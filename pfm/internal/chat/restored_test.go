@@ -667,3 +667,61 @@ func nativeChatRestoredCaller(t *testing.T, inside bool, parents ...int) {
 		}
 	}
 }
+
+// TestResumeTailRefusesAChatAnotherLiveProcessHolds pins the session a resume
+// of a continued Claude chat names: the newest segment, and only while no live
+// chat but the resuming seat itself answers to it.
+func TestResumeTailRefusesAChatAnotherLiveProcessHolds(t *testing.T) {
+	testjail.Fleet(t)
+	ctx := context.Background()
+	const (
+		launch    = "11111111-2222-4333-8444-555555555555"
+		continued = "66666666-7777-4888-8999-aaaaaaaaaaaa"
+	)
+	index, err := store.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, transcript := range []store.Transcript{
+		{UUID: launch, Path: "/jail/" + launch + ".jsonl", Size: 1, PromptCount: 1, ContinuedIn: continued},
+		{UUID: continued, Path: "/jail/" + continued + ".jsonl", Size: 1, PromptCount: 1},
+	} {
+		if err := index.UpsertTranscript(ctx, transcript); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := index.Close(); err != nil {
+		t.Fatal(err)
+	}
+	own := compose.Row{
+		Kind: compose.LiveClaude, Backend: "herdr", SeatID: "seat-1", ID: launch, Path: "/jail/" + continued + ".jsonl",
+	}
+	job := compose.Row{Kind: compose.Agent, ID: continued, Name: "moved"}
+	for _, test := range []struct {
+		name   string
+		id     string
+		seatID string
+		rows   []compose.Row
+		want   string
+	}{
+		{"nothing holds it", launch, "seat-1", []compose.Row{}, continued},
+		{"only the resuming seat holds it", launch, "seat-1", []compose.Row{own}, continued},
+		{"a daemon job holds it", launch, "seat-1", []compose.Row{own, job}, ""},
+		{"another seat holds it", launch, "", []compose.Row{own}, ""},
+		{"an unmoved chat needs no scan", continued, "", nil, continued},
+		{"an unmoved chat a held scan shows live is refused", continued, "", []compose.Row{job}, ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := resumeTail(ctx, config.Runtime{}, test.id, test.seatID, test.rows, io.Discard)
+			if test.want == "" {
+				if err == nil || !strings.Contains(err.Error(), "open that chat instead") {
+					t.Fatalf("resumeTail() = %q, %v; want a refusal naming the live chat", got, err)
+				}
+				return
+			}
+			if err != nil || got != test.want {
+				t.Fatalf("resumeTail() = %q, %v; want %q", got, err, test.want)
+			}
+		})
+	}
+}

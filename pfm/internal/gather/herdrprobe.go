@@ -20,8 +20,12 @@ const nativeHerdrBackend = "herdr"
 
 // HerdrSeat is a durable native seat and its visible probe failure, if any.
 type HerdrSeat struct {
-	CWD         string
-	Seat        fleetdb.Seat
+	CWD  string
+	Seat fleetdb.Seat
+	// Continued is the newest segment of the seat's Claude chat when Claude
+	// Code continued it under another session id; the seat keeps its launch
+	// id. Set by the fleet's continuation pass, empty otherwise.
+	Continued   string
 	Err         error
 	snapshot    json.RawMessage
 	directories map[string]string

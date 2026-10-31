@@ -441,6 +441,9 @@ func RosterCandidates(rows []compose.Row) []resolve.RosterCandidate {
 // a genuine collision of live seats refused as ambiguous.
 func Match(rows []compose.Row, name string) (headless.Chat, bool, error) {
 	match, found, err := resolve.ResolveRosterName(RosterCandidates(rows), name)
+	if err == nil && !found && fleet.ChatIDPattern.MatchString(name) {
+		return continuedMatch(rows, name)
+	}
 	if err != nil || !found {
 		return headless.Chat{}, false, err
 	}
@@ -452,6 +455,54 @@ func Match(rows []compose.Row, name string) (headless.Chat, bool, error) {
 		}
 	}
 	return headless.Chat{}, false, fmt.Errorf("resolved roster row disappeared from the same snapshot")
+}
+
+// continuedMatch finds the one native seat that answers to id only through
+// the session its chat continued in (answersTo): a live seat before a lost or
+// killed one, as Match ranks roster rows; two of one rank are refused as
+// ambiguous.
+func continuedMatch(rows []compose.Row, id string) (headless.Chat, bool, error) {
+	matched := -1
+	for index := range rows {
+		if !answersTo(&rows[index], id) {
+			continue
+		}
+		if matched >= 0 && continuedRank(&rows[index]) != continuedRank(&rows[matched]) {
+			if continuedRank(&rows[index]) < continuedRank(&rows[matched]) {
+				matched = index
+			}
+			continue
+		}
+		if matched >= 0 {
+			return headless.Chat{}, false, fmt.Errorf(
+				"chat %s continued in native seats %s and %s", id, rows[matched].SeatID, rows[index].SeatID,
+			)
+		}
+		matched = index
+	}
+	if matched < 0 {
+		return headless.Chat{}, false, nil
+	}
+	return FromRow(rows[matched]), true, nil
+}
+
+// continuedRank orders continuedMatch's candidates: live, then lost, then killed.
+func continuedRank(row *compose.Row) int {
+	switch {
+	case row.Killed:
+		return 2
+	case row.Kind.IsAddressable():
+		return 0
+	default:
+		return 1
+	}
+}
+
+// answersTo reports whether row is the chat id names: its own id, or for a
+// native seat, which keeps its launch id as its identity, the newest segment
+// Claude Code continued its chat in (compose.ContinuedSegment).
+func answersTo(row *compose.Row, id string) bool {
+	return row.ID == id || (id != "" && compose.ContinuedSegment(row) == id)
 }
 
 // FromRow is a composed row in the shape every verb operates on.

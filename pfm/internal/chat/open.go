@@ -152,7 +152,7 @@ func OpenID(
 	}
 	for index := range scan.Output.Rows {
 		row := &scan.Output.Rows[index]
-		if row.ID == id {
+		if answersTo(row, id) {
 			primary, primaryErr := fleet.PrimaryAccount(scan.Env.Paths, effective.Config)
 			if primaryErr != nil {
 				fmt.Fprintf(stderr, "pfm chat open: read primary account: %v\n", primaryErr)
@@ -207,7 +207,7 @@ func OpenDetachedID(
 	}
 	for index := range rows {
 		row := rows[index]
-		if row.ID != id {
+		if !answersTo(&row, id) {
 			continue
 		}
 		return openDetachedResolvedRow(ctx, row, stderr, effective)
@@ -434,7 +434,7 @@ func OpenRow(
 	}
 	// Dispatch execs tmux or zsh when stdout is a terminal and never returns,
 	// so the unseen flag clears before it.
-	markSchedulesSeen(ctx, effective.Paths, row.ID, stderr)
+	markSchedulesSeen(ctx, effective.Paths, &row, stderr)
 	if line != "" {
 		retireOtherHerdrViews(ctx, row, effective, stderr)
 		if err := action.Dispatch(stdout, line); err != nil {
@@ -448,8 +448,10 @@ func OpenRow(
 // markSchedulesSeen clears the unseen-schedule flag of a chat a human is now
 // opening. A failed clear is reported and the open proceeds: the chat is
 // already open, and the flag stays visible as a still-marked row.
-func markSchedulesSeen(ctx context.Context, values paths.Values, id string, stderr io.Writer) {
-	if id == "" {
+func markSchedulesSeen(ctx context.Context, values paths.Values, row *compose.Row, stderr io.Writer) {
+	// A continued native seat's schedules were carried onto its newest segment.
+	ids := []string{row.ID, compose.ContinuedSegment(row)}
+	if ids[0] == "" && ids[1] == "" {
 		return
 	}
 	state := fleetdb.OpenSharedState(ctx, values)
@@ -458,8 +460,13 @@ func markSchedulesSeen(ctx context.Context, values paths.Values, id string, stde
 			fmt.Fprintf(stderr, "pfm chat open: close shared state: %v\n", err)
 		}
 	}()
-	if _, err := state.ClearScheduleUnseen(ctx, id); err != nil {
-		fmt.Fprintf(stderr, "pfm chat open: clear schedule flag of %s: %v\n", id, err)
+	for _, id := range ids {
+		if id == "" {
+			continue
+		}
+		if _, err := state.ClearScheduleUnseen(ctx, id); err != nil {
+			fmt.Fprintf(stderr, "pfm chat open: clear schedule flag of %s: %v\n", id, err)
+		}
 	}
 }
 

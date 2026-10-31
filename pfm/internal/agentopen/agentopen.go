@@ -160,6 +160,9 @@ type Dependencies struct {
 	Stderr       io.Writer
 	GracePeriod  time.Duration
 	PollInterval time.Duration
+	// ContinuationTail follows a Claude session to the newest segment of its
+	// continued-in chain; nil follows none.
+	ContinuationTail func(context.Context, string) (string, error)
 }
 
 type Opener struct {
@@ -172,6 +175,7 @@ type Opener struct {
 	stderr                    io.Writer
 	gracePeriod, pollInterval time.Duration
 	configurationError        error
+	continuationTail          func(context.Context, string) (string, error)
 }
 
 func New(dependencies Dependencies) *Opener {
@@ -204,6 +208,7 @@ func New(dependencies Dependencies) *Opener {
 		tmux: dependencies.Tmux, stderr: stderr,
 		gracePeriod: grace, pollInterval: poll,
 		configurationError: configurationError,
+		continuationTail:   dependencies.ContinuationTail,
 	}
 }
 
@@ -393,8 +398,23 @@ func (opener *Opener) lookup(ctx context.Context, id string, configs []string) (
 				)
 				continue
 			}
+			agent, ok := findAgent(agents, id)
+			for index := 0; !ok && err == nil && index < len(agents); index++ {
+				ok, err = opener.continued(ctx, agents[index].SessionID, id)
+				agent = agents[index]
+			}
+			if err != nil {
+				fmt.Fprintf(
+					opener.stderr,
+					"pfm internal agent-open: follow continued sessions in agent registry config %q (pass %d): %v\n",
+					config,
+					pass+1,
+					err,
+				)
+				continue
+			}
 			answered[config] = true
-			if agent, ok := findAgent(agents, id); ok {
+			if ok {
 				return agent, config, true, true
 			}
 		}
@@ -447,9 +467,29 @@ func (opener *Opener) holdsSession(ctx context.Context, id string) (bool, error)
 			if argument == id {
 				return true, nil
 			}
+			continued, err := opener.continued(ctx, argument, id)
+			if err != nil {
+				fmt.Fprintf(opener.stderr, "pfm internal agent-open: scan live claude holders for %s: %v\n", id, err)
+				return false, err
+			}
+			if continued {
+				return true, nil
+			}
 		}
 	}
 	return false, nil
+}
+
+// continued reports whether session is an earlier segment Claude Code
+// continued in id: a process launched on it carries the chat id names now,
+// while its registry row and argv still name the launch id.
+func (opener *Opener) continued(ctx context.Context, session, id string) (bool, error) {
+	// Only a session id, never a flag or a path, can have been continued.
+	if opener.continuationTail == nil || session == id || len(session) != len(id) || strings.Count(session, "-") != 4 {
+		return false, nil
+	}
+	tail, err := opener.continuationTail(ctx, session)
+	return err == nil && tail == id, err
 }
 
 func (opener *Opener) configCandidates(owning string) []string {

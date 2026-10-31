@@ -182,7 +182,11 @@ func restoreNative(
 	if err != nil {
 		return fmt.Errorf("read restored recipe: %w", err)
 	}
-	run, err = resumeNativeRun(run, seat, runtime.Config, stderr)
+	resumed := seat
+	if resumed.SessionID, err = resumedSession(ctx, runtime, seat, nil, stderr); err != nil {
+		return err
+	}
+	run, err = resumeNativeRun(run, resumed, runtime.Config, stderr)
 	if err != nil {
 		return err
 	}
@@ -194,7 +198,7 @@ func restoreNative(
 		"TMUX=",
 	)
 	// Preserve existing loss evidence if the producer could not be read.
-	note, noteErr := restoredLossNote(ctx, seat.SessionID, pfmengine.ID(seat.Engine), runtime, stderr)
+	note, noteErr := restoredLossNote(ctx, resumed.SessionID, pfmengine.ID(seat.Engine), runtime, stderr)
 	if noteErr != nil {
 		fmt.Fprintf(stderr, "pfm chat open: restart loss unknown: %v\n", noteErr)
 	}
@@ -420,11 +424,15 @@ func prepareRestoredSeat(
 	if err != nil {
 		return fleetdb.Seat{}, err
 	}
+	// A chat Claude Code continued in another session resumes its newest segment.
+	if id, err = resumeTail(ctx, runtime, id, "", rows, stderr); err != nil {
+		return fleetdb.Seat{}, err
+	}
 	var row compose.Row
 	found := false
 	for index := range rows {
 		candidate := &rows[index]
-		if candidate.ID == id {
+		if answersTo(candidate, id) {
 			row = *candidate
 			found = true
 			break
@@ -432,6 +440,13 @@ func prepareRestoredSeat(
 	}
 	if !found {
 		return fleetdb.Seat{}, fmt.Errorf("chat %q is not indexed", id)
+	}
+	if row.SeatID != "" {
+		// No seat holds id, so this seat answers to it through its continued
+		// chat: a seat born here would resume that chat beside it.
+		return fleetdb.Seat{}, fmt.Errorf(
+			"chat %s is carried by native seat %s; open it with pfm chat open %s instead", id, row.SeatID, id,
+		)
 	}
 	if info, err := os.Stat(row.CWD); err != nil || !info.IsDir() {
 		row.CWD = runtime.Paths.Home
@@ -542,4 +557,98 @@ func restoredCallerAuthority(ctx context.Context, values paths.Values, socket, p
 		pid = stat.ParentPID
 	}
 	return fmt.Errorf("process %d is outside restored caller pane %s", os.Getpid(), pane)
+}
+
+func nativeResumeRow(
+	ctx context.Context,
+	seat fleetdb.Seat,
+	runtime config.Runtime,
+	stderr io.Writer,
+) (row compose.Row, returnErr error) {
+	row = nativeRow(seat)
+	rows, err := Rows(ctx, stderr, &runtime)
+	if err != nil {
+		return row, err
+	}
+	for index := range rows {
+		candidate := &rows[index]
+		if answersTo(candidate, seat.SessionID) {
+			row = *candidate
+			break
+		}
+	}
+	if row.ID, err = resumedSession(ctx, runtime, seat, rows, stderr); err != nil {
+		return row, err
+	}
+	if row.CWD == "" {
+		db := fleetdb.OpenSharedState(ctx, runtime.Paths)
+		defer func() { returnErr = errors.Join(returnErr, db.Close()) }()
+		run, err := db.ReadSeatRun(seat.SeatID)
+		if err != nil {
+			return row, err
+		}
+		row.CWD = run.CWD
+	}
+	if row.Account == 0 {
+		row.Account = runtime.Config.PrimaryAccountFor(pfmengine.ID(seat.Engine), runtime.Config.ImplicitAccount())
+	}
+	return row, nil
+}
+
+// resumedSession is the session a resume of native seat must name: a Claude
+// seat keeps its launch id after Claude Code continued its chat in a new
+// session, so it resumes the newest segment instead (resumeTail). rows is a
+// fleet scan the caller holds, or nil.
+func resumedSession(
+	ctx context.Context,
+	runtime config.Runtime,
+	seat fleetdb.Seat,
+	rows []compose.Row,
+	stderr io.Writer,
+) (string, error) {
+	if pfmengine.ID(seat.Engine) != pfmengine.Claude || seat.SessionID == "" {
+		return seat.SessionID, nil
+	}
+	return resumeTail(ctx, runtime, seat.SessionID, seat.SeatID, rows, stderr)
+}
+
+// resumeTail is the session a resume of Claude chat id must name: the
+// newest segment of its continued-in chain. It is refused while a live chat
+// other than seat seatID answers to that segment, since a resume would start
+// a second process on it. rows is a fleet scan the caller holds, checked
+// whether or not the chat moved, or nil to scan only when it moved.
+func resumeTail(
+	ctx context.Context,
+	runtime config.Runtime,
+	id, seatID string,
+	rows []compose.Row,
+	stderr io.Writer,
+) (string, error) {
+	tail, _, err := reload.ContinuedSession(ctx, id, stderr)
+	if err != nil {
+		return "", err
+	}
+	if tail == id && rows == nil {
+		return tail, nil
+	}
+	if rows == nil {
+		if rows, err = Rows(ctx, stderr, &runtime); err != nil {
+			return "", fmt.Errorf("find who holds chat %s: %w", tail, err)
+		}
+	}
+	for index := range rows {
+		row := &rows[index]
+		if answersTo(row, tail) && row.Kind.IsAddressable() && (seatID == "" || row.SeatID != seatID) {
+			if tail == id {
+				return "", fmt.Errorf(
+					"chat %s is held by the live chat %q; open that chat instead", id, cmp.Or(row.Name, row.ID),
+				)
+			}
+			return "", fmt.Errorf(
+				"chat %s continued in session %s, which the live chat %q holds; open that chat instead",
+				id, tail, cmp.Or(row.Name, row.ID),
+			)
+		}
+	}
+	return tail, nil
 }

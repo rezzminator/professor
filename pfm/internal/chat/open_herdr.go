@@ -345,7 +345,7 @@ func openNativeRow(
 				// to this pane, whose process then execs the seat host.
 				// On a terminal restoreNative execs the seat host and never
 				// returns, so the unseen flag clears before it.
-				markSchedulesSeen(ctx, runtime.Paths, row.ID, stderr)
+				markSchedulesSeen(ctx, runtime.Paths, &row, stderr)
 				err = restoreNative(ctx, runtime, seat, choice, false, stdout, stderr)
 				if err != nil {
 					fmt.Fprintf(stderr, "pfm chat open: %v\n", err)
@@ -400,7 +400,7 @@ func openNativeRow(
 				here, closeHere, err = moveLiveNativeHere(ctx, runtime, seat)
 			}
 			if err == nil && here {
-				markSchedulesSeen(ctx, runtime.Paths, row.ID, stderr)
+				markSchedulesSeen(ctx, runtime.Paths, &row, stderr)
 				if closeHere != nil {
 					// Last: closing this pane ends this process.
 					if err := closeHere(); err != nil {
@@ -419,7 +419,7 @@ func openNativeRow(
 		fmt.Fprintf(stderr, "pfm chat open: %v\n", err)
 		return true, 1
 	}
-	markSchedulesSeen(ctx, runtime.Paths, row.ID, stderr)
+	markSchedulesSeen(ctx, runtime.Paths, &row, stderr)
 	return true, 0
 }
 
@@ -463,6 +463,10 @@ func detachedNativeLocked(
 	defer func() { returnErr = errors.Join(returnErr, db.Close()) }()
 	run, err := db.ReadSeatRun(seat.SeatID)
 	if err != nil {
+		return result, err
+	}
+	// The resume, and a seat born from it, carry the chat's newest segment.
+	if seat.SessionID, err = resumedSession(ctx, runtime, seat, nil, stderr); err != nil {
 		return result, err
 	}
 	run, err = resumeNativeRun(run, seat, runtime.Config, stderr)
@@ -533,39 +537,6 @@ func detachedNativeLocked(
 		return result, err
 	}
 	return result, nil
-}
-
-func nativeResumeRow(
-	ctx context.Context,
-	seat fleetdb.Seat,
-	runtime config.Runtime,
-	stderr io.Writer,
-) (row compose.Row, returnErr error) {
-	row = nativeRow(seat)
-	rows, err := Rows(ctx, stderr, &runtime)
-	if err != nil {
-		return row, err
-	}
-	for index := range rows {
-		candidate := &rows[index]
-		if candidate.ID == seat.SessionID {
-			row = *candidate
-			break
-		}
-	}
-	if row.CWD == "" {
-		db := fleetdb.OpenSharedState(ctx, runtime.Paths)
-		defer func() { returnErr = errors.Join(returnErr, db.Close()) }()
-		run, err := db.ReadSeatRun(seat.SeatID)
-		if err != nil {
-			return row, err
-		}
-		row.CWD = run.CWD
-	}
-	if row.Account == 0 {
-		row.Account = runtime.Config.PrimaryAccountFor(pfmengine.ID(seat.Engine), runtime.Config.ImplicitAccount())
-	}
-	return row, nil
 }
 
 func nativeRow(seat fleetdb.Seat) compose.Row {

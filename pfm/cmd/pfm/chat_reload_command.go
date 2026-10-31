@@ -676,6 +676,26 @@ func resolveReloadSession(
 		// fresh without discarding or borrowing another seat's identity.
 		return "", "", nil
 	}
+	if engine == pfmengine.Claude {
+		// The crumb keeps the launch id after Claude Code continued the chat
+		// in a new session: the reload resumes the newest segment.
+		tail, path, err := reload.ContinuedSession(context.Background(), id, os.Stderr)
+		if err != nil {
+			return "", "", err
+		}
+		if tail != id {
+			if path == "" {
+				// The index lost the newest segment's path: find it on disk.
+				if path, err = reload.SessionTranscript(resolved, machine, engine, tail); err != nil {
+					return "", "", err
+				}
+			}
+			if path == "" {
+				return "", "", fmt.Errorf("chat %s continued in session %s, whose transcript pfm cannot find", id, tail)
+			}
+			id, transcript = tail, path
+		}
+	}
 	return id, transcript, nil
 }
 

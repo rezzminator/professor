@@ -13,6 +13,9 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
+// liveSeat is the state of a durable seat whose engine runs.
+const liveSeat = "live"
+
 // NativeSeats reads the same durable native seats for every fleet surface.
 // Non-live rows retain their failure without probing an address they no longer
 // own; a positively dead seat arrives non-live from the probe and is such a row.
@@ -25,7 +28,7 @@ func NativeSeats(ctx context.Context, values paths.Values, readOnly bool) ([]gat
 	seats := gather.ProbeHerdrSeats(ctx, values, durable, readOnly)
 	for index := range durable {
 		seat := &durable[index]
-		if seat.Backend == "herdr" && seat.State != "live" {
+		if seat.Backend == "herdr" && seat.State != liveSeat {
 			seats = append(seats, gather.HerdrSeat{
 				Seat: *seat,
 				Err:  fmt.Errorf("HERDR %s %s: %s", strings.ToUpper(seat.State), seat.HerdrSocket, seat.LostNote),
@@ -34,7 +37,7 @@ func NativeSeats(ctx context.Context, values paths.Values, readOnly bool) ([]gat
 	}
 	var failures []string
 	for index := range seats {
-		if seats[index].Seat.State == "live" && seats[index].Err != nil {
+		if seats[index].Seat.State == liveSeat && seats[index].Err != nil {
 			failures = append(failures, seats[index].Err.Error())
 		}
 	}
@@ -47,9 +50,9 @@ func EnrichNative(ctx context.Context, database *store.Store, data Data, native 
 	if data.CachedCounts == nil || len(native) == 0 {
 		return data, nil
 	}
-	transcripts := make(map[string]struct{}, len(data.Transcripts))
+	transcripts := make(map[string]int, len(data.Transcripts))
 	for index := range data.Transcripts {
-		transcripts[data.Transcripts[index].UUID] = struct{}{}
+		transcripts[data.Transcripts[index].UUID] = index
 	}
 	rollouts := make(map[string]struct{}, len(data.Rollouts))
 	for index := range data.Rollouts {
@@ -62,16 +65,9 @@ func EnrichNative(ctx context.Context, database *store.Store, data Data, native 
 		}
 		switch pfmengine.ID(seat.Engine) {
 		case pfmengine.Claude:
-			if _, found := transcripts[seat.SessionID]; found {
-				continue
-			}
-			transcript, found, err := database.Transcript(ctx, seat.SessionID)
-			if err != nil {
+			// The whole continued-in chain: the seat carries its newest segment.
+			if err := loadChain(ctx, database, &data, transcripts, seat.SessionID); err != nil {
 				return Data{}, fmt.Errorf("native seat %s transcript: %w", seat.SeatID, err)
-			}
-			transcripts[seat.SessionID] = struct{}{}
-			if found {
-				data.Transcripts = append(data.Transcripts, transcript)
 			}
 		case pfmengine.Codex:
 			if _, found := rollouts[seat.SessionID]; found {

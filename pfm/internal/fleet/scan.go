@@ -324,7 +324,7 @@ func ComposeFleet(
 	live gather.Snapshot,
 	native ...gather.HerdrSeat,
 ) compose.Output {
-	data, live = followContinuations(data, live)
+	data, live, native = followContinuations(data, live, native)
 	launches, launchErr := fleetdb.OpenLaunches(context.Background(), env.Paths)
 	if launches != nil {
 		defer func() { _ = launches.Close() }()

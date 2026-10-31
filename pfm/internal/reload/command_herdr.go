@@ -102,7 +102,15 @@ func RunHerdr(
 	if err != nil {
 		return Result{}, err
 	}
-	updated, run, err := nativeReloadRecipe(request, seat, old)
+	// The recipe resumes the chat's newest segment; publication re-keys the seat to it.
+	resumed := seat
+	if pfmengine.ID(seat.Engine) == pfmengine.Claude && seat.SessionID != "" && !request.New {
+		resumed.SessionID, _, err = ContinuedSession(ctx, seat.SessionID, stderr)
+		if err != nil {
+			return Result{}, err
+		}
+	}
+	updated, run, err := nativeReloadRecipe(request, resumed, old)
 	if err != nil {
 		return Result{}, err
 	}

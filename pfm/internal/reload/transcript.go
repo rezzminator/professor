@@ -1,6 +1,7 @@
 package reload
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 // Transcript is a Claude transcript opened for ONE guarded append: exclusive
@@ -207,4 +209,27 @@ func findClaudeTranscript(roots []string, id string) (string, error) {
 		}
 	}
 	return "", nil
+}
+
+// ContinuedSession follows Claude session id to the newest segment of its
+// continued-in chain and returns it with its indexed transcript path. Claude
+// Code moves a running chat to a new session id while the pane's crumb, the
+// seat and the process keep the launch id, so a resume of that id would
+// reopen a segment the chat already moved on from. An id the index does not
+// hold is its own newest segment, with path "".
+func ContinuedSession(ctx context.Context, id string, stderr io.Writer) (tail, path string, returnErr error) {
+	index, err := store.Open(store.WithWarningWriter(stderr))
+	if err != nil {
+		return "", "", fmt.Errorf("open transcript index to follow chat %s: %w", id, err)
+	}
+	defer func() { returnErr = errors.Join(returnErr, index.Close()) }()
+	tail, err = index.ContinuationTail(ctx, id)
+	if err != nil {
+		return "", "", fmt.Errorf("follow chat %s's continuation: %w", id, err)
+	}
+	transcript, _, err := index.Transcript(ctx, tail)
+	if err != nil {
+		return "", "", fmt.Errorf("read chat %s's transcript: %w", tail, err)
+	}
+	return tail, transcript.Path, nil
 }

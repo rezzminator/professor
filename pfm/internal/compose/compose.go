@@ -1,6 +1,7 @@
 package compose
 
 import (
+	"cmp"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -248,7 +249,8 @@ func (current *composer) buildIndexes() {
 		wantedTranscriptIDs[transcriptIDFromPath(crumb.TranscriptPath)] = struct{}{}
 	}
 	for index := range current.input.HerdrSeats {
-		wantedTranscriptIDs[current.input.HerdrSeats[index].Seat.SessionID] = struct{}{}
+		native := &current.input.HerdrSeats[index]
+		wantedTranscriptIDs[cmp.Or(native.Continued, native.Seat.SessionID)] = struct{}{}
 	}
 	wantedAgentIDs := make(map[string]struct{}, len(current.input.Snapshot.Agents))
 	for _, agent := range current.input.Snapshot.Agents {

@@ -155,6 +155,33 @@ func TestBuildSnapshotMarksScheduleFiredRows(t *testing.T) {
 	}
 }
 
+// TestBuildSnapshotMarksAContinuedSeatsCarriedSchedule pins the flag of a
+// herdr seat whose chat Claude Code continued in a new session: the seat keeps
+// its launch id while its schedules were carried onto the newest segment, so
+// the flag on that segment is the seat's.
+func TestBuildSnapshotMarksAContinuedSeatsCarriedSchedule(t *testing.T) {
+	const (
+		launch    = "11111111-2222-4333-8444-555555555555"
+		continued = "66666666-7777-4888-8999-aaaaaaaaaaaa"
+	)
+	output := compose.Output{Rows: []compose.Row{
+		{
+			Kind: compose.LiveClaude, Backend: "herdr", SeatID: "seat-1",
+			ID: launch, Path: "/jail/" + continued + ".jsonl",
+		},
+		{Kind: compose.ResumeClaude, ID: "idB", Path: "/jail/" + continued + ".jsonl"},
+	}}
+	snapshot := buildSnapshot(
+		context.Background(),
+		fleet.Env{},
+		scanRequest{Schedules: fakeScheduleReader{unseen: map[string]bool{continued: true}}},
+		output,
+	)
+	if len(snapshot.Rows) != 2 || !snapshot.Rows[0].ScheduleFired || snapshot.Rows[1].ScheduleFired {
+		t.Fatalf("snapshot rows ScheduleFired = %v, want only the continued seat", scheduleFiredFlags(snapshot.Rows))
+	}
+}
+
 func TestBuildSnapshotReportsScheduleReadFailure(t *testing.T) {
 	output := compose.Output{Rows: []compose.Row{{ID: "idA"}, {ID: "idB"}}}
 	snapshot := buildSnapshot(

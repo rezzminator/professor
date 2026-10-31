@@ -10,6 +10,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/index"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -110,7 +111,13 @@ func indexParkedChat(t *testing.T) (*store.Store, string) {
 
 // composeParked runs the picker's own data path — the capped default load
 // or the full load, enriched with the live snapshot — and composes it.
-func composeParked(t *testing.T, database *store.Store, view compose.View, live gather.Snapshot) compose.Output {
+func composeParked(
+	t *testing.T,
+	database *store.Store,
+	view compose.View,
+	live gather.Snapshot,
+	native ...gather.HerdrSeat,
+) compose.Output {
 	t.Helper()
 	ctx := context.Background()
 	var data Data
@@ -127,11 +134,16 @@ func composeParked(t *testing.T, database *store.Store, view compose.View, live 
 	if err != nil {
 		t.Fatalf("EnrichLive() = %v", err)
 	}
+	data, err = EnrichNative(ctx, database, data, native)
+	if err != nil {
+		t.Fatalf("EnrichNative() = %v", err)
+	}
 	return ComposeFleet(
 		Env{Config: pfmconfig.Defaults(t.TempDir(), nil)},
 		view,
 		data,
 		live,
+		native...,
 	)
 }
 
@@ -204,6 +216,91 @@ func TestParkedClaudeChatIsOneChatUnderItsCurrentSession(t *testing.T) {
 					t.Fatalf(
 						"parked chat row = %s, want {kind=%v id=%s name=%q socket=%s}",
 						describeRows(rows), test.wantKind, parkedSuccessorID, parkedNewName, test.wantSock,
+					)
+				}
+			})
+		}
+	}
+}
+
+// TestContinuedHerdrSeatCarriesItsNewestSegment pins the chat a user could
+// not reopen: a herdr seat launched on a session that Claude Code then
+// continued under a new id. The seat kept its launch id, its claude process
+// still named the old session, and the old segment left the data — so the
+// seat composed as a nameless row and its own process was offered as a
+// detached agent under the new id, whose open started a second process on
+// the chat. Whatever the seat's state, the conversation is one row: the
+// seat's, named from the newest segment, unless another live process holds
+// that segment.
+func TestContinuedHerdrSeatCarriesItsNewestSegment(t *testing.T) {
+	database, _ := indexParkedChat(t)
+	seat := func(state string) gather.HerdrSeat {
+		return gather.HerdrSeat{CWD: parkedCWD, Seat: fleetdb.Seat{
+			SeatID: "seat-1", SessionID: parkedPredecessorID, Engine: "cc", Backend: "herdr", State: state,
+			HerdrSocket: "/jail/herdr.sock", HerdrPane: "w1:p1", SeatHostPID: 4000,
+		}}
+	}
+	seatProcess := gather.Agent{PID: 4242, SessionID: parkedPredecessorID, ConfigDir: "/jail/.cc/2"}
+	daemonJob := gather.Agent{PID: 5151, SessionID: parkedSuccessorID, ConfigDir: "/jail/.cc/3"}
+
+	cases := []struct {
+		name     string
+		live     gather.Snapshot
+		seat     gather.HerdrSeat
+		wantKind compose.Kind
+		wantSeat string
+		wantID   string
+	}{
+		{
+			"live seat, its process on the launch id",
+			gather.Snapshot{Agents: []gather.Agent{seatProcess}},
+			seat("live"),
+			compose.LiveClaude, "seat-1", parkedPredecessorID,
+		},
+		{
+			"lost seat, nothing running",
+			gather.Snapshot{},
+			seat("lost"),
+			compose.ResumeClaude,
+			"seat-1",
+			parkedPredecessorID,
+		},
+		{
+			"lost seat, the chat running as a daemon job",
+			gather.Snapshot{Agents: []gather.Agent{daemonJob}},
+			seat("lost"),
+			compose.Agent, "", parkedSuccessorID,
+		},
+	}
+	for _, test := range cases {
+		for _, view := range []compose.View{compose.DefaultView, compose.AllView} {
+			t.Run(fmt.Sprintf("%s/view=%d", test.name, view), func(t *testing.T) {
+				rows := chatRows(composeParked(t, database, view, test.live, test.seat))
+				var named []compose.Row
+				for _, row := range rows {
+					if row.Name != "" {
+						named = append(named, row)
+					}
+				}
+				// A seat that carries the chat leaves no second row; one that
+				// does not stays as its own unnamed row.
+				if len(named) != 1 || (test.wantSeat != "" && len(rows) != 1) {
+					t.Fatalf("continued chat composed as %s, want one row named %q", describeRows(rows), parkedNewName)
+				}
+				row := named[0]
+				if row.ID != test.wantID || row.Name != parkedNewName || row.Kind != test.wantKind ||
+					row.SeatID != test.wantSeat || filepath.Base(row.Path) != parkedSuccessorID+".jsonl" {
+					t.Fatalf(
+						"continued chat row = %s seat=%q path=%q, want {kind=%v id=%s name=%q} seat=%q on the newest segment",
+						describeRows(
+							named,
+						),
+						row.SeatID,
+						row.Path,
+						test.wantKind,
+						test.wantID,
+						parkedNewName,
+						test.wantSeat,
 					)
 				}
 			})

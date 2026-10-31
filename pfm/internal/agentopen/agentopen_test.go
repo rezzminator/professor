@@ -328,3 +328,55 @@ func TestOpenRefusesFreshResumeWhenEveryRegistryQueryFails(t *testing.T) {
 		t.Fatalf("registry failure was treated as absence; resumes=%v", commands.resumes)
 	}
 }
+
+// TestOpenFollowsAChatClaudeCodeContinuedInANewSession pins the second
+// process a continued chat got: Claude Code moved the chat to a new session
+// while its process, registry row and argv kept the launch id, so opening the
+// new id found no holder and resumed it fresh beside the running one.
+func TestOpenFollowsAChatClaudeCodeContinuedInANewSession(t *testing.T) {
+	const (
+		launch    = "11111111-2222-4333-8444-555555555555"
+		continued = "66666666-7777-4888-8999-aaaaaaaaaaaa"
+	)
+	tail := func(_ context.Context, session string) (string, error) {
+		if session == launch {
+			return continued, nil
+		}
+		return session, nil
+	}
+	t.Run("a holder on the launch id refuses the double resume", func(t *testing.T) {
+		commands := &fakeCommands{rows: map[string][]byte{}}
+		processes := &fakeProcesses{
+			rows: []Process{{PID: 47, Argv: []string{"claude", "--session-id", launch}}},
+			dead: map[int]bool{},
+		}
+		opener := newTestOpener(t, commands, processes, fakeTmux{})
+		opener.continuationTail = tail
+		err := opener.Open(context.Background(), Request{ID: continued, CWD: "/jail", PrimaryAccount: 1})
+		if err == nil || !strings.Contains(err.Error(), "refusing the double-resume") || len(commands.resumes) != 0 {
+			t.Fatalf("Open() error=%v resumes=%v, want the double resume refused", err, commands.resumes)
+		}
+	})
+	t.Run("a registry row on the launch id attaches to its pane", func(t *testing.T) {
+		commands := &fakeCommands{
+			rows: map[string][]byte{
+				"": []byte(`[{"sessionId":"` + launch + `","name":"moved","pid":48,"status":"idle"}]`),
+			},
+		}
+		processes := &fakeProcesses{
+			rows: []Process{{PID: 48, Argv: []string{"claude", "--session-id", launch}}},
+			dead: map[int]bool{},
+		}
+		opener := newTestOpener(t, commands, processes, fakeTmux{socket: "cc-probe-2"})
+		opener.continuationTail = tail
+		if err := opener.Open(
+			context.Background(),
+			Request{ID: continued, CWD: "/jail", PrimaryAccount: 1},
+		); err != nil {
+			t.Fatal(err)
+		}
+		if len(commands.resumes) != 0 || len(commands.views) != 0 {
+			t.Fatalf("commands resume=%v view=%v, want an attach to the running chat", commands.resumes, commands.views)
+		}
+	})
+}

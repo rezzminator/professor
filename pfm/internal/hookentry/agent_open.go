@@ -11,6 +11,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 // AgentOpen is deliberately absent from operator help. It is the argv target
@@ -46,6 +47,25 @@ func AgentOpen(args []string, stderr io.Writer, runtime config.Runtime) int {
 	for _, account := range runtime.Config.Accounts {
 		accounts = append(accounts, agentopen.Account{ID: account.ID, ConfigDir: account.ConfigDir})
 	}
+	// Opened only when a lookup misses, to follow continued Claude sessions.
+	var index *store.Store
+	defer func() {
+		if index != nil {
+			if err := index.Close(); err != nil {
+				fmt.Fprintf(stderr, "pfm internal agent-open: close transcript index: %v\n", err)
+			}
+		}
+	}()
+	continuationTail := func(ctx context.Context, session string) (string, error) {
+		if index == nil {
+			opened, err := store.Open(store.WithWarningWriter(stderr))
+			if err != nil {
+				return "", fmt.Errorf("open transcript index: %w", err)
+			}
+			index = opened
+		}
+		return index.ContinuationTail(ctx, session)
+	}
 	opener := agentopen.New(agentopen.Dependencies{
 		SIDDir:       resolved.SIDDir,
 		Home:         resolved.Home,
@@ -54,9 +74,10 @@ func AgentOpen(args []string, stderr io.Writer, runtime config.Runtime) int {
 		Commands: agentopen.ExecCommands{
 			Home: resolved.Home, Machine: runtime.Config, Stdout: os.Stdout, Stderr: stderr,
 		},
-		Processes: agentopen.RealProcesses{Root: resolved.ProcRoot},
-		Tmux:      agentopen.RealTmux{Dir: resolved.TmuxDir, Stderr: stderr},
-		Stderr:    stderr,
+		Processes:        agentopen.RealProcesses{Root: resolved.ProcRoot},
+		Tmux:             agentopen.RealTmux{Dir: resolved.TmuxDir, Stderr: stderr},
+		Stderr:           stderr,
+		ContinuationTail: continuationTail,
 	})
 	cache1H := runtime.Config.EffectiveClaude(primary).Cache1H
 	if *cache != "" {

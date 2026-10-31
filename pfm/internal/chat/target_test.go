@@ -83,6 +83,54 @@ func TestMatchPrefersTheLiveSeat(t *testing.T) {
 	}
 }
 
+// TestMatchFindsANativeSeatByTheSessionItsChatContinuedIn pins the id a
+// continued herdr chat is known by now: Claude Code moved it to a new
+// session, the seat kept its launch id, and the picker, a carried schedule
+// or a user holding the new id found no chat — or, through the detached
+// agent row that id used to name, started a second process on it. The seat
+// answers to the newest segment it was composed from; a dead row merely
+// sharing the transcript name does not.
+func TestMatchFindsANativeSeatByTheSessionItsChatContinuedIn(t *testing.T) {
+	const (
+		launch    = "11111111-2222-4333-8444-555555555555"
+		continued = "66666666-7777-4888-8999-aaaaaaaaaaaa"
+		stranger  = "77777777-7777-4777-8777-777777777777"
+	)
+	seat := compose.Row{
+		Kind: compose.LiveClaude, Backend: "herdr", SeatID: "seat-1", ID: launch, Name: "SUITE",
+		Path: "/jail/-work-app/" + continued + ".jsonl", Socket: "/jail/herdr.sock", PaneID: "w1:p1",
+	}
+	tmux := compose.Row{
+		Kind: compose.ResumeClaude,
+		ID:   stranger,
+		Name: "other",
+		Path: "/jail/-work-app/" + launch + ".jsonl",
+	}
+
+	chat, found, err := Match([]compose.Row{tmux, seat}, continued)
+	if err != nil || !found || chat.ID != launch || chat.SeatID != "seat-1" || !chat.Live {
+		t.Fatalf("Match(continued id) = %#v found=%t err=%v, want the live seat on %s", chat, found, err, launch)
+	}
+	twin := seat
+	twin.SeatID, twin.ID = "seat-2", stranger
+	if chat, found, err := Match([]compose.Row{seat, twin}, continued); err == nil {
+		t.Fatalf("two seats on one continued chat resolved to %#v found=%t, want an ambiguity error", chat, found)
+	}
+	lost := twin
+	lost.Kind = compose.ResumeClaude
+	for _, rows := range [][]compose.Row{{seat, lost}, {lost, seat}} {
+		if chat, found, err := Match(rows, continued); err != nil || !found || chat.SeatID != "seat-1" {
+			t.Fatalf(
+				"a live and a lost seat on one continued chat = %#v found=%t err=%v, want the live seat-1",
+				chat, found, err,
+			)
+		}
+	}
+	if chat, found, err := Match([]compose.Row{tmux}, launch); found || err != nil {
+		t.Fatalf("a tmux row answered to its transcript name: %#v found=%t err=%v", chat, found, err)
+	}
+}
+
 // TestMatchAcceptsAFullSocketPathAndTheBareName covers the second resolver's
 // half of the same normalisation defect the cosmos graph had. A compose.Row
 // carries the BARE socket name tmux is addressed by (-L), while everything the

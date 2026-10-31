@@ -37,6 +37,16 @@ var KeepAmbientIdentity bool
 // include t.TempDir's test name, so macOS's long TMPDIR can exceed its 104-byte
 // limit. Resolving /tmp once also collapses macOS's /private alias.
 func Run(m *testing.M) int {
+	if !inFence() && !onHostedRunner() {
+		return runInFence() // fence.go: no test ever runs on the machine that started it
+	}
+	// A chat exports its live state store's paths; a jailed test must open the jail's own.
+	for _, name := range []string{"PFM_STATE_DB", "PFM_CACHE_DB"} {
+		if err := os.Unsetenv(name); err != nil {
+			warnSetup("clear %s: %v", name, err)
+			return 1
+		}
+	}
 	// The operator's ~/.local/bin and pfm's managed install bin hold pfm's own
 	// `claude` launcher shim; a jailed test resolving a binary through PATH must
 	// never reach it. Scrub before anything below resolves a binary.

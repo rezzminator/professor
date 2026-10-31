@@ -641,12 +641,14 @@ TARGET="${2:-all}"
 
 # A suite never runs on the host: its tests spawn tmux sessions, git repos and
 # processes against whatever machine they run on. The fence sets
-# PFM_DEV_FENCE=1 (infra/fence/docker-compose.yml, lanes/container.sh).
+# PFM_DEV_FENCE=1 (infra/fence/docker-compose.yml, lanes/container.sh) inside a
+# container (/.dockerenv): an exported variable alone never passes. On the host
+# the suite runs in the fence instead (pfm/internal/testjail/fence.go likewise).
 case "$CMD" in
   test|cover|all|verify|gate)
-    if [[ -z "${PFM_DEV_FENCE:-}" ]]; then
-      echo "FENCE-ONLY: dev.sh $CMD runs test suites and never on the host — run: .claude/scripts/dev.sh iso $CMD ${2:-}" >&2
-      exit 2
+    if [[ "${PFM_DEV_FENCE:-}" != 1 || ! -e /.dockerenv ]]; then
+      echo "FENCE-ONLY: dev.sh $CMD never runs on the host — running: dev.sh iso $CMD ${2:-}" >&2
+      exec bash "${BASH_SOURCE[0]}" iso "$CMD" ${2:+"$2"}
     fi ;;
 esac
 

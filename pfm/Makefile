@@ -140,6 +140,12 @@ lint-new: ## Findings on lines changed since LINT_BASE (origin/main) — the gat
 vet: ## go vet the whole module
 	go vet ./...
 
+# Suites never run on the host: there `cover` runs in the fence instead (testjail/fence.go).
+IN_FENCE := $(shell [ -e /.dockerenv ] && [ "$$PFM_DEV_FENCE" = 1 ] && echo 1)
+ifneq ($(IN_FENCE),1)
+cover:
+	bash "$(DEV)" iso cover pfm
+else
 cover: ## Unit coverage (cross-package) + any e2e GOCOVERDIR run, merged and thresholded
 	$(call need-tool,COVER)
 	rm -rf "$(COVER_DIR)/unit" && mkdir -p "$(COVER_DIR)/unit"
@@ -150,6 +156,7 @@ cover: ## Unit coverage (cross-package) + any e2e GOCOVERDIR run, merged and thr
 	go tool covdata textfmt -i="$$dirs" -o "$(COVER_DIR)/merged.out"
 	$(COVER) --config=.testcoverage.yml --profile="$(COVER_DIR)/merged.out" \
 	  --breakdown-file-name="$(COVER_DIR)/breakdown.json"
+endif
 
 arch: ## Architecture ratchet: size ceilings, one façade per mechanism, no new twins (baselines in .arch/)
 	bash scripts/arch-check.sh

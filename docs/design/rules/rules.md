@@ -2,7 +2,7 @@
 
 A rule is a Markdown instruction file under `.claude/rules/`. Claude Code reads rules natively; Codex and OpenCode have no equivalent. engine-sync (`docs/design/engine-sync/engine-sync.md`) carries every rule to both engines over two channels: an always-on rule (no `paths:`) is compiled into an instruction file the engine reads at session start, and a path-scoped rule is injected mid-session by one engine-sync matcher, run from a Codex hook entry and an OpenCode shim that engine-sync writes. This file is the design; the global always-on channel is built.
 
-**Status:** partly built. Built: [Global rule source](#global-rule-source), [Global always-on rules](#global-always-on-rules) (the Codex block, the OpenCode file and `instructions` entry, refreshed at `pfm install`), and the [Checks](#checks) rows marked built. Designed, not built: [Always-on project rules](#always-on-project-rules), [Path-scoped rules](#path-scoped-rules) (the `engine-sync hook` injector, its Codex hook entries and OpenCode shim), and the launch-time and `SessionStart` [freshness](#freshness) triggers — **Build path for the rest:** engine-sync phase P3, `flights-foreman` with this file as the spec — **Consumers:** `rm-rf-absolute-path`, `git-writes-through-gitter`, `flights-life-cycle`, `professor` and `one-door-per-operation`, shipped always-on; `pfm-testing-manual`, waiting on the injector ([First consumer](#first-consumer))
+**Status:** partly built. Built: [Global rule source](#global-rule-source), [Global always-on rules](#global-always-on-rules) (the Codex block, the OpenCode file and `instructions` entry, refreshed at `pfm install`), [Agent targeting](#agent-targeting) on Claude Code (the rule-control plugin), and the [Checks](#checks) rows marked built. Designed, not built: [Always-on project rules](#always-on-project-rules), [Path-scoped rules](#path-scoped-rules) (the `engine-sync hook` injector, its Codex hook entries and OpenCode shim), and the launch-time and `SessionStart` [freshness](#freshness) triggers — **Build path for the rest:** engine-sync phase P3, `flights-foreman` with this file as the spec — **Consumers:** `rm-rf-absolute-path`, `git-writes-through-gitter`, `flights-life-cycle`, `professor` and `one-door-per-operation`, shipped always-on; `pfm-testing-manual`, waiting on the injector ([First consumer](#first-consumer)); the rule-control plugin, which reads a rule's `visible-to:` key to deliver it to chosen loops on Claude Code ([Agent targeting](#agent-targeting))
 
 `{codex home}` is one Codex account's home; `{claude config dir}` is one Claude account's `configDir`; `{engine-sync home}` is `~/.local/share/engine-sync`; `{engine-sync state}` is `~/.local/state/engine-sync`.
 
@@ -48,7 +48,7 @@ Verified against Claude Code 2.1.295 and 2.1.312 (probes), Codex 0.161.0 (source
 | Native glob-scoped rules | yes, `.claude/rules` with `paths:` | no | no |
 | Instruction discovery | launch, plus nested `CLAUDE.md` and rules on file access | once at start, git root down to the working directory | upward from the project dir at start; `read` attaches nested `AGENTS.md`/`CLAUDE.md`/`CONTEXT.md` |
 | Reads `.claude/rules` | yes | no | no |
-| Rule targeting by agent | no, `paths` only | no | no |
+| Rule targeting by agent | not natively (`paths` only); the rule-control plugin's `visible-to:` key | no | no |
 | Mid-session injection point | built in (`nested_memory`) | `PreToolUse`/`PostToolUse` `additionalContext` | plugin `tool.execute.after` mutating `output.output` |
 | Injected text lands as | a system-reminder after the tool result | a `developer`-role message | part of the tool result |
 | File read tool | Read (also `cat`/`head` on one file) | none: `exec_command`, matched as `Bash` | `read` (`filePath`) |
@@ -67,7 +67,7 @@ Verified against Claude Code 2.1.295 and 2.1.312 (probes), Codex 0.161.0 (source
 
 **Frontmatter:** `paths` is the only key read (a YAML list or a comma-separated string); other keys are ignored, and the frontmatter is stripped before loading. Unparseable YAML loads the rule as always-on. A rule may be a symlink; one pointing outside the project needs the external-import approval, and then only its always-on rules load.
 
-**Agent targeting:** a rule cannot target an agent or the main chat; the frontmatter has no such key. Probed on Claude Code 2.1.312 (2026-10-29, `/tmp/professor/rules-scope/probe/`, one run per agent, evidence the agents' quoted context lines):
+**Native agent targeting:** Claude Code itself cannot target a rule at an agent or the main chat; its frontmatter has no such key ([Agent targeting](#agent-targeting) is the plugin that adds one). Probed on Claude Code 2.1.312 (2026-10-29, `/tmp/professor/rules-scope/probe/`, one run per agent, evidence the agents' quoted context lines):
 
 - A user rule (`~/.claude/rules/`), a project rule and `CLAUDE.md` reach the main chat, a custom sub-agent and `general-purpose` alike.
 - An agent with frontmatter `omitClaudeMd: true` receives none of the three: it drops user and project `CLAUDE.md` and every rule together. Managed policy is kept, and the key has no effect on the main session.
@@ -85,6 +85,12 @@ Verified against Claude Code 2.1.295 and 2.1.312 (probes), Codex 0.161.0 (source
 So a user rule guards files only by project-relative globs, and only in sessions whose project holds the file.
 
 **Debugging:** the `InstructionsLoaded` hook reports `file_path`, `memory_type`, `load_reason` (`session_start`, `path_glob_match`) and `trigger_file_path`; `/context` lists what loaded at launch.
+
+### Agent targeting
+
+**Built** by the rule-control plugin (`plugins/rule-control/`, its own repository, listed in this repo's marketplace), on the probe results above. A top-level `visible-to: {include: [...], exclude: [...]}` key in a rule's frontmatter names the loops that receive the rule: `main` (the main chat) or an agent type, exact or a `*` glob. A targeted rule leaves the instruction context every loop shares (`prompt.context`) and is given to each loop it names as hook context: the main chat at `SessionStart`, a sub-agent at `SubagentStart`, a compacted loop again at the `SessionStart` its `session.compact` pairs with; a path-scoped rule with `visible-to` is withheld (`prompt.attachment`) from a loop it leaves out. It fails open: a malformed key, an unreadable rule or a failing hook is logged and the rule reaches every loop. Live evidence: the plugin repository's README (tested on Claude Code 2.1.316) and the run records in `/tmp/rule-control/evidence/`.
+
+**The engine-sync gap:** Codex and OpenCode have no per-loop delivery. engine-sync reads only `paths:`, so a rule with `visible-to:` and no `paths:` stays always-on: it compiles into the Codex block and the OpenCode file like any other, frontmatter stripped, and reaches every loop there. `engine-sync doctor --machine` names each one in a `global-rules VISIBLE-TO {rule} delivered to every Codex and OpenCode loop` row, level `ok`: a known gap with no repair, never a failure.
 
 ## Delivery matrix
 
@@ -181,7 +187,7 @@ Codex runs a hook only once trusted, by a `sha256` of its event, matcher and han
 
 ## Global always-on rules
 
-**Built** in `plugins/engine-sync/internal/machine/rules.go` and `rules_opencode.go`. `engine-sync global` reads the rules under the first Claude config dir (the store), `{store}/rules/**/*.md`. It compiles every rule without `paths:` into one always-on set, each rule under its `<!-- rule: … -->` line in sorted path order, frontmatter stripped. A rule whose frontmatter does not parse is skipped with a `RULE-FRONTMATTER` line. `engine-sync global --uninstall` removes the Codex block and the OpenCode entry without reading any rule.
+**Built** in `plugins/engine-sync/internal/machine/rules.go` and `rules_opencode.go`. `engine-sync global` reads the rules under the first Claude config dir (the store), `{store}/rules/**/*.md`. It compiles every rule without `paths:` into one always-on set, each rule under its `<!-- rule: … -->` line in sorted path order, frontmatter stripped; a rule carrying rule-control's `visible-to:` is compiled the same way ([the engine-sync gap](#agent-targeting)). A rule whose frontmatter does not parse is skipped with a `RULE-FRONTMATTER` line. `engine-sync global --uninstall` removes the Codex block and the OpenCode entry without reading any rule.
 
 ### Codex: `{codex home}/AGENTS.md`
 
@@ -209,6 +215,7 @@ No project build covers `~/.claude/rules/`. Each trigger below runs `engine-sync
 | `engine-sync doctor --machine` | `global-rules opencode {file} state=MISSING` or `STALE`; `global-rules opencode instructions entry {config} state=MISSING` or `STALE` | built |
 | `engine-sync doctor --machine` | `RULE-FRONTMATTER {path}: {parse error}` for a global rule | built |
 | `engine-sync doctor --machine` | `global-rules PATH-SCOPED {rule} not delivered to Codex or OpenCode` (warning, until the injector ships) | built |
+| `engine-sync doctor --machine` | `global-rules VISIBLE-TO {rule} delivered to every Codex and OpenCode loop` (`ok`: the [agent-targeting](#agent-targeting) gap, no repair) | built |
 | `engine-sync doctor --machine` | `GLOBAL-BUDGET {bytes} > 8192` when the always-on global set exceeds 8 KiB, the cost every agent of every project pays (warning) | built |
 | `engine-sync doctor --machine` | `global-rules ERROR …` when a source, target or config cannot be read; never shown as a clean state | built |
 | `pfm doctor` | every `engine-sync doctor` row, rendered; a missing binary as a failing row | built |

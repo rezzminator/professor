@@ -6,6 +6,7 @@ Professor tracks only each plugin's commit: an edit under `{name}/` belongs to t
 
 - auto-effort: reasoning effort for the main chat and the sub-agents it launches — the main chat's per turn, moved by the model's `set_effort`, raised by failing tests, a cache gate per model; a tag at the start of an Agent prompt sets that sub-agent's; an agent whose frontmatter carries `effortControl` is raised at each failing test run or red sub-task, brought home once the trouble resolves, and moves its own with `effort_up`, `effort_down`, `effort_auto` · `auto-effort/`
 - tool-visibility-controller: a `visibility` field in agent, skill and command frontmatter, plus a scope file, decides per loop which agents, skills, MCP tools and built-in tools it sees and may invoke · `tool-visibility-controller/`
+- rule-control: a `visible-to` key in a rule file's frontmatter names the loops that receive the rule — `main` for the main chat, agent types, `*` globs — every loop when absent · `rule-control/`
 - buddy: an ASCII companion above the prompt that reacts to the work and answers `/buddy` · `buddy/`
 - cache-live-control: `/cache` sets the prompt-cache TTL of the main chat and its sub-agents · `cache-live-control/`
 - cache-keepwarm: keeps the prompt cache of the main chat and waiting sub-agents warm through background waits with visible pokes, capped per wait and each admitted by a budget against the rewrite it saves · `cache-keepwarm/`
@@ -14,7 +15,7 @@ Professor tracks only each plugin's commit: an edit under `{name}/` belongs to t
 - engine-sync: the Codex and OpenCode mirror writer pfm execs · `engine-sync/`
 - harvester: shared engine MCP daemon and one-shot web/document CLI; its own plugin registers the MCP server `harvester` (`mcp__plugin_harvester_harvester__*` in Claude Code), pfm none · `harvester/`
 - gpt-gateway: a local passthrough between Claude Code and the Anthropic API, with a middleware hook API and an opt-in ChatGPT route; a tracked submodule the marketplace does not list · `gpt-gateway/`
-- plugin-log: the one logging library, TypeScript, Go and Python held to one conformance spec, vendored byte-identical into each plugin at the copy path the sync script's `ROSTER` names; professor's own source, no submodule · `plugin-log/`, spec `plugin-log/spec.json`, sync `../scripts/plugin-log-sync.sh`
+- plugin-log: the one logging library, TypeScript, Go and Python held to one conformance spec, vendored byte-identical into each plugin at the copy path the sync script's `ROSTER` names; professor's own source, no submodule; also holds the canonical `ts/agent-types.ts`, the agent-type resolver vendored into tool-visibility-controller and rule-control by the same sync script and `ROSTER` · `plugin-log/`, spec `plugin-log/spec.json`, sync `../scripts/plugin-log-sync.sh`
 - installable plugin: the directory Claude Code installs, inside each checkout · `{name}/plugins/{name}/`
 - gitlink: professor's pin of one plugin commit, registered with `branch = develop` and `ignore = dirty` · `../.gitmodules`
 

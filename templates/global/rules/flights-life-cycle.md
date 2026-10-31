@@ -1,3 +1,8 @@
+---
+visible-to:
+  include: ["main"]
+---
+
 # Flights: one worktree, one lander
 
 Binds the main chat, owner of the place, the landing and git; a sub-agent follows its brief. The lander is the costliest step, its review scaling with the diff, so related work shares one.

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Vendors the canonical plugin-log library (plugins/plugin-log/) into every plugin checkout, or checks every copy.
+# Vendors the canonical shared sources under plugins/plugin-log/ (the plugin-log library, and agent-types.ts, the
+# agent-type resolver tool-visibility-controller and rule-control share) into every plugin checkout, or checks every copy.
 # Each copy is plain source at one fixed path per language, byte-identical to its canonical file.
 #   --write   copy each canonical file over its plugin copy; a file there that is not a vendored copy (no marker
 #             line) is refused unless --adopt, so a plugin's own module is never clobbered unasked
@@ -25,6 +26,9 @@ cache-keepwarm ts/plugin-log.ts plugins/cache-keepwarm/src/plugin-log.ts
 cache-live-control ts/plugin-log.ts plugins/cache-live-control/src/plugin-log.ts
 forward-compaction ts/plugin-log.ts plugins/forward-compaction/src/plugin-log.ts
 tool-visibility-controller ts/plugin-log.ts plugins/tool-visibility-controller/src/plugin-log.ts
+tool-visibility-controller ts/agent-types.ts plugins/tool-visibility-controller/src/agent-types.ts
+rule-control ts/plugin-log.ts plugins/rule-control/src/plugin-log.ts
+rule-control ts/agent-types.ts plugins/rule-control/src/agent-types.ts
 callmeter go/pluginlog.go internal/pluginlog/pluginlog.go
 engine-sync go/pluginlog.go internal/pluginlog/pluginlog.go
 harvester go/pluginlog.go internal/pluginlog/pluginlog.go

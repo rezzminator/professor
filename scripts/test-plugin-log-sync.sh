@@ -9,25 +9,26 @@ P="$T/plugins"
 TS="$ROOT/plugins/plugin-log/ts/plugin-log.ts"
 GO="$ROOT/plugins/plugin-log/go/pluginlog.go"
 PY="$ROOT/plugins/plugin-log/python/plugin_log.py"
+AT="$ROOT/plugins/plugin-log/ts/agent-types.ts"
 run_sut() { RC=0; bash "$SUT" "$@" --plugins-dir "$P" > "$T/out" 2> "$T/err" || RC=$?; }
 expect() { if eval "$2"; then ok "$1"; else bad "$1" "rc=$RC" "$(cat "$T/out" "$T/err")"; fi; }
 checkout() { mkdir -p "$P/$1"; : > "$P/$1/.git"; }
 
 mkdir -p "$P"
-for p in auto-effort buddy cache-keepwarm cache-live-control forward-compaction tool-visibility-controller callmeter engine-sync harvester gpt-gateway; do checkout "$p"; done
+for p in auto-effort buddy cache-keepwarm cache-live-control forward-compaction tool-visibility-controller rule-control callmeter engine-sync harvester gpt-gateway; do checkout "$p"; done
 
 run_sut --check
-expect 'a check of checkouts with no copy reports each MISSING and fails' '[ "$RC" = 1 ] && [ "$(grep -c "^MISSING " "$T/out")" = 10 ]'
+expect 'a check of checkouts with no copy reports each MISSING and fails' '[ "$RC" = 1 ] && [ "$(grep -c "^MISSING " "$T/out")" = 13 ]'
 
 run_sut --write
-expect 'a write adds every copy at its fixed path' '[ "$RC" = 0 ] && [ "$(grep -c "^added " "$T/out")" = 10 ] && cmp -s "$TS" "$P/buddy/plugins/buddy/src/plugin-log.ts" && cmp -s "$GO" "$P/callmeter/internal/pluginlog/pluginlog.go" && cmp -s "$PY" "$P/gpt-gateway/gpt_gateway/plugin_log.py"'
+expect 'a write adds every copy at its fixed path' '[ "$RC" = 0 ] && [ "$(grep -c "^added " "$T/out")" = 13 ] && cmp -s "$TS" "$P/buddy/plugins/buddy/src/plugin-log.ts" && cmp -s "$TS" "$P/rule-control/plugins/rule-control/src/plugin-log.ts" && cmp -s "$AT" "$P/rule-control/plugins/rule-control/src/agent-types.ts" && cmp -s "$AT" "$P/tool-visibility-controller/plugins/tool-visibility-controller/src/agent-types.ts" && cmp -s "$GO" "$P/callmeter/internal/pluginlog/pluginlog.go" && cmp -s "$PY" "$P/gpt-gateway/gpt_gateway/plugin_log.py"'
 expect 'a written copy is 0644' '[ "$(stat -c %a "$P/engine-sync/internal/pluginlog/pluginlog.go")" = 644 ]'
 
 run_sut --check
-expect 'a check after a write is clean, every copy ok' '[ "$RC" = 0 ] && [ "$(grep -c "^ok " "$T/out")" = 10 ] && grep -q "10 checked, 0 drifted, 0 not checked" "$T/out"'
+expect 'a check after a write is clean, every copy ok' '[ "$RC" = 0 ] && [ "$(grep -c "^ok " "$T/out")" = 13 ] && grep -q "13 checked, 0 drifted, 0 not checked" "$T/out"'
 
 run_sut --write
-expect 'a second write changes nothing' '[ "$RC" = 0 ] && [ "$(grep -c "^unchanged " "$T/out")" = 10 ]'
+expect 'a second write changes nothing' '[ "$RC" = 0 ] && [ "$(grep -c "^unchanged " "$T/out")" = 13 ]'
 
 printf '// a local edit\n' >> "$P/buddy/plugins/buddy/src/plugin-log.ts"
 run_sut --check
@@ -35,10 +36,16 @@ expect 'an edited copy is DRIFT and fails the check' '[ "$RC" = 1 ] && grep -q "
 run_sut --write buddy
 expect 'a write restores a drifted vendored copy' '[ "$RC" = 0 ] && grep -q "^updated buddy" "$T/out" && cmp -s "$TS" "$P/buddy/plugins/buddy/src/plugin-log.ts"'
 
+printf '// a local edit\n' >> "$P/rule-control/plugins/rule-control/src/agent-types.ts"
+run_sut --check rule-control
+expect 'a drifted agent-types copy is DRIFT while its plugin-log copy stays ok' '[ "$RC" = 1 ] && grep -q "^DRIFT rule-control plugins/rule-control/src/agent-types.ts" "$T/out" && grep -q "^ok rule-control plugins/rule-control/src/plugin-log.ts" "$T/out"'
+run_sut --write rule-control
+expect 'a write restores the agent-types copy' '[ "$RC" = 0 ] && grep -q "^updated rule-control plugins/rule-control/src/agent-types.ts" "$T/out" && cmp -s "$AT" "$P/rule-control/plugins/rule-control/src/agent-types.ts"'
+
 printf '// a released rewording\n' >> "$P/buddy/plugins/buddy/src/plugin-log.ts"
 accepted="buddy $(cd / && git hash-object --no-filters --stdin < "$P/buddy/plugins/buddy/src/plugin-log.ts") a released rewording"
 RC=0; PLUGIN_LOG_SYNC_ACCEPTED="$accepted" bash "$SUT" --check --plugins-dir "$P" > "$T/out" 2> "$T/err" || RC=$?
-expect 'an accepted drift pinned by its exact content is ACCEPTED and passes the check' '[ "$RC" = 0 ] && grep -q "^ACCEPTED buddy plugins/buddy/src/plugin-log.ts: a released rewording" "$T/out" && grep -q "10 checked, 0 drifted, 0 not checked, 1 accepted" "$T/out"'
+expect 'an accepted drift pinned by its exact content is ACCEPTED and passes the check' '[ "$RC" = 0 ] && grep -q "^ACCEPTED buddy plugins/buddy/src/plugin-log.ts: a released rewording" "$T/out" && grep -q "13 checked, 0 drifted, 0 not checked, 1 accepted" "$T/out"'
 RC=0; PLUGIN_LOG_SYNC_ACCEPTED="$accepted" bash "$SUT" --write buddy --plugins-dir "$P" > "$T/out" 2> "$T/err" || RC=$?
 expect 'a write leaves an accepted copy as it is' '[ "$RC" = 0 ] && grep -q "^ACCEPTED buddy" "$T/out" && ! cmp -s "$TS" "$P/buddy/plugins/buddy/src/plugin-log.ts"'
 printf '// one more edit\n' >> "$P/buddy/plugins/buddy/src/plugin-log.ts"
@@ -55,7 +62,7 @@ expect '--adopt replaces it' '[ "$RC" = 0 ] && cmp -s "$GO" "$P/harvester/intern
 printf '// a local edit\n' >> "$P/cache-keepwarm/plugins/cache-keepwarm/src/plugin-log.ts"
 rm -f "$P/cache-keepwarm/.git"
 run_sut --check
-expect 'a plugin with no checkout is NOT CHECKED and the check exits 3, never 0' '[ "$RC" = 3 ] && grep -q "^NOT CHECKED cache-keepwarm" "$T/out" && grep -q "9 checked, 0 drifted, 1 not checked" "$T/out"'
+expect 'a plugin with no checkout is NOT CHECKED and the check exits 3, never 0' '[ "$RC" = 3 ] && grep -q "^NOT CHECKED cache-keepwarm" "$T/out" && grep -q "12 checked, 0 drifted, 1 not checked" "$T/out"'
 run_sut --write
 expect 'a write skips an absent checkout and touches nothing there' '[ "$RC" = 3 ] && tail -n 1 "$P/cache-keepwarm/plugins/cache-keepwarm/src/plugin-log.ts" | grep -qx "// a local edit"'
 

@@ -150,8 +150,9 @@ func FetchClaude(ctx context.Context, account LimitAccount) (AccountLimits, erro
 	result.ConfirmedAt = confirmedAt
 	result.Windows = usageWindows(usage, now)
 	if len(result.Windows) == 0 {
-		result.Status = fmt.Sprintf("account %d limits unavailable: empty usage response", account.ID)
-		return result, errors.New(result.Status)
+		// An answer that reports no window is an account with no limit window
+		// (on credits), not a failure.
+		result.Status, result.NoWindow = noLimitWindows, true
 	}
 	return result, nil
 }
@@ -189,8 +190,8 @@ func FetchCodex(ctx context.Context, account LimitAccount) (AccountLimits, error
 	result.ConfirmedAt = confirmedAt
 	result.Windows = codexWindows(usage)
 	if len(result.Windows) == 0 {
-		result.Status = "Codex payload unreadable"
-		return result, errors.New(result.Status)
+		result.Status, result.NoWindow = noLimitWindows, true
+		return result, nil
 	}
 	if usage.Warning != "" {
 		result.Status = usage.Warning
@@ -199,10 +200,15 @@ func FetchCodex(ctx context.Context, account LimitAccount) (AccountLimits, error
 	return result, nil
 }
 
+// noLimitWindows is a card's status when the provider answered without any
+// limit window: the account's plan has none to show.
+const noLimitWindows = "no limit window on this plan"
+
 func applyFetchedLimits(target *AccountLimits, fetched AccountLimits) {
 	target.Plan = fetched.Plan
 	target.ConfirmedAt = fetched.ConfirmedAt
 	target.Status = fetched.Status
+	target.NoWindow = fetched.NoWindow
 	target.Windows = fetched.Windows
 }
 

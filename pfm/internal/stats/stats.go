@@ -102,7 +102,10 @@ type AccountLimits struct {
 	Plan        string
 	ConfirmedAt time.Time
 	Status      string
-	Windows     []Window
+	// NoWindow marks an account whose plan reports no limit window: Status
+	// is an informational note, not a failure.
+	NoWindow bool
+	Windows  []Window
 }
 
 type Snapshot struct {

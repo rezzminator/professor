@@ -94,6 +94,8 @@ type rateWindow struct {
 	ResetsAt       int64   `json:"resets_at"`
 	Cached         bool    `json:"-"`
 	Failure        bool    `json:"-"`
+	// Absent marks a window the latest answer left out: off the plan, hidden.
+	Absent bool `json:"-"`
 }
 
 type rateLimits struct {
@@ -162,13 +164,23 @@ func (limits rateLimits) windowsAt(
 	}
 	reported := maps.Clone(windows)
 	// A reported window stands, even at zero, unless another seat or the usage
-	// cache holds a newer reading of it. A missing window takes the cache's;
-	// an explicit scoped array also owns the absence of Fable, independently
-	// of missing main windows.
+	// cache holds a newer reading of it. A payload that reports a plain window
+	// answers for both, and an explicit scoped array for Fable: a window such an
+	// answer leaves out is off the plan and hidden. A window no answer spoke
+	// about is missing, and the usage cache decides it.
+	_, fiveReported := windows[fiveHourCacheKey]
+	_, weekReported := windows[sevenDayCacheKey]
 	missing := make(map[string]bool)
 	for _, descriptor := range usagehook.AllWindows() {
-		if _, present := windows[descriptor.Key]; !present &&
-			(descriptor.Key != "seven_day_fable" || limits.Scoped == nil) {
+		answered := fiveReported || weekReported
+		if descriptor.Key == fableCacheKey {
+			answered = limits.Scoped != nil
+		}
+		if _, present := windows[descriptor.Key]; present {
+			continue
+		} else if answered {
+			windows[descriptor.Key] = rateWindow{Absent: true}
+		} else {
 			missing[descriptor.Key] = true
 		}
 	}
@@ -361,13 +373,15 @@ func reportsKnownWindow(data input) bool {
 	return false
 }
 
-// rateWindowRow reads one known window. Every known window renders, always:
-// skipping a window at 0% made an unused quota and a quota whose data never
-// arrived look identical — both simply absent — so the one state worth seeing
-// (a limit the response stopped reporting) arrived as silence. A window missing
-// from a block that DID report renders with an explicit unknown marker.
+// rateWindowRow reads one known window; a zero label draws no row. A window
+// the latest answer left out is off the plan and draws nothing; a measured 0%
+// still draws, a window no answer spoke about yet draws the unknown marker, and
+// a failure to read draws ERR, so absence and failure never look alike.
 func rateWindowRow(now time.Time, descriptor usagehook.WindowDescriptor, data input) quotaRow {
 	window, present := data.RateLimits.Windows[descriptor.Key]
+	if window.Absent {
+		return quotaRow{}
+	}
 	if !present {
 		return quotaRow{label: dim + descriptor.Label + "-used:—" + reset}
 	}
@@ -394,7 +408,9 @@ func appendRateSegments(line string, now time.Time, data input) string {
 		return line
 	}
 	for _, descriptor := range usagehook.AllWindows() {
-		line = appendSegment(line, compactRow(rateWindowRow(now, descriptor, data)))
+		if row := rateWindowRow(now, descriptor, data); row.label != "" {
+			line = appendSegment(line, compactRow(row))
+		}
 	}
 	return line
 }
@@ -404,33 +420,44 @@ func appendRateSegments(line string, now time.Time, data input) string {
 // weekly last at full width. That width is 115% of the widest sibling row
 // (rowColumns; the compact forms count as siblings), capped by the terminal; a
 // terminal with no content column drops the Codex row and leaves the quotas at
-// their compact width.
+// their compact width. A hidden row (a zero label) takes no place: a lone top
+// reading spans the full width, and an empty row is not drawn.
 func claudeQuotaRows(runtime Runtime, now time.Time, data input, l1, l2 string) string {
-	codex := codexWeeklyRow(runtime, now)
-	widths := []int{ansi.StringWidth(codex.label)}
-	var five, week, fable quotaRow
-	known := reportsKnownWindow(data)
-	if known {
-		reading := map[string]quotaRow{}
+	reading := map[string]quotaRow{}
+	if reportsKnownWindow(data) {
 		for _, descriptor := range usagehook.AllWindows() {
 			reading[descriptor.Key] = rateWindowRow(now, descriptor, data)
 		}
-		five, week, fable = reading[fiveHourCacheKey], reading[sevenDayCacheKey], reading[fableCacheKey]
-		widths = append(
-			widths,
-			ansi.StringWidth(compactRow(five)+sep+compactRow(fable)),
-			ansi.StringWidth(compactRow(week)),
-		)
+	}
+	var top []quotaRow
+	compactTop := ""
+	for _, row := range []quotaRow{reading[fiveHourCacheKey], reading[fableCacheKey]} {
+		if row.label != "" {
+			top, compactTop = append(top, row), appendSegment(compactTop, compactRow(row))
+		}
+	}
+	week, codex := reading[sevenDayCacheKey], codexWeeklyRow(runtime, now)
+	widths := []int{ansi.StringWidth(codex.label), ansi.StringWidth(compactTop)}
+	if week.label != "" {
+		widths = append(widths, ansi.StringWidth(compactRow(week)))
 	}
 	columns, ok := rowColumns(runtime, widths, l1, l2)
 	var rows []string
 	switch {
-	case known && ok:
-		rows = append(rows, halfRows(five, fable, columns), barRow(week, columns))
-	case known:
-		rows = append(rows, compactRow(five)+sep+compactRow(fable), compactRow(week))
+	case len(top) == 2 && ok:
+		rows = append(rows, halfRows(top[0], top[1], columns))
+	case len(top) == 1 && ok:
+		rows = append(rows, barRow(top[0], columns))
+	case len(top) > 0:
+		rows = append(rows, compactTop)
 	}
-	if ok {
+	switch {
+	case week.label != "" && ok:
+		rows = append(rows, barRow(week, columns))
+	case week.label != "":
+		rows = append(rows, compactRow(week))
+	}
+	if ok && codex.label != "" {
 		rows = append(rows, barRow(codex, columns))
 	}
 	return strings.Join(rows, "\n"+reset)
@@ -860,9 +887,6 @@ func codexQuotaSegment(runtime Runtime, now time.Time) string {
 	if err := json.Unmarshal(body, &usage); err != nil {
 		return cBad + codexQuotaLabel + catalogError + reset
 	}
-	if usage.Primary == nil && usage.Secondary == nil {
-		return cWarn + codexQuotaLabel + "unknown" + reset
-	}
 	segment := ""
 	for _, window := range []*codexWindow{usage.Primary, usage.Secondary} {
 		if window == nil {
@@ -890,7 +914,8 @@ func codexQuotaSegment(runtime Runtime, now time.Time) string {
 			),
 		)
 	}
-	if statuslineFileAge(path, now) > 5*time.Minute {
+	// No window answered (an account on credits): the plan alone shows.
+	if segment != "" && statuslineFileAge(path, now) > 5*time.Minute {
 		segment += " " + cWarn + "stale" + reset
 	}
 	if usage.PlanType != "" {

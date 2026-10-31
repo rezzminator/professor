@@ -38,7 +38,7 @@ func adoptSiblingReadings(now time.Time, runtime Runtime, account int, windows m
 	}
 	for _, named := range usage.NamedWindowsAt(now) {
 		current, present := windows[named.Key]
-		if !present || current.Failure || named.Window.Utilization == nil {
+		if !present || current.Failure || current.Absent || named.Window.Utilization == nil {
 			continue
 		}
 		resetAt, err := time.Parse(time.RFC3339, named.Window.ResetsAt)
@@ -55,9 +55,13 @@ func adoptSiblingReadings(now time.Time, runtime Runtime, account int, windows m
 
 // fillCachedRateWindows reads only the existing cache: rendering never requests
 // provider data. It fills a missing window and replaces a reported one the
-// cache holds a newer reading of (usagehook.NewerReading); a cache failure
-// marks only the missing ones. Cached provenance keeps these values out of
-// fresh snapshots.
+// cache holds a newer reading of (usagehook.NewerReading). The record's latest
+// answer decides which windows exist: one it left out is hidden, steadily, on
+// either side of a backoff and of the stale horizon. A record whose latest
+// request failed marks ERR on the missing windows its last success carried
+// (every missing one when no success is known) until a request succeeds; an
+// unreadable cache marks every missing one. Cached provenance keeps these
+// values out of fresh snapshots.
 func fillCachedRateWindows(
 	now time.Time,
 	runtime Runtime,
@@ -85,16 +89,6 @@ func fillCachedRateWindows(
 	if !record.MatchesConfigDir(runtime.ConfigDir) {
 		return
 	}
-	if record.Backoff != nil && now.Before(record.Backoff.RetryAfter) {
-		fail(
-			fmt.Errorf(
-				"refresh backoff until %s: %q",
-				record.Backoff.RetryAfter.Format(time.RFC3339),
-				record.Backoff.Message,
-			),
-		)
-		return
-	}
 	confirmedAt := record.FetchedAt
 	if confirmedAt == nil {
 		confirmedAt = &modified
@@ -103,24 +97,43 @@ func fillCachedRateWindows(
 		fail(fmt.Errorf("cache confirmation timestamp %s is in the future", confirmedAt.Format(time.RFC3339)))
 		return
 	}
-	if now.Sub(*confirmedAt) > usagehook.StaleHorizon {
-		return
+	if record.Backoff != nil {
+		fmt.Fprintf(runtime.Warn, "statusline: usage cache %s: last refresh failed, retry after %s: %q "+
+			"(missing windows its last answer carried show ERR)\n",
+			path, record.Backoff.RetryAfter.Format(time.RFC3339), record.Backoff.Message)
 	}
+	// A failed request keeps the last success's usage beside its backoff; with
+	// no success stamped, the record knows no plan shape.
+	knowsShape := record.Backoff == nil || record.FetchedAt != nil
+	stale := now.Sub(*confirmedAt) > usagehook.StaleHorizon
 	for _, descriptor := range usagehook.AllWindows() {
 		key := descriptor.Key
 		current, present := windows[key]
-		if !missing[key] && (!present || current.Failure) {
+		if !missing[key] && (!present || current.Failure || current.Absent || record.Backoff != nil) {
 			continue
 		}
 		var window usagehook.Window
 		var windowErr error
+		carried := false
 		switch key {
 		case fiveHourCacheKey:
-			window = record.FiveHour
+			window, carried = record.FiveHour, record.FiveHour.Utilization != nil
 		case sevenDayCacheKey:
-			window = record.SevenDay
+			window, carried = record.SevenDay, record.SevenDay.Utilization != nil
 		case fableCacheKey:
+			_, anyFable, fableErr := record.FableWindowAt(time.Time{})
+			carried = anyFable || fableErr != nil
 			window, _, windowErr = record.FableWindowAt(now)
+		}
+		switch {
+		case missing[key] && knowsShape && !carried:
+			windows[key] = rateWindow{Absent: true}
+			continue
+		case missing[key] && record.Backoff != nil:
+			windows[key] = rateWindow{Failure: true}
+			continue
+		case stale:
+			continue
 		}
 		if windowErr != nil {
 			fmt.Fprintf(runtime.Warn, "statusline: usage cache %s: %v\n", path, windowErr)

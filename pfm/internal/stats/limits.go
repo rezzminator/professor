@@ -792,8 +792,7 @@ func (sampler *LimitsSampler) fetchCodexHTTP(ctx context.Context, account LimitA
 	if err := json.Unmarshal(
 		body,
 		&usage,
-	); err != nil || usage.RateLimit == nil ||
-		usage.RateLimit.PrimaryWindow == nil {
+	); err != nil || (usage.RateLimit == nil && usage.PlanType == "") { // a window left out is off the plan
 		return codexUsage{}, fmt.Errorf("usage payload from Codex is unreadable")
 	}
 	return usage, nil
@@ -843,9 +842,6 @@ func (sampler *LimitsSampler) fetchCodexAppServer(ctx context.Context, account L
 	}
 	for id, bucket := range message.Result.RateLimitsByLimitID {
 		usage.RateLimitsByLimitID[id] = *codexBucketFromApp(bucket)
-	}
-	if len(codexWindows(usage)) == 0 {
-		return codexUsage{}, fmt.Errorf("response from Codex App Server carried no rate-limit windows")
 	}
 	return usage, nil
 }
@@ -946,7 +942,7 @@ func (sampler *LimitsSampler) fetchCodexCached(
 		}
 		return codexUsage{}, time.Time{}, err
 	}
-	if matches && len(codexWindows(record.codexUsage)) > 0 &&
+	if matches && (record.Backoff == nil || len(codexWindows(record.codexUsage)) > 0) &&
 		cacheFresh(record.FetchedAt, path, now, sampler.ttlFor(pfmengine.Codex)) {
 		return record.codexUsage, confirmedAt, nil
 	}

@@ -352,3 +352,133 @@ func TestClaudeVersionProbeDropsTheHerdrPane(t *testing.T) {
 		}
 	}
 }
+
+// fixedUsageServer answers every request with body, counting requests.
+func fixedUsageServer(t *testing.T, body string) (*httptest.Server, *atomic.Int64) {
+	t.Helper()
+	var hits atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		_, _ = io.WriteString(writer, body)
+	}))
+	t.Cleanup(server.Close)
+	return server, &hits
+}
+
+// A usage response that leaves a window out says the account's plan has no
+// such window: it is stored as a success, with no backoff, no error and none
+// of the window's earlier reading carried over, and it answers inside the TTL
+// like any success. A response that reports no window at all (an account on
+// credits) is an answer too, and is not asked again inside the TTL. A body
+// naming no usage key at all is no answer: it still fails and backs off.
+func TestAnOmittedWindowIsAnAnswerNotAFailure(t *testing.T) {
+	now := time.Now().Truncate(time.Second)
+	week := now.Add(5 * 24 * time.Hour).UTC().Format(time.RFC3339)
+	for _, testcase := range []struct {
+		name, body          string
+		wantErr, wantSeven  bool
+		wantFable           bool
+		wantHitsAfterSecond int64
+	}{
+		{
+			name: "five_hour omitted",
+			body: `{"seven_day":{"utilization":11,"resets_at":"` + week + `"},"seven_day_opus":null,` +
+				`"limits":[{"kind":"weekly_scoped","scope":{"model":{"display_name":"Fable"}},"percent":0,` +
+				`"resets_at":"` + week + `","is_active":false}]}`,
+			wantSeven: true, wantFable: true, wantHitsAfterSecond: 1,
+		},
+		{
+			name:                "no window at all",
+			body:                `{"five_hour":null,"seven_day":null,"seven_day_opus":null,"limits":[]}`,
+			wantHitsAfterSecond: 1,
+		},
+		{
+			name: "windows naming only a reset",
+			body: `{"five_hour":{"utilization":null,"resets_at":"` + week + `"},` +
+				`"seven_day":{"utilization":null,"resets_at":"` + week + `"},"limits":[]}`,
+			wantHitsAfterSecond: 1,
+		},
+		{name: "error object", body: `{"error":{"type":"x","message":"y"}}`, wantErr: true, wantHitsAfterSecond: 1},
+		{name: "null body", body: `null`, wantErr: true, wantHitsAfterSecond: 1},
+	} {
+		t.Run(testcase.name, func(t *testing.T) {
+			root, configDir, cacheDir, env := doorSeat(t, 11, now)
+			server, hits := fixedUsageServer(t, testcase.body)
+			options := Options{
+				Now: func() time.Time { return now }, Env: env, Home: root, ConfigDir: configDir,
+				CacheDir: cacheDir, TTL: 3 * time.Minute, Client: server.Client(), Endpoint: server.URL,
+			}
+			usage, confirmedAt, err := Fetch(context.Background(), options, 11)
+			record, readErr := ReadCacheRecord(CachePath(cacheDir, 11))
+			if readErr != nil {
+				t.Fatalf("read cache: %v", readErr)
+			}
+			if testcase.wantErr {
+				if err == nil || record.Backoff == nil {
+					t.Fatalf("err=%v backoff=%+v, want a failure that backs off", err, record.Backoff)
+				}
+				return
+			}
+			if err != nil || confirmedAt.IsZero() {
+				t.Fatalf("Fetch err=%v confirmedAt=%s, want a confirmed success", err, confirmedAt)
+			}
+			if record.Backoff != nil || record.FetchedAt == nil || !record.FetchedAt.Equal(now) {
+				t.Fatalf("record %+v, want a success stamped now with no backoff", record)
+			}
+			if usage.FiveHour.Utilization != nil || record.FiveHour.Utilization != nil {
+				t.Fatalf("five_hour carried over: answer %+v record %+v", usage.FiveHour, record.FiveHour)
+			}
+			if got := record.SevenDay.Utilization != nil; got != testcase.wantSeven {
+				t.Fatalf("seven_day present=%v, want %v", got, testcase.wantSeven)
+			}
+			if _, got := record.fableWindow(now); got != testcase.wantFable {
+				t.Fatalf("Fable present=%v, want %v", got, testcase.wantFable)
+			}
+			options.Now = func() time.Time { return now.Add(time.Minute) }
+			if _, _, err := Fetch(context.Background(), options, 11); err != nil {
+				t.Fatalf("second Fetch: %v", err)
+			}
+			if got := hits.Load(); got != testcase.wantHitsAfterSecond {
+				t.Fatalf("requests after a second call inside the TTL = %d, want %d", got, testcase.wantHitsAfterSecond)
+			}
+		})
+	}
+}
+
+// Failures with no success ever are failures, however many: the second one
+// does not stamp the first failure's mtime as fetched_at, so the empty usage
+// beside its backoff never reads as an answer that reported no window, and a
+// call inside the TTL that follows still gets the error.
+func TestRepeatedFailuresNeverStampASuccess(t *testing.T) {
+	now := time.Now().Truncate(time.Second)
+	root, configDir, cacheDir := adversarialSeat(t, 13)
+	env := &paths.MapEnv{Values: map[string]string{paths.EnvHome: root}}
+	var hits atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		http.Error(writer, "upstream down", http.StatusInternalServerError)
+	}))
+	t.Cleanup(server.Close)
+	options := Options{
+		Env: env, Home: root, ConfigDir: configDir, CacheDir: cacheDir, TTL: 3 * time.Minute,
+		Client: server.Client(), Endpoint: server.URL, Log: io.Discard,
+	}
+	for index, offset := range []time.Duration{0, 2 * time.Minute, 2*time.Minute + 10*time.Second} {
+		at := now.Add(offset)
+		options.Now = func() time.Time { return at }
+		if _, _, err := Fetch(context.Background(), options, 13); err == nil {
+			t.Fatalf("call %d at +%s: Fetch err=nil, want the failure", index, offset)
+		}
+		record, err := ReadCacheRecord(CachePath(cacheDir, 13))
+		if err != nil {
+			t.Fatalf("call %d: read cache: %v", index, err)
+		}
+		if record.FetchedAt != nil || record.Backoff == nil {
+			t.Fatalf("call %d: record fetched_at=%v backoff=%+v, want no success stamp beside a backoff",
+				index, record.FetchedAt, record.Backoff)
+		}
+	}
+	if got := hits.Load(); got != 2 {
+		t.Fatalf("requests = %d, want 2 (the third call sits inside the second backoff)", got)
+	}
+}

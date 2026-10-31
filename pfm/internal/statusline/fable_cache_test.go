@@ -170,8 +170,8 @@ func TestFableWindowPresentButEmptyLimitsArrayIsNotCacheFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	plain := stripANSICodes(got)
-	if !strings.Contains(plain, "7d-fable-used:—") {
-		t.Fatalf("a present-but-empty limits array did not render absent:\n%q", plain)
+	if strings.Contains(plain, "7d-fable-used") {
+		t.Fatalf("a present-but-empty limits array answered without Fable, so its row must be hidden:\n%q", plain)
 	}
 	if strings.Contains(plain, "77%") {
 		t.Fatalf("a present-but-empty limits array consulted the cache anyway:\n%q", plain)

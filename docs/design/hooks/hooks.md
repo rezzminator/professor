@@ -77,12 +77,12 @@ Placement holds by construction: the renderer emits each registration once under
 The usage hook and the `pfm ls` Limits tab reach `GET https://api.anthropic.com/api/oauth/usage` only through `usagehook.Fetch` (`pfm/internal/usagehook/fetch.go`), which answers in this order:
 
 1. A `cc-rate-limits` statusline snapshot of the seat (`ReadStatuslineSnapshot`): the same config dir, younger than the caller's TTL, its five-hour reset still ahead. No request.
-2. The shared cache record `acct-<id>.json` fresh within the caller's TTL: the hook's 180 seconds (`CC_USAGE_TTL`), the Limits tab's 60 (`LiveLimitsTTL`).
+2. The shared cache record `acct-<id>.json` fresh within the caller's TTL: the hook's 180 seconds (`CC_USAGE_TTL`), the Limits tab's 60 (`LiveLimitsTTL`). A stamped success that reported no window at all (an account on credits) is fresh like any other.
 3. An active shared backoff: the cached usage with the backoff's error. No request.
 4. The `O_EXCL` refresh lock `acct-<id>.lock` beside the cache (`RefreshLockPath`). A lock older than 30 seconds (`lockStaleAfter`) is stale and taken over; a caller that cannot take the lock sends no request and answers from the cache; the holder re-reads the cache and answers if a peer refreshed or backed off meanwhile, and releases the lock on every path.
-5. The request, sent with `User-Agent: pfm/{version}`. Success writes the record. A 429 writes the shared backoff (`BackoffFor`): `Retry-After` honored with a ten-minute floor, message `rate-limited — retry HH:MM (429 Too Many Requests)`. Any other failure backs off one minute.
+5. The request, sent with `User-Agent: pfm/{version}`. Success writes the record: a window the response leaves out is off the account's plan, so it is no failure, backs nothing off and keeps none of its earlier reading; only a body naming no usage key (an error object, `null`) fails as undecodable. A 429 writes the shared backoff (`BackoffFor`): `Retry-After` honored with a ten-minute floor, message `rate-limited — retry HH:MM (429 Too Many Requests)`. Any other failure backs off one minute.
 
-The hook writes a failed refresh to stderr; its prompt output does not change. The statusline writes the snapshots from its stdin `rate_limits` (`recordRateLimits`, `pfm/internal/statusline/render.go`): every window the harness sent, 0% included, under `windows`, beside the flat keys an older build's reader expects.
+The hook writes a failed refresh to stderr; its prompt output does not change. Its warning names only the windows the answer carries. Merging the snapshots, a snapshot that reports a plain window but leaves the other out says the plan lacks it, so an older seat's reading of that window is dropped. The statusline writes the snapshots from its stdin `rate_limits` (`recordRateLimits`, `pfm/internal/statusline/render.go`): every window the harness sent, 0% included, under `windows`, beside the flat keys an older build's reader expects.
 
 A blocked prompt returns `decision: block` with the original prompt suppressed (`pfm/internal/hookentry/prompt_block.go:23-28`).
 

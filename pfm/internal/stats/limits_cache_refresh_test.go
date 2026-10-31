@@ -82,10 +82,17 @@ func TestLimitsSharedCacheRefreshBoundaries(t *testing.T) {
 				sampler.Endpoint, sampler.CodexEndpoint = server.URL, server.URL
 				sampler.Client, sampler.CodexClient = server.Client(), server.Client()
 				limits, warnings := sampler.Sample(context.Background())
-				if scenario == "confirmation-age" {
-					if hits.Load() != 0 || len(warnings) != 0 || limits[0].Windows[0].UsedPct != 54 {
-						t.Fatalf("fresh shared cache: hits=%d limits=%#v warnings=%v", hits.Load(), limits, warnings)
-					}
+				// A stamped answer with no window (an account on credits) is
+				// as fresh as one with windows: no request inside the TTL.
+				if scenario == "empty" && (hits.Load() != 0 || len(warnings) != 0 ||
+					len(limits[0].Windows) != 0 || limits[0].Status != noLimitWindows) {
+					t.Fatalf("fresh no-window answer: hits=%d limits=%#v warnings=%v", hits.Load(), limits, warnings)
+				}
+				if scenario == "confirmation-age" &&
+					(hits.Load() != 0 || len(warnings) != 0 || limits[0].Windows[0].UsedPct != 54) {
+					t.Fatalf("fresh shared cache: hits=%d limits=%#v warnings=%v", hits.Load(), limits, warnings)
+				}
+				if scenario != "future" {
 					now = now.Add(6 * time.Second)
 					limits, warnings = sampler.Sample(context.Background())
 				}

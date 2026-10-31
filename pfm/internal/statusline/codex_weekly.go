@@ -23,14 +23,18 @@ type codexWindow struct {
 
 // codexWeeklyRow reads the shared Codex cache into a drawable reading, arming
 // the Codex renderer's detached refresher; claudeQuotaRows sizes and draws it.
+// No cache yet reads "no data"; an answer that reports no weekly window (an
+// account on credits) draws no row, a zero label.
 func codexWeeklyRow(runtime Runtime, now time.Time) quotaRow {
 	path := filepath.Join(runtime.CacheDir, fmt.Sprintf("cc-gpt-usage-%d.json", runtime.UID))
 	armRefresh(runtime, RefreshKindCodex, path, 5*time.Minute)
-	window, age, err := readCodexWeekly(path, now)
+	window, age, answered, err := readCodexWeekly(path, now)
 	row := quotaRow{label: dim + "codex-7d: no data" + reset}
 	if err != nil {
 		fmt.Fprintf(runtime.Warn, "statusline: Codex weekly cache %s: %v\n", path, err)
 		row.label = red + "codex-7d: error" + reset
+	} else if answered && window == nil {
+		row.label = ""
 	} else if window != nil {
 		row.hasData = true
 		row.percent = gaugePercent(window.UsedPercent)
@@ -43,15 +47,17 @@ func codexWeeklyRow(runtime Runtime, now time.Time) quotaRow {
 	return row
 }
 
-// Missing and unreadable are different visible states. File age follows the
-// existing refresher's mtime rule, including caches from before ts was written.
-func readCodexWeekly(path string, now time.Time) (*codexWindow, time.Duration, error) {
+// Missing, unreadable and answered-without-a-weekly-window are different
+// visible states: answered is false only when no cache exists yet. File age
+// follows the existing refresher's mtime rule, including caches from before ts
+// was written.
+func readCodexWeekly(path string, now time.Time) (*codexWindow, time.Duration, bool, error) {
 	body, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, 0, nil
+			return nil, 0, false, nil
 		}
-		return nil, 0, fmt.Errorf("read cache: %w", err)
+		return nil, 0, false, fmt.Errorf("read cache: %w", err)
 	}
 	// An absent or null percent is unknown, not a measured zero. Reuse the
 	// shared window fields while decoding this required value with presence.
@@ -64,7 +70,7 @@ func readCodexWeekly(path string, now time.Time) (*codexWindow, time.Duration, e
 		Secondary *weeklyWindow `json:"secondary"`
 	}
 	if err := json.Unmarshal(body, &usage); err != nil {
-		return nil, 0, fmt.Errorf("decode cache: %w", err)
+		return nil, 0, false, fmt.Errorf("decode cache: %w", err)
 	}
 	var window *codexWindow
 	// Slots are not durations: a weekly-only plan reports its week as primary.
@@ -74,21 +80,21 @@ func readCodexWeekly(path string, now time.Time) (*codexWindow, time.Duration, e
 			continue
 		}
 		if candidate.UsedPercent == nil {
-			return nil, 0, fmt.Errorf("weekly window has no used percent")
+			return nil, 0, false, fmt.Errorf("weekly window has no used percent")
 		}
 		window = &candidate.codexWindow
 		window.UsedPercent = *candidate.UsedPercent
 		if window.UsedPercent < 0 || window.UsedPercent > 100 || window.ResetsAt <= 0 {
-			return nil, 0, fmt.Errorf("invalid weekly window")
+			return nil, 0, false, fmt.Errorf("invalid weekly window")
 		}
 		break
 	}
 	if window == nil {
-		return nil, 0, nil
+		return nil, 0, true, nil
 	}
 	info, err := os.Stat(path)
 	if err != nil {
-		return nil, 0, fmt.Errorf("stat cache: %w", err)
+		return nil, 0, false, fmt.Errorf("stat cache: %w", err)
 	}
-	return window, now.Sub(info.ModTime()), nil
+	return window, now.Sub(info.ModTime()), true, nil
 }

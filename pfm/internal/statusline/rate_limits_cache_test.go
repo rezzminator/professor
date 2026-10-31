@@ -25,8 +25,8 @@ func TestMissingMainWindowsUseUsageCacheWithoutReconfirmingIt(t *testing.T) {
 		{"null block", `,"rate_limits":null`, "fresh", "10%", "78%", "0%"},
 		{"empty block", `,"rate_limits":{}`, "fresh", "10%", "78%", "0%"},
 		{"null windows", `,"rate_limits":{"five_hour":null,"seven_day":null}`, "fresh", "10%", "78%", "0%"},
-		{"partial zero wins", fmt.Sprintf(`,"rate_limits":{"five_hour":{"used_percentage":0,"resets_at":%d}}`, now.Add(2*time.Hour).Unix()), "fresh", "0%", "78%", "0%"},
-		{"explicit empty scope", `,"rate_limits":{"limits":[]}`, "fresh", "10%", "78%", "—"},
+		{"partial zero wins", fmt.Sprintf(`,"rate_limits":{"five_hour":{"used_percentage":0,"resets_at":%d}}`, now.Add(2*time.Hour).Unix()), "fresh", "0%", "", "0%"},
+		{"explicit empty scope", `,"rate_limits":{"limits":[]}`, "fresh", "10%", "78%", ""},
 		{"missing cache", `,"rate_limits":{"seven_day_fable":{"used_percentage":0}}`, "missing", "—", "—", "0%"},
 		{"stale cache", `,"rate_limits":{"seven_day_fable":{"used_percentage":0}}`, "stale", "—", "—", "0%"},
 		{"other seat", `,"rate_limits":{"seven_day_fable":{"used_percentage":0}}`, "other", "—", "—", "0%"},
@@ -183,8 +183,12 @@ func TestMissingMainWindowsUseUsageCacheWithoutReconfirmingIt(t *testing.T) {
 			if tc.state == "backoff-controls" && strings.ContainsAny(warnings.String(), "\x1b\r") {
 				t.Fatalf("unescaped provider controls in diagnostic: %q", warnings.String())
 			}
+			// "" is a window the latest answer left out: hidden, never a marker.
 			for label, value := range map[string]string{"5h": tc.five, "7d": tc.seven, "7d-fable": tc.fable} {
-				if !strings.Contains(plain, label+"-used:"+value) {
+				if value == "" && strings.Contains(plain, label+"-used:") {
+					t.Fatalf("a window the answer left out must be hidden, got %s in %q", label, plain)
+				}
+				if value != "" && !strings.Contains(plain, label+"-used:"+value) {
 					t.Fatalf("missing %s-used:%s in %q", label, value, plain)
 				}
 			}

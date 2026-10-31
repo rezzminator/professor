@@ -126,8 +126,16 @@ func TestClaudeQuotaRowsTinyKeepQuotasDropCodex(t *testing.T) {
 }
 
 func TestClaudeQuotaRowsStates(t *testing.T) {
-	fiveOnly := `{"rate_limits":{"five_hour":{"used_percentage":29,"resets_at":` +
-		strconv.FormatInt(quotaNow.Add(time.Hour).Unix(), 10) + `}}}`
+	// The harness reports Fable alone, so the usage cache decides the plain
+	// windows' state.
+	week := quotaNow.Add(24 * time.Hour).UTC().Format(time.RFC3339)
+	unreported := `{"rate_limits":{"seven_day_fable":{"used_percentage":0,"resets_at":` +
+		strconv.FormatInt(quotaNow.Add(24*time.Hour).Unix(), 10) + `}}}`
+	carriedAll := usagehook.Usage{
+		FiveHour: usagehook.Window{Utilization: floatPtr(80), ResetsAt: week},
+		SevenDay: usagehook.Window{Utilization: floatPtr(80), ResetsAt: week},
+		Limits:   []usagehook.ScopedLimit{fableScopedLimit(80, week, true)},
+	}
 	check := func(t *testing.T, lines []string, wantWeek string) {
 		t.Helper()
 		if len(lines) != 5 {
@@ -146,10 +154,10 @@ func TestClaudeQuotaRowsStates(t *testing.T) {
 		}
 	}
 	t.Run("missing", func(t *testing.T) {
-		lines := quotaLines(t, 120, fiveOnly)
+		lines := quotaLines(t, 120, unreported)
 		check(t, lines, "7d-used:—")
-		if !strings.Contains(ansi.Strip(lines[2]), "7d-fable-used:—") {
-			t.Fatalf("fable half must keep its missing marker: %q", lines[2])
+		if !strings.Contains(ansi.Strip(lines[2]), "5h-used:—") {
+			t.Fatalf("an unanswered 5h half must keep its missing marker: %q", lines[2])
 		}
 		if !strings.Contains(lines[3], dim+"7d-used:—"+reset) {
 			t.Fatalf("missing label must stay dim: %q", lines[3])
@@ -159,11 +167,12 @@ func TestClaudeQuotaRowsStates(t *testing.T) {
 		runtime := fableRuntime(t.TempDir(), 2, quotaNow)
 		weeklyCache(t, runtime, quotaCodexCache, time.Minute)
 		writeFableCacheRecord(t, runtime.CacheDir, runtime.UID, 2, usagehook.CacheRecord{
+			Usage:     carriedAll,
 			Backoff:   &usagehook.CacheBackoff{Message: "rate limited", RetryAfter: quotaNow.Add(time.Hour)},
 			ConfigDir: runtime.ConfigDir,
 			FetchedAt: &quotaNow,
 		})
-		lines := renderQuotaLines(t, runtime, fiveOnly)
+		lines := renderQuotaLines(t, runtime, unreported)
 		check(t, lines, "7d-used:ERR")
 		if !strings.Contains(lines[3], red+"7d-used:ERR"+reset) {
 			t.Fatalf("ERR label must stay red: %q", lines[3])
@@ -174,13 +183,11 @@ func TestClaudeQuotaRowsStates(t *testing.T) {
 		weeklyCache(t, runtime, quotaCodexCache, time.Minute)
 		stale := quotaNow.Add(-2 * time.Hour)
 		writeFableCacheRecord(t, runtime.CacheDir, runtime.UID, 2, usagehook.CacheRecord{
-			Usage: usagehook.Usage{SevenDay: usagehook.Window{
-				Utilization: floatPtr(80), ResetsAt: quotaNow.Add(24 * time.Hour).UTC().Format(time.RFC3339),
-			}},
+			Usage:     carriedAll,
 			ConfigDir: runtime.ConfigDir,
 			FetchedAt: &stale,
 		})
-		lines := renderQuotaLines(t, runtime, fiveOnly)
+		lines := renderQuotaLines(t, runtime, unreported)
 		check(t, lines, "7d-used:—")
 		if strings.Contains(ansi.Strip(strings.Join(lines, "\n")), "80%") {
 			t.Fatalf("a stale cache must not surface its value: %q", lines)

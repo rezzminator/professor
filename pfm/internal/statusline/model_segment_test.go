@@ -75,6 +75,8 @@ func TestModelSegmentCarriesEffort(t *testing.T) {
 		{name: "empty file", payload: withSession, file: sess1, content: "", want: "◆ Opus 4·▰▰▰ high · ERR │ ", colour: cBad, wantWarn: true},
 		{name: "unknown version", payload: withSession, file: sess1, content: strings.Replace(state("auto", `"medium"`), `"version":3`, `"version":4`, 1), want: "◆ Opus 4·▰▰▰ high · ERR │ ", colour: cBad, wantWarn: true},
 		{name: "version 2", payload: withSession, file: sess1, content: strings.Replace(state("auto", `"medium"`), `"version":3`, `"version":2`, 1), want: "◆ Opus 4·▰▰▰ high · ERR │ ", colour: cBad, wantWarn: true},
+		{name: "version 2 the retired plugin's keeper holds: as without the plugin", payload: withSession, file: sess1, content: strings.Replace(line("model", `"high"`, self), `"version":3`, `"version":2`, 1), want: "◆ Opus 4·▰▰▰ high │ ", colour: cEffort, barColour: cWarn},
+		{name: "version 2 left by a gone keeper: as without the plugin", payload: withSession, file: sess1, content: strings.Replace(line("model", `"high"`, dead), `"version":3`, `"version":2`, 1), want: "◆ Opus 4·▰▰▰ high │ ", colour: cEffort, barColour: cWarn},
 		{name: "no keeper", payload: withSession, file: sess1, content: line("auto", `"medium"`, ""), want: "◆ Opus 4·▰▰▰ high · ERR │ ", colour: cBad, wantWarn: true},
 		{name: "keeper not an integer", payload: withSession, file: sess1, content: line("auto", `"medium"`, "1.5"), want: "◆ Opus 4·▰▰▰ high · ERR │ ", colour: cBad, wantWarn: true},
 		{name: "keeper a string", payload: withSession, file: sess1, content: line("auto", `"medium"`, `"`+live+`"`), want: "◆ Opus 4·▰▰▰ high · ERR │ ", colour: cBad, wantWarn: true},

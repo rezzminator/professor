@@ -159,22 +159,8 @@ func parseAutoEffortState(
 	if err != nil {
 		return autoEffortState{err: err}
 	}
-	if record.Version != autoEffortStateVersion {
-		return autoEffortState{err: fmt.Errorf("version %d, want %d", record.Version, autoEffortStateVersion)}
-	}
-	if !autoEffortModes[record.Mode] {
-		return autoEffortState{err: fmt.Errorf("unknown mode %q", record.Mode)}
-	}
-	level := ""
-	if record.Level != nil {
-		level = *record.Level
-		if _, ok := effortWords[level]; !ok {
-			return autoEffortState{err: fmt.Errorf("unknown level %q", level)}
-		}
-	}
-	if level == "" && (record.Mode == "model" || record.Mode == "pin") {
-		return autoEffortState{err: fmt.Errorf("mode %s without a level", record.Mode)}
-	}
+	// The keeper vouches before the line is judged: a line left by a gone or
+	// retired producer (an older version among them) reads as absent.
 	if record.Keeper == nil {
 		return autoEffortState{err: errors.New("no keeper")}
 	}
@@ -191,6 +177,22 @@ func parseAutoEffortState(
 	}
 	if !live {
 		return autoEffortState{}
+	}
+	if record.Version != autoEffortStateVersion {
+		return autoEffortState{err: fmt.Errorf("version %d, want %d", record.Version, autoEffortStateVersion)}
+	}
+	if !autoEffortModes[record.Mode] {
+		return autoEffortState{err: fmt.Errorf("unknown mode %q", record.Mode)}
+	}
+	level := ""
+	if record.Level != nil {
+		level = *record.Level
+		if _, ok := effortWords[level]; !ok {
+			return autoEffortState{err: fmt.Errorf("unknown level %q", level)}
+		}
+	}
+	if level == "" && (record.Mode == "model" || record.Mode == "pin") {
+		return autoEffortState{err: fmt.Errorf("mode %s without a level", record.Mode)}
 	}
 	return autoEffortState{found: true, mode: record.Mode, level: level}
 }

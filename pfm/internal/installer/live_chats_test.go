@@ -2,12 +2,14 @@ package installer
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -105,6 +107,81 @@ func TestLiveChatDoorPlanMatchesApply(t *testing.T) {
 			}
 			if !strings.Contains(applied, "live chats") {
 				t.Fatalf("apply deferred nothing to a live chat:\n%s", applied)
+			}
+		})
+	}
+}
+
+// TestRetiredFolderWait pins the door's answer for a retired plugin folder:
+// only a live chat started before the folder's retirement mark (now, with no
+// mark) holds it; an unreadable start time holds it too, a starting chat
+// holds it, and a folder that is gone holds nothing.
+func TestRetiredFolderWait(t *testing.T) {
+	retired := time.Unix(1_800_000_000, 0)
+	for _, test := range []struct {
+		name               string
+		folder, mark, stat bool
+		born               time.Time
+		starting           bool
+		want               string
+	}{
+		{name: "folder gone", born: retired.Add(-time.Hour), stat: true},
+		{name: "no live chat", folder: true, mark: true},
+		{name: "older chat, no mark", folder: true, stat: true, born: retired.Add(-time.Hour), want: "4242;"},
+		{name: "older chat", folder: true, mark: true, stat: true, born: retired.Add(-time.Hour), want: "4242;"},
+		{name: "younger chat", folder: true, mark: true, stat: true, born: retired.Add(time.Hour)},
+		{
+			name: "start time unreadable", folder: true, mark: true, born: retired.Add(time.Hour),
+			want: "4242 (start time unreadable: ",
+		},
+		{name: "chat starting", folder: true, mark: true, starting: true, want: "is starting a chat"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			account, proc, folder := filepath.Join(
+				root,
+				"account",
+			), filepath.Join(
+				root,
+				"proc",
+			), filepath.Join(
+				root,
+				"old",
+			)
+			if test.folder {
+				writeFixture(t, filepath.Join(folder, "README.md"), "old copy")
+			}
+			if test.mark {
+				writeFixture(t, filepath.Join(folder, RetiredFolderMark), "")
+				if err := os.Chtimes(filepath.Join(folder, RetiredFolderMark), retired, retired); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if !test.born.IsZero() {
+				writeFixture(t, filepath.Join(account, "sessions", "4242.json"), "{}")
+				if err := os.MkdirAll(filepath.Join(proc, "4242"), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if test.stat {
+				writeFixture(t, filepath.Join(proc, "stat"), fmt.Sprintf("btime %d\n", test.born.Unix()))
+				writeFixture(
+					t,
+					filepath.Join(proc, "4242", "stat"),
+					"4242 (claude) S 1"+strings.Repeat(" 0", 17)+" 0 0\n",
+				)
+			}
+			if err := os.MkdirAll(account, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			got, err := RetiredFolderDeferral(PluginChats{ProcRoot: proc, Dirs: []string{account}}, folder, retired)
+			if test.starting {
+				got, err = retiredFolderWait(
+					[]*accountChats{{procRoot: proc, dir: account, starting: true}}, folder, retired,
+				)
+			}
+			if err != nil || (test.want == "") != (got == "") || !strings.Contains(got, test.want) {
+				t.Fatalf("deferral = %q, %v; want one containing %q", got, err, test.want)
 			}
 		})
 	}

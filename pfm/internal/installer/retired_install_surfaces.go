@@ -77,11 +77,12 @@ func (installer *engine) retireStagedHarnessPrompts(uninstall bool) (returnErr e
 				returnErr = errors.Join(returnErr, release())
 			}
 		}()
-		for _, directory := range directories {
-			// A missing account has no chats to read the prompts.
-			if _, err := os.Stat(directory); directory == "" || errors.Is(err, fs.ErrNotExist) {
-				continue
-			}
+		accounts, err := liveChatAccounts(directories)
+		if err != nil {
+			installer.skip("keep " + prompts + ": " + err.Error())
+			return nil
+		}
+		for _, directory := range accounts {
 			wait, release, err := installer.liveChatDeferral(directory)
 			releases = append(releases, release)
 			if err != nil {

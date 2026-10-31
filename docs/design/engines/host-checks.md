@@ -250,7 +250,7 @@ For `account-entry-real`, the fix is selected by entry. Each fix is one shell li
 
 Looks at each `RetiredStoreEntries` entry: per account by ID, a link at `{acct}/{entry}` resolving to `{store}/{entry}` (skipped for an account `account-is-store` reports), then `{store}/{entry}`. A real `{acct}/{entry}` is the account's own file and gives no row.
 
-Problem: `{entry} links into the store; it is a per-account file now` for a link, `{entry} is a per-account file now; the store copy is retired` for the store copy.
+Problem: `{entry} links into the store; it is a per-account file now` for a link, `{entry} is a per-account file now; the store copy is retired` for the store copy. While an account has a live chat, which writes the entry, `pfm install` holds the migration back by design, through the same door it asks (`installer.LiveChatDeferral`, read here without the account guard): that account's link row and the store copy's row end `; deferred: account {dir} has live chats; close them and rerun pfm install --yes` (`; deferred: live chats in {dir} unreadable: {cause}` when the chats cannot be read).
 
 Fix: `run pfm install; it removes the link, and Claude writes this account's own file` for a link, `run pfm install; it archives the copy under {home}/.local/state/pfm/retired-store-entries` for the store copy. Never a BLOCK: the install a block would refuse is the step that migrates these.
 

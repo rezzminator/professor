@@ -12,9 +12,9 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
-	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // A plugin of ours installed as {name}@{name} (its own GitHub marketplace) or
@@ -100,15 +100,20 @@ func (installer *engine) removeFormerProfessorCopy(home, former, targetID string
 	return installer.change("remove "+copyDir+reason, func() error { return os.RemoveAll(copyDir) })
 }
 
-// pluginChatsLive asks the live-chat deferral door of every account whose chats
-// may run a plugin copy (the roster and dir, the plugin step's own) and returns
-// the first reason to wait, "" when none, with the release of every guard it
-// took: those guards are held until the copies are gone.
-func (installer *engine) pluginChatsLive(dir string) (string, func() error, error) {
+// pluginChats names every account whose chats may run a plugin copy: the
+// plugin step's own dir and the roster's.
+func (installer *engine) pluginChats(dir string) PluginChats {
 	dirs := append([]string{dir}, installer.options.RosterConfigDirs...)
 	for _, account := range installer.options.ClaudeAccounts {
 		dirs = append(dirs, account.ConfigDir)
 	}
+	return PluginChats{ProcRoot: installer.options.ProcRoot, Dirs: dirs}
+}
+
+// openPluginChats opens, guarded, the live-chat door of every account of
+// pluginChats, with the release of every guard it took: those guards are held
+// until the retired folders are gone, so no chat starts mid-removal.
+func (installer *engine) openPluginChats(dir string) ([]*accountChats, func() error, error) {
 	var releases []func() error
 	release := func() error {
 		var errs []error
@@ -117,29 +122,36 @@ func (installer *engine) pluginChatsLive(dir string) (string, func() error, erro
 		}
 		return errors.Join(errs...)
 	}
-	wait := ""
-	seen := map[string]bool{}
-	for _, dir := range dirs {
-		physical := paths.PhysicalPath(dir)
-		if dir == "" || seen[physical] {
-			continue
-		}
-		seen[physical] = true
-		if _, err := os.Stat(dir); errors.Is(err, fs.ErrNotExist) {
-			continue
-		} else if err != nil {
-			return "", release, fmt.Errorf("inspect account %s: %w", dir, err)
-		}
-		reason, free, err := installer.liveChatDeferral(dir)
-		releases = append(releases, free)
-		if err != nil {
-			return "", release, fmt.Errorf("read live chats in %s: %w", dir, err)
-		}
-		if wait == "" {
-			wait = reason
-		}
+	dirs, err := installer.pluginChats(dir).accountDirs()
+	if err != nil {
+		return nil, release, err
 	}
-	return wait, release, nil
+	var accounts []*accountChats
+	for _, dir := range dirs {
+		chats, err := installer.openAccountChats(dir, true)
+		releases = append(releases, chats.release)
+		if err != nil {
+			return nil, release, fmt.Errorf("read live chats in %s: %w", dir, err)
+		}
+		accounts = append(accounts, chats)
+	}
+	return accounts, release, nil
+}
+
+// markRetired writes folder's RetiredFolderMark when it has none, so a later
+// run holds the folder only for the chats started before this one.
+func (installer *engine) markRetired(folder string) error {
+	mark := filepath.Join(folder, RetiredFolderMark)
+	if _, err := os.Lstat(mark); err == nil || !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	now := installer.now()
+	return installer.change("mark "+folder+" retired: a chat started after this never runs from it", func() error {
+		if err := os.WriteFile(mark, nil, 0o600); err != nil {
+			return err
+		}
+		return os.Chtimes(mark, now, now)
+	})
 }
 
 // legacyDevMarketplace is the pfm-owned directory a plugin's -dev copy
@@ -186,8 +198,9 @@ func legacyDevDirOwned(home, name string) (bool, error) {
 // doctor's legacy gap naming it until a later run moves it; the steps after it
 // still run where they are safe: a marketplace is removed only once nothing is
 // installed from it, and the -dev directory only once no marketplace points
-// at it. A -dev directory or former name's copy a live chat may run its hooks
-// from stays, through the live-chat deferral door, until a run with none.
+// at it. A -dev directory or former name's copy a live chat started before its
+// retirement may run its hooks from stays, through the live-chat door
+// (retiredFolderWait), until a run where no such chat lives.
 func (installer *engine) removeLegacyClaudePluginCopies(
 	ctx context.Context,
 	run *claudePluginRun,
@@ -222,22 +235,35 @@ func (installer *engine) removeLegacyClaudePluginCopies(
 		})
 	}
 	keep := func(err error) { kept = append(kept, fmt.Errorf("%w — %s to retry", err, ClaudePluginRepair)) }
-	// The door is asked once, before the first copy a chat may run from goes.
-	asked, waitReason, waitErr := false, "", error(nil)
+	// The doors open once, before the first folder a chat may run from goes.
+	asked, openErr := false, error(nil)
+	var accounts []*accountChats
 	release := func() error { return nil }
 	defer func() { returnErr = errors.Join(returnErr, release()) }()
 	wait := func(path string) bool {
 		if !asked {
 			asked = true
-			waitReason, release, waitErr = installer.pluginChatsLive(run.dir)
-			if waitErr != nil {
-				keep(waitErr)
+			accounts, release, openErr = installer.openPluginChats(run.dir)
+			if openErr != nil {
+				keep(openErr)
 			}
 		}
-		if waitReason != "" {
-			installer.skip("keep " + path + ": " + waitReason + " — pfm doctor names the fix")
+		if openErr != nil {
+			return true
 		}
-		return waitReason != "" || waitErr != nil
+		reason, err := retiredFolderWait(accounts, path, installer.now())
+		if err != nil {
+			keep(err)
+			return true
+		}
+		if reason == "" {
+			return false
+		}
+		installer.skip("keep " + path + ": " + reason + " — pfm doctor names the fix")
+		if err := installer.markRetired(path); err != nil {
+			keep(fmt.Errorf("mark %s retired: %w", path, err))
+		}
+		return true
 	}
 	gone := map[string]bool{}
 	for _, id := range target.LegacyIDs() {
@@ -409,33 +435,58 @@ func sweepLegacyIDs(
 // settings.json, recorded in plugins/installed_plugins.json, or the
 // marketplace of one, registered in plugins/known_marketplaces.json and owned
 // by us; and the pfm-owned -dev directory under home. One gap per plugin
-// names them all. A file that cannot be read returns its error, never an
-// answer.
-func ClaudePluginLegacyGaps(store, home string, targets []ClaudePluginTarget) ([]ClaudePluginGap, error) {
+// names them all. A retired folder install would remove but holds back for a
+// live chat of chats (retiredFolderWait, the door install asks) is named
+// apart, one deferred gap per plugin ending "deferred: {reason}": install's
+// removal waits by design. A file, or a live chat, that cannot be read
+// returns its error, never an answer.
+func ClaudePluginLegacyGaps(
+	store, home string,
+	targets []ClaudePluginTarget,
+	chats PluginChats,
+) (gaps, deferredGaps []ClaudePluginGap, err error) {
 	settings := filepath.Join(store, "settings.json")
 	document, err := readClaudeSettingsDocument(settings)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	records, err := readClaudePluginInstalls(store)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	recordPath := filepath.Join(store, "plugins", "installed_plugins.json")
 	knownPath, known, err := readKnownMarketplaces(store)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	enabled, _ := document["enabledPlugins"].(map[string]any)
 	configs, _ := document["pluginConfigs"].(map[string]any)
-	var gaps []ClaudePluginGap
 	var failures []error
+	now := clock.Real.Now()
 	for index := range targets {
 		target := &targets[index]
 		if !target.Own {
 			continue
 		}
-		var left []string
+		var left, deferred []string
+		reason := ""
+		// held reports whether install, free to remove folder, holds it back for a
+		// live chat; an unreadable answer holds it too, as install does, its error
+		// the reason and a failure: doctor failed to look, which is no deferral.
+		held := func(folder string) bool {
+			wait, err := RetiredFolderDeferral(chats, folder, now)
+			if err != nil {
+				failures = append(
+					failures,
+					fmt.Errorf("plugin %s: live chats that may run %s: %w", target.ID, folder, err),
+				)
+				wait = "live chats unreadable, so " + folder + " stays: " + err.Error()
+			}
+			if reason == "" {
+				reason = wait
+			}
+			return wait != ""
+		}
 		for _, id := range target.LegacyIDs() {
 			if _, ok := enabled[id]; ok {
 				left = append(left, id+" in enabledPlugins of "+settings)
@@ -456,8 +507,19 @@ func ClaudePluginLegacyGaps(store, home string, targets []ClaudePluginTarget) ([
 			if err != nil {
 				failures = append(failures, fmt.Errorf("plugin %s: %w", target.ID, err))
 			}
-			if owned {
-				left = append(left, legacyDevMarketplace(home, name))
+			if !owned {
+				continue
+			}
+			devDir := legacyDevMarketplace(home, name)
+			pointed := false
+			for _, entry := range known {
+				pointed = pointed ||
+					entry.Source.Kind == claudeMarketplaceDirectory && filepath.Clean(entry.Source.Path) == devDir
+			}
+			if !pointed && held(devDir) {
+				deferred = append(deferred, devDir)
+			} else {
+				left = append(left, devDir)
 			}
 		}
 		for _, former := range target.FormerNames() {
@@ -465,15 +527,28 @@ func ClaudePluginLegacyGaps(store, home string, targets []ClaudePluginTarget) ([
 			if err != nil {
 				failures = append(failures, fmt.Errorf("plugin %s: %w", target.ID, err))
 			}
-			left = append(left, copies...)
+			copyDir := filepath.Join(professorDevMarketplace(home), "plugins", former)
+			// Install removes the entry and the copy together, once the former id has no install record.
+			if len(records[former+"@"+pfmconfig.ProfessorMarketplace]) == 0 &&
+				slices.Contains(copies, copyDir) && held(copyDir) {
+				deferred = append(deferred, copies...)
+			} else {
+				left = append(left, copies...)
+			}
 		}
+		problem := "plugin " + target.Name + " still has legacy copies of " + target.ID + ": "
 		if len(left) != 0 {
 			gaps = append(gaps, ClaudePluginGap{
-				Problem: "plugin " + target.Name + " still has legacy copies of " + target.ID + ": " +
-					strings.Join(left, "; "),
-				Fix: ClaudePluginRepair + " (it moves them to " + target.ID + " once that is installed)",
+				Problem: problem + strings.Join(left, "; "),
+				Fix:     ClaudePluginRepair + " (it moves them to " + target.ID + " once that is installed)",
+			})
+		}
+		if len(deferred) != 0 {
+			deferredGaps = append(deferredGaps, ClaudePluginGap{
+				Problem: problem + strings.Join(deferred, "; ") + "; deferred: " + reason,
+				Fix:     "once those chats close, " + ClaudePluginRepair + "; it removes them",
 			})
 		}
 	}
-	return gaps, errors.Join(failures...)
+	return gaps, deferredGaps, errors.Join(failures...)
 }

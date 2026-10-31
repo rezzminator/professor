@@ -245,3 +245,39 @@ func TestStagedRetirementChecksEachAccount(t *testing.T) {
 		})
 	}
 }
+
+// TestStagedRetirementAsksAnAliasedAccountOnce pins the staged prompts' entry
+// into liveChatAccounts: a roster naming one account by two paths takes its
+// guard once, so the second path never reads as a starting chat.
+func TestStagedRetirementAsksAnAliasedAccountOnce(t *testing.T) {
+	home := t.TempDir()
+	prompts := paths.LegacyHarnessPromptsDir(home)
+	writeFixture(t, filepath.Join(prompts, "claude.md"), "old prompt\n")
+	account := filepath.Join(home, "acct1")
+	if err := os.MkdirAll(account, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(home, "acct1-alias")
+	if err := os.Symlink(account, alias); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	installer := &engine{
+		options: Options{
+			Home:             home,
+			ConfigDir:        account,
+			RosterConfigDirs: []string{account, alias},
+			ProcRoot:         emptyProcRoot(t, home),
+			Stdout:           &output,
+		},
+		apply:       true,
+		managedRoot: managedRootForHome(home),
+	}
+	if err := installer.retireStagedManagedSurfaces(false); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(output.String(), "keep "+prompts) {
+		t.Fatalf("output=%q: an aliased account held the prompts", output.String())
+	}
+	requireNoPath(t, filepath.Join(prompts, "claude.md"), "staged prompt remains")
+}

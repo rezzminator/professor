@@ -69,7 +69,8 @@ func printEngineSyncHookDoctor(
 // ensures: each {name}@professor id, from its checkout copy on an -alpha build
 // with checkouts and from the professor marketplace otherwise, each -alpha
 // plugin with no checkout a gap, and each legacy copy of one a gap
-// (installer.ClaudePluginLegacyGaps). An -alpha build also checks
+// (installer.ClaudePluginLegacyGaps), a warning while a live chat of chats
+// holds its removal back. An -alpha build also checks
 // every plugin the source clone's marketplace lists that claude.plugins does
 // not, installed with no copy enabled; a marketplace list it cannot read is a
 // failure. On an -alpha build each gap of a plugin of ours claude.plugins
@@ -94,6 +95,7 @@ func printClaudePluginsDoctor(
 	store string,
 	env paths.Env,
 	build installer.ClaudePluginBuild,
+	chats installer.PluginChats,
 	tally *doctorTally,
 ) {
 	build, listErr := build.WithMarketplacePlugins()
@@ -209,7 +211,7 @@ func printClaudePluginsDoctor(
 		fmt.Fprintf(stdout, "doctor: claude_plugins could not read %s: %v\n", knownMarketplaces, marketplaceErr)
 	}
 	gaps = append(gaps, marketplaceGaps...)
-	legacyGaps, legacyErr := installer.ClaudePluginLegacyGaps(store, build.Home, targets)
+	legacyGaps, deferredGaps, legacyErr := installer.ClaudePluginLegacyGaps(store, build.Home, targets, chats)
 	if legacyErr != nil && (marketplaceErr == nil || !strings.Contains(legacyErr.Error(), knownMarketplaces)) {
 		tally.fail()
 		fmt.Fprintf(stdout, "doctor: claude_plugins could not look for legacy plugin copies: %v\n", legacyErr)
@@ -221,12 +223,14 @@ func printClaudePluginsDoctor(
 		}
 	}
 	gaps = append(gaps, cannotInstall...)
-	if len(gaps) == 0 && listErr == nil && recordErr == nil && marketplaceErr == nil && cacheErr == nil &&
-		legacyErr == nil && renamed == 0 {
+	if len(gaps)+len(deferredGaps) == 0 && listErr == nil && recordErr == nil && marketplaceErr == nil &&
+		cacheErr == nil && legacyErr == nil && renamed == 0 {
 		fmt.Fprintln(stdout, "doctor: claude_plugins ok")
 		return
 	}
 	printClaudePluginGaps(stdout, gaps, tally, failing)
+	// Install holds these back by design while a chat may run from them: a warning, never a failure.
+	printClaudePluginGaps(stdout, deferredGaps, tally, func(installer.ClaudePluginGap) bool { return false })
 }
 
 // undecidedCopyFix is the repair of a bare name whose source clone or checkout could not be read.

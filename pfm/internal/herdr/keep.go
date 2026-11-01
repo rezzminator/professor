@@ -302,14 +302,20 @@ func (keep *Keep) list(ctx context.Context, socket string) ([]KeepHolder, map[st
 	}
 	bounded, cancel := context.WithTimeout(ctx, keepListBound)
 	defer cancel()
-	argv := []string{deps.Executable(KeepBinary), "list", "--json"}
-	result, err := runner.Run(bounded, argv, deps.RunOptions{
-		Env:          append(without(os.Environ(), []string{EnvKeepInner, EnvSocket}), EnvSocket+"="+socket),
-		WaitDelay:    2 * time.Second,
-		ProcessGroup: true,
-	})
 	listed := keepList{at: now}
+	keepPath, resolveErr := deps.Resolve(KeepBinary)
+	var result deps.RunResult
+	var err error
+	if resolveErr == nil {
+		result, err = runner.Run(bounded, []string{keepPath, "list", "--json"}, deps.RunOptions{
+			Env:          append(without(os.Environ(), []string{EnvKeepInner, EnvSocket}), EnvSocket+"="+socket),
+			WaitDelay:    2 * time.Second,
+			ProcessGroup: true,
+		})
+	}
 	switch {
+	case resolveErr != nil:
+		listed.err = fmt.Errorf("resolve %s: %w", KeepBinary, resolveErr)
 	case err != nil:
 		listed.err = fmt.Errorf("run %s list --json against %s: %w", KeepBinary, socket, err)
 	case result.ExitCode != 0:

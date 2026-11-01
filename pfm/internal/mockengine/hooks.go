@@ -330,9 +330,13 @@ func runHookCommand(
 	environ []string,
 	timeout time.Duration,
 ) (hookAnswer, error) {
+	shell, err := deps.Resolve("sh")
+	if err != nil {
+		return hookAnswer{}, fmt.Errorf("sh not found: %w", err)
+	}
 	bounded, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	cmd := exec.CommandContext(bounded, deps.Executable("sh"), "-c", command)
+	cmd := exec.CommandContext(bounded, shell, "-c", command)
 	cmd.Dir = cwd
 	cmd.Env = environ
 	cmd.Stdin = bytes.NewReader(payload)
@@ -340,7 +344,7 @@ func runHookCommand(
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	cmd.WaitDelay = hookWaitDelay
-	err := cmd.Run()
+	err = cmd.Run()
 	answer := hookAnswer{stderr: strings.TrimSpace(stderr.String())}
 	var exitErr *exec.ExitError
 	switch {
@@ -394,9 +398,13 @@ func invokeStatusLine(ctx context.Context, command string, input any, cwd string
 	if err != nil {
 		return "", fmt.Errorf("encode statusline input: %w", err)
 	}
+	shell, err := deps.Resolve("sh")
+	if err != nil {
+		return "", fmt.Errorf("statusline: sh not found: %w", err)
+	}
 	bounded, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(bounded, deps.Executable("sh"), "-c", command)
+	cmd := exec.CommandContext(bounded, shell, "-c", command)
 	cmd.Dir = cwd
 	cmd.Env = environ
 	cmd.Stdin = bytes.NewReader(encoded)

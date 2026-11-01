@@ -12,6 +12,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 type indicatorKernel struct {
@@ -49,7 +50,7 @@ func (k *indicatorKernel) Environ(pid int) (map[string]string, error) {
 
 func TestConvergeHerdrIndicators(t *testing.T) {
 	for _, name := range []string{
-		"stale", "current", "foreign", "absent", "duplicate socket", "two sockets",
+		"stale", "current", "foreign", "another install", "absent", "duplicate socket", "two sockets",
 		"list error", "unreadable", "image error", "environment error", "missing socket", "zero start",
 		"reexec", "recycled pid", "start error", "stop error", "extra args", "gone image", "missing binary",
 		"exits before signal",
@@ -70,7 +71,10 @@ func TestConvergeHerdrIndicators(t *testing.T) {
 				fakeKernel: newKernel(proc),
 				images:     map[int]gather.FileID{40: stale},
 				envs: map[int]map[string]string{
-					40: {"HERDR_SOCKET_PATH": "/fixture/one.sock", "HOME": "/fixture/home"},
+					40: {
+						"HERDR_SOCKET_PATH": "/fixture/one.sock", "HOME": "/fixture/home",
+						paths.EnvInstallMark: testInstallMark,
+					},
 				},
 			}
 			wantStarts, wantStops, wantErr := 1, 1, ""
@@ -81,6 +85,9 @@ func TestConvergeHerdrIndicators(t *testing.T) {
 			case "foreign":
 				k.foreign[40] = true
 				wantStarts, wantStops = 0, 0
+			case "another install":
+				k.envs[40][paths.EnvInstallMark] = "another-install-mark"
+				wantStarts, wantStops = 0, 0
 			case "absent":
 				delete(k.procs, 40)
 				wantStarts, wantStops = 0, 0
@@ -89,7 +96,10 @@ func TestConvergeHerdrIndicators(t *testing.T) {
 				second.PID = 41
 				k.procs[41] = second
 				k.images[41] = stale
-				k.envs[41] = map[string]string{"HERDR_SOCKET_PATH": "/fixture/one.sock"}
+				k.envs[41] = map[string]string{
+					"HERDR_SOCKET_PATH":  "/fixture/one.sock",
+					paths.EnvInstallMark: testInstallMark,
+				}
 				wantStops = 2
 				if name == "two sockets" {
 					k.envs[41]["HERDR_SOCKET_PATH"] = "/fixture/two.sock"
@@ -145,7 +155,10 @@ func TestConvergeHerdrIndicators(t *testing.T) {
 				startErr = errors.New("spawn refused")
 			}
 			runner.ScriptStart([]string{binary}, 99, nil, startErr)
-			dependencies := Deps{Procs: k, Signal: k.signal, Clock: newTickClock(), Runner: runner, Executable: binary}
+			dependencies := Deps{
+				Procs: k, Kernel: k, Probe: k.probe, Clock: newTickClock(), Runner: runner, Executable: binary,
+				Install: gather.Install{Mark: testInstallMark, Binary: binary},
+			}
 			detail, replaced, err := ConvergeHerdrIndicators(context.Background(), dependencies)
 			if wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), wantErr) {
@@ -170,8 +183,14 @@ func TestConvergeHerdrIndicators(t *testing.T) {
 					start.Opts.Stdin != nil || start.Opts.Stdout != nil || start.Opts.Stderr != nil {
 					t.Fatalf("start = %+v", start)
 				}
-				if len(start.Opts.Env) == 0 {
-					t.Fatal("missing saved environment")
+				if name == "stale" {
+					want := []string{
+						"HERDR_SOCKET_PATH=/fixture/one.sock", "HOME=/fixture/home",
+						paths.EnvInstallMark + "=" + testInstallMark,
+					}
+					if !slices.Equal(start.Opts.Env, want) {
+						t.Fatalf("replacement environment = %q, want %q", start.Opts.Env, want)
+					}
 				}
 			}
 		})

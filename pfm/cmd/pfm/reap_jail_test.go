@@ -27,7 +27,7 @@ import (
 // where the failure surfaces as an unrelated-looking tmux error.
 func reapJail(t *testing.T) string {
 	t.Helper()
-	root, err := os.MkdirTemp("", "rp")
+	root, err := os.MkdirTemp(paths.TempRoot(), "rp")
 	if err != nil {
 		t.Fatalf("create jail root: %v", err)
 	}
@@ -48,10 +48,9 @@ func reapJail(t *testing.T) string {
 		}
 	}
 
-	// TMUX_TMPDIR and PFM_TMUX_DIR must agree: the probe addresses a
-	// socket by -L (which resolves through TMUX_TMPDIR) and the kill by -S
-	// (which joins PFM_TMUX_DIR), and a jail where those two disagree
-	// tests nothing at all.
+	// The probe and the kill both address a socket by -S under
+	// PFM_TMUX_DIR; TMUX_TMPDIR is pinned to the jail so no tmux call
+	// reaches the operator's default socket directory.
 	t.Setenv("TMUX_TMPDIR", filepath.Join(root, "t"))
 	t.Setenv("PFM_TMUX_DIR", socketDir)
 	t.Setenv("PFM_SID_DIR", filepath.Join(root, "sid"))
@@ -64,7 +63,7 @@ func reapJail(t *testing.T) string {
 	// The reaper reads the REAL /proc here on purpose: the jail's panes are
 	// real processes, and the non-chat guard is only proved by a real process
 	// tree. Reading /proc mutates nothing.
-	t.Setenv("PFM_PROC_ROOT", "/proc")
+	t.Setenv(paths.EnvProcRoot, paths.SystemProcRoot())
 	// A stub `claude agents --json` keeps the busy probe answering. Without an
 	// answer the sweep fails closed and would kill nothing — which would make
 	// this fixture pass for the wrong reason.

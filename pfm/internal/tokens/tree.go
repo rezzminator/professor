@@ -10,9 +10,11 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
@@ -374,7 +376,11 @@ func writtenBytes(name string, raw json.RawMessage, scope string) int64 {
 	return size
 }
 
-// underScope reports path inside scope and outside /tmp and /private/tmp; a
+// tempRoots is every spelling of the machine's temp roots, resolved once per
+// run: a write under one is scratch, never work in the scope.
+var tempRoots = sync.OnceValue(paths.TempRoots)
+
+// underScope reports path inside scope and outside every temp root; a
 // relative path reads against scope.
 func underScope(path, scope string) bool {
 	if path == "" {
@@ -384,7 +390,7 @@ func underScope(path, scope string) bool {
 		path = filepath.Join(scope, path)
 	}
 	path = filepath.Clean(path)
-	for _, tmp := range []string{"/tmp", "/private/tmp"} {
+	for _, tmp := range tempRoots() {
 		if path == tmp || strings.HasPrefix(path, tmp+"/") {
 			return false
 		}

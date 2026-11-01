@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -847,7 +848,10 @@ func addSnapshotFile(path, home string, snapshot surfaceSnapshot) error {
 	return nil
 }
 
+// normalizeHome replaces what differs between two homes by design: the home's
+// path and the install mark digested from it (paths.InstallMark).
 func normalizeHome(value, home string) string {
+	value = strings.ReplaceAll(value, paths.InstallMark(home), "<E2E_INSTALL_MARK>")
 	return strings.ReplaceAll(value, home, "<E2E_HOME>")
 }
 

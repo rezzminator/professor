@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // `pfm chat reload --sock ox-…` used to print "reload scheduled in place" and
@@ -26,7 +27,7 @@ func TestChatReloadRefusesAnOpenCodeSocketUpFront(t *testing.T) {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
-	dir := filepath.Join(os.TempDir(), "tmux-"+strconv.Itoa(os.Getuid()))
+	dir := paths.TmuxDirUnder(paths.TempRoot())
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +80,7 @@ func TestChatReloadRefusesAnUnknownAccountUpFront(t *testing.T) {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
-	dir := filepath.Join(os.TempDir(), "tmux-"+strconv.Itoa(os.Getuid()))
+	dir := paths.TmuxDirUnder(paths.TempRoot())
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}

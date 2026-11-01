@@ -16,9 +16,9 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
@@ -76,8 +76,13 @@ func TmuxServerGone(err error) bool {
 }
 
 // ServerGoneText is TmuxServerGone over the stderr text a caller already holds.
+// "server exited unexpectedly" is tmux's client losing its connection with no
+// exit message: a live server always ends a command client with one, so the
+// server behind the socket has ended (kill-server's race leaves exactly this,
+// and the next probe answers "no server running").
 func ServerGoneText(stderr string) bool {
 	return strings.Contains(stderr, "no server running") ||
+		strings.Contains(stderr, "server exited unexpectedly") ||
 		strings.Contains(stderr, "error connecting to") &&
 			(strings.Contains(stderr, "No such file or directory") || strings.Contains(stderr, "Connection refused"))
 }
@@ -137,23 +142,31 @@ func withStderr(err error) error {
 	return err
 }
 
-// TmuxProbe invokes a tmux binary inside a caller-supplied TMUX_TMPDIR.
+// TmuxProbe invokes a tmux binary on the sockets of one socket directory:
+// TmuxDir (paths.Values.TmuxDir, PFM_TMUX_DIR honoured), else the directory
+// tmux derives from TmuxTmpDir.
 type TmuxProbe struct {
 	Binary     string
+	TmuxDir    string
 	TmuxTmpDir string
 }
 
-// probeCommand is the one tmux invocation this probe makes: -L addressed
-// inside the caller's TMUX_TMPDIR (never internal/tmux.Command's -S socket
-// path), TMUX cleared, and completed through the tmux component's record
-// (pfmtmux.Observe) so each call writes its subcommand, target and exit once.
-func (tmux TmuxProbe) probeCommand(ctx context.Context, socket string, arguments ...string) *pfmtmux.Cmd {
-	binary := tmux.Binary
-	if binary == "" {
-		binary = deps.Executable("tmux")
+// socketPath is the full path of the socket named socket in the probe's
+// socket directory: the path the tmux door (internal/tmux.Command) takes.
+func (tmux TmuxProbe) socketPath(socket string) string {
+	directory := tmux.TmuxDir
+	if directory == "" {
+		directory = paths.TmuxDirUnder(tmux.TmuxTmpDir)
 	}
-	command := exec.CommandContext(ctx, binary, append([]string{"-L", socket}, arguments...)...)
-	command.Env = append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+tmux.TmuxTmpDir)
+	return filepath.Join(directory, socket)
+}
+
+// probeCommand is the one tmux invocation this probe makes: built by the tmux
+// door (internal/tmux.Command — -S socket path, TMUX cleared) and completed
+// through the tmux component's record (pfmtmux.Observe) so each call writes
+// its subcommand, target and exit once.
+func (tmux TmuxProbe) probeCommand(ctx context.Context, socket string, arguments ...string) *pfmtmux.Cmd {
+	command := pfmtmux.Command(ctx, tmux.Binary, tmux.socketPath(socket), arguments...)
 	// A tmux client hands its stdout to the server it talks to, so a client
 	// killed for a stopped server leaves that server holding the pipe: Wait
 	// would block on it forever. Past the delay the pipes are closed and the
@@ -725,10 +738,10 @@ func probeTmux(
 				result.ProbeWarnings = append(
 					result.ProbeWarnings,
 					fmt.Sprintf(
-						"%s: could not read this tmux server: %v — check it by hand: tmux -L %s list-sessions",
+						"%s: could not read this tmux server: %v — check it by hand: tmux -S %s list-sessions",
 						socket.name,
 						err,
-						socket.name,
+						socket.path,
 					),
 				)
 				mutex.Unlock()
@@ -773,7 +786,7 @@ func IsChatSocketName(name string) bool {
 	// Real tmux integration tests are forbidden from minting a live-looking
 	// cc-/cx- socket. Their explicit jail environment opts probe-* sockets into
 	// discovery so the production probe path is still exercised end to end.
-	if os.Getenv("PFM_TEST_PROBE_SOCKETS") == "1" &&
+	if (paths.OSEnv{}).Get("PFM_TEST_PROBE_SOCKETS") == "1" &&
 		strings.HasPrefix(name, "probe-") {
 		return true
 	}

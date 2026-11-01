@@ -143,11 +143,7 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 	// printDependencies is the required dependency preflight: it prints the
 	// table and returns its failure count; every probe is read-only.
 	printDependencies := func(w io.Writer, runtime commandRuntime) int {
-		entries := deps.Registry(deps.Options{
-			Home:         runtime.Paths.Home,
-			ClaudeBinary: runtime.Config.Claude.Binary,
-			CodexBinary:  runtime.Config.Codex.Binary,
-		})
+		entries := deps.Registry(runtime.DepsOptions())
 		probe := deps.ProbeOptions{
 			SkipEngines: map[pfmengine.ID]bool{pfmengine.Codex: skipCodex},
 			Runner:      obs.Runner(deps.RealRunner{}),

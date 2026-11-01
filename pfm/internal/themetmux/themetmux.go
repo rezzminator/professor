@@ -40,7 +40,7 @@ var _ themesync.TmuxServers = Servers{}
 // tmuxDir/{socket}.
 func AtDir(tmuxDir string) Servers {
 	return Servers{
-		Probe:   gather.TmuxProbe{TmuxTmpDir: filepath.Dir(tmuxDir)},
+		Probe:   gather.TmuxProbe{TmuxDir: tmuxDir},
 		TmuxDir: tmuxDir,
 	}
 }

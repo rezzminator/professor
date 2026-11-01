@@ -59,6 +59,9 @@ type LimitsSampler struct {
 	Fetch         func(context.Context, LimitAccount) (usagehook.Usage, error)
 	FetchCodex    func(context.Context, LimitAccount) (codexUsage, error)
 	Ack           func(context.Context, LimitAccount) error
+	// Offline is paths.EnvUsageOffline set, read by the production builder
+	// (paths.UsageOffline) and handed to usagehook.Options.Offline.
+	Offline bool
 
 	mu    sync.Mutex
 	cache map[string]cachedLimits
@@ -210,7 +213,7 @@ func (sampler *LimitsSampler) fetchClaudeCached(
 		Now: sampler.now, Env: sampler.Env, ConfigDir: account.ConfigDir,
 		CacheDir: usagehook.DefaultCacheDir(), TTL: sampler.ttl(),
 		Client: sampler.client(), Endpoint: sampler.Endpoint, Version: sampler.Version,
-		ClaudeBinary: account.ClaudeBinary,
+		ClaudeBinary: account.ClaudeBinary, Offline: sampler.Offline,
 	}
 	if bypassCredentialBackoff {
 		options.BypassBackoff = needsCredentialRefresh
@@ -895,7 +898,7 @@ func readCodexCacheRecord(path string) (codexCacheRecord, error) {
 }
 
 func writeCodexCacheRecord(path string, record codexCacheRecord) error {
-	if err := usagehook.EnsurePrivateDir(filepath.Dir(path)); err != nil {
+	if err := paths.EnsurePrivateDir("codex usage cache directory", filepath.Dir(path)); err != nil {
 		return err
 	}
 	body, err := json.Marshal(record)

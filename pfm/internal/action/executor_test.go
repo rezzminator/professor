@@ -261,11 +261,11 @@ func (processes *fakeProcesses) Processes(
 	return append([]Process(nil), processes.processes...), nil
 }
 
-func (processes *fakeProcesses) Terminate(pid int) error {
+func (processes *fakeProcesses) Terminate(target gather.Target) (gather.Outcome, error) {
 	processes.mutex.Lock()
 	defer processes.mutex.Unlock()
-	processes.terminated = append(processes.terminated, pid)
-	return nil
+	processes.terminated = append(processes.terminated, target.PID)
+	return gather.OutcomeSent, nil
 }
 
 type fixedGate bool

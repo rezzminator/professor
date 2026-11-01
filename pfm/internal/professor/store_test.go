@@ -145,6 +145,28 @@ func TestAdoptGitFiltersInheritedRepository(t *testing.T) {
 	}
 }
 
+// TestBlueprintGitNamesAMissingGit: with no git on PATH every blueprint Git
+// read reports the missing binary and runs nothing.
+func TestBlueprintGitNamesAMissingGit(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	notFound := `git not found: exec: "git": executable file not found in $PATH`
+	fake := &deps.FakeRunner{}
+	wantSHA := "UNREADABLE blueprint git state " + root + ": " + notFound
+	if _, err := storeSHAWithRunner(root, fake); err == nil || err.Error() != wantSHA {
+		t.Fatalf("storeSHAWithRunner error = %v, want %q", err, wantSHA)
+	}
+	if _, _, err := adoptGit(fake, root, "rev-parse", "HEAD"); err == nil || err.Error() != "adopt Git: "+notFound {
+		t.Fatalf("adoptGit error = %v, want %q", err, "adopt Git: "+notFound)
+	}
+	if calls := fake.Calls(); len(calls) != 0 {
+		t.Fatalf("Git calls = %#v, want none without a git binary", calls)
+	}
+}
+
 func environmentValue(environment []string, name string) string {
 	for _, entry := range environment {
 		if key, value, found := strings.Cut(entry, "="); found && key == name {

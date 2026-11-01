@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/servicemanager"
 )
 
 const (
@@ -90,10 +91,11 @@ func probeSystemdUnit(ctx context.Context, runner deps.Runner, unit string) serv
 	state := serviceManagerUnitState{Unit: unit}
 	probeCtx, cancel := context.WithTimeout(ctx, deps.ProbeTimeout)
 	defer cancel()
-	argv := []string{"systemctl", "--user", "show", "--property=LoadState,UnitFileState,ActiveState", unit}
-	result, err := runner.Run(probeCtx, argv, deps.RunOptions{})
-	if err != nil {
-		state.Err = fmt.Errorf("%s: %w", strings.Join(argv, " "), err)
+	answer := servicemanager.UserSystemctl(probeCtx, runner,
+		"show", "--property=LoadState,UnitFileState,ActiveState", unit)
+	argv, result := answer.Argv, answer.Result
+	if answer.RunErr != nil {
+		state.Err = fmt.Errorf("%s: %w", answer.Command(), answer.RunErr)
 		return state
 	}
 	if result.ExitCode != 0 || probeCtx.Err() != nil {

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -43,7 +44,7 @@ func newCallTmuxJail(t *testing.T) *callTmuxJail {
 	if _, err := exec.LookPath("python3"); err != nil {
 		t.Skip("python3 is not installed")
 	}
-	tmuxJailRoot := filepath.Join(os.TempDir(), "tmux-"+strconv.Itoa(os.Getuid()))
+	tmuxJailRoot := paths.TmuxDirUnder(paths.TempRoot())
 	if err := os.MkdirAll(tmuxJailRoot, 0o700); err != nil {
 		t.Fatal(err)
 	}

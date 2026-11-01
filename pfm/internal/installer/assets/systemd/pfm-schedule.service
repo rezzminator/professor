@@ -9,4 +9,5 @@ Type=oneshot
 # every pfm unit shares (paths.ServicePath), so the tmux the fire calls
 # through is found under every service manager.
 Environment=PATH=__PFM_SERVICE_PATH__
+Environment=PFM_INSTALL_MARK=__PFM_INSTALL_MARK__
 ExecStart=%h/.local/bin/pfm internal schedule-fire

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // LoadSeed previews the config pfm install would seed without writing target.
@@ -13,7 +15,7 @@ func LoadSeed(example, target, home string, projectRoots []string, codexHomes ..
 	if err != nil {
 		return Config{}, fmt.Errorf("read seed config %s: %w", example, err)
 	}
-	dir, err := os.MkdirTemp("", "pfm-seed-")
+	dir, err := paths.MkdirTemp("seed", "preview-")
 	if err != nil {
 		return Config{}, fmt.Errorf("create seed preview directory: %w", err)
 	}

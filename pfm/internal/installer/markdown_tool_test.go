@@ -31,12 +31,9 @@ func writeScript(t *testing.T, dir, name, content string) string {
 // poisonScript writes a fixture that records it ran (by touching a marker
 // file under $POISON_MARKER_DIR) and then fails loudly — used on branches
 // that must never invoke the tool at all. The marker travels through the
-// environment rather than through $0: installMarkdownTool invokes uv by the
-// bare name "uv" on its no-provisioned-uv fallback, and exec.Command leaves
-// Args[0] as the unqualified name it was given even though it resolves Path
-// through $PATH — so "$(dirname "$0")" resolves to the test binary's own
-// working directory, not the fixture's, and a poison that fired would go
-// undetected.
+// environment rather than through $0, so a poison that fired is recorded
+// whatever Args[0] its caller hands it: a bare name leaves "$(dirname "$0")"
+// at the test binary's working directory, not the fixture's.
 func poisonScript(t *testing.T, dir, marker, name string) {
 	t.Helper()
 	writeScript(

@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -17,6 +18,8 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 func TestMCPStressSequentialCallsNoLeaks(t *testing.T) {
@@ -273,7 +276,7 @@ func TestMCPMalformedFrameReturnsJSONRPCError(t *testing.T) {
 
 func openFDs(t *testing.T) int {
 	t.Helper()
-	entries, err := os.ReadDir("/proc/self/fd")
+	entries, err := os.ReadDir(filepath.Join(paths.SystemProcRoot(), "self", "fd"))
 	if err != nil {
 		t.Skipf("cannot count fds: %v", err)
 	}
@@ -282,7 +285,7 @@ func openFDs(t *testing.T) int {
 
 func rssBytes(t *testing.T) int64 {
 	t.Helper()
-	content, err := os.ReadFile("/proc/self/statm")
+	content, err := os.ReadFile(filepath.Join(paths.SystemProcRoot(), "self", "statm"))
 	if err != nil {
 		t.Skipf("cannot read RSS: %v", err)
 	}

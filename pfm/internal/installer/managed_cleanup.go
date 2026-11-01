@@ -14,6 +14,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/cmdparse"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // Managed cleanup states are shared by install and doctor.
@@ -288,7 +289,7 @@ func (installer *engine) installManagedCleanup(ctx context.Context) error {
 	if !errors.Is(directErr, fs.ErrPermission) {
 		return fmt.Errorf("managed-cleanup %s: write: %w", status.Path, directErr)
 	}
-	temporary, err := os.MkdirTemp("", "pfm-managed-cleanup-")
+	temporary, err := paths.MkdirTemp("managed-cleanup", "stage-")
 	if err != nil {
 		return fmt.Errorf("create managed-cleanup temporary directory: %w", err)
 	}

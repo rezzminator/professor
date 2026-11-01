@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"syscall"
 
 	"github.com/rezzminator/professor/pfm/internal/action"
 	"github.com/rezzminator/professor/pfm/internal/ask"
@@ -263,9 +262,7 @@ func Run(
 		ctx,
 		stdout,
 		resolved.Home,
-		deps.Registry(deps.Options{
-			Home: resolved.Home, ClaudeBinary: runtime.Config.Claude.Binary, CodexBinary: runtime.Config.Codex.Binary,
-		}),
+		deps.Registry(runtime.DepsOptions()),
 		deps.ProbeOptions{VerboseDir: verboseDir, Runner: dependencies.Runner},
 	)
 	tally.warnings += depWarnings
@@ -594,7 +591,7 @@ func PrintCodexPaneFollow(
 		fmt.Fprintf(stdout, "doctor: warning codex_pane_names=unreadable error=%v\n", err)
 		return 1
 	}
-	capturer := gather.TmuxProbe{TmuxTmpDir: filepath.Dir(runtime.Paths.TmuxDir)}
+	capturer := gather.TmuxProbe{TmuxDir: runtime.Paths.TmuxDir}
 	silent := func(message string) { fmt.Fprintf(stdout, "doctor: warning %s\n", message) }
 	_, actions := fleet.ObserveCodexPanes(
 		ctx, database, manager, capturer, snapshot, runtime, cxNames, silent,
@@ -644,7 +641,7 @@ func liveCodexPanes(ctx context.Context, runtime config.Runtime) ([]gather.Probe
 		}
 		return nil, fmt.Errorf("read tmux directory %s: %w", runtime.Paths.TmuxDir, err)
 	}
-	tmux := gather.TmuxProbe{TmuxTmpDir: filepath.Dir(runtime.Paths.TmuxDir)}
+	tmux := gather.TmuxProbe{TmuxDir: runtime.Paths.TmuxDir}
 	panes := make([]gather.ProbePane, 0, len(entries))
 	for _, entry := range entries {
 		socket := entry.Name()
@@ -961,7 +958,7 @@ func printClaudeVersionsDoctor(
 		fmt.Fprintf(stdout, "doctor: claude-versions dir=%s absent (native installer never ran)\n", report.Dir)
 		return warnings, failures
 	}
-	report = installer.ProbeLiveClaudeVersions(report, procs, syscall.Kill)
+	report = installer.ProbeLiveClaudeVersions(report, procs, gather.ProbeProcess)
 	if report.LiveProbeErr != nil {
 		warnings++
 		fmt.Fprintf(stdout, "doctor: claude-versions PROBE FAILED error=%v — retention unknown\n", report.LiveProbeErr)

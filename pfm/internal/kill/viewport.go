@@ -3,14 +3,12 @@ package kill
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
 
-	"github.com/rezzminator/professor/pfm/internal/deps"
-	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 )
 
 // A chat is watched through a terminal, and that terminal is owned by a shell.
@@ -31,25 +29,6 @@ import (
 // the human asked to close, so it is left alone.
 var terminalShells = map[string]bool{
 	"zsh": true, "bash": true, "sh": true, "dash": true, "ksh": true, "fish": true,
-}
-
-// ProcessInfo is the slice of the process table the viewport closer reads.
-type ProcessInfo struct {
-	PID  int
-	PPID int
-	Comm string
-}
-
-// ProcessTable reads one process's parentage. An interface so a test can state
-// a tree instead of spawning one.
-type ProcessTable interface {
-	Info(ctx context.Context, pid int) (ProcessInfo, error)
-}
-
-// Signaller delivers the close. Separated from the lookup so a test can assert
-// exactly which pids WOULD be signalled without signalling anything.
-type Signaller interface {
-	Signal(pid int, signal syscall.Signal) error
 }
 
 // ClientLister names the one tmux read the closer needs.
@@ -84,72 +63,12 @@ func (tmux TmuxKiller) ClientPIDs(
 	return pids, nil
 }
 
-// CommandProcessTable reads the real process table through ps.
-type CommandProcessTable struct {
-	Binary string
-	// Runner is the deps.Runner seam Info reads ps through; nil defaults to
-	// obs.Runner(deps.RealRunner{}).
-	Runner deps.Runner
-}
-
-// Info returns one process's pid, parent, and command name.
-func (table CommandProcessTable) Info(
-	ctx context.Context,
-	pid int,
-) (ProcessInfo, error) {
-	binary := table.Binary
-	if binary == "" {
-		binary = deps.Executable("ps")
-	}
-	runner := table.Runner
-	if runner == nil {
-		runner = obs.Runner(deps.RealRunner{})
-	}
-	result, err := runner.Run(
-		ctx,
-		[]string{binary, "-o", "pid=,ppid=,comm=", "-p", strconv.Itoa(pid)},
-		deps.RunOptions{},
-	)
-	if err == nil && result.ExitCode != 0 {
-		err = fmt.Errorf("exit status %d", result.ExitCode)
-	}
-	if err != nil {
-		return ProcessInfo{}, fmt.Errorf("read process %d: %w", pid, err)
-	}
-	output := result.Stdout
-	fields := strings.Fields(strings.TrimSpace(string(output)))
-	if len(fields) < 3 {
-		return ProcessInfo{}, fmt.Errorf(
-			"process %d returned %d fields, want pid ppid comm", pid, len(fields),
-		)
-	}
-	self, err := strconv.Atoi(fields[0])
-	if err != nil {
-		return ProcessInfo{}, fmt.Errorf("parse pid %q: %w", fields[0], err)
-	}
-	parent, err := strconv.Atoi(fields[1])
-	if err != nil {
-		return ProcessInfo{}, fmt.Errorf("parse ppid %q: %w", fields[1], err)
-	}
-	return ProcessInfo{PID: self, PPID: parent, Comm: fields[2]}, nil
-}
-
-// ProcessSignaller delivers a real signal.
-type ProcessSignaller struct{}
-
-// Signal sends one signal to one pid.
-func (ProcessSignaller) Signal(pid int, signal syscall.Signal) error {
-	return syscall.Kill(pid, signal)
-}
-
-// ViewportDeps are the three seams CloseTerminals reads the world through.
+// ViewportDeps are the two seams CloseTerminals reads the world through.
 type ViewportDeps struct {
-	Tmux      ClientLister
-	Processes ProcessTable
-	Signals   Signaller
-	// Self is the pid the closer must never take down — the hook's own
-	// process. Zero means os.Getpid().
-	Self int
+	Tmux ClientLister
+	// Door reads the process table (Door.Procs) and delivers the hang-up. Its
+	// Self is the pid the closer must never take down: the hook's own process.
+	Door gather.Door
 }
 
 // CloseTerminals shuts the terminals this chat is watched through, returning
@@ -163,13 +82,9 @@ func CloseTerminals(
 	socketPath string,
 	dependencies ViewportDeps,
 ) (closed []int, skipped []string, err error) {
-	if dependencies.Tmux == nil || dependencies.Processes == nil ||
-		dependencies.Signals == nil {
-		return nil, nil, fmt.Errorf("viewport closer needs tmux, process table, and signaller")
-	}
-	self := dependencies.Self
-	if self == 0 {
-		self = os.Getpid()
+	door := dependencies.Door
+	if dependencies.Tmux == nil || door.Procs == nil || door.Kernel == nil {
+		return nil, nil, fmt.Errorf("viewport closer needs tmux, a process table, and a signal kernel")
 	}
 	clients, err := dependencies.Tmux.ClientPIDs(ctx, socketPath)
 	if err != nil {
@@ -180,42 +95,81 @@ func CloseTerminals(
 	}
 	seen := make(map[int]bool, len(clients))
 	for _, client := range clients {
-		info, infoErr := dependencies.Processes.Info(ctx, client)
-		if infoErr != nil {
-			skipped = append(skipped, fmt.Sprintf("client %d: %v", client, infoErr))
-			continue
-		}
-		parent, parentErr := dependencies.Processes.Info(ctx, info.PPID)
-		if parentErr != nil {
-			skipped = append(skipped, fmt.Sprintf("client %d parent %d: %v", client, info.PPID, parentErr))
-			continue
-		}
-		name := filepath.Base(parent.Comm)
+		shell, reason := clientShell(door, client)
 		switch {
-		case parent.PID <= 1:
-			skipped = append(skipped, fmt.Sprintf(
-				"client %d: parent is pid %d — no terminal shell to close", client, parent.PID))
+		case reason != "":
+			skipped = append(skipped, reason)
 			continue
-		case parent.PID == self:
-			skipped = append(skipped, fmt.Sprintf(
-				"client %d: parent %d is this hook itself", client, parent.PID))
-			continue
-		case !terminalShells[name]:
-			skipped = append(skipped, fmt.Sprintf(
-				"client %d: parent %d is %q, not a terminal shell", client, parent.PID, name))
-			continue
-		case seen[parent.PID]:
+		case seen[shell.PID]:
 			continue
 		}
-		seen[parent.PID] = true
+		seen[shell.PID] = true
 		// SIGHUP is the hangup a terminal owner already knows how to die from:
 		// the shell runs its exit traps and the emulator closes the tab.
-		if signalErr := dependencies.Signals.Signal(parent.PID, syscall.SIGHUP); signalErr != nil {
+		outcome, signalErr := door.Signal(gather.Target{Identity: shell, Check: isTerminalShell}, syscall.SIGHUP)
+		switch {
+		case signalErr != nil:
+			skipped = append(skipped, fmt.Sprintf("client %d: hang up shell %d: %v", client, shell.PID, signalErr))
+		case outcome == gather.OutcomeGone:
+			skipped = append(skipped, fmt.Sprintf("client %d: shell %d ended before the hang-up", client, shell.PID))
+		case outcome != gather.OutcomeSent:
 			skipped = append(skipped, fmt.Sprintf(
-				"client %d: hang up shell %d: %v", client, parent.PID, signalErr))
-			continue
+				"client %d: shell %d changed before the hang-up; left alone", client, shell.PID))
+		default:
+			closed = append(closed, shell.PID)
 		}
-		closed = append(closed, parent.PID)
 	}
 	return closed, skipped, nil
+}
+
+// clientShell identifies the terminal shell that spawned client, or names why
+// there is none to hang up. The client is read on both sides of the shell's
+// identification: a parent that died, its pid going to another process in
+// between, leaves the client reparented, so a client still naming the same
+// parent since the same start proves the identity read is its spawning shell.
+func clientShell(door gather.Door, client int) (gather.Identity, string) {
+	before, err := door.Procs.Stat(client)
+	if err != nil {
+		return gather.Identity{}, fmt.Sprintf("client %d: %v", client, err)
+	}
+	parent := before.ParentPID
+	switch {
+	case parent <= 1:
+		return gather.Identity{}, fmt.Sprintf(
+			"client %d: parent is pid %d — no terminal shell to close",
+			client,
+			parent,
+		)
+	case parent == door.Self:
+		return gather.Identity{}, fmt.Sprintf("client %d: parent %d is this hook itself", client, parent)
+	}
+	shell, err := gather.IdentifyProcess(door.Procs, parent)
+	if err != nil {
+		return gather.Identity{}, fmt.Sprintf("client %d parent %d: %v", client, parent, err)
+	}
+	after, err := door.Procs.Stat(client)
+	if err != nil {
+		return gather.Identity{}, fmt.Sprintf("client %d: %v", client, err)
+	}
+	if after.StartTime != before.StartTime || after.ParentPID != parent {
+		return gather.Identity{}, fmt.Sprintf("client %d: left parent %d while it was read", client, parent)
+	}
+	if shell.Executable == "" {
+		return gather.Identity{}, fmt.Sprintf(
+			"client %d: parent %d's executable is unreadable, so it is not known to be a terminal shell",
+			client,
+			parent,
+		)
+	}
+	if holds, _ := isTerminalShell(shell); !holds {
+		return gather.Identity{}, fmt.Sprintf(
+			"client %d: parent %d is %q, not a terminal shell", client, parent, filepath.Base(shell.Executable))
+	}
+	return shell, ""
+}
+
+// isTerminalShell holds while the process runs a terminal shell's executable,
+// read from the kernel, never from its renameable argv[0].
+func isTerminalShell(live gather.Identity) (bool, error) {
+	return live.Executable != "" && terminalShells[filepath.Base(live.Executable)], nil
 }

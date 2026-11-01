@@ -35,18 +35,12 @@ func writeMCPFile(home string, payload []byte) (string, error) {
 		return "", fmt.Errorf("home %q is not an absolute path", home)
 	}
 	dir := paths.ClaudeMCPConfigDir(home)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", fmt.Errorf("create %s: %w", dir, err)
+	err := paths.EnsurePrivateDir("", dir)
+	if errors.Is(err, paths.ErrNotRealDirectory) {
+		return "", fmt.Errorf("%w — run pfm doctor", err)
 	}
-	info, err := os.Lstat(dir)
 	if err != nil {
-		return "", fmt.Errorf("inspect %s: %w", dir, err)
-	}
-	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return "", fmt.Errorf("%s is not a real directory — run pfm doctor", dir)
-	}
-	if err := os.Chmod(dir, 0o700); err != nil {
-		return "", fmt.Errorf("secure %s: %w", dir, err)
+		return "", err
 	}
 	pruneMCPFiles(dir, clock.Real.Now().Add(-mcpFileMaxAge))
 	var nonce [16]byte

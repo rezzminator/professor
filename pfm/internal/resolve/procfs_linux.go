@@ -10,14 +10,14 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 type linuxProcFS struct{ root string }
 
 func newNativeProcFS(root string) ProcFS {
-	if root == "" {
-		root = "/proc"
-	}
+	root = paths.ProcRootOr(root)
 	return linuxProcFS{root: root}
 }
 

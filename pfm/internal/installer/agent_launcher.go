@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/agentlauncher"
+	"github.com/rezzminator/professor/pfm/internal/servicemanager"
 	"github.com/rezzminator/professor/pfm/internal/themesync"
 )
 
@@ -99,7 +100,7 @@ func launcherFix(home, label, path string) string {
 	if _, err := os.Lstat(filepath.Join(stateDir, themesync.StateFileName)); err == nil {
 		return "run pfm theme off"
 	}
-	return "run launchctl bootout gui/$(id -u)/" + label + ", then remove " + path
+	return "run launchctl bootout " + servicemanager.ShellTarget(label) + ", then remove " + path
 }
 
 // LaunchAgentLauncherDrift lists every pfm launch agent under home whose

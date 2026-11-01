@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -42,7 +43,7 @@ func updateFixtureTemplate(
 	t.Helper()
 	updateFixtureTemplates.Lock()
 	if updateFixtureTemplates.root == "" {
-		base, err := os.MkdirTemp("", "update-fixtures-")
+		base, err := os.MkdirTemp(paths.TempRoot(), "update-fixtures-")
 		if err != nil {
 			updateFixtureTemplates.Unlock()
 			t.Fatalf("create the fixture template root: %v", err)

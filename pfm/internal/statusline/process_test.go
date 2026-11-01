@@ -75,6 +75,17 @@ exit 2
 	}
 }
 
+// TestReadCodexRateLimitsNamesAMissingBinary: a Codex binary absent from
+// PATH fails at resolution with its name, never as a later exec error.
+func TestReadCodexRateLimitsNamesAMissingBinary(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	_, err := ReadCodexRateLimitsWithBinaryAtHome(context.Background(), "codex", "")
+	want := `resolve Codex binary "codex": exec: "codex": executable file not found in $PATH`
+	if err == nil || err.Error() != want {
+		t.Fatalf("ReadCodexRateLimitsWithBinaryAtHome() error = %v, want %q", err, want)
+	}
+}
+
 // TestReadCodexRateLimitsDropsTheHerdrPane: the App Server read runs no turn,
 // so it is never the chat bound to the parent's Herdr pane — with or without an
 // explicit account home, none of the four Herdr names reaches it.

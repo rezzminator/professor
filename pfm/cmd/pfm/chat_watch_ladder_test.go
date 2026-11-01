@@ -26,6 +26,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -113,7 +114,7 @@ func newWatchLadder(t *testing.T) *watchLadder {
 	ladderMockOnce.Do(func() {
 		dir := testBinaryDir
 		if dir == "" {
-			dir, ladderMockErr = os.MkdirTemp("", "pfm-ladder-mock-")
+			dir, ladderMockErr = os.MkdirTemp(paths.TempRoot(), "pfm-ladder-mock-")
 			if ladderMockErr != nil {
 				return
 			}

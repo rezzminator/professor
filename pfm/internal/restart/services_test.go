@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/servicemanager"
 )
 
 const keepAlivePlist = "<plist><dict><key>KeepAlive</key>\n  <true/></dict></plist>"
@@ -47,7 +48,7 @@ func (model *launchd) run(argv []string) (deps.RunResult, error) {
 	case "print":
 		label := filepath.Base(argv[2])
 		if !model.loaded[label] {
-			return exitWith(launchctlNotFound, "Could not find service")
+			return exitWith(servicemanager.NotFoundExit, "Could not find service")
 		}
 		return answer("\tstate = running\n")
 	case "bootout":

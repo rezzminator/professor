@@ -130,7 +130,10 @@ func (spawn ClaudeSpawn) Command(ctx context.Context) (*ProcessCommand, error) {
 	if err != nil {
 		return nil, err
 	}
-	path := deps.Executable(launch.Binary)
+	path, err := deps.Resolve(launch.Binary)
+	if err != nil {
+		return nil, fmt.Errorf("resolve Claude binary %q: %w", launch.Binary, err)
+	}
 	args := append(append([]string{}, launch.Wrapper...), path)
 	args = append(args, launch.Argv...)
 	if len(launch.Wrapper) != 0 {

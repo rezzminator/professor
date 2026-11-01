@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"os/exec"
 	"slices"
@@ -20,6 +21,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -124,6 +126,16 @@ func exitWith(code int, stderr string) (deps.RunResult, error) {
 // foreignUID is the uid of another user's process in a fakeKernel.
 const foreignUID = 1000
 
+// defaultStart is the start time newKernel gives a process listed without one.
+const defaultStart = 7
+
+// testInstallMark is the install mark of the install every testDeps restart
+// acts for, and testBinary its installed pfm.
+const (
+	testInstallMark = "test-install-mark"
+	testBinary      = "/opt/pfm/bin/pfm"
+)
+
 // fakeKernel is the process table and the kernel's signal delivery: a pid in
 // stubborn ignores SIGTERM, one in unkillable survives SIGKILL too, one in
 // unreadable cannot be read, and one in foreign is another user's.
@@ -134,8 +146,10 @@ type fakeKernel struct {
 	unkillable map[int]bool
 	unreadable map[int]bool
 	foreign    map[int]bool
-	listErr    error
-	signals    []string
+	// marks is a pid's environment where it is not this install's launch.
+	marks   map[int]map[string]string
+	listErr error
+	signals []string
 }
 
 func newKernel(procs ...process) *fakeKernel {
@@ -145,8 +159,14 @@ func newKernel(procs ...process) *fakeKernel {
 		unkillable: map[int]bool{},
 		unreadable: map[int]bool{},
 		foreign:    map[int]bool{},
+		marks:      map[int]map[string]string{},
 	}
 	for _, proc := range procs {
+		if proc.Start == 0 {
+			// A listed process always has a start time, as a real one does;
+			// a test that needs it missing clears it after newKernel.
+			proc.Start = defaultStart
+		}
 		kernel.procs[proc.PID] = proc
 	}
 	return kernel
@@ -203,8 +223,22 @@ func (kernel *fakeKernel) ProcessIdentity(pid int) (gather.ProcessIdentity, erro
 	return gather.ProcessIdentity{}, nil
 }
 
-func (*fakeKernel) Environ(int) (map[string]string, error) { return nil, nil }
-func (*fakeKernel) FDLinks(int) ([]gather.FDLink, error)   { return nil, nil }
+// Environ plays every process as this install's launch: it carries
+// testInstallMark unless the pid is in marks, whose value (nil for none) it
+// carries instead.
+func (kernel *fakeKernel) Environ(pid int) (map[string]string, error) {
+	kernel.mu.Lock()
+	defer kernel.mu.Unlock()
+	if _, ok := kernel.procs[pid]; !ok {
+		return nil, fs.ErrNotExist
+	}
+	if environment, ok := kernel.marks[pid]; ok {
+		return maps.Clone(environment), nil
+	}
+	return map[string]string{paths.EnvInstallMark: testInstallMark}, nil
+}
+
+func (*fakeKernel) FDLinks(int) ([]gather.FDLink, error) { return nil, nil }
 
 func (kernel *fakeKernel) signal(pid int, sig syscall.Signal) error {
 	kernel.mu.Lock()
@@ -224,6 +258,31 @@ func (kernel *fakeKernel) signal(pid int, sig syscall.Signal) error {
 	}
 	return nil
 }
+
+// Open is the kernel's open for the signal door: a handle whose signals the
+// kernel delivers to pid, ESRCH for a pid it does not have.
+func (kernel *fakeKernel) Open(pid int) (gather.Handle, error) {
+	kernel.mu.Lock()
+	defer kernel.mu.Unlock()
+	if _, ok := kernel.procs[pid]; !ok {
+		return nil, syscall.ESRCH
+	}
+	return kernelHandle{kernel: kernel, pid: pid}, nil
+}
+
+// kernelHandle is a fakeKernel's open process.
+type kernelHandle struct {
+	kernel *fakeKernel
+	pid    int
+}
+
+func (handle kernelHandle) Signal(sig syscall.Signal) error {
+	return handle.kernel.signal(handle.pid, sig)
+}
+func (kernelHandle) Close() error { return nil }
+
+// probe is the kernel's signal-0 existence probe.
+func (kernel *fakeKernel) probe(pid int) error { return kernel.signal(pid, 0) }
 
 func (kernel *fakeKernel) sent() []string {
 	kernel.mu.Lock()
@@ -258,11 +317,13 @@ func testDeps(t *testing.T, runner *hostRunner, kernel *fakeKernel, fleet *fakeF
 	return Deps{
 		Runner:     runner,
 		Procs:      kernel,
-		Signal:     kernel.signal,
+		Kernel:     kernel,
+		Probe:      kernel.probe,
+		Install:    gather.Install{Mark: testInstallMark, Binary: testBinary},
 		Clock:      newTickClock(),
 		Fleet:      fleet,
 		Self:       1,
-		Executable: "/opt/pfm/bin/pfm",
+		Executable: testBinary,
 		LogDir:     t.TempDir(),
 	}
 }

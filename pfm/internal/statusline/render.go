@@ -621,7 +621,7 @@ func convergeWindowName(ctx context.Context, runtime Runtime, data input) {
 		Socket: socket, WindowID: pane, CurrentName: current, TargetName: label,
 		ChatName: data.SessionName,
 	}
-	client := gather.TmuxProbe{TmuxTmpDir: filepath.Dir(runtime.TmuxDir)}
+	client := gather.TmuxProbe{TmuxDir: runtime.TmuxDir}
 	if err := client.RenameWindow(commandContext, rename); err != nil {
 		return
 	}

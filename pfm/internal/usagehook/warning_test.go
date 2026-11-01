@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // The prompt hook names only the windows the answer carries: with the 5-hour
@@ -63,7 +65,7 @@ func TestCriticalGuidanceWithoutAFiveHourWindow(t *testing.T) {
 func TestEvaluateRecoversToAnAnswerWithNoWindow(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
 	root, configDir, cacheDir, env := doorSeat(t, 12, now)
-	if err := EnsurePrivateDir(cacheDir); err != nil {
+	if err := paths.EnsurePrivateDir("usage cache directory", cacheDir); err != nil {
 		t.Fatalf("cache dir: %v", err)
 	}
 	flagPath := filepath.Join(cacheDir, fmt.Sprintf("warned-%d", 12))

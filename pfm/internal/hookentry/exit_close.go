@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/kill"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/reload"
@@ -72,8 +73,10 @@ func ExitClose(stdin io.Reader, stderr io.Writer) int {
 		)
 		return 0
 	}
+	// The client pids come from the live tmux server, so their shells are read
+	// from the kernel's own process table, never a jail's fixture proc root.
 	closed, skipped, err := exitCloseTerminals(context.Background(), socketPath, kill.ViewportDeps{
-		Tmux: kill.TmuxKiller{}, Processes: kill.CommandProcessTable{}, Signals: kill.ProcessSignaller{},
+		Tmux: kill.TmuxKiller{}, Door: gather.NewDoor(gather.NewProcFS("")),
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm internal exit-close: close terminals (fail-open): %v\n", err)

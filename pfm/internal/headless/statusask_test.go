@@ -52,7 +52,7 @@ func startHeadlessTmuxSession(t *testing.T) (socketPath, session string) {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux binary is not installed")
 	}
-	tmuxJailRoot := filepath.Join(os.TempDir(), "tmux-"+strconv.Itoa(os.Getuid()))
+	tmuxJailRoot := paths.TmuxDirUnder(paths.TempRoot())
 	if err := os.MkdirAll(tmuxJailRoot, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestAskCapturesHerdrSeatThroughNativeHost(t *testing.T) {
 	root, _ := summaryTestStore(t)
 	t.Setenv("TMUX_TMPDIR", t.TempDir())
 	// Keep the native socket short enough for the Unix sun_path limit.
-	socketRoot, err := os.MkdirTemp("", "headless-herdr-")
+	socketRoot, err := os.MkdirTemp(paths.TempRoot(), "headless-herdr-")
 	if err != nil {
 		t.Fatal(err)
 	}

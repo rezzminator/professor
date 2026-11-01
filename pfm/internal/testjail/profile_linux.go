@@ -6,15 +6,17 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // kernelProc is the real kernel's /proc. The profiler reads the counters of this
 // very process, never paths.Values.ProcRoot, which a test may point at a
-// fixture; /proc is a literal here for that reason alone.
-const kernelProc = "/proc"
+// fixture; it takes the kernel's root, never a configured one, for that reason.
+var kernelProc = paths.SystemProcRoot()
 
 // psiDir is where the kernel publishes pressure stall information.
-const psiDir = kernelProc + "/pressure"
+var psiDir = kernelProc + "/pressure"
 
 // maxRSSKB: Linux reports ru_maxrss in kilobytes.
 func maxRSSKB(v int64) int64 { return v }

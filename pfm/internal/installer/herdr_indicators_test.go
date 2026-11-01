@@ -49,8 +49,35 @@ func (k *indicatorInstallKernel) ProcessIdentity(int) (gather.ProcessIdentity, e
 }
 func (k *indicatorInstallKernel) Image(int) (gather.FileID, error) { return k.image, nil }
 func (k *indicatorInstallKernel) Environ(int) (map[string]string, error) {
-	return map[string]string{"HERDR_SOCKET_PATH": "/fixture/herdr.sock", "HOME": "/fixture/home"}, nil
+	return map[string]string{
+		"HERDR_SOCKET_PATH": "/fixture/herdr.sock", "HOME": "/fixture/home",
+		paths.EnvInstallMark: indicatorInstallMark,
+	}, nil
 }
+
+// indicatorInstallMark is the install mark the fake painter carries and the
+// test's install owns.
+const indicatorInstallMark = "installer-test-install"
+
+// Open is the kernel's open for the signal door: a handle on the one painter.
+func (k *indicatorInstallKernel) Open(pid int) (gather.Handle, error) {
+	if !k.alive {
+		return nil, syscall.ESRCH
+	}
+	return indicatorInstallHandle{kernel: k, pid: pid}, nil
+}
+
+type indicatorInstallHandle struct {
+	kernel *indicatorInstallKernel
+	pid    int
+}
+
+func (handle indicatorInstallHandle) Signal(sig syscall.Signal) error {
+	return handle.kernel.signal(handle.pid, sig)
+}
+func (indicatorInstallHandle) Close() error { return nil }
+
+func (k *indicatorInstallKernel) probe(pid int) error { return k.signal(pid, 0) }
 
 func (k *indicatorInstallKernel) signal(_ int, sig syscall.Signal) error {
 	if sig != 0 {
@@ -76,8 +103,9 @@ func TestInstallRefreshesStaleHerdrIndicators(t *testing.T) {
 	runner := &deps.FakeRunner{}
 	runner.ScriptStart([]string{binary, "internal", "herdr-indicators"}, 5000, nil, nil)
 	dependencies := restart.Deps{
-		Procs: kernel, Signal: kernel.signal, Runner: runner,
-		Clock: clock.Real, EffectiveUID: uint32(os.Geteuid()), Executable: binary,
+		Procs: kernel, Kernel: kernel, Probe: kernel.probe, Runner: runner,
+		Install: gather.Install{Mark: indicatorInstallMark, Binary: binary},
+		Clock:   clock.Real, EffectiveUID: uint32(os.Geteuid()), Executable: binary,
 	}
 	var output bytes.Buffer
 	_, err := Run(context.Background(), Options{
@@ -134,8 +162,9 @@ func TestInstallHerdrIndicatorConvergenceNoopsAndErrors(t *testing.T) {
 			}
 			runner := &deps.FakeRunner{}
 			dependencies := restart.Deps{
-				Procs: kernel, Signal: kernel.signal, Runner: runner,
-				Clock: clock.Real, EffectiveUID: uint32(os.Geteuid()), Executable: binary,
+				Procs: kernel, Kernel: kernel, Probe: kernel.probe, Runner: runner,
+				Install: gather.Install{Mark: indicatorInstallMark, Binary: binary},
+				Clock:   clock.Real, EffectiveUID: uint32(os.Geteuid()), Executable: binary,
 			}
 			var output bytes.Buffer
 			_, err = Run(context.Background(), Options{

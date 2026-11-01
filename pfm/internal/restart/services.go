@@ -9,12 +9,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/servicemanager"
 )
 
 const (
@@ -22,8 +22,10 @@ const (
 	serviceStopWithin = 5 * time.Second
 	// serviceStartWithin bounds the wait for a started service to read up.
 	serviceStartWithin = 15 * time.Second
-	// launchctlNotFound is `launchctl print`'s exit for a label launchd does not know.
-	launchctlNotFound = 113
+	// launchdBootstrapAttempts spreads a launch agent's bootstrap attempts over
+	// serviceStopWithin, one per servicemanager.BootstrapRetryInterval, the
+	// first at once.
+	launchdBootstrapAttempts = int(serviceStopWithin/servicemanager.BootstrapRetryInterval) + 1
 	// pfmLaunchdPrefix opens every launch agent label pfm installs.
 	pfmLaunchdPrefix = "com.professor.pfm."
 	// pfmSystemdPrefix opens every systemd user unit pfm installs.
@@ -83,10 +85,18 @@ func (tools serviceTools) waitFor(ctx context.Context, within time.Duration, che
 		if !tools.clock.Now().Before(deadline) {
 			return false, nil
 		}
-		if err := tools.clock.Sleep(ctx, pollEvery); err != nil {
-			return false, fmt.Errorf("wait: %w", err)
+		if err := tools.pause(ctx, pollEvery); err != nil {
+			return false, err
 		}
 	}
+}
+
+// pause waits d on the clock every bounded wait polls on.
+func (tools serviceTools) pause(ctx context.Context, d time.Duration) error {
+	if err := tools.clock.Sleep(ctx, d); err != nil {
+		return fmt.Errorf("wait: %w", err)
+	}
+	return nil
 }
 
 // missing reports whether name is not on PATH; any other lookup failure is
@@ -102,13 +112,13 @@ func (tools serviceTools) missing(name string) (bool, error) {
 	return false, nil
 }
 
-// run runs argv and returns its answer; failing to run at all is the error.
-func (tools serviceTools) run(ctx context.Context, argv ...string) (deps.RunResult, error) {
-	result, err := tools.runner.Run(ctx, argv, deps.RunOptions{})
-	if err != nil {
-		return result, fmt.Errorf("%s: %w", strings.Join(argv, " "), err)
+// ran is a service-manager command's result; a command that failed to run at
+// all is the error, naming it.
+func ran(answer servicemanager.Answer) (deps.RunResult, error) {
+	if answer.RunErr != nil {
+		return answer.Result, fmt.Errorf("%s: %w", answer.Command(), answer.RunErr)
 	}
-	return result, nil
+	return answer.Result, nil
 }
 
 // installedNames lists the file names in dir that match accepts. A missing
@@ -184,7 +194,7 @@ func (manager LaunchdManager) Units(
 		}
 	}
 	return append(units, daemons...), fmt.Sprintf(
-		"%d launch agent(s) — %s, gui/%d domain", len(names), manager.Dir, manager.UID), nil
+		"%d launch agent(s) — %s, %s domain", len(names), manager.Dir, servicemanager.Domain(manager.UID)), nil
 }
 
 // launchdKeepAlive reports whether a plist keeps its job alive: such a job is
@@ -194,30 +204,28 @@ func launchdKeepAlive(plist string) bool {
 	return found && strings.HasPrefix(strings.TrimSpace(after), "<true/>")
 }
 
-func (manager LaunchdManager) target(label string) string {
-	return "gui/" + strconv.Itoa(manager.UID) + "/" + label
+// launchd is the manager's gui/<uid> domain, pausing between bootstrap
+// attempts on the manager's clock.
+func (manager LaunchdManager) launchd() servicemanager.Launchd {
+	return servicemanager.Launchd{Runner: manager.runner, UID: manager.UID, Pause: manager.pause}
 }
 
 // state asks launchd about label: whether it is loaded, and its state word.
 // A label launchd does not know is not loaded; any other non-answer is an error.
 func (manager LaunchdManager) state(ctx context.Context, label string) (loaded bool, state string, err error) {
-	result, err := manager.run(ctx, "launchctl", "print", manager.target(label))
+	answer := manager.launchd().Print(ctx, label)
+	result, err := ran(answer)
 	if err != nil {
 		return false, "", err
 	}
 	if result.ExitCode != 0 {
-		if result.ExitCode == launchctlNotFound || strings.Contains(string(result.Stderr), "Could not find service") {
+		if answer.Unknown() {
 			return false, "", nil
 		}
-		return false, "", fmt.Errorf("launchctl print %s: exit %d: %s",
-			manager.target(label), result.ExitCode, strings.TrimSpace(string(result.Stderr)))
+		return false, "", fmt.Errorf("%s: exit %d: %s",
+			answer.Command(), result.ExitCode, strings.TrimSpace(string(result.Stderr)))
 	}
-	for _, line := range strings.Split(string(result.Stdout), "\n") {
-		if value, ok := strings.CutPrefix(strings.TrimSpace(line), "state = "); ok {
-			return true, value, nil
-		}
-	}
-	return true, "", nil
+	return true, answer.State(), nil
 }
 
 func (manager LaunchdManager) loaded(ctx context.Context, label string) (bool, error) {
@@ -239,13 +247,14 @@ func (manager LaunchdManager) unit(
 	if loaded {
 		before = launchdLoaded
 	}
+	target := manager.launchd().Target(label)
 	unit := Unit{
 		Family:   family,
 		Name:     "launchd " + label,
 		FoundBy:  "plist " + path + ", " + before,
 		Before:   before,
-		StopHow:  "launchctl bootout " + manager.target(label) + "; verified: launchctl print no longer knows it",
-		StartHow: "launchctl bootstrap gui/" + strconv.Itoa(manager.UID) + " " + path + "; verified: " + upWord,
+		StopHow:  "launchctl bootout " + target + "; verified: launchctl print no longer knows it",
+		StartHow: "launchctl bootstrap " + servicemanager.Domain(manager.UID) + " " + path + "; verified: " + upWord,
 		Stop: func(ctx context.Context) (string, error) {
 			return manager.stop(ctx, label)
 		},
@@ -267,7 +276,8 @@ func (manager LaunchdManager) stop(ctx context.Context, label string) (string, e
 	if !loaded {
 		return "not loaded — launchctl print does not know it", nil
 	}
-	result, err := manager.run(ctx, "launchctl", "bootout", manager.target(label))
+	launchd := manager.launchd()
+	result, err := ran(launchd.Run(ctx, "bootout", launchd.Target(label)))
 	if err != nil {
 		return "", err
 	}
@@ -288,23 +298,19 @@ func (manager LaunchdManager) stop(ctx context.Context, label string) (string, e
 func (manager LaunchdManager) start(
 	ctx context.Context, label, path string, keepAlive bool, verify func(context.Context) error,
 ) (string, error) {
-	var last deps.RunResult
-	// A bootout's teardown can still be in flight: bootstrap retries until
-	// launchd accepts the job or the label reads loaded.
-	loaded, err := manager.waitFor(ctx, serviceStopWithin, func() (bool, error) {
-		result, err := manager.run(ctx, "launchctl", "bootstrap", "gui/"+strconv.Itoa(manager.UID), path)
-		if err != nil {
-			return false, err
-		}
-		last = result
-		return manager.loaded(ctx, label)
-	})
+	// A bootout's teardown can still be in flight: bootstrap retries until the
+	// label reads loaded, whatever each bootstrap's exit.
+	loadedNow := func(ctx context.Context) (bool, error) { return manager.loaded(ctx, label) }
+	last, loaded, err := manager.launchd().Bootstrap(ctx, path, launchdBootstrapAttempts, loadedNow)
 	if err != nil {
+		if last.RunErr != nil {
+			_, err = ran(last)
+		}
 		return "", err
 	}
 	if !loaded {
 		return "", fmt.Errorf("not loaded after launchctl bootstrap %s (exit %d: %s)",
-			path, last.ExitCode, strings.TrimSpace(string(last.Stderr)))
+			path, last.Result.ExitCode, strings.TrimSpace(string(last.Result.Stderr)))
 	}
 	detail := launchdLoaded
 	if keepAlive {
@@ -421,7 +427,8 @@ func (manager SystemdManager) Units(
 
 // activeState is the unit's ActiveState under systemd --user.
 func (manager SystemdManager) activeState(ctx context.Context, unit string) (string, error) {
-	result, err := manager.run(ctx, "systemctl", "--user", "show", "--property=ActiveState", "--value", unit)
+	show := servicemanager.UserSystemctl(ctx, manager.runner, "show", "--property=ActiveState", "--value", unit)
+	result, err := ran(show)
 	if err != nil {
 		return "", err
 	}
@@ -480,7 +487,7 @@ func (manager SystemdManager) unit(
 }
 
 func (manager SystemdManager) stop(ctx context.Context, name string) (string, error) {
-	result, err := manager.run(ctx, "systemctl", "--user", "stop", name)
+	result, err := ran(servicemanager.UserSystemctl(ctx, manager.runner, "stop", name))
 	if err != nil {
 		return "", err
 	}
@@ -505,7 +512,7 @@ func (manager SystemdManager) start(
 	name string,
 	verify func(context.Context) error,
 ) (string, error) {
-	result, err := manager.run(ctx, "systemctl", "--user", "start", name)
+	result, err := ran(servicemanager.UserSystemctl(ctx, manager.runner, "start", name))
 	if err != nil {
 		return "", err
 	}

@@ -12,6 +12,7 @@ import (
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/installer"
 )
 
@@ -140,7 +141,10 @@ func TestEngineDoctorPassesPfmsDependencyProbe(t *testing.T) {
 	fix.installHooks()
 	var engines []deps.Entry
 	entries := deps.Registry(deps.Options{
-		Home: fix.home, ClaudeBinary: filepath.Join(fix.bin, "claude"), CodexBinary: filepath.Join(fix.bin, "codex"),
+		Home:           fix.home,
+		ClaudeBinary:   filepath.Join(fix.bin, "claude"),
+		CodexBinary:    filepath.Join(fix.bin, "codex"),
+		OpenCodeBinary: filepath.Join(fix.bin, "opencode"),
 	})
 	for index := range entries {
 		if entries[index].Engine != "" {
@@ -148,13 +152,17 @@ func TestEngineDoctorPassesPfmsDependencyProbe(t *testing.T) {
 		}
 	}
 	results := deps.Probe(context.Background(), engines, deps.ProbeOptions{Runner: deps.RealRunner{}})
-	if len(results) != 2 {
-		t.Fatalf("engine probes=%+v, want both registered engines", results)
+	// OpenCode's registry row carries no self-doctor command, so its probe
+	// leaves SelfDoctor empty.
+	wantSelfDoctor := map[pfmengine.ID]string{pfmengine.Claude: "ok", pfmengine.Codex: "ok", pfmengine.OpenCode: ""}
+	if len(results) != len(wantSelfDoctor) {
+		t.Fatalf("engine probes=%+v, want the three registered engines %v", results, wantSelfDoctor)
 	}
 	for index := range results {
 		result := &results[index]
-		if result.State != deps.StateOK || result.SelfDoctor != "ok" {
-			t.Fatalf("%s probe=%+v, want state ok and self-doctor ok", result.Entry.Engine, result)
+		want, registered := wantSelfDoctor[result.Entry.Engine]
+		if !registered || result.State != deps.StateOK || result.SelfDoctor != want {
+			t.Fatalf("%s probe=%+v, want state ok and self-doctor %q", result.Entry.Engine, result, want)
 		}
 	}
 	assertCLIOpensNoSession(t, fix)

@@ -8,7 +8,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strconv"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 )
@@ -74,7 +73,7 @@ func ScheduleTimerDrift(home string, required ...bool) (path string, drifted boo
 			if err != nil {
 				return "", false, fmt.Errorf("read embedded asset %s: %w", name, err)
 			}
-			wanted, err = renderServicePath(wanted, home)
+			wanted, err = renderServiceEnv(wanted, home)
 		}
 		if err != nil {
 			return "", false, fmt.Errorf("render embedded asset %s: %w", name, err)
@@ -102,7 +101,7 @@ func renderScheduleLaunchAgent(home string) ([]byte, error) {
 	}
 	wanted, err := renderLaunchAgentTemplate(template, home)
 	if err == nil {
-		wanted, err = renderServicePath(wanted, home)
+		wanted, err = renderServiceEnv(wanted, home)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("render schedule launch agent: %w", err)
@@ -168,11 +167,7 @@ func (installer *engine) unwireScheduleLaunchAgentLabel(ctx context.Context, lab
 	} else if err != nil {
 		return fmt.Errorf("stat schedule launch agent %s: %w", path, err)
 	}
-	if installer.apply {
-		domain := "gui/" + strconv.Itoa(os.Getuid())
-		_ = installer.options.Runner.Run(ctx, "launchctl", "bootout", domain+"/"+label)
-	}
-	if err := installer.change("remove "+path, func() error { return os.Remove(path) }); err != nil {
+	if err := installer.retireLaunchAgent(ctx, path, label, "remove "+path); err != nil {
 		return fmt.Errorf("remove schedule launch agent %s: %w", path, err)
 	}
 	return nil

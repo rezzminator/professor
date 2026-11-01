@@ -4,9 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
-	"syscall"
 
+	"github.com/rezzminator/professor/pfm/internal/agentlauncher"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/restart"
 )
@@ -16,10 +15,11 @@ func (installer *engine) convergeHerdrIndicators(ctx context.Context) error {
 		return nil
 	}
 	dependencies := restart.Deps{
-		Procs: gather.NewProcFS(installer.options.ProcRoot), Signal: syscall.Kill,
+		Procs: gather.NewProcFS(installer.options.ProcRoot), Kernel: gather.NativeKernel(),
+		Probe: gather.ProbeProcess, Install: gather.InstallAt(installer.options.Home),
 		Runner: installer.processRunner(), Clock: installer.options.Clock,
 		Self: os.Getpid(), EffectiveUID: uint32(os.Geteuid()),
-		Executable: filepath.Join(installer.options.Home, ".local", "bin", "pfm"),
+		Executable: agentlauncher.ExecTarget(installer.options.Home),
 	}
 	if installer.options.herdrIndicatorDeps != nil {
 		dependencies = *installer.options.herdrIndicatorDeps

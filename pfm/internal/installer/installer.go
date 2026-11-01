@@ -427,7 +427,7 @@ func (installer *engine) wireGlobalLink(source, target, sourceRepoRoot string, i
 }
 
 func (installer *engine) futureCommandSource(assets []assetFile) (string, func() error, error) {
-	temporary, err := os.MkdirTemp("", "pfm-install-command-plan-")
+	temporary, err := paths.MkdirTemp("install-command-plan", "plan-")
 	if err != nil {
 		return "", func() error { return nil }, fmt.Errorf("create Codex command plan root: %w", err)
 	}
@@ -788,7 +788,7 @@ func (installer *engine) stageAssets(assets []assetFile) (bool, error) {
 		case asset.path == "systemd/"+nameSyncTimerUnit:
 			content, err = renderNameSyncTimerAsset(content, installer.options)
 		case strings.HasPrefix(asset.path, "systemd/"):
-			content, err = renderServicePath(content, installer.options.Home)
+			content, err = renderServiceEnv(content, installer.options.Home)
 		}
 		if err != nil {
 			return false, fmt.Errorf("render embedded asset %s: %w", asset.path, err)
@@ -1402,7 +1402,7 @@ func (installer *engine) reloadUnits(ctx context.Context) {
 	}
 	for _, units := range enablements {
 		args := append([]string{"enable", "--now"}, units...)
-		if err := userSystemctl(ctx, installer.options.Runner, args...); err != nil {
+		if err := installer.userSystemctl(ctx, args...).Err(); err != nil {
 			installer.deferFailure(installer.fail(
 				fmt.Errorf("systemctl --user enable --now %s: %w", strings.Join(units, " "), err),
 			))
@@ -1421,14 +1421,14 @@ func (installer *engine) reloadUnits(ctx context.Context) {
 }
 
 func (installer *engine) userManagerAvailable(ctx context.Context) bool {
-	return installer.options.Runner.Run(ctx, "systemctl", "--user", "show-environment") == nil
+	return installer.userSystemctl(ctx, "show-environment").OK()
 }
 
 // restartMCPUnit restarts pfm-mcp.service, waits the settle and verifies it
 // came back active; a restart that fails or does not come back is an error,
 // reported at once, never a skip.
 func (installer *engine) restartMCPUnit(ctx context.Context) error {
-	err := userSystemctl(ctx, installer.options.Runner, "restart", mcpUnitName)
+	err := installer.userSystemctl(ctx, "restart", mcpUnitName).Err()
 	if err != nil {
 		err = fmt.Errorf("systemctl --user restart %s: %w", mcpUnitName, err)
 	} else {
@@ -1444,7 +1444,7 @@ func (installer *engine) restartMCPUnit(ctx context.Context) error {
 
 func (installer *engine) unitKnown(ctx context.Context, unit string) bool {
 	for _, command := range []string{"is-active", "is-enabled", "is-failed"} {
-		if installer.options.Runner.Run(ctx, "systemctl", "--user", command, "--quiet", unit) == nil {
+		if installer.userSystemctl(ctx, command, "--quiet", unit).OK() {
 			return true
 		}
 	}
@@ -1452,9 +1452,8 @@ func (installer *engine) unitKnown(ctx context.Context, unit string) bool {
 }
 
 func (installer *engine) runSystemctl(ctx context.Context, arguments ...string) {
-	args := append([]string{"--user"}, arguments...)
-	if err := installer.options.Runner.Run(ctx, "systemctl", args...); err != nil {
-		installer.skip("systemctl " + strings.Join(args, " ") + " failed: " + err.Error())
+	if answer := installer.userSystemctl(ctx, arguments...); !answer.OK() {
+		installer.skip(answer.Command() + " failed: " + answer.Err().Error())
 	}
 }
 

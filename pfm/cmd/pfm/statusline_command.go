@@ -190,5 +190,6 @@ func runUsageHookWithRuntime(
 		AccountDirs:  accountDirs,
 		Version:      runtime.Version,
 		ClaudeBinary: runtime.Config.Claude.Binary,
+		Offline:      paths.UsageOffline(),
 	})
 }

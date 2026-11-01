@@ -154,18 +154,33 @@ type LaunchPaneState struct {
 	Dead    bool
 }
 
-// Process is one candidate for _cc_solo's stray-Claude sweep.
+// Process is one candidate for _cc_solo's stray-Claude sweep, read with the
+// identity a signal needs. Unidentified says why the table could not read its
+// start time and owner; such a process is matched but never signalled.
 type Process struct {
-	PID  int
-	Argv []string
-	TTY  string
+	PID          int
+	Start        uint64
+	UID          uint32
+	Argv         []string
+	Executable   string
+	TTY          string
+	Unidentified error
+}
+
+// Identity is the process generation the scan saw.
+func (process Process) Identity() gather.Identity {
+	return gather.Identity{
+		PID: process.PID, Start: process.Start, UID: process.UID,
+		Argv: process.Argv, Executable: process.Executable,
+	}
 }
 
 // ProcessTable supplies process snapshots and TERM without exposing /proc to
-// the action core.
+// the action core. Terminate goes through gather's signal door: it sends
+// nothing to a process that is no longer the target's identity.
 type ProcessTable interface {
 	Processes(ctx context.Context) ([]Process, error)
-	Terminate(pid int) error
+	Terminate(target gather.Target) (gather.Outcome, error)
 }
 
 // Gate asks on /dev/tty whether a mismatched live Claude chat should reboot.

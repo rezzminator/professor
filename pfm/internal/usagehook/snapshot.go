@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // statuslineSnapshot is one provider-confirmed quota reading a running Claude
@@ -38,7 +40,7 @@ type statuslineSnapshot struct {
 // the usage door and the Limits tab read there. Production uses the host temp
 // directory; a PFM_HOME jail keeps it inside that jail.
 func ClaudeRateLimitDir(jailHome string) string {
-	return filepath.Join(tempBase(jailHome), "cc-rate-limits")
+	return filepath.Join(paths.TempBase(jailHome), "cc-rate-limits")
 }
 
 // sameWindowSlack absorbs the sub-second gap between a reset the harness

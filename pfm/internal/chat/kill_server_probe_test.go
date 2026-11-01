@@ -40,7 +40,7 @@ func TestKillServerKeepsAnUnresponsiveServer(t *testing.T) {
 	if err := os.WriteFile(socketPath, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	err := KillServer(context.Background(), values, socket)
+	err := KillServer(context.Background(), values, socket, "%0")
 	if err == nil || !strings.Contains(err.Error(), "unresponsive") {
 		t.Fatalf("KillServer() over an unresponsive server = %v, want an unresponsive error", err)
 	}

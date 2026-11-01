@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -59,14 +60,28 @@ func TestRealRunnerRunRespectsEnvAndStdin(t *testing.T) {
 	}
 }
 
-func TestRealRunnerLookPathResolvesAKnownBinary(t *testing.T) {
-	var runner RealRunner
-	path, err := runner.LookPath("sh")
-	if err != nil {
-		t.Fatalf("LookPath(sh) error = %v", err)
+// RealRunner.LookPath is Resolve: a name on PATH resolves to its file, and a
+// registry name gated to another platform is refused even when a binary of
+// that name sits on PATH.
+func TestRealRunnerLookPathResolvesThroughTheRegistry(t *testing.T) {
+	offPlatform := map[string]string{"linux": "vm_stat", "darwin": "setsid"}[runtime.GOOS]
+	if offPlatform == "" {
+		t.Fatalf("no off-platform registry name pinned for %s", runtime.GOOS)
 	}
-	if path == "" {
-		t.Fatal("LookPath(sh) returned an empty path with a nil error")
+	directory := t.TempDir()
+	staged := writeDetachTestScript(t, filepath.Join(directory, "pfm-lookpath-probe"))
+	writeDetachTestScript(t, filepath.Join(directory, offPlatform))
+	t.Setenv("PATH", directory+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	var runner RealRunner
+	path, err := runner.LookPath("pfm-lookpath-probe")
+	if err != nil || path != staged {
+		t.Fatalf("LookPath(pfm-lookpath-probe) = %q, %v; want %q, nil", path, err, staged)
+	}
+	path, err = runner.LookPath(offPlatform)
+	want := "dependency " + offPlatform + " is not supported on " + runtime.GOOS
+	if err == nil || err.Error() != want {
+		t.Fatalf("LookPath(%s) = %q, %v; want the platform refusal %q", offPlatform, path, err, want)
 	}
 }
 

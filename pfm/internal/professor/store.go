@@ -126,7 +126,11 @@ func storeSHAWithContext(ctx context.Context, root string, runner deps.Runner) (
 			return "", fmt.Errorf("UNREADABLE %s: %w", gitPath, err)
 		}
 	}
-	argv := []string{deps.Executable("git"), "rev-parse", "--short", "HEAD"}
+	git, err := deps.Resolve("git")
+	if err != nil {
+		return "", fmt.Errorf("UNREADABLE blueprint git state %s: git not found: %w", root, err)
+	}
+	argv := []string{git, "rev-parse", "--short", "HEAD"}
 	env := deps.WithoutGitRepoVars(os.Environ())
 	if useFenceGit {
 		env = append(env, "GIT_DIR="+gitDir, "GIT_WORK_TREE="+root)
@@ -183,9 +187,13 @@ func adoptGit(runner deps.Runner, root string, args ...string) (string, string, 
 	if runner == nil {
 		return "", "", errors.New("adopt Git: runner is nil")
 	}
+	git, err := deps.Resolve("git")
+	if err != nil {
+		return "", "", fmt.Errorf("adopt Git: git not found: %w", err)
+	}
 	result, err := runner.Run(
 		context.Background(),
-		append([]string{deps.Executable("git")}, args...),
+		append([]string{git}, args...),
 		deps.RunOptions{Dir: root, Env: storeGitEnv(root)},
 	)
 	if err != nil {

@@ -20,7 +20,7 @@ func TestMain(m *testing.M) {
 		)
 	}
 	// Install convergence must not discover or signal another suite's painter.
-	procRoot, err := os.MkdirTemp("", "installer-proc-")
+	procRoot, err := os.MkdirTemp(paths.TempRoot(), "installer-proc-")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "installer process jail: %v\n", err)
 		os.Exit(1)

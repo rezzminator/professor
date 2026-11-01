@@ -16,7 +16,7 @@
 # in review. With no baseline, --measure writes today's tree as the first one.
 #
 # The checks are independent, so they run as concurrent background jobs and print
-# in the order they always have: C1 … C23, C25, C26, C27, then C24 (its own script). A job
+# in the order they always have: C1 … C23, C25, C26, C27, C28, then C24 (its own script). A job
 # that ends without leaving its CHECK line is reported as ERROR for that check,
 # never read as PASS.
 set -uo pipefail
@@ -540,6 +540,24 @@ chk_C27() {
   else say C27-identity-env ERROR "grep could not read the identity name declarations"; fi
 }
 
+# C28 one signal door: a pid is signalled only through internal/gather's door
+# (signal.go, signal_linux.go, signal_darwin.go), which re-reads the process's
+# start time, uid and argv before it sends, and pidalive.go's signal-0 probe.
+# Elsewhere a kill primitive (syscall or unix Kill, Killpg, Tgkill, Tkill,
+# PidfdSendSignal, a call or a function value), an *os.Process signalled
+# (.Process.Signal/.Kill) or obtained (os.FindProcess, os.StartProcess, an
+# *os.Process type, a variable holding cmd.Process) is counted per file. The
+# baseline holds only own-child sites, each with its reason in
+# .arch/exceptions.md. Count per file, only shrinks.
+chk_C28() {
+  grep -vE '^internal/gather/(signal|signal_linux|signal_darwin|pidalive)\.go$' "$L/src.list" > "$T/nodoor.list"
+  local primitive='\b(syscall|unix)\.(Kill|Killpg|Tgkill|Tkill|PidfdSendSignal)\b'
+  local process='\.Process\.(Signal|Kill)\(|\bos\.(FindProcess|StartProcess)\(|\*os\.Process\b|=[[:space:]]*[A-Za-z_][A-Za-z0-9_.]*\.Process[[:space:]]*$'
+  if g "$T/raw" "$T/nodoor.list" -nE "$primitive|$process"; then
+    count_by_file "$T/raw" > "$T/c28"; ratchet_counts C28-signal-door signal-door "$T/c28"
+  else say C28-signal-door ERROR "grep could not read sources"; fi
+}
+
 # C24 lives in its own script; its exit status (0 PASS · 1 FAIL · 2 ERROR) joins the
 # maximum below, and the status file is how the job hands it over.
 chk_C24() { bash "$PFM/scripts/arch-c24.sh" "$MODE"; echo $? > "$L/jobs/C24.status"; }
@@ -559,7 +577,7 @@ for id in C1-ceiling-src C2-ceiling-test C3-cmd-budget C4-cmd-primitives C5-tmux
   C12-claude-pointers C13-test-mirror C14-usage-parity C15-internal-usage \
   C16-env-outside-paths C17-dup-functions C18-engine-spellings C19-env-namespace \
   C20-codex-home C21-test-jail C22-host-doors C23-bare-log C25-testmain-jail C26-exec-write C27-identity-env \
-  C24-unwrapped-door; do
+  C28-signal-door C24-unwrapped-door; do
   job "$id"
 done
 

@@ -175,11 +175,12 @@ if ! pgrep -f "$eof_sleep" >/dev/null; then ok "a killed run leaves no process";
 # The stalled caller: a writer holding the run's stdin open without a beat. A fifo, not < <(…): the
 # command substitution would wait for its process substitution's exit.
 mkfifo "$T/stall"
-( exec 4>"$T/stall"; sleep 30 ) &
+( exec 4>"$T/stall"; exec sleep 30 ) &
+stall_writer=$!
 start=$(date +%s)
 out="$(bash "$SUT" run r-stall shared "$TREE" - wt -- bash -c 'sleep 61' 2>&1 <"$T/stall")"; rc=$?
 el=$(( $(date +%s) - start ))
-pkill -f '^sleep 30$' 2>/dev/null
+kill "$stall_writer" 2>/dev/null
 if [ "$rc" != 0 ] && [ "$el" -le 5 ]; then ok "a stalled heartbeat kills the run after PFM_FENCE_HEARTBEAT_S (${el}s)"; else bad "a stalled heartbeat kill" "rc=$rc after ${el}s" "$out"; fi
 if ! pgrep -f 'sleep 61' >/dev/null; then ok "a stalled run leaves no process"; else bad "a stalled run left a process" "$(pgrep -af 'sleep 61')"; fi
 ( srun r-kill shared 'sleep 62' >"$T/kill.out"; echo "$?" >"$T/kill.rc" ) &

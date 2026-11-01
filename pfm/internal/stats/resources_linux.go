@@ -2,10 +2,10 @@
 
 package stats
 
+import "github.com/rezzminator/professor/pfm/internal/paths"
+
 func readHostResources(root string, _ int64, _ int) (hostResources, error) {
-	if root == "" {
-		root = "/proc"
-	}
+	root = paths.ProcRootOr(root)
 	return readLinuxHostResources(root)
 }
 

@@ -3,12 +3,14 @@ package mcpserv
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
@@ -112,7 +114,7 @@ func TestChatCallCarriesTheThenArgument(t *testing.T) {
 // TestChatCaptureBoundsAreAppliedAfterTheCapture keeps the whole-scrollback
 // capture from returning an unbounded payload.
 func TestChatCaptureBoundsAreAppliedAfterTheCapture(t *testing.T) {
-	if _, err := os.Stat("/proc/self"); err != nil {
+	if _, err := os.Stat(filepath.Join(paths.SystemProcRoot(), "self")); err != nil {
 		t.Skip("no /proc")
 	}
 	setupBackendFixture(t)

@@ -27,6 +27,7 @@ import (
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/mockengine"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -68,7 +69,7 @@ func (m jailedTestMain) Run() int {
 		return 1
 	}
 	var err error
-	e2eStageRoot, err = os.MkdirTemp("", "pfm-e2e-stage-")
+	e2eStageRoot, err = os.MkdirTemp(paths.TempRoot(), "pfm-e2e-stage-")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "create e2e stage root: %v\n", err)
 		return 1

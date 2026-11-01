@@ -47,7 +47,7 @@ func execute(line string) error {
 		if err != nil {
 			return fmt.Errorf("find tmux: %w", err)
 		}
-		return Exec(path, append([]string{pfmtmux.Binary}, arguments...), deps.EnvironmentWith("TMUX", ""))
+		return Exec(path, append([]string{pfmtmux.Binary}, arguments...), pfmtmux.Environment())
 	}
 
 	path, err := LookPath("zsh")

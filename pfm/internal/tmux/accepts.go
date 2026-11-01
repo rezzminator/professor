@@ -1,9 +1,11 @@
 package tmux
 
 import (
+	"context"
 	"fmt"
-	"net"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
 // acceptsTimeout bounds one connect(): a unix connect to a dead socket refuses
@@ -17,7 +19,7 @@ const acceptsTimeout = 200 * time.Millisecond
 // with nothing behind it (or a path that cannot be reached), which the caller
 // reads as "down" — never as a reason to touch the file.
 func Accepts(socketPath string) error {
-	connection, err := net.DialTimeout("unix", socketPath, acceptsTimeout)
+	connection, err := deps.DialUnix(context.Background(), socketPath, acceptsTimeout)
 	if err != nil {
 		return fmt.Errorf("connect tmux socket %q: %w", socketPath, err)
 	}

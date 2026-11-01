@@ -5,15 +5,18 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/gather/gathertest"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -28,11 +31,14 @@ type fakeTmuxServer struct {
 	dead         bool
 	calls        int
 	failure      error
+	// pidReads counts ServerPID answers; from the second on, the server
+	// answers secondPID when that is set.
+	pidReads  int
+	secondPID int
 }
 
 type fakeTmux struct {
 	servers map[string]*fakeTmuxServer
-	signals []string
 }
 
 func (fake *fakeTmux) ListPanes(_ context.Context, socket string) ([]gather.ProbePane, error) {
@@ -55,34 +61,47 @@ func (fake *fakeTmux) ServerPID(_ context.Context, socket string) (int, error) {
 	if server == nil || server.dead {
 		return 0, fmt.Errorf("%w: %s", gather.ErrServerGone, socket)
 	}
+	server.pidReads++
+	if server.pidReads > 1 && server.secondPID != 0 {
+		return server.secondPID, nil
+	}
 	return server.pid, nil
 }
 
-func (fake *fakeTmux) signal(pid int, signal syscall.Signal) error {
-	for _, server := range fake.servers {
-		if server.pid != pid {
-			continue
+// reapUID is the uid the fake reaper's door acts as.
+const reapUID = 1000
+
+// reapTable is the process table behind the fake servers: each server's pid
+// runs tmux with the command line pfm starts a chat server with, naming its
+// socket under dir by -S.
+func reapTable(dir string, fake *fakeTmux) *gathertest.Table {
+	table := &gathertest.Table{Processes: map[int]*gathertest.Process{}}
+	for socket, server := range fake.servers {
+		table.Processes[server.pid] = &gathertest.Process{
+			Start: uint64(5000 + server.pid),
+			UID:   reapUID,
+			Argv:  []string{"/usr/bin/tmux", "-S", filepath.Join(dir, socket), "new-session", "-d", "-s", "chat"},
+			Exe:   "/usr/bin/tmux",
 		}
-		if server.dead {
-			return syscall.ESRCH
-		}
-		if signal == 0 {
-			return nil
-		}
-		fake.signals = append(fake.signals, fmt.Sprintf("%d %v", pid, signal))
-		if (signal == syscall.SIGTERM && !server.ignoreTERM) || (signal == syscall.SIGKILL && !server.ignoreKILL) {
-			server.dead = true
-		}
-		return nil
 	}
-	return syscall.ESRCH
+	return table
 }
 
-type fakeReapClock struct{ now time.Time }
-
-func (clock *fakeReapClock) sleep(_ context.Context, duration time.Duration) error {
-	clock.now = clock.now.Add(duration)
-	return nil
+// reapKernel delivers signals to the fake servers: a server that honours a
+// signal exits, its pid a zombie and its socket gone.
+func reapKernel(fake *fakeTmux, table *gathertest.Table) *gathertest.Kernel {
+	return &gathertest.Kernel{OnSignal: func(pid int, sig syscall.Signal) error {
+		for _, server := range fake.servers {
+			if server.pid != pid {
+				continue
+			}
+			if (sig == syscall.SIGTERM && !server.ignoreTERM) || (sig == syscall.SIGKILL && !server.ignoreKILL) {
+				server.dead = true
+				table.Processes[pid].Zombie = true
+			}
+		}
+		return nil
+	}}
 }
 
 // tmuxServersFixture makes a real (closed) unix socket file per name under a
@@ -115,12 +134,10 @@ func fleetFixture(t *testing.T) (string, *fakeTmux) {
 	}}
 }
 
-func newFakeReaper(fake *fakeTmux, clock *fakeReapClock) TmuxReaper {
+func newFakeReaper(fake *fakeTmux, table *gathertest.Table, kernel *gathertest.Kernel) TmuxReaper {
 	return TmuxReaper{
 		Client: fake,
-		Signal: fake.signal,
-		Sleep:  clock.sleep,
-		Now:    func() time.Time { return clock.now },
+		Door:   gathertest.Door(table, kernel, reapUID, os.Getpid()),
 		Wait:   5 * time.Second,
 		Poll:   100 * time.Millisecond,
 	}
@@ -137,9 +154,6 @@ func TestTmuxServersRowsAnAbandonedEmptyServerWithTheReapFix(t *testing.T) {
 			"so it counts as an open chat",
 		"pfm chat ls --reap (SIGTERM, then SIGKILL after 5s; a server with a live pane is never touched)",
 	})
-	if len(fake.signals) != 0 {
-		t.Fatalf("the detector signalled: %v", fake.signals)
-	}
 }
 
 // A failed probe is a row naming the failure, never an empty "nothing found".
@@ -162,35 +176,147 @@ func TestTmuxServersProbeFailureReadsAsFailure(t *testing.T) {
 	}
 }
 
-func TestReapSendsKillAfterTheBoundedWaitWhenTermIsIgnored(t *testing.T) {
-	dir, fake := fleetFixture(t)
-	fake.servers["cc-1-2-3"].ignoreTERM = true
-	clock := &fakeReapClock{now: time.Unix(1_000_000, 0)}
-	start := clock.now
-	var stdout bytes.Buffer
-	failed, err := ReapTmuxServers(context.Background(), dir, newFakeReaper(fake, clock), &stdout)
-	if err != nil || failed != 0 {
-		t.Fatalf("reap failed=%d err=%v stdout=%q", failed, err, stdout.String())
+// The reap signals only the server it identified: the pid the server names,
+// running tmux that names this socket, as the same generation, owner and
+// command line at every signal. Changes land as the door opens the pid,
+// between the identity read and the signal.
+func TestReapSignalsOnlyTheIdentifiedServer(t *testing.T) {
+	term := gathertest.Sent{PID: 101, Sig: syscall.SIGTERM}
+	kill := gathertest.Sent{PID: 101, Sig: syscall.SIGKILL}
+	tests := []struct {
+		name   string
+		server func(server *fakeTmuxServer, process *gathertest.Process, dir string)
+		onOpen func(process *gathertest.Process, opens int)
+		sent   []gathertest.Sent
+		failed int
+		stdout string
+	}{
+		{
+			name:   "a server that honours SIGTERM ends by it",
+			sent:   []gathertest.Sent{term},
+			stdout: "cc-1-2-3 (pid 101): ended by SIGTERM\n",
+		},
+		{
+			name: "a server started by -L label is the same server",
+			server: func(_ *fakeTmuxServer, process *gathertest.Process, _ string) {
+				process.Argv = []string{"tmux", "-L", "cc-1-2-3", "new-session", "-d"}
+			},
+			sent:   []gathertest.Sent{term},
+			stdout: "cc-1-2-3 (pid 101): ended by SIGTERM\n",
+		},
+		{
+			name:   "a server ignoring SIGTERM gets SIGKILL after the bounded wait",
+			server: func(server *fakeTmuxServer, _ *gathertest.Process, _ string) { server.ignoreTERM = true },
+			sent:   []gathertest.Sent{term, kill},
+			stdout: "cc-1-2-3 (pid 101): ignored SIGTERM for 5s, ended by SIGKILL\n",
+		},
+		{
+			name: "a server surviving SIGKILL is reported running",
+			server: func(server *fakeTmuxServer, _ *gathertest.Process, _ string) {
+				server.ignoreTERM, server.ignoreKILL = true, true
+			},
+			sent:   []gathertest.Sent{term, kill},
+			failed: 1,
+			stdout: "cc-1-2-3 (pid 101): still running 5s after SIGKILL\n",
+		},
+		{
+			name:   "a pid reused before SIGTERM is never signalled",
+			onOpen: func(process *gathertest.Process, _ int) { process.Start = 9999 },
+			stdout: "cc-1-2-3: already gone\n",
+		},
+		{
+			name:   "a pid now another user's is never signalled",
+			onOpen: func(process *gathertest.Process, _ int) { process.UID = 0 },
+			failed: 1,
+			stdout: "cc-1-2-3 (pid 101): left alone, the process planned as " +
+				"[\"/usr/bin/tmux\" \"-S\" \"{dir}/cc-1-2-3\" \"new-session\" \"-d\" \"-s\" \"chat\"] " +
+				"changed before SIGTERM\n",
+		},
+		{
+			name:   "a pid running another command line is never signalled",
+			onOpen: func(process *gathertest.Process, _ int) { process.Argv = []string{"/usr/bin/vim"} },
+			failed: 1,
+			stdout: "cc-1-2-3 (pid 101): left alone, the process planned as " +
+				"[\"/usr/bin/tmux\" \"-S\" \"{dir}/cc-1-2-3\" \"new-session\" \"-d\" \"-s\" \"chat\"] " +
+				"changed before SIGTERM\n",
+		},
+		{
+			name:   "SIGKILL is withheld from a process that changed after SIGTERM",
+			server: func(server *fakeTmuxServer, _ *gathertest.Process, _ string) { server.ignoreTERM = true },
+			onOpen: func(process *gathertest.Process, opens int) {
+				if opens == 2 {
+					process.Argv = []string{"/usr/bin/vim"}
+				}
+			},
+			sent:   []gathertest.Sent{term},
+			failed: 1,
+			stdout: "cc-1-2-3 (pid 101): not ended: pid 101 changed identity after SIGTERM; SIGKILL withheld\n",
+		},
+		{
+			name: "a pid whose command line names another socket is never signalled",
+			server: func(_ *fakeTmuxServer, process *gathertest.Process, dir string) {
+				process.Argv = []string{"/usr/bin/tmux", "-S", filepath.Join(dir, "cc-9-9-9"), "new-session"}
+			},
+			failed: 1,
+			stdout: "cc-1-2-3 (pid 101): left alone, its command line " +
+				"[\"/usr/bin/tmux\" \"-S\" \"{dir}/cc-9-9-9\" \"new-session\"] is not tmux naming {dir}/cc-1-2-3\n",
+		},
+		{
+			name: "a pid that is not tmux is never signalled",
+			server: func(_ *fakeTmuxServer, process *gathertest.Process, _ string) {
+				process.Argv = []string{"/usr/bin/vim", "-L", "cc-1-2-3"}
+			},
+			failed: 1,
+			stdout: "cc-1-2-3 (pid 101): left alone, its command line " +
+				"[\"/usr/bin/vim\" \"-L\" \"cc-1-2-3\"] is not tmux naming {dir}/cc-1-2-3\n",
+		},
+		{
+			name:   "a server owned by another user is refused",
+			server: func(_ *fakeTmuxServer, process *gathertest.Process, _ string) { process.UID = 0 },
+			failed: 1,
+			stdout: "cc-1-2-3 (pid 101): not ended: pid 101: signal refused: runs as uid 0, not 1000\n",
+		},
+		{
+			name:   "a server naming another pid on the second read is left alone",
+			server: func(server *fakeTmuxServer, _ *gathertest.Process, _ string) { server.secondPID = 202 },
+			failed: 1,
+			stdout: "cc-1-2-3: left alone, it answered pid 101 then 202\n",
+		},
 	}
-	if want := []string{"101 terminated", "101 killed"}; !reflect.DeepEqual(fake.signals, want) {
-		t.Fatalf("signals = %v, want %v (and nothing to the live or foreign server)", fake.signals, want)
-	}
-	if waited := clock.now.Sub(start); waited < 5*time.Second {
-		t.Fatalf("SIGKILL came after %s, before the 5s bounded wait", waited)
-	}
-	if want := "cc-1-2-3 (pid 101): ignored SIGTERM for 5s, ended by SIGKILL\n"; stdout.String() != want {
-		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
-	}
-}
-
-func TestReapEndsAServerThatHonoursTerm(t *testing.T) {
-	dir, fake := fleetFixture(t)
-	clock := &fakeReapClock{now: time.Unix(1_000_000, 0)}
-	var stdout bytes.Buffer
-	failed, err := ReapTmuxServers(context.Background(), dir, newFakeReaper(fake, clock), &stdout)
-	if err != nil || failed != 0 || !reflect.DeepEqual(fake.signals, []string{"101 terminated"}) ||
-		stdout.String() != "cc-1-2-3 (pid 101): ended by SIGTERM\n" {
-		t.Fatalf("failed=%d err=%v signals=%v stdout=%q", failed, err, fake.signals, stdout.String())
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dir, fake := fleetFixture(t)
+			table := reapTable(dir, fake)
+			if test.server != nil {
+				test.server(fake.servers["cc-1-2-3"], table.Processes[101], dir)
+			}
+			kernel := reapKernel(fake, table)
+			kernel.OnOpen = func(pid int) error {
+				if test.onOpen != nil && pid == 101 {
+					test.onOpen(table.Processes[101], kernel.Opens)
+				}
+				return nil
+			}
+			reaper := newFakeReaper(fake, table, kernel)
+			start := reaper.Door.Clock.Now()
+			var stdout bytes.Buffer
+			failed, err := ReapTmuxServers(context.Background(), dir, reaper, &stdout)
+			if err != nil {
+				t.Fatalf("reap: %v", err)
+			}
+			want := strings.ReplaceAll(test.stdout, "{dir}", dir)
+			if failed != test.failed || stdout.String() != want {
+				t.Fatalf("failed=%d stdout=%q, want failed=%d stdout=%q", failed, stdout.String(), test.failed, want)
+			}
+			if !reflect.DeepEqual(kernel.Sent, test.sent) {
+				t.Fatalf("signals = %v, want %v (and nothing to the live or foreign server)", kernel.Sent, test.sent)
+			}
+			if slices.Contains(test.sent, kill) {
+				if waited := reaper.Door.Clock.Now().Sub(start); waited < 5*time.Second {
+					t.Fatalf("SIGKILL came after %s, before the 5s bounded wait", waited)
+				}
+			}
+		})
 	}
 }
 
@@ -200,33 +326,25 @@ func TestReapLeavesAServerThatGainedAPane(t *testing.T) {
 	// The probe reads it twice (one retry on any failure); the reap's re-read
 	// is the third call.
 	fake := &fakeTmux{servers: map[string]*fakeTmuxServer{"cc-1-2-3": {pid: 101, paneFromCall: 3}}}
+	table := reapTable(dir, fake)
+	kernel := reapKernel(fake, table)
 	var stdout bytes.Buffer
-	failed, err := ReapTmuxServers(context.Background(), dir, newFakeReaper(fake, &fakeReapClock{}), &stdout)
-	if err != nil || failed != 0 || len(fake.signals) != 0 ||
+	failed, err := ReapTmuxServers(context.Background(), dir, newFakeReaper(fake, table, kernel), &stdout)
+	if err != nil || failed != 0 || len(kernel.Sent) != 0 ||
 		stdout.String() != "cc-1-2-3: left alone, it now holds 1 pane(s)\n" {
-		t.Fatalf("failed=%d err=%v signals=%v stdout=%q", failed, err, fake.signals, stdout.String())
-	}
-}
-
-func TestReapReportsAServerThatSurvivesKill(t *testing.T) {
-	dir := tmuxServersFixture(t, "cc-1-2-3")
-	fake := &fakeTmux{servers: map[string]*fakeTmuxServer{
-		"cc-1-2-3": {pid: 101, ignoreTERM: true, ignoreKILL: true},
-	}}
-	var stdout bytes.Buffer
-	failed, err := ReapTmuxServers(context.Background(), dir, newFakeReaper(fake, &fakeReapClock{}), &stdout)
-	if err != nil || failed != 1 || stdout.String() != "cc-1-2-3 (pid 101): still running 5s after SIGKILL\n" {
-		t.Fatalf("failed=%d err=%v stdout=%q", failed, err, stdout.String())
+		t.Fatalf("failed=%d err=%v signals=%v stdout=%q", failed, err, kernel.Sent, stdout.String())
 	}
 }
 
 func TestReapWithNothingAbandonedSaysSo(t *testing.T) {
 	dir := tmuxServersFixture(t, "cx-4-5-6", "work")
 	fake := &fakeTmux{servers: map[string]*fakeTmuxServer{"cx-4-5-6": {pid: 102, panes: 1}, "work": {pid: 103}}}
+	table := reapTable(dir, fake)
+	kernel := reapKernel(fake, table)
 	var stdout bytes.Buffer
-	failed, err := ReapTmuxServers(context.Background(), dir, newFakeReaper(fake, &fakeReapClock{}), &stdout)
-	if err != nil || failed != 0 || len(fake.signals) != 0 ||
+	failed, err := ReapTmuxServers(context.Background(), dir, newFakeReaper(fake, table, kernel), &stdout)
+	if err != nil || failed != 0 || len(kernel.Sent) != 0 ||
 		stdout.String() != "no abandoned empty pfm tmux server under "+dir+"\n" {
-		t.Fatalf("failed=%d err=%v signals=%v stdout=%q", failed, err, fake.signals, stdout.String())
+		t.Fatalf("failed=%d err=%v signals=%v stdout=%q", failed, err, kernel.Sent, stdout.String())
 	}
 }

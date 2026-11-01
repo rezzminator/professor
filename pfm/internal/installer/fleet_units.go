@@ -6,11 +6,12 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/servicemanager"
 )
 
 const (
 	fleetUnitSettle = 3 * time.Second
-	systemctlUser   = "--user"
 	unitStateActive = "active"
 )
 
@@ -26,17 +27,17 @@ func unitStateRunning(state string) (running, known bool) {
 }
 
 func fleetUnitState(ctx context.Context, runner CommandRunner, unit string) (string, error) {
-	args := []string{systemctlUser, "show", "--property=ActiveState", "--value", unit}
-	probe := "systemctl " + strings.Join(args, " ")
+	args := []string{"show", "--property=ActiveState", "--value", unit}
 	reader, ok := runner.(OutputRunner)
 	if !ok {
+		probe := strings.Join(servicemanager.UserSystemctlArgv(args...), " ")
 		return "", fmt.Errorf("%s: command runner cannot read output", probe)
 	}
-	output, err := reader.Output(ctx, "systemctl", args...)
-	if err != nil {
-		return "", fmt.Errorf("%s: %w", probe, err)
+	answer := servicemanager.UserSystemctl(ctx, commandOutput{reader}, args...)
+	if err := answer.Err(); err != nil {
+		return "", fmt.Errorf("%s: %w", answer.Command(), err)
 	}
-	return strings.TrimSpace(string(output)), nil
+	return strings.TrimSpace(string(answer.Result.Stdout)), nil
 }
 
 func verifyFleetUnitsActive(ctx context.Context, runner CommandRunner, units []string) error {
@@ -57,6 +58,8 @@ func verifyFleetUnitsActive(ctx context.Context, runner CommandRunner, units []s
 	return errors.Join(failures...)
 }
 
-func userSystemctl(ctx context.Context, runner CommandRunner, args ...string) error {
-	return runner.Run(ctx, "systemctl", append([]string{systemctlUser}, args...)...)
+// userSystemctl runs `systemctl --user args…` once through the install's
+// runner.
+func (installer *engine) userSystemctl(ctx context.Context, args ...string) servicemanager.Answer {
+	return servicemanager.UserSystemctl(ctx, commandRun{installer.options.Runner}, args...)
 }

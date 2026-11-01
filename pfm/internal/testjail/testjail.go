@@ -45,11 +45,13 @@ func Run(m *testing.M) int {
 	if !inFence() && !onHostedRunner() {
 		return runInFence() // fence.go: no test ever runs on the machine that started it
 	}
-	// A chat exports its live state store's paths; a jailed test must open the jail's own.
+	// A chat exports its live state store's paths and its install's mark; a jailed
+	// test must open the jail's own store, and a process it starts must never carry
+	// the operator's mark, or a stop acting for the operator's install would own it.
 	// A test binary a jailed test re-execs as its own helper inherits jailMarkerEnv
-	// and keeps the store paths that test handed it.
+	// and keeps the store paths and the jail mark that test handed it.
 	if _, child := (paths.OSEnv{}).Lookup(jailMarkerEnv); !child {
-		for _, name := range []string{"PFM_STATE_DB", "PFM_CACHE_DB"} {
+		for _, name := range []string{"PFM_STATE_DB", "PFM_CACHE_DB", paths.EnvInstallMark} {
 			if err := os.Unsetenv(name); err != nil {
 				warnSetup("clear %s: %v", name, err)
 				return 1
@@ -132,8 +134,12 @@ func Run(m *testing.M) int {
 	}
 	// No test fetches a source-fetched global skill from its public repo: an
 	// install run in the jail skips the fetch and doctor reports OFFLINE; no
-	// price refresh fetches a publisher's pricing page.
-	for _, name := range []string{paths.EnvSkillSourcesOffline, paths.EnvThemesOffline, paths.EnvPricesOffline} {
+	// price refresh fetches a publisher's pricing page; no update check asks
+	// GitHub and no usage fetch calls the provider.
+	for _, name := range []string{
+		paths.EnvSkillSourcesOffline, paths.EnvThemesOffline, paths.EnvPricesOffline,
+		paths.EnvUpdateCheckOffline, paths.EnvUsageOffline,
+	} {
 		if err := os.Setenv(name, "1"); err != nil {
 			warnSetup("set %s: %v", name, err)
 			return 1
@@ -150,15 +156,15 @@ func Run(m *testing.M) int {
 	if code := pinGoDirs(); code != 0 {
 		return code
 	}
-	base, err := filepath.EvalSymlinks(os.TempDir())
-	if short, shortErr := filepath.EvalSymlinks("/tmp"); shortErr == nil {
+	base, err := filepath.EvalSymlinks(paths.TempRoot())
+	if short, shortErr := filepath.EvalSymlinks(paths.SystemTempDir()); shortErr == nil {
 		base, err = short, nil
 	}
 	if err != nil {
 		// No canonical base to stand on. Run anyway rather than failing the
 		// whole package: on a platform where the default temp dir is already
 		// short and canonical, nothing here was needed in the first place.
-		cleanup, setupErr := jailHome(os.TempDir())
+		cleanup, setupErr := jailHome(paths.TempRoot())
 		defer cleanup()
 		if setupErr != nil {
 			warnSetup("%v", setupErr)
@@ -308,8 +314,8 @@ func ShortRoot(t *testing.T) string {
 // CreateShortRoot returns an unregistered short root for harnesses that do not
 // have a *testing.T. The caller owns cleanup.
 func CreateShortRoot() (string, error) {
-	base := os.TempDir()
-	if short, err := filepath.EvalSymlinks("/tmp"); err == nil {
+	base := paths.TempRoot()
+	if short, err := filepath.EvalSymlinks(paths.SystemTempDir()); err == nil {
 		base = short
 	}
 	return os.MkdirTemp(base, "j")
@@ -363,6 +369,9 @@ func fleetSetenv(t *testing.T, setenv func(string, string)) string {
 	setenv(paths.EnvCodexHome, filepath.Join(root, codexHome))
 	setenv(paths.EnvTmuxDir, filepath.Join(root, "tmux"))
 	setenv(paths.EnvHome, filepath.Join(root, "home"))
+	// Every process the jail starts carries the jail home's install mark, as a
+	// pfm run from that home marks its children: never the operator's.
+	setenv(paths.EnvInstallMark, paths.InstallMark(filepath.Join(root, "home")))
 	configPath := filepath.Join(root, "home", "pfm.config.json")
 	if err := os.WriteFile(configPath, []byte("{\"version\":2}\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -621,6 +630,7 @@ func CleanHome(t *testing.T, dirs []string, files map[string]string) config.Runt
 	}
 	t.Setenv("HOME", home)
 	t.Setenv(paths.EnvHome, home)
+	t.Setenv(paths.EnvInstallMark, paths.InstallMark(home)) // as fleetSetenv: the jail home's mark
 	configPath := filepath.Join(home, "pfm.config.json")
 	if err := os.WriteFile(configPath, []byte("{\"version\":2,\"ask\":{\"engine\":\"claude\"}}\n"), 0o600); err != nil {
 		t.Fatal(err)

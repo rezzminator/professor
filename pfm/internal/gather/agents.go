@@ -47,7 +47,7 @@ func detectAgentsFrom(
 		if !IsClaudeCommand(cmdline, binaries...) {
 			continue
 		}
-		sessionIDs := claudeSessionIDs(cmdline)
+		sessionIDs := ClaudeSessionIDs(cmdline)
 		environment, err := proc.Environ(pid)
 		if err != nil {
 			continue
@@ -162,14 +162,18 @@ func IsCodexCommand(cmdline []string, binaries ...string) bool {
 	return pfmengine.MatchCommand(pfmengine.Codex, cmdline, false, binaries...)
 }
 
-func claudeSessionIDs(cmdline []string) []string {
+// ClaudeSessionIDs is every session a Claude argv names, in the forms Claude
+// takes one: --session-id and --resume (or -r) as a separate word or with "=",
+// the value a session UUID or a transcript path whose base name is one. A
+// session id elsewhere in argv (a prompt, a path argument) names nothing.
+func ClaudeSessionIDs(cmdline []string) []string {
 	seen := make(map[string]struct{})
 	sessionIDs := make([]string, 0, 2)
 	for index := 1; index < len(cmdline); index++ {
 		argument := cmdline[index]
 		var value string
 		switch {
-		case argument == "--session-id" || argument == "--resume":
+		case argument == "--session-id" || argument == "--resume" || argument == "-r":
 			if index+1 >= len(cmdline) {
 				continue
 			}

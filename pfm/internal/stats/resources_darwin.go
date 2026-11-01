@@ -64,9 +64,13 @@ func readDarwinHostResources(now int64, cpuCount int) (hostResources, error) {
 }
 
 func readDarwinProcesses() (map[int]processSample, uint64, []string, error) {
+	ps, err := deps.Resolve("ps")
+	if err != nil {
+		return nil, 0, nil, fmt.Errorf("sample Darwin process counters: resolve ps: %w", err)
+	}
 	result, err := obs.Runner(deps.RealRunner{}).Run(
 		context.Background(),
-		[]string{deps.Executable("ps"), "-A", "-o", "pid=,ppid=,time=,rss=,comm="},
+		[]string{ps, "-A", "-o", "pid=,ppid=,time=,rss=,comm="},
 		deps.RunOptions{},
 	)
 	if err == nil && result.ExitCode != 0 {
@@ -147,8 +151,12 @@ func readDarwinHeader() (Header, error) {
 	if err != nil {
 		return Header{}, fmt.Errorf("read Darwin host memory size: %w", err)
 	}
+	vmStat, err := deps.Resolve("vm_stat")
+	if err != nil {
+		return Header{}, fmt.Errorf("sample Darwin host memory: resolve vm_stat: %w", err)
+	}
 	result, err := obs.Runner(deps.RealRunner{}).
-		Run(context.Background(), []string{deps.Executable("vm_stat")}, deps.RunOptions{})
+		Run(context.Background(), []string{vmStat}, deps.RunOptions{})
 	if err == nil && result.ExitCode != 0 {
 		err = fmt.Errorf("exit status %d", result.ExitCode)
 	}

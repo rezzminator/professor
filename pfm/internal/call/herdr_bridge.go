@@ -237,31 +237,9 @@ func (prover bridgeProver) serverSocket(argv []string) (string, error) {
 	if len(argv) == 0 || argv[0] == "" {
 		return "", fmt.Errorf("not a tmux client: empty command line %q", argv)
 	}
-	if filepath.Base(argv[0]) != "tmux" {
+	label, socketPath, isTmux := pfmtmux.NamedServer(argv)
+	if !isTmux {
 		return "", fmt.Errorf("%w: %q", errNotTmuxClient, argv)
-	}
-	var label, socketPath string
-	for index := 1; index < len(argv); index++ {
-		argument := argv[index]
-		if argument == "--" || !strings.HasPrefix(argument, "-") || argument == "-" {
-			break
-		}
-		flag, value := argument[:2], argument[2:]
-		switch flag {
-		case "-L", "-S", "-f", "-c", "-T":
-			if value == "" && index+1 < len(argv) {
-				index++
-				value = argv[index]
-			}
-		default:
-			continue
-		}
-		switch flag {
-		case "-L":
-			label = value
-		case "-S":
-			socketPath = value
-		}
 	}
 	if socketPath != "" {
 		clean := filepath.Clean(socketPath)

@@ -40,6 +40,21 @@ func TestRunHookCommandTimeoutDoesNotWaitForOrphan(t *testing.T) {
 	}
 }
 
+// TestHookShellNamesAMissingShell: with no sh on PATH both hook runners report
+// the missing shell before any exec, never a bare-name exec failure later.
+func TestHookShellNamesAMissingShell(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	notFound := `sh not found: exec: "sh": executable file not found in $PATH`
+	_, hookErr := runHookCommand(context.Background(), "true", nil, t.TempDir(), os.Environ(), time.Second)
+	if hookErr == nil || hookErr.Error() != notFound {
+		t.Fatalf("runHookCommand error = %v, want %q", hookErr, notFound)
+	}
+	_, lineErr := invokeStatusLine(context.Background(), "true", map[string]string{}, t.TempDir(), os.Environ())
+	if want := "statusline: " + notFound; lineErr == nil || lineErr.Error() != want {
+		t.Fatalf("invokeStatusLine error = %v, want %q", lineErr, want)
+	}
+}
+
 func TestRunHookCommandReadsAnswerWithoutWaitingForBackgroundChild(t *testing.T) {
 	command := `printf '%s\n' '{"decision":"block","reason":"orphan"}'; sleep 5 &`
 	start := time.Now()

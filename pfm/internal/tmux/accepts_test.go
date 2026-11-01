@@ -5,10 +5,12 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 func TestAcceptsSeesALiveSocketAndRefusesADeadOne(t *testing.T) {
-	directory, err := os.MkdirTemp("", "acc")
+	directory, err := os.MkdirTemp(paths.TempRoot(), "acc")
 	if err != nil {
 		t.Fatal(err)
 	}

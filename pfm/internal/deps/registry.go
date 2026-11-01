@@ -11,6 +11,7 @@ import (
 	"unicode"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 const (
@@ -45,11 +46,12 @@ type Entry struct {
 
 // Options materializes the config- and platform-owned registry entries.
 type Options struct {
-	Home         string
-	ClaudeBinary string
-	CodexBinary  string
-	GOOS         string
-	GOARCH       string
+	Home           string
+	ClaudeBinary   string
+	CodexBinary    string
+	OpenCodeBinary string
+	GOOS           string
+	GOARCH         string
 }
 
 var fixedCommands = []Entry{
@@ -180,6 +182,33 @@ var fixedCommands = []Entry{
 		InstallHint: "install systemd to spawn chats from the MCP service",
 	},
 	{
+		Name:        "vm_stat",
+		Purpose:     "Darwin host memory sampling",
+		Platforms:   []string{platformDarwin},
+		InstallHint: "restore the system vm_stat command",
+	},
+	{
+		Name:        "defaults",
+		Purpose:     "Darwin appearance detection for theme following",
+		Platforms:   []string{platformDarwin},
+		InstallHint: "restore the system defaults command",
+	},
+	{
+		Name:        "sudo",
+		Purpose:     "removing root-owned managed files during install cleanup",
+		InstallHint: "install sudo",
+	},
+	{
+		Name:        "uv",
+		Purpose:     "provisioning rumdl during pfm install",
+		InstallHint: "install uv (https://docs.astral.sh/uv/)",
+	},
+	{
+		Name:        "herdr",
+		Purpose:     "attaching to Herdr chat panes",
+		InstallHint: "install Herdr to attach Herdr chats",
+	},
+	{
 		Name:        "launchctl",
 		Purpose:     "Darwin launch-agent wiring",
 		Required:    true,
@@ -252,6 +281,19 @@ func Registry(options ...Options) []Entry {
 			ProbeHome: true, AccountChecks: accountChecks,
 		})
 	}
+	// OpenCode has no self-doctor command, so its row probes the version only,
+	// and outside a throwaway home: --version writes no engine state.
+	openCode := pfmengine.MustLookup(pfmengine.OpenCode)
+	openCodeBinary := strings.TrimSpace(resolved.OpenCodeBinary)
+	if openCodeBinary == "" {
+		openCodeBinary = openCode.Binary
+	}
+	entries = append(entries, Entry{
+		Name: openCode.LongName, Command: openCodeBinary, Engine: pfmengine.OpenCode,
+		Purpose:     "configured " + openCode.Short + " engine",
+		VersionArgs: []string{versionFlag}, Parse: firstVersion,
+		InstallHint: "install the configured " + openCode.Short + " CLI",
+	})
 	for index := range entries {
 		if entries[index].Command == "" {
 			entries[index].Command = entries[index].Name
@@ -288,7 +330,7 @@ var (
 )
 
 func resolveCacheKey(name string) string {
-	return name + "\x00" + os.Getenv("PATH")
+	return name + "\x00" + paths.OSEnv{}.Get("PATH")
 }
 
 // resolveCached returns a memoized resolution for name, invalidating it if
@@ -346,8 +388,12 @@ func Resolve(name string) (string, error) {
 	return path, nil
 }
 
-// Executable preserves exec.Cmd's normal not-found error while ensuring that
-// every successful PATH lookup crosses Resolve.
+// Executable resolves name through Resolve and, when the lookup fails, hands
+// back the bare name, so a missing binary surfaces only later as exec.Cmd's
+// not-found error. A caller that can report a missing binary calls Resolve
+// and returns its error. tmux/tmux.go keeps the fallback on purpose:
+// tmux.CouldNotRun classifies exec.Cmd's own not-found error as "could not
+// look".
 func Executable(name string) string {
 	path, err := Resolve(name)
 	if err != nil {

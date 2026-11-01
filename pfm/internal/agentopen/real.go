@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"syscall"
 
 	"github.com/rezzminator/professor/pfm/internal/action"
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
@@ -164,18 +163,6 @@ func (processes RealProcesses) Processes(ctx context.Context) ([]Process, error)
 func (RealProcesses) Alive(pid int) bool {
 	alive, err := gather.ProcessAlive(pid)
 	return alive || err != nil && pid > 0
-}
-
-func (RealProcesses) Terminate(pid int) error {
-	return gather.Terminate(pid)
-}
-
-func (RealProcesses) Kill(pid int) error {
-	err := syscall.Kill(pid, syscall.SIGKILL)
-	if errors.Is(err, syscall.ESRCH) {
-		return nil
-	}
-	return err
 }
 
 func (processes RealProcesses) ParentComm(pid int) string {

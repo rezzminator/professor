@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Self-test for scripts/arch-check.sh's C1, C5, C9, C10, C12, C23, C25, C26 and C27 ratchets and for
+# Self-test for scripts/arch-check.sh's C1, C5, C9, C10, C12, C23, C25, C26, C27 and C28 ratchets and for
 # how it folds its concurrent checks: print order, exit status, and a check job
 # that dies. It runs arch-check.sh against a throwaway git fixture (PFM=<fixture>),
 # never against this repo, and asserts on the relevant CHECK line rather than the
@@ -513,6 +513,45 @@ else
   bad "C27: could not build the git fixture"
 fi
 
+# ---- C28: a pid is signalled only through internal/gather's signal door ---
+
+REPO_C28="$T/signal-door"
+if fixture "$REPO_C28"; then
+  : > "$REPO_C28/.arch/signal-door.txt"
+  mkdir -p "$REPO_C28/internal/gather" "$REPO_C28/internal/sweep"
+  # The door's own files send and probe; nothing else is planted yet.
+  printf 'package gather\n\nimport "golang.org/x/sys/unix"\n\nfunc send(pid int) error { return unix.Kill(pid, unix.SIGTERM) }\n' > "$REPO_C28/internal/gather/signal_darwin.go"
+  printf 'package gather\n\nimport "syscall"\n\nfunc ProbeProcess(pid int) error { return syscall.Kill(pid, 0) }\n' > "$REPO_C28/internal/gather/pidalive.go"
+  git -C "$REPO_C28" -c user.email=t@example.invalid -c user.name=t add -A 2>/dev/null
+  line=$(check_line "$REPO_C28" C28-signal-door)
+  if [[ "$line" == *PASS* && "$line" == *"0 in 0 keys"* ]]; then
+    ok "C28: the door's own sends and its signal-0 probe pass"
+  else
+    bad "C28: expected PASS for kill calls inside the door's files" "$line"
+  fi
+
+  # Four planted signal paths outside the door: a kill primitive as a function
+  # value, a process found by pid, an *os.Process signalled, and one held.
+  printf 'package sweep\n\nimport (\n\t"os"\n\t"os/exec"\n\t"syscall"\n)\n\nvar send = syscall.Kill\n\nfunc stop(cmd *exec.Cmd, pid int) {\n\tfound, _ := os.FindProcess(pid)\n\t_ = found\n\t_ = cmd.Process.Signal(os.Interrupt)\n\theld := cmd.Process\n\t_ = held\n}\n' > "$REPO_C28/internal/sweep/sweep.go"
+  git -C "$REPO_C28" -c user.email=t@example.invalid -c user.name=t add -A 2>/dev/null
+  line=$(check_line "$REPO_C28" C28-signal-door)
+  if [[ "$line" == *FAIL* && "$line" == *"internal/sweep/sweep.go (new 4)"* && "$line" != *internal/gather* ]]; then
+    ok "C28: a kill primitive, a found process, a signalled and a held *os.Process outside the door FAIL, counted per file"
+  else
+    bad "C28: expected FAIL counting the four planted signal paths" "$line"
+  fi
+
+  printf 'internal/sweep/sweep.go 4\n' > "$REPO_C28/.arch/signal-door.txt"
+  line=$(check_line "$REPO_C28" C28-signal-door)
+  if [[ "$line" == *PASS* && "$line" == *"4 in 1 keys"* ]]; then
+    ok "C28: baselined own-child signals pass"
+  else
+    bad "C28: expected PASS once the signals are baselined" "$line"
+  fi
+else
+  bad "C28: could not build the git fixture"
+fi
+
 # ---- C5: tmux and herdr run only through their façades ---------------------
 
 REPO_C5="$T/tmux-runner"
@@ -607,7 +646,7 @@ fi
 
 # ---- the concurrent checks: order, exit status, a job that dies ------------
 
-# green_fixture <dir>: a tree on which all 27 checks PASS — the fixture plus what
+# green_fixture <dir>: a tree on which all 28 checks PASS — the fixture plus what
 # C12, C14 and C15 parse, an internal/mcpserv package for C10, a jailed test file
 # for C21 and C25, and the C24 script arch-check.sh runs from $PFM/scripts, with
 # every baseline the --measure of that tree writes.
@@ -656,18 +695,18 @@ run_all() {
   out=$(env -u PFM_DEV_REPO_GIT_DIR -u PFM_DEV_REPO_WORK_TREE "$@" PFM="$dir" bash "$SUT" </dev/null 2>/dev/null); rc=$?
 }
 
-# Today's order: C1 … C23, then C25, C26, C27, then C24 (its own script, last).
-EXPECTED_ORDER="C1-ceiling-src C2-ceiling-test C3-cmd-budget C4-cmd-primitives C5-tmux-runner C6-atomic-write C7-sql-open C8-negation-dirs C9-package-doc C10-mcp-argv C11-db-names C12-claude-pointers C13-test-mirror C14-usage-parity C15-internal-usage C16-env-outside-paths C17-dup-functions C18-engine-spellings C19-env-namespace C20-codex-home C21-test-jail C22-host-doors C23-bare-log C25-testmain-jail C26-exec-write C27-identity-env C24-unwrapped-door"
+# Today's order: C1 … C23, then C25, C26, C27, C28, then C24 (its own script, last).
+EXPECTED_ORDER="C1-ceiling-src C2-ceiling-test C3-cmd-budget C4-cmd-primitives C5-tmux-runner C6-atomic-write C7-sql-open C8-negation-dirs C9-package-doc C10-mcp-argv C11-db-names C12-claude-pointers C13-test-mirror C14-usage-parity C15-internal-usage C16-env-outside-paths C17-dup-functions C18-engine-spellings C19-env-namespace C20-codex-home C21-test-jail C22-host-doors C23-bare-log C25-testmain-jail C26-exec-write C27-identity-env C28-signal-door C24-unwrapped-door"
 
 REPO_GREEN="$T/green"
 if green_fixture "$REPO_GREEN"; then
   run_all "$REPO_GREEN"
   order=$(printf '%s\n' "$out" | awk '$1 == "CHECK" {printf "%s ", $2}' | sed 's/ $//')
   passes=$(printf '%s\n' "$out" | grep -c '^CHECK [^ ]* *PASS ')
-  if [ "$rc" -eq 0 ] && [ "$passes" -eq 27 ] && [ "$order" = "$EXPECTED_ORDER" ]; then
-    ok "exit: a tree where all 27 checks PASS exits 0, one line per check in today's order"
+  if [ "$rc" -eq 0 ] && [ "$passes" -eq 28 ] && [ "$order" = "$EXPECTED_ORDER" ]; then
+    ok "exit: a tree where all 28 checks PASS exits 0, one line per check in today's order"
   else
-    bad "exit: expected rc 0, 27 PASS lines in order" "rc=$rc passes=$passes" "$order" "$out"
+    bad "exit: expected rc 0, 28 PASS lines in order" "rc=$rc passes=$passes" "$order" "$out"
   fi
 else
   bad "exit: could not build the green fixture"
@@ -678,7 +717,7 @@ if green_fixture "$REPO_FAIL"; then
   printf 'func Again() { log.Fatalf("bye") }\n' >> "$REPO_FAIL/internal/loud/loud.go"
   run_all "$REPO_FAIL"
   others=$(printf '%s\n' "$out" | grep '^CHECK ' | grep -vc 'C23-bare-log .*FAIL ')
-  if [ "$rc" -eq 1 ] && [ "$others" -eq 26 ] && [[ "$out" == *"C23-bare-log"*"FAIL"*"internal/loud/loud.go (1->2)"* ]]; then
+  if [ "$rc" -eq 1 ] && [ "$others" -eq 27 ] && [[ "$out" == *"C23-bare-log"*"FAIL"*"internal/loud/loud.go (1->2)"* ]]; then
     ok "exit: one FAIL and no ERROR exits 1"
   else
     bad "exit: expected rc 1 with only C23 failing" "rc=$rc others=$others" "$out"
@@ -711,8 +750,8 @@ if green_fixture "$REPO_KILL"; then
   passes=$(printf '%s\n' "$out" | grep -c '^CHECK [^ ]* *PASS ')
   lines=$(printf '%s\n' "$out" | grep -c '^CHECK ')
   line=$(printf '%s\n' "$out" | grep '^CHECK C1-ceiling-src ' || true)
-  if [ "$rc" -eq 2 ] && [ "$lines" -eq 27 ] && [ "$passes" -eq 26 ] && [[ "$line" == *ERROR* && "$line" == *"without leaving its CHECK line"* ]]; then
-    ok "a check job killed before its result is an ERROR line naming it, exit 2, the other 26 checks PASS"
+  if [ "$rc" -eq 2 ] && [ "$lines" -eq 28 ] && [ "$passes" -eq 27 ] && [[ "$line" == *ERROR* && "$line" == *"without leaving its CHECK line"* ]]; then
+    ok "a check job killed before its result is an ERROR line naming it, exit 2, the other 27 checks PASS"
   else
     bad "a killed check job must print ERROR for that check and exit 2" "rc=$rc lines=$lines passes=$passes" "$line"
   fi

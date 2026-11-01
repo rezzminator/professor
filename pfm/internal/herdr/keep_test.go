@@ -5,16 +5,31 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // keepRunner answers `herdr-keep list --json` with listing on stdout, or on
-// stderr with a nonzero exit.
-func keepRunner(listing string, exit int) *deps.FakeRunner {
+// stderr with a nonzero exit; it stages a herdr-keep on PATH so the binary
+// resolves before the fake answers. testjail's stager imports this package,
+// so the stand-in is a link to sh, never run: the fake answers every call.
+func keepRunner(t *testing.T, listing string, exit int) *deps.FakeRunner {
+	t.Helper()
+	sh, err := deps.Resolve("sh")
+	if err != nil {
+		t.Fatalf("resolve sh for the %s stand-in: %v", KeepBinary, err)
+	}
+	dir := t.TempDir()
+	if err := os.Symlink(sh, filepath.Join(dir, KeepBinary)); err != nil {
+		t.Fatalf("link %s stand-in in %s to %s: %v", KeepBinary, dir, sh, err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+paths.OSEnv{}.Get("PATH"))
 	result := deps.RunResult{Stdout: []byte(listing)}
 	if exit != 0 {
 		result = deps.RunResult{Stderr: []byte(listing), ExitCode: exit}
@@ -105,6 +120,7 @@ func TestKeepProcessesSeesTheHoldersShell(t *testing.T) {
 		table                             keepProc
 		want                              PaneProcesses
 		holder                            bool
+		keepMissing                       bool
 		diagnostic                        string
 		// listed is the socket each herdr-keep run was pointed at, in order.
 		listed []string
@@ -137,6 +153,11 @@ func TestKeepProcessesSeesTheHoldersShell(t *testing.T) {
 			name: "list fails", socket: keepSocket, foreground: attachClient, listing: "user manager unavailable", exit: 1,
 			diagnostic: "herdr-keep list --json against " + keepSocket + ": exit 1: user manager unavailable",
 			listed:     []string{keepSocket},
+		},
+		{
+			name: "herdr-keep missing from PATH", socket: keepSocket, foreground: attachClient,
+			listing: keepListing("running", true, false, "PROTECTED"), keepMissing: true,
+			diagnostic: `resolve herdr-keep: exec: "herdr-keep": executable file not found in $PATH`,
 		},
 		{
 			name: "enumeration failed", socket: keepSocket, foreground: attachClient,
@@ -175,7 +196,10 @@ func TestKeepProcessesSeesTheHoldersShell(t *testing.T) {
 			// that shell's HERDR_KEEP_INNER and lists against HERDR_SOCKET_PATH.
 			t.Setenv(EnvKeepInner, "h1")
 			t.Setenv(EnvSocket, keepRelay)
-			runner := keepRunner(tc.listing, tc.exit)
+			runner := keepRunner(t, tc.listing, tc.exit)
+			if tc.keepMissing {
+				t.Setenv("PATH", t.TempDir())
+			}
 			got, err := (&Keep{Runner: runner, Proc: tc.table}).Processes(
 				context.Background(), tc.socket, processInfo("w1:p4", tc.foreground),
 			)
@@ -215,7 +239,7 @@ func TestKeepProcessesSeesTheHoldersShell(t *testing.T) {
 }
 
 func TestKeepUpstreamMapsOnlyARelay(t *testing.T) {
-	runner := keepRunner(keepListing("running", true, false, "PROTECTED"), 0)
+	runner := keepRunner(t, keepListing("running", true, false, "PROTECTED"), 0)
 	keep := &Keep{Runner: runner}
 	for _, tc := range []struct{ socket, pane, wantSocket, wantPane string }{
 		{keepRelay, "w1:p1", keepSocket, "w1:p4"},

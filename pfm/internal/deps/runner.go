@@ -160,9 +160,11 @@ func (RealRunner) Run(ctx context.Context, argv []string, opts RunOptions) (RunR
 	return result, nil
 }
 
-// LookPath resolves name on $PATH exactly as exec.LookPath does.
+// LookPath resolves name through Resolve, the one executable lookup: a
+// registry name maps to its command and is refused off its platforms, and
+// anything else is found on $PATH as exec.LookPath finds it.
 func (RealRunner) LookPath(name string) (string, error) {
-	return exec.LookPath(name)
+	return Resolve(name)
 }
 
 // Start launches argv and returns immediately. A non-Detach start wraps

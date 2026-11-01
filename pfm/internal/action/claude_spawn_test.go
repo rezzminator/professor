@@ -232,7 +232,7 @@ func TestClaudeSpawnRunsTheCostLauncherInFrontOfClaude(t *testing.T) {
 		t.Fatal(err)
 	}
 	var words []string
-	for _, word := range []string{pfm, "internal", "cost-launch", "--", "/opt/tools/claude enterprise"} {
+	for _, word := range []string{pfm, "internal", "cost-launch", "--", machine.Claude.Binary} {
 		words = append(words, cmdparse.Quote(word))
 	}
 	launcher := strings.Join(words, " ")
@@ -248,7 +248,7 @@ func TestClaudeSpawnRunsTheCostLauncherInFrontOfClaude(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	claude := deps.Executable("/opt/tools/claude enterprise")
+	claude := machine.Claude.Binary
 	if command.Path != pfm {
 		t.Errorf("Command Path = %q, want the launcher %q", command.Path, pfm)
 	}
@@ -271,7 +271,7 @@ func TestClaudeSpawnWithoutAnInstalledLauncherStartsClaudeDirectlyAndSaysSo(t *t
 		t.Fatal(err)
 	}
 	if strings.Contains(shell, "cost-launch") ||
-		!strings.Contains(shell, " PFM_COST_LEDGER='failed' '/opt/tools/claude enterprise' ") {
+		!strings.Contains(shell, " PFM_COST_LEDGER='failed' "+cmdparse.Quote(machine.Claude.Binary)+" ") {
 		t.Errorf(
 			"no launcher installed: want claude started directly after PFM_COST_LEDGER='failed', got %.400s",
 			shell,
@@ -281,12 +281,35 @@ func TestClaudeSpawnWithoutAnInstalledLauncherStartsClaudeDirectlyAndSaysSo(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if command.Path != deps.Executable("/opt/tools/claude enterprise") ||
+	if command.Path != machine.Claude.Binary ||
 		!slices.Contains(command.Env, "PFM_COST_LEDGER=failed") {
 		t.Errorf(
 			"no launcher installed: Path %q Env has the marker = %v",
 			command.Path,
 			slices.Contains(command.Env, "PFM_COST_LEDGER=failed"),
 		)
+	}
+}
+
+func TestClaudeSpawnCommandNamesAMissingClaudeBinary(t *testing.T) {
+	home := t.TempDir()
+	machine := configuredMachinePolicy(home)
+	present := ClaudeSpawn{Purpose: PurposeInteractive, Account: 42, Home: home, Machine: machine}
+	command, err := present.Command(context.Background())
+	if err != nil {
+		t.Fatalf("Command with the configured binary present: %v", err)
+	}
+	if command.Path != machine.Claude.Binary {
+		t.Fatalf("Command Path = %q, want the configured binary %q", command.Path, machine.Claude.Binary)
+	}
+
+	missing := filepath.Join(home, "absent", "claude")
+	machine.Claude.Binary = missing
+	absent := ClaudeSpawn{Purpose: PurposeInteractive, Account: 42, Home: home, Machine: machine}
+	_, err = absent.Command(context.Background())
+	want := `resolve Claude binary "` + missing + `": exec: "` + missing + `": stat ` + missing +
+		`: no such file or directory`
+	if err == nil || err.Error() != want {
+		t.Fatalf("Command with the binary missing: error = %v, want %q", err, want)
 	}
 }

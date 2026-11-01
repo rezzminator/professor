@@ -65,10 +65,13 @@ func (c *fakeCommands) View(_ context.Context, config, cwd string) error {
 }
 
 type fakeProcesses struct {
-	mu     sync.Mutex
-	rows   []Process
-	dead   map[int]bool
-	term   []int
+	mu   sync.Mutex
+	rows []Process
+	dead map[int]bool
+	// reborn pids read dead on their first probe and alive after it: the
+	// freed number handed to another process.
+	reborn map[int]bool
+	probes map[int]int
 	parent string
 }
 
@@ -81,23 +84,16 @@ func (p *fakeProcesses) Processes(context.Context) ([]Process, error) {
 func (p *fakeProcesses) Alive(pid int) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.probes == nil {
+		p.probes = make(map[int]int)
+	}
+	p.probes[pid]++
+	if p.reborn[pid] {
+		return p.probes[pid] > 1
+	}
 	return !p.dead[pid]
 }
 
-func (p *fakeProcesses) Terminate(pid int) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.term = append(p.term, pid)
-	p.dead[pid] = true
-	return nil
-}
-
-func (p *fakeProcesses) Kill(pid int) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.dead[pid] = true
-	return nil
-}
 func (p *fakeProcesses) ParentComm(int) string { return p.parent }
 
 type fakeTmux struct{ socket string }
@@ -116,7 +112,6 @@ func newTestOpener(t *testing.T, commands Commands, processes Processes, tmux Tm
 			{ID: 3, ConfigDir: filepath.Join(home, ".cc", "3")},
 		},
 		Commands: commands, Processes: processes, Tmux: tmux, Stderr: &bytes.Buffer{},
-		GracePeriod: 10 * time.Millisecond, PollInterval: time.Millisecond,
 	})
 }
 
@@ -134,24 +129,42 @@ func TestNewDoesNotInventAnAccountRoster(t *testing.T) {
 	}
 }
 
+// A stale idle row is taken over by a fresh resume under the current primary,
+// and the take-over stops nothing: the row's pid read dead, so a process
+// holding that number later is a stranger (Processes has no way to signal),
+// and the take-over never probes it again.
 func TestOpenStaleIdleRegistryRowResumesCurrentPrimary(t *testing.T) {
 	id := "11111111-1111-4111-8111-111111111111"
-	commands := &fakeCommands{
-		rows: map[string][]byte{"": []byte(`[{"sessionId":"` + id + `","name":"worker","pid":42,"status":"idle"}]`)},
-	}
-	processes := &fakeProcesses{
-		rows: []Process{{PID: 42, Argv: []string{"claude", "--resume", id}}},
-		dead: map[int]bool{42: true},
-	}
-	opener := newTestOpener(t, commands, processes, fakeTmux{})
-	if err := opener.Open(context.Background(), Request{ID: id, CWD: "/jail/project", PrimaryAccount: 2}); err != nil {
-		t.Fatal(err)
-	}
-	if len(processes.term) != 0 {
-		t.Fatalf("term=%v", processes.term)
-	}
-	if got := commands.resumes; len(got) != 1 || got[0] != filepath.Join(opener.home, ".cc", "2")+"|/jail/project|"+id {
-		t.Fatalf("resumes=%v", got)
+	for _, test := range []struct {
+		name      string
+		processes *fakeProcesses
+	}{
+		{name: "the row's pid is dead", processes: &fakeProcesses{dead: map[int]bool{42: true}}},
+		{name: "the row's pid is reused after the probe", processes: &fakeProcesses{reborn: map[int]bool{42: true}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			commands := &fakeCommands{
+				rows: map[string][]byte{
+					"": []byte(`[{"sessionId":"` + id + `","name":"worker","pid":42,"status":"idle"}]`),
+				},
+			}
+			processes := test.processes
+			processes.rows = []Process{{PID: 42, Argv: []string{"claude", "--resume", id}}}
+			opener := newTestOpener(t, commands, processes, fakeTmux{})
+			if err := opener.Open(
+				context.Background(),
+				Request{ID: id, CWD: "/jail/project", PrimaryAccount: 2},
+			); err != nil {
+				t.Fatal(err)
+			}
+			want := filepath.Join(opener.home, ".cc", "2") + "|/jail/project|" + id
+			if got := commands.resumes; len(got) != 1 || got[0] != want {
+				t.Fatalf("resumes=%q, want [%q]", got, want)
+			}
+			if probes := processes.probes[42]; probes != 1 {
+				t.Fatalf("pid 42 probed %d times, want 1: the take-over must not act on it again", probes)
+			}
+		})
 	}
 }
 
@@ -218,13 +231,8 @@ func TestOpenLiveAgentOutsidePFMReturnsOneActionableLine(t *testing.T) {
 	if stderr.Len() != 0 {
 		t.Fatalf("outside-pfm path emitted extra lines: %q", stderr.String())
 	}
-	if len(commands.views) != 0 || len(commands.resumes) != 0 || len(processes.term) != 0 {
-		t.Fatalf(
-			"outside-pfm path mutated process: views=%v resumes=%v term=%v",
-			commands.views,
-			commands.resumes,
-			processes.term,
-		)
+	if len(commands.views) != 0 || len(commands.resumes) != 0 {
+		t.Fatalf("outside-pfm path opened the agent: views=%v resumes=%v", commands.views, commands.resumes)
 	}
 }
 
@@ -259,14 +267,12 @@ func TestOpenPerUUIDMutexHasOneWinner(t *testing.T) {
 	processes := &fakeProcesses{dead: map[int]bool{}}
 	first := newTestOpener(t, commands, processes, fakeTmux{})
 	second := &Opener{
-		sidDir:       first.sidDir,
-		home:         first.home,
-		commands:     commands,
-		processes:    processes,
-		tmux:         fakeTmux{},
-		stderr:       &bytes.Buffer{},
-		gracePeriod:  time.Millisecond,
-		pollInterval: time.Millisecond,
+		sidDir:    first.sidDir,
+		home:      first.home,
+		commands:  commands,
+		processes: processes,
+		tmux:      fakeTmux{},
+		stderr:    &bytes.Buffer{},
 	}
 	results := make(chan error, 2)
 	go func() { results <- first.Open(context.Background(), Request{ID: id}) }()

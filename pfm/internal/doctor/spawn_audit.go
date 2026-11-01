@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -464,7 +463,7 @@ func liveClaudeSpawns(
 	machine config.Config,
 	clk clock.Clock,
 ) ([]spawnObservation, []string, error) {
-	client := gather.TmuxProbe{TmuxTmpDir: filepath.Dir(resolved.TmuxDir)}
+	client := gather.TmuxProbe{TmuxDir: resolved.TmuxDir}
 	if clk == nil {
 		clk = clock.Real
 	}

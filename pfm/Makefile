@@ -288,16 +288,33 @@ mcp-restart: ## Restart the MCP daemon so it serves the binary now on disk
 	    exit 1; \
 	  fi; \
 	  echo "mcp: $(AGENT) restarted, pid $$pid"; \
-	elif pgrep -f 'mcp serve$$' >/dev/null 2>&1; then \
-	  echo "mcp: no $(UNIT) unit or $(AGENT) agent; killing unsupervised 'pfm mcp serve' so the next client starts a fresh one"; \
-	  pkill -f 'mcp serve$$'; \
 	else \
-	  echo "mcp: no daemon running and no $(UNIT) unit or $(AGENT) agent — nothing to restart"; \
+	  rc=0; pids="$$(pgrep -f 'mcp serve$$')" || rc=$$?; \
+	  if [ $$rc -gt 1 ]; then \
+	    echo "mcp: pgrep failed (rc $$rc) — could not look for an unsupervised 'pfm mcp serve'; no $(UNIT) unit or $(AGENT) agent either" >&2; \
+	  elif [ -n "$$pids" ]; then \
+	    echo "mcp: no $(UNIT) unit or $(AGENT) agent supervises 'pfm mcp serve'; make stops no process by name — each one below still runs the binary it started on:" >&2; \
+	    for pid in $$pids; do \
+	      if args="$$(ps -o args= -p "$$pid")"; then \
+	        echo "  pid $$pid: $$args" >&2; \
+	        quoted="$$(printf '%s' "$$args" | sed "s/'/'\\\\''/g")"; \
+	        echo "    stop it: ps -o args= -p $$pid | grep -qxF '$$quoted' && kill $$pid" >&2; \
+	      else \
+	        echo "  pid $$pid: exited before its command line could be read" >&2; \
+	      fi; \
+	    done; \
+	    echo "mcp: make sweep-stale stops each one that runs a replaced binary; the next client then starts a fresh daemon" >&2; \
+	  else \
+	    echo "mcp: no daemon running and no $(UNIT) unit or $(AGENT) agent — nothing to restart"; \
+	  fi; \
 	fi
 	@# Restarting unconditionally is deliberate. Deciding whether the daemon is
 	@# stale needs process introspection that not every platform offers, and a
 	@# restart is cheap, supervised, and idempotent — so the guarantee does not
-	@# depend on a probe that might not be able to run.
+	@# depend on a probe that might not be able to run. An unsupervised daemon
+	@# is only listed: a pattern match is no proof the process is this install's
+	@# (any `… mcp serve` matches), so its stop is the operator's, identity-checked,
+	@# or sweep-stale's, which signals only a process proven to run a replaced pfm.
 
 mcp-status: ## Report the daemon, then every pfm process still running a replaced binary
 	@if command -v systemctl >/dev/null 2>&1 && \

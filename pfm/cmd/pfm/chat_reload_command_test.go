@@ -898,7 +898,7 @@ func TestNativeChatReloadRefusesASecondScheduleForTheSameSeat(t *testing.T) {
 	defer jail.killSockets(t)
 	// The worker's liveness is read from the kernel: the stub worker is this
 	// test process, which the jail's fake proc tree does not hold.
-	t.Setenv(paths.EnvProcRoot, "/proc")
+	t.Setenv(paths.EnvProcRoot, paths.SystemProcRoot())
 	runtime, err := pfmconfig.LoadRuntime("")
 	if err != nil {
 		t.Fatal(err)

@@ -49,7 +49,7 @@ func TestMain(m *testing.M) {
 	if flag.Lookup("test.list").Value.String() == "" && os.Getenv(attachHelperEnv) != "1" &&
 		!runningOnlyMCPDaemonMountedTest() {
 		var err error
-		binaryDir, err = os.MkdirTemp("", "pfm-cmd-test-binary-")
+		binaryDir, err = os.MkdirTemp(paths.TempRoot(), "pfm-cmd-test-binary-")
 		if err != nil {
 			_, _ = os.Stderr.WriteString("create shared pfm test binary directory: " + err.Error() + "\n")
 			os.Exit(1)

@@ -2,9 +2,9 @@
 
 package resolve
 
+import "github.com/rezzminator/professor/pfm/internal/paths"
+
 func newNativeProcFS(root string) ProcFS {
-	if root == "" {
-		root = "/proc"
-	}
+	root = paths.ProcRootOr(root)
 	return fileProcFS{root: root}
 }

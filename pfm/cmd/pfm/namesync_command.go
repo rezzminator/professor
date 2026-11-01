@@ -102,7 +102,7 @@ func runNameSync(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		fmt.Fprintf(stdout, "windows planned: %d\n", len(live.Renames))
 		return 0
 	}
-	titlesTmux := gather.TmuxProbe{TmuxTmpDir: filepath.Dir(environment.Paths.TmuxDir)}
+	titlesTmux := gather.TmuxProbe{TmuxDir: environment.Paths.TmuxDir}
 	titlesUnverified := convergeChatServerOptions(
 		ctx, titlesTmux, liveSockets(live.Panes), environment.Config.Tmux.Titles,
 		filepath.Join(environment.Paths.Home, ".local", "bin", "pfm"), stdout, stderr,

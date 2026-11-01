@@ -66,7 +66,7 @@ It reads and writes the user's real chat state: a destructive operation on a liv
 - `deps.Registry`: an entry with no `Platforms` field applies everywhere; everything ungated (`tmux`, `git`, `sh`, `bash`, `zsh`, `sleep`, `script`, `go`) works identically on both kernels.
 - A fallback's gate covers every platform that reaches it: `setsid` is linux-only, so darwin alone takes the `nohup` branch, and gating `nohup` to linux would strand the fallback exactly where it is needed.
 - Gate an entry on the binary's real availability, and give it `VersionArgs` only when every gated platform's build accepts them: BSD `nohup` rejects GNU's `--version`, reporting a working binary as broken.
-- Every filesystem location resolves through `internal/paths/`, and `/proc` sits behind the `ProcFS` interface — `$HOME`, `/tmp`, a socket dir and `/proc` are never literals; this is what lets the suite run in a jail.
+- `/proc` sits behind the `ProcFS` interface, never read directly; this is what lets the suite run in a jail.
 - Account identity, emoji, theme and permission posture come from `internal/config/` alone: a hardcoded account count, `.cc/{N}` literal, medal emoji or bypass flag elsewhere is a defect.
 - Every Claude launch flag, env value and `--settings` key comes from the launch registry alone; a launch literal elsewhere fails `TestNoLaunchLiteralOutsideRegistry`.
 - A seat is identified by lineage, not file recency: Codex writes subagent threads into `~/.codex/sessions` beside real seats, marked `thread_source: subagent` with a `parent_thread_id`; code reading the rollout tree directly checks those two fields first.

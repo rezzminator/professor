@@ -13,12 +13,12 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
-// stageHeldEngine has herdr-keep hold server's pane: holder h1 (pid 80) runs
+// stageHeldEngine has herdr-shield hold server's pane: holder h1 (pid 80) runs
 // shell 90, whose terminal's foreground group is the engine's, 7.
 func stageHeldEngine(t *testing.T, server *killHerdr) {
 	t.Helper()
 	for name, body := range map[string]string{
-		"80/stat":   "80 (herdr-keep) S 1 80 80 0 0 " + strings.Repeat("0 ", 13) + "8 0\n",
+		"80/stat":   "80 (herdr-shield) S 1 80 80 0 0 " + strings.Repeat("0 ", 13) + "8 0\n",
 		"90/stat":   "90 (pfm) S 80 90 90 0 7 " + strings.Repeat("0 ", 13) + "9 0\n",
 		"7/stat":    "7 (claude) S 90 7 90 0 7 " + strings.Repeat("0 ", 13) + "7 0\n",
 		"7/cmdline": pfmengine.MustLookup(pfmengine.Claude).Binary + "\x00",
@@ -31,10 +31,10 @@ func stageHeldEngine(t *testing.T, server *killHerdr) {
 			t.Fatal(err)
 		}
 	}
-	testjail.StageHerdrKeep(t, testjail.HerdrKeepListing(80, 8, 90, 9, "w1:p1", server.socket), 0)
+	testjail.StageHerdrShield(t, testjail.HerdrShieldListing(80, 8, 90, 9, "w1:p1", server.socket), 0)
 }
 
-// Closing a held pane ends only herdr-keep's attach client: the kill is done
+// Closing a held pane ends only herdr-shield's attach client: the kill is done
 // when the holder's shell has ended, and a shell that outlives the close keeps
 // the seat and names the cleanup.
 func TestHerdrKillOfAHeldPaneAwaitsItsShell(t *testing.T) {
@@ -46,15 +46,15 @@ func TestHerdrKillOfAHeldPaneAwaitsItsShell(t *testing.T) {
 		{name: "shell ends"},
 		{
 			name: "shell survives", survives: true,
-			want: "closed Herdr pane w1:p1, but herdr-keep holder h1 still runs its shell (pid 90): " +
-				"end it with `herdr-keep kill h1`; seat seat-kill retained",
+			want: "closed Herdr pane w1:p1, but herdr-shield holder h1 still runs its shell (pid 90): " +
+				"end it with `herdr-shield kill h1`; seat seat-kill retained",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			jail := newKillJail(t)
 			database := jail.open(t)
 			server := newKillHerdr(t)
-			server.processes = []any{map[string]any{"pid": 77, "name": "herdr-keep"}}
+			server.processes = []any{map[string]any{"pid": 77, "name": "herdr-shield"}}
 			server.closeKeepsShell = test.survives
 			stageHeldEngine(t, server)
 			seat := seedKillHerdr(t, database, server)

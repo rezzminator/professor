@@ -129,7 +129,7 @@ func TestHerdrNativeSeatReporter(t *testing.T) {
 			lines := server.requests()
 			wantResume := []string{herdr.ResumeCommand, "chat", "open", "--restored", "new-session"}
 			if held {
-				// Herdr cannot see Claude behind herdr-keep's attach client: pfm reports
+				// Herdr cannot see Claude behind herdr-shield's attach client: pfm reports
 				// the idle state, or the pane reads unknown.
 				want := map[string]any{
 					"pane_id": "w6:p3", "source": "pfm", "agent": "claude", "state": "idle",
@@ -436,6 +436,7 @@ func TestNativeLossNoteClearsOnlyOnActualPrompt(t *testing.T) {
 		{name: "idle", event: "idle", payload: `{"session_id":"sid"}`, state: "idle"},
 		{name: "tool working", event: "working", payload: `{"session_id":"sid","hook_event_name":"PostToolUse","tool_name":"Bash"}`, state: "working"},
 		{name: "prompt", event: "working", payload: `{"session_id":"sid","hook_event_name":"UserPromptSubmit","prompt":"private"}`, clear: true, state: "working"},
+		{name: "task notification turn", event: "working", payload: `{"session_id":"sid","hook_event_name":"UserPromptSubmit","prompt":"<task-notification>\n<task-id>t1</task-id>\n<status>completed</status>\n</task-notification>"}`, state: "working"},
 		{name: "end reload", event: "end", payload: `{"session_id":"sid","reason":"prompt_input_exit"}`, pending: true},
 		{name: "opencode state", engine: pfmengine.OpenCode, event: "working", payload: `{"session_id":"sid"}`},
 		{name: "opencode replayed user message", engine: pfmengine.OpenCode, event: "working", payload: `{"session_id":"sid","hook_event_name":"message.updated","role":"user"}`},

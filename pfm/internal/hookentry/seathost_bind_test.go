@@ -33,7 +33,7 @@ func TestBindNativeHostRequiresKernelRoleAndCanonicalOwnership(t *testing.T) {
 			// groups is each pid's process group and its terminal's foreground group.
 			groups := map[int][2]int{}
 			if mode == "kept" {
-				// herdr-keep's holder 900005 runs the shell 900002, whose terminal's foreground group is the supervisor's.
+				// herdr-shield's holder 900005 runs the shell 900002, whose terminal's foreground group is the supervisor's.
 				groups = map[int][2]int{900002: {900002, 900004}, os.Getpid(): {900004, 900004}}
 			}
 			writeProc := func(pid, parent int, argv string) {
@@ -69,7 +69,7 @@ func TestBindNativeHostRequiresKernelRoleAndCanonicalOwnership(t *testing.T) {
 			writeProc(os.Getpid(), 900002, argv)
 			if mode == "kept" {
 				writeProc(900002, 900005, "sh\x00")
-				writeProc(900005, 1, "herdr-keep\x00holder\x00")
+				writeProc(900005, 1, "herdr-shield\x00holder\x00")
 			} else {
 				writeProc(900002, 1, "sh\x00")
 			}
@@ -173,9 +173,9 @@ func TestBindNativeHostRequiresKernelRoleAndCanonicalOwnership(t *testing.T) {
 							}
 							foreground := map[string]any{"pid": os.Getpid(), "argv0": "pfm"}
 							if mode == "kept" {
-								// Herdr sees only herdr-keep's attach client.
+								// Herdr sees only herdr-shield's attach client.
 								shell = 900007
-								foreground = map[string]any{"pid": 900007, "name": "herdr-keep"}
+								foreground = map[string]any{"pid": 900007, "name": "herdr-shield"}
 							}
 							result = map[string]any{
 								"type": "pane_process_info",
@@ -249,10 +249,10 @@ func TestBindNativeHostRequiresKernelRoleAndCanonicalOwnership(t *testing.T) {
 			t.Setenv(herdr.EnvPane, caller)
 			if mode == "kept" {
 				// The shell names its holder's relay and the pane it was born in.
-				t.Setenv(herdr.EnvSocket, filepath.Join(root, "herdr-keep", "h1", "herdr-api.sock"))
+				t.Setenv(herdr.EnvSocket, filepath.Join(root, "herdr-shield", "h1", "herdr-api.sock"))
 				t.Setenv(herdr.EnvPane, "w1:p1")
-				t.Setenv(herdr.EnvKeepInner, "h1")
-				testjail.StageHerdrKeep(t, testjail.HerdrKeepListing(900005, 100, 900002, 100, pane, socket), 0)
+				t.Setenv(herdr.EnvShieldInner, "h1")
+				testjail.StageHerdrShield(t, testjail.HerdrShieldListing(900005, 100, 900002, 100, pane, socket), 0)
 			}
 			got, bindErr := bindNativeHost(context.Background(), db, before, values)
 			allowed := mode == "legacy" || mode == "moved" || mode == "cold-lost" || mode == "cold-moved-caller" ||

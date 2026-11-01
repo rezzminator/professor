@@ -205,12 +205,12 @@ func TestHerdrCallRaw(t *testing.T) {
 			name: "native-untracked", id: pfmengine.Claude, body: "a\nb", wantPayload: "a\nb", wantTyped: true,
 			before: "────────\n❯ \n────────", after: "a\nb\n────────\n❯ \n────────",
 		},
-		// Herdr refuses agent.prompt when herdr-keep's attach client, not Claude, is
+		// Herdr refuses agent.prompt when herdr-shield's attach client, not Claude, is
 		// the pane's foreground: the raw path's composer guard still protects it.
 		{
-			name: "native-keep-foreground", id: pfmengine.Claude, body: "a\nb", wantPayload: "a\nb", wantTyped: true,
+			name: "native-shield-foreground", id: pfmengine.Claude, body: "a\nb", wantPayload: "a\nb", wantTyped: true,
 			before: "────────\n❯ \n────────", after: "a\nb\n────────\n❯ \n────────",
-			promptRefusal: "agent_not_ready", keepForeground: true,
+			promptRefusal: "agent_not_ready", shieldForeground: true,
 		},
 		// A ready-check refusal with Claude itself in the foreground still refuses.
 		{
@@ -221,7 +221,7 @@ func TestHerdrCallRaw(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			entered := false
 			var payload string
-			var keepForeground atomic.Bool
+			var shieldForeground atomic.Bool
 			socket := newNativeSocketForeground(t, func(request nativeRequest) (any, string) {
 				if request.Method == test.refusal {
 					return nil, "pane_send_failed"
@@ -242,7 +242,7 @@ func TestHerdrCallRaw(t *testing.T) {
 					if test.promptRefusal == "" {
 						t.Errorf("raw engine prompted the native agent: %+v", request)
 					}
-					keepForeground.Store(test.keepForeground)
+					shieldForeground.Store(test.shieldForeground)
 					return nil, test.promptRefusal
 				case "pane.read":
 					if request.Params["format"] == "ansi" {
@@ -287,8 +287,8 @@ func TestHerdrCallRaw(t *testing.T) {
 				}
 				return map[string]any{"type": "ok"}, ""
 			}, func() []any {
-				if keepForeground.Swap(false) {
-					return []any{map[string]any{"pid": 41, "name": herdr.KeepBinary}}
+				if shieldForeground.Swap(false) {
+					return []any{map[string]any{"pid": 41, "name": herdr.ShieldBinary}}
 				}
 				return nil
 			})

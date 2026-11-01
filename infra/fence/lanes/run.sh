@@ -15,7 +15,7 @@
 #
 # Lane HELD runs on its own machine after the sequence: pfm-lane-held:<hash>
 # (root.sh --machine held), systemd as PID 1, the lane run as user lane (uid
-# 1000) over real Herdr and herdr-keep. It needs the herdr-keep source
+# 1000) over real Herdr and herdr-shield. It needs the herdr-shield source
 # fence-env.sh resolves (absent: `run: ✗ HELD SUBSTRATE — …`, exit 1) and Docker
 # >= 28 (`held: docker <ver> has no writable-cgroups (needs ≥ 28)`, exit 1); a
 # machine that does not reach `held: systemd running · user@1000.service
@@ -209,7 +209,7 @@ fi
 
 if [ -n "$HELD_ORDER" ]; then
   ROOT="$ROOT" FENCE_CALLER=lanes-run . "$HERE/../fence-env.sh"
-  [ -z "$PFM_DEV_HERDR_KEEP_MISSING" ] || die "✗ HELD SUBSTRATE — $PFM_DEV_HERDR_KEEP_MISSING" 1
+  [ -z "$PFM_DEV_HERDR_SHIELD_MISSING" ] || die "✗ HELD SUBSTRATE — $PFM_DEV_HERDR_SHIELD_MISSING" 1
 fi
 image_decision() { # image_decision <image> — the reuse decision a plan prints
   if [ "$ROOT_MODE" = rebuild ]; then

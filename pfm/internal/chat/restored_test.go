@@ -522,10 +522,10 @@ func TestRestoredRecipeNeverResendsPromptAfterBooleanFlags(t *testing.T) {
 }
 
 func TestOpenRestoredIDWithoutSeatUsesCurrentHerdrPane(t *testing.T) {
-	// Under herdr-keep Herdr sees its attach client; the caller's shell is the holder's child.
-	for _, holder := range []string{"herdr", "herdr-keep"} {
+	// Under herdr-shield Herdr sees its attach client; the caller's shell is the holder's child.
+	for _, holder := range []string{"herdr", "herdr-shield"} {
 		t.Run(holder, func(t *testing.T) {
-			kept := holder == "herdr-keep"
+			kept := holder == "herdr-shield"
 			root := testjail.Fleet(t)
 			const id = "1b67f24e-bbe9-491f-8390-86f50b45a598"
 			seedClaudeChat(t, root, id, assistantSaid("done"))
@@ -543,7 +543,7 @@ func TestOpenRestoredIDWithoutSeatUsesCurrentHerdrPane(t *testing.T) {
 					}
 					if kept {
 						info["shell_pid"] = 700009
-						info["foreground_processes"] = []any{map[string]any{"pid": 700009, "name": "herdr-keep"}}
+						info["foreground_processes"] = []any{map[string]any{"pid": 700009, "name": "herdr-shield"}}
 					}
 					return map[string]any{"type": "pane_process_info", "process_info": info}, ""
 				case "tab.get":
@@ -578,7 +578,7 @@ func TestOpenRestoredIDWithoutSeatUsesCurrentHerdrPane(t *testing.T) {
 				}
 				zeros := strings.Repeat("0 ", 13)
 				for pid, stat := range map[int]string{
-					700005:      "700005 (herdr-keep) S 1 700005 700005 0 -1 " + zeros + "100 0\n",
+					700005:      "700005 (herdr-shield) S 1 700005 700005 0 -1 " + zeros + "100 0\n",
 					700001:      "700001 (zsh) S 700005 700001 700001 0 700003 " + zeros + "100 0\n",
 					os.Getpid(): fmt.Sprintf("%d (pfm) S 700001 700003 700001 0 700003 %s100 0\n", os.Getpid(), zeros),
 				} {
@@ -597,7 +597,7 @@ func TestOpenRestoredIDWithoutSeatUsesCurrentHerdrPane(t *testing.T) {
 				); err != nil {
 					t.Fatal(err)
 				}
-				testjail.StageHerdrKeep(t, testjail.HerdrKeepListing(700005, 100, 700001, 100, "w9:p2", socket), 0)
+				testjail.StageHerdrShield(t, testjail.HerdrShieldListing(700005, 100, 700001, 100, "w9:p2", socket), 0)
 			}
 			runtime, err := config.LoadRuntime("")
 			if err != nil {

@@ -30,13 +30,13 @@
 #
 # --machine held builds lane HELD's machine, pfm-lane-held:<hash>, on that root
 # (built first when absent), with a container, exec steps and a commit like the
-# root: herdr-keep built by cargo in HELD_RUST_IMAGE from the source fence-env.sh
+# root: herdr-shield built by cargo in HELD_RUST_IMAGE from the source fence-env.sh
 # resolves (mounted read-only), then provision.sh held as root (systemd, the user
-# lane at /srv/lane, Herdr and herdr-keep configured as the owner runs them),
+# lane at /srv/lane, Herdr and herdr-shield configured as the owner runs them),
 # provision.sh seats and install as lane, the credential scan, and a commit whose
 # CMD is /sbin/init. <hash> covers the root hash, provision.sh, container.sh, the
-# HELD_RUST_IMAGE line and the herdr-keep source minus target/ and bin/. A
-# missing source exits 1: `root: ✗ HELD SUBSTRATE — herdr-keep source missing at
+# HELD_RUST_IMAGE line and the herdr-shield source minus target/ and bin/. A
+# missing source exits 1: `root: ✗ HELD SUBSTRATE — herdr-shield source missing at
 # <path> (…)`.
 #
 # BROKEN STATE: an incomplete hash input is HASH-UNDERIVABLE (exit 2); missing
@@ -50,7 +50,7 @@ set -uo pipefail
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 ROOT="$(cd -- "$HERE/../../.." && pwd -P)"
 REBUILD=0 PRINT_HASH=0 TAG="" MACHINE=root
-# The Rust builder of lane HELD's herdr-keep, pinned by digest (bookworm: glibc
+# The Rust builder of lane HELD's herdr-shield, pinned by digest (bookworm: glibc
 # 2.36, older than the root's Ubuntu 24.04, so the binary runs there).
 HELD_RUST_IMAGE=rust:1.99.0-slim-bookworm@sha256:2c3a22f0a5533ea2dd5a16627bc841228151faa2d4de2644ac9987e4a2f1f2fa
 HASH_PATHS="pfm templates VERSION docs/SETUP.md docs/PLACEHOLDERS.md .githooks/pre-push infra/fence/pfm-dev.Dockerfile infra/fence/docker-compose.yml infra/fence/tools.env infra/fence/tools.sh infra/fence/pinned-tools.sh infra/fence/jscpd infra/fence/fence-env.sh infra/fence/engine-sync.sh infra/fence/source-clone.sh infra/fence/lanes/root.sh infra/fence/lanes/container.sh infra/fence/lanes/provision.sh infra/fence/lanes/adopt.sh infra/fence/lanes/cred-scan.sh infra/fence/lanes/fixtures infra/fence/lanes/scenarios infra/plugin-lab/tests/fakes/claude"
@@ -170,12 +170,12 @@ hash_inputs() {
 }
 
 # The held machine's inputs: the root it derives from, its own build files, the
-# pinned Rust builder and the herdr-keep source the binary is built from.
+# pinned Rust builder and the herdr-shield source the binary is built from.
 held_inputs() {
   printf 'root\t%s\n' "$HASH"
   hash_tree "$ROOT" "" infra/fence/lanes/provision.sh infra/fence/lanes/container.sh || return 1
   grep -m1 '^HELD_RUST_IMAGE=' "$HERE/root.sh" || return 1
-  hash_tree "$PFM_DEV_HERDR_KEEP_SRC" "herdr-keep/" . ':(exclude)target/**' ':(exclude)bin/**'
+  hash_tree "$PFM_DEV_HERDR_SHIELD_SRC" "herdr-shield/" . ':(exclude)target/**' ':(exclude)bin/**'
 }
 
 root_hash() {
@@ -199,8 +199,8 @@ PIN="pfm-lane-base:$HASH-$SUFFIX"
 KEY="$HASH"
 if [ "$MACHINE" = held ]; then
   [ -z "$TAG" ] || fatal "--tag names the root image only; the held machine is always pfm-lane-held:<hash>"
-  if [ -n "$PFM_DEV_HERDR_KEEP_MISSING" ]; then
-    echo "root: ✗ HELD SUBSTRATE — $PFM_DEV_HERDR_KEEP_MISSING" >&2
+  if [ -n "$PFM_DEV_HERDR_SHIELD_MISSING" ]; then
+    echo "root: ✗ HELD SUBSTRATE — $PFM_DEV_HERDR_SHIELD_MISSING" >&2
     exit 1
   fi
   out="$(held_inputs 2>&1)" || { echo "root: HASH-UNDERIVABLE: held inputs: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-200)" >&2; exit 2; }
@@ -343,20 +343,20 @@ commit_lost_lease() { # commit_lost_lease <output-file>
 }
 
 if [ "$MACHINE" = held ]; then
-  say "step 1/6 · herdr-keep from $PFM_DEV_HERDR_KEEP_SRC (cargo build --release --locked in $HELD_RUST_IMAGE)"
+  say "step 1/6 · herdr-shield from $PFM_DEV_HERDR_SHIELD_SRC (cargo build --release --locked in $HELD_RUST_IMAGE)"
   # RUSTUP_TOOLCHAIN pins the image's own 1.99.0, so rust-toolchain.toml's lint components are never fetched.
   # Every held build shares the target volume: under one flock, the build and the
   # copy of its binary to keys/<key>/ are one step, so another source's build
   # never replaces the binary this key's image installs.
-  run_step "herdr-keep cargo build" docker run --rm --name "$HELD_CARGO" --label pfm.fence=1 \
-    -v "$PFM_DEV_HERDR_KEEP_SRC:/herdr-keep:ro" -v pfm-dev-cargo:/usr/local/cargo/registry \
-    -v pfm-dev-herdr-keep-target:/target -e CARGO_TARGET_DIR=/target -e RUSTUP_TOOLCHAIN=1.99.0 \
-    -w /herdr-keep "$HELD_RUST_IMAGE" flock /target/.pfm-held-build.lock sh -c \
-    'cargo build --release --locked && mkdir -p "/target/keys/$1" && cp /target/release/herdr-keep "/target/keys/$1/herdr-keep"' _ "$KEY"
-  lane_run "$BUILD" "$ROOT_IMAGE" '' -v "$PFM_DEV_HERDR_KEEP_SRC:/herdr-keep:ro" \
-    -v pfm-dev-herdr-keep-target:/herdr-keep-target:ro -e "HELD_KEEP_BIN=/herdr-keep-target/keys/$KEY/herdr-keep" ||
+  run_step "herdr-shield cargo build" docker run --rm --name "$HELD_CARGO" --label pfm.fence=1 \
+    -v "$PFM_DEV_HERDR_SHIELD_SRC:/herdr-shield:ro" -v pfm-dev-cargo:/usr/local/cargo/registry \
+    -v pfm-dev-herdr-shield-target:/target -e CARGO_TARGET_DIR=/target -e RUSTUP_TOOLCHAIN=1.99.0 \
+    -w /herdr-shield "$HELD_RUST_IMAGE" flock /target/.pfm-held-build.lock sh -c \
+    'cargo build --release --locked && mkdir -p "/target/keys/$1" && cp /target/release/herdr-shield "/target/keys/$1/herdr-shield"' _ "$KEY"
+  lane_run "$BUILD" "$ROOT_IMAGE" '' -v "$PFM_DEV_HERDR_SHIELD_SRC:/herdr-shield:ro" \
+    -v pfm-dev-herdr-shield-target:/herdr-shield-target:ro -e "HELD_SHIELD_BIN=/herdr-shield-target/keys/$KEY/herdr-shield" ||
     fatal "the build container would not start from $ROOT_IMAGE"
-  say "step 2/6 · systemd, the user lane, Herdr and herdr-keep (provision.sh held)"
+  say "step 2/6 · systemd, the user lane, Herdr and herdr-shield (provision.sh held)"
   run_step "provision.sh held" x "$BUILD" bash /worktree/infra/fence/lanes/provision.sh held
   say "step 3/6 · lane's fixture seats (provision.sh seats as lane)"
   run_step "provision.sh seats as lane" x "${LANE_HELD_EXEC[@]}" "$BUILD" bash /worktree/infra/fence/lanes/provision.sh seats
@@ -416,7 +416,7 @@ for attempt in 1 2 3; do
 done
 say "$IMAGE committed in $(( $(date +%s) - T0 ))s — LOCAL ONLY: fixture credentials only"
 if [ "$MACHINE" = held ]; then
-  # One held machine per root: an image of another herdr-keep source on this same
+  # One held machine per root: an image of another herdr-shield source on this same
   # root is superseded (fence housekeeping prunes held images only with their root).
   # rmi without -f, so one a container still runs is kept.
   if stale="$(docker image ls --filter "label=professor.lane-root=$HASH" --filter label=professor.lane-held \

@@ -123,7 +123,7 @@ case "$1" in
     [ "${STUB_DF:-ok}" = ok ] || { echo "Error response from daemon: df boom" >&2; return 1; }
     [ -z "${STUB_MB:-}" ] || printf 'acme_pgdata\t9.5GB\npfm-dev-gocache\t%sMB\n' "$STUB_MB"
     printf 'pfm-dev-gomod\t%sMB\npfm-dev-lintcache\t10MB\npfm-dev-cargo\t10MB\n' "${STUB_GOMOD_MB:-10}"
-    printf 'pfm-dev-herdr-keep-target\t%sMB\n' "${STUB_KEEP_TARGET_MB:-10}" ;;
+    printf 'pfm-dev-herdr-shield-target\t%sMB\n' "${STUB_SHIELD_TARGET_MB:-10}" ;;
   builder)
     case "${STUB_BUILDER:-ok}" in
       ok) echo "Total reclaimed space: 1.5GB" ;;
@@ -542,12 +542,12 @@ if logged 'volume rm pfm-dev-gomod' && ! grep -q '^volume rm pfm-dev-gocache' "$
   ok "cache budget: gomod over 4000 MB removed, gocache under 15000 MB kept, one sizing call"
 else bad "cache budget all volumes" "$(cat "$STUB_DOCKER_LOG")" "$(cat "$T/err")"; fi
 
-# 22 — cache budget: lane HELD's herdr-keep target volume over its 6000 MB goes,
+# 22 — cache budget: lane HELD's herdr-shield target volume over its 6000 MB goes,
 #      its cargo registry under 2000 MB stays
-fresh; STUB_MB=40 STUB_KEEP_TARGET_MB=6001 hk
-if logged 'volume rm pfm-dev-herdr-keep-target' && ! grep -q '^volume rm pfm-dev-cargo' "$STUB_DOCKER_LOG" &&
-  grep -q 'removed pfm-dev-herdr-keep-target, 6001 MB > 6000 MB budget, freed 6001 MB' "$T/err" && [ -f "$STAMP" ] && nowarn; then
-  ok "cache budget: the herdr-keep target over 6000 MB removed, the cargo registry under 2000 MB kept"
+fresh; STUB_MB=40 STUB_SHIELD_TARGET_MB=6001 hk
+if logged 'volume rm pfm-dev-herdr-shield-target' && ! grep -q '^volume rm pfm-dev-cargo' "$STUB_DOCKER_LOG" &&
+  grep -q 'removed pfm-dev-herdr-shield-target, 6001 MB > 6000 MB budget, freed 6001 MB' "$T/err" && [ -f "$STAMP" ] && nowarn; then
+  ok "cache budget: the herdr-shield target over 6000 MB removed, the cargo registry under 2000 MB kept"
 else bad "cache budget held volumes" "$(cat "$STUB_DOCKER_LOG")" "$(cat "$T/err")"; fi
 
 shtest_end

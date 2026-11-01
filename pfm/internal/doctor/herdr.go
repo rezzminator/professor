@@ -114,16 +114,16 @@ func printHerdrBackendDoctor(
 	case err != nil:
 		warnings++
 		fmt.Fprintf(stdout, "doctor: herdr restore config UNREADABLE — %v\n", err)
-	case !resume && filepath.Base(shell) == herdrKeepBinary:
-		// herdr-keep requires native resume off and keeps panes alive itself, so its own doctor is the verdict.
-		if failure := herdrKeepDoctor(ctx, dependencies, shell); failure != "" {
+	case !resume && filepath.Base(shell) == herdrShieldBinary:
+		// herdr-shield requires native resume off and keeps panes alive itself, so its own doctor is the verdict.
+		if failure := herdrShieldDoctor(ctx, dependencies, shell); failure != "" {
 			warnings++
-			fmt.Fprintf(stdout, "doctor: herdr resume_agents_on_restore=false and herdr-keep doctor FAILED — %s;"+
+			fmt.Fprintf(stdout, "doctor: herdr resume_agents_on_restore=false and herdr-shield doctor FAILED — %s;"+
 				" Herdr chats will not come back after a restart until it passes\n", failure)
 		} else {
 			fmt.Fprintln(
 				stdout,
-				"doctor: herdr resume_agents_on_restore=false by design: herdr-keep keeps panes alive (herdr-keep doctor OK)",
+				"doctor: herdr resume_agents_on_restore=false by design: herdr-shield keeps panes alive (herdr-shield doctor OK)",
 			)
 		}
 	case !resume:
@@ -227,18 +227,18 @@ func herdrDoctorRestoreConfig(env paths.Env) (resume bool, shell string, err err
 	return resume, config.Terminal.DefaultShell, nil
 }
 
-// herdrKeepBinary is the herdr-keep plugin's program, Herdr's default_shell when it guards panes.
-const herdrKeepBinary = "herdr-keep"
+// herdrShieldBinary is the herdr-shield plugin's program, Herdr's default_shell when it guards panes.
+const herdrShieldBinary = "herdr-shield"
 
-// herdrKeepDoctor runs `{shell} doctor` and returns "" when it reports OK, else
+// herdrShieldDoctor runs `{shell} doctor` and returns "" when it reports OK, else
 // the first line of why it did not: its own refusal, a timeout or a failed run.
-func herdrKeepDoctor(ctx context.Context, dependencies Dependencies, shell string) string {
+func herdrShieldDoctor(ctx context.Context, dependencies Dependencies, shell string) string {
 	bounded, cancel := context.WithTimeout(ctx, herdrStatusBound)
 	defer cancel()
-	// A doctor run from inside a held pane inherits the keeper's marks, which
-	// herdr-keep refuses as a recursive invocation: never a verdict on the keeper.
+	// A doctor run from inside a held pane inherits the shield's marks, which
+	// herdr-shield refuses as a recursive invocation: never a verdict on the shield.
 	result, err := dependencies.Runner.Run(bounded, []string{shell, "doctor"}, deps.RunOptions{
-		Env: herdr.KeepOuterEnviron(os.Environ()), WaitDelay: 2 * time.Second, ProcessGroup: true,
+		Env: herdr.ShieldOuterEnviron(os.Environ()), WaitDelay: 2 * time.Second, ProcessGroup: true,
 	})
 	switch {
 	case bounded.Err() != nil:

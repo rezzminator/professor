@@ -13,7 +13,7 @@ const (
 )
 
 // indicatorTarget is one pane or workspace as Herdr lists it: its id, its
-// agent_status and the custom tokens it holds, all sources' alike (Herdr keeps
+// agent_status and the custom tokens it holds, all sources' alike (Herdr retains
 // one token map per resource).
 type indicatorTarget struct {
 	kind   string

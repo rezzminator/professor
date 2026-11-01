@@ -552,7 +552,7 @@ func prepareRestoredSeat(
 // restore command, not an arbitrary pane named by inherited environment values.
 func restoredCallerAuthority(ctx context.Context, values paths.Values, socket, pane string) error {
 	proc := gather.NewProcFS(values.ProcRoot)
-	info, err := gather.HerdrKeep(proc).Read(ctx, socket, pane)
+	info, err := gather.HerdrShield(proc).Read(ctx, socket, pane)
 	if err != nil {
 		return fmt.Errorf("read restored caller shell: %w", err)
 	}

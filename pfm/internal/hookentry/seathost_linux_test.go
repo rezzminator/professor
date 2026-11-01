@@ -291,12 +291,12 @@ func TestSeatHostPTY(t *testing.T) {
 				paths.EnvStateDB+"="+filepath.Join(root, "pfm.db"),
 			)
 			if mode == "relay" {
-				// herdr-keep holds the pane: the supervisor's shell names its holder's relay.
-				testjail.StageHerdrKeep(t, testjail.HerdrKeepListing(5, 2, 10, 3, "w6:p3", server.path), 0)
+				// herdr-shield holds the pane: the supervisor's shell names its holder's relay.
+				testjail.StageHerdrShield(t, testjail.HerdrShieldListing(5, 2, 10, 3, "w6:p3", server.path), 0)
 				environment = append(
 					environment,
 					"PATH="+paths.OSEnv{}.Get("PATH"),
-					"HERDR_SOCKET_PATH="+filepath.Join(root, "herdr-keep", "h1", "herdr-api.sock"),
+					"HERDR_SOCKET_PATH="+filepath.Join(root, "herdr-shield", "h1", "herdr-api.sock"),
 				)
 			}
 			values := paths.Values{StateDB: filepath.Join(root, "pfm.db")}

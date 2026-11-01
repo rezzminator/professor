@@ -275,7 +275,7 @@ func PaintHerdrIndicators(ctx context.Context, socket, lockDir string, stderr io
 			proc.Environ,
 			herdr.Call,
 			func() uint64 { return uint64(clock.Real.Now().UnixNano()) },
-			gather.HerdrKeep(proc),
+			gather.HerdrShield(proc),
 		).Resolve,
 	}
 	provider.views = func(ctx context.Context, target headless.Chat, socket string) ([]herdr.TabDecoration, error) {
@@ -409,13 +409,13 @@ func (reader *tabViewReader) liveness(
 }
 
 // tabEngineForeground reports whether the seat's engine is in its pane's
-// foreground, from Herdr's pane.process_info (through herdr-keep).
+// foreground, from Herdr's pane.process_info (through herdr-shield).
 func tabEngineForeground(ctx context.Context, seat fleetdb.Seat) (bool, error) {
 	values, err := paths.Resolve()
 	if err != nil {
 		return false, fmt.Errorf("read Herdr foreground processes of %s: resolve paths: %w", seat.HerdrPane, err)
 	}
-	processes, err := gather.HerdrKeep(gather.NewProcFS(values.ProcRoot)).Read(ctx, seat.HerdrSocket, seat.HerdrPane)
+	processes, err := gather.HerdrShield(gather.NewProcFS(values.ProcRoot)).Read(ctx, seat.HerdrSocket, seat.HerdrPane)
 	if err != nil {
 		return false, fmt.Errorf("read Herdr foreground processes of %s: %w", seat.HerdrPane, err)
 	}

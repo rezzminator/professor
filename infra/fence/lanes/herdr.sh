@@ -94,13 +94,13 @@ h_type() {
     h_request pane.send_keys "$(jq -nc --arg p "$1" '{pane_id:$p,keys:["enter"]}')" >>"$LANE_LOG"
 }
 
-# herdr-keep's own listing for this server (`herdr-keep list --json`), never cached.
-h_keep() { HERDR_SOCKET_PATH="$HERDR_SOCKET_PATH" herdr-keep list --json; }
+# herdr-shield's own listing for this server (`herdr-shield list --json`), never cached.
+h_shield() { HERDR_SOCKET_PATH="$HERDR_SOCKET_PATH" herdr-shield list --json; }
 
-# h_held_holder <pane> — the one live, running, attached holder herdr-keep binds to
+# h_held_holder <pane> — the one live, running, attached holder herdr-shield binds to
 # <pane> on this server, as JSON; none or several is an error naming the count.
 h_held_holder() {
-  h_keep | jq -ec --arg p "$1" --arg s "$HERDR_SOCKET_PATH" '
+  h_shield | jq -ec --arg p "$1" --arg s "$HERDR_SOCKET_PATH" '
     [.holders[] | select(.binding.pane == $p and .binding.socket == $s and .holder_live == true
       and .state == "running" and .orphan == false)]
     | if length == 1 then .[0] else error("\(length) live holders bound to \($p)") end'

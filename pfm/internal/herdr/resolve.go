@@ -32,21 +32,21 @@ type Resolver struct {
 	Panes func(ctx context.Context, socket string) ([]Pane, error)
 	// Foreground returns the foreground pids of one pane (pane.process_info).
 	Foreground func(ctx context.Context, socket, pane string) ([]int, error)
-	// Keep maps a herdr-keep relay socket in the environment to Herdr's own.
-	Keep *Keep
+	// Shield maps a herdr-shield relay socket in the environment to Herdr's own.
+	Shield *Shield
 }
 
 // WireResolver is a Resolver over a live Herdr socket: call is Call's seam,
-// seq numbers each request and keep reads the panes herdr-keep holds.
+// seq numbers each request and shield reads the panes herdr-shield holds.
 func WireResolver(
 	environ func(pid int) (map[string]string, error),
 	call func(ctx context.Context, socket string, lines ...[]byte) ([]json.RawMessage, error),
 	seq func() uint64,
-	keep *Keep,
+	shield *Shield,
 ) Resolver {
 	return Resolver{
 		Environ: environ,
-		Keep:    keep,
+		Shield:  shield,
 		Panes: func(ctx context.Context, socket string) ([]Pane, error) {
 			line, err := PaneList{Seq: seq()}.Line()
 			if err != nil {
@@ -67,7 +67,7 @@ func WireResolver(
 			if err != nil {
 				return nil, err
 			}
-			processes, err := keep.Processes(ctx, socket, results[0])
+			processes, err := shield.Processes(ctx, socket, results[0])
 			if err != nil {
 				return nil, err
 			}
@@ -95,7 +95,7 @@ func (resolver Resolver) Resolve(ctx context.Context, pid int) (Location, bool, 
 	if environment[EnvSocket] == "" {
 		return Location{}, false, fmt.Errorf("client %d: %s=1 without %s", pid, EnvMarker, EnvSocket)
 	}
-	socket, first, err := resolver.Keep.Upstream(ctx, environment[EnvSocket], environment[EnvPane])
+	socket, first, err := resolver.Shield.Upstream(ctx, environment[EnvSocket], environment[EnvPane])
 	if err != nil {
 		return Location{}, false, fmt.Errorf("client %d: %w", pid, err)
 	}
@@ -196,11 +196,11 @@ type PaneIdentity struct {
 
 // LocatePane returns pane's identity by pane.get. A pane Herdr no longer knows
 // (pane_not_found: a pane move or a Herdr restart gave it a new id) is found
-// again by process: the listed pane whose foreground (through keep) holds one
+// again by process: the listed pane whose foreground (through shield) holds one
 // of pids (a process and its ancestors), so a stale inherited HERDR_PANE_ID
 // never fails a caller that still runs in Herdr. found is false only when
 // Herdr answered and no pane holds pids; every failed read is an error.
-func LocatePane(ctx context.Context, keep *Keep, socket, pane string, pids []int) (PaneIdentity, bool, error) {
+func LocatePane(ctx context.Context, shield *Shield, socket, pane string, pids []int) (PaneIdentity, bool, error) {
 	identity, err := paneIdentity(ctx, socket, pane)
 	var refusal *Refusal
 	if !errors.As(err, &refusal) || refusal.Code != paneNotFound && refusal.Code != "not_found" {
@@ -211,7 +211,7 @@ func LocatePane(ctx context.Context, keep *Keep, socket, pane string, pids []int
 		return PaneIdentity{}, false, fmt.Errorf("pane %s is gone; list panes: %w", pane, listErr)
 	}
 	resolver := Resolver{Foreground: func(ctx context.Context, socket, pane string) ([]int, error) {
-		processes, err := keep.Read(ctx, socket, pane)
+		processes, err := shield.Read(ctx, socket, pane)
 		if err != nil {
 			return nil, err
 		}

@@ -24,7 +24,7 @@ func TestHerdrTabProviderReleasedAgentTeardown(t *testing.T) {
 	for _, outcome := range []string{"exit", "closed", "alive", "recovered", "unreadable", "moved-exit", "replaced-pane", "kept-exit", "exit-beside-incomplete", "own-pane-incomplete"} {
 		t.Run(outcome, func(t *testing.T) {
 			t.Setenv("TMUX_TMPDIR", t.TempDir())
-			// kept-exit: herdr-keep's holder 5 runs shell 10, whose terminal's
+			// kept-exit: herdr-shield's holder 5 runs shell 10, whose terminal's
 			// foreground group 41 runs the engine, then a bare shell.
 			proc := t.TempDir()
 			if outcome == "kept-exit" {
@@ -33,7 +33,7 @@ func TestHerdrTabProviderReleasedAgentTeardown(t *testing.T) {
 			foreground := func(argv0 string) {
 				zeros := strings.Repeat("0 ", 13)
 				for pid, file := range map[string]string{
-					"5/stat":     "5 (herdr-keep) S 1 5 5 0 -1 " + zeros + "2 0\n",
+					"5/stat":     "5 (herdr-shield) S 1 5 5 0 -1 " + zeros + "2 0\n",
 					"10/stat":    "10 (zsh) S 5 10 10 0 41 " + zeros + "3 0\n",
 					"41/stat":    "41 (" + argv0 + ") S 10 41 10 0 41 " + zeros + "4 0\n",
 					"41/cmdline": argv0 + "\x00",
@@ -79,8 +79,8 @@ func TestHerdrTabProviderReleasedAgentTeardown(t *testing.T) {
 						name = "bash"
 					}
 					if outcome == "kept-exit" {
-						// Herdr sees only herdr-keep's attach client.
-						name = "herdr-keep"
+						// Herdr sees only herdr-shield's attach client.
+						name = "herdr-shield"
 					}
 					if outcome == "unreadable" {
 						return nil, "process_read_failed"
@@ -131,7 +131,7 @@ func TestHerdrTabProviderReleasedAgentTeardown(t *testing.T) {
 				warn: tabIndicatorWarnings{dir: dir, stderr: &warnings},
 			}
 			if outcome == "kept-exit" {
-				testjail.StageHerdrKeep(t, testjail.HerdrKeepListing(5, 2, 10, 3, "w1:p1", socket), 0)
+				testjail.StageHerdrShield(t, testjail.HerdrShieldListing(5, 2, 10, 3, "w1:p1", socket), 0)
 			}
 			for phase = 0; phase < 3; phase++ {
 				if outcome == "kept-exit" && phase == 0 {

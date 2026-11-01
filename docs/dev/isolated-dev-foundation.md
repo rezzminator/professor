@@ -119,7 +119,7 @@ Each default shown is the desktop default; native differs only where the row nam
 | Steps | `PFM_FENCE_SAMPLER_READY_TICKS` (50) · int | resource-sampler readiness wait, 0.1 s ticks (5 s) |
 | Housekeeping | `PFM_FENCE_CONTAINER_MAX_HOURS` (6), `PFM_FENCE_BUILDCACHE_HOURS` (168), `PFM_FENCE_BUDGET_MINUTES` (120), `PFM_FENCE_SCRATCH_DAYS` (7) · int | forced container age; build-cache age; cache-budget check interval; scratch age |
 | Housekeeping | `PFM_FENCE_BUILDCACHE_MINUTES` (1440) · int | interval between builder-prune checks, apart from the `PFM_FENCE_BUILDCACHE_HOURS` age |
-| Housekeeping | `PFM_FENCE_GOCACHE_MB` (15000), `PFM_FENCE_GOMOD_MB` (4000), `PFM_FENCE_LINTCACHE_MB` (2000), `PFM_FENCE_CARGO_MB` (2000), `PFM_FENCE_HERDR_KEEP_TARGET_MB` (6000) · int | cache volume budgets (the last two: lane HELD's `pfm-dev-cargo` and `pfm-dev-herdr-keep-target`) |
+| Housekeeping | `PFM_FENCE_GOCACHE_MB` (15000), `PFM_FENCE_GOMOD_MB` (4000), `PFM_FENCE_LINTCACHE_MB` (2000), `PFM_FENCE_CARGO_MB` (2000), `PFM_FENCE_HERDR_SHIELD_TARGET_MB` (6000) · int | cache volume budgets (the last two: lane HELD's `pfm-dev-cargo` and `pfm-dev-herdr-shield-target`) |
 | Housekeeping | `PFM_FENCE_DF_TIMEOUT_S` (120) · int | bound on `docker system df -v` |
 | Lanes | `LANE_EGRESS_READY_SECS` (10), `LANE_EGRESS_VERDICT_SECS` (30) · uint; `LANE_STORM_WAIT_SECS` (60) · int | egress ready and verdict waits; storm wait |
 | Lanes | `LANE_HELD_BOOT_SECS` (30) · uint | the held machine's boot wait |

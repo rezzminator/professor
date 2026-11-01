@@ -8,7 +8,7 @@ import (
 
 const processInfoResultType = "pane_process_info"
 
-// EngineForeground reads a pane's processes (Keep.Processes) for both tab
+// EngineForeground reads a pane's processes (Shield.Processes) for both tab
 // status and kill. Herdr 0.9.5 permits an empty array but supplies no
 // successful-enumeration marker: without a process identity, engine absence
 // remains unproved.

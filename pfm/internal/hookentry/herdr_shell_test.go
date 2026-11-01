@@ -43,7 +43,7 @@ func TestHerdrShellReportsToThePaneRunningTheShell(t *testing.T) {
 		// hidden is text the user typed that no error line may carry.
 		hidden string
 		rc     int
-		// kept has herdr-keep's holder 300 run the shell 4242 for pane wT:p1.
+		// kept has herdr-shield's holder 300 run the shell 4242 for pane wT:p1.
 		kept bool
 	}{
 		"done reports working then idle to the pane the shell was born in": {
@@ -76,7 +76,7 @@ func TestHerdrShellReportsToThePaneRunningTheShell(t *testing.T) {
 				sprintf(title, "wT:p1", strings.Repeat("x", 66)+"… exit 3 · 12s"),
 			},
 		},
-		"a pane herdr-keep holds reports for the shell its holder runs": {
+		"a pane herdr-shield holds reports for the shell its holder runs": {
 			setup: func(server *fakeHerdr) { server.addKeptPane("wT:p1", "t1", 77) },
 			kept:  true,
 			args:  []string{"done", "--pid", "4242", "--command", "make test", "--exit", "3", "--seconds", "12"},
@@ -216,7 +216,7 @@ func TestHerdrShellReportsToThePaneRunningTheShell(t *testing.T) {
 				proc := t.TempDir()
 				zeros := strings.Repeat("0 ", 13)
 				for pid, stat := range map[int]string{
-					300:  "300 (herdr-keep) S 1 300 300 0 -1 " + zeros + "30 0\n",
+					300:  "300 (herdr-shield) S 1 300 300 0 -1 " + zeros + "30 0\n",
 					4242: "4242 (zsh) S 300 4242 4242 0 4250 " + zeros + "31 0\n",
 					4250: "4250 (make) S 4242 4250 4242 0 4250 " + zeros + "32 0\n",
 				} {
@@ -235,8 +235,8 @@ func TestHerdrShellReportsToThePaneRunningTheShell(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				testjail.StageHerdrKeep(t, testjail.HerdrKeepListing(300, 30, 4242, 31, "wT:p1", server.path), 0)
-				deps.keep = gather.HerdrKeep(gather.NewProcFS(proc))
+				testjail.StageHerdrShield(t, testjail.HerdrShieldListing(300, 30, 4242, 31, "wT:p1", server.path), 0)
+				deps.shield = gather.HerdrShield(gather.NewProcFS(proc))
 			}
 			var stderr bytes.Buffer
 			if rc := reportShellRun(test.args, &stderr, deps); rc != test.rc {

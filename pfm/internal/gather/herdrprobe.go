@@ -18,14 +18,14 @@ import (
 
 const nativeHerdrBackend = "herdr"
 
-// HerdrKeep is the herdr-keep door over proc.
-func HerdrKeep(proc ProcFS) *herdr.Keep {
-	return &herdr.Keep{Runner: deps.RealRunner{}, Proc: keepProc{proc}}
+// HerdrShield is the herdr-shield door over proc.
+func HerdrShield(proc ProcFS) *herdr.Shield {
+	return &herdr.Shield{Runner: deps.RealRunner{}, Proc: shieldProc{proc}}
 }
 
-type keepProc struct{ ProcFS }
+type shieldProc struct{ ProcFS }
 
-func (proc keepProc) Stat(pid int) (herdr.ProcStat, error) {
+func (proc shieldProc) Stat(pid int) (herdr.ProcStat, error) {
 	stat, err := proc.ProcFS.Stat(pid)
 	return herdr.ProcStat{Start: stat.StartTime, Group: stat.Group, TerminalGroup: stat.TerminalGroup}, err
 }
@@ -211,7 +211,7 @@ func proveHerdrSeatSnapshot(
 	if err != nil {
 		return seat, false, fmt.Errorf("prove seat %s shell: %w", seat.SeatID, err)
 	}
-	processes, err := HerdrKeep(proc).Processes(ctx, seat.HerdrSocket, body)
+	processes, err := HerdrShield(proc).Processes(ctx, seat.HerdrSocket, body)
 	if err != nil {
 		return seat, false, fmt.Errorf("seat %s ownership shell identity unavailable: %w", seat.SeatID, err)
 	}

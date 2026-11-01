@@ -67,7 +67,7 @@ func (proc linuxProcFS) statFields(pid int) ([]string, error) {
 // withheld tags a refused environment read of a process that can never be a
 // pane of the caller's: another uid's or a non-dumpable one, or one with no
 // terminal holding capabilities this process lacks (the systemd user manager a
-// herdr-keep holder runs under). Any other refusal stays a read failure.
+// herdr-shield holder runs under). Any other refusal stays a read failure.
 func (proc linuxProcFS) withheld(pid int, err error) error {
 	if errors.Is(err, os.ErrPermission) && (foreignOwned(proc.path(pid, "environ")) || proc.privileged(pid)) {
 		return fmt.Errorf("%w: %w", ErrForeignProcess, err)

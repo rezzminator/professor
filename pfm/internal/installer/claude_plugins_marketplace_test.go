@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -636,6 +637,140 @@ func TestEnsureClaudePluginsAlphaUnlistedPluginLeftEnabled(t *testing.T) {
 			}
 			if strings.Contains(out.String(), "kept disabled") {
 				t.Fatalf("buddy reported kept disabled while enabled:\n%s", out.String())
+			}
+		})
+	}
+}
+
+// TestEnsureClaudePluginsRefreshesAKnownProfessorMarketplace: a release build
+// installing a plugin of ours from GitHub first refreshes the professor
+// marketplace Claude Code already knows, once per pass; a failed refresh is a
+// warning, and the install that then fails names the refresh as its repair,
+// not the claude.plugins entry; a disabled install record of any older
+// version is brought current before the install enables it, and an update
+// that fails leaves it disabled.
+func TestEnsureClaudePluginsRefreshesAKnownProfessorMarketplace(t *testing.T) {
+	notListed := `plugin "auto-effort" not found in marketplace "professor"`
+	for _, test := range []struct {
+		name     string
+		plugins  []pfmconfig.ClaudePlugin
+		disabled string
+		fail     []string
+		want     []string
+		err      func(first, binary string) string
+		line     func(first, binary string) string
+	}{
+		{
+			name:    "refreshed once for every install",
+			plugins: []pfmconfig.ClaudePlugin{{ID: "auto-effort"}, {ID: "engine-sync"}},
+			want: []string{
+				"plugin marketplace update professor",
+				"plugin marketplace add rezzminator/professor",
+				"plugin install auto-effort@professor -y",
+				"plugin marketplace add rezzminator/professor",
+				"plugin install engine-sync@professor -y",
+			},
+			err: func(string, string) string { return "" },
+			line: func(first, binary string) string {
+				return "  change  run CLAUDE_CONFIG_DIR=" + first + " " + binary + " plugin marketplace update professor:" +
+					" Claude Code's listing of marketplace professor may predate this release"
+			},
+		},
+		{
+			name:    "a failed refresh is the failed install's repair",
+			plugins: []pfmconfig.ClaudePlugin{{ID: "auto-effort"}},
+			fail:    []string{"plugin marketplace update professor", "plugin install auto-effort@professor -y"},
+			want: []string{
+				"plugin marketplace update professor",
+				"plugin marketplace add rezzminator/professor",
+				"plugin install auto-effort@professor -y",
+			},
+			err: func(first, binary string) string {
+				return "claude plugin auto-effort@professor in " + first + ": plugin install auto-effort@professor -y: exit 1" +
+					` stderr="` + strings.ReplaceAll(notListed, `"`, `\"`) + `" — Claude Code's listing of marketplace` +
+					" professor may predate auto-effort and could not be refreshed: run CLAUDE_CONFIG_DIR=" + first + " " +
+					binary + " plugin marketplace update professor, then pfm install --yes"
+			},
+			line: func(first, _ string) string {
+				return "  warn    claude plugin marketplace professor in " + first + " not refreshed:" +
+					` plugin marketplace update professor: exit 1 stderr="` + strings.ReplaceAll(notListed, `"`, `\"`) + `"`
+			},
+		},
+		{
+			name:     "a disabled old record is brought current before it is enabled",
+			plugins:  []pfmconfig.ClaudePlugin{{ID: "auto-effort"}},
+			disabled: "0.9.0",
+			want: []string{
+				"plugin marketplace update professor",
+				"plugin update auto-effort@professor --scope user -y",
+				"plugin marketplace add rezzminator/professor",
+				"plugin install auto-effort@professor -y",
+			},
+			err: func(string, string) string { return "" },
+			line: func(first, binary string) string {
+				return "  change  run CLAUDE_CONFIG_DIR=" + first + " " + binary +
+					" plugin update auto-effort@professor --scope user -y: plugin auto-effort@professor is disabled at" +
+					" version 0.9.0, brought to its marketplace's current version before it is enabled"
+			},
+		},
+		{
+			name:     "a failed update leaves the old record disabled",
+			plugins:  []pfmconfig.ClaudePlugin{{ID: "auto-effort"}},
+			disabled: "0.9.0",
+			fail:     []string{"plugin update auto-effort@professor --scope user -y"},
+			want: []string{
+				"plugin marketplace update professor",
+				"plugin update auto-effort@professor --scope user -y",
+			},
+			err: func(first, _ string) string {
+				return "claude plugin auto-effort@professor in " + first +
+					": plugin update auto-effort@professor --scope user -y: exit 1" +
+					` stderr="` + strings.ReplaceAll(notListed, `"`, `\"`) + `"`
+			},
+			line: func(string, string) string { return "" },
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			home, binary, first, second := pluginFixture(t)
+			writeKnownMarketplaces(t, first, pfmconfig.ProfessorMarketplace)
+			if test.disabled != "" {
+				writeFixture(t, filepath.Join(first, "settings.json"),
+					`{"enabledPlugins":{"auto-effort@professor":false}}`)
+				installPath := filepath.Join(first, "plugins", "cache", "professor", "auto-effort", test.disabled)
+				if err := os.MkdirAll(installPath, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				raw, err := json.Marshal(map[string]any{"version": 2, "plugins": map[string]any{
+					"auto-effort@professor": []any{
+						map[string]any{"scope": "user", "installPath": installPath, "version": test.disabled},
+					},
+				}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				writeFixture(t, filepath.Join(first, "plugins", "installed_plugins.json"), string(raw))
+			}
+			runner := &pluginRunner{fail: map[string]string{}}
+			for _, argv := range test.fail {
+				runner.fail[first+" "+argv] = notListed
+			}
+			var out bytes.Buffer
+			inst := pluginEngine(home, binary, first, second, runner, &out, true)
+			inst.options.ClaudePlugins = test.plugins
+			err := inst.ensureClaudePlugins(context.Background())
+			got := ""
+			if err != nil {
+				got = err.Error()
+			}
+			if want := test.err(first, binary); got != want {
+				t.Fatalf("error\n got %s\nwant %s\n%s", got, want, out.String())
+			}
+			if argvs := pluginArgvs(runner); !reflect.DeepEqual(argvs, test.want) {
+				t.Fatalf("commands\n got %q\nwant %q\n%s", argvs, test.want, out.String())
+			}
+			line := test.line(first, binary)
+			if line != "" && !slices.Contains(strings.Split(out.String(), "\n"), line) {
+				t.Fatalf("output lacks the line\n%s\ngot:\n%s", line, out.String())
 			}
 		})
 	}

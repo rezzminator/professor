@@ -17,6 +17,9 @@ import (
 // seat in its own tab: the shim's cx (pfm.zsh) then attaches nothing.
 const ChatServerBornNative = 3
 
+// codexLaunchEntry is the shim's run string up to cx's own words (pfm.zsh's cx).
+const codexLaunchEntry = " internal codex-launch"
+
 // NewChat runs `pfm chat new` argv under ctx: the one birth door a cx placed
 // in Herdr hands its chat to.
 type NewChat func(ctx context.Context, args []string, stdout, stderr io.Writer) int
@@ -74,6 +77,13 @@ func ChatServer(args []string, stdout, stderr io.Writer, runtime config.Runtime,
 // argument, so anything else is refused before the birth.
 func chatServerNative(ctx context.Context, args []string, stdout, stderr io.Writer, newChat NewChat) int {
 	typed := args[3:]
+	if _, words, _ := strings.Cut(args[2], codexLaunchEntry); len(typed) == 0 && strings.TrimSpace(words) != "" {
+		// A shell that sourced an older shim passes cx's words only inside the run string.
+		fmt.Fprintf(stderr, "pfm internal chat-server: this shell's cx predates this pfm and passed %s only "+
+			"inside its run string; open a new shell (or run: source ~/.zshrc) and run cx again\n",
+			strings.TrimSpace(words))
+		return 1
+	}
 	if len(typed) > 1 || len(typed) == 1 && (strings.HasPrefix(typed[0], "-") ||
 		codexNonTUISubcommands[typed[0]] || codexSessionSubcommands[typed[0]]) {
 		fmt.Fprintf(stderr, "pfm internal chat-server: a cx born in Herdr carries one prompt only, not %q; "+

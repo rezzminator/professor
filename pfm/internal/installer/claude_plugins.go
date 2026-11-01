@@ -26,6 +26,9 @@ const claudeConfigDirEnv = "CLAUDE_CONFIG_DIR"
 // claudePluginCommand is the claude subcommand every plugin command runs under.
 const claudePluginCommand = "plugin"
 
+// claudeMarketplaceCommand is the `claude plugin` subcommand over marketplaces.
+const claudeMarketplaceCommand = "marketplace"
+
 // claudePluginCommandTimeout bounds each `claude plugin` command: a plugin
 // command that hangs (a network wait, a prompt) must not stall pfm install.
 const claudePluginCommandTimeout = 2 * time.Minute
@@ -330,6 +333,8 @@ type claudePluginRun struct {
 	binary        string
 	resolveErr    error
 	failures      []error
+	// refreshed is each marketplace this pass refreshed, with the refresh's failure.
+	refreshed map[string]error
 }
 
 // ensureClaudePluginTarget ensures one target, appending each failure to run.
@@ -413,9 +418,19 @@ func (installer *engine) ensureClaudePluginTarget(
 		// enabled is still disabled below.
 		installer.skip("claude plugin " + target.FallbackNote())
 	default:
+		if target.Own && !target.Local {
+			installer.refreshClaudePluginMarketplace(ctx, run, target)
+			if installed {
+				// A disabled record may hold any older copy: the install would enable it as it is.
+				if err := installer.updateClaudePluginRecord(ctx, run, target); err != nil {
+					fail(err)
+					return
+				}
+			}
+		}
 		if err := installer.installClaudePlugin(ctx, run.binary, run.dir, target); err != nil {
 			if target.Own && !target.Local {
-				err = fmt.Errorf("%w — %s", err, BareClaudePluginRepair(target.Name))
+				err = fmt.Errorf("%w — %s", err, run.ownPluginRepair(target))
 			}
 			fail(err)
 			return
@@ -466,6 +481,88 @@ func (installer *engine) ensureClaudePluginTarget(
 	}
 }
 
+// refreshClaudePluginMarketplace runs `claude plugin marketplace update
+// {marketplace}` once per pass, before the first install of a plugin of ours a
+// release build takes from GitHub, when Claude Code already knows that
+// marketplace: its cached listing may predate a plugin this release adds or
+// renames, and the `plugin marketplace add` the install runs refreshes nothing
+// on a known name. A marketplace not yet known is fetched fresh by that add. A
+// failed refresh is a warning, never a failure by itself: the install that
+// follows is the judge, and its repair names the refresh (ownPluginRepair).
+func (installer *engine) refreshClaudePluginMarketplace(
+	ctx context.Context,
+	run *claudePluginRun,
+	target *ClaudePluginTarget,
+) {
+	_, marketplace, _ := strings.Cut(target.ID, "@")
+	if _, done := run.refreshed[marketplace]; done {
+		return
+	}
+	// An unreadable record cannot say the marketplace is unknown, so the refresh still runs.
+	if _, known, err := readKnownMarketplaces(run.dir); err == nil {
+		if _, ok := known[marketplace]; !ok {
+			return
+		}
+	}
+	if run.refreshed == nil {
+		run.refreshed = map[string]error{}
+	}
+	update := []string{run.binary, claudePluginCommand, claudeMarketplaceCommand, "update", marketplace}
+	message := fmt.Sprintf("run %s=%s %s: Claude Code's listing of marketplace %s may predate this release",
+		claudeConfigDirEnv, run.dir, shellCommandLine(update...), marketplace)
+	err := installer.change(message, func() error {
+		options := deps.RunOptions{Env: pluginCommandEnvironment(run.dir)}
+		return runClaudePluginCommand(ctx, installer.processRunner(), update, options)
+	})
+	run.refreshed[marketplace] = err
+	if err != nil {
+		warning := fmt.Sprintf("claude plugin marketplace %s in %s not refreshed: %v", marketplace, run.dir, err)
+		installer.say("  warn    %s", warning)
+		installer.record("warn", warning, err)
+	}
+}
+
+// ownPluginRepair is the repair a failed install of a plugin of ours from
+// GitHub names: a marketplace whose refresh failed may still list the
+// plugins from before this release, so the refresh is the repair; one
+// refreshed or freshly added lists what GitHub does, so a name it lacks is
+// the claude.plugins entry's.
+func (run *claudePluginRun) ownPluginRepair(target *ClaudePluginTarget) string {
+	_, marketplace, _ := strings.Cut(target.ID, "@")
+	if run.refreshed[marketplace] == nil {
+		return BareClaudePluginRepair(target.Name)
+	}
+	return fmt.Sprintf("Claude Code's listing of marketplace %s may predate %s and could not be refreshed: "+
+		"run %s=%s %s, then pfm install --yes", marketplace, target.Name, claudeConfigDirEnv, run.dir,
+		shellCommandLine(run.binary, claudePluginCommand, claudeMarketplaceCommand, "update", marketplace))
+}
+
+// updateClaudePluginRecord brings a disabled install record of a plugin of
+// ours a release build takes from GitHub to the marketplace's current version
+// before the install enables it: the record may be any older copy (a retired
+// plugin's id now its successor's), and the version the marketplace serves
+// is known only to Claude Code. One `claude plugin update` runs per scope.
+func (installer *engine) updateClaudePluginRecord(
+	ctx context.Context,
+	run *claudePluginRun,
+	target *ClaudePluginTarget,
+) error {
+	record, err := readClaudePluginInstalls(run.dir)
+	if err != nil {
+		return err
+	}
+	_, failures := installer.updateClaudePluginEntries(ctx, run, target.ID, record[target.ID],
+		func(entry claudePluginInstall) string {
+			recorded := "at version " + EscapeControl(entry.version())
+			if entry.version() == "" {
+				recorded = "with no version string"
+			}
+			return "plugin " + target.ID + " is disabled " + recorded +
+				", brought to its marketplace's current version before it is enabled"
+		})
+	return errors.Join(failures...)
+}
+
 // repointClaudePluginMarketplace re-points the professor marketplace of an
 // installed plugin of ours that Claude Code knows from another source at the
 // target's own source, its checkout copies' dir on -alpha: `plugin
@@ -486,7 +583,7 @@ func (installer *engine) repointClaudePluginMarketplace(
 		return fmt.Errorf("%s, and the real claude binary that re-points it is not resolved: %w",
 			gaps[0].Problem, run.resolveErr)
 	}
-	add := []string{run.binary, claudePluginCommand, "marketplace", "add", target.Source}
+	add := []string{run.binary, claudePluginCommand, claudeMarketplaceCommand, "add", target.Source}
 	message := fmt.Sprintf("run %s=%s %s: %s", claudeConfigDirEnv, run.dir, shellCommandLine(add...), gaps[0].Problem)
 	return installer.change(message, func() error {
 		options := deps.RunOptions{Env: pluginCommandEnvironment(run.dir)}
@@ -583,7 +680,7 @@ func (installer *engine) installClaudePlugin(
 	var add []string
 	message := fmt.Sprintf("run %s=%s %s", claudeConfigDirEnv, dir, shellCommandLine(install...))
 	if target.Source != "" {
-		add = []string{binary, claudePluginCommand, "marketplace", "add", target.Source}
+		add = []string{binary, claudePluginCommand, claudeMarketplaceCommand, "add", target.Source}
 		message = fmt.Sprintf(
 			"run %s=%s %s && %s", claudeConfigDirEnv, dir, shellCommandLine(add...), shellCommandLine(install...),
 		)

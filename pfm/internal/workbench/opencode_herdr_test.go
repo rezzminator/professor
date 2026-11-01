@@ -487,8 +487,8 @@ func TestOpenCodeHerdrPluginReportsActualPromptWithoutPromptText(t *testing.T) {
 }
 
 // engineGuardPluginDriver loads the staged engine-guard plugin and runs its
-// tool.execute.before over each call, printing each outcome and the warnings
-// it logged.
+// tool.execute.before over each call, printing each outcome, the warnings it
+// logged and whether OpenCode's event loop ran while the guard did.
 const engineGuardPluginDriver = `import fs from "node:fs"
 import {pathToFileURL} from "node:url"
 const row = JSON.parse(fs.readFileSync(0, "utf8"))
@@ -496,6 +496,8 @@ const logs = []
 const mod = await import(pathToFileURL(row.plugin).href)
 const hooks = await mod.PfmEngineGuard({directory: row.directory, client: {app: {log: async ({body}) => { logs.push(body.level + " " + body.message.split("\n")[0]) }}}})
 const outcomes = []
+let ticks = 0
+const ticker = setInterval(() => { ticks++ }, 1)
 for (const call of row.calls) {
   try {
     await hooks["tool.execute.before"]({tool: call.tool, sessionID: "s", callID: "c"}, {args: call.args})
@@ -504,13 +506,15 @@ for (const call of row.calls) {
     outcomes.push("deny " + error.message)
   }
 }
-process.stdout.write(JSON.stringify({outcomes, logs}))
+clearInterval(ticker)
+process.stdout.write(JSON.stringify({outcomes, logs, loopRan: ticks > 0}))
 `
 
 // TestOpenCodeEngineGuardPlugin runs the staged plugin under node against a
 // recording pfm: a write tool's call reaches the guard as the hook payload,
 // a deny throws its reason, a read tool never spawns it, and a guard that
-// fails lets the call through with one warning.
+// fails lets the call through with one warning; the guard never blocks
+// OpenCode's event loop.
 func TestOpenCodeEngineGuardPlugin(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {
@@ -554,14 +558,16 @@ func TestOpenCodeEngineGuardPlugin(t *testing.T) {
 	var run struct {
 		Outcomes []string `json:"outcomes"`
 		Logs     []string `json:"logs"`
+		LoopRan  bool     `json:"loopRan"`
 	}
 	if err := json.Unmarshal(output, &run); err != nil {
 		t.Fatalf("driver output %q: %v", output, err)
 	}
 	wantOutcomes := []string{"allow", "deny no framework writes", "allow", "allow"}
 	wantLogs := []string{"warn engine guard did not run (fail-open): broken"}
-	if !reflect.DeepEqual(run.Outcomes, wantOutcomes) || !reflect.DeepEqual(run.Logs, wantLogs) {
-		t.Fatalf("outcomes=%q logs=%q, want %q and %q", run.Outcomes, run.Logs, wantOutcomes, wantLogs)
+	if !reflect.DeepEqual(run.Outcomes, wantOutcomes) || !reflect.DeepEqual(run.Logs, wantLogs) || !run.LoopRan {
+		t.Fatalf("outcomes=%q logs=%q loopRan=%v, want %q and %q and true",
+			run.Outcomes, run.Logs, run.LoopRan, wantOutcomes, wantLogs)
 	}
 	raw, err := os.ReadFile(record)
 	if err != nil {

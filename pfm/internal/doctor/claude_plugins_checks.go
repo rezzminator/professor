@@ -201,7 +201,7 @@ func printClaudePluginsDoctor(
 		fmt.Fprintf(stdout, "doctor: claude_plugins could not read the plugin cache: %v\n", cacheErr)
 	}
 	gaps = append(gaps, cacheGaps...)
-	gaps = bareNameInstallFixes(gaps, targets)
+	gaps = bareNameInstallFixes(gaps, targets, store)
 	marketplaceGaps, marketplaceErr := installer.ClaudePluginMarketplaceGaps(store, targets)
 	// An unreadable known_marketplaces.json is one failure, reported once: by recordErr, else here,
 	// never again by the legacy check below.
@@ -262,10 +262,13 @@ func bareNameInstallFix(target installer.ClaudePluginTarget) string {
 
 // bareNameInstallFixes swaps the generic repair of every "not enabled" and "not installed" gap of
 // a bare name that installs from GitHub for bareNameInstallFix. A local -alpha checkout copy has a
-// checkout to name instead and keeps its repair.
+// checkout to name instead and keeps its repair. A "not enabled" one whose install record in store
+// remains names the version it holds: the marketplace's current version is Claude Code's alone to
+// read, and pfm install brings that record to it before enabling it.
 func bareNameInstallFixes(
 	gaps []installer.ClaudePluginGap,
 	targets []installer.ClaudePluginTarget,
+	store string,
 ) []installer.ClaudePluginGap {
 	for index := range gaps {
 		if gaps[index].Fix != installer.ClaudePluginRepair {
@@ -273,10 +276,21 @@ func bareNameInstallFixes(
 		}
 		for position := range targets {
 			target := &targets[position]
-			if target.Own && !target.Local && strings.HasPrefix(gaps[index].Problem, "plugin "+target.ID+" not ") {
-				gaps[index].Fix = bareNameInstallFix(*target)
-				break
+			if !target.Own || target.Local || !strings.HasPrefix(gaps[index].Problem, "plugin "+target.ID+" not ") {
+				continue
 			}
+			gaps[index].Fix = bareNameInstallFix(*target)
+			if strings.HasPrefix(gaps[index].Problem, "plugin "+target.ID+" not enabled ") {
+				versions, err := installer.ClaudePluginRecordedVersions(store, target.ID)
+				switch {
+				case err != nil:
+					gaps[index].Problem += " (its install record unreadable: " + err.Error() + ")"
+				case len(versions) != 0:
+					gaps[index].Problem += " (its install record holds version " + strings.Join(versions, ", ") +
+						", which may be behind its marketplace)"
+				}
+			}
+			break
 		}
 	}
 	return gaps

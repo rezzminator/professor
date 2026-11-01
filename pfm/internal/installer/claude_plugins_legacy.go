@@ -326,7 +326,7 @@ func (installer *engine) removeLegacyClaudePluginCopies(
 			continue
 		}
 		if err := command("legacy marketplace of "+target.ID+" in "+knownPath+", nothing installed from it",
-			"", "marketplace", "remove", marketplace); err != nil {
+			"", claudeMarketplaceCommand, "remove", marketplace); err != nil {
 			keep(err)
 		} else {
 			delete(known, marketplace)

@@ -198,7 +198,7 @@ func TestClaudePluginsDoctorNamesAPluginItCannotInstall(t *testing.T) {
 
 func TestClaudePluginsDoctorStore(t *testing.T) {
 	for _, state := range []string{
-		"clean", "disabled", "uninstalled", "absent", "settings unreadable", "record unreadable",
+		"clean", "disabled", "disabled at an old version", "uninstalled", "absent", "settings unreadable", "record unreadable",
 		"unmanaged duplicate", "managed plus a stranger", "foreign marketplace", "marketplaces unreadable",
 	} {
 		t.Run(state, func(t *testing.T) {
@@ -208,7 +208,7 @@ func TestClaudePluginsDoctorStore(t *testing.T) {
 			for _, id := range doctorPluginIDs {
 				enabled[id] = true
 			}
-			if state == "disabled" {
+			if state == "disabled" || state == "disabled at an old version" {
 				enabled[doctorPluginIDs[1]] = false
 			}
 			if state == "unmanaged duplicate" {
@@ -230,6 +230,8 @@ func TestClaudePluginsDoctorStore(t *testing.T) {
 			writeDoctorInstalledPlugins(t, store, doctorPluginIDs...)
 			marketplaces := filepath.Join(store, "plugins", "known_marketplaces.json")
 			switch state {
+			case "disabled at an old version":
+				writeDoctorCache(t, store, doctorPluginIDs[1], "0.9.0", nil)
 			case "uninstalled":
 				writeDoctorInstalledPlugins(
 					t, store, doctorPluginIDs[0], doctorPluginIDs[2], doctorPluginIDs[3], doctorPluginIDs[4],
@@ -270,6 +272,11 @@ func TestClaudePluginsDoctorStore(t *testing.T) {
 			case "disabled":
 				warnings = 1
 				want = "doctor: claude_plugins plugin " + doctorPluginIDs[1] + " not enabled in " + path + " — " +
+					bareNameFix("forward-compaction") + "\n"
+			case "disabled at an old version":
+				warnings = 1
+				want = "doctor: claude_plugins plugin " + doctorPluginIDs[1] + " not enabled in " + path +
+					" (its install record holds version 0.9.0, which may be behind its marketplace) — " +
 					bareNameFix("forward-compaction") + "\n"
 			case "uninstalled":
 				warnings = 1

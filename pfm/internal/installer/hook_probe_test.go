@@ -9,10 +9,25 @@ import (
 	"testing"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
+
+// stageOpenCodeGuard stages home's OpenCode engine-guard plugin as install
+// does, so a probe test of another hook sees only that hook's rows.
+func stageOpenCodeGuard(t *testing.T, home string) {
+	t.Helper()
+	path, binary := openCodeEngineGuardStaging(home, OpenCodeConfigPath(home))
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := workbench.StageOpenCodeEngineGuardPlugin(path, binary); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestReportHooksChecksLaunchExecutableOnce(t *testing.T) {
 	home := t.TempDir()
+	stageOpenCodeGuard(t, home)
 	binary := filepath.Join(home, ".local", "bin", "pfm")
 	machine := pfmconfig.Config{Accounts: []pfmconfig.Account{{ID: 1, ConfigDir: filepath.Join(home, ".claude")}}}
 	for _, testCase := range []struct {
@@ -51,6 +66,7 @@ func TestReportHooksChecksLaunchExecutableOnce(t *testing.T) {
 
 func TestReportHooksNoClaudeAccountAndCodexResidue(t *testing.T) {
 	home := t.TempDir()
+	stageOpenCodeGuard(t, home)
 	binary := filepath.Join(home, ".local", "bin", "pfm")
 	writeFixture(t, binary, "binary")
 	if err := os.Chmod(binary, 0o700); err != nil {
@@ -79,6 +95,7 @@ func resumeUnkillKey(t *testing.T, account, body string) string {
 
 func TestReportHooksStillChecksCodexResidue(t *testing.T) {
 	home := t.TempDir()
+	stageOpenCodeGuard(t, home)
 	binary := filepath.Join(home, ".local", "bin", "pfm")
 	writeFixture(t, binary, "binary")
 	if err := os.Chmod(binary, 0o700); err != nil {
@@ -113,6 +130,7 @@ func TestReportHooksStillChecksCodexResidue(t *testing.T) {
 func stageCodexProbeHome(t *testing.T, hooksBody string) (home string, machine pfmconfig.Config, hooksPath string) {
 	t.Helper()
 	home = t.TempDir()
+	stageOpenCodeGuard(t, home)
 	binary := filepath.Join(home, ".local", "bin", "pfm")
 	writeFixture(t, binary, "binary")
 	if err := os.Chmod(binary, 0o700); err != nil {

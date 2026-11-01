@@ -110,6 +110,47 @@ func TestChatServerDoorLeavesTheTitleToTheHostOnAnUnreadableConfig(t *testing.T)
 	}
 }
 
+// A cx placed in Herdr is born through chat new carrying its one typed prompt;
+// a shell holding an older shim passes the prompt only inside its run string,
+// which is refused, never born without it.
+func TestChatServerNativeBirthCarriesTheTypedPrompt(t *testing.T) {
+	const socket = "cx-1800000055-1-1"
+	run := `"/h/.local/bin/pfm" internal codex-launch`
+	born := []string{"new", "--engine=cx", "--name", socket, "--cwd", "/tmp", "--attach", "--"}
+	for _, tc := range []struct {
+		name   string
+		args   []string
+		code   int
+		birth  []string
+		stderr string
+	}{
+		{name: "no prompt", args: []string{socket, "/tmp", run + " "}, code: ChatServerBornNative, birth: born},
+		{
+			name: "typed prompt", args: []string{socket, "/tmp", run + " fix\\ it", "fix it"},
+			code: ChatServerBornNative, birth: append(slices.Clone(born), "fix it"),
+		},
+		{
+			name: "older shim's three arguments", args: []string{socket, "/tmp", run + " --resume abc"}, code: 1,
+			stderr: "pfm internal chat-server: this shell's cx predates this pfm and passed --resume abc only " +
+				"inside its run string; open a new shell (or run: source ~/.zshrc) and run cx again\n",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var stderr bytes.Buffer
+			var birth []string
+			code := chatServerNative(context.Background(), tc.args, io.Discard, &stderr,
+				func(_ context.Context, args []string, _, _ io.Writer) int {
+					birth = args
+					return 0
+				})
+			if code != tc.code || !slices.Equal(birth, tc.birth) || stderr.String() != tc.stderr {
+				t.Fatalf("code=%d birth=%q stderr=%q\nwant code=%d birth=%q stderr=%q",
+					code, birth, stderr.String(), tc.code, tc.birth, tc.stderr)
+			}
+		})
+	}
+}
+
 func TestChatServerDoorRefusesWhatItCannotPlace(t *testing.T) {
 	runtime, _ := chatServerRuntime(t, true)
 	for _, args := range [][]string{

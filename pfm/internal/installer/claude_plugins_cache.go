@@ -156,6 +156,47 @@ func claudePluginScopeDir(id, verb string, entry claudePluginInstall) (dir, repa
 	}
 }
 
+// updateClaudePluginEntries runs `claude plugin update {id} --scope {scope}
+// -y` once per scope and project over entries, each change line naming
+// why(entry), and returns which (scope, dir) moved and every failure: an entry
+// pfm cannot reach is one naming why(entry) and its repair, the rest still
+// updated.
+func (installer *engine) updateClaudePluginEntries(
+	ctx context.Context,
+	run *claudePluginRun,
+	id string,
+	entries []claudePluginInstall,
+	why func(claudePluginInstall) string,
+) (map[[2]string]bool, []error) {
+	var failures []error
+	moved := map[[2]string]bool{}
+	for _, entry := range entries {
+		dir, repair := claudePluginScopeDir(id, "update", entry)
+		if repair != "" {
+			failures = append(failures, errors.New(why(entry)+" — "+repair))
+			continue
+		}
+		key := [2]string{entry.Scope, dir}
+		if _, seen := moved[key]; seen {
+			continue
+		}
+		update := []string{run.binary, claudePluginCommand, "update", id, "--scope", entry.Scope, "-y"}
+		line := fmt.Sprintf("%s=%s %s", claudeConfigDirEnv, run.dir, shellCommandLine(update...))
+		if dir != "" {
+			line = "cd " + shellCommandLine(dir) + " && " + line
+		}
+		err := installer.change("run "+line+": "+why(entry), func() error {
+			options := deps.RunOptions{Env: pluginCommandEnvironment(run.dir), Dir: dir}
+			return runClaudePluginCommand(ctx, installer.processRunner(), update, options)
+		})
+		moved[key] = err == nil
+		if err != nil {
+			failures = append(failures, err)
+		}
+	}
+	return moved, failures
+}
+
 // ensureClaudePluginCache moves every entry of an installed local target that
 // records a version other than its checkout's with `claude plugin update {id}
 // --scope {scope} -y`, once per scope and project, then reads the record back:
@@ -184,33 +225,8 @@ func (installer *engine) ensureClaudePluginCache(
 		return fmt.Errorf("%s, and the real claude binary that updates it is not resolved: %w",
 			cache.behindGap(cache.behind[0]).Problem, run.resolveErr)
 	}
-	var failures []error
-	moved := map[[2]string]bool{}
-	for _, entry := range cache.behind {
-		gap := cache.behindGap(entry)
-		dir, repair := cache.updateDir(entry)
-		if repair != "" {
-			failures = append(failures, errors.New(gap.Problem+" — "+repair))
-			continue
-		}
-		key := [2]string{entry.Scope, dir}
-		if _, seen := moved[key]; seen {
-			continue
-		}
-		update := []string{run.binary, claudePluginCommand, "update", target.ID, "--scope", entry.Scope, "-y"}
-		line := fmt.Sprintf("%s=%s %s", claudeConfigDirEnv, run.dir, shellCommandLine(update...))
-		if dir != "" {
-			line = "cd " + shellCommandLine(dir) + " && " + line
-		}
-		err := installer.change("run "+line+": "+gap.Problem, func() error {
-			options := deps.RunOptions{Env: pluginCommandEnvironment(run.dir), Dir: dir}
-			return runClaudePluginCommand(ctx, installer.processRunner(), update, options)
-		})
-		moved[key] = err == nil
-		if err != nil {
-			failures = append(failures, err)
-		}
-	}
+	moved, failures := installer.updateClaudePluginEntries(ctx, run, target.ID, cache.behind,
+		func(entry claudePluginInstall) string { return cache.behindGap(entry).Problem })
 	if !installer.apply {
 		return errors.Join(failures...)
 	}

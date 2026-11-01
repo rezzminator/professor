@@ -385,7 +385,9 @@ func TestEnsureClaudePluginsUnreadableMarketplaceRecordFailsOnlyItsPlugins(t *te
 	if err == nil || err.Error() != want {
 		t.Fatalf("error = %v\nwant %s\n%s", err, want, out.String())
 	}
+	// The unreadable record cannot say the professor marketplace is unknown, so it is refreshed.
 	wantCommands := []string{
+		"plugin marketplace update professor",
 		"plugin marketplace add rezzminator/professor",
 		"plugin install auto-effort@professor -y",
 	}

@@ -93,7 +93,9 @@ jobs:
           LEAK_TERMS: ${{ runner.temp }}/leak-structural-only.txt
         run: |
           printf '!structural-only\n' > "$LEAK_TERMS"
-          bash .claude/scripts/dev.sh gate all
+          # The runner starts each step with SIGPIPE ignored, so a writer whose reader
+          # stops early prints "write error: Broken pipe"; the gate runs as a terminal does.
+          env --default-signal=PIPE bash .claude/scripts/dev.sh gate all
 
       # The gate prints only its step table; each red step's own log stays on
       # the runner, so print the log of every non-PASS row of each run's table.

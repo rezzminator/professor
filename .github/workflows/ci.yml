@@ -85,6 +85,19 @@ jobs:
           STEPS_BOUND_S: "1500"
         run: bash .claude/scripts/dev.sh gate all
 
+      # The gate prints only its step table; each failed step's own log stays
+      # on the runner, so print it here.
+      - name: Show each failed step's log
+        if: failure()
+        run: |
+          for f in /tmp/professor/timing/run.*/steps/*.failures; do
+            [ "$(cat "$f")" = 0 ] && continue
+            log=${f%.failures}.log
+            echo "::group::${log##*/}"
+            tail -n 200 "$log" || echo "no log at $log"
+            echo "::endgroup::"
+          done
+
   macos:
     name: macos (${{ matrix.part }})
     runs-on: macos-15

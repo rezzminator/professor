@@ -1,6 +1,6 @@
 ---
 visible-to:
-  exclude: [main, Explore, Plan, claude-code-guide, statusline-setup, web-fetch, "rr*", sub-rr, "*tracer", collector, transcript-reader, agent-investigator, clone-distiller, documenter, gitter, pcm, changelogger, "reviewer*", flights-hunter, flights-sub-lander, flights-spec-walker, flights-speccer]
+  include: ["flights-foreman", "flights-foreman-sonnet", "flights-lander"]
 ---
 # Tests: the fewest that reach the most
 

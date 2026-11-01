@@ -34,6 +34,17 @@ type nativeSocket struct {
 
 func newNativeSocket(t *testing.T, respond func(nativeRequest) (any, string)) *nativeSocket {
 	t.Helper()
+	return newNativeSocketForeground(t, respond, nil)
+}
+
+// newNativeSocketForeground is newNativeSocket whose pane.process_info names the
+// foreground processes foreground returns, when not nil.
+func newNativeSocketForeground(
+	t *testing.T,
+	respond func(nativeRequest) (any, string),
+	foreground func() []any,
+) *nativeSocket {
+	t.Helper()
 	root, err := os.MkdirTemp(paths.TempRoot(), "call-herdr-")
 	if err != nil {
 		t.Fatal(err)
@@ -67,6 +78,11 @@ func newNativeSocket(t *testing.T, respond func(nativeRequest) (any, string)) *n
 				refusal := ""
 				if proof, ok := nativeOwnershipReply(request); ok {
 					result = proof
+					if request.Method == "pane.process_info" && foreground != nil {
+						if processes := foreground(); processes != nil {
+							proof.(map[string]any)["process_info"].(map[string]any)["foreground_processes"] = processes
+						}
+					}
 				} else {
 					socket.mu.Lock()
 					socket.requests = append(socket.requests, request)

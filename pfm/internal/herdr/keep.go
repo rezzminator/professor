@@ -192,11 +192,30 @@ func (keep *Keep) Processes(ctx context.Context, socket string, body json.RawMes
 
 // Read asks socket for pane's pane.process_info and returns Processes of it.
 func (keep *Keep) Read(ctx context.Context, socket, pane string) (PaneProcesses, error) {
-	body, err := SeatRequest(ctx, socket, "pane.process_info", map[string]string{paneIDKey: pane})
+	body, err := paneProcessInfo(ctx, socket, pane)
 	if err != nil {
 		return PaneProcesses{}, err
 	}
 	return keep.Processes(ctx, socket, body)
+}
+
+// paneProcessInfo is the one pane.process_info request of a pane on socket.
+func paneProcessInfo(ctx context.Context, socket, pane string) (json.RawMessage, error) {
+	return SeatRequest(ctx, socket, "pane.process_info", map[string]string{paneIDKey: pane})
+}
+
+// KeepForeground reports whether herdr-keep's attach client is pane's foreground
+// on socket, where Herdr sees no engine process for the agent it tracks.
+func KeepForeground(ctx context.Context, socket, pane string) (bool, error) {
+	body, err := paneProcessInfo(ctx, socket, pane)
+	if err != nil {
+		return false, err
+	}
+	processes, err := ParsePaneProcesses(body)
+	if err != nil {
+		return false, err
+	}
+	return keepAttached(processes.Foreground), processes.ForegroundErr
 }
 
 // Upstream maps the Herdr socket and pane a process's environment names to

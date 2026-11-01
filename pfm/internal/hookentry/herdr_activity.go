@@ -1,6 +1,7 @@
 package hookentry
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -44,6 +45,8 @@ type herdrActivityTarget struct {
 	Owner    string `json:"owner,omitempty"`
 	Seq      uint64 `json:"seq"`
 	Native   bool   `json:"native,omitempty"`
+	// Source is the Herdr source the target's state was reported under.
+	Source string `json:"source,omitempty"`
 }
 
 func (reporter *herdrReporter) activityKey(session string) string {
@@ -99,26 +102,6 @@ func (reporter *herdrReporter) writeActivity(session string, state herdrActivity
 // runActivity holds the activity lock across the complete report, so a delayed
 // asynchronous tool hook cannot overwrite Stop or a synchronous agent lifecycle.
 func (reporter *herdrReporter) runActivity(ctx context.Context, payload herdrPayload) (returnErr error) {
-	if reporter.nativeClaude() {
-		if reporter.options.event == herdr.EventAgentStart || reporter.options.event == herdr.EventAgentStop {
-			return nil
-		}
-		if payload.SessionID != "" && reporter.deps.lockDir != "" {
-			unlock, err := reporter.lock(ctx, reporter.activityKey(payload.SessionID))
-			if err != nil {
-				return err
-			}
-			defer unlock()
-			state, err := reporter.readActivity(payload.SessionID)
-			if err != nil {
-				return err
-			}
-			if err := reporter.retireNativeTargets(ctx, payload.SessionID, &state); err != nil {
-				return err
-			}
-		}
-		return reporter.run(ctx, payload)
-	}
 	if reporter.options.engine != pfmengine.Claude || reporter.options.event.FiredByTmux() ||
 		payload.SessionID == "" || reporter.deps.lockDir == "" ||
 		(reporter.deps.identity().TMUX == "" && !reporter.processTarget().ok()) ||
@@ -198,8 +181,10 @@ func (reporter *herdrReporter) finishActivity(session string, state herdrActivit
 	if err := reporter.writeActivity(session, state); err != nil {
 		return err
 	}
+	// An unproved native Claude (a bare launch) reported nowhere: nothing to settle.
+	settles := len(state.Targets) > 0 || state.TmuxSocket != ""
 	if state.Stored.MainStoppedAt != 0 && len(state.Stored.Agents) > 0 && reporter.deps.spawn != nil &&
-		!wasWaiting {
+		!wasWaiting && settles {
 		// The process reads the durable lease, not a timer owned by this short hook.
 		if err := reporter.deps.spawn(
 			[]string{
@@ -315,6 +300,7 @@ func (reporter *herdrReporter) rememberActivityTarget(target herdrTarget, seq ui
 		Owner:    owner.Client,
 		Seq:      seq,
 		Native:   reporter.nativeSeatReport,
+		Source:   cmp.Or(reporter.source, herdr.Source),
 	}
 	for i, old := range reporter.activity.Targets {
 		if old.Socket == saved.Socket && old.Pane == saved.Pane {
@@ -454,6 +440,7 @@ func (reporter *herdrReporter) expireAgents(session string, generation ...int64)
 		// replace a more recent reporter's state after this watch was scheduled.
 		reporter.seq = saved.Seq
 		reporter.nativeSeatReport = saved.Native
+		reporter.source = saved.Source
 		errs = append(errs, reporter.send(ctx, target, &herdrAction{stored: state.Stored}, saved.Seq+1))
 	}
 	errs = append(errs, reporter.writeActivity(session, state))

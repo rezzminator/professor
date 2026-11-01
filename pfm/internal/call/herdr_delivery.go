@@ -99,6 +99,7 @@ func (engine *Engine) callHerdr(
 		}
 		return base, nil
 	}
+	raw := base
 	prepared, err := engine.prepareLiveMessage(ctx, target, request.Message, false)
 	if err != nil {
 		base.Code = CodeUndelivered
@@ -121,6 +122,19 @@ func (engine *Engine) callHerdr(
 	// Once prompt was attempted, neither a timeout nor a malformed response may
 	// authorize a retry: the producer may already have submitted the message.
 	base.Typed = true
+	var notReady *herdr.Refusal
+	if errors.As(err, &notReady) && notReady.Code == "agent_not_ready" {
+		// Herdr also refuses an agent that is not the pane's foreground process,
+		// as in a herdr-keep pane, where its attach client is: the raw path's
+		// composer guard still protects that pane. A busy agent still refuses.
+		kept, keepErr := herdr.KeepForeground(ctx, target.SocketPath, target.Pane)
+		if keepErr == nil && kept {
+			return engine.callHerdrRaw(ctx, request, target, raw, lock, id)
+		}
+		if keepErr != nil {
+			err = errors.Join(err, fmt.Errorf("read pane %s foreground: %w", target.Pane, keepErr))
+		}
+	}
 	if err != nil {
 		base.Typed = !herdrInputUnsent(err)
 		base.Status = statusTypedUnconfirmed

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -152,22 +153,27 @@ func TestHerdrNativeSeatReporter(t *testing.T) {
 				}
 				return
 			}
+			// Herdr detects Claude in the pane: pfm hands the pane from its own source to
+			// herdr:claude, the restore identity, and reports the state there.
+			state := map[string]string{
+				"start": "idle", "working": "working", "idle": "idle", "delayed working": "working",
+			}[event]
+			want := nativeClaudeCalls("new-session", "startup", state, "")
 			if event == "invalid resume" {
-				if len(lines) != 1 || !strings.Contains(lines[0], `"method":"pane.release_agent"`) {
-					t.Fatalf("invalid restore must not be registered as complete: %q", lines)
+				// No restore command for this id: its session report fails visibly, and
+				// the state still reaches Herdr without one.
+				want = []string{
+					want[0],
+					`pane.report_agent {"agent":"claude","agent_session_id":"bad'session","pane_id":"w6:p3",` +
+						`"source":"herdr:claude","state":"idle"}`,
 				}
-				return
 			}
-			if len(lines) != 2 {
-				t.Fatalf("native reports=%q", lines)
+			if calls := server.calls(); !slices.Equal(calls, want) {
+				t.Fatalf("Herdr received\n%s\nwant\n%s", strings.Join(calls, "\n"), strings.Join(want, "\n"))
 			}
 			var request struct {
-				Method string `json:"method"`
 				Params struct {
-					Seq    uint64   `json:"seq"`
-					Pane   string   `json:"pane_id"`
-					State  string   `json:"state"`
-					Resume []string `json:"resume_argv"`
+					Seq uint64 `json:"seq"`
 				} `json:"params"`
 			}
 			if err := json.Unmarshal([]byte(lines[1]), &request); err != nil {
@@ -175,12 +181,6 @@ func TestHerdrNativeSeatReporter(t *testing.T) {
 			}
 			if event == "delayed working" && request.Params.Seq != 102 {
 				t.Fatalf("native release/session sequence=%d want ingress+2=102", request.Params.Seq)
-			}
-
-			if request.Method != "pane.report_agent_session" || request.Params.Pane != "w6:p3" ||
-				request.Params.State != "" ||
-				!reflect.DeepEqual(request.Params.Resume, wantResume) {
-				t.Fatalf("native report = %s", lines[0])
 			}
 		})
 	}
@@ -305,6 +305,26 @@ func TestHerdrTmuxSeatFailurePreservesBridge(t *testing.T) {
 	}
 }
 
+// nativeClaudeCalls is what Herdr receives on a detected native Claude pane's
+// first report: pfm's own source released, then the session and its state
+// under herdr:claude, as fakeHerdr.calls records them (sorted keys, no seq).
+func nativeClaudeCalls(session, startSource, state, message string) []string {
+	argv := `"resume_argv":["pfm","chat","open","--restored","` + session + `"]`
+	if startSource != "" {
+		startSource = `,"session_start_source":"` + startSource + `"`
+	}
+	if message != "" {
+		message = `"message":"` + message + `",`
+	}
+	return []string{
+		`pane.release_agent {"agent":"claude","pane_id":"w6:p3","source":"pfm"}`,
+		`pane.report_agent_session {"agent":"claude","agent_session_id":"` + session + `","pane_id":"w6:p3",` +
+			argv + startSource + `,"source":"herdr:claude"}`,
+		`pane.report_agent {"agent":"claude","agent_session_id":"` + session + `",` + message + `"pane_id":"w6:p3",` +
+			argv + `,"source":"herdr:claude","state":"` + state + `"}`,
+	}
+}
+
 func TestHerdrNativeSeatReadOnlyReports(t *testing.T) {
 	for _, event := range []string{"working", "idle", "blocked", "notification", "legacy", "newer", "corrupt"} {
 		t.Run(event, func(t *testing.T) {
@@ -383,10 +403,22 @@ func TestHerdrNativeSeatReadOnlyReports(t *testing.T) {
 				return
 			}
 
-			lines := server.requests()
-			if len(lines) != 2 || !strings.Contains(lines[1], `"method":"pane.report_agent_session"`) ||
-				stderr.Len() != 0 {
-				t.Fatalf("read-only native %s report=%q stderr=%s", event, lines, &stderr)
+			state, message := "idle", ""
+			switch event {
+			case "working":
+				state = "working"
+			case "blocked":
+				state, message = "blocked", "waiting for approval: Bash"
+			}
+			want := nativeClaudeCalls("bound", "startup", state, message)
+			if got := server.calls(); !slices.Equal(got, want) || stderr.Len() != 0 {
+				t.Fatalf(
+					"read-only native %s: Herdr received\n%s\nwant\n%s\nstderr=%s",
+					event,
+					strings.Join(got, "\n"),
+					strings.Join(want, "\n"),
+					&stderr,
+				)
 			}
 		})
 	}
@@ -397,17 +429,19 @@ func TestNativeLossNoteClearsOnlyOnActualPrompt(t *testing.T) {
 		name, event, payload string
 		engine               pfmengine.ID
 		clear, pending       bool
+		// start and state are a Claude row's session start source and reported state.
+		start, state string
 	}{
-		{name: "resume", event: "start", payload: `{"session_id":"sid","source":"resume"}`},
-		{name: "idle", event: "idle", payload: `{"session_id":"sid"}`},
-		{name: "tool working", event: "working", payload: `{"session_id":"sid","hook_event_name":"PostToolUse","tool_name":"Bash"}`},
-		{name: "prompt", event: "working", payload: `{"session_id":"sid","hook_event_name":"UserPromptSubmit","prompt":"private"}`, clear: true},
+		{name: "resume", event: "start", payload: `{"session_id":"sid","source":"resume"}`, start: "resume", state: "idle"},
+		{name: "idle", event: "idle", payload: `{"session_id":"sid"}`, state: "idle"},
+		{name: "tool working", event: "working", payload: `{"session_id":"sid","hook_event_name":"PostToolUse","tool_name":"Bash"}`, state: "working"},
+		{name: "prompt", event: "working", payload: `{"session_id":"sid","hook_event_name":"UserPromptSubmit","prompt":"private"}`, clear: true, state: "working"},
 		{name: "end reload", event: "end", payload: `{"session_id":"sid","reason":"prompt_input_exit"}`, pending: true},
 		{name: "opencode state", engine: pfmengine.OpenCode, event: "working", payload: `{"session_id":"sid"}`},
 		{name: "opencode replayed user message", engine: pfmengine.OpenCode, event: "working", payload: `{"session_id":"sid","hook_event_name":"message.updated","role":"user"}`},
 		{name: "opencode prompt", engine: pfmengine.OpenCode, event: "working", payload: `{"session_id":"sid","hook_event_name":"chat.message"}`, clear: true},
 		{name: "opencode interrupted prompt", engine: pfmengine.OpenCode, event: "working", payload: `{"session_id":"sid","hook_event_name":"chat.message","is_interrupt":true}`},
-		{name: "claude rejects opencode marker", event: "working", payload: `{"session_id":"sid","hook_event_name":"chat.message"}`},
+		{name: "claude rejects opencode marker", event: "working", payload: `{"session_id":"sid","hook_event_name":"chat.message"}`, state: "working"},
 		{name: "opencode idle marker", engine: pfmengine.OpenCode, event: "idle", payload: `{"session_id":"sid","hook_event_name":"chat.message"}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -469,9 +503,13 @@ func TestNativeLossNoteClearsOnlyOnActualPrompt(t *testing.T) {
 					t.Fatalf("pending reload released pane: %v", server.requests())
 				}
 			case engine == pfmengine.Claude:
-				if len(server.requests()) != 2 ||
-					!strings.Contains(server.requests()[1], `"method":"pane.report_agent_session"`) {
-					t.Fatalf("native metadata=%v", server.requests())
+				want := nativeClaudeCalls("sid", tc.start, tc.state, "")
+				if got := server.calls(); !slices.Equal(got, want) {
+					t.Fatalf(
+						"native Claude: Herdr received\n%s\nwant\n%s",
+						strings.Join(got, "\n"),
+						strings.Join(want, "\n"),
+					)
 				}
 			default:
 				if len(server.requests()) != 1 ||
@@ -511,12 +549,15 @@ func TestBareHerdrDegradedSeatStoreRefusesUnprovedReport(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+			deps := realHerdrDeps()
+			spawned := 0
+			deps.spawn = func([]string) error { spawned++; return nil }
 			var stderr bytes.Buffer
 			if rc := reportToHerdr(
 				[]string{"start"},
 				strings.NewReader(`{"session_id":"sid","source":"startup"}`),
 				&stderr,
-				realHerdrDeps(),
+				deps,
 			); rc != 0 || !strings.Contains(stderr.String(), "seat") ||
 				!strings.Contains(stderr.String(), "fail-open") {
 				t.Fatalf("degraded rc=%d stderr=%s", rc, &stderr)
@@ -530,6 +571,30 @@ func TestBareHerdrDegradedSeatStoreRefusesUnprovedReport(t *testing.T) {
 			}
 			if reported || !strings.Contains(stderr.String(), "ownership unproved") {
 				t.Fatalf("unproved native report must be refused visibly: %v stderr=%s", lines, &stderr)
+			}
+			// The unproved pane got no report, so its stopped turn holding an agent
+			// leaves no watchdog behind to settle it.
+			for _, event := range [][2]string{
+				{"agent-start", `{"session_id":"sid","agent_id":"a","hook_event_name":"SubagentStart"}`},
+				{"idle", `{"session_id":"sid"}`},
+			} {
+				rc := reportToHerdr([]string{event[0]}, strings.NewReader(event[1]), new(bytes.Buffer), deps)
+				if rc != 0 {
+					t.Fatalf("%s rc=%d", event[0], rc)
+				}
+			}
+			activity, err := (&herdrReporter{deps: deps}).readActivity("sid")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(activity.Stored.Agents, map[string]bool{"a": true}) ||
+				activity.Stored.MainStoppedAt == 0 || spawned != 0 {
+				t.Fatalf(
+					"stopped turn agents=%v stopped=%d watchdogs=%d, want agent a held, no watchdog",
+					activity.Stored.Agents,
+					activity.Stored.MainStoppedAt,
+					spawned,
+				)
 			}
 		})
 	}

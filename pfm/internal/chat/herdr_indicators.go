@@ -36,6 +36,7 @@ type herdrTabProvider struct {
 	scan          func(context.Context) (FleetScan, error)
 	inspect       func(context.Context, headless.Chat, time.Time) (headless.Status, error)
 	views         func(context.Context, headless.Chat, string) ([]herdr.TabDecoration, error)
+	screen        func(context.Context, headless.Chat) (string, error)
 	mode          func() (string, error)
 	// glyphs reads the theme's tab glyphs each tick; nil draws the defaults.
 	glyphs func() (herdr.TabGlyphs, error)
@@ -126,13 +127,15 @@ func (provider *herdrTabProvider) tabs(ctx context.Context, socket string) ([]he
 				if !found {
 					since = clk.Now()
 				}
-				confirmed, confirmErr := missingTabAgentState(ctx, target, views[0].Terminal, clk.Now().Sub(since))
+				confirmed, confirmErr := missingTabAgentState(
+					ctx, target, views[0].Terminal, clk.Now().Sub(since), provider.screen,
+				)
 				if confirmErr == nil {
 					if confirmed == "" {
 						continue
 					}
 					state = confirmed
-					if confirmed == tabStateUnknown {
+					if confirmed != headless.StateDead {
 						pendingAgents[key] = since
 					}
 					err = nil
@@ -170,6 +173,8 @@ func (provider *herdrTabProvider) tabs(ctx context.Context, socket string) ([]he
 // SessionEnd releases the agent before the engine exits, and a shell can keep
 // its pane open afterwards. Neither a missing agent nor a listed pane proves
 // death: refresh the pane identity and foreground, allowing a bounded transition.
+// An engine still in the foreground past it runs in a pane Herdr tracks no agent
+// for (a native seat), and its own screen tells its state.
 const tabAgentExitGrace = 5 * time.Second
 
 func missingTabAgentState(
@@ -177,6 +182,7 @@ func missingTabAgentState(
 	target headless.Chat,
 	terminal string,
 	elapsed time.Duration,
+	screen func(context.Context, headless.Chat) (string, error),
 ) (string, error) {
 	panes, err := herdr.ReadTabPanes(ctx, target.Socket)
 	if err != nil {
@@ -199,12 +205,12 @@ func missingTabAgentState(
 		if elapsed < tabAgentExitGrace {
 			return tabStateUnknown, nil
 		}
-		return tabStateUnknown, fmt.Errorf(
-			"herdr pane %s still runs %s after %s without its agent",
-			pane.Pane,
-			target.Engine,
-			tabAgentExitGrace,
-		)
+		target.Pane = pane.Pane
+		capture, err := screen(ctx, target)
+		if err != nil {
+			return tabStateUnknown, fmt.Errorf("read tab pane %s without its agent: %w", pane.Pane, err)
+		}
+		return paneState(target.Engine, capture), nil
 	}
 	return "", nil
 }
@@ -222,6 +228,18 @@ func PaintHerdrIndicators(ctx context.Context, socket, lockDir string, stderr io
 	}
 	inspector := NewSeatInspector(&runtime)
 	provider := herdrTabProvider{inspect: inspector.Inspect, warn: warnings, probe: &tabProbe{}}
+	calls, err := NewCallEngine(false, &runtime)
+	if err != nil {
+		loadErr := fmt.Errorf("load tab indicator screen reader: %w", err)
+		_, writeErr := fmt.Fprintln(persisted, loadErr)
+		return errors.Join(loadErr, writeErr)
+	}
+	provider.screen = func(ctx context.Context, chat headless.Chat) (string, error) {
+		return calls.CaptureScreen(ctx, call.Target{
+			Backend: chat.Backend, SeatID: chat.SeatID, SocketPath: chat.Socket,
+			Pane: chat.Pane, Engine: string(chat.Engine),
+		})
+	}
 	settings := herdrIndicatorConfig{path: runtime.Config.Path}
 	provider.mode = settings.mode
 	stateDir := themesync.DefaultStateDir(runtime.Paths.Home)

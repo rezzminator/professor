@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -48,6 +49,11 @@ func TestNativeClaudeSessionLifecycleMetadata(t *testing.T) {
 		}
 		return stderr.String()
 	}
+	// Every start republishes restore metadata under herdr:claude; a new, resumed
+	// or cleared session also reports idle there, a compaction or fork no state.
+	// The fake records each request's params with sorted keys, its seq left out.
+	const argv = `"resume_argv":["pfm","chat","open","--restored","s1"]`
+	seen := 0
 	for _, source := range []string{"startup", "resume", "clear", "compact", "fork"} {
 		if warning := run(
 			"start",
@@ -55,31 +61,27 @@ func TestNativeClaudeSessionLifecycleMetadata(t *testing.T) {
 		); warning != "" {
 			t.Fatal(warning)
 		}
-		lines := server.requests()
-		line := lines[len(lines)-1]
-		if !strings.Contains(line, `"method":"pane.report_agent_session"`) ||
-			!strings.Contains(line, `"source":"herdr:claude"`) ||
-			!strings.Contains(line, `"agent_session_path":"/fixture/session.jsonl"`) ||
-			!strings.Contains(line, `"session_start_source":"`+source+`"`) ||
-			!strings.Contains(line, `"--restored"`) {
-			t.Fatalf("incomplete native session: %s", line)
+		var want []string
+		if source == "startup" {
+			want = append(want, `pane.release_agent {"agent":"claude","pane_id":"w6:p3","source":"pfm"}`)
 		}
-	}
-	before := len(server.requests())
-	for _, event := range []string{"working", "idle", "blocked", "notification", "agent-start", "agent-stop"} {
-		payload := `{"session_id":"s1","notification_type":"permission_prompt","hook_event_name":"PostToolUse"}`
-		if event == "agent-start" {
-			payload = `{"session_id":"s1","agent_id":"a","hook_event_name":"SubagentStart"}`
+		want = append(want, `pane.report_agent_session {"agent":"claude","agent_session_id":"s1",`+
+			`"agent_session_path":"/fixture/session.jsonl","pane_id":"w6:p3",`+argv+
+			`,"session_start_source":"`+source+`","source":"herdr:claude"}`)
+		if source == "startup" || source == "resume" || source == "clear" {
+			want = append(want, `pane.report_agent {"agent":"claude","agent_session_id":"s1","pane_id":"w6:p3",`+
+				argv+`,"source":"herdr:claude","state":"idle"}`)
 		}
-		if event == "agent-stop" {
-			payload = `{"session_id":"s1","agent_id":"a","hook_event_name":"SubagentStop"}`
+		calls := server.calls()
+		if got := calls[seen:]; !slices.Equal(got, want) {
+			t.Errorf(
+				"start %s: Herdr received\n%s\nwant\n%s",
+				source,
+				strings.Join(got, "\n"),
+				strings.Join(want, "\n"),
+			)
 		}
-		if warning := run(event, payload); warning != "" {
-			t.Fatal(warning)
-		}
-	}
-	if len(server.requests()) != before {
-		t.Fatalf("warm native lifecycle mutated Herdr: %q", server.requests()[before:])
+		seen = len(calls)
 	}
 	// A delayed old start must not rebind the durable session before rejection.
 	currentNow := now
@@ -103,11 +105,6 @@ func TestNativeClaudeSessionLifecycleMetadata(t *testing.T) {
 	if !strings.Contains(lines[len(lines)-2], `"method":"pane.release_agent"`) ||
 		!strings.Contains(lines[len(lines)-1], `"clear_title":true`) {
 		t.Fatalf("native end lost clearing: %q", lines)
-	}
-	for _, line := range lines {
-		if strings.Contains(line, `"method":"pane.report_agent"`) {
-			t.Fatalf("native session claimed state: %s", line)
-		}
 	}
 }
 
@@ -138,7 +135,9 @@ func TestNativeClaudeSessionWaitsForDetectionWithoutLosingRestore(t *testing.T) 
 				}
 				ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
 				defer cancel()
-				err := reporter.deferNativeClaude(ctx, target, herdrPayload{SessionID: "s1", Source: "startup"}, 10)
+				err := reporter.reportNativeClaude(
+					ctx, target, herdrPayload{SessionID: "s1", Source: "startup"}, &herdrAction{}, 10,
+				)
 				if refused != (err != nil) {
 					t.Fatalf("refused=%v error=%v", refused, err)
 				}
@@ -170,10 +169,11 @@ func TestNativeClaudeSessionWaitsForDetectionWithoutLosingRestore(t *testing.T) 
 					server.mu.Lock()
 					delete(server.refuse, "pane.report_agent_session")
 					server.mu.Unlock()
-					if err := reporter.deferNativeClaude(
+					if err := reporter.reportNativeClaude(
 						context.Background(),
 						target,
 						herdrPayload{SessionID: "s1"},
+						&herdrAction{},
 						20,
 					); err != nil {
 						t.Fatal(err)

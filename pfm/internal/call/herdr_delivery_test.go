@@ -8,11 +8,13 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/herdr"
 )
 
 func TestHerdrCallNative(t *testing.T) {
@@ -197,11 +199,24 @@ func TestHerdrCallRaw(t *testing.T) {
 			name: "native-untracked", id: pfmengine.Claude, body: "a\nb", wantPayload: "a\nb", wantTyped: true,
 			before: "────────\n❯ \n────────", after: "a\nb\n────────\n❯ \n────────",
 		},
+		// Herdr refuses agent.prompt when herdr-keep's attach client, not Claude, is
+		// the pane's foreground: the raw path's composer guard still protects it.
+		{
+			name: "native-keep-foreground", id: pfmengine.Claude, body: "a\nb", wantPayload: "a\nb", wantTyped: true,
+			before: "────────\n❯ \n────────", after: "a\nb\n────────\n❯ \n────────",
+			promptRefusal: "agent_not_ready", keepForeground: true,
+		},
+		// A ready-check refusal with Claude itself in the foreground still refuses.
+		{
+			name: "native-not-ready", id: pfmengine.Claude, body: "a\nb", before: "────────\n❯ \n────────",
+			promptRefusal: "agent_not_ready", wantCode: CodeUndelivered,
+		},
 	}, append(herdrRawStyleCases(), herdrOpenCodeCases()...)...) {
 		t.Run(test.name, func(t *testing.T) {
 			entered := false
 			var payload string
-			socket := newNativeSocket(t, func(request nativeRequest) (any, string) {
+			var keepForeground atomic.Bool
+			socket := newNativeSocketForeground(t, func(request nativeRequest) (any, string) {
 				if request.Method == test.refusal {
 					return nil, "pane_send_failed"
 				}
@@ -213,7 +228,16 @@ func TestHerdrCallRaw(t *testing.T) {
 					if test.id != pfmengine.Claude {
 						t.Errorf("raw engine read the native agent: %+v", request)
 					}
+					if test.promptRefusal != "" {
+						return nativeAgent("agent_info", "idle"), ""
+					}
 					return nil, "agent_not_found"
+				case "agent.prompt":
+					if test.promptRefusal == "" {
+						t.Errorf("raw engine prompted the native agent: %+v", request)
+					}
+					keepForeground.Store(test.keepForeground)
+					return nil, test.promptRefusal
 				case "pane.read":
 					if request.Params["format"] == "ansi" {
 						if request.Params["strip_ansi"] != false {
@@ -256,6 +280,11 @@ func TestHerdrCallRaw(t *testing.T) {
 					t.Errorf("raw engine used unexpected API %s", request.Method)
 				}
 				return map[string]any{"type": "ok"}, ""
+			}, func() []any {
+				if keepForeground.Swap(false) {
+					return []any{map[string]any{"pid": 41, "name": herdr.KeepBinary}}
+				}
+				return nil
 			})
 			target := Target{Backend: "herdr", SocketPath: socket.path, Pane: "w1:p2", Engine: string(test.id)}
 			engine := nativeEngine(t, target)
@@ -292,6 +321,13 @@ func TestHerdrCallRaw(t *testing.T) {
 				}
 				if test.id == pfmengine.Claude {
 					wantCalls, first = wantCalls+1, 1
+					if test.promptRefusal != "" {
+						// The composer hold's agent.get + pane.read pairs, then the refused prompt.
+						wantCalls, first = wantCalls+2*ComposerHoldReads, 2*ComposerHoldReads+1
+						if len(calls) <= first || calls[first-1].Method != "agent.prompt" {
+							t.Fatalf("native engine skipped the refused prompt: %+v", calls)
+						}
+					}
 					if calls[0].Method != "agent.get" {
 						t.Fatalf("native engine skipped the agent read: %+v", calls)
 					}

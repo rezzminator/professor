@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -97,7 +98,10 @@ func (chats *accountChats) live() ([]string, error) {
 		return nil, err
 	}
 	for _, pid := range claims {
-		live = append(live, strconv.Itoa(pid))
+		// A chat holds both a session and a launch claim: it is one live chat.
+		if id := strconv.Itoa(pid); !slices.Contains(live, id) {
+			live = append(live, id)
+		}
 	}
 	return live, nil
 }

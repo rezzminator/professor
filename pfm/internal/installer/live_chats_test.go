@@ -7,11 +7,13 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -184,5 +186,40 @@ func TestRetiredFolderWait(t *testing.T) {
 				t.Fatalf("deferral = %q, %v; want one containing %q", got, err, test.want)
 			}
 		})
+	}
+}
+
+// TestAccountChatsLiveCountsAChatOnce pins that a chat holding both a live
+// session and a live launch claim is one live chat, not two.
+func TestAccountChatsLiveCountsAChatOnce(t *testing.T) {
+	dir, self := t.TempDir(), os.Getpid()
+	launch, err := gather.AcquireAccountGuard(dir, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := launch.Record(self); err != nil {
+		t.Fatal(err)
+	}
+	if err := launch.Close(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := launch.Abort(); err != nil {
+			t.Error(err)
+		}
+	})
+	writeFixture(t, filepath.Join(dir, "sessions", strconv.Itoa(self)+".json"), "{}")
+	install, err := gather.AcquireAccountGuard(dir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := install.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	live, err := (&accountChats{dir: dir, guard: install}).live()
+	if err != nil || !reflect.DeepEqual(live, []string{strconv.Itoa(self)}) {
+		t.Fatalf("live = %v, %v; want [%d] once", live, err, self)
 	}
 }

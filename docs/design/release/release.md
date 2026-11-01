@@ -23,7 +23,7 @@ A change lands in this design doc first, then in the command, agent or script, t
 
 ## Why it is one pass
 
-Every commit reaches `develop` through a flight that already reviewed and gated it. A release adds only what no single flight can see: the whole range's seams, the README against what ships, the plugins pinned at published tags, the note, and the published assets. Everything a release checks is therefore a STOP, never a fix: a defect found at the cut is fixed on `develop` through a normal flight, and the user cuts again. The cut takes `develop`'s tip at that moment, with no soak window, so the release can never chase a candidate that moves under it.
+Every commit reaches `develop` through a flight that already reviewed and gated it. A release adds only what no single flight can see: the whole range's seams, the README against what ships, every plugin released and pinned at its release, the note, and the published assets. Everything a release checks is therefore a STOP, never a fix: a defect found at the cut is fixed on `develop` through a normal flight, and the user cuts again. The cut takes `develop`'s tip at that moment, with no soak window, so the release can never chase a candidate that moves under it.
 
 Typing `/pfm:release cut` is the user's explicit publish request for that version (project contract § Publication). `--dry` runs every check and the release commit, then stops before any push.
 
@@ -55,7 +55,7 @@ The note grammar that serves this reader is public, because adopters read it: `d
 
 ## The cut
 
-1. `gitter` Phase PULL fast-forwards `develop` and fetches tags. `origin/main` must be an ancestor of `develop`; the cut commit `C` is `develop`'s HEAD; `PREV` is the newest suffix-free `v*` tag and `NEW` is `PREV` bumped. An empty `origin/main..C` is a STOP.
+1. `gitter` Phase PULL fast-forwards `develop` and fetches tags. `origin/main` must be an ancestor of `develop`; the cut commit `C` is `develop`'s HEAD; `PREV` is the newest suffix-free `v*` tag and `NEW` is `PREV` bumped. An empty `origin/main..C` is a STOP. Then every plugin `.gitmodules` registers at `C` must be released: neither its gitlink nor its own `develop` ahead of its latest GitHub release, read through the GitHub API. A plugin that is ahead, or that the API could not answer for, is a STOP, fixed in the order `docs/RELEASE.md` § Cutting a release gives: plugins release first.
 2. `gitter` Phase SETUP makes `.worktrees/release/` on a new branch `release/v{NEW}` at `C`.
 3. The checks of [§ The checks](#the-checks) run in parallel; each failure is a STOP.
 4. The main chat copies the note into `releases/v{NEW}.md`, prepends the index line, writes `## Verification` from the checks' results, stamps `VERSION` and `.professor/VERSION` to `NEW`, runs the full notes check, and `gitter` commits `release: v{NEW} — {summary}`. A release commit touching any file outside the four release files is a STOP.
@@ -81,6 +81,7 @@ The review's premise is the reader's first fact: an adopter reaches this release
 ```text
 $HOME/.local/state/pfm/releases/{project}/v{NEW}/
   run.md          one line per step, `{time} {step} {PASS|STOP|SKIP} @{C7} — {one line}`   written by /pfm:release
+  plugins.txt     one PASS, FAIL or ERROR line per plugin, the step-1 plugin check          written by /pfm:release
   gate.log        the full gate's output, closed `EXIT {code} @{sha}`                       written by /pfm:release
   leak.txt        the leak scan's output                                                    written by /pfm:release
   preflight.txt   release-check preflight's output                                          written by /pfm:release

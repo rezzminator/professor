@@ -90,6 +90,8 @@ Maintainer command, run in this repo only:
 
 - `/pfm:release cut {patch|minor|major} "{summary}" [--dry]` — releases `develop`'s tip as it stands at the cut, in one pass: the full gate, the leak scan, `release-check preflight`, the note and, when the cut changes the update path, one review, all at once; then the release commit (the note, `CHANGELOG.md` and the version stamps, nothing else), `make release-check`, the pull request from `release/v{X.Y.Z}` into `main`, whose `ci.yml` run must pass, its merge — which tags and publishes — and the merge back into `develop`. Typing it is the maintainer's publish request; `--dry` stops before any push. Every check is a stop: nothing is fixed inside a release, the fix lands on `develop` and the maintainer cuts again.
 
+Plugins release first. The cut stops while any plugin `.gitmodules` registers holds a commit past its own latest GitHub release, in professor's gitlink or in the plugin's `develop`. Release each such plugin through its own release pull request (`develop` into `main`, green `ci`, merge; its publish workflow tags it), pin professor's gitlink on `develop` at that released commit, then cut.
+
 The procedure is `.claude/commands/pfm/release.md`; the design and the reasons are `docs/design/release/`.
 
 ## What the release pull request triggers

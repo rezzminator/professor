@@ -1,4 +1,4 @@
-# infra — the fence, the demo, and the README cards
+# infra — the fence, the plugin lab, and the README cards
 
 Three independent things share this directory; nothing here is one system.
 
@@ -6,7 +6,7 @@ Three independent things share this directory; nothing here is one system.
 infra/
   README.md                      this file — the map
   fence/                         the isolated dev fence — build/test in one shared container, a fresh run per call
-  demo/                          the live-demo fence — a real install for presentations
+  plugin-lab/                    the plugin lab — a plugin checkout in a real, isolated, metered Claude Code session
   readme-cards/                  the README section-card recorder (screenshots/motion clips)
 ```
 
@@ -18,7 +18,7 @@ Development must never destabilize the live box: code changes happen in a git wo
 
 The same Dockerfile's `pfm-sim` target is the real-simulation fence: pfm-dev plus Google Chrome, which runs headless only, and 2 GB of shared memory. `sim-entry.sh` builds and installs `pfm` from the worktree, then uses the separately mounted plugin source to build the standalone `harvester` binary and run `harvester setup` with its browser rung on. Harvester state persists per worktree in `pfm-sim-harvest-<worktree>-<cksum>`, `dev.sh iso sim-reset` drops it, and fence housekeeping (`infra/fence/housekeeping.sh`) removes it once its worktree is gone.
 
-`fence/lanes/` is the Tier B hermetic suite over the same image: `root.sh` builds a fixture-seated root with `provision.sh`, the mock engine and `adopt.sh`; `cred-scan.sh` refuses unregistered credentials; `hook-command.sh` reads a settings hook command in its plain form for lane A.11 and the demo's express-hooks beat. `run.sh` starts one offline container and runs the selected lanes in canonical order (`O1 → E1 → E2 → E3 → F → M → A → O2`), each beat asserting from pfm's own reports and the pane. `scenarios/` holds engine scripts, `lib.sh` the beat library, `check-map.sh` the coverage gate, `known-gaps.yml` and `budgets.yml` the ledgers, and `tests/` the harness tests. How to run one lane, read a red row and extend the suite: `docs/dev/testing/lanes.md`.
+`fence/lanes/` is the Tier B hermetic suite over the same image: `root.sh` builds a fixture-seated root with `provision.sh`, the mock engine and `adopt.sh`; `cred-scan.sh` refuses unregistered credentials; `hook-command.sh` reads a settings hook command in its plain form for lane A.11. `run.sh` starts one offline container and runs the selected lanes in canonical order (`O1 → E1 → E2 → E3 → F → M → A → O2`), each beat asserting from pfm's own reports and the pane. `scenarios/` holds engine scripts, `lib.sh` the beat library, `check-map.sh` the coverage gate, `known-gaps.yml` and `budgets.yml` the ledgers, and `tests/` the harness tests. How to run one lane, read a red row and extend the suite: `docs/dev/testing/lanes.md`.
 
 Entry point — from the worktree checkout:
 
@@ -31,7 +31,3 @@ Entry point — from the worktree checkout:
 ```
 
 A run builds the image only when its image key changed, then prints the fence proof (`fence: container=… HOME=/root work=… run=…`); a run that cannot print it did not run inside the fence. Docker absent reports `TOOLCHAIN-MISSING` — never a silent host fallback.
-
-## demo/
-
-A REAL Professor install inside the same fence image, for live presentations — real Claude Code + Codex + pfm, real chats over `chat-professor` and the native Harvester plugin. Entry point: `infra/demo/up.sh` (see `infra/demo/README.md`).

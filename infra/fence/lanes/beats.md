@@ -68,7 +68,7 @@ The root image build. Its steps build the shared `pfm-lane-root:<hash>` image ev
 - `F.02-new-label-role` · `chat new` dimension: `{name}:{group}` label / hidden `_KILL`/`_HIDE` / role / prompt-file · spends cc:$SEAT
 - `F.03-new-account-1h-model` · `chat new` dimension: account / cache / model-effort · spends cc:$SEAT
 - `F.04-new-await-attach` · `chat new --await`/`--attach` mechanics · spends cc:$SEAT
-- `F.05-storm` · a storm (`storm.sh`) spans cc + cx + oc · spends cc:$SEAT+cx
+- `F.05-storm` · a storm (`lane_storm_start`, lib.sh) spans cc + cx + oc · spends cc:$SEAT+cx
 - `F.06-ls-rows` · `pfm ls` rows and kinds render for every chat · spends cc:$SEAT
 - `F.07-row-kinds` · live, resume, new, split, agent and booting row kinds appear where the mock can create them; the ProfessorUpdate row follows the build's cache state · spends none
 - `F.08-tui-picker` · the TUI: picker entry, tab cycling, fuzzy-find, every Chats/Stats/Limits/Cosmos keybinding · spends none

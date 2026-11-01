@@ -30,7 +30,8 @@ services:
     memswap_limit: ${PFM_FENCE_COMPOSE_MEM:?set by fence_config_init}
     # Fence housekeeping (infra/fence/housekeeping.sh) removes only containers
     # carrying this label: exited ones, and running ones past their age limit
-    # unless `iso shell` or the demo also set pfm.fence.long-lived=1.
+    # unless they also carry pfm.fence.long-lived=1, as the shared fence container
+    # (infra/fence/shared.sh) does.
     labels:
       pfm.fence: "1"
     volumes:
@@ -85,7 +86,7 @@ services:
 # The caches are shared by bare name with plain `docker run -v` mounters, so
 # compose never creates or prefixes them (a compose-made fence_… copy is never
 # shared, and a volume compose did not create draws a warning on every run):
-# they are external, and dev.sh iso and infra/demo/up.sh create them first
+# they are external, and dev.sh iso creates them first
 # (fence_volumes_ensure, infra/fence/housekeeping.sh). Bare-name mounters:
 #   pfm-dev-gocache    lanes/container.sh
 #   pfm-dev-gomod      lanes/container.sh

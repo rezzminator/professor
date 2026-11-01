@@ -185,10 +185,10 @@ if logged 'ps -a -q --filter label=pfm.fence=1 --filter status=exited' && logged
 else bad "containers" "$(cat "$STUB_DOCKER_LOG")" "$(cat "$T/err")"; fi
 
 # 2 — an invalid age limit warns and falls back to 6 hours; a running container
-#     labelled pfm.fence.long-lived=1 (a shell, the demo)
+#     labelled pfm.fence.long-lived=1 (the shared fence container)
 #     is never age-reaped, however old
 fresh; touch "$STAMP"; printf 'c1\nc2\n' >"$STUB_DIR/running"
-printf '/mid %s\n/demo %s 1\n' "$(iso_ago $((5 * 3600)))" "$(iso_ago $((30 * 3600)))" >"$STUB_DIR/created"
+printf '/mid %s\n/shell %s 1\n' "$(iso_ago $((5 * 3600)))" "$(iso_ago $((30 * 3600)))" >"$STUB_DIR/created"
 PFM_FENCE_CONTAINER_MAX_HOURS=6h hk; invalid_rc=$?
 if [[ $invalid_rc != 0 ]] && grep -q "PFM_FENCE_CONTAINER_MAX_HOURS" "$T/err" && [[ ! -s "$STUB_DOCKER_LOG" ]]; then
   ok "containers: PFM_FENCE_CONTAINER_MAX_HOURS=6h is refused before cleanup"

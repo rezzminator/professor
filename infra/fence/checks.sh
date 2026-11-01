@@ -27,10 +27,6 @@ checks_templates_lanes_serial() {
   run "templates: lane library self-tests" -- bash -c 'for t in "$1"/infra/fence/lanes/tests/*_test.sh; do echo "== $t"; bash "$t" || exit 1; done' _ "$REPO_ROOT"
 }
 
-checks_templates_demo_serial() {
-  run "templates: demo fence self-tests" -- bash -c 'for t in "$1"/infra/demo/tests/*_test.sh; do echo "== $t"; bash "$t" || exit 1; done' _ "$REPO_ROOT"
-}
-
 checks_templates_plugin_logs() {
   run "templates: plugin-logs self-test" -- bash "$REPO_ROOT/scripts/test-plugin-logs.sh"
 }
@@ -204,12 +200,12 @@ checks_templates_scratch_paths() {
     # `/tmp/<name>` a host run shares with every other checkout. Allowed: the
     # derived `/tmp/$PROJECT/…` forms, anonymous `mktemp` templates (XXXXXX),
     # and tmux's own `/tmp/tmux-<uid>` socket dir. Container-only code (the
-    # fence and demo lanes, the e2e docker run) and test fixtures are excluded
+    # fence lanes, the e2e docker run) and test fixtures are excluded
     # BY NAME and counted, never filtered in silence; zero code files scanned
     # is a broken scan, not a clean tree. A comment line names a path, it does
     # not write one, so hits whose text opens with #, // or * are dropped.
     local code_ext='\.(sh|bash|mjs|js|ts|py|go)$'
-    local code_skip='^(infra/(fence|demo)/|scripts/e2e-linux\.sh$)|(_test\.go|\.test\.(mjs|js|ts))$|/testdata/'
+    local code_skip='^(infra/fence/|scripts/e2e-linux\.sh$)|(_test\.go|\.test\.(mjs|js|ts))$|/testdata/'
     local code_z="$TMP_BASE/templates/tracked-code.z" code_n code_skipped repo_local bare
     grep -zE "$code_ext" < "$TMP_BASE/templates/tracked.z" | grep -zvE "$code_skip" > "$code_z" || true
     code_n=$(tr -cd '\0' < "$code_z" | wc -c | tr -d ' ')
@@ -730,7 +726,7 @@ checks_templates_output_styles() {
 }
 
 # One catalogue for the serial runner and the parallel gate. Scheduling-only
-# lane/demo aggregates and the gate's heavy check-map stay at their boundaries.
+# lane aggregates and the gate's heavy check-map stay at their boundaries.
 checks_named_template_steps() { # <callback> <name>...: register the matching checks_templates_<name> command
   local add="$1" name
   shift
@@ -755,7 +751,6 @@ checks_templates_step_serial() { shift; "$@"; }
 checks_templates() {
   checks_templates_check_map_serial
   checks_templates_lanes_serial
-  checks_templates_demo_serial
   checks_templates_steps checks_templates_step_serial
 }
 
@@ -1216,11 +1211,6 @@ gate_run() { # pfm, templates, or all
       [[ -f "$f" ]] || { fail_step 'templates: lane self-tests NOT RUN — no fixture suites found'; return 1; }
       stem="${f##*/}"; stem="${stem%_test.sh}"
       steps_add "templates.lanes.${stem,,}" bash "$f" || return 1
-    done
-    for f in "$REPO_ROOT"/infra/demo/tests/*_test.sh; do
-      [[ -f "$f" ]] || { fail_step 'templates: demo self-tests NOT RUN — no fixture suites found'; return 1; }
-      stem="${f##*/}"; stem="${stem%_test.sh}"
-      steps_add "templates.demo.${stem,,}" bash "$f" || return 1
     done
   fi
   if [[ "${PFM_GATE_FIXTURES:-}" == 1 ]]; then

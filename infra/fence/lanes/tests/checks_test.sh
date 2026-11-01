@@ -180,13 +180,12 @@ graph_order() {
       else if ($0=="pfm.race") group=3
       else if ($0 ~ /^pfm\.self\./) group=4
       else if ($0 ~ /^templates\.lanes\./) group=5
-      else if ($0 ~ /^templates\.demo\./) group=6
       else exit 1
       if (group<previous || (target=="pfm" && group>4) || (target=="templates" && group<5)) exit 1
       previous=group
       next
     }
-    after && ($0 ~ /^pfm\.self\./ || $0 ~ /^templates\.(lanes|demo)\./ || $0=="pfm.unit" || $0=="pfm.e2e" || $0=="pfm.race") {exit 1}
+    after && ($0 ~ /^pfm\.self\./ || $0 ~ /^templates\.lanes\./ || $0=="pfm.unit" || $0=="pfm.e2e" || $0=="pfm.race") {exit 1}
     END {if (barriers!=1) exit 1}
   ' "$T/registered"
 }
@@ -200,7 +199,6 @@ if gate_run all >"$T/all.out" &&
   [ "$(grep -c '^pfm\.unit$' "$T/registered")" -eq 1 ] &&
   [ "$(grep -c '^pfm\.e2e$' "$T/registered")" -eq 1 ] &&
   [ "$(grep -c '^templates\.lanes\.' "$T/registered")" -eq "$(find "$REPO_ROOT/infra/fence/lanes/tests" -name '*_test.sh' | wc -l | tr -d ' ')" ] &&
-  [ "$(grep -c '^templates\.demo\.' "$T/registered")" -eq "$(find "$REPO_ROOT/infra/demo/tests" -name '*_test.sh' | wc -l | tr -d ' ')" ] &&
   [ "$(sed -n '1,3p' "$T/registered" | paste -sd, -)" = 'pfm.unit,pfm.e2e,pfm.race' ] &&
   [ "$(static_names)" = "$(printf '%s' "$pfm_static,$templates_static" | tr ',' '\n' | sort | paste -sd, -)" ] &&
   [ "$(sort "$T/heavy" | paste -sd, -)" = "$heavy_names" ] &&
@@ -292,8 +290,8 @@ templates.lanes.o2 bash $lanes_dir/O2_test.sh" ]; then
   ok 'PFM_GATE_ONLY registers exactly the steps it names'
 else bad 'PFM_GATE_ONLY slice' "$(cat "$T/sliced-registry.out")" "$(cat "$T/sliced-registry" 2>/dev/null)"; fi
 rm -f "$T/sliced-registry"
-if PFM_GATE_SKIP='templates\.(lanes|demo)\..*' registry_probe templates '' "$REPO_ROOT" "$T/sliced-registry" >"$T/sliced-registry.out" 2>&1 &&
-  grep -q '^templates\.check-map ' "$T/sliced-registry" && ! grep -qE '^templates\.(lanes|demo)\.' "$T/sliced-registry"; then
+if PFM_GATE_SKIP='templates\.lanes\..*' registry_probe templates '' "$REPO_ROOT" "$T/sliced-registry" >"$T/sliced-registry.out" 2>&1 &&
+  grep -q '^templates\.check-map ' "$T/sliced-registry" && ! grep -q '^templates\.lanes\.' "$T/sliced-registry"; then
   ok 'PFM_GATE_SKIP registers every step but the ones it names'
 else bad 'PFM_GATE_SKIP slice' "$(cat "$T/sliced-registry.out")" "$(cat "$T/sliced-registry" 2>/dev/null)"; fi
 for refusal in only skip; do
@@ -308,7 +306,7 @@ for refusal in only skip; do
     ok "a $refusal filter that cannot slice refuses before any step runs"
   else bad "filter refusal $refusal" "expected '$want' (rc $rc)" "$(cat "$T/sliced-registry.out")"; fi
 done
-for rejected in pfm.unit pfm.self.arch-check templates.lanes.root templates.demo.codex_fence_home \
+for rejected in pfm.unit pfm.self.arch-check templates.lanes.root \
   fixture.go-fail fixture.bound pfm.arch templates.check-map templates.clone templates.test-tests templates.engine-sync-action-tests; do
   rm -f "$T/refused-registry"
   if ! PFM_GATE_FIXTURES=1 registry_probe all "$rejected" "$REPO_ROOT" "$T/refused-registry" >"$T/refused-registry.out" 2>&1 &&
@@ -318,9 +316,8 @@ for rejected in pfm.unit pfm.self.arch-check templates.lanes.root templates.demo
 done
 for broken in collision invalid; do
   fixture="$T/registry-$broken"
-  mkdir -p "$fixture/infra/fence/lanes/tests" "$fixture/infra/demo/tests"
+  mkdir -p "$fixture/infra/fence/lanes/tests"
   : >"$fixture/infra/fence/lanes/tests/M_test.sh"
-  : >"$fixture/infra/demo/tests/demo_test.sh"
   case "$broken" in
     collision) : >"$fixture/infra/fence/lanes/tests/m_test.sh"; diagnostic='duplicate step name: templates.lanes.m' ;;
     invalid) : >"$fixture/infra/fence/lanes/tests/bad+name_test.sh"; diagnostic='invalid step name or missing command: templates.lanes.bad+name' ;;
@@ -387,8 +384,8 @@ if [ -z "$(find "$T" -maxdepth 1 -name 'gate-fixture-hang.*')" ]; then
 else bad 'shell-hang cleanup' "$(find "$T" -maxdepth 1 -name 'gate-fixture-hang.*')"; fi
 
 # gate_run against a fixture repo root, so the budget file it reads is the case's own.
-mkdir -p "$T/fx/infra/fence/lanes/tests" "$T/fx/infra/demo/tests" "$T/fx/pfm/scripts"
-: > "$T/fx/infra/fence/lanes/tests/a_test.sh"; : > "$T/fx/infra/demo/tests/b_test.sh"; : > "$T/fx/pfm/scripts/c_test.sh"
+mkdir -p "$T/fx/infra/fence/lanes/tests" "$T/fx/pfm/scripts"
+: > "$T/fx/infra/fence/lanes/tests/a_test.sh"; : > "$T/fx/pfm/scripts/c_test.sh"
 # The fixture's sampler, judge, report and load sampler: each logs to $STUB_EVENTS; a sampler
 # logs its start only once its TERM trap is set, so a stop after it is always logged. One that
 # cannot start ignores TERM, logs its -failed line, then exits 2: the gate's stop never decides its status.
@@ -455,9 +452,9 @@ fixture_case() { # fixture_case <target> <last phase-0 step of that target>
   else bad "fixture registration ($1)" "$(cat "$T/registered")" "$(cat "$T/bounds")"; fi
 }
 fx_budget
-fixture_case all templates.demo.b
+fixture_case all templates.lanes.a
 fixture_case pfm pfm.self.c
-fixture_case templates templates.demo.b
+fixture_case templates templates.lanes.a
 
 fx_budget
 fx_case bound-all all

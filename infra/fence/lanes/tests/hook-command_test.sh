@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The settings.json command hooks both twins ship read as rooted at $CLAUDE_PROJECT_DIR, the form lane
-# A.11's static half and the demo's express-hooks beat require; a resolver naming two scripts does not.
+# A.11's static half requires; a resolver naming two scripts does not.
 set -uo pipefail
 LANES="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 ROOT="$(cd -- "$LANES/../../.." && pwd -P)"

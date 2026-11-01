@@ -463,8 +463,9 @@ cmd_iso() { # cmd_iso <action> [project | command…]
   . "$REPO_ROOT/infra/fence/housekeeping.sh"
 
   # The fence mount contract (PFM_DEV_WORKTREE / PFM_DEV_GIT_COMMON /
-  # PFM_DEV_GIT_DIR_REL) is resolved once, in infra/fence/fence-env.sh — the demo
-  # fence sources the same file, so the two never drift.
+  # PFM_DEV_GIT_DIR_REL) is resolved once, in infra/fence/fence-env.sh — the
+  # lanes (root.sh and run.sh, through infra/fence/lanes/container.sh) source the
+  # same file, so they never drift.
   local git_common
   ROOT="$REPO_ROOT" FENCE_CALLER="iso" . "$REPO_ROOT/infra/fence/fence-env.sh"
   git_common="$PFM_DEV_GIT_COMMON"

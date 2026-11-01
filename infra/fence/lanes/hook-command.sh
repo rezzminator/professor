@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# hook-command.sh — sourced by lane A.11's static half (A.sh) and the demo's express-hooks beat
-# (infra/demo/verify.sh), the two readers that require a settings.json command hook rooted at
-# $CLAUDE_PROJECT_DIR.
+# hook-command.sh — sourced by lane A.11's static half (A.sh), the reader that requires a settings.json
+# command hook rooted at $CLAUDE_PROJECT_DIR.
 #   hook_command_plain <command>   prints the command's plain `$CLAUDE_PROJECT_DIR/{script}[ args]` form
 # The scaffolded format-md.sh command (templates/project/settings.json) first points CLAUDE_PROJECT_DIR at the
 # current repository when that repository holds the same script and shares the project's git common dir (the

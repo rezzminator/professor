@@ -35,7 +35,7 @@ Three facts about that reader shape every rule of the family:
 
 - The banner and the prompt come from the binary the adopter already runs. The update into vX runs the previous release's code; a change to the update path shows first on the update after it.
 - The reader is a model following text literally. An action without a timing is guessed into before or after the update; an action without a named surface cannot be superseded by a later release's action on the same surface.
-- `pfm update` prints the paths of the same notes (`pfm/internal/update/notes.go` `ReleaseNotes`), and `.github/workflows/release.yml` publishes the file verbatim as the GitHub Release body. A note is read three ways and must survive all three.
+- `pfm update` prints the paths of the same notes (`pfm/internal/update/notes.go` `ReleaseNotes`), and `.github/workflows/publish.yml` publishes the file verbatim as the GitHub Release body. A note is read three ways and must survive all three.
 
 The note grammar that serves this reader is public, because adopters read it: `docs/RELEASE.md` § Release notes. [changelogger.md](changelogger.md) holds the decisions behind it.
 
@@ -49,7 +49,8 @@ The note grammar that serves this reader is public, because adopters read it: `d
 | `gitter` | agent (existing) | Every git write: the pull, the push, the release worktree, the release commit, Phase RELEASE, the close | its own pin |
 | `scripts/release-check.mjs` | script | Everything computable: the scope and its tiers, the note grammar and coverage, the version floor, the preflight | — |
 | `.github/workflows/ci.yml` | workflow | Tests every push to `develop`; its run on the cut commit is a check | GitHub Actions |
-| `.github/workflows/release.yml` | workflow | Gates the release PR, publishes its merge, verifies what GitHub serves | GitHub Actions |
+| `.github/workflows/release.yml` | workflow | Gates the release PR | GitHub Actions |
+| `.github/workflows/publish.yml` | workflow | Publishes the release PR's merge, verifies what GitHub serves | GitHub Actions |
 
 `changelogger` runs at smart because a document an adopter acts on is never mechanical work, and the range of a release is the largest body of reasoning any single agent in the fleet writes from.
 
@@ -60,7 +61,7 @@ The note grammar that serves this reader is public, because adopters read it: `d
 3. `gitter` Phase SETUP makes `.worktrees/release/` on a new branch `release/v{NEW}` at `C`.
 4. The checks of [§ The checks](#the-checks) run in parallel; each failure is a STOP.
 5. The main chat copies the note into `releases/v{NEW}.md`, prepends the index line, writes `## Verification` from the checks' results, stamps `VERSION` and `.professor/VERSION` to `NEW`, runs the full notes check, and `gitter` commits `release: v{NEW} — {summary}`. A release commit touching any file outside the four release files is a STOP.
-6. `gitter` Phase RELEASE runs `make release-check`, pushes `release/v{NEW}`, opens the PR into `main`, waits for the required checks, merges with a merge commit, and watches `release.yml`'s `publish` job tag `v{NEW}` and its `verify` job check the assets.
+6. `gitter` Phase RELEASE runs `make release-check`, pushes `release/v{NEW}`, opens the PR into `main`, waits for the required checks, merges with a merge commit, and watches `publish.yml`'s `publish` job tag `v{NEW}` and its `verify` job check the assets.
 7. One `gitter` close merges `origin/main` back into `develop`, opens `{NEXT}-alpha`, pushes `develop`, deletes `release/v{NEW}` and removes the worktree.
 
 A STOP before step 6 removes the release worktree and its unpushed branch and keeps the release directory; a STOP at step 6 or later removes nothing and reports every ref that stands. A failure after the tag exists is reported as it is: the tag is public, and the fix is a patch release, never a moved tag.
@@ -107,7 +108,7 @@ $HOME/.local/state/pfm/releases/{project}/v{NEW}/
 
 ## Versioning
 
-`VERSION` is the source of truth; tags are `vX.Y.Z`, made by the `release.yml` `publish` job on the release PR's merge commit, never pushed by hand, never moved. Between releases `develop` carries the next `X.Y.Z-alpha`.
+`VERSION` is the source of truth; tags are `vX.Y.Z`, made by the `publish.yml` `publish` job on the release PR's merge commit, never pushed by hand, never moved. Between releases `develop` carries the next `X.Y.Z-alpha`.
 
 The bump has a floor computed from the note's sections, following the left-most non-zero rule (Cargo, uv, Ruff): while the major is 0, the minor is the breaking component.
 
@@ -128,7 +129,8 @@ The bump has a floor computed from the note's sections, following the left-most 
 | `.claude/agents/changelogger.md` | `changelogger` | How to write for the updating adopter: grounding, routes, traps, coverage |
 | `.claude/agents/gitter.md` Phase RELEASE | `gitter` | The release PR, the release commit's file check, the merge back into `develop` |
 | `scripts/release-check.mjs` | everyone, by running it | The tier and area table, the grammar, coverage, the floors, the preflight |
-| `.github/workflows/release.yml` | GitHub Actions | The PR gate, the tag, the published-asset check |
+| `.github/workflows/release.yml` | GitHub Actions | The PR gate |
+| `.github/workflows/publish.yml` | GitHub Actions | The tag, the published-asset check |
 | `pfm/internal/picker/update_row.go` | the adopter's update chat | The update prompt |
 
 A rule the script enforces is never restated as a prompt rule; the prompt names the check to run.
@@ -153,14 +155,14 @@ The release reviews in full only the `pfm-update` area, and only when the cut ch
 | The script | `scripts/release-check.mjs` and its tests | The mechanisms |
 | The public spec | `docs/RELEASE.md`, `CHANGELOG.md` (index and a pointer), `INSTALL.md` § Updating, `docs/SETUP.md` § Staying current | What adopters read |
 | The reader's prompt | `pfm/internal/picker/update_row.go` `professorUpdatePrompt` and its test | Timing, surfaces, stops |
-| The workflows | `.github/workflows/ci.yml`, `.github/workflows/release.yml` | The cut's CI run; the PR gate, `publish` and `verify` |
+| The workflows | `.github/workflows/ci.yml`, `.github/workflows/release.yml`, `.github/workflows/publish.yml` | The cut's CI run; the PR gate; `publish` and `verify` |
 | The mirrors | `.codex/`, `.opencode/` | The agent registered |
 
 ## Open items
 
 - Change-time adopter fragments. The strongest measured defense against omission is a note fragment written with each change and checked in CI (Go, Kubernetes, towncrier, changesets). This family keeps release-time derivation, grounded in commit messages and closed by the coverage ledger; a commit-message trailer carrying the adopter action (`Adopter: {when} · {surface} — {action}`) would move the knowledge to the moment the author holds it.
 - A deterministic range merge. `pfm update plan --to vX` could parse the action grammar across the skipped range and print the ordered checklist, replacing the update chat's hand merge (Renovate, the Angular update guide). It helps only adopters whose installed binary already carries it.
-- Provenance. `release.yml` could attest the binaries (`actions/attest-build-provenance`) and `verify` check them with `gh attestation verify`; the build-from-source update path gains nothing from it, which is why it waits.
+- Provenance. `publish.yml` could attest the binaries (`actions/attest-build-provenance`) and `verify` check them with `gh attestation verify`; the build-from-source update path gains nothing from it, which is why it waits.
 
 ## Evidence
 

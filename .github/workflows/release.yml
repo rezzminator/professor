@@ -1,13 +1,12 @@
 name: release
 
-# Releasing is merging the release/v{VERSION} -> main pull request: its PR jobs
-# run every check (`make release-check` runs the same ones locally), the merge
-# tags v{VERSION} on the merge commit and publishes the pfm binaries, and
-# `verify` checks what GitHub then serves. No tag is pushed by hand.
+# The release/v{VERSION} -> main pull request's gate: its jobs run every check
+# (`make release-check` runs the same ones locally). Merging it is the release:
+# publish.yml tags v{VERSION} and publishes the pfm binaries. No tag is pushed by hand.
 on:
   pull_request:
     branches: [main]
-    types: [opened, synchronize, reopened, closed]
+    types: [opened, synchronize, reopened]
   workflow_dispatch:
     inputs:
       version:
@@ -24,7 +23,6 @@ jobs:
   # awesome-ai-plugins catalog applies, so the source-side score is reproducible.
   check:
     name: check
-    if: github.event.action != 'closed'
     runs-on: ubuntu-latest
 
     steps:
@@ -67,7 +65,6 @@ jobs:
 
   build:
     name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
-    if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -117,7 +114,7 @@ jobs:
     name: release
     # always(): a skipped required check counts as passed, so a failed build leg must fail `release` itself.
     needs: build
-    if: always() && github.event_name == 'pull_request' && github.base_ref == 'main' && github.event.action != 'closed'
+    if: always() && github.event_name == 'pull_request' && github.base_ref == 'main'
     runs-on: ubuntu-latest
 
     steps:
@@ -139,113 +136,3 @@ jobs:
 
       - name: The version moved past main's, its authored release notes exist and pass the grammar
         run: make release
-
-  publish:
-    name: publish
-    if: github.event.action == 'closed' && github.event.pull_request.merged == true
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-      - name: Check out the merge commit
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.event.pull_request.merge_commit_sha }}
-          fetch-depth: 0
-
-      - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: pfm/go.mod
-          cache-dependency-path: pfm/go.sum
-
-      - name: The tag is new
-        shell: bash
-        run: |
-          set -euo pipefail
-          version="$(cat VERSION)"
-          [[ -n "$version" ]] || { echo "::error::VERSION is empty"; exit 1; }
-          tag="v$version"
-          rc=0
-          git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null || rc=$?
-          if [[ "$rc" -eq 0 ]]; then
-            echo "::error::tag $tag already exists"
-            exit 1
-          elif [[ "$rc" -ne 2 ]]; then
-            echo "::error::could not look up tag $tag (git ls-remote exit $rc)"
-            exit 1
-          fi
-          echo "VERSION=$tag" >> "$GITHUB_ENV"
-
-      - name: Build the four platform binaries
-        shell: bash
-        run: make build RELEASE_VERSION="$VERSION"
-
-      - name: Write SHA256SUMS
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd tmp/dist
-          LC_ALL=C sha256sum pfm_* | sort -k2 > SHA256SUMS
-
-      - name: Require the authored release notes
-        shell: bash
-        run: |
-          set -euo pipefail
-          notes="releases/${VERSION}.md"
-          if [[ ! -f "$notes" ]]; then
-            echo "missing authored release notes: $notes" >&2
-            exit 1
-          fi
-
-      - name: Create the GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          gh release create "$VERSION" tmp/dist/pfm_* tmp/dist/SHA256SUMS \
-            --target "${{ github.event.pull_request.merge_commit_sha }}" \
-            --title "$VERSION" --notes-file "releases/${VERSION}.md"
-
-  # What GitHub now serves, checked from the outside: the assets match their
-  # SHA256SUMS, the linux/amd64 binary names the release, and the release body
-  # is the authored note.
-  verify:
-    name: verify
-    needs: publish
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Check out the merge commit
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.event.pull_request.merge_commit_sha }}
-          persist-credentials: false
-
-      - name: The published assets, binary and body
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          tag="v$(cat VERSION)"
-          dir="$RUNNER_TEMP/assets"
-          gh release download "$tag" --repo "$GITHUB_REPOSITORY" --dir "$dir"
-          (cd "$dir" && sha256sum -c SHA256SUMS)
-          bin="$dir/pfm_${tag}_linux_amd64"
-          chmod +x "$bin"
-          got="$("$bin" version)"
-          if [[ "$got" != "pfm $tag" ]]; then
-            echo "::error::$bin version printed '$got', want 'pfm $tag'"
-            exit 1
-          fi
-          gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json body --jq .body > "$RUNNER_TEMP/body.md"
-          # $(…) drops trailing newlines, so the two compare up to a trailing newline.
-          if [[ "$(cat "$RUNNER_TEMP/body.md")" != "$(cat "releases/${tag}.md")" ]]; then
-            diff "$RUNNER_TEMP/body.md" "releases/${tag}.md" || true
-            echo "::error::the release body differs from releases/${tag}.md"
-            exit 1
-          fi
-          echo "verified $tag: SHA256SUMS, $("$bin" version), body"

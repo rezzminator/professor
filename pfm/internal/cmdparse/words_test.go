@@ -61,8 +61,10 @@ func TestScriptSelfDir(t *testing.T) {
 		{
 			"cd into it and pwd", `cat "$(cd "$(dirname "$0")/.." && pwd -P)/b"`,
 			[]step{
-				{"dirname", []string{script}}, {"cd", []string{"/repo/scripts/.."}},
-				{"pwd", []string{"-P"}}, {"cat", []string{"/repo/b"}},
+				{"dirname", []string{script}},
+				{"cd", []string{"/repo/scripts/.."}},
+				{"pwd", []string{"-P"}},
+				{"cat", []string{"/repo/b"}},
 			},
 		},
 		{

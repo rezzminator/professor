@@ -472,6 +472,11 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		return hookentry.OrchestratorWait(os.Stdin, stdout, stderr)
 	}
 	if len(args) != 0 && args[0] == "herdr-indicators" {
+		// The painter outlives the hook's directory, often a worktree removed under it, and every scan reads it.
+		if err := os.Chdir("/"); err != nil {
+			fmt.Fprintf(stderr, "pfm internal herdr-indicators: leave the hook's directory: %v\n", err)
+			return 1
+		}
 		return herdr.IndicatorsEntry(stderr, paths.OSEnv{}, pfmchat.PaintHerdrIndicators)
 	}
 	if len(args) != 0 && args[0] == "herdr-places" {

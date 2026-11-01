@@ -118,7 +118,9 @@ else
   bad 'tools --print-bin resolves the configured bin' "rc=$rc; $out"
 fi
 
-out=$(env -u TOOLS_BIN PATH="$T/path:/usr/bin:/bin" bash "$TOOLS_SCRIPT" --print-bin 2>&1); rc=$?
+# A PATH of only what tools.sh runs before its go check: /usr/bin may hold go (a CI runner's does).
+mkdir -p "$T/nogo" && ln -s "$(command -v bash)" "$(command -v dirname)" "$T/nogo/"
+out=$(env -u TOOLS_BIN PATH="$T/nogo" bash "$TOOLS_SCRIPT" --print-bin 2>&1); rc=$?
 if [[ $rc -ne 0 && "$out" == *'tools: TOOLCHAIN-MISSING — go not on PATH'* ]]; then
   ok 'tools --print-bin names a missing Go toolchain'
 else

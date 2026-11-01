@@ -36,6 +36,13 @@ func (engine *Engine) callHerdr(
 		return engine.callHerdrRaw(ctx, request, target, base, lock, id)
 	}
 	target, agent, screen, err := engine.awaitHerdrNative(ctx, target, &base, lock)
+	var untracked *herdr.Refusal
+	if errors.As(err, &untracked) && untracked.Code == "agent_not_found" {
+		// Herdr tracks no agent in this pane (its agent authority is held by a
+		// source that never reports, as in a herdr-keep pane): the raw path's
+		// composer guard still protects it.
+		return engine.callHerdrRaw(ctx, request, target, base, lock, id)
+	}
 	if err != nil {
 		var unsent *herdr.InputNotSentError
 		if errors.As(err, &unsent) {

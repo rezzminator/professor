@@ -219,6 +219,18 @@ func TestRealRunnerStartDetachReleasesAndWaitNamesIt(t *testing.T) {
 	if err := process.Release(); err != nil {
 		t.Fatalf("Release() error = %v", err)
 	}
+	// A long-lived caller (the paced statusline worker) must not collect a
+	// zombie per detached child: once the child exits, its pid is reaped.
+	deadline := time.Now().Add(5 * time.Second)
+	for syscall.Kill(process.Pid(), 0) == nil {
+		if time.Now().After(deadline) {
+			t.Fatalf(
+				"detached pid %d still in the process table 5s after it exited: never reaped (zombie)",
+				process.Pid(),
+			)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }
 
 func TestRealRunnerStartReturnsAnErrorWhenTheBinaryCannotStart(t *testing.T) {

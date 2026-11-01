@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -211,13 +212,14 @@ func waitPickerEndWorker(t *testing.T, marker, seat string) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			child, err := os.FindProcess(pid)
-			if err != nil {
-				t.Fatal(err)
-			}
-			state, err := child.Wait()
-			if err != nil || !state.Success() {
-				t.Fatalf("owned worker exit=%v err=%v", state, err)
+			// The marker is written only on the fixture's exit-0 path; the
+			// runner's reaper collects the detached worker, so it must be gone.
+			for syscall.Kill(pid, 0) == nil {
+				select {
+				case <-deadline.C:
+					t.Fatalf("owned worker %d still in the process table after its marker", pid)
+				case <-tick.C:
+				}
 			}
 			return
 		}

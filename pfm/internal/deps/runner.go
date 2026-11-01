@@ -91,10 +91,10 @@ type StartOptions struct {
 	// new session and therefore a process group automatically.
 	ProcessGroup bool
 	// Detach starts the child in its own session (SysProcAttr{Setsid: true}
-	// on unix) and releases it immediately after Start — the process is
-	// never waited on, because a detached child is expected to outlive this
-	// one. Process.Wait on a Detach process reports that error rather than
-	// blocking forever on a process this Runner no longer holds.
+	// on unix) and hands it to a background reaper right after Start — the
+	// caller never waits on it, because a detached child is expected to
+	// outlive this one, yet it leaves no zombie once it exits. Process.Wait
+	// on a Detach process reports that error rather than blocking.
 	Detach bool
 }
 
@@ -167,10 +167,9 @@ func (RealRunner) LookPath(name string) (string, error) {
 
 // Start launches argv and returns immediately. A non-Detach start wraps
 // ctx's cancellation (exec.CommandContext) exactly as Run does; a Detach
-// start runs in its own session and is released right after Start, so
-// nothing here holds its process table entry, and Wait on the returned
-// Process reports that rather than blocking on a process this Runner no
-// longer owns.
+// start runs in its own session and a background reaper waits on it, so its
+// process table entry clears when it exits, and Wait on the returned Process
+// reports that rather than blocking on a process the caller does not own.
 func (RealRunner) Start(ctx context.Context, argv []string, opts StartOptions) (Process, error) {
 	if len(argv) == 0 {
 		return nil, errors.New("deps: RealRunner.Start: empty argv")
@@ -236,11 +235,10 @@ func (RealRunner) Start(ctx context.Context, argv []string, opts StartOptions) (
 		return nil, fmt.Errorf("start %q: %w", argv[0], err)
 	}
 	if opts.Detach {
-		pid := command.Process.Pid
-		if err := command.Process.Release(); err != nil {
-			return nil, fmt.Errorf("release detached %q: %w", argv[0], err)
-		}
-		return &releasedProcess{pid: pid, argv0: argv[0]}, nil
+		// Release never reaps on unix: a long-lived caller (the paced statusline
+		// worker, the picker) would keep one zombie per exited child.
+		go func() { _ = command.Wait() }()
+		return &releasedProcess{pid: command.Process.Pid, argv0: argv[0]}, nil
 	}
 	return &realProcess{
 		command:      command,
@@ -310,10 +308,9 @@ func (p *realProcess) KillGroup() error {
 	return err
 }
 
-// releasedProcess is what Start(Detach: true) hands back: the pid it saw
-// before releasing the process handle. Nothing here can wait on the real
-// child any more — Wait says so by name instead of blocking forever on a
-// process table entry this Runner gave up.
+// releasedProcess is what Start(Detach: true) hands back: the child's pid.
+// Its background reaper owns the wait, so the caller cannot wait on the
+// child — Wait says so by name instead of blocking.
 type releasedProcess struct {
 	pid   int
 	argv0 string

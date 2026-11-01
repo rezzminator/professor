@@ -33,13 +33,32 @@ func SeatForReload(ctx context.Context, values paths.Values, socket, pane string
 	if err != nil {
 		return nil, fmt.Errorf("read reload backend: %w", err)
 	}
+	var matched []*fleetdb.Seat
 	for i := range seats {
 		seat := &seats[i]
 		if seat.Backend == spawn.BackendHerdr && seat.HerdrSocket == socket && seat.HerdrPane == pane {
-			return seat, nil
+			matched = append(matched, seat)
 		}
 	}
-	return nil, nil
+	if matched = liveFirst(matched); len(matched) == 0 {
+		return nil, nil
+	}
+	return matched[0], nil
+}
+
+// liveFirst keeps only the live seats when any matched: a retired seat keeps
+// its last pane for its resume recipe, so the live chat on that pane owns it.
+func liveFirst(matched []*fleetdb.Seat) []*fleetdb.Seat {
+	var live []*fleetdb.Seat
+	for _, seat := range matched {
+		if seat.State == nativeSeatLive {
+			live = append(live, seat)
+		}
+	}
+	if len(live) > 0 {
+		return live
+	}
+	return matched
 }
 
 // NativeTarget's handled result distinguishes native refusal from a tmux target.
@@ -88,7 +107,7 @@ func NativeTarget(
 	if err != nil {
 		return nil, ambient, fmt.Errorf("read native seats: %w", err)
 	}
-	var chosen *fleetdb.Seat
+	var matched []*fleetdb.Seat
 	handled := ambient
 	for i := range seats {
 		seat := &seats[i]
@@ -99,15 +118,17 @@ func NativeTarget(
 		if pane != "" && pane != seat.HerdrPane {
 			continue
 		}
-		if chosen != nil {
-			return nil, true, errors.New("native socket has multiple panes — specify --pane")
-		}
-		chosen = seat
+		matched = append(matched, seat)
 	}
-	if chosen == nil && handled {
+	switch matched = liveFirst(matched); {
+	case len(matched) > 1:
+		return nil, true, errors.New("native socket has multiple panes — specify --pane")
+	case len(matched) == 1:
+		return matched[0], handled, nil
+	case handled:
 		return nil, true, fmt.Errorf("no native seat for %s %s", socket, pane)
 	}
-	return chosen, handled, nil
+	return nil, false, nil
 }
 
 // notifyRetryDelays are the waits before each retry of a failure notification

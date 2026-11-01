@@ -50,6 +50,21 @@ func TestNativeReloadAdapterTarget(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// A chat retired from w6:p3 keeps that pane for its resume recipe; the
+	// live chat now in the pane still owns it. Its id sorts before the live one.
+	if err := db.PutSeat(
+		ctx,
+		fleetdb.Seat{
+			SeatID:      "retired-w6:p3",
+			Backend:     "herdr",
+			Engine:      string(pfmengine.Claude),
+			State:       "lost",
+			HerdrSocket: socket,
+			HerdrPane:   "w6:p3",
+		},
+	); err != nil {
+		t.Fatal(err)
+	}
 	for _, test := range []struct {
 		name, sock, pane string
 		bad              bool
@@ -63,7 +78,7 @@ func TestNativeReloadAdapterTarget(t *testing.T) {
 		})
 	}
 	seat, err := SeatForReload(ctx, values, socket, "w6:p3")
-	if err != nil || seat == nil || seat.HerdrPane != "w6:p3" {
+	if err != nil || seat == nil || seat.SeatID != "w6:p3" {
 		t.Fatalf("seat=%+v err=%v", seat, err)
 	}
 }

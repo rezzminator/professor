@@ -308,6 +308,17 @@ func TestParseValueFlags(t *testing.T) {
 			argv: []string{"claude", "--session-id=sid", "--name=seat", "--model=sonnet", "--effort=high", "--mcp-config=/srv/mcp.json"},
 			want: Parsed{SessionID: "sid", Name: "seat", Model: "sonnet", Effort: "high", MCPConfig: "/srv/mcp.json"},
 		},
+		{
+			name: "auto permission mode",
+			argv: []string{"claude", "--allow-dangerously-skip-permissions", "--permission-mode", "auto"},
+			want: Parsed{PermissionMode: "auto"},
+		},
+		{
+			name: "permission mode equals",
+			argv: []string{"claude", "--permission-mode=auto"},
+			want: Parsed{PermissionMode: "auto"},
+		},
+		{name: "permission mode last", argv: []string{"claude", "--permission-mode"}, err: "--permission-mode requires a value"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			got, err := Parse(test.argv)

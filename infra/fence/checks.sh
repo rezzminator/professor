@@ -350,8 +350,8 @@ checks_templates_mirrors_generate() {
 
 checks_templates_generated_agents() {
   local es_bin="$TMP_BASE/engine-sync/engine-sync" sources="$REPO_ROOT/templates/global/agents"
-  local jail home src names declared name rendered=0 missing="" out rc=0 named="" stale unknown="" unmapped=""
-  local tracked="$REPO_ROOT/templates/generated/agents"
+  local jail home src names declared name rendered=0 missing="" out rc=0 named="" stale unknown="" unmapped="" path
+  local tracked="$REPO_ROOT/templates/generated/agents" kept
   head_ "templates — generated agents render"
   # A machine agent .md file carrying from: is a declaration: engine-sync renders
   # it as a generated agent, the source agent with swapped body text; a shared file
@@ -372,8 +372,11 @@ checks_templates_generated_agents() {
   # agent's tools line names a server the twin cannot grant, so the twin loses
   # the tool, and the warning is a red line naming each server; an `unmapped
   # OpenCode model alias` warning means a twin lost its model pin, and is a red
-  # line naming each alias.
-  if ! need_tool go templates || ! need_tool python3 templates; then
+  # line naming each alias. Only files git tracks or would track are judged: a
+  # developer's gitignored local-only agent never ships, so the copy drops every
+  # ignored path before the inventory, the render and the stale comparison read
+  # it, and a git that cannot list them is a red line, never a guess.
+  if ! need_tool go templates || ! need_tool python3 templates || ! need_tool git templates; then
     fail_step "generated agents NOT RENDERED — the toolchain is missing"
     return
   elif ! engine_sync_build_once "$es_bin"; then
@@ -381,24 +384,6 @@ checks_templates_generated_agents() {
     return
   elif [[ ! -d "$sources" ]]; then
     fail_step "generated agents NOT RENDERED — $sources is missing, so nothing was looked up"
-    return
-  elif names="$(python3 -I "$REPO_ROOT/scripts/agent-source-inventory.py" "$sources" --declarations 2>&1)"; then
-    : # The parsed inventory is counted below.
-  else
-    rc=$?
-    # Only the producer's exit 1 REJECTED is a source parse failure.
-    if [[ "$rc" -eq 3 && "$names" == "GAP install"* ]]; then
-      fail_step "generated agents NOT RENDERED — $names"
-    elif [[ "$rc" -eq 1 && "$names" == "agent-source-inventory: REJECTED"* ]]; then
-      fail_step "generated agents NOT RENDERED — agent sources do not parse: $names"
-    else
-      fail_step "generated agents NOT RENDERED — agent source lookup failed (exit $rc): $names"
-    fi
-    return
-  fi
-  declared=$(grep -c . <<<"$names" || true)
-  if (( declared == 0 )); then
-    fail_step "generated agents NOT RENDERED — agent sources carry no declaration, so nothing could render"
     return
   fi
   mkdir -p "$TMP_BASE/engine-sync"
@@ -408,10 +393,46 @@ checks_templates_generated_agents() {
   fi
   home="$jail/home"
   src="$jail/src"
+  kept="$jail/tracked-generated"
   mkdir -p "$home/.claude" "$home/.codex" "$src"
-  # The copy drops the tracked render so an orphan or a stale file shows.
-  if ! cp -a "$REPO_ROOT/templates" "$src/templates" || ! rm -rf "$src/templates/generated"; then
+  if ! cp -a "$REPO_ROOT/templates" "$src/templates"; then
     fail_step "generated agents NOT RENDERED — templates/ could not be copied into the jail"
+    rm -rf "$jail"
+    return
+  fi
+  if ! checks_repo_git ls-files -z --others --ignored --exclude-standard -- templates >"$jail/ignored.z"; then
+    fail_step "generated agents NOT RENDERED — git could not list the ignored files under templates/ at $REPO_ROOT, so local-only files cannot be told from the tree under test"
+    rm -rf "$jail"
+    return
+  fi
+  while IFS= read -r -d '' path; do
+    rm -f -- "$src/$path" || { rc=1; break; }
+  done <"$jail/ignored.z"
+  # The tracked render moves aside so an orphan or a stale file shows against a fresh one.
+  if (( rc != 0 )) || { [[ -e "$src/templates/generated" ]] && ! mv "$src/templates/generated" "$kept"; }; then
+    fail_step "generated agents NOT RENDERED — the ignored files could not be dropped from the jail copy of templates/"
+    rm -rf "$jail"
+    return
+  fi
+  if names="$(python3 -I "$REPO_ROOT/scripts/agent-source-inventory.py" "$src/templates/global/agents" --declarations 2>&1)"; then
+    : # The parsed inventory is counted below.
+  else
+    rc=$?
+    names="${names//"$src"/"$REPO_ROOT"}" # an error names the repository path, never the removed jail
+    # Only the producer's exit 1 REJECTED is a source parse failure.
+    if [[ "$rc" -eq 3 && "$names" == "GAP install"* ]]; then
+      fail_step "generated agents NOT RENDERED — $names"
+    elif [[ "$rc" -eq 1 && "$names" == "agent-source-inventory: REJECTED"* ]]; then
+      fail_step "generated agents NOT RENDERED — agent sources do not parse: $names"
+    else
+      fail_step "generated agents NOT RENDERED — agent source lookup failed (exit $rc): $names"
+    fi
+    rm -rf "$jail"
+    return
+  fi
+  declared=$(grep -c . <<<"$names" || true)
+  if (( declared == 0 )); then
+    fail_step "generated agents NOT RENDERED — agent sources carry no declaration, so nothing could render"
     rm -rf "$jail"
     return
   fi
@@ -450,9 +471,10 @@ checks_templates_generated_agents() {
     # A policy without a source-repository generated directory renders into
     # the home store: neither side exists and there is nothing to compare.
     stale=""
-    if [[ -e "$src/templates/generated/agents" || -e "$tracked" ]]; then
+    if [[ -e "$src/templates/generated/agents" || -e "$kept/agents" ]]; then
       mkdir -p "$src/templates/generated/agents" # a render of nothing is an empty directory: each tracked file is named
-      stale="$(diff -rq "$src/templates/generated/agents" "$tracked" 2>&1 || true)"
+      stale="$(diff -rq "$src/templates/generated/agents" "$kept/agents" 2>&1 || true)"
+      stale="${stale//"$kept/agents"/"$tracked"}" # the filtered copy stands for the tracked directory, named by its repository path
     fi
     if (( rendered != declared )); then
       cat "$out"

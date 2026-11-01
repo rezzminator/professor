@@ -27,7 +27,8 @@
 #                             infra/fence/lanes/tests/x_test.sh;
 #                             a sourced helper brings its users' tests: scripts/shtest.sh and
 #                             scripts/stub-root.sh every tracked test naming it, infra/fence/mkdir-lock.sh
-#                             its own and the shared, root and gate-history tests
+#                             its own and the shared, root and gate-history tests, infra/fence/local-env.sh
+#                             the fence-env and iso-housekeeping tests
 # The rules hold under pfm/ as everywhere. Any other file brings no test, only checks, and is named on
 # its own `TEST UNCOVERED <file>` line, a gap that does not fail the run. The checks, every one run
 # even after one fails:
@@ -471,6 +472,10 @@ derive() { # derive <repository-relative path> <has selector 0|1> <selector>
           while IFS= read -r sib; do
             [ -z "$sib" ] || [ "$sib" = "$f" ] || [ ! -f "$ROOT/$sib" ] || ! grep -qF -- "$f" "$ROOT/$sib" || shell_test "$sib"
           done < <(git -C "$ROOT" ls-files -- '*_test.sh' 'scripts/test-*.sh') ;;
+        infra/fence/local-env.sh)
+          for sib in infra/fence/lanes/tests/fence-env_test.sh infra/fence/lanes/tests/iso-housekeeping_test.sh; do
+            [ ! -f "$ROOT/$sib" ] || shell_test "$sib"
+          done ;;
         infra/fence/mkdir-lock.sh)
           for sib in infra/fence/lanes/tests/mkdir-lock_test.sh infra/fence/lanes/tests/shared_test.sh \
             infra/fence/lanes/tests/root_test.sh infra/fence/lanes/tests/gate-history_test.sh; do

@@ -521,6 +521,36 @@ func TestRestoredRecipeNeverResendsPromptAfterBooleanFlags(t *testing.T) {
 	}
 }
 
+// A restored auto-mode chat keeps --permission-mode and its value.
+func TestRestoredRecipeKeepsAutoPermissionMode(t *testing.T) {
+	run, err := resumeNativeRun(
+		fleetdb.SeatRun{
+			Binary: "fixture",
+			Args: []string{
+				"--allow-dangerously-skip-permissions",
+				"--permission-mode",
+				"auto",
+				"PRIVATE PROMPT",
+				"--settings",
+				"{}",
+			},
+		},
+		fleetdb.Seat{Engine: string(pfmengine.Claude), SessionID: "same-session"}, config.Config{}, io.Discard,
+	)
+	want := []string{
+		"--allow-dangerously-skip-permissions",
+		"--permission-mode",
+		"auto",
+		"--settings",
+		"{}",
+		"--resume",
+		"same-session",
+	}
+	if err != nil || !slices.Equal(run.Args, want) {
+		t.Fatalf("restored argv=%q err=%v want=%q", run.Args, err, want)
+	}
+}
+
 func TestOpenRestoredIDWithoutSeatUsesCurrentHerdrPane(t *testing.T) {
 	// Under herdr-shield Herdr sees its attach client; the caller's shell is the holder's child.
 	for _, holder := range []string{"herdr", "herdr-shield"} {

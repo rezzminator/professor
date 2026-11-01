@@ -46,6 +46,7 @@ cp "$LANES/budgets.yml" "$T/budgets.fixture.yml"
 cp -R "$SUT_DIR/fixtures" "$SUT_DIR/scenarios" "$LANES/"
 cp "$SUT_DIR/../shared.sh" "$SUT_DIR/../mkdir-lock.sh" "$SUT_DIR/../image-key.sh" "$T/infra/fence/"
 cp "$SUT_DIR/../fence-env.sh" "$T/infra/fence/fence-env.sh" 2>/dev/null
+cp "$SUT_DIR/../local-env.sh" "$T/infra/fence/local-env.sh" 2>/dev/null
 (cd "$T" && git init -q && git config user.email t@t && git config user.name t && git commit -q --allow-empty -m fixture)
 # Lane HELD builds herdr-shield from the source fence-env.sh resolves; the fixture tree has none,
 # so every case names one, and the missing-source case unsets it.

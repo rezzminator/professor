@@ -48,6 +48,9 @@ const (
 const (
 	PermissionBypass = "bypass"
 	PermissionPrompt = "prompted"
+	// PermissionAuto starts a chat in auto mode (the permission classifier)
+	// with bypass reachable through shift+tab.
+	PermissionAuto = "auto"
 
 	// claude.systemPrompt values: which system prompt every managed Claude
 	// launch carries. Production leaves the CLI's own prompt untouched; lean

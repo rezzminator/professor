@@ -215,6 +215,11 @@ func TestRenderSubagentsRowBodies(t *testing.T) {
 			want: "10/? ctx missing│bot│gpt-5.5│running",
 		},
 		{
+			name: "a gateway asset reference names its model's family",
+			task: `{"id":"gw","name":"bot","status":"running","model":"gw:catalog/claude-opus-5-5[1m]","tokenCount":10}`,
+			want: "10/?│bot│opus│running",
+		},
+		{
 			name: "an agent in the session's own directory shows no cwd",
 			task: `{"id":"same","status":"running","cwd":"/work/repo/","model":"haiku","tokenCount":10,"label":"x"}`,
 			want: "10/?│haiku│running│x",

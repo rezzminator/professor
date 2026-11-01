@@ -100,7 +100,7 @@ type Knob struct {
 | cost marker | wrapper env `PFM_COST_LEDGER=on\|off\|preempted\|failed`, the decision the status lines read | constant | — |
 | cost pid | wrapper env `PFM_COST_LEDGER_PID={pid}`, the process the armed sink serves: a second pass of that same process (the wrapper exec'd pfm's `claude` shim) keeps its sink | constant | — |
 | MCP | flag `--mcp-config {file}` — a per-launch 0600 file holding enabled `chat-professor` and third-party entries | config | — |
-| `permissionMode` | flags `--allow-dangerously-skip-permissions --dangerously-skip-permissions` on `bypass` | config | `bypass` |
+| `permissionMode` | flags `--allow-dangerously-skip-permissions --dangerously-skip-permissions` on `bypass`; `--allow-dangerously-skip-permissions --permission-mode auto` on `auto` (auto mode first, bypass one shift+tab away); none on `prompted` or for the launcher | config | `bypass` |
 | model | flag `--model` | launch | unset |
 | effort | flag `--effort` (`low\|medium\|high\|xhigh\|max`) | launch | unset |
 | session id | flag `--session-id {uuid}` on a fresh chat — pfm assigns the id so the launch record exists before Claude starts | door | — |
@@ -150,7 +150,7 @@ The `claude` block of `pfm.config.json`; each key also takes a per-account overr
 | Key | Default | Knob |
 | --- | --- | --- |
 | `binary` | `claude` | the real binary behind the launcher |
-| `permissionMode` | `bypass` | autonomy flags (`prompted` omits them) |
+| `permissionMode` | `bypass` | autonomy flags: `bypass`, `auto` (starts in auto mode, bypass reachable by shift+tab) or `prompted` (omits them) |
 | `systemPrompt` | `production` | `production` / `lean` / `professor` |
 | `cache1h` | `true` | the cache-live-control handoff (`CACHE_LIVE_CONTROL_MAIN_TTL`) in the process environment |
 | `theme` | unset | `theme` |
@@ -175,7 +175,7 @@ env -u {hygiene…} CLAUDE_CONFIG_DIR={config dir} CACHE_LIVE_CONTROL_MAIN_TTL={
   [~/.local/bin/pfm internal cost-launch --] {binary} {door verbs} \
   --settings '{"outputStyle":"default","cleanupPeriodDays":36500,"env":{…},"hooks":{…},"statusLine":{…},"subagentStatusLine":{…}[,"theme":…]}' \
   [--mcp-config ~/.local/state/pfm/mcp-config/claude-mcp-{random}.json] \
-  [--model M] [--effort E] [--system-prompt-file F] [--allow-dangerously-skip-permissions --dangerously-skip-permissions] \
+  [--model M] [--effort E] [--system-prompt-file F] [--allow-dangerously-skip-permissions --dangerously-skip-permissions | --allow-dangerously-skip-permissions --permission-mode auto] \
   [--remote-control [name]]
 ```
 

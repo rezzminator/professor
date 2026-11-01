@@ -562,6 +562,25 @@ func tabView(pane herdr.TabPane, identity string) herdr.TabDecoration {
 	}
 }
 
+// staleTabClaim says the pane's agent_session names a chat whose own native
+// seat was born in another terminal: Herdr kept a replaced chat's claim, so
+// the claim never vetoes the seat that proves the pane's terminal. A claim
+// pfm cannot place (a path, an unknown chat) stands.
+func (reader *tabViewReader) staleTabClaim(ctx context.Context, pane herdr.TabPane) (bool, error) {
+	var session struct{ Kind, Value string }
+	if err := json.Unmarshal(pane.Session, &session); err != nil {
+		return false, fmt.Errorf("decode tab agent_session: %w", err)
+	}
+	if session.Kind != "id" {
+		return false, nil
+	}
+	claimed, found, err := nativeSeat(ctx, *reader.runtime, session.Value, "")
+	if err != nil {
+		return false, fmt.Errorf("read the native seat Herdr names in tab %s: %w", pane.Tab, err)
+	}
+	return found && claimed.HerdrTerminalID != "" && claimed.HerdrTerminalID != pane.Terminal, nil
+}
+
 func tabPaneSession(pane herdr.TabPane, target headless.Chat) (bool, error) {
 	if len(pane.Session) == 0 || string(pane.Session) == "null" {
 		return false, nil
@@ -592,23 +611,28 @@ func (reader *tabViewReader) nativeView(
 	socket string,
 	pane herdr.TabPane,
 ) ([]herdr.TabDecoration, error) {
-	// Herdr emits no agent_session for a pfm-native pane: absent, the seat's
-	// own recorded terminal must be the pane's; present, it must name the chat.
+	// A seat's recorded terminal must be the pane's. Herdr emits no
+	// agent_session for a pfm-native pane: absent, that terminal is the only
+	// proof; present, it must name the chat, unless it is a replaced chat's
+	// claim Herdr kept (reader.staleTabClaim).
 	sessionNamed := len(pane.Session) != 0 && string(pane.Session) != "null"
 	matches, err := tabPaneSession(pane, target)
 	if err != nil {
 		return nil, err
-	}
-	if sessionNamed && !matches {
-		return nil, nil
 	}
 	seat, found, err := nativeSeat(ctx, *reader.runtime, target.ID, target.SeatID)
 	if err != nil {
 		return nil, fmt.Errorf("read native tab seat: %w", err)
 	}
 	if !found || seat.ReloadPending || seat.HerdrSocket != socket || seat.HerdrPane != pane.Pane ||
-		!sessionNamed && (seat.HerdrTerminalID == "" || seat.HerdrTerminalID != pane.Terminal) {
+		seat.HerdrTerminalID != pane.Terminal && (seat.HerdrTerminalID != "" || !sessionNamed) {
 		return nil, nil
+	}
+	if sessionNamed && !matches {
+		stale, err := reader.staleTabClaim(ctx, pane)
+		if err != nil || !stale || seat.HerdrTerminalID == "" {
+			return nil, err
+		}
 	}
 	state, proved, err := reader.liveness(ctx, target, seat)
 	if err != nil || !proved {
@@ -623,7 +647,7 @@ func (reader *tabViewReader) nativeView(
 			return false, fmt.Errorf("read native tab owner: %w", err)
 		}
 		if !found || seat.SessionID != target.ID || seat.HerdrSocket != socket || seat.HerdrPane != target.Pane ||
-			seat.ReloadPending || !sessionNamed && seat.HerdrTerminalID != pane.Terminal {
+			seat.ReloadPending || seat.HerdrTerminalID != pane.Terminal && (seat.HerdrTerminalID != "" || !sessionNamed) {
 			return false, nil
 		}
 		currentState, proved, err := reader.liveness(ctx, target, seat)

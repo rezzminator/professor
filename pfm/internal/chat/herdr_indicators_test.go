@@ -397,20 +397,32 @@ func TestHerdrTabNativeOwnershipProof(t *testing.T) {
 // Herdr emits no agent_session for a pfm-native pane, so a native tab is
 // painted when the proved seat's own Herdr terminal is the pane's terminal; a
 // pane naming another chat, a seat with no recorded terminal, or another
-// terminal leaves the tab untouched, and a terminal changed since discovery
-// fails the final validation.
+// terminal leaves the tab untouched, unless the chat named is a replaced one
+// whose own seat was born in another terminal; a terminal changed since
+// discovery fails the final validation.
 func TestHerdrTabNativePaneWithoutAgentSession(t *testing.T) {
+	other := `{"source":"herdr:claude","agent":"claude","kind":"id","value":"s2"}`
 	for _, tc := range []struct {
 		name, seatTerminal string
 		session            string
+		claimedTerminal    string
 		views              int
 	}{
 		{name: "the seat's terminal proves the pane", seatTerminal: "term1", views: 1},
 		{name: "a seat with no recorded terminal", seatTerminal: "", views: 0},
 		{name: "another terminal", seatTerminal: "term2", views: 0},
+		{name: "an agent_session naming another chat", seatTerminal: "term1", views: 0, session: other},
 		{
-			name: "an agent_session naming another chat", seatTerminal: "term1", views: 0,
-			session: `{"source":"pfm","agent":"claude","kind":"id","value":"s2"}`,
+			name: "an agent_session naming a chat execed into the same terminal", seatTerminal: "term1", views: 0,
+			session: other, claimedTerminal: "term1",
+		},
+		{
+			name: "a stale agent_session naming a chat born in another terminal", seatTerminal: "term1", views: 1,
+			session: other, claimedTerminal: "term0",
+		},
+		{
+			name: "an agent_session naming this chat born in another terminal", seatTerminal: "term0", views: 0,
+			session: `{"source":"herdr:claude","agent":"claude","kind":"id","value":"s1"}`,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -434,6 +446,18 @@ func TestHerdrTabNativePaneWithoutAgentSession(t *testing.T) {
 				}
 			}
 			putSeat(tc.seatTerminal)
+			if tc.claimedTerminal != "" {
+				db := fleetdb.OpenSharedState(ctx, values)
+				if err := db.PutSeat(ctx, fleetdb.Seat{
+					SeatID: "seat2", SessionID: "s2", Engine: "cc", Backend: "herdr", HerdrSocket: "endpoint",
+					HerdrPane: "w1:p1", HerdrWorkspace: "w1", HerdrTerminalID: tc.claimedTerminal, State: "lost",
+				}); err != nil {
+					t.Fatal(err)
+				}
+				if err := db.Close(); err != nil {
+					t.Fatal(err)
+				}
+			}
 			pane := herdr.TabPane{Pane: "w1:p1", Terminal: "term1", Tab: "w1:t1", Workspace: "w1"}
 			if tc.session != "" {
 				pane.Session = []byte(tc.session)

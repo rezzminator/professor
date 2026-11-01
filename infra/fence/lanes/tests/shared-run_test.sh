@@ -18,6 +18,10 @@ FENCE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 SUT="${SHARED_RUN_SUT:-$FENCE/shared-run.sh}"
 [ -f "$SUT" ] || { echo "shared-run_test: no shared-run.sh at $SUT" >&2; exit 2; }
 if [ -z "${SHARED_RUN_TEST_NS:-}" ]; then
+  SHTEST_TAG=fence-shared-run-test-root # a plain assignment: one prefixed to `.` ends with the source, and shtest_as_root names it
+  # shellcheck source=/dev/null
+  . "$FENCE/../../scripts/shtest.sh"
+  shtest_as_root "${BASH_SOURCE[0]}" "$@"
   rc=0; SHARED_RUN_TEST_NS=1 unshare --mount -- bash "${BASH_SOURCE[0]}" "$@" || rc=$?
   [ "$rc" = 0 ] || echo "shared-run_test: FAILED (exit $rc) — the suite needs unshare with CAP_SYS_ADMIN and CAP_NET_ADMIN, as the shared fence container grants" >&2
   exit "$rc"

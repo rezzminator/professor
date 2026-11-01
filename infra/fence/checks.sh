@@ -1177,7 +1177,7 @@ gate_attribution() {
 
 gate_run() { # pfm, templates, or all
   local target="${1:-all}" d="$REPO_ROOT/pfm" base run_dir row stem f step_rc=0 budget_rc=0 derived=0 started
-  local gate_pid sampler_pid attribution summary_rc knob filter=""
+  local gate_pid sampler_pid attribution summary_rc knob knob_rc filter=""
   case "$target" in pfm|templates|all) ;; *) printf 'gate_run: unknown target: %s\n' "$target" >&2; return 2 ;; esac
   if [[ "$target" == pfm || "$target" == all ]]; then
     need_tool go pfm || return 1
@@ -1196,7 +1196,8 @@ gate_run() { # pfm, templates, or all
   timing_run_note "$run_dir"
   for knob in PFM_GATE_ONLY PFM_GATE_SKIP; do
     [[ -n "${!knob:-}" ]] || continue
-    [[ "" =~ ^(${!knob})$ ]]; (( $? != 2 )) || { fail_step "gate: $knob is not an extended regex: ${!knob}"; return 1; }
+    knob_rc=0; [[ "" =~ ^(${!knob})$ ]] || knob_rc=$? # errexit-safe: a sourcing caller may run set -e
+    (( knob_rc != 2 )) || { fail_step "gate: $knob is not an extended regex: ${!knob}"; return 1; }
     filter="$filter $knob=${!knob}"
   done
   steps_reset || return 1

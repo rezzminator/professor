@@ -5,6 +5,7 @@
 # shtest_unset_gate_env clears the gate and profiler knobs a suite can inherit.
 # shtest_clean_also <path>... makes the EXIT trap remove those paths too, beside $T and every earlier call's; a suite never sets its own trap.
 # shtest_probe_trap_guard <path> proves the EXIT trap's PID guard, <path> standing in for a shtest_clean_also path.
+# shtest_as_root <script> [args...] re-runs a root-only suite as root through passwordless sudo.
 # shtest_isolate_host points HOME at $T/home and git at no host config or inherited repository, so a fixture commit never reads the host's.
 # BROKEN STATE: an unset SHTEST_TAG or a failed mktemp exits 2 with a named
 # line before any assertion runs — a suite never reports "0 failed" from a
@@ -62,6 +63,18 @@ shtest_isolate_host() {
   # namespace or alternate object store reach no fixture either
   unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT \
     GIT_TEMPLATE_DIR GIT_NAMESPACE GIT_ALTERNATE_OBJECT_DIRECTORIES
+}
+# shtest_as_root <script> [args...]: a suite whose precondition is root (the fence's user) re-runs itself as
+# root through passwordless sudo when it is not, as on GitHub's hosted runner; HOME=/root keeps root's writes
+# out of the invoking user's caches. BROKEN STATE: not root and no passwordless sudo = a named line and exit 1.
+shtest_as_root() {
+  [ "$(id -u)" = 0 ] && return 0
+  if sudo -n true 2>/dev/null; then
+    rm -rf -- "$T"
+    exec sudo -n --preserve-env env "PATH=$PATH" HOME=/root bash "$@"
+  fi
+  echo "$SHTEST_TAG: FAILED — this suite needs root (the fence's user); not root and no passwordless sudo" >&2
+  exit 1
 }
 shtest_end() { printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]; }
 # shtest_probe_trap_guard <path>: the suite's EXIT trap, run by a forked shell, must leave $T and <path> alone.

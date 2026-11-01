@@ -8,6 +8,8 @@ CATALOGUE=${1:-"$REPO_ROOT/infra/fence/checks.sh"}
 ROOT=$(mktemp -d "${TMPDIR:-/tmp}/templates-steps.XXXXXX")
 trap 'rm -rf "$ROOT"' EXIT
 TMP_BASE="$ROOT"
+# The catalogue under test is the whole one: a CI slice's filter (ci.yml) must not reach it.
+unset PFM_GATE_ONLY PFM_GATE_SKIP
 source "$CATALOGUE"
 
 plugin_log_commands="$( (

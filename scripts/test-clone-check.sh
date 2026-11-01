@@ -118,14 +118,23 @@ else
   bad 'tools --print-bin resolves the configured bin' "rc=$rc; $out"
 fi
 
-out=$(env -u TOOLS_BIN PATH="$T/path:/usr/bin:/bin" bash "$TOOLS_SCRIPT" --print-bin 2>&1); rc=$?
+# A PATH of only what tools.sh runs before its go check: /usr/bin may hold go (a CI runner's does).
+mkdir -p "$T/nogo" && ln -s "$(command -v bash)" "$(command -v dirname)" "$T/nogo/"
+out=$(env -u TOOLS_BIN PATH="$T/nogo" bash "$TOOLS_SCRIPT" --print-bin 2>&1); rc=$?
 if [[ $rc -ne 0 && "$out" == *'tools: TOOLCHAIN-MISSING — go not on PATH'* ]]; then
   ok 'tools --print-bin names a missing Go toolchain'
 else
   bad 'tools --print-bin names a missing Go toolchain' "rc=$rc; $out"
 fi
 
-out=$(TOOLS_BIN=/usr/local/bin bash "$TOOLS_SCRIPT" 2>&1); rc=$?
+# The installed tools live wherever clone-check resolves jscpd: the fence image's /usr/local/bin,
+# or the checkout's tmp/tools/<os>-<arch>/bin that tools.sh fills on a CI runner or a host.
+installed=$(bash "$ROOT/scripts/clone-check.sh" --resolve) \
+  || { echo "test-clone-check: no installed jscpd to test against — $installed" >&2; exit 2; }
+installed_bin=$(dirname "$installed")
+go_cmd=$(command -v go) || { echo 'test-clone-check: go not on PATH — harness did not start' >&2; exit 2; }
+go_bin=$(dirname "$go_cmd")
+out=$(TOOLS_BIN="$installed_bin" bash "$TOOLS_SCRIPT" 2>&1); rc=$?
 tool_line=$(printf '%s\n' "$out" | grep '^TOOL jscpd' || true)
 if [[ $rc -eq 0 && "$tool_line" == *"$JSCPD_VERSION"* && "$tool_line" == *PRESENT* ]]; then
   ok 'installed jscpd and identical lockfile report PRESENT'
@@ -144,14 +153,14 @@ echo called > "$JSCPD_NPM_MARKER"
 exit 99
 EOF
 chmod +x "$T/path/npm"
-out=$(env TOOLS_BIN=/usr/local/bin PATH="$T/path:$PATH" JSCPD_NPM_MARKER="$T/npm-called" bash "$T/tool-src/tools.sh" 2>&1); rc=$?
+out=$(env TOOLS_BIN="$installed_bin" PATH="$T/path:$PATH" JSCPD_NPM_MARKER="$T/npm-called" bash "$T/tool-src/tools.sh" 2>&1); rc=$?
 if [[ $rc -eq 2 && "$out" == *"jscpd 9.9.9; JSCPD_VERSION is $JSCPD_VERSION"* && ! -e "$T/npm-called" ]]; then
   ok 'lockfile version drift names both versions before npm ci'
 else
   bad 'lockfile version drift names both versions before npm ci' "rc=$rc; $out"
 fi
 
-out=$(env TOOLS_BIN=/usr/local/bin PATH=/usr/local/go/bin:/usr/bin:/bin bash "$TOOLS_SCRIPT" 2>&1); rc=$?
+out=$(env TOOLS_BIN="$installed_bin" PATH="$go_bin:/usr/bin:/bin" bash "$TOOLS_SCRIPT" 2>&1); rc=$?
 if [[ $rc -eq 1 && "$out" == *'tools: TOOLCHAIN-MISSING — npm not on PATH'* ]]; then
   ok 'missing npm is a named toolchain failure'
 else

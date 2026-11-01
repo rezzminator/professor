@@ -123,6 +123,7 @@ type indicatorPainter struct {
 	// already-focused tab seen need not emit any focus or agent-state event.
 	hasDone         bool
 	tabs            TabProvider
+	tabsChanged     TabProbe
 	hasTabs         bool
 	tabObservations []TabDecoration
 	// unproved holds each pane whose ownership proof failed: the status it

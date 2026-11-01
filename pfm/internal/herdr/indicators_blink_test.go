@@ -231,3 +231,56 @@ func TestCancelledTabPainterRestoresWithinItsBudget(t *testing.T) {
 		t.Fatal("a cancelled painter's restore outlived its budget")
 	}
 }
+
+// TestIdleTabBlinkerRereadsWhenItsProbeSeesAChange pins the third reason an
+// idle tick re-reads the tabs: the provider's probe reports a change no hook
+// announced (a transcript-only failed turn, a dead engine). A probe that
+// fails reads as a change and is named once while it lasts.
+func TestIdleTabBlinkerRereadsWhenItsProbeSeesAChange(t *testing.T) {
+	f := newTabStatusFixture()
+	painter, stepping := tabPainterFixture(t, f)
+	stderr := &strings.Builder{}
+	painter.stderr = stderr
+	scans, probes := 0, 0
+	painter.tabs = func(context.Context, string) ([]TabDecoration, error) {
+		scans++
+		return []TabDecoration{tabObservation("idle")}, nil
+	}
+	painter.tabsChanged = func(context.Context, string) (bool, error) {
+		probes++
+		switch len(stepping.sleeps) {
+		case 4:
+			return true, nil
+		case 6, 7:
+			return false, errors.New("pane.list refused")
+		}
+		return false, nil
+	}
+	const ticks = 9
+	var scansAt []int
+	stepping.onSleep = func(context.Context) error {
+		scansAt = append(scansAt, scans)
+		if len(stepping.sleeps) > ticks {
+			return context.Canceled
+		}
+		return nil
+	}
+	if err := painter.run(context.Background()); err != nil {
+		t.Fatalf("run = %v", err)
+	}
+	// scansAt[k] is the count before sleep k+1, so after tick k.
+	if want := []int{1, 1, 1, 1, 2, 2, 3, 4, 4, 4}; !slices.Equal(scansAt, want) {
+		t.Fatalf(
+			"scans after each tick = %v, want %v: a re-read at the changed tick and each failed probe",
+			scansAt,
+			want,
+		)
+	}
+	if probes != ticks {
+		t.Fatalf("probes = %d over %d ticks, want one per tick", probes, ticks)
+	}
+	if got := strings.Count(stderr.String(), "probe the tabs of socket"); got != 1 ||
+		!strings.Contains(stderr.String(), "pane.list refused") {
+		t.Fatalf("stderr %q: want the failing probe named once with its cause", stderr)
+	}
+}

@@ -308,8 +308,17 @@ func TestHerdrIndicatorsCompiledCLIShowsAndStopsTabPulse(t *testing.T) {
 	revision++
 	mu.Unlock()
 	await("⚪ Chat")
-	// Observe several real monitor polls, rather than sleeping and inferring.
-	for i := 0; i < 12; i++ {
+	// Observe several real monitor polls, rather than sleeping and inferring:
+	// first drop the polls the working and blocked phases left buffered, so
+	// each one counted below is an idle tick's.
+	for drained := false; !drained; {
+		select {
+		case <-listed:
+		default:
+			drained = true
+		}
+	}
+	for i := 0; i < 6; i++ {
 		select {
 		case <-listed:
 		case <-ctx.Done():
@@ -319,7 +328,7 @@ func TestHerdrIndicatorsCompiledCLIShowsAndStopsTabPulse(t *testing.T) {
 	mu.Lock()
 	count := len(renames)
 	mu.Unlock()
-	for i := 0; i < 8; i++ {
+	for i := 0; i < 6; i++ {
 		select {
 		case <-listed:
 		case <-ctx.Done():

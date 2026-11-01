@@ -54,6 +54,11 @@ type TabDecoration struct {
 // TabProvider enumerates the chats displayed on one Herdr endpoint.
 type TabProvider func(context.Context, string) ([]TabDecoration, error)
 
+// TabProbe says, without the TabProvider's fleet scan, whether the inputs
+// behind its last enumeration on one Herdr endpoint changed since; an error
+// says it could not tell.
+type TabProbe func(context.Context, string) (bool, error)
+
 // tabMarkers are the prefixes state plays in mode, one per frame: emoji mode
 // the theme's frames (a zero TabGlyphs field keeps its default), text mode
 // three-rune markers, its blocked and error pulsing with "[ ]" and every
@@ -358,12 +363,15 @@ func tabTargetGone(err error) bool {
 	return errors.As(err, &refusal) && (refusal.Code == "pane_not_found" || refusal.Code == "tab_not_found")
 }
 
-// PaintIndicatorsWithTabs reuses the sidebar clock, failure bound and singleton.
+// PaintIndicatorsWithTabs reuses the sidebar clock, failure bound and
+// singleton; changed, when not nil, is consulted on every blinker tick that
+// would not re-read the tabs, and a change it reports makes the tick re-read.
 func PaintIndicatorsWithTabs(
 	ctx context.Context,
 	socket, lockDir string,
 	stderr io.Writer,
 	tabs TabProvider,
+	changed TabProbe,
 	proof PaneProof,
 ) error {
 	if stderr == nil {
@@ -376,7 +384,7 @@ func PaintIndicatorsWithTabs(
 		call:     Call,
 		clock:    clock.Real,
 		reported: map[string]bool{},
-		tabs:     tabs, provePane: proof,
+		tabs:     tabs, tabsChanged: changed, provePane: proof,
 	}
 	return painter.run(ctx)
 }

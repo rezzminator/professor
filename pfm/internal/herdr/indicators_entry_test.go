@@ -99,7 +99,7 @@ const indicatorsSignalHelperEnv = "PFM_HERDR_INDICATORS_SIGNAL_HELPER"
 func TestIndicatorsEntrySecondSignalKillsAPainterStillUnwinding(t *testing.T) {
 	cmd := exec.CommandContext(context.Background(), os.Args[0],
 		"-test.run=^TestIndicatorsEntrySignalHelper$")
-	cmd.Env = append(os.Environ(), indicatorsSignalHelperEnv+"=1", "HOME="+t.TempDir())
+	cmd.Env = append(os.Environ(), indicatorsSignalHelperEnv+"=1")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -155,11 +155,15 @@ func scanTo(lines *bufio.Scanner, want string) bool {
 
 // TestIndicatorsEntrySignalHelper is the helper process of the signal test: a
 // painter that, once cancelled, never returns.
-func TestIndicatorsEntrySignalHelper(_ *testing.T) {
+func TestIndicatorsEntrySignalHelper(t *testing.T) {
 	if os.Getenv(indicatorsSignalHelperEnv) != "1" {
 		return // runs only as the signal test's helper process
 	}
-	env := &paths.MapEnv{HomeDir: os.Getenv("HOME"), Values: map[string]string{EnvSocket: "/run/herdr.sock"}}
+	values, err := paths.Resolve()
+	if err != nil {
+		t.Fatalf("resolve the helper's jail: %v", err)
+	}
+	env := &paths.MapEnv{HomeDir: values.Home, Values: map[string]string{EnvSocket: "/run/herdr.sock"}}
 	IndicatorsEntry(io.Discard, env, func(ctx context.Context, _, _ string, _ io.Writer) error {
 		_, _ = os.Stdout.WriteString("painting\n")
 		<-ctx.Done()

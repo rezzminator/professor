@@ -12,11 +12,13 @@ import (
 
 // The blinker's cadence. Re-reading the tab observations (the fleet scan
 // behind TabProvider) is the costly part of a paint, so a tick re-reads them
-// only when a hook-fired painter nudged the blinker or idleRefresh passed
-// since the last read; between reads an animated tab advances from the
-// observations already read, the sidebar repaints only while anything is
-// blocked or done, and an idle tick does no work beyond its stat calls. A
-// cancelled painter restores its tabs within restoreBudget.
+// only when a hook-fired painter nudged the blinker, its TabProbe reports a
+// change no hook announces (a transcript-only failed turn, an engine that
+// died, the tab status setting), or idleRefresh passed since the last read;
+// between reads an animated tab advances from the observations already read,
+// the sidebar repaints only while anything is blocked or done, and an idle
+// tick does no work beyond its stat calls and its probe. A cancelled painter
+// restores its tabs within restoreBudget.
 const (
 	idleRefresh   = 10 * time.Second
 	restoreBudget = 3 * time.Second
@@ -35,6 +37,7 @@ type indicatorCadence struct {
 	lastScan      time.Time
 	lastBlocked   bool
 	nudgeFailed   bool
+	probeFailed   bool
 }
 
 // blink repaints on every half-second boundary until nothing is blocked or done
@@ -72,7 +75,7 @@ func (painter *indicatorPainter) blink(ctx context.Context) (stopped bool, err e
 		if painter.ownerGone() {
 			return true, nil
 		}
-		scan, due := painter.tickDue()
+		scan, due := painter.tickDue(ctx)
 		if !due {
 			continue
 		}
@@ -125,7 +128,7 @@ func (painter *indicatorPainter) startCadence() {
 
 // tickDue says whether this tick paints (due) and whether it re-reads the tab
 // observations (scan). A painter without a tab provider paints every tick.
-func (painter *indicatorPainter) tickDue() (scan, due bool) {
+func (painter *indicatorPainter) tickDue(ctx context.Context) (scan, due bool) {
 	if painter.tabs == nil {
 		return false, true
 	}
@@ -133,8 +136,32 @@ func (painter *indicatorPainter) tickDue() (scan, due bool) {
 	if refresh <= 0 {
 		refresh = idleRefresh
 	}
-	scan = painter.takeNudge() || painter.clock.Now().Sub(painter.cadence.lastScan) >= refresh
+	scan = painter.takeNudge() || painter.clock.Now().Sub(painter.cadence.lastScan) >= refresh ||
+		painter.tabsChangedSinceScan(ctx)
 	return scan, scan || painter.cadence.lastBlocked || painter.hasDone || painter.tabsAnimate()
+}
+
+// tabsChangedSinceScan asks the painter's TabProbe whether the inputs behind
+// the last tab observations changed; no probe says no. A probe that fails is
+// named once while it lasts and reads as a change, so the tick re-reads the
+// tabs and the scan names what it finds.
+func (painter *indicatorPainter) tabsChangedSinceScan(ctx context.Context) bool {
+	if painter.tabsChanged == nil {
+		return false
+	}
+	changed, err := painter.tabsChanged(ctx, painter.socket)
+	if err == nil {
+		painter.cadence.probeFailed = false
+		return changed
+	}
+	if ctx.Err() != nil {
+		return false // the next sleep ends the blinker
+	}
+	if !painter.cadence.probeFailed {
+		painter.cadence.probeFailed = true
+		painter.logf("herdr indicators: probe the tabs of socket %s: %v (re-reading them)", painter.socket, err)
+	}
+	return true
 }
 
 // tabsAnimate says whether an observed tab plays more than one frame.

@@ -40,6 +40,8 @@ type herdrTabProvider struct {
 	// glyphs reads the theme's tab glyphs each tick; nil draws the defaults.
 	glyphs func() (herdr.TabGlyphs, error)
 	warn   io.Writer
+	// probe, when set, takes each enumeration's baseline for changed.
+	probe *tabProbe
 }
 
 func (provider *herdrTabProvider) tabs(ctx context.Context, socket string) ([]herdr.TabDecoration, error) {
@@ -52,17 +54,23 @@ func (provider *herdrTabProvider) tabs(ctx context.Context, socket string) ([]he
 	}
 	pendingAgents := map[string]time.Time{}
 	defer func() { provider.missingAgents = pendingAgents }()
+	if provider.probe != nil {
+		provider.probe.baseline = "" // an enumeration that fails leaves none
+	}
 	mode, err := provider.mode()
 	if err != nil {
 		return nil, fmt.Errorf("read tab status configuration: %w", err)
 	}
 	var glyphs herdr.TabGlyphs
+	glyphRead := ""
 	// Only emoji mode draws the theme's glyphs: off and text never read them,
 	// so a broken theme state is never named for a mode that ignores it.
-	if provider.glyphs != nil && mode != herdr.TabStatusOff && mode != "text" {
+	if provider.drawsGlyphs(mode) {
 		// An unreadable theme never stops the tabs' status: it is named, and
 		// the tabs keep painting with the default glyphs while it lasts.
-		if glyphs, err = provider.glyphs(); err != nil {
+		glyphs, err = provider.glyphs()
+		glyphRead = glyphToken(glyphs, err)
+		if err != nil {
 			glyphs = herdr.TabGlyphs{}
 			if _, writeErr := fmt.Fprintf(
 				provider.warn,
@@ -76,6 +84,9 @@ func (provider *herdrTabProvider) tabs(ctx context.Context, socket string) ([]he
 	scan, err := provider.scan(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("scan tab chats: %w", err)
+	}
+	if provider.probe != nil {
+		provider.probe.record(ctx, socket, scan.Rows, mode, glyphRead)
 	}
 	var decorations []herdr.TabDecoration
 	for i := range scan.Rows {
@@ -212,7 +223,7 @@ func PaintHerdrIndicators(ctx context.Context, socket, lockDir string, stderr io
 		return errors.Join(loadErr, writeErr)
 	}
 	inspector := NewSeatInspector(&runtime)
-	provider := herdrTabProvider{inspect: inspector.Inspect, warn: warnings}
+	provider := herdrTabProvider{inspect: inspector.Inspect, warn: warnings, probe: &tabProbe{}}
 	settings := herdrIndicatorConfig{path: runtime.Config.Path}
 	provider.mode = settings.mode
 	stateDir := themesync.DefaultStateDir(runtime.Paths.Home)
@@ -245,7 +256,15 @@ func PaintHerdrIndicators(ctx context.Context, socket, lockDir string, stderr io
 		}
 		return addresses.views(ctx, target, socket, panes)
 	}
-	return herdr.PaintIndicatorsWithTabs(ctx, socket, lockDir, persisted, provider.tabs, call.ProveHerdrPane)
+	return herdr.PaintIndicatorsWithTabs(
+		ctx,
+		socket,
+		lockDir,
+		persisted,
+		provider.tabs,
+		provider.changed,
+		call.ProveHerdrPane,
+	)
 }
 
 // tickWarnings names each per-chat tab diagnostic once while it recurs on

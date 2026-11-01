@@ -106,6 +106,7 @@ func realHerdrProbe(warn io.Writer, values paths.Values, claudeBinary string) he
 		Tmux:     runTmux,
 		Call:     herdr.Call,
 		Environ:  proc.Environ,
+		Keep:     gather.HerdrKeep(proc),
 		Hookless: hooklessLaunch(warn, proc, claudeBinary),
 		Warn:     warn,
 	}

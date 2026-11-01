@@ -39,22 +39,25 @@ func ProveHerdrBridge(ctx context.Context, socket, pane string) (HerdrBridge, er
 	if err != nil {
 		return HerdrBridge{}, fmt.Errorf("herdr pane %s bridge ownership unproved: resolve paths: %w", pane, err)
 	}
+	proc := gather.NewProcFS(values.ProcRoot)
 	return bridgeProver{
 		values: values,
-		proc:   gather.NewProcFS(values.ProcRoot),
+		proc:   proc,
 		foreground: bridgeForeground(
 			herdr.Call,
 			func() uint64 { return uint64(clock.Real.Now().UnixNano()) },
+			gather.HerdrKeep(proc),
 		),
 		tmux: bridgeTmux,
 	}.prove(ctx, socket, pane)
 }
 
-// bridgeForeground reads one pane's foreground pids through pane.process_info,
-// refusing a reply that does not name that very pane.
+// bridgeForeground reads one pane's foreground pids through pane.process_info
+// and keep, refusing a reply that does not name that very pane.
 func bridgeForeground(
 	call func(ctx context.Context, socket string, lines ...[]byte) ([]json.RawMessage, error),
 	seq func() uint64,
+	keep *herdr.Keep,
 ) func(ctx context.Context, socket, pane string) ([]int, error) {
 	return func(ctx context.Context, socket, pane string) ([]int, error) {
 		line, err := herdr.ProcessInfo{Pane: pane, Seq: seq()}.Line()
@@ -68,18 +71,18 @@ func bridgeForeground(
 		if len(results) != 1 {
 			return nil, fmt.Errorf("pane.process_info of %s answered %d results, want 1", pane, len(results))
 		}
-		var reply struct {
-			Info struct {
-				Pane string `json:"pane_id"`
-			} `json:"process_info"`
-		}
-		if err := json.Unmarshal(results[0], &reply); err != nil {
+		processes, err := keep.Processes(ctx, socket, results[0])
+		if err != nil {
 			return nil, fmt.Errorf("decode pane.process_info of %s: %w", pane, err)
 		}
-		if reply.Info.Pane != pane {
-			return nil, fmt.Errorf("pane.process_info of %s answered for pane %q", pane, reply.Info.Pane)
+		if processes.Pane != pane {
+			return nil, fmt.Errorf("pane.process_info of %s answered for pane %q", pane, processes.Pane)
 		}
-		return herdr.ParseProcessInfo(results[0])
+		pids, err := processes.PIDs()
+		if err != nil {
+			return nil, fmt.Errorf("decode pane.process_info of %s: %w", pane, err)
+		}
+		return pids, nil
 	}
 }
 

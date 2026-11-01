@@ -33,10 +33,11 @@ var (
 	)
 	ErrNotRegistered = errors.New("resolve: caller not registered")
 	ErrAmbiguous     = errors.New("resolve: caller ambiguous")
-	// ErrForeignProcess marks a process whose environment another uid owns: a different user's
-	// process, or one that made itself non-dumpable (sshd's session, the systemd user manager).
+	// ErrForeignProcess marks a process whose environment the kernel withholds from the caller:
+	// a different user's process, one that made itself non-dumpable (sshd's session), or one
+	// holding capabilities the caller lacks (the systemd user manager).
 	// It can never be a pane the caller owns, so ancestry recovery passes over it.
-	ErrForeignProcess = errors.New("resolve: process environment owned by another uid")
+	ErrForeignProcess = errors.New("resolve: process environment withheld: another uid's, non-dumpable or privileged")
 )
 
 // Identity is who the CALLING process is: the tmux handle another chat calls
@@ -114,6 +115,7 @@ type Whoami struct {
 	processes   ProcessTree
 	selfPID     int
 	tmuxDir     string
+	procRoot    string
 	codexSeats  func(context.Context) ([]CodexSeat, error)
 }
 
@@ -144,6 +146,7 @@ func NewWhoami(dependencies WhoamiDependencies) (*Whoami, error) {
 		processes:   dependencies.Processes,
 		selfPID:     dependencies.SelfPID,
 		tmuxDir:     tmuxDir,
+		procRoot:    procRoot,
 		codexSeats:  dependencies.CodexSeats,
 	}
 	if identifier.namer == nil {

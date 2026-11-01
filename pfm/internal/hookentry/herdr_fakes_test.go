@@ -24,11 +24,13 @@ import (
 
 // fakePane is a pane in the fake Herdr's table: its id, the terminal that
 // outlives a move, the foreground process pids pane.process_info reports, and
-// the pane's own shell (0: none reported).
+// the pane's own shell (0: none reported); kept names every process
+// herdr-keep, the attach client of a pane herdr-keep holds.
 type fakePane struct {
 	id, terminal string
 	pids         []int
 	shell        int
+	kept         bool
 }
 
 type fakeAgent struct{ name, pane string }
@@ -100,6 +102,17 @@ func (server *fakeHerdr) addShellPane(id, terminal string, shell int, pids ...in
 	server.mu.Lock()
 	defer server.mu.Unlock()
 	server.panes = append(server.panes, fakePane{id: id, terminal: terminal, pids: pids, shell: shell})
+}
+
+// addKeptPane adds a pane herdr-keep holds: Herdr sees its attach client
+// (pid client) as both shell and foreground.
+func (server *fakeHerdr) addKeptPane(id, terminal string, client int) {
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	server.panes = append(
+		server.panes,
+		fakePane{id: id, terminal: terminal, pids: []int{client}, shell: client, kept: true},
+	)
 }
 
 // runIn makes pid a foreground process of the pane with id.
@@ -244,8 +257,12 @@ func (server *fakeHerdr) answer(method, pane, target, name string) (code, result
 				continue
 			}
 			foreground := make([]map[string]any, 0, len(candidate.pids))
+			name := "proc"
+			if candidate.kept {
+				name = herdr.KeepBinary
+			}
 			for _, pid := range candidate.pids {
-				foreground = append(foreground, map[string]any{"pid": pid, "name": "proc"})
+				foreground = append(foreground, map[string]any{"pid": pid, "name": name})
 			}
 			info := map[string]any{"pane_id": pane, "foreground_processes": foreground}
 			if candidate.shell != 0 {

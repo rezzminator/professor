@@ -146,14 +146,16 @@ func SeatHost(args []string, stdout, stderr io.Writer, runtime config.Runtime) i
 		}
 		status, started := 1, false
 		if runErr == nil {
+			// The bound seat's Herdr socket and pane, never a herdr-keep relay's.
 			options.Env = seatEnvironment(
 				options.Env,
 				[]string{
 					paths.EnvStateDB + "=" + runtime.Paths.StateDB,
+					herdr.EnvSocket + "=" + seat.HerdrSocket,
 					herdr.EnvPane + "=" + seat.HerdrPane,
 					herdr.EnvWorkspace + "=" + seat.HerdrWorkspace,
 				},
-				[]string{paths.EnvStateDB, herdr.EnvPane, herdr.EnvWorkspace, herdr.EnvTab},
+				[]string{paths.EnvStateDB, herdr.EnvSocket, herdr.EnvPane, herdr.EnvWorkspace, herdr.EnvTab},
 			)
 			options.Env, _ = armCostLedger(options.Env, paths.OSEnv{}, run.CostLedger, stderr)
 			acknowledge := seat.ReloadPending

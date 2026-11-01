@@ -405,24 +405,6 @@ func ListPanes(ctx context.Context, socket string) ([]Pane, error) {
 	return ParsePanes(body)
 }
 
-// ParseShellPID decodes a pane.process_info result into the pid of the pane's
-// own shell (0 when Herdr names none).
-func ParseShellPID(result json.RawMessage) (int, error) {
-	var decoded struct {
-		Type        string `json:"type"`
-		ProcessInfo struct {
-			ShellPID int `json:"shell_pid"`
-		} `json:"process_info"`
-	}
-	if err := json.Unmarshal(result, &decoded); err != nil {
-		return 0, fmt.Errorf("herdr pane.process_info: decode result %q: %w", result, err)
-	}
-	if decoded.Type != "pane_process_info" {
-		return 0, fmt.Errorf("herdr pane.process_info: result type %q, want pane_process_info", decoded.Type)
-	}
-	return decoded.ProcessInfo.ShellPID, nil
-}
-
 // ProcessInfo is one pane.process_info request: the processes in the pane's
 // foreground.
 type ProcessInfo struct {
@@ -442,34 +424,6 @@ func (info ProcessInfo) Line() ([]byte, error) {
 			PaneID string `json:"pane_id"`
 		}{info.Pane},
 	})
-}
-
-// ParseProcessInfo decodes a pane.process_info result
-// ({"type":"pane_process_info","process_info":{"foreground_processes":[…]}})
-// into the foreground pids.
-func ParseProcessInfo(result json.RawMessage) ([]int, error) {
-	var decoded struct {
-		Type        string `json:"type"`
-		ProcessInfo struct {
-			Foreground *[]struct {
-				PID int `json:"pid"`
-			} `json:"foreground_processes"`
-		} `json:"process_info"`
-	}
-	if err := json.Unmarshal(result, &decoded); err != nil {
-		return nil, fmt.Errorf("herdr pane.process_info: decode result %q: %w", result, err)
-	}
-	if decoded.Type != "pane_process_info" {
-		return nil, fmt.Errorf("herdr pane.process_info: result type %q, want pane_process_info", decoded.Type)
-	}
-	if decoded.ProcessInfo.Foreground == nil {
-		return nil, fmt.Errorf("herdr pane.process_info: foreground_processes missing or null in result %q", result)
-	}
-	pids := make([]int, 0, len(*decoded.ProcessInfo.Foreground))
-	for _, process := range *decoded.ProcessInfo.Foreground {
-		pids = append(pids, process.PID)
-	}
-	return pids, nil
 }
 
 // MaxTitleRunes is Herdr's cap on a pane title.

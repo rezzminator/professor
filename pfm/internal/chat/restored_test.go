@@ -450,80 +450,123 @@ func TestRestoredRecipeNeverResendsPromptAfterBooleanFlags(t *testing.T) {
 }
 
 func TestOpenRestoredIDWithoutSeatUsesCurrentHerdrPane(t *testing.T) {
-	root := testjail.Fleet(t)
-	const id = "1b67f24e-bbe9-491f-8390-86f50b45a598"
-	seedClaudeChat(t, root, id, assistantSaid("done"))
-	socket := nativeChatSocket(t, func(req nativeChatRequest) (any, string) {
-		switch req.Method {
-		case "ping":
-			return map[string]any{"type": "pong", "protocol": 22, "version": "fixture"}, ""
-		case "pane.get":
-			return testjail.HerdrPaneInfo("w9:p2"), ""
-		case "pane.process_info":
-			return map[string]any{
-				"type": "pane_process_info",
-				"process_info": map[string]any{
-					"pane_id":              "w9:p2",
-					"shell_pid":            700001,
-					"foreground_processes": []any{map[string]any{"pid": os.Getpid()}},
-				},
-			}, ""
-		case "tab.get":
-			return map[string]any{
-				"type": "tab_info",
-				"tab":  map[string]any{"tab_id": "w9:t1", "label": "INTEGRATION", "pane_count": 1},
-			}, ""
-		case "tab.rename":
-			return map[string]any{"type": "ok"}, ""
-		case "pane.rename":
-			var label string
-			_ = json.Unmarshal(req.Params["label"], &label)
-			return map[string]any{"pane": map[string]any{"pane_id": "w9:p2", "label": label}}, ""
-		case "agent.rename":
-			var name string
-			_ = json.Unmarshal(req.Params["name"], &name)
-			return map[string]any{"agent": map[string]any{"pane_id": "w9:p2", "name": name}}, ""
-		default:
-			return nil, "unexpected_method"
-		}
-	})
-	t.Setenv("HERDR_ENV", "1")
-	t.Setenv("HERDR_SOCKET_PATH", socket)
-	t.Setenv("HERDR_PANE_ID", "w9:p2")
-	t.Setenv("TMUX", "")
-	nativeChatRestoredCaller(t, true)
-	runtime, err := config.LoadRuntime("")
-	if err != nil {
-		t.Fatal(err)
-	}
-	binary := filepath.Join(runtime.Paths.Home, "native-engine")
-	if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	runtime.Config.Claude.Binary = binary
-	fake := &fakeOpenTmux{alive: map[string]bool{}}
-	stubOpenExecutor(t, fake)
-	var stdout, stderr bytes.Buffer
-	code := OpenRestoredID(context.Background(), id, &stdout, &stderr, &runtime)
-	if code != 0 || !strings.HasPrefix(stdout.String(), "exec pfm internal seat-host ") {
-		t.Fatalf("missing-seat recovery code=%d out=%q err=%q", code, stdout.String(), stderr.String())
-	}
-	db := fleetdb.OpenSharedState(context.Background(), runtime.Paths)
-	defer func() {
-		if err := db.Close(); err != nil {
-			t.Error(err)
-		}
-	}()
-	seat, found, err := db.SeatBySession(context.Background(), id)
-	if err != nil || !found || seat.HerdrPane != "w9:p2" {
-		t.Fatalf("missing-seat recovery seat=%+v found=%t err=%v", seat, found, err)
-	}
-	// The chat's recorded directory is gone: it restores in the fleet home
-	// and says so, the one missing-directory rule every door shares.
-	run, err := db.ReadSeatRun(seat.SeatID)
-	want := "opened in " + runtime.Paths.Home + ": its own directory /work/project is gone"
-	if err != nil || run.CWD != runtime.Paths.Home || !strings.Contains(stderr.String(), want) {
-		t.Fatalf("restored cwd=%q err=%v stderr=%q, want the fleet home and %q", run.CWD, err, stderr.String(), want)
+	// Under herdr-keep Herdr sees its attach client; the caller's shell is the holder's child.
+	for _, holder := range []string{"herdr", "herdr-keep"} {
+		t.Run(holder, func(t *testing.T) {
+			kept := holder == "herdr-keep"
+			root := testjail.Fleet(t)
+			const id = "1b67f24e-bbe9-491f-8390-86f50b45a598"
+			seedClaudeChat(t, root, id, assistantSaid("done"))
+			socket := nativeChatSocket(t, func(req nativeChatRequest) (any, string) {
+				switch req.Method {
+				case "ping":
+					return map[string]any{"type": "pong", "protocol": 22, "version": "fixture"}, ""
+				case "pane.get":
+					return testjail.HerdrPaneInfo("w9:p2"), ""
+				case "pane.process_info":
+					info := map[string]any{
+						"pane_id":              "w9:p2",
+						"shell_pid":            700001,
+						"foreground_processes": []any{map[string]any{"pid": os.Getpid()}},
+					}
+					if kept {
+						info["shell_pid"] = 700009
+						info["foreground_processes"] = []any{map[string]any{"pid": 700009, "name": "herdr-keep"}}
+					}
+					return map[string]any{"type": "pane_process_info", "process_info": info}, ""
+				case "tab.get":
+					return map[string]any{
+						"type": "tab_info",
+						"tab":  map[string]any{"tab_id": "w9:t1", "label": "INTEGRATION", "pane_count": 1},
+					}, ""
+				case "tab.rename":
+					return map[string]any{"type": "ok"}, ""
+				case "pane.rename":
+					var label string
+					_ = json.Unmarshal(req.Params["label"], &label)
+					return map[string]any{"pane": map[string]any{"pane_id": "w9:p2", "label": label}}, ""
+				case "agent.rename":
+					var name string
+					_ = json.Unmarshal(req.Params["name"], &name)
+					return map[string]any{"agent": map[string]any{"pane_id": "w9:p2", "name": name}}, ""
+				default:
+					return nil, "unexpected_method"
+				}
+			})
+			t.Setenv("HERDR_ENV", "1")
+			t.Setenv("HERDR_SOCKET_PATH", socket)
+			t.Setenv("HERDR_PANE_ID", "w9:p2")
+			t.Setenv("TMUX", "")
+			nativeChatRestoredCaller(t, true)
+			if kept {
+				// Holder 700005 runs the shell 700001, whose terminal's foreground group is this process's.
+				values, err := paths.Resolve()
+				if err != nil {
+					t.Fatal(err)
+				}
+				zeros := strings.Repeat("0 ", 13)
+				for pid, stat := range map[int]string{
+					700005:      "700005 (herdr-keep) S 1 700005 700005 0 -1 " + zeros + "100 0\n",
+					700001:      "700001 (zsh) S 700005 700001 700001 0 700003 " + zeros + "100 0\n",
+					os.Getpid(): fmt.Sprintf("%d (pfm) S 700001 700003 700001 0 700003 %s100 0\n", os.Getpid(), zeros),
+				} {
+					dir := filepath.Join(values.ProcRoot, fmt.Sprint(pid))
+					if err := os.MkdirAll(dir, 0o700); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(filepath.Join(dir, "stat"), []byte(stat), 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if err := os.WriteFile(
+					filepath.Join(values.ProcRoot, fmt.Sprint(os.Getpid()), "cmdline"),
+					[]byte("pfm\x00"),
+					0o600,
+				); err != nil {
+					t.Fatal(err)
+				}
+				testjail.StageHerdrKeep(t, testjail.HerdrKeepListing(700005, 100, 700001, 100, "w9:p2", socket), 0)
+			}
+			runtime, err := config.LoadRuntime("")
+			if err != nil {
+				t.Fatal(err)
+			}
+			binary := filepath.Join(runtime.Paths.Home, "native-engine")
+			if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			runtime.Config.Claude.Binary = binary
+			fake := &fakeOpenTmux{alive: map[string]bool{}}
+			stubOpenExecutor(t, fake)
+			var stdout, stderr bytes.Buffer
+			code := OpenRestoredID(context.Background(), id, &stdout, &stderr, &runtime)
+			if code != 0 || !strings.HasPrefix(stdout.String(), "exec pfm internal seat-host ") {
+				t.Fatalf("missing-seat recovery code=%d out=%q err=%q", code, stdout.String(), stderr.String())
+			}
+			db := fleetdb.OpenSharedState(context.Background(), runtime.Paths)
+			defer func() {
+				if err := db.Close(); err != nil {
+					t.Error(err)
+				}
+			}()
+			seat, found, err := db.SeatBySession(context.Background(), id)
+			if err != nil || !found || seat.HerdrPane != "w9:p2" {
+				t.Fatalf("missing-seat recovery seat=%+v found=%t err=%v", seat, found, err)
+			}
+			// The chat's recorded directory is gone: it restores in the fleet home
+			// and says so, the one missing-directory rule every door shares.
+			run, err := db.ReadSeatRun(seat.SeatID)
+			want := "opened in " + runtime.Paths.Home + ": its own directory /work/project is gone"
+			if err != nil || run.CWD != runtime.Paths.Home || !strings.Contains(stderr.String(), want) {
+				t.Fatalf(
+					"restored cwd=%q err=%v stderr=%q, want the fleet home and %q",
+					run.CWD,
+					err,
+					stderr.String(),
+					want,
+				)
+			}
+		})
 	}
 }
 

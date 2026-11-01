@@ -10,12 +10,25 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 const nativeHerdrBackend = "herdr"
+
+// HerdrKeep is the herdr-keep door over proc.
+func HerdrKeep(proc ProcFS) *herdr.Keep {
+	return &herdr.Keep{Runner: deps.RealRunner{}, Proc: keepProc{proc}}
+}
+
+type keepProc struct{ ProcFS }
+
+func (proc keepProc) Stat(pid int) (herdr.ProcStat, error) {
+	stat, err := proc.ProcFS.Stat(pid)
+	return herdr.ProcStat{Start: stat.StartTime, Group: stat.Group, TerminalGroup: stat.TerminalGroup}, err
+}
 
 // HerdrSeat is a durable native seat and its visible probe failure, if any.
 type HerdrSeat struct {
@@ -198,17 +211,11 @@ func proveHerdrSeatSnapshot(
 	if err != nil {
 		return seat, false, fmt.Errorf("prove seat %s shell: %w", seat.SeatID, err)
 	}
-	var info struct {
-		Type string `json:"type"`
-		Info struct {
-			Pane  string `json:"pane_id"`
-			Shell int    `json:"shell_pid"`
-		} `json:"process_info"`
+	processes, err := HerdrKeep(proc).Processes(ctx, seat.HerdrSocket, body)
+	if err != nil {
+		return seat, false, fmt.Errorf("seat %s ownership shell identity unavailable: %w", seat.SeatID, err)
 	}
-	if err := json.Unmarshal(body, &info); err != nil {
-		return seat, false, fmt.Errorf("decode ownership shell: %w", err)
-	}
-	if info.Type != "pane_process_info" || info.Info.Pane != candidate.PaneID || info.Info.Shell <= 1 {
+	if processes.Pane != candidate.PaneID || processes.Shell <= 1 {
 		return seat, false, fmt.Errorf("seat %s ownership shell identity unavailable", seat.SeatID)
 	}
 	pid := seat.SeatHostPID
@@ -218,7 +225,7 @@ func proveHerdrSeatSnapshot(
 			return seat, false, fmt.Errorf("enumerate seat hosts: %w", err)
 		}
 		for _, possible := range pids {
-			member, err := belowHerdrShell(proc, possible, info.Info.Shell)
+			member, err := belowHerdrShell(proc, possible, processes.Shell)
 			if err != nil {
 				return seat, false, err
 			}
@@ -285,7 +292,7 @@ func proveHerdrSeatSnapshot(
 	if !HerdrSupervisorArgv(argv, seat.SeatID) {
 		return seat, false, fmt.Errorf("seat %s supervisor argv mismatch", seat.SeatID)
 	}
-	member, err := belowHerdrShell(proc, pid, info.Info.Shell)
+	member, err := belowHerdrShell(proc, pid, processes.Shell)
 	if err != nil {
 		return seat, false, err
 	}

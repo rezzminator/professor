@@ -8,8 +8,10 @@ import (
 	"io"
 	"path/filepath"
 	"strconv"
+	"time"
 
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
@@ -23,6 +25,10 @@ const (
 	herdrPaneKey  = "pane_id"
 	herdrBackend  = "herdr"
 	liveSeatState = "live"
+	// defaultHeldShellWait bounds how long a held pane's close waits for
+	// herdr-keep to end the holder's shell, polled every heldShellPoll.
+	defaultHeldShellWait = 5 * time.Second
+	heldShellPoll        = 100 * time.Millisecond
 )
 
 // herdrTarget resolves ownership before the index fallback: a new native engine
@@ -277,6 +283,9 @@ type herdrKiller struct {
 	sidDir string
 	// log receives the warnings of a close that succeeded around a failure.
 	log io.Writer
+	// heldShellWait bounds the wait for a held pane's shell to end after its
+	// close; zero is defaultHeldShellWait.
+	heldShellWait time.Duration
 }
 
 // prove re-reads by stable seat identity; stale wire addresses never confer ownership.
@@ -363,15 +372,18 @@ func (client herdrKiller) PaneExists(ctx context.Context, _, _ string) (bool, er
 	if !herdrPaneMatches(pane, got, response.Pane.Workspace) {
 		return false, fmt.Errorf("get Herdr pane %s: result belongs to %q", pane, got)
 	}
-	result, err = herdr.SeatRequest(ctx, socket, "pane.process_info", map[string]string{herdrPaneKey: pane})
-	if err != nil {
-		return false, fmt.Errorf("read Herdr processes in %s: %w", pane, err)
-	}
-	return client.enginePresent(result, pane)
+	return client.enginePresent(ctx, socket, pane)
 }
 
-func (client herdrKiller) enginePresent(result json.RawMessage, pane string) (bool, error) {
-	present, err := herdr.EngineForeground(result, pane, client.engine)
+// enginePresent reads the pane's foreground through herdr-keep: a pane it holds
+// shows its holder's shell, so the engine is found where it runs, never in the
+// attach client alone.
+func (client herdrKiller) enginePresent(ctx context.Context, socket, pane string) (bool, error) {
+	_, processes, err := paneProcesses(ctx, socket, pane)
+	if err != nil {
+		return false, err
+	}
+	present, err := herdr.EngineForeground(processes, pane, client.engine)
 	if err != nil || present {
 		return present, err
 	}
@@ -379,6 +391,54 @@ func (client herdrKiller) enginePresent(result json.RawMessage, pane string) (bo
 	return false, fmt.Errorf(
 		"herdr foreground evidence unavailable in %s; live supervisor engine exit is unproved", pane,
 	)
+}
+
+// paneProcesses reads pane's processes through herdr-keep, returning the keep
+// door that read them.
+func paneProcesses(ctx context.Context, socket, pane string) (*herdr.Keep, herdr.PaneProcesses, error) {
+	values, err := paths.Resolve()
+	if err != nil {
+		return nil, herdr.PaneProcesses{}, fmt.Errorf("read Herdr processes in %s: resolve paths: %w", pane, err)
+	}
+	keep := gather.HerdrKeep(gather.NewProcFS(values.ProcRoot))
+	processes, err := keep.Read(ctx, socket, pane)
+	if err != nil {
+		return nil, herdr.PaneProcesses{}, fmt.Errorf("read Herdr processes in %s: %w", pane, err)
+	}
+	return keep, processes, nil
+}
+
+// awaitHeldShell waits, bounded, for herdr-keep to end holder's shell once its
+// pane closed: Herdr's close ends only the attach client, so a shell that
+// outlives it keeps the seat and names herdr-keep's own cleanup.
+func (client herdrKiller) awaitHeldShell(
+	ctx context.Context, keep *herdr.Keep, holder herdr.KeepHolder, pane string,
+) error {
+	wait := client.heldShellWait
+	if wait <= 0 {
+		wait = defaultHeldShellWait
+	}
+	deadline := clock.Real.Now().Add(wait)
+	for {
+		ended, err := keep.ShellEnded(holder)
+		if err != nil {
+			return fmt.Errorf("closed Herdr pane %s; seat %s retained: %w", pane, client.seat.SeatID, err)
+		}
+		if ended {
+			return nil
+		}
+		if !clock.Real.Now().Before(deadline) {
+			return fmt.Errorf(
+				"closed Herdr pane %s, but herdr-keep holder %s still runs its shell (pid %d): "+
+					"end it with `%s kill %s`; seat %s retained",
+				pane, holder.ID, holder.Child.PID, herdr.KeepBinary, holder.ID, client.seat.SeatID,
+			)
+		}
+		if err := waitContext(ctx, heldShellPoll); err != nil {
+			return fmt.Errorf("closed Herdr pane %s; seat %s retained: await its herdr-keep shell: %w",
+				pane, client.seat.SeatID, err)
+		}
+	}
 }
 
 func herdrPaneMatches(target, pane, workspace string) bool {
@@ -399,13 +459,7 @@ func (client herdrKiller) screenTarget(ctx context.Context, input bool) (pfmcall
 		return pfmcall.Target{}, errors.New("native screen target: saved supervisor is dead")
 	}
 	if input {
-		evidence, err := herdr.SeatRequest(
-			ctx, owner.HerdrSocket, "pane.process_info", map[string]string{herdrPaneKey: owner.HerdrPane},
-		)
-		if err != nil {
-			return pfmcall.Target{}, fmt.Errorf("verify foreground before input: %w", err)
-		}
-		if _, err := client.enginePresent(evidence, owner.HerdrPane); err != nil {
+		if _, err := client.enginePresent(ctx, owner.HerdrSocket, owner.HerdrPane); err != nil {
 			return pfmcall.Target{}, fmt.Errorf("verify foreground before input: %w", err)
 		}
 	}
@@ -464,8 +518,18 @@ func (client herdrKiller) KillPane(ctx context.Context, socket, pane string) err
 		return fmt.Errorf("native seat %s supervisor is dead; pane not closed, seat retained", client.seat.SeatID)
 	}
 
+	// The proved owner's address, never the caller's stale one, as ack uses.
+	keep, processes, err := paneProcesses(ctx, owner.HerdrSocket, owner.HerdrPane)
+	if err != nil {
+		return fmt.Errorf("refuse Herdr close: %w", err)
+	}
 	if err := client.ack(ctx, socket, pane, "pane.close", map[string]string{herdrPaneKey: pane}); err != nil {
 		return err
+	}
+	if processes.Holder != nil {
+		if err := client.awaitHeldShell(ctx, keep, *processes.Holder, owner.HerdrPane); err != nil {
+			return err
+		}
 	}
 	// A forced pane close also kills its supervisor, so it cannot retire the
 	// durable address itself. Keep the independent kill ledger untouched.

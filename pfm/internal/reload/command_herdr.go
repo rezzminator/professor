@@ -36,6 +36,8 @@ type nativeReload struct {
 	door    *pfmcall.Engine
 	db      *fleetdb.Store
 	owner   fleetdb.Seat
+	// keep reads the pane through herdr-keep, which may hold its shell.
+	keep *herdr.Keep
 }
 
 // pane is the native seat's seatScreen: call's door, the seat's supervisor
@@ -94,6 +96,7 @@ func RunHerdr(
 		options: options,
 		door:    door,
 		db:      db,
+		keep:    gather.HerdrKeep(gather.NewProcFS(values.ProcRoot)),
 		target: pfmcall.Target{
 			Backend:    "herdr",
 			SocketPath: request.SocketPath,
@@ -483,44 +486,25 @@ func (n *nativeReload) ready(ctx context.Context, stash bool) error {
 	return errors.New("native reload: chat still busy or input box not ready; /exit was not typed")
 }
 
-type nativeReloadProcess struct {
-	PID   int      `json:"pid"`
-	Name  string   `json:"name"`
-	Argv0 *string  `json:"argv0"`
-	Argv  []string `json:"argv"`
-}
-
 func (n *nativeReload) process(ctx context.Context) (int, []string, error) {
 	if err := n.refreshTarget(ctx); err != nil {
 		return 0, nil, err
 	}
-	body, err := herdr.SeatRequest(
-		ctx,
-		n.target.SocketPath,
-		"pane.process_info",
-		map[string]string{herdrPaneKey: n.target.Pane},
-	)
+	processes, err := n.keep.Read(ctx, n.target.SocketPath, n.target.Pane)
 	if err != nil {
 		return 0, nil, fmt.Errorf("native reload process_info: %w", err)
 	}
-	var result struct {
-		Type string `json:"type"`
-		Info *struct {
-			Pane      string                `json:"pane_id"`
-			Processes []nativeReloadProcess `json:"foreground_processes"`
-		} `json:"process_info"`
+	if processes.ForegroundErr != nil {
+		return 0, nil, fmt.Errorf("decode native reload process_info: %w", processes.ForegroundErr)
 	}
-	if err := json.Unmarshal(body, &result); err != nil {
-		return 0, nil, fmt.Errorf("decode native reload process_info: %w", err)
-	}
-	if result.Type != "pane_process_info" || result.Info == nil || result.Info.Pane != n.target.Pane {
+	if processes.Pane != n.target.Pane {
 		return 0, nil, errors.New("native reload malformed process_info or mismatched pane")
 	}
 	binary := pfmengine.MustLookup(n.request.Engine).Binary
-	for _, process := range result.Info.Processes {
+	for _, process := range processes.Foreground {
 		name := process.Name
-		if process.Argv0 != nil {
-			name = filepath.Base(*process.Argv0)
+		if process.Argv0 != "" {
+			name = filepath.Base(process.Argv0)
 		} else if len(process.Argv) > 0 {
 			name = filepath.Base(process.Argv[0])
 		}

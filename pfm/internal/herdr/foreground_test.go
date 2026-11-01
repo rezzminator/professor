@@ -7,15 +7,24 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
+// foregroundOf is EngineForeground over a pane.process_info body, as its callers read it.
+func foregroundOf(body, pane string, engine pfmengine.ID) (bool, error) {
+	processes, err := ParsePaneProcesses([]byte(body))
+	if err != nil {
+		return false, err
+	}
+	return EngineForeground(processes, pane, engine)
+}
+
 func TestEngineForegroundRejectsInvalidEnvelope(t *testing.T) {
 	for _, tc := range []struct{ name, body, engine, reason string }{
-		{"engine", `{}`, "invalid", "engine"},
+		{"engine", `{"type":"pane_process_info","process_info":{"pane_id":"w1:p2","foreground_processes":[]}}`, "invalid", "engine"},
 		{"json", `{"type":`, "cc", "decode"},
-		{"type", `{"type":"future","process_info":{"pane_id":"w1:p2"}}`, "cc", "malformed"},
-		{"identity", `{"type":"pane_process_info","process_info":{"pane_id":"w1:p9"}}`, "cc", "malformed"},
+		{"type", `{"type":"future","process_info":{"pane_id":"w1:p2"}}`, "cc", `result type "future"`},
+		{"identity", `{"type":"pane_process_info","process_info":{"pane_id":"w1:p9","foreground_processes":[]}}`, "cc", "malformed"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := EngineForeground([]byte(tc.body), "w1:p2", pfmengine.ID(tc.engine))
+			_, err := foregroundOf(tc.body, "w1:p2", pfmengine.ID(tc.engine))
 			if err == nil || !strings.Contains(err.Error(), tc.reason) {
 				t.Fatalf("foreground error=%v; want %s", err, tc.reason)
 			}
@@ -37,7 +46,7 @@ func TestEngineForegroundEvidence(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			body := `{"type":"pane_process_info","process_info":{"pane_id":"w6:p3","foreground_processes":` + tc.processes + `}}`
-			got, err := EngineForeground([]byte(body), "w6:p3", pfmengine.Claude)
+			got, err := foregroundOf(body, "w6:p3", pfmengine.Claude)
 			if tc.diagnostic != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.diagnostic) {
 					t.Fatalf("foreground=%t err=%v; want %s", got, err, tc.diagnostic)

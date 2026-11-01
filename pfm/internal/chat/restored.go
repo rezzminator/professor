@@ -526,27 +526,17 @@ func prepareRestoredSeat(
 // restoredCallerAuthority authorizes only the terminal running this explicit
 // restore command, not an arbitrary pane named by inherited environment values.
 func restoredCallerAuthority(ctx context.Context, values paths.Values, socket, pane string) error {
-	body, err := herdr.SeatRequest(ctx, socket, "pane.process_info", map[string]string{nativePaneIDKey: pane})
+	proc := gather.NewProcFS(values.ProcRoot)
+	info, err := gather.HerdrKeep(proc).Read(ctx, socket, pane)
 	if err != nil {
 		return fmt.Errorf("read restored caller shell: %w", err)
 	}
-	var info struct {
-		Type string `json:"type"`
-		Info struct {
-			Pane  string `json:"pane_id"`
-			Shell int    `json:"shell_pid"`
-		} `json:"process_info"`
+	if info.Pane != pane || info.Shell <= 0 {
+		return fmt.Errorf("invalid restored caller shell identity: pane %q shell %d", info.Pane, info.Shell)
 	}
-	if err := json.Unmarshal(body, &info); err != nil {
-		return fmt.Errorf("decode restored caller shell: %w", err)
-	}
-	if info.Type != "pane_process_info" || info.Info.Pane != pane || info.Info.Shell <= 0 {
-		return fmt.Errorf("invalid restored caller shell identity: %s", body)
-	}
-	proc := gather.NewProcFS(values.ProcRoot)
 	seen := map[int]bool{}
 	for pid := os.Getpid(); pid > 1 && !seen[pid]; {
-		if pid == info.Info.Shell {
+		if pid == info.Shell {
 			return nil
 		}
 		seen[pid] = true

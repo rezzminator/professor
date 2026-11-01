@@ -71,3 +71,42 @@ func HerdrWorkspaceReply(method, label, workspace string) (map[string]any, bool)
 	}
 	return nil, false
 }
+
+// HerdrKeepListing is `herdr-keep list --json` holding one running holder h1
+// (pid holderPID, started at holderStart) whose child (pid childPID, started
+// at childStart) runs the shell of pane on socket, which it lists PROTECTED.
+func HerdrKeepListing(holderPID, holderStart, childPID, childStart int, pane, socket string) string {
+	return fmt.Sprintf(
+		`{"enumeration":"OK","error":null,"holders":[{"id":"h1","holder_live":true,"state":"running",`+
+			`"orphan":false,"holder":{"pid":%d,"start":%d},"child":{"pid":%d,"start":%d},`+
+			`"binding":{"pane":%q,"socket":%q}}],"panes":[{"pane_id":%q,"status":"PROTECTED"}]}`,
+		holderPID, holderStart, childPID, childStart, pane, socket, pane,
+	)
+}
+
+// StageHerdrKeep puts a fake herdr-keep first on PATH for the rest of t: its
+// `list --json` prints listing to stdout and exits 0, or with exit nonzero
+// prints listing to stderr and exits exit. Any other argv exits 2. Like
+// herdr-keep's endpoint, it refuses with enumeration ERROR and exit 1 when
+// HERDR_SOCKET_PATH is no absolute path or HERDR_KEEP_INNER is set.
+func StageHerdrKeep(t *testing.T, listing string, exit int) {
+	t.Helper()
+	dir := t.TempDir()
+	stream := ""
+	if exit != 0 {
+		stream = " >&2"
+	}
+	script := fmt.Sprintf(
+		"#!/bin/sh\n[ \"$*\" = \"list --json\" ] || { echo \"unexpected argv: $*\" >&2; exit 2; }\n"+
+			"case \"$HERDR_SOCKET_PATH\" in /*) refusal= ;; *) refusal=\"HERDR_SOCKET_PATH required\" ;; esac\n"+
+			"[ -z \"${HERDR_KEEP_INNER+set}\" ] || refusal=\"recursive keeper invocation refused\"\n"+
+			"[ -z \"$refusal\" ] || { printf '{\"enumeration\":\"ERROR\",\"error\":\"%%s\",\"holders\":[],\"panes\":[]}\\n' \"$refusal\"; "+
+			"echo \"herdr-keep: ERROR: pane enumeration failed; holder list retained\" >&2; exit 1; }\n"+
+			"cat%s <<'PFM_KEEP_LISTING'\n%s\nPFM_KEEP_LISTING\nexit %d\n",
+		stream, listing, exit,
+	)
+	if err := WriteExecutable(filepath.Join(dir, "herdr-keep"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+paths.OSEnv{}.Get("PATH"))
+}

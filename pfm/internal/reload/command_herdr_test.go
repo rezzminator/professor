@@ -53,6 +53,8 @@ type reloadHerdrFixture struct {
 	onRead    func()
 	onExit    func()
 	prompted  string
+	// proc is the process table the run reads (PFM_PROC_ROOT).
+	proc string
 }
 
 func newReloadHerdrFixture(t *testing.T) *reloadHerdrFixture {
@@ -72,6 +74,7 @@ func newReloadHerdrFixture(t *testing.T) *reloadHerdrFixture {
 	socket := filepath.Join(testjail.ShortRoot(t), "h.sock")
 	f := &reloadHerdrFixture{t: t, db: db, text: "❯ ", canonical: "w6:p3", terminal: "reload-terminal"}
 	proc := t.TempDir()
+	f.proc = proc
 	t.Setenv(paths.EnvProcRoot, proc)
 	if err := os.WriteFile(filepath.Join(proc, "stat"), []byte("btime 1000000000\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -268,6 +271,9 @@ func (f *reloadHerdrFixture) respond(method string, p map[string]json.RawMessage
 			}
 		}
 		argv := append([]string{pfmengine.MustLookup(f.request.Engine).Binary}, run.Args...)
+		if f.mode == "kept" {
+			return f.keptProcess(pid, argv)
+		}
 		return f.processResult(
 			[]any{map[string]any{"pid": pid, "name": "versioned-binary", "argv0": argv[0], "argv": argv}},
 		), ""
@@ -400,6 +406,7 @@ func TestRunHerdrLifecycle(t *testing.T) {
 		draft, then      bool
 	}{
 		{name: "model-and-account"},
+		{name: "held-pane", mode: "kept"},
 		{name: "dim-hint", mode: "dim-hint"},
 		{name: "same-text-draft", draft: true},
 		{name: "pending-cleared-before-new-process", mode: "pending-race"},
@@ -420,6 +427,9 @@ func TestRunHerdrLifecycle(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newReloadHerdrFixture(t)
 			f.mode = tc.mode
+			if tc.mode == "kept" {
+				f.holdByKeep()
+			}
 			if tc.mode == "dim-hint" {
 				f.text = "❯ \x1b[2mTry running tests\x1b[0m"
 			}

@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -345,28 +346,24 @@ func TestResultParsersReadHerdrsShapesAndRefuseOthers(t *testing.T) {
 		pane.AgentStatus != "working" || pane.Tokens["t"] != "1" || pane.CWD != "/a" || pane.ForegroundCWD != "/b" {
 		t.Errorf("ParsePanes = %+v, want every PaneInfo field a caller reads", pane)
 	}
-	pids, err := ParseProcessInfo(
-		json.RawMessage(
-			`{"type":"pane_process_info","process_info":{"pane_id":"w1:p1","foreground_processes":[{"pid":4242,"name":"tmux"},{"pid":7,"name":"x"}]}}`,
-		),
-	)
-	if err != nil || len(pids) != 2 || pids[0] != 4242 || pids[1] != 7 {
-		t.Errorf("ParseProcessInfo = %v, %v", pids, err)
-	}
-	empty, err := ParseProcessInfo(
-		json.RawMessage(`{"type":"pane_process_info","process_info":{"foreground_processes":[]}}`),
-	)
-	if err != nil || len(empty) != 0 {
-		t.Errorf("explicit empty foreground = %v, %v", empty, err)
-	}
 	// The shape a live Herdr answered for a plain zsh pane.
-	shellPID, err := ParseShellPID(json.RawMessage(
+	processes, err := ParsePaneProcesses(json.RawMessage(
 		`{"type":"pane_process_info","process_info":{"foreground_process_group_id":51234,"foreground_processes":` +
 			`[{"argv":["-zsh"],"argv0":"-zsh","cmdline":"-zsh","cwd":"/tmp","name":"zsh","pid":51234}],` +
 			`"pane_id":"wD:p2","shell_pid":51234}}`,
 	))
-	if err != nil || shellPID != 51234 {
-		t.Errorf("ParseShellPID = %d, %v, want 51234", shellPID, err)
+	want := PaneProcesses{
+		Pane: "wD:p2", Shell: 51234,
+		Foreground: []Process{{PID: 51234, Name: "zsh", Argv0: "-zsh", Argv: []string{"-zsh"}}},
+	}
+	if err != nil || !reflect.DeepEqual(processes, want) {
+		t.Errorf("ParsePaneProcesses = %+v, %v, want %+v", processes, err, want)
+	}
+	empty, err := ParsePaneProcesses(
+		json.RawMessage(`{"type":"pane_process_info","process_info":{"foreground_processes":[]}}`),
+	)
+	if err != nil || len(empty.Foreground) != 0 || empty.Foreground == nil {
+		t.Errorf("explicit empty foreground = %+v, %v", empty, err)
 	}
 	// The shape a live Herdr answered for the tab of an agent's pane.
 	tab, err := ParseTab(json.RawMessage(
@@ -376,31 +373,32 @@ func TestResultParsersReadHerdrsShapesAndRefuseOthers(t *testing.T) {
 	if err != nil || tab != (Tab{TabID: "w6:t3", Label: "1", PaneCount: 1}) {
 		t.Errorf("ParseTab = %+v, %v, want w6:t3 labelled 1 holding one pane", tab, err)
 	}
+	foregroundPIDs := func(body string) error {
+		processes, err := ParsePaneProcesses(json.RawMessage(body))
+		if err != nil {
+			return err
+		}
+		_, err = processes.PIDs()
+		return err
+	}
 	for name, parse := range map[string]func() error{
 		"tab of another type": func() error {
 			_, err := ParseTab(json.RawMessage(`{"type":"ok","tab":{"tab_id":"w6:t3","label":"1","pane_count":1}}`))
 			return err
 		},
-		"tab garbage":        func() error { _, err := ParseTab(json.RawMessage(`[1]`)); return err },
-		"tab without its id": func() error { _, err := ParseTab(json.RawMessage(`{"type":"tab_info","tab":{}}`)); return err },
-		"shell pid of another type": func() error {
-			_, err := ParseShellPID(json.RawMessage(`{"type":"ok","process_info":{"shell_pid":7}}`))
-			return err
-		},
-		"shell pid garbage":      func() error { _, err := ParseShellPID(json.RawMessage(`[1]`)); return err },
+		"tab garbage":            func() error { _, err := ParseTab(json.RawMessage(`[1]`)); return err },
+		"tab without its id":     func() error { _, err := ParseTab(json.RawMessage(`{"type":"tab_info","tab":{}}`)); return err },
 		"agents of another type": func() error { _, err := ParseAgentList(json.RawMessage(`{"type":"ok"}`)); return err },
 		"panes of another type":  func() error { _, err := ParsePanes(json.RawMessage(`{"type":"agent_list"}`)); return err },
-		"process info garbage":   func() error { _, err := ParseProcessInfo(json.RawMessage(`[1]`)); return err },
+		"process info garbage":   func() error { _, err := ParsePaneProcesses(json.RawMessage(`[1]`)); return err },
 		"missing foreground": func() error {
-			_, err := ParseProcessInfo(json.RawMessage(`{"type":"pane_process_info","process_info":{}}`))
-			return err
+			return foregroundPIDs(`{"type":"pane_process_info","process_info":{}}`)
 		},
 		"null foreground": func() error {
-			_, err := ParseProcessInfo(json.RawMessage(`{"type":"pane_process_info","process_info":{"foreground_processes":null}}`))
-			return err
+			return foregroundPIDs(`{"type":"pane_process_info","process_info":{"foreground_processes":null}}`)
 		},
 		"process info of another type": func() error {
-			_, err := ParseProcessInfo(json.RawMessage(`{"type":"ok","process_info":{"foreground_processes":[{"pid":7,"name":"x"}]}}`))
+			_, err := ParsePaneProcesses(json.RawMessage(`{"type":"ok","process_info":{"foreground_processes":[{"pid":7,"name":"x"}]}}`))
 			return err
 		},
 		"panes without a result": func() error { _, err := ParsePanes(nil); return err },

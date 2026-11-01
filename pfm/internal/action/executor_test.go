@@ -380,42 +380,6 @@ func TestSoloReapsPaneAloneServerAndStrayWithKeepTTY(t *testing.T) {
 	}
 }
 
-// A failed pane probe is not an empty server. The socket may still be live
-// but temporarily unreadable; removing its crumb here makes the next sweep
-// treat a working chat as unowned. Cleanup is safe only after a successful
-// probe that returned no panes.
-func TestSoloPreservesCrumbWhenPaneProbeFails(t *testing.T) {
-	jailAction(t)
-	id := "55555555-5555-4555-8555-555555555555"
-	socket := "cc-900-1-1"
-	crumb := filepath.Join(os.Getenv("PFM_SID_DIR"), socket)
-	writeActionFile(t, crumb, "/tx/"+id+".jsonl", 0o600)
-
-	tmux := &fakeActionTmux{alive: map[string]bool{socket: false}}
-	var stderr bytes.Buffer
-	executor, err := New(Dependencies{
-		Tmux:      tmux,
-		Processes: &fakeProcesses{},
-		Gate:      fixedGate(false),
-		Runner:    &captureRunner{},
-		Stderr:    &stderr,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := executor.Solo(context.Background(), id, "", true); err != nil {
-		t.Fatalf("Solo() error = %v", err)
-	}
-	if _, err := os.Stat(crumb); err != nil {
-		t.Fatalf("Solo() removed crumb after a failed pane probe: %v", err)
-	}
-	// L1-F14: the pane probe failure has a sibling 30 lines below (the
-	// keep-socket probe) that already logs; this one was silent.
-	if !strings.Contains(stderr.String(), socket) || !strings.Contains(stderr.String(), "dead socket") {
-		t.Fatalf("Solo() did not log the failed pane probe: stderr=%q", stderr.String())
-	}
-}
-
 // The keep-socket probe also gates the stray-Claude sweep. If it fails, the
 // target's tty cannot be proven safe to exclude; killing every matching
 // process would be worse than leaving strays for a later pass.

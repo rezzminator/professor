@@ -101,6 +101,43 @@ printf '%s\n' '{"type":"thread.started"}' '{"type":"turn.started"}' '{"type":"it
 	}
 }
 
+// A cache that cannot be read or written costs only the cache: the summary
+// is run and handed back, and both cache failures come back as its Warning.
+func TestSummarizeKeepsTheSummaryPastAnUnusableCache(t *testing.T) {
+	root, database := summaryTestStore(t)
+	transcriptPath := filepath.Join(root, "complete.jsonl")
+	writeSummaryTranscript(t, transcriptPath,
+		`{"type":"user","message":{"role":"user","content":"what changed?"}}`,
+		`{"type":"assistant","message":{"role":"assistant","content":"the cache changed"}}`,
+	)
+	counter := filepath.Join(root, "calls")
+	bin := filepath.Join(root, "bin")
+	writeSummaryStub(t, bin, "claude",
+		"printf x >> \"$ASK_COUNTER\"\nprintf '%s\\n' '{\"result\":\"the cache changed\"}'")
+	t.Setenv("PATH", bin)
+	t.Setenv("ASK_COUNTER", counter)
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	result := Summarize(context.Background(), Chat{Name: "seat", Engine: "cc", Path: transcriptPath}, SummaryOptions{
+		Config: summaryMachine(t, "claude"), Database: database, TempDir: filepath.Join(root, "prepared"),
+	})
+	if result.Text != "the cache changed" || result.Cached {
+		t.Fatalf("summary=%+v, want the fresh summary text", result)
+	}
+	if calls, err := os.ReadFile(counter); err != nil || string(calls) != "x" {
+		t.Fatalf("runner calls=%q err=%v, want one run", calls, err)
+	}
+	if result.Warning == nil {
+		t.Fatal("Warning = nil, want both cache failures")
+	}
+	lines := strings.Split(result.Warning.Error(), "\n")
+	if len(lines) != 2 || !strings.HasPrefix(lines[0], "read summary cache: ") ||
+		!strings.HasPrefix(lines[1], "write summary cache: ") {
+		t.Fatalf("Warning = %q, want a read then a write cache failure", result.Warning)
+	}
+}
+
 func TestSummarizeMarksPartialAndNeverCachesIt(t *testing.T) {
 	root, database := summaryTestStore(t)
 	transcriptPath := filepath.Join(root, "working.jsonl")

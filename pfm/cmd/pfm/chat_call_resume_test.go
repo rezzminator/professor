@@ -2,11 +2,14 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -121,5 +124,55 @@ func writeResumeTranscript(t *testing.T, root, id, excerpt string) {
 `
 	if err := os.WriteFile(filepath.Join(project, id+".jsonl"), []byte(body), 0o600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A dormant chat's append keeps its parent past a torn line and takes the
+// session id from the transcript's name when the tail event carries none.
+func TestAppendResumeCallKeepsTheTailItCanRead(t *testing.T) {
+	const id = "c4000000-4444-4444-8444-444444444444"
+	const parent = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+	for _, testCase := range []struct {
+		name, transcript string
+	}{
+		{
+			name: "torn line before the tail",
+			transcript: `{"type":"user","uuid":"` + parent + `","sessionId":"` + id + `"}` + "\n" +
+				`{"type":"assistant","uuid":` + "\n",
+		},
+		{
+			name:       "tail without a session id",
+			transcript: `{"type":"user","uuid":"` + parent + `"}` + "\n",
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			home := t.TempDir()
+			path := filepath.Join(t.TempDir(), id+".jsonl")
+			if err := os.WriteFile(path, []byte(testCase.transcript), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			receipt, err := appendResumeCall(
+				context.Background(), paths.Values{Home: home}, resumeTarget{ID: id, Path: path},
+				"the delivered message", clock.NewFake(time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)),
+			)
+			if err != nil {
+				t.Fatalf("appendResumeCall(%s) error = %v", path, err)
+			}
+			if receipt.SessionID != id || receipt.ParentID != parent {
+				t.Fatalf("receipt = %+v, want session %s parent %s", receipt, id, parent)
+			}
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			lines := strings.Split(strings.TrimSuffix(string(raw), "\n"), "\n")
+			var appended map[string]any
+			if err := json.Unmarshal([]byte(lines[len(lines)-1]), &appended); err != nil {
+				t.Fatalf("appended line of %s = %q: %v", path, lines[len(lines)-1], err)
+			}
+			if appended["sessionId"] != id || appended["parentUuid"] != parent {
+				t.Fatalf("appended event = %v, want sessionId %s parentUuid %s", appended, id, parent)
+			}
+		})
 	}
 }

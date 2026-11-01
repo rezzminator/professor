@@ -36,6 +36,7 @@ func ClearKill(args []string, stdin io.Reader, stderr io.Writer, runtimes ...con
 		Event     string `json:"hook_event_name"`
 		Reason    string `json:"reason"`
 		SessionID string `json:"session_id"`
+		CWD       string `json:"cwd"`
 	}
 	if err := json.Unmarshal(payload, &hook); err != nil {
 		fmt.Fprintf(stderr, "pfm internal clear-kill: decode hook payload (fail-open): %v\n", err)
@@ -63,8 +64,13 @@ func ClearKill(args []string, stdin io.Reader, stderr io.Writer, runtimes ...con
 		fmt.Fprintf(stderr, "pfm internal clear-kill: resolve fleet session (fail-open): %v\n", err)
 		return 0
 	}
+	cwd := transcript.CWD
 	if !found {
-		return 0
+		// A chat cleared before its first index pass is indexed from its own directory.
+		if hook.CWD == "" {
+			return 0
+		}
+		cwd = hook.CWD
 	}
 	runtime, runtimeErr := config.OptionalRuntime(runtimes)
 	if runtimeErr != nil {
@@ -78,7 +84,7 @@ func ClearKill(args []string, stdin io.Reader, stderr io.Writer, runtimes ...con
 	}
 	if _, err := indexer.Run(
 		ctx,
-		index.Options{PriorityCWD: transcript.CWD, PriorityOnly: filepath.Clean(transcript.CWD) != "."},
+		index.Options{PriorityCWD: cwd, PriorityOnly: filepath.Clean(cwd) != "."},
 	); err != nil {
 		fmt.Fprintf(stderr, "pfm internal clear-kill: refresh transcript baseline (fail-open): %v\n", err)
 		return 0

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -143,14 +144,31 @@ func (pane TabPane) valid() bool {
 	return pane.Pane != "" && pane.Terminal != "" && pane.Workspace != "" && pane.Tab != "" && pane.Focused != nil
 }
 
+// IncompleteTabPanesError names the panes pane.list listed without a full
+// identity. ReadTabPanes returns it beside every complete pane: a caller may
+// paint those, but must not read a skipped pane as gone.
+type IncompleteTabPanesError struct {
+	Skipped []string
+}
+
+func (e *IncompleteTabPanesError) Error() string {
+	quoted := make([]string, len(e.Skipped))
+	for index, pane := range e.Skipped {
+		quoted[index] = strconv.Quote(pane)
+	}
+	return "tab panes: incomplete PaneInfo for " + strings.Join(quoted, ", ")
+}
+
 // ReadTabPanes reads pane.list (ListPanes) and validates its identity fields
-// at data entry.
+// at data entry. An incomplete pane is skipped and named in an
+// IncompleteTabPanesError returned with the complete ones.
 func ReadTabPanes(ctx context.Context, socket string) ([]TabPane, error) {
 	listed, err := ListPanes(ctx, socket)
 	if err != nil {
 		return nil, fmt.Errorf("list tab panes: %w", err)
 	}
 	panes := make([]TabPane, 0, len(listed))
+	var skipped []string
 	for index := range listed {
 		pane := &listed[index]
 		tab := TabPane{
@@ -158,9 +176,13 @@ func ReadTabPanes(ctx context.Context, socket string) ([]TabPane, error) {
 			Focused: pane.Focused, Revision: pane.Revision, Session: pane.AgentSession, State: pane.AgentStatus,
 		}
 		if !tab.valid() {
-			return nil, fmt.Errorf("tab panes: incomplete PaneInfo for %q", tab.Pane)
+			skipped = append(skipped, tab.Pane)
+			continue
 		}
 		panes = append(panes, tab)
+	}
+	if len(skipped) > 0 {
+		return panes, &IncompleteTabPanesError{Skipped: skipped}
 	}
 	return panes, nil
 }

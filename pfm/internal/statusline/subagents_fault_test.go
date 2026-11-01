@@ -97,19 +97,32 @@ func TestServeSubagentsShowsAFaultOnEveryRow(t *testing.T) {
 	cases := []struct {
 		name    string
 		input   io.Reader
-		rows    []string
+		rows    []string // the rows that show the fault
+		ok      []string // the rows that render whole beside them
 		logged  string
 		inError string
 	}{
 		{
 			"torn payload", strings.NewReader(`{"tasks":[` + rowA + `,` + rowB),
 			[]string{"t1", "t2"},
+			nil,
 			"--subagents: render (rows show the error)", "pfm statusline: parse subagent row context",
 		},
 		{
-			"wrong field type", strings.NewReader(`{"tasks":[{"id":"t1","tokenCount":"many"},` + rowB + `]}`),
+			"wrong field type faults only its task",
+			strings.NewReader(`{"tasks":[{"id":"t1","tokenCount":"many"},` + rowB + `]}`),
+			[]string{"t1"},
+			[]string{"t2"},
+			"--subagents: row t1 (shows the error): json: cannot unmarshal string into Go struct field plain.tokenCount of type int64",
+			"pfm statusline: json: cannot unmarshal string into Go struct field plain.tokenCount of type int64",
+		},
+		{
+			"negative counters read as unknown",
+			strings.NewReader(`{"tasks":[{"id":"t1","tokenCount":-1,"contextWindowSize":-5},` + rowB + `]}`),
+			nil,
 			[]string{"t1", "t2"},
-			"--subagents: render (rows show the error)", "pfm statusline: parse subagent row context",
+			"--subagents: row t1: negative context counters (shown as ?)",
+			"",
 		},
 		{
 			"read error", &failingReader{
@@ -117,16 +130,18 @@ func TestServeSubagentsShowsAFaultOnEveryRow(t *testing.T) {
 				err:  errors.New("pipe broke"),
 			},
 			[]string{"t1", "t2"},
+			nil,
 			"--subagents: input (rows show the error)", "pfm statusline: read input: pipe broke",
 		},
 		{
 			"input past the cap", strings.NewReader(overflow),
 			[]string{"t1", "t2"},
+			nil,
 			"--subagents: input (rows show the error)", "pfm statusline: read input: over 16 MiB",
 		},
 		{
 			"empty input has no row to show it on", strings.NewReader(""),
-			nil,
+			nil, nil,
 			"--subagents: render (fail-open): no task id to show it on: parse subagent row context", "",
 		},
 	}
@@ -151,12 +166,17 @@ func TestServeSubagentsShowsAFaultOnEveryRow(t *testing.T) {
 				}
 				rows[row.ID] = row.Content
 			}
-			if len(rows) != len(tc.rows) {
-				t.Fatalf("rows=%v, want exactly the ids %v", rows, tc.rows)
+			if len(rows) != len(tc.rows)+len(tc.ok) {
+				t.Fatalf("rows=%v, want exactly the ids %v and %v", rows, tc.rows, tc.ok)
 			}
 			for _, id := range tc.rows {
 				if !strings.Contains(rows[id], tc.inError) {
 					t.Fatalf("row %s=%q, want %q", id, rows[id], tc.inError)
+				}
+			}
+			for _, id := range tc.ok {
+				if rows[id] == "" || strings.Contains(rows[id], "pfm statusline:") {
+					t.Fatalf("row %s=%q, want a whole row beside the fault", id, rows[id])
 				}
 			}
 		})

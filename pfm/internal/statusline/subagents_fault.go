@@ -43,7 +43,7 @@ func failSubagents(stage string, raw []byte, cause error, stdout, stderr io.Writ
 	var out bytes.Buffer
 	encoder := json.NewEncoder(&out)
 	encoder.SetEscapeHTML(false)
-	content := rowOpen + cBad + "pfm statusline: " + strings.Join(strings.Fields(cause.Error()), " ") + reset
+	content := faultRowContent(cause)
 	for _, id := range ids {
 		if err := encoder.Encode(subagentRow{ID: id, Content: content}); err != nil {
 			fmt.Fprintf(stderr, "pfm statusline --subagents: encode error row %s: %v\n", id, err)
@@ -54,6 +54,11 @@ func failSubagents(stage string, raw []byte, cause error, stdout, stderr io.Writ
 		fmt.Fprintf(stderr, "pfm statusline --subagents: write output (fail-open): %v\n", err)
 	}
 	return 0
+}
+
+// faultRowContent is the row body that shows a fault: red, on one line.
+func faultRowContent(cause error) string {
+	return rowOpen + cBad + "pfm statusline: " + strings.Join(strings.Fields(cause.Error()), " ") + reset
 }
 
 // subagentTaskIDs lists the task ids raw holds, in order, once each, reading

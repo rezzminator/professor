@@ -57,9 +57,12 @@ func inspectRetiredStoreLink(store, base, path string) (string, bool, error) {
 // retireStoreEntries migrates every retired entry: each account's link into
 // the store goes first, so no account is left dangling, then the store copy
 // moves into the archive. A real account file is the account's own and stays.
+// An account that cannot be read or unlinked keeps that entry's store copy,
+// named, and costs no other account or entry.
 func (installer *engine) retireStoreEntries() error {
 	store := installer.options.ConfigDir
 	report := InspectClaudeStore(store, installer.options.ClaudeAccounts)
+	var failed error
 	for _, name := range RetiredStoreEntries {
 		keep := ""
 		if len(installer.options.ClaudeAccounts) == 0 {
@@ -71,7 +74,8 @@ func (installer *engine) retireStoreEntries() error {
 				keep = fmt.Sprintf("account %d %s resolves to the store", account.ID, account.Dir)
 				continue
 			case stateUnreadable:
-				return fmt.Errorf("inspect account %d %s: %w", account.ID, account.Dir, account.Err)
+				keep = fmt.Sprintf("account %d %s unreadable: %v", account.ID, account.Dir, account.Err)
+				continue
 			case string(HostOverlayMissing):
 				continue
 			}
@@ -101,14 +105,13 @@ func (installer *engine) retireStoreEntries() error {
 				return nil
 			}()
 			if accountErr != nil {
-				return accountErr
+				keep = fmt.Sprintf("account %d %s: %v", account.ID, account.Dir, accountErr)
+				failed = errors.Join(failed, accountErr)
 			}
 		}
-		if err := installer.archiveRetiredStoreEntry(filepath.Join(store, name), keep); err != nil {
-			return err
-		}
+		failed = errors.Join(failed, installer.archiveRetiredStoreEntry(filepath.Join(store, name), keep))
 	}
-	return nil
+	return failed
 }
 
 // archiveRetiredStoreEntry moves a retired entry's store copy into the

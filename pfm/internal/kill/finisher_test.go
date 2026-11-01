@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -206,6 +207,55 @@ func TestReapTeammatesRetainsFailedChildren(t *testing.T) {
 				t.Errorf("detached socket stat = %v; gone=%v", statErr, gone)
 			}
 		})
+	}
+}
+
+// An unreadable children table never hides a chat's flat-file teammates: they
+// are reaped, their registrations kept for the retry the table's failure
+// forces, and that failure returned beside them.
+func TestReapTeammatesReadsTheFlatFileWhenTheTableIsUnreadable(t *testing.T) {
+	jail := newKillJail(t)
+	database := jail.open(t)
+	ctx := context.Background()
+	tmux := &fakeTmux{}
+	finisher, err := NewFinisher(database, Dependencies{Tmux: tmux, Screen: tmux})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const id = "parent"
+	registrations := map[string]string{fleetdb.KindNew: "cc-legacy", fleetdb.KindPane: "shared\t%7"}
+	for kind, value := range registrations {
+		flat := filepath.Join(jail.home, ".claude", ".cc-"+kind+"-children", id)
+		if err := os.MkdirAll(filepath.Dir(flat), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(flat, []byte(value+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	err = finisher.reapTeammates(ctx, id)
+	const closed = "sql: database is closed"
+	want := "read new children of parent: query shared children: " + closed + "\n" +
+		`reaped new child "cc-legacy" of parent; its registration stays: clear shared new child "cc-legacy" of parent: ` +
+		closed + "\n" +
+		"read pane children of parent: query shared children: " + closed + "\n" +
+		`reaped pane child "shared\t%7" of parent; its registration stays: clear shared pane child "shared\t%7" of parent: ` +
+		closed
+	if got := fmt.Sprint(err); got != want {
+		t.Errorf("reap error = %q, want %q", got, want)
+	}
+	if got, want := fmt.Sprint(tmux.killedServers, tmux.killedPanes), "[cc-legacy] [shared\t%7]"; got != want {
+		t.Errorf("reaped servers and panes = %q, want %q", got, want)
+	}
+	for kind, value := range registrations {
+		flat := filepath.Join(jail.home, ".claude", ".cc-"+kind+"-children", id)
+		if contents, err := os.ReadFile(flat); err != nil || string(contents) != value+"\n" {
+			t.Errorf("%s flat registrations = %q, %v; want %q kept", kind, contents, err, value+"\n")
+		}
 	}
 }
 

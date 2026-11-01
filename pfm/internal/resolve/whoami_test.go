@@ -492,6 +492,105 @@ func TestIdentifyDistinguishesMissingTmuxServerFromReadFailure(t *testing.T) {
 	}
 }
 
+// ownersBySocket plays CommandPaneOwners per socket base name. vanish names a
+// sibling entry the call removes, a server ending mid-scan.
+type ownersBySocket map[string]struct {
+	owners []PaneOwner
+	err    error
+	vanish string
+}
+
+func (fake ownersBySocket) PaneOwners(_ context.Context, socketPath string) ([]PaneOwner, error) {
+	answer := fake[filepath.Base(socketPath)]
+	if answer.vanish != "" {
+		if err := os.Remove(filepath.Join(filepath.Dir(socketPath), answer.vanish)); err != nil {
+			return nil, err
+		}
+	}
+	for index := range answer.owners {
+		answer.owners[index].SocketPath = socketPath
+	}
+	return answer.owners, answer.err
+}
+
+// namerAt answers one pane's session and pid.
+type namerAt struct{ session string }
+
+func (namer namerAt) SessionPane(context.Context, string, string) (string, int, error) {
+	return namer.session, 4300, nil
+}
+
+// A tmux server whose panes cannot be read costs only itself: another server
+// still proves the caller, and with no proof the read failure answers, never
+// a plain not-in-chat.
+func TestIdentifyRecoversPastAnUnreadableTmuxServer(t *testing.T) {
+	failure := errors.New("permission denied")
+	for _, test := range []struct {
+		name     string
+		owners   ownersBySocket
+		wantPane string
+	}{
+		{
+			name: "another server proves the caller",
+			owners: ownersBySocket{
+				"cc-1-1-1": {err: failure},
+				"cc-2-2-2": {owners: []PaneOwner{{PaneID: "%3", PanePID: 4300}}},
+			},
+			wantPane: "%3",
+		},
+		{
+			name: "a server ends between the listing and its stat",
+			owners: ownersBySocket{
+				"cc-1-1-1": {vanish: "cc-1-1-2"},
+				"cc-2-2-2": {owners: []PaneOwner{{PaneID: "%3", PanePID: 4300}}},
+			},
+			wantPane: "%3",
+		},
+		{
+			name:   "no server proves the caller",
+			owners: ownersBySocket{"cc-1-1-1": {err: failure}, "cc-2-2-2": {}},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			tmuxDir := testjail.ShortRoot(t)
+			for _, name := range []string{"cc-1-1-1", "cc-2-2-2"} {
+				listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: filepath.Join(tmuxDir, name), Net: "unix"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = listener.Close() })
+			}
+			// The entry a server removes mid-scan; listed, gone by its stat.
+			if err := os.WriteFile(filepath.Join(tmuxDir, "cc-1-1-2"), nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			identifier, err := NewWhoami(WhoamiDependencies{
+				Environment: &WhoamiEnvironment{},
+				Namer:       namerAt{session: "mysession"},
+				Owners:      test.owners,
+				Processes:   fakeProcTree{parents: map[int]int{4300: 1}},
+				SelfPID:     4300, TmuxDir: tmuxDir,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			identity, err := identifier.Identify(context.Background())
+			if test.wantPane != "" {
+				if err != nil || identity.Pane != test.wantPane || identity.Session != "mysession" ||
+					identity.SocketName != "cc-2-2-2" {
+					t.Fatalf("Identify() = %+v, %v; want pane %s on cc-2-2-2", identity, err, test.wantPane)
+				}
+				return
+			}
+			want := "look up the caller: read tmux panes on " + filepath.Join(tmuxDir, "cc-1-1-1") +
+				": permission denied"
+			if err == nil || err.Error() != want || !errors.Is(err, failure) || errors.Is(err, ErrNotInChat) {
+				t.Fatalf("Identify() error = %v, want %q", err, want)
+			}
+		})
+	}
+}
+
 type environmentDeniedTree struct{ fakeProcTree }
 
 func (environmentDeniedTree) Environ(int) (map[string]string, error) {

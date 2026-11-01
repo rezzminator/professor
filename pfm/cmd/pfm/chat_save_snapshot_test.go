@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"strings"
 	"testing"
 
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
@@ -64,20 +63,41 @@ func TestWriteRepositorySnapshotReportsWhyNoSnapshotWasTaken(t *testing.T) {
 	}
 }
 
-func TestWriteRepositorySnapshotRendersBranchStatusAndWorktrees(t *testing.T) {
+func TestWriteRepositorySnapshotRendersEachPartItCouldRead(t *testing.T) {
 	git := deps.Executable("git")
-	runner := &deps.FakeRunner{}
-	runner.Script([]string{git, "rev-parse", "--is-inside-work-tree"}, deps.RunResult{ExitCode: 0}, nil)
-	runner.Script([]string{git, branchAction, "--show-current"}, deps.RunResult{Stdout: []byte("wave/testing\n")}, nil)
-	runner.Script([]string{git, "status", "--short"}, deps.RunResult{Stdout: []byte(" M cmd/pfm/x.go\n")}, nil)
-	runner.Script([]string{git, "worktree", "list"}, deps.RunResult{Stdout: []byte("/repo  abc123 [main]\n")}, nil)
-	var buf bytes.Buffer
-	writeRepositorySnapshot(context.Background(), &buf, runner)
-	got := buf.String()
-	if !strings.Contains(got, "Branch: wave/testing") ||
-		!strings.Contains(got, " M cmd/pfm/x.go") ||
-		!strings.Contains(got, "/repo  abc123 [main]") {
-		t.Fatalf("writeRepositorySnapshot() = %q, want branch/status/worktrees rendered", got)
+	tests := []struct {
+		name   string
+		status deps.RunResult
+		want   string
+	}{
+		{
+			name:   "every part read",
+			status: deps.RunResult{Stdout: []byte(" M cmd/pfm/x.go\n")},
+			want: "Branch: wave/testing\n\n```\n M cmd/pfm/x.go\n```\n\n" +
+				"Worktrees:\n```\n/repo  abc123 [main]\n```\n",
+		},
+		{
+			name:   "status failed",
+			status: deps.RunResult{ExitCode: 128},
+			want: "Branch: wave/testing\n\n```\n(failed: exit status 128)\n```\n\n" +
+				"Worktrees:\n```\n/repo  abc123 [main]\n```\n",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := &deps.FakeRunner{}
+			runner.Script([]string{git, "rev-parse", "--is-inside-work-tree"}, deps.RunResult{ExitCode: 0}, nil)
+			branch := deps.RunResult{Stdout: []byte("wave/testing\n")}
+			runner.Script([]string{git, branchAction, "--show-current"}, branch, nil)
+			runner.Script([]string{git, "status", "--short"}, tc.status, nil)
+			worktrees := deps.RunResult{Stdout: []byte("/repo  abc123 [main]\n")}
+			runner.Script([]string{git, "worktree", "list"}, worktrees, nil)
+			var buf bytes.Buffer
+			writeRepositorySnapshot(context.Background(), &buf, runner)
+			if got := buf.String(); got != tc.want {
+				t.Fatalf("writeRepositorySnapshot() = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 

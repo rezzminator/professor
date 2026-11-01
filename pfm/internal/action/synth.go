@@ -395,7 +395,7 @@ func Synthesize(request Request) (Plan, error) {
 		if request.Row.Socket == "" {
 			return Plan{}, errors.New("live action requires a socket")
 		}
-		plan.Line = attachLine(
+		plan.Line = AttachLine(
 			request.Row.Socket,
 			liveTarget(request.Row),
 			request.Bunker,
@@ -756,11 +756,12 @@ func onChatServer(plan Plan, request Request, machine pfmconfig.Config, engine p
 		Run:    plan.Run,
 		Titles: &titles,
 	}
-	plan.Line = attachLine(request.FreshSocket, request.FreshSocket, request.Bunker)
+	plan.Line = AttachLine(request.FreshSocket, request.FreshSocket, request.Bunker)
 	return plan
 }
 
-func attachLine(socket, target string, bunker bool) string {
+// AttachLine is the one shell line that attaches a terminal to a tmux session.
+func AttachLine(socket, target string, bunker bool) string {
 	prefix := "TMUX= "
 	if bunker {
 		prefix += "exec "

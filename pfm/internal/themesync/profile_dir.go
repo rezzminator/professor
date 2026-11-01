@@ -34,7 +34,7 @@ const (
 // profileMeta is theme.json. VSCodeSemanticHighlighting is
 // surfaces.vscode.theme.semanticHighlighting, omitted when unset.
 type profileMeta struct {
-	Name                       string `json:"name"`
+	Name                       string `json:"name,omitempty"`
 	Base                       string `json:"base,omitempty"`
 	VSCodeSemanticHighlighting *bool  `json:"vscodeSemanticHighlighting,omitempty"`
 }
@@ -176,9 +176,6 @@ func assembleParts(files map[string][]byte) (Profile, error) {
 	var meta profileMeta
 	if err := decodeProfilePart(files[profileThemeFile], &meta); err != nil {
 		return Profile{}, fmt.Errorf("%s: %w", profileThemeFile, err)
-	}
-	if meta.Name == "" {
-		return Profile{}, fmt.Errorf("%s: no name", profileThemeFile)
 	}
 	if err := validatePalette(Profile{Base: meta.Base}); err != nil {
 		return Profile{}, fmt.Errorf("%s: %w", profileThemeFile, err)

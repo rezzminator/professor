@@ -170,14 +170,32 @@ func TestCodexLaunchRunsTheChatInProcess(t *testing.T) {
 	previous := LaunchExec
 	t.Cleanup(func() { LaunchExec = previous })
 	for _, test := range []struct {
-		name string
-		args []string
-		want []string
+		name       string
+		args       []string
+		want       []string
+		primary    string
+		wantStderr string
 	}{
-		{"resume", []string{"resume", "--last"}, []string{binary, "--no-daemon", "resume", "--last"}},
-		{"the user's remote", []string{"--remote", "ws://h:1"}, []string{binary, "--remote", "ws://h:1"}},
+		{"resume", []string{"resume", "--last"}, []string{binary, "--no-daemon", "resume", "--last"}, "", ""},
+		{"the user's remote", []string{"--remote", "ws://h:1"}, []string{binary, "--remote", "ws://h:1"}, "", ""},
+		{
+			"an unreadable primary account launches on the implicit one",
+			[]string{"resume", "--last"},
+			[]string{binary, "--no-daemon", "resume", "--last"},
+			"garbage",
+			"pfm: primary account unreadable (read primary account: parse primary account mirror: " +
+				`strconv.Atoi: parsing "garbage": invalid syntax); launching on account 1` + "\n",
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			mirror := filepath.Join(root, ".claude-primary")
+			if test.primary == "" {
+				if err := os.Remove(mirror); err != nil && !os.IsNotExist(err) {
+					t.Fatal(err)
+				}
+			} else if err := os.WriteFile(mirror, []byte(test.primary), 0o600); err != nil {
+				t.Fatal(err)
+			}
 			var gotArgv []string
 			LaunchExec = func(_ string, argv, _ []string) error {
 				gotArgv = append([]string(nil), argv...)
@@ -195,6 +213,9 @@ func TestCodexLaunchRunsTheChatInProcess(t *testing.T) {
 			}
 			if !slices.Equal(gotArgv, test.want) {
 				t.Fatalf("CodexLaunch(%q) exec argv = %q, want %q", test.args, gotArgv, test.want)
+			}
+			if stderr.String() != test.wantStderr {
+				t.Fatalf("CodexLaunch(%q) stderr = %q, want %q", test.args, stderr.String(), test.wantStderr)
 			}
 		})
 	}

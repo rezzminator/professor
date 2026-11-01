@@ -196,7 +196,6 @@ func TestAnUnreadableProfileIsASourceErrorNamingTheFile(t *testing.T) {
 	}{
 		{"not json", writeFileAt(`{not json`), "parse profile"},
 		{"unknown top-level key", writeFileAt(`{"name":"x","overrides":{},"colours":{}}`), `"colours"`},
-		{"unknown pin key", writeFileAt(profileJSON(`{"tmux":{"@nope":"#ffffff"}}`)), "@nope"},
 		{"bad pin colour", writeFileAt(profileJSON(`{"herdr":{"accent":"purple"}}`)), "purple"},
 		{"a directory", func(t *testing.T, path string) {
 			t.Helper()
@@ -229,6 +228,21 @@ func TestAnUnreadableProfileIsASourceErrorNamingTheFile(t *testing.T) {
 				t.Error("a surface was written under a profile that could not be read")
 			}
 		})
+	}
+}
+
+// A pin for a key no renderer emits (one a renderer dropped since the profile was
+// installed) costs only itself: the run goes on, every other pin lands, and the
+// claude row names what it dropped.
+func TestAPinForAKeyNoRendererEmitsIsDroppedAndTheRunGoesOn(t *testing.T) {
+	h := newHarness(t)
+	path := ProfilePath(h.home, tokyoNightName)
+	writeFileAt(profileJSON(`{"tmux":{"@nope":"#ffffff","@host_accent":"#ff2e93"}}`))(t, path)
+	report := h.on()
+	wantVerdict(t, report, "claude", VerdictSource,
+		"profile "+path+`: tmux pin "@nope": tmux renders no such key (dropped)`)
+	if got := h.tmux.servers["cc-a"]["@host_accent"]; got != "#ff2e93" {
+		t.Errorf("@host_accent = %q, want the pin kept beside the dropped one", got)
 	}
 }
 
@@ -342,12 +356,15 @@ func TestParseProfileIsStrictAndChecksItsPins(t *testing.T) {
 	if err != nil || palette.Surfaces != nil {
 		t.Errorf("a palette-only profile = %+v, %v, want no pins", palette, err)
 	}
+	unnamed, err := ParseProfile([]byte(`{"overrides":{}}`))
+	if err != nil || unnamed.Name != "" {
+		t.Errorf("an unnamed profile = %+v, %v, want it read with no name", unnamed, err)
+	}
 	for name, tc := range map[string]struct{ content, want string }{
 		"not json":             {`{not json`, "parse profile"},
 		"unknown top-level":    {`{"name":"x","overrides":{},"extra":1}`, `"extra"`},
 		"unknown nested":       {`{"name":"x","overrides":{},"surfaces":{"vscode":{"colours":{}}}}`, `"colours"`},
 		"trailing data":        {`{"name":"x","overrides":{}} {}`, "data after"},
-		"no name":              {`{"overrides":{}}`, "no name"},
 		"unknown tmux pin":     {`{"name":"x","overrides":{},"surfaces":{"tmux":{"@nope":"#fff"}}}`, "@nope"},
 		"bad herdr pin colour": {`{"name":"x","overrides":{},"surfaces":{"herdr":{"accent":"purple"}}}`, "purple"},
 		"unknown claude token": {`{"name":"x","overrides":{"claude":"#fff","promptBordr":"#fff"}}`, `overrides "promptBordr": not a Claude Code theme token`},

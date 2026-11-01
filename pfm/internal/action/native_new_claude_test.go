@@ -95,7 +95,7 @@ func TestNewClaudeUsesNativeConfiguredSpawn(t *testing.T) {
 	if strings.Contains(plan.Run, "skip-permissions") {
 		t.Fatalf("prompted account received autonomy bypass: %q", plan.Run)
 	}
-	if got, want := plan.Line, attachLine(request.FreshSocket, request.FreshSocket, true); got != want {
+	if got, want := plan.Line, AttachLine(request.FreshSocket, request.FreshSocket, true); got != want {
 		t.Fatalf("native fresh line = %q, want bunker attach line %q", got, want)
 	}
 	if plan.ChatServer == nil || plan.ChatServer.Run != plan.Run || plan.ChatServer.CWD != request.Row.CWD {

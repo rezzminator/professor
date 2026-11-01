@@ -42,6 +42,11 @@ func TestRetireDeadRegistryLinks(t *testing.T) {
 				if err := os.Symlink(live, filepath.Join(assertRoot, "live.md")); err != nil {
 					t.Fatal(err)
 				}
+				// A link whose target cannot be stated costs only itself.
+				loop := filepath.Join(repo, "templates", "global", "commands", "loop.md")
+				unreadable := filepath.Join(assertRoot, "aaa.md")
+				symlinkFixture(t, loop, loop)
+				symlinkFixture(t, loop, unreadable)
 				var output bytes.Buffer
 				installer := &engine{
 					options:     Options{Home: home, ConfigDir: store, Stdout: &output},
@@ -51,7 +56,9 @@ func TestRetireDeadRegistryLinks(t *testing.T) {
 				if err := installer.retireDeadRegistryLinks(); err != nil {
 					t.Fatal(err)
 				}
-				want := "  change  retire " + link + " (dead pfm link -> " + target + ")\n"
+				want := "  skip    registry-ownership entry left alone: inspect registry link " + unreadable +
+					" target " + loop + ": stat " + loop + ": too many levels of symbolic links\n" +
+					"  change  retire " + link + " (dead pfm link -> " + target + ")\n"
 				if output.String() != want {
 					t.Fatalf("transcript=%q, want %q", output.String(), want)
 				}
@@ -198,7 +205,7 @@ func TestRegistryDeadLinkResilience(t *testing.T) {
 				agentsLink := filepath.Join(home, ".agents", "skills", "fetched")
 				symlinkFixture(t, fetched, agentsLink)
 				t.Cleanup(func() { assertLink(t, agentsLink, fetched) })
-				_, _, sourcesErr := loadSkillSources(clone, "")
+				_, _, _, sourcesErr := loadSkillSources(clone, "")
 				want = "  skip    registry-ownership check skipped: " + errPlanSkillSources.Error() + ": " +
 					sourcesErr.Error() + "\n"
 			}

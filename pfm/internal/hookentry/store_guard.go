@@ -73,12 +73,8 @@ func StoreGuard(input io.Reader, stdout, stderr io.Writer) int {
 	if dir, ok := storeGuardResolve(storeGuardGet(storeGuardEnv), home, ""); ok && storeGuardInStore(store, dir) {
 		return 0
 	}
-	cwd := hook.Cwd
-	if !filepath.IsAbs(cwd) {
-		cwd = string(filepath.Separator)
-	}
 	parsed, err := cmdparse.ParseBatch([]cmdparse.Call{{
-		ID: "store-guard", Command: command, Cwd: cwd, Vars: map[string]string{"HOME": home},
+		ID: "store-guard", Command: command, Vars: map[string]string{"HOME": home},
 	}})
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm internal store-guard: parse command (fail-open): %v\n", err)

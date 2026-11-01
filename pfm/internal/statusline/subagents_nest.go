@@ -17,9 +17,9 @@ import (
 // agentNesting is what a row says about the agents below its task, at every
 // depth: how many there are, how many are working right now (Claude Code
 // still lists them as running and their own turn is open), and how many could
-// not be read. err is a failure to look (the
-// subagents directory or a meta file could not be read) and renders "?/?",
-// never as "none".
+// not be read, an agent whose meta file could not be read included (its parent
+// is unknown, so it may sit below the task). err is a failure to look (the
+// subagents directory could not be listed) and renders "?/?", never as "none".
 type agentNesting struct {
 	total   int
 	active  int
@@ -39,15 +39,18 @@ type agentTree struct {
 	children map[string][]string
 	err      error
 	warnings []string
-	open     map[string]turnState
-	reads    map[string]*agentActivity
-	warned   map[string]bool
-	session  string
-	prices   *pricing.Prices
-	scans    transcriptScans
-	ids      []string
-	live     map[string]bool
-	now      time.Time
+	// unreadMeta are the agents whose meta file could not be read: their parent
+	// is unknown, every other edge stands.
+	unreadMeta []string
+	open       map[string]turnState
+	reads      map[string]*agentActivity
+	warned     map[string]bool
+	session    string
+	prices     *pricing.Prices
+	scans      transcriptScans
+	ids        []string
+	live       map[string]bool
+	now        time.Time
 }
 
 type turnState int
@@ -66,9 +69,9 @@ const (
 const agentDeadAfter = 15 * time.Minute
 
 // scanAgentTree reads every agent-<id>.meta.json beside the session's
-// transcript once per render. A directory that cannot be listed, or any meta
-// file that cannot be read, sets err: the parent of that agent is unknown, so
-// no row may claim a count it cannot vouch for.
+// transcript once per render. A directory that cannot be listed sets err: no
+// row may claim a count it cannot vouch for. A meta file that cannot be read
+// costs only that agent's parent (unreadMeta) and warns; every other edge stands.
 func scanAgentTree(sessionTranscript string, prices *pricing.Prices, scans transcriptScans) *agentTree {
 	tree := &agentTree{
 		children: map[string][]string{}, open: map[string]turnState{}, reads: map[string]*agentActivity{},
@@ -94,8 +97,8 @@ func scanAgentTree(sessionTranscript string, prices *pricing.Prices, scans trans
 		tree.ids = append(tree.ids, id)
 		meta, err := transcript.ReadSubagentMeta(filepath.Join(tree.dir, name))
 		if err != nil {
-			tree.err = err
-			tree.warnings = append(tree.warnings, tree.err.Error())
+			tree.unreadMeta = append(tree.unreadMeta, id)
+			tree.warnings = append(tree.warnings, err.Error())
 			continue
 		}
 		if parent := strings.TrimSpace(meta.ParentAgentID); parent != "" && parent != id {
@@ -167,6 +170,7 @@ func (tree *agentTree) nesting(id string) agentNesting {
 			nest.unknown++
 		}
 	}
+	nest.unknown += len(tree.unreadMeta)
 	return nest
 }
 
@@ -401,7 +405,7 @@ func nestingSegment(nest agentNesting) string {
 	if nest.err != nil {
 		return cWarn + "?/?" + reset
 	}
-	if nest.total == 0 {
+	if nest.total == 0 && nest.unknown == 0 {
 		return ""
 	}
 	working := cRunning + strconv.Itoa(nest.active) + reset

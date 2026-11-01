@@ -57,9 +57,12 @@ type RegistryScan struct {
 type RegistryFinding struct{ Class, Path, Target, Name string }
 
 // RegistryOwnership is the scan's result: what it lists and what it covered.
+// Unreadable holds each entry the scan could not judge; the scan's error joins
+// them, and the installer's sweep alone carries on past them.
 type RegistryOwnership struct {
 	Findings            []RegistryFinding
 	Entries, Registries int
+	Unreadable          []error
 }
 
 // errPlanSkillSources marks a plan that failed on the source-fetched skills
@@ -118,7 +121,7 @@ func PlanRegistryLinks(home, store, clone, releaseURL string) (RegistryPlan, err
 		plan.Links[filepath.Join(store, globalSkillsRegistry, entry.Name())] = true
 		plan.Links[filepath.Join(home, ".agents", globalSkillsRegistry, entry.Name())] = true
 	}
-	sources, _, err := loadSkillSources(clone, releaseURL)
+	sources, _, _, err := loadSkillSources(clone, releaseURL)
 	if err != nil {
 		return RegistryPlan{}, fmt.Errorf("%w: %w", errPlanSkillSources, err)
 	}
@@ -169,8 +172,10 @@ func ScanRegistryOwnership(home, store string, retired RetiredRegistryNames) (Re
 // registries ({store}/agents, {store}/commands, {store}/rules, {store}/skills,
 // ~/.agents/skills) and lists the unmarked entries named for a retired name.
 // A link outside the owned roots and any other unmarked entry is never listed.
-// WalkDir never follows a symlink into an operator's directory. A walk, read
-// or stat error returns the error, never a shorter list.
+// WalkDir never follows a symlink into an operator's directory. A registry it
+// cannot walk returns an empty result and the error; an entry it cannot read,
+// link or stat is listed in Unreadable and joined into the error, never a
+// shorter list read as complete.
 func InspectRegistryOwnership(scan RegistryScan) (RegistryOwnership, error) {
 	var result RegistryOwnership
 	for _, registry := range []struct{ path, kind string }{
@@ -184,7 +189,7 @@ func InspectRegistryOwnership(scan RegistryScan) (RegistryOwnership, error) {
 			return RegistryOwnership{}, err
 		}
 	}
-	return result, nil
+	return result, errors.Join(result.Unreadable...)
 }
 
 func (scan RegistryScan) walk(result *RegistryOwnership, registry, kind string) error {
@@ -193,7 +198,12 @@ func (scan RegistryScan) walk(result *RegistryOwnership, registry, kind string) 
 			return nil
 		}
 		if walkErr != nil {
-			return fmt.Errorf("inspect registry path %s: %w", path, walkErr)
+			err := fmt.Errorf("inspect registry path %s: %w", path, walkErr)
+			if path == registry {
+				return err
+			}
+			result.Unreadable = append(result.Unreadable, err)
+			return nil
 		}
 		isLink := entry.Type()&os.ModeSymlink != 0
 		if path == registry {
@@ -213,10 +223,21 @@ func (scan RegistryScan) walk(result *RegistryOwnership, registry, kind string) 
 			return nil
 		}
 		result.Entries++
+		var err error
 		if isLink {
-			return scan.link(result, path, kind, false)
+			err = scan.link(result, path, kind, false)
+		} else {
+			err = scan.regular(result, registry, path, kind, entry)
 		}
-		return scan.regular(result, registry, path, kind, entry)
+		if err == nil || errors.Is(err, fs.SkipDir) {
+			return err
+		}
+		// One entry the scan cannot judge costs only that entry.
+		result.Unreadable = append(result.Unreadable, err)
+		if entry.IsDir() {
+			return fs.SkipDir
+		}
+		return nil
 	})
 }
 

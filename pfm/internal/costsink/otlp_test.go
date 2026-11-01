@@ -67,6 +67,32 @@ func TestDecodeReadsInt64FieldsAsNumbersOrStrings(t *testing.T) {
 	}
 }
 
+// A token attribute that is present but no number reads 0 and is named: it is not a real zero.
+// An absent one reads 0 and is not named, the exporter having sent none.
+func TestDecodeNamesATokenCountThatIsPresentButNotANumber(t *testing.T) {
+	attrs := withoutKey(apiRequest(testSession, "req_1", "repl_main_thread", 5), "cache_read_tokens")
+	for i, a := range attrs {
+		if a["key"] == "output_tokens" {
+			attrs[i] = str("output_tokens", "many")
+		}
+	}
+	halves, err := DecodeLogs(logBody(attrs))
+	if err != nil || len(halves) != 1 {
+		t.Fatalf("DecodeLogs = %v, %v", halves, err)
+	}
+	if got := halves[0]; got.OutputTokens != 0 || got.CacheReadTokens != 0 || got.InputTokens != 2 ||
+		got.UnreadableCounts != "output_tokens" {
+		t.Fatalf("half = %+v, want output_tokens named unreadable and cache_read_tokens absent unnamed", got)
+	}
+	span := llmSpan(testSession, "req_2", "", "", "repl_main_thread")
+	span["attributes"] = append(withoutKey(span["attributes"].([]map[string]any), "input_tokens"),
+		str("input_tokens", "n/a"))
+	spans, err := DecodeSpans(spanBody(span))
+	if err != nil || len(spans) != 1 || spans[0].UnreadableCounts != "input_tokens" || spans[0].InputTokens != 0 {
+		t.Fatalf("span half = %+v, %v; want input_tokens named unreadable", spans, err)
+	}
+}
+
 // The probe capture establishes the OTLP envelopes and alternate response-id attribute;
 // rejection logs establish that background calls can omit request/session attributes.
 func TestDecodeResourceIdentityAndResponseID(t *testing.T) {

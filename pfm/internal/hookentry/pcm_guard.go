@@ -359,7 +359,7 @@ func (judge *pcmGuardJudge) bash(command, cwd string, script cmdparse.Script, de
 		defer func() { judge.scripts-- }()
 	}
 	parsed, err := cmdparse.ParseBatch([]cmdparse.Call{{
-		ID: "pcm-guard", Command: command, Cwd: cmp.Or(cwd, string(filepath.Separator)),
+		ID: "pcm-guard", Command: command,
 		Vars: map[string]string{"HOME": judge.scope.home}, Script: script,
 	}})
 	if err != nil {

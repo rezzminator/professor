@@ -12,7 +12,7 @@ import (
 )
 
 func TestHerdrIndicatorsDoctor(t *testing.T) {
-	for _, name := range []string{"stale", "current", "absent", "foreign", "another install", "unreadable table", "unreadable pid", "unreadable image"} {
+	for _, name := range []string{"stale", "current", "absent", "foreign", "another install", "unreadable table", "unreadable pid", "unreadable image", "stale beside unreadable"} {
 		t.Run(name, func(t *testing.T) {
 			runtime, fresh, old := newMCPServeDoctorFixture(t)
 			const pid = 5000001
@@ -29,6 +29,7 @@ func TestHerdrIndicatorsDoctor(t *testing.T) {
 				commandReads: map[int]int{},
 			}
 			wantWarnings, wantFailures, want := 0, 0, "ok process enumeration confirms no stale painter"
+			wantAlso := ""
 			switch name {
 			case "stale":
 				wantWarnings, want = 1, "WARN stale executable pids=[5000001] — fix: pfm install --yes"
@@ -49,10 +50,23 @@ func TestHerdrIndicatorsDoctor(t *testing.T) {
 			case "unreadable image":
 				table.imageErr = map[int]error{pid: fs.ErrPermission}
 				wantFailures, want = 1, "ERROR herdr indicator pid 5000001 executable identity"
+			case "stale beside unreadable":
+				const unreadable = 5000002
+				table.pids = append(table.pids, unreadable)
+				table.cmdlines[unreadable] = []string{"pfm", "internal", "herdr-indicators"}
+				table.environs[unreadable] = map[string]string{
+					paths.EnvInstallMark: paths.InstallMark(runtime.Paths.Home),
+				}
+				table.identities[unreadable] = gather.ProcessIdentity{EffectiveUID: uint32(os.Geteuid())}
+				table.imageErr = map[int]error{unreadable: fs.ErrPermission}
+				wantWarnings, wantFailures = 1, 1
+				want = "doctor: herdr-indicators: WARN stale executable pids=[5000001] — fix: pfm install --yes\n"
+				wantAlso = "doctor: herdr-indicators: ERROR herdr indicator pid 5000002 executable identity"
 			}
 			var output bytes.Buffer
 			warnings, failures := printHerdrIndicatorsDoctor(&output, runtime.Paths.Home, table)
-			if warnings != wantWarnings || failures != wantFailures || !strings.Contains(output.String(), want) {
+			if warnings != wantWarnings || failures != wantFailures || !strings.Contains(output.String(), want) ||
+				!strings.Contains(output.String(), wantAlso) {
 				t.Fatalf(
 					"counts=%d,%d output=%s; want=%d,%d %s",
 					warnings,

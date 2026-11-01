@@ -629,7 +629,7 @@ func discoverAccounts(home string) ([]Account, []AccountSkip) {
 	accounts := make([]Account, 0, len(candidates))
 	skips := make([]AccountSkip, 0)
 	for _, candidate := range candidates {
-		if !hasValidAccountCredentials(candidate.path) {
+		if !hasAccountCredentials(candidate.path) {
 			skips = append(skips, AccountSkip{
 				ID: candidate.id, ConfigDir: candidate.path, Reason: "no valid credentials",
 			})
@@ -643,17 +643,19 @@ func discoverAccounts(home string) ([]Account, []AccountSkip) {
 	return accounts, skips
 }
 
-func hasValidAccountCredentials(configDir string) bool {
+// hasAccountCredentials is false only for an absent file or one with no access
+// token: an unreadable or torn one (mid OAuth rotation) keeps its account.
+func hasAccountCredentials(configDir string) bool {
 	body, err := os.ReadFile(filepath.Join(configDir, ".credentials.json"))
 	if err != nil {
-		return false
+		return !errors.Is(err, os.ErrNotExist)
 	}
 	var marker struct {
 		OAuth struct {
 			AccessToken string `json:"accessToken"`
 		} `json:"claudeAiOauth"`
 	}
-	return json.Unmarshal(body, &marker) == nil && strings.TrimSpace(marker.OAuth.AccessToken) != ""
+	return json.Unmarshal(body, &marker) != nil || strings.TrimSpace(marker.OAuth.AccessToken) != ""
 }
 
 func skipsOutsideDir(skips []AccountSkip, root string) []AccountSkip {
@@ -681,10 +683,6 @@ func loadWithMCPServers(
 	registered map[string]MCPServer,
 	codexHomes ...string,
 ) (Config, error) {
-	openCodeHome := openCodeAccountHome(home)
-	if _, err := openCodeStoreExists(openCodeHome); err != nil {
-		return Config{}, fmt.Errorf("discover OpenCode account data %s: %w", openCodeHome, err)
-	}
 	result := defaultsWithMCPServers(home, projectRoots, registered, codexHomes...)
 	if path == "" {
 		var err error
@@ -724,8 +722,10 @@ func loadWithMCPServers(
 	if err != nil {
 		return Config{}, fmt.Errorf("config %s: %w", result.Path, err)
 	}
-	result.Sources[keyVersion] = SourceFile
-	result.InputVersion = *raw.Version
+	if raw.Version != nil { // an absent version reads as the current one, its source left default
+		result.Sources[keyVersion] = SourceFile
+		result.InputVersion = *raw.Version
+	}
 	// Version 1 is accepted as a compatibility input, but callers always see
 	// the current materialized schema version.
 	result.Version = Version

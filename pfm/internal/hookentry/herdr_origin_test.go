@@ -40,9 +40,9 @@ func TestThreadWithoutRollout(t *testing.T) {
 		{"cx", `{}`, false},
 		{"cl", `{"transcript_path":null}`, false},
 	} {
-		payload, err := readHerdrPayload(strings.NewReader(test.raw))
-		if err != nil {
-			t.Fatal(err)
+		payload, skipped, err := readHerdrPayload(strings.NewReader(test.raw))
+		if err != nil || skipped != nil {
+			t.Fatal(err, skipped)
 		}
 		if got := threadWithoutRollout(pfmengine.ID(test.engine), payload); got != test.want {
 			t.Errorf("threadWithoutRollout(%s, %s) = %v, want %v", test.engine, test.raw, got, test.want)
@@ -54,19 +54,34 @@ func TestReadHerdrPayloadValidatesTheWholeStream(t *testing.T) {
 	for _, tc := range []struct {
 		name, raw string
 		bad       bool
+		skipped   string
 	}{
-		{"nested response", `{"tool_response":{"items":[null,true,2,{"escaped":"a\"b"}]},"session_id":"s1"}`, false},
-		{"huge ignored exponent", `{"tool_response":1e9999,"session_id":"s1"}`, false},
-		{"truncated response", `{"tool_response":{"items":[1,2]`, true},
-		{"bad escape in response", `{"tool_response":"\q"}`, true},
-		{"trailing object", `{"session_id":"s1"}{"agent_id":"child"}`, true},
-		{"wrong field type", `{"agent_id":1}`, true},
-		{"null payload", `null`, true},
+		{"nested response", `{"tool_response":{"items":[null,true,2,{"escaped":"a\"b"}]},"session_id":"s1"}`, false, ""},
+		{"huge ignored exponent", `{"tool_response":1e9999,"session_id":"s1"}`, false, ""},
+		{"truncated response", `{"tool_response":{"items":[1,2]`, true, ""},
+		{"bad escape in response", `{"tool_response":"\q"}`, true, ""},
+		{"trailing object", `{"session_id":"s1"}{"agent_id":"child"}`, true, ""},
+		{"wrong identity field type", `{"agent_id":1}`, true, ""},
+		{
+			"wrong label field types are skipped, the rest kept",
+			`{"message":7,"is_interrupt":"yes","session_id":"s1"}`,
+			false,
+			"hook message: json: cannot unmarshal number into Go value of type string\n" +
+				"hook is_interrupt: json: cannot unmarshal string into Go value of type bool",
+		},
+		{"null payload", `null`, true, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			payload, err := readHerdrPayload(strings.NewReader(tc.raw))
+			payload, skipped, err := readHerdrPayload(strings.NewReader(tc.raw))
 			if (err != nil) != tc.bad || !tc.bad && payload.SessionID != "s1" {
 				t.Fatalf("payload=%+v err=%v", payload, err)
+			}
+			gotSkipped := ""
+			if skipped != nil {
+				gotSkipped = skipped.Error()
+			}
+			if gotSkipped != tc.skipped {
+				t.Fatalf("skipped = %q, want %q", gotSkipped, tc.skipped)
 			}
 		})
 	}

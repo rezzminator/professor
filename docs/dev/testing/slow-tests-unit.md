@@ -96,11 +96,11 @@ jailTest/InstalledHome writes temp artifacts; store.Open/Batch 256 rows; 100 str
 
 U — temp files and in-process refresh/index seams; no child process is launched.
 
-### TestReadOpenCodeSessionsRejectsMalformedNativeJSONAndShapes
+### TestReadOpenCodeSessionsKeepsSessionsPastMalformedRows
 
-**Source:** [pfm/internal/index/opencode_test.go](../../../pfm/internal/index/opencode_test.go) line 287 · **Observed:** 2.74s · **Class:** SQLite/JSON parsing
+**Source:** [pfm/internal/index/opencode_test.go](../../../pfm/internal/index/opencode_test.go) line 311 · **Observed:** 2.74s · **Class:** SQLite/JSON parsing
 
-seedOpenCodeStore; SQLite mutations via sql.Open/Exec; ReadOpenCodeSessions validation.
+seedOpenCodeStore; SQLite mutations via sql.Open/Exec; ReadOpenCodeSessions keeps each session past a malformed row and warns.
 
 U — temp SQLite and parser validation are local package seams.
 

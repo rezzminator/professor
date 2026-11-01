@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -222,6 +223,46 @@ func TestProbeTmuxKeepsAFailingServerAsAWarning(t *testing.T) {
 	}
 	if len(result.ProbeWarnings) != 1 {
 		t.Fatalf("warnings = %q, want the one failing server named", result.ProbeWarnings)
+	}
+}
+
+// TestProbeTmuxKeepsTheReadablePanesOfAPartlyMalformedAnswer: one pane line
+// tmux spelled past the format costs that pane only. The socket's other
+// panes are listed, the socket is named unreadable with a warning, and it is
+// never swept as a corpse.
+func TestProbeTmuxKeepsTheReadablePanesOfAPartlyMalformedAnswer(t *testing.T) {
+	tmuxDir := t.TempDir()
+	now := time.Now()
+	socket := filepath.Join(tmuxDir, "cc-7-8-9")
+	createCorpseSocket(t, socket, now.Add(-2*time.Hour))
+	binary := filepath.Join(t.TempDir(), "tmux")
+	script := "#!/bin/sh\nprintf '" + paneLine("%%1", "42", "0") + "garbage\\n" + paneLine("%%2", "43", "0") + "'\n"
+	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := ProbeTmux(context.Background(), tmuxDir, TmuxProbe{Binary: binary, TmuxTmpDir: tmuxDir}, now)
+	if err != nil {
+		t.Fatalf("ProbeTmux() error = %v, want the readable panes kept", err)
+	}
+	var ids []string
+	for _, pane := range result.Panes {
+		ids = append(ids, pane.Socket+" "+pane.PaneID)
+	}
+	if !slices.Equal(ids, []string{"cc-7-8-9 %1", "cc-7-8-9 %2"}) {
+		t.Fatalf("panes = %q, want both readable panes of cc-7-8-9", ids)
+	}
+	wantWhy := `1 of 3 pane lines unreadable, the rest kept; the first: tmux cc-7-8-9 returned 1 pane fields in "garbage"`
+	if why := result.Unreadable["cc-7-8-9"]; why != wantWhy {
+		t.Fatalf("Unreadable[cc-7-8-9] = %q, want %q", why, wantWhy)
+	}
+	wantWarning := "cc-7-8-9: could not read this tmux server: " + wantWhy +
+		" — check it by hand: tmux -S " + socket + " list-sessions"
+	if !slices.Equal(result.ProbeWarnings, []string{wantWarning}) {
+		t.Fatalf("warnings = %q, want [%q]", result.ProbeWarnings, wantWarning)
+	}
+	if _, err := os.Stat(socket); err != nil {
+		t.Fatalf("a partly read socket was swept: %v", err)
 	}
 }
 

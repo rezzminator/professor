@@ -328,6 +328,12 @@ func TestModelCostCheckPrintsTheSummaryAndFailsOnAnInvalidOverride(t *testing.T)
 	if code != 1 || !strings.Contains(stderr, config.PricesPath(f.configPath)) {
 		t.Fatalf("invalid override: code %d stderr %q; want 1 naming %s", code, stderr, config.PricesPath(f.configPath))
 	}
+	// A lookup still answers from the published table, the override named.
+	code, stdout, stderr = f.run(t0.Add(time.Hour), false, "--all")
+	if code != 0 || !strings.Contains(stdout, "override: none") ||
+		!strings.Contains(stderr, "; serving the published table without it\n") {
+		t.Fatalf("lookup beside an invalid override: code %d stdout %q stderr %q", code, stdout, stderr)
+	}
 }
 
 func TestModelCostOfflineFetchesNothingEvenWhenForced(t *testing.T) {

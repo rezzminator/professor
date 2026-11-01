@@ -392,3 +392,65 @@ func TestDoctorReachesTheHostChecksPastAPendingLegacyDatabase(t *testing.T) {
 		})
 	}
 }
+
+// TestDoctorReadsPastADatabaseRowItCannotRead pins that one database row doctor
+// cannot read is that row alone: a corrupt advisory busy counter is one warning
+// naming its value, a census query that fails is one failure, and every later
+// row (the WAL, the busy counters, the process table, the crumbs) still prints.
+func TestDoctorReadsPastADatabaseRowItCannotRead(t *testing.T) {
+	for _, testCase := range []struct {
+		name  string
+		stage func(context.Context, *store.Store, string) error
+		row   string
+		code  int
+	}{
+		{
+			name: "corrupt busy counter",
+			stage: func(ctx context.Context, database *store.Store, _ string) error {
+				return database.SetMeta(ctx, "busy_kill_warnings", "garbage")
+			},
+			row:  "doctor: warning busy_warnings unreadable: busy_kill_warnings has invalid value \"garbage\"\n",
+			code: 1,
+		},
+		{
+			name: "census query fails",
+			stage: func(_ context.Context, _ *store.Store, cache string) error {
+				db, err := sqlitedb.OpenReadWrite(cache, time.Second)
+				if err != nil {
+					return err
+				}
+				_, err = db.Exec("DROP TABLE cx_names")
+				return errors.Join(err, db.Close())
+			},
+			row:  "doctor: unhealthy row counts: count fleet rows: SQL logic error: no such table: cx_names (1)\n",
+			code: 3,
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			runtime := buildCleanDoctorHome(t)
+			database, err := store.Open(store.WithWarningWriter(io.Discard))
+			if err != nil {
+				t.Fatal(err)
+			}
+			stageErr := testCase.stage(context.Background(), database, runtime.Paths.CacheDB)
+			if err := errors.Join(stageErr, database.Close()); err != nil {
+				t.Fatal(err)
+			}
+
+			var stdout, stderr bytes.Buffer
+			code := runDoctor(nil, &stdout, &stderr, runtime)
+			output := stdout.String()
+			if !strings.Contains(output, testCase.row) {
+				t.Fatalf("doctor output lacks the row %q:\n%s", testCase.row, output)
+			}
+			for _, later := range []string{"doctor: wal_bytes=", "doctor: process_table ", "doctor: crumbs entries="} {
+				if !strings.Contains(output, later) {
+					t.Fatalf("doctor stopped before the %q row:\n%s", later, output)
+				}
+			}
+			if code != testCase.code {
+				t.Fatalf("doctor code=%d, want %d\n%s", code, testCase.code, output)
+			}
+		})
+	}
+}

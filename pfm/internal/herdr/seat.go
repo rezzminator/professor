@@ -97,8 +97,10 @@ func ValidateNotificationShown(body json.RawMessage) error {
 	if err := json.Unmarshal(body, &ack); err != nil {
 		return fmt.Errorf("decode Herdr notification: %w", err)
 	}
-	if ack.Type != "notification_show" || ack.Shown == nil || ack.Reason == "" ||
-		(*ack.Shown && ack.Reason != "shown") || (!*ack.Shown && ack.Reason == "shown") {
+	// shown=true is the delivery; its reason is only a label. A notification
+	// not shown must say why, or no caller can tell a retry from a refusal.
+	if ack.Type != "notification_show" || ack.Shown == nil ||
+		(!*ack.Shown && (ack.Reason == "" || ack.Reason == "shown")) {
 		return fmt.Errorf("unexpected Herdr notification acknowledgement: %s", body)
 	}
 	if !*ack.Shown {

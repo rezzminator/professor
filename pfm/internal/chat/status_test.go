@@ -157,6 +157,34 @@ func TestInspectSeatReportsDurableLossUntilNextPrompt(t *testing.T) {
 			t.Fatalf("status=%+v err=%v want lost_note=%q", status, err, note)
 		}
 	}
+	// An unreadable seat store costs only the note, which says it could not look.
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runtime.Paths.StateDB = filepath.Join(blocker, "state.db")
+	status, err := InspectSeat(
+		context.Background(),
+		&runtime,
+		headless.Chat{
+			ID:      seat.SessionID,
+			SeatID:  seat.SeatID,
+			Backend: "herdr",
+			Engine:  pfmengine.Claude,
+			Name:    seat.Name,
+		},
+		time.Now(),
+		nil,
+	)
+	if err != nil || !strings.HasPrefix(status.LostNote, "loss note unknown: ") ||
+		!strings.Contains(status.LostNote, blocker) || status.Name != seat.Name {
+		t.Fatalf(
+			"status=%+v err=%v; want the status with lost_note naming the unreadable store %s",
+			status,
+			err,
+			blocker,
+		)
+	}
 }
 
 func TestHerdrStatusReconcilesTranscript(t *testing.T) {

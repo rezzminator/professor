@@ -137,9 +137,10 @@ func TestContextCatalogStatesAndLazyRead(t *testing.T) {
 		{name: "unknown model", body: `{"models":[{"slug":"other","context_window":500000}]}`, model: "gpt-6.1-sol", state: "unknown"},
 		{name: "unknown capacity", body: `{"models":[{"slug":"gpt-6.1-sol","context_window":null}]}`, model: "gpt-6.1-sol", state: "unknown"},
 		{name: "malformed", body: `{`, state: catalogError},
-		{name: "trailing JSON", body: `{"models":[{"slug":"gpt-6.1-sol","context_window":500000}]}{}`, state: catalogError},
-		{name: "trailing garbage", body: `{"models":[{"slug":"gpt-6.1-sol","context_window":500000}]}oops`, state: catalogError},
-		{name: "invalid value", body: `{"models":[{"slug":"gpt-6.1-sol","context_window":-1}]}`, state: catalogError},
+		{name: "trailing JSON keeps the decoded catalog", body: `{"models":[{"slug":"gpt-6.1-sol","context_window":500000}]}{}`, model: "gpt-6.1-sol", want: 500000},
+		{name: "trailing garbage keeps the decoded catalog", body: `{"models":[{"slug":"gpt-6.1-sol","context_window":500000}]}oops`, model: "gpt-6.1-sol", want: 500000},
+		{name: "invalid value skips its model", body: `{"models":[{"slug":"gpt-6.1-sol","context_window":-1}]}`, model: "gpt-6.1-sol", state: "unknown"},
+		{name: "bad entries skip only themselves", body: `{"models":[{"context_window":7},{"slug":"gpt-6-luna","context_window":0},{"slug":"gpt-6.1-sol","context_window":500000},{"slug":"gpt-6.1-sol","context_window":1}]}`, model: "gpt-6.1-sol", want: 500000},
 		{name: "missing", state: "missing"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

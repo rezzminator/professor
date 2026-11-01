@@ -653,12 +653,11 @@ const (
 // Herdr's PaneMoveResult and PaneSwapResult carry (src/api/schema/panes.rs
 // L521-L530 and L541-L560), Pane only on a move.
 type paneMoveReply struct {
-	Changed      bool   `json:"changed"`
-	Reason       string `json:"reason"`
-	SourcePane   string `json:"source_pane_id"`
-	TargetPane   string `json:"target_pane_id"`
-	PreviousPane string `json:"previous_pane_id"`
-	Pane         *struct {
+	Changed    bool   `json:"changed"`
+	Reason     string `json:"reason"`
+	SourcePane string `json:"source_pane_id"`
+	TargetPane string `json:"target_pane_id"`
+	Pane       *struct {
 		ID  string `json:"pane_id"`
 		Tab string `json:"tab_id"`
 	} `json:"pane"`

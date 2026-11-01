@@ -86,9 +86,10 @@ func selectEvents(p *parsed, req *request) ([]*event, error) {
 			}
 			*bound.target = &at
 		}
+		stamped := eventTimes(p.events)
 		events = keepEvents(events, func(ev *event) bool {
-			at, ok := parseStamp(ev.ts)
-			return ok && (low == nil || !at.Before(*low)) && (high == nil || !at.After(*high))
+			at, ok := stamped[ev]
+			return !ok || (low == nil || !at.Before(*low)) && (high == nil || !at.After(*high))
 		})
 	}
 	if req.grep != "" {
@@ -117,6 +118,30 @@ func selectEvents(p *parsed, req *request) ([]*event, error) {
 		events = events[sliceBound(-req.last, len(events)):]
 	}
 	return events, nil
+}
+
+// eventTimes is when each event happened: its own stamp, else the stamp of the
+// event before it, else of the first stamped event after it. An event no stamp
+// can place is absent, and a window keeps it: nothing says it is outside.
+func eventTimes(events []*event) map[*event]time.Time {
+	times := make(map[*event]time.Time, len(events))
+	var previous *time.Time
+	var unplaced []*event
+	for _, ev := range events {
+		if at, ok := parseStamp(ev.ts); ok {
+			previous = &at
+			for _, early := range unplaced {
+				times[early] = at
+			}
+			unplaced = nil
+			times[ev] = at
+		} else if previous != nil {
+			times[ev] = *previous
+		} else {
+			unplaced = append(unplaced, ev)
+		}
+	}
+	return times
 }
 
 // sliceBound is a Python slice index over a list of n: a negative index

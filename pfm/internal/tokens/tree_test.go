@@ -201,6 +201,12 @@ func TestTreeWorktreeIsTheWriteScope(t *testing.T) {
 		"/work/repo/src"); got != 0 {
 		t.Errorf("a Read = %d, want 0", got)
 	}
+	// One edit that is no object counts nothing and never zeroes the bytes of its siblings.
+	if got := writtenBytes("MultiEdit",
+		json.RawMessage(`{"file_path":"/work/repo/a.go","edits":[{"new_string":"ab"},7,{"new_string":"c"}]}`),
+		"/work/repo"); got != 3 {
+		t.Errorf("a MultiEdit with one odd edit = %d, want 3", got)
+	}
 	if got := writtenBytes(
 		"Edit",
 		json.RawMessage(`{"file_path":"src/é.go","new_string":"é"}`),
@@ -210,8 +216,8 @@ func TestTreeWorktreeIsTheWriteScope(t *testing.T) {
 	}
 }
 
-// TestTreeUnreadableAgentIsANamedRow: a sub-agent whose meta cannot be parsed
-// and one whose transcript cannot be opened stay rows, named in NOT READ and
+// TestTreeUnreadableAgentIsANamedRow: a sub-agent whose meta cannot be parsed,
+// one whose transcript cannot be opened and one whose parent has no transcript stay rows, named in NOT READ and
 // left out of every total, and the run exits 1.
 func TestTreeUnreadableAgentIsANamedRow(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "projects")
@@ -232,16 +238,47 @@ func TestTreeUnreadableAgentIsANamedRow(t *testing.T) {
 	if err := os.Symlink(filepath.Join(sub, "no-such-transcript.jsonl"), gone+".jsonl"); err != nil {
 		t.Fatal(err)
 	}
+	// An agent whose parent has no transcript has an unknown place, not no place: it stays a row.
+	orphan := filepath.Join(sub, "agent-a0f00000000000b3")
+	if err := os.WriteFile(orphan+".meta.json", []byte(`{"agentType":"tracer","parentAgentId":"a0f0ffffffffffff",`+
+		`"spawnDepth":2}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(orphan+".jsonl", []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A line that is no record costs that agent's byte totals those lines; the row counts them.
+	worker := filepath.Join(sub, "agent-"+treeWorker1+".jsonl")
+	appended, err := os.OpenFile(worker, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := appended.WriteString("{not json\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := appended.Close(); err != nil {
+		t.Fatal(err)
+	}
 	code, stdout, _ := treeAudit(t, root, "--tree", treeSession)
-	if code != 1 || !strings.Contains(stdout, "NOT READ                   2 agents — ") ||
+	if code != 1 || !strings.Contains(stdout, "NOT READ                   3 agents — ") ||
 		!strings.Contains(stdout, "a0f00000000000b1: meta: parse sub-agent meta") ||
 		!strings.Contains(stdout, "a0f00000000000b2: open ") ||
+		!strings.Contains(stdout, "a0f00000000000b3: parent chain: parent a0f0ffffffffffff not found") ||
+		!strings.Contains(stdout, "(1 undecodable lines: their writes and reads are not counted)") ||
 		!strings.Contains(stdout, "  a0f00000000000b2                     tracer                   unreadable: open ") {
 		t.Fatalf("exit %d stdout:\n%s\nwant exit 1 naming both unreadable agents", code, stdout)
 	}
 	code, document, _ := treeJSON(t, root, "--tree", treeSession)
-	if code != 1 || document.Tree.NotRead != 2 || document.Tree.Agents != 7 || document.Tree.InputTokens != 162100 {
-		t.Fatalf("exit %d tree %+v, want 2 of 7 not read and the totals unchanged", code, document.Tree)
+	if code != 1 || document.Tree.NotRead != 3 || document.Tree.Agents != 8 || document.Tree.InputTokens != 162100 {
+		t.Fatalf("exit %d tree %+v, want 3 of 8 not read and the totals unchanged", code, document.Tree)
+	}
+	if row := agentRow(t, document, "a0f00000000000b3"); row.Unreadable == nil ||
+		*row.Unreadable != "parent chain: parent a0f0ffffffffffff not found" || row.Depth != nil ||
+		row.Parent == nil || *row.Parent != "a0f0ffffffffffff" {
+		t.Errorf("orphan row %+v, want unreadable naming the missing parent, no depth", row)
+	}
+	if row := agentRow(t, document, treeWorker1); row.UndecodableLines != 1 {
+		t.Errorf("worker one row %+v, want one undecodable line counted", row)
 	}
 	if row := agentRow(t, document, "a0f00000000000b1"); row.Unreadable == nil || row.Depth != nil ||
 		row.USD != nil || row.Parent != nil {

@@ -3,6 +3,7 @@ package digest
 import (
 	"errors"
 	"math"
+	"slices"
 	"testing"
 	"time"
 )
@@ -63,4 +64,33 @@ func TestFilterBoundsReadEachSpelling(t *testing.T) {
 	if _, err := windowTime("+5m", &parsed{}); err == nil {
 		t.Error("a relative bound on a transcript without stamps is refused")
 	}
+}
+
+// An event with no readable stamp sits where its neighbours put it, so a window
+// keeps it with the events around it instead of dropping it uncounted.
+func TestWindowPlacesAnUnstampedEventByItsNeighbours(t *testing.T) {
+	early := &event{line: 1, ts: "2026-09-29T20:00:01Z", kind: kindPrompt}
+	earlyNote := &event{line: 2, kind: kindNote}
+	late := &event{line: 3, ts: "2026-09-29T20:00:09Z", kind: kindReply}
+	lateNote := &event{line: 4, ts: "garbage", kind: kindNote}
+	p := &parsed{events: []*event{early, earlyNote, late, lateNote}}
+	got, err := selectEvents(p, &request{only: "prompt,reply,call,note,final", since: "2026-09-29T20:00:05Z"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []*event{late, lateNote}; !slices.Equal(got, want) {
+		t.Errorf("--since 20:00:05 kept lines %v, want [3 4]", eventLines(got))
+	}
+	headless := &parsed{events: []*event{{line: 1, kind: kindNote}}}
+	if got, _ := selectEvents(headless, &request{only: "note", since: "2026-09-29T20:00:05Z"}); len(got) != 1 {
+		t.Errorf("an event no stamp can place was dropped by the window: kept %d, want 1", len(got))
+	}
+}
+
+func eventLines(events []*event) []int {
+	lines := make([]int, len(events))
+	for at, ev := range events {
+		lines[at] = ev.line
+	}
+	return lines
 }

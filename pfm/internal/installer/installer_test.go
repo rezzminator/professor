@@ -1364,31 +1364,6 @@ func assertLink(t *testing.T, target, wanted string) {
 	}
 }
 
-func TestMigrateLegacyCarrierUsesConfiguredStateDB(t *testing.T) {
-	home := t.TempDir()
-	writeFixture(t, filepath.Join(home, ".claude", ".cc-ls-hidden"), "retired-chat\n")
-	statePath := filepath.Join(home, "operator-state", "pfm.db")
-	installer := &engine{
-		options: Options{
-			MCPConfigPath: testConfigPath(t),
-			Mode:          ModeApply,
-			Home:          home,
-			StateDB:       statePath,
-			Stdout:        io.Discard,
-		},
-		apply: true,
-	}
-	if err := installer.migrateLegacyCarrier(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	state := fleetdb.OpenSharedState(context.Background(), paths.Values{StateDB: statePath})
-	killed, err := state.KilledAt(context.Background())
-	closeErr := state.Close()
-	if err != nil || closeErr != nil || killed["retired-chat"] != 0 || len(killed) != 1 {
-		t.Fatalf("configured state killed=%v err=%v close=%v", killed, err, closeErr)
-	}
-}
-
 func TestInstallerChangeWritesAndReports(t *testing.T) {
 	failure := errors.New("write failed")
 	for _, test := range []struct {

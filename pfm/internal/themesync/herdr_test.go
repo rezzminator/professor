@@ -248,7 +248,7 @@ func TestHerdrOffStripsStyledRowsEvenWhenThePfmBlockIsGone(t *testing.T) {
 	}
 }
 
-func TestHerdrReadBackOfAStateWithoutTheUnknownHueIsDriftNotError(t *testing.T) {
+func TestHerdrReadBackNamesARowWhoseHueTheStateLacks(t *testing.T) {
 	h := newHarness(t)
 	herdrConfigWithSidebar(h)
 	h.on()
@@ -261,7 +261,8 @@ func TestHerdrReadBackOfAStateWithoutTheUnknownHueIsDriftNotError(t *testing.T) 
 	}
 	h.write(stateRel, stale)
 	h.write(settingsRel, `{"theme":`)
-	wantVerdict(t, h.status(), "herdr", VerdictDrift, "carries no hue")
+	wantVerdict(t, h.status(), "herdr", VerdictInSync,
+		"herdr sidebar row names $pfm_unknown but the applied theme carries no hue for it (left unstyled)")
 }
 
 func TestHerdrConfigOverridesStayPinnedThroughRestore(t *testing.T) {
@@ -319,8 +320,9 @@ func TestHerdrReloadAcknowledgementAndRetry(t *testing.T) {
 		{"failed", `{"result":{"type":"config_reload","status":"failed","diagnostics":["bad config"]}}`, "failed", true},
 		{"wrong type", `{"result":{"type":"ok","status":"applied","diagnostics":[]}}`, "acknowledgement", true},
 		{"unknown status", `{"result":{"type":"config_reload","status":"future","diagnostics":[]}}`, "future", true},
-		{"missing diagnostics", `{"result":{"type":"config_reload","status":"applied"}}`, "acknowledgement", true},
-		{"malformed", `not json`, "decode", true},
+		{"missing diagnostics", `{"result":{"type":"config_reload","status":"applied"}}`, "", false},
+		{"null diagnostics", `{"result":{"type":"config_reload","status":"applied","diagnostics":null}}`, "", false},
+		{"malformed", `not json`, "reload applied (exit 0); reply unreadable (invalid character 'o' in literal null (expecting 'u')): not json", false},
 		{"refusal", `{"error":{"code":"invalid_config","message":"bad config"}}`, "invalid_config", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

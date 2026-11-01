@@ -222,6 +222,22 @@ func TestInstallReportsAnUnreadableGptHookReceipt(t *testing.T) {
 	assertForeignLinkKept(t, host)
 }
 
+// TestInstallUsesAGptHookReceiptOfAnotherVersion: a receipt whose targets
+// validate finishes the retirement whatever its version, which is a warn line.
+func TestInstallUsesAGptHookReceiptOfAnotherVersion(t *testing.T) {
+	host := seedRetiredHookHost(t, "")
+	writeFixture(t, host.receipt, `{"version":2,"targets":["`+host.foreignLink+`","`+host.ownedLink+`"]}`)
+	output, err := runRetiredHookInstall(t, host.home, ModeApply)
+	if err != nil {
+		t.Fatalf("install failed: %v\n%s", err, output)
+	}
+	assertOutput(t, output,
+		"  warn    gpt hook ownership "+host.receipt+": version 2, want 1; its targets validate and are used\n",
+		"  change  remove "+host.receipt+"\n")
+	assertGone(t, "retired gpt hook", host.ownedLink, host.managed, host.receipt)
+	assertForeignLinkKept(t, host)
+}
+
 // TestUninstallRetiresTheGptHook: uninstall takes the same retirement, so
 // no link to a removed managed copy survives it.
 func TestUninstallRetiresTheGptHook(t *testing.T) {

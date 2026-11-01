@@ -2,15 +2,18 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/naming"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -280,5 +283,105 @@ func TestClearNameReservationsAreUniqueAcrossCaches(t *testing.T) {
 		if want := fmt.Sprintf("Desk #%d", i+2); name != want {
 			t.Errorf("names=%v: index %d=%q want %q", names, i, name, want)
 		}
+	}
+}
+
+// A successor name pfm cannot read or confirm costs only the overlay: the
+// transcript stays listed on its engine title and the store warns once.
+func TestClearNameUnreadableKeepsTheTranscript(t *testing.T) {
+	const id = "22222222-2222-4222-8222-222222222222"
+	fresh, err := naming.ClearSuccessorName("Desk", id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name      string
+		title     string
+		breakName func(context.Context, *Store) error
+		read      func(context.Context, *Store) (Transcript, error)
+		wantTitle string
+		warning   string
+	}{
+		{
+			name:  "one decision undecodable",
+			title: "Desk",
+			breakName: func(ctx context.Context, db *Store) error {
+				return db.state.SetMeta(ctx, "clear-name:"+id, "broken-json", 9)
+			},
+			read: func(ctx context.Context, db *Store) (Transcript, error) {
+				got, _, err := db.Transcript(ctx, id)
+				return got, err
+			},
+			wantTitle: "Desk",
+			warning: "WARNING: pfm could not read the successor name of transcript " + id +
+				"; it shows its own title: decode clear name " + id +
+				": invalid character 'b' looking for beginning of value\n",
+		},
+		{
+			name:  "decisions unreadable",
+			title: "Desk",
+			breakName: func(_ context.Context, db *Store) error {
+				return db.state.Close()
+			},
+			read: func(ctx context.Context, db *Store) (Transcript, error) {
+				all, err := db.Transcripts(ctx)
+				if len(all) != 1 {
+					return Transcript{}, fmt.Errorf("transcripts=%+v err=%v, want the one cached", all, err)
+				}
+				return all[0], err
+			},
+			wantTitle: "Desk",
+			warning: "WARNING: pfm could not read the successor names; transcripts show their own titles: " +
+				"acquire clear names connection: sql: database is closed\n",
+		},
+		{
+			name:  "confirmation unwritable",
+			title: fresh,
+			breakName: func(ctx context.Context, db *Store) error {
+				state, err := sqlitedb.OpenReadWrite(db.state.Path(), time.Second)
+				if err != nil {
+					return err
+				}
+				_, err = state.ExecContext(ctx,
+					"CREATE TRIGGER refuse_confirm BEFORE UPDATE ON meta BEGIN SELECT RAISE(FAIL,'confirm refused'); END")
+				return errors.Join(err, state.Close())
+			},
+			read: func(ctx context.Context, db *Store) (Transcript, error) {
+				all, err := db.Transcripts(ctx)
+				if len(all) != 1 {
+					return Transcript{}, fmt.Errorf("transcripts=%+v err=%v, want the one cached", all, err)
+				}
+				return all[0], err
+			},
+			wantTitle: fresh,
+			warning: "WARNING: pfm could not confirm the clear title of transcript " + id +
+				": write clear name " + id + ": constraint failed: confirm refused (1811)\n",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			testjail.Fleet(t)
+			ctx := context.Background()
+			var warnings strings.Builder
+			db := openTestStore(t, WithWarningWriter(&warnings))
+			defer func() { _ = db.Close() }()
+			if err := db.UpsertTranscript(ctx, Transcript{
+				UUID: id, Path: "/fixture/successor.jsonl", CustomTitle: test.title, Size: 10, PromptCount: 1,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.state.PutClearName(ctx, id, naming.ClearName{Inherited: "Desk", Name: fresh}, 1); err != nil {
+				t.Fatal(err)
+			}
+			if err := test.breakName(ctx, db); err != nil {
+				t.Fatal(err)
+			}
+			got, err := test.read(ctx, db)
+			if err != nil || got.UUID != id || got.CustomTitle != test.wantTitle {
+				t.Fatalf("transcript=%+v err=%v, want %s titled %q", got, err, id, test.wantTitle)
+			}
+			if warnings.String() != test.warning {
+				t.Fatalf("warnings=%q, want %q", warnings.String(), test.warning)
+			}
+		})
 	}
 }

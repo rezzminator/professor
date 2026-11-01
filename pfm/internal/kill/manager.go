@@ -758,30 +758,3 @@ func (manager *Manager) codexTarget(
 		DataPath: path,
 	}, nil
 }
-
-// resolveUnindexedCodexParent reads rolloutPath's own session_meta header —
-// the shared shape the identity resolver and the CLI's own row lookup both hit —
-// for the conversation it resumes from: the ONLY place that link exists
-// before the indexer has parsed the file into the fleet database. It
-// answers found=true only when THAT parent id itself resolves to a real,
-// already-indexed lineage; a parent that is ALSO unindexed (a deeper resume
-// chain the indexer has not reached at all) falls through to the caller's
-// own fallback rather than guessing further.
-func (manager *Manager) resolveUnindexedCodexParent(
-	ctx context.Context,
-	rolloutPath string,
-) (Target, bool) {
-	parent := readCodexLineageParent(rolloutPath)
-	if parent == "" {
-		return Target{}, false
-	}
-	lineage, found, err := manager.database.CodexLineage(ctx, parent)
-	if err != nil || !found {
-		return Target{}, false
-	}
-	return Target{
-		Engine:   pfmengine.Codex,
-		ID:       lineage.RootID,
-		DataPath: lineage.Newest.Path,
-	}, true
-}

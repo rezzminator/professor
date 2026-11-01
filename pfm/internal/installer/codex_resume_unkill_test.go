@@ -485,7 +485,10 @@ func TestCodexHookLedgerRecordsNoOwnershipForAFailedWrite(t *testing.T) {
 	if err := os.Symlink(physical, filepath.Join(account, "hooks.json")); err != nil {
 		t.Fatal(err)
 	}
+	// The failed home costs itself alone: a later home is still wired.
+	later := filepath.Join(home, ".codex-later")
 	installer := resumeUnkillEngine(home, account, "", ModeApply, &bytes.Buffer{})
+	installer.options.CodexHomes = []string{account, later}
 	if err := installer.wireCodexHooks(); err == nil {
 		t.Fatal("a failed hooks.json write returned success")
 	}
@@ -495,6 +498,15 @@ func TestCodexHookLedgerRecordsNoOwnershipForAFailedWrite(t *testing.T) {
 	}
 	if owned := ledger[physicalSettingsPath(physical)]; len(owned) != 0 {
 		t.Fatalf("ledger owns %v in a hooks.json the failed write never reached", owned)
+	}
+	laterPath := filepath.Join(later, "hooks.json")
+	command := resumeUnkillCommand(home)
+	if got := hookCommandCount(t, readFixture(t, laterPath), "SessionStart", command); got != 1 {
+		t.Fatalf("later home %s carries %d resume-unkill hooks, want 1", laterPath, got)
+	}
+	key := settingsHookKey{Event: "SessionStart", Matcher: "resume", Command: command}
+	if owned := ledger[physicalSettingsPath(laterPath)][key]; owned != 1 {
+		t.Fatalf("ledger owns %d resume-unkill hooks in %s, want 1", owned, laterPath)
 	}
 }
 

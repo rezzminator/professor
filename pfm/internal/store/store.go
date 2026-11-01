@@ -252,7 +252,7 @@ func (s *Store) migrate(ctx context.Context, existed bool) (returnErr error) {
 			}
 		}
 		if version < 2 {
-			if err := migrateCodexLineageKills(ctx, tx); err != nil {
+			if err := s.migrateCodexLineageKills(ctx, tx); err != nil {
 				return fmt.Errorf("migrate Codex lineage kills: %w", err)
 			}
 		}
@@ -363,8 +363,15 @@ func (s *Store) adoptLocalKills(ctx context.Context) error {
 		var id string
 		var killedAt int64
 		if err := rows.Scan(&id, &killedAt); err != nil {
-			_ = rows.Close()
-			return fmt.Errorf("scan kill awaiting adoption: %w", err)
+			// The kill is the operator's decision: a row whose id still reads is
+			// adopted with its time unknown, so migration 9 never drops it unread.
+			var at any
+			if rows.Scan(&id, &at) != nil || id == "" {
+				s.warningf("WARNING: pfm skipped a kill with no readable chat id in %s: %v\n", s.path, err)
+				continue
+			}
+			s.warningf("WARNING: pfm adopted the kill of %q from %s with its time unknown: %v\n", id, s.path, err)
+			killedAt = 0
 		}
 		adopted[id] = killedAt
 	}

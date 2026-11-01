@@ -202,9 +202,9 @@ func TestWireEngineSyncGlobalWithoutTheBinaryFailsTheStep(t *testing.T) {
 	}
 }
 
-// The adopter reads the repair in the preflight refusal that stops the install
-// before any step applies, not only in the step's own error.
-func TestInstallPreflightWithoutEngineSyncNamesTheRepair(t *testing.T) {
+// The adopter reads the repair in the install's error: a missing engine-sync
+// fails its own steps, never the preflight of every other step.
+func TestInstallWithoutEngineSyncNamesTheRepair(t *testing.T) {
 	withoutEngineSync(t)
 	home := t.TempDir()
 	clone := filepath.Join(home, ".professor")
@@ -216,10 +216,10 @@ func TestInstallPreflightWithoutEngineSyncNamesTheRepair(t *testing.T) {
 		MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home, SourceRepo: clone,
 		Runner: &fakeRunner{}, Stdout: &output,
 	})
-	if err == nil || !strings.Contains(err.Error(), "preflight apply plan") ||
+	if err == nil || strings.Contains(err.Error(), "preflight apply plan") ||
 		!strings.Contains(err.Error(), "claude plugin install engine-sync@professor") ||
 		!strings.Contains(err.Error(), "start a new Claude session") {
-		t.Fatalf("Run = %v, want the preflight refusal naming the engine-sync repair\n%s", err, output.String())
+		t.Fatalf("Run = %v, want the step failure naming the engine-sync repair\n%s", err, output.String())
 	}
 }
 

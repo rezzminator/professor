@@ -227,7 +227,7 @@ func customTokens(t *testing.T, raw string) map[string]string {
 	if err := json.Unmarshal([]byte(raw), &file); err != nil {
 		t.Fatal(err)
 	}
-	tokens, _ := customPalette(file.Base, file.Overrides)
+	tokens, _, _ := customPalette(file.Base, file.Overrides)
 	return tokens
 }
 

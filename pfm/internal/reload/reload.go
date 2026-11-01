@@ -9,7 +9,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -24,7 +23,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/obs"
-	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // Usage leads with the flags because a caller who guesses is guessing
@@ -862,13 +860,4 @@ func readSessionCrumb(path string) (id, transcript string, found bool, err error
 	}
 	id = strings.TrimSuffix(filepath.Base(transcript), filepath.Ext(transcript))
 	return id, transcript, true, nil
-}
-
-// ParseIntEnv reads name through env and returns fallback when it is unset
-// or not a positive integer.
-func ParseIntEnv(env paths.Env, name string, fallback int) int {
-	if value, err := strconv.Atoi(env.Get(name)); err == nil && value > 0 {
-		return value
-	}
-	return fallback
 }

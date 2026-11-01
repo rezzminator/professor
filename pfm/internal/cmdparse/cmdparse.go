@@ -38,10 +38,9 @@ const (
 	maxShellDepth   = 8
 )
 
-// Call is one Bash tool call: its tool_use_id, its command string and the
-// absolute directory it ran in.
+// Call is one Bash tool call: its tool_use_id and its command string.
 type Call struct {
-	ID, Command, Cwd string
+	ID, Command string
 	// Vars seeds the parse with variables the command's shell already has
 	// (HOME), so `$HOME/x` resolves; nil seeds nothing.
 	Vars map[string]string
@@ -106,16 +105,13 @@ type Redirect struct {
 }
 
 // ParseBatch parses every call and returns its parts keyed by Call.ID. The
-// error return is for a malformed batch (duplicate id, relative cwd), never
-// for a command that did not parse.
+// error return is for a malformed batch (duplicate id), never for a command
+// that did not parse; the parse reads no cwd, so a relative one costs nothing.
 func ParseBatch(calls []Call) (map[string][]Part, error) {
 	out := make(map[string][]Part, len(calls))
 	for _, call := range calls {
 		if _, dup := out[call.ID]; dup {
 			return nil, fmt.Errorf("cmdparse: duplicate call id %q in batch", call.ID)
-		}
-		if !filepath.IsAbs(call.Cwd) {
-			return nil, fmt.Errorf("cmdparse: call %q: cwd %q is not absolute", call.ID, call.Cwd)
 		}
 		out[call.ID] = parseCall(call).parts
 	}

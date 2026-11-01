@@ -427,10 +427,12 @@ func TestHerdrReporterErrorsDoctor(t *testing.T) {
 			},
 			wantRow: func(_ *testing.T, dir string) string {
 				return fmt.Sprintf(
-					"%s WARN need=readable reporter error log checked=%s error=%q — "+
-						"fix: repair or delete the log the error names, then rerun pfm doctor",
+					"%s WARN need=complete reporter error history checked=%s retained-count=0 error=%q — "+
+						"fix: inspect retained logs; discarded errors leave the requested window after %dh",
 					herdrReporterRow, dir,
-					fmt.Sprintf("herdr error log: %s holds a malformed line %q", filepath.Join(dir, "cc-1.log"), "garbage"),
+					fmt.Sprintf("herdr error log: history incomplete since %s: %s holds 1 malformed line(s)",
+						now.Add(-herdrReporterWindow).Format(time.RFC3339), filepath.Join(dir, "cc-1.log")),
+					herdrReporterWindowHours,
 				)
 			},
 			wantWarnings: 1,

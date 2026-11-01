@@ -19,8 +19,8 @@ import (
 // census, the WAL and the busy counters. A database at another schema version
 // prints one warning naming it and both versions, and every row that needs it
 // says it could not look; a database not yet created says so and is no
-// warning, since the first pfm command that needs it creates it. aborted
-// reports a row that could not run at all, with doctor's exit code.
+// warning, since the first pfm command that needs it creates it. A query that
+// fails is its own row and never ends the run: every later row still prints.
 func printDatabaseDoctor(
 	ctx context.Context,
 	stdout io.Writer,
@@ -28,7 +28,7 @@ func printDatabaseDoctor(
 	openErr error,
 	values paths.Values,
 	tally *doctorTally,
-) (code int, aborted bool) {
+) {
 	if database == nil {
 		unread := printUnreadCache(stdout, openErr, values.CacheDB, tally)
 		state := fleetdb.OpenSharedStateReadOnly(ctx, values)
@@ -43,35 +43,39 @@ func printDatabaseDoctor(
 		} else if text := sharedUnread(state.Degraded()); text != "" {
 			fmt.Fprintf(stdout, "doctor: rows %s\n", text)
 		}
-		return 0, false
+		return
 	}
 
-	version, err := database.UserVersion(ctx)
-	if err != nil {
-		return tally.abort(stdout, "doctor: unhealthy user_version: %v\n", err), true
+	version, versionErr := database.UserVersion(ctx)
+	if versionErr != nil {
+		tally.fail()
+		fmt.Fprintf(stdout, "doctor: unhealthy user_version: %v\n", versionErr)
 	}
-	check, err := database.QuickCheck(ctx)
-	if err != nil {
-		return tally.abort(stdout, "doctor: unhealthy integrity: %v\n", err), true
+	check, checkErr := database.QuickCheck(ctx)
+	if checkErr != nil {
+		tally.fail()
+		fmt.Fprintf(stdout, "doctor: unhealthy integrity: %v\n", checkErr)
 	}
-	if version != store.SchemaVersion || check != "ok" {
-		tally.warn()
+	if versionErr == nil && checkErr == nil {
+		if version != store.SchemaVersion || check != "ok" {
+			tally.warn()
+		}
+		fmt.Fprintf(
+			stdout,
+			"doctor: database user_version=%d expected=%d quick_check=%s\n",
+			version,
+			store.SchemaVersion,
+			check,
+		)
 	}
-	fmt.Fprintf(
-		stdout,
-		"doctor: database user_version=%d expected=%d quick_check=%s\n",
-		version,
-		store.SchemaVersion,
-		check,
-	)
 
 	// Kills live in the fleet's shared database, not this binary's cache.
 	shared := database.SharedDegraded()
 	printSharedStoreDoctor(stdout, database.SharedPath(), shared, tally)
 	if text := sharedUnread(shared); text != "" {
 		fmt.Fprintf(stdout, "doctor: rows %s\n", text)
-	} else if code, aborted := printRowCensus(ctx, stdout, database, tally); aborted {
-		return code, true
+	} else {
+		printRowCensus(ctx, stdout, database, tally)
 	}
 
 	walBytes := int64(0)
@@ -83,13 +87,18 @@ func printDatabaseDoctor(
 	}
 	fmt.Fprintf(stdout, "doctor: wal_bytes=%d\n", walBytes)
 
-	killWarnings, err := metaCounter(ctx, database, "busy_kill_warnings")
-	if err != nil {
-		return tally.abort(stdout, "doctor: unhealthy busy counter: %v\n", err), true
-	}
-	unkillWarnings, err := metaCounter(ctx, database, "busy_unkill_warnings")
-	if err != nil {
-		return tally.abort(stdout, "doctor: unhealthy busy counter: %v\n", err), true
+	// The busy counters are advisory: one that cannot be read is a warning
+	// naming its value, never a failure.
+	killWarnings, killErr := metaCounter(ctx, database, "busy_kill_warnings")
+	unkillWarnings, unkillErr := metaCounter(ctx, database, "busy_unkill_warnings")
+	if err := errors.Join(killErr, unkillErr); err != nil {
+		tally.warn()
+		fmt.Fprintf(
+			stdout,
+			"doctor: warning busy_warnings unreadable: %s\n",
+			strings.ReplaceAll(err.Error(), "\n", "; "),
+		)
+		return
 	}
 	if killWarnings != 0 || unkillWarnings != 0 {
 		tally.warn()
@@ -100,14 +109,16 @@ func printDatabaseDoctor(
 		killWarnings,
 		unkillWarnings,
 	)
-	return 0, false
 }
 
-// printRowCensus prints the table sizes and the orphaned kills it counts.
-func printRowCensus(ctx context.Context, stdout io.Writer, database *store.Store, tally *doctorTally) (int, bool) {
+// printRowCensus prints the table sizes and the orphaned kills it counts; a
+// census that cannot be read is one failure row.
+func printRowCensus(ctx context.Context, stdout io.Writer, database *store.Store, tally *doctorTally) {
 	counts, err := database.Counts(ctx)
 	if err != nil {
-		return tally.abort(stdout, "doctor: unhealthy row counts: %v\n", err), true
+		tally.fail()
+		fmt.Fprintf(stdout, "doctor: unhealthy row counts: %v\n", err)
+		return
 	}
 	fmt.Fprintf(
 		stdout,
@@ -135,7 +146,6 @@ func printRowCensus(ctx context.Context, stdout io.Writer, database *store.Store
 				"`pfm archive --prune-orphans --yes` (a deleted kill does not come back)",
 		)
 	}
-	return 0, false
 }
 
 // printUnreadCache prints the row for a cache database doctor did not read

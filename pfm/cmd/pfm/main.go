@@ -132,6 +132,11 @@ func run(args []string, stdout, stderr io.Writer) (exitCode int) {
 			fmt.Fprintf(stderr, "pfm: config: %v\n", err)
 			return 1
 		}
+		if args[0] == internalCommand && (len(args) < 2 || args[1] != statuslineCommand) {
+			// A hook or launcher refused here would stop Claude starting and fail every guard open.
+			fmt.Fprintf(stderr, "pfm: config: %v; running on defaults until it is fixed (pfm doctor)\n",
+				runtime.ConfigError)
+		}
 	}
 	// Before anything launches: every process pfm starts carries this
 	// install's mark, the proof a later stop needs that pfm launched it.
@@ -257,9 +262,8 @@ func diagnosticCommand(args []string) bool {
 	if len(args) == 0 {
 		return false
 	}
-	if args[0] == doctorCommand || args[0] == statuslineCommand ||
-		args[0] == internalCommand && len(args) > 1 && args[1] == statuslineCommand {
-		return true // the statusline renders a broken config on its cache segment
+	if args[0] == doctorCommand || args[0] == statuslineCommand || args[0] == internalCommand {
+		return true // the statusline renders a broken config on its cache segment; hooks and launchers warn
 	}
 	return args[0] == configCommand && len(args) > 1 && (args[1] == "show" || args[1] == "validate")
 }

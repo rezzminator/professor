@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 )
@@ -180,6 +181,59 @@ func TestSharedOpenRepairsMovedTmuxSeatsWithoutSchemaBump(t *testing.T) {
 	if _, found, err := readonly.Seat(ctx, "tmux-s1"); err != nil || !found {
 		t.Fatalf("read-only open repaired stale tmux row: found=%v err=%v", found, err)
 	}
+}
+
+// A moved-seat repair that cannot run keeps the stale row and the store open:
+// it warns and repairs at the next open. Serial: obs.Test.
+func TestSharedOpenKeepsMovedTmuxSeatsWhenTheirRepairFails(t *testing.T) {
+	ctx, recorder := obs.Test(t)
+	path := filepath.Join(t.TempDir(), "pfm.db")
+	values := paths.Values{StateDB: path}
+	seed := OpenSharedState(ctx, values)
+	for _, seat := range []Seat{
+		{SeatID: "tmux-s1", SessionID: "S1", Backend: "tmux", State: "live", UpdatedAt: 100},
+		{SeatID: "herdr-s1", SessionID: "S1", Backend: "herdr", State: "live", HerdrSocket: "/h.sock", HerdrPane: "w1:p1", UpdatedAt: 200},
+	} {
+		if _, err := seed.db.ExecContext(ctx,
+			"INSERT INTO seat ("+seatColumns+") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+			seatValues(seat)...,
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := seed.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// A directory where the migration lock file goes makes the lock unopenable.
+	if err := os.Mkdir(path+".migrate.lock", 0o700); err != nil {
+		t.Fatal(err)
+	}
+	state := OpenSharedState(ctx, values)
+	defer func() { _ = state.Close() }()
+	if err := state.Degraded(); err != nil {
+		t.Fatalf("open with an unrunnable repair: %v, want the store open", err)
+	}
+	if _, found, err := state.Seat(ctx, "tmux-s1"); err != nil || !found {
+		t.Fatalf("stale tmux seat found=%v err=%v, want it kept", found, err)
+	}
+	if got, want := openWarnings(recorder, "fleet.seats.repair_deferred"),
+		[]string{
+			"open migration lock " + path + ".migrate.lock: open " + path + ".migrate.lock: is a directory",
+		}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("repair warnings = %q, want %q", got, want)
+	}
+}
+
+// openWarnings lists the err text of every WARN record named event.
+func openWarnings(recorder *obs.Recorder, event string) []string {
+	var texts []string
+	for _, record := range recorder.Records() {
+		if record.Message == event && record.Level == "WARN" {
+			text, _ := record.Field(obs.FieldErr)
+			texts = append(texts, text.(string))
+		}
+	}
+	return texts
 }
 
 // TestSharedOpenMigratesAtOpenUnderTheMigrationLock: an open that must add
@@ -413,10 +467,10 @@ func TestSharedIssuesDropRefusesARowFiledAfterItsBackup(t *testing.T) {
 	}
 }
 
-// A backup that cannot be written leaves the ledger in place and fails the open.
+// A backup that cannot be written leaves the ledger in place and the store
+// open: the cleanup warns and retries at the next open. Serial: obs.Test.
 func TestSharedOpenKeepsTheIssuesTableWhenItsBackupFails(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
+	ctx, recorder := obs.Test(t)
 	path := filepath.Join(t.TempDir(), "pfm.db")
 	seedSharedState(t, path, retiredIssuesSeed(1))
 	if err := os.Mkdir(path+".bak-before-issues-drop", 0o700); err != nil {
@@ -427,8 +481,13 @@ func TestSharedOpenKeepsTheIssuesTableWhenItsBackupFails(t *testing.T) {
 	if closeErr := state.Close(); closeErr != nil {
 		t.Fatal(closeErr)
 	}
-	if err == nil || !strings.Contains(err.Error(), "keep retired issues before their drop") {
-		t.Fatalf("open with an unwritable backup: %v, want the named backup failure", err)
+	if err != nil {
+		t.Fatalf("open with an unwritable backup: %v, want the store open", err)
+	}
+	if got, want := openWarnings(recorder, "fleet.issues.kept"),
+		[]string{"keep retired issues before their drop: backup " + path + ": " + path +
+			".bak-before-issues-drop is not a regular file"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("issues warnings = %q, want %q", got, want)
 	}
 	db, openErr := sqlitedb.OpenReadOnly(path, time.Second)
 	if openErr != nil {

@@ -35,6 +35,9 @@ type deckState struct {
 	// factsError is the snapshot's FactsError: why the rows' model, effort and
 	// working state may be missing.
 	factsError string
+	// scanError is the snapshot's ScanError: the pass composed, short of the
+	// items it names.
+	scanError string
 	// refreshFailure is the last pass's failure, nil once a pass lands: the
 	// rows on screen are then older than freshNS says, and the masthead says so.
 	refreshFailure *RefreshFailure
@@ -80,10 +83,11 @@ func (state *deckState) touch(nowNS int64) {
 }
 
 // refreshed notes that a snapshot landed.
-func (state *deckState) refreshed(nowNS int64, factsError string) {
+func (state *deckState) refreshed(nowNS int64, factsError, scanError string) {
 	state.freshNS = nowNS
 	state.waking = false
 	state.factsError = factsError
+	state.scanError = scanError
 	state.refreshFailure = nil
 }
 

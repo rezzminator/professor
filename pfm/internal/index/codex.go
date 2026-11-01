@@ -2,6 +2,7 @@ package index
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"strings"
 
@@ -36,6 +37,7 @@ type codexPayload struct {
 }
 
 func parseCodexRolloutFile(
+	ctx context.Context,
 	file diskFile,
 	start int64,
 	rollout store.Rollout,
@@ -44,6 +46,7 @@ func parseCodexRolloutFile(
 	// session_meta line normally establishes the source before messages, but
 	// the fallback remains user for older files without thread_source.
 	sourceKnown := start > 0
+	unparsed := 0
 	parsedOffset, bytesRead, err := claudetranscript.ReadLines(file.Path, start, func(line []byte, complete bool) {
 		if !complete {
 			return
@@ -54,6 +57,7 @@ func parseCodexRolloutFile(
 
 		var record codexRecord
 		if err := json.Unmarshal(line, &record); err != nil {
+			unparsed++
 			return
 		}
 		if value := firstNonEmptyCodexField(record.CWD, record.Payload.CWD); value != "" {
@@ -137,6 +141,7 @@ func parseCodexRolloutFile(
 			rollout.FirstPrompt = prompt
 		}
 	})
+	warnUnparsedLines(ctx, file.Path, unparsed)
 	if err != nil {
 		return store.Rollout{}, bytesRead, err
 	}

@@ -41,13 +41,18 @@ func readDockerResources(root string) ([]Container, map[string]dockerSample, boo
 }
 
 func readDarwinHostResources(now int64, cpuCount int) (hostResources, error) {
-	header, err := readDarwinHeader()
+	header, warnings, err := readDarwinHeader()
 	if err != nil {
 		return hostResources{}, err
 	}
-	processes, busy, warnings, err := readDarwinProcesses()
+	processes, busy, processWarnings, err := readDarwinProcesses()
+	warnings = append(warnings, processWarnings...)
 	if err != nil {
-		return hostResources{}, err
+		// No process table is a warning and an empty table, not a failed
+		// sample: the header stays, and the zero total is the "no CPU
+		// counter" marker the deltas refuse.
+		warnings = append(warnings, err.Error())
+		return hostResources{header: header, processes: map[int]processSample{}, warnings: warnings}, nil
 	}
 	// ps reports cumulative process CPU in centiseconds. A wall-clock counter
 	// multiplied by the logical CPU count gives the matching host-total unit;
@@ -79,11 +84,16 @@ func readDarwinProcesses() (map[int]processSample, uint64, []string, error) {
 	if err != nil {
 		return nil, 0, nil, fmt.Errorf("sample Darwin process counters via ps: %w", err)
 	}
-	output := result.Stdout
+	processes, busy, warnings := parseDarwinProcessRows(string(result.Stdout))
+	return processes, busy, warnings, nil
+}
+
+// parseDarwinProcessRows reads `ps -A -o pid=,ppid=,time=,rss=,comm=` output.
+func parseDarwinProcessRows(output string) (map[int]processSample, uint64, []string) {
 	processes := make(map[int]processSample)
 	var busy uint64
 	var warnings []string
-	for _, line := range strings.Split(string(output), "\n") {
+	for _, line := range strings.Split(output, "\n") {
 		fields := strings.Fields(line)
 		if len(fields) == 0 {
 			continue
@@ -96,20 +106,33 @@ func readDarwinProcesses() (map[int]processSample, uint64, []string, error) {
 		parent, parentErr := strconv.Atoi(fields[1])
 		cpu, cpuErr := parseDarwinCPUTime(fields[2])
 		rssKB, rssErr := strconv.ParseUint(fields[3], 10, 64)
-		if pidErr != nil || parentErr != nil || cpuErr != nil || rssErr != nil {
+		if pidErr != nil || parentErr != nil {
+			// Without its pid and parent a row cannot be placed in any tree.
 			warnings = append(warnings, fmt.Sprintf(
-				"parse Darwin process row %q: pid=%v parent=%v cpu=%v rss=%v",
-				line, pidErr, parentErr, cpuErr, rssErr,
+				"parse Darwin process row %q: pid=%v parent=%v", line, pidErr, parentErr,
 			))
 			continue
 		}
+		if cpuErr != nil || rssErr != nil {
+			// The row keeps its place with zero CPU or memory for the field
+			// that did not parse; the warning names what is unknown.
+			warnings = append(warnings, fmt.Sprintf(
+				"parse Darwin process row %q: cpu=%v rss=%v; kept with that reading unknown", line, cpuErr, rssErr,
+			))
+			if cpuErr != nil {
+				cpu = 0
+			}
+			if rssErr != nil {
+				rssKB = 0
+			}
+		}
 		processes[pid] = processSample{
-			parent: parent, jiffies: cpu, rss: rssKB * 1024,
+			parent: parent, jiffies: cpu, cpuUnknown: cpuErr != nil, rss: rssKB * 1024,
 			command: strings.Join(fields[4:], " "),
 		}
 		busy += cpu
 	}
-	return processes, busy, warnings, nil
+	return processes, busy, warnings
 }
 
 func parseDarwinCPUTime(value string) (uint64, error) {
@@ -146,14 +169,14 @@ func parseDarwinCPUTime(value string) (uint64, error) {
 	return uint64(math.Round((float64(hours*3600+minutes*60) + seconds) * 100)), nil
 }
 
-func readDarwinHeader() (Header, error) {
+func readDarwinHeader() (Header, []string, error) {
 	total, err := unix.SysctlUint64("hw.memsize")
 	if err != nil {
-		return Header{}, fmt.Errorf("read Darwin host memory size: %w", err)
+		return Header{}, nil, fmt.Errorf("read Darwin host memory size: %w", err)
 	}
 	vmStat, err := deps.Resolve("vm_stat")
 	if err != nil {
-		return Header{}, fmt.Errorf("sample Darwin host memory: resolve vm_stat: %w", err)
+		return Header{}, nil, fmt.Errorf("sample Darwin host memory: resolve vm_stat: %w", err)
 	}
 	result, err := obs.Runner(deps.RealRunner{}).
 		Run(context.Background(), []string{vmStat}, deps.RunOptions{})
@@ -161,12 +184,12 @@ func readDarwinHeader() (Header, error) {
 		err = fmt.Errorf("exit status %d", result.ExitCode)
 	}
 	if err != nil {
-		return Header{}, fmt.Errorf("sample Darwin host memory via vm_stat: %w", err)
+		return Header{}, nil, fmt.Errorf("sample Darwin host memory via vm_stat: %w", err)
 	}
 	output := result.Stdout
-	pageSize, pages, err := parseDarwinVMStat(string(output))
+	pageSize, pages, warnings, err := parseDarwinVMStat(string(output))
 	if err != nil {
-		return Header{}, err
+		return Header{}, nil, err
 	}
 	availablePages := pages["Pages free"] + pages["Pages inactive"] +
 		pages["Pages speculative"] + pages["Pages purgeable"]
@@ -175,39 +198,46 @@ func readDarwinHeader() (Header, error) {
 		available = total
 	}
 	header := Header{MemoryBytes: total, RAMPercent: percent(total-available, total), PSIUnavailable: true}
+	// A swap reading that cannot be had leaves SwapPercent at zero with a
+	// warning; it never aborts the host sample.
 	swap, err := unix.SysctlRaw("vm.swapusage")
 	if err != nil {
-		return Header{}, fmt.Errorf("read Darwin swap counters: %w", err)
+		header.SwapUnread = true
+		return header, append(warnings, fmt.Sprintf("read Darwin swap counters: %v", err)), nil
 	}
 	swapTotal, swapUsed, err := parseDarwinSwap(swap)
 	if err != nil {
-		return Header{}, err
+		header.SwapUnread = true
+		return header, append(warnings, err.Error()), nil
 	}
 	if swapTotal > 0 {
 		header.SwapPercent = percent(swapUsed, swapTotal)
 	}
-	return header, nil
+	return header, warnings, nil
 }
 
-func parseDarwinVMStat(value string) (uint64, map[string]uint64, error) {
+// parseDarwinVMStat returns the page size and every page counter that parsed;
+// a counter that does not parse is skipped with a warning naming it.
+func parseDarwinVMStat(value string) (uint64, map[string]uint64, []string, error) {
 	lines := strings.Split(value, "\n")
 	if len(lines) == 0 {
-		return 0, nil, fmt.Errorf("parse Darwin vm_stat: empty output")
+		return 0, nil, nil, fmt.Errorf("parse Darwin vm_stat: empty output")
 	}
 	marker := "page size of "
 	start := strings.Index(lines[0], marker)
 	if start < 0 {
-		return 0, nil, fmt.Errorf("parse Darwin vm_stat page size: malformed header %q", lines[0])
+		return 0, nil, nil, fmt.Errorf("parse Darwin vm_stat page size: malformed header %q", lines[0])
 	}
 	sizeField := strings.Fields(lines[0][start+len(marker):])
 	if len(sizeField) == 0 {
-		return 0, nil, fmt.Errorf("parse Darwin vm_stat page size: missing value")
+		return 0, nil, nil, fmt.Errorf("parse Darwin vm_stat page size: missing value")
 	}
 	pageSize, err := strconv.ParseUint(sizeField[0], 10, 64)
 	if err != nil {
-		return 0, nil, fmt.Errorf("parse Darwin vm_stat page size %q: %w", sizeField[0], err)
+		return 0, nil, nil, fmt.Errorf("parse Darwin vm_stat page size %q: %w", sizeField[0], err)
 	}
 	pages := make(map[string]uint64)
+	var warnings []string
 	for _, line := range lines[1:] {
 		key, raw, found := strings.Cut(line, ":")
 		if !found {
@@ -215,11 +245,12 @@ func parseDarwinVMStat(value string) (uint64, map[string]uint64, error) {
 		}
 		count, parseErr := strconv.ParseUint(strings.TrimSuffix(strings.TrimSpace(raw), "."), 10, 64)
 		if parseErr != nil {
-			return 0, nil, fmt.Errorf("parse Darwin vm_stat %q: %w", key, parseErr)
+			warnings = append(warnings, fmt.Sprintf("parse Darwin vm_stat %q: %v; counter skipped", key, parseErr))
+			continue
 		}
 		pages[strings.TrimSpace(key)] = count
 	}
-	return pageSize, pages, nil
+	return pageSize, pages, warnings, nil
 }
 
 func parseDarwinSwap(value []byte) (total, used uint64, err error) {

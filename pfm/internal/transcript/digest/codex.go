@@ -148,12 +148,15 @@ func (p *parsed) codexMessage(n int, ts, label string, payload *transcript.Codex
 func (p *parsed) codexOutput(n int, ts, label string, payload *transcript.CodexPayload) {
 	key := pyvalue.Repr(payload.CallID)
 	ev := p.calls[key]
+	text, failed := transcript.CodexToolOutput(payload.Output)
 	if ev == nil {
-		p.mark(n, dispSkipped, label+" (no matching call)")
+		// Its call is in another file: the output still shows, under an unknown call.
+		ev = &event{line: n, ts: ts, kind: kindCall, name: "?"}
+		ev.setResult(text, failed, ts)
+		p.add(ev, label+" (no matching call)")
 		return
 	}
 	delete(p.calls, key)
-	text, failed := transcript.CodexToolOutput(payload.Output)
 	ev.setResult(text, failed, ts)
 	for index, wrapper := range p.wrappers {
 		if wrapper != ev {

@@ -176,10 +176,11 @@ func inspectTarget(
 			return headless.Status{}, runtimeErr
 		}
 		seat, found, seatErr := nativeSeat(ctx, effective, target.ID, target.SeatID)
-		if seatErr != nil {
-			return headless.Status{}, fmt.Errorf("read status loss note: %w", seatErr)
-		}
-		if found {
+		switch {
+		case seatErr != nil:
+			// The note is an optional suffix: an unread one says so, never fails the status.
+			status.LostNote = fmt.Sprintf("loss note unknown: %v", seatErr)
+		case found:
 			status.LostNote = seat.LostNote
 		}
 	}

@@ -99,14 +99,6 @@ func (t *doctorTally) summarize(stdout io.Writer) {
 	}
 }
 
-// abort ends a run whose later rows cannot be read: its row, one failure, the summary, exit 3.
-func (t *doctorTally) abort(stdout io.Writer, format string, args ...any) int {
-	fmt.Fprintf(stdout, format, args...)
-	t.fail()
-	t.summarize(stdout)
-	return 3
-}
-
 var DependencyProbeOverride func(context.Context, []deps.Entry, deps.ProbeOptions) []deps.Result
 
 // Run performs one health pass and returns 0 clean, 1 warnings, 2 usage, or 3 failures.
@@ -351,9 +343,7 @@ func Run(
 	tally.warnings += cleanupWarnings
 	tally.failures += cleanupFailures
 
-	if code, aborted := printDatabaseDoctor(ctx, stdout, database, databaseErr, resolved, tally); aborted {
-		return code
-	}
+	printDatabaseDoctor(ctx, stdout, database, databaseErr, resolved, tally)
 
 	// The process table is probed by READING it, not by stat'ing /proc. macOS has
 	// no /proc and never will — pfm reads its process table through sysctl there

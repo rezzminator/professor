@@ -118,6 +118,10 @@ type Snapshot struct {
 	// working state (internal/rowfacts), shown in the header: rows with no
 	// facts must read as "could not look", never as "nothing to show".
 	FactsError string
+	// ScanError is the pass's per-item failures that still composed a fleet:
+	// an unreadable primary account, a native seat left unenriched. Shown in
+	// the header so a stand-in or a bare seat never reads as the whole truth.
+	ScanError string
 	// MergeNewChat is used only by the interactive picker. Plain and TSV
 	// output leave it false so their existing two-row output remains stable.
 	MergeNewChat bool

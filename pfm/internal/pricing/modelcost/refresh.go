@@ -136,8 +136,10 @@ type Result struct {
 // fetched and the clone file
 // rewritten only when its rows or sources changed, so an unchanged refresh
 // leaves the tracked file alone and records the check in the stamp. A failed
-// fetch serves the loaded table. The error is a table that cannot be served
-// (an invalid override); the Result is meaningful either way.
+// fetch serves the loaded table. The error is either a published table that
+// cannot be loaded (no Prices at all) or a *pricing.OverrideError, returned
+// beside the published table served without the override; the Result is
+// meaningful either way.
 func Refresh(ctx context.Context, options Options) (pricing.Prices, Result, error) {
 	ticker := options.Clock
 	if ticker == nil {
@@ -211,11 +213,10 @@ func Refresh(ctx context.Context, options Options) (pricing.Prices, Result, erro
 	default:
 		result.StampErr = fmt.Errorf("%w; %w", result.StampErr, binaryErr)
 	}
+	// An invalid override returns its error beside the published table served
+	// without it: a caller that can price by that table does.
 	prices, err := pricing.ServeTable(served, origin, options.ConfigPath)
-	if err != nil {
-		return pricing.Prices{}, result, err
-	}
-	return prices, result, nil
+	return prices, result, err
 }
 
 // PriceDocument is the --json document of a served table and the refresh that

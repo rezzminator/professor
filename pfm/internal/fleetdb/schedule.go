@@ -96,7 +96,7 @@ VALUES(?,?,?,?,?,?,?,?,?,?)`,
 
 // Schedules lists every schedule, soonest first.
 func (s *Store) Schedules(ctx context.Context) ([]Schedule, error) {
-	return s.selectSchedules(ctx, "list schedules", "ORDER BY next_fire_ns,id")
+	return s.selectSchedules(ctx, true, "list schedules", "ORDER BY next_fire_ns,id")
 }
 
 // DueSchedules lists the schedules whose next fire is at or before now,
@@ -104,7 +104,7 @@ func (s *Store) Schedules(ctx context.Context) ([]Schedule, error) {
 // schedule that already fired never is again.
 func (s *Store) DueSchedules(ctx context.Context, now time.Time) ([]Schedule, error) {
 	return s.selectSchedules(
-		ctx, "list due schedules", "WHERE next_fire_ns<=? AND "+schedulePending+" ORDER BY next_fire_ns,id",
+		ctx, true, "list due schedules", "WHERE next_fire_ns<=? AND "+schedulePending+" ORDER BY next_fire_ns,id",
 		now.UnixNano(),
 	)
 }
@@ -114,6 +114,7 @@ func (s *Store) DueSchedules(ctx context.Context, now time.Time) ([]Schedule, er
 func (s *Store) ScheduleProblems(ctx context.Context, now time.Time, grace time.Duration) ([]Schedule, error) {
 	return s.selectSchedules(
 		ctx,
+		true,
 		"list schedule problems",
 		"WHERE last_error<>'' OR (next_fire_ns<=? AND "+schedulePending+") ORDER BY next_fire_ns,id",
 		now.Add(-grace).UnixNano(),
@@ -122,7 +123,9 @@ func (s *Store) ScheduleProblems(ctx context.Context, now time.Time, grace time.
 
 // Schedule reads one schedule; found is false when no row has that id.
 func (s *Store) Schedule(ctx context.Context, id int64) (Schedule, bool, error) {
-	schedules, err := s.selectSchedules(ctx, fmt.Sprintf("read schedule %d", id), "WHERE id=?", id)
+	// One schedule by id refuses an unreadable row: skipping it would read
+	// as "no such schedule".
+	schedules, err := s.selectSchedules(ctx, false, fmt.Sprintf("read schedule %d", id), "WHERE id=?", id)
 	if err != nil {
 		return Schedule{}, false, err
 	}
@@ -132,8 +135,11 @@ func (s *Store) Schedule(ctx context.Context, id int64) (Schedule, bool, error) 
 	return schedules[0], true, nil
 }
 
+// selectSchedules reads schedules; a list (skipUnreadable) skips an unreadable
+// row with a warning, a lookup by id returns its error.
 func (s *Store) selectSchedules(
 	ctx context.Context,
+	skipUnreadable bool,
 	what, clause string,
 	args ...any,
 ) (result []Schedule, returnErr error) {
@@ -158,7 +164,12 @@ func (s *Store) selectSchedules(
 			&interval, &next, &created, &fired, &unseen,
 			&schedule.SetByID, &schedule.SetByLabel, &schedule.LastError, &errorAt, &once,
 		); err != nil {
-			return nil, fmt.Errorf("%s: scan: %w", what, err)
+			err = fmt.Errorf("%s: scan: %w", what, err)
+			if !skipUnreadable {
+				return nil, err
+			}
+			skipRow(ctx, "schedules", err)
+			continue
 		}
 		schedule.Interval = time.Duration(interval)
 		schedule.NextFire = time.Unix(0, next)

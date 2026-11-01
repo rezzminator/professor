@@ -34,7 +34,7 @@ func TestLogDefaultsToTheBuildLevelAndTheShippedRotation(t *testing.T) {
 
 func TestLogKeysFromFile(t *testing.T) {
 	got, err := loadTmuxConfig(t, `, "log": {"level": "WARNING", "keepFiles": 2, "maxMB": 16, "keepDays": 0,
-		"components": {"mcp": "debug", "db": "off", "tmux": "Warning"}}`)
+		"components": {"mcp": "debug", "db": "off", "tmux": "Warning", "database": "off"}}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,8 +42,10 @@ func TestLogKeysFromFile(t *testing.T) {
 		t.Fatalf("Log = %+v, want warn/2/16/0 — warning is stored as its canonical warn", got.Log)
 	}
 	components := got.Log.Components
-	if components["mcp"] != "debug" || components["db"] != "off" || components["tmux"] != "warn" {
-		t.Fatalf("Log.Components = %v, want mcp=debug db=off tmux=warn", got.Log.Components)
+	// An unknown component is kept for obs to name, never a refused config.
+	if components["mcp"] != "debug" || components["db"] != "off" || components["tmux"] != "warn" ||
+		components["database"] != "off" {
+		t.Fatalf("Log.Components = %v, want mcp=debug db=off tmux=warn database=off", got.Log.Components)
 	}
 	for _, key := range []string{"log.level", "log.keepFiles", "log.maxMB", "log.keepDays", "log.components"} {
 		if source := got.Source(key); source != SourceFile {
@@ -61,7 +63,6 @@ func TestLogKeysRejectUnusableValues(t *testing.T) {
 			`, "log": {"components": {"mcp": "loud"}}`,
 			"log.components.mcp must be one of debug, info, warn, warning, error, off",
 		},
-		{`, "log": {"components": {"database": "off"}}`, `log.components: "database" is not one of cli, mcp, http.in`},
 		{`, "log": {"keepDays": -1}`, "log.keepDays must be 0..3650"},
 		{`, "log": {"keepDays": 4000}`, "log.keepDays must be 0..3650"},
 		{`, "log": {"keepFiles": 0}`, "log.keepFiles must be 1..64"},

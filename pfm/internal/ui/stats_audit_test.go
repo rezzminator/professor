@@ -27,6 +27,13 @@ func TestStatsHeaderNeverPrintsAMissingReadingAsZero(t *testing.T) {
 			t.Fatalf("sampled header %q missing %q", sampled, want)
 		}
 	}
+	model.stats.Header = pfmstats.Header{RAMUnread: true, SwapUnread: true}
+	unread := ansi.Strip(model.renderStatsHeader(120))
+	for _, want := range []string{"RAM err", "SWAP err"} {
+		if !strings.Contains(unread, want) {
+			t.Fatalf("unread-memory header %q missing %q", unread, want)
+		}
+	}
 }
 
 func TestStatsSeatWithoutAProcessRendersDashes(t *testing.T) {

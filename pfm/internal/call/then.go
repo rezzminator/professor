@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"strings"
 	"time"
@@ -297,39 +296,32 @@ func (spawner CommandThenSpawner) Spawn(
 	// Stdin is left unset: a deps.Runner.Start child reads from the null
 	// device by default (os/exec's own contract for a nil Stdin) exactly as
 	// the explicit /dev/null wiring this replaced did.
-	null, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
-	if err != nil {
-		return fmt.Errorf("open null device for then waiter: %w", err)
-	}
-	defer func() {
-		if err := null.Close(); err != nil {
-			returnErr = errors.Join(returnErr, fmt.Errorf("close null device for then waiter: %w", err))
-		}
-	}()
 	// A fresh chain truncates the log; a HOP appends — truncating on a hop
 	// would wipe the chain's earlier hops while they are still being written.
 	flags := os.O_CREATE | os.O_WRONLY | os.O_TRUNC
 	if request.Append {
 		flags = os.O_CREATE | os.O_WRONLY | os.O_APPEND
 	}
-	var stdout, stderr io.Writer = null, null
+	// The log is the waiter's only voice once detached: an undelivered steer
+	// is kept there. A waiter that cannot write it is never started.
 	log, err := os.OpenFile(request.LogPath, flags, 0o600)
-	if err == nil {
-		defer func() {
-			if err := log.Close(); err != nil {
-				returnErr = errors.Join(returnErr, fmt.Errorf("close then waiter log %s: %w", request.LogPath, err))
-			}
-		}()
-		stdout, stderr = log, log
+	if err != nil {
+		return fmt.Errorf("open then waiter log: %w", err)
 	}
+	defer func() {
+		if err := log.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close then waiter log %s: %w", request.LogPath, err))
+		}
+	}()
+
 	runner := spawner.Runner
 	if runner == nil {
 		runner = obs.Runner(deps.RealRunner{})
 	}
 	opts := deps.StartOptions{
 		Env:    env,
-		Stdout: stdout,
-		Stderr: stderr,
+		Stdout: log,
+		Stderr: log,
 		// The nohup floor detaches by releasing the process handle right
 		// after Start (deps.StartOptions' Detach shape); the setsid launcher
 		// already forks and returns on its own (setsid -f), so Spawn waits

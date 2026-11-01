@@ -78,16 +78,24 @@ func acquireTargetLock(
 
 		// chat.sh:164-168 steals a held lock only when its owner process is
 		// gone or the hold has run past MAXHOLD, and measures the hold in whole
-		// seconds with a STRICT >. An unreadable or malformed owner file is
-		// never stale: the contender waits out its deadline instead.
+		// seconds with a STRICT >. An unreadable or malformed owner file names
+		// no owner to probe: it is stale only once its file has not been
+		// written for longer than MAXHOLD, which no live holder's beat allows.
 		ownerPID, epoch, ok := readLockOwner(path)
 		stale := ok && (processDead(ownerPID) ||
 			clk.Now().Unix()-epoch > int64(maxHold/time.Second))
+		if !ok {
+			stale = unreadableOwnerExpired(clk, path, maxHold)
+		}
 		if stale {
 			_ = os.RemoveAll(path)
 			continue
 		}
 		if !clk.Now().Before(deadline) {
+			if !ok {
+				return nil, fmt.Errorf("call target lock timeout: owner file %s names no owner",
+					filepath.Join(path, "owner"))
+			}
 			return nil, fmt.Errorf("call target lock timeout")
 		}
 		if err := clk.Sleep(ctx, poll); err != nil {
@@ -159,6 +167,16 @@ func readLockOwner(path string) (pid int, epoch int64, ok bool) {
 	}
 	epoch, err = strconv.ParseInt(fields[1], 10, 64)
 	return pid, epoch, err == nil
+}
+
+// unreadableOwnerExpired judges a lock whose owner file cannot be parsed by
+// the last write to it (or to the lock directory, before any owner file).
+func unreadableOwnerExpired(clk clock.Clock, path string, maxHold time.Duration) bool {
+	info, err := os.Stat(filepath.Join(path, "owner"))
+	if err != nil {
+		info, err = os.Stat(path)
+	}
+	return err == nil && clk.Now().Sub(info.ModTime()) > maxHold
 }
 
 // processDead is a lock owner the one pid probe (gather.ProcessAlive) proves

@@ -2,14 +2,18 @@ package headless
 
 import (
 	"context"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/codexmeta"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 const (
@@ -169,16 +173,95 @@ func TestACodexParentOutsideADayDirectoryKeepsItsTranscriptVerdict(t *testing.T)
 	}
 }
 
-// A sub-agent rollout whose first line cannot be read as session_meta is a
-// loud inspect error, never a silent "no sub-agent".
-func TestAnUndecodableNewerCodexRolloutIsAnInspectError(t *testing.T) {
+// A rollout whose first line is not a session_meta says nothing of this
+// parent's lineage: it is logged with its path and skipped, and the real
+// sub-agent listed after it still holds the parent at working.
+func TestAnUndecodableNewerCodexRolloutIsSkippedAndLogged(t *testing.T) {
 	root := t.TempDir()
 	stamp := time.Now().Add(-90 * time.Second)
-	writeRollout(t, root, "2026/01/01", childThread, stamp.Add(time.Minute), `{"not":"a session_meta"}`)
+	undecodable := writeRollout(t, root, "2026/01/01", childThread, stamp.Add(time.Minute), `{"not":"a session_meta"}`)
+	writeRollout(t, root, "2026/01/01", grandThread, stamp.Add(time.Minute), subagentMeta(grandThread, parentThread))
 	parent := writeRollout(t, root, "2026/01/01", parentThread, stamp, codexUserLine, codexAssistantLine)
-	status, err := inspectCodexParent(t, parent)
-	if err == nil || !strings.Contains(err.Error(), "decode Codex rollout header") {
-		t.Fatalf("Inspect() = %#v, %v; want the decode failure named", status, err)
+	ctx, recorder := obs.Test(t)
+	status, err := Inspect(ctx, Chat{
+		Name: "seat", ID: parentThread, Engine: pfmengine.Codex, Path: parent, Live: true,
+	}, time.Now())
+	if err != nil || status.State != StateWorking {
+		t.Fatalf("Inspect() = %q, %v; want working, nil", status.State, err)
+	}
+	var warned []string
+	for _, record := range recorder.Records() {
+		if record.Message == "inspect: Codex rollout header could not be decoded; not counted as a sub-agent" {
+			path, _ := record.Field("path")
+			warned = append(warned, record.Level+" "+path.(string))
+		}
+	}
+	if want := []string{"WARN " + undecodable}; !slices.Equal(warned, want) {
+		t.Fatalf("warnings = %q, want %q", warned, want)
+	}
+}
+
+// A rollout removed between the day listing and its read wrote nothing this
+// parent can wait on: it is no header and no error.
+func TestAVanishedCodexRolloutHasNoHeader(t *testing.T) {
+	_, ok, err := readCodexHeader(context.Background(), filepath.Join(t.TempDir(), "rollout-gone.jsonl"))
+	if ok || err != nil {
+		t.Fatalf("readCodexHeader() ok=%v err=%v; want false, nil", ok, err)
+	}
+}
+
+// A sidechain or rollout removed between its listing and its stat wrote nothing
+// newer: it is skipped. Any other stat failure is a read error, never "no
+// sub-agent".
+func TestAFileRemovedSinceItsListingIsSkipped(t *testing.T) {
+	root := t.TempDir()
+	parent := filepath.Join(root, "2026", "08", "16", "rollout-2026-08-16T12-00-00-"+parentThread+".jsonl")
+	child := filepath.Join(root, "2026", "08", "16", "rollout-2026-08-16T12-05-00-"+childThread+".jsonl")
+	sidechain := filepath.Join(root, "2026", "08", "16", parentThread, "subagents", "agent-a.jsonl")
+	for _, path := range []string{parent, child, sidechain} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("{}\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	parentModified := time.Now().Add(-time.Hour).UnixNano()
+	denied := errors.New("permission denied")
+	for _, testCase := range []struct {
+		name       string
+		statErr    error
+		wantClaude bool
+		wantErrs   [2]string
+	}{
+		{"still there", nil, true, [2]string{"", ""}},
+		{"removed since the listing", fs.ErrNotExist, false, [2]string{"", ""}},
+		{"unreadable", denied, false, [2]string{
+			"inspect Claude sidechain " + sidechain + ": permission denied",
+			"inspect Codex rollout " + child + ": permission denied",
+		}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			lstatListed = func(path string) (fs.FileInfo, error) {
+				if testCase.statErr != nil && (path == sidechain || path == child) {
+					return nil, testCase.statErr
+				}
+				return os.Lstat(path)
+			}
+			t.Cleanup(func() { lstatListed = os.Lstat })
+			gotClaude, claudeErr := newerClaudeSidechain(parent, parentThread, parentModified)
+			_, codexErr := newerCodexSubagent(context.Background(), parent, parentThread, parentModified)
+			gotErrs := [2]string{}
+			for i, err := range []error{claudeErr, codexErr} {
+				if err != nil {
+					gotErrs[i] = err.Error()
+				}
+			}
+			if gotClaude != testCase.wantClaude || gotErrs != testCase.wantErrs {
+				t.Fatalf("Claude sidechain newer=%v, errors=%q; want newer=%v, errors=%q",
+					gotClaude, gotErrs, testCase.wantClaude, testCase.wantErrs)
+			}
+		})
 	}
 }
 

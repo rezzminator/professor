@@ -121,8 +121,9 @@ var marketplacePluginName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 // marketplace, {sourceRepo}/.claude-plugin/marketplace.json, lists, in its
 // order, and returns that path beside them. A file that cannot be read returns
 // its error wrapped, so a missing file still matches fs.ErrNotExist; a file
-// that cannot be parsed, lists no plugins or lists a name twice or one that is
-// not a plugin name returns its error, never a partial list.
+// that cannot be parsed or lists no plugins returns its error and no list. An
+// entry listed twice or whose name is not a plugin name is skipped and named
+// in the error returned beside every valid name.
 func MarketplacePluginNames(sourceRepo string) (string, []string, error) {
 	path := filepath.Join(sourceRepo, ".claude-plugin", "marketplace.json")
 	raw, err := os.ReadFile(path)
@@ -137,17 +138,23 @@ func MarketplacePluginNames(sourceRepo string) (string, []string, error) {
 		return path, nil, fmt.Errorf("the marketplace plugin list %s lists no plugins", path)
 	}
 	names := make([]string, 0, len(manifest.Plugins))
+	var skipped []error
 	for index, entry := range manifest.Plugins {
-		if !marketplacePluginName.MatchString(entry.Name) {
-			return path, nil, fmt.Errorf("the marketplace plugin list %s: plugins[%d] name %q is not a plugin name",
-				path, index, EscapeControl(entry.Name))
+		switch {
+		case !marketplacePluginName.MatchString(entry.Name):
+			skipped = append(skipped, fmt.Errorf(
+				"the marketplace plugin list %s: plugins[%d] name %q is not a plugin name",
+				path, index, EscapeControl(entry.Name)))
+		case slices.Contains(names, entry.Name):
+			skipped = append(skipped, fmt.Errorf("the marketplace plugin list %s lists %s twice", path, entry.Name))
+		default:
+			names = append(names, entry.Name)
 		}
-		if slices.Contains(names, entry.Name) {
-			return path, nil, fmt.Errorf("the marketplace plugin list %s lists %s twice", path, entry.Name)
-		}
-		names = append(names, entry.Name)
 	}
-	return path, names, nil
+	if len(names) == 0 {
+		return path, nil, errors.Join(skipped...)
+	}
+	return path, names, errors.Join(skipped...)
 }
 
 // WithMarketplacePlugins resolves an -alpha build's plugins against the source
@@ -159,7 +166,8 @@ func MarketplacePluginNames(sourceRepo string) (string, []string, error) {
 // marketplace file. A file that cannot be read, parsed or validated, a source
 // clone that could not be resolved, and a default list with no file to read
 // return the build unchanged with the error: install and doctor name it as a
-// failure and still plan the list, never an empty one.
+// failure and still plan the list, never an empty one. Entries the file lists
+// badly are named in the error beside the build derived from the valid ones.
 func (build ClaudePluginBuild) WithMarketplacePlugins() (ClaudePluginBuild, error) {
 	if !obs.AlphaBuild(build.Version) {
 		return build, nil
@@ -174,7 +182,7 @@ func (build ClaudePluginBuild) WithMarketplacePlugins() (ClaudePluginBuild, erro
 	if errors.Is(err, fs.ErrNotExist) && !build.PluginsDefault {
 		return build, nil
 	}
-	if err != nil {
+	if err != nil && len(names) == 0 {
 		return build, err
 	}
 	if build.PluginsDefault {
@@ -199,7 +207,7 @@ func (build ClaudePluginBuild) WithMarketplacePlugins() (ClaudePluginBuild, erro
 			build.Unlisted = append(build.Unlisted, name)
 		}
 	}
-	return build, nil
+	return build, err
 }
 
 // claudeMarketplaceRecord is the source Claude Code records for one marketplace

@@ -257,6 +257,8 @@ func (launcher Launcher) Follow(ctx context.Context, pid int, logPath string, st
 			if code, ok := strings.CutPrefix(string(line), ExitMarker); ok {
 				parsed, err := strconv.Atoi(strings.TrimSpace(code))
 				if err != nil {
+					fmt.Fprintf(stderr, "pfm restart: worker pid %d: unreadable exit marker %q: %v; log %s\n",
+						pid, strings.TrimSpace(code), err, logPath)
 					return 1
 				}
 				return parsed

@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -484,5 +485,83 @@ func TestFailedAssetStageDoesNotWireDependentRegistries(t *testing.T) {
 		if target, err := os.Readlink(path); err == nil {
 			t.Errorf("failed asset stage published dependent link %s -> %s", path, target)
 		}
+	}
+}
+
+// An operator's own "PFM" profile fails that settings file alone: the install
+// keeps it untouched, merges every other settings file, records the merged one
+// in the ledger, and lands every other step.
+func TestVSCodeProfileConflictFailsOnlyItsSettingsFile(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	merged := filepath.Join(home, "a", "settings.json")
+	writeFixture(t, merged, `{}`)
+	settings := filepath.Join(home, "b", "settings.json")
+	original := `{"terminal.integrated.profiles.linux":{"PFM":{"path":"/operator/shell"}}}`
+	writeFixture(t, settings, original)
+
+	var output bytes.Buffer
+	_, err := Run(context.Background(), Options{
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, VSCode: true, Stdout: &output,
+		SourceRepo:     writeVSCodeLawFixture(t, t.TempDir()),
+		vscodePlatform: "linux", vscodeSettingsPaths: []string{merged, settings},
+	})
+	conflict := "VS Code settings " + settings + `: profile "PFM" already exists and is not PFM-owned`
+	if err == nil || !strings.Contains(err.Error(), conflict) || strings.Contains(err.Error(), "preflight") {
+		t.Fatalf("apply error=%v, want the profile conflict of its step alone", err)
+	}
+	if !strings.Contains(output.String(), "  FAIL    "+conflict+"\n") {
+		t.Fatalf("output lacks the FAIL row %q:\n%s", conflict, output.String())
+	}
+	if got := readFixture(t, settings); got != original {
+		t.Fatalf("conflicting apply changed settings.json: %q", got)
+	}
+	if got := readFixture(t, merged); !strings.Contains(got, `"PFM"`) {
+		t.Fatalf("the other settings file %s was not merged: %q", merged, got)
+	}
+	ledger := readVSCodeLedgerFixture(t, managedRootForHome(home))
+	if len(ledger.Files) != 1 || ledger.Files[0].Path != merged {
+		t.Fatalf("ledger files = %+v, want only %s", ledger.Files, merged)
+	}
+	if _, statErr := os.Lstat(filepath.Join(home, ".zshrc")); statErr != nil {
+		t.Fatalf("the shell step did not land past the VS Code conflict: %v", statErr)
+	}
+}
+
+// One broken store entry and one account that cannot be wired cost only
+// themselves: every other entry is linked into every other account.
+func TestWireClaudeStoreFailureCostsOnlyItsEntryAndAccount(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	store := ClaudeStore(home)
+	writeFixture(t, filepath.Join(store, "agents"), "a file where the agents directory belongs\n")
+	writeFixture(t, filepath.Join(home, "blocked"), "a file where account 1's parent belongs\n")
+	blocked := filepath.Join(home, "blocked", "1")
+	kept := pfmconfig.DefaultAccountDir(home, 2)
+	var output bytes.Buffer
+	runner := &engine{
+		options: Options{
+			Home: home, ConfigDir: store, Stdout: &output,
+			ClaudeAccounts: []pfmconfig.Account{{ID: 1, ConfigDir: blocked}, {ID: 2, ConfigDir: kept}},
+		},
+		apply: true,
+	}
+	err := runner.wireClaudeStore()
+	broken := "store entry " + filepath.Join(store, "agents") + " broken: a file where a directory belongs — remove " +
+		filepath.Join(store, "agents") + ", then run pfm install --yes"
+	if err == nil || !strings.Contains(err.Error(), broken) || !strings.Contains(err.Error(), blocked) {
+		t.Fatalf("wireClaudeStore = %v, want the broken entry and account 1 named", err)
+	}
+	skip := "  skip    " + filepath.Join(kept, "agents") + " left as it is: store entry " +
+		filepath.Join(store, "agents") + " failed above\n"
+	if !strings.Contains(output.String(), skip) {
+		t.Fatalf("output lacks %q:\n%s", skip, output.String())
+	}
+	for _, entry := range StoreEntries {
+		if entry.Name == "agents" {
+			continue
+		}
+		assertLink(t, filepath.Join(kept, entry.Name), filepath.Join(store, entry.Name))
 	}
 }

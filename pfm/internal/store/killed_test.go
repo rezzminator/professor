@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -15,6 +16,7 @@ import (
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 )
 
 const (
@@ -60,6 +62,69 @@ func TestPromptBaselineKillAutoUnkillsAfterTranscriptGrowth(t *testing.T) {
 	}
 	if _, found := raw[id]; found {
 		t.Fatalf("expired baseline kill remains in shared state: %#v", raw)
+	}
+}
+
+// A grown clear-kill that cannot be expired, because the delete fails or
+// another writer keeps changing the row, stays killed and is warned: the read
+// itself never fails.
+func TestPromptBaselineKillThatCannotExpireStaysKilled(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		trigger string
+		warning string
+	}{
+		{
+			name:    "delete refused",
+			trigger: "SELECT RAISE(FAIL,'unkill refused')",
+			warning: "WARNING: pfm could not lift the expired clear-kill of \"clear-killed\" in {state}; " +
+				"it stays killed: expire shared clear kill \"clear-killed\": constraint failed: unkill refused (1811)\n",
+		},
+		{
+			name:    "row changes on every pass",
+			trigger: "SELECT RAISE(IGNORE)",
+			warning: "WARNING: pfm's clear-kill state in {state} changed during each of 3 auto-unkill passes; " +
+				"the chats whose kill changed stay killed until the next read\n",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			setStoreTestJail(t)
+			var warnings strings.Builder
+			database := openTestStore(t, WithWarningWriter(&warnings))
+			t.Cleanup(func() { _ = database.Close() })
+			ctx := context.Background()
+			const id = "clear-killed"
+			baseline := int64(2)
+			if err := database.Kill(ctx, Killed{
+				ID: id, Engine: pfmengine.Claude, KilledAt: 10, BaselinePrompts: &baseline,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if err := database.UpsertTranscript(ctx, Transcript{
+				UUID: id, Path: "/claude/clear-killed.jsonl", PromptCount: 3,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			state, err := sqlitedb.OpenReadWrite(database.state.Path(), time.Second)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = state.ExecContext(
+				ctx,
+				"CREATE TRIGGER hold_kill BEFORE DELETE ON hidden BEGIN "+test.trigger+"; END",
+			)
+			if err := errors.Join(err, state.Close()); err != nil {
+				t.Fatal(err)
+			}
+			killed, err := database.KilledChats(ctx)
+			want := []Killed{{ID: id, Engine: pfmengine.Claude, KilledAt: 10, BaselinePrompts: &baseline}}
+			if err != nil || !reflect.DeepEqual(killed, want) {
+				t.Fatalf("killed chats = %#v, %v; want %#v", killed, err, want)
+			}
+			if want := strings.ReplaceAll(test.warning, "{state}", database.state.Path()); warnings.String() != want {
+				t.Fatalf("warnings = %q, want %q", warnings.String(), want)
+			}
+		})
 	}
 }
 

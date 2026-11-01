@@ -298,11 +298,11 @@ func TestBuildCosmosTimestampTieKeepsNewestFirstMessage(t *testing.T) {
 }
 
 func TestBuildCosmosUnknownKindWarnsInsteadOfVanishingSilently(t *testing.T) {
-	graph := BuildCosmos(nil, []fleetdb.CommsEvent{{ID: 9, AtNS: 80, Kind: "reload"}}, 100, false)
-	if len(graph.Nodes) != 0 || len(graph.Edges) != 0 || len(graph.Warnings) != 1 ||
-		!strings.Contains(graph.Warnings[0], `event 9`) ||
-		!strings.Contains(graph.Warnings[0], `unknown kind "reload"`) {
-		t.Fatalf("unknown-kind graph = %#v", graph)
+	graph := BuildCosmos(nil, []fleetdb.CommsEvent{{ID: 9, Kind: "reload", SenderLabel: "A", Target: "B"}}, 100, false)
+	edges := []CosmosEdge{{From: "chat:name:A", To: "chat:name:B", Kind: "reload", Count: 1}}
+	warnings := []string{`comms event 9 has unknown kind "reload"; drawn as a message line`}
+	if len(graph.Nodes) != 2 || !reflect.DeepEqual(graph.Edges, edges) || !reflect.DeepEqual(graph.Warnings, warnings) {
+		t.Fatalf("unknown-kind graph = %#v, want 2 nodes, edges %#v, warnings %#v", graph, edges, warnings)
 	}
 }
 

@@ -316,6 +316,48 @@ func TestParseAgentsRejectsMalformedRegistry(t *testing.T) {
 	}
 }
 
+// One registry row whose pid is not an integer keeps its row and every other row;
+// its pid is unknown, so the take-over resumes only after the process table proves
+// no live claude holds the session, and refuses the double-resume otherwise.
+func TestOpenARowWithAnUnreadablePidIsProvenBeforeTakeOver(t *testing.T) {
+	id := "77777777-7777-4777-8777-777777777777"
+	registry := `[{"sessionId":"other","name":"other","pid":9,"status":"idle"},` +
+		`{"sessionId":"` + id + `","name":"worker","pid":"nine","status":"idle"}]`
+	agents, err := ParseAgents([]byte(registry))
+	if err != nil || len(agents) != 2 || agents[1].PID != 0 || agents[1].PIDText != "nine" || agents[0].PID != 9 {
+		t.Fatalf("ParseAgents = %+v, %v; want both rows, the odd pid unknown as text nine", agents, err)
+	}
+	for _, test := range []struct {
+		name    string
+		holders []Process
+		want    string
+	}{
+		{name: "no live claude holds it"},
+		{
+			name:    "a live claude holds it",
+			holders: []Process{{PID: 51, Argv: []string{"claude", "--resume", id}}},
+			want: "registry row for " + id +
+				` has an unreadable pid "nine", and a live claude holds it — refusing the double-resume`,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			commands := &fakeCommands{rows: map[string][]byte{"": []byte(registry)}}
+			opener := newTestOpener(t, commands, &fakeProcesses{rows: test.holders}, fakeTmux{})
+			err := opener.Open(context.Background(), Request{ID: id, CWD: "/jail/project", PrimaryAccount: 2})
+			if test.want != "" {
+				if err == nil || err.Error() != test.want || len(commands.resumes) != 0 {
+					t.Fatalf("Open = %v, resumes %q; want refusal %q", err, commands.resumes, test.want)
+				}
+				return
+			}
+			want := filepath.Join(opener.home, ".cc", "2") + "|/jail/project|" + id
+			if err != nil || len(commands.resumes) != 1 || commands.resumes[0] != want {
+				t.Fatalf("Open = %v, resumes %q; want one resume %q", err, commands.resumes, want)
+			}
+		})
+	}
+}
+
 func TestOpenRefusesFreshResumeWhenEveryRegistryQueryFails(t *testing.T) {
 	id := "55555555-5555-4555-8555-555555555555"
 	commands := &fakeCommands{

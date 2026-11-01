@@ -35,6 +35,8 @@ const (
 	openCodeStateCompleted = "completed"
 	openCodePartTool       = "tool"
 	openCodeToolApplyPatch = "apply_patch"
+	// openCodeEventUnreadable is pfm's own normalized event: a part the converter could not decode.
+	openCodeEventUnreadable = "pfm.unreadable"
 )
 
 type openCodeServer struct {

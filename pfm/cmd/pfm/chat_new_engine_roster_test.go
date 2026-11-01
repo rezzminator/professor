@@ -1,11 +1,15 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleet"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
@@ -108,4 +112,27 @@ func TestResolveRunEngineAccountDefaultsToCallerEngine(t *testing.T) {
 			t.Fatalf("resolveRunEngineAccount = %q/%d error=%v, want cx/3 (explicit wins)", engine, account, err)
 		}
 	})
+}
+
+func TestPrimaryAccountOrImplicitStandsInWhenThePrimaryCannotBeRead(t *testing.T) {
+	home := t.TempDir()
+	values := paths.Values{Home: home, StateDB: filepath.Join(home, "absent.db")}
+	machine := pfmconfig.Config{Accounts: []pfmconfig.Account{{ID: 3}, {ID: 5}}}
+	mirror := filepath.Join(home, ".claude-primary")
+	if err := os.WriteFile(mirror, []byte("5\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := fleet.PrimaryAccountOrImplicit(values, machine); got != 5 || err != nil {
+		t.Fatalf("fleet.PrimaryAccountOrImplicit(mirror 5) = (%d, %v), want (5, nil)", got, err)
+	}
+	if err := os.Remove(mirror); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(mirror, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := fleet.PrimaryAccountOrImplicit(values, machine); got != 3 || err == nil {
+		t.Fatalf("fleet.PrimaryAccountOrImplicit(unreadable mirror %s) = (%d, %v), want (3, the read error)",
+			mirror, got, err)
+	}
 }

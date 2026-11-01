@@ -116,7 +116,8 @@ type indicatorPainter struct {
 	call      func(ctx context.Context, socket string, lines ...[]byte) ([]json.RawMessage, error)
 	clock     clock.Clock
 	// seq numbers the request ids; reported holds the unexpected agent_status
-	// strings already named on stderr, so a blinking pane names one once.
+	// strings and id-less list entries already named on stderr, so a blinking
+	// pane names one once.
 	seq      uint64
 	reported map[string]bool
 	// hasDone keeps the blinker reconciling unseen completions: marking an
@@ -431,9 +432,16 @@ func (painter *indicatorPainter) list(ctx context.Context) ([]indicatorTarget, e
 			len(results),
 		)
 	}
-	targets, err := decodeIndicatorTargets(results[0], results[1])
+	targets, skipped, err := decodeIndicatorTargets(results[0], results[1])
 	if err != nil {
 		return nil, fmt.Errorf("herdr indicators: socket %s: %w", painter.socket, err)
+	}
+	for _, entry := range skipped {
+		// Named once per painter, as an unrecognised status is: a blinker lists every tick.
+		if !painter.reported[entry] {
+			painter.reported[entry] = true
+			painter.logf("herdr indicators: socket %s: %s, left unpainted", painter.socket, entry)
+		}
 	}
 	return targets, nil
 }

@@ -31,6 +31,10 @@ func fileStamp(path string) (size, mtimeNS int64, err error) {
 	return info.Size(), info.ModTime().UnixNano(), nil
 }
 
+// reloadCxNamesFromRoots replaces the Codex names table from every home's
+// session index. A session index it cannot read is warned and the pass keeps
+// every prior name, stamping no signature so the next pass retries: the table
+// is replaced whole and cannot tell one home's names from another's.
 func reloadCxNamesFromRoots(
 	ctx context.Context,
 	database *store.Store,
@@ -47,7 +51,8 @@ func reloadCxNamesFromRoots(
 		path := filepath.Join(codexHome, codexmeta.SessionIndexFile)
 		size, mtimeNS, err := fileStamp(path)
 		if err != nil {
-			return fmt.Errorf("stat Codex session index %q: %w", path, err)
+			warnUnreadable(ctx, "codex session index", path, err)
+			return nil
 		}
 		fmt.Fprintf(signature, "%s\x00%d\x00%d\x00", filepath.Clean(codexHome), size, mtimeNS)
 		sources = append(sources, source{path: path, size: size})
@@ -64,22 +69,28 @@ func reloadCxNamesFromRoots(
 		if source.size < 0 {
 			continue
 		}
+		unparsed := 0
 		_, bytesRead, err := claudetranscript.ReadLines(source.path, 0, func(line []byte, complete bool) {
 			if !complete {
 				return
 			}
-			if entry, err := codexmeta.DecodeSessionIndexLine(line); err == nil {
-				names[entry.ID] = store.CxName{
-					ID: entry.ID, ThreadName: entry.ThreadName,
-					Source:    store.CxNameSourceSessionIndex,
-					RenamedAt: cxRenameTime(entry),
-				}
+			entry, err := codexmeta.DecodeSessionIndexLine(line)
+			if err != nil {
+				unparsed++
+				return
+			}
+			names[entry.ID] = store.CxName{
+				ID: entry.ID, ThreadName: entry.ThreadName,
+				Source:    store.CxNameSourceSessionIndex,
+				RenamedAt: cxRenameTime(entry),
 			}
 		})
-		if err != nil {
-			return fmt.Errorf("parse Codex session index %q: %w", source.path, err)
-		}
 		counters.BytesRead += bytesRead
+		warnUnparsedLines(ctx, source.path, unparsed)
+		if err != nil {
+			warnUnreadable(ctx, "codex session index", source.path, err)
+			return nil
+		}
 	}
 
 	ids := make([]string, 0, len(names))
@@ -127,7 +138,8 @@ func reloadCxNames(
 	path := filepath.Join(codexHome, codexmeta.SessionIndexFile)
 	size, mtimeNS, err := fileStamp(path)
 	if err != nil {
-		return fmt.Errorf("stat Codex session index: %w", err)
+		warnUnreadable(ctx, "codex session index", path, err)
+		return nil
 	}
 
 	oldSize, sizeFound, err := database.Meta(ctx, "cx_index_size")
@@ -146,26 +158,32 @@ func reloadCxNames(
 
 	names := make(map[string]store.CxName)
 	if size >= 0 {
+		unparsed := 0
 		_, bytesRead, err := claudetranscript.ReadLines(path, 0, func(line []byte, complete bool) {
 			if !complete {
 				return
 			}
-			if entry, err := codexmeta.DecodeSessionIndexLine(line); err == nil {
-				// The file is append-only, so the LAST entry for an id — the
-				// one this overwrite leaves standing — is the freshest rename
-				// intent, whether or not it carries a timestamp.
-				names[entry.ID] = store.CxName{
-					ID:         entry.ID,
-					ThreadName: entry.ThreadName,
-					Source:     store.CxNameSourceSessionIndex,
-					RenamedAt:  cxRenameTime(entry),
-				}
+			entry, err := codexmeta.DecodeSessionIndexLine(line)
+			if err != nil {
+				unparsed++
+				return
+			}
+			// The file is append-only, so the LAST entry for an id — the
+			// one this overwrite leaves standing — is the freshest rename
+			// intent, whether or not it carries a timestamp.
+			names[entry.ID] = store.CxName{
+				ID:         entry.ID,
+				ThreadName: entry.ThreadName,
+				Source:     store.CxNameSourceSessionIndex,
+				RenamedAt:  cxRenameTime(entry),
 			}
 		})
-		if err != nil {
-			return fmt.Errorf("parse Codex session index: %w", err)
-		}
 		counters.BytesRead += bytesRead
+		warnUnparsedLines(ctx, path, unparsed)
+		if err != nil {
+			warnUnreadable(ctx, "codex session index", path, err)
+			return nil
+		}
 	}
 
 	ids := make([]string, 0, len(names))

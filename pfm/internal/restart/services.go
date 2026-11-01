@@ -141,6 +141,21 @@ func installedNames(dir string, match func(string) bool) ([]string, error) {
 	return names, nil
 }
 
+// unreadableUnit is a unit whose state could not be read. It stays in the plan:
+// its stop step fails naming why, so the restart reports it and exits 1, and
+// every other unit is still restarted. It is never started, and never read as
+// stopped.
+func unreadableUnit(family, name, foundBy string, cause error) Unit {
+	return Unit{
+		Family:  family,
+		Name:    name,
+		FoundBy: foundBy,
+		Before:  "unreadable",
+		StopHow: "not attempted: its state could not be read: " + stepLine(cause.Error()),
+		Stop:    func(context.Context) (string, error) { return "", fmt.Errorf("state unreadable: %w", cause) },
+	}
+}
+
 // LaunchdManager supervises per-user launch agents in the gui/<uid> domain.
 type LaunchdManager struct {
 	serviceTools
@@ -177,15 +192,15 @@ func (manager LaunchdManager) Units(
 	for _, name := range names {
 		label := strings.TrimSuffix(name, ".plist")
 		path := filepath.Join(manager.Dir, name)
-		loaded, err := manager.loaded(ctx, label)
+		loaded, body, err := manager.read(ctx, label, path)
 		if err != nil {
-			return nil, "", err
+			if ctx.Err() != nil {
+				return nil, "", err
+			}
+			units = append(units, unreadableUnit(family, "launchd "+label, "plist "+path, err))
+			continue
 		}
-		body, err := os.ReadFile(path)
-		if err != nil {
-			return nil, "", fmt.Errorf("read launch agent %s: %w", path, err)
-		}
-		keepAlive := launchdKeepAlive(string(body))
+		keepAlive := launchdKeepAlive(body)
 		unit := manager.unit(family, label, path, loaded, keepAlive, verify.check(label))
 		if keepAlive {
 			daemons = append(daemons, unit)
@@ -226,6 +241,20 @@ func (manager LaunchdManager) state(ctx context.Context, label string) (loaded b
 			answer.Command(), result.ExitCode, strings.TrimSpace(string(result.Stderr)))
 	}
 	return true, answer.State(), nil
+}
+
+// read is one launch agent's state: whether launchd has label loaded, and its
+// plist's text.
+func (manager LaunchdManager) read(ctx context.Context, label, path string) (bool, string, error) {
+	loaded, err := manager.loaded(ctx, label)
+	if err != nil {
+		return false, "", err
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return false, "", fmt.Errorf("read launch agent %s: %w", path, err)
+	}
+	return loaded, string(body), nil
 }
 
 func (manager LaunchdManager) loaded(ctx context.Context, label string) (bool, error) {
@@ -391,20 +420,45 @@ func (manager SystemdManager) Units(
 	for _, name := range names {
 		installed[name] = true
 	}
-	states, up := map[string]string{}, map[string]bool{}
+	states, up, unreadable := map[string]string{}, map[string]bool{}, map[string]error{}
 	for _, name := range names {
 		state, err := manager.activeState(ctx, name)
-		if err != nil {
-			return nil, "", err
+		if err == nil {
+			up[name], err = systemdUp(name, state)
 		}
-		if up[name], err = systemdUp(name, state); err != nil {
-			return nil, "", err
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil, "", err
+			}
+			unreadable[name] = err
+			continue
 		}
 		states[name] = state
 	}
 	var triggers, triggered, standalone []Unit
 	for _, name := range names {
 		stem := strings.TrimSuffix(name, filepath.Ext(name))
+		// A service's restart path hangs on its own state and its triggers': one
+		// unread among them leaves the service unreadable too.
+		watched := []string{name}
+		if filepath.Ext(name) == ".service" {
+			watched = append(watched, stem+".timer", stem+".path")
+		}
+		var cause error
+		for _, watch := range watched {
+			if cause == nil {
+				cause = unreadable[watch]
+			}
+		}
+		if cause != nil {
+			unit := unreadableUnit(family, "systemd "+name, filepath.Join(manager.Dir, name), cause)
+			if filepath.Ext(name) != ".service" {
+				triggers = append(triggers, unit)
+			} else {
+				standalone = append(standalone, unit)
+			}
+			continue
+		}
 		switch {
 		case filepath.Ext(name) != ".service":
 			triggers = append(triggers, manager.unit(family, name, states[name], up[name], "", verify.check(name)))

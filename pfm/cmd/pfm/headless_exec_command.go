@@ -273,13 +273,21 @@ func runHeadlessExec(args []string, stdin io.Reader, stdout, stderr io.Writer, r
 			fmt.Fprintf(stderr, "pfm headless: write result: %v\n", err)
 			code = 4
 		}
-	} else if *format == textFormat && runErr == nil {
-		if _, err := fmt.Fprintln(stdout, result.Answer); err != nil {
+	}
+	// A schema miss still paid for its answer: it is printed and written, exit 5 names the miss.
+	answered := runErr == nil || errors.Is(runErr, headlessrun.ErrStructuredOutput) &&
+		(result.Answer != "" || len(result.StructuredOutput) != 0)
+	if *format == textFormat && answered {
+		answer := result.Answer
+		if answer == "" {
+			answer = string(result.StructuredOutput)
+		}
+		if _, err := fmt.Fprintln(stdout, answer); err != nil {
 			fmt.Fprintf(stderr, "pfm headless: write answer: %v\n", err)
 			code = 4
 		}
 	}
-	if *out != "" && runErr == nil {
+	if *out != "" && answered {
 		body := []byte(result.Answer)
 		if len(result.StructuredOutput) != 0 {
 			body = result.StructuredOutput

@@ -77,7 +77,10 @@ func TestConvergeHerdrIndicators(t *testing.T) {
 					},
 				},
 			}
-			wantStarts, wantStops, wantErr := 1, 1, ""
+			wantStarts, wantStops, wantErr, wantDetail := 1, 1, "", ""
+			const unreadNote = "Herdr indicator process enumeration found no stale painter among those it could " +
+				"read; could not read 1 painter(s), left running: "
+			const identity = "herdr indicator pid 40 executable identity: "
 			switch name {
 			case "current":
 				k.images[40] = installed
@@ -113,10 +116,12 @@ func TestConvergeHerdrIndicators(t *testing.T) {
 				wantErr = "could not be read"
 			case "image error":
 				k.imageErr = fs.ErrPermission
-				wantErr = "executable identity"
+				wantStarts, wantStops, wantDetail = 0, 0, unreadNote+identity+fs.ErrPermission.Error()
 			case "environment error":
 				k.envErr = fs.ErrPermission
-				wantErr = "environment"
+				wantStarts, wantStops, wantDetail = 0, 0, unreadNote+
+					"herdr indicator: pid 40 install ownership: "+
+					"read pid 40 environment for its install mark: permission denied"
 			case "missing socket":
 				delete(k.envs[40], "HERDR_SOCKET_PATH")
 				wantErr = "HERDR_SOCKET_PATH"
@@ -141,7 +146,7 @@ func TestConvergeHerdrIndicators(t *testing.T) {
 				wantStarts, wantStops = 0, 0
 			case "gone image":
 				k.imageErr = fs.ErrNotExist
-				wantErr = "executable identity"
+				wantStarts, wantStops, wantDetail = 0, 0, unreadNote+identity+fs.ErrNotExist.Error()
 			case "missing binary":
 				binary += ".absent"
 				wantErr = "installed binary"
@@ -174,6 +179,9 @@ func TestConvergeHerdrIndicators(t *testing.T) {
 			}
 			if err != nil {
 				t.Fatalf("converge: %v", err)
+			}
+			if wantDetail != "" && detail != wantDetail {
+				t.Fatalf("detail = %q, want %q", detail, wantDetail)
 			}
 			if len(k.sent()) != wantStops || len(runner.Starts()) != wantStarts || replaced != (wantStarts > 0) {
 				t.Fatalf("signals=%v starts=%v detail=%s replaced=%v", k.sent(), runner.Starts(), detail, replaced)

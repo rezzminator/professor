@@ -60,17 +60,24 @@ func ReadCache(path string) ([]Bench, []WalkError, error) {
 		return nil, nil, workbenchCacheError(path, fmt.Errorf("unsupported version %d", cache.Version))
 	}
 	var benches []Bench
+	var walkErrors []WalkError
 	seen := make(map[string]bool)
+	// One bad entry is one walk error; every other workbench still loads.
 	for _, entry := range cache.Workbenches {
 		if !filepath.IsAbs(entry.Dir) || !filepath.IsAbs(entry.Root) || !eligibleBench(entry.Root, entry.Dir) {
-			return nil, nil, workbenchCacheError(
+			walkErrors = append(walkErrors, WalkError{Root: entry.Root, Path: path, Err: workbenchCacheError(
 				path,
 				fmt.Errorf("invalid workbench directory %q under %q", entry.Dir, entry.Root),
-			)
+			)})
+			continue
 		}
 		found, err := paths.HasWorkbenchManifest(entry.Dir)
 		if err != nil {
-			return nil, nil, workbenchCacheError(path, err)
+			walkErrors = append(
+				walkErrors,
+				WalkError{Root: entry.Root, Path: entry.Dir, Err: workbenchCacheError(path, err)},
+			)
+			continue
 		}
 		if found && !seen[entry.Dir] {
 			benches = append(benches, LoadBench(entry.Dir, entry.Root))
@@ -79,7 +86,6 @@ func ReadCache(path string) ([]Bench, []WalkError, error) {
 	}
 	sort.Slice(benches, func(i, j int) bool { return benches[i].Dir < benches[j].Dir })
 	assignKeys(benches)
-	var walkErrors []WalkError
 	for _, entry := range cache.Errors {
 		walkErrors = append(walkErrors, WalkError{Root: entry.Root, Path: entry.Path, Err: errors.New(entry.Error)})
 	}

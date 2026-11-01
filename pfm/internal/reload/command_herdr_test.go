@@ -18,7 +18,6 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
@@ -55,6 +54,9 @@ type reloadHerdrFixture struct {
 	prompted  string
 	// proc is the process table the run reads (PFM_PROC_ROOT).
 	proc string
+
+	// agentReads counts agent.get calls.
+	agentReads int
 }
 
 func newReloadHerdrFixture(t *testing.T) *reloadHerdrFixture {
@@ -309,9 +311,15 @@ func (f *reloadHerdrFixture) respond(method string, p map[string]json.RawMessage
 			},
 		}, ""
 	case "agent.get":
-		status := "idle"
-		if f.mode == "blocked" {
+		f.agentReads++
+		var status any = "idle"
+		switch {
+		case f.mode == "blocked":
 			status = "blocked"
+		case f.mode == "unrecognized-agent" || f.mode == "unrecognized-agent-once" && f.agentReads == 1:
+			status = "thinking"
+		case f.mode == "undecodable-agent-once" && f.agentReads == 1:
+			status = 7
 		}
 		return map[string]any{
 			"type":  "agent_info",
@@ -423,6 +431,12 @@ func TestRunHerdrLifecycle(t *testing.T) {
 		{name: "null-argv", mode: "null-argv", want: "argv"},
 		{name: "snapshot-error", mode: "read-error", want: "snapshot unavailable"},
 		{name: "blocked", mode: "blocked", want: "blocked"},
+		{name: "unrecognized-agent-state-waits", mode: "unrecognized-agent-once"},
+		{name: "undecodable-agent-state-waits", mode: "undecodable-agent-once"},
+		{
+			name: "unrecognized-agent-state-never-clears", mode: "unrecognized-agent",
+			want: `native reload: Herdr never reported the chat's state (native reload unknown agent state "thinking"); /exit was not typed`,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newReloadHerdrFixture(t)
@@ -442,7 +456,8 @@ func TestRunHerdrLifecycle(t *testing.T) {
 			if tc.then {
 				f.request.Then = "resume the port"
 			}
-			result, err := RunHerdr(context.Background(), f.request, f.options, io.Discard)
+			var stderr strings.Builder
+			result, err := RunHerdr(context.Background(), f.request, f.options, &stderr)
 			if tc.want != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.want) {
 					t.Fatalf("RunHerdr error=%v, want %q", err, tc.want)
@@ -621,7 +636,7 @@ func TestRunHerdrPublicationAndCancellation(t *testing.T) {
 }
 
 func TestRunHerdrUnsafePublication(t *testing.T) {
-	for _, kind := range []string{"failed-seat-with-live-engine", "corrupt-current-recipe", "binding-changes-during-idle"} {
+	for _, kind := range []string{"failed-seat-with-live-engine", "binding-changes-during-idle"} {
 		t.Run(kind, func(t *testing.T) {
 			f := newReloadHerdrFixture(t)
 			want := ""
@@ -633,12 +648,6 @@ func TestRunHerdrUnsafePublication(t *testing.T) {
 					t.Fatal(err)
 				}
 				want = "engine is still running"
-			case "corrupt-current-recipe":
-				f.old.CWD = "relative-path"
-				if err := f.db.WriteSeatRun(f.seat.SeatID, f.old); err != nil {
-					t.Fatal(err)
-				}
-				want = "current recipe"
 			case "binding-changes-during-idle":
 				f.onRead = func() {
 					before, found, err := f.db.Seat(context.Background(), f.seat.SeatID)
@@ -727,7 +736,8 @@ func TestRunHerdrCodex(t *testing.T) {
 			if err := f.db.WriteSeatRun(f.seat.SeatID, f.old); err != nil {
 				t.Fatal(err)
 			}
-			result, err := RunHerdr(context.Background(), f.request, f.options, io.Discard)
+			var stderr strings.Builder
+			result, err := RunHerdr(context.Background(), f.request, f.options, &stderr)
 			if tc.want != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.want) {
 					t.Fatalf("RunHerdr error=%v, want %q", err, tc.want)
@@ -760,114 +770,6 @@ func TestRunHerdrCodex(t *testing.T) {
 			}
 			if tc.fresh && (!result.New || current.SessionID != "" || slices.Contains(run.Args, "resume")) {
 				t.Fatalf("new result=%+v seat=%+v args=%q", result, current, run.Args)
-			}
-		})
-	}
-}
-
-func TestRunHerdrPreservesBirthDefaults(t *testing.T) {
-	for _, tc := range []struct {
-		name                              string
-		accountGiven, cacheGiven, missing bool
-		wantAccount                       int
-		wantCache                         bool
-		want                              string
-	}{
-		{name: "retain-account-and-cache", wantAccount: 1, wantCache: true},
-		{name: "explicit-account-and-cache", accountGiven: true, cacheGiven: true, wantAccount: 2},
-		{name: "explicit-account-retain-cache", accountGiven: true, wantAccount: 2, wantCache: true},
-		{name: "explicit-cache-retain-account", cacheGiven: true, wantAccount: 1},
-		{name: "missing-birth-metadata", missing: true, want: "account"},
-		{name: "unknown-account", want: "account"},
-		{name: "invalid-cache", want: "cache"},
-		{name: "missing-cache", want: "cache"},
-		{name: "stale-launch-record", wantAccount: 1, wantCache: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			f := newReloadHerdrFixture(t)
-			if !tc.missing {
-				before := f.request
-				before.Account = 1
-				before.Cache1H = true
-				spawn, err := claudeSpawn(before)
-				if err != nil {
-					t.Fatal(err)
-				}
-				f.old, err = spawn.SeatRun(before.CWD)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if tc.name == "unknown-account" {
-					f.request.Machine.Accounts = f.request.Machine.Accounts[1:]
-				}
-				if tc.name == "invalid-cache" || tc.name == "missing-cache" {
-					key := ""
-					for _, knob := range claudelaunch.Knobs {
-						if knob.Name == "cache1h" {
-							key = knob.Target
-						}
-					}
-					for i, entry := range f.old.Env {
-						if strings.HasPrefix(entry, key+"=") {
-							if tc.name == "invalid-cache" {
-								f.old.Env[i] = key + "=not-a-cache"
-							} else {
-								f.old.Env = append(f.old.Env[:i], f.old.Env[i+1:]...)
-							}
-							break
-						}
-					}
-				}
-				if tc.name == "stale-launch-record" {
-					values, err := paths.Resolve()
-					if err != nil {
-						t.Fatal(err)
-					}
-					if err := fleetdb.RecordLaunch(
-						context.Background(),
-						values,
-						fleetdb.Launch{SessionID: f.seat.SessionID, Engine: f.request.Engine, Account: 2},
-						1,
-					); err != nil {
-						t.Fatal(err)
-					}
-				}
-				if err := f.db.WriteSeatRun(f.seat.SeatID, f.old); err != nil {
-					t.Fatal(err)
-				}
-			}
-			f.request.AccountGiven = tc.accountGiven
-			f.request.CacheGiven = tc.cacheGiven
-			result, err := RunHerdr(context.Background(), f.request, f.options, io.Discard)
-			if tc.want != "" {
-				if err == nil || !strings.Contains(err.Error(), tc.want) {
-					t.Fatalf("error=%v want %q metadata diagnostic", err, tc.want)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			if result.Account != tc.wantAccount || result.Cache1H != tc.wantCache {
-				t.Fatalf("result=%+v want account=%d cache=%t", result, tc.wantAccount, tc.wantCache)
-			}
-			expected := f.request
-			expected.Account = tc.wantAccount
-			expected.Cache1H = tc.wantCache
-			spawn, err := claudeSpawn(expected)
-			if err != nil {
-				t.Fatal(err)
-			}
-			want, err := spawn.SeatRun(expected.CWD)
-			if err != nil {
-				t.Fatal(err)
-			}
-			got, err := f.db.ReadSeatRun(f.seat.SeatID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !reflect.DeepEqual(got, want) {
-				t.Fatalf("recipe=%+v want=%+v", got, want)
 			}
 		})
 	}

@@ -188,7 +188,18 @@ func TestClearTmuxNameUsesExistingHerdrWindowHook(t *testing.T) {
 
 func TestReservedSeatLabel(t *testing.T) {
 	root := t.TempDir()
-	values := paths.Values{Home: root, StateDB: filepath.Join(root, "absent.db")}
+	values := paths.Values{Home: root, StateDB: filepath.Join(root, "state.db")}
+	ctx := context.Background()
+	state := fleetdb.OpenSharedState(ctx, values)
+	defer func() { _ = state.Close() }()
+	const id = "22222222-2222-4222-8222-222222222222"
+	fresh, err := naming.ClearSuccessorName("Desk", id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := state.PutClearName(ctx, id, naming.ClearName{Inherited: "Desk", Name: fresh}, 1); err != nil {
+		t.Fatal(err)
+	}
 	path := filepath.Join(root, "transcript.jsonl")
 	for _, label := range []string{"seat:child", "SeAt:child"} {
 		body, err := json.Marshal(map[string]string{"type": "custom-title", "customTitle": label})
@@ -198,13 +209,18 @@ func TestReservedSeatLabel(t *testing.T) {
 		if err := os.WriteFile(path, append(body, '\n'), 0o600); err != nil {
 			t.Fatal(err)
 		}
+		var stderr bytes.Buffer
 		reporter := herdrReporter{
 			options: herdrOptions{engine: engine.Claude, event: herdr.EventStart},
 			deps:    herdrDeps{seatPaths: &values},
+			stderr:  &stderr,
 		}
-		name, err := reporter.engineName(context.Background(), herdrPayload{SessionID: "fixture", TranscriptPath: path})
-		if err == nil || !strings.Contains(err.Error(), "reserved for durable seat handles") || name != "" {
-			t.Errorf("reserved engine title: name=%q err=%v", name, err)
+		name, err := reporter.engineName(ctx, herdrPayload{SessionID: id, TranscriptPath: path})
+		wantWarning := `pfm internal herdr-state start: engine title not used: label "` + label +
+			`" is reserved for durable seat handles` + "\n"
+		if err != nil || name != fresh || stderr.String() != wantWarning {
+			t.Errorf("reserved engine title %q: name=%q err=%v stderr=%q, want %q and %q",
+				label, name, err, stderr.String(), fresh, wantWarning)
 		}
 	}
 }

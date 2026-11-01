@@ -11,13 +11,15 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/naming"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 )
 
 // renameHerdr follows successful engine /rename delivery. Persist only after
-// the pane label, agent name and tab label agree under herdr.LabelSoleTab's
-// rule; every partial failure is returned to the caller and remains retryable.
+// Herdr acknowledged the pane, agent and tab rename (herdr.LabelSoleTab's rule);
+// an acknowledged label differing from the request is logged, never a lost name.
+// Every partial failure is returned to the caller and remains retryable.
 func renameHerdr(ctx context.Context, target headless.Chat, name string, values paths.Values) (returnErr error) {
 	state := fleetdb.OpenSharedState(ctx, values)
 	defer func() { returnErr = errors.Join(returnErr, state.Close()) }()
@@ -84,8 +86,12 @@ func renameNativeOwned(ctx context.Context, state *fleetdb.Store, seat fleetdb.S
 	if err := json.Unmarshal(body, &pane); err != nil {
 		return fmt.Errorf("decode Herdr pane rename: %w", err)
 	}
-	if pane.Pane.ID != target.Pane || pane.Pane.Label != name {
+	if pane.Pane.ID != target.Pane {
 		return fmt.Errorf("herdr pane rename returned an unexpected acknowledgement: %s", body)
+	}
+	if pane.Pane.Label != name {
+		obs.Logger(ctx).Warn("herdr pane rename acknowledged another label",
+			obs.FieldSeat, seat.SeatID, "requested", name, "chosen", pane.Pane.Label)
 	}
 	taken := make(map[string]bool)
 	for attempt := 0; attempt < 100; attempt++ {
@@ -113,8 +119,12 @@ func renameNativeOwned(ctx context.Context, state *fleetdb.Store, seat fleetdb.S
 		if err := json.Unmarshal(body, &agent); err != nil {
 			return fmt.Errorf("decode Herdr agent rename: %w", err)
 		}
-		if agent.Agent.Pane != target.Pane || agent.Agent.Name != slug {
+		if agent.Agent.Pane != target.Pane {
 			return fmt.Errorf("herdr agent rename returned an unexpected acknowledgement: %s", body)
+		}
+		if agent.Agent.Name != slug {
+			obs.Logger(ctx).Warn("herdr agent rename acknowledged another name",
+				obs.FieldSeat, seat.SeatID, "requested", slug, "chosen", agent.Agent.Name)
 		}
 		if err := labelNativeTab(ctx, target, name); err != nil {
 			return fmt.Errorf("label Herdr tab after pane and agent rename: %w", err)

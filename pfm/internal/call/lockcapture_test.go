@@ -99,8 +99,7 @@ func TestEngineCaptureNamesACaptureFailureDistinctFromADeadPane(t *testing.T) {
 
 // TestEngineCaptureStillReportsAnOrdinaryDeadPaneAsCodeDead pins the
 // unchanged half: tmux running and answering "no such pane" is genuine
-// absence, still CodeDead, still the fixed "target pane is dead or
-// unreadable" detail every existing caller already matches on.
+// absence, still CodeDead, its detail carrying tmux's own answer.
 func TestEngineCaptureStillReportsAnOrdinaryDeadPaneAsCodeDead(t *testing.T) {
 	engine := newTestEngine(t, "cc-capture-dead", &fakeTmux{})
 	engine.tmux = scriptedCaptureTmux{
@@ -114,7 +113,43 @@ func TestEngineCaptureStillReportsAnOrdinaryDeadPaneAsCodeDead(t *testing.T) {
 	if code != CodeDead {
 		t.Fatalf("code = %d, want CodeDead (%d) for an ordinary tmux answer", code, CodeDead)
 	}
-	if detail != "target pane is dead or unreadable" {
-		t.Fatalf("detail = %q, want the unchanged dead-pane message", detail)
+	if want := "target pane is dead or unreadable: can't find pane: %9"; detail != want {
+		t.Fatalf("detail = %q, want %q", detail, want)
+	}
+	result, err := engine.Call(context.Background(), Request{Target: "beta", Message: "hello"})
+	if want := "target pane is dead or unreadable: can't find pane: %9"; err != nil || result.Code != CodeDead ||
+		result.Message != want || result.Typed {
+		t.Fatalf("call = %+v err=%v, want CodeDead %q, nothing typed", result, err, want)
+	}
+}
+
+// failingLiteralTmux types the first literal chunk, then fails every later one.
+type failingLiteralTmux struct{ *fakeTmux }
+
+func (fake failingLiteralTmux) SendLiteral(ctx context.Context, socketPath, target, text string) error {
+	if len(fake.literals) > 0 {
+		return errors.New("server exited unexpectedly")
+	}
+	return fake.fakeTmux.SendLiteral(ctx, socketPath, target, text)
+}
+
+// A paced command that fails mid-text keeps what it already typed: the caller
+// must learn the composer may hold part of it, never a bare error.
+func TestPacedCommandFailureReportsTheChunksTyped(t *testing.T) {
+	inner := &fakeTmux{capture: "conversation\n❯ ", submitOnEnter: true}
+	engine := newTestEngine(t, "cc-paced-fail", inner)
+	engine.tmux = failingLiteralTmux{inner}
+	engine.options.DisableSignature = true
+	command := "/status " + strings.Repeat("focus text ", 300)
+	result, err := engine.Call(context.Background(), Request{Target: "chat", Message: command})
+	want := `typing into "%1" failed after 1 command chunk(s): server exited unexpectedly — the composer may hold part of the text and nothing was submitted; do not retry blindly`
+	if err != nil || result.Status != statusTypedUnconfirmed || result.Code != CodeUndelivered || !result.Typed ||
+		result.LiteralChunks != 1 || result.Message != want {
+		t.Fatalf("call = %+v err=%v, want typed_unconfirmed after 1 chunk: %q", result, err, want)
+	}
+	for _, key := range inner.keys {
+		if key == "Enter" {
+			t.Fatalf("keys sent = %v — a half-typed command must never be submitted", inner.keys)
+		}
 	}
 }

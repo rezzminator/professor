@@ -680,3 +680,38 @@ func TestCommandThenSpawnerCarriesNativeBoundaryEvidence(t *testing.T) {
 		})
 	}
 }
+
+// A waiter that could not write its log would run with no voice: an
+// undelivered steer is kept only there. It is never started; the caller is
+// told why and delivers the steer itself.
+func TestCommandThenSpawnerRefusesAnUnwritableLog(t *testing.T) {
+	scratch := t.TempDir()
+	blocker := filepath.Join(scratch, "blocker")
+	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dump := filepath.Join(scratch, "nohup-arguments.txt")
+	nohup := filepath.Join(scratch, "nohup-stub")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" > " + dump + "\n"
+	if err := testjail.WriteExecutable(nohup, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(blocker, "then.log")
+	err := CommandThenSpawner{
+		Executable: filepath.Join(scratch, "pfm-candidate"),
+		Setsid:     filepath.Join(scratch, "setsid-missing"),
+		Nohup:      nohup,
+	}.Spawn(context.Background(), SteerSpawn{
+		SocketPath: filepath.Join(scratch, "cc-1-2-3"),
+		Target:     "%4",
+		Steers:     []string{"continue after the primary"},
+		LogPath:    logPath,
+	})
+	want := "open then waiter log: open " + logPath + ": not a directory"
+	if err == nil || err.Error() != want {
+		t.Fatalf("spawn error = %v, want %q", err, want)
+	}
+	if _, statErr := os.Stat(dump); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("waiter started despite the unwritable log: stat %s = %v", dump, statErr)
+	}
+}

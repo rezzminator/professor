@@ -34,7 +34,9 @@ func TestHerdrCallNative(t *testing.T) {
 		{name: "blocked", state: "blocked", status: "refused", code: CodeUndelivered, detail: "blocked"},
 		{name: "blocked-force", state: "blocked", force: true, status: "refused", code: CodeUndelivered, detail: "blocked"},
 		{name: "unknown", state: "unknown", status: "refused", code: CodeUndelivered, detail: "unknown"},
-		{name: "missing-state", status: "refused", code: CodeUndelivered, detail: "status"},
+		// A status pfm cannot read leaves the raw composer guard to decide.
+		{name: "missing-state", status: "delivered", detail: "Herdr raw composer confirmed"},
+		{name: "unrecognized-state", state: "thinking", status: "delivered", detail: "Herdr raw composer confirmed"},
 		{name: "not-ready", state: "idle", refusal: "agent_not_ready", status: "undelivered", code: CodeUndelivered, detail: "agent_not_ready"},
 		{name: "blocked-after-idle", state: "idle", refusal: "agent_blocked", status: "undelivered", code: CodeUndelivered, detail: "agent_blocked"},
 		{name: "lookup-refusal", state: "idle", refusal: "agent_not_found", status: "undelivered", code: CodeUndelivered, detail: "agent_not_found"},
@@ -42,7 +44,8 @@ func TestHerdrCallNative(t *testing.T) {
 		{name: "submit-failed", state: "idle", refusal: "agent_prompt_failed", status: "typed_unconfirmed", code: CodeUndelivered, detail: "agent_prompt_failed"},
 		{name: "stalled", state: "idle", refusal: "agent_prompt_stalled", status: "typed_unconfirmed", code: CodeUndelivered, detail: "agent_prompt_stalled"},
 		{name: "unknown-result", state: "idle", response: "surprise", status: "typed_unconfirmed", code: CodeUndelivered, detail: "surprise"},
-		{name: "unsupported", state: "idle", engine: "invalid-engine", status: "refused", code: CodeUndelivered, detail: "unsupported"},
+		// An engine this binary cannot name takes the raw guard, never agent.prompt.
+		{name: "unsupported", state: "idle", engine: "invalid-engine", status: "delivered", detail: "Herdr raw composer confirmed"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			socket := newNativeSocket(t, func(request nativeRequest) (any, string) {
@@ -58,6 +61,9 @@ func TestHerdrCallNative(t *testing.T) {
 				}
 				if request.Method == "agent.get" {
 					return nativeAgent("agent_info", test.state), ""
+				}
+				if request.Method == "pane.send_input" || request.Method == "pane.send_keys" {
+					return map[string]any{"type": "ok"}, ""
 				}
 				kind := "agent_prompted"
 				if test.response != "" {
@@ -416,7 +422,10 @@ func TestHerdrOversizedBodyNotTyped(t *testing.T) {
 }
 
 func TestHerdrTurnSubmissionAnchor(t *testing.T) {
-	for _, identity := range []string{"valid-session", "absent-session", "null-session", "missing-terminal", "null-terminal", "empty-terminal"} {
+	for _, identity := range []string{
+		"valid-session", "absent-session", "null-session", "missing-terminal", "null-terminal", "empty-terminal",
+		"unrecognized-status",
+	} {
 		t.Run(identity, func(t *testing.T) {
 			socket := newNativeSocket(t, func(req nativeRequest) (any, string) {
 				if req.Method == "pane.read" {
@@ -449,6 +458,8 @@ func TestHerdrTurnSubmissionAnchor(t *testing.T) {
 						a["terminal_id"], a["agent_session"] = nil, nil
 					case "empty-terminal":
 						a["terminal_id"], a["agent_session"] = "", nil
+					case "unrecognized-status":
+						a["agent_status"], a["agent_session"] = "thinking", nil
 					}
 				}
 				return response, ""
@@ -460,16 +471,6 @@ func TestHerdrTurnSubmissionAnchor(t *testing.T) {
 				target,
 				Request{Message: "hello", Then: []string{"follow up"}},
 			)
-			if strings.HasSuffix(identity, "terminal") {
-				if err != nil || got.Code != CodeUndelivered || !got.Typed || got.Status != "typed_unconfirmed" ||
-					!strings.Contains(
-						got.Message,
-						"terminal identity",
-					) || len(engine.spawner.(*fakeSpawner).spawned()) != 0 {
-					t.Fatalf("malformed prompt identity accepted: primary=%+v err=%v", got, err)
-				}
-				return
-			}
 			if err != nil || got.Code != 0 {
 				t.Fatalf("primary=%+v err=%v", got, err)
 			}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/codexmeta"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // conversation is a chat whose transcript a test writes by hand, plus the
@@ -631,5 +633,76 @@ func TestAwaitClearsAnErrorARealAnswerFollows(t *testing.T) {
 	}
 	if turn.Error != "" {
 		t.Fatalf("Error = %q, want none once a real answer followed", turn.Error)
+	}
+}
+
+// A failed fleet scan during a wait is no news of the chat: the last lookup
+// holds and the next poll retries, and only UnreadablePolls failures in a row
+// end the wait. The answer lands on the last failing lookup, so a wait that
+// gave up early would never read it.
+func TestAwaitRidesOutAFailedChatLookup(t *testing.T) {
+	scanFailed := errors.New("fleet scan failed")
+	for _, testCase := range []struct {
+		name          string
+		failing       []int // the lookups, counted from 0, that fail
+		wantAnswer    string
+		wantErrorText string
+	}{
+		{"before the chat is first found", []int{0, 1}, "the answer", ""},
+		{"after the chat was found, in bursts", []int{1, 2, 4, 5}, "the answer", ""},
+		{"UnreadablePolls in a row", []int{1, 2, 3}, "", "chat lookup failed 3 times in a row: fleet scan failed"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			talk := newConversation(t)
+			talk.say(user("my question"))
+			calls := 0
+			resolve := func(ctx context.Context) (Chat, bool, error) {
+				call := calls
+				calls++
+				if !slices.Contains(testCase.failing, call) {
+					return talk.resolve(ctx)
+				}
+				if call == testCase.failing[len(testCase.failing)-1] && testCase.wantAnswer != "" {
+					talk.say(assistant(testCase.wantAnswer))
+				}
+				return Chat{}, false, scanFailed
+			}
+			turn, err := Await(context.Background(), resolve, fastOptions())
+			gotErrorText := ""
+			if err != nil {
+				gotErrorText = err.Error()
+			}
+			if gotErrorText != testCase.wantErrorText || (err != nil && !errors.Is(err, scanFailed)) {
+				t.Fatalf("Await() error = %v, want %q wrapping the scan failure", err, testCase.wantErrorText)
+			}
+			if turn.Answer != testCase.wantAnswer {
+				t.Fatalf("Answer = %q, want %q", turn.Answer, testCase.wantAnswer)
+			}
+		})
+	}
+}
+
+// A Codex rollout whose turn records cannot be read leaves the answer in hand
+// to the newest-entry rule, and says why in the log.
+func TestACodexTurnWhoseRecordsCannotBeReadIsDecidedByItsNewestEntry(t *testing.T) {
+	ctx, recorder := obs.Test(t)
+	path := filepath.Join(t.TempDir(), "rollout-gone.jsonl")
+	read := codexTurnRead{at: -1}
+	if open, readOK := read.open(ctx, path, 0); open || readOK {
+		t.Fatalf(
+			"open() = (%v, %v) for an unreadable rollout, want (false, false): the newest entry decides, unproven",
+			open,
+			readOK,
+		)
+	}
+	var warned []string
+	for _, record := range recorder.Records() {
+		if record.Message == "await: Codex turn records could not be read; the newest entry decides" {
+			logged, _ := record.Field("path")
+			warned = append(warned, record.Level+" "+logged.(string))
+		}
+	}
+	if want := []string{"WARN " + path}; !slices.Equal(warned, want) {
+		t.Fatalf("warnings = %q, want %q", warned, want)
 	}
 }

@@ -2,6 +2,7 @@ package run
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -62,23 +63,25 @@ func parseOutput(result *Result, request Request) error {
 		result.IsError = envelope.IsError
 		if len(envelope.Result) > 0 && string(envelope.Result) != jsonNull {
 			if err := json.Unmarshal(envelope.Result, &result.Answer); err != nil {
-				return fmt.Errorf("parse Claude result: %w", err)
+				// a result that is not a string is still the model's answer: keep its JSON text
+				result.Answer = string(envelope.Result)
+				result.noteUnreadable("Claude result as text, so the answer is its JSON", err)
 			}
 		}
 		result.StructuredOutput = append(json.RawMessage(nil), envelope.Structured...)
 		var err error
-		result.Usage, err = parseTokenUsage(envelope.Usage)
-		if err != nil {
-			return fmt.Errorf("parse Claude usage: %w", err)
+		if result.Usage, err = parseTokenUsage(envelope.Usage); err != nil {
+			result.noteUnreadable("Claude usage", err)
 		}
 		if whole, err := parseModelUsage(envelope.ModelUsage); err != nil {
-			return fmt.Errorf("parse Claude modelUsage: %w", err)
+			// the usage block is the last turn only: standing alone it would understate the run
+			result.Usage = nil
+			result.noteUnreadable("Claude modelUsage", err)
 		} else if whole != nil {
 			result.Usage = whole // every turn, not the last one
 		}
-		result.TotalCostUSD, err = parseCost(envelope.TotalCost)
-		if err != nil {
-			return fmt.Errorf("parse Claude cost: %w", err)
+		if result.TotalCostUSD, err = parseCost(envelope.TotalCost); err != nil {
+			result.noteUnreadable("Claude cost", err)
 		}
 		if result.IsError {
 			return fmt.Errorf("headless envelope reported an error for Claude")
@@ -124,10 +127,13 @@ func parseCodexJSONL(result *Result, request Request) error {
 			Error   json.RawMessage `json:"error"`
 		}
 		if err := json.Unmarshal([]byte(line), &event); err != nil {
-			return fmt.Errorf("parse Codex JSONL event %d: %w", lineNo+1, err)
+			result.noteUnreadable(fmt.Sprintf("Codex JSONL event %d", lineNo+1), err)
+			continue
 		}
 		if event.Type == "" {
-			return fmt.Errorf("event %d from Codex has no type", lineNo+1)
+			result.noteUnreadable(
+				fmt.Sprintf("Codex JSONL event %d", lineNo+1), errors.New("the event has no type"))
+			continue
 		}
 		switch event.Type {
 		case jsonEventError:
@@ -153,9 +159,9 @@ func parseCodexJSONL(result *Result, request Request) error {
 			}
 			terminal = true
 			var err error
-			result.Usage, err = parseTokenUsage(event.Usage)
-			if err != nil {
-				return fmt.Errorf("parse Codex usage: %w", err)
+			if result.Usage, err = parseTokenUsage(event.Usage); err != nil {
+				result.noteUnreadable(
+					fmt.Sprintf("Codex usage in event %d", lineNo+1), err)
 			}
 		case "item.completed":
 			var item struct {
@@ -164,7 +170,9 @@ func parseCodexJSONL(result *Result, request Request) error {
 				Message string `json:"message"`
 			}
 			if err := json.Unmarshal(event.Item, &item); err != nil {
-				return fmt.Errorf("parse Codex completed item: %w", err)
+				result.noteUnreadable(
+					fmt.Sprintf("Codex completed item in event %d", lineNo+1), err)
+				continue
 			}
 			if item.Type == "agent_message" {
 				result.Answer = item.Text
@@ -183,6 +191,17 @@ func parseCodexJSONL(result *Result, request Request) error {
 		result.StructuredOutput = json.RawMessage(result.Answer)
 	}
 	return nil
+}
+
+// unreadableItem is the one diagnostic for an engine output item pfm could not decode. The caller
+// leaves that item out, or its one value unknown, and the run goes on: "could not read" never
+// reads as "the engine sent nothing".
+func unreadableItem(what string, err error) string {
+	return fmt.Sprintf("could not read %s: %v", what, err)
+}
+
+func (result *Result) noteUnreadable(what string, err error) {
+	result.Diagnostics = append(result.Diagnostics, unreadableItem(what, err))
 }
 
 func parseTokenUsage(raw json.RawMessage) (*TokenUsage, error) {

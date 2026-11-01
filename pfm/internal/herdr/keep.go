@@ -78,6 +78,16 @@ func (processes PaneProcesses) PIDs() ([]int, error) {
 	return pids, nil
 }
 
+// KeepOuterEnviron is environ with a held shell's marks stripped (EnvKeepInner,
+// and the pfm Herdr shell mark envKeepShell), so herdr-keep run from inside a
+// held pane checks the keeper instead of refusing a recursive invocation.
+func KeepOuterEnviron(environ []string) []string {
+	return without(environ, []string{EnvKeepInner, envKeepShell})
+}
+
+// envKeepShell marks a shell the pfm Herdr shell shim started (pfm-herdr-shell.sh).
+const envKeepShell = "PFM_HERDR_SHELL"
+
 // KeepProcess is a process herdr-keep identifies by pid and /proc start time.
 type KeepProcess struct {
 	PID   int    `json:"pid"`

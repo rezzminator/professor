@@ -193,6 +193,30 @@ func TestClearNamePromptBoundsHeldConversationLock(t *testing.T) {
 	}
 }
 
+func TestClearNameNamesTheSuccessorOfARelativeTranscriptPath(t *testing.T) {
+	testjail.Fleet(t)
+	runtime, err := config.LoadRuntime("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const id = "22222222-2222-4222-8222-222222222222"
+	payload := `{"hook_event_name":"SessionStart","source":"clear","session_id":"` + id +
+		`","session_title":"Desk","transcript_path":"claude/` + id + `.jsonl"}`
+	var out, stderr bytes.Buffer
+	code := ClearName(nil, strings.NewReader(payload), &out, &stderr, runtime)
+	wantStderr := "pfm internal clear-name: session " + id + ` transcript_path "claude/` + id +
+		`.jsonl" is not absolute; naming from the payload title` + "\n"
+	if code != 0 || stderr.String() != wantStderr {
+		t.Fatalf("code=%d stderr=%q, want 0 %q", code, stderr.String(), wantStderr)
+	}
+	state := fleetdb.OpenSharedState(context.Background(), runtime.Paths)
+	defer func() { _ = state.Close() }()
+	name, found, err := state.ClearName(context.Background(), id)
+	if err != nil || !found || name.Inherited != "Desk" {
+		t.Fatalf("successor name=%+v found=%v err=%v, want inherited %q", name, found, err, "Desk")
+	}
+}
+
 func TestClearNameStateWriteFailureIsVisible(t *testing.T) {
 	root := testjail.Fleet(t)
 	runtime, err := config.LoadRuntime("")

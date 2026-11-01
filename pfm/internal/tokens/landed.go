@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -232,25 +233,37 @@ func (l *landedLines) readNumstat(out []byte) error {
 	return nil
 }
 
+// countUntracked counts one untracked file that was there to book.
+func (l *landedLines) countUntracked() {
+	l.untrackedFiles++
+	l.files++
+}
+
 // addUntracked books an untracked file: its lines, all of them added.
 // A symlink or any other non-regular file carries no lines of its own and
 // books as binary.
 func (l *landedLines) addUntracked(path string) error {
 	full := filepath.Join(l.top, path)
 	info, err := os.Lstat(full)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil // a build or test temp deleted since ls-files listed it: gone, as readHead reads a deleted file
+	}
 	if err != nil {
 		return fmt.Errorf("stat untracked %s: %w", full, err)
 	}
-	l.untrackedFiles++
-	l.files++
 	if !info.Mode().IsRegular() {
+		l.countUntracked()
 		l.add(classBinary, 0)
 		return nil
 	}
 	content, err := os.ReadFile(full)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
 	if err != nil {
 		return fmt.Errorf("read untracked %s: %w", full, err)
 	}
+	l.countUntracked()
 	if bytes.IndexByte(content[:min(len(content), binarySniff)], 0) >= 0 {
 		l.add(classBinary, 0)
 		return nil

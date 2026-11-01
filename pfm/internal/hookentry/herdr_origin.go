@@ -28,11 +28,16 @@ func reportToHerdr(args []string, stdin io.Reader, stderr io.Writer, deps herdrD
 	var payload herdrPayload
 	if !options.event.FiredByTmux() {
 		// Read every identity field before reporting, even after a large response.
-		payload, err = readHerdrPayload(stdin)
+		var skipped error
+		payload, skipped, err = readHerdrPayload(stdin)
 		if err != nil {
 			const decodeFailure = "pfm internal herdr-state %s engine=%s: decode hook payload (skipped): %v"
 			reporter.warn(decodeFailure, options.event, options.engine, err)
 			return 0
+		}
+		if skipped != nil {
+			reporter.warn("pfm internal herdr-state %s engine=%s: unreadable hook field taken as unknown: %v",
+				options.event, options.engine, skipped)
 		}
 		if threadWithoutRollout(options.engine, payload) {
 			return 0
@@ -78,7 +83,16 @@ const (
 	herdrSourceKey = "source"
 )
 
-func readHerdrPayload(input io.Reader) (payload herdrPayload, returnErr error) {
+// herdrIdentityFields decide whose report this is; a value of the wrong type
+// there fails the payload, while any other field is skipped as unknown.
+var herdrIdentityFields = map[string]bool{
+	"hook_event_name": true,
+	"session_id":      true,
+	"agent_id":        true,
+	herdrSourceKey:    true,
+}
+
+func readHerdrPayload(input io.Reader) (payload herdrPayload, skipped, returnErr error) {
 	limited := &io.LimitedReader{R: input, N: herdrHookBytes + 1}
 	defer func() {
 		if limited.N == 0 {
@@ -89,10 +103,10 @@ func readHerdrPayload(input io.Reader) (payload herdrPayload, returnErr error) {
 	decoder.UseNumber()
 	token, err := decoder.Token()
 	if err != nil {
-		return payload, fmt.Errorf("empty or unreadable hook object: %w", err)
+		return payload, skipped, fmt.Errorf("empty or unreadable hook object: %w", err)
 	}
 	if token != json.Delim('{') {
-		return payload, fmt.Errorf("hook payload must be an object")
+		return payload, skipped, fmt.Errorf("hook payload must be an object")
 	}
 	fields := map[string]any{
 		"hook_event_name": &payload.HookEventName, "session_id": &payload.SessionID,
@@ -104,17 +118,17 @@ func readHerdrPayload(input io.Reader) (payload herdrPayload, returnErr error) {
 	for decoder.More() {
 		key, err := decoder.Token()
 		if err != nil {
-			return payload, fmt.Errorf("read hook field: %w", err)
+			return payload, skipped, fmt.Errorf("read hook field: %w", err)
 		}
 		name, ok := key.(string)
 		if !ok {
-			return payload, fmt.Errorf("hook field is not a string: %v", key)
+			return payload, skipped, fmt.Errorf("hook field is not a string: %v", key)
 		}
 		name = strings.ToLower(name)
 		if name == "transcript_path" {
 			var path *string
 			if err := decoder.Decode(&path); err != nil {
-				return payload, fmt.Errorf("read hook transcript_path: %w", err)
+				return payload, skipped, fmt.Errorf("read hook transcript_path: %w", err)
 			}
 			payload.TranscriptNull = path == nil
 			payload.TranscriptPath = ""
@@ -123,19 +137,26 @@ func readHerdrPayload(input io.Reader) (payload herdrPayload, returnErr error) {
 			}
 		} else if field, known := fields[name]; known {
 			if err := decoder.Decode(field); err != nil {
-				return payload, fmt.Errorf("read hook %s: %w", name, err)
+				var typeErr *json.UnmarshalTypeError
+				if herdrIdentityFields[name] || !errors.As(err, &typeErr) {
+					return payload, skipped, fmt.Errorf("read hook %s: %w", name, err)
+				}
+				skipped = errors.Join(skipped, fmt.Errorf("hook %s: %w", name, err))
 			}
 		} else if err := skipHerdrValue(decoder, 0); err != nil {
-			return payload, fmt.Errorf("skip hook %s: %w", name, err)
+			return payload, skipped, fmt.Errorf("skip hook %s: %w", name, err)
 		}
 	}
 	if _, err := decoder.Token(); err != nil {
-		return payload, fmt.Errorf("close hook object: %w", err)
+		return payload, skipped, fmt.Errorf("close hook object: %w", err)
 	}
 	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
-		return payload, fmt.Errorf("after hook object: %w", errors.Join(err, errors.New("expected end of input")))
+		return payload, skipped, fmt.Errorf(
+			"after hook object: %w",
+			errors.Join(err, errors.New("expected end of input")),
+		)
 	}
-	return payload, nil
+	return payload, skipped, nil
 }
 
 func skipHerdrValue(decoder *json.Decoder, depth int) error {

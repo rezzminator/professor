@@ -1,7 +1,6 @@
 package themesync
 
 import (
-	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -246,26 +245,26 @@ func herdrInlineEntry(start, end int, segments []string, known map[string]bool) 
 	return entry
 }
 
-// errHerdrNoHue is the herdrRowsStyled failure of a row naming a token the
-// applied theme has no hue for: a read-back takes it as DRIFT (a state written
-// before that hue existed heals on the next apply), an apply as an error.
-var errHerdrNoHue = errors.New("the applied theme carries no hue for it")
-
 // herdrRowsStyled returns content with every sidebar row entry that names an
 // indicator token rewritten to `{ token = "$pfm_X", fg = "#hex" }`, the hex
 // being hues[X]; every other byte stays. A file naming no indicator token
-// comes back identical; an entry whose hue is empty is an error naming it.
-func herdrRowsStyled(content string, hues map[string]string) (string, error) {
-	return herdrRewriteRows(content, func(entry herdrRowEntry) (string, bool, error) {
+// comes back identical. An entry whose token the applied theme has no hue for
+// is left as it is and named in notes: one such row never stops the others
+// from being styled.
+func herdrRowsStyled(content string, hues map[string]string) (string, []string, error) {
+	var notes []string
+	styled, err := herdrRewriteRows(content, func(entry herdrRowEntry) (string, bool, error) {
 		hue := hues[entry.token]
 		if hue == "" {
-			return "", false, fmt.Errorf(
-				"themesync: herdr sidebar row names %s%s but %w",
-				herdrTokenPrefix, entry.token, errHerdrNoHue,
-			)
+			notes = append(notes, fmt.Sprintf(
+				"herdr sidebar row names %s%s but the applied theme carries no hue for it (left unstyled)",
+				herdrTokenPrefix, entry.token,
+			))
+			return "", false, nil
 		}
 		return fmt.Sprintf("{ token = %q, fg = %q }", herdrTokenPrefix+entry.token, hue), true, nil
 	})
+	return styled, notes, err
 }
 
 // herdrRowsBare undoes herdrRowsStyled: every inline entry that is exactly a

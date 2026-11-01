@@ -275,7 +275,7 @@ func NewModel(snapshot Snapshot) Model {
 		placeState:   placeState{projectDirs: snapshot.ProjectDirs, dirExists: snapshot.DirExists},
 		deck: deckState{
 			home: snapshot.Home, rev: 1, agg: &deckAgg{}, freshNS: snapshot.NowNS,
-			factsError: snapshot.FactsError,
+			factsError: snapshot.FactsError, scanError: snapshot.ScanError,
 		},
 		newChatEngine: defaultNewChatEngine(
 			snapshot.AccountIDs,
@@ -1057,7 +1057,7 @@ func (model *Model) applyRefresh(snapshot Snapshot) {
 	model.killedCount = snapshot.KilledCount
 	model.suppressedCount = snapshot.SuppressedCount
 	model.refreshing = snapshot.Refreshing
-	model.deck.refreshed(snapshot.NowNS, snapshot.FactsError)
+	model.deck.refreshed(snapshot.NowNS, snapshot.FactsError, snapshot.ScanError)
 	model.scheduleError = snapshot.ScheduleError
 	model.themeError = snapshot.ThemeError
 	for index := range model.rows {

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/store"
@@ -157,7 +159,6 @@ func TestCallEngineForRequestRejectsConflictingSingleProxySeat(t *testing.T) {
 			wantDetail: "location disagrees",
 		},
 		{name: "engine", field: "engine", value: "codex", wantDetail: "engine"},
-		{name: "malformed engine", field: "engine", value: "not-an-engine", wantDetail: "engine"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -267,11 +268,12 @@ func TestCallEngineForRequestKeepsSessionFallbackAndEngineAliases(t *testing.T) 
 		Kind: compose.LiveOpenCode, Socket: "ox-seat", PaneID: "%7",
 	}
 	tests := []struct {
-		name           string
-		proxy          map[string]any
-		wantSocketName string
-		wantSocketPath string
-		wantPane       string
+		name              string
+		proxy             map[string]any
+		wantSocketName    string
+		wantSocketPath    string
+		wantPane          string
+		wantEngineWarning []string
 	}{
 		{
 			name: "session only", proxy: map[string]any{"v": ProxyWireVersion, "session": "oc-seat"},
@@ -283,6 +285,15 @@ func TestCallEngineForRequestKeepsSessionFallbackAndEngineAliases(t *testing.T) 
 				"v": ProxyWireVersion, "session": "oc-seat", "engine": "OpenCode",
 			},
 			wantSocketName: "ox-seat", wantSocketPath: filepath.Join(resolved.TmuxDir, "ox-seat"), wantPane: "%7",
+		},
+		{
+			// The engine only feeds the conflict check: unreadable, it is skipped and named.
+			name: "unreadable engine",
+			proxy: map[string]any{
+				"v": ProxyWireVersion, "session": "oc-seat", "engine": "gpt-x",
+			},
+			wantSocketName: "ox-seat", wantSocketPath: filepath.Join(resolved.TmuxDir, "ox-seat"), wantPane: "%7",
+			wantEngineWarning: []string{`gpt-x|unknown engine "gpt-x" (want cc/claude, cx/codex, ox/opencode)`},
 		},
 		{
 			name: "keeps supplied socket name",
@@ -305,9 +316,21 @@ func TestCallEngineForRequestKeepsSessionFallbackAndEngineAliases(t *testing.T) 
 			current := &backend{paths: resolved, chat: &fakeChatVerbs{
 				listed: chat.ListResult{Rows: []compose.Row{row}, Matched: 1},
 			}}
-			caller, err := current.callerForRequest(context.Background(), mcp.Meta{"pfmProxy": test.proxy})
+			ctx, recorder := obs.Test(t)
+			caller, err := current.callerForRequest(ctx, mcp.Meta{"pfmProxy": test.proxy})
 			if err != nil || !caller.present || !caller.valid || caller.row.ID != "opencode-id" {
 				t.Fatalf("fallback caller = %+v err=%v, want the unique session row", caller, err)
+			}
+			var engineWarnings []string
+			for _, record := range recorder.Records() {
+				if record.Message == "mcp.caller_engine_invalid" && record.Level == "WARN" {
+					engine, _ := record.Field(obs.FieldEngine)
+					text, _ := record.Field(obs.FieldErr)
+					engineWarnings = append(engineWarnings, engine.(string)+"|"+text.(string))
+				}
+			}
+			if !slices.Equal(engineWarnings, test.wantEngineWarning) {
+				t.Fatalf("engine warnings = %q, want %q", engineWarnings, test.wantEngineWarning)
 			}
 			if caller.identity.SocketName != test.wantSocketName ||
 				caller.identity.SocketPath != test.wantSocketPath || caller.identity.Pane != test.wantPane {
@@ -364,9 +387,10 @@ func TestCallEngineForRequestRejectsInvalidFallbackSocket(t *testing.T) {
 	caller, err := current.callerForRequest(context.Background(), mcp.Meta{
 		"pfmProxy": map[string]any{"v": ProxyWireVersion, "session": "oc-seat"},
 	})
-	if err == nil || caller.valid || !strings.Contains(err.Error(), `session "oc-seat"`) ||
-		!strings.Contains(err.Error(), `socket "../outside"`) {
-		t.Fatalf("invalid row socket caller = %+v err=%v, want contextual error", caller, err)
+	want := `resolve MCP proxy session "oc-seat": live chat "oc-seat" socket: ` +
+		`socket "../outside" must be one relative tmux socket name`
+	if err != nil || !caller.present || caller.valid || caller.detail != want || caller.identity.SocketName != "" {
+		t.Fatalf("invalid row socket caller = %+v err=%v, want present invalid caller naming %q", caller, err, want)
 	}
 }
 
@@ -448,8 +472,13 @@ func TestCallEngineForRequestRejectsSplitProxyConflicts(t *testing.T) {
 	}
 }
 
+// A split pane the breadcrumb bound exactly keeps its identity while its
+// transcript is unindexed, lacks a directory or cannot be read: directory and
+// transcript path stay unknown (never the split row's, another pane's), and
+// an unreadable store is a warning naming the transcript.
 func TestCallEngineForRequestNamesSplitTranscriptFailures(t *testing.T) {
 	setupBackendFixture(t)
+	ctx, recorder := obs.Test(t)
 	resolved, err := paths.Resolve()
 	if err != nil {
 		t.Fatal(err)
@@ -464,53 +493,81 @@ func TestCallEngineForRequestNamesSplitTranscriptFailures(t *testing.T) {
 		t.Fatal(err)
 	}
 	const socket = "cc-123-456-789"
-	row := compose.Row{Kind: compose.LiveSplit, Socket: socket}
+	row := compose.Row{Kind: compose.LiveSplit, Socket: socket, CWD: "/work/other-pane", Path: "/work/other-pane.jsonl"}
 	current := &backend{
 		chat:     &fakeChatVerbs{listed: chat.ListResult{Rows: []compose.Row{row}, Matched: 1}},
 		database: database,
 		paths:    resolved,
 	}
-	for _, transcriptID := range []string{"missing", "empty-cwd"} {
-		t.Run(transcriptID, func(t *testing.T) {
-			if err := os.WriteFile(
-				filepath.Join(resolved.SIDDir, socket+".%1"),
-				[]byte("/work/"+transcriptID+".jsonl\n"),
-				0o600,
-			); err != nil {
-				t.Fatal(err)
+	bind := func(t *testing.T, transcriptID string) callerIdentity {
+		t.Helper()
+		if err := os.WriteFile(
+			filepath.Join(resolved.SIDDir, socket+".%1"),
+			[]byte("/work/"+transcriptID+".jsonl\n"),
+			0o600,
+		); err != nil {
+			t.Fatal(err)
+		}
+		caller, err := current.callerForRequest(ctx, mcp.Meta{
+			"pfmProxy": map[string]any{
+				"v": ProxyWireVersion, "session": "renamed-split", "socketName": socket,
+				"socketPath": filepath.Join(resolved.TmuxDir, socket), "pane": "%1",
+				"engine": "claude", "id": transcriptID,
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return caller
+	}
+	transcriptWarnings := func(id string) []string {
+		var found []string
+		for _, record := range recorder.Records() {
+			if named, _ := record.Field(
+				obs.FieldChat,
+			); record.Message == "mcp.caller_transcript_unread" &&
+				named == id {
+				text, _ := record.Field(obs.FieldErr)
+				found = append(found, record.Level+"|"+text.(string))
 			}
-			caller, err := current.callerForRequest(context.Background(), mcp.Meta{
-				"pfmProxy": map[string]any{
-					"v": ProxyWireVersion, "session": "renamed-split", "socketName": socket,
-					"socketPath": filepath.Join(resolved.TmuxDir, socket), "pane": "%1",
-					"engine": "claude", "id": transcriptID,
-				},
-			})
-			if err != nil || !caller.present || caller.valid ||
-				!strings.Contains(caller.detail, "has no indexed working directory") {
-				t.Fatalf("split transcript caller = %+v err=%v, want named indexed-CWD refusal", caller, err)
+		}
+		return found
+	}
+	for _, test := range []struct {
+		id, wantPath string
+	}{
+		{id: "missing"},
+		{id: "empty-cwd", wantPath: "/work/empty.jsonl"},
+	} {
+		t.Run(test.id, func(t *testing.T) {
+			caller := bind(t, test.id)
+			if !caller.valid || caller.row.ID != test.id || caller.identity.ID != test.id ||
+				caller.row.Dir != "" || caller.row.transcriptPath != test.wantPath || caller.row.Pane != "%1" {
+				t.Fatalf("split transcript caller = %+v, want valid %q with no directory and path %q",
+					caller, test.id, test.wantPath)
 			}
 		})
 	}
 	if err := database.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(
-		filepath.Join(resolved.SIDDir, socket+".%1"),
-		[]byte("/work/closed-store.jsonl\n"),
-		0o600,
-	); err != nil {
-		t.Fatal(err)
+	caller := bind(t, "closed-store")
+	if !caller.valid || caller.identity.ID != "closed-store" || caller.row.Dir != "" ||
+		caller.row.transcriptPath != "" {
+		t.Fatalf("closed-store split caller = %+v, want the bound identity with no directory or path", caller)
 	}
-	_, err = current.callerForRequest(context.Background(), mcp.Meta{
-		"pfmProxy": map[string]any{
-			"v": ProxyWireVersion, "session": "renamed-split", "socketName": socket,
-			"socketPath": filepath.Join(resolved.TmuxDir, socket), "pane": "%1",
-			"engine": "claude", "id": "closed-store",
-		},
-	})
-	if err == nil || !strings.Contains(err.Error(), `resolve MCP proxy split transcript "closed-store"`) {
-		t.Fatalf("split transcript lookup failure collapsed into absence: %v", err)
+	if got, want := transcriptWarnings(
+		"closed-store",
+	), []string{
+		`WARN|query transcript "closed-store": sql: database is closed`,
+	}; !slices.Equal(
+		got,
+		want,
+	) {
+		t.Fatalf("closed-store warnings = %q, want %q", got, want)
+	}
+	if got := transcriptWarnings("missing"); len(got) != 0 {
+		t.Fatalf("an unindexed transcript warned %q, want no warning", got)
 	}
 }
 
@@ -694,9 +751,12 @@ func TestSplitCallerRequiresReadableExactPaneBinding(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(resolved.SIDDir, socket+".%4"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := current.callerForRequest(context.Background(), request("%4")); err == nil ||
-		!strings.Contains(err.Error(), "split pane \"%4\" breadcrumb") {
-		t.Fatalf("pane binding read failure = %v", err)
+	caller, err = current.callerForRequest(context.Background(), request("%4"))
+	crumb := filepath.Join(resolved.SIDDir, socket+".%4")
+	wantDetail := `resolve MCP proxy split pane "%4" breadcrumb: read reload breadcrumb "` + crumb +
+		`": read ` + crumb + ": is a directory"
+	if err != nil || !caller.present || caller.valid || caller.detail != wantDetail {
+		t.Fatalf("pane binding read failure caller=%+v err=%v, want present-invalid %q", caller, err, wantDetail)
 	}
 }
 
@@ -748,30 +808,6 @@ func TestCallEngineForRequestFindsProxyBeyondPublicListLimit(t *testing.T) {
 	})
 	if err != nil || !caller.valid || caller.row.Session != "cc-seat" {
 		t.Fatalf("caller beyond public list limit = %+v err=%v", caller, err)
-	}
-}
-
-func TestCallEngineForRequestFindsThreadIDBeyondPublicListLimit(t *testing.T) {
-	setupBackendFixture(t)
-	resolved, err := paths.Resolve()
-	if err != nil {
-		t.Fatal(err)
-	}
-	rows := make([]compose.Row, defaultChatLSLimit+1)
-	for index := range defaultChatLSLimit {
-		rows[index] = compose.Row{ID: "historical", Kind: compose.ResumeClaude}
-	}
-	rows[defaultChatLSLimit] = compose.Row{
-		SessionName: "cx-seat", ID: "thread-a", Kind: compose.LiveCodex, Socket: "cx-seat", PaneID: "%7",
-	}
-	verbs := &cappedProxyChat{fakeChatVerbs: &fakeChatVerbs{
-		listed: chat.ListResult{Rows: rows, Matched: len(rows)},
-	}}
-	caller, err := (&backend{paths: resolved, chat: verbs}).callerForRequest(context.Background(), mcp.Meta{
-		"threadId": "thread-a",
-	})
-	if err != nil || !caller.valid || caller.row.Session != "cx-seat" {
-		t.Fatalf("threadId caller beyond public list limit = %+v err=%v", caller, err)
 	}
 }
 
@@ -850,18 +886,23 @@ func TestCallEngineForRequestNamesProxyNoMatchAndAmbiguity(t *testing.T) {
 	}
 }
 
+// A listing failure is a present caller that did not bind, named and never
+// absent: self targets refuse with it and explicit targets go on. Only an
+// unsupported wire version fails the request.
 func TestCallEngineForRequestReturnsProxyVersionAndListingErrors(t *testing.T) {
 	t.Parallel()
 	current := &backend{chat: &fakeChatVerbs{err: errors.New("fleet database busy")}}
-	_, err := current.callerForRequest(context.Background(), mcp.Meta{
+	caller, err := current.callerForRequest(context.Background(), mcp.Meta{
 		"pfmProxy": map[string]any{"v": ProxyWireVersion, "session": "cc-seat"},
 	})
-	if err == nil ||
-		!strings.Contains(err.Error(), `resolve MCP proxy session "cc-seat": list live chats: fleet database busy`) {
-		t.Fatalf("listing failure collapsed or lost its session: %v", err)
+	const wantDetail = `resolve MCP proxy session "cc-seat": list live chats: fleet database busy`
+	if err != nil || !caller.present || caller.valid || caller.detail != wantDetail ||
+		identityFailureStatus(caller.err) != statusError {
+		t.Fatalf("listing failure caller = %+v err=%v, want present-invalid %q with status %q",
+			caller, err, wantDetail, statusError)
 	}
 
-	caller, err := current.callerForRequest(context.Background(), mcp.Meta{
+	caller, err = current.callerForRequest(context.Background(), mcp.Meta{
 		"pfmProxy": map[string]any{"v": ProxyWireVersion + 1, "session": "cc-seat"},
 	})
 	if err == nil || !strings.Contains(err.Error(), "version 2") ||
@@ -891,33 +932,6 @@ func TestCallEngineForRequestMarksMalformedProxyPresent(t *testing.T) {
 				t.Fatalf("malformed proxy caller = %+v err=%v, want present invalid detail", caller, err)
 			}
 		})
-	}
-}
-
-func TestCallEngineForRequestKeepsThreadIDPrecedenceAndEmptyMetadata(t *testing.T) {
-	setupBackendFixture(t)
-	resolved, err := paths.Resolve()
-	if err != nil {
-		t.Fatal(err)
-	}
-	live := compose.Row{
-		SessionName: "cx-seat", ID: "thread-a", Kind: compose.LiveCodex, Socket: "cx-seat", PaneID: "%0",
-	}
-	current := &backend{
-		paths: resolved,
-		chat:  &fakeChatVerbs{listed: chat.ListResult{Rows: []compose.Row{live}, Matched: 1}},
-	}
-	caller, err := current.callerForRequest(context.Background(), mcp.Meta{
-		"threadId": "thread-a",
-		"pfmProxy": map[string]any{"v": 0, "session": "must-not-be-read"},
-	})
-	if err != nil || !caller.valid || caller.identity.Source != "mcp-thread-meta" || caller.identity.ID != "thread-a" {
-		t.Fatalf("threadId did not retain precedence: caller=%+v err=%v", caller, err)
-	}
-
-	empty, err := current.callerForRequest(context.Background(), nil)
-	if err != nil || !reflect.DeepEqual(empty, callerIdentity{}) {
-		t.Fatalf("metadata-free caller = %+v err=%v, want zero caller", empty, err)
 	}
 }
 

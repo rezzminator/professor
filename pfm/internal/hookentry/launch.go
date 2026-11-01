@@ -256,11 +256,7 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 		fmt.Fprintf(stderr, "pfm internal launch: %v\n", err)
 		return 1
 	}
-	primary, primaryErr := fleet.PrimaryAccount(runtime.Paths, runtime.Config)
-	if primaryErr != nil {
-		fmt.Fprintf(stderr, "pfm internal launch: read primary account: %v\n", primaryErr)
-		return 1
-	}
+	primary := launchPrimaryAccount(runtime, stderr)
 	configDir, accountID := launcherSeatAccount(runtime, primary, paths.OSEnv{})
 	identity, resuming, continuing := action.LauncherIdentity(arguments)
 	mode := workbench.New
@@ -492,4 +488,14 @@ func readLaunchStatus(path string) (int, error) {
 
 func launchTmuxCommand(ctx context.Context, binary, socketPath string, args ...string) *pfmtmux.Cmd {
 	return pfmtmux.Exec(ctx, binary, socketPath, args...)
+}
+
+// launchPrimaryAccount is the launchers' primary-account read: an unreadable
+// store launches on the implicit account with a warning, as pfm install does.
+func launchPrimaryAccount(runtime config.Runtime, stderr io.Writer) int {
+	primary, err := fleet.PrimaryAccountOrImplicit(runtime.Paths, runtime.Config)
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm: primary account unreadable (%v); launching on account %d\n", err, primary)
+	}
+	return primary
 }

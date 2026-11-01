@@ -83,7 +83,10 @@ func (reporter *herdrReporter) readActivity(session string) (herdrActivity, erro
 		return state, fmt.Errorf("claude activity exceeds %d bytes", maxActivityBytes)
 	}
 	if err := json.Unmarshal(data, &state); err != nil {
-		return state, fmt.Errorf("decode Claude activity: %w", err)
+		// A corrupt file must not freeze the session: this event rewrites it.
+		reporter.warn("pfm internal herdr-state %s: decode Claude activity %s (starting empty): %v",
+			reporter.options.event, reporter.activityPath(session), err)
+		return herdrActivity{}, nil
 	}
 	return state, nil
 }
@@ -223,7 +226,9 @@ func (reporter *herdrReporter) planActivity(payload herdrPayload, state *herdrSt
 			expected = "SubagentStop"
 		}
 		if payload.HookEventName != expected {
-			return nil, fmt.Errorf("claude agent lifecycle needs hook_event_name %s (skipped)", expected)
+			// The hook's own CLI event already names the lifecycle; the payload's name only labels it.
+			reporter.warn("pfm internal herdr-state %s: hook_event_name %q, want %s (counted as %s)",
+				event, payload.HookEventName, expected, event)
 		}
 		if event == herdr.EventAgentStop && !state.Agents[payload.AgentID] {
 			return nil, nil

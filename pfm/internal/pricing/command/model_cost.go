@@ -4,6 +4,7 @@ package command
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strconv"
@@ -65,6 +66,14 @@ func runModelCost(args []string, stdout, stderr io.Writer, options modelcost.Opt
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 	prices, result, err := modelcost.Refresh(ctx, options)
+	// An unusable override leaves the published table served without it: a
+	// lookup answers from it, and --check, which validates the table, fails.
+	var override *pricing.OverrideError
+	overrideFailed := errors.As(err, &override)
+	if overrideFailed {
+		fmt.Fprintf(stderr, "pfm model-cost: warning: %v; serving the published table without it\n", err)
+		err = nil
+	}
 	if err != nil {
 		if result.Err != nil {
 			fmt.Fprintf(stderr, "pfm model-cost: warning: refresh failed: %v\n", result.Err)
@@ -96,6 +105,9 @@ func runModelCost(args []string, stdout, stderr io.Writer, options modelcost.Opt
 	}
 	fmt.Fprintln(stdout, summary(prices, result))
 	if *check {
+		if overrideFailed {
+			return 1
+		}
 		return 0
 	}
 	if err := writeTable(stdout, rows); err != nil {

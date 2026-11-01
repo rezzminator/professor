@@ -340,18 +340,18 @@ func TestInspectSeatKeepsAnOpenCodexTurnWorking(t *testing.T) {
 	}
 }
 
-// Native states are the fallback only; a broken or unknown response is not idle.
+// Native states are the fallback only; an unknown or future state is not idle:
+// it keeps the transcript verdict and names itself in state_source.
 func TestHerdrStatusNativeFallback(t *testing.T) {
 	for _, tc := range []struct {
-		state, want string
-		bad         bool
+		state, want, source string
 	}{
-		{"idle", headless.StateIdle, false},
-		{"done", headless.StateIdle, false},
-		{"working", headless.StateWorking, false},
-		{"blocked", headless.StateBlocked, false},
-		{"unknown", headless.StateWorking, false},
-		{"future", "", true},
+		{"idle", headless.StateIdle, ""},
+		{"done", headless.StateIdle, ""},
+		{"working", headless.StateWorking, ""},
+		{"blocked", headless.StateBlocked, ""},
+		{"unknown", headless.StateWorking, "transcript (Herdr unknown)"},
+		{"future", headless.StateWorking, "transcript (Herdr future)"},
 	} {
 		t.Run(tc.state, func(t *testing.T) {
 			socket := herdrStatusSocket(t, fmt.Sprintf(`{"agent":{"pane_id":"w6:p3","agent_status":%q}}`, tc.state))
@@ -362,14 +362,8 @@ func TestHerdrStatusNativeFallback(t *testing.T) {
 				time.Now(),
 				nil,
 			)
-			if tc.bad {
-				if err == nil {
-					t.Fatalf("unknown state returned %+v, want error", got)
-				}
-				return
-			}
-			if err != nil || got.State != tc.want {
-				t.Fatalf("status=%+v, %v; want %s", got, err, tc.want)
+			if err != nil || got.State != tc.want || got.StateSource != tc.source {
+				t.Fatalf("status=%+v, %v; want %s from %q", got, err, tc.want, tc.source)
 			}
 		})
 	}

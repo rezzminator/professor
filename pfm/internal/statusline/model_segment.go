@@ -9,6 +9,7 @@ import (
 	"os"
 	"slices"
 	"strconv"
+	"strings"
 	"syscall"
 
 	"github.com/rezzminator/professor/pfm/internal/gather"
@@ -64,11 +65,6 @@ func paintedEffort(level, ambient string) string {
 		return ambient + modelglyph.EffortLabel(level)
 	}
 	return effortBarColors[name] + bar + reset + ambient + " " + name
-}
-
-// effortWords lists the producer's five valid levels.
-var effortWords = map[string]bool{
-	"low": true, "medium": true, "high": true, "xhigh": true, "max": true,
 }
 
 // autoEffortModes lists the state file's modes.
@@ -160,9 +156,10 @@ func parseAutoEffortState(
 		return autoEffortState{err: err}
 	}
 	// The keeper vouches before the line is judged: a line left by a gone or
-	// retired producer (an older version among them) reads as absent.
+	// retired producer (an older version among them, one that wrote no keeper
+	// at all) reads as absent.
 	if record.Keeper == nil {
-		return autoEffortState{err: errors.New("no keeper")}
+		return autoEffortState{}
 	}
 	keeper, err := strconv.ParseInt(string(*record.Keeper), 10, 32)
 	if err != nil || keeper < 0 {
@@ -184,12 +181,11 @@ func parseAutoEffortState(
 	if !autoEffortModes[record.Mode] {
 		return autoEffortState{err: fmt.Errorf("unknown mode %q", record.Mode)}
 	}
+	// A level word outside the five (a newer plugin's) shows as the raw word,
+	// marked requested, never as ERR.
 	level := ""
 	if record.Level != nil {
 		level = *record.Level
-		if _, ok := effortWords[level]; !ok {
-			return autoEffortState{err: fmt.Errorf("unknown level %q", level)}
-		}
 	}
 	if level == "" && (record.Mode == "model" || record.Mode == "pin") {
 		return autoEffortState{err: fmt.Errorf("mode %s without a level", record.Mode)}
@@ -296,4 +292,75 @@ func clipForWarn(text string) string {
 		return string(runes[:80]) + "…"
 	}
 	return text
+}
+
+// subagentModel names the family and effort: claude-opus-5-5[1m] + high →
+// opus·▰▰▰ high. The level its transcript recorded for its latest request
+// (recorded) wins: it is the effort that request went out at, after any
+// plugin pinned it, so it renders plainly on any model. Without one, the
+// payload's effort shows; one that is not a JSON string is left out. A row
+// with neither shows the session's recorded effort (inherited), exactly as
+// a payload effort on the model it was recorded for and muted on another,
+// where Claude Code may resolve a different level.
+func subagentModel(model, recorded string, effort json.RawMessage, inherited sessionEffortRecord) string {
+	family := modelFamily(model)
+	level := strings.TrimSpace(recorded)
+	color, painted := cEffort, true
+	if level == "" &&
+		(len(effort) == 0 || json.Unmarshal(effort, &level) != nil || strings.TrimSpace(level) == "") {
+		level = ""
+		if len(effort) == 0 {
+			level = inherited.Level
+		}
+		if modelVersion(model) != modelVersion(inherited.Model) {
+			color, painted = cMuted, false
+		}
+	}
+	if level != "" {
+		// A muted level may be another than the one shown, so its bar stays muted
+		// too; otherwise the bar wears the level's own colour.
+		label := color + modelglyph.EffortLabel(level)
+		if painted {
+			label = paintedEffort(level, color)
+		}
+		if family == "" {
+			return label + reset
+		}
+		return cModel + family + reset + cMuted + "·" + reset + label + reset
+	}
+	if family == "" {
+		return ""
+	}
+	return cModel + family + reset
+}
+
+// modelVersion strips the vendor prefix and the context-window tag:
+// claude-opus-5-5[1m] → opus-5-5.
+func modelVersion(model string) string {
+	model = strings.TrimPrefix(strings.TrimSpace(model), "claude-")
+	if cut := strings.IndexByte(model, '['); cut >= 0 {
+		model = model[:cut]
+	}
+	return model
+}
+
+// modelFamily is the model's family alone: claude-opus-5-5[1m] → opus. A gpt-
+// id names its tier last and its version first, so it renders tier-version:
+// gpt-6-sol → sol-6, gpt-5.6-terra → terra-5.6; one with no tier renders
+// whole, gpt-6 → gpt-6. The gateway's priority-tier suffix is no tier and
+// drops like the window tag: gpt-6-sol-fast → sol-6, gpt-5.5-fast → gpt-5.5.
+func modelFamily(model string) string {
+	model = modelVersion(model)
+	if strings.HasPrefix(model, "gpt-") {
+		model = strings.TrimSuffix(model, "-fast")
+		rest := strings.TrimPrefix(model, "gpt-")
+		if cut := strings.LastIndexByte(rest, '-'); cut > 0 && cut < len(rest)-1 {
+			return rest[cut+1:] + "-" + rest[:cut]
+		}
+		return model
+	}
+	if cut := strings.IndexByte(model, '-'); cut > 0 {
+		model = model[:cut]
+	}
+	return model
 }

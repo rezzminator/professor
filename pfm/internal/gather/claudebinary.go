@@ -24,6 +24,8 @@ var ErrConfiguredClaudeBinaryNotFound = errors.New("configured Claude binary not
 
 var readClaudeShim = os.ReadFile
 
+var readClaudeVersionsDir = os.ReadDir
+
 func ManagedClaudeLauncher(home string) string {
 	return filepath.Join(
 		home,
@@ -223,7 +225,7 @@ func InspectClaudeVersions(home, configuredBinary string) (ClaudeVersionsReport,
 	dir := ClaudeVersionsDir(home)
 	report := ClaudeVersionsReport{Dir: dir, Protected: map[string]string{}}
 
-	entries, err := os.ReadDir(dir)
+	entries, err := readClaudeVersionsDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return report, nil
@@ -235,6 +237,9 @@ func InspectClaudeVersions(home, configuredBinary string) (ClaudeVersionsReport,
 			continue
 		}
 		info, err := entry.Info()
+		if errors.Is(err, fs.ErrNotExist) {
+			continue // removed between the listing and this read: no version to report
+		}
 		if err != nil {
 			return ClaudeVersionsReport{}, fmt.Errorf("inspect Claude version %s: %w", entry.Name(), err)
 		}
@@ -244,6 +249,9 @@ func InspectClaudeVersions(home, configuredBinary string) (ClaudeVersionsReport,
 		path := filepath.Join(dir, entry.Name())
 		version, ok := semver.ParseVersion("v" + entry.Name())
 		id, err := FileIDOf(path)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
 		if err != nil {
 			return ClaudeVersionsReport{}, fmt.Errorf("identify Claude version %s: %w", path, err)
 		}
@@ -294,7 +302,11 @@ func InspectClaudeVersions(home, configuredBinary string) (ClaudeVersionsReport,
 			return ClaudeVersionsReport{}, fmt.Errorf("identify configured Claude binary %s: %w", configuredBinary, err)
 		}
 	}
-	if displaced := strings.TrimSpace(readClaudeLauncherState(home)); displaced != "" {
+	recorded, err := readClaudeLauncherState(home)
+	if err != nil {
+		return ClaudeVersionsReport{}, err
+	}
+	if displaced := strings.TrimSpace(recorded); displaced != "" {
 		displacedID, err := FileIDOf(displaced)
 		switch {
 		case err == nil:
@@ -315,11 +327,17 @@ func InspectClaudeVersions(home, configuredBinary string) (ClaudeVersionsReport,
 
 // readClaudeLauncherState reads the displaced-native-target recorded by
 // RepairClaudeLauncher, or "" when none was ever recorded — the same file
-// unwireClaudeLauncher reads to restore a pre-pfm launcher on uninstall.
-func readClaudeLauncherState(home string) string {
-	content, err := os.ReadFile(ClaudeLauncherStatePath(home))
-	if err != nil {
-		return ""
+// unwireClaudeLauncher reads to restore a pre-pfm launcher on uninstall. A
+// record that exists and cannot be read is an error: the target it names
+// cannot be protected unseen.
+func readClaudeLauncherState(home string) (string, error) {
+	path := ClaudeLauncherStatePath(home)
+	content, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", nil
 	}
-	return string(content)
+	if err != nil {
+		return "", fmt.Errorf("read displaced Claude target record %s: %w", path, err)
+	}
+	return string(content), nil
 }

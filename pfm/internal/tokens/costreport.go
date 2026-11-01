@@ -126,10 +126,14 @@ func (a *auditor) includeTelemetryChats(chats []ledgerChat, report *ledgerReport
 	if a.opts.project != "" || a.opts.family != "" || (a.opts.familyRxSource != "" && a.opts.familyRxSource != ".") {
 		return chats
 	}
-	ids, err := costledger.SessionIDs(a.ledgerDir)
+	ids, skipped, err := costledger.SessionIDs(a.ledgerDir)
 	if err != nil {
 		fail("cost ledger directory unreadable", err)
 		return chats
+	}
+	if len(skipped) != 0 {
+		a.scan.noteOnce(fmt.Sprintf("%d cost ledger files left out, their names are no session id: %s",
+			len(skipped), strings.Join(skipped, ", ")))
 	}
 	seen := map[string]bool{}
 	for _, chat := range chats {

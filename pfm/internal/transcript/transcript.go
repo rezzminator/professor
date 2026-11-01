@@ -104,7 +104,7 @@ type codexTurnError struct {
 // token counts, and the harness-injected records naming.IsJunkPrompt names.
 func Parse(line []byte, engine string) (Entry, bool) {
 	var parsed record
-	if err := json.Unmarshal(line, &parsed); err != nil || parsed.IsSidechain {
+	if err := decodeTolerant(line, &parsed); err != nil || parsed.IsSidechain {
 		return Entry{}, false
 	}
 	if engine == string(pfmengine.Codex) {
@@ -300,15 +300,32 @@ func toolCall(raw json.RawMessage) (Entry, bool) {
 	return Entry{}, false
 }
 
+const (
+	systemReminderOpen  = "<system-reminder>"
+	systemReminderClose = "</system-reminder>"
+)
+
+// stripLeadingReminders drops the harness reminders a string-bodied turn opens
+// with and keeps the human text after them; a reminder with no closing tag is
+// all reminder.
+func stripLeadingReminders(text string) string {
+	for strings.HasPrefix(text, systemReminderOpen) {
+		end := strings.Index(text, systemReminderClose)
+		if end < 0 {
+			return ""
+		}
+		text = strings.TrimLeft(text[end+len(systemReminderClose):], " \t\r\n")
+	}
+	return text
+}
+
 // Visible returns the human-readable text of a message body, dropping the
-// system reminders the harness injects into user turns.
+// system reminders the harness injects into user turns: a block that is one,
+// and the leading reminders of a string body, whose remaining text stays.
 func Visible(raw json.RawMessage) string {
 	var text string
 	if err := json.Unmarshal(raw, &text); err == nil {
-		if strings.HasPrefix(text, "<system-reminder>") {
-			return ""
-		}
-		return text
+		return stripLeadingReminders(text)
 	}
 	blocks, ok := DecodeContent(raw)
 	if !ok {

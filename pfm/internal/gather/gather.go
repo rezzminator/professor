@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"slices"
 	"sort"
 	"time"
 
@@ -170,11 +171,7 @@ func (gatherer *Gatherer) Gather(ctx context.Context) (Snapshot, error) {
 	})
 	group.Go(func() error {
 		var err error
-		if gatherer.readOnly {
-			crumbs, err = ReadCrumbsReadOnly(gatherer.paths.SIDDir, tmuxProbe.Panes)
-		} else {
-			crumbs, err = ReadCrumbs(gatherer.paths.SIDDir, tmuxProbe.Panes)
-		}
+		crumbs, err = scanCrumbs(gatherer.paths.SIDDir, tmuxProbe.Panes, !gatherer.readOnly, tmuxProbe.Unreadable)
 		return err
 	})
 	group.Go(func() error {
@@ -249,7 +246,7 @@ func (gatherer *Gatherer) Gather(ctx context.Context) (Snapshot, error) {
 		CrumblessLive:     append([]CrumblessLive(nil), crumblessLive...),
 		CorpseSwept:       append([]string(nil), tmuxProbe.CorpseSwept...),
 		StaleSwept:        append([]string(nil), crumbs.StaleSwept...),
-		Warnings:          append(append([]string(nil), tmuxProbe.ProbeWarnings...), agentWarnings...),
+		Warnings:          slices.Concat(tmuxProbe.ProbeWarnings, agentWarnings, crumbs.Warnings),
 		UnreadableSockets: maps.Clone(tmuxProbe.Unreadable),
 	}, nil
 }

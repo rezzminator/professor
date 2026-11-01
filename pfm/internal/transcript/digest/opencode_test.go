@@ -3,8 +3,10 @@ package digest
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -103,5 +105,36 @@ func TestSplitOpenCodeLocator(t *testing.T) {
 			t.Errorf("splitOpenCodeLocator(%q) = %q, %q, %v; want %q, %q, %v", c.target, store, id, ok, c.store, c.id,
 				c.ok)
 		}
+	}
+}
+
+// A part whose message row cannot be read still shows, its role unknown: its
+// text is a reply, not a lost record.
+func TestOpenCodePartOfAnUnreadableMessageStillShows(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "opencode")
+	seedOpenCodeStore(t, root, "garden")
+	db, err := sql.Open("sqlite", filepath.Join(root, "opencode.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Errorf("close the store: %v", err)
+		}
+	}()
+	for _, statement := range []string{
+		`INSERT INTO message VALUES ('msg_bad', 'ses_1a2b3c4d5e6fGarden0001', 1790762500000, 1790762500000, 'not json')`,
+		`INSERT INTO part VALUES ('prt_bad', 'msg_bad', 'ses_1a2b3c4d5e6fGarden0001', 1790762500000, 1790762500000,
+			'{"type":"text","text":"lost parent reply"}')`,
+	} {
+		if _, err := db.Exec(statement); err != nil {
+			t.Fatalf("seed %s: %v", statement, err)
+		}
+	}
+	locator := filepath.Join(root, "opencode.db") + "#ses_1a2b3c4d5e6fGarden0001"
+	code, stdout, stderr := invokeOpenCode(t, root, "show", locator)
+	reply := regexp.MustCompile(`(?m)^L\d+ 10:01:40 SAY lost parent reply$`)
+	if code != 0 || stderr != "" || !reply.MatchString(stdout) {
+		t.Errorf("exit %d stderr %q stdout %q, want 0, nothing and a line matching %s", code, stderr, stdout, reply)
 	}
 }

@@ -386,6 +386,9 @@ func (model Model) chatsHeaderLine(width int) string {
 	if model.refreshing || model.deck.waking {
 		spans = append(spans, sep, span{text: "⟳ refreshing", paint: tone{fg: palette.Accent}})
 	}
+	if model.deck.scanError != "" {
+		spans = append(spans, sep, span{text: "⚠ scan: " + model.deck.scanError, paint: tone{fg: palette.Warn}})
+	}
 	if model.deck.factsError != "" {
 		spans = append(spans, sep, span{text: "⚠ row facts: " + model.deck.factsError, paint: tone{fg: palette.Warn}})
 	}

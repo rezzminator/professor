@@ -2,12 +2,14 @@ package index
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/codexmeta"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
@@ -158,5 +160,33 @@ func TestACompressedRolloutIsIndexedFromItsLines(t *testing.T) {
 			t.Errorf("Rollout(%q) = %#v, found=%t, err=%v; want path %s, first prompt %q", want.id, rollout, found, err,
 				want.path, want.prompt)
 		}
+	}
+}
+
+// TestCodexParseCountsLinesItCannotDecode: an undecodable line costs that
+// line only; the rollout keeps its other prompts and the parse warns the
+// count.
+func TestCodexParseCountsLinesItCannotDecode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sessions", "rollout-2026-09-23T12-07-24-torn.jsonl")
+	meta := `{"type":"session_meta","payload":{"source":"cli","thread_source":"user","cwd":"/work/app"}}`
+	torn := `{"type":"response_item","payload":{"type":"message","role":"user"`
+	kept := `{"type":"response_item","payload":{"type":"message","role":"user",` +
+		`"content":[{"type":"input_text","text":"kept"}]}}`
+	writeLines(t, path, meta, torn, kept)
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, recorder := obs.Test(t)
+	file := diskFile{ID: "torn", Path: path, Size: info.Size(), MTimeNS: info.ModTime().UnixNano()}
+	rollout, _, err := parseCodexRolloutFile(ctx, file, 0, store.Rollout{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rollout.FirstPrompt != "kept" || rollout.PromptCount != 1 || rollout.CWD != "/work/app" {
+		t.Fatalf("rollout = %#v, want the decodable lines kept", rollout)
+	}
+	if got := unparsedLineCounts(recorder, path); len(got) != 1 || got[0] != float64(1) {
+		t.Fatalf("unparsed line warnings for %s = %v, want [1]", path, got)
 	}
 }

@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/usagehook"
 )
 
 type builtinTestUsageSource struct{ id pfmengine.ID }
@@ -104,5 +106,83 @@ func TestAnAnswerWithNoLimitWindowIsAStatusNotAFailure(t *testing.T) {
 				t.Fatalf("limits=%#v warnings=%v, want a no-window card and no warning", limits, warnings)
 			}
 		})
+	}
+}
+
+type fixedLimitsSource struct{ limits AccountLimits }
+
+func (source fixedLimitsSource) Fetch(context.Context, LimitAccount) (AccountLimits, error) {
+	return source.limits, nil
+}
+
+// A forward-dated confirmation stamp is clamped to now: the windows beside it
+// are still the provider's answer and stay, with a warning.
+func TestLimitsSamplerKeepsWindowsUnderAFutureConfirmationStamp(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	const engine = pfmengine.ID("zz-future")
+	RegisterUsageSource(engine, fixedLimitsSource{limits: AccountLimits{
+		ConfirmedAt: now.Add(time.Hour), Windows: []Window{{Name: "5h", UsedPct: 42}},
+	}})
+	t.Cleanup(func() { delete(usageSources, engine) })
+	sampler := NewLimitsSampler([]LimitAccount{{ID: 9, Engine: engine, Label: "account 9"}})
+	sampler.Now = func() time.Time { return now }
+	limits, warnings := sampler.Sample(context.Background())
+	wantWarning := "account 9 limits: future confirmation timestamp, treated as now"
+	if len(warnings) != 1 || warnings[0] != wantWarning {
+		t.Fatalf("warnings = %q, want [%q]", warnings, wantWarning)
+	}
+	if len(limits) != 1 || len(limits[0].Windows) != 1 || limits[0].Windows[0].UsedPct != 42 ||
+		!limits[0].ConfirmedAt.Equal(now) || limits[0].Status != "" {
+		t.Fatalf("limits = %#v, want the 5h window at 42%% confirmed at now", limits)
+	}
+}
+
+// A window the provider names with a reset but no utilization keeps its row
+// with an unknown number: skipping it would hide the window and its reset.
+func TestUsageWindowsKeepsAResetOnlyWindowWithAnUnknownNumber(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	windows := usageWindows(usagehook.Usage{
+		SevenDay: usagehook.Window{ResetsAt: now.Add(72 * time.Hour).Format(time.RFC3339)},
+	}, now)
+	if len(windows) != 1 || windows[0].Name != "7d" || windows[0].UsedPct != UnknownUsedPct ||
+		!windows[0].ResetAt.Equal(now.Add(72*time.Hour)) {
+		t.Fatalf("windows=%#v, want a 7d row with an unknown number and its reset", windows)
+	}
+}
+
+// A statusline snapshot that answers stands even when a sibling file it skipped comes with it:
+// the account keeps its windows under the fallback, and the skipped file is a warning naming it.
+func TestStatuslineFallbackKeepsItsWindowsBesideASkippedSnapshotFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv(paths.EnvHome, home)
+	configDir := filepath.Join(home, ".claude2")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1_800_000_000, 0)
+	confirmed := now.Add(-30 * time.Minute) // past the usage door's TTL, inside the stale horizon
+	rateDir := filepath.Join(home, "tmp", "cc-rate-limits")
+	writeStatuslineQuotaFixture(t, rateDir, configDir, confirmed)
+	if err := os.WriteFile(filepath.Join(rateDir, "acct-2.broken.json"), []byte("not json\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sampler := NewLimitsSampler([]LimitAccount{{
+		ID: 2, Engine: pfmengine.Claude, Label: "account 2", ConfigDir: configDir,
+	}})
+	sampler.Now = func() time.Time { return now }
+	sampler.Ack = func(context.Context, LimitAccount) error {
+		t.Error("credential refresh must not run: the snapshot answered")
+		return nil
+	}
+	limits, warnings := sampler.Sample(context.Background())
+	want := "account 2 limits: statusline quota partly unreadable, showing what read: skipped statusline quota " +
+		"acct-2.broken.json: decode: invalid character 'o' in literal null (expecting 'u')"
+	if len(warnings) != 1 || warnings[0] != want {
+		t.Fatalf("warnings = %q, want [%q]", warnings, want)
+	}
+	if len(limits) != 1 || len(limits[0].Windows) != 2 || limits[0].Windows[0].UsedPct != 31 ||
+		limits[0].Windows[1].UsedPct != 47 || !limits[0].ConfirmedAt.Equal(confirmed) ||
+		limits[0].Status != "statusline quota partly unreadable" {
+		t.Fatalf("limits = %#v, want the 31/47 windows confirmed at %s", limits, confirmed)
 	}
 }

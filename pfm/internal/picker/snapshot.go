@@ -173,9 +173,6 @@ func sendRefresh(
 	if err == nil && len(failures) > 0 {
 		err = fmt.Errorf("probe native seats: %s", strings.Join(failures, "\n"))
 	}
-	if err == nil {
-		data, err = fleet.EnrichNative(ctx, database, data, native)
-	}
 	if err != nil {
 		return sentRefresh{failed: true}, sendRefreshFailure(
 			ctx,
@@ -185,8 +182,16 @@ func sendRefresh(
 			time.Unix(0, environment.NowNS),
 		)
 	}
+	// A seat EnrichNative could not read stays bare beside every other seat's
+	// enrichment; it and any account fault are named in the header.
+	scanErrors := slices.Clone(environment.Faults)
+	data, err = fleet.EnrichNative(ctx, database, data, native)
+	if err != nil {
+		scanErrors = append(scanErrors, err.Error())
+	}
 	output := fleet.ComposeFleet(environment, request.View, data, live, native...)
 	snapshot := buildSnapshot(ctx, environment, request, output)
+	snapshot.ScanError = strings.Join(scanErrors, "; ")
 	snapshot.Refreshing = refreshing
 	return sentRefresh{output: output, snapshot: snapshot}, publishSnapshot(ctx, snapshot, updates)
 }

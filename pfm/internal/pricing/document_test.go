@@ -83,8 +83,6 @@ func TestDecodeDocumentRefusesWhatPfmNeverWrites(t *testing.T) {
 	for _, tc := range []struct{ name, from, to, want string }{
 		{"an unknown key", `"served_from"`, `"servedFrom"`, "unknown field"},
 		{"another version", `"version":2`, `"version":1`, "version must be 2"},
-		{"a row without its source", `,"source":"published"`, ``, "neither published nor override"},
-		{"a row source pfm never sets", `"source":"override"`, `"source":"guess"`, "neither published nor override"},
 		{"a rate below zero", `"in":4,"out":20,"hit"`, `"in":-4,"out":20,"hit"`, "non-negative"},
 		{"no fetch time", `"fetched_at":"2026-01-01T00:00:00Z"`, `"fetched_at":""`, "fetched_at"},
 		{"an override with no path", `"path":"/cfg/pfm.prices.json"`, `"path":""`, "override needs"},
@@ -106,5 +104,26 @@ func TestDecodeDocumentRefusesWhatPfmNeverWrites(t *testing.T) {
 				t.Fatalf("DecodeDocument error = %v, want one naming %q", err, tc.want)
 			}
 		})
+	}
+}
+
+// A saved document's row source and checked_at only label it: no reader acts
+// on either, so an absent or odd one never refuses the document, and its rows
+// are kept as written.
+func TestDecodeDocumentKeepsRowsWhoseLabelsAreOdd(t *testing.T) {
+	compact, err := json.Marshal(documentFixture())
+	if err != nil {
+		t.Fatalf("marshal fixture: %v", err)
+	}
+	content := strings.Replace(string(compact), `,"source":"published"`, ``, 1)
+	content = strings.Replace(content, `"source":"override"`, `"source":"guess"`, 1)
+	content = strings.Replace(content, `"checked_at":"2026-01-02T03:04:05.5Z"`, `"checked_at":"last tuesday"`, 1)
+	doc, err := DecodeDocument([]byte(content), "saved")
+	if err != nil {
+		t.Fatalf("DecodeDocument: %v", err)
+	}
+	if len(doc.Rows) != 2 || doc.Rows[0].Key != "claude-opus-5-5" || doc.Rows[1].Key != "gpt-5.6-sol" ||
+		doc.Rows[0].Source != "" || doc.Rows[1].Source != "guess" || doc.CheckedAt != "last tuesday" {
+		t.Fatalf("decoded = %+v, want both rows kept with their sources and checked_at as written", doc)
 	}
 }

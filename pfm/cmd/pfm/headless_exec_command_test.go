@@ -562,8 +562,31 @@ func TestHeadlessExecReceiptOfAFailedRunCarriesNoEngineOutput(t *testing.T) {
 	}
 }
 
-func TestHeadlessExecFailureAndTimeoutDoNotWriteOut(t *testing.T) {
+func TestHeadlessExecOutCarriesOnlyAPaidAnswer(t *testing.T) {
 	headlessCLIJail(t)
+	t.Run("schema miss", func(t *testing.T) {
+		binary := writeHeadlessCLIStub(
+			t,
+			`printf '%s\n' '{"result":"the paid answer","structured_output":{"ok":"yes"},"total_cost_usd":null}'`,
+		)
+		commandEnv := headlessCLIRuntime(t, binary)
+		schema := filepath.Join(t.TempDir(), "schema.json")
+		schemaBody := `{"type":"object","required":["ok"],"properties":{"ok":{"type":"boolean"}}}`
+		if err := os.WriteFile(schema, []byte(schemaBody), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		out := filepath.Join(t.TempDir(), "out.json")
+		var stdout, stderr bytes.Buffer
+		code := runHeadlessExec([]string{
+			"--engine", "claude", "--prompt", "judge", "--schema", schema, "--out", out,
+		}, strings.NewReader(""), &stdout, &stderr, commandEnv)
+		if code != 5 || stdout.String() != "the paid answer\n" {
+			t.Fatalf("exit=%d stdout=%q stderr=%q, want 5 and the paid answer", code, stdout.String(), stderr.String())
+		}
+		if body := string(mustReadCLI(t, out)); body != "{\"ok\":\"yes\"}\n" {
+			t.Fatalf("out %s = %q, want the schema-missing structured output", out, body)
+		}
+	})
 	t.Run("failure", func(t *testing.T) {
 		capture := t.TempDir()
 		binary := writeHeadlessCLIStub(t, "printf failure >&2\nexit 7")

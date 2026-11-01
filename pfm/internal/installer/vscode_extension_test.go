@@ -100,6 +100,35 @@ func TestVSCodeExtensionLinksIntoEveryPresentProductRootNeverAnAbsentOne(t *test
 // same roots changes nothing: no new "change" is reported and the ledger
 // bytes are byte-for-byte the same, the same law ensureLink already gives
 // every other managed link.
+// One product whose extension cannot link fails alone: every other product
+// still links, and the ledger records the links that landed.
+func TestVSCodeExtensionFailingProductCostsOnlyThatProduct(t *testing.T) {
+	t.Setenv("VSCODE_PORTABLE", "")
+	home := t.TempDir()
+	rootA := filepath.Join(home, "product-a")
+	rootB := filepath.Join(home, "product-b")
+	writeFixture(t, filepath.Join(rootA, "extensions"), "a file where the extensions directory belongs\n")
+	if err := os.MkdirAll(rootB, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	installer := newVSCodeExtensionEngine(t, home, []string{rootA, rootB}, true)
+	broken := filepath.Join(rootA, "extensions", vscodeExtensionLinkName)
+	err := installer.wireVSCode()
+	if err == nil || !strings.Contains(err.Error(), "link VS Code extension "+broken+": ") {
+		t.Fatalf("wireVSCode = %v, want the failure of %s", err, broken)
+	}
+	linked := filepath.Join(rootB, "extensions", vscodeExtensionLinkName)
+	source := filepath.Join(installer.managedRoot, filepath.FromSlash(vscodeExtensionSource))
+	if resolved, ok := resolvedLink(linked); !ok || resolved != filepath.Clean(source) {
+		t.Fatalf("%s -> %q,%v, want the extension source %s", linked, resolved, ok, source)
+	}
+	ledger := readVSCodeLedgerFixture(t, installer.managedRoot)
+	if len(ledger.Extensions) != 1 || ledger.Extensions[0] != linked {
+		t.Fatalf("ledger extensions = %v, want [%s]", ledger.Extensions, linked)
+	}
+}
+
 func TestVSCodeExtensionReinstallIsIdempotent(t *testing.T) {
 	t.Setenv("VSCODE_PORTABLE", "")
 	home := t.TempDir()

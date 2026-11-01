@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -119,5 +120,78 @@ func TestReadCrumbsReadOnlyLeavesStalePane(t *testing.T) {
 	if content, err := os.ReadFile(stale); err != nil ||
 		string(content) != "/transcripts/stale.jsonl" {
 		t.Fatalf("read-only probe mutated stale crumb: content=%q err=%v", content, err)
+	}
+}
+
+// overlongSIDDir builds a directory whose path is exactly length characters,
+// written by populate under a short name and then renamed long: an entry
+// whose own path then passes Linux's PATH_MAX (4096) is refused to every
+// user, root included, while its shorter siblings stay readable.
+func overlongSIDDir(t *testing.T, length int, populate func(dir string)) string {
+	t.Helper()
+	parent := t.TempDir()
+	for remaining := length - 201 - len(parent); remaining > 0; remaining = length - 201 - len(parent) {
+		size := min(200, remaining-1)
+		if remaining-size-1 == 1 { // a 1-character remainder cannot be a component
+			size--
+		}
+		parent = filepath.Join(parent, strings.Repeat("d", size))
+	}
+	short := filepath.Join(parent, "s")
+	if err := os.MkdirAll(short, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	populate(short)
+	dir := filepath.Join(parent, strings.Repeat("s", 200))
+	if err := os.Rename(short, dir); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// TestScanCrumbsCostsOnlyTheCrumbItCannotReadOrSweep: a crumb that cannot be
+// read, or a stale one that cannot be removed, is named in Warnings while the
+// scan goes on; a pane crumb on a socket the tmux probe could not read is
+// never swept, its pane may live on unread.
+func TestScanCrumbsCostsOnlyTheCrumbItCannotReadOrSweep(t *testing.T) {
+	longSocket := "cc-1-2-" + strings.Repeat("3", 100)
+	files := map[string]string{
+		"cc-1-2-3.%1":      "/transcripts/live.jsonl",
+		"cc-1-2-3.%99":     "/transcripts/stale.jsonl",
+		longSocket:         "/transcripts/unreadable.jsonl",
+		longSocket + ".%7": "/transcripts/unremovable.jsonl",
+		"cc-4-5-6.%3":      "/transcripts/on-an-unread-socket.jsonl",
+	}
+	sidDir := overlongSIDDir(t, 4000, func(dir string) {
+		for name, content := range files {
+			if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	})
+	unread, unremovable := filepath.Join(sidDir, longSocket), filepath.Join(sidDir, longSocket+".%7")
+
+	probe, err := scanCrumbs(sidDir, []ProbePane{{Socket: "cc-1-2-3", PaneID: "%1"}}, true,
+		map[string]string{"cc-4-5-6": "could not read this tmux server"})
+	if err != nil {
+		t.Fatalf("scanCrumbs() error = %v, want the scan to go on", err)
+	}
+	if len(probe.Crumbs) != 1 || probe.Crumbs[0].TranscriptPath != "/transcripts/live.jsonl" {
+		t.Fatalf("crumbs = %#v, want the live pane's crumb", probe.Crumbs)
+	}
+	if !slices.Equal(probe.StaleSwept, []string{"cc-1-2-3.%99"}) {
+		t.Fatalf("StaleSwept = %q, want only cc-1-2-3.%%99", probe.StaleSwept)
+	}
+	wantWarnings := []string{
+		"crumb " + unread + " unreadable; its chat may lack its transcript this scan: open " + unread +
+			": file name too long",
+		"stale pane crumb " + unremovable + " could not be removed; it stays: remove " + unremovable +
+			": file name too long",
+	}
+	if !slices.Equal(probe.Warnings, wantWarnings) || probe.Ignored != 1 {
+		t.Fatalf("warnings = %q ignored=%d, want %q and 1 ignored", probe.Warnings, probe.Ignored, wantWarnings)
+	}
+	if _, err := os.Stat(filepath.Join(sidDir, "cc-4-5-6.%3")); err != nil {
+		t.Fatalf("crumb on an unread socket was swept: %v", err)
 	}
 }

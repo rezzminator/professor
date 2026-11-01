@@ -42,4 +42,17 @@ func TestPFMPathWarningsCatchResolutionAndHashShadows(t *testing.T) {
 	if len(warnings) != 0 {
 		t.Fatalf("matching canonical-first PATH warnings = %q, want none", warnings)
 	}
+
+	// A canonical binary that cannot be hashed still leaves the resolution order reported.
+	if err := os.Remove(canonical); err != nil {
+		t.Fatal(err)
+	}
+	warnings = pfmPathWarnings(home, shadowDir+string(os.PathListSeparator)+canonicalDir)
+	want := []string{
+		"pfm_canonical=" + canonical + " error=open " + canonical + ": no such file or directory",
+		"pfm_path_resolves=" + shadow + " canonical=" + canonical,
+	}
+	if strings.Join(warnings, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("unhashable canonical warnings = %q, want %q", warnings, want)
+	}
 }

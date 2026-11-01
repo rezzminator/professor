@@ -3,6 +3,7 @@ package themesync
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"syscall"
@@ -139,8 +140,15 @@ func TestResolveValueErrorsNameTheFile(t *testing.T) {
 		[]byte(`{"name":"x","base":"dark","overrides":{"claude":"purple"}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := resolveValue("custom:badcolour", dir); err == nil || !containsAll(err.Error(), "claude", "purple") {
-		t.Fatalf("bad colour error = %v", err)
+	// An override colour that cannot be read costs only itself: the base's value
+	// stays and the note names the token and the colour.
+	badColour, err := resolveValue("custom:badcolour", dir)
+	wantNote := `custom theme badcolour: override "claude" unreadable, the base's value kept: ` +
+		`themesync: colour "purple" is not rgb(), #rgb, #rrggbb, ansi256() or ansi:name`
+	if err != nil || !reflect.DeepEqual(badColour.Notes, []string{wantNote}) ||
+		badColour.Applied.Primary.Accent != "#d77757" {
+		t.Fatalf("bad colour = accent %q notes %q err %v, want the base's #d77757 and %q",
+			badColour.Applied.Primary.Accent, badColour.Notes, err, wantNote)
 	}
 	// A name is a file directly in themes/: one holding a path separator names
 	// no theme, even when the file it points at parses.

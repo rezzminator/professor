@@ -411,12 +411,7 @@ func TestWireClaudeStore(t *testing.T) {
 			switch scenario {
 			case "dangling-store":
 				path, reason = filepath.Join(store, "projects"), "a dangling link"
-				if err := os.MkdirAll(store, 0o700); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.Symlink(filepath.Join(home, "gone"), path); err != nil {
-					t.Fatal(err)
-				}
+				symlinkFixture(t, filepath.Join(home, "gone"), path)
 			case "file-in-dir":
 				writeFixture(t, path, "file")
 			case "dir-in-file":
@@ -438,7 +433,9 @@ func TestWireClaudeStore(t *testing.T) {
 			if err := runner.wireClaudeStore(); err == nil || err.Error() != want {
 				t.Fatalf("error=%v want=%s", err, want)
 			}
-			assertAbsent(t, account)
+			// A broken entry costs its own account link; the account's others still wire.
+			assertAbsent(t, filepath.Join(account, filepath.Base(path)))
+			assertLink(t, filepath.Join(account, "commands"), filepath.Join(store, "commands"))
 		})
 	}
 }

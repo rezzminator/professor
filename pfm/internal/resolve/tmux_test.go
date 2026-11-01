@@ -2,7 +2,9 @@ package resolve
 
 import (
 	"context"
+	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/obs"
@@ -95,4 +97,63 @@ func TestWhoamiTmuxRecordsEveryInvocation(t *testing.T) {
 	}
 	requireTmuxRecord(t, recorder, 0, "display-message", "%3")
 	requireTmuxRecord(t, recorder, 1, "list-panes", "")
+}
+
+// tmuxPrinting plays a tmux whose every answer is output.
+func tmuxPrinting(t *testing.T, output string) string {
+	t.Helper()
+	dir := t.TempDir()
+	answer := filepath.Join(dir, "answer")
+	if err := os.WriteFile(answer, []byte(output), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	binary := filepath.Join(dir, "tmux")
+	if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\ncat '"+answer+"'\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return binary
+}
+
+// One listing line tmux wrote in another shape costs that pane, never the
+// server's other panes, and the loss is named.
+func TestTmuxListingsKeepEveryParsedPane(t *testing.T) {
+	t.Run("list-panes", func(t *testing.T) {
+		ctx, recorder := obs.Test(t)
+		binary := tmuxPrinting(t, "main\x1f%1\x1fclaude\x1fwin\nbroken-line\n")
+		panes, err := TmuxResolver{Binary: binary}.ListPanes(ctx, "/sockets/cc-1")
+		want := []ResolvedPane{{
+			SocketPath: "/sockets/cc-1", SessionName: "main", PaneID: "%1", CurrentCommand: "claude", WindowName: "win",
+		}}
+		if err != nil || !reflect.DeepEqual(panes, want) {
+			t.Fatalf("ListPanes() = %+v, %v; want %+v", panes, err, want)
+		}
+		var skipped []string
+		for _, record := range recorder.Records() {
+			if record.Message == "resolve.pane.skipped" {
+				sock, _ := record.Field(obs.FieldSock)
+				text, _ := record.Field(obs.FieldErr)
+				skipped = append(skipped, record.Level+" "+sock.(string)+": "+text.(string))
+			}
+		}
+		if want := []string{
+			`WARN /sockets/cc-1: tmux returned 1 fields in "broken-line"`,
+		}; !reflect.DeepEqual(
+			skipped,
+			want,
+		) {
+			t.Fatalf("skip records = %q, want %q", skipped, want)
+		}
+	})
+	t.Run("pane owners", func(t *testing.T) {
+		binary := tmuxPrinting(t, "1234 %0\nabc %1\n")
+		owners, err := CommandPaneOwners{Binary: binary}.PaneOwners(context.Background(), "/sockets/cc-1")
+		want := []PaneOwner{{SocketPath: "/sockets/cc-1", PaneID: "%0", PanePID: 1234}}
+		if !reflect.DeepEqual(owners, want) {
+			t.Fatalf("PaneOwners() = %+v, want %+v", owners, want)
+		}
+		if wantErr := `tmux returned 1 unparsable pane owner line(s), first "abc %1"`; err == nil ||
+			err.Error() != wantErr {
+			t.Fatalf("PaneOwners() error = %v, want %q", err, wantErr)
+		}
+	})
 }

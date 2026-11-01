@@ -20,7 +20,14 @@ type dockerIdentity struct {
 	name  string
 	image string
 	err   string
+	// retryAtNS is the sample time from which a failed lookup is asked again.
+	retryAtNS int64
 }
+
+// dockerIdentityRetry spaces the lookups of a container whose identity failed:
+// a daemon that was down at the first sample is asked again, but not once per
+// sample while it stays down.
+const dockerIdentityRetry = 30 * time.Second
 
 // dockerSocketPath is where a real Docker daemon's control socket lives.
 const dockerSocketPath = "/var/run/docker.sock"
@@ -45,7 +52,7 @@ func NewSamplerWithDockerSocket(procRoot, cgroupRoot, dockerSocket string) *Samp
 	}
 }
 
-func (sampler *Sampler) resolveDockerIdentities(containers []Container) []string {
+func (sampler *Sampler) resolveDockerIdentities(containers []Container, nowNS int64) []string {
 	if sampler.DockerInspect == nil {
 		return nil
 	}
@@ -57,7 +64,7 @@ func (sampler *Sampler) resolveDockerIdentities(containers []Container) []string
 	var warnings []string
 	for index := range containers {
 		identity, found := sampler.dockerIdentities[containers[index].ID]
-		if !found {
+		if !found || (identity.err != "" && nowNS >= identity.retryAtNS) {
 			name, image, err := sampler.DockerInspect(containers[index].ID)
 			identity = dockerIdentity{
 				name:  strings.TrimPrefix(strings.TrimSpace(name), "/"),
@@ -67,6 +74,9 @@ func (sampler *Sampler) resolveDockerIdentities(containers []Container) []string
 				identity.err = err.Error()
 			} else if identity.name == "" || identity.image == "" {
 				identity.err = "daemon response omitted the container name or image"
+			}
+			if identity.err != "" {
+				identity.retryAtNS = nowNS + dockerIdentityRetry.Nanoseconds()
 			}
 			sampler.dockerIdentities[containers[index].ID] = identity
 		}

@@ -3,7 +3,9 @@ package run
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -50,7 +52,7 @@ func TestParseOpenCodeJSONLRejectsMalformedAndIncompleteResults(t *testing.T) {
 		body string
 		want string
 	}{
-		{name: "malformed", body: "not-json", want: "parse OpenCode JSONL"},
+		{name: "malformed", body: "not-json", want: "missing terminal"},
 		{name: "missing terminal", body: `{"type":"text","part":{"text":"answer"}}`, want: "missing terminal"},
 		{
 			name: "tool error",
@@ -72,5 +74,136 @@ func TestParseOpenCodeJSONLRejectsMalformedAndIncompleteResults(t *testing.T) {
 				t.Fatalf("parseOpenCodeJSONL() error = %v, want %q", err, testCase.want)
 			}
 		})
+	}
+}
+
+// One unreadable OpenCode event, part or value costs that item alone; a run that ends badly
+// still carries the model's text, usage and cost beside its error.
+func TestParseOpenCodeJSONLKeepsWhatItCouldRead(t *testing.T) {
+	cost := func(value float64) *float64 { return &value }
+	finish := func(reason string) string {
+		return `{"type":"step_finish","part":{"reason":"` + reason + `","tokens":{"input":4,"output":2},"cost":0.25}}`
+	}
+	text := `{"type":"text","part":{"id":"p1","messageID":"m1","text":"kept"}}`
+	cases := []struct {
+		name        string
+		body        string
+		schema      bool
+		wantErr     string
+		answer      string
+		usage       *TokenUsage
+		cost        *float64
+		diagnostics []string
+	}{
+		{
+			name: "unreadable line, typeless event, text part and converter diagnostic",
+			body: strings.Join([]string{
+				"not-json", `{"part":{}}`, `{"type":"text","part":{"text":7}}`,
+				`{"type":"pfm.unreadable","message":"could not read an OpenCode run message part: bad"}`,
+				text, finish("stop"),
+			}, "\n"),
+			answer: "kept", usage: &TokenUsage{Input: 4, Output: 2}, cost: cost(0.25),
+			diagnostics: []string{
+				"could not read OpenCode JSONL event 1: invalid character 'o' in literal null (expecting 'u')",
+				"could not read OpenCode JSONL event 2: the event has no type",
+				"could not read OpenCode text event 3: json: cannot unmarshal number into Go struct field .text of type string",
+				"could not read an OpenCode run message part: bad",
+			},
+		},
+		{
+			name: "one step's tokens and cost leave the run's usage and cost unknown",
+			body: strings.Join([]string{
+				text,
+				`{"type":"step_finish","part":{"reason":"tool-calls","tokens":{"input":-1},"cost":"x"}}`,
+				finish("stop"),
+			}, "\n"),
+			answer: "kept",
+			diagnostics: []string{
+				"could not read OpenCode step_finish event 2 tokens: negative token count",
+				"could not read OpenCode step_finish event 2 cost: json: cannot unmarshal string into Go value of type float64",
+			},
+		},
+		{
+			name:    "a reason other than stop keeps the text beside the error",
+			body:    text + "\n" + finish("length"),
+			wantErr: `OpenCode headless output ended with "length" and contains no structured result`,
+			answer:  "kept", usage: &TokenUsage{Input: 4, Output: 2}, cost: cost(0.25),
+		},
+		{
+			name:    "no reason keeps the text beside the error",
+			body:    text + "\n" + `{"type":"step_finish","part":{"messageID":"m1"}}`,
+			wantErr: "OpenCode headless output missing terminal stop event",
+			answer:  "kept",
+		},
+		{
+			name:    "an engine error keeps the text beside the error",
+			body:    strings.Join([]string{text, `{"type":"error","error":{"message":"quota"}}`, finish("stop")}, "\n"),
+			wantErr: "OpenCode headless output reported an error",
+			answer:  "kept", usage: &TokenUsage{Input: 4, Output: 2}, cost: cost(0.25),
+			diagnostics: []string{"quota"},
+		},
+		{
+			name:    "a schema run without StructuredOutput keeps the text beside the error",
+			body:    text + "\n" + finish("stop"),
+			schema:  true,
+			wantErr: "structured output missing or invalid: OpenCode did not return StructuredOutput",
+			answer:  "kept", usage: &TokenUsage{Input: 4, Output: 2}, cost: cost(0.25),
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			result := Result{Stdout: testCase.body}
+			request := Request{Engine: pfmengine.OpenCode}
+			if testCase.schema {
+				request.Schema = json.RawMessage(`{"type":"object"}`)
+			}
+			err := parseOpenCodeJSONL(&result, request)
+			if gotErr := fmt.Sprint(err); (err != nil || testCase.wantErr != "") && gotErr != testCase.wantErr {
+				t.Fatalf("parseOpenCodeJSONL() error = %v, want %q", err, testCase.wantErr)
+			}
+			if result.Answer != testCase.answer {
+				t.Fatalf("answer = %q, want %q", result.Answer, testCase.answer)
+			}
+			if !reflect.DeepEqual(result.Usage, testCase.usage) {
+				t.Fatalf("usage = %+v, want %+v", result.Usage, testCase.usage)
+			}
+			if !reflect.DeepEqual(result.TotalCostUSD, testCase.cost) {
+				t.Fatalf("cost = %v, want %v", result.TotalCostUSD, testCase.cost)
+			}
+			if !reflect.DeepEqual(result.Diagnostics, testCase.diagnostics) {
+				t.Fatalf("diagnostics = %#v, want %#v", result.Diagnostics, testCase.diagnostics)
+			}
+		})
+	}
+}
+
+// A persisted part the converter cannot decode is carried into the normalized stream as a
+// diagnostic; its sibling parts still convert and the snapshot still reads as complete.
+func TestOpenCodeMessageConversionSkipsAnUnreadablePart(t *testing.T) {
+	body := []byte(`{"info":{"role":"assistant","finish":"stop","time":{"completed":1}},"parts":[` +
+		`"stray",{"type":"tool","tool":"StructuredOutput","state":"pending"},` +
+		`{"type":"text","id":"p1","messageID":"m1","text":"kept"},{"type":"step-finish","reason":"stop"}]}`)
+	request := Request{Engine: pfmengine.OpenCode}
+	complete, err := openCodeMessageSnapshotComplete(body, request)
+	if err != nil || !complete {
+		t.Fatalf("openCodeMessageSnapshotComplete() = %v, %v; want true, nil", complete, err)
+	}
+	output, converted, err := openCodeMessageAsJSONL(body, request)
+	if err != nil || !converted {
+		t.Fatalf("openCodeMessageAsJSONL() = %v, %v; want complete, nil", converted, err)
+	}
+	result := Result{Stdout: output}
+	if err := parseOpenCodeJSONL(&result, request); err != nil {
+		t.Fatalf("parseOpenCodeJSONL(%s) error = %v", output, err)
+	}
+	if result.Answer != "kept" {
+		t.Fatalf("answer = %q, want kept; stream %s", result.Answer, output)
+	}
+	want := []string{
+		"could not read an OpenCode run message part: json: cannot unmarshal string into Go value of type run.openCodeSnapshotPart",
+		"could not read an OpenCode run message part: json: cannot unmarshal string into Go struct field openCodeSnapshotPart.state of type struct { Status string \"json:\\\"status\\\"\" }",
+	}
+	if !reflect.DeepEqual(result.Diagnostics, want) {
+		t.Fatalf("diagnostics = %#v, want %#v", result.Diagnostics, want)
 	}
 }

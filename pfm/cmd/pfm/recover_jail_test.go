@@ -101,3 +101,26 @@ func TestChatRecoverCompactedRolloutSeparatesCarriedHistory(t *testing.T) {
 		t.Fatalf("summary = %q", stdout.String())
 	}
 }
+
+// Recover reads no machine config: the one main loaded from --config is the
+// only load, so a broken config elsewhere (PFM_CONFIG) never blocks it.
+func TestChatRecoverRunsBesideABrokenDefaultConfig(t *testing.T) {
+	const id = "33333333-3333-4333-8333-333333333333"
+	line := `{"timestamp":"2026-08-16T14:00:00Z","type":"response_item",` +
+		`"payload":{"type":"message","role":"user","content":[{"text":"recover me"}]}}`
+	root, _ := recoveryJail(t, line+"\n", id)
+	broken := filepath.Join(root, "broken.json")
+	if err := os.WriteFile(broken, []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PFM_CONFIG", broken)
+	named := writeConfigFixture(t, root, `{"version":1}`)
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"--config", named, "chat", "recover", id}, &stdout, &stderr); code != 0 {
+		t.Fatalf("recover exit = %d, want 0; stderr=%q", code, stderr.String())
+	}
+	if got := readRecoveryFile(t, root, id, "transcript.md"); !strings.Contains(got, "recover me") {
+		t.Fatalf("transcript.md = %q, want the user message %q", got, "recover me")
+	}
+}

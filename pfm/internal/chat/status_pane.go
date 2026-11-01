@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -252,10 +253,9 @@ func statusFromHerdr(
 		status.State = result.Agent.State
 		status.IdleSeconds = 0
 		status.Error = ""
-	case "unknown":
-		status.StateSource = "transcript (Herdr unknown)"
 	default:
-		return status, fmt.Errorf("herdr pane %s has unknown state %q", chat.Pane, result.Agent.State)
+		// A state Herdr reports outside the known set keeps the transcript verdict, named.
+		status.StateSource = "transcript (Herdr " + cmp.Or(result.Agent.State, "unknown") + ")"
 	}
 	for _, observation := range observations {
 		if observation != nil {

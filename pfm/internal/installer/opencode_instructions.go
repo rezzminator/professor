@@ -58,6 +58,9 @@ func (installer *engine) editOpenCodeInstructions(wanted bool) (returnErr error)
 	// only later in this same run, as at wireShell.
 	var composed string
 	if wanted {
+		if installer.skipFailedPrompt(pfmengine.OpenCode, "OpenCode instructions") {
+			return nil
+		}
 		var err error
 		if repo := strings.TrimSpace(installer.options.SourceRepo); repo != "" {
 			var content []byte

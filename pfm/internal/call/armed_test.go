@@ -162,12 +162,21 @@ func TestArmRecordLeavesALiveArmingAlone(t *testing.T) {
 	}
 
 	writeArmedFixture(t, path, deadPID(t), "/compact a dead arming", time.Now().Add(-time.Hour))
+	// A reader holding the old record (a hard link to its inode) keeps it whole:
+	// the new record replaces the file in one rename, never truncates it in place.
+	reader := path + ".reader"
+	if err := os.Link(path, reader); err != nil {
+		t.Fatal(err)
+	}
 	if err := armRecord(request, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	record, _, err = readArmedRecord(path)
 	if err != nil || record.PID != 0 || record.Steer != "resume" {
 		t.Fatalf("record after arming over a dead one = %+v (%v), want the new unclaimed arming", record, err)
+	}
+	if old, _, err := readArmedRecord(reader); err != nil || old.Steer != "/compact a dead arming" {
+		t.Fatalf("reader's record %s = %+v (%v), want the dead arming intact", reader, old, err)
 	}
 }
 

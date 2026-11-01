@@ -2,6 +2,7 @@ package fleet
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -46,6 +47,8 @@ func NativeSeats(ctx context.Context, values paths.Values, readOnly bool) ([]gat
 
 // EnrichNative adds only native identities omitted by the capped default load.
 // Kills and OpenCode sessions are already complete; cached totals remain valid.
+// A seat whose store read fails stays unenriched and is named in the joined
+// error; the returned data always carries every other seat's enrichment.
 func EnrichNative(ctx context.Context, database *store.Store, data Data, native []gather.HerdrSeat) (Data, error) {
 	if data.CachedCounts == nil || len(native) == 0 {
 		return data, nil
@@ -58,6 +61,7 @@ func EnrichNative(ctx context.Context, database *store.Store, data Data, native 
 	for index := range data.Rollouts {
 		rollouts[data.Rollouts[index].ID] = struct{}{}
 	}
+	var failures []error
 	for index := range native {
 		seat := &native[index].Seat
 		if seat.SessionID == "" {
@@ -67,7 +71,7 @@ func EnrichNative(ctx context.Context, database *store.Store, data Data, native 
 		case pfmengine.Claude:
 			// The whole continued-in chain: the seat carries its newest segment.
 			if err := loadChain(ctx, database, &data, transcripts, seat.SessionID); err != nil {
-				return Data{}, fmt.Errorf("native seat %s transcript: %w", seat.SeatID, err)
+				failures = append(failures, fmt.Errorf("native seat %s transcript: %w", seat.SeatID, err))
 			}
 		case pfmengine.Codex:
 			if _, found := rollouts[seat.SessionID]; found {
@@ -75,7 +79,8 @@ func EnrichNative(ctx context.Context, database *store.Store, data Data, native 
 			}
 			rollout, found, err := database.Rollout(ctx, seat.SessionID)
 			if err != nil {
-				return Data{}, fmt.Errorf("native seat %s rollout: %w", seat.SeatID, err)
+				failures = append(failures, fmt.Errorf("native seat %s rollout: %w", seat.SeatID, err))
+				continue
 			}
 			rollouts[seat.SessionID] = struct{}{}
 			if found {
@@ -83,7 +88,7 @@ func EnrichNative(ctx context.Context, database *store.Store, data Data, native 
 			}
 		}
 	}
-	return data, nil
+	return data, errors.Join(failures...)
 }
 
 // composeNativeFleet is the shared native-read policy after a scan has loaded
@@ -97,14 +102,16 @@ func composeNativeFleet(
 	data Data,
 	live gather.Snapshot,
 	readOnly bool,
-) (compose.Output, []string, error) {
+) (compose.Output, []string) {
 	native, failures, err := NativeSeats(ctx, environment.Paths, readOnly)
 	if err != nil {
 		failures = append(failures, err.Error())
 	}
+	// An unreadable continued-in chain or rollout leaves only its seat
+	// unenriched: the scan error names it and every other row still composes.
 	data, err = EnrichNative(ctx, database, data, native)
 	if err != nil {
-		return compose.Output{}, nil, err
+		failures = append(failures, err.Error())
 	}
-	return ComposeFleet(environment, view, data, live, native...), failures, nil
+	return ComposeFleet(environment, view, data, live, native...), failures
 }

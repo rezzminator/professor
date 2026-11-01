@@ -42,14 +42,25 @@ func FetchClaude(ctx context.Context, account LimitAccount) (AccountLimits, erro
 	}
 	result := AccountLimits{}
 	usage, confirmedAt, fetchErr := sampler.fetchClaude(ctx, account)
-	if fetchErr != nil && usagehook.IsCredentialUnavailable(fetchErr) {
-		statuslineUsage, statuslineConfirmedAt, found, statuslineErr := sampler.fetchClaudeStatusline(account)
+	// fromStatusline reads the statusline snapshots into the fetch state. A snapshot that answers
+	// stands even with errors beside it (files or windows it skipped): those are kept in
+	// snapshotNotes and warned about, never allowed to replace the answer. With no answer, a read
+	// error replaces the fetch error.
+	var snapshotNotes []error
+	fromStatusline := func() {
+		snapshotUsage, snapshotConfirmedAt, found, snapshotErr := sampler.fetchClaudeStatusline(account)
 		switch {
-		case statuslineErr != nil:
-			fetchErr = statuslineErr
 		case found:
-			usage, confirmedAt, fetchErr = statuslineUsage, statuslineConfirmedAt, nil
+			usage, confirmedAt, fetchErr = snapshotUsage, snapshotConfirmedAt, nil
+			if snapshotErr != nil {
+				snapshotNotes = append(snapshotNotes, snapshotErr)
+			}
+		case snapshotErr != nil:
+			fetchErr = snapshotErr
 		}
+	}
+	if fetchErr != nil && usagehook.IsCredentialUnavailable(fetchErr) {
+		fromStatusline()
 	}
 	// Neither a credentials file nor a statusline snapshot: the account is
 	// completely dark, and nothing about rendering the tab changes that on its
@@ -68,13 +79,7 @@ func FetchClaude(ctx context.Context, account LimitAccount) (AccountLimits, erro
 		if ackErr := sampler.tryAck(ctx, account); ackErr == nil {
 			usage, confirmedAt, fetchErr = sampler.fetchClaudeAfterCredentialRefresh(ctx, account)
 			if fetchErr != nil && usagehook.IsCredentialUnavailable(fetchErr) {
-				probedUsage, probedConfirmedAt, found, probedErr := sampler.fetchClaudeStatusline(account)
-				switch {
-				case probedErr != nil:
-					fetchErr = probedErr
-				case found:
-					usage, confirmedAt, fetchErr = probedUsage, probedConfirmedAt, nil
-				}
+				fromStatusline()
 			}
 		}
 		// The probe is the only automatic repair for this state, so when it
@@ -153,6 +158,13 @@ func FetchClaude(ctx context.Context, account LimitAccount) (AccountLimits, erro
 		// An answer that reports no window is an account with no limit window
 		// (on credits), not a failure.
 		result.Status, result.NoWindow = noLimitWindows, true
+	}
+	if len(snapshotNotes) != 0 {
+		if result.Status == "" {
+			result.Status = "statusline quota partly unreadable"
+		}
+		return result, fmt.Errorf("%s limits: statusline quota partly unreadable, showing what read: %w",
+			label, errors.Join(snapshotNotes...))
 	}
 	return result, nil
 }

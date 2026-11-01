@@ -118,3 +118,32 @@ func TestReadHeaderNamesARolloutWithoutSessionMeta(t *testing.T) {
 		t.Fatalf("a missing file read as %v; want an open error, never ErrNoSessionMeta", err)
 	}
 }
+
+// One malformed line among a rollout's first lines costs only itself: the
+// session_meta after it still names the thread, and a prefix with no session_meta
+// but a damaged line is named unreadable, never the absence ErrNoSessionMeta.
+func TestReadHeaderSkipsAMalformedLineBeforeSessionMeta(t *testing.T) {
+	dir := t.TempDir()
+	damaged := filepath.Join(dir, "damaged.jsonl")
+	if err := os.WriteFile(
+		damaged,
+		[]byte("{not json\n"+`{"type":"session_meta","payload":{"id":"thread-1","source":"cli"}}`+"\n"),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	header, err := ReadHeader(damaged)
+	if err != nil || header.ID != "thread-1" || header.Kind != User {
+		t.Fatalf("ReadHeader(%s) = %+v, %v; want thread-1 read past the malformed line", damaged, header, err)
+	}
+	headless := filepath.Join(dir, "headless.jsonl")
+	if err := os.WriteFile(headless, []byte("{not json\n"+`{"type":"turn_context"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err = ReadHeader(headless)
+	want := "decode rollout metadata: no session_meta among the readable lines of " + headless +
+		", 1 malformed line(s) skipped, the first: invalid character 'n' looking for beginning of object key string"
+	if err == nil || err.Error() != want || errors.Is(err, ErrNoSessionMeta) {
+		t.Fatalf("ReadHeader(%s) error = %v, want %q and not ErrNoSessionMeta", headless, err, want)
+	}
+}

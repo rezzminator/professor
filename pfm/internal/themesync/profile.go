@@ -51,7 +51,9 @@ func parseClaudeTokens(source string) map[string]bool {
 // keys Claude ever sees) and the optional per-surface pins beside it, which
 // win over what derive fills.
 type Profile struct {
-	Name      string            `json:"name"`
+	// Name is the theme's title, optional: an unnamed one is titled by its stem
+	// (RenderVSCodeTheme) or its value (resolveCustom), as Claude Code does.
+	Name      string            `json:"name,omitempty"`
 	Base      string            `json:"base,omitempty"`
 	Overrides map[string]string `json:"overrides"`
 	Surfaces  *SurfacePins      `json:"surfaces,omitempty"`
@@ -152,7 +154,12 @@ func ProfilePath(home, name string) string { return filepath.Join(ProfileDir(hom
 // ParseProfile reads a profile strictly: an unknown top-level key, trailing
 // data or an invalid pin is an error, so nothing but the palette reaches
 // Claude Code.
-func ParseProfile(content []byte) (Profile, error) {
+func ParseProfile(content []byte) (Profile, error) { return decodeProfile(content, true) }
+
+// decodeProfile is ParseProfile; authoring false reads a profile already
+// installed: its pins are left to keepPins, which drops a key no renderer emits
+// any more where authoring refuses it.
+func decodeProfile(content []byte, authoring bool) (Profile, error) {
 	decoder := json.NewDecoder(bytes.NewReader(content))
 	decoder.DisallowUnknownFields()
 	var profile Profile
@@ -162,14 +169,13 @@ func ParseProfile(content []byte) (Profile, error) {
 	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
 		return Profile{}, errors.New("parse profile: data after the top-level value")
 	}
-	if profile.Name == "" {
-		return Profile{}, errors.New("parse profile: no name")
-	}
 	if err := validatePalette(profile); err != nil {
 		return Profile{}, fmt.Errorf("profile %s: %w", profile.Name, err)
 	}
-	if err := validatePins(profile.Surfaces); err != nil {
-		return Profile{}, fmt.Errorf("profile %s: %w", profile.Name, err)
+	if authoring {
+		if err := validatePins(profile.Surfaces); err != nil {
+			return Profile{}, fmt.Errorf("profile %s: %w", profile.Name, err)
+		}
 	}
 	return profile, nil
 }

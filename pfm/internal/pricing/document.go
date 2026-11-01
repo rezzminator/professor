@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"time"
 )
 
 // RefreshReport is what the refresh that served a table did, as the document
@@ -62,10 +61,10 @@ func DecodeDocument(content []byte, name string) (Document, error) {
 	}
 	rows := make([]Row, len(doc.Rows))
 	for i, row := range doc.Rows {
-		if row.Source != SourcePublished && row.Source != SourceOverride {
-			return Document{}, fmt.Errorf("price document %s: %s: source %q is neither %s nor %s",
-				name, row.Key, row.Source, SourcePublished, SourceOverride)
-		}
+		// A saved row's source only labels where pfm served it from; the book
+		// is priced by the rates, so whatever the label says never refuses the
+		// document. The copy the table check reads carries none, as a table's
+		// rows do.
 		row.Source = ""
 		rows[i] = row
 	}
@@ -73,15 +72,6 @@ func DecodeDocument(content []byte, name string) (Document, error) {
 		Table{Version: doc.Version, FetchedAt: doc.FetchedAt, Sources: doc.Sources, Rows: rows},
 	); err != nil {
 		return Document{}, fmt.Errorf("price document %s: %w", name, err)
-	}
-	if doc.CheckedAt != "" {
-		if _, err := time.Parse(time.RFC3339Nano, doc.CheckedAt); err != nil {
-			return Document{}, fmt.Errorf(
-				"price document %s: checked_at %q is not an RFC 3339 time",
-				name,
-				doc.CheckedAt,
-			)
-		}
 	}
 	if doc.Billing != nil {
 		multiplier, err := billingMultiplier(doc.Billing.Route, doc.Billing.Region)

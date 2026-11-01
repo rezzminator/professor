@@ -309,9 +309,11 @@ func (installer *engine) wireCodexHooks() error {
 	if len(installer.codexHomes()) == 0 {
 		installer.skip("no Codex accounts configured — hooks.json wiring has nothing to wire")
 	}
+	// One home's failure costs that home: every other home is still wired and
+	// trusted, and the ledger follows every file this pass touched.
 	var loopErr error
 	for _, codexHome := range installer.codexHomes() {
-		loopErr = func() error {
+		homeErr := func() error {
 			path := filepath.Join(codexHome, "hooks.json")
 			physical := physicalSettingsPath(path)
 			if seen[physical] {
@@ -423,13 +425,14 @@ func (installer *engine) wireCodexHooks() error {
 			}
 			return nil
 		}()
-		if loopErr != nil {
-			break
+		if homeErr != nil {
+			// A failed home asks Codex to trust nothing its file may not hold.
+			delete(carriesHook, physicalSettingsPath(filepath.Join(codexHome, "hooks.json")))
+			loopErr = errors.Join(loopErr, homeErr)
 		}
 	}
 	// Claude settings rows go; a configured home's hooks file stays under
-	// whatever name its link resolves to, the homes a stopped loop never
-	// reached included.
+	// whatever name its link resolves to, a failed home's included.
 	configured := map[string]bool{}
 	for _, codexHome := range installer.codexHomes() {
 		configured[physicalSettingsPath(filepath.Join(codexHome, "hooks.json"))] = true
@@ -444,10 +447,7 @@ func (installer *engine) wireCodexHooks() error {
 		}
 	}
 	ledgerErr := installer.writeSettingsHookOwnership(ownershipPath, ownershipRaw, ownership)
-	if err := errors.Join(loopErr, ledgerErr); err != nil {
-		return err
-	}
-	return installer.wireCodexHookTrust(carriesHook)
+	return errors.Join(loopErr, ledgerErr, installer.wireCodexHookTrust(carriesHook))
 }
 
 // codexOwnedHooks is every handler pfm owns in a Codex hooks.json: the

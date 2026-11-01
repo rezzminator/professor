@@ -345,7 +345,8 @@ func (s *Store) enumerateSeats(ctx context.Context, columns string) (seats []Sea
 	for rows.Next() {
 		seat, err := scanSeat(rows)
 		if err != nil {
-			return nil, fmt.Errorf("read seat row: %w", err)
+			skipRow(ctx, "seat", fmt.Errorf("read seat row: %w", err))
+			continue
 		}
 		seats = append(seats, seat)
 	}

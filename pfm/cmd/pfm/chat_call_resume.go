@@ -334,6 +334,9 @@ func appendResumeCall(
 	}
 	parent, _ := tail["uuid"].(string)
 	sessionID, _ := tail["sessionId"].(string)
+	if sessionID == "" {
+		sessionID = target.ID // Claude names a transcript after its session id
+	}
 	if parent == "" || sessionID == "" {
 		return resumeReceipt{}, fmt.Errorf("transcript %q has no uuid-bearing session tail", target.Path)
 	}
@@ -379,8 +382,8 @@ func lastUUIDEvent(raw []byte) (map[string]any, error) {
 	scanner.Buffer(make([]byte, 64<<10), 32<<20)
 	for scanner.Scan() {
 		var event map[string]any
-		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
-			return nil, fmt.Errorf("decode JSONL line: %w", err)
+		if json.Unmarshal(scanner.Bytes(), &event) != nil {
+			continue // one torn line costs that line; Append separates a torn tail
 		}
 		if id, _ := event["uuid"].(string); id != "" {
 			tail = event

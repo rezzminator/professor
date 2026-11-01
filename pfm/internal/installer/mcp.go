@@ -64,33 +64,25 @@ func (installer *engine) mcpOwnershipPath() string {
 	return filepath.Join(installer.managedRoot, mcpOwnershipName)
 }
 
+// wireMCP wires every MCP client; one registry or client that fails costs
+// itself alone. The retired credentials go only once every registration
+// before them landed, so none is left pointing at a removed one.
 func (installer *engine) wireMCP() error {
-	if err := installer.cutOverClaudeMCP(); err != nil {
-		return err
+	failures := []error{installer.cutOverClaudeMCP(), installer.dropClaudeMCPOwnership()}
+	if installer.options.Mode == ModeUninstall || !installer.mcpAnyEnabled() {
+		return errors.Join(append(failures, installer.removeMCPClientRegistrations())...)
 	}
-	if err := installer.dropClaudeMCPOwnership(); err != nil {
-		return err
-	}
-	if installer.options.Mode == ModeUninstall {
-		return installer.removeMCPClientRegistrations()
-	}
-	if !installer.mcpAnyEnabled() {
-		return installer.removeMCPClientRegistrations()
-	}
-	if err := installer.removeLegacyMCPConfigAuth(); err != nil {
-		return err
+	retire := errors.Join(failures...) == nil
+	if retire {
+		failures = append(failures, installer.removeLegacyMCPConfigAuth())
 	}
 	names := enabledMCPNames(installer.options.MCPEnabled)
-	if err := installer.writeMCPCodeConfig(names); err != nil {
+	failures = append(failures, installer.writeMCPCodeConfig(names), installer.writeMCPOpenCodeJSON(names))
+	if err := errors.Join(failures...); err != nil {
+		installer.skip("retired MCP credentials kept: an MCP registration above failed")
 		return err
 	}
-	if err := installer.writeMCPOpenCodeJSON(names); err != nil {
-		return err
-	}
-	if err := installer.removeLegacyMCPCredential(); err != nil {
-		return err
-	}
-	return nil
+	return installer.removeLegacyMCPCredential()
 }
 
 func (installer *engine) removeLegacyMCPCredential() error {
@@ -235,12 +227,14 @@ func pfmClaudeMCPShape(name string, registration map[string]any, home string, po
 }
 
 func (installer *engine) writeMCPCodeConfig(names []string) error {
+	// One unreadable or unparseable home costs itself alone.
+	var failures []error
 	for _, home := range installer.codexHomes() {
 		if err := installer.writeMCPCodeConfigAt(filepath.Join(home, "config.toml"), names); err != nil {
-			return err
+			failures = append(failures, installer.fail(err))
 		}
 	}
-	return nil
+	return errors.Join(failures...)
 }
 
 func (installer *engine) writeMCPCodeConfigAt(path string, names []string) error {

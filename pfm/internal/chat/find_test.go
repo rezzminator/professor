@@ -73,6 +73,10 @@ func TestFindRanksByHitsAndNamesEachEmptyAnswer(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// A transcript removed since the listing is no longer a candidate, never a failed search.
+	if err := os.Symlink(filepath.Join(directory, "removed"), filepath.Join(directory, "gone.jsonl")); err != nil {
+		t.Fatal(err)
+	}
 	matches, err := Find(ctx, nil, FindRequest{Excerpt: first + "\n" + second})
 	if err != nil || len(matches) != 2 {
 		t.Fatalf("Find = %+v, %v; want the two transcripts that hold a needle", matches, err)

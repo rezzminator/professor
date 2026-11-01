@@ -98,7 +98,8 @@ func (watcher Watcher) Watch(
 }
 
 // UnreadablePolls is how many polls in a row a followed seat's tmux server may
-// go unread before the watch says so with an ERROR line. A server that cannot
+// go unread, or its lookup, listing or inspect fail once the seat was read,
+// before the watch says so with an ERROR line. A server or scan that cannot
 // be read is no evidence the chat ended: until then the seat's verdict is
 // held, and nothing is announced for it.
 const UnreadablePolls = 3
@@ -245,8 +246,12 @@ type watchedSeat struct {
 	// bound is the live seat a named target first resolved to, or the seat a
 	// glob adopted: what the watch follows from then on.
 	bound *Chat
-	// unread counts the polls in a row this seat's server could not be read.
+	// unread counts the polls in a row this seat could not be read: its
+	// server unreadable, or its lookup, listing or inspect failed.
 	unread int
+	// read is true once a poll has read this target: from then on a failed
+	// read holds that verdict (deferFailure) instead of ending the target.
+	read bool
 	// print is the fingerprint taken before the scan the bound row came from,
 	// "" when there is none to trust; reused counts the polls since that scan.
 	print  string
@@ -406,8 +411,8 @@ func (run *fleetRun) liveGlobs() int {
 // advance reads one target once: found false is a name that resolves to
 // nothing, otherwise chat is inspected.
 func (run *fleetRun) advance(ctx context.Context, seat *watchedSeat, chat Chat, found bool) error {
-	seat.unread = 0
 	if !found {
+		seat.unread, seat.read = 0, true
 		seat.status = Missing(seat.name)
 		if run.options.Transitions && !seat.seen {
 			return run.snapshot(ctx, seat)
@@ -416,8 +421,9 @@ func (run *fleetRun) advance(ctx context.Context, seat *watchedSeat, chat Chat, 
 	}
 	status, err := run.inspect(ctx, chat, run.now())
 	if err != nil {
-		return run.failSeat(ctx, seat, err)
+		return run.deferFailure(ctx, seat, err)
 	}
+	seat.unread, seat.read = 0, true
 	if status.RestID != "" {
 		if seat.restID != "" && seat.restID != status.RestID {
 			seat.announcedIdle = false
@@ -483,19 +489,20 @@ func (run *fleetRun) failSeat(ctx context.Context, seat *watchedSeat, cause erro
 	return run.say("%s", ErrorLine(seat.name, cause))
 }
 
-// failGlobs is a listing that could not be read: every glob and every seat the
-// globs adopted fails with it, since none can be followed any longer.
-func (run *fleetRun) failGlobs(ctx context.Context, cause error) error {
+// deferGlobs is a listing that could not be read: every glob and every seat
+// the globs adopted holds its verdict for this poll (deferFailure), and fails
+// with it once that has lasted UnreadablePolls polls.
+func (run *fleetRun) deferGlobs(ctx context.Context, cause error) error {
 	for _, glob := range run.globs {
 		if glob.ended {
 			continue
 		}
-		if err := run.failSeat(ctx, glob, cause); err != nil {
+		if err := run.deferFailure(ctx, glob, cause); err != nil {
 			return err
 		}
 	}
 	for _, key := range run.liveAdopted() {
-		if err := run.failSeat(ctx, run.adopted[key], cause); err != nil {
+		if err := run.deferFailure(ctx, run.adopted[key], cause); err != nil {
 			return err
 		}
 	}

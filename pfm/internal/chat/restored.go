@@ -319,9 +319,20 @@ func resumeNativeRun(
 	if seat.SessionID == "" {
 		return reload.RefreshRecipeRemoteControl(run, engineID, machine, seat.Name, stderr), nil
 	}
+	recorded := run.Args
 	if engineID == pfmengine.Claude {
-		if _, err := claudelaunch.Parse(append([]string{run.Binary}, run.Args...)); err != nil {
-			return run, fmt.Errorf("parse restored recipe: %w", err)
+		parsed, err := claudelaunch.Parse(append([]string{run.Binary}, run.Args...))
+		for _, warning := range parsed.Warnings {
+			fmt.Fprintf(stderr, "pfm WARN: chat %q: restored recipe %s\n", seat.Name, warning)
+		}
+		if err != nil {
+			fmt.Fprintf(
+				stderr,
+				"pfm WARN: chat %q: restored recipe unparsable (%v); resuming with default launch args\n",
+				seat.Name,
+				err,
+			)
+			recorded = nil
 		}
 	}
 	remove := make(map[string]bool)
@@ -356,15 +367,13 @@ func resumeNativeRun(
 	case pfmengine.OpenCode:
 		arity = map[string]bool{"--model": true}
 	}
-	args := make([]string, 0, len(run.Args)+2)
-	for i := 0; i < len(run.Args); i++ {
-		word := run.Args[i]
+	args := make([]string, 0, len(recorded)+2)
+	for i := 0; i < len(recorded); i++ {
+		word := recorded[i]
 		key, _, inline := strings.Cut(word, "=")
 		if takesValue, ok := remove[key]; ok {
-			if takesValue && !inline {
-				if i+1 >= len(run.Args) || strings.HasPrefix(run.Args[i+1], "-") {
-					return run, fmt.Errorf("restored recipe %s requires a value", key)
-				}
+			// A removed flag missing its value has nothing more to strip.
+			if takesValue && !inline && i+1 < len(recorded) && !strings.HasPrefix(recorded[i+1], "-") {
 				i++
 			}
 			continue
@@ -375,24 +384,40 @@ func resumeNativeRun(
 		if !strings.HasPrefix(word, "-") {
 			continue
 		}
-		args = append(args, word)
-		if !inline && i+1 < len(run.Args) && !strings.HasPrefix(run.Args[i+1], "-") {
+		if !inline && i+1 < len(recorded) && !strings.HasPrefix(recorded[i+1], "-") {
 			takesValue, known := arity[key]
 			if !known {
-				return run, errors.New("restored recipe has an ambiguous unregistered flag value")
+				// The next word may be its value or the birth prompt: drop both, never resend a prompt.
+				fmt.Fprintf(
+					stderr,
+					"pfm WARN: chat %q: restored recipe flag %s has an ambiguous value; dropped\n",
+					seat.Name,
+					key,
+				)
+				i++
+				continue
 			}
+			args = append(args, word)
 			if takesValue {
 				i++
-				args = append(args, run.Args[i])
+				args = append(args, recorded[i])
 			}
+			continue
 		}
+		args = append(args, word)
 	}
 	switch engineID {
 	case pfmengine.Claude:
-		var err error
-		args, err = claudelaunch.RefreshThemePin(args)
-		if err != nil {
-			return run, fmt.Errorf("refresh restored theme: %w", err)
+		// A pin that cannot be refreshed costs only the theme: the chat resumes as recorded.
+		if refreshed, err := claudelaunch.RefreshThemePin(args); err != nil {
+			fmt.Fprintf(
+				stderr,
+				"pfm WARN: chat %q: restored theme pin not refreshed (%v); resuming with the recorded settings\n",
+				seat.Name,
+				err,
+			)
+		} else {
+			args = refreshed
 		}
 		args = append(args, claudelaunch.SessionArgs("", seat.SessionID, false)...)
 	case pfmengine.Codex:
@@ -621,7 +646,13 @@ func resumeTail(
 ) (string, error) {
 	tail, _, err := reload.ContinuedSession(ctx, id, stderr)
 	if err != nil {
-		return "", err
+		fmt.Fprintf(
+			stderr,
+			"pfm WARN: chat %s: newest segment unknown (%v); resuming it, which may be an older segment\n",
+			id,
+			err,
+		)
+		tail = id
 	}
 	if tail == id && rows == nil {
 		return tail, nil

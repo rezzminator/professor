@@ -113,106 +113,115 @@ func (installer *engine) cutOverClaudeMCP() error {
 	if installer.options.Mode == ModeUninstall {
 		names = nil
 	}
+	var failures []error
 	for _, registry := range registries {
 		physical := physicalSettingsPath(registry.Path)
 		if seen[physical] {
 			continue
 		}
 		seen[physical] = true
-		raw, existed, err := readMCPFile(registry.Path)
-		if err != nil {
-			return fmt.Errorf("read Claude MCP registry %s: %w", registry.Path, err)
+		// One bad or conflicting registry costs itself alone: every other
+		// registry is still cut over.
+		if err := installer.cutOverClaudeMCPRegistry(registry, physical, names); err != nil {
+			failures = append(failures, installer.fail(err))
 		}
-		if !existed {
-			continue
-		}
-		var document map[string]json.RawMessage
-		if err := json.Unmarshal(raw, &document); err != nil {
-			return fmt.Errorf("parse Claude MCP registry %s: %w", registry.Path, err)
-		}
-		encoded, present := document["mcpServers"]
+	}
+	return errors.Join(failures...)
+}
+
+// cutOverClaudeMCPRegistry moves one registry's pfm-owned entries to the
+// current names; a foreign entry under a current name refuses that registry.
+func (installer *engine) cutOverClaudeMCPRegistry(registry ClaudeRegistry, physical string, names []string) error {
+	raw, existed, err := readMCPFile(registry.Path)
+	if err != nil {
+		return fmt.Errorf("read Claude MCP registry %s: %w", registry.Path, err)
+	}
+	if !existed {
+		return nil
+	}
+	var document map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &document); err != nil {
+		return fmt.Errorf("parse Claude MCP registry %s: %w", registry.Path, err)
+	}
+	encoded, present := document["mcpServers"]
+	if !present {
+		return nil
+	}
+	var servers map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &servers); err != nil {
+		return fmt.Errorf("parse Claude MCP servers %s: %w", registry.Path, err)
+	}
+	owned := false
+	for _, name := range append(LegacyMCPNames(), pfmconfig.MCPRegistrationName(chatName)) {
+		entry, present := servers[name]
 		if !present {
 			continue
 		}
-		var servers map[string]json.RawMessage
-		if err := json.Unmarshal(encoded, &servers); err != nil {
-			return fmt.Errorf("parse Claude MCP servers %s: %w", registry.Path, err)
+		var shape map[string]any
+		if err := json.Unmarshal(entry, &shape); err != nil {
+			return fmt.Errorf("parse Claude MCP registration %s in %s: %w", name, registry.Path, err)
 		}
-		owned := false
-		for _, name := range append(LegacyMCPNames(), pfmconfig.MCPRegistrationName(chatName)) {
-			entry, present := servers[name]
-			if !present {
-				continue
-			}
-			var shape map[string]any
-			if err := json.Unmarshal(entry, &shape); err != nil {
-				return fmt.Errorf("parse Claude MCP registration %s in %s: %w", name, registry.Path, err)
-			}
-			matches := isPFMLegacyClaudeShape(name, shape, installer.mcpChatCommand(), installer.options.MCPPort)
-			if isFamilyRegistration(name) {
-				matches = matches || isExactStdioShape(
-					shape,
-					mcpFamilyBinary(installer.options.Home),
-					mcpFamilyStdioArgs(name),
-				)
-			}
-			if matches {
-				delete(servers, name)
-				owned = true
-			} else if name == professorName {
-				fmt.Fprintf(
-					installer.options.Stdout,
-					"preserve foreign Claude MCP client professor in %s\n",
-					registry.Path,
-				)
-			}
-		}
-		if !owned {
-			continue
-		}
-		for _, name := range names {
-			if _, present := servers[name]; present {
-				return fmt.Errorf(
-					"preserve foreign Claude MCP client %s in %s: cannot cut over owned registration",
-					name,
-					registry.Path,
-				)
-			}
-			encoded, err := json.Marshal(
-				map[string]any{
-					configTypeKey:    stdioProtocol,
-					configCommandKey: mcpFamilyBinary(installer.options.Home),
-					"args":           mcpFamilyStdioArgs(name),
-				},
+		matches := isPFMLegacyClaudeShape(name, shape, installer.mcpChatCommand(), installer.options.MCPPort)
+		if isFamilyRegistration(name) {
+			matches = matches || isExactStdioShape(
+				shape,
+				mcpFamilyBinary(installer.options.Home),
+				mcpFamilyStdioArgs(name),
 			)
-			if err != nil {
-				return fmt.Errorf("encode Claude MCP registration %s: %w", name, err)
-			}
-			servers[name] = encoded
 		}
-		encoded, err = json.Marshal(servers)
-		if err != nil {
-			return fmt.Errorf("encode Claude MCP servers %s: %w", registry.Path, err)
-		}
-		document["mcpServers"] = encoded
-		wanted, err := json.MarshalIndent(document, "", "  ")
-		if err != nil {
-			return fmt.Errorf("encode Claude MCP registry %s: %w", registry.Path, err)
-		}
-		wanted = append(wanted, '\n')
-		if bytes.Equal(raw, wanted) {
-			continue
-		}
-		locks := installer.claudeMCPLockAliases(registry.Path, physical)
-		if err := installer.change("cut over Claude MCP registrations in "+registry.Path, func() error {
-			return withClaudeMCPLocks(locks, func(check func() error) error {
-				return installer.writeMCPFileIf(registry.Path, raw, wanted, true, check)
-			})
-		}); err != nil {
-			return err
+		if matches {
+			delete(servers, name)
+			owned = true
+		} else if name == professorName {
+			fmt.Fprintf(
+				installer.options.Stdout,
+				"preserve foreign Claude MCP client professor in %s\n",
+				registry.Path,
+			)
 		}
 	}
-	return nil
+	if !owned {
+		return nil
+	}
+	for _, name := range names {
+		if _, present := servers[name]; present {
+			return fmt.Errorf(
+				"preserve foreign Claude MCP client %s in %s: cannot cut over owned registration",
+				name,
+				registry.Path,
+			)
+		}
+		encoded, err := json.Marshal(
+			map[string]any{
+				configTypeKey:    stdioProtocol,
+				configCommandKey: mcpFamilyBinary(installer.options.Home),
+				"args":           mcpFamilyStdioArgs(name),
+			},
+		)
+		if err != nil {
+			return fmt.Errorf("encode Claude MCP registration %s: %w", name, err)
+		}
+		servers[name] = encoded
+	}
+	encoded, err = json.Marshal(servers)
+	if err != nil {
+		return fmt.Errorf("encode Claude MCP servers %s: %w", registry.Path, err)
+	}
+	document["mcpServers"] = encoded
+	wanted, err := json.MarshalIndent(document, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode Claude MCP registry %s: %w", registry.Path, err)
+	}
+	wanted = append(wanted, '\n')
+	if bytes.Equal(raw, wanted) {
+		return nil
+	}
+	locks := installer.claudeMCPLockAliases(registry.Path, physical)
+	return installer.change("cut over Claude MCP registrations in "+registry.Path, func() error {
+		return withClaudeMCPLocks(locks, func(check func() error) error {
+			return installer.writeMCPFileIf(registry.Path, raw, wanted, true, check)
+		})
+	})
 }
 
 // claudeMCPAccounts includes every configured, roster-only and ambient seat.

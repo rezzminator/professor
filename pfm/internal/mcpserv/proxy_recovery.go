@@ -17,6 +17,8 @@ const (
 	// daemon refuses it with HTTP 400, so the proxy answers it itself: a local
 	// method-not-found sends the client straight on to initialize.
 	proxyDiscoverMethod = "server/discover"
+	proxyParseError     = -32700
+	proxyInvalidRequest = -32600
 	proxyMethodNotFound = -32601
 	proxyInternalError  = -32603
 	// proxyUninitializedError is go-sdk text: ServerSession.handle's error for

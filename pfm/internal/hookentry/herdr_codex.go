@@ -401,3 +401,29 @@ func codexChildIdentity(header codexmeta.Header) bool {
 	return header.Kind == codexmeta.Subagent || header.ThreadSource == "subagent" ||
 		header.ParentThreadID != "" || strings.HasPrefix(header.AgentPath, "/root/")
 }
+
+// envCommand is env(1), the most common command wrapper.
+const envCommand = "env"
+
+// isCommandWrapper names the commands that run another command in their own
+// process: a wrapper between an engine and its pane is not an engine.
+func isCommandWrapper(command string) bool {
+	switch filepath.Base(command) {
+	case envCommand, "timeout", "gtimeout", "caffeinate", "script", "nice", "nohup", "stdbuf", "time":
+		return true
+	}
+	return false
+}
+
+func isNodeLauncher(command string) bool {
+	return filepath.Base(command) == "node"
+}
+
+func isShellOrPfm(command string) bool {
+	base := filepath.Base(strings.TrimPrefix(command, "-"))
+	switch base {
+	case "sh", "bash", "zsh", "dash", "fish", "pfm":
+		return true
+	}
+	return strings.HasPrefix(base, "pfm.")
+}

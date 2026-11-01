@@ -12,13 +12,16 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -655,4 +658,173 @@ func herdrPaneEnv(server *fakeHerdr, pane string) map[string]string {
 		"HERDR_SOCKET_PATH": server.path,
 		"HERDR_BIN_PATH":    "/usr/bin/herdr",
 	}
+}
+
+// This producer-faithful native fixture records mutations separately from proof reads.
+func newNativeReporterHerdr(t *testing.T, seatID, pane, terminal string, beforeSend ...func()) *fakeHerdr {
+	return newNativeReporterHerdrCount(t, seatID, pane, terminal, nil, nil, beforeSend...)
+}
+
+func newNativeReporterHerdrCount(
+	t *testing.T,
+	seatID, pane, terminal string,
+	onProof func(),
+	location func() (string, string),
+	beforeSend ...func(),
+) *fakeHerdr {
+	t.Helper()
+	root := testjail.ShortRoot(t)
+	proc := filepath.Join(root, "proc")
+	if err := os.MkdirAll(proc, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(proc, "stat"), []byte("btime 1000\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	write := func(pid, parent int, argv string) {
+		dir := filepath.Join(proc, strconv.Itoa(pid))
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		fields := make([]string, 24)
+		for i := range fields {
+			fields[i] = "0"
+		}
+		fields[0] = "S"
+		fields[1] = strconv.Itoa(parent)
+		fields[19] = "100"
+		if err := os.WriteFile(
+			filepath.Join(dir, "stat"),
+			[]byte(fmt.Sprintf("%d (pfm) %s", pid, strings.Join(fields, " "))),
+			0o600,
+		); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "cmdline"), []byte(argv), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(900001, 1, "/fixture/pfm\x00internal\x00seat-host\x00"+seatID+"\x00")
+	write(os.Getpid(), 900001, "/fixture/pfm\x00internal\x00herdr-state\x00working\x00")
+	t.Setenv(paths.EnvProcRoot, proc)
+	server := &fakeHerdr{path: filepath.Join(root, "h.sock")}
+	listener, err := net.Listen("unix", server.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			func() {
+				defer func() { _ = conn.Close() }()
+				var req struct {
+					ID     string                     `json:"id"`
+					Method string                     `json:"method"`
+					Params map[string]json.RawMessage `json:"params"`
+				}
+				if err := json.NewDecoder(conn).Decode(&req); err != nil {
+					t.Error(err)
+					return
+				}
+				var result any
+				if (req.Method == "pane.list" || req.Method == "pane.process_info") && onProof != nil {
+					onProof()
+				}
+				if location != nil {
+					pane, terminal = location()
+				}
+				switch req.Method {
+				case "pane.list":
+					fields := testjail.HerdrPaneInfo(pane)["pane"].(map[string]any)
+					fields["terminal_id"] = terminal
+					result = map[string]any{"type": "pane_list", "panes": []any{fields}}
+				case "pane.process_info":
+					info := map[string]any{"pane_id": pane, "shell_pid": 900001}
+					server.mu.Lock()
+					for _, held := range server.panes {
+						if held.kept && held.id == pane {
+							// Herdr sees only herdr-keep's attach client in a held pane.
+							info["shell_pid"] = held.shell
+							info["foreground_processes"] = []any{
+								map[string]any{
+									"pid": held.shell, "name": herdr.KeepBinary, "argv": []string{herdr.KeepBinary},
+								},
+							}
+						}
+					}
+					server.mu.Unlock()
+					result = map[string]any{"type": "pane_process_info", "process_info": info}
+				default:
+					for _, check := range beforeSend {
+						check()
+					}
+					line, _ := json.Marshal(req)
+					server.mu.Lock()
+					server.lines = append(server.lines, string(line))
+					server.mu.Unlock()
+					result = map[string]any{"type": "ok"}
+					switch req.Method {
+					case "pane.rename":
+						result = map[string]any{"pane": map[string]any{"pane_id": pane, "label": req.Params["label"]}}
+					case "agent.rename":
+						result = map[string]any{"agent": map[string]any{"pane_id": pane, "name": req.Params["name"]}}
+					case "pane.get":
+						result = testjail.HerdrPaneInfo(pane)
+					case "tab.get":
+						result = map[string]any{
+							"type": "tab_info",
+							"tab":  map[string]any{"tab_id": "w6:t1", "label": "Previous", "pane_count": 1},
+						}
+					}
+				}
+				if err := json.NewEncoder(conn).Encode(map[string]any{"id": req.ID, "result": result}); err != nil {
+					t.Error(err)
+				}
+			}()
+		}
+	}()
+	return server
+}
+
+// holdNativeReporterPane makes pane one herdr-keep holds: holder 900020 runs
+// the shell 900021 the seat host 900001 runs under, whose terminal's
+// foreground group is the seat host's, and Herdr sees attach client 900030.
+func holdNativeReporterPane(t *testing.T, server *fakeHerdr, pane string) {
+	t.Helper()
+	proc := os.Getenv(paths.EnvProcRoot)
+	for _, process := range []struct{ pid, parent, group, terminalGroup int }{
+		{900020, 1, 900020, -1}, {900021, 900020, 900021, 900001}, {900001, 900021, 900001, 900001},
+	} {
+		fields := strings.Fields(strings.Repeat("0 ", 24))
+		fields[0], fields[1], fields[2] = "S", strconv.Itoa(process.parent), strconv.Itoa(process.group)
+		fields[5], fields[19] = strconv.Itoa(process.terminalGroup), "100"
+		stat := fmt.Sprintf("%d (pfm) %s", process.pid, strings.Join(fields, " "))
+		dir := filepath.Join(proc, strconv.Itoa(process.pid))
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "stat"), []byte(stat), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if process.pid != 900001 {
+			if err := os.WriteFile(filepath.Join(dir, "cmdline"), []byte("/fixture/sh\x00"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	testjail.StageHerdrKeep(t, testjail.HerdrKeepListing(900020, 100, 900021, 100, pane, server.path), 0)
+	server.addKeptPane(pane, "native", 900030)
+}
+
+func stampNativeReporterSeat(t *testing.T, seat *fleetdb.Seat) {
+	t.Helper()
+	if err := gather.StampHerdrHost(gather.NewProcFS(os.Getenv(paths.EnvProcRoot)), seat, 900001); err != nil {
+		t.Fatal(err)
+	}
+	seat.HerdrTerminalID = "native-terminal"
+	seat.HerdrWorkspace = "w6"
 }

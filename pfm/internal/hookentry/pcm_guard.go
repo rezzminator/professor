@@ -48,6 +48,9 @@ const (
 	// (after `cd "$X"`, or before an expansion), so only the names after it
 	// are judged.
 	pcmGuardUnknownRoot = "/__pcm-guard-unknown__"
+	// pcmGuardUnknownName stands for a last name a script computes, which no
+	// framework path has (pcmGuardJudge.unknownName).
+	pcmGuardUnknownName = "__pcm-guard-unknown-name__"
 	pcmGuardPushd       = "pushd"
 	pcmGuardPopd        = "popd"
 	pcmGuardDash        = "dash"
@@ -102,6 +105,8 @@ type pcmGuardJudge struct {
 	pcmOnly, themeOnly []string
 	unreadable         bool
 	blind, read        []string
+	// scripts counts the script files the code being judged is read from.
+	scripts int
 }
 
 // PcmGuard is the PreToolUse hook on the edit tools and Bash that denies a
@@ -142,7 +147,7 @@ func PcmGuard(input io.Reader, stdout, stderr io.Writer) int {
 			}
 			judge.path(filepath.Clean(target))
 		}
-	} else if err := judge.bash(hook.ToolInput.Command, cwd, 0); err != nil {
+	} else if err := judge.bash(hook.ToolInput.Command, cwd, cmdparse.Script{}, 0); err != nil {
 		fmt.Fprintf(stderr, "pfm internal pcm-guard: parse command (fail-open): %v\n", err)
 		return 0
 	}
@@ -310,7 +315,7 @@ func (judge *pcmGuardJudge) resolve(word, dir string) (string, bool) {
 	if i := strings.LastIndexAny(word, "$`"); i >= 0 {
 		slash := strings.IndexByte(word[i:], filepath.Separator)
 		if slash < 0 {
-			return "", false
+			return judge.unknownName(word, i, dir)
 		}
 		tail := strings.NewReplacer(`"`, "", `'`, "").Replace(word[i+slash:])
 		return filepath.Join(pcmGuardUnknownRoot, tail), true
@@ -324,15 +329,38 @@ func (judge *pcmGuardJudge) resolve(word, dir string) (string, bool) {
 	return filepath.Clean(word), true
 }
 
+// unknownName resolves a word whose last name holds an expansion at i. In a
+// script file the guard read, the script computes that name, so the word is
+// its literal directory plus pcmGuardUnknownName; in a typed command it stays
+// unknown.
+// shortcut: a name a script computes as a framework name passes; judge the
+// expansion's source when such a script turns up.
+func (judge *pcmGuardJudge) unknownName(word string, i int, dir string) (string, bool) {
+	slash := strings.LastIndexByte(word[:i], filepath.Separator)
+	if judge.scripts == 0 || slash < 0 {
+		return "", false
+	}
+	abs, ok := judge.resolve(cmp.Or(word[:slash], string(filepath.Separator)), dir)
+	if !ok {
+		return "", false
+	}
+	return filepath.Join(abs, pcmGuardUnknownName), true
+}
+
 // bash judges every part of a Bash command in order. The flat part list
 // does not say where a cd stops applying (a subshell, an inner shell, popd),
 // so a relative word is judged in every directory the call may stand in: the
 // cwd and each directory a cd, pushd or popd may have moved it to. depth
-// counts the shell programs the command is read inside (pcmGuardJudge.shell).
-func (judge *pcmGuardJudge) bash(command, cwd string, depth int) error {
+// counts the shell programs the command is read inside (pcmGuardJudge.shell);
+// script is the script file the command was read from, zero for typed code.
+func (judge *pcmGuardJudge) bash(command, cwd string, script cmdparse.Script, depth int) error {
+	if script.Path != "" {
+		judge.scripts++
+		defer func() { judge.scripts-- }()
+	}
 	parsed, err := cmdparse.ParseBatch([]cmdparse.Call{{
 		ID: "pcm-guard", Command: command, Cwd: cmp.Or(cwd, string(filepath.Separator)),
-		Vars: map[string]string{"HOME": judge.scope.home},
+		Vars: map[string]string{"HOME": judge.scope.home}, Script: script,
 	}})
 	if err != nil {
 		return err

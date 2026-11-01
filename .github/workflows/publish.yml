@@ -2,7 +2,7 @@ name: publish
 
 # Merging the release/v{VERSION} -> main pull request is the release: `publish`
 # tags v{VERSION} on the merge commit and publishes the pfm binaries, and
-# `verify` checks what GitHub then serves. release.yml gates the pull request
+# `verify` checks what GitHub then serves. ci.yml gates the pull request
 # before the merge. No tag is pushed by hand.
 on:
   pull_request:

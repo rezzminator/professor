@@ -48,8 +48,7 @@ The note grammar that serves this reader is public, because adopters read it: `d
 | `reviewer-pro` | agent (existing) | One round over the `pfm-update` area, only when the cut changes it | its own pin |
 | `gitter` | agent (existing) | Every git write: the pull, the push, the release worktree, the release commit, Phase RELEASE, the close | its own pin |
 | `scripts/release-check.mjs` | script | Everything computable: the scope and its tiers, the note grammar and coverage, the version floor, the preflight | — |
-| `.github/workflows/ci.yml` | workflow | Tests every push to `develop`; its run on the cut commit is a check | GitHub Actions |
-| `.github/workflows/release.yml` | workflow | Gates the release PR | GitHub Actions |
+| `.github/workflows/ci.yml` | workflow | Gates the release PR: every layer on Linux and macOS in parallel; its aggregate `ci` job is `main`'s only required check | GitHub Actions |
 | `.github/workflows/publish.yml` | workflow | Publishes the release PR's merge, verifies what GitHub serves | GitHub Actions |
 
 `changelogger` runs at smart because a document an adopter acts on is never mechanical work, and the range of a release is the largest body of reasoning any single agent in the fleet writes from.
@@ -57,14 +56,13 @@ The note grammar that serves this reader is public, because adopters read it: `d
 ## The cut
 
 1. `gitter` Phase PULL fast-forwards `develop` and fetches tags. `origin/main` must be an ancestor of `develop`; the cut commit `C` is `develop`'s HEAD; `PREV` is the newest suffix-free `v*` tag and `NEW` is `PREV` bumped. An empty `origin/main..C` is a STOP.
-2. `gitter` Phase PUSH sends `develop` when `origin/develop` lags `C`, so `ci.yml` runs on `C` (skipped under `--dry`).
-3. `gitter` Phase SETUP makes `.worktrees/release/` on a new branch `release/v{NEW}` at `C`.
-4. The checks of [§ The checks](#the-checks) run in parallel; each failure is a STOP.
-5. The main chat copies the note into `releases/v{NEW}.md`, prepends the index line, writes `## Verification` from the checks' results, stamps `VERSION` and `.professor/VERSION` to `NEW`, runs the full notes check, and `gitter` commits `release: v{NEW} — {summary}`. A release commit touching any file outside the four release files is a STOP.
-6. `gitter` Phase RELEASE runs `make release-check`, pushes `release/v{NEW}`, opens the PR into `main`, waits for the required checks, merges with a merge commit, and watches `publish.yml`'s `publish` job tag `v{NEW}` and its `verify` job check the assets.
-7. One `gitter` close merges `origin/main` back into `develop`, opens `{NEXT}-alpha`, pushes `develop`, deletes `release/v{NEW}` and removes the worktree.
+2. `gitter` Phase SETUP makes `.worktrees/release/` on a new branch `release/v{NEW}` at `C`.
+3. The checks of [§ The checks](#the-checks) run in parallel; each failure is a STOP.
+4. The main chat copies the note into `releases/v{NEW}.md`, prepends the index line, writes `## Verification` from the checks' results, stamps `VERSION` and `.professor/VERSION` to `NEW`, runs the full notes check, and `gitter` commits `release: v{NEW} — {summary}`. A release commit touching any file outside the four release files is a STOP.
+5. `gitter` Phase RELEASE runs `make release-check`, pushes `release/v{NEW}`, opens the PR into `main`, which starts `ci.yml`, waits for its `ci` check, `main`'s only required check, to pass, merges with a merge commit, and watches `publish.yml`'s `publish` job tag `v{NEW}` and its `verify` job check the assets.
+6. One `gitter` close merges `origin/main` back into `develop`, opens `{NEXT}-alpha`, pushes `develop`, deletes `release/v{NEW}` and removes the worktree.
 
-A STOP before step 6 removes the release worktree and its unpushed branch and keeps the release directory; a STOP at step 6 or later removes nothing and reports every ref that stands. A failure after the tag exists is reported as it is: the tag is public, and the fix is a patch release, never a moved tag.
+A STOP before step 5 removes the release worktree and its unpushed branch and keeps the release directory; a STOP at step 5 or later removes nothing and reports every ref that stands. A failure after the tag exists is reported as it is: the tag is public, and the fix is a patch release, never a moved tag.
 
 ## The checks
 
@@ -73,7 +71,6 @@ A STOP before step 6 removes the release worktree and its unpushed branch and ke
 | Gate | `.claude/scripts/test.sh --full` in the release worktree, over the clean tree at `C` | `gate.log` ends `EXIT 0 @{C}` |
 | Leak | `scripts/leak-check.sh --range origin/main {C}` | exit 0 |
 | Preflight | `release-check preflight --base origin/main --head {C}` | exit 0: no removed name still live (S1), every README command shipped (D1), every listed plugin at a published tag (T1) |
-| CI | `gh run list --workflow ci.yml --commit {C}`, then `gh run watch` | conclusion `success`; under `--dry` with `C` unpushed it is a named gap |
 | Notes | `changelogger`, then `release-check notes` with coverage, the title's version and `--pfm-help` | exit 0, within two `SendMessage` revision rounds |
 | Review | one `reviewer-pro`, only when `release-check scope` prints a `pfm-update` area | no CRITICAL or HIGH finding on the update, install or doctor path; every other finding is listed in `## Verification` as not fixed in this release |
 
@@ -96,11 +93,11 @@ $HOME/.local/state/pfm/releases/{project}/v{NEW}/
 ```
 
 - `{project}` is the repo directory's basename with any leading dot stripped. The directory outlives the release branch, so an audit reads it after the tag; each cut opens `run.md` with a `CUT @{C7}` line.
-- The changelogger writes here, never into the release worktree, because the full gate reads that tree while the note is being written. The note and the index line move into the worktree at step 5, because they ship.
+- The changelogger writes here, never into the release worktree, because the full gate reads that tree while the note is being written. The note and the index line move into the worktree at step 4, because they ship.
 
 ## The invariants
 
-1. The gated commit is the published commit. The gate, the leak scan, the preflight, `ci.yml` and the review all run at `C`; the release commit may touch only `releases/v{NEW}.md`, `CHANGELOG.md`, `VERSION` and `.professor/VERSION`, which the main chat checks after the commit and `gitter` Phase RELEASE checks again before the push.
+1. The gated commit is the published commit. The gate, the leak scan, the preflight and the review all run at `C`, and `ci.yml` on the release pull request, whose head is `C` plus the release files; the release commit may touch only `releases/v{NEW}.md`, `CHANGELOG.md`, `VERSION` and `.professor/VERSION`, which the main chat checks after the commit and `gitter` Phase RELEASE checks again before the push.
 2. Every commit in the range is accounted for. The coverage ledger names, for each commit, the bullet it reached or why it reaches no adopter; the check fails on a missing or extra commit.
 3. The judge is never the judged. `changelogger` writes the note; the script judges it; `## Verification` is written from the checks' own output.
 4. Nothing is fixed inside a release. A check that fails stops the cut; the fix lands on `develop` through a flight.
@@ -129,7 +126,7 @@ The bump has a floor computed from the note's sections, following the left-most 
 | `.claude/agents/changelogger.md` | `changelogger` | How to write for the updating adopter: grounding, routes, traps, coverage |
 | `.claude/agents/gitter.md` Phase RELEASE | `gitter` | The release PR, the release commit's file check, the merge back into `develop` |
 | `scripts/release-check.mjs` | everyone, by running it | The tier and area table, the grammar, coverage, the floors, the preflight |
-| `.github/workflows/release.yml` | GitHub Actions | The PR gate |
+| `.github/workflows/ci.yml` | GitHub Actions | The PR gate |
 | `.github/workflows/publish.yml` | GitHub Actions | The tag, the published-asset check |
 | `pfm/internal/picker/update_row.go` | the adopter's update chat | The update prompt |
 
@@ -143,7 +140,7 @@ A rule the script enforces is never restated as a prompt rule; the prompt names 
 
 ## Accepted risk
 
-The release reviews in full only the `pfm-update` area, and only when the cut changes it: the update, install, init, doctor and config paths an adopter's update runs through. Everything else relies on the review it had when it landed on `develop`, on the full fenced gate and `ci.yml` at the cut, and on the preflight's seams sweep, which finds every removed path or role still named anywhere outside history. A defect inside an internal package that its own tests do not catch and its landing review missed can ship; a MEDIUM or LOW finding on the update path ships named in `## Verification`. No model follows the note before it ships, so a note that misleads the update chat is found by an adopter, and its fix is the next patch release.
+The release reviews in full only the `pfm-update` area, and only when the cut changes it: the update, install, init, doctor and config paths an adopter's update runs through. Everything else relies on the review it had when it landed on `develop`, on the full fenced gate at the cut and `ci.yml` on the release pull request, and on the preflight's seams sweep, which finds every removed path or role still named anywhere outside history. A defect inside an internal package that its own tests do not catch and its landing review missed can ship; a MEDIUM or LOW finding on the update path ships named in `## Verification`. No model follows the note before it ships, so a note that misleads the update chat is found by an adopter, and its fix is the next patch release.
 
 ## Surfaces that stay in sync
 
@@ -155,7 +152,7 @@ The release reviews in full only the `pfm-update` area, and only when the cut ch
 | The script | `scripts/release-check.mjs` and its tests | The mechanisms |
 | The public spec | `docs/RELEASE.md`, `CHANGELOG.md` (index and a pointer), `INSTALL.md` § Updating, `docs/SETUP.md` § Staying current | What adopters read |
 | The reader's prompt | `pfm/internal/picker/update_row.go` `professorUpdatePrompt` and its test | Timing, surfaces, stops |
-| The workflows | `.github/workflows/ci.yml`, `.github/workflows/release.yml`, `.github/workflows/publish.yml` | The cut's CI run; the PR gate; `publish` and `verify` |
+| The workflows | `.github/workflows/ci.yml`, `.github/workflows/publish.yml` | The PR gate; `publish` and `verify` |
 | The mirrors | `.codex/`, `.opencode/` | The agent registered |
 
 ## Open items

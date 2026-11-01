@@ -1,0 +1,35 @@
+name: macos
+
+# The full macOS suite on demand, between releases: the same parts ci.yml runs
+# on every pull request into main, on whichever branch the run is started from.
+# Started by hand only (the rule: .claude/rules/ci-workflows.md).
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    name: macos (${{ matrix.part }})
+    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [unit, e2e]
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: pfm/go.mod
+          cache-dependency-path: pfm/go.sum
+
+      - name: Run the macOS ${{ matrix.part }} part
+        uses: ./.github/actions/macos-suite
+        with:
+          part: ${{ matrix.part }}

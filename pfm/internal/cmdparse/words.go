@@ -3,6 +3,7 @@ package cmdparse
 import (
 	"bytes"
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -57,9 +58,109 @@ func (p *callParser) evalPart(part syntax.WordPart, out *word, quoted bool) {
 			return
 		}
 		out.appendAll(vals)
+	case *syntax.CmdSubst:
+		dir, ok := p.selfDir(x)
+		if !ok {
+			out.ok = false
+			return
+		}
+		out.appendAll([]string{dir})
 	default:
 		out.ok = false
 	}
+}
+
+// partial is a script word with every part the parse knows expanded and
+// every other part kept as its source, so a reader still sees the `$` where
+// the value is unknown: `"$D/acks/$1.md"` run with `chat` is `$D/acks/chat.md`.
+func (p *callParser) partial(parts []syntax.WordPart, quoted bool) string {
+	var b strings.Builder
+	for _, part := range parts {
+		switch x := part.(type) {
+		case *syntax.Lit:
+			if quoted {
+				b.WriteString(dquoteUnescape(x.Value))
+			} else {
+				b.WriteString(unescape(x.Value))
+			}
+		case *syntax.SglQuoted:
+			b.WriteString(x.Value)
+		case *syntax.DblQuoted:
+			b.WriteString(p.partial(x.Parts, true))
+		default:
+			one := word{vals: []string{""}, ok: true}
+			p.evalPart(part, &one, quoted)
+			if one.ok && len(one.vals) == 1 && !strings.ContainsAny(one.vals[0], "$`") {
+				b.WriteString(one.vals[0])
+			} else {
+				b.WriteString(p.source(part))
+			}
+		}
+	}
+	return b.String()
+}
+
+// selfDir evaluates the two command substitutions a script uses to find a
+// directory: `$(dirname [--] W)` and `$(cd W && pwd [-P|-L])`, W a word the
+// parse knows; any other substitution, and every one in a typed command, is
+// unknown.
+func (p *callParser) selfDir(x *syntax.CmdSubst) (string, bool) {
+	if !p.script || len(x.Stmts) != 1 {
+		return "", false
+	}
+	stmt := x.Stmts[0]
+	if stmt.Negated || stmt.Background || len(stmt.Redirs) > 0 {
+		return "", false
+	}
+	switch cmd := stmt.Cmd.(type) {
+	case *syntax.CallExpr:
+		operand, ok := p.callOperand(cmd, "dirname")
+		if !ok {
+			return "", false
+		}
+		if trimmed := strings.TrimRight(operand, "/"); trimmed != "" {
+			operand = trimmed
+		}
+		return filepath.Dir(operand), true
+	case *syntax.BinaryCmd:
+		if cmd.Op != syntax.AndStmt || cmd.X.Negated || cmd.Y.Negated ||
+			len(cmd.X.Redirs)+len(cmd.Y.Redirs) > 0 {
+			return "", false
+		}
+		cd, isCall := cmd.X.Cmd.(*syntax.CallExpr)
+		pwd, isPwd := cmd.Y.Cmd.(*syntax.CallExpr)
+		if !isCall || !isPwd || len(pwd.Assigns) > 0 || len(pwd.Args) == 0 || len(pwd.Args) > 2 ||
+			pwd.Args[0].Lit() != "pwd" || (len(pwd.Args) == 2 && pwd.Args[1].Lit() != "-P" && pwd.Args[1].Lit() != "-L") {
+			return "", false
+		}
+		// Only an absolute target: the script may have cd'd before this.
+		target, ok := p.callOperand(cd, "cd")
+		if !ok || !filepath.IsAbs(target) {
+			return "", false
+		}
+		return filepath.Clean(target), true
+	}
+	return "", false
+}
+
+// callOperand is the one operand of `program [--] W` when W evaluates to one
+// value; ok is false for any other shape.
+func (p *callParser) callOperand(cmd *syntax.CallExpr, program string) (string, bool) {
+	if len(cmd.Assigns) > 0 || len(cmd.Args) < 2 || cmd.Args[0].Lit() != program {
+		return "", false
+	}
+	args := cmd.Args[1:]
+	if args[0].Lit() == "--" {
+		args = args[1:]
+	}
+	if len(args) != 1 {
+		return "", false
+	}
+	ev := p.eval(args[0])
+	if !ev.ok || len(ev.vals) != 1 || ev.vals[0] == "" {
+		return "", false
+	}
+	return ev.vals[0], true
 }
 
 // appendAll appends every suffix to every value so far.
@@ -117,6 +218,9 @@ func (p *callParser) args(w *syntax.Word) []arg {
 	var out []arg
 	for _, bw := range braces(w) {
 		ev := p.eval(bw)
+		if !ev.ok && p.script {
+			return []arg{{text: p.partial(w.Parts, false)}}
+		}
 		if !ev.ok {
 			return []arg{{text: p.source(w)}}
 		}

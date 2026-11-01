@@ -375,7 +375,11 @@ func (judge *pcmGuardJudge) codeInto(dest, name, dir string) {
 // pcmGuardWrites returns the literal paths lang's code writes; ok is false
 // when a write target cannot be read or the code holds an escape.
 func pcmGuardWrites(lang, code string) ([]string, bool) {
-	if pcmGuardEscapes[lang].MatchString(code) {
+	scanned := code
+	if lang == pcmGuardPython {
+		scanned = pcmGuardPyMask(code)
+	}
+	if pcmGuardEscapes[lang].MatchString(scanned) {
 		return nil, false
 	}
 	switch lang {

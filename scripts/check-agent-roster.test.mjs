@@ -741,20 +741,21 @@ test('the shipped variants render with zero errors with and without the gpt-agen
         join(render.home, 'source/templates/generated/agents', `${name}.md`),
         `${label}: ${name} must be rendered into the copied source tree`);
     }
-    const gitter = parseFrontmatter('gitter', readFileSync(join(render.home, '.config/opencode/agents/gitter.md'), 'utf8'));
-    assert.equal(gitter.permission.bash['git *'], 'allow', `${label}: OpenCode gitter must retain Git write permission`);
   }
 });
 
-test('only the exact gitter mirror retains Git write permissions', () => {
+// No OpenCode role writes git, gitter included: Git writes are Claude's alone.
+test('no OpenCode mirror, gitter included, holds a Git write permission', () => {
   const render = renderShipped([CAPABILITY]);
   const dir = join(render.home, '.config/opencode/agents');
+  const files = readdirSync(dir).filter(file => file.endsWith('.md'));
+  assert.ok(files.includes('gitter.md'), `gitter was not rendered into ${dir}`);
   const allowed = [];
-  for (const file of readdirSync(dir).filter(file => file.endsWith('.md'))) {
+  for (const file of files) {
     const fm = parseFrontmatter(file, readFileSync(join(dir, file), 'utf8'));
     if (fm.permission?.bash?.['git *'] === 'allow') allowed.push(file.slice(0, -3));
   }
-  assert.deepEqual(allowed.sort(), ['gitter']);
+  assert.deepEqual(allowed.sort(), [], `roles allowing git writes in ${dir}`);
   for (const name of ['gitter']) {
     const codex = readFileSync(join(render.home, '.codex/agents', `${name}.toml`), 'utf8');
     assert.doesNotMatch(codex, /^sandbox_mode\s*=/m, `${name}: sandbox inherit must emit no sandbox_mode`);

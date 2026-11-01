@@ -45,6 +45,10 @@ func TestPcmGuardAdmitsReadsDataAndWritesElsewhere(t *testing.T) {
 		`python3 - <<'EOF'` + "\np='/tmp/x/review.md'\ns=open(p).read()\n" +
 			"s=s.replace('a','templates/global/rules/x.md and CLAUDE.md')\nopen(p,'w').write(s)\nEOF",
 		`python3 -c "p='/tmp/x/review.md'; s=open(p).read(); open(p, 'w').write(s + 'CLAUDE.md')"`,
+		// Doc text whose markdown link reads like a call, written to targets the name takes in turn.
+		`python3 - <<'EOF'` + "\np='/tmp/x/a.md'\ns=open(p).read()\n" +
+			"s=s.replace('a','see [hooks](hooks.md) and `.claude/engine-sync.json` # not code')\n" +
+			"open(p,'w').write(s)\np='/tmp/x/b.md'\nopen(p,'w').write(s)\nEOF",
 		`python3 -c "from pathlib import Path; Path('/tmp/x/out.md').write_text(open('CLAUDE.md').read())"`,
 		`node -e "require('fs').writeFileSync('/tmp/x/out.md', require('fs').readFileSync('CLAUDE.md'))"`,
 		// A read program on stdin.
@@ -102,6 +106,8 @@ func TestPcmGuardDeniesInterpreterWritesItCanOrCannotAttribute(t *testing.T) {
 		`python3 -c "import os; os.rename('/tmp/x', '.claude/agents/a.md')"`,
 		`python3 -c "p='/tmp/x'; p='CLAUDE.md'; open(p, 'w')"`,
 		`python3 -c "p: str = 'CLAUDE.md'; open(p, mode='a')"`,
+		`python3 -c "import shutil; s='/tmp/a'; s='/tmp/b'; shutil.copy(s, 'CLAUDE.md')"`,
+		`python3 -c "print(f'{open(\"CLAUDE.md\", \"w\")}')"`,
 		`python3 -c "import os; os.system('rm CLAUDE.md')"`,
 		`python3 -c "o = open; o('CLAUDE.md', 'w')"`,
 		`python3 -c "from os import remove; remove('CLAUDE.md')"`,

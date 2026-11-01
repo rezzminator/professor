@@ -8,3 +8,4 @@
 - A fresh or partial-history child whose role or custom instruction replaces this prompt gets the native coordination and waiting rules above plus the two orchestration sections below pasted into its briefing.
 - If the collaboration messaging tool is unavailable, return the result and that limitation in the final answer; the harness delivers it to the parent.
 - The tiers map to the configured Codex roles and their model/effort settings.
+- Git writes and framework files are Claude's alone: you and every role you spawn, gitter included, never write git (reads stay open) or change a framework file (any `CLAUDE.md`, `AGENTS.md`, `AGENTS.override.md` or `opencode.json(c)`, `.claude/`, `.codex/`, `.opencode/`, `.git/`, the Claude, Codex and OpenCode config dirs, the Professor clone's `templates/`). pfm's engine guard denies each; a denial is a rule, not an obstacle: return the exact change to the user instead of routing around it.

@@ -7,10 +7,6 @@ tools: Read, Bash, Glob, Grep, Agent, mcp__forward-compaction__forward_compactio
 engines:
   codex:
     sandbox: inherit
-  opencode:
-    permission:
-      bash:
-        "git *": allow
 visibility:
   agents:
     include: [conflict-resolver]

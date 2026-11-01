@@ -25,6 +25,8 @@ An agent that made its own worktree left it behind: nothing tore it down, and st
 
 `claudelaunch.HookTemplates` names it — event `PreToolUse`, matcher `Bash`, command `pfm internal git-guard` (`pfm/internal/claudelaunch/hooks.go:30`) — and `claudelaunch.Render` carries it in the launch-line `--settings` of every Claude chat a pfm door starts ([hooks.md](hooks.md)); `pfm doctor` spawn-audit expects it in each live chat's payload like every pfm hook. It is an internal verb (`pfm/cmd/pfm/main.go:69`, dispatched at `:427`). Because it rides every launch and not one project's settings, it runs in every repository, whether pfm manages it or not.
 
+Codex and OpenCode carry no git-guard, and their `gitter` role writes no git either: their [engine-guard](engine-guard.md) judges git by the same reading and denies every git write to every caller.
+
 ## Who is exempt
 
 A payload whose `agent_type` is exactly `gitter` is always allowed (`git_guard.go:26`, checked at `:121`). The hook reads only the name, so any gitter qualifies: a project's own (`.claude/agents/gitter.md`, scaffolded from `templates/project/agents/gitter.md`) or the machine-global one (`templates/global/agents/gitter.md`, which `pfm install` links into every account and a project's own gitter overrides by name). Every other caller is checked, a main chat (no `agent_type`) included.

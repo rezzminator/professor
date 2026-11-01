@@ -149,12 +149,12 @@ func codexTimeoutText(value any) string {
 }
 
 // codexOwnedHookKey reports whether key is a hook pfm owns in a Codex
-// hooks.json: the resume-unkill handler or one of the Herdr handlers.
+// hooks.json: the resume-unkill handler, a Herdr handler or the engine guard.
 func codexOwnedHookKey(key settingsHookKey, resumeUnkill ExpectedHook, home string) bool {
 	if key.Event == resumeUnkill.Event && key.Matcher == resumeUnkill.Matcher && key.Command == resumeUnkill.Command {
 		return true
 	}
-	for _, hook := range codexHerdrHooks(home) {
+	for _, hook := range append(codexHerdrHooks(home), codexEngineGuardHook(home)) {
 		if key.Event == hook.Event && key.Matcher == hook.Matcher && key.Command == hook.Command {
 			return true
 		}

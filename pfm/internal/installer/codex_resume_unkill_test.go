@@ -239,12 +239,12 @@ func TestCodexResumeUnkillHookTrustIsRecordedThroughTheNativeAPI(t *testing.T) {
 	if err := json.Unmarshal([]byte(receiptRaw), &receipt); err != nil {
 		t.Fatal(err)
 	}
-	// Every handler pfm owns is trusted: resume-unkill and the seven Herdr ones.
-	if len(receipt) != 8 || receipt[key] != "sha256:deadbeef" {
-		t.Fatalf("receipt=%v, want eight handlers incl. %s -> sha256:deadbeef", receipt, key)
+	// Every handler pfm owns is trusted: resume-unkill, the seven Herdr ones and the engine guard.
+	if len(receipt) != 9 || receipt[key] != "sha256:deadbeef" {
+		t.Fatalf("receipt=%v, want nine handlers incl. %s -> sha256:deadbeef", receipt, key)
 	}
 	logged := readFixture(t, requestLog)
-	if got := strings.Count(logged, `"method":"config/value/write"`); got != 8 ||
+	if got := strings.Count(logged, `"method":"config/value/write"`); got != 9 ||
 		!strings.Contains(logged, `"keyPath":"hooks.state.\"`+key+`\""`) ||
 		!strings.Contains(logged, `"trusted_hash":"sha256:deadbeef"`) {
 		t.Fatalf("config/value/write requests=%d, want one carrying the hooks.state key and hash:\n%s", got, logged)
@@ -257,7 +257,7 @@ func TestCodexResumeUnkillHookTrustIsRecordedThroughTheNativeAPI(t *testing.T) {
 	if err := resumeUnkillEngine(home, account, binary, ModeApply, &again).wireCodexHooks(); err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Count(readFixture(t, requestLog), `"method":"config/value/write"`); got != 8 {
+	if got := strings.Count(readFixture(t, requestLog), `"method":"config/value/write"`); got != 9 {
 		t.Fatalf("a trusted hook was written again: %d config/value/write requests", got)
 	}
 	// A trust already recorded is no change: a repeat install stays changed=0.

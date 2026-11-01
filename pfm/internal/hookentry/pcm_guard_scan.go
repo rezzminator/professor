@@ -10,24 +10,27 @@ import (
 
 func pcmGuardPythonWrites(code string) ([]string, bool) {
 	var targets []string
-	for _, m := range pcmGuardPyOpen.FindAllStringSubmatchIndex(code, -1) {
+	masked := pcmGuardPyMask(code) // calls are found outside strings, read in code
+	for _, m := range pcmGuardPyOpen.FindAllStringSubmatchIndex(masked, -1) {
 		found, ok := pcmGuardPyOpenCall(code, m[3])
 		if !ok {
 			return nil, false
 		}
 		targets = append(targets, found...)
 	}
-	pathlib := strings.Contains(code, "Path") || strings.Contains(code, "pathlib")
-	for _, m := range pcmGuardPyAttr.FindAllStringSubmatchIndex(code, -1) {
+	pathlib := strings.Contains(masked, "Path") || strings.Contains(masked, "pathlib")
+	for _, m := range pcmGuardPyAttr.FindAllStringSubmatchIndex(masked, -1) {
 		name, receiver := code[m[2]:m[3]], pcmGuardReceiver(code, m[0])
 		var found []string
 		ok := true
 		switch {
 		case pcmGuardPyModules[receiver] != nil:
 			if n, hit := pcmGuardPyModules[receiver][name]; hit {
-				found, ok = pcmGuardPyPaths(code, m[3], n)
+				var groups [][]string
+				groups, ok = pcmGuardPyPathGroups(code, m[3], n)
+				found = slices.Concat(groups...)
 				if into, copying := pcmGuardPyCopies[receiver+"."+name]; ok && copying {
-					found = pcmGuardCopyTargets(found, into)
+					found = pcmGuardCopyTargets(groups, into)
 				}
 			}
 		case name == pcmGuardOpen && slices.Contains(pcmGuardPyOpeners, receiver),
@@ -52,15 +55,21 @@ func pcmGuardPythonWrites(code string) ([]string, bool) {
 	return targets, true
 }
 
-// pcmGuardCopyTargets keeps a copy's destination, the source being read;
-// into adds dest and the source's name for codeInto.
-func pcmGuardCopyTargets(paths []string, into bool) []string {
-	if len(paths) < 2 {
-		return paths
+// pcmGuardCopyTargets keeps a copy's destinations, the second argument's
+// values, the source being read; into adds each dest and source name pair for
+// codeInto. groups holds each argument's values apart, since a name bound
+// more than once holds several.
+func pcmGuardCopyTargets(groups [][]string, into bool) []string {
+	if len(groups) < 2 {
+		return slices.Concat(groups...)
 	}
-	out := []string{paths[1]}
+	out := slices.Clone(groups[1])
 	if into {
-		out = append(out, paths[1]+pcmGuardInto+paths[0])
+		for _, dest := range groups[1] {
+			for _, source := range groups[0] {
+				out = append(out, dest+pcmGuardInto+source)
+			}
+		}
 	}
 	return out
 }
@@ -68,6 +77,13 @@ func pcmGuardCopyTargets(paths []string, into bool) []string {
 // pcmGuardPyPaths reads the call after code[:end]: lead (a receiver) and its
 // first n positional arguments are the paths it writes.
 func pcmGuardPyPaths(code string, end, n int, lead ...string) ([]string, bool) {
+	groups, ok := pcmGuardPyPathGroups(code, end, n, lead...)
+	return slices.Concat(groups...), ok
+}
+
+// pcmGuardPyPathGroups is pcmGuardPyPaths with each argument's values kept
+// apart, in argument order.
+func pcmGuardPyPathGroups(code string, end, n int, lead ...string) ([][]string, bool) {
 	args, ok := pcmGuardCallAt(code, end, pcmGuardPython)
 	if !ok {
 		return nil, false
@@ -76,7 +92,15 @@ func pcmGuardPyPaths(code string, end, n int, lead ...string) ([]string, bool) {
 	if !ok || len(positional) < n {
 		return nil, false
 	}
-	return pcmGuardPyValues(code, append(lead, positional[:n]...))
+	groups := make([][]string, 0, len(lead)+n)
+	for _, expr := range append(lead, positional[:n]...) {
+		values, ok := pcmGuardPyValues(code, []string{expr})
+		if !ok {
+			return nil, false
+		}
+		groups = append(groups, values)
+	}
+	return groups, true
 }
 
 // pcmGuardPyOpenCall reads an open call after code[:end]: its target when
@@ -130,9 +154,19 @@ func pcmGuardForeignOpen(positional []string) bool {
 	return ok && (value == "" || strings.Trim(value, "rwxabtU+") != "")
 }
 
+// pcmGuardPyValues reads each expression as the paths it can hold; a name
+// bound only by plain assignments holds each of their values in turn.
 func pcmGuardPyValues(code string, exprs []string) ([]string, bool) {
 	values := make([]string, 0, len(exprs))
 	for _, expr := range exprs {
+		if name := strings.TrimSpace(expr); pcmGuardIdent.MatchString(name) {
+			bound, ok := pcmGuardPyBindings(code, name, 0)
+			if !ok {
+				return nil, false
+			}
+			values = append(values, bound...)
+			continue
+		}
 		value, ok := pcmGuardPyValue(code, expr, 0)
 		if !ok {
 			return nil, false
@@ -176,13 +210,23 @@ func pcmGuardPyValue(code, expr string, depth int) (string, bool) {
 	return joined, joined != ""
 }
 
-// pcmGuardPyBinding follows name to the value of its one binding. Every way
-// python binds a name counts, over-counted rather than missed; any count but
-// one, or a binding other than `name = value`, leaves it unread.
+// pcmGuardPyBinding follows name to the value of its one binding.
 func pcmGuardPyBinding(code, name string, depth int) (string, bool) {
+	values, ok := pcmGuardPyBindings(code, name, depth)
+	if !ok || len(values) != 1 {
+		return "", false
+	}
+	return values[0], true
+}
+
+// pcmGuardPyBindings follows name to the value of each of its bindings. Every
+// way python binds a name counts, over-counted rather than missed; a binding
+// other than `name = value`, or none, leaves it unread.
+func pcmGuardPyBindings(code, name string, depth int) ([]string, bool) {
 	quoted := regexp.QuoteMeta(name)
 	word := regexp.MustCompile(`\b` + quoted + `\b`)
-	assigned, rhs, plain := 0, "", false
+	assigned := 0
+	var rhs []string
 	statements := pcmGuardStatements(pcmGuardPyDecomment(code))
 	for _, stmt := range statements {
 		eqs := pcmGuardAssigns(stmt)
@@ -193,7 +237,7 @@ func pcmGuardPyBinding(code, name string, depth int) (string, bool) {
 		hits := len(word.FindAllStringIndex(lhs, -1))
 		assigned += hits
 		if hits == 1 && len(eqs) == 1 && strings.TrimSpace(lhs) == name {
-			plain, rhs = true, stmt[eqs[0]+1:]
+			rhs = append(rhs, stmt[eqs[0]+1:])
 		}
 	}
 	// Text-wide, an assignment the statement split may have missed still counts.
@@ -206,10 +250,62 @@ func pcmGuardPyBinding(code, name string, depth int) (string, bool) {
 		re := pcmGuardBinder(binder, quoted)
 		bound += max(len(re.FindAllStringIndex(code, -1)), len(re.FindAllStringIndex(flat, -1)))
 	}
-	if bound != 1 || !plain {
-		return "", false
+	if bound == 0 || bound != len(rhs) {
+		return nil, false
 	}
-	return pcmGuardPyValue(code, rhs, depth+1)
+	values := make([]string, 0, len(rhs))
+	for _, each := range rhs {
+		value, ok := pcmGuardPyValue(code, each, depth+1)
+		if !ok {
+			return nil, false
+		}
+		values = append(values, value)
+	}
+	return values, true
+}
+
+// pcmGuardPyMask blanks the text of python's comments and of its strings but
+// f-strings, whose braces are code, keeping every offset: prose in a string
+// ("see [a](b)") is no call or escape.
+func pcmGuardPyMask(code string) string {
+	out := []byte(code)
+	blank := func(from, to int) {
+		for k := from; k < to; k++ {
+			if out[k] != '\n' && out[k] != '\'' && out[k] != '"' {
+				out[k] = ' '
+			}
+		}
+	}
+	for i := 0; i < len(code); {
+		switch code[i] {
+		case '\'', '"':
+			j := pcmGuardSkipQuote(code, i, true)
+			if !pcmGuardFString(code, i) {
+				blank(i+1, j)
+			}
+			i = j
+		case '#':
+			j := strings.IndexByte(code[i:], '\n')
+			if j < 0 {
+				j = len(code) - i
+			}
+			blank(i, i+j)
+			i += j
+		default:
+			i++
+		}
+	}
+	return string(out)
+}
+
+// pcmGuardFString reports a string literal opening at code[quote] whose
+// prefix (rb, Rf, …) holds an f.
+func pcmGuardFString(code string, quote int) bool {
+	start := quote
+	for start > 0 && strings.IndexByte("rRbBuUfF", code[start-1]) >= 0 {
+		start--
+	}
+	return strings.ContainsAny(code[start:quote], "fF")
 }
 
 func pcmGuardBinder(pattern, quoted string) *regexp.Regexp {

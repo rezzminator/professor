@@ -21,6 +21,23 @@ const codexResumeUnkillHookName = "resume-unkill"
 // codexResumeUnkillTimeoutSeconds is the resume-unkill handler's timeout.
 const codexResumeUnkillTimeoutSeconds = 30
 
+// codexEngineGuardTimeoutSeconds bounds the engine guard; past it Codex runs
+// the tool unjudged, as a failed hook does.
+const codexEngineGuardTimeoutSeconds = 10
+
+// codexEngineGuardHook is the PreToolUse handler that denies a Codex chat's
+// git writes and framework-file writes (hookentry.EngineGuard): Codex sends
+// its shell as Bash and its edits as apply_patch.
+func codexEngineGuardHook(home string) ExpectedHook {
+	return ExpectedHook{
+		Target:  hookTargetCodex,
+		Event:   "PreToolUse",
+		Matcher: "Bash|apply_patch",
+		Command: home + "/.local/bin/pfm internal engine-guard --engine codex",
+		Name:    "engine-guard",
+	}
+}
+
 // codexClearMatcher is the matcher the retired Codex SessionStart clear-kill
 // hook used to carry. It remains only so leftover entries can be removed; no
 // current ownership path recognizes or writes this retired shape.
@@ -84,8 +101,9 @@ func ensureCodexHook(document map[string]any, hook ExpectedHook, timeoutSeconds 
 }
 
 // updateCodexHooks preserves personal handlers, owns the Codex hooks the
-// installer writes — the SessionStart "resume" resume-unkill handler and the
-// Herdr reporter handlers of codex_hooks_herdr.go — and retires pfm's others:
+// installer writes — the SessionStart "resume" resume-unkill handler, the
+// Herdr reporter handlers of codex_hooks_herdr.go and the PreToolUse engine
+// guard — and retires pfm's others:
 // the clear-kill hook, and the SessionStart appendix hook whose truncated,
 // compaction-dropped delivery developer_instructions replaced. An uninstall
 // strips the owned hook through the ledger.
@@ -162,6 +180,13 @@ func updateCodexHooks(
 			changed = true
 		}
 		if ensureCodexHerdrHooks(document, home) {
+			changed = true
+		}
+		guard := codexEngineGuardHook(home)
+		if ensureCodexHook(document, guard, codexEngineGuardTimeoutSeconds) {
+			changed = true
+		}
+		if setCodexHookTimeout(document, guard, codexEngineGuardTimeoutSeconds) {
 			changed = true
 		}
 	}
@@ -426,13 +451,13 @@ func (installer *engine) wireCodexHooks() error {
 }
 
 // codexOwnedHooks is every handler pfm owns in a Codex hooks.json: the
-// resume-unkill handler, then the Herdr reporter handlers.
+// resume-unkill handler, then the Herdr reporter handlers and the engine guard.
 func codexOwnedHooks(home string) ([]ExpectedHook, error) {
 	unkill, err := codexResumeUnkillHook(home)
 	if err != nil {
 		return nil, err
 	}
-	return append([]ExpectedHook{unkill}, codexHerdrHooks(home)...), nil
+	return append(append([]ExpectedHook{unkill}, codexHerdrHooks(home)...), codexEngineGuardHook(home)), nil
 }
 
 // codexHandler is the native-hook handler an owned hook becomes: Codex's own

@@ -43,6 +43,7 @@ const (
 	gitGuardVerbUpdate = "update"
 	gitGuardVerbList   = "list"
 	gitGuardVerbShow   = "show"
+	gitGuardVerbApply  = "apply"
 	gitGuardFlagList   = "--list"
 )
 
@@ -117,12 +118,29 @@ func GitGuard(input io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "pfm internal git-guard: decode hook payload (fail-open): %v\n", err)
 		return 0
 	}
-	command := hook.ToolInput.Command
-	if hook.ToolName != bashTool || hook.AgentType == gitGuardExemptAgent ||
-		(!strings.Contains(command, "git") && !strings.Contains(command, "worktree.sh")) {
+	if hook.ToolName != bashTool || hook.AgentType == gitGuardExemptAgent {
 		return 0
 	}
-	cwd := hook.Cwd
+	reason := gitGuardCheck(hook.ToolInput.Command, hook.Cwd, false, stderr)
+	if reason == "" {
+		return 0
+	}
+	if err := json.NewEncoder(stdout).Encode(preToolUseDenyResponse(reason)); err != nil {
+		fmt.Fprintf(stderr, "pfm internal git-guard: write deny: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+// gitGuardCheck judges one Bash command run in cwd and returns its deny
+// reason, "" to allow. engine is the Codex and OpenCode reading
+// (EngineGuard): a whole stash is a write too, and the reason names no
+// gitter, since no git writer runs there. A parser error is fail-open to
+// stderr.
+func gitGuardCheck(command, cwd string, engine bool, stderr io.Writer) string {
+	if !strings.Contains(command, "git") && !strings.Contains(command, "worktree.sh") {
+		return ""
+	}
 	parseCwd := cwd
 	if !filepath.IsAbs(parseCwd) {
 		parseCwd = string(filepath.Separator)
@@ -130,7 +148,7 @@ func GitGuard(input io.Reader, stdout, stderr io.Writer) int {
 	parsed, err := cmdparse.ParseBatch([]cmdparse.Call{{ID: "git-guard", Command: command, Cwd: parseCwd}})
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm internal git-guard: parse command (fail-open): %v\n", err)
-		return 0
+		return ""
 	}
 	var blocks []gitGuardBlock
 	unreadable, bounded := false, false
@@ -149,19 +167,14 @@ func GitGuard(input io.Reader, stdout, stderr io.Writer) int {
 		}
 		// An unread -c string runs commands no part shows.
 		unreadable = unreadable || (part.Unread && gitGuardMentionsGit(command))
-		if block, ok := gitGuardPart(part, cwd); ok {
+		if block, ok := gitGuardPart(part, cwd, engine); ok {
 			blocks = append(blocks, block)
 		}
 	}
 	if len(blocks) == 0 && !unreadable && !bounded {
-		return 0
+		return ""
 	}
-	reason := gitGuardReason(blocks, unreadable, bounded)
-	if err := json.NewEncoder(stdout).Encode(preToolUseDenyResponse(reason)); err != nil {
-		fmt.Fprintf(stderr, "pfm internal git-guard: write deny: %v\n", err)
-		return 1
-	}
-	return 0
+	return gitGuardReason(blocks, unreadable, bounded, engine)
 }
 
 // gitGuardMentionsGit reports a command naming git as a program could: the
@@ -195,7 +208,7 @@ func gitGuardWordByte(b byte) bool {
 
 // gitGuardPart decides one parsed part: a git call, or a repo's worktree
 // script run with create, remove or prune.
-func gitGuardPart(part *cmdparse.Part, cwd string) (gitGuardBlock, bool) {
+func gitGuardPart(part *cmdparse.Part, cwd string, engine bool) (gitGuardBlock, bool) {
 	written := strings.TrimSpace(part.Program + " " + strings.Join(part.Args, " "))
 	scriptIsProgram := strings.HasSuffix(part.Program, gitGuardWorktreeSh)
 	if scriptIsProgram || (len(part.Args) > 0 && strings.HasSuffix(part.Args[0], gitGuardWorktreeSh)) {
@@ -212,7 +225,7 @@ func gitGuardPart(part *cmdparse.Part, cwd string) (gitGuardBlock, bool) {
 		return gitGuardBlock{}, false
 	}
 	repoDir, sub, rest := gitGuardSplit(part.Args, cwd)
-	blocked, worktree := gitGuardBlocks(sub, rest, repoDir)
+	blocked, worktree := gitGuardBlocks(sub, rest, repoDir, engine)
 	return gitGuardBlock{command: written, worktree: worktree, stash: sub == "stash", repoDir: repoDir}, blocked
 }
 
@@ -245,8 +258,9 @@ func gitGuardSplit(args []string, cwd string) (string, string, []string) {
 }
 
 // gitGuardBlocks reports whether one git subcommand writes shared state, and
-// whether that write is a worktree write.
-func gitGuardBlocks(sub string, rest []string, repoDir string) (blocked, worktree bool) {
+// whether that write is a worktree write; engine blocks every stash but its
+// list and show, and every subcommand that is neither judged here nor a read.
+func gitGuardBlocks(sub string, rest []string, repoDir string, engine bool) (blocked, worktree bool) {
 	first := gitGuardFirstOperand(rest)
 	switch sub {
 	case "worktree":
@@ -274,12 +288,15 @@ func gitGuardBlocks(sub string, rest []string, repoDir string) (blocked, worktre
 		return gitGuardHas(rest, "-d", "--delete") || len(gitGuardOperands(rest)) >= 2, false
 	case "remote":
 		return slices.Contains(gitGuardRemoteWrites, first), false
-	case "apply":
+	case gitGuardVerbApply:
 		readOnly := gitGuardHas(rest, "--check", "--stat", "--numstat", "--summary")
 		return gitGuardHas(rest, "--index", "--cached", "-3", "--3way") && !readOnly, false
 	case "hash-object":
 		return gitGuardHas(rest, "-w"), false
 	case "stash":
+		if engine {
+			return first != gitGuardVerbList && first != gitGuardVerbShow, false
+		}
 		return gitGuardStash(rest, repoDir), false
 	case "config":
 		return gitGuardConfigWrite(rest), false
@@ -287,8 +304,12 @@ func gitGuardBlocks(sub string, rest []string, repoDir string) (blocked, worktre
 		return !slices.Contains(gitGuardNotesReads, first), false
 	case "submodule":
 		return slices.Contains(gitGuardSubmoduleWrites, first), false
+	case "reflog":
+		return engine && !slices.Contains(engineGuardGitReflogReads, first), false
 	}
-	return false, false
+	// Engine mode reads by allowlist: a subcommand no case above judges and
+	// no read below names (bisect, sparse-checkout, init, an alias) writes.
+	return engine && sub != "" && !slices.Contains(engineGuardGitReads, sub), false
 }
 
 // gitGuardCheckout blocks a branch switch or creation and a pathspec that
@@ -515,18 +536,23 @@ func gitGuardTopLevel(dir string) string {
 // gitter instruction, the worktree way for each repository a worktree write
 // named, the path-stash line when a stash was blocked, the unreadable-command
 // line, and the parse-bound line. The bound line alone sends nobody to
-// gitter: a shortened command is read and judged like any other.
-func gitGuardReason(blocks []gitGuardBlock, unreadable, bounded bool) string {
+// gitter: a shortened command is read and judged like any other. engine
+// swaps the gitter instruction for the engine ban and drops the gitter ways.
+func gitGuardReason(blocks []gitGuardBlock, unreadable, bounded, engine bool) string {
+	route := gitGuardOnlyGitter
+	if engine {
+		route = engineGuardGitBan
+	}
 	var lines []string
 	if len(blocks) > 0 {
 		named := make([]string, 0, len(blocks))
 		for _, block := range blocks {
 			named = append(named, "`"+block.command+"`")
 		}
-		lines = append(lines, "git-guard blocked "+strings.Join(named, ", ")+".", gitGuardOnlyGitter)
+		lines = append(lines, "git-guard blocked "+strings.Join(named, ", ")+".", route)
 	}
 	for _, block := range blocks {
-		if !block.worktree {
+		if engine || !block.worktree {
 			continue
 		}
 		hint := gitGuardNoSetupHint
@@ -541,14 +567,14 @@ func gitGuardReason(blocks []gitGuardBlock, unreadable, bounded bool) string {
 		}
 	}
 	for _, block := range blocks {
-		if block.stash && !slices.Contains(lines, gitGuardStashHint) {
+		if !engine && block.stash && !slices.Contains(lines, gitGuardStashHint) {
 			lines = append(lines, gitGuardStashHint)
 		}
 	}
 	if unreadable {
 		lines = append(lines, "git-guard "+gitGuardUnreadable)
 		if len(blocks) == 0 {
-			lines = append(lines, gitGuardOnlyGitter)
+			lines = append(lines, route)
 		}
 	}
 	if bounded {

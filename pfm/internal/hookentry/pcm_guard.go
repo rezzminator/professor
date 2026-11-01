@@ -51,6 +51,7 @@ const (
 	pcmGuardPushd       = "pushd"
 	pcmGuardPopd        = "popd"
 	pcmGuardDash        = "dash"
+	pcmGuardTemplates   = "templates"
 )
 
 var (
@@ -83,19 +84,24 @@ var (
 
 // pcmGuardScope is what a path is judged against: home, the Professor clone
 // (physical, "" when unresolved) and the Claude config dirs, as written and
-// physical.
+// physical. engine is the Codex and OpenCode reading (EngineGuard), whose
+// roots (engineGuardRoots) are protected whole, as are the config dirs.
 type pcmGuardScope struct {
 	home, clone string
 	configs     []string
+	engine      bool
+	roots       []string
 }
 
 // pcmGuardJudge collects one call's verdict: the paths only pcm writes, the
-// themes only themer writes, and whether a write target could not be read.
+// themes only themer writes, and whether a write target could not be read;
+// in engine mode also the blind parts (enginePart) and the file texts it read.
 type pcmGuardJudge struct {
 	scope              pcmGuardScope
 	agent              string
 	pcmOnly, themeOnly []string
 	unreadable         bool
+	blind, read        []string
 }
 
 // PcmGuard is the PreToolUse hook on the edit tools and Bash that denies a
@@ -128,7 +134,7 @@ func PcmGuard(input io.Reader, stdout, stderr io.Writer) int {
 	if !filepath.IsAbs(cwd) {
 		cwd = ""
 	}
-	judge := &pcmGuardJudge{scope: pcmGuardNewScope(stderr), agent: hook.AgentType}
+	judge := &pcmGuardJudge{scope: pcmGuardNewScope(stderr, false), agent: hook.AgentType}
 	if editing {
 		if target := cmp.Or(hook.ToolInput.FilePath, hook.ToolInput.NotebookPath); target != "" {
 			if !filepath.IsAbs(target) {
@@ -140,7 +146,11 @@ func PcmGuard(input io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "pfm internal pcm-guard: parse command (fail-open): %v\n", err)
 		return 0
 	}
-	judge.unreadable = judge.unreadable && pcmGuardMentions(hook.ToolInput.Command, hook.AgentType)
+	names := pcmGuardPromptNames
+	if hook.AgentType == pcmGuardWriter {
+		names = []string{"themes"}
+	}
+	judge.unreadable = judge.unreadable && pcmGuardMentions(hook.ToolInput.Command, names)
 	if len(judge.pcmOnly) == 0 && len(judge.themeOnly) == 0 && !judge.unreadable {
 		return 0
 	}
@@ -153,11 +163,14 @@ func PcmGuard(input io.Reader, stdout, stderr io.Writer) int {
 
 // pcmGuardNewScope reads home, the clone the way pfm install finds it
 // (paths.GlobalSourceRepo) and the config dirs: ~/.claude and the chat's
-// CLAUDE_CONFIG_DIR. What it cannot read leaves that root unguarded, with
-// one stderr line.
-func pcmGuardNewScope(stderr io.Writer) pcmGuardScope {
+// CLAUDE_CONFIG_DIR; engine adds engineGuardRoots. What it cannot read
+// leaves that root unguarded, with one stderr line.
+func pcmGuardNewScope(stderr io.Writer, engine bool) pcmGuardScope {
 	home := storeGuardGet("HOME")
-	scope := pcmGuardScope{home: home}
+	scope := pcmGuardScope{home: home, engine: engine}
+	if engine {
+		scope.roots = engineGuardRoots(home)
+	}
 	dirs := []string{storeGuardGet(storeGuardEnv)}
 	if home != "" {
 		dirs = append(dirs, claudelaunch.ClaudeStore(home))
@@ -200,18 +213,14 @@ func (scope pcmGuardScope) class(abs string) (protected, theme bool) {
 }
 
 func (scope pcmGuardScope) classOne(path string) (protected, theme bool) {
+	if scope.engine {
+		return scope.engineClass(path), false
+	}
 	if strings.EqualFold(filepath.Base(path), "CLAUDE.md") {
 		return true, false
 	}
-	if rel, ok := pcmGuardUnder(path, scope.clone); ok {
-		elems := strings.Split(rel, string(filepath.Separator))
-		if len(elems) > 2 && elems[0] == ".worktrees" {
-			// A flight worktree of the clone carries the same templates.
-			elems = elems[2:]
-		}
-		if elems[0] == "templates" {
-			return true, len(elems) > 1 && elems[1] == "themes"
-		}
+	if in, theme := scope.templates(path); in {
+		return true, theme
 	}
 	for _, config := range scope.configs {
 		if rel, ok := pcmGuardUnder(path, config); ok {
@@ -225,6 +234,22 @@ func (scope pcmGuardScope) classOne(path string) (protected, theme bool) {
 		}
 	}
 	return false, false
+}
+
+// templates reports a path under the clone's templates/ (or a flight
+// worktree's), and whether it lies under templates/themes/.
+func (scope pcmGuardScope) templates(path string) (in, theme bool) {
+	rel, ok := pcmGuardUnder(path, scope.clone)
+	if !ok {
+		return false, false
+	}
+	elems := strings.Split(rel, string(filepath.Separator))
+	if len(elems) > 2 && elems[0] == ".worktrees" {
+		// A flight worktree of the clone carries the same templates.
+		elems = elems[2:]
+	}
+	in = elems[0] == pcmGuardTemplates
+	return in, in && len(elems) > 1 && elems[1] == "themes"
 }
 
 // pcmGuardUnder returns path relative to root ("" for root itself) when
@@ -327,6 +352,9 @@ func (judge *pcmGuardJudge) bash(command, cwd string, depth int) error {
 				judge.word(word, dir)
 			}
 			judge.program(&part, base, dir, depth)
+			if judge.scope.engine {
+				judge.enginePart(&part, base, dir, depth)
+			}
 			if copying {
 				judge.copies(base, part.Args, dir)
 			}
@@ -589,16 +617,16 @@ func pcmGuardSplit(args []string, valued ...string) ([]string, map[string]string
 	return operands, values
 }
 
+// pcmGuardPromptNames are the names a prompt-file write is recognised by in
+// a command the guard could not read: CLAUDE.md, .claude and templates.
+var pcmGuardPromptNames = []string{"claude.md", ".claude", pcmGuardTemplates}
+
 // pcmGuardMentions reports whether a command the guard could not read in
-// full names a file the caller may not write: for pcm only a theme, for
-// everyone else CLAUDE.md, .claude or templates. Each counts as a whole path
-// element or word, letter case folded, a trailing dot dropped, so
-// .claude-plugin, .claude.json and my_templates_x name none.
-func pcmGuardMentions(command, agent string) bool {
-	names := []string{"claude.md", ".claude", "templates"}
-	if agent == pcmGuardWriter {
-		names = []string{"themes"}
-	}
+// full names a file the caller may not write: one of names (lower case),
+// each counted as a whole path element or word, letter case folded, a
+// trailing dot dropped, so .claude-plugin, .claude.json and my_templates_x
+// name none.
+func pcmGuardMentions(command string, names []string) bool {
 	elements := strings.FieldsFunc(strings.ToLower(command), func(r rune) bool {
 		return !unicode.IsLetter(r) && !unicode.IsDigit(r) && !strings.ContainsRune("._-", r)
 	})
@@ -611,6 +639,9 @@ func pcmGuardMentions(command, agent string) bool {
 // pcm, the themes only themer writes and the route to themer, then the
 // unreadable-command line.
 func (judge *pcmGuardJudge) reason() string {
+	if judge.scope.engine {
+		return judge.engineReason()
+	}
 	var lines []string
 	if len(judge.pcmOnly) > 0 {
 		lines = append(

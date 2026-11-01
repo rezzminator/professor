@@ -35,28 +35,23 @@ prefix_rule(
     justification = "Infra ops (queues included) go through the owning project's Makefile — make -C {PROJECT} (repo law).",
 )
 
-# ─── OPTIONAL: promoting the git law from prose to a pin ─────────────────────
+# ─── OPTIONAL: a second git lock beside the engine guard ─────────────────────
 #
-# Shipped COMMENTED OUT because it is not in the working live config, and this
-# file does not carry claims it has not earned. In the live pipeline git is NOT
-# gated here: it binds as LAW — every role card states that read-only git
-# (status/diff/log/show/rev-parse) is the role's, while commits, merges, pushes
-# and branch changes are gitter's alone. The generated registry includes that
-# one writer, so a repo-wide Git deny would disable the authorized role along
-# with everyone else.
-#
-# Uncomment only if this installation intentionally disables every Git writer,
-# including gitter. `codex execpolicy check` is the only way to prove the pin;
-# a rule you have not run through the checker is a comment, not a control.
+# Shipped COMMENTED OUT: git is not gated here. On Codex no chat or role writes
+# git, gitter included: pfm's engine guard (a PreToolUse hook in each Codex
+# home's hooks.json) denies every git write, and only Claude's gitter commits,
+# merges, pushes or changes a branch. Uncomment these to keep a lock where pfm's
+# hooks are not installed. `codex execpolicy check` is the only way to prove the
+# pin; a rule you have not run through the checker is a comment, not a control.
 #
 # prefix_rule(
 #     pattern = ["git", "commit"],
 #     decision = "forbidden",
-#     justification = "Only gitter commits (repo law). Report the diff and request a gitter dispatch.",
+#     justification = "Codex never writes git: only Claude's gitter commits (repo law). Return the exact change to the user.",
 # )
 #
 # prefix_rule(
 #     pattern = ["git", "push"],
 #     decision = "forbidden",
-#     justification = "Only gitter pushes, and only on an explicit publish request (repo law).",
+#     justification = "Codex never writes git: only Claude's gitter pushes, on an explicit publish request (repo law). Return the exact change to the user.",
 # )

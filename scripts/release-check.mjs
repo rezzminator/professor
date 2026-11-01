@@ -65,6 +65,7 @@ const TIER1 = [
           "themesync",
           "themetmux",
           "agentlauncher",
+          "workbench",
         ],
       },
       {

@@ -56,7 +56,7 @@ Where Vocabulary, Runtime or On demand disagrees with the code on a path, comman
 
 ## OpenCode
 
-- Reads the same `AGENTS.md` (preferred over `CLAUDE.md`) plus `.opencode/`: `agent/*.md`, flat `/name` commands, skill symlinks, and `opencode.jsonc` pinning the non-gitter Git-write denies.
+- Reads the same `AGENTS.md` (preferred over `CLAUDE.md`) plus `.opencode/`: `agent/*.md`, flat `/name` commands, skill symlinks, and `opencode.jsonc` pinning the Git-write denies.
 
 ## Local
 

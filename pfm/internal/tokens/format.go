@@ -9,6 +9,7 @@ import (
 	"unicode/utf16"
 
 	"github.com/rezzminator/professor/pfm/internal/jsvalue"
+	"github.com/rezzminator/professor/pfm/internal/pricing"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
@@ -141,10 +142,15 @@ var (
 	codexPrefix = regexp.MustCompile(`^gpt-`)
 )
 
-// modelStem drops a Claude id's family prefix and snapshot date.
+// modelStem drops a Claude id's family prefix and snapshot date, after the
+// price table's own normalization (gateway asset path, Bedrock prefix, window
+// tag): gw:catalog/claude-opus-5 → opus-5.
 func modelStem(model string) string {
 	if model == "" {
 		model = "?"
+	}
+	if id, ok := pricing.NormalizeID(model); ok {
+		model = id
 	}
 	return modelDate.ReplaceAllString(modelPrefix.ReplaceAllString(model, ""), "")
 }

@@ -14,7 +14,8 @@ services:
       # an ordinary builder leaves an unkeyed image for the next fence start.
       labels:
         pfm.fence.inputs: ${PFM_DEV_INPUTS_KEY:-unkeyed}
-      # Empty by default: the npm mirror for a network that blocks registry.npmjs.org.
+      # Empty by default: the npm mirror for a network that blocks registry.npmjs.org
+      # (infra/fence/local-env.sh loads it from the gitignored infra/fence/.env).
       args:
         PFM_NPM_REGISTRY: ${PFM_NPM_REGISTRY:-}
     image: professor-pfm-dev
@@ -56,6 +57,9 @@ services:
       PFM_DEV_FENCE: "1"
       # root-vs-uid1000 dubious ownership + an unmounted worktree gitdir break `git`-shelling go builds; pfm reports version "dev", so no VCS stamp is lost.
       GOFLAGS: "-buildvcs=false"
+      # The Go module proxy for a network that intercepts proxy.golang.org's TLS; runtime
+      # only, so the image key never carries it. Empty is unset to Go: its default proxy.
+      GOPROXY: ${PFM_GOPROXY:-}
       PFM_DEV_REPO_GIT_DIR: /pfm-git-common/${PFM_DEV_GIT_DIR_REL:?set by dev.sh iso — relative active gitdir}
       PFM_DEV_REPO_WORK_TREE: /worktree
       PFM_DEV_ENGINE_SYNC_MISSING: ${PFM_DEV_ENGINE_SYNC_MISSING:-}

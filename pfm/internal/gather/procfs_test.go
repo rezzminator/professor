@@ -358,7 +358,8 @@ func TestProcessReadErrorUsesIndependentExistence(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := processReadError(42, syscall.EINVAL, tc.probe)
-			if errors.Is(err, fs.ErrNotExist) != tc.gone || !tc.gone && !errors.Is(err, syscall.EINVAL) {
+			if errors.Is(err, fs.ErrNotExist) != tc.gone || errors.Is(err, syscall.ESRCH) != tc.gone ||
+				!tc.gone && !errors.Is(err, syscall.EINVAL) {
 				t.Fatalf(
 					"process read error=%v gone=%t want gone=%t with unreadability preserved",
 					err,

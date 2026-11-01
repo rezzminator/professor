@@ -176,8 +176,14 @@ func Render(request Request, machine pfmconfig.Config) (Launch, error) {
 		if prompt, _ := wantedPromptFile(request, prefs); prompt != "" {
 			result.Argv = append(result.Argv, flagPromptFile, prompt)
 		}
-		if prefs.PermissionMode == pfmconfig.PermissionBypass && request.Purpose != PurposeLauncher {
-			result.Argv = append(result.Argv, flagAllowBypass, flagBypass)
+		if request.Purpose != PurposeLauncher {
+			switch prefs.PermissionMode {
+			case pfmconfig.PermissionBypass:
+				result.Argv = append(result.Argv, flagAllowBypass, flagBypass)
+			case pfmconfig.PermissionAuto:
+				// Auto mode first; the allow flag keeps bypass one shift+tab away.
+				result.Argv = append(result.Argv, flagAllowBypass, flagPermissionMode, permissionModeAuto)
+			}
 		}
 	}
 	result.Argv = RefreshRemoteControl(

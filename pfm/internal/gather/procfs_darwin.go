@@ -129,7 +129,7 @@ func (proc *DarwinProcFS) Stat(pid int) (ProcStat, error) {
 func (proc *DarwinProcFS) Birth(pid int) (int64, error) {
 	process, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
 	if err != nil {
-		return 0, fmt.Errorf("read kern.proc.pid for %d: %w", pid, err)
+		return 0, fmt.Errorf("read kern.proc.pid for %d: %w", pid, processReadError(pid, err, ProbeProcess(pid)))
 	}
 	return process.Proc.P_starttime.Sec, nil
 }
@@ -212,7 +212,11 @@ func (proc *DarwinProcFS) FDLinks(pid int) ([]FDLink, error) {
 		// still prints what it found. Only an empty result alongside an error is
 		// a probe that could not run.
 		if len(output) == 0 {
-			return nil, fmt.Errorf("list open files for pid %d via lsof: %w", pid, err)
+			return nil, fmt.Errorf(
+				"list open files for pid %d via lsof: %w",
+				pid,
+				processReadError(pid, err, ProbeProcess(pid)),
+			)
 		}
 	}
 	links := make([]FDLink, 0)
@@ -261,7 +265,11 @@ func (proc *DarwinProcFS) Image(pid int) (FileID, error) {
 	}
 	output := result.Stdout
 	if err != nil && len(output) == 0 {
-		return FileID{}, fmt.Errorf("read the executable of pid %d via lsof: %w", pid, err)
+		return FileID{}, fmt.Errorf(
+			"read the executable of pid %d via lsof: %w",
+			pid,
+			processReadError(pid, err, ProbeProcess(pid)),
+		)
 	}
 	var id FileID
 	var sawDevice, sawInode bool
@@ -347,7 +355,11 @@ func procArgs(pid int) (argv, env []string, err error) {
 func (proc *DarwinProcFS) Executable(pid int) (string, error) {
 	buffer, err := unix.SysctlRaw("kern.procargs2", pid)
 	if err != nil {
-		return "", fmt.Errorf("read executable via kern.procargs2 for %d: %w", pid, err)
+		return "", fmt.Errorf(
+			"read executable via kern.procargs2 for %d: %w",
+			pid,
+			processReadError(pid, err, ProbeProcess(pid)),
+		)
 	}
 	path, err := procExecutablePath(buffer)
 	if err != nil {

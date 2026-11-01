@@ -350,6 +350,7 @@ func resumeNativeRun(
 			remove[knob.Target] = knob.Name != restoredKnobFork
 		}
 	}
+	arity[claudelaunch.PermissionModeFlag] = true // the one permissionMode flag that takes a value
 	if engineID != pfmengine.Claude {
 		remove = map[string]bool{"--prompt": true, "--session": true, "--continue": false}
 	}

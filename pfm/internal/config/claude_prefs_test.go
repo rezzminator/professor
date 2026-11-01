@@ -455,3 +455,27 @@ func TestSubagentStatuslineTraceMachineWideSwitchDefaultsOff(t *testing.T) {
 		t.Fatalf("account switch refusal=%v", err)
 	}
 }
+
+// claude.permissionMode takes bypass, prompted or auto; anything else names
+// every accepted value.
+func TestClaudePermissionModeValues(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(t.TempDir(), FileName)
+	for _, mode := range []string{PermissionBypass, PermissionPrompt, "auto"} {
+		content := `{"version":2,"claude":{"permissionMode":"` + mode + `"}}`
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		loaded, err := Load(path, home, nil)
+		if err != nil || loaded.EffectiveClaude(0).PermissionMode != mode {
+			t.Fatalf("permissionMode %q: err=%v loaded=%+v", mode, err, loaded.Claude)
+		}
+	}
+	if err := os.WriteFile(path, []byte(`{"version":2,"claude":{"permissionMode":"yolo"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	want := "config " + path + `: claude.permissionMode must be "bypass", "prompted" or "auto", got "yolo"`
+	if _, err := Load(path, home, nil); err == nil || err.Error() != want {
+		t.Fatalf("junk permissionMode error = %v, want %s", err, want)
+	}
+}

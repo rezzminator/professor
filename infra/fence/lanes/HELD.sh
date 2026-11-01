@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Lane HELD — real Herdr, real herdr-keep-wrapped panes, fake engines: every pfm
+# Lane HELD — real Herdr, real herdr-shield-wrapped panes, fake engines: every pfm
 # operation a user drives from a held pane, through the whole chain the owner
-# runs (fake engine → its hooks → pfm → Herdr socket → herdr-keep holder → back).
+# runs (fake engine → its hooks → pfm → Herdr socket → herdr-shield holder → back).
 #
 #   run.sh --lanes HELD           on its own machine, after the sequence
 #
 # The machine (run.sh, root.sh --machine held): systemd as PID 1, this lane as
 # user lane (uid 1000) under a real user@1000.service, Herdr configured as the
-# owner's — default_shell is herdr-keep, whose inner shell is pfm's wrapper, so
+# owner's — default_shell is herdr-shield, whose inner shell is pfm's wrapper, so
 # every default-shell pane opens the picker inside a holder outside Herdr's
 # process tree. HELD.topology proves that wrapping first and every later beat
 # requires it: the lane can never pass on lane H's plain topology. Chats are
@@ -26,7 +26,7 @@ export H_SESSION=lane-HELD H_FIXTURE=/tmp/lane-HELD-fixture H_FAKE_SCRIPT=/tmp/l
 F="$H_FIXTURE"
 H_DB="${PFM_STATE_DB:-$HOME/.local/state/pfm/pfm.db}"
 UP="$HOME/.config/herdr/sessions/$H_SESSION/herdr.sock"
-KEEP_PLUGIN="$HOME/.local/share/herdr-keep/plugin"
+SHIELD_PLUGIN="$HOME/.local/share/herdr-shield/plugin"
 . "$HERE/herdr.sh"
 h() { herdr --session "$H_SESSION" "$@"; }
 
@@ -48,8 +48,8 @@ need held-fixture 'test -x "$F/bin/claude" && test -s "$H_FAKE_SCRIPT" && jq -e 
 unset HERDR_CONFIG_PATH
 h_server_start || lane_abort "the held Herdr server did not start (H SERVER-* line above)"
 _lane_log_only "HELD native fake source $(sha256sum /worktree/infra/plugin-lab/tests/fakes/claude "$H_FAKE_SCRIPT" "$F/bin/claude")"
-need held-plugins 'h plugin list | grep -q herdr-keep' 'h plugin link "$KEEP_PLUGIN"' ||
-  lane_abort "herdr-keep is not linked into the held Herdr server"
+need held-plugins 'h plugin list | grep -q herdr-shield' 'h plugin link "$SHIELD_PLUGIN"' ||
+  lane_abort "herdr-shield is not linked into the held Herdr server"
 # pfm links its indicator plugin while theme sync is on, as on the owner's host.
 theme_on() {
   pfm theme on >"$F/theme-on.out" 2>&1 || { cat "$F/theme-on.out"; return 1; }
@@ -58,8 +58,8 @@ theme_on() {
 }
 need held-indicator-plugin 'h plugin list | grep -q professor.indicators' theme_on ||
   lane_abort "pfm's indicator plugin is not linked into the held Herdr server"
-need held-keep-doctor 'herdr-keep doctor | grep -q "^OK: Linux/systemd user manager"' false ||
-  lane_abort "herdr-keep doctor: $(herdr-keep doctor 2>&1 | tail -n 1)"
+need held-shield-doctor 'herdr-shield doctor | grep -q "^OK: Linux/systemd user manager"' false ||
+  lane_abort "herdr-shield doctor: $(herdr-shield doctor 2>&1 | tail -n 1)"
 workspace="$(h workspace create --label HELD --cwd /work/held --no-focus)" || lane_abort "workspace create failed"
 printf '%s\n' "$workspace" >>"$LANE_LOG"
 W="$(jq -er '.result.workspace.workspace_id' <<<"$workspace")" || lane_abort "workspace create named no workspace"
@@ -78,10 +78,10 @@ live_seat_on() { # live_seat_on <pane> — "<seat> <sid>" of the live seat on <p
 start_of() { awk '{print $22}' "/proc/$1/stat" 2>/dev/null; }
 argv_of() { tr '\0' ' ' <"/proc/$1/cmdline" 2>/dev/null; }
 transcript_of() { find "$HOME" -path '*/projects/*' -name "$1.jsonl" -print -quit 2>/dev/null; }
-# held_pane <pane> — herdr-keep lists <pane> PROTECTED with one live holder bound to it.
+# held_pane <pane> — herdr-shield lists <pane> PROTECTED with one live holder bound to it.
 held_pane() {
-  h_keep >"$F/keep-$1.json" &&
-    jq -e --arg p "$1" '.enumeration == "OK" and any(.panes[]; .pane_id == $p and .status == "PROTECTED")' "$F/keep-$1.json" >/dev/null &&
+  h_shield >"$F/shield-$1.json" &&
+    jq -e --arg p "$1" '.enumeration == "OK" and any(.panes[]; .pane_id == $p and .status == "PROTECTED")' "$F/shield-$1.json" >/dev/null &&
     h_held_holder "$1" >"$F/holder-$1.json"
 }
 # exec_in <sid> <pane> <command> — H_EXEC under the fake engine of <sid>; its rc.
@@ -103,16 +103,16 @@ turn_closed() {
 beat HELD.topology
 topology_ready() {
   h_request pane.process_info "$(pane_json "$P0")" >"$F/topology-process.json" &&
-    jq -e 'any(.result.process_info.foreground_processes[]; .name == "herdr-keep")' "$F/topology-process.json" >/dev/null &&
+    jq -e 'any(.result.process_info.foreground_processes[]; .name == "herdr-shield")' "$F/topology-process.json" >/dev/null &&
     held_pane "$P0"
 }
 if wait_for 15 topology_ready; then
-  cat "$F/topology-process.json" "$F/keep-$P0.json" >>"$LANE_LOG"
+  cat "$F/topology-process.json" "$F/shield-$P0.json" >>"$LANE_LOG"
   HOLDER0="$(cat "$F/holder-$P0.json")"
   holder_id="$(jq -r '.id' <<<"$HOLDER0")" holder_pid="$(jq -r '.holder.pid' <<<"$HOLDER0")"
   child_pid="$(jq -r '.child.pid' <<<"$HOLDER0")"
   shell_pid="$(jq -r '.result.process_info.shell_pid' "$F/topology-process.json")"
-  bound="$(jq --arg p "$P0" --arg s "$UP" '[.holders[] | select(.binding.pane == $p and .binding.socket == $s)] | length' "$F/keep-$P0.json")"
+  bound="$(jq --arg p "$P0" --arg s "$UP" '[.holders[] | select(.binding.pane == $p and .binding.socket == $s)] | length' "$F/shield-$P0.json")"
   cgroup="$(cat "/proc/$holder_pid/cgroup" 2>&1)"
   ancestry="" pid="$child_pid"
   while [ -n "$pid" ] && [ "$pid" != 0 ] && [ "$pid" != 1 ]; do
@@ -122,12 +122,12 @@ if wait_for 15 topology_ready; then
   printf 'HELD topology holder=%s pid=%s child=%s shell_pid=%s bound=%s ancestry=%s cgroup=%s\n' \
     "$holder_id" "$holder_pid" "$child_pid" "$shell_pid" "$bound" "$ancestry" "$cgroup" >>"$LANE_LOG"
   # Herdr's shell_pid must be a pid, or "outside Herdr's pane process" proves nothing.
-  if [ "$bound" = 1 ] && [[ "$cgroup" == *"/user@1000.service/app.slice/herdr-keep-$holder_id.service"* ]] &&
+  if [ "$bound" = 1 ] && [[ "$cgroup" == *"/user@1000.service/app.slice/herdr-shield-$holder_id.service"* ]] &&
     [[ "$shell_pid" =~ ^[1-9][0-9]*$ ]] && [[ " $ancestry " != *" $shell_pid "* ]]; then
     pass "P0 $P0 PROTECTED: holder $holder_id (pid $holder_pid) in user@1000.service, its shell $child_pid outside Herdr's pane process $shell_pid"
   else fail "held topology: bound=$bound cgroup=[$cgroup] shell_pid=$shell_pid in ancestry=[$ancestry]"; fi
 else
-  h_keep >>"$LANE_LOG" 2>&1
+  h_shield >>"$LANE_LOG" 2>&1
   h pane read "$P0" >>"$LANE_LOG" 2>&1
   fail "P0 $P0 never became a protected held pane: $LANE_WAIT_WHY"
 fi
@@ -257,7 +257,7 @@ beat HELD.call
 if requires HELD.topology HELD.birth-picker; then
   wait_for 8 'status_is "$P0" idle' || _lane_log_only "HELD pane not idle before the call: $LANE_WAIT_WHY"
   # Herdr tracks the agent pfm itself reports for a held pane, yet the pane's
-  # foreground is herdr-keep's attach client: the call must take the raw path.
+  # foreground is herdr-shield's attach client: the call must take the raw path.
   printf 'HELD call agent.get %s\n' "$(h_request agent.get "$(jq -nc --arg p "$P0" '{target:$p}')" 2>&1)" >>"$LANE_LOG"
   out="$(pfm chat call --allow-unsigned "$SID" HELD_CALL_PROMPT 2>&1)"; rc=$?
   printf 'HELD call rc=%s %s\n' "$rc" "$out" >>"$LANE_LOG"
@@ -339,17 +339,17 @@ if requires HELD.topology HELD.birth-picker; then
   ENGINE0="$(h_held_engine "$P0")"
 fi
 
-beat HELD.keep-unlistable
-expect-log 'herdr-keep list --json against'
+beat HELD.shield-unlistable
+expect-log 'herdr-shield list --json against'
 if requires HELD.topology HELD.birth-picker; then
-  mkdir -p "$F/keep-refuses"
-  printf '#!/bin/sh\necho "HELD_KEEP_REFUSES fixture" >&2\nexit 3\n' >"$F/keep-refuses/herdr-keep"
-  chmod +x "$F/keep-refuses/herdr-keep"
-  out="$(env PATH="$F/keep-refuses:/usr/local/bin:/usr/bin:/bin" "$HOME/.local/bin/pfm" chat status "$SID" --json 2>"$F/unlistable.err")"; rc=$?
+  mkdir -p "$F/shield-refuses"
+  printf '#!/bin/sh\necho "HELD_SHIELD_REFUSES fixture" >&2\nexit 3\n' >"$F/shield-refuses/herdr-shield"
+  chmod +x "$F/shield-refuses/herdr-shield"
+  out="$(env PATH="$F/shield-refuses:/usr/local/bin:/usr/bin:/bin" "$HOME/.local/bin/pfm" chat status "$SID" --json 2>"$F/unlistable.err")"; rc=$?
   printf 'HELD unlistable rc=%s stdout=%s stderr=%s\n' "$rc" "$out" "$(cat "$F/unlistable.err")" >>"$LANE_LOG"
-  if [ "$rc" != 0 ] && grep -qF "herdr-keep list --json against $UP: exit 3: HELD_KEEP_REFUSES fixture" "$F/unlistable.err"; then
-    pass "a herdr-keep that cannot list is an error naming the socket, never an absent holder"
-  else fail "unlistable herdr-keep rc=$rc: $(one_line "$(cat "$F/unlistable.err")")"; fi
+  if [ "$rc" != 0 ] && grep -qF "herdr-shield list --json against $UP: exit 3: HELD_SHIELD_REFUSES fixture" "$F/unlistable.err"; then
+    pass "a herdr-shield that cannot list is an error naming the socket, never an absent holder"
+  else fail "unlistable herdr-shield rc=$rc: $(one_line "$(cat "$F/unlistable.err")")"; fi
 fi
 
 # held_birth_launcher <PREFIX> [nested] — a new held tab, its picker dismissed,
@@ -496,13 +496,13 @@ if requires HELD.topology HELD.reload-retired; then
   shell_left="$(start_of "$held_shell")"
   printf 'HELD kill rc=%s held shell %s start %s -> [%s] %s\n' "$rc" "$held_shell" "$held_start" "$shell_left" "$out" >>"$LANE_LOG"
   killed="$(sqlite3 "$H_DB" "select count(*) from hidden where uuid='$NEXT_SID' and hidden_at > 0;")"
-  # The engine behind herdr-keep's attach client ended by the exit command kill typed, never a forced close.
+  # The engine behind herdr-shield's attach client ended by the exit command kill typed, never a forced close.
   exited=no
   [ "$(exits_of "$NEXT_SID")" = $((exits_before + 1)) ] && exited=yes
   pane_gone() {
     h_request pane.get "$(pane_json "$LOST_PANE")" >"$F/kill-pane.json" 2>&1
     jq -e '.error.code == "pane_not_found"' "$F/kill-pane.json" >/dev/null &&
-      h_keep | jq -e --arg p "$LOST_PANE" '[.holders[] | select(.binding.pane == $p and .state == "running")] | length == 0' >/dev/null &&
+      h_shield | jq -e --arg p "$LOST_PANE" '[.holders[] | select(.binding.pane == $p and .state == "running")] | length == 0' >/dev/null &&
       [ "$(sqlite3 "$H_DB" "select count(*) from seat where seat_id='$NEXT_SEAT';")" = 0 ]
   }
   if [ "$rc" = 0 ] && [[ "$out" == *"killed $NEXT_SID"* ]] && [ "$killed" = 1 ] && [ "$exited" = yes ] && [ -n "$main_start" ] &&
@@ -510,7 +510,7 @@ if requires HELD.topology HELD.reload-retired; then
     [ "$(h_held_engine "$P0")" = "$main_engine" ] && [ "$(start_of "$main_engine")" = "$main_start" ]; then
     pass "kill typed the exit command into the held engine, closed $LOST_PANE and returned after its held shell $held_shell ended, the seat is gone and HELD_MAIN's engine $main_engine is untouched"
   else
-    h_keep >>"$LANE_LOG" 2>&1
+    h_shield >>"$LANE_LOG" 2>&1
     fail "kill rc=$rc hidden=$killed exit command received=$exited (records of $NEXT_SID before kill: $exits_before) [$(cat "$F/held-exits.log" 2>&1 | tr '\n' ' ')] held shell $held_shell start $held_start at return [$shell_left] pane=$(one_line "$(cat "$F/kill-pane.json" 2>&1)") main $main_engine -> $(h_held_engine "$P0") $LANE_WAIT_WHY"
   fi
 fi

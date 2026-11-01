@@ -47,10 +47,10 @@ cp -R "$SUT_DIR/fixtures" "$SUT_DIR/scenarios" "$LANES/"
 cp "$SUT_DIR/../shared.sh" "$SUT_DIR/../mkdir-lock.sh" "$SUT_DIR/../image-key.sh" "$T/infra/fence/"
 cp "$SUT_DIR/../fence-env.sh" "$T/infra/fence/fence-env.sh" 2>/dev/null
 (cd "$T" && git init -q && git config user.email t@t && git config user.name t && git commit -q --allow-empty -m fixture)
-# Lane HELD builds herdr-keep from the source fence-env.sh resolves; the fixture tree has none,
+# Lane HELD builds herdr-shield from the source fence-env.sh resolves; the fixture tree has none,
 # so every case names one, and the missing-source case unsets it.
-mkdir -p "$T/herdr-keep-src" && : >"$T/herdr-keep-src/Cargo.toml"
-export HERDR_KEEP_SRC="$T/herdr-keep-src"
+mkdir -p "$T/herdr-shield-src" && : >"$T/herdr-shield-src/Cargo.toml"
+export HERDR_SHIELD_SRC="$T/herdr-shield-src"
 RUN="$LANES/run.sh"
 [ -f "$RUN" ] || { echo "run_test: no run.sh at $RUN" >&2; exit 2; }
 
@@ -604,9 +604,9 @@ if [ "$RC" -eq 0 ] && [ "$order" = "O1 → HELD" ] &&
   ok "the dry-run plan names HELD's machine and held image after the root lanes and starts nothing"
 else bad "held dry-run plan" "rc=$RC held_line=[$held_line]" "$OUT" "$(cat "$T/root.log")"; fi
 
-OUT="$(env -u HERDR_KEEP_SRC bash "$RUN" --lanes HELD --dry-run 2>&1)"; RC=$?
-if [ "$RC" -eq 1 ] && [ "$OUT" = "run: ✗ HELD SUBSTRATE — herdr-keep source missing at $T/plugins/herdr-keep (check out plugins/herdr-keep, or set HERDR_KEEP_SRC)" ]; then
-  ok "a missing herdr-keep source refuses HELD by name, exit 1"
+OUT="$(env -u HERDR_SHIELD_SRC bash "$RUN" --lanes HELD --dry-run 2>&1)"; RC=$?
+if [ "$RC" -eq 1 ] && [ "$OUT" = "run: ✗ HELD SUBSTRATE — herdr-shield source missing at $T/plugins/herdr-shield (check out plugins/herdr-shield, or set HERDR_SHIELD_SRC)" ]; then
+  ok "a missing herdr-shield source refuses HELD by name, exit 1"
 else bad "held missing source" "rc=$RC" "$OUT"; fi
 
 : >"$T/docker.log"

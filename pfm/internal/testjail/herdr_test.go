@@ -69,7 +69,7 @@ func TestStageHerdrShieldAnswersListOnly(t *testing.T) {
 		{name: "upstream socket", socket: "/fixture/herdr.sock", want: "{\"enumeration\":\"OK\"}\n"},
 		{
 			name: "held shell", socket: "/fixture/herdr.sock", inner: "h1", exit: 1,
-			want: `{"enumeration":"ERROR","error":"recursive keeper invocation refused","holders":[],"panes":[]}` + "\n",
+			want: `{"enumeration":"ERROR","error":"recursive shield invocation refused","holders":[],"panes":[]}` + "\n",
 		},
 		{
 			name: "no socket", exit: 1,

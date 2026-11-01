@@ -33,7 +33,7 @@
 # The held machine (lane HELD) boots systemd as PID 1 instead of `sleep
 # infinity` under docker's init: a private, writable cgroup namespace (Docker
 # >= 28's writable-cgroups, never --privileged), tmpfs /run and /run/lock, and
-# container=docker, so a user manager can place herdr-keep's holders in real
+# container=docker, so a user manager can place herdr-shield's holders in real
 # user@1000.service cgroups.
 #
 # BROKEN STATE: a failing build or run prints docker's own message and returns

@@ -333,7 +333,7 @@ PYTEST
 rc=$?
 if [ "$rc" = 0 ]; then ok "fake PTY empty-composer guard receives exact prompt"; else bad "fake PTY empty-composer guard" "rc=$rc"; fi
 # Lane HELD's turn directives on a real PTY: each hook in Claude Code's order, each
-# turn held open by its gate file, and the notification turn with no UserPromptSubmit.
+# turn held open by its gate file, and the notification turn's UserPromptSubmit carrying the notification.
 python3 "$LANES/herdr.py" prepare "$LANES/../../plugin-lab/tests/fakes/claude" "$T/held-fixture"
 HELD_FIXTURE="$T/held-fixture" timeout 30 python3 - <<'PYTEST'
 import os,pty,subprocess,time,json,pathlib,select,errno
@@ -394,13 +394,15 @@ try:
   os.write(master,f'H_NOTIFY {gate}\n'.encode())
   note='<task-notification>\n<task-id>held-task</task-id>\n<status>completed</status>\n</task-notification>'
   until(lambda: any(r.get('turnOrigin')=='task_notification' and r['message']['content']==note for r in rows()),'notification record')
-  assert names()[6:]==[], names()
+  until(lambda: names()[6:]==['UserPromptSubmit'],'notification turn UserPromptSubmit')
+  submit=seen()[6]
+  assert (submit['prompt'],submit['task_notification'],submit['session_id'])==(note,True,'held-probe'), submit
   gate.unlink()
-  until(lambda: names()[6:]==['Stop'],'notification turn Stop without UserPromptSubmit')
+  until(lambda: names()[6:]==['UserPromptSubmit','Stop'],'notification turn Stop after its gate')
   # The exit command ends the engine and names its session in the fixture's exit record.
   os.write(master,b'/exit\n')
   until(lambda: p.poll()==0,'fake exits on /exit')
-  assert names()[7:]==['SessionEnd'], names()
+  assert names()[8:]==['SessionEnd'], names()
   exits=root/'held-exits.log'
   assert exits.exists() and exits.read_text()=='held-probe\n', (exits, exits.exists() and exits.read_text())
   print('HELD DIRECTIVES PASS')

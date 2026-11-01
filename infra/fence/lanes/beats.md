@@ -181,14 +181,14 @@ Runs after the state-building lanes and before destructive O2. Its prelude creat
 - `H.reload` · same pane and terminal, a new engine with the reloaded model, pending observed and cleared, same live SID · spends cc:$SEAT
 - `H.open-restored` · automatic unattended real-server resume rebinds exact carried SID live · spends cc:$SEAT
 
-## Lane HELD — real Herdr, herdr-keep-held panes, fake engines
+## Lane HELD — real Herdr, herdr-shield-held panes, fake engines
 
-Runs alone on its own machine after the sequence (`run.sh --lanes HELD`): systemd as PID 1, the lane as user `lane` under a real `user@1000.service`, Herdr configured as the owner runs it, `default_shell` herdr-keep around pfm's shell wrapper. Chats are born only through default-shell doors (the picker, `claude` typed in a held shell). `HELD.topology` proves the wrapping first; every later beat requires it. Every beat spends only fixture cc:1, with no credentials or providers.
+Runs alone on its own machine after the sequence (`run.sh --lanes HELD`): systemd as PID 1, the lane as user `lane` under a real `user@1000.service`, Herdr configured as the owner runs it, `default_shell` herdr-shield around pfm's shell wrapper. Chats are born only through default-shell doors (the picker, `claude` typed in a held shell). `HELD.topology` proves the wrapping first; every later beat requires it. Every beat spends only fixture cc:1, with no credentials or providers.
 
 - `HELD.topology` · the workspace's root pane is PROTECTED: one running holder bound to it, in `user@1000.service`, its shell outside Herdr's pane process · spends none
 - `HELD.birth-picker` · the picker's New chat in a held pane gives seat `herdr|<upstream socket>|<pane>|live`, its engine under the pane's holder · spends cc:1
 - `HELD.name` · `pfm chat name` sets the seat name and the held pane's label · spends cc:1
-- `HELD.whoami` · the engine's own descendant resolves its chat through the herdr-keep relay to the upstream socket and pane · spends cc:1
+- `HELD.whoami` · the engine's own descendant resolves its chat through the herdr-shield relay to the upstream socket and pane · spends cc:1
 - `HELD.discovery` · `pfm ls` carries the held chat live with its name and upstream socket · spends cc:1
 - `HELD.status` · `pfm chat status` reads the held chat idle · spends cc:1
 - `HELD.indicator-idle` · Herdr reads the held pane's `agent_status` idle · spends cc:1
@@ -201,7 +201,7 @@ Runs alone on its own machine after the sequence (`run.sh --lanes HELD`): system
 - `HELD.capture` · capture shows the typed marker · spends cc:1
 - `HELD.open` · `pfm chat open` typed in another held shell brings the chat into that tab, focused, same engine and holder · spends cc:1
 - `HELD.reload` · reload relaunches the engine with `--model sonnet` in the same holder and shell · spends cc:1
-- `HELD.keep-unlistable` · a herdr-keep that cannot list is an error naming the socket, never an absent holder · spends cc:1
+- `HELD.shield-unlistable` · a herdr-shield that cannot list is an error naming the socket, never an absent holder · spends cc:1
 - `HELD.birth-launcher` · `claude` typed in a held shell gives a live seat, its engine under the pane's holder · spends cc:1
 - `HELD.call-signed` · a held chat's call reaches its held peer signed, prompt and steer · spends cc:1
 - `HELD.reload-retired` · reload in a held pane that also holds a retired seat relaunches the live chat; the retired seat stays lost · spends cc:1

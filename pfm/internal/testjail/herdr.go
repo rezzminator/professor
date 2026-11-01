@@ -99,10 +99,10 @@ func StageHerdrShield(t *testing.T, listing string, exit int) {
 	script := fmt.Sprintf(
 		"#!/bin/sh\n[ \"$*\" = \"list --json\" ] || { echo \"unexpected argv: $*\" >&2; exit 2; }\n"+
 			"case \"$HERDR_SOCKET_PATH\" in /*) refusal= ;; *) refusal=\"HERDR_SOCKET_PATH required\" ;; esac\n"+
-			"[ -z \"${HERDR_SHIELD_INNER+set}\" ] || refusal=\"recursive keeper invocation refused\"\n"+
+			"[ -z \"${HERDR_SHIELD_INNER+set}\" ] || refusal=\"recursive shield invocation refused\"\n"+
 			"[ -z \"$refusal\" ] || { printf '{\"enumeration\":\"ERROR\",\"error\":\"%%s\",\"holders\":[],\"panes\":[]}\\n' \"$refusal\"; "+
 			"echo \"herdr-shield: ERROR: pane enumeration failed; holder list retained\" >&2; exit 1; }\n"+
-			"cat%s <<'PFM_KEEP_LISTING'\n%s\nPFM_KEEP_LISTING\nexit %d\n",
+			"cat%s <<'PFM_SHIELD_LISTING'\n%s\nPFM_SHIELD_LISTING\nexit %d\n",
 		stream, listing, exit,
 	)
 	if err := WriteExecutable(filepath.Join(dir, "herdr-shield"), []byte(script), 0o755); err != nil {

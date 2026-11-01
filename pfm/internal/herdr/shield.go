@@ -26,7 +26,7 @@ import (
 const (
 	ShieldBinary = "herdr-shield"
 	// EnvShieldInner marks a held shell's environment; herdr-shield refuses to run
-	// under it (spec § herdr: recursive keeper invocation).
+	// under it (spec § herdr: recursive shield invocation).
 	EnvShieldInner    = "HERDR_SHIELD_INNER"
 	shieldRelaySocket = "herdr-api.sock"
 	shieldListBound   = 10 * time.Second
@@ -80,7 +80,7 @@ func (processes PaneProcesses) PIDs() ([]int, error) {
 
 // ShieldOuterEnviron is environ with a held shell's marks stripped (EnvShieldInner,
 // and the pfm Herdr shell mark envPfmShell), so herdr-shield run from inside a
-// held pane checks the keeper instead of refusing a recursive invocation.
+// held pane checks the shield instead of refusing a recursive invocation.
 func ShieldOuterEnviron(environ []string) []string {
 	return without(environ, []string{EnvShieldInner, envPfmShell})
 }
@@ -398,7 +398,7 @@ func parseShieldList(stdout []byte) ([]ShieldHolder, map[string]string, error) {
 // innerForeground verifies the holder and its child by start time, then
 // returns the processes of the foreground group of the child's terminal: none
 // once the group's last member exited, as Herdr reports such a plain pane.
-func (keep *Shield) innerForeground(holder ShieldHolder) ([]Process, error) {
+func (shield *Shield) innerForeground(holder ShieldHolder) ([]Process, error) {
 	if shield.Proc == nil {
 		return nil, errors.New("no process table to verify the holder against")
 	}

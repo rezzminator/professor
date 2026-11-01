@@ -143,7 +143,8 @@ func (reporter *herdrReporter) nativeSeat(ctx context.Context, payload herdrPayl
 	if payload.SessionID != "" {
 		seat.SessionID = payload.SessionID
 	}
-	promptSubmitted := payload.HookEventName == claudelaunch.HookEventUserPromptSubmit ||
+	// A task notification opens a turn through UserPromptSubmit, but the user re-sent nothing.
+	promptSubmitted := (payload.HookEventName == claudelaunch.HookEventUserPromptSubmit && !payload.TaskNotification) ||
 		(reporter.options.engine == pfmengine.OpenCode && payload.HookEventName == "chat.message")
 	if reporter.options.event == herdr.EventWorking && promptSubmitted && !payload.IsInterrupt {
 		seat.LostNote = ""
@@ -358,6 +359,7 @@ type herdrPayload struct {
 	Title            string          `json:"title"`
 	TranscriptPath   string          `json:"transcript_path"`
 	Prompt           string          `json:"prompt"`
+	TaskNotification bool            `json:"task_notification"`
 }
 
 // Native and legacy reports share SESSION then BRIDGE ordering, including re-proofs.

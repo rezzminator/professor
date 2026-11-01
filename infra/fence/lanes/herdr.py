@@ -63,7 +63,9 @@ while composer; IFS= read -e -r -p '❯ ' line; do
 fi
 now_iso() {''',
         # Lane HELD's turn directives: a held turn, a turn whose sub-agent outlives
-        # it, and a turn a task notification starts (no UserPromptSubmit). Each
+        # it, and a turn a task notification starts: Claude Code writes the notification
+        # as a user record, then fires UserPromptSubmit with it as the prompt and
+        # task_notification true, as callmeter records real Claude Code doing. Each
         # waits on a gate file the driver removes, on read ticks, so no child
         # process joins the fake's foreground group while it waits.
         "stop() { # the Stop hook, then the stop-hook summary Claude Code writes after it": '''exec {held_tick_fd}<> <(:)
@@ -98,7 +100,9 @@ held_directive() { # H_HOLD <gate> | H_SUBAGENT <id> <gate> | H_NOTIFY <gate>
       note=$(printf '<task-notification>\\n<task-id>held-task</task-id>\\n<status>completed</status>\\n</task-notification>')
       jq -nc --arg s "$sid" --arg c "$note" \\
         '{type:"user",sessionId:$s,isSidechain:false,userType:"external",entrypoint:"cli",promptSource:"system",turnOrigin:"task_notification",origin:{kind:"task-notification",producer:"session-task",runId:"held-run"},message:{role:"user",content:$c}}' >> "$transcript"
-      held_wait "$2"; held_assistant; stop ;;
+      held_busy
+      hook UserPromptSubmit "{$(base UserPromptSubmit),\\"prompt\\":$(jq -Rn --arg c "$note" '$c'),\\"task_notification\\":true}" >>"$H_FIXTURE/held-hooks-$sid.log" 2>&1
+      held_wait "$2"; held_idle; held_assistant; stop ;;
   esac
   status_line || { echo "fake statusLine.command failed" >&2; exit 1; }
 }

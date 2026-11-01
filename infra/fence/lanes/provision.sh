@@ -64,7 +64,7 @@ JSON
   held)
     # Lane HELD's machine, as root on the lane root (lanes/root.sh --machine held):
     # systemd with a lingering user lane, whose Herdr opens every default-shell
-    # pane through herdr-keep (built into /herdr-keep-target) and herdr-keep's
+    # pane through herdr-shield (built into /herdr-shield-target) and herdr-shield's
     # inner shell through pfm's wrapper — the owner's configuration.
     export DEBIAN_FRONTEND=noninteractive
     apt-get update -q
@@ -84,14 +84,14 @@ JSON
     git -C /work/held -c user.name=demo -c user.email=demo@example.invalid commit -q --allow-empty -m init
     git -C /work/held checkout -q -b develop
     chown -R lane:lane /work
-    lane=/srv/lane plugin=/srv/lane/.local/share/herdr-keep/plugin
+    lane=/srv/lane plugin=/srv/lane/.local/share/herdr-shield/plugin
     mkdir -p "$lane/.local/bin" "$plugin/bin" "$lane/.local/share/pfm-lanes"
-    # herdr-keep reads Herdr's config only from a private directory, as Herdr itself makes it.
+    # herdr-shield reads Herdr's config only from a private directory, as Herdr itself makes it.
     install -d -m 0700 "$lane/.config/herdr"
     install -m 0755 "$HOME/.local/bin/pfm" "$lane/.local/bin/pfm"
-    install -m 0644 /herdr-keep/herdr-plugin.toml "$plugin/herdr-plugin.toml"
-    install -m 0755 "${HELD_KEEP_BIN:?lanes/root.sh names the herdr-keep binary for this key}" "$plugin/bin/herdr-keep"
-    ln -sfn "$plugin/bin/herdr-keep" "$lane/.local/bin/herdr-keep"
+    install -m 0644 /herdr-shield/herdr-plugin.toml "$plugin/herdr-plugin.toml"
+    install -m 0755 "${HELD_SHIELD_BIN:?lanes/root.sh names the herdr-shield binary for this key}" "$plugin/bin/herdr-shield"
+    ln -sfn "$plugin/bin/herdr-shield" "$lane/.local/bin/herdr-shield"
     cp "$HERE/scenarios/default.json" "$lane/.local/share/pfm-lanes/default.json"
     cat >"$lane/.config/herdr/config.toml" <<'TOML'
 onboarding = false
@@ -101,7 +101,7 @@ version_check = false
 manifest_check = false
 
 [terminal]
-default_shell = "/srv/lane/.local/bin/herdr-keep"
+default_shell = "/srv/lane/.local/bin/herdr-shield"
 shell_mode = "non_login"
 
 [session]
@@ -113,8 +113,8 @@ delivery = "off"
 [ui.sound]
 enabled = false
 TOML
-    install -d -m 0700 "$lane/.config/herdr-keep"
-    (umask 077 && printf '%s\n' '{"shell":"/srv/lane/.local/share/pfm/install/bin/pfm-herdr-shell","args":["-l"]}' >"$lane/.config/herdr-keep/config.json")
+    install -d -m 0700 "$lane/.config/herdr-shield"
+    (umask 077 && printf '%s\n' '{"shell":"/srv/lane/.local/share/pfm/install/bin/pfm-herdr-shell","args":["-l"]}' >"$lane/.config/herdr-shield/config.json")
     . /worktree/infra/fence/engine-sync.sh
     HOME="$lane" XDG_DATA_HOME="" ENGINE_SYNC_HOME="" engine_sync_link_stable "${ENGINE_SYNC_BIN:?lanes/container.sh sets ENGINE_SYNC_BIN}"
     chown -R lane:lane "$lane"

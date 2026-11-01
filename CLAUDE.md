@@ -31,7 +31,7 @@ Where Vocabulary, Runtime or On demand disagrees with the code on a path, comman
 - Codex keeper: the one hand-written, tracked file under `.codex/` · `.codex/config.toml`
 - marketplace: the plugin listing · `.claude-plugin/marketplace.json`
 - plugins: the plugins professor tracks, each a git submodule of its own repo on `develop`, all but gpt-gateway listed in the marketplace; edits inside one leave this repo's status clean (`ignore = dirty`); an alpha `pfm install` installs every listed one as `{plugin}@professor` from a copy of its checkout in the pfm-owned `professor` directory marketplace `~/.local/share/professor-dev` (`claude.pluginCheckoutRoot` overriding), enabling those `claude.plugins` names · `plugins/{plugin}/`, `.gitmodules`
-- CI: GitHub Actions — `ci.yml` tests every push to `develop` and every pull request into `main`; `release.yml` gates the release pull request, publishes its merge and verifies the published assets; `make release-check` runs the release checks locally · `.github/workflows/ci.yml`, `.github/workflows/release.yml`, `Makefile`
+- CI: GitHub Actions — `ci.yml` tests every push to `develop` and every pull request into `main`; `release.yml` gates the release pull request; `publish.yml` publishes its merge and verifies the published assets; `make release-check` runs the release checks locally · `.github/workflows/ci.yml`, `.github/workflows/release.yml`, `.github/workflows/publish.yml`, `Makefile`
 
 ## Path vars
 
@@ -72,7 +72,8 @@ Where Vocabulary, Runtime or On demand disagrees with the code on a path, comman
 ## CI
 
 - `.github/workflows/ci.yml` runs on every push to `develop` and every pull request into `main`: `macos-tests`, `fresh-install-linux` and `fresh-install-macos`.
-- `.github/workflows/release.yml` runs on pull requests into `main` and manually (test artifacts only), never on a push: `check` (the mirrors and the HOL plugin scan), `build` and `release` gate the release PR; its merge's `publish` job tags `v{VERSION}` and creates the GitHub release, and `verify` checks the published assets against `SHA256SUMS`, the binary's version and the note.
+- `.github/workflows/release.yml` runs on pull requests into `main` and manually (test artifacts only), never on a push: `check` (the mirrors and the HOL plugin scan), `build` and `release` gate the release PR.
+- `.github/workflows/publish.yml` runs only when a pull request into `main` closes: on a merge, `publish` tags `v{VERSION}` on the merge commit and creates the GitHub release, and `verify` checks the published assets against `SHA256SUMS`, the binary's version and the note.
 
 ## Host
 

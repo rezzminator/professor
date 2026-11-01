@@ -16,7 +16,7 @@ Two things ship on every release: the blueprint tree (this repo) and the `pfm` b
 
 ## Versioning
 
-[Semantic Versioning](https://semver.org/), one `VERSION` file at the repo root as the source of truth, one tag `v{MAJOR}.{MINOR}.{PATCH}` per release, made on the release pull request's merge commit by the release workflow and never pushed by hand. Tags are immutable — never deleted or moved. Between releases `develop` carries the next development version, `{MAJOR}.{MINOR+1}.0-alpha`; the release commit drops the suffix, and the release's close opens the next `-alpha` line, so a build from `develop` never reports itself as the release it follows. Tags never carry a suffix.
+[Semantic Versioning](https://semver.org/), one `VERSION` file at the repo root as the source of truth, one tag `v{MAJOR}.{MINOR}.{PATCH}` per release, made on the release pull request's merge commit by the `publish` workflow and never pushed by hand. Tags are immutable — never deleted or moved. Between releases `develop` carries the next development version, `{MAJOR}.{MINOR+1}.0-alpha`; the release commit drops the suffix, and the release's close opens the next `-alpha` line, so a build from `develop` never reports itself as the release it follows. Tags never carry a suffix.
 
 The bump has a floor set by the sections the release's note holds. While the major is 0, the minor is the breaking component, as in Cargo:
 
@@ -94,7 +94,7 @@ The procedure is `.claude/commands/pfm/release.md`; the design and the reasons a
 
 ## What the release pull request triggers
 
-The workflow is `.github/workflows/release.yml`; it runs only on a pull request into `main` (and a manual `workflow_dispatch`, which builds test artifacts and publishes nothing). `make release-check` runs every pull-request check locally first, after `git fetch origin main`, except the `check` job's Scan step: the HOL AI Plugin Scanner is a GitHub Action with no local install, and the target says so.
+Two workflows run on the pull request into `main`: `.github/workflows/release.yml` gates it while it is open (opened, synchronized or reopened; also a manual `workflow_dispatch`, which builds test artifacts and publishes nothing), and `.github/workflows/publish.yml` runs when it closes merged. `make release-check` runs every pull-request check locally first, after `git fetch origin main`, except the `check` job's Scan step: the HOL AI Plugin Scanner is a GitHub Action with no local install, and the target says so.
 
 While the release pull request from `release/v{X.Y.Z}` into `main` is open, its jobs gate the merge — the `main is release-only` ruleset requires `check` and `release`:
 
@@ -102,13 +102,13 @@ While the release pull request from `release/v{X.Y.Z}` into `main` is open, its 
 2. **Build** — `pfm` for `linux/amd64`, `linux/arm64`, `darwin/arm64`, `darwin/amd64` (Go, `-trimpath`, `CGO_ENABLED=0`); each platform binary uploads as its own workflow artifact.
 3. **`release`** — fails unless every build leg passed, `VERSION` moved past `main`'s as a plain `X.Y.Z`, `releases/v{VERSION}.md` exists, and `release-check notes` passes on it.
 
-Merging the pull request is the release. Its `publish` job:
+Merging the pull request is the release. `publish.yml`'s `publish` job:
 
 1. Fails when the tag `v{VERSION}` already exists.
 2. Builds the four platform binaries again from the merge commit and writes `SHA256SUMS`.
 3. Creates the GitHub Release `v{VERSION}` on the merge commit — the tag is made there, never pushed by hand — attaching the `pfm_*` binaries and `SHA256SUMS`, with `releases/v{VERSION}.md` as the release body verbatim.
 
-Its `verify` job then checks what GitHub serves: it downloads the release's assets, verifies them with `sha256sum -c SHA256SUMS`, requires the `linux/amd64` binary's `version` to print `pfm v{VERSION}`, and requires the release body to equal `releases/v{VERSION}.md` up to a trailing newline.
+`publish.yml`'s `verify` job then checks what GitHub serves: it downloads the release's assets, verifies them with `sha256sum -c SHA256SUMS`, requires the `linux/amd64` binary's `version` to print `pfm v{VERSION}`, and requires the release body to equal `releases/v{VERSION}.md` up to a trailing newline.
 
 ## Pulling an update (adopter)
 

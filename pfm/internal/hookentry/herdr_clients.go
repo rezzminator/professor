@@ -252,7 +252,7 @@ func (reporter *herdrReporter) liveClients(
 // client's own environment, this run's cached pane listing and one
 // pane.process_info per candidate pane.
 func (reporter *herdrReporter) resolver() herdr.Resolver {
-	resolver := herdr.WireResolver(reporter.deps.environ, herdr.Call, reporter.nextSent, reporter.deps.keep)
+	resolver := herdr.WireResolver(reporter.deps.environ, herdr.Call, reporter.nextSent, reporter.deps.shield)
 	resolver.Panes = reporter.listPanes
 	return resolver
 }

@@ -28,7 +28,7 @@ import (
 // fakePane is a pane in the fake Herdr's table: its id, the terminal that
 // outlives a move, the foreground process pids pane.process_info reports, and
 // the pane's own shell (0: none reported); kept names every process
-// herdr-keep, the attach client of a pane herdr-keep holds.
+// herdr-shield, the attach client of a pane herdr-shield holds.
 type fakePane struct {
 	id, terminal string
 	pids         []int
@@ -107,7 +107,7 @@ func (server *fakeHerdr) addShellPane(id, terminal string, shell int, pids ...in
 	server.panes = append(server.panes, fakePane{id: id, terminal: terminal, pids: pids, shell: shell})
 }
 
-// addKeptPane adds a pane herdr-keep holds: Herdr sees its attach client
+// addKeptPane adds a pane herdr-shield holds: Herdr sees its attach client
 // (pid client) as both shell and foreground.
 func (server *fakeHerdr) addKeptPane(id, terminal string, client int) {
 	server.mu.Lock()
@@ -262,7 +262,7 @@ func (server *fakeHerdr) answer(method, pane, target, name string) (code, result
 			foreground := make([]map[string]any, 0, len(candidate.pids))
 			name := "proc"
 			if candidate.kept {
-				name = herdr.KeepBinary
+				name = herdr.ShieldBinary
 			}
 			for _, pid := range candidate.pids {
 				foreground = append(foreground, map[string]any{"pid": pid, "name": name})
@@ -747,11 +747,11 @@ func newNativeReporterHerdrCount(
 					server.mu.Lock()
 					for _, held := range server.panes {
 						if held.kept && held.id == pane {
-							// Herdr sees only herdr-keep's attach client in a held pane.
+							// Herdr sees only herdr-shield's attach client in a held pane.
 							info["shell_pid"] = held.shell
 							info["foreground_processes"] = []any{
 								map[string]any{
-									"pid": held.shell, "name": herdr.KeepBinary, "argv": []string{herdr.KeepBinary},
+									"pid": held.shell, "name": herdr.ShieldBinary, "argv": []string{herdr.ShieldBinary},
 								},
 							}
 						}
@@ -790,7 +790,7 @@ func newNativeReporterHerdrCount(
 	return server
 }
 
-// holdNativeReporterPane makes pane one herdr-keep holds: holder 900020 runs
+// holdNativeReporterPane makes pane one herdr-shield holds: holder 900020 runs
 // the shell 900021 the seat host 900001 runs under, whose terminal's
 // foreground group is the seat host's, and Herdr sees attach client 900030.
 func holdNativeReporterPane(t *testing.T, server *fakeHerdr, pane string) {
@@ -816,7 +816,7 @@ func holdNativeReporterPane(t *testing.T, server *fakeHerdr, pane string) {
 			}
 		}
 	}
-	testjail.StageHerdrKeep(t, testjail.HerdrKeepListing(900020, 100, 900021, 100, pane, server.path), 0)
+	testjail.StageHerdrShield(t, testjail.HerdrShieldListing(900020, 100, 900021, 100, pane, server.path), 0)
 	server.addKeptPane(pane, "native", 900030)
 }
 

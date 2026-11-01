@@ -171,7 +171,7 @@ func reportShell(ctx context.Context, deps herdrDeps, options herdrShellOptions,
 		return seq
 	}
 	record := filepath.Join(deps.lockDir, fmt.Sprintf("%s-%d.pane", herdrShellSource, options.pid))
-	pane, nested, err := shellPane(ctx, deps.keep, socket, options.pid, identity.HerdrPane, next)
+	pane, nested, err := shellPane(ctx, deps.shield, socket, options.pid, identity.HerdrPane, next)
 	if options.verb == herdrShellRelease {
 		var missing errNoShellPane
 		if errors.As(err, &missing) {
@@ -251,7 +251,7 @@ func reportShell(ctx context.Context, deps herdrDeps, options herdrShellOptions,
 	// Herdr shows a lone idle report on a pane with no agent as nothing, and
 	// drops any report within a second once the bare shell holds the
 	// foreground again: working then idle mark the run finished, and the
-	// title, which Herdr keeps on a bare shell, carries it to the next command.
+	// title, which Herdr retains on a bare shell, carries it to the next command.
 	// The record comes first and outlives a send error: a send that timed out
 	// may have reached Herdr, and an older release must never erase a title
 	// that may be showing; a refused one leaves at worst an older title up.
@@ -449,14 +449,13 @@ func shellTitlePath(lockDir, pane string) string {
 // pane that closed between the listing and its question is skipped.
 func shellPane(
 	ctx context.Context,
-	keep *herdr.Keep,
-	socket string,
+	shield *herdr.Shield, socket string,
 	pid int,
 	born string,
 	next func() uint64,
 ) (string, bool, error) {
 	if born != "" {
-		canonical, nested, err := paneRunsShell(ctx, keep, socket, born, pid, next())
+		canonical, nested, err := paneRunsShell(ctx, shield, socket, born, pid, next())
 		if err != nil && !isHerdrNotFound(err) {
 			return "", false, err
 		}
@@ -472,7 +471,7 @@ func shellPane(
 		if pane.PaneID == born {
 			continue
 		}
-		canonical, nested, err := paneRunsShell(ctx, keep, socket, pane.PaneID, pid, next())
+		canonical, nested, err := paneRunsShell(ctx, shield, socket, pane.PaneID, pid, next())
 		if err != nil && !isHerdrNotFound(err) {
 			return "", false, err
 		}
@@ -484,13 +483,12 @@ func shellPane(
 }
 
 // paneRunsShell returns the producer's canonical pane id when its own shell,
-// or one of its foreground processes (nested true), is pid; a pane herdr-keep
-// holds runs its holder's shell (keep). A moved pane's inherited id may be an
+// or one of its foreground processes (nested true), is pid; a pane herdr-shield
+// holds runs its holder's shell (shield). A moved pane's inherited id may be an
 // alias that pane.list never emits.
 func paneRunsShell(
 	ctx context.Context,
-	keep *herdr.Keep,
-	socket, pane string,
+	shield *herdr.Shield, socket, pane string,
 	pid int,
 	seq uint64,
 ) (string, bool, error) {
@@ -502,7 +500,7 @@ func paneRunsShell(
 	if err != nil {
 		return "", false, err
 	}
-	processes, err := keep.Processes(ctx, socket, results[0])
+	processes, err := shield.Processes(ctx, socket, results[0])
 	if err != nil {
 		return "", false, err
 	}

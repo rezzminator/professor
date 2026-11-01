@@ -95,7 +95,7 @@ type herdrDeps struct {
 	sidDir    string
 	codexHome string
 	seatPaths *paths.Values
-	keep      *herdr.Keep // reads the panes herdr-keep holds
+	shield    *herdr.Shield // reads the panes herdr-shield holds
 }
 
 func realHerdrDeps() herdrDeps {
@@ -105,7 +105,7 @@ func realHerdrDeps() herdrDeps {
 		getenv: env.Get, tmux: runTmuxForHerdr, listPanes: listTmuxPanesForHerdr, now: clock.Real.Now,
 		lookPath: hostdeps.RealRunner{}.LookPath,
 		procInfo: realProcInfo(procfs), getpid: os.Getpid, cmdline: procfs.Cmdline, environ: procfs.Environ,
-		sidDir: paths.SIDDirFrom(env), spawn: startHerdrWatch, keep: gather.HerdrKeep(procfs),
+		sidDir: paths.SIDDirFrom(env), spawn: startHerdrWatch, shield: gather.HerdrShield(procfs),
 	}
 	if env.Get(paths.EnvProcRoot) == "" {
 		deps.processAlive = gather.ProcessAlive

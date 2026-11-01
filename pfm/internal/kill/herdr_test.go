@@ -418,8 +418,8 @@ func TestHerdrConfirmDistinguishesAbsenceFromProbeFailure(t *testing.T) {
 		{name: "omitted list", wantClose: true, omitProcesses: true, wantError: true},
 		{name: "engine argv0", processes: []any{map[string]any{"pid": 7, "argv0": "/opt/bin/" + pfmengine.MustLookup(pfmengine.Claude).Binary}}, wantClose: true},
 		{name: "engine name", processes: []any{map[string]any{"pid": 7, "name": pfmengine.MustLookup(pfmengine.Claude).Binary}}, wantClose: true},
-		// Herdr sees herdr-keep's attach client; the engine runs in its holder's shell.
-		{name: "held engine", processes: []any{map[string]any{"pid": 77, "name": "herdr-keep"}}, held: true, wantClose: true},
+		// Herdr sees herdr-shield's attach client; the engine runs in its holder's shell.
+		{name: "held engine", processes: []any{map[string]any{"pid": 77, "name": "herdr-shield"}}, held: true, wantClose: true},
 		{name: "missing process type", missingType: true, processes: []any{}, wantError: true},
 		{name: "null list", wantClose: true, wantError: true},
 		{name: "unknown process", wantClose: true, processes: []any{map[string]any{"pid": 7}}, wantError: true},

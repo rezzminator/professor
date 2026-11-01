@@ -274,7 +274,7 @@ func (f *reloadHerdrFixture) respond(method string, p map[string]json.RawMessage
 		}
 		argv := append([]string{pfmengine.MustLookup(f.request.Engine).Binary}, run.Args...)
 		if f.mode == "kept" {
-			return f.keptProcess(pid, argv)
+			return f.shieldedProcess(pid, argv)
 		}
 		return f.processResult(
 			[]any{map[string]any{"pid": pid, "name": "versioned-binary", "argv0": argv[0], "argv": argv}},
@@ -442,7 +442,7 @@ func TestRunHerdrLifecycle(t *testing.T) {
 			f := newReloadHerdrFixture(t)
 			f.mode = tc.mode
 			if tc.mode == "kept" {
-				f.holdByKeep()
+				f.holdByShield()
 			}
 			if tc.mode == "dim-hint" {
 				f.text = "❯ \x1b[2mTry running tests\x1b[0m"

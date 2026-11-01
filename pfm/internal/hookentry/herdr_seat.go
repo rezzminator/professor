@@ -108,12 +108,12 @@ func (reporter *herdrReporter) nativeSeat(ctx context.Context, payload herdrPayl
 	}
 	action := reporter.plan(payload)
 	// Herdr detects a native Claude from the pane's foreground and keys its state
-	// by herdr:claude, so pfm reports there; in a pane herdr-keep holds Herdr sees
+	// by herdr:claude, so pfm reports there; in a pane herdr-shield holds Herdr sees
 	// the attach client, so pfm reports under its own source.
 	// An event that changes nothing skips the read; a start still needs it.
 	detected := false
 	if reporter.options.engine == pfmengine.Claude && (action != nil || reporter.options.event == herdr.EventStart) {
-		processes, err := reporter.deps.keep.Read(ctx, seat.HerdrSocket, seat.HerdrPane)
+		processes, err := reporter.deps.shield.Read(ctx, seat.HerdrSocket, seat.HerdrPane)
 		if err != nil {
 			return true, fmt.Errorf(
 				"native Claude seat %s: read pane %s foreground: %w", seat.SeatID, seat.HerdrPane, err,

@@ -37,8 +37,8 @@ type nativeReload struct {
 	door    *pfmcall.Engine
 	db      *fleetdb.Store
 	owner   fleetdb.Seat
-	// keep reads the pane through herdr-keep, which may hold its shell.
-	keep *herdr.Keep
+	// shield reads the pane through herdr-shield, which may hold its shell.
+	shield *herdr.Shield
 }
 
 // pane is the native seat's seatScreen: call's door, the seat's supervisor
@@ -97,7 +97,7 @@ func RunHerdr(
 		options: options,
 		door:    door,
 		db:      db,
-		keep:    gather.HerdrKeep(gather.NewProcFS(values.ProcRoot)),
+		shield:  gather.HerdrShield(gather.NewProcFS(values.ProcRoot)),
 		target: pfmcall.Target{
 			Backend:    "herdr",
 			SocketPath: request.SocketPath,
@@ -516,7 +516,7 @@ func (n *nativeReload) process(ctx context.Context) (int, []string, error) {
 	if err := n.refreshTarget(ctx); err != nil {
 		return 0, nil, err
 	}
-	processes, err := n.keep.Read(ctx, n.target.SocketPath, n.target.Pane)
+	processes, err := n.shield.Read(ctx, n.target.SocketPath, n.target.Pane)
 	if err != nil {
 		return 0, nil, fmt.Errorf("native reload process_info: %w", err)
 	}

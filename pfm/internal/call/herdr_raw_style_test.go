@@ -13,9 +13,9 @@ type herdrRawCase struct {
 	wantCode                                      int
 	wantTyped                                     bool
 	// promptRefusal is Herdr's refusal of agent.prompt to a ready agent;
-	// keepForeground makes herdr-keep's attach client the pane's foreground then.
-	promptRefusal  string
-	keepForeground bool
+	// shieldForeground makes herdr-shield's attach client the pane's foreground then.
+	promptRefusal    string
+	shieldForeground bool
 }
 
 // herdrRawStyleCases are TestHerdrCallRaw's styled-capture rows: a dim placeholder

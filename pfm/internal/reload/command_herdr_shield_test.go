@@ -9,12 +9,12 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
-// holdByKeep has herdr-keep's holder 5 run the seat host 90 as the pane's
+// holdByShield has herdr-shield's holder 5 run the seat host 90 as the pane's
 // shell, its terminal's foreground group 300 running the engine.
-func (f *reloadHerdrFixture) holdByKeep() {
+func (f *reloadHerdrFixture) holdByShield() {
 	zeros := strings.Repeat("0 ", 13)
 	for pid, stat := range map[int]string{
-		5:  "5 (herdr-keep) S 1 5 5 0 -1 " + zeros + "2 0\n",
+		5:  "5 (herdr-shield) S 1 5 5 0 -1 " + zeros + "2 0\n",
 		90: "90 (pfm) S 5 90 90 0 300 " + zeros + "9 0\n",
 	} {
 		dir := filepath.Join(f.proc, fmt.Sprint(pid))
@@ -25,13 +25,13 @@ func (f *reloadHerdrFixture) holdByKeep() {
 			f.t.Fatal(err)
 		}
 	}
-	testjail.StageHerdrKeep(f.t, testjail.HerdrKeepListing(5, 2, 90, 9, f.canonical, f.request.SocketPath), 0)
+	testjail.StageHerdrShield(f.t, testjail.HerdrShieldListing(5, 2, 90, 9, f.canonical, f.request.SocketPath), 0)
 }
 
-// keptProcess is pane.process_info of a pane herdr-keep holds: Herdr sees its
+// shieldedProcess is pane.process_info of a pane herdr-shield holds: Herdr sees its
 // attach client while the engine (pid, argv) runs in the foreground group 300
 // of the holder's shell, the seat host 90.
-func (f *reloadHerdrFixture) keptProcess(pid int, argv []string) (any, string) {
+func (f *reloadHerdrFixture) shieldedProcess(pid int, argv []string) (any, string) {
 	for _, gone := range []int{101, 202} {
 		if err := os.RemoveAll(filepath.Join(f.proc, fmt.Sprint(gone))); err != nil {
 			return nil, err.Error()
@@ -54,6 +54,6 @@ func (f *reloadHerdrFixture) keptProcess(pid int, argv []string) (any, string) {
 	}
 	return map[string]any{"type": "pane_process_info", "process_info": map[string]any{
 		"pane_id": f.canonical, "shell_pid": 77,
-		"foreground_processes": []any{map[string]any{"pid": 77, "name": "herdr-keep"}},
+		"foreground_processes": []any{map[string]any{"pid": 77, "name": "herdr-shield"}},
 	}}, ""
 }

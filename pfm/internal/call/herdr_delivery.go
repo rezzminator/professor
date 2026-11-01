@@ -36,7 +36,7 @@ func (engine *Engine) callHerdr(
 	var untracked *herdr.Refusal
 	if errors.As(err, &untracked) && untracked.Code == "agent_not_found" {
 		// Herdr tracks no agent in this pane (its agent authority is held by a
-		// source that never reports, as in a herdr-keep pane): the raw path's
+		// source that never reports, as in a herdr-shield pane): the raw path's
 		// composer guard still protects it.
 		return engine.callHerdrRaw(ctx, request, target, base, lock, id)
 	}
@@ -126,14 +126,14 @@ func (engine *Engine) callHerdr(
 	var notReady *herdr.Refusal
 	if errors.As(err, &notReady) && notReady.Code == "agent_not_ready" {
 		// Herdr also refuses an agent that is not the pane's foreground process,
-		// as in a herdr-keep pane, where its attach client is: the raw path's
+		// as in a herdr-shield pane, where its attach client is: the raw path's
 		// composer guard still protects that pane. A busy agent still refuses.
-		kept, keepErr := herdr.KeepForeground(ctx, target.SocketPath, target.Pane)
-		if keepErr == nil && kept {
+		kept, shieldErr := herdr.ShieldForeground(ctx, target.SocketPath, target.Pane)
+		if shieldErr == nil && kept {
 			return engine.callHerdrRaw(ctx, request, target, raw, lock, id)
 		}
-		if keepErr != nil {
-			err = errors.Join(err, fmt.Errorf("read pane %s foreground: %w", target.Pane, keepErr))
+		if shieldErr != nil {
+			err = errors.Join(err, fmt.Errorf("read pane %s foreground: %w", target.Pane, shieldErr))
 		}
 	}
 	if err != nil {

@@ -129,7 +129,7 @@ func TestHerdrNativeSeatReporter(t *testing.T) {
 			lines := server.requests()
 			wantResume := []string{herdr.ResumeCommand, "chat", "open", "--restored", "new-session"}
 			if held {
-				// Herdr cannot see Claude behind herdr-keep's attach client: pfm reports
+				// Herdr cannot see Claude behind herdr-shield's attach client: pfm reports
 				// the idle state, or the pane reads unknown.
 				want := map[string]any{
 					"pane_id": "w6:p3", "source": "pfm", "agent": "claude", "state": "idle",

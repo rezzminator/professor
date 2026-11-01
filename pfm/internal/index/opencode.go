@@ -2,7 +2,9 @@ package index
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
@@ -332,18 +334,49 @@ func clip(prompt string) string {
 	return prompt
 }
 
-// syncOpenCodeMirror replaces the oc_sessions mirror with one pass's view.
+// openCodeStoreStamp fingerprints the OpenCode stores under roots as a mirror
+// pass reads them: each store's database and its WAL, where a live OpenCode's
+// commits land before a checkpoint moves them, by size and mtime. It is taken
+// before the read, so a commit racing the read costs the next pass a re-read,
+// never a miss.
+func openCodeStoreStamp(roots []string) (string, error) {
+	signature := sha256.New()
+	fmt.Fprintf(signature, "%s\x00", openCodeMirrorVersion)
+	for _, root := range roots {
+		dbPath := OpenCodeStorePath(root)
+		for _, path := range []string{dbPath, dbPath + "-wal"} {
+			size, mtimeNS, err := fileStamp(path)
+			if err != nil {
+				return "", fmt.Errorf("stat opencode store %s: %w", path, err)
+			}
+			fmt.Fprintf(signature, "%s\x00%d\x00%d\x00", path, size, mtimeNS)
+		}
+	}
+	return hex.EncodeToString(signature.Sum(nil)), nil
+}
+
+// syncOpenCodeMirror replaces the oc_sessions mirror with one pass's view
+// and, when stamp is set, records it in the same transaction, so the stamp
+// stored always names the read the mirror holds, whichever pass wrote last.
 func syncOpenCodeMirror(
 	ctx context.Context,
 	database *store.Store,
-	root string,
+	root, stamp string,
 	counters *Counters,
 ) error {
 	sessions, err := ReadOpenCodeSessions(ctx, root)
 	if err != nil {
 		return fmt.Errorf("read opencode sessions: %w", err)
 	}
-	if err := database.ReplaceOpenCodeSessions(ctx, sessions); err != nil {
+	if err := database.WithImmediateTx(ctx, func(tx *store.ImmediateTx) error {
+		if err := tx.ReplaceOpenCodeSessions(ctx, sessions); err != nil {
+			return err
+		}
+		if stamp == "" {
+			return nil
+		}
+		return tx.SetMeta(ctx, openCodeStoreStampKey, stamp)
+	}); err != nil {
 		return fmt.Errorf("replace opencode mirror: %w", err)
 	}
 	counters.OpenCodeSessions = len(sessions)

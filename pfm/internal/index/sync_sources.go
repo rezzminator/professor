@@ -203,13 +203,32 @@ func SyncCodex(ctx context.Context, database *store.Store, roots []string, count
 	return nil
 }
 
-// SyncOpenCode runs OpenCode's session-mirror pass.
+// SyncOpenCode runs OpenCode's session-mirror pass. A pass whose stores are
+// unchanged since the last mirror (openCodeStoreStamp) reads and writes
+// nothing: the store's whole-table read is the costly part of a fleet scan.
 func SyncOpenCode(ctx context.Context, database *store.Store, roots []string, counters *Counters) error {
 	if counters.options.PriorityOnly {
 		return nil
 	}
-	for _, root := range roots {
-		if err := syncOpenCodeMirror(ctx, database, root, counters); err != nil {
+	stamp, err := openCodeStoreStamp(roots)
+	if err != nil {
+		return err
+	}
+	if !counters.options.Full {
+		previous, found, err := database.Meta(ctx, openCodeStoreStampKey)
+		if err != nil {
+			return err
+		}
+		if found && previous == stamp {
+			return nil
+		}
+	}
+	for i, root := range roots {
+		rootStamp := "" // the last root's replace is the mirror a pass leaves
+		if i == len(roots)-1 {
+			rootStamp = stamp
+		}
+		if err := syncOpenCodeMirror(ctx, database, root, rootStamp, counters); err != nil {
 			return err
 		}
 	}

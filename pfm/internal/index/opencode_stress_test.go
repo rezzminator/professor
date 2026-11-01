@@ -250,7 +250,7 @@ func TestStressOpenCodeMirrorConcurrentPasses(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			var counters Counters
-			if err := syncOpenCodeMirror(context.Background(), database, root, &counters); err != nil {
+			if err := syncOpenCodeMirror(context.Background(), database, root, "", &counters); err != nil {
 				errs <- err
 				return
 			}

@@ -5,11 +5,13 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
 	_ "modernc.org/sqlite"
 
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
@@ -413,50 +415,68 @@ func openMirrorStore(t *testing.T) *store.Store {
 	return database
 }
 
-func TestSyncOpenCodeMirrorReplacesAndDeletes(t *testing.T) {
+// TestSyncOpenCodeMirrorsChangedStoresOnly pins the mirror pass a fleet scan
+// runs on every refresh: a pass over an unchanged store neither reads it nor
+// replaces the mirror, and a commit a live OpenCode left in its WAL (the
+// database file untouched) is read, dropping the session it deleted.
+func TestSyncOpenCodeMirrorsChangedStoresOnly(t *testing.T) {
 	database := openMirrorStore(t)
-	ctx := context.Background()
+	ctx, recorder := obs.Test(t)
 	root := t.TempDir()
 	seedOpenCodeStore(t, root)
-
-	var counters Counters
-	if err := syncOpenCodeMirror(ctx, database, root, &counters); err != nil {
-		t.Fatalf("first sync: %v", err)
+	reads := func() int {
+		count := 0
+		for _, record := range recorder.Records() {
+			if kind, _ := record.Field("kind"); record.Message == "db.statement" && kind == "opencode" {
+				count++
+			}
+		}
+		return count
 	}
-	if counters.OpenCodeSessions != 3 {
-		t.Fatalf("OpenCodeSessions = %d, want 3", counters.OpenCodeSessions)
+	pass := func(step string, wantReads, wantMirrored int, wantIDs ...string) {
+		t.Helper()
+		var counters Counters
+		if err := SyncOpenCode(ctx, database, []string{root}, &counters); err != nil {
+			t.Fatalf("%s: sync: %v", step, err)
+		}
+		stored, err := database.OpenCodeSessions(ctx)
+		if err != nil {
+			t.Fatalf("%s: reread mirror: %v", step, err)
+		}
+		ids := make([]string, 0, len(stored))
+		for _, row := range stored {
+			ids = append(ids, row.ID)
+		}
+		sort.Strings(ids)
+		if got := reads(); got != wantReads || counters.OpenCodeSessions != wantMirrored ||
+			strings.Join(ids, ",") != strings.Join(wantIDs, ",") {
+			t.Fatalf("%s: store reads %d, mirrored %d, mirror %v; want %d, %d, %v",
+				step, got, counters.OpenCodeSessions, ids, wantReads, wantMirrored, wantIDs)
+		}
 	}
-	// The source loses ses_child entirely; the next pass must drop it.
-	db, err := sql.Open("sqlite", filepath.Join(root, "opencode.db"))
+	// A live OpenCode holds its store open in WAL mode, its WAL created by its
+	// first transaction, so its commits stay in the WAL until a checkpoint.
+	live, err := sql.Open("sqlite", filepath.Join(root, "opencode.db"))
 	if err != nil {
-		t.Fatalf("reopen fixture: %v", err)
+		t.Fatalf("open the live store: %v", err)
 	}
+	live.SetMaxOpenConns(1)
 	defer func() {
-		if err := db.Close(); err != nil {
-			t.Errorf("close db: %v", err)
+		if err := live.Close(); err != nil {
+			t.Errorf("close the live store: %v", err)
 		}
 	}()
-	if _, err := db.Exec("DELETE FROM session WHERE id = 'ses_child'"); err != nil {
-		t.Fatalf("delete child: %v", err)
+	if _, err := live.Exec("PRAGMA journal_mode=WAL"); err != nil {
+		t.Fatalf("enable WAL: %v", err)
 	}
-	if err := db.Close(); err != nil {
-		t.Fatal(err)
+	if _, err := live.Exec("SELECT count(*) FROM session"); err != nil {
+		t.Fatalf("open the live WAL: %v", err)
 	}
 
-	counters = Counters{}
-	if err := syncOpenCodeMirror(ctx, database, root, &counters); err != nil {
-		t.Fatalf("second sync: %v", err)
+	pass("first pass", 1, 3, "ses_child", "ses_gone", "ses_root")
+	pass("unchanged store", 1, 0, "ses_child", "ses_gone", "ses_root")
+	if _, err := live.Exec("DELETE FROM session WHERE id = 'ses_child'"); err != nil {
+		t.Fatalf("delete child: %v", err)
 	}
-	stored, err := database.OpenCodeSessions(ctx)
-	if err != nil {
-		t.Fatalf("reread mirror: %v", err)
-	}
-	if len(stored) != 2 {
-		t.Fatalf("mirror holds %d rows after deletion, want 2: %#v", len(stored), stored)
-	}
-	for _, row := range stored {
-		if row.ID == "ses_child" {
-			t.Fatalf("vanished session survived the mirror replace: %#v", stored)
-		}
-	}
+	pass("a commit only the WAL holds", 2, 2, "ses_gone", "ses_root")
 }

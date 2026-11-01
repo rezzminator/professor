@@ -18,14 +18,18 @@ import (
 
 // TestHerdrTabProbeSeesWhatNoHookAnnounces pins the provider's probe: after an
 // enumeration it reports no change until an input behind it changes with no
-// hook to nudge the blinker — the transcript (a failed turn), the engine in
-// the pane's foreground (an abrupt death), the tab status setting, the pane's
-// Herdr revision — and a fresh enumeration takes the new baseline. A pane
-// list it cannot read is an error, never "unchanged".
+// hook to nudge the blinker — a tabbed chat's transcript (a failed turn), the
+// engine in the pane's foreground (an abrupt death), the tab status setting,
+// the pane's Herdr revision — and a fresh enumeration takes the new baseline.
+// A turn of a chat with no tab is no change. A pane list it cannot read is an
+// error, never "unchanged".
 func TestHerdrTabProbeSeesWhatNoHookAnnounces(t *testing.T) {
-	transcript := filepath.Join(t.TempDir(), "s1.jsonl")
-	if err := os.WriteFile(transcript, []byte("{}\n"), 0o600); err != nil {
-		t.Fatal(err)
+	dir := t.TempDir()
+	transcript, untabbed := filepath.Join(dir, "s1.jsonl"), filepath.Join(dir, "s2.jsonl")
+	for _, path := range []string{transcript, untabbed} {
+		if err := os.WriteFile(path, []byte("{}\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
 	focused := true
 	mode, alive, revision := "emoji", true, uint64(1)
@@ -49,12 +53,17 @@ func TestHerdrTabProbeSeesWhatNoHookAnnounces(t *testing.T) {
 			return FleetScan{Rows: []compose.Row{{
 				Backend: "herdr", SeatID: "seat1", ID: "s1", Socket: "endpoint", PaneID: "w1:p1",
 				Path: transcript, Name: "Chat", Kind: compose.LiveClaude,
+			}, {
+				Backend: "tmux", SeatID: "seat2", ID: "s2", Path: untabbed, Name: "Elsewhere", Kind: compose.LiveClaude,
 			}}}, nil
 		},
 		inspect: func(context.Context, headless.Chat, time.Time) (headless.Status, error) {
 			return headless.Status{State: "idle"}, nil
 		},
 		views: func(_ context.Context, c headless.Chat, _ string) ([]herdr.TabDecoration, error) {
+			if c.ID == "s2" {
+				return nil, nil
+			}
 			return []herdr.TabDecoration{{Pane: c.Pane, Identity: c.SeatID + ":" + c.ID}}, nil
 		},
 		mode:  func() (string, error) { return mode, nil },
@@ -80,15 +89,21 @@ func TestHerdrTabProbeSeesWhatNoHookAnnounces(t *testing.T) {
 	assertChanged("right after an enumeration", false)
 	assertChanged("probed again with nothing new", false)
 
-	file, err := os.OpenFile(transcript, os.O_APPEND|os.O_WRONLY, 0o600)
-	if err != nil {
-		t.Fatal(err)
+	appendTurn := func(path string) {
+		t.Helper()
+		file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, writeErr := file.WriteString(`{"type":"assistant","isApiErrorMessage":true}` + "\n")
+		if closeErr := file.Close(); writeErr != nil || closeErr != nil {
+			t.Fatalf("append turn to %s: %v %v", path, writeErr, closeErr)
+		}
 	}
-	_, writeErr := file.WriteString(`{"type":"assistant","isApiErrorMessage":true}` + "\n")
-	if closeErr := file.Close(); writeErr != nil || closeErr != nil {
-		t.Fatalf("append turn: %v %v", writeErr, closeErr)
-	}
-	assertChanged("a turn only the transcript holds", true)
+	appendTurn(untabbed)
+	assertChanged("a turn of a chat with no tab", false)
+	appendTurn(transcript)
+	assertChanged("a turn only the tabbed chat's transcript holds", true)
 	enumerate()
 	assertChanged("the transcript's turn enumerated", false)
 

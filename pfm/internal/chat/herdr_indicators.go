@@ -54,9 +54,7 @@ func (provider *herdrTabProvider) tabs(ctx context.Context, socket string) ([]he
 	}
 	pendingAgents := map[string]time.Time{}
 	defer func() { provider.missingAgents = pendingAgents }()
-	if provider.probe != nil {
-		provider.probe.baseline = "" // an enumeration that fails leaves none
-	}
+	provider.probe.begin()
 	mode, err := provider.mode()
 	if err != nil {
 		return nil, fmt.Errorf("read tab status configuration: %w", err)
@@ -85,9 +83,7 @@ func (provider *herdrTabProvider) tabs(ctx context.Context, socket string) ([]he
 	if err != nil {
 		return nil, fmt.Errorf("scan tab chats: %w", err)
 	}
-	if provider.probe != nil {
-		provider.probe.record(ctx, socket, scan.Rows, mode, glyphRead)
-	}
+	provider.probe.record(ctx, socket, scan.Rows, mode, glyphRead)
 	var decorations []herdr.TabDecoration
 	for i := range scan.Rows {
 		row := scan.Rows[i]
@@ -111,6 +107,7 @@ func (provider *herdrTabProvider) tabs(ctx context.Context, socket string) ([]he
 		if len(views) == 0 {
 			continue
 		}
+		provider.probe.track(target)
 		if !target.Live && len(scan.Unreadable) > 0 {
 			return nil, fmt.Errorf("fleet inspection incomplete, refusing dead tab status: %v", scan.Unreadable)
 		}
@@ -166,6 +163,7 @@ func (provider *herdrTabProvider) tabs(ctx context.Context, socket string) ([]he
 			decorations = append(decorations, view)
 		}
 	}
+	provider.probe.commit()
 	return decorations, nil
 }
 

@@ -75,6 +75,9 @@ func TestSyntaxFamiliesClaimEachRootOnceAndEveryFamilyIsUsed(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		if profile.Surfaces == nil || profile.Surfaces.VSCode == nil || profile.Surfaces.VSCode.Theme == nil {
+			continue // a profile that pins no VS Code theme holds no rule
+		}
 		for _, rule := range profile.Surfaces.VSCode.Theme.TokenColors {
 			used[syntaxFamily(rule)] = true
 		}

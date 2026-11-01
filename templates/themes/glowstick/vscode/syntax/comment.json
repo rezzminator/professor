@@ -1,0 +1,14 @@
+{
+  "0000": {
+    "name": "Comment",
+    "scope": [
+      "comment",
+      "punctuation.definition.comment",
+      "string.comment"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#838e61"
+    }
+  }
+}

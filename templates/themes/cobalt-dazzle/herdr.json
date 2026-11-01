@@ -1,0 +1,18 @@
+{
+  "overlay0": "#a5a9b6",
+  "tabGlyphs": {
+    "blocked": [
+      "🔶",
+      "🟠"
+    ],
+    "dead": "🕳️",
+    "done": "🏁",
+    "error": [
+      "🛑",
+      "❌"
+    ],
+    "idle": "🧊",
+    "unknown": "🛸",
+    "working": "🌊"
+  }
+}

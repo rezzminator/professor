@@ -66,7 +66,8 @@ type Paced struct {
 	Watch []string
 	Now   func() time.Time
 	Sleep func(time.Duration) error
-	// Warn takes the diagnostic lines; nil is os.Stderr.
+	// Warn takes the diagnostic lines; nil is os.Stderr. Every line also
+	// reaches the activity log (loggedWarn).
 	Warn io.Writer
 }
 
@@ -262,9 +263,7 @@ func (paced Paced) normalized() Paced {
 	if paced.Sleep == nil {
 		paced.Sleep = func(wait time.Duration) error { return clock.Real.Sleep(context.Background(), wait) }
 	}
-	if paced.Warn == nil {
-		paced.Warn = os.Stderr
-	}
+	paced.Warn = loggedWarn(paced.Warn)
 	return paced
 }
 

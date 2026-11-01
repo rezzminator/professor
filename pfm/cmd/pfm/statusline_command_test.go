@@ -14,6 +14,7 @@ import (
 	"time"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/statusline"
 )
@@ -412,4 +413,51 @@ func TestStatuslinePacedWorkerFlagIsExclusiveAndRefusesABadKey(t *testing.T) {
 		!strings.Contains(stderr.String(), "32 hex digits") {
 		t.Fatalf("--paced ../escape code=%d stderr=%q; want the key refused", code, stderr.String())
 	}
+}
+
+func TestStatuslineWarningsReachTheActivityLog(t *testing.T) {
+	jailTest(t)
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "tmp"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PFM_HOME", root)
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(root, ".cc", "1"))
+	t.Setenv("PFM_TMUX_DIR", filepath.Join(root, "tmux"))
+	t.Setenv("PFM_SID_DIR", filepath.Join(root, "sid"))
+	stateDir := filepath.Join(root, "auto-effort")
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stateDir, "state.sess-w.json"), []byte("not json\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AUTO_EFFORT_STATE_FILE", filepath.Join(stateDir, "state.json"))
+	// No worker in this test: the front renders inline, through the runtime the
+	// detached worker renders with, whose stderr nobody reads.
+	original := statuslinePacedSpawn
+	t.Cleanup(func() { statuslinePacedSpawn = original })
+	statuslinePacedSpawn = func(string) error { return errors.New("no worker in this test") }
+	_, recorder := obs.Test(t)
+
+	var stdout, stderr bytes.Buffer
+	code := runStatuslineWithRuntime(
+		nil,
+		strings.NewReader(`{"session_id":"sess-w","model":{"display_name":"Opus 4"}}`),
+		&stdout,
+		&stderr,
+		statuslineTestRuntime(t),
+		paths.OSEnv{},
+	)
+	if code != 0 || !strings.Contains(stdout.String(), "ERR") {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	for _, record := range recorder.Records() {
+		cause, _ := record.Field(obs.FieldErr)
+		if text, ok := cause.(string); ok && record.Message == "statusline.warn" && record.Level == "WARN" &&
+			strings.Contains(text, "effort shows ERR") {
+			return
+		}
+	}
+	t.Fatalf("no statusline.warn record names the ERR cause: %s", recorder.Raw())
 }

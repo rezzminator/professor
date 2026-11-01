@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"unicode"
@@ -515,9 +516,16 @@ func pcmGuardCode(part *cmdparse.Part, base string) []string {
 }
 
 // code judges code by the paths it names: every path-shaped token (holding
-// a /, named CLAUDE.md, or naming an existing file) is judged as a write. It
-// is the reading of code whose writes pcmGuardJudge.interpret cannot read.
+// a /, named CLAUDE.md, or naming an existing file) is judged as a write. A
+// token naming an existing directory counts only as a whole quoted literal
+// ('templates'), the one form a directory operation takes it in; the same word
+// inside prose ("FAIL templates steps") names no path. It is the reading of
+// code whose writes pcmGuardJudge.interpret cannot read.
 func (judge *pcmGuardJudge) code(code, dir string) {
+	literals := map[string]bool{}
+	for _, match := range pcmGuardWholeLiteral.FindAllStringSubmatch(code, -1) {
+		literals[match[2]] = true
+	}
 	tokens := strings.FieldsFunc(code, func(r rune) bool {
 		return unicode.IsSpace(r) || strings.ContainsRune("'\"`()[]{};,=<>|&$!#*?\\", r)
 	})
@@ -526,12 +534,16 @@ func (judge *pcmGuardJudge) code(code, dir string) {
 		if !ok {
 			continue
 		}
-		_, err := os.Lstat(abs)
-		if strings.Contains(token, "/") || strings.EqualFold(filepath.Base(token), "CLAUDE.md") || err == nil {
+		info, err := os.Lstat(abs)
+		named := err == nil && (!info.IsDir() || literals[token])
+		if strings.Contains(token, "/") || strings.EqualFold(filepath.Base(token), "CLAUDE.md") || named {
 			judge.path(abs)
 		}
 	}
 }
+
+// pcmGuardWholeLiteral is one quoted string whose whole text is a single word.
+var pcmGuardWholeLiteral = regexp.MustCompile("(['\"`])([^'\"`\\s]+)['\"`]")
 
 // pcmGuardSplit returns args' operands and the values of the flags named in
 // valued: a long flag as --flag=v or --flag v, a short one alone or in a

@@ -58,6 +58,9 @@ func TestPcmGuardAdmitsReadsDataAndWritesElsewhere(t *testing.T) {
 		// A copy reads its source; an open whose first argument is a path is no Path.open.
 		`python3 -c "import shutil; shutil.copy('CLAUDE.md', '/tmp/x/out.md')"`,
 		`python3 -c "from PIL import Image; Image.open('templates/global/logo.png')"`,
+		// An unattributable write whose prose names a protected directory as a word.
+		`python3 - <<'EOF'` + "\nb='/tmp/x'\np=b+'/checks.sh'\ns=open(p).read()\n" +
+			"s=s.replace('a','echo \"FAIL templates steps: plugin logs\"')\nopen(p,'w').write(s)\nEOF",
 	} {
 		t.Run(command, func(t *testing.T) { pcmGuardRequireAllow(t, pcmGuardBash(t, command, f.clone, "")) })
 	}
@@ -144,6 +147,11 @@ func TestPcmGuardDeniesInterpreterWritesItCanOrCannotAttribute(t *testing.T) {
 			pcmGuardRequireDeny(t, pcmGuardBash(t, command, f.project, ""), pcmGuardOnlyPcm)
 		})
 	}
+	// A protected directory named as a whole literal in code whose target is computed.
+	rmtree := `python3 -c "import shutil; b=''; shutil.rmtree(b + 'templates')"`
+	t.Run(rmtree, func(t *testing.T) {
+		pcmGuardRequireDeny(t, pcmGuardBash(t, rmtree, f.clone, ""), pcmGuardOnlyPcm)
+	})
 }
 
 // Shell code nested in heredocs is read to the parse bound: a write inside

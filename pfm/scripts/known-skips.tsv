@@ -28,3 +28,4 @@ github.com/rezzminator/professor/pfm/internal/transcript	TestFlattenPromptTextSt
 github.com/rezzminator/professor/pfm/internal/resolve	TestLinuxEnvironKeepsOwnRefusedRead	root-noop	the fence runs as root, which reads every process environment and a mode-000 file
 github.com/rezzminator/professor/pfm/internal/resolve	TestLinuxEnvironTagsForeignProcess	root-noop	the fence runs as root, which reads every process environment and a mode-000 file
 github.com/rezzminator/professor/pfm/internal/reload	TestLockNativeReloadSafety/foreign-lock	root-only	only root hands a file to another uid; a non-root run (macOS CI) cannot build the foreign-owned lock
+github.com/rezzminator/professor/pfm/internal/statusline	TestScanCheckpointsTrustOnlyThisUsersPrivateDirectory/owned_by_another_uid	root-only	only root hands a file to another uid; a non-root run (the hosted CI runner) cannot plant the foreign-owned checkpoint

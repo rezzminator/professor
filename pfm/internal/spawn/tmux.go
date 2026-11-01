@@ -177,9 +177,10 @@ func (tmux TmuxSpawner) NewSession(
 			recordErr = guard.Record(pid)
 		}
 		if recordErr != nil {
-			// Cancellation returns as itself, as at creation and configuration:
-			// the killed query alone says only "signal: killed".
-			if ctxErr := ctx.Err(); ctxErr != nil {
+			// A cancelled query returns as the cancellation, as at creation and
+			// configuration: the killed query alone says only "signal: killed".
+			// A record failure keeps its own error.
+			if ctxErr := ctx.Err(); queryErr != nil && ctxErr != nil {
 				recordErr = fmt.Errorf("read account launch pane pid: %w", ctxErr)
 			}
 			return tmux.terminateUnrecorded(guard, spec.Socket, recordErr)

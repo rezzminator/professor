@@ -13,13 +13,14 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestBindNativeHostRequiresKernelRoleAndCanonicalOwnership(t *testing.T) {
-	for _, mode := range []string{"legacy", "moved", "recycled", "old-live", "old-dead-live", "cold-lost", "cold-moved-caller", "unknown-old", "wrong-shell", "shell-negative", "shell-zero", "shell-one", "wrong-argv", "malformed", "malformed-list", "kept"} {
+	for _, mode := range []string{"legacy", "moved", "recycled", "old-live", "old-dead-live", "cold-lost", "cold-moved-caller", "unknown-old", "wrong-shell", "shell-negative", "shell-zero", "shell-one", "wrong-argv", "malformed", "malformed-list", "kept", "raced", "raced-other"} {
 		t.Run(mode, func(t *testing.T) {
 			root := testjail.ShortRoot(t)
 			proc := filepath.Join(root, "proc")
@@ -78,6 +79,37 @@ func TestBindNativeHostRequiresKernelRoleAndCanonicalOwnership(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			// publish stamps a binding between the bind's read and its write, as a gather proof does
+			// without the seat lock: the bind's own supervisor when raced, another process when raced-other.
+			publish := func() {
+				ctx := context.Background()
+				store := fleetdb.OpenSharedState(
+					ctx,
+					paths.Values{StateDB: filepath.Join(root, "state.db"), ProcRoot: proc},
+				)
+				defer func() { _ = store.Close() }()
+				current, found, err := store.Seat(ctx, "host-seat")
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				if !found || current.SeatHostPID != 0 {
+					return
+				}
+				next := current
+				next.HerdrPane, next.HerdrWorkspace, next.HerdrTerminalID = pane, "w6", terminal
+				host := os.Getpid()
+				if mode == "raced-other" {
+					host = 900002
+				}
+				if err := gather.StampHerdrHost(gather.NewProcFS(proc), &next, host); err != nil {
+					t.Error(err)
+					return
+				}
+				if err := store.UpdateSeat(ctx, current, next); err != nil {
+					t.Error(err)
+				}
+			}
 			done := make(chan struct{})
 			t.Cleanup(func() { _ = listener.Close(); <-done })
 			go func() {
@@ -125,6 +157,9 @@ func TestBindNativeHostRequiresKernelRoleAndCanonicalOwnership(t *testing.T) {
 								result = map[string]any{"type": "pane_list"}
 							}
 						case "pane.process_info":
+							if mode == "raced" || mode == "raced-other" {
+								publish()
+							}
 							shell := os.Getpid()
 							switch mode {
 							case "wrong-shell":
@@ -221,7 +256,7 @@ func TestBindNativeHostRequiresKernelRoleAndCanonicalOwnership(t *testing.T) {
 			}
 			got, bindErr := bindNativeHost(context.Background(), db, before, values)
 			allowed := mode == "legacy" || mode == "moved" || mode == "cold-lost" || mode == "cold-moved-caller" ||
-				mode == "kept"
+				mode == "kept" || mode == "raced"
 			current, found, readErr := db.Seat(context.Background(), seat.SeatID)
 			if allowed {
 				if bindErr != nil || !found || readErr != nil || got.SeatHostPID != os.Getpid() ||
@@ -231,6 +266,20 @@ func TestBindNativeHostRequiresKernelRoleAndCanonicalOwnership(t *testing.T) {
 					got.HerdrSocket != socket ||
 					got.HerdrPane != pane {
 					t.Fatalf("bind %+v err=%v found=%v read=%v", got, bindErr, found, readErr)
+				}
+			} else if mode == "raced-other" {
+				// Another supervisor's binding stands; the bind refuses at its write.
+				want := `persist supervisor binding: update seat "host-seat": seat no longer exists or Herdr pane is already owned`
+				if bindErr == nil || bindErr.Error() != want || !found || readErr != nil ||
+					current.SeatHostPID != 900002 {
+					t.Fatalf(
+						"raced bind: err=%v want %q; stored %+v found=%v read=%v",
+						bindErr,
+						want,
+						current,
+						found,
+						readErr,
+					)
 				}
 			} else if bindErr == nil || !found || readErr != nil || !reflect.DeepEqual(current, before) {
 				t.Fatalf(

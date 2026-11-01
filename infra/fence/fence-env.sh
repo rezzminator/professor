@@ -10,9 +10,13 @@
 # source without go.mod mounts the common Git directory (already read-only at
 # /pfm-git-common) in its place, so the fence still starts and touches nothing
 # on the host, and PFM_DEV_ENGINE_SYNC_MISSING names the absence for the build.
+# The harvester source resolves the same way. The herdr-keep source the held
+# lane machine builds from (lanes/root.sh --machine held) resolves the same way
+# with Cargo.toml as its marker; an absent one leaves PFM_DEV_HERDR_KEEP_SRC
+# empty and PFM_DEV_HERDR_KEEP_MISSING naming it, refused by the held build.
 # BROKEN STATE: an unset ROOT prints `fence-env: ROOT unset` and exits 2; a Git
-# directory outside the common directory, or a relative ENGINE_SYNC_SRC, prints
-# the caller-prefixed error and exits 1.
+# directory outside the common directory, or a relative ENGINE_SYNC_SRC,
+# HARVESTER_SRC or HERDR_KEEP_SRC, prints the caller-prefixed error and exits 1.
 [[ -n "${ROOT:-}" ]] || { echo "fence-env: ROOT unset" >&2; exit 2; }
 
 git_common="$(git -C "$ROOT" rev-parse --git-common-dir)"
@@ -25,15 +29,19 @@ case "$git_dir" in
   *) echo "$FENCE_CALLER: git dir $git_dir is outside common dir $git_common" >&2; exit 1 ;;
 esac
 export PFM_DEV_WORKTREE="$ROOT" PFM_DEV_GIT_COMMON="$git_common" PFM_DEV_GIT_DIR_REL="$git_dir_rel"
-engine_sync_src="${ENGINE_SYNC_SRC:-}"
-if [[ -z "$engine_sync_src" ]]; then
-  if [[ -f "$ROOT/plugins/engine-sync/go.mod" ]]; then
-    engine_sync_src="$ROOT/plugins/engine-sync"
-  else
-    engine_sync_src="$(dirname "$git_common")/plugins/engine-sync"
+# fence_plugin_src <plugin> <marker> <override var> — $<override> when set, else
+# the worktree's plugins/<plugin> when it holds <marker>, else the main checkout's.
+fence_plugin_src() {
+  local src="${!3:-}"
+  if [[ -z "$src" ]]; then
+    if [[ -f "$ROOT/plugins/$1/$2" ]]; then src="$ROOT/plugins/$1"
+    else src="$(dirname "$git_common")/plugins/$1"; fi
   fi
-fi
-[[ "$engine_sync_src" == /* ]] || { echo "$FENCE_CALLER: ENGINE_SYNC_SRC must be an absolute path: $engine_sync_src" >&2; exit 1; }
+  [[ "$src" == /* ]] || { echo "$FENCE_CALLER: $3 must be an absolute path: $src" >&2; return 1; }
+  printf '%s\n' "$src"
+}
+
+engine_sync_src="$(fence_plugin_src engine-sync go.mod ENGINE_SYNC_SRC)" || exit 1
 if [[ -f "$engine_sync_src/go.mod" ]]; then
   export PFM_DEV_ENGINE_SYNC_SRC="$engine_sync_src" PFM_DEV_ENGINE_SYNC_MISSING=""
 else
@@ -41,15 +49,18 @@ else
     PFM_DEV_ENGINE_SYNC_MISSING="$engine_sync_src: no go.mod (check out plugins/engine-sync, or set ENGINE_SYNC_SRC)"
 fi
 
-harvester_src="${HARVESTER_SRC:-}"
-if [[ -z "$harvester_src" ]]; then
-  if [[ -f "$ROOT/plugins/harvester/go.mod" ]]; then harvester_src="$ROOT/plugins/harvester"
-  else harvester_src="$(dirname "$git_common")/plugins/harvester"; fi
-fi
-[[ "$harvester_src" == /* ]] || { echo "$FENCE_CALLER: HARVESTER_SRC must be an absolute path: $harvester_src" >&2; exit 1; }
+harvester_src="$(fence_plugin_src harvester go.mod HARVESTER_SRC)" || exit 1
 if [[ -f "$harvester_src/go.mod" ]]; then
   export PFM_DEV_HARVESTER_SRC="$harvester_src" PFM_DEV_HARVESTER_MISSING=""
 else
   export PFM_DEV_HARVESTER_SRC="$git_common" \
     PFM_DEV_HARVESTER_MISSING="$harvester_src: no go.mod (check out plugins/harvester, or set HARVESTER_SRC)"
+fi
+
+herdr_keep_src="$(fence_plugin_src herdr-keep Cargo.toml HERDR_KEEP_SRC)" || exit 1
+if [[ -f "$herdr_keep_src/Cargo.toml" ]]; then
+  export PFM_DEV_HERDR_KEEP_SRC="$herdr_keep_src" PFM_DEV_HERDR_KEEP_MISSING=""
+else
+  export PFM_DEV_HERDR_KEEP_SRC="" \
+    PFM_DEV_HERDR_KEEP_MISSING="herdr-keep source missing at $herdr_keep_src (check out plugins/herdr-keep, or set HERDR_KEEP_SRC)"
 fi

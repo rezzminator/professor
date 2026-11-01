@@ -132,7 +132,17 @@ func bindNativeHost(
 		return seat, err
 	}
 	if err := db.UpdateSeat(ctx, seat, next); err != nil {
-		return seat, fmt.Errorf("persist supervisor binding: %w", err)
+		// A gather proof publishes this same binding without the seat lock: adopt it, refuse any other.
+		stored, found, readErr := db.Seat(ctx, seat.SeatID)
+		adopted := stored
+		adopted.HerdrSocket, adopted.HerdrPane = next.HerdrSocket, next.HerdrPane
+		adopted.HerdrWorkspace, adopted.HerdrTerminalID = next.HerdrWorkspace, next.HerdrTerminalID
+		adopted.SeatHostPID, adopted.SeatHostStart, adopted.SeatHostBirth = next.SeatHostPID, next.SeatHostStart,
+			next.SeatHostBirth
+		if readErr != nil || !found || adopted != stored {
+			return seat, fmt.Errorf("persist supervisor binding: %w", errors.Join(err, readErr))
+		}
+		next = stored
 	}
 	proved, owned, err := gather.ProveHerdrSeat(ctx, db, proc, next)
 	if err != nil || !owned {

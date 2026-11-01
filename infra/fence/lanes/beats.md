@@ -176,10 +176,37 @@ Runs after the state-building lanes and before destructive O2. Its prelude creat
 - `H.herdr-to-tmux` · actual sender ancestry, signed prompt and same-target --then in recipient transcript · spends cc:$SEAT
 - `H.herdr-to-herdr` · actual sender ancestry, signed prompt and same-target --then in recipient transcript · spends cc:$SEAT
 - `H.watch` · actual native idle is reported · spends cc:$SEAT
-- `H.open-live` · BLOCKED: pinned agent.focus acknowledgement differs from product expectation · spends cc:$SEAT
+- `H.open-live` · BLOCKED: `pfm chat open` attaches a Herdr client, which exits `Os { code: 25, … "Not a tty" }` under the lane's tty-less exec · spends cc:$SEAT
 - `H.name` · durable name and actual Herdr pane label agree · spends cc:$SEAT
-- `H.reload` · BLOCKED: pinned pane.send_keys rejects product tmux key spelling C-s · spends cc:$SEAT
+- `H.reload` · same pane and terminal, a new engine with the reloaded model, pending observed and cleared, same live SID · spends cc:$SEAT
 - `H.open-restored` · automatic unattended real-server resume rebinds exact carried SID live · spends cc:$SEAT
+
+## Lane HELD — real Herdr, herdr-keep-held panes, fake engines
+
+Runs alone on its own machine after the sequence (`run.sh --lanes HELD`): systemd as PID 1, the lane as user `lane` under a real `user@1000.service`, Herdr configured as the owner runs it, `default_shell` herdr-keep around pfm's shell wrapper. Chats are born only through default-shell doors (the picker, `claude` typed in a held shell). `HELD.topology` proves the wrapping first; every later beat requires it. Every beat spends only fixture cc:1, with no credentials or providers.
+
+- `HELD.topology` · the workspace's root pane is PROTECTED: one running holder bound to it, in `user@1000.service`, its shell outside Herdr's pane process · spends none
+- `HELD.birth-picker` · the picker's New chat in a held pane gives seat `herdr|<upstream socket>|<pane>|live`, its engine under the pane's holder · spends cc:1
+- `HELD.name` · `pfm chat name` sets the seat name and the held pane's label · spends cc:1
+- `HELD.whoami` · the engine's own descendant resolves its chat through the herdr-keep relay to the upstream socket and pane · spends cc:1
+- `HELD.discovery` · `pfm ls` carries the held chat live with its name and upstream socket · spends cc:1
+- `HELD.status` · `pfm chat status` reads the held chat idle · spends cc:1
+- `HELD.indicator-idle` · Herdr reads the held pane's `agent_status` idle · spends cc:1
+- `HELD.status-working` · `pfm chat status` reads working while a held turn runs · spends cc:1
+- `HELD.indicator-working` · Herdr reads working during the held turn, idle once it ends · spends cc:1
+- `HELD.subagent-hold` · Herdr reads working after Stop while a sub-agent runs, idle after its stop · spends cc:1
+- `HELD.notification-turn` · Herdr reads working through a turn that opens with a notification, idle after · spends cc:1
+- `HELD.call` · an operator call reaches the held chat's transcript · spends cc:1
+- `HELD.keys` · literal keys and Enter reach the transcript and the held pane · spends cc:1
+- `HELD.capture` · capture shows the typed marker · spends cc:1
+- `HELD.open` · `pfm chat open` typed in another held shell brings the chat into that tab, focused, same engine and holder · spends cc:1
+- `HELD.reload` · reload relaunches the engine with `--model sonnet` in the same holder and shell · spends cc:1
+- `HELD.keep-unlistable` · a herdr-keep that cannot list is an error naming the socket, never an absent holder · spends cc:1
+- `HELD.birth-launcher` · `claude` typed in a held shell gives a live seat, its engine under the pane's holder · spends cc:1
+- `HELD.call-signed` · a held chat's call reaches its held peer signed, prompt and steer · spends cc:1
+- `HELD.reload-retired` · reload in a held pane that also holds a retired seat relaunches the live chat; the retired seat stays lost · spends cc:1
+- `HELD.kill` · kill types the exit command into the held engine, closes the held pane, ends its holder and removes the seat; HELD_MAIN untouched · spends cc:1
+- `HELD.exit` · `kill --exit` ends the held engine; HELD_MAIN untouched · spends cc:1
 
 ## Coverage
 

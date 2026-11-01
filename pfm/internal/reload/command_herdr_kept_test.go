@@ -30,12 +30,20 @@ func (f *reloadHerdrFixture) holdByKeep() {
 
 // keptProcess is pane.process_info of a pane herdr-keep holds: Herdr sees its
 // attach client while the engine (pid, argv) runs in the foreground group 300
-// of the holder's shell, the seat host 90.
+// of the holder's shell, the seat host 90; pid 0 leaves that group empty, as
+// between the old engine's exit and the new one's start.
 func (f *reloadHerdrFixture) keptProcess(pid int, argv []string) (any, string) {
 	for _, gone := range []int{101, 202} {
 		if err := os.RemoveAll(filepath.Join(f.proc, fmt.Sprint(gone))); err != nil {
 			return nil, err.Error()
 		}
+	}
+	attached := map[string]any{"type": "pane_process_info", "process_info": map[string]any{
+		"pane_id": f.canonical, "shell_pid": 77,
+		"foreground_processes": []any{map[string]any{"pid": 77, "name": "herdr-keep"}},
+	}}
+	if pid == 0 {
+		return attached, ""
 	}
 	dir := filepath.Join(f.proc, fmt.Sprint(pid))
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -52,8 +60,5 @@ func (f *reloadHerdrFixture) keptProcess(pid int, argv []string) (any, string) {
 	); err != nil {
 		return nil, err.Error()
 	}
-	return map[string]any{"type": "pane_process_info", "process_info": map[string]any{
-		"pane_id": f.canonical, "shell_pid": 77,
-		"foreground_processes": []any{map[string]any{"pid": 77, "name": "herdr-keep"}},
-	}}, ""
+	return attached, ""
 }

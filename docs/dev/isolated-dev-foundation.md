@@ -119,13 +119,14 @@ Each default shown is the desktop default; native differs only where the row nam
 | Steps | `PFM_FENCE_SAMPLER_READY_TICKS` (50) · int | resource-sampler readiness wait, 0.1 s ticks (5 s) |
 | Housekeeping | `PFM_FENCE_CONTAINER_MAX_HOURS` (6), `PFM_FENCE_BUILDCACHE_HOURS` (168), `PFM_FENCE_BUDGET_MINUTES` (120), `PFM_FENCE_SCRATCH_DAYS` (7) · int | forced container age; build-cache age; cache-budget check interval; scratch age |
 | Housekeeping | `PFM_FENCE_BUILDCACHE_MINUTES` (1440) · int | interval between builder-prune checks, apart from the `PFM_FENCE_BUILDCACHE_HOURS` age |
-| Housekeeping | `PFM_FENCE_GOCACHE_MB` (15000), `PFM_FENCE_GOMOD_MB` (4000), `PFM_FENCE_LINTCACHE_MB` (2000) · int | cache volume budgets |
+| Housekeeping | `PFM_FENCE_GOCACHE_MB` (15000), `PFM_FENCE_GOMOD_MB` (4000), `PFM_FENCE_LINTCACHE_MB` (2000), `PFM_FENCE_CARGO_MB` (2000), `PFM_FENCE_HERDR_KEEP_TARGET_MB` (6000) · int | cache volume budgets (the last two: lane HELD's `pfm-dev-cargo` and `pfm-dev-herdr-keep-target`) |
 | Housekeeping | `PFM_FENCE_DF_TIMEOUT_S` (120) · int | bound on `docker system df -v` |
 | Lanes | `LANE_EGRESS_READY_SECS` (10), `LANE_EGRESS_VERDICT_SECS` (30) · uint; `LANE_STORM_WAIT_SECS` (60) · int | egress ready and verdict waits; storm wait |
+| Lanes | `LANE_HELD_BOOT_SECS` (30) · uint | the held machine's boot wait |
 | Lanes | `LANE_ALIVE_RETRY_SECS` (1), `LANE_WAIT_LAST_EVERY_SECS` (0.5), `LANE_WAIT_FOR_EVERY_SECS` (0.2), `LANE_STORM_EVERY_SECS` (0.5) · number | lane wait polls; the two storm lanes' own poll, separate from the 0.2 s wait-for poll |
 | Lanes | `PFM_FENCE_LANE_ROOT_LOCK_TICKS` (18000) · int | root-build lock wait in `PFM_FENCE_LOCK_POLL_S` ticks (3600 s at 0.2 s) |
 | Lanes | `PFM_FENCE_LANE_TOLERANCE` (1.25) · number; `PFM_FENCE_LANE_SEQUENCE_S` (763) · int | lane budget tolerance; whole-sequence wall budget |
-| Lanes | `PFM_FENCE_LANE_O1_S` (70), `PFM_FENCE_LANE_E1_S` (194), `PFM_FENCE_LANE_E2_S` (39), `PFM_FENCE_LANE_E3_S` (14), `PFM_FENCE_LANE_F_S` (134), `PFM_FENCE_LANE_M_S` (156), `PFM_FENCE_LANE_A_S` (49), `PFM_FENCE_LANE_O2_S` (86) · int; `PFM_FENCE_LANE_H_S` (unpinned) · budget | per-lane wall budgets |
+| Lanes | `PFM_FENCE_LANE_O1_S` (70), `PFM_FENCE_LANE_E1_S` (194), `PFM_FENCE_LANE_E2_S` (39), `PFM_FENCE_LANE_E3_S` (14), `PFM_FENCE_LANE_F_S` (134), `PFM_FENCE_LANE_M_S` (156), `PFM_FENCE_LANE_A_S` (49), `PFM_FENCE_LANE_O2_S` (86) · int; `PFM_FENCE_LANE_H_S` (unpinned), `PFM_FENCE_LANE_HELD_S` (unpinned) · budget | per-lane wall budgets |
 
 The budget rows of `infra/fence/gate-budget.yml` and `infra/fence/lanes/budgets.yml` name these env knobs, resolved through the schema; the defaults are the pinned walls. `docker-compose.yml` reads `PFM_FENCE_COMPOSE_MEM` and `PFM_FENCE_SIM_SHM`, required set by `fence_config_init`. The start, image and exec retry loops count their attempts knob. The established `STEPS_`, `STEPPROF_`, `SAMPLER_` and `LANE_` names stay as they are, with no `PFM_FENCE_` alias.
 

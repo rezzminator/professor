@@ -62,7 +62,6 @@ H_PANE="$(awk -F'\t' '$3 == "herdr" {print $5}' <<<"$out")"
 H_DB="${PFM_STATE_DB:-$HOME/.local/state/pfm/pfm.db}"
 H_SID="$(sqlite3 "$H_DB" "select session_id from seat where herdr_pane='$H_PANE';")"
 H_SEAT="$(sqlite3 "$H_DB" "select seat_id from seat where herdr_pane='$H_PANE';")"
-h_request() { python3 "$HERE/herdr.py" request "$HERDR_SOCKET_PATH" "$1" "$2"; }
 h_agents() { herdr --session lane-H agent list; }
 h_native_ready() {
   h_agents >"$H_FIXTURE/agents.json" && jq -e --arg p "$H_PANE" 'any(.result.agents[]; .pane_id == $p)' "$H_FIXTURE/agents.json" >/dev/null
@@ -320,10 +319,6 @@ if wait_for 10 'test -f "$H_FIXTURE/exec-$H_SID.rc"'; then
   if jq -e --arg seat "$H_SEAT" --arg pane "$H_PANE" --arg sock "$HERDR_SOCKET_PATH" --arg sid "$H_SID" '.id == $sid and .source == "herdr-ancestry" and .backend == "herdr" and .seat_id == $seat and .pane == $pane and .socket_path == $sock' "$H_FIXTURE/exec-$H_SID.out" >/dev/null && [ "$(cat "$H_FIXTURE/exec-$H_SID.rc")" = 0 ]; then pass "actual native fake descendant identifies carried SID"; else fail "whoami did not identify $H_SID"; fi
 else fail "$LANE_WAIT_WHY"; fi
 fi
-h_type() {
-  h_request pane.send_text "$(jq -nc --arg p "$1" --arg text "$2" '{pane_id:$p,text:$text}')" >>"$LANE_LOG" &&
-    h_request pane.send_keys "$(jq -nc --arg p "$1" '{pane_id:$p,keys:["enter"]}')" >>"$LANE_LOG"
-}
 h_door_ready() {
   D_SID="$(sqlite3 "$H_DB" "select session_id from seat where herdr_pane='$D_PANE' and state='live';")" || return 1
   [ -n "$D_SID" ] && h_request pane.process_info "$(jq -nc --arg p "$D_PANE" '{pane_id:$p}')" >"$H_FIXTURE/door-process.json" &&

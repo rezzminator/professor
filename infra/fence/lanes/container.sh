@@ -6,7 +6,7 @@
 #   . "$HERE/container.sh"
 #   lane_base_image <root> <pin-tag> # prepare the fence image and pin it privately
 #   lane_base_release <pin-tag>     # drop that pin once the root build ends
-#   lane_run <name> <image> [network] [docker-run args…] # detached container
+#   lane_run <name> <image> [network] [root|held] [docker-run args…] # detached container
 #
 # Why the private tag: the fence image `professor-pfm-dev` is rebuilt on this
 # host whenever its build inputs change (infra/fence/image-key.sh), and under
@@ -30,6 +30,12 @@
 # fence housekeeping (infra/fence/housekeeping.sh) reaps it once exited or past
 # its age limit.
 #
+# The held machine (lane HELD) boots systemd as PID 1 instead of `sleep
+# infinity` under docker's init: a private, writable cgroup namespace (Docker
+# >= 28's writable-cgroups, never --privileged), tmpfs /run and /run/lock, and
+# container=docker, so a user manager can place herdr-keep's holders in real
+# user@1000.service cgroups.
+#
 # BROKEN STATE: a failing build or run prints docker's own message and returns
 # non-zero; neither function ever falls back to a host-local execution.
 
@@ -38,6 +44,14 @@
 . "$(dirname -- "${BASH_SOURCE[0]}")/../shared.sh" || return 1
 fence_config_values || return 1
 
+
+# Every `docker exec` as the held machine's user lane (uid 1000, home /srv/lane,
+# zsh): the build's provisioning steps and lane HELD itself, whose run adds the
+# user manager's XDG_RUNTIME_DIR and bus address.
+LANE_HELD_EXEC=(-u 1000:1000 -e HOME=/srv/lane -e USER=lane -e LOGNAME=lane -e SHELL=/usr/bin/zsh
+  -e PFM_CONFIG=/srv/lane/.local/state/pfm/pfm.config.json
+  -e MOCK_ENGINE_SCENARIO=/srv/lane/.local/share/pfm-lanes/default.json
+  -e PATH=/srv/lane/.local/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin)
 
 lane_fence_env() { # resolve PFM_DEV_* once, from the worktree root
   local root="$1"
@@ -61,13 +75,20 @@ lane_base_release() { # lane_base_release <pin-tag> — drops the pin once the b
   docker rmi "$1" >/dev/null 2>&1 || true
 }
 
-lane_run() { # lane_run <name> <image> [network] [docker-run args…]
-  local name="$1" image="$2" network="${3:-}"
+lane_run() { # lane_run <name> <image> [network] [root|held] [docker-run args…]
+  local name="$1" image="$2" network="${3:-}" boot=(--init) command=(sleep infinity)
   shift 2
   [ $# -eq 0 ] || shift
+  case "${1:-}" in
+    root) shift ;;
+    held)
+      shift
+      boot=(--cgroupns=private --security-opt writable-cgroups=true --tmpfs /run --tmpfs /run/lock -e container=docker)
+      command=(/sbin/init) ;;
+  esac
   if [ "$network" = none ]; then set -- --network none -e GOPROXY=off "$@"
   elif [ -n "$network" ]; then set -- --network "$network" "$@"; fi
-  docker run -d --init --name "$name" --label pfm.fence=1 \
+  docker run -d "${boot[@]}" --name "$name" --label pfm.fence=1 \
     "$@" \
     -v "$PFM_DEV_WORKTREE:/worktree:ro" \
     -v "$PFM_DEV_GIT_COMMON:/pfm-git-common:ro" \
@@ -85,5 +106,5 @@ lane_run() { # lane_run <name> <image> [network] [docker-run args…]
     -e "PFM_DEV_HARVESTER_MISSING=${PFM_DEV_HARVESTER_MISSING:-}" \
     -e "PFM_DEV_REPO_GIT_DIR=/pfm-git-common/$PFM_DEV_GIT_DIR_REL" \
     -e PFM_DEV_REPO_WORK_TREE=/worktree \
-    "$image" sleep infinity >/dev/null
+    "$image" "${command[@]}" >/dev/null
 }

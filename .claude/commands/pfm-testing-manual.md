@@ -24,6 +24,7 @@ Fixed headings, fixed order. Detail lives in `pfm/CLAUDE.md` § Testing Rules, `
 
 - A new command or MCP tool lands with its beat (`infra/fence/lanes/beats.md` and `infra/fence/lanes/<lane>.sh`) and its map row (`infra/fence/lanes/map.tsv`, `name · lane · beat`) in the same commit, and a removed one takes them with it; a fleet capability lands with its beat; the recipe is `docs/dev/testing/lanes.md` § Extend it.
 - One editor per flight: `infra/fence/lanes/lib.sh`, `run.sh`, `map.tsv`, `beats.md`, `known-gaps.yml`, `pfm/scripts/known-skips.tsv`.
+- A change touching `pfm/internal/herdr/**`, `pfm/internal/resolve/**`, `pfm/internal/{call,kill,reload,chat,gather,spawn}/*herdr*`, `pfm/internal/chat/restored*`, `pfm/internal/hookentry/{herdr*,seathost*,launch_native*}`, `pfm/internal/installer/herdr*`, `pfm/internal/installer/assets/shim/pfm-herdr-shell.sh` or `infra/fence/lanes/{HELD.sh,herdr.sh,herdr.py}` runs `infra/fence/lanes/run.sh --lanes HELD` before its landing; the lander runs it once more in its gate.
 
 ## Mock boundary
 

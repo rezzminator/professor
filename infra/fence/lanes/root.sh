@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # root.sh — builds or reuses the hermetic lane root, keyed by tree content.
 #
-#   root.sh [--rebuild] [--tag NAME] [--print-hash]
+#   root.sh [--rebuild] [--tag NAME] [--print-hash] [--machine root|held]
 #
 # From the pfm-dev fence image, in order:
 #   1. provision.sh tools — pfm, engine-sync, and the mock linked as all three engines
@@ -28,6 +28,17 @@
 # The image carries fixture credentials only and stays LOCAL ONLY. A registry
 # --tag is refused; this script never pushes.
 #
+# --machine held builds lane HELD's machine, pfm-lane-held:<hash>, on that root
+# (built first when absent), with a container, exec steps and a commit like the
+# root: herdr-keep built by cargo in HELD_RUST_IMAGE from the source fence-env.sh
+# resolves (mounted read-only), then provision.sh held as root (systemd, the user
+# lane at /srv/lane, Herdr and herdr-keep configured as the owner runs them),
+# provision.sh seats and install as lane, the credential scan, and a commit whose
+# CMD is /sbin/init. <hash> covers the root hash, provision.sh, container.sh, the
+# HELD_RUST_IMAGE line and the herdr-keep source minus target/ and bin/. A
+# missing source exits 1: `root: ✗ HELD SUBSTRATE — herdr-keep source missing at
+# <path> (…)`.
+#
 # BROKEN STATE: an incomplete hash input is HASH-UNDERIVABLE (exit 2); missing
 # docker or its daemon is TOOLCHAIN-MISSING (exit 2). Every failed build step
 # names its exit status; no image is committed. A lost containerd lease at
@@ -38,7 +49,10 @@ set -uo pipefail
 
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 ROOT="$(cd -- "$HERE/../../.." && pwd -P)"
-REBUILD=0 PRINT_HASH=0 TAG=""
+REBUILD=0 PRINT_HASH=0 TAG="" MACHINE=root
+# The Rust builder of lane HELD's herdr-keep, pinned by digest (bookworm: glibc
+# 2.36, older than the root's Ubuntu 24.04, so the binary runs there).
+HELD_RUST_IMAGE=rust:1.99.0-slim-bookworm@sha256:2c3a22f0a5533ea2dd5a16627bc841228151faa2d4de2644ac9987e4a2f1f2fa
 HASH_PATHS="pfm templates VERSION docs/SETUP.md docs/PLACEHOLDERS.md .githooks/pre-push infra/fence/pfm-dev.Dockerfile infra/fence/docker-compose.yml infra/fence/tools.env infra/fence/tools.sh infra/fence/pinned-tools.sh infra/fence/jscpd infra/fence/fence-env.sh infra/fence/engine-sync.sh infra/fence/source-clone.sh infra/fence/lanes/root.sh infra/fence/lanes/container.sh infra/fence/lanes/provision.sh infra/fence/lanes/adopt.sh infra/fence/lanes/cred-scan.sh infra/fence/lanes/fixtures infra/fence/lanes/scenarios infra/plugin-lab/tests/fakes/claude"
 
 while [ $# -gt 0 ]; do
@@ -46,10 +60,12 @@ while [ $# -gt 0 ]; do
     --rebuild) REBUILD=1; shift ;;
     --tag) TAG="$2"; shift 2 ;;
     --print-hash) PRINT_HASH=1; shift ;;
+    --machine) MACHINE="${2:-}"; shift; [ $# -eq 0 ] || shift ;;
     -h|--help) sed -n '2,10p' "$0"; exit 0 ;;
-    *) echo "usage: root.sh [--rebuild] [--tag NAME] [--print-hash]" >&2; exit 2 ;;
+    *) echo "usage: root.sh [--rebuild] [--tag NAME] [--print-hash] [--machine root|held]" >&2; exit 2 ;;
   esac
 done
+case "$MACHINE" in root|held) ;; *) echo "usage: root.sh --machine takes root or held, not '$MACHINE'" >&2; exit 2 ;; esac
 
 fatal() { echo "root: $1" >&2; exit 2; }
 say() { echo "root: $1"; }
@@ -153,6 +169,15 @@ hash_inputs() {
   fi
 }
 
+# The held machine's inputs: the root it derives from, its own build files, the
+# pinned Rust builder and the herdr-keep source the binary is built from.
+held_inputs() {
+  printf 'root\t%s\n' "$HASH"
+  hash_tree "$ROOT" "" infra/fence/lanes/provision.sh infra/fence/lanes/container.sh || return 1
+  grep -m1 '^HELD_RUST_IMAGE=' "$HERE/root.sh" || return 1
+  hash_tree "$PFM_DEV_HERDR_KEEP_SRC" "herdr-keep/" . ':(exclude)target/**' ':(exclude)bin/**'
+}
+
 root_hash() {
   local out
   out="$(hash_inputs 2>&1)" || { echo "root: HASH-UNDERIVABLE: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-200)" >&2; return 2; }
@@ -171,6 +196,20 @@ IMAGE="pfm-lane-root:$HASH"
 SUFFIX="${BASHPID}${RANDOM}${RANDOM}"
 BUILD="pfm-lane-build-$HASH-$SUFFIX"
 PIN="pfm-lane-base:$HASH-$SUFFIX"
+KEY="$HASH"
+if [ "$MACHINE" = held ]; then
+  [ -z "$TAG" ] || fatal "--tag names the root image only; the held machine is always pfm-lane-held:<hash>"
+  if [ -n "$PFM_DEV_HERDR_KEEP_MISSING" ]; then
+    echo "root: ✗ HELD SUBSTRATE — $PFM_DEV_HERDR_KEEP_MISSING" >&2
+    exit 1
+  fi
+  out="$(held_inputs 2>&1)" || { echo "root: HASH-UNDERIVABLE: held inputs: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-200)" >&2; exit 2; }
+  KEY="$(printf '%s' "$out" | sha256_stdin | cut -c1-12)" || exit 2
+  ROOT_IMAGE="$IMAGE"
+  IMAGE="pfm-lane-held:$KEY"
+  # pfm-lane-build-*, so fence housekeeping sees a held build in flight as it sees a root build.
+  BUILD="pfm-lane-build-held-$KEY-$SUFFIX"
+fi
 if [ -n "$TAG" ]; then
   # A push-capable tag is one docker would resolve to a registry: it carries a
   # repository path (`/`) or a host-looking first segment (`host.tld:port/...`).
@@ -188,12 +227,15 @@ if [ -n "$TAG" ]; then
 fi
 
 if [ "$PRINT_HASH" -eq 1 ]; then
-  printf '%s\n' "$HASH"
+  printf '%s\n' "$KEY"
   exit 0
 fi
 
 command -v docker >/dev/null || fatal "TOOLCHAIN-MISSING — docker"
 docker info >/dev/null 2>&1 || fatal "TOOLCHAIN-MISSING — the docker daemon is not reachable ('docker info' failed)"
+if [ "$MACHINE" = held ] && ! docker image inspect "$ROOT_IMAGE" >/dev/null 2>&1; then
+  bash "$HERE/root.sh" >&2 || fatal "the root image $ROOT_IMAGE the held machine derives from could not be built"
+fi
 
 T0="$(date +%s)"
 PROJECT="$(basename "$ROOT")"; PROJECT="${PROJECT#.}"
@@ -211,18 +253,18 @@ MAIN_PROJECT="$(basename "$(dirname "$PFM_DEV_GIT_COMMON")")"; MAIN_PROJECT="${M
 [ -n "$MAIN_PROJECT" ] || fatal "no project name in the git common dir $PFM_DEV_GIT_COMMON"
 LOCK_DIR="/tmp/$MAIN_PROJECT/lanes"
 mkdir -p "$LOCK_DIR" || fatal "the root build lock directory could not be created: $LOCK_DIR"
-LOCK="$LOCK_DIR/root-build-$HASH.lock" LOCKED=0
+LOCK="$LOCK_DIR/$MACHINE-build-$KEY.lock" LOCKED=0
 root_unlock() { [ "$LOCKED" -eq 0 ] || rm -rf "$LOCK"; LOCKED=0; }
 told=0
 for ((i = 0; i < PFM_FENCE_LANE_ROOT_LOCK_TICKS; i++)); do
   if mkdir_lock_try "$LOCK" "$$"; then LOCKED=1; break; fi
-  [ "$told" -eq 1 ] || { say "waiting for the root build of $HASH held by pid ${MKDIR_LOCK_HOLDER:-?} ($LOCK)"; told=1; }
+  [ "$told" -eq 1 ] || { say "waiting for the $MACHINE build of $KEY held by pid ${MKDIR_LOCK_HOLDER:-?} ($LOCK)"; told=1; }
   sleep "$PFM_FENCE_LOCK_POLL_S"
 done
-[ "$LOCKED" -eq 1 ] || fatal "the root build lock $LOCK is still held by pid ${MKDIR_LOCK_HOLDER:-?} after $PFM_FENCE_LANE_ROOT_LOCK_TICKS polls of $PFM_FENCE_LOCK_POLL_S s"
+[ "$LOCKED" -eq 1 ] || fatal "the $MACHINE build lock $LOCK is still held by pid ${MKDIR_LOCK_HOLDER:-?} after $PFM_FENCE_LANE_ROOT_LOCK_TICKS polls of $PFM_FENCE_LOCK_POLL_S s"
 trap root_unlock EXIT
 if [ "$REBUILD" -eq 0 ] && docker image inspect "$IMAGE" >/dev/null 2>&1; then
-  say "reusing $IMAGE (same hash: no root build input changed) · $(( $(date +%s) - T0 ))s"
+  say "reusing $IMAGE (same hash: no $MACHINE build input changed) · $(( $(date +%s) - T0 ))s"
   printf '%s\n' "$IMAGE"
   exit 0
 fi
@@ -238,14 +280,18 @@ fence_volumes_ensure
 # The build container goes first, then the pin it held — on every exit path
 # (commit, step failure, fatal, Ctrl-C), so this build's base pin never outlives
 # its build.
-cleanup() { docker rm -f "$BUILD" >/dev/null 2>&1; lane_base_release "$PIN"; rm -f "$STEP_LOG"; root_unlock; }
+# HELD_CARGO is the held build's cargo container, whose --rm a killed client never reaches.
+HELD_CARGO=""; [ "$MACHINE" = root ] || HELD_CARGO="$BUILD-cargo"
+cleanup() { docker rm -f "$BUILD" ${HELD_CARGO:+"$HELD_CARGO"} >/dev/null 2>&1; lane_base_release "$PIN"; rm -f "$STEP_LOG"; root_unlock; }
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 trap 'exit 129' HUP
-BASE="$(lane_base_image "$ROOT" "$PIN")" || fatal "the pfm-dev fence image could not be built"
-say "base image $BASE (pinned for this build, so a concurrent dev.sh iso rebuild cannot orphan it)"
-lane_run "$BUILD" "$BASE" '' || fatal "the fence container would not start from $BASE"
+if [ "$MACHINE" = root ]; then
+  BASE="$(lane_base_image "$ROOT" "$PIN")" || fatal "the pfm-dev fence image could not be built"
+  say "base image $BASE (pinned for this build, so a concurrent dev.sh iso rebuild cannot orphan it)"
+  lane_run "$BUILD" "$BASE" '' || fatal "the fence container would not start from $BASE"
+fi
 
 root_failure_diagnostics() { # root_failure_diagnostics <step> <exit> <output-file> [attempt] [retry]
   local dir stamp file
@@ -296,6 +342,35 @@ commit_lost_lease() { # commit_lost_lease <output-file>
     grep -Fq 'no such file or directory' "$1"
 }
 
+if [ "$MACHINE" = held ]; then
+  say "step 1/6 · herdr-keep from $PFM_DEV_HERDR_KEEP_SRC (cargo build --release --locked in $HELD_RUST_IMAGE)"
+  # RUSTUP_TOOLCHAIN pins the image's own 1.99.0, so rust-toolchain.toml's lint components are never fetched.
+  # Every held build shares the target volume: under one flock, the build and the
+  # copy of its binary to keys/<key>/ are one step, so another source's build
+  # never replaces the binary this key's image installs.
+  run_step "herdr-keep cargo build" docker run --rm --name "$HELD_CARGO" --label pfm.fence=1 \
+    -v "$PFM_DEV_HERDR_KEEP_SRC:/herdr-keep:ro" -v pfm-dev-cargo:/usr/local/cargo/registry \
+    -v pfm-dev-herdr-keep-target:/target -e CARGO_TARGET_DIR=/target -e RUSTUP_TOOLCHAIN=1.99.0 \
+    -w /herdr-keep "$HELD_RUST_IMAGE" flock /target/.pfm-held-build.lock sh -c \
+    'cargo build --release --locked && mkdir -p "/target/keys/$1" && cp /target/release/herdr-keep "/target/keys/$1/herdr-keep"' _ "$KEY"
+  lane_run "$BUILD" "$ROOT_IMAGE" '' -v "$PFM_DEV_HERDR_KEEP_SRC:/herdr-keep:ro" \
+    -v pfm-dev-herdr-keep-target:/herdr-keep-target:ro -e "HELD_KEEP_BIN=/herdr-keep-target/keys/$KEY/herdr-keep" ||
+    fatal "the build container would not start from $ROOT_IMAGE"
+  say "step 2/6 · systemd, the user lane, Herdr and herdr-keep (provision.sh held)"
+  run_step "provision.sh held" x "$BUILD" bash /worktree/infra/fence/lanes/provision.sh held
+  say "step 3/6 · lane's fixture seats (provision.sh seats as lane)"
+  run_step "provision.sh seats as lane" x "${LANE_HELD_EXEC[@]}" "$BUILD" bash /worktree/infra/fence/lanes/provision.sh seats
+  say "step 4/6 · lane's pfm integration (provision.sh install as lane)"
+  run_step "provision.sh install as lane" x "${LANE_HELD_EXEC[@]}" "$BUILD" bash /worktree/infra/fence/lanes/provision.sh install
+  # The user manager starts pfm's units without PFM_CONFIG: they read the clone's
+  # default config path, as on the owner's host, so it names the lane's config.
+  run_step "lane config at its default path" x "${LANE_HELD_EXEC[@]}" "$BUILD" \
+    ln -s /srv/lane/.local/state/pfm/pfm.config.json /srv/lane/.professor.source/pfm.config.json
+  say "step 5/6 · registered fixture credential scan"
+  run_step "cred-scan.sh" x "$BUILD" bash /worktree/infra/fence/lanes/cred-scan.sh
+  say "step 6/6 · commit"
+  LABEL="professor.lane-held=$KEY" START='CMD ["/sbin/init"]'
+else
 say "step 1/7 · pfm, engine-sync and mock engines (provision.sh tools)"
 run_step "provision.sh tools" x "$BUILD" bash /worktree/infra/fence/lanes/provision.sh tools
 
@@ -320,12 +395,14 @@ fi
 say "fleet: 0 row(s)"
 
 say "step 6/7 · registered fixture credential scan"
-run_step "cred-scan.sh" x "$BUILD" bash /worktree/infra/fence/lanes/cred-scan.sh /root /tmp /home
+run_step "cred-scan.sh" x "$BUILD" bash /worktree/infra/fence/lanes/cred-scan.sh
 
 say "step 7/7 · commit"
+LABEL="professor.lane-root=$HASH" START='CMD ["sleep","infinity"]'
+fi
 for attempt in 1 2 3; do
   rc=0
-  docker commit --change "LABEL professor.lane-root=$HASH" --change 'CMD ["sleep","infinity"]' "$BUILD" "$IMAGE" >"$STEP_LOG" 2>&1 || rc=$?
+  docker commit --change "LABEL $LABEL" --change "$START" "$BUILD" "$IMAGE" >"$STEP_LOG" 2>&1 || rc=$?
   cat "$STEP_LOG"
   [ "$rc" -eq 0 ] && break
   commit_lost_lease "$STEP_LOG" || step_failed "docker commit" "$rc"
@@ -338,4 +415,19 @@ for attempt in 1 2 3; do
   fi
 done
 say "$IMAGE committed in $(( $(date +%s) - T0 ))s — LOCAL ONLY: fixture credentials only"
+if [ "$MACHINE" = held ]; then
+  # One held machine per root: an image of another herdr-keep source on this same
+  # root is superseded (fence housekeeping prunes held images only with their root).
+  # rmi without -f, so one a container still runs is kept.
+  if stale="$(docker image ls --filter "label=professor.lane-root=$HASH" --filter label=professor.lane-held \
+    --format '{{.Repository}}:{{.Tag}}' 2>&1)"; then
+    while read -r ref; do
+      case "$ref" in "" | "$IMAGE" | *"<none>"*) continue ;; esac
+      if out="$(docker rmi "$ref" 2>&1)"; then say "removed superseded $ref"
+      else say "kept superseded $ref: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-200)"; fi
+    done <<<"$stale"
+  else
+    echo "root: WARN listing superseded held images failed, none removed: $(printf '%s' "$stale" | tr '\n' ' ' | cut -c1-200)" >&2
+  fi
+fi
 printf '%s\n' "$IMAGE"

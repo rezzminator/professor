@@ -178,6 +178,19 @@ func TestKeepProcessesSeesTheHoldersShell(t *testing.T) {
 			want: held, holder: true, listed: []string{keepSocket},
 		},
 		{
+			// Between an engine's exit and its relaunch the terminal's foreground
+			// group has no member left: Herdr reports a plain pane so as no
+			// foreground, never as a failed read.
+			name: "foreground group emptied by its exit", socket: keepSocket, foreground: attachClient,
+			listing: keepListing("running", true, false, "PROTECTED"),
+			table: func() keepProc {
+				table := keepTable()
+				delete(table, 320)
+				return table
+			}(),
+			want: PaneProcesses{Pane: "w1:p4", Shell: 310, Foreground: []Process{}}, holder: true, listed: []string{keepSocket},
+		},
+		{
 			name: "reused child pid", socket: keepSocket, foreground: attachClient,
 			listing: keepListing("running", true, false, "PROTECTED"),
 			table: func() keepProc {

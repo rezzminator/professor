@@ -155,7 +155,7 @@ func (installer *engine) wireHerdrShell(uninstall bool) (result error) {
 	wrapper := paths.HerdrShellWrapper(home)
 	if status.Present && !status.Owned {
 		installer.skip(fmt.Sprintf("herdr shell: user-owned default_shell=%q in %s", status.Value, status.Path))
-		if !uninstall || status.Value == wrapper {
+		if uninstall && status.Value == wrapper {
 			return nil
 		}
 	}
@@ -173,6 +173,11 @@ func (installer *engine) wireHerdrShell(uninstall bool) (result error) {
 	}
 	if status.Owned {
 		installer.ok("herdr shell: wired " + status.Path)
+		return nil
+	}
+	if status.Present {
+		// A user-owned default_shell stays the user's; the wrapper is still kept current, since a
+		// user-chosen outer shell (herdr-keep's inner shell) may exec it.
 		return nil
 	}
 	raw, existed, err := readCodexConfig(status.Path)

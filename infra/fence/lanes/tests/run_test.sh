@@ -23,6 +23,7 @@ LANES="$T/infra/fence/lanes"
 mkdir -p "$LANES" "$T/infra/fence"
 cp "$SUT_DIR"/*.sh "$SUT_DIR"/*.yml "$SUT_DIR"/*.tsv "$SUT_DIR"/*.md "$SUT_DIR"/pending.txt "$LANES/" 2>/dev/null
 if [ ! -f "$LANES/H.sh" ]; then printf 'beat H.birth\n' >"$LANES/H.sh"; fi
+if [ ! -f "$LANES/HELD.sh" ]; then printf 'beat HELD.topology\n' >"$LANES/HELD.sh"; fi
 cat >"$LANES/budgets.yml" <<'YML'
 tolerance: 1.25
 
@@ -39,12 +40,17 @@ lanes:
   A: unpinned
   H: unpinned
   O2: unpinned
+  HELD: unpinned
 YML
 cp "$LANES/budgets.yml" "$T/budgets.fixture.yml"
 cp -R "$SUT_DIR/fixtures" "$SUT_DIR/scenarios" "$LANES/"
 cp "$SUT_DIR/../shared.sh" "$SUT_DIR/../mkdir-lock.sh" "$SUT_DIR/../image-key.sh" "$T/infra/fence/"
 cp "$SUT_DIR/../fence-env.sh" "$T/infra/fence/fence-env.sh" 2>/dev/null
 (cd "$T" && git init -q && git config user.email t@t && git config user.name t && git commit -q --allow-empty -m fixture)
+# Lane HELD builds herdr-keep from the source fence-env.sh resolves; the fixture tree has none,
+# so every case names one, and the missing-source case unsets it.
+mkdir -p "$T/herdr-keep-src" && : >"$T/herdr-keep-src/Cargo.toml"
+export HERDR_KEEP_SRC="$T/herdr-keep-src"
 RUN="$LANES/run.sh"
 [ -f "$RUN" ] || { echo "run_test: no run.sh at $RUN" >&2; exit 2; }
 
@@ -59,6 +65,7 @@ printf '%s\n' "$*" >>"${STUB_DOCKER_LOG:-/dev/null}"
 case "$1 ${2:-}" in
   "image inspect") [ "${STUB_IMAGE_PRESENT:-1}" = 1 ] ;;
   "info") exit 0 ;;
+  "version --format") printf '%s\n' "${STUB_DOCKER_VERSION:-29.9.1}" ;;
   "exec "*)
     case "$*" in
       *cred-scan.sh*)
@@ -73,6 +80,9 @@ case "$1 ${2:-}" in
         [ -z "${STUB_EGRESS_READY_DELAY:-}" ] || command -p sleep "$STUB_EGRESS_READY_DELAY"
         [ "${STUB_EGRESS_READY:-1}" = 1 ] || exit 1 ;;
       *'grep -q '^EGRESS*) [ -n "${STUB_EGRESS_VERDICT-PASS}" ] || exit 1 ;;
+      *is-system-running*) printf '%s %s\n' "${STUB_SYSTEM_STATE:-running}" "${STUB_USER_STATE:-active}" ;;
+      *'systemctl --failed'*) echo 'fixture-unit.service loaded failed failed Fixture unit' ;;
+      *'journalctl -b'*) echo 'fixture boot journal' ;;
     esac
     exit 0 ;;
   "cp "*)
@@ -89,6 +99,10 @@ case "$1 ${2:-}" in
         printf 'fixture pcap\n' >"$3/fixture.pcap"
         printf 'fixture log\n' >"$3/fixture.log" ;;
     esac
+    exit 0 ;;
+  "run -d")
+    # STUB_HELD_RUN_FAIL=1: the held machine's container refuses to start.
+    case "$*" in *--cgroupns=private*) [ "${STUB_HELD_RUN_FAIL:-0}" = 0 ] || { echo 'fixture: writable-cgroups refused' >&2; exit 125; } ;; esac
     exit 0 ;;
   *) exit 0 ;;
 esac
@@ -577,4 +591,71 @@ STUB_ROW_FIXTURE="$T/herdr-row.tsv" run_sut --lanes H
 if [ "$RC" = 0 ] && grep -qF -- '-e LANE_H_SCOPE=all' "$T/docker.log"; then
   ok "default H registers the complete rows 2-9 journey"
 else bad "default H omitted complete journey" "rc=$RC" "$(cat "$T/docker.log")"; fi
+
+# ---- held machine: lane HELD runs after the sequence on its own systemd machine.
+: >"$T/docker.log" && : >"$T/root.log"
+run_sut --lanes HELD,O1 --dry-run
+order="$(printf '%s' "$OUT" | sed -n 's/^run: lane order  //p')"
+held_line="$(grep '^lane HELD ' <<<"$OUT")"
+if [ "$RC" -eq 0 ] && [ "$order" = "O1 → HELD" ] &&
+  grep -qx 'run: held image  pfm-lane-held:deadbeefcafe — REUSE (image present)' <<<"$OUT" &&
+  [[ "$held_line" =~ ^lane\ HELD\ ·\ machine\ held\ ·\ image\ pfm-lane-held:deadbeefcafe\ ·\ [1-9][0-9]*\ beats\ ·\ spends\ .*\ ·\ lane\ HELD\ unpinned ]] &&
+  grep -qx -- '--machine held --print-hash' "$T/root.log" && ! grep -q '^run -d' "$T/docker.log"; then
+  ok "the dry-run plan names HELD's machine and held image after the root lanes and starts nothing"
+else bad "held dry-run plan" "rc=$RC held_line=[$held_line]" "$OUT" "$(cat "$T/root.log")"; fi
+
+OUT="$(env -u HERDR_KEEP_SRC bash "$RUN" --lanes HELD --dry-run 2>&1)"; RC=$?
+if [ "$RC" -eq 1 ] && [ "$OUT" = "run: ✗ HELD SUBSTRATE — herdr-keep source missing at $T/plugins/herdr-keep (check out plugins/herdr-keep, or set HERDR_KEEP_SRC)" ]; then
+  ok "a missing herdr-keep source refuses HELD by name, exit 1"
+else bad "held missing source" "rc=$RC" "$OUT"; fi
+
+: >"$T/docker.log"
+STUB_DOCKER_VERSION=27.5.1 run_sut --lanes HELD
+if [ "$RC" -eq 1 ] && grep -qx 'held: docker 27.5.1 has no writable-cgroups (needs ≥ 28)' <<<"$OUT" &&
+  ! grep -q '^run -d' "$T/docker.log"; then
+  ok "a Docker below 28 is refused before any container starts, never run privileged"
+else bad "held docker version refusal" "rc=$RC" "$OUT" "$(cat "$T/docker.log")"; fi
+
+: >"$T/docker.log"
+rm -rf "$T/out"
+STUB_SYSTEM_STATE=degraded run_sut --lanes HELD
+heldout="$(find "$T/out" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | head -1)"
+if [ "$RC" -eq 1 ] && grep -qx 'held: BOOT-FAILED degraded (user@1000.service active)' <<<"$OUT" &&
+  grep -qx 'held:   fixture-unit.service loaded failed failed Fixture unit' <<<"$OUT" &&
+  [ "$(cat "$heldout/HELD.row.tsv" 2>/dev/null)" = "$(printf 'HELD\t0\t0\t1\t0\t0')" ] &&
+  [ "$(cat "$heldout/held-boot.log" 2>/dev/null)" = 'fixture boot journal' ] &&
+  ! grep -q '/lanes/HELD.sh' "$T/docker.log" && [ "$(grep -c '^rm -f pfm-lane-held-' "$T/docker.log")" -eq 1 ]; then
+  ok "a degraded held machine is BOOT-FAILED with its failed units, a failed row, the journal kept and no lane run"
+else bad "held boot failure" "rc=$RC" "$OUT" "$(cat "$heldout/HELD.row.tsv" 2>&1)" "$(cat "$T/docker.log")"; fi
+
+: >"$T/docker.log"
+rm -rf "$T/out"
+STUB_HELD_RUN_FAIL=1 run_sut --lanes O1,HELD
+heldout="$(find "$T/out" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | head -1)"
+if [ "$RC" -eq 1 ] && grep -qx 'run: ✗ the held machine would not start from pfm-lane-held:deadbeefcafe' <<<"$OUT" &&
+  [ "$(cat "$heldout/HELD.row.tsv" 2>/dev/null)" = "$(printf 'HELD\t0\t0\t1\t0\t0')" ] &&
+  grep -q '^run: [0-9]* beats · ' <<<"$OUT" && [ -s "$heldout/summary.md" ] && grep -q 'bash /worktree/infra/fence/lanes/O1.sh$' "$T/docker.log" &&
+  ! grep -q '/lanes/HELD.sh' "$T/docker.log"; then
+  ok "a held machine that will not start after the root lanes is HELD's failed row, and the root lanes' report still aggregates"
+else bad "held start failure" "rc=$RC" "$OUT" "$(cat "$heldout/HELD.row.tsv" 2>&1)"; fi
+
+printf 'HELD\t9\t2\t0\t0\t0\n' >"$T/held-row.tsv"
+: >"$T/docker.log"
+rm -rf "$T/out"
+STUB_ROW_FIXTURE="$T/held-row.tsv" run_sut --lanes O1,HELD
+heldout="$(find "$T/out" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | head -1)"
+root_start="$(grep -n '^run -d --init --name pfm-lane-' "$T/docker.log" | cut -d: -f1)"
+held_start="$(grep -n '^run -d --cgroupns=private --security-opt writable-cgroups=true --tmpfs /run --tmpfs /run/lock -e container=docker --name pfm-lane-held-.* --network none .*pfm-lane-held:deadbeefcafe /sbin/init$' "$T/docker.log" | cut -d: -f1)"
+o1_exec="$(grep -n 'bash /worktree/infra/fence/lanes/O1.sh$' "$T/docker.log" | cut -d: -f1)"
+held_exec="$(grep 'bash /worktree/infra/fence/lanes/HELD.sh$' "$T/docker.log")"
+want_exec='^exec -u 1000:1000 -e HOME=/srv/lane -e USER=lane -e LOGNAME=lane -e SHELL=/usr/bin/zsh -e PFM_CONFIG=/srv/lane/.local/state/pfm/pfm.config.json -e MOCK_ENGINE_SCENARIO=/srv/lane/.local/share/pfm-lanes/default.json -e PATH=/srv/lane/.local/bin:[^ ]* -e XDG_RUNTIME_DIR=/run/user/1000 -e DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus -w /tmp -e LANE_MODE=solo -e LANE_PRIOR= .* pfm-lane-held-[^ ]* bash /worktree/infra/fence/lanes/HELD.sh$'
+if [ "$RC" -eq 0 ] && [ -n "$root_start" ] && [ -n "$held_start" ] && [ -n "$o1_exec" ] &&
+  [ "$o1_exec" -lt "$held_start" ] && [[ "$held_exec" =~ $want_exec ]] &&
+  grep -qx 'held: systemd running · user@1000.service active' <<<"$OUT" &&
+  grep -q '^exec pfm-lane-held-[^ ]* chown 1000:1000 /tmp/lanes/' "$T/docker.log" &&
+  grep -q '^exec pfm-lane-held-[^ ]* bash /worktree/infra/fence/lanes/cred-scan.sh$' "$T/docker.log" &&
+  grep -q '^- containers: root `pfm-lane-[^`]*` · held `pfm-lane-held-[^`]*`$' "$heldout/summary.md" &&
+  [ "$(grep -c '^rm -f pfm-lane-' "$T/docker.log")" -eq 2 ]; then
+  ok "HELD runs after the root lanes in its own held container as uid 1000 with the user manager's env, scanned there, both containers named and removed"
+else bad "held machine run" "rc=$RC held_exec=[$held_exec] root=$root_start held=$held_start o1=$o1_exec" "$OUT" "$(cat "$T/docker.log")"; fi
 shtest_end

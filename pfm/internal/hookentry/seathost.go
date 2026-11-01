@@ -137,6 +137,9 @@ func SeatHost(args []string, stdout, stderr io.Writer, runtime config.Runtime) i
 			} else {
 				run = reload.RefreshRecipeRemoteControl(run, pfmengine.ID(seat.Engine), machine, seat.Name, stderr)
 			}
+			if pfmengine.ID(seat.Engine) == pfmengine.Claude {
+				run.Binary, runErr = currentClaudeBinary(run.Binary, runtime.Paths.Home, machine.Claude.Binary)
+			}
 		}
 		if runErr == nil {
 			argv, options, runErr = seatCommand(run, descriptor.Binary, terminal, stdout, stderr)
@@ -351,6 +354,22 @@ func failedSeatStart(
 		fmt.Fprintf(stderr, "pfm internal seat-host: record failed seat %s: %v\n", seat.SeatID, err)
 	}
 	return 1
+}
+
+// currentClaudeBinary swaps a recorded Claude build that version retention has
+// since pruned for the build the launcher picks now; any other recorded path stays.
+func currentClaudeBinary(recorded, home, configured string) (string, error) {
+	if filepath.Dir(recorded) != gather.ClaudeVersionsDir(home) {
+		return recorded, nil
+	}
+	if _, err := os.Stat(recorded); !errors.Is(err, os.ErrNotExist) {
+		return recorded, nil
+	}
+	resolved, err := gather.ResolveClaudeBinary(home, configured, paths.OSEnv{}.Get("PATH"))
+	if err != nil {
+		return "", fmt.Errorf("recorded Claude binary %s is gone, resolve its successor: %w", recorded, err)
+	}
+	return resolved, nil
 }
 
 func seatCommand(

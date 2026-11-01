@@ -62,7 +62,6 @@ Every law and every step serves one of these.
 - **The project's orientation file:** its test tiers, its isolation rules, and what a test run may never touch. These are the owner's constraints, not the designer's to invent. When the file is missing, each of the three becomes an Open ruling rather than a guess.
 - **The project's ratified references:** its facts, specs, contracts and rulings, indexed in `references.tsv` (§ Terms), which is where Law 12's `source:` values resolve. When none exist, every ruled assertion's source is an Open ruling.
 - **The project's own identifiers:** its repository names, its issue-tracker hosts and its internal domains, listed in the checks script so that `gaps` can tell an external reference from an internal one (Law 19).
-- **The interaction faults (optional):** the `faults.json` that the `/interaction-faults` skill (`templates/global/skills/interaction-faults/SKILL.md`) writes. Its cells are factor-value combinations ranked by fix history and test coverage. A cell with `held_by: null` is unheld and enters as a rank-first candidate: a step 7 crossing where two lanes touch the cell's sides, otherwise a step 6 row, each kept or cut by that step's own law. Without the file, steps 6–7 derive from the tree alone.
 - **The owner,** for the rulings in step 12 and as the reviewer of the ruling-bearing files (§ The threat model).
 
 ## The shape

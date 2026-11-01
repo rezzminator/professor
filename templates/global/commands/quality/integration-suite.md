@@ -26,7 +26,6 @@ Read `$DESIGN/integration-suite.md § Inputs`.
 - ratified references: facts, specs, contracts and rulings, indexed in `references.tsv`; none, and every ruled row's source is an Open ruling.
 - own identifiers: repository names, issue-tracker hosts and internal domains, listed in the checks script for `gaps`.
 - owner: the step 12 rulings, and the review of the owner-owned paths (Where enforcement ends).
-- interaction faults: the `faults.json` `/interaction-faults` writes, ranked cells (factor-value combinations that broke together); absent, steps 6–7 derive from the tree alone. Its cells with `held_by: null` are candidates, rank-first: a step 7 crossing where two lanes touch the cell's sides, else a step 6 row, each kept or cut by that step's law.
 
 ## Terms
 

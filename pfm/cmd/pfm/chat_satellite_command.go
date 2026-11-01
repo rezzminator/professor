@@ -543,7 +543,7 @@ func waitForBranchSessionID(
 				return "", fmt.Errorf("read session crumb %s: %w", entry.Name(), err)
 			}
 			id := composeTranscriptIDFromPath(strings.TrimSpace(string(raw)))
-			if id != "" && id != parent && uuidSessionID(id) {
+			if id != "" && id != parent && pfmengine.IsUUID(id) {
 				return id, nil
 			}
 		}

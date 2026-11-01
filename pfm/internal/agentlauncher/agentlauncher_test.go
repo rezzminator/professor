@@ -19,7 +19,7 @@ func TestContentExecsThePfmThroughOneSingleQuotedWord(t *testing.T) {
 	for _, test := range []struct{ name, pfm, want string }{
 		{"plain", "/h/.local/bin/pfm", `exec '/h/.local/bin/pfm' "$@"`},
 		{"space", "/h o/.local/bin/pfm", `exec '/h o/.local/bin/pfm' "$@"`},
-		{"quote", "/it's/.local/bin/pfm", `exec '/it'\''s/.local/bin/pfm' "$@"`},
+		{"quote", "/it's/.local/bin/pfm", `exec '/it'"'"'s/.local/bin/pfm' "$@"`},
 		{"dollar", "/$HOME/`x`/pfm", "exec '/$HOME/`x`/pfm' \"$@\""},
 	} {
 		t.Run(test.name, func(t *testing.T) {

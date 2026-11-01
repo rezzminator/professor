@@ -16,6 +16,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
@@ -77,9 +78,9 @@ func TestNewClaudeUsesNativeConfiguredSpawn(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"CLAUDE_CONFIG_DIR=" + Quote(machine.Accounts[0].ConfigDir),
-		Quote(machine.Claude.Binary),
-		Quote(prompt),
+		"CLAUDE_CONFIG_DIR=" + cmdparse.Quote(machine.Accounts[0].ConfigDir),
+		cmdparse.Quote(machine.Claude.Binary),
+		cmdparse.Quote(prompt),
 	} {
 		if !strings.Contains(plan.Run, want) {
 			t.Fatalf("native fresh run %q lacks %q", plan.Run, want)

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -42,7 +43,7 @@ func TestSynthesizeWorkbenchPersona(t *testing.T) {
 			switch request.Row.Kind {
 			case compose.NewClaude:
 				words = []string{
-					Quote("--system-prompt-file") + " " + Quote(prompt),
+					cmdparse.Quote("--system-prompt-file") + " " + cmdparse.Quote(prompt),
 					"'--effort' 'xhigh'",
 					"'--model' 'gpt-x'",
 					"'--name' '_SCRIBE:3'",
@@ -50,7 +51,7 @@ func TestSynthesizeWorkbenchPersona(t *testing.T) {
 			case compose.ResumeClaude, compose.Agent:
 				words = []string{
 					"'--resume' '44444444-4444-4444-8444-444444444444'",
-					Quote("--system-prompt-file") + " " + Quote(prompt),
+					cmdparse.Quote("--system-prompt-file") + " " + cmdparse.Quote(prompt),
 					"'--effort' 'xhigh'",
 					"'--model' 'gpt-x'",
 				}
@@ -62,10 +63,10 @@ func TestSynthesizeWorkbenchPersona(t *testing.T) {
 
 				fleetEnv := ""
 				if request.OpenCodeFleetPrompt != "" {
-					fleetEnv = " PFM_OPENCODE_FLEET_FILE=" + Quote(request.OpenCodeFleetPrompt)
+					fleetEnv = " PFM_OPENCODE_FLEET_FILE=" + cmdparse.Quote(request.OpenCodeFleetPrompt)
 				}
 				words = []string{
-					`OPENCODE_CONFIG_CONTENT='{"instructions":["` + prompt + `"],"plugin":["file://` + request.OpenCodePlugin + `","file://` + request.OpenCodeHerdrPlugin + `"]}' PFM_OPENCODE_MODEL='openai/gpt-x' PFM_OPENCODE_VARIANT='xhigh'` + fleetEnv + " PFM_OPENCODE_SYSTEM_FILE=" + Quote(
+					`OPENCODE_CONFIG_CONTENT='{"instructions":["` + prompt + `"],"plugin":["file://` + request.OpenCodePlugin + `","file://` + request.OpenCodeHerdrPlugin + `"]}' PFM_OPENCODE_MODEL='openai/gpt-x' PFM_OPENCODE_VARIANT='xhigh'` + fleetEnv + " PFM_OPENCODE_SYSTEM_FILE=" + cmdparse.Quote(
 						prompt,
 					) + " opencode",
 				}
@@ -418,9 +419,11 @@ func TestExecutorWorkbenchOpenCodeFleetPrompt(t *testing.T) {
 				request.Home,
 			) + `"]}'`
 			if marker == "clone recorded" {
-				want += " PFM_OPENCODE_FLEET_FILE=" + Quote(paths.GeneratedHarnessPromptIn(clone, pfmengine.OpenCode))
+				want += " PFM_OPENCODE_FLEET_FILE=" + cmdparse.Quote(
+					paths.GeneratedHarnessPromptIn(clone, pfmengine.OpenCode),
+				)
 			}
-			want += " PFM_OPENCODE_SYSTEM_FILE=" + Quote(prompt) + " opencode"
+			want += " PFM_OPENCODE_SYSTEM_FILE=" + cmdparse.Quote(prompt) + " opencode"
 			if !strings.Contains(run, want) {
 				t.Fatalf("run lacks %q: %s", want, run)
 			}

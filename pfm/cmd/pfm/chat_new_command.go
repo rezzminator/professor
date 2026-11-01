@@ -16,6 +16,7 @@ import (
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
@@ -501,8 +502,8 @@ func attachRunResult(attach bool, warnings []string, result spawn.Result, stdout
 		return 0
 	}
 	launchnotice.Pause(stderr, "pfm chat new", warnings)
-	line := "TMUX= tmux -L " + action.Quote(result.Socket) +
-		" attach -t " + action.Quote(result.Session)
+	line := "TMUX= tmux -L " + cmdparse.Quote(result.Socket) +
+		" attach -t " + cmdparse.Quote(result.Session)
 	if err := action.Dispatch(stdout, line); err != nil {
 		fmt.Fprintf(stderr, "pfm chat new: attach: %v\n", err)
 		return 1

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -54,10 +55,6 @@ func fenceArgs(args []string) []string {
 	return kept
 }
 
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
-}
-
 // runInFence re-runs this binary's package through `dev.sh iso run` and returns its exit code.
 // It never runs a test here: with no fence to reach, it refuses.
 func runInFence() int {
@@ -80,9 +77,9 @@ func runInFence() int {
 	if err != nil {
 		return refuseHost("package %s outside checkout %s: %v", pkgDir, root, err)
 	}
-	inner := "cd " + shellQuote(rel) + " && go test -count=1 . -args"
+	inner := "cd " + cmdparse.Quote(rel) + " && go test -count=1 . -args"
 	for _, arg := range fenceArgs(os.Args[1:]) {
-		inner += " " + shellQuote(arg)
+		inner += " " + cmdparse.Quote(arg)
 	}
 	warnSetup("no test runs on this machine — running %s in the fence", rel)
 	process, err := deps.RealRunner{}.Start(

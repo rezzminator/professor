@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
+	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -323,10 +324,10 @@ func Synthesize(request Request) (Plan, error) {
 			args = append(args, request.Prompt)
 		}
 		plan.SeatRun = codexSeatRun(machine, request.PrimaryAccount, request.Row.CWD, args...)
-		plan.Line = "(cd -- " + Quote(request.Row.CWD) + " && CODEX_HOME=" +
-			Quote(account.Home) + " cx"
+		plan.Line = "(cd -- " + cmdparse.Quote(request.Row.CWD) + " && CODEX_HOME=" +
+			cmdparse.Quote(account.Home) + " cx"
 		if request.Prompt != "" {
-			plan.Line += " " + Quote(request.Prompt)
+			plan.Line += " " + cmdparse.Quote(request.Prompt)
 		}
 		plan.Line += ")"
 	case NewOpenCode:
@@ -348,10 +349,10 @@ func Synthesize(request Request) (Plan, error) {
 			machine.Source("opencode.binary") == pfmconfig.SourceFile,
 		))
 		command.WriteByte(' ')
-		command.WriteString(Quote(request.Row.CWD))
+		command.WriteString(cmdparse.Quote(request.Row.CWD))
 		if request.Prompt != "" {
 			command.WriteString(" --prompt ")
-			command.WriteString(Quote(request.Prompt))
+			command.WriteString(cmdparse.Quote(request.Prompt))
 		}
 		plan.Run = command.String()
 		plan.SeatRun, err = openCodeSeatRun(request, machine, false)
@@ -381,9 +382,9 @@ func Synthesize(request Request) (Plan, error) {
 			machine.Source("opencode.binary") == pfmconfig.SourceFile,
 		))
 		command.WriteString(" --session ")
-		command.WriteString(Quote(request.Row.ID))
+		command.WriteString(cmdparse.Quote(request.Row.ID))
 		command.WriteByte(' ')
-		command.WriteString(Quote(request.Row.CWD))
+		command.WriteString(cmdparse.Quote(request.Row.CWD))
 		plan.Run = opencodeContinuityBanner(request.Row) + command.String()
 		plan.SeatRun, err = openCodeSeatRun(request, machine, true)
 		if err != nil {
@@ -437,7 +438,7 @@ func Synthesize(request Request) (Plan, error) {
 		plan.Warnings = resumeSpawn.warnings()
 		plan.Run = agentRun +
 			" || { echo; echo " +
-			Quote("agent router failed — resuming fresh:") +
+			cmdparse.Quote("agent router failed — resuming fresh:") +
 			"; exec " + resume + "; }"
 		plan = onChatServer(plan, request, machine, pfmengine.Claude)
 		plan.Record = &fleetdb.Launch{
@@ -484,7 +485,7 @@ func Synthesize(request Request) (Plan, error) {
 		)
 		plan.Run = resume +
 			" || { echo; echo " +
-			Quote("resume refused — session is live elsewhere:") +
+			cmdparse.Quote("resume refused — session is live elsewhere:") +
 			"; " + agent + "; }"
 		plan = onChatServer(plan, request, machine, pfmengine.Claude)
 		plan.Record = &fleetdb.Launch{
@@ -621,7 +622,7 @@ func continuityBanner(row compose.Row) string {
 	banner.WriteString("printf '%s\\n'")
 	for _, line := range lines {
 		banner.WriteByte(' ')
-		banner.WriteString(Quote(line))
+		banner.WriteString(cmdparse.Quote(line))
 	}
 	banner.WriteString("; ")
 	return banner.String()
@@ -641,7 +642,7 @@ func opencodeContinuityBanner(row compose.Row) string {
 	banner.WriteString("printf '%s\\n'")
 	for _, line := range lines {
 		banner.WriteByte(' ')
-		banner.WriteString(Quote(line))
+		banner.WriteString(cmdparse.Quote(line))
 	}
 	banner.WriteString("; ")
 	return banner.String()
@@ -663,7 +664,7 @@ func codexCommandWithAccount(
 	command.WriteString(ExtensionShellEnv(machine, pfmengine.MustLookup(pfmengine.Codex).LongName))
 	if selected, found := machine.CodexAccountByID(account); found {
 		command.WriteString(" CODEX_HOME=")
-		command.WriteString(Quote(selected.Home))
+		command.WriteString(cmdparse.Quote(selected.Home))
 	}
 	command.WriteByte(' ')
 	command.WriteString(binaryWord(
@@ -676,7 +677,7 @@ func codexCommandWithAccount(
 	command.WriteString(strings.Join(codexAutonomyArgs(policy.Yolo), " "))
 	for _, argument := range args {
 		command.WriteByte(' ')
-		command.WriteString(Quote(argument))
+		command.WriteString(cmdparse.Quote(argument))
 	}
 	return command.String()
 }
@@ -694,7 +695,7 @@ func binaryWord(value, fallback string, quote bool) string {
 		value = fallback
 	}
 	if quote {
-		return Quote(value)
+		return cmdparse.Quote(value)
 	}
 	return value
 }
@@ -721,12 +722,12 @@ func agentCommand(
 	command.WriteString(" pfm")
 	if machineConfigPath != "" {
 		command.WriteString(" --config ")
-		command.WriteString(Quote(machineConfigPath))
+		command.WriteString(cmdparse.Quote(machineConfigPath))
 	}
 	command.WriteString(" internal agent-open --id ")
-	command.WriteString(Quote(id))
+	command.WriteString(cmdparse.Quote(id))
 	command.WriteString(" --cwd ")
-	command.WriteString(Quote(cwd))
+	command.WriteString(cmdparse.Quote(cwd))
 	cache := "5m"
 	if cache1H {
 		cache = "1h"
@@ -735,7 +736,7 @@ func agentCommand(
 	command.WriteString(cache)
 	if len(configDir) != 0 && configDir[0] != "" {
 		command.WriteString(" --config ")
-		command.WriteString(Quote(configDir[0]))
+		command.WriteString(cmdparse.Quote(configDir[0]))
 	}
 	return command.String()
 }
@@ -764,9 +765,9 @@ func attachLine(socket, target string, bunker bool) string {
 	if bunker {
 		prefix += "exec "
 	}
-	line := prefix + "tmux -L " + Quote(socket) + " attach"
+	line := prefix + "tmux -L " + cmdparse.Quote(socket) + " attach"
 	if target != "" {
-		line += " -t " + Quote(target)
+		line += " -t " + cmdparse.Quote(target)
 	}
 	return line
 }

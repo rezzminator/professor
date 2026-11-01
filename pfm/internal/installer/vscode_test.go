@@ -516,7 +516,7 @@ const realMalformedVSCodeSettings = `{
 `
 
 // TestVSCodeMergeToleratesTheRealMalformedTrailingCommaFile proves
-// sanitizeJSONC/parseJSONCObject's trailing-comma tolerance against the
+// decodeJSONCObject/parseJSONCObject's trailing-comma tolerance against the
 // actual file that tripped errMalformedVSCodeSettings on devbox, not a
 // synthetic stand-in: the merge must proceed (no skip, no error). The PFM
 // profile, the "PFM" default, and all four ScalarOwned keys already match

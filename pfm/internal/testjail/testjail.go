@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	harnessprompts "github.com/rezzminator/professor/pfm/harness-prompts"
+	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -673,7 +674,7 @@ func PTYCommand(argv ...string) *exec.Cmd {
 	if runtime.GOOS == "linux" {
 		quoted := make([]string, len(argv))
 		for index, argument := range argv {
-			quoted[index] = "'" + strings.ReplaceAll(argument, "'", `'\''`) + "'"
+			quoted[index] = cmdparse.Quote(argument)
 		}
 		return exec.Command(scriptBinary, "-qefc", strings.Join(quoted, " "), "/dev/null")
 	}

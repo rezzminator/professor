@@ -15,6 +15,7 @@ import (
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
@@ -537,7 +538,7 @@ func TestClaudeRunCarriesTheConfiguredSystemPrompt(t *testing.T) {
 		SessionID: "11111111-1111-4111-8111-111111111111", PromptChannel: rolePrompt,
 	})
 	if err != nil || parsedReloadShell(t, roleRun).PromptFile != rolePrompt ||
-		strings.Contains(roleRun, action.Quote(promptPath)) {
+		strings.Contains(roleRun, cmdparse.Quote(promptPath)) {
 		t.Fatalf("Claude role reload did not replace the ordinary prompt file: run=%q error=%v", roleRun, err)
 	}
 
@@ -588,7 +589,7 @@ func TestCodexRunUsesTheSelectedHomeAndRosterPolicy(t *testing.T) {
 	}
 	escaped := strings.ReplaceAll(prompt, `\`, `\\`)
 	escaped = strings.ReplaceAll(escaped, `"""`, `\"\"\"`)
-	developerInstructions := action.Quote("developer_instructions=\"\"\"\n" + escaped + "\"\"\"")
+	developerInstructions := cmdparse.Quote("developer_instructions=\"\"\"\n" + escaped + "\"\"\"")
 	if !strings.Contains(run, " -c "+developerInstructions+" resume ") {
 		t.Fatalf("Codex role reload does not carry one complete developer-instructions value before resume: %q", run)
 	}

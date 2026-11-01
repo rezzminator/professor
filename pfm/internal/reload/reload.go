@@ -18,6 +18,7 @@ import (
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
@@ -565,14 +566,14 @@ func codexRun(request Request) (string, error) {
 		parts = append(parts, extensionEnv)
 	}
 	if request.CodexHome != "" {
-		parts = append(parts, "CODEX_HOME="+action.Quote(request.CodexHome))
+		parts = append(parts, "CODEX_HOME="+cmdparse.Quote(request.CodexHome))
 	}
 	binary := request.CodexBinary
 	if binary == "" {
 		binary = pfmengine.MustLookup(pfmengine.Codex).Binary
 	}
 	if binary != pfmengine.MustLookup(pfmengine.Codex).Binary {
-		binary = action.Quote(binary)
+		binary = cmdparse.Quote(binary)
 	}
 	// The respawned chat runs in-process, so its hooks reach its pane.
 	parts = append(parts, binary, pfmengine.CodexNoDaemon)
@@ -588,7 +589,7 @@ func codexRun(request Request) (string, error) {
 	}
 	for _, word := range words {
 		if word != "-c" && word != "--model" && word != "resume" {
-			word = action.Quote(word)
+			word = cmdparse.Quote(word)
 		}
 		parts = append(parts, word)
 	}

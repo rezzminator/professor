@@ -10,8 +10,6 @@ package mockengine
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -193,22 +191,6 @@ func touchFile(path string) error {
 		return fmt.Errorf("close %s: %w", path, err)
 	}
 	return nil
-}
-
-// newUUID is a random version-4 UUID in the 8-4-4-4-12 spelling
-// gather.isUUID accepts.
-func newUUID() string {
-	var raw [16]byte
-	if _, err := rand.Read(raw[:]); err != nil {
-		// crypto/rand never fails on the platforms pfm builds for; a fixed
-		// fixture id is still a valid UUID rather than a crash.
-		warn(os.Stderr, "crypto/rand.Read failed, falling back to a fixed fixture UUID: %v", err)
-		return "00000000-0000-4000-8000-000000000000"
-	}
-	raw[6] = (raw[6] & 0x0f) | 0x40
-	raw[8] = (raw[8] & 0x3f) | 0x80
-	text := hex.EncodeToString(raw[:])
-	return text[0:8] + "-" + text[8:12] + "-" + text[12:16] + "-" + text[16:20] + "-" + text[20:32]
 }
 
 // stamp is the RFC3339 millisecond timestamp Claude and Codex write.

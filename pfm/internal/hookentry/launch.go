@@ -20,6 +20,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/costsink"
 	"github.com/rezzminator/professor/pfm/internal/deps"
@@ -346,8 +347,8 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 	socketPath := filepath.Join(runtime.Paths.TmuxDir, socket)
 	startChannel := "pfm-launch-start-" + socket
 	doneChannel := "pfm-launch-done-" + socket
-	startWait := "TMUX= " + action.Quote(tmuxBinary) + " -S " + action.Quote(socketPath) +
-		" wait-for " + action.Quote(startChannel)
+	startWait := "TMUX= " + cmdparse.Quote(tmuxBinary) + " -S " + cmdparse.Quote(socketPath) +
+		" wait-for " + cmdparse.Quote(startChannel)
 	interactive := term.IsTerminal(os.Stdin.Fd())
 	gateRun := startWait + " && exec " + realRun
 	statusPath := ""
@@ -467,10 +468,10 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 }
 
 func launcherStatusRun(startWait, realRun, tmuxBinary, socketPath, doneChannel, statusPath string) string {
-	signalDone := "TMUX= " + action.Quote(tmuxBinary) + " -S " + action.Quote(socketPath) +
-		" wait-for -S " + action.Quote(doneChannel)
+	signalDone := "TMUX= " + cmdparse.Quote(tmuxBinary) + " -S " + cmdparse.Quote(socketPath) +
+		" wait-for -S " + cmdparse.Quote(doneChannel)
 	return startWait + " || exit $?; " + realRun + "; rc=$?; umask 077; " +
-		"printf '%s\\n' \"$rc\" > " + action.Quote(statusPath) + "; write_rc=$?; " +
+		"printf '%s\\n' \"$rc\" > " + cmdparse.Quote(statusPath) + "; write_rc=$?; " +
 		signalDone + "; signal_rc=$?; " +
 		"if [ \"$write_rc\" -ne 0 ]; then exit \"$write_rc\"; fi; " +
 		"if [ \"$signal_rc\" -ne 0 ]; then exit \"$signal_rc\"; fi; exit \"$rc\""

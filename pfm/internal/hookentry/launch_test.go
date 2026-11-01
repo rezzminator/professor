@@ -17,6 +17,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/action"
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
+	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/launchnotice"
@@ -133,7 +134,7 @@ func TestLaunchWorkbench(t *testing.T) {
 			binary, argvPath := filepath.Join(root, "claude"), filepath.Join(root, "argv")
 			if err := testjail.WriteExecutable(
 				binary,
-				[]byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > "+action.Quote(argvPath)+"\n"),
+				[]byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > "+cmdparse.Quote(argvPath)+"\n"),
 				0o700,
 			); err != nil {
 				t.Fatal(err)
@@ -271,7 +272,7 @@ func TestLaunchWarnsWhenTheFleetPromptCannotReachTheChat(t *testing.T) {
 			binary, argvPath := filepath.Join(root, "claude"), filepath.Join(root, "argv")
 			if err := testjail.WriteExecutable(
 				binary,
-				[]byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > "+action.Quote(argvPath)+"\n"),
+				[]byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > "+cmdparse.Quote(argvPath)+"\n"),
 				0o700,
 			); err != nil {
 				t.Fatal(err)
@@ -482,9 +483,9 @@ func TestLaunchReadsCompletedStatusAfterServerExit(t *testing.T) {
 			wrapper := "#!/bin/sh\n" +
 				"if [ \"$3\" = wait-for ] && [ \"$4\" != -S ]; then\n" +
 				"  case \"$4\" in pfm-launch-done-*)\n" +
-				"    n=0; while " + action.Quote(realTmux) + " -S \"$2\" has-session 2>/dev/null; do\n" +
+				"    n=0; while " + cmdparse.Quote(realTmux) + " -S \"$2\" has-session 2>/dev/null; do\n" +
 				"      n=$((n + 1)); [ \"$n\" -lt 500 ] || exit 99; sleep 0.01\n" +
-				"    done;; esac\nfi\nexec " + action.Quote(realTmux) + " \"$@\"\n"
+				"    done;; esac\nfi\nexec " + cmdparse.Quote(realTmux) + " \"$@\"\n"
 			if err := testjail.WriteExecutable(filepath.Join(binDir, "tmux"), []byte(wrapper), 0o700); err != nil {
 				t.Fatal(err)
 			}

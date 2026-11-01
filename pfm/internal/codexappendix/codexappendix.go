@@ -25,6 +25,7 @@ import (
 	"github.com/BurntSushi/toml"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 )
 
 // Matcher and Command are the retired handler's exact spelling in
@@ -34,7 +35,7 @@ const Matcher = "startup|resume|clear|compact"
 // Command identifies only Professor's handler, including homes containing shell metacharacters.
 func Command(home string) string {
 	path := filepath.Join(home, ".local", "bin", "pfm")
-	return "'" + strings.ReplaceAll(path, "'", "'\"'\"'") + "' internal codex-appendix"
+	return cmdparse.Quote(path) + " internal codex-appendix"
 }
 
 func receiptPath(account string) string {

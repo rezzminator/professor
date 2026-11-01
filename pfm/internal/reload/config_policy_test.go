@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rezzminator/professor/pfm/internal/action"
+	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
@@ -55,8 +55,8 @@ func TestRunRespawnsWithConfiguredClaudePolicy(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	}
 	for _, want := range []string{
-		"CLAUDE_CONFIG_DIR=" + action.Quote(configDir),
-		action.Quote(customBinary),
+		"CLAUDE_CONFIG_DIR=" + cmdparse.Quote(configDir),
+		cmdparse.Quote(customBinary),
 	} {
 		if !strings.Contains(tmux.respawn, want) {
 			t.Fatalf("respawn command %q lacks configured policy %q", tmux.respawn, want)

@@ -8,8 +8,8 @@ import (
 	"io"
 	"io/fs"
 
-	"github.com/rezzminator/professor/pfm/internal/action"
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
+	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/headless"
@@ -310,7 +310,7 @@ func CheckAwait(ctx context.Context, chat headless.Chat, runtime *pfmconfig.Runt
 			chat.Name,
 			PaneTarget(chat),
 			socket,
-			action.Quote(chat.Handle()),
+			cmdparse.Quote(chat.Handle()),
 		)
 	}
 	return nil

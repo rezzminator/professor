@@ -624,7 +624,7 @@ func callOneHeadless(call headlessCall, targetName string, stdout, stderr io.Wri
 				return codeUndelivered
 			}
 			resolved := machine.Paths
-			if uuidSessionID(target.ID) {
+			if pfmengine.IsUUID(target.ID) {
 				live, liveErr := runningClaudeSession(resolved.ProcRoot, target.ID)
 				if liveErr != nil {
 					fmt.Fprintf(stderr, "pfm chat call: %v\n", liveErr)

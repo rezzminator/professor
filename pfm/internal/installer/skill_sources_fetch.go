@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/rezzminator/professor/pfm/internal/action"
+	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 )
 
 // skillGitUsesSSH checks only remote operations, whose registry URL follows
@@ -34,7 +34,7 @@ func skillGitRemoteOperation(args []string) bool {
 }
 
 func skillSSHCommandNoninteractive(command string) bool {
-	words, err := action.SplitShellWords(command)
+	words, err := cmdparse.SplitShellWords(command)
 	if err != nil || len(words) == 0 || filepath.Base(words[0]) != "ssh" ||
 		strings.ContainsAny(command, "$`;|&<>()\n") {
 		return false

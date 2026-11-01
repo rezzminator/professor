@@ -5,7 +5,9 @@
 // part and denies a git command whose part did not parse or hit a parse bound,
 // the store guard (internal/hookentry/store_guard.go), which reads each
 // part's Env, and the pcm guard (internal/hookentry/pcm_guard.go), which
-// reads each part's Redirs besides its words.
+// reads each part's Redirs besides its words. Quote and SplitShellWords are
+// the one POSIX single-quoter and its inverse, which removes quoting and
+// expands nothing.
 // Design: docs/design/hooks/git-guard.md § How it reads a command,
 // docs/design/hooks/pcm-guard.md § How it reads a command.
 package cmdparse

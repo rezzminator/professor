@@ -4,8 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"uuid"
 
 	"github.com/rezzminator/professor/pfm/internal/action"
 	"github.com/rezzminator/professor/pfm/internal/agentopen"
@@ -183,24 +182,6 @@ func runningClaudeSession(procRoot, id string) (bool, error) {
 	return false, nil
 }
 
-func uuidSessionID(id string) bool {
-	parts := strings.Split(id, "-")
-	if len(parts) != 5 || len(parts[0]) != 8 || len(parts[1]) != 4 ||
-		len(parts[2]) != 4 || len(parts[3]) != 4 || len(parts[4]) != 12 {
-		return false
-	}
-	for _, part := range parts {
-		for _, character := range part {
-			if (character < '0' || character > '9') &&
-				(character < 'a' || character > 'f') &&
-				(character < 'A' || character > 'F') {
-				return false
-			}
-		}
-	}
-	return true
-}
-
 // liveCrumbSession restores the portable half of the live-session guard. A
 // chat can be absent from /proc (or its environment unreadable) while its
 // socket crumb still points at a live tmux pane. The crumb is evidence only
@@ -356,14 +337,7 @@ func appendResumeCall(
 	if parent == "" || sessionID == "" {
 		return resumeReceipt{}, fmt.Errorf("transcript %q has no uuid-bearing session tail", target.Path)
 	}
-	eventID, err := randomUUID()
-	if err != nil {
-		return resumeReceipt{}, fmt.Errorf("create called event id: %w", err)
-	}
-	promptID, err := randomUUID()
-	if err != nil {
-		return resumeReceipt{}, fmt.Errorf("create called prompt id: %w", err)
-	}
+	eventID, promptID := uuid.NewV4().String(), uuid.NewV4().String()
 	event := map[string]any{
 		"type":        transcriptRoleUser,
 		"userType":    "external",
@@ -408,7 +382,7 @@ func lastUUIDEvent(raw []byte) (map[string]any, error) {
 		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
 			return nil, fmt.Errorf("decode JSONL line: %w", err)
 		}
-		if uuid, _ := event["uuid"].(string); uuid != "" {
+		if id, _ := event["uuid"].(string); id != "" {
 			tail = event
 		}
 	}
@@ -419,18 +393,4 @@ func lastUUIDEvent(raw []byte) (map[string]any, error) {
 		return nil, errors.New("no uuid-bearing event")
 	}
 	return tail, nil
-}
-
-func randomUUID() (string, error) {
-	var raw [16]byte
-	if _, err := rand.Read(raw[:]); err != nil {
-		return "", err
-	}
-	raw[6] = (raw[6] & 0x0f) | 0x40
-	raw[8] = (raw[8] & 0x3f) | 0x80
-	encoded := make([]byte, 32)
-	hex.Encode(encoded, raw[:])
-	return string(encoded[0:8]) + "-" + string(encoded[8:12]) + "-" +
-		string(encoded[12:16]) + "-" + string(encoded[16:20]) + "-" +
-		string(encoded[20:32]), nil
 }

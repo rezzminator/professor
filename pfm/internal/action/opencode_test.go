@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
@@ -29,7 +30,7 @@ func TestSynthesizeNewOpenCodeLaunchesFreshConfiguredSeat(t *testing.T) {
 	if plan.Route != NewOpenCode {
 		t.Fatalf("route = %v, want %v", plan.Route, NewOpenCode)
 	}
-	if !strings.Contains(plan.Run, Quote(machine.OpenCode.Binary)) || strings.Contains(plan.Run, "--session") {
+	if !strings.Contains(plan.Run, cmdparse.Quote(machine.OpenCode.Binary)) || strings.Contains(plan.Run, "--session") {
 		t.Fatalf("fresh OpenCode run = %q", plan.Run)
 	}
 	if !strings.HasPrefix(plan.Run, opencodeHygiene+" ") || !strings.Contains(plan.Run, " -u CLAUDE_CODE_SSE_PORT ") {

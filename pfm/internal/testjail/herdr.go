@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -26,8 +27,7 @@ func StageHerdrShell(t *testing.T, home string) string {
 	if err != nil {
 		t.Fatalf("read installed Herdr shell fixture asset: %v", err)
 	}
-	quote := func(value string) string { return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'" }
-	contentWrapper := strings.NewReplacer("__PFM_REAL_SHELL__", quote("/bin/sh"), "__PFM_WRAPPER__", quote(wrapper)).
+	contentWrapper := strings.NewReplacer("__PFM_REAL_SHELL__", cmdparse.Quote("/bin/sh"), "__PFM_WRAPPER__", cmdparse.Quote(wrapper)).
 		Replace(string(raw))
 	if err := WriteExecutable(wrapper, []byte(contentWrapper), 0o755); err != nil {
 		t.Fatal(err)

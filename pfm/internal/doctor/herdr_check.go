@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rezzminator/professor/pfm/internal/action"
+	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -92,7 +92,7 @@ func printHerdrDoctor(
 					deps.EnvironmentWith(engine.key, home),
 					[]string{engine.name},
 					scope,
-					engine.key+"="+action.Quote(home)+" ",
+					engine.key+"="+cmdparse.Quote(home)+" ",
 				)
 				warnings += w
 				failures += f

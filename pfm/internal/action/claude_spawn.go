@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
+	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
@@ -100,13 +101,13 @@ func (spawn ClaudeSpawn) ShellCommand() (string, error) {
 	writeAssignments(&command, launch.Env)
 	for _, word := range launch.Wrapper {
 		command.WriteByte(' ')
-		command.WriteString(Quote(word))
+		command.WriteString(cmdparse.Quote(word))
 	}
 	command.WriteByte(' ')
-	command.WriteString(Quote(launch.Binary))
+	command.WriteString(cmdparse.Quote(launch.Binary))
 	for _, argument := range launch.Argv {
 		command.WriteByte(' ')
-		command.WriteString(Quote(argument))
+		command.WriteString(cmdparse.Quote(argument))
 	}
 	return command.String(), nil
 }
@@ -235,7 +236,7 @@ func writeAssignments(command *strings.Builder, assignments []string) {
 		command.WriteByte(' ')
 		command.WriteString(name)
 		command.WriteByte('=')
-		command.WriteString(Quote(value))
+		command.WriteString(cmdparse.Quote(value))
 	}
 }
 
@@ -252,4 +253,13 @@ func (spawn ClaudeSpawn) SeatRun(cwd string) (fleetdb.SeatRun, error) {
 		CWD:        cwd,
 		CostLedger: spawn.Machine.EffectiveClaude(spawn.Account).CostLedger,
 	}, nil
+}
+
+func hasNUL(values ...string) bool {
+	for _, value := range values {
+		if strings.IndexByte(value, 0) >= 0 {
+			return true
+		}
+	}
+	return false
 }

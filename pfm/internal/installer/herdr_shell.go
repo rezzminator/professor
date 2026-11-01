@@ -16,6 +16,7 @@ import (
 	"github.com/BurntSushi/toml"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -93,11 +94,15 @@ func InspectHerdrShell(home string, env paths.Env) (HerdrShellStatus, error) {
 		return status, fmt.Errorf("read Herdr shell wrapper: %w", err)
 	}
 	for line := range strings.SplitSeq(string(content), "\n") {
-		const prefix = "pfm_real_shell='"
-		if !strings.HasPrefix(line, prefix) || !strings.HasSuffix(line, "'") {
+		value, found := strings.CutPrefix(line, "pfm_real_shell=")
+		if !found || !strings.HasPrefix(value, "'") || !strings.HasSuffix(value, "'") {
 			continue
 		}
-		shell := strings.ReplaceAll(strings.TrimSuffix(strings.TrimPrefix(line, prefix), "'"), `'\''`, "'")
+		words, err := cmdparse.SplitShellWords(value)
+		if err != nil || len(words) != 1 {
+			return status, nil
+		}
+		shell := words[0]
 		if !filepath.IsAbs(shell) || strings.ContainsAny(shell, "\x00\r\n") || shell == paths.HerdrShellWrapper(home) {
 			return status, nil
 		}
@@ -116,9 +121,8 @@ func renderHerdrShell(wrapper, realShell string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read Herdr shell wrapper asset: %w", err)
 	}
-	quote := func(value string) string { return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'" }
 	return []byte(
-		strings.NewReplacer("__PFM_REAL_SHELL__", quote(realShell), "__PFM_WRAPPER__", quote(wrapper)).
+		strings.NewReplacer("__PFM_REAL_SHELL__", cmdparse.Quote(realShell), "__PFM_WRAPPER__", cmdparse.Quote(wrapper)).
 			Replace(string(content)),
 	), nil
 }

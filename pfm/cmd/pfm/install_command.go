@@ -8,9 +8,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/rezzminator/professor/pfm/internal/action"
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/doctor"
@@ -218,7 +218,7 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 			confirmation += " --adopt-agents"
 		}
 		if *configDir != "" {
-			confirmation += " --config-dir " + action.Quote(*configDir)
+			confirmation += " --config-dir " + cmdparse.Quote(*configDir)
 		}
 		fmt.Fprintln(stdout, confirmation)
 	}

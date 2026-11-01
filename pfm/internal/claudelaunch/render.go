@@ -3,13 +3,13 @@ package claudelaunch
 import (
 	"cmp"
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"uuid"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -410,12 +410,7 @@ func argsPersonaFlag(args []string, flag string) bool {
 	return false
 }
 
+// NewSessionID is a random version-4 UUID for a fresh Claude session.
 func NewSessionID() (string, error) {
-	var bytes [16]byte
-	if _, err := rand.Read(bytes[:]); err != nil {
-		return "", err
-	}
-	bytes[6] = (bytes[6] & 0x0f) | 0x40
-	bytes[8] = (bytes[8] & 0x3f) | 0x80
-	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", bytes[:4], bytes[4:6], bytes[6:8], bytes[8:10], bytes[10:]), nil
+	return uuid.NewV4().String(), nil
 }

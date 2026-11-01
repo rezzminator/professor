@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
+	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -432,7 +433,7 @@ func PlanOpenCode(request HeadlessRequest) (HeadlessPlan, error) {
 	}
 	if request.Model != "" {
 		plan.SeatRun.Args = append(plan.SeatRun.Args, "--model", request.Model)
-		plan.Run += " --model " + Quote(request.Model)
+		plan.Run += " --model " + cmdparse.Quote(request.Model)
 	}
 	return HeadlessPlan{
 		Engine:              pfmengine.OpenCode,

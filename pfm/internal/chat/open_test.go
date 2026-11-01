@@ -14,6 +14,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/action"
 	"github.com/rezzminator/professor/pfm/internal/archive"
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -203,7 +204,7 @@ func TestOpenDetachedIDResumesUnderRecordedClaudeAccount(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantDir := filepath.Join(home, ".cc", "3")
-	if len(tmux.created) != 1 || !strings.Contains(tmux.created[0].Run, "CLAUDE_CONFIG_DIR="+action.Quote(wantDir)) {
+	if len(tmux.created) != 1 || !strings.Contains(tmux.created[0].Run, "CLAUDE_CONFIG_DIR="+cmdparse.Quote(wantDir)) {
 		t.Fatalf("created = %+v; want account 3 config %q", tmux.created, wantDir)
 	}
 	launches, err := fleetdb.OpenLaunches(ctx, runtime.Paths)

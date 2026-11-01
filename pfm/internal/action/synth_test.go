@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -29,8 +30,8 @@ func TestQuoteRoundTripsHostileWords(t *testing.T) {
 	}
 	for _, value := range values {
 		outputPath := filepath.Join(t.TempDir(), "word")
-		script := "set -- " + Quote(value) +
-			"; printf %s \"$1\" > " + Quote(outputPath)
+		script := "set -- " + cmdparse.Quote(value) +
+			"; printf %s \"$1\" > " + cmdparse.Quote(outputPath)
 		command := exec.Command("sh", "-c", script)
 		if output, err := command.CombinedOutput(); err != nil {
 			t.Fatalf("sh round trip %q: %v: %s", value, err, output)
@@ -40,7 +41,7 @@ func TestQuoteRoundTripsHostileWords(t *testing.T) {
 			t.Fatal(err)
 		}
 		if string(content) != value {
-			t.Fatalf("Quote(%q) round trip = %q", value, content)
+			t.Fatalf("cmdparse.Quote(%q) round trip = %q", value, content)
 		}
 	}
 }
@@ -87,7 +88,7 @@ func TestLauncherRunAsWorkbench(t *testing.T) {
 				}
 				return
 			}
-			for _, pair := range []string{"'--system-prompt-file' " + Quote(persona.Prompt), "'--effort' 'xhigh'", "'--model' 'sonnet'"} {
+			for _, pair := range []string{"'--system-prompt-file' " + cmdparse.Quote(persona.Prompt), "'--effort' 'xhigh'", "'--model' 'sonnet'"} {
 				if !strings.Contains(got, pair) {
 					t.Errorf("command lacks %s: %s", pair, got)
 				}
@@ -227,11 +228,14 @@ func TestDeadClaudeResumeUsesRecordedAccount(t *testing.T) {
 				t.Fatal(err)
 			}
 			wantDir := pfmconfig.DefaultAccountDir(home, scenario.want)
-			if !strings.Contains(plan.Run, "CLAUDE_CONFIG_DIR="+Quote(wantDir)) || plan.Record == nil ||
+			if !strings.Contains(plan.Run, "CLAUDE_CONFIG_DIR="+cmdparse.Quote(wantDir)) || plan.Record == nil ||
 				plan.Record.Account != scenario.want {
 				t.Fatalf("run = %q, record = %+v; want account %d", plan.Run, plan.Record, scenario.want)
 			}
-			if usesThird := strings.Contains(plan.Run, Quote("/bin/claude-three")); usesThird != (scenario.want == 3) {
+			if usesThird := strings.Contains(
+				plan.Run,
+				cmdparse.Quote("/bin/claude-three"),
+			); usesThird != (scenario.want == 3) {
 				t.Fatalf("account %d effective binary in run = %t", scenario.want, usesThird)
 			}
 		})
@@ -308,7 +312,7 @@ func TestCodexLiveUsesOnlyVerifiedWindow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(plan.Line, Quote("cx-session")) ||
+	if !strings.Contains(plan.Line, cmdparse.Quote("cx-session")) ||
 		strings.Contains(plan.Line, "cx-session:") {
 		t.Fatalf("unverified Codex attach line = %q", plan.Line)
 	}
@@ -321,7 +325,7 @@ func TestCodexLiveUsesOnlyVerifiedWindow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(plan.Line, Quote("cx-session:already-converged")) {
+	if !strings.Contains(plan.Line, cmdparse.Quote("cx-session:already-converged")) {
 		t.Fatalf("Codex converged attach line = %q", plan.Line)
 	}
 }
@@ -367,8 +371,8 @@ func TestBootingRowAttachesLikeAnOrdinaryLiveRow(t *testing.T) {
 			liveLine.Line,
 		)
 	}
-	if want := "TMUX= tmux -L " + Quote("cc-new-fixture-1") +
-		" attach -t " + Quote("cc-new-fixture-1"); bootingLine.Line != want {
+	if want := "TMUX= tmux -L " + cmdparse.Quote("cc-new-fixture-1") +
+		" attach -t " + cmdparse.Quote("cc-new-fixture-1"); bootingLine.Line != want {
 		t.Fatalf("booting attach line = %q, want %q", bootingLine.Line, want)
 	}
 
@@ -485,17 +489,17 @@ func TestPickerLaunchPromptReachesClaudeCodexAndOpenCode(t *testing.T) {
 		{
 			name: "Claude",
 			row:  compose.Row{Kind: compose.NewClaude, CWD: "/work/.professor"},
-			want: []string{"claude", Quote(prompt), "attach"},
+			want: []string{"claude", cmdparse.Quote(prompt), "attach"},
 		},
 		{
 			name: "Codex",
 			row:  compose.Row{Kind: compose.NewCodex, CWD: "/work/.professor"},
-			want: []string{"cx", Quote(prompt)},
+			want: []string{"cx", cmdparse.Quote(prompt)},
 		},
 		{
 			name: "OpenCode",
 			row:  compose.Row{Kind: compose.NewOpenCode, CWD: "/work/.professor"},
-			want: []string{"opencode", "--prompt", Quote(prompt)},
+			want: []string{"opencode", "--prompt", cmdparse.Quote(prompt)},
 		},
 	}
 	for _, test := range tests {
@@ -626,7 +630,7 @@ func TestEveryFreshServerRouteIsBornThroughTheOneChatServerCreator(t *testing.T)
 		if request.Bunker {
 			prefix += "exec "
 		}
-		socket := Quote(request.FreshSocket)
+		socket := cmdparse.Quote(request.FreshSocket)
 		if want := prefix + "tmux -L " + socket + " attach -t " + socket; plan.Line != want {
 			t.Fatalf("route %c line = %s, want only the attach %s", plan.Route, plan.Line, want)
 		}

@@ -8,6 +8,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/charmbracelet/x/ansi"
+
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
@@ -43,8 +45,8 @@ var (
 	// rather than being silently treated as proven.
 	compactReceipt  = regexp.MustCompile(`(?i)compacted \(|(?:context|conversation) compacted`)
 	menuHintPattern = regexp.MustCompile(`(?i)enter to (confirm|continue|select)|esc to (cancel|go back)`)
-	ansiPattern     = regexp.MustCompile(`\x1b\[[0-?]*[\x20-\x2f]*[\x40-\x7e]`)
-	oscPattern      = regexp.MustCompile("\x1b\\][^\x07]*(\x07|\x1b\\\\)")
+	// ansiPattern finds one CSI sequence for the SGR walkers; ansi.Strip removes them all.
+	ansiPattern = regexp.MustCompile(`\x1b\[[0-?]*[\x20-\x2f]*[\x40-\x7e]`)
 	// A row of Claude's agents panel under the cursor: a status bullet, then the
 	// bare main row, or a name (a count such as "(+3)" may follow) and a
 	// two-space gap before its status.
@@ -121,7 +123,7 @@ func IsBusyFor(engine pfmengine.ID, capture string) bool {
 	}
 	tail := lastNonEmptyLines(capture, openCodeBusyFooterLines)
 	for _, line := range strings.Split(tail, "\n") {
-		if strings.Contains(stripTerminalControl(line), openCodeBusyHint) {
+		if strings.Contains(ansi.Strip(line), openCodeBusyHint) {
 			return true
 		}
 	}
@@ -136,7 +138,7 @@ func SelectorLine(capture string) string {
 	if line == "" {
 		return ""
 	}
-	clean := stripTerminalControl(strings.TrimSuffix(line, "\r"))
+	clean := ansi.Strip(strings.TrimSuffix(line, "\r"))
 	clean = strings.TrimSpace(clean)
 	if strings.HasPrefix(clean, "❯") {
 		if claudeMenuPattern.MatchString(clean) ||
@@ -164,7 +166,7 @@ func hasDraft(line string) bool {
 	if line == "" {
 		return false
 	}
-	line = stripTerminalControl(strings.TrimSuffix(line, "\r"))
+	line = ansi.Strip(strings.TrimSuffix(line, "\r"))
 	rest := strings.TrimSpace(line)
 	rest = strings.TrimPrefix(rest, "❯")
 	rest = strings.TrimPrefix(rest, "›")
@@ -225,7 +227,7 @@ func ComposerDraftText(capture string) string {
 
 // composerDraft is the text after the composer row's leading ❯/› marker.
 func composerDraft(line string) string {
-	line = strings.TrimLeftFunc(stripTerminalControl(line), unicode.IsSpace)
+	line = strings.TrimLeftFunc(ansi.Strip(line), unicode.IsSpace)
 	if strings.HasPrefix(line, "❯") || strings.HasPrefix(line, "›") {
 		return line[len("❯"):]
 	}
@@ -304,12 +306,12 @@ func isDimPlaceholder(styledLine string) bool {
 		}
 		rest = rest[match[1]:]
 	}
-	return !hasDraft(stripTerminalControl(visible.String()))
+	return !hasDraft(ansi.Strip(visible.String()))
 }
 
 func composerLastLine(capture string) string {
 	line := rawLastComposerLine(capture)
-	if isClaudeTrustSelector(capture, strings.TrimSpace(stripTerminalControl(line))) {
+	if isClaudeTrustSelector(capture, strings.TrimSpace(ansi.Strip(line))) {
 		return ""
 	}
 	return line
@@ -323,7 +325,7 @@ func isClaudeTrustSelector(capture, line string) bool {
 	}
 	lines := strings.Split(capture, "\n")
 	row := lastComposerRow(lines)
-	if row > 0 && ComposerBoxRule(stripTerminalControl(lines[row-1])) {
+	if row > 0 && ComposerBoxRule(ansi.Strip(lines[row-1])) {
 		if _, bounded := ComposerBoxText(capture); bounded {
 			return false
 		}
@@ -344,7 +346,7 @@ func rawLastComposerLine(capture string) string {
 func lastComposerRow(lines []string) int {
 	last, boxWidth := -1, 0
 	for index, line := range lines {
-		clean := stripTerminalControl(strings.TrimSuffix(line, "\r"))
+		clean := ansi.Strip(strings.TrimSuffix(line, "\r"))
 		if boxWidth > 0 {
 			if ComposerBoxRule(clean) && utf8.RuneCountInString(strings.TrimSpace(clean)) >= boxWidth {
 				boxWidth = 0
@@ -364,7 +366,7 @@ func lastComposerRow(lines []string) int {
 		if strings.HasPrefix(visible, "❯") || strings.HasPrefix(visible, "›") {
 			last = index
 			if index > 0 {
-				top := strings.TrimSpace(stripTerminalControl(lines[index-1]))
+				top := strings.TrimSpace(ansi.Strip(lines[index-1]))
 				if ComposerBoxRule(top) {
 					boxWidth = utf8.RuneCountInString(top)
 				}
@@ -384,7 +386,7 @@ func lastComposerRow(lines []string) int {
 // frame, Codex's braille sparkle) are a typed "-" or text on these rows.
 func ComposerBoxEmpty(capture string) bool {
 	text, bounded := ComposerBoxText(capture)
-	return bounded && strings.IndexFunc(stripTerminalControl(text), func(character rune) bool {
+	return bounded && strings.IndexFunc(ansi.Strip(text), func(character rune) bool {
 		return unicode.IsGraphic(character) && !unicode.IsSpace(character)
 	}) < 0
 }
@@ -400,13 +402,13 @@ func ComposerBoxText(capture string) (string, bool) {
 	}
 	topWidth := 0
 	if row > 0 {
-		top := strings.TrimSpace(stripTerminalControl(lines[row-1]))
+		top := strings.TrimSpace(ansi.Strip(lines[row-1]))
 		if ComposerBoxRule(top) {
 			topWidth = utf8.RuneCountInString(top)
 		}
 	}
 	for end := row + 1; end < len(lines); end++ {
-		clean := stripTerminalControl(strings.TrimSuffix(lines[end], "\r"))
+		clean := ansi.Strip(strings.TrimSuffix(lines[end], "\r"))
 		if ComposerBoxRule(clean) && utf8.RuneCountInString(strings.TrimSpace(clean)) >= topWidth {
 			return strings.Join(lines[row+1:end], "\n"), true
 		}
@@ -430,10 +432,6 @@ func ComposerBoxRule(line string) bool {
 		}
 	}
 	return drawn
-}
-
-func stripTerminalControl(value string) string {
-	return oscPattern.ReplaceAllString(ansiPattern.ReplaceAllString(value, ""), "")
 }
 
 func lastNonEmptyLines(capture string, limit int) string {

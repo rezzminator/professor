@@ -7,10 +7,10 @@ import (
 	"os"
 	"strings"
 	"syscall"
-	"unicode"
 
 	"github.com/charmbracelet/x/term"
 
+	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
@@ -58,7 +58,11 @@ func execute(line string) error {
 }
 
 func directTmuxArguments(line string) ([]string, bool, error) {
-	words, err := SplitShellWords(line)
+	// Only a generated TMUX= line is split; any other line is zsh's to parse.
+	if !strings.HasPrefix(line, "TMUX=") {
+		return nil, false, nil
+	}
+	words, err := cmdparse.SplitShellWords(line)
 	if err != nil {
 		return nil, false, fmt.Errorf("decode tmux action: %w", err)
 	}
@@ -76,72 +80,4 @@ func directTmuxArguments(line string) ([]string, bool, error) {
 		return nil, false, errors.New("generated tmux action has no arguments")
 	}
 	return words[index+1:], true, nil
-}
-
-// SplitShellWords decodes the quoting emitted by Quote. It performs no
-// expansion, substitution, globbing, or operator interpretation.
-func SplitShellWords(line string) ([]string, error) {
-	words := make([]string, 0, 12)
-	var word strings.Builder
-	var quote rune
-	inWord := false
-	escaped := false
-	flush := func() {
-		if !inWord {
-			return
-		}
-		words = append(words, word.String())
-		word.Reset()
-		inWord = false
-	}
-
-	for _, character := range line {
-		if escaped {
-			word.WriteRune(character)
-			inWord = true
-			escaped = false
-			continue
-		}
-		switch quote {
-		case '\'':
-			if character == '\'' {
-				quote = 0
-			} else {
-				word.WriteRune(character)
-			}
-			inWord = true
-		case '"':
-			switch character {
-			case '"':
-				quote = 0
-			case '\\':
-				escaped = true
-			default:
-				word.WriteRune(character)
-			}
-			inWord = true
-		default:
-			switch {
-			case unicode.IsSpace(character):
-				flush()
-			case character == '\'' || character == '"':
-				quote = character
-				inWord = true
-			case character == '\\':
-				escaped = true
-				inWord = true
-			default:
-				word.WriteRune(character)
-				inWord = true
-			}
-		}
-	}
-	if escaped {
-		return nil, errors.New("trailing escape")
-	}
-	if quote != 0 {
-		return nil, errors.New("unterminated quote")
-	}
-	flush()
-	return words, nil
 }

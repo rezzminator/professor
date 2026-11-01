@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"uuid"
 
 	"github.com/BurntSushi/toml"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -139,7 +140,7 @@ func serveCodex(proc *process) int {
 		session.threadID = proc.script.SessionID
 	}
 	if session.threadID == "" {
-		session.threadID = newUUID()
+		session.threadID = uuid.NewV4().String()
 	}
 	if call.subcommand == "exec" {
 		return session.headless()
@@ -514,7 +515,7 @@ func (session *codexSession) tool(step Step) (string, error) {
 	if arguments == "" {
 		arguments = "{}"
 	}
-	callID := "call_" + newUUID()[:8]
+	callID := "call_" + uuid.NewV4().String()[:8]
 	records := []codexRecord{
 		{Type: recordResponseItem, Payload: map[string]any{
 			keyType: "function_call", "name": step.Tool, "arguments": arguments, "call_id": callID,
@@ -567,7 +568,12 @@ func (session *codexSession) rename(name string) error {
 // names this thread as parent (internal/codexmeta/header.go:71-84 reads it).
 // Codex's pane shows nothing pfm pins for it, so no row is rendered.
 func (session *codexSession) background(step Step) (string, error) {
-	child := &codexSession{proc: session.proc, codexHome: session.codexHome, threadID: newUUID(), model: session.model}
+	child := &codexSession{
+		proc:      session.proc,
+		codexHome: session.codexHome,
+		threadID:  uuid.NewV4().String(),
+		model:     session.model,
+	}
 	now := time.Now()
 	child.rollout = child.rolloutFor(child.threadID, now)
 	if err := child.openRollout(); err != nil {
@@ -601,7 +607,7 @@ func (session *codexSession) mcp(step Step) error {
 	if len(input) == 0 {
 		input = json.RawMessage(`{}`)
 	}
-	callID := "call_" + newUUID()[:8]
+	callID := "call_" + uuid.NewV4().String()[:8]
 	if err := session.write(codexRecord{Type: recordResponseItem, Payload: map[string]any{
 		keyType: "function_call", "name": step.Tool, "arguments": string(input), "call_id": callID,
 	}}); err != nil {

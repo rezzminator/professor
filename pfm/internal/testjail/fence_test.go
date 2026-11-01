@@ -1,7 +1,6 @@
 package testjail
 
 import (
-	"os/exec"
 	"reflect"
 	"testing"
 )
@@ -14,15 +13,6 @@ func TestFenceArgsDropHostPathFlags(t *testing.T) {
 	want := []string{"-test.run=^TestX$", "-test.v=test2json", "-test.timeout=10m0s", "-test.count=1"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("fenceArgs = %q, want %q", got, want)
-	}
-}
-
-func TestShellQuoteSurvivesAShell(t *testing.T) {
-	for _, s := range []string{"plain", "it's", `^Test(A|B)$`, "a b", `$HOME;rm -rf x`} {
-		out, err := exec.Command("bash", "-c", "printf %s "+shellQuote(s)).Output()
-		if err != nil || string(out) != s {
-			t.Fatalf("shellQuote(%q) round-trips to %q (%v)", s, out, err)
-		}
 	}
 }
 

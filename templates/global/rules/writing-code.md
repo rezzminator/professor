@@ -1,3 +1,7 @@
+---
+visible-to:
+  exclude: [main, Explore, Plan, claude-code-guide, statusline-setup, web-fetch, "rr*", sub-rr, "*tracer", collector, transcript-reader, agent-investigator, clone-distiller, documenter, gitter, pcm, changelogger, "reviewer*", flights-hunter, flights-sub-lander, flights-spec-walker, flights-speccer]
+---
 # Writing code
 
 - One door per operation: each operation (a decision, a lookup, a built command, a write) and each mechanism (process exec, file write, env read, clock, logging, an LLM call) lives in one function, its door, and every caller uses it. Grep for it before writing and call or extend it; never a second copy, a scheduled or remote variant included.

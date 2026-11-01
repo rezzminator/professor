@@ -99,7 +99,14 @@ needle=os.fsencode('MOCK_ENGINE_SCENARIO='+sys.argv[1])
 for proc in pathlib.Path('/proc').glob('[0-9]*'):
     if int(proc.name) in (os.getpid(),os.getppid()):continue
     try:
-        if needle not in (proc/'environ').read_bytes().split(b'\0'):continue
+        # A fixture process runs as this user; another user's environ is unreadable to a non-root run,
+        # and a concurrent setuid exec (mount, sudo) turns a process root between the stat and the read.
+        if proc.stat().st_uid != os.getuid():continue
+        try:environ=(proc/'environ').read_bytes()
+        except PermissionError:
+            if proc.stat().st_uid != os.getuid():continue
+            raise
+        if needle not in environ.split(b'\0'):continue
         if sys.argv[2] == 'tmux' and not (proc/'comm').read_text().startswith('tmux'):continue
         print(proc.name)
     except (FileNotFoundError,ProcessLookupError):pass

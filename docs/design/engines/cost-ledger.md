@@ -2,7 +2,7 @@
 
 Every API call a Claude Code chat makes is priced once per correlation identity ([Identity](#identity)), in a per-session file, so the status line, `pfm tokens` and callmeter read one set of telemetry-reported dollars, which for request-correlated calls agrees with Claude Code's own session total. The ledger exists because the chat's transcripts do not hold every call: Claude Code makes calls it never records there, and a transcript-priced total undercounts by the whole of that spend.
 
-The pieces: the launch registry points Claude Code's OpenTelemetry exporters at a loopback sink ([The launch](#the-launch)); a detached `pfm internal cost-sink` process joins the two exported halves of each call ([The sink](#the-sink), [The join](#the-join)) and appends one line per call to `{session_id}.jsonl` ([The ledger](#the-ledger)); readers sum it ([The status lines](#the-status-lines), [pfm tokens](#pfm-tokens)). The launch registry's own shape is in [claude-launch.md](claude-launch.md); the statusline's fields are in [statusline.md](../context/statusline.md).
+The pieces: the launch registry points Claude Code's OpenTelemetry exporters at a loopback sink ([The launch](#the-launch)); a detached `pfm internal cost-sink` process joins the two exported halves of each call ([The sink](#the-sink), [The join](#the-join)) and appends one line per call to `{session_id}.jsonl` ([The ledger](#the-ledger)); readers sum it ([The status lines](#the-status-lines), [pfm tokens](#pfm-tokens)). The launch registry's own shape is in [claude-launch.md](claude-launch.md); the statusline's fields are in `pfm/internal/statusline/`.
 
 ## Contents
 
@@ -184,7 +184,7 @@ Every number on the main line and where it comes from:
 | output tokens `31K` | everything the model wrote | with a ledger, `output_tokens` summed over every row; else the transcripts' |
 | tool calls `46` | distinct `tool_use` calls | the chat's transcript and every sub-agent transcript beside it, always; the ledger records no tools. `?` when a transcript cannot be read |
 | `+?` | the dollar figure is a floor | with a ledger, a row whose cost never arrived (`cost_usd_micros` null); without one, a transcript model the price table cannot price |
-| cache window `💾1h✓48m:0s` and hit `77%` | prompt-cache time left; share of the last call's prompt read from cache | [statusline.md](../context/statusline.md#the-main-statusline); not cost |
+| cache window `💾1h✓48m:0s` and hit `77%` | prompt-cache time left; share of the last call's prompt read from cache | `pfm/internal/statusline/`; not cost |
 | `⏳ 5m32s` | session wall time | the payload's `cost.total_duration_ms` |
 | `5h-used:32%`, `7d-used:71%` | rate-limit windows | the payload's `rate_limits`, or pfm's refreshed copy |
 
@@ -219,7 +219,7 @@ A row's spend field `Σ$1.24/3.1M/42K/12` (`spendSegment`; the muted `Σ` marks 
 | `+?` | a floor: with a ledger, a row of the agent or below it whose cost never arrived; without one, a model the price table cannot price or a transcript below that cannot be read |
 | `Σ$?/?/?/?` | no ledger and the agent's own transcript cannot be read; with a ledger the row keeps its ledger dollars and shows `?` for tool calls |
 
-The invariant, native rows only: the main thread's own rows plus every top-level row equal the ledger total; a gateway GPT supplement ([Gateway GPT spend](#gateway-gpt-spend)) sits outside it. A row's gauge, status, cache and the other fields are in [statusline.md](../context/statusline.md#the-sub-agent-row).
+The invariant, native rows only: the main thread's own rows plus every top-level row equal the ledger total; a gateway GPT supplement ([Gateway GPT spend](#gateway-gpt-spend)) sits outside it. A row's gauge, status, cache and the other fields are in `pfm/internal/statusline/`.
 
 ## Gateway GPT spend
 

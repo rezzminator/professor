@@ -94,7 +94,7 @@ type Knob struct {
 | `theme` | settings `theme` only with theme sync off; omitted while sync owns it ([theme sync](theme-sync.md#themeforlaunch)) | config; account settings while synced | unset |
 | `cleanupPeriodDays` | settings `cleanupPeriodDays` | config | `36500` |
 | hooks | settings `hooks` — the pfm hook set, `docs/design/hooks/hooks.md` | constant | — |
-| status lines | settings `statusLine`, `subagentStatusLine` — `docs/design/context/statusline.md` | constant | — |
+| status lines | settings `statusLine`, `subagentStatusLine` — `pfm/internal/statusline/` | constant | — |
 | `costLedger` | wrapper `pfm internal cost-launch --` in front of the binary: it binds a loopback sink and execs Claude with the exporter variables below; `false`, or the user's own telemetry settings, launch without and record `PFM_COST_LEDGER=off` or `preempted` — [cost-ledger.md](cost-ledger.md#the-launch) | config (machine-wide) | `true` |
 | cost exporters | wrapper env `CLAUDE_CODE_ENABLE_TELEMETRY=1`, `OTEL_LOGS_EXPORTER=otlp`, `OTEL_TRACES_EXPORTER=otlp`, `CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1`, `OTEL_METRICS_EXPORTER=none`, `OTEL_EXPORTER_OTLP_PROTOCOL=http/json`, `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:{port}`, `OTEL_LOGS_EXPORT_INTERVAL=1000`, `OTEL_BSP_SCHEDULE_DELAY=1000` | constant | — |
 | cost marker | wrapper env `PFM_COST_LEDGER=on\|off\|preempted\|failed`, the decision the status lines read | constant | — |

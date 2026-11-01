@@ -147,7 +147,7 @@ if requires E2.01-open-seat; then
   # Exit code AND output: fail-open prints nothing on an error, and a check
   # that accepts either cannot tell a render from a swallowed failure.
   # A chat's first tick prints the pending line while its paced worker renders
-  # (docs/design/context/statusline.md § How a render is paced): tick again
+  # (pfm/internal/statusline/paced.go): tick again
   # until the worker's line is served, as Claude Code's own timer would.
   id="$(live_field "$CHAT" 2)"
   for _ in $(seq 1 30); do

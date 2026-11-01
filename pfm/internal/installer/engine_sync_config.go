@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
@@ -295,7 +296,7 @@ func (installer *engine) retireEngineSyncFile() error {
 // against (a dry run writes nothing, and a scratch home of links is refused by
 // engine-sync's own symlink-parent rule): the preview is skipped by name and
 // the apply, which writes the file and retires the old files first, runs the
-// real call. A dry run that changes neither previews against the real home.
+// real call. A rule link the pass retires skips it the same way. A dry run that changes neither previews against the real home.
 func (installer *engine) engineSyncPreviewSkip(sourceRepo string) (string, error) {
 	if installer.apply {
 		return "", nil
@@ -315,6 +316,19 @@ func (installer *engine) engineSyncPreviewSkip(sourceRepo string) (string, error
 		return "", err
 	}
 	for _, path := range old {
+		changes = append(changes, "retire "+path)
+	}
+	// A rule link this pass retires (a renamed rule's dead link) is still on
+	// disk in a dry run, where engine-sync's rule walk refuses it.
+	rules := filepath.Join(installer.options.ConfigDir, globalRulesRegistry) + string(filepath.Separator)
+	var retiredRules []string
+	for path := range installer.removedPaths {
+		if strings.HasPrefix(path, rules) {
+			retiredRules = append(retiredRules, path)
+		}
+	}
+	sort.Strings(retiredRules)
+	for _, path := range retiredRules {
 		changes = append(changes, "retire "+path)
 	}
 	if len(changes) == 0 {

@@ -427,6 +427,14 @@ func TestEngineSyncPreviewIsSkippedByNameWhenTheInstallChangesTheConfig(t *testi
 			want: "would retire {old}",
 		},
 		{
+			name: "a rule link this pass retires", mode: ModeDryRun,
+			setup: func(t *testing.T, installer *engine, home string) {
+				writeCurrentGlobalFile(t, installer, home)
+				installer.markRemoved(filepath.Join(installer.options.ConfigDir, "rules", "renamed.md"))
+			},
+			want: "would retire {rule}",
+		},
+		{
 			name: "an uninstall with an owned old file", mode: ModeUninstall,
 			setup: func(t *testing.T, _ *engine, home string) {
 				writeFixture(t, filepath.Join(home, ".config", "engine-sync", "targets.json"), `{"codexHomes":[]}`)
@@ -443,7 +451,8 @@ func TestEngineSyncPreviewIsSkippedByNameWhenTheInstallChangesTheConfig(t *testi
 				t.Fatal(err)
 			}
 			want := strings.NewReplacer("{file}", enginesync.GlobalConfigPath(home),
-				"{old}", filepath.Join(home, ".config", "engine-sync", "targets.json")).Replace(testCase.want)
+				"{old}", filepath.Join(home, ".config", "engine-sync", "targets.json"),
+				"{rule}", filepath.Join(installer.options.ConfigDir, "rules", "renamed.md")).Replace(testCase.want)
 			line := "  skip    engine-sync global preview skipped: this install " + want +
 				", which engine-sync reads before it plans; the apply runs it after\n"
 			if output.String() != line {

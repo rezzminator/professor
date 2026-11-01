@@ -163,6 +163,29 @@ func TestForeignProcessesLeavesAnEmptyShellReapable(t *testing.T) {
 	}
 }
 
+// tmux 3.8 prints no pane_pid for a dead pane, which gather reads as PID 0.
+// PID 0 parents init on Linux and launchd on macOS, so a walk rooted there
+// would sweep the whole machine into one dead pane.
+func TestDeadPaneHostsNothing(t *testing.T) {
+	proc := newFleetProc()
+	proc.parents[1] = 0
+	proc.cmdline[1] = []string{"init"}
+	proc.rss[1] = 9_000
+	tree, err := NewProcessTree(proc)
+	if err != nil {
+		t.Fatalf("NewProcessTree() error = %v", err)
+	}
+	if foreign := tree.ForeignProcesses([]int{0}); len(foreign) != 0 {
+		t.Fatalf("ForeignProcesses(dead pane) = %v, want none", foreign)
+	}
+	if got := tree.SubtreeRSSKB(0); got != 0 {
+		t.Fatalf("SubtreeRSSKB(dead pane) = %d, want 0", got)
+	}
+	if foreign := tree.ForeignProcesses([]int{200}); len(foreign) != 1 || foreign[0] != "pnpm" {
+		t.Fatalf("ForeignProcesses(dev shell) = %v, want [pnpm]", foreign)
+	}
+}
+
 func TestSubtreeRSSSumsTheWholeTree(t *testing.T) {
 	tree, err := NewProcessTree(newFleetProc())
 	if err != nil {

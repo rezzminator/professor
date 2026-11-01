@@ -134,8 +134,8 @@ func (tree *ProcessTree) walk(roots []int, visit func(pid int) bool) {
 	for len(stack) > 0 {
 		pid := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
-		if _, repeated := seen[pid]; repeated {
-			continue
+		if _, repeated := seen[pid]; repeated || pid <= 0 {
+			continue // PID 0 is a dead pane's, and it parents init: never a root
 		}
 		seen[pid] = struct{}{}
 		if !visit(pid) {

@@ -261,9 +261,14 @@ func parseTmuxPanes(socket string, output []byte) ([]ProbePane, error) {
 				line,
 			)
 		}
-		pid, err := strconv.Atoi(fields[5])
-		if err != nil {
-			return nil, fmt.Errorf("tmux %s pane pid %q: %w", socket, fields[5], err)
+		// tmux 3.8 prints no pane_pid once a dead pane's descriptor closes: no live process, PID 0.
+		pid := 0
+		if fields[5] != "" {
+			parsed, err := strconv.Atoi(fields[5])
+			if err != nil {
+				return nil, fmt.Errorf("tmux %s pane pid %q: %w", socket, fields[5], err)
+			}
+			pid = parsed
 		}
 		attached, err := strconv.ParseBool(fields[7])
 		if err != nil {

@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -746,24 +747,29 @@ func TestMCPBoundedContextAppliesTheConfiguredTimeout(t *testing.T) {
 func rolloutHandles(t *testing.T, path string) int {
 	t.Helper()
 	const fdRoot = "/dev/fd" // Linux and macOS both list this process's descriptors here
-	rollout, err := os.Stat(path)
+	info, err := os.Stat(path)
 	if err != nil {
 		t.Fatalf("stat rollout %s: %v", path, err)
 	}
+	rollout := info.Sys().(*syscall.Stat_t)
 	entries, err := os.ReadDir(fdRoot)
 	if err != nil {
 		t.Fatalf("enumerate rollout handles: %v", err)
 	}
 	count := 0
 	for _, entry := range entries {
-		info, err := os.Stat(filepath.Join(fdRoot, entry.Name()))
-		if os.IsNotExist(err) || errors.Is(err, syscall.EBADF) {
-			continue // ReadDir's own descriptor has already closed.
-		}
+		fd, err := strconv.Atoi(entry.Name())
 		if err != nil {
-			t.Fatalf("stat descriptor %s: %v", entry.Name(), err)
+			t.Fatalf("descriptor name %q in %s: %v", entry.Name(), fdRoot, err)
 		}
-		if os.SameFile(info, rollout) {
+		// Fstat, never stat of /dev/fd/N: macOS's fdesc answers that stat with its own node.
+		var st syscall.Stat_t
+		if err := syscall.Fstat(fd, &st); errors.Is(err, syscall.EBADF) {
+			continue // ReadDir's own descriptor has already closed.
+		} else if err != nil {
+			t.Fatalf("fstat descriptor %d: %v", fd, err)
+		}
+		if st.Dev == rollout.Dev && st.Ino == rollout.Ino {
 			count++
 		}
 	}

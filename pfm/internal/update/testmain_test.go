@@ -28,7 +28,9 @@ func TestGitConfigIsJailed(t *testing.T) {
 	if got := os.Getenv("GIT_CONFIG_NOSYSTEM"); got != "1" {
 		t.Fatalf("GIT_CONFIG_NOSYSTEM = %q, want 1", got)
 	}
-	out, err := exec.Command("git", "config", "--get", "maintenance.auto").Output()
+	cmd := exec.Command("git", "config", "--get", "maintenance.auto")
+	cmd.Dir = t.TempDir() // a fenced worktree's gitdir is unreadable; the env config is what's under test
+	out, err := cmd.Output()
 	if got := strings.TrimSpace(string(out)); err != nil || got != "false" {
 		t.Fatalf("git config maintenance.auto = %q (err %v), want false", got, err)
 	}

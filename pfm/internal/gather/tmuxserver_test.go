@@ -24,9 +24,17 @@ func TestProbeServerNeverReadsAFailureAsDead(t *testing.T) {
 	}{
 		{
 			"panes",
-			"printf '" + paneLine("%%1", "0") + paneLine("%%2", "1") + "'",
+			"printf '" + paneLine("%%1", "42", "0") + paneLine("%%2", "42", "1") + "'",
 			ServerAlive,
 			[]string{"%1", "%2"},
+			"",
+		},
+		{
+			// tmux 3.8 prints no pane_pid once a dead pane's descriptor closes.
+			"exited",
+			"printf '" + paneLine("%%3", "", "1") + "'",
+			ServerAlive,
+			[]string{"%3"},
 			"",
 		},
 		{"unreadable", "printf 'garbage\\n'", ServerUnknown, nil, "returned 1 pane fields"},
@@ -56,6 +64,9 @@ func TestProbeServerNeverReadsAFailureAsDead(t *testing.T) {
 					t.Fatalf("ProbeServer() panes = %+v, want every paneFormat field read", panes)
 				}
 			}
+			if tc.name == "exited" && (!panes[0].Dead || panes[0].PID != 0) {
+				t.Fatalf("ProbeServer() exited pane = %+v, want dead with PID 0", panes[0])
+			}
 			if tc.wantErr == "" && err != nil ||
 				tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)) {
 				t.Fatalf("ProbeServer() error = %v, want %q", err, tc.wantErr)
@@ -70,9 +81,9 @@ func TestProbeServerNeverReadsAFailureAsDead(t *testing.T) {
 	})
 }
 
-// paneLine is one paneFormat answer line, printf-escaped: session cc-1,
-// pid 42 on /dev/pts/7 running claude in window 3.
-func paneLine(paneID, dead string) string {
-	fields := []string{"cc-1", "@1", "win", "title", "/dev/pts/7", "42", paneID, "1", "/work", "claude", dead, "3"}
+// paneLine is one paneFormat answer line, printf-escaped: session cc-1
+// on /dev/pts/7 running claude in window 3.
+func paneLine(paneID, pid, dead string) string {
+	fields := []string{"cc-1", "@1", "win", "title", "/dev/pts/7", pid, paneID, "1", "/work", "claude", dead, "3"}
 	return strings.Join(fields, "\\037") + "\\n"
 }

@@ -158,7 +158,7 @@ func EngineGuard(args []string, input io.Reader, stdout, stderr io.Writer) int {
 			cwd = gitGuardJoin(cwd, workdir)
 		}
 		reasons = append(reasons, gitGuardCheck(command, cwd, true, stderr))
-		if err := judge.bash(command, cwd, 0); err != nil {
+		if err := judge.bash(command, cwd, "", 0); err != nil {
 			fmt.Fprintf(stderr, "pfm internal engine-guard: parse command (fail-open): %v\n", err)
 		}
 		read := append([]string{command}, judge.read...)
@@ -330,7 +330,8 @@ func (judge *pcmGuardJudge) engineScript(part *cmdparse.Part, base, lang, dir st
 	read := false
 	for _, source := range sources {
 		if text, ok := judge.readFile(source, dir); ok {
-			judge.run(lang, text, dir, depth)
+			script, _ := judge.resolve(source, dir)
+			judge.run(lang, text, dir, script, depth)
 			read = true
 			break
 		}
@@ -398,7 +399,7 @@ func (judge *pcmGuardJudge) shebang(program, dir string, depth int) {
 	}
 	if len(fields) > 0 {
 		if lang := pcmGuardLang(filepath.Base(fields[0])); lang != "" {
-			judge.run(lang, text, dir, depth)
+			judge.run(lang, text, dir, abs, depth)
 		}
 	}
 }
@@ -418,10 +419,11 @@ func engineGuardIsScript(abs string) bool {
 	return n == 2 && string(head) == "#!"
 }
 
-// run judges code a script file holds, as program judges inline code.
-func (judge *pcmGuardJudge) run(lang, code, dir string, depth int) {
+// run judges code the script file at script holds, as program judges inline
+// code; the shell code reads `$0` as script.
+func (judge *pcmGuardJudge) run(lang, code, dir, script string, depth int) {
 	if lang == pcmGuardSh {
-		judge.shell(code, dir, depth)
+		judge.shell(code, dir, script, depth)
 		return
 	}
 	judge.interpret(lang, []string{code}, dir)

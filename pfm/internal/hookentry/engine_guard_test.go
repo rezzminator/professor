@@ -40,8 +40,18 @@ func engineGuardFixture(t *testing.T) pcmGuardFixture {
 		"ok.sh":      "echo y > notes.md\n",
 		"bad.py":     "open('.codex/config.toml', 'w').write('x')\n",
 		"run-bad.sh": "#!/usr/bin/env bash\necho y > .opencode/opencode.jsonc\n",
+		// Scripts reaching a sibling program through their own directory.
+		"tools/near.sh":     "python3 -I \"$(dirname \"$0\")/ok.py\" \"$1\"\n",
+		"tools/near-bad.sh": "python3 -I \"$(cd \"$(dirname -- \"${BASH_SOURCE[0]}\")\" && pwd -P)/bad.py\"\n",
+		"tools/missing.sh":  "python3 \"$(dirname \"$0\")/gone.py\"\n",
+		"tools/ok.py":       "print('ok')\n",
+		"tools/bad.py":      "open('AGENTS.md', 'w').write('x')\n",
 	} {
-		if err := os.WriteFile(filepath.Join(f.project, name), []byte(body), 0o644); err != nil {
+		path := filepath.Join(f.project, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -228,6 +238,9 @@ func TestEngineGuardFrameworkFiles(t *testing.T) {
 				"rm " + filepath.Join(f.clone, "templates", "themes", "dusk", "theme.json"),
 				fileDeny(filepath.Join(f.clone, "templates", "themes", "dusk", "theme.json")),
 			},
+			{"bash tools/near.sh x", ""},
+			{"bash tools/near-bad.sh", fileDeny(p("AGENTS.md"), p("tools/AGENTS.md"))},
+			{"bash tools/missing.sh", blindDeny("python3 " + p("tools/gone.py"))},
 			{"bash", blindDeny("bash")},
 			{"python3", blindDeny("python3")},
 			{"vim", blindDeny("vim")},

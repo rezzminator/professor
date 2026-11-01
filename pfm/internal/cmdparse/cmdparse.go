@@ -45,6 +45,9 @@ type Call struct {
 	// Vars seeds the parse with variables the command's shell already has
 	// (HOME), so `$HOME/x` resolves; nil seeds nothing.
 	Vars map[string]string
+	// Script is the absolute path of the script file Command was read from:
+	// `$0` and `${BASH_SOURCE[0]}` resolve to it. Empty for a typed command.
+	Script string
 }
 
 // Part is one simple command of a call, in source order. Program is the
@@ -115,8 +118,10 @@ type callParser struct {
 	arrays map[string][]string // literal indexed arrays: NAME=(a b c)
 	// env is the assignments in force for the next command (Part.Env); base
 	// is the call's seeded variables, which a child shell inherits.
-	env     map[string]string
-	base    map[string]string
+	env  map[string]string
+	base map[string]string
+	// script: the command was read from a script file (Call.Script).
+	script  bool
 	parts   []Part
 	printer *syntax.Printer
 	// shellDepth counts the literal -c strings the walk is inside, up to
@@ -134,6 +139,11 @@ func parseCall(call Call) *callParser {
 	}
 	for name, val := range call.Vars {
 		p.vars[name] = []string{val}
+	}
+	if call.Script != "" {
+		p.vars["0"] = []string{call.Script}
+		p.arrays["BASH_SOURCE"] = []string{call.Script}
+		p.script = true
 	}
 	if len(call.Command) > maxCommandBytes {
 		p.parts = []Part{{Status: StatusUnparsed, Bounded: true}}

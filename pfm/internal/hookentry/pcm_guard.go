@@ -142,7 +142,7 @@ func PcmGuard(input io.Reader, stdout, stderr io.Writer) int {
 			}
 			judge.path(filepath.Clean(target))
 		}
-	} else if err := judge.bash(hook.ToolInput.Command, cwd, 0); err != nil {
+	} else if err := judge.bash(hook.ToolInput.Command, cwd, "", 0); err != nil {
 		fmt.Fprintf(stderr, "pfm internal pcm-guard: parse command (fail-open): %v\n", err)
 		return 0
 	}
@@ -328,11 +328,12 @@ func (judge *pcmGuardJudge) resolve(word, dir string) (string, bool) {
 // does not say where a cd stops applying (a subshell, an inner shell, popd),
 // so a relative word is judged in every directory the call may stand in: the
 // cwd and each directory a cd, pushd or popd may have moved it to. depth
-// counts the shell programs the command is read inside (pcmGuardJudge.shell).
-func (judge *pcmGuardJudge) bash(command, cwd string, depth int) error {
+// counts the shell programs the command is read inside (pcmGuardJudge.shell);
+// script is the script file the command was read from, "" for typed code.
+func (judge *pcmGuardJudge) bash(command, cwd, script string, depth int) error {
 	parsed, err := cmdparse.ParseBatch([]cmdparse.Call{{
 		ID: "pcm-guard", Command: command, Cwd: cmp.Or(cwd, string(filepath.Separator)),
-		Vars: map[string]string{"HOME": judge.scope.home},
+		Vars: map[string]string{"HOME": judge.scope.home}, Script: script,
 	}})
 	if err != nil {
 		return err

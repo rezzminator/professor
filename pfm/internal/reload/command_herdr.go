@@ -545,7 +545,8 @@ func (n *nativeReload) wait(ctx context.Context, id string, oldPID int, run flee
 		if err != nil {
 			return err
 		}
-		if !seat.ReloadPending && seat.State == nativeSeatLive && pid > 0 && pid != oldPID && slices.Equal(argv[1:], run.Args) {
+		if !seat.ReloadPending && seat.State == nativeSeatLive && pid > 0 && pid != oldPID &&
+			slices.Equal(argv[1:], run.Args) {
 			return nil
 		}
 		if pid == oldPID && oldPID != 0 {

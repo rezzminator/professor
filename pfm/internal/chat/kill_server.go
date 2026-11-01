@@ -227,7 +227,7 @@ func ScheduleHerdrEnd(ctx context.Context, chat headless.Chat, runtime pfmconfig
 	if err != nil {
 		return fmt.Errorf("resolve native end worker image: %w", err)
 	}
-	log, err := openEndWorkerLog(runtime.Paths.SIDDir, "end-"+seat.SeatID+".log")
+	log, err := openEndWorkerLog(runtime.Paths.SIDDir, paths.SIDEndLogPrefix+seat.SeatID+".log")
 	if err != nil {
 		return fmt.Errorf("open end worker log: %w", err)
 	}

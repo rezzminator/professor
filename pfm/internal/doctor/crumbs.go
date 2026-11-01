@@ -127,6 +127,7 @@ func crumbHealthWith(
 			nonFleetServerCrumb(name) ||
 			knownSIDMetadata(name) ||
 			nativeReloadScheduleFile(name) ||
+			nativeSeatWorkerLog(name) ||
 			agentrole.IsSeatPromptPath(name) ||
 			agentrole.IsHarnessPromptRecordPath(name) ||
 			sidScratchFile(name) {
@@ -174,6 +175,22 @@ func nativeReloadScheduleFile(name string) bool {
 		if seat, ok := strings.CutSuffix(rest, suffix); ok {
 			return seat != "" && seat != "." && seat != ".."
 		}
+	}
+	return false
+}
+
+// nativeSeatWorkerLog reports whether name is a native seat's detached worker
+// log: its end log, paths.SIDEndLogPrefix+seat+".log", for any seat id, or its
+// kill-exit log, paths.SIDKillExitLogPrefix+seat+".log", whose native seat id is
+// 32 lowercase hex digits (any other kill-exit name must parse as a tmux socket).
+func nativeSeatWorkerLog(name string) bool {
+	if rest, ok := strings.CutPrefix(name, paths.SIDEndLogPrefix); ok {
+		seat, ok := strings.CutSuffix(rest, ".log")
+		return ok && seat != "" && seat != "." && seat != ".."
+	}
+	if rest, ok := strings.CutPrefix(name, paths.SIDKillExitLogPrefix); ok {
+		seat, ok := strings.CutSuffix(rest, ".log")
+		return ok && len(seat) == 32 && strings.Trim(seat, "0123456789abcdef") == ""
 	}
 	return false
 }

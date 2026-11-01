@@ -30,6 +30,9 @@ const (
 	// (reload-{socket}.log for a tmux chat, SIDReloadHerdrPrefix+seat+".log"
 	// for a native one); the doctor's crumb audit accepts all of them.
 	SIDKillExitLogPrefix = "kill-exit-"
+	// SIDEndLogPrefix names a native seat's detached end worker log,
+	// SIDEndLogPrefix+seat+".log"; the doctor's crumb audit accepts it.
+	SIDEndLogPrefix = "end-"
 	// SIDReloadHerdrPrefix names a native Herdr chat's reload schedule,
 	// SIDReloadHerdrPrefix+seat+".pid" (the scheduled worker's record) and
 	// SIDReloadHerdrPrefix+seat+".log" (its log); the doctor's crumb audit

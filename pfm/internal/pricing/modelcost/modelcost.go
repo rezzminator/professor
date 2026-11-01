@@ -318,9 +318,12 @@ func publishedIDs(provider, label string) []string {
 	return []string{strings.ToLower(label)}
 }
 
+// modelColumn is the column naming each row's model: "Model", or "Model
+// configuration" where OpenAI groups a model's priced configurations.
 func modelColumn(headers []string) int {
 	for i, header := range headers {
-		if strings.EqualFold(strings.TrimSpace(header), "Model") {
+		if name := strings.TrimSpace(header); strings.EqualFold(name, "Model") ||
+			strings.EqualFold(name, "Model configuration") {
 			return i
 		}
 	}

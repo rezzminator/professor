@@ -293,3 +293,15 @@ func TestFetcherUsesBoundedHTTPAndPublisherUserAgent(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// OpenAI's grouped tables head their model column "Model configuration": its
+// rows price the model they name, never an unsupported column.
+func TestModelConfigurationColumnNamesTheModel(t *testing.T) {
+	page := "### Grouped Pricing Table data\n\n" +
+		"| Model configuration | Input | Output | Cached input |\n| --- | --- | --- | --- |\n" +
+		"| gpt-6-astra-law | $10.00 | $50.00 | $1.00 |\n"
+	catalog, err := parseCatalog(providerOpenAI, Source{URL: openAIURL, FetchedAt: "x", Markdown: page})
+	if err != nil || len(catalog.Models) != 1 || catalog.Models[0].ID != "gpt-6-astra-law" {
+		t.Fatalf("catalog models = %+v, err = %v; want gpt-6-astra-law", catalog.Models, err)
+	}
+}

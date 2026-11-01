@@ -544,6 +544,11 @@ checks_templates_refresh_scope() {
 
 }
 
+checks_templates_plugin_workflows() {
+  head_ "templates — plugin workflow shape check fixtures"
+  run "templates: plugin workflow shape check fixtures" -- python3 "$REPO_ROOT/scripts/test-check-plugin-workflows.py"
+}
+
 checks_templates_worktree_script() {
   head_ "templates — shipped worktree.sh lifecycle safety"
   if bash "$REPO_ROOT/scripts/test-worktree.sh"; then
@@ -738,7 +743,7 @@ checks_named_template_steps() { # <callback> <name>...: register the matching ch
 checks_templates_steps() { # <callback>: callback <step name> <command> [args...]
   local add="$1" name
   checks_named_template_steps "$add" clone leak plugin-logs plugin-lab placeholders scratch-paths descriptions mirrors \
-    generated-agents release-check refresh-scope worktree-script dev-report \
+    generated-agents release-check refresh-scope plugin-workflows worktree-script dev-report \
     format-md flight-templates theme-glyphs || return 1
   for name in test unit-path; do
     "$add" "templates.$name-tests" checks_templates_unit_script "$name" || return 1

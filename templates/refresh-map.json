@@ -311,6 +311,15 @@
     },
     "global/pcm/audit-scopes.md": {
       "curated": true
+    },
+    "global/plugin-ci/README.md": {
+      "curated": true
+    },
+    "global/plugin-ci/ci.yml": {
+      "curated": true
+    },
+    "global/plugin-ci/publish.yml": {
+      "curated": true
     }
   }
 }

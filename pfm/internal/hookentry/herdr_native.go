@@ -33,8 +33,9 @@ func (reporter *herdrReporter) sessionOnly(
 	// Session metadata must join Herdr's native Claude identity. The pfm
 	// source is released above and cannot persist a state-free restore record.
 	report := herdr.SessionReport{
-		Pane: target.pane, Source: "herdr:claude", Agent: herdr.Label(pfmengine.Claude), SessionID: payload.SessionID,
-		SessionPath: payload.TranscriptPath, StartSource: payload.Source, ResumeArgv: argv, Seq: seq,
+		Pane: target.pane, Source: herdr.ClaudeSource, Agent: herdr.Label(pfmengine.Claude),
+		SessionID: payload.SessionID, SessionPath: payload.TranscriptPath, StartSource: payload.Source,
+		ResumeArgv: argv, Seq: seq,
 	}
 	line, err := report.Line()
 	if err != nil {
@@ -57,46 +58,55 @@ func (reporter *herdrReporter) sessionOnly(
 }
 
 // Called under the native report bridge lock after durable supervisor proof.
-// A successful release AND session publication are remembered in the existing
+// Herdr keys a detected Claude pane by its own herdr:claude source, so the
+// state goes there too; an old pfm report is released first, once. A
+// successful release AND session publication are remembered in the existing
 // owner record. A partial failure retries both, never masquerades as complete.
-func (reporter *herdrReporter) deferNativeClaude(
+func (reporter *herdrReporter) reportNativeClaude(
 	ctx context.Context,
 	target herdrTarget,
 	payload herdrPayload,
+	action *herdrAction,
 	seq uint64,
 ) error {
 	owner, err := reporter.paneOwner(target)
 	if err != nil {
 		return err
 	}
-	if owner.NativeDetection {
-		if reporter.options.event != herdr.EventStart {
-			return nil
-		}
-		if seq <= owner.Seq {
-			seq = owner.Seq + 1
-		}
-		if err := reporter.sessionOnly(ctx, target, payload, seq); err != nil {
-			return err
-		}
-		return reporter.storeNativeDetection(target, owner, seq)
-	}
 	if seq <= owner.Seq {
 		seq = owner.Seq + 1
 	}
-	line, err := (herdr.Release{Pane: target.pane, Agent: herdr.Label(pfmengine.Claude), Seq: seq}).Line()
-	if err != nil {
-		return err
-	}
-	if err := releaseSettled(herdr.Send(ctx, target.socket, line)); err != nil {
-		return err
+	migrate := !owner.NativeDetection
+	if migrate {
+		line, err := (herdr.Release{Pane: target.pane, Agent: herdr.Label(pfmengine.Claude), Seq: seq}).Line()
+		if err != nil {
+			return err
+		}
+		if err := releaseSettled(herdr.Send(ctx, target.socket, line)); err != nil {
+			return err
+		}
+		seq++
 	}
 	// Release may clear the old session reference: restore it immediately even
 	// when this upgrade was first observed on a non-start hook.
-	if err := reporter.sessionOnly(ctx, target, payload, seq+1); err != nil {
-		return err
+	publish := migrate || reporter.options.event == herdr.EventStart
+	var sessionErr error
+	if publish {
+		sessionErr = reporter.sessionOnly(ctx, target, payload, seq)
 	}
-	return reporter.storeNativeDetection(target, owner, seq+1)
+	if action.stored.State != "" {
+		if publish {
+			seq++
+		}
+		reporter.source = herdr.ClaudeSource
+		if err := reporter.send(ctx, target, action, seq); err != nil {
+			return errors.Join(sessionErr, err)
+		}
+	}
+	if !publish || sessionErr != nil {
+		return sessionErr
+	}
+	return reporter.storeNativeDetection(target, owner, seq)
 }
 
 func (reporter *herdrReporter) storeNativeDetection(target herdrTarget, owner herdrPaneOwner, seq uint64) error {
@@ -138,7 +148,9 @@ type herdrRetirementPending struct{ error }
 func (reporter *herdrReporter) retireNativeTargets(ctx context.Context, session string, state *herdrActivity) error {
 	var kept []herdrActivityTarget
 	for _, saved := range state.Targets {
-		if state.tmuxTarget(saved) {
+		// A native target with a source is this build's own report; one without
+		// predates native state reporting and is retired as before.
+		if state.tmuxTarget(saved) || (saved.Native && saved.Source != "") {
 			kept = append(kept, saved)
 		} else {
 			state.RetiredTargets = append(state.RetiredTargets, saved)

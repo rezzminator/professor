@@ -11,6 +11,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/compose"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -110,6 +111,14 @@ func TestHerdrTabProviderReleasedAgentTeardown(t *testing.T) {
 						Message: "target missing",
 					}
 				},
+				// Past the exit grace an engine still alive in an agent-less pane (a
+				// native seat Herdr tracks no agent for) is read from its own screen.
+				screen: func(_ context.Context, chat headless.Chat) (string, error) {
+					if chat.Socket != socket || chat.Pane != "w1:p1" || chat.Engine != pfmengine.Claude {
+						t.Errorf("screen read of %+v, want claude pane w1:p1 on %s", chat, socket)
+					}
+					return claudeBusyPane, nil
+				},
 				mode: func() (string, error) { return "emoji", nil },
 				warn: tabIndicatorWarnings{dir: dir, stderr: &warnings},
 			}
@@ -126,7 +135,7 @@ func TestHerdrTabProviderReleasedAgentTeardown(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				wantError := outcome == "unreadable" || phase > 0 && outcome == "alive"
+				wantError := outcome == "unreadable"
 				records, err := herdr.RecentErrors(dir, time.Time{})
 				if err != nil {
 					t.Fatal(err)
@@ -153,6 +162,9 @@ func TestHerdrTabProviderReleasedAgentTeardown(t *testing.T) {
 					}
 					if phase == 1 && outcome == "recovered" {
 						want = headless.StateIdle
+					}
+					if phase > 0 && outcome == "alive" {
+						want = headless.StateWorking
 					}
 					if views[0].State != want {
 						t.Fatalf("state=%q want %q", views[0].State, want)

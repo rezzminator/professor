@@ -107,8 +107,9 @@ func (reporter *herdrReporter) nativeSeat(ctx context.Context, payload herdrPayl
 		return true, nil
 	}
 	action := reporter.plan(payload)
-	// Herdr detects a native Claude from the pane's foreground, except in a pane
-	// herdr-keep holds: there it sees the attach client, so pfm reports the state.
+	// Herdr detects a native Claude from the pane's foreground and keys its state
+	// by herdr:claude, so pfm reports there; in a pane herdr-keep holds Herdr sees
+	// the attach client, so pfm reports under its own source.
 	// An event that changes nothing skips the read; a start still needs it.
 	detected := false
 	if reporter.options.engine == pfmengine.Claude && (action != nil || reporter.options.event == herdr.EventStart) {
@@ -120,7 +121,7 @@ func (reporter *herdrReporter) nativeSeat(ctx context.Context, payload herdrPayl
 		}
 		detected = processes.Holder == nil
 	}
-	if detected && reporter.options.event == herdr.EventStart {
+	if detected && reporter.options.event == herdr.EventStart && action == nil {
 		// Compaction/fork still refresh session metadata, never lifecycle state.
 		action = &herdrAction{}
 	}
@@ -174,7 +175,7 @@ func (reporter *herdrReporter) nativeSeat(ctx context.Context, payload herdrPayl
 	target := herdrTarget{socket: seat.HerdrSocket, pane: seat.HerdrPane, terminal: seat.HerdrTerminalID}
 	payload.SessionID = seat.SessionID
 	if detected && !action.release {
-		err = reporter.deferNativeClaude(ctx, target, payload, seq)
+		err = reporter.reportNativeClaude(ctx, target, payload, action, seq)
 	} else {
 		err = reporter.send(ctx, target, action, seq)
 	}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -237,6 +238,8 @@ func TestHerdrAgentPayloadRequiresIdentity(t *testing.T) {
 	}
 }
 
+// A native Claude seat Herdr detects reports its lifecycle under herdr:claude,
+// the session's restore identity, with the same sub-agent hold as a tmux seat.
 func TestHerdrNativeBackgroundAgents(t *testing.T) {
 	root := t.TempDir()
 	server := newNativeReporterHerdr(t, "native-seat", "w6:p3", "native-terminal")
@@ -266,20 +269,100 @@ func TestHerdrNativeBackgroundAgents(t *testing.T) {
 	deps := realHerdrDeps()
 	now := time.Unix(1000, 0)
 	deps.now = func() time.Time { now = now.Add(time.Millisecond); return now }
-	deps.spawn = func([]string) error { return nil }
-	for _, test := range []struct{ event, payload, want, message string }{
-		{"working", `{"session_id":"activity-session","hook_event_name":"UserPromptSubmit"}`, "working", ""},
-		{"agent-start", `{"session_id":"activity-session","agent_id":"a","hook_event_name":"SubagentStart"}`, "working", ""},
-		{"idle", `{"session_id":"activity-session"}`, "working", "1 agent running"},
-		{"agent-stop", `{"session_id":"activity-session","agent_id":"a","hook_event_name":"SubagentStop"}`, "idle", ""},
-		{"agent-start", `{"session_id":"activity-session","agent_id":"b","hook_event_name":"SubagentStart"}`, "working", "1 agent running"},
+	spawned := 0
+	deps.spawn = func([]string) error { spawned++; return nil }
+	// The fake records each request's params with sorted keys, its seq left out.
+	const argv = `"resume_argv":["pfm","chat","open","--restored","activity-session"]`
+	report := func(state, message string) string {
+		if message != "" {
+			message = `"message":"` + message + `",`
+		}
+		return `pane.report_agent {"agent":"claude","agent_session_id":"activity-session",` + message +
+			`"pane_id":"w6:p3",` + argv + `,"source":"herdr:claude","state":"` + state + `"}`
+	}
+	working, idle := report("working", ""), report("idle", "")
+	seen := 0
+	lifecycle := func() []string {
+		calls := server.calls()
+		var got []string
+		for _, call := range calls[seen:] {
+			if strings.HasPrefix(call, "pane.report_agent") || strings.HasPrefix(call, "pane.release_agent") {
+				got = append(got, call)
+			}
+		}
+		seen = len(calls)
+		return got
+	}
+	for _, test := range []struct {
+		name, event, payload string
+		want                 []string
+	}{
+		{
+			"prompt takes the pane from pfm and reports working",
+			"working",
+			`{"session_id":"activity-session","hook_event_name":"UserPromptSubmit"}`,
+			[]string{
+				`pane.release_agent {"agent":"claude","pane_id":"w6:p3","source":"pfm"}`,
+				`pane.report_agent_session {"agent":"claude","agent_session_id":"activity-session","pane_id":"w6:p3",` +
+					argv + `,"source":"herdr:claude"}`,
+				working,
+			},
+		},
+		{
+			"agent start",
+			"agent-start",
+			`{"session_id":"activity-session","agent_id":"a","hook_event_name":"SubagentStart"}`,
+			[]string{working},
+		},
+		{
+			"Stop with a live agent stays working",
+			"idle",
+			`{"session_id":"activity-session"}`,
+			[]string{report("working", "1 agent running")},
+		},
+		{
+			"last agent stop after Stop reports idle",
+			"agent-stop",
+			`{"session_id":"activity-session","agent_id":"a","hook_event_name":"SubagentStop"}`,
+			[]string{idle},
+		},
+		{
+			"notification-started turn reads working on its first tool hook",
+			"working",
+			`{"session_id":"activity-session","hook_event_name":"PostToolUse","tool_name":"Read"}`,
+			[]string{working},
+		},
+		{
+			"permission request reports blocked",
+			"blocked",
+			`{"session_id":"activity-session","hook_event_name":"PermissionRequest","tool_name":"Bash"}`,
+			[]string{report("blocked", "waiting for approval: Bash")},
+		},
+		{"Stop without agents reports idle", "idle", `{"session_id":"activity-session"}`, []string{idle}},
+		{
+			"late agent after Stop holds working",
+			"agent-start",
+			`{"session_id":"activity-session","agent_id":"b","hook_event_name":"SubagentStart"}`,
+			[]string{report("working", "1 agent running")},
+		},
 	} {
 		var stderr bytes.Buffer
 		rc := reportToHerdr([]string{test.event}, strings.NewReader(test.payload), &stderr, deps)
 		if rc != 0 || stderr.Len() != 0 {
-			t.Fatalf("%s: rc=%d stderr=%s", test.event, rc, &stderr)
+			t.Fatalf("%s: rc=%d stderr=%s", test.name, rc, &stderr)
 		}
-		assertActivityReport(t, server, "", "")
+		if got := lifecycle(); !slices.Equal(got, test.want) {
+			t.Errorf(
+				"%s: Herdr received\n%s\nwant\n%s",
+				test.name,
+				strings.Join(got, "\n"),
+				strings.Join(test.want, "\n"),
+			)
+		}
+	}
+	// One watchdog per stopped turn holding an agent: the first Stop, the late agent.
+	if spawned != 2 {
+		t.Errorf("agent watchdogs=%d, want 2", spawned)
 	}
 	now = now.Add(time.Hour + time.Second)
 	var stderr bytes.Buffer
@@ -291,7 +374,9 @@ func TestHerdrNativeBackgroundAgents(t *testing.T) {
 		stderr.Len() != 0 {
 		t.Fatalf("watch rc=%d stderr=%s", rc, &stderr)
 	}
-	assertActivityReport(t, server, "", "")
+	if got := lifecycle(); !slices.Equal(got, []string{idle}) {
+		t.Errorf("lost agent lease: Herdr received\n%s\nwant %s", strings.Join(got, "\n"), idle)
+	}
 }
 
 func TestHerdrBackgroundAgentsThroughTmux(t *testing.T) {

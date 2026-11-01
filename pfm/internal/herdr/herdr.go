@@ -1,10 +1,10 @@
 // Package herdr integrates pfm chats with the Herdr terminal multiplexer
 // (https://herdr.dev). Tmux chats and native Codex/OpenCode report lifecycle
 // state, session metadata and resume commands under the stable pfm source.
-// Native Claude reports session/restore metadata only under herdr:claude,
-// joining Herdr's native identity so state-free restore commands persist.
-// Herdr detects its lifecycle state. Old pfm ownership is released with a
-// newer sequence before metadata is republished; end also clears pfm's title.
+// A native Claude pane Herdr detects reports the same under ClaudeSource,
+// Herdr's native Claude identity, the one source Herdr takes its state and
+// restore record from. Old pfm ownership is released with a newer sequence
+// before metadata is republished; end also clears pfm's title.
 // Outside Herdr nothing here runs.
 package herdr
 
@@ -19,9 +19,14 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
-// Source is the one integration identity pfm reports under. Herdr's own
+// Source is the integration identity pfm reports under. Herdr's own
 // integrations use the `herdr:` prefix; pfm must never start with it.
 const Source = "pfm"
+
+// ClaudeSource is Herdr's own Claude identity. Once Herdr sees claude as a
+// pane's foreground it keys that pane's state and restore record by this
+// source alone, so pfm reports a detected native Claude pane under it.
+const ClaudeSource = "herdr:claude"
 
 // ReportDeadline bounds one reporter run, from its first tmux call through its
 // error log. EngineKillTimeout is the kill timer an engine (Codex's handler

@@ -6,6 +6,5 @@
 - Code lives with what changes with it, one change in one directory; never a `utils`, `helpers`, `common`, `misc` or `shared` directory.
 - A list (registry, usage text, allowlist) is derived from the code or generated from one source, never a hand-kept twin.
 - A script you would run twice goes in the project's `scripts/`.
-- Each source file has one test home, by the project's mirror convention.
 - A failure never reads as absence: "found nothing" and "could not look" print differently.
 - Every check names what its broken state reports.

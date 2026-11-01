@@ -5,7 +5,7 @@ description: Governs how {project} ({PROJECT_ROLE}) is tested — tiers, test ho
 
 # {project} testing manual
 
-Fixed headings, fixed order; a section that does not apply says `none`. State the current law only — no history. Stack detail lives in the project's runbook; cite it, never restate it.
+Fixed headings, fixed order; a section that does not apply says `none`. State the current law only — no history. Stack detail lives in the project's runbook; cite it, never restate it. How to write a test is the `testing` rule's (`~/.claude/rules/testing.md`); this manual holds {project}'s facts and how its tests run.
 
 ## Tiers
 
@@ -16,7 +16,6 @@ Fixed headings, fixed order; a section that does not apply says `none`. State th
 ## Where a test lives
 
 - A test lives in the module that owns its contract; the path convention: {source path → test path}.
-- Extend the owning test file; add a file only when none exists.
 
 ## Lanes and registries
 
@@ -34,7 +33,8 @@ Fixed headings, fixed order; a section that does not apply says `none`. State th
 
 ## Run commands
 
-- The full gate runs ONCE per worktree, right before its merge. During development you run ONLY the tests your change affects. No full suite at any other time: not per repair round, not to verify a fix, not before the gate. A red gate is fixed with affected tests only, then the gate runs once more before the merge.
+- Tests run only {where: the sandbox or command they run through}, against the tree holding the change; CI is never a debug loop, and every suite CI runs passes here before a push.
+- Development runs only the tests the change affects; the full gate runs once per worktree, right before its merge, and at no other time. A suite green on a tree never reruns on that tree; a red reruns only its failing tests until green, then the red suite once more.
 - Affected, an executor's only run (flight or general): `{PROJECT_TEST_RUNNER} {path or filter}` — timeout {n} s.
 - Full, the flight gate's run and never an executor's: {the one command of the full suite} — timeout {n} s.
 - Static check, an executor's only one, run once, last, given its task's files: {the one static-check command that takes a list of files}; a red is fixed and the same command run again.
@@ -42,11 +42,13 @@ Fixed headings, fixed order; a section that does not apply says `none`. State th
 
 ## Concurrency
 
-- Workers: `{PARALLEL_FLAG}`. What isolates one run from another, and what may never run beside what: {rule}.
+- Workers: `{PARALLEL_FLAG}`.
+- No two runs share a tree, a database or a fixture directory: {what isolates one run from another}; what may never run beside what: {rule}.
 
 ## Gates and floors
 
 - Coverage floor {n}%; lint and type check clean; any scored gate with its pass and fail thresholds: {gates}.
+- Wall-time budget per suite: {suite → n s}; a suite over budget has its slowest tests measured before any test joins it.
 
 ## Bug classes
 
@@ -59,6 +61,4 @@ Fixed headings, fixed order; a section that does not apply says `none`. State th
 ## What not to test
 
 - Tests this project refuses: {kinds}.
-- The refused shapes, in any unit, hermetic or live test, its harness and its checks: a fail-open verdict; a weak or tautological oracle; an unscoped read of a shared store; a wall-clock wait; a consuming probe; the toolchain tested as product; shipped migration content in a test; a source invariant tested instead of linted; a self-skip; a double or a test path in production code; a second logging path; a line-anchored exemption; a host path, process id or captured log in a fixture. This stack's spelling of each: {shape → spelling}.
-- A removed feature, field, route, flag, environment variable or prompt section takes its tests with it, never inverted into an absence assertion.
-- That an event did not happen (a network call, a DNS query, a sleep, a spawned process): a test asserts what the code does, never an absence.
+- This stack's spelling of the `/quality:integration-suite` refused shapes: {shape → spelling}.

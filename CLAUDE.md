@@ -132,6 +132,5 @@ Tiers and effort live in the fleet prompt's § Model Selection; the cast and eac
 
 ## Testing
 
-- Every test runs through `.claude/scripts/test.sh`, which runs it in the fence; the affected tests run before claiming anything works, and only a suite you watched run is reported.
-- The full gate runs once per worktree, right before its merge; a red one is fixed with `test.sh <failing paths>`, then the gate runs once more.
+- Tests run as `.claude/commands/pfm-testing-manual.md` § Run commands says; only a suite you watched run is reported.
 - A skipped or filtered suite is a named gap in the report, never a pass.

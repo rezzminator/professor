@@ -944,7 +944,12 @@ func TestHerdrKillOfALostSeatOnlyHides(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := Request{ID: seat.SessionID, Engine: pfmengine.ID(seat.Engine), SocketName: seat.HerdrSocket, PaneID: seat.HerdrPane}
+	request := Request{
+		ID:         seat.SessionID,
+		Engine:     pfmengine.ID(seat.Engine),
+		SocketName: seat.HerdrSocket,
+		PaneID:     seat.HerdrPane,
+	}
 	target, err := manager.Kill(context.Background(), request)
 	if err != nil || target.SocketPath != "" || target.PaneID != "" || len(spawner.args) != 0 {
 		t.Fatalf("lost seat kill target=%+v err=%v spawns=%v; want a hide only", target, err, spawner.args)

@@ -16,6 +16,7 @@ fence_config_values || return 1
 
 
 steps_reset() {
+  STEPS_LAST_FILTERED=0
   STEPS_NAMES=()
   STEPS_COMMANDS=()
   STEPS_HEAVY=()
@@ -36,6 +37,12 @@ steps_add() { # steps_add <name> <command> [args...]
       return 1
     fi
   done
+  # PFM_GATE_ONLY / PFM_GATE_SKIP (extended regexes, matched whole) register a slice of the
+  # list: one CI job per slice, the steps no ONLY slice claims landing in the SKIP job.
+  STEPS_LAST_FILTERED=1
+  if [[ -n "${PFM_GATE_ONLY:-}" && ! "$name" =~ ^(${PFM_GATE_ONLY})$ ]]; then return 0; fi
+  if [[ -n "${PFM_GATE_SKIP:-}" && "$name" =~ ^(${PFM_GATE_SKIP})$ ]]; then return 0; fi
+  STEPS_LAST_FILTERED=0
   shift
   printf -v quoted '%q ' "$@"
   STEPS_NAMES+=("$name")
@@ -47,6 +54,7 @@ steps_add() { # steps_add <name> <command> [args...]
 
 steps_add_heavy() { # steps_add_heavy <name> <command> [args...]
   steps_add "$@" || return 1
+  (( STEPS_LAST_FILTERED == 0 )) || return 0
   STEPS_HEAVY[$((${#STEPS_HEAVY[@]} - 1))]=1
 }
 
@@ -55,6 +63,7 @@ steps_set_bound() { # steps_set_bound <seconds>: the bound of the step registere
     printf 'steps_set_bound: bound must be a positive integer: %s\n' "${1:-}" >&2
     return 1
   fi
+  (( ${STEPS_LAST_FILTERED:-0} == 0 )) || return 0 # the step it bounds was filtered out
   if (( ${#STEPS_NAMES[@]} == 0 )); then
     printf 'steps_set_bound: no step registered\n' >&2
     return 1

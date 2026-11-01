@@ -32,7 +32,7 @@ dev_knobs() { # dev_knobs <file>...: the injected names in order, one per line; 
 dev_knobs_of() { # dev_knobs_of <file>
   local names
   names="$(awk '
-    /# Only generated timing artifacts are writable|# Profiling and step-scheduling knobs/ { on = 1 }
+    /# Only generated timing artifacts are writable|# Profiling, step-scheduling and gate-slice knobs/ { on = 1 }
     on && /# end of the gate knobs/ { exit }
     on {
       line = $0
@@ -461,6 +461,17 @@ out="$(bash -c 'source "$1"' _ "$T/noprof/steps.sh" 2>&1)"; rc=$?
 if [ "$rc" -eq 1 ] && [ "$out" = "steps.sh: cannot source $T/noprof/stepprof.sh" ]; then
   ok 'steps.sh without stepprof.sh beside it names the missing file and fails'
 else bad 'missing stepprof.sh' "rc=$rc $out"; fi
+
+# PFM_GATE_ONLY / PFM_GATE_SKIP register a slice: whole-name matches only, the heavy flag kept, a
+# bound aimed at a filtered step dropped with it.
+steps_reset
+PFM_GATE_ONLY='keep|keep-heavy|keep-not|drop' PFM_GATE_SKIP='keep-not'
+steps_add keep true; steps_add keepx true; steps_add drop true; steps_set_bound 9
+steps_add_heavy keep-heavy true; steps_add keep-not true; steps_set_bound 7; steps_add_heavy drop-heavy true
+unset PFM_GATE_ONLY PFM_GATE_SKIP
+got="$(printf '%s|' "${STEPS_NAMES[*]}" "${STEPS_HEAVY[*]}" "$(printf '%s,' "${STEPS_BOUND[@]}")")"
+if [ "$got" = 'keep drop keep-heavy|0 0 1|,9,,|' ]; then ok 'the gate filter registers whole-name matches, keeps heavy flags and drops bounds aimed at filtered steps'
+else bad 'gate filter slice' "expected 'keep drop keep-heavy|0 0 1|,9,,|' got '$got'"; fi
 
 # Public knobs change scheduling and Go concurrency without changing the Makefile.
 out="$(env -u TESTFLAGS PFM_FENCE_TEST_P=2 PFM_FENCE_TEST_PARALLEL=7 make -s -C "$MK_DIR" --no-print-directory testflags 2>&1)"; rc=$?

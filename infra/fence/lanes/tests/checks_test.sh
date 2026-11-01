@@ -284,6 +284,30 @@ if registry_probe templates '' "$REPO_ROOT" "$T/real-registry" >"$T/real-registr
   [ "$(grep -c '^templates\.lanes\.' "$T/real-registry")" -eq "$(find "$REPO_ROOT/infra/fence/lanes/tests" -name '*_test.sh' | wc -l | tr -d ' ')" ]; then
   ok 'the actual gate enumerator registers M and O2 commands under valid IDs and includes every lane suite'
 else bad 'actual lane suite registration' "$(cat "$T/real-registry.out")" "$(cat "$T/real-registry" 2>/dev/null)"; fi
+lanes_dir="$REPO_ROOT/infra/fence/lanes/tests"
+rm -f "$T/sliced-registry"
+if PFM_GATE_ONLY='templates\.lanes\.(m|o2)' registry_probe templates '' "$REPO_ROOT" "$T/sliced-registry" >"$T/sliced-registry.out" 2>&1 &&
+  [ "$(cat "$T/sliced-registry")" = "templates.lanes.m bash $lanes_dir/M_test.sh
+templates.lanes.o2 bash $lanes_dir/O2_test.sh" ]; then
+  ok 'PFM_GATE_ONLY registers exactly the steps it names'
+else bad 'PFM_GATE_ONLY slice' "$(cat "$T/sliced-registry.out")" "$(cat "$T/sliced-registry" 2>/dev/null)"; fi
+rm -f "$T/sliced-registry"
+if PFM_GATE_SKIP='templates\.(lanes|demo)\..*' registry_probe templates '' "$REPO_ROOT" "$T/sliced-registry" >"$T/sliced-registry.out" 2>&1 &&
+  grep -q '^templates\.check-map ' "$T/sliced-registry" && ! grep -qE '^templates\.(lanes|demo)\.' "$T/sliced-registry"; then
+  ok 'PFM_GATE_SKIP registers every step but the ones it names'
+else bad 'PFM_GATE_SKIP slice' "$(cat "$T/sliced-registry.out")" "$(cat "$T/sliced-registry" 2>/dev/null)"; fi
+for refusal in only skip; do
+  rm -f "$T/sliced-registry"
+  case "$refusal" in
+    only) want='FAILSTEP gate: the filter matched no step: PFM_GATE_ONLY=no\.such\.step'
+      PFM_GATE_ONLY='no\.such\.step' registry_probe templates '' "$REPO_ROOT" "$T/sliced-registry" >"$T/sliced-registry.out" 2>&1; rc=$? ;;
+    skip) want='FAILSTEP gate: PFM_GATE_SKIP is not an extended regex: ('
+      PFM_GATE_SKIP='(' registry_probe templates '' "$REPO_ROOT" "$T/sliced-registry" >"$T/sliced-registry.out" 2>&1; rc=$? ;;
+  esac
+  if [ "$rc" -ne 0 ] && grep -Fxq "$want" "$T/sliced-registry.out" && [ ! -e "$T/sliced-registry" ]; then
+    ok "a $refusal filter that cannot slice refuses before any step runs"
+  else bad "filter refusal $refusal" "expected '$want' (rc $rc)" "$(cat "$T/sliced-registry.out")"; fi
+done
 for rejected in pfm.unit pfm.self.arch-check templates.lanes.root templates.demo.codex_fence_home \
   fixture.go-fail fixture.bound pfm.arch templates.check-map templates.clone templates.test-tests templates.engine-sync-action-tests; do
   rm -f "$T/refused-registry"

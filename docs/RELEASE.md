@@ -82,25 +82,31 @@ Notes before `v0.78.0` wrote actions as `#### → For:`, `#### → For adopters 
 
 ### Verification
 
-`## Verification` closes the note: how the release was proven — the gate, the CI run, the leak scan, the preflight, the review — as facts and numbers. It holds prose only, never a bullet or an action.
+`## Verification` closes the note: how the release was proven — the gate, the leak scan, the preflight, the review — as facts and numbers. It holds prose only, never a bullet or an action.
 
 ## Cutting a release
 
 Maintainer command, run in this repo only:
 
-- `/pfm:release cut {patch|minor|major} "{summary}" [--dry]` — releases `develop`'s tip as it stands at the cut, in one pass: the full gate, the leak scan, `release-check preflight`, the `ci.yml` run on that commit, the note and, when the cut changes the update path, one review, all at once; then the release commit (the note, `CHANGELOG.md` and the version stamps, nothing else), `make release-check`, the pull request from `release/v{X.Y.Z}` into `main`, its merge — which tags and publishes — and the merge back into `develop`. Typing it is the maintainer's publish request; `--dry` stops before any push. Every check is a stop: nothing is fixed inside a release, the fix lands on `develop` and the maintainer cuts again.
+- `/pfm:release cut {patch|minor|major} "{summary}" [--dry]` — releases `develop`'s tip as it stands at the cut, in one pass: the full gate, the leak scan, `release-check preflight`, the note and, when the cut changes the update path, one review, all at once; then the release commit (the note, `CHANGELOG.md` and the version stamps, nothing else), `make release-check`, the pull request from `release/v{X.Y.Z}` into `main`, whose `ci.yml` run must pass, its merge — which tags and publishes — and the merge back into `develop`. Typing it is the maintainer's publish request; `--dry` stops before any push. Every check is a stop: nothing is fixed inside a release, the fix lands on `develop` and the maintainer cuts again.
 
 The procedure is `.claude/commands/pfm/release.md`; the design and the reasons are `docs/design/release/`.
 
 ## What the release pull request triggers
 
-Two workflows run on the pull request into `main`: `.github/workflows/release.yml` gates it while it is open (opened, synchronized or reopened; also a manual `workflow_dispatch`, which builds test artifacts and publishes nothing), and `.github/workflows/publish.yml` runs when it closes merged. `make release-check` runs every pull-request check locally first, after `git fetch origin main`, except the `check` job's Scan step: the HOL AI Plugin Scanner is a GitHub Action with no local install, and the target says so.
+Two workflows run on the pull request into `main`: `.github/workflows/ci.yml` gates it while it is open, and `.github/workflows/publish.yml` runs when it closes merged. No workflow runs on a push. `make release-check` runs the `build` and `release` jobs' checks and the mirror generation the `scan` job scores locally first, after `git fetch origin main`; the HOL AI Plugin Scanner itself is a GitHub Action with no local install, and the target says so.
 
-While the release pull request from `release/v{X.Y.Z}` into `main` is open, its jobs gate the merge — the `main is release-only` ruleset requires `check` and `release`:
+While the release pull request from `release/v{X.Y.Z}` into `main` is open, `ci.yml`'s jobs run in parallel and gate the merge — the `main is release-only` ruleset requires one check, the aggregate `ci`:
 
-1. **`check`** — generates the Codex and OpenCode mirrors and runs the HOL AI Plugin Scanner over the tree.
-2. **Build** — `pfm` for `linux/amd64`, `linux/arm64`, `darwin/arm64`, `darwin/amd64` (Go, `-trimpath`, `CGO_ENABLED=0`); each platform binary uploads as its own workflow artifact.
-3. **`release`** — fails unless every build leg passed, `VERSION` moved past `main`'s as a plain `X.Y.Z`, `releases/v{VERSION}.md` exists, and `release-check notes` passes on it.
+1. **`gate (unit|e2e|race|mirrors|rest)`** — the local gate's own step list (`gate_run` in `infra/fence/checks.sh`) natively on `ubuntu-latest` through `bash .claude/scripts/dev.sh gate all`, one slice per job. `PFM_GATE_ONLY` and `PFM_GATE_SKIP` select the slice: extended regexes matched against whole step names in `steps_add` (`infra/fence/steps.sh`); `rest` skips the four named slices, so a new gate step runs in CI with no workflow edit. The pinned shellcheck, rumdl, Node and Herdr come from `infra/fence/pinned-tools.sh`, the same installs the fence image runs.
+2. **`macos (unit|e2e)`** — the composite action `.github/actions/macos-suite` on `macos-15`: `unit` runs `go test ./...` and the refresh-scope fixture under the system Bash 3.2; `e2e` runs the whole tagged e2e suite.
+3. **`fresh-install (ubuntu-latest|macos-15)`** — `scripts/fresh-install-test.sh`: `INSTALL.md` as written in a fresh HOME, then update and rollback across releases.
+4. **`build`** — `pfm` for `linux/amd64`, `linux/arm64`, `darwin/arm64`, `darwin/amd64` (Go, `-trimpath`, `CGO_ENABLED=0`) through `make release-binary`; nothing is uploaded.
+5. **`scan`** — generates the Codex and OpenCode mirrors and runs the HOL AI Plugin Scanner over the tree.
+6. **`release`** — `make release`: fails unless `VERSION` moved past `main`'s as a plain `X.Y.Z`, `releases/v{VERSION}.md` exists, and `release-check notes` passes on it, so `main` takes only release pull requests.
+7. **`ci`** — fails unless every other job succeeded; a skipped or cancelled job counts as a failure.
+
+`.github/workflows/macos.yml` runs the same macOS `unit` and `e2e` parts on demand (`workflow_dispatch` only) between releases.
 
 Merging the pull request is the release. `publish.yml`'s `publish` job:
 

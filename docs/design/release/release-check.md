@@ -113,7 +113,7 @@ README agents are prose mentions, not a list: a removed agent the README still n
 - `/pfm:release`: `preflight` and `scope` at the cut; `notes` over the draft with coverage, `--version` and `--pfm-help`, then over `releases/v{NEW}.md` with every rule group once the version is stamped.
 - `changelogger`: `notes` with the coverage arguments and `--version`, before it returns.
 - `.claude/scripts/dev.sh verify templates`: `notes --all releases`.
-- `.github/workflows/release.yml`: the release PR's `release` job runs `make release`, `notes releases/v{VERSION}.md --version v{VERSION}` beside the authored-notes gate; `make release-check` runs it locally.
+- `.github/workflows/ci.yml`: the release PR's `release` job runs `make release`, `notes releases/v{VERSION}.md --version v{VERSION}` beside the authored-notes gate; `make release-check` runs it locally.
 
 ## Tests
 

@@ -129,8 +129,7 @@ skip_gate() {
 
 # timing_run_dir <base>: create <base> if absent and a fresh run.XXXXXX under
 # it, mode 0755 whatever the umask — the fence writes as root under the bind
-# mount and the host's non-root reader (`make -C pfm timing`, the CI artifact
-# upload) must still open it. Prints the run dir's absolute path. BROKEN STATE:
+# mount and the host's non-root reader (`make -C pfm timing`) must still open it. Prints the run dir's absolute path. BROKEN STATE:
 # a base or run dir that cannot be made is non-zero with a stderr line naming
 # the base and prints no path, so a caller never runs a suite into nowhere.
 timing_run_dir() {
@@ -483,10 +482,10 @@ cmd_iso() { # cmd_iso <action> [project | command…]
     fence_image_prepare "$compose" "$service" || { fail_step "iso: the $service image could not be keyed — see the line above"; exit 1; }
   fi
   local -a extra=()
-  # Profiling and step-scheduling knobs reach the fence when the caller set them, TESTFLAGS too.
+  # Profiling, step-scheduling and gate-slice knobs reach the fence when the caller set them, TESTFLAGS too.
   if [[ -n "${TESTFLAGS+x}" ]]; then extra+=(-e "TESTFLAGS=$TESTFLAGS"); fi
   local knob
-  for knob in STEPS_JOBS STEPS_HEAVY_JOBS STEPS_BOUND_S STEPPROF_TRACE STEPPROF_GRACE_TICKS PFM_TEST_PROFILE PFM_GATE_FIXTURES; do
+  for knob in STEPS_JOBS STEPS_HEAVY_JOBS STEPS_BOUND_S STEPPROF_TRACE STEPPROF_GRACE_TICKS PFM_TEST_PROFILE PFM_GATE_FIXTURES PFM_GATE_ONLY PFM_GATE_SKIP; do
     if [[ -n "${!knob+x}" ]]; then extra+=(-e "$knob=${!knob}"); fi
   done
   # Every exported PFM_FENCE_* knob reaches the fence, except the per-run names
@@ -642,11 +641,15 @@ TARGET="${2:-all}"
 # A suite never runs on the host: its tests spawn tmux sessions, git repos and
 # processes against whatever machine they run on. The fence sets
 # PFM_DEV_FENCE=1 (infra/fence/docker-compose.yml, lanes/container.sh) inside a
-# container (/.dockerenv): an exported variable alone never passes. On the host
-# the suite runs in the fence instead (pfm/internal/testjail/fence.go likewise).
+# container (/.dockerenv): an exported variable alone never passes. A
+# GitHub-hosted runner (GITHUB_ACTIONS=true, RUNNER_ENVIRONMENT=github-hosted)
+# passes too: it is a throwaway machine, so ci.yml runs the gate on it natively.
+# Everywhere else the suite runs in the fence instead; pfm/internal/testjail/fence.go
+# (inFence, onHostedRunner) applies the same rule.
 case "$CMD" in
   test|cover|all|verify|gate)
-    if [[ "${PFM_DEV_FENCE:-}" != 1 || ! -e /.dockerenv ]]; then
+    if [[ ( "${PFM_DEV_FENCE:-}" != 1 || ! -e /.dockerenv ) \
+          && ( "${GITHUB_ACTIONS:-}" != true || "${RUNNER_ENVIRONMENT:-}" != github-hosted ) ]]; then
       echo "FENCE-ONLY: dev.sh $CMD never runs on the host — running: dev.sh iso $CMD ${2:-}" >&2
       exec bash "${BASH_SOURCE[0]}" iso "$CMD" ${2:+"$2"}
     fi ;;

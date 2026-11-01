@@ -1,24 +1,97 @@
 name: ci
 
-# Deterministic tests the fence cannot run: macOS, and a fresh machine that
-# follows INSTALL.md then updates and rolls back across real releases. The
-# Linux unit and e2e suites run in the fence gate, not here.
+# The one check, on a pull request into main: every layer on Linux and macOS,
+# in parallel. Its `ci` job is main's only required status check, so nothing
+# merges, releases or publishes until every job here is green. The Linux gate
+# jobs run the local gate's own step list (infra/fence/checks.sh gate_run),
+# one slice per job, directly on the runner; publish.yml runs on the merge.
+# The rule: .claude/rules/ci-workflows.md.
 on:
-  push:
-    branches:
-      - develop
   pull_request:
-    branches:
-      - main
-  workflow_dispatch:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
-  macos-tests:
-    name: macos-tests
+  gate:
+    name: gate (${{ matrix.slice }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Each `only` slice runs alone; `rest` skips exactly those, so a step
+        # added to the gate lands in CI with no edit here. A new slice adds its
+        # pattern to `rest`'s skip too.
+        include:
+          - slice: unit
+            only: 'pfm\.unit'
+          - slice: e2e
+            only: 'pfm\.e2e'
+          - slice: race
+            only: 'pfm\.race'
+          - slice: mirrors
+            only: 'templates\.mirrors'
+          - slice: rest
+            skip: 'pfm\.(unit|e2e|race)|templates\.mirrors'
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          submodules: true
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: pfm/go.mod
+          cache-dependency-path: pfm/go.sum
+
+      - name: Install the system packages the fence image carries
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            tmux zsh jq python3-yaml sqlite3 rsync xz-utils libgl1 libglib2.0-0 libxcb1
+
+      - name: Install the pinned shellcheck, rumdl, Node and Herdr
+        run: |
+          set -euo pipefail
+          bash infra/fence/pinned-tools.sh "$RUNNER_TEMP/pinned" shellcheck rumdl node herdr
+          echo "$RUNNER_TEMP/pinned/bin" >> "$GITHUB_PATH"
+
+      - name: Restore the pinned developer tools
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: tmp/tools
+          key: tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('infra/fence/tools.env', 'infra/fence/tools.sh', 'infra/fence/jscpd/package-lock.json') }}
+
+      - name: Install the pinned developer tools
+        run: bash infra/fence/tools.sh
+
+      - name: Run the gate's ${{ matrix.slice }} slice
+        env:
+          PFM_DEV_FENCE: "1"
+          PFM_FENCE_PROFILE: native
+          PFM_HARVESTPY_OFFLINE: "1"
+          PFM_GATE_ONLY: ${{ matrix.only }}
+          PFM_GATE_SKIP: ${{ matrix.skip }}
+          # The fence's per-step bound derives from its own gate budget; a
+          # hosted runner has fewer cores, so each step gets the default bound.
+          STEPS_BOUND_S: "1500"
+        run: bash .claude/scripts/dev.sh gate all
+
+  macos:
+    name: macos (${{ matrix.part }})
     runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [unit, e2e]
     steps:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -31,44 +104,121 @@ jobs:
           go-version-file: pfm/go.mod
           cache-dependency-path: pfm/go.sum
 
-      # The agent source inventory the installer tests read imports yaml.
-      - name: Install test tools
+      - name: Run the macOS ${{ matrix.part }} part
+        uses: ./.github/actions/macos-suite
+        with:
+          part: ${{ matrix.part }}
+
+  fresh-install:
+    name: fresh-install (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15]
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: pfm/go.mod
+          cache-dependency-path: pfm/go.sum
+
+      - name: Install the runtime prerequisites INSTALL.md lists
         run: |
           set -euo pipefail
-          brew install tmux jq
-          python3 -c 'import yaml' 2>/dev/null || python3 -m pip install --break-system-packages 'PyYAML>=6.0.2,<7'
-          python3 -c 'import yaml; print("PyYAML", yaml.__version__)'
+          if [ "$RUNNER_OS" = macOS ]; then
+            brew install tmux jq
+            python3 -c 'import yaml' 2>/dev/null || python3 -m pip install --break-system-packages 'PyYAML>=6.0.2,<7'
+          else
+            sudo apt-get update
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tmux zsh jq python3 python3-yaml
+          fi
 
       - name: Build engine-sync
         uses: ./.github/actions/engine-sync
 
-      # Exercise the fixture with the system Bash 3.2.
-      - name: Verify refresh scope with system Bash
-        run: python3 scripts/test-refresh-scope.py
+      # /bin/bash is the system Bash 3.2 on macOS, as on a user's Mac.
+      - name: Install from INSTALL.md, then update and roll back across releases
+        run: /bin/bash scripts/fresh-install-test.sh
 
-      - name: Run pfm unit tests
+  build:
+    name: build (${{ matrix.goos }}/${{ matrix.goarch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+          - { goos: darwin, goarch: arm64 }
+          - { goos: darwin, goarch: amd64 }
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: pfm/go.mod
+          cache-dependency-path: pfm/go.sum
+
+      # publish.yml rebuilds and uploads the binaries from the merge commit.
+      - name: Build
         env:
-          PFM_DEV_FENCE: "1"
-          PFM_HARVESTPY_OFFLINE: "1"
-        run: go -C pfm test -count=1 ./...
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: make release-binary
 
-      # Includes the Darwin installer and the release-upgrade e2e.
-      - name: Run serial e2e
-        # Runs even when the unit step failed, so one CI run shows every red.
-        if: ${{ !cancelled() }}
-        env:
-          PFM_DEV_FENCE: "1"
-          PFM_HARVESTPY_OFFLINE: "1"
-        run: |
-          set -euo pipefail
-          export PFM_E2E_SOURCE_REPO="$GITHUB_WORKSPACE"
-          export PFM_DEV_REPO_WORK_TREE="$GITHUB_WORKSPACE"
-          PFM_DEV_REPO_GIT_DIR="$(git rev-parse --absolute-git-dir)"
-          export PFM_DEV_REPO_GIT_DIR
-          go -C pfm test -count=1 -tags e2e -p 1 -timeout 60m ./e2e/...
+  # HOL AI Plugin Scanner — the same pinned action and thresholds the
+  # awesome-ai-plugins catalog applies, so the source-side score is reproducible.
+  scan:
+    name: scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-  fresh-install-linux:
-    name: fresh-install-linux
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: pfm/go.mod
+          cache-dependency-path: pfm/go.sum
+
+      - name: Build engine-sync
+        uses: ./.github/actions/engine-sync
+
+      # The scanner scores `.opencode/` as its own package, including its
+      # generated LICENSE/SECURITY.md/opencode.jsonc — none of which are
+      # tracked (see .gitignore). Generate both mirrors before it runs, or
+      # it scores an absent, not a generated, tree. The project's
+      # .claude/engine-sync.json opencode.mirrorFiles lists LICENSE and
+      # SECURITY.md; the machine policy the action stages fills
+      # opencode.jsonc from its opencode.permission.
+      - name: Generate Codex and OpenCode mirrors
+        run: make check
+
+      - name: Scan
+        uses: hashgraph-online/ai-plugin-scanner-action@8c2dd4f9cc381ad56496ca44aab10ce19f6bdd0f # v1.2.813
+        with:
+          plugin_dir: "."
+          min_score: 80
+          fail_on_severity: high
+          # .plugin-scanner.toml (fixture paths that plant fake credentials)
+          # counts only for a pull request from this repository. A fork's
+          # pull request is scanned with no repository suppressions.
+          trust_repository_policy: ${{ github.event.pull_request.head.repo.full_name == github.repository && 'true' || 'false' }}
+
+  # main takes only release pull requests: VERSION moved past main's, and its
+  # authored notes releases/v{VERSION}.md exist and pass the grammar.
+  release:
+    name: release
     runs-on: ubuntu-latest
     steps:
       - name: Check out the repository
@@ -76,48 +226,31 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          go-version-file: pfm/go.mod
-          cache-dependency-path: pfm/go.sum
+          node-version: 22
 
-      - name: Install the runtime prerequisites INSTALL.md lists
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tmux zsh jq python3 python3-yaml
+      - name: The version moved past main's, its authored release notes exist and pass the grammar
+        run: make release
 
-      - name: Build engine-sync
-        uses: ./.github/actions/engine-sync
-
-      - name: Install from INSTALL.md, then update and roll back across releases
-        run: bash scripts/fresh-install-test.sh
-
-  fresh-install-macos:
-    name: fresh-install-macos
-    runs-on: macos-15
+  # main's only required status check. always(): a skipped or cancelled job
+  # counts as passed for a required check, so this job fails unless every
+  # job it needs succeeded.
+  ci:
+    name: ci
+    needs: [gate, macos, fresh-install, build, scan, release]
+    if: always()
+    runs-on: ubuntu-latest
     steps:
-      - name: Check out the repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-
-      - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: pfm/go.mod
-          cache-dependency-path: pfm/go.sum
-
-      - name: Install the runtime prerequisites INSTALL.md lists
+      - name: Every job succeeded
+        env:
+          NEEDS: ${{ toJSON(needs) }}
         run: |
           set -euo pipefail
-          brew install tmux jq
-          python3 -c 'import yaml' 2>/dev/null || python3 -m pip install --break-system-packages 'PyYAML>=6.0.2,<7'
-
-      - name: Build engine-sync
-        uses: ./.github/actions/engine-sync
-
-      # The system Bash 3.2 runs the script, as on a user's Mac.
-      - name: Install from INSTALL.md, then update and roll back across releases
-        run: /bin/bash scripts/fresh-install-test.sh
+          failed="$(jq -r 'to_entries[] | select(.value.result != "success") | "\(.key)=\(.value.result)"' <<<"$NEEDS")"
+          if [ -n "$failed" ]; then
+            echo "::error::not every CI job succeeded: $(tr '\n' ' ' <<<"$failed")"
+            exit 1
+          fi
+          echo "every CI job succeeded"

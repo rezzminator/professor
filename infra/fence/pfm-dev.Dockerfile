@@ -22,47 +22,10 @@ ARG GO_VERSION=1.27.1
 ARG TARGETARCH
 RUN case "${TARGETARCH}" in amd64|arm64) ;; *) echo "unsupported build architecture: ${TARGETARCH}" >&2; exit 1 ;; esac \
  && curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${TARGETARCH}.tar.gz" | tar -C /usr/local -xz
-# shellcheck is the linter the plugins' scripts/gate.sh runs over their shell
-# scripts. Pinned to the release those gates pin (gpt-gateway SHELLCHECK_VERSION):
-# apt's older release reports different findings. Each tarball is verified
-# against its recorded checksum before extracting.
-ARG SHELLCHECK_VERSION=0.11.0
-RUN case "${TARGETARCH}" in \
-      amd64) sc_arch=x86_64; sc_sum=8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198 ;; \
-      arm64) sc_arch=aarch64; sc_sum=12b331c1d2db6b9eb13cfca64306b1b157a86eb69db83023e261eaa7e7c14588 ;; \
-      *) echo "unsupported build architecture: ${TARGETARCH}" >&2; exit 1 ;; \
-    esac \
- && curl -fsSL -o /tmp/shellcheck.tar.xz "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.${sc_arch}.tar.xz" \
- && echo "${sc_sum}  /tmp/shellcheck.tar.xz" | sha256sum -c - \
- && tar -C /tmp -xJf /tmp/shellcheck.tar.xz \
- && install -m 0755 "/tmp/shellcheck-v${SHELLCHECK_VERSION}/shellcheck" /usr/local/bin/shellcheck \
- && rm -rf /tmp/shellcheck.tar.xz "/tmp/shellcheck-v${SHELLCHECK_VERSION}"
-# rumdl is the Markdown linter .claude/scripts/test.sh runs on every named .md file, pinned to
-# the release `pfm install` installs on a host (pfm/internal/installer/markdown_tool.go
-# rumdlPinnedVersion): bump both together. The static musl build, verified against the
-# release's recorded digest before extracting.
-ARG RUMDL_VERSION=0.2.73
-RUN case "${TARGETARCH}" in \
-      amd64) rd_arch=x86_64; rd_sum=dc4aa9bf98f936f667039224a34fc2e26ddf6be3589bf59d63e4d6b038be4f5c ;; \
-      arm64) rd_arch=aarch64; rd_sum=f51548adfc71c4982cb5cc239d847bcd4c884e6ac8dc67efd68efd3eea9753a4 ;; \
-      *) echo "unsupported build architecture: ${TARGETARCH}" >&2; exit 1 ;; \
-    esac \
- && curl -fsSL -o /tmp/rumdl.tar.gz "https://github.com/rvben/rumdl/releases/download/v${RUMDL_VERSION}/rumdl-v${RUMDL_VERSION}-${rd_arch}-unknown-linux-musl.tar.gz" \
- && echo "${rd_sum}  /tmp/rumdl.tar.gz" | sha256sum -c - \
- && mkdir /tmp/rumdl && tar -C /tmp/rumdl -xzf /tmp/rumdl.tar.gz \
- && install -m 0755 "$(find /tmp/rumdl -type f -name rumdl | head -n 1)" /usr/local/bin/rumdl \
- && rm -rf /tmp/rumdl.tar.gz /tmp/rumdl \
- && rumdl --version | grep -F "${RUMDL_VERSION}"
-# Node pinned to the mirror compilers' minimum supported release. Verify the selected
-# architecture's tarball against the release checksum before extracting it.
-ARG NODE_VERSION=22.13.1
-RUN case "${TARGETARCH}" in amd64) node_arch=x64 ;; arm64) node_arch=arm64 ;; esac \
- && node_tar="node-v${NODE_VERSION}-linux-${node_arch}.tar.xz" \
- && curl -fsSLO "https://nodejs.org/dist/v${NODE_VERSION}/${node_tar}" \
- && curl -fsSLO "https://nodejs.org/dist/v${NODE_VERSION}/SHASUMS256.txt" \
- && grep " ${node_tar}$" SHASUMS256.txt | sha256sum -c - \
- && tar -C /usr/local --strip-components=1 -xJf "${node_tar}" \
- && rm -f "${node_tar}" SHASUMS256.txt
+# shellcheck, rumdl and Node: the pinned, checksum-verified installs CI's Linux gate jobs run too
+# (infra/fence/pinned-tools.sh holds every version and digest).
+COPY pinned-tools.sh /opt/pfm-tools/
+RUN bash /opt/pfm-tools/pinned-tools.sh /usr/local shellcheck rumdl node
 ENV HOME=/root \
     LANG=C.UTF-8 \
     PATH=/usr/local/go/bin:/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
@@ -104,15 +67,4 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # pfm-dev carries the real headless Herdr used by the native-seat lane.
 FROM pfm-base AS pfm-dev
-ARG HERDR_VERSION=0.9.5
-ARG TARGETARCH
-RUN case "${TARGETARCH}" in \
-      amd64) herdr_arch=x86_64; herdr_sum=14d9e8bc8b4a9e0118d77c32266f76d461f09b40342eb23752960bd89f59929d ;; \
-      arm64) herdr_arch=aarch64; herdr_sum=17d7536f2da50859523680ef279dffcac8e4a235f4e46fe8da6c2ec44141897c ;; \
-      *) echo "unsupported Herdr architecture: ${TARGETARCH}" >&2; exit 1 ;; \
-    esac \
- && curl -fsSL -o /tmp/herdr "https://github.com/herdrdev/herdr/releases/download/v${HERDR_VERSION}/herdr-linux-${herdr_arch}" \
- && echo "${herdr_sum}  /tmp/herdr" | sha256sum -c - \
- && install -m 0755 /tmp/herdr /usr/local/bin/herdr \
- && rm /tmp/herdr \
- && herdr --version
+RUN bash /opt/pfm-tools/pinned-tools.sh /usr/local herdr

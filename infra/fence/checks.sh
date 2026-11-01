@@ -1014,7 +1014,7 @@ gate_budget_limits() {
 }
 
 # gate_budget_verdict <target> <wall seconds> [budget file] [attribution]: prints the verdict
-# line, returns 1 when red, and leaves PASS, WARN, FAIL, UNPINNED or ERROR in BUDGET_VERDICT.
+# line, returns 1 when red, and leaves PASS, WARN, FAIL, UNPINNED or ERROR in BUDGET_VERDICT (gate_run sets FILTERED for a slice).
 # attribution is test-contention.sh's `<WORD><TAB><evidence>` line for the run: an over-limit line
 # ends with it, and a fail-tier wall the judge calls CONTENTION is a WARN, not a red gate.
 gate_budget_verdict() {
@@ -1177,7 +1177,7 @@ gate_attribution() {
 
 gate_run() { # pfm, templates, or all
   local target="${1:-all}" d="$REPO_ROOT/pfm" base run_dir row stem f step_rc=0 budget_rc=0 derived=0 started
-  local gate_pid sampler_pid attribution summary_rc
+  local gate_pid sampler_pid attribution summary_rc knob filter=""
   case "$target" in pfm|templates|all) ;; *) printf 'gate_run: unknown target: %s\n' "$target" >&2; return 2 ;; esac
   if [[ "$target" == pfm || "$target" == all ]]; then
     need_tool go pfm || return 1
@@ -1194,6 +1194,11 @@ gate_run() { # pfm, templates, or all
     return 1
   fi
   timing_run_note "$run_dir"
+  for knob in PFM_GATE_ONLY PFM_GATE_SKIP; do
+    [[ -n "${!knob:-}" ]] || continue
+    [[ "" =~ ^(${!knob})$ ]]; (( $? != 2 )) || { fail_step "gate: $knob is not an extended regex: ${!knob}"; return 1; }
+    filter="$filter $knob=${!knob}"
+  done
   steps_reset || return 1
   if [[ "$target" == pfm || "$target" == all ]]; then
     steps_add_heavy pfm.unit checks_pfm_unit "$d" "$run_dir" || return 1
@@ -1237,6 +1242,10 @@ gate_run() { # pfm, templates, or all
     steps_add_heavy templates.check-map checks_gate_check_map "$run_dir" || return 1
     checks_templates_steps steps_add || return 1
   fi
+  if [[ -n "$filter" ]] && (( ${#STEPS_NAMES[@]} == 0 )); then
+    fail_step "gate: the filter matched no step:$filter"
+    return 1
+  fi
   if gate_derive_bound "$target"; then derived=1; fi
   started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   if ! gate_write_meta "$run_dir" "$target" "$started" 'NA running'; then
@@ -1253,7 +1262,11 @@ gate_run() { # pfm, templates, or all
   attribution="$(gate_attribution "$d" "$run_dir")"
   row="$(awk -F '\t' '$1=="STEPS" {print $3}' "$run_dir/gate.tsv" 2>/dev/null)"
   BUDGET_VERDICT=ERROR
-  if gate_budget_verdict "$target" "$row" "" "$attribution"; then budget_rc=0; else budget_rc=$?; fi
+  if [[ -n "$filter" ]]; then
+    # The budget times the whole gate on the fence's cores; a slice is recorded, never judged.
+    BUDGET_VERDICT=FILTERED; budget_rc=0
+    printf 'budget: gate(%s) filtered —%s; recorded, not judged\n' "$target" "$filter"
+  elif gate_budget_verdict "$target" "$row" "" "$attribution"; then budget_rc=0; else budget_rc=$?; fi
   if [[ "$row" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then row="$(gate_wall_ceil "$row")"; else row=NA; fi
   if [[ -f "$run_dir/gate.tsv" ]] && ! printf 'BUDGET\t%s\t%s\n' "$BUDGET_VERDICT" "$row" >> "$run_dir/gate.tsv"; then
     fail_step "gate: cannot append the BUDGET row to $run_dir/gate.tsv"; budget_rc=1

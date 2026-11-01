@@ -63,6 +63,8 @@ func TestHerdrBackendDoctor(t *testing.T) {
 	const healthy = `{"type":"pong","version":"0.9.5","protocol":22}`
 	for _, scenario := range []struct {
 		name, pong, config, platform, status string
+		keep, keepErr                        string
+		keepExit                             int
 		dead, discover, directory            bool
 		warnings, failures                   int
 		want                                 string
@@ -77,6 +79,19 @@ func TestHerdrBackendDoctor(t *testing.T) {
 		{name: "wrong result type", pong: `{"type":"other","version":"0.9.5","protocol":22}`, failures: 1, want: "doctor: herdr backend UNREACHABLE — malformed ping result"},
 		{name: "empty version", pong: `{"type":"pong","version":"","protocol":22}`, failures: 1, want: "doctor: herdr backend UNREACHABLE — malformed ping result"},
 		{name: "restore disabled", pong: healthy, config: "[session]\nresume_agents_on_restore = false\n", warnings: 1, want: "doctor: herdr resume_agents_on_restore=false — Herdr chats will not come back after a restart"},
+		{
+			name: "restore disabled, herdr-keep healthy", pong: healthy, keep: "OK: Linux/systemd user manager",
+			config: "[session]\nresume_agents_on_restore = false\n[terminal]\ndefault_shell = \"/opt/herdr-keep\"\n",
+			want:   "doctor: herdr resume_agents_on_restore=false by design: herdr-keep keeps panes alive (herdr-keep doctor OK)",
+		},
+		{
+			name: "restore disabled, herdr-keep refusing", pong: healthy, keepExit: 1,
+			keepErr:  "herdr-keep: upstream observation requires an owned private parent",
+			config:   "[session]\nresume_agents_on_restore = false\n[terminal]\ndefault_shell = \"/opt/herdr-keep\"\n",
+			warnings: 1,
+			want: "doctor: herdr resume_agents_on_restore=false and herdr-keep doctor FAILED — " +
+				"herdr-keep: upstream observation requires an owned private parent;",
+		},
 		{name: "restore explicit true", pong: healthy, config: "[session]\nresume_agents_on_restore = true\n", want: "doctor: herdr resume_agents_on_restore=true (on-disk config)"},
 		{name: "restore default", pong: healthy, want: "doctor: herdr resume_agents_on_restore=true (on-disk config)"},
 		{name: "BOM config", pong: healthy, config: "\ufeff[session]\nresume_agents_on_restore = false\n", warnings: 1, want: "doctor: herdr resume_agents_on_restore=false — Herdr chats will not come back after a restart"},
@@ -116,6 +131,11 @@ func TestHerdrBackendDoctor(t *testing.T) {
 			t.Setenv(herdr.EnvSocket, socket)
 			t.Setenv(herdr.EnvBin, "")
 			runner := &deps.FakeRunner{}
+			if scenario.keep != "" || scenario.keepErr != "" {
+				runner.Script([]string{"/opt/herdr-keep", "doctor"}, deps.RunResult{
+					Stdout: []byte(scenario.keep), Stderr: []byte(scenario.keepErr), ExitCode: scenario.keepExit,
+				}, nil)
+			}
 			if scenario.discover {
 				t.Setenv(herdr.EnvSocket, "")
 				runner.ScriptLookPath("herdr", "/opt/herdr", nil)
@@ -261,7 +281,7 @@ func TestHerdrRestoreConfigPaths(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			resume, err := herdrDoctorRestoreConfig(env)
+			resume, _, err := herdrDoctorRestoreConfig(env)
 			if scenario.debug && !scenario.override {
 				if err == nil || !strings.Contains(err.Error(), "set HERDR_CONFIG_PATH") {
 					t.Fatalf("resume=%v err=%v, want visible ambiguous config", resume, err)

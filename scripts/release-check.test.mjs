@@ -193,7 +193,7 @@ describe("scope", { concurrency: availableParallelism() }, () => {
       "FILE D 1 tier1 templates templates/global/agents/old-agent.md",
       "FILE A 1 tier2 - side.txt",
       "AREA templates 5 5 templates/ pfm/harness-prompts/",
-      "AREA gates 1 1 .github/ .githooks/ scripts/ infra/check-self-hosted-manifest.sh",
+      "AREA gates 1 1 .github/ .githooks/ scripts/",
       "TIER2 4 5",
       "REMOVED docs/BLUEPRINT.md",
       "REMOVED docs/moved.md",
@@ -614,7 +614,6 @@ describe("notes version V1–V3 and commands P1", { concurrency: availableParall
       "note.md": NOTE,
       VERSION: "0.78.0\n",
       ".professor/VERSION": "0.78.0\n",
-      ".professor/manifest.json": JSON.stringify({ installed_from: { version: "0.78.0" } }),
       "CHANGELOG.md": "# Changelog\n\n## Releases\n\n- [v0.78.0](releases/v0.78.0.md) — the summary\n- [v0.77.2](releases/v0.77.2.md) — older\n",
       "help.txt": "usage: pfm <command>\n\ncommands:\n  install   wire the host\n  update    update the binary\n",
       ...over,
@@ -626,11 +625,6 @@ describe("notes version V1–V3 and commands P1", { concurrency: availableParall
 
   test("stamps, index line and bump in agreement are clean", async () => assertClean(await version(await fixture()), "notes"));
   test("V1 a stamp differs", async () => assertFail(await version(await fixture({ ".professor/VERSION": "0.77.2\n" })), "V1"));
-  test("V1 the manifest stamp differs", async () => {
-    const r = await version(await fixture({ ".professor/manifest.json": JSON.stringify({ installed_from: { version: "0.77.2" } }) }));
-    assertFail(r, "V1");
-    assert.match(r.out, /^FAIL V1: \.professor\/manifest\.json — "0\.77\.2" differs from --version 0\.78\.0$/m, r.out);
-  });
   test("V2 first changelog entry", async () =>
     assertFail(await version(await fixture({ "CHANGELOG.md": "# Changelog\n\n## Releases\n\n- [v0.77.2](releases/v0.77.2.md) — older\n" })), "V2"));
   test("V2 the Releases heading holds no entry", async () => {
@@ -703,7 +697,6 @@ describe("notes, every rule group", () => {
       "releases/v0.78.0.md": NOTE,
       VERSION: "0.78.0\n",
       ".professor/VERSION": "0.78.0\n",
-      ".professor/manifest.json": JSON.stringify({ installed_from: { version: "0.78.0" } }),
       "CHANGELOG.md": "# Changelog\n\n## Releases\n\n- [v0.78.0](releases/v0.78.0.md) — the summary\n",
     }, "release v0.78.0");
     const d = tmp();

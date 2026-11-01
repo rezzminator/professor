@@ -1,11 +1,9 @@
 {
-  "_comment": "Professor self-hosted install state. Source is the live working tree; its SHA is resolved from Git at inspection time and is never persisted in this tracked, self-referential file.",
+  "_comment": "Professor's own self-hosted install record. pfm reads installed_from.repo alone, as the theme source owner (pfm/internal/installer/themes.go); mode and answers record the install interview for humans.",
   "installed_from": {
     "mode": "self-hosted",
-    "repo": "rezzminator/professor",
-    "version": "0.86.0-alpha"
+    "repo": "rezzminator/professor"
   },
-  "profile": "minimal",
   "answers": {
     "project_name": "Professor",
     "tagline": "the discipline layer for Claude Code",
@@ -63,52 +61,5 @@
     "tier_b_roles": [],
     "codex": true,
     "host_extras": []
-  },
-  "installed": {
-    "agents": [
-      "changelogger",
-      "gitter",
-      "pcm",
-      "themer"
-    ],
-    "commands": [
-      "github-marketing",
-      "pfm-testing-manual",
-      "pfm:release",
-      "pfm:update"
-    ],
-    "scripts": [
-      "dev.sh",
-      "format-md.sh",
-      "test.sh",
-      "unit-path.sh"
-    ],
-    "skills_source_fetched": {},
-    "deliberately_absent": {
-      "notify.sh + filter-test-output.sh": "not wired: no notification surface and no test-output filter on this host",
-      "docs hub (docs/_index.md, docs/standards.md)": "no permanent cross-project doc tree in a template repo"
-    }
-  },
-  "file_hashes": {
-    ".claude/agents/changelogger.md": "03ac716c2ad5a8fdbef859e41a688d5a5a58e16436392e94f80f8138a9e2266a",
-    ".claude/agents/gitter.md": "3f1fa8e1d7608d49d02696a1cc65d2744acd5986c64bfb5bfc759fc8cdcfcc72",
-    ".claude/agents/pcm.md": "492daf3bc48a2c303b934d666890982e1cc803b345d1d04311d0c6541122b9ab",
-    ".claude/agents/themer.md": "3cb0875f9026f92505fb8826f253a21f6b0ba8368c364d6744cd39123b1d5b41",
-    ".claude/commands/github-marketing.md": "41f371d469b0c59609d0fa97c3bb1fc3c7bf39ee6fcaedb3f0bfe00c3336721a",
-    ".claude/commands/pfm-testing-manual.md": "1d4dd1419479ed9e63599bfbf01a5dd9f6fb87c544d8d7d6b27b3f223bf3bbaf",
-    ".claude/commands/pfm/release.md": "eb89f906a2dc1601aa1068ddc0773e91c9eb01ba86c4f0ffe8cb1e3c497f1cd3",
-    ".claude/commands/pfm/update.md": "6c3abb4382d9ae632d9df5b83c061bb72124cebe6436ddc0033cf1f0a36e563f",
-    ".claude/engine-sync.json": "bae0486ac9187e69474fc5edde59fe1dd202c0996b6fa4c2e1f825d8af75c952",
-    ".claude/scripts/dev.sh": "8e5300306239c4797654c9f78637b68f94c37ec8d45a1b41838e6c6b1bdb45ae",
-    ".claude/scripts/format-md.sh": "bba3241e6011300c45238b75ea47aa82ba5ba179299b4048a4eae04c240894d3",
-    ".claude/scripts/test.sh": "54ad386f0894c6016e02ed02ea75fabad0cbeeb2d4cb8a1a8400b637c11ac292",
-    ".claude/scripts/unit-path.sh": "be9407a8a1f1e4f30a681d893d2eace6903759110a29b4210c7e8bcf51dcb92a",
-    ".claude/settings.json": "b6e55fe038648276e021fdbe1928a1a80831cf794276ae28d7f2f9a0063fb505",
-    ".codex/config.toml": "8732c6ca8b84645e162ffaa33d910c5be538fc9d09da7988d2907a6b24a31e53",
-    ".gitignore": "04294c4020f8468b6d547505736d11a226eb4f73fccbf987a90eb28a51888590",
-    "CLAUDE.md": "a57ddee8aa858edd3d16afbc89a2fb2252ae90763ab6023c624e8af42afbe115",
-    "docs/commands/pcm/references/audit-scopes.md": "16e78ab093e6b15015a5ec12784d9ea0ac211f21ea5e76ef8dac400ba0ee7f49",
-    "docs/commands/pcm/references/refresh.md": "21e1f11c880501c92ea1c9301b87dd5288db5d2308d089a13f1ccfa06a0b15ba",
-    "pfm/CLAUDE.md": "c6f95032f472716813d4c6453ff11fc2db18af0b06903c0abced4dc314e78cd8"
   }
 }

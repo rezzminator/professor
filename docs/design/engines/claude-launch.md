@@ -331,7 +331,7 @@ Values set through the `--settings` `env` block are read from argv, never from `
 
 - `claudelaunch.Knobs` ↔ `example.pfm.config.json` (every config-sourced knob has its key there) ↔ `pfm config claude` ↔ the mock engine's accepted flags (`pfm/internal/mockengine/claude.go`).
 - The hygiene rows ↔ the Codex launch's unset list (`pfm internal codex-launch`) ↔ the headless strip lists ↔ the doctor harness probe's capture environment — all read from the registry.
-- `outputStyle` constant ↔ the gate in `infra/check-self-hosted-manifest.sh`.
+- `outputStyle` constant ↔ the gate `checks_templates_output_styles` in `infra/fence/checks.sh`.
 - The cost rows (`costLedger`, the exporter variables, the `PFM_COST_LEDGER` marker) ↔ `pfm/internal/claudelaunch/cost.go` ↔ [cost-ledger.md](cost-ledger.md); `PFM_COST_LEDGER_DIR` (`pfm/internal/paths/paths.go`) names the ledger directory the sink writes and every reader opens.
 - `pfm/harness-prompts/generated/*.md` (assembled by `pfm install` and `pfm generate`, gitignored) ↔ the clone's source parts under `pfm/harness-prompts/{share,claude,codex,opencode}/`; the Codex output ↔ `codexprompt.FleetPrompt`.
 - `chat.backend` (`pfm/internal/config/chat.go`) ↔ `example.pfm.config.json` ↔ [pfm-home.md § chat](pfm-home.md#chat) ↔ `spawn.Place`.

@@ -59,7 +59,7 @@ The note grammar that serves this reader is public, because adopters read it: `d
 2. `gitter` Phase PUSH sends `develop` when `origin/develop` lags `C`, so `ci.yml` runs on `C` (skipped under `--dry`).
 3. `gitter` Phase SETUP makes `.worktrees/release/` on a new branch `release/v{NEW}` at `C`.
 4. The checks of [§ The checks](#the-checks) run in parallel; each failure is a STOP.
-5. The main chat copies the note into `releases/v{NEW}.md`, prepends the index line, writes `## Verification` from the checks' results, stamps `VERSION`, `.professor/VERSION` and the manifest to `NEW`, runs the full notes check, and `gitter` commits `release: v{NEW} — {summary}`. A release commit touching any file outside the five release files is a STOP.
+5. The main chat copies the note into `releases/v{NEW}.md`, prepends the index line, writes `## Verification` from the checks' results, stamps `VERSION` and `.professor/VERSION` to `NEW`, runs the full notes check, and `gitter` commits `release: v{NEW} — {summary}`. A release commit touching any file outside the four release files is a STOP.
 6. `gitter` Phase RELEASE runs `make release-check`, pushes `release/v{NEW}`, opens the PR into `main`, waits for the required checks, merges with a merge commit, and watches `release.yml`'s `publish` job tag `v{NEW}` and its `verify` job check the assets.
 7. One `gitter` close merges `origin/main` back into `develop`, opens `{NEXT}-alpha`, pushes `develop`, deletes `release/v{NEW}` and removes the worktree.
 
@@ -99,7 +99,7 @@ $HOME/.local/state/pfm/releases/{project}/v{NEW}/
 
 ## The invariants
 
-1. The gated commit is the published commit. The gate, the leak scan, the preflight, `ci.yml` and the review all run at `C`; the release commit may touch only `releases/v{NEW}.md`, `CHANGELOG.md`, `VERSION`, `.professor/VERSION` and `.professor/manifest.json`, which the main chat checks after the commit and `gitter` Phase RELEASE checks again before the push.
+1. The gated commit is the published commit. The gate, the leak scan, the preflight, `ci.yml` and the review all run at `C`; the release commit may touch only `releases/v{NEW}.md`, `CHANGELOG.md`, `VERSION` and `.professor/VERSION`, which the main chat checks after the commit and `gitter` Phase RELEASE checks again before the push.
 2. Every commit in the range is accounted for. The coverage ledger names, for each commit, the bullet it reached or why it reaches no adopter; the check fails on a missing or extra commit.
 3. The judge is never the judged. `changelogger` writes the note; the script judges it; `## Verification` is written from the checks' own output.
 4. Nothing is fixed inside a release. A check that fails stops the cut; the fix lands on `develop` through a flight.
@@ -154,7 +154,7 @@ The release reviews in full only the `pfm-update` area, and only when the cut ch
 | The public spec | `docs/RELEASE.md`, `CHANGELOG.md` (index and a pointer), `INSTALL.md` § Updating, `docs/SETUP.md` § Staying current | What adopters read |
 | The reader's prompt | `pfm/internal/picker/update_row.go` `professorUpdatePrompt` and its test | Timing, surfaces, stops |
 | The workflows | `.github/workflows/ci.yml`, `.github/workflows/release.yml` | The cut's CI run; the PR gate, `publish` and `verify` |
-| The mirrors and manifest | `.codex/`, `.opencode/`, `.professor/manifest.json` | The agent registered |
+| The mirrors | `.codex/`, `.opencode/` | The agent registered |
 
 ## Open items
 

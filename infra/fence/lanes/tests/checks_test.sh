@@ -1356,4 +1356,49 @@ if ! (cd "$T/shard" && skill_unittest_sharded "$T/shard/missing.out" pkg/nope_te
   ok 'skill shards: an unimportable test file is red, never OK'
 else bad 'skill shards missing' "$(cat "$T/shard/missing.out" 2>&1)"; fi
 
+# checks_templates_output_styles: an outputStyle key, a style directory, an unreadable settings file
+# or an unreadable git listing is red; only a tree with none of them passes.
+os_repo="$T/output-styles"
+mkdir -p "$os_repo/.claude" "$os_repo/templates/project"
+printf '{"hooks":{}}\n' > "$os_repo/.claude/settings.json"
+printf '{}\n' > "$os_repo/templates/project/settings.json"
+git -C "$os_repo" init -q && git -C "$os_repo" add -A &&
+  git -C "$os_repo" -c user.name=fixture -c user.email=fixture.invalid commit -qm fixture ||
+  bad 'output-styles fixture' 'git could not build the fixture repository'
+output_styles_gate() {
+  (
+    cd "$os_repo" || exit 1
+    repo_git() { git "$@"; }; head_() { :; }
+    ok() { printf 'ok [%s]\n' "$*"; }; fail_step() { printf 'fail [%s]\n' "$*"; }
+    checks_templates_output_styles
+  ) 2>&1
+}
+out="$(output_styles_gate)"
+if [ "$out" = 'ok [no output style is tracked, on disk, or set in a settings file]' ]; then
+  ok 'output styles: a tree with no style and no outputStyle key passes'
+else bad 'output styles clean' "$out"; fi
+printf '{"outputStyle":"Explanatory"}\n' > "$os_repo/templates/project/settings.json"
+out="$(output_styles_gate)"
+if [ "$out" = 'fail [templates/project/settings.json sets outputStyle — output styles are retired and every launch pins default]' ]; then
+  ok 'output styles: a planted outputStyle key is red, naming its file'
+else bad 'output styles planted key' "$out"; fi
+printf '{}\n' > "$os_repo/templates/project/settings.json"
+mkdir -p "$os_repo/.claude/output-styles" && printf 'x\n' > "$os_repo/.claude/output-styles/s.md"
+git -C "$os_repo" add -A
+out="$(output_styles_gate)"
+if [[ "$out" == *'fail [tracked .claude/output-styles/ exists'* && "$out" == *'fail [.claude/output-styles exists on disk'* && "$out" != *'ok ['* ]]; then
+  ok 'output styles: a tracked style directory is red, tracked and on disk'
+else bad 'output styles directory' "$out"; fi
+git -C "$os_repo" rm -rq --cached .claude/output-styles && rm -r "$os_repo/.claude/output-styles"
+printf 'not json\n' > "$os_repo/.claude/settings.json"
+out="$(output_styles_gate)"
+if [[ "$out" == 'fail [.claude/settings.json could not be read as a JSON object (jq exit '*') — its outputStyle NOT CHECKED]' ]]; then
+  ok 'output styles: an unreadable settings file is NOT CHECKED, never clean'
+else bad 'output styles unreadable settings' "$out"; fi
+out="$(cd "$os_repo" && repo_git() { return 128; }; head_() { :; }; ok() { printf 'ok [%s]\n' "$*"; }
+  fail_step() { printf 'fail [%s]\n' "$*"; }; checks_templates_output_styles 2>&1)"
+if [ "$out" = 'fail [output styles NOT CHECKED — the tracked-file list could not be read from git]' ]; then
+  ok 'output styles: an unreadable git listing is NOT CHECKED, never clean'
+else bad 'output styles git failure' "$out"; fi
+
 shtest_end

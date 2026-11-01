@@ -709,13 +709,39 @@ checks_templates_skill_tests() {
 
 }
 
-checks_templates_mirrors_manifest() {
-  head_ "templates — self-hosted manifest"
-  if bash infra/check-self-hosted-manifest.sh "$REPO_ROOT" templates pfm; then
-    ok "self-hosted manifest version, roster, and hashes match the repository"
-  else
-    fail_step "self-hosted manifest FAILED — its install ledger is stale or unreadable"
+checks_templates_output_styles() {
+  head_ "templates — output styles retired"
+  # Output styles are retired, and their absence is ASSERTED rather than assumed:
+  # every Claude launch pins `--settings {"outputStyle":"default"}`, so a style
+  # file that reappeared would be INERT rather than wrong. Nothing would fail, no
+  # persona would change, and the only symptom would be a file everyone believes
+  # is doing something. A gate that looks is the only way that surfaces.
+  # Its own broken state: a git listing or a settings file it cannot read is a
+  # FAIL naming it, never a clean sweep.
+  local tracked settings rc found=0
+  if ! tracked="$(repo_git ls-files -- .claude/output-styles)"; then
+    fail_step "output styles NOT CHECKED — the tracked-file list could not be read from git"
+    return
   fi
+  if [[ -n "$tracked" ]]; then
+    fail_step "tracked .claude/output-styles/ exists — output styles are retired and every launch pins outputStyle=default, so anything there is inert"
+    found=1
+  fi
+  if [[ -d .claude/output-styles ]]; then
+    fail_step ".claude/output-styles exists on disk — output styles are retired; remove it"
+    found=1
+  fi
+  for settings in .claude/settings.json templates/project/settings.json templates/project/settings-global.json; do
+    [[ -f "$settings" ]] || continue
+    rc=0
+    jq -e 'has("outputStyle")' "$settings" >/dev/null 2>&1 || rc=$?
+    case "$rc" in
+      0) fail_step "$settings sets outputStyle — output styles are retired and every launch pins default"; found=1 ;;
+      1) ;;
+      *) fail_step "$settings could not be read as a JSON object (jq exit $rc) — its outputStyle NOT CHECKED"; found=1 ;;
+    esac
+  done
+  [[ "$found" == 1 ]] || ok "no output style is tracked, on disk, or set in a settings file"
 }
 
 # One catalogue for the serial runner and the parallel gate. Scheduling-only
@@ -1109,7 +1135,7 @@ checks_templates_mirrors() {
   checks_templates_mirrors_marker
   checks_templates_mirrors_roster
   checks_templates_mirrors_opencode
-  checks_templates_mirrors_manifest
+  checks_templates_output_styles
 }
 
 checks_gate_check_map() { # run dir

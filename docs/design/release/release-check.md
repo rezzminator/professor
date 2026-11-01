@@ -49,7 +49,7 @@ Tier 1 is the adopter contract; its paths are the only ones a release reviews in
 | `templates` | `templates/`, `pfm/harness-prompts/` |
 | `pfm-update` | `pfm/internal/{update,updatecheck,installer,enginesync,globallink,codexappendix,claudelaunch,doctor,config,professor,codexprompt,picker,mcpserv,herdr,themesync,themetmux,agentlauncher}/`; files under `pfm/cmd/pfm/` whose name starts with `install`, `uninstall`, `update`, `init`, `doctor`, `config` or `mcp_serve` |
 | `public` | `README.md`, `INSTALL.md`, `CHANGELOG.md`, `docs/SETUP.md`, `docs/RELEASE.md`, `docs/PLACEHOLDERS.md` |
-| `gates` | `.github/`, `.githooks/`, `scripts/`, `infra/check-self-hosted-manifest.sh` |
+| `gates` | `.github/`, `.githooks/`, `scripts/` |
 
 Everything else is tier 2.
 
@@ -74,7 +74,7 @@ Range, with `--base`, `--head`, `--coverage`:
 
 | Rule | Fails when |
 | --- | --- |
-| C1 | a non-merge commit of the range is missing from the ledger, appears twice, or a row names a commit outside the range; a commit that touches only the release files (`releases/`, `CHANGELOG.md`, `VERSION`, `.professor/VERSION`, `.professor/manifest.json`) is the release's own and needs no row |
+| C1 | a non-merge commit of the range is missing from the ledger, appears twice, or a row names a commit outside the range; a commit that touches only the release files (`releases/`, `CHANGELOG.md`, `VERSION`, `.professor/VERSION`) is the release's own and needs no row |
 | C2 | a row's `{section}` and `{Label}: {scope}` match no bullet in that section |
 | C3 | a `none` row has no reason |
 | C4 | a changed `templates/project/{rest}` path's `{rest}` appears, as a whole path, in no bullet or action line |
@@ -84,7 +84,7 @@ Version, with `--version`, `--previous`, `--bump`:
 
 | Rule | Fails when |
 | --- | --- |
-| V1 | `VERSION`, `.professor/VERSION` or `.professor/manifest.json` `installed_from.version` differs from `--version` |
+| V1 | `VERSION` or `.professor/VERSION` differs from `--version` |
 | V2 | the first entry under `CHANGELOG.md` `## Releases` is not `- [v{V}](releases/v{V}.md) — {summary}` with a summary |
 | V3 | `--version` is not `--previous` bumped by `--bump`, or `--bump` is below the floor of the note's sections ([release.md § Versioning](release.md#versioning)) |
 

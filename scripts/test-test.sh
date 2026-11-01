@@ -94,7 +94,6 @@ stubscript() { # stubscript <path> <name>
 stubscript scripts/leak-check.sh leak-check.sh
 stubscript scripts/clone-check.sh clone-check.sh
 stubscript scripts/description-check.sh description-check.sh
-stubscript infra/check-self-hosted-manifest.sh check-self-hosted-manifest.sh
 echo 'export {}' >"$R/scripts/check-codex-markers.mjs"
 # The catalogue's scratch-path sweep lists the tracked files through repo_git (pfm/scripts/repo-git.sh).
 cp "$HERE/pfm/scripts/repo-git.sh" "$R/pfm/scripts/"
@@ -102,6 +101,7 @@ cp "$HERE/pfm/scripts/repo-git.sh" "$R/pfm/scripts/"
 printf '%s\n' 'source "$STUBLIB"' \
   'checks_templates_placeholders() { stub_record placeholders; stub_rule placeholders; [ "$RULE_RC" = 0 ] || fail_step "placeholders (exit $RULE_RC)"; }' \
   'checks_templates_scratch_paths() { stub_record scratch-paths; declare -F repo_git >/dev/null || { fail_step "scratch-paths: repo_git is not defined"; return; }; stub_rule scratch-paths; [ "$RULE_RC" = 0 ] || fail_step "scratch-paths (exit $RULE_RC)"; }' \
+  'checks_templates_output_styles() { stub_record output-styles; stub_rule output-styles; [ "$RULE_RC" = 0 ] || fail_step "output-styles (exit $RULE_RC)"; }' \
   >"$R/infra/fence/checks.sh"
 # The fence half loads the real fence config (fence_config_values): its defaults and validation.
 cp "$HERE/infra/fence/shared.sh" "$HERE/infra/fence/mkdir-lock.sh" "$R/infra/fence/"
@@ -485,16 +485,17 @@ expect "a rumdl finding is CHECK FAIL rumdl" 1 "CHECK FAIL rumdl"
 # --- the templates checks -----------------------------------------------------------------------------
 reset
 run "$R" docs/only.md
-if [ "$(checks)" = 'rumdl leak clone placeholders scratch-paths descriptions manifest codex-markers ' ]; then ok "the templates checks run in their order after rumdl and leak"
+if [ "$(checks)" = 'rumdl leak clone placeholders scratch-paths output-styles descriptions codex-markers ' ]; then ok "the templates checks run in their order after rumdl and leak"
 else bad "the templates check order" "$(checks)"; fi
 out_has "the scratch-path sweep has repo_git to list the tracked files" "CHECK PASS scratch-paths"
-rec_has "manifest checks the self-hosted manifest of both units" check-self-hosted-manifest.sh "$R" templates pfm
+rec_has "output-styles runs the catalogue's check" output-styles
 rec_has "codex-markers runs its node check" node scripts/check-codex-markers.mjs
-reset; rule placeholders '' 1; rule description-check.sh '' 1
+reset; rule placeholders '' 1; rule output-styles '' 1; rule description-check.sh '' 1
 run "$R" docs/only.md
 expect "a failing catalogue function is CHECK FAIL placeholders" 1 "CHECK FAIL placeholders"
 out_has "a failing description check is CHECK FAIL descriptions" "CHECK FAIL descriptions"
-out_has "after a templates check fails, the next still runs" "CHECK PASS manifest"
+out_has "a failing output-styles check is CHECK FAIL output-styles" "CHECK FAIL output-styles"
+out_has "after a templates check fails, the next still runs" "CHECK PASS codex-markers"
 reset
 
 # --- a tool the fence image lacks: one named FAIL line, no check runs --------------------------------

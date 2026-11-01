@@ -1,0 +1,22 @@
+{
+  "0001": {
+    "name": "Strikethrough",
+    "scope": [
+      "markup.strikethrough"
+    ],
+    "settings": {
+      "fontStyle": "strikethrough",
+      "foreground": "#838e61"
+    }
+  },
+  "0002": {
+    "name": "Quote",
+    "scope": [
+      "markup.quote"
+    ],
+    "settings": {
+      "fontStyle": "italic",
+      "foreground": "#838e61"
+    }
+  }
+}

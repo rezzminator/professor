@@ -61,6 +61,15 @@ func TestOlderPFMDiscoversUpdateThenPickerLaunchesGuidedEngine(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(opencodeHome, "opencode.db"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	// The launched engine's zsh is a user's shell with its startup files: with
+	// none, zsh-newuser-install holds a non-root shell's first prompt, and the
+	// system zshrc's compinit asks about insecure directories where an fpath
+	// directory is writable by others (GitHub's hosted runner).
+	for name, body := range map[string]string{".zshrc": "# update-picker fixture\n", ".zshenv": "skip_global_compinit=1\n"} {
+		if err := os.WriteFile(filepath.Join(home, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := os.WriteFile(
 		filepath.Join(configDir, ".credentials.json"),
 		[]byte(`{"claudeAiOauth":{"accessToken":"fixture-token"}}`),

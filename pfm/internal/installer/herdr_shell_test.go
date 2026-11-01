@@ -285,6 +285,12 @@ func TestHerdrShellPickerReturnsToShell(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(home, ".zshrc"), []byte(rc), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	// The system zshrc's compinit is the host's, not the shim's: where an fpath
+	// directory is writable by others (GitHub's hosted runner), its
+	// insecure-directories question would hold the first prompt.
+	if err := os.WriteFile(filepath.Join(home, ".zshenv"), []byte("skip_global_compinit=1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	wrapper := paths.HerdrShellWrapper(home)
 	command := testjail.PTYCommand("env", "SHELL="+wrapper, wrapper)
 	command.Env = append(

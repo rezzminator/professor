@@ -86,7 +86,9 @@ func Run(m *testing.M) int {
 		return 1
 	}
 	// The fence has none of these — no tmux pane, no chat socket, no host
-	// Claude/Codex session — and a jail must not inherit a live seat from the
+	// Claude/Codex session, no systemd service (INVOCATION_ID, which a hosted
+	// CI runner's job inherits and which routes every chat spawn through
+	// systemd-run) — and a jail must not inherit a live seat from the
 	// executor's own shell. A test that needs one sets it with t.Setenv.
 	// Literal names: testjail cannot import internal/resolve (import cycle).
 	//
@@ -98,6 +100,7 @@ func Run(m *testing.M) int {
 			"CHAT_CALL_SOCKET",
 			"CLAUDE_CODE_SESSION_ID",
 			"CODEX_THREAD_ID",
+			"INVOCATION_ID",
 		} {
 			if err := os.Setenv(name, ""); err != nil {
 				warnSetup("clear %s: %v", name, err)

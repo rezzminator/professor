@@ -491,8 +491,11 @@ else
 fi
 
 # F9: nested remote names share a tracking namespace, but do not prove the parent target holds a commit.
+# Written as config: recent git releases refuse `git remote add` of a name nested under an existing remote,
+# but a repository configured before then (or by hand) still holds one.
 for nested_remote in origin/fork origin/fork/deep; do
-  pgit remote add "$nested_remote" "$pushed/.git"
+  pgit config "remote.$nested_remote.url" "$pushed/.git"
+  pgit config "remote.$nested_remote.fetch" "+refs/heads/*:refs/remotes/$nested_remote/*"
   pgit update-ref "refs/remotes/$nested_remote/held" HEAD
   real_range_remote "$empty_tree" HEAD origin
   if [[ "$rc" -eq 1 && "$out" == *'LEAK other-held.txt: syntheticsecret'* ]]; then

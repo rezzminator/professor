@@ -83,19 +83,34 @@ jobs:
           # The fence's per-step bound derives from its own gate budget; a
           # hosted runner has fewer cores, so each step gets the default bound.
           STEPS_BOUND_S: "1500"
-        run: bash .claude/scripts/dev.sh gate all
+          # The fence mounts the engine-sync source at /engine-sync; here it is
+          # the checkout's own submodule (infra/fence/engine-sync.sh).
+          ENGINE_SYNC_FENCE_SRC: ${{ github.workspace }}/plugins/engine-sync
+          # The private leak denylist never leaves the maintainer's machine: CI
+          # runs the leak gate's self-tests and its structural patterns, and the
+          # step reports STRUCTURAL-ONLY; the pre-push hook applies the private
+          # terms on every push (scripts/leak-check.sh).
+          LEAK_TERMS: ${{ runner.temp }}/leak-structural-only.txt
+        run: |
+          printf '!structural-only\n' > "$LEAK_TERMS"
+          # The runner starts each step with SIGPIPE ignored, so a writer whose reader
+          # stops early prints "write error: Broken pipe"; the gate runs as a terminal does.
+          env --default-signal=PIPE bash .claude/scripts/dev.sh gate all
 
-      # The gate prints only its step table; each failed step's own log stays
-      # on the runner, so print it here.
+      # The gate prints only its step table; each red step's own log stays on
+      # the runner, so print the log of every non-PASS row of each run's table.
       - name: Show each failed step's log
         if: failure()
         run: |
-          for f in /tmp/professor/timing/run.*/steps/*.failures; do
-            [ "$(cat "$f")" = 0 ] && continue
-            log=${f%.failures}.log
-            echo "::group::${log##*/}"
-            tail -n 200 "$log" || echo "no log at $log"
-            echo "::endgroup::"
+          for table in /tmp/professor/timing/run.*/gate.tsv; do
+            [ -f "$table" ] || { echo "no gate table under /tmp/professor/timing"; continue; }
+            awk -F '\t' 'NR > 1 && $1 != "STEPS" && $1 != "BUDGET" && $2 != "PASS" {print $1}' "$table" |
+              while IFS= read -r step; do
+                log="${table%/gate.tsv}/steps/$step.log"
+                echo "::group::$step.log"
+                tail -n 300 "$log" || echo "no log at $log"
+                echo "::endgroup::"
+              done
           done
 
   macos:

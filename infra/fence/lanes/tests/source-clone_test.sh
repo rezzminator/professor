@@ -5,6 +5,8 @@ set -euo pipefail
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 SHTEST_TAG=source-clone-test
 source "$HERE/../../../../scripts/shtest.sh"
+# Root, as in the fence: the fixture hands the source to another uid, as the host mount is to a root container.
+shtest_as_root "${BASH_SOURCE[0]}" "$@"
 shtest_isolate_host
 SUT="$HERE/../../source-clone.sh"
 mkdir -p "$T/source/pfm/harness-prompts/generated" "$T/source/.worktrees/other" "$T/source/plugins/example"

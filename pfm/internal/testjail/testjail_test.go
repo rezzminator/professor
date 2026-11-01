@@ -381,9 +381,9 @@ func TestEveryJailPinsAndSeedsPFMConfig(t *testing.T) {
 }
 
 // TestRunScrubsAmbientIdentity pins the jail's own scrub: an executor's shell
-// carries a live tmux pane, chat socket, or host Claude/Codex session id, and
-// none of it may reach a jailed test — a test that needs one sets it back
-// with t.Setenv.
+// carries a live tmux pane, chat socket, host Claude/Codex session id, or
+// systemd service invocation id, and none of it may reach a jailed test — a
+// test that needs one sets it back with t.Setenv.
 func TestRunScrubsAmbientIdentity(t *testing.T) {
 	for _, name := range []string{
 		"TMUX",
@@ -391,6 +391,7 @@ func TestRunScrubsAmbientIdentity(t *testing.T) {
 		"CHAT_CALL_SOCKET",
 		"CLAUDE_CODE_SESSION_ID",
 		"CODEX_THREAD_ID",
+		"INVOCATION_ID",
 	} {
 		if value := os.Getenv(name); value != "" {
 			t.Fatalf("%s=%q after Run — ambient identity leaked into the jail", name, value)

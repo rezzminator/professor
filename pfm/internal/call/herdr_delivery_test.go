@@ -192,6 +192,11 @@ func TestHerdrCallRaw(t *testing.T) {
 		{name: "enter-refused", id: pfmengine.Codex, body: "a\nb", refusal: "pane.send_keys", wantCode: CodeUndelivered, wantTyped: true},
 		{name: "still-in-composer", id: pfmengine.Codex, body: "a\nb", after: "› [Pasted text #1 +2 lines]", wantCode: CodeUndelivered, wantTyped: true},
 		{name: "no-confirmation", id: pfmengine.Codex, body: "a\nb", after: "unrelated screen", wantCode: CodeUndelivered, wantTyped: true},
+		// Claude is a native engine: Herdr tracking no agent in its pane sends it here.
+		{
+			name: "native-untracked", id: pfmengine.Claude, body: "a\nb", wantPayload: "a\nb", wantTyped: true,
+			before: "────────\n❯ \n────────", after: "a\nb\n────────\n❯ \n────────",
+		},
 	}, append(herdrRawStyleCases(), herdrOpenCodeCases()...)...) {
 		t.Run(test.name, func(t *testing.T) {
 			entered := false
@@ -204,6 +209,11 @@ func TestHerdrCallRaw(t *testing.T) {
 					return map[string]any{"type": "unexpected"}, ""
 				}
 				switch request.Method {
+				case "agent.get":
+					if test.id != pfmengine.Claude {
+						t.Errorf("raw engine read the native agent: %+v", request)
+					}
+					return nil, "agent_not_found"
 				case "pane.read":
 					if request.Params["format"] == "ansi" {
 						if request.Params["strip_ansi"] != false {
@@ -276,12 +286,18 @@ func TestHerdrCallRaw(t *testing.T) {
 					t.Fatalf("paste payload=%q want %q", payload, wantPayload)
 				}
 				calls := socket.calls()
-				wantCalls := 4
+				wantCalls, first := 4, 0
 				if test.styled != "" {
 					wantCalls = 5
 				}
+				if test.id == pfmengine.Claude {
+					wantCalls, first = wantCalls+1, 1
+					if calls[0].Method != "agent.get" {
+						t.Fatalf("native engine skipped the agent read: %+v", calls)
+					}
+				}
 				last := len(calls) - 1
-				if len(calls) != wantCalls || calls[0].Method != "pane.read" ||
+				if len(calls) != wantCalls || calls[first].Method != "pane.read" ||
 					calls[last-2].Method != "pane.send_input" ||
 					calls[last-1].Method != "pane.send_keys" ||
 					calls[last].Method != "pane.read" ||

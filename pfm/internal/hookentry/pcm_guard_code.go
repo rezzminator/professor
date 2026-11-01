@@ -207,14 +207,14 @@ func (judge *pcmGuardJudge) program(part *cmdparse.Part, base, dir string, depth
 		return
 	}
 	for _, body := range bodies {
-		judge.shell(body, dir, "", depth)
+		judge.shell(body, dir, cmdparse.Script{}, depth)
 	}
 	for _, word := range words {
 		if strings.ContainsAny(word, "$`") {
 			judge.code(word, dir)
 			continue
 		}
-		judge.shell(word, dir, "", depth)
+		judge.shell(word, dir, cmdparse.Script{}, depth)
 	}
 }
 
@@ -305,8 +305,8 @@ func (judge *pcmGuardJudge) scriptFile(word, dir string) bool {
 
 // shell judges shell code run in dir the way a Bash command is judged, one
 // level deeper; past pcmGuardMaxShellDepth it is unreadable. script is the
-// file the code came from, "" for inline code.
-func (judge *pcmGuardJudge) shell(code, dir, script string, depth int) {
+// file the code came from, zero for inline code.
+func (judge *pcmGuardJudge) shell(code, dir string, script cmdparse.Script, depth int) {
 	if depth >= pcmGuardMaxShellDepth {
 		judge.unreadable = true
 		return

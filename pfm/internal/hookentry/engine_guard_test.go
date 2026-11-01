@@ -46,6 +46,9 @@ func engineGuardFixture(t *testing.T) pcmGuardFixture {
 		"tools/missing.sh":  "python3 \"$(dirname \"$0\")/gone.py\"\n",
 		"tools/ok.py":       "print('ok')\n",
 		"tools/bad.py":      "open('AGENTS.md', 'w').write('x')\n",
+		"tools/ack.sh":      "cp AGENTS.md \"$D/acks/$1.md\"\n",
+		"tools/ack-fn.sh":   "f() { cp AGENTS.md \"$1\"; }\nf \"$1\"\n",
+		"tools/claim.sh":    "h=$(cat queue); mkdir $D/claims/$h && cat AGENTS.md > $D/claims/$h/owner\n",
 	} {
 		path := filepath.Join(f.project, name)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -241,6 +244,10 @@ func TestEngineGuardFrameworkFiles(t *testing.T) {
 			{"bash tools/near.sh x", ""},
 			{"bash tools/near-bad.sh", fileDeny(p("AGENTS.md"), p("tools/AGENTS.md"))},
 			{"bash tools/missing.sh", blindDeny("python3 " + p("tools/gone.py"))},
+			{"bash tools/ack.sh chat", ""},
+			{"bash tools/ack-fn.sh chat", engineGuardUnreadable},
+			{"bash tools/claim.sh", ""},
+			{"h=$(cat queue); mkdir $D/claims/$h && cat AGENTS.md", engineGuardUnreadable},
 			{"bash", blindDeny("bash")},
 			{"python3", blindDeny("python3")},
 			{"vim", blindDeny("vim")},

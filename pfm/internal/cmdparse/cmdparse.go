@@ -45,10 +45,21 @@ type Call struct {
 	// Vars seeds the parse with variables the command's shell already has
 	// (HOME), so `$HOME/x` resolves; nil seeds nothing.
 	Vars map[string]string
-	// Script is the absolute path of the script file Command was read from:
-	// `$0` and `${BASH_SOURCE[0]}` resolve to it. Empty for a typed command.
-	Script string
+	// Script is the script file Command was read from; the zero value for a
+	// typed command.
+	Script Script
 }
+
+// Script is a script file a call runs: `$0` and `${BASH_SOURCE[0]}` are Path,
+// and `$1`…`$9` are Args (unset ones empty) outside a function, unless the
+// script reassigns them with shift or set.
+type Script struct {
+	Path string
+	Args []string
+}
+
+// positional are the parameters a Script's Args seed.
+var positional = strings.Fields("1 2 3 4 5 6 7 8 9")
 
 // Part is one simple command of a call, in source order. Program is the
 // command word as written, after unwrapping any wrapper (`timeout 60 env
@@ -140,9 +151,9 @@ func parseCall(call Call) *callParser {
 	for name, val := range call.Vars {
 		p.vars[name] = []string{val}
 	}
-	if call.Script != "" {
-		p.vars["0"] = []string{call.Script}
-		p.arrays["BASH_SOURCE"] = []string{call.Script}
+	if call.Script.Path != "" {
+		p.vars["0"] = []string{call.Script.Path}
+		p.arrays["BASH_SOURCE"] = []string{call.Script.Path}
 		p.script = true
 	}
 	if len(call.Command) > maxCommandBytes {
@@ -154,8 +165,40 @@ func parseCall(call Call) *callParser {
 		p.parts = []Part{{Status: StatusError}}
 		return p
 	}
+	if p.script && !reassignsPositional(file) {
+		for i, name := range positional {
+			p.vars[name] = []string{""}
+			if i < len(call.Script.Args) {
+				p.vars[name] = []string{call.Script.Args[i]}
+			}
+		}
+	}
 	syntax.Walk(file, p.visit)
 	return p
+}
+
+// reassignsPositional reports a shift, or a set given operands, anywhere in
+// file: after one, `$1`… no longer hold the script's arguments.
+func reassignsPositional(file *syntax.File) bool {
+	found := false
+	syntax.Walk(file, func(node syntax.Node) bool {
+		call, ok := node.(*syntax.CallExpr)
+		if !ok || len(call.Args) == 0 {
+			return !found
+		}
+		switch call.Args[0].Lit() {
+		case "shift":
+			found = true
+		case "set":
+			for _, arg := range call.Args[1:] {
+				if lit := arg.Lit(); lit == "--" || !strings.HasPrefix(lit, "-") && !strings.HasPrefix(lit, "+") {
+					found = true
+				}
+			}
+		}
+		return !found
+	})
+	return found
 }
 
 func (p *callParser) visit(node syntax.Node) bool {
@@ -184,6 +227,20 @@ func (p *callParser) visit(node syntax.Node) bool {
 			syntax.Walk(x.Cmd, p.visit)
 		}
 		p.attachRedirs(from, x.Redirs)
+		return false
+	case *syntax.FuncDecl:
+		// A function's $1… are its own arguments, never the script's.
+		saved := map[string][]string{}
+		for _, name := range positional {
+			if vals, ok := p.vars[name]; ok {
+				saved[name] = vals
+				delete(p.vars, name)
+			}
+		}
+		if x.Body != nil {
+			syntax.Walk(x.Body, p.visit)
+		}
+		maps.Copy(p.vars, saved)
 		return false
 	case *syntax.ForClause:
 		iter, ok := x.Loop.(*syntax.WordIter)

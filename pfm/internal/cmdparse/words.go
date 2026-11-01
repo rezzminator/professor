@@ -70,6 +70,36 @@ func (p *callParser) evalPart(part syntax.WordPart, out *word, quoted bool) {
 	}
 }
 
+// partial is a script word with every part the parse knows expanded and
+// every other part kept as its source, so a reader still sees the `$` where
+// the value is unknown: `"$D/acks/$1.md"` run with `chat` is `$D/acks/chat.md`.
+func (p *callParser) partial(parts []syntax.WordPart, quoted bool) string {
+	var b strings.Builder
+	for _, part := range parts {
+		switch x := part.(type) {
+		case *syntax.Lit:
+			if quoted {
+				b.WriteString(dquoteUnescape(x.Value))
+			} else {
+				b.WriteString(unescape(x.Value))
+			}
+		case *syntax.SglQuoted:
+			b.WriteString(x.Value)
+		case *syntax.DblQuoted:
+			b.WriteString(p.partial(x.Parts, true))
+		default:
+			one := word{vals: []string{""}, ok: true}
+			p.evalPart(part, &one, quoted)
+			if one.ok && len(one.vals) == 1 && !strings.ContainsAny(one.vals[0], "$`") {
+				b.WriteString(one.vals[0])
+			} else {
+				b.WriteString(p.source(part))
+			}
+		}
+	}
+	return b.String()
+}
+
 // selfDir evaluates the two command substitutions a script uses to find a
 // directory: `$(dirname [--] W)` and `$(cd W && pwd [-P|-L])`, W a word the
 // parse knows; any other substitution, and every one in a typed command, is
@@ -188,6 +218,9 @@ func (p *callParser) args(w *syntax.Word) []arg {
 	var out []arg
 	for _, bw := range braces(w) {
 		ev := p.eval(bw)
+		if !ev.ok && p.script {
+			return []arg{{text: p.partial(w.Parts, false)}}
+		}
 		if !ev.ok {
 			return []arg{{text: p.source(w)}}
 		}

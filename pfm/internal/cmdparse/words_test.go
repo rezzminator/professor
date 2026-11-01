@@ -67,17 +67,17 @@ func TestScriptSelfDir(t *testing.T) {
 		},
 		{
 			"a relative cd stays unknown", `cat "$(cd lib && pwd)/c"`,
-			[]step{{"cd", []string{"lib"}}, {"pwd", nil}, {"cat", []string{`"$(cd lib && pwd)/c"`}}},
+			[]step{{"cd", []string{"lib"}}, {"pwd", nil}, {"cat", []string{"$(cd lib && pwd)/c"}}},
 		},
 		{
 			"any other substitution stays unknown", `cat "$(basename "$0")"`,
-			[]step{{"basename", []string{script}}, {"cat", []string{`"$(basename "$0")"`}}},
+			[]step{{"basename", []string{script}}, {"cat", []string{`$(basename "$0")`}}},
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := ParseBatch([]Call{{ID: "c1", Command: tc.command, Cwd: testCwd, Script: script}})
+			got, err := ParseBatch([]Call{{ID: "c1", Command: tc.command, Cwd: testCwd, Script: Script{Path: script}}})
 			if err != nil {
 				t.Fatalf("ParseBatch(%q): %v", tc.command, err)
 			}
@@ -86,6 +86,48 @@ func TestScriptSelfDir(t *testing.T) {
 	}
 	typed := parseOne(t, `cat "$(dirname "$0")/x"`)
 	assertSteps(t, typed, []step{{"dirname", []string{`"$0"`}}, {"cat", []string{`"$(dirname "$0")/x"`}}})
+}
+
+func TestScriptPositionalArgs(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name, command string
+		want          []step
+	}{
+		{
+			"an argument and an unset one", `cp a "$D/acks/$1.md" x$2`,
+			[]step{{"cp", []string{"a", "$D/acks/chat.md", "x"}}},
+		},
+		{"the script's own", `cp a "/s/$1"`, []step{{"cp", []string{"a", "/s/chat"}}}},
+		{
+			"a function's are its own", `f() { cp a "/s/$1"; }; cp b "/s/$1"`,
+			[]step{{"cp", []string{"a", "/s/$1"}}, {"cp", []string{"b", "/s/chat"}}},
+		},
+		{
+			"shift reassigns them", `shift; cp a "/s/$1"`,
+			[]step{{"shift", nil}, {"cp", []string{"a", "/s/$1"}}},
+		},
+		{
+			"set -- reassigns them", `set -- x; cp a "/s/$1"`,
+			[]step{{"set", []string{"--", "x"}}, {"cp", []string{"a", "/s/$1"}}},
+		},
+		{
+			"set -e keeps them", `set -e; cp a "/s/$1"`,
+			[]step{{"set", []string{"-e"}}, {"cp", []string{"a", "/s/chat"}}},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			script := Script{Path: "/s/run.sh", Args: []string{"chat"}}
+			got, err := ParseBatch([]Call{{ID: "c1", Command: tc.command, Cwd: testCwd, Script: script}})
+			if err != nil {
+				t.Fatalf("ParseBatch(%q): %v", tc.command, err)
+			}
+			assertSteps(t, got["c1"], tc.want)
+		})
+	}
+	assertSteps(t, parseOne(t, `cp a "/s/$1"`), []step{{"cp", []string{"a", `"/s/$1"`}}})
 }
 
 // TestQuoteSurvivesAShell: what Quote emits, bash reads back as the one word

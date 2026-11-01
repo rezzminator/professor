@@ -439,16 +439,6 @@ func nameCodexThread(
 	return false, warning, false
 }
 
-// unverifiedRename is the verdict when neither witness can speak: Codex shows
-// nothing on screen and its ledger could not be read. That is "could not
-// verify", never "unnamed" — the rename may well have landed.
-func unverifiedRename(err error) string {
-	return fmt.Sprintf(
-		"could not verify the Codex rename — nothing on screen confirms it and its session index could not be read (%v); the chat may be named, check it with pfm ls",
-		err,
-	)
-}
-
 // renameCodexThread drives Codex's own rename UI and verifies each step before
 // taking the next one. It reports the warning rather than an error: an unnamed
 // chat is still a working chat.
@@ -483,13 +473,14 @@ func renameCodexThread(
 		return false, fmt.Sprintf("could not open the rename prompt: %v", err), false
 	}
 	if !awaitRenameModal(ctx, door, target, timings) {
-		capture, _ := door.CaptureScreen(ctx, target)
+		capture, captureErr := door.CaptureScreen(ctx, target)
 		trace.step("no name prompt | %s", screen(capture))
 		if codexFolderUntrusted(capture) {
 			return false, "Codex has no active thread to rename", true
 		}
 		_ = door.SendKey(ctx, target, "Escape")
-		return false, "Codex never asked for a thread name — the chat is running unnamed", false
+		warning := "Codex never asked for a thread name — the chat is running unnamed" + screenUnread(captureErr)
+		return false, warning, false
 	}
 	for index := 0; index < modalClearKeys; index++ {
 		if err := door.SendKey(ctx, target, "BSpace"); err != nil {
@@ -543,9 +534,9 @@ func renameCodexThread(
 	if !confirmed {
 		// Read the reason BEFORE dismissing the prompt: Escape takes the
 		// modal — and the refusal printed inside it — off the screen.
-		warning := "Codex never confirmed the rename — the chat may be unnamed"
+		capture, captureErr := door.CaptureScreen(ctx, target)
+		warning := "Codex never confirmed the rename — the chat may be unnamed" + screenUnread(captureErr)
 		unverifiable := false
-		capture, _ := door.CaptureScreen(ctx, target)
 		switch {
 		case strings.Contains(capture, codexRenameEmpty):
 			warning = "Codex refused the name as empty — the chat is running unnamed"

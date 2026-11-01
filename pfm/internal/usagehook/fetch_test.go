@@ -150,7 +150,8 @@ func TestConcurrentCallersSpendOneRequest(t *testing.T) {
 }
 
 // T3: a fresh statusline snapshot for this seat answers without a request,
-// and its windows are the ones the caller sees.
+// and its windows are the ones the caller sees; a corrupt sibling snapshot
+// costs only itself, named in the hook's log.
 func TestFreshStatuslineSnapshotAnswersWithoutARequest(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
 	root, configDir, cacheDir, env := doorSeat(t, 7, now)
@@ -169,11 +170,15 @@ func TestFreshStatuslineSnapshotAnswersWithoutARequest(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(snapshotDir, "acct-7.session-a.json"), snapshot, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(snapshotDir, "acct-7.session-b.json"), []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	server, hits, _ := countingUsageServer(t, now, 0)
+	var log bytes.Buffer
 	message, err := Evaluate(context.Background(), Options{
 		Now: func() time.Time { return now }, Env: env, Home: root, ConfigDir: configDir,
 		AccountDirs: map[string]int{configDir: 7}, CacheDir: cacheDir, Warn: 80, Critical: 95, TTL: 3 * time.Minute,
-		Client: server.Client(), Endpoint: server.URL, Log: io.Discard,
+		Client: server.Client(), Endpoint: server.URL, Log: &log,
 	})
 	if err != nil {
 		t.Fatalf("evaluate: %v", err)
@@ -183,6 +188,11 @@ func TestFreshStatuslineSnapshotAnswersWithoutARequest(t *testing.T) {
 	}
 	if !strings.Contains(message, "5h 85%") || !strings.Contains(message, "7d 30%") {
 		t.Fatalf("hook did not answer from the snapshot's windows: %q", message)
+	}
+	wantLog := "pfm usage-hook: statusline snapshot: skipped statusline quota acct-7.session-b.json: decode: " +
+		"unexpected end of JSON input\n"
+	if log.String() != wantLog {
+		t.Fatalf("log=%q, want %q", log.String(), wantLog)
 	}
 }
 
@@ -419,13 +429,15 @@ func fixedUsageServer(t *testing.T, body string) (*httptest.Server, *atomic.Int6
 // of the window's earlier reading carried over, and it answers inside the TTL
 // like any success. A response that reports no window at all (an account on
 // credits) is an answer too, and is not asked again inside the TTL. A body
-// naming no usage key at all is no answer: it still fails and backs off.
+// naming no usage key at all, or no JSON, is no answer: it still fails and
+// backs off, its message carrying the body it could not use.
 func TestAnOmittedWindowIsAnAnswerNotAFailure(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
 	week := now.Add(5 * 24 * time.Hour).UTC().Format(time.RFC3339)
 	for _, testcase := range []struct {
 		name, body          string
-		wantErr, wantSeven  bool
+		wantBackoff         string
+		wantSeven           bool
 		wantFable           bool
 		wantHitsAfterSecond int64
 	}{
@@ -447,8 +459,19 @@ func TestAnOmittedWindowIsAnAnswerNotAFailure(t *testing.T) {
 				`"seven_day":{"utilization":null,"resets_at":"` + week + `"},"limits":[]}`,
 			wantHitsAfterSecond: 1,
 		},
-		{name: "error object", body: `{"error":{"type":"x","message":"y"}}`, wantErr: true, wantHitsAfterSecond: 1},
-		{name: "null body", body: `null`, wantErr: true, wantHitsAfterSecond: 1},
+		{
+			name: "error object", body: `{"error":{"type":"x","message":"y"}}`, wantHitsAfterSecond: 1,
+			wantBackoff: `decode usage response: no usage key in 36-byte body: {"error":{"type":"x","message":"y"}}`,
+		},
+		{
+			name: "null body", body: `null`, wantHitsAfterSecond: 1,
+			wantBackoff: "decode usage response: no usage key in 4-byte body: null",
+		},
+		{
+			name: "no JSON", body: "<html>\n  busy\n</html>", wantHitsAfterSecond: 1,
+			wantBackoff: "decode usage response: invalid character '<' looking for beginning of value; " +
+				"body: <html> busy </html>",
+		},
 	} {
 		t.Run(testcase.name, func(t *testing.T) {
 			root, configDir, cacheDir, env := doorSeat(t, 11, now)
@@ -462,9 +485,10 @@ func TestAnOmittedWindowIsAnAnswerNotAFailure(t *testing.T) {
 			if readErr != nil {
 				t.Fatalf("read cache: %v", readErr)
 			}
-			if testcase.wantErr {
-				if err == nil || record.Backoff == nil {
-					t.Fatalf("err=%v backoff=%+v, want a failure that backs off", err, record.Backoff)
+			if testcase.wantBackoff != "" {
+				if err == nil || record.Backoff == nil || record.Backoff.Message != testcase.wantBackoff {
+					t.Fatalf("err=%v backoff=%+v, want a failure that backs off with %q",
+						err, record.Backoff, testcase.wantBackoff)
 				}
 				return
 			}

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -473,15 +474,7 @@ func TestRunReportsMalformedAbsentAndEngineErrorOutputs(t *testing.T) {
 			true,
 			"structured_output",
 		},
-		{"Claude malformed result", pfmengine.Claude, "printf '%s\\n' '{\"result\":123}'", false, ""},
-		{
-			"Claude malformed usage",
-			pfmengine.Claude,
-			"printf '%s\\n' '{\"result\":\"plain\",\"usage\":\"bad\"}'",
-			false,
-			"",
-		},
-		{"Codex malformed JSONL", pfmengine.Codex, "printf '%s\\n' 'not json'", false, "parse Codex JSONL"},
+		{"Codex malformed JSONL", pfmengine.Codex, "printf '%s\\n' 'not json'", false, "missing terminal"},
 		{
 			"Codex missing terminal",
 			pfmengine.Codex,
@@ -524,6 +517,11 @@ func TestRunReportsMalformedAbsentAndEngineErrorOutputs(t *testing.T) {
 			}
 			if !result.IsError {
 				t.Fatal("malformed/absent/error output returned without an error state")
+			}
+			// output pfm could not read is shown, never dropped
+			if testCase.name == "Claude malformed JSON" &&
+				!reflect.DeepEqual(result.Diagnostics, []string{"stdout: not json"}) {
+				t.Fatalf("diagnostics = %#v, want the unread stdout", result.Diagnostics)
 			}
 		})
 	}

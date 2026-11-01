@@ -15,7 +15,6 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
-	"github.com/rezzminator/professor/pfm/internal/modelglyph"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/pricing"
 	"github.com/rezzminator/professor/pfm/internal/pyvalue"
@@ -47,6 +46,8 @@ type subagentTask struct {
 	TokenCount        int64           `json:"tokenCount"`
 	tokenKnown        bool
 	capacityState     string
+	// decodeErr is why the task's fields could not be read (subagentTask.UnmarshalJSON).
+	decodeErr error
 }
 
 // subagentRow is one line Claude Code accepts back: the task id and the body
@@ -183,12 +184,17 @@ func ServeSubagents(
 // the clone file or the embedded copy, the override beside pfmConfigPath
 // merged), never fetched. A table that cannot load is nil — every dollar then
 // renders "$?" — and its cause goes to stderr under who, as does a clone file
-// the embedded copy stood in for.
+// the embedded copy stood in for. An override that cannot be used is no reason
+// to lose the table: the published one prices, and the override's cause goes
+// to stderr.
 func LoadServedPrices(home, pfmConfigPath string, stderr io.Writer, who string) *pricing.Prices {
 	table, err := pricing.LoadPrices(home, pfmConfigPath)
 	if err != nil {
-		fmt.Fprintf(stderr, "%s: price table (dollars show $?): %v\n", who, err)
-		return nil
+		if table.FetchedAt == "" { // no published table came back to price by
+			fmt.Fprintf(stderr, "%s: price table (dollars show $?): %v\n", who, err)
+			return nil
+		}
+		fmt.Fprintf(stderr, "%s: price override unusable, pricing from the published table: %v\n", who, err)
 	}
 	if table.FileError != nil {
 		fmt.Fprintf(
@@ -239,11 +245,19 @@ func RenderSubagents(
 	ledger := loadLedgerView(data.SessionID, home, env, warn)
 	for index := range data.Tasks {
 		task := &data.Tasks[index]
-		if task.TokenCount < 0 || task.ContextWindowSize < 0 {
-			return "", fmt.Errorf("row %s: negative context counters", task.ID)
-		}
 		if task.ID == "" {
 			continue
+		}
+		if task.decodeErr != nil {
+			fmt.Fprintf(warn, "pfm statusline --subagents: row %s (shows the error): %v\n", task.ID, task.decodeErr)
+			if err := encoder.Encode(subagentRow{ID: task.ID, Content: faultRowContent(task.decodeErr)}); err != nil {
+				return "", fmt.Errorf("encode subagent row %s: %w", task.ID, err)
+			}
+			continue
+		}
+		if task.TokenCount < 0 || task.ContextWindowSize < 0 {
+			fmt.Fprintf(warn, "pfm statusline --subagents: row %s: negative context counters (shown as ?)\n", task.ID)
+			task.TokenCount, task.ContextWindowSize, task.tokenKnown = 0, 0, false
 		}
 		var activity *agentActivity
 		if task.Type == localAgentTask {
@@ -415,77 +429,6 @@ func subagentIdentity(name string, activity *agentActivity) string {
 	default:
 		return cName + name + reset + cMuted + "·" + reset + role
 	}
-}
-
-// subagentModel names the family and effort: claude-opus-5-5[1m] + high →
-// opus·▰▰▰ high. The level its transcript recorded for its latest request
-// (recorded) wins: it is the effort that request went out at, after any
-// plugin pinned it, so it renders plainly on any model. Without one, the
-// payload's effort shows; one that is not a JSON string is left out. A row
-// with neither shows the session's recorded effort (inherited), exactly as
-// a payload effort on the model it was recorded for and muted on another,
-// where Claude Code may resolve a different level.
-func subagentModel(model, recorded string, effort json.RawMessage, inherited sessionEffortRecord) string {
-	family := modelFamily(model)
-	level := strings.TrimSpace(recorded)
-	color, painted := cEffort, true
-	if level == "" &&
-		(len(effort) == 0 || json.Unmarshal(effort, &level) != nil || strings.TrimSpace(level) == "") {
-		level = ""
-		if len(effort) == 0 {
-			level = inherited.Level
-		}
-		if modelVersion(model) != modelVersion(inherited.Model) {
-			color, painted = cMuted, false
-		}
-	}
-	if level != "" {
-		// A muted level may be another than the one shown, so its bar stays muted
-		// too; otherwise the bar wears the level's own colour.
-		label := color + modelglyph.EffortLabel(level)
-		if painted {
-			label = paintedEffort(level, color)
-		}
-		if family == "" {
-			return label + reset
-		}
-		return cModel + family + reset + cMuted + "·" + reset + label + reset
-	}
-	if family == "" {
-		return ""
-	}
-	return cModel + family + reset
-}
-
-// modelVersion strips the vendor prefix and the context-window tag:
-// claude-opus-5-5[1m] → opus-5-5.
-func modelVersion(model string) string {
-	model = strings.TrimPrefix(strings.TrimSpace(model), "claude-")
-	if cut := strings.IndexByte(model, '['); cut >= 0 {
-		model = model[:cut]
-	}
-	return model
-}
-
-// modelFamily is the model's family alone: claude-opus-5-5[1m] → opus. A gpt-
-// id names its tier last and its version first, so it renders tier-version:
-// gpt-6-sol → sol-6, gpt-5.6-terra → terra-5.6; one with no tier renders
-// whole, gpt-6 → gpt-6. The gateway's priority-tier suffix is no tier and
-// drops like the window tag: gpt-6-sol-fast → sol-6, gpt-5.5-fast → gpt-5.5.
-func modelFamily(model string) string {
-	model = modelVersion(model)
-	if strings.HasPrefix(model, "gpt-") {
-		model = strings.TrimSuffix(model, "-fast")
-		rest := strings.TrimPrefix(model, "gpt-")
-		if cut := strings.LastIndexByte(rest, '-'); cut > 0 && cut < len(rest)-1 {
-			return rest[cut+1:] + "-" + rest[:cut]
-		}
-		return model
-	}
-	if cut := strings.IndexByte(model, '-'); cut > 0 {
-		model = model[:cut]
-	}
-	return model
 }
 
 // subagentStatus renders the task status and the time since its start: live

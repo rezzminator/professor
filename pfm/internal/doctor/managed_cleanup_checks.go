@@ -46,9 +46,9 @@ func printManagedCleanupChecks(stdout io.Writer, runtime config.Runtime) (warnin
 		} else {
 			fmt.Fprintf(
 				stdout,
-				"managed-cleanup: %s cleanupPeriodDays=%d, want %d",
+				"managed-cleanup: %s cleanupPeriodDays=%s, want %d",
 				status.Path,
-				status.Value,
+				status.Raw,
 				prefs.CleanupPeriodDays,
 			)
 		}

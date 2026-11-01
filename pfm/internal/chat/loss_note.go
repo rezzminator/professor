@@ -74,26 +74,8 @@ func lossNote(ctx context.Context, path string, engine pfmengine.ID) (note strin
 					damage = errors.Join(damage, fmt.Errorf("restart transcript line %d: %w", lineNo, err))
 				}
 			default:
-				record, ok := transcript.DecodeCodexRecord(line)
-				if !ok {
-					return "", fmt.Errorf("restart transcript line %d is not an object", lineNo)
-				}
-				if _, ok := record.Kind(); !ok {
-					return "", fmt.Errorf("restart transcript line %d has non-string type", lineNo)
-				}
-				var shape struct {
-					Payload map[string]json.RawMessage `json:"payload"`
-				}
-				if err := json.Unmarshal(line, &shape); err != nil || shape.Payload == nil {
-					return "", fmt.Errorf("restart transcript line %d has unsupported Codex payload", lineNo)
-				}
-				if entry, ok := transcript.Parse(line, string(engine)); ok {
-					switch entry.Role {
-					case transcript.RoleUser:
-						unanswered = true
-					case transcript.RoleAssistant, transcript.RoleTool:
-						unanswered = false
-					}
+				if err := lossCodex(line, &unanswered); err != nil {
+					damage = errors.Join(damage, fmt.Errorf("restart transcript line %d: %w", lineNo, err))
 				}
 			}
 		}
@@ -105,6 +87,31 @@ func lossNote(ctx context.Context, path string, engine pfmengine.ID) (note strin
 		}
 	}
 	return "", damage
+}
+
+func lossCodex(line []byte, unanswered *bool) error {
+	record, ok := transcript.DecodeCodexRecord(line)
+	if !ok {
+		return errors.New("record is not an object")
+	}
+	if _, ok := record.Kind(); !ok {
+		return errors.New("record has non-string type")
+	}
+	var shape struct {
+		Payload map[string]json.RawMessage `json:"payload"`
+	}
+	if err := json.Unmarshal(line, &shape); err != nil || shape.Payload == nil {
+		return errors.New("record has unsupported Codex payload")
+	}
+	if entry, ok := transcript.Parse(line, string(pfmengine.Codex)); ok {
+		switch entry.Role {
+		case transcript.RoleUser:
+			*unanswered = true
+		case transcript.RoleAssistant, transcript.RoleTool:
+			*unanswered = false
+		}
+	}
+	return nil
 }
 
 func lossClaude(line []byte, pending map[string]bool, unanswered *bool) error {
@@ -201,11 +208,14 @@ func lossOpenCode(ctx context.Context, root, id string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("read OpenCode restart history: %w", err)
 	}
+	// One unreadable message or part costs that item and marks the note unknown.
+	var damage error
 	unanswered := false
 	for _, row := range rows.Messages {
 		message, err := index.DecodeOpenCodeMessage(row.Data)
 		if err != nil {
-			return "", fmt.Errorf("read OpenCode restart message: %w", err)
+			damage = errors.Join(damage, fmt.Errorf("read OpenCode restart message: %w", err))
+			continue
 		}
 		switch message.Role {
 		case transcript.RoleUser:
@@ -213,7 +223,7 @@ func lossOpenCode(ctx context.Context, root, id string) (string, error) {
 		case transcript.RoleAssistant:
 			unanswered = false
 		default:
-			return "", errors.New("OpenCode restart message has unsupported role")
+			damage = errors.Join(damage, fmt.Errorf("OpenCode restart message has unsupported role %q", message.Role))
 		}
 	}
 	agent := false
@@ -227,23 +237,19 @@ func lossOpenCode(ctx context.Context, root, id string) (string, error) {
 			} `json:"state"`
 		}
 		if err := json.Unmarshal([]byte(row.Data), &part); err != nil {
-			return "", fmt.Errorf("read OpenCode restart part: %w", err)
-		}
-		if part.Type == "" {
-			return "", errors.New("OpenCode restart part has no type")
-		}
-		if part.Type != "tool" || part.Tool != "task" {
+			damage = errors.Join(damage, fmt.Errorf("read OpenCode restart part: %w", err))
 			continue
 		}
-		if part.CallID == "" {
-			return "", errors.New("OpenCode sub-agent part has no callID")
-		}
-		switch part.State.Status {
-		case "pending", "running":
+		switch {
+		case part.Type == "":
+			damage = errors.Join(damage, errors.New("OpenCode restart part has no type"))
+		case part.Type != "tool" || part.Tool != "task":
+		case part.CallID == "":
+			damage = errors.Join(damage, errors.New("OpenCode sub-agent part has no callID"))
+		case part.State.Status == "pending" || part.State.Status == "running":
 			agent = true
-		case "completed", "error":
-		default:
-			return "", errors.New("OpenCode sub-agent part has unknown state")
+		case part.State.Status != "completed" && part.State.Status != "error":
+			damage = errors.Join(damage, fmt.Errorf("OpenCode sub-agent part has unknown state %q", part.State.Status))
 		}
 	}
 	var notes []string
@@ -253,5 +259,5 @@ func lossOpenCode(ctx context.Context, root, id string) (string, error) {
 	if agent {
 		notes = append(notes, lostSubagent)
 	}
-	return strings.Join(notes, "; "), nil
+	return strings.Join(notes, "; "), damage
 }

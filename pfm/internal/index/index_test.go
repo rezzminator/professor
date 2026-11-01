@@ -346,7 +346,7 @@ func TestParseCodexSubagentMessagesNeverPromoteToUserThread(t *testing.T) {
 		Size:    info.Size(),
 		MTimeNS: info.ModTime().UnixNano(),
 	}
-	rollout, offset, err := parseCodexRolloutFile(file, 0, store.Rollout{})
+	rollout, offset, err := parseCodexRolloutFile(context.Background(), file, 0, store.Rollout{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -362,7 +362,7 @@ func TestParseCodexSubagentMessagesNeverPromoteToUserThread(t *testing.T) {
 	}
 	file.Size = info.Size()
 	file.MTimeNS = info.ModTime().UnixNano()
-	rollout, _, err = parseCodexRolloutFile(file, offset, rollout)
+	rollout, _, err = parseCodexRolloutFile(context.Background(), file, offset, rollout)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -388,7 +388,7 @@ func TestClaudeMetadataAppendDoesNotRefreshPromptActivity(t *testing.T) {
 		t.Fatal(err)
 	}
 	file := diskFile{ID: "semantic-activity", Path: path, Size: info.Size(), MTimeNS: info.ModTime().UnixNano()}
-	transcript, offset, err := parseClaudeTranscriptFile(file, 0, store.Transcript{})
+	transcript, offset, err := parseClaudeTranscriptFile(context.Background(), file, 0, store.Transcript{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -409,7 +409,7 @@ func TestClaudeMetadataAppendDoesNotRefreshPromptActivity(t *testing.T) {
 	}
 	file.Size = info.Size()
 	file.MTimeNS = info.ModTime().UnixNano()
-	transcript, _, err = parseClaudeTranscriptFile(file, offset, transcript)
+	transcript, _, err = parseClaudeTranscriptFile(context.Background(), file, offset, transcript)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -623,7 +623,7 @@ func TestAttachmentMarkerAloneDoesNotFlagBackground(t *testing.T) {
 		t.Fatal(err)
 	}
 	file := diskFile{ID: "attached-interactive", Path: path, Size: info.Size(), MTimeNS: info.ModTime().UnixNano()}
-	transcript, _, err := parseClaudeTranscriptFile(file, 0, store.Transcript{})
+	transcript, _, err := parseClaudeTranscriptFile(context.Background(), file, 0, store.Transcript{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -651,7 +651,7 @@ func TestBackgroundMarkerOnLaterRecordDoesNotRetroactivelyFlagInteractiveSession
 		t.Fatal(err)
 	}
 	file := diskFile{ID: "sticky-interactive", Path: path, Size: info.Size(), MTimeNS: info.ModTime().UnixNano()}
-	transcript, _, err := parseClaudeTranscriptFile(file, 0, store.Transcript{})
+	transcript, _, err := parseClaudeTranscriptFile(context.Background(), file, 0, store.Transcript{})
 	if err != nil {
 		t.Fatal(err)
 	}

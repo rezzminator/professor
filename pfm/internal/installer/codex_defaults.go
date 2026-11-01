@@ -38,6 +38,9 @@ const (
 // developer_instructions fence — the channel Codex rebuilds verbatim after
 // every compaction and hands to every default-role sub-agent.
 func (installer *engine) wireCodexDefaults() error {
+	if installer.skipFailedPrompt(pfmengine.Codex, "Codex config defaults and fleet prompt") {
+		return nil
+	}
 	defaults, err := installer.codexDefaultsSource()
 	if err != nil {
 		return err
@@ -46,45 +49,58 @@ func (installer *engine) wireCodexDefaults() error {
 	if err != nil {
 		return err
 	}
+	// One home's failure costs that home: every other home is still wired.
+	var failures []error
 	for _, home := range installer.codexHomes() {
-		path := filepath.Join(home, "config.toml")
-		raw, existed, err := readCodexConfig(path)
-		if err != nil {
-			return err
-		}
-		wanted := string(raw)
-		_, _, yielded, err := installer.codexMCPYield(wanted)
-		if err != nil {
-			return fmt.Errorf("read Codex MCP config %s: %w", path, err)
-		}
-		change := "merge Professor defaults into " + path
-		if tables := yieldedCodexMCPTables(wanted, yielded); len(tables) != 0 {
-			for index, name := range tables {
-				tables[index] = "mcp_servers." + name
-			}
-			change += "; remove pfm's MCP tables: " + strings.Join(tables, ", ")
-		}
-		wanted = yielded
-		if defaults != "" {
-			if wanted, err = mergeCodexDefaults(wanted, defaults); err != nil {
-				return fmt.Errorf("merge Codex defaults into %s: %w", path, err)
-			}
-		}
-		wanted, foreign, err := mergeCodexDeveloperInstructions(wanted, string(prompt))
-		if err != nil {
-			return fmt.Errorf("write the fleet prompt into %s: %w", path, err)
-		}
-		if foreign != "" {
-			installer.skip(path + ": " + foreign)
-		}
-		if err := installer.writeCodexConfig(path, raw, existed, wanted, codexConfigEdit{
-			change:  change,
-			settled: path + " defaults",
-		}); err != nil {
-			return err
+		if err := installer.wireCodexHomeDefaults(home, defaults, string(prompt)); err != nil {
+			failures = append(failures, err)
 		}
 	}
-	return nil
+	return errors.Join(failures...)
+}
+
+func (installer *engine) wireCodexHomeDefaults(home, defaults, prompt string) error {
+	path := filepath.Join(home, "config.toml")
+	raw, existed, err := readCodexConfig(path)
+	if err != nil {
+		return err
+	}
+	wanted := string(raw)
+	_, _, yielded, err := installer.codexMCPYield(wanted)
+	if err != nil {
+		return fmt.Errorf("read Codex MCP config %s: %w", path, err)
+	}
+	change := "merge Professor defaults into " + path
+	if tables := yieldedCodexMCPTables(wanted, yielded); len(tables) != 0 {
+		for index, name := range tables {
+			tables[index] = "mcp_servers." + name
+		}
+		change += "; remove pfm's MCP tables: " + strings.Join(tables, ", ")
+	}
+	wanted = yielded
+	var mergeErr error
+	if defaults != "" {
+		merged, note, err := mergeCodexDefaults(wanted, defaults)
+		if err != nil {
+			mergeErr = installer.fail(fmt.Errorf("merge Codex defaults into %s: %w", path, err))
+		} else {
+			wanted = merged
+		}
+		if note != "" {
+			installer.skip(path + ": " + note)
+		}
+	}
+	wanted, foreign, err := mergeCodexDeveloperInstructions(wanted, prompt)
+	if err != nil {
+		return errors.Join(mergeErr, fmt.Errorf("write the fleet prompt into %s: %w", path, err))
+	}
+	if foreign != "" {
+		installer.skip(path + ": " + foreign)
+	}
+	return errors.Join(mergeErr, installer.writeCodexConfig(path, raw, existed, wanted, codexConfigEdit{
+		change:  change,
+		settled: path + " defaults",
+	}))
 }
 
 func yieldedCodexMCPTables(raw, yielded string) []string {
@@ -226,25 +242,29 @@ func (installer *engine) writeCodexConfig(
 // mergeCodexDefaults preserves comments and installer ownership fences. The
 // TOML parser locates complete declarations, including multiline strings;
 // the retired Professor developer block is removed and absent feature keys are inserted.
-func mergeCodexDefaults(raw, defaults string) (string, error) {
+//
+// A user's own wait-timeout values that are out of range or out of order leave
+// features.multi_agent_v2 as set: the returned note names why, and the rest of
+// the merge goes ahead.
+func mergeCodexDefaults(raw, defaults string) (string, string, error) {
 	var config, source map[string]any
 	if _, err := toml.Decode(raw, &config); err != nil {
-		return "", fmt.Errorf("parse existing config: %w", err)
+		return "", "", fmt.Errorf("parse existing config: %w", err)
 	}
 	if _, err := toml.Decode(defaults, &source); err != nil {
-		return "", fmt.Errorf("parse defaults: %w", err)
+		return "", "", fmt.Errorf("parse defaults: %w", err)
 	}
 	current, ok := config["developer_instructions"].(string)
 	if !ok && config["developer_instructions"] != nil {
-		return "", fmt.Errorf("developer_instructions must be a string")
+		return "", "", fmt.Errorf("developer_instructions must be a string")
 	}
 	if strings.Contains(current, codexPolicyBegin) || strings.Contains(current, codexPolicyEnd) {
 		if strings.Count(current, codexPolicyBegin) != 1 || strings.Count(current, codexPolicyEnd) != 1 {
-			return "", fmt.Errorf("ambiguous Professor instruction markers")
+			return "", "", fmt.Errorf("ambiguous Professor instruction markers")
 		}
 		start, end := strings.Index(current, codexPolicyBegin), strings.Index(current, codexPolicyEnd)
 		if end < start {
-			return "", fmt.Errorf("reversed Professor instruction markers")
+			return "", "", fmt.Errorf("reversed Professor instruction markers")
 		}
 		current = current[:start] + current[end+len(codexPolicyEnd):]
 	}
@@ -252,7 +272,7 @@ func mergeCodexDefaults(raw, defaults string) (string, error) {
 	if config["developer_instructions"] != nil && config["developer_instructions"] != current {
 		value, err := encodeCodexValues(map[string]any{"developer_instructions": current})
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
 		if current == "" {
 			value = ""
@@ -278,21 +298,25 @@ func mergeCodexDefaults(raw, defaults string) (string, error) {
 	}
 	sourceFeatures, ok := source["features"].(map[string]any)
 	if !ok {
-		return "", fmt.Errorf("defaults need a features table")
+		return "", "", fmt.Errorf("defaults need a features table")
 	}
 	wanted, ok := sourceFeatures["multi_agent_v2"].(map[string]any)
 	if !ok {
-		return "", fmt.Errorf("defaults need features.multi_agent_v2")
+		return "", "", fmt.Errorf("defaults need features.multi_agent_v2")
 	}
 	existing, err := codexFeatureTable(config, "multi_agent_v2")
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	// Existing preferences win, but a partial override must not produce a
-	// configuration Codex rejects at startup.
+	// configuration Codex rejects at startup: a user's own bad or unordered
+	// value leaves the table as set, while a bad template value is pfm's error.
 	limits := map[string]int64{}
+	userSet := map[string]bool{}
+	var keep string
 	for _, key := range []string{codexMinWaitTimeout, codexDefaultWaitTimeout, codexMaxWaitTimeout} {
 		value, present := existing[key]
+		user := present
 		if !present {
 			value, present = wanted[key]
 		}
@@ -301,30 +325,38 @@ func mergeCodexDefaults(raw, defaults string) (string, error) {
 		}
 		number, ok := value.(int64)
 		if !ok || number < 0 || number > 3600000 {
-			return "", fmt.Errorf("%s must be an integer from 0 to 3600000", key)
+			if !user {
+				return "", "", fmt.Errorf("%s must be an integer from 0 to 3600000", key)
+			}
+			keep = fmt.Sprintf("%s must be an integer from 0 to 3600000", key)
+			break
 		}
 		limits[key] = number
+		userSet[key] = user
 	}
 	for _, pair := range [][2]string{{codexMinWaitTimeout, codexDefaultWaitTimeout}, {codexDefaultWaitTimeout, codexMaxWaitTimeout}, {codexMinWaitTimeout, codexMaxWaitTimeout}} {
 		lower, hasLower := limits[pair[0]]
 		upper, hasUpper := limits[pair[1]]
-		if hasLower && hasUpper && lower > upper {
-			return "", fmt.Errorf(
-				"wait defaults for Codex conflict with existing settings: %s exceeds %s; set a consistent minimum/default/maximum",
-				pair[0],
-				pair[1],
-			)
+		if keep != "" || !hasLower || !hasUpper || lower <= upper {
+			continue
 		}
+		if !userSet[pair[0]] && !userSet[pair[1]] {
+			return "", "", fmt.Errorf("wait defaults for Codex conflict: %s exceeds %s", pair[0], pair[1])
+		}
+		keep = fmt.Sprintf("%s exceeds %s", pair[0], pair[1])
 	}
-	updated, err = insertMissingCodexFeature(updated, "multi_agent_v2", wanted, existing)
-	if err != nil {
-		return "", err
+	var note string
+	if keep != "" {
+		note = "features.multi_agent_v2 left as set, no wait defaults inserted: " + keep +
+			"; set a consistent minimum/default/maximum"
+	} else if updated, err = insertMissingCodexFeature(updated, "multi_agent_v2", wanted, existing); err != nil {
+		return "", "", err
 	}
 	// Both long-yield keys are needed together: codex-cli clamps a command wait
 	// at ~31s without them, so an agent asking for 600s polls instead of waiting.
 	codeMode, err := codexFeatureTable(config, codexCodeMode)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	updated, err = insertMissingCodexFeature(
 		updated,
@@ -333,24 +365,24 @@ func mergeCodexDefaults(raw, defaults string) (string, error) {
 		codeMode,
 	)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if _, present := config[codexBackgroundTerminalMaxTimeout]; !present {
 		// A bare key appended after a table would land inside it, so it leads.
 		value, err := encodeCodexValues(map[string]any{codexBackgroundTerminalMaxTimeout: codexLongYieldMs})
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
 		updated = value + updated
 	}
 	var checked map[string]any
 	if _, err := toml.Decode(updated, &checked); err != nil {
-		return "", fmt.Errorf(
+		return "", "", fmt.Errorf(
 			"defaults cannot be merged into this TOML layout without rewriting existing tables: %w",
 			err,
 		)
 	}
-	return updated, nil
+	return updated, note, nil
 }
 
 // codexFeatureTable reads one feature sub-table from a parsed config. An absent

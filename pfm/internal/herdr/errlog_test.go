@@ -131,8 +131,9 @@ func TestErrorLogStaysBounded(t *testing.T) {
 		t.Fatal(err)
 	}
 	records, err = RecentErrors(dir, at)
-	if err == nil || !strings.Contains(err.Error(), "cc-1.log.1 holds a malformed line") {
-		t.Fatalf("records=%+v err=%v, want the retained torn log reported, not silently hidden", records, err)
+	want := "herdr error log: history incomplete since 2026-10-16T01:00:00Z: " + path + ".1 holds 2 malformed line(s)"
+	if err == nil || err.Error() != want || len(records) != 1 || records[0].Message != "fresh" {
+		t.Fatalf("records=%+v err=%v, want the fresh record and %q", records, err, want)
 	}
 	if _, err := os.Stat(path + ".1"); err != nil {
 		t.Fatalf("rotated log: %v, want the old log kept beside it", err)
@@ -205,18 +206,49 @@ func TestErrorLogRetentionReportsLostErrorsAndKeepsRetainedOnes(t *testing.T) {
 	}
 }
 
+// Broken retained history is named, and every record still readable is kept.
 func TestErrorLogNamesBrokenRotationsAndWatermarks(t *testing.T) {
-	for _, suffix := range []string{".1", ".lost"} {
-		t.Run(suffix, func(t *testing.T) {
+	at := time.Date(2026, 10, 16, 1, 0, 0, 0, time.UTC)
+	for _, test := range []struct{ suffix, cause string }{
+		{".1", " holds 1 malformed line(s)"},
+		{".lost", " holds a malformed retention watermark"},
+	} {
+		t.Run(test.suffix, func(t *testing.T) {
 			dir := t.TempDir()
-			path := filepath.Join(dir, "broken.log"+suffix)
+			path := filepath.Join(dir, "broken.log"+test.suffix)
 			if err := os.WriteFile(path, []byte("bad history\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := RecentErrors(dir, time.Time{}); err == nil || !strings.Contains(err.Error(), path) {
-				t.Fatalf("broken retained history became clean: %v", err)
+			if err := AppendError(dir, "fine", at, "still readable"); err != nil {
+				t.Fatal(err)
+			}
+			records, err := RecentErrors(dir, time.Time{})
+			want := "herdr error log: history incomplete since 0001-01-01T00:00:00Z: " + path + test.cause
+			if err == nil || err.Error() != want || len(records) != 1 || records[0].Message != "still readable" {
+				t.Fatalf("records=%+v err=%v, want the readable record and %q", records, err, want)
 			}
 		})
+	}
+	// A malformed watermark never blocks the next rotation: it is rewritten.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cc-1"+ErrorLogSuffix)
+	if err := os.WriteFile(path+".lost", []byte("bad history\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := AppendError(dir, "cc-1", at, "rotated away"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(path, path+".1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(strings.Repeat("x", ErrorLogBytes)+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := AppendError(dir, "cc-1", at, "after rotation"); err != nil {
+		t.Fatalf("append over a malformed watermark: %v", err)
+	}
+	if through, err := readLostErrors(dir, "cc-1.log.lost"); err != nil || !through.Equal(at) {
+		t.Fatalf("watermark = %s, %v, want %s", through, err, at)
 	}
 }
 

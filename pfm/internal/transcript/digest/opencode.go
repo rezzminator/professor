@@ -261,6 +261,9 @@ func openCodeError(raw json.RawMessage) string {
 	return pyvalue.Dumps(raw)
 }
 
+// unknownRole is the role of a part whose message row could not be read.
+const unknownRole = "?"
+
 func typeOr(kind string) string {
 	if kind == "" {
 		return "?"
@@ -280,8 +283,8 @@ func (p *parsed) openCodePart(n int, row index.OpenCodeRow, role string, final b
 	}
 	label := "part." + typeOr(part.Type)
 	if role == "" {
-		p.mark(n, dispSkipped, label+" (of an unreadable message)")
-		return
+		// Its message row could not be read: the part still shows, its role unknown.
+		role, label = unknownRole, label+" (of an unreadable message)"
 	}
 	note := func(text string) { p.add(&event{line: n, ts: ts, kind: kindNote, text: text}, label) }
 	switch part.Type {
@@ -334,7 +337,7 @@ func (p *parsed) openCodeText(n int, ts, label string, part *openCodePart, role 
 		p.add(&event{line: n, ts: ts, kind: kindPrompt, text: text}, label)
 	case role == transcript.RoleAssistant && final:
 		p.add(&event{line: n, ts: ts, kind: kindFinal, text: text}, label)
-	case role == transcript.RoleAssistant:
+	case role == transcript.RoleAssistant || role == unknownRole:
 		p.add(&event{line: n, ts: ts, kind: kindReply, text: text}, label)
 	default:
 		p.mark(n, dispSkipped, label)

@@ -238,19 +238,36 @@ func TestRenderSubagentsNestedLongTail(t *testing.T) {
 	}
 }
 
-// A meta file that cannot be parsed hides which agent spawned it: every row
-// says "?/?", never "none".
-func TestRenderSubagentsNestedTornMetaIsNotAbsence(t *testing.T) {
-	session := nestedSession(t, map[string][]string{"p": agentTranscriptLines},
-		map[string]string{"p": ""})
-	dir := filepath.Join(strings.TrimSuffix(session, ".jsonl"), "subagents")
-	if err := os.WriteFile(filepath.Join(dir, "agent-c1.meta.json"), []byte(`{"agentTy`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	got, warned := renderOneSubagent(t, session, parentTask)
-	if !strings.HasPrefix(got, "?/?│▱") ||
-		!strings.Contains(warned, "row p: nested agents: parse sub-agent meta") {
-		t.Fatalf("content = %q warn = %q, want ?/? and the cause", got, warned)
+// A meta file that cannot be parsed hides which agent spawned that one agent
+// only: every other edge stands, the row counts the unreadable agent as unread
+// (it may sit below the task), and the cause goes to warn, never "none".
+func TestRenderSubagentsNestedTornMetaCostsOnlyItsOwnParent(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		transcripts map[string][]string
+		parents     map[string]string
+		want        string
+	}{
+		{"alone", map[string][]string{"p": agentTranscriptLines}, map[string]string{"p": ""}, "0/0 (1 unread)│▱"},
+		{
+			"beside a readable child",
+			map[string][]string{"p": agentTranscriptLines, "c2": {turnEnded}},
+			map[string]string{"p": "", "c2": "p"},
+			"0/1 (1 unread)│▱",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			session := nestedSession(t, tc.transcripts, tc.parents)
+			dir := filepath.Join(strings.TrimSuffix(session, ".jsonl"), "subagents")
+			if err := os.WriteFile(filepath.Join(dir, "agent-c1.meta.json"), []byte(`{"agentTy`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			got, warned := renderOneSubagent(t, session, parentTask)
+			if !strings.HasPrefix(got, tc.want) ||
+				!strings.Contains(warned, "row p: nested agents: parse sub-agent meta") {
+				t.Fatalf("content = %q warn = %q, want prefix %q and the cause", got, warned, tc.want)
+			}
+		})
 	}
 }
 

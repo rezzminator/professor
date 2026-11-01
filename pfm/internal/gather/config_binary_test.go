@@ -1,6 +1,7 @@
 package gather
 
 import (
+	"io/fs"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -79,7 +80,7 @@ func TestClaudeProcessUnreadableEnvironmentStaysUnknown(t *testing.T) {
 	proc := &fakeProcFS{processes: map[int]fakeProcess{
 		100: {stat: ProcStat{ParentPID: 1}},
 		200: {
-			cmdline: []string{"/opt/claude"}, environErr: true,
+			cmdline: []string{"/opt/claude"}, environErr: fs.ErrPermission,
 			stat: ProcStat{ParentPID: 100},
 		},
 	}}

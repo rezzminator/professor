@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
@@ -136,4 +137,20 @@ func (indexer *Indexer) Run(ctx context.Context, options Options) (Counters, err
 		}
 	}
 	return counters, nil
+}
+
+// warnUnreadable records one item a pass could not read and went on without:
+// the pass keeps its siblings and the item's prior row, and the activity log
+// is where the loss shows.
+func warnUnreadable(ctx context.Context, kind, path string, err error) {
+	obs.Logger(ctx).Warn("index.unreadable", "kind", kind, "path", path, obs.FieldErr, err.Error())
+}
+
+// warnUnparsedLines records how many complete lines of one file a parse
+// skipped as undecodable; the file's other lines are kept.
+func warnUnparsedLines(ctx context.Context, path string, lines int) {
+	if lines == 0 {
+		return
+	}
+	obs.Logger(ctx).Warn("index.unparsed_lines", "path", path, "count", lines)
 }

@@ -33,36 +33,57 @@ func (installer *engine) generateHarnessPrompts() error {
 	if err != nil {
 		return fmt.Errorf("resolve harness prompt source repository: %w", err)
 	}
+	// One engine's failure costs that engine's prompt and its consumers alone:
+	// a FAIL row names it, and every other engine's prompt still lands.
 	for _, id := range pfmengine.All() {
-		content, err := assembledHarnessPrompt(repo, id)
-		if err != nil {
-			return fmt.Errorf("assemble %s harness prompt: %w", id, err)
-		}
-		if len(bytes.TrimSpace(content)) == 0 {
-			return fmt.Errorf("assemble %s harness prompt: empty prompt", id)
-		}
-		target := paths.GeneratedHarnessPromptIn(repo, id)
-		current, err := os.ReadFile(target)
-		if err == nil && bytes.Equal(current, content) {
-			installer.ok(target + " harness prompt")
-			continue
-		}
-		if err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("read generated harness prompt %s: %w", target, err)
-		}
-		if err := installer.change("generate harness prompt "+target, func() error {
-			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-				return fmt.Errorf("create generated harness prompt directory %s: %w", filepath.Dir(target), err)
+		if err := installer.generateHarnessPrompt(repo, id); err != nil {
+			if installer.failedPrompts == nil {
+				installer.failedPrompts = map[pfmengine.ID]bool{}
 			}
-			if err := atomicfile.Write(target, content, 0o644); err != nil {
-				return fmt.Errorf("write generated harness prompt %s: %w", target, err)
-			}
-			return nil
-		}); err != nil {
-			return err
+			installer.failedPrompts[id] = true
+			installer.deferFailure(installer.fail(fmt.Errorf("generate harness prompts: %w", err)))
 		}
 	}
 	return nil
+}
+
+func (installer *engine) generateHarnessPrompt(repo string, id pfmengine.ID) error {
+	content, err := assembledHarnessPrompt(repo, id)
+	if err != nil {
+		return fmt.Errorf("assemble %s harness prompt: %w", id, err)
+	}
+	if len(bytes.TrimSpace(content)) == 0 {
+		return fmt.Errorf("assemble %s harness prompt: empty prompt", id)
+	}
+	target := paths.GeneratedHarnessPromptIn(repo, id)
+	current, err := os.ReadFile(target)
+	if err == nil && bytes.Equal(current, content) {
+		installer.ok(target + " harness prompt")
+		return nil
+	}
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("read generated harness prompt %s: %w", target, err)
+	}
+	return installer.change("generate harness prompt "+target, func() error {
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return fmt.Errorf("create generated harness prompt directory %s: %w", filepath.Dir(target), err)
+		}
+		if err := atomicfile.Write(target, content, 0o644); err != nil {
+			return fmt.Errorf("write generated harness prompt %s: %w", target, err)
+		}
+		return nil
+	})
+}
+
+// skipFailedPrompt names a consumer skipped because its engine's prompt
+// failed to generate this run; it reports whether to skip.
+func (installer *engine) skipFailedPrompt(id pfmengine.ID, consumer string) bool {
+	if !installer.failedPrompts[id] {
+		return false
+	}
+	installer.skip(consumer + " skipped: the " + pfmengine.MustLookup(id).LongName +
+		" harness prompt failed to generate above")
+	return true
 }
 
 // generatedHarnessPrompt reads the file generation just wrote on apply. Plans

@@ -80,15 +80,18 @@ type fakeSeats struct {
 	resolves   map[string]int
 	missing    map[string]bool
 	resolveErr map[string]error
+	// resolveErrAt fails a name's lookups by number, counted from 1.
+	resolveErrAt map[string]map[int]error
 }
 
 func newFakeSeats(steps map[string][]fakeStep) *fakeSeats {
 	return &fakeSeats{
-		steps:      steps,
-		calls:      map[string]int{},
-		resolves:   map[string]int{},
-		missing:    map[string]bool{},
-		resolveErr: map[string]error{},
+		steps:        steps,
+		calls:        map[string]int{},
+		resolves:     map[string]int{},
+		missing:      map[string]bool{},
+		resolveErr:   map[string]error{},
+		resolveErrAt: map[string]map[int]error{},
 	}
 }
 
@@ -97,6 +100,9 @@ func (seats *fakeSeats) resolve(_ context.Context, name string) (Chat, bool, err
 	defer seats.mu.Unlock()
 	seats.resolves[name]++
 	if err := seats.resolveErr[name]; err != nil {
+		return Chat{}, false, err
+	}
+	if err := seats.resolveErrAt[name][seats.resolves[name]]; err != nil {
 		return Chat{}, false, err
 	}
 	if seats.missing[name] {
@@ -213,50 +219,6 @@ func TestFleetWatchTwoNamedTargetsEndIndependently(t *testing.T) {
 				t.Fatalf("result = %#v", result)
 			}
 		})
-	}
-}
-
-func TestFleetWatchAnErrorEndsOnlyItsTarget(t *testing.T) {
-	for _, testCase := range []struct {
-		name  string
-		setup func(*fakeSeats)
-		want  string
-	}{
-		{"resolve", func(seats *fakeSeats) {
-			seats.resolveErr["bad"] = errors.New("scan failed:\n\tdisk\t  gone")
-		}, "ERROR bad scan failed: disk gone"},
-		{"inspect", func(seats *fakeSeats) {
-			seats.steps["bad"] = []fakeStep{{err: errors.New("read transcript:\nno such file")}}
-		}, "ERROR bad read transcript: no such file"},
-	} {
-		for _, transitions := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s/transitions=%v", testCase.name, transitions), func(t *testing.T) {
-				seats := newFakeSeats(map[string][]fakeStep{
-					"good": {working("x"), working("x"), gone()},
-				})
-				testCase.setup(seats)
-				hooks := 0
-				lines, result, err := runFleet(t, namedFleet(seats, "bad", "good"), WatchOptions{
-					Transitions: transitions,
-					OnIdle:      func(Status) error { hooks++; return nil },
-					OnExit:      func(Status) error { hooks++; return nil },
-				})
-				if err != nil {
-					t.Fatalf("Watch() error = %v", err)
-				}
-				want := []string{testCase.want, "EXIT good"}
-				if transitions {
-					want = []string{testCase.want, "SEEN good working", "EXIT good"}
-				}
-				assertLines(t, lines, want)
-				if result.Errors["bad"] == nil || result.Errors["good"] != nil {
-					t.Fatalf("Errors = %v, want only bad", result.Errors)
-				}
-				if hooks != 1 {
-					t.Fatalf("hooks fired %d times, want 1 (EXIT good only: an ERROR runs no hook)", hooks)
-				}
-			})
-		}
 	}
 }
 

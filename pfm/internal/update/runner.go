@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -102,7 +103,9 @@ func parseDoctorTally(output string) (warnings, failures int) {
 	for _, match := range doctorTallyPattern.FindAllStringSubmatch(output, -1) {
 		count, err := strconv.Atoi(match[2])
 		if err != nil {
-			continue
+			// \d+ fails only past MaxInt: the tier is still nonzero, never clean.
+			obs.Logger(context.Background()).Warn("update.doctor_tally", "kind", match[1], obs.FieldErr, err.Error())
+			count = math.MaxInt
 		}
 		if match[1] == "warnings" {
 			warnings = count

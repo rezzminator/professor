@@ -25,12 +25,9 @@ func (engine *Engine) callHerdr(
 	}
 	id, err := pfmengine.Parse(target.Engine)
 	if err != nil {
-		base.Code = CodeUndelivered
-		base.Message = fmt.Sprintf(
-			"ABORT: unsupported Herdr call engine %q",
-			target.Engine,
-		)
-		return base, nil
+		// An engine this binary cannot name takes the engine-neutral raw
+		// guards, as the tmux path does, never the native prompt.
+		return engine.callHerdrRaw(ctx, request, target, base, lock, pfmengine.ID(target.Engine))
 	}
 	if !pfmengine.MustLookup(id).HerdrNativePrompt {
 		return engine.callHerdrRaw(ctx, request, target, base, lock, id)
@@ -41,6 +38,10 @@ func (engine *Engine) callHerdr(
 		// Herdr tracks no agent in this pane (its agent authority is held by a
 		// source that never reports, as in a herdr-keep pane): the raw path's
 		// composer guard still protects it.
+		return engine.callHerdrRaw(ctx, request, target, base, lock, id)
+	}
+	if errors.Is(err, errHerdrStatusUnrecognized) {
+		// Herdr reports a state pfm cannot read: the raw composer guard decides.
 		return engine.callHerdrRaw(ctx, request, target, base, lock, id)
 	}
 	if err != nil {
@@ -153,11 +154,16 @@ func (engine *Engine) callHerdr(
 		return base, nil
 	}
 	prompted, err := decodeHerdrAgent(result, "agent_prompted", target)
-	if err != nil {
+	if err != nil && !errors.Is(err, errHerdrStatusUnrecognized) {
 		base.Status = statusTypedUnconfirmed
 		base.Code = CodeUndelivered
 		base.Message = err.Error()
 		return base, nil
+	}
+	if prompted.Agent.Terminal == "" {
+		// The acknowledgement may omit its terminal: the agent.get read just
+		// before the prompt already proved this pane's terminal.
+		prompted.Agent.Terminal = agent.Agent.Terminal
 	}
 	// A syntactically valid acknowledgement can still carry the old idle
 	// snapshot. Only this agent working, or a new completion event, proves
@@ -224,7 +230,7 @@ func (engine *Engine) confirmHerdrTurn(
 			return fmt.Errorf("confirm Herdr turn read for %s: %w", target.Pane, err)
 		}
 		observed, err := decodeHerdrAgent(body, "agent_info", target)
-		if err != nil {
+		if err != nil && !errors.Is(err, errHerdrStatusUnrecognized) {
 			return fmt.Errorf("confirm Herdr turn for %s: %w", target.Pane, err)
 		}
 		if observed.Agent.Terminal != prompted.Agent.Terminal ||
@@ -407,10 +413,14 @@ func (engine *Engine) callHerdrRaw(
 // A busy footer does not make the composer unsafe: it is the engine's queue.
 // Native Claude still requires the full bounded box, including wrapped lines.
 func herdrComposerEmpty(ctx context.Context, target Target, id pfmengine.ID, screen string) (bool, error) {
+	// An engine this binary cannot name may be native Claude: it must show the
+	// full bounded box empty too.
+	descriptor, lookupErr := pfmengine.Lookup(id)
+	nativePrompt := lookupErr != nil || descriptor.HerdrNativePrompt
 	ready := func(capture string) bool {
 		return ComposerRowShown(capture) && SelectorLine(capture) == "" &&
 			!pfmengine.ClaudeTrustDialog(capture) &&
-			(!pfmengine.MustLookup(id).HerdrNativePrompt || ComposerBoxEmpty(capture))
+			(!nativePrompt || ComposerBoxEmpty(capture))
 	}
 	if !ready(screen) {
 		return false, nil

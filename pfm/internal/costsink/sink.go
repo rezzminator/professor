@@ -90,6 +90,14 @@ func (s *Sink) noteIdentity(path, session, identity string) {
 	}
 }
 
+// noteUnreadableCounts faults a record whose token attributes were present but no number: the row
+// is still written, its counts read 0, and the log names what was lost.
+func (s *Sink) noteUnreadableCounts(path, requestID, unreadable string) {
+	if unreadable != "" {
+		s.fault("%s: request %q: token attribute(s) %s unreadable, counted as 0", path, requestID, unreadable)
+	}
+}
+
 // LastPost is when the sink last received a POST, zero before the first.
 func (s *Sink) LastPost() time.Time {
 	nanos := s.last.Load()
@@ -235,6 +243,7 @@ func (s *Sink) ingestLogs(body []byte, now time.Time) error {
 			continue
 		}
 		row := logOnlyRow(*half, now)
+		s.noteUnreadableCounts(pathLogs, row.RequestID, half.UnreadableCounts)
 		s.noteIdentity(pathLogs, half.SessionID, row.Identity())
 		s.joiner.AddLog(*half, now)
 	}
@@ -254,6 +263,7 @@ func (s *Sink) ingestSpans(body []byte, now time.Time) error {
 			continue
 		}
 		row := spanOnlyRow(*half, now)
+		s.noteUnreadableCounts(pathTraces, row.RequestID, half.UnreadableCounts)
 		s.noteIdentity(pathTraces, half.SessionID, row.Identity())
 		s.joiner.AddSpan(*half, now)
 	}

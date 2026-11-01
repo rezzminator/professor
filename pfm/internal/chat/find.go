@@ -78,6 +78,9 @@ func Find(ctx context.Context, runtime *pfmconfig.Runtime, request FindRequest) 
 			return nil, err
 		}
 		raw, err := os.ReadFile(path)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue // removed since the listing: no longer a candidate
+		}
 		if err != nil {
 			return nil, fmt.Errorf("read transcript %s: %w", path, err)
 		}

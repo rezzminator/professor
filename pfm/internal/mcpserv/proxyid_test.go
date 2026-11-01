@@ -27,7 +27,7 @@ func TestParseProxyIdentityAcceptsWirePayload(t *testing.T) {
 		"pane":       "%7",
 		"engine":     "claude",
 		"id":         "session-id",
-		"source":     "tmux",
+		"source":     float64(7), // never read: a malformed one costs nothing
 	}
 	want := ProxyIdentity{
 		Version:    ProxyWireVersion,
@@ -37,7 +37,6 @@ func TestParseProxyIdentityAcceptsWirePayload(t *testing.T) {
 		Pane:       "%7",
 		Engine:     "claude",
 		ID:         "session-id",
-		Source:     "tmux",
 	}
 	got, detail, err := parseProxyIdentity(raw)
 	if err != nil || detail != "" || !reflect.DeepEqual(got, want) {
@@ -128,17 +127,32 @@ func TestParseProxyIdentityRejectsUnsupportedWireVersions(t *testing.T) {
 }
 
 func TestBirthProxyErrorPayload(t *testing.T) {
-	for _, kind := range []string{"not_in_chat", "not_registered", "ambiguous", "failed"} {
-		_, detail, err := parseProxyIdentity(
-			map[string]any{"v": 1, "error": map[string]any{"kind": kind, "message": "lookup failed"}},
-		)
-		if err != nil || detail != "" {
-			t.Errorf("kind %s: detail=%q err=%v", kind, detail, err)
+	const unread = "caller identity lookup failed without a message"
+	for _, test := range []struct {
+		kind, message      any
+		wantKind, wantText string
+	}{
+		{"not_in_chat", "lookup failed", "not_in_chat", "lookup failed"},
+		{"not_registered", "lookup failed", "not_registered", "lookup failed"},
+		{"ambiguous", "lookup failed", "ambiguous", "lookup failed"},
+		{"failed", "lookup failed", "failed", "lookup failed"},
+		{"not_registered", " ", "not_registered", unread},
+		{"x", "bad", "failed", `bad (unknown error kind "x")`},
+		{float64(3), nil, "failed", unread + " (unknown error kind 3)"},
+	} {
+		raw := map[string]any{"kind": test.kind, "message": test.message}
+		got, detail, err := parseProxyIdentity(map[string]any{"v": 1, "error": raw})
+		want := ProxyIdentityError{Kind: test.wantKind, Message: test.wantText}
+		if err != nil || detail != "" || got.Error == nil || *got.Error != want {
+			t.Errorf(
+				"error payload %v: parsed error %+v, detail=%q err=%v; want %+v",
+				raw,
+				got.Error,
+				detail,
+				err,
+				want,
+			)
 		}
-	}
-	_, detail, err := parseProxyIdentity(map[string]any{"v": 1, "error": map[string]any{"kind": "x", "message": "bad"}})
-	if err != nil || detail != `MCP _meta.pfmProxy error kind "x" is unknown` {
-		t.Fatalf("unknown kind: detail=%q err=%v", detail, err)
 	}
 }
 

@@ -86,15 +86,19 @@ func (a Anchors) MarshalJSON() ([]byte, error) {
 	return json.Marshal(anchorsJSON{States: a.states, Stamp: a.stamp, Stamped: a.stamped, Open: a.open})
 }
 
-// UnmarshalJSON restores what MarshalJSON kept, refusing an open index outside
-// the states it names.
+// UnmarshalJSON restores what MarshalJSON kept. An open index outside the
+// states it names is only a damaged bookmark: the states stay, and the index
+// is read back from them (the states before it hold an Until).
 func (a *Anchors) UnmarshalJSON(raw []byte) error {
 	var kept anchorsJSON
 	if err := json.Unmarshal(raw, &kept); err != nil {
 		return fmt.Errorf("decode cost-state anchors: %w", err)
 	}
 	if kept.Open < 0 || kept.Open > len(kept.States) {
-		return fmt.Errorf("decode cost-state anchors: open index %d outside %d states", kept.Open, len(kept.States))
+		kept.Open = 0
+		for kept.Open < len(kept.States) && !kept.States[kept.Open].Until.IsZero() {
+			kept.Open++
+		}
 	}
 	*a = Anchors{states: kept.States, stamp: kept.Stamp, stamped: kept.Stamped, open: kept.Open}
 	return nil

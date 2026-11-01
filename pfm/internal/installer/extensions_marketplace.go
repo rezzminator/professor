@@ -2,6 +2,7 @@ package installer
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -23,6 +24,9 @@ func (installer *engine) recordClaudeExtensionMarketplaces() error {
 	if err != nil {
 		return err
 	}
+	// One unreadable marketplace file costs only its record's capture: every
+	// other record's MarketplaceLast still reaches the ledger.
+	var failed error
 	for key := range ledger.Records {
 		record := ledger.Records[key]
 		if record.Engine != extensionClaude || !record.MarketplaceCaptured || record.MarketplaceBefore != nil ||
@@ -33,19 +37,21 @@ func (installer *engine) recordClaudeExtensionMarketplaces() error {
 		target.fact = pfmconfig.ExtensionRegistry()[record.Name].Engines[extensionClaude]
 		_, document, err := readExtensionDocument(claudeExtensionMarketplacePath(target), extensionClaude)
 		if err != nil {
-			return err
+			failed = errors.Join(failed, err)
+			continue
 		}
 		record.MarketplaceLast = document[target.fact.Marketplace]
 		ledger.Records[key] = record
 	}
 	raw, err := json.MarshalIndent(ledger, "", "  ")
 	if err != nil {
-		return fmt.Errorf("encode extension marketplace ownership: %w", err)
+		return errors.Join(failed, fmt.Errorf("encode extension marketplace ownership: %w", err))
 	}
 	if len(ledger.Records) == 0 {
-		return nil
+		return failed
 	}
-	return atomicfile.Write(filepath.Join(installer.managedRoot, extensionOwnershipName), append(raw, '\n'), 0o600)
+	return errors.Join(failed,
+		atomicfile.Write(filepath.Join(installer.managedRoot, extensionOwnershipName), append(raw, '\n'), 0o600))
 }
 
 func (installer *engine) cleanupClaudeExtensionMarketplace(target extensionTarget, record extensionRecord) error {

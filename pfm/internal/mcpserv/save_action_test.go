@@ -370,6 +370,19 @@ func TestChatSaveNamesCallerListingAndTranscriptLookupFailures(t *testing.T) {
 			!strings.Contains(err.Error(), "list live chats") {
 			t.Fatalf("chatSave listing error = %v, want wrapped caller listing failure", err)
 		}
+		// Absolute paths need no caller: the failed lookup costs nothing.
+		var calls [][]string
+		service.backend.dispatch = func(_ context.Context, args []string, _, _ io.Writer) int {
+			calls = append(calls, args)
+			return 0
+		}
+		_, _, err = service.chatSave(context.Background(), request, SaveInput{
+			Target: "/notes/chat.md", Transcript: "/transcripts/chat.jsonl",
+		})
+		want := [][]string{{"chat", "save", "/notes/chat.md", "/transcripts/chat.jsonl"}}
+		if err != nil || !reflect.DeepEqual(calls, want) {
+			t.Fatalf("chatSave with absolute paths = %v, calls %q; want %q", err, calls, want)
+		}
 	})
 
 	t.Run("transcript", func(t *testing.T) {

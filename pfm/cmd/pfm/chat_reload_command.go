@@ -287,7 +287,7 @@ func runChatReloadWorkerWithRuntime(
 		return 0
 	}
 	engine := reload.EngineOf(socketPath)
-	id, transcript, err := resolveReloadSession(resolved, runtime.Config, socketPath, pane, sock == "", env)
+	id, transcript, err := resolveReloadSession(resolved, runtime.Config, socketPath, pane, sock == "", env, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat reload: %v\n", err)
 		return 1
@@ -338,12 +338,15 @@ func runChatReloadWorkerWithRuntime(
 		fmt.Fprintf(stderr, "pfm chat reload: %v\n", err)
 		return 1
 	}
-	birthAccount, birthCache, err := reload.BirthAccount(
-		resolved, runtime.Config, socketPath, leftBehind, paneState, stderr, defaultEnv(env),
-	)
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm chat reload: %v\n", err)
-		return 1
+	birthAccount, birthCache := 0, false
+	if account == "" || cacheOverride == "" { // both given: the birth record decides nothing
+		birthAccount, birthCache, err = reload.BirthAccount(
+			resolved, runtime.Config, socketPath, leftBehind, paneState, stderr, defaultEnv(env),
+		)
+		if err != nil {
+			fmt.Fprintf(stderr, "pfm chat reload: %v\n", err)
+			return 1
+		}
 	}
 	kept := account == ""
 	if kept {
@@ -431,8 +434,7 @@ func runChatReloadWorkerWithRuntime(
 		if engine == pfmengine.Codex {
 			transcript, err = reload.SessionTranscript(resolved, runtime.Config, engine, leftBehind)
 			if err != nil {
-				fmt.Fprintf(stderr, "pfm chat reload: find conversation to hide: %v\n", err)
-				return 1
+				fmt.Fprintf(stderr, "pfm chat reload: find conversation to hide: %v; hiding it by id alone\n", err)
 			}
 		}
 		hidden, err := hideReloadedConversation(context.Background(), runtime, engine, leftBehind, transcript, stderr)
@@ -627,6 +629,7 @@ func resolveReloadSession(
 	socketPath, pane string,
 	allowAmbient bool,
 	env paths.Env,
+	stderr io.Writer,
 ) (string, string, error) {
 	env = defaultEnv(env)
 	id, crumbPath, err := reload.SessionFromCrumb(
@@ -690,20 +693,20 @@ func resolveReloadSession(
 	if engine == pfmengine.Claude {
 		// The crumb keeps the launch id after Claude Code continued the chat
 		// in a new session: the reload resumes the newest segment.
-		tail, path, err := reload.ContinuedSession(context.Background(), id, os.Stderr)
+		tail, path, err := reload.ContinuedSession(context.Background(), id, stderr)
 		if err != nil {
-			return "", "", err
+			fmt.Fprintf(stderr, "pfm chat reload: %v; a newer continued segment may exist, resuming %s\n", err, id)
+			tail = id
 		}
-		if tail != id {
-			if path == "" {
-				// The index lost the newest segment's path: find it on disk.
-				if path, err = reload.SessionTranscript(resolved, machine, engine, tail); err != nil {
-					return "", "", err
-				}
+		if tail != id && path == "" {
+			// The index lost the newest segment's path: find it on disk.
+			if path, err = reload.SessionTranscript(resolved, machine, engine, tail); err != nil {
+				fmt.Fprintf(stderr, "pfm chat reload: continued session %s: %v; resuming %s\n", tail, err, id)
+			} else if path == "" {
+				fmt.Fprintf(stderr, "pfm chat reload: continued session %s has no transcript; resuming %s\n", tail, id)
 			}
-			if path == "" {
-				return "", "", fmt.Errorf("chat %s continued in session %s, whose transcript pfm cannot find", id, tail)
-			}
+		}
+		if tail != id && path != "" {
 			id, transcript = tail, path
 		}
 	}

@@ -33,8 +33,9 @@ type TmuxSnapshot struct {
 	EmptyServers  []string
 	ProbeWarnings []string
 	// Unreadable names each socket whose server could not be read (any
-	// failure but ErrServerGone), with why: a socket the probe failed to
-	// read, never one it proved empty. Each also carries a ProbeWarnings line.
+	// failure but ErrServerGone), or was read only in part (its readable
+	// panes still listed), with why: a socket the probe failed to read, never
+	// one it proved empty. Each also carries a ProbeWarnings line.
 	Unreadable map[string]string
 }
 
@@ -53,6 +54,11 @@ type CrumbProbe struct {
 	Accepted   int
 	Ignored    int
 	StaleSwept []string
+	// Warnings name each crumb the scan could not read or sweep.
+	Warnings []string
+	// Unread are the crumbs the scan saw but could not read: their chat's
+	// session is unknown this scan, never absent.
+	Unread []Crumb
 }
 
 // LiveCodex maps a live codex process and its first rollout onto a pane.

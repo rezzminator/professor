@@ -38,7 +38,7 @@ func (s *Store) ClearNames(ctx context.Context) (names map[string]naming.ClearNa
 		return nil, fmt.Errorf("acquire clear names connection: %w", err)
 	}
 	defer func() { returnErr = errors.Join(returnErr, conn.Close()) }()
-	return clearNameDecisions(ctx, conn)
+	return clearNameDecisions(ctx, conn, true)
 }
 
 func decodeClearName(id, raw string) (naming.ClearName, error) {
@@ -115,7 +115,7 @@ func (s *Store) ReserveClearName(
 			returnErr = errors.Join(returnErr, clearNameExec(cleanup, conn, "ROLLBACK"))
 		}
 	}()
-	decisions, err := clearNameDecisions(ctx, conn)
+	decisions, err := clearNameDecisions(ctx, conn, false)
 	if err != nil {
 		return name, err
 	}
@@ -146,7 +146,12 @@ func (s *Store) ReserveClearName(
 	return name, nil
 }
 
-func clearNameDecisions(ctx context.Context, conn *sql.Conn) (decisions map[string]naming.ClearName, returnErr error) {
+// clearNameDecisions reads every reservation. A listing skips an unreadable
+// row with a warning; a reservation refuses it, since the number that row
+// holds is unknown and picking around it could hand out a duplicate name.
+func clearNameDecisions(
+	ctx context.Context, conn *sql.Conn, skipUnreadable bool,
+) (decisions map[string]naming.ClearName, returnErr error) {
 	rows, err := clearNameQuery(ctx, conn, "SELECT key,val FROM meta WHERE key LIKE ?", clearNamePrefix+"%")
 	if err != nil {
 		return nil, fmt.Errorf("look up clear name reservations: %w", err)
@@ -160,12 +165,21 @@ func clearNameDecisions(ctx context.Context, conn *sql.Conn) (decisions map[stri
 	for rows.Next() {
 		var key, raw string
 		if err := rows.Scan(&key, &raw); err != nil {
-			return nil, fmt.Errorf("scan clear name reservation: %w", err)
+			err = fmt.Errorf("scan clear name reservation: %w", err)
+			if !skipUnreadable {
+				return nil, err
+			}
+			skipRow(ctx, "meta", err)
+			continue
 		}
 		id := strings.TrimPrefix(key, clearNamePrefix)
 		name, err := decodeClearName(id, raw)
 		if err != nil {
-			return nil, err
+			if !skipUnreadable {
+				return nil, err
+			}
+			skipRow(ctx, "meta", err)
+			continue
 		}
 		decisions[id] = name
 	}

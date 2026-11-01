@@ -3,6 +3,7 @@ package tokens
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 
@@ -19,6 +20,9 @@ type priceBook struct {
 	refresh    *pricing.RefreshReport
 	override   *pricing.Override
 	billing    *pricing.Billing
+	// overrideFailure is why the served table's override did not load: the
+	// run is then priced by the published table without it.
+	overrideFailure string
 }
 
 // loadSaved reads a saved `pfm model-cost --json --all` document, or a bare
@@ -55,13 +59,25 @@ func loadSaved(path string) (*priceBook, error) {
 	return book, nil
 }
 
+// refreshPrices is modelcost.Refresh, the seam a test swaps to serve a table
+// that cannot be loaded.
+var refreshPrices = modelcost.Refresh
+
 // loadServed refreshes and serves the table exactly as `pfm model-cost` does.
+// An invalid override leaves the published table: the audit still counts
+// every token, priced without the override, the failure named in its data gaps.
+// A published table that cannot be loaded prices nothing and is the error.
 func loadServed(ctx context.Context, options modelcost.Options) (*priceBook, error) {
-	prices, result, err := modelcost.Refresh(ctx, options)
-	if err != nil {
-		return nil, fmt.Errorf("the price table cannot load (pfm model-cost): %w", err)
+	prices, result, err := refreshPrices(ctx, options)
+	var override *pricing.OverrideError
+	if err != nil && !errors.As(err, &override) {
+		return nil, fmt.Errorf("load the price table: %w", err)
 	}
-	return bookOf(modelcost.PriceDocument(prices, result, "", prices.Rows)), nil
+	book := bookOf(modelcost.PriceDocument(prices, result, "", prices.Rows))
+	if override != nil {
+		book.overrideFailure = err.Error()
+	}
+	return book, nil
 }
 
 func bookOf(doc pricing.Document) *priceBook {

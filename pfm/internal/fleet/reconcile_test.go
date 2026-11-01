@@ -1,9 +1,13 @@
 package fleet
 
 import (
+	"context"
+	"slices"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // TestCodexRolloutFingerprintsCaptureIdentityPerPID pins the shape the
@@ -146,5 +150,33 @@ func TestCodexRolloutFingerprintsEqualTreatsNilAndEmptyAsNoPriorState(t *testing
 	nonEmpty := map[int]CodexRolloutFingerprint{111: {rolloutPath: "/codex/rollout-a.jsonl", rolloutHeld: true}}
 	if CodexRolloutFingerprintsEqual(nil, nonEmpty) {
 		t.Fatalf("nil vs a populated map: want NOT equal")
+	}
+}
+
+// An unreadable kill table must be said, not swallowed: the pass warns once
+// with the error and answers "unknown" for every thread it is asked about.
+func TestCodexRetiredThreadsWarnsAnUnreadableKillTable(t *testing.T) {
+	testjail.Fleet(t)
+	database, err := store.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var warnings []string
+	retired := codexRetiredThreads(context.Background(), database, func(warning string) {
+		warnings = append(warnings, warning)
+	})
+	for _, id := range []string{"thread-a", "thread-b"} {
+		if gone, known := retired(id); gone || known {
+			t.Fatalf("retired(%q) = %v, %v; want false, false over an unreadable kill table", id, gone, known)
+		}
+	}
+	want := []string{
+		"codex panes: read killed chats: query shared kills: sql: database is closed; no binding moves on a /clear this pass",
+	}
+	if !slices.Equal(warnings, want) {
+		t.Fatalf("warnings = %q, want %q", warnings, want)
 	}
 }

@@ -459,7 +459,7 @@ func TestSourceCloneInstallsEveryThemeInTemplatesThemes(t *testing.T) {
 	if len(want) == 0 {
 		t.Fatalf("no theme directory in %s: the enumeration found nothing to check", themes)
 	}
-	profiles, err := loadThemeProfiles(context.Background(), Options{SourceRepo: repoRoot})
+	profiles, _, err := loadThemeProfiles(context.Background(), Options{SourceRepo: repoRoot})
 	if err != nil {
 		t.Fatalf("load the clone's themes: %v", err)
 	}

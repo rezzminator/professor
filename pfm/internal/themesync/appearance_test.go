@@ -23,7 +23,6 @@ func TestAutoAppearanceUnsupportedPlatforms(t *testing.T) {
 		{"On", On},
 		{"Sync", func(ctx context.Context, env Env) (Report, error) { return Sync(ctx, env, false) }},
 		{"ForceSync", func(ctx context.Context, env Env) (Report, error) { return Sync(ctx, env, true) }},
-		{"ReadBack", ReadBack},
 	}
 	for _, goos := range platforms {
 		for _, op := range operations {
@@ -61,6 +60,34 @@ func TestAutoAppearanceUnsupportedPlatforms(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// A read-back writes nothing, so it never needs a guessed side: with the system
+// appearance unreadable it still reads every surface, against the appearance last
+// applied, and the claude row says it could not look.
+func TestReadBackKeepsTheMatrixWhenTheAppearanceCannotBeRead(t *testing.T) {
+	h := newLinuxHarness(t)
+	h.on() // an explicit theme is supported on Linux
+	stateBefore := h.read(".local/state/pfm/theme/state.json")
+	h.write(settingsRel, `{"theme":"auto"}`)
+	h.rearm()
+	report, err := ReadBack(context.Background(), h.env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Surfaces) != 5 {
+		t.Fatalf("read-back rows = %+v, want all five surfaces", report.Surfaces)
+	}
+	wantVerdict(
+		t,
+		report,
+		"claude",
+		VerdictError,
+		"themesync: auto appearance detection unsupported; choose an explicit theme/appearance",
+	)
+	if got := h.read(".local/state/pfm/theme/state.json"); got != stateBefore {
+		t.Error("a read-back changed the theme state")
 	}
 }
 

@@ -198,16 +198,6 @@ func BuildCosmos(rows []Row, events []fleetdb.CommsEvent, nowNS int64, live bool
 	for index := range events {
 		event := events[index]
 		switch event.Kind {
-		case fleetdb.KindCall:
-			if event.SenderSession == "" && event.SenderUUID == "" && event.SenderLabel == "" {
-				unsigned++
-			}
-			from := builder.chatNode(senderAddress(event))
-			to := builder.chatNode(receiverAddress(event))
-			builder.touch(from, event.AtNS)
-			builder.touch(to, event.AtNS)
-			builder.addEdge(from.Key, to.Key, event)
-			builder.warm(event.AtNS, from, to)
 		case fleetdb.KindSpawn:
 			child := builder.chatNode(receiverAddress(event))
 			builder.touch(child, event.AtNS)
@@ -225,9 +215,22 @@ func BuildCosmos(rows []Row, events []fleetdb.CommsEvent, nowNS int64, live bool
 			// kind is known history, not an unknown one — skip it silently,
 			// with no node, no edge, and no warning.
 		default:
-			builder.warnings = append(builder.warnings, fmt.Sprintf(
-				"comms event %d has unknown kind %q", event.ID, event.Kind,
-			))
+			// A call, or a kind this build does not know (a newer pfm wrote it):
+			// drawn as a line from sender to receiver, labelled with its raw kind.
+			if event.Kind != fleetdb.KindCall {
+				builder.warnings = append(builder.warnings, fmt.Sprintf(
+					"comms event %d has unknown kind %q; drawn as a message line", event.ID, event.Kind,
+				))
+			}
+			if event.SenderSession == "" && event.SenderUUID == "" && event.SenderLabel == "" {
+				unsigned++
+			}
+			from := builder.chatNode(senderAddress(event))
+			to := builder.chatNode(receiverAddress(event))
+			builder.touch(from, event.AtNS)
+			builder.touch(to, event.AtNS)
+			builder.addEdge(from.Key, to.Key, event)
+			builder.warm(event.AtNS, from, to)
 		}
 	}
 

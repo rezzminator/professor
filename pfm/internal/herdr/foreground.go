@@ -29,14 +29,20 @@ func EngineForeground(processes PaneProcesses, pane string, engine pfmengine.ID)
 	if len(processes.Foreground) == 0 {
 		return false, fmt.Errorf("herdr foreground evidence unavailable in %s; engine exit is unproved", pane)
 	}
-	present := false
+	// An unidentifiable process proves nothing either way: a matched engine
+	// beside it is still present, but without a match absence is unproved.
+	present, unidentified := false, false
 	for _, process := range processes.Foreground {
 		if process.PID <= 0 || (process.Name == "" && process.Argv0 == "") {
-			return false, fmt.Errorf("read Herdr processes in %s: process has no valid pid or identity", pane)
+			unidentified = true
+			continue
 		}
 		for _, argv := range [][]string{{process.Name}, {process.Argv0}, process.Argv} {
 			present = present || pfmengine.MatchCommand(engine, argv, engine == pfmengine.Claude)
 		}
+	}
+	if !present && unidentified {
+		return false, fmt.Errorf("read Herdr processes in %s: process has no valid pid or identity", pane)
 	}
 	return present, nil
 }

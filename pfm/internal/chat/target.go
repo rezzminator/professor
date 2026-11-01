@@ -312,7 +312,7 @@ func ResolveIn(
 	case resolve.CodeUnknown:
 		return headless.Chat{}, false, nil
 	case resolve.CodeAmbiguous:
-		return headless.Chat{}, false, errors.New(detail)
+		return headless.Chat{}, false, &headless.AmbiguousTargetError{Detail: detail}
 	default:
 		return headless.Chat{}, false, fmt.Errorf("resolve target %q failed with code %d: %s", name, code, detail)
 	}
@@ -330,26 +330,30 @@ func enrichResolvedSelf(resolved, indexed headless.Chat) headless.Chat {
 	return resolved
 }
 
+// enrichRecordedSelf adds the indexed transcript to a resolved self chat; an
+// index it cannot read leaves the chat resolved, its transcript unknown and warned.
 func enrichRecordedSelf(
 	ctx context.Context,
 	resolved headless.Chat,
 	warn io.Writer,
 ) (result headless.Chat, returnErr error) {
+	if resolved.Engine != pfmengine.Claude {
+		return resolved, nil
+	}
 	database, err := store.Open(store.WithWarningWriter(warn))
 	if err != nil {
-		return headless.Chat{}, err
+		fmt.Fprintf(warn, "pfm WARN: self transcript %s unknown: %v\n", resolved.ID, err)
+		return resolved, nil
 	}
 	defer func() {
 		if err := database.Close(); err != nil {
 			returnErr = errors.Join(returnErr, fmt.Errorf("close fleet database: %w", err))
 		}
 	}()
-	if resolved.Engine != pfmengine.Claude {
-		return resolved, nil
-	}
 	transcript, found, err := database.Transcript(ctx, resolved.ID)
 	if err != nil {
-		return headless.Chat{}, fmt.Errorf("resolve self transcript %q: %w", resolved.ID, err)
+		fmt.Fprintf(warn, "pfm WARN: self transcript %s unknown: %v\n", resolved.ID, err)
+		return resolved, nil
 	}
 	if !found {
 		return resolved, nil
@@ -557,20 +561,23 @@ func CodexSeats(runtime *pfmconfig.Runtime) func(context.Context) ([]resolve.Cod
 		if err != nil {
 			return nil, fmt.Errorf("scan Codex identity seats: %w", err)
 		}
-		return codexSeatsFromRows(scan.Output.Rows, scan.Env.Paths)
+		return codexSeatsFromRows(scan.Output.Rows, scan.Env.Paths), nil
 	}
 }
 
-func codexSeatsFromRows(rows []compose.Row, values paths.Values) ([]resolve.CodexSeat, error) {
+// codexSeatsFromRows keeps a row whose socket cannot be resolved, its failure
+// in BackendError: only a lookup of that row's own thread fails on it.
+func codexSeatsFromRows(rows []compose.Row, values paths.Values) []resolve.CodexSeat {
 	seats := []resolve.CodexSeat{}
 	for index := range rows {
 		row := &rows[index]
 		if row.Kind != compose.LiveCodex || row.Killed || row.Socket == "" {
 			continue
 		}
+		backendError := row.BackendError
 		socket, err := targetSocket(values, row.Backend, row.Socket)
 		if err != nil {
-			return nil, fmt.Errorf("resolve Codex seat %s socket: %w", row.ID, err)
+			backendError = strings.TrimSpace(fmt.Sprintf("%s socket: %v", backendError, err))
 		}
 		backend := row.Backend
 		if backend == "" {
@@ -590,11 +597,11 @@ func codexSeatsFromRows(rows []compose.Row, values paths.Values) ([]resolve.Code
 				SocketPath:     socket,
 				Pane:           row.PaneID,
 				HerdrWorkspace: row.HerdrWorkspace,
-				BackendError:   row.BackendError,
+				BackendError:   backendError,
 			},
 		)
 	}
-	return seats, nil
+	return seats
 }
 
 // targetSocket keeps native addresses absolute; only tmux sockets use the fleet root.

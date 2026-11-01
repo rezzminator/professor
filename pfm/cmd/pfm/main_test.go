@@ -826,18 +826,21 @@ func TestInternalStaleAnswersWhileLegacyConfigWaits(t *testing.T) {
 	}
 }
 
-// Every other internal command still refuses while the legacy config waits.
-func TestInternalCommandsRefuseWhileLegacyConfigWaits(t *testing.T) {
+// A hook or launcher runs on defaults while the legacy config waits: a refusal
+// there would keep Claude from starting and fail every guard open.
+func TestInternalCommandsRunOnDefaultsWhileLegacyConfigWaits(t *testing.T) {
 	legacyConfigJail(t)
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{internalCommand, "git-guard"}, &stdout, &stderr); code != 1 {
-		t.Fatalf("internal git-guard code=%d stdout=%q stderr=%q, want 1", code, stdout.String(), stderr.String())
+	if code := run([]string{internalCommand, "primary-get"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("internal primary-get code=%d stdout=%q stderr=%q, want 0", code, stdout.String(), stderr.String())
 	}
-	if want := "pfm: config: config not migrated: run pfm doctor for the fix"; !strings.HasPrefix(
-		stderr.String(),
-		want,
-	) {
-		t.Fatalf("internal git-guard stderr=%q, want %q", stderr.String(), want)
+	if stdout.String() != "1\n" {
+		t.Fatalf("internal primary-get stdout=%q, want the default account %q", stdout.String(), "1\n")
+	}
+	want := "pfm: config: config not migrated: run pfm doctor for the fix"
+	suffix := "; running on defaults until it is fixed (pfm doctor)\n"
+	if !strings.HasPrefix(stderr.String(), want) || !strings.HasSuffix(stderr.String(), suffix) {
+		t.Fatalf("internal primary-get stderr=%q, want %q ... %q", stderr.String(), want, suffix)
 	}
 }
 

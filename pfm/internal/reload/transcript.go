@@ -163,54 +163,59 @@ func SessionTranscript(
 	default:
 		return "", fmt.Errorf("unknown reload engine %q", engine)
 	}
+	var unread error
 	for _, account := range machine.CodexAccounts {
 		// A rollout plain or compressed, the plain twin winning
 		// (codexmeta.PreferPlain): a finished chat's rollout is compressed.
-		var found []string
-		err := filepath.WalkDir(
-			filepath.Join(account.Home, "sessions"),
-			func(path string, entry os.DirEntry, walkErr error) error {
-				if walkErr != nil {
-					return walkErr
-				}
-				if _, transcriptName := codexmeta.RolloutStem(filepath.Base(path)); entry != nil && !entry.IsDir() &&
-					transcriptName && strings.Contains(filepath.Base(path), id) {
-					found = append(found, path)
-				}
-				return nil
-			},
-		)
-		if err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return "", fmt.Errorf("search Codex rollouts under %q: %w", account.Home, err)
-		}
+		found, err := searchTranscripts(filepath.Join(account.Home, "sessions"), false, func(name string) bool {
+			_, transcriptName := codexmeta.RolloutStem(name)
+			return transcriptName && strings.Contains(name, id)
+		})
 		if found = codexmeta.PreferPlain(found); len(found) != 0 {
 			return found[0], nil
 		}
+		if err != nil {
+			unread = errors.Join(unread, fmt.Errorf("search Codex rollouts under %q: %w", account.Home, err))
+		}
 	}
-	return "", nil
+	return "", unread
 }
 
 func findClaudeTranscript(roots []string, id string) (string, error) {
+	var unread error
 	for _, root := range roots {
-		found := ""
-		err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
-			if walkErr != nil {
-				return walkErr
-			}
-			if entry != nil && !entry.IsDir() && filepath.Base(path) == id+".jsonl" {
-				found = path
-				return filepath.SkipAll
-			}
-			return nil
-		})
-		if err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return "", fmt.Errorf("search Claude transcripts under %q: %w", root, err)
+		found, err := searchTranscripts(root, true, func(name string) bool { return name == id+".jsonl" })
+		if len(found) != 0 {
+			return found[0], nil
 		}
-		if found != "" {
-			return found, nil
+		if err != nil {
+			unread = errors.Join(unread, fmt.Errorf("search Claude transcripts under %q: %w", root, err))
 		}
 	}
-	return "", nil
+	return "", unread
+}
+
+// searchTranscripts walks root for files whose base name match accepts,
+// stopping at the first when first is set. An unreadable subtree is skipped
+// and returned in err, so a match elsewhere still counts and "not found"
+// never hides "could not look"; a missing root is no error.
+func searchTranscripts(root string, first bool, match func(name string) bool) (found []string, err error) {
+	walkErr := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			if !errors.Is(walkErr, fs.ErrNotExist) {
+				err = errors.Join(err, walkErr)
+			}
+			return nil
+		}
+		if !entry.IsDir() && match(filepath.Base(path)) {
+			found = append(found, path)
+			if first {
+				return filepath.SkipAll
+			}
+		}
+		return nil
+	})
+	return found, errors.Join(err, walkErr)
 }
 
 // ContinuedSession follows Claude session id to the newest segment of its

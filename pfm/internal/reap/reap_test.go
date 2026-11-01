@@ -425,6 +425,18 @@ func TestPlanClassifiesEverySocket(t *testing.T) {
 			action: ActionNone,
 		},
 		{
+			name: "a detached fork whose breadcrumb could not be read is never killed as untouched",
+			input: Input{
+				AgentsOK: true,
+				Apply:    true,
+				Sockets: []Socket{{
+					Name: "cc-100-1-1", HasServer: true, DetachedFork: true, CrumbUnread: true,
+				}},
+			},
+			want:   StateSkip,
+			action: ActionNone,
+		},
+		{
 			name: "a transcript written moments ago outranks a stale busy snapshot",
 			input: Input{
 				AgentsOK:   true,

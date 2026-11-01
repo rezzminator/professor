@@ -833,3 +833,38 @@ func TestDepsOptionsProbesEveryConfiguredEngineBinary(t *testing.T) {
 		t.Fatalf("engine row commands = %v, want %v", got, want)
 	}
 }
+
+// A missing version reads as the current one (source default, so doctor shows
+// it); only a version this build does not know is refused.
+func TestLoadVersionMissingReadsCurrentAndWrongIsRefused(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	for _, tc := range []struct {
+		name   string
+		json   string
+		want   string
+		input  int
+		source Source
+	}{
+		{name: "missing", json: `{"theme":"tokyo-night"}`, input: Version, source: SourceDefault},
+		{name: "wrong", json: `{"version":99}`, want: "version must be 1 or 2, got 99"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.json")
+			if err := os.WriteFile(path, []byte(tc.json), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			got, err := Load(path, home, nil)
+			if tc.want != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.want) {
+					t.Fatalf("Load error = %v, want %q", err, tc.want)
+				}
+				return
+			}
+			if err != nil || got.InputVersion != tc.input || got.Source(keyVersion) != tc.source ||
+				got.Theme != "tokyo-night" {
+				t.Fatalf("Load(%s) = input %d source %q theme %q err %v, want input %d source %q theme tokyo-night",
+					path, got.InputVersion, got.Source(keyVersion), got.Theme, err, tc.input, tc.source)
+			}
+		})
+	}
+}

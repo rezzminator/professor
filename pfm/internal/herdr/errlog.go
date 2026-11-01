@@ -42,16 +42,24 @@ type ErrorRecord struct {
 	LogPath string
 }
 
-// ErrorLogIncompleteError means bounded retention discarded errors within the
-// requested window. RecentErrors still returns every retained matching error.
+// ErrorLogIncompleteError means errors within the requested window may be
+// missing: bounded retention discarded them (Through), or retained history
+// could not be read (Unread names each file and what in it). RecentErrors
+// still returns every retained matching error it could read.
 type ErrorLogIncompleteError struct {
 	Since   time.Time
-	Through time.Time
+	Through time.Time // zero when no watermark proves a discard
+	Unread  []string
 }
 
 func (gap *ErrorLogIncompleteError) Error() string {
-	return fmt.Sprintf("herdr error log: history incomplete since %s: bounded retention discarded errors through %s",
-		gap.Since.UTC().Format(time.RFC3339), gap.Through.UTC().Format(time.RFC3339))
+	var causes []string
+	if !gap.Through.IsZero() {
+		causes = append(causes, "bounded retention discarded errors through "+gap.Through.UTC().Format(time.RFC3339))
+	}
+	causes = append(causes, gap.Unread...)
+	return fmt.Sprintf("herdr error log: history incomplete since %s: %s",
+		gap.Since.UTC().Format(time.RFC3339), strings.Join(causes, "; "))
 }
 
 // AppendError appends one error line to dir/{session}.log, creating dir.
@@ -139,11 +147,13 @@ func appendReporterLog(dir, session string, at time.Time, level, message string)
 // recordDiscardedErrors runs under the writer lock, before any history is
 // replaced. Failure preserves that history. INFO-only loss needs no warning.
 func recordDiscardedErrors(dir, name string) error {
+	// A malformed watermark proves no time: the retained history rewrites it,
+	// or no reporter error could ever be logged again.
 	newest, err := readLostErrors(dir, name+".lost")
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err != nil && !errors.Is(err, os.ErrNotExist) && !errors.Is(err, errMalformedWatermark) {
 		return err
 	}
-	records, err := readReporterLog(dir, name+".1", "", time.Time{})
+	records, _, err := readReporterLog(dir, name+".1", "", time.Time{})
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
@@ -187,6 +197,7 @@ func RecentErrors(dir string, since time.Time) (records []ErrorRecord, returnErr
 		return nil, fmt.Errorf("herdr error log: read %s: %w", dir, err)
 	}
 	var lostThrough time.Time
+	var unread []string
 	for _, entry := range entries {
 		name := entry.Name()
 		base := strings.TrimSuffix(strings.TrimSuffix(name, ".1"), ".lost")
@@ -195,6 +206,11 @@ func RecentErrors(dir string, since time.Time) (records []ErrorRecord, returnErr
 		}
 		if strings.HasSuffix(name, ".lost") {
 			through, err := readLostErrors(dir, name)
+			if errors.Is(err, errMalformedWatermark) {
+				// Some loss happened; its extent cannot be read.
+				unread = append(unread, filepath.Join(dir, name)+" "+errMalformedWatermark.Error())
+				continue
+			}
 			if err != nil {
 				return nil, err
 			}
@@ -204,54 +220,62 @@ func RecentErrors(dir string, since time.Time) (records []ErrorRecord, returnErr
 			continue
 		}
 		session := strings.TrimSuffix(base, ErrorLogSuffix)
-		found, err := readReporterLog(dir, name, session, since)
+		found, malformed, err := readReporterLog(dir, name, session, since)
 		if err != nil {
 			return nil, err
+		}
+		if malformed > 0 {
+			unread = append(unread, fmt.Sprintf("%s holds %d malformed line(s)", filepath.Join(dir, name), malformed))
 		}
 		records = append(records, found...)
 	}
 	sort.SliceStable(records, func(i, j int) bool { return records[i].At.After(records[j].At) })
-	if !lostThrough.IsZero() {
-		return records, &ErrorLogIncompleteError{Since: since, Through: lostThrough}
+	if !lostThrough.IsZero() || len(unread) > 0 {
+		return records, &ErrorLogIncompleteError{Since: since, Through: lostThrough, Unread: unread}
 	}
 	return records, nil
 }
 
+var errMalformedWatermark = errors.New("holds a malformed retention watermark")
+
 func readLostErrors(dir, name string) (time.Time, error) {
-	records, err := readReporterLog(dir, name, "", time.Time{})
+	records, malformed, err := readReporterLog(dir, name, "", time.Time{})
 	if err != nil {
 		return time.Time{}, err
 	}
-	if len(records) != 1 || records[0].Message != "bounded retention discarded errors" {
-		return time.Time{}, fmt.Errorf(
-			"herdr error log: %s holds a malformed retention watermark",
-			filepath.Join(dir, name),
-		)
+	if malformed > 0 || len(records) != 1 || records[0].Message != "bounded retention discarded errors" {
+		return time.Time{}, fmt.Errorf("herdr error log: %s %w", filepath.Join(dir, name), errMalformedWatermark)
 	}
 	return records[0].At, nil
 }
 
-func readReporterLog(dir, name, session string, since time.Time) ([]ErrorRecord, error) {
+// readReporterLog returns the file's records at or after since and how many
+// lines it could not parse: a torn line is counted and skipped, never the
+// end of every record after it.
+func readReporterLog(dir, name, session string, since time.Time) ([]ErrorRecord, int, error) {
 	path := filepath.Join(dir, name)
 	file, err := OpenStateFile(dir, name, os.O_RDONLY, "herdr error log")
 	if err != nil {
-		return nil, fmt.Errorf("herdr error log: open %s: %w", path, err)
+		return nil, 0, fmt.Errorf("herdr error log: open %s: %w", path, err)
 	}
 	var records []ErrorRecord
+	malformed := 0
 	scanner := bufio.NewScanner(file)
+	// A torn log can hold one unbroken run as long as the rotation bound.
+	scanner.Buffer(nil, ErrorLogBytes+ErrorMessageBytes+64)
 	for scanner.Scan() {
 		stamp, message, found := strings.Cut(scanner.Text(), "\t")
 		at, parseErr := time.Parse(time.RFC3339, stamp)
 		if !found || parseErr != nil {
-			return nil, errors.Join(
-				fmt.Errorf("herdr error log: %s holds a malformed line %q", path, scanner.Text()), file.Close())
+			malformed++
+			continue
 		}
 		if !strings.HasPrefix(message, "INFO\t") && !at.Before(since) {
 			records = append(records, ErrorRecord{Session: session, At: at, Message: message, LogPath: path})
 		}
 	}
 	if err := errors.Join(scanner.Err(), file.Close()); err != nil {
-		return nil, fmt.Errorf("herdr error log: read %s: %w", path, err)
+		return nil, 0, fmt.Errorf("herdr error log: read %s: %w", path, err)
 	}
-	return records, nil
+	return records, malformed, nil
 }

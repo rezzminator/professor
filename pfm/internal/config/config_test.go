@@ -189,7 +189,7 @@ func TestDefaultEmojiOwnsTheConventionalBadgeRoster(t *testing.T) {
 
 func TestDefaultsWithoutDiscoveryRootsDiscoversCredentialedAccountsAndNamesSkips(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
-	for _, account := range []int{1, 2, 3, 4} {
+	for _, account := range []int{1, 2, 3, 4, 5} {
 		configDir := filepath.Join(home, ".cc", strconv.Itoa(account))
 		if err := os.MkdirAll(configDir, 0o700); err != nil {
 			t.Fatal(err)
@@ -198,6 +198,9 @@ func TestDefaultsWithoutDiscoveryRootsDiscoversCredentialedAccountsAndNamesSkips
 			continue
 		}
 		credentials := `{"claudeAiOauth":{"accessToken":"fixture","refreshToken":"fixture"}}`
+		if account == 5 { // torn mid-rewrite: the account stays, its token unknown
+			credentials = `{"claudeAiOauth":{"accessTo`
+		}
 		if err := os.WriteFile(filepath.Join(configDir, ".credentials.json"), []byte(credentials), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -219,6 +222,11 @@ func TestDefaultsWithoutDiscoveryRootsDiscoversCredentialedAccountsAndNamesSkips
 			ID:        3,
 			ConfigDir: filepath.Join(home, ".cc", "3"),
 			Emoji:     "🥉",
+		},
+		{
+			ID:        5,
+			ConfigDir: filepath.Join(home, ".cc", "5"),
+			Emoji:     DefaultEmoji(5),
 		},
 	}
 	if !reflect.DeepEqual(got.Accounts, want) {
@@ -553,29 +561,6 @@ func TestLoadRejectsInvalidAccountRoster(t *testing.T) {
 			_, err := Load(path, home, nil)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("Load error = %v, want substring %q", err, tc.want)
-			}
-		})
-	}
-}
-
-func TestLoadRejectsMissingVersionAndWrongVersion(t *testing.T) {
-	home := filepath.Join(t.TempDir(), "home")
-	for _, tc := range []struct {
-		name string
-		json string
-		want string
-	}{
-		{name: "missing", json: `{}`, want: "required key \"version\" is missing"},
-		{name: "wrong", json: `{"version":99}`, want: "version must be 1 or 2, got 99"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "config.json")
-			if err := os.WriteFile(path, []byte(tc.json), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			_, err := Load(path, home, nil)
-			if err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("Load error = %v, want %q", err, tc.want)
 			}
 		})
 	}

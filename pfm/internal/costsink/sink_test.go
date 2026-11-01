@@ -208,6 +208,28 @@ func TestSinkAcceptsRequestScopedBackgroundWithoutSession(t *testing.T) {
 	}
 }
 
+func TestSinkWritesARowWhoseTokenCountIsUnreadableAndNamesTheLoss(t *testing.T) {
+	sink, _, dir, logs := newTestSink(t)
+	attrs := apiRequest(testSession, "req_1", "repl_main_thread", 75)
+	for i, a := range attrs {
+		if a["key"] == "output_tokens" {
+			attrs[i] = str("output_tokens", "many")
+		}
+	}
+	if code := post(t, sink, http.MethodPost, "/v1/logs", logBody(attrs), nil).Code; code != http.StatusOK {
+		t.Fatalf("POST = %d, want 200", code)
+	}
+	sink.Drain()
+	ledger, err := costledger.ForSession(dir, testSession)
+	if err != nil || len(ledger.Rows) != 1 || ledger.Rows[0].OutputTokens != 0 || ledger.Rows[0].InputTokens != 2 {
+		t.Fatalf("ledger = %+v, %v; want the row written", ledger, err)
+	}
+	want := `/v1/logs: request "req_1": token attribute(s) output_tokens unreadable, counted as 0`
+	if sink.Faults() != 1 || !strings.Contains(logs.String(), want) {
+		t.Fatalf("faults = %d, log = %q, want one fault logging %q", sink.Faults(), logs.String(), want)
+	}
+}
+
 func TestSinkAnswers400ForABrokenBodyAndLogsWhy(t *testing.T) {
 	sink, _, _, logs := newTestSink(t)
 	if code := post(t, sink, http.MethodPost, "/v1/logs", []byte("{broken"), nil).Code; code != http.StatusBadRequest {

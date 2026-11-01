@@ -7,6 +7,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -92,12 +93,15 @@ func readAccount(path string) (account, error) {
 // is value, sorted; no account at all is none. An account it cannot read is
 // an error naming it, never "not selected".
 func AccountsSelecting(home, value string) ([]string, error) {
-	accounts, err := readAccounts(home)
+	accounts, failed, err := readAccounts(home)
 	if errors.Is(err, ErrNoAccounts) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
+	}
+	if len(failed) > 0 {
+		return nil, failed[0]
 	}
 	var selecting []string
 	for _, read := range accounts {
@@ -111,21 +115,29 @@ func AccountsSelecting(home, value string) ([]string, error) {
 // CustomValue is the `theme` value selecting the custom theme file stem.
 func CustomValue(stem string) string { return customPrefix + stem }
 
-// readAccounts reads every account; the first failure names its file.
-func readAccounts(home string) ([]account, error) {
+// readAccounts reads every account. An account whose settings.json cannot be
+// read or parsed is skipped and returned in failed, each error naming its file:
+// one bad account never stops the others from governing. The error is non-nil
+// only when no account could be listed or none could be read (every failure
+// joined).
+func readAccounts(home string) (accounts []account, failed []error, err error) {
 	paths, err := accountSettings(home)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	accounts := make([]account, 0, len(paths))
+	accounts = make([]account, 0, len(paths))
 	for _, path := range paths {
 		read, err := readAccount(path)
 		if err != nil {
-			return nil, err
+			failed = append(failed, err)
+			continue
 		}
 		accounts = append(accounts, read)
 	}
-	return accounts, nil
+	if len(accounts) == 0 {
+		return nil, nil, errors.Join(failed...)
+	}
+	return accounts, failed, nil
 }
 
 // govern picks the account the global surfaces follow (D9): the one whose
@@ -176,11 +188,13 @@ type customFile struct {
 }
 
 // resolved is a theme value turned into its Applied, with the custom theme
-// file it read (if any) and that file's mtime.
+// file it read (if any) and that file's mtime, and the notes of every value of
+// it that was set aside (customPalette).
 type resolved struct {
 	Applied   Applied
 	ThemeFile string
 	ThemeTime time.Time
+	Notes     []string
 }
 
 // builtinVariant derives a built-in theme; an unknown name is dark, Claude's
@@ -253,7 +267,10 @@ func resolveCustom(value, configDir string) (resolved, error) {
 	if err := json.Unmarshal(content, &file); err != nil {
 		return resolved{}, fmt.Errorf("custom theme %s: parse %s: %w", name, path, err)
 	}
-	tokens, side := customPalette(file.Base, file.Overrides)
+	tokens, side, notes := customPalette(file.Base, file.Overrides)
+	for index := range notes {
+		notes[index] = "custom theme " + name + ": " + notes[index]
+	}
 	variant, err := deriveVariant(value, tokens)
 	if err != nil {
 		return resolved{}, fmt.Errorf("custom theme %s: %w", name, err)
@@ -268,24 +285,35 @@ func resolveCustom(value, configDir string) (resolved, error) {
 	}
 	return resolved{
 		Applied:   Applied{Value: value, Title: title, Side: side, Primary: variant},
-		ThemeFile: path, ThemeTime: info.ModTime(),
+		ThemeFile: path, ThemeTime: info.ModTime(), Notes: notes,
 	}, nil
 }
 
 // customPalette is a custom theme's palette as Claude Code reads it: the base
 // built-in's tokens (the default built-in when base names none) with the
-// overrides laid over them, and the side that base sits on.
-func customPalette(base string, overrides map[string]string) (map[string]string, Appearance) {
+// overrides laid over them, and the side that base sits on. An override of a
+// token the derivation reads whose colour cannot be parsed is set aside, the
+// base's value kept, and named in notes: one bad spelling never costs the theme.
+func customPalette(base string, overrides map[string]string) (map[string]string, Appearance, []string) {
 	if _, ok := builtinThemes[base]; !ok {
 		base = builtinDefault
 	}
 	tokens := maps.Clone(builtinThemes[base])
-	maps.Copy(tokens, overrides)
+	var notes []string
+	for _, key := range slices.Sorted(maps.Keys(overrides)) {
+		if slices.Contains(deriveTokens, key) {
+			if _, err := parseColor(overrides[key]); err != nil {
+				notes = append(notes, fmt.Sprintf("override %q unreadable, the base's value kept: %v", key, err))
+				continue
+			}
+		}
+		tokens[key] = overrides[key]
+	}
 	side := Dark
 	if strings.HasPrefix(base, string(Light)) {
 		side = Light
 	}
-	return tokens, side
+	return tokens, side, notes
 }
 
 // themesDir is the account's themes dir by real path when it exists.

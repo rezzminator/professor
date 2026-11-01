@@ -5,11 +5,13 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/archive"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
@@ -97,5 +99,33 @@ func TestArchiveCommandFailsVisiblyOnIncompleteArchive(t *testing.T) {
 				t.Errorf("failed move report missing: stdout=%s stderr=%s", &stdout, &stderr)
 			}
 		})
+	}
+}
+
+func TestArchiveReportNamesWhatAnUnresolvedEntryKeeps(t *testing.T) {
+	for _, tc := range []struct {
+		subagents bool
+		entry     string
+		want      string
+	}{
+		{
+			false, "11111111-1111-4111-8111-111111111111",
+			"  UNRESOLVED 11111111-1111-4111-8111-111111111111 — kept killed: lookup failed",
+		},
+		{
+			true, "/jail/claude/-p/subagents/agent-a1.jsonl",
+			"  UNRESOLVED /jail/claude/-p/subagents/agent-a1.jsonl — left in place: lookup failed",
+		},
+	} {
+		report := archive.Report{
+			Unresolved:       []string{tc.entry},
+			UnresolvedErrors: map[string]string{tc.entry: "lookup failed"},
+		}
+		var stdout bytes.Buffer
+		printArchiveReport(report, false, tc.subagents, paths.Values{}, &stdout)
+		lines := strings.Split(stdout.String(), "\n")
+		if !slices.Contains(lines, tc.want) {
+			t.Fatalf("printArchiveReport(subagents=%t) = %q, want the line %q", tc.subagents, stdout.String(), tc.want)
+		}
 	}
 }

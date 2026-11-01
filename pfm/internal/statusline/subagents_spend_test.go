@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -57,7 +58,8 @@ func TestRenderSubagentsSpendCoversTheWholeTree(t *testing.T) {
 		name        string
 		transcripts map[string][]string
 		parents     map[string]string
-		want        string // what follows the gauge, ANSI stripped
+		tornMeta    []string // agents whose meta file is overwritten with a torn one
+		want        string   // what follows the gauge, ANSI stripped
 		warn        string
 	}{
 		{
@@ -97,10 +99,30 @@ func TestRenderSubagentsSpendCoversTheWholeTree(t *testing.T) {
 			want:        "Σ$0.01/2.0K/35/2+?",
 			warn:        "open sub-agent transcript",
 		},
+		{
+			name: "an agent whose meta file cannot be read leaves the nested sum a floor, the readable child still adds in",
+			transcripts: map[string][]string{
+				"p": agentTranscriptLines, "c1": {unpricedResponse, turnEnded}, "c2": {childResponse, turnEnded},
+			},
+			parents:  map[string]string{"p": "", "c1": "p", "c2": "p"},
+			tornMeta: []string{"c1"},
+			want:     "Σ$0.01/3.0K/135/2+?",
+			warn:     "parse sub-agent meta",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			session := nestedSession(t, tc.transcripts, tc.parents)
+			for _, id := range tc.tornMeta {
+				dir := filepath.Join(strings.TrimSuffix(session, ".jsonl"), "subagents")
+				if err := os.WriteFile(
+					filepath.Join(dir, "agent-"+id+".meta.json"),
+					[]byte(`{"agentTy`),
+					0o600,
+				); err != nil {
+					t.Fatal(err)
+				}
+			}
 			got, warned := renderOneSubagent(t, session, parentTask)
 			if !strings.Contains(got, "1.0K/1.0M "+tc.want+"│") {
 				t.Fatalf("content = %q, want the gauge followed by %q", got, tc.want)
@@ -576,5 +598,59 @@ func TestRenderGatewayZeroLedgerWithNativeChild(t *testing.T) {
 	}
 	if !strings.Contains(rows["c"], "Σ$0.00/1.0K/100/1") || strings.Contains(rows["c"], "API-eq") {
 		t.Fatalf("native child changed: %q", rows["c"])
+	}
+}
+
+// The main line's total needs no parent map: an agent whose meta file cannot be
+// read is still in the subagents directory, and its transcript's spend counts.
+func TestSessionSpendCountsAgentsWhoseMetaCannotBeRead(t *testing.T) {
+	const response = `{"type":"assistant","message":{"id":"%s","model":"claude-sonnet-5-5",` +
+		`"usage":{"input_tokens":1000,"output_tokens":100}}}`
+	session := nestedSession(t, map[string][]string{"c1": {fmt.Sprintf(response, "c-1")}}, map[string]string{"c1": ""})
+	if err := os.WriteFile(session, []byte(fmt.Sprintf(response, "m-1")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	meta := filepath.Join(strings.TrimSuffix(session, ".jsonl"), "subagents", "agent-c1.meta.json")
+	if err := os.WriteFile(meta, []byte(`{"agentTy`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	spend, err := sessionSpend(session, testPrices(t), nil, transcriptScans{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if spend.in != 2000 || spend.out != 200 || spend.priced != 2 || spend.partial {
+		t.Fatalf("spend = %s, want both transcripts' 2000 in and 200 out, priced, no floor", spendView(spend))
+	}
+}
+
+// A failed read keeps what it folded as a floor; one that never opened, or
+// folded nothing, keeps nothing.
+func TestFailedReadSpendKeepsOnlyWhatWasFolded(t *testing.T) {
+	folded := agentSpend{in: 1000, out: 100, priced: 1, tools: 2}
+	for _, tc := range []struct {
+		name   string
+		folded agentSpend
+		opened bool
+		want   agentSpend
+	}{
+		{"read failed after folding", folded, true, agentSpend{in: 1000, out: 100, priced: 1, tools: 2, partial: true, behind: true}},
+		{"read failed before folding", agentSpend{}, true, agentSpend{}},
+		{"never opened", folded, false, agentSpend{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := failedReadSpend(
+				tc.folded,
+				tc.opened,
+			); spendView(got) != spendView(tc.want) ||
+				got.behind != tc.want.behind {
+				t.Fatalf(
+					"failedReadSpend = %s behind=%v, want %s behind=%v",
+					spendView(got),
+					got.behind,
+					spendView(tc.want),
+					tc.want.behind,
+				)
+			}
+		})
 	}
 }

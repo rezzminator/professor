@@ -314,6 +314,7 @@ func TestSendRefreshIncludesNativeSeats(t *testing.T) {
 	environment := fleet.Env{
 		Paths:  paths.Values{Home: home, StateDB: filepath.Join(home, "state.db")},
 		Config: config.Defaults(home, nil),
+		Faults: []string{"primary account unreadable: permission denied; account 1 stands in"},
 	}
 	state := fleetdb.OpenSharedState(ctx, environment.Paths)
 	t.Cleanup(func() {
@@ -363,6 +364,9 @@ func TestSendRefreshIncludesNativeSeats(t *testing.T) {
 		}
 		if snapshot.Refreshing != refreshing || len(last.output.Rows) != len(snapshot.Rows) {
 			t.Fatalf("refresh state lost: %+v", snapshot)
+		}
+		if want := "primary account unreadable: permission denied; account 1 stands in"; snapshot.ScanError != want {
+			t.Fatalf("ScanError = %q, want the account fault %q", snapshot.ScanError, want)
 		}
 	}
 }

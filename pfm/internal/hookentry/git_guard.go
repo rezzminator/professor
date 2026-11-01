@@ -141,11 +141,7 @@ func gitGuardCheck(command, cwd string, engine bool, stderr io.Writer) string {
 	if !strings.Contains(command, "git") && !strings.Contains(command, "worktree.sh") {
 		return ""
 	}
-	parseCwd := cwd
-	if !filepath.IsAbs(parseCwd) {
-		parseCwd = string(filepath.Separator)
-	}
-	parsed, err := cmdparse.ParseBatch([]cmdparse.Call{{ID: "git-guard", Command: command, Cwd: parseCwd}})
+	parsed, err := cmdparse.ParseBatch([]cmdparse.Call{{ID: "git-guard", Command: command}})
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm internal git-guard: parse command (fail-open): %v\n", err)
 		return ""

@@ -96,7 +96,7 @@ func TestRetirementReachesTheStore(t *testing.T) {
 		managedRoot: managed,
 		apply:       true,
 	}
-	for _, run := range []func() error{installer.retirePredecessors, installer.retireRenamedGlobalAgents, installer.retireLegacySwapCommand} {
+	for _, run := range []func() error{func() error { return installer.retirePredecessors(true) }, installer.retireRenamedGlobalAgents, installer.retireLegacySwapCommand} {
 		if err := run(); err != nil {
 			t.Fatal(err)
 		}

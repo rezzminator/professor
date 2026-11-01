@@ -20,7 +20,7 @@ A workbench is a nested sub-project marked by `{dir}/.professor/workbench.json`,
 | --- | --- | --- |
 | `prompt` | required | Relative regular non-empty file inside `.professor/`, including after physical-path resolution. |
 | `engines` | `["claude"]` | Non-empty ordered array of distinct `claude`, `codex`, `opencode` words. |
-| `title` | `filepath.Base(dir)` | Non-empty string when present. |
+| `title` | `filepath.Base(dir)` | String; empty reads as absent. |
 | `name` | `naming.WorkbenchPrefix(title)` | Non-empty string without whitespace or `:`. |
 | `effort` | none | String; `action.WorkbenchPersona` validates through `ClaudeEffort`, `CodexEffort` or `OpenCodeEffort` and lower-cases it; unknown values refuse the launch naming the bench. |
 | `model` | none | String passed verbatim; OpenCode requires non-empty `provider/model` parts. |
@@ -92,7 +92,7 @@ Claude ✦ launches choose a numbered name from the live/killed roster. Codex/Op
 
 ## Cache
 
-`paths.WorkbenchCache` names `workbenches.json` beside `CacheDB`. The version-1 cache stores bench directories/roots and discovery failures, not prompt content. `ReadCache` reloads manifests, skips deleted entries, recalculates duplicate-title keys, distinguishes missing from corrupt files, and returns saved walk failures. `WriteCache` publishes atomically. Source: `pfm/internal/workbench/cache.go`.
+`paths.WorkbenchCache` names `workbenches.json` beside `CacheDB`. The version-1 cache stores bench directories/roots and discovery failures, not prompt content. `ReadCache` reloads manifests, skips deleted entries, recalculates duplicate-title keys, distinguishes missing from corrupt files, and returns saved walk failures; an entry with an invalid or unstattable directory is one walk failure and every other bench still loads. `WriteCache` publishes atomically. Source: `pfm/internal/workbench/cache.go`.
 
 Picker first paint uses this cache without walking; refresh discovers benches and publishes both rows and cache. A corrupt cache produces a first frame with an error row naming the cache, and refresh repairs it. Fleet scans opt in through `Request.Workbenches`; plain scans keep their existing rows. Sources: `pfm/internal/picker/pipeline.go` (`refreshWorkbenches`), `pfm/internal/fleet/scan.go`.
 

@@ -91,7 +91,7 @@ need "the OpenCode home at $OC_DB" "[ -f '$OC_DB' ]" 'make_oc_home' ||
 
 # oc_tmux_dir / ox_sockets — the default tmux socket directory pfm's `-L`
 # attach resolves against (spawn.FreshSocket returns a BARE name like
-# "ox-<unix>-<pid>-<rand>"; action/synth.go's attachLine uses `tmux -L
+# "ox-<unix>-<pid>-<rand>"; action/synth.go's AttachLine uses `tmux -L
 # <socket>`, which is `-L`, not `-S` — resolved inside this same default dir),
 # and every ox- prefixed socket currently sitting in it.
 oc_tmux_dir() {

@@ -88,6 +88,8 @@ func TestInspectRegistryOwnershipClasses(t *testing.T) {
 		want  []string
 		// failAt is the path a scan error must name, in the scan and in install's retirement.
 		failAt func(h ownershipHome) string
+		// entry marks a failAt one entry costs: install names it and retires the rest.
+		entry bool
 	}{
 		{
 			name: "a dead owned link is DEAD in every registry, nested commands included",
@@ -122,6 +124,7 @@ func TestInspectRegistryOwnershipClasses(t *testing.T) {
 				symlinkFixture(t, target, filepath.Join(h.store, "commands", "old"))
 			},
 			failAt: func(h ownershipHome) string { return filepath.Join(h.clone, "workflows", "deep-rr") },
+			entry:  true,
 		},
 		{
 			name: "store links, present or gone",
@@ -284,10 +287,18 @@ func TestInspectRegistryOwnershipClasses(t *testing.T) {
 				if err == nil || !strings.Contains(err.Error(), path) {
 					t.Fatalf("error=%v, want an error naming %s", err, path)
 				}
-				installer := &engine{options: Options{Home: h.home, ConfigDir: h.store}}
-				if stepErr := installer.retireDeadRegistryLinks(); stepErr == nil ||
-					!strings.Contains(stepErr.Error(), path) {
-					t.Fatalf("install retirement error=%v, want an error naming %s", stepErr, path)
+				var output bytes.Buffer
+				installer := &engine{options: Options{Home: h.home, ConfigDir: h.store, Stdout: &output}}
+				stepErr := installer.retireDeadRegistryLinks()
+				if !test.entry {
+					if stepErr == nil || !strings.Contains(stepErr.Error(), path) {
+						t.Fatalf("install retirement error=%v, want an error naming %s", stepErr, path)
+					}
+					return
+				}
+				want := "  skip    registry-ownership entry left alone: " + err.Error() + "\n"
+				if stepErr != nil || output.String() != want {
+					t.Fatalf("install error=%v transcript=%q, want nil, %q", stepErr, output.String(), want)
 				}
 				return
 			}

@@ -15,6 +15,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
@@ -264,13 +265,9 @@ func OptionsForWorker(values paths.Values, env paths.Env, duration func(string, 
 		ClaudeRoots: values.Roots[pfmengine.Claude],
 		Delay:       duration("PFM_RELOAD_DELAY_MS", 1500, env),
 		Poll:        duration("PFM_RELOAD_POLL_MS", 1000, env),
-		ExitTries: ParseIntEnv(
-			paths.OSEnv{},
-			"PFM_RELOAD_EXIT_TRIES",
-			20,
-		),
-		IdleTries: ParseIntEnv(paths.OSEnv{}, "PFM_RELOAD_IDLE_TRIES", 120),
-		ThenTries: ParseIntEnv(paths.OSEnv{}, "PFM_RELOAD_THEN_TRIES", 900),
+		ExitTries:   pfmcall.PositiveIntEnv(paths.OSEnv{}, "PFM_RELOAD_EXIT_TRIES", 20, os.Stderr),
+		IdleTries:   pfmcall.PositiveIntEnv(paths.OSEnv{}, "PFM_RELOAD_IDLE_TRIES", 120, os.Stderr),
+		ThenTries:   pfmcall.PositiveIntEnv(paths.OSEnv{}, "PFM_RELOAD_THEN_TRIES", 900, os.Stderr),
 	}
 }
 

@@ -52,7 +52,11 @@ func (installer *engine) installThemes(ctx context.Context) {
 	if !installer.options.InstallThemes {
 		return
 	}
-	profiles, err := loadThemeProfiles(ctx, installer.options)
+	profiles, refused, err := loadThemeProfiles(ctx, installer.options)
+	// One stray or badly named entry costs itself alone: every other theme installs.
+	for _, refusal := range refused {
+		installer.skip("theme NOT installed: " + refusal.Error())
+	}
 	if err != nil {
 		installer.skip("themes NOT installed: load " + themeProfilesRelative + ": " + err.Error())
 		return
@@ -278,75 +282,80 @@ func releaseUnpublishedAlpha(rawURL string) bool {
 
 // loadThemeProfiles finds the themes install ships, keyed by name: every
 // theme directory in the source clone's templates/themes/, or, with no source
-// clone or one without that directory, every one there at the release.
-func loadThemeProfiles(ctx context.Context, options Options) (map[string]themeProfile, error) {
+// clone or one without that directory, every one there at the release. Each
+// entry that is no theme (a stray file or link, a bad name) is refused by name
+// and costs itself alone.
+func loadThemeProfiles(ctx context.Context, options Options) (map[string]themeProfile, []error, error) {
 	if strings.TrimSpace(options.SourceRepo) == "" {
-		profiles, err := releaseThemeProfiles(ctx, options)
+		profiles, refused, err := releaseThemeProfiles(ctx, options)
 		if err != nil {
-			return nil, fmt.Errorf("no source repository: %w", err)
+			return nil, refused, fmt.Errorf("no source repository: %w", err)
 		}
-		return profiles, nil
+		return profiles, refused, nil
 	}
 	directory := filepath.Join(options.SourceRepo, filepath.FromSlash(themeProfilesRelative))
-	names, err := localProfileDirs(directory)
+	names, refused, err := localProfileDirs(directory)
 	if errors.Is(err, fs.ErrNotExist) {
-		profiles, releaseErr := releaseThemeProfiles(ctx, options)
+		profiles, releaseRefused, releaseErr := releaseThemeProfiles(ctx, options)
 		if releaseErr != nil {
-			return nil, fmt.Errorf("local themes unavailable: %v; %w", err, releaseErr)
+			return nil, releaseRefused, fmt.Errorf("local themes unavailable: %v; %w", err, releaseErr)
 		}
-		return profiles, nil
+		return profiles, releaseRefused, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	profiles := make(map[string]themeProfile, len(names))
 	for _, name := range names {
 		if err := validateThemeName(name); err != nil {
-			return nil, fmt.Errorf("theme %s: %w", name, err)
+			refused = append(refused, fmt.Errorf("theme %s: %w", name, err))
+			continue
 		}
 		profiles[name] = themeProfile{local: filepath.Join(directory, name)}
 	}
 	if len(profiles) == 0 {
-		return nil, fmt.Errorf("no theme in %s: a theme is a {name}/ directory there", directory)
+		return nil, refused, fmt.Errorf("no theme in %s: a theme is a {name}/ directory there", directory)
 	}
-	return profiles, nil
+	return profiles, refused, nil
 }
 
 // releaseThemeProfiles lists the profiles at Options.ThemeReleaseURL and
 // names each one's download URL: refused, before any fetch, for an
 // unpublished -alpha release or with the theme fetch switched off.
-func releaseThemeProfiles(ctx context.Context, options Options) (map[string]themeProfile, error) {
+func releaseThemeProfiles(ctx context.Context, options Options) (map[string]themeProfile, []error, error) {
 	base := strings.TrimSpace(options.ThemeReleaseURL)
 	if base == "" {
-		return nil, errors.New("no release theme URL is configured")
+		return nil, nil, errors.New("no release theme URL is configured")
 	}
 	if releaseUnpublishedAlpha(base) {
-		return nil, errors.New(
+		return nil, nil, errors.New(
 			"release themes for an unpublished -alpha build; run pfm install from the source clone",
 		)
 	}
 	if options.ThemesOffline {
-		return nil, fmt.Errorf("fetch skipped: %s=1", paths.EnvThemesOffline)
+		return nil, nil, fmt.Errorf("fetch skipped: %s=1", paths.EnvThemesOffline)
 	}
-	names, err := releaseProfileDirs(ctx, options.ThemeHTTPClient, base)
+	names, refused, err := releaseProfileDirs(ctx, options.ThemeHTTPClient, base)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	profiles := make(map[string]themeProfile, len(names))
 	for _, name := range names {
 		if err := validateThemeName(name); err != nil {
-			return nil, fmt.Errorf("theme %s: %w", name, err)
+			refused = append(refused, fmt.Errorf("theme %s: %w", name, err))
+			continue
 		}
 		raw := strings.TrimSuffix(base, "/") + "/" + name + "/"
 		if err := validateThemeURL(raw); err != nil {
-			return nil, fmt.Errorf("theme %s release URL: %w", name, err)
+			refused = append(refused, fmt.Errorf("theme %s release URL: %w", name, err))
+			continue
 		}
 		profiles[name] = themeProfile{raw: raw}
 	}
 	if len(profiles) == 0 {
-		return nil, fmt.Errorf("no theme in %s", base)
+		return nil, refused, fmt.Errorf("no theme in %s", base)
 	}
-	return profiles, nil
+	return profiles, refused, nil
 }
 
 // flatProfileError refuses a {name}.json file directly in templates/themes/:
@@ -360,31 +369,30 @@ func flatProfileError(file, where string) error {
 }
 
 // localProfileDirs are the themes in the source clone's templates/themes/,
-// sorted: every subdirectory, each a theme. A {name}.json file there is an
-// error (flatProfileError), a symlink or other non-regular entry too; any
+// sorted: every subdirectory, each a theme. A {name}.json file there is
+// refused (flatProfileError), a symlink or other non-regular entry too; any
 // other file (the README) is not a theme.
-func localProfileDirs(dir string) ([]string, error) {
+func localProfileDirs(dir string) (names []string, refused []error, err error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, fmt.Errorf("list themes in %s: %w", dir, err)
+		return nil, nil, fmt.Errorf("list themes in %s: %w", dir, err)
 	}
-	var names []string
 	for _, entry := range entries {
 		switch {
 		case entry.IsDir():
 			names = append(names, entry.Name())
 		case !entry.Type().IsRegular():
-			return nil, fmt.Errorf(
+			refused = append(refused, fmt.Errorf(
 				"%s in %s is neither a theme directory nor a file (%s)",
 				entry.Name(),
 				dir,
 				entry.Type(),
-			)
+			))
 		case strings.HasSuffix(entry.Name(), ".json"):
-			return nil, flatProfileError(entry.Name(), dir)
+			refused = append(refused, flatProfileError(entry.Name(), dir))
 		}
 	}
-	return names, nil
+	return names, refused, nil
 }
 
 // The contents API's types for a directory and a file entry, as against
@@ -397,34 +405,37 @@ const (
 // releaseProfileDirs lists the themes at a release theme URL on
 // raw.githubusercontent.com through GitHub's contents API, the one listing
 // that host has: the directories of templates/themes/ at the URL's ref. A
-// {name}.json file there is an error (flatProfileError).
-func releaseProfileDirs(ctx context.Context, client *http.Client, releaseURL string) ([]string, error) {
+// {name}.json file there is refused (flatProfileError).
+func releaseProfileDirs(
+	ctx context.Context,
+	client *http.Client,
+	releaseURL string,
+) (names []string, refused []error, err error) {
 	listing, err := themeListingURL(releaseURL)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	content, err := fetchTheme(ctx, client, listing)
 	if err != nil {
-		return nil, fmt.Errorf("list release profiles: %w", err)
+		return nil, nil, fmt.Errorf("list release profiles: %w", err)
 	}
 	var entries []struct {
 		Name string `json:"name"`
 		Type string `json:"type"`
 	}
 	if err := json.Unmarshal(content, &entries); err != nil {
-		return nil, fmt.Errorf("list release profiles: decode %s: %w", listing, err)
+		return nil, nil, fmt.Errorf("list release profiles: decode %s: %w", listing, err)
 	}
-	var names []string
 	for _, entry := range entries {
 		switch {
 		case entry.Type == githubContentsDir:
 			names = append(names, entry.Name)
 		case entry.Type == githubContentsFile && strings.HasSuffix(entry.Name, ".json"):
-			return nil, flatProfileError(entry.Name, releaseURL)
+			refused = append(refused, flatProfileError(entry.Name, releaseURL))
 		}
 	}
 	sort.Strings(names)
-	return names, nil
+	return names, refused, nil
 }
 
 // themeListingURL turns a release theme URL,

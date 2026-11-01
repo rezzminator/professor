@@ -45,6 +45,52 @@ func TestMCPWiresCodexAndOpenCodeWithoutClaudeRegistry(t *testing.T) {
 	}
 }
 
+// One Claude registry holding a foreign entry under pfm's name and one
+// unparseable Codex home cost only themselves: every other registry is cut
+// over and every other Codex home wired.
+func TestWireMCPFailingRegistryAndHomeCostOnlyThemselves(t *testing.T) {
+	home := t.TempDir()
+	bin := filepath.Join(home, ".local", "bin", "pfm")
+	legacy := fmt.Sprintf(`"professor":{"type":"stdio","command":%q,"args":["mcp","serve","--stdio"]}`, bin)
+	conflicted := filepath.Join(home, "account-1", ".claude.json")
+	original := `{"mcpServers":{` + legacy + `,"chat-professor":{"command":"operator"}}}`
+	writeFixture(t, conflicted, original)
+	cutOver := filepath.Join(home, "account-2", ".claude.json")
+	writeFixture(t, cutOver, `{"mcpServers":{`+legacy+`}}`)
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Dir(cutOver))
+	broken, wired := filepath.Join(home, "codex-broken"), filepath.Join(home, "codex-wired")
+	writeFixture(t, filepath.Join(broken, "config.toml"), "broken = [")
+	var stdout bytes.Buffer
+	e := engine{
+		options: Options{
+			Home: home, CodexHomes: []string{broken, wired}, MCPEnabled: map[string]bool{"chat": true},
+			ClaudeAccounts: []pfmconfig.Account{
+				{ID: 1, ConfigDir: filepath.Dir(conflicted)}, {ID: 2, ConfigDir: filepath.Dir(cutOver)},
+			},
+			MCPPort: 8377, Stdout: &stdout,
+		},
+		apply: true, managedRoot: managedRootForHome(home), stamp: "fixture",
+	}
+	err := e.wireMCP()
+	conflict := "preserve foreign Claude MCP client chat-professor in " + conflicted +
+		": cannot cut over owned registration"
+	if err == nil || !strings.Contains(err.Error(), conflict) ||
+		!strings.Contains(err.Error(), filepath.Join(broken, "config.toml")) {
+		t.Fatalf("wireMCP = %v, want the registry conflict and the broken Codex home", err)
+	}
+	if !strings.Contains(stdout.String(), "  FAIL    "+conflict+"\n") {
+		t.Fatalf("output lacks the FAIL row %q:\n%s", conflict, stdout.String())
+	}
+	if got := readFixture(t, conflicted); got != original {
+		t.Fatalf("conflicting registry changed: %s", got)
+	}
+	for _, path := range []string{cutOver, filepath.Join(wired, "config.toml")} {
+		if got := readFixture(t, path); !strings.Contains(got, "chat-professor") {
+			t.Fatalf("%s was not wired past the failures: %s", path, got)
+		}
+	}
+}
+
 func TestWireMCPDropsClaudeOwnership(t *testing.T) {
 	for _, test := range []struct {
 		name       string

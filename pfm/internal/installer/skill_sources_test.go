@@ -286,6 +286,27 @@ func TestSourceFetchedSkillsValidateTheRegistryAtEntry(t *testing.T) {
 			t.Fatalf("an unresolvable {GH_USER} was not a named failure:\n%s", output)
 		}
 	})
+	t.Run("unknown keys", func(t *testing.T) {
+		t.Parallel()
+		home := t.TempDir()
+		repo := skillFixtureRepo(t, filepath.Join(t.TempDir(), "kept"), map[string]string{"SKILL.md": "# kept\n"})
+		path := writeSkillRegistry(t, home, `{"_comment":"c","pinned":{},"source_fetched":{`+
+			`"extra":{"repo":"https://example.invalid/extra","ref":"v1"},"kept":{"repo":"file://`+repo+`"}}}`)
+		output := runSkillInstall(t, home, ModeApply)
+		for _, want := range []string{
+			"  skip    SKILL-SOURCES-UNKNOWN-KEY pinned in " + path + ": ignored\n",
+			"  skip    SKILL-SOURCE-INVALID extra: decode its record in " + path + `: json: unknown field "ref"` + "\n",
+		} {
+			if !strings.Contains(output, want) {
+				t.Fatalf("missing %q:\n%s", want, output)
+			}
+		}
+		store := filepath.Join(skillStoreRoot(home), "kept")
+		if got := readSkillFile(t, filepath.Join(store, "SKILL.md")); got != "# kept\n" {
+			t.Fatalf("the valid entry beside the unknown keys was not fetched: %q\n%s", got, output)
+		}
+		assertLink(t, filepath.Join(home, ".agents", "skills", "kept"), store)
+	})
 	t.Run("unparsable", func(t *testing.T) {
 		t.Parallel()
 		home := t.TempDir()
@@ -728,7 +749,7 @@ func TestShippedSkillSourcesRegistryLoads(t *testing.T) {
 		t.Fatal("find test source")
 	}
 	repo := filepath.Join(filepath.Dir(source), "..", "..", "..")
-	sources, present, err := loadSkillSources(repo, ThemeReleaseURL(""))
+	sources, present, _, err := loadSkillSources(repo, ThemeReleaseURL(""))
 	if err != nil || !present || len(sources) == 0 {
 		t.Fatalf("load %s: present=%t sources=%d err=%v", skillSourcesRelative, present, len(sources), err)
 	}

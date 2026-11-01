@@ -14,7 +14,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/compose"
-	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/doctor"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
@@ -315,7 +314,7 @@ func runChatCapture(args []string, stdout, stderr io.Writer, runtimes ...command
 	return 0
 }
 
-func runChatRecover(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
+func runChatRecover(args []string, stdout, stderr io.Writer) int {
 	flags := cli.NewFlagSet("chat recover", "usage: pfm chat recover <thread-id|rollout-path>", stderr)
 	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
@@ -323,11 +322,6 @@ func runChatRecover(args []string, stdout, stderr io.Writer, runtimes ...command
 	if flags.NArg() != 1 {
 		flags.Usage()
 		return 2
-	}
-	_, err := pfmconfig.OptionalRuntime(runtimes)
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm chat recover: load config: %v\n", err)
-		return 1
 	}
 	resolved, err := paths.Resolve()
 	if err != nil {
@@ -558,10 +552,11 @@ func runChatLS(args []string, stdout, stderr io.Writer, clk clock.Clock, runtime
 	if !all {
 		directory, err := os.Getwd()
 		if err != nil {
-			fmt.Fprintf(stderr, "pfm chat ls: read the current directory: %v\n", err)
-			return 1
+			fmt.Fprintf(stderr, "pfm chat ls: read the current directory: %v; listing every repo\n", err)
+			all, request.NoCurrentDir = true, true
+		} else {
+			request.Repo = gitroot.RepoRoot(directory)
 		}
-		request.Repo = gitroot.RepoRoot(directory)
 	}
 	listed, err := pfmchat.List(context.Background(), firstRuntime(runtimes), request, stderr)
 	if err != nil {

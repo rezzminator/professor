@@ -102,6 +102,46 @@ func TestInitDeploysMappedTemplatesAndPinsExactlyTheDeployedSet(t *testing.T) {
 	}
 }
 
+func TestInitWithoutAUsableMarkerScaffoldsFromTheDiscoveredClone(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		marker string // "" writes no marker
+	}{
+		{name: "no marker"},
+		{name: "marker names a gone directory", marker: "/nonexistent-pfm-clone\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := newScaffoldStoreFixture(t)
+			t.Setenv("PFM_SOURCE_REPO", source)
+			target := t.TempDir()
+			home := t.TempDir()
+			wantStderr := ""
+			if tc.marker != "" {
+				markerPath := paths.SourceRepoPath(home)
+				if err := os.MkdirAll(filepath.Dir(markerPath), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(markerPath, []byte(tc.marker), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				wantStderr = "pfm init: warning: inspect recorded source repository /nonexistent-pfm-clone: " +
+					"recorded source repository is unusable: stat /nonexistent-pfm-clone: no such file or directory\n"
+			}
+			runtime := commandRuntime{Paths: paths.Values{Home: home}}
+			var stdout, stderr bytes.Buffer
+			if code := runInit([]string{target}, &stdout, &stderr, runtime); code != 0 {
+				t.Fatalf("runInit() code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+			}
+			if want := "initialized " + target + " from " + source + "\n"; !strings.Contains(stdout.String(), want) {
+				t.Fatalf("runInit() stdout=%q, want %q", stdout.String(), want)
+			}
+			if stderr.String() != wantStderr {
+				t.Fatalf("runInit() stderr=%q, want %q", stderr.String(), wantStderr)
+			}
+		})
+	}
+}
+
 func TestInitCollisionSkipsWithoutPinAndForceOverwrites(t *testing.T) {
 	source := newScaffoldStoreFixture(t)
 	home := t.TempDir()

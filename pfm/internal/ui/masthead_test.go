@@ -114,6 +114,12 @@ func TestChatsHeaderLineKeepsRefreshingInViewBesideALongFactsError(t *testing.T)
 	if !strings.Contains(line, "⟳ refreshing") || !strings.Contains(line, "⚠ row facts") {
 		t.Errorf("both the refresh marker and the facts warning must show: %q", line)
 	}
+	model.deck.factsError = ""
+	model.deck.scanError = "native seat s1 rollout: database is locked"
+	line = ansi.Strip(model.chatsHeaderLine(140))
+	if !strings.HasSuffix(strings.TrimRight(line, " "), "⚠ scan: native seat s1 rollout: database is locked") {
+		t.Errorf("the scan warning must end the header: %q", line)
+	}
 }
 
 func TestChatsHeaderLineKeepsItsContextTokens(t *testing.T) {

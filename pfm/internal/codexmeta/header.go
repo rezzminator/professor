@@ -213,12 +213,19 @@ func ReadHeader(path string) (header Header, returnErr error) {
 	}()
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	malformed := 0
+	var firstMalformed error
 	for lines := 0; lines < 20 && scanner.Scan(); lines++ {
 		var record struct {
 			Type string `json:"type"`
 		}
 		if err := json.Unmarshal(scanner.Bytes(), &record); err != nil {
-			return Header{}, fmt.Errorf("decode rollout metadata: %w", err)
+			// One damaged line costs that line; the session_meta may follow it.
+			malformed++
+			if firstMalformed == nil {
+				firstMalformed = err
+			}
+			continue
 		}
 		if record.Type == "session_meta" {
 			return Decode(scanner.Bytes())
@@ -226,6 +233,11 @@ func ReadHeader(path string) (header Header, returnErr error) {
 	}
 	if err := scanner.Err(); err != nil {
 		return Header{}, err
+	}
+	if malformed > 0 {
+		// Not ErrNoSessionMeta: the prefix was not fully readable, so the absence is unproven.
+		return Header{}, fmt.Errorf("decode rollout metadata: no session_meta among the readable lines of %s, "+
+			"%d malformed line(s) skipped, the first: %w", path, malformed, firstMalformed)
 	}
 	return Header{}, ErrNoSessionMeta
 }

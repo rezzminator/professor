@@ -1,6 +1,7 @@
 package call
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -52,5 +53,40 @@ func TestPersistBodyPrunesExpiredMarkdownByAge(t *testing.T) {
 	if err != nil || string(stored) != "exact body" ||
 		!strings.Contains(filepath.Base(path), "cc-1--2") {
 		t.Fatalf("canonical file path=%q body=%q err=%v", path, stored, err)
+	}
+}
+
+func TestPrepareForResumeDeliversInlineWhenTheBodyCannotBeSaved(t *testing.T) {
+	engine := newTestEngine(t, "cc-resume-unsaved", &fakeTmux{capture: "❯ "})
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	engine.options.BodyRoot = filepath.Join(blocker, "bodies")
+	body := "resume caption\n" + strings.Repeat("r", 8<<10)
+	prepared, err := engine.PrepareForResume(
+		context.Background(),
+		"11111111-2222-4333-8444-555555555555",
+		"cc",
+		body,
+	)
+	want := `long body not saved to a file (create call body directory "` + engine.options.BodyRoot +
+		`": mkdir ` + blocker + `: not a directory) — delivered inline`
+	if err != nil || prepared.AutoFilePath != "" || !strings.HasPrefix(prepared.Message, body+"\n\n— sid 12345678") ||
+		len(prepared.Warnings) != 1 || prepared.Warnings[0] != want {
+		t.Fatalf("err=%v file=%q warnings=%q\nwant warning %q\nmessage prefix ok=%t", err, prepared.AutoFilePath,
+			prepared.Warnings, want, strings.HasPrefix(prepared.Message, body+"\n\n— sid 12345678"))
+	}
+}
+
+func TestPruneBodiesWarnsWhenTheDirectoryCannotBeListed(t *testing.T) {
+	engine := newTestEngine(t, "cc-body-unlisted", &fakeTmux{capture: "❯ "})
+	notDir := filepath.Join(t.TempDir(), "bodies")
+	if err := os.WriteFile(notDir, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	want := `enumerate call bodies in "` + notDir + `": open ` + notDir + `: not a directory — nothing pruned`
+	if got := engine.pruneBodies(notDir); len(got) != 1 || got[0] != want {
+		t.Fatalf("warnings=%q, want [%q]", got, want)
 	}
 }

@@ -3,6 +3,7 @@ package transcript
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -10,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/codexmeta"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // claudeLines and codexLines are the record shapes each engine actually
@@ -50,6 +52,12 @@ func TestParseKeepsWhatWasSaidAndDropsTheRest(t *testing.T) {
 		content string
 		want    []string
 	}{
+		{
+			// A member of another type reads as absent; the line still says what it said.
+			engine:  "cc",
+			content: `{"type":"user","isSidechain":"no","message":{"content":"odd flag kept"}}` + "\n",
+			want:    []string{"U odd flag kept"},
+		},
 		{
 			engine:  "cc",
 			content: claudeLines,
@@ -523,6 +531,63 @@ func TestReadMetaClaudeCountsOnlyRealHumanPromptsAcrossWholeFile(t *testing.T) {
 	}
 }
 
+// One line the reader cannot take — over the line bound, or a member of another
+// type — costs only itself: every other line, and the rest of that one, applies.
+func TestReadMetaKeepsEveryLineItCanRead(t *testing.T) {
+	huge := `{"type":"user","message":{"content":"` + strings.Repeat("x", metaMaxLine+1) + `"}}`
+	for _, testCase := range []struct {
+		name, engine string
+		lines        []string
+		want         Meta
+	}{
+		{
+			"claude: an oversized line and an odd isMeta", "cc",
+			[]string{
+				`{"type":"assistant","message":{"model":"m1","usage":{"input_tokens":10}}}`,
+				huge,
+				`{"type":"user","isMeta":"yes","message":{"content":"real prompt"}}`,
+				`{"type":"assistant","message":{"model":"m2","usage":{"input_tokens":20}}}`,
+			},
+			Meta{Model: "m2", ContextKnown: true, ContextTokens: 20, HumanPrompts: 1, SkippedLines: 1},
+		},
+		{
+			"codex: an odd window beside a readable context", "cx",
+			[]string{
+				`{"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":5},"model_context_window":"big"}}}`,
+			},
+			Meta{ContextKnown: true, ContextTokens: 5},
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			path := writeTranscript(t, "odd.jsonl", strings.Join(testCase.lines, "\n")+"\n")
+			_, recorder := obs.Test(t)
+			got, err := ReadMeta(path, testCase.engine)
+			if err != nil {
+				t.Fatalf("ReadMeta(%s) error = %v", path, err)
+			}
+			got.SizeBytes, got.ModifiedUnixNS = 0, 0
+			if got != testCase.want {
+				t.Fatalf("ReadMeta(%s) = %+v, want %+v", path, got, testCase.want)
+			}
+			// A skipped line is a logged loss; a scan that read every line logs none.
+			var skippedLogs []string
+			for _, record := range recorder.Records() {
+				if record.Message == "transcript.meta.lines_skipped" {
+					lines, _ := record.Field("rows")
+					skippedLogs = append(skippedLogs, fmt.Sprint(lines))
+				}
+			}
+			want := []string(nil)
+			if testCase.want.SkippedLines > 0 {
+				want = []string{fmt.Sprint(testCase.want.SkippedLines)}
+			}
+			if !slices.Equal(skippedLogs, want) {
+				t.Fatalf("lines_skipped logs = %v, want %v; log %s", skippedLogs, want, recorder.Raw())
+			}
+		})
+	}
+}
+
 func TestMetaUsagePresenceDoesNotManufactureZero(t *testing.T) {
 	for _, raw := range []string{`{}`, `{"total_tokens":null}`} {
 		var meta Meta
@@ -641,6 +706,14 @@ func TestReadMetaFollowsTheNewestCodexTurnRecord(t *testing.T) {
 func TestContentListsReadEachBlockOnItsOwn(t *testing.T) {
 	if got := Visible(json.RawMessage(`[{"type":"text","text":"kept"},7,{"type":"text","text":5}]`)); got != "kept" {
 		t.Errorf("Visible = %q, want kept", got)
+	}
+	if got := Visible(
+		json.RawMessage(`"<system-reminder>a</system-reminder>\n<system-reminder>b</system-reminder>\nreal prompt"`),
+	); got != "real prompt" {
+		t.Errorf("Visible of a reminder-led string = %q, want %q", got, "real prompt")
+	}
+	if got := Visible(json.RawMessage(`"<system-reminder>never closed"`)); got != "" {
+		t.Errorf("Visible of an unclosed reminder = %q, want empty", got)
 	}
 	entry, ok := toolCall(
 		json.RawMessage(`[5,{"type":"tool_use","name":7},{"type":"tool_use","name":"Read","input":{"a":1}}]`),

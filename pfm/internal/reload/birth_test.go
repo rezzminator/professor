@@ -153,13 +153,27 @@ func TestSessionTranscriptFindsACompressedCodexRollout(t *testing.T) {
 	finished := compress(write("rollout-2026-09-23T12-07-24-finished-thread.jsonl"))
 	compress(write("rollout-2026-09-23T12-07-24-twin-thread.jsonl"))
 	twin := write("rollout-2026-09-23T12-07-24-twin-thread.jsonl")
-	machine := pfmconfig.Config{CodexAccounts: []pfmconfig.CodexAccount{{ID: 1, Home: home}}}
-	for _, row := range []struct{ id, want string }{
-		{"plain-thread", plain}, {"finished-thread", finished}, {"twin-thread", twin}, {"absent-thread", ""},
+	// An unreadable home (a NUL byte fails lstat even for root) costs only
+	// itself: the next home is still searched, and "could not look" is an
+	// error only when no home holds the rollout.
+	unreadable := "unreadable\x00home"
+	machine := pfmconfig.Config{CodexAccounts: []pfmconfig.CodexAccount{{ID: 1, Home: unreadable}, {ID: 2, Home: home}}}
+	for _, row := range []struct{ id, want, wantErr string }{
+		{"plain-thread", plain, ""},
+		{"finished-thread", finished, ""},
+		{"twin-thread", twin, ""},
+		{
+			"absent-thread", "", `search Codex rollouts under "unreadable\x00home": lstat unreadable` + "\x00" +
+				`home/sessions: invalid argument`,
+		},
 	} {
 		got, err := SessionTranscript(paths.Values{}, machine, pfmengine.Codex, row.id)
-		if err != nil || got != row.want {
-			t.Errorf("SessionTranscript(codex, %s) = %q, %v; want %q", row.id, got, err, row.want)
+		gotErr := ""
+		if err != nil {
+			gotErr = err.Error()
+		}
+		if gotErr != row.wantErr || got != row.want {
+			t.Errorf("SessionTranscript(codex, %s) = %q, %q; want %q, %q", row.id, got, gotErr, row.want, row.wantErr)
 		}
 	}
 }

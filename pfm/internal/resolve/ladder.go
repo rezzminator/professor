@@ -178,6 +178,11 @@ func (ladder Ladder) Resolve(
 			return seat, 0, outcome.Stderr, nil
 		case CodeAmbiguous:
 			return Seat{}, CodeAmbiguous, outcome.Stderr, nil
+		default:
+			// A rung that could not look says so: its note joins the miss.
+			if note := strings.TrimSpace(outcome.Stderr); note != "" {
+				miss += "; " + note
+			}
 		}
 	}
 	return Seat{}, CodeUnknown, miss, nil

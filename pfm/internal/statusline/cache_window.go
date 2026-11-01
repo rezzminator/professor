@@ -28,7 +28,8 @@ import (
 // countdown runs to the payload's expiry, else from the transcript's newest
 // request. A failed launch read renders 💾⚠ with its cause on stderr, and a
 // machine config that failed to load 💾⚠config: the launch record lives where
-// the config's state.db says. hit < 0 means the harness reported no usage yet,
+// the config's state.db says; either marker keeps the window the transcript
+// names beside it, and stands alone when it names none. hit < 0 means the harness reported no usage yet,
 // and drops the tail; a lapsed window renders the hit as history, was 99%.
 // The cache-keepwarm shield (cacheKeepwarmShield) follows, even when no
 // countdown renders.
@@ -65,7 +66,13 @@ func cacheWindowText(
 	}
 	launch, found, failure := launchCache(runtime, sessionID)
 	if failure != "" {
-		return failure
+		// The launch record could not be read: the transcript still names a
+		// window, drawn beside the warning that the record is unread.
+		text, lapsed, ok := unlaunchedWindowText(runtime, now, transcriptPath, harness)
+		if !ok {
+			return failure
+		}
+		return failure + " " + strings.TrimPrefix(withHit(text, hit, lapsed), sep)
 	}
 	switch {
 	case found && harness.expires():

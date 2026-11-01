@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
@@ -27,7 +28,7 @@ func TestClaudeTitleRecordsFollowTheSharedTitleRule(t *testing.T) {
 		t.Fatal(err)
 	}
 	file := diskFile{ID: "titled", Path: path, Size: info.Size(), MTimeNS: info.ModTime().UnixNano()}
-	transcript, _, err := parseClaudeTranscriptFile(file, 0, store.Transcript{})
+	transcript, _, err := parseClaudeTranscriptFile(context.Background(), file, 0, store.Transcript{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +83,7 @@ func TestClaudeTranscriptCWDIsWhereTheSessionRan(t *testing.T) {
 				t.Fatal(err)
 			}
 			file := diskFile{ID: "session", Path: path, Size: info.Size(), MTimeNS: info.ModTime().UnixNano()}
-			transcript, _, err := parseClaudeTranscriptFile(file, 0, test.prior)
+			transcript, _, err := parseClaudeTranscriptFile(context.Background(), file, 0, test.prior)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -138,5 +139,29 @@ func TestClaudeCWDFillsRowsAPreviousParserIndexed(t *testing.T) {
 		t.Fatalf("/clear successor's CWD after upgrade = %q, want %q — claudeParserVersion must move past %q "+
 			"so rows indexed before the first record's directory was read are reparsed",
 			filled.CWD, "/work/app", preFirstRecordCWDParserVersion)
+	}
+}
+
+// TestClaudeParseCountsLinesItCannotDecode: an undecodable line costs that
+// line only; the transcript keeps its other prompts and the parse warns the
+// count.
+func TestClaudeParseCountsLinesItCannotDecode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "torn.jsonl")
+	writeLines(t, path, `{"type":"user","message":{"content":"kept prompt"}}`, `{"type":"user","message":`)
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, recorder := obs.Test(t)
+	file := diskFile{ID: "torn", Path: path, Size: info.Size(), MTimeNS: info.ModTime().UnixNano()}
+	transcript, _, err := parseClaudeTranscriptFile(ctx, file, 0, store.Transcript{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if transcript.LastPrompt != "kept prompt" || transcript.PromptCount != 1 {
+		t.Fatalf("transcript = %#v, want the one decodable prompt kept", transcript)
+	}
+	if got := unparsedLineCounts(recorder, path); len(got) != 1 || got[0] != float64(1) {
+		t.Fatalf("unparsed line warnings for %s = %v, want [1]", path, got)
 	}
 }

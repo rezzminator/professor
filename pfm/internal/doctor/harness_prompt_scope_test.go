@@ -18,6 +18,7 @@ func TestHarnessDoctorDistinguishesModelCoverageAndCaptureFailures(t *testing.T)
 	t.Cleanup(func() { HarnessCaptureOverride = saved })
 	for _, tc := range []struct {
 		name, model, prompt, missing, want string
+		baselineModel                      string
 		err                                error
 		warning                            bool
 	}{
@@ -25,17 +26,28 @@ func TestHarnessDoctorDistinguishesModelCoverageAndCaptureFailures(t *testing.T)
 		{name: "behavior change", model: "claude-sonnet-5", prompt: "different instructions\n", want: "DRIFT", warning: true},
 		{name: "renamed model same bytes", model: "claude-renamed-6", prompt: harnessPromptFixtureCaptured, want: "matches baseline"},
 		{name: "capture failure", want: "CHECK FAILED", err: errors.New("sink unavailable"), warning: true},
-		{name: "missing baseline model", missing: "harness-original.model", want: "BASELINE UNAVAILABLE", warning: true},
+		{
+			name: "missing baseline model", model: "claude-sonnet-5", prompt: harnessPromptFixtureCaptured,
+			missing: "harness-original.model", baselineModel: "unknown", warning: true,
+			want: "doctor: harness-prompt: matches baseline harness-prompt-fixture.md\n" +
+				"doctor: harness-prompt: baseline_model unknown (open {dir}/harness-original.model: " +
+				"no such file or directory) — the prompt was still compared; update or restore the clone at {dir}\n",
+		},
 		{name: "missing baseline body", missing: "harness-prompt-fixture.md", want: "BASELINE UNAVAILABLE", warning: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home := t.TempDir()
 			stageHarnessPromptBaseline(t, home)
+			dir, err := paths.HarnessBaselineDir(home)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := strings.ReplaceAll(tc.want, "{dir}", dir)
+			baselineModel := tc.baselineModel
+			if baselineModel == "" {
+				baselineModel = "claude-sonnet-5"
+			}
 			if tc.missing != "" {
-				dir, err := paths.HarnessBaselineDir(home)
-				if err != nil {
-					t.Fatal(err)
-				}
 				if err := os.Remove(
 					filepath.Join(dir, tc.missing),
 				); err != nil {
@@ -54,14 +66,14 @@ func TestHarnessDoctorDistinguishesModelCoverageAndCaptureFailures(t *testing.T)
 				home,
 				harnessPromptModels[0],
 			)
-			if (code != 0) != tc.warning || !strings.Contains(output.String(), tc.want) {
-				t.Fatalf("code=%d output=%s", code, &output)
+			if (code != 0) != tc.warning || !strings.Contains(output.String(), want) {
+				t.Fatalf("code=%d output=%s, want %q", code, &output, want)
 			}
-			if tc.missing != "" && called {
+			if strings.Contains(tc.want, "BASELINE UNAVAILABLE") && called {
 				t.Fatal("capture ran without a complete baseline")
 			}
 			if called {
-				for _, field := range []string{"runtime=claude-code", "scope=claude-model-baseline", "requested=sonnet", "cli=\"2.1.fixture\"", "baseline_model=claude-sonnet-5", "unchecked=active-chat,fable,codex"} {
+				for _, field := range []string{"runtime=claude-code", "scope=claude-model-baseline", "requested=sonnet", "cli=\"2.1.fixture\"", "baseline_model=" + baselineModel, "unchecked=active-chat,fable,codex"} {
 					if !strings.Contains(output.String(), field) {
 						t.Errorf("missing %s: %s", field, &output)
 					}
@@ -78,7 +90,11 @@ func TestHarnessCaptureRetainsRequestModel(t *testing.T) {
 	if err != nil || got.ResolvedModel != "claude-fable-5-1" || got.Prompt != "model-specific instructions\n" {
 		t.Fatalf("capture=%+v err=%v", got, err)
 	}
-	for _, raw := range []string{`{`, `{"system":"prompt"}`, `{"model":"claude-sonnet-5"}`, `{"model":"claude-sonnet-5","system":[]}`} {
+	modelless, err := decodeHarnessCapture([]byte(`{"system":"prompt"}`))
+	if err != nil || modelless != (HarnessCapture{Prompt: "prompt\n"}) {
+		t.Fatalf("a capture naming no model was not kept for comparison: capture=%+v err=%v", modelless, err)
+	}
+	for _, raw := range []string{`{`, `{"model":"claude-sonnet-5"}`, `{"model":"claude-sonnet-5","system":[]}`} {
 		if _, err := decodeHarnessCapture([]byte(raw)); err == nil {
 			t.Fatalf("invalid capture accepted: %s", raw)
 		}

@@ -169,7 +169,8 @@ func ClaudePluginsNotInstalled(configDir string, targets []ClaudePluginTarget) (
 // in plugins/installed_plugins.json: one per scope it is installed in, a
 // project or local one naming its project. Claude Code owns the shape: a
 // scope, projectPath or version that is not a string reads as empty rather
-// than failing the record every other reader needs; installPath stays strict.
+// than failing the record every other reader needs, and an entry whose
+// installPath is not one reads as not installed.
 type claudePluginInstall struct {
 	Scope       string
 	ProjectPath string
@@ -182,7 +183,7 @@ func (install *claudePluginInstall) UnmarshalJSON(raw []byte) error {
 	var entry struct {
 		Scope       json.RawMessage `json:"scope"`
 		ProjectPath json.RawMessage `json:"projectPath"`
-		InstallPath string          `json:"installPath"`
+		InstallPath json.RawMessage `json:"installPath"`
 		Version     json.RawMessage `json:"version"`
 	}
 	if err := json.Unmarshal(raw, &entry); err != nil {
@@ -191,7 +192,7 @@ func (install *claudePluginInstall) UnmarshalJSON(raw []byte) error {
 	*install = claudePluginInstall{
 		Scope:       recordString(entry.Scope),
 		ProjectPath: recordString(entry.ProjectPath),
-		InstallPath: entry.InstallPath,
+		InstallPath: recordString(entry.InstallPath),
 		Version:     recordString(entry.Version),
 	}
 	return nil

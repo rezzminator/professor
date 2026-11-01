@@ -97,6 +97,8 @@ func proxyRecoveryError(t *testing.T, frame map[string]any) (float64, string) {
 
 // A: Claude Code probes server/discover before initialize. The probe must be
 // answered locally and never cost the session, even after the retry window.
+// A frame that is no JSON-RPC object (a batch, broken JSON) is answered
+// locally too, with a null id, never left unanswered.
 func TestStdioProxyDiscoverProbeKeepsSessionPastRetryWindow(t *testing.T) {
 	t.Parallel()
 	var calls [][]string
@@ -125,6 +127,31 @@ func TestStdioProxyDiscoverProbeKeepsSessionPastRetryWindow(t *testing.T) {
 	harness.write(t, `{"jsonrpc":"2.0","id":"server-discover-probe-1","method":"server/discover","params":{}}`)
 	if code, message := proxyRecoveryError(t, harness.read(t)); code != -32601 {
 		t.Errorf("discover probe answered %v %q, want -32601", code, message)
+	}
+	for _, test := range []struct {
+		frame       string
+		wantCode    float64
+		wantMessage string
+	}{
+		{
+			frame:       `[{"jsonrpc":"2.0","id":7,"method":"ping"}]`,
+			wantCode:    -32600,
+			wantMessage: "invalid JSON-RPC frame: json: cannot unmarshal array into Go value of type mcpserv.proxyFrame",
+		},
+		{
+			frame:       `{"jsonrpc":"2.0","id":8,`,
+			wantCode:    -32700,
+			wantMessage: "invalid JSON-RPC frame: unexpected end of JSON input",
+		},
+	} {
+		harness.write(t, test.frame)
+		answer := harness.read(t)
+		id, hasID := answer["id"]
+		if code, message := proxyRecoveryError(t, answer); code != test.wantCode || message != test.wantMessage ||
+			!hasID || id != nil {
+			t.Errorf("frame %s answered %+v, want id null, code %v, message %q",
+				test.frame, answer, test.wantCode, test.wantMessage)
+		}
 	}
 	harness.write(t, proxyTestInitialize)
 	if _, failed := harness.read(t)["error"]; failed {

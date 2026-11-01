@@ -32,12 +32,17 @@ func TestCodexHeldRootWinsOverChildFirstDescriptors(t *testing.T) {
 	child := filepath.Join(root, "sessions", "rollout-child.jsonl")
 	writeRolloutMeta(t, parent, "user", "")
 	writeRolloutMeta(t, child, "subagent", "parent")
+	// A child just spawned: its rollout is open and holds no header yet.
+	newborn := filepath.Join(root, "sessions", "rollout-newborn.jsonl")
+	if err := os.WriteFile(newborn, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	proc := &fakeProcFS{processes: map[int]fakeProcess{
 		100: {stat: ProcStat{ParentPID: 1}},
 		400: {
 			cmdline: []string{"codex"},
 			stat:    ProcStat{ParentPID: 100},
-			fdLinks: []FDLink{{FD: 3, Target: child}, {FD: 8, Target: parent}},
+			fdLinks: []FDLink{{FD: 3, Target: child}, {FD: 5, Target: newborn}, {FD: 8, Target: parent}},
 		},
 		401: {cmdline: []string{"codex"}, stat: ProcStat{ParentPID: 400}, fdLinks: []FDLink{{FD: 2, Target: child}}},
 	}}

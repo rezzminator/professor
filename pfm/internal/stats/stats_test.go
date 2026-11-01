@@ -677,6 +677,7 @@ func TestSamplerCountsAMultiRecordAssistantMessageOnce(t *testing.T) {
 		`{"timestamp":"2026-09-02T10:00:07Z","type":"assistant","requestId":"req_C","message":{"content":[{"type":"tool_use"}],"usage":{"output_tokens":5}}}`,
 		`{"timestamp":"2026-09-02T10:00:08Z","type":"assistant","message":{"usage":{"output_tokens":1}}}`,
 		`{"timestamp":"2026-09-02T10:00:09Z","type":"assistant","message":{"usage":{"output_tokens":1}}}`,
+		`{"timestamp":"not-a-time","type":"assistant","message":{"usage":{"output_tokens":3}}}`,
 	}, "\n") + "\n"
 	if err := os.WriteFile(path, []byte(transcript), 0o600); err != nil {
 		t.Fatal(err)
@@ -693,9 +694,13 @@ func TestSamplerCountsAMultiRecordAssistantMessageOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// msg_A once (1000) + msg_B (100) + req_C once (5) + two id-less records (1 + 1).
-	if got := chatsBySeat(snapshot.Chats)["split-socket"]; !got.TokensKnown || got.TokenCount != 1107 {
-		t.Fatalf("split-message token accounting = %#v, want 1107 (each message counted once)", got)
+	// msg_A once (1000) + msg_B (100) + req_C once (5) + two id-less records (1 + 1) + a record whose
+	// timestamp is no time (3): the timestamp is a label and never gates the usage.
+	if got := chatsBySeat(snapshot.Chats)["split-socket"]; !got.TokensKnown || got.TokenCount != 1110 {
+		t.Fatalf("split-message token accounting = %#v, want 1110 (each message counted once)", got)
+	}
+	if len(snapshot.Warnings) != 0 {
+		t.Fatalf("an unparsable timestamp warned: %q", snapshot.Warnings)
 	}
 }
 
@@ -710,5 +715,248 @@ func TestLiveOpenCodeCountsAsItsOwnEngine(t *testing.T) {
 	want := pfmengine.MustLookup(pfmengine.OpenCode).LongName
 	if got := statsEngineName(compose.LiveOpenCode); got != want {
 		t.Fatalf("statsEngineName(LiveOpenCode)=%q, want %q", got, want)
+	}
+}
+
+func newStatsJail(t *testing.T) (proc, cgroup string) {
+	t.Helper()
+	root := t.TempDir()
+	proc, cgroup = filepath.Join(root, "proc"), filepath.Join(root, "cgroup")
+	for _, directory := range []string{filepath.Join(proc, "pressure"), cgroup} {
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return proc, cgroup
+}
+
+func writeStatsFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A host counter that cannot be read leaves its column unknown with a warning
+// naming it; the chats and containers beside it are still sampled, and a later
+// good counter never diffs against the unreadable one.
+func TestSamplerKeepsTheSampleWhenAHostCounterIsUnreadable(t *testing.T) {
+	rows := []compose.Row{{Kind: compose.LiveClaude, Socket: "probe-chat", Name: "worker", PanePIDs: []int{100}}}
+	for _, testCase := range []struct {
+		name      string
+		breakFile func(t *testing.T, proc string)
+		warning   func(proc string) string
+		check     func(t *testing.T, header Header)
+	}{
+		{
+			name: "cpu counter",
+			breakFile: func(t *testing.T, proc string) {
+				writeStatsFile(t, filepath.Join(proc, "stat"), "cpu x 0 0 0 0\n")
+			},
+			warning: func(string) string {
+				return `parse host CPU counter "x": strconv.ParseUint: parsing "x": invalid syntax`
+			},
+		},
+		{
+			name: "memory counters",
+			breakFile: func(t *testing.T, proc string) {
+				if err := os.Remove(filepath.Join(proc, "meminfo")); err != nil {
+					t.Fatal(err)
+				}
+			},
+			warning: func(proc string) string {
+				return "read host memory counters: open " + filepath.Join(proc, "meminfo") + ": no such file or directory"
+			},
+			check: func(t *testing.T, header Header) {
+				if header.MemoryBytes != 0 || header.PSIPercent != 7.25 || !header.RAMUnread || !header.SwapUnread {
+					t.Fatalf("header = %#v, want memory and swap unread and the pressure still read", header)
+				}
+			},
+		},
+		{
+			name: "pressure avg10",
+			breakFile: func(t *testing.T, proc string) {
+				writeStatsFile(t, filepath.Join(proc, "pressure", "cpu"), "some avg10=zz avg60=0.00\n")
+			},
+			warning: func(string) string {
+				return `parse CPU pressure avg10: strconv.ParseFloat: parsing "zz": invalid syntax`
+			},
+			check: func(t *testing.T, header Header) {
+				if !header.PSIUnavailable || header.RAMPercent != 50 || header.RAMUnread || header.SwapUnread {
+					t.Fatalf("header = %#v, want PSI unavailable and memory read", header)
+				}
+			},
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			proc, cgroup := newStatsJail(t)
+			writeStatsFixture(t, proc, 1000, 100)
+			testCase.breakFile(t, proc)
+			now := int64(1)
+			sampler := &Sampler{ProcRoot: proc, CgroupRoot: cgroup, CPUCount: 1, Clock: func() int64 { return now }}
+			first, err := sampler.Sample(rows)
+			if err != nil {
+				t.Fatalf("sample failed: %v", err)
+			}
+			if want := testCase.warning(proc); len(first.Warnings) != 1 || first.Warnings[0] != want {
+				t.Fatalf("warnings = %q, want [%q]", first.Warnings, want)
+			}
+			if len(first.Chats) != 1 || first.Chats[0].RSSBytes == 0 {
+				t.Fatalf("chats = %#v, want the chat still sampled", first.Chats)
+			}
+			if testCase.check != nil {
+				testCase.check(t, first.Header)
+			}
+			if testCase.name != "cpu counter" {
+				return
+			}
+			// The next good counter has no baseline to diff against.
+			writeStatsFixture(t, proc, 1200, 130)
+			now = 2_000_000_001
+			second, err := sampler.Sample(rows)
+			if err != nil || second.Header.CPUValid || second.Chats[0].CPUValid {
+				t.Fatalf("second sample = %#v err=%v, want CPU unknown without a baseline", second, err)
+			}
+			writeStatsFixture(t, proc, 1400, 160)
+			now = 4_000_000_002
+			third, err := sampler.Sample(rows)
+			if err != nil || !third.Chats[0].CPUValid ||
+				third.Chats[0].CPUPercent < 14.9 || third.Chats[0].CPUPercent > 15.1 {
+				t.Fatalf("third sample = %#v err=%v, want 15%% chat CPU", third, err)
+			}
+		})
+	}
+}
+
+// A process whose stat record will not parse stays in its chat's tree with
+// unknown CPU; its memory still counts, and the warning names the loss. Its
+// zero ticks are no reading: no CPU delta is told across either side of it.
+func TestSamplerKeepsAProcessWhoseStatRecordWillNotParse(t *testing.T) {
+	const torn = "100 (pane) S 1 0 0 0 0 0 0 0 0 0 zz 0 0\n"
+	for _, testCase := range []struct {
+		name         string
+		firstTorn    bool
+		secondTorn   bool
+		wantWarnings int
+	}{
+		{name: "torn then whole", firstTorn: true, wantWarnings: 0},
+		{name: "whole then torn", secondTorn: true, wantWarnings: 1},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			proc, cgroup := newStatsJail(t)
+			now := int64(1)
+			sampler := &Sampler{ProcRoot: proc, CgroupRoot: cgroup, CPUCount: 1, Clock: func() int64 { return now }}
+			rows := []compose.Row{
+				{Kind: compose.LiveClaude, Socket: "probe-chat", Name: "worker", PanePIDs: []int{100}},
+			}
+			var snapshot Snapshot
+			for index, sample := range []struct {
+				at, system, process uint64
+				torn                bool
+			}{
+				{at: 1, system: 1000, process: 100, torn: testCase.firstTorn},
+				{at: 1_000_000_001, system: 2000, process: 300, torn: testCase.secondTorn},
+			} {
+				now = int64(sample.at)
+				writeStatsFixture(t, proc, sample.system, sample.process)
+				if sample.torn {
+					writeStatsFile(t, filepath.Join(proc, "100", "stat"), torn)
+				}
+				var err error
+				if snapshot, err = sampler.Sample(rows); err != nil {
+					t.Fatalf("sample %d: %v", index, err)
+				}
+			}
+			want := `parse process 100 user ticks: strconv.ParseUint: parsing "zz": invalid syntax; process kept with unknown CPU`
+			if len(snapshot.Warnings) != testCase.wantWarnings ||
+				(testCase.wantWarnings == 1 && snapshot.Warnings[0] != want) {
+				t.Fatalf("warnings = %q, want %d of %q", snapshot.Warnings, testCase.wantWarnings, want)
+			}
+			if len(snapshot.Chats) != 1 || snapshot.Chats[0].NoProcess || snapshot.Chats[0].RSSBytes == 0 {
+				t.Fatalf("chats = %#v, want the chat found with its memory", snapshot.Chats)
+			}
+			if snapshot.Chats[0].CPUValid {
+				t.Fatalf("chat CPU = %v valid, want unknown across a torn record", snapshot.Chats[0].CPUPercent)
+			}
+		})
+	}
+}
+
+// A container whose CPU counter cannot be read stays in the list with CPU
+// unknown and its memory shown.
+func TestDockerContainerKeepsItsRowWhenCPUStatIsUnreadable(t *testing.T) {
+	proc, cgroup := newStatsJail(t)
+	container := filepath.Join(cgroup, "system.slice", "docker-1234567890abcdef.scope")
+	if err := os.MkdirAll(container, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeStatsFixture(t, proc, 1000, 100)
+	writeDockerFixture(t, container, 1_000, 250, 1000)
+	if err := os.Remove(filepath.Join(container, "cpu.stat")); err != nil {
+		t.Fatal(err)
+	}
+	now := int64(1)
+	sampler := &Sampler{ProcRoot: proc, CgroupRoot: cgroup, CPUCount: 1, Clock: func() int64 { return now }}
+	var second Snapshot
+	for _, at := range []int64{1, 1_000_000_001} {
+		now = at
+		var err error
+		if second, err = sampler.Sample(nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := "read Docker CPU 1234567890ab: open " + filepath.Join(container, "cpu.stat") + ": no such file or directory"
+	if len(second.Warnings) != 1 || second.Warnings[0] != want {
+		t.Fatalf("warnings = %q, want [%q]", second.Warnings, want)
+	}
+	if len(second.Docker) != 1 || second.Docker[0].CPUValid || second.Docker[0].MemoryBytes != 250 {
+		t.Fatalf("docker = %#v, want the container kept with CPU unknown", second.Docker)
+	}
+}
+
+// A failed identity lookup is asked again once the retry spacing has passed,
+// never memoized for the sampler's life and never repeated every sample.
+func TestDockerIdentityFailureIsRetriedAfterTheSpacing(t *testing.T) {
+	proc, cgroup := newStatsJail(t)
+	id := "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+	container := filepath.Join(cgroup, "system.slice", "docker-"+id+".scope")
+	if err := os.MkdirAll(container, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeStatsFixture(t, proc, 1000, 100)
+	writeDockerFixture(t, container, 1_000, 200, 1000)
+	calls := 0
+	now := int64(1)
+	sampler := &Sampler{
+		ProcRoot: proc, CgroupRoot: cgroup, CPUCount: 1, Clock: func() int64 { return now },
+		DockerInspect: func(string) (string, string, error) {
+			calls++
+			if calls == 1 {
+				return "", "", fmt.Errorf("daemon down")
+			}
+			return "professor-web", "registry.example/professor:web", nil
+		},
+	}
+	steps := []struct {
+		atNS    int64
+		calls   int
+		name    string
+		warning string
+	}{
+		{1, 1, "1234567890ab", "resolve Docker identity 1234567890ab: daemon down"},
+		{10 * int64(time.Second), 1, "1234567890ab", "resolve Docker identity 1234567890ab: daemon down"},
+		{31 * int64(time.Second), 2, "professor-web", ""},
+	}
+	for _, step := range steps {
+		now = step.atNS
+		snapshot, err := sampler.Sample(nil)
+		if err != nil || len(snapshot.Docker) != 1 || snapshot.Docker[0].Name != step.name || calls != step.calls {
+			t.Fatalf("at %d: docker=%#v calls=%d err=%v, want name %q after %d calls",
+				step.atNS, snapshot.Docker, calls, err, step.name, step.calls)
+		}
+		if (step.warning == "") != (len(snapshot.Warnings) == 0) ||
+			(step.warning != "" && snapshot.Warnings[0] != step.warning) {
+			t.Fatalf("at %d: warnings = %q, want %q", step.atNS, snapshot.Warnings, step.warning)
+		}
 	}
 }

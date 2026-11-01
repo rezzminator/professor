@@ -731,7 +731,8 @@ func TestStdioProxyRefreshesClaudeConversationForEveryChatCall(t *testing.T) {
 		}
 	}
 	writeCrumb("conversation-a")
-	proxy := newStdioProxy(context.Background(), proxyTestAddress(server), io.Discard)
+	var warnings bytes.Buffer
+	proxy := newStdioProxy(context.Background(), proxyTestAddress(server), &warnings)
 	proxy.sidDir = sidDir
 	proxy.identify = func(context.Context) (resolve.Identity, error) {
 		return resolve.Identity{
@@ -764,17 +765,34 @@ func TestStdioProxyRefreshesClaudeConversationForEveryChatCall(t *testing.T) {
 	if id, _ := missingIdentity["id"].(string); id != "" {
 		t.Fatalf("missing current crumb replayed cached id: %+v", missingIdentity)
 	}
+	// An unreadable crumb or breadcrumb directory forwards the call with no
+	// transcript id, as a missing crumb does, and names why on the warnings.
 	if err := os.Mkdir(crumb, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	before := len(received)
 	proxy.forward(context.Background(), []byte(proxyTestToolCall(5, "whoami", `{}`)), &output)
-	if len(received) != before || !strings.Contains(output.String(), "refresh Claude caller transcript") {
-		t.Fatalf(
-			"crumb read failure forwarded mutation or lacked named error: received=%d output=%s",
-			len(received),
-			output.String(),
-		)
+	proxy.sidDir = "relative-sid"
+	proxy.forward(context.Background(), []byte(proxyTestToolCall(51, "whoami", `{}`)), &output)
+	proxy.sidDir = sidDir
+	if len(received) != 5 {
+		t.Fatalf("daemon received %d calls, want the unreadable-crumb calls forwarded too", len(received))
+	}
+	for _, frame := range received[3:5] {
+		identity := frame["params"].(map[string]any)["_meta"].(map[string]any)["pfmProxy"].(map[string]any)
+		if id, present := identity["id"]; present || identity["session"] != "seat" {
+			t.Fatalf(
+				"unreadable crumb forwarded identity %+v (id %v), want the seat with no transcript id",
+				identity,
+				id,
+			)
+		}
+	}
+	wantWarnings := "pfm mcp stdio proxy: refresh Claude caller transcript: read reload breadcrumb \"" + crumb +
+		"\": read " + crumb + ": is a directory; forwarding without a transcript id\n" +
+		"pfm mcp stdio proxy: refresh Claude caller transcript: breadcrumb directory \"relative-sid\" is not absolute; " +
+		"forwarding without a transcript id\n"
+	if warnings.String() != wantWarnings {
+		t.Fatalf("refresh warnings = %q, want %q", warnings.String(), wantWarnings)
 	}
 	if err := os.Remove(crumb); err != nil {
 		t.Fatal(err)

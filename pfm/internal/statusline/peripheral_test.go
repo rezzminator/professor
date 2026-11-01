@@ -107,11 +107,15 @@ func TestCodexQuotaMissingErrorUnknownStaleAndZero(t *testing.T) {
 		{name: "malformed", body: `{`, want: "quota error"},
 		{name: "no window answered draws nothing", body: `{}`},
 		{name: "missing percent", body: `{"primary":{"windowDurationMins":300,"resetsAt":1900000000}}`, want: "quota error"},
+		{name: "unknown reset and length keep the reading", body: `{"primary":{"usedPercent":30,"windowDurationMins":0}}`, want: "?-used:30%"},
+		{name: "invalid percent costs only its window", body: `{"primary":{"usedPercent":101,"windowDurationMins":10080,"resetsAt":1900000000},"secondary":{"usedPercent":30,"windowDurationMins":300,"resetsAt":1900000000}}`, want: "7d-used:error" + stripANSICodes(sep) + "▰▱▱▱▱ 5h-used:30%"},
+		{name: "every window invalid reads as an error", body: `{"primary":{"usedPercent":-1,"windowDurationMins":300,"resetsAt":1900000000}}`, want: "5h-used:error"},
 		{name: "zero", body: `{"primary":{"usedPercent":0,"windowDurationMins":300,"resetsAt":1900000000}}`, want: "5h-used:0%"},
 		{name: "stale", body: `{"primary":{"usedPercent":30,"windowDurationMins":300,"resetsAt":1900000000}}`, want: "stale", stale: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := parityRuntime(t)
+			r.Warn = &bytes.Buffer{}
 			path := filepath.Join(r.CacheDir, "cc-gpt-usage-0.json")
 			if tc.body != "" {
 				if err := os.WriteFile(path, []byte(tc.body), 0o600); err != nil {

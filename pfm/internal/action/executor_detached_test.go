@@ -381,6 +381,14 @@ func TestOpenWatchesTheLaunch(t *testing.T) {
 			wantErr: []string{"resumable chat died at launch", socket, "what it printed was lost"},
 		},
 		{
+			name:   "the server is gone after its pane printed",
+			launch: fakeLaunch{screen: "zsh: command not found: claude\n", command: "zsh", goneAfterReads: 1},
+			wantErr: []string{
+				"the chat resumable chat died at launch: its server on socket " + socket +
+					" is gone (no server running on " + socket + ") — its pane last read: zsh: command not found: claude",
+			},
+		},
+		{
 			// A resume row's pane runs its compound line under a shell that
 			// never execs, and an agent row's under pfm: the engine is a
 			// child on the pane's terminal, never the pane's own command.

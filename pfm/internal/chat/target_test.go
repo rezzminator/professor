@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
@@ -283,6 +284,33 @@ func TestAmbientSelfEnrichmentRestoresTheRosterPaneAndSession(t *testing.T) {
 	}
 }
 
+// A self chat the index cannot enrich stays resolved, its transcript unknown and warned.
+func TestRecordedSelfEnrichmentKeepsTheChatWhenTheIndexIsUnreadable(t *testing.T) {
+	testjail.Fleet(t)
+	blocker := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(paths.EnvCacheDB, filepath.Join(blocker, "index.db"))
+	resolved := headless.Chat{
+		ID: "c3333333-3333-4333-8333-333333333333", Engine: pfmengine.Claude, Socket: "cc-self", Pane: "%2", Live: true,
+	}
+	var warn strings.Builder
+	got, err := enrichRecordedSelf(context.Background(), resolved, &warn)
+	const prefix = "pfm WARN: self transcript c3333333-3333-4333-8333-333333333333 unknown: "
+	if err != nil || got != resolved || !strings.HasPrefix(warn.String(), prefix) ||
+		!strings.Contains(warn.String(), blocker) {
+		t.Fatalf(
+			"enrichRecordedSelf = %+v, %v, warn %q; want %+v kept and a warning starting %q",
+			got,
+			err,
+			warn.String(),
+			resolved,
+			prefix,
+		)
+	}
+}
+
 func TestAmbientSplitSelfEnrichmentKeepsTheLivePane(t *testing.T) {
 	resolved := headless.Chat{
 		ID: "b2222222-2222-4222-8222-222222222222", Engine: "cc",
@@ -310,6 +338,7 @@ func TestCodexSeatsKeepNativeAddressAndRejectsUnusableRows(t *testing.T) {
 		name      string
 		mutate    func(*compose.Row)
 		duplicate bool
+		sibling   bool
 		want      bool
 	}{
 		{name: "native", want: true},
@@ -321,6 +350,7 @@ func TestCodexSeatsKeepNativeAddressAndRejectsUnusableRows(t *testing.T) {
 		{name: "wrong engine", mutate: func(row *compose.Row) { row.Kind = compose.LiveClaude }},
 		{name: "no pane", mutate: func(row *compose.Row) { row.PaneID = "" }},
 		{name: "ambiguous", duplicate: true},
+		{name: "another seat's unusable socket", sibling: true, want: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			row := native
@@ -331,14 +361,19 @@ func TestCodexSeatsKeepNativeAddressAndRejectsUnusableRows(t *testing.T) {
 			if tc.duplicate {
 				rows = append(rows, row)
 			}
-			seats, err := codexSeatsFromRows(rows, values)
-			identity := resolve.Identity{}
-			if err == nil {
-				identity, err = resolve.CodexThreadSeat(native.ID, seats)
+			if tc.sibling {
+				other := native
+				other.ID, other.SeatID, other.Socket = "thread-other", "seat-other", "herdr.sock"
+				rows = append(rows, other)
 			}
+			identity, err := resolve.CodexThreadSeat(native.ID, codexSeatsFromRows(rows, values))
 			found := err == nil
 			if found != tc.want {
-				t.Fatalf("identity = %+v found=%t, want found=%t", identity, found, tc.want)
+				t.Fatalf("identity = %+v found=%t err=%v, want found=%t", identity, found, err, tc.want)
+			}
+			if tc.name == "relative" &&
+				err.Error() != `look up the caller: Codex seat seat-cx: socket: herdr socket must be absolute: "herdr.sock"` {
+				t.Fatalf("relative socket error = %v, want the seat's own socket failure", err)
 			}
 			if !found {
 				return

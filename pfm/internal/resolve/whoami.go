@@ -84,7 +84,8 @@ type PaneOwner struct {
 
 // PaneOwnerLister asks a tmux server which pids own its panes. It is the
 // portable half of cc_pane_of: it asks tmux who it owns rather than asking the
-// kernel what a process was told.
+// kernel what a process was told. Owners it did parse come back beside an
+// error naming the lines it could not.
 type PaneOwnerLister interface {
 	PaneOwners(ctx context.Context, socketPath string) ([]PaneOwner, error)
 }
@@ -364,10 +365,10 @@ func (identifier *Whoami) recoverFromAncestry(
 			return found, true, nil
 		}
 	}
-	owners, err := identifier.paneOwners(ctx)
-	if err != nil {
-		return identity, false, err
-	}
+	// Servers that could not be read cost only their own panes: their reasons
+	// answer the lookup only when no other server proves the caller.
+	owners, ownersErr := identifier.paneOwners(ctx)
+	readErr = errors.Join(readErr, ownersErr)
 	for _, pid := range chain {
 		for _, owner := range owners {
 			if owner.PanePID != pid {
@@ -418,10 +419,15 @@ func (identifier *Whoami) paneOwners(ctx context.Context) ([]PaneOwner, error) {
 		return nil, fmt.Errorf("look up the caller: list tmux sockets: %w", err)
 	}
 	owners := make([]PaneOwner, 0)
+	var failures []error
 	for _, entry := range entries {
 		info, err := entry.Info()
+		if errors.Is(err, os.ErrNotExist) {
+			continue // the server ended between the listing and the stat
+		}
 		if err != nil {
-			return nil, fmt.Errorf("look up the caller: stat tmux socket %s: %w", entry.Name(), err)
+			failures = append(failures, fmt.Errorf("look up the caller: stat tmux socket %s: %w", entry.Name(), err))
+			continue
 		}
 		if info.Mode()&os.ModeSocket == 0 {
 			continue
@@ -432,11 +438,11 @@ func (identifier *Whoami) paneOwners(ctx context.Context) ([]PaneOwner, error) {
 			continue
 		}
 		if err != nil {
-			return nil, fmt.Errorf("look up the caller: read tmux panes on %s: %w", socketPath, err)
+			failures = append(failures, fmt.Errorf("look up the caller: read tmux panes on %s: %w", socketPath, err))
 		}
 		owners = append(owners, rows...)
 	}
-	return owners, nil
+	return owners, errors.Join(failures...)
 }
 
 func engineForSocket(socketName string) string {
@@ -513,13 +519,21 @@ func (lister CommandPaneOwners) PaneOwners(
 		return nil, err
 	}
 	owners := make([]PaneOwner, 0)
+	unparsed, first := 0, ""
 	for _, line := range strings.Split(string(output), "\n") {
 		fields := strings.Fields(strings.TrimSpace(line))
-		if len(fields) != 2 {
+		if len(fields) == 0 {
 			continue
 		}
-		pid, err := strconv.Atoi(fields[0])
-		if err != nil || pid <= 0 {
+		pid := 0
+		if len(fields) == 2 {
+			pid, _ = strconv.Atoi(fields[0]) // a pid that does not parse stays 0: named below
+		}
+		if pid <= 0 {
+			if unparsed == 0 {
+				first = line
+			}
+			unparsed++
 			continue
 		}
 		owners = append(owners, PaneOwner{
@@ -527,6 +541,10 @@ func (lister CommandPaneOwners) PaneOwners(
 			PaneID:     fields[1],
 			PanePID:    pid,
 		})
+	}
+	if unparsed > 0 {
+		// The parsed panes stay usable beside the named loss.
+		return owners, fmt.Errorf("tmux returned %d unparsable pane owner line(s), first %q", unparsed, first)
 	}
 	return owners, nil
 }

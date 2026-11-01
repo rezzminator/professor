@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -127,6 +128,25 @@ func TestResolveEnvNoCurrentDirComposesFromNowhere(t *testing.T) {
 	env, err := ResolveEnv(Request{Runtime: jailRuntime(t), NoCurrentDir: true})
 	if err != nil || env.CurrentDir != "" {
 		t.Fatalf("ResolveEnv(NoCurrentDir) = %+v, %v; want no current directory", env, err)
+	}
+}
+
+// An unreadable primary account must not blank the fleet: the scan composes on
+// the implicit account and reports the fallback among its errors.
+func TestResolveEnvComposesOnTheImplicitAccountPastAnUnreadablePrimary(t *testing.T) {
+	runtime := jailRuntime(t)
+	mirror := filepath.Join(runtime.Paths.Home, ".claude-primary")
+	if err := os.WriteFile(mirror, []byte("garbage\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env, err := ResolveEnv(Request{Runtime: runtime})
+	if err != nil {
+		t.Fatalf("ResolveEnv() = %v, want the implicit account", err)
+	}
+	want := []string{"primary account unreadable (read primary account: parse primary account mirror: " +
+		`strconv.Atoi: parsing "garbage": invalid syntax); composing on account 1`}
+	if env.Primary != 1 || !slices.Equal(env.Faults, want) {
+		t.Fatalf("ResolveEnv() primary = %d, faults = %q; want 1, %q", env.Primary, env.Faults, want)
 	}
 }
 

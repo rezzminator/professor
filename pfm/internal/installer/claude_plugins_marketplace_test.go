@@ -245,17 +245,25 @@ func TestClaudePluginBuildWithMarketplacePlugins(t *testing.T) {
 		}, defaults, nil, "lists no plugins"},
 		{"a name that is not a plugin name", func(t *testing.T) ClaudePluginBuild {
 			return ClaudePluginBuild{
+				Version:    alphaVersion,
+				SourceRepo: manifest(t, `{"plugins":[{"name":"../x","source":"./x"},{"name":"good","source":"./good"}]}`),
+				Plugins:    defaults, PluginsDefault: true,
+			}
+		}, bareList("good"), nil, `plugins[0] name "../x" is not a plugin name`},
+		{"a name listed twice", func(t *testing.T) ClaudePluginBuild {
+			return ClaudePluginBuild{
+				Version: alphaVersion,
+				SourceRepo: manifest(t,
+					`{"plugins":[{"name":"a","source":"./a"},{"name":"a","source":"./b"},{"name":"b","source":"./b"}]}`),
+				Plugins: defaults, PluginsDefault: true,
+			}
+		}, bareList("a", "b"), nil, "lists a twice"},
+		{"only bad names", func(t *testing.T) ClaudePluginBuild {
+			return ClaudePluginBuild{
 				Version: alphaVersion, SourceRepo: manifest(t, `{"plugins":[{"name":"../x","source":"./x"}]}`),
 				Plugins: defaults, PluginsDefault: true,
 			}
 		}, defaults, nil, `plugins[0] name "../x" is not a plugin name`},
-		{"a name listed twice", func(t *testing.T) ClaudePluginBuild {
-			return ClaudePluginBuild{
-				Version:    alphaVersion,
-				SourceRepo: manifest(t, `{"plugins":[{"name":"a","source":"./a"},{"name":"a","source":"./b"}]}`),
-				Plugins:    defaults, PluginsDefault: true,
-			}
-		}, defaults, nil, "lists a twice"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			got, err := test.build(t).WithMarketplacePlugins()

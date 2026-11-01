@@ -64,10 +64,14 @@ func (installer *engine) retireStateDirs() {
 // with their callers at v0.93.0 (docs/dev/pfm-architecture.md Open ruling 6).
 func (installer *engine) retireGptHooks() error {
 	var failures []error
-	receipt, receiptErr := readRetiredGptHookReceipt(installer.managedRoot)
+	receipt, versionNote, receiptErr := readRetiredGptHookReceipt(installer.managedRoot)
 	if receiptErr != nil {
 		installer.say("  warn    %v", receiptErr)
 		installer.record("warn", "retired gpt hook receipt unreadable", receiptErr)
+	}
+	if versionNote != "" {
+		installer.say("  warn    %s", versionNote)
+		installer.record("warn", versionNote, nil)
 	}
 	current, err := retiredGptHookTargets(retiredGptHookDirs(
 		installer.options.Home, installer.options.ConfigDir, installer.options.ClaudeAccounts,
@@ -144,32 +148,37 @@ type retiredGptHookReceipt struct {
 
 // readRetiredGptHookReceipt returns the link locations the receipt names. It
 // remembers locations, not permission to remove them: each link is still
-// checked against its exact managed source.
-func readRetiredGptHookReceipt(managedRoot string) ([]string, error) {
+// checked against its exact managed source, so a receipt whose targets all
+// validate is used whatever its version, which only earns versionNote.
+func readRetiredGptHookReceipt(managedRoot string) (targets []string, versionNote string, err error) {
 	path := filepath.Join(managedRoot, retiredGptHookReceiptName)
 	raw, absent, err := readHookFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("read gpt hook ownership %s: %w", path, err)
+		return nil, "", fmt.Errorf("read gpt hook ownership %s: %w", path, err)
 	}
 	if absent {
-		return nil, nil
+		return nil, "", nil
 	}
 	var receipt retiredGptHookReceipt
 	if err := json.Unmarshal(raw, &receipt); err != nil {
-		return nil, fmt.Errorf("decode gpt hook ownership %s: %w; delete it to finish the retirement", path, err)
+		return nil, "", fmt.Errorf("decode gpt hook ownership %s: %w; delete it to finish the retirement", path, err)
 	}
-	if receipt.Version != 1 || receipt.Targets == nil {
-		return nil, fmt.Errorf(
-			"gpt hook ownership %s: want version 1 with a targets array; delete it to finish the retirement", path,
+	if receipt.Targets == nil {
+		return nil, "", fmt.Errorf(
+			"gpt hook ownership %s: want a targets array; delete it to finish the retirement", path,
 		)
 	}
 	for _, target := range receipt.Targets {
 		if !filepath.IsAbs(target) || filepath.Clean(target) != target ||
 			!slices.Contains(retiredGptHookAssets, filepath.Base(target)) {
-			return nil, fmt.Errorf("gpt hook ownership %s: invalid asset target %q", path, target)
+			return nil, "", fmt.Errorf("gpt hook ownership %s: invalid asset target %q", path, target)
 		}
 	}
-	return receipt.Targets, nil
+	if receipt.Version != 1 {
+		versionNote = fmt.Sprintf("gpt hook ownership %s: version %d, want 1; its targets validate and are used",
+			path, receipt.Version)
+	}
+	return receipt.Targets, versionNote, nil
 }
 
 // inspectRetiredGptHookLink reports whether target is a symlink resolving

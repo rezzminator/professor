@@ -11,7 +11,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
-	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/workbench"
@@ -129,11 +128,7 @@ func codexSubcommand(args []string) (subcommand string, help bool) {
 
 // CodexLaunch applies the current primary account's Codex policy at launch time.
 func CodexLaunch(args []string, stderr io.Writer, runtime config.Runtime) int {
-	primary, err := fleet.PrimaryAccount(runtime.Paths, runtime.Config)
-	if err != nil {
-		fmt.Fprintf(stderr, "resolve primary account: %v\n", err)
-		return 1
-	}
+	primary := launchPrimaryAccount(runtime, stderr)
 	policy := runtime.Config.EffectiveCodex(primary)
 	binaryName := policy.Binary
 	if binaryName == "" {

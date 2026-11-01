@@ -125,9 +125,8 @@ func TestHarnessFencedIdentityExampleRemainsBehavioral(t *testing.T) {
 	}
 }
 
-// A baseline that cannot be used says WHICH baseline and WHY: the .model read
-// error, the pinned body's read error, or the digest the body no longer
-// matches. "missing, unreadable or inconsistent" alone leaves the operator to
+// A baseline that cannot be used says WHICH baseline and WHY: the pinned
+// body's read error, or the digest the body no longer matches. "missing, unreadable or inconsistent" alone leaves the operator to
 // guess which of the three it was.
 func TestHarnessBaselineUnavailableNamesItsPathAndCause(t *testing.T) {
 	saved := HarnessCaptureOverride
@@ -197,12 +196,6 @@ func TestHarnessBaselineUnavailableNamesItsPathAndCause(t *testing.T) {
 			},
 			cause: `body file "nested/body.md" is not a base name`,
 			state: "baseline digest malformed",
-		},
-		{
-			name:          "model file missing",
-			breakBaseline: func(dir string) error { return os.Remove(filepath.Join(dir, model.Stem+".model")) },
-			cause:         model.Stem + ".model: no such file or directory",
-			state:         "baseline inconsistent",
 		},
 		{
 			name:          "pinned body missing",

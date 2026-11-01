@@ -17,6 +17,7 @@ func heldCodexRoot(links []FDLink, roots []string) (string, error) {
 	seen := map[string]bool{}
 	selected := ""
 	observed := false
+	unwritten := ""
 	for _, link := range links {
 		path := filepath.Clean(link.Target)
 		if seen[path] {
@@ -35,6 +36,12 @@ func heldCodexRoot(links []FDLink, roots []string) (string, error) {
 		observed = true
 		seen[path] = true
 		header, err := codexmeta.ReadHeader(path)
+		if errors.Is(err, codexmeta.ErrNoSessionMeta) {
+			// Opened and not yet headed — a child the parent just spawned. It
+			// refuses only when no other held rollout verifies as the root.
+			unwritten = path
+			continue
+		}
 		if err != nil {
 			return "", fmt.Errorf("read held rollout %s: %w", path, err)
 		}
@@ -48,6 +55,9 @@ func heldCodexRoot(links []FDLink, roots []string) (string, error) {
 			return "", fmt.Errorf("conflicting held root rollouts %s and %s", selected, path)
 		}
 		selected = path
+	}
+	if selected == "" && unwritten != "" {
+		return "", fmt.Errorf("read held rollout %s: %w", unwritten, codexmeta.ErrNoSessionMeta)
 	}
 	if observed && selected == "" {
 		return "", errHeldSubagents

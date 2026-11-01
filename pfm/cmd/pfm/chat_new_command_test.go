@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -77,7 +78,7 @@ func TestChatNewWorkbench(t *testing.T) {
 			engine, socket, wantName := "cc", "cc-workbench", "_SCRIBE:1"
 			extra := []string{}
 			wantEffort, wantChannel := "xhigh", filepath.Join(dir, ".professor", "scribe.md")
-			wantCode, wantError := 0, ""
+			wantCode, wantError, wantWarning := 0, "", ""
 			mirrorRecord := ""
 			switch name {
 			case "next number":
@@ -176,7 +177,8 @@ func TestChatNewWorkbench(t *testing.T) {
 				if err == nil {
 					t.Fatal("fixture ForLaunch did not fail")
 				}
-				wantCode, wantError = 2, "pfm chat new: "+err.Error()+"\n"
+				wantName, wantChannel, wantEffort = "x", "", ""
+				wantWarning = "pfm chat new: " + err.Error() + "; starting without the workbench persona\n"
 			case "outside":
 				dir = filepath.Join(jail.root, "work")
 				wantCode, wantError = 2, "usage: pfm chat new [--name NAME]"
@@ -236,6 +238,9 @@ func TestChatNewWorkbench(t *testing.T) {
 				}
 				return
 			}
+			if got := stderr.String(); got != wantWarning {
+				t.Fatalf("launch stderr = %q; want %q", got, wantWarning)
+			}
 			if !strings.Contains(stdout.String(), "\t"+wantName+"\t") {
 				t.Fatalf("launch name = %q; want %q", stdout.String(), wantName)
 			}
@@ -264,7 +269,11 @@ func TestChatNewWorkbench(t *testing.T) {
 						t.Fatalf("role prompt = %q, %v; want %q", raw, err, want)
 					}
 				}
-				if !strings.Contains(argv, "--system-prompt-file "+wantChannel) {
+				if wantChannel == "" {
+					if !strings.Contains(argv, "--name x") || strings.Contains(argv, "--system-prompt-file") {
+						t.Fatalf("Claude argv = %q; want the launch named x with no workbench prompt", argv)
+					}
+				} else if !strings.Contains(argv, "--system-prompt-file "+wantChannel) {
 					t.Fatalf("Claude argv = %q; want prompt %s", argv, wantChannel)
 				}
 				if wantEffort != "" && !strings.Contains(argv, "--effort "+wantEffort) {
@@ -749,5 +758,52 @@ func TestChatNewRejectsCallerReadFailure(t *testing.T) {
 			stdout.String(),
 			stderr.String(),
 		)
+	}
+}
+
+func TestChatNewCodexRequiresLogin(t *testing.T) {
+	jail := newRunJail(t)
+	t.Cleanup(func() { jail.killSockets(t) })
+	home := filepath.Join(jail.root, "codex")
+	configPath := writeConfigFixture(t, jail.root,
+		`{"version":2,"codex":{"homes":[{"id":1,"home":"`+home+`"}]}}`)
+	if err := os.Remove(filepath.Join(home, "auth.json")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PFM_TEST_FRESH_SOCKET", "cx-logged-out-new")
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"--config", configPath, "chat", "new", "--engine", "codex", "x"}, &stdout, &stderr)
+	entries, err := os.ReadDir(jail.tmuxDir)
+	if code != 1 || !strings.Contains(stderr.String(), "run codex login") || err != nil || len(entries) != 0 {
+		t.Fatalf("chat new code=%d stderr=%q sockets=%v error=%v", code, stderr.String(), entries, err)
+	}
+}
+
+func TestChatNewCodexAdmitsAnAPIKeyHome(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	jail := newRunJail(t)
+	t.Cleanup(func() { jail.killSockets(t) })
+	home := filepath.Join(jail.root, "codex")
+	configPath := writeConfigFixture(t, jail.root,
+		`{"version":2,"codex":{"homes":[{"id":1,"home":"`+home+`"}]}}`)
+	if err := os.WriteFile(
+		filepath.Join(home, "auth.json"),
+		[]byte(`{"OPENAI_API_KEY":"sk-fixture","tokens":null}`),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PFM_TEST_FRESH_SOCKET", "cx-api-key-new")
+	var stdout, stderr bytes.Buffer
+	code := run([]string{
+		"--config", configPath, "chat", "new", "--engine", "codex",
+		"--cwd", filepath.Join(jail.root, "work"), "x",
+	}, &stdout, &stderr)
+	if code != 0 || strings.Contains(stderr.String(), "run codex login") ||
+		!strings.Contains(stdout.String(), "attach: tmux -L cx-") {
+		t.Fatalf("chat new code=%d stdout=%q stderr=%q; want API-key home to launch",
+			code, stdout.String(), stderr.String())
 	}
 }

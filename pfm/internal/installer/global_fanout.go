@@ -39,6 +39,7 @@ func ReportGlobalAgents(
 		CodexHomes:      ResolveCodexHomes(home, codexHomes),
 		ClaudeAbsent:    claudeAbsent,
 	}
+	resolved := true
 	if !claudeAbsent {
 		repo, cloned, err := RecordedGlobalClone(home)
 		if err != nil {
@@ -48,20 +49,24 @@ func ReportGlobalAgents(
 				home,
 				err,
 			)
-			return 1, 0
-		}
-		if cloned {
+			// The version rows need no clone; the registry rows would read the
+			// unset SourceRepo as NO-CLONE, so only they are left out.
+			warnings, resolved = 1, false
+		} else if cloned {
 			options.SourceRepo = repo
 		}
 	}
 	runner := enginesync.Runner{Env: env, Home: home, Capabilities: capabilities}
 	if err := runner.RequireMinimumVersion(context.Background()); err != nil {
 		fmt.Fprintf(w, "doctor: global-agents state=FAIL %v\n", err)
-		return 0, 1
+		return warnings, 1
 	}
 	versionWarnings, versionFailures := ReportEngineSyncVersions(w, home, env, accountDirs)
 	warnings += versionWarnings
 	failures += versionFailures
+	if !resolved {
+		return warnings, failures
+	}
 	rows, err := runner.MachineDoctor(context.Background(), options)
 	if err != nil {
 		fmt.Fprintf(w, "doctor: global-agents state=FAIL %v\n", err)
@@ -127,24 +132,24 @@ func (installer *engine) wireTemplateSkills(sourceRepo string) error {
 		return fmt.Errorf("inspect global skills source %s: %w", source, err)
 	}
 	linked := 0
+	var failed error // one skill's failure costs only that skill
 	for _, entry := range entries {
 		path := filepath.Join(source, entry.Name())
 		info, statErr := os.Stat(path)
 		if statErr != nil {
-			return fmt.Errorf("inspect global skill source %s: %w", path, statErr)
+			installer.skip("SKILL-SOURCE-UNREADABLE " + entry.Name() + " (" + statErr.Error() + ")")
+			continue
 		}
 		if !info.IsDir() {
 			continue
 		}
 		linked++
-		if err := installer.wireGlobalSkill(sourceRepo, path, entry.Name()); err != nil {
-			return err
-		}
+		failed = errors.Join(failed, installer.wireGlobalSkill(sourceRepo, path, entry.Name()))
 	}
 	if linked == 0 {
 		installer.skip("global skills source empty at " + source + " (0 skill directories)")
 	}
-	return nil
+	return failed
 }
 
 // wireGlobalSkill links one clone skill directory into the store and ~/.agents/skills.
@@ -155,13 +160,11 @@ func (installer *engine) wireGlobalSkill(sourceRepo, source, name string) error 
 	} else if err != nil {
 		return fmt.Errorf("inspect %s skill source: %w", name, err)
 	}
+	var failed error
 	for _, target := range installer.skillSourceLinkTargets(name) {
-		if err := installer.wireGlobalLink(source, target, sourceRepo, true); err != nil {
-			return err
-		}
+		failed = errors.Join(failed, installer.wireGlobalLink(source, target, sourceRepo, true))
 	}
-
-	return nil
+	return failed
 }
 
 // globalRulesSource is the clone directory whose *.md files become the store

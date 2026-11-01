@@ -120,13 +120,9 @@ func applyLog(result *Config, raw *rawLog) error {
 	}
 	if len(raw.Components) != 0 {
 		result.Log.Components = make(map[string]string, len(raw.Components))
+		// An unknown component (a newer build's, a typo) is kept: obs.ResolveLevels
+		// names it on every command's stderr and in doctor, and it sets nothing.
 		for name, value := range raw.Components {
-			if !obs.KnownComponent(name) {
-				return fmt.Errorf(
-					"config %s: log.components: %q is not one of %s",
-					result.Path, name, strings.Join(obs.Components, ", "),
-				)
-			}
 			level, err := canonicalLogLevel(value)
 			if err != nil {
 				return fmt.Errorf("config %s: log.components.%s %w", result.Path, name, err)

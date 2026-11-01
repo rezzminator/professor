@@ -36,6 +36,10 @@ type fireTiming struct {
 
 const scheduleRetryGrace = 5 * time.Minute
 
+// errDamagedReceipt marks a receipt file that is there but holds no usable
+// record of an attempt: the fire then stands on the transcript proof alone.
+var errDamagedReceipt = errors.New("damaged delivery receipt")
+
 func fireTag(r fleetdb.Schedule) string {
 	return fmt.Sprintf("[pfm-schedule id=%d fire=%s]", r.ID, r.NextFire.UTC().Format(time.RFC3339Nano))
 }
@@ -54,10 +58,10 @@ func readReceipt(path, tag string) (deliveryReceipt, error) {
 	}
 	var receipt deliveryReceipt
 	if err := json.Unmarshal(data, &receipt); err != nil {
-		return deliveryReceipt{}, fmt.Errorf("decode delivery receipt: %w", err)
+		return deliveryReceipt{}, fmt.Errorf("%w: decode %s: %w", errDamagedReceipt, path, err)
 	}
 	if receipt.Tag == "" || receipt.Attempted.IsZero() {
-		return deliveryReceipt{}, fmt.Errorf("invalid delivery receipt %s", path)
+		return deliveryReceipt{}, fmt.Errorf("%w: %s has no tag or attempt time", errDamagedReceipt, path)
 	}
 	if receipt.Tag != tag {
 		return deliveryReceipt{}, nil
@@ -114,6 +118,16 @@ func (deliverer *chatDeliverer) submitSchedule(ctx context.Context, r fleetdb.Sc
 		return nil // Independent proof can reconcile even a damaged receipt.
 	}
 	receipt, err := readReceipt(path, fireTag(r))
+	damaged := errors.Is(err, errDamagedReceipt)
+	if damaged {
+		// The transcript just showed no fire tag, so the wake is owed; whether an
+		// earlier attempt is still in flight is unknown, so send it idle-only,
+		// as a retry does, rather than hold the schedule due forever.
+		obs.Logger(ctx).WarnContext(
+			ctx, fmt.Sprintf("schedule %d: %v; sending the wake idle-only", r.ID, err), obs.FieldChat, r.SessionID,
+		)
+		receipt, err = deliveryReceipt{}, nil
+	}
 	if err != nil {
 		return err
 	}
@@ -140,11 +154,12 @@ func (deliverer *chatDeliverer) submitSchedule(ctx context.Context, r fleetdb.Sc
 	}
 	previous := receipt
 	receipt = deliveryReceipt{Tag: fireTag(r), Attempted: now}
+	idleOnly := retrying || damaged
 	if err := writeReceipt(path, receipt); err != nil {
 		return err // No input without a durable attempted receipt.
 	}
 	res, callErr := deliverer.call(ctx, r, pfmcall.Request{
-		Target: target, Message: message, RequireIdle: retrying,
+		Target: target, Message: message, RequireIdle: idleOnly,
 	})
 	if callErr == nil && res.Code == 0 && res.Typed && (res.Status == "delivered" || res.Status == "queued") {
 		receipt.Delivered = true

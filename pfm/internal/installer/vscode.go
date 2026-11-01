@@ -139,6 +139,9 @@ func (installer *engine) wireVSCode() error {
 	}
 	sort.Strings(ordered)
 
+	// One settings file's failure costs that file: the rest still merge, and
+	// the ledger below records every file this pass changed.
+	var failures []error
 	for _, path := range ordered {
 		record, alreadyOwned := ownership[path]
 		if !alreadyOwned {
@@ -150,7 +153,8 @@ func (installer *engine) wireVSCode() error {
 				installer.skip("VS Code settings skipped " + path + ": " + err.Error())
 				continue
 			}
-			return err
+			failures = append(failures, installer.fail(err))
+			continue
 		}
 		if next.ProfileOwned || next.DefaultOwned || len(next.ScalarOwned) != 0 || next.EnvOwned ||
 			next.EnvValue != "" {
@@ -165,21 +169,28 @@ func (installer *engine) wireVSCode() error {
 		if err := installer.change("merge VS Code PFM terminal profile "+path, func() error {
 			return installer.writeVSCodeSettings(path, updated)
 		}); err != nil {
-			return err
+			ownership[path] = record
+			if !alreadyOwned {
+				delete(ownership, path)
+			}
+			failures = append(failures, installer.fail(err))
 		}
 	}
-	// A failed build still lets the links and ledger land; the run fails on it.
+	// A failed build or link still lets the other links and the ledger land;
+	// the run fails on it.
 	promptErr := installer.writeVSCodeSystemPrompt()
-	extensions, err = installer.linkVSCodeExtension(extensions)
-	if err != nil {
-		return errors.Join(promptErr, err)
+	if promptErr != nil {
+		promptErr = installer.fail(promptErr)
 	}
+	extensions, linkErr := installer.linkVSCodeExtension(extensions)
 	indexRegistrations = make([]string, 0, len(extensions))
 	for _, target := range extensions {
 		indexRegistrations = append(indexRegistrations, filepath.Join(filepath.Dir(target), vscodeExtensionIndexName))
 	}
 	return errors.Join(
+		errors.Join(failures...),
 		promptErr,
+		linkErr,
 		installer.writeVSCodeOwnership(ownershipPath, ownershipRaw, ownership, extensions, indexRegistrations),
 	)
 }
@@ -241,7 +252,12 @@ func (installer *engine) linkVSCodeExtension(recorded []string) ([]string, error
 	}
 	sort.Strings(ordered)
 
+	recordedSet := make(map[string]bool, len(recorded))
+	for _, target := range recorded {
+		recordedSet[target] = true
+	}
 	var kept []string
+	var failures []error
 	for _, target := range ordered {
 		extensionsDir := filepath.Dir(target)
 		root := filepath.Dir(extensionsDir)
@@ -249,23 +265,37 @@ func (installer *engine) linkVSCodeExtension(recorded []string) ([]string, error
 			installer.skip(target + " VS Code product " + root + " no longer exists; dropped extension link")
 			continue
 		}
-		if info, err := os.Stat(extensionsDir); err != nil || !info.IsDir() {
-			if err := installer.change("create "+extensionsDir, func() error {
-				return os.MkdirAll(extensionsDir, 0o755)
-			}); err != nil {
-				return nil, fmt.Errorf("link VS Code extension %s: %w", target, err)
-			}
+		// One product's failure costs that product: the rest still link, and a
+		// target pfm owned or linked this pass stays in the ledger.
+		linked, err := installer.linkVSCodeTarget(source, extensionsDir, target)
+		if err != nil {
+			failures = append(failures, err)
 		}
-		if _, err := installer.ensureLink(source, target); err != nil {
-			return nil, fmt.Errorf("link VS Code extension %s: %w", target, err)
+		if err == nil || linked || recordedSet[target] {
+			kept = append(kept, target)
 		}
-		if _, err := installer.registerVSCodeExtension(extensionsDir); err != nil {
-			return nil, fmt.Errorf("register VS Code extension %s: %w", target, err)
-		}
-		kept = append(kept, target)
 	}
 	sort.Strings(kept)
-	return kept, nil
+	return kept, errors.Join(failures...)
+}
+
+// linkVSCodeTarget links and registers one product's extension, reporting
+// whether the link itself landed.
+func (installer *engine) linkVSCodeTarget(source, extensionsDir, target string) (bool, error) {
+	if info, err := os.Stat(extensionsDir); err != nil || !info.IsDir() {
+		if err := installer.change("create "+extensionsDir, func() error {
+			return os.MkdirAll(extensionsDir, 0o755)
+		}); err != nil {
+			return false, fmt.Errorf("link VS Code extension %s: %w", target, err)
+		}
+	}
+	if _, err := installer.ensureLink(source, target); err != nil {
+		return false, fmt.Errorf("link VS Code extension %s: %w", target, err)
+	}
+	if _, err := installer.registerVSCodeExtension(extensionsDir); err != nil {
+		return true, fmt.Errorf("register VS Code extension %s: %w", target, err)
+	}
+	return true, nil
 }
 
 func (installer *engine) mergeVSCodeSettings(

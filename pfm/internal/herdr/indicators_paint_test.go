@@ -105,6 +105,30 @@ func TestAnUnrecognisedStatusPaintsUnknownAndIsNamedOnStderrOnce(t *testing.T) {
 	}
 }
 
+// A pane Herdr lists without an id is named once and left unpainted; every
+// other target still paints.
+func TestAnIdlessPaneIsNamedOnceAndTheRestPaint(t *testing.T) {
+	herdr := &fakeIndicatorHerdr{
+		panes: []*fakeTarget{
+			{ID: "", Workspace: "w1", Status: "working"},
+			{ID: "w1:p2", Workspace: "w1", Status: "working"},
+		},
+	}
+	painter, _, stderr := newTestPainter(t, herdr, phaseOn)
+	for range 2 {
+		if _, _, err := painter.paint(context.Background()); err != nil {
+			t.Fatalf("paint = %v", err)
+		}
+	}
+	if want := map[string]string{IndicatorWorking: GlyphWorking}; !maps.Equal(herdr.panes[1].Tokens, want) {
+		t.Fatalf("w1:p2 tokens = %v, want %v", herdr.panes[1].Tokens, want)
+	}
+	want := `herdr indicators: socket /fake/herdr.sock: herdr pane.list: an entry has no pane_id (status "working"), left unpainted` + "\n"
+	if stderr.String() != want {
+		t.Fatalf("stderr = %q, want %q", stderr, want)
+	}
+}
+
 func TestPaintWritesOnlyWhatChanged(t *testing.T) {
 	herdr := &fakeIndicatorHerdr{
 		panes: []*fakeTarget{
@@ -243,16 +267,12 @@ func TestAWriteThatCannotReachHerdrFailsThePaintWithItsContext(t *testing.T) {
 
 func TestMalformedListsAreErrors(t *testing.T) {
 	for name, tc := range map[string]struct{ panes, spaces, want string }{
-		"pane type":       {`{"type":"nope","panes":[]}`, `{"type":"workspace_list","workspaces":[]}`, "pane_list"},
-		"workspace type":  {`{"type":"pane_list","panes":[]}`, `{"type":"x","workspaces":[]}`, "workspace_list"},
-		"pane not json":   {`[1`, `{"type":"workspace_list","workspaces":[]}`, "pane.list"},
-		"pane without id": {`{"type":"pane_list","panes":[{"agent_status":"idle"}]}`, `{"type":"workspace_list","workspaces":[]}`, "pane_id"},
-		"space without id": {
-			`{"type":"pane_list","panes":[]}`, `{"type":"workspace_list","workspaces":[{"agent_status":"idle"}]}`, "workspace_id",
-		},
+		"pane type":      {`{"type":"nope","panes":[]}`, `{"type":"workspace_list","workspaces":[]}`, "pane_list"},
+		"workspace type": {`{"type":"pane_list","panes":[]}`, `{"type":"x","workspaces":[]}`, "workspace_list"},
+		"pane not json":  {`[1`, `{"type":"workspace_list","workspaces":[]}`, "pane.list"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			targets, err := decodeIndicatorTargets(json.RawMessage(tc.panes), json.RawMessage(tc.spaces))
+			targets, _, err := decodeIndicatorTargets(json.RawMessage(tc.panes), json.RawMessage(tc.spaces))
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("decode = %v, %v, want an error naming %q", targets, err, tc.want)
 			}
@@ -261,16 +281,24 @@ func TestMalformedListsAreErrors(t *testing.T) {
 }
 
 func TestDecodeReadsPanesThenWorkspacesWithAbsentTokensEmpty(t *testing.T) {
-	targets, err := decodeIndicatorTargets(
+	// An entry with no id cannot be painted: it is named, and the rest still are.
+	targets, skipped, err := decodeIndicatorTargets(
 		json.RawMessage(
-			`{"type":"pane_list","panes":[{"pane_id":"w1:p1","workspace_id":"w1","agent_status":"blocked","tokens":{"pfm_blocked":"●"},"agent":"claude"}]}`,
+			`{"type":"pane_list","panes":[{"agent_status":"idle"},{"pane_id":"w1:p1","workspace_id":"w1","agent_status":"blocked","tokens":{"pfm_blocked":"●"},"agent":"claude"}]}`,
 		),
 		json.RawMessage(
-			`{"type":"workspace_list","workspaces":[{"workspace_id":"w1","label":"x","agent_status":"done"}]}`,
+			`{"type":"workspace_list","workspaces":[{"workspace_id":"w1","label":"x","agent_status":"done"},{"agent_status":"working"}]}`,
 		),
 	)
 	if err != nil {
 		t.Fatal(err)
+	}
+	wantSkipped := []string{
+		`herdr pane.list: an entry has no pane_id (status "idle")`,
+		`herdr workspace.list: an entry has no workspace_id (status "working")`,
+	}
+	if !slices.Equal(skipped, wantSkipped) {
+		t.Fatalf("skipped = %q, want %q", skipped, wantSkipped)
 	}
 	want := []indicatorTarget{
 		{kind: "pane", id: "w1:p1", status: "blocked", tokens: map[string]string{IndicatorBlocked: GlyphBlocked}},

@@ -194,6 +194,12 @@ func TestPresenceRequiresExplicitEnumerationArrays(t *testing.T) {
 					if got != PresenceNotInHerdr || warn.Len() != 0 {
 						t.Fatalf("explicit empty arrays = %q, warning %q", got, warn.String())
 					}
+				} else if list.method != "pane.list" {
+					// The explicit empty pane list proves the pane gone; the
+					// unreadable agent or label list is named beside it.
+					if got != PresenceNotInHerdr || !strings.Contains(warn.String(), list.method) {
+						t.Fatalf("invalid %s enumeration = %q, warning %q", list.method, got, warn.String())
+					}
 				} else if !strings.HasPrefix(got, presenceUnreachableLead) ||
 					!strings.Contains(got, list.method) || !strings.Contains(warn.String(), list.method) {
 					t.Fatalf(
@@ -352,6 +358,9 @@ func TestPresenceFailedLookupReadsHerdrErrorNeverNotInHerdr(t *testing.T) {
 	wrongType := serveHerdr(t, map[string]string{
 		"pane.list": panesJSON, "agent.list": agentsJSON, "workspace.list": `{"type":"nope"}`,
 	})
+	agentsWrongType := serveHerdr(t, map[string]string{
+		"pane.list": panesJSON, "agent.list": `{"type":"nope"}`, "workspace.list": workspacesJSON,
+	})
 	deadSocket := filepath.Join(t.TempDir(), "dead.sock")
 	client := func(socket string) string {
 		return storedWith(map[string]Client{"1": {Pane: "w6:p2", Terminal: "term_a", Socket: socket}})
@@ -362,6 +371,7 @@ func TestPresenceFailedLookupReadsHerdrErrorNeverNotInHerdr(t *testing.T) {
 			"/t/cc-dial|dial":  client(deadSocket),
 			"/t/cc-refuse|ref": client(refusing.path),
 			"/t/cc-type|type":  client(wrongType.path),
+			"/t/cc-agent|agt":  client(agentsWrongType.path),
 			"/t/cc-json|json":  "{not json",
 			"/t/cc-nosock|nos": storedWith(map[string]Client{"1": {Pane: "w6:p2"}}),
 		},
@@ -371,7 +381,6 @@ func TestPresenceFailedLookupReadsHerdrErrorNeverNotInHerdr(t *testing.T) {
 		{SocketPath: "/t/cc-ok", Session: "ok"},
 		{SocketPath: "/t/cc-dial", Session: "dial"},
 		{SocketPath: "/t/cc-refuse", Session: "ref"},
-		{SocketPath: "/t/cc-type", Session: "type"},
 		{SocketPath: "/t/cc-json", Session: "json"},
 		{SocketPath: "/t/cc-nosock", Session: "nos"},
 		{SocketPath: "/t/cc-tmux", Session: "tmuxerr"},
@@ -381,6 +390,10 @@ func TestPresenceFailedLookupReadsHerdrErrorNeverNotInHerdr(t *testing.T) {
 			Session:    "pf",
 			Err:        errors.New("resolve socket \"x/y\": must be one relative tmux socket name"),
 		},
+		// Panes alone place a client: an unreadable label or agent list is
+		// named on the warning stream and shown as such, never "unreachable".
+		{SocketPath: "/t/cc-type", Session: "type"},
+		{SocketPath: "/t/cc-agent", Session: "agt"},
 	}
 	var warn strings.Builder
 	got := probeFor(tmux, true, &warn).Presence(context.Background(), seats)
@@ -390,7 +403,6 @@ func TestPresenceFailedLookupReadsHerdrErrorNeverNotInHerdr(t *testing.T) {
 	causes := []string{
 		"dial",
 		"forbidden",
-		"workspace_list",
 		"decode",
 		"no pane or no Herdr socket",
 		"no server running",
@@ -400,7 +412,7 @@ func TestPresenceFailedLookupReadsHerdrErrorNeverNotInHerdr(t *testing.T) {
 	// A Herdr socket that could not be read is unreachable; every other failure
 	// stays a herdr error.
 	leads := []string{
-		"herdr unreachable: ", "herdr unreachable: ", "herdr unreachable: ",
+		"herdr unreachable: ", "herdr unreachable: ",
 		"herdr error: ", "herdr error: ", "herdr error: ", "herdr error: ", "herdr error: ",
 	}
 	for offset, cause := range causes {
@@ -412,8 +424,25 @@ func TestPresenceFailedLookupReadsHerdrErrorNeverNotInHerdr(t *testing.T) {
 			t.Errorf("seat %d failed lookup read as %q", offset+1, PresenceNotInHerdr)
 		}
 	}
-	if lines := strings.Count(warn.String(), "\n"); lines != len(causes) {
-		t.Errorf("warn lines = %d, want one per failed seat (%d):\n%s", lines, len(causes), warn.String())
+	if got[len(got)-2] != "w6:p2 w6 idle pfm-1" || got[len(got)-1] != "w6:p2 .professor agents-unread" {
+		t.Errorf("partial socket reads = %q, %q; want the pane by workspace id, then its agent unread",
+			got[len(got)-2], got[len(got)-1])
+	}
+	for _, named := range []string{
+		"pfm chat ls: herdr socket " + wrongType.path + `: herdr workspace.list: result type "nope", want workspace_list — panes shown by workspace id`,
+		"pfm chat ls: herdr socket " + agentsWrongType.path + `: herdr agent.list: result type "nope", want agent_list — panes shown with agents-unread`,
+	} {
+		if !strings.Contains(warn.String(), named) {
+			t.Errorf("warnings do not name %q:\n%s", named, warn.String())
+		}
+	}
+	if lines := strings.Count(warn.String(), "\n"); lines != len(causes)+2 {
+		t.Errorf(
+			"warn lines = %d, want one per failed seat and partial socket (%d):\n%s",
+			lines,
+			len(causes)+2,
+			warn.String(),
+		)
 	}
 }
 
@@ -491,11 +520,29 @@ func TestPresenceLiveClientCases(t *testing.T) {
 	cases := []struct {
 		name     string
 		clients  string
+		stored   string
 		envs     map[int]map[string]string
 		hookless func(Seat) (bool, bool)
 		want     string
 	}{
 		{name: "no client", clients: "", want: PresenceNotInHerdr},
+		// A registered record that cannot be read never hides the live client.
+		{
+			name: "an undecodable record still shows the live client and names it", clients: "66597\n",
+			stored:   "{not json",
+			envs:     map[int]map[string]string{66597: clientEnv(fake.path, "w6:p2")},
+			hookless: unknownHookless(true, false),
+			want: `w6:p2 .professor unknown KEYS, herdr error: decode @pfm_herdr of KEYS ("{not json"): ` +
+				"invalid character 'n' looking for beginning of object key string",
+		},
+		{
+			name: "a malformed registered client still shows the live one and names it", clients: "66597\n",
+			stored:   storedWith(map[string]Client{"5": {Pane: "w6:p2"}}),
+			envs:     map[int]map[string]string{66597: clientEnv(fake.path, "w6:p2")},
+			hookless: unknownHookless(true, false),
+			want: "w6:p2 .professor unknown KEYS, herdr error: @pfm_herdr of KEYS: client 5 names no pane or " +
+				"no Herdr socket: {Pane:w6:p2 Terminal: Socket:}",
+		},
 		{
 			name: "a client outside Herdr", clients: "123\n",
 			envs: map[int]map[string]string{123: clientEnv("", "")},
@@ -543,7 +590,10 @@ func TestPresenceLiveClientCases(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			tmux := &fakeTmux{clients: map[string]string{"/t/cc-keys|KEYS": test.clients}}
+			tmux := &fakeTmux{
+				clients: map[string]string{"/t/cc-keys|KEYS": test.clients},
+				stored:  map[string]string{"/t/cc-keys|KEYS": test.stored},
+			}
 			var warn strings.Builder
 			probe := probeFor(tmux, true, &warn)
 			probe.Environ = func(pid int) (map[string]string, error) { return test.envs[pid], nil }

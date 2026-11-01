@@ -23,6 +23,9 @@ type LogHalf struct {
 	InputTokens, OutputTokens, CacheReadTokens, CacheCreationTokens int64
 	CostMicros                                                      *int64
 	Speed, Effort, TraceID, SpanID                                  string
+	// UnreadableCounts names the token attributes the record carried but whose value was no
+	// number, comma-separated: their counts read 0, which is not a real zero.
+	UnreadableCounts string
 }
 
 // SpanHalf is the agent half of one API call: a claude_code.llm_request span.
@@ -30,6 +33,7 @@ type SpanHalf struct {
 	RequestID, SessionID, AgentID, ParentAgentID, QuerySource, Model string
 	InputTokens, OutputTokens, CacheReadTokens, CacheCreationTokens  int64
 	Speed, Effort, EndTS, TraceID, SpanID                            string
+	UnreadableCounts                                                 string // as LogHalf's
 }
 
 type otlpValue struct {
@@ -97,9 +101,21 @@ func (a attrs) costMicros() (int64, bool) {
 	return int64(math.Round(*v.DoubleValue * 1e6)), true
 }
 
-func (a attrs) count(key string) int64 {
-	n, _ := a.integer(key)
-	return n
+// tokenAttrs are the four token-count attributes a half carries, in ledger order.
+var tokenAttrs = [4]string{"input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens"}
+
+// tokens reads the four token counts. An attribute that is absent counts 0 (the exporter sent
+// none); one that is present but not a number counts 0 too and is named in unreadable.
+func (a attrs) tokens() (counts [4]int64, unreadable string) {
+	var bad []string
+	for index, key := range tokenAttrs {
+		n, ok := a.integer(key)
+		if _, present := a[key]; present && !ok {
+			bad = append(bad, key)
+		}
+		counts[index] = n
+	}
+	return counts, strings.Join(bad, ",")
 }
 
 type otlpResource struct {
@@ -167,23 +183,25 @@ func DecodeLogs(body []byte) ([]LogHalf, error) {
 				if a.str("event.name") != apiRequestEvent {
 					continue
 				}
+				counts, unreadable := a.tokens()
 				half := LogHalf{
 					RequestID: a.requestID(),
 					SessionID: a.sessionID(),
-					TraceID:   record.TraceID, SpanID: record.SpanID,
-					TS: firstFilled(normalizeTimestamp(a.str("event.timestamp")), nanoTimestamp(record.TimeUnixNano)),
-					QuerySource: a.str(
-						"query_source",
+					TraceID:   record.TraceID,
+					SpanID:    record.SpanID,
+					TS: firstFilled(
+						normalizeTimestamp(a.str("event.timestamp")),
+						nanoTimestamp(record.TimeUnixNano),
 					),
-					Model:        a.str("model"),
-					Speed:        a.str("speed"),
-					Effort:       a.str("effort"),
-					InputTokens:  a.count("input_tokens"),
-					OutputTokens: a.count("output_tokens"),
-					CacheReadTokens: a.count(
-						"cache_read_tokens",
-					),
-					CacheCreationTokens: a.count("cache_creation_tokens"),
+					QuerySource:         a.str("query_source"),
+					Model:               a.str("model"),
+					Speed:               a.str("speed"),
+					Effort:              a.str("effort"),
+					InputTokens:         counts[0],
+					OutputTokens:        counts[1],
+					CacheReadTokens:     counts[2],
+					CacheCreationTokens: counts[3],
+					UnreadableCounts:    unreadable,
 				}
 				if micros, ok := a.costMicros(); ok {
 					half.CostMicros = &micros
@@ -219,25 +237,21 @@ func DecodeSpans(body []byte) ([]SpanHalf, error) {
 					continue
 				}
 				a := scopedAttrs(resource.Resource, span.Attributes)
+				counts, unreadable := a.tokens()
 				half := SpanHalf{
 					RequestID: a.requestID(),
 					SessionID: a.sessionID(),
 					TraceID:   span.TraceID, SpanID: span.SpanID,
-					AgentID: a.str("agent_id"),
-					ParentAgentID: a.str(
-						"parent_agent_id",
-					),
-					QuerySource:  NormalizeSpanQuerySource(a.str("query_source_safe")),
-					Model:        a.str("model"),
-					Speed:        a.str("speed"),
-					Effort:       a.str("effort"),
-					InputTokens:  a.count("input_tokens"),
-					OutputTokens: a.count("output_tokens"),
-					CacheReadTokens: a.count(
-						"cache_read_tokens",
-					),
-					CacheCreationTokens: a.count("cache_creation_tokens"),
-					EndTS:               nanoTimestamp(span.EndTimeUnixNano),
+					AgentID:       a.str("agent_id"),
+					ParentAgentID: a.str("parent_agent_id"),
+					QuerySource:   NormalizeSpanQuerySource(a.str("query_source_safe")),
+					Model:         a.str("model"),
+					Speed:         a.str("speed"),
+					Effort:        a.str("effort"),
+					InputTokens:   counts[0], OutputTokens: counts[1],
+					CacheReadTokens: counts[2], CacheCreationTokens: counts[3],
+					EndTS:            nanoTimestamp(span.EndTimeUnixNano),
+					UnreadableCounts: unreadable,
 				}
 				halves = append(halves, half)
 			}

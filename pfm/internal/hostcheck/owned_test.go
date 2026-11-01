@@ -364,16 +364,27 @@ func TestThirdPartyMCP(t *testing.T) {
 }
 
 func TestThirdPartyMCPAcceptedDeclarationIsExactAndReadable(t *testing.T) {
+	const reason = "active user integration"
 	for _, test := range []struct {
-		name, path, server, body string
-		accepted                 bool
-		warnings                 int
+		name, path, server, body, reason, problem string
+		accepted                                  bool
+		warnings                                  int
 	}{
-		{"exact", "", "agent-browser", `{"mcpServers":{"agent-browser":{}}}`, true, 0},
-		{"other server", "", "other", `{"mcpServers":{"agent-browser":{}}}`, false, 1},
-		{"other path", "/other/.claude.json", "agent-browser", `{"mcpServers":{"agent-browser":{}}}`, false, 1},
-		{"broken json", "", "agent-browser", `{`, false, 0},
-		{"mixed registry", "", "agent-browser", `{"mcpServers":{"agent-browser":{},"other":{"command":"invented"}}}`, true, 1},
+		{
+			"exact", "", "agent-browser", `{"mcpServers":{"agent-browser":{}}}`, reason,
+			"mcpServers.agent-browser retained by doctor.acceptedMCP: " + reason, true, 0,
+		},
+		{
+			"exact without a reason", "", "agent-browser", `{"mcpServers":{"agent-browser":{}}}`, "",
+			"mcpServers.agent-browser retained by doctor.acceptedMCP", true, 0,
+		},
+		{"other server", "", "other", `{"mcpServers":{"agent-browser":{}}}`, reason, "", false, 1},
+		{"other path", "/other/.claude.json", "agent-browser", `{"mcpServers":{"agent-browser":{}}}`, reason, "", false, 1},
+		{"broken json", "", "agent-browser", `{`, reason, "", false, 0},
+		{
+			"mixed registry", "", "agent-browser", `{"mcpServers":{"agent-browser":{},"other":{"command":"invented"}}}`, reason,
+			"mcpServers.agent-browser retained by doctor.acceptedMCP: " + reason, true, 1,
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			env := fixtureEnv(t)
@@ -384,12 +395,12 @@ func TestThirdPartyMCPAcceptedDeclarationIsExactAndReadable(t *testing.T) {
 				acceptedPath = path
 			}
 			env.AcceptedMCP = []config.AcceptedMCP{
-				{Path: acceptedPath, Server: test.server, Reason: "active user integration"},
+				{Path: acceptedPath, Server: test.server, Reason: test.reason},
 			}
 			rows := detect(t, "third-party-mcp", env)
 			if test.accepted {
 				if len(rows) != 1+test.warnings || rows[0].Severity != Accepted ||
-					!strings.Contains(rows[0].Problem, "active user integration") ||
+					rows[0].Problem != test.problem ||
 					Count(rows, Warn) != test.warnings {
 					t.Fatalf("accepted rows=%+v", rows)
 				}

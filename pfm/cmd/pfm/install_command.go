@@ -276,9 +276,8 @@ func newInstallerOptions(
 		if configDir == "" {
 			options.ClaudeAccounts = runtime.Config.Accounts
 			if len(runtime.Config.Accounts) > 0 {
-				id, err := fleet.PrimaryAccount(runtime.Paths, runtime.Config)
+				id, err := fleet.PrimaryAccountOrImplicit(runtime.Paths, runtime.Config)
 				if err != nil {
-					id = runtime.Config.ImplicitAccount()
 					fmt.Fprintf(stdout, "  skip    primary account unreadable (%v); using account %d\n", err, id)
 				}
 				account, _ := runtime.Config.AccountByID(id)

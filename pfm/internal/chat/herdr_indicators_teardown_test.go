@@ -21,7 +21,7 @@ import (
 // SessionEnd releases the agent while the engine and its pane still exist.
 // Repeated observations must distinguish that transition from a broken agent.
 func TestHerdrTabProviderReleasedAgentTeardown(t *testing.T) {
-	for _, outcome := range []string{"exit", "closed", "alive", "recovered", "unreadable", "moved-exit", "replaced-pane", "kept-exit"} {
+	for _, outcome := range []string{"exit", "closed", "alive", "recovered", "unreadable", "moved-exit", "replaced-pane", "kept-exit", "exit-beside-incomplete", "own-pane-incomplete"} {
 		t.Run(outcome, func(t *testing.T) {
 			t.Setenv("TMUX_TMPDIR", t.TempDir())
 			// kept-exit: herdr-keep's holder 5 runs shell 10, whose terminal's
@@ -61,13 +61,21 @@ func TestHerdrTabProviderReleasedAgentTeardown(t *testing.T) {
 						pane.(map[string]any)["terminal_id"] = "different-terminal"
 					}
 					panes := []any{pane}
+					if phase > 0 && outcome == "exit-beside-incomplete" {
+						// Another pane Herdr lists without its identity is skipped alone.
+						panes = append(panes, map[string]any{"pane_id": "w1:p9"})
+					}
+					if phase > 0 && outcome == "own-pane-incomplete" {
+						panes = []any{map[string]any{"pane_id": "w1:p1"}}
+					}
 					if phase > 0 && outcome == "closed" {
 						panes = []any{} // Herdr lists no pane as [], never null
 					}
 					return map[string]any{"type": "pane_list", "panes": panes}, ""
 				case "pane.process_info":
 					name := "claude"
-					if phase > 0 && (outcome == "exit" || outcome == "moved-exit") {
+					if phase > 0 && (outcome == "exit" || outcome == "moved-exit" ||
+						outcome == "exit-beside-incomplete" || outcome == "own-pane-incomplete") {
 						name = "bash"
 					}
 					if outcome == "kept-exit" {
@@ -135,7 +143,7 @@ func TestHerdrTabProviderReleasedAgentTeardown(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				wantError := outcome == "unreadable"
+				wantError := outcome == "unreadable" || outcome == "own-pane-incomplete" && phase > 0
 				records, err := herdr.RecentErrors(dir, time.Time{})
 				if err != nil {
 					t.Fatal(err)
@@ -157,7 +165,8 @@ func TestHerdrTabProviderReleasedAgentTeardown(t *testing.T) {
 				}
 				if len(views) > 0 {
 					want := "unknown"
-					if phase > 0 && (outcome == "exit" || outcome == "moved-exit" || outcome == "kept-exit") {
+					if phase > 0 && (outcome == "exit" || outcome == "moved-exit" || outcome == "kept-exit" ||
+						outcome == "exit-beside-incomplete") {
 						want = headless.StateDead
 					}
 					if phase == 1 && outcome == "recovered" {

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/pricing"
 )
@@ -801,5 +802,25 @@ func TestRenderSubagentsGaugeRoundsToNearest(t *testing.T) {
 		if got, _ := renderOneSubagent(t, session, task); !strings.Contains(got, want) {
 			t.Fatalf("tokens %d: content = %q, want %q", tokens, got, want)
 		}
+	}
+}
+
+// An override that cannot be used never costs the table: dollars are priced by
+// the published table beside the warning naming the override.
+func TestLoadServedPricesPricesByThePublishedTableBesideABadOverride(t *testing.T) {
+	home := t.TempDir()
+	configPath := filepath.Join(home, "pfm.config.json")
+	override := pfmconfig.PricesPath(configPath)
+	if err := os.WriteFile(override, []byte(`{`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	prices := LoadServedPrices(home, configPath, &stderr, "pfm statusline")
+	if prices == nil || len(prices.Rows) == 0 {
+		t.Fatalf("prices = %+v, want the published table's rows beside the override's error", prices)
+	}
+	want := "pfm statusline: price override unusable, pricing from the published table: "
+	if !strings.HasPrefix(stderr.String(), want) || !strings.Contains(stderr.String(), override) {
+		t.Fatalf("stderr = %q, want it to open %q and name %s", stderr.String(), want, override)
 	}
 }

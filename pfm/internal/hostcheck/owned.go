@@ -196,24 +196,20 @@ func thirdPartyMCP(env Env) ([]Row, error) {
 		}
 		sort.Strings(names)
 		for _, name := range names {
-			reason := ""
+			reason, accepted := "", false
 			for _, item := range env.AcceptedMCP {
 				if item.Path == path && item.Server == name {
-					reason = item.Reason
+					reason, accepted = item.Reason, true
 					break
 				}
 			}
-			if reason != "" {
-				rows = append(
-					rows,
-					Row{
-						Accepted,
-						checkThirdPartyMCP,
-						path,
-						"mcpServers." + name + " retained by doctor.acceptedMCP: " + reason,
-						"",
-					},
-				)
+			if accepted {
+				// The reason is optional: an acceptance without one is still an acceptance.
+				detail := "mcpServers." + name + " retained by doctor.acceptedMCP"
+				if reason != "" {
+					detail += ": " + reason
+				}
+				rows = append(rows, Row{Accepted, checkThirdPartyMCP, path, detail, ""})
 				continue
 			}
 			rows = append(

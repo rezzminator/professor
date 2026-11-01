@@ -73,9 +73,6 @@ func TestSessionIDMustBeSafeBeforeAnyPathJoin(t *testing.T) {
 			t.Errorf("ValidSessionID(%q) = false", id)
 		}
 	}
-	if err := Append(t.TempDir(), Row{SessionID: sessionA}); err == nil {
-		t.Error("Append without a request_id succeeded")
-	}
 }
 
 func TestUnattributedKeepsObservationsAndDeduplicatesOnlyRealIdentity(t *testing.T) {
@@ -103,7 +100,7 @@ func TestSessionObservationsStayOutsideLegacyLedgers(t *testing.T) {
 	if err := Append(dir, row("", JoinLog, micros(25))); err != nil {
 		t.Fatal(err)
 	}
-	ids, err := SessionIDs(dir)
+	ids, _, err := SessionIDs(dir)
 	if err != nil || len(ids) != 1 || ids[0] != sessionA {
 		t.Fatalf("observation-only sessions = %v, %v", ids, err)
 	}
@@ -121,7 +118,7 @@ func TestSessionObservationsStayOutsideLegacyLedgers(t *testing.T) {
 	if err != nil || !ledger.Present || ledger.Faults != 0 || len(ledger.Rows) != 2 || Sum(ledger.Rows).Micros != 75 {
 		t.Fatalf("combined ledger = %+v, %v", ledger, err)
 	}
-	ids, err = SessionIDs(dir)
+	ids, _, err = SessionIDs(dir)
 	if err != nil || len(ids) != 1 {
 		t.Fatalf("duplicate session discovery = %v, %v", ids, err)
 	}
@@ -145,8 +142,42 @@ func TestSessionObservationsStayOutsideLegacyLedgers(t *testing.T) {
 	if err := os.Rename(ObservationsDir(dir)+"-file", ObservationsDir(dir)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := SessionIDs(dir); err == nil {
+	if _, _, err := SessionIDs(dir); err == nil {
 		t.Fatal("unreadable observations rendered as absent")
+	}
+}
+
+// A .jsonl file whose name is no session id is no ledger, and is named as left out instead of
+// vanishing from the listing.
+func TestSessionIDsNameTheFilesTheirNamesLeaveOut(t *testing.T) {
+	dir := t.TempDir()
+	if err := Append(dir, row("req_1", JoinLog, micros(25))); err != nil {
+		t.Fatal(err)
+	}
+	foreign := filepath.Join(dir, "my session.jsonl")
+	if err := os.WriteFile(foreign, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ids, skipped, err := SessionIDs(dir)
+	if err != nil || len(ids) != 1 || ids[0] != sessionA || len(skipped) != 1 || skipped[0] != foreign {
+		t.Fatalf("SessionIDs = %v skipped %v, %v; want %s listed and %s left out",
+			ids, skipped, err, sessionA, foreign)
+	}
+}
+
+// A join label only ranks the lines of one request: a request-less row with a label no join names
+// is still written and read, ranking below every real join.
+func TestARequestlessRowWithAnUnknownJoinIsStillWritten(t *testing.T) {
+	dir := t.TempDir()
+	for _, join := range []string{"mystery", ""} {
+		if err := Append(dir, row("", join, micros(3))); err != nil {
+			t.Fatalf("Append refused a request-less row with join %q: %v", join, err)
+		}
+	}
+	ledger, err := ForSession(dir, sessionA)
+	if err != nil || ledger.Faults != 0 || len(ledger.Rows) != 2 || ledger.Rows[0].Join != "mystery" ||
+		ledger.Rows[1].Join != "" || Sum(ledger.Rows).Micros != 6 {
+		t.Fatalf("ledger = %+v, %v; want both rows read back with no fault", ledger, err)
 	}
 }
 

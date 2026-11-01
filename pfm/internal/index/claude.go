@@ -2,6 +2,7 @@ package index
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"strings"
 	"time"
@@ -42,10 +43,12 @@ func (message *borrowedRawMessage) UnmarshalJSON(content []byte) error {
 }
 
 func parseClaudeTranscriptFile(
+	ctx context.Context,
 	file diskFile,
 	start int64,
 	transcript store.Transcript,
 ) (store.Transcript, int64, error) {
+	unparsed := 0
 	parsedOffset, bytesRead, err := claudetranscript.ReadLines(file.Path, start, func(line []byte, complete bool) {
 		if !complete {
 			return
@@ -56,6 +59,7 @@ func parseClaudeTranscriptFile(
 
 		var record claudeRecord
 		if err := json.Unmarshal(line, &record); err != nil {
+			unparsed++
 			return
 		}
 		// Provenance is the only background signal. Claude Code stamps
@@ -111,6 +115,7 @@ func parseClaudeTranscriptFile(
 			}
 		}
 	})
+	warnUnparsedLines(ctx, file.Path, unparsed)
 	if err != nil {
 		return store.Transcript{}, bytesRead, err
 	}

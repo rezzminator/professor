@@ -51,12 +51,21 @@ func TestRRDirNamesTheNearestAncestorLedger(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	got, stderr := runRRDir(t, rrDirPayload(t, cwd), filepath.Join(root, "home"))
-	if want := "RR-DIR: " + filepath.Join(project, ".professor", "RR"); got != want {
-		t.Fatalf("context = %q, want %q", got, want)
-	}
-	if stderr != "" {
-		t.Fatalf("stderr on the found path: %q", stderr)
+	for _, tc := range []struct{ name, workdir, payload string }{
+		{"absolute cwd", root, rrDirPayload(t, cwd)},
+		{"relative cwd resolves against the hook's directory", project, rrDirPayload(t, filepath.Join("sub", "dir"))},
+		{"absent cwd is the hook's directory", cwd, `{"agent_type":"rr"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Chdir(tc.workdir)
+			got, stderr := runRRDir(t, tc.payload, filepath.Join(root, "home"))
+			if want := "RR-DIR: " + filepath.Join(project, ".professor", "RR"); got != want {
+				t.Fatalf("context = %q, want %q", got, want)
+			}
+			if stderr != "" {
+				t.Fatalf("stderr on the found path: %q", stderr)
+			}
+		})
 	}
 	if _, err := os.Lstat(filepath.Join(project, ".professor", "RR")); !os.IsNotExist(err) {
 		t.Fatalf("the hook created the RR directory (err=%v)", err)
@@ -89,8 +98,6 @@ func TestRRDirReportsAFailedLookAsAnErrorLineNeverSilence(t *testing.T) {
 	for name, tc := range map[string]struct{ payload, home, want string }{
 		"undecodable payload": {"{not json", "/home/x", "RR-DIR-ERROR: decode hook payload"},
 		"empty payload":       {"", "/home/x", "RR-DIR-ERROR: decode hook payload"},
-		"missing cwd":         {`{"agent_type":"rr"}`, "/home/x", `RR-DIR-ERROR: hook payload cwd "" is not an absolute path`},
-		"relative cwd":        {`{"cwd":"some/dir"}`, "/home/x", "is not an absolute path"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			got, stderr := runRRDir(t, tc.payload, tc.home)

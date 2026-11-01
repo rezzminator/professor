@@ -532,16 +532,21 @@ func (finisher *Finisher) reapTeammates(
 		values, err := finisher.children(ctx, kind, id, flatPath)
 		if err != nil {
 			reapErrors = append(reapErrors, err)
-			continue
+			if len(values) == 0 {
+				continue
+			}
 		}
 		var retained []string
 		for _, value := range values {
-			err := finisher.reapChild(ctx, kind, value)
-			if err == nil {
-				err = finisher.database.Shared().ClearChild(ctx, kind, id, value)
-			}
-			if err != nil {
+			if err := finisher.reapChild(ctx, kind, value); err != nil {
 				reapErrors = append(reapErrors, fmt.Errorf("reap %s child %q of %s: %w", kind, value, id, err))
+				retained = append(retained, value)
+				continue
+			}
+			// The child is gone; only its registration outlives a failed clear.
+			if err := finisher.database.Shared().ClearChild(ctx, kind, id, value); err != nil {
+				reapErrors = append(reapErrors,
+					fmt.Errorf("reaped %s child %q of %s; its registration stays: %w", kind, value, id, err))
 				retained = append(retained, value)
 			}
 		}
@@ -610,7 +615,10 @@ func (finisher *Finisher) children(
 ) ([]string, error) {
 	values, _, err := finisher.database.Shared().Children(ctx, kind, id)
 	if err != nil {
-		return nil, err
+		// The table's failure is returned beside the file's teammates, never
+		// instead of them: a chat registered through the table has no file.
+		legacy, fileErr := readChildFile(flatPath)
+		return legacy, errors.Join(fmt.Errorf("read %s children of %s: %w", kind, id, err), fileErr)
 	}
 	if len(values) > 0 {
 		return values, nil

@@ -333,6 +333,33 @@ func TestCanonicalPinsWriteColoursAsHexAndDropEmptyMaps(t *testing.T) {
 	}
 }
 
+// An installed profile outlives the pfm that validated it: a pin for a key no
+// renderer emits any more is dropped and named, every other pin is kept, and
+// authoring (canonicalPins) still refuses it.
+func TestProfilePinsDropsAKeyNoRendererEmitsAndKeepsTheRest(t *testing.T) {
+	home := t.TempDir()
+	path := ProfilePath(home, "orchid")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		path,
+		[]byte(profileJSON(`{"tmux":{"@pfm-retired":"#ffffff"},"herdr":{"accent":"#ff2e93"}}`)),
+		0o644,
+	); err != nil {
+		t.Fatal(err)
+	}
+	got, err := profilePins(home, "custom:orchid")
+	wantNotes := []string{"profile " + path + `: tmux pin "@pfm-retired": tmux renders no such key (dropped)`}
+	if err != nil || got.pins == nil || got.pins.Tmux != nil || got.pins.Herdr.Tokens["accent"] != "#ff2e93" ||
+		!reflect.DeepEqual(got.notes, wantNotes) {
+		t.Fatalf("profilePins = %+v, %v; want the herdr accent kept, no tmux pin and notes %q", got, err, wantNotes)
+	}
+	if _, err := ParseProfile([]byte(profileJSON(`{"tmux":{"@pfm-retired":"#ffffff"}}`))); err == nil {
+		t.Fatal("authoring accepted a pin for a key no renderer emits")
+	}
+}
+
 func TestProfilePinsReadsOnlyACustomValuesProfile(t *testing.T) {
 	home := t.TempDir()
 	path := ProfilePath(home, "orchid")

@@ -44,8 +44,32 @@ func TestVSCodePendingRestoresWithoutStateOrInstallation(t *testing.T) {
 	}
 }
 
+// One target inside a record that cannot be parsed is pending as unreadable
+// beside the targets that can; it never hides them.
+func TestVSCodePendingRestoresListsAnUnreadableTargetBesideTheRest(t *testing.T) {
+	dir := t.TempDir()
+	chrome := filepath.Join(dir, vscodeChromeRecordFile)
+	if err := os.WriteFile(
+		chrome,
+		[]byte(`{"/a.code-workspace":{"keys":null},"/b.code-workspace":{"keys":{"statusBar.border":{}}}}`),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := VSCodePendingRestores(dir)
+	want := []VSCodeRestore{
+		{Record: chrome, Target: "/a.code-workspace", Keys: []string{
+			"(unreadable: parse " + chrome + " target /a.code-workspace: keys: expected an ownership object, got null)",
+		}},
+		{Record: chrome, Target: "/b.code-workspace", Keys: []string{"statusBar.border"}},
+	}
+	if err != nil || !reflect.DeepEqual(pending, want) || !RestorePending(dir) {
+		t.Fatalf("pending = %+v, %v; want %+v and RestorePending true", pending, err, want)
+	}
+}
+
 func TestVSCodePendingRestoresRejectsUnreadableRecords(t *testing.T) {
-	for _, content := range []string{"{", "null", "[]", `{"keys":null}`, `{"keys":{"[Theme]":{"keys":null}}}`} {
+	for _, content := range []string{"{", "null", "[]"} {
 		t.Run(content, func(t *testing.T) {
 			dir := t.TempDir()
 			file := filepath.Join(dir, "vscode-applied.json")

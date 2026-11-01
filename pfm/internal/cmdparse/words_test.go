@@ -79,7 +79,7 @@ func TestScriptSelfDir(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := ParseBatch([]Call{{ID: "c1", Command: tc.command, Cwd: testCwd, Script: Script{Path: script}}})
+			got, err := ParseBatch([]Call{{ID: "c1", Command: tc.command, Script: Script{Path: script}}})
 			if err != nil {
 				t.Fatalf("ParseBatch(%q): %v", tc.command, err)
 			}
@@ -122,7 +122,7 @@ func TestScriptPositionalArgs(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			script := Script{Path: "/s/run.sh", Args: []string{"chat"}}
-			got, err := ParseBatch([]Call{{ID: "c1", Command: tc.command, Cwd: testCwd, Script: script}})
+			got, err := ParseBatch([]Call{{ID: "c1", Command: tc.command, Script: script}})
 			if err != nil {
 				t.Fatalf("ParseBatch(%q): %v", tc.command, err)
 			}

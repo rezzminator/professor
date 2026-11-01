@@ -570,32 +570,6 @@ func (reporter *herdrReporter) paneEngineFired(panePIDText string) (bool, error)
 	)
 }
 
-// envCommand is env(1), the most common command wrapper.
-const envCommand = "env"
-
-// isCommandWrapper names the commands that run another command in their own
-// process: a wrapper between an engine and its pane is not an engine.
-func isCommandWrapper(command string) bool {
-	switch filepath.Base(command) {
-	case envCommand, "timeout", "gtimeout", "caffeinate", "script", "nice", "nohup", "stdbuf", "time":
-		return true
-	}
-	return false
-}
-
-func isNodeLauncher(command string) bool {
-	return filepath.Base(command) == "node"
-}
-
-func isShellOrPfm(command string) bool {
-	base := filepath.Base(strings.TrimPrefix(command, "-"))
-	switch base {
-	case "sh", "bash", "zsh", "dash", "fish", "pfm":
-		return true
-	}
-	return strings.HasPrefix(base, "pfm.")
-}
-
 // lock serializes every reporter of one chat session: a flock on a file in
 // the pfm state directory, retried until the hook's deadline. The state read,
 // compare, write and the requests to Herdr all happen inside it.
@@ -649,7 +623,8 @@ func (reporter *herdrReporter) readState(ctx context.Context, session string) (h
 		return stored, nil
 	}
 	if err := json.Unmarshal([]byte(raw), &stored); err != nil {
-		return stored, fmt.Errorf("decode %s of %s (%q): %w", herdrStoredOption, session, raw, err)
+		reporter.warn("pfm internal herdr-state %s: decode %s of %s (%q), this event rewrites it: %v",
+			reporter.options.event, herdrStoredOption, session, raw, err)
 	}
 	return stored, nil
 }

@@ -202,10 +202,22 @@ func readTabLabel(path string) (tabLabelRecord, error) {
 		return record, fmt.Errorf("read tab label %s: %w", path, err)
 	}
 	if err := json.Unmarshal(body, &record); err != nil {
-		return record, fmt.Errorf("decode tab label %s: %w", path, err)
+		// A corrupt record would block every label of this tab until removed
+		// by hand: it is named in the reporter log doctor reads, then read as
+		// empty, so the next write replaces it.
+		corrupt := fmt.Errorf("decode tab label %s: %w", path, err)
+		if logErr := AppendError(
+			filepath.Dir(path), tabLabelLogSession, clock.Real.Now(), corrupt.Error()+"; read as empty",
+		); logErr != nil {
+			return tabLabelRecord{}, errors.Join(corrupt, logErr)
+		}
+		return tabLabelRecord{}, nil
 	}
 	return record, nil
 }
+
+// tabLabelLogSession names the reporter log a corrupt tab-label record goes to.
+const tabLabelLogSession = "tab-label"
 
 func writeTabLabel(path string, record tabLabelRecord) error {
 	body, err := json.Marshal(record)

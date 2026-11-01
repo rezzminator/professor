@@ -13,6 +13,7 @@ func TestCheckProtocol(t *testing.T) {
 	for _, scenario := range []struct {
 		name, result, want string
 		mismatch           bool
+		version            string // "0.9.5" when empty
 	}{
 		{name: "supported", result: `{"type":"pong","version":"0.9.5","protocol":22}`},
 		{name: "mismatch", result: `{"type":"pong","version":"0.9.5","protocol":23}`, mismatch: true, want: "herdr protocol 23 DIVERGES from supported 22 — herdr seats disabled"},
@@ -23,7 +24,7 @@ func TestCheckProtocol(t *testing.T) {
 		{name: "string protocol", result: `{"type":"pong","version":"0.9.5","protocol":"22"}`, want: "malformed ping result:"},
 		{name: "negative protocol", result: `{"type":"pong","version":"0.9.5","protocol":-1}`, want: "malformed ping result:"},
 		{name: "overflow", result: `{"type":"pong","version":"0.9.5","protocol":4294967296}`, want: "malformed ping result:"},
-		{name: "missing version", result: `{"type":"pong","protocol":22}`, want: "malformed ping result:"},
+		{name: "missing version", result: `{"type":"pong","protocol":22}`, version: "unknown"},
 		{name: "dead socket", want: "dial for ping"},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
@@ -45,7 +46,11 @@ func TestCheckProtocol(t *testing.T) {
 			status, err := ProbeProtocol(context.Background(), socket)
 			guardError := CheckProtocol(context.Background(), socket)
 			if scenario.want == "" {
-				if err != nil || guardError != nil || status.Version != "0.9.5" ||
+				version := scenario.version
+				if version == "" {
+					version = "0.9.5"
+				}
+				if err != nil || guardError != nil || status.Version != version ||
 					status.Protocol != SupportedProtocol {
 					t.Fatalf("status=%+v probe=%v guard=%v", status, err, guardError)
 				}

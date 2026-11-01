@@ -39,7 +39,9 @@ func (reporter *herdrReporter) engineName(ctx context.Context, payload herdrPayl
 		}
 	}
 	if err := naming.ValidateLabel(name); err != nil {
-		return "", err
+		// A reserved title never reaches tmux or Herdr; pfm's clear name still does.
+		reporter.warn("pfm internal herdr-state %s: engine title not used: %v", reporter.options.event, err)
+		name = ""
 	}
 	state := fleetdb.OpenSharedStateReadOnly(ctx, *reporter.deps.seatPaths)
 	defer func() { returnErr = errors.Join(returnErr, state.Close()) }()

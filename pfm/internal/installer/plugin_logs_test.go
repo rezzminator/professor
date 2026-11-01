@@ -265,10 +265,24 @@ func TestAlphaInstallOwnsSharedPluginLogEnv(t *testing.T) {
 			t.Fatalf("explicit log root ignored: %+v", setting)
 		}
 	}
+	chosen := inst.options.ClaudeEnv[PluginLogDirEnv]
 	inst.options.ClaudeEnv[PluginLogDirEnv] = "relative-logs"
-	if err := inst.ensureClaudeEnv(false); err == nil || !strings.Contains(err.Error(), "must be absolute") {
+	inst.options.ClaudeEnv[envKey] = "1"
+	if err := inst.ensureClaudeEnv(false); err == nil ||
+		err.Error() != PluginLogDirEnv+` must be absolute: "relative-logs"` {
 		t.Fatalf("invalid log root accepted: %v", err)
 	}
+	// The bad log root costs its own key alone: the earlier value stays and
+	// every other claude.env key still lands.
+	for _, setting := range ReadPluginLogEnv([]string{store, first, second}) {
+		if setting.Value != chosen {
+			t.Fatalf("invalid log root dropped the earlier value %s: %+v", chosen, setting)
+		}
+	}
+	if got := readFixture(t, inst.claudeEnvTarget()); !strings.Contains(got, `"`+envKey+`": "1"`) {
+		t.Fatalf("invalid log root blocked the other claude.env keys in %s:\n%s", inst.claudeEnvTarget(), got)
+	}
+	delete(inst.options.ClaudeEnv, envKey)
 	if err := inst.ensureClaudeEnv(true); err != nil {
 		t.Fatal(err)
 	}

@@ -172,6 +172,7 @@ func TestHerdrTabViewReaderUsesActualClientsAndGeneration(t *testing.T) {
 		},
 	}
 	generation := `{"session_id":"s1","seq":1,"clients":{"10":{"pane":"stale","socket":"endpoint"}}}`
+	warnings := &bytes.Buffer{}
 	reader := tabViewReader{
 		runtime: &config.Runtime{Paths: paths.Values{TmuxDir: "/fixture/tmux"}},
 		tmux: func(_ context.Context, socket string, args ...string) (string, error) {
@@ -179,12 +180,15 @@ func TestHerdrTabViewReaderUsesActualClientsAndGeneration(t *testing.T) {
 				return "", fmt.Errorf("tmux -S %s %s: exit status 1", socket, args[0])
 			}
 			if args[0] == "list-clients" {
-				return "10\n11\n12", nil
+				return "10\nbogus\n13\n11\n12", nil
 			}
 			return generation, nil
 		},
+		warn: warnings,
 		resolve: func(_ context.Context, pid int) (herdr.Location, bool, error) {
 			switch pid {
+			case 13:
+				return herdr.Location{}, false, errors.New("read environ of 13: no such process")
 			case 10:
 				return herdr.Location{Socket: "endpoint", Pane: "w1:p1", Terminal: "term1"}, true, nil
 			case 11:
@@ -208,6 +212,10 @@ func TestHerdrTabViewReaderUsesActualClientsAndGeneration(t *testing.T) {
 	got, err := reader.views(context.Background(), target, "endpoint", panes)
 	if err != nil || len(got) != 2 || got[0].Pane != "w1:p1" || got[1].Pane != "w2:p2" {
 		t.Fatalf("actual views=%+v err=%v", got, err)
+	}
+	if want := "Herdr tab client \"bogus\" of s1 skipped: not a pid\n" +
+		"Herdr tab client 13 of s1 skipped: read environ of 13: no such process\n"; warnings.String() != want {
+		t.Fatalf("unreadable clients named %q, want %q", warnings.String(), want)
 	}
 	if valid, err := got[0].Validate(context.Background()); err != nil || !valid {
 		t.Fatalf("current generation valid=%t err=%v", valid, err)
@@ -260,6 +268,11 @@ func TestHerdrTabSessionProducerForms(t *testing.T) {
 				t.Fatalf("session=%s matches=%t err=%v", body, matches, err)
 			}
 		})
+	}
+	// Source and agent are labels: a session naming the chat matches without them.
+	body := `{"kind":"id","value":"s1"}`
+	if matches, err := tabPaneSession(herdr.TabPane{Session: []byte(body)}, target); !matches || err != nil {
+		t.Fatalf("unlabelled session=%s matches=%t err=%v, want a match", body, matches, err)
 	}
 }
 
@@ -654,6 +667,20 @@ func TestHerdrTabProviderCarriesTheThemeGlyphs(t *testing.T) {
 	}
 	if !strings.Contains(warn.String(), "Herdr tab glyphs of the theme: parse state.json") {
 		t.Fatalf("an unreadable theme was not named: %q", warn.String())
+	}
+	// An unreadable configuration paints the default mode, named.
+	readErr = nil
+	warn.Reset()
+	provider.mode = func() (string, error) {
+		return "", errors.New("load Herdr tab status configuration: parse config.json: unexpected end")
+	}
+	got, err = provider.tabs(context.Background(), "endpoint")
+	if err != nil || len(got) != 2 || !reflect.DeepEqual(got[0].Glyphs, themeGlyphs) {
+		t.Fatalf("an unreadable configuration: tabs=%+v err=%v, want the tabs in the default emoji mode", got, err)
+	}
+	if want := "Herdr tab status configuration: load Herdr tab status configuration: parse config.json: unexpected end" +
+		" (painting the default emoji mode)\n"; warn.String() != want {
+		t.Fatalf("an unreadable configuration was named %q, want %q", warn.String(), want)
 	}
 }
 

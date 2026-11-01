@@ -389,10 +389,7 @@ func decodeVersioned(path string, content []byte) (rawConfig, error) {
 	if err := decodeStrict(content, &raw); err != nil {
 		return rawConfig{}, configJSONError(path, err, int64(len(content)))
 	}
-	if raw.Version == nil {
-		return rawConfig{}, fmt.Errorf("config %s: required key %q is missing", path, keyVersion)
-	}
-	if *raw.Version != 1 && *raw.Version != Version {
+	if raw.Version != nil && *raw.Version != 1 && *raw.Version != Version {
 		return rawConfig{}, fmt.Errorf("config %s: version must be 1 or %d, got %d", path, Version, *raw.Version)
 	}
 	return raw, nil

@@ -460,6 +460,24 @@ func TestSourceErrorNamesTheFileAndWritesNoSurface(t *testing.T) {
 	}
 }
 
+// One account whose settings.json will not parse never stops the others from
+// governing: the run goes on from the accounts that read and the claude row names
+// the one it skipped.
+func TestSourceGovernsFromTheAccountsThatRead(t *testing.T) {
+	h := newHarness(t)
+	bad := h.path(".cc/2/settings.json")
+	h.write(".cc/2/settings.json", `{"theme":`)
+	report := h.on()
+	wantVerdict(
+		t,
+		report,
+		"claude",
+		VerdictSource,
+		"account skipped: themesync: parse "+bad+": unexpected end of JSON input",
+	)
+	wantVerdict(t, report, "tmux", VerdictInSync, "2 servers")
+}
+
 // scriptedClock returns the scripted instants in order, then the last one.
 type scriptedClock struct {
 	clock.Clock

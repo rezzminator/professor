@@ -445,3 +445,24 @@ func TestClaudePluginGapsNamesAStaleRetiredPluginConfig(t *testing.T) {
 		t.Fatalf("a settled settings.json reported %q, %v", gaps, err)
 	}
 }
+
+// One entry whose installPath is not a string reads as not installed and
+// costs no other entry of the record.
+func TestReadClaudePluginInstallsKeepsAnEntryWithAMalformedInstallPath(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeFixture(t, filepath.Join(dir, "plugins", "installed_plugins.json"), `{"version":2,"plugins":{`+
+		`"broken@x":[{"scope":"user","installPath":7,"version":"1.0.0"}],`+
+		`"kept@y":[{"scope":"project","projectPath":"/work","installPath":"/cache/kept","version":"2.0.0"}]}}`)
+	got, err := readClaudePluginInstalls(dir)
+	if err != nil {
+		t.Fatalf("readClaudePluginInstalls = %v, want the record kept", err)
+	}
+	want := map[string][]claudePluginInstall{
+		"broken@x": {{Scope: "user", Version: "1.0.0"}},
+		"kept@y":   {{Scope: "project", ProjectPath: "/work", InstallPath: "/cache/kept", Version: "2.0.0"}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("records = %+v, want %+v", got, want)
+	}
+}

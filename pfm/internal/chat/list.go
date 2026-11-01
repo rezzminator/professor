@@ -41,6 +41,8 @@ type ListRequest struct {
 	Repo     string
 	LiveOnly bool
 	ReadOnly bool
+	// NoCurrentDir scans without the working directory, for a caller that cannot read it.
+	NoCurrentDir bool
 }
 
 // ListResult is the listed rows plus the counts a capped answer must still
@@ -81,7 +83,7 @@ func List(
 		}
 	}()
 	scan, err := fleet.Scan(ctx, database, fleet.Request{
-		View: request.View, Runtime: runtime, ReadOnly: request.ReadOnly,
+		View: request.View, Runtime: runtime, ReadOnly: request.ReadOnly, NoCurrentDir: request.NoCurrentDir,
 	}, warn)
 	if err != nil {
 		return ListResult{}, fmt.Errorf("chat list: scan fleet: %w", err)
@@ -141,6 +143,10 @@ func hooklessLaunch(warn io.Writer, proc gather.ProcFS, claudeBinary string) fun
 				continue
 			}
 			parsed, err := claudelaunch.Parse(argv)
+			if err == nil && len(parsed.Warnings) > 0 {
+				// A payload Parse could not read may hold the hooks: unverified, never hookless.
+				err = errors.New(strings.Join(parsed.Warnings, "; "))
+			}
 			if err != nil {
 				_, _ = fmt.Fprintf(
 					warn,

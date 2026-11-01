@@ -235,8 +235,10 @@ const herdrKeepBinary = "herdr-keep"
 func herdrKeepDoctor(ctx context.Context, dependencies Dependencies, shell string) string {
 	bounded, cancel := context.WithTimeout(ctx, herdrStatusBound)
 	defer cancel()
+	// A doctor run from inside a held pane inherits the keeper's marks, which
+	// herdr-keep refuses as a recursive invocation: never a verdict on the keeper.
 	result, err := dependencies.Runner.Run(bounded, []string{shell, "doctor"}, deps.RunOptions{
-		WaitDelay: 2 * time.Second, ProcessGroup: true,
+		Env: herdr.KeepOuterEnviron(os.Environ()), WaitDelay: 2 * time.Second, ProcessGroup: true,
 	})
 	switch {
 	case bounded.Err() != nil:

@@ -501,6 +501,60 @@ func TestCodexRefusingAnEmptyNameIsReportedAsSuch(t *testing.T) {
 	}
 }
 
+// dyingCodex is fakeCodex whose pane dies on its Nth Enter, as a Codex that
+// exits mid-rename: every later capture fails as a gone pane's does.
+type dyingCodex struct {
+	*fakeCodex
+	entersLeft int
+}
+
+func (fake *dyingCodex) SendKey(ctx context.Context, target pfmcall.Target, key string) error {
+	err := fake.fakeCodex.SendKey(ctx, target, key)
+	if key == "Enter" {
+		fake.entersLeft--
+		if fake.entersLeft == 0 {
+			fake.mutex.Lock()
+			fake.dead = true
+			fake.mutex.Unlock()
+		}
+	}
+	return err
+}
+
+// TestCodexRenameWarningSaysTheScreenWasUnread: when the screen that would
+// carry Codex's reason cannot be read, the rename warning says so — "could
+// not look" never reads as "Codex showed nothing".
+func TestCodexRenameWarningSaysTheScreenWasUnread(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		diesOnEnter int
+		wantWarning string
+	}{
+		{
+			name:        "dies as the rename prompt opens",
+			diesOnEnter: 1,
+			wantWarning: "Codex never asked for a thread name — the chat is running unnamed (its screen could not be read: chat exited)",
+		},
+		{
+			name:        "dies as the name is confirmed",
+			diesOnEnter: 2,
+			wantWarning: "Codex never confirmed the rename — the chat may be unnamed (its screen could not be read: chat exited)",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fake := &dyingCodex{fakeCodex: newFakeCodex(), entersLeft: test.diesOnEnter}
+			renamed, warning, unverifiable := renameCodexThread(
+				context.Background(), fake, fakeTarget("cx-1-2-3", "cx-1-2-3"), "worker",
+				testTimings(), tracer{}, nil, time.Now(),
+			)
+			if renamed || unverifiable || warning != test.wantWarning {
+				t.Fatalf("renameCodexThread() = %t, %q, %t; want false, %q, false",
+					renamed, warning, unverifiable, test.wantWarning)
+			}
+		})
+	}
+}
+
 // TestClaudeNeedsNoChoreography: Claude takes its name on the command line, so
 // the spawn must type NOTHING into it.
 func TestClaudeNeedsNoChoreography(t *testing.T) {

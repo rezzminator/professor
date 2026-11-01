@@ -56,9 +56,18 @@ func (provider *herdrTabProvider) tabs(ctx context.Context, socket string) ([]he
 	pendingAgents := map[string]time.Time{}
 	defer func() { provider.missingAgents = pendingAgents }()
 	provider.probe.begin()
+	// An unreadable configuration never stops the tabs' status: it is named, and
+	// the tabs keep painting in the default mode while it lasts.
 	mode, err := provider.mode()
 	if err != nil {
-		return nil, fmt.Errorf("read tab status configuration: %w", err)
+		mode = pfmconfig.DefaultHerdrTabStatus
+		if _, writeErr := fmt.Fprintf(
+			provider.warn,
+			"Herdr tab status configuration: %v (painting the default %s mode)\n",
+			err, mode,
+		); writeErr != nil {
+			return nil, fmt.Errorf("persist tab status configuration failure: %w", writeErr)
+		}
 	}
 	var glyphs herdr.TabGlyphs
 	glyphRead := ""
@@ -185,7 +194,10 @@ func missingTabAgentState(
 	screen func(context.Context, headless.Chat) (string, error),
 ) (string, error) {
 	panes, err := herdr.ReadTabPanes(ctx, target.Socket)
-	if err != nil {
+	// An incomplete listing still holds every complete pane: this chat's pane is
+	// judged when it is among them, and stays unknown when it may be a skipped one.
+	var incomplete *herdr.IncompleteTabPanesError
+	if err != nil && !errors.As(err, &incomplete) {
 		return tabStateUnknown, fmt.Errorf("confirm tab pane %s: %w", target.Pane, err)
 	}
 	for _, pane := range panes {
@@ -211,6 +223,9 @@ func missingTabAgentState(
 			return tabStateUnknown, fmt.Errorf("read tab pane %s without its agent: %w", pane.Pane, err)
 		}
 		return paneState(target.Engine, capture), nil
+	}
+	if incomplete != nil {
+		return tabStateUnknown, fmt.Errorf("confirm tab pane %s: %w", target.Pane, err)
 	}
 	return "", nil
 }
@@ -267,7 +282,17 @@ func PaintHerdrIndicators(ctx context.Context, socket, lockDir string, stderr io
 		if !loaded {
 			var err error
 			panes, err = herdr.ReadTabPanes(ctx, socket)
-			if err != nil {
+			var incomplete *herdr.IncompleteTabPanesError
+			if errors.As(err, &incomplete) {
+				// The complete panes still paint; only the skipped ones go unpainted.
+				if _, writeErr := fmt.Fprintf(
+					warnings,
+					"Herdr tab panes: %v (painting the complete panes)\n",
+					err,
+				); writeErr != nil {
+					return nil, fmt.Errorf("persist tab pane warning: %w", writeErr)
+				}
+			} else if err != nil {
 				return nil, fmt.Errorf("%w: %w", errTabPaneList, err)
 			}
 			loaded = true
@@ -488,13 +513,31 @@ func (reader *tabViewReader) views(
 	seen := map[string]bool{}
 	var views []herdr.TabDecoration
 	for _, pidText := range strings.Fields(output) {
+		// One client that cannot be read costs that client's view, named, never its siblings'.
 		pid, err := strconv.Atoi(pidText)
 		if err != nil {
-			return nil, fmt.Errorf("invalid tab client pid %q: %w", pidText, err)
+			if _, writeErr := fmt.Fprintf(
+				reader.warn,
+				"Herdr tab client %q of %s skipped: not a pid\n",
+				pidText,
+				target.ID,
+			); writeErr != nil {
+				return nil, fmt.Errorf("persist tab client failure: %w", writeErr)
+			}
+			continue
 		}
 		location, found, err := reader.resolve(ctx, pid)
 		if err != nil {
-			return nil, fmt.Errorf("resolve tab client %d: %w", pid, err)
+			if _, writeErr := fmt.Fprintf(
+				reader.warn,
+				"Herdr tab client %d of %s skipped: %v\n",
+				pid,
+				target.ID,
+				err,
+			); writeErr != nil {
+				return nil, fmt.Errorf("persist tab client failure: %w", errors.Join(err, writeErr))
+			}
+			continue
 		}
 		if !found || location.Socket != socket || seen[location.Terminal] {
 			continue
@@ -602,11 +645,11 @@ func tabPaneSession(pane herdr.TabPane, target headless.Chat) (bool, error) {
 	if len(pane.Session) == 0 || string(pane.Session) == "null" {
 		return false, nil
 	}
-	var session struct{ Source, Agent, Kind, Value string }
+	var session struct{ Kind, Value string }
 	if err := json.Unmarshal(pane.Session, &session); err != nil {
 		return false, fmt.Errorf("decode tab agent_session: %w", err)
 	}
-	if session.Source == "" || session.Agent == "" || session.Value == "" {
+	if session.Value == "" {
 		return false, fmt.Errorf("incomplete tab agent_session: %s", pane.Session)
 	}
 	switch session.Kind {

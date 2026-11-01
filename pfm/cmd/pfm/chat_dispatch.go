@@ -111,7 +111,7 @@ func runChatWithRuntime(
 	case "keys":
 		return runChatKeys(rest, stdout, stderr, clock.Real, runtime)
 	case "recover":
-		return runChatRecover(rest, stdout, stderr, runtime)
+		return runChatRecover(rest, stdout, stderr)
 	case "name":
 		return runChatNameContext(ctx, rest, stdout, stderr, runtime)
 	case "kill":

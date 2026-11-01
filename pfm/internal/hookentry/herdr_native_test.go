@@ -547,7 +547,14 @@ func TestNativeRetirementRetriesAndNamesRecordErrors(t *testing.T) {
 	if err := os.WriteFile(reporter.activityPath("s1"), []byte(`{`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := reporter.expireAgents("s1"); err == nil || !strings.Contains(err.Error(), "decode Claude activity") {
-		t.Fatalf("malformed record read as absent: %v", err)
+	var warned bytes.Buffer
+	reporter.stderr = &warned
+	if done, err := reporter.expireAgents("s1"); !done || err != nil {
+		t.Fatalf("malformed record: done=%v err=%v, want the watchdog to finish on an empty state", done, err)
+	}
+	wantWarning := "pfm internal herdr-state : decode Claude activity " + reporter.activityPath("s1") +
+		" (starting empty): unexpected end of JSON input\n"
+	if warned.String() != wantWarning {
+		t.Fatalf("malformed record warning = %q, want %q", warned.String(), wantWarning)
 	}
 }

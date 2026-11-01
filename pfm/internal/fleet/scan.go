@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strconv"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
@@ -56,6 +57,9 @@ type Env struct {
 	NowNS           int64
 	// Primary is the operator's primary Claude account (see PrimaryAccount).
 	Primary int
+	// Faults are environment reads that fell back to a default; every scan
+	// reports them among its Errors.
+	Faults []string
 }
 
 // Runtime is the Env's machine policy in the shape every fleet writer takes.
@@ -124,10 +128,8 @@ func Scan(
 			return Result{}, err
 		}
 	}
-	output, failures, err := composeNativeFleet(ctx, database, env, request.View, data, live, request.ReadOnly)
-	if err != nil {
-		return Result{}, err
-	}
+	output, failures := composeNativeFleet(ctx, database, env, request.View, data, live, request.ReadOnly)
+	failures = append(slices.Clone(env.Faults), failures...)
 	return Result{
 		Errors:   failures,
 		Output:   output,
@@ -157,7 +159,7 @@ func ScanCached(
 	if err != nil {
 		return Result{}, err
 	}
-	output, failures, err := composeNativeFleet(
+	output, failures := composeNativeFleet(
 		ctx,
 		database,
 		env,
@@ -166,9 +168,7 @@ func ScanCached(
 		gather.Snapshot{},
 		request.ReadOnly,
 	)
-	if err != nil {
-		return Result{}, err
-	}
+	failures = append(slices.Clone(env.Faults), failures...)
 	return Result{
 		Output: output,
 		Errors: failures,
@@ -291,17 +291,21 @@ func ResolveEnv(request Request) (Env, error) {
 		}
 		nowNS = parsed
 	}
-	primary, err := PrimaryAccount(resolved, machine)
-	if err != nil {
-		return Env{}, fmt.Errorf("resolve primary account: %w", err)
-	}
 	env := Env{
 		Paths:      resolved,
 		CurrentDir: currentDir,
 		NowNS:      nowNS,
-		Primary:    primary,
 		Config:     machine,
 	}
+	primary, err := PrimaryAccountOrImplicit(resolved, machine)
+	if err != nil {
+		// An unreadable store must not blank the fleet: compose on the
+		// implicit account, as the launchers do, and say so.
+		fault := fmt.Sprintf("primary account unreadable (%v); composing on account %d", err, primary)
+		obs.Logger(context.Background()).Warn("fleet.primary.unreadable", obs.FieldErr, fault)
+		env.Faults = append(env.Faults, fault)
+	}
+	env.Primary = primary
 	if request.Workbenches {
 		benches, faults, err := workbench.ReadCache(paths.WorkbenchCache(resolved))
 		if err == nil {

@@ -70,7 +70,6 @@ type tokenHistoryState struct {
 }
 
 type tokenRecord struct {
-	Timestamp string `json:"timestamp"`
 	Type      string `json:"type"`
 	RequestID string `json:"requestId"`
 	Message   struct {
@@ -399,11 +398,6 @@ func applyTokenRecord(entry *tokenCacheEntry, line []byte) error {
 	var record tokenRecord
 	if err := json.Unmarshal(line, &record); err != nil {
 		return err
-	}
-	if record.Timestamp != "" {
-		if _, err := time.Parse(time.RFC3339Nano, record.Timestamp); err != nil {
-			return fmt.Errorf("parse timestamp %q: %w", record.Timestamp, err)
-		}
 	}
 	if record.Type == "assistant" && record.Message.Usage != nil {
 		usage := *record.Message.Usage

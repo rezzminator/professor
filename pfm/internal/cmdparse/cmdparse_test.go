@@ -6,13 +6,10 @@ import (
 	"testing"
 )
 
-// testCwd is the directory every test call runs in; the parse never reads it.
-const testCwd = "/tmp/cmdparse-test"
-
 // parseOne runs ParseBatch on one call.
 func parseOne(t *testing.T, command string) []Part {
 	t.Helper()
-	got, err := ParseBatch([]Call{{ID: "c1", Command: command, Cwd: testCwd}})
+	got, err := ParseBatch([]Call{{ID: "c1", Command: command}})
 	if err != nil {
 		t.Fatalf("ParseBatch(%q): %v", command, err)
 	}
@@ -58,13 +55,6 @@ func TestNodeEvalIsUnparsed(t *testing.T) {
 	parts := parseOne(t, `node -e "require('fs').readFileSync('x.js')"`)
 	if len(parts) != 1 || parts[0].Program != "node" || parts[0].Status != StatusUnparsed {
 		t.Fatalf("parts = %+v, want one unparsed node part", parts)
-	}
-}
-
-func TestParseBatchRejectsRelativeCwd(t *testing.T) {
-	t.Parallel()
-	if _, err := ParseBatch([]Call{{ID: "a", Command: "true", Cwd: "rel"}}); err == nil {
-		t.Fatal("ParseBatch accepted a relative cwd")
 	}
 }
 
@@ -288,7 +278,7 @@ func TestPartEnv(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := ParseBatch([]Call{{ID: "c1", Command: tc.command, Cwd: testCwd, Vars: tc.vars}})
+			got, err := ParseBatch([]Call{{ID: "c1", Command: tc.command, Vars: tc.vars}})
 			if err != nil {
 				t.Fatalf("ParseBatch(%q): %v", tc.command, err)
 			}

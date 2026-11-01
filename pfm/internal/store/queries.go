@@ -115,7 +115,7 @@ LIMIT ?`, limit)
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate cached transcripts: %w", err)
 	}
-	return s.clearNames(ctx, transcripts)
+	return s.clearNames(ctx, transcripts), nil
 }
 
 func (s *Store) defaultRollouts(
@@ -382,8 +382,7 @@ func (s *Store) Transcript(
 	if err != nil {
 		return Transcript{}, false, fmt.Errorf("query transcript %q: %w", uuid, err)
 	}
-	transcript, err = s.clearName(ctx, transcript)
-	return transcript, err == nil, err
+	return s.clearName(ctx, transcript), true, nil
 }
 
 // Transcripts returns all transcripts ordered by UUID.
@@ -398,7 +397,7 @@ func (s *Store) Transcripts(ctx context.Context) ([]Transcript, error) {
 	if err != nil {
 		return nil, err
 	}
-	return s.clearNames(ctx, transcripts)
+	return s.clearNames(ctx, transcripts), nil
 }
 
 func scanTranscript(row rowScanner) (Transcript, error) {

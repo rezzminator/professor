@@ -22,14 +22,16 @@ func pfmPathWarningsWithEnv(home, pathEnvironment string, env paths.Env) []strin
 	canonical, _ = filepath.Abs(canonical)
 	targetHome, _ := filepath.Abs(home)
 	jailed := env.Get(paths.EnvHome) != "" || env.Get("PFM_DEV_FENCE") != ""
-	canonicalHash, err := executableHash(canonical)
-	if err != nil {
-		return []string{fmt.Sprintf("pfm_canonical=%s error=%v", canonical, err)}
+	// A canonical binary that cannot be hashed leaves only the byte comparison
+	// unknown: which pfm PATH resolves first is still reported.
+	var warnings []string
+	canonicalHash, canonicalErr := executableHash(canonical)
+	if canonicalErr != nil {
+		warnings = append(warnings, fmt.Sprintf("pfm_canonical=%s error=%v", canonical, canonicalErr))
 	}
 
 	seen := make(map[string]bool)
 	candidates := make([]string, 0)
-	var warnings []string
 	for _, directory := range filepath.SplitList(pathEnvironment) {
 		if directory == "" {
 			directory = "."
@@ -72,6 +74,9 @@ func pfmPathWarningsWithEnv(home, pathEnvironment string, env paths.Env) []strin
 			candidates[0],
 			canonical,
 		))
+	}
+	if canonicalErr != nil {
+		return warnings
 	}
 	for _, candidate := range candidates {
 		hash, err := executableHash(candidate)

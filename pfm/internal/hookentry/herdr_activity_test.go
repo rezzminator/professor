@@ -387,6 +387,14 @@ func TestHerdrBackgroundAgentsThroughTmux(t *testing.T) {
 	assertActivityReport(t, rig.herdr, "working", "1 agent running")
 	rig.wantQuiet(rig.engine("agent-stop", `{"session_id":"s1","agent_id":"a","hook_event_name":"SubagentStop"}`))
 	assertActivityReport(t, rig.herdr, "idle", "")
+	// The hook's CLI event decides; a payload without its event name still counts.
+	got := rig.engine("agent-start", `{"session_id":"s1","agent_id":"b"}`)
+	want := `pfm internal herdr-state agent-start: hook_event_name "", want SubagentStart (counted as agent-start)` + "\n"
+	if got.rc != 0 || got.stderr != want {
+		t.Fatalf("rc=%d stderr=%q, want 0 %q", got.rc, got.stderr, want)
+	}
+	rig.wantQuiet(rig.engine("idle", `{"session_id":"s1"}`))
+	assertActivityReport(t, rig.herdr, "working", "1 agent running")
 }
 
 func TestHerdrAgentWatchDoesNotIdleANewPrompt(t *testing.T) {
@@ -593,7 +601,12 @@ func TestHerdrAgentWatchRetriesAReadFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte(`{`), 0o600); err != nil {
+	// An unreadable record (here: not a regular file) is retried; an undecodable
+	// one is a corrupt state the next hook rewrites.
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(path, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	waits := 0
@@ -604,6 +617,9 @@ func TestHerdrAgentWatchRetriesAReadFailure(t *testing.T) {
 			t.Fatal("watch did not recover")
 		}
 		now += int64(time.Hour + time.Second)
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
 		if err := os.WriteFile(path, good, 0o600); err != nil {
 			t.Fatal(err)
 		}

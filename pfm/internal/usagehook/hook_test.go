@@ -195,7 +195,7 @@ func TestWarnRecoverQuietTransition(t *testing.T) {
 	// exhausted: finish the in-flight step, then /reload" on every prompt while the 5-hour
 	// window was 1% used. Severity by max() is correct; asserting it about the LIVE window was
 	// not. A model-scoped cap must name the model and report the real 5-hour headroom.
-	seedNamed := func(five, seven int, fable string) {
+	seedNamed := func(five, seven int, fable, fableReset string) {
 		t.Helper()
 		body := []byte(`{"config_dir":` + `"` + configDir + `",` + `"five_hour":{"utilization":` + itoa(five) +
 			`,"resets_at":"2030-01-01T10:00:00Z"},` +
@@ -203,7 +203,7 @@ func TestWarnRecoverQuietTransition(t *testing.T) {
 			`,"resets_at":"2030-01-03T08:00:00Z"},` +
 			`"seven_day_opus":{"utilization":null},` +
 			`"limits":[{"kind":"weekly_scoped","scope":{"model":{"display_name":"Fable"}},` +
-			`"percent":` + fable + `,"resets_at":"2030-01-03T08:00:00Z","is_active":true}]}`)
+			`"percent":` + fable + `,"resets_at":"` + fableReset + `","is_active":true}]}`)
 		if err := os.WriteFile(filepath.Join(cacheDir, "acct-1.json"), body, 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -216,7 +216,7 @@ func TestWarnRecoverQuietTransition(t *testing.T) {
 	if _, err := Evaluate(context.Background(), options); err != nil {
 		t.Fatal(err)
 	}
-	seedNamed(1, 76, "95")
+	seedNamed(1, 76, "95", "2030-01-03T08:00:00Z")
 	scoped, err := Evaluate(context.Background(), options)
 	if err != nil || !strings.Contains(scoped, "USAGE LIMIT IMMINENT") {
 		t.Fatalf("scoped=%q err=%v", scoped, err)
@@ -229,11 +229,26 @@ func TestWarnRecoverQuietTransition(t *testing.T) {
 	if strings.Contains(scoped, "finish the in-flight step") {
 		t.Fatalf("model-scoped cap must NOT order a session-wide stop: %q", scoped)
 	}
-	seedNamed(97, 76, "20")
+	seedNamed(97, 76, "20", "2030-01-03T08:00:00Z")
 	fiveCrit, err := Evaluate(context.Background(), options)
 	if err != nil || !strings.Contains(fiveCrit, "The 5-hour window is nearly exhausted") {
 		t.Fatalf("fiveCrit=%q err=%v", fiveCrit, err)
 	}
+	// A Fable reading whose reset will not parse is still a reading: the
+	// warning names it, and the hook's log names the unknown reset.
+	var log bytes.Buffer
+	options.Log = &log
+	seedNamed(1, 20, "96", "soon")
+	unknownReset, err := Evaluate(context.Background(), options)
+	if err != nil || !strings.Contains(unknownReset, " · 7d-fable 96%. ") {
+		t.Fatalf("unknown Fable reset: warning=%q err=%v, want the 7d-fable 96%% clause", unknownReset, err)
+	}
+	wantLog := "pfm usage-hook: Fable reset unknown: decode cached Fable reset \"soon\": " +
+		"parsing time \"soon\" as \"2006-01-02T15:04:05Z07:00\": cannot parse \"soon\" as \"2006\"\n"
+	if log.String() != wantLog {
+		t.Fatalf("unknown Fable reset log=%q, want %q", log.String(), wantLog)
+	}
+	options.Log = nil
 
 	seed(5, 5)
 	secondRecovery, err := Evaluate(context.Background(), options)
@@ -247,6 +262,115 @@ func TestWarnRecoverQuietTransition(t *testing.T) {
 	coldHealthy, err := Evaluate(context.Background(), options)
 	if err != nil || coldHealthy != "" {
 		t.Fatalf("cold healthy=%q err=%v", coldHealthy, err)
+	}
+}
+
+// TestEvaluateKeepsItsNoticeWhenTheWarnedFlagFails: the warned flag only
+// dedupes the recovery notice, so a flag that cannot be written or removed
+// costs a log line, never the warning or the notice it travels with. A config
+// directory nothing names reports as account 1, and says so.
+func TestEvaluateKeepsItsNoticeWhenTheWarnedFlagFails(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		fiveUsed    float64
+		arm         func(t *testing.T, flagPath, configDir string)
+		wantMessage string
+		wantLog     string
+	}{
+		{
+			name:     "flag write fails",
+			fiveUsed: 85,
+			arm: func(t *testing.T, flagPath, _ string) {
+				if err := os.MkdirAll(filepath.Join(flagPath, "occupied"), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantMessage: "⚠ usage limit approaching — account 1: 5h 85% (resets 05:00) · 7d 12% (resets Mon 05:00). " +
+				"Plan around it: wrap up soon or /reload to another account before the cap hits.\n",
+			wantLog: "record warned flag {flag}: ",
+		},
+		{
+			name:     "flag removal fails",
+			fiveUsed: 10,
+			arm: func(t *testing.T, flagPath, configDir string) {
+				if err := atomicfile.Write(flagPath, []byte(configDir), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				previous := removeWarnedFlag
+				t.Cleanup(func() { removeWarnedFlag = previous })
+				removeWarnedFlag = func(string) error { return os.ErrPermission }
+			},
+			wantMessage: "✅ usage recovered — account 1 is back to 5h 10% · 7d 12%. Any earlier limit warning in " +
+				"this conversation is STALE — ignore it and work normally.\n",
+			wantLog: "clear warned flag {flag}: permission denied\n",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			configDir := filepath.Join(root, "work-seat")
+			if err := os.MkdirAll(configDir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(
+				filepath.Join(configDir, ".credentials.json"),
+				[]byte(`{"claudeAiOauth":{"accessToken":"fixture-token"}}`),
+				0o600,
+			); err != nil {
+				t.Fatal(err)
+			}
+			now := time.Date(2030, 1, 7, 1, 0, 0, 0, time.UTC)
+			cacheDir := filepath.Join(root, "cache")
+			if err := WriteCacheRecord(CachePath(cacheDir, 1), CacheRecord{
+				Usage: Usage{
+					FiveHour: Window{Utilization: usageFloatPtr(test.fiveUsed), ResetsAt: "2030-01-07T05:00:00Z"},
+					SevenDay: Window{Utilization: usageFloatPtr(12), ResetsAt: "2030-01-07T05:00:00Z"},
+				},
+				ConfigDir: configDir, FetchedAt: &now,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			flagPath := filepath.Join(cacheDir, "warned-1")
+			test.arm(t, flagPath, configDir)
+			var log bytes.Buffer
+			message, err := Evaluate(context.Background(), Options{
+				Now: func() time.Time { return now }, Env: &paths.MapEnv{Values: map[string]string{}},
+				Home: root, ConfigDir: configDir, CacheDir: cacheDir,
+				Warn: 80, Critical: 95, TTL: 24 * time.Hour, Log: &log,
+			})
+			if err != nil || message != test.wantMessage {
+				t.Fatalf("message=%q err=%v, want %q", message, err, test.wantMessage)
+			}
+			flagLog := strings.ReplaceAll(test.wantLog, "{flag}", flagPath)
+			wantLog := "pfm usage-hook: no account number for config dir " + configDir + "; reporting it as account 1\n" +
+				"pfm usage-hook: " + flagLog
+			if !strings.HasPrefix(log.String(), wantLog) {
+				t.Fatalf("log=%q, want it to start %q", log.String(), wantLog)
+			}
+		})
+	}
+}
+
+// TestEnvIntNamesAMalformedValue: an unset knob takes its default quietly; a
+// malformed one takes it too, and the log names the value refused.
+func TestEnvIntNamesAMalformedValue(t *testing.T) {
+	for _, test := range []struct {
+		name, value, wantLog string
+		want                 int
+	}{
+		{name: "unset", want: 80},
+		{name: "whole number", value: "70", want: 70},
+		{
+			name: "malformed", value: "8O", want: 80,
+			wantLog: "pfm usage-hook: CC_USAGE_WARN=\"8O\" is not a whole number; using 80\n",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var log bytes.Buffer
+			env := &paths.MapEnv{Values: map[string]string{"CC_USAGE_WARN": test.value}}
+			if got := envInt(env, &log, "CC_USAGE_WARN", 80); got != test.want || log.String() != test.wantLog {
+				t.Fatalf("envInt=%d log=%q, want %d %q", got, log.String(), test.want, test.wantLog)
+			}
+		})
 	}
 }
 

@@ -168,7 +168,7 @@ func TestSynthesizeRoutesAndEnvHygiene(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if plan.Line != attachLine(request.FreshSocket, request.FreshSocket, false) ||
+	if plan.Line != AttachLine(request.FreshSocket, request.FreshSocket, false) ||
 		plan.ChatServer == nil || plan.ChatServer.Run != plan.Run || plan.ChatServer.CWD != request.Row.CWD {
 		t.Fatalf("new Claude line = %q, server = %#v, run = %q", plan.Line, plan.ChatServer, plan.Run)
 	}

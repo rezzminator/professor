@@ -284,8 +284,9 @@ func TestHooklessLaunchReadsTheEnginesSettingsAsTheSpawnAuditDoes(t *testing.T) 
 		},
 		{
 			name: "an unparsable payload is unverified and warned", pids: []int{10},
-			argv:     map[int][]string{10: {"/opt/claude", "--settings", "{not json"}},
-			wantWarn: "pid 10:",
+			argv: map[int][]string{10: {"/opt/claude", "--settings", "{not json"}},
+			wantWarn: "pfm chat ls: herdr hookless read of seat w1: parse launch of pid 10: --settings: " +
+				"invalid character 'n' looking for beginning of object key string; left to Claude as written\n",
 		},
 	}
 	for _, test := range cases {

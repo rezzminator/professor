@@ -97,3 +97,22 @@ func sessionIndexHasRename(path, name string, since time.Time) (renamed bool, re
 	}
 	return false, nil
 }
+
+// unverifiedRename is the verdict when neither witness can speak: Codex shows
+// nothing on screen and its ledger could not be read. That is "could not
+// verify", never "unnamed" — the rename may well have landed.
+func unverifiedRename(err error) string {
+	return fmt.Sprintf(
+		"could not verify the Codex rename — nothing on screen confirms it and its session index could not be read (%v); the chat may be named, check it with pfm ls",
+		err,
+	)
+}
+
+// screenUnread is what a rename warning adds when the screen that would show
+// Codex's reason could not be read: "could not look", never "showed nothing".
+func screenUnread(err error) string {
+	if err == nil {
+		return ""
+	}
+	return fmt.Sprintf(" (its screen could not be read: %v)", err)
+}

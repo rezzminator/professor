@@ -31,6 +31,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/codexmeta"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
@@ -51,6 +52,15 @@ const (
 	StateDead    = "dead"
 	StateMissing = "not-found"
 )
+
+// AmbiguousTargetError is a name more than one chat answers to: a refusal
+// of the name itself, never a lookup that could not look (Detail names the
+// claimants).
+type AmbiguousTargetError struct {
+	Detail string
+}
+
+func (e *AmbiguousTargetError) Error() string { return e.Detail }
 
 // Chat is one resolved seat: who it is, where its record lives, and whether a
 // server is still holding it up.
@@ -285,7 +295,7 @@ func InspectWith(
 	}
 	if chat.Live && chat.Engine == pfmengine.Codex && chat.ID != "" &&
 		(status.State == StateIdle || status.State == StateError) {
-		subagentWorking, err := newerCodexSubagent(chat.Path, chat.ID, meta.ModifiedUnixNS)
+		subagentWorking, err := newerCodexSubagent(ctx, chat.Path, chat.ID, meta.ModifiedUnixNS)
 		if err != nil {
 			return status, err
 		}
@@ -331,6 +341,10 @@ func assistantAnswered(role string) bool {
 // crash-read-as-silence a watcher exists to prevent. The mtime rule's failure
 // is a premature idle that the sub-agent's next write corrects. Both sidechain
 // rules below stay on mtime alone for that reason.
+// lstatListed stats a file a directory listing just named; a test swaps it to
+// stage the file's removal between the listing and the stat.
+var lstatListed = os.Lstat
+
 func newerClaudeSidechain(transcriptPath, sessionID string, parentModifiedUnixNS int64) (bool, error) {
 	directory := filepath.Join(filepath.Dir(transcriptPath), sessionID, "subagents")
 	entries, err := os.ReadDir(directory)
@@ -348,7 +362,10 @@ func newerClaudeSidechain(transcriptPath, sessionID string, parentModifiedUnixNS
 		if entry.IsDir() || filepath.Ext(entry.Name()) != ".jsonl" {
 			continue
 		}
-		info, err := entry.Info()
+		info, err := lstatListed(filepath.Join(directory, entry.Name()))
+		if errors.Is(err, fs.ErrNotExist) {
+			continue // removed since the listing: it wrote nothing newer
+		}
 		if err != nil {
 			return false, fmt.Errorf("inspect Claude sidechain %s: %w", filepath.Join(directory, entry.Name()), err)
 		}
@@ -373,8 +390,14 @@ const codexMaxLineageDepth = 8
 // sub-agent started after midnight lands in a later day); a directory missing
 // is skipped, any other read error is returned. A rollout counts when its
 // session_meta is a sub-agent's and its parent chain reaches parentID
-// (codexmeta.Decode is the one session_meta reader).
-func newerCodexSubagent(transcriptPath, parentID string, parentModifiedUnixNS int64) (bool, error) {
+// (codexmeta.Decode is the one session_meta reader). A rollout removed since
+// the listing, or whose header does not decode, is not this parent's
+// sub-agent; the undecodable one is logged with its path.
+func newerCodexSubagent(
+	ctx context.Context,
+	transcriptPath, parentID string,
+	parentModifiedUnixNS int64,
+) (bool, error) {
 	dayDir := filepath.Dir(transcriptPath)
 	monthDir := filepath.Dir(dayDir)
 	yearDir := filepath.Dir(monthDir)
@@ -430,7 +453,10 @@ func newerCodexSubagent(transcriptPath, parentID string, parentModifiedUnixNS in
 					if !ok || !pfmengine.IsUUID(id) {
 						continue
 					}
-					info, err := os.Lstat(path)
+					info, err := lstatListed(path)
+					if errors.Is(err, fs.ErrNotExist) {
+						continue
+					}
 					if err != nil {
 						return false, fmt.Errorf("inspect Codex rollout %s: %w", path, err)
 					}
@@ -443,7 +469,7 @@ func newerCodexSubagent(transcriptPath, parentID string, parentModifiedUnixNS in
 		}
 	}
 	for _, path := range newer {
-		reaches, err := codexSubagentReaches(path, parentID, byID)
+		reaches, err := codexSubagentReaches(ctx, path, parentID, byID)
 		if err != nil {
 			return false, err
 		}
@@ -456,9 +482,9 @@ func newerCodexSubagent(transcriptPath, parentID string, parentModifiedUnixNS in
 
 // codexSubagentReaches walks one rollout's parent chain, at most
 // codexMaxLineageDepth levels, and reports whether it ends at parentID.
-func codexSubagentReaches(path, parentID string, byID map[string]string) (bool, error) {
+func codexSubagentReaches(ctx context.Context, path, parentID string, byID map[string]string) (bool, error) {
 	for depth := 0; depth < codexMaxLineageDepth; depth++ {
-		header, ok, err := readCodexHeader(path)
+		header, ok, err := readCodexHeader(ctx, path)
 		if err != nil || !ok {
 			return false, err
 		}
@@ -478,10 +504,14 @@ func codexSubagentReaches(path, parentID string, byID map[string]string) (bool, 
 }
 
 // readCodexHeader decodes a rollout's first line. ok is false for a file whose
-// first line is not written yet (empty, or no newline): a rollout still being
-// created says nothing about lineage and is not an error.
-func readCodexHeader(path string) (header codexmeta.Header, ok bool, returnErr error) {
+// first line is not written yet (empty, or no newline), for one removed since
+// its listing, and for one whose first line is not a session_meta (logged):
+// none of them says anything about this parent's lineage, and none is an error.
+func readCodexHeader(ctx context.Context, path string) (header codexmeta.Header, ok bool, returnErr error) {
 	file, err := codexmeta.OpenRollout(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return codexmeta.Header{}, false, nil
+	}
 	if err != nil {
 		return codexmeta.Header{}, false, fmt.Errorf("open Codex rollout %s: %w", path, err)
 	}
@@ -499,7 +529,12 @@ func readCodexHeader(path string) (header codexmeta.Header, ok bool, returnErr e
 	}
 	header, err = codexmeta.Decode(line)
 	if err != nil {
-		return codexmeta.Header{}, false, fmt.Errorf("decode Codex rollout header %s: %w", path, err)
+		obs.Logger(ctx).Warn(
+			"inspect: Codex rollout header could not be decoded; not counted as a sub-agent",
+			"path", path,
+			obs.FieldErr, err.Error(),
+		)
+		return codexmeta.Header{}, false, nil
 	}
 	return header, true, nil
 }

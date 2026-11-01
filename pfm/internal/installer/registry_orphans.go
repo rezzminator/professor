@@ -55,8 +55,11 @@ func (installer *engine) retireDeadRegistryLinks() error {
 		}
 	}
 	result, err := InspectRegistryOwnership(scan)
-	if err != nil {
+	if err != nil && len(result.Unreadable) == 0 {
 		return err
+	}
+	for _, unreadable := range result.Unreadable {
+		installer.skip("registry-ownership entry left alone: " + unreadable.Error())
 	}
 	registries := map[string]bool{}
 	for _, name := range []string{"agents", "commands", "skills", globalRulesRegistry} {

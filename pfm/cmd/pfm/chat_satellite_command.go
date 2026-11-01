@@ -296,26 +296,21 @@ func runChatBranch(
 		return 2
 	}
 	// A fork inherits its parent's account and cache posture, not the caller's.
-	parent, parentFound, err := parentBranchRow(context.Background(), *id, runtimes...)
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm chat branch: resolve parent session: %v\n", err)
-		return 1
-	}
 	var parentLaunch fleetdb.Launch
 	parentRecorded := false
 	if engine == pfmengine.Claude {
 		launches, openErr := fleetdb.OpenLaunches(context.Background(), runtime.Paths)
 		if openErr != nil {
-			fmt.Fprintf(stderr, "pfm chat branch: read launch record for %s: %v\n", *id, openErr)
-			return 1
+			fmt.Fprintf(stderr, "pfm chat branch: read launch record for %s: %v; continuing without it\n", *id, openErr)
+		} else {
+			parentLaunch, err = launches.LaunchFor(context.Background(), *id)
+			closeErr := launches.Close()
+			if err != nil && !errors.Is(err, fleetdb.ErrNoLaunch) || closeErr != nil {
+				fmt.Fprintf(stderr, "pfm chat branch: read launch record for %s: %v; continuing without it\n",
+					*id, errors.Join(err, closeErr))
+			}
+			parentRecorded = err == nil
 		}
-		parentLaunch, err = launches.LaunchFor(context.Background(), *id)
-		closeErr := launches.Close()
-		if err != nil && !errors.Is(err, fleetdb.ErrNoLaunch) || closeErr != nil {
-			fmt.Fprintf(stderr, "pfm chat branch: read launch record for %s: %v\n", *id, errors.Join(err, closeErr))
-			return 1
-		}
-		parentRecorded = err == nil
 	}
 	// The launch record, else the live seat's process: never the primary
 	// as a guess when the machine offers a choice of accounts.
@@ -323,18 +318,23 @@ func runChatBranch(
 	if requestedAccount == 0 && engine == pfmengine.Claude && parentRecorded {
 		requestedAccount = parentLaunch.Account
 	}
-	if requestedAccount == 0 && parentFound {
-		requestedAccount = parent.Account
+	if requestedAccount == 0 {
+		parent, parentFound, scanErr := parentBranchRow(context.Background(), *id, runtimes...)
+		if scanErr != nil {
+			fmt.Fprintf(stderr, "pfm chat branch: resolve parent session: %v\n", scanErr)
+		}
+		if parentFound {
+			requestedAccount = parent.Account
+		}
 	}
 	if requestedAccount == 0 && runtime.Config.AccountChoices(engine) > 1 {
 		fmt.Fprintf(stderr, "pfm chat branch: the account of session %s could not be resolved "+
 			"(no launch record, no live seat naming it); pass --account N\n", *id)
 		return 1
 	}
-	primary, primaryErr := fleet.PrimaryAccount(runtime.Paths, runtime.Config)
+	primary, primaryErr := fleet.PrimaryAccountOrImplicit(runtime.Paths, runtime.Config)
 	if primaryErr != nil {
-		fmt.Fprintf(stderr, "pfm chat branch: read primary account: %v\n", primaryErr)
-		return 1
+		fmt.Fprintf(stderr, "pfm chat branch: %v; account %d stands in\n", primaryErr, primary)
 	}
 	engine, selectedAccount, err := resolveRunEngineIDAccount(engine, requestedAccount, runtime.Config, primary)
 	if err != nil {
@@ -367,8 +367,8 @@ func runChatBranch(
 		err = workbench.EnsureMirror(persona.Bench, engine, runtime.Paths.Home)
 	}
 	if err != nil {
-		fmt.Fprintf(stderr, "pfm chat branch: %v\n", err)
-		return 1
+		fmt.Fprintf(stderr, "pfm chat branch: %v; branching without the workbench persona\n", err)
+		persona = workbench.Persona{}
 	}
 	nameInput := *requestedName
 	if flags.NArg() != 0 {

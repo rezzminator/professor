@@ -262,7 +262,8 @@ func RenderVSCodeTheme(stem string, content []byte) (VSCodeThemeFile, error) {
 		return VSCodeThemeFile{}, fmt.Errorf("themesync: VS Code theme %s: %w", stem, err)
 	}
 	value := CustomValue(stem)
-	tokens, side := customPalette(profile.Base, profile.Overrides)
+	// ParseProfile held every override a colour, so no note is set aside here.
+	tokens, side, _ := customPalette(profile.Base, profile.Overrides)
 	variant, err := deriveVariant(value, tokens)
 	if err != nil {
 		return VSCodeThemeFile{}, fmt.Errorf("themesync: VS Code theme %s: %w", stem, err)

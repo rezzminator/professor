@@ -109,8 +109,10 @@ func accountHookModules(rows *[]Row, dir string) {
 }
 
 // modulePlugins names, sorted, every plugin dir's installed_plugins.json
-// records whose hooks/hooks.json declares hook modules. ok is false when a
-// read failed; its row is already appended.
+// records whose hooks/hooks.json declares hook modules. ok is false when the
+// plugin list itself could not be read; its row is already appended. A plugin
+// whose modules cannot be resolved costs that plugin alone: its row names it
+// unknown and its siblings are still named.
 func modulePlugins(rows *[]Row, dir string) ([]string, bool) {
 	record := filepath.Join(dir, "plugins", "installed_plugins.json")
 	before := len(*rows)
@@ -170,7 +172,7 @@ func modulePlugins(rows *[]Row, dir string) ([]string, bool) {
 		}
 	}
 	sort.Strings(names)
-	return names, len(*rows) == before
+	return names, true
 }
 
 // directoryMarketplaces maps each directory-source marketplace in dir's

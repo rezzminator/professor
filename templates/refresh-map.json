@@ -82,9 +82,6 @@
     "global/commands/imagine.md": {
       "curated": true
     },
-    "global/commands/iterative-improvement.md": {
-      "curated": true
-    },
     "global/commands/live-audit.md": {
       "curated": true
     },
@@ -122,6 +119,9 @@
       "curated": true
     },
     "global/skills/how-to-build-agent/SKILL.md": {
+      "curated": true
+    },
+    "global/skills/how-to-build-iterative-improvement/SKILL.md": {
       "curated": true
     },
     "global/skills/ultimate/SKILL.md": {

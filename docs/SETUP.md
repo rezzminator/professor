@@ -203,6 +203,7 @@ Claude takes your answers and:
 | `/how-to-build-rules` | Skill `templates/global/skills/how-to-build-rules/SKILL.md` — host-global, linked by `pfm install` | None |
 | `/how-to-build-claude-selector` | Skill `templates/global/skills/how-to-build-claude-selector/SKILL.md` — host-global, linked by `pfm install` | None |
 | `/how-to-build-agent` | Skill `templates/global/skills/how-to-build-agent/SKILL.md` — host-global, linked by `pfm install` | None |
+| `/how-to-build-iterative-improvement` | Skill `templates/global/skills/how-to-build-iterative-improvement/SKILL.md` — host-global, linked by `pfm install` | None |
 | `/how-to-build-md-forlint` | Skill `templates/global/skills/how-to-build-md-forlint/SKILL.md`, config `templates/project/rumdl-policy.toml` → adopter `.rumdl.toml` | None |
 | `/how-to-build-llm-codebase`, `/how-to-build-integration-suite` | Skills `templates/global/skills/how-to-build-{llm-codebase,integration-suite}/SKILL.md` — host-global, linked by `pfm install` | None |
 | `/audit:code-hygiene` | Command `templates/project/commands/audit/code-hygiene.md` | Hydrated by RR (Phase 2.5) |

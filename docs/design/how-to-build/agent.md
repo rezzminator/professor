@@ -1,6 +1,6 @@
 # how-to-build-agent
 
-`/how-to-build-agent` is the fleet's law for an agent definition: what the file carries, and the method that grows it on a fixed bench, run by run. Its modes are `build <name>`, `improve <agent>` and `check [path…]`. This file holds why each law and each method step exists and the evidence behind it: a commit, a bench ledger or a design doc in this repository. The loop's mechanics belong to `/iterative-improvement` and the design push to `/ultimate`; the skill names them and restates neither.
+`/how-to-build-agent` is the fleet's law for an agent definition: what the file carries, and the method that grows it on a fixed bench, run by run. Its modes are `build <name>`, `improve <agent>` and `check [path…]`. This file holds why each law and each method step exists and the evidence behind it: a commit, a bench ledger or a design doc in this repository. The loop's mechanics belong to `/how-to-build-iterative-improvement` and the design push to `/ultimate`; the skill names them and restates neither.
 
 ## Contents
 
@@ -18,7 +18,7 @@
 | Part | File |
 | --- | --- |
 | The law | `templates/global/skills/how-to-build-agent/SKILL.md` |
-| The loop it runs | `templates/global/commands/iterative-improvement.md` |
+| The loop it runs | `templates/global/skills/how-to-build-iterative-improvement/SKILL.md` |
 | The design push it loads | `templates/global/skills/ultimate/SKILL.md` |
 | Prose and description laws it defers to | `templates/global/skills/how-to-build-prompt/SKILL.md`, `templates/global/skills/how-to-build-description/SKILL.md` |
 | The declaration mechanism its tier law cites | `plugins/engine-sync/docs/interface.md` § Declarations |
@@ -63,13 +63,13 @@ rr:
 3. Lenses and a red-team digger were added (642f6254); the red team was dropped the same day, the lenses kept (c58aac7e). The lenses rest on the essay `docs/design/RR/rr.md` § What the evidence says quotes for Range (a question read as verbs, through several fields) and Depth (the rawest material, the field's methods), the two steps `/ultimate`'s § Raise the ask, before the first edit carries under those names.
 4. Each run saves a directory holding every digger's report (27c37fab), and the deeper tiers became pinned declarations (bb3a550b).
 
-The method's own record: `/iterative-improvement` was committed (3a17d3e6) 68 minutes after the tracer tree (c1e79562), its rules — the ladder, replay of the heaviest past runs, blind grading, a change kept only beyond the spread, a rule disobeyed twice moved into a mechanism — the tree bench's practice written down. `/ultimate` predates the tree (265825ed).
+The method's own record: `/how-to-build-iterative-improvement` was committed (3a17d3e6) 68 minutes after the tracer tree (c1e79562), its rules — the ladder, replay of the heaviest past runs, blind grading, a change kept only beyond the spread, a rule disobeyed twice moved into a mechanism — the tree bench's practice written down. `/ultimate` predates the tree (265825ed).
 
-Unproven: the user's account is that both agents were grown from a greenfield brief with goals on named axes, Opus trying theories stage by stage under `/iterative-improvement` and `/ultimate`. The opening prompts of the tracer tree work and of the rr rework sit in no transcript this host holds (an `agent-investigator` search over this repository's transcripts for the windows before c1e79562 and 642f6254 found none). The stages are proven by the ledgers above; the greenfield brief and the named axes are the user's testimony.
+Unproven: the user's account is that both agents were grown from a greenfield brief with goals on named axes, Opus trying theories stage by stage under `/how-to-build-iterative-improvement` and `/ultimate`. The opening prompts of the tracer tree work and of the rr rework sit in no transcript this host holds (an `agent-investigator` search over this repository's transcripts for the windows before c1e79562 and 642f6254 found none). The stages are proven by the ledgers above; the greenfield brief and the named axes are the user's testimony.
 
 ## Why the question round
 
-- The metric is fixed before the first run and changes only on the user's word (`iterative-improvement.md` § Frame — before round 1), so the axes are settled before any work.
+- The metric is fixed before the first run and changes only on the user's word (`how-to-build-iterative-improvement/SKILL.md` § Frame — before round 1), so the axes are settled before any work.
 - The four default axes are the four every bench above measured: accuracy as key facets, cost as USD, requests and seconds, wrong claims as the Wrong column and the cites checked against their lines, and leanness as bytes (the description law's sweep cut the framework's 93 descriptions from 29,223 to 20,474 characters, read by every session and spawn, 38ef8987; tracer's cards repeating long questions cost 4.5–7.6K output tokens a lead).
 - Target, input and budget are asked with the axes because each bench above stood on one fixed brief and one spend cap.
 - The value formula follows tracer's tree bench, value = facet share × cite-ok share ÷ USD; a broken return contract blocks shipping outright because a caller parses the return, and a caller that cannot is a failed run at any score.
@@ -114,7 +114,7 @@ Each is overturnable; the flip is named.
 - `check` takes an optional path list defaulting to every agent under the project's and the user's agents directories, as its siblings' `check` does. Flip: make the path required.
 - The description carries `MANDATORY`, since every agent edit is meant to load the law. Flip: drop the token; the skill then routes on the model's judgment.
 - The value formula multiplies accuracy by the share of claims right and divides by USD; leanness breaks ties and a broken return contract blocks shipping. Flip: rewrite the formula paragraph in § Settle first.
-- The method stays as agent-specific deltas over `/iterative-improvement` and `/ultimate`, no loop step restated.
+- The method stays as agent-specific deltas over `/how-to-build-iterative-improvement` and `/ultimate`, no loop step restated.
 
 ## Open items
 

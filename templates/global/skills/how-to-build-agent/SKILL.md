@@ -37,7 +37,7 @@ The axes fix the metric before the first run: value = (facets delivered ÷ key) 
 
 ## Grow it
 
-Run the loop as an `/iterative-improvement` lab on the agent, the axes as its metric, and load `/ultimate` for every design round; the two own the loop's mechanics. An agent adds these steps:
+Run the loop as an `/how-to-build-iterative-improvement` lab on the agent, the axes as its metric, and load `/ultimate` for every design round; the two own the loop's mechanics. An agent adds these steps:
 
 1. Greenfield: `build`, and an `improve` whose agent two rounds could not move, start from the goal and the axes alone. The first version is the boldest design the goal admits (a lead over cheaper readers, a script holding what prose kept losing, a different split of the work), never the old prompt reworded.
 2. Bench, fixed before any run:

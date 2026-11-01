@@ -86,6 +86,10 @@ var retiredNames = []retiredName{
 	{name: "/quality:md-forlint", kind: retiredCommand, successor: "/how-to-build-md-forlint", match: matchExact},
 	{name: "/quality:prompt", kind: retiredCommand, successor: "/how-to-build-prompt", match: matchExact},
 	{name: "/quality:rules", kind: retiredCommand, successor: "/how-to-build-rules", match: matchExact},
+	{
+		name: "/iterative-improvement", kind: retiredCommand,
+		successor: "/how-to-build-iterative-improvement", match: matchExact,
+	},
 	// releases/v0.78.0.md "Project: /pfm becomes /pcm": commands/pfm.md is
 	// renamed commands/pcm.md with its audit scopes inline; that /pcm command
 	// retired in turn (below), so both point at the agent it dispatched.

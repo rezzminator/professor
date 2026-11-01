@@ -41,12 +41,12 @@ done < <(declare -F)
 
 checks_templates > "$ROOT/serial"
 # These have equivalent gate registrations, inspected separately below.
-for name in check_map_serial lanes_serial demo_serial; do
+for name in check_map_serial lanes_serial; do
   [[ "$(grep -c "^checks_templates_$name $" "$ROOT/serial" || true)" == 1 ]] || {
     echo "FAIL templates steps: serial $name must run once" >&2; exit 1;
   }
 done
-sed -i '/^checks_templates_\(check_map_serial\|lanes_serial\|demo_serial\) /d' "$ROOT/serial"
+sed -i '/^checks_templates_\(check_map_serial\|lanes_serial\) /d' "$ROOT/serial"
 
 (
   phase=0
@@ -80,21 +80,17 @@ fi
 # Keep the gate placement contract as well as the shared check membership.
 awk -F '\t' '
   $1 == "templates.check-map" { map++; if ($2 != 1 || $3 != "heavy") bad=1; next }
-  $1 ~ /^templates\.(lanes|demo)\./ { if ($2 != 0 || $3 != "normal") bad=1; next }
+  $1 ~ /^templates\.lanes\./ { if ($2 != 0 || $3 != "normal") bad=1; next }
   { if ($2 != 1 || $3 != "normal") bad=1 }
   END { exit (bad || map != 1) }
 ' "$ROOT/registrations" || { echo 'FAIL templates steps: gate phase or heavy check-map placement changed' >&2; exit 1; }
-for family in lanes demo; do
-  expected=0
-  fixtures="$REPO_ROOT/infra/fence/lanes/tests"
-  [[ "$family" != demo ]] || fixtures="$REPO_ROOT/infra/demo/tests"
-  for f in "$fixtures"/*_test.sh; do
-    [[ -f "$f" ]] || { echo "ERROR templates steps: no $family fixtures" >&2; exit 2; }
-    expected=$((expected + 1))
-  done
-  actual=$(grep -c "^templates\.$family\." "$ROOT/registrations" || true)
-  [[ "$actual" == "$expected" ]] || { echo "FAIL templates steps: $family fixtures $actual registered, $expected expected" >&2; exit 1; }
+expected=0
+for f in "$REPO_ROOT"/infra/fence/lanes/tests/*_test.sh; do
+  [[ -f "$f" ]] || { echo "ERROR templates steps: no lanes fixtures" >&2; exit 2; }
+  expected=$((expected + 1))
 done
+actual=$(grep -c "^templates\.lanes\." "$ROOT/registrations" || true)
+[[ "$actual" == "$expected" ]] || { echo "FAIL templates steps: lanes fixtures $actual registered, $expected expected" >&2; exit 1; }
 if [[ -n "$(cut -f1 "$ROOT/registrations" | sort | uniq -d)" ]]; then
   echo 'FAIL templates steps: duplicate gate registration' >&2; exit 1
 fi

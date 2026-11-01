@@ -23,7 +23,7 @@ From the worktree root:
 
 `.claude/scripts/test.sh --full` runs the same gate. The source mount stays read-only. Generated artifacts go to `/tmp/{project}/fence/shared/{worktree}/timing/` on the host, the run's `/pfm-timing`, through a separate writable mount. Each invocation gets its own `run.*` directory containing `gate.tsv`, `gate.meta`, `steps/<name>.log`, `steps/<name>.prof.tsv`, `resources.tsv`, `profile/`, `profile.tsv`, and, for the pfm steps, `unit.json`, `unit.tsv`, `unit.load`, `unit-shards/`, `bin/`, `e2e.json`, `e2e.tsv` and `e2e.load`. What each profiling artifact holds, and how to read a red gate from them, is in [profiling.md](profiling.md).
 
-**Phases.** `gate_run` registers every test step in phase 0: `pfm.unit` and `pfm.e2e` (heavy), the `pfm.self.*`, `templates.lanes.*` and `templates.demo.*` suites, and the `fixture.*` steps under `PFM_GATE_FIXTURES=1`. `steps_barrier` then opens phase 1, the static checks, which starts only when every phase-0 step has ended. Phase 1 registers its heavy Go steps longest first: `pfm.lint-new`, `pfm.fmt-check`, `pfm.vet`, `pfm.vet-darwin`, then `pfm.arch` and `pfm.testplan` (light) and `templates.check-map` (heavy), then the light `templates.*` checks. A step starts as soon as a slot is free, in registration order: at most `STEPS_JOBS` steps run at once (default: the CPU count), and at most `STEPS_HEAVY_JOBS` heavy steps (default: 2; three slots OOM-killed `pfm.lint-new` on a cold lint cache, see the speed table).
+**Phases.** `gate_run` registers every test step in phase 0: `pfm.unit` and `pfm.e2e` (heavy), the `pfm.self.*` and `templates.lanes.*` suites, and the `fixture.*` steps under `PFM_GATE_FIXTURES=1`. `steps_barrier` then opens phase 1, the static checks, which starts only when every phase-0 step has ended. Phase 1 registers its heavy Go steps longest first: `pfm.lint-new`, `pfm.fmt-check`, `pfm.vet`, `pfm.vet-darwin`, then `pfm.arch` and `pfm.testplan` (light) and `templates.check-map` (heavy), then the light `templates.*` checks. A step starts as soon as a slot is free, in registration order: at most `STEPS_JOBS` steps run at once (default: the CPU count), and at most `STEPS_HEAVY_JOBS` heavy steps (default: 2; three slots OOM-killed `pfm.lint-new` on a cold lint cache, see the speed table).
 
 **Step bound.** Every step runs under `stepprof_run` with a bound: its own (`steps_set_bound`, used only by fixture steps) or the default `STEPS_BOUND_S`. When the caller does not set `STEPS_BOUND_S`, `gate_run` derives it from the target's budget fail limit, `budget × tolerance × fail_factor` (494 s for `all`); a budget that cannot give one falls back to 1500 s and the gate says why. A step that reaches its bound is snapshotted, TERMed, then KILLed. The bound stays the target's fail limit: a step that reaches it has by itself taken the gate past that limit, so a tighter bound would only cut evidence short, and a looser one would let a hang outlive a gate that has already failed. The `TIMEOUT` it ends with closes a hang and stays red whatever the attribution ([profiling.md](profiling.md) § Attribution, **FAIL → WARN**). On a host loaded enough to stretch one step that far, the caller sets `STEPS_BOUND_S`.
 
@@ -148,7 +148,7 @@ Each change was measured before and after in the fence, on the quantity it targe
 
 The kept schedule's (S4) `STEPS` median is 41.9 s (n=5) against the 54.0 s median of the 17 `iso gate all` captures in `$HOME/.local/state/pfm/flights/professor/test-profiling/slowness-map.md`: −12.1 s, −22.4 %.
 
-The median S5 capture's `gate.tsv`, from `$HOME/.local/state/pfm/flights/professor/test-profiling/measure/10-b/` capture `S5-r2-3` (`run.1X6AoI`; `STEPS PASS`, `BUDGET PASS`, attribution `CODE`, `steps_heavy_jobs 3`), less the two rows of the since-deleted OpenCode writer check:
+The median S5 capture's `gate.tsv`, from `$HOME/.local/state/pfm/flights/professor/test-profiling/measure/10-b/` capture `S5-r2-3` (`run.1X6AoI`; `STEPS PASS`, `BUDGET PASS`, attribution `CODE`, `steps_heavy_jobs 3`), less the rows of since-deleted steps (the OpenCode writer check's two and one fence self-test suite's one):
 
 ```text
 step	verdict	seconds
@@ -180,7 +180,6 @@ templates.lanes.run	PASS	9.9
 templates.lanes.sampler	PASS	17.3
 templates.lanes.stepprof	PASS	10.3
 templates.lanes.steps	PASS	5.3
-templates.demo.codex_fence_home	PASS	0.1
 pfm.lint-new	PASS	6.8
 pfm.fmt-check	PASS	8.5
 pfm.vet	PASS	4.6

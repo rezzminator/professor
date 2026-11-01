@@ -224,4 +224,4 @@ VS Code prints `doctor: vscode not managed (pfm install --vscode never ran)` whe
 
 `infra/fence/lanes/provision.sh` writes a roster of separate fixture account directories at `PFM_CONFIG`, stages invented fixture credentials mode `0600` and per-account onboarding/trust state, then runs `pfm install --yes`. Install creates the store and every shared-entry link. The lane script then writes its presentation settings once to the store's `settings.json`.
 
-`infra/demo/setup.sh` provisions the separate presentation demo. Demo settings include onboarding, trust, permission-prompt skips, `tui`, `effortLevel` and `attribution`. `IS_SANDBOX=1` is exported where a root container launches with bypass flags.
+The fence lanes export `IS_SANDBOX=1` where a root container launches with bypass flags (`infra/fence/lanes/lib.sh`, `container.sh`, `run.sh`), because Claude Code refuses the bypass flag under root without it.

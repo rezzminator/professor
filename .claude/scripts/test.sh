@@ -24,7 +24,7 @@
 #                             (dev.sh: scripts/test-dev-report.sh and infra/fence/lanes/tests/
 #                             iso-housekeeping_test.sh, format-md.sh: scripts/test-format-md.sh on that
 #                             copy); infra/fence/x.sh, infra/fence/lanes/x.sh bring
-#                             infra/fence/lanes/tests/x_test.sh; infra/demo/x.sh infra/demo/tests/x_test.sh;
+#                             infra/fence/lanes/tests/x_test.sh;
 #                             a sourced helper brings its users' tests: scripts/shtest.sh and
 #                             scripts/stub-root.sh every tracked test naming it, infra/fence/mkdir-lock.sh
 #                             its own and the shared, root and gate-history tests
@@ -484,8 +484,6 @@ derive() { # derive <repository-relative path> <has selector 0|1> <selector>
           done ;;
         infra/fence/*.sh | infra/fence/lanes/*.sh)
           sib="infra/fence/lanes/tests/${base%.sh}_test.sh"; [ ! -f "$ROOT/$sib" ] || shell_test "$sib" ;;
-        infra/demo/*.sh)
-          sib="infra/demo/tests/${base%.sh}_test.sh"; [ ! -f "$ROOT/$sib" ] || shell_test "$sib" ;;
         *.mjs) sib="${f%.mjs}.test.mjs"; [ ! -f "$ROOT/$sib" ] || add_inv t_proof "$sib" tap node --test --test-reporter=tap "$sib" ;;
         *.py) sib="${f%.py}_test.py"; [ ! -f "$ROOT/$sib" ] || py_inv "$sib" 0 '' ;;
       esac ;;

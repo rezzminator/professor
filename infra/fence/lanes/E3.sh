@@ -219,7 +219,7 @@ rm -f "$open_log"
 # The file pfm's OWN installer registers MCP into: pfm/internal/installer/
 # mcp.go writeMCPOpenCodeJSON, by the same fence discipline as Claude's
 # .claude.json (mcp_accounts.go) and Codex's config.toml (mcp.go wireMCP) —
-# root.sh's own `pfm install --yes` (setup.sh install) wrote this file before
+# the root build's own `pfm install --yes` (provision.sh) wrote this file before
 # this lane ran. The shared body (identical to M.03) lives once in lib.sh's
 # assert_opencode_mcp_registered — this lane and M must never drift apart on
 # what "MCP registered" means.

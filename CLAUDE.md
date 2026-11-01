@@ -23,7 +23,6 @@ Where Vocabulary, Runtime or On demand disagrees with the code on a path, comman
 - flights: the foreman tiers and the lander that build and land work, and `/flights:doctor`, their meter · `templates/global/agents/flights-*.md`, `templates/global/commands/flights/` · design `docs/design/flights/`
 - quality laws: the `/quality:*` family every prompt and orientation-file edit loads · `templates/global/commands/quality/` · design `docs/design/quality/`
 - fence: the shared `pfm-dev` container, own namespaces, HOME and `/tmp` per call, and the `pfm-sim` browser target · `infra/fence/` · design `docs/dev/isolated-dev-foundation.md`
-- demo fence: for presentations · `infra/demo/`
 - install record: this repo's own pfm install (`VERSION`, `manifest.json`, whose `installed_from.repo` pfm's theme install reads) and its saved rr reports (`RR/`) · `.professor/`
 - this repo's install: the project tier this repo runs, source of truth for its engine mirrors; machine-global originals reach it only through `~/.claude/` symlinks, never a local copy · `.claude/`
 - engine-sync: the single writer of every Codex and OpenCode artifact derived from a Claude source, a Go binary and Claude plugin; pfm execs it, and `pfm install` links it as `~/.local/bin/engine-sync` · `plugins/engine-sync/` · design `docs/design/engine-sync/`

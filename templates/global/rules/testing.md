@@ -1,3 +1,7 @@
+---
+visible-to:
+  exclude: [main, Explore, Plan, claude-code-guide, statusline-setup, web-fetch, "rr*", sub-rr, "*tracer", collector, transcript-reader, agent-investigator, clone-distiller, documenter, gitter, pcm, changelogger, "reviewer*", flights-hunter, flights-sub-lander, flights-spec-walker, flights-speccer]
+---
 # Tests: the fewest that reach the most
 
 - Extend before you add: a new behaviour or failure is asserted inside the existing test that already drives that path, as a table row or an added assertion. A new test needs a path no test reaches; a new test file needs a source file with no test file.

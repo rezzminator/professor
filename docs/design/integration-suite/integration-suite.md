@@ -1,8 +1,8 @@
-# /quality:integration-suite
+# /how-to-build-integration-suite
 
-`/quality:integration-suite <project|subsystem>` designs a project's whole test suite: its tiers, what every test at every tier may and may not be, the ledgers and checks that keep the suite honest, and — where the product has a live tier — its integration tests as lanes over one shared state. Every capability of the product is inventoried from code and mapped to a test that asserts it, the live beats are ordered so features meet each other the way they do in production, and coverage is proven by what a run observed, never by what a file declares. The command returns a design document plus its skeleton files and edits no code. It is stack-agnostic: the same procedure designs the suite for a CLI, a web service, a UI, a daemon, a library with a unit tier only, or a product with LLM-driven steps.
+`/how-to-build-integration-suite <project|subsystem>` designs a project's whole test suite: its tiers, what every test at every tier may and may not be, the ledgers and checks that keep the suite honest, and — where the product has a live tier — its integration tests as lanes over one shared state. Every capability of the product is inventoried from code and mapped to a test that asserts it, the live beats are ordered so features meet each other the way they do in production, and coverage is proven by what a run observed, never by what a file declares. The command returns a design document plus its skeleton files and edits no code. It is stack-agnostic: the same procedure designs the suite for a CLI, a web service, a UI, a daemon, a library with a unit tier only, or a product with LLM-driven steps.
 
-This file covers how the command works and why each part of it exists. [laws.md](laws.md) covers Laws 1–18 (tiers, shape, verdict) and [validity.md](validity.md) covers Laws 19–31 (honesty over time, what a test may not be), each with the reasoning and the sources it rests on. The command itself lives in [`templates/global/commands/quality/integration-suite.md`](../../../templates/global/commands/quality/integration-suite.md).
+This file covers how the command works and why each part of it exists. [laws.md](laws.md) covers Laws 1–18 (tiers, shape, verdict) and [validity.md](validity.md) covers Laws 19–31 (honesty over time, what a test may not be), each with the reasoning and the sources it rests on. The command itself lives in [`templates/global/skills/how-to-build-integration-suite/SKILL.md`](../../../templates/global/skills/how-to-build-integration-suite/SKILL.md).
 
 ## Contents
 
@@ -316,7 +316,7 @@ With no live tier, steps 6–8 are replaced by the unit and hermetic conversions
 
 ## The checks
 
-The command ships `scripts/suite-checks.sh`, a POSIX shell skeleton with its per-language spelling sets and planted-violation corpora, `third-party-rules.txt` (one relied-on third-party rule per line, with its law) and `name-allowlist.txt` under `scripts/suite-checks/`, that the design adapts to the tree: the id patterns, the derivation commands, the test-name and lane-file patterns, the ledger paths. It runs in two modes, a plain check and `--close`. Each check prints one line, `CHECK <name> PASS|FAIL|ERROR <detail>`. The script exits `0` when everything is clean, `1` on a finding, and `2` when a check could not run. This is the three-state protocol of `/quality:llm-codebase` § Protocol. Every ratchet reads its baseline — a multiset of signatures, never a count — as § The threat model reads every ruling-bearing input: a signature found more often than the baseline holds it is red even when the total fell, so a move keeps its count and a copy raises it; the baseline only shrinks; and its header carries the owner's burn-down ceiling, a signature count per date, so a baseline above today's ceiling fails and a header without one is the ratchet's `ERROR`. A design value a check reads — a Speed target, the headroom, the schedule window — missing is that check's `ERROR`. Every scope skips the `scope`-tagged paths of `exclusions.txt`.
+The command ships `scripts/suite-checks.sh`, a POSIX shell skeleton with its per-language spelling sets and planted-violation corpora, `third-party-rules.txt` (one relied-on third-party rule per line, with its law) and `name-allowlist.txt` under `scripts/suite-checks/`, that the design adapts to the tree: the id patterns, the derivation commands, the test-name and lane-file patterns, the ledger paths. It runs in two modes, a plain check and `--close`. Each check prints one line, `CHECK <name> PASS|FAIL|ERROR <detail>`. The script exits `0` when everything is clean, `1` on a finding, and `2` when a check could not run. This is the three-state protocol of `/how-to-build-llm-codebase` § Protocol. Every ratchet reads its baseline — a multiset of signatures, never a count — as § The threat model reads every ruling-bearing input: a signature found more often than the baseline holds it is red even when the total fell, so a move keeps its count and a copy raises it; the baseline only shrinks; and its header carries the owner's burn-down ceiling, a signature count per date, so a baseline above today's ceiling fails and a header without one is the ratchet's `ERROR`. A design value a check reads — a Speed target, the headroom, the schedule window — missing is that check's `ERROR`. Every scope skips the `scope`-tagged paths of `exclusions.txt`.
 
 | Check | Mode | Fails on | Errors on |
 | --- | --- | --- | --- |
@@ -398,15 +398,15 @@ Outside this blueprint, the owner assigns the review, the build and the runs. La
 
 | Neighbour | Owns | Shares with this command |
 | --- | --- | --- |
-| `/quality:llm-codebase` | the source-tree layout and its mechanical gates | the three-state protocol as it stands; this suite's `size`, `clones` and budget rows run in its own script |
+| `/how-to-build-llm-codebase` | the source-tree layout and its mechanical gates | the three-state protocol as it stands; this suite's `size`, `clones` and budget rows run in its own script |
 | the project's testing manual | one project's test mechanics — where a test lives, run commands, environments, cleanup, concurrency, the local traps — and the per-change duty | this command carries the design law for every tier; the manual's § Lanes and registries carries the per-change duty and § What not to test the refused shapes, in the manual's own words for its stack |
 
 ## Surfaces that stay in sync
 
 | Surface | File | Holds |
 | --- | --- | --- |
-| The command | `templates/global/commands/quality/integration-suite.md` | Inputs, terms, names, the tier names unit / hermetic / live, laws, procedure, output, hand-off, seed evidence, checks, the threat model |
-| Its neighbour | `templates/global/commands/quality/llm-codebase.md` | § Protocol, cited as it stands |
+| The command | `templates/global/skills/how-to-build-integration-suite/SKILL.md` | Inputs, terms, names, the tier names unit / hermetic / live, laws, procedure, output, hand-off, seed evidence, checks, the threat model |
+| Its neighbour | `templates/global/skills/how-to-build-llm-codebase/SKILL.md` | § Protocol, cited as it stands |
 | The testing-manual template | `templates/project/commands/per-project/testing-manual.md` | § Tiers in the tier names unit / hermetic / live, § Lanes and registries, § What not to test |
 | Registries | `templates/refresh-map.json`, `docs/SETUP.md`, `docs/README.md` | The command's entry |
 | This directory | `docs/design/integration-suite/` | How the command works and why its laws are shaped as they are |

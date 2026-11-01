@@ -731,9 +731,9 @@ describe("preflight S1, D1, T1", { concurrency: availableParallelism() }, () => 
       plugins: [{ name: "p", source: { source: "git-subdir", url: url ?? plugin, path: "./plugins/p", ref: "main" } }],
     };
     const base = await commit(r0, {
-      "README.md": "Run `/quality:prompt check`, `/handy` or `/reload --account 2`; see `/dev/null`.\n",
+      "README.md": "Run `/how-to-build-prompt check`, `/handy` or `/reload --account 2`; see `/dev/null`.\n",
       ".claude-plugin/marketplace.json": JSON.stringify(market, null, 2),
-      "templates/global/commands/quality/prompt.md": "q\n",
+      "templates/global/skills/how-to-build-prompt/SKILL.md": "q\n",
       "templates/global/skills/handy/SKILL.md": "h\n",
       "pfm/internal/installer/assets/reload.command.md": "r\n",
       "templates/global/agents/old-agent.md": "a\n",
@@ -778,9 +778,9 @@ describe("preflight S1, D1, T1", { concurrency: availableParallelism() }, () => 
     assert.match(r.out, /^FAIL S1: docs\/design\/x\/x\.md:3 — names the removed agent old-agent$/m, r.out);
   });
   test("D1 the README names a command no tree ships", async () => {
-    const r = await (await fixture()).check({ "README.md": "Run `/quality:prompt`.\n\nThen `/quality:gone fix`.\n" });
+    const r = await (await fixture()).check({ "README.md": "Run `/how-to-build-prompt`.\n\nThen `/how-to-build-gone fix`.\n" });
     assertFail(r, "D1");
-    assert.match(r.out, /^FAIL D1: README\.md:3 — `\/quality:gone` names no command or skill this tree ships$/m, r.out);
+    assert.match(r.out, /^FAIL D1: README\.md:3 — `\/how-to-build-gone` names no command or skill this tree ships$/m, r.out);
   });
   test("T1 a listed plugin's gitlink is no published tag", async () => {
     const r = await (await fixture({ tagged: false })).check();

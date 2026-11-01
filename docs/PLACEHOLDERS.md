@@ -178,7 +178,7 @@ They are listed because the template token gate (`dev.sh verify templates`) FAIL
 | `{SHA}` | `epics/TEMPLATE.md` | a commit sha |
 | `{MB}` | `docs-commands/git/references/gitter-history.md` | a file size in megabytes |
 | `{SCOPE}` | `global/agents/pcm.md` | the audit scope being run |
-| `{CALLER}` | `commands/quality/description.md` and every description carrying a `{CALLER}-ONLY` token | the name of the only entity allowed to invoke the entry |
+| `{CALLER}` | `skills/how-to-build-description/SKILL.md` and every description carrying a `{CALLER}-ONLY` token | the name of the only entity allowed to invoke the entry |
 | `{STATUS_LITERAL}` | `commands/audit/code-hygiene.md` | an example status string literal in the code being audited |
 | `{PATHSPECS}` / `{HEAD7}` | `global/agents/reviewer.md`, `global/agents/reviewer-pro.md` | the brief's pathspecs restricting the reviewed diff; the reviewed HEAD's seven-character short sha |
 | `{HHMMSS}` | `global/agents/agent-investigator.md` | the UTC time of the report's write, hours, minutes and seconds |

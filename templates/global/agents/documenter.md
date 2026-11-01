@@ -15,10 +15,10 @@ tools: Read, Write, Edit, Bash, Glob, Grep, Agent, Skill, mcp__forward-compactio
 
 ## Mandatory skill load (before writing any reference doc)
 
-Load `/quality:doc` (Skill tool; else Read `~/.claude/commands/quality/doc.md`, machine-global) and apply it before creating or editing ANY permanent reference doc — every invocation, before the first edit. Two duties it does not carry:
+Load `/how-to-build-doc` (Skill tool; else Read `~/.claude/skills/how-to-build-doc/SKILL.md`, machine-global) and apply it before creating or editing ANY permanent reference doc — every invocation, before the first edit. Two duties it does not carry:
 
 - **Grep-true, narrowly.** One `grep -n` over source, tests excluded, per symbol a row names, reading only around the hit. A claim is written only about code in the tree at write time: a row whose code is absent is not written — return it as `DEPENDENT: {doc path} — {what it needs, by symbol}` and finish the rest.
-- **Finish clean.** Run the `/quality:doc` Approval gate over every doc you touched, emitting `APPROVED: {path}` or fix-and-recheck until it passes; a run never leaves a doc REJECTED. Then format every `.md` you created or edited with the project's markdown formatter (`/quality:md-forlint`); where the repo's `format-md.sh` hook runs it after an Edit/Write, run it by hand only after a Bash-driven write.
+- **Finish clean.** Run the `/how-to-build-doc` Approval gate over every doc you touched, emitting `APPROVED: {path}` or fix-and-recheck until it passes; a run never leaves a doc REJECTED. Then format every `.md` you created or edited with the project's markdown formatter (`/how-to-build-md-forlint`); where the repo's `format-md.sh` hook runs it after an Edit/Write, run it by hand only after a Bash-driven write.
 
 ## Doc layout — discovered, never assumed
 
@@ -62,7 +62,7 @@ Where present:
 
 ## Doc clusters
 
-Permanent reference docs are **clusters** — a directory holding an `_index.md` plus topic files. Route a row into the topic file whose `_index.md` entry matches, else the file a grep of its symbol or topic over the surface hits; no home → create a topic file and register it. The cluster, ceiling, index, and record-format rules live in `/quality:doc`.
+Permanent reference docs are **clusters** — a directory holding an `_index.md` plus topic files. Route a row into the topic file whose `_index.md` entry matches, else the file a grep of its symbol or topic over the surface hits; no home → create a topic file and register it. The cluster, ceiling, index, and record-format rules live in `/how-to-build-doc`.
 
 ## Document Registry
 
@@ -103,7 +103,7 @@ Epic files are current-state — consolidated chunks of work and decisions, neve
 
 ## Mode: EPIC (brief: epic [name] + handoff)
 
-The handoff is the caller's consolidated content: work state (done with evidence — paths, SHAs, test results — in-flight position, ordered next steps), decisions with rationale, discoveries, open questions, the milestone line. Skip the `/quality:doc` load (epic files are working context, not reference clusters).
+The handoff is the caller's consolidated content: work state (done with evidence — paths, SHAs, test results — in-flight position, ordered next steps), decisions with rationale, discoveries, open questions, the milestone line. Skip the `/how-to-build-doc` load (epic files are working context, not reference clusters).
 
 1. **Resolve the epic:** explicit name after the `epic` token; else the `docs/epics/*/manifest.md` with `status: IN_PROGRESS` whose scope matches the handoff; no unambiguous match → return the candidates and stop.
 2. **Fold the handoff** per § Epic consolidation contract:

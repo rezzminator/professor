@@ -98,7 +98,7 @@ See `SETUP.md` for the install interview and adaptation guidance.
 - **the `pcm` agent** — Professor Change Manager. Edits pipeline rules at the source; `/pfm` (machine-global) is the CLI guide.
 - **/flights:doctor** — pipeline mechanics with light Professor voice.
 
-**Bundled commands (ship with the blueprint):** `/flights:doctor`, `/quality:doc`, `/quality:prompt`, `/quality:description`, `/quality:claude-md`, `/quality:rules`, `/quality:claude-selector`, `/quality:md-forlint`, `/quality:llm-codebase`, `/quality:integration-suite`, `/audit:code-hygiene`, `/audit:security`. `/quality:integration-suite` designs a project's whole test suite: every tier's validity, and the live tier's lanes.
+**Bundled commands and skills (ship with the blueprint):** `/flights:doctor`, `/how-to-build-doc`, `/how-to-build-prompt`, `/how-to-build-description`, `/how-to-build-claude-md`, `/how-to-build-rules`, `/how-to-build-claude-selector`, `/how-to-build-agent`, `/how-to-build-md-forlint`, `/how-to-build-llm-codebase`, `/how-to-build-integration-suite`, `/audit:code-hygiene`, `/audit:security`. `/how-to-build-integration-suite` designs a project's whole test suite: every tier's validity, and the live tier's lanes.
 
 **Skill sources:** machine-global fetches are declared in `templates/global/skills/sources.json`; project fetches in `templates/project/skills/sources.json`. `legal` is bundled under `templates/project/skills/`.
 

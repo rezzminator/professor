@@ -95,7 +95,7 @@ func TestInitDeploysMappedTemplatesAndPinsExactlyTheDeployedSet(t *testing.T) {
 		"SETUP.md",
 	) + " § Install interview — it records your answers in .professor/manifest.json, " +
 		"runs pfm init --render and deploys the per-project files"
-	next := "\nnext: write CLAUDE.md with /quality:claude-md write CLAUDE.md\n"
+	next := "\nnext: write CLAUDE.md with /how-to-build-claude-md write CLAUDE.md\n"
 	if !strings.Contains(stdout.String(), "deployed 10 project files") || !strings.Contains(stdout.String(), handoff) ||
 		!strings.HasSuffix(stdout.String(), next) {
 		t.Fatalf("init output=%q", stdout.String())

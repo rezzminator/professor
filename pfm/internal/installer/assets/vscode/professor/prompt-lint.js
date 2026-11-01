@@ -3,7 +3,7 @@
 // the editor's current text, saved or not and numbered line by line, to Claude through `pfm headless
 // exec`, so the run uses the user's own Claude Code subscription. Its system prompt is
 // prompt-lint.system.md, which pfm install builds beside this file from prompt-lint.md and Professor's
-// prompt law (/quality:prompt's source in the Professor clone); Claude answers in
+// prompt law (/how-to-build-prompt's source in the Professor clone); Claude answers in
 // prompt-lint.schema.json's shape, and each finding becomes a diagnostic in the Problems panel; one
 // that carries a rewrite gets the quick fix "Apply Prompt Lint rewrite". The run is click-only, sealed
 // (no tools, settings or session persistence for the model) and cancellable from the lens or the

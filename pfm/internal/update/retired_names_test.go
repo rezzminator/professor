@@ -92,7 +92,7 @@ func TestRetiredNamesNeverHitALiveNameSharingAPrefix(t *testing.T) {
 		"the /pfm CLI guide",
 		"see ~/.claude/commands/pfm.md and $HOME/.claude/commands/pfm.md",
 		".claude/commands/pcm.md",
-		"/quality:md-forlint check",
+		"/how-to-build-md-forlint check",
 		"mcp__chat-professor__call",
 		"tools: Read, mcp__forward-compaction__forward_compaction, mcp__forward-compaction__look_back",
 		"spawn super-rr",
@@ -116,24 +116,33 @@ func TestRetiredNamesNeverHitALiveNameSharingAPrefix(t *testing.T) {
 		}
 	}
 	for line, name := range map[string]string{
-		"/pfm:refresh is gone":             "/pfm:refresh",
-		"run /wave":                        "/wave",
-		"`/wave:refine`":                   "/wave",
-		"(/jc:wave)":                       "/jc",
-		"cat .claude/commands/pfm.md":      ".claude/commands/pfm.md",
-		"\"mcp__chat__chat_ls\"":           "mcp__chat__",
-		"/chat:save now":                   "/chat:",
-		"agent: rr-super":                  "rr-super",
-		".claude/agents/mono-architect.md": "mono-architect",
-		"use /quality:forlint.":            "/quality:forlint",
-		"Phase: JC-COMMIT.":                "JC-COMMIT",
-		"/documenter:archive":              "/documenter",
-		"skills/wave-builder/SKILL.md":     "wave-builder",
-		"/qa:live":                         "/qa:live",
-		"run /rnd new chain slug goal":     "/rnd",
-		"dispatch it with /pcm audit all":  "/pcm",
-		"(the user's `/pcm`)":              "/pcm",
-		"(/rnd:hammer)":                    "/rnd",
+		"/pfm:refresh is gone":                              "/pfm:refresh",
+		"run /wave":                                         "/wave",
+		"`/wave:refine`":                                    "/wave",
+		"(/jc:wave)":                                        "/jc",
+		"cat .claude/commands/pfm.md":                       ".claude/commands/pfm.md",
+		"\"mcp__chat__chat_ls\"":                            "mcp__chat__",
+		"/chat:save now":                                    "/chat:",
+		"agent: rr-super":                                   "rr-super",
+		".claude/agents/mono-architect.md":                  "mono-architect",
+		"use /quality:forlint.":                             "/quality:forlint",
+		"run /quality:claude-md now":                        "/quality:claude-md",
+		"run /quality:claude-selector now":                  "/quality:claude-selector",
+		"run /quality:description now":                      "/quality:description",
+		"run /quality:doc now":                              "/quality:doc",
+		"run /quality:integration-suite now":                "/quality:integration-suite",
+		"run /quality:llm-codebase now":                     "/quality:llm-codebase",
+		"run /quality:md-forlint now":                       "/quality:md-forlint",
+		"run /quality:prompt now":                           "/quality:prompt",
+		"run /quality:rules now":                            "/quality:rules",
+		"Phase: JC-COMMIT.":                                 "JC-COMMIT",
+		"/documenter:archive":                               "/documenter",
+		"skills/wave-builder/SKILL.md":                      "wave-builder",
+		"/qa:live":                                          "/qa:live",
+		"run /rnd new chain slug goal":                      "/rnd",
+		"dispatch it with /pcm audit all":                   "/pcm",
+		"(the user's `/pcm`)":                               "/pcm",
+		"(/rnd:hammer)":                                     "/rnd",
 		"x .claude/commands/pfm/references/audit-scopes.md": ".claude/commands/pfm/references/audit-scopes.md",
 	} {
 		hits := retiredNameHits("f", line)
@@ -786,12 +795,12 @@ func TestScanRetiredNamesStreamsTrackedTextToClean(t *testing.T) {
 	want := []professor.RetiredNameHit{
 		{Path: "large.txt", Line: 1, Name: "/wave", Kind: "command", Successor: flightsSuccessor},
 		{Path: "large.txt", Line: 4, Name: "/jc", Kind: "command"},
-		{Path: "large.txt", Line: 5, Name: "/quality:forlint", Kind: "command", Successor: "/quality:md-forlint"},
+		{Path: "large.txt", Line: 5, Name: "/quality:forlint", Kind: "command", Successor: "/how-to-build-md-forlint"},
 	}
 	if len(scan.Failures) != 0 || len(scan.Incomplete) != 0 || !reflect.DeepEqual(scan.Hits, want) {
 		t.Errorf("large tracked scan = %+v, want complete hits %+v", scan, want)
 	}
-	clean := strings.NewReplacer("/wave", "/flights:doctor", "/jc", "/quality:prompt", "/quality:forlint", "/quality:md-forlint").
+	clean := strings.NewReplacer("/wave", "/flights:doctor", "/jc", "/how-to-build-prompt", "/quality:forlint", "/how-to-build-md-forlint").
 		Replace(content)
 	writeRetiredFixture(t, root, map[string]string{"large.txt": clean})
 	scan = ScanRetiredNames(root, nil)

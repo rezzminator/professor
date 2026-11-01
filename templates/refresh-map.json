@@ -97,28 +97,31 @@
     "global/commands/pfm/workbench.md": {
       "curated": true
     },
-    "global/commands/quality/claude-md.md": {
+    "global/skills/how-to-build-claude-md/SKILL.md": {
       "curated": true
     },
-    "global/commands/quality/description.md": {
+    "global/skills/how-to-build-description/SKILL.md": {
       "curated": true
     },
-    "global/commands/quality/doc.md": {
+    "global/skills/how-to-build-doc/SKILL.md": {
       "curated": true
     },
-    "global/commands/quality/integration-suite.md": {
+    "global/skills/how-to-build-integration-suite/SKILL.md": {
       "curated": true
     },
-    "global/commands/quality/llm-codebase.md": {
+    "global/skills/how-to-build-llm-codebase/SKILL.md": {
       "curated": true
     },
-    "global/commands/quality/md-forlint.md": {
+    "global/skills/how-to-build-md-forlint/SKILL.md": {
       "curated": true
     },
-    "global/commands/quality/prompt.md": {
+    "global/skills/how-to-build-prompt/SKILL.md": {
       "curated": true
     },
-    "global/commands/quality/rules.md": {
+    "global/skills/how-to-build-rules/SKILL.md": {
+      "curated": true
+    },
+    "global/skills/how-to-build-agent/SKILL.md": {
       "curated": true
     },
     "global/skills/ultimate/SKILL.md": {

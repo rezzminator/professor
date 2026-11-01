@@ -67,7 +67,25 @@ var retiredNames = []retiredName{
 		match:     matchExact,
 	},
 	// releases/v0.77.0.md "/quality:md-forlint (renamed from /quality:forlint)".
-	{name: "/quality:forlint", kind: retiredCommand, successor: "/quality:md-forlint", match: matchExact},
+	{name: "/quality:forlint", kind: retiredCommand, successor: "/how-to-build-md-forlint", match: matchExact},
+	// Commit "rename the /quality:* family to the /how-to-build-* skills": each
+	// command became the skill of the same suffix. A name is matched exactly, so
+	// the longer /quality:md-forlint never reads as a shorter one.
+	{name: "/quality:claude-md", kind: retiredCommand, successor: "/how-to-build-claude-md", match: matchExact},
+	{
+		name: "/quality:claude-selector", kind: retiredCommand,
+		successor: "/how-to-build-claude-selector", match: matchExact,
+	},
+	{name: "/quality:description", kind: retiredCommand, successor: "/how-to-build-description", match: matchExact},
+	{name: "/quality:doc", kind: retiredCommand, successor: "/how-to-build-doc", match: matchExact},
+	{
+		name: "/quality:integration-suite", kind: retiredCommand,
+		successor: "/how-to-build-integration-suite", match: matchExact,
+	},
+	{name: "/quality:llm-codebase", kind: retiredCommand, successor: "/how-to-build-llm-codebase", match: matchExact},
+	{name: "/quality:md-forlint", kind: retiredCommand, successor: "/how-to-build-md-forlint", match: matchExact},
+	{name: "/quality:prompt", kind: retiredCommand, successor: "/how-to-build-prompt", match: matchExact},
+	{name: "/quality:rules", kind: retiredCommand, successor: "/how-to-build-rules", match: matchExact},
 	// releases/v0.78.0.md "Project: /pfm becomes /pcm": commands/pfm.md is
 	// renamed commands/pcm.md with its audit scopes inline; that /pcm command
 	// retired in turn (below), so both point at the agent it dispatched.
@@ -96,7 +114,7 @@ var retiredNames = []retiredName{
 	// releases/v0.78.0.md "Project: retired project surface": /documenter and
 	// /documenter:archive ("Doc consolidation is the main session's work
 	// under /quality:doc"), /km, /audit:ai-output and six agents.
-	{name: "/documenter", kind: retiredCommand, successor: "/quality:doc", match: matchFamily},
+	{name: "/documenter", kind: retiredCommand, successor: "/how-to-build-doc", match: matchFamily},
 	{name: "/km", kind: retiredCommand, match: matchExact},
 	{name: "/audit:ai-output", kind: retiredCommand, match: matchExact},
 	// Commit "remove /rnd end to end": the project-scope research command and

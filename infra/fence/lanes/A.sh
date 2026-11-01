@@ -258,8 +258,8 @@ grep -qxF "deployed $expected project files; baseline: $INIT_DIR/.professor/base
   bad="$bad want 'deployed $expected project files; baseline: …' (store has $expected mapped files), got: $(printf '%s' "$out" | grep '^deployed' | head -1);"
 grep -qF "follow $SOURCE_REPO/docs/SETUP.md § Install interview" <<<"$out" ||
   bad="$bad the handoff line does not name $SOURCE_REPO/docs/SETUP.md;"
-grep -qxF 'next: write CLAUDE.md with /quality:claude-md write CLAUDE.md' <<<"$out" ||
-  bad="$bad no 'next: write CLAUDE.md with /quality:claude-md write CLAUDE.md' line;"
+grep -qxF 'next: write CLAUDE.md with /how-to-build-claude-md write CLAUDE.md' <<<"$out" ||
+  bad="$bad no 'next: write CLAUDE.md with /how-to-build-claude-md write CLAUDE.md' line;"
 pinned="$(jq '.files | length' "$INIT_DIR/.professor/baseline.json" 2>/dev/null)"
 [ "$pinned" = "$expected" ] || bad="$bad baseline.json pins ${pinned:-<unreadable>} file(s), want $expected;"
 for local_path in .claude/settings.json .rumdl.toml .claude/agents/gitter.md docs/_index.md; do

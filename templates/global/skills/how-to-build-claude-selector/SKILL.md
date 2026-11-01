@@ -1,12 +1,12 @@
 ---
-name: quality:claude-selector
+name: how-to-build-claude-selector
 description: Designs arrow-key pickers — menus a Claude Code user steers; "a small menu over the prompt bar", "build a picker"; `design <what>` picks the site and specs one, `check <path…>` certifies one (APPROVED/REJECTED). Returns a spec or a verdict. Mod mechanics → plugin-authoring.
 argument-hint: "[design <what> | check <path…>]"
 ---
 
 # Selector Law
 
-This law governs where a selector draws, how keys reach it, what it costs, how a pick lands, how it ends, and how it is proven; `/quality:prompt` governs any prompt text it ships. Engine and tmux facts here were verified on Claude Code 2.1.300 and tmux 3.7c.
+This law governs where a selector draws, how keys reach it, what it costs, how a pick lands, how it ends, and how it is proven; `/how-to-build-prompt` governs any prompt text it ships. Engine and tmux facts here were verified on Claude Code 2.1.300 and tmux 3.7c.
 
 ## Contents
 

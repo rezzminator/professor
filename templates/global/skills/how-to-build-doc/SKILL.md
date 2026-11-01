@@ -1,6 +1,6 @@
 ---
-name: quality:doc
-description: MANDATORY — load before writing or restructuring any reference doc under docs/ (root or child project), and to certify one via the Approval gate (APPROVED/REJECTED); owns doc SHAPE — cluster + _index.md, ≤500-line topic files, table-vs-sections, grep-true headings, current-state only. Prose → /quality:prompt; a `description:` → /quality:description; markdown mechanics → /quality:md-forlint.
+name: how-to-build-doc
+description: MANDATORY — load before writing or restructuring any reference doc under docs/ (root or child project), and to certify one via the Approval gate (APPROVED/REJECTED); owns doc SHAPE — cluster + _index.md, ≤500-line topic files, table-vs-sections, grep-true headings, current-state only. Prose → /how-to-build-prompt; a `description:` → /how-to-build-description; markdown mechanics → /how-to-build-md-forlint.
 ---
 
 # Doc Format
@@ -29,7 +29,7 @@ The highest-leverage rule. Decide by field shape, not habit:
 - Short, uniform cells (port maps, access matrices, the `_index.md` pointer tables themselves) → markdown table: genuinely tabular, no padding waste, one grep hit shows the whole record on one line.
 - Any long free-text field (descriptions, rationale, prose) → heading-per-record sections: one `###` per record, a one-line bold metadata strip for the short fields (`**Projects:** api, web — **Status:** Active`), then the long field as a prose paragraph.
 
-Long prose belongs in a section, never a table cell. A 600-char cell forces its column that wide for every other row, so editing one record reflows the whole column into a giant diff and a grep hit drags the padding with it. Sections keep a one-record edit local and give each record its own greppable `###` anchor. (Column padding itself is stripped by the format policy — `/quality:md-forlint` — so a genuinely tabular table stays compact; the rule above is about edit locality and grep, not about padding.)
+Long prose belongs in a section, never a table cell. A 600-char cell forces its column that wide for every other row, so editing one record reflows the whole column into a giant diff and a grep hit drags the padding with it. Sections keep a one-record edit local and give each record its own greppable `###` anchor. (Column padding itself is stripped by the format policy — `/how-to-build-md-forlint` — so a genuinely tabular table stays compact; the rule above is about edit locality and grep, not about padding.)
 
 ## Edit locality
 
@@ -55,7 +55,7 @@ When a split moves a doc that consumers reference by its old path, leave a one-l
 
 ## Finish
 
-Run `rumdl fmt <file>` from the repo root on everything touched (`/quality:md-forlint`). The format hook covers Edit/Write on root-owned paths (`CLAUDE.md`, `.claude/`, `docs/`); child-project docs (a sub-project's own `docs/`) and Bash-written files need the manual run.
+Run `rumdl fmt <file>` from the repo root on everything touched (`/how-to-build-md-forlint`). The format hook covers Edit/Write on root-owned paths (`CLAUDE.md`, `.claude/`, `docs/`); child-project docs (a sub-project's own `docs/`) and Bash-written files need the manual run.
 
 ## Approval — certify a document
 
@@ -69,6 +69,6 @@ Every reference doc must pass this gate before it is considered done; run it ove
 - 6 One hop: a record sends the reader on a doc → doc → doc chase instead of inlining the essential fact.
 - 7 Index: the cluster `_index.md` does not list exactly the files on disk.
 - 8 Byline: a `> Author:` / `> Last updated:` / `> Flight:` line is present.
-- 9 Mechanics: `/quality:md-forlint check <path>` reports a dead relative link (MD057), a dead or stale anchor (MD051 — a ToC entry included), or a byline term (MD061). Run it; a check that was not run is not a pass.
+- 9 Mechanics: `/how-to-build-md-forlint check <path>` reports a dead relative link (MD057), a dead or stale anchor (MD051 — a ToC entry included), or a byline term (MD061). Run it; a check that was not run is not a pass.
 
 Emit the verdict per doc as `APPROVED: {path}` or `REJECTED: {path} — checks {n,…}`. A cluster is approved only when its `_index.md` and every topic file are approved.

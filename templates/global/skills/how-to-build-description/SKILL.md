@@ -1,12 +1,12 @@
 ---
-name: quality:description
-description: MANDATORY — load before writing or certifying any `description:` (command, skill, agent, MCP tool or server); the four components and their order, the caps, the cut order, naming, family-chain and invocation-class law, the MCP self-containment rules, and the Approval gate. General prompt law → /quality:prompt.
+name: how-to-build-description
+description: MANDATORY — load before writing or certifying any `description:` (command, skill, agent, MCP tool or server); the four components and their order, the caps, the cut order, naming, family-chain and invocation-class law, the MCP self-containment rules, and the Approval gate. General prompt law → /how-to-build-prompt.
 argument-hint: [path…]
 ---
 
 # Description Law
 
-A `description:` is the routing surface. The harness injects every one of them into every session and every sub-agent spawn and loads a body only on a match, so it is both the most re-read text in a fleet and the only text that decides whether an entity is ever reached. `/quality:prompt` governs every prompt line; this file adds what a description needs beyond it. With `[path…]`, run § Approval over each path — a `.md` frontmatter, or an MCP tool's description string in source — and emit one verdict per entry.
+A `description:` is the routing surface. The harness injects every one of them into every session and every sub-agent spawn and loads a body only on a match, so it is both the most re-read text in a fleet and the only text that decides whether an entity is ever reached. `/how-to-build-prompt` governs every prompt line; this file adds what a description needs beyond it. With `[path…]`, run § Approval over each path — a `.md` frontmatter, or an MCP tool's description string in source — and emit one verdict per entry.
 
 ## The four components, in one order
 

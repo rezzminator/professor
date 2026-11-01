@@ -203,7 +203,8 @@ func TestHeadlessProcessExtensionOwnership(t *testing.T) {
 		for _, id := range []pfmengine.ID{pfmengine.Codex, pfmengine.OpenCode} {
 			t.Run(mode+"/"+string(id), func(t *testing.T) {
 				capture := t.TempDir()
-				body := `/usr/bin/printenv PONYTAIL_SUBAGENT_MATCHER PONYTAIL_USER_EXPORT > "$CAPTURE_DIR/extension-env" || true`
+				// One name per printenv: BSD printenv, macOS's, prints only its first.
+				body := `{ /usr/bin/printenv PONYTAIL_SUBAGENT_MATCHER; /usr/bin/printenv PONYTAIL_USER_EXPORT; } > "$CAPTURE_DIR/extension-env" || true`
 				var machine pfmconfig.Config
 				if id == pfmengine.Codex {
 					binary := writeEngineStub(t, body+"\nprintf '%s\\n' '{}' ")
@@ -212,7 +213,7 @@ func TestHeadlessProcessExtensionOwnership(t *testing.T) {
 					inner := writeOpenCodeStub(t, body+"\n"+opencodeValidEvents())
 					wrapper := writeEngineStub(
 						t,
-						`if [ "${1:-}" = serve ]; then /usr/bin/printenv PONYTAIL_SUBAGENT_MATCHER PONYTAIL_USER_EXPORT > "$CAPTURE_DIR/server-extension-env" || true; fi`+"\nexec '"+inner+"' \"$@\"",
+						`if [ "${1:-}" = serve ]; then { /usr/bin/printenv PONYTAIL_SUBAGENT_MATCHER; /usr/bin/printenv PONYTAIL_USER_EXPORT; } > "$CAPTURE_DIR/server-extension-env" || true; fi`+"\nexec '"+inner+"' \"$@\"",
 					)
 					machine = opencodeMachine(wrapper, opencodeHome(t))
 				}

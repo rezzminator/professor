@@ -37,8 +37,8 @@ func (f fakeScheduleSource) ScheduleProblems(
 	return f.problems, f.problemsErr
 }
 
-func armedTimerReport() serviceManagerReport {
-	return serviceManagerReport{
+func armedTimerReport() ServiceManagerReport {
+	return ServiceManagerReport{
 		Manager: "systemd",
 		Present: true,
 		Unit: serviceManagerUnitState{
@@ -47,9 +47,9 @@ func armedTimerReport() serviceManagerReport {
 	}
 }
 
-func unitReport(unit serviceManagerUnitState) serviceManagerReport {
+func unitReport(unit serviceManagerUnitState) ServiceManagerReport {
 	unit.Unit = "pfm-schedule.timer"
-	return serviceManagerReport{Manager: "systemd", Present: true, Unit: unit}
+	return ServiceManagerReport{Manager: "systemd", Present: true, Unit: unit}
 }
 
 // TestRenderScheduleDoctorStates pins the one `doctor: schedules` line for each
@@ -72,7 +72,7 @@ func TestRenderScheduleDoctorStates(t *testing.T) {
 	cases := []struct {
 		name     string
 		skipOn   string
-		schedule serviceManagerReport
+		schedule ServiceManagerReport
 		drift    scheduleTimerDrift
 		source   fakeScheduleSource
 		want     string
@@ -125,7 +125,7 @@ func TestRenderScheduleDoctorStates(t *testing.T) {
 		},
 		{
 			name: "no manager",
-			schedule: serviceManagerReport{
+			schedule: ServiceManagerReport{
 				Manager: "systemd", Unit: serviceManagerUnitState{Unit: "pfm-schedule.timer"},
 			},
 			want: "doctor: schedules scheduler=none unit=pfm-schedule.timer due=0 overdue=0 failed=0 — " +
@@ -211,11 +211,11 @@ func TestRenderScheduleDoctorStates(t *testing.T) {
 	}
 }
 
-func stubScheduleTimerProbe(t *testing.T, report serviceManagerReport) {
+func stubScheduleTimerProbe(t *testing.T, report ServiceManagerReport) {
 	t.Helper()
-	previous := scheduleTimerProbeOverride
-	scheduleTimerProbeOverride = func(context.Context, deps.Runner) serviceManagerReport { return report }
-	t.Cleanup(func() { scheduleTimerProbeOverride = previous })
+	previous := ScheduleTimerProbeOverride
+	ScheduleTimerProbeOverride = func(context.Context, deps.Runner) ServiceManagerReport { return report }
+	t.Cleanup(func() { ScheduleTimerProbeOverride = previous })
 }
 
 // TestPrintScheduleDoctorRealStateOverdue reads a real shared state database

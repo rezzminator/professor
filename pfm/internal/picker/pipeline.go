@@ -733,6 +733,10 @@ func refreshWorkbenches(request scanRequest, discover func([]string) ([]workbenc
 	var roots []string
 	var faults []workbench.WalkError
 	currentDir, err := os.Getwd()
+	if err == nil {
+		// macOS's getcwd still names a deleted directory; Linux's fails.
+		_, err = os.Stat(currentDir)
+	}
 	if err != nil {
 		faults = append(faults, workbench.WalkError{
 			Root: ".", Path: ".", Err: fmt.Errorf("read workbench discovery directory: %w", err),

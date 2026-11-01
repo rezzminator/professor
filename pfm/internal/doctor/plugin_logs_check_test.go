@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -415,6 +416,7 @@ func TestAlphaInstallSatisfiesPluginLogsDoctor(t *testing.T) {
 			Version:          "0.82.0-alpha",
 			Mode:             installer.ModeApply,
 			ProcRoot:         t.TempDir(),
+			Runner:           healthyServiceManager{},
 			Stdout:           io.Discard,
 		},
 	); err != nil {
@@ -433,6 +435,29 @@ func TestAlphaInstallSatisfiesPluginLogsDoctor(t *testing.T) {
 		!strings.Contains(out.String(), "plugin_logs ok: PLUGIN_LOG_DIR=") {
 		t.Fatalf("installer leaves doctor unhealthy: %s", out.String())
 	}
+}
+
+// healthyServiceManager answers the installer's systemctl and launchctl calls
+// as a healthy user manager would, so an apply never bootstraps a fixture
+// agent into the real launchd gui domain or systemd user manager.
+type healthyServiceManager struct{}
+
+func (healthyServiceManager) Run(_ context.Context, name string, args ...string) error {
+	_, err := healthyServiceManager{}.Output(context.Background(), name, args...)
+	return err
+}
+
+func (healthyServiceManager) Output(_ context.Context, name string, args ...string) ([]byte, error) {
+	switch {
+	case name == "systemctl" && len(args) > 0 && strings.HasSuffix(args[len(args)-1], ".service"):
+		// A oneshot between runs: the install gate refuses while one runs.
+		return []byte("inactive\n"), nil
+	case name == "systemctl":
+		return []byte("active\n"), nil
+	case name == "launchctl":
+		return []byte("state = not running\n"), nil
+	}
+	return nil, fmt.Errorf("%s %s: not a service manager command this fixture answers", name, strings.Join(args, " "))
 }
 
 // ambientHerdrIndicatorTable stages a process table holding one running

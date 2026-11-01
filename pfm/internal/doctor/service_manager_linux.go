@@ -37,8 +37,8 @@ func serviceManagerIdentity() (manager, unit string) {
 // M.06 exercises — is reported as report.Present=false, never folded into
 // "could not ask": LookPath failing is a clean, expected answer, not a
 // probe that could not run.
-func probeServiceManager(ctx context.Context, runner deps.Runner) serviceManagerReport {
-	report := serviceManagerReport{
+func probeServiceManager(ctx context.Context, runner deps.Runner) ServiceManagerReport {
+	report := ServiceManagerReport{
 		Manager: serviceManagerLinuxName,
 		Unit:    serviceManagerUnitState{Unit: pfmMCPSystemdUnit},
 	}
@@ -59,8 +59,8 @@ func scheduleTimerIdentity() (manager, unit string) {
 // probeScheduleTimer asks systemd --user about the pfm schedule timer; a
 // systemctl binary absent from PATH is Present=false, the same clean answer
 // probeServiceManager gives.
-func probeScheduleTimer(ctx context.Context, runner deps.Runner) serviceManagerReport {
-	report := serviceManagerReport{
+func probeScheduleTimer(ctx context.Context, runner deps.Runner) ServiceManagerReport {
+	report := ServiceManagerReport{
 		Manager: serviceManagerLinuxName,
 		Unit:    serviceManagerUnitState{Unit: pfmScheduleSystemdUnit},
 	}

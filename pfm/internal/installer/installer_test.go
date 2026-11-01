@@ -357,7 +357,7 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 		if strings.Contains(plist, "__PFM_HOME__") {
 			t.Fatalf("launch agent kept its placeholder:\n%s", plist)
 		}
-		if !strings.Contains(plist, home+"/.local/bin/pfm") ||
+		if !strings.Contains(plist, "<string>"+paths.AgentLauncher(home)+"</string>") ||
 			!strings.Contains(plist, home+"/.codex/session_index.jsonl") {
 			t.Fatalf("launch agent does not point at this home:\n%s", plist)
 		}

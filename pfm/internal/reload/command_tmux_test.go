@@ -2,6 +2,7 @@ package reload
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
@@ -115,7 +117,7 @@ func TestReloadRespawnLaunchesACommandLongerThanATmuxMessage(t *testing.T) {
 			t.Fatalf("read socket directory: %v", err)
 		}
 		pid := query("#{pane_pid}")
-		exe, exeErr := os.Readlink("/proc/" + pid + "/exe")
+		exe, exeErr := paneExecutable(pid)
 		_, markErr := os.Stat(marker)
 		detail = "entries=" + strconv.Itoa(len(entries)) + " pane " + pid + " exe=" + exe
 		if markErr == nil && exeErr == nil && exe == want && len(entries) == 1 {
@@ -123,4 +125,22 @@ func TestReloadRespawnLaunchesACommandLongerThanATmuxMessage(t *testing.T) {
 		}
 	}
 	t.Fatalf("respawned pane never ran the target from a consumed script (want exe %s): %s", want, detail)
+}
+
+// paneExecutable resolves a pane process's executable through the platform's
+// process reader: /proc on Linux, kern.procargs2 on macOS, which has no /proc.
+func paneExecutable(pid string) (string, error) {
+	number, err := strconv.Atoi(pid)
+	if err != nil {
+		return "", err
+	}
+	reader, ok := gather.NewProcFS("/proc").(gather.ProcExecutable)
+	if !ok {
+		return "", errors.New("this platform's process reader names no executable")
+	}
+	exe, err := reader.Executable(number)
+	if err != nil {
+		return "", err
+	}
+	return filepath.EvalSymlinks(exe)
 }

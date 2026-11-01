@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/doctor"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/hostcheck"
@@ -543,6 +544,13 @@ func jailTest(t *testing.T) string {
 	dirs, files := storeLayout()
 	testjail.StageAccountLinks(t, filepath.Join(root, "home"), filepath.Join(root, "home", ".cc", "1"), dirs, files)
 	stageStorePlugins(t, filepath.Join(root, "home"))
+	// The jailed home reaches no user service manager: macOS always has
+	// launchctl, whose real gui domain holds no plist in this home.
+	previous := doctor.ScheduleTimerProbeOverride
+	doctor.ScheduleTimerProbeOverride = func(context.Context, deps.Runner) doctor.ServiceManagerReport {
+		return doctor.ServiceManagerReport{}
+	}
+	t.Cleanup(func() { doctor.ScheduleTimerProbeOverride = previous })
 	return root
 }
 

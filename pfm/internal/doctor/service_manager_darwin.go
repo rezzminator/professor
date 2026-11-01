@@ -40,8 +40,8 @@ func serviceManagerIdentity() (manager, unit string) {
 // launchctl binary absent from PATH is reported as report.Present=false,
 // never folded into "could not ask" — the same absence-vs-error split
 // service_manager_linux.go's systemd probe makes.
-func probeServiceManager(ctx context.Context, runner deps.Runner) serviceManagerReport {
-	report := serviceManagerReport{
+func probeServiceManager(ctx context.Context, runner deps.Runner) ServiceManagerReport {
+	report := ServiceManagerReport{
 		Manager: serviceManagerDarwinName,
 		Unit:    serviceManagerUnitState{Unit: pfmMCPLaunchdLabel},
 	}
@@ -62,8 +62,8 @@ func scheduleTimerIdentity() (manager, unit string) {
 // probeScheduleTimer asks launchd about the pfm schedule label; a launchctl
 // binary absent from PATH is Present=false, the same clean answer
 // probeServiceManager gives.
-func probeScheduleTimer(ctx context.Context, runner deps.Runner) serviceManagerReport {
-	report := serviceManagerReport{
+func probeScheduleTimer(ctx context.Context, runner deps.Runner) ServiceManagerReport {
+	report := ServiceManagerReport{
 		Manager: serviceManagerDarwinName,
 		Unit:    serviceManagerUnitState{Unit: pfmScheduleLaunchdLabel},
 	}

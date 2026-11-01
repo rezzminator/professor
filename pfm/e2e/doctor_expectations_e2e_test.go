@@ -398,8 +398,8 @@ func (h *e2eHarness) applyOldShapeFixes(home string) {
 // unionFix and settingsFix are account-entry-real's printed fixes for a real
 // projects dir and settings file, as the host check renders them.
 func unionFix(path, target string) string {
-	return "mkdir -p " + target + " && cp -an " + path + "/. " + target + "/ && ! diff -rq " + path + " " + target +
-		" 2>&1 | grep -v '^Only in " + target + "' && rm -r " + path +
+	return "mkdir -p " + target + " && { cp -an " + path + "/. " + target + "/ || :; } && ! diff -rq " + path + " " +
+		target + " 2>&1 | grep -v '^Only in " + target + "' && rm -r " + path +
 		"  # union into the store; stops while a file differs"
 }
 

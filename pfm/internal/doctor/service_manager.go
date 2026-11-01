@@ -28,14 +28,14 @@ type serviceManagerUnitState struct {
 	Err     error
 }
 
-// serviceManagerReport is what probeServiceManager — defined once per
+// ServiceManagerReport is what probeServiceManager — defined once per
 // platform in service_manager_linux.go / service_manager_darwin.go, same
 // identifier on both so the caller here stays platform-blind (pfm/CLAUDE.md
 // § Code Standards, "one binary, two kernels") — returns: the manager this
 // platform uses, whether it could be asked at all, and the pfm MCP daemon
 // unit's state under it (assets/systemd/pfm-mcp.service, M47;
 // assets/launchd/com.professor.pfm.mcp.plist, M48).
-type serviceManagerReport struct {
+type ServiceManagerReport struct {
 	Manager string
 	Present bool
 	Unit    serviceManagerUnitState
@@ -45,9 +45,9 @@ type serviceManagerReport struct {
 // three-state formatting without depending on the build's own platform probe
 // (systemd on Linux, launchd on Darwin) or a real service manager on the
 // host running the test. Production leaves it nil.
-var ServiceManagerProbeOverride func(context.Context, deps.Runner) serviceManagerReport
+var ServiceManagerProbeOverride func(context.Context, deps.Runner) ServiceManagerReport
 
-func configuredServiceManagerProbe(ctx context.Context, runner deps.Runner) serviceManagerReport {
+func configuredServiceManagerProbe(ctx context.Context, runner deps.Runner) ServiceManagerReport {
 	if ServiceManagerProbeOverride != nil {
 		return ServiceManagerProbeOverride(ctx, runner)
 	}

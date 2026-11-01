@@ -406,7 +406,8 @@ func sharedEntryFix(store, path, name string) string {
 		"rules",
 		"themes":
 		// diff's own errors join its output, so an unreadable file stops the rm too.
-		return "mkdir -p " + target + " && cp -an " + path + "/. " + target + "/ && ! diff -rq " + path + " " +
+		// diff alone judges the merge: BSD cp -n exits 1 for every file it skips.
+		return "mkdir -p " + target + " && { cp -an " + path + "/. " + target + "/ || :; } && ! diff -rq " + path + " " +
 			target + " 2>&1 | grep -v '^Only in " + target + "' && rm -r " + path +
 			"  # union into the store; stops while a file differs"
 	case "history.jsonl":

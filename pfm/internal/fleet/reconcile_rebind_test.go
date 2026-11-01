@@ -50,7 +50,7 @@ func TestReconcileCodexPanesRecordsARebind(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tmuxTmpDir := t.TempDir()
+	tmuxTmpDir := testjail.ShortRoot(t)
 	resolved.TmuxDir = filepath.Join(tmuxTmpDir, "tmux-"+strconv.Itoa(os.Getuid()))
 
 	database, err := store.Open()
@@ -192,7 +192,7 @@ func TestReconcileCodexPanesDefersClearWhileReloadOrTurnRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tmuxTmpDir := t.TempDir()
+	tmuxTmpDir := testjail.ShortRoot(t)
 	resolved.TmuxDir = filepath.Join(tmuxTmpDir, "tmux-"+strconv.Itoa(os.Getuid()))
 	database, err := store.Open()
 	if err != nil {
@@ -422,7 +422,7 @@ func TestReconcileCodexPanesCarriesSchedulesAcrossAReset(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tmuxTmpDir := t.TempDir()
+	tmuxTmpDir := testjail.ShortRoot(t)
 	resolved.TmuxDir = filepath.Join(tmuxTmpDir, "tmux-"+strconv.Itoa(os.Getuid()))
 	database, err := store.Open()
 	if err != nil {

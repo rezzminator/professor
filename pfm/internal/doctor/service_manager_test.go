@@ -30,13 +30,13 @@ func TestPrintServiceManagerDoctorReportsThreeStates(t *testing.T) {
 	probeErr := errors.New("dial unix /run/user/1000/bus: connect: no such file or directory")
 	cases := []struct {
 		name    string
-		report  serviceManagerReport
+		report  ServiceManagerReport
 		want    []string
 		exclude []string
 	}{
 		{
 			name: "present and healthy",
-			report: serviceManagerReport{
+			report: ServiceManagerReport{
 				Manager: "systemd",
 				Present: true,
 				Unit: serviceManagerUnitState{
@@ -50,7 +50,7 @@ func TestPrintServiceManagerDoctorReportsThreeStates(t *testing.T) {
 		},
 		{
 			name: "no service manager on this host",
-			report: serviceManagerReport{
+			report: ServiceManagerReport{
 				Manager: "systemd",
 				Present: false,
 				Unit:    serviceManagerUnitState{Unit: "pfm-mcp.service"},
@@ -63,7 +63,7 @@ func TestPrintServiceManagerDoctorReportsThreeStates(t *testing.T) {
 		},
 		{
 			name: "could not ask",
-			report: serviceManagerReport{
+			report: ServiceManagerReport{
 				Manager: "systemd",
 				Present: true,
 				Unit: serviceManagerUnitState{
@@ -79,7 +79,7 @@ func TestPrintServiceManagerDoctorReportsThreeStates(t *testing.T) {
 
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			ServiceManagerProbeOverride = func(context.Context, deps.Runner) serviceManagerReport {
+			ServiceManagerProbeOverride = func(context.Context, deps.Runner) ServiceManagerReport {
 				return testCase.report
 			}
 			defer func() { ServiceManagerProbeOverride = nil }()
@@ -108,12 +108,12 @@ func TestPrintServiceManagerDoctorReportsThreeStates(t *testing.T) {
 func TestPrintServiceManagerDoctorPresentButUnhealthyNamesTheRemedy(t *testing.T) {
 	cases := []struct {
 		name   string
-		report serviceManagerReport
+		report ServiceManagerReport
 		want   []string
 	}{
 		{
 			name: "systemd unit activating",
-			report: serviceManagerReport{Manager: "systemd", Present: true, Unit: serviceManagerUnitState{
+			report: ServiceManagerReport{Manager: "systemd", Present: true, Unit: serviceManagerUnitState{
 				Unit: "pfm-mcp.service", Present: true, Enabled: true, State: "activating",
 			}},
 			want: []string{
@@ -123,21 +123,21 @@ func TestPrintServiceManagerDoctorPresentButUnhealthyNamesTheRemedy(t *testing.T
 		},
 		{
 			name: "systemd unit never staged",
-			report: serviceManagerReport{Manager: "systemd", Present: true, Unit: serviceManagerUnitState{
+			report: ServiceManagerReport{Manager: "systemd", Present: true, Unit: serviceManagerUnitState{
 				Unit: "pfm-mcp.service", State: "inactive",
 			}},
 			want: []string{"present=false enabled=false active=inactive", "— run pfm install --yes"},
 		},
 		{
 			name: "launchd label not running",
-			report: serviceManagerReport{Manager: "launchd", Present: true, Unit: serviceManagerUnitState{
+			report: ServiceManagerReport{Manager: "launchd", Present: true, Unit: serviceManagerUnitState{
 				Unit: "com.professor.pfm.mcp", Present: true, Enabled: true, State: "not running",
 			}},
 			want: []string{"active=not running", "launchctl kickstart -k gui/$(id -u)/com.professor.pfm.mcp"},
 		},
 		{
 			name: "launchd label unknown",
-			report: serviceManagerReport{Manager: "launchd", Present: true, Unit: serviceManagerUnitState{
+			report: ServiceManagerReport{Manager: "launchd", Present: true, Unit: serviceManagerUnitState{
 				Unit: "com.professor.pfm.mcp",
 			}},
 			want: []string{"present=false", "— run pfm install --yes"},
@@ -145,7 +145,7 @@ func TestPrintServiceManagerDoctorPresentButUnhealthyNamesTheRemedy(t *testing.T
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			ServiceManagerProbeOverride = func(context.Context, deps.Runner) serviceManagerReport {
+			ServiceManagerProbeOverride = func(context.Context, deps.Runner) ServiceManagerReport {
 				return testCase.report
 			}
 			defer func() { ServiceManagerProbeOverride = nil }()
@@ -172,9 +172,9 @@ func TestPrintServiceManagerDoctorPresentButUnhealthyNamesTheRemedy(t *testing.T
 // server disabled there is no daemon to supervise — the row says so, asks the
 // manager nothing and warns nothing.
 func TestPrintServiceManagerDoctorDisabledInConfigNeverProbes(t *testing.T) {
-	ServiceManagerProbeOverride = func(context.Context, deps.Runner) serviceManagerReport {
+	ServiceManagerProbeOverride = func(context.Context, deps.Runner) ServiceManagerReport {
 		t.Fatal("a disabled MCP config must not probe the service manager")
-		return serviceManagerReport{}
+		return ServiceManagerReport{}
 	}
 	defer func() { ServiceManagerProbeOverride = nil }()
 

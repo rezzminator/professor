@@ -28,14 +28,14 @@ type scheduleTimerDrift struct {
 	Err     error
 }
 
-// scheduleTimerProbeOverride lets tests exercise printScheduleDoctor
+// ScheduleTimerProbeOverride lets tests exercise printScheduleDoctor
 // without a real service manager, as ServiceManagerProbeOverride does for the
 // MCP row. Production leaves it nil.
-var scheduleTimerProbeOverride func(context.Context, deps.Runner) serviceManagerReport
+var ScheduleTimerProbeOverride func(context.Context, deps.Runner) ServiceManagerReport
 
-func configuredScheduleTimerProbe(ctx context.Context, runner deps.Runner) serviceManagerReport {
-	if scheduleTimerProbeOverride != nil {
-		return scheduleTimerProbeOverride(ctx, runner)
+func configuredScheduleTimerProbe(ctx context.Context, runner deps.Runner) ServiceManagerReport {
+	if ScheduleTimerProbeOverride != nil {
+		return ScheduleTimerProbeOverride(ctx, runner)
 	}
 	return probeScheduleTimer(ctx, runner)
 }
@@ -89,7 +89,7 @@ func printScheduleDoctor(
 func renderScheduleDoctor(
 	ctx context.Context,
 	stdout io.Writer,
-	schedule serviceManagerReport,
+	schedule ServiceManagerReport,
 	drift scheduleTimerDrift,
 	source scheduleSource,
 	now time.Time,

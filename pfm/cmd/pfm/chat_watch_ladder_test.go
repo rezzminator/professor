@@ -849,11 +849,13 @@ func TestWatchLadderAFrozenTmuxServerIsNeverAnExit(t *testing.T) {
 		release := seat.hold()
 		watch.poll()
 		watch.expect("WORKING lad-a")
+		// The turn ends on disk before the freeze: a frozen server stops
+		// draining the pane, so an engine painting into it blocks once the pty
+		// buffer fills (at once on macOS). The poll against the frozen server
+		// still reads the turn's end from the transcript and announces it.
+		release()
 		seat.signalServer(syscall.SIGSTOP)
 		t.Cleanup(func() { seat.signalServer(syscall.SIGCONT) })
-		// The engine outlives its frozen server: the turn it ends is still
-		// read from its transcript and announced.
-		release()
 		watch.poll()
 		watch.expect("IDLE lad-a idle_seconds=")
 		// Now nothing about the seat can be read: no line, then an ERROR —

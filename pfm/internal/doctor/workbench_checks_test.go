@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/professor"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
@@ -111,8 +113,13 @@ func TestWorkbenchDoctorWalkError(t *testing.T) {
 	// A depth-6 directory whose path leaves no room for "/.professor" under
 	// PATH_MAX fails its manifest probe (ENAMETOOLONG) for real, even in a
 	// root-run fence; a regular file named .professor is absence, not a fault.
-	const pathMax, segments, segment = 4095, 6, 255
-	base := t.TempDir()
+	// PATH_MAX is 4096 on Linux and 1024 on macOS, so the segments shrink to fit.
+	const pathMax, segments = unix.PathMax - 1, 6
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	segment := min(255, (pathMax-5-len(base)-len("/acme"))/segments-1)
 	for remaining := pathMax - 5 - segments*(segment+1) - len(base); remaining > 0; {
 		n := min(200, remaining-1)
 		if remaining-(n+1) == 1 {

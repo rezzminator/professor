@@ -54,6 +54,8 @@ jobs:
 
       # Includes the Darwin installer and the release-upgrade e2e.
       - name: Run serial e2e
+        # Runs even when the unit step failed, so one CI run shows every red.
+        if: ${{ !cancelled() }}
         env:
           PFM_DEV_FENCE: "1"
           PFM_HARVESTPY_OFFLINE: "1"

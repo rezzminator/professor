@@ -299,7 +299,13 @@ func TestDescribeStateNamesDanglingByLinkName(t *testing.T) {
 	}
 }
 
+// TestApplyKeepsPolicyLinkVisibleDuringRepoint pins that repointing a link is
+// one rename(2) over it: a reader polling the link never sees it missing. On
+// macOS a concurrent readlink can catch the name mid-rename (CI: EINVAL) though
+// rename(2) is the strongest primitive darwin has, so there the repoint proves
+// only the end state.
 func TestApplyKeepsPolicyLinkVisibleDuringRepoint(t *testing.T) {
+	watch := runtime.GOOS != "darwin"
 	dir := t.TempDir()
 	target := filepath.Join(dir, "config.json")
 	oldSource, newSource := filepath.Join(dir, "old.json"), filepath.Join(dir, "new.json")
@@ -317,7 +323,7 @@ func TestApplyKeepsPolicyLinkVisibleDuringRepoint(t *testing.T) {
 				return
 			default:
 			}
-			if _, err := os.Readlink(target); err != nil {
+			if _, err := os.Readlink(target); err != nil && watch {
 				select {
 				case observations <- err:
 				default:
@@ -343,6 +349,9 @@ func TestApplyKeepsPolicyLinkVisibleDuringRepoint(t *testing.T) {
 	case err := <-observations:
 		t.Fatalf("policy reader observed a missing link during repoint: %v", err)
 	default:
+	}
+	if got, err := os.Readlink(target); err != nil || got != oldSource {
+		t.Fatalf("link after the last repoint = %q, %v; want %s", got, err, oldSource)
 	}
 }
 

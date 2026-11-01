@@ -17,6 +17,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/installer"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestAccountIsStore(t *testing.T) {
@@ -412,6 +413,19 @@ func TestAccountEntryRealFixesRun(t *testing.T) {
 	if len(rows) != len(installer.StoreEntries) {
 		t.Fatalf("rows=%+v", rows)
 	}
+	// BSD cp -n exits 1 for every file it skips, and each union here skips
+	// "both"; this cp copies as the host's does, then exits as macOS's does.
+	realCp, err := exec.LookPath("cp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	if err := testjail.WriteExecutable(
+		filepath.Join(bin, "cp"), []byte("#!/bin/sh\n"+realCp+" \"$@\"\nexit 1\n"), 0o700,
+	); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	for _, row := range rows {
 		if output, err := exec.Command("sh", "-c", row.Fix).CombinedOutput(); err != nil {
 			t.Fatalf("fix %q: %v: %s", row.Fix, err, output)
@@ -652,7 +666,7 @@ func TestAccountEntryReal(t *testing.T) {
 		"projects file-history tasks session-env paste-cache shell-snapshots plans uploads downloads teams " +
 			"agents commands skills rules themes",
 	) {
-		fixes[name] = "mkdir -p {store}/{entry} && cp -an {path}/. {store}/{entry}/ && " +
+		fixes[name] = "mkdir -p {store}/{entry} && { cp -an {path}/. {store}/{entry}/ || :; } && " +
 			"! diff -rq {path} {store}/{entry} 2>&1 | grep -v '^Only in {store}/{entry}' && " +
 			"rm -r {path}  # union into the store; stops while a file differs"
 	}

@@ -37,7 +37,9 @@ func reloadWorkerAccountFixture(t *testing.T) (string, string, string) {
 	}
 	captured := filepath.Join(t.TempDir(), "account.txt")
 	fixtureClaude := filepath.Join(t.TempDir(), "claude-fixture.sh")
-	script := "#!/bin/sh\nprintf 'ACCOUNT:%s\\n' \"${CLAUDE_CONFIG_DIR:-}\" > '" + captured + "'\nexec bash -c 'exec -a claude-fixture.sh python3 " + promptScript + "'\n"
+	// The named process is a bash parent, never python itself: macOS framework
+	// Python re-execs its interpreter with a new argv[0], losing the exec -a name.
+	script := "#!/bin/sh\nprintf 'ACCOUNT:%s\\n' \"${CLAUDE_CONFIG_DIR:-}\" > '" + captured + "'\nexec bash -c 'exec -a claude-fixture.sh bash -c \"python3 " + promptScript + "; exit\"'\n"
 	if err := testjail.WriteExecutable(fixtureClaude, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -333,7 +335,8 @@ func TestChatReloadWorkerContinuesBoundCodexConversationAfterNew(t *testing.T) {
 	}
 	argvFile := filepath.Join(t.TempDir(), "codex-argv.txt")
 	fixtureCodex := filepath.Join(t.TempDir(), "codex-fixture.sh")
-	script := "#!/bin/sh\n{ printf 'CALL\\n'; for a in \"$@\"; do printf 'ARG:%s\\n' \"$a\"; done; } >> '" + argvFile + "'\nexec bash -c 'exec -a codex-fixture.sh python3 " + promptScript + "'\n"
+	// A named bash parent, as reloadWorkerAccountFixture's, so macOS keeps the name.
+	script := "#!/bin/sh\n{ printf 'CALL\\n'; for a in \"$@\"; do printf 'ARG:%s\\n' \"$a\"; done; } >> '" + argvFile + "'\nexec bash -c 'exec -a codex-fixture.sh bash -c \"python3 " + promptScript + "; exit\"'\n"
 	if err := testjail.WriteExecutable(fixtureCodex, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}

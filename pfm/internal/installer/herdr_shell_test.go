@@ -10,8 +10,10 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/BurntSushi/toml"
 
@@ -278,7 +280,8 @@ func TestHerdrShellPickerReturnsToShell(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rc := "source '" + filepath.Join(cwd, "assets", "shim", "pfm.zsh") + "'\n"
+	const ready = "herdr-ready> "
+	rc := "source '" + filepath.Join(cwd, "assets", "shim", "pfm.zsh") + "'\nPS1='" + ready + "'\n"
 	if err := os.WriteFile(filepath.Join(home, ".zshrc"), []byte(rc), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -292,9 +295,49 @@ func TestHerdrShellPickerReturnsToShell(t *testing.T) {
 		"PFM_HERDR_SHELL=",
 		"HERDR_ENV=0",
 	)
-	command.Stdin = strings.NewReader("print -r -- plain:${PFM_AUTO_OPEN-unset} >> \"$HOME/result\"\nexit\n")
-	if out, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("interactive wrapper: %v: %s", err, out)
+	// Typed at the first prompt, as a person types: input queued before the
+	// shell starts is not delivered alike by util-linux and BSD script.
+	stdin, typed, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := typed.Close(); err != nil {
+			t.Errorf("close typed input: %v", err)
+		}
+	})
+	screen := &lockedBuffer{}
+	command.Stdin, command.Stdout, command.Stderr = stdin, screen, screen
+	if err := command.Start(); err != nil {
+		t.Fatalf("start interactive wrapper: %v", err)
+	}
+	if err := stdin.Close(); err != nil {
+		t.Fatalf("close the child's end of typed input: %v", err)
+	}
+	exited := make(chan error, 1)
+	go func() { exited <- command.Wait() }()
+	deadline := time.After(15 * time.Second)
+	for !strings.Contains(screen.String(), ready) {
+		select {
+		case err := <-exited:
+			t.Fatalf("interactive wrapper ended before its first prompt: %v: %s", err, screen.String())
+		case <-deadline:
+			_ = command.Process.Kill()
+			t.Fatalf("interactive wrapper never drew prompt %q: %s", ready, screen.String())
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	if _, err := typed.WriteString("print -r -- plain:${PFM_AUTO_OPEN-unset} >> \"$HOME/result\"\nexit\n"); err != nil {
+		t.Fatalf("type into interactive wrapper: %v", err)
+	}
+	select {
+	case err := <-exited:
+		if err != nil {
+			t.Fatalf("interactive wrapper: %v: %s", err, screen.String())
+		}
+	case <-deadline:
+		_ = command.Process.Kill()
+		t.Fatalf("interactive wrapper never exited: %s", screen.String())
 	}
 	result, err := os.ReadFile(filepath.Join(home, "result"))
 	if err != nil {
@@ -620,4 +663,22 @@ func TestHerdrShellWrapper(t *testing.T) {
 			}
 		})
 	}
+}
+
+// lockedBuffer collects a running command's output for a concurrent reader.
+type lockedBuffer struct {
+	mu   sync.Mutex
+	data bytes.Buffer
+}
+
+func (output *lockedBuffer) Write(p []byte) (int, error) {
+	output.mu.Lock()
+	defer output.mu.Unlock()
+	return output.data.Write(p)
+}
+
+func (output *lockedBuffer) String() string {
+	output.mu.Lock()
+	defer output.mu.Unlock()
+	return output.data.String()
 }

@@ -101,6 +101,9 @@ func TestMain(m *testing.M) {
 		return mcpserv.DaemonStatus{}, fmt.Errorf("%w: jailed test never probes a live daemon", mcpserv.ErrDaemonAbsent)
 	}
 	PrePushGateProbeOverride = func(context.Context) PrePushGate { return PrePushGate{State: "outside-repository"} }
+	// The jail reaches no user service manager: macOS always has launchctl,
+	// whose real gui domain holds no plist in a jailed home.
+	ScheduleTimerProbeOverride = func(context.Context, deps.Runner) ServiceManagerReport { return ServiceManagerReport{} }
 	DependencyProbeOverride = func(_ context.Context, entries []deps.Entry, _ deps.ProbeOptions) []deps.Result {
 		results := make([]deps.Result, 0, len(entries))
 		for index := range entries {

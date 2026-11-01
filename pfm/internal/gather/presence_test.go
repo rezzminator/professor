@@ -8,6 +8,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // listenChatSocket binds a real unix socket named like a chat's tmux socket.
@@ -26,7 +28,7 @@ func listenChatSocket(t *testing.T, directory, name string) net.Listener {
 }
 
 func TestPresenceFilesSeesSocketsAndCrumbsByNameAndContentNotMtime(t *testing.T) {
-	tmuxDir, sidDir := t.TempDir(), t.TempDir()
+	tmuxDir, sidDir := testjail.ShortRoot(t), t.TempDir()
 	probe := PresenceProbe{TmuxDir: tmuxDir, SIDDir: sidDir}
 	crumb := filepath.Join(sidDir, "cc-1800000000-1-1")
 	if err := os.WriteFile(crumb, []byte("/t/one.jsonl\n"), 0o600); err != nil {

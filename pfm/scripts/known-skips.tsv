@@ -27,3 +27,4 @@ github.com/rezzminator/professor/pfm/internal/store	TestStoreStressKilledHelper	
 github.com/rezzminator/professor/pfm/internal/transcript	TestFlattenPromptTextStress	opt-in-stress	stress battery, opt-in with PFM_STRESS=1
 github.com/rezzminator/professor/pfm/internal/resolve	TestLinuxEnvironKeepsOwnRefusedRead	root-noop	the fence runs as root, which reads every process environment and a mode-000 file
 github.com/rezzminator/professor/pfm/internal/resolve	TestLinuxEnvironTagsForeignProcess	root-noop	the fence runs as root, which reads every process environment and a mode-000 file
+github.com/rezzminator/professor/pfm/internal/reload	TestLockNativeReloadSafety/foreign-lock	root-only	only root hands a file to another uid; a non-root run (macOS CI) cannot build the foreign-owned lock

@@ -895,7 +895,9 @@ func TestLockNativeReloadSafety(t *testing.T) {
 					t.Fatal(err)
 				}
 				if kind == "foreign-lock" {
-					if err := os.Chown(path, 65534, -1); err != nil {
+					if err := os.Chown(path, os.Geteuid()+1, -1); errors.Is(err, syscall.EPERM) {
+						t.Skipf("needs root: only root hands a file to another uid (%v)", err)
+					} else if err != nil {
 						t.Fatalf("fenced foreign-owner fixture: %v", err)
 					}
 				}
@@ -919,7 +921,15 @@ func TestLockNativeReloadSafety(t *testing.T) {
 					t.Fatal(err)
 				}
 			case "foreign-directory":
-				if err := os.Chown(options.SIDDir, 65534, -1); err != nil {
+				if err := os.Chown(options.SIDDir, os.Geteuid()+1, -1); errors.Is(err, syscall.EPERM) {
+					// Without root nothing is handed to another uid; the file
+					// system root already belongs to another user.
+					var rootDir syscall.Stat_t
+					if err := syscall.Stat("/", &rootDir); err != nil || rootDir.Uid == uint32(os.Geteuid()) {
+						t.Fatalf("no foreign-owned directory for a non-root run: / uid=%d err=%v", rootDir.Uid, err)
+					}
+					options.SIDDir = "/"
+				} else if err != nil {
 					t.Fatalf("fenced foreign-owner fixture: %v", err)
 				}
 			case "writable-directory":

@@ -76,13 +76,17 @@ for a in "$@"; do
     fi
     exit 0
   fi
+  if [ "$a" = "display-message" ] && [ %q = "query" ]; then
+    : > %q
+    exec sleep 30
+  fi
 done
 if [ %q = "configure" ]; then
   : > %q
   exec sleep 30
 fi
 exit 0
-`, block, marker, block, marker)
+`, block, marker, block, marker, block, marker)
 	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -207,6 +211,11 @@ func newSessionCancelledWhileBlocked(t *testing.T, block string) error {
 	dir := t.TempDir()
 	marker := filepath.Join(dir, "blocking")
 	tmux := TmuxSpawner{Binary: fakeTmuxBinaryBlocks(t, block, marker), TmuxDir: dir}
+	// Only an account launch queries its pane pid (the account guard's record).
+	run := "echo ready"
+	if block == "query" {
+		run = "env CLAUDE_CONFIG_DIR=" + t.TempDir() + " claude --resume example"
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	result := make(chan error, 1)
@@ -216,7 +225,7 @@ func newSessionCancelledWhileBlocked(t *testing.T, block string) error {
 			Session: "cancelled",
 			Window:  "w",
 			CWD:     dir,
-			Run:     "echo ready",
+			Run:     run,
 			Width:   80,
 			Height:  24,
 		})
@@ -243,23 +252,21 @@ func newSessionCancelledWhileBlocked(t *testing.T, block string) error {
 	}
 }
 
-func TestNewSessionReturnsCancellationDuringConfigure(t *testing.T) {
-	err := newSessionCancelledWhileBlocked(t, "configure")
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("NewSession error = %v, want context cancellation", err)
-	}
-	if !strings.HasPrefix(err.Error(), "configure chat server:") || strings.Contains(err.Error(), "the server died") {
-		t.Fatalf("NewSession error = %v, want configure cancellation without server death", err)
-	}
-}
-
-func TestNewSessionReturnsCancellationDuringCreate(t *testing.T) {
-	err := newSessionCancelledWhileBlocked(t, "new-session")
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("NewSession error = %v, want context cancellation", err)
-	}
-	if !strings.HasPrefix(err.Error(), "create chat server:") {
-		t.Fatalf("NewSession error = %v, want create cancellation", err)
+// TestNewSessionReturnsCancellation: a cancel that kills the tmux call in
+// flight is reported as the cancellation at that stage, never as the killed
+// client's "signal: killed" nor as a server that died.
+func TestNewSessionReturnsCancellation(t *testing.T) {
+	for _, test := range []struct{ block, want string }{
+		{"new-session", "create chat server: context canceled"},
+		{"query", "read account launch pane pid: context canceled"},
+		{"configure", "configure chat server: context canceled"},
+	} {
+		t.Run(test.block, func(t *testing.T) {
+			err := newSessionCancelledWhileBlocked(t, test.block)
+			if !errors.Is(err, context.Canceled) || err.Error() != test.want {
+				t.Fatalf("NewSession error = %v, want %q wrapping context.Canceled", err, test.want)
+			}
+		})
 	}
 }
 

@@ -2,12 +2,15 @@ package transcript
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/codexmeta"
 )
 
 type readLine struct {
@@ -28,11 +31,25 @@ func readAll(t *testing.T, path string, start int64) ([]readLine, int64, int64) 
 }
 
 func TestReadLinesHandsEveryLineAndMarksATornTail(t *testing.T) {
+	for _, compressed := range []bool{false, true} {
+		t.Run(fmt.Sprintf("compressed=%t", compressed), func(t *testing.T) { readLinesOfATornTail(t, compressed) })
+	}
+}
+
+// readLinesOfATornTail reads a file whose last line is torn, plain or as a
+// rollout Codex compressed, from its start and again from the parsed offset.
+func readLinesOfATornTail(t *testing.T, compressed bool) {
 	long := strings.Repeat("x", 200<<10) // longer than the read buffer
-	path := filepath.Join(t.TempDir(), "t.jsonl")
+	path := filepath.Join(t.TempDir(), "rollout-2026-09-23T12-07-24-t.jsonl")
 	content := "{\"a\":1}\n\n" + long + "\r\n{\"torn\":"
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
+	}
+	if compressed {
+		var err error
+		if path, err = codexmeta.CompressRollout(path); err != nil {
+			t.Fatal(err)
+		}
 	}
 	got, parsed, read := readAll(t, path, 0)
 	want := []readLine{{`{"a":1}`, true}, {"", true}, {long + "\r", true}, {`{"torn":`, false}}

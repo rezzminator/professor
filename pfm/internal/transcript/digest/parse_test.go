@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/codexmeta"
 )
 
 func TestParseReadsRecordShapesAndTallies(t *testing.T) {
@@ -44,6 +46,49 @@ func TestParseReadsRecordShapesAndTallies(t *testing.T) {
 	}
 	if counter.total() != 6 {
 		t.Errorf("total = %d, want 6", counter.total())
+	}
+}
+
+// A compressed rollout resolves by its id, from a Codex home and from a
+// --root, the plain twin winning where both sit, and digests decompressed.
+func TestACompressedRolloutResolvesByIDAndDigests(t *testing.T) {
+	const meta = `{"timestamp":"2026-09-29T20:00:00.000Z","type":"session_meta","payload":{"id":"aaa111","cwd":"/w"}}` + "\n" +
+		`{"timestamp":"2026-09-29T20:00:01.000Z","type":"turn_context","payload":{"model":"gpt-5"}}` + "\n"
+	write := func(dir, name string) string {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(meta), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	compress := func(path string) string {
+		compressed, err := codexmeta.CompressRollout(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resolvedPath(compressed)
+	}
+	home := t.TempDir()
+	inHome := compress(
+		write(filepath.Join(home, "sessions", "2026", "09", "29"), "rollout-2026-09-29T20-00-00-aaa111.jsonl"),
+	)
+	root := t.TempDir()
+	inRoot := compress(write(root, "rollout-2026-09-29T20-00-00-bbb222.jsonl"))
+	compress(write(root, "rollout-2026-09-29T20-00-00-ccc333.jsonl"))
+	twin := resolvedPath(write(root, "rollout-2026-09-29T20-00-00-ccc333.jsonl"))
+	env := Env{CodexHomes: []string{home}}
+	for _, row := range []struct{ id, want string }{{"aaa111", inHome}, {"bbb222", inRoot}, {"ccc333", twin}} {
+		out, err := DigestTranscript(context.Background(), []string{"locate", row.id, "--root", root}, env)
+		if err != nil || out.Text != row.want+"\n" {
+			t.Errorf("locate %s = %q, %v; want %s", row.id, out.Text, err, row.want)
+		}
+	}
+	out, err := DigestTranscript(context.Background(), []string{"show", "aaa111"}, env)
+	if head, _, _ := strings.Cut(out.Text, "\n"); err != nil || head != "TRANSCRIPT codex · aaa111 · gpt-5" {
+		t.Fatalf("show %s = %q, %v; want the decompressed digest", inHome, out.Text, err)
 	}
 }
 

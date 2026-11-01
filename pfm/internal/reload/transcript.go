@@ -12,6 +12,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/rezzminator/professor/pfm/internal/codexmeta"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -118,7 +119,7 @@ func TranscriptCWD(path string) (string, error) {
 	if path == "" {
 		return "", nil
 	}
-	file, err := os.Open(path)
+	file, err := codexmeta.OpenRollout(path)
 	if err != nil {
 		return "", fmt.Errorf("open reload transcript %q: %w", path, err)
 	}
@@ -163,17 +164,18 @@ func SessionTranscript(
 		return "", fmt.Errorf("unknown reload engine %q", engine)
 	}
 	for _, account := range machine.CodexAccounts {
-		found := ""
+		// A rollout plain or compressed, the plain twin winning
+		// (codexmeta.PreferPlain): a finished chat's rollout is compressed.
+		var found []string
 		err := filepath.WalkDir(
 			filepath.Join(account.Home, "sessions"),
 			func(path string, entry os.DirEntry, walkErr error) error {
 				if walkErr != nil {
 					return walkErr
 				}
-				if entry != nil && !entry.IsDir() && strings.Contains(filepath.Base(path), id) &&
-					filepath.Ext(path) == ".jsonl" {
-					found = path
-					return filepath.SkipAll
+				if _, transcriptName := codexmeta.RolloutStem(filepath.Base(path)); entry != nil && !entry.IsDir() &&
+					transcriptName && strings.Contains(filepath.Base(path), id) {
+					found = append(found, path)
 				}
 				return nil
 			},
@@ -181,8 +183,8 @@ func SessionTranscript(
 		if err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return "", fmt.Errorf("search Codex rollouts under %q: %w", account.Home, err)
 		}
-		if found != "" {
-			return found, nil
+		if found = codexmeta.PreferPlain(found); len(found) != 0 {
+			return found[0], nil
 		}
 	}
 	return "", nil

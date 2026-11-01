@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 
 	"github.com/rezzminator/professor/pfm/internal/jsvalue"
 )
@@ -203,7 +202,7 @@ func Decode(line []byte) (Header, error) {
 }
 
 func ReadHeader(path string) (header Header, returnErr error) {
-	file, err := os.Open(path)
+	file, err := OpenRollout(path)
 	if err != nil {
 		return Header{}, err
 	}

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/codexmeta"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 )
 
@@ -56,7 +57,7 @@ func ReadLines(
 	handle func(line []byte, complete bool),
 ) (parsedOffset, bytesRead int64, err error) {
 	noteWholeRead(path)
-	file, err := os.Open(path)
+	file, err := codexmeta.OpenRolloutAt(path, start)
 	if err != nil {
 		return start, 0, &OpenError{Path: path, Err: err}
 	}
@@ -65,9 +66,6 @@ func ReadLines(
 			err = errors.Join(err, fmt.Errorf("close %q: %w", path, closeErr))
 		}
 	}()
-	if _, err := file.Seek(start, io.SeekStart); err != nil {
-		return start, 0, fmt.Errorf("seek %q to %d: %w", path, start, err)
-	}
 	parsedOffset, bytesRead, err = ScanLines(file, start, handle)
 	if err != nil {
 		return parsedOffset, bytesRead, fmt.Errorf("read %q: %w", path, err)

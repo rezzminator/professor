@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/codexmeta"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
@@ -43,6 +44,14 @@ func writeRollout(t *testing.T, root, day, id string, stamp time.Time, lines ...
 		t.Fatal(err)
 	}
 	return path
+}
+
+// compress leaves the rollout at path compressed, as Codex leaves a finished one.
+func compress(t *testing.T, path string) {
+	t.Helper()
+	if _, err := codexmeta.CompressRollout(path); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func inspectCodexParent(t *testing.T, path string) (Status, error) {
@@ -85,6 +94,17 @@ func TestACodexParentWithANewerSubagentRolloutIsWorking(t *testing.T) {
 		{"turn ended on an error", func(t *testing.T, root string) {
 			writeRollout(t, root, day, childThread, newer, subagentMeta(childThread, parentThread))
 		}, `{"type":"event_msg","payload":{"type":"task_complete","error":{"message":"x","codex_error_info":"server_error"}}}`, StateWorking},
+		{"newer compressed sub-agent of the parent", func(t *testing.T, root string) {
+			compress(t, writeRollout(t, root, day, childThread, newer, subagentMeta(childThread, parentThread)))
+		}, codexAssistantLine, StateWorking},
+		{"nested sub-agent whose own parent is compressed", func(t *testing.T, root string) {
+			compress(t, writeRollout(t, root, day, childThread, older, subagentMeta(childThread, parentThread)))
+			writeRollout(t, root, day, grandThread, newer, subagentMeta(grandThread, childThread))
+		}, codexAssistantLine, StateWorking},
+		{"compressed sub-agent shadowed by its plain twin", func(t *testing.T, root string) {
+			compress(t, writeRollout(t, root, day, childThread, newer, subagentMeta(childThread, parentThread)))
+			writeRollout(t, root, day, childThread, older, subagentMeta(childThread, parentThread))
+		}, codexAssistantLine, StateIdle},
 		{"older sub-agent", func(t *testing.T, root string) {
 			writeRollout(t, root, day, childThread, older, subagentMeta(childThread, parentThread))
 		}, codexAssistantLine, StateIdle},

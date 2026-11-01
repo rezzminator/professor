@@ -13,6 +13,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/codexmeta"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/obs"
@@ -183,11 +184,12 @@ func TestArchiveMovesOnlyResolvableDeadKilledChats(t *testing.T) {
 	transcripts := filepath.Join(values.Roots[pfmengine.Claude][0], project)
 	writeFile(t, filepath.Join(transcripts, deadID+".jsonl"), "{}\n")
 	writeFile(t, filepath.Join(transcripts, liveID+".jsonl"), "{}\n")
-	writeFile(
-		t,
-		filepath.Join(values.Roots[pfmengine.Codex][0], "sessions", "2026", "08", "15", rollout),
-		"{}\n",
-	)
+	// The codex chat is finished: Codex left its rollout compressed.
+	codexRollout := filepath.Join(values.Roots[pfmengine.Codex][0], "sessions", "2026", "08", "15", rollout)
+	writeFile(t, codexRollout, "{}\n")
+	if _, err := codexmeta.CompressRollout(codexRollout); err != nil {
+		t.Fatal(err)
+	}
 	// The live chat states itself through its socket crumb, exactly as a
 	// running chat does.
 	writeFile(
@@ -258,9 +260,9 @@ func TestArchiveMovesOnlyResolvableDeadKilledChats(t *testing.T) {
 		t.Fatalf("archived file is not where the manifest says: %v", err)
 	}
 	if _, err := os.Stat(
-		filepath.Join(values.ArchiveDir, "codex", rollout),
+		filepath.Join(values.ArchiveDir, "codex", rollout+".zst"),
 	); err != nil {
-		t.Fatalf("the codex rollout was not archived: %v", err)
+		t.Fatalf("the compressed codex rollout was not archived: %v", err)
 	}
 
 	history, err := os.ReadFile(filepath.Join(values.Home, ".claude", "history.jsonl"))

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 
+	"github.com/rezzminator/professor/pfm/internal/codexmeta"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 )
 
@@ -83,6 +84,14 @@ func readCodexTail(path string) (cachedFile, error) {
 // its parent's row by the fleet, so no agent count is read here: a Codex chat
 // shows its own turn, never a gauge of agents.
 func (reader *Reader) codexFacts(row *compose.Row, nowNS int64) (Facts, error) {
+	if codexmeta.Compressed(row.Path) {
+		// A compressed rollout is a finished chat, never working, and its tail
+		// has no offset to seek to: reading its model and effort would
+		// decompress the whole file for every such row on every picker launch,
+		// so it shows none. A plain scan of its compressed bytes could match a
+		// raw-stored line as live facts.
+		return Facts{}, nil
+	}
 	tail, err := reader.load(row.Path, readCodexTail)
 	if err != nil {
 		return Facts{}, err

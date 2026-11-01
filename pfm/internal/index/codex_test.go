@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/codexmeta"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
@@ -104,5 +105,58 @@ func TestCodexCachedExecRolloutsReclassifyOnUpgrade(t *testing.T) {
 	}
 	if warm.FullParsed != 0 || warm.DeltaParsed != 0 || warm.FilesSkipped != 3 {
 		t.Fatalf("warm counters = %+v, want unchanged files skipped", warm)
+	}
+}
+
+// A rollout Codex compressed is indexed from its decompressed lines, by the id
+// its name carries; beside a plain twin the plain file is the row.
+func TestACompressedRolloutIsIndexedFromItsLines(t *testing.T) {
+	codexHome := t.TempDir()
+	day := filepath.Join(codexHome, "sessions", "2026", "09", "23")
+	meta := `{"type":"session_meta","payload":{"source":"cli","thread_source":"user","cwd":"/work/app"}}`
+	prompt := func(text string) string {
+		return `{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"` +
+			text + `"}]}}`
+	}
+	compress := func(path string) string {
+		t.Helper()
+		compressed, err := codexmeta.CompressRollout(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return compressed
+	}
+	finished := filepath.Join(day, "rollout-2026-09-23T12-07-24-finished.jsonl")
+	writeLines(t, finished, meta, prompt("review the changes"))
+	compressedPath := compress(finished)
+	twin := filepath.Join(day, "rollout-2026-09-23T12-07-24-twin.jsonl")
+	writeLines(t, twin, meta, prompt("stale"))
+	compress(twin)
+	writeLines(t, twin, meta, prompt("current"))
+
+	database := openIndexStore(t)
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	})
+	indexer, err := NewWithRoots(database, paths.Values{}, map[pfmengine.ID][]string{pfmengine.Codex: {codexHome}})
+	if err != nil {
+		t.Fatalf("NewWithRoots() error = %v", err)
+	}
+	ctx := context.Background()
+	if _, err := indexer.Run(ctx, Options{}); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	for _, want := range []struct{ id, path, prompt string }{
+		{"finished", compressedPath, "review the changes"},
+		{"twin", twin, "current"},
+	} {
+		rollout, found, err := database.Rollout(ctx, want.id)
+		if err != nil || !found || rollout.Path != want.path || rollout.FirstPrompt != want.prompt ||
+			rollout.CWD != "/work/app" || !rollout.UserThread || rollout.PromptCount != 1 {
+			t.Errorf("Rollout(%q) = %#v, found=%t, err=%v; want path %s, first prompt %q", want.id, rollout, found, err,
+				want.path, want.prompt)
+		}
 	}
 }

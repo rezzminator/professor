@@ -8,9 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/codexmeta"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/index"
 	"github.com/rezzminator/professor/pfm/internal/pyvalue"
@@ -35,7 +35,7 @@ func lossNote(ctx context.Context, path string, engine pfmengine.ID) (note strin
 	if path == "" {
 		return "", errors.New("restart loss unknown: transcript path is unavailable")
 	}
-	file, err := os.Open(path)
+	file, err := codexmeta.OpenRollout(path)
 	if err != nil {
 		return "", fmt.Errorf("open restart transcript: %w", err)
 	}

@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+
+	"github.com/rezzminator/professor/pfm/internal/codexmeta"
 )
 
 // Reading is what a watch reads of a transcript at each poll: the run's facts
@@ -164,6 +166,11 @@ func advance(
 	maxBytes int,
 	known *cursor,
 ) (next *cursor, whole bool, returnErr error) {
+	if codexmeta.Compressed(path) {
+		// A compressed rollout is a finished one: it never grows, and its bytes
+		// are no line offsets to fold from, so it is read whole.
+		return nil, true, nil
+	}
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, false, err

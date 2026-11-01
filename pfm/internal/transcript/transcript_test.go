@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/codexmeta"
 )
 
 // claudeLines and codexLines are the record shapes each engine actually
@@ -252,6 +255,56 @@ func TestLastExchangeNamesPartialAndMissingShapesWithoutGuessing(t *testing.T) {
 		response != nil {
 		t.Fatalf("missing prompt=%#v response=%#v ok=%t", prompt, response, ok)
 	}
+}
+
+// A rollout Codex compressed reads through every reader as its plain form.
+func TestACompressedRolloutReadsAsItsLines(t *testing.T) {
+	compressed, err := codexmeta.CompressRollout(writeTranscript(t, "rollout-2026-09-23T12-07-24-t1.jsonl", codexLines))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"U read the report",
+		`T exec|const r = await tools.exec_command({"cmd":"ls"})`,
+		`T spawn_agent|{"agent_type":"gitter"}`,
+		"A the report is clean",
+	}
+	all, err := All(context.Background(), compressed, "cx")
+	if got := condensedAll(all); err != nil || !slices.Equal(got, want) {
+		t.Fatalf("All(%s) = %q, %v; want %q", compressed, got, err, want)
+	}
+	tail, truncated, err := Tail(context.Background(), compressed, "cx", 1, 0)
+	if got := condensedAll(tail); err != nil || !truncated || !slices.Equal(got, want[3:]) {
+		t.Fatalf("Tail(%s, 1) = %q, truncated=%t, %v; want %q", compressed, got, truncated, err, want[3:])
+	}
+	meta, err := ReadMeta(compressed, "cx")
+	if err != nil || meta.ContextWindow != 272000 {
+		t.Fatalf("ReadMeta(%s) = %#v, %v; want window 272000", compressed, meta, err)
+	}
+	if size, err := Size(compressed); err != nil || size != int64(len(codexLines)) {
+		t.Fatalf("Size(%s) = %d, %v; want its lines' %d bytes", compressed, size, err, len(codexLines))
+	}
+	firstLine := int64(strings.Index(codexLines, "\n") + 1)
+	for _, offset := range []int64{0, firstLine} {
+		entries, consumed, err := From(context.Background(), compressed, "cx", offset)
+		if got, wantFrom := condensedAll(entries), want[min(offset, 1):]; err != nil ||
+			consumed != int64(len(codexLines)) || !slices.Equal(got, wantFrom) {
+			t.Fatalf("From(%s, %d) = %q, consumed %d, %v; want %q, consumed %d",
+				compressed, offset, got, consumed, err, wantFrom, len(codexLines))
+		}
+	}
+	reading, err := new(Reader).Read(context.Background(), compressed, "cx", TextCap)
+	if err != nil || !reading.HasLast || Condensed(reading.Last) != want[3] || reading.Meta.ContextWindow != 272000 {
+		t.Fatalf("Reader.Read(%s) = %#v, %v; want the last entry %q", compressed, reading, err, want[3])
+	}
+}
+
+func condensedAll(entries []Entry) []string {
+	got := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		got = append(got, Condensed(entry))
+	}
+	return got
 }
 
 func TestReadMetaTakesTheLiveModelAndContext(t *testing.T) {

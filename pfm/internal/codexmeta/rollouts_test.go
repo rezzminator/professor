@@ -2,12 +2,72 @@ package codexmeta
 
 import (
 	"context"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 )
+
+// writeCompressed leaves content at path zstd-compressed, as Codex leaves a
+// finished rollout; path names the .zst file.
+func writeCompressed(t *testing.T, path, content string) {
+	t.Helper()
+	plain := strings.TrimSuffix(path, ".zst")
+	if err := os.MkdirAll(filepath.Dir(plain), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(plain, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := CompressRollout(plain); err != nil || got != path {
+		t.Fatalf("CompressRollout(%s) = %q, %v; want %q", plain, got, err, path)
+	}
+	if _, err := os.Stat(plain); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("plain file %s after CompressRollout: %v, want it removed", plain, err)
+	}
+}
+
+func TestWalkRolloutsFindsCompressedRolloutsAndPrefersThePlainTwin(t *testing.T) {
+	home := t.TempDir()
+	day := filepath.Join(home, SessionsDir, "2026", "09", "20")
+	meta := func(id string) string { return `{"type":"session_meta","payload":{"id":"` + id + `"}}` + "\n" }
+	compressed := filepath.Join(day, "rollout-2026-09-20T08-00-00-c.jsonl.zst")
+	writeCompressed(t, compressed, meta("c"))
+	plain := filepath.Join(day, "rollout-2026-09-20T08-00-00-a.jsonl")
+	writeCompressed(t, plain+".zst", meta("a-stale"))
+	if err := os.WriteFile(plain, []byte(meta("a")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeCompressed(t, filepath.Join(day, "notes.zst"), meta("n"))
+
+	rollouts, errs := WalkRollouts(context.Background(), home, SessionsDir)
+	if len(errs) != 0 {
+		t.Fatalf("errs = %v", errs)
+	}
+	var got []string
+	for _, rollout := range rollouts {
+		got = append(got, filepath.Base(rollout.Path))
+	}
+	want := []string{filepath.Base(plain), filepath.Base(compressed)}
+	if !slices.Equal(got, want) {
+		t.Fatalf("walk = %q, want %q (the plain twin wins, a non-rollout .zst is no rollout)", got, want)
+	}
+	header, err := ReadHeader(rollouts[1].Path)
+	if err != nil || header.ID != "c" {
+		t.Fatalf("ReadHeader(%s) = %q, %v; want the decompressed session_meta id c", rollouts[1].Path, header.ID, err)
+	}
+	if id := RolloutID(filepath.Base(rollouts[1].Path)); id != "c" {
+		t.Fatalf("RolloutID(%s) = %q, want c", rollouts[1].Path, id)
+	}
+	kept := PreferPlain([]string{plain + ".zst", plain, compressed})
+	if !slices.Equal(kept, []string{plain, compressed}) {
+		t.Fatalf("PreferPlain = %q, want %q", kept, []string{plain, compressed})
+	}
+}
 
 func TestWalkRolloutsListsEachSubtreeInOrderAndSkipsTheHome(t *testing.T) {
 	home := t.TempDir()
@@ -97,6 +157,8 @@ func TestParseRolloutName(t *testing.T) {
 		stamped, ok bool
 	}{
 		{"rollout-2026-09-20T08-30-05-019a-thread.jsonl", "019a-thread", time.Date(2026, 9, 20, 6, 30, 5, 0, time.UTC), true, true},
+		{"rollout-2026-09-20T08-30-05-019a-thread.jsonl.zst", "019a-thread", time.Date(2026, 9, 20, 6, 30, 5, 0, time.UTC), true, true},
+		{"rollout-2026-09-20T08-30-05-019a-thread.zst", "", time.Time{}, false, false},
 		{"rollout-2026-13-20T08-30-05-x.jsonl", "x", time.Time{}, false, true},
 		{"rollout-unusual.jsonl", "", time.Time{}, false, false},
 		{"rollout-2026-09-20T08-30-05-.jsonl", "", time.Time{}, false, false},
@@ -111,8 +173,11 @@ func TestParseRolloutName(t *testing.T) {
 
 func TestRolloutID(t *testing.T) {
 	for name, want := range map[string]string{
-		"rollout-2026-01-02T03-04-05-id.jsonl": "id",
-		"rollout-unusual.jsonl":                "unusual",
+		"rollout-2026-01-02T03-04-05-id.jsonl":     "id",
+		"rollout-2026-01-02T03-04-05-id.jsonl.zst": "id",
+		"rollout-unusual.jsonl":                    "unusual",
+		"rollout-unusual.jsonl.zst":                "unusual",
+		"rollout-odd.zst":                          "odd.zst",
 	} {
 		if got := RolloutID(name); got != want {
 			t.Fatalf("RolloutID(%q) = %q, want %q", name, got, want)

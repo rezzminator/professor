@@ -7,7 +7,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/codexmeta"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
@@ -168,30 +170,28 @@ func detectCodexThreadsInRootsFrom(
 }
 
 // CodexRolloutID returns the conversation id carried by a rollout path.
-// Empty means the process holds no recognisable Codex rollout. Keeping this
-// parser in gather makes the live-process observation the single source used
-// by both composition and persistent pane rebinding.
+// Empty means the process holds no recognisable Codex rollout. The name rule
+// is codexmeta's; gather keeps the held-rollout reading, so the live-process
+// observation is the single source used by both composition and persistent
+// pane rebinding.
 func CodexRolloutID(path string) string {
 	base := filepath.Base(path)
-	if filepath.Ext(base) != ".jsonl" {
+	if !heldRolloutName(base) {
 		return ""
 	}
-	stem := strings.TrimSuffix(base, ".jsonl")
-	rest, found := strings.CutPrefix(stem, "rollout-")
-	if !found {
-		return ""
-	}
-	if len(rest) > 20 &&
-		rest[4] == '-' &&
-		rest[7] == '-' &&
-		rest[10] == 'T' &&
-		rest[13] == '-' &&
-		rest[16] == '-' &&
-		rest[19] == '-' {
-		threadID, _, _ := strings.Cut(rest[20:], "_")
+	if id, _, _, ok := codexmeta.ParseRolloutName(base, time.UTC); ok {
+		threadID, _, _ := strings.Cut(id, "_")
 		return threadID
 	}
-	return rest
+	return codexmeta.RolloutID(base)
+}
+
+// heldRolloutName reports whether name is a rollout a live Codex process
+// holds: a plain one (codexmeta.IsRolloutName). Codex writes only the plain
+// file; a compressed one it opens is being decompressed for a resume and is
+// gone once that ends, so it names no rollout the process holds.
+func heldRolloutName(name string) bool {
+	return codexmeta.IsRolloutName(name) && !codexmeta.Compressed(name)
 }
 
 // CodexThreadID names the live conversation a detected Codex process owns.
@@ -271,8 +271,7 @@ func RefreshCodexHeldRollouts(proc ProcFS, previous []LiveCodex, roots []string)
 }
 
 func isRolloutUnder(root, target string) bool {
-	if !strings.HasPrefix(filepath.Base(target), "rollout-") ||
-		filepath.Ext(target) != ".jsonl" {
+	if !heldRolloutName(filepath.Base(target)) {
 		return false
 	}
 	relative, err := filepath.Rel(root, filepath.Clean(target))

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
+	"github.com/rezzminator/professor/pfm/internal/codexmeta"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
@@ -122,6 +123,44 @@ func TestReloadExplicitlyRejectsOpenCode(t *testing.T) {
 	}}, machine, pfmengine.OpenCode, "ses-fixture")
 	if err == nil || !strings.Contains(err.Error(), "OpenCode") {
 		t.Fatalf("SessionTranscript(OpenCode) error=%v, want product-level refusal", err)
+	}
+}
+
+// A Codex chat's rollout is found plain or compressed, as Codex leaves a
+// finished one, the plain twin winning beside its compressed copy; a reload
+// that missed it would start the chat fresh instead of resuming it.
+func TestSessionTranscriptFindsACompressedCodexRollout(t *testing.T) {
+	home := t.TempDir()
+	day := filepath.Join(home, "sessions", "2026", "09", "23")
+	if err := os.MkdirAll(day, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	write := func(name string) string {
+		path := filepath.Join(day, name)
+		if err := os.WriteFile(path, []byte("{}\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	compress := func(path string) string {
+		compressed, err := codexmeta.CompressRollout(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return compressed
+	}
+	plain := write("rollout-2026-09-23T12-07-24-plain-thread.jsonl")
+	finished := compress(write("rollout-2026-09-23T12-07-24-finished-thread.jsonl"))
+	compress(write("rollout-2026-09-23T12-07-24-twin-thread.jsonl"))
+	twin := write("rollout-2026-09-23T12-07-24-twin-thread.jsonl")
+	machine := pfmconfig.Config{CodexAccounts: []pfmconfig.CodexAccount{{ID: 1, Home: home}}}
+	for _, row := range []struct{ id, want string }{
+		{"plain-thread", plain}, {"finished-thread", finished}, {"twin-thread", twin}, {"absent-thread", ""},
+	} {
+		got, err := SessionTranscript(paths.Values{}, machine, pfmengine.Codex, row.id)
+		if err != nil || got != row.want {
+			t.Errorf("SessionTranscript(codex, %s) = %q, %v; want %q", row.id, got, err, row.want)
+		}
 	}
 }
 

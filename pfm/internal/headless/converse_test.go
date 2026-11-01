@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/codexmeta"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
@@ -449,6 +450,53 @@ func TestAwaitReadsOneTranscriptOnceThroughTwoSpellings(t *testing.T) {
 	}
 	if turn.Answer != "the answer" {
 		t.Fatalf("Answer = %q, want %q", turn.Answer, "the answer")
+	}
+}
+
+// TestAwaitKeepsTheFrontierAcrossARolloutDecompressedToResume: a finished
+// Codex chat's rollout is compressed; the frontier is taken there, and Codex
+// decompresses it to its plain twin before it writes the turn. The twin holds
+// the history at the same offsets, so reading it from the top would count
+// every old question as somebody else's.
+func TestAwaitKeepsTheFrontierAcrossARolloutDecompressedToResume(t *testing.T) {
+	talk := newConversation(t)
+	talk.say(user("an old question"), assistant("an old answer"), user("another old question"), assistant("done"))
+	compressed, err := codexmeta.CompressRollout(talk.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	asked := talk.chat
+	asked.Path = compressed
+	frontier, err := Frontier(asked)
+	if err != nil {
+		t.Fatalf("Frontier(%s) error = %v", compressed, err)
+	}
+	calls := 0
+	resolve := func(ctx context.Context) (Chat, bool, error) {
+		chat, found, err := talk.resolve(ctx)
+		if calls == 0 {
+			chat.Path = compressed
+		}
+		calls++
+		return chat, found, err
+	}
+	if _, err := codexmeta.DecompressRollout(compressed); err != nil {
+		t.Fatal(err)
+	}
+	talk.say(user("my question"))
+	go func() {
+		time.Sleep(40 * time.Millisecond)
+		talk.say(assistant("the answer"))
+	}()
+	options := fastOptions()
+	options.Offset = frontier
+	turn, err := Await(context.Background(), resolve, options)
+	if err != nil {
+		t.Fatalf("Await() error = %v", err)
+	}
+	if calls < 2 || turn.Superseded || turn.Answer != "the answer" {
+		t.Fatalf("Await() after %d resolves = superseded %t, answer %q; want one question answered %q",
+			calls, turn.Superseded, turn.Answer, "the answer")
 	}
 }
 

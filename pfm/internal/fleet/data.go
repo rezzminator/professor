@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/codexmeta"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
@@ -184,23 +185,12 @@ func loadChain(ctx context.Context, database *store.Store, data *Data, loaded ma
 }
 
 // rolloutIDFromPath strips a rollout file name down to its thread id:
-// rollout-2026-01-02T03-04-05-<id>.jsonl → <id>.
+// rollout-2026-01-02T03-04-05-<id>.jsonl → <id> (codexmeta.RolloutID).
 // An empty path — a rollout-less Codex process, the normal shape since Codex
 // 0.146.1 — has no id; filepath.Base would answer ".".
 func rolloutIDFromPath(path string) string {
 	if path == "" {
 		return ""
 	}
-	stem := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
-	rest := strings.TrimPrefix(stem, "rollout-")
-	if len(rest) > 20 &&
-		rest[4] == '-' &&
-		rest[7] == '-' &&
-		rest[10] == 'T' &&
-		rest[13] == '-' &&
-		rest[16] == '-' &&
-		rest[19] == '-' {
-		return rest[20:]
-	}
-	return rest
+	return codexmeta.RolloutID(filepath.Base(path))
 }

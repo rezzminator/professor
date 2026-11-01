@@ -3,8 +3,10 @@ package mockengine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -769,11 +771,35 @@ func TestCodexRolloutHandleLivesForTheSession(t *testing.T) {
 		ctx: context.Background(), engine: engineCodex, env: fix.env(nil), cwd: fix.work,
 		pid: os.Getpid(), stderr: io.Discard, script: newScript(Scenario{}, engineCodex),
 	}
-	for _, resumed := range []bool{false, true} {
-		t.Run(fmt.Sprintf("resumed=%t", resumed), func(t *testing.T) {
+	var first string
+	for _, testCase := range []struct {
+		name              string
+		resumed, compress bool
+	}{{"fresh", false, false}, {"resumed", true, false}, {"resumed from a compressed rollout", true, true}} {
+		resumed := testCase.resumed
+		t.Run(testCase.name, func(t *testing.T) {
+			if testCase.compress {
+				if _, err := codexmeta.CompressRollout(first); err != nil {
+					t.Fatal(err)
+				}
+			}
 			session := &codexSession{proc: proc, codexHome: fix.codexHome, threadID: fixtureThread, model: "fixture"}
 			if err := session.start(resumed); err != nil {
 				t.Fatal(err)
+			}
+			if first == "" {
+				first = session.rollout
+			}
+			if session.rollout != first {
+				t.Fatalf("rollout = %s, want the thread's first rollout %s", session.rollout, first)
+			}
+			if testCase.compress {
+				if content := readFile(t, first); strings.Count(content, `"type":"session_meta"`) != 1 {
+					t.Fatalf("resume of a compressed rollout did not decompress it in place: %s", content)
+				}
+				if _, err := os.Stat(first + ".zst"); !errors.Is(err, fs.ErrNotExist) {
+					t.Fatalf("compressed rollout %s.zst after resume: %v, want it removed", first, err)
+				}
 			}
 			t.Cleanup(func() {
 				if err := session.finish("other"); err != nil {

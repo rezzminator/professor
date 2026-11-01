@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/workbench"
@@ -58,7 +59,7 @@ func TestHeadlessForkWorkbench(t *testing.T) {
 			want := "'--resume' 'thread-123'"
 			words := []string{
 				"'--fork-session'",
-				"'--system-prompt-file' " + Quote(request.Persona.Prompt),
+				"'--system-prompt-file' " + cmdparse.Quote(request.Persona.Prompt),
 				"'--effort' 'xhigh'",
 				"'--model' 'opus'",
 			}

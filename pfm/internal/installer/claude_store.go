@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"syscall"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
@@ -76,11 +75,13 @@ var AccountEntries = []string{
 // (chrome, dev-mods, keybindings), and engine-sync's machine policy
 // (engine-sync.json), which pfm install renders into the store itself and no
 // account directory carries: engine-sync reads it from $HOME/.claude whatever
-// CLAUDE_CONFIG_DIR says.
+// CLAUDE_CONFIG_DIR says. The ponytail plugin keeps its mode and band state
+// per config dir (.ponytail-*, ponytail-modes): plugin runtime, not identity.
 var IgnoredEntries = []string{
 	"ide", ".cc-new-children", ".cc-pane-children", claudeLocalSettingsName,
 	"debug", "daemon.lock", "daemon.status.json", ".claude.json.lock", "tmp",
 	"chrome", "dev-mods", "keybindings.json", "hooks", "engine-sync.json",
+	".ponytail-active", ".ponytail-band", ".ponytail-statusline-nudged", "ponytail-modes",
 }
 
 // EntryClass classifies a top-level Claude entry.
@@ -290,18 +291,14 @@ func (installer *engine) wireClaudeStore() error {
 	}
 	for _, account := range accounts {
 		accountErr := func() (returnErr error) {
-			var guard *gather.AccountGuard
-			if installer.apply {
-				var err error
-				guard, err = gather.AcquireAccountGuard(account.Dir, false)
-				if errors.Is(err, syscall.EWOULDBLOCK) {
-					installer.skip("account " + account.Dir + " is starting a chat; rerun pfm install --yes")
-					return nil
-				}
-				if err != nil {
-					return err
-				}
-				defer func() { returnErr = errors.Join(returnErr, guard.Close()) }()
+			chats, err := installer.openAccountChats(account.Dir, true)
+			if err != nil {
+				return err
+			}
+			defer func() { returnErr = errors.Join(returnErr, chats.release()) }()
+			if chats.starting {
+				installer.skip(startingChat(account.Dir))
+				return nil
 			}
 			var live []string
 			liveRead := false
@@ -339,18 +336,9 @@ func (installer *engine) wireClaudeStore() error {
 				case stateElsewhere:
 					if !liveRead {
 						var err error
-						live, err = liveChatPIDs(installer.options.ProcRoot, account.Dir)
+						live, err = chats.live()
 						if err != nil {
 							return fmt.Errorf("read live chats in %s: %w", account.Dir, err)
-						}
-						if guard != nil {
-							claims, claimErr := guard.Active(gather.NewProcFS(installer.options.ProcRoot))
-							if claimErr != nil {
-								return claimErr
-							}
-							for _, pid := range claims {
-								live = append(live, fmt.Sprint(pid))
-							}
 						}
 						liveRead = true
 					}

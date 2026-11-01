@@ -5,6 +5,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/action"
 	"github.com/rezzminator/professor/pfm/internal/ask"
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/index"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
@@ -33,9 +34,8 @@ func (Launcher) ComposerReady(string) bool { return true }
 // (cmd/pfm/chat_name_confirm.go).
 func (Launcher) Rename(
 	context.Context,
-	spawn.Tmux,
-	string,
-	string,
+	pfmcall.Screen,
+	pfmcall.Target,
 	string,
 	spawn.Timings,
 	spawn.Trace,

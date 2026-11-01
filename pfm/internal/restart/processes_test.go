@@ -330,11 +330,14 @@ type daemonRaceKernel struct {
 	executableErrors  map[int]error
 	environmentErrors map[int]error
 	emptyEnvironments map[int]bool
-	executablePaths   map[int]string
-	configPaths       map[int]string
-	identityCalls     int
-	executableCalls   int
-	environmentCalls  int
+	// partialEnvironments read back without PFM_CONFIG, as a torn read of an
+	// exiting process's /proc/{pid}/environ can.
+	partialEnvironments map[int]bool
+	executablePaths     map[int]string
+	configPaths         map[int]string
+	identityCalls       int
+	executableCalls     int
+	environmentCalls    int
 }
 
 func (kernel *daemonRaceKernel) ProcessIdentity(pid int) (gather.ProcessIdentity, error) {
@@ -365,6 +368,9 @@ func (kernel *daemonRaceKernel) Environ(pid int) (map[string]string, error) {
 		// An exiting process's /proc/{pid}/environ reads empty, without an error.
 		return map[string]string{}, nil
 	}
+	if kernel.partialEnvironments[kernel.environmentCalls] {
+		return map[string]string{"HOME": "/nonexistent/partial-home"}, nil
+	}
 	if path, ok := kernel.configPaths[kernel.environmentCalls]; ok {
 		return map[string]string{"PFM_CONFIG": path}, nil
 	}
@@ -373,19 +379,20 @@ func (kernel *daemonRaceKernel) Environ(pid int) (map[string]string, error) {
 
 func TestConvergeMCPDaemonExitRacesPreserveLiveFailures(t *testing.T) {
 	for _, tc := range []struct {
-		name              string
-		identities        map[int]daemonRaceIdentity
-		executableErrors  map[int]error
-		environmentErrors map[int]error
-		emptyEnvironments map[int]bool
-		executablePaths   map[int]string
-		configPaths       map[int]string
-		recycle           bool
-		stubborn          bool
-		enabled           bool
-		wantSignals       []string
-		starts            int
-		wantErr           string
+		name                string
+		identities          map[int]daemonRaceIdentity
+		executableErrors    map[int]error
+		environmentErrors   map[int]error
+		emptyEnvironments   map[int]bool
+		partialEnvironments map[int]bool
+		executablePaths     map[int]string
+		configPaths         map[int]string
+		recycle             bool
+		stubborn            bool
+		enabled             bool
+		wantSignals         []string
+		starts              int
+		wantErr             string
 	}{
 		{name: "owned snapshot exits before stop still restarts", enabled: true, starts: 1, identities: map[int]daemonRaceIdentity{3: {err: syscall.ESRCH}}},
 		{name: "post TERM zombie restarts enabled chat", stubborn: true, enabled: true, starts: 1, wantSignals: []string{"29 terminated"}, identities: map[int]daemonRaceIdentity{5: {identity: gather.ProcessIdentity{Zombie: true}}}},
@@ -400,6 +407,8 @@ func TestConvergeMCPDaemonExitRacesPreserveLiveFailures(t *testing.T) {
 		{name: "environment missing during verify after exit", environmentErrors: map[int]error{2: fs.ErrNotExist}, identities: map[int]daemonRaceIdentity{4: {err: syscall.ESRCH}}},
 		{name: "environment empty during verify after exit", emptyEnvironments: map[int]bool{2: true}, identities: map[int]daemonRaceIdentity{4: {err: syscall.ESRCH}}},
 		{name: "transient empty environment recovers", emptyEnvironments: map[int]bool{2: true}, wantSignals: []string{"29 terminated"}},
+		{name: "environment partial during verify after exit", partialEnvironments: map[int]bool{2: true}, identities: map[int]daemonRaceIdentity{4: {err: syscall.ESRCH}}},
+		{name: "transient partial environment recovers", partialEnvironments: map[int]bool{2: true}, wantSignals: []string{"29 terminated"}},
 		{name: "transient executable missing recovers", executableErrors: map[int]error{2: fs.ErrNotExist}, wantSignals: []string{"29 terminated"}},
 		{name: "transient environment missing recovers", environmentErrors: map[int]error{2: fs.ErrNotExist}, wantSignals: []string{"29 terminated"}},
 		{name: "identity permission remains error", identities: map[int]daemonRaceIdentity{3: {err: fs.ErrPermission}}, wantErr: "permission"},
@@ -419,12 +428,13 @@ func TestConvergeMCPDaemonExitRacesPreserveLiveFailures(t *testing.T) {
 					configPath: "/fixture/config",
 					recycle:    tc.recycle,
 				},
-				identities:        tc.identities,
-				executableErrors:  tc.executableErrors,
-				environmentErrors: tc.environmentErrors,
-				emptyEnvironments: tc.emptyEnvironments,
-				executablePaths:   tc.executablePaths,
-				configPaths:       tc.configPaths,
+				identities:          tc.identities,
+				executableErrors:    tc.executableErrors,
+				environmentErrors:   tc.environmentErrors,
+				emptyEnvironments:   tc.emptyEnvironments,
+				partialEnvironments: tc.partialEnvironments,
+				executablePaths:     tc.executablePaths,
+				configPaths:         tc.configPaths,
 			}
 			runner := &hostRunner{}
 			dependencies := testDeps(t, runner, kernel.fakeKernel, &fakeFleet{})

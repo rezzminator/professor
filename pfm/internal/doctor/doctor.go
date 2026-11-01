@@ -278,18 +278,22 @@ func Run(
 	)
 	pluginBuild.Plugins = runtime.Config.ExtensionClaudePlugins()
 	claudeEnv := runtime.Config.ExtensionClaudeEnv(dependencies.Env, resolved.Home)
+	claudeEnvDir := primary.ConfigDir
+	if len(runtime.Config.Accounts) == 0 || claudeEnvDir == "" {
+		claudeEnvDir = filepath.Join(resolved.Home, ".claude")
+	}
 	printClaudePluginsDoctor(
 		stdout,
 		claudeStore,
 		installer.ClaudePluginEnvironment(dependencies.Env, claudeEnv),
 		pluginBuild,
+		installer.PluginChats{
+			ProcRoot: resolved.ProcRoot,
+			Dirs:     append([]string{claudeEnvDir}, runtime.Config.ClaudeConfigDirs()...),
+		},
 		tally,
 	)
 	printEngineSyncHookDoctor(stdout, pluginBuild.Plugins, pluginBuild.PluginsDefault, tally)
-	claudeEnvDir := primary.ConfigDir
-	if len(runtime.Config.Accounts) == 0 || claudeEnvDir == "" {
-		claudeEnvDir = filepath.Join(resolved.Home, ".claude")
-	}
 	printManagedPluginLogsDoctor(
 		stdout, append([]string{claudeStore}, runtime.Config.ClaudeConfigDirs()...), pluginBuild,
 		installer.ManagedRoot(resolved.Home), filepath.Join(claudeEnvDir, "settings.json"), tally,

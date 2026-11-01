@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
@@ -29,7 +30,7 @@ func TestSynthesizeNewOpenCodeLaunchesFreshConfiguredSeat(t *testing.T) {
 	if plan.Route != NewOpenCode {
 		t.Fatalf("route = %v, want %v", plan.Route, NewOpenCode)
 	}
-	if !strings.Contains(plan.Run, Quote(machine.OpenCode.Binary)) || strings.Contains(plan.Run, "--session") {
+	if !strings.Contains(plan.Run, cmdparse.Quote(machine.OpenCode.Binary)) || strings.Contains(plan.Run, "--session") {
 		t.Fatalf("fresh OpenCode run = %q", plan.Run)
 	}
 	if !strings.HasPrefix(plan.Run, opencodeHygiene+" ") || !strings.Contains(plan.Run, " -u CLAUDE_CODE_SSE_PORT ") {
@@ -194,7 +195,7 @@ func TestOpenLiveOpenCodeAttachesAndDemotesToItsOwnResume(t *testing.T) {
 			OpenCode:         pfmconfig.OpenCode{Binary: "opencode"},
 		},
 	}
-	line, err := executor.Open(context.Background(), request)
+	line, err := openLine(executor, context.Background(), request)
 	if err != nil {
 		t.Fatalf("open live OpenCode: %v", err)
 	}
@@ -203,7 +204,7 @@ func TestOpenLiveOpenCodeAttachesAndDemotesToItsOwnResume(t *testing.T) {
 	}
 
 	request.Row.Socket = "ox-404-1-1"
-	line, err = executor.Open(context.Background(), request)
+	line, err = openLine(executor, context.Background(), request)
 	if err != nil {
 		t.Fatalf("open dead OpenCode socket: %v", err)
 	}

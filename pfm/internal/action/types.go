@@ -7,8 +7,8 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
-	"github.com/rezzminator/professor/pfm/internal/place"
-	"github.com/rezzminator/professor/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
@@ -55,6 +55,33 @@ type Request struct {
 	FreshSocket    string
 	CurrentTMUX    string
 	Config         pfmconfig.Config
+	// Detached opens for a caller with no terminal (the MCP daemon, a
+	// schedule's wake): no eval line, no attach, never a birth in place.
+	Detached bool
+}
+
+// OpenResult is what Executor.Open hands back: the eval line a terminal
+// caller dispatches, and for a caller with no terminal the chat's display
+// name, the socket it now lives on, and whether it was already live or was
+// just started.
+type OpenResult struct {
+	// Line is the sole eval line of an interactive open; empty for a
+	// detached one, and for a self-switch by design.
+	Line   string
+	Name   string
+	Socket string
+	State  string
+	// Detail is one sentence about how the chat was opened that the caller
+	// could not otherwise see: where a Herdr birth lives, or that a resumable
+	// row whose recorded directory has disappeared was opened somewhere else
+	// instead (written by whoever prepared the Request, who knows the
+	// substitution was made). A caller with no terminal never looks at the
+	// chat it started, so a difference like that rides back in the result.
+	Detail string
+	// Warnings are what a detached caller must be told about the chat it
+	// opened: it opened anyway. They ride the result because the caller has
+	// no terminal to print them on.
+	Warnings []string
 }
 
 // ChatServer is a detached server that must exist before its attach line is
@@ -102,14 +129,14 @@ type ActionPane struct {
 // TmuxClient contains only action mutations and prerequisite probes.
 type TmuxClient interface {
 	ListPanes(ctx context.Context, socket string) ([]ActionPane, error)
-	SocketAlive(ctx context.Context, socket string) bool
+	ServerState(ctx context.Context, socket string) (gather.ServerState, error)
 	KillPane(ctx context.Context, socket, paneID string) error
 	KillServer(ctx context.Context, socket string) error
 	SetWindowSizeLatest(ctx context.Context, socket string) error
 	SelectWindow(ctx context.Context, socket string, windowIndex int) error
 	CreateChatServer(ctx context.Context, server ChatServer) error
 	// LaunchPane reads a freshly created server's pane for the launch watch.
-	// An error is a pane that could not be read; SocketAlive tells a gone
+	// An error is a pane that could not be read; ServerState tells a gone
 	// server from an unreadable pane.
 	LaunchPane(ctx context.Context, socket string) (LaunchPaneState, error)
 	// SetRemainOnExit keeps (on) or releases (off) the pane of a server's
@@ -162,7 +189,10 @@ type CommandRunner interface {
 
 // Dependencies replace every effect boundary in jailed tests.
 type Dependencies struct {
-	Identify  func(context.Context) (resolve.Identity, error)
+	// Place is the request's one placement of a birth (chat's placeChat):
+	// door names the asking door, requested the configured chat.backend. A
+	// nil Place births every chat in tmux.
+	Place     func(ctx context.Context, door, requested string) (spawn.BackendChoice, error)
 	Tmux      TmuxClient
 	Processes ProcessTable
 	Gate      Gate
@@ -174,9 +204,6 @@ type Dependencies struct {
 	// repair reads Codex's own SQLite stores, and action must stay free of
 	// the store layer. A nil Heal simply skips the check.
 	Heal HealFunc
-	// HerdrPlaces scans the fleet a Herdr new tab files its chat under
-	// (chat.HerdrPlaces); spawn.SpawnHerdr refuses a birth without it.
-	HerdrPlaces func(context.Context) (*place.Fleet, error)
 }
 
 // HealFunc is the pre-resume Codex projection repair.
@@ -185,7 +212,7 @@ type HealFunc func(ctx context.Context, threadID string) string
 // Executor performs preparations and returns the only line the caller may
 // write to stdout.
 type Executor struct {
-	identify  func(context.Context) (resolve.Identity, error)
+	place     func(ctx context.Context, door, requested string) (spawn.BackendChoice, error)
 	tmux      TmuxClient
 	processes ProcessTable
 	gate      Gate
@@ -193,5 +220,4 @@ type Executor struct {
 	stderr    io.Writer
 	sidDir    string
 	heal      HealFunc
-	places    func(context.Context) (*place.Fleet, error)
 }

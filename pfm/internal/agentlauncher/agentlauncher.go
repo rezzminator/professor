@@ -17,10 +17,10 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 	"syscall"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -37,7 +37,7 @@ func ExecTarget(home string) string { return filepath.Join(home, ".local", "bin"
 // Content is the launcher's bytes for the pfm at pfm. The path is single-quoted
 // for sh, so no character in it is ever interpreted.
 func Content(pfm string) []byte {
-	quoted := "'" + strings.ReplaceAll(pfm, "'", `'\''`) + "'"
+	quoted := cmdparse.Quote(pfm)
 	return []byte("#!/bin/sh\n" +
 		"# Stable launchd entry for pfm's LaunchAgents (written by pfm install, never edited).\n" +
 		"# It execs pfm so launchd keeps one pid, while Background Task Management sees\n" +

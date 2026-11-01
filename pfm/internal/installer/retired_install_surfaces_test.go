@@ -8,13 +8,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 func TestStagedManagedSurfacesRetirement(t *testing.T) {
 	for _, scenario := range []string{
 		"shim", "no live chat", "dry run", "re-pinned baseline", "operator file", "live chat", "read fails",
-		"uninstall both", "renamed prompt lint",
+		"starting chat", "uninstall both", "renamed prompt lint",
 	} {
 		t.Run(scenario, func(t *testing.T) {
 			home := t.TempDir()
@@ -34,6 +35,9 @@ func TestStagedManagedSurfacesRetirement(t *testing.T) {
 				writeFixture(t, shim, "old\n")
 				wants = []string{"  change  retire " + shim + " (retired staged shim)\n"}
 			case "no live chat", "dry run":
+				if err := os.MkdirAll(account, 0o700); err != nil {
+					t.Fatal(err)
+				}
 				for _, relative := range staged {
 					writeFixture(t, filepath.Join(prompts, filepath.FromSlash(relative)), "old\n")
 				}
@@ -73,8 +77,29 @@ func TestStagedManagedSurfacesRetirement(t *testing.T) {
 					t.Fatal(err)
 				}
 				wants = []string{
-					"  skip    keep " + prompts + ": live Claude chats 4242 in " + account +
-						" may still read it — rerun pfm install --yes once they close\n",
+					"  skip    account " + account + " has live chats; close them and rerun pfm install --yes\n",
+					"  skip    keep " + prompts + ": account " + account +
+						" has live chats; close them and rerun pfm install --yes\n",
+				}
+				keep = true
+			case "starting chat":
+				// A launching chat holds the account guard: the door defers rather than race it.
+				writeFixture(t, filepath.Join(prompts, "claude.md"), "old prompt\n")
+				if err := os.MkdirAll(account, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				guard, err := gather.AcquireAccountGuard(account, false)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() {
+					if err := guard.Close(); err != nil {
+						t.Error(err)
+					}
+				})
+				wants = []string{
+					"  skip    account " + account + " is starting a chat; rerun pfm install --yes\n",
+					"  skip    keep " + prompts + ": account " + account + " is starting a chat; rerun pfm install --yes\n",
 				}
 				keep = true
 			case "uninstall both":
@@ -103,7 +128,9 @@ func TestStagedManagedSurfacesRetirement(t *testing.T) {
 				writeFixture(t, filepath.Join(prompts, "claude.md"), "old prompt\n")
 				writeFixture(t, filepath.Join(account, "sessions"), "not a directory")
 				_, readErr := os.ReadDir(filepath.Join(account, "sessions"))
-				wants = []string{"  skip    keep " + prompts + ": " + readErr.Error() + "\n"}
+				wants = []string{
+					"  skip    keep " + prompts + ": read live chats in " + account + ": " + readErr.Error() + "\n",
+				}
 				keep = true
 			}
 			var output bytes.Buffer
@@ -152,6 +179,16 @@ func TestStagedManagedSurfacesRetirement(t *testing.T) {
 			default:
 				requireNoPath(t, prompts, "staged prompts remain")
 			}
+			if scenario == "no live chat" {
+				// The door's guard is released once retirement is done.
+				guard, err := gather.AcquireAccountGuard(account, false)
+				if err != nil {
+					t.Fatalf("account guard still held after retirement: %v", err)
+				}
+				if err := guard.Close(); err != nil {
+					t.Fatal(err)
+				}
+			}
 			if scenario == "shim" || scenario == "uninstall both" {
 				requireNoPath(t, shim, "staged shim remains")
 				requireNoPath(t, filepath.Dir(shim), "staged shim directory remains")
@@ -177,8 +214,8 @@ func TestStagedRetirementChecksEachAccount(t *testing.T) {
 				if err := os.MkdirAll(filepath.Join(proc, "4242"), 0o700); err != nil {
 					t.Fatal(err)
 				}
-				want.WriteString("  skip    keep " + prompts + ": live Claude chats 4242 in " + account +
-					" may still read it — rerun pfm install --yes once they close\n")
+				wait := "account " + account + " has live chats; close them and rerun pfm install --yes\n"
+				want.WriteString("  skip    " + wait + "  skip    keep " + prompts + ": " + wait)
 			}
 			roster := accounts
 			if fallback {
@@ -207,4 +244,40 @@ func TestStagedRetirementChecksEachAccount(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestStagedRetirementAsksAnAliasedAccountOnce pins the staged prompts' entry
+// into liveChatAccounts: a roster naming one account by two paths takes its
+// guard once, so the second path never reads as a starting chat.
+func TestStagedRetirementAsksAnAliasedAccountOnce(t *testing.T) {
+	home := t.TempDir()
+	prompts := paths.LegacyHarnessPromptsDir(home)
+	writeFixture(t, filepath.Join(prompts, "claude.md"), "old prompt\n")
+	account := filepath.Join(home, "acct1")
+	if err := os.MkdirAll(account, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(home, "acct1-alias")
+	if err := os.Symlink(account, alias); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	installer := &engine{
+		options: Options{
+			Home:             home,
+			ConfigDir:        account,
+			RosterConfigDirs: []string{account, alias},
+			ProcRoot:         emptyProcRoot(t, home),
+			Stdout:           &output,
+		},
+		apply:       true,
+		managedRoot: managedRootForHome(home),
+	}
+	if err := installer.retireStagedManagedSurfaces(false); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(output.String(), "keep "+prompts) {
+		t.Fatalf("output=%q: an aliased account held the prompts", output.String())
+	}
+	requireNoPath(t, filepath.Join(prompts, "claude.md"), "staged prompt remains")
 }

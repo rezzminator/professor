@@ -1,6 +1,7 @@
 package spawn
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -28,6 +29,18 @@ type HerdrRequest struct {
 	Seat   fleetdb.Seat
 	Run    fleetdb.SeatRun
 	Paths  paths.Values
+	// Launch is the birth's launch record, written once the seat is reserved.
+	Launch *fleetdb.Launch
+	// Comms is the spawn event the comms ledger records once the chat's pane
+	// is known; the receiver is filled in here.
+	Comms *fleetdb.CommsEvent
+	// Replaces is the dead seat a revive replaces, retired once the new seat
+	// exists (RetireHerdrSeat).
+	Replaces *fleetdb.Seat
+	// TabName and UserNamed label an in-place birth's tab: TabName, else the
+	// seat's name, a user's choice only when UserNamed.
+	TabName   string
+	UserNamed bool
 }
 
 type HerdrResult struct {
@@ -40,21 +53,59 @@ type HerdrResult struct {
 
 var nativeSeatID = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
-// PrepareHerdr reserves a durable seat in the current bare pane for a launcher
-// or restoration; the seat stays in the caller's pane and workspace, and
-// places nothing.
+// PrepareHerdr is the one in-place Herdr birth: it reserves a durable seat in
+// the caller's own bare pane (the seat store refuses a pane another seat
+// holds) for a launcher, a picker or a restored birth; the seat stays in the
+// caller's pane and workspace, places nothing, and labels its tab. Its Eval is
+// the shell line that execs the seat host in that pane.
 func PrepareHerdr(ctx context.Context, request HerdrRequest) (result HerdrResult, returnErr error) {
-	return reserveHerdr(ctx, request, request.Choice.HerdrPane)
+	choice := request.Choice
+	if choice.HerdrPane == "" || choice.HerdrWorkspace == "" {
+		return result, errors.New("an in-place native seat requires the caller's Herdr pane and workspace")
+	}
+	result, err := reserveHerdr(ctx, request, choice.HerdrPane)
+	if err != nil {
+		return result, err
+	}
+	label := BirthTabLabel(cmp.Or(request.TabName, request.Seat.Name), request.Run.CWD)
+	if err := herdr.LabelPaneTab(ctx, choice.HerdrSocket, choice.HerdrPane, label, request.UserNamed); err != nil &&
+		!errors.Is(err, herdr.ErrTabNotSole) {
+		// The birth proceeds: the tab keeps its label until the chat's name reaches it.
+		result.Warnings = append(result.Warnings,
+			fmt.Sprintf("Herdr tab of pane %s keeps its label: %v", choice.HerdrPane, err))
+	}
+	result.Warnings = append(result.Warnings, recordHerdrBirth(ctx, request, result.Seat)...)
+	return result, nil
 }
 
+// recordHerdrBirth writes a birth's launch record and comms event, each a
+// warning when it cannot be written: the chat exists either way.
+func recordHerdrBirth(ctx context.Context, request HerdrRequest, seat fleetdb.Seat) (warnings []string) {
+	if request.Launch != nil {
+		if err := fleetdb.RecordLaunch(ctx, request.Paths, *request.Launch, clock.Real.Now().Unix()); err != nil {
+			warnings = append(warnings, fmt.Sprintf("record launch %s: %v", request.Launch.SessionID, err))
+		}
+	}
+	if request.Comms != nil {
+		event := *request.Comms
+		event.ReceiverSocket, event.ReceiverPane = seat.HerdrSocket, seat.HerdrPane
+		state := fleetdb.OpenSharedState(ctx, request.Paths)
+		if err := errors.Join(state.RecordComms(ctx, event), state.Close()); err != nil {
+			warnings = append(warnings, fmt.Sprintf("native seat is starting; comms ledger: %v", err))
+		}
+	}
+	return warnings
+}
+
+// reserveHerdr writes the seat row and recipe of a birth on a verified Herdr
+// socket: in pane for an in-place birth, with no pane yet for a new tab.
 func reserveHerdr(ctx context.Context, request HerdrRequest, pane string) (result HerdrResult, returnErr error) {
 	if err := naming.ValidateLabel(request.Seat.Name); err != nil {
 		return result, err
 	}
 	choice := request.Choice
-	if choice.Backend != BackendHerdr || !filepath.IsAbs(choice.HerdrSocket) || choice.HerdrWorkspace == "" ||
-		choice.HerdrPane == "" {
-		return result, errors.New("native seat requires a verified Herdr backend, socket, pane and workspace")
+	if choice.Backend != BackendHerdr || !filepath.IsAbs(choice.HerdrSocket) {
+		return result, errors.New("native seat requires a verified Herdr backend and socket")
 	}
 	descriptor, err := pfmengine.Lookup(pfmengine.ID(request.Seat.Engine))
 	if err != nil {
@@ -122,6 +173,11 @@ func reserveHerdr(ctx context.Context, request HerdrRequest, pane string) (resul
 	return HerdrResult{Seat: seat, Eval: "exec pfm internal seat-host " + seat.SeatID}, nil
 }
 
+// HerdrLocation is the one sentence that says where a native chat lives.
+func HerdrLocation(seat fleetdb.Seat) string {
+	return strings.TrimSpace(fmt.Sprintf("%s lives in Herdr pane %s (%s)", seat.Name, seat.HerdrPane, seat.HerdrSocket))
+}
+
 // BirthTabLabel is the label a chat's tab is born with, never empty: the
 // chat's name, else the base name of its working directory (the project
 // folder an unnamed chat runs in), each as Herdr would show it.
@@ -135,9 +191,11 @@ func BirthTabLabel(name, cwd string) string {
 	return folder
 }
 
-// SpawnHerdr creates one unfocused tab in the workspace of the chat's place
-// (place.Fleet.Of its cwd), creating that workspace when the place has none,
-// after moving every other misplaced running chat on the socket into its own.
+// SpawnHerdr is the one Herdr birth of a new tab: it creates one unfocused tab
+// in the workspace of the chat's place (place.Fleet.Of its cwd), creating that
+// workspace when the place has none, after moving every other misplaced
+// running chat on the socket into its own; then it records the birth and
+// retires the seat it replaces.
 func SpawnHerdr(ctx context.Context, request HerdrRequest) (result HerdrResult, returnErr error) {
 	if request.Choice.Places == nil {
 		return result, errors.New("herdr birth has no fleet places to file the chat under")
@@ -222,5 +280,16 @@ func SpawnHerdr(ctx context.Context, request HerdrRequest) (result HerdrResult, 
 		return result, fmt.Errorf("herdr pane %s exists; persist address: %w", seat.HerdrPane, err)
 	}
 	result.Seat = seat
+	result.Warnings = append(result.Warnings, recordHerdrBirth(ctx, request, seat)...)
+	if request.Replaces != nil {
+		warning, err := RetireHerdrSeat(ctx, request.Paths, *request.Replaces)
+		if warning != "" {
+			result.Warnings = append(result.Warnings, warning)
+		}
+		if err != nil {
+			// The chat lives in its new pane: a retire that fails is a warning, never a failed revive.
+			result.Warnings = append(result.Warnings, fmt.Sprintf("new native pane %s exists: %v", seat.HerdrPane, err))
+		}
+	}
 	return result, nil
 }

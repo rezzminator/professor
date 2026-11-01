@@ -12,19 +12,147 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
 // A plugin of ours installed as {name}@{name} (its own GitHub marketplace) or
 // {name}@{name}-dev (the -alpha copy in the pfm-owned directory marketplace
 // ~/.local/share/{name}-dev) before every build installed it as
-// {name}@professor. Once {name}@professor is installed, pfm install moves each
-// legacy id to it: its pluginConfigs carried first (planLegacyCopyRetirement),
+// {name}@professor, or under a former name (FormerNames). Once
+// {name}@professor is installed, pfm install moves each legacy id to it: its pluginConfigs carried first (planLegacyCopyRetirement),
 // since an uninstall deletes them, then every install record uninstalled with
 // its data kept, a project or local one installed as {name}@professor in its
 // project first; then each legacy marketplace pfm owns with nothing left
 // installed from it removed, the -dev directory deleted, and every legacy key
-// left in settings.json dropped (planLegacySettingsSweep).
+// left in settings.json dropped (planLegacySettingsSweep); a former name's
+// copy in the local professor marketplace goes once {former}@professor is.
+
+// formerProfessorManifest is the local professor marketplace's manifest, and
+// formerProfessorEntry reports whether it lists former, a former name of a
+// plugin of ours. A manifest that is absent, does not parse or names another
+// marketplace lists nothing pfm may drop.
+func formerProfessorManifest(home, former string) (string, devMarketplaceManifest, bool, error) {
+	path := filepath.Join(professorDevMarketplace(home), ".claude-plugin", "marketplace.json")
+	manifest, _, err := devMarketplaceCurrent(path, former)
+	listed := slices.ContainsFunc(manifest.Plugins, func(entry devMarketplaceEntry) bool {
+		return entry.Name == former
+	})
+	return path, manifest, listed, err
+}
+
+// formerProfessorCopies names what is left of former, a former name of a
+// plugin of ours, in the local professor marketplace: its manifest entry and
+// its copy under plugins/.
+func formerProfessorCopies(home, former string) ([]string, error) {
+	path, _, listed, err := formerProfessorManifest(home, former)
+	if err != nil {
+		return nil, err
+	}
+	var left []string
+	if listed {
+		left = append(left, former+" in "+path)
+	}
+	copyDir := filepath.Join(professorDevMarketplace(home), "plugins", former)
+	if _, err := os.Lstat(copyDir); err == nil {
+		left = append(left, copyDir)
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return left, fmt.Errorf("inspect %s: %w", copyDir, err)
+	}
+	return left, nil
+}
+
+// removeFormerProfessorCopy drops former, a former name of target's plugin
+// with no install record left, from the local professor marketplace: its
+// manifest entry, then its copy under plugins/. Both stay while wait, asked
+// with the copy, reports a live chat that may run from it.
+func (installer *engine) removeFormerProfessorCopy(home, former, targetID string, wait func(string) bool) error {
+	path, manifest, listed, err := formerProfessorManifest(home, former)
+	if err != nil {
+		return err
+	}
+	copyDir := filepath.Join(professorDevMarketplace(home), "plugins", former)
+	_, err = os.Lstat(copyDir)
+	copied := err == nil
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("inspect %s: %w", copyDir, err)
+	}
+	if !listed && !copied || wait(copyDir) {
+		return nil
+	}
+	reason := ": the former name of " + targetID
+	if listed {
+		manifest.Plugins = slices.DeleteFunc(manifest.Plugins, func(entry devMarketplaceEntry) bool {
+			return entry.Name == former
+		})
+		if err := installer.writeDevMarketplaceManifest(
+			"drop "+former+" from "+path+reason,
+			path,
+			manifest,
+		); err != nil {
+			return err
+		}
+	}
+	if !copied {
+		return nil
+	}
+	return installer.change("remove "+copyDir+reason, func() error { return os.RemoveAll(copyDir) })
+}
+
+// pluginChats names every account whose chats may run a plugin copy: the
+// plugin step's own dir and the roster's.
+func (installer *engine) pluginChats(dir string) PluginChats {
+	dirs := append([]string{dir}, installer.options.RosterConfigDirs...)
+	for _, account := range installer.options.ClaudeAccounts {
+		dirs = append(dirs, account.ConfigDir)
+	}
+	return PluginChats{ProcRoot: installer.options.ProcRoot, Dirs: dirs}
+}
+
+// openPluginChats opens, guarded, the live-chat door of every account of
+// pluginChats, with the release of every guard it took: those guards are held
+// until the retired folders are gone, so no chat starts mid-removal.
+func (installer *engine) openPluginChats(dir string) ([]*accountChats, func() error, error) {
+	var releases []func() error
+	release := func() error {
+		var errs []error
+		for _, release := range releases {
+			errs = append(errs, release())
+		}
+		return errors.Join(errs...)
+	}
+	dirs, err := installer.pluginChats(dir).accountDirs()
+	if err != nil {
+		return nil, release, err
+	}
+	var accounts []*accountChats
+	for _, dir := range dirs {
+		chats, err := installer.openAccountChats(dir, true)
+		releases = append(releases, chats.release)
+		if err != nil {
+			return nil, release, fmt.Errorf("read live chats in %s: %w", dir, err)
+		}
+		accounts = append(accounts, chats)
+	}
+	return accounts, release, nil
+}
+
+// markRetired writes folder's RetiredFolderMark when it has none, so a later
+// run holds the folder only for the chats started before this one.
+func (installer *engine) markRetired(folder string) error {
+	mark := filepath.Join(folder, RetiredFolderMark)
+	if _, err := os.Lstat(mark); err == nil || !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	now := installer.now()
+	return installer.change("mark "+folder+" retired: a chat started after this never runs from it", func() error {
+		if err := os.WriteFile(mark, nil, 0o600); err != nil {
+			return err
+		}
+		return os.Chtimes(mark, now, now)
+	})
+}
 
 // legacyDevMarketplace is the pfm-owned directory a plugin's -dev copy
 // installed from before {name}@professor.
@@ -70,12 +198,14 @@ func legacyDevDirOwned(home, name string) (bool, error) {
 // doctor's legacy gap naming it until a later run moves it; the steps after it
 // still run where they are safe: a marketplace is removed only once nothing is
 // installed from it, and the -dev directory only once no marketplace points
-// at it.
+// at it. A -dev directory or former name's copy a live chat started before its
+// retirement may run its hooks from stays, through the live-chat door
+// (retiredFolderWait), until a run where no such chat lives.
 func (installer *engine) removeLegacyClaudePluginCopies(
 	ctx context.Context,
 	run *claudePluginRun,
 	target *ClaudePluginTarget,
-) error {
+) (returnErr error) {
 	records, err := readClaudePluginInstalls(run.dir)
 	if err != nil {
 		return fmt.Errorf("legacy ids of %s unchecked: %w", target.ID, err)
@@ -105,6 +235,36 @@ func (installer *engine) removeLegacyClaudePluginCopies(
 		})
 	}
 	keep := func(err error) { kept = append(kept, fmt.Errorf("%w — %s to retry", err, ClaudePluginRepair)) }
+	// The doors open once, before the first folder a chat may run from goes.
+	asked, openErr := false, error(nil)
+	var accounts []*accountChats
+	release := func() error { return nil }
+	defer func() { returnErr = errors.Join(returnErr, release()) }()
+	wait := func(path string) bool {
+		if !asked {
+			asked = true
+			accounts, release, openErr = installer.openPluginChats(run.dir)
+			if openErr != nil {
+				keep(openErr)
+			}
+		}
+		if openErr != nil {
+			return true
+		}
+		reason, err := retiredFolderWait(accounts, path, installer.now())
+		if err != nil {
+			keep(err)
+			return true
+		}
+		if reason == "" {
+			return false
+		}
+		installer.skip("keep " + path + ": " + reason + " — pfm doctor names the fix")
+		if err := installer.markRetired(path); err != nil {
+			keep(fmt.Errorf("mark %s retired: %w", path, err))
+		}
+		return true
+	}
 	gone := map[string]bool{}
 	for _, id := range target.LegacyIDs() {
 		gone[id] = true
@@ -166,27 +326,36 @@ func (installer *engine) removeLegacyClaudePluginCopies(
 			continue
 		}
 		if err := command("legacy marketplace of "+target.ID+" in "+knownPath+", nothing installed from it",
-			"", "marketplace", "remove", marketplace); err != nil {
+			"", claudeMarketplaceCommand, "remove", marketplace); err != nil {
 			keep(err)
 		} else {
 			delete(known, marketplace)
 		}
 	}
-	owned, err := legacyDevDirOwned(home, target.Name)
-	if err != nil {
-		keep(err)
-	}
-	devDir := legacyDevMarketplace(home, target.Name)
-	pointed := false
-	for _, entry := range known {
-		pointed = pointed ||
-			entry.Source.Kind == claudeMarketplaceDirectory && filepath.Clean(entry.Source.Path) == devDir
-	}
-	if owned && !pointed {
-		if err := installer.change("remove "+devDir+": the legacy -dev marketplace of "+target.ID, func() error {
-			return os.RemoveAll(devDir)
-		}); err != nil {
+	for _, name := range append([]string{target.Name}, target.FormerNames()...) {
+		owned, err := legacyDevDirOwned(home, name)
+		if err != nil {
 			keep(err)
+		}
+		devDir := legacyDevMarketplace(home, name)
+		pointed := false
+		for _, entry := range known {
+			pointed = pointed ||
+				entry.Source.Kind == claudeMarketplaceDirectory && filepath.Clean(entry.Source.Path) == devDir
+		}
+		if owned && !pointed && !wait(devDir) {
+			if err := installer.change("remove "+devDir+": the legacy -dev marketplace of "+target.ID, func() error {
+				return os.RemoveAll(devDir)
+			}); err != nil {
+				keep(err)
+			}
+		}
+	}
+	for _, former := range target.FormerNames() {
+		if gone[former+"@"+pfmconfig.ProfessorMarketplace] {
+			if err := installer.removeFormerProfessorCopy(home, former, target.ID, wait); err != nil {
+				keep(err)
+			}
 		}
 	}
 	var swept []string
@@ -266,33 +435,58 @@ func sweepLegacyIDs(
 // settings.json, recorded in plugins/installed_plugins.json, or the
 // marketplace of one, registered in plugins/known_marketplaces.json and owned
 // by us; and the pfm-owned -dev directory under home. One gap per plugin
-// names them all. A file that cannot be read returns its error, never an
-// answer.
-func ClaudePluginLegacyGaps(store, home string, targets []ClaudePluginTarget) ([]ClaudePluginGap, error) {
+// names them all. A retired folder install would remove but holds back for a
+// live chat of chats (retiredFolderWait, the door install asks) is named
+// apart, one deferred gap per plugin ending "deferred: {reason}": install's
+// removal waits by design. A file, or a live chat, that cannot be read
+// returns its error, never an answer.
+func ClaudePluginLegacyGaps(
+	store, home string,
+	targets []ClaudePluginTarget,
+	chats PluginChats,
+) (gaps, deferredGaps []ClaudePluginGap, err error) {
 	settings := filepath.Join(store, "settings.json")
 	document, err := readClaudeSettingsDocument(settings)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	records, err := readClaudePluginInstalls(store)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	recordPath := filepath.Join(store, "plugins", "installed_plugins.json")
 	knownPath, known, err := readKnownMarketplaces(store)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	enabled, _ := document["enabledPlugins"].(map[string]any)
 	configs, _ := document["pluginConfigs"].(map[string]any)
-	var gaps []ClaudePluginGap
 	var failures []error
+	now := clock.Real.Now()
 	for index := range targets {
 		target := &targets[index]
 		if !target.Own {
 			continue
 		}
-		var left []string
+		var left, deferred []string
+		reason := ""
+		// held reports whether install, free to remove folder, holds it back for a
+		// live chat; an unreadable answer holds it too, as install does, its error
+		// the reason and a failure: doctor failed to look, which is no deferral.
+		held := func(folder string) bool {
+			wait, err := RetiredFolderDeferral(chats, folder, now)
+			if err != nil {
+				failures = append(
+					failures,
+					fmt.Errorf("plugin %s: live chats that may run %s: %w", target.ID, folder, err),
+				)
+				wait = "live chats unreadable, so " + folder + " stays: " + err.Error()
+			}
+			if reason == "" {
+				reason = wait
+			}
+			return wait != ""
+		}
 		for _, id := range target.LegacyIDs() {
 			if _, ok := enabled[id]; ok {
 				left = append(left, id+" in enabledPlugins of "+settings)
@@ -308,20 +502,53 @@ func ClaudePluginLegacyGaps(store, home string, targets []ClaudePluginTarget) ([
 				left = append(left, "marketplace "+marketplace+" in "+knownPath)
 			}
 		}
-		owned, err := legacyDevDirOwned(home, target.Name)
-		if err != nil {
-			failures = append(failures, fmt.Errorf("plugin %s: %w", target.ID, err))
+		for _, name := range append([]string{target.Name}, target.FormerNames()...) {
+			owned, err := legacyDevDirOwned(home, name)
+			if err != nil {
+				failures = append(failures, fmt.Errorf("plugin %s: %w", target.ID, err))
+			}
+			if !owned {
+				continue
+			}
+			devDir := legacyDevMarketplace(home, name)
+			pointed := false
+			for _, entry := range known {
+				pointed = pointed ||
+					entry.Source.Kind == claudeMarketplaceDirectory && filepath.Clean(entry.Source.Path) == devDir
+			}
+			if !pointed && held(devDir) {
+				deferred = append(deferred, devDir)
+			} else {
+				left = append(left, devDir)
+			}
 		}
-		if owned {
-			left = append(left, legacyDevMarketplace(home, target.Name))
+		for _, former := range target.FormerNames() {
+			copies, err := formerProfessorCopies(home, former)
+			if err != nil {
+				failures = append(failures, fmt.Errorf("plugin %s: %w", target.ID, err))
+			}
+			copyDir := filepath.Join(professorDevMarketplace(home), "plugins", former)
+			// Install removes the entry and the copy together, once the former id has no install record.
+			if len(records[former+"@"+pfmconfig.ProfessorMarketplace]) == 0 &&
+				slices.Contains(copies, copyDir) && held(copyDir) {
+				deferred = append(deferred, copies...)
+			} else {
+				left = append(left, copies...)
+			}
 		}
+		problem := "plugin " + target.Name + " still has legacy copies of " + target.ID + ": "
 		if len(left) != 0 {
 			gaps = append(gaps, ClaudePluginGap{
-				Problem: "plugin " + target.Name + " still has legacy copies of " + target.ID + ": " +
-					strings.Join(left, "; "),
-				Fix: ClaudePluginRepair + " (it moves them to " + target.ID + " once that is installed)",
+				Problem: problem + strings.Join(left, "; "),
+				Fix:     ClaudePluginRepair + " (it moves them to " + target.ID + " once that is installed)",
+			})
+		}
+		if len(deferred) != 0 {
+			deferredGaps = append(deferredGaps, ClaudePluginGap{
+				Problem: problem + strings.Join(deferred, "; ") + "; deferred: " + reason,
+				Fix:     "once those chats close, " + ClaudePluginRepair + "; it removes them",
 			})
 		}
 	}
-	return gaps, errors.Join(failures...)
+	return gaps, deferredGaps, errors.Join(failures...)
 }

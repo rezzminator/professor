@@ -69,6 +69,8 @@ type Probe struct {
 	// Environ reads another process's environment (gather's ProcFS.Environ):
 	// how a tmux client no hook registered is found to run in Herdr.
 	Environ func(pid int) (map[string]string, error)
+	// Keep reads the panes herdr-keep holds.
+	Keep *Keep
 	// Hookless says whether the chat of a seat was launched without the Herdr
 	// reporter hooks; known is false when its launch cannot be read, and the
 	// detail is then left out, never guessed.
@@ -76,15 +78,17 @@ type Probe struct {
 	Warn     io.Writer
 }
 
-// hostHasHerdr is the reporter's rule: HERDR_BIN_PATH set, or herdr on PATH.
-func (probe Probe) hostHasHerdr() bool {
-	if probe.Getenv != nil && probe.Getenv(EnvBin) != "" {
+// HostHasHerdr is the one rule for a Herdr on this host: HERDR_BIN_PATH set
+// (inherited from the shell that created the chat server), or herdr on PATH.
+// A nil seam proves nothing.
+func HostHasHerdr(getenv func(string) string, lookPath func(string) (string, error)) bool {
+	if getenv != nil && getenv(EnvBin) != "" {
 		return true
 	}
-	if probe.LookPath == nil {
+	if lookPath == nil {
 		return false
 	}
-	_, err := probe.LookPath("herdr")
+	_, err := lookPath("herdr")
 	return err == nil
 }
 
@@ -100,7 +104,7 @@ func (probe Probe) hostHasHerdr() bool {
 // or its failure. Each Herdr socket is asked once for all seats.
 func (probe Probe) Presence(ctx context.Context, seats []Seat) []string {
 	presence := make([]string, len(seats))
-	if !probe.hostHasHerdr() {
+	if !HostHasHerdr(probe.Getenv, probe.LookPath) {
 		for index := range presence {
 			presence[index] = PresenceNoHerdr
 		}
@@ -327,19 +331,16 @@ func (probe Probe) resolver(sockets map[string]*socketView) Resolver {
 		sequence++
 		return sequence
 	}
-	wire := WireResolver(probe.Environ, probe.Call, next)
+	wire := WireResolver(probe.Environ, probe.Call, next, probe.Keep)
 	return Resolver{
 		Environ: probe.Environ,
+		Keep:    probe.Keep,
 		Panes: func(ctx context.Context, socket string) ([]Pane, error) {
 			view := probe.socketViewOf(ctx, socket, sockets)
 			if view.err != nil {
 				return nil, view.err
 			}
-			panes := make([]Pane, len(view.panes))
-			for index, pane := range view.panes {
-				panes[index] = Pane{PaneID: pane.PaneID, TerminalID: pane.TerminalID}
-			}
-			return panes, nil
+			return view.panes, nil
 		},
 		Foreground: wire.Foreground,
 	}
@@ -358,16 +359,10 @@ func (probe Probe) socketViewOf(ctx context.Context, socket string, sockets map[
 // socketView is what one Herdr socket answered for a listing: its panes, the
 // agents on them and the workspace labels, or why it could not.
 type socketView struct {
-	panes      []presencePane
+	panes      []Pane
 	agents     map[string]Agent
 	workspaces map[string]string
 	err        error
-}
-
-type presencePane struct {
-	PaneID      string `json:"pane_id"`
-	TerminalID  string `json:"terminal_id"`
-	WorkspaceID string `json:"workspace_id"`
 }
 
 // look asks one Herdr socket for pane.list, agent.list and workspace.list.
@@ -399,7 +394,7 @@ func (probe Probe) look(ctx context.Context, socket string) *socketView {
 	if len(results) != 3 {
 		return fail(fmt.Errorf("answered %d of 3 requests", len(results)))
 	}
-	if view.panes, err = parsePresencePanes(results[0]); err != nil {
+	if view.panes, err = ParsePanes(results[0]); err != nil {
 		return fail(err)
 	}
 	agents, err := ParseAgentList(results[1])
@@ -453,23 +448,6 @@ func (view *socketView) describe(client Client) (hit presenceHit, found bool) {
 		return presenceHit{text: strings.Join(fields, " "), status: status}, true
 	}
 	return presenceHit{}, false
-}
-
-func parsePresencePanes(result json.RawMessage) ([]presencePane, error) {
-	var decoded struct {
-		Type  string         `json:"type"`
-		Panes []presencePane `json:"panes"`
-	}
-	if err := json.Unmarshal(result, &decoded); err != nil {
-		return nil, fmt.Errorf("herdr pane.list: decode result %q: %w", result, err)
-	}
-	if decoded.Type != "pane_list" {
-		return nil, fmt.Errorf("herdr pane.list: result type %q, want pane_list", decoded.Type)
-	}
-	if decoded.Panes == nil {
-		return nil, fmt.Errorf("herdr pane.list: panes missing or null in result %q", result)
-	}
-	return decoded.Panes, nil
 }
 
 // WorkspaceList is one workspace.list request: every workspace Herdr holds.

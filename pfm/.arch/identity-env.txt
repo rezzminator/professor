@@ -1,0 +1,7 @@
+internal/call/engine.go 3
+internal/gather/herdrprobe.go 2
+internal/herdr/indicators_entry.go 1
+internal/herdr/resolve.go 2
+internal/mockengine/claude.go 1
+internal/mockengine/codex.go 2
+internal/mockengine/jail.go 2

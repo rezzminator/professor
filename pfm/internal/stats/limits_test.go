@@ -1063,10 +1063,10 @@ func TestLimitsSamplerLiveRecoversFutureAndEmptyCacheEntries(t *testing.T) {
 		if len(limits) != 1 || limits[0].Status != "refreshing limits…" {
 			t.Fatalf("empty cold card=%#v, want explicit refreshing state", limits)
 		}
-		waitForCachedStatus(t, sampler, 6, "empty usage response")
+		waitForCachedStatus(t, sampler, 6, noLimitWindows)
 		clock.Store(now.Add(LiveLimitsTTL).UnixNano())
 		limits, _ = sampler.SampleLive(context.Background())
-		if !strings.Contains(limits[0].Status, "empty usage response") {
+		if !strings.Contains(limits[0].Status, noLimitWindows) {
 			t.Fatalf("empty cached status=%q, want failed attempt retained while retrying", limits[0].Status)
 		}
 		waitForCachedWindow(t, sampler, 6, 66)

@@ -17,7 +17,9 @@ import (
 // plugin command) and, while an agent is blocked, keeps the one blinker alive
 // until nothing is or a signal ends it. paint is PaintIndicators, a seam for
 // the entry's test; it writes its own errors to stderr (Herdr's plugin log). A
-// failure is exit 1.
+// failure is exit 1. The first SIGINT or SIGTERM cancels the painter, which
+// restores what it decorated within its restore budget; the next one kills
+// the process at once.
 func IndicatorsEntry(
 	stderr io.Writer,
 	env paths.Env,
@@ -30,6 +32,10 @@ func IndicatorsEntry(
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	go func() {
+		<-ctx.Done()
+		stop() // the default disposition again: a second signal is not swallowed
+	}()
 	if err := paint(ctx, env.Get(EnvSocket), paths.HerdrLockDir(home), stderr); err != nil {
 		return 1
 	}

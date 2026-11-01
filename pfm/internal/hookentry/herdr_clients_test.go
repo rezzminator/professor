@@ -3,12 +3,14 @@ package hookentry
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"slices"
 	"strings"
 	"syscall"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/reload"
 )
 
@@ -469,7 +471,7 @@ func TestHerdrStateEventsReachEveryLiveClientInAHerdrPane(t *testing.T) {
 // and an engine ending in the user's own tmux, or a reload's /exit whose
 // engine respawns on the same server, or an engine whose server keeps another
 // pane, leaves that live server's titles alone; a reload probe or a pane list
-// that cannot run leaves them too, and says so. Every end still releases.
+// that cannot run or an unresponsive server leaves them too, and says so. Every end still releases.
 func TestHerdrStateEndBlanksTheTmuxTitle(t *testing.T) {
 	const blank = "socket=" + rigSocket + " set-option -g set-titles-string "
 	const exit = `{"session_id":"s1","reason":"prompt_input_exit"}`
@@ -513,6 +515,10 @@ func TestHerdrStateEndBlanksTheTmuxTitle(t *testing.T) {
 			rig.tmux.failOn = "list-panes"
 			return rig.engine("end", exit)
 		}, 0, "outer terminal title left as is at session end: list the panes of cc-1", true},
+		{"a server that does not answer the pane-list door", func(rig *chatRig) herdrRun {
+			rig.tmux.probeErr = fmt.Errorf("%w within 3s: %s", gather.ErrServerUnresponsive, rigSocket)
+			return rig.engine("end", exit)
+		}, 0, "list the panes of cc-1: " + gather.ErrServerUnresponsive.Error(), true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			rig := newChatRig(t)
@@ -802,6 +808,7 @@ func TestHerdrStateReannounceReportsUnknownWithoutAnEngineEvent(t *testing.T) {
 		clock := rig.clock
 		deps := rig.jail.deps(rig.env, &clock)
 		deps.tmux = rig.tmux.run
+		deps.listPanes = rig.tmux.listPanes
 		return reannounceOn(context.Background(), rigSocket, deps)
 	}
 	for _, test := range []struct {
@@ -860,6 +867,7 @@ func TestHerdrStateReannounceReportsUnknownWithoutAnEngineEvent(t *testing.T) {
 			clock := rig.clock
 			deps := rig.jail.deps(rig.env, &clock)
 			deps.tmux = rig.tmux.run
+			deps.listPanes = rig.tmux.listPanes
 			if panes, err := reannounceOn(
 				context.Background(),
 				"/tmp/tmux-1/cx-1",
@@ -887,6 +895,7 @@ func TestHerdrStateReannounceReportsUnknownWithoutAnEngineEvent(t *testing.T) {
 		clock := rig.clock
 		deps := rig.jail.deps(map[string]string{}, &clock)
 		deps.tmux = rig.tmux.run
+		deps.listPanes = rig.tmux.listPanes
 		if panes, err := reannounceOn(context.Background(), rigSocket, deps); err != nil || len(panes) != 0 {
 			t.Fatalf("reached = %q, err = %v, want nothing and no error", panes, err)
 		}

@@ -117,8 +117,10 @@ func NamesDeadCredential(text string) bool {
 //  4. the O_EXCL refresh lock (RefreshLockPath) is taken — while a peer holds it no
 //     request is sent and the cache answers; holding it, the cache is read
 //     again and answers if a peer refreshed or backed off meanwhile;
-//  5. the request: success writes the record, a 429 writes the shared backoff
-//     (BackoffFor), any other failure a one-minute backoff.
+//  5. the request: success writes the record — a window the response leaves
+//     out is off the account's plan, so it is no failure and nothing of it is
+//     carried over — a 429 writes the shared backoff (BackoffFor), any other
+//     failure a one-minute backoff.
 //
 // With an error the returned usage is the last-good payload still inside the
 // one-hour stale horizon, or none (a zero confirmation time): callers decide
@@ -201,7 +203,11 @@ func refreshHeld(ctx context.Context, options Options, cachePath string, now tim
 		return answer
 	}
 	previousUsage, previousFetchedAt := Usage{}, (*time.Time)(nil)
-	if view.matches && view.confirmed {
+	// Only a success is carried: a record holding nothing but an earlier
+	// failure (a backoff, no fetched_at) is confirmed by its mtime alone, and
+	// stamping that as fetched_at would turn two failures into a "success"
+	// that reported no window.
+	if view.matches && view.confirmed && (view.record.FetchedAt != nil || view.record.Backoff == nil) {
 		stamp := view.confirmedAt
 		previousUsage, previousFetchedAt = view.record.Usage, &stamp
 	}
@@ -298,8 +304,14 @@ func (view cacheView) answer(ctx context.Context, options Options, now time.Time
 		return doorAnswer{}, false
 	}
 	fresh := view.record.FreshFor(options.TTL)
-	if options.BypassBackoff == nil && view.confirmed && now.Sub(view.confirmedAt) < fresh &&
-		HasCurrentWindow(view.record.Usage, now) {
+	// A stamped success that reported no reading at all (an account on
+	// credits, or windows naming only a reset) is a current answer too:
+	// asking again inside the TTL learns nothing new. A reading whose reset
+	// passed still asks, and a record whose latest request failed is no
+	// such answer: its backoff speaks below.
+	current := HasCurrentWindow(view.record.Usage, now) ||
+		(view.record.FetchedAt != nil && view.record.Backoff == nil && !carriesReading(view.record.Usage, now))
+	if options.BypassBackoff == nil && view.confirmed && now.Sub(view.confirmedAt) < fresh && current {
 		return doorAnswer{usage: view.record.Usage, confirmedAt: view.confirmedAt}, true
 	}
 	backoff := view.record.Backoff
@@ -353,6 +365,17 @@ func (view cacheView) staleAnswer(now time.Time, err error) doorAnswer {
 func HasCurrentWindow(usage Usage, now time.Time) bool {
 	for _, named := range usage.NamedWindowsAt(now) {
 		if named.Window.Utilization != nil && !resetPassed(named.Window.ResetsAt, now) {
+			return true
+		}
+	}
+	return false
+}
+
+// carriesReading reports whether any window of usage carries a utilization,
+// current or rolled over.
+func carriesReading(usage Usage, now time.Time) bool {
+	for _, named := range usage.NamedWindowsAt(now) {
+		if named.Window.Utilization != nil {
 			return true
 		}
 	}
@@ -479,9 +502,11 @@ func request(ctx context.Context, options Options) (usageResult Usage, credentia
 	if err := json.Unmarshal(fresh, &decoded); err != nil {
 		return Usage{}, credentialID, fmt.Errorf("decode usage response: %w", err)
 	}
-	logUnknownUsageKeys(fresh, options.Log)
-	if decoded.FiveHour.Utilization == nil {
-		return Usage{}, credentialID, fmt.Errorf("usage response omitted %s utilization", fiveHourKey)
+	// A window the response leaves out is not on the account's plan: an
+	// answer, not a failure. A body naming no usage key at all (an error
+	// object, null) answers nothing and fails.
+	if !logUnknownUsageKeys(fresh, options.Log) {
+		return Usage{}, credentialID, fmt.Errorf("decode usage response: no usage key in %d-byte body", len(fresh))
 	}
 	return decoded, credentialID, nil
 }

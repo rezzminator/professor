@@ -135,7 +135,7 @@ func runChatWithRuntime(
 		}
 		return runChatSatellite(verb, rest, stdin, stdout, stderr, paths.OSEnv{}, clock.Real, runtime)
 	case "modal":
-		return runChatModal(rest, stdout, stderr, clock.Real)
+		return runChatModal(rest, stdout, stderr, clock.Real, runtime)
 	case "resolve":
 		return runChatResolve(rest, stdout, stderr, runtime)
 	case helpCommand, "-h", helpFlag:
@@ -624,7 +624,7 @@ func callOneHeadless(call headlessCall, targetName string, stdout, stderr io.Wri
 				return codeUndelivered
 			}
 			resolved := machine.Paths
-			if uuidSessionID(target.ID) {
+			if pfmengine.IsUUID(target.ID) {
 				live, liveErr := runningClaudeSession(resolved.ProcRoot, target.ID)
 				if liveErr != nil {
 					fmt.Fprintf(stderr, "pfm chat call: %v\n", liveErr)

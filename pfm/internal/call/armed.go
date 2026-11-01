@@ -8,8 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/gather"
 )
 
 // armedRecord is the ONE post-command steer armed on a pane, kept beside the
@@ -120,8 +121,8 @@ func readArmedRecord(path string) (record armedRecord, exists bool, err error) {
 // the launch grace has not run out.
 func (record armedRecord) alive(now time.Time) bool {
 	if record.PID > 0 {
-		err := syscall.Kill(record.PID, 0)
-		return err == nil || errors.Is(err, syscall.EPERM)
+		alive, err := gather.ProcessAlive(record.PID)
+		return alive || err != nil
 	}
 	return now.Sub(time.Unix(record.Stamp, 0)) < armedLaunchGrace
 }

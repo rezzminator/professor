@@ -12,8 +12,10 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/action"
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
@@ -29,17 +31,22 @@ type fakeReloadTmux struct {
 	displays   []string
 	selector   bool
 	displayErr error
+	leaveErr   error
 }
 
 func (tmux *fakeReloadTmux) ListPanes(context.Context, string) ([]Pane, error) {
 	return []Pane{{ID: "%7", Dead: tmux.dead, PID: 700}}, nil
 }
 func (*fakeReloadTmux) SetRemain(context.Context, string, string, bool) error { return nil }
-func (*fakeReloadTmux) PaneInMode(context.Context, string, string) (bool, error) {
-	return false, nil
+func (tmux *fakeReloadTmux) LeaveCopyMode(context.Context, pfmcall.Target) (bool, error) {
+	return false, tmux.leaveErr
 }
-func (*fakeReloadTmux) CancelMode(context.Context, string, string) error { return nil }
-func (tmux *fakeReloadTmux) Capture(context.Context, string, string) (string, error) {
+
+func (tmux *fakeReloadTmux) CaptureTarget(ctx context.Context, target pfmcall.Target, _ int) (string, error) {
+	return tmux.CaptureScreen(ctx, target)
+}
+
+func (tmux *fakeReloadTmux) CaptureScreen(context.Context, pfmcall.Target) (string, error) {
 	if tmux.selector {
 		return "Claude\n❯ \n❯ 1. choose", nil
 	}
@@ -49,18 +56,24 @@ func (tmux *fakeReloadTmux) Capture(context.Context, string, string) (string, er
 	return "Claude\n❯ ", nil
 }
 
-func (tmux *fakeReloadTmux) CaptureStyled(ctx context.Context, socket, pane string) (string, error) {
-	return tmux.Capture(ctx, socket, pane)
+func (tmux *fakeReloadTmux) CaptureStyled(ctx context.Context, target pfmcall.Target) (string, error) {
+	return tmux.CaptureScreen(ctx, target)
 }
 
-func (tmux *fakeReloadTmux) SendKey(_ context.Context, _, _, key string) error {
+func (tmux *fakeReloadTmux) SendKey(_ context.Context, _ pfmcall.Target, key string) error {
 	if key == "Enter" && tmux.literal == "/exit" {
 		tmux.dead = true
 	}
 	return nil
 }
 
-func (tmux *fakeReloadTmux) SendLiteral(_ context.Context, _, _, value string) error {
+func (tmux *fakeReloadTmux) SendLiteral(_ context.Context, _ pfmcall.Target, value string) error {
+	tmux.literal = value
+	return nil
+}
+
+// SendPaste draws a pasted follow-up as its draft, the way typed text is.
+func (tmux *fakeReloadTmux) SendPaste(_ context.Context, _ pfmcall.Target, value string) error {
 	tmux.literal = value
 	return nil
 }
@@ -112,18 +125,18 @@ type neverExitRenderTmux struct {
 	enterCount int
 }
 
-func (tmux *neverExitRenderTmux) Capture(context.Context, string, string) (string, error) {
+func (tmux *neverExitRenderTmux) CaptureScreen(context.Context, pfmcall.Target) (string, error) {
 	return "Codex\n› ", nil
 }
 
-func (tmux *neverExitRenderTmux) SendKey(_ context.Context, _, _, key string) error {
+func (tmux *neverExitRenderTmux) SendKey(_ context.Context, _ pfmcall.Target, key string) error {
 	if key == "Enter" && tmux.literal == "/exit" {
 		tmux.enterCount++
 	}
 	return nil
 }
 
-func (tmux *delayedExitRenderTmux) Capture(context.Context, string, string) (string, error) {
+func (tmux *delayedExitRenderTmux) CaptureScreen(context.Context, pfmcall.Target) (string, error) {
 	if tmux.literal == "/exit" {
 		tmux.exitRendered = true
 		return "Codex\n› /exit", nil
@@ -131,7 +144,7 @@ func (tmux *delayedExitRenderTmux) Capture(context.Context, string, string) (str
 	return "Codex\n› ", nil
 }
 
-func (tmux *delayedExitRenderTmux) SendKey(_ context.Context, _, _, key string) error {
+func (tmux *delayedExitRenderTmux) SendKey(_ context.Context, _ pfmcall.Target, key string) error {
 	if key != "Enter" || tmux.literal != "/exit" {
 		return nil
 	}
@@ -143,7 +156,7 @@ func (tmux *delayedExitRenderTmux) SendKey(_ context.Context, _, _, key string) 
 	return nil
 }
 
-func (tmux *delayedThenTmux) Capture(context.Context, string, string) (string, error) {
+func (tmux *delayedThenTmux) CaptureScreen(context.Context, pfmcall.Target) (string, error) {
 	marker := tmux.marker
 	if marker == "" {
 		marker = "❯"
@@ -189,7 +202,7 @@ func wrapComposer(marker, text string, width int) string {
 	return strings.Join(append(block, rule), "\n")
 }
 
-func (tmux *delayedThenTmux) SendKey(_ context.Context, _, _, key string) error {
+func (tmux *delayedThenTmux) SendKey(_ context.Context, _ pfmcall.Target, key string) error {
 	if key != "Enter" {
 		return nil
 	}
@@ -378,11 +391,11 @@ type queuedThenTmux struct {
 	submissions int
 }
 
-func (tmux *queuedThenTmux) SendKey(ctx context.Context, socket, pane, key string) error {
+func (tmux *queuedThenTmux) SendKey(ctx context.Context, target pfmcall.Target, key string) error {
 	if key == "Enter" && tmux.literal == "S" && !tmux.submitted {
 		tmux.submissions++
 	}
-	return tmux.delayedThenTmux.SendKey(ctx, socket, pane, key)
+	return tmux.delayedThenTmux.SendKey(ctx, target, key)
 }
 
 func TestRunQueuesBehindAnOverlappingPaneReload(t *testing.T) {
@@ -525,7 +538,7 @@ func TestClaudeRunCarriesTheConfiguredSystemPrompt(t *testing.T) {
 		SessionID: "11111111-1111-4111-8111-111111111111", PromptChannel: rolePrompt,
 	})
 	if err != nil || parsedReloadShell(t, roleRun).PromptFile != rolePrompt ||
-		strings.Contains(roleRun, action.Quote(promptPath)) {
+		strings.Contains(roleRun, cmdparse.Quote(promptPath)) {
 		t.Fatalf("Claude role reload did not replace the ordinary prompt file: run=%q error=%v", roleRun, err)
 	}
 
@@ -576,7 +589,7 @@ func TestCodexRunUsesTheSelectedHomeAndRosterPolicy(t *testing.T) {
 	}
 	escaped := strings.ReplaceAll(prompt, `\`, `\\`)
 	escaped = strings.ReplaceAll(escaped, `"""`, `\"\"\"`)
-	developerInstructions := action.Quote("developer_instructions=\"\"\"\n" + escaped + "\"\"\"")
+	developerInstructions := cmdparse.Quote("developer_instructions=\"\"\"\n" + escaped + "\"\"\"")
 	if !strings.Contains(run, " -c "+developerInstructions+" resume ") {
 		t.Fatalf("Codex role reload does not carry one complete developer-instructions value before resume: %q", run)
 	}
@@ -913,14 +926,14 @@ type exitDialogTmux struct {
 	keys     []string
 }
 
-func (tmux *exitDialogTmux) Capture(context.Context, string, string) (string, error) {
+func (tmux *exitDialogTmux) CaptureScreen(context.Context, pfmcall.Target) (string, error) {
 	if tmux.dialog {
 		return "Claude\n" + exitDialog, nil
 	}
 	return "Claude\n❯ " + tmux.literal, nil
 }
 
-func (tmux *exitDialogTmux) SendKey(_ context.Context, _, _, key string) error {
+func (tmux *exitDialogTmux) SendKey(_ context.Context, _ pfmcall.Target, key string) error {
 	tmux.keys = append(tmux.keys, key)
 	switch {
 	case key == "Enter" && tmux.dialog && tmux.confirms:

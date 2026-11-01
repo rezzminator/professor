@@ -327,10 +327,12 @@ func TestDetectCodexThreadsMarksOnlyAnFDHeldRolloutAsHeld(t *testing.T) {
 
 func TestCodexRolloutIDAcceptsTimestampedAndUntimestampedFiles(t *testing.T) {
 	tests := map[string]string{
-		"/codex/sessions/rollout-2026-01-02T03-04-05-thread-id.jsonl": "thread-id",
-		"/codex/sessions/rollout-unusual.jsonl":                       "unusual",
-		"/codex/sessions/not-a-rollout.jsonl":                         "",
-		"":                                                            "",
+		"/codex/sessions/rollout-2026-01-02T03-04-05-thread-id.jsonl":      "thread-id",
+		"/codex/sessions/rollout-unusual.jsonl":                            "unusual",
+		"/codex/sessions/rollout-2026-01-02T03-04-05-thread-id_fork.jsonl": "thread-id",
+		"/codex/sessions/rollout-2026-01-02T03-04-05-thread-id.jsonl.zst":  "",
+		"/codex/sessions/not-a-rollout.jsonl":                              "",
+		"":                                                                 "",
 	}
 	for path, want := range tests {
 		if got := CodexRolloutID(path); got != want {

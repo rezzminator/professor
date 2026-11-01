@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 )
 
@@ -139,7 +140,7 @@ func herdrHookCommand(pfmBinary string, event herdr.Event) string {
 }
 
 func shellSingleQuote(value string) string {
-	return "'" + strings.ReplaceAll(strings.ReplaceAll(value, "'", `'\''`), "#", "##") + "'"
+	return strings.ReplaceAll(cmdparse.Quote(value), "#", "##")
 }
 
 func tmuxDoubleQuote(value string) string {

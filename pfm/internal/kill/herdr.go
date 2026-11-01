@@ -8,8 +8,10 @@ import (
 	"io"
 	"path/filepath"
 	"strconv"
+	"time"
 
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
@@ -23,6 +25,10 @@ const (
 	herdrPaneKey  = "pane_id"
 	herdrBackend  = "herdr"
 	liveSeatState = "live"
+	// defaultHeldShellWait bounds how long a held pane's close waits for
+	// herdr-keep to end the holder's shell, polled every heldShellPoll.
+	defaultHeldShellWait = 5 * time.Second
+	heldShellPoll        = 100 * time.Millisecond
 )
 
 // herdrTarget resolves ownership before the index fallback: a new native engine
@@ -277,6 +283,9 @@ type herdrKiller struct {
 	sidDir string
 	// log receives the warnings of a close that succeeded around a failure.
 	log io.Writer
+	// heldShellWait bounds the wait for a held pane's shell to end after its
+	// close; zero is defaultHeldShellWait.
+	heldShellWait time.Duration
 }
 
 // prove re-reads by stable seat identity; stale wire addresses never confer ownership.
@@ -363,15 +372,18 @@ func (client herdrKiller) PaneExists(ctx context.Context, _, _ string) (bool, er
 	if !herdrPaneMatches(pane, got, response.Pane.Workspace) {
 		return false, fmt.Errorf("get Herdr pane %s: result belongs to %q", pane, got)
 	}
-	result, err = herdr.SeatRequest(ctx, socket, "pane.process_info", map[string]string{herdrPaneKey: pane})
-	if err != nil {
-		return false, fmt.Errorf("read Herdr processes in %s: %w", pane, err)
-	}
-	return client.enginePresent(result, pane)
+	return client.enginePresent(ctx, socket, pane)
 }
 
-func (client herdrKiller) enginePresent(result json.RawMessage, pane string) (bool, error) {
-	present, err := herdr.EngineForeground(result, pane, client.engine)
+// enginePresent reads the pane's foreground through herdr-keep: a pane it holds
+// shows its holder's shell, so the engine is found where it runs, never in the
+// attach client alone.
+func (client herdrKiller) enginePresent(ctx context.Context, socket, pane string) (bool, error) {
+	_, processes, err := paneProcesses(ctx, socket, pane)
+	if err != nil {
+		return false, err
+	}
+	present, err := herdr.EngineForeground(processes, pane, client.engine)
 	if err != nil || present {
 		return present, err
 	}
@@ -381,68 +393,80 @@ func (client herdrKiller) enginePresent(result json.RawMessage, pane string) (bo
 	)
 }
 
+// paneProcesses reads pane's processes through herdr-keep, returning the keep
+// door that read them.
+func paneProcesses(ctx context.Context, socket, pane string) (*herdr.Keep, herdr.PaneProcesses, error) {
+	values, err := paths.Resolve()
+	if err != nil {
+		return nil, herdr.PaneProcesses{}, fmt.Errorf("read Herdr processes in %s: resolve paths: %w", pane, err)
+	}
+	keep := gather.HerdrKeep(gather.NewProcFS(values.ProcRoot))
+	processes, err := keep.Read(ctx, socket, pane)
+	if err != nil {
+		return nil, herdr.PaneProcesses{}, fmt.Errorf("read Herdr processes in %s: %w", pane, err)
+	}
+	return keep, processes, nil
+}
+
+// awaitHeldShell waits, bounded, for herdr-keep to end holder's shell once its
+// pane closed: Herdr's close ends only the attach client, so a shell that
+// outlives it keeps the seat and names herdr-keep's own cleanup.
+func (client herdrKiller) awaitHeldShell(
+	ctx context.Context, keep *herdr.Keep, holder herdr.KeepHolder, pane string,
+) error {
+	wait := client.heldShellWait
+	if wait <= 0 {
+		wait = defaultHeldShellWait
+	}
+	deadline := clock.Real.Now().Add(wait)
+	for {
+		ended, err := keep.ShellEnded(holder)
+		if err != nil {
+			return fmt.Errorf("closed Herdr pane %s; seat %s retained: %w", pane, client.seat.SeatID, err)
+		}
+		if ended {
+			return nil
+		}
+		if !clock.Real.Now().Before(deadline) {
+			return fmt.Errorf(
+				"closed Herdr pane %s, but herdr-keep holder %s still runs its shell (pid %d): "+
+					"end it with `%s kill %s`; seat %s retained",
+				pane, holder.ID, holder.Child.PID, herdr.KeepBinary, holder.ID, client.seat.SeatID,
+			)
+		}
+		if err := waitContext(ctx, heldShellPoll); err != nil {
+			return fmt.Errorf("closed Herdr pane %s; seat %s retained: await its herdr-keep shell: %w",
+				pane, client.seat.SeatID, err)
+		}
+	}
+}
+
 func herdrPaneMatches(target, pane, workspace string) bool {
 	return pane != "" && (pane == target || (workspace != "" && workspace+":"+pane == target))
 }
 
-func (client herdrKiller) Capture(ctx context.Context, socket, pane string) (string, error) {
-	return client.captureFormat(ctx, socket, pane, "text")
-}
-
-func (client herdrKiller) captureFormat(ctx context.Context, _, _, format string) (string, error) {
+// screenTarget is the seat's address for the screen door (call.Screen),
+// re-proved by stable seat identity first: a dead supervisor or a changed
+// owner is an error, never a pane to read or type into. Input (keys, text)
+// also needs the engine itself in the pane's foreground, so a retry prompt
+// or a shell left behind never receives an exit command.
+func (client herdrKiller) screenTarget(ctx context.Context, input bool) (pfmcall.Target, error) {
 	owner, owned, err := client.prove(ctx)
 	if err != nil {
-		return "", fmt.Errorf("prove native capture target: %w", err)
+		return pfmcall.Target{}, fmt.Errorf("prove native screen target: %w", err)
 	}
 	if !owned {
-		return "", fmt.Errorf("native capture supervisor is dead")
+		return pfmcall.Target{}, errors.New("native screen target: saved supervisor is dead")
 	}
-	socket, pane := owner.HerdrSocket, owner.HerdrPane
-	result, err := herdr.SeatRequest(
-		ctx,
-		socket,
-		"pane.read",
-		map[string]any{herdrPaneKey: pane, "source": "visible", "lines": 1000, "format": format, "strip_ansi": false},
-	)
-	if err != nil {
-		return "", fmt.Errorf("read Herdr pane %s: %w", pane, err)
+	if input {
+		if _, err := client.enginePresent(ctx, owner.HerdrSocket, owner.HerdrPane); err != nil {
+			return pfmcall.Target{}, fmt.Errorf("verify foreground before input: %w", err)
+		}
 	}
-	var response struct {
-		Type string `json:"type"`
-		Read *struct {
-			Pane      string  `json:"pane_id"`
-			Workspace string  `json:"workspace_id"`
-			Text      *string `json:"text"`
-			Truncated *bool   `json:"truncated"`
-			Format    string  `json:"format"`
-		} `json:"read"`
-	}
-	if err := json.Unmarshal(result, &response); err != nil {
-		return "", fmt.Errorf("decode Herdr pane %s: %w", pane, err)
-	}
-	if response.Type != "pane_read" || response.Read == nil || response.Read.Text == nil ||
-		response.Read.Truncated == nil ||
-		!herdrPaneMatches(
-			pane,
-			response.Read.Pane,
-			response.Read.Workspace,
-		) || (format == "ansi" && response.Read.Format != "ansi") {
-		return "", fmt.Errorf("read Herdr pane %s: malformed pane_read result", pane)
-	}
-	return *response.Read.Text, nil
-}
-
-func (client herdrKiller) CaptureStyled(ctx context.Context, socket, pane string) (string, error) {
-	frame, err := client.captureFormat(ctx, socket, pane, "ansi")
-	if err != nil {
-		return "", err
-	}
-	if !pfmcall.ComposerRowShown(frame) || pfmcall.SelectorLine(frame) != "" ||
-		pfmengine.ClaudeTrustDialog(frame) || pfmcall.IsFooterBusy(pfmengine.ID(client.seat.Engine), frame) ||
-		!pfmcall.ComposerBoxEmpty(frame) {
-		return "", fmt.Errorf("herdr pane %s: composer changed while checking styling", pane)
-	}
-	return frame, nil
+	return pfmcall.Target{
+		Backend: herdrBackend, SeatID: owner.SeatID, SocketPath: owner.HerdrSocket, Pane: owner.HerdrPane,
+		HerdrWorkspace: owner.HerdrWorkspace, Engine: owner.Engine, ID: owner.SessionID,
+	}, nil
 }
 
 func (client herdrKiller) ack(ctx context.Context, _, _, method string, params any) error {
@@ -454,16 +478,6 @@ func (client herdrKiller) ack(ctx context.Context, _, _, method string, params a
 		return fmt.Errorf("herdr %s: saved supervisor is dead", method)
 	}
 	socket, pane := owner.HerdrSocket, owner.HerdrPane
-	if method != "pane.close" {
-		evidence, err := herdr.SeatRequest(ctx, socket, "pane.process_info", map[string]string{herdrPaneKey: pane})
-		if err != nil {
-			return fmt.Errorf("verify foreground before Herdr %s: %w", method, err)
-		}
-		if _, err := client.enginePresent(evidence, pane); err != nil {
-			return fmt.Errorf("verify foreground before Herdr %s: %w", method, err)
-		}
-	}
-
 	switch values := params.(type) {
 	case map[string]string:
 		values[herdrPaneKey] = pane
@@ -488,23 +502,6 @@ func (client herdrKiller) ack(ctx context.Context, _, _, method string, params a
 	return nil
 }
 
-func (client herdrKiller) SendLine(ctx context.Context, socket, pane, line string) error {
-	if err := client.ack(
-		ctx,
-		socket,
-		pane,
-		"pane.send_text",
-		map[string]string{herdrPaneKey: pane, "text": line},
-	); err != nil {
-		return err
-	}
-	return client.SendKey(ctx, socket, pane, "Enter")
-}
-
-func (client herdrKiller) SendKey(ctx context.Context, socket, pane, key string) error {
-	return client.ack(ctx, socket, pane, "pane.send_keys", map[string]any{herdrPaneKey: pane, "keys": []string{key}})
-}
-
 func (client herdrKiller) KillPane(ctx context.Context, socket, pane string) error {
 	// A retry prompt has a live supervisor but no foreground engine.
 	owner, owned, err := client.prove(ctx)
@@ -521,8 +518,18 @@ func (client herdrKiller) KillPane(ctx context.Context, socket, pane string) err
 		return fmt.Errorf("native seat %s supervisor is dead; pane not closed, seat retained", client.seat.SeatID)
 	}
 
+	// The proved owner's address, never the caller's stale one, as ack uses.
+	keep, processes, err := paneProcesses(ctx, owner.HerdrSocket, owner.HerdrPane)
+	if err != nil {
+		return fmt.Errorf("refuse Herdr close: %w", err)
+	}
 	if err := client.ack(ctx, socket, pane, "pane.close", map[string]string{herdrPaneKey: pane}); err != nil {
 		return err
+	}
+	if processes.Holder != nil {
+		if err := client.awaitHeldShell(ctx, keep, *processes.Holder, owner.HerdrPane); err != nil {
+			return err
+		}
 	}
 	// A forced pane close also kills its supervisor, so it cannot retire the
 	// durable address itself. Keep the independent kill ledger untouched.

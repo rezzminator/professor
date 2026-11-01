@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -17,6 +18,7 @@ import (
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
@@ -240,5 +242,72 @@ func waitForFile(t *testing.T, path string, within time.Duration) ([]byte, error
 			return nil, err
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// A fork is born detached on its own tmux server whatever chat.backend says,
+// never placed: its lineage, launch record and session-id wait all bind to
+// that socket, and a Herdr birth has no fork session id to record.
+func TestChatBranchBirthsDetachedTmux(t *testing.T) {
+	for _, tc := range []struct{ name, backend string }{
+		{name: "default"},
+		{name: "configured Herdr outside Herdr", backend: "herdr"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := exec.LookPath("tmux"); err != nil {
+				t.Skip("tmux is not installed")
+			}
+			for _, name := range []string{"HERDR_ENV", "HERDR_SOCKET_PATH", "HERDR_PANE_ID", "TMUX"} {
+				t.Setenv(name, "")
+			}
+			jail := newBranchInheritJail(t)
+			const parentID = "a1000000-1111-4111-8111-111111111112"
+			const branchSocket = "probe-branch-placement"
+			t.Setenv("PFM_TEST_FRESH_SOCKET", branchSocket)
+			cleanupBranchSocket(t, jail, branchSocket)
+			registerParentTranscript(t, jail.parentDir, parentID)
+			recordBranchParent(t, jail, parentID, 7, false)
+			if tc.backend != "" {
+				config, err := os.ReadFile(jail.configPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var machine map[string]any
+				if err := json.Unmarshal(config, &machine); err != nil {
+					t.Fatal(err)
+				}
+				machine["chat"] = map[string]any{"backend": tc.backend}
+				if config, err = json.Marshal(machine); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(jail.configPath, config, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			runtime, err := pfmconfig.LoadRuntime(jail.configPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// run() re-installs the process logger, so the verb runs directly
+			// and obs.Test's recorder stays in place.
+			_, recorder := obs.Test(t)
+			var out, errOut bytes.Buffer
+			code := runChatBranch([]string{
+				"--engine", "claude", "--session-id", parentID, "--cwd", jail.root, "--name", "placed-branch",
+			}, &out, &errOut, nil, nil, runtime)
+			stdout, stderr := out.String(), errOut.String()
+			var placed []string
+			for _, record := range recorder.Records() {
+				if record.Message == "chat.placement" {
+					door, _ := record.Field("door")
+					chosen, _ := record.Field("chosen")
+					placed = append(placed, fmt.Sprint(door, "=", chosen))
+				}
+			}
+			if code != 0 || len(placed) != 0 {
+				t.Fatalf("rc=%d placements=%v stdout=%q stderr=%q; want rc 0 and no placement",
+					code, placed, stdout, stderr)
+			}
+		})
 	}
 }

@@ -11,8 +11,8 @@ It reads and writes the user's real chat state: a destructive operation on a liv
 - jail: a test run with every filesystem location redirected by `PFM_*` overrides (§ Environment Variables); reference harness `testdata/e2e.sh`, fixtures `testdata/{claude-store|codex-store|crumbs|proc|golden}/`
 - eval protocol (K1): the binary prints one shell line on stdout for the shim to `eval`, never execing the final tmux attach itself
 - K3: one implementation per rule — naming precedence, the kill ratchet, row classification, run-string synthesis — each in exactly one package with table-driven tests
-- façades: the one door per cross-cutting primitive — `atomicfile.Write` (whole-file replace), `sqlitedb` (every SQLite open), `tmux.Exec` and `tmux.Socket` over it (every tmux call on a chat socket), `internal/chat/` (the chat verbs a surface calls typed) · `internal/atomicfile/`, `internal/sqlitedb/`, `internal/tmux/`
-- architecture ratchet: C1–C26 checked against baselines that only shrink; `--measure` locks a shrink · `scripts/arch-check.sh`, `.arch/`
+- façades: the one door per cross-cutting primitive — `atomicfile.Write` (whole-file replace), `sqlitedb` (every SQLite open), `tmux.Exec` and `tmux.Socket` over it (every tmux call on a chat socket), `internal/herdr/` (every herdr socket call), `internal/chat/` (the chat verbs a surface calls typed) · `internal/atomicfile/`, `internal/sqlitedb/`, `internal/tmux/`
+- architecture ratchet: C1–C27 checked against baselines that only shrink; `--measure` locks a shrink · `scripts/arch-check.sh`, `.arch/`
 - lint law: gofumpt + gci + golines at 120, plus dupl, goconst, gocritic, revive, staticcheck; coverage thresholds · `.golangci.yml`, `.testcoverage.yml`, tools pinned in `infra/fence/tools.env`
 - shim: the thin zsh wrapper that `eval`s the eval-protocol line, sourced in place from the clone · `internal/installer/assets/shim/pfm.zsh`, its tests `internal/installer/shim/`
 - installer: stages every host asset embedded from `internal/installer/assets/`; the shim is read from the clone instead · `internal/installer/`
@@ -53,7 +53,7 @@ It reads and writes the user's real chat state: a destructive operation on a liv
 
 - Eval protocol (K1): the TUI renders on `/dev/tty`, information goes to stderr, exactly one shell line to stdout; bunker semantics need `exec tmux attach` to replace the interactive shell.
 - A ✦-new Claude row spawns natively through `action.ClaudeSpawn`; a ✦-new Codex row calls the user's own `cx`; emitted lines stay golden-testable.
-- K3: a second copy of a K3 rule is a defect; MCP reaches everything outside `internal/chat/` through argv `Dispatch`, which C10 counts and lets only shrink.
+- K3: a second copy of a K3 rule is a defect; MCP reaches everything outside `internal/chat/` through argv `Dispatch`, never a direct `pfmcall` call; C10 counts both and lets them only shrink.
 - Architecture ratchet: `.claude/scripts/test.sh` runs it as `arch` on any `pfm/` path; a new entry is a FAIL to fix; a genuinely new exception is a hand edit to `.arch/` named in the commit message.
 - Lint law: `.golangci.yml` and `.testcoverage.yml` are gates — lint-new blocks a wave on the lines it changed, `make lint` is the burn-down view, coverage thresholds only ratchet up.
 - A kill is permanent, and the store table keeps its `hidden` name; a kill of a live chat always runs the detached exit choreography, `--exit` its explicit form.
@@ -77,7 +77,7 @@ It reads and writes the user's real chat state: a destructive operation on a liv
 - Errors wrap with context (`fmt.Errorf("…: %w", err)`): a swallowed error in a gather path renders as a missing chat row, which reads as "no such chat".
 - A schema change is a new `migration_v{N}.sql` plus its `go:embed`; `internal/store/schema.sql` is never edited for it, since existing databases never see it.
 - Behavior belongs in Go, not the shim: a fix that is easier in the shim signals that the Go surface is wrong.
-- The CLI stays boring Go for one box: stdlib `flag`, no cobra, no config system, no telemetry.
+- The CLI stays boring Go for one box: stdlib `flag`, no cobra, no config system, no telemetry; a solved format or protocol (JSONC, semver, UUID) comes from the standard library or a maintained library.
 - Storage is modernc.org/sqlite, pure Go with `CGO_ENABLED=0` for a static binary; indexing is on-demand and incremental, with no index daemon.
 - The TUI is charm.land/bubbletea, bubbles and lipgloss, all v2: verify the v2 API against upstream before writing UI code, since v1 examples do not compile.
 - Go is pinned in `go.mod` (mise: `mise use -g go@1.27`).

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -188,11 +189,11 @@ func TestJailedSoloCompetingAttemptsAndSelfSwitch(t *testing.T) {
 		}
 	}
 	commandTmux := TmuxExecutor{Binary: "tmux", TmuxDir: jail.tmuxDir}
-	if !commandTmux.SocketAlive(context.Background(), keepSocket) {
-		t.Fatal("solo killed keep socket")
+	if state, err := commandTmux.ServerState(context.Background(), keepSocket); state != gather.ServerAlive {
+		t.Fatalf("solo killed keep socket: %s %v", state, err)
 	}
-	if commandTmux.SocketAlive(context.Background(), duplicateSocket) {
-		t.Fatal("solo left duplicate standalone server alive")
+	if state, err := commandTmux.ServerState(context.Background(), duplicateSocket); state != gather.ServerDead {
+		t.Fatalf("solo left duplicate standalone server %s: %v", state, err)
 	}
 	sharedPanes, err := commandTmux.ListPanes(context.Background(), sharedSocket)
 	if err != nil || len(sharedPanes) != 1 {

@@ -121,8 +121,8 @@ func (reporter *herdrReporter) runActivity(ctx context.Context, payload herdrPay
 	}
 	if reporter.options.engine != pfmengine.Claude || reporter.options.event.FiredByTmux() ||
 		payload.SessionID == "" || reporter.deps.lockDir == "" ||
-		(reporter.deps.getenv("TMUX") == "" && !reporter.processTarget().ok()) ||
-		(reporter.deps.getenv("TMUX") != "" && !reporter.hostHasHerdr()) {
+		(reporter.deps.identity().TMUX == "" && !reporter.processTarget().ok()) ||
+		(reporter.deps.identity().TMUX != "" && !reporter.hostHasHerdr()) {
 		if reporter.options.event == herdr.EventAgentStart || reporter.options.event == herdr.EventAgentStop {
 			// Without durable membership, an agent stop cannot establish main-turn activity.
 			return nil

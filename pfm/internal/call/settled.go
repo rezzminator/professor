@@ -7,6 +7,8 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/charmbracelet/x/ansi"
+
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
@@ -101,7 +103,7 @@ func withoutRecordLines(tail string) string {
 	lines := strings.Split(tail, "\n")
 	kept := lines[:0]
 	for _, line := range lines {
-		trimmed := strings.TrimLeftFunc(stripTerminalControl(line), unicode.IsSpace)
+		trimmed := strings.TrimLeftFunc(ansi.Strip(line), unicode.IsSpace)
 		if strings.HasPrefix(trimmed, "●") || strings.HasPrefix(trimmed, "⏺") {
 			continue
 		}

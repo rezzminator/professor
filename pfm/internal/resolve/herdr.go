@@ -2,7 +2,6 @@ package resolve
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -24,61 +23,60 @@ type herdrClaim struct {
 	terminal string
 }
 
-// proveHerdr proves the process location before consulting any seat rows.
+// proveHerdr proves the process location before consulting any seat rows. A
+// shell herdr-keep holds names its holder's relay socket and birth pane; the
+// claim carries Herdr's own socket and the current pane, as an unheld pane's.
 func (identifier *Whoami) proveHerdr(ctx context.Context, chain []int) (herdrClaim, int, string, error) {
 	env := identifier.environment
 	claim := herdrClaim{}
 	if env.HerdrSocket == "" || env.HerdrPane == "" {
 		return claim, -1, "", nil
 	}
+	keep := gather.HerdrKeep(gather.NewProcFS(identifier.procRoot))
+	socket, inherited, err := keep.Upstream(ctx, env.HerdrSocket, env.HerdrPane)
+	if err != nil {
+		return claim, -1, "", fmt.Errorf("look up the caller: %w", err)
+	}
 	failure := func(err error) (herdrClaim, int, string, error) {
 		var refusal *herdr.Refusal
 		if errors.Is(err, syscall.ENOENT) || errors.Is(err, syscall.ECONNREFUSED) ||
 			errors.As(err, &refusal) && refusal.Code == "pane_not_found" {
-			return claim, -1, fmt.Sprintf("herdr %s %s: %v", env.HerdrSocket, env.HerdrPane, err), nil
+			return claim, -1, fmt.Sprintf("herdr %s %s: %v", socket, inherited, err), nil
 		}
-		return claim, -1, "", fmt.Errorf("look up the caller: herdr pane %s: %w", env.HerdrPane, err)
+		return claim, -1, "", fmt.Errorf("look up the caller: herdr pane %s: %w", inherited, err)
 	}
-	asked, err := identifier.herdrChatPane(ctx, chain)
+	asked, err := identifier.herdrChatPane(ctx, socket, inherited, chain)
 	if err != nil {
 		return claim, -1, "", fmt.Errorf("look up the caller: %w", err)
 	}
-	pane, found, err := herdr.LocatePane(ctx, env.HerdrSocket, asked, chain)
+	pane, found, err := herdr.LocatePane(ctx, keep, socket, asked, chain)
 	if err != nil {
 		return failure(err)
 	}
 	if !found {
-		return claim, -1, fmt.Sprintf("herdr %s %s: no pane holds the caller", env.HerdrSocket, asked), nil
+		return claim, -1, fmt.Sprintf("herdr %s %s: no pane holds the caller", socket, asked), nil
 	}
-	body, err := herdr.SeatRequest(ctx, env.HerdrSocket, "pane.process_info", map[string]string{"pane_id": pane.ID})
+	processes, err := keep.Read(ctx, socket, pane.ID)
 	if err != nil {
 		return failure(err)
 	}
-	pids, err := herdr.ParseProcessInfo(body)
-	if err != nil {
-		return failure(err)
-	}
-	var result struct {
-		Info struct {
-			Pane string `json:"pane_id"`
-		} `json:"process_info"`
-	}
-	if err := json.Unmarshal(body, &result); err != nil {
-		return failure(fmt.Errorf("decode pane process identity: %w", err))
-	}
-	if result.Info.Pane != pane.ID {
-		return failure(fmt.Errorf("process response returned pane %q, want %q", result.Info.Pane, pane.ID))
+	if processes.Pane != pane.ID {
+		return failure(fmt.Errorf("process response returned pane %q, want %q", processes.Pane, pane.ID))
 	}
 	claim = herdrClaim{
 		Identity: Identity{
 			Backend:        nativeHerdrBackend,
-			SocketPath:     env.HerdrSocket,
-			SocketName:     filepath.Base(env.HerdrSocket),
+			SocketPath:     socket,
+			SocketName:     filepath.Base(socket),
 			Pane:           pane.ID,
 			HerdrWorkspace: pane.Workspace,
 			Source:         "herdr-ancestry",
 		},
 		terminal: pane.Terminal,
+	}
+	pids, err := processes.PIDs()
+	if err != nil {
+		return failure(err)
 	}
 	for _, pid := range pids {
 		if pid <= 0 {
@@ -100,15 +98,19 @@ func (identifier *Whoami) proveHerdr(ctx context.Context, chain []int) (herdrCla
 		}
 	}
 	if nearest < 0 {
-		return claim, -1, fmt.Sprintf("herdr %s %s: foreground has no ancestor", env.HerdrSocket, pane.ID), nil
+		return claim, -1, fmt.Sprintf("herdr %s %s: foreground has no ancestor", socket, pane.ID), nil
 	}
 	return claim, nearest, "", nil
 }
 
 // herdrChatPane is the pane the caller's Herdr claim is proved against: its
 // chat's seat pane when a seat's supervisor is in chain, else the inherited
-// HERDR_PANE_ID (gather.HerdrChatPane). A seat table it cannot read is an error.
-func (identifier *Whoami) herdrChatPane(ctx context.Context, chain []int) (pane string, returnErr error) {
+// pane (gather.HerdrChatPane). A seat table it cannot read is an error.
+func (identifier *Whoami) herdrChatPane(
+	ctx context.Context,
+	socket, inherited string,
+	chain []int,
+) (pane string, returnErr error) {
 	values, err := paths.Resolve()
 	if err != nil {
 		return "", fmt.Errorf("resolve state paths: %w", err)
@@ -128,9 +130,8 @@ func (identifier *Whoami) herdrChatPane(ctx context.Context, chain []int) (pane 
 			returnErr = errors.Join(returnErr, fmt.Errorf("close caller seat state: %w", err))
 		}
 	}()
-	env := identifier.environment
 	proc := gather.NewProcFS(values.ProcRoot)
-	pane, _, _, err = gather.HerdrChatPane(ctx, state, proc, env.HerdrSocket, env.HerdrPane, chain)
+	pane, _, _, err = gather.HerdrChatPane(ctx, state, proc, socket, inherited, chain)
 	return pane, err
 }
 

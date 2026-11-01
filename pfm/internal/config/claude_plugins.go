@@ -11,28 +11,54 @@ import (
 )
 
 // ClaudePlugin is one claude.plugins entry. ID is a bare plugin name of ours
-// ("auto-effort-control": {name}@professor, from the GitHub professor
+// ("auto-effort": {name}@professor, from the GitHub professor
 // marketplace, or on an -alpha build from its checkout under
 // claude.pluginCheckoutRoot, else under the source clone's plugins/) or a full
 // "name@marketplace" id.
 // Source is what `claude plugin marketplace add` takes (owner/repo, a git or
 // https URL, a path) for a full id whose marketplace Claude Code does not know
 // yet; empty otherwise.
+// Former is the former name a bare entry was written with
+// (FormerClaudePluginNames), read as ID, its current name; empty otherwise.
 type ClaudePlugin struct {
 	ID     string
 	Source string
+	Former string
 }
 
 // ProfessorMarketplace is the marketplace every plugin of ours installs from:
 // a bare name's id is {name}@professor on every build.
 const ProfessorMarketplace = "professor"
 
+// FormerClaudePluginNames are the names a plugin of ours had before its
+// current one, keyed by the current name. A bare former name in claude.plugins
+// reads as the current one, and doctor names it.
+var FormerClaudePluginNames = map[string][]string{
+	"auto-effort": {"auto-effort-control"},
+}
+
+// CurrentClaudePluginName is the current name of a plugin of ours once called
+// name, else name itself.
+func CurrentClaudePluginName(name string) string {
+	for current, formers := range FormerClaudePluginNames {
+		if slices.Contains(formers, name) {
+			return current
+		}
+	}
+	return name
+}
+
 // LegacyClaudePluginIDs are the ids a plugin of ours installed as before
 // {name}@professor: {name}@{name}, its own GitHub marketplace, and
-// {name}@{name}-dev, the -alpha checkout copy. pfm install moves each to
-// {name}@professor.
+// {name}@{name}-dev, the -alpha checkout copy; and for each former name
+// (FormerClaudePluginNames) {former}@professor and its own two. pfm install
+// moves each to {name}@professor.
 func LegacyClaudePluginIDs(name string) []string {
-	return []string{name + "@" + name, name + "@" + name + "-dev"}
+	ids := []string{name + "@" + name, name + "@" + name + "-dev"}
+	for _, former := range FormerClaudePluginNames[name] {
+		ids = append(ids, former+"@"+ProfessorMarketplace, former+"@"+former, former+"@"+former+"-dev")
+	}
+	return ids
 }
 
 // claudePluginIDPattern is a plugin id: a name, or name@marketplace, each part
@@ -44,7 +70,7 @@ func DefaultClaudePlugins() []ClaudePlugin {
 	return []ClaudePlugin{
 		{ID: "cache-live-control"},
 		{ID: "forward-compaction"},
-		{ID: "auto-effort-control"},
+		{ID: "auto-effort"},
 		{ID: "tool-visibility-controller"},
 		{ID: "engine-sync"},
 	}
@@ -125,7 +151,7 @@ func decodeClaudePlugins(entries []json.RawMessage) ([]ClaudePlugin, error) {
 // ensures {name}@professor and moves the legacy ids to it, so the full id
 // would be ensured twice or moved away again on every install.
 func claudePluginCopyClash(plugin ClaudePlugin, index int, first map[string]int) error {
-	name := plugin.Name()
+	name := CurrentClaudePluginName(plugin.Name())
 	copies := append([]string{name + "@" + ProfessorMarketplace}, LegacyClaudePluginIDs(name)...)
 	if plugin.Bare() {
 		for _, id := range copies {
@@ -174,6 +200,9 @@ func decodeClaudePlugin(entry json.RawMessage) (ClaudePlugin, error) {
 	}
 	if !claudePluginIDPattern.MatchString(plugin.ID) {
 		return ClaudePlugin{}, fmt.Errorf("id must be a plugin name or name@marketplace, got %q", plugin.ID)
+	}
+	if current := CurrentClaudePluginName(plugin.ID); plugin.Bare() && current != plugin.ID {
+		plugin.Former, plugin.ID = plugin.ID, current
 	}
 	if source == nil {
 		return plugin, nil

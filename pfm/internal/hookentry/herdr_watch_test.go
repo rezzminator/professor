@@ -116,6 +116,7 @@ func (rig *watchRig) start(argv []string, timing herdrWatchTiming) *runningWatch
 	clock := int64(9_000_000_000)
 	deps := rig.jail.deps(rig.env, &clock)
 	deps.tmux = rig.tmux.run
+	deps.listPanes = rig.tmux.listPanes
 	watch := &runningWatch{done: make(chan struct{})}
 	go func() {
 		defer close(watch.done)

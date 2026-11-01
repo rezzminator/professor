@@ -134,17 +134,3 @@ func (n *nativeReload) refreshTarget(ctx context.Context) error {
 	n.request.Pane = proved.HerdrPane
 	return nil
 }
-
-func (n *nativeReload) sendKey(ctx context.Context, key string) error {
-	if err := n.refreshTarget(ctx); err != nil {
-		return err
-	}
-	return n.client.SendKey(ctx, n.target, key)
-}
-
-func (n *nativeReload) sendLiteral(ctx context.Context, text string) error {
-	if err := n.refreshTarget(ctx); err != nil {
-		return err
-	}
-	return n.client.SendLiteral(ctx, n.target, text)
-}

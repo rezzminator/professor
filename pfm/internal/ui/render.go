@@ -248,7 +248,11 @@ func (model Model) renderLimitCards(innerWidth int) []string {
 		appendLine(borderStyle.Render(fillLine("  "+strings.Repeat("─", maxInt(0, innerWidth-2)), innerWidth)))
 		appendLine(statsHeaderStyle.Render(fillLine("  "+limitAccountHeader(*account, now), innerWidth)))
 		if account.Status != "" {
-			appendLine(dimStyle.Render(fillLine("  ⚠ "+cleanField(account.Status), innerWidth)))
+			prefix := "  ⚠ "
+			if account.NoWindow {
+				prefix = "  "
+			}
+			appendLine(dimStyle.Render(fillLine(prefix+cleanField(account.Status), innerWidth)))
 			if len(account.Windows) == 0 {
 				continue
 			}

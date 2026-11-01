@@ -64,8 +64,8 @@ func (finder *resolver) resolve(target string) (string, error) {
 		}
 		return finder.pick(target, hits, listed)
 	}
-	if filepath.IsAbs(target) || strings.HasPrefix(target, "~") || strings.HasPrefix(target, ".") ||
-		strings.HasSuffix(target, ".jsonl") {
+	if _, transcriptName := codexmeta.RolloutStem(target); filepath.IsAbs(target) ||
+		strings.HasPrefix(target, "~") || strings.HasPrefix(target, ".") || transcriptName {
 		return "", runtimeFailure("no such transcript file: %s", target)
 	}
 	id := strings.TrimPrefix(target, "agent-")
@@ -130,8 +130,9 @@ func (finder *resolver) idHits(id string) (hits []string, failed []error) {
 const rolloutPrefix = "rollout-"
 
 // extraRootHits walks root for {id}*.jsonl, agent-{id}*.jsonl and
-// rollout-*{id}*.jsonl, a dot-named entry skipped; a missing root holds
-// nothing.
+// rollout-*{id}*.jsonl, plain or compressed, a compressed rollout dropped
+// beside its plain twin (codexmeta.PreferPlain), a dot-named entry skipped; a
+// missing root holds nothing.
 func extraRootHits(root, id string) ([]string, error) {
 	var hits []string
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
@@ -148,15 +149,16 @@ func extraRootHits(root, id string) ([]string, error) {
 			}
 			return nil
 		}
-		if entry.IsDir() || !strings.HasSuffix(name, ".jsonl") {
+		if entry.IsDir() {
 			return nil
 		}
-		if strings.HasPrefix(name, id) || strings.HasPrefix(name, "agent-"+id) ||
-			(strings.HasPrefix(name, rolloutPrefix) && strings.Contains(name[len(rolloutPrefix):], id)) {
+		if strings.HasSuffix(name, ".jsonl") && (strings.HasPrefix(name, id) || strings.HasPrefix(name, "agent-"+id)) ||
+			codexmeta.IsRolloutName(name) && strings.Contains(name[len(rolloutPrefix):], id) {
 			hits = append(hits, path)
 		}
 		return nil
 	})
+	hits = codexmeta.PreferPlain(hits)
 	if err != nil {
 		return hits, fmt.Errorf("search %s: %w", root, err)
 	}

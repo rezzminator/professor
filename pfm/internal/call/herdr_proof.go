@@ -37,6 +37,18 @@ func ProveHerdrTarget(ctx context.Context, target Target) (Target, error) {
 		if !matches {
 			continue
 		}
+		if target.SeatID == "" && seat.State != "live" && seat.SeatHostPID > 0 && seat.SeatHostStart != 0 {
+			// A retired seat keeps its last pane for its resume recipe; once its
+			// supervisor is proved dead, it no longer owns that pane.
+			dead, err := gather.HerdrHostDead(gather.NewProcFS(values.ProcRoot), *seat)
+			if err != nil {
+				return target, fmt.Errorf("herdr pane %s ownership unproved: prove seat %s retired: %w",
+					target.Pane, seat.SeatID, err)
+			}
+			if dead {
+				continue
+			}
+		}
 		if owner != nil {
 			return target, fmt.Errorf("herdr pane %s ownership unproved: multiple durable owners", target.Pane)
 		}

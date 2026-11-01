@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/headless"
@@ -389,5 +390,34 @@ func TestAnUnknownSupervisorLeavesTheDaemonRunning(t *testing.T) {
 	}
 	if daemonErr == nil || !strings.Contains(daemonErr.Error(), "1 pfm mcp serve process(es) left running") {
 		t.Fatalf("mcp-daemon find with its supervisor unknown = %v, want a failed find naming the daemon", daemonErr)
+	}
+}
+
+// TestAChatUnitStopsTheWayChatEndsIt: the plan's stop line for a chat is the
+// chat package's own end decision (EndHow), so the plan never promises an end
+// the end door does not perform.
+func TestAChatUnitStopsTheWayChatEndsIt(t *testing.T) {
+	fleet := &fakeFleet{chats: []headless.Chat{
+		{Engine: pfmengine.Claude, Name: "native", ID: "sess-native", Backend: spawn.BackendHerdr, SeatID: "seat-1"},
+		{Engine: pfmengine.Codex, Name: "builder", ID: "sess-build", Socket: "pfm-cx-builder", Pane: "%1"},
+	}}
+	plan := BuildPlan(context.Background(), testDeps(t, &hostRunner{}, newKernel(), fleet))
+	stops := 0
+	for index := range plan.Units {
+		unit := &plan.Units[index]
+		if unit.Family != FamilyChats {
+			continue
+		}
+		stops++
+		want := pfmchat.EndHow(headless.Chat{Backend: spawn.BackendHerdr}) + "; not brought back"
+		if unit.Chat.SessionID == "sess-build" {
+			want = "tmux kill-server on pfm-cx-builder; verified: tmux says the server is dead; not brought back"
+		}
+		if unit.StopHow != want {
+			t.Fatalf("%s stops by %q, want %q", unit.Chat.SessionID, unit.StopHow, want)
+		}
+	}
+	if stops != 2 {
+		t.Fatalf("plan holds %d chat units, want 2", stops)
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -24,25 +25,30 @@ import (
 
 // killHerdr is a throwaway socket, never an installed Herdr or a real engine.
 type killHerdr struct {
-	t             *testing.T
-	mu            sync.Mutex
-	socket        string
-	frame         string
-	styledFrame   string
-	processes     any
-	probeError    string
-	closeError    string
-	gone          bool
-	exitGone      bool
-	closed        bool
-	events        []string
-	onRead        func()
-	onExit        func()
-	processType   string
-	omitProcesses bool
-	pane          string
-	terminal      string
-	proc          string
+	t           *testing.T
+	mu          sync.Mutex
+	socket      string
+	frame       string
+	styledFrame string
+	processes   any
+	probeError  string
+	closeError  string
+	gone        bool
+	exitGone    bool
+	// dialogOnce answers the first key with Claude's exit confirmation on
+	// screen instead of an exit; the next key is the one that exits.
+	dialogOnce bool
+	// closeKeepsShell answers pane.close while the shell it runs (pid 90) lives on.
+	closeKeepsShell bool
+	closed          bool
+	events          []string
+	onRead          func()
+	onExit          func()
+	processType     string
+	omitProcesses   bool
+	pane            string
+	terminal        string
+	proc            string
 }
 
 func newKillHerdr(t *testing.T) *killHerdr {
@@ -172,7 +178,10 @@ func (server *killHerdr) serve(conn net.Conn) {
 			code = "wrong_text"
 		}
 	case "pane.send_keys":
-		if server.exitGone {
+		if server.dialogOnce {
+			server.dialogOnce = false
+			server.frame = dialogFrame
+		} else if server.exitGone {
 			server.processes = []any{map[string]any{"pid": 6, "argv0": "pfm"}}
 			// Successful engine exit runs the independent seat closer.
 			server.gone = true
@@ -188,8 +197,10 @@ func (server *killHerdr) serve(conn net.Conn) {
 			code = server.closeError
 		} else {
 			server.closed = true
-			if err := os.RemoveAll(filepath.Join(server.proc, "90")); err != nil {
-				server.t.Error(err)
+			if !server.closeKeepsShell {
+				if err := os.RemoveAll(filepath.Join(server.proc, "90")); err != nil {
+					server.t.Error(err)
+				}
 			}
 		}
 	default:
@@ -298,22 +309,27 @@ func TestHerdrFinisherReusesComposerRatchet(t *testing.T) {
 	for _, test := range []struct {
 		name, frame, styled string
 		exitGone, wantExit  bool
+		dialog              bool
 	}{
-		{"empty", idleFrame, "", true, true},
-		{"dim hint", strings.Replace(idleFrame, "❯ ", "❯ \x1b[2mTry running tests\x1b[0m", 1), "", true, true},
-		{"same text draft", strings.Replace(idleFrame, "❯ ", "❯ Try running tests", 1), "", false, false},
-		{"draft", strings.Replace(idleFrame, "❯ ", "❯ unsent draft", 1), "", false, false},
-		{"busy", busyFrame, "", false, false},
-		{"missing composer", "unknown terminal content", "", false, false},
-		{"last resort", idleFrame, "", false, true},
-		{"styled busy", strings.Replace(idleFrame, "❯ ", "❯ \x1b[2mTry running tests\x1b[0m", 1), strings.Replace(idleFrame, "❯ ", "❯ \x1b[2mTry running tests\x1b[0m", 1) + "\n" + busyFrame, false, false},
-		{"styled continuation", strings.Replace(idleFrame, "❯ ", "❯ \x1b[2mTry running tests\x1b[0m", 1), strings.Replace(strings.Replace(idleFrame, "❯ ", "❯ \x1b[2mTry running tests\x1b[0m", 1), "\x1b[0m\n", "\x1b[0m\nprivate draft\n", 1), false, false},
+		{"empty", idleFrame, "", true, true, false},
+		// The confirmation /exit opens over background work is answered with
+		// Enter in the Herdr pane itself, never through tmux.
+		{"exit dialog", idleFrame, "", true, true, true},
+		{"dim hint", strings.Replace(idleFrame, "❯ ", "❯ \x1b[2mTry running tests\x1b[0m", 1), "", true, true, false},
+		{"same text draft", strings.Replace(idleFrame, "❯ ", "❯ Try running tests", 1), "", false, false, false},
+		{"draft", strings.Replace(idleFrame, "❯ ", "❯ unsent draft", 1), "", false, false, false},
+		{"busy", busyFrame, "", false, false, false},
+		{"missing composer", "unknown terminal content", "", false, false, false},
+		{"last resort", idleFrame, "", false, true, false},
+		{"styled busy", strings.Replace(idleFrame, "❯ ", "❯ \x1b[2mTry running tests\x1b[0m", 1), strings.Replace(idleFrame, "❯ ", "❯ \x1b[2mTry running tests\x1b[0m", 1) + "\n" + busyFrame, false, false, false},
+		{"styled continuation", strings.Replace(idleFrame, "❯ ", "❯ \x1b[2mTry running tests\x1b[0m", 1), strings.Replace(strings.Replace(idleFrame, "❯ ", "❯ \x1b[2mTry running tests\x1b[0m", 1), "\x1b[0m\n", "\x1b[0m\nprivate draft\n", 1), false, false, false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			jail := newKillJail(t)
 			database := jail.open(t)
 			server := newKillHerdr(t)
 			server.frame, server.styledFrame, server.exitGone = test.frame, test.styled, test.exitGone
+			server.dialogOnce = test.dialog
 			seat := seedKillHerdr(t, database, server)
 			recipe := fleetdb.SeatRun{Binary: "fixture", Args: []string{"fixture"}}
 			if err := database.Shared().WriteSeatRun(seat.SeatID, recipe); err != nil {
@@ -364,6 +380,9 @@ func TestHerdrFinisherReusesComposerRatchet(t *testing.T) {
 			if test.wantExit && (!strings.Contains(joined, "text:/exit") || !strings.Contains(joined, "keys:[Enter]")) {
 				t.Fatalf("exit not text + Enter: %s", joined)
 			}
+			if keys := strings.Count(joined, "pane.send_keys "); test.dialog && keys != 2 {
+				t.Fatalf("exit dialog not answered in the Herdr pane: %d keys, events=%s", keys, joined)
+			}
 			if test.exitGone == closed {
 				t.Fatalf("close=%t graceful=%t events=%s", closed, test.exitGone, joined)
 			}
@@ -389,6 +408,7 @@ func TestHerdrConfirmDistinguishesAbsenceFromProbeFailure(t *testing.T) {
 		processes            any
 		gone                 bool
 		probeError           string
+		held                 bool
 		wantError, wantClose bool
 	}{
 		{name: "pane gone", gone: true, wantError: true},
@@ -398,6 +418,8 @@ func TestHerdrConfirmDistinguishesAbsenceFromProbeFailure(t *testing.T) {
 		{name: "omitted list", wantClose: true, omitProcesses: true, wantError: true},
 		{name: "engine argv0", processes: []any{map[string]any{"pid": 7, "argv0": "/opt/bin/" + pfmengine.MustLookup(pfmengine.Claude).Binary}}, wantClose: true},
 		{name: "engine name", processes: []any{map[string]any{"pid": 7, "name": pfmengine.MustLookup(pfmengine.Claude).Binary}}, wantClose: true},
+		// Herdr sees herdr-keep's attach client; the engine runs in its holder's shell.
+		{name: "held engine", processes: []any{map[string]any{"pid": 77, "name": "herdr-keep"}}, held: true, wantClose: true},
 		{name: "missing process type", missingType: true, processes: []any{}, wantError: true},
 		{name: "null list", wantClose: true, wantError: true},
 		{name: "unknown process", wantClose: true, processes: []any{map[string]any{"pid": 7}}, wantError: true},
@@ -410,6 +432,9 @@ func TestHerdrConfirmDistinguishesAbsenceFromProbeFailure(t *testing.T) {
 			server := newKillHerdr(t)
 			server.processes, server.gone, server.probeError = test.processes, test.gone, test.probeError
 			server.omitProcesses = test.omitProcesses
+			if test.held {
+				stageHeldEngine(t, server)
+			}
 			if test.missingType {
 				server.processType = ""
 			}
@@ -421,6 +446,13 @@ func TestHerdrConfirmDistinguishesAbsenceFromProbeFailure(t *testing.T) {
 				seat.SeatID, fleetdb.SeatRun{Binary: "/fixture/claude", CWD: jail.root},
 			); err != nil {
 				t.Fatal(err)
+			}
+			if test.held {
+				// Escalation closes either way: the held engine must read as present, never unproved.
+				client := herdrKiller{engine: pfmengine.Claude, database: database, seat: seat, sidDir: jail.sidDir}
+				if present, err := client.PaneExists(context.Background(), "", ""); err != nil || !present {
+					t.Fatalf("held engine PaneExists = %t, %v; want true, no error", present, err)
+				}
 			}
 			tmux := &fakeTmux{}
 			manager, err := New(database, Dependencies{Tmux: tmux, ConfirmEvery: time.Nanosecond, ConfirmAttempts: 1})
@@ -611,6 +643,7 @@ func TestHerdrDegradedSeatStoreKeepsExplicitTmux(t *testing.T) {
 			spawner := &captureSpawner{}
 			dependencies := Dependencies{
 				Tmux:            tmux,
+				Screen:          tmux,
 				Spawner:         spawner,
 				Log:             &warnings,
 				Refresher:       refreshFunc(func(context.Context) error { return nil }),
@@ -732,8 +765,16 @@ func TestHerdrKillRequiresCanonicalSupervisor(t *testing.T) {
 			client := herdrKiller{engine: pfmengine.Claude, database: db, seat: seat, sidDir: jail.sidDir}
 			if mode == "move-before-ack" {
 				server.pane = "w9:p2"
-				if err := client.SendKey(context.Background(), seat.HerdrSocket, seat.HerdrPane, "Escape"); err != nil {
-					t.Fatalf("moved ack: %v", err)
+				screen, err := pfmcall.New(pfmcall.Dependencies{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				target, err := client.screenTarget(context.Background(), true)
+				if err == nil {
+					err = screen.SendKey(context.Background(), target, "Escape")
+				}
+				if err != nil || target.Pane != "w9:p2" {
+					t.Fatalf("moved ack to %q: %v", target.Pane, err)
 				}
 				return
 			}
@@ -899,5 +940,38 @@ func TestHerdrForcedCloseRemovesReloadFiles(t *testing.T) {
 				t.Errorf("another seat's reload log was touched: %v", err)
 			}
 		})
+	}
+}
+
+// A picker row of a lost native seat still carries its Herdr address: with no
+// live seat behind it the kill hides the chat and ends nothing, never reading
+// the Herdr socket path as a tmux socket name.
+func TestHerdrKillOfALostSeatOnlyHides(t *testing.T) {
+	jail := newKillJail(t)
+	database := jail.open(t)
+	server := newKillHerdr(t)
+	seat := seedKillHerdr(t, database, server)
+	lost := seat
+	lost.State = "lost"
+	if err := database.Shared().UpdateSeat(context.Background(), seat, lost); err != nil {
+		t.Fatal(err)
+	}
+	spawner := &captureSpawner{}
+	manager, err := New(database, Dependencies{Tmux: &fakeTmux{}, Spawner: spawner})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := Request{
+		ID:         seat.SessionID,
+		Engine:     pfmengine.ID(seat.Engine),
+		SocketName: seat.HerdrSocket,
+		PaneID:     seat.HerdrPane,
+	}
+	target, err := manager.Kill(context.Background(), request)
+	if err != nil || target.SocketPath != "" || target.PaneID != "" || len(spawner.args) != 0 {
+		t.Fatalf("lost seat kill target=%+v err=%v spawns=%v; want a hide only", target, err, spawner.args)
+	}
+	if row, found, err := database.Killed(context.Background(), seat.SessionID); err != nil || !found {
+		t.Fatalf("kill record=%+v found=%t err=%v", row, found, err)
 	}
 }

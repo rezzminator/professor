@@ -6,9 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"syscall"
 
-	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -78,30 +76,14 @@ func (installer *engine) retireStoreEntries() error {
 				continue
 			}
 			accountErr := func() (returnErr error) {
-				if installer.apply {
-					guard, err := gather.AcquireAccountGuard(account.Dir, false)
-					if errors.Is(err, syscall.EWOULDBLOCK) {
-						keep = "account " + account.Dir + " is starting a chat; rerun pfm install --yes"
-						installer.skip(keep)
-						return nil
-					}
-					if err != nil {
-						return err
-					}
-					defer func() { returnErr = errors.Join(returnErr, guard.Close()) }()
-					claims, err := guard.Active(gather.NewProcFS(installer.options.ProcRoot))
-					if err != nil {
-						return err
-					}
-					live, err := liveChatPIDs(installer.options.ProcRoot, account.Dir)
-					if err != nil {
-						return err
-					}
-					if len(claims) != 0 || len(live) != 0 {
-						keep = "account " + account.Dir + " has live chats; close them and rerun pfm install --yes"
-						installer.skip(keep)
-						return nil
-					}
+				wait, release, err := installer.liveChatDeferral(account.Dir)
+				defer func() { returnErr = errors.Join(returnErr, release()) }()
+				if err != nil {
+					return err
+				}
+				if wait != "" {
+					keep = wait
+					return nil
 				}
 				path := filepath.Join(account.Dir, name)
 				inspected, linked, err := inspectRetiredStoreLink(store, paths.PhysicalPath(account.Dir), path)

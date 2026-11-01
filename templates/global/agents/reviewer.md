@@ -1,7 +1,7 @@
 ---
 name: reviewer
 description: Reviews a diff range — proves every thread it touches safe up and downstream; "review this branch/range/merge", "is this safe to merge", the default where /code-review would be used; 10,000+ code lines → reviewer-pro. Modes pre-merge, post-merge; HEAD WORKTREE for uncommitted work; PATHSPECS narrow it; a merge-gating brief names REPORT_PATH. Returns one line, the review file path.
-tools: Read, Write, Grep, Glob, Bash, Agent, mcp__forward-compaction__forward_compaction, mcp__forward-compaction__look_back, mcp__auto-effort-control__effort_up, mcp__auto-effort-control__effort_down, mcp__auto-effort-control__effort_auto
+tools: Read, Write, Grep, Glob, Bash, Agent, mcp__forward-compaction__forward_compaction, mcp__forward-compaction__look_back, mcp__auto-effort__effort_up, mcp__auto-effort__effort_down, mcp__auto-effort__effort_auto
 skills: [tracer:use]
 model: opus
 effort: high
@@ -88,6 +88,7 @@ Read each changed function in your share whole, not just hunks, batching functio
 7. INPUTS: every field read from a harness payload, transcript line or config — absent, `null`, zero, empty and synthetic values, and what each yields.
 8. TESTS: each new or changed test — does it drive the production path, would it fail without the change, does a fixture already satisfy what it claims to prove.
 9. CLAIMS: each claim sentence — does the code do it; quote the line.
-10. CONVENTIONS: the CLAUDE.md files governing the changed paths — flag only with both quotes, the rule and the line.
+10. TWIN DOORS: each operation the change adds or fixes — another implementation of it outside the diff (grep its verb, data and outside command) that it copies or leaves unfixed.
+11. CONVENTIONS: the CLAUDE.md files governing the changed paths — flag only with both quotes, the rule and the line.
 
 At each changed function ask what the surrounding code obliges it to have — a default arm, a deadline, a status write, a log on a fallback, the field every other return sets — and check for its absence: the line that is not there matches no grep.

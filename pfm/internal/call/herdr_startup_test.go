@@ -17,7 +17,7 @@ import (
 // Native startup may expose an unknown agent before its composer is ready.
 // Delivery waits only before input, and a stuck startup still refuses explicitly.
 func TestHerdrCallWaitsForNativeBirthReadiness(t *testing.T) {
-	for _, stage := range []string{"agent", "composer", "stuck", "read-failed"} {
+	for _, stage := range []string{"agent", "composer", "flash", "stuck", "read-failed"} {
 		t.Run(stage, func(t *testing.T) {
 			t.Setenv("TMUX_TMPDIR", t.TempDir())
 			reads := 0
@@ -36,15 +36,20 @@ func TestHerdrCallWaitsForNativeBirthReadiness(t *testing.T) {
 					}
 					return nativeAgent("agent_info", state), ""
 				case "pane.read":
-					if stage == "composer" {
+					if stage == "composer" || stage == "flash" {
 						reads++
 					}
 					if stage == "composer" && reads < 3 {
 						return nativePaneRead(req, "Starting the engine..."), ""
 					}
+					// A splash frame may paint the composer glyph once before
+					// the TUI takes keys: one read of it is not a live composer.
+					if stage == "flash" && (reads == 1 || reads == 3) {
+						return nativePaneRead(req, "Starting the engine..."), ""
+					}
 					return nativePaneRead(req, "❯ "), ""
 				case "agent.prompt":
-					if reads < 3 {
+					if reads < 3 || stage == "flash" && reads < 6 {
 						t.Errorf("input before native birth readiness: %d reads", reads)
 					}
 					return nativeAgent("agent_prompted", "working"), ""

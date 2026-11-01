@@ -4,6 +4,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 // claudeAgentPanelHint is the agents panel's own footer, drawn only while the
@@ -19,7 +21,7 @@ func agentPanelFocused(capture string) bool {
 		return false
 	}
 	for _, line := range strings.Split(tail, "\n") {
-		visible := strings.TrimLeftFunc(stripTerminalControl(strings.TrimSuffix(line, "\r")), unicode.IsSpace)
+		visible := strings.TrimLeftFunc(ansi.Strip(strings.TrimSuffix(line, "\r")), unicode.IsSpace)
 		if claudeAgentRow.MatchString(visible) {
 			return true
 		}

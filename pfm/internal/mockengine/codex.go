@@ -7,12 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
+	"uuid"
 
 	"github.com/BurntSushi/toml"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -139,7 +139,7 @@ func serveCodex(proc *process) int {
 		session.threadID = proc.script.SessionID
 	}
 	if session.threadID == "" {
-		session.threadID = newUUID()
+		session.threadID = uuid.NewV4().String()
 	}
 	if call.subcommand == "exec" {
 		return session.headless()
@@ -343,6 +343,9 @@ func (session *codexSession) write(record codexRecord) error {
 }
 
 func (session *codexSession) openRollout() error {
+	if codexmeta.Compressed(session.rollout) {
+		return fmt.Errorf("open rollout %s: a compressed rollout is never appended to", session.rollout)
+	}
 	if err := os.MkdirAll(filepath.Dir(session.rollout), 0o700); err != nil {
 		return fmt.Errorf("create rollout directory: %w", err)
 	}
@@ -355,7 +358,7 @@ func (session *codexSession) openRollout() error {
 }
 
 // rolloutFor is the rollout path for a thread: sessions/YYYY/MM/DD/
-// rollout-<stamp>-<thread>.jsonl, the name index/walk.go:152 strips the id off.
+// rollout-<stamp>-<thread>.jsonl, the name codexmeta.RolloutID strips the id off.
 func (session *codexSession) rolloutFor(threadID string, now time.Time) string {
 	now = now.UTC()
 	return filepath.Join(
@@ -364,23 +367,18 @@ func (session *codexSession) rolloutFor(threadID string, now time.Time) string {
 	)
 }
 
-// findRollout locates an existing thread's rollout for resume.
+// findRollout locates an existing thread's rollout for resume, plain or
+// compressed (codexmeta.WalkRollouts, the plain twin winning).
 func (session *codexSession) findRollout(threadID string) (string, error) {
+	rollouts, errs := codexmeta.WalkRollouts(session.proc.ctx, session.codexHome, codexmeta.SessionsDir)
+	if len(errs) != 0 {
+		return "", fmt.Errorf("find rollout for %s: %w", threadID, errors.Join(errs...))
+	}
 	found := ""
-	err := filepath.WalkDir(
-		filepath.Join(session.codexHome, "sessions"),
-		func(path string, entry fs.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if !entry.IsDir() && strings.HasSuffix(entry.Name(), threadID+".jsonl") {
-				found = path
-			}
-			return nil
-		},
-	)
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return "", fmt.Errorf("find rollout for %s: %w", threadID, err)
+	for _, rollout := range rollouts {
+		if codexmeta.RolloutID(filepath.Base(rollout.Path)) == threadID {
+			found = rollout.Path
+		}
 	}
 	return found, nil
 }
@@ -409,6 +407,12 @@ func (session *codexSession) start(resumed bool) error {
 		existing, err := session.findRollout(session.threadID)
 		if err != nil {
 			return err
+		}
+		if codexmeta.Compressed(existing) {
+			// Codex decompresses a finished rollout before it appends to it.
+			if existing, err = codexmeta.DecompressRollout(existing); err != nil {
+				return err
+			}
 		}
 		session.rollout = existing
 	}
@@ -514,7 +518,7 @@ func (session *codexSession) tool(step Step) (string, error) {
 	if arguments == "" {
 		arguments = "{}"
 	}
-	callID := "call_" + newUUID()[:8]
+	callID := "call_" + uuid.NewV4().String()[:8]
 	records := []codexRecord{
 		{Type: recordResponseItem, Payload: map[string]any{
 			keyType: "function_call", "name": step.Tool, "arguments": arguments, "call_id": callID,
@@ -567,7 +571,12 @@ func (session *codexSession) rename(name string) error {
 // names this thread as parent (internal/codexmeta/header.go:71-84 reads it).
 // Codex's pane shows nothing pfm pins for it, so no row is rendered.
 func (session *codexSession) background(step Step) (string, error) {
-	child := &codexSession{proc: session.proc, codexHome: session.codexHome, threadID: newUUID(), model: session.model}
+	child := &codexSession{
+		proc:      session.proc,
+		codexHome: session.codexHome,
+		threadID:  uuid.NewV4().String(),
+		model:     session.model,
+	}
 	now := time.Now()
 	child.rollout = child.rolloutFor(child.threadID, now)
 	if err := child.openRollout(); err != nil {
@@ -601,7 +610,7 @@ func (session *codexSession) mcp(step Step) error {
 	if len(input) == 0 {
 		input = json.RawMessage(`{}`)
 	}
-	callID := "call_" + newUUID()[:8]
+	callID := "call_" + uuid.NewV4().String()[:8]
 	if err := session.write(codexRecord{Type: recordResponseItem, Payload: map[string]any{
 		keyType: "function_call", "name": step.Tool, "arguments": string(input), "call_id": callID,
 	}}); err != nil {

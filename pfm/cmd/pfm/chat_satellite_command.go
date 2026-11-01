@@ -179,9 +179,9 @@ func runChatSaveContext(
 	if len(args) == 2 {
 		transcriptPath = args[1]
 	} else {
-		id := env.Get("CLAUDE_CODE_SESSION_ID")
+		id := resolve.CallerEnvironmentFrom(env).ClaudeSessionID
 		if id == "" {
-			return fail("CLAUDE_CODE_SESSION_ID is not set and no transcript path was given")
+			return fail("%s is not set and no transcript path was given", resolve.ClaudeSessionEnv)
 		}
 		cwd, err := os.Getwd()
 		if err != nil {
@@ -273,10 +273,11 @@ func runChatBranch(
 		fmt.Fprintf(stderr, "pfm chat branch: load config: %v\n", err)
 		return 1
 	}
+	ambient := resolve.CallerEnvironmentFrom(env)
 	engineInput := strings.TrimSpace(*requestedEngine)
 	if engineInput == "" {
-		caller, ok := callerEngine(env.Get)
-		if !ok {
+		caller, _ := ambient.EngineSession()
+		if caller == "" {
 			fmt.Fprintln(stderr, "pfm chat branch: no ambient session id; pass --engine and --session-id")
 			return 1
 		}
@@ -288,11 +289,7 @@ func runChatBranch(
 		return 2
 	}
 	if *id == "" {
-		if engine == pfmengine.Claude {
-			*id = env.Get(resolve.ClaudeSessionEnv)
-		} else {
-			*id = env.Get(resolve.CodexThreadEnv)
-		}
+		*id = ambient.SessionOf(engine)
 	}
 	if strings.TrimSpace(*id) == "" || strings.ContainsAny(*id, "\r\n\x00") {
 		fmt.Fprintln(stderr, "pfm chat branch: --session-id is required and must be one safe line")
@@ -404,6 +401,8 @@ func runChatBranch(
 		fmt.Fprintf(stderr, "pfm chat branch: plan fork: %v\n", err)
 		return 1
 	}
+	// A fork is born detached on its own tmux server, never placed: its
+	// lineage, launch record and session-id wait below bind to that socket.
 	socket := spawn.FreshSocket(engine)
 	if override := env.Get(spawn.TestFreshSocketEnv); override != "" {
 		socket = override
@@ -544,7 +543,7 @@ func waitForBranchSessionID(
 				return "", fmt.Errorf("read session crumb %s: %w", entry.Name(), err)
 			}
 			id := composeTranscriptIDFromPath(strings.TrimSpace(string(raw)))
-			if id != "" && id != parent && uuidSessionID(id) {
+			if id != "" && id != parent && pfmengine.IsUUID(id) {
 				return id, nil
 			}
 		}
@@ -717,7 +716,7 @@ func historyPools(runtimes ...commandRuntime) ([]string, error) {
 	return []string{filepath.Join(resolved.Home, ".claude", "projects")}, nil
 }
 
-func runChatModal(args []string, stdout, stderr io.Writer, clk clock.Clock) int {
+func runChatModal(args []string, stdout, stderr io.Writer, clk clock.Clock, runtimes ...commandRuntime) int {
 	clk = defaultClock(clk)
 	if len(args) != 3 || args[1] != "deny" {
 		fmt.Fprintln(stderr, "usage: pfm chat modal <target> deny <down-count>")
@@ -728,49 +727,22 @@ func runChatModal(args []string, stdout, stderr io.Writer, clk clock.Clock) int 
 		fmt.Fprintln(stderr, "usage: pfm chat modal <target> deny <down-count>")
 		return 2
 	}
-	chat, found, err := pfmchat.Resolve(context.Background(), args[0], io.Discard, nil)
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm chat modal: resolve target: %v\n", err)
-		return 1
+	ctx := context.Background()
+	chat, code := headlessTarget(ctx, args[0], stdout, stderr, false, runtimes...)
+	if code != 0 {
+		return code
 	}
-	if found && chat.Backend == pfmcall.HerdrBackend {
-
-		target := pfmcall.Target{
-			Backend:    chat.Backend,
-			SocketPath: chat.Socket,
-			Pane:       chat.Pane,
-			Engine:     string(chat.Engine),
-		}
-		if err := pfmcall.DenyModal(context.Background(), target, count, clk); err != nil {
-			fmt.Fprintf(stderr, "pfm chat modal: %v\n", err)
-			return 1
-		}
-		fmt.Fprintf(stdout, "modal denied on %s\n", args[0])
-		return 0
+	if !chat.Live {
+		fmt.Fprintf(stderr, "pfm chat modal: %q is not running\n", chat.Name)
+		return codeDeadChat
 	}
-	socketPath, err := chatSocketPath(args[0])
+	seat, err := chatTarget(chat)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat modal: %v\n", err)
 		return 1
 	}
-	if _, err := os.Stat(socketPath); err != nil {
-		fmt.Fprintf(stderr, "pfm chat modal: no tmux socket for %q: %v\n", args[0], err)
-		return 1
-	}
-	for index := 0; index < count; index++ {
-		if output, err := pfmtmux.Exec(context.Background(), "", socketPath, "send-keys", "Down").
-			CombinedOutput(); err != nil {
-			fmt.Fprintf(stderr, "pfm chat modal: send Down: %v: %s\n", err, strings.TrimSpace(string(output)))
-			return 1
-		}
-		if err := clk.Sleep(context.Background(), 200*time.Millisecond); err != nil {
-			fmt.Fprintf(stderr, "pfm chat modal: %v\n", err)
-			return 1
-		}
-	}
-	if output, err := pfmtmux.Exec(context.Background(), "", socketPath, "send-keys", "Enter").
-		CombinedOutput(); err != nil {
-		fmt.Fprintf(stderr, "pfm chat modal: send Enter: %v: %s\n", err, strings.TrimSpace(string(output)))
+	if err := pfmcall.DenyModal(ctx, seat, count, clk); err != nil {
+		fmt.Fprintf(stderr, "pfm chat modal: %v\n", err)
 		return 1
 	}
 	fmt.Fprintf(stdout, "modal denied on %s\n", args[0])

@@ -51,6 +51,8 @@ const (
 var (
 	hookTargetClaude = pfmengine.MustLookup(pfmengine.Claude).LongName
 	hookTargetCodex  = pfmengine.MustLookup(pfmengine.Codex).LongName
+	// hookTargetOpenCode is the engine-guard plugin's row (probeOpenCodeEngineGuard).
+	hookTargetOpenCode = pfmengine.MustLookup(pfmengine.OpenCode).LongName
 )
 
 // HookProbeResult is one doctor hook row. What, Want and Got name the
@@ -65,8 +67,9 @@ type HookProbeResult struct {
 	Got   string
 }
 
-// ProbeExpectedHooks checks the launch hook binary once and the one hook pfm
-// owns in each Codex hooks.json, plus Codex hook residue. Claude account settings are inspected by the pfm-settings host check.
+// ProbeExpectedHooks checks the launch hook binary once, the hooks pfm owns in
+// each Codex hooks.json, plus Codex hook residue, and the OpenCode engine-guard
+// plugin. Claude account settings are inspected by the pfm-settings host check.
 func ProbeExpectedHooks(home string, config pfmconfig.Config) []HookProbeResult {
 	results := []HookProbeResult{}
 	if len(config.Accounts) == 0 {
@@ -87,6 +90,7 @@ func ProbeExpectedHooks(home string, config pfmconfig.Config) []HookProbeResult 
 		})
 	}
 	results = append(results, probeCodexHooks(home, config, binary)...)
+	results = append(results, probeOpenCodeEngineGuard(home)...)
 	ownershipPath := settingsHookOwnershipPath(managedRootForHome(home))
 	ownership, _, err := readSettingsHookOwnership(ownershipPath)
 	if err != nil {
@@ -346,7 +350,8 @@ func sortHookKeys(keys []settingsHookKey) {
 // without staging real settings.json content for it.
 var HookProbeOverride func(home string, machine pfmconfig.Config) []HookProbeResult
 
-// ReportHooks prints the launch executable, Codex hook and Codex residue checks.
+// ReportHooks prints the launch executable, Codex hook, Codex residue and
+// OpenCode engine-guard plugin checks.
 func ReportHooks(stdout io.Writer, home string, machine pfmconfig.Config, _ bool) (warnings, failures int) {
 	results := ProbeExpectedHooks(home, machine)
 	if HookProbeOverride != nil {

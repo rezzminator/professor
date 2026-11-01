@@ -19,6 +19,7 @@ type keepwarmProcFixture struct {
 	argv        []string
 	argvErr     error
 	zombie      bool
+	foreign     bool
 	identityErr error
 	born        int64
 	birthErr    error
@@ -26,25 +27,30 @@ type keepwarmProcFixture struct {
 
 func (proc keepwarmProcFixture) Cmdline(int) ([]string, error) { return proc.argv, proc.argvErr }
 func (proc keepwarmProcFixture) ProcessIdentity(int) (gather.ProcessIdentity, error) {
-	return gather.ProcessIdentity{Zombie: proc.zombie}, proc.identityErr
+	uid := uint32(os.Geteuid())
+	if proc.foreign {
+		uid++
+	}
+	return gather.ProcessIdentity{Zombie: proc.zombie, EffectiveUID: uid}, proc.identityErr
 }
 func (proc keepwarmProcFixture) Birth(int) (int64, error) { return proc.born, proc.birthErr }
 
 // Probe failures differ from negative liveness: unreadable is ERR, never ?.
 func TestCacheKeepwarmProbe(t *testing.T) {
 	for _, tc := range []struct {
-		name                                   string
-		signal, argvErr, identityErr, birthErr error
-		born                                   int64
-		argv                                   []string
-		zombie, live, wantErr, exitDuringRead  bool
+		name                                     string
+		aliveErr, argvErr, identityErr, birthErr error
+		born                                     int64
+		argv                                     []string
+		gone, foreign, zombie, live, wantErr     bool
+		exitDuringRead                           bool
 	}{
 		{name: "Claude", argv: []string{"claude"}, live: true},
 		{name: "native version", argv: []string{"/state/versions/2.1.302"}, live: true},
 		{name: "other program", argv: []string{"bash"}},
-		{name: "gone", signal: syscall.ESRCH},
-		{name: "another user", signal: syscall.EPERM},
-		{name: "signal failure", signal: syscall.EIO, wantErr: true},
+		{name: "gone", gone: true},
+		{name: "another user", argv: []string{"claude"}, foreign: true},
+		{name: "probe failure", aliveErr: syscall.EIO, wantErr: true},
 		{name: "zombie", argv: []string{"claude"}, zombie: true},
 		{name: "argv unreadable", argvErr: syscall.EIO, wantErr: true},
 		{name: "identity unreadable", identityErr: syscall.EIO, wantErr: true},
@@ -59,17 +65,18 @@ func TestCacheKeepwarmProbe(t *testing.T) {
 				argv:        tc.argv,
 				argvErr:     tc.argvErr,
 				zombie:      tc.zombie,
+				foreign:     tc.foreign,
 				identityErr: tc.identityErr,
 				born:        tc.born,
 				birthErr:    tc.birthErr,
 			}
 			calls := 0
-			live, err := keepwarmProbe(proc, func(int) error {
+			live, err := keepwarmProbe(proc, func(int) (bool, error) {
 				calls++
 				if tc.exitDuringRead && calls > 1 {
-					return syscall.ESRCH
+					return false, nil
 				}
-				return tc.signal
+				return !tc.gone, tc.aliveErr
 			})(42, 1000*1000)
 			if live != tc.live || (err != nil) != tc.wantErr {
 				t.Fatalf("live=%t err=%v, want live=%t error=%t", live, err, tc.live, tc.wantErr)

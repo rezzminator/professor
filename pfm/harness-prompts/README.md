@@ -64,7 +64,7 @@ source a host without a clone composes from.
 
 ## The Claude drift baseline
 
-- `claude/baselines/harness-original-v2.1.300.md` and `claude/baselines/harness-opus-v2.1.300.md`
+- `claude/baselines/harness-original-v2.1.316.md` and `claude/baselines/harness-opus-v2.1.316.md`
   are reviewed Sonnet and Opus built-in prompt baselines, captured in print mode with dynamic
   sections excluded. These are frozen captures: no test or suite re-captures or re-verifies them
   against a real Claude CLI. The only live capture is `pfm doctor` on a host; re-pinning follows

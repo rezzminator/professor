@@ -36,6 +36,7 @@ func TestFinisherSurfacesAKillItNeverSawLand(t *testing.T) {
 	tmux := &fakeTmux{existsErrFor: 10, killPaneErr: killPaneErr}
 	finisher, err := NewFinisher(database, Dependencies{
 		Tmux:         tmux,
+		Screen:       tmux,
 		Refresher:    refreshFunc(func(context.Context) error { return nil }),
 		Delay:        time.Millisecond,
 		PollEvery:    time.Millisecond,

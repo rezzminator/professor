@@ -205,3 +205,52 @@ func TestReadStatuslineSnapshotConfirmsAMergeAtItsOldestReading(t *testing.T) {
 			confirmedAt, now.Add(-10*time.Minute))
 	}
 }
+
+// A snapshot that reports the plain windows and leaves one out says the plan
+// has no such window: an older seat's reading of it is not merged back in. A
+// newer seat that does report it wins over an older omission.
+func TestReadStatuslineSnapshotDropsAWindowANewerSnapshotOmitted(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	configDir := filepath.Join(t.TempDir(), ".claude")
+	fiveReset := now.Add(2 * time.Hour).Unix()
+	weekReset := now.Add(60 * time.Hour).Unix()
+	write := func(directory, name string, age time.Duration, windows map[string]any) {
+		t.Helper()
+		body, err := json.Marshal(map[string]any{
+			"acct": 3, "config_dir": configDir, "ts": now.Add(-age).Unix(), "windows": windows,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(directory, name), body, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	both := map[string]any{
+		"five_hour": map[string]any{"used_percentage": 40, "resets_at": fiveReset},
+		"seven_day": map[string]any{"used_percentage": 10, "resets_at": weekReset},
+	}
+	weekOnly := map[string]any{"seven_day": map[string]any{"used_percentage": 12, "resets_at": weekReset}}
+
+	omitted := t.TempDir()
+	write(omitted, "acct-3.idle.json", 10*time.Minute, both)
+	write(omitted, "acct-3.live.json", time.Minute, weekOnly)
+	usage, _, found, err := ReadStatuslineSnapshot(omitted, 3, configDir, now, time.Hour)
+	if err != nil || !found {
+		t.Fatalf("found=%v err=%v", found, err)
+	}
+	if usage.FiveHour.Utilization != nil {
+		t.Fatalf("five_hour=%v came back from a seat older than the answer that omitted it", usage.FiveHour)
+	}
+	if usage.SevenDay.Utilization == nil || *usage.SevenDay.Utilization != 12 {
+		t.Fatalf("seven_day=%v, want 12%%", usage.SevenDay)
+	}
+
+	reported := t.TempDir()
+	write(reported, "acct-3.idle.json", 10*time.Minute, weekOnly)
+	write(reported, "acct-3.live.json", time.Minute, both)
+	usage, _, _, err = ReadStatuslineSnapshot(reported, 3, configDir, now, time.Hour)
+	if err != nil || usage.FiveHour.Utilization == nil || *usage.FiveHour.Utilization != 40 {
+		t.Fatalf("five_hour=%v err=%v, want the newer seat's 40%%", usage.FiveHour, err)
+	}
+}

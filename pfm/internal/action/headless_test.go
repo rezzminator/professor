@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
@@ -117,7 +118,7 @@ func TestHeadlessClaudeUsesRolePromptFileAndKeepsCallerPromptAlone(t *testing.T)
 	if parsedShell(t, plan.Run).PromptFile != rolePrompt {
 		t.Fatalf("Claude command does not carry per-seat prompt file: %s", plan.Run)
 	}
-	if strings.Contains(plan.Run, Quote(mustProfessorPromptPath(t, home))) {
+	if strings.Contains(plan.Run, cmdparse.Quote(mustProfessorPromptPath(t, home))) {
 		t.Fatalf("Claude command still carries staged fleet prompt: %s", plan.Run)
 	}
 	if strings.Count(plan.Run, "caller prompt") != 1 {
@@ -138,7 +139,7 @@ func TestHeadlessCodexCarriesWholeRoleAsDeveloperInstructions(t *testing.T) {
 	}
 	escaped := strings.ReplaceAll(constitution, `\`, `\\`)
 	escaped = strings.ReplaceAll(escaped, `"""`, `\"\"\"`)
-	want := Quote("developer_instructions=\"\"\"\n" + escaped + "\"\"\"")
+	want := cmdparse.Quote("developer_instructions=\"\"\"\n" + escaped + "\"\"\"")
 	if !strings.Contains(plan.Run, " '-c' "+want) {
 		t.Fatalf(
 			"Codex command does not carry complete developer instructions (%d bytes): %s",
@@ -171,7 +172,7 @@ func TestHeadlessClaudeAccountOneAndCacheArmed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HeadlessRun() error = %v", err)
 	}
-	if !strings.Contains(plan.Run, "CLAUDE_CONFIG_DIR="+Quote(pfmconfig.DefaultAccountDir(home, 1))) {
+	if !strings.Contains(plan.Run, "CLAUDE_CONFIG_DIR="+cmdparse.Quote(pfmconfig.DefaultAccountDir(home, 1))) {
 		t.Fatalf("account 1 must use its config dir %s: %s", pfmconfig.DefaultAccountDir(home, 1), plan.Run)
 	}
 	// Match the assignments themselves, never "…=1 claude": launch-env words
@@ -420,7 +421,8 @@ func TestPlanCodexResolvesBareRosterTierToCodexModelID(t *testing.T) {
 		if at < 0 || at+1 >= len(plan.SeatRun.Args) || plan.SeatRun.Args[at+1] != want {
 			t.Fatalf("--model %s launched args %q, want --model %s", tier, plan.SeatRun.Args, want)
 		}
-		if !strings.Contains(plan.Run, Quote("--model")+" "+Quote(want)) || strings.Contains(plan.Run, Quote("astra")) {
+		if !strings.Contains(plan.Run, cmdparse.Quote("--model")+" "+cmdparse.Quote(want)) ||
+			strings.Contains(plan.Run, cmdparse.Quote("astra")) {
 			t.Fatalf("--model %s launched run %q, want --model %s", tier, plan.Run, want)
 		}
 	}
@@ -523,7 +525,7 @@ func TestPlanCodexPreservesResumeIdentity(t *testing.T) {
 			if !reflect.DeepEqual(plan.SeatRun.Args, want) || plan.Record != nil {
 				t.Fatalf("resume recipe args=%q want=%q record=%+v", plan.SeatRun.Args, want, plan.Record)
 			}
-			if sid != "" && !strings.Contains(plan.Run, Quote("resume")+" "+Quote(sid)) {
+			if sid != "" && !strings.Contains(plan.Run, cmdparse.Quote("resume")+" "+cmdparse.Quote(sid)) {
 				t.Fatalf("resume shell=%s", plan.Run)
 			}
 		})

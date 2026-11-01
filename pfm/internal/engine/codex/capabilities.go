@@ -5,6 +5,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/action"
 	"github.com/rezzminator/professor/pfm/internal/ask"
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/index"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
@@ -24,12 +25,13 @@ func (Launcher) ComposerReady(capture string) bool { return spawn.CodexComposerR
 
 func (Launcher) Rename(
 	ctx context.Context,
-	tmux spawn.Tmux,
-	socket, target, name string,
+	screen pfmcall.Screen,
+	target pfmcall.Target,
+	name string,
 	timings spawn.Timings,
 	trace spawn.Trace,
 ) (string, error) {
-	return spawn.RenameCodex(ctx, tmux, socket, target, name, timings, trace)
+	return spawn.RenameCodex(ctx, screen, target, name, timings, trace)
 }
 
 type UsageSource struct{}

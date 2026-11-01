@@ -3,13 +3,13 @@ package claudelaunch
 import (
 	"cmp"
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"uuid"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -78,6 +78,23 @@ func CheckConfigDir(account int, dir string) error {
 	return nil
 }
 
+// SessionArgs is the one spelling of Claude's session words: `--session-id S`,
+// `--resume R`, `--fork-session`, each only when set, in that order. Render and
+// the restored-seat recipe both call it.
+func SessionArgs(sessionID, resume string, fork bool) []string {
+	var words []string
+	if sessionID != "" {
+		words = append(words, flagSessionID, sessionID)
+	}
+	if resume != "" {
+		words = append(words, flagResume, resume)
+	}
+	if fork {
+		words = append(words, flagForkSession)
+	}
+	return words
+}
+
 func Render(request Request, machine pfmconfig.Config) (Launch, error) {
 	prefs := machine.EffectiveClaude(request.Account)
 	result := Launch{Unset: Hygiene(), Binary: prefs.Binary, Cache1H: prefs.Cache1H, SessionID: request.SessionID}
@@ -121,15 +138,7 @@ func Render(request Request, machine pfmconfig.Config) (Launch, error) {
 	result.Env = append(result.Env, envCacheLiveControlMainTTL+"="+promptCacheTTL(result.Cache1H))
 	result.Env = append(result.Env, ShellEnv(paths.OSEnv{}.Lookup)...)
 	costLedgerPlan(request, prefs.CostLedger, &result)
-	if request.SessionID != "" {
-		result.Argv = append(result.Argv, flagSessionID, request.SessionID)
-	}
-	if request.Resume != "" {
-		result.Argv = append(result.Argv, flagResume, request.Resume)
-	}
-	if request.Fork {
-		result.Argv = append(result.Argv, flagForkSession)
-	}
+	result.Argv = append(result.Argv, SessionArgs(request.SessionID, request.Resume, request.Fork)...)
 	if name := naming.LaunchName(request.Name); name != "" && !argsName(request.Args) && !resumesInPlace(request) {
 		result.Argv = append(result.Argv, flagName, name)
 	}
@@ -401,12 +410,7 @@ func argsPersonaFlag(args []string, flag string) bool {
 	return false
 }
 
+// NewSessionID is a random version-4 UUID for a fresh Claude session.
 func NewSessionID() (string, error) {
-	var bytes [16]byte
-	if _, err := rand.Read(bytes[:]); err != nil {
-		return "", err
-	}
-	bytes[6] = (bytes[6] & 0x0f) | 0x40
-	bytes[8] = (bytes[8] & 0x3f) | 0x80
-	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", bytes[:4], bytes[4:6], bytes[6:8], bytes[8:10], bytes[10:]), nil
+	return uuid.NewV4().String(), nil
 }

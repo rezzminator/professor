@@ -90,3 +90,25 @@ func TestReplaceRestoresTheRealStdin(t *testing.T) {
 		t.Fatal("Replace's undo left the replaced stdin in place")
 	}
 }
+
+func TestRelocateKeepsALiveDirectoryAndMovesAMissingOneHome(t *testing.T) {
+	home, live := t.TempDir(), t.TempDir()
+	if dir, notice := Relocate(live, home); dir != live || notice != "" {
+		t.Fatalf("live directory = %q %q, want %q and no notice", dir, notice, live)
+	}
+	gone := live + "/gone"
+	if dir, notice := Relocate(
+		gone,
+		home,
+	); dir != home ||
+		notice != "opened in "+home+": its own directory "+gone+" is gone" {
+		t.Fatalf("missing directory = %q %q", dir, notice)
+	}
+	if dir, notice := Relocate(
+		"",
+		home,
+	); dir != home ||
+		notice != "opened in "+home+": no directory of its own was recorded" {
+		t.Fatalf("unrecorded directory = %q %q", dir, notice)
+	}
+}

@@ -48,11 +48,11 @@ The Claude Code settings a project carries in its own tree: this repo's `.claude
 
 ## The outputStyle gate
 
-`infra/check-self-hosted-manifest.sh:247-265` (run by `.claude/scripts/test.sh`'s `manifest` check and `.claude/scripts/dev.sh iso test templates`) fails when:
+`checks_templates_output_styles` in `infra/fence/checks.sh` (run by `.claude/scripts/test.sh`'s `output-styles` check and the gate's `templates.mirrors` step) fails when:
 
 - `.claude/output-styles/` is tracked or exists on disk;
-- the manifest advertises `installed.output_styles`;
-- `.claude/settings.json`, `templates/project/settings.json` or `templates/project/settings-global.json` has an `outputStyle` key.
+- `.claude/settings.json`, `templates/project/settings.json` or `templates/project/settings-global.json` has an `outputStyle` key, or cannot be read as a JSON object;
+- git cannot list the tracked files.
 
 A style file would be inert under the per-launch `outputStyle: default` pin, so the gate is what surfaces one.
 

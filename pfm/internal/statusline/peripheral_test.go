@@ -105,7 +105,7 @@ func TestCodexQuotaMissingErrorUnknownStaleAndZero(t *testing.T) {
 	}{
 		{name: "missing", want: "quota missing"},
 		{name: "malformed", body: `{`, want: "quota error"},
-		{name: "unknown", body: `{}`, want: "quota unknown"},
+		{name: "no window answered draws nothing", body: `{}`},
 		{name: "missing percent", body: `{"primary":{"windowDurationMins":300,"resetsAt":1900000000}}`, want: "quota error"},
 		{name: "zero", body: `{"primary":{"usedPercent":0,"windowDurationMins":300,"resetsAt":1900000000}}`, want: "5h-used:0%"},
 		{name: "stale", body: `{"primary":{"usedPercent":30,"windowDurationMins":300,"resetsAt":1900000000}}`, want: "stale", stale: true},
@@ -125,7 +125,8 @@ func TestCodexQuotaMissingErrorUnknownStaleAndZero(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if got := stripANSICodes(codexQuotaSegment(r, r.now())); !strings.Contains(got, tc.want) {
+			if got := stripANSICodes(codexQuotaSegment(r, r.now())); !strings.Contains(got, tc.want) ||
+				tc.want == "" && got != "" {
 				t.Fatalf("%q lacks %q", got, tc.want)
 			}
 		})

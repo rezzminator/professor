@@ -1,32 +1,85 @@
 package installer
 
 import (
+	"reflect"
 	"testing"
 )
 
-// TestSanitizeJSONCToleratesConsecutiveTrailingCommas covers the one gap a
-// single-comma lookahead leaves: two (or more) trailing commas in a row —
-// two edits landing on the same spot, or a block moved and re-punctuated —
-// where the first comma is followed by another comma, not directly by
-// whitespace-then-bracket.
-func TestSanitizeJSONCToleratesConsecutiveTrailingCommas(t *testing.T) {
+// TestJSONCReadsAndEditsWhatVSCodeAccepts covers the JSONC a hand-edited
+// settings file carries: two (or more) trailing commas in a row — two edits
+// landing on the same spot, or a block moved and re-punctuated — comments,
+// and commas or brackets inside strings, which must come back verbatim from
+// a read and from a read after an edit or a removal, because uninstall restores them.
+func TestJSONCReadsAndEditsWhatVSCodeAccepts(t *testing.T) {
 	t.Parallel()
-	for name, content := range map[string]string{
-		"double trailing comma in a nested object":  `{"a": {"x": 1,,},"b":2}`,
-		"triple trailing comma in a nested object":  `{"a": {"x": 1,,,},"b":2}`,
-		"double trailing comma in an array":         `{"a": [1, 2,,],"b":2}`,
-		"double trailing comma spread across lines": "{\"a\": {\"x\": 1,\n  ,\n  },\"b\":2}",
+	for name, row := range map[string]struct {
+		content string
+		want    map[string]any
+	}{
+		"double trailing comma in a nested object": {
+			`{"a": {"x": 1,,},"b":2}`,
+			map[string]any{"a": map[string]any{"x": 1.0}, "b": 2.0},
+		},
+		"triple trailing comma in a nested object": {
+			`{"a": {"x": 1,,,},"b":2}`,
+			map[string]any{"a": map[string]any{"x": 1.0}, "b": 2.0},
+		},
+		"double trailing comma in an array": {
+			`{"a": [1, 2,,],"b":2}`,
+			map[string]any{"a": []any{1.0, 2.0}, "b": 2.0},
+		},
+		"double trailing comma spread across lines": {
+			"{\"a\": {\"x\": 1,\n  ,\n  },\"b\":2}",
+			map[string]any{"a": map[string]any{"x": 1.0}, "b": 2.0},
+		},
+		"comma before a closing bracket inside strings": {
+			`{"x": "a, }", "y": ["b, ]"],"b":2}`,
+			map[string]any{"x": "a, }", "y": []any{"b, ]"}, "b": 2.0},
+		},
+		"quote in a comment and doubled commas in a string": {
+			"{\"x\": \"a,,]\", // it's \"quoted\n\"b\":2,,}",
+			map[string]any{"x": "a,,]", "b": 2.0},
+		},
+		"line comment ending the file without a newline": {
+			`{"b":2} // last`,
+			map[string]any{"b": 2.0},
+		},
+		"double comma between members, the first removed": {
+			`{"b": 2,, "a": 1}`,
+			map[string]any{"a": 1.0, "b": 2.0},
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			document, err := decodeJSONCObject([]byte(content))
+			document, err := decodeJSONCObject([]byte(row.content))
 			if err != nil {
-				t.Fatalf("decodeJSONCObject: %v", err)
+				t.Fatalf("decodeJSONCObject(%q): %v", row.content, err)
 			}
-			if _, ok := document["b"].(float64); !ok {
-				t.Fatalf("decoded document missing sibling key: %#v", document)
+			if !reflect.DeepEqual(document, row.want) {
+				t.Fatalf("read %q\nwant %#v\ngot  %#v", row.content, row.want, document)
 			}
-			if _, err := parseJSONCObject([]byte(content), 0); err != nil {
-				t.Fatalf("parseJSONCObject: %v", err)
+			edited, err := setJSONCProperty([]byte(row.content), 0, "b", []byte("3"))
+			if err != nil {
+				t.Fatalf("setJSONCProperty(%q): %v", row.content, err)
+			}
+			document, err = decodeJSONCObject(edited)
+			if err != nil {
+				t.Fatalf("decodeJSONCObject(%q): %v", edited, err)
+			}
+			row.want["b"] = 3.0
+			if !reflect.DeepEqual(document, row.want) {
+				t.Fatalf("read after edit %q\nwant %#v\ngot  %#v", edited, row.want, document)
+			}
+			removed, err := removeJSONCProperty([]byte(row.content), 0, "b")
+			if err != nil {
+				t.Fatalf("removeJSONCProperty(%q): %v", row.content, err)
+			}
+			document, err = decodeJSONCObject(removed)
+			if err != nil {
+				t.Fatalf("decodeJSONCObject(%q) after removing b from %q: %v", removed, row.content, err)
+			}
+			delete(row.want, "b")
+			if !reflect.DeepEqual(document, row.want) {
+				t.Fatalf("read after removal %q\nwant %#v\ngot  %#v", removed, row.want, document)
 			}
 		})
 	}

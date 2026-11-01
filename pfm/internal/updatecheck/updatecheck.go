@@ -13,13 +13,13 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/semver"
 )
 
 const (
@@ -64,13 +64,6 @@ type FailureMarker struct {
 	Reason string       `json:"reason"`
 }
 
-type semanticVersion struct {
-	major      int
-	minor      int
-	patch      int
-	prerelease bool
-}
-
 // Read returns a notice only when the last successful lookup found a release
 // newer than the binary asking. Missing cache state is an ordinary first run;
 // malformed state is named to callers, which may deliberately keep the picker
@@ -87,9 +80,9 @@ func Read(path, current string) (Notice, bool, error) {
 	if err := json.Unmarshal(raw, &notice); err != nil {
 		return Notice{}, false, fmt.Errorf("decode update cache: %w", err)
 	}
-	installed, installedOK := parseNoticeVersion(current)
-	latest, latestOK := parseReleaseVersion(notice.Latest)
-	if !installedOK || !latestOK || !newer(latest, installed) {
+	installed, latest := normalizeVersion(current), normalizeVersion(notice.Latest)
+	if _, latestOK := semver.ParseVersion(latest); !semver.Valid(installed) || !latestOK ||
+		semver.Compare(latest, installed) <= 0 {
 		return Notice{}, false, nil
 	}
 	notice.Current = normalizeVersion(current)
@@ -107,7 +100,7 @@ func Read(path, current string) (Notice, bool, error) {
 // alone, to a machine that genuinely has no update — see ReadFailure.
 func CheckForUpdate(ctx context.Context, path, current, latestURL string, client *http.Client) error {
 	clk := clock.Real
-	if _, ok := parseNoticeVersion(current); !ok {
+	if !semver.Valid(normalizeVersion(current)) {
 		return fmt.Errorf("current version %q is not vMAJOR.MINOR.PATCH[-prerelease]", current)
 	}
 	release, err := acquire(path+".lock", clk.Now())
@@ -187,7 +180,7 @@ func performCheck(
 		}
 	}
 	latest := pathVersion(resolved)
-	if _, ok := parseReleaseVersion(latest); !ok {
+	if _, ok := semver.ParseVersion(latest); !ok {
 		return failureNetwork, fmt.Errorf(
 			"latest Professor release redirect %q has no vMAJOR.MINOR.PATCH tag",
 			location,
@@ -305,7 +298,7 @@ func checkedRecently(path, current string, now time.Time) (bool, error) {
 	if err := json.Unmarshal(raw, &notice); err != nil {
 		return false, nil
 	}
-	_, latestOK := parseReleaseVersion(notice.Latest)
+	_, latestOK := semver.ParseVersion(normalizeVersion(notice.Latest))
 	if notice.CheckedAt.IsZero() ||
 		notice.Current != normalizeVersion(current) ||
 		!latestOK ||
@@ -439,60 +432,4 @@ func normalizeVersion(value string) string {
 		value = "v" + value
 	}
 	return value
-}
-
-func parseNoticeVersion(value string) (semanticVersion, bool) {
-	value = strings.TrimPrefix(normalizeVersion(value), "v")
-	var prerelease bool
-	if separator := strings.IndexAny(value, "-+"); separator >= 0 {
-		if separator == 0 || separator == len(value)-1 {
-			return semanticVersion{}, false
-		}
-		// A "-" suffix is a pre-release (SemVer §9); a "+" suffix alone is
-		// build metadata (§10) and carries no ordering weight of its own, so
-		// only a "-" that appears before any "+" counts.
-		prerelease = value[separator] == '-'
-		value = value[:separator]
-	}
-	parts := strings.Split(value, ".")
-	if len(parts) != 3 {
-		return semanticVersion{}, false
-	}
-	numbers := make([]int, 3)
-	for index, part := range parts {
-		if part == "" {
-			return semanticVersion{}, false
-		}
-		number, err := strconv.Atoi(part)
-		if err != nil || number < 0 || strconv.Itoa(number) != part {
-			return semanticVersion{}, false
-		}
-		numbers[index] = number
-	}
-	return semanticVersion{major: numbers[0], minor: numbers[1], patch: numbers[2], prerelease: prerelease}, true
-}
-
-func parseReleaseVersion(value string) (semanticVersion, bool) {
-	normalized := strings.TrimPrefix(normalizeVersion(value), "v")
-	if strings.ContainsAny(normalized, "-+") {
-		return semanticVersion{}, false
-	}
-	return parseNoticeVersion(normalized)
-}
-
-func newer(candidate, current semanticVersion) bool {
-	if candidate.major != current.major {
-		return candidate.major > current.major
-	}
-	if candidate.minor != current.minor {
-		return candidate.minor > current.minor
-	}
-	if candidate.patch != current.patch {
-		return candidate.patch > current.patch
-	}
-	// Same core version: a release beats its own pre-release (SemVer §11).
-	// Two pre-releases of one core are never newer than each other here —
-	// candidate is always a published tag (parseReleaseVersion rejects any
-	// suffix), so no identifier ordering is needed.
-	return !candidate.prerelease && current.prerelease
 }

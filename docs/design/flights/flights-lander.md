@@ -49,6 +49,8 @@ The lander never waits on a child: it keeps hunting, verifying and writing the r
 
 ## Sync to the target
 
+With TARGET a branch, the lander first settles the true tip: it compares `git ls-remote origin` of the branch with that branch in the live checkout (the first `worktree list` entry), for the root on TARGET and for each submodule or plugin repo the change touches on its tracked branch. Local remote-tracking refs alone never settle it: a landing once reported no drift while the upstream plugin had been rebuilt and local `develop` held unpushed commits. `ls-remote` is the lander's read, a fetch is `gitter`'s; a failed `ls-remote` is drift `unknown`, never up to date. Ahead (live commits origin lacks), behind (origin commits the live ref lacks) and diverged are drift. The root behind only: `gitter` fetches and the tip becomes origin's tip. Every other drift is reported in the return's `SYNC` line and the report's COVERAGE.
+
 When TARGET's tip is not an ancestor of the worktree's HEAD, the lander has `gitter` stash, rebase the branch onto the tip and pop, in the foreground. On a conflict gitter stops with the markers in place; the lander resolves each path, keeping the change's intent on top of the tip, and tells gitter to finish. BASE becomes the tip, and the sync outcome goes into the report's COVERAGE and the return's `SYNC` line.
 
 ## The inventory and the computed spawn
@@ -78,7 +80,7 @@ Call 2 is one message spawning exactly the PLAN rows in the background: no row a
 
 ## The lander's own hunt
 
-With the children out, the lander owns what no cluster owns: the seams between clusters, each INTENT claim, every changed file no hunter row lists (docs, prompts, configs, deleted files) and the untracked files, read whole. It reads every changed function with the helpers it relies on and checks LINES, PATHS, GUARDS, REMOVED, CONCURRENCY and HOT PATH, INPUTS, TESTS and CLAIMS. Two or more threads leaving the diff go to one more background sub-lander.
+With the children out, the lander owns what no cluster owns: the seams between clusters, each INTENT claim, every changed file no hunter row lists (docs, prompts, configs, deleted files) and the untracked files, read whole. It reads every changed function with the helpers it relies on and checks LINES, PATHS, GUARDS, REMOVED, CONCURRENCY and HOT PATH, INPUTS, TESTS, CLAIMS and TWIN DOORS. Two or more threads leaving the diff go to one more background sub-lander.
 
 ## Judge and report
 
@@ -99,7 +101,7 @@ With the children out, the lander owns what no cluster owns: the seams between c
 
 ```text
 PASS {worktree} | FIXED {worktree} | FAIL {worktree}
-SYNC {up to date | synced {old base} → {TIP}, resolved {paths} | none}
+SYNC {up to date | synced {old base} → {TIP}, resolved {paths} | none}{; drift {repo} {ahead|behind|diverged|unknown} {live sha} vs {origin sha}, …}
 FINDINGS F{n} {fixed — file:line | outside the change — why}, … | none
 GATE {project} · {last full-gate verdict line as printed}, …
 RESIDUALS … | none

@@ -123,6 +123,7 @@ type indicatorPainter struct {
 	// already-focused tab seen need not emit any focus or agent-state event.
 	hasDone         bool
 	tabs            TabProvider
+	tabsChanged     TabProbe
 	hasTabs         bool
 	tabObservations []TabDecoration
 	// unproved holds each pane whose ownership proof failed: the status it
@@ -150,6 +151,7 @@ type indicatorPainter struct {
 	// own clear, which is that theme off's work.
 	recordWritten bool
 	clearing      bool
+	cadence       indicatorCadence
 }
 
 type unprovedPane struct {
@@ -225,6 +227,7 @@ func (painter *indicatorPainter) run(ctx context.Context) error {
 			return err
 		}
 		if !held {
+			painter.nudge() // the blinker re-reads the tabs at its next tick
 			return nil
 		}
 		defer release()
@@ -238,7 +241,9 @@ func (painter *indicatorPainter) run(ctx context.Context) error {
 		}
 		_, err = painter.blink(ctx)
 		if ctx.Err() != nil {
-			if restoreErr := painter.restoreTabs(context.WithoutCancel(ctx)); restoreErr != nil {
+			restoreCtx, cancel := painter.restoreContext(ctx)
+			defer cancel()
+			if restoreErr := painter.restoreTabs(restoreCtx); restoreErr != nil {
 				painter.logf("%v", restoreErr)
 				return errors.Join(err, restoreErr)
 			}
@@ -278,62 +283,6 @@ func (painter *indicatorPainter) run(ctx context.Context) error {
 	}
 }
 
-// blink repaints on every half-second boundary until nothing is blocked or done
-// and no tab is decorated. A
-// cancelled context ends it cleanly; maxPaintFailures failed repaints in a row
-// end it with the last error. A tick that finds the socket's stop marker, or
-// its record gone (ClearIndicators: pfm's Herdr theme is off), clears the
-// indicators and stops the blinker, stopped true. Every failure is written to
-// stderr as it happens.
-func (painter *indicatorPainter) blink(ctx context.Context) (stopped bool, err error) {
-	failures := 0
-	for {
-		wait := blinkHalfPeriod - time.Duration(painter.clock.Now().UnixNano())%blinkHalfPeriod
-		if err := painter.clock.Sleep(ctx, wait); err != nil {
-			return false, nil // Sleep ends early only when ctx is done
-		}
-		stop := !painter.recorded()
-		if !stop {
-			marked, err := painter.stopMarked()
-			if err != nil {
-				painter.logf("%v", err)
-				return true, err
-			}
-			stop = marked
-		}
-		if stop {
-			if err := painter.clear(ctx); err != nil {
-				painter.logf("%v", err)
-				return true, err
-			}
-			return true, nil
-		}
-		blocked, _, err := painter.paint(ctx)
-		if err != nil {
-			if ctx.Err() != nil {
-				return false, nil
-			}
-			painter.logf("%v", err)
-			failures++
-			if failures >= maxPaintFailures {
-				painter.logf("herdr indicators: blinker on socket %s gave up after %d failed repaints in a row",
-					painter.socket, failures)
-				return false, fmt.Errorf(
-					"herdr indicators: blinker on socket %s gave up after %d failed repaints in a row: %w",
-					painter.socket,
-					failures,
-					err,
-				)
-			}
-			continue
-		}
-		failures = 0
-		if !blocked && !painter.hasDone && !painter.hasTabs {
-			return false, nil
-		}
-	}
-}
-
 // paint lists every pane and workspace once and writes the indicator tokens
 // that differ from what the blink phase of the clock wants, one request per
 // changed target. blocked says whether anything listed is blocked, wrote
@@ -341,6 +290,13 @@ func (painter *indicatorPainter) blink(ctx context.Context) (stopped bool, err e
 // latest list. A target that vanished between list and report is logged and
 // skipped; every other refusal or failure ends the paint with its error.
 func (painter *indicatorPainter) paint(ctx context.Context) (blocked, wrote bool, err error) {
+	return painter.paintFrom(ctx, true)
+}
+
+// paintFrom is paint; scan false reuses the tab observations already read and
+// paints tabs only while one animates.
+func (painter *indicatorPainter) paintFrom(ctx context.Context, scan bool) (blocked, wrote bool, err error) {
+	defer func() { painter.cadence.lastBlocked = blocked }()
 	targets, err := painter.list(ctx)
 	if err != nil {
 		return false, false, err
@@ -374,10 +330,12 @@ func (painter *indicatorPainter) paint(ctx context.Context) (blocked, wrote bool
 		}
 		wrote = wrote || accepted
 	}
-	if painter.tabs != nil {
-		observations, err := painter.tabs(ctx, painter.socket)
-		if err != nil {
-			return blocked, wrote, fmt.Errorf("herdr tab status: %w", err)
+	if painter.tabs != nil && (scan || painter.tabsAnimate()) {
+		observations := painter.tabObservations
+		if scan {
+			if observations, err = painter.tabs(ctx, painter.socket); err != nil {
+				return blocked, wrote, fmt.Errorf("herdr tab status: %w", err)
+			}
 		}
 		accepted, err := painter.paintTabs(ctx, observations, tick)
 		wrote = wrote || accepted

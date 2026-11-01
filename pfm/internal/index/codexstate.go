@@ -120,7 +120,7 @@ func codexStoreRollout(
 	if path == "" {
 		// The rollout row's path is a unique key as well as a location. A
 		// placeholder keeps the key without claiming a file that Codex never
-		// wrote; walkCodexRollouts only ever collects rollout-*.jsonl names.
+		// wrote; walkCodexRollouts only ever collects rollout-* names.
 		path = filepath.Join(codexHome, "sessions", thread.ID+".jsonl")
 	}
 	activityNS := int64(0)

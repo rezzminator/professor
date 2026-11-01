@@ -381,7 +381,12 @@ func (finder *discoverer) inspectOwnedMCPDaemon(proc process) (daemonOwnership, 
 		}
 		configPath, err = config.ResolvePathFrom(&paths.MapEnv{Values: environment}, environment["HOME"])
 		if err != nil {
-			return daemonForeign, fmt.Errorf("pid %d daemon config: %w", proc.PID, err)
+			// A torn environ read of an exiting process can lack PFM_CONFIG: a not-exist
+			// cause proves exit or meets the deadline; any other cause fails at once.
+			return daemonForeign, &daemonMissingRead{
+				door: "environment",
+				err:  fmt.Errorf("pid %d daemon config: %w", proc.PID, err),
+			}
 		}
 	}
 	if !filepath.IsAbs(configPath) || !filepath.IsAbs(finder.deps.ConfigPath) {

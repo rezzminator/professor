@@ -89,7 +89,7 @@ func TestSelfKillOnUnindexedLineageMemberResolvesToRoot(t *testing.T) {
 					return Target{ID: memberID, Engine: pfmengine.Codex, DataPath: memberPath}, nil
 				},
 				ProcFS:  proc,
-				Tmux:    &fakeTmux{panePID: 11},
+				Tmux:    &fakeTmux{},
 				Spawner: &captureSpawner{},
 				Now:     func() time.Time { return time.Unix(50, 0) },
 			})

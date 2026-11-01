@@ -2,6 +2,7 @@ package testjail
 
 import (
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -56,5 +57,42 @@ func TestHerdrWorkspaceReplyCreatesTheAskedLabel(t *testing.T) {
 	}
 	if _, handled := HerdrWorkspaceReply("pane.get", "", "w6"); handled {
 		t.Fatal("a pane request was answered as placement")
+	}
+}
+
+func TestStageHerdrKeepAnswersListOnly(t *testing.T) {
+	StageHerdrKeep(t, `{"enumeration":"OK"}`, 0)
+	for _, tc := range []struct {
+		name, socket, inner, want string
+		exit                      int
+	}{
+		{name: "upstream socket", socket: "/fixture/herdr.sock", want: "{\"enumeration\":\"OK\"}\n"},
+		{
+			name: "held shell", socket: "/fixture/herdr.sock", inner: "h1", exit: 1,
+			want: `{"enumeration":"ERROR","error":"recursive keeper invocation refused","holders":[],"panes":[]}` + "\n",
+		},
+		{
+			name: "no socket", exit: 1,
+			want: `{"enumeration":"ERROR","error":"HERDR_SOCKET_PATH required","holders":[],"panes":[]}` + "\n",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			list := exec.Command("herdr-keep", "list", "--json")
+			list.Env = []string{"PATH=" + paths.OSEnv{}.Get("PATH")}
+			if tc.socket != "" {
+				list.Env = append(list.Env, "HERDR_SOCKET_PATH="+tc.socket)
+			}
+			if tc.inner != "" {
+				list.Env = append(list.Env, "HERDR_KEEP_INNER="+tc.inner)
+			}
+			out, err := list.Output()
+			if string(out) != tc.want || list.ProcessState.ExitCode() != tc.exit {
+				t.Fatalf("herdr-keep list --json = %q, exit %d (%v); want %q, exit %d",
+					out, list.ProcessState.ExitCode(), err, tc.want, tc.exit)
+			}
+		})
+	}
+	if err := exec.Command("herdr-keep", "kill", "x").Run(); err == nil {
+		t.Fatal("herdr-keep kill ran; the fake answers list --json only")
 	}
 }

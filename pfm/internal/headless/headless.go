@@ -26,7 +26,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"time"
 
@@ -363,10 +362,6 @@ func newerClaudeSidechain(transcriptPath, sessionID string, parentModifiedUnixNS
 // codexMaxLineageDepth bounds the parent walk of a nested Codex sub-agent.
 const codexMaxLineageDepth = 8
 
-var codexRolloutName = regexp.MustCompile(
-	`^rollout-.*-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$`,
-)
-
 // newerCodexSubagent reports whether a sub-agent of the Codex thread parentID
 // wrote a rollout after parentModifiedUnixNS: the parent then sits at its
 // prompt while its sub-agent works, which is working, not idle.
@@ -424,18 +419,23 @@ func newerCodexSubagent(transcriptPath, parentID string, parentModifiedUnixNS in
 				if err != nil {
 					return false, fmt.Errorf("read Codex sessions directory %s: %w", dir, err)
 				}
+				paths := make([]string, 0, len(files))
 				for _, file := range files {
-					match := codexRolloutName.FindStringSubmatch(file.Name())
-					if file.IsDir() || match == nil {
+					if !file.IsDir() {
+						paths = append(paths, filepath.Join(dir, file.Name()))
+					}
+				}
+				for _, path := range codexmeta.PreferPlain(paths) {
+					id, _, _, ok := codexmeta.ParseRolloutName(filepath.Base(path), time.UTC)
+					if !ok || !pfmengine.IsUUID(id) {
 						continue
 					}
-					path := filepath.Join(dir, file.Name())
-					info, err := file.Info()
+					info, err := os.Lstat(path)
 					if err != nil {
 						return false, fmt.Errorf("inspect Codex rollout %s: %w", path, err)
 					}
-					byID[match[1]] = path
-					if info.ModTime().UnixNano() > parentModifiedUnixNS && match[1] != parentID {
+					byID[id] = path
+					if info.ModTime().UnixNano() > parentModifiedUnixNS && id != parentID {
 						newer = append(newer, path)
 					}
 				}
@@ -481,7 +481,7 @@ func codexSubagentReaches(path, parentID string, byID map[string]string) (bool, 
 // first line is not written yet (empty, or no newline): a rollout still being
 // created says nothing about lineage and is not an error.
 func readCodexHeader(path string) (header codexmeta.Header, ok bool, returnErr error) {
-	file, err := os.Open(path)
+	file, err := codexmeta.OpenRollout(path)
 	if err != nil {
 		return codexmeta.Header{}, false, fmt.Errorf("open Codex rollout %s: %w", path, err)
 	}

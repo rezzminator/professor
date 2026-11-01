@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"uuid"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -180,13 +181,13 @@ func newClaudeSession(proc *process, call claudeInvocation) (*claudeSession, err
 	}
 	session.sessionID = call.sessionID
 	if call.resumed && call.fork && session.sessionID == "" {
-		session.sessionID = newUUID()
+		session.sessionID = uuid.NewV4().String()
 	}
 	if session.sessionID == "" {
 		session.sessionID = proc.script.SessionID
 	}
 	if session.sessionID == "" {
-		session.sessionID = newUUID()
+		session.sessionID = uuid.NewV4().String()
 	}
 	session.transcript = filepath.Join(configDir, "projects", claudeProjectSlug(proc.cwd), session.sessionID+".jsonl")
 	if call.resumed && call.fork && !proc.script.NoTranscript {
@@ -294,7 +295,7 @@ func (session *claudeSession) tool(step Step) (string, error) {
 	}
 	payload := session.payload(hookPreToolUse)
 	payload.ToolName, payload.ToolInput = step.Tool, input
-	use := contentPart{Type: "tool_use", ID: "toolu_" + newUUID()[:8], Name: step.Tool, Input: input}
+	use := contentPart{Type: "tool_use", ID: "toolu_" + uuid.NewV4().String()[:8], Name: step.Tool, Input: input}
 	payload.ToolUseID = use.ID
 	answers, err := session.fire(hookPreToolUse, step.Tool, payload)
 	if err != nil {
@@ -365,7 +366,7 @@ func (session *claudeSession) rename(name string) error {
 // descends, so no reader counts them; the pane shows the agent row
 // internal/call/guards.go:24 exempts from the composer.
 func (session *claudeSession) background(step Step) (string, error) {
-	agentID := "agent-" + newUUID()[:8]
+	agentID := "agent-" + uuid.NewV4().String()[:8]
 	sidechain := filepath.Join(strings.TrimSuffix(session.transcript, ".jsonl"), "subagents", agentID+".jsonl")
 	ask := session.userRecord("Sidechain task for "+step.Name, false)
 	ask.IsSidechain, ask.AgentID = true, agentID
@@ -402,7 +403,7 @@ func (session *claudeSession) mcp(step Step) error {
 	if len(input) == 0 {
 		input = json.RawMessage(`{}`)
 	}
-	use := contentPart{Type: "tool_use", ID: "toolu_" + newUUID()[:8], Name: step.Tool, Input: input}
+	use := contentPart{Type: "tool_use", ID: "toolu_" + uuid.NewV4().String()[:8], Name: step.Tool, Input: input}
 	if err := session.write(
 		session.assistantRecord([]contentPart{use}, session.proc.script.Tokens, false),
 	); err != nil {
@@ -486,7 +487,7 @@ func (session *claudeSession) clear() error {
 	if err := session.finish("clear"); err != nil {
 		return err
 	}
-	session.sessionID = newUUID()
+	session.sessionID = uuid.NewV4().String()
 	session.transcript = filepath.Join(
 		session.configDir,
 		"projects",
@@ -747,7 +748,7 @@ type contentPart struct {
 func (session *claudeSession) userRecord(text string, meta bool) claudeRecord {
 	return claudeRecord{
 		Type:         roleUser,
-		UUID:         newUUID(),
+		UUID:         uuid.NewV4().String(),
 		SessionID:    session.sessionID,
 		Timestamp:    stamp(time.Now()),
 		CWD:          session.proc.cwd,
@@ -760,7 +761,7 @@ func (session *claudeSession) userRecord(text string, meta bool) claudeRecord {
 
 func (session *claudeSession) assistantRecord(parts []contentPart, usage Tokens, sidechain bool) claudeRecord {
 	return claudeRecord{
-		Type: roleAssistant, UUID: newUUID(), SessionID: session.sessionID, Timestamp: stamp(time.Now()),
+		Type: roleAssistant, UUID: uuid.NewV4().String(), SessionID: session.sessionID, Timestamp: stamp(time.Now()),
 		CWD: session.proc.cwd, IsSidechain: sidechain,
 		Message: &claudeMessage{
 			Role:    roleAssistant,

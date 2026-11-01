@@ -148,13 +148,13 @@ func TestChatServerOptionsAreTheTitlePolicyPlusAFrozenWindowName(t *testing.T) {
 // with a quote, dollar, backtick, space, double quote or hash stays one word.
 func TestHerdrHookCommandQuotesTheBinaryForShellAndTmux(t *testing.T) {
 	got := herdrHookCommand("/a b/p'q$x\"y#z`w/pfm", herdr.EventSync)
-	want := "run-shell -b \"'/a b/p'\\\\''q\\$x\\\"y##z`w/pfm' internal herdr-state sync --socket #{q:socket_path} --session #{q:session_name} --client #{q:client_pid}\""
+	want := "run-shell -b \"'/a b/p'\\\"'\\\"'q\\$x\\\"y##z`w/pfm' internal herdr-state sync --socket #{q:socket_path} --session #{q:session_name} --client #{q:client_pid}\""
 	if got != want {
 		t.Fatalf("herdrHookCommand =\n%s\nwant\n%s", got, want)
 	}
 	// The name event runs for a window, not a client: no --client word.
 	gotName := herdrHookCommand("/a b/p'q$x\"y#z`w/pfm", herdr.EventName)
-	wantName := "run-shell -b \"'/a b/p'\\\\''q\\$x\\\"y##z`w/pfm' internal herdr-state name --socket #{q:socket_path} --session #{q:session_name}\""
+	wantName := "run-shell -b \"'/a b/p'\\\"'\\\"'q\\$x\\\"y##z`w/pfm' internal herdr-state name --socket #{q:socket_path} --session #{q:session_name}\""
 	if gotName != wantName {
 		t.Fatalf("herdrHookCommand(name) =\n%s\nwant\n%s", gotName, wantName)
 	}

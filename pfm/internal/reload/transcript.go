@@ -1,6 +1,7 @@
 package reload
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,9 +12,11 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/rezzminator/professor/pfm/internal/codexmeta"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 // Transcript is a Claude transcript opened for ONE guarded append: exclusive
@@ -116,7 +119,7 @@ func TranscriptCWD(path string) (string, error) {
 	if path == "" {
 		return "", nil
 	}
-	file, err := os.Open(path)
+	file, err := codexmeta.OpenRollout(path)
 	if err != nil {
 		return "", fmt.Errorf("open reload transcript %q: %w", path, err)
 	}
@@ -161,17 +164,18 @@ func SessionTranscript(
 		return "", fmt.Errorf("unknown reload engine %q", engine)
 	}
 	for _, account := range machine.CodexAccounts {
-		found := ""
+		// A rollout plain or compressed, the plain twin winning
+		// (codexmeta.PreferPlain): a finished chat's rollout is compressed.
+		var found []string
 		err := filepath.WalkDir(
 			filepath.Join(account.Home, "sessions"),
 			func(path string, entry os.DirEntry, walkErr error) error {
 				if walkErr != nil {
 					return walkErr
 				}
-				if entry != nil && !entry.IsDir() && strings.Contains(filepath.Base(path), id) &&
-					filepath.Ext(path) == ".jsonl" {
-					found = path
-					return filepath.SkipAll
+				if _, transcriptName := codexmeta.RolloutStem(filepath.Base(path)); entry != nil && !entry.IsDir() &&
+					transcriptName && strings.Contains(filepath.Base(path), id) {
+					found = append(found, path)
 				}
 				return nil
 			},
@@ -179,8 +183,8 @@ func SessionTranscript(
 		if err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return "", fmt.Errorf("search Codex rollouts under %q: %w", account.Home, err)
 		}
-		if found != "" {
-			return found, nil
+		if found = codexmeta.PreferPlain(found); len(found) != 0 {
+			return found[0], nil
 		}
 	}
 	return "", nil
@@ -207,4 +211,27 @@ func findClaudeTranscript(roots []string, id string) (string, error) {
 		}
 	}
 	return "", nil
+}
+
+// ContinuedSession follows Claude session id to the newest segment of its
+// continued-in chain and returns it with its indexed transcript path. Claude
+// Code moves a running chat to a new session id while the pane's crumb, the
+// seat and the process keep the launch id, so a resume of that id would
+// reopen a segment the chat already moved on from. An id the index does not
+// hold is its own newest segment, with path "".
+func ContinuedSession(ctx context.Context, id string, stderr io.Writer) (tail, path string, returnErr error) {
+	index, err := store.Open(store.WithWarningWriter(stderr))
+	if err != nil {
+		return "", "", fmt.Errorf("open transcript index to follow chat %s: %w", id, err)
+	}
+	defer func() { returnErr = errors.Join(returnErr, index.Close()) }()
+	tail, err = index.ContinuationTail(ctx, id)
+	if err != nil {
+		return "", "", fmt.Errorf("follow chat %s's continuation: %w", id, err)
+	}
+	transcript, _, err := index.Transcript(ctx, tail)
+	if err != nil {
+		return "", "", fmt.Errorf("read chat %s's transcript: %w", tail, err)
+	}
+	return tail, transcript.Path, nil
 }

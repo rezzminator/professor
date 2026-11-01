@@ -10,6 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"mvdan.cc/sh/v3/syntax"
+
+	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -62,7 +65,7 @@ func PrepareLaunch(dir, run string) (Launch, error) {
 		return Launch{}, fmt.Errorf("write launch script %s: %w", script, err)
 	}
 	return Launch{
-		Command: "/bin/sh '" + strings.ReplaceAll(script, "'", `'"'"'`) + "'",
+		Command: "/bin/sh " + cmdparse.Quote(script),
 		script:  script,
 	}, nil
 }
@@ -83,68 +86,40 @@ func (launch Launch) Discard() error {
 // is exec'd, so reap, name-sync and every /proc exe check see the engine,
 // never a lingering shell. `exec` cannot take a NAME=value word, so a run
 // that opens with assignments execs env to apply them. Anything else — a
-// list, a pipeline, a group, a redirection — runs verbatim, exactly as the
-// shell would have run it inline.
+// list, a pipeline, a group, a redirection, a substitution, a parse error —
+// runs verbatim, exactly as the shell would have run it inline.
 func launchBody(run string) string {
-	if !simpleCommand(run) {
+	call, ok := simpleCommand(run)
+	if !ok {
 		return run
 	}
-	if assignmentFirst(run) {
+	if len(call.Assigns) > 0 {
 		return "exec env " + run
 	}
 	return "exec " + run
 }
 
-// simpleCommand reports whether run is one simple command: no unquoted shell
-// operator, grouping, redirection or comment, and no reserved first word.
-// It errs toward "not simple", which only costs the exec.
-func simpleCommand(run string) bool {
-	first := strings.Fields(run)
-	if len(first) == 0 {
-		return false
+// simpleCommand returns run's one simple command, parsed as the /bin/sh the
+// script runs under reads it. It errs toward "not simple", which only costs
+// the exec.
+func simpleCommand(run string) (*syntax.CallExpr, bool) {
+	file, err := syntax.NewParser(syntax.Variant(syntax.LangPOSIX)).Parse(strings.NewReader(run), "")
+	if err != nil || len(file.Stmts) != 1 {
+		return nil, false
 	}
-	switch first[0] {
-	case "!", "if", "while", "until", "for", "case":
-		return false
+	stmt := file.Stmts[0]
+	call, ok := stmt.Cmd.(*syntax.CallExpr)
+	// A command below a leading comment or blank line would leave the exec
+	// prefixed on that first line, an exec of nothing.
+	if !ok || stmt.Pos().Line() != 1 || stmt.Negated || stmt.Background || len(stmt.Redirs) > 0 {
+		return nil, false
 	}
-	var quote byte
-	for index := 0; index < len(run); index++ {
-		char := run[index]
-		switch {
-		case quote == '\'':
-			if char == '\'' {
-				quote = 0
-			}
-		case quote == '"':
-			switch char {
-			case '\\':
-				index++
-			case '"':
-				quote = 0
-			}
-		case char == '\\':
-			index++
-		case char == '\'' || char == '"':
-			quote = char
-		case strings.IndexByte(";&|(){}<>`#\n", char) >= 0:
-			return false
+	syntax.Walk(stmt, func(node syntax.Node) bool {
+		switch node.(type) {
+		case *syntax.CmdSubst, *syntax.ArithmExp, *syntax.ProcSubst:
+			ok = false
 		}
-	}
-	return quote == 0
-}
-
-// assignmentFirst reports whether run's first word is NAME=value.
-func assignmentFirst(run string) bool {
-	word := strings.TrimLeft(run, " \t")
-	equals := strings.IndexByte(word, '=')
-	if equals <= 0 {
-		return false
-	}
-	for index, char := range word[:equals] {
-		letter := char == '_' || (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z')
-		if !letter && (index == 0 || char < '0' || char > '9') {
-			return false
-		}
-	}
-	return true
+		return ok
+	})
+	return call, ok
 }

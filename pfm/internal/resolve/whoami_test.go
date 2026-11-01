@@ -534,3 +534,64 @@ func TestIdentifyPassesOverForeignAncestor(t *testing.T) {
 		t.Fatalf("a foreign ancestor blocked identification: %v", err)
 	}
 }
+
+// TestEnvironmentSessionRule pins the one session rule every identity read
+// shares (K3): a Claude session wins over a Codex thread, since
+// CODEX_THREAD_ID is inherited into shells that are not themselves a Codex
+// chat; SessionOf answers for the engine the caller names; a snapshot of
+// another process's environ reads the same names as this process's own.
+func TestEnvironmentSessionRule(t *testing.T) {
+	const claude, codex = "claude-sess-1", "codex-thread-1"
+	tests := []struct {
+		name       string
+		env        map[string]string
+		wantEngine pfmengine.ID
+		wantID     string
+		wantCodex  string
+		wantSocket string
+	}{
+		{
+			name:       "claude only",
+			env:        map[string]string{ClaudeSessionEnv: claude},
+			wantEngine: pfmengine.Claude,
+			wantID:     claude,
+		},
+		{
+			name: "codex only", env: map[string]string{CodexThreadEnv: codex},
+			wantEngine: pfmengine.Codex, wantID: codex, wantCodex: codex,
+		},
+		{
+			name:       "both set favors claude because CODEX_THREAD_ID is inherited",
+			env:        map[string]string{ClaudeSessionEnv: claude, CodexThreadEnv: codex},
+			wantEngine: pfmengine.Claude, wantID: claude, wantCodex: codex,
+		},
+		{name: "neither set", env: map[string]string{}},
+		{
+			name:       "tmux socket is the TMUX value's first field",
+			env:        map[string]string{"TMUX": "/jail/tmux/cc-1-1-1,42,0", "TMUX_PANE": "%3"},
+			wantSocket: "/jail/tmux/cc-1-1-1",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			for _, environment := range []WhoamiEnvironment{
+				ProcessEnvironment(test.env),
+				EnvironmentOf(func(name string) string { return test.env[name] }),
+			} {
+				engine, id := environment.EngineSession()
+				if engine != test.wantEngine || id != test.wantID {
+					t.Fatalf("EngineSession() = (%q, %q), want (%q, %q)", engine, id, test.wantEngine, test.wantID)
+				}
+				if got := environment.SessionOf(pfmengine.Codex); got != test.wantCodex {
+					t.Fatalf("SessionOf(codex) = %q, want %q", got, test.wantCodex)
+				}
+				if got := environment.SessionOf(pfmengine.OpenCode); got != "" {
+					t.Fatalf("SessionOf(opencode) = %q, want none: OpenCode carries no session variable", got)
+				}
+				if got := environment.TmuxSocket(); got != test.wantSocket {
+					t.Fatalf("TmuxSocket() = %q, want %q", got, test.wantSocket)
+				}
+			}
+		})
+	}
+}

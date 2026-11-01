@@ -24,7 +24,7 @@ Where Vocabulary, Runtime or On demand disagrees with the code on a path, comman
 - quality laws: the `/quality:*` family every prompt and orientation-file edit loads · `templates/global/commands/quality/` · design `docs/design/quality/`
 - fence: the shared `pfm-dev` container, own namespaces, HOME and `/tmp` per call, and the `pfm-sim` browser target · `infra/fence/` · design `docs/dev/isolated-dev-foundation.md`
 - demo fence: for presentations · `infra/demo/`
-- self-hosted manifest: the tracked ledger of this repo's own install, verified (restamped with `--write`) by a repo gate · `.professor/manifest.json`, `infra/check-self-hosted-manifest.sh`
+- install record: this repo's own pfm install (`VERSION`, `manifest.json`, whose `installed_from.repo` pfm's theme install reads) and its saved rr reports (`RR/`) · `.professor/`
 - this repo's install: the project tier this repo runs, source of truth for its engine mirrors; machine-global originals reach it only through `~/.claude/` symlinks, never a local copy · `.claude/`
 - engine-sync: the single writer of every Codex and OpenCode artifact derived from a Claude source, a Go binary and Claude plugin; pfm execs it, and `pfm install` links it as `~/.local/bin/engine-sync` · `plugins/engine-sync/` · design `docs/design/engine-sync/`
 - engine mirrors: `AGENTS.md`, `.codex/**`, `.opencode/**`, untracked, so a fresh clone generates before it checks · generated from `CLAUDE.md` and `.claude/` by engine-sync
@@ -56,7 +56,7 @@ Where Vocabulary, Runtime or On demand disagrees with the code on a path, comman
 
 ## OpenCode
 
-- Reads the same `AGENTS.md` (preferred over `CLAUDE.md`) plus `.opencode/`: `agent/*.md`, flat `/name` commands, skill symlinks, and `opencode.jsonc` pinning the non-gitter Git-write denies.
+- Reads the same `AGENTS.md` (preferred over `CLAUDE.md`) plus `.opencode/`: `agent/*.md`, flat `/name` commands, skill symlinks, and `opencode.jsonc` pinning the Git-write denies.
 
 ## Local
 
@@ -99,19 +99,18 @@ Tiers and effort live in the fleet prompt's § Model Selection; the cast and eac
 
 - Every dispatch carries all five: the goal in one sentence and the artifact it returns, its shape named; the boundary, in scope and explicitly out; the anchors — exact files, symbols or commands, never "find the relevant code"; the tier and effort, plus a budget when the task can run away; what its own failure looks like — a dead end, an empty result, a tool that would not run.
 - All sibling agents of a round go in one message; agents dispatched and reports received are counted and must match, and a missing report is a named coverage hole.
-- An invariant enforced across layers (Go + shell + prompt) is mapped closed-world before the build dispatch; the brief carries every enumerated door — an invariant held at N−1 of its N doors is a violation at the missing door.
+- An invariant enforced across layers (Go + shell + prompt) is mapped closed-world before the build dispatch; the brief carries every enumerated door, per `templates/global/rules/writing-code.md`.
 - Agent reports are evidence, not truth: verify a claim against what you can read yourself before relaying it.
 
 ## Prompt & template code
 
+- Only `pcm` writes `templates/**`; `templates/themes/` goes to `themer`.
 - A template is the live source file, verbatim — same structure, mechanics, character and logic; only project-specific values swap for placeholder tokens; the prose is never abstracted, skeletonized or genericized.
 - One canonical token per concept — never a synonym for a registered placeholder.
 - No dangling pointers: grep before you cite; a pointer to a file, agent or command the install does not produce is deleted, or its target ships.
-- Every check names what its own broken state reports: a gate answering "fine" both healthy and broken is a coincidence detector.
-- An error never renders as absence: "nothing there" and "we failed to look" read differently at the visible surface; logging alone is not sufficient.
 - The judge is never the thing being judged: read the artifact from disk, never a verdict asserted in a brief; an empty enumeration is clean only once the enumerator provably ran, and the parent reports which.
 - Surgical changes: every changed line traces to the task; fix broken things you hit; remove dead code, references and deps end to end, including `README.md`, `docs/SETUP.md` and `templates/refresh-map.json`.
-- No duplication: grep for the existing rule, section or script and reference it; a near-copy drifts.
+- No duplication: grep for the existing rule or section and reference it; a near-copy drifts; code and scripts follow `writing-code.md`.
 - Twins move together: a `.claude/**` change any adopter could use lands in its `templates/{project|global}/**` twin in the same pass, the commit message carrying the adopter-facing change; a customization only this repo wants stays local; unsure → ask.
 - Right-size and finish: the simplest thing that works, no speculative abstractions, no stubs or deferred TODOs; where correct and convenient diverge, take correct, even at re-architecting cost.
 
@@ -133,7 +132,5 @@ Tiers and effort live in the fleet prompt's § Model Selection; the cast and eac
 
 ## Testing
 
-- Every test runs through `.claude/scripts/test.sh`, which runs it in the fence; the affected tests run before claiming anything works, and only a suite you watched run is reported.
-- The full gate runs once per worktree, right before its merge; a red one is fixed with `test.sh <failing paths>`, then the gate runs once more.
-- A regression test counts only after it was watched failing against the unfixed code.
+- Tests run as `.claude/commands/pfm-testing-manual.md` § Run commands says; only a suite you watched run is reported.
 - A skipped or filtered suite is a named gap in the report, never a pass.

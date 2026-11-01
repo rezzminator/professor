@@ -12,6 +12,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/launchnotice"
 )
 
 type handoffRecord struct {
@@ -81,6 +82,9 @@ func continueFromHandoff(
 	updated, run, wasNew, err := prepareReload(updated)
 	if err != nil {
 		return request, "", "", false, err
+	}
+	if updated.cwdNotice != "" {
+		fmt.Fprintf(stderr, "pfm chat reload: %s\n", updated.cwdNotice)
 	}
 	fmt.Fprintf(
 		stderr,
@@ -200,8 +204,6 @@ func adoptHandoff(
 	if !request.CacheGiven {
 		request.Cache1H = record.Cache1H
 	}
-	if info, err := os.Stat(record.CWD); err == nil && info.IsDir() {
-		request.CWD = record.CWD
-	}
+	request.CWD, request.cwdNotice = launchnotice.Relocate(record.CWD, request.Home)
 	return request, continuedID, true, nil
 }

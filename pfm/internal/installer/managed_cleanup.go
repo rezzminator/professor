@@ -12,8 +12,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/rezzminator/professor/pfm/internal/action"
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 )
 
 // Managed cleanup states are shared by install and doctor.
@@ -326,7 +326,7 @@ func shellCommandLine(words ...string) string {
 		if word != "" && strings.IndexFunc(word, func(r rune) bool { return !shellSafeRune(r) }) < 0 {
 			quoted[index] = word
 		} else {
-			quoted[index] = action.Quote(word)
+			quoted[index] = cmdparse.Quote(word)
 		}
 	}
 	return strings.Join(quoted, " ")

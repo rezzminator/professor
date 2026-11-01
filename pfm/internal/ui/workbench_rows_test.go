@@ -12,6 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
@@ -275,7 +276,7 @@ type ownLauncher struct{}
 func (ownLauncher) ComposerReady(string) bool { return true }
 
 func (ownLauncher) Rename(
-	context.Context, spawn.Tmux, string, string, string, spawn.Timings, spawn.Trace,
+	context.Context, pfmcall.Screen, pfmcall.Target, string, spawn.Timings, spawn.Trace,
 ) (string, error) {
 	return "", nil
 }

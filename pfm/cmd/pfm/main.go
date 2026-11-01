@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"strconv"
+	"strings"
 
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/cli"
@@ -73,7 +74,7 @@ var topLevelSubcommands = []string{
 // internalSubcommands names each runInternal branch for usage and installer parity.
 var internalSubcommands = []string{
 	"agent-open", "chat-server", "claude-launch", "claude-version", "clear-kill", "clear-name",
-	"codex-launch", "codex-transport", "cost-launch", "cost-sink", "epic-inject", "schedule-fire",
+	"codex-launch", "codex-transport", "cost-launch", "cost-sink", "engine-guard", "epic-inject", "schedule-fire",
 	"exit-close", "exit-intercept", "git-guard", "herdr-indicators", "herdr-places", "herdr-shell", "herdr-state",
 	"kill-exit", "launch", "pcm-guard", "seat-host", "restart-run",
 	"launcher-repair", "orchestrator-wait", "primary-get", "primary-set", "reload-intercept", "resume-unkill", "rr-dir",
@@ -464,10 +465,18 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 	if len(args) != 0 && args[0] == "pcm-guard" {
 		return hookentry.PcmGuard(os.Stdin, stdout, stderr)
 	}
+	if len(args) != 0 && args[0] == "engine-guard" {
+		return hookentry.EngineGuard(args[1:], os.Stdin, stdout, stderr)
+	}
 	if len(args) != 0 && args[0] == "orchestrator-wait" {
 		return hookentry.OrchestratorWait(os.Stdin, stdout, stderr)
 	}
 	if len(args) != 0 && args[0] == "herdr-indicators" {
+		// The painter outlives the hook's directory, often a worktree removed under it, and every scan reads it.
+		if err := os.Chdir("/"); err != nil {
+			fmt.Fprintf(stderr, "pfm internal herdr-indicators: leave the hook's directory: %v\n", err)
+			return 1
+		}
 		return herdr.IndicatorsEntry(stderr, paths.OSEnv{}, pfmchat.PaintHerdrIndicators)
 	}
 	if len(args) != 0 && args[0] == "herdr-places" {
@@ -519,7 +528,10 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		return 0
 	}
 	if len(args) != 0 && args[0] == "chat-server" {
-		return hookentry.ChatServer(args[1:], stderr, runtime)
+		newChat := func(ctx context.Context, argv []string, stdout, stderr io.Writer) int {
+			return runChatWithRuntime(argv, strings.NewReader(""), stdout, stderr, runtime, ctx)
+		}
+		return hookentry.ChatServer(args[1:], stdout, stderr, runtime, newChat)
 	}
 	if len(args) != 0 && args[0] == "stale" {
 		return stale.Run(args[1:], stdout, stderr)
@@ -551,7 +563,7 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		// Keep this literal pipe-joined for C15; the registry test checks branch reachability.
 		fmt.Fprintln(
 			stderr,
-			"usage: pfm internal agent-open|chat-server|claude-launch|claude-version|clear-kill|clear-name|codex-launch|codex-transport|cost-launch|cost-sink|epic-inject|exit-close|exit-intercept|git-guard|herdr-indicators|herdr-places|herdr-shell|herdr-state|kill-exit|launch|launcher-repair|orchestrator-wait|pcm-guard|primary-get|primary-set|reload-intercept|reload-run|restart-run|schedule-fire|resume-unkill|rr-dir|seat-host|stale|statusline|store-guard|then|tmux-title-renudge|update-check [options]",
+			"usage: pfm internal agent-open|chat-server|claude-launch|claude-version|clear-kill|clear-name|codex-launch|codex-transport|cost-launch|cost-sink|engine-guard|epic-inject|exit-close|exit-intercept|git-guard|herdr-indicators|herdr-places|herdr-shell|herdr-state|kill-exit|launch|launcher-repair|orchestrator-wait|pcm-guard|primary-get|primary-set|reload-intercept|reload-run|restart-run|schedule-fire|resume-unkill|rr-dir|seat-host|stale|statusline|store-guard|then|tmux-title-renudge|update-check [options]",
 		)
 		return 2
 	}

@@ -74,42 +74,38 @@ func launchNative(
 	if launch.SessionID != "" {
 		identity = launch.SessionID
 	}
-	id, err := claudelaunch.NewSessionID()
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm internal launch: new seat id: %v\n", err)
-		return 1
-	}
 	environment := nativeLaunchEnvironment(launch)
 	// The supervisor, not a birth-door process, applies the saved ledger policy.
 	environment = append(environment, paths.EnvStateDB+"="+runtime.Paths.StateDB)
 	ctx := context.Background()
-	provisional := identity
-	if provisional == "" {
-		provisional = id
+	birth := spawn.HerdrRequest{
+		Choice: choice,
+		Paths:  runtime.Paths,
+		Run: fleetdb.SeatRun{
+			Binary:     launch.Binary,
+			Args:       launch.Argv,
+			Env:        environment,
+			CWD:        cwd,
+			CostLedger: prefs.CostLedger,
+		},
+		Seat:      fleetdb.Seat{SessionID: identity, Engine: string(pfmengine.Claude), Name: request.Name},
+		UserNamed: request.Name != "",
 	}
-	if identity != "" {
-		if err := fleetdb.RecordLaunch(
-			ctx,
-			runtime.Paths,
-			fleetdb.Launch{SessionID: identity, Engine: pfmengine.Claude, Account: accountID, Cache1H: launch.Cache1H},
-			clock.Real.Now().Unix(),
-		); err != nil {
-			fmt.Fprintf(stderr, "pfm: record launch %s: %v\n", identity, err)
+	if identity == "" {
+		// A fresh chat's session is provisional until its transcript names it.
+		id, err := claudelaunch.NewSessionID()
+		if err != nil {
+			fmt.Fprintf(stderr, "pfm internal launch: new seat id: %v\n", err)
+			return 1
+		}
+		birth.Seat.SessionID = id
+	} else {
+		birth.Launch = &fleetdb.Launch{
+			SessionID: identity, Engine: pfmengine.Claude, Account: accountID, Cache1H: launch.Cache1H,
 		}
 	}
 	if !choice.InPlace {
-		born, err := spawn.SpawnHerdr(ctx, spawn.HerdrRequest{
-			Choice: choice,
-			Paths:  runtime.Paths,
-			Run: fleetdb.SeatRun{
-				Binary:     launch.Binary,
-				Args:       launch.Argv,
-				Env:        environment,
-				CWD:        cwd,
-				CostLedger: prefs.CostLedger,
-			},
-			Seat: fleetdb.Seat{SessionID: provisional, Engine: string(pfmengine.Claude), Name: request.Name},
-		})
+		born, err := spawn.SpawnHerdr(ctx, birth)
 		launchnotice.Print(stderr, "pfm internal launch", born.Warnings)
 		if err != nil {
 			fmt.Fprintf(stderr, "pfm internal launch: birth native chat: %v\n", err)
@@ -117,57 +113,12 @@ func launchNative(
 		}
 		return 0
 	}
-	db := fleetdb.OpenSharedState(ctx, runtime.Paths)
-	if owner, found, err := db.SeatByPane(ctx, choice.HerdrSocket, choice.HerdrPane); err != nil || found {
-		fmt.Fprintf(
-			stderr,
-			"pfm internal launch: pane %s already owned by seat %s or unavailable: %v\n",
-			choice.HerdrPane,
-			owner.SeatID,
-			err,
-		)
-		if err := db.Close(); err != nil {
-			fmt.Fprintf(stderr, "pfm internal launch: close occupied seat state: %v\n", err)
-		}
-		return 1
-	}
-	seat := fleetdb.Seat{
-		SeatID:         id,
-		SessionID:      identity,
-		Engine:         string(pfmengine.Claude),
-		Backend:        spawn.BackendHerdr,
-		HerdrSocket:    choice.HerdrSocket,
-		HerdrPane:      choice.HerdrPane,
-		HerdrWorkspace: choice.HerdrWorkspace,
-		Name:           request.Name,
-		State:          nativeSeatLive,
-		UpdatedAt:      clock.Real.Now().Unix(),
-	}
-	run := fleetdb.SeatRun{
-		Binary:     launch.Binary,
-		Args:       launch.Argv,
-		Env:        environment,
-		CWD:        cwd,
-		CostLedger: prefs.CostLedger,
-	}
-	if err := db.WriteSeatRun(id, run); err != nil {
+	prepared, err := spawn.PrepareHerdr(ctx, birth)
+	launchnotice.Print(stderr, "pfm internal launch", prepared.Warnings)
+	if err != nil {
 		fmt.Fprintf(stderr, "pfm internal launch: %v\n", err)
-		_ = db.Close()
 		return 1
 	}
-	if err := db.PutSeat(ctx, seat); err != nil {
-		fmt.Fprintf(stderr, "pfm internal launch: persist native seat: %v\n", err)
-		if cleanupErr := db.DeleteSeatRun(id); cleanupErr != nil {
-			fmt.Fprintf(stderr, "pfm internal launch: remove unbound recipe: %v\n", cleanupErr)
-		}
-		_ = db.Close()
-		return 1
-	}
-	if err := db.Close(); err != nil {
-		fmt.Fprintf(stderr, "pfm internal launch: close native seat state: %v\n", err)
-		return 1
-	}
-
 	executable, err := os.Executable()
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm internal launch: resolve running executable: %v\n", err)
@@ -177,7 +128,7 @@ func launchNative(
 	if runtime.Config.Path != "" {
 		argv = append(argv, "--config", runtime.Config.Path)
 	}
-	argv = append(argv, "internal", "seat-host", id)
+	argv = append(argv, "internal", "seat-host", prepared.Seat.SeatID)
 	if err := LaunchExec(executable, argv, os.Environ()); err != nil {
 		fmt.Fprintf(stderr, "pfm internal launch: exec native supervisor: %v\n", err)
 		return 1

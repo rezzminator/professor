@@ -6,11 +6,6 @@ tools: Read, Write, Bash, Glob, Grep, Agent, mcp__forward-compaction__forward_co
 visibility:
   agents:
     include: [conflict-resolver]
-engines:
-  opencode:
-    permission:
-      bash:
-        "git *": allow
 ---
 
 # Gitter Agent
@@ -63,9 +58,9 @@ The spawn brief names a **Phase**. No phase named = freeform request: read comma
 3. Every PR merged into `main` publishes: `VERSION` must move past `main`'s, and the release commit bumps the `-alpha` development version to the real release version.
 4. After the merge, the `release.yml` `publish` job tags `vX.Y.Z` on the merge commit and creates the GitHub release with the binaries, and its `verify` job checks the published assets; nobody pushes a tag by hand.
 
-The brief names the release worktree, its branch `release/vX.Y.Z`, the cut commit `C` and the summary. In the release worktree: `git fetch origin main`; `git merge-base --is-ancestor origin/main HEAD` must hold, and `git diff --name-only {C} HEAD` must name only `releases/vX.Y.Z.md`, `CHANGELOG.md`, `VERSION`, `.professor/VERSION` and `.professor/manifest.json`; `make release-check` must pass there; else STOP with the output quoted. Then: `git push origin release/vX.Y.Z` → `gh pr create --base main --head release/vX.Y.Z --title "release: vX.Y.Z — {summary}" --body-file releases/vX.Y.Z.md` → `gh pr checks --watch` until every required check is green (a red or missing check is a STOP, never an admin override) → `gh pr merge --merge --subject "release: vX.Y.Z — {summary}"` → watch the merge's run through its `publish` and `verify` jobs (`gh run list --workflow release.yml --event pull_request --branch release/vX.Y.Z --limit 1 --json databaseId --jq '.[0].databaseId'`, then `gh run watch {id} --exit-status`); a failed run is a STOP → `git fetch origin main --tags` and verify `origin/main` is the merge commit and `vX.Y.Z` names it. Report the PR URL, the merge SHA, the tag and the `verify` job's conclusion.
+The brief names the release worktree, its branch `release/vX.Y.Z`, the cut commit `C` and the summary. In the release worktree: `git fetch origin main`; `git merge-base --is-ancestor origin/main HEAD` must hold, and `git diff --name-only {C} HEAD` must name only `releases/vX.Y.Z.md`, `CHANGELOG.md`, `VERSION` and `.professor/VERSION`; `make release-check` must pass there; else STOP with the output quoted. Then: `git push origin release/vX.Y.Z` → `gh pr create --base main --head release/vX.Y.Z --title "release: vX.Y.Z — {summary}" --body-file releases/vX.Y.Z.md` → `gh pr checks --watch` until every required check is green (a red or missing check is a STOP, never an admin override) → `gh pr merge --merge --subject "release: vX.Y.Z — {summary}"` → watch the merge's run through its `publish` and `verify` jobs (`gh run list --workflow release.yml --event pull_request --branch release/vX.Y.Z --limit 1 --json databaseId --jq '.[0].databaseId'`, then `gh run watch {id} --exit-status`); a failed run is a STOP → `git fetch origin main --tags` and verify `origin/main` is the merge commit and `vX.Y.Z` names it. Report the PR URL, the merge SHA, the tag and the `verify` job's conclusion.
 
-**Release close** — the dispatch after RELEASE, in the live `develop` checkout; a dirty path is a STOP naming it. `git fetch origin`, then `git merge --no-ff origin/main -m "merge: vX.Y.Z back into develop"` on `develop` (conflicts per § Conflicts); write the next development version the brief names into `VERSION`, `.professor/VERSION` and `.professor/manifest.json` `installed_from.version`, run `bash infra/check-self-hosted-manifest.sh --write . templates pfm`, and commit those three files as `chore(release): open v{NEXT}-alpha on develop`; `git push origin develop`; `git branch -d release/vX.Y.Z` and `git push origin --delete release/vX.Y.Z`; remove the release worktree under § Worktree close. Report each ref and what stayed.
+**Release close** — the dispatch after RELEASE, in the live `develop` checkout; a dirty path is a STOP naming it. `git fetch origin`, then `git merge --no-ff origin/main -m "merge: vX.Y.Z back into develop"` on `develop` (conflicts per § Conflicts); write the next development version the brief names into `VERSION` and `.professor/VERSION`, and commit those two files as `chore(release): open v{NEXT}-alpha on develop`; `git push origin develop`; `git branch -d release/vX.Y.Z` and `git push origin --delete release/vX.Y.Z`; remove the release worktree under § Worktree close. Report each ref and what stayed.
 
 ## Worktree close
 

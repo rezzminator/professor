@@ -57,14 +57,11 @@ func RefreshCodex(ctx context.Context, options CodexOptions) error {
 	if err != nil {
 		return err
 	}
-	primary, primaryOK := rateLimits["primary"]
-	secondary, secondaryOK := rateLimits["secondary"]
-	if !primaryOK && !secondaryOK {
-		return fmt.Errorf("response from App Server carried no primary or secondary rate limit")
-	}
+	// A response with neither window is an account with no limit window (on
+	// credits): an answer the cache keeps, never a failed refresh.
 	output := map[string]any{
-		"primary":   primary,
-		"secondary": secondary,
+		"primary":   rateLimits["primary"],
+		"secondary": rateLimits["secondary"],
 		"planType":  rateLimits["planType"],
 		"ts":        options.Now().Unix(),
 	}

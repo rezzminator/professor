@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/codexmeta"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
@@ -120,26 +121,8 @@ func EnrichLive(
 	// followContinuations can only follow the handoff to a successor it was
 	// given.
 	for id := range wantedTranscripts {
-		seen := make(map[string]struct{})
-		for id != "" {
-			if _, cycle := seen[id]; cycle {
-				break
-			}
-			seen[id] = struct{}{}
-			index, found := transcriptIDs[id]
-			if !found {
-				transcript, stored, err := database.Transcript(ctx, id)
-				if err != nil {
-					return Data{}, err
-				}
-				if !stored {
-					break
-				}
-				data.Transcripts = append(data.Transcripts, transcript)
-				index = len(data.Transcripts) - 1
-				transcriptIDs[id] = index
-			}
-			id = data.Transcripts[index].ContinuedIn
+		if err := loadChain(ctx, database, &data, transcriptIDs, id); err != nil {
+			return Data{}, err
 		}
 	}
 
@@ -173,24 +156,41 @@ func EnrichLive(
 	return data, nil
 }
 
+// loadChain adds id's transcript and every continued-in successor the data
+// lacks, indexing each in loaded; it stops at an id the store does not hold
+// and at any cycle.
+func loadChain(ctx context.Context, database *store.Store, data *Data, loaded map[string]int, id string) error {
+	seen := make(map[string]struct{})
+	for id != "" {
+		if _, cycle := seen[id]; cycle {
+			return nil
+		}
+		seen[id] = struct{}{}
+		index, found := loaded[id]
+		if !found {
+			transcript, stored, err := database.Transcript(ctx, id)
+			if err != nil {
+				return err
+			}
+			if !stored {
+				return nil
+			}
+			data.Transcripts = append(data.Transcripts, transcript)
+			index = len(data.Transcripts) - 1
+			loaded[id] = index
+		}
+		id = data.Transcripts[index].ContinuedIn
+	}
+	return nil
+}
+
 // rolloutIDFromPath strips a rollout file name down to its thread id:
-// rollout-2026-01-02T03-04-05-<id>.jsonl → <id>.
+// rollout-2026-01-02T03-04-05-<id>.jsonl → <id> (codexmeta.RolloutID).
 // An empty path — a rollout-less Codex process, the normal shape since Codex
 // 0.146.1 — has no id; filepath.Base would answer ".".
 func rolloutIDFromPath(path string) string {
 	if path == "" {
 		return ""
 	}
-	stem := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
-	rest := strings.TrimPrefix(stem, "rollout-")
-	if len(rest) > 20 &&
-		rest[4] == '-' &&
-		rest[7] == '-' &&
-		rest[10] == 'T' &&
-		rest[13] == '-' &&
-		rest[16] == '-' &&
-		rest[19] == '-' {
-		return rest[20:]
-	}
-	return rest
+	return codexmeta.RolloutID(filepath.Base(path))
 }

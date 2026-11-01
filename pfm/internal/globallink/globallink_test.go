@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -424,9 +425,14 @@ func TestClassifyRealEntryIsCopyOnlyWhenProven(t *testing.T) {
 
 // TestApplyCopyReplacesByRenameNeverAbsent pins that replacing a proven copy
 // (file or directory) with the link is a rename over the target: a reader
-// polling the target while Apply runs never sees it missing.
+// polling the target while Apply runs never sees it missing. macOS's
+// RENAME_SWAP of a directory lets a concurrent lstat miss the name for an
+// instant (CI: kind Dir only, about one swap in a thousand), and no darwin
+// primitive replaces a directory with a link more atomically, so there the
+// directory kind proves only the end state.
 func TestApplyCopyReplacesByRenameNeverAbsent(t *testing.T) {
 	for _, kind := range []Kind{File, Dir} {
+		watch := kind == File || runtime.GOOS != "darwin"
 		base := t.TempDir()
 		source := filepath.Join(base, "src")
 		target := filepath.Join(base, "dst")
@@ -451,7 +457,7 @@ func TestApplyCopyReplacesByRenameNeverAbsent(t *testing.T) {
 						return
 					default:
 					}
-					if _, err := os.Lstat(target); err != nil {
+					if _, err := os.Lstat(target); err != nil && watch {
 						absent <- err
 						return
 					}

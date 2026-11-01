@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/rezzminator/professor/pfm/internal/codexmeta"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/naming"
 	"github.com/rezzminator/professor/pfm/internal/pricing"
@@ -114,7 +115,7 @@ func ReadMeta(path, engine string) (meta Meta, returnErr error) {
 		return Meta{}, fmt.Errorf("stat transcript %s: %w", path, err)
 	}
 	noteWholeRead(path)
-	file, err := os.Open(path)
+	file, err := codexmeta.OpenRollout(path)
 	if err != nil {
 		return Meta{SizeBytes: info.Size(), ModifiedUnixNS: info.ModTime().UnixNano()},
 			fmt.Errorf("open transcript %s: %w", path, err)

@@ -67,3 +67,42 @@ func TestLimitsSamplerRequestNamesThePfmVersion(t *testing.T) {
 		t.Fatalf("User-Agent = %q, want pfm/7.7.7", agent)
 	}
 }
+
+// An account whose provider answers with no limit window at all (on credits)
+// gets a card that says so, with no window, no warning and no error status;
+// the answer is the plan's shape, not a failed refresh.
+func TestAnAnswerWithNoLimitWindowIsAStatusNotAFailure(t *testing.T) {
+	for _, engine := range []pfmengine.ID{pfmengine.Claude, pfmengine.Codex} {
+		t.Run(string(engine), func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv(paths.EnvHome, home)
+			configDir := filepath.Join(home, "claude")
+			writeFixtureCredentials(t, configDir)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				if engine == pfmengine.Claude {
+					fmt.Fprint(w, `{"five_hour":null,"seven_day":null,"seven_day_opus":null,"limits":[]}`)
+					return
+				}
+				fmt.Fprint(w, `{"plan_type":"pro","rate_limit":null,"credits":{"balance":"12.5"}}`)
+			}))
+			defer server.Close()
+			account := LimitAccount{ID: 12, Engine: engine, Label: "account 12", ConfigDir: configDir}
+			if engine == pfmengine.Codex {
+				account = LimitAccount{
+					ID: 12, Engine: engine, Label: "Codex",
+					CodexAuthPath: writeCodexAuth(t, home, "fixture-access", "fixture-account"),
+				}
+			}
+			sampler := NewLimitsSampler([]LimitAccount{account})
+			sampler.Now = func() time.Time { return time.Unix(1_800_000_000, 0) }
+			sampler.Endpoint, sampler.CodexEndpoint = server.URL, server.URL
+			sampler.Client, sampler.CodexClient = server.Client(), server.Client()
+			limits, warnings := sampler.Sample(context.Background())
+			if len(warnings) != 0 || len(limits) != 1 || len(limits[0].Windows) != 0 ||
+				limits[0].Status != "no limit window on this plan" {
+				t.Fatalf("limits=%#v warnings=%v, want a no-window card and no warning", limits, warnings)
+			}
+		})
+	}
+}

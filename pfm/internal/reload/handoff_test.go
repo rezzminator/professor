@@ -355,3 +355,27 @@ func TestRunKeepsTheHandoffWhenAQueuedReloadFailsBeforeRespawn(t *testing.T) {
 		}
 	}
 }
+
+func TestAdoptHandoffMissingRecordedCWDRelocatesToFleetHomeWithNotice(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(paths.EnvHome, t.TempDir())
+	home := t.TempDir()
+	gone := filepath.Join(t.TempDir(), "gone")
+	entry := time.Unix(100, 0)
+	record := handoffRecord{
+		Engine: pfmengine.Claude, SessionID: "new-session", Account: 2,
+		CWD: gone, WrittenAt: entry.Add(time.Second),
+	}
+	request := Request{
+		Engine: pfmengine.Claude, SocketPath: "/tmp/probe-1", Pane: "%7",
+		SessionID: "old-session", Account: 1, CWD: dir, Home: home,
+		Machine: reloadTestMachine("", dir),
+	}
+	got, _, adopted, err := adoptHandoff(request, record, entry, dir)
+	if err != nil || !adopted || got.CWD != home {
+		t.Fatalf("adopted=%t cwd=%q want fleet home %q err=%v", adopted, got.CWD, home, err)
+	}
+	if want := "opened in " + home + ": its own directory " + gone + " is gone"; got.cwdNotice != want {
+		t.Fatalf("cwdNotice=%q want %q", got.cwdNotice, want)
+	}
+}

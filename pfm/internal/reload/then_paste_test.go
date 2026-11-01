@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
@@ -25,12 +26,12 @@ type codexPasteTmux struct {
 	submitted bool
 }
 
-func (tmux *codexPasteTmux) paste(_ context.Context, _, _, text string) error {
+func (tmux *codexPasteTmux) SendPaste(_ context.Context, _ pfmcall.Target, text string) error {
 	tmux.pastes = append(tmux.pastes, text)
 	return nil
 }
 
-func (tmux *codexPasteTmux) Capture(context.Context, string, string) (string, error) {
+func (tmux *codexPasteTmux) CaptureScreen(context.Context, pfmcall.Target) (string, error) {
 	if tmux.submitted {
 		return "OpenAI Codex\n• working on the follow-up\n› ", nil
 	}
@@ -40,14 +41,14 @@ func (tmux *codexPasteTmux) Capture(context.Context, string, string) (string, er
 	return "OpenAI Codex\n" + tmux.draftView(tmux.pastes[len(tmux.pastes)-1]), nil
 }
 
-func (tmux *codexPasteTmux) SendKey(ctx context.Context, socket, pane, key string) error {
+func (tmux *codexPasteTmux) SendKey(ctx context.Context, target pfmcall.Target, key string) error {
 	if key == "Enter" {
 		tmux.enters++
 		if tmux.submits && len(tmux.pastes) > 0 {
 			tmux.submitted = true
 		}
 	}
-	return tmux.fakeReloadTmux.SendKey(ctx, socket, pane, key)
+	return tmux.fakeReloadTmux.SendKey(ctx, target, key)
 }
 
 func runCodexThen(t *testing.T, tmux *codexPasteTmux, then string) error {
@@ -63,7 +64,7 @@ func runCodexThen(t *testing.T, tmux *codexPasteTmux, then string) error {
 		err = deliverThen(
 			context.Background(),
 			Request{Engine: pfmengine.Codex, SocketPath: "/tmp/tmux-1000/cx-then-paste", Pane: "%7", Then: then},
-			Options{ThenTries: 2, Clock: fakeClock, Paste: tmux.paste},
+			Options{ThenTries: 2, Clock: fakeClock},
 			tmux,
 			proc,
 			io.Discard,

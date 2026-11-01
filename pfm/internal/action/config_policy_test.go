@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -64,9 +65,9 @@ func TestSynthesizeUsesConfiguredClaudeAccountAndPromptPolicy(t *testing.T) {
 		t.Fatalf("Synthesize() error = %v", err)
 	}
 	for _, want := range []string{
-		"CLAUDE_CONFIG_DIR=" + Quote(machine.Accounts[0].ConfigDir),
-		Quote(machine.Claude.Binary),
-		Quote("--resume") + " " + Quote("11111111-1111-4111-8111-111111111111"),
+		"CLAUDE_CONFIG_DIR=" + cmdparse.Quote(machine.Accounts[0].ConfigDir),
+		cmdparse.Quote(machine.Claude.Binary),
+		cmdparse.Quote("--resume") + " " + cmdparse.Quote("11111111-1111-4111-8111-111111111111"),
 	} {
 		if !strings.Contains(plan.Run, want) {
 			t.Fatalf("resume run %q lacks configured policy %q", plan.Run, want)
@@ -95,7 +96,7 @@ func TestHeadlessRunUsesConfiguredClaudeAndCodexPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HeadlessRun(Claude) error = %v", err)
 	}
-	if !claude.PromptOnCommandLine || !strings.Contains(claude.Run, Quote(machine.Claude.Binary)) {
+	if !claude.PromptOnCommandLine || !strings.Contains(claude.Run, cmdparse.Quote(machine.Claude.Binary)) {
 		t.Fatalf("headless Claude plan = %#v", claude)
 	}
 	if strings.Contains(claude.Run, "skip-permissions") {
@@ -113,7 +114,7 @@ func TestHeadlessRunUsesConfiguredClaudeAndCodexPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HeadlessRun(Codex) error = %v", err)
 	}
-	if !strings.Contains(codex.Run, Quote(machine.Codex.Binary)+" --no-daemon --sandbox workspace-write") {
+	if !strings.Contains(codex.Run, cmdparse.Quote(machine.Codex.Binary)+" --no-daemon --sandbox workspace-write") {
 		t.Fatalf("headless Codex plan = %q", codex.Run)
 	}
 	if strings.Contains(codex.Run, "dangerously-bypass-approvals-and-sandbox") {
@@ -147,7 +148,7 @@ func TestSynthesizePickerNewRowsUseNativeClaudeAndShellCodexLaunches(t *testing.
 			claudePlan.Run,
 		)
 	}
-	if !strings.Contains(claudePlan.Run, Quote(machine.Claude.Binary)) ||
+	if !strings.Contains(claudePlan.Run, cmdparse.Quote(machine.Claude.Binary)) ||
 		strings.Contains(claudePlan.Run, "skip-permissions") {
 		t.Fatalf("new Claude picker run ignored configured prompt policy: %q", claudePlan.Run)
 	}
@@ -164,7 +165,7 @@ func TestSynthesizePickerNewRowsUseNativeClaudeAndShellCodexLaunches(t *testing.
 	if err != nil {
 		t.Fatalf("Synthesize(NewCodex) error = %v", err)
 	}
-	wantCodex := "(cd -- '/work/project' && CODEX_HOME=" + Quote(machine.CodexAccounts[0].Home) + " cx)"
+	wantCodex := "(cd -- '/work/project' && CODEX_HOME=" + cmdparse.Quote(machine.CodexAccounts[0].Home) + " cx)"
 	if codexPlan.Line != wantCodex {
 		t.Fatalf("new Codex picker line = %q, want %q", codexPlan.Line, wantCodex)
 	}

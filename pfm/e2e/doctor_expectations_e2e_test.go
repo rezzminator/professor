@@ -103,9 +103,6 @@ func (h *e2eHarness) requireInstalledDoctor(result commandResult) {
 func (h *e2eHarness) requireInstalledDoctorWarnings(result commandResult, planted ...string) {
 	h.t.Helper()
 	output := result.stdout + result.stderr
-	if result.err == nil {
-		h.t.Fatalf("doctor after install succeeded, want service-manager warning; output=%q", output)
-	}
 	for _, want := range []string{
 		"doctor: pre-push gate=armed core.hooksPath=.githooks",
 		"doctor: harness-prompt: matches baseline",
@@ -120,12 +117,19 @@ func (h *e2eHarness) requireInstalledDoctorWarnings(result commandResult, plante
 			)
 		}
 	}
-	wantWarnings := fmt.Sprintf(
-		"doctor: warnings=%d",
-		schedulerRowWarnings(output)+h.hostCheckRowWarnings(output, planted)+h.plantedRowWarnings(output, planted),
-	)
-	if !strings.Contains("\n"+output, "\n"+wantWarnings+"\n") {
-		h.t.Fatalf("doctor omitted exact tally %q: %s", wantWarnings, output)
+	// Warnings exit 1 and print their tally; none (a healthy service manager,
+	// as on macOS) exits 0 and prints clean.
+	warnings := schedulerRowWarnings(output) + h.hostCheckRowWarnings(output, planted) +
+		h.plantedRowWarnings(output, planted)
+	wantSummary := fmt.Sprintf("doctor: warnings=%d", warnings)
+	if warnings == 0 {
+		wantSummary = "doctor: clean"
+	}
+	if (result.err == nil) != (warnings == 0) {
+		h.t.Fatalf("doctor after install exit=%v, want %q; output=%q", result.err, wantSummary, output)
+	}
+	if !strings.Contains("\n"+output, "\n"+wantSummary+"\n") {
+		h.t.Fatalf("doctor omitted exact tally %q: %s", wantSummary, output)
 	}
 	for _, prefix := range []string{"host-check: BLOCK ", "store: ", "account: ", "account-link: "} {
 		for _, line := range strings.Split(output, "\n") {

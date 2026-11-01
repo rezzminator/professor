@@ -336,21 +336,47 @@ func (list PaneList) Line() ([]byte, error) {
 	return json.Marshal(request{ID: fmt.Sprintf("pfm-%d", list.Seq), Method: "pane.list", Params: struct{}{}})
 }
 
-// Pane is one pane.list entry: the public pane id (a move assigns a new one)
-// and the terminal id (a move keeps it).
+// Pane is one pane.list entry, Herdr's PaneInfo: the public pane id (a move
+// assigns a new one), the terminal id (a move keeps it), where it sits and
+// what its agent reports. A field Herdr omits is its zero value; Focused is a
+// pointer so an absent mandatory field is not a false observation. It carries
+// no JSON tags: a nested shell's pane record (hookentry's pfm-shell-{pid}.pane)
+// persists it under these field names, so Herdr's wire names live on paneWire.
 type Pane struct {
-	PaneID     string
-	TerminalID string
+	PaneID        string
+	TerminalID    string
+	WorkspaceID   string
+	TabID         string
+	Focused       *bool
+	Revision      uint64
+	AgentSession  json.RawMessage
+	AgentStatus   string
+	Tokens        map[string]string
+	CWD           string
+	ForegroundCWD string
 }
 
-// ParsePanes decodes a pane.list result ({"type":"pane_list","panes":[…]}).
+// paneWire is Pane under Herdr's wire names, converted field for field.
+type paneWire struct {
+	PaneID        string            `json:"pane_id"`
+	TerminalID    string            `json:"terminal_id"`
+	WorkspaceID   string            `json:"workspace_id"`
+	TabID         string            `json:"tab_id"`
+	Focused       *bool             `json:"focused"`
+	Revision      uint64            `json:"revision"`
+	AgentSession  json.RawMessage   `json:"agent_session"`
+	AgentStatus   string            `json:"agent_status"`
+	Tokens        map[string]string `json:"tokens"`
+	CWD           string            `json:"cwd"`
+	ForegroundCWD string            `json:"foreground_cwd"`
+}
+
+// ParsePanes is the one reading of a pane.list result
+// ({"type":"pane_list","panes":[…]}): every field a caller reads, decoded once.
 func ParsePanes(result json.RawMessage) ([]Pane, error) {
 	var decoded struct {
-		Type  string `json:"type"`
-		Panes []struct {
-			PaneID     string `json:"pane_id"`
-			TerminalID string `json:"terminal_id"`
-		} `json:"panes"`
+		Type  string     `json:"type"`
+		Panes []paneWire `json:"panes"`
 	}
 	if err := json.Unmarshal(result, &decoded); err != nil {
 		return nil, fmt.Errorf("herdr pane.list: decode result %q: %w", result, err)
@@ -361,29 +387,22 @@ func ParsePanes(result json.RawMessage) ([]Pane, error) {
 	if decoded.Panes == nil {
 		return nil, fmt.Errorf("herdr pane.list: panes missing or null in result %q", result)
 	}
-	panes := make([]Pane, 0, len(decoded.Panes))
-	for _, pane := range decoded.Panes {
-		panes = append(panes, Pane{PaneID: pane.PaneID, TerminalID: pane.TerminalID})
+	panes := make([]Pane, len(decoded.Panes))
+	for index := range decoded.Panes {
+		panes[index] = Pane(decoded.Panes[index])
 	}
 	return panes, nil
 }
 
-// ParseShellPID decodes a pane.process_info result into the pid of the pane's
-// own shell (0 when Herdr names none).
-func ParseShellPID(result json.RawMessage) (int, error) {
-	var decoded struct {
-		Type        string `json:"type"`
-		ProcessInfo struct {
-			ShellPID int `json:"shell_pid"`
-		} `json:"process_info"`
+// ListPanes is one pane.list of the Herdr server at socket (SeatRequest), read
+// by ParsePanes. A server that cannot answer, or answers malformed, is an
+// error, never an empty list.
+func ListPanes(ctx context.Context, socket string) ([]Pane, error) {
+	body, err := SeatRequest(ctx, socket, "pane.list", struct{}{})
+	if err != nil {
+		return nil, err
 	}
-	if err := json.Unmarshal(result, &decoded); err != nil {
-		return 0, fmt.Errorf("herdr pane.process_info: decode result %q: %w", result, err)
-	}
-	if decoded.Type != "pane_process_info" {
-		return 0, fmt.Errorf("herdr pane.process_info: result type %q, want pane_process_info", decoded.Type)
-	}
-	return decoded.ProcessInfo.ShellPID, nil
+	return ParsePanes(body)
 }
 
 // ProcessInfo is one pane.process_info request: the processes in the pane's
@@ -405,34 +424,6 @@ func (info ProcessInfo) Line() ([]byte, error) {
 			PaneID string `json:"pane_id"`
 		}{info.Pane},
 	})
-}
-
-// ParseProcessInfo decodes a pane.process_info result
-// ({"type":"pane_process_info","process_info":{"foreground_processes":[…]}})
-// into the foreground pids.
-func ParseProcessInfo(result json.RawMessage) ([]int, error) {
-	var decoded struct {
-		Type        string `json:"type"`
-		ProcessInfo struct {
-			Foreground *[]struct {
-				PID int `json:"pid"`
-			} `json:"foreground_processes"`
-		} `json:"process_info"`
-	}
-	if err := json.Unmarshal(result, &decoded); err != nil {
-		return nil, fmt.Errorf("herdr pane.process_info: decode result %q: %w", result, err)
-	}
-	if decoded.Type != "pane_process_info" {
-		return nil, fmt.Errorf("herdr pane.process_info: result type %q, want pane_process_info", decoded.Type)
-	}
-	if decoded.ProcessInfo.Foreground == nil {
-		return nil, fmt.Errorf("herdr pane.process_info: foreground_processes missing or null in result %q", result)
-	}
-	pids := make([]int, 0, len(*decoded.ProcessInfo.Foreground))
-	for _, process := range *decoded.ProcessInfo.Foreground {
-		pids = append(pids, process.PID)
-	}
-	return pids, nil
 }
 
 // MaxTitleRunes is Herdr's cap on a pane title.

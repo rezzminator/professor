@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/charmbracelet/x/ansi"
@@ -449,7 +450,7 @@ func TestTabStatusRenameBeforeFirstPaintAndWithoutEvent(t *testing.T) {
 		t.Fatal(err)
 	}
 	if polls != 2 {
-		t.Fatalf("source polls = %d, want the first paint and one eventless tick", polls)
+		t.Fatalf("source polls = %d, want the first paint and the next refresh, with no event between", polls)
 	}
 }
 
@@ -863,10 +864,12 @@ func tabPainterFixture(t *testing.T, tabs *tabStatusFixture) (*indicatorPainter,
 var blockedFrames = []string{"🔴", "⭕"}
 
 // A blocked tab plays every attention frame, one per half-second tick,
-// and the painter stops once no decorated tab is left.
+// and the painter stops once no decorated tab is left. Every tick re-reads
+// the tabs here, as a hook's nudge before each tick would.
 func TestTabPainterAnimatesBlockedAndStopsWhenNoTabAnimates(t *testing.T) {
 	f := newTabStatusFixture()
 	painter, stepping := tabPainterFixture(t, f)
+	painter.cadence.idleRefresh = time.Nanosecond // every tick re-reads the tabs
 	polls := 0
 	painter.tabs = func(context.Context, string) ([]TabDecoration, error) {
 		polls++
@@ -904,10 +907,12 @@ func TestTabPainterAnimatesBlockedAndStopsWhenNoTabAnimates(t *testing.T) {
 
 // A label caught on any frame of its state is pfm's own: the next tick paints
 // its own frame over it, never stacking a second prefix as if a user renamed it.
+// Every tick re-reads the tabs here, so the third read (no tab) stops it.
 func TestTabLabelOnAnyFrameIsPfmsOwn(t *testing.T) {
 	for i, caught := range blockedFrames {
 		f := newTabStatusFixture()
 		painter, stepping := tabPainterFixture(t, f)
+		painter.cadence.idleRefresh = time.Nanosecond // every tick re-reads the tabs
 		polls := 0
 		painter.tabs = func(context.Context, string) ([]TabDecoration, error) {
 			polls++

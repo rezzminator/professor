@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
+	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
@@ -232,7 +233,7 @@ func TestClaudeSpawnRunsTheCostLauncherInFrontOfClaude(t *testing.T) {
 	}
 	var words []string
 	for _, word := range []string{pfm, "internal", "cost-launch", "--", "/opt/tools/claude enterprise"} {
-		words = append(words, Quote(word))
+		words = append(words, cmdparse.Quote(word))
 	}
 	launcher := strings.Join(words, " ")
 	if !strings.Contains(shell, " "+launcher+" ") {

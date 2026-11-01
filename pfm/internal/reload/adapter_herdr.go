@@ -158,18 +158,6 @@ func NotifyWorkerFailure(
 	}
 }
 
-// EngineForTarget takes native identity from its durable seat, never its socket name.
-func EngineForTarget(ctx context.Context, values paths.Values, socket, pane string) (pfmengine.ID, error) {
-	seat, err := SeatForReload(ctx, values, socket, pane)
-	if err != nil {
-		return "", err
-	}
-	if seat != nil {
-		return pfmengine.ID(seat.Engine), nil
-	}
-	return EngineOf(socket), nil
-}
-
 // WorkerArguments carries the validated CLI values to a backend-specific request.
 type WorkerArguments struct {
 	Account, Cache, Socket, Pane, Then, Model, Effort string
@@ -296,20 +284,20 @@ func (err *ScheduledError) Error() string {
 	)
 }
 
-// LockWorkerSchedule returns the reload worker's log path. A tmux chat's log
-// is named by its socket and has no schedule. A native seat's log is its own,
-// since every seat on one Herdr server shares the socket, and its schedule
-// comes back locked; a live recorded worker is refused as *ScheduledError.
-// On any error nothing stays locked.
+// LockWorkerSchedule returns the reload worker's log path. A tmux chat (seat
+// nil) has a log named by its socket and no schedule. A native seat's log is
+// its own, since every seat on one Herdr server shares the socket, and its
+// schedule comes back locked; a live recorded worker is refused as
+// *ScheduledError. On any error nothing stays locked.
 func LockWorkerSchedule(
 	ctx context.Context,
 	values paths.Values,
-	socket, pane string,
+	socket string,
+	seat *fleetdb.Seat,
 ) (string, *NativeSchedule, error) {
 	logPath := filepath.Join(values.SIDDir, "reload-"+filepath.Base(socket)+".log")
-	seat, err := SeatForReload(ctx, values, socket, pane)
-	if err != nil || seat == nil {
-		return logPath, nil, err
+	if seat == nil {
+		return logPath, nil, nil
 	}
 	id := seat.SeatID
 	if id == "" || id == "." || id == ".." || strings.ContainsAny(id, "/\x00") {

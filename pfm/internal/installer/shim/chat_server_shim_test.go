@@ -12,9 +12,9 @@ import (
 
 // `cx` creates its server through pfm's one chat-server creator, never a zsh
 // copy of it. The fixture runs the real `_cx_server` with a RECORDING pfm and
-// a RECORDING tmux — no server is created, no socket is touched — and reads
-// back who was asked to do what.
-func runCxServer(t *testing.T, pfmScript string) (pfmCalls, tmuxCalls, stderr string, failed bool) {
+// a RECORDING tmux — no server is created, no socket is touched — runs call
+// in an interactive shell, and reads back who was asked to do what.
+func runCxServer(t *testing.T, pfmScript, call string) (pfmCalls, tmuxCalls, stderr string, failed bool) {
 	t.Helper()
 	zsh, err := exec.LookPath("zsh")
 	if err != nil {
@@ -44,11 +44,13 @@ func runCxServer(t *testing.T, pfmScript string) (pfmCalls, tmuxCalls, stderr st
 	); err != nil {
 		t.Fatal(err)
 	}
-	script := "source " + quoteZsh(shimPath) + "\n_cx_server cx-probe-shim-sock /tmp 'sleep 1'\n"
+	script := "source " + quoteZsh(shimPath) + "\n" + call + "\n"
 	command := jailedZshCommand(
 		zsh, script, home,
 		"PATH="+fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"),
 	)
+	// cx() runs only under `[[ -o interactive ]]`.
+	command.Args = append([]string{command.Args[0], "-i"}, command.Args[1:]...)
 	var errorOutput strings.Builder
 	command.Stderr = &errorOutput
 	runErr := command.Run()
@@ -62,8 +64,10 @@ func runCxServer(t *testing.T, pfmScript string) (pfmCalls, tmuxCalls, stderr st
 	return read(pfmLog), read(tmuxLog), errorOutput.String(), runErr != nil
 }
 
+const cxServerCall = "_cx_server cx-probe-shim-sock /tmp 'sleep 1'"
+
 func TestShimCreatesTheCodexServerThroughPfmsOneCreator(t *testing.T) {
-	pfmCalls, tmuxCalls, stderr, failed := runCxServer(t, "exit 0\n")
+	pfmCalls, tmuxCalls, stderr, failed := runCxServer(t, "exit 0\n", cxServerCall)
 	if failed {
 		t.Fatalf("_cx_server failed on a pfm that succeeded: %s", stderr)
 	}
@@ -79,12 +83,30 @@ func TestShimCreatesTheCodexServerThroughPfmsOneCreator(t *testing.T) {
 // attaches to nothing, and pfm's own reason reaches the user.
 func TestShimStopsWhenPfmCouldNotCreateTheServer(t *testing.T) {
 	_, _, stderr, failed := runCxServer(
-		t, "echo 'pfm internal chat-server: create chat server: boom' >&2\nexit 1\n",
+		t, "echo 'pfm internal chat-server: create chat server: boom' >&2\nexit 1\n", cxServerCall,
 	)
 	if !failed {
 		t.Fatal("_cx_server succeeded on a pfm that failed")
 	}
 	if !strings.Contains(stderr, "create chat server: boom") {
 		t.Fatalf("the shim swallowed pfm's reason: %q", stderr)
+	}
+}
+
+// `cx` typed in a Herdr pane is born natively, in its own Herdr tab, through
+// pfm's creator: the creator gets the typed arguments after the run string and
+// answers 3 (born natively), and cx attaches nothing and succeeds.
+func TestCxBornNativelyAttachesNothing(t *testing.T) {
+	pfmCalls, tmuxCalls, stderr, failed := runCxServer(
+		t, "exit 3\n", "cx 'fix the bug'",
+	)
+	if failed {
+		t.Fatalf("cx failed on a native birth: %s", stderr)
+	}
+	if !strings.HasPrefix(pfmCalls, "internal chat-server cx-") || !strings.HasSuffix(pfmCalls, " fix the bug\n") {
+		t.Fatalf("pfm calls = %q, want the chat-server door handed the typed prompt", pfmCalls)
+	}
+	if tmuxCalls != "" {
+		t.Fatalf("cx attached after a native birth:\n%s", tmuxCalls)
 	}
 }

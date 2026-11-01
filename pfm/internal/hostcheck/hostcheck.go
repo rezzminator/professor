@@ -64,6 +64,8 @@ type Env struct {
 	TmuxDir string
 	// Tmux probes the servers under TmuxDir; nil is the real tmux.
 	Tmux TmuxServerClient
+	// ProcRoot is the proc root an account's live chats are read from; empty is the host's.
+	ProcRoot string
 }
 
 // EnvFor builds the read-only detector environment from the loaded runtime.
@@ -80,7 +82,7 @@ func EnvFor(runtime config.Runtime, now time.Time) Env {
 		StateDB:         runtime.Paths.StateDB, CacheDB: runtime.Paths.CacheDB,
 		ManagedRoot: installer.ManagedRoot(home), ConfigExplicit: runtime.ConfigExplicit,
 		MCPPort: runtime.Config.MCP.HTTP.Port, Accounts: runtime.Config.Accounts, Now: now,
-		Environ: os.Environ(), TmuxDir: runtime.Paths.TmuxDir,
+		Environ: os.Environ(), TmuxDir: runtime.Paths.TmuxDir, ProcRoot: runtime.Paths.ProcRoot,
 		AcceptedMCP: runtime.Config.Doctor.AcceptedMCP,
 	}
 }

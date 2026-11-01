@@ -16,8 +16,6 @@ import (
 // TabStatusOff disables tab decorations without changing sidebar indicators.
 const TabStatusOff = "off"
 
-const tabPaneListResult = "pane_list"
-
 // errTabOwnership marks a tab whose owner could not be proved, and
 // errTabLabelForeign a retained tab whose label pfm cannot show is its own:
 // either leaves that tab untouched while every other tab keeps painting.
@@ -55,6 +53,11 @@ type TabDecoration struct {
 
 // TabProvider enumerates the chats displayed on one Herdr endpoint.
 type TabProvider func(context.Context, string) ([]TabDecoration, error)
+
+// TabProbe says, without the TabProvider's fleet scan, whether the inputs
+// behind its last enumeration on one Herdr endpoint changed since; an error
+// says it could not tell.
+type TabProbe func(context.Context, string) (bool, error)
 
 // tabMarkers are the prefixes state plays in mode, one per frame: emoji mode
 // the theme's frames (a zero TabGlyphs field keeps its default), text mode
@@ -140,28 +143,26 @@ func (pane TabPane) valid() bool {
 	return pane.Pane != "" && pane.Terminal != "" && pane.Workspace != "" && pane.Tab != "" && pane.Focused != nil
 }
 
-// ReadTabPanes validates pane.list's identity fields at data entry.
+// ReadTabPanes reads pane.list (ListPanes) and validates its identity fields
+// at data entry.
 func ReadTabPanes(ctx context.Context, socket string) ([]TabPane, error) {
-	body, err := SeatRequest(ctx, socket, "pane.list", struct{}{})
+	listed, err := ListPanes(ctx, socket)
 	if err != nil {
 		return nil, fmt.Errorf("list tab panes: %w", err)
 	}
-	var result struct {
-		Type  string    `json:"type"`
-		Panes []TabPane `json:"panes"`
-	}
-	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, fmt.Errorf("decode tab panes: %w", err)
-	}
-	if result.Type != tabPaneListResult {
-		return nil, fmt.Errorf("tab panes: unexpected result %s", body)
-	}
-	for _, pane := range result.Panes {
-		if !pane.valid() {
-			return nil, fmt.Errorf("tab panes: incomplete PaneInfo for %q", pane.Pane)
+	panes := make([]TabPane, 0, len(listed))
+	for index := range listed {
+		pane := &listed[index]
+		tab := TabPane{
+			Pane: pane.PaneID, Terminal: pane.TerminalID, Workspace: pane.WorkspaceID, Tab: pane.TabID,
+			Focused: pane.Focused, Revision: pane.Revision, Session: pane.AgentSession, State: pane.AgentStatus,
 		}
+		if !tab.valid() {
+			return nil, fmt.Errorf("tab panes: incomplete PaneInfo for %q", tab.Pane)
+		}
+		panes = append(panes, tab)
 	}
-	return result.Panes, nil
+	return panes, nil
 }
 
 func readTabPane(
@@ -362,12 +363,15 @@ func tabTargetGone(err error) bool {
 	return errors.As(err, &refusal) && (refusal.Code == "pane_not_found" || refusal.Code == "tab_not_found")
 }
 
-// PaintIndicatorsWithTabs reuses the sidebar clock, failure bound and singleton.
+// PaintIndicatorsWithTabs reuses the sidebar clock, failure bound and
+// singleton; changed, when not nil, is consulted on every blinker tick that
+// would not re-read the tabs, and a change it reports makes the tick re-read.
 func PaintIndicatorsWithTabs(
 	ctx context.Context,
 	socket, lockDir string,
 	stderr io.Writer,
 	tabs TabProvider,
+	changed TabProbe,
 	proof PaneProof,
 ) error {
 	if stderr == nil {
@@ -380,7 +384,7 @@ func PaintIndicatorsWithTabs(
 		call:     Call,
 		clock:    clock.Real,
 		reported: map[string]bool{},
-		tabs:     tabs, provePane: proof,
+		tabs:     tabs, tabsChanged: changed, provePane: proof,
 	}
 	return painter.run(ctx)
 }

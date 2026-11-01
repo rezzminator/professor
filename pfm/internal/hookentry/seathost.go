@@ -30,6 +30,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/reload"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 )
 
@@ -57,9 +58,9 @@ func SeatHost(args []string, stdout, stderr io.Writer, runtime config.Runtime) i
 		fmt.Fprintf(stderr, "pfm internal seat-host: native seat %q unavailable: %v\n", args[0], err)
 		return 1
 	}
-	if (paths.OSEnv{}).Get("TMUX") != "" || (paths.OSEnv{}).Get(herdr.EnvMarker) != "1" ||
-		(paths.OSEnv{}).Get(herdr.EnvSocket) == "" ||
-		(paths.OSEnv{}).Get(herdr.EnvPane) == "" {
+	if identity := resolve.CallerEnvironment(); identity.TMUX != "" || (paths.OSEnv{}).Get(herdr.EnvMarker) != "1" ||
+		identity.HerdrSocket == "" ||
+		identity.HerdrPane == "" {
 		fmt.Fprintln(stderr, "pfm internal seat-host: current Herdr pane identity is required")
 		return 1
 	}
@@ -136,20 +137,25 @@ func SeatHost(args []string, stdout, stderr io.Writer, runtime config.Runtime) i
 			} else {
 				run = reload.RefreshRecipeRemoteControl(run, pfmengine.ID(seat.Engine), machine, seat.Name, stderr)
 			}
+			if pfmengine.ID(seat.Engine) == pfmengine.Claude {
+				run.Binary, runErr = currentClaudeBinary(run.Binary, runtime.Paths.Home, machine.Claude.Binary)
+			}
 		}
 		if runErr == nil {
 			argv, options, runErr = seatCommand(run, descriptor.Binary, terminal, stdout, stderr)
 		}
 		status, started := 1, false
 		if runErr == nil {
+			// The bound seat's Herdr socket and pane, never a herdr-keep relay's.
 			options.Env = seatEnvironment(
 				options.Env,
 				[]string{
 					paths.EnvStateDB + "=" + runtime.Paths.StateDB,
+					herdr.EnvSocket + "=" + seat.HerdrSocket,
 					herdr.EnvPane + "=" + seat.HerdrPane,
 					herdr.EnvWorkspace + "=" + seat.HerdrWorkspace,
 				},
-				[]string{paths.EnvStateDB, herdr.EnvPane, herdr.EnvWorkspace, herdr.EnvTab},
+				[]string{paths.EnvStateDB, herdr.EnvSocket, herdr.EnvPane, herdr.EnvWorkspace, herdr.EnvTab},
 			)
 			options.Env, _ = armCostLedger(options.Env, paths.OSEnv{}, run.CostLedger, stderr)
 			acknowledge := seat.ReloadPending
@@ -350,6 +356,22 @@ func failedSeatStart(
 		fmt.Fprintf(stderr, "pfm internal seat-host: record failed seat %s: %v\n", seat.SeatID, err)
 	}
 	return 1
+}
+
+// currentClaudeBinary swaps a recorded Claude build that version retention has
+// since pruned for the build the launcher picks now; any other recorded path stays.
+func currentClaudeBinary(recorded, home, configured string) (string, error) {
+	if filepath.Dir(recorded) != gather.ClaudeVersionsDir(home) {
+		return recorded, nil
+	}
+	if _, err := os.Stat(recorded); !errors.Is(err, os.ErrNotExist) {
+		return recorded, nil
+	}
+	resolved, err := gather.ResolveClaudeBinary(home, configured, paths.OSEnv{}.Get("PATH"))
+	if err != nil {
+		return "", fmt.Errorf("recorded Claude binary %s is gone, resolve its successor: %w", recorded, err)
+	}
+	return resolved, nil
 }
 
 func seatCommand(

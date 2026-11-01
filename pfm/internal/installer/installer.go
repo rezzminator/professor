@@ -316,6 +316,7 @@ func (installer *engine) install(ctx context.Context) error {
 	}
 	installer.deferFailure(mcpErr)
 	installer.deferFailure(installer.wireOpenCodeInstructions())
+	installer.deferFailure(installer.wireOpenCodeEngineGuard())
 	installer.deferFailure(installer.wireLogDefault())
 	installer.deferFailure(installer.wireShell(false))
 	installer.deferFailure(installer.wireHerdrShell(false))
@@ -588,6 +589,9 @@ func copyPlanTree(source, target string) error {
 func (installer *engine) uninstall(ctx context.Context) error {
 	// Recover instruction ownership before MCP edits the shared config.
 	if err := installer.wireOpenCodeInstructions(); err != nil {
+		return err
+	}
+	if err := installer.wireOpenCodeEngineGuard(); err != nil {
 		return err
 	}
 	if err := installer.themeSyncOff(ctx); err != nil {

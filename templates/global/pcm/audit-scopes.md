@@ -59,7 +59,7 @@ Files: project dirs, CLAUDE.md files, permanent docs, lock files
 
 - **Project dirs:** every roster project exists (`{project}/`, repeated per entry)
 - **Child CLAUDE.md:** each project dir has a `CLAUDE.md`
-- **Child agents:** each project dir has `.claude/agents/`; rosters match a live `ls`
+- **Child agents:** where a project dir keeps `.claude/agents/`, its roster matches a live `ls`; a repo whose agents all live at root passes
 - **Permanent docs:** every docs path `CLAUDE.md` names (the hub `docs/_index.md`, `docs/commands/`, where the project keeps them) exists, with expected subdirs
 - **Stale names:** grep all CLAUDE.md files and agents for old/renamed project names or typos
 - **Package managers:** each roster project's lock file (its package manager's, named in its `CLAUDE.md`) present

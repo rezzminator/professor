@@ -65,6 +65,7 @@ const TIER1 = [
           "themesync",
           "themetmux",
           "agentlauncher",
+          "workbench",
         ],
       },
       {
@@ -91,7 +92,6 @@ const TIER1 = [
       ".github/",
       ".githooks/",
       "scripts/",
-      "infra/check-self-hosted-manifest.sh",
     ],
   },
 ];
@@ -101,7 +101,6 @@ const RELEASE_FILES = [
   "CHANGELOG.md",
   "VERSION",
   ".professor/VERSION",
-  ".professor/manifest.json",
 ];
 const isReleaseFile = (path) =>
   path.startsWith("releases/") || RELEASE_FILES.includes(path);
@@ -777,22 +776,12 @@ function versionRules(cwd, note, version, previous, bump, notePath) {
   const stamps = [
     ["VERSION", (t) => t.trim()],
     [".professor/VERSION", (t) => t.trim()],
-    [
-      ".professor/manifest.json",
-      (t, path) => {
-        try {
-          return JSON.parse(t)?.installed_from?.version;
-        } catch (err) {
-          throw new CheckError(`${path} is not valid JSON: ${err.message}`);
-        }
-      },
-    ],
   ];
   for (const [file, read] of stamps) {
     const path = join(cwd, file);
-    const value = read(readInput(path, "version stamp"), path);
+    const value = read(readInput(path, "version stamp"));
     if (value !== version.str)
-      fails.push(fail("V1", file, `${value === undefined ? "no installed_from.version" : JSON.stringify(value)} differs from --version ${version.str}`));
+      fails.push(fail("V1", file, `${JSON.stringify(value)} differs from --version ${version.str}`));
   }
 
   const changelog = textLines(readInput(join(cwd, "CHANGELOG.md"), "changelog"));

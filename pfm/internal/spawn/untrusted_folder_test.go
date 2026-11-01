@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 )
 
 // untrustedCodex is fakeCodex in a folder it does not trust, as a live 0.159.0
@@ -29,21 +31,25 @@ func newUntrustedCodex() *untrustedCodex {
 	return &untrustedCodex{fakeCodex: newFakeCodex(), noThread: true}
 }
 
-func (fake *untrustedCodex) Capture(ctx context.Context, socket, target string) (string, error) {
+func (fake *untrustedCodex) Pane(socket, pane string) (pfmcall.Screen, pfmcall.Target, error) {
+	return fake, fakeTarget(socket, pane), nil
+}
+
+func (fake *untrustedCodex) CaptureScreen(ctx context.Context, target pfmcall.Target) (string, error) {
 	fake.mutex.Lock()
 	trustAsked, noticed := fake.trustAsked, fake.noticed
 	fake.mutex.Unlock()
 	if trustAsked {
 		return untrustedDialog, nil
 	}
-	capture, err := fake.fakeCodex.Capture(ctx, socket, target)
+	capture, err := fake.fakeCodex.CaptureScreen(ctx, target)
 	if err != nil || !noticed {
 		return capture, err
 	}
 	return "■ " + codexNoThread + "\n" + capture, nil
 }
 
-func (fake *untrustedCodex) SendKey(ctx context.Context, socket, target, key string) error {
+func (fake *untrustedCodex) SendKey(ctx context.Context, target pfmcall.Target, key string) error {
 	fake.mutex.Lock()
 	switch {
 	case fake.trustAsked:
@@ -64,7 +70,7 @@ func (fake *untrustedCodex) SendKey(ctx context.Context, socket, target, key str
 		return nil
 	}
 	fake.mutex.Unlock()
-	return fake.fakeCodex.SendKey(ctx, socket, target, key)
+	return fake.fakeCodex.SendKey(ctx, target, key)
 }
 
 func requireUntrustedRefusal(t *testing.T, result Result, err error) {

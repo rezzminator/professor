@@ -60,7 +60,11 @@ const (
 type herdrDeps struct {
 	getenv func(string) string
 	tmux   func(ctx context.Context, socket string, args ...string) (string, error)
-	now    func() time.Time
+	// listPanes lists the chat server's panes through the one pane-list door
+	// (gather.ProbePanes): a dead or unresponsive server is an error, never an
+	// empty list.
+	listPanes func(ctx context.Context, socket string) ([]gather.ProbePane, error)
+	now       func() time.Time
 	// lookPath finds a program on PATH; lockDir holds the per-session lock
 	// files and the Codex pane registry (herdr_codex.go).
 	lookPath func(string) (string, error)
@@ -73,7 +77,11 @@ type herdrDeps struct {
 	// procInfo reads one process: its parent pid and command name. getpid is
 	// the hook process.
 	procInfo func(pid int) (parent int, command string, err error)
-	getpid   func() int
+	// processAlive is the one pid probe (gather.ProcessAlive), consulted before
+	// a process table's "no such process" retires a record; nil when the table
+	// is a fixture whose pids name no real process.
+	processAlive func(pid int) (bool, error)
+	getpid       func() int
 	// cmdline and environ read one process's command line and environment:
 	// the Codex TUI's own, which name the pane it runs in (herdr_codex.go).
 	cmdline func(pid int) ([]string, error)
@@ -87,15 +95,20 @@ type herdrDeps struct {
 	sidDir    string
 	codexHome string
 	seatPaths *paths.Values
+	keep      *herdr.Keep // reads the panes herdr-keep holds
 }
 
 func realHerdrDeps() herdrDeps {
 	env := paths.OSEnv{}
 	procfs := gather.NewProcFS(env.Get(paths.EnvProcRoot))
 	deps := herdrDeps{
-		getenv: env.Get, tmux: runTmuxForHerdr, now: clock.Real.Now, lookPath: hostdeps.RealRunner{}.LookPath,
+		getenv: env.Get, tmux: runTmuxForHerdr, listPanes: listTmuxPanesForHerdr, now: clock.Real.Now,
+		lookPath: hostdeps.RealRunner{}.LookPath,
 		procInfo: realProcInfo(procfs), getpid: os.Getpid, cmdline: procfs.Cmdline, environ: procfs.Environ,
-		sidDir: paths.SIDDirFrom(env), spawn: startHerdrWatch,
+		sidDir: paths.SIDDirFrom(env), spawn: startHerdrWatch, keep: gather.HerdrKeep(procfs),
+	}
+	if env.Get(paths.EnvProcRoot) == "" {
+		deps.processAlive = gather.ProcessAlive
 	}
 	home, err := paths.HomeFrom(env)
 	// A real reporter always enables durable-seat resolution, even when home
@@ -123,6 +136,12 @@ func realHerdrDeps() herdrDeps {
 		return herdr.AppendInfo(deps.lockDir, session, at, message)
 	}
 	return deps
+}
+
+// listTmuxPanesForHerdr is gather.ProbePanes on the chat server at socket,
+// with tmux.Exec's default binary.
+func listTmuxPanesForHerdr(ctx context.Context, socket string) ([]gather.ProbePane, error) {
+	return gather.ProbePanes(ctx, "", socket)
 }
 
 func runTmuxForHerdr(ctx context.Context, socket string, args ...string) (string, error) {
@@ -343,17 +362,9 @@ func blockedMessage(payload herdrPayload) string {
 }
 
 // hostHasHerdr is the gate on every tmux write: no Herdr on the host, no
-// store. The hook inherits HERDR_BIN_PATH from the shell that created the
-// chat server or finds herdr on PATH; either proves a Herdr to report to.
+// store. herdr.HostHasHerdr is the rule, over the hook's own seams.
 func (reporter *herdrReporter) hostHasHerdr() bool {
-	if reporter.deps.getenv(herdr.EnvBin) != "" {
-		return true
-	}
-	if reporter.deps.lookPath == nil {
-		return false
-	}
-	_, err := reporter.deps.lookPath("herdr")
-	return err == nil
+	return herdr.HostHasHerdr(reporter.deps.getenv, reporter.deps.lookPath)
 }
 
 // run resolves the pane, then reports. A Codex event reports to the pane
@@ -361,7 +372,7 @@ func (reporter *herdrReporter) hostHasHerdr() bool {
 // pane belongs to the tmux CLIENT that attached from a Herdr pane, never to
 // the process environment.
 func (reporter *herdrReporter) run(ctx context.Context, payload herdrPayload) (returnErr error) {
-	if reporter.deps.seatPaths != nil && reporter.deps.getenv("TMUX") != "" {
+	if reporter.deps.seatPaths != nil && reporter.deps.identity().TMUX != "" {
 		// Durable bookkeeping must not suppress or consume the legacy bridge's deadline.
 		defer func() {
 			returnErr = errors.Join(returnErr, reporter.tmuxSeatLifecycle(ctx, payload))
@@ -443,7 +454,8 @@ func (reporter *herdrReporter) processTarget() herdrTarget {
 	if reporter.deps.getenv(herdr.EnvMarker) != "1" {
 		return herdrTarget{}
 	}
-	return herdrTarget{pane: reporter.deps.getenv(herdr.EnvPane), socket: reporter.deps.getenv(herdr.EnvSocket)}
+	identity := reporter.deps.identity()
+	return herdrTarget{pane: identity.HerdrPane, socket: identity.HerdrSocket}
 }
 
 func (reporter *herdrReporter) apply(ctx context.Context, payload herdrPayload, target herdrTarget) error {

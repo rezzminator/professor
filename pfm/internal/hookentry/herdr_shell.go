@@ -147,7 +147,8 @@ func logHerdrShell(stderr io.Writer, deps herdrDeps, message string) {
 
 // reportShell runs one verb; warn takes a failure the run reports past.
 func reportShell(ctx context.Context, deps herdrDeps, options herdrShellOptions, warn func(error)) error {
-	socket := deps.getenv(herdr.EnvSocket)
+	identity := deps.identity()
+	socket := identity.HerdrSocket
 	if socket == "" {
 		return fmt.Errorf("no %s in the shell's environment", herdr.EnvSocket)
 	}
@@ -170,7 +171,7 @@ func reportShell(ctx context.Context, deps herdrDeps, options herdrShellOptions,
 		return seq
 	}
 	record := filepath.Join(deps.lockDir, fmt.Sprintf("%s-%d.pane", herdrShellSource, options.pid))
-	pane, nested, err := shellPane(ctx, socket, options.pid, deps.getenv(herdr.EnvPane), next)
+	pane, nested, err := shellPane(ctx, deps.keep, socket, options.pid, identity.HerdrPane, next)
 	if options.verb == herdrShellRelease {
 		var missing errNoShellPane
 		if errors.As(err, &missing) {
@@ -446,9 +447,16 @@ func shellTitlePath(lockDir, pane string) string {
 // (born) when it still runs it, else the first listed pane that does; nested
 // says pid is one of the pane's foreground processes, not its own shell. A
 // pane that closed between the listing and its question is skipped.
-func shellPane(ctx context.Context, socket string, pid int, born string, next func() uint64) (string, bool, error) {
+func shellPane(
+	ctx context.Context,
+	keep *herdr.Keep,
+	socket string,
+	pid int,
+	born string,
+	next func() uint64,
+) (string, bool, error) {
 	if born != "" {
-		canonical, nested, err := paneRunsShell(ctx, socket, born, pid, next())
+		canonical, nested, err := paneRunsShell(ctx, keep, socket, born, pid, next())
 		if err != nil && !isHerdrNotFound(err) {
 			return "", false, err
 		}
@@ -464,7 +472,7 @@ func shellPane(ctx context.Context, socket string, pid int, born string, next fu
 		if pane.PaneID == born {
 			continue
 		}
-		canonical, nested, err := paneRunsShell(ctx, socket, pane.PaneID, pid, next())
+		canonical, nested, err := paneRunsShell(ctx, keep, socket, pane.PaneID, pid, next())
 		if err != nil && !isHerdrNotFound(err) {
 			return "", false, err
 		}
@@ -476,9 +484,16 @@ func shellPane(ctx context.Context, socket string, pid int, born string, next fu
 }
 
 // paneRunsShell returns the producer's canonical pane id when its own shell,
-// or one of its foreground processes (nested true), is pid. A moved pane's
-// inherited id may be an alias that pane.list never emits.
-func paneRunsShell(ctx context.Context, socket, pane string, pid int, seq uint64) (string, bool, error) {
+// or one of its foreground processes (nested true), is pid; a pane herdr-keep
+// holds runs its holder's shell (keep). A moved pane's inherited id may be an
+// alias that pane.list never emits.
+func paneRunsShell(
+	ctx context.Context,
+	keep *herdr.Keep,
+	socket, pane string,
+	pid int,
+	seq uint64,
+) (string, bool, error) {
 	line, err := herdr.ProcessInfo{Pane: pane, Seq: seq}.Line()
 	if err != nil {
 		return "", false, err
@@ -487,30 +502,22 @@ func paneRunsShell(ctx context.Context, socket, pane string, pid int, seq uint64
 	if err != nil {
 		return "", false, err
 	}
-	shell, err := herdr.ParseShellPID(results[0])
+	processes, err := keep.Processes(ctx, socket, results[0])
 	if err != nil {
 		return "", false, err
 	}
-	var identity struct {
-		ProcessInfo struct {
-			Pane string `json:"pane_id"`
-		} `json:"process_info"`
-	}
-	if err := json.Unmarshal(results[0], &identity); err != nil {
-		return "", false, fmt.Errorf("read canonical identity of shell pane %s: %w", pane, err)
-	}
-	if identity.ProcessInfo.Pane == "" {
+	if processes.Pane == "" {
 		return "", false, fmt.Errorf("read canonical identity of shell pane %s: process_info.pane_id is empty", pane)
 	}
-	if shell == pid {
-		return identity.ProcessInfo.Pane, false, nil
+	if processes.Shell == pid {
+		return processes.Pane, false, nil
 	}
-	foreground, err := herdr.ParseProcessInfo(results[0])
+	foreground, err := processes.PIDs()
 	if err != nil {
 		return "", false, err
 	}
 	if slices.Contains(foreground, pid) {
-		return identity.ProcessInfo.Pane, true, nil
+		return processes.Pane, true, nil
 	}
 	return "", false, nil
 }

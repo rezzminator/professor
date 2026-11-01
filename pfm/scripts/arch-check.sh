@@ -16,7 +16,7 @@
 # in review. With no baseline, --measure writes today's tree as the first one.
 #
 # The checks are independent, so they run as concurrent background jobs and print
-# in the order they always have: C1 … C23, C25, C26, then C24 (its own script). A job
+# in the order they always have: C1 … C23, C25, C26, C27, then C24 (its own script). A job
 # that ends without leaving its CHECK line is reported as ERROR for that check,
 # never read as PASS.
 set -uo pipefail
@@ -57,7 +57,9 @@ grep '^cmd/pfm/' "$L/src.list" > "$L/cmd.list"
 # not read (rc ≥ 2), so an unreadable tree never passes as a clean one.
 # An EMPTY list is never "clean": grep with no file operands would read stdin
 # and hang the gate, so it is reported as an enumerator that could not run.
-g() { local out=$1 list=$2; shift 2; [ -s "$list" ] || return 2; grep "$@" $(cat "$list") > "$out"; [ $? -le 1 ] || return 2; }
+# -H keeps the file name on a one-file list, which count_by_file keys on (an -h
+# the caller passes still wins: the later flag rules).
+g() { local out=$1 list=$2; shift 2; [ -s "$list" ] || return 2; grep -H "$@" $(cat "$list") > "$out"; [ $? -le 1 ] || return 2; }
 
 # stale_baseline <name>: the baseline's Go-file keys (an optional `kind:` prefix
 # stripped) whose file no longer exists — a ledger entry that names nothing. A
@@ -188,11 +190,16 @@ chk_C4() {
   else say C4-cmd-primitives ERROR "grep could not read cmd/pfm sources"; fi
 }
 
-# C5 one tmux runner: outside internal/tmux/, a file that builds its own tmux
-# invocation — resolves the tmux binary or assembles the -S socket argv itself.
+# C5 one tmux runner, one herdr runner: outside internal/tmux/ and
+# internal/herdr/, a file that builds its own tmux or herdr invocation —
+# resolves the binary itself (deps.Executable, LookPath), spells it as the head
+# of an argv slice or hands it to a runner beside a flag, or assembles the -S
+# socket argv itself.
 chk_C5() {
-  grep -v '^internal/tmux/' "$L/src.list" > "$T/notmux.list"
-  if g "$T/raw" "$T/notmux.list" -lE 'deps\.Executable\("tmux"\)|\[\]string\{"-S", '; then cp "$T/raw" "$T/c5"; ratchet C5-tmux-runner tmux-runners "$T/c5"
+  grep -vE '^internal/(tmux|herdr)/' "$L/src.list" > "$T/notmux.list"
+  local bin='"(tmux|herdr)"'
+  if g "$T/raw" "$T/notmux.list" -lE "deps\.Executable\($bin\)|[lL]ookPath\(($bin|pfmtmux\.Binary)\)|\[\]string\{($bin|pfmtmux\.Binary)|^[[:space:]]*pfmtmux\.Binary,\$|$bin, \"-|\[\]string\{\"-S\", "; then
+    cp "$T/raw" "$T/c5"; ratchet C5-tmux-runner tmux-runners "$T/c5"
   else say C5-tmux-runner ERROR "grep could not read sources"; fi
 }
 
@@ -233,11 +240,16 @@ chk_C9() {
   fi
 }
 
-# C10 MCP reaches chat verbs through typed calls, never argv into package main.
+# C10 MCP reaches chat verbs through typed calls, never argv into package main,
+# and reaches send and capture through internal/chat, never pfmcall directly: a
+# call of a pfmcall function (pfmcall.New, a key check) is counted under the key
+# pfmcall:<file>, beside the argv count under <file>.
 chk_C10() {
   grep '^internal/mcpserv/' "$L/src.list" > "$T/mcp.list"
   if [ ! -s "$T/mcp.list" ]; then say C10-mcp-argv ERROR "no internal/mcpserv sources listed"
-  elif g "$T/raw" "$T/mcp.list" -nE 'backend\.dispatch\(|cliAction\('; then count_by_file "$T/raw" > "$T/c10"; ratchet_counts C10-mcp-argv mcp-argv-calls "$T/c10"
+  elif g "$T/raw" "$T/mcp.list" -nE 'backend\.dispatch\(|cliAction\(' &&
+       g "$T/call" "$T/mcp.list" -nE 'pfmcall\.[A-Z][A-Za-z0-9]*\('; then
+    { count_by_file "$T/raw"; count_by_file "$T/call" | sed 's/^/pfmcall:/'; } > "$T/c10"; ratchet_counts C10-mcp-argv mcp-argv-calls "$T/c10"
   else say C10-mcp-argv ERROR "grep could not read internal/mcpserv"; fi
 }
 
@@ -509,6 +521,25 @@ chk_C26() {
   ratchet C26-exec-write exec-writes "$T/c26"
 }
 
+# C27 identity is read in one place: TMUX, TMUX_PANE, HERDR_SOCKET_PATH,
+# HERDR_PANE_ID, CLAUDE_CODE_SESSION_ID, CODEX_THREAD_ID and CHAT_SENDER_* are
+# read through internal/resolve (EnvironmentOf, CallerEnvironment,
+# ProcessEnvironment), whose snapshot names its subject: this process or another
+# one. A read is a getter (Get, getenv, env, environ[…]) handed the literal or any
+# constant that holds one of those names; a write (EnvironmentWith, "TMUX=") is
+# no read. Count per file, only shrinks.
+chk_C27() {
+  local names='TMUX|TMUX_PANE|HERDR_SOCKET_PATH|HERDR_PANE_ID|CLAUDE_CODE_SESSION_ID|CODEX_THREAD_ID|CHAT_SENDER_[A-Z0-9_]+'
+  grep -vE '^internal/(resolve|paths)/' "$L/src.list" > "$T/noresolve.list"
+  if g "$T/decl" "$L/src.list" -ohE "\b[A-Za-z_][A-Za-z0-9_]*[[:space:]]*(string[[:space:]]*)?=[[:space:]]*\"($names)\""; then
+    local consts arg; consts=$(grep -oE '^[A-Za-z_][A-Za-z0-9_]*' "$T/decl" | sort -u | paste -sd'|' -)
+    arg="\"($names)\""; [ -n "$consts" ] && arg="($arg|([A-Za-z_]+\.)?($consts))"
+    if g "$T/raw" "$T/noresolve.list" -nE "([gG]et|[eE]nv|[eE]nviron|[eE]nvironment)[[:space:]]*[([][[:space:]]*$arg[[:space:]]*[])]"; then
+      count_by_file "$T/raw" > "$T/c27"; ratchet_counts C27-identity-env identity-env "$T/c27"
+    else say C27-identity-env ERROR "grep could not read sources"; fi
+  else say C27-identity-env ERROR "grep could not read the identity name declarations"; fi
+}
+
 # C24 lives in its own script; its exit status (0 PASS · 1 FAIL · 2 ERROR) joins the
 # maximum below, and the status file is how the job hands it over.
 chk_C24() { bash "$PFM/scripts/arch-c24.sh" "$MODE"; echo $? > "$L/jobs/C24.status"; }
@@ -527,7 +558,8 @@ for id in C1-ceiling-src C2-ceiling-test C3-cmd-budget C4-cmd-primitives C5-tmux
   C6-atomic-write C7-sql-open C8-negation-dirs C9-package-doc C10-mcp-argv C11-db-names \
   C12-claude-pointers C13-test-mirror C14-usage-parity C15-internal-usage \
   C16-env-outside-paths C17-dup-functions C18-engine-spellings C19-env-namespace \
-  C20-codex-home C21-test-jail C22-host-doors C23-bare-log C25-testmain-jail C26-exec-write C24-unwrapped-door; do
+  C20-codex-home C21-test-jail C22-host-doors C23-bare-log C25-testmain-jail C26-exec-write C27-identity-env \
+  C24-unwrapped-door; do
   job "$id"
 done
 

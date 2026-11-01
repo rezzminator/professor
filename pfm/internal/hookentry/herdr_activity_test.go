@@ -428,6 +428,7 @@ func TestHerdrTmuxAgentLeaseExpiresStoredState(t *testing.T) {
 	now := rig.clock + int64(time.Hour+time.Second)
 	deps := rig.jail.deps(rig.env, &now)
 	deps.tmux = rig.tmux.run
+	deps.listPanes = rig.tmux.listPanes
 	reporter := &herdrReporter{deps: deps}
 	done, err := reporter.expireAgents("s1")
 	if err != nil || !done {
@@ -535,6 +536,7 @@ func TestHerdrTranscriptWatchPreservesActivityFence(t *testing.T) {
 	rig.wantQuiet(rig.engine("working", `{"session_id":"s1","hook_event_name":"PostToolUse","tool_name":"Read"}`))
 	deps := rig.jail.deps(rig.env, &rig.clock)
 	deps.tmux = rig.tmux.run
+	deps.listPanes = rig.tmux.listPanes
 	options, err := parseHerdrOptions([]string{"idle", "--socket", rigSocket, "--session", "cc-1"})
 	if err != nil {
 		t.Fatal(err)
@@ -568,6 +570,7 @@ func TestHerdrTranscriptWatchDoesNotCrossSessions(t *testing.T) {
 	blocked := rig.tmux.storedState(t)
 	deps := rig.jail.deps(rig.env, &rig.clock)
 	reads := 0
+	deps.listPanes = rig.tmux.listPanes
 	deps.tmux = func(ctx context.Context, socket string, args ...string) (string, error) {
 		if len(args) > 0 && args[0] == "show-options" && args[len(args)-1] == herdrStoredOption {
 			reads++

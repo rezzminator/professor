@@ -5,7 +5,9 @@
 // part and denies a git command whose part did not parse or hit a parse bound,
 // the store guard (internal/hookentry/store_guard.go), which reads each
 // part's Env, and the pcm guard (internal/hookentry/pcm_guard.go), which
-// reads each part's Redirs besides its words.
+// reads each part's Redirs besides its words. Quote and SplitShellWords are
+// the one POSIX single-quoter and its inverse, which removes quoting and
+// expands nothing.
 // Design: docs/design/hooks/git-guard.md § How it reads a command,
 // docs/design/hooks/pcm-guard.md § How it reads a command.
 package cmdparse
@@ -64,6 +66,11 @@ type Part struct {
 	Args    []string
 	Status  string
 	Bounded bool
+	// Unread is true for a bash, sh or zsh part whose -c string holds an
+	// expansion the parse cannot know: the string is not parsed, so the
+	// commands it runs are among no part, and a caller deciding on them
+	// treats the call as unread.
+	Unread bool
 	// Env holds the variable assignments in force for the command: those set
 	// earlier in the call, its own `NAME=v` prefix and those of an
 	// `env`/`sudo` wrapper, less what `unset` and `env -u/-i` removed. A value

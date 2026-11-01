@@ -14,14 +14,16 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/headless"
-	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/launchnotice"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
-type callerKey struct{}
+type (
+	callerKey struct{}
+	placedKey struct{}
+)
 
 type birthCaller struct {
 	door     string
@@ -34,13 +36,46 @@ func WithCaller(ctx context.Context, door string, identity resolve.Identity, err
 	return context.WithValue(ctx, callerKey{}, birthCaller{door: door, identity: identity, err: err})
 }
 
-// BirthBackend obtains the request caller or identifies the local process, then
-// places once; a Herdr choice carries the scan of the fleet a new tab is filed
-// under, run only when one is born.
+// withoutCaller marks a door that opens for no terminal (a schedule's wake,
+// an MCP open): unless the request carries its caller, the chat is placed by
+// its own recorded host, never by the process that runs the door.
+func withoutCaller(ctx context.Context, door string) context.Context {
+	if _, carried := ctx.Value(callerKey{}).(birthCaller); carried {
+		return ctx
+	}
+	return WithCaller(ctx, door, resolve.Identity{}, spawn.ErrNoCaller)
+}
+
+// WithPlacement carries a placement already made to the rest of its request
+// (a door that hands its birth to another, like shim.cx to chat new), so no
+// later step of the same request asks again.
+func WithPlacement(ctx context.Context, choice spawn.BackendChoice) context.Context {
+	return context.WithValue(ctx, placedKey{}, choice)
+}
+
+// BirthBackend places a birth that has no recorded host (placeChat).
 func BirthBackend(ctx context.Context, door, requested string) (spawn.BackendChoice, error) {
+	return placeChat(ctx, door, requested, "", false, nil)
+}
+
+// placeChat is the one placement of every birth and revive: a placement the
+// request already made is reused; otherwise the carried caller (with its door)
+// or the local process, identified once with Codex seats, the chat's recorded
+// Herdr host and whether it revives a stored chat decide through spawn.Place.
+// A Herdr choice carries the scan of the fleet a new tab is filed under, run
+// only when one is born.
+func placeChat(
+	ctx context.Context,
+	door, requested, recorded string,
+	revive bool,
+	runtime *pfmconfig.Runtime,
+) (spawn.BackendChoice, error) {
+	if choice, placed := ctx.Value(placedKey{}).(spawn.BackendChoice); placed {
+		return choice, nil
+	}
 	caller, carried := ctx.Value(callerKey{}).(birthCaller)
 	if !carried {
-		identifier, err := resolve.NewWhoami(resolve.WhoamiDependencies{CodexSeats: CodexSeats(nil)})
+		identifier, err := resolve.NewWhoami(resolve.WhoamiDependencies{CodexSeats: CodexSeats(runtime)})
 		if err != nil {
 			caller.err = err
 		} else {
@@ -49,9 +84,9 @@ func BirthBackend(ctx context.Context, door, requested string) (spawn.BackendCho
 	} else if caller.door != "" {
 		door = caller.door
 	}
-	choice, err := spawn.Place(ctx, door, requested, caller.identity, caller.err)
+	choice, err := spawn.Place(ctx, door, requested, recorded, revive, caller.identity, caller.err)
 	if choice.Backend == spawn.BackendHerdr {
-		choice.Places = herdrPlacesFor(nil)
+		choice.Places = herdrPlacesFor(runtime)
 	}
 	return choice, err
 }
@@ -86,15 +121,6 @@ func BirthHerdr(ctx context.Context, choice spawn.BackendChoice, plan action.Hea
 		}
 	}
 
-	if err := herdr.CheckProtocol(ctx, choice.HerdrSocket); err != nil {
-		fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
-		return false, 1
-	}
-	if plan.Record != nil {
-		if err := fleetdb.RecordLaunch(ctx, runtime.Paths, *plan.Record, clock.Real.Now().Unix()); err != nil {
-			fmt.Fprintf(stderr, "pfm chat new: record native launch %s: %v\n", plan.Record.SessionID, err)
-		}
-	}
 	recipe := *plan.SeatRun
 	// Tmux birth submits Codex's prompt after launch; a native seat has no
 	// tmux submission phase, so carry it in the engine's positional argv.
@@ -102,22 +128,23 @@ func BirthHerdr(ctx context.Context, choice spawn.BackendChoice, plan action.Hea
 		recipe.Args = append(append([]string(nil), recipe.Args...), "--", prompt)
 	}
 	result, err := spawn.SpawnHerdr(ctx, spawn.HerdrRequest{
-		Choice: choice, Paths: runtime.Paths, Run: recipe,
-		Seat: fleetdb.Seat{SessionID: id, Engine: string(engineID), Name: name},
+		Choice: choice,
+		Paths:  runtime.Paths,
+		Run:    recipe,
+		Seat:   fleetdb.Seat{SessionID: id, Engine: string(engineID), Name: name},
+		Launch: plan.Record,
+		Comms: &fleetdb.CommsEvent{
+			AtNS:    clock.Real.Now().UnixNano(),
+			Kind:    fleetdb.KindSpawn,
+			Target:  name,
+			Message: prompt,
+		},
 	})
 	born := result.Seat.SeatID != ""
 	launchnotice.Print(stderr, "pfm chat new", result.Warnings)
 	if err = CommitWorkbenchLaunch(ctx, born, name, err); err != nil {
 		fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
 		return born, 1
-	}
-	state := fleetdb.OpenSharedState(ctx, runtime.Paths)
-	err = errors.Join(state.RecordComms(ctx, fleetdb.CommsEvent{
-		AtNS: clock.Real.Now().UnixNano(), Kind: fleetdb.KindSpawn, Target: name,
-		ReceiverSocket: result.Seat.HerdrSocket, ReceiverPane: result.Seat.HerdrPane, Message: prompt,
-	}), state.Close())
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm chat new: native seat is starting; comms ledger: %v\n", err)
 	}
 	plan.Report(stderr, "pfm chat new")
 	report := stdout
@@ -241,8 +268,4 @@ func nativeBirthTarget(
 	}
 	// No transcript yet is a live startup seat, not an absent conversation.
 	return target, true, nil
-}
-
-func nativeLocation(seat fleetdb.Seat) string {
-	return fmt.Sprintf("%s lives in Herdr pane %s (%s)", seat.Name, seat.HerdrPane, seat.HerdrSocket)
 }

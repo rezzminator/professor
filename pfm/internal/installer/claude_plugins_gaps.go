@@ -118,7 +118,8 @@ func (target ClaudePluginTarget) retiredSuccessor() string {
 	}
 	for _, successor := range slices.Sorted(maps.Keys(retiredClaudePlugins)) {
 		for _, id := range retiredClaudePlugins[successor] {
-			if name, _, _ := strings.Cut(id, "@"); name == target.Name {
+			// A successor's own name under a retired marketplace (auto-effort@rezzminator) retires that id alone.
+			if name, _, _ := strings.Cut(id, "@"); name == target.Name && successor != target.Name {
 				return successor
 			}
 		}
@@ -229,6 +230,24 @@ func readClaudePluginInstalls(configDir string) (map[string][]claudePluginInstal
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
 	return record.Plugins, nil
+}
+
+// ClaudePluginRecordedVersions is every version configDir's install record
+// holds for id, one per entry naming one, control characters escaped; none
+// when id has no record. A record that cannot be read returns its error, never
+// an answer.
+func ClaudePluginRecordedVersions(configDir, id string) ([]string, error) {
+	record, err := readClaudePluginInstalls(configDir)
+	if err != nil {
+		return nil, err
+	}
+	versions := make([]string, 0, len(record[id]))
+	for _, entry := range record[id] {
+		if entry.version() != "" {
+			versions = append(versions, EscapeControl(entry.version()))
+		}
+	}
+	return versions, nil
 }
 
 // ClaudePluginsUnresolved names every listed full id pfm cannot install: still

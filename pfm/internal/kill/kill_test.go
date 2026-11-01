@@ -66,7 +66,7 @@ func (proc *fakeProc) Stat(pid int) (gather.ProcStat, error) {
 
 type fakeTmux struct {
 	mutex                     sync.Mutex
-	panePID, existsFor        int
+	existsFor                 int
 	existsErrFor, existsCalls int // existsErrFor: leading calls that error, before existsFor answers
 	killPaneErr               error
 	sent                      []string
@@ -100,26 +100,6 @@ func (tmux *fakeTmux) PanesByTTY(
 	return panes, nil
 }
 
-func (tmux *fakeTmux) PaneIDs(context.Context, string) ([]string, error) {
-	tmux.mutex.Lock()
-	defer tmux.mutex.Unlock()
-	panes := make([]string, 0, len(tmux.panesByTTY))
-	for _, pane := range tmux.panesByTTY {
-		panes = append(panes, pane)
-	}
-	return panes, nil
-}
-
-func (tmux *fakeTmux) PanePID(
-	_ context.Context,
-	_, _ string,
-) (int, error) {
-	if tmux.panePID == 0 {
-		return 0, errors.New("no pane pid")
-	}
-	return tmux.panePID, nil
-}
-
 func (tmux *fakeTmux) PaneExists(_ context.Context, _, _ string) (bool, error) {
 	tmux.mutex.Lock()
 	defer tmux.mutex.Unlock()
@@ -128,17 +108,6 @@ func (tmux *fakeTmux) PaneExists(_ context.Context, _, _ string) (bool, error) {
 		return false, errors.New("tmux probe failed")
 	}
 	return tmux.existsCalls-tmux.existsErrFor <= tmux.existsFor, nil
-}
-
-func (tmux *fakeTmux) SendLine(
-	_ context.Context,
-	_, _ string,
-	line string,
-) error {
-	tmux.mutex.Lock()
-	defer tmux.mutex.Unlock()
-	tmux.sent = append(tmux.sent, line)
-	return nil
 }
 
 func (tmux *fakeTmux) KillPane(
@@ -293,7 +262,7 @@ func TestManagerIdentifiesClaudeAndCodexSelf(t *testing.T) {
 	}
 
 	writeTestFile(t, rolloutPath, `{"type":"session_meta","payload":{"id":"`+codexID+`","thread_source":"user"}}`+"\n")
-	tmux := &fakeTmux{panePID: 10}
+	tmux := &fakeTmux{}
 	proc := &fakeProc{
 		pids:    []int{20},
 		cmdline: map[int][]string{20: {"codex"}},
@@ -727,6 +696,7 @@ func TestFinisherChoreographyAndTeammateReaping(t *testing.T) {
 	})
 	finisher, err := NewFinisher(database, Dependencies{
 		Tmux:         tmux,
+		Screen:       tmux,
 		Refresher:    refresher,
 		Delay:        time.Millisecond,
 		PollEvery:    time.Millisecond,
@@ -811,6 +781,7 @@ func TestFinisherReapsTeammatesFromTheSharedChildrenTable(t *testing.T) {
 	tmux := &fakeTmux{existsFor: 1}
 	finisher, err := NewFinisher(database, Dependencies{
 		Tmux:         tmux,
+		Screen:       tmux,
 		Refresher:    refreshFunc(func(context.Context) error { return nil }),
 		Delay:        time.Millisecond,
 		PollEvery:    time.Millisecond,

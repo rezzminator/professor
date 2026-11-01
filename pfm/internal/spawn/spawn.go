@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 	"unicode"
@@ -72,12 +73,6 @@ const (
 	// startupEscapes bounds how many overlays are dismissed before giving up,
 	// so a screen that is simply slow is never escaped forever.
 	startupEscapes = 4
-
-	// composerHoldReads is how many consecutive reads must show the composer
-	// before it counts as ready. Codex paints its composer FIRST and its
-	// startup overlays a beat later, so a single sighting is a flash, not a
-	// state — that flash is what sent a "/rename" into a hooks modal.
-	composerHoldReads = 4
 
 	// renameAttempts covers an overlay that appears between the composer and
 	// the keystroke: dismiss it and try the whole rename again rather than
@@ -150,6 +145,12 @@ func Run(
 	if spec.Height <= 0 {
 		spec.Height = 50
 	}
+	// The door is opened before the server is born: a chat nobody can read
+	// is never left behind.
+	door, target, err := tmux.Pane(request.Socket, spec.Session)
+	if err != nil {
+		return Result{}, err
+	}
 	if err := tmux.NewSession(ctx, spec); err != nil {
 		return Result{}, err
 	}
@@ -163,9 +164,8 @@ func Run(
 	if err := recordSpawnSeat(ctx, request); err != nil {
 		result.Warnings = append(result.Warnings, fmt.Sprintf("tmux chat exists; persist seat: %v", err))
 	}
-	target := spec.Session
 	trace.step("session %s created, running: %s", spec.Session, request.Run)
-	boot, err := waitForBoot(ctx, tmux, request.Socket, target, timings)
+	boot, err := waitForBoot(ctx, door, target, timings)
 	if err != nil {
 		return result, err
 	}
@@ -179,17 +179,17 @@ func Run(
 	// startup overlay swallows every keystroke sent to it — that is how a
 	// chat ended up unnamed AND unprompted, with its "/rename" and its first
 	// prompt both eaten by a hooks-review modal.
-	warning, renameErr := launcher.Rename(ctx, tmux, request.Socket, target, request.Name, timings, trace)
+	warning, renameErr := launcher.Rename(ctx, door, target, request.Name, timings, trace)
 	if renameErr != nil {
 		return result, renameErr
 	}
-	if err := untrustedFolderGuard(ctx, tmux, request, target); err != nil {
+	if err := untrustedFolderGuard(ctx, door, request, target); err != nil {
 		return result, err
 	}
 	result.Named = warning == ""
 	if warning != "" {
 		result.Warnings = append(result.Warnings, warning)
-		capture, captureErr := tmux.Capture(ctx, request.Socket, target)
+		capture, captureErr := door.CaptureScreen(ctx, target)
 		if captureErr != nil || !launcher.ComposerReady(capture) {
 			return result, nil
 		}
@@ -204,7 +204,7 @@ func Run(
 	// An overlay can arrive at any moment during startup (MCP notices land
 	// asynchronously), so the composer is re-confirmed before the prompt is
 	// typed, exactly as it was before the rename.
-	if !waitForComposer(ctx, tmux, request.Socket, target, timings, trace, launcher.ComposerReady) {
+	if !waitForComposer(ctx, door, target, timings, trace, launcher.ComposerReady) {
 		result.Warnings = append(
 			result.Warnings,
 			"a startup screen is holding the chat — the first prompt was not "+
@@ -212,8 +212,8 @@ func Run(
 		)
 		return result, nil
 	}
-	err = submitPrompt(ctx, tmux, request.Socket, target, request.Prompt, timings, trace)
-	if guardErr := untrustedFolderGuard(ctx, tmux, request, target); guardErr != nil {
+	err = submitPrompt(ctx, door, target, request.Prompt, timings, trace)
+	if guardErr := untrustedFolderGuard(ctx, door, request, target); guardErr != nil {
 		return result, guardErr
 	}
 	if err != nil {
@@ -235,22 +235,22 @@ func Run(
 // it kills the context-bound capture command.
 func waitForBoot(
 	ctx context.Context,
-	tmux Tmux,
-	socket, target string,
+	door pfmcall.Screen,
+	target pfmcall.Target,
 	timings Timings,
 ) (string, error) {
 	deadline := clock.Real.Now().Add(timings.Boot)
 	previous := ""
 	settled := false
 	for {
-		capture, err := tmux.Capture(ctx, socket, target)
+		capture, err := door.CaptureScreen(ctx, target)
 		if err != nil {
 			if ctxErr := ctx.Err(); ctxErr != nil {
 				return "", ctxErr
 			}
 			return "", fmt.Errorf(
 				"the chat died at birth on socket %s: %w",
-				socket,
+				filepath.Base(target.SocketPath),
 				err,
 			)
 		}
@@ -269,7 +269,7 @@ func waitForBoot(
 				return "", fmt.Errorf(
 					"the chat drew nothing within %s on socket %s",
 					timings.Boot,
-					socket,
+					filepath.Base(target.SocketPath),
 				)
 			}
 			return capture, nil
@@ -316,18 +316,18 @@ func composerReady(capture string) bool {
 // has stopped changing, so a slow paint is never mistaken for a stuck modal.
 func waitForCodexComposer(
 	ctx context.Context,
-	tmux Tmux,
-	socket, target string,
+	door pfmcall.Screen,
+	target pfmcall.Target,
 	timings Timings,
 	trace tracer,
 ) bool {
-	return waitForComposer(ctx, tmux, socket, target, timings, trace, composerReady)
+	return waitForComposer(ctx, door, target, timings, trace, composerReady)
 }
 
 func waitForComposer(
 	ctx context.Context,
-	tmux Tmux,
-	socket, target string,
+	door pfmcall.Screen,
+	target pfmcall.Target,
 	timings Timings,
 	trace tracer,
 	ready func(string) bool,
@@ -337,7 +337,7 @@ func waitForComposer(
 	dismissals := 0
 	held := 0
 	for {
-		capture, err := tmux.Capture(ctx, socket, target)
+		capture, err := door.CaptureScreen(ctx, target)
 		switch {
 		case err == nil && pfmengine.ClaudeTrustDialog(capture):
 			// Trust precedes readiness: Claude's launcher may already be ready,
@@ -346,7 +346,7 @@ func waitForComposer(
 			return false
 		case err == nil && ready(capture):
 			held++
-			if held >= composerHoldReads {
+			if held >= pfmcall.ComposerHoldReads {
 				trace.step("composer held %d reads | %s", held, screen(capture))
 				return true
 			}
@@ -362,7 +362,7 @@ func waitForComposer(
 			if trimmed != "" && trimmed == previous && dismissals < startupEscapes {
 				key := startupOverlayKey(capture)
 				trace.step("overlay %d dismissed with %s | %s", dismissals+1, key, screen(capture))
-				_ = tmux.SendKey(ctx, socket, target, key)
+				_ = door.SendKey(ctx, target, key)
 				dismissals++
 				previous = ""
 			} else {
@@ -394,8 +394,9 @@ func waitForComposer(
 // retried blind.
 func nameCodexThread(
 	ctx context.Context,
-	tmux Tmux,
-	socket, target, name string,
+	door pfmcall.Screen,
+	target pfmcall.Target,
+	name string,
 	timings Timings,
 	trace tracer,
 	proof renameProof,
@@ -413,12 +414,12 @@ func nameCodexThread(
 			}
 		}
 		trace.step("rename attempt %d/%d", attempt+1, renameAttempts)
-		if !waitForCodexComposer(ctx, tmux, socket, target, timings, trace) {
+		if !waitForCodexComposer(ctx, door, target, timings, trace) {
 			return false, "Codex is still holding a startup screen — nothing " +
 				"was typed into it, so the chat is unnamed and unprompted; " +
 				"attach it and clear the screen by hand", true
 		}
-		renamed, why, unverifiable := renameCodexThread(ctx, tmux, socket, target, name, timings, trace, proof, since)
+		renamed, why, unverifiable := renameCodexThread(ctx, door, target, name, timings, trace, proof, since)
 		if renamed {
 			return true, "", false
 		}
@@ -456,51 +457,46 @@ func unverifiedRename(err error) string {
 // either way, which a retry cannot fix.
 func renameCodexThread(
 	ctx context.Context,
-	tmux Tmux,
-	socket, target, name string,
+	door pfmcall.Screen,
+	target pfmcall.Target,
+	name string,
 	timings Timings,
 	trace tracer,
 	proof renameProof,
 	since time.Time,
 ) (renamed bool, warning string, unverifiable bool) {
-	if err := tmux.SendLiteral(ctx, socket, target, codexRenameCommand); err != nil {
+	if err := door.SendLiteral(ctx, target, codexRenameCommand); err != nil {
 		return false, fmt.Sprintf("could not type the rename command: %v", err), false
 	}
 	trace.step("typed %s", codexRenameCommand)
-	if !waitFor(ctx, tmux, socket, target, codexRenameOffered, timings) {
-		capture, _ := tmux.Capture(ctx, socket, target)
+	if !waitFor(ctx, door, target, codexRenameOffered, timings) {
+		capture, _ := door.CaptureScreen(ctx, target)
 		trace.step("no /rename offer | %s", screen(capture))
-		leftover := clearComposer(
-			ctx,
-			tmux,
-			socket,
-			target,
-			codexRenameCommand,
-		)
+		leftover := clearComposer(ctx, door, target, codexRenameCommand)
 		warning := "this Codex build did not offer /rename — the chat is running unnamed"
 		if leftover {
 			warning += "; its composer may still hold " + codexRenameCommand
 		}
 		return false, warning, false
 	}
-	if err := tmux.SendKey(ctx, socket, target, "Enter"); err != nil {
+	if err := door.SendKey(ctx, target, "Enter"); err != nil {
 		return false, fmt.Sprintf("could not open the rename prompt: %v", err), false
 	}
-	if !awaitRenameModal(ctx, tmux, socket, target, timings) {
-		capture, _ := tmux.Capture(ctx, socket, target)
+	if !awaitRenameModal(ctx, door, target, timings) {
+		capture, _ := door.CaptureScreen(ctx, target)
 		trace.step("no name prompt | %s", screen(capture))
 		if codexFolderUntrusted(capture) {
 			return false, "Codex has no active thread to rename", true
 		}
-		_ = tmux.SendKey(ctx, socket, target, "Escape")
+		_ = door.SendKey(ctx, target, "Escape")
 		return false, "Codex never asked for a thread name — the chat is running unnamed", false
 	}
 	for index := 0; index < modalClearKeys; index++ {
-		if err := tmux.SendKey(ctx, socket, target, "BSpace"); err != nil {
+		if err := door.SendKey(ctx, target, "BSpace"); err != nil {
 			return false, fmt.Sprintf("could not clear the name field: %v", err), false
 		}
 	}
-	if err := tmux.SendLiteral(ctx, socket, target, name); err != nil {
+	if err := door.SendLiteral(ctx, target, name); err != nil {
 		return false, fmt.Sprintf("could not type the thread name: %v", err), false
 	}
 	// Success is PROVEN, never inferred from a modal that merely closed: by
@@ -530,13 +526,12 @@ func renameCodexThread(
 		if err := sleep(ctx, timings.Typed); err != nil {
 			break
 		}
-		if err := tmux.SendKey(ctx, socket, target, "Enter"); err != nil {
+		if err := door.SendKey(ctx, target, "Enter"); err != nil {
 			return false, fmt.Sprintf("could not confirm the thread name: %v", err), false
 		}
 		confirmed = pollCapture(
 			ctx,
-			tmux,
-			socket,
+			door,
 			target,
 			Timings{Poll: timings.Poll, Step: confirmWait(timings)},
 			witnessed,
@@ -550,7 +545,7 @@ func renameCodexThread(
 		// modal — and the refusal printed inside it — off the screen.
 		warning := "Codex never confirmed the rename — the chat may be unnamed"
 		unverifiable := false
-		capture, _ := tmux.Capture(ctx, socket, target)
+		capture, _ := door.CaptureScreen(ctx, target)
 		switch {
 		case strings.Contains(capture, codexRenameEmpty):
 			warning = "Codex refused the name as empty — the chat is running unnamed"
@@ -558,7 +553,7 @@ func renameCodexThread(
 			warning, unverifiable = unverifiedRename(proofErr), true
 		}
 		trace.step("rename unconfirmed: %s | %s", warning, screen(capture))
-		_ = tmux.SendKey(ctx, socket, target, "Escape")
+		_ = door.SendKey(ctx, target, "Escape")
 		return false, warning, unverifiable
 	}
 	trace.step("rename confirmed")
@@ -634,17 +629,18 @@ func confirmWait(timings Timings) time.Duration {
 // is the one it misses.
 func submitPrompt(
 	ctx context.Context,
-	tmux Tmux,
-	socket, target, text string,
+	door pfmcall.Screen,
+	target pfmcall.Target,
+	text string,
 	timings Timings,
 	trace tracer,
 ) error {
-	if err := tmux.SendPaste(ctx, socket, target, text); err != nil {
+	if err := door.SendPaste(ctx, target, text); err != nil {
 		return err
 	}
 	needle := composerNeedle(text)
 	step := Timings{Poll: timings.Poll, Step: confirmWait(timings)}
-	if !pollCapture(ctx, tmux, socket, target, step, func(capture string) bool {
+	if !pollCapture(ctx, door, target, step, func(capture string) bool {
 		return composerHolds(capture, needle)
 	}) {
 		// Not fatal on its own: a composer that elides or re-wraps what it was
@@ -657,10 +653,10 @@ func submitPrompt(
 		if err := sleep(ctx, timings.Typed); err != nil {
 			return err
 		}
-		if err := tmux.SendKey(ctx, socket, target, "Enter"); err != nil {
+		if err := door.SendKey(ctx, target, "Enter"); err != nil {
 			return err
 		}
-		if pollCapture(ctx, tmux, socket, target, step, func(capture string) bool {
+		if pollCapture(ctx, door, target, step, func(capture string) bool {
 			return composerReleased(capture, needle)
 		}) {
 			trace.step("prompt left the composer on press %d", press+1)
@@ -724,15 +720,16 @@ func flattenComposerText(value string) string {
 // screen afterwards, because a clear nobody verified is a guess.
 func clearComposer(
 	ctx context.Context,
-	tmux Tmux,
-	socket, target, typed string,
+	door pfmcall.Screen,
+	target pfmcall.Target,
+	typed string,
 ) bool {
 	for range []rune(typed) {
-		if err := tmux.SendKey(ctx, socket, target, "BSpace"); err != nil {
+		if err := door.SendKey(ctx, target, "BSpace"); err != nil {
 			return true
 		}
 	}
-	capture, err := tmux.Capture(ctx, socket, target)
+	capture, err := door.CaptureScreen(ctx, target)
 	if err != nil {
 		return true
 	}
@@ -741,25 +738,26 @@ func clearComposer(
 
 func waitFor(
 	ctx context.Context,
-	tmux Tmux,
-	socket, target, marker string,
+	door pfmcall.Screen,
+	target pfmcall.Target,
+	marker string,
 	timings Timings,
 ) bool {
-	return pollCapture(ctx, tmux, socket, target, timings, func(capture string) bool {
+	return pollCapture(ctx, door, target, timings, func(capture string) bool {
 		return strings.Contains(capture, marker)
 	})
 }
 
 func pollCapture(
 	ctx context.Context,
-	tmux Tmux,
-	socket, target string,
+	door pfmcall.Screen,
+	target pfmcall.Target,
 	timings Timings,
 	satisfied func(string) bool,
 ) bool {
 	deadline := clock.Real.Now().Add(timings.Step)
 	for {
-		capture, err := tmux.Capture(ctx, socket, target)
+		capture, err := door.CaptureScreen(ctx, target)
 		if err == nil && satisfied(capture) {
 			return true
 		}

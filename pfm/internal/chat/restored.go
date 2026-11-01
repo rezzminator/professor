@@ -18,6 +18,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
+	"github.com/rezzminator/professor/pfm/internal/launchnotice"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/reload"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
@@ -56,13 +57,14 @@ func OpenRestoredID(ctx context.Context, id string, stdout, stderr io.Writer, ru
 		fmt.Fprintf(stderr, "pfm chat open: restored seat: %v\n", err)
 		return 1
 	}
-	choice, err := BirthBackend(ctx, "restored", spawn.BackendAuto)
+	choice, err := placeChat(ctx, "restored", spawn.BackendAuto, "", false, &effective)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat open: restored backend: %v\n", err)
 		return 1
 	}
 	if choice.Backend != spawn.BackendHerdr {
-		return OpenID(ctx, id, stdout, stderr, &effective)
+		// The open births where this placement said, without asking again.
+		return OpenID(WithPlacement(ctx, choice), id, stdout, stderr, &effective)
 	}
 	lockID := id
 	if initialFound {
@@ -182,7 +184,11 @@ func restoreNative(
 	if err != nil {
 		return fmt.Errorf("read restored recipe: %w", err)
 	}
-	run, err = resumeNativeRun(run, seat, runtime.Config, stderr)
+	resumed := seat
+	if resumed.SessionID, err = resumedSession(ctx, runtime, seat, nil, stderr); err != nil {
+		return err
+	}
+	run, err = resumeNativeRun(run, resumed, runtime.Config, stderr)
 	if err != nil {
 		return err
 	}
@@ -194,7 +200,7 @@ func restoreNative(
 		"TMUX=",
 	)
 	// Preserve existing loss evidence if the producer could not be read.
-	note, noteErr := restoredLossNote(ctx, seat.SessionID, pfmengine.ID(seat.Engine), runtime, stderr)
+	note, noteErr := restoredLossNote(ctx, resumed.SessionID, pfmengine.ID(seat.Engine), runtime, stderr)
 	if noteErr != nil {
 		fmt.Fprintf(stderr, "pfm chat open: restart loss unknown: %v\n", noteErr)
 	}
@@ -319,7 +325,6 @@ func resumeNativeRun(
 		}
 	}
 	remove := make(map[string]bool)
-	resume := ""
 	arity := map[string]bool{claudelaunch.SettingsFlag: true}
 	for _, knob := range claudelaunch.Knobs {
 		if knob.Wire == claudelaunch.WireFlag {
@@ -332,13 +337,7 @@ func resumeNativeRun(
 		switch knob.Name {
 		case "sessionID", "resume", restoredKnobName, restoredKnobFork:
 			remove[knob.Target] = knob.Name != restoredKnobFork
-			if knob.Name == "resume" {
-				resume = knob.Target
-			}
 		}
-	}
-	if resume == "" {
-		return run, errors.New("launch registry has no resume flag")
 	}
 	if engineID != pfmengine.Claude {
 		remove = map[string]bool{"--prompt": true, "--session": true, "--continue": false}
@@ -395,9 +394,13 @@ func resumeNativeRun(
 		if err != nil {
 			return run, fmt.Errorf("refresh restored theme: %w", err)
 		}
-		args = append(args, resume, seat.SessionID)
+		args = append(args, claudelaunch.SessionArgs("", seat.SessionID, false)...)
 	case pfmengine.Codex:
-		args = append(args, "resume", seat.SessionID)
+		tail, err := action.CodexArgs("", "", "", nil, action.CodexResume, seat.SessionID)
+		if err != nil {
+			return run, err
+		}
+		args = append(args, tail...)
 	case pfmengine.OpenCode:
 		args = append(args, "--session", seat.SessionID, run.CWD)
 	}
@@ -420,11 +423,15 @@ func prepareRestoredSeat(
 	if err != nil {
 		return fleetdb.Seat{}, err
 	}
+	// A chat Claude Code continued in another session resumes its newest segment.
+	if id, err = resumeTail(ctx, runtime, id, "", rows, stderr); err != nil {
+		return fleetdb.Seat{}, err
+	}
 	var row compose.Row
 	found := false
 	for index := range rows {
 		candidate := &rows[index]
-		if candidate.ID == id {
+		if answersTo(candidate, id) {
 			row = *candidate
 			found = true
 			break
@@ -433,8 +440,16 @@ func prepareRestoredSeat(
 	if !found {
 		return fleetdb.Seat{}, fmt.Errorf("chat %q is not indexed", id)
 	}
-	if info, err := os.Stat(row.CWD); err != nil || !info.IsDir() {
-		row.CWD = runtime.Paths.Home
+	if row.SeatID != "" {
+		// No seat holds id, so this seat answers to it through its continued
+		// chat: a seat born here would resume that chat beside it.
+		return fleetdb.Seat{}, fmt.Errorf(
+			"chat %s is carried by native seat %s; open it with pfm chat open %s instead", id, row.SeatID, id,
+		)
+	}
+	var relocated string
+	if row.CWD, relocated = launchnotice.Relocate(row.CWD, runtime.Paths.Home); relocated != "" {
+		fmt.Fprintf(stderr, "pfm chat open: %s\n", relocated)
 	}
 	// A lost display name must not prevent restoring the indexed identity.
 	if row.Name == "" {
@@ -478,7 +493,7 @@ func prepareRestoredSeat(
 		}
 		recipe = plan.SeatRun
 	case pfmengine.OpenCode:
-		row.Kind = compose.ResumeOpenCode
+		row.Kind = compose.ResumeKindFor(row.Kind)
 		plan, err := action.Synthesize(
 			action.Request{
 				Row:            row,
@@ -511,27 +526,17 @@ func prepareRestoredSeat(
 // restoredCallerAuthority authorizes only the terminal running this explicit
 // restore command, not an arbitrary pane named by inherited environment values.
 func restoredCallerAuthority(ctx context.Context, values paths.Values, socket, pane string) error {
-	body, err := herdr.SeatRequest(ctx, socket, "pane.process_info", map[string]string{nativePaneIDKey: pane})
+	proc := gather.NewProcFS(values.ProcRoot)
+	info, err := gather.HerdrKeep(proc).Read(ctx, socket, pane)
 	if err != nil {
 		return fmt.Errorf("read restored caller shell: %w", err)
 	}
-	var info struct {
-		Type string `json:"type"`
-		Info struct {
-			Pane  string `json:"pane_id"`
-			Shell int    `json:"shell_pid"`
-		} `json:"process_info"`
+	if info.Pane != pane || info.Shell <= 0 {
+		return fmt.Errorf("invalid restored caller shell identity: pane %q shell %d", info.Pane, info.Shell)
 	}
-	if err := json.Unmarshal(body, &info); err != nil {
-		return fmt.Errorf("decode restored caller shell: %w", err)
-	}
-	if info.Type != "pane_process_info" || info.Info.Pane != pane || info.Info.Shell <= 0 {
-		return fmt.Errorf("invalid restored caller shell identity: %s", body)
-	}
-	proc := gather.NewProcFS(values.ProcRoot)
 	seen := map[int]bool{}
 	for pid := os.Getpid(); pid > 1 && !seen[pid]; {
-		if pid == info.Info.Shell {
+		if pid == info.Shell {
 			return nil
 		}
 		seen[pid] = true
@@ -542,4 +547,103 @@ func restoredCallerAuthority(ctx context.Context, values paths.Values, socket, p
 		pid = stat.ParentPID
 	}
 	return fmt.Errorf("process %d is outside restored caller pane %s", os.Getpid(), pane)
+}
+
+// nativeResumeRow is the resumable row a dead native seat revives from in its
+// engine's own tmux server: the fleet's row for its newest segment, with no
+// seat, socket or pane of its own yet.
+func nativeResumeRow(
+	ctx context.Context,
+	seat fleetdb.Seat,
+	runtime config.Runtime,
+	stderr io.Writer,
+) (row compose.Row, returnErr error) {
+	row = nativeRow(seat)
+	rows, err := Rows(ctx, stderr, &runtime)
+	if err != nil {
+		return row, err
+	}
+	for index := range rows {
+		candidate := &rows[index]
+		if answersTo(candidate, seat.SessionID) {
+			row = *candidate
+			break
+		}
+	}
+	if row.ID, err = resumedSession(ctx, runtime, seat, rows, stderr); err != nil {
+		return row, err
+	}
+	if row.CWD == "" {
+		db := fleetdb.OpenSharedState(ctx, runtime.Paths)
+		defer func() { returnErr = errors.Join(returnErr, db.Close()) }()
+		run, err := db.ReadSeatRun(seat.SeatID)
+		if err != nil {
+			return row, err
+		}
+		row.CWD = run.CWD
+	}
+	if row.Account == 0 {
+		row.Account = runtime.Config.PrimaryAccountFor(pfmengine.ID(seat.Engine), runtime.Config.ImplicitAccount())
+	}
+	row.Backend, row.Socket, row.PaneID, row.SeatID = "", "", "", ""
+	row.Kind = compose.ResumeKindFor(row.Kind)
+	return row, nil
+}
+
+// resumedSession is the session a resume of native seat must name: a Claude
+// seat keeps its launch id after Claude Code continued its chat in a new
+// session, so it resumes the newest segment instead (resumeTail). rows is a
+// fleet scan the caller holds, or nil.
+func resumedSession(
+	ctx context.Context,
+	runtime config.Runtime,
+	seat fleetdb.Seat,
+	rows []compose.Row,
+	stderr io.Writer,
+) (string, error) {
+	if pfmengine.ID(seat.Engine) != pfmengine.Claude || seat.SessionID == "" {
+		return seat.SessionID, nil
+	}
+	return resumeTail(ctx, runtime, seat.SessionID, seat.SeatID, rows, stderr)
+}
+
+// resumeTail is the session a resume of Claude chat id must name: the
+// newest segment of its continued-in chain. It is refused while a live chat
+// other than seat seatID answers to that segment, since a resume would start
+// a second process on it. rows is a fleet scan the caller holds, checked
+// whether or not the chat moved, or nil to scan only when it moved.
+func resumeTail(
+	ctx context.Context,
+	runtime config.Runtime,
+	id, seatID string,
+	rows []compose.Row,
+	stderr io.Writer,
+) (string, error) {
+	tail, _, err := reload.ContinuedSession(ctx, id, stderr)
+	if err != nil {
+		return "", err
+	}
+	if tail == id && rows == nil {
+		return tail, nil
+	}
+	if rows == nil {
+		if rows, err = Rows(ctx, stderr, &runtime); err != nil {
+			return "", fmt.Errorf("find who holds chat %s: %w", tail, err)
+		}
+	}
+	for index := range rows {
+		row := &rows[index]
+		if answersTo(row, tail) && row.Kind.IsAddressable() && (seatID == "" || row.SeatID != seatID) {
+			if tail == id {
+				return "", fmt.Errorf(
+					"chat %s is held by the live chat %q; open that chat instead", id, cmp.Or(row.Name, row.ID),
+				)
+			}
+			return "", fmt.Errorf(
+				"chat %s continued in session %s, which the live chat %q holds; open that chat instead",
+				id, tail, cmp.Or(row.Name, row.ID),
+			)
+		}
+	}
+	return tail, nil
 }

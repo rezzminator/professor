@@ -1,6 +1,7 @@
 package compose
 
 import (
+	"cmp"
 	"fmt"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -8,6 +9,21 @@ import (
 )
 
 const herdrBackend = "herdr"
+
+// ContinuedSegment is the newest segment a native Claude seat's row carries
+// once Claude Code continued its chat under a new session id: the row keeps
+// the seat's launch id as ID and is named from that segment's transcript
+// (Path). Schedules carried onto that segment, Claude Code and a resume know
+// the chat by it. Empty for every other row.
+func ContinuedSegment(row *Row) string {
+	if row.Backend != herdrBackend || (row.Kind != LiveClaude && row.Kind != ResumeClaude) || row.Path == "" {
+		return ""
+	}
+	if session := transcriptIDFromPath(row.Path); session != row.ID {
+		return session
+	}
+	return ""
+}
 
 // herdrRows joins native seats before the shared kill and view eligibility pass.
 // Seats are distinct addresses even when they share one transcript; they must
@@ -23,8 +39,10 @@ func (current *composer) herdrRows() []Row {
 		row := Row{ID: seat.SessionID}
 		switch pfmengine.ID(seat.Engine) {
 		case pfmengine.Claude:
-			row = current.transcriptRow(current.transcriptByID[seat.SessionID], LiveClaude)
-			current.liveTranscripts[seat.SessionID] = struct{}{}
+			// A continued chat is named from, and claims, the segment it carries now.
+			session := cmp.Or(native.Continued, seat.SessionID)
+			row = current.transcriptRow(current.transcriptByID[session], LiveClaude)
+			current.liveTranscripts[session] = struct{}{}
 		case pfmengine.Codex:
 			row = current.rolloutRow(current.rolloutByID[seat.SessionID], LiveCodex)
 			current.liveRollouts[seat.SessionID] = struct{}{}
@@ -68,9 +86,7 @@ func (current *composer) herdrRows() []Row {
 			row.CWD = native.CWD
 			row.Project = current.projects.of(native.CWD)
 		}
-		if seat.State != "live" {
-			row.Kind = ResumeKindFor(row.Kind)
-		}
+		row.Kind = SeatKindFor(row.Kind, seat.State)
 		if native.Err != nil {
 			row.BackendError = native.Err.Error()
 		} else if seat.State == "live" && seat.SeatHostPID > 0 {

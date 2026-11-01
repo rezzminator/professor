@@ -138,12 +138,8 @@ func TestOpenCodeInstructionsRejectsForeignShape(t *testing.T) {
 
 func decodeOpenCodeFixture(t *testing.T, raw string) map[string]any {
 	t.Helper()
-	sanitized, err := sanitizeJSONC([]byte(raw))
+	document, err := decodeJSONCObject([]byte(raw))
 	if err != nil {
-		t.Fatal(err)
-	}
-	var document map[string]any
-	if err := json.Unmarshal(sanitized, &document); err != nil {
 		t.Fatalf("decode OpenCode fixture: %v\n%s", err, raw)
 	}
 	return document

@@ -110,7 +110,13 @@ func (installer *engine) clearFullscreenAutoDisable() error {
 			installer.ok("claude fullscreen renderer not auto-disabled in " + path)
 			continue
 		}
-		live, err := liveChatPIDs(installer.options.ProcRoot, account.ConfigDir)
+		// Unguarded: the clear never held the account guard, so its busy lock or an
+		// unresolved launch claim is no new way for this step to fail.
+		chats, err := installer.openAccountChats(account.ConfigDir, false)
+		var live []string
+		if err == nil {
+			live, err = chats.live()
+		}
 		if err != nil {
 			failures = append(failures, installer.fail(fmt.Errorf(
 				"claude fullscreen canary in %s: read live chats in %s: %w", path, account.ConfigDir, err,

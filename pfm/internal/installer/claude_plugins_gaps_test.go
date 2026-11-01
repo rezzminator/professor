@@ -71,7 +71,7 @@ func mustSettings(t *testing.T, file string) map[string]any {
 }
 
 // TestEnsureClaudePluginsDisablesTheRetiredAgentEffort: the plugin was renamed
-// agent-effort -> auto-effort-control; install ensures the successor and then
+// agent-effort -> auto-effort; install ensures the successor and then
 // sets each enabled retired id false (never uninstalls it).
 func TestEnsureClaudePluginsDisablesTheRetiredAgentEffort(t *testing.T) {
 	const retiredGitHub, retiredDev = "agent-effort@agent-effort", "agent-effort@agent-effort-dev"
@@ -106,13 +106,13 @@ func TestEnsureClaudePluginsDisablesTheRetiredAgentEffort(t *testing.T) {
 		}
 		installed := false
 		for _, call := range runner.calls {
-			installed = installed || call.argv == "plugin install auto-effort-control@professor -y"
+			installed = installed || call.argv == "plugin install auto-effort@professor -y"
 		}
 		if !installed {
 			t.Fatalf("the successor was not installed: %v", runner.calls)
 		}
 		if line := "disable " + retiredGitHub + ", " + retiredDev + " in " + filepath.Join(first, "settings.json") +
-			": retired, auto-effort-control@professor replaces it"; !strings.Contains(out.String(), line) {
+			": retired, auto-effort@professor replaces it"; !strings.Contains(out.String(), line) {
 			t.Fatalf("no %q line:\n%s", line, out.String())
 		}
 	})
@@ -177,6 +177,17 @@ func TestEnsureClaudePluginsRefusesAListedRetiredName(t *testing.T) {
 		pfmconfig.KeyClaudePlugins + ", then " + ClaudePluginRepair}
 	if !slices.Contains(gaps, want) || !ClaudePluginGapNames(want.Problem, retired) {
 		t.Fatalf("gaps = %q, want %q among them", gaps, want)
+	}
+}
+
+// TestRetiredSuccessorSparesTheSuccessorsOwnName: a successor whose own name
+// is retired under another marketplace (auto-effort@rezzminator) is no retired
+// name when claude.plugins lists it; a name it retired still is.
+func TestRetiredSuccessorSparesTheSuccessorsOwnName(t *testing.T) {
+	for name, want := range map[string]string{"auto-effort": "", "agent-effort": "auto-effort"} {
+		if got := (ClaudePluginTarget{Name: name, ID: ownID(name), Own: true}).retiredSuccessor(); got != want {
+			t.Errorf("retiredSuccessor of %s = %q, want %q", name, got, want)
+		}
 	}
 }
 
@@ -308,7 +319,7 @@ func TestClaudePluginGapsNamesTheBuildsID(t *testing.T) {
 // warn on; a successor's own entry is never overwritten, and a dry run writes
 // nothing.
 func TestEnsureClaudePluginsSettlesTheRetiredPluginConfigs(t *testing.T) {
-	const name = "auto-effort-control"
+	const name = "auto-effort"
 	successor, github, dev := ownID(name), name+"@"+name, name+"@"+name+"-dev"
 	retiredGitHub, retiredDev := "effort-live-control@effort-live-control", "effort-live-control@effort-live-control-dev"
 	patterns := `{"options":{"testCommandPatterns":["make test"]}}`
@@ -415,14 +426,14 @@ func TestEnsureClaudePluginsSettlesTheRetiredPluginConfigs(t *testing.T) {
 // TestClaudePluginGapsNamesAStaleRetiredPluginConfig: doctor reports a
 // pluginConfigs entry of a retired copy beside its successor's.
 func TestClaudePluginGapsNamesAStaleRetiredPluginConfig(t *testing.T) {
-	const name = "auto-effort-control"
+	const name = "auto-effort"
 	target := ClaudePluginTarget{Name: name, ID: ownID(name), Own: true}
 	file := filepath.Join(t.TempDir(), "settings.json")
 	writeFixture(t, file, `{"enabledPlugins":{"`+target.ID+`":true},"pluginConfigs":{"`+target.ID+`":{"options":{}},`+
-		`"effort-live-control@effort-live-control":{"options":{}},"auto-effort@auto-effort":{"options":{}}}}`)
+		`"effort-live-control@effort-live-control":{"options":{}},"agent-effort@agent-effort":{"options":{}}}}`)
 	gaps, err := ClaudePluginGaps(file, []ClaudePluginTarget{target})
 	want := ClaudePluginGap{
-		"pluginConfigs of auto-effort@auto-effort and effort-live-control@effort-live-control still in " + file +
+		"pluginConfigs of agent-effort@agent-effort and effort-live-control@effort-live-control still in " + file +
 			": retired copies of " + target.ID,
 		"pfm install copies the first to " + target.ID + " when it has none, then drops them",
 	}

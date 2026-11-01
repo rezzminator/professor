@@ -26,7 +26,7 @@ func TestClaudePluginsKey(t *testing.T) {
 			want: []ClaudePlugin{
 				{ID: "cache-live-control"},
 				{ID: "forward-compaction"},
-				{ID: "auto-effort-control"},
+				{ID: "auto-effort"},
 				{ID: "tool-visibility-controller"},
 				{ID: "engine-sync"},
 			},
@@ -130,23 +130,38 @@ func TestClaudePluginsKey(t *testing.T) {
 			source: SourceFile,
 		},
 		{
-			name: "a full id of a listed bare name's legacy -dev id", content: `{"version":2,"claude":{"plugins":["auto-effort-control","auto-effort-control@auto-effort-control-dev"]}}`,
-			err: `claude.plugins[1] auto-effort-control@auto-effort-control-dev is an id of claude.plugins[0] auto-effort-control, which ensures auto-effort-control@professor and moves its legacy ids to it: list the plugin once`,
+			name: "a full id of a listed bare name's legacy -dev id", content: `{"version":2,"claude":{"plugins":["auto-effort","auto-effort@auto-effort-dev"]}}`,
+			err: `claude.plugins[1] auto-effort@auto-effort-dev is an id of claude.plugins[0] auto-effort, which ensures auto-effort@professor and moves its legacy ids to it: list the plugin once`,
 		},
 		{
-			name: "a full id of a listed bare name's professor id", content: `{"version":2,"claude":{"plugins":["auto-effort-control","auto-effort-control@professor"]}}`,
-			err: `claude.plugins[1] auto-effort-control@professor is an id of claude.plugins[0] auto-effort-control, which ensures auto-effort-control@professor and moves its legacy ids to it: list the plugin once`,
+			name: "a full id of a listed bare name's professor id", content: `{"version":2,"claude":{"plugins":["auto-effort","auto-effort@professor"]}}`,
+			err: `claude.plugins[1] auto-effort@professor is an id of claude.plugins[0] auto-effort, which ensures auto-effort@professor and moves its legacy ids to it: list the plugin once`,
 		},
 		{
-			name: "a full id of a listed bare name's legacy GitHub id", content: `{"version":2,"claude":{"plugins":["auto-effort-control@auto-effort-control","c","auto-effort-control"]}}`,
-			err: `claude.plugins[2] auto-effort-control is a bare name of claude.plugins[0] auto-effort-control@auto-effort-control, which it ensures or moves: list the plugin once`,
+			name: "a full id of a listed bare name's legacy GitHub id", content: `{"version":2,"claude":{"plugins":["auto-effort@auto-effort","c","auto-effort"]}}`,
+			err: `claude.plugins[2] auto-effort is a bare name of claude.plugins[0] auto-effort@auto-effort, which it ensures or moves: list the plugin once`,
 		},
 		{
 			name:        "a bare name beside the same plugin of another marketplace",
-			content:     `{"version":2,"claude":{"plugins":["auto-effort-control","auto-effort-control@some-market"]}}`,
-			want:        []ClaudePlugin{{ID: "auto-effort-control"}, {ID: "auto-effort-control@some-market"}},
-			wantMarshal: []any{"auto-effort-control", "auto-effort-control@some-market"},
+			content:     `{"version":2,"claude":{"plugins":["auto-effort","auto-effort@some-market"]}}`,
+			want:        []ClaudePlugin{{ID: "auto-effort"}, {ID: "auto-effort@some-market"}},
+			wantMarshal: []any{"auto-effort", "auto-effort@some-market"},
 			source:      SourceFile,
+		},
+		{
+			name:        "a bare former name reads as the current one",
+			content:     `{"version":2,"claude":{"plugins":["auto-effort-control","c"]}}`,
+			want:        []ClaudePlugin{{ID: "auto-effort", Former: "auto-effort-control"}, {ID: "c"}},
+			wantMarshal: []any{"auto-effort", "c"},
+			source:      SourceFile,
+		},
+		{
+			name: "a bare former name beside its current name", content: `{"version":2,"claude":{"plugins":["auto-effort","auto-effort-control"]}}`,
+			err: `claude.plugins[1] repeats claude.plugins[0]: auto-effort`,
+		},
+		{
+			name: "a former name's professor id beside the current bare name", content: `{"version":2,"claude":{"plugins":["auto-effort","auto-effort-control@professor"]}}`,
+			err: `claude.plugins[1] auto-effort-control@professor is an id of claude.plugins[0] auto-effort, which ensures auto-effort@professor and moves its legacy ids to it: list the plugin once`,
 		},
 		{
 			name:    "an account may not set the list",

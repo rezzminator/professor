@@ -236,11 +236,26 @@ func assertAgentLaunch(t *testing.T, argvPath string, leading ...string) claudel
 	return parsed
 }
 
-// fakeAgentopenTmuxBinary plays tmux: list-panes answers a fixed pid.
+// fakeAgentopenTmuxBinary plays tmux: list-panes answers one pane, in gather's
+// pane format, running a fixed pid.
 func fakeAgentopenTmuxBinary(t *testing.T, pid int) string {
 	t.Helper()
 	binary := filepath.Join(t.TempDir(), "tmux")
-	script := "#!/bin/sh\nprintf '" + strconv.Itoa(pid) + "\\n'\nexit 0\n"
+	fields := []string{
+		"cc-1",
+		"@1",
+		"win",
+		"title",
+		"/dev/pts/7",
+		strconv.Itoa(pid),
+		"%%1", // printf format: tmux prints %1
+		"1",
+		"/work",
+		"claude",
+		"0",
+		"0",
+	}
+	script := "#!/bin/sh\nprintf '" + strings.Join(fields, "\\037") + "\\n'\nexit 0\n"
 	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}

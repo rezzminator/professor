@@ -113,3 +113,40 @@ func seedNativeOwner(t *testing.T, target Target) {
 		}
 	}
 }
+
+// A lost seat keeps the pane it last held: a dead supervisor's record never
+// makes that pane's live owner ambiguous, a live one still does.
+func TestHerdrPaneOwnerIgnoresARetiredSeat(t *testing.T) {
+	const socket = "/fixture/herdr.sock"
+	for _, tc := range []struct {
+		name      string
+		pid       int
+		ambiguous bool
+	}{
+		{name: "dead supervisor", pid: 77},
+		{name: "live supervisor", pid: 41, ambiguous: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			seedNativeOwner(t, Target{SocketPath: socket, Engine: "cc"})
+			values, err := paths.Resolve()
+			if err != nil {
+				t.Fatal(err)
+			}
+			db := fleetdb.OpenSharedState(context.Background(), values)
+			if err := db.PutSeat(context.Background(), fleetdb.Seat{
+				SeatID: "retired-fixture", Engine: "cc", Backend: "herdr", State: "lost",
+				HerdrSocket: socket, HerdrPane: "w1:p2", HerdrWorkspace: "w1", HerdrTerminalID: "w1:old",
+				SeatHostPID: tc.pid, SeatHostStart: 100,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Close(); err != nil {
+				t.Fatal(err)
+			}
+			_, err = ProveHerdrTarget(context.Background(), Target{SocketPath: socket, Pane: "w1:p2"})
+			if got := err != nil && strings.Contains(err.Error(), "multiple durable owners"); got != tc.ambiguous {
+				t.Fatalf("proof = %v; ambiguous=%t, want %t", err, got, tc.ambiguous)
+			}
+		})
+	}
+}

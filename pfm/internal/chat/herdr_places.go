@@ -10,9 +10,9 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
-	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/place"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
@@ -66,7 +66,7 @@ func herdrPlacesFor(runtime *pfmconfig.Runtime) func(context.Context) (*place.Fl
 // HERDR_SOCKET_PATH names) moves into its place's workspace. With no Herdr
 // socket it does nothing.
 func HerdrPlacesEntry(stderr io.Writer, env paths.Env, runtime pfmconfig.Runtime) int {
-	socket := env.Get(herdr.EnvSocket)
+	socket := resolve.CallerEnvironmentFrom(env).HerdrSocket
 	if socket == "" {
 		return 0
 	}

@@ -42,6 +42,78 @@ def listing(kind, files, namer, key):  # one layer per model-visible description
         desc = (d.get('description', '') + ' ' + d.get('when_to_use', '')).strip()
         if desc: add(kind, f, desc, key=(key, namer(f, d))); L[-1].append(d)
         else: out('WARN', 'no description', f)
+# visible-to: a port of rule-control's src/visible-to.ts (plugins/rule-control/plugins/rule-control/src/visible-to.ts), the source of truth: change both together.
+class Unusable(Exception): pass
+def vt_cut(ln):  # a `#` comment starting the line or after a space, outside quotes
+    q = ''
+    for i, c in enumerate(ln):
+        if q: q = '' if c == q else q
+        elif c in '"\'': q = c
+        elif c == '#' and (i == 0 or ln[i - 1].isspace()): return ln[:i]
+    return ln
+def vt_split(s):  # commas outside quotes, brackets, braces
+    parts, depth, q, start = [], 0, '', 0
+    for i, c in enumerate(s):
+        if q: q = '' if c == q else q
+        elif c in '"\'': q = c
+        elif c in '[{': depth += 1
+        elif c in ']}': depth -= 1
+        elif c == ',' and depth == 0: parts.append(s[start:i]); start = i + 1
+    return parts + [s[start:]]
+def vt_unq(s):
+    t = s.strip()
+    return t[1:-1] if len(t) >= 2 and t[0] in '"\'' and t[-1] == t[0] else t
+def vt_filter(entries):  # [(key, inline value, `- item` lines)] → {'include'?, 'exclude'?}
+    f = {}
+    for raw, inline, items in entries:
+        k = vt_unq(raw)
+        if k not in ('include', 'exclude'): raise Unusable(f'unknown key {k!r}; use include or exclude')
+        if k in f: raise Unusable(f'names {k} twice')
+        if inline:
+            if not (inline.startswith('[') and inline.endswith(']')) or items: raise Unusable(f'{k} is not a list')
+            names = [x.strip() for x in vt_split(inline[1:-1])]
+            names = [] if names == [''] else names
+        else:
+            if not items: raise Unusable(f'{k} has no value')
+            if any(not x.startswith('- ') and x != '-' for x in items): raise Unusable(f'{k} is not a list')
+            names = [x[1:].strip() for x in items]
+        names = [vt_unq(n) for n in names]
+        if any(not n.strip() or re.search(r'[\[\]{},\n]', n) for n in names): raise Unusable(f'{k} holds a value that is not a name')
+        f[k] = [n.strip() for n in names]
+    return f
+def rule_text(t):  # (body the engine delivers, filter or None, problem or None); an unusable value reaches every loop
+    ls = t.lstrip('\ufeff').splitlines()
+    close = next((i for i in range(1, len(ls)) if ls[i].strip() == '---'), -1) if ls and ls[0].strip() == '---' else -1
+    if close < 0: return t, None, None
+    yaml, body = ls[1:close], re.sub(r'^\s*\n', '', '\n'.join(ls[close + 1:])).rstrip()
+    at = next((i for i, ln in enumerate(yaml) if re.match(r'visible-to\s*:(\s|$)', ln)), None)
+    if at is None: return body, None, None
+    inline, block = vt_cut(yaml[at].split(':', 1)[1]).strip(), []
+    for ln in yaml[at + 1:]:
+        if ln.strip() and not ln[0].isspace() and not ln.startswith('#') and not re.match(r'-(\s|$)', ln): break
+        block.append(ln)
+    try:
+        if inline:
+            if not (inline.startswith('{') and inline.endswith('}')): raise Unusable('is not a mapping of include and exclude')
+            pairs = []
+            for p in (p for p in vt_split(inline[1:-1]) if p.strip()):
+                if ':' not in p: raise Unusable(f'holds {p.strip()!r}, not a key: value pair')
+                k, v = p.split(':', 1); pairs.append((k.strip(), v.strip(), []))
+            return body, vt_filter(pairs), None
+        lines = [x for x in map(vt_cut, block) if x.strip()]
+        if not lines: raise Unusable('has no value')
+        ind, entries = len(lines[0]) - len(lines[0].lstrip()), []
+        for ln in lines:
+            d, s = len(ln) - len(ln.lstrip()), ln.strip()
+            if (d > ind or re.match(r'-(\s|$)', s)) and entries: entries[-1][2].append(s); continue
+            m = re.match(r'([^:]+):(.*)$', s) if d == ind else None
+            if not m: raise Unusable(f'is not a mapping of include and exclude at {s!r}')
+            entries.append((m[1].strip(), m[2].strip(), []))
+        return body, vt_filter(entries), None
+    except Unusable as e: return body, None, f'visible-to {e}'
+def vt_glob(p, v): return p == v if '*' not in p else re.fullmatch('.*'.join(map(re.escape, p.split('*'))), v) is not None
+def vt_admits(f, loop): return ('include' not in f or any(vt_glob(p, loop) for p in f['include'])) and not any(vt_glob(p, loop) for p in f.get('exclude', []))
+def vt_targeted(f): return f is not None and not (('include' not in f or '*' in f['include']) and not f.get('exclude'))  # a filter leaving some loop out
 def ancestors(root):
     ds, d = [], P
     while True:
@@ -73,11 +145,36 @@ def claude():
         agent, body = fm(rd(af)) if af else ({}, '')
         out('PROBE', 'agent file', 'found' if af else 'absent (built-in or plugin agent: body read from the wire only)', af or LOOP)
     nochain = LOOP in ('Explore', 'Plan') or agent.get('omitClaudeMd') == 'true'
+    plug, mk = [], json.loads(rd(CFG + '/plugins/known_marketplaces.json') or '{}')
+    def plugdir(name, r):  # a directory marketplace's plugin loads from its folder, never its cache; any other from its cache
+        n, m = name.split('@')
+        src = mk.get(m, {}).get('source', {})
+        if src.get('source') != 'directory': return r['installPath']
+        e = next((e for e in json.loads(rd(src['path'] + '/.claude-plugin/marketplace.json') or '{"plugins":[]}')['plugins'] if e.get('name') == n), {})
+        if isinstance(e.get('source'), str): return os.path.normpath(os.path.join(src['path'], e['source']))
+        out('ERROR', f'directory marketplace {m}: no folder for plugin {n} in {src["path"]}/.claude-plugin/marketplace.json — its listings not read')
+    for name, rows in json.loads(rd(CFG + '/plugins/installed_plugins.json') or '{"plugins":{}}')['plugins'].items():
+        if S.get('enabledPlugins', {}).get(name):
+            r = next((r for r in rows if r.get('scope') == 'user' or P.startswith(r.get('projectPath', '\0'))), None)
+            ip = plugdir(name, r) if r else None
+            if ip: plug.append((name.split('@')[0], ip))
+    out('PROBE', 'plugins', f'{len(plug)} enabled and installed for this project')
+    RC = any(n == 'rule-control' for n, _ in plug)  # enabled and installed, read like every other plugin
+    out('PROBE', 'rule-control', 'enabled: visible-to narrows rules per loop' if RC else 'not enabled: visible-to is inert, every rule reaches every loop')
+    def rule(kind, r):  # a rule without paths:, counted for this loop unless rule-control withholds it (rules.ts targeted, splitShared)
+        if 'paths' in fm(rd(r))[0]: return
+        i = len(L)
+        if not chain(kind, r): return
+        body, f, bad = rule_text(L[i][2]); L[i][2] = body
+        if not RC: return
+        if bad: out('WARN', f'{bad}: rule-control fails open, the rule reaches every loop', r); return
+        if not vt_targeted(f) or vt_admits(f, LOOP): return
+        if len(L) > i + 1: out('PROBE', 'visible-to', f'leaves out {LOOP} but imports files rule-control cannot hand on: kept for every loop', r); return
+        del L[i:]; out('PROBE', 'visible-to', f'withheld from {LOOP} by rule-control', r)
     for p in ['/etc/claude-code/CLAUDE.md', '/Library/Application Support/ClaudeCode/CLAUDE.md']: chain('managed', p)
     if not nochain:
         chain('user', CFG + '/CLAUDE.md')
-        for r in glob.glob(CFG + '/rules/**/*.md', recursive=True):
-            if 'paths' not in fm(rd(r))[0]: chain('user rule', r)
+        for r in glob.glob(CFG + '/rules/**/*.md', recursive=True): rule('user rule', r)
         mode = S.get('pluginConfigs', {}).get('cc-plugin-agents-md@builtin', {}).get('options', {}).get('instructionFiles', 'claude-md-or-agents-md')
         dirs = ancestors('/')
         hasclaude = any(os.path.isfile(os.path.join(d, n)) for d in dirs for n in ('CLAUDE.md', '.claude/CLAUDE.md', 'CLAUDE.local.md'))
@@ -86,8 +183,7 @@ def claude():
         for d in dirs:
             for n in ['CLAUDE.md', '.claude/CLAUDE.md', 'CLAUDE.local.md'] + (['AGENTS.md', '.claude/AGENTS.md'] if agents_md else []):
                 if os.path.isfile(os.path.join(d, n)): chain('project', os.path.join(d, n))
-        for r in sorted(glob.glob(P + '/.claude/rules/**/*.md', recursive=True)):
-            if 'paths' not in fm(rd(r))[0]: chain('project rule', r)
+        for r in sorted(glob.glob(P + '/.claude/rules/**/*.md', recursive=True)): rule('project rule', r)
         out('PROBE', 'rules', f'{len(glob.glob(CFG + "/rules/**/*.md", recursive=True))} user, {len(glob.glob(P + "/.claude/rules/**/*.md", recursive=True))} project')
         slug = os.environ.get('CLAUDE_CODE_PROJECT_DIR_NAME') or re.sub(r'[^A-Za-z0-9]', '-', P)
         mem = CFG + f'/projects/{slug}/memory/MEMORY.md'
@@ -106,20 +202,6 @@ def claude():
             probe(next(iter(glob.glob(f'{CFG}/skills/{s}/SKILL.md') + glob.glob(f'{P}/.claude/skills/{s}/SKILL.md') + glob.glob(f'{P}/.claude/commands/{c}.md') + glob.glob(f'{CFG}/commands/{c}.md')), f'{s} (missing)'), 'preloaded skill')
             if L[-1][0] == 'preloaded skill': L[-1][2] = fm(L[-1][2])[1]  # the body loads, the frontmatter does not
     tools = agent.get('tools', '') if LOOP != 'main' else ''
-    plug, mk = [], json.loads(rd(CFG + '/plugins/known_marketplaces.json') or '{}')
-    def plugdir(name, r):  # a directory marketplace's plugin loads from its folder, never its cache; any other from its cache
-        n, m = name.split('@')
-        src = mk.get(m, {}).get('source', {})
-        if src.get('source') != 'directory': return r['installPath']
-        e = next((e for e in json.loads(rd(src['path'] + '/.claude-plugin/marketplace.json') or '{"plugins":[]}')['plugins'] if e.get('name') == n), {})
-        if isinstance(e.get('source'), str): return os.path.normpath(os.path.join(src['path'], e['source']))
-        out('ERROR', f'directory marketplace {m}: no folder for plugin {n} in {src["path"]}/.claude-plugin/marketplace.json — its listings not read')
-    for name, rows in json.loads(rd(CFG + '/plugins/installed_plugins.json') or '{"plugins":{}}')['plugins'].items():
-        if S.get('enabledPlugins', {}).get(name):
-            r = next((r for r in rows if r.get('scope') == 'user' or P.startswith(r.get('projectPath', '\0'))), None)
-            ip = plugdir(name, r) if r else None
-            if ip: plug.append((name.split('@')[0], ip))
-    out('PROBE', 'plugins', f'{len(plug)} enabled and installed for this project')
     cmdname = lambda base: lambda f, d: os.path.relpath(f, base)[:-3].replace('/', ':')
     if not tools or 'Skill' in tools:
         listing('skill', glob.glob(CFG + '/skills/*/SKILL.md') + glob.glob(P + '/.claude/skills/*/SKILL.md'), lambda f, d: os.path.basename(os.path.dirname(f)), 'skill')

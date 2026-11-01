@@ -17,6 +17,20 @@ import (
 	claudetranscript "github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
+// fileStamp is the change signal of a file the index mirrors whole: its size
+// and mtime, or -1 for both when it does not exist; any other stat failure is
+// an error.
+func fileStamp(path string) (size, mtimeNS int64, err error) {
+	info, err := os.Stat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return -1, -1, nil
+	}
+	if err != nil {
+		return 0, 0, err
+	}
+	return info.Size(), info.ModTime().UnixNano(), nil
+}
+
 func reloadCxNamesFromRoots(
 	ctx context.Context,
 	database *store.Store,
@@ -31,11 +45,8 @@ func reloadCxNamesFromRoots(
 	signature := sha256.New()
 	for _, codexHome := range codexHomes {
 		path := filepath.Join(codexHome, codexmeta.SessionIndexFile)
-		size, mtimeNS := int64(-1), int64(-1)
-		if info, err := os.Stat(path); err == nil {
-			size = info.Size()
-			mtimeNS = info.ModTime().UnixNano()
-		} else if !errors.Is(err, fs.ErrNotExist) {
+		size, mtimeNS, err := fileStamp(path)
+		if err != nil {
 			return fmt.Errorf("stat Codex session index %q: %w", path, err)
 		}
 		fmt.Fprintf(signature, "%s\x00%d\x00%d\x00", filepath.Clean(codexHome), size, mtimeNS)
@@ -114,11 +125,8 @@ func reloadCxNames(
 	counters *Counters,
 ) error {
 	path := filepath.Join(codexHome, codexmeta.SessionIndexFile)
-	size, mtimeNS := int64(-1), int64(-1)
-	if info, err := os.Stat(path); err == nil {
-		size = info.Size()
-		mtimeNS = info.ModTime().UnixNano()
-	} else if !errors.Is(err, fs.ErrNotExist) {
+	size, mtimeNS, err := fileStamp(path)
+	if err != nil {
 		return fmt.Errorf("stat Codex session index: %w", err)
 	}
 

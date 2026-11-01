@@ -10,7 +10,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
+	"github.com/rezzminator/professor/pfm/internal/chat"
 )
 
 func (service *Service) chatCall(
@@ -43,7 +43,7 @@ func (service *Service) chatCall(
 		wait.Go(func() {
 			delivery, err := service.callOne(ctx, callEngine, caller, target, input)
 			if err != nil {
-				delivery = CallDelivery{Status: "error", Code: pfmcall.CodeUndelivered, Message: err.Error()}
+				delivery = CallDelivery{Status: "error", Code: chat.CodeUndelivered, Message: err.Error()}
 			}
 			results[index] = TargetCallOutput{Target: target, CallDelivery: delivery}
 		})
@@ -58,7 +58,7 @@ func (service *Service) chatCall(
 	output := CallOutput{CallDelivery: CallDelivery{Status: "delivered"}, Results: results}
 	output.Message = fmt.Sprintf("broadcast delivered %d/%d", len(targets)-len(failed), len(targets))
 	if len(failed) > 0 {
-		output.Status, output.Code = "partial", pfmcall.CodeUndelivered
+		output.Status, output.Code = "partial", chat.CodeUndelivered
 		if len(failed) == len(targets) {
 			output.Status = "undelivered"
 		}
@@ -76,9 +76,9 @@ func (service *Service) callOne(
 	input CallInput,
 ) (CallDelivery, error) {
 	if refusal, detail := service.selfCallerRefusal(caller); selfTarget(target) && refusal != "" {
-		return CallDelivery{Status: refusal, Code: pfmcall.CodeUnknown, Message: detail}, nil
+		return CallDelivery{Status: refusal, Code: chat.CodeUnknown, Message: detail}, nil
 	}
-	result, err := callEngine.Call(ctx, pfmcall.Request{
+	result, err := callEngine.Call(ctx, chat.CallRequest{
 		Target:   target,
 		Message:  input.Message,
 		ForceNow: input.ForceNow,
@@ -86,7 +86,7 @@ func (service *Service) callOne(
 	})
 	output := outputFromCall(result)
 	if caller.present && !caller.valid && caller.detail != "" &&
-		strings.Contains(output.Message, pfmcall.ErrUnsigned.Error()) {
+		strings.Contains(output.Message, chat.ErrUnsigned.Error()) {
 		// The request did carry an identity that failed to bind: name why, so
 		// a binding failure never reads as "no identity was sent".
 		output.Message += " The request's own caller identity did not bind: " + caller.detail
@@ -94,7 +94,7 @@ func (service *Service) callOne(
 	return output, err
 }
 
-// mcpUnsignedMessage restates pfmcall.ErrUnsigned's refusal for an MCP
+// mcpUnsignedMessage restates chat.ErrUnsigned's refusal for an MCP
 // caller. The engine's own wording (call/body.go) is CLI-oriented — it
 // tells the reader to set an environment variable or pass --allow-unsigned,
 // both unreachable from an MCP tool call, and it blames a detached process
@@ -102,15 +102,15 @@ func (service *Service) callOne(
 // process still derived no identity of its own), so only the remedy half is
 // replaced with one an MCP caller can act on.
 func mcpUnsignedMessage() string {
-	return pfmcall.ErrUnsigned.Error() +
+	return chat.ErrUnsigned.Error() +
 		": this process derived no identity of its own, so the recipient " +
 		"would be asked to act on an instruction from nobody. " +
 		noAmbientCallerRemedy
 }
 
-func outputFromCall(result pfmcall.Result) CallDelivery {
+func outputFromCall(result chat.CallResult) CallDelivery {
 	message := result.Message
-	if strings.Contains(message, pfmcall.ErrUnsigned.Error()) {
+	if strings.Contains(message, chat.ErrUnsigned.Error()) {
 		message = mcpUnsignedMessage()
 	}
 	return CallDelivery{

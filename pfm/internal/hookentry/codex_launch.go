@@ -56,6 +56,9 @@ var codexNonTUISubcommands = func() map[string]bool {
 	return set
 }()
 
+// codexSessionSubcommands are the subcommands that open a TUI on an existing session.
+var codexSessionSubcommands = map[string]bool{"resume": true, "fork": true}
+
 // codexTransportFlags are the options that pick a Codex session's transport themselves: an explicit
 // in-process run, or a remote app-server (codex-cli 0.162.1 refuses --no-daemon beside --remote, and
 // a repeated --no-daemon).
@@ -187,7 +190,7 @@ func codexWorkbenchArgs(args []string, home string) ([]string, error) {
 		if codexPassthrough[arg] {
 			return nil, nil
 		}
-		if arg == "resume" || arg == "fork" {
+		if codexSessionSubcommands[arg] {
 			mode = workbench.Resume
 		}
 		model = model || arg == "-m" || arg == "--model" || strings.HasPrefix(arg, "--model=")

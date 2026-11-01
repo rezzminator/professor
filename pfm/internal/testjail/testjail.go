@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	harnessprompts "github.com/rezzminator/professor/pfm/harness-prompts"
+	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -114,10 +115,15 @@ func Run(m *testing.M) int {
 	}
 	// Git fixtures must read only repository-local configuration. A developer's
 	// global identity, aliases, hooks, signing policy, or system configuration
-	// must never steer a test subprocess.
+	// must never steer a test subprocess. Auto maintenance stays off: git detaches
+	// it after a commit, and it writes .git/objects/maintenance.lock under a
+	// fixture another test is copying.
 	for name, value := range map[string]string{
 		"GIT_CONFIG_GLOBAL":   "/dev/null",
 		"GIT_CONFIG_NOSYSTEM": "1",
+		"GIT_CONFIG_COUNT":    "1",
+		"GIT_CONFIG_KEY_0":    "maintenance.auto",
+		"GIT_CONFIG_VALUE_0":  "false",
 	} {
 		if err := os.Setenv(name, value); err != nil {
 			warnSetup("set %s to %s: %v", name, value, err)
@@ -673,7 +679,7 @@ func PTYCommand(argv ...string) *exec.Cmd {
 	if runtime.GOOS == "linux" {
 		quoted := make([]string, len(argv))
 		for index, argument := range argv {
-			quoted[index] = "'" + strings.ReplaceAll(argument, "'", `'\''`) + "'"
+			quoted[index] = cmdparse.Quote(argument)
 		}
 		return exec.Command(scriptBinary, "-qefc", strings.Join(quoted, " "), "/dev/null")
 	}

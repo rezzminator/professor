@@ -111,10 +111,11 @@ func TestHerdrStateFollowsTheClientThatAttachedOnARealTmuxServer(t *testing.T) {
 				getenv: func(name string) string {
 					return map[string]string{"TMUX_PANE": paneID, "HERDR_BIN_PATH": "/usr/bin/herdr"}[name]
 				},
-				tmux:     runTmuxForHerdr,
-				now:      func() time.Time { clock += 1000; return time.Unix(0, clock) },
-				lockDir:  lockDir,
-				lookPath: func(string) (string, error) { return "", errors.New("not on PATH") },
+				tmux:      runTmuxForHerdr,
+				listPanes: listTmuxPanesForHerdr,
+				now:       func() time.Time { clock += 1000; return time.Unix(0, clock) },
+				lockDir:   lockDir,
+				lookPath:  func(string) (string, error) { return "", errors.New("not on PATH") },
 				logError: func(session string, at time.Time, message string) error {
 					return herdr.AppendError(lockDir, session, at, message)
 				},

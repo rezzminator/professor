@@ -76,7 +76,8 @@ func TestHerdrCallNative(t *testing.T) {
 				target.Engine = test.engine
 			}
 			engine := nativeEngine(t, target)
-			engine.options.ComposerWait, engine.options.Poll = 10*time.Millisecond, time.Millisecond
+			// The bound only has to outlast the composer hold's reads.
+			engine.options.ComposerWait, engine.options.Poll = time.Second, time.Millisecond
 			result, err := engine.CallTarget(
 				context.Background(),
 				target,
@@ -105,10 +106,12 @@ func TestHerdrCallNative(t *testing.T) {
 				if test.engine != "" || test.screen != "" {
 					return
 				}
+				// The composer hold's agent.get + pane.read pairs, then the prompt.
 				calls := socket.calls()
-				if len(calls) != 3 || calls[0].Method != "agent.get" || calls[1].Method != "pane.read" ||
-					calls[2].Method != "agent.prompt" ||
-					calls[2].Params["target"] != "w1:p2" {
+				last := 2 * ComposerHoldReads
+				if len(calls) != last+1 || calls[0].Method != "agent.get" || calls[1].Method != "pane.read" ||
+					calls[last].Method != "agent.prompt" ||
+					calls[last].Params["target"] != "w1:p2" {
 					t.Fatalf("native calls = %+v", calls)
 				}
 				text, _ := calls[len(calls)-1].Params["text"].(string)
@@ -160,8 +163,9 @@ func TestHerdrNativePayloadSafety(t *testing.T) {
 				}
 				return
 			}
+			// The composer hold's agent.get + pane.read pairs, then the prompt.
 			calls := socket.calls()
-			if len(calls) != 3 || calls[2].Method != "agent.prompt" {
+			if len(calls) != 2*ComposerHoldReads+1 || calls[len(calls)-1].Method != "agent.prompt" {
 				t.Fatalf("native payload did not reach native prompt: %+v", calls)
 			}
 			text, _ := calls[len(calls)-1].Params["text"].(string)

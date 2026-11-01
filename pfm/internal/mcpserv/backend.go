@@ -9,7 +9,6 @@ import (
 	"strings"
 	"unicode"
 
-	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/compose"
@@ -26,10 +25,10 @@ import (
 )
 
 type callService interface {
-	Resolve(context.Context, string) (pfmcall.Target, int, string, error)
-	ResolveEngine(context.Context, string, string) (pfmcall.Target, int, string, error)
-	Capture(context.Context, string, int) (pfmcall.Target, string, int, string, error)
-	Call(context.Context, pfmcall.Request) (pfmcall.Result, error)
+	Resolve(context.Context, string) (chat.CallTarget, int, string, error)
+	ResolveEngine(context.Context, string, string) (chat.CallTarget, int, string, error)
+	Capture(context.Context, string, int) (chat.CallTarget, string, int, string, error)
+	Call(context.Context, chat.CallRequest) (chat.CallResult, error)
 }
 
 type backend struct {
@@ -84,10 +83,10 @@ func newBackendConfigured(warnings io.Writer, runtime Runtime) (*backend, error)
 		_ = sharedState.Close()
 		return nil, err
 	}
-	caller, err := pfmcall.New(pfmcall.Dependencies{
+	caller, err := chat.NewCallEngineWith(chat.CallDependencies{
 		Resolver:       resolver,
 		Names:          runtime.Names,
-		Spawner:        pfmcall.CommandThenSpawner{ConfigPath: runtime.ConfigPath},
+		Spawner:        chat.CommandThenSpawner{ConfigPath: runtime.ConfigPath},
 		ClaudeBinary:   runtime.ClaudeBinary,
 		CodexBinary:    runtime.CodexBinary,
 		OpenCodeBinary: runtime.OpenCodeBinary,
@@ -122,7 +121,7 @@ func (current *backend) close() error {
 // engineBinaries is the MCP process's configured engine executables, one entry
 // per REGISTERED engine. The shared resolver and the call engine read the
 // same map: the resolver used to be built from a Claude+Codex literal while
-// pfmcall.New built its own from all three, so an OpenCode pane was resolved
+// the call engine built its own from all three, so an OpenCode pane was resolved
 // here against a table that did not know the engine existed — and the next
 // engine would land half-configured the same way.
 func engineBinaries(runtime Runtime) map[pfmengine.ID]string {

@@ -40,6 +40,8 @@ type herdrTabProvider struct {
 	// glyphs reads the theme's tab glyphs each tick; nil draws the defaults.
 	glyphs func() (herdr.TabGlyphs, error)
 	warn   io.Writer
+	// probe, when set, takes each enumeration's baseline for changed.
+	probe *tabProbe
 }
 
 func (provider *herdrTabProvider) tabs(ctx context.Context, socket string) ([]herdr.TabDecoration, error) {
@@ -52,17 +54,21 @@ func (provider *herdrTabProvider) tabs(ctx context.Context, socket string) ([]he
 	}
 	pendingAgents := map[string]time.Time{}
 	defer func() { provider.missingAgents = pendingAgents }()
+	provider.probe.begin()
 	mode, err := provider.mode()
 	if err != nil {
 		return nil, fmt.Errorf("read tab status configuration: %w", err)
 	}
 	var glyphs herdr.TabGlyphs
+	glyphRead := ""
 	// Only emoji mode draws the theme's glyphs: off and text never read them,
 	// so a broken theme state is never named for a mode that ignores it.
-	if provider.glyphs != nil && mode != herdr.TabStatusOff && mode != "text" {
+	if provider.drawsGlyphs(mode) {
 		// An unreadable theme never stops the tabs' status: it is named, and
 		// the tabs keep painting with the default glyphs while it lasts.
-		if glyphs, err = provider.glyphs(); err != nil {
+		glyphs, err = provider.glyphs()
+		glyphRead = glyphToken(glyphs, err)
+		if err != nil {
 			glyphs = herdr.TabGlyphs{}
 			if _, writeErr := fmt.Fprintf(
 				provider.warn,
@@ -77,6 +83,7 @@ func (provider *herdrTabProvider) tabs(ctx context.Context, socket string) ([]he
 	if err != nil {
 		return nil, fmt.Errorf("scan tab chats: %w", err)
 	}
+	provider.probe.record(ctx, socket, scan.Rows, mode, glyphRead)
 	var decorations []herdr.TabDecoration
 	for i := range scan.Rows {
 		row := scan.Rows[i]
@@ -100,6 +107,7 @@ func (provider *herdrTabProvider) tabs(ctx context.Context, socket string) ([]he
 		if len(views) == 0 {
 			continue
 		}
+		provider.probe.track(target)
 		if !target.Live && len(scan.Unreadable) > 0 {
 			return nil, fmt.Errorf("fleet inspection incomplete, refusing dead tab status: %v", scan.Unreadable)
 		}
@@ -155,6 +163,7 @@ func (provider *herdrTabProvider) tabs(ctx context.Context, socket string) ([]he
 			decorations = append(decorations, view)
 		}
 	}
+	provider.probe.commit()
 	return decorations, nil
 }
 
@@ -212,7 +221,7 @@ func PaintHerdrIndicators(ctx context.Context, socket, lockDir string, stderr io
 		return errors.Join(loadErr, writeErr)
 	}
 	inspector := NewSeatInspector(&runtime)
-	provider := herdrTabProvider{inspect: inspector.Inspect, warn: warnings}
+	provider := herdrTabProvider{inspect: inspector.Inspect, warn: warnings, probe: &tabProbe{}}
 	settings := herdrIndicatorConfig{path: runtime.Config.Path}
 	provider.mode = settings.mode
 	stateDir := themesync.DefaultStateDir(runtime.Paths.Home)
@@ -224,14 +233,16 @@ func PaintHerdrIndicators(ctx context.Context, socket, lockDir string, stderr io
 		inspector.Sweep()
 		return ScanRows(ctx, persisted, &runtime)
 	}
+	proc := gather.NewProcFS(runtime.Paths.ProcRoot)
 	addresses := tabViewReader{
 		runtime: &runtime,
 		warn:    warnings,
 		tmux:    runTmux,
 		resolve: herdr.WireResolver(
-			gather.NewProcFS(runtime.Paths.ProcRoot).Environ,
+			proc.Environ,
 			herdr.Call,
 			func() uint64 { return uint64(clock.Real.Now().UnixNano()) },
+			gather.HerdrKeep(proc),
 		).Resolve,
 	}
 	provider.views = func(ctx context.Context, target headless.Chat, socket string) ([]herdr.TabDecoration, error) {
@@ -245,7 +256,15 @@ func PaintHerdrIndicators(ctx context.Context, socket, lockDir string, stderr io
 		}
 		return addresses.views(ctx, target, socket, panes)
 	}
-	return herdr.PaintIndicatorsWithTabs(ctx, socket, lockDir, persisted, provider.tabs, call.ProveHerdrPane)
+	return herdr.PaintIndicatorsWithTabs(
+		ctx,
+		socket,
+		lockDir,
+		persisted,
+		provider.tabs,
+		provider.changed,
+		call.ProveHerdrPane,
+	)
 }
 
 // tickWarnings names each per-chat tab diagnostic once while it recurs on
@@ -347,18 +366,17 @@ func (reader *tabViewReader) liveness(
 }
 
 // tabEngineForeground reports whether the seat's engine is in its pane's
-// foreground, from Herdr's pane.process_info.
+// foreground, from Herdr's pane.process_info (through herdr-keep).
 func tabEngineForeground(ctx context.Context, seat fleetdb.Seat) (bool, error) {
-	body, err := herdr.SeatRequest(
-		ctx,
-		seat.HerdrSocket,
-		"pane.process_info",
-		map[string]string{nativePaneIDKey: seat.HerdrPane},
-	)
+	values, err := paths.Resolve()
+	if err != nil {
+		return false, fmt.Errorf("read Herdr foreground processes of %s: resolve paths: %w", seat.HerdrPane, err)
+	}
+	processes, err := gather.HerdrKeep(gather.NewProcFS(values.ProcRoot)).Read(ctx, seat.HerdrSocket, seat.HerdrPane)
 	if err != nil {
 		return false, fmt.Errorf("read Herdr foreground processes of %s: %w", seat.HerdrPane, err)
 	}
-	return herdr.EngineForeground(body, seat.HerdrPane, pfmengine.ID(seat.Engine))
+	return herdr.EngineForeground(processes, seat.HerdrPane, pfmengine.ID(seat.Engine))
 }
 
 // unproved records, through the painter's diagnostic writer (the Herdr plugin
@@ -543,6 +561,25 @@ func tabView(pane herdr.TabPane, identity string) herdr.TabDecoration {
 	}
 }
 
+// staleTabClaim says the pane's agent_session names a chat whose own native
+// seat was born in another terminal: Herdr kept a replaced chat's claim, so
+// the claim never vetoes the seat that proves the pane's terminal. A claim
+// pfm cannot place (a path, an unknown chat) stands.
+func (reader *tabViewReader) staleTabClaim(ctx context.Context, pane herdr.TabPane) (bool, error) {
+	var session struct{ Kind, Value string }
+	if err := json.Unmarshal(pane.Session, &session); err != nil {
+		return false, fmt.Errorf("decode tab agent_session: %w", err)
+	}
+	if session.Kind != "id" {
+		return false, nil
+	}
+	claimed, found, err := nativeSeat(ctx, *reader.runtime, session.Value, "")
+	if err != nil {
+		return false, fmt.Errorf("read the native seat Herdr names in tab %s: %w", pane.Tab, err)
+	}
+	return found && claimed.HerdrTerminalID != "" && claimed.HerdrTerminalID != pane.Terminal, nil
+}
+
 func tabPaneSession(pane herdr.TabPane, target headless.Chat) (bool, error) {
 	if len(pane.Session) == 0 || string(pane.Session) == "null" {
 		return false, nil
@@ -573,23 +610,28 @@ func (reader *tabViewReader) nativeView(
 	socket string,
 	pane herdr.TabPane,
 ) ([]herdr.TabDecoration, error) {
-	// Herdr emits no agent_session for a pfm-native pane: absent, the seat's
-	// own recorded terminal must be the pane's; present, it must name the chat.
+	// A seat's recorded terminal must be the pane's. Herdr emits no
+	// agent_session for a pfm-native pane: absent, that terminal is the only
+	// proof; present, it must name the chat, unless it is a replaced chat's
+	// claim Herdr kept (reader.staleTabClaim).
 	sessionNamed := len(pane.Session) != 0 && string(pane.Session) != "null"
 	matches, err := tabPaneSession(pane, target)
 	if err != nil {
 		return nil, err
-	}
-	if sessionNamed && !matches {
-		return nil, nil
 	}
 	seat, found, err := nativeSeat(ctx, *reader.runtime, target.ID, target.SeatID)
 	if err != nil {
 		return nil, fmt.Errorf("read native tab seat: %w", err)
 	}
 	if !found || seat.ReloadPending || seat.HerdrSocket != socket || seat.HerdrPane != pane.Pane ||
-		!sessionNamed && (seat.HerdrTerminalID == "" || seat.HerdrTerminalID != pane.Terminal) {
+		seat.HerdrTerminalID != pane.Terminal && (seat.HerdrTerminalID != "" || !sessionNamed) {
 		return nil, nil
+	}
+	if sessionNamed && !matches {
+		stale, err := reader.staleTabClaim(ctx, pane)
+		if err != nil || !stale || seat.HerdrTerminalID == "" {
+			return nil, err
+		}
 	}
 	state, proved, err := reader.liveness(ctx, target, seat)
 	if err != nil || !proved {
@@ -604,7 +646,7 @@ func (reader *tabViewReader) nativeView(
 			return false, fmt.Errorf("read native tab owner: %w", err)
 		}
 		if !found || seat.SessionID != target.ID || seat.HerdrSocket != socket || seat.HerdrPane != target.Pane ||
-			seat.ReloadPending || !sessionNamed && seat.HerdrTerminalID != pane.Terminal {
+			seat.ReloadPending || seat.HerdrTerminalID != pane.Terminal && (seat.HerdrTerminalID != "" || !sessionNamed) {
 			return false, nil
 		}
 		currentState, proved, err := reader.liveness(ctx, target, seat)

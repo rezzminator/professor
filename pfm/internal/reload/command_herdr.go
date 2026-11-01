@@ -33,9 +33,26 @@ type nativeReload struct {
 	request Request
 	options Options
 	target  pfmcall.Target
-	client  pfmcall.Engine
+	door    *pfmcall.Engine
 	db      *fleetdb.Store
 	owner   fleetdb.Seat
+	// keep reads the pane through herdr-keep, which may hold its shell.
+	keep *herdr.Keep
+}
+
+// pane is the native seat's seatScreen: call's door, the seat's supervisor
+// re-proved before every read and key. Herdr shows a worker's failure through
+// its notification, so a refusal is returned, never displayed here.
+func (n *nativeReload) pane() seatScreen {
+	return seatScreen{
+		door: n.door,
+		bind: func(ctx context.Context) (pfmcall.Target, error) {
+			if err := n.refreshTarget(ctx); err != nil {
+				return pfmcall.Target{}, err
+			}
+			return n.target, nil
+		},
+	}
 }
 
 // RunHerdr reboots a native seat without replacing its Herdr pane. Seat-host
@@ -63,12 +80,23 @@ func RunHerdr(
 	if options.SIDDir == "" {
 		options.SIDDir = values.SIDDir
 	}
+	door, err := pfmcall.New(
+		pfmcall.Dependencies{
+			WarningWriter: stderr,
+			Options:       pfmcall.Options{DisableSignature: true, Clock: options.Clock},
+		},
+	)
+	if err != nil {
+		return Result{}, fmt.Errorf("native reload pane door: %w", err)
+	}
 	db := fleetdb.OpenSharedState(ctx, values)
 	defer func() { returnErr = errors.Join(returnErr, db.Close()) }()
 	n := nativeReload{
 		request: request,
 		options: options,
+		door:    door,
 		db:      db,
+		keep:    gather.HerdrKeep(gather.NewProcFS(values.ProcRoot)),
 		target: pfmcall.Target{
 			Backend:    "herdr",
 			SocketPath: request.SocketPath,
@@ -102,7 +130,15 @@ func RunHerdr(
 	if err != nil {
 		return Result{}, err
 	}
-	updated, run, err := nativeReloadRecipe(request, seat, old)
+	// The recipe resumes the chat's newest segment; publication re-keys the seat to it.
+	resumed := seat
+	if pfmengine.ID(seat.Engine) == pfmengine.Claude && seat.SessionID != "" && !request.New {
+		resumed.SessionID, _, err = ContinuedSession(ctx, seat.SessionID, stderr)
+		if err != nil {
+			return Result{}, err
+		}
+	}
+	updated, run, err := nativeReloadRecipe(request, resumed, old)
 	if err != nil {
 		return Result{}, err
 	}
@@ -120,7 +156,7 @@ func RunHerdr(
 		if pid != 0 {
 			return Result{}, errors.New("failed native reload seat engine is still running; refusing retry input")
 		}
-		screen, err := n.capture(ctx)
+		screen, err := n.pane().capture(ctx)
 		if err != nil {
 			return Result{}, err
 		}
@@ -191,26 +227,19 @@ func RunHerdr(
 			returnErr = errors.Join(returnErr, n.rollback(cleanup, seat, pending, old, oldPID, retry))
 		}
 	}()
-	if !retry {
-		if err := n.sendLiteral(ctx, "/exit"); err != nil {
-			return Result{}, err
-		}
-		if err := n.renderExit(ctx); err != nil {
-			return Result{}, err
-		}
+	if retry {
+		submitted, err = pressEnter(ctx, n.pane(), "submit native reload retry")
+	} else {
+		submitted, err = typeExit(ctx, n.pane(), n.options.Clock, stderr)
 	}
-	if err := n.refreshTarget(ctx); err != nil {
+	if err != nil {
 		return Result{}, err
-	}
-	submitted = true
-	if err := n.client.SendKey(ctx, n.target, "Enter"); err != nil {
-		return Result{}, fmt.Errorf("submit native reload exit/retry: %w", err)
 	}
 	if err := n.wait(ctx, seat.SeatID, oldPID, run); err != nil {
 		return Result{}, err
 	}
 	if n.request.Then != "" {
-		if err := n.then(ctx, stderr); err != nil {
+		if err := n.then(ctx); err != nil {
 			return Result{}, err
 		}
 	}
@@ -380,60 +409,16 @@ func nativeReloadRun(request Request, name string) (fleetdb.SeatRun, error) {
 	return *plan.SeatRun, nil
 }
 
-func (n *nativeReload) capture(ctx context.Context) (string, error) {
-	if err := n.refreshTarget(ctx); err != nil {
-		return "", err
-	}
-	body, err := herdr.SeatRequest(
-		ctx,
-		n.target.SocketPath,
-		"pane.read",
-		map[string]any{
-			herdrPaneKey: n.target.Pane,
-			"source":     "visible",
-			"lines":      1000,
-			"strip_ansi": false,
-			"format":     "ansi",
-		},
-	)
-	if err != nil {
-		return "", fmt.Errorf("native reload read composer: %w", err)
-	}
-	var result struct {
-		Type string `json:"type"`
-		Read *struct {
-			Pane      string  `json:"pane_id"`
-			Workspace string  `json:"workspace_id"`
-			Text      *string `json:"text"`
-			Truncated *bool   `json:"truncated"`
-			Format    string  `json:"format"`
-		} `json:"read"`
-	}
-	if err := json.Unmarshal(body, &result); err != nil {
-		return "", fmt.Errorf("decode native reload composer: %w", err)
-	}
-	if result.Type != "pane_read" || result.Read == nil || result.Read.Text == nil || result.Read.Truncated == nil ||
-		result.Read.Format != "ansi" {
-		return "", errors.New("native reload malformed pane_read result")
-	}
-	if err := n.refreshTarget(ctx); err != nil {
-		return "", err
-	}
-	if result.Read.Pane != n.target.Pane && result.Read.Workspace+":"+result.Read.Pane != n.target.Pane {
-		return "", fmt.Errorf("native reload snapshot belongs to pane %q", result.Read.Pane)
-	}
-	return *result.Read.Text, nil
-}
-
 func (n *nativeReload) ready(ctx context.Context, stash bool) error {
 	stable := 0
+	pane := n.pane()
 	for attempt := 0; attempt < n.options.IdleTries; attempt++ {
-		screen, err := n.capture(ctx)
+		screen, err := pane.capture(ctx)
 		if err != nil {
 			return err
 		}
-		if selectorOpen(screen) || pfmengine.ClaudeTrustDialog(screen) {
-			return errors.New("native reload: open selector/menu; answer it before reloading")
+		if err := refuseSelector(ctx, pane, screen); err != nil {
+			return fmt.Errorf("native reload: %w", err)
 		}
 		if n.request.Engine == pfmengine.Claude {
 			body, err := herdr.SeatRequest(
@@ -474,7 +459,7 @@ func (n *nativeReload) ready(ctx context.Context, stash bool) error {
 		if !composerDrawn(screen) || pfmcall.IsFooterBusy(n.request.Engine, screen) {
 			stable = 0
 		} else {
-			empty, draft, err := reloadComposerEmpty(screen, func() (string, error) { return screen, nil })
+			empty, draft, err := reloadComposerEmpty(screen, pane.styled(ctx))
 			if err != nil {
 				return err
 			}
@@ -482,7 +467,7 @@ func (n *nativeReload) ready(ctx context.Context, stash bool) error {
 				if !stash {
 					return fmt.Errorf("native reload: %w", composerDraftError(draft))
 				}
-				if err := n.sendKey(ctx, "ctrl+s"); err != nil {
+				if err := pane.key(ctx, "C-s"); err != nil {
 					return fmt.Errorf("stash native reload draft: %w", err)
 				}
 				stash = false
@@ -501,60 +486,25 @@ func (n *nativeReload) ready(ctx context.Context, stash bool) error {
 	return errors.New("native reload: chat still busy or input box not ready; /exit was not typed")
 }
 
-func (n *nativeReload) renderExit(ctx context.Context) error {
-	for attempt := 0; attempt < n.options.ExitTries; attempt++ {
-		screen, err := n.capture(ctx)
-		if err != nil {
-			return err
-		}
-		if composerShowsExit(screen) {
-			return nil
-		}
-		if err := n.options.Clock.Sleep(ctx, n.options.Poll); err != nil {
-			return err
-		}
-	}
-	return errors.New("native reload: typed /exit never rendered; refusing blind Enter")
-}
-
-type nativeReloadProcess struct {
-	PID   int      `json:"pid"`
-	Name  string   `json:"name"`
-	Argv0 *string  `json:"argv0"`
-	Argv  []string `json:"argv"`
-}
-
 func (n *nativeReload) process(ctx context.Context) (int, []string, error) {
 	if err := n.refreshTarget(ctx); err != nil {
 		return 0, nil, err
 	}
-	body, err := herdr.SeatRequest(
-		ctx,
-		n.target.SocketPath,
-		"pane.process_info",
-		map[string]string{herdrPaneKey: n.target.Pane},
-	)
+	processes, err := n.keep.Read(ctx, n.target.SocketPath, n.target.Pane)
 	if err != nil {
 		return 0, nil, fmt.Errorf("native reload process_info: %w", err)
 	}
-	var result struct {
-		Type string `json:"type"`
-		Info *struct {
-			Pane      string                `json:"pane_id"`
-			Processes []nativeReloadProcess `json:"foreground_processes"`
-		} `json:"process_info"`
+	if processes.ForegroundErr != nil {
+		return 0, nil, fmt.Errorf("decode native reload process_info: %w", processes.ForegroundErr)
 	}
-	if err := json.Unmarshal(body, &result); err != nil {
-		return 0, nil, fmt.Errorf("decode native reload process_info: %w", err)
-	}
-	if result.Type != "pane_process_info" || result.Info == nil || result.Info.Pane != n.target.Pane {
+	if processes.Pane != n.target.Pane {
 		return 0, nil, errors.New("native reload malformed process_info or mismatched pane")
 	}
 	binary := pfmengine.MustLookup(n.request.Engine).Binary
-	for _, process := range result.Info.Processes {
+	for _, process := range processes.Foreground {
 		name := process.Name
-		if process.Argv0 != nil {
-			name = filepath.Base(*process.Argv0)
+		if process.Argv0 != "" {
+			name = filepath.Base(process.Argv0)
 		} else if len(process.Argv) > 0 {
 			name = filepath.Base(process.Argv[0])
 		}
@@ -598,12 +548,12 @@ func (n *nativeReload) wait(ctx context.Context, id string, oldPID int, run flee
 			return nil
 		}
 		if pid == oldPID && oldPID != 0 {
-			screen, err := n.capture(ctx)
+			screen, err := n.pane().capture(ctx)
 			if err != nil {
 				return err
 			}
 			if pfmcall.ExitDialogOpen(screen) || composerShowsExit(screen) {
-				if err := n.sendKey(ctx, "Enter"); err != nil {
+				if err := n.pane().key(ctx, "Enter"); err != nil {
 					return fmt.Errorf("confirm native reload exit: %w", err)
 				}
 			}
@@ -639,15 +589,13 @@ func (n *nativeReload) rollback(
 		if pid != oldPID {
 			return errors.New("native reload engine changed before rollback; pending left to seat-host")
 		}
-		screen, err := n.capture(ctx)
+		screen, err := n.pane().capture(ctx)
 		if err != nil {
 			return err
 		}
 		if composerShowsExit(screen) {
-			for range len("/exit") {
-				if err := n.sendKey(ctx, "BSpace"); err != nil {
-					return fmt.Errorf("clear unsubmitted native /exit: %w", err)
-				}
+			if err := clearTypedExit(ctx, n.pane()); err != nil {
+				return fmt.Errorf("clear unsubmitted native /exit: %w", err)
 			}
 		}
 	}
@@ -660,23 +608,14 @@ func (n *nativeReload) rollback(
 	return nil
 }
 
-func (n *nativeReload) then(ctx context.Context, stderr io.Writer) error {
+func (n *nativeReload) then(ctx context.Context) error {
 	if err := n.ready(ctx, false); err != nil {
 		return fmt.Errorf("native reload --then: %w", err)
-	}
-	caller, err := pfmcall.New(
-		pfmcall.Dependencies{
-			WarningWriter: stderr,
-			Options:       pfmcall.Options{DisableSignature: true, Clock: n.options.Clock},
-		},
-	)
-	if err != nil {
-		return fmt.Errorf("native reload --then client: %w", err)
 	}
 	if err := n.refreshTarget(ctx); err != nil {
 		return err
 	}
-	result, err := caller.CallTarget(ctx, n.target, pfmcall.Request{Message: n.request.Then})
+	result, err := n.door.CallTarget(ctx, n.target, pfmcall.Request{Message: n.request.Then})
 	if err != nil {
 		return fmt.Errorf("native reload --then: %w", err)
 	}

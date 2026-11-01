@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync/atomic"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
@@ -47,6 +47,9 @@ type TmuxSpawner struct {
 	// serviceScopeCommand reads INVOCATION_ID through; nil defaults to
 	// paths.OSEnv{}.
 	Env paths.Env
+	// Screen is the pane door Pane hands out; nil is the call engine over
+	// Binary. A test injects a recorder here.
+	Screen pfmcall.Screen
 }
 
 // preflightBinary proves the executable word a pane is about to run resolves
@@ -275,62 +278,20 @@ func (tmux TmuxSpawner) newSessionCommand(
 	return pfmtmux.Observe(ctx, command, arguments...), nil
 }
 
-func (tmux TmuxSpawner) Capture(
-	ctx context.Context,
-	socket, target string,
-) (string, error) {
-	output, err := tmux.command(
-		ctx,
-		socket,
-		"capture-pane", "-t", target, "-p", "-J",
-	).Output()
-	return string(output), err
-}
-
-func (tmux TmuxSpawner) SendLiteral(
-	ctx context.Context,
-	socket, target, text string,
-) error {
-	return tmux.command(
-		ctx,
-		socket,
-		"send-keys", "-t", target, "-l", "--", text,
-	).Run()
-}
-
-// SendPaste loads text into a private one-shot tmux buffer and pastes it
-// with -p, so an engine that enables bracketed paste receives it as a single
-// paste event; -d deletes the buffer once pasted.
-func (tmux TmuxSpawner) SendPaste(
-	ctx context.Context,
-	socket, target, text string,
-) error {
-	buffer := fmt.Sprintf("pfm-spawn-%d-%d", os.Getpid(), pasteSequence.Add(1))
-	load := tmux.command(ctx, socket, "load-buffer", "-b", buffer, "-")
-	load.Stdin = strings.NewReader(text)
-	if err := load.Run(); err != nil {
-		return fmt.Errorf("load the prompt into tmux buffer %s: %w", buffer, err)
+// Pane is the door to pane on socket: the socket's path under TmuxDir on the
+// tmux backend, read and typed through Screen — or, when no Screen is set, the
+// call engine over this spawner's tmux binary, the one place that decides how
+// a pane is captured, keyed and pasted into.
+func (tmux TmuxSpawner) Pane(socket, pane string) (pfmcall.Screen, pfmcall.Target, error) {
+	target := pfmcall.Target{SocketPath: filepath.Join(tmux.TmuxDir, socket), Pane: pane}
+	if tmux.Screen != nil {
+		return tmux.Screen, target, nil
 	}
-	if err := tmux.command(
-		ctx, socket, "paste-buffer", "-d", "-p", "-b", buffer, "-t", target,
-	).Run(); err != nil {
-		if deleteErr := tmux.command(ctx, socket, "delete-buffer", "-b", buffer).Run(); deleteErr != nil {
-			return fmt.Errorf("paste tmux buffer %s: %w (delete it: %v)", buffer, err, deleteErr)
-		}
-		return fmt.Errorf("paste tmux buffer %s: %w", buffer, err)
+	engine, err := pfmcall.New(pfmcall.Dependencies{Tmux: pfmcall.TmuxCaller{Binary: tmux.Binary}, Env: tmux.Env})
+	if err != nil {
+		return nil, pfmcall.Target{}, fmt.Errorf("open the pane door for socket %s: %w", socket, err)
 	}
-	return nil
-}
-
-// pasteSequence keeps concurrent spawns in one process off each other's
-// paste buffers.
-var pasteSequence atomic.Uint64
-
-func (tmux TmuxSpawner) SendKey(
-	ctx context.Context,
-	socket, target, key string,
-) error {
-	return tmux.command(ctx, socket, "send-keys", "-t", target, key).Run()
+	return engine, target, nil
 }
 
 // socket is the one tmux-addressing wrapper (internal/tmux.Socket).

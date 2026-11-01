@@ -18,7 +18,13 @@ const (
 
 	claudeParserVersionKey = "claude_parser_version"
 	claudeParserVersion    = "5"
-	messageRoleUser        = "user"
+
+	// openCodeStoreStampKey holds the stamp of the OpenCode stores the
+	// oc_sessions mirror was last replaced from; a change to the mirror's
+	// columns or to how a session row is read bumps openCodeMirrorVersion.
+	openCodeStoreStampKey = "opencode_store_stamp"
+	openCodeMirrorVersion = "1"
+	messageRoleUser       = "user"
 )
 
 // Options controls one indexing pass.
@@ -45,7 +51,8 @@ type Counters struct {
 	CodexRowsCreated int
 
 	// OpenCodeSessions counts the OpenCode sessions mirrored this pass. The mirror
-	// is a full replace, so this is the population, not a delta.
+	// is a full replace, so this is the population, not a delta; a pass that
+	// found the stores unchanged mirrors none.
 	OpenCodeSessions      int
 	options               Options
 	legacySingleCodexHome bool

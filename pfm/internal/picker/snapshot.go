@@ -56,7 +56,9 @@ func buildSnapshot(
 			rows = slices.Clone(output.Rows)
 			for index := range rows {
 				if rows[index].ID != "" {
-					rows[index].ScheduleFired = unseen[rows[index].ID]
+					// A continued native seat's schedules sit on its newest segment.
+					continued := compose.ContinuedSegment(&rows[index])
+					rows[index].ScheduleFired = unseen[rows[index].ID] || (continued != "" && unseen[continued])
 				}
 			}
 		}

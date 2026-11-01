@@ -88,6 +88,10 @@ func ReadStatuslineSnapshot(
 		confirmedAt time.Time
 	}
 	merged := map[string]pick{}
+	// The newest snapshot carrying each plain window, and the newest that
+	// reported the plain windows but left it out: a later omission says the
+	// plan dropped it, so an older seat's reading of it is not merged back.
+	carried, omitted := map[string]time.Time{}, map[string]time.Time{}
 	found := false
 	for _, entry := range entries {
 		if !strings.HasPrefix(entry.Name(), prefix) || !strings.HasSuffix(entry.Name(), ".json") {
@@ -126,7 +130,20 @@ func ReadStatuslineSnapshot(
 			continue
 		}
 		found = true
-		for key, reading := range snapshot.readings() {
+		readings := snapshot.readings()
+		answered := readings[fiveHourKey].ResetsAt > 0 || readings[sevenDayKey].ResetsAt > 0
+		for _, key := range []string{fiveHourKey, sevenDayKey} {
+			latest := omitted
+			if readings[key].ResetsAt > 0 {
+				latest = carried
+			} else if !answered {
+				continue
+			}
+			if confirmedAt.After(latest[key]) {
+				latest[key] = confirmedAt
+			}
+		}
+		for key, reading := range readings {
 			best, seen := merged[key]
 			if reading.ResetsAt > now.Unix() && (!seen || NewerReading(
 				reading.UsedPercentage, reading.ResetsAt, best.reading.UsedPercentage, best.reading.ResetsAt,
@@ -137,6 +154,11 @@ func ReadStatuslineSnapshot(
 	}
 	if !found {
 		return Usage{}, time.Time{}, false, nil
+	}
+	for key, at := range omitted {
+		if at.After(carried[key]) {
+			delete(merged, key)
+		}
 	}
 	windows := make(map[string]snapshotWindow, len(merged))
 	var answeredAt time.Time

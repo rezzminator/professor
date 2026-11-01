@@ -5,6 +5,8 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/charmbracelet/x/ansi"
+
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
@@ -26,15 +28,15 @@ func herdrRawCapture(ctx context.Context, target Target, format string) (string,
 func openCodeComposer(screen string) string {
 	lines := strings.Split(screen, "\n")
 	for end := len(lines) - 2; end >= 3; end-- {
-		if !strings.HasPrefix(strings.TrimSpace(stripTerminalControl(lines[end])), "╹▀") {
+		if !strings.HasPrefix(strings.TrimSpace(ansi.Strip(lines[end])), "╹▀") {
 			continue
 		}
-		model := strings.TrimSpace(stripTerminalControl(lines[end-1]))
+		model := strings.TrimSpace(ansi.Strip(lines[end-1]))
 		if !strings.HasPrefix(model, "┃") || !strings.Contains(model, " · ") {
 			return screen
 		}
 		start := end - 2
-		for start >= 0 && strings.HasPrefix(strings.TrimSpace(stripTerminalControl(lines[start])), "┃") {
+		for start >= 0 && strings.HasPrefix(strings.TrimSpace(ansi.Strip(lines[start])), "┃") {
 			start--
 		}
 		start++
@@ -44,12 +46,12 @@ func openCodeComposer(screen string) string {
 		var body []string
 		for _, line := range lines[start : end-1] {
 			_, text, _ := strings.Cut(line, "┃")
-			if strings.TrimSpace(stripTerminalControl(text)) != "" {
+			if strings.TrimSpace(ansi.Strip(text)) != "" {
 				body = append(body, text)
 			}
 		}
 		draft := strings.Join(body, " ")
-		plain := strings.TrimSpace(stripTerminalControl(draft))
+		plain := strings.TrimSpace(ansi.Strip(draft))
 		// Hints use textMuted, not SGR dim. Compare to the commands hint in
 		// this capture, never a hardcoded theme colour. A typed lookalike uses
 		// the foreground; indistinguishable themes fail closed.

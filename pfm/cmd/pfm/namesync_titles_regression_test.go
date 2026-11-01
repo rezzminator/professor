@@ -170,7 +170,7 @@ func TestNameSyncConvergesTheHerdrHooksInTheFormTmuxPrintsBack(t *testing.T) {
 		t.Fatalf("second pass stdout = %q, want every option already converged", secondOut.String())
 	}
 
-	prefix := `run-shell -b "'/tmp/pfm dir/it'\\''s/pfm' internal herdr-state `
+	prefix := `run-shell -b "'/tmp/pfm dir/it'\"'\"'s/pfm' internal herdr-state `
 	for hook, want := range map[string]string{
 		"client-attached[50]": prefix + `attach --socket #{q:socket_path} --session #{q:session_name} --client #{q:client_pid}"`,
 		"client-detached[50]": prefix + `detach --socket #{q:socket_path} --session #{q:session_name} --client #{q:client_pid}"`,

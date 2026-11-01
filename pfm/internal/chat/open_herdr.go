@@ -17,11 +17,11 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	"github.com/rezzminator/professor/pfm/internal/config"
-	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
+	"github.com/rezzminator/professor/pfm/internal/launchnotice"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
@@ -144,24 +144,11 @@ func viewNative(ctx context.Context, seat fleetdb.Seat, stdout, stderr io.Writer
 		}
 		return nil
 	}
-	process, err := (deps.RealRunner{}).Start(
-		ctx,
-		[]string{"herdr", "agent", "attach", seat.HerdrPane},
-		deps.StartOptions{
-			Env:    append(herdr.StripPane(os.Environ()), herdr.EnvSocket+"="+seat.HerdrSocket),
-			Stdin:  os.Stdin,
-			Stdout: stdout,
-			Stderr: stderr,
-		},
-	)
-	if err == nil {
-		err = process.Wait()
-	}
-	if err != nil {
+	if err := herdr.Attach(ctx, seat.HerdrSocket, seat.HerdrPane, os.Stdin, stdout, stderr); err != nil {
 		if ctx.Err() != nil {
 			return fmt.Errorf("attach Herdr pane %s: %w", seat.HerdrPane, ctx.Err())
 		}
-		fmt.Fprintf(stderr, "pfm chat open: Herdr attach failed: %v\n%s\n", err, nativeLocation(seat))
+		fmt.Fprintf(stderr, "pfm chat open: Herdr attach failed: %v\n%s\n", err, spawn.HerdrLocation(seat))
 		return fmt.Errorf("attach Herdr pane %s: %w", seat.HerdrPane, err)
 	}
 	return nil
@@ -335,52 +322,21 @@ func openNativeRow(
 		var alive bool
 		seat, alive, err = nativeAlive(ctx, seat, runtime.Paths)
 		if err == nil && !alive {
-			// D4: a dead seat resumes by the caller's current birth rule.
-			choice, choiceErr := BirthBackend(ctx, "open.herdr", spawn.BackendAuto)
-			switch {
-			case choiceErr != nil:
-				err = choiceErr
-			case choice.Backend == spawn.BackendHerdr:
-				// The chat resumes in the caller's own pane: the seat is rebound
-				// to this pane, whose process then execs the seat host.
-				// On a terminal restoreNative execs the seat host and never
-				// returns, so the unseen flag clears before it.
-				markSchedulesSeen(ctx, runtime.Paths, row.ID, stderr)
-				err = restoreNative(ctx, runtime, seat, choice, false, stdout, stderr)
-				if err != nil {
+			// On a terminal an in-place revive and a tmux attach exec and never
+			// return, so the unseen flag clears before the revive.
+			markSchedulesSeen(ctx, runtime.Paths, &row, stderr)
+			result, err := reviveNative(ctx, runtime, seat, false, stdout, stderr)
+			launchnotice.Print(stderr, "pfm chat open", result.Warnings)
+			if err != nil {
+				if !errors.Is(err, errOpenReported) {
 					fmt.Fprintf(stderr, "pfm chat open: %v\n", err)
-					return true, 1
 				}
-				return true, 0
-			default:
-				row, err = nativeResumeRow(ctx, seat, runtime, stderr)
-				if err != nil {
-					fmt.Fprintf(stderr, "pfm chat open: %v\n", err)
-					return true, 1
-				}
-				row.Backend = ""
-				row.Kind = compose.ResumeKindFor(row.Kind)
-				row.Socket = ""
-				row.PaneID = ""
-				row.SeatID = ""
-				code = OpenRow(
-					ctx,
-					row,
-					runtime.Config.PrimaryAccountFor(pfmengine.ID(seat.Engine), row.Account),
-					row.C1H,
-					"",
-					stdout,
-					stderr,
-					&runtime,
-				)
-				if code == 0 {
-					if cleanupErr := retireNative(ctx, runtime.Paths, seat); cleanupErr != nil {
-						fmt.Fprintf(stderr, "pfm chat open: %v\n", cleanupErr)
-						code = 1
-					}
-				}
-				return true, code
+				return true, 1
 			}
+			if result.Detail != "" {
+				fmt.Fprintf(stderr, "pfm chat open: %s\n", result.Detail)
+			}
+			return true, 0
 		}
 		if err == nil {
 			// A terminal attach may last the whole interactive session; do not hold the
@@ -400,7 +356,7 @@ func openNativeRow(
 				here, closeHere, err = moveLiveNativeHere(ctx, runtime, seat)
 			}
 			if err == nil && here {
-				markSchedulesSeen(ctx, runtime.Paths, row.ID, stderr)
+				markSchedulesSeen(ctx, runtime.Paths, &row, stderr)
 				if closeHere != nil {
 					// Last: closing this pane ends this process.
 					if err := closeHere(); err != nil {
@@ -419,7 +375,7 @@ func openNativeRow(
 		fmt.Fprintf(stderr, "pfm chat open: %v\n", err)
 		return true, 1
 	}
-	markSchedulesSeen(ctx, runtime.Paths, row.ID, stderr)
+	markSchedulesSeen(ctx, runtime.Paths, &row, stderr)
 	return true, 0
 }
 
@@ -452,120 +408,99 @@ func detachedNativeLocked(
 			Name:   seat.Name,
 			Socket: seat.HerdrSocket,
 			State:  liveState,
-			Detail: strings.TrimSpace(nativeLocation(seat)),
+			Detail: spawn.HerdrLocation(seat),
 		}, nil
 	}
-	choice, err := BirthBackend(ctx, "open.herdr", spawn.BackendAuto)
+	return reviveNative(ctx, runtime, seat, true, io.Discard, stderr)
+}
+
+// errOpenReported is a failed open whose cause the open door already printed:
+// its caller exits non-zero without a second line.
+var errOpenReported = errors.New("the open failed; its cause is reported above")
+
+// reviveNative is the one revive of a dead native seat, locked and proved
+// dead: one placement (placeChat, the seat's recorded Herdr host deciding for
+// a door with no caller) puts it in the caller's own Herdr pane (an
+// interactive open placed in place), a new tab on its Herdr host, or its
+// engine's own tmux server through the one open door; the replaced seat
+// retires through spawn.RetireHerdrSeat, its old pane closed when Herdr proves
+// it is that seat's terminal.
+func reviveNative(
+	ctx context.Context,
+	runtime config.Runtime,
+	seat fleetdb.Seat,
+	detached bool,
+	stdout, stderr io.Writer,
+) (action.OpenResult, error) {
+	choice, err := placeChat(ctx, "open.herdr", runtime.Config.Chat.Backend, seat.HerdrSocket, true, &runtime)
 	if err != nil {
-		return result, err
+		return action.OpenResult{}, err
 	}
-	db := fleetdb.OpenSharedState(ctx, runtime.Paths)
-	defer func() { returnErr = errors.Join(returnErr, db.Close()) }()
-	run, err := db.ReadSeatRun(seat.SeatID)
-	if err != nil {
-		return result, err
-	}
-	run, err = resumeNativeRun(run, seat, runtime.Config, stderr)
-	if err != nil {
-		return result, err
+	ctx = WithPlacement(ctx, choice)
+	if choice.Backend == spawn.BackendHerdr && choice.InPlace && !detached {
+		// The chat resumes in the caller's own pane: the seat is rebound to
+		// this pane, whose process then execs the seat host.
+		return action.OpenResult{}, restoreNative(ctx, runtime, seat, choice, false, stdout, stderr)
 	}
 	if choice.Backend == spawn.BackendHerdr {
-		if err := herdr.CheckProtocol(ctx, choice.HerdrSocket); err != nil {
-			return result, err
-		}
-		next := seat
-		next.SeatID = ""
-		next.HerdrTerminalID = ""
-		next.SeatHostPID = 0
-		next.SeatHostStart = 0
-		next.SeatHostBirth = 0
-		next.EndPending = false
-		next.State = liveState
-		born, err := spawn.SpawnHerdr(
-			ctx,
-			spawn.HerdrRequest{
-				Choice: choice,
-				Seat:   next,
-				Run:    run,
-				Paths:  runtime.Paths,
-			},
-		)
-		if err != nil {
-			return result, err
-		}
-		// The old seat's reload schedule files are keyed by its id, which the
-		// new seat does not reuse: they go before its row, or nothing removes them.
-		if err := herdr.RemoveReloadFiles(runtime.Paths.SIDDir, seat.SeatID); err != nil {
-			return result, fmt.Errorf(
-				"new native pane %s exists; remove old seat reload files: %w",
-				born.Seat.HerdrPane,
-				err,
-			)
-		}
-		if err := db.DeleteSeat(ctx, seat.SeatID); err != nil {
-			return result, fmt.Errorf("new native pane %s exists; remove old seat: %w", born.Seat.HerdrPane, err)
-		}
-		if err := db.DeleteSeatRun(seat.SeatID); err != nil {
-			return result, fmt.Errorf("new native pane %s exists; remove old recipe: %w", born.Seat.HerdrPane, err)
-		}
-		return action.OpenResult{
-			Name:     born.Seat.Name,
-			Socket:   born.Seat.HerdrSocket,
-			State:    "opened",
-			Detail:   nativeLocation(born.Seat),
-			Warnings: born.Warnings,
-		}, nil
+		return reviveNativeTab(ctx, runtime, seat, choice, stderr)
 	}
 	row, err := nativeResumeRow(ctx, seat, runtime, stderr)
 	if err != nil {
-		return result, err
+		return action.OpenResult{}, err
 	}
-	row.Backend = ""
-	row.Kind = compose.ResumeKindFor(row.Kind)
-	row.Socket = ""
-	row.PaneID = ""
-	row.SeatID = ""
-	result, err = openDetachedResolvedRow(ctx, row, stderr, runtime)
+	if !detached {
+		primary := runtime.Config.PrimaryAccountFor(pfmengine.ID(seat.Engine), row.Account)
+		if code := openRowReplacing(ctx, row, primary, row.C1H, "", stdout, stderr, runtime, &seat); code != 0 {
+			return action.OpenResult{}, fmt.Errorf("revive chat %s in tmux: %w", seat.SessionID, errOpenReported)
+		}
+		return action.OpenResult{}, nil
+	}
+	result, err := openDetachedResolvedRow(ctx, row, stderr, runtime)
 	if err != nil {
 		return result, err
 	}
-	if err := retireNative(ctx, runtime.Paths, seat); err != nil {
-		return result, err
+	warning, err := spawn.RetireHerdrSeat(ctx, runtime.Paths, seat)
+	if warning != "" {
+		result.Warnings = append(result.Warnings, warning)
 	}
-	return result, nil
+	return result, err
 }
 
-func nativeResumeRow(
+// reviveNativeTab births a dead native seat's chat as a new tab on the
+// placement's Herdr host, from its own recipe resumed at its newest segment.
+func reviveNativeTab(
 	ctx context.Context,
-	seat fleetdb.Seat,
 	runtime config.Runtime,
+	seat fleetdb.Seat,
+	choice spawn.BackendChoice,
 	stderr io.Writer,
-) (row compose.Row, returnErr error) {
-	row = nativeRow(seat)
-	rows, err := Rows(ctx, stderr, &runtime)
-	if err != nil {
-		return row, err
+) (result action.OpenResult, returnErr error) {
+	db := fleetdb.OpenSharedState(ctx, runtime.Paths)
+	run, readErr := db.ReadSeatRun(seat.SeatID)
+	if err := errors.Join(readErr, db.Close()); err != nil {
+		return result, err
 	}
-	for index := range rows {
-		candidate := &rows[index]
-		if candidate.ID == seat.SessionID {
-			row = *candidate
-			break
-		}
+	next := seat
+	var err error
+	// The resume, and a seat born from it, carry the chat's newest segment.
+	if next.SessionID, err = resumedSession(ctx, runtime, seat, nil, stderr); err != nil {
+		return result, err
 	}
-	if row.CWD == "" {
-		db := fleetdb.OpenSharedState(ctx, runtime.Paths)
-		defer func() { returnErr = errors.Join(returnErr, db.Close()) }()
-		run, err := db.ReadSeatRun(seat.SeatID)
-		if err != nil {
-			return row, err
-		}
-		row.CWD = run.CWD
+	if run, err = resumeNativeRun(run, next, runtime.Config, stderr); err != nil {
+		return result, err
 	}
-	if row.Account == 0 {
-		row.Account = runtime.Config.PrimaryAccountFor(pfmengine.ID(seat.Engine), runtime.Config.ImplicitAccount())
-	}
-	return row, nil
+	next.SeatID, next.HerdrTerminalID = "", ""
+	next.SeatHostPID, next.SeatHostStart, next.SeatHostBirth = 0, 0, 0
+	next.EndPending = false
+	next.State = liveState
+	born, err := spawn.SpawnHerdr(ctx, spawn.HerdrRequest{
+		Choice: choice, Seat: next, Run: run, Paths: runtime.Paths, Replaces: &seat,
+	})
+	return action.OpenResult{
+		Name: born.Seat.Name, Socket: born.Seat.HerdrSocket, State: "opened",
+		Detail: spawn.HerdrLocation(born.Seat), Warnings: born.Warnings,
+	}, err
 }
 
 func nativeRow(seat fleetdb.Seat) compose.Row {
@@ -581,28 +516,11 @@ func nativeRow(seat fleetdb.Seat) compose.Row {
 		SeatID:         seat.SeatID,
 		ID:             seat.SessionID,
 		Name:           seat.Name,
-		Kind:           kind,
+		Kind:           compose.SeatKindFor(kind, seat.State),
 		Socket:         seat.HerdrSocket,
 		PaneID:         seat.HerdrPane,
 		HerdrWorkspace: seat.HerdrWorkspace,
 	}
-}
-
-// retireNative removes only the obsolete reservation after replacement
-// succeeded: its reload schedule files first, then its row and recipe.
-func retireNative(ctx context.Context, values paths.Values, seat fleetdb.Seat) (returnErr error) {
-	if err := herdr.RemoveReloadFiles(values.SIDDir, seat.SeatID); err != nil {
-		return fmt.Errorf("retire replaced native seat %s reload files: %w", seat.SeatID, err)
-	}
-	db := fleetdb.OpenSharedState(ctx, values)
-	defer func() { returnErr = errors.Join(returnErr, db.Close()) }()
-	if err := db.DeleteSeat(ctx, seat.SeatID); err != nil {
-		return fmt.Errorf("retire replaced native seat %s: %w", seat.SeatID, err)
-	}
-	if err := db.DeleteSeatRun(seat.SeatID); err != nil {
-		return fmt.Errorf("retire replaced native recipe %s: %w", seat.SeatID, err)
-	}
-	return nil
 }
 
 // herdrViewRetirer is retireHerdrViews' reach: the chat session's Herdr

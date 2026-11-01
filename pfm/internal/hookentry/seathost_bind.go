@@ -2,7 +2,6 @@ package hookentry
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -12,6 +11,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
 // bindNativeHost validates the caller's canonical producer identity and kernel
@@ -51,7 +51,13 @@ func bindNativeHost(
 			cold = true
 		}
 	}
-	socket, pane := (paths.OSEnv{}).Get(herdr.EnvSocket), (paths.OSEnv{}).Get(herdr.EnvPane)
+	identity := resolve.CallerEnvironment()
+	// A pane herdr-keep holds names its relay and birth pane; the seat records Herdr's own.
+	keep := gather.HerdrKeep(proc)
+	socket, pane, err := keep.Upstream(ctx, identity.HerdrSocket, identity.HerdrPane)
+	if err != nil {
+		return seat, fmt.Errorf("resolve caller socket: %w", err)
+	}
 	if socket != seat.HerdrSocket && !cold {
 		return seat, errors.New("caller socket differs from durable owner")
 	}
@@ -63,7 +69,7 @@ func bindNativeHost(
 	if err != nil {
 		return seat, err
 	}
-	info, found, err := herdr.LocatePane(ctx, socket, asked, chain)
+	info, found, err := herdr.LocatePane(ctx, keep, socket, asked, chain)
 	if err == nil && !found {
 		err = fmt.Errorf("no pane of %s holds the supervisor", socket)
 	}
@@ -93,27 +99,17 @@ func bindNativeHost(
 		args[2] != seat.SeatID {
 		return seat, errors.New("supervisor must exec exact seat-host role")
 	}
-	body, err := herdr.SeatRequest(ctx, socket, "pane.process_info", map[string]string{"pane_id": info.ID})
+	process, err := keep.Read(ctx, socket, info.ID)
 	if err != nil {
 		return seat, fmt.Errorf("read caller shell: %w", err)
 	}
-	var process struct {
-		Type string `json:"type"`
-		Info struct {
-			Pane  string `json:"pane_id"`
-			Shell int    `json:"shell_pid"`
-		} `json:"process_info"`
-	}
-	if err := json.Unmarshal(body, &process); err != nil {
-		return seat, fmt.Errorf("decode caller shell: %w", err)
-	}
-	if process.Type != "pane_process_info" || process.Info.Pane != info.ID || process.Info.Shell <= 1 {
+	if process.Pane != info.ID || process.Shell <= 1 {
 		return seat, errors.New("caller shell identity unavailable")
 	}
 	member := false
 	seen := map[int]bool{}
 	for pid := os.Getpid(); pid > 0 && !seen[pid]; {
-		if pid == process.Info.Shell {
+		if pid == process.Shell {
 			member = true
 			break
 		}

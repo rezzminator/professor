@@ -58,7 +58,7 @@ For `/pfm:workbench new docs/scribe` in `/work/acme`:
 
 ## check
 
-Run `pfm doctor` from the managed root or bench. Read each line, including discovery failures; `none — not inside a Professor project` means the cwd has no managed root; `none under {root}` means discovery found no workbench there. The output patterns below come from `pfm/internal/doctor/workbench_checks.go` in `{BLUEPRINT_CLONE_PATH}`; `{dir}`, `{root}`, `{engine}`, `{engines}`, `{prompt}`, `{fault}`, `{problem}`, `{problems}` and `{err}` stand for printed values; `{problems}` joins rebuildable problems with `; `.
+Run `pfm doctor` from the managed root or bench. Read each line, including discovery failures; `none — not inside a Professor project` means the cwd has no managed root; `none under {root}` means discovery found no workbench there. The output patterns below come from `pfm/internal/doctor/workbench_checks.go` in the Professor clone `{clone}`, `readlink -f ~/.claude/commands/pfm/workbench.md` minus `/templates/global/commands/pfm/workbench.md`; `{dir}`, `{root}`, `{engine}`, `{engines}`, `{prompt}`, `{fault}`, `{problem}`, `{problems}` and `{err}` stand for printed values; `{problems}` joins rebuildable problems with `; `.
 
 | doctor line | count | action |
 | --- | --- | --- |

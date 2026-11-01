@@ -246,8 +246,9 @@ func Evaluate(ctx context.Context, options Options) (string, error) {
 	if confirmedAt.IsZero() || now.Sub(confirmedAt) > StaleHorizon {
 		return "", nil
 	}
-	five := currentUtilization(cached.FiveHour, now, 0)
-	seven := currentUtilization(cached.SevenDay, now, 0)
+	// A window the answer left out is off the plan: -1 keeps it out of every
+	// phrase below, where a 0 would invent a reading.
+	five, seven := planUtilization(cached.FiveHour, now), planUtilization(cached.SevenDay, now)
 	opus := currentUtilization(cached.SevenOpus, now, -1)
 	fable := -1
 	for _, named := range cached.NamedWindowsAt(now) {
@@ -267,11 +268,23 @@ func Evaluate(ctx context.Context, options Options) (string, error) {
 			if err := os.Remove(flagPath); err != nil {
 				return "", err
 			}
+			back := make([]string, 0, 2)
+			if five >= 0 {
+				back = append(back, recoveredWindowPhrase("5h", cached.FiveHour, five, now))
+			}
+			if seven >= 0 {
+				back = append(back, recoveredWindowPhrase("7d", cached.SevenDay, seven, now))
+			}
+			// An answer carrying neither main window (the plan dropped them,
+			// an account on credits) still lifts the warning, in words.
+			state := "reports no limit window on its plan"
+			if len(back) > 0 {
+				state = "is back to " + strings.Join(back, " · ")
+			}
 			return fmt.Sprintf(
-				"✅ usage recovered — account %d is back to %s · %s. Any earlier limit warning in this conversation is STALE — ignore it and work normally.\n",
+				"✅ usage recovered — account %d %s. Any earlier limit warning in this conversation is STALE — ignore it and work normally.\n",
 				account,
-				recoveredWindowPhrase("5h", cached.FiveHour, five, now),
-				recoveredWindowPhrase("7d", cached.SevenDay, seven, now),
+				state,
 			), nil
 		}
 		return "", nil
@@ -279,14 +292,20 @@ func Evaluate(ctx context.Context, options Options) (string, error) {
 	if err := atomicfile.Write(flagPath, []byte(options.ConfigDir), 0o600); err != nil {
 		return "", err
 	}
-	line := windowPhrase("5h", cached.FiveHour, five, now, "15:04") +
-		" · " + windowPhrase("7d", cached.SevenDay, seven, now, "Mon 15:04")
+	parts := make([]string, 0, 4)
+	if five >= 0 {
+		parts = append(parts, windowPhrase("5h", cached.FiveHour, five, now, "15:04"))
+	}
+	if seven >= 0 {
+		parts = append(parts, windowPhrase("7d", cached.SevenDay, seven, now, "Mon 15:04"))
+	}
 	if opus >= 0 {
-		line += fmt.Sprintf(" · 7d-opus %d%%", opus)
+		parts = append(parts, fmt.Sprintf("7d-opus %d%%", opus))
 	}
 	if fable >= 0 {
-		line += fmt.Sprintf(" · 7d-fable %d%%", fable)
+		parts = append(parts, fmt.Sprintf("7d-fable %d%%", fable))
 	}
+	line := strings.Join(parts, " · ")
 	if maximum >= options.Critical {
 		return fmt.Sprintf(
 			"🔴 USAGE LIMIT IMMINENT — account %d: %s. %s\n",
@@ -300,47 +319,6 @@ func Evaluate(ctx context.Context, options Options) (string, error) {
 		account,
 		line,
 	), nil
-}
-
-// criticalGuidance names the window that actually crossed the critical threshold, and tells
-// the reader only what is true of THAT window.
-//
-// The severity is max() across every window, which is right — any one of them hitting its cap
-// stops work. The old copy was not: it asserted "This window is nearly exhausted: finish the
-// in-flight step, then /reload" no matter which window tripped. A model-scoped 7-day cap
-// (opus, fable) at 95% therefore printed a session-wide stop order while the live 5-hour
-// window sat at 1% used — an alarm that is false about the thing it is read as describing, on
-// every single prompt. Read literally, it truncates work that had ~99% of its budget left; read
-// often enough, it trains the reader to ignore the banner that will one day be true.
-//
-// So: say which window, and say what is spendable. A model-scoped cap names the model and the
-// still-open 5-hour headroom; the 5-hour window keeps the original stop-and-reload advice.
-func criticalGuidance(five, seven, opus, fable, critical int) string {
-	if five >= critical {
-		return "The 5-hour window is nearly exhausted: finish the in-flight step, then /reload to another account (or pause until the reset)."
-	}
-	if seven >= critical {
-		return fmt.Sprintf(
-			"The 7-day account cap is nearly reached (the 5-hour window is only %d%% used, but the weekly cap binds first): /reload to another account.",
-			five,
-		)
-	}
-	scoped := make([]string, 0, 2)
-	if opus >= critical {
-		scoped = append(scoped, "opus")
-	}
-	if fable >= critical {
-		scoped = append(scoped, "fable")
-	}
-	if len(scoped) > 0 {
-		return fmt.Sprintf(
-			"Only the 7-day %s cap is nearly reached — the 5-hour window is %d%% used and every other model on this account is unaffected. Keep working; route %s-tier spawns elsewhere or /reload for those.",
-			strings.Join(scoped, " and "),
-			five,
-			strings.Join(scoped, "/"),
-		)
-	}
-	return "One window is nearly exhausted: finish the in-flight step, then /reload to another account (or pause until the reset)."
 }
 
 func normalize(options Options) Options {
@@ -692,14 +670,16 @@ func EnsurePrivateDir(path string) error {
 	return os.Chmod(path, 0o700)
 }
 
-func logUnknownUsageKeys(body []byte, logger io.Writer) {
+// logUnknownUsageKeys logs the top-level keys the response carried beside the
+// usage ones, and reports whether it carried any usage key at all.
+func logUnknownUsageKeys(body []byte, logger io.Writer) bool {
 	if logger == nil {
-		return
+		logger = io.Discard
 	}
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(body, &fields); err != nil {
 		fmt.Fprintf(logger, "pfm usage-hook: debug: enumerate ignored usage keys: %v\n", err)
-		return
+		return false
 	}
 	known := map[string]bool{
 		fiveHourKey: true, sevenDayKey: true, sevenDayOpusKey: true, "limits": true,
@@ -710,11 +690,11 @@ func logUnknownUsageKeys(body []byte, logger io.Writer) {
 			unknown = append(unknown, key)
 		}
 	}
-	if len(unknown) == 0 {
-		return
+	if len(unknown) != 0 {
+		sort.Strings(unknown)
+		fmt.Fprintf(logger, "pfm usage-hook: debug: ignored usage keys: %s\n", strings.Join(unknown, ","))
 	}
-	sort.Strings(unknown)
-	fmt.Fprintf(logger, "pfm usage-hook: debug: ignored usage keys: %s\n", strings.Join(unknown, ","))
+	return len(unknown) < len(fields)
 }
 
 func utilization(window usageWindow, fallback int) int {

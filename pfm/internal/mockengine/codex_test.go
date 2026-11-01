@@ -3,11 +3,15 @@ package mockengine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -742,21 +746,30 @@ func TestMCPBoundedContextAppliesTheConfiguredTimeout(t *testing.T) {
 
 func rolloutHandles(t *testing.T, path string) int {
 	t.Helper()
-	const fdRoot = "/proc/self/fd"
+	const fdRoot = "/dev/fd" // Linux and macOS both list this process's descriptors here
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat rollout %s: %v", path, err)
+	}
+	rollout := info.Sys().(*syscall.Stat_t)
 	entries, err := os.ReadDir(fdRoot)
 	if err != nil {
 		t.Fatalf("enumerate rollout handles: %v", err)
 	}
 	count := 0
 	for _, entry := range entries {
-		target, err := os.Readlink(filepath.Join(fdRoot, entry.Name()))
-		if os.IsNotExist(err) {
-			continue // ReadDir's own descriptor has already closed.
-		}
+		fd, err := strconv.Atoi(entry.Name())
 		if err != nil {
-			t.Fatalf("read descriptor %s: %v", entry.Name(), err)
+			t.Fatalf("descriptor name %q in %s: %v", entry.Name(), fdRoot, err)
 		}
-		if target == path {
+		// Fstat, never stat of /dev/fd/N: macOS's fdesc answers that stat with its own node.
+		var st syscall.Stat_t
+		if err := syscall.Fstat(fd, &st); errors.Is(err, syscall.EBADF) {
+			continue // ReadDir's own descriptor has already closed.
+		} else if err != nil {
+			t.Fatalf("fstat descriptor %d: %v", fd, err)
+		}
+		if st.Dev == rollout.Dev && st.Ino == rollout.Ino {
 			count++
 		}
 	}
@@ -769,11 +782,35 @@ func TestCodexRolloutHandleLivesForTheSession(t *testing.T) {
 		ctx: context.Background(), engine: engineCodex, env: fix.env(nil), cwd: fix.work,
 		pid: os.Getpid(), stderr: io.Discard, script: newScript(Scenario{}, engineCodex),
 	}
-	for _, resumed := range []bool{false, true} {
-		t.Run(fmt.Sprintf("resumed=%t", resumed), func(t *testing.T) {
+	var first string
+	for _, testCase := range []struct {
+		name              string
+		resumed, compress bool
+	}{{"fresh", false, false}, {"resumed", true, false}, {"resumed from a compressed rollout", true, true}} {
+		resumed := testCase.resumed
+		t.Run(testCase.name, func(t *testing.T) {
+			if testCase.compress {
+				if _, err := codexmeta.CompressRollout(first); err != nil {
+					t.Fatal(err)
+				}
+			}
 			session := &codexSession{proc: proc, codexHome: fix.codexHome, threadID: fixtureThread, model: "fixture"}
 			if err := session.start(resumed); err != nil {
 				t.Fatal(err)
+			}
+			if first == "" {
+				first = session.rollout
+			}
+			if session.rollout != first {
+				t.Fatalf("rollout = %s, want the thread's first rollout %s", session.rollout, first)
+			}
+			if testCase.compress {
+				if content := readFile(t, first); strings.Count(content, `"type":"session_meta"`) != 1 {
+					t.Fatalf("resume of a compressed rollout did not decompress it in place: %s", content)
+				}
+				if _, err := os.Stat(first + ".zst"); !errors.Is(err, fs.ErrNotExist) {
+					t.Fatalf("compressed rollout %s.zst after resume: %v, want it removed", first, err)
+				}
 			}
 			t.Cleanup(func() {
 				if err := session.finish("other"); err != nil {

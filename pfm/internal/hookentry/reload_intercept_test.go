@@ -24,8 +24,10 @@ func TestRunReloadIntercept(t *testing.T) {
 		{name: "near miss slash command is not a match", prompt: "/reloaded", wantNoStderr: true},
 		{name: "bare reload calls front with no args", prompt: "/reload", frontOutput: "reload scheduled\n", frontWanted: true, wantArgs: []string{}, wantNoStderr: true},
 		{name: "quoted then payload splits into one word", prompt: `/reload --account 2 --then "go on, friend"`, frontOutput: "reload scheduled\n", frontWanted: true, wantArgs: []string{"--account", "2", "--then", "go on, friend"}, wantNoStderr: true},
+		{name: "backslash inside double quotes stays as the shell keeps it", prompt: `/reload --then "C:\dir \"x\" a\\b"`, frontOutput: "reload scheduled\n", frontWanted: true, wantArgs: []string{"--then", `C:\dir "x" a\b`}, wantNoStderr: true},
 		{name: "front failure stays loud", prompt: "/reload --account 2", frontOutput: "pfm chat reload: bad account\n", frontCode: 1, frontWanted: true, wantArgs: []string{"--account", "2"}, wantExit: 2, wantStderr: "reload: pfm chat reload: bad account\n"},
 		{name: "unterminated quote is reported", prompt: `/reload --then "go on`, wantExit: 2},
+		{name: "unquoted operator is reported at its column in the prompt", prompt: "/reload --then go; on", wantExit: 2, wantStderr: "reload: split shell words: 1:18: `;` is not a valid word\n"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var calls [][]string

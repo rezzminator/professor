@@ -301,32 +301,17 @@ func runChatCapture(args []string, stdout, stderr io.Writer, runtimes ...command
 		fmt.Fprintf(stderr, "pfm chat capture: %q is not running\n", chat.Name)
 		return codeDeadChat
 	}
-	transport, err := pfmcall.New(pfmcall.Dependencies{})
+	door, seat, err := chatSeat(chat)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat capture: %v\n", err)
 		return 1
 	}
-	socketPath := chat.Socket
-	if chat.Backend != pfmcall.HerdrBackend {
-		socketPath, err = chatSocketPath(chat.Socket)
-		if err != nil {
-			fmt.Fprintf(stderr, "pfm chat capture: %v\n", err)
-			return 1
-		}
-	}
-	capture, err := transport.CaptureTarget(
-		context.Background(),
-		pfmcall.Target{Backend: chat.Backend, SocketPath: socketPath, Pane: pfmchat.PaneTarget(chat)},
-		pfmcall.FullScrollback,
-	)
+	capture, err := pfmchat.CaptureSeat(context.Background(), door, seat, pfmcall.FullScrollback)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat capture: %v\n", err)
 		return codeDeadChat
 	}
 	fmt.Fprint(stdout, capture)
-	if !strings.HasSuffix(capture, "\n") {
-		fmt.Fprintln(stdout)
-	}
 	return 0
 }
 

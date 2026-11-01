@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"uuid"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
@@ -230,7 +231,7 @@ func newOpenCodeSession(proc *process, call openCodeInvocation) *openCodeSession
 		session.id = proc.script.SessionID
 	}
 	if session.id == "" {
-		session.id = "ses_" + strings.ReplaceAll(newUUID(), "-", "")[:24]
+		session.id = "ses_" + strings.ReplaceAll(uuid.NewV4().String(), "-", "")[:24]
 	}
 	if call.model != "" {
 		if provider, model, found := strings.Cut(call.model, "/"); found {
@@ -270,7 +271,7 @@ func (session *openCodeSession) start(bool) (returnErr error) {
 		return fmt.Errorf("create opencode schema: %w", err)
 	}
 	now := time.Now().UnixMilli()
-	projectID := "prj_" + strings.ReplaceAll(newUUID(), "-", "")[:20]
+	projectID := "prj_" + strings.ReplaceAll(uuid.NewV4().String(), "-", "")[:20]
 	var existingProject string
 	err = database.QueryRowContext(ctx, "SELECT id FROM project WHERE worktree = ?", proc.cwd).Scan(&existingProject)
 	switch {
@@ -339,7 +340,7 @@ func (session *openCodeSession) recordUser(text string) error {
 	if err != nil {
 		return fmt.Errorf("encode user message: %w", err)
 	}
-	userID := "msg_" + strings.ReplaceAll(newUUID(), "-", "")[:20]
+	userID := "msg_" + strings.ReplaceAll(uuid.NewV4().String(), "-", "")[:20]
 	if err := insertOpenCodeMessage(ctx, database, userID, session.id, now, userData); err != nil {
 		return err
 	}
@@ -350,7 +351,7 @@ func (session *openCodeSession) recordUser(text string) error {
 	if _, err := database.ExecContext(
 		ctx,
 		"INSERT INTO part (id, message_id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?, ?)",
-		"prt_"+strings.ReplaceAll(newUUID(), "-", "")[:20],
+		"prt_"+strings.ReplaceAll(uuid.NewV4().String(), "-", "")[:20],
 		userID,
 		session.id,
 		now,
@@ -381,7 +382,7 @@ func (session *openCodeSession) recordAssistant(_ string, usage Tokens) error {
 	if err := insertOpenCodeMessage(
 		ctx,
 		database,
-		"msg_"+strings.ReplaceAll(newUUID(), "-", "")[:20],
+		"msg_"+strings.ReplaceAll(uuid.NewV4().String(), "-", "")[:20],
 		session.id,
 		now,
 		assistantData,

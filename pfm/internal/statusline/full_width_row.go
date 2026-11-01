@@ -15,21 +15,23 @@ type quotaRow struct {
 	label   string
 }
 
-// quotaRowPercent stretches every quota row to 115% of its widest sibling, so
-// the bars have room beyond the longest line above them.
-const quotaRowPercent = 115
+// quotaRowPercent sizes every quota row at 86% of its widest sibling (115% x
+// 0.75, rounded down).
+const quotaRowPercent = 86
 
-// rowColumns is the width a full-width quota row spans: 115% (rounded up) of
-// the widest of the labels and sibling lines, bounded by hook COLUMNS minus the
+// rowColumns is the width a full-width quota row spans: 86% (rounded down) of
+// the widest sibling line, never below minColumns (the compact Claude line) or
+// the widest label, so every label stays whole; bounded by hook COLUMNS minus the
 // 2×2 footer padding. ok=false when the terminal leaves no content column at all.
-func rowColumns(runtime Runtime, labelWidths []int, siblingLines ...string) (columns int, ok bool) {
+func rowColumns(runtime Runtime, minColumns int, labelWidths []int, siblingLines ...string) (columns int, ok bool) {
+	widest := 0
+	for _, line := range siblingLines {
+		widest = max(widest, ansi.StringWidth(line))
+	}
+	columns = max(widest*quotaRowPercent/100, minColumns)
 	for _, width := range labelWidths {
 		columns = max(columns, width)
 	}
-	for _, line := range siblingLines {
-		columns = max(columns, ansi.StringWidth(line))
-	}
-	columns = (columns*quotaRowPercent + 99) / 100
 	if runtime.Columns > 0 {
 		contentColumns := runtime.Columns - 2*2 // Claude's outer footer padding, left and right.
 		if contentColumns <= 0 {
@@ -62,9 +64,54 @@ func compactRow(row quotaRow) string {
 	return barRow(row, ansi.StringWidth(row.label)+1+5)
 }
 
-// halfRows draws left | right across exactly columns cells, each half half the
-// row, the separator between them; a row narrower than the separator is cut to fit.
-func halfRows(left, right quotaRow, columns int) string {
-	halves := max(columns-ansi.StringWidth(sep), 0)
-	return ansi.Truncate(barRow(left, halves/2)+sep+barRow(right, halves-halves/2), columns, "")
+// splitQuotaRow draws the present Claude readings (5h, 7d-fable, 7d; a zero label is
+// absent) side by side across exactly columns cells, the separator between them.
+// With a 7d reading, 5h and fable take 25% of the cells the separators leave and 7d
+// the remainder; without one the readings split equally. A 5h or fable segment never
+// draws below its compact width: the cells it lacks come out of 7d, else out of the
+// other segment's cells above its own floor. A row the floors overflow is cut to fit.
+func splitQuotaRow(five, fable, week quotaRow, columns int) string {
+	var rows []quotaRow
+	for _, row := range []quotaRow{five, fable, week} {
+		if row.label != "" {
+			rows = append(rows, row)
+		}
+	}
+	if len(rows) == 0 {
+		return ""
+	}
+	total := max(columns-(len(rows)-1)*ansi.StringWidth(sep), 0)
+	last := len(rows) - 1
+	widths, floors := make([]int, len(rows)), make([]int, len(rows))
+	cells := total
+	for i, row := range rows {
+		if i < last || week.label == "" {
+			floors[i] = ansi.StringWidth(compactRow(row))
+		}
+		if i == last {
+			widths[i] = cells
+			break
+		}
+		widths[i] = total / len(rows)
+		if week.label != "" {
+			widths[i] = total / 4
+		}
+		cells -= widths[i]
+	}
+	for i := range rows {
+		need := floors[i] - widths[i]
+		for j := last; j >= 0 && need > 0; j-- { // 7d, when present, is last and gives first
+			if j == i {
+				continue
+			}
+			give := min(need, max(widths[j]-floors[j], 0))
+			widths[j], widths[i], need = widths[j]-give, widths[i]+give, need-give
+		}
+		widths[i] += max(need, 0)
+	}
+	drawn := make([]string, len(rows))
+	for i, row := range rows {
+		drawn[i] = barRow(row, widths[i])
+	}
+	return ansi.Truncate(strings.Join(drawn, sep), columns, "")
 }

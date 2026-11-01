@@ -9,7 +9,7 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/rezzminator/professor/pfm/internal/action"
+	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 )
@@ -54,7 +54,9 @@ func reloadInterceptBody(
 		return 0
 	}
 	trimmed := strings.TrimSpace(payload.Prompt)
-	words, err := action.SplitShellWords(strings.TrimPrefix(trimmed, "/reload"))
+	// Blanking the command word keeps the parser's line:column on the prompt
+	// the user typed.
+	words, err := cmdparse.SplitShellWords(strings.Repeat(" ", len("/reload")) + strings.TrimPrefix(trimmed, "/reload"))
 	if err != nil {
 		recordReloadRefusal(trimmed, err.Error())
 		fmt.Fprintf(stderr, "reload: %v\n", err)

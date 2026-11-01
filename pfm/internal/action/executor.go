@@ -17,11 +17,9 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
-	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/launchnotice"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
-	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
@@ -54,15 +52,14 @@ func New(dependencies Dependencies) (*Executor, error) {
 	if stderr == nil {
 		stderr = os.Stderr
 	}
-	if dependencies.Identify == nil {
-		identifier, err := resolve.NewWhoami(resolve.WhoamiDependencies{})
-		if err != nil {
-			return nil, fmt.Errorf("resolve picker caller: %w", err)
+	place := dependencies.Place
+	if place == nil {
+		place = func(context.Context, string, string) (spawn.BackendChoice, error) {
+			return spawn.BackendChoice{Backend: spawn.BackendTmux}, nil
 		}
-		dependencies.Identify = identifier.Identify
 	}
 	return &Executor{
-		identify:  dependencies.Identify,
+		place:     place,
 		tmux:      tmux,
 		processes: processes,
 		gate:      gate,
@@ -70,42 +67,63 @@ func New(dependencies Dependencies) (*Executor, error) {
 		stderr:    stderr,
 		sidDir:    resolved.SIDDir,
 		heal:      dependencies.Heal,
-		places:    dependencies.HerdrPlaces,
 	}, nil
 }
 
-// Open performs all preparatory effects and returns the sole eval line. A
-// self-switch returns an empty line by design.
+// Open is the one door that opens a chat row: it performs every preparatory
+// effect and asks the request's placement once for a birth. Interactive, it
+// returns the sole eval line in result.Line (a self-switch returns an empty
+// line by design). Detached (request.Detached: the MCP daemon, a schedule's
+// wake) it never dispatches a K1 eval line and never calls syscall.Exec: a
+// live chat already has a running session, so nothing is spawned and its own
+// socket is reported ("live"); a resumable chat is born where the placement
+// says (a new Herdr tab, never in place, or its own fresh tmux server) and
+// the socket it now lives on is reported ("opened").
 func (executor *Executor) Open(
 	ctx context.Context,
 	request Request,
-) (line string, err error) {
+) (result OpenResult, err error) {
 	trail := obs.NewTrail(ctx, "action", "requested")
 	defer func() { trail.End(err) }()
+	if request.Detached {
+		defer func() {
+			if err != nil {
+				err = fmt.Errorf("open detached: %w", err)
+			}
+		}()
+	}
 	if executor == nil {
-		return "", errors.New("action executor is nil")
+		return result, errors.New("action executor is nil")
 	}
 	if request.Row.Kind.IsLiveSeat() {
-		if !executor.tmux.SocketAlive(ctx, request.Row.Socket) {
+		gone, probeErr := liveSocketGone(ctx, executor.tmux, request.Row.Socket)
+		if probeErr != nil {
+			return result, probeErr
+		}
+		if gone {
+			// A live row whose socket has disappeared resumes fresh rather
+			// than being reported live over a socket nothing answers on.
 			if request.Row.ID == "" {
-				return "", fmt.Errorf(
+				return result, fmt.Errorf(
 					"live socket %q died and its split row has no resumable id",
 					request.Row.Socket,
 				)
 			}
-			fmt.Fprintf(
-				executor.stderr,
-				"pfm: live socket %s disappeared; resuming %s in a fresh server\n",
-				request.Row.Socket,
-				request.Row.ID,
-			)
+			if !request.Detached {
+				fmt.Fprintf(
+					executor.stderr,
+					"pfm: live socket %s disappeared; resuming %s in a fresh server\n",
+					request.Row.Socket,
+					request.Row.ID,
+				)
+			}
 			request.Row.Kind = compose.ResumeKindFor(request.Row.Kind)
 			request.Row.Socket = ""
 			request.Row.SessionName = ""
 			request.Row.WindowName = ""
-		} else {
+		} else if !request.Detached {
 			if err := executor.prepareLive(ctx, request); err != nil {
-				return "", err
+				return result, err
 			}
 			if request.Row.Kind == compose.LiveCodex {
 				request.Row.WindowName = executor.verifiedCodexWindow(
@@ -122,32 +140,30 @@ func (executor *Executor) Open(
 				request.Config.Codex.Binary,
 				request.Config.OpenCode.Binary,
 			) {
-				return "", nil
+				return result, nil
 			}
 			plan, err := Synthesize(request)
 			if err != nil {
-				return "", err
+				return result, err
 			}
 			trail.Reach("opened", "pane attached")
-			return plan.Line, nil
+			return OpenResult{Line: plan.Line}, nil
 		}
 	}
 
 	// A workbench refusal comes before Solo closes any seat holding the chat.
 	if err := applyWorkbench(&request); err != nil {
-		return "", err
+		return result, err
 	}
 	if err := checkCodexLaunch(request); err != nil {
-		return "", err
+		return result, err
 	}
 	switch request.Row.Kind {
-	case compose.Agent:
-		if err := executor.Solo(ctx, request.Row.ID, "", true, request.Config.Claude.Binary); err != nil {
-			return "", err
-		}
-	case compose.ResumeClaude:
-		if err := executor.Solo(ctx, request.Row.ID, "", false, request.Config.Claude.Binary); err != nil {
-			return "", err
+	case compose.Agent, compose.ResumeClaude:
+		if err := executor.Solo(
+			ctx, request.Row.ID, "", request.Row.Kind == compose.Agent, request.Config.Claude.Binary,
+		); err != nil {
+			return result, err
 		}
 	case compose.ResumeCodex:
 		// A Codex thread whose history projection is wedged resumes amnesiac
@@ -163,114 +179,27 @@ func (executor *Executor) Open(
 	}
 	plan, err := Synthesize(request)
 	if err != nil {
-		return "", err
+		return result, err
 	}
-	if request.Row.Kind == compose.NewClaude || request.Row.Kind == compose.NewCodex ||
-		request.Row.Kind == compose.NewOpenCode || request.Row.Kind == compose.ResumeClaude ||
-		request.Row.Kind == compose.ResumeCodex || request.Row.Kind == compose.ResumeOpenCode {
-		caller, callerErr := executor.identify(ctx)
-		choice, chooseErr := spawn.Place(ctx, "picker", request.Config.Chat.Backend, caller, callerErr)
-		if chooseErr != nil {
-			return "", chooseErr
+	if plan.ChatServer == nil && request.Detached {
+		// Live and booting rows already have a running session: there is
+		// nothing to spawn, and the eval line Synthesize built is an attach
+		// instruction for a terminal this caller does not have.
+		trail.Reach("opened", "already live")
+		return OpenResult{Name: request.Row.Name, Socket: request.Row.Socket, State: "live"}, nil
+	}
+	if born(request.Row.Kind) {
+		choice, err := executor.place(ctx, "picker", request.Config.Chat.Backend)
+		if err != nil {
+			return result, err
 		}
 		if choice.Backend == spawn.BackendHerdr {
-			values, pathErr := pfmconfig.ResolvePaths()
-			if pathErr != nil {
-				return "", pathErr
-			}
-			if plan.SeatRun == nil {
-				return "", errors.New("native picker launch has no structured recipe or identity")
-			}
-			engineID := compose.EngineForKind(request.Row.Kind)
-			sessionID := request.Row.ID
-			if plan.Record != nil {
-				sessionID = plan.Record.SessionID
-			} else if sessionID == "" {
-				sessionID, err = newSessionID()
-				if err != nil {
-					return "", err
-				}
-			}
-			seat := fleetdb.Seat{
-				SessionID: sessionID,
-				Engine:    string(engineID),
-				Name:      request.LaunchName,
-			}
-			if !choice.InPlace {
-				choice.Places = executor.places
-				born, spawnErr := spawn.SpawnHerdr(
-					ctx,
-					spawn.HerdrRequest{Choice: choice, Paths: values, Run: *plan.SeatRun, Seat: seat},
-				)
-				if spawnErr != nil {
-					return "", spawnErr
-				}
-				executor.recordLaunch(ctx, plan.Record)
-				launchnotice.Print(executor.stderr, "pfm", slices.Concat(plan.Warnings, born.Warnings))
-				return "", nil
-			}
-			// The chat is born in the caller's own pane: the reservation names
-			// this pane and the shell execs the seat host in place, so the pane
-			// and its tab stay the user's (no new tab, nothing left to close).
-			prepared, prepareErr := spawn.PrepareHerdr(
-				ctx,
-				spawn.HerdrRequest{
-					Choice: choice,
-					Paths:  values,
-					Run:    *plan.SeatRun,
-					Seat:   seat,
-				},
-			)
-			if prepareErr != nil {
-				return "", prepareErr
-			}
-			// Only a name a user chose (launch --name, a resumed chat's own
-			// user name) replaces a label the user set on this tab; an AI
-			// title, a first prompt or the project folder is re-announced.
-			name := cmp.Or(request.LaunchName, request.Row.Name)
-			userChose := request.LaunchName != "" ||
-				request.Row.UserName != "" && request.Row.Name == request.Row.UserName
-			label := spawn.BirthTabLabel(name, plan.SeatRun.CWD)
-			if labelErr := herdr.LabelPaneTab(
-				ctx, choice.HerdrSocket, choice.HerdrPane, label, userChose,
-			); labelErr != nil &&
-				!errors.Is(labelErr, herdr.ErrTabNotSole) {
-				// The birth proceeds: the tab keeps its label until the chat's
-				// name reaches it.
-				fmt.Fprintf(
-					executor.stderr, "pfm: Herdr tab of pane %s keeps its label: %v\n", choice.HerdrPane, labelErr,
-				)
-			}
-			executor.recordLaunch(ctx, plan.Record)
-			launchnotice.Print(executor.stderr, "pfm", plan.Warnings)
-			return prepared.Eval, nil
+			return executor.openHerdr(ctx, request, plan, choice)
 		}
 	}
 	if plan.ChatServer != nil {
-		executor.recordLaunch(ctx, plan.Record)
-		if err := executor.tmux.CreateChatServer(
-			ctx,
-			*plan.ChatServer,
-		); err != nil {
-			return "", err
-		}
-		if plan.Record != nil {
-			values, pathErr := pfmconfig.ResolvePaths()
-			if pathErr != nil {
-				return "", pathErr
-			}
-			if persistErr := spawn.RecordTmuxSeat(
-				ctx,
-				values,
-				fleetdb.Seat{
-					SessionID:  plan.Record.SessionID,
-					Engine:     string(plan.Record.Engine),
-					Name:       request.LaunchName,
-					TmuxSocket: plan.ChatServer.Socket,
-				},
-			); persistErr != nil {
-				fmt.Fprintf(executor.stderr, "pfm: tmux picker chat exists; seat registration failed: %v\n", persistErr)
-			}
+		if err := executor.openTmux(ctx, request, plan); err != nil {
+			return result, err
 		}
 		held, err := executor.watchLaunch(
 			ctx,
@@ -281,12 +210,130 @@ func (executor *Executor) Open(
 			request.Config.OpenCode.Binary,
 		)
 		if err != nil {
-			return "", err
+			return result, err
 		}
-		launchnotice.Hold(executor.stderr, "pfm", launchWarnings(plan.Warnings, held))
+		warnings := launchWarnings(plan.Warnings, held)
+		if request.Detached {
+			// A caller with no terminal never sees the pane: a chat that died
+			// at launch, or one held at a dialog only the human may answer,
+			// reaches it through this result or not at all.
+			trail.Reach("opened", "detached server created")
+			return OpenResult{
+				Name: request.Row.Name, Socket: plan.ChatServer.Socket, State: "opened", Warnings: warnings,
+			}, nil
+		}
+		launchnotice.Hold(executor.stderr, "pfm", warnings)
 	}
 	trail.Reach("opened", "pane attached")
-	return plan.Line, nil
+	return OpenResult{Line: plan.Line}, nil
+}
+
+// born reports a row kind whose open starts a new engine process.
+func born(kind compose.Kind) bool {
+	switch kind {
+	case compose.NewClaude, compose.NewCodex, compose.NewOpenCode,
+		compose.ResumeClaude, compose.ResumeCodex, compose.ResumeOpenCode:
+		return true
+	}
+	return false
+}
+
+// openHerdr births the planned chat on the placement's Herdr host: a new
+// tab, or (interactive, when placed in place) the caller's own pane, whose
+// shell then execs the seat host through the returned eval line.
+func (executor *Executor) openHerdr(
+	ctx context.Context,
+	request Request,
+	plan Plan,
+	choice spawn.BackendChoice,
+) (OpenResult, error) {
+	values, err := pfmconfig.ResolvePaths()
+	if err != nil {
+		return OpenResult{}, err
+	}
+	if plan.SeatRun == nil {
+		return OpenResult{}, errors.New("native picker launch has no structured recipe or identity")
+	}
+	sessionID := request.Row.ID
+	if plan.Record != nil {
+		sessionID = plan.Record.SessionID
+	} else if sessionID == "" {
+		if sessionID, err = newSessionID(); err != nil {
+			return OpenResult{}, err
+		}
+	}
+	birth := spawn.HerdrRequest{
+		Choice: choice,
+		Paths:  values,
+		Run:    *plan.SeatRun,
+		Seat: fleetdb.Seat{
+			SessionID: sessionID,
+			Engine:    string(compose.EngineForKind(request.Row.Kind)),
+			Name:      request.LaunchName,
+		},
+		Launch: plan.Record,
+	}
+	if !choice.InPlace || request.Detached {
+		birth.Choice.InPlace = false
+		born, err := spawn.SpawnHerdr(ctx, birth)
+		if err != nil {
+			return OpenResult{}, err
+		}
+		warnings := slices.Concat(plan.Warnings, born.Warnings)
+		if request.Detached {
+			seat := born.Seat
+			seat.Name = cmp.Or(seat.Name, request.Row.Name)
+			return OpenResult{
+				Name: seat.Name, Socket: seat.HerdrSocket, State: "opened",
+				Detail: spawn.HerdrLocation(seat), Warnings: warnings,
+			}, nil
+		}
+		launchnotice.Print(executor.stderr, "pfm", warnings)
+		return OpenResult{}, nil
+	}
+	// The chat is born in the caller's own pane: the reservation names this
+	// pane and the shell execs the seat host in place, so the pane and its tab
+	// stay the user's (no new tab, nothing left to close). Only a name a user
+	// chose (launch --name, a resumed chat's own user name) replaces a label
+	// the user set on this tab; an AI title, a first prompt or the project
+	// folder is re-announced.
+	birth.TabName = cmp.Or(request.LaunchName, request.Row.Name)
+	birth.UserNamed = request.LaunchName != "" ||
+		request.Row.UserName != "" && request.Row.Name == request.Row.UserName
+	prepared, err := spawn.PrepareHerdr(ctx, birth)
+	if err != nil {
+		return OpenResult{}, err
+	}
+	launchnotice.Print(executor.stderr, "pfm", slices.Concat(plan.Warnings, prepared.Warnings))
+	return OpenResult{Line: prepared.Eval}, nil
+}
+
+// openTmux creates the planned chat's own tmux server and registers its seat.
+func (executor *Executor) openTmux(ctx context.Context, request Request, plan Plan) error {
+	executor.recordLaunch(ctx, plan.Record)
+	if err := executor.tmux.CreateChatServer(ctx, *plan.ChatServer); err != nil {
+		return err
+	}
+	if plan.Record == nil {
+		return nil
+	}
+	values, err := pfmconfig.ResolvePaths()
+	if err != nil {
+		return err
+	}
+	if err := spawn.RecordTmuxSeat(
+		ctx,
+		values,
+		fleetdb.Seat{
+			SessionID:  plan.Record.SessionID,
+			Engine:     string(plan.Record.Engine),
+			Name:       request.LaunchName,
+			TmuxSocket: plan.ChatServer.Socket,
+		},
+	); err != nil {
+		fmt.Fprintf(executor.stderr, "pfm: tmux picker chat exists; seat registration failed: %v\n", err)
+	}
+	return nil
 }
 
 func checkCodexLaunch(request Request) error {

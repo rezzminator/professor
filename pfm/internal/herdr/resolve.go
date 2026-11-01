@@ -32,17 +32,21 @@ type Resolver struct {
 	Panes func(ctx context.Context, socket string) ([]Pane, error)
 	// Foreground returns the foreground pids of one pane (pane.process_info).
 	Foreground func(ctx context.Context, socket, pane string) ([]int, error)
+	// Keep maps a herdr-keep relay socket in the environment to Herdr's own.
+	Keep *Keep
 }
 
-// WireResolver is a Resolver over a live Herdr socket: call is Call's seam and
-// seq numbers each request.
+// WireResolver is a Resolver over a live Herdr socket: call is Call's seam,
+// seq numbers each request and keep reads the panes herdr-keep holds.
 func WireResolver(
 	environ func(pid int) (map[string]string, error),
 	call func(ctx context.Context, socket string, lines ...[]byte) ([]json.RawMessage, error),
 	seq func() uint64,
+	keep *Keep,
 ) Resolver {
 	return Resolver{
 		Environ: environ,
+		Keep:    keep,
 		Panes: func(ctx context.Context, socket string) ([]Pane, error) {
 			line, err := PaneList{Seq: seq()}.Line()
 			if err != nil {
@@ -63,7 +67,11 @@ func WireResolver(
 			if err != nil {
 				return nil, err
 			}
-			return ParseProcessInfo(results[0])
+			processes, err := keep.Processes(ctx, socket, results[0])
+			if err != nil {
+				return nil, err
+			}
+			return processes.PIDs()
 		},
 	}
 }
@@ -84,15 +92,18 @@ func (resolver Resolver) Resolve(ctx context.Context, pid int) (Location, bool, 
 	if environment[EnvMarker] != "1" {
 		return Location{}, false, nil
 	}
-	socket := environment[EnvSocket]
-	if socket == "" {
+	if environment[EnvSocket] == "" {
 		return Location{}, false, fmt.Errorf("client %d: %s=1 without %s", pid, EnvMarker, EnvSocket)
+	}
+	socket, first, err := resolver.Keep.Upstream(ctx, environment[EnvSocket], environment[EnvPane])
+	if err != nil {
+		return Location{}, false, fmt.Errorf("client %d: %w", pid, err)
 	}
 	panes, err := resolver.Panes(ctx, socket)
 	if err != nil {
 		return Location{}, false, fmt.Errorf("list the panes of %s: %w", socket, err)
 	}
-	pane, found, err := resolver.PaneRunning(ctx, socket, pid, panes, environment[EnvPane])
+	pane, found, err := resolver.PaneRunning(ctx, socket, pid, panes, first)
 	if err != nil {
 		return Location{}, false, err
 	}
@@ -185,30 +196,26 @@ type PaneIdentity struct {
 
 // LocatePane returns pane's identity by pane.get. A pane Herdr no longer knows
 // (pane_not_found: a pane move or a Herdr restart gave it a new id) is found
-// again by process: the listed pane whose foreground holds one of pids (a
-// process and its ancestors), so a stale inherited HERDR_PANE_ID never fails a
-// caller that still runs in Herdr. found is false only when Herdr answered and
-// no pane holds pids; every failed read is an error.
-func LocatePane(ctx context.Context, socket, pane string, pids []int) (PaneIdentity, bool, error) {
+// again by process: the listed pane whose foreground (through keep) holds one
+// of pids (a process and its ancestors), so a stale inherited HERDR_PANE_ID
+// never fails a caller that still runs in Herdr. found is false only when
+// Herdr answered and no pane holds pids; every failed read is an error.
+func LocatePane(ctx context.Context, keep *Keep, socket, pane string, pids []int) (PaneIdentity, bool, error) {
 	identity, err := paneIdentity(ctx, socket, pane)
 	var refusal *Refusal
 	if !errors.As(err, &refusal) || refusal.Code != paneNotFound && refusal.Code != "not_found" {
 		return identity, err == nil, err
 	}
-	body, listErr := SeatRequest(ctx, socket, "pane.list", struct{}{})
-	if listErr != nil {
-		return PaneIdentity{}, false, fmt.Errorf("pane %s is gone; list panes: %w", pane, listErr)
-	}
-	panes, listErr := ParsePanes(body)
+	panes, listErr := ListPanes(ctx, socket)
 	if listErr != nil {
 		return PaneIdentity{}, false, fmt.Errorf("pane %s is gone; list panes: %w", pane, listErr)
 	}
 	resolver := Resolver{Foreground: func(ctx context.Context, socket, pane string) ([]int, error) {
-		body, err := SeatRequest(ctx, socket, "pane.process_info", map[string]string{paneIDKey: pane})
+		processes, err := keep.Read(ctx, socket, pane)
 		if err != nil {
 			return nil, err
 		}
-		return ParseProcessInfo(body)
+		return processes.PIDs()
 	}}
 	held, found, err := resolver.PaneHolding(ctx, socket, pids, panes, "")
 	if err != nil || !found {

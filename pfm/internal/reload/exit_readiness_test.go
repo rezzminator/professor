@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 )
 
 // startingPaneTmux is the pane whose CHAT HAS NOT DRAWN ITS INPUT BOX YET —
@@ -23,7 +25,7 @@ type startingPaneTmux struct {
 	redrawn       bool
 }
 
-func (tmux *startingPaneTmux) Capture(context.Context, string, string) (string, error) {
+func (tmux *startingPaneTmux) CaptureScreen(context.Context, pfmcall.Target) (string, error) {
 	tmux.captures++
 	if tmux.captures <= tmux.blankCaptures {
 		return tmux.echoed, nil
@@ -37,20 +39,20 @@ func (tmux *startingPaneTmux) Capture(context.Context, string, string) (string, 
 	return screen, nil
 }
 
-func (tmux *startingPaneTmux) SendLiteral(ctx context.Context, socket, pane, value string) error {
+func (tmux *startingPaneTmux) SendLiteral(ctx context.Context, target pfmcall.Target, value string) error {
 	tmux.typedAt = tmux.captures
 	if tmux.captures <= tmux.blankCaptures {
 		tmux.echoed += value
 		return nil
 	}
-	return tmux.fakeReloadTmux.SendLiteral(ctx, socket, pane, value)
+	return tmux.fakeReloadTmux.SendLiteral(ctx, target, value)
 }
 
-func (tmux *startingPaneTmux) SendKey(ctx context.Context, socket, pane, key string) error {
+func (tmux *startingPaneTmux) SendKey(ctx context.Context, target pfmcall.Target, key string) error {
 	if key == "Enter" && tmux.literal == "" {
 		tmux.redrawn = true
 	}
-	return tmux.fakeReloadTmux.SendKey(ctx, socket, pane, key)
+	return tmux.fakeReloadTmux.SendKey(ctx, target, key)
 }
 
 // A pane with nothing on it is not an idle chat — it is a chat that cannot be
@@ -119,11 +121,11 @@ type slowExitTmux struct {
 	after string
 }
 
-func (tmux *slowExitTmux) Capture(ctx context.Context, socket, pane string) (string, error) {
+func (tmux *slowExitTmux) CaptureScreen(ctx context.Context, target pfmcall.Target) (string, error) {
 	if tmux.submitted && tmux.after != "" {
 		return tmux.after, nil
 	}
-	return tmux.fakeReloadTmux.Capture(ctx, socket, pane)
+	return tmux.fakeReloadTmux.CaptureScreen(ctx, target)
 }
 
 // ListPanes counts the exit loop's polls: those after the submitted /exit and
@@ -138,7 +140,7 @@ func (tmux *slowExitTmux) ListPanes(ctx context.Context, socket string) ([]Pane,
 	return tmux.fakeReloadTmux.ListPanes(ctx, socket)
 }
 
-func (tmux *slowExitTmux) SendKey(_ context.Context, _, _, key string) error {
+func (tmux *slowExitTmux) SendKey(_ context.Context, _ pfmcall.Target, key string) error {
 	if key == "Enter" && tmux.literal == "/exit" {
 		tmux.submitted = true
 		tmux.literal = ""

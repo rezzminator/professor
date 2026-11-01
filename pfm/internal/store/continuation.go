@@ -1,6 +1,9 @@
 package store
 
-import "context"
+import (
+	"context"
+	"fmt"
+)
 
 // CarryContinuedSchedules moves every schedule whose chat Claude Code
 // continued in another session onto the newest segment of that chat's
@@ -30,23 +33,11 @@ func (s *Store) CarryContinuedSchedules(ctx context.Context) {
 			continue
 		}
 		followed[from] = struct{}{}
-		to, seen := from, map[string]struct{}{from: {}}
-		for {
-			transcript, found, err := s.Transcript(ctx, to)
-			if err != nil {
-				s.warningf("WARNING: pfm could not follow the continuation of session %s from %s: %v; "+
-					"its schedules stay on %s until the next index pass\n", from, to, err, from)
-				to = from
-				break
-			}
-			if !found || !transcript.Superseded {
-				break
-			}
-			if _, cycle := seen[transcript.ContinuedIn]; cycle {
-				break
-			}
-			seen[transcript.ContinuedIn] = struct{}{}
-			to = transcript.ContinuedIn
+		to, err := s.ContinuationTail(ctx, from)
+		if err != nil {
+			s.warningf("WARNING: pfm could not follow the continuation of session %s %v; "+
+				"its schedules stay on %s until the next index pass\n", from, err, from)
+			continue
 		}
 		if to == from {
 			continue
@@ -55,5 +46,29 @@ func (s *Store) CarryContinuedSchedules(ctx context.Context) {
 			s.warningf("WARNING: pfm could not move the schedules of session %s to %s, the session Claude Code "+
 				"continued it in: %v; the next index pass retries\n", from, to, err)
 		}
+	}
+}
+
+// ContinuationTail follows id's continued-in chain to its newest segment: the
+// session a resume of id must name, since resuming a superseded id reopens a
+// segment Claude Code already moved on from. A segment counts as continued
+// only while it is Superseded, its successor indexed, so the tail is always a
+// chat pfm can show; an id the index lacks is its own tail. A cycle stops at
+// the last new segment.
+func (s *Store) ContinuationTail(ctx context.Context, start string) (string, error) {
+	id, seen := start, map[string]struct{}{start: {}}
+	for {
+		transcript, found, err := s.Transcript(ctx, id)
+		if err != nil {
+			return "", fmt.Errorf("from %s at %s: %w", start, id, err)
+		}
+		if !found || !transcript.Superseded {
+			return id, nil
+		}
+		if _, cycle := seen[transcript.ContinuedIn]; cycle {
+			return id, nil
+		}
+		seen[transcript.ContinuedIn] = struct{}{}
+		id = transcript.ContinuedIn
 	}
 }

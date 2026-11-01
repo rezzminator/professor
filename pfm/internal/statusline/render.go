@@ -19,6 +19,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 	"github.com/rezzminator/professor/pfm/internal/usagehook"
 )
@@ -94,6 +95,8 @@ type rateWindow struct {
 	ResetsAt       int64   `json:"resets_at"`
 	Cached         bool    `json:"-"`
 	Failure        bool    `json:"-"`
+	// Absent marks a window the latest answer left out: off the plan, hidden.
+	Absent bool `json:"-"`
 }
 
 type rateLimits struct {
@@ -162,13 +165,23 @@ func (limits rateLimits) windowsAt(
 	}
 	reported := maps.Clone(windows)
 	// A reported window stands, even at zero, unless another seat or the usage
-	// cache holds a newer reading of it. A missing window takes the cache's;
-	// an explicit scoped array also owns the absence of Fable, independently
-	// of missing main windows.
+	// cache holds a newer reading of it. A payload that reports a plain window
+	// answers for both, and an explicit scoped array for Fable: a window such an
+	// answer leaves out is off the plan and hidden. A window no answer spoke
+	// about is missing, and the usage cache decides it.
+	_, fiveReported := windows[fiveHourCacheKey]
+	_, weekReported := windows[sevenDayCacheKey]
 	missing := make(map[string]bool)
 	for _, descriptor := range usagehook.AllWindows() {
-		if _, present := windows[descriptor.Key]; !present &&
-			(descriptor.Key != "seven_day_fable" || limits.Scoped == nil) {
+		answered := fiveReported || weekReported
+		if descriptor.Key == fableCacheKey {
+			answered = limits.Scoped != nil
+		}
+		if _, present := windows[descriptor.Key]; present {
+			continue
+		} else if answered {
+			windows[descriptor.Key] = rateWindow{Absent: true}
+		} else {
 			missing[descriptor.Key] = true
 		}
 	}
@@ -361,13 +374,15 @@ func reportsKnownWindow(data input) bool {
 	return false
 }
 
-// rateWindowRow reads one known window. Every known window renders, always:
-// skipping a window at 0% made an unused quota and a quota whose data never
-// arrived look identical — both simply absent — so the one state worth seeing
-// (a limit the response stopped reporting) arrived as silence. A window missing
-// from a block that DID report renders with an explicit unknown marker.
+// rateWindowRow reads one known window; a zero label draws no row. A window
+// the latest answer left out is off the plan and draws nothing; a measured 0%
+// still draws, a window no answer spoke about yet draws the unknown marker, and
+// a failure to read draws ERR, so absence and failure never look alike.
 func rateWindowRow(now time.Time, descriptor usagehook.WindowDescriptor, data input) quotaRow {
 	window, present := data.RateLimits.Windows[descriptor.Key]
+	if window.Absent {
+		return quotaRow{}
+	}
 	if !present {
 		return quotaRow{label: dim + descriptor.Label + "-used:—" + reset}
 	}
@@ -394,43 +409,44 @@ func appendRateSegments(line string, now time.Time, data input) string {
 		return line
 	}
 	for _, descriptor := range usagehook.AllWindows() {
-		line = appendSegment(line, compactRow(rateWindowRow(now, descriptor, data)))
+		if row := rateWindowRow(now, descriptor, data); row.label != "" {
+			line = appendSegment(line, compactRow(row))
+		}
 	}
 	return line
 }
 
-// claudeQuotaRows is the Claude quota block, every row the same width: 5h and
-// 7d-fable share the top row at half width each, the 7d under it and the Codex
-// weekly last at full width. That width is 115% of the widest sibling row
-// (rowColumns; the compact forms count as siblings), capped by the terminal; a
-// terminal with no content column drops the Codex row and leaves the quotas at
-// their compact width.
+// claudeQuotaRows is the Claude quota block: one row with 5h, 7d-fable and 7d side
+// by side (splitQuotaRow), the Codex weekly row under it at the same width. That
+// width is 86% of the widest sibling row (rowColumns), never below the compact
+// Claude line, capped by the terminal; a terminal with no content column drops
+// the Codex row and leaves the quotas as that compact line. A hidden reading (a
+// zero label) takes no place, and an empty block is not drawn.
 func claudeQuotaRows(runtime Runtime, now time.Time, data input, l1, l2 string) string {
-	codex := codexWeeklyRow(runtime, now)
-	widths := []int{ansi.StringWidth(codex.label)}
-	var five, week, fable quotaRow
-	known := reportsKnownWindow(data)
-	if known {
-		reading := map[string]quotaRow{}
+	reading := map[string]quotaRow{}
+	if reportsKnownWindow(data) {
 		for _, descriptor := range usagehook.AllWindows() {
 			reading[descriptor.Key] = rateWindowRow(now, descriptor, data)
 		}
-		five, week, fable = reading[fiveHourCacheKey], reading[sevenDayCacheKey], reading[fableCacheKey]
-		widths = append(
-			widths,
-			ansi.StringWidth(compactRow(five)+sep+compactRow(fable)),
-			ansi.StringWidth(compactRow(week)),
-		)
 	}
-	columns, ok := rowColumns(runtime, widths, l1, l2)
+	five, fable, week := reading[fiveHourCacheKey], reading[fableCacheKey], reading[sevenDayCacheKey]
+	compact := ""
+	for _, row := range []quotaRow{five, fable, week} {
+		if row.label != "" {
+			compact = appendSegment(compact, compactRow(row))
+		}
+	}
+	codex := codexWeeklyRow(runtime, now)
+	columns, ok := rowColumns(runtime, ansi.StringWidth(compact), []int{ansi.StringWidth(codex.label)}, l1, l2)
 	var rows []string
 	switch {
-	case known && ok:
-		rows = append(rows, halfRows(five, fable, columns), barRow(week, columns))
-	case known:
-		rows = append(rows, compactRow(five)+sep+compactRow(fable), compactRow(week))
+	case compact == "":
+	case ok:
+		rows = append(rows, splitQuotaRow(five, fable, week, columns))
+	default:
+		rows = append(rows, compact)
 	}
-	if ok {
+	if ok && codex.label != "" {
 		rows = append(rows, barRow(codex, columns))
 	}
 	return strings.Join(rows, "\n"+reset)
@@ -560,7 +576,8 @@ func convergeWindowName(ctx context.Context, runtime Runtime, data input) {
 	if !ok {
 		return
 	}
-	pane := runtime.getenv("TMUX_PANE")
+	identity := runtime.identity()
+	pane := identity.TMUXPane
 	if pane == "" {
 		return
 	}
@@ -572,7 +589,7 @@ func convergeWindowName(ctx context.Context, runtime Runtime, data input) {
 	// The cache holds the server ($TMUX: socket, server pid, session) beside
 	// the name: a resumed chat keeps its session id and name on a NEW server,
 	// which lacks the window name and @pfm_chat_name until this render sets them.
-	stamp := runtime.getenv("TMUX") + "\n" + data.SessionName
+	stamp := identity.TMUX + "\n" + data.SessionName
 	if cached, err := os.ReadFile(cachePath); err == nil && string(cached) == stamp {
 		return
 	}
@@ -582,10 +599,10 @@ func convergeWindowName(ctx context.Context, runtime Runtime, data input) {
 	// window_panes gates the rename the same way gather's claude half does: a
 	// window hosting two /chat:branch siblings cannot carry both labels, so it
 	// keeps the name it has rather than take whichever sibling rendered last.
-	read, err := runtime.Command.Output(
-		commandContext, "tmux", "-S", socketPath,
+	read, err := pfmtmux.Exec(
+		commandContext, "", socketPath,
 		"display-message", "-t", pane, "-p", "#{window_panes} #{window_name}",
-	)
+	).Output()
 	if err != nil {
 		return
 	}
@@ -613,15 +630,20 @@ func convergeWindowName(ctx context.Context, runtime Runtime, data input) {
 	_ = atomicfile.Write(cachePath, []byte(stamp), 0o600)
 }
 
+// identity is the render's own identity snapshot: Claude Code runs the status
+// line inside the chat it renders, so this process's environment is the chat's.
+func (runtime Runtime) identity() resolve.WhoamiEnvironment {
+	return resolve.EnvironmentOf(runtime.getenv)
+}
+
 // pfmSocket resolves the fleet socket this render is running inside, or
 // reports that it is not in one. It applies the same probe-socket allowance
 // fleetCountsWithError does so a jailed fixture can exercise the path.
 func pfmSocket(runtime Runtime) (string, bool) {
-	tmux := runtime.getenv("TMUX")
-	if tmux == "" {
+	socketPath := runtime.identity().TmuxSocket()
+	if socketPath == "" {
 		return "", false
 	}
-	socketPath := pfmtmux.SocketPath(tmux)
 	if filepath.Clean(filepath.Dir(socketPath)) != filepath.Clean(runtime.TmuxDir) {
 		return "", false
 	}
@@ -638,12 +660,11 @@ func pfmSocket(runtime Runtime) (string, bool) {
 }
 
 func writeBreadcrumb(runtime Runtime, transcriptPath string) {
-	tmux := runtime.getenv("TMUX")
-	if tmux == "" || transcriptPath == "" {
+	identity := runtime.identity()
+	if identity.TMUX == "" || transcriptPath == "" {
 		return
 	}
-	socket := pfmtmux.SocketPath(tmux)
-	socket = filepath.Base(socket)
+	socket := filepath.Base(identity.TmuxSocket())
 	if socket == "." || socket == "" {
 		return
 	}
@@ -652,7 +673,7 @@ func writeBreadcrumb(runtime Runtime, transcriptPath string) {
 	}
 	_ = os.Chmod(runtime.SIDDir, 0o700)
 	_ = atomicfile.Write(filepath.Join(runtime.SIDDir, socket), []byte(transcriptPath), 0o600)
-	if pane := runtime.getenv("TMUX_PANE"); pane != "" {
+	if pane := identity.TMUXPane; pane != "" {
 		_ = atomicfile.Write(filepath.Join(runtime.SIDDir, socket+"."+pane), []byte(transcriptPath), 0o600)
 	}
 }
@@ -860,9 +881,6 @@ func codexQuotaSegment(runtime Runtime, now time.Time) string {
 	if err := json.Unmarshal(body, &usage); err != nil {
 		return cBad + codexQuotaLabel + catalogError + reset
 	}
-	if usage.Primary == nil && usage.Secondary == nil {
-		return cWarn + codexQuotaLabel + "unknown" + reset
-	}
 	segment := ""
 	for _, window := range []*codexWindow{usage.Primary, usage.Secondary} {
 		if window == nil {
@@ -890,7 +908,8 @@ func codexQuotaSegment(runtime Runtime, now time.Time) string {
 			),
 		)
 	}
-	if statuslineFileAge(path, now) > 5*time.Minute {
+	// No window answered (an account on credits): the plan alone shows.
+	if segment != "" && statuslineFileAge(path, now) > 5*time.Minute {
 		segment += " " + cWarn + "stale" + reset
 	}
 	if usage.PlanType != "" {

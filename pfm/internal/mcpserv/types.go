@@ -87,7 +87,7 @@ type CallInput struct {
 	Then     []string `json:"then,omitempty" jsonschema:"follow-up steers delivered by a detached waiter after the primary turn settles to idle; in order, one settled turn apart. No steer may itself start with /compact — /compact itself is refused as a message here"`
 }
 
-// CallOutput is a stable MCP representation of pfmcall.Result; a broadcast
+// CallOutput is a stable MCP representation of chat.CallResult; a broadcast
 // adds one result per target.
 type CallOutput struct {
 	CallDelivery

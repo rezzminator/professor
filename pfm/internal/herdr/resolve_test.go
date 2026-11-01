@@ -40,6 +40,7 @@ func (fake *resolveFake) resolver() Resolver {
 			}
 			return fake.foreground[pane], nil
 		},
+		Keep: &Keep{},
 	}
 }
 
@@ -52,21 +53,45 @@ func inHerdr(pane string) map[string]string {
 var resolvePanes = []Pane{{PaneID: "w1:p2", TerminalID: "t2"}, {PaneID: "w1:p3", TerminalID: "t3"}}
 
 func TestResolveFindsTheClientsOwnPane(t *testing.T) {
-	fake := &resolveFake{
-		environ:    map[int]map[string]string{4101: inHerdr("w1:p3")},
-		panes:      resolvePanes,
-		foreground: map[string][]int{"w1:p2": {4100}, "w1:p3": {4099, 4101}},
-	}
-	location, found, err := fake.resolver().Resolve(context.Background(), 4101)
-	if err != nil || !found {
-		t.Fatalf("Resolve = %+v, %v, %v; want found, no error", location, found, err)
-	}
-	want := Location{Socket: resolveSocket, Pane: "w1:p3", Terminal: "t3"}
-	if location != want {
-		t.Fatalf("Resolve = %+v, want %+v", location, want)
-	}
-	if strings.Join(fake.asked, ",") != "w1:p3" {
-		t.Fatalf("panes asked = %v, want only the env pane w1:p3", fake.asked)
+	for _, tc := range []struct {
+		name    string
+		environ map[string]string
+		keep    *Keep
+		want    Location
+	}{
+		{
+			name: "unheld pane", environ: inHerdr("w1:p3"), keep: &Keep{},
+			want: Location{Socket: resolveSocket, Pane: "w1:p3", Terminal: "t3"},
+		},
+		// A shell herdr-keep holds names its holder's relay and birth pane.
+		{
+			name:    "herdr-keep relay",
+			environ: map[string]string{EnvMarker: "1", EnvSocket: keepRelay, EnvPane: "w9:p1"},
+			keep:    &Keep{Runner: keepRunner(keepListing("running", true, false, "PROTECTED"), 0)},
+			want:    Location{Socket: keepSocket, Pane: "w1:p4", Terminal: "t4"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := &resolveFake{
+				environ: map[int]map[string]string{4101: tc.environ},
+				panes:   append([]Pane{{PaneID: "w1:p4", TerminalID: "t4"}}, resolvePanes...),
+				foreground: map[string][]int{
+					"w1:p2": {4100}, "w1:p3": {4099, 4101}, "w1:p4": {4101},
+				},
+			}
+			resolver := fake.resolver()
+			resolver.Keep = tc.keep
+			location, found, err := resolver.Resolve(context.Background(), 4101)
+			if err != nil || !found {
+				t.Fatalf("Resolve = %+v, %v, %v; want found, no error", location, found, err)
+			}
+			if location != tc.want {
+				t.Fatalf("Resolve = %+v, want %+v", location, tc.want)
+			}
+			if strings.Join(fake.asked, ",") != tc.want.Pane {
+				t.Fatalf("panes asked = %v, want only the env pane %s", fake.asked, tc.want.Pane)
+			}
+		})
 	}
 }
 
@@ -207,6 +232,7 @@ func TestWireResolverReadsTheHerdrSocket(t *testing.T) {
 		},
 		Call,
 		func() uint64 { seq++; return seq },
+		&Keep{},
 	)
 	location, found, err := resolver.Resolve(context.Background(), 4101)
 	if err != nil || !found {

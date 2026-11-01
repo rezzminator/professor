@@ -150,13 +150,11 @@ func (installer *engine) ensureClaudePluginCopy(target *ClaudePluginTarget) erro
 		manifest.Plugins = append(slices.DeleteFunc(manifest.Plugins, func(entry devMarketplaceEntry) bool {
 			return entry.Name == target.Name
 		}), devMarketplaceEntry{Name: target.Name, Source: "./plugins/" + target.Name})
-		raw, err := json.MarshalIndent(manifest, "", "  ")
-		if err != nil {
-			return err
-		}
-		if err := installer.change("add "+target.Name+" to "+manifestPath, func() error {
-			return atomicfile.Write(manifestPath, append(raw, '\n'), 0o644)
-		}); err != nil {
+		if err := installer.writeDevMarketplaceManifest(
+			"add "+target.Name+" to "+manifestPath,
+			manifestPath,
+			manifest,
+		); err != nil {
 			return err
 		}
 	}
@@ -170,6 +168,17 @@ func (installer *engine) ensureClaudePluginCopy(target *ClaudePluginTarget) erro
 		return nil
 	}
 	return installer.change(message, func() error { return mirrorPluginTree(target.Checkout, mirror) })
+}
+
+// writeDevMarketplaceManifest is the one writer of the local professor
+// marketplace's manifest at path: manifest, indented, as one change line
+// message.
+func (installer *engine) writeDevMarketplaceManifest(message, path string, manifest devMarketplaceManifest) error {
+	raw, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode %s: %w", path, err)
+	}
+	return installer.change(message, func() error { return atomicfile.Write(path, append(raw, '\n'), 0o644) })
 }
 
 // devMarketplaceCurrent reads the local professor marketplace's manifest at
@@ -629,14 +638,12 @@ func settingsEditTarget(path string) (string, fs.FileMode, error) {
 // (ClaudePluginGaps); install disables it, never uninstalls it, once the
 // successor is ensured.
 var retiredClaudePlugins = map[string][]string{
-	"auto-effort-control": {
+	"auto-effort": {
 		"agent-effort@agent-effort",
 		"agent-effort@agent-effort-dev",
 		"agent-effort@professor",
 		"agent-effort@rezzminator",
-		"auto-effort@auto-effort",
-		"auto-effort@auto-effort-dev",
-		"auto-effort@professor",
+		"auto-effort-control@rezzminator",
 		"auto-effort@rezzminator",
 		"effort-live-control@effort-live-control",
 		"effort-live-control@effort-live-control-dev",

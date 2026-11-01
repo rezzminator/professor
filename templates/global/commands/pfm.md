@@ -8,7 +8,7 @@ argument-hint: [verb|question]
 
 $ARGUMENTS
 
-`pfm` is the host binary Professor ships: it manages the chat fleet, the memory organs, the host integration, and this project's template baseline. This file is the map; the flags of any verb are `pfm <verb> --help` — never invent one. Template store: `{BLUEPRINT_CLONE_PATH}` (default `~/.professor`; `.professor/manifest.json` can point elsewhere).
+`pfm` is the host binary Professor ships: it manages the chat fleet, the memory organs, the host integration, and this project's template baseline. This file is the map; the flags of any verb are `pfm <verb> --help` — never invent one. Template store `{clone}`: the Professor clone `pfm install` links from, `readlink -f ~/.claude/commands/pfm.md` minus `/templates/global/commands/pfm.md` (`~/.professor` unless installed from elsewhere).
 
 For creating, adopting, modifying or checking a workbench, load `/pfm:workbench`.
 
@@ -54,7 +54,7 @@ engine-sync, the `engine-sync` plugin's binary (on PATH after `pfm install`), is
 
 ## Host integration
 
-`pfm install --yes` stages the host assets and symlinks the machine-global agents, commands, rules and skills from `{BLUEPRINT_CLONE_PATH}`, one link per rule file in `~/.claude/rules/`; `engine-sync global` carries the always-on rules to Codex (an owned block in each Codex home's `AGENTS.md`) and OpenCode (an `instructions` entry); saving a global template IS the deploy. `pfm doctor [--verbose]` is the health check to run after an install or update, and the first thing to run when a fleet verb misbehaves.
+`pfm install --yes` stages the host assets and symlinks the machine-global agents, commands, rules and skills from `{clone}`, one link per rule file in `~/.claude/rules/`; `engine-sync global` carries the always-on rules to Codex (an owned block in each Codex home's `AGENTS.md`) and OpenCode (an `instructions` entry); saving a global template IS the deploy. `pfm doctor [--verbose]` is the health check to run after an install or update, and the first thing to run when a fleet verb misbehaves.
 
 ## Chat: MCP first, shell for the rest
 

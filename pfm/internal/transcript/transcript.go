@@ -14,10 +14,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"unicode/utf8"
 
+	"github.com/rezzminator/professor/pfm/internal/codexmeta"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/naming"
 	"github.com/rezzminator/professor/pfm/internal/pyvalue"
@@ -374,7 +374,7 @@ func Tail(
 	if lastN < 1 {
 		return nil, false, fmt.Errorf("tail count must be positive, got %d", lastN)
 	}
-	file, err := os.Open(path)
+	file, err := codexmeta.OpenRollout(path)
 	if err != nil {
 		return nil, false, err
 	}
@@ -421,7 +421,7 @@ func Tail(
 // with tail/status so save and excerpt loading cannot invent a second record
 // interpretation.
 func All(ctx context.Context, path, engine string) (entries []Entry, returnErr error) {
-	file, err := os.Open(path)
+	file, err := codexmeta.OpenRollout(path)
 	if err != nil {
 		return nil, err
 	}

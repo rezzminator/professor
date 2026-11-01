@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -24,7 +25,8 @@ import (
 // paths are driven by a TUI that behaves differently, not by a stubbed
 // timeout.
 type fakeCodex struct {
-	mutex sync.Mutex
+	pfmcall.Screen // CaptureStyled: a spawn never reads a styled frame
+	mutex          sync.Mutex
 
 	offersRename bool
 	opensPrompt  bool
@@ -96,7 +98,16 @@ func (fake *fakeCodex) NewSession(_ context.Context, spec SessionSpec) error {
 	return nil
 }
 
-func (fake *fakeCodex) Capture(_ context.Context, _, _ string) (string, error) {
+func (fake *fakeCodex) Pane(socket, pane string) (pfmcall.Screen, pfmcall.Target, error) {
+	return fake, fakeTarget(socket, pane), nil
+}
+
+// fakeTarget is the address a fake hands out with itself as the pane door.
+func fakeTarget(socket, pane string) pfmcall.Target {
+	return pfmcall.Target{SocketPath: socket, Pane: pane}
+}
+
+func (fake *fakeCodex) CaptureScreen(_ context.Context, _ pfmcall.Target) (string, error) {
 	fake.mutex.Lock()
 	defer fake.mutex.Unlock()
 	if fake.dead {
@@ -156,7 +167,7 @@ func (fake *fakeCodex) Capture(_ context.Context, _, _ string) (string, error) {
 	}
 }
 
-func (fake *fakeCodex) SendLiteral(_ context.Context, _, _, text string) error {
+func (fake *fakeCodex) SendLiteral(_ context.Context, _ pfmcall.Target, text string) error {
 	fake.mutex.Lock()
 	defer fake.mutex.Unlock()
 	fake.keys = append(fake.keys, "literal:"+text)
@@ -172,7 +183,7 @@ func (fake *fakeCodex) SendLiteral(_ context.Context, _, _, text string) error {
 	return nil
 }
 
-func (fake *fakeCodex) SendPaste(_ context.Context, _, _, text string) error {
+func (fake *fakeCodex) SendPaste(_ context.Context, _ pfmcall.Target, text string) error {
 	fake.mutex.Lock()
 	defer fake.mutex.Unlock()
 	fake.keys = append(fake.keys, "paste:"+text)
@@ -183,7 +194,7 @@ func (fake *fakeCodex) SendPaste(_ context.Context, _, _, text string) error {
 	return nil
 }
 
-func (fake *fakeCodex) SendKey(_ context.Context, _, _, key string) error {
+func (fake *fakeCodex) SendKey(_ context.Context, _ pfmcall.Target, key string) error {
 	fake.mutex.Lock()
 	defer fake.mutex.Unlock()
 	fake.keys = append(fake.keys, "key:"+key)
@@ -532,7 +543,11 @@ func TestClaudeNeedsNoChoreography(t *testing.T) {
 // deadPane is a server whose session never comes up — the chat died at birth.
 type deadPane struct{ fakeCodex }
 
-func (fake *deadPane) Capture(context.Context, string, string) (string, error) {
+func (fake *deadPane) Pane(socket, pane string) (pfmcall.Screen, pfmcall.Target, error) {
+	return fake, fakeTarget(socket, pane), nil
+}
+
+func (fake *deadPane) CaptureScreen(context.Context, pfmcall.Target) (string, error) {
 	return "", errNoSession{}
 }
 
@@ -547,7 +562,11 @@ type cancelledCapturePane struct {
 	started chan struct{}
 }
 
-func (fake *cancelledCapturePane) Capture(ctx context.Context, _, _ string) (string, error) {
+func (fake *cancelledCapturePane) Pane(socket, pane string) (pfmcall.Screen, pfmcall.Target, error) {
+	return fake, fakeTarget(socket, pane), nil
+}
+
+func (fake *cancelledCapturePane) CaptureScreen(ctx context.Context, _ pfmcall.Target) (string, error) {
 	close(fake.started)
 	<-ctx.Done()
 	return "", errors.New("signal: killed")
@@ -788,7 +807,14 @@ func TestCodexRenameOfANamedThreadFindsItsRetitledModal(t *testing.T) {
 	fake.hintOnlyWhenEmpty = true
 	fake.ledger = t.TempDir()
 	useCodexHomes(t, fake.ledger)
-	warning, err := RenameCodex(context.Background(), fake, "cx-1-2-3", "cx-1-2-3", "new name", testTimings(), Trace{})
+	warning, err := RenameCodex(
+		context.Background(),
+		fake,
+		fakeTarget("cx-1-2-3", "cx-1-2-3"),
+		"new name",
+		testTimings(),
+		Trace{},
+	)
 	if err != nil {
 		t.Fatalf("RenameCodex() error = %v", err)
 	}

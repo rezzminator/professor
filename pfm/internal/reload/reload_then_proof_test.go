@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
@@ -69,7 +70,7 @@ type composerPastePlaceholderTmux struct {
 	submitted  bool
 }
 
-func (tmux *composerPastePlaceholderTmux) Capture(context.Context, string, string) (string, error) {
+func (tmux *composerPastePlaceholderTmux) CaptureScreen(context.Context, pfmcall.Target) (string, error) {
 	if tmux.literal == "" {
 		// Pre-send: both the input-box wait and the pre-send baseline see an
 		// empty composer.
@@ -81,14 +82,14 @@ func (tmux *composerPastePlaceholderTmux) Capture(context.Context, string, strin
 	return "Chat\n❯ [Pasted text #3 +72 lines]", nil
 }
 
-func (tmux *composerPastePlaceholderTmux) SendKey(ctx context.Context, socket, pane, key string) error {
+func (tmux *composerPastePlaceholderTmux) SendKey(ctx context.Context, target pfmcall.Target, key string) error {
 	if key == "Enter" {
 		tmux.enterCount++
 		if tmux.enterCount >= 2 {
 			tmux.submitted = true
 		}
 	}
-	return tmux.fakeReloadTmux.SendKey(ctx, socket, pane, key)
+	return tmux.fakeReloadTmux.SendKey(ctx, target, key)
 }
 
 func TestDeliverThenAcceptsAComposerPastePlaceholderAsProofOfDelivery(t *testing.T) {
@@ -133,16 +134,16 @@ type stalePlaceholderScrollbackTmux struct {
 	enterCount int
 }
 
-func (tmux *stalePlaceholderScrollbackTmux) Capture(context.Context, string, string) (string, error) {
+func (tmux *stalePlaceholderScrollbackTmux) CaptureScreen(context.Context, pfmcall.Target) (string, error) {
 	tmux.tick++
 	return fmt.Sprintf("Chat\n[Pasted text #1 +5 lines]  (an earlier turn)\nspinner %d\n❯ ", tmux.tick), nil
 }
 
-func (tmux *stalePlaceholderScrollbackTmux) SendKey(ctx context.Context, socket, pane, key string) error {
+func (tmux *stalePlaceholderScrollbackTmux) SendKey(ctx context.Context, target pfmcall.Target, key string) error {
 	if key == "Enter" {
 		tmux.enterCount++
 	}
-	return tmux.fakeReloadTmux.SendKey(ctx, socket, pane, key)
+	return tmux.fakeReloadTmux.SendKey(ctx, target, key)
 }
 
 func TestDeliverThenRefusesAStalePlaceholderLeftInScrollback(t *testing.T) {
@@ -193,7 +194,7 @@ type baselineFailureTmux struct {
 	submitted    bool
 }
 
-func (tmux *baselineFailureTmux) Capture(context.Context, string, string) (string, error) {
+func (tmux *baselineFailureTmux) CaptureScreen(context.Context, pfmcall.Target) (string, error) {
 	tmux.captures++
 	switch tmux.captures {
 	case 1:
@@ -213,14 +214,14 @@ func (tmux *baselineFailureTmux) Capture(context.Context, string, string) (strin
 	}
 }
 
-func (tmux *baselineFailureTmux) SendKey(ctx context.Context, socket, pane, key string) error {
+func (tmux *baselineFailureTmux) SendKey(ctx context.Context, target pfmcall.Target, key string) error {
 	if key == "Enter" {
 		tmux.enterCount++
 		if tmux.enterCount >= 2 {
 			tmux.submitted = true
 		}
 	}
-	return tmux.fakeReloadTmux.SendKey(ctx, socket, pane, key)
+	return tmux.fakeReloadTmux.SendKey(ctx, target, key)
 }
 
 func TestDeliverThenRefusesWhenTheBaselineCaptureFailed(t *testing.T) {
@@ -277,7 +278,7 @@ type stuckSubmitTmux struct {
 	fakeReloadTmux
 }
 
-func (tmux *stuckSubmitTmux) Capture(context.Context, string, string) (string, error) {
+func (tmux *stuckSubmitTmux) CaptureScreen(context.Context, pfmcall.Target) (string, error) {
 	if tmux.respawn == "" {
 		if tmux.literal == "/exit" {
 			return "Chat\n❯ /exit", nil

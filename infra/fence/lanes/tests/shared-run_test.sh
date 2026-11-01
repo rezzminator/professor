@@ -96,6 +96,16 @@ out="$(PFM_FENCE_HEADROOM_MIB=4096 bash -c 'source "$1" kill r-admission; scratc
 if [[ $rc != 0 && "$out" == 'shared-run: disk scratch: free 4096 MiB, needed 5970 MiB' ]]; then
   ok "RAM admission sums configured caps and headroom, not the old constant"
 else bad "RAM admission sums configured caps and headroom" "rc=$rc $out"; fi
+# Page cache the kernel can drop (inactive_file) is free for admission, not used.
+printf '%s\n' 4294967296 > "$PFM_FENCE_CGROUP_ROOT/memory.current"
+out="$(bash -c 'source "$1" kill r-cache; scratch_uses_ram' _ "$SUT" 2>&1)"; rc=$?
+printf 'anon 1073741824\ninactive_file 3221225472\n' > "$PFM_FENCE_CGROUP_ROOT/memory.stat"
+out2="$(bash -c 'source "$1" kill r-cache; scratch_uses_ram' _ "$SUT" 2>&1)"; rc2=$?
+if [[ $rc != 0 && "$out" == 'shared-run: disk scratch: free 1024 MiB, needed 2898 MiB' && $rc2 == 0 && -z "$out2" ]]; then
+  ok "RAM admission counts reclaimable page cache as free"
+else bad "RAM admission counts reclaimable page cache as free" "without stat rc=$rc $out" "with stat rc=$rc2 $out2"; fi
+rm "$PFM_FENCE_CGROUP_ROOT/memory.stat"
+printf '%s\n' 1073741824 > "$PFM_FENCE_CGROUP_ROOT/memory.current"
 
 # The suite's STATE is itself tmpfs: verify bind sources, not the backing filesystem type.
 disk_probe='for spec in /root:home:700 /tmp:tmp:1777 /var/tmp:vartmp:1777; do

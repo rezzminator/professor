@@ -272,3 +272,64 @@ func unescape(lit string) string {
 	}
 	return b.String()
 }
+
+// Quote returns one POSIX-shell single-quoted word, the quoting
+// SplitShellWords decodes. Literal newlines remain inside the quotes, so they
+// are data rather than command separators (syntax.Quote refuses a newline
+// under LangPOSIX, so it cannot serve here).
+func Quote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
+}
+
+// SplitShellWords splits line into words as the shell does, removing quotes
+// and backslashes, and expands nothing: a $, a backtick or a glob stays as
+// written. An unquoted operator or comment is refused, never read as text.
+func SplitShellWords(line string) ([]string, error) {
+	words := []string{}
+	end := 0
+	for word, err := range syntax.NewParser(syntax.Variant(syntax.LangPOSIX)).WordsSeq(strings.NewReader(line)) {
+		if err != nil {
+			return nil, fmt.Errorf("split shell words: %w", err)
+		}
+		if err := blankGap(line[end:word.Pos().Offset()]); err != nil {
+			return nil, err
+		}
+		words = append(words, literal(line, word.Parts, false))
+		end = int(word.End().Offset())
+	}
+	if err := blankGap(line[end:]); err != nil {
+		return nil, err
+	}
+	return words, nil
+}
+
+// blankGap refuses text the word parser skipped between words: a comment.
+func blankGap(gap string) error {
+	if text := strings.TrimSpace(strings.ReplaceAll(gap, "\\\n", "")); text != "" {
+		return fmt.Errorf("split shell words: unquoted comment %q", text)
+	}
+	return nil
+}
+
+// literal is a word's value with quotes and backslashes removed; any other
+// part — an expansion or substitution — keeps its source text.
+func literal(source string, parts []syntax.WordPart, quoted bool) string {
+	var b strings.Builder
+	for _, part := range parts {
+		switch x := part.(type) {
+		case *syntax.Lit:
+			if quoted {
+				b.WriteString(dquoteUnescape(x.Value))
+			} else {
+				b.WriteString(unescape(x.Value))
+			}
+		case *syntax.SglQuoted:
+			b.WriteString(x.Value)
+		case *syntax.DblQuoted:
+			b.WriteString(literal(source, x.Parts, true))
+		default:
+			b.WriteString(source[part.Pos().Offset():part.End().Offset()])
+		}
+	}
+	return b.String()
+}

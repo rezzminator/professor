@@ -142,14 +142,20 @@ cmd_run() {
 
 scratch_uses_ram() {
   # This is a snapshot, not a reservation: simultaneous admissions can still race.
-  local cg="${PFM_FENCE_CGROUP_ROOT:-/sys/fs/cgroup}" limit current free
+  local cg="${PFM_FENCE_CGROUP_ROOT:-/sys/fs/cgroup}" limit current free key value reclaimable=0
   local needed_mib=$((PFM_FENCE_HOME_MIB + PFM_FENCE_TMP_MIB + PFM_FENCE_VARTMP_MIB + PFM_FENCE_SHM_MIB + 2 * PFM_FENCE_HIDE_MIB + PFM_FENCE_HEADROOM_MIB))
   if ! { IFS= read -r limit < "$cg/memory.max" && IFS= read -r current < "$cg/memory.current"; } 2>/dev/null \
     || [[ ! "$limit" =~ ^[0-9]{1,18}$ || ! "$current" =~ ^[0-9]{1,18}$ ]]; then
     echo "shared-run: disk scratch: cgroup read failed ($cg/memory.max, $cg/memory.current); free unknown MiB, needed $needed_mib MiB" >&2
     return 1
   fi
-  free=$((10#$limit - 10#$current))
+  # The long-lived fence fills its cgroup with page cache the kernel drops on demand; counting it as
+  # used sends every later run to disk scratch. Without memory.stat the estimate stays conservative.
+  if [ -r "$cg/memory.stat" ]; then
+    while read -r key value; do [ "$key" = inactive_file ] && { reclaimable="$value"; break; }; done < "$cg/memory.stat"
+  fi
+  [[ "$reclaimable" =~ ^[0-9]{1,18}$ ]] || reclaimable=0
+  free=$((10#$limit - 10#$current + 10#$reclaimable))
   (( free >= 0 )) || free=0
   (( free >= needed_mib * 1024 * 1024 )) && return 0
   echo "shared-run: disk scratch: free $((free / 1024 / 1024)) MiB, needed $needed_mib MiB" >&2

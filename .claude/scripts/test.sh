@@ -37,7 +37,7 @@
 #                  FAIL on a finding in a named file or any `(typecheck)` finding; others are burn-down),
 #                  arch, launch-literals
 #   any path       rumdl (named .md files), leak (named files)
-#   other paths    clone, placeholders, scratch-paths, descriptions, manifest, codex-markers
+#   other paths    clone, placeholders, scratch-paths, output-styles, descriptions, codex-markers
 # Everything runs in the shared fence (dev.sh iso run, PFM_FENCE_NET=private: the run's own network
 # namespace), in ONE run: tests in the order named, then the checks. Every tool is the fence image's
 # (no host tool, no setup step); one it lacks is `CHECK FAIL image (the fence image lacks: …)` and no
@@ -250,12 +250,13 @@ static_templates() { # the templates unit's unit-wide checks
     source "$ROOT/pfm/scripts/repo-git.sh" && source "$ROOT/infra/fence/checks.sh"; then
     s_shim placeholders checks_templates_placeholders
     s_shim scratch-paths checks_templates_scratch_paths
+    s_shim output-styles checks_templates_output_styles
   else
     s_verdict placeholders 1 "pfm/scripts/repo-git.sh or infra/fence/checks.sh could not be sourced: $out"
     s_verdict scratch-paths 1 "pfm/scripts/repo-git.sh or infra/fence/checks.sh could not be sourced"
+    s_verdict output-styles 1 "pfm/scripts/repo-git.sh or infra/fence/checks.sh could not be sourced"
   fi
   s_check descriptions bash scripts/description-check.sh
-  s_check manifest bash infra/check-self-hosted-manifest.sh "$ROOT" templates pfm
   s_check codex-markers node scripts/check-codex-markers.mjs
 }
 

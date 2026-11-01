@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"unicode"
@@ -50,6 +51,7 @@ const (
 	pcmGuardPushd       = "pushd"
 	pcmGuardPopd        = "popd"
 	pcmGuardDash        = "dash"
+	pcmGuardTemplates   = "templates"
 )
 
 var (
@@ -82,19 +84,24 @@ var (
 
 // pcmGuardScope is what a path is judged against: home, the Professor clone
 // (physical, "" when unresolved) and the Claude config dirs, as written and
-// physical.
+// physical. engine is the Codex and OpenCode reading (EngineGuard), whose
+// roots (engineGuardRoots) are protected whole, as are the config dirs.
 type pcmGuardScope struct {
 	home, clone string
 	configs     []string
+	engine      bool
+	roots       []string
 }
 
 // pcmGuardJudge collects one call's verdict: the paths only pcm writes, the
-// themes only themer writes, and whether a write target could not be read.
+// themes only themer writes, and whether a write target could not be read;
+// in engine mode also the blind parts (enginePart) and the file texts it read.
 type pcmGuardJudge struct {
 	scope              pcmGuardScope
 	agent              string
 	pcmOnly, themeOnly []string
 	unreadable         bool
+	blind, read        []string
 }
 
 // PcmGuard is the PreToolUse hook on the edit tools and Bash that denies a
@@ -127,7 +134,7 @@ func PcmGuard(input io.Reader, stdout, stderr io.Writer) int {
 	if !filepath.IsAbs(cwd) {
 		cwd = ""
 	}
-	judge := &pcmGuardJudge{scope: pcmGuardNewScope(stderr), agent: hook.AgentType}
+	judge := &pcmGuardJudge{scope: pcmGuardNewScope(stderr, false), agent: hook.AgentType}
 	if editing {
 		if target := cmp.Or(hook.ToolInput.FilePath, hook.ToolInput.NotebookPath); target != "" {
 			if !filepath.IsAbs(target) {
@@ -135,11 +142,15 @@ func PcmGuard(input io.Reader, stdout, stderr io.Writer) int {
 			}
 			judge.path(filepath.Clean(target))
 		}
-	} else if err := judge.bash(hook.ToolInput.Command, cwd); err != nil {
+	} else if err := judge.bash(hook.ToolInput.Command, cwd, 0); err != nil {
 		fmt.Fprintf(stderr, "pfm internal pcm-guard: parse command (fail-open): %v\n", err)
 		return 0
 	}
-	judge.unreadable = judge.unreadable && pcmGuardMentions(hook.ToolInput.Command, hook.AgentType)
+	names := pcmGuardPromptNames
+	if hook.AgentType == pcmGuardWriter {
+		names = []string{"themes"}
+	}
+	judge.unreadable = judge.unreadable && pcmGuardMentions(hook.ToolInput.Command, names)
 	if len(judge.pcmOnly) == 0 && len(judge.themeOnly) == 0 && !judge.unreadable {
 		return 0
 	}
@@ -152,11 +163,14 @@ func PcmGuard(input io.Reader, stdout, stderr io.Writer) int {
 
 // pcmGuardNewScope reads home, the clone the way pfm install finds it
 // (paths.GlobalSourceRepo) and the config dirs: ~/.claude and the chat's
-// CLAUDE_CONFIG_DIR. What it cannot read leaves that root unguarded, with
-// one stderr line.
-func pcmGuardNewScope(stderr io.Writer) pcmGuardScope {
+// CLAUDE_CONFIG_DIR; engine adds engineGuardRoots. What it cannot read
+// leaves that root unguarded, with one stderr line.
+func pcmGuardNewScope(stderr io.Writer, engine bool) pcmGuardScope {
 	home := storeGuardGet("HOME")
-	scope := pcmGuardScope{home: home}
+	scope := pcmGuardScope{home: home, engine: engine}
+	if engine {
+		scope.roots = engineGuardRoots(home)
+	}
 	dirs := []string{storeGuardGet(storeGuardEnv)}
 	if home != "" {
 		dirs = append(dirs, claudelaunch.ClaudeStore(home))
@@ -199,18 +213,14 @@ func (scope pcmGuardScope) class(abs string) (protected, theme bool) {
 }
 
 func (scope pcmGuardScope) classOne(path string) (protected, theme bool) {
+	if scope.engine {
+		return scope.engineClass(path), false
+	}
 	if strings.EqualFold(filepath.Base(path), "CLAUDE.md") {
 		return true, false
 	}
-	if rel, ok := pcmGuardUnder(path, scope.clone); ok {
-		elems := strings.Split(rel, string(filepath.Separator))
-		if len(elems) > 2 && elems[0] == ".worktrees" {
-			// A flight worktree of the clone carries the same templates.
-			elems = elems[2:]
-		}
-		if elems[0] == "templates" {
-			return true, len(elems) > 1 && elems[1] == "themes"
-		}
+	if in, theme := scope.templates(path); in {
+		return true, theme
 	}
 	for _, config := range scope.configs {
 		if rel, ok := pcmGuardUnder(path, config); ok {
@@ -224,6 +234,22 @@ func (scope pcmGuardScope) classOne(path string) (protected, theme bool) {
 		}
 	}
 	return false, false
+}
+
+// templates reports a path under the clone's templates/ (or a flight
+// worktree's), and whether it lies under templates/themes/.
+func (scope pcmGuardScope) templates(path string) (in, theme bool) {
+	rel, ok := pcmGuardUnder(path, scope.clone)
+	if !ok {
+		return false, false
+	}
+	elems := strings.Split(rel, string(filepath.Separator))
+	if len(elems) > 2 && elems[0] == ".worktrees" {
+		// A flight worktree of the clone carries the same templates.
+		elems = elems[2:]
+	}
+	in = elems[0] == pcmGuardTemplates
+	return in, in && len(elems) > 1 && elems[1] == "themes"
 }
 
 // pcmGuardUnder returns path relative to root ("" for root itself) when
@@ -301,8 +327,9 @@ func (judge *pcmGuardJudge) resolve(word, dir string) (string, bool) {
 // bash judges every part of a Bash command in order. The flat part list
 // does not say where a cd stops applying (a subshell, an inner shell, popd),
 // so a relative word is judged in every directory the call may stand in: the
-// cwd and each directory a cd, pushd or popd may have moved it to.
-func (judge *pcmGuardJudge) bash(command, cwd string) error {
+// cwd and each directory a cd, pushd or popd may have moved it to. depth
+// counts the shell programs the command is read inside (pcmGuardJudge.shell).
+func (judge *pcmGuardJudge) bash(command, cwd string, depth int) error {
 	parsed, err := cmdparse.ParseBatch([]cmdparse.Call{{
 		ID: "pcm-guard", Command: command, Cwd: cmp.Or(cwd, string(filepath.Separator)),
 		Vars: map[string]string{"HOME": judge.scope.home},
@@ -316,15 +343,17 @@ func (judge *pcmGuardJudge) bash(command, cwd string) error {
 			judge.unreadable = true
 			continue
 		}
+		judge.unreadable = judge.unreadable || part.Unread
 		base := filepath.Base(part.Program)
-		words, codes := pcmGuardWords(&part, base), pcmGuardCode(&part, base)
+		words := pcmGuardWords(&part, base)
 		_, copying := pcmGuardCopyValued[base]
 		for _, dir := range dirs {
 			for _, word := range words {
 				judge.word(word, dir)
 			}
-			for _, code := range codes {
-				judge.code(code, dir)
+			judge.program(&part, base, dir, depth)
+			if judge.scope.engine {
+				judge.enginePart(&part, base, dir, depth)
 			}
 			if copying {
 				judge.copies(base, part.Args, dir)
@@ -379,7 +408,7 @@ func pcmGuardWords(part *cmdparse.Part, base string) []string {
 	}
 	var operands []string
 	switch base {
-	case "tee", "rm", "unlink":
+	case "tee", "rm", pcmGuardUnlink:
 		operands, _ = pcmGuardSplit(part.Args)
 	case "touch":
 		operands, _ = pcmGuardSplit(part.Args, "-r", "--reference", "-d", "--date", "-t")
@@ -470,34 +499,28 @@ func (judge *pcmGuardJudge) copies(base string, args []string, dir string) {
 // pcmGuardCodeFlags are the short flags whose value is inline code, per
 // interpreter; python names every python* program.
 // dash and ksh are here because cmdparse parses only a bash, sh or zsh -c
-// string (cmdparse.shellScript), so theirs is read as code.
+// string (cmdparse.shellScript), so pcmGuardJudge.program parses theirs.
 var pcmGuardCodeFlags = map[string]string{
-	"python": "c", "node": "ep", "nodejs": "ep", "perl": "eE", "ruby": "e", pcmGuardDash: "c", "ksh": "c",
+	pcmGuardPython: "c", pcmGuardNode: "ep", "nodejs": "ep", pcmGuardPerl: "eE", pcmGuardRuby: "e",
+	pcmGuardDash: "c", "ksh": "c",
 }
 
-// pcmGuardCode returns the inline code an interpreter runs: a heredoc or
-// here-string body fed to python, node, perl, ruby or a shell, and the value
-// of a code flag (alone or in a short cluster: -c, -e, -pe, the code the next
+// pcmGuardCode returns the inline code an interpreter runs: the value of a
+// code flag (alone or in a short cluster: -c, -e, -pe, the code the next
 // word or joined to it: -c'code'), --eval and --print. A bash, sh or zsh -c
-// string is no code here: cmdparse parses it into parts of its own.
+// string is no code here: cmdparse parses it into parts of its own, or marks
+// its part Unread when it cannot know the string (PcmGuard's bash). Its
+// heredocs and here-strings are pcmGuardStdin's.
 func pcmGuardCode(part *cmdparse.Part, base string) []string {
 	shell := slices.Contains(pcmGuardShells, base)
-	if strings.HasPrefix(base, "python") {
-		base = "python"
+	if strings.HasPrefix(base, pcmGuardPython) {
+		base = pcmGuardPython
 	}
 	flags, interpreter := pcmGuardCodeFlags[base]
 	if !shell && !interpreter {
 		return nil
 	}
 	var code []string
-	for _, r := range part.Redirs {
-		switch r.Op {
-		case "<<", "<<-":
-			code = append(code, r.Body)
-		case "<<<":
-			code = append(code, r.Target)
-		}
-	}
 	for i, a := range part.Args {
 		if name, value, ok := strings.Cut(a, "="); ok && !shell && slices.Contains(pcmGuardLongCode, name) {
 			code = append(code, value)
@@ -520,11 +543,17 @@ func pcmGuardCode(part *cmdparse.Part, base string) []string {
 	return code
 }
 
-// code judges inline code by the paths it names: every path-shaped token
-// (holding a /, named CLAUDE.md, or naming an existing file) is judged as a
-// write. shortcut: a read-only script naming a prompt file is denied too;
-// reading what the code does would need its language's parser.
+// code judges code by the paths it names: every path-shaped token (holding
+// a /, named CLAUDE.md, or naming an existing file) is judged as a write. A
+// token naming an existing directory counts only as a whole quoted literal
+// ('templates'), the one form a directory operation takes it in; the same word
+// inside prose ("FAIL templates steps") names no path. It is the reading of
+// code whose writes pcmGuardJudge.interpret cannot read.
 func (judge *pcmGuardJudge) code(code, dir string) {
+	literals := map[string]bool{}
+	for _, match := range pcmGuardWholeLiteral.FindAllStringSubmatch(code, -1) {
+		literals[match[2]] = true
+	}
 	tokens := strings.FieldsFunc(code, func(r rune) bool {
 		return unicode.IsSpace(r) || strings.ContainsRune("'\"`()[]{};,=<>|&$!#*?\\", r)
 	})
@@ -533,12 +562,16 @@ func (judge *pcmGuardJudge) code(code, dir string) {
 		if !ok {
 			continue
 		}
-		_, err := os.Lstat(abs)
-		if strings.Contains(token, "/") || strings.EqualFold(filepath.Base(token), "CLAUDE.md") || err == nil {
+		info, err := os.Lstat(abs)
+		named := err == nil && (!info.IsDir() || literals[token])
+		if strings.Contains(token, "/") || strings.EqualFold(filepath.Base(token), "CLAUDE.md") || named {
 			judge.path(abs)
 		}
 	}
 }
+
+// pcmGuardWholeLiteral is one quoted string whose whole text is a single word.
+var pcmGuardWholeLiteral = regexp.MustCompile("(['\"`])([^'\"`\\s]+)['\"`]")
 
 // pcmGuardSplit returns args' operands and the values of the flags named in
 // valued: a long flag as --flag=v or --flag v, a short one alone or in a
@@ -584,22 +617,31 @@ func pcmGuardSplit(args []string, valued ...string) ([]string, map[string]string
 	return operands, values
 }
 
+// pcmGuardPromptNames are the names a prompt-file write is recognised by in
+// a command the guard could not read: CLAUDE.md, .claude and templates.
+var pcmGuardPromptNames = []string{"claude.md", ".claude", pcmGuardTemplates}
+
 // pcmGuardMentions reports whether a command the guard could not read in
-// full names a file the caller may not write: for pcm only a theme, for
-// everyone else CLAUDE.md, .claude or templates.
-func pcmGuardMentions(command, agent string) bool {
-	lower := strings.ToLower(command)
-	if agent == pcmGuardWriter {
-		return strings.Contains(lower, "themes")
-	}
-	return strings.Contains(lower, "claude.md") || strings.Contains(lower, ".claude") ||
-		strings.Contains(lower, "templates")
+// full names a file the caller may not write: one of names (lower case),
+// each counted as a whole path element or word, letter case folded, a
+// trailing dot dropped, so .claude-plugin, .claude.json and my_templates_x
+// name none.
+func pcmGuardMentions(command string, names []string) bool {
+	elements := strings.FieldsFunc(strings.ToLower(command), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r) && !strings.ContainsRune("._-", r)
+	})
+	return slices.ContainsFunc(elements, func(element string) bool {
+		return slices.Contains(names, strings.TrimRight(element, "."))
+	})
 }
 
 // reason is the one deny message: the paths only pcm writes and the route to
 // pcm, the themes only themer writes and the route to themer, then the
 // unreadable-command line.
 func (judge *pcmGuardJudge) reason() string {
+	if judge.scope.engine {
+		return judge.engineReason()
+	}
 	var lines []string
 	if len(judge.pcmOnly) > 0 {
 		lines = append(

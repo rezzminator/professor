@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/codexmeta"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
@@ -199,9 +200,10 @@ func Await(
 			// whole. A new SPELLING of the same file is not a move: a fresh
 			// Claude chat is named by its hook crumb's path until the index
 			// has it, then by the index's, and an account whose projects/ is
-			// a symlink spells the one file two ways. Reading it whole again
-			// would count the question twice.
-			if path != "" && !sameTranscriptFile(ctx, path, chat.Path) {
+			// a symlink spells the one file two ways, and a compressed rollout
+			// Codex decompressed to resume it holds its lines at the same
+			// offsets. Reading it whole again would count the question twice.
+			if path != "" && !sameTranscriptFile(ctx, path, chat.Path) && codexmeta.PlainTwin(path) != chat.Path {
 				offset = 0
 			}
 			path = chat.Path

@@ -25,10 +25,11 @@ The project contract is already in your context: never open a `CLAUDE.md` or `AG
 ## 0. Sync to the target's tip
 
 1. `TIP=$(git -C {WORKTREE} rev-parse {TARGET}^{commit})`; record `git -C {WORKTREE} rev-parse HEAD`.
-2. `git -C {WORKTREE} merge-base --is-ancestor $TIP HEAD` succeeds → BASE stays; go to § Review.
-3. Otherwise spawn `gitter` (foreground; nothing else can run on a moving tree): "Bring {WORKTREE} up to {TIP}, keeping its uncommitted and untracked work: stash, rebase the branch's commits onto {TIP}, pop. On a conflict stop with the markers left in place and return the conflicted paths; never abort, never pick a side."
-4. Conflicted paths returned: resolve each yourself — read both sides, keep the change's intent on top of the tip's code, no markers left — then `SendMessage` that gitter to continue and finish the stash pop.
-5. BASE becomes $TIP. Record the old base, $TIP and every resolved path for the report's COVERAGE.
+2. TARGET a branch: the true tip compares `git ls-remote origin` of the branch with that branch in the live checkout (`git -C {WORKTREE} worktree list`'s first entry), for the root on TARGET and each submodule or plugin repo the change touches on its tracked branch; local remote-tracking refs alone never settle it. `ls-remote` is your read, a fetch is gitter's; a failed one is drift `unknown`, never up to date. Live commits origin lacks (ahead), origin commits the live ref lacks (behind) or both (diverged) are drift: the root behind only → `gitter` fetches and TIP becomes origin's tip; every other drift goes to SYNC.
+3. `git -C {WORKTREE} merge-base --is-ancestor $TIP HEAD` succeeds → BASE stays; go to § Review.
+4. Otherwise spawn `gitter` (foreground; nothing else can run on a moving tree): "Bring {WORKTREE} up to {TIP}, keeping its uncommitted and untracked work: stash, rebase the branch's commits onto {TIP}, pop. On a conflict stop with the markers left in place and return the conflicted paths; never abort, never pick a side."
+5. Conflicted paths returned: resolve each yourself — read both sides, keep the change's intent on top of the tip's code, no markers left — then `SendMessage` that gitter to continue and finish the stash pop.
+6. BASE becomes $TIP. Record the old base, $TIP, every resolved path and every drift for the report's COVERAGE.
 
 ## 1. Review
 
@@ -73,6 +74,7 @@ Read every changed function whole, several per call, plus the unchanged helpers 
 6. INPUTS: every payload or config field read — absent, `null`, zero, empty values.
 7. TESTS: each new or changed test drives the production path and would fail without the change.
 8. CLAIMS: each INTENT sentence — the line that does it.
+9. TWIN DOORS: each operation the change adds or fixes — another implementation of it outside the diff (grep its verb, data and outside command) that it copies or leaves unfixed.
 
 At each changed function ask what the surrounding code obliges it to have — a default arm, a deadline, a log on a fallback, the field every sibling return sets — and check for its absence.
 
@@ -125,7 +127,7 @@ One message, its first word the verdict:
 
 ```text
 PASS {worktree} | FIXED {worktree} | FAIL {worktree}
-SYNC {up to date | synced {old base} → {TIP}, resolved {paths} | none}
+SYNC {up to date | synced {old base} → {TIP}, resolved {paths} | none}{; drift {repo} {ahead|behind|diverged|unknown} {live sha} vs {origin sha}, …}
 FINDINGS F{n} {fixed — file:line | outside the change — why}, … | none
 GATE {project} · {last full-gate verdict line as printed}, …
 RESIDUALS {what is left open} | none

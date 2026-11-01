@@ -13,6 +13,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/reload"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
@@ -224,5 +225,28 @@ func TestSeatHostPreBindFailurePreservesLiveSeat(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "current Herdr pane identity is required") {
 		t.Fatalf("missing local failure: %s", &stderr)
+	}
+}
+
+func TestCurrentClaudeBinaryReplacesOnlyAPrunedBuild(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	versions := gather.ClaudeVersionsDir(home)
+	kept := filepath.Join(versions, "2.1.316")
+	if err := os.MkdirAll(versions, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := testjail.WriteExecutable(kept, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct{ recorded, want string }{
+		{filepath.Join(versions, "2.1.308"), kept},
+		{kept, kept},
+		{filepath.Join(home, "missing-engine"), filepath.Join(home, "missing-engine")},
+	} {
+		got, err := currentClaudeBinary(test.recorded, home, "")
+		if err != nil || got != test.want {
+			t.Fatalf("currentClaudeBinary(%q) = %q, %v; want %q", test.recorded, got, err, test.want)
+		}
 	}
 }

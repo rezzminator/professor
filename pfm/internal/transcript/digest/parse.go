@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/rezzminator/professor/pfm/internal/codexmeta"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/jsvalue"
 	"github.com/rezzminator/professor/pfm/internal/pyvalue"
@@ -236,7 +237,7 @@ func parseTranscript(ctx context.Context, path string) (*parsed, error) {
 			unacc = append(unacc, line)
 		}
 	}
-	file, err := os.Open(path)
+	file, err := codexmeta.OpenRollout(path)
 	if err != nil {
 		return nil, runtimeFailure("cannot read %s: %v", path, err)
 	}

@@ -12,12 +12,12 @@ import (
 	"testing"
 	"time"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/kill"
-	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
@@ -1101,11 +1101,12 @@ func TestReconcileCodexPanesDropsABindingOnAClearRetiredThread(t *testing.T) {
 // the rename state machine waits for is present in one capture, so each wait
 // satisfies immediately and the rename reports CONFIRMED. It exists to reach
 // the step AFTER the rename, which had no coverage at all.
-type fakeCodexRenamer struct{ name string }
+type fakeCodexRenamer struct {
+	pfmcall.Screen // CaptureStyled: never read on the rename path
+	name           string
+}
 
-func (renamer fakeCodexRenamer) NewSession(context.Context, spawn.SessionSpec) error { return nil }
-
-func (renamer fakeCodexRenamer) Capture(context.Context, string, string) (string, error) {
+func (renamer fakeCodexRenamer) CaptureScreen(context.Context, pfmcall.Target) (string, error) {
 	return "› Ask Codex to do anything\n" +
 		"gpt-5-codex · /work/example · 12% used\n" +
 		"rename the current thread\n" +
@@ -1113,15 +1114,15 @@ func (renamer fakeCodexRenamer) Capture(context.Context, string, string) (string
 		"• Session renamed to " + renamer.name + ".\n", nil
 }
 
-func (renamer fakeCodexRenamer) SendLiteral(context.Context, string, string, string) error {
+func (renamer fakeCodexRenamer) SendLiteral(context.Context, pfmcall.Target, string) error {
 	return nil
 }
 
-func (renamer fakeCodexRenamer) SendPaste(context.Context, string, string, string) error {
+func (renamer fakeCodexRenamer) SendPaste(context.Context, pfmcall.Target, string) error {
 	return nil
 }
 
-func (renamer fakeCodexRenamer) SendKey(context.Context, string, string, string) error { return nil }
+func (renamer fakeCodexRenamer) SendKey(context.Context, pfmcall.Target, string) error { return nil }
 
 // After a clear, pfm re-applies the chat's name to the NEW thread and must
 // record that rename in cx_names itself.

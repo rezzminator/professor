@@ -16,6 +16,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
@@ -23,6 +24,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/place"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
+	seatspawn "github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -76,9 +78,9 @@ func TestNewClaudeUsesNativeConfiguredSpawn(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"CLAUDE_CONFIG_DIR=" + Quote(machine.Accounts[0].ConfigDir),
-		Quote(machine.Claude.Binary),
-		Quote(prompt),
+		"CLAUDE_CONFIG_DIR=" + cmdparse.Quote(machine.Accounts[0].ConfigDir),
+		cmdparse.Quote(machine.Claude.Binary),
+		cmdparse.Quote(prompt),
 	} {
 		if !strings.Contains(plan.Run, want) {
 			t.Fatalf("native fresh run %q lacks %q", plan.Run, want)
@@ -281,15 +283,16 @@ func TestHerdrPickerOpensInItsOwnPane(t *testing.T) {
 			var stderr strings.Builder
 			executor, err := New(Dependencies{
 				Tmux: &fakeActionTmux{alive: map[string]bool{}}, Stderr: &stderr,
-				HerdrPlaces: func(context.Context) (*place.Fleet, error) { return &place.Fleet{}, nil },
-				Identify: func(context.Context) (resolve.Identity, error) {
-					return resolve.Identity{
+				Place: func(ctx context.Context, door, requested string) (seatspawn.BackendChoice, error) {
+					choice, err := seatspawn.Place(ctx, door, requested, "", false, resolve.Identity{
 						Backend:        "herdr",
 						SocketPath:     fake.socket,
 						Pane:           "w6:p3",
 						HerdrWorkspace: "w6",
 						Fronted:        test.refuse != "stale",
-					}, resolve.ErrNotRegistered
+					}, resolve.ErrNotRegistered)
+					choice.Places = func(context.Context) (*place.Fleet, error) { return &place.Fleet{}, nil }
+					return choice, err
 				},
 			})
 			if err != nil {
@@ -308,7 +311,7 @@ func TestHerdrPickerOpensInItsOwnPane(t *testing.T) {
 				fake.label, fake.renames = "work", nil
 				fake.mu.Unlock()
 			}
-			line, err := executor.Open(context.Background(), Request{
+			line, err := openLine(executor, context.Background(), Request{
 				Row: row, LaunchName: test.launchName, Home: home, PrimaryAccount: 2,
 				FreshSocket: "unused", Config: machine,
 			})
@@ -491,7 +494,9 @@ func TestPickerRejectsCallerReadFailure(t *testing.T) {
 	tmux := &fakeActionTmux{alive: map[string]bool{}, panes: map[string][]ActionPane{}}
 	executor, err := New(Dependencies{
 		Tmux: tmux, Processes: &fakeProcesses{}, Stderr: io.Discard,
-		Identify: func(context.Context) (resolve.Identity, error) { return resolve.Identity{}, failure },
+		Place: func(ctx context.Context, door, requested string) (seatspawn.BackendChoice, error) {
+			return seatspawn.Place(ctx, door, requested, "", false, resolve.Identity{}, failure)
+		},
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -717,21 +717,8 @@ func (engine *Engine) callResolved(
 		}
 	}
 
-	if inMode, modeErr := engine.tmux.PaneInMode(
-		ctx,
-		target.SocketPath,
-		target.Pane,
-	); modeErr == nil && inMode {
-		if err := engine.tmux.CancelCopyMode(ctx, target.SocketPath, target.Pane); err != nil {
-			return Result{}, err
-		}
-		engine.sleepContext(ctx, engine.options.Poll)
-		capture, err = engine.capturePane(ctx, target, 0)
-		if err != nil {
-			base.Code = CodeDead
-			base.Message = "target pane died while leaving copy mode"
-			return base, nil
-		}
+	if engine.exitCopyModeForDelivery(ctx, &base, target, &capture, "") {
+		return base, nil
 	}
 	if strings.Contains(strings.ToLower(capture), "restore the code") ||
 		strings.Contains(strings.ToLower(captureLastLines(capture, 12)), "create a plan?") {
@@ -754,21 +741,8 @@ func (engine *Engine) callResolved(
 	// Overlay dismissal can put tmux back into copy mode. Re-check at the last
 	// possible moment before any composer key, matching the first cancellation
 	// rather than assuming the overlay Escape left a writable pane.
-	if inMode, modeErr := engine.tmux.PaneInMode(
-		ctx,
-		target.SocketPath,
-		target.Pane,
-	); modeErr == nil && inMode {
-		if err := engine.tmux.CancelCopyMode(ctx, target.SocketPath, target.Pane); err != nil {
-			return Result{}, err
-		}
-		engine.sleepContext(ctx, engine.options.Poll)
-		capture, err = engine.capturePane(ctx, target, 0)
-		if err != nil {
-			base.Code = CodeDead
-			base.Message = "target pane died while leaving copy mode after overlay dismissal"
-			return base, nil
-		}
+	if engine.exitCopyModeForDelivery(ctx, &base, target, &capture, " after overlay dismissal") {
+		return base, nil
 	}
 
 	if menu := SelectorLine(capture); menu != "" {
@@ -1274,6 +1248,37 @@ func (engine *Engine) checkSteerChain(request Request) (Result, bool) {
 		), false
 	}
 	return Result{}, true
+}
+
+// exitCopyModeForDelivery takes the pane out of copy mode (LeaveCopyMode) before a
+// composer key and re-reads it. A mode read that failed refuses the delivery
+// and a pane gone while leaving is dead: either is written into base, and the
+// caller stops.
+func (engine *Engine) exitCopyModeForDelivery(
+	ctx context.Context,
+	base *Result,
+	target Target,
+	capture *string,
+	when string,
+) bool {
+	left, err := engine.LeaveCopyMode(ctx, target)
+	if err != nil {
+		base.Code = CodeUndelivered
+		base.Message = fmt.Sprintf("ABORT: %v; nothing was typed", err)
+		return true
+	}
+	if !left {
+		return false
+	}
+	engine.sleepContext(ctx, engine.options.Poll)
+	screen, err := engine.capturePane(ctx, target, 0)
+	if err != nil {
+		base.Code = CodeDead
+		base.Message = "target pane died while leaving copy mode" + when
+		return true
+	}
+	*capture = screen
+	return false
 }
 
 func (engine *Engine) capturePane(

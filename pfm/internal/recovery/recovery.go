@@ -19,6 +19,7 @@ import (
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/codexmeta"
 )
 
 var threadIDPattern = regexp.MustCompile(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`)
@@ -88,7 +89,7 @@ func locate(codexHome, target string) (string, error) {
 		return "", fmt.Errorf("stat rollout %q: %w", target, err)
 	}
 	sessions := filepath.Join(codexHome, "sessions")
-	var candidates []candidate
+	var paths []string
 	err := filepath.WalkDir(sessions, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -96,15 +97,10 @@ func locate(codexHome, target string) (string, error) {
 		if entry.IsDir() {
 			return nil
 		}
-		if !entry.Type().IsRegular() || filepath.Ext(path) != ".jsonl" ||
-			!strings.Contains(filepath.Base(path), target) {
-			return nil
+		if _, transcriptName := codexmeta.RolloutStem(entry.Name()); entry.Type().IsRegular() && transcriptName &&
+			strings.Contains(entry.Name(), target) {
+			paths = append(paths, path)
 		}
-		info, err := entry.Info()
-		if err != nil {
-			return fmt.Errorf("stat candidate %q: %w", path, err)
-		}
-		candidates = append(candidates, candidate{path: path, mod: info.ModTime().UnixNano()})
 		return nil
 	})
 	if errors.Is(err, fs.ErrNotExist) {
@@ -112,6 +108,14 @@ func locate(codexHome, target string) (string, error) {
 	}
 	if err != nil {
 		return "", fmt.Errorf("find rollouts under %q: %w", sessions, err)
+	}
+	var candidates []candidate
+	for _, path := range codexmeta.PreferPlain(paths) {
+		info, err := os.Lstat(path)
+		if err != nil {
+			return "", fmt.Errorf("stat candidate %q: %w", path, err)
+		}
+		candidates = append(candidates, candidate{path: path, mod: info.ModTime().UnixNano()})
 	}
 	if len(candidates) == 0 {
 		return "", fmt.Errorf("no rollout found for thread %q under %s", target, sessions)
@@ -131,7 +135,7 @@ type candidate struct {
 }
 
 func parse(ctx context.Context, path string) (turns, carried []turn, malformed int, returnErr error) {
-	file, err := os.Open(path)
+	file, err := codexmeta.OpenRollout(path)
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("open rollout %q: %w", path, err)
 	}

@@ -24,6 +24,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/codexmeta"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/obs"
@@ -478,8 +479,11 @@ func (runner *Runner) findClaudeTranscript(id string) (string, error) {
 	return "", nil
 }
 
+// findCodexRollout is the rollout under the first Codex root's sessions tree
+// whose name carries id, plain or compressed, the plain twin winning
+// (codexmeta.PreferPlain); "" when none does.
 func (runner *Runner) findCodexRollout(id string) (string, error) {
-	found := ""
+	var found []string
 	root := filepath.Join(firstEngineRoot(runner.paths.Roots[pfmengine.Codex]), "sessions")
 	err := filepath.WalkDir(root, func(
 		path string,
@@ -492,19 +496,20 @@ func (runner *Runner) findCodexRollout(id string) (string, error) {
 			}
 			return err
 		}
-		if entry.IsDir() || found != "" {
+		if _, transcriptName := codexmeta.RolloutStem(entry.Name()); entry.IsDir() || !transcriptName ||
+			!strings.Contains(entry.Name(), id) {
 			return nil
 		}
-		if strings.HasSuffix(entry.Name(), ".jsonl") &&
-			strings.Contains(entry.Name(), id) {
-			found = path
-		}
+		found = append(found, path)
 		return nil
 	})
 	if err != nil {
 		return "", fmt.Errorf("scan %s for a codex rollout: %w", root, err)
 	}
-	return found, nil
+	if found = codexmeta.PreferPlain(found); len(found) != 0 {
+		return found[0], nil
+	}
+	return "", nil
 }
 
 // claudeRoots is the runtime's Claude transcript roots.

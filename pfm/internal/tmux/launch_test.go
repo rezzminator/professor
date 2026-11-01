@@ -21,6 +21,11 @@ func TestLaunchBodyExecsOnlyASimpleCommand(t *testing.T) {
 		{"codex 'unterminated", "codex 'unterminated"},
 		{"--flag=1 codex", "exec --flag=1 codex"},
 		{"1A=b codex", "exec 1A=b codex"},
+		{"codex # note", "exec codex # note"},
+		{"# note\ncodex", "# note\ncodex"},
+		{"\ncodex", "\ncodex"},
+		{"codex &", "codex &"},
+		{"! codex", "! codex"},
 	} {
 		if got := launchBody(row.run); got != row.want {
 			t.Errorf("launchBody(%q) = %q, want %q", row.run, got, row.want)

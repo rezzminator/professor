@@ -11,6 +11,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/pyvalue"
 )
@@ -503,7 +504,7 @@ func shellWord(value string) string {
 		return value
 	}
 	value = strings.NewReplacer("\n", "\\n", "\r", "\\r").Replace(value)
-	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
+	return cmdparse.Quote(value)
 }
 
 func isRetiredSafeByte(b byte) bool {

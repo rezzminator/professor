@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/action"
@@ -152,7 +153,7 @@ func OpenID(
 	}
 	for index := range scan.Output.Rows {
 		row := &scan.Output.Rows[index]
-		if row.ID == id {
+		if answersTo(row, id) {
 			primary, primaryErr := fleet.PrimaryAccount(scan.Env.Paths, effective.Config)
 			if primaryErr != nil {
 				fmt.Fprintf(stderr, "pfm chat open: read primary account: %v\n", primaryErr)
@@ -179,17 +180,20 @@ func OpenID(
 var ErrNotIndexed = errors.New("not indexed")
 
 // OpenDetachedID opens an indexed chat for a caller that has no terminal to be
-// replaced by an attach — the MCP daemon. It is OpenID's own resolution and
-// preparation over action.Executor.OpenDetached: no K1 eval line, no attach,
-// and the result reports whether the chat was already live or has just been
-// started. The caller resolves its target first (Target), so an id that is not
-// indexed here is a resolution and a scan disagreeing, not a caller's typo.
+// replaced by an attach — the MCP daemon, a schedule's wake. It is OpenID's
+// own resolution and preparation over action.Executor.Open's detached mode: no
+// K1 eval line, no attach, and the result reports whether the chat was already
+// live or has just been started. With no carried caller the chat is placed by
+// its own recorded host (withoutCaller). The caller resolves its target first
+// (Target), so an id that is not indexed here is a resolution and a scan
+// disagreeing, not a caller's typo.
 func OpenDetachedID(
 	ctx context.Context,
 	id string,
 	stderr io.Writer,
 	runtime *config.Runtime,
 ) (action.OpenResult, error) {
+	ctx = withoutCaller(ctx, "open.detached")
 	effective, err := config.RuntimeOrDefault(runtime)
 	if err != nil {
 		return action.OpenResult{}, err
@@ -207,7 +211,7 @@ func OpenDetachedID(
 	}
 	for index := range rows {
 		row := rows[index]
-		if row.ID != id {
+		if !answersTo(&row, id) {
 			continue
 		}
 		return openDetachedResolvedRow(ctx, row, stderr, effective)
@@ -217,13 +221,15 @@ func OpenDetachedID(
 
 // OpenDetachedTarget opens one already-resolved chat without scanning for its
 // aggregate row again. Request-scoped split callers retain their exact pane,
-// transcript identity and current session through this door.
+// transcript identity and current session through this door; with no carried
+// caller the chat is placed by its own recorded host (withoutCaller).
 func OpenDetachedTarget(
 	ctx context.Context,
 	target headless.Chat,
 	stderr io.Writer,
 	runtime *config.Runtime,
 ) (action.OpenResult, error) {
+	ctx = withoutCaller(ctx, "open.detached")
 	effective, err := config.RuntimeOrDefault(runtime)
 	if err != nil {
 		return action.OpenResult{}, err
@@ -345,20 +351,16 @@ func openDetachedRow(
 	stderr io.Writer,
 	effective config.Runtime,
 ) (action.OpenResult, error) {
-	// OpenRow's os.Getwd() substitution has no counterpart here: a daemon
-	// stands in no directory that means anything to the chat it is opening,
-	// and a resumable row whose recorded directory has disappeared would
-	// otherwise be born in whatever directory the server was started from.
-	// The fleet home is the one defensible answer, and the result says so.
+	// A resumable row whose recorded directory has disappeared opens in the
+	// fleet home, the one missing-directory rule, and the result says so.
 	relocated := ""
 	if !row.Kind.IsLiveSeat() {
-		if info, err := os.Stat(row.CWD); err != nil || !info.IsDir() {
-			if row.Workbench != "" {
+		if row.Workbench != "" {
+			if info, err := os.Stat(row.CWD); err != nil || !info.IsDir() {
 				return action.OpenResult{}, fmt.Errorf("open: workbench directory %s is missing", row.CWD)
 			}
-			relocated = relocation(effective.Paths.Home, row.CWD)
-			row.CWD = effective.Paths.Home
 		}
+		row.CWD, relocated = launchnotice.Relocate(row.CWD, effective.Paths.Home)
 	}
 	executor, request, claim, err := prepareOpen(
 		ctx,
@@ -367,11 +369,14 @@ func openDetachedRow(
 	if err != nil {
 		return action.OpenResult{}, err
 	}
-	result, err := executor.OpenDetached(ctx, request)
+	request.Detached = true
+	result, err := executor.Open(ctx, request)
 	if err := claim.settle(err == nil, err); err != nil {
 		return result, err
 	}
-	result.Detail = relocated
+	if relocated != "" {
+		result.Detail = strings.TrimPrefix(result.Detail+"; "+relocated, "; ")
+	}
 	return result, nil
 }
 
@@ -390,6 +395,22 @@ func OpenRow(
 		fmt.Fprintf(stderr, "pfm chat open: %v\n", err)
 		return 1
 	}
+	return openRowReplacing(ctx, row, primary, cache1H, prompt, stdout, stderr, effective, nil)
+}
+
+// openRowReplacing is OpenRow over a loaded runtime. replaced is the dead
+// native seat a revive replaces: it retires once the chat is open, before the
+// dispatch that on a terminal execs and never returns.
+func openRowReplacing(
+	ctx context.Context,
+	row compose.Row,
+	primary int,
+	cache1H bool,
+	prompt string,
+	stdout, stderr io.Writer,
+	effective config.Runtime,
+	replaced *fleetdb.Seat,
+) int {
 	if ctx.Value(restoredOpenKey{}) == true && row.Backend == spawn.BackendHerdr {
 		row.Backend = ""
 		row.Kind = compose.ResumeKindFor(row.Kind)
@@ -401,30 +422,34 @@ func OpenRow(
 	}
 	relocated := ""
 	if !row.Kind.IsLiveSeat() {
-		if info, statErr := os.Stat(row.CWD); statErr != nil || !info.IsDir() {
-			if row.Workbench != "" {
+		if row.Workbench != "" {
+			if info, statErr := os.Stat(row.CWD); statErr != nil || !info.IsDir() {
 				fmt.Fprintf(stderr, "open: workbench directory %s is missing\n", row.CWD)
 				return 1
 			}
-			currentDir, cwdErr := os.Getwd()
-			if cwdErr != nil {
-				fmt.Fprintf(stderr, "pfm chat open: %s, and the current directory cannot be read: %v\n",
-					unusableDirectory(row.CWD), cwdErr)
-				return 1
-			}
-			relocated = relocation(currentDir, row.CWD)
-			row.CWD = currentDir
 		}
+		row.CWD, relocated = launchnotice.Relocate(row.CWD, effective.Paths.Home)
 	}
 	executor, request, claim, err := prepareOpen(ctx, row, primary, cache1H, prompt, stderr, effective)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat open: %v\n", err)
 		return 1
 	}
-	line, err := executor.Open(ctx, request)
+	result, err := executor.Open(ctx, request)
+	line := result.Line
 	if err := claim.settle(err == nil, err); err != nil {
 		fmt.Fprintf(stderr, "pfm chat open: %v\n", err)
 		return 1
+	}
+	if replaced != nil {
+		warning, err := spawn.RetireHerdrSeat(ctx, effective.Paths, *replaced)
+		if warning != "" {
+			fmt.Fprintf(stderr, "pfm chat open: %s\n", warning)
+		}
+		if err != nil {
+			fmt.Fprintf(stderr, "pfm chat open: %v\n", err)
+			return 1
+		}
 	}
 	if relocated != "" {
 		// Said only once the open succeeded, and held for Enter: the attach
@@ -434,7 +459,7 @@ func OpenRow(
 	}
 	// Dispatch execs tmux or zsh when stdout is a terminal and never returns,
 	// so the unseen flag clears before it.
-	markSchedulesSeen(ctx, effective.Paths, row.ID, stderr)
+	markSchedulesSeen(ctx, effective.Paths, &row, stderr)
 	if line != "" {
 		retireOtherHerdrViews(ctx, row, effective, stderr)
 		if err := action.Dispatch(stdout, line); err != nil {
@@ -448,8 +473,10 @@ func OpenRow(
 // markSchedulesSeen clears the unseen-schedule flag of a chat a human is now
 // opening. A failed clear is reported and the open proceeds: the chat is
 // already open, and the flag stays visible as a still-marked row.
-func markSchedulesSeen(ctx context.Context, values paths.Values, id string, stderr io.Writer) {
-	if id == "" {
+func markSchedulesSeen(ctx context.Context, values paths.Values, row *compose.Row, stderr io.Writer) {
+	// A continued native seat's schedules were carried onto its newest segment.
+	ids := []string{row.ID, compose.ContinuedSegment(row)}
+	if ids[0] == "" && ids[1] == "" {
 		return
 	}
 	state := fleetdb.OpenSharedState(ctx, values)
@@ -458,8 +485,13 @@ func markSchedulesSeen(ctx context.Context, values paths.Values, id string, stde
 			fmt.Fprintf(stderr, "pfm chat open: close shared state: %v\n", err)
 		}
 	}()
-	if _, err := state.ClearScheduleUnseen(ctx, id); err != nil {
-		fmt.Fprintf(stderr, "pfm chat open: clear schedule flag of %s: %v\n", id, err)
+	for _, id := range ids {
+		if id == "" {
+			continue
+		}
+		if _, err := state.ClearScheduleUnseen(ctx, id); err != nil {
+			fmt.Fprintf(stderr, "pfm chat open: clear schedule flag of %s: %v\n", id, err)
+		}
 	}
 }
 
@@ -499,18 +531,18 @@ func prepareOpen(
 	if ctx.Value(restoredOpenKey{}) == true {
 		gate = restoredGate{}
 	}
-	identifier, err := resolve.NewWhoami(resolve.WhoamiDependencies{CodexSeats: CodexSeats(&effective)})
-	if err != nil {
-		return nil, action.Request{}, NameReservation{}, errors.Join(err, claim.Release())
-	}
+	// A stored chat's home is tmux (a Herdr seat revives through
+	// reviveNative): with no caller, only a new chat falls to chat.backend.
+	revive := !slices.Contains([]compose.Kind{compose.NewClaude, compose.NewCodex, compose.NewOpenCode}, row.Kind)
 	executor, err := newOpenExecutor(action.Dependencies{
-		Identify: identifier.Identify,
-		Gate:     gate,
-		Stderr:   stderr,
+		Place: func(ctx context.Context, door, requested string) (spawn.BackendChoice, error) {
+			return placeChat(ctx, door, requested, "", revive, &effective)
+		},
+		Gate:   gate,
+		Stderr: stderr,
 		Heal: func(ctx context.Context, threadID string) string {
 			return heal.Thread(ctx, healCodexRoot, threadID)
 		},
-		HerdrPlaces: herdrPlacesFor(&effective),
 	})
 	if err != nil {
 		err = errors.Join(err, claim.Release())
@@ -530,7 +562,7 @@ func prepareOpen(
 		Bunker:         fleet.CurrentSocket() == "vsct",
 		Home:           effective.Paths.Home,
 		FreshSocket:    fresh,
-		CurrentTMUX:    (paths.OSEnv{}).Get("TMUX"),
+		CurrentTMUX:    resolve.CallerEnvironment().TMUX,
 		Config:         effective.Config,
 	}, claim, nil
 }
@@ -541,19 +573,4 @@ func socketForKind(kind compose.Kind) (string, error) {
 		return "", err
 	}
 	return spawn.FreshSocket(id), nil
-}
-
-// relocation is the one sentence for a resumable chat opened somewhere other
-// than its own directory: where it opened, and why its own would not do.
-func relocation(opened, recorded string) string {
-	return fmt.Sprintf("opened in %s: %s", opened, unusableDirectory(recorded))
-}
-
-// unusableDirectory says why a row's recorded directory cannot be opened in:
-// it is gone, or none was ever recorded.
-func unusableDirectory(recorded string) string {
-	if recorded == "" {
-		return "no directory of its own was recorded"
-	}
-	return "its own directory " + recorded + " is gone"
 }

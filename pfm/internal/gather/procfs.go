@@ -22,6 +22,9 @@ type FDLink struct {
 type ProcStat struct {
 	ParentPID int
 	StartTime uint64
+	// Group is the process group; TerminalGroup the foreground group of its
+	// controlling terminal (-1 without one). Darwin leaves both 0.
+	Group, TerminalGroup int
 }
 
 // ProcFS abstracts all /proc access used by gather.
@@ -246,7 +249,15 @@ func (proc RealProcFS) Stat(pid int) (ProcStat, error) {
 	if err != nil {
 		return ProcStat{}, fmt.Errorf("parse start time for %d: %w", pid, err)
 	}
-	return ProcStat{ParentPID: parentPID, StartTime: startTime}, nil
+	group, err := strconv.Atoi(fields[2])
+	if err != nil {
+		return ProcStat{}, fmt.Errorf("parse process group for %d: %w", pid, err)
+	}
+	terminalGroup, err := strconv.Atoi(fields[5])
+	if err != nil {
+		return ProcStat{}, fmt.Errorf("parse terminal foreground group for %d: %w", pid, err)
+	}
+	return ProcStat{ParentPID: parentPID, StartTime: startTime, Group: group, TerminalGroup: terminalGroup}, nil
 }
 
 // userHZ is USER_HZ, the fixed tick rate the kernel reports /proc times in

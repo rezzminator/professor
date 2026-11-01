@@ -14,6 +14,7 @@ func TestRolloutIDFromPathStripsTheTimestampPrefix(t *testing.T) {
 	for _, test := range []struct{ path, want string }{
 		{"/r/2026/01/02/rollout-2026-01-02T03-04-05-0199aaaa-bbbb-7ccc-8ddd-eeeeeeeeeeee.jsonl", "0199aaaa-bbbb-7ccc-8ddd-eeeeeeeeeeee"},
 		{"rollout-short.jsonl", "short"},
+		{"/r/2026/01/02/rollout-2026-01-02T03-04-05-0199aaaa-bbbb-7ccc-8ddd-eeeeeeeeeeee.jsonl.zst", "0199aaaa-bbbb-7ccc-8ddd-eeeeeeeeeeee"},
 		{"", ""},
 	} {
 		if got := rolloutIDFromPath(test.path); got != test.want {

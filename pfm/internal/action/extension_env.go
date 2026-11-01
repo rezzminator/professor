@@ -4,6 +4,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
 
@@ -18,7 +19,7 @@ func ExtensionShellEnv(machine pfmconfig.Config, engine string) string {
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		result.WriteString(" " + name + "=" + Quote(env[name]))
+		result.WriteString(" " + name + "=" + cmdparse.Quote(env[name]))
 	}
 	return result.String()
 }

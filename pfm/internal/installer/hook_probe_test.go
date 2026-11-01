@@ -9,10 +9,25 @@ import (
 	"testing"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
+
+// stageOpenCodeGuard stages home's OpenCode engine-guard plugin as install
+// does, so a probe test of another hook sees only that hook's rows.
+func stageOpenCodeGuard(t *testing.T, home string) {
+	t.Helper()
+	path, binary := openCodeEngineGuardStaging(home, OpenCodeConfigPath(home))
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := workbench.StageOpenCodeEngineGuardPlugin(path, binary); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestReportHooksChecksLaunchExecutableOnce(t *testing.T) {
 	home := t.TempDir()
+	stageOpenCodeGuard(t, home)
 	binary := filepath.Join(home, ".local", "bin", "pfm")
 	machine := pfmconfig.Config{Accounts: []pfmconfig.Account{{ID: 1, ConfigDir: filepath.Join(home, ".claude")}}}
 	for _, testCase := range []struct {
@@ -51,6 +66,7 @@ func TestReportHooksChecksLaunchExecutableOnce(t *testing.T) {
 
 func TestReportHooksNoClaudeAccountAndCodexResidue(t *testing.T) {
 	home := t.TempDir()
+	stageOpenCodeGuard(t, home)
 	binary := filepath.Join(home, ".local", "bin", "pfm")
 	writeFixture(t, binary, "binary")
 	if err := os.Chmod(binary, 0o700); err != nil {
@@ -79,6 +95,7 @@ func resumeUnkillKey(t *testing.T, account, body string) string {
 
 func TestReportHooksStillChecksCodexResidue(t *testing.T) {
 	home := t.TempDir()
+	stageOpenCodeGuard(t, home)
 	binary := filepath.Join(home, ".local", "bin", "pfm")
 	writeFixture(t, binary, "binary")
 	if err := os.Chmod(binary, 0o700); err != nil {
@@ -98,8 +115,9 @@ func TestReportHooksStillChecksCodexResidue(t *testing.T) {
 	machine := pfmconfig.Config{CodexAccounts: []pfmconfig.CodexAccount{{ID: 1, Home: codex}}}
 	var output bytes.Buffer
 	warnings, failures := ReportHooks(&output, home, machine, false)
-	// Eight failures: the stale clear-hide handler and the seven Herdr handlers the receipt does not record.
-	if warnings != 2 || failures != 8 ||
+	// Nine failures: the stale clear-hide handler, and the seven Herdr handlers and the engine guard the
+	// receipt does not record.
+	if warnings != 2 || failures != 9 ||
 		!strings.Contains(output.String(), "native trust is unknown") ||
 		!strings.Contains(output.String(), "doctor: hook codex[1] hooks.json SessionStart clear-hide STALE") {
 		t.Fatalf("failures=%d output=%s", failures, output.String())
@@ -112,6 +130,7 @@ func TestReportHooksStillChecksCodexResidue(t *testing.T) {
 func stageCodexProbeHome(t *testing.T, hooksBody string) (home string, machine pfmconfig.Config, hooksPath string) {
 	t.Helper()
 	home = t.TempDir()
+	stageOpenCodeGuard(t, home)
 	binary := filepath.Join(home, ".local", "bin", "pfm")
 	writeFixture(t, binary, "binary")
 	if err := os.Chmod(binary, 0o700); err != nil {
@@ -167,9 +186,9 @@ func TestProbeCodexHooksReportsTheResumeUnkillHookMissing(t *testing.T) {
 		rows int
 	}{
 		"no hooks.json":     {"", 1},
-		"no resume handler": {`{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo personal"}]}]}}`, 8},
+		"no resume handler": {`{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo personal"}]}]}}`, 9},
 		"wrong matcher": {`{"hooks":{"SessionStart":[{"matcher":"startup","hooks":[` +
-			`{"type":"command","command":"@CMD@"}]}]}}`, 8},
+			`{"type":"command","command":"@CMD@"}]}]}}`, 9},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -233,8 +252,9 @@ func TestProbeCodexHooksReportsUntrustedAndUnknownNativeTrust(t *testing.T) {
 	var output bytes.Buffer
 	warnings, failures := ReportHooks(&output, home, machine, false)
 	// The one warning is the missing Claude config of this machine config.
-	if warnings != 1 || failures != 8 ||
+	if warnings != 1 || failures != 9 ||
 		!strings.Contains(output.String(), "doctor: hook codex[1] hooks.json SessionStart resume-unkill UNTRUSTED") ||
+		!strings.Contains(output.String(), "doctor: hook codex[1] hooks.json PreToolUse engine-guard UNTRUSTED") ||
 		!strings.Contains(output.String(), "doctor: hook codex[1] hooks.json Stop herdr-idle-Stop UNTRUSTED") ||
 		!strings.Contains(output.String(), "pfm install --yes") {
 		t.Fatalf("warnings=%d failures=%d output=%s", warnings, failures, output.String())
@@ -257,7 +277,7 @@ func TestProbeCodexHooksReportsUntrustedAndUnknownNativeTrust(t *testing.T) {
 	if rows := codexProbeRows(
 		home,
 		machine,
-	); len(rows) != 8 || rows[0].Hook.Name != "resume-unkill" || rows[0].State != "native-trust-unknown" ||
+	); len(rows) != 9 || rows[0].Hook.Name != "resume-unkill" || rows[0].State != "native-trust-unknown" ||
 		!strings.Contains(rows[0].Error, "native trust is unknown") {
 		t.Fatalf("historical trust must stay visibly unknown: %+v", rows)
 	}
@@ -269,7 +289,7 @@ func TestProbeCodexHooksReportsUntrustedAndUnknownNativeTrust(t *testing.T) {
 			unknownLine = line
 		}
 	}
-	if warnings != 2 || failures != 7 || unknownLine == "" || strings.Contains(unknownLine, "pfm install --yes") {
+	if warnings != 2 || failures != 8 || unknownLine == "" || strings.Contains(unknownLine, "pfm install --yes") {
 		t.Fatalf(
 			"unknown native trust must be an explicit warning, without promising readback: warnings=%d failures=%d output=%s",
 			warnings,

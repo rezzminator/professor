@@ -299,3 +299,34 @@ func TestDoctorCrumbsAcceptNativeReloadSchedule(t *testing.T) {
 		})
 	}
 }
+
+func TestDoctorCrumbsAcceptNativeSeatWorkerLogs(t *testing.T) {
+	const seat = "820763b416f1e2195c0dbaa07c2b32eb"
+	for _, row := range []struct {
+		name        string
+		wantInvalid int
+	}{
+		{name: paths.SIDEndLogPrefix + seat + ".log"},
+		{name: paths.SIDEndLogPrefix + "restore-seat.log"},
+		{name: paths.SIDKillExitLogPrefix + seat + ".log"},
+		{name: paths.SIDEndLogPrefix + ".log", wantInvalid: 1},
+		{name: paths.SIDEndLogPrefix + seat + ".txt", wantInvalid: 1},
+		{name: paths.SIDKillExitLogPrefix + "820763B416F1E2195C0DBAA07C2B32EB.log", wantInvalid: 1},
+		{name: paths.SIDKillExitLogPrefix + "probe.log", wantInvalid: 1},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			root := jailTest(t)
+			sidDir := filepath.Join(root, "sid")
+			if err := os.WriteFile(filepath.Join(sidDir, row.name), []byte("log\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			entries, invalid, err := crumbHealth(sidDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if entries != 1 || invalid != row.wantInvalid {
+				t.Fatalf("crumbHealth() entries=%d invalid=%d, want 1 and %d", entries, invalid, row.wantInvalid)
+			}
+		})
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/codexmeta"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/index"
 	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
@@ -20,6 +21,7 @@ func TestLossNoteUsesProducerIDsAndNeverQuotesPrompts(t *testing.T) {
 		engine     pfmengine.ID
 		body, want string
 		wantErr    bool
+		compressed bool
 	}{
 		{name: "empty", engine: pfmengine.Claude},
 		{
@@ -113,6 +115,13 @@ func TestLossNoteUsesProducerIDsAndNeverQuotesPrompts(t *testing.T) {
 			body:   `{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"PRIVATE PROMPT"}]}}` + "\n" + `{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"answer"}]}}`,
 		},
 		{
+			name:       "codex unanswered in a compressed rollout",
+			engine:     pfmengine.Codex,
+			body:       `{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"PRIVATE PROMPT"}]}}`,
+			want:       unanswered,
+			compressed: true,
+		},
+		{
 			name:    "codex malformed payload",
 			want:    "restart loss unknown",
 			engine:  pfmengine.Codex,
@@ -126,6 +135,12 @@ func TestLossNoteUsesProducerIDsAndNeverQuotesPrompts(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "transcript.jsonl")
 			if err := os.WriteFile(path, []byte(tc.body+"\n"), 0o600); err != nil {
 				t.Fatal(err)
+			}
+			if tc.compressed {
+				var err error
+				if path, err = codexmeta.CompressRollout(path); err != nil {
+					t.Fatal(err)
+				}
 			}
 			note, err := lossNote(context.Background(), path, tc.engine)
 			if note != tc.want || (err != nil) != tc.wantErr {

@@ -1,15 +1,10 @@
 package cmdparse
 
 import (
-	"os"
 	"reflect"
 	"strings"
 	"testing"
-
-	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
-
-func TestMain(m *testing.M) { os.Exit(testjail.Run(m)) }
 
 // testCwd is the directory every test call runs in; the parse never reads it.
 const testCwd = "/tmp/cmdparse-test"

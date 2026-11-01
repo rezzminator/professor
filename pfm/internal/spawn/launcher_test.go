@@ -4,13 +4,16 @@ import (
 	"context"
 	"testing"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 type claudeTestLauncher struct{}
 
 func (claudeTestLauncher) ComposerReady(string) bool { return true }
-func (claudeTestLauncher) Rename(context.Context, Tmux, string, string, string, Timings, Trace) (string, error) {
+func (claudeTestLauncher) Rename(
+	context.Context, pfmcall.Screen, pfmcall.Target, string, Timings, Trace,
+) (string, error) {
 	return "", nil
 }
 
@@ -35,12 +38,13 @@ func TestCodexDefaultFooterComposerIsReady(t *testing.T) {
 
 func (codexTestLauncher) Rename(
 	ctx context.Context,
-	tmux Tmux,
-	socket, target, name string,
+	door pfmcall.Screen,
+	target pfmcall.Target,
+	name string,
 	timings Timings,
 	trace Trace,
 ) (string, error) {
-	return RenameCodex(ctx, tmux, socket, target, name, timings, trace)
+	return RenameCodex(ctx, door, target, name, timings, trace)
 }
 
 func init() {

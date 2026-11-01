@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
@@ -72,7 +73,7 @@ func TestGoldenCommandLines(t *testing.T) {
 }
 
 func replaceGoldenRun(line, run string) string {
-	quotedRun := Quote(run)
+	quotedRun := cmdparse.Quote(run)
 	index := bytes.Index([]byte(line), []byte(quotedRun))
 	if index < 0 {
 		return line

@@ -16,6 +16,7 @@ import (
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
@@ -24,6 +25,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/launchnotice"
 	"github.com/rezzminator/professor/pfm/internal/naming"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
@@ -422,7 +424,7 @@ func resolveRunEngineAccount(
 	env := firstEnv(envs)
 	engineInput := requestedEngine
 	if strings.TrimSpace(engineInput) == "" {
-		if caller, ok := callerEngine(env.Get); ok {
+		if caller, _ := resolve.CallerEnvironmentFrom(env).EngineSession(); caller != "" {
 			return resolveRunEngineIDAccount(caller, requestedAccount, machine, primaryClaude)
 		}
 		defaultEngine, err := machine.DefaultEngine()
@@ -478,10 +480,8 @@ func parentChatID(ctx context.Context, env paths.Env) string {
 	if self, ok := pfmchat.ScopedSelf(ctx); ok {
 		return self.ID
 	}
-	if id := env.Get("CLAUDE_CODE_SESSION_ID"); id != "" {
-		return id
-	}
-	return env.Get("CODEX_THREAD_ID")
+	_, id := resolve.CallerEnvironmentFrom(env).EngineSession()
+	return id
 }
 
 func registerDetachedChild(state *fleetdb.Store, parent, socket string, createdAt int64) error {
@@ -502,8 +502,8 @@ func attachRunResult(attach bool, warnings []string, result spawn.Result, stdout
 		return 0
 	}
 	launchnotice.Pause(stderr, "pfm chat new", warnings)
-	line := "TMUX= tmux -L " + action.Quote(result.Socket) +
-		" attach -t " + action.Quote(result.Session)
+	line := "TMUX= tmux -L " + cmdparse.Quote(result.Socket) +
+		" attach -t " + cmdparse.Quote(result.Session)
 	if err := action.Dispatch(stdout, line); err != nil {
 		fmt.Fprintf(stderr, "pfm chat new: attach: %v\n", err)
 		return 1

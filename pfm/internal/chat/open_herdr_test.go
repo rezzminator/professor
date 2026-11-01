@@ -26,7 +26,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
-	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -378,139 +377,6 @@ func TestOpenNativeOutsideReportsLocationWhenAttachFails(t *testing.T) {
 	}
 }
 
-func TestOpenNativeDeadDetachedResumesByCallerBackend(t *testing.T) {
-	for _, backend := range []string{"tmux", "herdr"} {
-		t.Run(backend, func(t *testing.T) {
-			root := testjail.Fleet(t)
-			layouts := make(chan struct{}, 4)
-			socket := nativeChatSocket(t, func(req nativeChatRequest) (any, string) {
-				switch req.Method {
-				case "ping":
-					return map[string]any{"type": "pong", "protocol": 22, "version": "fixture"}, ""
-				case "pane.list":
-					return map[string]any{"type": "pane_list", "panes": []any{func() any {
-						info := testjail.HerdrPaneInfo("w6:p9")["pane"].(map[string]any)
-						info["terminal_id"] = "fixture-w6:p3"
-						return info
-					}()}}, ""
-				case "pane.get":
-					var pane string
-					_ = json.Unmarshal(req.Params["pane_id"], &pane)
-					if pane == "w6:p3" {
-						return nil, "pane_not_found"
-					}
-					return map[string]any{
-						"type": "pane_info",
-						"pane": map[string]any{"pane_id": pane, "workspace_id": "w6"},
-					}, ""
-				case "pane.process_info":
-					return map[string]any{
-						"type": "pane_process_info",
-						"process_info": map[string]any{
-							"pane_id": "w6:p9", "shell_pid": 41,
-							"foreground_processes": []any{map[string]any{"pid": 42, "name": "claude"}},
-						},
-					}, ""
-				case "pane.focus":
-					return nil, "permission_denied"
-				case "layout.apply":
-					layouts <- struct{}{}
-					return map[string]any{
-						"layout": map[string]any{
-							"workspace_id": "w6",
-							"root":         map[string]any{"type": "pane", "pane_id": "w6:p9"},
-						},
-					}, ""
-				default:
-					return nil, "unexpected_method"
-				}
-			})
-			runtime, db, seat := nativeChatSeat(t, socket, "lost")
-			seat = nativeChatHost(t, db, seat, false)
-			loaded, err := config.LoadRuntime("")
-			if err != nil {
-				t.Fatal(err)
-			}
-			runtime.Config = loaded.Config
-			seedClaudeChat(t, root, seat.SessionID)
-			// The replaced seat's reload schedule files go with its row: the
-			// new seat has a new id, so nothing else would remove them.
-			reloadFiles := plantNativeReloadFiles(t, runtime.Paths.SIDDir, seat.SeatID)
-			binary := filepath.Join(runtime.Paths.Home, "native-engine")
-			if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
-				t.Fatal(err)
-			}
-			if err := db.WriteSeatRun(
-				seat.SeatID,
-				fleetdb.SeatRun{Binary: binary, CWD: runtime.Paths.Home, Args: []string{"--resume", seat.SessionID}},
-			); err != nil {
-				t.Fatal(err)
-			}
-			t.Setenv("HERDR_ENV", "")
-			t.Setenv("HERDR_SOCKET_PATH", "")
-			t.Setenv("HERDR_PANE_ID", "")
-			t.Setenv("TMUX", "")
-			ctx := context.Background()
-			if strings.HasPrefix(backend, "herdr") {
-				ctx = WithCaller(
-					ctx,
-					"open.herdr",
-					resolve.Identity{Backend: "herdr", SocketPath: socket, Pane: "w6:p8", HerdrWorkspace: "w6"},
-					nil,
-				)
-			}
-			fake := &fakeOpenTmux{alive: map[string]bool{}}
-			stubOpenExecutor(t, fake)
-			result, err := OpenDetachedTarget(
-				ctx,
-				headless.Chat{
-					ID:      seat.SessionID,
-					SeatID:  seat.SeatID,
-					Backend: "herdr",
-					Engine:  pfmengine.Claude,
-					Socket:  seat.HerdrSocket,
-					Pane:    seat.HerdrPane,
-				},
-				io.Discard,
-				&runtime,
-			)
-			if err != nil || result.State != "opened" {
-				t.Fatalf("dead native result=%+v err=%v", result, err)
-			}
-			if backend == "tmux" && len(fake.created) != 1 {
-				t.Fatalf("tmux resume=%+v", fake.created)
-			}
-			if backend == "herdr" && (result.Socket != socket || !strings.Contains(result.Detail, "w6:p9")) {
-				t.Fatalf("native resume=%+v", result)
-			}
-			assertNativeReloadFilesGone(t, reloadFiles)
-			if backend != "herdr" {
-				return
-			}
-			// A stale exact row fails closed; the refreshed row finds the
-			// completed birth and lays out no second tab.
-			stale := headless.Chat{
-				ID: seat.SessionID, SeatID: seat.SeatID, Backend: "herdr",
-				Socket: seat.HerdrSocket, Pane: seat.HerdrPane,
-			}
-			if _, err := OpenDetachedTarget(ctx, stale, io.Discard, &runtime); err == nil {
-				t.Fatal("stale exact row unexpectedly resolved")
-			}
-			current, found, err := db.SeatBySession(ctx, seat.SessionID)
-			if err != nil || !found || current.HerdrPane != "w6:p9" {
-				t.Fatalf("replacement ownership lost: seat=%+v found=%t err=%v", current, found, err)
-			}
-			current = nativeChatHost(t, db, current, true)
-			stale.SeatID = current.SeatID
-			stale.Socket, stale.Pane = current.HerdrSocket, current.HerdrPane
-			result, err = OpenDetachedTarget(ctx, stale, io.Discard, &runtime)
-			if err != nil || result.State != "live" || len(layouts) != 1 {
-				t.Fatalf("retry duplicated birth: result=%+v err=%v layouts=%d", result, err, len(layouts))
-			}
-		})
-	}
-}
-
 // plantNativeReloadFiles writes seatID's reload schedule record and log into
 // sidDir, as a native /reload leaves them, and returns their paths.
 func plantNativeReloadFiles(t *testing.T, sidDir, seatID string) []string {
@@ -600,11 +466,14 @@ func TestOpenNativeDeadEndpointUsesBirthRule(t *testing.T) {
 						code = 1
 					}
 				}
+				// A terminal outside Herdr resumes by its own birth rule; a door
+				// with no terminal revives on the chat's recorded host, and a
+				// host it cannot reach is an error, never a silent tmux birth.
 				want := 0
-				if mode == "malformed" || mode == "permission" {
+				if mode == "malformed" || mode == "permission" || door == "detached" {
 					want = 1
 				}
-				if code != want || (want == 0 && len(fake.created) != 1) {
+				if code != want || (want == 0 && len(fake.created) != 1) || (want == 1 && len(fake.created) != 0) {
 					t.Fatalf(
 						"endpoint recovery code=%d want=%d created=%v err=%v stderr=%q",
 						code,

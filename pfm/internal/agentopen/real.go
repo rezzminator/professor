@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"syscall"
 
 	"github.com/rezzminator/professor/pfm/internal/action"
@@ -159,7 +158,14 @@ func (processes RealProcesses) Processes(ctx context.Context) ([]Process, error)
 	}
 	return result, nil
 }
-func (RealProcesses) Alive(pid int) bool { return pid > 0 && syscall.Kill(pid, 0) == nil }
+
+// Alive asks the one pid probe (gather.ProcessAlive); a probe that could not
+// tell counts as alive, so nothing resumes over a process that may still run.
+func (RealProcesses) Alive(pid int) bool {
+	alive, err := gather.ProcessAlive(pid)
+	return alive || err != nil && pid > 0
+}
+
 func (RealProcesses) Terminate(pid int) error {
 	return gather.Terminate(pid)
 }
@@ -195,32 +201,35 @@ func (tmux RealTmux) command(ctx context.Context, socket string, args ...string)
 	return pfmtmux.Exec(ctx, tmux.Binary, filepath.Join(tmux.Dir, socket), args...)
 }
 
+// SocketForPID finds the Claude socket whose pane runs pid, each server read
+// through the one bounded pane read (gather.ProbeServer). A server that did
+// not answer is never "not here": unless pid is found elsewhere, it is an error.
 func (tmux RealTmux) SocketForPID(ctx context.Context, pid int) (string, error) {
 	entries, err := os.ReadDir(tmux.Dir)
 	if err != nil {
 		return "", err
 	}
+	var unread []error
 	for _, entry := range entries {
 		if id, ok := pfmengine.FromSocket(entry.Name()); !ok || id != pfmengine.Claude {
 			continue
 		}
-		output, err := tmux.command(ctx, entry.Name(), "list-panes", "-a", "-F", "#{pane_pid}").Output()
-		if err != nil {
-			// tmux itself never starting is not "this socket has no such
-			// pane" — the caller would report an OutsidePFMError telling the
-			// operator to kill a pid that was never actually checked.
-			if pfmtmux.CouldNotRun(err) {
-				return "", fmt.Errorf("tmux could not run to list panes on %s: %w", entry.Name(), err)
+		state, panes, err := gather.ProbeServer(ctx, tmux.Binary, filepath.Join(tmux.Dir, entry.Name()))
+		switch state {
+		case gather.ServerDead:
+			continue
+		case gather.ServerAlive:
+			for index := range panes {
+				pane := &panes[index]
+				if pane.PID == pid {
+					return entry.Name(), nil
+				}
 			}
 			continue
 		}
-		for _, line := range strings.Split(string(output), "\n") {
-			if strings.TrimSpace(line) == fmt.Sprint(pid) {
-				return entry.Name(), nil
-			}
-		}
+		unread = append(unread, fmt.Errorf("list panes on %s: %w", entry.Name(), err))
 	}
-	return "", nil
+	return "", errors.Join(unread...)
 }
 
 func (tmux RealTmux) Attach(ctx context.Context, socket string) error {

@@ -16,6 +16,7 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
 var (
@@ -111,7 +112,7 @@ func Find(ctx context.Context, runtime *pfmconfig.Runtime, request FindRequest) 
 // (CLAUDE_CODE_SESSION_ID), or "" outside one — the Self a surface whose
 // process is the asking chat hands Find.
 func AskingSession() string {
-	return (paths.OSEnv{}).Get("CLAUDE_CODE_SESSION_ID")
+	return resolve.CallerEnvironment().ClaudeSessionID
 }
 
 // ExcerptNeedles splits an excerpt into the needles Find searches for: its

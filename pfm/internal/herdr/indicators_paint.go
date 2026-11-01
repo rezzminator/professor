@@ -27,23 +27,14 @@ type indicatorTarget struct {
 // when it holds none, so an absent map is an empty one; an entry with no id
 // cannot be painted and is an error, never skipped.
 func decodeIndicatorTargets(paneResult, workspaceResult json.RawMessage) ([]indicatorTarget, error) {
-	// The result type and the shape of the envelope are the lists' own parsers'
-	// to judge; the fields they drop are read here.
-	if _, err := ParsePanes(paneResult); err != nil {
+	// The workspace list's result type and envelope are its own parser's to
+	// judge; the fields it drops are read here.
+	panes, err := ParsePanes(paneResult)
+	if err != nil {
 		return nil, err
 	}
 	if _, err := ParseWorkspaceList(workspaceResult); err != nil {
 		return nil, err
-	}
-	var panes struct {
-		Panes []struct {
-			PaneID string            `json:"pane_id"`
-			Status string            `json:"agent_status"`
-			Tokens map[string]string `json:"tokens"`
-		} `json:"panes"`
-	}
-	if err := json.Unmarshal(paneResult, &panes); err != nil {
-		return nil, fmt.Errorf("herdr pane.list: decode result %q: %w", paneResult, err)
 	}
 	var workspaces struct {
 		Workspaces []struct {
@@ -55,14 +46,15 @@ func decodeIndicatorTargets(paneResult, workspaceResult json.RawMessage) ([]indi
 	if err := json.Unmarshal(workspaceResult, &workspaces); err != nil {
 		return nil, fmt.Errorf("herdr workspace.list: decode result %q: %w", workspaceResult, err)
 	}
-	targets := make([]indicatorTarget, 0, len(panes.Panes)+len(workspaces.Workspaces))
-	for _, pane := range panes.Panes {
+	targets := make([]indicatorTarget, 0, len(panes)+len(workspaces.Workspaces))
+	for index := range panes {
+		pane := &panes[index]
 		if pane.PaneID == "" {
-			return nil, fmt.Errorf("herdr pane.list: an entry has no pane_id (status %q)", pane.Status)
+			return nil, fmt.Errorf("herdr pane.list: an entry has no pane_id (status %q)", pane.AgentStatus)
 		}
 		targets = append(
 			targets,
-			indicatorTarget{kind: targetPane, id: pane.PaneID, status: pane.Status, tokens: pane.Tokens},
+			indicatorTarget{kind: targetPane, id: pane.PaneID, status: pane.AgentStatus, tokens: pane.Tokens},
 		)
 	}
 	for _, workspace := range workspaces.Workspaces {

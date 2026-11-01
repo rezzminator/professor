@@ -1,11 +1,10 @@
-# infra — the fence, the demo, and the manifest gate
+# infra — the fence, the demo, and the README cards
 
 Three independent things share this directory; nothing here is one system.
 
 ```
 infra/
   README.md                      this file — the map
-  check-self-hosted-manifest.sh  repo gate, not fence-only (dev.sh verify templates calls it)
   fence/                         the isolated dev fence — build/test in one shared container, a fresh run per call
   demo/                          the live-demo fence — a real install for presentations
   readme-cards/                  the README section-card recorder (screenshots/motion clips)
@@ -36,7 +35,3 @@ A run builds the image only when its image key changed, then prints the fence pr
 ## demo/
 
 A REAL Professor install inside the same fence image, for live presentations — real Claude Code + Codex + pfm, real chats over `chat-professor` and the native Harvester plugin. Entry point: `infra/demo/up.sh` (see `infra/demo/README.md`).
-
-## check-self-hosted-manifest.sh
-
-Verifies this checkout's own `.professor/manifest.json` against the tracked tree — `dev.sh verify templates` calls it. Not fence-only, so it stays at the top level rather than moving into `fence/`.

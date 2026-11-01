@@ -60,7 +60,7 @@ func renderContextLine(runtime Runtime, data input, project string, now time.Tim
 		percent,
 	) + " " + makeBar(
 		percent,
-		10,
+		15,
 	) + " " + percentColor(
 		percent,
 	) + gauge.marker + label + " " + count + reset

@@ -104,6 +104,8 @@ func TestStoreGuardFailsOpenAndSaysWhy(t *testing.T) {
 		{"piped shell", payload(`echo 'CLAUDE_CONFIG_DIR=~/.claude claude plugin list' | bash`), "cannot read the command bash runs (fail-open)"},
 		{"heredoc shell", payload("bash <<'EOF'\nCLAUDE_CONFIG_DIR=~/.claude claude plugin list\nEOF"), "cannot read the command bash runs (fail-open)"},
 		{"env -S", payload(`env -S 'CLAUDE_CONFIG_DIR=~/.claude claude plugin list'`), "cannot read the command env runs (fail-open)"},
+		{"unread shell string", payload(`bash -c "CLAUDE_CONFIG_DIR=~/.claude claude $X"`), "cannot read the command bash runs (fail-open)"},
+		{"unread shell string on the store", payload(`CLAUDE_CONFIG_DIR=~/.claude bash -c "$X"`), "bash runs on the store and may run claude unseen (fail-open)"},
 		{"function", payload(`f() { claude plugin list; }; CLAUDE_CONFIG_DIR=~/.claude f`), "f runs on the store and may run claude unseen (fail-open)"},
 	} {
 		t.Run(test.name, func(t *testing.T) {

@@ -83,8 +83,9 @@ func runPostExitFinisher(
 	t *testing.T, jail killJail, database *store.Store, id, transcriptPath string, refresher refreshFunc,
 ) {
 	t.Helper()
+	unkillTmux := &fakeTmux{existsFor: 1}
 	finisher, err := NewFinisher(database, Dependencies{
-		Tmux: &fakeTmux{existsFor: 1}, Refresher: refresher,
+		Tmux: unkillTmux, Screen: unkillTmux, Refresher: refresher,
 		Delay: time.Millisecond, PollEvery: time.Millisecond, PollAttempts: 3,
 		Now: func() time.Time { return time.Unix(200, 0) },
 	})

@@ -46,30 +46,36 @@ func scanOpenCodeSession(row interface{ Scan(...any) error }) (OpenCodeSession, 
 // no longer present is deleted. A full replace (rather than delta upserts)
 // matches the source: OpenCode's database is a single file whose mtime is the
 // only change signal pfm gets, so per-row offsets do not exist.
-func (s *Store) ReplaceOpenCodeSessions(ctx context.Context, sessions []OpenCodeSession) (err error) {
+func (s *Store) ReplaceOpenCodeSessions(ctx context.Context, sessions []OpenCodeSession) error {
 	return s.WithImmediateTx(ctx, func(tx *ImmediateTx) error {
-		rows, err := tx.QueryContext(ctx, "SELECT id FROM oc_sessions")
-		if err != nil {
-			return fmt.Errorf("query existing oc sessions: %w", err)
-		}
-		existing := make(map[string]bool)
-		for rows.Next() {
-			var id string
-			if err := rows.Scan(&id); err != nil {
-				return errors.Join(fmt.Errorf("scan existing oc session id: %w", err), rows.Close())
-			}
-			existing[id] = true
-		}
-		if err := rows.Err(); err != nil {
-			return errors.Join(fmt.Errorf("iterate existing oc sessions: %w", err), rows.Close())
-		}
-		if err := rows.Close(); err != nil {
-			return fmt.Errorf("close existing oc session rows: %w", err)
-		}
+		return tx.ReplaceOpenCodeSessions(ctx, sessions)
+	})
+}
 
-		for index := range sessions {
-			session := &sessions[index]
-			_, err := tx.ExecContext(ctx, `
+// ReplaceOpenCodeSessions mirrors one pass's view within tx.
+func (tx *ImmediateTx) ReplaceOpenCodeSessions(ctx context.Context, sessions []OpenCodeSession) error {
+	rows, err := tx.QueryContext(ctx, "SELECT id FROM oc_sessions")
+	if err != nil {
+		return fmt.Errorf("query existing oc sessions: %w", err)
+	}
+	existing := make(map[string]bool)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return errors.Join(fmt.Errorf("scan existing oc session id: %w", err), rows.Close())
+		}
+		existing[id] = true
+	}
+	if err := rows.Err(); err != nil {
+		return errors.Join(fmt.Errorf("iterate existing oc sessions: %w", err), rows.Close())
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("close existing oc session rows: %w", err)
+	}
+
+	for index := range sessions {
+		session := &sessions[index]
+		_, err := tx.ExecContext(ctx, `
 INSERT INTO oc_sessions (`+openCodeSessionColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
   title=excluded.title,
@@ -87,36 +93,35 @@ ON CONFLICT(id) DO UPDATE SET
   time_created_ms=excluded.time_created_ms,
   time_updated_ms=excluded.time_updated_ms,
   time_archived_ms=excluded.time_archived_ms`,
-				session.ID,
-				session.Title,
-				session.Directory,
-				session.ProjectDir,
-				session.ParentID,
-				session.Agent,
-				session.Model,
-				session.FirstPrompt,
-				session.PromptCount,
-				session.AssistantCount,
-				session.TokensInput,
-				session.TokensOutput,
-				session.CostMillicents,
-				session.TimeCreatedMS,
-				session.TimeUpdatedMS,
-				session.TimeArchivedMS,
-			)
-			if err != nil {
-				return fmt.Errorf("upsert oc session %q: %w", session.ID, err)
-			}
-			delete(existing, session.ID)
+			session.ID,
+			session.Title,
+			session.Directory,
+			session.ProjectDir,
+			session.ParentID,
+			session.Agent,
+			session.Model,
+			session.FirstPrompt,
+			session.PromptCount,
+			session.AssistantCount,
+			session.TokensInput,
+			session.TokensOutput,
+			session.CostMillicents,
+			session.TimeCreatedMS,
+			session.TimeUpdatedMS,
+			session.TimeArchivedMS,
+		)
+		if err != nil {
+			return fmt.Errorf("upsert oc session %q: %w", session.ID, err)
 		}
+		delete(existing, session.ID)
+	}
 
-		for id := range existing {
-			if _, err := tx.ExecContext(ctx, "DELETE FROM oc_sessions WHERE id = ?", id); err != nil {
-				return fmt.Errorf("delete vanished oc session %q: %w", id, err)
-			}
+	for id := range existing {
+		if _, err := tx.ExecContext(ctx, "DELETE FROM oc_sessions WHERE id = ?", id); err != nil {
+			return fmt.Errorf("delete vanished oc session %q: %w", id, err)
 		}
-		return nil
-	})
+	}
+	return nil
 }
 
 // OpenCodeSessions returns every indexed OpenCode session, newest activity first.

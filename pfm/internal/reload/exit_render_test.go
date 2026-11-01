@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 )
 
@@ -18,15 +19,15 @@ type blindExitTmux struct {
 	backspaces int
 }
 
-func (tmux *blindExitTmux) Capture(context.Context, string, string) (string, error) {
+func (tmux *blindExitTmux) CaptureScreen(context.Context, pfmcall.Target) (string, error) {
 	return "Claude\n❯ ", nil
 }
 
-func (tmux *blindExitTmux) SendKey(ctx context.Context, socket, pane, key string) error {
+func (tmux *blindExitTmux) SendKey(ctx context.Context, target pfmcall.Target, key string) error {
 	if key == "BSpace" {
 		tmux.backspaces++
 	}
-	return tmux.fakeReloadTmux.SendKey(ctx, socket, pane, key)
+	return tmux.fakeReloadTmux.SendKey(ctx, target, key)
 }
 
 // A /exit that never confirms rendering was still TYPED — the worker sent it

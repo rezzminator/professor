@@ -14,7 +14,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rezzminator/professor/pfm/internal/action"
+	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/doctor"
@@ -346,7 +346,7 @@ func TestInstallConfirmationPreservesConfigDir(t *testing.T) {
 		t.Fatalf("preview code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	_, confirmation, found := strings.Cut(stdout.String(), "if you agree, run again: ")
-	if !found || !strings.Contains(confirmation, " --config-dir "+action.Quote(dir)) {
+	if !found || !strings.Contains(confirmation, " --config-dir "+cmdparse.Quote(dir)) {
 		t.Fatalf("confirmation dropped shell-quoted config-dir %q: %q", dir, confirmation)
 	}
 	command := exec.Command("sh", "-c", "set -- "+strings.TrimSpace(confirmation)+"; printf '%s\\000' \"$@\"")

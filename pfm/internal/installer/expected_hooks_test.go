@@ -81,9 +81,15 @@ func TestCodexHookWiringStripsALeftoverClearKillHookInEveryShape(t *testing.T) {
 	for _, hook := range codexHerdrHooks(home) {
 		want[settingsHookKey{Event: hook.Event, Matcher: hook.Matcher, Command: hook.Command}] = 1
 	}
+	guard := settingsHookKey{
+		Event:   "PreToolUse",
+		Matcher: "Bash|apply_patch",
+		Command: filepath.Join(home, ".local", "bin", "pfm") + " internal engine-guard --engine codex",
+	}
+	want[guard] = 1
 	if !reflect.DeepEqual(owned, want) {
 		t.Fatalf(
-			"Codex hook ownership=%#v, want the resume-unkill hook and the Herdr handlers owned once: %#v",
+			"Codex hook ownership=%#v, want resume-unkill, the Herdr handlers and the engine guard owned once: %#v",
 			owned,
 			want,
 		)
@@ -99,6 +105,9 @@ func TestCodexHookWiringStripsALeftoverClearKillHookInEveryShape(t *testing.T) {
 	}
 	if got := hookCommandCount(t, string(updated), "SessionStart", resumeUnkill.Command); got != 1 {
 		t.Fatalf("resume-unkill handler count=%d, want exactly one:\n%s", got, updated)
+	}
+	if got := hookCommandCount(t, string(updated), "PreToolUse", guard.Command); got != 1 {
+		t.Fatalf("engine-guard handler count=%d, want exactly one:\n%s", got, updated)
 	}
 
 	// Idempotent: a second pass over the already-converged file changes

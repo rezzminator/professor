@@ -77,7 +77,7 @@ It reads and writes the user's real chat state: a destructive operation on a liv
 - Errors wrap with context (`fmt.Errorf("…: %w", err)`): a swallowed error in a gather path renders as a missing chat row, which reads as "no such chat".
 - A schema change is a new `migration_v{N}.sql` plus its `go:embed`; `internal/store/schema.sql` is never edited for it, since existing databases never see it.
 - Behavior belongs in Go, not the shim: a fix that is easier in the shim signals that the Go surface is wrong.
-- The CLI stays boring Go for one box: stdlib `flag`, no cobra, no config system, no telemetry.
+- The CLI stays boring Go for one box: stdlib `flag`, no cobra, no config system, no telemetry; a solved format or protocol (JSONC, semver, UUID) comes from the standard library or a maintained library.
 - Storage is modernc.org/sqlite, pure Go with `CGO_ENABLED=0` for a static binary; indexing is on-demand and incremental, with no index daemon.
 - The TUI is charm.land/bubbletea, bubbles and lipgloss, all v2: verify the v2 API against upstream before writing UI code, since v1 examples do not compile.
 - Go is pinned in `go.mod` (mise: `mise use -g go@1.27`).

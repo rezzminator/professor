@@ -7,7 +7,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"net"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -19,11 +18,9 @@ import (
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
-	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
-	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestHerdrNativeClaudeDefersLifecycle(t *testing.T) {
@@ -53,11 +50,20 @@ func TestHerdrNativeClaudeDefersLifecycle(t *testing.T) {
 }
 
 func TestHerdrNativeSeatReporter(t *testing.T) {
-	for _, event := range []string{"start", "working", "idle", "attach", "detach", "sync", "invalid resume", "delayed working"} {
+	events := []string{
+		"start", "working", "idle", "attach", "detach", "sync", "invalid resume", "delayed working",
+		"held start", "held idle",
+	}
+	for _, event := range events {
 		t.Run(event, func(t *testing.T) {
 			root := t.TempDir()
 			server := newNativeReporterHerdr(t, "native-seat", "w6:p3", "native-terminal")
-			server.addPane("w6:p3", "native")
+			reportEvent, held := strings.CutPrefix(event, "held ")
+			if held {
+				holdNativeReporterPane(t, server, "w6:p3")
+			} else {
+				server.addPane("w6:p3", "native")
+			}
 			t.Setenv(paths.EnvHome, root)
 			t.Setenv(paths.EnvStateDB, filepath.Join(root, "pfm.db"))
 			t.Setenv("TMUX", "")
@@ -82,7 +88,6 @@ func TestHerdrNativeSeatReporter(t *testing.T) {
 			}
 			var stderr bytes.Buffer
 			reportedSession := "new-session"
-			reportEvent := event
 			if event == "invalid resume" {
 				reportedSession = "bad'session"
 				reportEvent = "start"
@@ -121,6 +126,32 @@ func TestHerdrNativeSeatReporter(t *testing.T) {
 				t.Fatalf("native seat binding = %q, want %s", got.SessionID, reportedSession)
 			}
 			lines := server.requests()
+			wantResume := []string{herdr.ResumeCommand, "chat", "open", "--restored", "new-session"}
+			if held {
+				// Herdr cannot see Claude behind herdr-keep's attach client: pfm reports
+				// the idle state, or the pane reads unknown.
+				want := map[string]any{
+					"pane_id": "w6:p3", "source": "pfm", "agent": "claude", "state": "idle",
+					"agent_session_id": "new-session", "resume_argv": wantResume,
+				}
+				if len(lines) != 1 {
+					t.Fatalf("held pane requests=%q, want one pane.report_agent %v", lines, want)
+				}
+				var request struct {
+					Method string         `json:"method"`
+					Params map[string]any `json:"params"`
+				}
+				if err := json.Unmarshal([]byte(lines[0]), &request); err != nil {
+					t.Fatal(err)
+				}
+				delete(request.Params, "seq")
+				wantJSON, _ := json.Marshal(want)
+				gotJSON, _ := json.Marshal(request.Params)
+				if request.Method != "pane.report_agent" || !bytes.Equal(gotJSON, wantJSON) {
+					t.Fatalf("held pane report = %s %s, want pane.report_agent %s", request.Method, gotJSON, wantJSON)
+				}
+				return
+			}
 			if event == "invalid resume" {
 				if len(lines) != 1 || !strings.Contains(lines[0], `"method":"pane.release_agent"`) {
 					t.Fatalf("invalid restore must not be registered as complete: %q", lines)
@@ -146,7 +177,6 @@ func TestHerdrNativeSeatReporter(t *testing.T) {
 				t.Fatalf("native release/session sequence=%d want ingress+2=102", request.Params.Seq)
 			}
 
-			wantResume := []string{herdr.ResumeCommand, "chat", "open", "--restored", "new-session"}
 			if request.Method != "pane.report_agent_session" || request.Params.Pane != "w6:p3" ||
 				request.Params.State != "" ||
 				!reflect.DeepEqual(request.Params.Resume, wantResume) {
@@ -503,134 +533,6 @@ func TestBareHerdrDegradedSeatStoreRefusesUnprovedReport(t *testing.T) {
 			}
 		})
 	}
-}
-
-// This producer-faithful native fixture records mutations separately from proof reads.
-func newNativeReporterHerdr(t *testing.T, seatID, pane, terminal string, beforeSend ...func()) *fakeHerdr {
-	return newNativeReporterHerdrCount(t, seatID, pane, terminal, nil, nil, beforeSend...)
-}
-
-func newNativeReporterHerdrCount(
-	t *testing.T,
-	seatID, pane, terminal string,
-	onProof func(),
-	location func() (string, string),
-	beforeSend ...func(),
-) *fakeHerdr {
-	t.Helper()
-	root := testjail.ShortRoot(t)
-	proc := filepath.Join(root, "proc")
-	if err := os.MkdirAll(proc, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(proc, "stat"), []byte("btime 1000\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	write := func(pid, parent int, argv string) {
-		dir := filepath.Join(proc, strconv.Itoa(pid))
-		if err := os.MkdirAll(dir, 0o700); err != nil {
-			t.Fatal(err)
-		}
-		fields := make([]string, 24)
-		for i := range fields {
-			fields[i] = "0"
-		}
-		fields[0] = "S"
-		fields[1] = strconv.Itoa(parent)
-		fields[19] = "100"
-		if err := os.WriteFile(
-			filepath.Join(dir, "stat"),
-			[]byte(fmt.Sprintf("%d (pfm) %s", pid, strings.Join(fields, " "))),
-			0o600,
-		); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, "cmdline"), []byte(argv), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	write(900001, 1, "/fixture/pfm\x00internal\x00seat-host\x00"+seatID+"\x00")
-	write(os.Getpid(), 900001, "/fixture/pfm\x00internal\x00herdr-state\x00working\x00")
-	t.Setenv(paths.EnvProcRoot, proc)
-	server := &fakeHerdr{path: filepath.Join(root, "h.sock")}
-	listener, err := net.Listen("unix", server.path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = listener.Close() })
-	go func() {
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				return
-			}
-			func() {
-				defer func() { _ = conn.Close() }()
-				var req struct {
-					ID     string                     `json:"id"`
-					Method string                     `json:"method"`
-					Params map[string]json.RawMessage `json:"params"`
-				}
-				if err := json.NewDecoder(conn).Decode(&req); err != nil {
-					t.Error(err)
-					return
-				}
-				var result any
-				if (req.Method == "pane.list" || req.Method == "pane.process_info") && onProof != nil {
-					onProof()
-				}
-				if location != nil {
-					pane, terminal = location()
-				}
-				switch req.Method {
-				case "pane.list":
-					fields := testjail.HerdrPaneInfo(pane)["pane"].(map[string]any)
-					fields["terminal_id"] = terminal
-					result = map[string]any{"type": "pane_list", "panes": []any{fields}}
-				case "pane.process_info":
-					result = map[string]any{
-						"type":         "pane_process_info",
-						"process_info": map[string]any{"pane_id": pane, "shell_pid": 900001},
-					}
-				default:
-					for _, check := range beforeSend {
-						check()
-					}
-					line, _ := json.Marshal(req)
-					server.mu.Lock()
-					server.lines = append(server.lines, string(line))
-					server.mu.Unlock()
-					result = map[string]any{"type": "ok"}
-					switch req.Method {
-					case "pane.rename":
-						result = map[string]any{"pane": map[string]any{"pane_id": pane, "label": req.Params["label"]}}
-					case "agent.rename":
-						result = map[string]any{"agent": map[string]any{"pane_id": pane, "name": req.Params["name"]}}
-					case "pane.get":
-						result = testjail.HerdrPaneInfo(pane)
-					case "tab.get":
-						result = map[string]any{
-							"type": "tab_info",
-							"tab":  map[string]any{"tab_id": "w6:t1", "label": "Previous", "pane_count": 1},
-						}
-					}
-				}
-				if err := json.NewEncoder(conn).Encode(map[string]any{"id": req.ID, "result": result}); err != nil {
-					t.Error(err)
-				}
-			}()
-		}
-	}()
-	return server
-}
-
-func stampNativeReporterSeat(t *testing.T, seat *fleetdb.Seat) {
-	t.Helper()
-	if err := gather.StampHerdrHost(gather.NewProcFS(os.Getenv(paths.EnvProcRoot)), seat, 900001); err != nil {
-		t.Fatal(err)
-	}
-	seat.HerdrTerminalID = "native-terminal"
-	seat.HerdrWorkspace = "w6"
 }
 
 func TestNativeReporterProvesItsSupervisorAndCanonicalTarget(t *testing.T) {

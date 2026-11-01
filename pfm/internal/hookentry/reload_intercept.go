@@ -54,7 +54,9 @@ func reloadInterceptBody(
 		return 0
 	}
 	trimmed := strings.TrimSpace(payload.Prompt)
-	words, err := cmdparse.SplitShellWords(strings.TrimPrefix(trimmed, "/reload"))
+	// Blanking the command word keeps the parser's line:column on the prompt
+	// the user typed.
+	words, err := cmdparse.SplitShellWords(strings.Repeat(" ", len("/reload")) + strings.TrimPrefix(trimmed, "/reload"))
 	if err != nil {
 		recordReloadRefusal(trimmed, err.Error())
 		fmt.Fprintf(stderr, "reload: %v\n", err)

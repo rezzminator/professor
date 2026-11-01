@@ -109,7 +109,9 @@ func simpleCommand(run string) (*syntax.CallExpr, bool) {
 	}
 	stmt := file.Stmts[0]
 	call, ok := stmt.Cmd.(*syntax.CallExpr)
-	if !ok || stmt.Negated || stmt.Background || len(stmt.Redirs) > 0 {
+	// A command below a leading comment or blank line would leave the exec
+	// prefixed on that first line, an exec of nothing.
+	if !ok || stmt.Pos().Line() != 1 || stmt.Negated || stmt.Background || len(stmt.Redirs) > 0 {
 		return nil, false
 	}
 	syntax.Walk(stmt, func(node syntax.Node) bool {

@@ -339,7 +339,7 @@ describe("scope", { concurrency: availableParallelism() }, () => {
     }
     assert.ok(imported.has("enginesync") && imported.has("globallink"), `import scan lost its known imports: ${[...imported]}`);
     const generic = new Set([
-      "action", "atomicfile", "clock", "cli", "deps", "engine", "fleetdb", "gather", "obs", "paths",
+      "atomicfile", "clock", "cli", "cmdparse", "deps", "engine", "fleetdb", "gather", "obs", "paths",
       "pricing", "pricing/modelcost", "reload", "restart", "schedule", "semver",
     ]);
     const script = readFileSync(SCRIPT, "utf8");

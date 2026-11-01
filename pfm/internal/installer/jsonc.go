@@ -113,6 +113,15 @@ func jsoncObjectAt(raw []byte, root *hujson.Value, start int) (jsoncObject, erro
 			}
 			if comma := member.Value.EndOffset + len(member.Value.AfterExtra); comma < len(raw) && raw[comma] == ',' {
 				property.commaStart, property.commaEnd = comma, comma+1
+				// The span takes every comma parseJSONC blanked after this
+				// one, so a removal never leaves a stray comma behind.
+				for next := property.commaEnd; next < len(raw); next++ {
+					if raw[next] == ',' {
+						property.commaEnd = next + 1
+					} else if !isJSONWhitespace(raw[next]) {
+						break
+					}
+				}
 			}
 			result.properties = append(result.properties, property)
 			result.byName[name] = property

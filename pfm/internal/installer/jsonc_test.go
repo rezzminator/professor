@@ -9,7 +9,7 @@ import (
 // settings file carries: two (or more) trailing commas in a row — two edits
 // landing on the same spot, or a block moved and re-punctuated — comments,
 // and commas or brackets inside strings, which must come back verbatim from
-// a read and from a read after an edit, because uninstall restores them.
+// a read and from a read after an edit or a removal, because uninstall restores them.
 func TestJSONCReadsAndEditsWhatVSCodeAccepts(t *testing.T) {
 	t.Parallel()
 	for name, row := range map[string]struct {
@@ -44,6 +44,10 @@ func TestJSONCReadsAndEditsWhatVSCodeAccepts(t *testing.T) {
 			`{"b":2} // last`,
 			map[string]any{"b": 2.0},
 		},
+		"double comma between members, the first removed": {
+			`{"b": 2,, "a": 1}`,
+			map[string]any{"a": 1.0, "b": 2.0},
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			document, err := decodeJSONCObject([]byte(row.content))
@@ -64,6 +68,18 @@ func TestJSONCReadsAndEditsWhatVSCodeAccepts(t *testing.T) {
 			row.want["b"] = 3.0
 			if !reflect.DeepEqual(document, row.want) {
 				t.Fatalf("read after edit %q\nwant %#v\ngot  %#v", edited, row.want, document)
+			}
+			removed, err := removeJSONCProperty([]byte(row.content), 0, "b")
+			if err != nil {
+				t.Fatalf("removeJSONCProperty(%q): %v", row.content, err)
+			}
+			document, err = decodeJSONCObject(removed)
+			if err != nil {
+				t.Fatalf("decodeJSONCObject(%q) after removing b from %q: %v", removed, row.content, err)
+			}
+			delete(row.want, "b")
+			if !reflect.DeepEqual(document, row.want) {
+				t.Fatalf("read after removal %q\nwant %#v\ngot  %#v", removed, row.want, document)
 			}
 		})
 	}

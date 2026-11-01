@@ -178,8 +178,18 @@ func TestCodexPaneDoctorNamesAPaneItCannotFollow(t *testing.T) {
 	const socket = "cx-1800000020-1-1"
 	startCodexStatusPane(t, tmuxTmpDir, socket, `  FIX_HAND · /work/example · Full Access\n`)
 
+	// PFM_TMUX_DIR need not be named tmux-{uid}: the doctor must probe the
+	// directory it was given, never one it re-derives from that directory's
+	// parent. The fleet directory here only links to the started socket.
 	resolved := jailPaths(t)
-	resolved.TmuxDir = filepath.Join(tmuxTmpDir, "tmux-"+strconv.Itoa(os.Getuid()))
+	resolved.TmuxDir = filepath.Join(root, "sockets")
+	if err := os.MkdirAll(resolved.TmuxDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	started := filepath.Join(tmuxTmpDir, "tmux-"+strconv.Itoa(os.Getuid()), socket)
+	if err := os.Symlink(started, filepath.Join(resolved.TmuxDir, socket)); err != nil {
+		t.Fatal(err)
+	}
 	database, err := store.Open()
 	if err != nil {
 		t.Fatal(err)
@@ -323,7 +333,7 @@ func TestCodexPaneDoctorUsesHeldRootDespiteModelFirstStatus(t *testing.T) {
 		Paths:  resolved,
 		Config: config.Config{CodexAccounts: []config.CodexAccount{{ID: 1, Home: filepath.Join(root, "codex")}}},
 	}
-	panes, err := (gather.TmuxProbe{TmuxTmpDir: filepath.Dir(resolved.TmuxDir)}).ListPanes(ctx, socket)
+	panes, err := (gather.TmuxProbe{TmuxDir: resolved.TmuxDir}).ListPanes(ctx, socket)
 	if err != nil || len(panes) != 1 {
 		t.Fatalf("panes=%#v err=%v", panes, err)
 	}

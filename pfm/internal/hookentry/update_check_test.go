@@ -10,10 +10,40 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/updatecheck"
 )
 
+// TestUpdateCheckOfflineMakesNoLookup: with the offline switch set, the check
+// asks no server, writes neither cache nor failure marker, and says why.
+func TestUpdateCheckOfflineMakesNoLookup(t *testing.T) {
+	_, recorder := obs.Test(t)
+	t.Setenv(paths.EnvUpdateCheckOffline, "1")
+	asked := 0
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		asked++
+		writer.WriteHeader(http.StatusFound)
+	}))
+	defer server.Close()
+	cache := filepath.Join(t.TempDir(), "update.json")
+	var stderr bytes.Buffer
+	code := UpdateCheck([]string{"--cache", cache, "--current", "v1.0.0", "--url", server.URL}, &stderr)
+	want := "pfm internal update-check: offline (PFM_UPDATE_CHECK_OFFLINE=1): no release lookup made\n"
+	if code != 0 || stderr.String() != want {
+		t.Fatalf("offline update-check = %d, %q; want 0, %q", code, stderr.String(), want)
+	}
+	if asked != 0 || len(recorder.Records()) != 0 {
+		t.Fatalf("offline update-check asked the server %d times, logged %s; want neither", asked, recorder.Raw())
+	}
+	for _, path := range []string{cache, cache + ".failure"} {
+		if _, err := os.Lstat(path); !os.IsNotExist(err) {
+			t.Fatalf("offline update-check left %s (stat err %v); want nothing written", path, err)
+		}
+	}
+}
+
 func TestUpdateCheckFailureOutcomes(t *testing.T) {
+	t.Setenv(paths.EnvUpdateCheckOffline, "")
 	closed := httptest.NewServer(http.NotFoundHandler())
 	closedURL := closed.URL
 	closed.Close()
@@ -96,6 +126,7 @@ func TestUpdateCheckFailureOutcomes(t *testing.T) {
 // release leaves one comp=http.out record with the redirect status, and the
 // release cache it writes is unaffected by the wrapper.
 func TestUpdateCheckWritesAnHTTPOutRecord(t *testing.T) {
+	t.Setenv(paths.EnvUpdateCheckOffline, "")
 	_, recorder := obs.Test(t)
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.Method != http.MethodHead || request.URL.Path != "/professor-org/professor/releases/latest" {

@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // FDLink is one numeric process file descriptor and its symlink target.
@@ -63,16 +65,6 @@ type ProcBirth interface {
 // everywhere else and the reaper reports no RAM rather than refusing to run.
 type ProcMemory interface {
 	RSSKB(pid int) (int64, error)
-}
-
-// Terminate asks a process to exit. A process that already exited satisfies
-// the request.
-func Terminate(pid int) error {
-	err := syscall.Kill(pid, syscall.SIGTERM)
-	if errors.Is(err, syscall.ESRCH) {
-		return nil
-	}
-	return err
 }
 
 // FileID names one file by device and inode: the identity an install's
@@ -132,7 +124,7 @@ func FileIDOfInfo(info os.FileInfo) (FileID, error) {
 func NewProcFS(root string) ProcFS {
 	if root != "" {
 		if info, err := os.Stat(root); err == nil && info.IsDir() {
-			if filepath.Clean(root) == "/proc" {
+			if filepath.Clean(root) == paths.SystemProcRoot() {
 				return nativeProcFS()
 			}
 			return RealProcFS{Root: root}
@@ -147,10 +139,7 @@ type RealProcFS struct {
 }
 
 func (proc RealProcFS) root() string {
-	if proc.Root == "" {
-		return "/proc"
-	}
-	return proc.Root
+	return paths.ProcRootOr(proc.Root)
 }
 
 // PIDs returns numeric process directories in ascending order.

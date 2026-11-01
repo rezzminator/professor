@@ -28,6 +28,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/servicemanager"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 )
 
@@ -345,13 +346,16 @@ func LiveDeps(runtime config.Runtime, warn io.Writer, spare []int, launchedFrom 
 	if err != nil {
 		fmt.Fprintf(warn, "pfm restart: resolve this binary (pfm processes are matched by name only): %v\n", err)
 	}
+	services := nativeServiceManager(goruntime.GOOS, runner, clock.Real, runtime.Paths.Home, servicemanager.UID())
 	dependencies := Deps{
 		Runner:       runner,
 		Procs:        gather.NewProcFS(runtime.Paths.ProcRoot),
-		Signal:       syscall.Kill,
+		Kernel:       gather.NativeKernel(),
+		Probe:        gather.ProbeProcess,
+		Install:      gather.InstallAt(runtime.Paths.Home),
 		Clock:        clock.Real,
 		Fleet:        liveFleet{runtime: runtime, warn: warn},
-		Services:     nativeServiceManager(goruntime.GOOS, runner, clock.Real, runtime.Paths.Home, os.Getuid()),
+		Services:     services,
 		Self:         os.Getpid(),
 		EffectiveUID: uint32(os.Geteuid()),
 		Spare:        spare,

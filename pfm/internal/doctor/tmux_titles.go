@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"path/filepath"
 	"sort"
 	"time"
 
@@ -68,7 +67,7 @@ func printTmuxTitlesDoctorWithClock(
 		intended, machine.Tmux.Titles.Enabled, machine.Source("tmux.titles.enabled"),
 	)
 
-	client := gather.TmuxProbe{TmuxTmpDir: filepath.Dir(resolved.TmuxDir)}
+	client := gather.TmuxProbe{TmuxDir: resolved.TmuxDir}
 	if clk == nil {
 		clk = clock.Real
 	}

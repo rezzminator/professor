@@ -67,19 +67,42 @@ func TestHookRunnerRunsThroughTheRunnerSeam(t *testing.T) {
 	}
 }
 
-// TestHookRunnerReportsAFailedHookOnStderr proves a hook that fails to start
-// or exits non-nil is reported, never swallowed silently.
+// TestHookRunnerReportsAFailedHookOnStderr proves a hook that cannot resolve
+// sh, fails to start or exits non-nil is reported, never swallowed silently.
+// Not parallel: the missing-sh row empties PATH with t.Setenv.
 func TestHookRunnerReportsAFailedHookOnStderr(t *testing.T) {
-	t.Parallel()
-	fake := &deps.FakeRunner{}
-	fake.ScriptStart([]string{deps.Executable("sh")}, 0, errors.New("boom"), nil)
-	var stderr bytes.Buffer
-	hook := hookRunner("false", fake, &stderr)
-	if err := hook(headless.Status{Name: "chat-1"}); err != nil {
-		t.Fatalf("hook() error = %v, want nil (errors are logged, never propagated)", err)
-	}
-	if !strings.Contains(stderr.String(), "hook failed") || !strings.Contains(stderr.String(), "boom") {
-		t.Fatalf("stderr = %q, want it to name the failed hook and its cause", stderr.String())
+	for _, tc := range []struct {
+		name       string
+		shMissing  bool
+		wantStderr string
+		wantStarts int
+	}{
+		{name: "start fails", wantStderr: "pfm chat watch: hook failed: boom\n", wantStarts: 1},
+		{
+			name:       "sh missing from PATH",
+			shMissing:  true,
+			wantStderr: "pfm chat watch: hook failed: resolve sh: exec: \"sh\": executable file not found in $PATH\n",
+			wantStarts: 0,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := &deps.FakeRunner{}
+			fake.ScriptStart([]string{deps.Executable("sh")}, 0, errors.New("boom"), nil)
+			if tc.shMissing {
+				t.Setenv("PATH", t.TempDir())
+			}
+			var stderr bytes.Buffer
+			hook := hookRunner("false", fake, &stderr)
+			if err := hook(headless.Status{Name: "chat-1"}); err != nil {
+				t.Fatalf("hook() error = %v, want nil (errors are logged, never propagated)", err)
+			}
+			if got := stderr.String(); got != tc.wantStderr {
+				t.Fatalf("stderr = %q, want %q", got, tc.wantStderr)
+			}
+			if got := len(fake.Starts()); got != tc.wantStarts {
+				t.Fatalf("Starts() = %d, want %d", got, tc.wantStarts)
+			}
+		})
 	}
 }
 

@@ -65,7 +65,7 @@ func runReap(args []string, stdout, stderr io.Writer, runtime commandRuntime) in
 		OpenCodeBinary: runtime.Config.OpenCode.Binary,
 		CodexHomes:     runtime.Config.CodexHomes(),
 		KillServer: func(ctx context.Context, socket string) error {
-			return pfmchat.KillServer(ctx, resolved, socket)
+			return pfmchat.KillServer(ctx, resolved, socket, "")
 		},
 	})
 	if err != nil {

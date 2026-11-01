@@ -2,6 +2,7 @@ package restart
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -31,9 +32,16 @@ type Fleet interface {
 // Deps is every host door discovery and the steps it plans go through; a test
 // fills each with a fake.
 type Deps struct {
-	Runner   deps.Runner
-	Procs    gather.ProcFS
-	Signal   Signaler
+	Runner deps.Runner
+	Procs  gather.ProcFS
+	// Kernel opens a process for the signal door; Probe asks only whether a
+	// pid exists (signal 0).
+	Kernel gather.Kernel
+	Probe  gather.Probe
+	// Install is the install whose launched processes the restart may stop:
+	// a pfm, helper or painter of another install (a test jail, another
+	// checkout's build) is never one of them.
+	Install  gather.Install
 	Clock    clock.Clock
 	Fleet    Fleet
 	Services ServiceManager
@@ -60,6 +68,18 @@ type Deps struct {
 	LogDir string
 	// Env is the environment of every process the restart starts.
 	Env []string
+}
+
+// door is the signal door over these dependencies: every stop re-identifies
+// its process through it right before each signal.
+func (dependencies Deps) door() gather.Door {
+	return gather.Door{
+		Procs:  dependencies.Procs,
+		Kernel: dependencies.Kernel,
+		Clock:  dependencies.Clock,
+		UID:    dependencies.EffectiveUID,
+		Self:   dependencies.Self,
+	}
 }
 
 // discoverer builds one plan.
@@ -217,13 +237,27 @@ func (finder *discoverer) findServices(ctx context.Context) (bool, error) {
 // are claimed so nothing stops them twice. When the services find failed, a
 // daemon may be supervised: it is claimed and left running, a failed find.
 func (finder *discoverer) findMCPDaemon(table processTable, supervised bool, servicesErr error) {
-	defer finder.failedOn(FamilyMCPDaemon, table.unreadableErr())
+	var unowned []error
+	defer func() { finder.failedOn(FamilyMCPDaemon, errors.Join(append(unowned, table.unreadableErr())...)) }()
 	var daemons []process
+	kept := 0
 	for _, proc := range table.Processes {
-		if finder.mcpDaemon(proc.Argv) && !finder.claimed[proc.PID] {
-			finder.claimed[proc.PID] = true
-			daemons = append(daemons, proc)
+		if !finder.mcpDaemon(proc.Argv) || finder.claimed[proc.PID] {
+			continue
 		}
+		// Claimed either way: another install's daemon, or one whose owner
+		// could not be read, is left running and never reaches the pfm family.
+		finder.claimed[proc.PID] = true
+		owned, err := finder.ownedByInstall(proc)
+		if err != nil {
+			unowned = append(unowned, err)
+			continue
+		}
+		if !owned {
+			kept++
+			continue
+		}
+		daemons = append(daemons, proc)
 	}
 	if servicesErr != nil {
 		finder.failed(FamilyMCPDaemon, fmt.Errorf(
@@ -239,7 +273,8 @@ func (finder *discoverer) findMCPDaemon(table processTable, supervised bool, ser
 		return
 	}
 	finder.found(FamilyMCPDaemon, fmt.Sprintf(
-		"%d unsupervised pfm mcp serve process(es) of %d listed — process table", len(daemons), table.Listed))
+		"%d unsupervised pfm mcp serve process(es) of %d listed — process table%s",
+		len(daemons), table.Listed, keptNote(kept)))
 	for index, proc := range daemons {
 		unit := finder.processUnit(FamilyMCPDaemon, "pfm mcp serve", proc)
 		if index == 0 {

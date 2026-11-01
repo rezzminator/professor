@@ -14,6 +14,7 @@ import (
 	"time"
 
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -92,7 +93,7 @@ func TestChatCallResolvesUnindexedLiveSessionAcrossProbeSockets(t *testing.T) {
 	if _, err := exec.LookPath("python3"); err != nil {
 		t.Skip("python3 binary is not installed")
 	}
-	tmuxRoot := filepath.Join(os.TempDir(), "tmux-"+strconv.Itoa(os.Getuid()))
+	tmuxRoot := paths.TmuxDirUnder(paths.TempRoot())
 	if err := os.MkdirAll(tmuxRoot, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -585,7 +586,7 @@ func TestChatCallResumeRefusesLiveSocketCrumbSession(t *testing.T) {
 	}
 	const id = "66666666-2222-4333-8444-555555555555"
 	const socket = "cc-1800000000-22-3"
-	base := filepath.Join(os.TempDir(), "tmux-"+strconv.Itoa(os.Getuid()))
+	base := paths.TmuxDirUnder(paths.TempRoot())
 	if err := os.MkdirAll(base, 0o700); err != nil {
 		t.Fatal(err)
 	}

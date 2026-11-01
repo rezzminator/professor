@@ -65,6 +65,23 @@ type OutputRunner interface {
 	Output(context.Context, string, ...string) ([]byte, error)
 }
 
+// commandRun is a CommandRunner as the service-manager door's runner: its
+// answer is the error alone, so the result carries no output.
+type commandRun struct{ runner CommandRunner }
+
+func (adapter commandRun) Run(ctx context.Context, argv []string, _ deps.RunOptions) (deps.RunResult, error) {
+	return deps.RunResult{}, adapter.runner.Run(ctx, argv[0], argv[1:]...)
+}
+
+// commandOutput is an OutputRunner as the service-manager door's runner, so
+// the door reads the command's stdout as well.
+type commandOutput struct{ reader OutputRunner }
+
+func (adapter commandOutput) Run(ctx context.Context, argv []string, _ deps.RunOptions) (deps.RunResult, error) {
+	stdout, err := adapter.reader.Output(ctx, argv[0], argv[1:]...)
+	return deps.RunResult{Stdout: stdout}, err
+}
+
 type Options struct {
 	Mode Mode
 	// herdrIndicatorDeps replaces the process-table, signal and start doors in tests.
@@ -297,7 +314,7 @@ func (runner execCommandRunner) Output(ctx context.Context, name string, args ..
 // Options.ProcRoot nor its Env names one. The package's TestMain points it at an
 // empty jail, so a test whose fake Env omits PFM_PROC_ROOT never reads, or
 // signals, the processes of a suite running beside it.
-var defaultProcRoot = "/proc"
+var defaultProcRoot = paths.SystemProcRoot()
 
 func normalizeInstallerOptions(options Options) (Options, error) {
 	if options.SourceRepo != "" {

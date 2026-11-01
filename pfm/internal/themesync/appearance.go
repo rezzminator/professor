@@ -17,7 +17,14 @@ func DetectAppearance(ctx context.Context, env Env) (Appearance, error) {
 	if !env.darwin() {
 		return "", errors.New("themesync: auto appearance detection unsupported; choose an explicit theme/appearance")
 	}
-	result, err := env.Runner.Run(ctx, []string{"defaults", "read", "-g", "AppleInterfaceStyle"}, deps.RunOptions{})
+	// Resolved through the Runner seam, as herdr is here: a test serving
+	// darwin on another host scripts the lookup where deps.Resolve would
+	// refuse the darwin-only row for the host's own GOOS.
+	defaults, err := env.Runner.LookPath("defaults")
+	if err != nil {
+		return "", fmt.Errorf("themesync: resolve defaults: %w", err)
+	}
+	result, err := env.Runner.Run(ctx, []string{defaults, "read", "-g", "AppleInterfaceStyle"}, deps.RunOptions{})
 	if err != nil {
 		return "", fmt.Errorf("themesync: read macOS appearance: %w", err)
 	}

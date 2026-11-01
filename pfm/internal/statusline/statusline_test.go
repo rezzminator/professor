@@ -837,3 +837,25 @@ func TestEngineFromEnvironmentIgnoresTheLoginDefault(t *testing.T) {
 		})
 	}
 }
+
+// A render whose caller named no SID directory writes its breadcrumb where
+// every hook and resolver reads it — PFM_SID_DIR, else the host-wide
+// rendezvous — never under its own cache directory or TMPDIR.
+func TestNormalizedSIDDirIsTheSharedRendezvous(t *testing.T) {
+	cache := t.TempDir()
+	for _, row := range []struct {
+		name string
+		env  map[string]string
+		want string
+	}{
+		{"named", map[string]string{"PFM_SID_DIR": "/jail/sid", "TMPDIR": "/jail/tmp"}, "/jail/sid"},
+		{"unnamed", map[string]string{"TMPDIR": "/jail/tmp"}, "/tmp/cc-sid"},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			got := Runtime{Home: t.TempDir(), CacheDir: cache, Env: row.env}.normalized().SIDDir
+			if got != row.want {
+				t.Fatalf("SIDDir = %q, want %q", got, row.want)
+			}
+		})
+	}
+}

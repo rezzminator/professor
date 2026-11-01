@@ -101,7 +101,7 @@ Tiers and effort live in the fleet prompt's § Model Selection; the cast and eac
 
 - Every dispatch carries all five: the goal in one sentence and the artifact it returns, its shape named; the boundary, in scope and explicitly out; the anchors — exact files, symbols or commands, never "find the relevant code"; the tier and effort, plus a budget when the task can run away; what its own failure looks like — a dead end, an empty result, a tool that would not run.
 - All sibling agents of a round go in one message; agents dispatched and reports received are counted and must match, and a missing report is a named coverage hole.
-- An invariant enforced across layers (Go + shell + prompt) is mapped closed-world before the build dispatch; the brief carries every enumerated door, per `templates/global/rules/writing-code.md`.
+- An invariant enforced across layers (Go + shell + prompt) is mapped closed-world before the build dispatch; the brief carries every enumerated door, per `templates/global/rules/coding.md`.
 - Agent reports are evidence, not truth: verify a claim against what you can read yourself before relaying it.
 
 ## Prompt & template code
@@ -112,7 +112,7 @@ Tiers and effort live in the fleet prompt's § Model Selection; the cast and eac
 - No dangling pointers: grep before you cite; a pointer to a file, agent or command the install does not produce is deleted, or its target ships.
 - The judge is never the thing being judged: read the artifact from disk, never a verdict asserted in a brief; an empty enumeration is clean only once the enumerator provably ran, and the parent reports which.
 - Surgical changes: every changed line traces to the task; fix broken things you hit; remove dead code, references and deps end to end, including `README.md`, `docs/SETUP.md` and `templates/refresh-map.json`.
-- No duplication: grep for the existing rule or section and reference it; a near-copy drifts; code and scripts follow `writing-code.md`.
+- No duplication: grep for the existing rule or section and reference it; a near-copy drifts; code and scripts follow `coding.md`.
 - Twins move together: a `.claude/**` change any adopter could use lands in its `templates/{project|global}/**` twin in the same pass, the commit message carrying the adopter-facing change; a customization only this repo wants stays local; unsure → ask.
 - Right-size and finish: the simplest thing that works, no speculative abstractions, no stubs or deferred TODOs; where correct and convenient diverge, take correct, even at re-architecting cost.
 

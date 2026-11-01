@@ -30,7 +30,7 @@ func TestChatBranchCreatesADetachedSeatWithoutTouchingTheCaller(t *testing.T) {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
-	root, err := os.MkdirTemp("", "pbr")
+	root, err := os.MkdirTemp(paths.TempRoot(), "pbr")
 	if err != nil {
 		t.Fatal(err)
 	}

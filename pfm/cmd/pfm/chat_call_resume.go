@@ -198,7 +198,7 @@ func liveCrumbSession(
 	if err != nil {
 		return "", false, fmt.Errorf("read session crumbs %q: %w", resolved.SIDDir, err)
 	}
-	client := gather.TmuxProbe{TmuxTmpDir: filepath.Dir(resolved.TmuxDir)}
+	client := gather.TmuxProbe{TmuxDir: resolved.TmuxDir}
 	for _, entry := range entries {
 		if !entry.Type().IsRegular() {
 			continue

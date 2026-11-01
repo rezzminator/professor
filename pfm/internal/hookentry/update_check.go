@@ -9,13 +9,16 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/updatecheck"
 )
 
 const professorLatestReleaseURL = "https://github.com/" + updatecheck.ProfessorRepo + "/releases/latest"
 
 // UpdateCheck refreshes the release notice cache for the picker. An unreachable
-// release lookup is recorded in the failure marker, logged WARN, and exits 0.
+// release lookup is recorded in the failure marker, logged WARN, and exits 0;
+// paths.EnvUpdateCheckOffline=1 makes no lookup, leaves the cache and marker
+// as they are, says so on stderr and exits 0.
 func UpdateCheck(args []string, stderr io.Writer) int {
 	flags := cli.NewFlagSet(
 		"internal update-check",
@@ -31,6 +34,14 @@ func UpdateCheck(args []string, stderr io.Writer) int {
 	if flags.NArg() != 0 || *cache == "" || *current == "" || *latestURL == "" {
 		flags.Usage()
 		return 2
+	}
+	if paths.UpdateCheckOffline() {
+		fmt.Fprintf(
+			stderr,
+			"pfm internal update-check: offline (%s=1): no release lookup made\n",
+			paths.EnvUpdateCheckOffline,
+		)
+		return 0
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()

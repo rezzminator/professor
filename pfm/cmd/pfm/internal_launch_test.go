@@ -51,7 +51,7 @@ func TestInternalLaunchNoTTYCreatesListedSessionAndPropagatesExit(t *testing.T) 
 	}
 	t.Setenv("PFM_TMUX_DIR", tmuxDir)
 	t.Setenv("PFM_TEST_FRESH_SOCKET", socket)
-	t.Setenv("PFM_PROC_ROOT", "/proc")
+	t.Setenv(paths.EnvProcRoot, paths.SystemProcRoot())
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "poison-parent")
 	t.Setenv("CLAUDECODE", "poison-parent")
 	t.Setenv("CLAUDE_CODE_CHILD_SESSION", "poison-parent")

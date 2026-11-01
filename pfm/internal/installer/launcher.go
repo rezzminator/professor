@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"syscall"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/gather"
@@ -169,7 +168,7 @@ func (installer *engine) pruneClaudeVersions() error {
 		return nil
 	}
 	procs := gather.NewProcFS(installer.options.ProcRoot)
-	report = ProbeLiveClaudeVersions(report, procs, syscall.Kill)
+	report = ProbeLiveClaudeVersions(report, procs, gather.ProbeProcess)
 	if report.LiveProbeErr != nil {
 		installer.say("  skip    claude versions: retention not applied — %v", report.LiveProbeErr)
 		return nil

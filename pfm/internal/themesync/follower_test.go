@@ -8,8 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/agentlauncher"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -28,7 +30,8 @@ func TestFollowerPlistHoldsTheContractedKeys(t *testing.T) {
 		"<key>StandardOutPath</key>\n\t<string>/h/.local/state/pfm/theme/follow.log</string>",
 		"<key>StandardErrorPath</key>\n\t<string>/h/.local/state/pfm/theme/follow.log</string>",
 		"<key>EnvironmentVariables</key>\n\t<dict>\n\t\t<key>PATH</key>\n" +
-			"\t\t<string>" + paths.ServicePath("/h") + "</string>\n\t</dict>",
+			"\t\t<string>" + paths.ServicePath("/h") + "</string>\n" +
+			"\t\t<key>PFM_INSTALL_MARK</key>\n\t\t<string>" + paths.InstallMark("/h") + "</string>\n\t</dict>",
 	} {
 		if !strings.Contains(plist, want) {
 			t.Errorf("plist lacks %q:\n%s", want, plist)
@@ -117,6 +120,9 @@ func TestFollowerReloadOwedUntilABootstrapSucceeds(t *testing.T) {
 		return strings.Join(ran, " ")
 	}
 	t.Run("a failed bootout stays due", func(t *testing.T) {
+		saved := wallClock
+		wallClock = instantSleep{Clock: clock.Real}
+		t.Cleanup(func() { wallClock = saved })
 		h := newHarness(t)
 		h.on()
 		h.write(plist, "<plist>stale render</plist>\n")
@@ -130,7 +136,8 @@ func TestFollowerReloadOwedUntilABootstrapSucceeds(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		wantVerdict(t, report, "follower", VerdictError, "bootout exited 5")
+		wantVerdict(t, report, "follower", VerdictError, "themesync: launchctl bootout "+target+
+			" failed and the job is still loaded after 20 checks: launchctl exited 5: Boot-out failed: 5: Input/output error")
 		status, err := ReadBack(context.Background(), h.env)
 		if err != nil {
 			t.Fatal(err)
@@ -287,3 +294,9 @@ func TestFollowerDiscoveryFailureKeepsLastValidWatches(t *testing.T) {
 		})
 	}
 }
+
+// instantSleep is a clock whose waits return at once, for a retry the test
+// drives to exhaustion.
+type instantSleep struct{ clock.Clock }
+
+func (instantSleep) Sleep(context.Context, time.Duration) error { return nil }

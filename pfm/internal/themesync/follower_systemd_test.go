@@ -72,6 +72,7 @@ func TestLinuxFollowerIsASystemdUnitTrioNeverALaunchAgent(t *testing.T) {
 	for _, want := range []string{
 		"Type=oneshot\n",
 		`Environment="PATH=` + paths.ServicePath(h.home) + `"` + "\n",
+		`Environment="PFM_INSTALL_MARK=` + paths.InstallMark(h.home) + `"` + "\n",
 		`Environment="XPC_SERVICE_NAME=com.professor.pfm.theme"` + "\n",
 		`ExecStart="/opt/bin/pfm" theme sync` + "\n",
 		"StandardOutput=append:" + filepath.Join(h.stateDir, "follow.log") + "\n",

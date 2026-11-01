@@ -56,7 +56,7 @@ func TestNameSyncSchedulersInvokeApply(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	renderedService, err := renderServicePath(service, home)
+	renderedService, err := renderServiceEnv(service, home)
 	if err != nil {
 		t.Fatalf("render systemd service: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestNameSyncSchedulersInvokeApply(t *testing.T) {
 		Options{},
 	)
 	if err == nil {
-		renderedPlist, err = renderServicePath(renderedPlist, home)
+		renderedPlist, err = renderServiceEnv(renderedPlist, home)
 	}
 	if err != nil {
 		t.Fatalf("render launch agent: %v", err)

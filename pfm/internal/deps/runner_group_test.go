@@ -3,10 +3,13 @@ package deps
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // TestRunProcessGroupGivesTheChildItsOwnGroup proves RunOptions.ProcessGroup
@@ -14,10 +17,11 @@ import (
 // the caller's group never reaches it; without it the child shares the
 // caller's group.
 func TestRunProcessGroupGivesTheChildItsOwnGroup(t *testing.T) {
-	if _, err := os.Stat("/proc/self/stat"); err != nil {
+	procRoot := paths.SystemProcRoot()
+	if _, err := os.Stat(filepath.Join(procRoot, "self", "stat")); err != nil {
 		t.Skipf("no /proc to read a child's process group: %v", err)
 	}
-	argv := []string{"sh", "-c", `read -r _ _ _ _ pgid _ </proc/$$/stat; echo "$$ $pgid"`}
+	argv := []string{"sh", "-c", `read -r _ _ _ _ pgid _ <"$1/$$/stat"; echo "$$ $pgid"`, "sh", procRoot}
 	for _, own := range []bool{true, false} {
 		result, err := RealRunner{}.Run(context.Background(), argv, RunOptions{ProcessGroup: own})
 		if err != nil || result.ExitCode != 0 {

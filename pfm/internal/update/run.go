@@ -662,7 +662,7 @@ func runUpdateDoctor(
 	// binary, not whichever source checkout invoked it, so run from a fresh
 	// non-repository directory and keep an unwired maintainer checkout from
 	// rolling back an otherwise healthy update.
-	doctorDir, err := os.MkdirTemp("", "pfm-update-doctor-")
+	doctorDir, err := paths.MkdirTemp("update-doctor", "run-")
 	if err != nil {
 		return doctorOutcome{}, fmt.Errorf("create isolated doctor directory: %w", err)
 	}

@@ -14,6 +14,7 @@ Type=simple
 # whose engines live elsewhere pins absolute <engine>.binary paths in the pfm
 # machine config instead.
 Environment=PATH=__PFM_SERVICE_PATH__
+Environment=PFM_INSTALL_MARK=__PFM_INSTALL_MARK__
 ExecStart=%h/.local/bin/pfm mcp serve
 Restart=on-failure
 RestartSec=2

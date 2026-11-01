@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -258,6 +259,43 @@ func TestUsageRequestCarriesThePfmUserAgent(t *testing.T) {
 	}
 }
 
+// The usage offline switch stops the request at the door: with it set the
+// endpoint is never asked and the expired cache answers beside
+// ErrUsageOffline; unset, the same seat asks the endpoint once.
+func TestUsageOfflineSwitchSendsNoRequest(t *testing.T) {
+	for _, testcase := range []struct {
+		name         string
+		offline      bool
+		wantHits     int64
+		wantErr      error
+		wantFiveHour float64
+	}{
+		{name: "offline", offline: true, wantHits: 0, wantErr: ErrUsageOffline, wantFiveHour: 20},
+		{name: "online", offline: false, wantHits: 1, wantErr: nil, wantFiveHour: 10},
+	} {
+		t.Run(testcase.name, func(t *testing.T) {
+			now := time.Now()
+			root, configDir, cacheDir, _ := doorSeat(t, 5, now)
+			env := &paths.MapEnv{Values: map[string]string{paths.EnvHome: root}}
+			server, hits, _ := countingUsageServer(t, now, 0)
+			usage, _, err := Fetch(context.Background(), Options{
+				Env: env, Home: root, ConfigDir: configDir,
+				AccountDirs: map[string]int{configDir: 5}, CacheDir: cacheDir, TTL: 3 * time.Minute,
+				Client: server.Client(), Endpoint: server.URL, Log: io.Discard, Offline: testcase.offline,
+			}, 5)
+			if !errors.Is(err, testcase.wantErr) || (testcase.wantErr == nil && err != nil) {
+				t.Fatalf("fetch error = %v, want %v", err, testcase.wantErr)
+			}
+			if got := hits.Load(); got != testcase.wantHits {
+				t.Fatalf("requests = %d, want %d", got, testcase.wantHits)
+			}
+			if usage.FiveHour.Utilization == nil || *usage.FiveHour.Utilization != testcase.wantFiveHour {
+				t.Fatalf("five-hour utilization = %v, want %v", usage.FiveHour.Utilization, testcase.wantFiveHour)
+			}
+		})
+	}
+}
+
 // The door and the Limits tab share one "still worth showing" rule: a window
 // counts only with a reading and a reset not yet passed, an unknown reset
 // being no passed one.
@@ -317,6 +355,17 @@ func TestClaudeProbesNeverWriteTheRealClaudeHome(t *testing.T) {
 	}
 	if runs := testjail.AssertClaudeRanInThrowawayHomes(t, home, sid, record); runs != 4 {
 		t.Errorf("the fake recorded %d runs, want 4 (--version, doctor --help, doctor, the usage --version)", runs)
+	}
+}
+
+// TestClaudeCodeVersionNamesAMissingBinary: a Claude binary absent from PATH
+// fails at resolution with its name, never as a stat of the bare name.
+func TestClaudeCodeVersionNamesAMissingBinary(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	_, err := claudeCodeVersion(context.Background(), "claude")
+	want := `resolve Claude Code binary "claude": exec: "claude": executable file not found in $PATH`
+	if err == nil || err.Error() != want {
+		t.Fatalf("claudeCodeVersion() error = %v, want %q", err, want)
 	}
 }
 

@@ -58,8 +58,12 @@ func (commandRunner) Output(
 		// translated message to display. Keep it stable for classification.
 		options.Env = append(os.Environ(), "LC_ALL=C")
 	}
+	binary, err := deps.Resolve(name)
+	if err != nil {
+		return nil, fmt.Errorf("resolve %s: %w", name, err)
+	}
 	result, err := obs.Runner(deps.RealRunner{}).
-		Run(ctx, append([]string{deps.Executable(name)}, args...), options)
+		Run(ctx, append([]string{binary}, args...), options)
 	if err == nil && result.ExitCode != 0 {
 		err = &commandExitError{code: result.ExitCode, stderr: strings.TrimSpace(string(result.Stderr))}
 	}
@@ -179,11 +183,7 @@ func EngineFromEnvironment(getenv func(string) string) (pfmengine.ID, error) {
 // cache. Production uses the host temp directory; a PFM_HOME jail keeps the
 // cache inside that jail. The cc-gpt-usage name is a legacy on-disk contract.
 func CodexStatuslineCachePath(jailHome string, uid int) string {
-	cacheDir := os.TempDir()
-	if jailHome != "" {
-		cacheDir = filepath.Join(jailHome, "tmp")
-	}
-	return filepath.Join(cacheDir, "cc-gpt-usage-"+strconv.Itoa(uid)+".json")
+	return filepath.Join(paths.TempBase(jailHome), "cc-gpt-usage-"+strconv.Itoa(uid)+".json")
 }
 
 // UseConfig takes the state database and any load error from the machine
@@ -220,20 +220,20 @@ func (runtime Runtime) normalized() Runtime {
 		runtime.ConfigDir = filepath.Join(runtime.Home, ".claude")
 	}
 	if runtime.CacheDir == "" {
-		runtime.CacheDir = os.TempDir()
+		runtime.CacheDir = paths.TempRoot()
 	}
 	if runtime.RateLimitDir == "" {
 		runtime.RateLimitDir = filepath.Join(runtime.CacheDir, "cc-rate-limits")
 	}
 	if runtime.SIDDir == "" {
-		runtime.SIDDir = filepath.Join(runtime.CacheDir, "cc-sid")
+		// The SID rendezvous every hook and resolver reads: PFM_SID_DIR, else
+		// the host-wide one. A cache directory or TMPDIR never moves it.
+		runtime.SIDDir = paths.SIDDirFrom(runtime.pathsEnv())
 	}
 	if runtime.TmuxDir == "" {
-		runtime.TmuxDir = filepath.Join(runtime.CacheDir, "tmux-"+strconv.Itoa(runtime.UID))
+		runtime.TmuxDir = paths.TmuxDirOf(runtime.CacheDir, runtime.UID)
 	}
-	if runtime.ProcRoot == "" {
-		runtime.ProcRoot = "/proc"
-	}
+	runtime.ProcRoot = paths.ProcRootOr(runtime.ProcRoot)
 	if runtime.Command == nil {
 		runtime.Command = commandRunner{}
 	}

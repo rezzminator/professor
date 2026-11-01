@@ -8,8 +8,8 @@ import (
 	"context"
 	"errors"
 	"io/fs"
-	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
@@ -18,10 +18,53 @@ import (
 // Binary is the executable name shared by every tmux caller.
 const Binary = "tmux"
 
+// valueFlags are tmux's global flags that take a value (its getopt string
+// "2c:CDdf:lL:NqS:T:uUvV").
+const valueFlags = "cfLST"
+
 // SocketPath returns the server socket component of a TMUX value.
 func SocketPath(value string) string {
 	socket, _, _ := strings.Cut(value, ",")
 	return socket
+}
+
+// NamedServer reads the server a tmux command line names, as tmux's own
+// option parser takes it: the -L label and the -S socket path, each "" when
+// absent (-S wins over -L in tmux). isTmux is false when argv[0] is not tmux.
+// A tmux server keeps the command line of the client that started it, so this
+// reads a server's argv as well as a client's.
+func NamedServer(argv []string) (label, socketPath string, isTmux bool) {
+	if len(argv) == 0 || filepath.Base(argv[0]) != Binary {
+		return "", "", false
+	}
+	for index := 1; index < len(argv); index++ {
+		argument := argv[index]
+		if argument == "--" || !strings.HasPrefix(argument, "-") || argument == "-" {
+			break
+		}
+		// Flags group as getopt(3) groups them ("-uL work", "-2S/path"): each
+		// letter is a flag until one taking a value, which takes the rest of
+		// the token or, when none is left, the next argument.
+		for position := 1; position < len(argument); position++ {
+			flag := argument[position]
+			if !strings.ContainsRune(valueFlags, rune(flag)) {
+				continue
+			}
+			value := argument[position+1:]
+			if value == "" && index+1 < len(argv) {
+				index++
+				value = argv[index]
+			}
+			switch flag {
+			case 'L':
+				label = value
+			case 'S':
+				socketPath = value
+			}
+			break
+		}
+	}
+	return label, socketPath, true
 }
 
 // CouldNotRun reports whether err means tmux itself never started — the
@@ -60,5 +103,12 @@ func Invocation(binary, socketPath string, arguments ...string) (string, []strin
 	if binary == "" {
 		binary = deps.Executable(Binary)
 	}
-	return binary, append([]string{"-S", socketPath}, arguments...), append(os.Environ(), "TMUX=")
+	return binary, append([]string{"-S", socketPath}, arguments...), Environment()
+}
+
+// Environment is the environment every tmux run gets: the caller's own, with
+// TMUX set and empty (see Command). A caller replacing pfm with tmux
+// (syscall.Exec of a generated action line) passes it unchanged.
+func Environment() []string {
+	return deps.EnvironmentWith("TMUX", "")
 }

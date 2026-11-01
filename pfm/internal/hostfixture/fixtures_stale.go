@@ -68,14 +68,18 @@ func StaleArtifacts(t *testing.T) StaleArtifactsFixture {
 // deadPID spawns a real, trivial child process, waits for it to exit, and
 // hands back its now-dead pid — the same shape a crashed writer's leftover
 // artifact names, without hardcoding a number that might collide with a
-// real live process on this host. It runs through deps.Executable("sh"),
+// real live process on this host. It resolves sh through deps.Resolve,
 // the same registered-command seam every other production subprocess spawn
 // in this module must cross (internal/deps's own source guard,
 // TestProductionExecLiteralsAreRegisteredAndResolved, refuses a bare
 // literal command name outside internal/deps).
 func deadPID(t *testing.T) int {
 	t.Helper()
-	command := exec.Command(deps.Executable("sh"), "-c", "exit 0")
+	sh, err := deps.Resolve("sh")
+	if err != nil {
+		t.Fatalf("hostfixture: resolve sh for a dead pid: %v", err)
+	}
+	command := exec.Command(sh, "-c", "exit 0")
 	if err := command.Run(); err != nil {
 		t.Fatalf("hostfixture: run throwaway process for a dead pid: %v", err)
 	}

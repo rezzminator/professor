@@ -503,7 +503,7 @@ func TestChatReloadWorkerFreshDropsSessionButKeepsTranscriptCWD(t *testing.T) {
 
 func probeReloadSocket(t *testing.T, suffix string) string {
 	t.Helper()
-	dir := filepath.Join(os.TempDir(), "tmux-"+strconv.Itoa(os.Getuid()))
+	dir := paths.TmuxDirUnder(paths.TempRoot())
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}

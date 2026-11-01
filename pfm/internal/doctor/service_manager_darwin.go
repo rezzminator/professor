@@ -5,11 +5,9 @@ package doctor
 import (
 	"context"
 	"fmt"
-	"os"
-	"strconv"
-	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/servicemanager"
 )
 
 const (
@@ -25,9 +23,6 @@ const (
 	// pfmScheduleLaunchdLabel is the StartInterval job staged by the installer
 	// that runs pfm internal schedule-fire every five minutes.
 	pfmScheduleLaunchdLabel = "com.professor.pfm.schedule"
-	// launchctlNotFoundExit is `launchctl print`'s exit for a label launchd
-	// does not know ("Could not find service … in domain").
-	launchctlNotFoundExit = 113
 )
 
 // serviceManagerIdentity names the manager and label the row reports without
@@ -95,31 +90,24 @@ func probeLaunchdLabel(ctx context.Context, runner deps.Runner, label string) se
 	state := serviceManagerUnitState{Unit: label}
 	probeCtx, cancel := context.WithTimeout(ctx, deps.ProbeTimeout)
 	defer cancel()
-	argv := []string{"launchctl", "print", "gui/" + strconv.Itoa(os.Getuid()) + "/" + label}
-	result, err := runner.Run(probeCtx, argv, deps.RunOptions{})
-	if err != nil {
-		state.Err = fmt.Errorf("%s: %w", strings.Join(argv, " "), err)
+	answer := servicemanager.NewLaunchd(runner, nil).Print(probeCtx, label)
+	if answer.RunErr != nil {
+		state.Err = fmt.Errorf("%s: %w", answer.Command(), answer.RunErr)
 		return state
 	}
 	if probeCtx.Err() != nil {
-		state.Err = probeUnanswered(probeCtx, argv, result)
+		state.Err = probeUnanswered(probeCtx, answer.Argv, answer.Result)
 		return state
 	}
-	if result.ExitCode != 0 {
-		if result.ExitCode != launchctlNotFoundExit &&
-			!strings.Contains(string(result.Stderr), "Could not find service") {
-			state.Err = probeUnanswered(probeCtx, argv, result)
+	if !answer.OK() {
+		if !answer.Unknown() {
+			state.Err = probeUnanswered(probeCtx, answer.Argv, answer.Result)
 		}
 		return state
 	}
 	state.Present = true
 	state.Enabled = true
-	for _, line := range strings.Split(string(result.Stdout), "\n") {
-		if value, ok := strings.CutPrefix(strings.TrimSpace(line), "state = "); ok {
-			state.State = value
-			state.Active = value == "running"
-			break
-		}
-	}
+	state.State = answer.State()
+	state.Active = state.State == "running"
 	return state
 }

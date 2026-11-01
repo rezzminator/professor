@@ -184,7 +184,7 @@ func (r *flakyBootstrapRunner) Run(_ context.Context, name string, args ...strin
 	case "bootstrap":
 		r.bootstrapCalls++
 		if r.bootstrapCalls <= r.failCount {
-			return errors.New("bootstrap exit status 5")
+			return commandExitError{name: "launchctl", code: 5, text: "Bootstrap failed: 5: Input/output error"}
 		}
 		r.loaded = true
 		return nil
@@ -233,7 +233,7 @@ func (r *alwaysFailsBootstrapRunner) Run(_ context.Context, name string, args ..
 	case "print":
 		return errors.New("could not find service")
 	case "bootstrap":
-		return errors.New("bootstrap exit status 5")
+		return commandExitError{name: "launchctl", code: 5, text: "Bootstrap failed: 5: Input/output error"}
 	}
 	return nil
 }
@@ -344,5 +344,63 @@ func TestReloadLaunchAgentLoadedUnchangedReloadsOnlyAWedgedJob(t *testing.T) {
 				t.Fatalf("install said %q, want it to say %q", out.String(), test.says)
 			}
 		})
+	}
+}
+
+// bootoutRunner scripts launchctl's answers to an unload: `bootout` answers
+// bootout, and each `print` takes the next entry of prints, the last one
+// repeating. Every other call succeeds.
+type bootoutRunner struct {
+	calls   []string
+	bootout error
+	prints  []error
+}
+
+func (r *bootoutRunner) Run(_ context.Context, name string, args ...string) error {
+	r.calls = append(r.calls, name+" "+strings.Join(args, " "))
+	if len(args) == 0 {
+		return nil
+	}
+	switch args[0] {
+	case "bootout":
+		return r.bootout
+	case "print":
+		answer := r.prints[0]
+		if len(r.prints) > 1 {
+			r.prints = r.prints[1:]
+		}
+		return answer
+	}
+	return nil
+}
+
+// TestReloadLaunchAgentKeepsAJobBootoutCouldNotUnload: a changed plist on a
+// loaded job whose bootout launchd refuses, and which stays loaded, is
+// reported as not reloaded — never bootstrapped over and never read as
+// reloaded or as a service the installer took DOWN.
+func TestReloadLaunchAgentKeepsAJobBootoutCouldNotUnload(t *testing.T) {
+	t.Parallel()
+	target := "gui/" + strconv.Itoa(os.Getuid()) + "/" + mcpLaunchdLabel
+	runner := &bootoutRunner{
+		bootout: commandExitError{name: "launchctl", code: 5, text: "Boot-out failed: 5: Input/output error"},
+		prints:  []error{nil},
+	}
+	installer := engine{
+		options: Options{Runner: runner, Stdout: io.Discard, Sleep: func(time.Duration) {}},
+		apply:   true,
+	}
+	err := installer.reloadLaunchAgentWithLabel(context.Background(), "/fixture/agent.plist", mcpLaunchdLabel, true)
+	want := "launchctl com.professor.pfm.mcp not reloaded: the new plist at /fixture/agent.plist is installed, " +
+		"but its loaded job could not be unloaded: launchctl bootout " + target +
+		" failed and the job is still loaded after 20 checks: launchctl exited 5: Boot-out failed: 5: Input/output error"
+	if err == nil || err.Error() != want {
+		t.Fatalf("reload error = %v\nwant %s", err, want)
+	}
+	wantCalls := []string{"launchctl print " + target, "launchctl bootout " + target}
+	for range 20 {
+		wantCalls = append(wantCalls, "launchctl print "+target)
+	}
+	if strings.Join(runner.calls, "\n") != strings.Join(wantCalls, "\n") {
+		t.Fatalf("calls = %q\nwant %q", runner.calls, wantCalls)
 	}
 }

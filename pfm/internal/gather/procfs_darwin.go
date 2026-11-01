@@ -84,7 +84,7 @@ func (proc *DarwinProcFS) ProcessIdentity(pid int) (ProcessIdentity, error) {
 		return ProcessIdentity{}, fmt.Errorf(
 			"read process identity for pid %d via kern.proc.pid: %w",
 			pid,
-			processReadError(pid, err, unix.Kill(pid, 0)),
+			processReadError(pid, err, ProbeProcess(pid)),
 		)
 	}
 	command := make([]byte, 0, len(process.Proc.P_comm))
@@ -115,7 +115,7 @@ func (proc *DarwinProcFS) Stat(pid int) (ProcStat, error) {
 		return ProcStat{}, fmt.Errorf(
 			"read kern.proc.pid for %d: %w",
 			pid,
-			processReadError(pid, err, unix.Kill(pid, 0)),
+			processReadError(pid, err, ProbeProcess(pid)),
 		)
 	}
 	started := process.Proc.P_starttime
@@ -154,9 +154,14 @@ func (proc *DarwinProcFS) RSSKB(pid int) (int64, error) {
 }
 
 func (proc *DarwinProcFS) loadResident() {
+	ps, err := deps.Resolve("ps")
+	if err != nil {
+		proc.residentErr = fmt.Errorf("sample resident memory: resolve ps: %w", err)
+		return
+	}
 	result, err := obs.Runner(deps.RealRunner{}).Run(
 		context.Background(),
-		[]string{deps.Executable("ps"), "-A", "-o", "pid=,rss="},
+		[]string{ps, "-A", "-o", "pid=,rss="},
 		deps.RunOptions{},
 	)
 	if err == nil && result.ExitCode != 0 {
@@ -189,9 +194,13 @@ func (proc *DarwinProcFS) loadResident() {
 // transcript a live chat holds open, and "no open files" is a claim, not a
 // shrug — reporting it falsely would let archive evict a file still in use.
 func (proc *DarwinProcFS) FDLinks(pid int) ([]FDLink, error) {
+	lsof, err := deps.Resolve("lsof")
+	if err != nil {
+		return nil, fmt.Errorf("list open files for pid %d: resolve lsof: %w", pid, err)
+	}
 	result, err := obs.Runner(deps.RealRunner{}).Run(
 		context.Background(),
-		[]string{deps.Executable("lsof"), "-w", "-n", "-P", "-p", strconv.Itoa(pid), "-F", "fn"},
+		[]string{lsof, "-w", "-n", "-P", "-p", strconv.Itoa(pid), "-F", "fn"},
 		deps.RunOptions{},
 	)
 	if err == nil && result.ExitCode != 0 {
@@ -238,9 +247,13 @@ func (proc *DarwinProcFS) FDLinks(pid int) ([]FDLink, error) {
 // the one the process still holds after an install renamed a new file over
 // the path. A missing entry is an error, never a zero identity.
 func (proc *DarwinProcFS) Image(pid int) (FileID, error) {
+	lsof, err := deps.Resolve("lsof")
+	if err != nil {
+		return FileID{}, fmt.Errorf("read the executable of pid %d: resolve lsof: %w", pid, err)
+	}
 	result, err := obs.Runner(deps.RealRunner{}).Run(
 		context.Background(),
-		[]string{deps.Executable("lsof"), "-w", "-n", "-P", "-a", "-p", strconv.Itoa(pid), "-d", "txt", "-F", "Di"},
+		[]string{lsof, "-w", "-n", "-P", "-a", "-p", strconv.Itoa(pid), "-d", "txt", "-F", "Di"},
 		deps.RunOptions{},
 	)
 	if err == nil && result.ExitCode != 0 {
@@ -298,7 +311,7 @@ func procArgs(pid int) (argv, env []string, err error) {
 		return nil, nil, fmt.Errorf(
 			"read kern.procargs2 for %d: %w",
 			pid,
-			processReadError(pid, err, unix.Kill(pid, 0)),
+			processReadError(pid, err, ProbeProcess(pid)),
 		)
 	}
 	if len(buffer) < 4 {

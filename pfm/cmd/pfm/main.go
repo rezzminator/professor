@@ -133,6 +133,12 @@ func run(args []string, stdout, stderr io.Writer) (exitCode int) {
 			return 1
 		}
 	}
+	// Before anything launches: every process pfm starts carries this
+	// install's mark, the proof a later stop needs that pfm launched it.
+	if err := paths.MarkProcess(runtime.Paths.Home); err != nil {
+		fmt.Fprintf(stderr, "pfm: %v\n", err)
+		return 1
+	}
 	defer config.UseConfigPath(runtime.Config.Path, runtime.Config.State)()
 	runtime.Version = version
 	finishLog := openActivityLog(args, runtime, stderr)

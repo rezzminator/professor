@@ -15,6 +15,7 @@ import (
 	"time"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 func TestHerdrStateOutsideHerdrIsASilentNoOp(t *testing.T) {
@@ -252,7 +253,7 @@ func TestHerdrStateNeverFailsATurn(t *testing.T) {
 	clock := int64(1_000_000)
 	t.Run("socket gone", func(t *testing.T) {
 		env := herdrPaneEnv(server, "w1:p1")
-		env["HERDR_SOCKET_PATH"] = filepath.Join(os.TempDir(), "pfm-no-such-herdr.sock")
+		env["HERDR_SOCKET_PATH"] = filepath.Join(paths.TempRoot(), "pfm-no-such-herdr.sock")
 		got := runHerdr(t, env, nil, &clock, []string{"--engine", "opencode", "working"}, `{"session_id":"s1"}`)
 		if got.rc != 0 || !strings.Contains(got.stderr, "pfm-no-such-herdr.sock") ||
 			!strings.Contains(got.stderr, "herdr-state") {

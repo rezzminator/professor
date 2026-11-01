@@ -3,7 +3,6 @@ package reap
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -41,8 +40,8 @@ func (tmux TmuxReaper) ListPanes(
 	socket string,
 ) ([]gather.ProbePane, error) {
 	return gather.TmuxProbe{
-		Binary:     tmux.Binary,
-		TmuxTmpDir: filepath.Dir(tmux.TmuxDir),
+		Binary:  tmux.Binary,
+		TmuxDir: tmux.TmuxDir,
 	}.ListPanes(ctx, socket)
 }
 

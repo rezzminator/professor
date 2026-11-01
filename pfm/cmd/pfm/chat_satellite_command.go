@@ -427,7 +427,7 @@ func runChatBranch(
 		})
 	}
 	if err != nil {
-		rollbackErr := pfmchat.KillServer(context.Background(), resolved, socket)
+		rollbackErr := pfmchat.KillServer(context.Background(), resolved, socket, "")
 		if rollbackErr != nil {
 			fmt.Fprintf(stderr, "pfm chat branch: create detached seat: %v; rollback: %v\n", err, rollbackErr)
 		} else {
@@ -457,7 +457,7 @@ func runChatBranch(
 	recordErr := state.RecordBranchSeat(context.Background(), socket, *id, clk.Now().Unix())
 	closeErr := state.Close()
 	if recordErr != nil || closeErr != nil {
-		rollbackErr := pfmchat.KillServer(context.Background(), resolved, socket)
+		rollbackErr := pfmchat.KillServer(context.Background(), resolved, socket, "")
 		failure := errors.Join(recordErr, closeErr)
 		if rollbackErr != nil {
 			failure = errors.Join(failure, fmt.Errorf("rollback detached seat: %w", rollbackErr))

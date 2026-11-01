@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -805,5 +806,30 @@ func TestLoadRuntimeWhitespaceOverrideStillRefusesLegacy(t *testing.T) {
 	t.Setenv(paths.EnvConfig, "  ")
 	if _, err := LoadRuntime(""); !errors.Is(err, ErrNotMigrated) {
 		t.Fatalf("blank override load=%v, want ErrNotMigrated", err)
+	}
+}
+
+// Every engine's dependency row probes the binary the runtime is configured
+// to launch, OpenCode included: a doctor or install preflight that probed the
+// default name would vouch for a binary pfm never runs.
+func TestDepsOptionsProbesEveryConfiguredEngineBinary(t *testing.T) {
+	var runtime Runtime
+	runtime.Paths.Home = "/jail/home"
+	runtime.Config.Claude.Binary = "/opt/example/claude-pinned"
+	runtime.Config.Codex.Binary = "/opt/example/codex-pinned"
+	runtime.Config.OpenCode.Binary = "/opt/example/opencode-pinned"
+	got := map[pfmengine.ID]string{}
+	for _, entry := range deps.Registry(runtime.DepsOptions()) {
+		if entry.Engine != "" {
+			got[entry.Engine] = entry.Command
+		}
+	}
+	want := map[pfmengine.ID]string{
+		pfmengine.Claude:   "/opt/example/claude-pinned",
+		pfmengine.Codex:    "/opt/example/codex-pinned",
+		pfmengine.OpenCode: "/opt/example/opencode-pinned",
+	}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("engine row commands = %v, want %v", got, want)
 	}
 }

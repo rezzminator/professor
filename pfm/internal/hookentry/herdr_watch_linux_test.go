@@ -3,10 +3,10 @@
 package hookentry
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -37,21 +37,7 @@ func TestHerdrWatchScanTakesNoControllingTerminal(t *testing.T) {
 		}
 		return
 	}
-	master, err := os.OpenFile("/dev/ptmx", os.O_RDWR|syscall.O_NOCTTY, 0)
-	if err != nil {
-		t.Fatalf("open a pty: %v", err)
-	}
-	defer func() { _ = master.Close() }()
-	if err := unix.IoctlSetPointerInt(int(master.Fd()), unix.TIOCSPTLCK, 0); err != nil {
-		t.Fatalf("unlock the pty: %v", err)
-	}
-	// The pty's number, from the master's fdinfo ("tty-index:").
-	info, err := os.ReadFile(fmt.Sprintf("/proc/self/fdinfo/%d", master.Fd()))
-	_, index, found := strings.Cut(string(info), "tty-index:")
-	if err != nil || !found {
-		t.Fatalf("name the pty: %v, fdinfo %q", err, info)
-	}
-	number := strings.TrimSpace(strings.SplitN(index, "\n", 2)[0])
+	_, number := openPTY(t)
 	transcript := filepath.Join(dir, "s1.jsonl")
 	if err := os.Symlink("/dev/pts/"+number, transcript); err != nil {
 		t.Fatal(err)
@@ -64,4 +50,23 @@ func TestHerdrWatchScanTakesNoControllingTerminal(t *testing.T) {
 		_ = tty.Close()
 		t.Fatalf("the scan's session has a controlling terminal, want none: the transcript's terminal was taken")
 	}
+}
+
+// openPTY opens a pty master the test owns, unlocks its slave and returns the
+// master with the slave's /dev/pts number, which the kernel's ioctl reports.
+func openPTY(t *testing.T) (*os.File, string) {
+	t.Helper()
+	master, err := os.OpenFile("/dev/ptmx", os.O_RDWR|syscall.O_NOCTTY, 0)
+	if err != nil {
+		t.Fatalf("open a pty: %v", err)
+	}
+	t.Cleanup(func() { _ = master.Close() })
+	if err := unix.IoctlSetPointerInt(int(master.Fd()), unix.TIOCSPTLCK, 0); err != nil {
+		t.Fatalf("unlock the pty: %v", err)
+	}
+	number, err := unix.IoctlGetUint32(int(master.Fd()), unix.TIOCGPTN)
+	if err != nil {
+		t.Fatalf("name the pty: %v", err)
+	}
+	return master, strconv.FormatUint(uint64(number), 10)
 }

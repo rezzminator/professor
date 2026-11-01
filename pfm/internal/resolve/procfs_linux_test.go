@@ -9,13 +9,15 @@ import (
 	"strconv"
 	"syscall"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 func TestLinuxEnvironTagsForeignProcess(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root reads every environment")
 	}
-	if _, err := os.ReadFile("/proc/1/environ"); !errors.Is(err, os.ErrPermission) {
+	if _, err := os.ReadFile(filepath.Join(paths.SystemProcRoot(), "1", "environ")); !errors.Is(err, os.ErrPermission) {
 		t.Skipf("pid 1's environment is not refused here: %v", err)
 	}
 	_, err := newNativeProcFS("").Environ(1)

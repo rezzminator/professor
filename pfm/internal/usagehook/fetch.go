@@ -46,6 +46,10 @@ const StaleHorizon = time.Hour
 // while nothing usable is cached to answer with meanwhile.
 var ErrRefreshHeld = errors.New("another pfm process is refreshing this account's usage and nothing is cached yet")
 
+// ErrUsageOffline reports that paths.EnvUsageOffline stopped the request: the
+// endpoint was not asked, so the answer is the cache alone, never "no usage".
+var ErrUsageOffline = errors.New("usage endpoint not asked: " + paths.EnvUsageOffline + "=1")
+
 // StatusError is a non-2xx usage response other than 429. ErrorType and
 // Message are the provider's own reading of it, from the body's
 // `{"error":{"type","message"}}`, empty when the body carried none; the json
@@ -114,10 +118,12 @@ func NamesDeadCredential(text string) bool {
 //     five-hour reset still ahead, answers without a request;
 //  2. this seat's cache record fresh within options.TTL answers;
 //  3. an active shared backoff answers with the cached usage and its error;
-//  4. the O_EXCL refresh lock (RefreshLockPath) is taken — while a peer holds it no
+//  4. with options.Offline (paths.EnvUsageOffline=1) the cache answers with
+//     ErrUsageOffline and no request is sent;
+//  5. the O_EXCL refresh lock (RefreshLockPath) is taken — while a peer holds it no
 //     request is sent and the cache answers; holding it, the cache is read
 //     again and answers if a peer refreshed or backed off meanwhile;
-//  5. the request: success writes the record — a window the response leaves
+//  6. the request: success writes the record — a window the response leaves
 //     out is off the account's plan, so it is no failure and nothing of it is
 //     carried over — a 429 writes the shared backoff (BackoffFor), any other
 //     failure a one-minute backoff.
@@ -155,11 +161,12 @@ func Fetch(ctx context.Context, options Options, account int) (usage Usage, conf
 	if answer, ok := view.answer(ctx, options, now); ok {
 		return finish(answer)
 	}
+	if options.Offline {
+		return finish(view.staleAnswer(now, ErrUsageOffline))
+	}
 	lockPath := RefreshLockPath(options.CacheDir, account)
-	held, lockErr := false, EnsurePrivateDir(options.CacheDir)
-	if lockErr != nil {
-		lockErr = fmt.Errorf("usage cache directory %s: %w", options.CacheDir, lockErr)
-	} else {
+	held, lockErr := false, paths.EnsurePrivateDir("usage cache directory", options.CacheDir)
+	if lockErr == nil {
 		held, lockErr = takeRefreshLock(lockPath, options.Clock.Now())
 	}
 	if held {
@@ -590,7 +597,10 @@ func claudeCodeVersion(ctx context.Context, binary string) (string, error) {
 	if binary == "" {
 		binary = pfmengine.MustLookup(pfmengine.Claude).Binary
 	}
-	path := deps.Executable(binary)
+	path, err := deps.Resolve(binary)
+	if err != nil {
+		return "", fmt.Errorf("resolve Claude Code binary %q: %w", binary, err)
+	}
 	info, err := os.Stat(path)
 	if err != nil {
 		return "", fmt.Errorf("stat Claude Code binary %s: %w", path, err)

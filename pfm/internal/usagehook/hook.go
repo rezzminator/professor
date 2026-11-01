@@ -57,6 +57,10 @@ type Options struct {
 	// fresh cache no longer answers, and neither does an active backoff whose
 	// replayed error it accepts (a credential failure the caller just repaired).
 	BypassBackoff func(error) bool
+	// Offline is paths.EnvUsageOffline set, read by the production builder
+	// (paths.UsageOffline): the cache answers with ErrUsageOffline and no
+	// request goes out.
+	Offline bool
 }
 
 // Window is one model usage window returned by Anthropic's OAuth endpoint.
@@ -235,7 +239,7 @@ func Evaluate(ctx context.Context, options Options) (string, error) {
 		return "", err
 	}
 	account := accountNumber(options.Home, options.ConfigDir, options.AccountDirs)
-	if err := EnsurePrivateDir(options.CacheDir); err != nil {
+	if err := paths.EnsurePrivateDir("usage cache directory", options.CacheDir); err != nil {
 		return "", err
 	}
 	now := options.Now()
@@ -404,7 +408,7 @@ func accountNumber(home, configDir string, accountDirs ...map[string]int) int {
 
 // UsageCacheDir returns the usage cache directory nested under base using the
 // same "cc-usage-<uid>" naming DefaultCacheDir applies to its own base (a
-// jail home's "tmp" directory, or os.TempDir()). A caller that already holds
+// paths.TempBase). A caller that already holds
 // a jail-scoped base directory computed the identical way — e.g.
 // statusline's Runtime.CacheDir, which DefaultRuntime derives from the exact
 // same paths.EnvHome rule — uses this instead of re-deriving the directory
@@ -434,15 +438,7 @@ func CacheDirFor(env paths.Env) string {
 }
 
 func cacheDirForEnv(env paths.Env) string {
-	return UsageCacheDir(tempBase(env.Get(paths.EnvHome)), os.Getuid())
-}
-
-// tempBase is the host temp directory, or a PFM_HOME jail's own tmp.
-func tempBase(jailHome string) string {
-	if jailHome != "" {
-		return filepath.Join(jailHome, "tmp")
-	}
-	return os.TempDir()
+	return UsageCacheDir(paths.TempBase(env.Get(paths.EnvHome)), os.Getuid())
 }
 
 // CredentialPath is the one filesystem rule for an account's OAuth credential
@@ -608,7 +604,7 @@ func readCacheRecordFile(file *os.File) (CacheRecord, time.Time, error) {
 
 // WriteCacheRecord atomically publishes a private cache record.
 func WriteCacheRecord(path string, record CacheRecord) error {
-	if err := EnsurePrivateDir(filepath.Dir(path)); err != nil {
+	if err := paths.EnsurePrivateDir("usage cache directory", filepath.Dir(path)); err != nil {
 		return err
 	}
 	body, err := json.Marshal(record)
@@ -650,24 +646,6 @@ func ParseRetryAfter(value string, now time.Time) time.Duration {
 		}
 	}
 	return 0
-}
-
-func EnsurePrivateDir(path string) error {
-	if err := os.MkdirAll(path, 0o700); err != nil {
-		return err
-	}
-	info, err := os.Lstat(path)
-	if err != nil {
-		return err
-	}
-	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("%s is not a real directory", path)
-	}
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok || int(stat.Uid) != os.Getuid() {
-		return fmt.Errorf("%s is not owned by uid %d", path, os.Getuid())
-	}
-	return os.Chmod(path, 0o700)
 }
 
 // logUnknownUsageKeys logs the top-level keys the response carried beside the

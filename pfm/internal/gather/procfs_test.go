@@ -185,6 +185,38 @@ func TestDetectAgentsAndClaudeProcesses(t *testing.T) {
 	}
 }
 
+// A Claude argv names a session only in the forms Claude takes one; an id
+// elsewhere in argv claims nothing, so the stray sweep never kills on it.
+func TestClaudeSessionIDs(t *testing.T) {
+	const id = "01234567-89ab-cdef-0123-456789abcdef"
+	const other = "fedcba98-7654-3210-fedc-ba9876543210"
+	for _, test := range []struct {
+		name    string
+		cmdline []string
+		want    []string
+	}{
+		{name: "session-id word", cmdline: []string{"claude", "--session-id", id}, want: []string{id}},
+		{name: "session-id equals", cmdline: []string{"claude", "--session-id=" + id}, want: []string{id}},
+		{name: "resume word", cmdline: []string{"claude", "--resume", id}, want: []string{id}},
+		{name: "resume equals", cmdline: []string{"claude", "--resume=" + id}, want: []string{id}},
+		{name: "short resume", cmdline: []string{"claude", "-r", id}, want: []string{id}},
+		{name: "resume transcript path", cmdline: []string{"claude", "--resume", "/tx/" + id + ".jsonl"}, want: []string{id}},
+		{name: "both flags", cmdline: []string{"claude", "--session-id", id, "-r", other}, want: []string{id, other}},
+		{name: "named twice", cmdline: []string{"claude", "--session-id", id, "--resume", id}, want: []string{id}},
+		{name: "id inside a prompt", cmdline: []string{"claude", "-p", "resume " + id}, want: []string{}},
+		{name: "id inside a path argument", cmdline: []string{"claude", "--add-dir", "/work/" + id}, want: []string{}},
+		{name: "id as the binary", cmdline: []string{id, "--resume"}, want: []string{}},
+		{name: "not a uuid", cmdline: []string{"claude", "--resume", "../../not-a-uuid"}, want: []string{}},
+		{name: "flag without value", cmdline: []string{"claude", "--resume"}, want: []string{}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := ClaudeSessionIDs(test.cmdline); !reflect.DeepEqual(got, test.want) {
+				t.Fatalf("ClaudeSessionIDs(%q) = %q, want %q", test.cmdline, got, test.want)
+			}
+		})
+	}
+}
+
 func TestWindowConvergenceClipsRunesOnlyHere(t *testing.T) {
 	longName := strings.Repeat("界", 25)
 	panes := []ProbePane{{

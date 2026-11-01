@@ -11,12 +11,21 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func configuredMachinePolicy(home string) pfmconfig.Config {
 	configDir := filepath.Join(home, "profiles", "account 42")
 	if err := os.MkdirAll(configDir, 0o700); err != nil {
 		panic(fmt.Sprintf("fixture account dir %s: %v", configDir, err))
+	}
+	// A real executable, so ClaudeSpawn.Command resolves the configured binary.
+	claudeBinary := filepath.Join(home, "tools", "claude enterprise")
+	if err := os.MkdirAll(filepath.Dir(claudeBinary), 0o700); err != nil {
+		panic(fmt.Sprintf("fixture tools dir %s: %v", filepath.Dir(claudeBinary), err))
+	}
+	if err := testjail.WriteExecutable(claudeBinary, []byte("#!/bin/sh\n"), 0o700); err != nil {
+		panic(fmt.Sprintf("fixture claude binary %s: %v", claudeBinary, err))
 	}
 	return pfmconfig.Config{
 		Version: pfmconfig.Version,
@@ -30,7 +39,7 @@ func configuredMachinePolicy(home string) pfmconfig.Config {
 		}},
 		Claude: pfmconfig.Claude{
 			PermissionMode: pfmconfig.PermissionPrompt,
-			Binary:         "/opt/tools/claude enterprise",
+			Binary:         claudeBinary,
 		},
 		Codex: pfmconfig.Codex{
 			Yolo:   false,

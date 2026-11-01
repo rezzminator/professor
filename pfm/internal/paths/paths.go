@@ -70,24 +70,9 @@ const (
 	EnvOpenCodeRoot = "PFM_OPENCODE_ROOT"
 	EnvTmuxDir      = "PFM_TMUX_DIR"
 	EnvHome         = "PFM_HOME"
-	// EnvSkillSourcesOffline=1 stops pfm install from fetching the
-	// source-fetched global skills (templates/global/skills/sources.json):
-	// an existing store copy is still linked, and pfm doctor reports an
-	// unfetched skill as OFFLINE rather than a warning. The e2e harness sets
-	// it so no test reaches a public repository.
-	EnvSkillSourcesOffline = "PFM_SKILL_SOURCES_OFFLINE"
-	// EnvThemesOffline=1 stops pfm install from downloading the release
-	// profiles; the profiles in the source clone still install.
-	// The test harness sets it so no test fetches themes from a public repository.
-	EnvThemesOffline = "PFM_THEMES_OFFLINE"
 	// EnvDevFence=1 marks a process the fence (infra/fence) started; with
 	// /.dockerenv it is how testjail admits a test run.
 	EnvDevFence = "PFM_DEV_FENCE"
-	// EnvPricesOffline=1 stops every price refresh — pfm model-cost, pfm
-	// install, pfm doctor — from fetching the publishers' pricing pages; the
-	// served table stays the clone file or the embedded copy. The test harness
-	// and the fence lanes set it so no test fetches a pricing page.
-	EnvPricesOffline = "PFM_PRICES_OFFLINE"
 	// EnvCostLedgerDir names the directory of the per-call cost ledger
 	// ({session_id}.jsonl, one line per API call) the cost sink writes and the
 	// status line, `pfm tokens` and callmeter read; unset, it hangs off the
@@ -143,7 +128,6 @@ const (
 	// EnvFormerAutoEffortStateFile is the variable under the plugin's former
 	// name, which the plugin reads in place of an unset EnvAutoEffortStateFile.
 	EnvFormerAutoEffortStateFile = "AUTO_EFFORT_CONTROL_STATE_FILE"
-	defaultTmpDir                = "/tmp"
 )
 
 const sourceRepoMarkerName = "source-repo"
@@ -270,7 +254,7 @@ func GeneratedHarnessPromptIn(repo string, id pfmengine.ID) string {
 // TmuxConfigArguments returns the `-f <config>` a chat server is created with,
 // or nothing at all so tmux loads the user's own config.
 func TmuxConfigArguments() []string {
-	if config := os.Getenv(EnvTmuxConf); config != "" {
+	if config := (OSEnv{}).Get(EnvTmuxConf); config != "" {
 		return []string{"-f", config}
 	}
 	return nil
@@ -279,25 +263,24 @@ func TmuxConfigArguments() []string {
 // EnsureTmuxDir creates the private socket directory a fresh machine does not
 // have yet. Tmux's explicit -S form creates the socket, but not its parent.
 func EnsureTmuxDir(directory string) error {
-	if strings.TrimSpace(directory) == "" {
-		return fmt.Errorf("tmux socket directory is empty")
+	return EnsurePrivateDir("tmux socket directory", directory)
+}
+
+// TmuxDirUnder is the socket directory tmux itself derives from a
+// TMUX_TMPDIR value — tmux-{uid} beneath it, the system temp directory when
+// it is empty — so a socket named for tmux -L resolves to the path tmux -S
+// takes.
+func TmuxDirUnder(tmuxTmpDir string) string {
+	if tmuxTmpDir == "" {
+		tmuxTmpDir = SystemTempDir()
 	}
-	if err := os.MkdirAll(directory, 0o700); err != nil {
-		return fmt.Errorf("create tmux socket directory %s: %w", directory, err)
-	}
-	info, err := os.Lstat(directory)
-	if err != nil {
-		return fmt.Errorf("inspect tmux socket directory %s: %w", directory, err)
-	}
-	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("tmux socket directory %s is not a real directory", directory)
-	}
-	if info.Mode().Perm() != 0o700 {
-		if err := os.Chmod(directory, 0o700); err != nil {
-			return fmt.Errorf("secure tmux socket directory %s: %w", directory, err)
-		}
-	}
-	return nil
+	return TmuxDirOf(tmuxTmpDir, os.Getuid())
+}
+
+// TmuxDirOf is the socket directory tmux keeps for uid under base:
+// tmux-{uid}, the name tmux itself gives it.
+func TmuxDirOf(base string, uid int) string {
+	return filepath.Join(base, "tmux-"+strconv.Itoa(uid))
 }
 
 // Values contains the filesystem locations used by pfm.
@@ -342,9 +325,15 @@ func EnvOrFrom(env Env, name, fallback string) string {
 }
 
 // SIDDirFrom is the SID directory resolved over an injected Env: PFM_SID_DIR,
-// else /tmp/cc-sid. Resolve and every caller holding its own Env share it.
+// else cc-sid under the system temp directory (TMPDIR never moves it: every
+// process on the host must agree on it). Resolve and every caller holding its own Env share it.
 func SIDDirFrom(env Env) string {
-	return EnvOrFrom(env, EnvSIDDir, filepath.Join(defaultTmpDir, "cc-sid"))
+	return EnvOrFrom(env, EnvSIDDir, SIDDirUnder(SystemTempDir()))
+}
+
+// SIDDirUnder is the SID directory's name, cc-sid, placed under base.
+func SIDDirUnder(base string) string {
+	return filepath.Join(base, "cc-sid")
 }
 
 // WorkbenchManifest is the marker declaring a nested workbench.
@@ -355,8 +344,9 @@ func WorkbenchManifest(dir string) string {
 // DevRepoGitDir returns the fence-mounted git directory when root is the
 // corresponding mounted worktree.
 func DevRepoGitDir(root string) (string, bool) {
-	workTree := strings.TrimSpace(os.Getenv(EnvDevRepoWorkTree))
-	gitDir := strings.TrimSpace(os.Getenv(EnvDevRepoGitDir))
+	env := OSEnv{}
+	workTree := strings.TrimSpace(env.Get(EnvDevRepoWorkTree))
+	gitDir := strings.TrimSpace(env.Get(EnvDevRepoGitDir))
 	if gitDir == "" {
 		return "", false
 	}
@@ -543,14 +533,12 @@ func Resolve() (Values, error) {
 	roots := make(map[pfmengine.ID][]string, len(pfmengine.All()))
 	for _, id := range pfmengine.All() {
 		descriptor := pfmengine.MustLookup(id)
-		if value := os.Getenv(descriptor.RootEnv); value != "" {
+		if value := (OSEnv{}).Get(descriptor.RootEnv); value != "" {
 			roots[id] = filepath.SplitList(value)
 		} else {
 			roots[id] = descriptor.DefaultRoots(home)
 		}
 	}
-
-	tmuxBase := EnvOr("TMUX_TMPDIR", defaultTmpDir)
 
 	managed := EnvOr(EnvManagedSettingsDir, defaultManagedSettingsDir)
 	if !filepath.IsAbs(managed) {
@@ -561,11 +549,11 @@ func Resolve() (Values, error) {
 		StateDB:            EnvOr(EnvStateDB, DefaultStateDB(home)),
 		SIDDir:             SIDDirFrom(OSEnv{}),
 		Roots:              roots,
-		TmuxDir:            EnvOr(EnvTmuxDir, filepath.Join(tmuxBase, "tmux-"+strconv.Itoa(os.Getuid()))),
+		TmuxDir:            EnvOr(EnvTmuxDir, TmuxDirUnder((OSEnv{}).Get(EnvTmuxTmpDir))),
 		Home:               home,
 		ArchiveDir:         filepath.Join(home, ".claude-archive"),
 		LogFile:            filepath.Join(home, ".local", "state", "pfm", "log", "pfm.jsonl"),
-		ProcRoot:           EnvOr(EnvProcRoot, "/proc"),
+		ProcRoot:           EnvOr(EnvProcRoot, systemProcRoot),
 		ManagedSettingsDir: managed,
 		CgroupRoot:         EnvOr(EnvCgroupRoot, "/sys/fs/cgroup"),
 	}, nil
@@ -711,40 +699,6 @@ func (values Values) FirstRoot(id pfmengine.ID) string {
 		return roots[0]
 	}
 	return ""
-}
-
-// SkillSourcesOffline reports EnvSkillSourcesOffline=1: pfm install fetches no
-// source-fetched global skill and pfm doctor reports an unfetched one OFFLINE.
-func SkillSourcesOffline() bool {
-	return SkillSourcesOfflineIn(OSEnv{})
-}
-
-// SkillSourcesOfflineIn is SkillSourcesOffline read from env, the environment
-// a caller was handed.
-func SkillSourcesOfflineIn(env Env) bool {
-	return env.Get(EnvSkillSourcesOffline) == "1"
-}
-
-// ThemesOffline reports EnvThemesOffline=1: pfm install reads the profiles
-// in the source clone but downloads no release profile.
-func ThemesOffline() bool {
-	return ThemesOfflineIn(OSEnv{})
-}
-
-// ThemesOfflineIn is ThemesOffline read from env, the environment a caller was handed.
-func ThemesOfflineIn(env Env) bool {
-	return env.Get(EnvThemesOffline) == "1"
-}
-
-// PricesOffline reports EnvPricesOffline=1: no price refresh fetches the
-// publishers' pricing pages.
-func PricesOffline() bool {
-	return PricesOfflineIn(OSEnv{})
-}
-
-// PricesOfflineIn is PricesOffline read from env, the environment a caller was handed.
-func PricesOfflineIn(env Env) bool {
-	return env.Get(EnvPricesOffline) == "1"
 }
 
 // PrebuiltPFMBinary is the pfm binary a unit run built once for every package that runs one.

@@ -34,7 +34,7 @@ type nativeSocket struct {
 
 func newNativeSocket(t *testing.T, respond func(nativeRequest) (any, string)) *nativeSocket {
 	t.Helper()
-	root, err := os.MkdirTemp("", "call-herdr-")
+	root, err := os.MkdirTemp(paths.TempRoot(), "call-herdr-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -628,7 +628,7 @@ type blockingProducerRun struct {
 // budget is the only bound meant to end the blocked wait.
 func runBlockingProducerWait(t *testing.T, budget time.Duration) blockingProducerRun {
 	t.Helper()
-	root, err := os.MkdirTemp("", "call-wait-")
+	root, err := os.MkdirTemp(paths.TempRoot(), "call-wait-")
 	if err != nil {
 		t.Fatal(err)
 	}

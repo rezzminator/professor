@@ -27,14 +27,40 @@ func (runner *snapshotContextRunner) Run(
 	return runner.FakeRunner.Run(ctx, argv, opts)
 }
 
-func TestWriteRepositorySnapshotReportsOutsideAGitRepository(t *testing.T) {
-	git := deps.Executable("git")
-	runner := &deps.FakeRunner{}
-	runner.Script([]string{git, "rev-parse", "--is-inside-work-tree"}, deps.RunResult{ExitCode: 128}, nil)
-	var buf bytes.Buffer
-	writeRepositorySnapshot(context.Background(), &buf, runner)
-	if got := buf.String(); got != "(not a git repository)\n" {
-		t.Fatalf("writeRepositorySnapshot() outside a repo = %q", got)
+func TestWriteRepositorySnapshotReportsWhyNoSnapshotWasTaken(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		gitMissing bool
+		want       string
+		wantCalls  int
+	}{
+		{name: "outside a repository", want: "(not a git repository)\n", wantCalls: 1},
+		{
+			name:       "git missing from PATH",
+			gitMissing: true,
+			want:       "(repository snapshot failed: resolve git: exec: \"git\": executable file not found in $PATH)\n",
+			wantCalls:  0,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := &deps.FakeRunner{}
+			runner.Script(
+				[]string{deps.Executable("git"), "rev-parse", "--is-inside-work-tree"},
+				deps.RunResult{ExitCode: 128},
+				nil,
+			)
+			if tc.gitMissing {
+				t.Setenv("PATH", t.TempDir())
+			}
+			var buf bytes.Buffer
+			writeRepositorySnapshot(context.Background(), &buf, runner)
+			if got := buf.String(); got != tc.want {
+				t.Fatalf("writeRepositorySnapshot() = %q, want %q", got, tc.want)
+			}
+			if got := len(runner.Calls()); got != tc.wantCalls {
+				t.Fatalf("git calls = %d, want %d", got, tc.wantCalls)
+			}
+		})
 	}
 }
 

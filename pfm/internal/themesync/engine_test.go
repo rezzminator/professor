@@ -20,10 +20,11 @@ import (
 const (
 	fixtureHerdr = "onboarding = false\n\n[theme]\nname = \"solarized\"\nauto_switch = false\n\n" +
 		"# VS Code terminal shortcuts\n[keys]\nnew_tab = [\"prefix+c\"]\n"
-	fixtureVscode = "{\n  \"workbench.colorTheme\": \"Sonar\"\n}\n"
-	herdrBinary   = "/opt/bin/herdr"
-	settingsRel   = ".claude/settings.json"
-	tokyoNightRel = ".claude/themes/tokyo-night.json"
+	fixtureVscode  = "{\n  \"workbench.colorTheme\": \"Sonar\"\n}\n"
+	herdrBinary    = "/opt/bin/herdr"
+	defaultsBinary = "/usr/bin/defaults"
+	settingsRel    = ".claude/settings.json"
+	tokyoNightRel  = ".claude/themes/tokyo-night.json"
 
 	herdrRegistryRel = ".config/herdr/plugins.json"
 	herdrManifestRel = ".config/herdr/pfm-indicators/herdr-plugin.toml"
@@ -180,7 +181,8 @@ func (h *harness) exists(rel string) bool {
 // rearm rebuilds the scripted runner from the harness's current knobs.
 func (h *harness) rearm() {
 	runner := new(deps.FakeRunner)
-	defaults := []string{"defaults", "read", "-g", "AppleInterfaceStyle"}
+	runner.ScriptLookPath("defaults", defaultsBinary, nil)
+	defaults := []string{defaultsBinary, "read", "-g", "AppleInterfaceStyle"}
 	switch {
 	case h.appearanceFail != "":
 		runner.Script(defaults, deps.RunResult{ExitCode: 1, Stderr: []byte(h.appearanceFail)}, nil)

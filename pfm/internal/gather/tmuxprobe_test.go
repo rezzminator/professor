@@ -95,8 +95,9 @@ func TestNudgeTitlesStringRoundTripsExplicitIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantCommands := "-L " + socket + " set-option -g set-titles-string #P \n" +
-		"-L " + socket + " set-option -g set-titles-string #P\n"
+	address := "-S " + filepath.Join(client.TmuxDir, socket)
+	wantCommands := address + " set-option -g set-titles-string #P \n" +
+		address + " set-option -g set-titles-string #P\n"
 	if string(gotCommands) != wantCommands {
 		t.Fatalf("tmux commands = %q, want %q", gotCommands, wantCommands)
 	}
@@ -121,9 +122,10 @@ func TestNudgeTitlesIdentityReadsAndRestoresSocketValue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantCommands := "-L " + socket + " show -gv set-titles-string\n" +
-		"-L " + socket + " set-option -g set-titles-string #T \n" +
-		"-L " + socket + " set-option -g set-titles-string #T\n"
+	address := "-S " + filepath.Join(client.TmuxDir, socket)
+	wantCommands := address + " show -gv set-titles-string\n" +
+		address + " set-option -g set-titles-string #T \n" +
+		address + " set-option -g set-titles-string #T\n"
 	if string(gotCommands) != wantCommands {
 		t.Fatalf("tmux commands = %q, want %q", gotCommands, wantCommands)
 	}
@@ -157,7 +159,7 @@ esac
 	}
 	t.Setenv("PFM_TEST_TMUX_COMMANDS", commands)
 	t.Setenv("PFM_TEST_TMUX_STATE", state)
-	return TmuxProbe{Binary: binary, TmuxTmpDir: root}, state, commands
+	return TmuxProbe{Binary: binary, TmuxDir: filepath.Join(root, "sockets")}, state, commands
 }
 
 // TestProbeTmuxFailsWholeWhenTmuxCannotRun is the regression for the shared
@@ -341,8 +343,40 @@ func TestProbeFailureCarriesTmuxReasonAndAHandCheck(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := socket + ": could not read this tmux server: list-panes: exit status 1: " +
-		"tmux: connect failed: permission denied — check it by hand: tmux -L " + socket + " list-sessions"
+		"tmux: connect failed: permission denied — check it by hand: tmux -S " + filepath.Join(tmuxDir, socket) + " list-sessions"
 	if !reflect.DeepEqual(probe.ProbeWarnings, []string{want}) || len(probe.EmptyServers) != 0 {
 		t.Fatalf("probe = %#v, want the one failure warning %q", probe, want)
+	}
+}
+
+// TestGathererProbesThePFMTmuxDirSockets runs real tmux: a server whose socket
+// sits in PFM_TMUX_DIR — a directory that is not TMUX_TMPDIR/tmux-{uid} — is
+// read by the probe gather.New builds, which addresses it by full path the way
+// the tmux door does.
+func TestGathererProbesThePFMTmuxDirSockets(t *testing.T) {
+	jail := newTmuxJail(t)
+	const socket = "cc-probe-dir-1-2-3"
+	directory := filepath.Join(jail.root, "pfm-tmux")
+	if err := os.Mkdir(directory, 0o700); err != nil {
+		t.Fatalf("create socket directory %s: %v", directory, err)
+	}
+	t.Setenv("PFM_TMUX_DIR", directory)
+	socketPath := filepath.Join(directory, socket)
+	if output, err := jail.command("-f", "/dev/null", "-S", socketPath,
+		"new-session", "-d", "-s", "work", "sleep", "120").CombinedOutput(); err != nil {
+		t.Fatalf("start tmux on %s: %v: %s", socketPath, err, output)
+	}
+	t.Cleanup(func() { _ = jail.command("-S", socketPath, "kill-server").Run() })
+
+	gatherer, err := New(Dependencies{})
+	if err != nil {
+		t.Fatalf("gather.New: %v", err)
+	}
+	panes, err := gatherer.tmux.ListPanes(context.Background(), socket)
+	if err != nil {
+		t.Fatalf("list panes of %s: %v", socketPath, err)
+	}
+	if len(panes) != 1 || panes[0].Socket != socket || panes[0].SessionName != "work" {
+		t.Fatalf("panes of %s = %+v, want one pane of session work on socket %s", socketPath, panes, socket)
 	}
 }

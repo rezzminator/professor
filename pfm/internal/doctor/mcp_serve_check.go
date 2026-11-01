@@ -10,6 +10,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/rezzminator/professor/pfm/internal/agentlauncher"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
@@ -20,38 +21,38 @@ import (
 // pfm binary that an install has replaced. It only observes processes; the
 // explicit `pfm internal stale --sweep` command remains the remedy.
 func printMCPServeProcessesDoctor(stdout io.Writer, runtime config.Runtime, table gather.ProcFS) (warnings int) {
-	return printMCPServeProcessesDoctorWithSignaler(stdout, runtime, table, syscall.Kill)
+	return printMCPServeProcessesDoctorWithProbe(stdout, runtime, table, gather.ProbeProcess)
 }
 
-func printMCPServeProcessesDoctorWithSignaler(
+func printMCPServeProcessesDoctorWithProbe(
 	stdout io.Writer,
 	runtime config.Runtime,
 	table gather.ProcFS,
-	signal stale.Signaler,
+	probe gather.Probe,
 ) (warnings int) {
-	return printMCPServeProcessesDoctorWithSignalerAndUID(
+	return printMCPServeProcessesDoctorWithProbeAndUID(
 		stdout,
 		runtime,
 		table,
-		signal,
+		probe,
 		uint32(os.Geteuid()),
 	)
 }
 
-func printMCPServeProcessesDoctorWithSignalerAndUID(
+func printMCPServeProcessesDoctorWithProbeAndUID(
 	stdout io.Writer,
 	runtime config.Runtime,
 	table gather.ProcFS,
-	signal stale.Signaler,
+	probe gather.Probe,
 	effectiveUID uint32,
 ) (warnings int) {
-	binary := filepath.Join(runtime.Paths.Home, ".local", "bin", "pfm")
+	binary := agentlauncher.ExecTarget(runtime.Paths.Home)
 	snapshot, candidates, probeFailures, err := snapshotMCPServeProcesses(table, effectiveUID)
 	if err != nil {
 		fmt.Fprintf(stdout, "doctor: mcp-serve UNREAD — %v\n", err)
 		return 1
 	}
-	scan, err := stale.Find(snapshot, binary, signal)
+	scan, err := stale.Find(snapshot, binary, probe)
 	if err != nil {
 		fmt.Fprintf(stdout, "doctor: mcp-serve UNREAD — %v\n", err)
 		return 1
@@ -61,7 +62,7 @@ func printMCPServeProcessesDoctorWithSignalerAndUID(
 		snapshot,
 		runtime.Paths.ProcRoot,
 		runtime.Paths.Home,
-		signal,
+		probe,
 		scan.Stale,
 	)
 	renderedCandidate := false
@@ -105,7 +106,7 @@ func printMCPServeProcessesDoctorWithSignalerAndUID(
 		}
 	}
 	for _, failure := range probeFailures {
-		if printMCPServeProbeFailure(stdout, signal, failure) {
+		if printMCPServeProbeFailure(stdout, probe, failure) {
 			warnings++
 		}
 	}
@@ -244,10 +245,10 @@ func mcpServeCandidate(argv []string) bool {
 
 func printMCPServeProbeFailure(
 	stdout io.Writer,
-	signal stale.Signaler,
+	probe gather.Probe,
 	failure mcpServeProbeFailure,
 ) bool {
-	livenessErr := signal(failure.pid, 0)
+	livenessErr := probe(failure.pid)
 	if errors.Is(livenessErr, syscall.ESRCH) {
 		return false
 	}

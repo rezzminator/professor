@@ -22,7 +22,7 @@ func TestTmuxTitlesDoctorReportsBothOwnersOnProbeSockets(t *testing.T) {
 		t.Skip("tmux is not installed")
 	}
 	socketDir := "tmux-" + strconv.Itoa(os.Getuid())
-	base := filepath.Join(os.TempDir(), socketDir)
+	base := filepath.Join(paths.TempRoot(), socketDir)
 	if err := os.MkdirAll(base, 0o700); err != nil {
 		t.Fatal(err)
 	}

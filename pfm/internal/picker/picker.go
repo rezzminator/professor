@@ -190,6 +190,7 @@ func Run(
 		statsSampler.Limits = pfmstats.NewLimitsSampler(limitAccounts(runtime))
 		statsSampler.Limits.TTL = pfmstats.LiveLimitsTTL
 		statsSampler.Limits.Version = runtime.Version
+		statsSampler.Limits.Offline = paths.UsageOffline()
 		// Codex's own fetch execs `codex app-server` (unlike Claude's cheap
 		// disk-cache-backed HTTP path) — see CodexLiveLimitsTTL.
 		statsSampler.Limits.CodexTTL = pfmstats.CodexLiveLimitsTTL
@@ -599,8 +600,24 @@ func deactivateApplier(
 		if row.Socket == "" {
 			return errors.New("selected chat has no live server")
 		}
-		return pfmchat.KillServer(ctx, resolved, row.Socket)
+		return endSoleChatServer(ctx, resolved, row)
 	}
+}
+
+// endSoleChatServer ends row's tmux server through pfmchat.KillServer, which
+// ends it only while row's pane is its sole pane. A picker row is a scan's
+// view: a Codex or OpenCode row is one per process with no split check, and a
+// Claude row counts only crumbed panes, so a row with no pane is refused.
+func endSoleChatServer(ctx context.Context, resolved paths.Values, row compose.Row) error {
+	if row.PaneID == "" {
+		return fmt.Errorf(
+			"chat %s has no pane on server %s to prove the server is its own: %w",
+			row.Name,
+			row.Socket,
+			pfmchat.ErrEndRefused,
+		)
+	}
+	return pfmchat.KillServer(ctx, resolved, row.Socket, row.PaneID)
 }
 
 func rebootRow(
@@ -622,7 +639,11 @@ func rebootRow(
 	if row.Kind == compose.LiveSplit || row.ID == "" {
 		return compose.Row{}, errors.New("a split live row cannot be rebooted as one chat")
 	}
-	if err := pfmchat.KillServer(ctx, resolved, row.Socket); err != nil {
+	// A refused end leaves the chat running, so reopening it would start a
+	// second copy beside it; a cleanup failure after the server died is a warning.
+	if err := endSoleChatServer(ctx, resolved, row); errors.Is(err, pfmchat.ErrEndRefused) {
+		return compose.Row{}, fmt.Errorf("reboot %s: %w", row.ID, err)
+	} else if err != nil {
 		fmt.Fprintf(stderr, "pfm: reboot kill-server %s: %v\n", row.Socket, err)
 	}
 	row.Kind = compose.ResumeKindFor(row.Kind)

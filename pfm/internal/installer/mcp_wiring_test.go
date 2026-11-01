@@ -83,7 +83,7 @@ func TestMCPSystemdUnitStartsAtLogin(t *testing.T) {
 	// ~/.local/bin — where user-installed engine CLIs live. Without this line
 	// every chat the daemon spawns dies at launch on "command not found".
 	home := t.TempDir()
-	rendered, err := renderServicePath(raw, home)
+	rendered, err := renderServiceEnv(raw, home)
 	if err != nil {
 		t.Fatal(err)
 	}

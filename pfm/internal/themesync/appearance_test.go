@@ -79,13 +79,14 @@ func TestAppearanceForExplicitTheme(t *testing.T) {
 }
 
 func TestDetectAppearance(t *testing.T) {
-	defaults := []string{"defaults", "read", "-g", "AppleInterfaceStyle"}
+	defaults := []string{defaultsBinary, "read", "-g", "AppleInterfaceStyle"}
 	cases := []struct {
-		name    string
-		result  deps.RunResult
-		runErr  error
-		want    Appearance
-		wantErr string
+		name            string
+		defaultsMissing bool
+		result          deps.RunResult
+		runErr          error
+		want            Appearance
+		wantErr         string
 	}{
 		{name: "Dark is dark", result: deps.RunResult{Stdout: []byte("Dark\n")}, want: Dark},
 		{
@@ -105,10 +106,19 @@ func TestDetectAppearance(t *testing.T) {
 		},
 		{name: "an unknown value is an error", result: deps.RunResult{Stdout: []byte("Sepia\n")}, wantErr: "Sepia"},
 		{name: "a start failure is an error", runErr: errors.New("no such file"), wantErr: "no such file"},
+		{
+			name:            "a missing defaults is an error",
+			defaultsMissing: true,
+			result:          deps.RunResult{Stdout: []byte("Dark\n")},
+			wantErr:         `themesync: resolve defaults: exec: "defaults": executable file not found in $PATH`,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			runner := new(deps.FakeRunner)
+			if !tc.defaultsMissing {
+				runner.ScriptLookPath("defaults", defaultsBinary, nil)
+			}
 			runner.Script(defaults, tc.result, tc.runErr)
 			got, err := DetectAppearance(context.Background(), Env{GOOS: "darwin", Runner: runner})
 			if tc.wantErr != "" {

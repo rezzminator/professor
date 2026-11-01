@@ -13,6 +13,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
@@ -57,6 +58,13 @@ func (finder *discoverer) staleHerdrIndicators() ([]staleIndicator, error) {
 		if state != daemonOwned {
 			continue
 		}
+		owned, err := finder.ownedByInstall(proc)
+		if err != nil {
+			return nil, fmt.Errorf("herdr indicator: %w", err)
+		}
+		if !owned {
+			continue // another install's painter: never this install's to replace
+		}
 		images, ok := finder.deps.Procs.(gather.ProcImage)
 		if !ok {
 			return nil, fmt.Errorf("herdr indicator pid %d: executable identity reader unavailable", proc.PID)
@@ -93,10 +101,7 @@ func ConvergeHerdrIndicators(ctx context.Context, dependencies Deps) (string, bo
 	if len(stale) == 0 {
 		return "Herdr indicator process enumeration confirms no stale painter", false, nil
 	}
-	stopper := processStopper{
-		procs: dependencies.Procs, signal: dependencies.Signal,
-		clock: dependencies.Clock, uid: dependencies.EffectiveUID,
-	}
+	stopper := dependencies.stopper(&dependencies.Install)
 	// Prove every replacement can be addressed before stopping any painter.
 	environments := map[string][]string{}
 	for _, painter := range stale {
@@ -125,10 +130,15 @@ func ConvergeHerdrIndicators(ctx context.Context, dependencies Deps) (string, bo
 				socket,
 			)
 		}
-		values := make([]string, 0, len(env))
+		values := make([]string, 0, len(env)+1)
 		for key, value := range env {
-			values = append(values, key+"="+value)
+			if key != paths.EnvInstallMark {
+				values = append(values, key+"="+value)
+			}
 		}
+		// The replacement is this install's launch whatever the old painter
+		// carried (one from before marks existed carries none).
+		values = append(values, paths.EnvInstallMark+"="+dependencies.Install.Mark)
 		sort.Strings(values)
 		environments[socket] = values
 	}

@@ -86,17 +86,15 @@ func New(dependencies Dependencies) (*Gatherer, error) {
 	}
 	tmux := dependencies.Tmux
 	if tmux == nil {
-		tmuxTmpDir := dependencies.TmuxTmpDir
-		if tmuxTmpDir == "" {
-			tmuxTmpDir = paths.OSEnv{}.Get("TMUX_TMPDIR")
-			if tmuxTmpDir == "" {
-				tmuxTmpDir = "/tmp"
-			}
-		}
-		tmux = TmuxProbe{
+		probe := TmuxProbe{
 			Binary:     dependencies.TmuxBinary,
-			TmuxTmpDir: tmuxTmpDir,
+			TmuxDir:    resolved.TmuxDir,
+			TmuxTmpDir: dependencies.TmuxTmpDir,
 		}
+		if dependencies.TmuxTmpDir != "" {
+			probe.TmuxDir = ""
+		}
+		tmux = probe
 	}
 	codexHomes := dependencies.CodexHomes
 	if codexHomes == nil {

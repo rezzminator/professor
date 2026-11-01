@@ -66,6 +66,7 @@ const TIER1 = [
           "themetmux",
           "agentlauncher",
           "workbench",
+          "servicemanager",
         ],
       },
       {

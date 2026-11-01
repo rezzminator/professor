@@ -20,12 +20,12 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/gather"
-	"github.com/rezzminator/professor/pfm/internal/usagehook"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // pacedDir is the directory under the cache dir holding each chat's paced
 // render files, suffixed with the uid that owns it; it must be that uid's own
-// real directory (usagehook.EnsurePrivateDir), else the chat renders inline.
+// real directory (paths.EnsurePrivateDir), else the chat renders inline.
 const pacedDir = "cc-sl-paced"
 
 const (
@@ -270,7 +270,7 @@ func (paced Paced) normalized() Paced {
 // dir is the chat files' private directory, made when absent.
 func (paced Paced) dir() (string, error) {
 	dir := filepath.Join(paced.CacheDir, pacedDir+"-"+strconv.Itoa(os.Getuid()))
-	if err := usagehook.EnsurePrivateDir(dir); err != nil {
+	if err := paths.EnsurePrivateDir("paced directory", dir); err != nil {
 		return "", fmt.Errorf("paced directory refused: %w", err)
 	}
 	return dir, nil

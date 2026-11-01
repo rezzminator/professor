@@ -17,6 +17,7 @@ import (
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -760,13 +761,14 @@ func TestSkillStoreUnlockReleasesForkedCopies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	entries, err := os.ReadDir("/proc/self/fd")
+	entries, err := os.ReadDir(filepath.Join(paths.SystemProcRoot(), "self", "fd"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	forked := -1
 	for _, entry := range entries {
-		if target, err := os.Readlink("/proc/self/fd/" + entry.Name()); err == nil && target == physical {
+		link := filepath.Join(paths.SystemProcRoot(), "self", "fd", entry.Name())
+		if target, err := os.Readlink(link); err == nil && target == physical {
 			fd := 0
 			if _, err := fmt.Sscan(entry.Name(), &fd); err != nil {
 				t.Fatal(err)

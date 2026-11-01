@@ -184,6 +184,19 @@ func TestTreeWorktreeIsTheWriteScope(t *testing.T) {
 			t.Errorf("a write to %q = %d, want 0", path, got)
 		}
 	}
+	// Scoped at the root, only the temp roots keep a write out: the system
+	// /tmp under both spellings and this run's TMPDIR.
+	for path, want := range map[string]int64{
+		"/work/a.go":        3,
+		"/tmp/a.go":         0,
+		"/private/tmp/a.go": 0,
+		filepath.Join(paths.TempRoot(), "scratch.go"): 0,
+	} {
+		raw, _ := json.Marshal(map[string]string{"file_path": path, "content": "abc"})
+		if got := writtenBytes("Write", raw, "/"); got != want {
+			t.Errorf("a write to %q scoped at / = %d, want %d", path, got, want)
+		}
+	}
 	if got := writtenBytes("Read", json.RawMessage(`{"file_path":"/work/repo/src/a.go","content":"abc"}`),
 		"/work/repo/src"); got != 0 {
 		t.Errorf("a Read = %d, want 0", got)

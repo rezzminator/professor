@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -69,14 +70,19 @@ func TestRunScrubsTheOperatorLocalBinFromPATH(t *testing.T) {
 	}
 }
 
-// A chat's exported store paths never reach a jailed test, but a jailed test
-// that re-execs its own binary as a helper hands it the jail's store paths
-// (hookentry's TestSeatHostPTY launch modes): Run keeps those, and only those.
+// A chat's exported store paths and install mark never reach a jailed test, but
+// a jailed test that re-execs its own binary as a helper hands it the jail's
+// store paths and mark (hookentry's TestSeatHostPTY launch modes): Run keeps
+// those, and only those.
 func TestRunKeepsTheStorePathsAJailedTestHandsItsHelper(t *testing.T) {
 	const marker = "PFM_TEST_STORE_PATHS_CHILD"
+	const markMarker = "PFM_TEST_INSTALL_MARK_CHILD"
 	if want, child := os.LookupEnv(marker); child {
 		if got := os.Getenv("PFM_STATE_DB"); got != want {
 			t.Fatalf("PFM_STATE_DB=%q after Run, want %q", got, want)
+		}
+		if got, want := os.Getenv(paths.EnvInstallMark), os.Getenv(markMarker); got != want {
+			t.Fatalf("%s=%q after Run, want %q", paths.EnvInstallMark, got, want)
 		}
 		return
 	}
@@ -84,8 +90,12 @@ func TestRunKeepsTheStorePathsAJailedTestHandsItsHelper(t *testing.T) {
 		name string
 		env  []string
 	}{
-		{"helper of a jailed test", append(os.Environ(), "PFM_STATE_DB=/jail/pfm.db", marker+"=/jail/pfm.db")},
-		{"started by a chat", envWithout(jailMarkerEnv, "PFM_STATE_DB=/jail/pfm.db", marker+"=")},
+		{"helper of a jailed test", append(os.Environ(),
+			"PFM_STATE_DB=/jail/pfm.db", marker+"=/jail/pfm.db",
+			paths.EnvInstallMark+"=0123456789abcdef", markMarker+"=0123456789abcdef")},
+		{"started by a chat", envWithout(jailMarkerEnv,
+			"PFM_STATE_DB=/jail/pfm.db", marker+"=",
+			paths.EnvInstallMark+"=fedcba9876543210", markMarker+"=")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			command := exec.Command(os.Args[0], "-test.run=^TestRunKeepsTheStorePathsAJailedTestHandsItsHelper$")
@@ -386,6 +396,53 @@ func TestRunScrubsAmbientIdentity(t *testing.T) {
 		if value := os.Getenv(name); value != "" {
 			t.Fatalf("%s=%q after Run — ambient identity leaked into the jail", name, value)
 		}
+	}
+}
+
+// Every jail marks the processes it starts with its own home's install mark,
+// over the operator's inherited one, so no stop acting for the operator's
+// install owns a jailed child.
+func TestJailMarksItsChildrenWithTheJailHomesMark(t *testing.T) {
+	for _, row := range []struct {
+		name  string
+		build func(*testing.T) (home string, environment []string)
+	}{
+		{"Fleet", func(t *testing.T) (string, []string) {
+			return filepath.Join(Fleet(t), "home"), os.Environ()
+		}},
+		{"FleetEnv", func(t *testing.T) (string, []string) {
+			root, environment := FleetEnv(t)
+			return filepath.Join(root, "home"), environment
+		}},
+		{"CleanHome", func(t *testing.T) (string, []string) {
+			runtime := CleanHome(t, []string{"projects"}, map[string]string{"settings.json": "{}\n"})
+			return runtime.Paths.Home, os.Environ()
+		}},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			t.Setenv(paths.EnvInstallMark, "operator-mark")
+			// Resolved before the jail: CleanHome's PATH holds only its staged shims.
+			envBinary, err := exec.LookPath("env")
+			if err != nil {
+				t.Fatalf("resolve env: %v", err)
+			}
+			home, environment := row.build(t)
+			command := exec.Command(envBinary)
+			command.Env = environment
+			listing, err := command.Output()
+			if err != nil {
+				t.Fatalf("list a jailed child's environment: %v", err)
+			}
+			var marks []string
+			for _, line := range strings.Split(string(listing), "\n") {
+				if mark, ok := strings.CutPrefix(line, paths.EnvInstallMark+"="); ok {
+					marks = append(marks, mark)
+				}
+			}
+			if want := []string{paths.InstallMark(home)}; !slices.Equal(marks, want) {
+				t.Fatalf("jailed child %s = %q; want %q, jail home %s's", paths.EnvInstallMark, marks, want, home)
+			}
+		})
 	}
 }
 

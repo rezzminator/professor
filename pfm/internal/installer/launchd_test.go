@@ -78,7 +78,7 @@ func TestMCPLaunchAgentGivesTheDaemonAPathThatFindsTmux(t *testing.T) {
 // implementation: every launchd agent and systemd unit that starts pfm takes
 // its PATH from the servicePathMarker — never a PATH spelled by hand, which
 // is how the systemd unit had one and its launchd twins had none — and the
-// rendered unit carries paths.ServicePath exactly.
+// rendered unit carries paths.ServicePath and this install's mark exactly.
 func TestEveryServiceUnitTakesTheOneServicePath(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
@@ -105,12 +105,20 @@ func TestEveryServiceUnitTakesTheOneServicePath(t *testing.T) {
 			t.Errorf("%s holds the service PATH marker %d times, want exactly once", relative, got)
 			return nil
 		}
-		rendered, err := renderServicePath(content, home)
+		rendered, err := renderServiceEnv(content, home)
 		if err != nil {
 			return fmt.Errorf("render %s: %w", relative, err)
 		}
 		if got := strings.Count(string(rendered), paths.ServicePath(home)); got != 1 {
 			t.Errorf("%s renders paths.ServicePath %d times, want once:\n%s", relative, got, rendered)
+		}
+		// The pfm a unit starts carries this install's mark, or a stop of
+		// pfm-launched processes cannot prove the unit's daemon is its own.
+		if got := strings.Count(string(rendered), paths.EnvInstallMark); got != 1 {
+			t.Errorf("%s names %s %d times, want once:\n%s", relative, paths.EnvInstallMark, got, rendered)
+		}
+		if got := strings.Count(string(rendered), paths.InstallMark(home)); got != 1 {
+			t.Errorf("%s renders paths.InstallMark %d times, want once:\n%s", relative, got, rendered)
 		}
 		return nil
 	})

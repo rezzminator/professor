@@ -101,10 +101,10 @@ func New(dependencies Dependencies) (*Engine, error) {
 		options.BodyRoot = filepath.Join(resolved.Home, ".local", "state", "pfm", "call-bodies")
 	}
 	if options.LockRoot == "" {
-		options.LockRoot = filepath.Join(tempRoot(dependencies.Env), "chat-call-locks")
+		options.LockRoot = filepath.Join(paths.TempRootFrom(dependencies.Env), "chat-call-locks")
 	}
 	if options.ThenLogRoot == "" {
-		options.ThenLogRoot = tempRoot(dependencies.Env)
+		options.ThenLogRoot = paths.TempRootFrom(dependencies.Env)
 	}
 	if dependencies.Identifier == nil {
 		environment := resolve.CallerEnvironmentFrom(dependencies.Env)
@@ -176,15 +176,6 @@ func cloneEngineBinaries(values map[pfmengine.ID]string) map[pfmengine.ID]string
 		cloned[id] = binary
 	}
 	return cloned
-}
-
-// tempRoot is chat.sh's ${TMPDIR:-/tmp}, the root both implementations share
-// for call locks and --then chain logs.
-func tempRoot(env paths.Env) string {
-	if value := env.Get("TMPDIR"); value != "" {
-		return strings.TrimRight(value, "/")
-	}
-	return "/tmp"
 }
 
 func applyEnvironment(options *Options, env paths.Env) {

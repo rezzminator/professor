@@ -67,7 +67,7 @@ func TestResolveFindsTheClientsOwnPane(t *testing.T) {
 		{
 			name:    "herdr-keep relay",
 			environ: map[string]string{EnvMarker: "1", EnvSocket: keepRelay, EnvPane: "w9:p1"},
-			keep:    &Keep{Runner: keepRunner(keepListing("running", true, false, "PROTECTED"), 0)},
+			keep:    &Keep{Runner: keepRunner(t, keepListing("running", true, false, "PROTECTED"), 0)},
 			want:    Location{Socket: keepSocket, Pane: "w1:p4", Terminal: "t4"},
 		},
 	} {

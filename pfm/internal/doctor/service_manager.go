@@ -9,6 +9,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/servicemanager"
 )
 
 // serviceManagerUnitState is one supervised unit's probed state under
@@ -146,7 +147,7 @@ func probeUnanswered(probeCtx context.Context, argv []string, result deps.RunRes
 // each platform.
 func serviceManagerStartHint(manager, unit string) string {
 	if manager == "launchd" {
-		return "launchctl kickstart -k gui/$(id -u)/" + unit
+		return "launchctl kickstart -k " + servicemanager.ShellTarget(unit)
 	}
 	return "systemctl --user enable --now " + unit
 }

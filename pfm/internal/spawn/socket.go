@@ -8,6 +8,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // TestFreshSocketEnv fixes generated socket names in jailed tests.
@@ -15,7 +16,7 @@ const TestFreshSocketEnv = "PFM_TEST_FRESH_SOCKET"
 
 // FreshSocket returns a unique socket name for a new engine session.
 func FreshSocket(id engine.ID) string {
-	if value := os.Getenv(TestFreshSocketEnv); value != "" {
+	if value := (paths.OSEnv{}).Get(TestFreshSocketEnv); value != "" {
 		return value
 	}
 	descriptor := engine.MustLookup(id)

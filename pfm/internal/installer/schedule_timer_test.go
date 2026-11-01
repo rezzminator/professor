@@ -2,10 +2,13 @@ package installer
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -129,6 +132,77 @@ func TestWireScheduleLaunchAgentWritesTheFiveMinuteAgent(t *testing.T) {
 	}
 	if err := installer.unwireScheduleLaunchAgent(context.Background()); err != nil {
 		t.Fatalf("unwire of an absent schedule launch agent: %v", err)
+	}
+}
+
+// TestUnwireScheduleLaunchAgentRemovesOnlyAnUnloadedAgent: unwire removes the
+// plist once launchd no longer holds the job — a bootout that succeeded, or
+// one that failed because the label is already gone, at once or after a
+// teardown still in flight — and keeps it, saying why, while the job stays
+// loaded or launchctl never answered, so the next run retries rather than
+// orphaning a loaded job no plist names.
+func TestUnwireScheduleLaunchAgentRemovesOnlyAnUnloadedAgent(t *testing.T) {
+	t.Parallel()
+	notFound := commandExitError{name: "launchctl", code: 113, text: "Could not find service"}
+	refused := commandExitError{name: "launchctl", code: 5, text: "Boot-out failed: 5: Input/output error"}
+	missing := errors.New(`run "launchctl": exec: "launchctl": executable file not found in $PATH`)
+	for _, test := range []struct {
+		name    string
+		bootout error
+		prints  []error
+		checks  int
+		want    string
+	}{
+		{name: "bootout unloads", prints: []error{nil}},
+		{name: "label already gone", bootout: notFound, prints: []error{notFound}, checks: 1},
+		{name: "teardown in flight", bootout: refused, prints: []error{nil, nil, notFound}, checks: 3},
+		{
+			name: "still loaded", bootout: refused, prints: []error{nil}, checks: 20,
+			want: "remove schedule launch agent PLIST: unload com.professor.pfm.schedule before removing PLIST: " +
+				"launchctl bootout TARGET failed and the job is still loaded after 20 checks: " +
+				"launchctl exited 5: Boot-out failed: 5: Input/output error",
+		},
+		{
+			name: "launchctl missing", bootout: missing,
+			want: "remove schedule launch agent PLIST: unload com.professor.pfm.schedule before removing PLIST: " +
+				`launchctl bootout TARGET could not run: run "launchctl": exec: "launchctl": executable file not found in $PATH`,
+		},
+		{
+			name: "print cannot confirm", bootout: refused, prints: []error{missing}, checks: 1,
+			want: "remove schedule launch agent PLIST: unload com.professor.pfm.schedule before removing PLIST: " +
+				"launchctl bootout TARGET failed (launchctl exited 5: Boot-out failed: 5: Input/output error) " +
+				`and launchctl print could not confirm it unloaded: run "launchctl": exec: "launchctl": executable file not found in $PATH`,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			home := t.TempDir()
+			plist := filepath.Join(home, "Library", "LaunchAgents", scheduleLaunchdLabel+".plist")
+			target := "gui/" + strconv.Itoa(os.Getuid()) + "/" + scheduleLaunchdLabel
+			writeFixture(t, plist, "<plist/>\n")
+			runner := &bootoutRunner{bootout: test.bootout, prints: test.prints}
+			installer := engine{
+				options: Options{Home: home, Runner: runner, Stdout: io.Discard, Sleep: func(time.Duration) {}},
+				apply:   true,
+				stamp:   "test",
+			}
+			err := installer.unwireScheduleLaunchAgentLabel(context.Background(), scheduleLaunchdLabel)
+			want := strings.NewReplacer("PLIST", plist, "TARGET", target).Replace(test.want)
+			if got := fmt.Sprint(err); (err == nil) != (want == "") || (err != nil && got != want) {
+				t.Fatalf("unwire error = %v\nwant %q", err, want)
+			}
+			wantCalls := []string{"launchctl bootout " + target}
+			for range test.checks {
+				wantCalls = append(wantCalls, "launchctl print "+target)
+			}
+			if strings.Join(runner.calls, "\n") != strings.Join(wantCalls, "\n") {
+				t.Fatalf("calls = %q\nwant %q", runner.calls, wantCalls)
+			}
+			_, statErr := os.Lstat(plist)
+			if kept := statErr == nil; kept != (want != "") {
+				t.Fatalf("plist %s kept=%t (stat: %v), want kept=%t", plist, kept, statErr, want != "")
+			}
+		})
 	}
 }
 

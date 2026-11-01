@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/schedule"
+	"github.com/rezzminator/professor/pfm/internal/servicemanager"
 )
 
 const (
@@ -103,10 +104,12 @@ func SchedulerRefusal(command string, err error) string {
 			": the pfm schedule service is running; wait for it to finish or run `systemctl --user stop pfm-schedule.service`, then retry"
 	case errors.Is(err, ErrScheduleAgentRunning):
 		return "pfm " + command +
-			": the pfm schedule launch agent is running; wait for it to finish or `launchctl bootout gui/$(id -u)/com.professor.pfm.schedule` first"
+			": the pfm schedule launch agent is running; wait for it to finish or `launchctl bootout " +
+			servicemanager.ShellTarget(scheduleLaunchdLabel) + "` first"
 	case errors.Is(err, ErrLaunchAgentRunning):
 		return "pfm " + command +
-			": the pfm name-sync launch agent is running; wait for it to finish or `launchctl bootout gui/$(id -u)/com.professor.pfm.name-sync` first"
+			": the pfm name-sync launch agent is running; wait for it to finish or `launchctl bootout " +
+			servicemanager.ShellTarget(launchdLabel) + "` first"
 	}
 	return ""
 }

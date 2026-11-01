@@ -347,23 +347,7 @@ func TestSeatHostPTY(t *testing.T) {
 					}
 				}
 			}
-			master, err := os.OpenFile("/dev/ptmx", os.O_RDWR|syscall.O_NOCTTY, 0)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer func() { _ = master.Close() }()
-			if err := unix.IoctlSetPointerInt(int(master.Fd()), unix.TIOCSPTLCK, 0); err != nil {
-				t.Fatal(err)
-			}
-			info, err := os.ReadFile(fmt.Sprintf("/proc/self/fdinfo/%d", master.Fd()))
-			_, index, found := strings.Cut(string(info), "tty-index:")
-			if !found {
-				t.Fatalf("pty has no tty-index: %q", info)
-			}
-			number := strings.TrimSpace(strings.SplitN(index, "\n", 2)[0])
-			if err != nil {
-				t.Fatal(err)
-			}
+			master, number := openPTY(t)
 			slave, err := os.OpenFile("/dev/pts/"+number, os.O_RDWR|syscall.O_NOCTTY, 0)
 			if err != nil {
 				t.Fatal(err)
@@ -420,7 +404,7 @@ func TestSeatHostPTY(t *testing.T) {
 				)
 				// Run the real reloader against a real supervisor. Its next exec fails.
 				t.Setenv(paths.EnvStateDB, values.StateDB)
-				t.Setenv(paths.EnvProcRoot, "/proc")
+				t.Setenv(paths.EnvProcRoot, paths.SystemProcRoot())
 				request, options := seatReloadFailure(t, root, server.path)
 				_, reloadErr := reload.RunHerdr(ctx, request, options, io.Discard)
 				// Stop the helper before reading its shared output buffer on either path.

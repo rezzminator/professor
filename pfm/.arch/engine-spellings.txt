@@ -1,4 +1,5 @@
 cmd/pfm/statusline_command.go 2
+internal/hookentry/herdr_watch_linux_test.go 1
 internal/stats/limits.go 1
 internal/stats/limits_test.go 3
 internal/statusline/context_capacity.go 1

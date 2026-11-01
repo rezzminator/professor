@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -62,6 +63,18 @@ type Runtime struct {
 	ConfigError    error
 	ConfigExplicit bool
 	Version        string
+}
+
+// DepsOptions is the dependency registry's options for this runtime: its home
+// and the configured launch binary of every engine, so each engine row probes
+// the binary pfm launches.
+func (runtime Runtime) DepsOptions() deps.Options {
+	return deps.Options{
+		Home:           runtime.Paths.Home,
+		ClaudeBinary:   runtime.Config.Claude.Binary,
+		CodexBinary:    runtime.Config.Codex.Binary,
+		OpenCodeBinary: runtime.Config.OpenCode.Binary,
+	}
 }
 
 // WithConfig applies a newly loaded install seed using the runtime's database

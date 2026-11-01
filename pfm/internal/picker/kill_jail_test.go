@@ -2,6 +2,8 @@ package picker
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -151,35 +153,105 @@ func TestHidingALiveChatKeepsItRunningAndKeepsItsHandles(t *testing.T) {
 	}
 }
 
-func TestDeactivatingALiveChatEndsItAndClearsItsHandles(t *testing.T) {
+// TestEndingALiveChatEndsOnlyItsOwnServer: deactivate and reboot end a
+// chat's tmux server only while the chat's pane is the server's sole pane. A
+// second pane — another engine's chat, a split the scan never counted, a pane
+// born after the scan — keeps the server, its socket and its crumb alive.
+func TestEndingALiveChatEndsOnlyItsOwnServer(t *testing.T) {
 	if _, err := exec.LookPath("tmux"); err != nil {
-		t.Skip("tmux is not installed")
+		t.Fatalf("tmux is required: %v", err)
 	}
-	root := jailTest(t)
-	tmuxDir := filepath.Join(root, "tmux")
-	sidDir := filepath.Join(root, "sid")
-	const socket = "cc-1800000004-45-10"
-	startJailServer(t, tmuxDir, socket)
-	if err := os.MkdirAll(sidDir, 0o700); err != nil {
-		t.Fatal(err)
+	const refusal = "server %s is still alive after kill-server, which tmux runs only while pane %%0 is the " +
+		"server's sole pane; a server holding another pane is never ended: end refused"
+	end := map[string]func(resolved paths.Values, row compose.Row) error{
+		"deactivate": func(resolved paths.Values, row compose.Row) error {
+			return deactivateApplier(context.Background(), resolved)(row)
+		},
+		"reboot": func(resolved paths.Values, row compose.Row) error {
+			_, err := rebootRow(context.Background(), resolved, row, io.Discard)
+			return err
+		},
 	}
-	crumb := filepath.Join(sidDir, socket+".%0")
-	if err := os.WriteFile(crumb, []byte("/transcript.jsonl\n"), 0o600); err != nil {
-		t.Fatal(err)
+	for _, test := range []struct {
+		name    string
+		door    string
+		socket  string
+		shared  bool
+		wantErr string
+	}{
+		{"deactivate sole pane", "deactivate", "cc-1800000004-45-10", false, ""},
+		{"deactivate shared server", "deactivate", "cc-1800000004-45-11", true, refusal},
+		{"reboot sole pane", "reboot", "cc-1800000004-45-12", false, ""},
+		{"reboot shared server", "reboot", "cc-1800000004-45-13", true, "reboot seat-id: " + refusal},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := jailTest(t)
+			tmuxDir := filepath.Join(root, "tmux")
+			sidDir := filepath.Join(root, "sid")
+			startJailServer(t, tmuxDir, test.socket)
+			wantPanes := "%0\n"
+			if test.shared {
+				split := exec.Command(
+					"tmux", "-S", filepath.Join(tmuxDir, test.socket), "split-window", "-d", "-t", "%0", "sleep 120",
+				)
+				split.Env = append(os.Environ(), "TMUX=")
+				if output, err := split.CombinedOutput(); err != nil {
+					t.Fatalf("split a second pane onto %s: %v: %s", test.socket, err, output)
+				}
+				wantPanes = "%0\n%1\n"
+			}
+			if got := jailServerPanes(t, tmuxDir, test.socket); got != wantPanes {
+				t.Fatalf("setup panes on %s = %q, want %q", test.socket, got, wantPanes)
+			}
+			if err := os.MkdirAll(sidDir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			crumb := filepath.Join(sidDir, test.socket+".%0")
+			if err := os.WriteFile(crumb, []byte("/transcript.jsonl\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			err := end[test.door](jailPaths(t), compose.Row{
+				Kind: compose.LiveClaude, ID: "seat-id", Name: "sleeping",
+				Socket: test.socket, SessionName: "chat", PaneID: "%0",
+			})
+			want := test.wantErr
+			if want != "" {
+				want = fmt.Sprintf(want, test.socket)
+			}
+			if got := fmt.Sprint(err); (err == nil) != (want == "") || (err != nil && got != want) {
+				t.Fatalf("%s error = %q, want %q", test.door, got, want)
+			}
+			_, socketErr := os.Stat(filepath.Join(tmuxDir, test.socket))
+			_, crumbErr := os.Stat(crumb)
+			if test.shared {
+				if got := jailServerPanes(t, tmuxDir, test.socket); got != wantPanes {
+					t.Fatalf("panes on refused %s = %q, want %q", test.socket, got, wantPanes)
+				}
+				if socketErr != nil || crumbErr != nil {
+					t.Fatalf("refused %s lost a handle: socket %v, crumb %v", test.door, socketErr, crumbErr)
+				}
+				return
+			}
+			if jailServerAlive(tmuxDir, test.socket) {
+				t.Fatalf("%s left the chat's sole-pane server %s running", test.door, test.socket)
+			}
+			if !os.IsNotExist(socketErr) || !os.IsNotExist(crumbErr) {
+				t.Fatalf("%s left handles: socket %v, crumb %s: %v", test.door, socketErr, crumb, crumbErr)
+			}
+		})
 	}
-	apply := deactivateApplier(context.Background(), jailPaths(t))
-	if err := apply(compose.Row{Kind: compose.LiveClaude, Socket: socket, Name: "sleeping"}); err != nil {
-		t.Fatalf("deactive live chat: %v", err)
+}
+
+// jailServerPanes is every pane ID on the jail server, one per line.
+func jailServerPanes(t *testing.T, tmuxDir, socket string) string {
+	t.Helper()
+	command := exec.Command("tmux", "-S", filepath.Join(tmuxDir, socket), "list-panes", "-a", "-F", "#{pane_id}")
+	command.Env = append(os.Environ(), "TMUX=")
+	output, err := command.Output()
+	if err != nil {
+		t.Fatalf("list panes on %s: %v", socket, err)
 	}
-	if jailServerAlive(tmuxDir, socket) {
-		t.Fatal("deactive left the chat running")
-	}
-	if _, err := os.Stat(filepath.Join(tmuxDir, socket)); !os.IsNotExist(err) {
-		t.Fatalf("socket file outlived deactive: %v", err)
-	}
-	if _, err := os.Stat(crumb); !os.IsNotExist(err) {
-		t.Fatalf("sid crumb outlived deactive: %v", err)
-	}
+	return string(output)
 }
 
 // TestKillingAChatThatIsNotRunningKillsNothing: the kill is scoped to rows the

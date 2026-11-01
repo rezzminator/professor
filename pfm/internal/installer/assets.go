@@ -108,16 +108,26 @@ func foldReloadUsage(usage string) string {
 }
 
 // servicePathMarker is where every pfm service unit — launchd agent or systemd
-// unit — takes its PATH.
-const servicePathMarker = "__PFM_SERVICE_PATH__"
+// unit — takes its PATH; serviceMarkMarker is where it takes this install's
+// mark (paths.EnvInstallMark), so the pfm a unit starts is provably this
+// install's when a later stop looks at it.
+const (
+	servicePathMarker = "__PFM_SERVICE_PATH__"
+	serviceMarkMarker = "__PFM_INSTALL_MARK__"
+)
 
-// renderServicePath fills a unit's servicePathMarker; a unit without one is
-// returned unchanged.
-func renderServicePath(content []byte, home string) ([]byte, error) {
+// renderServiceEnv fills a unit's servicePathMarker and serviceMarkMarker;
+// a unit without a PATH marker is returned unchanged, and one with a PATH but
+// no mark is an error, since every unit that starts pfm carries both.
+func renderServiceEnv(content []byte, home string) ([]byte, error) {
 	if !strings.Contains(string(content), servicePathMarker) {
 		return content, nil
 	}
 	rendered, err := replaceSingleAssetMarker(string(content), servicePathMarker, paths.ServicePath(home))
+	if err != nil {
+		return nil, err
+	}
+	rendered, err = replaceSingleAssetMarker(rendered, serviceMarkMarker, paths.InstallMark(home))
 	if err != nil {
 		return nil, err
 	}

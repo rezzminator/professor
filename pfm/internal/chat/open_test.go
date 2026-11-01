@@ -76,7 +76,9 @@ type emptyProcesses struct{}
 
 func (emptyProcesses) Processes(context.Context) ([]action.Process, error) { return nil, nil }
 
-func (emptyProcesses) Terminate(int) error { return nil }
+func (emptyProcesses) Terminate(gather.Target) (gather.Outcome, error) {
+	return gather.OutcomeGone, nil
+}
 
 // openStub is what stubOpenExecutor observed: the Heal the preparation wired
 // (nil means a wedged Codex thread would resume amnesiac) and every thread id
@@ -311,9 +313,9 @@ func (processes *openAgentProcesses) Processes(context.Context) ([]action.Proces
 	return []action.Process{{PID: 4242, Argv: []string{"claude", "--session-id", processes.id}}}, nil
 }
 
-func (processes *openAgentProcesses) Terminate(pid int) error {
-	processes.killed = append(processes.killed, pid)
-	return nil
+func (processes *openAgentProcesses) Terminate(target gather.Target) (gather.Outcome, error) {
+	processes.killed = append(processes.killed, target.PID)
+	return gather.OutcomeSent, nil
 }
 
 func TestOpenDetachedTargetKeepsAgentRouterSemantics(t *testing.T) {

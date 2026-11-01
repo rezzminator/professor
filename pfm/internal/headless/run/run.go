@@ -25,7 +25,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
-	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -212,7 +211,7 @@ func Resolve(request Request) (Request, error) {
 			return Request{}, err
 		}
 	}
-	binaryPath, err := obs.Runner(deps.RealRunner{}).LookPath(binary)
+	binaryPath, err := deps.Resolve(binary)
 	if err != nil {
 		if errors.Is(err, exec.ErrNotFound) {
 			return Request{}, &BinaryMissingError{

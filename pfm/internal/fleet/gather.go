@@ -72,9 +72,7 @@ func Gather(
 		store.CodexThreads(data.Rollouts),
 		data.CxNames,
 	)
-	tmuxClient := gather.TmuxProbe{
-		TmuxTmpDir: filepath.Dir(env.Paths.TmuxDir),
-	}
+	tmuxClient := gather.TmuxProbe{TmuxDir: env.Paths.TmuxDir}
 	// The pane-binding manager lets the rollout-less live-process resolver
 	// (store.NewCodexThreadResolverRoots) rank a pane's fleet-recorded thread
 	// binding over its own birth-window guess — the guess never moves once a
@@ -84,8 +82,7 @@ func Gather(
 		return gather.Snapshot{}, fmt.Errorf("prepare Codex pane binding resolver: %w", err)
 	}
 	gatherer, err := gather.New(gather.Dependencies{
-		Tmux:       tmuxClient,
-		TmuxTmpDir: filepath.Dir(env.Paths.TmuxDir),
+		Tmux: tmuxClient,
 		CodexName: func(rolloutPath string) naming.CodexName {
 			return codexNamesByPath[filepath.Clean(rolloutPath)]
 		},

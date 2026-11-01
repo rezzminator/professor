@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 
+	"github.com/rezzminator/professor/pfm/internal/agentlauncher"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/restart"
 )
@@ -13,7 +13,7 @@ import (
 func printHerdrIndicatorsDoctor(stdout io.Writer, home string, procs gather.ProcFS) (warnings, failures int) {
 	pids, err := restart.StaleHerdrIndicators(restart.Deps{
 		Procs: procs, Self: os.Getpid(), EffectiveUID: uint32(os.Geteuid()),
-		Executable: filepath.Join(home, ".local", "bin", "pfm"),
+		Install: gather.InstallAt(home), Executable: agentlauncher.ExecTarget(home),
 	})
 	if err != nil {
 		fmt.Fprintf(

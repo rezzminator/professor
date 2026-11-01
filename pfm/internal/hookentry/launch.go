@@ -411,7 +411,7 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 	if interactive {
 		failed = false
 		arguments := attachArguments(socketPath, startChannel, session, resolve.CallerEnvironmentFrom(env).TMUX != "")
-		if err := LaunchExec(tmuxBinary, arguments, deps.EnvironmentWith("TMUX", "")); err != nil {
+		if err := LaunchExec(tmuxBinary, arguments, pfmtmux.Environment()); err != nil {
 			fmt.Fprintf(stderr, "pfm internal launch: attach tmux session: %v\n", err)
 			return 1
 		}

@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -171,8 +172,24 @@ func (executor *Executor) Solo(
 		if _, keep := keepTTYs[strings.TrimPrefix(process.TTY, "/dev/")]; keep {
 			continue
 		}
-		err := executor.processes.Terminate(process.PID)
-		if err == nil {
+		if process.Unidentified != nil {
+			obs.Logger(ctx).Warn(
+				"solo.kill_process_failed", "pid", process.PID, "session_id", id,
+				"err", process.Unidentified.Error(),
+			)
+			continue
+		}
+		// No site Check: the door withholds the signal unless the live argv
+		// is the one matched here, so the stray match holds at the signal.
+		outcome, err := executor.processes.Terminate(gather.Target{Identity: process.Identity()})
+		switch {
+		case err != nil:
+			obs.Logger(ctx).Warn("solo.kill_process_failed", "pid", process.PID, "session_id", id, "err", err.Error())
+		case outcome != gather.OutcomeSent:
+			obs.Logger(ctx).Info(
+				"solo.kill_process_skipped", "pid", process.PID, "session_id", id, "state", outcome.String(),
+			)
+		default:
 			fmt.Fprintf(
 				executor.stderr,
 				"cc: solo — killed stray claude %d holding %s\n",
@@ -181,9 +198,7 @@ func (executor *Executor) Solo(
 			)
 			kills.processes++
 			obs.Logger(ctx).Info("solo.kill_process", "pid", process.PID, "session_id", id)
-			continue
 		}
-		obs.Logger(ctx).Warn("solo.kill_process_failed", "pid", process.PID, "session_id", id, "err", err.Error())
 	}
 	return nil
 }
@@ -251,6 +266,10 @@ func paneExists(panes []ActionPane, paneID string) bool {
 	return false
 }
 
+// isStrayClaude reports whether process is a Claude chat holding session id:
+// a Claude binary, not the background pty host, whose argv names id as a
+// session the way Claude takes one (gather.ClaudeSessionIDs). An id that only
+// appears inside another argument is no claim on the session.
 func isStrayClaude(process Process, id string, claudeBinaries ...string) bool {
 	if len(process.Argv) == 0 {
 		return false
@@ -274,12 +293,7 @@ func isStrayClaude(process Process, id string, claudeBinaries ...string) bool {
 		!pathMatchesHints(executable, descriptor.BinaryPathHints) {
 		return false
 	}
-	for _, argument := range process.Argv {
-		if strings.Contains(argument, id) {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(gather.ClaudeSessionIDs(process.Argv), id)
 }
 
 func pathMatchesHints(path string, hints []string) bool {

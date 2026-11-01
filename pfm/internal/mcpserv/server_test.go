@@ -770,7 +770,7 @@ func buildFleetBinary(t *testing.T) string {
 	t.Helper()
 	fleetBinaryOnce.Do(func() {
 		var err error
-		fleetBinaryDir, err = os.MkdirTemp("", "pfm-mcpserv-bin-")
+		fleetBinaryDir, err = os.MkdirTemp(paths.TempRoot(), "pfm-mcpserv-bin-")
 		if err != nil {
 			fleetBinaryErr = fmt.Errorf("create shared pfm build directory: %w", err)
 			return

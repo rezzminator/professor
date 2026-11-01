@@ -41,6 +41,10 @@ func TestProbeServerNeverReadsAFailureAsDead(t *testing.T) {
 		{"empty", "echo 'no current target' >&2; exit 1", ServerAlive, nil, ""},
 		{"dead", "echo 'no server running on /tmp/x' >&2; exit 1", ServerDead, nil, ""},
 		{"refused", "echo 'error connecting to /tmp/x (Connection refused)' >&2; exit 1", ServerDead, nil, ""},
+		// The client connected, then its server ended before answering: tmux
+		// 3.4 raced against kill-server said this 238 times in 300, and every
+		// next probe said "no server running".
+		{"lost", "echo 'server exited unexpectedly' >&2; exit 1", ServerDead, nil, ""},
 		{"denied", "echo 'connect failed: permission denied' >&2; exit 1", ServerUnknown, nil, "permission denied"},
 	}
 	for _, tc := range cases {

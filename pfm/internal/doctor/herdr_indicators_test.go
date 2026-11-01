@@ -8,10 +8,11 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 func TestHerdrIndicatorsDoctor(t *testing.T) {
-	for _, name := range []string{"stale", "current", "absent", "foreign", "unreadable table", "unreadable pid", "unreadable image"} {
+	for _, name := range []string{"stale", "current", "absent", "foreign", "another install", "unreadable table", "unreadable pid", "unreadable image"} {
 		t.Run(name, func(t *testing.T) {
 			runtime, fresh, old := newMCPServeDoctorFixture(t)
 			const pid = 5000001
@@ -20,6 +21,9 @@ func TestHerdrIndicatorsDoctor(t *testing.T) {
 					pids:     []int{pid},
 					cmdlines: map[int][]string{pid: {"pfm", "internal", "herdr-indicators"}},
 					images:   map[int]gather.FileID{pid: old},
+					environs: map[int]map[string]string{
+						pid: {paths.EnvInstallMark: paths.InstallMark(runtime.Paths.Home)},
+					},
 				},
 				identities:   map[int]gather.ProcessIdentity{pid: {EffectiveUID: uint32(os.Geteuid())}},
 				commandReads: map[int]int{},
@@ -34,6 +38,8 @@ func TestHerdrIndicatorsDoctor(t *testing.T) {
 				table.pids = nil
 			case "foreign":
 				table.identities[pid] = gather.ProcessIdentity{EffectiveUID: uint32(os.Geteuid()) + 1}
+			case "another install":
+				table.environs[pid][paths.EnvInstallMark] = "another-install-mark"
 			case "unreadable table":
 				table.pidsErr = fs.ErrPermission
 				wantFailures, want = 1, "ERROR herdr indicator process check: list processes"

@@ -247,6 +247,12 @@ func (manager *Manager) Kill(
 	if err != nil {
 		return Target{}, err
 	}
+	if !native && !request.Self && request.ID != "" && filepath.IsAbs(request.SocketName) {
+		// A Herdr address (a tmux socket name is never absolute) no live seat
+		// owns, such as a lost seat's row: nothing pfm proves is there to end,
+		// so the kill only hides the chat.
+		request.SocketName, request.PaneID = "", ""
+	}
 	switch {
 	case native:
 		// The durable seat supplies identity and address before the index exists.

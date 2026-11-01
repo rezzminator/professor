@@ -925,3 +925,31 @@ func TestHerdrForcedCloseRemovesReloadFiles(t *testing.T) {
 		})
 	}
 }
+
+// A picker row of a lost native seat still carries its Herdr address: with no
+// live seat behind it the kill hides the chat and ends nothing, never reading
+// the Herdr socket path as a tmux socket name.
+func TestHerdrKillOfALostSeatOnlyHides(t *testing.T) {
+	jail := newKillJail(t)
+	database := jail.open(t)
+	server := newKillHerdr(t)
+	seat := seedKillHerdr(t, database, server)
+	lost := seat
+	lost.State = "lost"
+	if err := database.Shared().UpdateSeat(context.Background(), seat, lost); err != nil {
+		t.Fatal(err)
+	}
+	spawner := &captureSpawner{}
+	manager, err := New(database, Dependencies{Tmux: &fakeTmux{}, Spawner: spawner})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := Request{ID: seat.SessionID, Engine: pfmengine.ID(seat.Engine), SocketName: seat.HerdrSocket, PaneID: seat.HerdrPane}
+	target, err := manager.Kill(context.Background(), request)
+	if err != nil || target.SocketPath != "" || target.PaneID != "" || len(spawner.args) != 0 {
+		t.Fatalf("lost seat kill target=%+v err=%v spawns=%v; want a hide only", target, err, spawner.args)
+	}
+	if row, found, err := database.Killed(context.Background(), seat.SessionID); err != nil || !found {
+		t.Fatalf("kill record=%+v found=%t err=%v", row, found, err)
+	}
+}

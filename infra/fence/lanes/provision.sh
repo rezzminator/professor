@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Build the lane tools and stage only invented, registered fixture seats.
+# Build the lane tools and stage only invented, registered fixture seats; `held`
+# provisions lane HELD's machine on the root (lanes/root.sh --machine held).
 set -euo pipefail
 [ "${PFM_DEV_FENCE:-}" = 1 ] || { echo 'provision: requires the fence' >&2; exit 1; }
 : "${PFM_CONFIG:?PFM_CONFIG is required in the container}"
@@ -26,7 +27,7 @@ case "${1:-}" in
     cat >"$PFM_CONFIG" <<'JSON'
 {"version":2,"accounts":[{"id":1,"configDir":"~/.cc/1","emoji":"🥇"},{"id":2,"configDir":"~/.cc/2","emoji":"🥈"}],"codex":{"homes":[{"id":1,"home":"~/.codex","emoji":"🥇"}]},"claude":{"systemPrompt":"professor"},"mcp":{"servers":{"chat":{"enabled":true}}}}
 JSON
-    trust="$(printf '%s\n' atlas lumen orbit express | jq -R '{key: ("/work/" + .), value: {hasTrustDialogAccepted: true}}' | jq -s from_entries)"
+    trust="$(printf '%s\n' atlas lumen orbit express held | jq -R '{key: ("/work/" + .), value: {hasTrustDialogAccepted: true}}' | jq -s from_entries)"
     for id in 1 2; do
       dir="$HOME/.cc/$id"; mkdir -p "$dir"
       jq -n --argjson trust "$trust" --arg email "seat$id@lane.invalid" \
@@ -60,5 +61,63 @@ JSON
     done
     printf '{"$schema":"https://opencode.ai/tui.json","theme":"tokyonight"}\n' >"$HOME/.config/opencode/tui.json"
     ;;
-  *) echo 'usage: provision.sh tools|seats|install' >&2; exit 2 ;;
+  held)
+    # Lane HELD's machine, as root on the lane root (lanes/root.sh --machine held):
+    # systemd with a lingering user lane, whose Herdr opens every default-shell
+    # pane through herdr-keep (built into /herdr-keep-target) and herdr-keep's
+    # inner shell through pfm's wrapper — the owner's configuration.
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -q
+    apt-get install -y -q --no-install-recommends systemd systemd-sysv dbus dbus-user-session libpam-systemd
+    rm -rf /var/lib/apt/lists/*
+    # Ubuntu's image user holds uid 1000.
+    if id -u ubuntu >/dev/null 2>&1; then userdel -r ubuntu; fi
+    useradd -m -d /srv/lane -u 1000 -s /usr/bin/zsh lane
+    # The root build's own install leaves its scratch in /tmp and a 0700
+    # /etc/claude-code; the owner's host has neither, so lane meets what the owner meets.
+    find /tmp -mindepth 1 -maxdepth 1 -user root -exec rm -rf {} +
+    if [ -d /etc/claude-code ]; then find /etc/claude-code -type d -exec chmod 0755 {} +; fi
+    mkdir -p /var/lib/systemd/linger
+    touch /var/lib/systemd/linger/lane
+    mkdir -p /work/held
+    git -C /work/held init -q -b main
+    git -C /work/held -c user.name=demo -c user.email=demo@example.invalid commit -q --allow-empty -m init
+    git -C /work/held checkout -q -b develop
+    chown -R lane:lane /work
+    lane=/srv/lane plugin=/srv/lane/.local/share/herdr-keep/plugin
+    mkdir -p "$lane/.local/bin" "$plugin/bin" "$lane/.local/share/pfm-lanes"
+    # herdr-keep reads Herdr's config only from a private directory, as Herdr itself makes it.
+    install -d -m 0700 "$lane/.config/herdr"
+    install -m 0755 "$HOME/.local/bin/pfm" "$lane/.local/bin/pfm"
+    install -m 0644 /herdr-keep/herdr-plugin.toml "$plugin/herdr-plugin.toml"
+    install -m 0755 "${HELD_KEEP_BIN:?lanes/root.sh names the herdr-keep binary for this key}" "$plugin/bin/herdr-keep"
+    ln -sfn "$plugin/bin/herdr-keep" "$lane/.local/bin/herdr-keep"
+    cp "$HERE/scenarios/default.json" "$lane/.local/share/pfm-lanes/default.json"
+    cat >"$lane/.config/herdr/config.toml" <<'TOML'
+onboarding = false
+
+[update]
+version_check = false
+manifest_check = false
+
+[terminal]
+default_shell = "/srv/lane/.local/bin/herdr-keep"
+shell_mode = "non_login"
+
+[session]
+resume_agents_on_restore = false
+
+[ui.toast]
+delivery = "off"
+
+[ui.sound]
+enabled = false
+TOML
+    install -d -m 0700 "$lane/.config/herdr-keep"
+    (umask 077 && printf '%s\n' '{"shell":"/srv/lane/.local/share/pfm/install/bin/pfm-herdr-shell","args":["-l"]}' >"$lane/.config/herdr-keep/config.json")
+    . /worktree/infra/fence/engine-sync.sh
+    HOME="$lane" XDG_DATA_HOME="" ENGINE_SYNC_HOME="" engine_sync_link_stable "${ENGINE_SYNC_BIN:?lanes/container.sh sets ENGINE_SYNC_BIN}"
+    chown -R lane:lane "$lane"
+    ;;
+  *) echo 'usage: provision.sh tools|seats|install|held' >&2; exit 2 ;;
 esac

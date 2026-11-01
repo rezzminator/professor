@@ -7,7 +7,7 @@ if [ "${1:-}" = --fixtures ]; then
   [ $# -ge 2 ] || { echo 'usage: cred-scan.sh [--fixtures DIR] [ROOT…]' >&2; exit 2; }
   FIXTURES="$2"; shift 2
 fi
-[ $# -gt 0 ] || set -- /root /tmp /home
+[ $# -gt 0 ] || set -- /root /tmp /home /srv
 failed() { printf 'cred-scan: SCAN-FAILED — %s\n' "$1" >&2; exit 2; }
 command -v jq >/dev/null || failed 'jq is not on PATH'
 [ -d "$FIXTURES" ] || failed "fixtures directory missing: $FIXTURES"

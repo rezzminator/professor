@@ -137,4 +137,19 @@ else bad "lane_run engine-sync absence" "$(cat "$STUB_DOCKER_LOG")"; fi
 if grep -qF -- "-v $T/harvester:/harvester:ro" "$STUB_DOCKER_LOG"; then
   ok 'lane containers mount the standalone harvester source read-only'
 else bad 'lane container omitted harvester source' "$(cat "$STUB_DOCKER_LOG")"; fi
+
+# 7 — the held machine boots systemd as PID 1 in a private writable cgroup
+# namespace, never under docker's init and never --privileged; root stays as it was.
+: >"$STUB_DOCKER_LOG"
+PFM_DEV_WORKTREE="$T" PFM_DEV_GIT_COMMON="$T" PFM_DEV_GIT_DIR_REL=. PFM_DEV_ENGINE_SYNC_SRC="$T/es" lane_run lane-held pfm-lane-held:cafe01 none held -e FIXTURE_VALUE=held
+line="$(grep '^run -d ' "$STUB_DOCKER_LOG")"
+if [[ "$line" == 'run -d --cgroupns=private --security-opt writable-cgroups=true --tmpfs /run --tmpfs /run/lock -e container=docker --name lane-held --label pfm.fence=1 --network none -e GOPROXY=off -e FIXTURE_VALUE=held -v '* ]] &&
+  [[ "$line" == *' pfm-lane-held:cafe01 /sbin/init' ]] && [[ "$line" != *--init* ]] && [[ "$line" != *--privileged* ]]; then
+  ok 'lane_run held boots /sbin/init with writable private cgroups, no --init and no --privileged'
+else bad 'lane_run held machine' "$line"; fi
+: >"$STUB_DOCKER_LOG"
+PFM_DEV_WORKTREE="$T" PFM_DEV_GIT_COMMON="$T" PFM_DEV_GIT_DIR_REL=. PFM_DEV_ENGINE_SYNC_SRC="$T/es" lane_run lane-x pfm-lane-root:cafe01 none root
+if grep -q -- '^run -d --init --name lane-x --label pfm.fence=1 --network none .*pfm-lane-root:cafe01 sleep infinity$' "$STUB_DOCKER_LOG"; then
+  ok 'lane_run root keeps docker init and sleep infinity'
+else bad 'lane_run root machine' "$(cat "$STUB_DOCKER_LOG")"; fi
 shtest_end

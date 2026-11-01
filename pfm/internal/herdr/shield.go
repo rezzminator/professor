@@ -396,8 +396,9 @@ func parseShieldList(stdout []byte) ([]ShieldHolder, map[string]string, error) {
 }
 
 // innerForeground verifies the holder and its child by start time, then
-// returns the processes of the foreground group of the child's terminal.
-func (shield *Shield) innerForeground(holder ShieldHolder) ([]Process, error) {
+// returns the processes of the foreground group of the child's terminal: none
+// once the group's last member exited, as Herdr reports such a plain pane.
+func (keep *Shield) innerForeground(holder ShieldHolder) ([]Process, error) {
 	if shield.Proc == nil {
 		return nil, errors.New("no process table to verify the holder against")
 	}
@@ -444,13 +445,6 @@ func (shield *Shield) innerForeground(holder ShieldHolder) ([]Process, error) {
 			return nil, fmt.Errorf("read foreground process %d: %w", pid, err)
 		}
 		foreground = append(foreground, Process{PID: pid, Name: filepath.Base(argv[0]), Argv0: argv[0], Argv: argv})
-	}
-	if len(foreground) == 0 {
-		return nil, fmt.Errorf(
-			"no process is in foreground group %d of child %d",
-			child.TerminalGroup,
-			holder.Child.PID,
-		)
 	}
 	return foreground, nil
 }

@@ -13,7 +13,8 @@
 # Only fence-owned objects are ever removed: containers and dangling images
 # labelled pfm.fence=1 (pfm-dev.Dockerfile, docker-compose.yml and every fence
 # `docker run` set it), lane images (label professor.lane-root, tag
-# pfm-lane-base:*), the three shared cache volumes, volumes named
+# pfm-lane-base:*), the three shared cache volumes, lane HELD's two cargo
+# volumes, volumes named
 # ^(fence|infra)_pfm-dev-, the retired pfm-lane-{harvest,uv}-cache volumes,
 # and this clone's recorded pfm-sim-harvest- volumes,
 # build cache no build used for a week, and scratch under the roots this repo's
@@ -76,7 +77,12 @@
 #                   `docker system df -v` (bounded to 120 s where the host has
 #                   `timeout`) against its budget in MB — pfm-dev-gocache
 #                   PFM_FENCE_GOCACHE_MB (15000), pfm-dev-gomod PFM_FENCE_GOMOD_MB
-#                   (4000), pfm-dev-lintcache PFM_FENCE_LINTCACHE_MB (2000); over
+#                   (4000), pfm-dev-lintcache PFM_FENCE_LINTCACHE_MB (2000), and
+#                   lane HELD's herdr-keep build volumes (lanes/root.sh --machine
+#                   held creates them on first use) pfm-dev-cargo PFM_FENCE_CARGO_MB
+#                   (2000) and pfm-dev-herdr-keep-target
+#                   PFM_FENCE_HERDR_KEEP_TARGET_MB (6000), a volume not created
+#                   yet skipped; over
 #                   budget the volume is removed — `docker volume rm`, which the
 #                   daemon refuses atomically while any container mounts it — and
 #                   the next fence run recreates it empty: one cold build.
@@ -111,7 +117,9 @@ FENCE_CACHE_VOLUMES="pfm-dev-gocache pfm-dev-gomod pfm-dev-lintcache"
 # volume · budget variable · default MB, one row per shared cache volume
 FENCE_CACHE_BUDGETS="pfm-dev-gocache PFM_FENCE_GOCACHE_MB $PFM_FENCE_GOCACHE_MB
 pfm-dev-gomod PFM_FENCE_GOMOD_MB $PFM_FENCE_GOMOD_MB
-pfm-dev-lintcache PFM_FENCE_LINTCACHE_MB $PFM_FENCE_LINTCACHE_MB"
+pfm-dev-lintcache PFM_FENCE_LINTCACHE_MB $PFM_FENCE_LINTCACHE_MB
+pfm-dev-cargo PFM_FENCE_CARGO_MB $PFM_FENCE_CARGO_MB
+pfm-dev-herdr-keep-target PFM_FENCE_HERDR_KEEP_TARGET_MB $PFM_FENCE_HERDR_KEEP_TARGET_MB"
 
 _fence_hk_warn() { printf 'WARN fence housekeeping: %s failed: %s\n' "$1" "$2" >&2; }
 _fence_hk_say() { printf 'fence housekeeping: %s\n' "$1" >&2; }

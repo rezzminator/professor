@@ -178,6 +178,19 @@ func TestShieldProcessesSeesTheHoldersShell(t *testing.T) {
 			want: held, holder: true, listed: []string{shieldSocket},
 		},
 		{
+			// Between an engine's exit and its relaunch the terminal's foreground
+			// group has no member left: Herdr reports a plain pane so as no
+			// foreground, never as a failed read.
+			name: "foreground group emptied by its exit", socket: shieldSocket, foreground: attachClient,
+			listing: shieldListing("running", true, false, "PROTECTED"),
+			table: func() shieldProc {
+				table := shieldTable()
+				delete(table, 320)
+				return table
+			}(),
+			want: PaneProcesses{Pane: "w1:p4", Shell: 310, Foreground: []Process{}}, holder: true, listed: []string{shieldSocket},
+		},
+		{
 			name: "reused child pid", socket: shieldSocket, foreground: attachClient,
 			listing: shieldListing("running", true, false, "PROTECTED"),
 			table: func() shieldProc {

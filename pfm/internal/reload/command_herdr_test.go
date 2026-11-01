@@ -273,7 +273,10 @@ func (f *reloadHerdrFixture) respond(method string, p map[string]json.RawMessage
 			}
 		}
 		argv := append([]string{pfmengine.MustLookup(f.request.Engine).Binary}, run.Args...)
-		if f.mode == "kept" {
+		if f.mode == "kept-gap" && f.submitted && f.processes == 1 {
+			return f.shieldedProcess(0, nil)
+		}
+		if f.mode == "kept" || f.mode == "kept-gap" {
 			return f.shieldedProcess(pid, argv)
 		}
 		return f.processResult(
@@ -415,6 +418,7 @@ func TestRunHerdrLifecycle(t *testing.T) {
 	}{
 		{name: "model-and-account"},
 		{name: "held-pane", mode: "kept"},
+		{name: "held-pane-between-engines", mode: "kept-gap"},
 		{name: "dim-hint", mode: "dim-hint"},
 		{name: "same-text-draft", draft: true},
 		{name: "pending-cleared-before-new-process", mode: "pending-race"},
@@ -441,7 +445,7 @@ func TestRunHerdrLifecycle(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newReloadHerdrFixture(t)
 			f.mode = tc.mode
-			if tc.mode == "kept" {
+			if tc.mode == "kept" || tc.mode == "kept-gap" {
 				f.holdByShield()
 			}
 			if tc.mode == "dim-hint" {

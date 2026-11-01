@@ -332,6 +332,85 @@ finally:
 PYTEST
 rc=$?
 if [ "$rc" = 0 ]; then ok "fake PTY empty-composer guard receives exact prompt"; else bad "fake PTY empty-composer guard" "rc=$rc"; fi
+# Lane HELD's turn directives on a real PTY: each hook in Claude Code's order, each
+# turn held open by its gate file, and the notification turn with no UserPromptSubmit.
+python3 "$LANES/herdr.py" prepare "$LANES/../../plugin-lab/tests/fakes/claude" "$T/held-fixture"
+HELD_FIXTURE="$T/held-fixture" timeout 30 python3 - <<'PYTEST'
+import os,pty,subprocess,time,json,pathlib,select,errno
+root=pathlib.Path(os.environ['HELD_FIXTURE']); config=root/'config'; config.mkdir()
+events=root/'events.jsonl'
+record={'hooks':[{'type':'command','command':f'cat >>{events}; echo >>{events}'}]}
+(config/'settings.json').write_text(json.dumps({'statusLine':{'type':'command','command':'cat >/dev/null'},
+  'hooks':{e:[record] for e in ('UserPromptSubmit','Stop','SubagentStart','SubagentStop','SessionEnd')}}))
+master,slave=pty.openpty()
+env=os.environ.copy();env.update(H_FIXTURE=str(root),CLAUDE_CONFIG_DIR=str(config),H_FAKE_SCRIPT=str(root/'fake.sh'))
+p=subprocess.Popen(['bash',str(root/'fake.sh'),'--session-id','held-probe'],stdin=slave,stdout=slave,stderr=slave,env=env,start_new_session=True)
+os.close(slave)
+transcript=config/'projects/-fake-work/held-probe.jsonl'
+screen=bytearray()
+def drain():
+  try:
+    while select.select([master],[],[],0)[0]: screen.extend(os.read(master,65536))
+  except OSError as e:
+    # The pty reads EIO once the fake has exited and closed its side.
+    if e.errno!=errno.EIO: raise
+def seen():
+  if not events.exists(): return []
+  return [json.loads(l) for l in events.read_text().splitlines() if l.strip()]
+def rows(): return [json.loads(l) for l in transcript.read_text().splitlines()] if transcript.exists() else []
+def until(cond,what,bound=5):
+  deadline=time.monotonic()+bound
+  while time.monotonic()<deadline:
+    drain()
+    if cond(): return
+    time.sleep(.05)
+  raise AssertionError(f'{what}: events={[e["hook_event_name"] for e in seen()]} rows={[r.get("type") for r in rows()]}')
+def names(): return [e['hook_event_name'] for e in seen()]
+try:
+  until(lambda: transcript.exists(),'fake never started')
+  gate=root/'hold-gate'; gate.touch()
+  os.write(master,f'H_HOLD {gate}\n'.encode())
+  until(lambda: any(r.get('type')=='user' and r['message']['content']==f'H_HOLD {gate}' for r in rows()),'held turn user record')
+  assert names()==['UserPromptSubmit'], names()
+  assert not any(r.get('type')=='assistant' for r in rows()), 'held turn answered while its gate exists'
+  busy='✻ Holding… (esc to interrupt)\r\n────────────────────────────────────────\r\n❯ \r\n────────────────────────────────────────\r\n'.encode()
+  until(lambda: busy in screen,'busy footer above an empty composer while the turn is held')
+  held=len(screen)
+  gate.unlink()
+  until(lambda: names()==['UserPromptSubmit','Stop'],'held turn Stop after its gate')
+  until(lambda: [r.get('type') for r in rows()][-3:]==['user','assistant','system'],'held turn answered, then its stop-hook summary')
+  assert bytes(screen[held:]).startswith(b'\x1b[4A\r\x1b[J'), bytes(screen[held:held+40])
+  gate=root/'sub-gate'; gate.touch()
+  os.write(master,f'H_SUBAGENT held-sub {gate}\n'.encode())
+  until(lambda: names()[2:]==['UserPromptSubmit','SubagentStart','Stop'],'sub-agent turn ends with its sub-agent alive')
+  start=seen()[3]
+  assert (start['agent_id'],start['agent_type'])==('held-sub','general-purpose'), start
+  assert 'SubagentStop' not in names(), 'SubagentStop before its gate'
+  gate.unlink()
+  until(lambda: names()[5:]==['SubagentStop'],'SubagentStop after its gate')
+  stop=seen()[5]
+  assert (stop['agent_id'],stop['stop_hook_active'],stop['session_id'])==('held-sub',False,'held-probe'), stop
+  gate=root/'notify-gate'; gate.touch()
+  os.write(master,f'H_NOTIFY {gate}\n'.encode())
+  note='<task-notification>\n<task-id>held-task</task-id>\n<status>completed</status>\n</task-notification>'
+  until(lambda: any(r.get('turnOrigin')=='task_notification' and r['message']['content']==note for r in rows()),'notification record')
+  assert names()[6:]==[], names()
+  gate.unlink()
+  until(lambda: names()[6:]==['Stop'],'notification turn Stop without UserPromptSubmit')
+  # The exit command ends the engine and names its session in the fixture's exit record.
+  os.write(master,b'/exit\n')
+  until(lambda: p.poll()==0,'fake exits on /exit')
+  assert names()[7:]==['SessionEnd'], names()
+  exits=root/'held-exits.log'
+  assert exits.exists() and exits.read_text()=='held-probe\n', (exits, exits.exists() and exits.read_text())
+  print('HELD DIRECTIVES PASS')
+finally:
+  if p.poll() is None: p.terminate()
+  p.wait(timeout=3);os.close(master)
+PYTEST
+rc=$?
+if [ "$rc" = 0 ]; then ok "held directives fire Claude Code's hooks in order, each turn open until its gate goes"
+else bad "held turn directives" "rc=$rc"; fi
 # Drive the actual delivery-birth loop: only the tmux recipient uses the lane TUI mock.
 awk '/^for birth / {copy=1} copy {print} copy && /^done$/ {exit}' "$LANES/H.sh" >"$T/delivery-birth.sh"
 out="$(WITNESS="$T/delivery-birth.sh" bash -c '

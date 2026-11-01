@@ -153,4 +153,16 @@ pfm chat call	H	H.herdr-to-herdr
 pfm chat watch	H	H.watch
 pfm chat name	H	H.name
 pfm chat open	H	H.open-restored
+pfm internal seat-host	HELD	HELD.birth-picker
+pfm whoami	HELD	HELD.whoami
+pfm ls	HELD	HELD.discovery
+pfm chat status	HELD	HELD.status
+pfm internal herdr-state	HELD	HELD.indicator-idle
+pfm chat call	HELD	HELD.call
+pfm chat keys	HELD	HELD.keys
+pfm chat capture	HELD	HELD.capture
+pfm chat name	HELD	HELD.name
+pfm chat open	HELD	HELD.open
+pfm chat reload	HELD	HELD.reload
+pfm chat kill	HELD	HELD.kill
 pfm config validate	O1	O1.20-extensions

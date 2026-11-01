@@ -115,10 +115,15 @@ func Run(m *testing.M) int {
 	}
 	// Git fixtures must read only repository-local configuration. A developer's
 	// global identity, aliases, hooks, signing policy, or system configuration
-	// must never steer a test subprocess.
+	// must never steer a test subprocess. Auto maintenance stays off: git detaches
+	// it after a commit, and it writes .git/objects/maintenance.lock under a
+	// fixture another test is copying.
 	for name, value := range map[string]string{
 		"GIT_CONFIG_GLOBAL":   "/dev/null",
 		"GIT_CONFIG_NOSYSTEM": "1",
+		"GIT_CONFIG_COUNT":    "1",
+		"GIT_CONFIG_KEY_0":    "maintenance.auto",
+		"GIT_CONFIG_VALUE_0":  "false",
 	} {
 		if err := os.Setenv(name, value); err != nil {
 			warnSetup("set %s to %s: %v", name, value, err)

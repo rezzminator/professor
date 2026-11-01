@@ -7,6 +7,8 @@ import (
 	"os"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/rezzminator/professor/pfm/internal/gather"
 )
 
 type darwinProcFS struct{}
@@ -20,11 +22,9 @@ func newNativeProcFS(root string) ProcFS {
 	return darwinProcFS{}
 }
 
+// Environ reads kern.procargs2 through gather's decoder, the one door for that layout.
 func (darwinProcFS) Environ(pid int) (map[string]string, error) {
-	return nil, fmt.Errorf(
-		"process environment for %d is not implemented on darwin; KERN_PROCARGS2 is the reachable route",
-		pid,
-	)
+	return gather.NewProcFS("").Environ(pid)
 }
 
 func (darwinProcFS) Stat(pid int) (ProcStat, error) {

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -744,21 +745,25 @@ func TestMCPBoundedContextAppliesTheConfiguredTimeout(t *testing.T) {
 
 func rolloutHandles(t *testing.T, path string) int {
 	t.Helper()
-	const fdRoot = "/proc/self/fd"
+	const fdRoot = "/dev/fd" // Linux and macOS both list this process's descriptors here
+	rollout, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat rollout %s: %v", path, err)
+	}
 	entries, err := os.ReadDir(fdRoot)
 	if err != nil {
 		t.Fatalf("enumerate rollout handles: %v", err)
 	}
 	count := 0
 	for _, entry := range entries {
-		target, err := os.Readlink(filepath.Join(fdRoot, entry.Name()))
-		if os.IsNotExist(err) {
+		info, err := os.Stat(filepath.Join(fdRoot, entry.Name()))
+		if os.IsNotExist(err) || errors.Is(err, syscall.EBADF) {
 			continue // ReadDir's own descriptor has already closed.
 		}
 		if err != nil {
-			t.Fatalf("read descriptor %s: %v", entry.Name(), err)
+			t.Fatalf("stat descriptor %s: %v", entry.Name(), err)
 		}
-		if target == path {
+		if os.SameFile(info, rollout) {
 			count++
 		}
 	}

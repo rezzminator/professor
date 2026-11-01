@@ -436,7 +436,7 @@ func TestNativeLossNoteClearsOnlyOnActualPrompt(t *testing.T) {
 		{name: "idle", event: "idle", payload: `{"session_id":"sid"}`, state: "idle"},
 		{name: "tool working", event: "working", payload: `{"session_id":"sid","hook_event_name":"PostToolUse","tool_name":"Bash"}`, state: "working"},
 		{name: "prompt", event: "working", payload: `{"session_id":"sid","hook_event_name":"UserPromptSubmit","prompt":"private"}`, clear: true, state: "working"},
-		{name: "task notification turn", event: "working", payload: `{"session_id":"sid","hook_event_name":"UserPromptSubmit","prompt":"<task-notification>done</task-notification>","task_notification":true}`, state: "working"},
+		{name: "task notification turn", event: "working", payload: `{"session_id":"sid","hook_event_name":"UserPromptSubmit","prompt":"<task-notification>\n<task-id>t1</task-id>\n<status>completed</status>\n</task-notification>"}`, state: "working"},
 		{name: "end reload", event: "end", payload: `{"session_id":"sid","reason":"prompt_input_exit"}`, pending: true},
 		{name: "opencode state", engine: pfmengine.OpenCode, event: "working", payload: `{"session_id":"sid"}`},
 		{name: "opencode replayed user message", engine: pfmengine.OpenCode, event: "working", payload: `{"session_id":"sid","hook_event_name":"message.updated","role":"user"}`},

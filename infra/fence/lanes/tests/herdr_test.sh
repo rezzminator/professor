@@ -396,7 +396,8 @@ try:
   until(lambda: any(r.get('turnOrigin')=='task_notification' and r['message']['content']==note for r in rows()),'notification record')
   until(lambda: names()[6:]==['UserPromptSubmit'],'notification turn UserPromptSubmit')
   submit=seen()[6]
-  assert (submit['prompt'],submit['task_notification'],submit['session_id'])==(note,True,'held-probe'), submit
+  # Real Claude Code marks a notification turn by its prompt alone, never a payload flag.
+  assert (submit['prompt'],'task_notification' in submit,submit['session_id'])==(note,False,'held-probe'), submit
   gate.unlink()
   until(lambda: names()[6:]==['UserPromptSubmit','Stop'],'notification turn Stop after its gate')
   # The exit command ends the engine and names its session in the fixture's exit record.

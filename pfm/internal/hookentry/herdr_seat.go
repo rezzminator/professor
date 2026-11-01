@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"path/filepath"
+	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
@@ -143,8 +144,10 @@ func (reporter *herdrReporter) nativeSeat(ctx context.Context, payload herdrPayl
 	if payload.SessionID != "" {
 		seat.SessionID = payload.SessionID
 	}
-	// A task notification opens a turn through UserPromptSubmit, but the user re-sent nothing.
-	promptSubmitted := (payload.HookEventName == claudelaunch.HookEventUserPromptSubmit && !payload.TaskNotification) ||
+	// A task notification opens a turn through UserPromptSubmit with the notification
+	// as its prompt, but the user re-sent nothing.
+	promptSubmitted := (payload.HookEventName == claudelaunch.HookEventUserPromptSubmit &&
+		!strings.HasPrefix(payload.Prompt, taskNotificationPrompt)) ||
 		(reporter.options.engine == pfmengine.OpenCode && payload.HookEventName == "chat.message")
 	if reporter.options.event == herdr.EventWorking && promptSubmitted && !payload.IsInterrupt {
 		seat.LostNote = ""
@@ -359,8 +362,11 @@ type herdrPayload struct {
 	Title            string          `json:"title"`
 	TranscriptPath   string          `json:"transcript_path"`
 	Prompt           string          `json:"prompt"`
-	TaskNotification bool            `json:"task_notification"`
 }
+
+// taskNotificationPrompt opens the prompt Claude Code submits when a background
+// task reports back; its hook payload carries no other mark.
+const taskNotificationPrompt = "<task-notification>"
 
 // Native and legacy reports share SESSION then BRIDGE ordering, including re-proofs.
 func (reporter *herdrReporter) lockNativeReport(ctx context.Context, seat fleetdb.Seat) (func(), error) {

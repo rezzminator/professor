@@ -33,21 +33,6 @@ checks_templates_demo_serial() {
 
 checks_templates_plugin_logs() {
   run "templates: plugin-logs self-test" -- bash "$REPO_ROOT/scripts/test-plugin-logs.sh"
-  run "templates: plugin-log conformance" -- bash "$REPO_ROOT/plugins/plugin-log/conformance_test.sh"
-  run "templates: plugin-log-sync self-test" -- bash "$REPO_ROOT/scripts/test-plugin-log-sync.sh"
-  plugin_log_copies
-}
-
-# Every plugin's vendored plugin-log and agent-types copy against its canonical file. A plugin checkout absent
-# here (a fence worktree carries no submodule) is NOT CHECKED: a warning naming it, never a pass, never a failure.
-plugin_log_copies() {
-  local rc=0
-  bash "$REPO_ROOT/scripts/plugin-log-sync.sh" --check || rc=$?
-  case $rc in
-    0) ok "templates: plugin-log and agent-types copies match the canonical source" ;;
-    3) warn "templates: plugin-log and agent-types copies NOT CHECKED: the plugin checkouts named above are absent here" ;;
-    *) fail_step "templates: plugin-log and agent-types copies drifted from the canonical source (exit $rc)" ;;
-  esac
 }
 
 # The plugin lab's hermetic half: its shell linted at warning level

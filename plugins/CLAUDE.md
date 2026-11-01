@@ -15,7 +15,6 @@ Professor tracks only each plugin's commit: an edit under `{name}/` belongs to t
 - engine-sync: the Codex and OpenCode mirror writer pfm execs · `engine-sync/`
 - harvester: shared engine MCP daemon and one-shot web/document CLI; its own plugin registers the MCP server `harvester` (`mcp__plugin_harvester_harvester__*` in Claude Code), pfm none · `harvester/`
 - gpt-gateway: a local passthrough between Claude Code and the Anthropic API, with a middleware hook API and an opt-in ChatGPT route; a tracked submodule the marketplace does not list · `gpt-gateway/`
-- plugin-log: the one logging library, TypeScript, Go and Python held to one conformance spec, vendored byte-identical into each plugin at the copy path the sync script's `ROSTER` names; professor's own source, no submodule; also holds the canonical `ts/agent-types.ts`, the agent-type resolver vendored into tool-visibility-controller and rule-control by the same sync script and `ROSTER` · `plugin-log/`, spec `plugin-log/spec.json`, sync `../scripts/plugin-log-sync.sh`
 - installable plugin: the directory Claude Code installs, inside each checkout · `{name}/plugins/{name}/`
 - gitlink: professor's pin of one plugin commit, registered with `branch = develop` and `ignore = dirty` · `../.gitmodules`
 
@@ -47,13 +46,13 @@ Professor tracks only each plugin's commit: an edit under `{name}/` belongs to t
 
 ## Standalone
 
-- Dependency runs one way: pfm may depend on a plugin; a plugin depends on neither pfm nor Professor, and installs and works fully on a machine without them.
+- Dependency runs one way: pfm may depend on a plugin; a plugin depends on neither pfm, Professor nor another plugin, and installs and works fully alone.
 - A plugin's code and every file it writes carry no Professor path, agent, policy or wording; credit in its README and manifest is the one exception.
 - Professor-specific behavior enters through the plugin's own integration surface — a config file, flag, environment variable or extension hook — with a neutral default; Professor's install and project files supply Professor's values; a new option adds its `{PLUGIN}_{OPTION}` variable, read in a function-hooks plugin by a string-literal `$.env.get('NAME')`.
 
 ## Identity
 
-- Every plugin belongs to professor: listed in the marketplace and installed as `{name}@professor`.
+- Every plugin belongs to Professor and installs as `{name}@professor`, from Professor's marketplace or from its own repo's root `.claude-plugin/marketplace.json`, which is named `professor` too.
 
 ## Native first
 
@@ -61,7 +60,7 @@ Professor tracks only each plugin's commit: an edit under `{name}/` belongs to t
 
 ## Logging
 
-- All plugin logging goes through one shared plugin-log library, shipped inside each plugin as an identical vendored copy of one canonical source, so the plugin still installs and runs without Professor or pfm; a library change lands in the canonical source and every copy in the same pass · copies by `../scripts/plugin-log-sync.sh --write|--check`
+- Each plugin owns its logging module, held to the rules below.
 - Directory: every plugin MUST write its logs under `$PLUGIN_LOG_DIR/{plugin}` when `PLUGIN_LOG_DIR` is set, and no plugin-specific log variable or path overrides it; else `~/.local/state/{plugin}/logs`; with no directory resolvable, logging is off.
 - Level files `errors.jsonl`, `warnings.jsonl`, `info.jsonl`, `debug.jsonl`, directory 0700, files 0600.
 - Row: one JSON line, keys in order `ts`, `plugin`, `level`, `event`, `msg`, `where`, `session` when known, `detail`; at most 4096 bytes with its newline, shortened to fit.

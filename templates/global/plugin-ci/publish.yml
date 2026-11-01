@@ -1,0 +1,102 @@
+name: publish
+
+# Merging the develop -> main pull request is the release: `publish` tags
+# v{version} on the merge commit and publishes the four binaries, and `verify`
+# checks what GitHub then serves. ci.yml gates the pull request before the
+# merge; this re-runs no test. No tag is pushed by hand.
+on:
+  pull_request:
+    branches: [main]
+    types: [closed]
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: publish
+    if: github.event.action == 'closed' && github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          fetch-depth: 0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+      - name: the tag is new
+        run: |
+          version="$(grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' plugins/{PLUGIN_NAME}/.claude-plugin/plugin.json | head -n 1 | sed 's/^"version"[[:space:]]*:[[:space:]]*"//; s/"$//')"
+          [ -n "$version" ] || { echo "::error::no version in plugins/{PLUGIN_NAME}/.claude-plugin/plugin.json"; exit 1; }
+          tag="v$version"
+          rc=0
+          git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null || rc=$?
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::tag $tag already exists"
+            exit 1
+          elif [ "$rc" -ne 2 ]; then
+            echo "::error::could not look up tag $tag (git ls-remote exit $rc)"
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          echo "TAG=$tag" >> "$GITHUB_ENV"
+      - name: build the four assets
+        run: scripts/build-release.sh
+      - name: release notes from the changelog
+        run: |
+          awk -v heading="## [$VERSION]" 'index($0, heading) == 1 { found = 1; next } found && /^## \[/ { exit } found' CHANGELOG.md > notes.md
+          test -s notes.md
+      - name: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$TAG" dist/{PLUGIN_NAME}_* dist/SHA256SUMS \
+            --target "${{ github.event.pull_request.merge_commit_sha }}" \
+            --title "{PLUGIN_NAME} $VERSION" --notes-file notes.md
+
+  # What GitHub now serves, checked from the outside: the assets match their
+  # SHA256SUMS and the sums the wrapper verifies against, the linux/amd64
+  # binary names the release, and the release body is the CHANGELOG section.
+  verify:
+    name: verify
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          persist-credentials: false
+      - name: the published assets, binary and body
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="$(grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' plugins/{PLUGIN_NAME}/.claude-plugin/plugin.json | head -n 1 | sed 's/^"version"[[:space:]]*:[[:space:]]*"//; s/"$//')"
+          tag="v$version"
+          dir="$RUNNER_TEMP/assets"
+          gh release download "$tag" --repo "$GITHUB_REPOSITORY" --dir "$dir"
+          (cd "$dir" && sha256sum -c SHA256SUMS)
+          if ! cmp -s "$dir/SHA256SUMS" plugins/{PLUGIN_NAME}/libexec/SHA256SUMS; then
+            diff "$dir/SHA256SUMS" plugins/{PLUGIN_NAME}/libexec/SHA256SUMS || true
+            echo "::error::the published SHA256SUMS differ from plugins/{PLUGIN_NAME}/libexec/SHA256SUMS"
+            exit 1
+          fi
+          bin="$dir/{PLUGIN_NAME}_${version}_linux_amd64"
+          chmod +x "$bin"
+          got="$("$bin" version)"
+          if [ "$got" != "{PLUGIN_NAME} $version" ]; then
+            echo "::error::$bin version printed '$got', want '{PLUGIN_NAME} $version'"
+            exit 1
+          fi
+          awk -v heading="## [$version]" 'index($0, heading) == 1 { found = 1; next } found && /^## \[/ { exit } found' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json body --jq .body > "$RUNNER_TEMP/body.md"
+          # $(…) drops trailing newlines, so the two compare up to a trailing newline.
+          if [ "$(cat "$RUNNER_TEMP/body.md")" != "$(cat "$RUNNER_TEMP/notes.md")" ]; then
+            diff "$RUNNER_TEMP/body.md" "$RUNNER_TEMP/notes.md" || true
+            echo "::error::the release body differs from CHANGELOG.md's $version section"
+            exit 1
+          fi
+          echo "verified $tag: SHA256SUMS, $got, body"

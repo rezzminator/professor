@@ -243,6 +243,17 @@ jobs:
           # pull request is scanned with no repository suppressions.
           trust_repository_policy: ${{ github.event.pull_request.head.repo.full_name == github.repository && 'true' || 'false' }}
 
+      # Every plugin keeps the one-check CI shape (.claude/rules/ci-workflows.md).
+      # It checks the plugins out only after the scanner ran, so the scanner scores
+      # the same tree as before; it runs after a red scan too.
+      - name: Plugin workflows keep the CI shape
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          git submodule update --init
+          python3 -c 'import yaml' 2>/dev/null || { sudo apt-get update && sudo apt-get install -y --no-install-recommends python3-yaml; }
+          python3 scripts/check-plugin-workflows.py
+
   # main takes only release pull requests: VERSION moved past main's, and its
   # authored notes releases/v{VERSION}.md exist and pass the grammar.
   release:

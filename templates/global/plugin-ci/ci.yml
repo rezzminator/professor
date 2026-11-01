@@ -1,0 +1,88 @@
+name: ci
+
+# The one check, on a pull request into main: `make check` on Linux and macOS
+# in parallel, and `make release`. Its `ci` job is main's only required status
+# check, so nothing merges or publishes until every job here is green;
+# publish.yml runs on the merge. No run starts on a push.
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # The pinned tools, one place both check legs read: the Claude Code
+  # `claude plugin validate` runs on, and the Node that installs it. Go comes
+  # from go.mod.
+  CLAUDE_CODE_VERSION: "{CLAUDE_CODE_VERSION}"
+  NODE_VERSION: "{NODE_VERSION}"
+
+jobs:
+  check:
+    name: check (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: install Claude Code
+        run: npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+      - name: leak scan, gofmt, vet, test, validate the plugin
+        # The private leak terms reach only a pull request from this repository; a fork's gets
+        # no secrets, so its leak scan has no terms and fails rather than passing.
+        env:
+          LEAK_TERMS_CONTENT: ${{ github.event.pull_request.head.repo.full_name == github.repository && secrets.LEAK_TERMS || '' }}
+        run: |
+          if [ -n "$LEAK_TERMS_CONTENT" ]; then
+            printf '%s\n' "$LEAK_TERMS_CONTENT" > "$RUNNER_TEMP/leak-terms.txt"
+            export LEAK_TERMS="$RUNNER_TEMP/leak-terms.txt"
+          fi
+          make check
+
+  release:
+    name: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+      - name: the version moved past main's, every version place agrees, the committed sums match a fresh build, the changelog yields notes
+        run: make release
+
+  # main's only required status check. always(): a skipped or cancelled job
+  # counts as passed for a required check, so this job fails unless every
+  # job it needs succeeded.
+  ci:
+    name: ci
+    needs: [check, release]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every job succeeded
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          failed="$(jq -r 'to_entries[] | select(.value.result != "success") | "\(.key)=\(.value.result)"' <<<"$NEEDS")"
+          if [ -n "$failed" ]; then
+            echo "::error::not every CI job succeeded: $(tr '\n' ' ' <<<"$failed")"
+            exit 1
+          fi
+          echo "every CI job succeeded"

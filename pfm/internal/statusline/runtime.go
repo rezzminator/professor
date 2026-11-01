@@ -105,7 +105,8 @@ type Runtime struct {
 	// leaves the main line's own dollars unpriced, "$?".
 	Prices *pricing.Prices
 
-	// Warn takes the render's diagnostic lines; nil is os.Stderr.
+	// Warn takes the render's diagnostic lines; nil is os.Stderr. Every line
+	// also reaches the activity log (loggedWarn).
 	Warn io.Writer
 
 	// scans resumes the render's whole-transcript folds under CacheDir; set
@@ -236,9 +237,7 @@ func (runtime Runtime) normalized() Runtime {
 	if runtime.Command == nil {
 		runtime.Command = commandRunner{}
 	}
-	if runtime.Warn == nil {
-		runtime.Warn = os.Stderr
-	}
+	runtime.Warn = loggedWarn(runtime.Warn)
 	if runtime.scans.warn == nil { // once: a second normalize must not restart the budget
 		runtime.scans = newTranscriptScans(runtime.CacheDir, runtime.Warn)
 	}
@@ -246,4 +245,20 @@ func (runtime Runtime) normalized() Runtime {
 		runtime.contextCatalog = newContextCatalog(runtime.Home, runtime.getenv, runtime.now(), runtime.Warn)
 	}
 	return runtime
+}
+
+// warnLog is a Warn writer that already copies its lines to the activity log.
+type warnLog struct{ io.Writer }
+
+// loggedWarn is warn (os.Stderr when nil) whose every line also lands in the
+// activity log as a statusline.warn record: the detached render worker's
+// stderr is read by nobody. A writer already logged is returned as it is.
+func loggedWarn(warn io.Writer) io.Writer {
+	if _, logged := warn.(warnLog); logged {
+		return warn
+	}
+	if warn == nil {
+		warn = os.Stderr
+	}
+	return warnLog{io.MultiWriter(warn, obs.WarnLines(context.Background(), "statusline.warn"))}
 }

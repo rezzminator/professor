@@ -156,20 +156,20 @@ func servePlaceHerdr(t *testing.T, fake *placeHerdr) string {
 	return socket
 }
 
-// hostOps is the fleet of the live case: a host-ops place and an orchard
+// fleetDesk is the fleet of the live case: a fleet-desk place and an orchard
 // place, a framework repo with a plugin repo nested in it, and a place whose
 // chats only resume.
-func hostOps() place.Fleet {
+func fleetDesk() place.Fleet {
 	return place.Fleet{
 		Rows: []compose.Row{
-			{Kind: compose.LiveClaude, Project: "host-ops", CWD: "/fixture/host-ops"},
+			{Kind: compose.LiveClaude, Project: "fleet-desk", CWD: "/fixture/fleet-desk"},
 			{Kind: compose.LiveClaude, Project: "orchard", CWD: "/fixture/orchard"},
 			{Kind: compose.LiveClaude, Project: ".professor", CWD: "/fixture/.professor"},
 			{Kind: compose.ResumeClaude, Project: "callmeter", CWD: "/fixture/.professor/plugins/callmeter"},
 			{Kind: compose.ResumeClaude, Project: "attic", CWD: "/fixture/attic"},
 		},
 		ProjectDirs: map[string]string{
-			"host-ops": "/fixture/host-ops", "orchard": "/fixture/orchard", ".professor": "/fixture/.professor",
+			"fleet-desk": "/fixture/fleet-desk", "orchard": "/fixture/orchard", ".professor": "/fixture/.professor",
 			"callmeter": "/fixture/.professor/plugins/callmeter", "attic": "/fixture/attic",
 		},
 		Home: "/jail",
@@ -188,7 +188,7 @@ func spawnInPlace(t *testing.T, fake *placeHerdr, cwd string) (fleetdb.Seat, err
 	if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	fleet := hostOps()
+	fleet := fleetDesk()
 	result, err := SpawnHerdr(context.Background(), HerdrRequest{
 		Paths: values,
 		// The caller sits in orchard's workspace.
@@ -210,12 +210,12 @@ func spawnInPlace(t *testing.T, fake *placeHerdr, cwd string) (fleetdb.Seat, err
 // in another root is born in the outer root's workspace.
 func TestSpawnHerdrBornInItsPlaceWorkspace(t *testing.T) {
 	for _, test := range []struct{ name, cwd, want string }{
-		{"its own place", "/fixture/host-ops", "wE"},
+		{"its own place", "/fixture/fleet-desk", "wE"},
 		{"a nested repo", "/fixture/.professor/plugins/callmeter", "wC"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			fake := &placeHerdr{workspaces: [][3]any{
-				{"wC", ".professor", 6}, {"wF", "orchard", 7}, {"wE", "host-ops", 6},
+				{"wC", ".professor", 6}, {"wF", "orchard", 7}, {"wE", "fleet-desk", 6},
 			}}
 			seat, err := spawnInPlace(t, fake, test.cwd)
 			if err != nil {
@@ -239,12 +239,12 @@ func TestSpawnHerdrBornInItsPlaceWorkspace(t *testing.T) {
 // its label, without focus; the chat is born there.
 func TestSpawnHerdrCreatesAMissingPlaceWorkspace(t *testing.T) {
 	fake := &placeHerdr{workspaces: [][3]any{{"wF", "orchard", 7}}}
-	seat, err := spawnInPlace(t, fake, "/fixture/host-ops")
+	seat, err := spawnInPlace(t, fake, "/fixture/fleet-desk")
 	if err != nil {
 		t.Fatal(err)
 	}
 	create, found := fake.call("workspace.create")
-	if !found || create.Params["cwd"] != "/fixture/host-ops" || create.Params["label"] != "host-ops" ||
+	if !found || create.Params["cwd"] != "/fixture/fleet-desk" || create.Params["label"] != "fleet-desk" ||
 		create.Params["focus"] != false {
 		t.Fatalf("workspace.create = %+v (found %v)", create, found)
 	}
@@ -262,13 +262,13 @@ func TestPlaceHerdrBirthsRacingCreateOneWorkspace(t *testing.T) {
 		t.Fatal(err)
 	}
 	fake := &placeHerdr{workspaces: [][3]any{{"wF", "orchard", 7}}, listDelay: 20 * time.Millisecond}
-	fleet := hostOps()
+	fleet := fleetDesk()
 	request := HerdrRequest{
 		Paths: values,
 		Choice: BackendChoice{
 			Backend: BackendHerdr, HerdrSocket: servePlaceHerdr(t, fake), HerdrPane: "wF:p3", HerdrWorkspace: "wF",
 		},
-		Run: fleetdb.SeatRun{CWD: "/fixture/host-ops"},
+		Run: fleetdb.SeatRun{CWD: "/fixture/fleet-desk"},
 	}
 	workspaces, failures := make([]string, 4), make([]error, 4)
 	var births sync.WaitGroup
@@ -288,7 +288,7 @@ func TestPlaceHerdrBirthsRacingCreateOneWorkspace(t *testing.T) {
 	}
 	distinct := slices.Compact(slices.Clone(workspaces))
 	if creates != 1 || errors.Join(failures...) != nil || len(distinct) != 1 || distinct[0] != "w91" {
-		t.Fatalf("creates=%d workspaces=%q errors=%v, want one host-ops workspace w91 for every birth",
+		t.Fatalf("creates=%d workspaces=%q errors=%v, want one fleet-desk workspace w91 for every birth",
 			creates, workspaces, errors.Join(failures...))
 	}
 }
@@ -337,7 +337,7 @@ func TestReconcileHerdrMovesAMisplacedChatAndRewritesItsSeat(t *testing.T) {
 		t.Fatal(err)
 	}
 	fake := &placeHerdr{
-		workspaces: [][3]any{{"wC", ".professor", 6}, {"wF", "orchard", 7}, {"wE", "host-ops", 6}},
+		workspaces: [][3]any{{"wC", ".professor", 6}, {"wF", "orchard", 7}, {"wE", "fleet-desk", 6}},
 		panes:      map[string]string{"wF:p3": "term-ops", "wF:p5": "plain-shell", "wF:p6": "term-caller"},
 	}
 	socket := servePlaceHerdr(t, fake)
@@ -356,7 +356,7 @@ func TestReconcileHerdrMovesAMisplacedChatAndRewritesItsSeat(t *testing.T) {
 	if err := state.PutSeat(ctx, seat); err != nil {
 		t.Fatal(err)
 	}
-	fleet := hostOps()
+	fleet := fleetDesk()
 	live := func(project, cwd, seatID, pane string) compose.Row {
 		workspace, _, _ := strings.Cut(pane, ":")
 		return compose.Row{
@@ -365,9 +365,9 @@ func TestReconcileHerdrMovesAMisplacedChatAndRewritesItsSeat(t *testing.T) {
 		}
 	}
 	fleet.Rows = append(fleet.Rows,
-		live("host-ops", "/fixture/host-ops", "ops-seat", "wF:p3"),
+		live("fleet-desk", "/fixture/fleet-desk", "ops-seat", "wF:p3"),
 		live("orchard", "/fixture/orchard", "home-seat", "wF:p4"),
-		live("host-ops", "/fixture/host-ops", "caller-seat", "wF:p6"),
+		live("fleet-desk", "/fixture/fleet-desk", "caller-seat", "wF:p6"),
 	)
 	if err := ReconcileHerdr(ctx, values, socket, fleet, "wF:p6"); err != nil {
 		t.Fatal(err)
@@ -418,11 +418,11 @@ func TestReconcileHerdrNeverClosesAWorkspace(t *testing.T) {
 		t.Fatal(err)
 	}
 	fake := &placeHerdr{
-		workspaces: [][3]any{{"wE", "host-ops", 6}, {"wS", "scratch", 1}},
+		workspaces: [][3]any{{"wE", "fleet-desk", 6}, {"wS", "scratch", 1}},
 		panes:      map[string]string{"wS:p1": "term-ops"},
 	}
 	socket := servePlaceHerdr(t, fake)
-	if err := ReconcileHerdr(ctx, values, socket, hostOps(), ""); err != nil || len(fake.methods()) != 0 {
+	if err := ReconcileHerdr(ctx, values, socket, fleetDesk(), ""); err != nil || len(fake.methods()) != 0 {
 		t.Fatalf("a fleet with no live Herdr chat: err %v, calls %v", err, fake.methods())
 	}
 	writeSeatHost(t, values, "ops-seat")
@@ -439,9 +439,9 @@ func TestReconcileHerdrNeverClosesAWorkspace(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	fleet := hostOps()
+	fleet := fleetDesk()
 	fleet.Rows = append(fleet.Rows, compose.Row{
-		Kind: compose.LiveClaude, Backend: BackendHerdr, Project: "host-ops", CWD: "/fixture/host-ops", Name: "OPS",
+		Kind: compose.LiveClaude, Backend: BackendHerdr, Project: "fleet-desk", CWD: "/fixture/fleet-desk", Name: "OPS",
 		SeatID: "ops-seat", Socket: socket, PaneID: "wS:p1", HerdrWorkspace: "wS",
 	})
 	err = ReconcileHerdr(ctx, values, socket, fleet, "")
@@ -456,7 +456,7 @@ func TestReconcileHerdrNeverClosesAWorkspace(t *testing.T) {
 		Choice: BackendChoice{
 			Backend: BackendHerdr, HerdrSocket: socket, HerdrPane: "wE:p1", HerdrWorkspace: "wE",
 		},
-		Run: fleetdb.SeatRun{CWD: "/fixture/host-ops"},
+		Run: fleetdb.SeatRun{CWD: "/fixture/fleet-desk"},
 	}, fleet)
 	if err != nil || workspace != "wE" || unmoved == nil ||
 		!strings.Contains(unmoved.Error(), "last pane of workspace wS") {
@@ -493,9 +493,9 @@ func TestReconcileHerdrCreatesNoWorkspaceForAnUnmovableChat(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	fleet := hostOps()
+	fleet := fleetDesk()
 	fleet.Rows = append(fleet.Rows, compose.Row{
-		Kind: compose.LiveClaude, Backend: BackendHerdr, Project: "host-ops", CWD: "/fixture/host-ops", Name: "OPS",
+		Kind: compose.LiveClaude, Backend: BackendHerdr, Project: "fleet-desk", CWD: "/fixture/fleet-desk", Name: "OPS",
 		SeatID: "ops-seat", Socket: socket, PaneID: "wS:p1", HerdrWorkspace: "wS",
 	})
 	err = ReconcileHerdr(ctx, values, socket, fleet, "")
@@ -505,7 +505,7 @@ func TestReconcileHerdrCreatesNoWorkspaceForAnUnmovableChat(t *testing.T) {
 	if created, found := fake.call("workspace.create"); found {
 		t.Fatalf("a workspace was created for a chat that stays: %+v", created)
 	}
-	faulted := hostOps()
+	faulted := fleetDesk()
 	faulted.Faults = []string{"read native seats: database is locked"}
 	err = ReconcileHerdr(ctx, values, socket, faulted, "")
 	if err == nil || !strings.Contains(err.Error(), "fleet scan: read native seats: database is locked") {

@@ -2,6 +2,7 @@ package hookentry
 
 import (
 	"cmp"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,9 +13,12 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/cmdparse"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -72,6 +76,8 @@ const (
 		" split it into simple commands with literal paths."
 	// engineGuardMaxRead bounds a script or patch file the guard reads.
 	engineGuardMaxRead = 1 << 20
+	// engineGuardGitTimeout bounds the git reads that trust a script.
+	engineGuardGitTimeout = 2 * time.Second
 )
 
 var (
@@ -437,7 +443,85 @@ func engineGuardIsScript(abs string) bool {
 
 // run judges code the script file holds, as program judges inline code; the
 // shell code reads `$0` and its arguments from script.
+//
+// A script file the engine could not have changed is trusted: one it may not
+// write (a framework file) or one git tracks with HEAD's content (the engine
+// cannot commit). Its own unreadable and blind parts do not count and its
+// text is no mention, so the repo's test entries run; what it plainly writes
+// still lands in pcmOnly, and an untrusted script it runs is judged in full.
 func (judge *pcmGuardJudge) run(lang, code, dir string, script cmdparse.Script, depth int) {
+	if !judge.trusts(script.Path) {
+		unreadable, blind := judge.unreadable, len(judge.blind)
+		judge.runCode(lang, code, dir, script, depth)
+		if judge.trusting > 0 {
+			judge.escapedUnreadable = judge.escapedUnreadable || (judge.unreadable && !unreadable)
+			judge.escapedBlind = append(judge.escapedBlind, judge.blind[blind:]...)
+		}
+		return
+	}
+	unreadable, blind := judge.unreadable, len(judge.blind)
+	if i := slices.Index(judge.read, code); i >= 0 {
+		judge.read = slices.Delete(judge.read, i, i+1)
+	}
+	judge.trusting++
+	judge.runCode(lang, code, dir, script, depth)
+	judge.trusting--
+	if i := slices.Index(judge.read, code); i >= 0 {
+		judge.read = slices.Delete(judge.read, i, i+1)
+	}
+	judge.unreadable = unreadable || judge.escapedUnreadable
+	kept := judge.blind[:blind]
+	for _, b := range judge.blind[blind:] {
+		if slices.Contains(judge.escapedBlind, b) && !slices.Contains(kept, b) {
+			kept = append(kept, b)
+		}
+	}
+	judge.blind = kept
+}
+
+// trusts reports a script file the engine could not have changed.
+func (judge *pcmGuardJudge) trusts(abs string) bool {
+	if abs == "" || !judge.scope.engine {
+		return false
+	}
+	if protected, _ := judge.scope.class(abs); protected {
+		return true
+	}
+	if trusted, ok := judge.trusted[abs]; ok {
+		return trusted
+	}
+	if judge.trusted == nil {
+		judge.trusted = map[string]bool{}
+	}
+	judge.trusted[abs] = engineGuardCommitted(abs)
+	return judge.trusted[abs]
+}
+
+// engineGuardCommitted reports a file git tracks whose content on disk is
+// HEAD's. Any failure (no repo, untracked, git missing) is untrusted.
+func engineGuardCommitted(abs string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), engineGuardGitTimeout)
+	defer cancel()
+	run := obs.Runner(deps.RealRunner{})
+	dir, base := filepath.Dir(abs), filepath.Base(abs)
+	head, err := run.Run(
+		ctx,
+		[]string{"git", "-C", dir, "rev-parse", "--verify", "-q", "HEAD:./" + base},
+		deps.RunOptions{},
+	)
+	if err != nil || head.ExitCode != 0 {
+		return false
+	}
+	disk, err := run.Run(ctx, []string{"git", "-C", dir, "hash-object", "--", base}, deps.RunOptions{})
+	if err != nil || disk.ExitCode != 0 {
+		return false
+	}
+	sum := strings.TrimSpace(string(head.Stdout))
+	return sum != "" && sum == strings.TrimSpace(string(disk.Stdout))
+}
+
+// runCode dispatches code to the shell reading or the interpreter reading.
+func (judge *pcmGuardJudge) runCode(lang, code, dir string, script cmdparse.Script, depth int) {
 	if lang == pcmGuardSh {
 		judge.shell(code, dir, script, depth)
 		return

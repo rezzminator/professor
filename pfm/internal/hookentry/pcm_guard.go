@@ -110,6 +110,13 @@ type pcmGuardJudge struct {
 	heredocs map[string]string
 	// scripts counts the script files the code being judged is read from.
 	scripts int
+	// trusting counts the trusted scripts (engine run) being read; what an
+	// untrusted script run inside one leaves escapes its reset.
+	trusting          int
+	escapedUnreadable bool
+	escapedBlind      []string
+	// trusted memoises trusts' git reads by script path.
+	trusted map[string]bool
 }
 
 // PcmGuard is the PreToolUse hook on the edit tools and Bash that denies a

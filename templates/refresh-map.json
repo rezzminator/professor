@@ -139,6 +139,12 @@
     "global/skills/dude/SKILL.md": {
       "curated": true
     },
+    "global/skills/extension-surface/SKILL.md": {
+      "curated": true
+    },
+    "global/skills/extension-surface/mods-example.md": {
+      "curated": true
+    },
     "global/skills/sources.json": {
       "curated": true
     },

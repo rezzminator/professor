@@ -19,7 +19,7 @@
 # covers all tmpfs caps plus 1024 MiB headroom, otherwise private disk binds with one stderr line
 # naming free/needed MiB (a failed read is explicit); /dev/shm stays capped, noswap tmpfs;
 # the worktree's timing base on /pfm-timing and the run's
-# host directory on /pfm-run; its disk-backed escape on /pfm-disk (PFM_FENCE_DISK_DIR), then
+# host directory on /pfm-run; its disk-backed escape on /pfm-disk (PFM_FENCE_DISK_DIR, also GOTMPDIR), then
 # /var/fence and /pfm-fence hidden behind capped, noswap tmpfs — so no
 # fixed path under HOME or /tmp is shared with another run; and for private its own network
 # namespace with lo up (a dummy0 default route makes an outside connect leave a packet the egress
@@ -192,6 +192,9 @@ cmd_inner() {
   scratch_mount /dev/shm "${PFM_FENCE_SHM_MIB}m" 1777
   mount --bind "$run/disk" /pfm-disk || die "the run disk directory could not be bound on /pfm-disk"
   export PFM_FENCE_DISK_DIR=/pfm-disk
+  # Go's build work dir ($WORK) is disk scratch, not test scratch (testjail.Run clears GOTMPDIR in test
+  # binaries): a cold-cache build of pfm's test binaries alone overran the 1536 MiB /tmp cap.
+  export GOTMPDIR=/pfm-disk
   mount --bind "$MNT/$wt/timing" /pfm-timing || die "the timing base could not be bound on /pfm-timing"
   if [[ -d "$MNT/.runs/$id" ]]; then mount --bind "$MNT/.runs/$id" /pfm-run || die "the run's host directory could not be bound"; fi
   scratch_mount "$STATE" "${PFM_FENCE_HIDE_MIB}m" 0700

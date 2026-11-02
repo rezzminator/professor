@@ -49,9 +49,11 @@ func Run(m *testing.M) int {
 	// test must open the jail's own store, and a process it starts must never carry
 	// the operator's mark, or a stop acting for the operator's install would own it.
 	// A test binary a jailed test re-execs as its own helper inherits jailMarkerEnv
-	// and keeps the store paths and the jail mark that test handed it.
+	// and keeps the store paths and the jail mark that test handed it. GOTMPDIR is the
+	// fence's disk for go's build scratch, and t.TempDir honours it since Go 1.25:
+	// test scratch stays on TMPDIR's tmpfs, where the timing budgets were set.
 	if _, child := (paths.OSEnv{}).Lookup(jailMarkerEnv); !child {
-		for _, name := range []string{"PFM_STATE_DB", "PFM_CACHE_DB", paths.EnvInstallMark} {
+		for _, name := range []string{"PFM_STATE_DB", "PFM_CACHE_DB", paths.EnvInstallMark, "GOTMPDIR"} {
 			if err := os.Unsetenv(name); err != nil {
 				warnSetup("clear %s: %v", name, err)
 				return 1

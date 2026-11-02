@@ -32,6 +32,14 @@ func TestMain(m *testing.M) {
 // makes RemoveAll fail with "directory not empty" — the flake
 // TestKillSelfResolveAndInternalCLI showed under load (5/6 red). Run pins all
 // three before any jail exists: each must be set and sit outside every jail root.
+func TestRunKeepsTestScratchUnderTMPDIR(t *testing.T) {
+	dir := t.TempDir()
+	if got, want := filepath.Dir(filepath.Dir(dir)), paths.TempRoot(); got != want {
+		t.Fatalf("t.TempDir() = %s, under %s; want TMPDIR %s (GOTMPDIR=%q)",
+			dir, got, want, os.Getenv("GOTMPDIR"))
+	}
+}
+
 func TestRunPinsGoCacheOutsideTheJail(t *testing.T) {
 	root := Fleet(t)
 	values, err := paths.Resolve()

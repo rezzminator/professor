@@ -37,8 +37,18 @@ func professorDevMarketplace(home string) string {
 	return filepath.Join(home, ".local", "share", pfmconfig.ProfessorMarketplace+"-dev")
 }
 
-// pluginCopySkipped names the checkout entries the copy leaves out.
-func pluginCopySkipped(name string) bool { return name == "node_modules" || name == ".DS_Store" }
+// pluginCopySkipped names the entries, by path under the plugin root, the copy
+// leaves out: dependencies, Finder's .DS_Store, and the typings and tsconfig.json
+// Claude Code generates into a plugin folder it loads, so a chat loading the copy
+// never reads as drift.
+func pluginCopySkipped(rel string) bool {
+	switch rel {
+	case filepath.Join(".claude-plugin", "types"), "tsconfig.json":
+		return true
+	}
+	name := filepath.Base(rel)
+	return name == "node_modules" || name == ".DS_Store"
+}
 
 // localClaudePluginTarget turns an -alpha build's target local when its
 // checkout exists under the checkout root, and otherwise says why not. The
@@ -274,8 +284,8 @@ func pluginCopyChange(checkout, mirror string) (string, error) {
 }
 
 // walkPluginTree visits root and everything under it, root's own rel "",
-// following symlinks to what they name and leaving out each entry skip
-// names. A dangling link, a symlink loop or a special file is an error.
+// following symlinks to what they name and leaving out each entry whose path
+// under root skip names. A dangling link, a symlink loop or a special file is an error.
 func walkPluginTree(root string, skip func(string) bool, visit func(rel, path string, info fs.FileInfo) error) error {
 	active := map[string]bool{}
 	var walk func(path, rel string) error
@@ -307,7 +317,7 @@ func walkPluginTree(root string, skip func(string) bool, visit func(rel, path st
 			return err
 		}
 		for _, entry := range entries {
-			if skip != nil && skip(entry.Name()) {
+			if skip != nil && skip(filepath.Join(rel, entry.Name())) {
 				continue
 			}
 			if err := walk(filepath.Join(path, entry.Name()), filepath.Join(rel, entry.Name())); err != nil {

@@ -352,6 +352,9 @@ func TestEnsureClaudePluginsAlphaInstallsTheLocalCopy(t *testing.T) {
 	// Finder drops .DS_Store into a copy it shows; the copy still matches.
 	writeFixture(t, filepath.Join(mirror(zero), ".DS_Store"), "finder")
 	writeFixture(t, filepath.Join(mirror(zero), "hooks", ".DS_Store"), "finder")
+	// Claude Code writes typings and a tsconfig.json into a plugin folder it loads.
+	writeFixture(t, filepath.Join(mirror(zero), ".claude-plugin", "types", "claude-code", "index.d.ts"), "declare module 'claude-code' {}\n")
+	writeFixture(t, filepath.Join(mirror(zero), "tsconfig.json"), `{"extends": "./.claude-plugin/types/tsconfig.json"}`)
 	runner.calls = nil
 	out.Reset()
 	if err := inst.ensureClaudePlugins(context.Background()); err != nil {

@@ -384,18 +384,7 @@ func Run(
 		return Result{}, exitIncomplete(ctx, pane, tries+grace)
 	}
 	trail.Reach("dead", "pane exited")
-	if request.Engine == pfmengine.Claude && request.SessionID != "" {
-		values, recordErr := pfmconfig.ResolvePaths()
-		if recordErr == nil {
-			recordErr = fleetdb.RecordLaunch(ctx, values, fleetdb.Launch{
-				SessionID: request.SessionID, Engine: pfmengine.Claude,
-				Account: request.Account, Cache1H: request.Cache1H,
-			}, clock.Real.Now().Unix())
-		}
-		if recordErr != nil {
-			fmt.Fprintf(stderr, "pfm: record launch %s: %v\n", request.SessionID, recordErr)
-		}
-	}
+	recordReloadLaunch(ctx, request, stderr)
 	promptWarning := warnPromptMissing(request, stderr)
 	if err := respawnClaimedPane(ctx, tmux, request, run); err != nil {
 		return Result{}, fmt.Errorf("respawn pane: %w", err)
@@ -860,4 +849,22 @@ func readSessionCrumb(path string) (id, transcript string, found bool, err error
 	}
 	id = strings.TrimSuffix(filepath.Base(transcript), filepath.Ext(transcript))
 	return id, transcript, true, nil
+}
+
+// recordReloadLaunch writes the launch record of a reloaded Claude session, so
+// the picker row and every later resume read the account and cache it runs on.
+func recordReloadLaunch(ctx context.Context, request Request, stderr io.Writer) {
+	if request.Engine != pfmengine.Claude || request.SessionID == "" {
+		return
+	}
+	values, err := pfmconfig.ResolvePaths()
+	if err == nil {
+		err = fleetdb.RecordLaunch(ctx, values, fleetdb.Launch{
+			SessionID: request.SessionID, Engine: pfmengine.Claude,
+			Account: request.Account, Cache1H: request.Cache1H,
+		}, clock.Real.Now().Unix())
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm: record launch %s: %v\n", request.SessionID, err)
+	}
 }

@@ -79,12 +79,12 @@ func TestDeactivateKeepsCursorOnTheDeactivatedConversation(t *testing.T) {
 	if got.ID != deactivated.ID || got.Kind != compose.ResumeClaude || count != 1 {
 		t.Fatalf("after a fresh refresh the cursor row = %+v, rows for it = %d", got, count)
 	}
-	opened, cmd := enter(model)
+	opened, cmd, _ := enterThrough(t, model)
 	if cmd == nil || opened.outcome != OutcomeSelected || opened.outcomeRow.ID != deactivated.ID {
 		t.Fatalf("enter once the seat left the roster: cmd=%v outcome=%v row=%q, want the resume of %q",
 			cmd != nil, opened.outcome, opened.outcomeRow.ID, deactivated.ID)
 	}
-	// A tmux stop is synchronous: its resumable row opens at once.
+	// A tmux stop is synchronous: its resumable row resumes at once, through its steps.
 	tmux := compose.Row{
 		Kind: compose.LiveClaude, ID: "tmux-session", Name: "Tmux", Project: "p", Socket: "/fixture/tmux",
 	}
@@ -92,7 +92,7 @@ func TestDeactivateKeepsCursorOnTheDeactivatedConversation(t *testing.T) {
 		Rows: []compose.Row{tmux}, InitialCursorID: tmux.ID, ApplyDeactivate: func(compose.Row) error { return nil },
 	})
 	tmuxModel.deactivate(tmux)
-	opened, cmd = enter(tmuxModel)
+	opened, cmd, _ = enterThrough(t, tmuxModel)
 	if cmd == nil || opened.outcome != OutcomeSelected || opened.outcomeRow.ID != tmux.ID {
 		t.Fatalf("enter on a deactivated tmux row: cmd=%v outcome=%v row=%q, want its resume",
 			cmd != nil, opened.outcome, opened.outcomeRow.ID)

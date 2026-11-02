@@ -36,7 +36,7 @@ const (
 	// SIDReloadHerdrPrefix names a native Herdr chat's reload schedule,
 	// SIDReloadHerdrPrefix+seat+".pid" (the scheduled worker's record) and
 	// SIDReloadHerdrPrefix+seat+".log" (its log); the doctor's crumb audit
-	// accepts both, and ending the seat removes both.
+	// accepts both, and ending the seat removes the record and keeps the log.
 	SIDReloadHerdrPrefix = "reload-herdr-"
 	// SIDHarnessConfigDirPrefix names the throwaway config directory the
 	// doctor's harness-prompt capture creates (os.MkdirTemp) in the SID dir;

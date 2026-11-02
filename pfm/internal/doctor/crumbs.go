@@ -164,7 +164,7 @@ func sidScratchFile(name string) bool {
 // schedule file, paths.SIDReloadHerdrPrefix+seat+".pid" (the worker's record)
 // or ".log" (its log). The seat id is whatever reload.LockWorkerSchedule built
 // from the seat row, so any non-empty one is accepted; ending the seat removes
-// both files.
+// the record and keeps the log.
 func nativeReloadScheduleFile(name string) bool {
 	rest, ok := strings.CutPrefix(name, paths.SIDReloadHerdrPrefix)
 	if !ok {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -23,6 +24,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
@@ -178,6 +180,23 @@ func NotifyWorkerFailure(
 			return true, fmt.Errorf("native reload failure notification: %w (retry cancelled: %w)", err, waitErr)
 		}
 	}
+}
+
+// WorkerFailureLine is a failed worker's error: the last line it wrote.
+func WorkerFailureLine(workerLog string) string {
+	lines := strings.Split(strings.TrimSpace(workerLog), "\n")
+	return lines[len(lines)-1]
+}
+
+// RecordWorkerFailure writes a failed worker's error to the activity log: its
+// own log file goes when the SID directory is cleared, and a tmux worker's
+// has no seat to name it.
+func RecordWorkerFailure(workerLog string, exitCode int) {
+	ctx := obs.Component(context.Background(), "hooks")
+	obs.Logger(ctx).LogAttrs(ctx, slog.LevelError, "reload.failed",
+		slog.String(obs.FieldErr, WorkerFailureLine(workerLog)),
+		slog.Int(obs.FieldExit, exitCode),
+	)
 }
 
 // WorkerArguments carries the validated CLI values to a backend-specific request.

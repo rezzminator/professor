@@ -202,7 +202,7 @@ func engineHexOf(row compose.Row) string {
 // where (omnibox.go), every other row its name with the search matches lit.
 func (model Model) nameSpans(row compose.Row, width int, name, bg string, base tone) []span {
 	palette := configuredPalette
-	if model.mergeNewChat && isNewChatActionKind(row.Kind) {
+	if model.mergeNewChat && isNewChatActionKind(row.Kind) || model.wizardOn(row) {
 		return model.launchSpans(row, width, bg)
 	}
 	shown := padRightCells(name, width)

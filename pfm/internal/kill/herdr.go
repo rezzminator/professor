@@ -289,7 +289,7 @@ type herdrKiller struct {
 	engine   pfmengine.ID
 	database *store.Store
 	seat     fleetdb.Seat
-	// sidDir holds the seat's reload schedule files, retired with its row.
+	// sidDir holds the seat's reload schedule record, retired with its row.
 	sidDir string
 	// log receives the warnings of a close that succeeded around a failure.
 	log io.Writer
@@ -543,11 +543,11 @@ func (client herdrKiller) KillPane(ctx context.Context, socket, pane string) err
 	}
 	// A forced pane close also kills its supervisor, so it cannot retire the
 	// durable address itself. Keep the independent kill ledger untouched.
-	// The pane is gone now: a reload file that will not go is named, never a
+	// The pane is gone now: a reload record that will not go is named, never a
 	// reason to keep a closed pane's row live, which no retry could retire.
-	if err := herdr.RemoveReloadFiles(client.sidDir, client.seat.SeatID); err != nil {
-		warning := fmt.Errorf("closed Herdr seat %s: its reload files stay behind: %w", client.seat.SeatID, err)
-		obs.Logger(ctx).WarnContext(ctx, "kill: reload files of a closed native seat not removed",
+	if err := herdr.RemoveReloadRecord(client.sidDir, client.seat.SeatID); err != nil {
+		warning := fmt.Errorf("closed Herdr seat %s: its reload record stays behind: %w", client.seat.SeatID, err)
+		obs.Logger(ctx).WarnContext(ctx, "kill: reload record of a closed native seat not removed",
 			"seat", client.seat.SeatID, "err", err)
 		if client.log == nil {
 			return errors.Join(warning, errors.New("kill warning writer is unavailable"))

@@ -98,14 +98,14 @@ func (model Model) fleetVitals() fleetVitals {
 func (model Model) countVitals() fleetVitals {
 	vitals := fleetVitals{live: liveEngineCounts(model.rows)}
 	for index := range model.rows {
-		switch model.rows[index].Kind {
-		case compose.ResumeClaude, compose.ResumeCodex, compose.ResumeOpenCode:
+		switch kind := model.rows[index].Kind; {
+		case kind.IsResumable():
 			if model.visibleInView(model.rows[index]) {
 				vitals.resumable++
 			}
-		case compose.Agent:
+		case kind == compose.Agent:
 			vitals.agents++
-		case compose.Booting:
+		case kind == compose.Booting:
 			vitals.booting++
 		}
 	}

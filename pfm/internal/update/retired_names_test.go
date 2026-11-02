@@ -733,7 +733,7 @@ func TestRetiredNamesReportRemovedTwinAgents(t *testing.T) {
 // TestRetiredNamesReportTheFlightsCut: every agent and command the flights
 // family cut retires is a hit with no successor, and the names beside them
 // that only share a prefix — the current foremen, gpt-foreman, /flights:doctor —
-// are none, nor is flights-speccer, which ships again (templates/global/agents).
+// are none, nor are flights-speccer and /flights:spec, which ship again.
 func TestRetiredNamesReportTheFlightsCut(t *testing.T) {
 	t.Parallel()
 	rows := []struct{ line, name, kind, successor string }{
@@ -742,7 +742,6 @@ func TestRetiredNamesReportTheFlightsCut(t *testing.T) {
 		{"hand it to flights-mechanical-executor", "flights-mechanical-executor", "agent", ""},
 		{"hand it to gpt-flights-mechanical-executor", "gpt-flights-mechanical-executor", "agent", ""},
 		{"gpt-flights-speccer writes the spec", "gpt-flights-speccer", "agent", ""},
-		{"run /flights:spec first", "/flights:spec", "command", ""},
 		{"run /flights:init once", "/flights:init", "command", ""},
 		{"run /flights:orchestrate-cross-harness on codex", "/flights:orchestrate-cross-harness", "command", ""},
 	}
@@ -757,6 +756,7 @@ func TestRetiredNamesReportTheFlightsCut(t *testing.T) {
 	}
 	content.WriteString("spawn flights-foreman, flights-foreman-sonnet or gpt-foreman; run /flights:doctor\n")
 	content.WriteString("flights-speccer writes the spec\n")
+	content.WriteString("run /flights:spec first\n")
 	writeRetiredFixture(t, root, map[string]string{"notes.md": content.String()})
 	scan := ScanRetiredNames(root, nil)
 	if len(scan.Failures) != 0 || !reflect.DeepEqual(scan.Hits, want) {

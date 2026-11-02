@@ -53,7 +53,7 @@ var retiredThisRelease = []struct{ line, name, kind, successor string }{
 	{"load /callmeter:ultimate-visualization", "/callmeter:ultimate-visualization", "skill", "/imagine"},
 	{"type /imagine:build to build it", "/imagine:build", "command", "/imagine"},
 	{"type /imagine:build-fast to build it", "/imagine:build-fast", "command", "/imagine"},
-	{"type /imagine:build-spec to spec it", "/imagine:build-spec", "command", flightsSuccessor},
+	{"type /imagine:build-spec to spec it", "/imagine:build-spec", "command", "/flights:spec"},
 	{"run /imagine:callmeter on the data", "/imagine:callmeter", "command", "/imagine"},
 	{`Agent(subagent_type: "imagine", prompt: "build it")`, `subagent_type: "imagine"`, "agent", "imaginator"},
 	{`Agent({subagent_type:"imagine"})`, `subagent_type:"imagine"`, "agent", "imaginator"},

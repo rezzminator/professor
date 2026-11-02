@@ -512,10 +512,17 @@ func (lister CommandPaneOwners) PaneOwners(
 	// Dir stays empty: socketPath is already the full pathname (lister.TmuxDir
 	// addresses a directory to SCAN for sockets, in paneOwners above — never a
 	// join prefix here), and filepath.Join("", full) returns full unchanged.
+	// A stopped server never answers: the probe is bounded, or one frozen server
+	// hangs every caller lookup on the box (claude-launch outside a pane).
+	probeCtx, cancel := context.WithTimeout(ctx, gather.ProbeTimeout)
+	defer cancel()
 	output, err := pfmtmux.Socket{Binary: lister.Binary}.
-		Command(ctx, socketPath, "list-panes", "-a", "-F", "#{pane_pid} #{pane_id}").
+		Command(probeCtx, socketPath, "list-panes", "-a", "-F", "#{pane_pid} #{pane_id}").
 		Output()
 	if err != nil {
+		if unresponsive := gather.Unresponsive(ctx, probeCtx, socketPath); unresponsive != nil {
+			return nil, unresponsive
+		}
 		return nil, err
 	}
 	owners := make([]PaneOwner, 0)

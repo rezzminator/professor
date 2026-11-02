@@ -2,11 +2,14 @@ package resolve
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
@@ -154,6 +157,24 @@ func TestTmuxListingsKeepEveryParsedPane(t *testing.T) {
 		if wantErr := `tmux returned 1 unparsable pane owner line(s), first "abc %1"`; err == nil ||
 			err.Error() != wantErr {
 			t.Fatalf("PaneOwners() error = %v, want %q", err, wantErr)
+		}
+	})
+	// A stopped tmux server never answers its client: the lookup costs that
+	// server alone, named, within the probe bound.
+	t.Run("pane owners on a stopped server", func(t *testing.T) {
+		binary := filepath.Join(t.TempDir(), "tmux")
+		if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexec sleep 60\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		started := time.Now()
+		owners, err := CommandPaneOwners{Binary: binary}.PaneOwners(context.Background(), "/sockets/cc-1")
+		elapsed := time.Since(started)
+		want := "tmux server did not answer within 2s: /sockets/cc-1"
+		if owners != nil || err == nil || err.Error() != want || !errors.Is(err, gather.ErrServerUnresponsive) {
+			t.Fatalf("PaneOwners() = %+v, %v; want nil, %q", owners, err, want)
+		}
+		if elapsed > 10*time.Second {
+			t.Fatalf("PaneOwners() took %s on a stopped server, want the %s probe bound", elapsed, gather.ProbeTimeout)
 		}
 	})
 }

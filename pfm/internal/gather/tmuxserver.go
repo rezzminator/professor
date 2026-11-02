@@ -82,13 +82,22 @@ func ProbePanes(ctx context.Context, binary, socketPath string) ([]ProbePane, er
 	return nil, err
 }
 
+// Unresponsive names a probe of socket that ran past its own ProbeTimeout
+// deadline while its caller's ctx was still live, nil for any other probe.
+func Unresponsive(ctx, probeCtx context.Context, socket string) error {
+	if ctx.Err() == nil && errors.Is(probeCtx.Err(), context.DeadlineExceeded) {
+		return fmt.Errorf("%w within %s: %s", ErrServerUnresponsive, ProbeTimeout, socket)
+	}
+	return nil
+}
+
 // classifyProbe reads one failed list-panes: past its own deadline the server
 // is unresponsive, tmux's words name a dead or an empty (alive) server, and
 // everything else is a probe that could not tell.
 func classifyProbe(ctx, probeCtx context.Context, err error, socket string) (ServerState, error) {
 	switch {
-	case ctx.Err() == nil && errors.Is(probeCtx.Err(), context.DeadlineExceeded):
-		return ServerUnresponsive, fmt.Errorf("%w within %s: %s", ErrServerUnresponsive, ProbeTimeout, socket)
+	case Unresponsive(ctx, probeCtx, socket) != nil:
+		return ServerUnresponsive, Unresponsive(ctx, probeCtx, socket)
 	case pfmtmux.CouldNotRun(err):
 		return ServerUnknown, fmt.Errorf("could not run tmux to probe %s: %w", socket, err)
 	case TmuxServerGone(err):

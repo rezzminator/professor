@@ -525,7 +525,6 @@ func TestEvaluateDoesNotReuseAReassignedAccountCache(t *testing.T) {
 				record.Backoff = &CacheBackoff{
 					Message:    "429 Too Many Requests",
 					RetryAfter: now.Add(time.Hour),
-					RecordedAt: now,
 				}
 			}
 			cachePath := CachePath(cacheDir, 2)
@@ -778,7 +777,6 @@ func TestEvaluateAgesTheCacheByFetchedAtNotFileMtime(t *testing.T) {
 				record.Backoff = &CacheBackoff{
 					Message:    "429 Too Many Requests",
 					RetryAfter: now.Add(time.Hour),
-					RecordedAt: now,
 				}
 			}
 			// WriteCacheRecord leaves mtime at "now" — exactly the state a

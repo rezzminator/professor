@@ -347,6 +347,24 @@ func TestCodexThreadResolverNamesAnUnreadableHome(t *testing.T) {
 	}
 }
 
+// A Codex home whose every state generation is unreadable leaves the
+// resolver no candidates, and says so: the pane still resolves by its id.
+func TestCodexThreadResolverNamesUnreadableThreads(t *testing.T) {
+	home := t.TempDir()
+	if err := os.WriteFile(filepath.Join(home, "state_5.sqlite"), []byte("not a database"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, recorder := obs.Test(t)
+	resolver := NewCodexThreadResolverRoots(ctx, []string{home}, nil)
+	if id, rollout := resolver("exported", "", 0, "", ""); id != "exported" || rollout != "" {
+		t.Fatalf("resolver = %q, %q; want the exported id with no rollout", id, rollout)
+	}
+	want := []string{"WARN: read Codex state: all 1 generation(s) were unreadable"}
+	if got := warnings(recorder, "store.codex_threads.unreadable"); !slices.Equal(got, want) {
+		t.Fatalf("records = %q, want %q\n%s", got, want, recorder.Raw())
+	}
+}
+
 // warnings renders each record named message as "LEVEL field… : err", the
 // named fields joined by spaces.
 func warnings(recorder *obs.Recorder, message string, fields ...string) []string {

@@ -77,7 +77,7 @@ func TestLaunchPassThroughPredicate(t *testing.T) {
 }
 
 func TestLaunchWorkbench(t *testing.T) {
-	for _, scenario := range []string{"new", "resume", "explicit", "invalid", "disabled", "disabled session id", "disabled resume", "outside", "version", "mcp", "unreadable primary"} {
+	for _, scenario := range []string{"new", "resume", "explicit", "invalid", "unknown effort", "disabled", "disabled session id", "disabled resume", "outside", "version", "mcp", "unreadable primary"} {
 		t.Run(scenario, func(t *testing.T) {
 			root := testjail.ShortRoot(t)
 			dir := filepath.Join(root, "acme", "docs", "scribe")
@@ -92,8 +92,16 @@ func TestLaunchWorkbench(t *testing.T) {
 				args = []string{"--effort", "low", "--system-prompt-file", "/work/alt.md"}
 				wantPrompt, wantEffort = "/work/alt.md", "low"
 			case "invalid":
+				// A persona that cannot resolve launches the chat without it, said.
 				manifest = `{"prompt":""}`
-				wantError = "pfm internal launch: " + paths.WorkbenchManifest(dir) + `: "prompt" is required` + "\n"
+				wantPrompt, wantEffort = "", ""
+				wantWarning = "pfm internal launch: workbench persona not applied (" + paths.WorkbenchManifest(dir) +
+					`: "prompt" is required); launching without it` + "\n"
+			case "unknown effort":
+				manifest = `{"prompt":"scribe.md","effort":"turbo"}`
+				wantEffort = ""
+				wantWarning = "pfm internal launch: workbench " + dir + `: unknown Claude effort "turbo" ` +
+					"(want low, medium, high, xhigh or max); launching the persona on the default effort\n"
 			case "disabled", "disabled session id", "disabled resume":
 				manifest = `{"prompt":"scribe.md","engines":["codex"],"effort":"xhigh"}`
 				if scenario == "disabled session id" {

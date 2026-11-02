@@ -183,8 +183,12 @@ func Run(
 	if renameErr != nil {
 		return result, renameErr
 	}
-	if err := untrustedFolderGuard(ctx, door, request, target); err != nil {
+	guardWarning, err := untrustedFolderGuard(ctx, door, request, target)
+	if err != nil {
 		return result, err
+	}
+	if guardWarning != "" {
+		result.Warnings = append(result.Warnings, guardWarning)
 	}
 	result.Named = warning == ""
 	if warning != "" {
@@ -213,8 +217,12 @@ func Run(
 		return result, nil
 	}
 	err = submitPrompt(ctx, door, target, request.Prompt, timings, trace)
-	if guardErr := untrustedFolderGuard(ctx, door, request, target); guardErr != nil {
+	promptGuard, guardErr := untrustedFolderGuard(ctx, door, request, target)
+	if guardErr != nil {
 		return result, guardErr
+	}
+	if promptGuard != "" && promptGuard != guardWarning {
+		result.Warnings = append(result.Warnings, promptGuard)
 	}
 	if err != nil {
 		result.Warnings = append(

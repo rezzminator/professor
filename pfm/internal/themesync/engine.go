@@ -1,6 +1,7 @@
 package themesync
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -453,7 +454,12 @@ func converge(ctx context.Context, env Env, store stateStore, state themeState, 
 	}
 	appearance, err := appearanceFor(ctx, env, source.applied)
 	if err != nil {
-		return Report{}, err
+		// An auto theme whose system side cannot be read keeps the side last
+		// applied (dark before any): the surfaces still follow the theme, and the
+		// claude row names why the side was not re-read.
+		appearance = cmp.Or(state.Appearance, Dark)
+		source.notes = append(source.notes,
+			fmt.Sprintf("system appearance unreadable, drawing %s: %v", appearance, err))
 	}
 	known := state.Enabled && state.Applied != nil
 	sourceMoved := !known || !reflect.DeepEqual(*state.Applied, source.applied)

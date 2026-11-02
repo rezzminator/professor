@@ -157,8 +157,9 @@ func ProfilePath(home, name string) string { return filepath.Join(ProfileDir(hom
 func ParseProfile(content []byte) (Profile, error) { return decodeProfile(content, true) }
 
 // decodeProfile is ParseProfile; authoring false reads a profile already
-// installed: its pins are left to keepPins, which drops a key no renderer emits
-// any more where authoring refuses it.
+// installed: its palette is left to Claude's own file (resolveCustom, which sets
+// aside what it cannot read) and its pins to keepPins, which drops a key no
+// renderer emits any more where authoring refuses it.
 func decodeProfile(content []byte, authoring bool) (Profile, error) {
 	decoder := json.NewDecoder(bytes.NewReader(content))
 	decoder.DisallowUnknownFields()
@@ -169,10 +170,10 @@ func decodeProfile(content []byte, authoring bool) (Profile, error) {
 	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
 		return Profile{}, errors.New("parse profile: data after the top-level value")
 	}
-	if err := validatePalette(profile); err != nil {
-		return Profile{}, fmt.Errorf("profile %s: %w", profile.Name, err)
-	}
 	if authoring {
+		if err := validatePalette(profile); err != nil {
+			return Profile{}, fmt.Errorf("profile %s: %w", profile.Name, err)
+		}
 		if err := validatePins(profile.Surfaces); err != nil {
 			return Profile{}, fmt.Errorf("profile %s: %w", profile.Name, err)
 		}
@@ -197,6 +198,20 @@ func validatePalette(profile Profile) error {
 		}
 	}
 	return nil
+}
+
+// unknownOverrideNotes names each override key claude_token_ids.txt does not
+// list: a token a later Claude release added is kept, only this build cannot
+// vouch for it.
+func unknownOverrideNotes(profile Profile) []string {
+	var notes []string
+	for _, key := range slices.Sorted(maps.Keys(profile.Overrides)) {
+		if !claudeTokens[key] {
+			notes = append(notes, fmt.Sprintf(
+				"overrides %q: not a Claude Code theme token this pfm build knows (kept)", key))
+		}
+	}
+	return notes
 }
 
 // ClaudeFile is the profile as Claude Code's theme file: content verbatim

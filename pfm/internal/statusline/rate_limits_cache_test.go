@@ -113,7 +113,6 @@ func TestMissingMainWindowsUseUsageCacheWithoutReconfirmingIt(t *testing.T) {
 				record.Backoff = &usagehook.CacheBackoff{
 					Message:    "429",
 					RetryAfter: now.Add(time.Minute),
-					RecordedAt: now,
 				}
 			case "invalid":
 				record.FiveHour.ResetsAt = "not-a-time"

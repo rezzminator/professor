@@ -318,6 +318,40 @@ func TestNewSessionFailedLaunchKeepsOnlyUnresolvedClaims(t *testing.T) {
 	}
 }
 
+// TestNewSessionAsksForTheLaunchPanePidAgain: a freshly born pane that answers
+// the pid query once with nothing is asked again; the launch is recorded under
+// the pid the second answer names and the server is kept.
+func TestNewSessionAsksForTheLaunchPanePidAgain(t *testing.T) {
+	account, dir := t.TempDir(), t.TempDir()
+	binary := filepath.Join(dir, "tmux")
+	asked := filepath.Join(dir, "asked")
+	script := "#!/bin/sh\nfor a in \"$@\"; do\n case \"$a\" in\n new-session) exit 0;;\n" +
+		" display-message) if [ -e " + asked + " ]; then echo $PPID; else : > " + asked + "; fi; exit 0;;\n esac\ndone\nexit 0\n"
+	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	err := (TmuxSpawner{Binary: binary, TmuxDir: dir}).NewSession(context.Background(), SessionSpec{
+		Socket: "retry", Session: "retry", Window: "w", CWD: dir,
+		Run: "env CLAUDE_CONFIG_DIR=" + account + " claude --resume example",
+	})
+	if err != nil {
+		t.Fatalf("NewSession ended a server whose pane answered the second pid query: %v", err)
+	}
+	guard, err := gather.AcquireAccountGuard(account, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := guard.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	live, err := guard.Active(gather.NewProcFS(""))
+	if err != nil || len(live) != 1 || live[0] != os.Getpid() {
+		t.Fatalf("recorded launch = %v, %v; want the pid the second answer named, %d", live, err, os.Getpid())
+	}
+}
+
 // themeBirthCase is one birth of a chat server with the theme door observed.
 type themeBirthCase struct {
 	name       string

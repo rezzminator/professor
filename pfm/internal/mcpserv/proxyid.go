@@ -34,7 +34,6 @@ type ProxyIdentity struct {
 	Pane           string              `json:"pane,omitempty"`
 	Engine         string              `json:"engine,omitempty"`
 	ID             string              `json:"id,omitempty"`
-	Source         string              `json:"source,omitempty"`
 }
 
 // parseProxyIdentity decodes the untyped JSON object carried in

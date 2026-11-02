@@ -129,6 +129,10 @@ func warnRefresh(stderr io.Writer, prices pricing.Prices, result modelcost.Resul
 	if result.StampErr != nil {
 		fmt.Fprintf(stderr, "pfm model-cost: warning: price check stamp: %v\n", result.StampErr)
 	}
+	if len(result.Carried) > 0 {
+		fmt.Fprintf(stderr, "pfm model-cost: warning: the fetched pages price these models in a way "+
+			"the parser cannot fold, keeping their previous rows: %s\n", strings.Join(result.Carried, ", "))
+	}
 	if prices.FileError != nil {
 		fmt.Fprintf(stderr, "pfm model-cost: warning: the clone's prices file is unusable, serving the %s table: %v\n",
 			prices.From, prices.FileError)

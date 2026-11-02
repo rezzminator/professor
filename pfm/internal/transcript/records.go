@@ -10,11 +10,11 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/pyvalue"
 )
 
-// decodeTolerant is json.Unmarshal that lets a member of another type than its
+// DecodeTolerant is json.Unmarshal that lets a member of another type than its
 // field's read as absent: Unmarshal decodes the rest and reports the first such
 // member, which is no failure of the line. Only a line that is no JSON, whose
 // decode stops, is an error.
-func decodeTolerant(data []byte, into any) error {
+func DecodeTolerant(data []byte, into any) error {
 	err := json.Unmarshal(data, into)
 	if odd := (*json.UnmarshalTypeError)(nil); errors.As(err, &odd) {
 		return nil

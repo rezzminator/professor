@@ -56,7 +56,7 @@ func resolveResumeTarget(target string, runtimes ...commandRuntime) (resumeTarge
 		return resumeTarget{}, false, fmt.Errorf("stat transcript target %q: %w", target, err)
 	}
 
-	files, err := pfmchat.ClaudeTranscripts(firstRuntime(runtimes))
+	files, skipped, err := pfmchat.ClaudeTranscripts(firstRuntime(runtimes))
 	if err != nil {
 		return resumeTarget{}, false, err
 	}
@@ -76,11 +76,13 @@ func resolveResumeTarget(target string, runtimes ...commandRuntime) (resumeTarge
 		if len(matches) == 0 {
 			matches = prefix
 		}
-		switch len(matches) {
-		case 1:
+		switch {
+		case len(matches) == 1 && len(exact) == 0 && skipped > 0:
+			return resumeTarget{}, false, fmt.Errorf("session id prefix %q: %d transcript project director(ies) "+
+				"could not be read, so the match may not be unique; give the full session id", target, skipped)
+		case len(matches) == 1:
 			return matches[0], true, nil
-		case 0:
-		default:
+		case len(matches) > 1:
 			return resumeTarget{}, false, fmt.Errorf(
 				"session id %q is ambiguous across %d transcripts",
 				target,
@@ -95,7 +97,7 @@ func resolveResumeTarget(target string, runtimes ...commandRuntime) (resumeTarge
 	matches, err := pfmchat.Find(
 		context.Background(),
 		firstRuntime(runtimes),
-		pfmchat.FindRequest{Excerpt: target, Self: pfmchat.AskingSession()},
+		pfmchat.FindRequest{Excerpt: target, Self: pfmchat.AskingSession(), Complete: true},
 	)
 	if err != nil {
 		if errors.Is(err, pfmchat.ErrNoExcerptMatch) || errors.Is(err, pfmchat.ErrNoTranscriptRegistry) {

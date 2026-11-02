@@ -113,6 +113,35 @@ func parseOutput(result *Result, request Request) error {
 	return nil
 }
 
+// codexItem is the part of a Codex item.completed event pfm reads.
+type codexItem struct {
+	Type    string `json:"type"`
+	Text    string `json:"text"`
+	Message string `json:"message"`
+}
+
+// lenientField reads one key of an engine part whose whole decode failed: a missing or mistyped
+// value is that field unknown, never the part lost.
+func lenientField[T any](fields map[string]json.RawMessage, key string) T {
+	var value T
+	_ = json.Unmarshal(fields[key], &value) // a value that does not fit leaves the zero value
+	return value
+}
+
+// lenientText is the model's text in a part whose whole decode failed: a string as written, any
+// other value as its JSON text (the rule the Claude result follows), absent as empty.
+func lenientText(fields map[string]json.RawMessage, key string) string {
+	raw := fields[key]
+	if len(raw) == 0 || string(raw) == jsonNull {
+		return ""
+	}
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		return text
+	}
+	return string(raw)
+}
+
 func parseCodexJSONL(result *Result, request Request) error {
 	var terminal bool
 	for lineNo, line := range strings.Split(result.Stdout, "\n") {
@@ -164,15 +193,21 @@ func parseCodexJSONL(result *Result, request Request) error {
 					fmt.Sprintf("Codex usage in event %d", lineNo+1), err)
 			}
 		case "item.completed":
-			var item struct {
-				Type    string `json:"type"`
-				Text    string `json:"text"`
-				Message string `json:"message"`
-			}
+			var item codexItem
 			if err := json.Unmarshal(event.Item, &item); err != nil {
-				result.noteUnreadable(
-					fmt.Sprintf("Codex completed item in event %d", lineNo+1), err)
-				continue
+				var fields map[string]json.RawMessage
+				if json.Unmarshal(event.Item, &fields) != nil {
+					result.noteUnreadable(
+						fmt.Sprintf("Codex completed item in event %d", lineNo+1), err)
+					continue
+				}
+				// one mistyped field costs that field: the item's text and type are read on their own
+				result.noteUnreadable(fmt.Sprintf("Codex completed item in event %d, whole; "+
+					"its readable fields were kept", lineNo+1), err)
+				item = codexItem{
+					Type: lenientField[string](fields, "type"), Text: lenientText(fields, "text"),
+					Message: lenientField[string](fields, "message"),
+				}
 			}
 			if item.Type == "agent_message" {
 				result.Answer = item.Text

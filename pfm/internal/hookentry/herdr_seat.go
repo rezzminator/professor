@@ -116,11 +116,12 @@ func (reporter *herdrReporter) nativeSeat(ctx context.Context, payload herdrPayl
 	if reporter.options.engine == pfmengine.Claude && (action != nil || reporter.options.event == herdr.EventStart) {
 		processes, err := reporter.deps.shield.Read(ctx, seat.HerdrSocket, seat.HerdrPane)
 		if err != nil {
-			return true, fmt.Errorf(
-				"native Claude seat %s: read pane %s foreground: %w", seat.SeatID, seat.HerdrPane, err,
-			)
+			// The read only picks the report's source: an unread pane still gets the state, under pfm's own.
+			reporter.warn("pfm internal herdr-state %s: native Claude seat %s: read pane %s foreground "+
+				"(any report goes under pfm's own source): %v", reporter.options.event, seat.SeatID, seat.HerdrPane, err)
+		} else {
+			detected = processes.Holder == nil
 		}
-		detected = processes.Holder == nil
 	}
 	if detected && reporter.options.event == herdr.EventStart && action == nil {
 		// Compaction/fork still refresh session metadata, never lifecycle state.

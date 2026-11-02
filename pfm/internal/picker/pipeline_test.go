@@ -34,6 +34,7 @@ type slowIndexRunner struct {
 type immediateIndexRunner struct {
 	mutex   sync.Mutex
 	options []fleetindex.Options
+	err     error // what every pass answers beside its empty counters
 }
 
 func TestCanceledPickerRefreshExitsWithoutReportingARefreshFailure(t *testing.T) {
@@ -77,7 +78,66 @@ func (runner *immediateIndexRunner) Run(
 	runner.mutex.Lock()
 	runner.options = append(runner.options, options)
 	runner.mutex.Unlock()
-	return fleetindex.Counters{}, nil
+	return fleetindex.Counters{}, runner.err
+}
+
+// A pass in which one engine failed and the rest indexed warns and goes on
+// listing: the stream neither stops nor reports a refresh failure.
+func TestPickerRefreshStreamWarnsOnAPartialIndexAndKeepsRefreshing(t *testing.T) {
+	shortenRefreshIntervals(t)
+	jailTest(t)
+	database, err := store.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	updates := make(chan ui.Snapshot, 1)
+	var stderr bytes.Buffer
+	var warned []string
+	var warnedMutex sync.Mutex
+	runner := &immediateIndexRunner{err: &fleetindex.PartialError{
+		Failures: []error{errors.New("index engine oc: store unreadable")},
+	}}
+	go streamFleetRefreshesWith(
+		ctx,
+		database,
+		scanRequest{},
+		func(warning string) {
+			warnedMutex.Lock()
+			warned = append(warned, warning)
+			warnedMutex.Unlock()
+		},
+		&stderr,
+		updates,
+		refreshDependencies{newIndexer: func(*store.Store) (indexRunner, error) { return runner, nil }},
+	)
+	published := 0
+	for snapshot := range updates {
+		if !snapshot.Refreshing {
+			published++
+		}
+		if published == 3 {
+			break
+		}
+	}
+	cancel()
+	for range updates {
+	}
+	warnedMutex.Lock()
+	defer warnedMutex.Unlock()
+	if len(warned) == 0 || warned[0] != "project index: index engine oc: store unreadable" || stderr.Len() != 0 {
+		t.Fatalf(
+			"warnings %q, stderr %q; want the partial index warned first and no refresh failure",
+			warned,
+			stderr.String(),
+		)
+	}
 }
 
 func TestPickerRefreshStreamRepeatsAtTheBaseInterval(t *testing.T) {

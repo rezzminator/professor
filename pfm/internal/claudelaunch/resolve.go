@@ -21,7 +21,7 @@ type Resolved struct {
 func Resolve(machine pfmconfig.Config, account int) []Resolved {
 	prefs := machine.Claude
 	accountIndex := -1
-	overrides := accountOverrideKeys(machine.Path, account)
+	overrides, overridesErr := accountOverrideKeys(machine.Path, account)
 	if account != 0 {
 		prefs = machine.EffectiveClaude(account)
 		for index, candidate := range machine.Accounts {
@@ -55,13 +55,18 @@ func Resolve(machine pfmconfig.Config, account int) []Resolved {
 		case SourceConfig, SourceLaunchThenConfig:
 			row.Value = configValue(knob.Name, prefs, machine)
 			key := "claude." + knob.Name
+			// Unread override keys fall back to a value differing from the machine's, and say so.
 			if accountIndex >= 0 &&
-				(overrides[knob.Name] || machine.Source(fmt.Sprintf("accounts[%d].claude.%s", accountIndex, knob.Name)) == pfmconfig.SourceFile) {
+				(overrides[knob.Name] || machine.Source(fmt.Sprintf("accounts[%d].claude.%s", accountIndex, knob.Name)) == pfmconfig.SourceFile ||
+					(overridesErr != nil && row.Value != configValue(knob.Name, machine.Claude, machine))) {
 				row.Won = accountWord
 			} else if machine.Source(
 				key,
 			) == pfmconfig.SourceFile {
 				row.Won = "config"
+			}
+			if accountIndex >= 0 && overridesErr != nil {
+				row.Won += " (" + overridesErr.Error() + ")"
 			}
 		case SourceHost:
 			row.Value, row.Won = shellValue()
@@ -91,36 +96,42 @@ func Resolve(machine pfmconfig.Config, account int) []Resolved {
 
 // The config decoder records sources for most account fields, but not the
 // simple string fields. Presence is needed when an override equals its parent.
-func accountOverrideKeys(path string, account int) map[string]bool {
+// An account with no claude block overrides nothing; a document that cannot be
+// read is an error, never an empty override set.
+func accountOverrideKeys(path string, account int) (map[string]bool, error) {
 	if path == "" || account == 0 {
-		return nil
+		return nil, nil
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("account overrides unread: %w", err)
 	}
 	var document struct {
 		Accounts []map[string]json.RawMessage `json:"accounts"`
 	}
 	if err := json.Unmarshal(raw, &document); err != nil {
-		return nil
+		return nil, fmt.Errorf("account overrides unread: decode %s: %w", path, err)
 	}
 	for _, entry := range document.Accounts {
 		var id int
 		if err := json.Unmarshal(entry["id"], &id); err != nil || id != account {
 			continue
 		}
+		block, found := entry[pfmengine.MustLookup(pfmengine.Claude).LongName]
+		if !found {
+			return nil, nil
+		}
 		var overrides map[string]json.RawMessage
-		if err := json.Unmarshal(entry[pfmengine.MustLookup(pfmengine.Claude).LongName], &overrides); err != nil {
-			return nil
+		if err := json.Unmarshal(block, &overrides); err != nil {
+			return nil, fmt.Errorf("account overrides unread: decode account %d of %s: %w", account, path, err)
 		}
 		keys := make(map[string]bool, len(overrides))
 		for key := range overrides {
 			keys[key] = true
 		}
-		return keys
+		return keys, nil
 	}
-	return nil
+	return nil, nil
 }
 
 func configValue(name string, prefs pfmconfig.ClaudePrefs, machine pfmconfig.Config) string {

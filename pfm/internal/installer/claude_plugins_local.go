@@ -144,17 +144,24 @@ func (installer *engine) ensureClaudePluginCopy(target *ClaudePluginTarget) erro
 		return err
 	}
 	if !current {
+		message, backup := "add "+target.Name+" to "+manifestPath, ""
+		if manifest.Name != pfmconfig.ProfessorMarketplace {
+			// A manifest that does not parse or names another marketplace is
+			// rewritten whole: its bytes are kept beside it first.
+			if _, err := os.Lstat(manifestPath); err == nil {
+				backup = availableBackup(manifestPath, installer.stamp)
+				message += "; the manifest it replaces kept as " + backup
+			} else if !errors.Is(err, fs.ErrNotExist) {
+				return fmt.Errorf("inspect %s: %w", manifestPath, err)
+			}
+		}
 		// Every other plugin's entry stays: each target adds its own.
 		manifest.Name = pfmconfig.ProfessorMarketplace
 		manifest.Owner = &devMarketplaceOwner{Name: claudePluginOwner, URL: "https://github.com/" + claudePluginOwner}
 		manifest.Plugins = append(slices.DeleteFunc(manifest.Plugins, func(entry devMarketplaceEntry) bool {
 			return entry.Name == target.Name
 		}), devMarketplaceEntry{Name: target.Name, Source: "./plugins/" + target.Name})
-		if err := installer.writeDevMarketplaceManifest(
-			"add "+target.Name+" to "+manifestPath,
-			manifestPath,
-			manifest,
-		); err != nil {
+		if err := installer.writeDevMarketplaceManifest(message, manifestPath, backup, manifest); err != nil {
 			return err
 		}
 	}
@@ -172,13 +179,23 @@ func (installer *engine) ensureClaudePluginCopy(target *ClaudePluginTarget) erro
 
 // writeDevMarketplaceManifest is the one writer of the local professor
 // marketplace's manifest at path: manifest, indented, as one change line
-// message.
-func (installer *engine) writeDevMarketplaceManifest(message, path string, manifest devMarketplaceManifest) error {
+// message, the current file copied to backup first when backup is set.
+func (installer *engine) writeDevMarketplaceManifest(
+	message, path, backup string,
+	manifest devMarketplaceManifest,
+) error {
 	raw, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode %s: %w", path, err)
 	}
-	return installer.change(message, func() error { return atomicfile.Write(path, append(raw, '\n'), 0o644) })
+	return installer.change(message, func() error {
+		if backup != "" {
+			if err := copyBackup(path, backup); err != nil {
+				return fmt.Errorf("back up %s: %w", path, err)
+			}
+		}
+		return atomicfile.Write(path, append(raw, '\n'), 0o644)
+	})
 }
 
 // devMarketplaceCurrent reads the local professor marketplace's manifest at

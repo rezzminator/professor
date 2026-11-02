@@ -187,14 +187,13 @@ func runRun(
 		ctx = pfmchat.WithWorkbenchNameReservation(ctx, auto)
 	}
 	defer pfmchat.ReleaseUnusedWorkbenchName(ctx, *name, stderr)
-	persona, err := workbench.ForLaunch(directory, engineName, workbench.New)
+	persona, personaWarnings, err := action.LaunchPersona(directory, engineName, workbench.New)
 	if err != nil {
-		// Only the workbench's own "does not enable this engine" stays a refusal.
-		if bench, found, _ := workbench.Nearest(directory); found && bench.Err == nil && !bench.Enables(engineName) {
-			fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
-			return 2
-		}
-		fmt.Fprintf(stderr, "pfm chat new: %v; starting without the workbench persona\n", err)
+		fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
+		return 2
+	}
+	if engineName != pfmengine.OpenCode { // OpenCode's plan reads the persona again and reports it
+		launchnotice.Print(stderr, "pfm chat new", personaWarnings)
 	}
 	harnessPath, harnessBody, err := agentrole.LoadHarnessPromptFor(engineName, *harnessPrompt)
 	if err != nil {
@@ -258,11 +257,8 @@ func runRun(
 		fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
 		return 2
 	}
-	if engineName == pfmengine.Codex && persona.Applies() {
-		if err := workbench.EnsureMirror(persona.Bench, engineName, resolved.Home); err != nil {
-			fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
-			return 2
-		}
+	if engineName == pfmengine.Codex {
+		launchnotice.Print(stderr, "pfm chat new", action.PersonaMirror(persona, engineName, resolved.Home))
 	}
 	plan, err := action.HeadlessRun(action.HeadlessRequest{
 		Engine:         engineName,

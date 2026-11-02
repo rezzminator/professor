@@ -261,7 +261,17 @@ func (installer *engine) linkVSCodeExtension(recorded []string) ([]string, error
 	for _, target := range ordered {
 		extensionsDir := filepath.Dir(target)
 		root := filepath.Dir(extensionsDir)
-		if info, err := os.Stat(root); err != nil || !info.IsDir() {
+		info, statErr := os.Stat(root)
+		if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+			// Could not look is not gone: keep the record, name the error.
+			installer.skip(target + " VS Code product " + root + " could not be checked: " +
+				statErr.Error() + "; extension link record kept")
+			if recordedSet[target] {
+				kept = append(kept, target)
+			}
+			continue
+		}
+		if statErr != nil || !info.IsDir() {
 			installer.skip(target + " VS Code product " + root + " no longer exists; dropped extension link")
 			continue
 		}

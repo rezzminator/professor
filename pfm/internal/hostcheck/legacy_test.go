@@ -354,4 +354,14 @@ func TestRetiredHarvesterConfig(t *testing.T) {
 		makeDir(t, path)
 		assertUnreadable(t, detect(t, check, env), check, path, syscall.EISDIR)
 	})
+	t.Run("config-unparsable", func(t *testing.T) {
+		env := fixtureEnv(t)
+		writeFile(t, env.ConfigPath, `{"mcp":{"servers":[`)
+		assertRows(t, detect(t, check, env), Row{
+			Warn, check, env.ConfigPath,
+			"cannot parse " + env.ConfigPath + ": unexpected end of JSON input" +
+				" — whether it carries a retired mcp.servers.harvester entry is unknown",
+			"repair the JSON in " + env.ConfigPath + ", then rerun pfm doctor",
+		})
+	})
 }

@@ -210,7 +210,17 @@ func targetClient(
 	if !found && target.ID != "" {
 		candidate, ok, lookupErr := database.Shared().SeatBySession(ctx, target.ID)
 		if lookupErr != nil {
-			return nil, false, fmt.Errorf("resolve moved kill seat: %w", lookupErr)
+			// The same degraded-lookup door as the pane read above: an explicit
+			// pfm tmux address goes on, warned; any other address stays refused.
+			if fallbackErr := warnTmuxSeatFallback(
+				tmuxDir,
+				target,
+				log,
+				fmt.Errorf("resolve moved kill seat: %w", lookupErr),
+			); fallbackErr != nil {
+				return nil, false, fallbackErr
+			}
+			return fallback, false, nil
 		}
 		if ok && candidate.Backend == herdrBackend && candidate.HerdrSocket == target.SocketPath {
 			seat, found = candidate, true

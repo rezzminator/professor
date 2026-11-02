@@ -20,12 +20,13 @@ import (
 const viewportUID = 501
 
 type fakeClientLister struct {
-	pids []int
-	err  error
+	pids    []int
+	skipped []string
+	err     error
 }
 
-func (lister fakeClientLister) ClientPIDs(context.Context, string) ([]int, error) {
-	return lister.pids, lister.err
+func (lister fakeClientLister) ClientPIDs(context.Context, string) ([]int, []string, error) {
+	return lister.pids, lister.skipped, lister.err
 }
 
 // rereadTable runs onReread when a pid's Stat is read a second time: the
@@ -59,6 +60,7 @@ func TestCloseTerminals(t *testing.T) {
 	for _, test := range []struct {
 		name        string
 		clients     []int
+		unread      []string
 		processes   map[int]*gathertest.Process
 		self        int
 		onReread    func(table *gathertest.Table, pid int)
@@ -222,6 +224,11 @@ func TestCloseTerminals(t *testing.T) {
 			clients:     nil,
 			wantSkipped: []string{"no client attached — chat was not being watched"},
 		},
+		{
+			name:        "an unreadable client line is named, never read as no client",
+			unread:      []string{`client pid "x" unreadable: bad`},
+			wantSkipped: []string{`client pid "x" unreadable: bad`},
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			table := &gathertest.Table{Processes: test.processes}
@@ -243,7 +250,7 @@ func TestCloseTerminals(t *testing.T) {
 			}
 			procs := rereadTable{Table: table, reads: map[int]int{}, onReread: test.onReread}
 			closed, skipped, err := CloseTerminals(context.Background(), "socket", ViewportDeps{
-				Tmux: fakeClientLister{pids: test.clients},
+				Tmux: fakeClientLister{pids: test.clients, skipped: test.unread},
 				Door: gathertest.Door(procs, kernel, viewportUID, self),
 			})
 			if err != nil {
@@ -290,6 +297,17 @@ func TestCloseTerminalsRequiresAllThreeSeams(t *testing.T) {
 	}
 }
 
+func TestParseClientPIDsSkipsOnlyTheUnreadableLine(t *testing.T) {
+	pids, skipped := parseClientPIDs("101\nnot-a-pid\n\n102\n")
+	if !reflect.DeepEqual(pids, []int{101, 102}) {
+		t.Fatalf("pids = %v, want [101 102]", pids)
+	}
+	want := []string{`client pid "not-a-pid" unreadable: strconv.Atoi: parsing "not-a-pid": invalid syntax`}
+	if !reflect.DeepEqual(skipped, want) {
+		t.Fatalf("skipped = %#v, want %#v", skipped, want)
+	}
+}
+
 // TestCommandTmuxClientPIDsRealServer pins the real `tmux list-clients`
 // parse: no client attached reports an empty slice with no error, and a real
 // attached client reports its own live pid.
@@ -305,7 +323,7 @@ func TestCommandTmuxClientPIDsRealServer(t *testing.T) {
 	jail.sockets = append(jail.sockets, socket)
 	socketPath := jail.tmuxDir + "/" + socket
 
-	pids, err := (TmuxKiller{}).ClientPIDs(ctx, socketPath)
+	pids, _, err := (TmuxKiller{}).ClientPIDs(ctx, socketPath)
 	if err != nil {
 		t.Fatalf("ClientPIDs before attach: %v", err)
 	}
@@ -335,7 +353,7 @@ func TestCommandTmuxClientPIDsRealServer(t *testing.T) {
 
 	var pidsAfter []int
 	for attempt := 0; attempt < 50; attempt++ {
-		pidsAfter, err = (TmuxKiller{}).ClientPIDs(ctx, socketPath)
+		pidsAfter, _, err = (TmuxKiller{}).ClientPIDs(ctx, socketPath)
 		if err != nil {
 			t.Fatalf("ClientPIDs after attach: %v", err)
 		}

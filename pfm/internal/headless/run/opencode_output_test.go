@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
@@ -98,7 +101,7 @@ func TestParseOpenCodeJSONLKeepsWhatItCouldRead(t *testing.T) {
 		{
 			name: "unreadable line, typeless event, text part and converter diagnostic",
 			body: strings.Join([]string{
-				"not-json", `{"part":{}}`, `{"type":"text","part":{"text":7}}`,
+				"not-json", `{"part":{}}`, `{"type":"text","part":"stray"}`,
 				`{"type":"pfm.unreadable","message":"could not read an OpenCode run message part: bad"}`,
 				text, finish("stop"),
 			}, "\n"),
@@ -106,8 +109,26 @@ func TestParseOpenCodeJSONLKeepsWhatItCouldRead(t *testing.T) {
 			diagnostics: []string{
 				"could not read OpenCode JSONL event 1: invalid character 'o' in literal null (expecting 'u')",
 				"could not read OpenCode JSONL event 2: the event has no type",
-				"could not read OpenCode text event 3: json: cannot unmarshal number into Go struct field .text of type string",
+				"could not read OpenCode text event 3: json: cannot unmarshal string into Go value of type run.openCodeTextPart",
 				"could not read an OpenCode run message part: bad",
+			},
+		},
+		{
+			name: "a text part with a mistyped time keeps its text",
+			body: `{"type":"text","part":{"id":"p1","messageID":"m1","text":"kept","time":{"end":"soon"}}}` +
+				"\n" + finish("stop"),
+			answer: "kept", usage: &TokenUsage{Input: 4, Output: 2}, cost: cost(0.25),
+			diagnostics: []string{
+				"could not read OpenCode text event 1, whole; its readable fields were kept: json: cannot unmarshal string into Go struct field openCodeTextPart.time.end of type int64",
+			},
+		},
+		{
+			name: "a text part whose text is not a string keeps its JSON as the text",
+			body: `{"type":"text","part":{"id":"p1","messageID":"m1","text":{"parts":["raw"]}}}` +
+				"\n" + finish("stop"),
+			answer: `{"parts":["raw"]}`, usage: &TokenUsage{Input: 4, Output: 2}, cost: cost(0.25),
+			diagnostics: []string{
+				"could not read OpenCode text event 1, whole; its readable fields were kept: json: cannot unmarshal object into Go struct field openCodeTextPart.text of type string",
 			},
 		},
 		{
@@ -205,5 +226,54 @@ func TestOpenCodeMessageConversionSkipsAnUnreadablePart(t *testing.T) {
 	}
 	if !reflect.DeepEqual(result.Diagnostics, want) {
 		t.Fatalf("diagnostics = %#v, want %#v", result.Diagnostics, want)
+	}
+}
+
+// The plugin writes the assistant marker atomically, so an unreadable one is read again on the
+// next tick; only a wait that ends on it names the decode failure.
+func TestCollectOpenCodeRunOutputReadsAnUnreadableMarkerAgain(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "assistants.json")
+	if err := os.WriteFile(marker, []byte(`{"sessionID":`), 0o600); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+	collect := func(ctx context.Context, fake *clock.Fake) (<-chan string, <-chan error) {
+		output, failure, done := make(chan string, 1), make(chan error, 1), make(chan struct{})
+		go func() {
+			got, err := collectOpenCodeRunOutput(ctx, "", "", nil, marker, Request{Clock: fake})
+			output <- got
+			failure <- err
+			close(done)
+		}()
+		for fake.Pending() == 0 { // the collector waits on its first tick, unless it already returned
+			select {
+			case <-done:
+				return output, failure
+			case <-time.After(time.Millisecond):
+			}
+		}
+		return output, failure
+	}
+
+	fake := clock.NewFake(time.Unix(0, 0))
+	output, failure := collect(context.Background(), fake)
+	if err := os.WriteFile(marker, []byte(`{"sessionID":"s","error":{"message":"quota"}}`), 0o600); err != nil {
+		t.Fatalf("rewrite marker: %v", err)
+	}
+	fake.Advance(50 * time.Millisecond)
+	if got, err := <-output, <-failure; err != nil || got != `{"error":{"message":"quota"},"type":"error"}`+"\n" {
+		t.Fatalf("collect after the marker was rewritten = %q, %v", got, err)
+	}
+
+	if err := os.WriteFile(marker, []byte(`{"sessionID":`), 0o600); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	fake = clock.NewFake(time.Unix(0, 0))
+	output, failure = collect(ctx, fake)
+	cancel()
+	if got, err := <-output, <-failure; got != "" || err == nil ||
+		err.Error() != "wait for OpenCode run result: context canceled\n"+
+			"decode OpenCode assistant marker: unexpected end of JSON input" {
+		t.Fatalf("collect on a marker that stays unreadable = %q, %v", got, err)
 	}
 }

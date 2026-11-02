@@ -490,6 +490,13 @@ func (reader *tabViewReader) views(
 			for _, pane := range panes {
 				if pane.Terminal == old.Terminal {
 					matches, err := tabPaneSession(pane, target)
+					if errors.Is(err, errUnusableTabClaim) {
+						// The terminal is the one this chat's tab proved: an unreadable claim vetoes nothing.
+						if err := reader.warnUnusableClaim(target, pane, err); err != nil {
+							return nil, err
+						}
+						matches, err = true, nil
+					}
 					if err != nil {
 						return nil, err
 					}
@@ -525,7 +532,16 @@ func (reader *tabViewReader) views(
 	var stored herdr.Stored
 	if strings.TrimSpace(raw) != "" {
 		if err := json.Unmarshal([]byte(raw), &stored); err != nil {
-			return nil, fmt.Errorf("decode tab client mappings: %w", err)
+			// A mapping pfm cannot read is rebuilt from the live clients, which the bridge proof checks.
+			if _, writeErr := fmt.Fprintf(
+				reader.warn,
+				"Herdr tab client mappings of %s unreadable (%v); using the live clients\n",
+				target.ID,
+				err,
+			); writeErr != nil {
+				return nil, fmt.Errorf("persist tab client mappings failure: %w", errors.Join(err, writeErr))
+			}
+			stored = herdr.Stored{}
 		}
 	}
 	if stored.SessionID != "" && stored.SessionID != target.ID {
@@ -666,16 +682,34 @@ func (reader *tabViewReader) staleTabClaim(ctx context.Context, pane herdr.TabPa
 	return found && claimed.HerdrTerminalID != "" && claimed.HerdrTerminalID != pane.Terminal, nil
 }
 
+// errUnusableTabClaim marks an agent_session pfm cannot read (undecodable,
+// valueless or of an unknown kind): it proves nothing and vetoes nothing.
+var errUnusableTabClaim = errors.New("unusable tab agent_session")
+
+// warnUnusableClaim names a pane's unusable claim, which never stops its tab.
+func (reader *tabViewReader) warnUnusableClaim(target headless.Chat, pane herdr.TabPane, claimErr error) error {
+	if _, err := fmt.Fprintf(
+		reader.warn,
+		"Herdr tab %s of %s: %v; the pane's terminal proves it\n",
+		pane.Tab,
+		target.ID,
+		claimErr,
+	); err != nil {
+		return fmt.Errorf("persist tab claim failure: %w", errors.Join(claimErr, err))
+	}
+	return nil
+}
+
 func tabPaneSession(pane herdr.TabPane, target headless.Chat) (bool, error) {
 	if len(pane.Session) == 0 || string(pane.Session) == "null" {
 		return false, nil
 	}
 	var session struct{ Kind, Value string }
 	if err := json.Unmarshal(pane.Session, &session); err != nil {
-		return false, fmt.Errorf("decode tab agent_session: %w", err)
+		return false, fmt.Errorf("%w: decode: %w", errUnusableTabClaim, err)
 	}
 	if session.Value == "" {
-		return false, fmt.Errorf("incomplete tab agent_session: %s", pane.Session)
+		return false, fmt.Errorf("%w: incomplete: %s", errUnusableTabClaim, pane.Session)
 	}
 	switch session.Kind {
 	case "id":
@@ -686,7 +720,7 @@ func tabPaneSession(pane herdr.TabPane, target headless.Chat) (bool, error) {
 		}
 		return filepath.Clean(session.Value) == filepath.Clean(target.Path), nil
 	default:
-		return false, fmt.Errorf("unsupported tab agent_session kind %q", session.Kind)
+		return false, fmt.Errorf("%w: unsupported kind %q", errUnusableTabClaim, session.Kind)
 	}
 }
 
@@ -701,9 +735,9 @@ func (reader *tabViewReader) nativeView(
 	// proof; present, it must name the chat, unless it is a replaced chat's
 	// claim Herdr kept (reader.staleTabClaim).
 	sessionNamed := len(pane.Session) != 0 && string(pane.Session) != "null"
-	matches, err := tabPaneSession(pane, target)
-	if err != nil {
-		return nil, err
+	matches, claimErr := tabPaneSession(pane, target)
+	if claimErr != nil && !errors.Is(claimErr, errUnusableTabClaim) {
+		return nil, claimErr
 	}
 	seat, found, err := nativeSeat(ctx, *reader.runtime, target.ID, target.SeatID)
 	if err != nil {
@@ -713,7 +747,15 @@ func (reader *tabViewReader) nativeView(
 		seat.HerdrTerminalID != pane.Terminal && (seat.HerdrTerminalID != "" || !sessionNamed) {
 		return nil, nil
 	}
-	if sessionNamed && !matches {
+	if sessionNamed && !matches && claimErr != nil {
+		// An unreadable claim vetoes nothing, but only the seat's own terminal can stand in for it.
+		if seat.HerdrTerminalID == "" {
+			return nil, claimErr
+		}
+		if err := reader.warnUnusableClaim(target, pane, claimErr); err != nil {
+			return nil, err
+		}
+	} else if sessionNamed && !matches {
 		stale, err := reader.staleTabClaim(ctx, pane)
 		if err != nil || !stale || seat.HerdrTerminalID == "" {
 			return nil, err

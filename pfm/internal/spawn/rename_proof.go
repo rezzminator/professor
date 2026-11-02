@@ -2,6 +2,7 @@ package spawn
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/codexmeta"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // renameProof reports whether Codex itself recorded a rename of a thread to
@@ -55,13 +57,16 @@ func codexIndexProof(codexHomes []string) renameProof {
 		if len(homes) == 0 {
 			return false, errors.New("no Codex home is configured to read the rename from")
 		}
+		// A home that cannot be read never hides a rename another home recorded.
+		var unread error
 		for _, home := range homes {
 			landed, err := sessionIndexHasRename(filepath.Join(home, codexmeta.SessionIndexFile), name, since)
-			if err != nil || landed {
-				return landed, err
+			if landed {
+				return true, nil
 			}
+			unread = errors.Join(unread, err)
 		}
-		return false, nil
+		return false, unread
 	}
 }
 
@@ -81,11 +86,16 @@ func sessionIndexHasRename(path, name string, since time.Time) (renamed bool, re
 	}()
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
+	undecoded := 0
 	for scanner.Scan() {
 		// A line that does not decode is skipped, not fatal: Codex appends
 		// while this reads, so the last line can be torn mid-write.
 		entry, err := codexmeta.DecodeSessionIndexLine(scanner.Bytes())
-		if err != nil || entry.ThreadName != name {
+		if err != nil {
+			undecoded++
+			continue
+		}
+		if entry.ThreadName != name {
 			continue
 		}
 		if renamed, ok := entry.RenamedAt(); ok && !renamed.Before(since) {
@@ -94,6 +104,12 @@ func sessionIndexHasRename(path, name string, since time.Time) (renamed bool, re
 	}
 	if err := scanner.Err(); err != nil {
 		return false, fmt.Errorf("read Codex session index %s: %w", path, err)
+	}
+	if undecoded > 0 {
+		// Counted, never fatal: a torn last line is routine, and an error here
+		// would stop the rename retry for every chat on this home.
+		obs.Logger(context.Background()).Warn("Codex session index lines skipped",
+			"path", path, "undecoded", undecoded)
 	}
 	return false, nil
 }

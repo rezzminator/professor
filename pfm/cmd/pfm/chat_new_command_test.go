@@ -70,7 +70,7 @@ func newWorkbenchRunFixture(t *testing.T, jail *runJail) (string, string) {
 
 // These tests share process environment and spawn timings, so they stay serial.
 func TestChatNewWorkbench(t *testing.T) {
-	for _, name := range []string{"auto-name", "next number", "explicit effort", "explicit harness", "omitted enabled", "omitted disabled", "omitted skips opencode", "no account", "disabled explicit", "invalid manifest", "outside", "roster unreadable", "Codex", "mirror failure", "role"} {
+	for _, name := range []string{"auto-name", "next number", "explicit effort", "explicit harness", "omitted enabled", "omitted disabled", "omitted skips opencode", "no account", "disabled explicit", "invalid manifest", "bad effort", "outside", "roster unreadable", "Codex", "mirror failure", "role"} {
 		t.Run(name, func(t *testing.T) {
 			jail := newRunJail(t)
 			defer jail.killSockets(t)
@@ -178,7 +178,18 @@ func TestChatNewWorkbench(t *testing.T) {
 					t.Fatal("fixture ForLaunch did not fail")
 				}
 				wantName, wantChannel, wantEffort = "x", "", ""
-				wantWarning = "pfm chat new: " + err.Error() + "; starting without the workbench persona\n"
+				wantWarning = "pfm chat new: workbench persona not applied (" + err.Error() + "); launching without it\n"
+			case "bad effort":
+				if err := os.WriteFile(
+					paths.WorkbenchManifest(dir),
+					[]byte(`{"prompt":"scribe.md","title":"Scribe","name":"_SCRIBE","effort":"bogus"}`),
+					0o600,
+				); err != nil {
+					t.Fatal(err)
+				}
+				wantEffort = ""
+				wantWarning = "pfm chat new: workbench " + dir + `: unknown Claude effort "bogus" ` +
+					"(want low, medium, high, xhigh or max); launching the persona on the default effort\n"
 			case "outside":
 				dir = filepath.Join(jail.root, "work")
 				wantCode, wantError = 2, "usage: pfm chat new [--name NAME]"
@@ -203,9 +214,26 @@ func TestChatNewWorkbench(t *testing.T) {
 				reply, code := testjail.CleanMirrorReply, 0
 				if name == "mirror failure" {
 					reply, code = testjail.FailedMirrorReply, 1
-					wantCode, wantError = 2, "pfm chat new: build the codex mirror of workbench "+duo+":"
 				}
 				mirrorRecord = testjail.FakeEngineSync(t, reply, code)
+				if name == "mirror failure" {
+					runtime, err := pfmconfig.LoadRuntime("")
+					if err != nil {
+						t.Fatal(err)
+					}
+					persona, err := workbench.ForLaunch(duo, pfmengine.Codex, workbench.New)
+					if err != nil {
+						t.Fatal(err)
+					}
+					err = workbench.EnsureMirror(persona.Bench, pfmengine.Codex, runtime.Paths.Home)
+					if err == nil {
+						t.Fatal("mirror fixture must fail")
+					}
+					wantWarning = "pfm chat new: " + err.Error() + "; launching on the mirror as it stands\n"
+					if err := os.Remove(mirrorRecord); err != nil {
+						t.Fatal(err)
+					}
+				}
 			case "role":
 				extra = []string{"--agent-role", "r"}
 			}
@@ -230,7 +258,7 @@ func TestChatNewWorkbench(t *testing.T) {
 				if !strings.Contains(stderr.String(), wantError) {
 					t.Fatalf("error = %q; want %q", stderr.String(), wantError)
 				}
-				if name != "outside" && name != "mirror failure" && stderr.String() != wantError {
+				if name != "outside" && stderr.String() != wantError {
 					t.Fatalf("error = %q; want exactly %q", stderr.String(), wantError)
 				}
 				if stdout.Len() != 0 {
@@ -278,6 +306,9 @@ func TestChatNewWorkbench(t *testing.T) {
 				}
 				if wantEffort != "" && !strings.Contains(argv, "--effort "+wantEffort) {
 					t.Fatalf("Claude effort argv = %q; want %s", argv, wantEffort)
+				}
+				if name == "bad effort" && strings.Contains(argv, "--effort") {
+					t.Fatalf("Claude argv = %q; want no --effort for the rejected word", argv)
 				}
 			}
 			recorded, found, err := agentrole.ReadHarnessPromptRecord(filepath.Join(jail.root, "sid"), socket, "")
@@ -548,7 +579,7 @@ func TestChatNameNativeDeliveryConvergesWithoutTmuxWindow(t *testing.T) {
 }
 
 func TestChatNewNativeRawEngineBirth(t *testing.T) {
-	for _, engine := range []string{"codex", "opencode", "opencode-workbench"} {
+	for _, engine := range []string{"codex", "opencode", "opencode-workbench", "opencode-workbench-bad-effort"} {
 		t.Run(engine, func(t *testing.T) {
 			jail := newRunJail(t)
 			defer jail.killSockets(t)
@@ -633,10 +664,14 @@ func TestChatNewNativeRawEngineBirth(t *testing.T) {
 				t.Fatal(err)
 			}
 			directory, selected := jail.root, engine
-			if engine == "opencode-workbench" {
+			if strings.HasPrefix(engine, "opencode-workbench") {
 				directory, _ = newWorkbenchRunFixture(t, jail)
+				personaEffort := "medium"
+				if engine == "opencode-workbench-bad-effort" {
+					personaEffort = "bogus"
+				}
 				if err := atomicfile.Write(paths.WorkbenchManifest(directory), []byte(
-					`{"prompt":"scribe.md","engines":["opencode"],"model":"openai/other","effort":"medium"}`,
+					`{"prompt":"scribe.md","engines":["opencode"],"model":"openai/other","effort":"`+personaEffort+`"}`,
 				), 0o600); err != nil {
 					t.Fatal(err)
 				}
@@ -691,10 +726,19 @@ func TestChatNewNativeRawEngineBirth(t *testing.T) {
 					!slices.Contains(recipe.Env, "PFM_OPENCODE_VARIANT=high") {
 					t.Errorf("native model/effort/binary recipe=%+v", recipe)
 				}
-				if engine == "opencode-workbench" &&
+				if strings.HasPrefix(engine, "opencode-workbench") &&
 					(!slices.Contains(recipe.Env, "PFM_OPENCODE_SYSTEM_FILE="+filepath.Join(directory, ".professor", "scribe.md")) ||
 						strings.Contains(strings.Join(recipe.Env, "\n"), "PFM_OPENCODE_POLICY=You are scribe.")) {
 					t.Errorf("canonical persona missing or duplicated: %+v", recipe)
+				}
+				// The plan reports the persona's degradation; chat new adds no second copy.
+				wantWarning := ""
+				if engine == "opencode-workbench-bad-effort" {
+					wantWarning = "pfm chat new: workbench " + directory + `: unknown OpenCode effort "bogus"; ` +
+						"launching the persona on the default effort\n"
+				}
+				if stderr.String() != wantWarning {
+					t.Errorf("native %s stderr = %q; want %q", engine, stderr.String(), wantWarning)
 				}
 			}
 		})

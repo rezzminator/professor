@@ -263,11 +263,12 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 	if resuming || continuing {
 		mode = workbench.Resume
 	}
-	persona, err := action.WorkbenchPersona(workingDir, pfmengine.Claude, mode)
+	persona, personaWarnings, err := action.LaunchPersona(workingDir, pfmengine.Claude, mode)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm internal launch: %v\n", err)
 		return 1
 	}
+	launchnotice.Print(stderr, "pfm internal launch", personaWarnings)
 	freshID := ""
 	if identity == "" && !continuing {
 		var idErr error

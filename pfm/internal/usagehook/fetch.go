@@ -245,7 +245,7 @@ func refreshHeld(ctx context.Context, options Options, cachePath string, now tim
 		cacheErr := WriteCacheRecord(cachePath, CacheRecord{
 			Usage: previousUsage, ConfigDir: options.ConfigDir, FetchedAt: previousFetchedAt,
 			Backoff: &CacheBackoff{
-				Message: message, RetryAfter: retryAfter, RecordedAt: now, Credential: credentialID, Refusal: refusal,
+				Message: message, RetryAfter: retryAfter, Credential: credentialID, Refusal: refusal,
 			},
 		})
 		var rateLimit *RateLimitError

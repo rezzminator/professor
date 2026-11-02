@@ -27,7 +27,6 @@ func TestParseProxyIdentityAcceptsWirePayload(t *testing.T) {
 		"pane":       "%7",
 		"engine":     "claude",
 		"id":         "session-id",
-		"source":     float64(7), // never read: a malformed one costs nothing
 	}
 	want := ProxyIdentity{
 		Version:    ProxyWireVersion,
@@ -185,7 +184,6 @@ func TestBirthProxyForwardsCurrentHerdrSeatAndErrors(t *testing.T) {
 		Pane:           "wC:p24",
 		Engine:         "claude",
 		ID:             "conversation-a",
-		Source:         "herdr-ancestry",
 	}
 	currentErr := resolve.ErrNotRegistered
 	proxy.identify = func(context.Context) (resolve.Identity, error) { return identity, currentErr }
@@ -207,8 +205,7 @@ func TestBirthProxyForwardsCurrentHerdrSeatAndErrors(t *testing.T) {
 		got := meta["pfmProxy"].(map[string]any)
 		if kind == "ok" {
 			if got["session"] != "87caf6bf" || got["backend"] != "herdr" || got["seatId"] != "87caf6bf" ||
-				got["herdrWorkspace"] != "wC" ||
-				got["source"] != "herdr-ancestry" {
+				got["herdrWorkspace"] != "wC" {
 				t.Fatalf("current Herdr identity=%v", got)
 			}
 		} else {

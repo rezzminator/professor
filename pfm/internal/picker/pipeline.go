@@ -384,7 +384,11 @@ func streamFleetRefreshesWith(
 			PriorityCWD:  environment.CurrentDir,
 			PriorityOnly: true,
 		}); err != nil {
-			return stop(" project index", err)
+			var partial *fleetindex.PartialError
+			if !errors.As(err, &partial) {
+				return stop(" project index", err)
+			}
+			warn(fmt.Sprintf("project index: %v", err))
 		}
 		data, err = fleet.LoadData(ctx, database)
 		if err != nil {
@@ -645,10 +649,14 @@ func streamFleetRefreshesWith(
 			PriorityCWD:  environment.CurrentDir,
 			PriorityOnly: true,
 		}); err != nil {
-			if !fail(" index", err, passStart) {
-				return
+			var partial *fleetindex.PartialError
+			if !errors.As(err, &partial) {
+				if !fail(" index", err, passStart) {
+					return
+				}
+				continue
 			}
-			continue
+			warn(fmt.Sprintf("project index: %v", err))
 		}
 		data, err = fleet.LoadData(ctx, database)
 		if err != nil {

@@ -97,7 +97,6 @@ func TestUnnamedHerdrSeatFindsItself(t *testing.T) {
 		Version: mcpserv.ProxyWireVersion, Session: identity.Session, Backend: identity.Backend,
 		SeatID: identity.SeatID, HerdrWorkspace: identity.HerdrWorkspace, SocketPath: identity.SocketPath,
 		SocketName: identity.SocketName, Pane: identity.Pane, Engine: identity.Engine, ID: identity.ID,
-		Source: identity.Source,
 	})
 	if err != nil {
 		t.Fatal(err)

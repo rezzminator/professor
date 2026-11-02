@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -408,11 +409,11 @@ func PlanOpenCode(request HeadlessRequest) (HeadlessPlan, error) {
 		Config:         machine,
 		Prompt:         request.Prompt,
 	}
-	if err := applyWorkbench(&launch); err != nil {
+	personaWarnings, err := applyWorkbench(&launch)
+	if err != nil {
 		return HeadlessPlan{}, err
 	}
 	launch.Persona.Model = launch.Persona.ModelOr(request.Model)
-	var err error
 	launch.Persona.Effort, err = OpenCodeEffort(launch.Persona.EffortOr(request.Effort))
 	if err != nil {
 		return HeadlessPlan{}, err
@@ -441,5 +442,6 @@ func PlanOpenCode(request HeadlessRequest) (HeadlessPlan, error) {
 		Run:                 plan.Run,
 		Binary:              plan.SeatRun.Binary,
 		PromptOnCommandLine: true,
+		Warnings:            slices.Concat(personaWarnings, plan.Warnings),
 	}, nil
 }

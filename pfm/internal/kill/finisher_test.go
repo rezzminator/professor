@@ -3,6 +3,7 @@ package kill
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"os"
@@ -15,6 +16,7 @@ import (
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // CaptureScreen, CaptureStyled, CaptureTarget, SendKey, SendLiteral,
@@ -521,5 +523,41 @@ func TestFinisherTypesExitOnlyAfterTheTurnAndConfirmsTheExitDialog(t *testing.T)
 				t.Fatalf("log = %q, want one no-exit-command line naming %q", log.String(), test.wantReason)
 			}
 		})
+	}
+}
+
+// One engine's index pass failing costs only that engine: the post-exit
+// refresh of the others stands, and the failure is logged, not returned.
+func TestIndexRefresherWarnsOnAPartialIndexAndRefreshes(t *testing.T) {
+	jail := newKillJail(t)
+	database := jail.open(t)
+	ctx, recorder := obs.Test(t)
+	raw, err := sql.Open("sqlite", database.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec("DROP TABLE transcripts"); err != nil { // the Claude pass's own table
+		t.Fatal(errors.Join(err, raw.Close()))
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	refresher := indexRefresher{
+		database:    database,
+		claudeRoots: []string{filepath.Join(jail.home, ".claude", "projects")},
+		codexHomes:  []string{jail.codexHome},
+	}
+	if err := refresher.Refresh(ctx); err != nil {
+		t.Fatalf("Refresh() = %v, want nil: the Codex pass indexed", err)
+	}
+	var warned any
+	for _, record := range recorder.Records() {
+		if record.Message == "kill: post-exit index refreshed partially" {
+			warned, _ = record.Field(obs.FieldErr)
+		}
+	}
+	want := "index engine cc: query transcripts: SQL logic error: no such table: transcripts (1)"
+	if warned != want {
+		t.Fatalf("warned error = %v, want %q", warned, want)
 	}
 }

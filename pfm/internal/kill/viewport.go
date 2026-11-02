@@ -33,7 +33,7 @@ var terminalShells = map[string]bool{
 
 // ClientLister names the one tmux read the closer needs.
 type ClientLister interface {
-	ClientPIDs(ctx context.Context, socketPath string) ([]int, error)
+	ClientPIDs(ctx context.Context, socketPath string) (pids []int, skipped []string, err error)
 }
 
 // ClientPIDs lists the `tmux attach` processes currently attached to this
@@ -41,26 +41,33 @@ type ClientLister interface {
 func (tmux TmuxKiller) ClientPIDs(
 	ctx context.Context,
 	socketPath string,
-) ([]int, error) {
+) (pids []int, skipped []string, err error) {
 	output, err := tmux.command(
 		ctx, socketPath, "list-clients", "-F", "#{client_pid}",
 	).Output()
 	if err != nil {
-		return nil, fmt.Errorf("list clients on %s: %w", socketPath, err)
+		return nil, nil, fmt.Errorf("list clients on %s: %w", socketPath, err)
 	}
-	var pids []int
-	for _, line := range strings.Split(string(output), "\n") {
+	pids, skipped = parseClientPIDs(string(output))
+	return pids, skipped, nil
+}
+
+// parseClientPIDs reads one pid per line; a line that is not one is named in
+// skipped and costs only that client, never its siblings.
+func parseClientPIDs(output string) (pids []int, skipped []string) {
+	for _, line := range strings.Split(output, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
 		pid, convErr := strconv.Atoi(line)
 		if convErr != nil {
-			return nil, fmt.Errorf("parse client pid %q: %w", line, convErr)
+			skipped = append(skipped, fmt.Sprintf("client pid %q unreadable: %v", line, convErr))
+			continue
 		}
 		pids = append(pids, pid)
 	}
-	return pids, nil
+	return pids, skipped
 }
 
 // ViewportDeps are the two seams CloseTerminals reads the world through.
@@ -86,11 +93,11 @@ func CloseTerminals(
 	if dependencies.Tmux == nil || door.Procs == nil || door.Kernel == nil {
 		return nil, nil, fmt.Errorf("viewport closer needs tmux, a process table, and a signal kernel")
 	}
-	clients, err := dependencies.Tmux.ClientPIDs(ctx, socketPath)
+	clients, skipped, err := dependencies.Tmux.ClientPIDs(ctx, socketPath)
 	if err != nil {
 		return nil, nil, err
 	}
-	if len(clients) == 0 {
+	if len(clients) == 0 && len(skipped) == 0 {
 		return nil, []string{"no client attached — chat was not being watched"}, nil
 	}
 	seen := make(map[int]bool, len(clients))

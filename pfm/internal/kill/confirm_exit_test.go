@@ -1,6 +1,7 @@
 package kill
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"path/filepath"
@@ -9,6 +10,8 @@ import (
 	"time"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 )
 
 // TestManagerConfirmExitFailsWhenPaneOutlivesEscalation reproduces the live
@@ -158,5 +161,71 @@ func TestNewConfirmEveryTestKnob(t *testing.T) {
 				)
 			}
 		})
+	}
+}
+
+func TestConfirmExitMovedSeatLookupFailureKeepsExplicitTmux(t *testing.T) {
+	jail := newKillJail(t)
+	statePath := filepath.Join(jail.root, "state.db")
+	t.Setenv("PFM_STATE_DB", statePath)
+	database := jail.open(t)
+	ctx := context.Background()
+	// A session row the pane read never selects (tmux backend) and the moved
+	// read cannot scan: its host pid is text.
+	if err := database.Shared().PutSeat(ctx, fleetdb.Seat{
+		SeatID: "seat-f9", SessionID: "session-f9", Engine: string(pfmengine.Claude),
+		Backend: "tmux", TmuxSocket: "tmux-fixture", TmuxPane: "%9", State: "live",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := sqlitedb.OpenReadWrite(statePath, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.ExecContext(
+		ctx,
+		"UPDATE seat SET seat_host_pid='unreadable' WHERE seat_id='seat-f9'",
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var warnings bytes.Buffer
+	tmux := &fakeTmux{}
+	manager, err := New(database, Dependencies{
+		Tmux:            tmux,
+		Screen:          tmux,
+		Spawner:         &captureSpawner{},
+		Log:             &warnings,
+		Refresher:       refreshFunc(func(context.Context) error { return nil }),
+		Delay:           time.Nanosecond,
+		PollEvery:       time.Nanosecond,
+		PollAttempts:    1,
+		IdleAttempts:    2,
+		ConfirmEvery:    time.Nanosecond,
+		ConfirmAttempts: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	socket := filepath.Join(jail.tmuxDir, "tmux-fixture")
+	err = manager.ConfirmExit(ctx, Target{
+		Engine:     pfmengine.Claude,
+		ID:         "session-f9",
+		SocketName: "tmux-fixture",
+		SocketPath: socket,
+		PaneID:     "%9",
+	})
+	if err != nil {
+		t.Fatalf("moved-seat lookup failure broke explicit tmux confirmation: %v", err)
+	}
+	prefix := "pfm kill: resolve moved kill seat: read seat: "
+	want := "; continuing with explicit tmux target " + socket + " %9\n"
+	if got := warnings.String(); !strings.HasPrefix(got, prefix) || !strings.HasSuffix(got, want) {
+		t.Fatalf("warning = %q, want %q…%q", got, prefix, want)
+	}
+	if tmux.existsCalls == 0 {
+		t.Fatal("tmux target was never probed")
 	}
 }

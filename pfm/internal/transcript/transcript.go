@@ -20,6 +20,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/codexmeta"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/naming"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/pyvalue"
 )
 
@@ -103,14 +104,38 @@ type codexTurnError struct {
 // that carries nothing a reader would want: sidechains, compaction summaries,
 // token counts, and the harness-injected records naming.IsJunkPrompt names.
 func Parse(line []byte, engine string) (Entry, bool) {
+	entry, ok, _ := parseLine(line, engine)
+	return entry, ok
+}
+
+// parseLine is Parse that also says whether the line was no JSON at all, the
+// one loss Parse cannot tell from a record with nothing to show.
+func parseLine(line []byte, engine string) (entry Entry, ok, malformed bool) {
 	var parsed record
-	if err := decodeTolerant(line, &parsed); err != nil || parsed.IsSidechain {
-		return Entry{}, false
+	if err := DecodeTolerant(line, &parsed); err != nil {
+		return Entry{}, false, len(bytes.TrimSpace(line)) > 0
+	}
+	if parsed.IsSidechain {
+		return Entry{}, false, false
 	}
 	if engine == string(pfmengine.Codex) {
-		return parseCodex(parsed)
+		entry, ok = parseCodex(parsed)
+		return entry, ok, false
 	}
-	return parseClaude(parsed)
+	entry, ok = parseClaude(parsed)
+	return entry, ok, false
+}
+
+// warnMalformedLines names the complete lines of path that were no JSON: each
+// cost itself, and the entries read from the lines around it stand.
+func warnMalformedLines(path string, count int) {
+	if count == 0 {
+		return
+	}
+	obs.Logger(context.Background()).Warn(
+		"transcript.lines_malformed", "path", path, "rows", count,
+		obs.FieldErr, fmt.Sprintf("%d complete line(s) were no JSON and left unread", count),
+	)
 }
 
 func parseClaude(parsed record) (Entry, bool) {
@@ -403,14 +428,19 @@ func Tail(
 
 	reader := bufio.NewReaderSize(file, 64<<10)
 	ring := make([]Entry, 0, lastN)
-	total := 0
+	total, malformed := 0, 0
+	defer func() { warnMalformedLines(path, malformed) }()
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, false, err
 		}
 		line, readErr := reader.ReadBytes('\n')
 		if len(line) > 0 {
-			if entry, ok := Parse(line, engine); ok {
+			entry, ok, bad := parseLine(line, engine)
+			if bad && readErr == nil {
+				malformed++
+			}
+			if ok {
 				total++
 				if maxBytes > 0 {
 					entry.Text = Truncate(entry.Text, maxBytes)
@@ -448,13 +478,19 @@ func All(ctx context.Context, path, engine string) (entries []Entry, returnErr e
 		}
 	}()
 	reader := bufio.NewReaderSize(file, 64<<10)
+	malformed := 0
+	defer func() { warnMalformedLines(path, malformed) }()
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		line, readErr := reader.ReadBytes('\n')
 		if len(line) > 0 {
-			if entry, ok := Parse(line, engine); ok {
+			entry, ok, bad := parseLine(line, engine)
+			if bad && readErr == nil {
+				malformed++
+			}
+			if ok {
 				entries = append(entries, entry)
 			}
 		}

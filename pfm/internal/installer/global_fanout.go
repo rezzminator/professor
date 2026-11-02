@@ -112,11 +112,10 @@ func (installer *engine) wireGlobalSkills() error {
 		return fmt.Errorf("resolve global skills source repository: %w", err)
 	}
 	// Source-fetched skills first: their retirement frees a name that newly
-	// clashes with a template skill before wireTemplateSkills links it.
-	if err := installer.wireSourceFetchedSkills(sourceRepo); err != nil {
-		return err
-	}
-	return installer.wireTemplateSkills(sourceRepo)
+	// clashes with a template skill before wireTemplateSkills links it. Their
+	// failure costs them alone: every template skill still links.
+	fetchedErr := installer.wireSourceFetchedSkills(sourceRepo)
+	return errors.Join(fetchedErr, installer.wireTemplateSkills(sourceRepo))
 }
 
 // wireTemplateSkills links clone skill directories into both skills registries.
@@ -217,14 +216,13 @@ func (installer *engine) wireGlobalRules() error {
 		return nil
 	}
 	target := filepath.Join(installer.options.ConfigDir, globalRulesRegistry)
+	var failed error // one rule's failure costs only that rule's link
 	for _, name := range names {
-		if err := installer.wireGlobalLink(
+		failed = errors.Join(failed, installer.wireGlobalLink(
 			filepath.Join(source, name), filepath.Join(target, name), sourceRepo, false,
-		); err != nil {
-			return err
-		}
+		))
 	}
-	return nil
+	return failed
 }
 
 // ReportGlobalRules prints one "doctor: rules" row per rule whose store link

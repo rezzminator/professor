@@ -968,7 +968,7 @@ func (sampler *LimitsSampler) fetchCodexCached(
 		cacheErr := writeCodexCacheRecord(path, codexCacheRecord{
 			codexUsage: previousUsage, SourceVersion: codexUsageSourceVersion,
 			CodexAuthPath: account.CodexAuthPath, FetchedAt: previousFetchedAt,
-			Backoff: &usagehook.CacheBackoff{Message: message, RetryAfter: retryAfter, RecordedAt: now},
+			Backoff: &usagehook.CacheBackoff{Message: message, RetryAfter: retryAfter},
 		})
 		var rateLimit *usagehook.RateLimitError
 		if errors.As(err, &rateLimit) {

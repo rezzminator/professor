@@ -212,6 +212,45 @@ func TestDoctorStalePurgeReportsAFailedMove(t *testing.T) {
 	}
 }
 
+// TestDoctorStaleBrokenConfigListsWhatNeedsNoAccountsAndRefusesPurge pins the
+// unknown-accounts door: the listing still runs and its dead-account-dir row
+// says it cannot judge, while --purge, which moves, moves nothing.
+func TestDoctorStaleBrokenConfigListsWhatNeedsNoAccountsAndRefusesPurge(t *testing.T) {
+	runtime := buildStaleCleanHome(t)
+	runtime.ConfigError = errors.New("config broken: unexpected end of JSON input")
+	shared := filepath.Join(runtime.Paths.Home, ".local", "state", "pfm", "shared.db")
+	seedStaleFile(t, shared)
+	root := filepath.Dir(config.DefaultAccountDir(runtime.Paths.Home, 1))
+	const unknown = "stale: config error=config broken: unexpected end of JSON input — the accounts are unknown, "
+
+	var stdout, stderr bytes.Buffer
+	code := runDoctor([]string{"--stale"}, &stdout, &stderr, runtime)
+	want := unknown + "so account-dependent rows are unknown\n" +
+		"stale: WARN shared-db " + shared + " — retired shared.db\n" +
+		"stale:   fix: pfm doctor --stale --purge moves it into one backup dir\n" +
+		"stale: BLOCK dead-account-dir " + root +
+		" — no account configured: cannot tell a live account dir from a dead one\n" +
+		"stale:   fix: fix the config's accounts, then rerun\n" +
+		"stale: 1 stale, 1 held or unreadable\n"
+	if code != 3 || stdout.String() != want {
+		t.Fatalf("doctor --stale on a broken config code=%d, want 3\nstdout=%q\nwant  =%q", code, stdout.String(), want)
+	}
+
+	stdout.Reset()
+	code = runDoctor([]string{"--stale", "--purge"}, &stdout, &stderr, runtime)
+	if want := unknown + "so --purge moves nothing\n"; code != 3 || stdout.String() != want {
+		t.Fatalf(
+			"doctor --stale --purge on a broken config code=%d, want 3\nstdout=%q\nwant  =%q",
+			code,
+			stdout.String(),
+			want,
+		)
+	}
+	if _, err := os.Lstat(shared); err != nil {
+		t.Fatalf("a refused purge moved %s: %v", shared, err)
+	}
+}
+
 // TestDoctorStaleCleanHomeNamesTheWalk pins the clean answer: "ok" with the
 // count of kinds walked, exit 0, so an empty list reads as a walk that ran.
 func TestDoctorStaleCleanHomeNamesTheWalk(t *testing.T) {

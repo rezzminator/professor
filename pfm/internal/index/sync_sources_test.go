@@ -176,3 +176,55 @@ func TestCodexPassKeepsRowsWhenTheRolloutWalkFails(t *testing.T) {
 		t.Fatalf("warnings for %s = %q, want [%q]", codexHome, got, want)
 	}
 }
+
+// TestCodexPassKeepsRowsWhenTheStateStoreIsUnreadable: a state store with no
+// readable generation costs that home's reconcile only: the rollouts still
+// index, and a row only the store vouched for is not pruned.
+func TestCodexPassKeepsRowsWhenTheStateStoreIsUnreadable(t *testing.T) {
+	codexHome := t.TempDir()
+	sessions := filepath.Join(codexHome, "sessions")
+	meta := `{"type":"session_meta","payload":{"source":"cli","thread_source":"user","cwd":"/work/app"}}`
+	prompt := func(text string) string {
+		return `{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"` +
+			text + `"}]}}`
+	}
+	rollout := filepath.Join(sessions, "rollout-2026-09-23T12-07-24-file.jsonl")
+	writeLines(t, rollout, meta, prompt("first"))
+	statePath := filepath.Join(codexHome, "state_5.sqlite")
+	buildCodexState(t, statePath, codexStateThread{
+		ID:          "store-only",
+		RolloutPath: filepath.Join(sessions, "rollout-2026-09-23T12-08-00-store-only.jsonl"),
+		CWD:         "/work/paginated", FirstUserMessage: "paginated first prompt",
+		ThreadSource: "user", HistoryMode: "paginated", CreatedAt: 300, UpdatedAt: 400, TokensUsed: 99,
+	})
+	database := openIndexStore(t)
+	t.Cleanup(func() { _ = database.Close() })
+	ctx, recorder := obs.Test(t)
+	if err := SyncCodex(ctx, database, []string{codexHome}, &Counters{}); err != nil {
+		t.Fatalf("first SyncCodex() error = %v", err)
+	}
+
+	if err := os.WriteFile(statePath, []byte("not a database"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeLines(t, rollout, meta, prompt("first"), prompt("second"))
+	if err := SyncCodex(ctx, database, []string{codexHome}, &Counters{}); err != nil {
+		t.Fatalf("SyncCodex() over an unreadable state store error = %v, want the pass to go on", err)
+	}
+
+	for _, want := range []struct {
+		id     string
+		prompt string
+		count  int64
+	}{{"store-only", "paginated first prompt", 1}, {"file", "first", 2}} {
+		row, found, err := database.Rollout(ctx, want.id)
+		if err != nil || !found || row.FirstPrompt != want.prompt || row.PromptCount != want.count {
+			t.Errorf("Rollout(%q) = %#v found=%t err=%v, want first prompt %q and %d prompts",
+				want.id, row, found, err, want.prompt, want.count)
+		}
+	}
+	want := "codex state|read Codex state: all 1 generation(s) were unreadable"
+	if got := unreadableWarnings(recorder, codexHome); len(got) != 1 || got[0] != want {
+		t.Fatalf("warnings for %s = %q, want [%q]", codexHome, got, want)
+	}
+}

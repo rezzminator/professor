@@ -267,14 +267,14 @@ func (writer *rotator) Close() error {
 
 // rotate shifts the generations down and opens a fresh current file. A shift
 // that fails leaves the current file live and still appended to, and a prune
-// that fails after a good rotation costs only the retention limit: both are
-// reported by the next write, never a dropped record. The caller holds the mutex.
+// that fails after a good rotation costs only the retention limit, and so does
+// a handle that fails to close: all are reported by the next write, never a
+// dropped record. The caller holds the mutex.
 func (writer *rotator) rotate() error {
-	if err := writer.file.Close(); err != nil {
-		return fmt.Errorf("close activity log %s before rotation: %w", writer.path, err)
-	}
-	writer.file = nil
-	shiftErr := writer.shiftGenerations()
+	// A handle that will not close is unusable either way: it is dropped, never kept for the next
+	// write to fail on, and rotation goes on with the failure reported like a failed shift.
+	closeErr := writer.dropHandle()
+	shiftErr := errors.Join(closeErr, writer.shiftGenerations())
 	if err := writer.reopen(); err != nil {
 		return errors.Join(shiftErr, err)
 	}

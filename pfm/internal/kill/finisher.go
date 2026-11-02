@@ -18,6 +18,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/index"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
@@ -50,6 +51,12 @@ func (refresher indexRefresher) Refresh(ctx context.Context) error {
 		return err
 	}
 	_, err = indexer.Run(ctx, index.Options{})
+	var partial *index.PartialError
+	if errors.As(err, &partial) {
+		// One failed engine keeps its prior rows; the others refreshed.
+		obs.Logger(ctx).WarnContext(ctx, "kill: post-exit index refreshed partially", obs.FieldErr, err.Error())
+		return nil
+	}
 	return err
 }
 

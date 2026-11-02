@@ -89,6 +89,7 @@ func (installer *engine) removeFormerProfessorCopy(home, former, targetID string
 		if err := installer.writeDevMarketplaceManifest(
 			"drop "+former+" from "+path+reason,
 			path,
+			"",
 			manifest,
 		); err != nil {
 			return err

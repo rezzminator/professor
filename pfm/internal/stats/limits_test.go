@@ -812,7 +812,7 @@ func TestLimitsSamplerDoesNotReuseClaudeCacheAcrossConfigDirectories(t *testing.
 			}
 			if testcase.backoff {
 				record.Backoff = &usagehook.CacheBackoff{
-					Message: "429 Too Many Requests", RetryAfter: now.Add(10 * time.Minute), RecordedAt: now,
+					Message: "429 Too Many Requests", RetryAfter: now.Add(10 * time.Minute),
 				}
 			}
 			cachePath := usagehook.CachePath(usagehook.DefaultCacheDir(), 2)
@@ -1661,7 +1661,6 @@ func TestLimitsSamplerIgnoresAPeerCredentialBackoffWhenCredentialsAreAbsent(t *t
 				filepath.Join(configDir, ".credentials.json"),
 			),
 			RetryAfter: now.Add(time.Minute),
-			RecordedAt: now,
 		},
 	}); err != nil {
 		t.Fatal(err)
@@ -1835,7 +1834,7 @@ func TestLimitsRefetchesCacheWhoseWindowsAllExpiredUnlessBackedOff(t *testing.T)
 			}
 			if backoff {
 				record.Backoff = &usagehook.CacheBackoff{
-					Message: "429 Too Many Requests", RetryAfter: now.Add(time.Hour), RecordedAt: fetchedAt,
+					Message: "429 Too Many Requests", RetryAfter: now.Add(time.Hour),
 				}
 			}
 			if err := usagehook.WriteCacheRecord(

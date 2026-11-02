@@ -98,6 +98,9 @@ const backgroundGap = "transcript totals exclude background API calls (auto_mode
 func (a *auditor) gapsLine() string {
 	scan, book := a.scan, a.prices
 	var loud []string
+	if book.tableFailure != "" {
+		loud = append(loud, "price table unusable ("+book.tableFailure+`) — tokens counted, every dollar "n/a"`)
+	}
 	if book.overrideFailure != "" {
 		loud = append(loud, "price override unusable ("+book.overrideFailure+
 			") — dollars use the published table without it")
@@ -176,6 +179,9 @@ func (a *auditor) gapsLine() string {
 		"; not historical billing"
 	if book.billing != nil {
 		pricingLine += "; Claude " + book.billing.Route + "/" + book.billing.Region
+	}
+	if book.tableFailure != "" {
+		pricingLine = "pricing: none, no price table loaded; not historical billing"
 	}
 	pricingLine += "\n"
 	if len(loud) == 0 {

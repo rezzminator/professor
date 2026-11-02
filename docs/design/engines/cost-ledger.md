@@ -103,11 +103,12 @@ A passthrough start (for example a `claude` run inside an existing pfm tmux sock
 - **Endpoints.** `POST /v1/logs` and `POST /v1/traces` answer `200 {}`; any other path answers `404`, any other method `405`. A body over 8 MiB, compressed or decompressed, answers `413`; `Content-Encoding: gzip` is accepted.
 - **What it keeps.** Only `api_request` log records and `claude_code.llm_request` spans; every other event and span is dropped before it is stored.
 - **Session ids.** A record whose session id is non-empty and outside the ledger's character class (`costledger.ValidSessionID`) is refused, counted in the answer's `partialSuccess` and logged, never joined into a path. A record with no session id is not refused: it is stored unattributed ([The ledger](#the-ledger)).
+- **Undecodable records.** A record of a shape the decoder cannot read is counted in the answer's `partialSuccess` (`N records undecodable`) and logged; the batch's other records still join.
 - **Unattributed warning.** A record missing its session id or its correlation identity counts in `Sink.Unattributed()` and is kept. The sink log gets one warning per sink endpoint (`/v1/logs`, `/v1/traces`), not one per record; the counter and the ledger rows keep every observation visible.
 - **Identity of the chat.** The launcher's pid plus that process's start time, read through `gather` at arm time. A reused pid has another start time and counts as gone.
 - **Exit.** When the chat is gone the sink keeps accepting until three seconds pass without a POST (at most fifteen), writes every pending half and exits; Claude's exporters flush on exit and a late batch must still land. Thirty consecutive unreadable process-table reads also end it, with the cause logged.
 - **Prune.** At start (`costledger.Prune`) it deletes `*.jsonl` files older than 90 days from the ledger directory and from `observations/` alike, never the `unattributed/` directory's file.
-- **Failure.** Nothing in the sink can stop the chat. A refused POST, a ledger write that failed, a panic while serving, a failed prune: one line in the sink log, `~/.local/state/pfm/log/cost-sink.log` (`paths.CostSinkLog`), which the launcher also writes its own decisions to. `pfm doctor` shows its tail ([Doctor](#doctor)).
+- **Failure.** Nothing in the sink can stop the chat. A refused POST (its log line carries the first 256 bytes of the body), a ledger write that failed, a panic while serving, a failed prune: one line in the sink log, `~/.local/state/pfm/log/cost-sink.log` (`paths.CostSinkLog`), which the launcher also writes its own decisions to. `pfm doctor` shows its tail ([Doctor](#doctor)).
 
 ## The join
 

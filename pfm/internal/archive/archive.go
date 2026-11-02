@@ -206,12 +206,12 @@ func (runner *Runner) Run(
 	} else {
 		report, err = runner.runKilled(ctx, options, live)
 	}
-	if err != nil {
-		return report, err
-	}
-	trail.Reach("planned", "moves classified")
-	if options.Apply {
-		trail.Reach("applied", "moves applied")
+	// A failed sidecar cleanup still returns the moves it made: each is recorded.
+	if err == nil {
+		trail.Reach("planned", "moves classified")
+		if options.Apply {
+			trail.Reach("applied", "moves applied")
+		}
 	}
 	for _, move := range report.Moves {
 		state, cause := "planned", "archive move planned"
@@ -225,7 +225,7 @@ func (runner *Runner) Run(
 		}
 		obs.Transition(ctx, "archive", "chat", state, cause)(failed)
 	}
-	return report, nil
+	return report, err
 }
 
 func (runner *Runner) runKilled(
@@ -328,26 +328,39 @@ func (runner *Runner) runKilled(
 			decided = append(decided, move.ID)
 		}
 	}
-	pruned, unclassified, err := runner.pruneLines(
-		filepath.Join(runner.paths.Home, ".claude", "history.jsonl"),
-		archived,
-	)
-	if err != nil {
-		return report, err
+	// A sidecar that cannot be pruned costs only the moved chats' retirement:
+	// their kill rows stay so the next run replays the cleanup, while orphans
+	// and live chats are decided as ever and the other sidecar is still pruned.
+	var cleanupErr error
+	history := filepath.Join(runner.paths.Home, ".claude", "history.jsonl")
+	index := filepath.Join(firstEngineRoot(runner.paths.Roots[pfmengine.Codex]), "session_index.jsonl")
+	for _, sidecar := range []struct {
+		path   string
+		pruned *int
+	}{
+		{history, &report.HistoryPruned},
+		{index, &report.IndexPruned},
+	} {
+		pruned, unclassified, err := runner.pruneLines(sidecar.path, archived)
+		if err != nil {
+			cleanupErr = errors.Join(cleanupErr, err)
+			continue
+		}
+		*sidecar.pruned = pruned
+		report.Unclassified = append(report.Unclassified, unclassified...)
 	}
-	report.HistoryPruned = pruned
-	report.Unclassified = append(report.Unclassified, unclassified...)
-	pruned, unclassified, err = runner.pruneLines(
-		filepath.Join(firstEngineRoot(runner.paths.Roots[pfmengine.Codex]), "session_index.jsonl"),
-		archived,
-	)
-	if err != nil {
-		return report, err
+	pendingCleanup := make(map[string]struct{})
+	if cleanupErr != nil {
+		for _, id := range archived {
+			pendingCleanup[id] = struct{}{}
+		}
 	}
-	report.IndexPruned = pruned
-	report.Unclassified = append(report.Unclassified, unclassified...)
 
 	for _, id := range decided {
+		if _, pending := pendingCleanup[id]; pending {
+			report.unresolve(id, fmt.Sprintf("sidecar cleanup failed; kill retained: %v", cleanupErr))
+			continue
+		}
 		// One kill the store would not retire stays standing and is reported;
 		// it never keeps the rest of the decided set killed.
 		if err := runner.kills.Unkill(ctx, id); err != nil {
@@ -356,7 +369,7 @@ func (runner *Runner) runKilled(
 		}
 		report.Unkilled++
 	}
-	return report, nil
+	return report, cleanupErr
 }
 
 func (runner *Runner) runSubagents(

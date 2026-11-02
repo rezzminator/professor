@@ -93,8 +93,8 @@ func TestChatBranchWorkbench(t *testing.T) {
 					if err == nil {
 						t.Fatal("mirror fixture did not fail")
 					}
-					wantWarning = "pfm chat branch: " + err.Error() + "; branching without the workbench persona\n"
-					wantArgs = []string{"fork " + parentID}
+					// The persona stays: the chat branches on the mirror as it stands.
+					wantWarning = "pfm chat branch: " + err.Error() + "; launching on the mirror as it stands\n"
 				}
 			case "invalid":
 				if err := atomicfile.Write(
@@ -104,8 +104,8 @@ func TestChatBranchWorkbench(t *testing.T) {
 				); err != nil {
 					t.Fatal(err)
 				}
-				wantWarning = "pfm chat branch: " + paths.WorkbenchManifest(scribe) + `: "prompt" is required` +
-					"; branching without the workbench persona\n"
+				wantWarning = "pfm chat branch: workbench persona not applied (" + paths.WorkbenchManifest(scribe) +
+					`: "prompt" is required); launching without it` + "\n"
 				wantArgs = []string{"--resume " + parentID, "--fork-session", "--name workbench-branch"}
 			case "outside":
 				dir = filepath.Join(jail.root, "work", "acme", "src")
@@ -144,7 +144,7 @@ func TestChatBranchWorkbench(t *testing.T) {
 					t.Errorf("branch argv=%q lacks %q", argv, want)
 				}
 			}
-			if wantWarning != "" && (strings.Contains(argv, "--system-prompt-file") ||
+			if name == "invalid" && (strings.Contains(argv, "--system-prompt-file") ||
 				strings.Contains(argv, "developer_instructions")) {
 				t.Errorf("branch argv=%q carries a workbench persona the warning dropped", argv)
 			}

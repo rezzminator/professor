@@ -166,9 +166,21 @@ func (tmux TmuxSpawner) NewSession(
 	}
 	started = true
 	if guard != nil {
-		output, queryErr := tmux.command(ctx, spec.Socket, "display-message", "-p", "-t", spec.Session+":", "#{pane_pid}").
-			Output()
-		pid, parseErr := strconv.Atoi(strings.TrimSpace(string(output)))
+		// A freshly born pane can answer once with nothing: ask again before ending the server.
+		var (
+			queryErr, parseErr error
+			pid                int
+		)
+		for attempt := 0; attempt < 2; attempt++ {
+			var output []byte
+			output, queryErr = tmux.command(
+				ctx, spec.Socket, "display-message", "-p", "-t", spec.Session+":", "#{pane_pid}",
+			).Output()
+			pid, parseErr = strconv.Atoi(strings.TrimSpace(string(output)))
+			if queryErr == nil && parseErr == nil || ctx.Err() != nil {
+				break
+			}
+		}
 		recordErr := queryErr
 		if recordErr == nil && parseErr != nil {
 			recordErr = fmt.Errorf("read account launch pane pid: %w", parseErr)

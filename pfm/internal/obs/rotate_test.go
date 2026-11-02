@@ -380,3 +380,26 @@ func TestRotatorReportsARotationFailureAndRecovers(t *testing.T) {
 		t.Fatal("the record after recovery is not in the live file")
 	}
 }
+
+// TestRotatorRotatesPastAHandleThatIsAlreadyClosed: a live handle that is closed under the writer
+// (the descriptor was released elsewhere) is dropped at the next rotation, not kept to fail every
+// later write: the record that triggers the rotation lands in a fresh current file.
+func TestRotatorRotatesPastAHandleThatIsAlreadyClosed(t *testing.T) {
+	first, _, path := openPair(t, 2, 1, io.Discard)
+	record := []byte(strings.Repeat("r", 600*1024) + "\n")
+	if _, err := first.Write(record); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.Write(record); err != nil {
+		t.Fatalf("write that rotates over the closed handle: %v", err)
+	}
+	if got := readFile(t, path+".1"); got != string(record) {
+		t.Fatalf("%s.1 = %d bytes, want the first record", path, len(got))
+	}
+	if got := readFile(t, path); got != string(record) {
+		t.Fatalf("%s = %d bytes, want only the record that rotated", path, len(got))
+	}
+}

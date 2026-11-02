@@ -109,7 +109,8 @@ func TestSplitOpenCodeLocator(t *testing.T) {
 }
 
 // A part whose message row cannot be read still shows, its role unknown: its
-// text is a reply, not a lost record.
+// text is a reply, not a lost record; so does a part with a member of another
+// type than its field's, which reads as absent.
 func TestOpenCodePartOfAnUnreadableMessageStillShows(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "opencode")
 	seedOpenCodeStore(t, root, "garden")
@@ -126,6 +127,8 @@ func TestOpenCodePartOfAnUnreadableMessageStillShows(t *testing.T) {
 		`INSERT INTO message VALUES ('msg_bad', 'ses_1a2b3c4d5e6fGarden0001', 1790762500000, 1790762500000, 'not json')`,
 		`INSERT INTO part VALUES ('prt_bad', 'msg_bad', 'ses_1a2b3c4d5e6fGarden0001', 1790762500000, 1790762500000,
 			'{"type":"text","text":"lost parent reply"}')`,
+		`INSERT INTO part VALUES ('prt_odd', 'msg_bad', 'ses_1a2b3c4d5e6fGarden0001', 1790762500001, 1790762500001,
+			'{"type":"text","text":"odd member reply","synthetic":"yes"}')`,
 	} {
 		if _, err := db.Exec(statement); err != nil {
 			t.Fatalf("seed %s: %v", statement, err)
@@ -133,8 +136,10 @@ func TestOpenCodePartOfAnUnreadableMessageStillShows(t *testing.T) {
 	}
 	locator := filepath.Join(root, "opencode.db") + "#ses_1a2b3c4d5e6fGarden0001"
 	code, stdout, stderr := invokeOpenCode(t, root, "show", locator)
-	reply := regexp.MustCompile(`(?m)^L\d+ 10:01:40 SAY lost parent reply$`)
-	if code != 0 || stderr != "" || !reply.MatchString(stdout) {
-		t.Errorf("exit %d stderr %q stdout %q, want 0, nothing and a line matching %s", code, stderr, stdout, reply)
+	for _, line := range []string{`10:01:40 SAY lost parent reply`, `10:01:40 SAY odd member reply`} {
+		reply := regexp.MustCompile(`(?m)^L\d+ ` + line + `$`)
+		if code != 0 || stderr != "" || !reply.MatchString(stdout) {
+			t.Errorf("exit %d stderr %q stdout %q, want 0, nothing and a line matching %s", code, stderr, stdout, reply)
+		}
 	}
 }

@@ -212,6 +212,28 @@ func TestGlobalWiringUnreadableEntryCostsOnlyItself(t *testing.T) {
 	}
 }
 
+// TestGlobalSkillsLinkPastAFailedSourceFetch pins that a source-fetched step
+// that fails (an unreadable skill link ledger) costs those skills alone: the
+// template skills still link, and the step returns the ledger's error.
+func TestGlobalSkillsLinkPastAFailedSourceFetch(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	var output bytes.Buffer
+	installer, store, _ := globalFanoutEngine(t, home, true, &output)
+	installer.options.SkillSourcesOffline = true
+	writeFixture(t, filepath.Join(installer.options.SourceRepo, filepath.FromSlash(skillSourcesRelative)),
+		skillRegistryJSON(map[string]string{"fetched": "https://example.invalid/fetched"}))
+	ledger := skillLinkLedgerPath(home)
+	writeFixture(t, ledger, "{")
+
+	err := installer.wireGlobalSkills()
+	if want := "skill link ledger " + ledger + ": unexpected end of JSON input"; fmt.Sprint(err) != want {
+		t.Fatalf("wireGlobalSkills error = %v, want %q\n%s", err, want, output.String())
+	}
+	assertFanoutLink(t, filepath.Join(store, "skills", "beta"),
+		filepath.Join(installer.options.SourceRepo, "templates", "global", "skills", "beta"))
+}
+
 // TestGlobalWiringDryRunPlansTheStore checks that preview names the store paths.
 func TestGlobalWiringDryRunPlansTheStore(t *testing.T) {
 	t.Parallel()

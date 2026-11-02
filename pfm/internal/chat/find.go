@@ -15,6 +15,7 @@ import (
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
@@ -46,9 +47,12 @@ type TranscriptMatch struct {
 // session's id, whose own transcript is left out (an excerpt copied from it
 // always matches it); the surface supplies it — AskingSession where its
 // process runs inside the asking chat — and "" leaves nothing out.
+// Complete refuses a search that skipped what it could not read: a surface
+// resolving one chat (resume) never picks from a partial list.
 type FindRequest struct {
-	Excerpt string
-	Self    string
+	Excerpt  string
+	Self     string
+	Complete bool
 }
 
 // Find is the shared excerpt search behind `pfm chat find`, `pfm chat read
@@ -60,11 +64,14 @@ func Find(ctx context.Context, runtime *pfmconfig.Runtime, request FindRequest) 
 	if len(needles) == 0 {
 		return nil, ErrNoExcerpt
 	}
-	files, err := ClaudeTranscripts(runtime)
+	files, skipped, err := listClaudeTranscripts(ctx, runtime)
 	if err != nil {
 		return nil, err
 	}
 	if len(files) == 0 {
+		if skipped > 0 {
+			return nil, fmt.Errorf("%w; %d project director(ies) could not be read", ErrNoTranscriptRegistry, skipped)
+		}
 		return nil, ErrNoTranscriptRegistry
 	}
 	self := request.Self
@@ -82,7 +89,10 @@ func Find(ctx context.Context, runtime *pfmconfig.Runtime, request FindRequest) 
 			continue // removed since the listing: no longer a candidate
 		}
 		if err != nil {
-			return nil, fmt.Errorf("read transcript %s: %w", path, err)
+			// One unreadable transcript costs that transcript, never the search.
+			obs.Logger(ctx).Warn("find skipped an unreadable transcript", "path", path, obs.FieldErr, err)
+			skipped++
+			continue
 		}
 		hits := 0
 		for _, needle := range needles {
@@ -99,7 +109,17 @@ func Find(ctx context.Context, runtime *pfmconfig.Runtime, request FindRequest) 
 			ID: id, Path: path, First: first, Last: last, Hits: hits, Needles: len(needles),
 		})
 	}
+	if request.Complete && skipped > 0 {
+		return nil, fmt.Errorf("%d transcript(s) or project director(ies) could not be read: "+
+			"the best match among the rest may not be the chat meant", skipped)
+	}
 	if len(matches) == 0 {
+		if skipped > 0 {
+			return nil, fmt.Errorf(
+				"%w; %d transcript(s) or project director(ies) could not be read and were skipped",
+				ErrNoExcerptMatch, skipped,
+			)
+		}
 		return nil, ErrNoExcerptMatch
 	}
 	sort.Slice(matches, func(left, right int) bool {
@@ -148,8 +168,20 @@ func ExcerptNeedles(value string) []string {
 }
 
 // ClaudeTranscripts lists every Claude transcript under the runtime's Claude
-// roots, sorted, each given path once.
-func ClaudeTranscripts(runtime *pfmconfig.Runtime) ([]string, error) {
+// roots, sorted, each given path once, and counts the project directories it
+// could not list: a caller resolving one chat by uniqueness refuses on them.
+func ClaudeTranscripts(runtime *pfmconfig.Runtime) ([]string, int, error) {
+	return listClaudeTranscripts(context.Background(), runtime)
+}
+
+// readProjectDirectory lists one transcript project directory; a seam so a
+// test can fail one directory (the fence runs as root, which reads any mode).
+var readProjectDirectory = os.ReadDir
+
+// listClaudeTranscripts is ClaudeTranscripts and the count of project
+// directories it could not list: each is logged and skipped, so one unreadable
+// project never hides the others' transcripts.
+func listClaudeTranscripts(ctx context.Context, runtime *pfmconfig.Runtime) ([]string, int, error) {
 	var resolved paths.Values
 	if runtime != nil {
 		resolved = runtime.Paths
@@ -157,28 +189,34 @@ func ClaudeTranscripts(runtime *pfmconfig.Runtime) ([]string, error) {
 		var err error
 		resolved, err = paths.Resolve()
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 	}
 	roots := append([]string(nil), resolved.Roots[pfmengine.Claude]...)
 	seen := make(map[string]struct{})
 	var files []string
+	skipped := 0
 	for _, root := range roots {
 		projects, err := os.ReadDir(root)
 		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
 		if err != nil {
-			return nil, fmt.Errorf("read transcript registry %s: %w", root, err)
+			return nil, 0, fmt.Errorf("read transcript registry %s: %w", root, err)
 		}
 		for _, project := range projects {
 			if !project.IsDir() {
 				continue
 			}
 			directory := filepath.Join(root, project.Name())
-			entries, err := os.ReadDir(directory)
+			entries, err := readProjectDirectory(directory)
+			if errors.Is(err, fs.ErrNotExist) {
+				continue // removed since the listing: no longer a candidate
+			}
 			if err != nil {
-				return nil, fmt.Errorf("read transcript project %s: %w", directory, err)
+				obs.Logger(ctx).Warn("transcript project directory skipped", "path", directory, obs.FieldErr, err)
+				skipped++
+				continue
 			}
 			for _, entry := range entries {
 				if entry.IsDir() || filepath.Ext(entry.Name()) != ".jsonl" {
@@ -194,7 +232,7 @@ func ClaudeTranscripts(runtime *pfmconfig.Runtime) ([]string, error) {
 		}
 	}
 	sort.Strings(files)
-	return files, nil
+	return files, skipped, nil
 }
 
 // transcriptRange is the first and last record timestamps in a transcript.

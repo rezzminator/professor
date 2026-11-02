@@ -113,6 +113,35 @@ func TestInspectSkillSourcesNamesEveryState(t *testing.T) {
 	}
 }
 
+// A registry note install prints (an owner resolved past a broken manifest)
+// is a doctor warning row too, never dropped.
+func TestInspectSkillSourcesCarriesTheRegistryNotes(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	manifest := filepath.Join(home, ".professor", ".professor", "manifest.json")
+	writeFixture(t, manifest, `{"installed_from":`)
+	registry := writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"x": "https://github.com/{GH_USER}/x"}))
+	want := SkillSourceStatus{
+		Path:  registry,
+		State: SkillSourceNote,
+		Error: "SKILL-SOURCES-OWNER decode " + manifest + ": unexpected end of JSON input; " +
+			"{GH_USER} resolved from the release theme URL instead",
+	}
+	statuses := InspectSkillSources(home, false)
+	unfetched := SkillSourceStatus{
+		Name:  "x",
+		Path:  filepath.Join(skillStoreRoot(home), "x"),
+		State: SkillSourceNotFetched,
+	}
+	if !reflect.DeepEqual(statuses, []SkillSourceStatus{unfetched, want}) {
+		t.Fatalf("statuses = %+v; want the unfetched skill, then %+v", statuses, want)
+	}
+	var report strings.Builder
+	if warnings, failures := ReportSkillSources(&report, home, false); warnings != 2 || failures != 0 {
+		t.Fatalf("ReportSkillSources = %d warnings, %d failures; want 2, 0:\n%s", warnings, failures, report.String())
+	}
+}
+
 // skillSourceRow returns the one "doctor: skill-source" line naming name.
 func skillSourceRow(t *testing.T, report, name string) string {
 	t.Helper()

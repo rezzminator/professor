@@ -53,15 +53,22 @@ func TestHerdrNativeClaudeDefersLifecycle(t *testing.T) {
 func TestHerdrNativeSeatReporter(t *testing.T) {
 	events := []string{
 		"start", "working", "idle", "attach", "detach", "sync", "invalid resume", "delayed working",
-		"held start", "held idle",
+		"held start", "held idle", "unread idle",
 	}
 	for _, event := range events {
 		t.Run(event, func(t *testing.T) {
 			root := t.TempDir()
 			server := newNativeReporterHerdr(t, "native-seat", "w6:p3", "native-terminal")
 			reportEvent, held := strings.CutPrefix(event, "held ")
+			reportEvent, unread := strings.CutPrefix(reportEvent, "unread ")
+			held = held || unread
 			if held {
 				holdNativeReporterPane(t, server, "w6:p3")
+				if unread {
+					// The foreground read after the seat's proof fails: the state still
+					// reaches the pane, under pfm's source.
+					server.processInfoAnswers = 1
+				}
 			} else {
 				server.addPane("w6:p3", "native")
 			}
@@ -107,8 +114,14 @@ func TestHerdrNativeSeatReporter(t *testing.T) {
 				}
 			}
 			rc := reportToHerdr([]string{reportEvent}, strings.NewReader(string(payload)), &stderr, deps)
-			if rc != 0 || (stderr.Len() != 0 && event != "invalid resume") {
-				t.Fatalf("report rc=%d stderr=%s", rc, &stderr)
+			wantStderr := ""
+			if unread {
+				wantStderr = "pfm internal herdr-state idle: native Claude seat native-seat: read pane w6:p3 " +
+					"foreground (any report goes under pfm's own source): herdr refused pane.process_info pfm-seat pane w6:p3: " +
+					"server_error: refused by fake herdr\n"
+			}
+			if rc != 0 || (stderr.String() != wantStderr && event != "invalid resume") {
+				t.Fatalf("report rc=%d stderr=%q, want %q", rc, stderr.String(), wantStderr)
 			}
 			if event == "invalid resume" && !strings.Contains(stderr.String(), "resume") {
 				t.Fatalf("invalid resume warning=%s", &stderr)

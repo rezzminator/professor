@@ -49,6 +49,7 @@ func TestReadHistoryKeepsTheLastRealTurns(t *testing.T) {
 		`{"type":"user","timestamp":"t3c","message":{"content":"<system-reminder>lead</system-reminder>\ntyped after the reminder string"}}`,
 		`{"type":"user","timestamp":"t4","message":{"content":"Caveat: The messages below were generated"}}`,
 		`{"type":"assistant","message":{"content":[{"type":"text","text":"a"},{"type":"tool_use"},{"type":"text","text":"b"}]}}`,
+		`{"type":"user","timestamp":1730000000,"message":{"content":"numeric stamp"}}`,
 		`{"type":"user","timestamp":"t6","message":{"content":"last"}}`,
 	)
 	got, err := ReadHistory(path, 20)
@@ -62,6 +63,7 @@ func TestReadHistoryKeepsTheLastRealTurns(t *testing.T) {
 		{Timestamp: "t3b", Role: RoleUser, Text: "typed after the reminder block"},
 		{Timestamp: "t3c", Role: RoleUser, Text: "typed after the reminder string"},
 		{Timestamp: "?", Role: RoleAssistant, Text: "a\nb"},
+		{Timestamp: "?", Role: RoleUser, Text: "numeric stamp"},
 		{Timestamp: "t6", Role: RoleUser, Text: "last"},
 	}
 	if !reflect.DeepEqual(got, want) {

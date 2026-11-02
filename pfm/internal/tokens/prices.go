@@ -23,6 +23,9 @@ type priceBook struct {
 	// overrideFailure is why the served table's override did not load: the
 	// run is then priced by the published table without it.
 	overrideFailure string
+	// tableFailure is why no published table loaded: the run then prices
+	// nothing, every dollar "n/a", every token still counted.
+	tableFailure string
 }
 
 // loadSaved reads a saved `pfm model-cost --json --all` document, or a bare
@@ -66,12 +69,13 @@ var refreshPrices = modelcost.Refresh
 // loadServed refreshes and serves the table exactly as `pfm model-cost` does.
 // An invalid override leaves the published table: the audit still counts
 // every token, priced without the override, the failure named in its data gaps.
-// A published table that cannot be loaded prices nothing and is the error.
+// A published table that cannot be loaded leaves an empty book: every dollar
+// "n/a", every token counted, the failure named in the data gaps.
 func loadServed(ctx context.Context, options modelcost.Options) (*priceBook, error) {
 	prices, result, err := refreshPrices(ctx, options)
 	var override *pricing.OverrideError
 	if err != nil && !errors.As(err, &override) {
-		return nil, fmt.Errorf("load the price table: %w", err)
+		return &priceBook{tableFailure: fmt.Sprintf("load the price table: %v", err)}, nil
 	}
 	book := bookOf(modelcost.PriceDocument(prices, result, "", prices.Rows))
 	if override != nil {
@@ -104,6 +108,9 @@ func (book *priceBook) catalog() *object {
 		out.set("saved", nil)
 	}
 	out.set("fetched_at", book.table.FetchedAt).set("sources", sources)
+	if book.tableFailure != "" {
+		out.set("table_failure", book.tableFailure)
+	}
 	if book.billing != nil {
 		out.set("billing", newObject().set("route", book.billing.Route).set("region", book.billing.Region).
 			set("configured", book.billing.Configured).set("multiplier", book.billing.Multiplier))

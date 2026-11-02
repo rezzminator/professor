@@ -229,9 +229,10 @@ func TestLoadServedServesTheEmbeddedTableOfflineWithoutAClone(t *testing.T) {
 	}
 }
 
-// A published table that cannot be loaded prices nothing: the audit fails
-// naming it, never reads it as an unusable override and exits 0.
-func TestAnUnloadablePublishedTableFailsTheAudit(t *testing.T) {
+// A published table that cannot be loaded prices nothing and loses nothing
+// else: every token still counts, every dollar reads "n/a", and the data gaps
+// name the table failure.
+func TestAnUnloadablePublishedTablePricesNothingAndStillCountsTokens(t *testing.T) {
 	broken := errors.New("embedded prices.json: unexpected end of JSON input")
 	saved := refreshPrices
 	refreshPrices = func(context.Context, modelcost.Options) (pricing.Prices, modelcost.Result, error) {
@@ -239,11 +240,34 @@ func TestAnUnloadablePublishedTableFailsTheAudit(t *testing.T) {
 	}
 	t.Cleanup(func() { refreshPrices = saved })
 	root := fixture(t, "claude/projects")
+	out := filepath.Join(t.TempDir(), "report.json")
 	code, stdout, stderr := auditWith(t, Options{Served: modelcost.Options{Home: t.TempDir()}},
-		"--since", "99999d", "--root", root)
-	want := "pfm tokens: load the price table: embedded prices.json: unexpected end of JSON input\n"
-	if code != 1 || stdout != "" || stderr != want {
-		t.Fatalf("code=%d stdout=%q stderr=%q, want 1, no report, %q", code, stdout, stderr, want)
+		"--since", "99999d", "--root", root, "--out", out)
+	if code != 0 || stderr != "" {
+		t.Fatalf("exit %d, stderr %q; want 0 and nothing", code, stderr)
+	}
+	raw, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document struct {
+		Pricing struct {
+			TableFailure string `json:"table_failure"`
+		} `json:"pricing"`
+	}
+	wantFailure := "load the price table: " + broken.Error()
+	if err := json.Unmarshal(raw, &document); err != nil || document.Pricing.TableFailure != wantFailure {
+		t.Errorf("%s pricing.table_failure = %q, %v; want %q", out, document.Pricing.TableFailure, err, wantFailure)
+	}
+	for _, want := range []string{
+		"pricing: none, no price table loaded; not historical billing\n",
+		"data gaps: price table unusable (load the price table: embedded prices.json: unexpected end of JSON " +
+			`input) — tokens counted, every dollar "n/a" · `,
+		" UNPRICED calls ",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("stdout lacks %q:\n%s", want, stdout)
+		}
 	}
 }
 

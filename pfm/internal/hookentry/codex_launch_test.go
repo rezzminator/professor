@@ -271,3 +271,92 @@ func TestCodexLaunchExtensionOwnership(t *testing.T) {
 		})
 	}
 }
+
+// A Codex workbench persona whose mirror build or model alias fails launches
+// with the rest of the persona and says what it left out; a workbench that
+// does not enable Codex stays refused, naming its fix.
+func TestCodexLaunchWorkbenchPersonaParts(t *testing.T) {
+	root := testjail.ShortRoot(t)
+	binDir := filepath.Join(root, "bin")
+	binary := filepath.Join(binDir, "codex")
+	engineSync := filepath.Join(root, "engine-sync")
+	for path, body := range map[string]string{
+		binary:     "#!/bin/sh\n",
+		engineSync: "#!/bin/sh\nprintf '%s\\n' '{\"ok\":false,\"problems\":[\"mirror boom\"]}'\nexit 1\n",
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := testjail.WriteExecutable(path, []byte(body), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	agent := filepath.Join(root, ".claude", "agents", "astra.md")
+	if err := os.MkdirAll(agent, 0o700); err != nil { // a directory: the alias cannot be read
+		t.Fatal(err)
+	}
+	dir := filepath.Join(root, "acme", "docs", "scribe")
+	t.Chdir(root)
+	t.Setenv("PATH", binDir)
+	t.Setenv("ENGINE_SYNC_BIN", engineSync)
+	previous := LaunchExec
+	t.Cleanup(func() { LaunchExec = previous })
+	for _, test := range []struct {
+		name, manifest, wantStderr string
+		code                       int
+		want                       []string
+	}{
+		{
+			name:     "mirror and model unresolvable",
+			manifest: `{"prompt":"scribe.md","engines":["codex"],"model":"astra","effort":"high"}`,
+			want: []string{
+				binary, "--no-daemon", "-c", `model_reasoning_effort="high"`,
+				"-c", "developer_instructions=\"\"\"\nYou are scribe.\"\"\"",
+			},
+			wantStderr: "launch Codex: build the codex mirror of workbench " + dir +
+				": mirror boom; launching on the mirror as it stands\n" +
+				`launch Codex: codex model "astra": read agent persona ` + agent + ": read " + agent +
+				": is a directory; launching on Codex's default model\n",
+		},
+		{
+			name:     "codex not enabled",
+			manifest: `{"prompt":"scribe.md"}`,
+			code:     1,
+			wantStderr: "launch Codex: workbench " + dir + ` does not enable codex: add "codex" to "engines" in ` +
+				paths.WorkbenchManifest(dir) + "\n",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			for path, body := range map[string]string{
+				filepath.Join(root, "acme", ".professor", "baseline.json"): "{}",
+				paths.WorkbenchManifest(dir):                               test.manifest,
+				filepath.Join(dir, ".professor", "scribe.md"):              "You are scribe.",
+			} {
+				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			t.Chdir(dir)
+			var gotArgv []string
+			LaunchExec = func(_ string, argv, _ []string) error {
+				gotArgv = append([]string(nil), argv...)
+				return nil
+			}
+			runtime := config.Runtime{Paths: paths.Values{
+				Home:    root,
+				StateDB: filepath.Join(root, "state", "pfm.db"),
+				SIDDir:  filepath.Join(root, "sid"),
+				TmuxDir: filepath.Join(root, "tmux"),
+			}}
+			var stderr bytes.Buffer
+			code := CodexLaunch(nil, &stderr, runtime)
+			if code != test.code || !slices.Equal(gotArgv, test.want) || stderr.String() != test.wantStderr {
+				t.Fatalf("CodexLaunch code=%d argv=%q stderr=%q\nwant code=%d argv=%q stderr=%q",
+					code, gotArgv, stderr.String(), test.code, test.want, test.wantStderr)
+			}
+		})
+	}
+}

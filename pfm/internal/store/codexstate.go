@@ -229,6 +229,8 @@ func NewCodexThreadResolverRoots(
 		}
 		threads, err := ReadCodexThreads(ctx, files)
 		if err != nil {
+			// No candidates: a pane matches only by its binding or exported id.
+			obs.Logger(ctx).Warn("store.codex_threads.unreadable", obs.FieldErr, err.Error())
 			return nil
 		}
 		rows := make([]resolve.CodexThread, 0, len(threads))

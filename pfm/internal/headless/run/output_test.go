@@ -129,7 +129,19 @@ func TestParseOutputKeepsTheAnswerPastAnUnreadableItem(t *testing.T) {
 			diagnostics: []string{
 				"could not read Codex JSONL event 2: invalid character 'o' in literal null (expecting 'u')",
 				"could not read Codex JSONL event 3: the event has no type",
-				"could not read Codex completed item in event 4: json: cannot unmarshal string into Go value of type struct { Type string \"json:\\\"type\\\"\"; Text string \"json:\\\"text\\\"\"; Message string \"json:\\\"message\\\"\" }",
+				"could not read Codex completed item in event 4: json: cannot unmarshal string into Go value of type run.codexItem",
+			},
+		},
+		{
+			name:   "Codex agent message with a mistyped sibling field and with a text that is not a string",
+			engine: pfmengine.Codex,
+			stdout: `{"type":"item.completed","item":{"type":"agent_message","text":"first","message":5}}` + "\n" +
+				`{"type":"item.completed","item":{"type":"agent_message","text":["kept","too"]}}` + "\n" +
+				`{"type":"turn.completed"}`,
+			answer: `["kept","too"]`,
+			diagnostics: []string{
+				"could not read Codex completed item in event 1, whole; its readable fields were kept: json: cannot unmarshal number into Go struct field codexItem.message of type string",
+				"could not read Codex completed item in event 2, whole; its readable fields were kept: json: cannot unmarshal array into Go struct field codexItem.text of type string",
 			},
 		},
 		{

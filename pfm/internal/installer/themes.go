@@ -202,52 +202,58 @@ const ownerPlaceholder = "{GH_USER}"
 // global skill sources with the blueprint repo owner registeredOwner
 // resolves. Content without the placeholder is returned untouched; a
 // resolution failure is an error naming the placeholder, never a silently
-// unresolved URL.
-func resolveOwnerPlaceholder(content []byte, sourceRepo, releaseURL string) ([]byte, error) {
+// unresolved URL. note names a manifest the owner could not come from.
+func resolveOwnerPlaceholder(content []byte, sourceRepo, releaseURL string) ([]byte, string, error) {
 	if !bytes.Contains(content, []byte(ownerPlaceholder)) {
-		return content, nil
+		return content, "", nil
 	}
-	owner, err := registeredOwner(sourceRepo, releaseURL)
+	owner, note, err := registeredOwner(sourceRepo, releaseURL)
 	if err != nil {
-		return nil, fmt.Errorf("resolve registered placeholder %s: %w", ownerPlaceholder, err)
+		return nil, "", fmt.Errorf("resolve registered placeholder %s: %w", ownerPlaceholder, err)
 	}
-	return bytes.ReplaceAll(content, []byte(ownerPlaceholder), []byte(owner)), nil
+	return bytes.ReplaceAll(content, []byte(ownerPlaceholder), []byte(owner)), note, nil
 }
 
 // registeredOwner resolves {GH_USER}: the owner in the source clone's
 // .professor/manifest.json installed_from.repo, else the owner segment of the
-// release theme URL (ThemeReleaseURL).
-func registeredOwner(sourceRepo, releaseURL string) (string, error) {
+// release theme URL (ThemeReleaseURL). A manifest that cannot be read or names
+// no owner falls through to the release URL, named in note.
+func registeredOwner(sourceRepo, releaseURL string) (owner, note string, err error) {
+	var manifestErr error
 	if strings.TrimSpace(sourceRepo) != "" {
 		manifestPath := filepath.Join(sourceRepo, ".professor", "manifest.json")
-		content, err := os.ReadFile(manifestPath)
-		if err == nil {
+		content, readErr := os.ReadFile(manifestPath)
+		if readErr == nil {
 			var manifest struct {
 				InstalledFrom struct {
 					Repo string `json:"repo"`
 				} `json:"installed_from"`
 			}
 			if decodeErr := json.Unmarshal(content, &manifest); decodeErr != nil {
-				return "", fmt.Errorf("decode %s: %w", manifestPath, decodeErr)
+				manifestErr = fmt.Errorf("decode %s: %w", manifestPath, decodeErr)
+			} else if owner := repositoryOwner(manifest.InstalledFrom.Repo); owner != "" {
+				return owner, "", nil
+			} else {
+				manifestErr = fmt.Errorf("%s installed_from.repo does not name owner/repo", manifestPath)
 			}
-			if owner := repositoryOwner(manifest.InstalledFrom.Repo); owner != "" {
-				return owner, nil
-			}
-			return "", fmt.Errorf("%s installed_from.repo does not name owner/repo", manifestPath)
-		}
-		if !errors.Is(err, fs.ErrNotExist) {
-			return "", fmt.Errorf("read %s: %w", manifestPath, err)
+		} else if !errors.Is(readErr, fs.ErrNotExist) {
+			manifestErr = fmt.Errorf("read %s: %w", manifestPath, readErr)
 		}
 	}
 	parsed, err := url.Parse(strings.TrimSpace(releaseURL))
 	if err != nil {
-		return "", fmt.Errorf("parse release theme URL: %w", err)
+		return "", "", errors.Join(manifestErr, fmt.Errorf("parse release theme URL: %w", err))
 	}
 	segments := strings.Split(strings.Trim(parsed.Path, "/"), "/")
 	if len(segments) < 2 || strings.TrimSpace(segments[0]) == "" {
-		return "", fmt.Errorf("release theme URL %q does not name an owner/repository", releaseURL)
+		return "", "", errors.Join(manifestErr,
+			fmt.Errorf("release theme URL %q does not name an owner/repository", releaseURL))
 	}
-	return segments[0], nil
+	if manifestErr != nil {
+		note = "SKILL-SOURCES-OWNER " + manifestErr.Error() + "; " + ownerPlaceholder +
+			" resolved from the release theme URL instead"
+	}
+	return segments[0], note, nil
 }
 
 func repositoryOwner(repository string) string {

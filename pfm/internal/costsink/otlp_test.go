@@ -12,7 +12,7 @@ func TestDecodeLogsKeepsOnlyApiRequestWithTheLedgerFields(t *testing.T) {
 		str("request_id", "req_x"),
 	}
 	body := logBody(other, apiRequest(testSession, "req_1", "repl_main_thread", 149149))
-	halves, err := DecodeLogs(body)
+	halves, _, err := DecodeLogs(body)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestDecodeReadsInt64FieldsAsNumbersOrStrings(t *testing.T) {
 			attrs[i] = map[string]any{"key": "output_tokens", "value": map[string]any{"doubleValue": 323.0}}
 		}
 	}
-	halves, err := DecodeLogs(logBody(attrs))
+	halves, _, err := DecodeLogs(logBody(attrs))
 	if err != nil || len(halves) != 1 {
 		t.Fatalf("DecodeLogs = %v, %v", halves, err)
 	}
@@ -58,7 +58,7 @@ func TestDecodeReadsInt64FieldsAsNumbersOrStrings(t *testing.T) {
 			attrs[i] = map[string]any{"key": "cost_usd", "value": map[string]any{"doubleValue": 0.14914940000000002}}
 		}
 	}
-	halves, err = DecodeLogs(logBody(attrs))
+	halves, _, err = DecodeLogs(logBody(attrs))
 	if err != nil || len(halves) != 1 {
 		t.Fatalf("DecodeLogs = %v, %v", halves, err)
 	}
@@ -76,7 +76,7 @@ func TestDecodeNamesATokenCountThatIsPresentButNotANumber(t *testing.T) {
 			attrs[i] = str("output_tokens", "many")
 		}
 	}
-	halves, err := DecodeLogs(logBody(attrs))
+	halves, _, err := DecodeLogs(logBody(attrs))
 	if err != nil || len(halves) != 1 {
 		t.Fatalf("DecodeLogs = %v, %v", halves, err)
 	}
@@ -87,7 +87,7 @@ func TestDecodeNamesATokenCountThatIsPresentButNotANumber(t *testing.T) {
 	span := llmSpan(testSession, "req_2", "", "", "repl_main_thread")
 	span["attributes"] = append(withoutKey(span["attributes"].([]map[string]any), "input_tokens"),
 		str("input_tokens", "n/a"))
-	spans, err := DecodeSpans(spanBody(span))
+	spans, _, err := DecodeSpans(spanBody(span))
 	if err != nil || len(spans) != 1 || spans[0].UnreadableCounts != "input_tokens" || spans[0].InputTokens != 0 {
 		t.Fatalf("span half = %+v, %v; want input_tokens named unreadable", spans, err)
 	}
@@ -102,14 +102,14 @@ func TestDecodeResourceIdentityAndResponseID(t *testing.T) {
 			"attributes": withoutKey(apiRequest("", "req_resource", "auto_mode", 5), "session.id"),
 		}}}},
 	}}})
-	halves, err := DecodeLogs(body)
+	halves, _, err := DecodeLogs(body)
 	if err != nil || len(halves) != 1 || halves[0].SessionID != testSession {
 		t.Fatalf("resource identity = %+v, %v; want one background call in its real session", halves, err)
 	}
 	span := llmSpan(testSession, "", "", "", "agent_summary")
 	span["attributes"] = append(withoutKey(span["attributes"].([]map[string]any), "request_id"),
 		str("gen_ai.response.id", "req_response"))
-	spans, err := DecodeSpans(spanBody(span))
+	spans, _, err := DecodeSpans(spanBody(span))
 	if err != nil || len(spans) != 1 || spans[0].RequestID != "req_response" {
 		t.Fatalf("response identity = %+v, %v; want the provider's response id", spans, err)
 	}
@@ -117,7 +117,7 @@ func TestDecodeResourceIdentityAndResponseID(t *testing.T) {
 
 func TestDecodeLogsKeepsARecordWithoutAnIdentity(t *testing.T) {
 	missing := apiRequest("", "", "auto_mode", 5)
-	halves, err := DecodeLogs(logBody(missing))
+	halves, _, err := DecodeLogs(logBody(missing))
 	if err != nil || len(halves) != 1 || halves[0].RequestID != "" || halves[0].SessionID != "" {
 		t.Fatalf("DecodeLogs = %v, %v; want the observation kept without invented identity", halves, err)
 	}
@@ -129,7 +129,7 @@ func TestDecodeSpansKeepsOnlyLlmRequestAndTheEndTime(t *testing.T) {
 		llmSpan(testSession, "req_1", "a0000000000000001", "a0000000000000002", "agent.builtin.general-purpose"),
 		llmSpan(testSession, "req_2", "", "", "repl_main_thread"),
 	)
-	halves, err := DecodeSpans(body)
+	halves, _, err := DecodeSpans(body)
 	if err != nil || len(halves) != 2 {
 		t.Fatalf("DecodeSpans = %v, %v; want the two llm_request spans", halves, err)
 	}
@@ -146,14 +146,14 @@ func TestDecodeSpansKeepsOnlyLlmRequestAndTheEndTime(t *testing.T) {
 }
 
 func TestDecodeRejectsABodyThatIsNotJSON(t *testing.T) {
-	if _, err := DecodeLogs([]byte("not json")); err == nil {
+	if _, _, err := DecodeLogs([]byte("not json")); err == nil {
 		t.Fatal("DecodeLogs accepted a non-JSON body")
 	}
-	if _, err := DecodeSpans([]byte(`{"resourceSpans":`)); err == nil {
+	if _, _, err := DecodeSpans([]byte(`{"resourceSpans":`)); err == nil {
 		t.Fatal("DecodeSpans accepted a truncated body")
 	}
 	var empty json.RawMessage = []byte(`{}`)
-	if halves, err := DecodeLogs(empty); err != nil || len(halves) != 0 {
+	if halves, _, err := DecodeLogs(empty); err != nil || len(halves) != 0 {
 		t.Fatalf("DecodeLogs({}) = %v, %v; want no halves, no error", halves, err)
 	}
 }

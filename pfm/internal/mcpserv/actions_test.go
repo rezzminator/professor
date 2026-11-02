@@ -807,7 +807,7 @@ func TestChatExitEndsOnlyTheRequestScopedCaller(t *testing.T) {
 	}
 	proxy := mcp.Meta{"pfmProxy": map[string]any{
 		"v": ProxyWireVersion, "session": "cc-seat", "socketPath": "/tmp/tmux-1000/cc-seat",
-		"socketName": "cc-seat", "pane": "%7", "engine": "claude", "id": "session-id", "source": "tmux",
+		"socketName": "cc-seat", "pane": "%7", "engine": "claude", "id": "session-id",
 	}}
 	seat := headless.Chat{
 		Backend: "tmux",

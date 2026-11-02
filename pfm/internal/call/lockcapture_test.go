@@ -95,6 +95,12 @@ func TestEngineCaptureNamesACaptureFailureDistinctFromADeadPane(t *testing.T) {
 	if !strings.Contains(detail, "could not run tmux") || !strings.Contains(detail, exec.ErrNotFound.Error()) {
 		t.Fatalf("detail = %q, want it to name the capture failure and its cause", detail)
 	}
+	// A call's own first read says the same: could not look, never a dead pane.
+	result, err := engine.Call(context.Background(), Request{Target: "beta", Message: "hello"})
+	want := `could not run tmux to capture "%1": exec: "tmux": executable file not found in $PATH`
+	if err != nil || result.Code != CodeCaptureFailed || result.Message != want || result.Typed {
+		t.Fatalf("call = %+v err=%v, want CodeCaptureFailed %q, nothing typed", result, err, want)
+	}
 }
 
 // TestEngineCaptureStillReportsAnOrdinaryDeadPaneAsCodeDead pins the

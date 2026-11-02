@@ -89,6 +89,43 @@ func TestScanRecordsATransition(t *testing.T) {
 	}
 }
 
+// One engine's pass failing leaves the others indexed: Scan warns on stderr
+// and lists from the index instead of failing the whole scan.
+func TestScanWarnsOnAPartialIndexAndLists(t *testing.T) {
+	root := testjail.Fleet(t)
+	openCodeRoot := filepath.Join(root, "opencode")
+	if err := os.MkdirAll(openCodeRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(openCodeRoot, "opencode.db"), []byte("not a database"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(paths.EnvOpenCodeRoot, openCodeRoot)
+	database, err := store.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}()
+	var stderr bytes.Buffer
+	if _, err := Scan(
+		context.Background(),
+		database,
+		Request{View: compose.DefaultView, ReadOnly: true},
+		&stderr,
+	); err != nil {
+		t.Fatalf("Scan() = %v, want the partial index warned and the scan listed", err)
+	}
+	want := "pfm: index warning: index engine ox: read opencode sessions: query opencode sessions: " +
+		"file is not a database (26)\n"
+	if got := stderr.String(); got != want {
+		t.Fatalf("stderr = %q, want %q", got, want)
+	}
+}
+
 func TestMain(m *testing.M) {
 	os.Exit(testjail.Run(m))
 }
@@ -224,6 +261,43 @@ func TestResolveEnvWorkbenchCacheOptIn(t *testing.T) {
 	env, err = ResolveEnv(Request{Runtime: runtime})
 	if err != nil || len(env.Workbenches) != 0 {
 		t.Fatalf("chat environment = %+v, %v", env, err)
+	}
+}
+
+// An unreadable cache must not hide the benches under the cwd's project: they
+// are discovered live and the cache failure stays among the faults.
+func TestResolveEnvWorkbenchUnreadableCacheDiscoversLive(t *testing.T) {
+	runtime := jailRuntime(t)
+	runtime.Paths.CacheDB = filepath.Join(t.TempDir(), "index.db")
+	cachePath := paths.WorkbenchCache(runtime.Paths)
+	if err := os.WriteFile(cachePath, []byte(`{"version":2,"workbenches":[],"errors":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(root, "docs", "scribe")
+	for path, content := range map[string]string{
+		filepath.Join(root, ".professor", "baseline.json"): "{}",
+		paths.WorkbenchManifest(dir):                       `{"prompt":"scribe.md","title":"Scribe"}`,
+		filepath.Join(dir, ".professor", "scribe.md"):      "You are scribe.",
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Chdir(root)
+	env, err := ResolveEnv(Request{Runtime: runtime, Workbenches: true})
+	if err != nil || len(env.Workbenches) != 1 || env.Workbenches[0].Dir != dir {
+		t.Fatalf("environment = %+v, %v; want the live-discovered bench %s", env, err, dir)
+	}
+	if len(env.WorkbenchErrors) != 1 || env.WorkbenchErrors[0].Path != cachePath ||
+		!strings.Contains(env.WorkbenchErrors[0].Error(), "unsupported version 2") {
+		t.Fatalf("faults = %#v; want only the cache failure at %s", env.WorkbenchErrors, cachePath)
 	}
 }
 

@@ -360,6 +360,43 @@ func TestProfilePinsDropsAKeyNoRendererEmitsAndKeepsTheRest(t *testing.T) {
 	}
 }
 
+// A profile installed by a pfm that knew a Claude token or a VS Code colour id
+// this build does not costs only that entry: the override stays, the colour is
+// left out, each is named in the notes, and every pin beside it is kept; authoring
+// still refuses both.
+func TestProfilePinsKeepsAnOverrideAndDropsAColourThisBuildDoesNotKnow(t *testing.T) {
+	home := t.TempDir()
+	path := ProfilePath(home, "orchid")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := `{"name":"Orchid","overrides":{"claude":"#ff2e93","nextTokenIdAClaudeReleaseAdded":"#fff"},` +
+		`"surfaces":{"herdr":{"accent":"#ff2e93"},"vscode":{"theme":{"colors":` +
+		`{"editor.background":"#101010","nextColourIdAVSCodeReleaseAdded":"#fff"}}}}}`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := profilePins(home, "custom:orchid")
+	wantNotes := []string{
+		"profile " + path + `: overrides "nextTokenIdAClaudeReleaseAdded": ` +
+			"not a Claude Code theme token this pfm build knows (kept)",
+		"profile " + path + `: vscode theme colors "nextColourIdAVSCodeReleaseAdded": ` +
+			"not a VS Code colour id (vscode_color_ids.txt) (dropped)",
+	}
+	if err != nil || got.pins == nil || got.pins.Herdr.Tokens["accent"] != "#ff2e93" ||
+		!reflect.DeepEqual(got.notes, wantNotes) {
+		t.Fatalf("profilePins = %+v, %v; want the herdr accent kept and notes %q", got, err, wantNotes)
+	}
+	for _, authoring := range []string{
+		`{"overrides":{"nextTokenIdAClaudeReleaseAdded":"#fff"}}`,
+		`{"overrides":{},"surfaces":{"vscode":{"theme":{"colors":{"nextColourIdAVSCodeReleaseAdded":"#fff"}}}}}`,
+	} {
+		if _, err := ParseProfile([]byte(authoring)); err == nil {
+			t.Errorf("authoring accepted %s", authoring)
+		}
+	}
+}
+
 func TestProfilePinsReadsOnlyACustomValuesProfile(t *testing.T) {
 	home := t.TempDir()
 	path := ProfilePath(home, "orchid")

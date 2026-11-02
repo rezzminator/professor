@@ -38,12 +38,18 @@ func collectOpenCodeRunOutput(
 ) (string, error) {
 	ticker := request.Clock.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
+	var markerDecodeErr error
 	for {
 		markerBody, markerErr := os.ReadFile(assistantPath)
 		if markerErr == nil {
 			var marker openCodeAssistantMarker
 			if err := json.Unmarshal(markerBody, &marker); err != nil {
-				return "", fmt.Errorf("decode OpenCode assistant marker: %w", err)
+				// the plugin writes the marker atomically: an unreadable one is read again next tick, and
+				// named if the wait ends on it
+				markerDecodeErr = fmt.Errorf("decode OpenCode assistant marker: %w", err)
+				marker = openCodeAssistantMarker{}
+			} else {
+				markerDecodeErr = nil
 			}
 			if len(marker.Error) != 0 && string(marker.Error) != jsonNull {
 				var output bytes.Buffer
@@ -92,7 +98,7 @@ func collectOpenCodeRunOutput(
 		}
 		select {
 		case <-ctx.Done():
-			return "", fmt.Errorf("wait for OpenCode run result: %w", ctx.Err())
+			return "", errors.Join(fmt.Errorf("wait for OpenCode run result: %w", ctx.Err()), markerDecodeErr)
 		case <-ticker.C():
 		}
 	}
@@ -356,6 +362,18 @@ func appendOpenCodeErrorEvent(output *bytes.Buffer, errorValue json.RawMessage) 
 	return nil
 }
 
+type openCodeTextTime struct {
+	End int64 `json:"end"`
+}
+
+// openCodeTextPart is the part of an OpenCode text event pfm reads.
+type openCodeTextPart struct {
+	ID        string           `json:"id"`
+	MessageID string           `json:"messageID"`
+	Text      string           `json:"text"`
+	Time      openCodeTextTime `json:"time"`
+}
+
 func parseOpenCodeJSONL(result *Result, request Request) error {
 	var text string
 	var terminalReason string
@@ -399,17 +417,20 @@ func parseOpenCodeJSONL(result *Result, request Request) error {
 			}
 			result.Diagnostics = append(result.Diagnostics, message)
 		case jsonEventText:
-			var part struct {
-				ID        string `json:"id"`
-				MessageID string `json:"messageID"`
-				Text      string `json:"text"`
-				Time      struct {
-					End int64 `json:"end"`
-				} `json:"time"`
-			}
+			var part openCodeTextPart
 			if err := json.Unmarshal(event.Part, &part); err != nil {
-				result.noteUnreadable(fmt.Sprintf("OpenCode text event %d", lineNo+1), err)
-				continue
+				var fields map[string]json.RawMessage
+				if json.Unmarshal(event.Part, &fields) != nil {
+					result.noteUnreadable(fmt.Sprintf("OpenCode text event %d", lineNo+1), err)
+					continue
+				}
+				// one mistyped field costs that field: the model's text is read on its own
+				result.noteUnreadable(
+					fmt.Sprintf("OpenCode text event %d, whole; its readable fields were kept", lineNo+1), err)
+				part = openCodeTextPart{
+					ID: lenientField[string](fields, "id"), MessageID: lenientField[string](fields, "messageID"),
+					Text: lenientText(fields, "text"), Time: lenientField[openCodeTextTime](fields, "time"),
+				}
 			}
 			if part.Time.End != 0 || part.Text != "" {
 				messageID := part.MessageID

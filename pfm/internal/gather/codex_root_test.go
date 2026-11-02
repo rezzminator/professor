@@ -37,12 +37,19 @@ func TestCodexHeldRootWinsOverChildFirstDescriptors(t *testing.T) {
 	if err := os.WriteFile(newborn, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	// A child rollout whose header cannot be read costs that child only.
+	torn := filepath.Join(root, "sessions", "rollout-torn.jsonl")
+	if err := os.WriteFile(torn, []byte("{broken\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	proc := &fakeProcFS{processes: map[int]fakeProcess{
 		100: {stat: ProcStat{ParentPID: 1}},
 		400: {
 			cmdline: []string{"codex"},
 			stat:    ProcStat{ParentPID: 100},
-			fdLinks: []FDLink{{FD: 3, Target: child}, {FD: 5, Target: newborn}, {FD: 8, Target: parent}},
+			fdLinks: []FDLink{
+				{FD: 3, Target: child}, {FD: 4, Target: torn}, {FD: 5, Target: newborn}, {FD: 8, Target: parent},
+			},
 		},
 		401: {cmdline: []string{"codex"}, stat: ProcStat{ParentPID: 400}, fdLinks: []FDLink{{FD: 2, Target: child}}},
 	}}

@@ -8,6 +8,7 @@ package fleet
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -97,6 +98,12 @@ func Scan(
 	counters, err := indexer.Run(ctx, fleetindex.Options{
 		PriorityCWD: env.CurrentDir,
 	})
+	var partial *fleetindex.PartialError
+	if errors.As(err, &partial) {
+		// Failed engines keep their prior rows: list from the index and say so.
+		fmt.Fprintf(stderr, "pfm: index warning: %v\n", err)
+		err = nil
+	}
 	if err != nil {
 		return Result{}, err
 	}
@@ -311,9 +318,19 @@ func ResolveEnv(request Request) (Env, error) {
 		if err == nil {
 			env.Workbenches, env.WorkbenchErrors = benches, faults
 		} else {
-			env.WorkbenchErrors = []workbench.WalkError{
+			// An unreadable cache must not hide the benches: discover them live
+			// under the cwd's managed root and keep the cache failure among the rows.
+			faults := []workbench.WalkError{
 				{Root: currentDir, Path: paths.WorkbenchCache(resolved), Err: err},
 			}
+			roots, rootsErr := workbench.ManagedRoots([]string{currentDir})
+			if rootsErr != nil {
+				faults = append(faults, workbench.WalkError{Root: currentDir, Path: currentDir, Err: rootsErr})
+			}
+			var walkErrors []workbench.WalkError
+			env.Workbenches, walkErrors = workbench.Discover(roots)
+			faults = append(faults, walkErrors...)
+			env.WorkbenchErrors = faults
 		}
 	}
 	return env, nil

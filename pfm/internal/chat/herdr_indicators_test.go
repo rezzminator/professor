@@ -220,6 +220,18 @@ func TestHerdrTabViewReaderUsesActualClientsAndGeneration(t *testing.T) {
 	if valid, err := got[0].Validate(context.Background()); err != nil || !valid {
 		t.Fatalf("current generation valid=%t err=%v", valid, err)
 	}
+	// A client mapping pfm cannot decode is rebuilt from the live clients, named.
+	generation = `{"seq":`
+	warnings.Reset()
+	rebuilt, err := reader.views(context.Background(), target, "endpoint", panes)
+	if err != nil || len(rebuilt) != 2 || rebuilt[0].Pane != "w1:p1" || rebuilt[1].Pane != "w2:p2" {
+		t.Fatalf("rebuilt views=%+v err=%v", rebuilt, err)
+	}
+	if want := "Herdr tab client mappings of s1 unreadable (unexpected end of JSON input); using the live clients\n" +
+		"Herdr tab client \"bogus\" of s1 skipped: not a pid\n" +
+		"Herdr tab client 13 of s1 skipped: read environ of 13: no such process\n"; warnings.String() != want {
+		t.Fatalf("unreadable mapping named %q, want %q", warnings.String(), want)
+	}
 	generation = `{"session_id":"s2","seq":2}`
 	if valid, err := got[0].Validate(context.Background()); err != nil || valid {
 		t.Fatalf("replaced generation valid=%t err=%v", valid, err)
@@ -246,6 +258,16 @@ func TestHerdrTabViewReaderUsesActualClientsAndGeneration(t *testing.T) {
 	got, err = reader.views(context.Background(), target, "endpoint", panes)
 	if err != nil || len(got) != 0 {
 		t.Fatalf("replacement retained old chat=%+v err=%v", got, err)
+	}
+	// An agent_session of a kind pfm does not know vetoes nothing: the terminal that proved the tab keeps it.
+	panes[1].Session = []byte(`{"kind":"future","value":"s1"}`)
+	warnings.Reset()
+	got, err = reader.views(context.Background(), target, "endpoint", panes)
+	if err != nil || len(got) != 1 || got[0].Pane != "w2:p2" || !got[0].Retained {
+		t.Fatalf("unknown claim retained views=%+v err=%v", got, err)
+	}
+	if want := "Herdr tab w2:t2 of s1: unusable tab agent_session: unsupported kind \"future\"; the pane's terminal proves it\n"; warnings.String() != want {
+		t.Fatalf("unknown claim named %q, want %q", warnings.String(), want)
 	}
 }
 
@@ -424,6 +446,7 @@ func TestHerdrTabNativePaneWithoutAgentSession(t *testing.T) {
 		// judged by the replacement seat that now carries the chat.
 		replaced bool
 		views    int
+		warning  string
 	}{
 		{name: "the seat's terminal proves the pane", seatTerminal: "term1", views: 1},
 		{name: "a seat with no recorded terminal", seatTerminal: "", views: 0},
@@ -444,6 +467,16 @@ func TestHerdrTabNativePaneWithoutAgentSession(t *testing.T) {
 		{
 			name: "an agent_session naming this chat born in another terminal", seatTerminal: "term0", views: 0,
 			session: `{"source":"herdr:claude","agent":"claude","kind":"id","value":"s1"}`,
+		},
+		{
+			name: "an agent_session of an unknown kind, the seat's terminal proves the pane", seatTerminal: "term1",
+			views: 1, session: `{"source":"herdr:claude","agent":"claude","kind":"future","value":"s1"}`,
+			warning: "Herdr tab w1:t1 of s1: unusable tab agent_session: unsupported kind \"future\"; the pane's terminal proves it\n",
+		},
+		{
+			name: "an agent_session with no value, the seat's terminal proves the pane", seatTerminal: "term1",
+			views: 1, session: `{"kind":"id"}`,
+			warning: "Herdr tab w1:t1 of s1: unusable tab agent_session: incomplete: {\"kind\":\"id\"}; the pane's terminal proves it\n",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -505,8 +538,8 @@ func TestHerdrTabNativePaneWithoutAgentSession(t *testing.T) {
 				engine: func(context.Context, fleetdb.Seat) (bool, error) { return true, nil },
 			}
 			got, err := reader.views(ctx, target, "endpoint", []herdr.TabPane{pane})
-			if err != nil || len(got) != tc.views {
-				t.Fatalf("views=%+v err=%v warnings=%q", got, err, warnings)
+			if err != nil || len(got) != tc.views || warnings.String() != tc.warning {
+				t.Fatalf("views=%+v err=%v warnings=%q, want warnings %q", got, err, warnings, tc.warning)
 			}
 			if tc.views == 0 {
 				return

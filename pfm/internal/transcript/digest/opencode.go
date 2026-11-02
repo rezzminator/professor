@@ -198,8 +198,8 @@ func lastTextPart(parts []index.OpenCodeRow) string {
 	last := ""
 	for _, row := range parts {
 		var part openCodePart
-		if json.Unmarshal([]byte(row.Data), &part) != nil || part.Type != "text" || part.Ignored || part.Text == nil ||
-			pyvalue.Strip(*part.Text) == "" {
+		if transcript.DecodeTolerant([]byte(row.Data), &part) != nil || part.Type != "text" || part.Ignored ||
+			part.Text == nil || pyvalue.Strip(*part.Text) == "" {
 			continue
 		}
 		last = row.ID
@@ -277,7 +277,7 @@ func (p *parsed) openCodePart(n int, row index.OpenCodeRow, role string, final b
 	ts := msStamp(row.TimeCreatedMS)
 	p.stamp(ts)
 	var part openCodePart
-	if err := json.Unmarshal([]byte(row.Data), &part); err != nil {
+	if err := transcript.DecodeTolerant([]byte(row.Data), &part); err != nil {
 		p.mark(n, dispSkipped, "part (unparseable)")
 		return
 	}
@@ -488,7 +488,7 @@ func readOpenCodeAgentRow(ctx context.Context, root string, child store.OpenCode
 	for _, row := range rows.Parts {
 		note(row.TimeCreatedMS)
 		var part openCodePart
-		if json.Unmarshal([]byte(row.Data), &part) == nil && part.Type == openCodeToolPart {
+		if transcript.DecodeTolerant([]byte(row.Data), &part) == nil && part.Type == openCodeToolPart {
 			calls++
 		}
 	}

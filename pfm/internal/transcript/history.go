@@ -96,7 +96,7 @@ func ReadHistory(path string, count int) (messages []HistoryMessage, returnErr e
 				Content json.RawMessage `json:"content"`
 			} `json:"message"`
 		}
-		if err := json.Unmarshal([]byte(line), &record); err != nil {
+		if err := DecodeTolerant([]byte(line), &record); err != nil {
 			// One bad row is not fatal and not silent: it costs itself, a marker stands in.
 			messages = append(messages, HistoryMessage{
 				Timestamp: "?",

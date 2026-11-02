@@ -16,6 +16,9 @@ type RefreshReport struct {
 	Persisted    *bool  `json:"persisted,omitempty"`
 	PersistError string `json:"persist_error,omitempty"`
 	StampError   string `json:"stamp_error,omitempty"`
+	// Carried lists the models whose rows the refresh kept from the previous table
+	// because the fetched pages priced them in a way that would not fold.
+	Carried []string `json:"carried,omitempty"`
 }
 
 // Document is the `pfm model-cost --json` document: the served table, where

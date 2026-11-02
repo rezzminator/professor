@@ -2,6 +2,7 @@ package spawn
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -198,5 +199,41 @@ func TestCodexFolderTrustKeyReadsTheDialogsOwnOption(t *testing.T) {
 		if key := startupOverlayKey(testCase.capture); testCase.want != "" && key != testCase.want {
 			t.Errorf("%s: startupOverlayKey = %q, want %q", testCase.name, key, testCase.want)
 		}
+	}
+}
+
+// blindAfterPrompt is a Codex chat whose pane stops answering captures once the
+// first prompt was pasted: the chat is running, only its thread is unverified.
+type blindAfterPrompt struct{ *fakeCodex }
+
+func (fake *blindAfterPrompt) Pane(socket, pane string) (pfmcall.Screen, pfmcall.Target, error) {
+	return fake, fakeTarget(socket, pane), nil
+}
+
+func (fake *blindAfterPrompt) CaptureScreen(ctx context.Context, target pfmcall.Target) (string, error) {
+	fake.mutex.Lock()
+	pasted := false
+	for _, key := range fake.keys {
+		pasted = pasted || strings.HasPrefix(key, "paste:")
+	}
+	fake.mutex.Unlock()
+	if pasted {
+		return "", errors.New("pane capture failed")
+	}
+	return fake.fakeCodex.CaptureScreen(ctx, target)
+}
+
+// TestCodexThreadCheckThatCannotReadTheScreenWarnsAndKeepsTheChat: a screen the
+// thread check cannot read leaves a chat that is already running reported as
+// started, with the unverified thread named, never as a failed spawn.
+func TestCodexThreadCheckThatCannotReadTheScreenWarnsAndKeepsTheChat(t *testing.T) {
+	result, err := Run(context.Background(), &blindAfterPrompt{newFakeCodex()}, codexRequest())
+	if err != nil {
+		t.Fatalf("Run() reported a running chat as failed: %v", err)
+	}
+	want := "could not read the Codex chat on socket cx-1-2-3 to confirm it started a thread: " +
+		"pane capture failed; the chat is running, unverified"
+	if len(result.Warnings) == 0 || result.Warnings[0] != want || !result.Named {
+		t.Fatalf("result = %#v, want Named with first warning %q", result, want)
 	}
 }

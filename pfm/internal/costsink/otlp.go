@@ -122,16 +122,28 @@ type otlpResource struct {
 	Attributes []otlpAttr `json:"attributes"`
 }
 
+type otlpLogRecord struct {
+	TraceID      string          `json:"traceId"`
+	SpanID       string          `json:"spanId"`
+	TimeUnixNano json.RawMessage `json:"timeUnixNano"`
+	Attributes   []otlpAttr      `json:"attributes"`
+}
+
+type otlpSpan struct {
+	Name            string          `json:"name"`
+	TraceID         string          `json:"traceId"`
+	SpanID          string          `json:"spanId"`
+	EndTimeUnixNano json.RawMessage `json:"endTimeUnixNano"`
+	Attributes      []otlpAttr      `json:"attributes"`
+}
+
+// The records of both requests stay raw until decodeEach reads them one by one: a record of an
+// unexpected shape costs that record, never the batch.
 type logsRequest struct {
 	ResourceLogs []struct {
 		Resource  otlpResource `json:"resource"`
 		ScopeLogs []struct {
-			LogRecords []struct {
-				TraceID      string          `json:"traceId"`
-				SpanID       string          `json:"spanId"`
-				TimeUnixNano json.RawMessage `json:"timeUnixNano"`
-				Attributes   []otlpAttr      `json:"attributes"`
-			} `json:"logRecords"`
+			LogRecords []json.RawMessage `json:"logRecords"`
 		} `json:"scopeLogs"`
 	} `json:"resourceLogs"`
 }
@@ -140,15 +152,23 @@ type tracesRequest struct {
 	ResourceSpans []struct {
 		Resource   otlpResource `json:"resource"`
 		ScopeSpans []struct {
-			Spans []struct {
-				Name            string          `json:"name"`
-				TraceID         string          `json:"traceId"`
-				SpanID          string          `json:"spanId"`
-				EndTimeUnixNano json.RawMessage `json:"endTimeUnixNano"`
-				Attributes      []otlpAttr      `json:"attributes"`
-			} `json:"spans"`
+			Spans []json.RawMessage `json:"spans"`
 		} `json:"scopeSpans"`
 	} `json:"resourceSpans"`
+}
+
+// decodeEach decodes each raw record as T; a record that will not decode is counted in undecodable
+// and skipped, so the records beside it still count.
+func decodeEach[T any](raws []json.RawMessage) (records []T, undecodable int) {
+	for _, raw := range raws {
+		var record T
+		if err := json.Unmarshal(raw, &record); err != nil {
+			undecodable++
+			continue
+		}
+		records = append(records, record)
+	}
+	return records, undecodable
 }
 
 // scopedAttrs gives a record's attributes precedence over its resource defaults.
@@ -168,17 +188,19 @@ func (a attrs) sessionID() string {
 	return firstFilled(a.str("session.id"), a.str("session_id"))
 }
 
-// DecodeLogs reduces an OTLP/HTTP JSON logs body to api_request records. Missing identity
-// remains empty: the sink accounts for these observations without inventing attribution.
-func DecodeLogs(body []byte) ([]LogHalf, error) {
+// DecodeLogs reduces an OTLP/HTTP JSON logs body to api_request records, and counts the records
+// whose shape it could not read in undecodable. Missing identity remains empty: the sink accounts
+// for these observations without inventing attribution.
+func DecodeLogs(body []byte) (halves []LogHalf, undecodable int, err error) {
 	var request logsRequest
 	if err := json.Unmarshal(body, &request); err != nil {
-		return nil, fmt.Errorf("decode OTLP logs: %w", err)
+		return nil, 0, fmt.Errorf("decode OTLP logs: %w", err)
 	}
-	var halves []LogHalf
 	for _, resource := range request.ResourceLogs {
 		for _, scope := range resource.ScopeLogs {
-			for _, record := range scope.LogRecords {
+			records, bad := decodeEach[otlpLogRecord](scope.LogRecords)
+			undecodable += bad
+			for _, record := range records {
 				a := scopedAttrs(resource.Resource, record.Attributes)
 				if a.str("event.name") != apiRequestEvent {
 					continue
@@ -210,11 +232,11 @@ func DecodeLogs(body []byte) ([]LogHalf, error) {
 			}
 		}
 	}
-	return halves, nil
+	return halves, undecodable, nil
 }
 
-// RefusedError reports records refused by ingest for an unsafe session identity.
-// Accepted halves have already been joined; the POST is not a bad request.
+// RefusedError reports records refused by ingest, for an unsafe session identity or a shape the
+// decoder could not read. Accepted halves have already been joined; the POST is not a bad request.
 type RefusedError struct {
 	Count  int
 	Reason string
@@ -223,16 +245,18 @@ type RefusedError struct {
 func (e *RefusedError) Error() string { return e.Reason }
 
 // DecodeSpans reduces an OTLP/HTTP JSON traces body to its claude_code.llm_request spans, the
-// query source spelled as the log half spells it.
-func DecodeSpans(body []byte) ([]SpanHalf, error) {
+// query source spelled as the log half spells it, and counts the spans it could not read in
+// undecodable.
+func DecodeSpans(body []byte) (halves []SpanHalf, undecodable int, err error) {
 	var request tracesRequest
 	if err := json.Unmarshal(body, &request); err != nil {
-		return nil, fmt.Errorf("decode OTLP traces: %w", err)
+		return nil, 0, fmt.Errorf("decode OTLP traces: %w", err)
 	}
-	var halves []SpanHalf
 	for _, resource := range request.ResourceSpans {
 		for _, scope := range resource.ScopeSpans {
-			for _, span := range scope.Spans {
+			spans, bad := decodeEach[otlpSpan](scope.Spans)
+			undecodable += bad
+			for _, span := range spans {
 				if span.Name != llmRequestSpan {
 					continue
 				}
@@ -257,7 +281,7 @@ func DecodeSpans(body []byte) ([]SpanHalf, error) {
 			}
 		}
 	}
-	return halves, nil
+	return halves, undecodable, nil
 }
 
 // NormalizeSpanQuerySource spells a span's query_source_safe as the log's query_source is spelled:

@@ -112,11 +112,13 @@ func TestChatServerDoorLeavesTheTitleToTheHostOnAnUnreadableConfig(t *testing.T)
 
 // A cx placed in Herdr is born through chat new carrying its one typed prompt;
 // a shell holding an older shim passes the prompt only inside its run string,
-// which is refused, never born without it.
+// from which it is carried, said, never born without it.
 func TestChatServerNativeBirthCarriesTheTypedPrompt(t *testing.T) {
 	const socket = "cx-1800000055-1-1"
 	run := `"/h/.local/bin/pfm" internal codex-launch`
 	born := []string{"new", "--engine=cx", "--name", socket, "--cwd", "/tmp", "--attach", "--"}
+	const olderShim = "pfm internal chat-server: this shell's cx predates this pfm and passed its words only " +
+		"inside its run string; carried from there — open a new shell (or run: source ~/.zshrc)\n"
 	for _, tc := range []struct {
 		name   string
 		args   []string
@@ -130,9 +132,14 @@ func TestChatServerNativeBirthCarriesTheTypedPrompt(t *testing.T) {
 			code: ChatServerBornNative, birth: append(slices.Clone(born), "fix it"),
 		},
 		{
+			name: "older shim's prompt", args: []string{socket, "/tmp", run + " fix\\ it"},
+			code: ChatServerBornNative, birth: append(slices.Clone(born), "fix it"), stderr: olderShim,
+		},
+		{
 			name: "older shim's three arguments", args: []string{socket, "/tmp", run + " --resume abc"}, code: 1,
-			stderr: "pfm internal chat-server: this shell's cx predates this pfm and passed --resume abc only " +
-				"inside its run string; open a new shell (or run: source ~/.zshrc) and run cx again\n",
+			stderr: olderShim + "pfm internal chat-server: a cx born in Herdr carries one prompt only, not " +
+				`"--resume abc"; type ` + "`codex …`" + " in this pane, or start it with: " +
+				"pfm chat new {name} --engine codex\n",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

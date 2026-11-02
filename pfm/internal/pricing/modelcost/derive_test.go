@@ -2,6 +2,8 @@ package modelcost
 
 import (
 	"os"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -26,7 +28,7 @@ func catalogsOf(t *testing.T, claude, openai string) []Catalog {
 
 func derived(t *testing.T, claude, openai string) pricing.Table {
 	t.Helper()
-	table, err := Derive(catalogsOf(t, claude, openai), "2026-10-08T09:00:00Z")
+	table, _, err := Derive(catalogsOf(t, claude, openai), "2026-10-08T09:00:00Z", nil)
 	if err != nil {
 		t.Fatalf("Derive: %v", err)
 	}
@@ -183,19 +185,58 @@ func TestDeriveVariants(t *testing.T) {
 	}
 }
 
+// conflictingPages are the fixture pages with one model on each provider priced twice, the rows
+// disagreeing, so neither folds into one row.
+func conflictingPages() (claude, openai string) {
+	claude = strings.Replace(claudePage, "| Claude Opus 4.1 | $15 / MTok |",
+		"| Claude Opus 4.1 | $16 / MTok | $18.75 / MTok | $30 / MTok | $1.50 / MTok | $75 / MTok |\n"+
+			"| Claude Opus 4.1 | $15 / MTok |", 1)
+	openai = openAIPage + "### Grouped Pricing Table data\n" + openAIHeader +
+		"| gpt-6-astra | $99.00 | $1.00 | $12.50 | $50.00 | $20.00 | $2.00 | $25.00 | $75.00 |\n"
+	return claude, openai
+}
+
+func TestDeriveKeepsThePublishedRowOfAModelItCannotFold(t *testing.T) {
+	claude, openai := conflictingPages()
+	published := derived(t, claudePage, openAIPage).Rows
+	published = append(published, pricing.Row{
+		Key: "gpt-retired", Engine: pricing.EngineCodex, Rates: pricing.Rates{In: rate(1), Out: rate(2)},
+	})
+	table, kept, err := Derive(catalogsOf(t, claude, openai), "2026-10-08T09:00:00Z", published)
+	if err != nil {
+		t.Fatalf("Derive: %v", err)
+	}
+	if want := []string{"claude-opus-4-1", "gpt-6-astra"}; !slices.Equal(kept, want) {
+		t.Fatalf("kept = %v, want %v", kept, want)
+	}
+	for _, key := range kept {
+		at := slices.IndexFunc(table.Rows, func(row pricing.Row) bool { return row.Key == key })
+		was := slices.IndexFunc(published, func(row pricing.Row) bool { return row.Key == key })
+		if at < 0 || !reflect.DeepEqual(table.Rows[at], published[was]) {
+			t.Fatalf("%s row = %+v, want the published %+v", key, table.Rows[at], published[was])
+		}
+	}
+	if slices.ContainsFunc(table.Rows, func(row pricing.Row) bool { return row.Key == "gpt-retired" }) {
+		t.Fatal("a model no page lists kept its row, want it dropped")
+	}
+	if _, kept, _ := Derive(catalogsOf(t, claude, openai), "2026-10-08T09:00:00Z", nil); len(kept) != 0 {
+		t.Fatalf("kept = %v with no published rows, want none", kept)
+	}
+}
+
 func TestDeriveRefusesAProviderWithoutRows(t *testing.T) {
 	for _, tc := range []struct{ name, claude, openai, want string }{
 		{"no prices-per-1M statement", claudePage, strings.ReplaceAll(openAIPage, "Prices per 1M tokens.", ""), "openai"},
 		{"no model pricing table", strings.Replace(claudePage, "## Model pricing", "## Model rates", 1), openAIPage, "anthropic"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := Derive(catalogsOf(t, tc.claude, tc.openai), "2026-10-08T09:00:00Z")
+			_, _, err := Derive(catalogsOf(t, tc.claude, tc.openai), "2026-10-08T09:00:00Z", nil)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("Derive error = %v, want one naming %s", err, tc.want)
 			}
 		})
 	}
-	if _, err := Derive(catalogsOf(t, claudePage, openAIPage)[:1], "2026-10-08T09:00:00Z"); err == nil {
+	if _, _, err := Derive(catalogsOf(t, claudePage, openAIPage)[:1], "2026-10-08T09:00:00Z", nil); err == nil {
 		t.Fatal("Derive of one provider succeeded, want an error")
 	}
 }

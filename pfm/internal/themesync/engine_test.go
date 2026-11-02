@@ -432,6 +432,26 @@ func TestAutoSourceFollowsTheSystemAppearance(t *testing.T) {
 	}
 }
 
+// An auto theme whose system side cannot be read keeps the side last applied:
+// the sync goes on, every surface still follows, and the claude row names why
+// the side was not re-read.
+func TestAutoSourceKeepsTheLastSideWhenTheSystemAppearanceCannotBeRead(t *testing.T) {
+	h := newHarness(t)
+	h.write(settingsRel, `{"theme":"auto"}`)
+	h.appearanceOut = "" // a light system
+	h.rearm()
+	h.on()
+	h.appearanceFail = "defaults: broken plist"
+	h.rearm()
+	report := h.sync(true)
+	wantVerdict(t, report, "claude", VerdictSource, "system appearance unreadable, drawing light: "+
+		"themesync: defaults read AppleInterfaceStyle exited 1: defaults: broken plist")
+	if report.Appearance != Light || h.tmux.servers["cc-a"]["@pfm-c-bg"] != "#ffffff" {
+		t.Errorf("an unreadable system side gave appearance %s tmux bg %q, want the last side light #ffffff",
+			report.Appearance, h.tmux.servers["cc-a"]["@pfm-c-bg"])
+	}
+}
+
 func TestSourceErrorNamesTheFileAndWritesNoSurface(t *testing.T) {
 	h := newHarness(t)
 	h.write(settingsRel, `{"theme":"custom:missing"}`)

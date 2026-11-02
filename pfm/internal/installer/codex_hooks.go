@@ -503,16 +503,16 @@ func (installer *engine) wireCodexHookTrust(carriesHook map[string][]ExpectedHoo
 		}
 		seenAccounts[physical] = true
 		err := func() error {
-			// Retired appendix trust is cleaned up on install and uninstall.
+			// Retired appendix trust is cleaned up on install and uninstall; a
+			// receipt that will not clean up never skips the current trust.
+			var retiredErr error
 			if codexappendix.TrustRecorded(account) {
-				if err := installer.change(
+				retiredErr = installer.change(
 					"remove retired appendix hook trust "+account,
 					func() error { return codexappendix.Unregister(account) },
-				); err != nil {
-					return err
-				}
+				)
 			}
-			return installer.wireHandlerTrust(account, carriesHook)
+			return errors.Join(retiredErr, installer.wireHandlerTrust(account, carriesHook))
 		}()
 		if err != nil {
 			//nolint:staticcheck // Codex is a product name.

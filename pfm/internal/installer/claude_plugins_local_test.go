@@ -372,6 +372,34 @@ func TestEnsureClaudePluginsAlphaInstallsTheLocalCopy(t *testing.T) {
 	}
 }
 
+// TestEnsureClaudePluginsKeepsAnUnparsableLocalManifest: a local professor
+// manifest that does not parse is rewritten whole, its bytes kept as a backup
+// the change line names.
+func TestEnsureClaudePluginsKeepsAnUnparsableLocalManifest(t *testing.T) {
+	root := t.TempDir()
+	inst, runner, out, home, _ := alphaPluginEngine(t, root)
+	inst.stamp = "fixture"
+	simulateClaude(t, runner)
+	for _, p := range testPlugins {
+		writePluginCheckout(t, root, p.Name)
+	}
+	manifestPath := filepath.Join(home, ".local", "share", "professor-dev", ".claude-plugin", "marketplace.json")
+	broken := `{"name":"professor","description":"hand note",`
+	writeFixture(t, manifestPath, broken)
+	if err := inst.ensureClaudePlugins(context.Background()); err != nil {
+		t.Fatalf("ensureClaudePlugins: %v\n%s", err, out.String())
+	}
+	backup := manifestPath + ".pre-professor-fixture"
+	if got := readFixture(t, backup); got != broken {
+		t.Fatalf("backup %s = %q, want %q\n%s", backup, got, broken, out.String())
+	}
+	line := "  change  add " + testPlugins[0].Name + " to " + manifestPath +
+		"; the manifest it replaces kept as " + backup + "\n"
+	if !strings.Contains(out.String(), line) {
+		t.Fatalf("missing %q:\n%s", line, out.String())
+	}
+}
+
 // TestEnsureClaudePluginsRetiresTheLegacyIDs: on every build an installed
 // {name}@professor takes over each legacy id enabled in settings.json: the
 // legacy ids disabled with the options of the enabled one carried, then every

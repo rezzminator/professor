@@ -448,6 +448,66 @@ func TestArchiveReplaysSidecarCleanupBeforeRetiringKill(t *testing.T) {
 	}
 }
 
+// A history.jsonl the run cannot prune holds back only the moved chat's kill
+// (its next run replays the cleanup): the orphan decided beside it is retired,
+// the codex index is still pruned, and the failure stays the run's error.
+func TestArchiveDecidesTheRestWhenOneSidecarCannotBePruned(t *testing.T) {
+	values := archiveJail(t)
+	const (
+		movedID  = "88888888-8888-4888-8888-888888888888"
+		ghostID  = "33333333-3333-4333-8333-333333333333"
+		codexRow = "99999999-9999-4999-8999-999999999999"
+	)
+	writeFile(t, filepath.Join(values.Roots[pfmengine.Claude][0], "-p", movedID+".jsonl"), "{}\n")
+	oversized := `{"sessionId":"` + movedID + `","display":"` + strings.Repeat("x", 8*1024*1024) + `"}` + "\n"
+	writeFile(t, filepath.Join(values.Home, ".claude", "history.jsonl"), oversized)
+	index := filepath.Join(values.Roots[pfmengine.Codex][0], "session_index.jsonl")
+	writeFile(
+		t,
+		index,
+		`{"id":"`+movedID+`","thread_name":"moved"}`+"\n"+`{"id":"`+codexRow+`","thread_name":"kept"}`+"\n",
+	)
+	kills := &fakeKills{rows: []KilledChat{
+		{ID: movedID, Engine: pfmengine.Claude},
+		{ID: ghostID, Engine: pfmengine.Claude},
+	}}
+	runner, err := New(Dependencies{Paths: values, Kills: kills, Proc: emptyProc{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, recorder := obs.Test(t)
+	report, err := runner.Run(ctx, Options{Apply: true})
+	if err == nil || !strings.Contains(err.Error(), "token too long") {
+		t.Fatalf("Run error = %v, want the history prune failure", err)
+	}
+	// The move happened on disk, so its trail records it despite the failed cleanup.
+	var moves []string
+	for _, record := range recorder.Records() {
+		if prior, _ := record.Field("prior"); record.Message == "state.transition" && prior == "chat" {
+			next, _ := record.Field("next")
+			moves = append(moves, next.(string))
+		}
+	}
+	if got := strings.Join(moves, ","); got != "moved" {
+		t.Fatalf("archive chat transitions = %q, want moved: %s", got, recorder.Raw())
+	}
+	if got, want := strings.Join(kills.unkilled, ","), ghostID; got != want {
+		t.Fatalf("kills retired = %q, want %q (the orphan, never the moved chat)", got, want)
+	}
+	if report.Unkilled != 1 || report.IndexPruned != 1 || report.HistoryPruned != 0 {
+		t.Fatalf("Unkilled=%d IndexPruned=%d HistoryPruned=%d, want 1, 1, 0: %+v",
+			report.Unkilled, report.IndexPruned, report.HistoryPruned, report)
+	}
+	if got := report.UnresolvedErrors[movedID]; !strings.HasPrefix(got, "sidecar cleanup failed; kill retained: ") {
+		t.Fatalf("UnresolvedErrors[%s] = %q, want the retained-kill cause", movedID, got)
+	}
+	content, err := os.ReadFile(index)
+	if want := `{"id":"` + codexRow + `","thread_name":"kept"}`; err != nil ||
+		strings.TrimSpace(string(content)) != want {
+		t.Fatalf("codex index = %q, %v; want only %q", content, err, want)
+	}
+}
+
 // L1-F1: when the live-session reading itself could not run — an unreadable
 // process table — Run must refuse to decide anything at all rather than treat
 // the failure as "no chats are live". Nothing on disk moves and no kill is

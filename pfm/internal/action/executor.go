@@ -152,7 +152,8 @@ func (executor *Executor) Open(
 	}
 
 	// A workbench refusal comes before Solo closes any seat holding the chat.
-	if err := applyWorkbench(&request); err != nil {
+	personaWarnings, err := applyWorkbench(&request)
+	if err != nil {
 		return result, err
 	}
 	if err := checkCodexLaunch(request); err != nil {
@@ -181,6 +182,7 @@ func (executor *Executor) Open(
 	if err != nil {
 		return result, err
 	}
+	plan.Warnings = slices.Concat(personaWarnings, plan.Warnings)
 	if plan.ChatServer == nil && request.Detached {
 		// Live and booting rows already have a running session: there is
 		// nothing to spawn, and the eval line Synthesize built is an attach

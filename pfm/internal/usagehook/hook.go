@@ -494,7 +494,6 @@ func RefreshLockPath(cacheDir string, account int) string {
 type CacheBackoff struct {
 	Message    string       `json:"message"`
 	RetryAfter time.Time    `json:"retry_after"`
-	RecordedAt time.Time    `json:"recorded_at"`
 	Credential string       `json:"credential,omitempty"`
 	Refusal    *StatusError `json:"refusal,omitempty"`
 }

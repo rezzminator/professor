@@ -336,7 +336,6 @@ func (proxy *stdioProxy) forward(ctx context.Context, raw []byte, output io.Writ
 			Pane:           resolved.Pane,
 			Engine:         resolved.Engine,
 			ID:             resolved.ID,
-			Source:         resolved.Source,
 		}
 		if identifyErr != nil {
 			kind := proxyErrorKind(identifyErr)

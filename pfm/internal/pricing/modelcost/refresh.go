@@ -115,7 +115,8 @@ func MachineOptions(runtime config.Runtime) Options {
 // Result is what one refresh did. Reason says why an offline status was not
 // the switch's doing (a running pfm update); Err is a failed fetch or derivation;
 // Changed and Persisted, PersistErr and a stamp write's StampErr describe a
-// refreshed table; StampErr also carries an unreadable stamp; CheckedAt is the
+// refreshed table; Carried names the models the fetched pages priced but the
+// parser could not fold, whose previously served rows stayed; StampErr also carries an unreadable stamp; CheckedAt is the
 // check that confirmed the clone file, zero when none applies.
 type Result struct {
 	Status               string
@@ -123,6 +124,7 @@ type Result struct {
 	Err                  error
 	Changed, Persisted   bool
 	PersistErr, StampErr error
+	Carried              []string
 	CheckedAt            time.Time
 }
 
@@ -234,6 +236,7 @@ func PriceDocument(prices pricing.Prices, result Result, model string, rows []pr
 	if !result.CheckedAt.IsZero() {
 		doc.CheckedAt = result.CheckedAt.UTC().Format(time.RFC3339Nano)
 	}
+	doc.Refresh.Carried = result.Carried
 	if result.Status == StatusRefreshed {
 		changed, persisted := result.Changed, result.Persisted
 		doc.Refresh.Changed, doc.Refresh.Persisted = &changed, &persisted
@@ -277,7 +280,7 @@ func refreshNow(
 	catalogs, err := fetch(ctx)
 	var fresh pricing.Table
 	if err == nil {
-		fresh, err = Derive(catalogs, now.Format(time.RFC3339))
+		fresh, result.Carried, err = Derive(catalogs, now.Format(time.RFC3339), published.Rows)
 	}
 	if err != nil {
 		result.Status, result.Err = StatusFailed, err

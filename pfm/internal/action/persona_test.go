@@ -1,6 +1,7 @@
 package action
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"os"
@@ -203,7 +204,8 @@ func TestExecutorWorkbenchDoors(t *testing.T) {
 		kind           compose.Kind
 		both           bool
 	}{
-		{"refusal before any side effect", `{"prompt":""}`, compose.ResumeClaude, true},
+		{"broken persona opens without it", `{"prompt":""}`, compose.ResumeClaude, true},
+		{"disabled new chat refused before any side effect", `{"prompt":"scribe.md","engines":["codex"]}`, compose.NewClaude, false},
 		{"allowed", `{"prompt":"scribe.md","effort":"xhigh","engines":["claude","codex","opencode"]}`, compose.ResumeClaude, true},
 		{"disabled resume", `{"prompt":"scribe.md"}`, compose.ResumeCodex, false},
 		{"booting row ignores the manifest", `{"prompt":""}`, compose.Booting, false},
@@ -217,17 +219,14 @@ func TestExecutorWorkbenchDoors(t *testing.T) {
 				request, dir := actionWorkbenchFixture(t, test.manifest)
 				request.Row.Kind = test.kind
 				processes := &fakeProcesses{}
-				var wantError, wantRun string
+				var wantError, wantRun, wantWarning string
 				switch test.name {
-				case "refusal before any side effect":
-					processes.processes = []Process{
-						{PID: 42, Argv: []string{"claude", "--resume", request.Row.ID}, TTY: "pts/1"},
-					}
-					_, err := workbench.ForLaunch(dir, pfmengine.Claude, workbench.Resume)
-					if err == nil {
-						t.Fatal("fixture ForLaunch did not fail")
-					}
-					wantError = err.Error()
+				case "broken persona opens without it":
+					wantWarning = "workbench persona not applied (" + paths.WorkbenchManifest(dir) +
+						`: "prompt" is required); launching without it`
+				case "disabled new chat refused before any side effect":
+					wantError = "workbench " + dir + ` does not enable claude: add "claude" to "engines" in ` +
+						paths.WorkbenchManifest(dir)
 				case "disabled resume":
 					plain, err := Synthesize(request)
 					if err != nil {
@@ -241,24 +240,31 @@ func TestExecutorWorkbenchDoors(t *testing.T) {
 					}
 				}
 				tmux := &fakeActionTmux{alive: map[string]bool{}}
+				var stderr bytes.Buffer
 				executor, err := New(Dependencies{
 					Tmux:      tmux,
 					Processes: processes,
 					Gate:      fixedGate(false),
 					Runner:    &captureRunner{},
-					Stderr:    io.Discard,
+					Stderr:    &stderr,
 				})
 				if err != nil {
 					t.Fatal(err)
 				}
 				var line string
+				var told []string
 				if detached {
-					_, err = executor.Open(context.Background(), detachedRequest(request))
+					var result OpenResult
+					result, err = executor.Open(context.Background(), detachedRequest(request))
+					told = result.Warnings
 				} else {
 					line, err = openLine(executor, context.Background(), request)
+					if stderr.Len() > 0 {
+						told = strings.Split(strings.TrimSuffix(stderr.String(), "\n"), "\n")
+					}
 				}
 				if wantError != "" {
-					if err == nil || !strings.Contains(err.Error(), wantError) || len(tmux.created) != 0 ||
+					if err == nil || err.Error() != wantError || len(tmux.created) != 0 ||
 						len(processes.terminated) != 0 {
 						t.Fatalf(
 							"refusal=%v, created=%v, terminated=%v; want %q",
@@ -273,6 +279,16 @@ func TestExecutorWorkbenchDoors(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				var want []string
+				if wantWarning != "" {
+					want = []string{wantWarning}
+					if !detached {
+						want = []string{"pfm: " + wantWarning}
+					}
+				}
+				if !reflect.DeepEqual(told, want) {
+					t.Fatalf("open told %q, want %q", told, want)
+				}
 				if test.kind == compose.Booting {
 					if !strings.Contains(line, "cc-new-fixture-1") || len(tmux.created) != 0 {
 						t.Fatalf("booting attach = %q, created=%v", line, tmux.created)
@@ -286,6 +302,13 @@ func TestExecutorWorkbenchDoors(t *testing.T) {
 				if test.name == "disabled resume" {
 					if run != wantRun {
 						t.Fatalf("disabled resume=%s; want %s", run, wantRun)
+					}
+					return
+				}
+				if test.name == "broken persona opens without it" {
+					prompt := filepath.Join(dir, ".professor", "scribe.md")
+					if !stringsContainsAll(run, "'--resume' '"+request.Row.ID+"'") || strings.Contains(run, prompt) {
+						t.Fatalf("broken persona run=%s; want the resume without %s", run, prompt)
 					}
 					return
 				}
@@ -345,20 +368,49 @@ func TestExecutorWorkbenchPrep(t *testing.T) {
 						}
 					}
 				}
-				executor, err := New(Dependencies{Tmux: tmux, Processes: &fakeProcesses{}, Stderr: io.Discard})
+				var stderr bytes.Buffer
+				executor, err := New(Dependencies{Tmux: tmux, Processes: &fakeProcesses{}, Stderr: &stderr})
 				if err != nil {
 					t.Fatal(err)
 				}
+				var told []string
 				if detached {
-					_, err = executor.Open(context.Background(), detachedRequest(request))
+					var result OpenResult
+					result, err = executor.Open(context.Background(), detachedRequest(request))
+					told = result.Warnings
 				} else {
 					_, err = executor.Open(context.Background(), request)
+					if stderr.Len() > 0 {
+						told = strings.Split(strings.TrimSuffix(stderr.String(), "\n"), "\n")
+					}
 				}
-				if test.fail {
+				switch {
+				case test.fail && test.kind == compose.NewOpenCode:
 					if err == nil || len(tmux.created) != 0 {
 						t.Fatalf("preparation refusal=%v, created=%v", err, tmux.created)
 					}
-				} else if err != nil || len(tmux.created) != 1 {
+				case test.fail:
+					// A mirror that will not build opens the chat on the mirror as it stands, said.
+					persona, personaErr := workbench.ForLaunch(dir, pfmengine.Codex, workbench.Resume)
+					if personaErr != nil {
+						t.Fatal(personaErr)
+					}
+					mirrorErr := workbench.EnsureMirror(persona.Bench, pfmengine.Codex, request.Home)
+					if mirrorErr == nil {
+						t.Fatal("mirror fixture did not fail")
+					}
+					want := mirrorErr.Error() + "; launching on the mirror as it stands"
+					if !detached {
+						want = "pfm: " + want
+					}
+					if err != nil || len(tmux.created) != 1 || !reflect.DeepEqual(told, []string{want}) {
+						t.Fatalf("mirror failure open=%v, created=%d, told %q; want one server and %q",
+							err, len(tmux.created), told, want)
+					}
+					if !strings.Contains(tmux.created[0].Run, "developer_instructions") {
+						t.Fatalf("mirror failure dropped the persona: %s", tmux.created[0].Run)
+					}
+				case err != nil || len(tmux.created) != 1:
 					t.Fatalf("prepared open=%v, created=%v; want one server", err, tmux.created)
 				}
 			})

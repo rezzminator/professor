@@ -91,17 +91,18 @@ func (commands ExecCommands) QueryAgents(ctx context.Context, configName string)
 }
 
 func (commands ExecCommands) Resume(ctx context.Context, configName, cwd, id string, cache1H bool) error {
-	persona, err := action.WorkbenchPersona(cwd, pfmengine.Claude, workbench.Resume)
-	if err != nil {
-		return fmt.Errorf("resume agent session: %w", err)
-	}
-	account, err := commands.accountFor(configName)
-	if err != nil {
-		return fmt.Errorf("resume agent session: %w", err)
-	}
 	stderr := commands.Stderr
 	if stderr == nil {
 		stderr = os.Stderr
+	}
+	persona, warnings, err := action.LaunchPersona(cwd, pfmengine.Claude, workbench.Resume)
+	if err != nil {
+		return fmt.Errorf("resume agent session: %w", err)
+	}
+	launchnotice.Print(stderr, "pfm", warnings)
+	account, err := commands.accountFor(configName)
+	if err != nil {
+		return fmt.Errorf("resume agent session: %w", err)
 	}
 	// No --name: the resumed session restores its own name from its
 	// transcript (claudelaunch.Render gives a resume none).

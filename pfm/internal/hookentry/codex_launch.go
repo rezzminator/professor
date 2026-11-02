@@ -12,6 +12,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
+	"github.com/rezzminator/professor/pfm/internal/launchnotice"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
@@ -143,7 +144,7 @@ func CodexLaunch(args []string, stderr io.Writer, runtime config.Runtime) int {
 	if policy.Yolo {
 		argv = append(argv, "--dangerously-bypass-approvals-and-sandbox")
 	}
-	personaArgs, err := codexWorkbenchArgs(args, runtime.Paths.Home)
+	personaArgs, err := codexWorkbenchArgs(args, runtime.Paths.Home, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "launch Codex: %v\n", err)
 		return 1
@@ -174,10 +175,15 @@ func CodexLaunch(args []string, stderr io.Writer, runtime config.Runtime) int {
 	return 0
 }
 
-func codexWorkbenchArgs(args []string, home string) ([]string, error) {
+// codexWorkbenchArgs is the persona's Codex arguments. A part that cannot be
+// resolved is left out with a warning and the launch goes on; only a workbench
+// that does not enable Codex refuses it.
+func codexWorkbenchArgs(args []string, home string, stderr io.Writer) ([]string, error) {
+	const prefix = "launch Codex"
 	cwd, err := os.Getwd()
 	if err != nil {
-		return nil, fmt.Errorf("resolve cwd: %w", err)
+		fmt.Fprintf(stderr, "%s: resolve cwd (%v); launching without a workbench persona\n", prefix, err)
+		return nil, nil
 	}
 	mode := workbench.New
 	var model, effort, prompt bool
@@ -192,23 +198,22 @@ func codexWorkbenchArgs(args []string, home string) ([]string, error) {
 		effort = effort || strings.Contains(arg, "model_reasoning_effort=")
 		prompt = prompt || strings.Contains(arg, "developer_instructions=")
 	}
-	persona, err := action.WorkbenchPersona(cwd, pfmengine.Codex, mode)
+	persona, warnings, err := action.LaunchPersona(cwd, pfmengine.Codex, mode)
 	if err != nil {
 		return nil, err
 	}
+	launchnotice.Print(stderr, prefix, append(warnings, action.PersonaMirror(persona, pfmengine.Codex, home)...))
 	if !persona.Applies() {
 		return nil, nil
-	}
-	if err := workbench.EnsureMirror(persona.Bench, pfmengine.Codex, home); err != nil {
-		return nil, err
 	}
 	var inserted []string
 	if persona.Model != "" && !model {
 		resolved, err := pfmengine.CodexModel(persona.Model, home)
 		if err != nil {
-			return nil, err
+			fmt.Fprintf(stderr, "%s: %v; launching on Codex's default model\n", prefix, err)
+		} else {
+			inserted = append(inserted, "--model", resolved)
 		}
-		inserted = append(inserted, "--model", resolved)
 	}
 	if persona.Effort != "" && !effort {
 		inserted = append(inserted, action.CodexEffortArg(persona.Effort)...)

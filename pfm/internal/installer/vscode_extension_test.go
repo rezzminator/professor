@@ -399,7 +399,17 @@ func TestVSCodeExtensionDropsARecordedTargetWhoseProductRootVanished(t *testing.
 	}
 	stillTarget := filepath.Join(stillRoot, "extensions", vscodeExtensionLinkName)
 
-	ledger := vscodeOwnershipDocument{Version: vscodeOwnershipVersion, Extensions: []string{goneTarget, stillTarget}}
+	// A path under a regular file stats as ENOTDIR (even as root), so the
+	// root is unreadable rather than gone: its record must be kept.
+	blocker := filepath.Join(home, "blocker")
+	writeFixture(t, blocker, "not a directory")
+	blockedRoot := filepath.Join(blocker, "product")
+	blockedTarget := filepath.Join(blockedRoot, "extensions", vscodeExtensionLinkName)
+
+	ledger := vscodeOwnershipDocument{
+		Version:    vscodeOwnershipVersion,
+		Extensions: []string{goneTarget, stillTarget, blockedTarget},
+	}
 	encoded, err := json.Marshal(ledger)
 	if err != nil {
 		t.Fatal(err)
@@ -415,8 +425,14 @@ func TestVSCodeExtensionDropsARecordedTargetWhoseProductRootVanished(t *testing.
 		t.Fatalf("a vanished product root was recreated: %v", err)
 	}
 	result := readVSCodeLedgerFixture(t, managed)
-	if len(result.Extensions) != 1 || result.Extensions[0] != stillTarget {
-		t.Fatalf("ledger extensions = %v, want only %s", result.Extensions, stillTarget)
+	if want := []string{blockedTarget, stillTarget}; !slices.Equal(result.Extensions, want) {
+		t.Fatalf("ledger extensions = %v, want %v", result.Extensions, want)
+	}
+	output := installer.options.Stdout.(*bytes.Buffer).String()
+	wantSkip := "  skip    " + blockedTarget + " VS Code product " + blockedRoot +
+		" could not be checked: stat " + blockedRoot + ": not a directory; extension link record kept\n"
+	if !strings.Contains(output, wantSkip) {
+		t.Fatalf("missing %q in install output:\n%s", wantSkip, output)
 	}
 	if _, linked := resolvedLink(stillTarget); !linked {
 		t.Fatal("the still-present recorded target was not (re)linked")

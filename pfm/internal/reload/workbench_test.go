@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/action"
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -36,7 +37,7 @@ func reloadWorkbenchFixture(t *testing.T) (string, string, string) {
 }
 
 func TestReloadWorkbench(t *testing.T) {
-	for _, name := range []string{"effort", "explicit", "Codex", "disabled", "outside", "mirror failure"} {
+	for _, name := range []string{"effort", "explicit", "bad effort", "Codex", "disabled", "outside", "mirror failure"} {
 		t.Run(name, func(t *testing.T) {
 			root, scribe, duo := reloadWorkbenchFixture(t)
 			request := Request{
@@ -51,6 +52,17 @@ func TestReloadWorkbench(t *testing.T) {
 			switch name {
 			case "explicit":
 				request.Effort, want.Effort = "low", "low"
+			case "bad effort":
+				// The reload validates the persona's effort word as every launch door does.
+				manifest := `{"prompt":"scribe.md","title":"Scribe","name":"_SCRIBE","effort":"loud"}`
+				if err := atomicfile.Write(paths.WorkbenchManifest(scribe), []byte(manifest), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				_, effortErr := action.ClaudeEffort("loud")
+				if effortErr == nil {
+					t.Fatal("fixture effort word must be invalid")
+				}
+				wantError = "workbench " + scribe + ": " + effortErr.Error()
 			case "Codex", "mirror failure":
 				request.Engine, request.CWD = pfmengine.Codex, duo
 				want = request

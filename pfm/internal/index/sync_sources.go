@@ -171,10 +171,18 @@ func SyncCodex(ctx context.Context, database *store.Store, roots []string, count
 	}
 
 	threads := make([]store.CodexThread, 0)
+	stateComplete := true
 	for _, root := range roots {
 		found, readErr := loadIndexedCodexThreads(ctx, root)
 		if readErr != nil {
-			return readErr
+			if ctx.Err() != nil {
+				return readErr
+			}
+			// A state store it cannot read costs that home's reconcile only:
+			// the rollouts still write, and no row it vouched for is pruned.
+			warnUnreadable(ctx, "codex state", root, readErr)
+			stateComplete = false
+			continue
 		}
 		threads = append(threads, found...)
 		updates = reconcileCodexState(found, root, updates, byID, presentIDs, counters)
@@ -184,7 +192,7 @@ func SyncCodex(ctx context.Context, database *store.Store, roots []string, count
 		rollout := &existing[i]
 		_, pathPresent := presentPaths[rollout.Path]
 		_, idPresent := presentIDs[rollout.ID]
-		if walkComplete && !pathPresent && !idPresent {
+		if walkComplete && stateComplete && !pathPresent && !idPresent {
 			deletes = append(deletes, rollout.ID)
 		}
 	}

@@ -353,18 +353,10 @@ func (engine *Engine) Capture(
 		FullScrollback,
 	)
 	if err != nil {
-		if pfmtmux.CouldNotRun(err) {
-			// tmux itself never started (missing binary, bad configured
-			// socket dir) — a probe that could not run, never a pane that
-			// answered dead. Folding this into CodeDead would tell the
-			// caller a live chat's pane is gone when the truth is "could
-			// not look"; the cause rides in detail since this door's err
-			// return stays nil for every prior caller (mcpserv among them).
-			return target, "", CodeCaptureFailed, fmt.Sprintf(
-				"could not run tmux to capture %q: %v", target.Pane, err,
-			), nil
-		}
-		return target, "", CodeDead, paneUnreadable(err), nil
+		// The cause rides in detail: this door's err return stays nil for
+		// every prior caller (mcpserv among them).
+		code, detail := paneUnreadable(target.Pane, "", err)
+		return target, "", code, detail, nil
 	}
 	if tailLines > 0 {
 		capture = lastNonEmptyLines(capture, tailLines)
@@ -513,8 +505,7 @@ func (engine *Engine) callResolved(
 
 	capture, err := engine.capturePane(ctx, target, 0)
 	if err != nil {
-		base.Code = CodeDead
-		base.Message = paneUnreadable(err)
+		base.Code, base.Message = paneUnreadable(target.Pane, "", err)
 		return base, nil
 	}
 	command, commandErr := engine.tmux.PaneCommand(ctx, target.SocketPath, target.Pane)
@@ -559,8 +550,7 @@ func (engine *Engine) callResolved(
 			engine.sleepContext(ctx, engine.options.Poll)
 			capture, err = engine.capturePane(ctx, target, 0)
 			if err != nil {
-				base.Code = CodeDead
-				base.Message = "target pane died while interrupting"
+				base.Code, base.Message = paneUnreadable(target.Pane, " while interrupting", err)
 				return base, nil
 			}
 		}
@@ -569,8 +559,7 @@ func (engine *Engine) callResolved(
 			engine.sleepContext(ctx, engine.options.Poll)
 			capture, err = engine.capturePane(ctx, target, 0)
 			if err != nil {
-				base.Code = CodeDead
-				base.Message = "target pane died while waiting for idle"
+				base.Code, base.Message = paneUnreadable(target.Pane, " while waiting for idle", err)
 				return base, nil
 			}
 			if !IsBusyFor(paneEngine, capture) {
@@ -595,8 +584,7 @@ func (engine *Engine) callResolved(
 		engine.sleepContext(ctx, engine.options.Poll)
 		capture, err = engine.capturePane(ctx, target, 0)
 		if err != nil {
-			base.Code = CodeDead
-			base.Message = "target pane died while leaving the agents panel"
+			base.Code, base.Message = paneUnreadable(target.Pane, " while leaving the agents panel", err)
 			return base, nil
 		}
 		if agentPanelFocused(capture) {
@@ -668,8 +656,7 @@ func (engine *Engine) callResolved(
 		engine.sleepContext(ctx, engine.options.Poll)
 		capture, err = engine.capturePane(ctx, target, 0)
 		if err != nil {
-			base.Code = CodeDead
-			base.Message = "target pane died while dismissing an overlay"
+			base.Code, base.Message = paneUnreadable(target.Pane, " while dismissing an overlay", err)
 			return base, nil
 		}
 	}
@@ -721,8 +708,7 @@ func (engine *Engine) callResolved(
 		engine.sleepContext(ctx, engine.options.Poll)
 		capture, err = engine.capturePane(ctx, target, 0)
 		if err != nil {
-			base.Code = CodeDead
-			base.Message = "target pane died during draft guard"
+			base.Code, base.Message = paneUnreadable(target.Pane, " during draft guard", err)
 			return base, nil
 		}
 		base.DraftStashed = strings.Contains(
@@ -1208,18 +1194,23 @@ func (engine *Engine) exitCopyModeForDelivery(
 	engine.sleepContext(ctx, engine.options.Poll)
 	screen, err := engine.capturePane(ctx, target, 0)
 	if err != nil {
-		base.Code = CodeDead
-		base.Message = "target pane died while leaving copy mode" + when
+		base.Code, base.Message = paneUnreadable(target.Pane, " while leaving copy mode"+when, err)
 		return true
 	}
 	*capture = screen
 	return false
 }
 
-// paneUnreadable is the CodeDead detail for a capture tmux ran and refused:
-// its error tells a gone pane from one that could not be read.
-func paneUnreadable(err error) string {
-	return fmt.Sprintf("target pane is dead or unreadable: %v", err)
+// paneUnreadable is the verdict on a failed pane capture, during naming the
+// delivery step: tmux that never started (missing binary, bad socket dir) is
+// CodeCaptureFailed, a probe that could not look, never a pane that answered
+// gone; anything else is CodeDead. The capture's own error always rides in
+// the message, since it alone tells a gone pane from an unreadable one.
+func paneUnreadable(pane, during string, err error) (int, string) {
+	if pfmtmux.CouldNotRun(err) {
+		return CodeCaptureFailed, fmt.Sprintf("could not run tmux to capture %q%s: %v", pane, during, err)
+	}
+	return CodeDead, fmt.Sprintf("target pane is dead or unreadable%s: %v", during, err)
 }
 
 func (engine *Engine) capturePane(

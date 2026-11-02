@@ -265,8 +265,9 @@ const checkRetiredHarvesterConfig = "retired-harvester-config"
 // retiredHarvesterConfig names what pfm's harvester settings left behind
 // once harvest moved to the harvester plugin: harvester.config.json beside the
 // config, and an mcp.servers.harvester entry the config loader now passes
-// through unread. An unreadable or unparseable config is pre-split-config's
-// row, never a second one here.
+// through unread. An unreadable config is pre-split-config's row, never a
+// second one here; one that does not parse says so here too, since its
+// mcp.servers could not be looked at.
 func retiredHarvesterConfig(env Env) ([]Row, error) {
 	var rows []Row
 	path := filepath.Join(filepath.Dir(env.ConfigPath), "harvester.config.json")
@@ -285,8 +286,9 @@ func retiredHarvesterConfig(env Env) ([]Row, error) {
 			Servers map[string]json.RawMessage `json:"servers"`
 		} `json:"mcp"`
 	}
-	if json.Unmarshal(raw, &document) != nil {
-		return rows, nil
+	if err := json.Unmarshal(raw, &document); err != nil {
+		return append(rows, unparsable(checkRetiredHarvesterConfig, env.ConfigPath, err,
+			"whether it carries a retired mcp.servers.harvester entry is unknown")), nil
 	}
 	if _, found := document.MCP.Servers["harvester"]; found {
 		rows = append(rows, Row{

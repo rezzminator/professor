@@ -26,6 +26,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/launchnotice"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
@@ -362,14 +363,13 @@ func runChatBranch(
 			return 1
 		}
 	}
-	persona, err := action.WorkbenchPersona(cwd, engine, workbench.Resume)
-	if err == nil && engine == pfmengine.Codex && persona.Applies() {
-		err = workbench.EnsureMirror(persona.Bench, engine, runtime.Paths.Home)
-	}
+	persona, warnings, err := action.LaunchPersona(cwd, engine, workbench.Resume)
 	if err != nil {
-		fmt.Fprintf(stderr, "pfm chat branch: %v; branching without the workbench persona\n", err)
-		persona = workbench.Persona{}
+		fmt.Fprintf(stderr, "pfm chat branch: %v\n", err)
+		return 1
 	}
+	warnings = append(warnings, action.PersonaMirror(persona, engine, runtime.Paths.Home)...)
+	launchnotice.Print(stderr, "pfm chat branch", warnings)
 	nameInput := *requestedName
 	if flags.NArg() != 0 {
 		nameInput = strings.Join(flags.Args(), " ")

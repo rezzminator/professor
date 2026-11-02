@@ -722,3 +722,41 @@ func TestContentListsReadEachBlockOnItsOwn(t *testing.T) {
 		t.Errorf("toolCall = %+v, %t; want the Read call", entry, ok)
 	}
 }
+
+// A complete line that is no JSON costs itself and is logged with its count;
+// the entries around it still read, and a torn last line (no newline yet, a
+// write in flight) is no loss to log.
+func TestAMalformedCompleteLineIsLoggedAndTheLinesAroundItRead(t *testing.T) {
+	good := `{"type":"user","timestamp":"t1","message":{"role":"user","content":"ship the fix"}}` + "\n"
+	path := writeTranscript(t, "garbled.jsonl", good+"{not json\n\n"+good+`{"type":"user","timest`)
+	reads := map[string]func() ([]Entry, error){
+		"All": func() ([]Entry, error) { return All(context.Background(), path, "cc") },
+		"Tail": func() ([]Entry, error) {
+			entries, _, err := Tail(context.Background(), path, "cc", 10, 0)
+			return entries, err
+		},
+		"From": func() ([]Entry, error) {
+			entries, _, err := From(context.Background(), path, "cc", 0)
+			return entries, err
+		},
+	}
+	for name, read := range reads {
+		t.Run(name, func(t *testing.T) {
+			_, recorder := obs.Test(t)
+			entries, err := read()
+			if err != nil || len(entries) != 2 {
+				t.Fatalf("%s(%s) = %d entries, error %v; want the 2 readable ones", name, path, len(entries), err)
+			}
+			var logged []string
+			for _, record := range recorder.Records() {
+				if record.Message == "transcript.lines_malformed" {
+					rows, _ := record.Field("rows")
+					logged = append(logged, fmt.Sprint(rows))
+				}
+			}
+			if !slices.Equal(logged, []string{"1"}) {
+				t.Fatalf("lines_malformed logs = %v, want [1]; log %s", logged, recorder.Raw())
+			}
+		})
+	}
+}

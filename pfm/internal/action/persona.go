@@ -20,24 +20,26 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
-// applyWorkbench prepares the persona before either executor door synthesizes a launch.
-func applyWorkbench(request *Request) error {
+// applyWorkbench prepares the persona before either executor door synthesizes
+// a launch, and returns what the launch dropped of it (LaunchPersona,
+// PersonaMirror): the chat opens anyway.
+func applyWorkbench(request *Request) ([]string, error) {
 	// A booting row attaches to a seat already launched: nothing relaunches.
 	if request.Row.Kind.IsLiveSeat() || request.Row.Kind == compose.Booting {
-		return nil
+		return nil, nil
 	}
 	engine, err := compose.EngineForKindChecked(request.Row.Kind)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	mode := workbench.Resume
 	switch request.Row.Kind {
 	case compose.NewClaude, compose.NewCodex, compose.NewOpenCode:
 		mode = workbench.New
 	}
-	persona, err := WorkbenchPersona(request.Row.CWD, engine, mode)
+	persona, warnings, err := LaunchPersona(request.Row.CWD, engine, mode)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	request.Persona = persona
 	request.OpenCodePlugin = ""
@@ -60,27 +62,62 @@ func applyWorkbench(request *Request) error {
 		}
 	}
 	if !persona.Applies() {
-		return nil
+		return warnings, nil
 	}
+	// A new Codex chat runs the user's own cx, whose launcher builds the mirror.
 	if request.Row.Kind == compose.ResumeCodex || engine == pfmengine.OpenCode {
-		if err := workbench.EnsureMirror(persona.Bench, engine, request.Home); err != nil {
-			return err
-		}
+		warnings = append(warnings, PersonaMirror(persona, engine, request.Home)...)
 	}
 	if engine == pfmengine.OpenCode {
 		if err := attachOpenCodeSeatPlugin(request); err != nil {
-			return err
+			return nil, err
 		}
 		fleet, err := paths.GeneratedHarnessPrompt(request.Home, pfmengine.OpenCode)
 		if err != nil {
 			if !errors.Is(err, paths.ErrNoSourceRepoMarker) && !errors.Is(err, paths.ErrSourceRepoUnusable) {
 				wrapped := fmt.Errorf("resolve the fleet prompt an OpenCode workbench launch replaces: %w", err)
 				obs.Logger(context.Background()).Error("OpenCode workbench fleet prompt", obs.FieldErr, wrapped)
-				return wrapped
+				return nil, wrapped
 			}
 		} else {
 			request.OpenCodeFleetPrompt = fleet
 		}
+	}
+	return warnings, nil
+}
+
+// LaunchPersona is every launch door's workbench persona read. A persona that
+// cannot resolve never refuses the launch: an unknown effort word launches the
+// persona on the engine's default effort, any other fault launches without the
+// persona, each named in the returned warnings. A workbench that does not
+// enable the engine stays the refusal of a new launch, naming its fix.
+func LaunchPersona(cwd string, engine pfmengine.ID, mode workbench.Mode) (workbench.Persona, []string, error) {
+	persona, err := WorkbenchPersona(cwd, engine, mode)
+	if err == nil {
+		return persona, nil, nil
+	}
+	if raw, rawErr := workbench.ForLaunch(cwd, engine, mode); rawErr == nil {
+		// Only the effort word failed validation.
+		raw.Effort = ""
+		return raw, []string{err.Error() + "; launching the persona on the default effort"}, nil
+	}
+	if bench, found, benchErr := workbench.Nearest(cwd); benchErr == nil && found && bench.Err == nil &&
+		!bench.Enables(engine) {
+		return workbench.Persona{}, nil, err
+	}
+	return workbench.Persona{}, []string{
+		"workbench persona not applied (" + err.Error() + "); launching without it",
+	}, nil
+}
+
+// PersonaMirror builds the persona's engine mirror before a launch. A build
+// that fails launches on the mirror as it stands, named in the returned warning.
+func PersonaMirror(persona workbench.Persona, engine pfmengine.ID, home string) []string {
+	if !persona.Applies() {
+		return nil
+	}
+	if err := workbench.EnsureMirror(persona.Bench, engine, home); err != nil {
+		return []string{err.Error() + "; launching on the mirror as it stands"}
 	}
 	return nil
 }

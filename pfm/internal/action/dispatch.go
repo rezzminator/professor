@@ -64,7 +64,9 @@ func directTmuxArguments(line string) ([]string, bool, error) {
 	}
 	words, err := cmdparse.SplitShellWords(line)
 	if err != nil {
-		return nil, false, fmt.Errorf("decode tmux action: %w", err)
+		// A line the splitter cannot read is zsh's to run, like any other
+		// line; zsh names its own syntax error when it cannot either.
+		return nil, false, nil
 	}
 	if len(words) == 0 || words[0] != "TMUX=" {
 		return nil, false, nil

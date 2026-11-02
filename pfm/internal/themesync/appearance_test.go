@@ -3,7 +3,6 @@ package themesync
 import (
 	"context"
 	"errors"
-	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -11,7 +10,10 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
-func TestAutoAppearanceUnsupportedPlatforms(t *testing.T) {
+// Auto on a platform with no system appearance to read draws dark (no side was
+// applied before) rather than stopping the sync: every surface still follows the
+// theme and the claude row names why the side was not read.
+func TestAutoAppearanceUnsupportedPlatformsDrawsDarkAndNamesWhy(t *testing.T) {
 	platforms := []string{"linux", "freebsd", "windows"}
 	if runtime.GOOS != "darwin" {
 		platforms = append(platforms, "") // production defaults to runtime.GOOS
@@ -28,35 +30,24 @@ func TestAutoAppearanceUnsupportedPlatforms(t *testing.T) {
 		for _, op := range operations {
 			t.Run(goos+"/"+op.name, func(t *testing.T) {
 				h := newLinuxHarness(t)
-				stateBefore := ""
 				if op.name != "On" {
 					h.on() // explicit themes remain supported on Linux
-					stateBefore = h.read(".local/state/pfm/theme/state.json")
 				}
 				h.write(settingsRel, `{"theme":"auto"}`)
 				h.rearm() // defaults would misleadingly succeed with Dark
 				h.env.GOOS = goos
-				herdrBefore, callsBefore := h.read(".config/herdr/config.toml"), h.tmux.applyCalls
 				report, err := op.run(context.Background(), h.env)
-				want := "auto appearance detection unsupported; choose an explicit theme/appearance"
-				if err == nil || !strings.Contains(err.Error(), want) {
-					t.Fatalf("%s = %+v, %v; want actionable unsupported-auto error", op.name, report, err)
+				if err != nil {
+					t.Fatalf("%s: %v", op.name, err)
 				}
-				if !reflect.DeepEqual(report, Report{}) {
-					t.Errorf("%s returned a guessed appearance or report: %+v", op.name, report)
+				wantVerdict(t, report, "claude", VerdictSource, "system appearance unreadable, drawing dark: "+
+					"themesync: auto appearance detection unsupported; choose an explicit theme/appearance")
+				if report.Appearance != Dark || !report.Enabled || h.tmux.servers["cc-a"]["@pfm-c-bg"] != "#000000" {
+					t.Errorf("%s = appearance %s enabled %v tmux bg %q, want the theme drawn dark #000000",
+						op.name, report.Appearance, report.Enabled, h.tmux.servers["cc-a"]["@pfm-c-bg"])
 				}
-				if calls := h.runner.Calls(); len(calls) != 0 {
-					t.Errorf("unsupported detection ran external commands: %+v", calls)
-				}
-				if h.tmux.applyCalls != callsBefore || h.read(".config/herdr/config.toml") != herdrBefore {
-					t.Error("unsupported auto changed a surface")
-				}
-				if stateBefore == "" {
-					if h.exists(".local/state/pfm/theme/state.json") {
-						t.Error("unsupported auto created theme state")
-					}
-				} else if h.read(".local/state/pfm/theme/state.json") != stateBefore {
-					t.Error("unsupported auto changed theme state")
+				if state := h.state(); state.Appearance != Dark {
+					t.Errorf("stored appearance = %q, want dark", state.Appearance)
 				}
 			})
 		}

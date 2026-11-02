@@ -134,6 +134,8 @@ func keepPins(pins *SurfacePins) (kept *SurfacePins, dropped []string, err error
 		// The theme itself never reaches the result, so state.json stays the
 		// pins alone; only its colours for the contract's keys do.
 		if theme := pins.VSCode.Theme; theme != nil {
+			theme, notes = dropUnknownColours(theme)
+			dropped = append(dropped, notes...)
 			if err := validateVSCodeTheme(theme); err != nil {
 				return nil, dropped, err
 			}
@@ -156,6 +158,29 @@ func keepPins(pins *SurfacePins) (kept *SurfacePins, dropped []string, err error
 		return nil, dropped, nil
 	}
 	return out, dropped, nil
+}
+
+// dropUnknownColours is theme without the colour ids VS Code's registry
+// (vscode_color_ids.txt) does not list, each named in dropped: VS Code ignores an
+// id it does not know, so one a later VS Code added costs that colour, never the
+// theme.
+func dropUnknownColours(theme *VSCodeTheme) (kept *VSCodeTheme, dropped []string) {
+	var unknown []string
+	for _, key := range slices.Sorted(maps.Keys(theme.Colors)) {
+		if !vscodeColorIDs[key] {
+			unknown = append(unknown, key)
+			dropped = append(dropped, unknownColourNote(key))
+		}
+	}
+	if len(unknown) == 0 {
+		return theme, nil
+	}
+	copied := *theme
+	copied.Colors = maps.Clone(theme.Colors)
+	for _, key := range unknown {
+		delete(copied.Colors, key)
+	}
+	return &copied, dropped
 }
 
 // canonicalMap checks one surface's pins in key order, so the first error is
@@ -324,6 +349,9 @@ func profilePins(home, value string) (pinSource, error) {
 		return pinSource{}, fmt.Errorf("theme profile %s: %w", path, err)
 	}
 	var notes []string
+	for _, note := range unknownOverrideNotes(profile) {
+		notes = append(notes, "profile "+path+": "+note)
+	}
 	for _, note := range dropped {
 		notes = append(notes, "profile "+path+": "+note+" (dropped)")
 	}

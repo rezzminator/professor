@@ -3,6 +3,7 @@ package index
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -113,10 +114,21 @@ func newWithRoots(database *store.Store, roots map[pfmengine.ID][]string) (*Inde
 	return &Indexer{database: database, roots: cleanRoots}, nil
 }
 
+// PartialError is a Run in which some sources failed and the rest indexed:
+// each failed engine keeps its prior rows, so a caller may list from the index
+// and report the failures. Its text is the failures' own.
+type PartialError struct{ Failures []error }
+
+func (partial *PartialError) Error() string { return errors.Join(partial.Failures...).Error() }
+
+func (partial *PartialError) Unwrap() []error { return partial.Failures }
+
 // Run asks every registered engine's index source to perform its indexing
 // pass. An engine with no source is a wiring failure, refused before any source
 // syncs: skipping it would leave its chats out of the index, and every lookup
-// would report a failure to look as "no chat named X".
+// would report a failure to look as "no chat named X". A source that fails
+// costs its own pass only: the others still run, and the error is a
+// *PartialError unless every source failed or ctx was cancelled.
 func (indexer *Indexer) Run(ctx context.Context, options Options) (Counters, error) {
 	counters := Counters{
 		options:               options,
@@ -131,12 +143,24 @@ func (indexer *Indexer) Run(ctx context.Context, options Options) (Counters, err
 		}
 		engineSources = append(engineSources, source)
 	}
+	failures := make([]error, 0)
 	for position, source := range engineSources {
 		if err := source.Sync(ctx, indexer.database, indexer.roots[ids[position]], &counters); err != nil {
-			return counters, fmt.Errorf("index engine %s: %w", ids[position], err)
+			err = fmt.Errorf("index engine %s: %w", ids[position], err)
+			if ctx.Err() != nil {
+				return counters, err
+			}
+			failures = append(failures, err)
 		}
 	}
-	return counters, nil
+	switch len(failures) {
+	case 0:
+		return counters, nil
+	case len(engineSources):
+		return counters, errors.Join(failures...)
+	default:
+		return counters, &PartialError{Failures: failures}
+	}
 }
 
 // warnUnreadable records one item a pass could not read and went on without:

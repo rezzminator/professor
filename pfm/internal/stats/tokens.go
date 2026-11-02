@@ -72,14 +72,29 @@ type tokenHistoryState struct {
 type tokenRecord struct {
 	Type      string `json:"type"`
 	RequestID string `json:"requestId"`
-	Message   struct {
-		ID    string              `json:"id"`
-		Usage *pricing.UsageBlock `json:"usage"`
+	// The counts stay raw past the tolerant line decode: a count of another
+	// type must refuse the line, never read as 0 (decodeCounts).
+	Message struct {
+		ID    string          `json:"id"`
+		Usage json.RawMessage `json:"usage"`
 	} `json:"message"`
 	Payload struct {
-		Type string                     `json:"type"`
-		Info *transcript.CodexTokenInfo `json:"info"`
+		Type string          `json:"type"`
+		Info json.RawMessage `json:"info"`
 	} `json:"payload"`
+}
+
+// decodeCounts decodes a usage or token-info member strictly; nil when it is
+// absent or null.
+func decodeCounts[T any](raw json.RawMessage) (*T, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, nil
+	}
+	counts := new(T)
+	if err := json.Unmarshal(raw, counts); err != nil {
+		return nil, err
+	}
+	return counts, nil
 }
 
 func (sampler *Sampler) attachTokenUsage(rows []compose.Row, chats []Chat, now int64) []string {
@@ -396,11 +411,17 @@ func applyTokenRecord(entry *tokenCacheEntry, line []byte) error {
 		return nil
 	}
 	var record tokenRecord
-	if err := json.Unmarshal(line, &record); err != nil {
+	// An odd-typed member (a numeric requestId) reads as absent: the usage
+	// beside it still counts.
+	if err := transcript.DecodeTolerant(line, &record); err != nil {
 		return err
 	}
-	if record.Type == "assistant" && record.Message.Usage != nil {
-		usage := *record.Message.Usage
+	if record.Type == "assistant" {
+		counted, err := decodeCounts[pricing.UsageBlock](record.Message.Usage)
+		if err != nil || counted == nil {
+			return err
+		}
+		usage := *counted
 		if negativeUsage(usage) {
 			return fmt.Errorf("assistant usage contains a negative token count")
 		}
@@ -410,7 +431,14 @@ func applyTokenRecord(entry *tokenCacheEntry, line []byte) error {
 			entry.known = true
 		}
 	}
-	if info := record.Payload.Info; record.Payload.Type == "token_count" && info != nil {
+	if record.Payload.Type != "token_count" {
+		return nil
+	}
+	info, err := decodeCounts[transcript.CodexTokenInfo](record.Payload.Info)
+	if err != nil {
+		return err
+	}
+	if info != nil {
 		total := info.TotalTokenUsage.Total()
 		if total < 0 {
 			return fmt.Errorf("lifetime usage for Codex contains a negative token count")

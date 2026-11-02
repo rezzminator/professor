@@ -123,7 +123,7 @@ func TestCallEngineForRequestResolvesProxyIdentity(t *testing.T) {
 	}
 	meta := mcp.Meta{"pfmProxy": map[string]any{
 		"v": ProxyWireVersion, "session": "cc-seat", "socketPath": "/tmp/tmux-1000/cc-seat",
-		"socketName": "cc-seat", "pane": "%7", "engine": "claude", "id": "session-id", "source": "tmux",
+		"socketName": "cc-seat", "pane": "%7", "engine": "claude", "id": "session-id",
 	}}
 	caller, err := current.callerForRequest(context.Background(), meta)
 	if err != nil {
@@ -960,7 +960,7 @@ func TestProxyIdentityReachesCallerBoundTools(t *testing.T) {
 	protocol := connectInMemory(t, service.Server())
 	meta := mcp.Meta{"pfmProxy": map[string]any{
 		"v": ProxyWireVersion, "session": "cc-seat", "socketPath": "/tmp/tmux-1000/cc-seat",
-		"socketName": "cc-seat", "pane": "%7", "engine": "claude", "id": "session-id", "source": "tmux",
+		"socketName": "cc-seat", "pane": "%7", "engine": "claude", "id": "session-id",
 	}}
 
 	whoami := callToolWithMeta[WhoamiOutput](t, protocol.clientSession, "whoami", meta, WhoamiInput{})

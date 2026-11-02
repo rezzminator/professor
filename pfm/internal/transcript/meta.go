@@ -204,7 +204,7 @@ func (fold *MetaFold) Line(line []byte, engine string) {
 
 func applyMeta(meta *Meta, state *metaScanState, line []byte, engine string) {
 	var parsed metaRecord
-	if decodeTolerant(line, &parsed) != nil {
+	if DecodeTolerant(line, &parsed) != nil {
 		return
 	}
 	if engine == string(pfmengine.Codex) {

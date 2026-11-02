@@ -65,6 +65,9 @@ type fakeHerdr struct {
 	// tab.get, and tab.rename relabels one.
 	tabOf map[string]string
 	tabs  map[string]fakeTab
+	// processInfoAnswers, when set, is how many pane.process_info requests the
+	// native fixture answers before it refuses every later one.
+	processInfoAnswers, processInfoSeen int
 }
 
 func newFakeHerdr(t *testing.T) *fakeHerdr {
@@ -743,6 +746,15 @@ func newNativeReporterHerdrCount(
 					fields["terminal_id"] = terminal
 					result = map[string]any{"type": "pane_list", "panes": []any{fields}}
 				case "pane.process_info":
+					server.mu.Lock()
+					server.processInfoSeen++
+					refused := server.processInfoAnswers > 0 && server.processInfoSeen > server.processInfoAnswers
+					server.mu.Unlock()
+					if refused {
+						const refusal = `{"id":%q,"error":{"code":"server_error","message":"refused by fake herdr"}}`
+						fmt.Fprintf(conn, refusal+"\n", req.ID)
+						return
+					}
 					info := map[string]any{"pane_id": pane, "shell_pid": 900001}
 					server.mu.Lock()
 					for _, held := range server.panes {

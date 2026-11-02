@@ -405,6 +405,18 @@ func herdrOwnershipSocketShell(
 	beforeInfo ...func(),
 ) (string, *atomic.Int32) {
 	t.Helper()
+	return herdrOwnershipSocketInfo(t, list, map[string]any{"pane_id": pane, "shell_pid": shell}, beforeInfo...)
+}
+
+// herdrOwnershipSocketInfo answers pane.list with list and pane.process_info
+// with info.
+func herdrOwnershipSocketInfo(
+	t *testing.T,
+	list string,
+	info map[string]any,
+	beforeInfo ...func(),
+) (string, *atomic.Int32) {
+	t.Helper()
 	socket := filepath.Join(testjail.ShortRoot(t), "herdr.sock")
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
@@ -439,7 +451,7 @@ func herdrOwnershipSocketShell(
 					body = map[string]any{
 						"result": map[string]any{
 							"type":         "pane_process_info",
-							"process_info": map[string]any{"pane_id": pane, "shell_pid": shell},
+							"process_info": info,
 						},
 					}
 				}

@@ -35,6 +35,7 @@ func TestHerdrIndicatorsIsTheVerbThePluginExecs(t *testing.T) {
 // This runs the installed plugin's exact argv through the compiled CLI. No
 // injected provider: fleet enumeration, SeatInspector, config, clock and wire
 // transport are real; only Herdr's socket and engine processes are fixtures.
+// It starts in a directory removed under it, as a hook's worktree is.
 func TestHerdrIndicatorsCompiledCLIShowsAndStopsTabPulse(t *testing.T) {
 	root := testjail.Fleet(t)
 	values, err := paths.Resolve()
@@ -255,10 +256,20 @@ func TestHerdrIndicatorsCompiledCLIShowsAndStopsTabPulse(t *testing.T) {
 	defer cancel()
 	command := exec.CommandContext(ctx, testPFMBinary, "internal", "herdr-indicators")
 	command.Env = append(os.Environ(), "PFM_CONFIG="+config, "HERDR_SOCKET_PATH="+socket)
+	// Herdr execs the painter in the hook's directory, often a worktree removed
+	// while the painter outlives it: every fleet scan reads the working directory.
+	hookDir := filepath.Join(t.TempDir(), "worktree")
+	if err := os.Mkdir(hookDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	command.Dir = hookDir
 	var output bytes.Buffer
 	command.Stdout = &output
 	command.Stderr = &output
 	if err := command.Start(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(hookDir); err != nil {
 		t.Fatal(err)
 	}
 	waited := make(chan error, 1)

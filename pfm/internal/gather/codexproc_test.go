@@ -270,7 +270,17 @@ func TestDetectCodexThreadsMarksOnlyAnFDHeldRolloutAsHeld(t *testing.T) {
 	heldRollout := filepath.Join(codexHome, "sessions", "2026", "rollout-held.jsonl")
 	writeRolloutMeta(t, heldRollout, "user", "")
 	resolvedRollout := filepath.Join(codexHome, "sessions", "2026", "rollout-resolved-paginated.jsonl")
+	// A resume decompressing its compressed rollout holds that .zst, never the
+	// thread's live transcript: it is no held rollout, the argv names the thread.
+	const resumed = "019a0000-0000-7000-8000-000000000001"
+	decompressing := filepath.Join(codexHome, "sessions", "2026", "rollout-2026-01-02T03-04-05-"+resumed+".jsonl.zst")
 	proc := &fakeProcFS{processes: map[int]fakeProcess{
+		102: {stat: ProcStat{ParentPID: 1}},
+		402: {
+			cmdline: []string{"/usr/bin/codex", "resume", resumed},
+			fdLinks: []FDLink{{FD: 3, Target: decompressing}},
+			stat:    ProcStat{ParentPID: 102},
+		},
 		100: {stat: ProcStat{ParentPID: 1}},
 		400: {
 			cmdline: []string{"/usr/bin/codex"},
@@ -287,6 +297,7 @@ func TestDetectCodexThreadsMarksOnlyAnFDHeldRolloutAsHeld(t *testing.T) {
 	panes := []ProbePane{
 		{Socket: "cx-1-2-3", PaneID: "%4", PID: 100},
 		{Socket: "cx-4-5-6", PaneID: "%5", PID: 101},
+		{Socket: "cx-7-8-9", PaneID: "%6", PID: 102},
 	}
 
 	live, err := DetectCodexThreads(
@@ -317,6 +328,15 @@ func TestDetectCodexThreadsMarksOnlyAnFDHeldRolloutAsHeld(t *testing.T) {
 			PaneID:      "%5",
 			RolloutPath: resolvedRollout,
 			ThreadID:    "paginated",
+			RolloutHeld: false,
+		},
+		{
+			PID:         402,
+			PanePID:     102,
+			Socket:      "cx-7-8-9",
+			PaneID:      "%6",
+			RolloutPath: resolvedRollout,
+			ThreadID:    resumed,
 			RolloutHeld: false,
 		},
 	}

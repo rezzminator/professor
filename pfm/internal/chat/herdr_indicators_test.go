@@ -419,7 +419,11 @@ func TestHerdrTabNativePaneWithoutAgentSession(t *testing.T) {
 		name, seatTerminal string
 		session            string
 		claimedTerminal    string
-		views              int
+		// replaced: the claimed chat's seat was replaced by a revive into a new
+		// tab, its old row retired (spawn.RetireHerdrSeat), so the claim is
+		// judged by the replacement seat that now carries the chat.
+		replaced bool
+		views    int
 	}{
 		{name: "the seat's terminal proves the pane", seatTerminal: "term1", views: 1},
 		{name: "a seat with no recorded terminal", seatTerminal: "", views: 0},
@@ -432,6 +436,10 @@ func TestHerdrTabNativePaneWithoutAgentSession(t *testing.T) {
 		{
 			name: "a stale agent_session naming a chat born in another terminal", seatTerminal: "term1", views: 1,
 			session: other, claimedTerminal: "term0",
+		},
+		{
+			name: "a stale agent_session naming a chat replaced into another terminal", seatTerminal: "term1", views: 1,
+			session: other, claimedTerminal: "term2", replaced: true,
 		},
 		{
 			name: "an agent_session naming this chat born in another terminal", seatTerminal: "term0", views: 0,
@@ -461,10 +469,14 @@ func TestHerdrTabNativePaneWithoutAgentSession(t *testing.T) {
 			putSeat(tc.seatTerminal)
 			if tc.claimedTerminal != "" {
 				db := fleetdb.OpenSharedState(ctx, values)
-				if err := db.PutSeat(ctx, fleetdb.Seat{
+				claimed := fleetdb.Seat{
 					SeatID: "seat2", SessionID: "s2", Engine: "cc", Backend: "herdr", HerdrSocket: "endpoint",
 					HerdrPane: "w1:p1", HerdrWorkspace: "w1", HerdrTerminalID: tc.claimedTerminal, State: "lost",
-				}); err != nil {
+				}
+				if tc.replaced {
+					claimed.SeatID, claimed.HerdrPane, claimed.HerdrWorkspace, claimed.State = "seat3", "w2:p1", "w2", "live"
+				}
+				if err := db.PutSeat(ctx, claimed); err != nil {
 					t.Fatal(err)
 				}
 				if err := db.Close(); err != nil {

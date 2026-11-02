@@ -863,3 +863,65 @@ type gateFunc func(context.Context, action.GateRequest) (bool, error)
 func (gate gateFunc) Confirm(ctx context.Context, request action.GateRequest) (bool, error) {
 	return gate(ctx, request)
 }
+
+// TestOpenIDFocusesTheNativeSeatItsChatContinuedIn pins `pfm chat open` with
+// the id Claude Code continued a native chat in: no seat is keyed by that id,
+// so the fleet scan's row must answer to it (answersTo) and the open focuses
+// the live seat that carries the chat, starting no second process on it.
+func TestOpenIDFocusesTheNativeSeatItsChatContinuedIn(t *testing.T) {
+	testjail.Fleet(t)
+	const continued = "66666666-7777-4888-8999-aaaaaaaaaaaa"
+	pane := "w6:p3"
+	mutations := make(chan string, 8)
+	socket := nativeChatSocket(t, func(req nativeChatRequest) (any, string) {
+		if req.Method == "agent.focus" || req.Method == "pane.focus" {
+			mutations <- req.Method
+		}
+		if value, code, ok := nativeChatProof(req, pane); ok {
+			return value, code
+		}
+		switch req.Method {
+		case "agent.focus":
+			return nil, "agent_not_found"
+		case "pane.focus":
+			return testjail.HerdrPaneInfo(pane), ""
+		default:
+			return nil, "unexpected_method"
+		}
+	})
+	runtime, db, seat := nativeChatSeat(t, socket, "live")
+	seat = nativeChatHost(t, db, seat, true)
+	project := filepath.Join(os.Getenv(paths.EnvClaudeRoots), "-work-app")
+	if err := os.MkdirAll(project, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	prompt := `{"type":"user","cwd":"/work/app","promptSource":"typed","entrypoint":"cli",` +
+		`"message":{"role":"user","content":"%s"}}` + "\n"
+	for id, body := range map[string]string{
+		seat.SessionID: fmt.Sprintf(prompt, "launch") + `{"type":"continued-in","timestamp":"2026-09-18T08:50:25.188Z",` +
+			`"sessionId":"` + seat.SessionID + `","continuedInSessionId":"` + continued + `"}` + "\n",
+		continued: fmt.Sprintf(prompt, "continued"),
+	} {
+		if err := os.WriteFile(filepath.Join(project, id+".jsonl"), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("HERDR_ENV", "1")
+	t.Setenv("HERDR_SOCKET_PATH", socket)
+	t.Setenv("HERDR_PANE_ID", "w6:p8")
+	nativeChatCallerHostsChat(t, db, socket, "w6:p8")
+	var stdout, stderr bytes.Buffer
+	if code := OpenID(context.Background(), continued, &stdout, &stderr, &runtime); code != 0 {
+		t.Fatalf("OpenID(continued id) = %d, want the live seat opened; stderr=%s", code, &stderr)
+	}
+	if len(mutations) != 2 || <-mutations != "agent.focus" || <-mutations != "pane.focus" {
+		t.Fatalf("OpenID(continued id) did not focus the seat's pane; stderr=%s", &stderr)
+	}
+	if strings.Contains(stdout.String(), "--resume") {
+		t.Fatalf("OpenID(continued id) started a second process: %s", &stdout)
+	}
+	current, found, err := db.Seat(context.Background(), seat.SeatID)
+	if err != nil || !found || current.SessionID != seat.SessionID || current.HerdrPane != pane {
+		t.Fatalf("seat after open = %+v found=%t err=%v, want it untouched", current, found, err)
+	}
+}

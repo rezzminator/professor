@@ -9,9 +9,9 @@ import (
 	"testing"
 )
 
-const vscodeLawFixture = "---\nname: how-to-build-prompt\ndescription: routing\n---\n\n# Prompt Quality\n\nCut every line.\n"
+const vscodeLawFixture = "---\nname: prompt:use\ndescription: routing\n---\n\n# Prompt Quality\n\nCut every line.\n"
 
-// writeVSCodeLawFixture puts a /how-to-build-prompt source into the clone repo and
+// writeVSCodeLawFixture puts a /prompt:use source into the clone repo and
 // returns repo.
 func writeVSCodeLawFixture(t *testing.T, repo string) string {
 	t.Helper()

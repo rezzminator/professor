@@ -15,7 +15,7 @@ import (
 // vscodeSystemPromptName is the Prompt Lint run's system prompt
 // (prompt-lint.js passes it as --system-file), built at install into the
 // staged extension and never tracked: prompt-lint.md, then the
-// /how-to-build-prompt law from the source clone.
+// /prompt:use law from the source clone.
 const vscodeSystemPromptName = "prompt-lint.system.md"
 
 // vscodeLintPromptAsset is the embedded half of the system prompt.
@@ -25,10 +25,10 @@ func (installer *engine) vscodeSystemPromptPath() string {
 	return filepath.Join(installer.managedRoot, filepath.FromSlash(vscodeExtensionSource), vscodeSystemPromptName)
 }
 
-// vscodeLawSource is /how-to-build-prompt's source file in a Professor clone, the
-// file the machine-global skill link in ~/.claude/skills resolves to.
+// vscodeLawSource is /prompt:use's source file in a Professor clone, the
+// file the machine-global command link in ~/.claude/commands resolves to.
 func vscodeLawSource(repo string) string {
-	return filepath.Join(repo, "templates", "global", "skills", "how-to-build-prompt", "SKILL.md")
+	return filepath.Join(repo, "templates", "global", "commands", "prompt", "use.md")
 }
 
 // writeVSCodeSystemPrompt builds prompt-lint.system.md from prompt-lint.md and the

@@ -1,13 +1,13 @@
 ---
 # professor: SOURCE TEMPLATE — edit here for a framework change (routes through the `pcm` agent); project-scaffold customization belongs in its installed local source; engine mirrors are never hand-edited.
-name: how-to-build-agent
-description: "MANDATORY — load before writing or editing an agent definition; `build <name>` grows one from a fixed bench, `improve <agent>` raises one run by run, `check [path…]` certifies each (APPROVED/REJECTED). Prose → /how-to-build-prompt; a `description:` → /how-to-build-description."
+name: agent:use
+description: "MANDATORY — load before writing or editing an agent definition; `build <name>` grows one from a fixed bench, `improve <agent>` raises one run by run, `check [path…]` certifies each (APPROVED/REJECTED). Prose → /prompt:use; a `description:` → /description:use."
 argument-hint: "[build <name> | improve <agent> | check [path…]]"
 ---
 
 # Agent Law
 
-An agent definition is a whole system prompt: the spawned agent sees its own file, its brief and the environment, nothing else, and its `description:` rides every session that can spawn it. Every line earns its place on a fixed bench, run by run, and the run that earned it stays on record. `/how-to-build-prompt` governs each line's prose, `/how-to-build-description` the `description:`; this law governs what the file carries and how it is grown. The evidence behind each rule: `docs/design/how-to-build/agent.md` in the Professor clone (`readlink -f ~/.claude/skills/how-to-build-agent/SKILL.md`, then its directory's `../../../..`).
+An agent definition is a whole system prompt: the spawned agent sees its own file, its brief and the environment, nothing else, and its `description:` rides every session that can spawn it. Every line earns its place on a fixed bench, run by run, and the run that earned it stays on record. `/prompt:use` governs each line's prose, `/description:use` the `description:`; this law governs what the file carries and how it is grown. The evidence behind each rule: `docs/design/use/agent.md` in the Professor clone (`readlink -f ~/.claude/commands/agent/use.md`, then its directory's `../../../..`).
 
 ## Modes
 
@@ -37,7 +37,7 @@ The axes fix the metric before the first run: value = (facets delivered ÷ key) 
 
 ## Grow it
 
-Run the loop as an `/how-to-build-iterative-improvement` lab on the agent, the axes as its metric, and load `/ultimate` for every design round; the two own the loop's mechanics. An agent adds these steps:
+Run the loop as an `/iterative-improvement:use` lab on the agent, the axes as its metric, and load `/ultimate` for every design round; the two own the loop's mechanics. An agent adds these steps:
 
 1. Greenfield: `build`, and an `improve` whose agent two rounds could not move, start from the goal and the axes alone. The first version is the boldest design the goal admits (a lead over cheaper readers, a script holding what prose kept losing, a different split of the work), never the old prompt reworded.
 2. Bench, fixed before any run:
@@ -59,7 +59,7 @@ Run the loop as an `/how-to-build-iterative-improvement` lab on the agent, the a
 ### Frontmatter
 
 - `name`: kebab-case, the file's stem, a role noun (`tracer`, `collector`).
-- `description`: per `/how-to-build-description`, naming the brief's fields as `Pass {fields}`.
+- `description`: per `/description:use`, naming the brief's fields as `Pass {fields}`.
 - `model`, `effort`: the setup step 4 picked, on the fleet's Model Selection tiers. A lead whose output someone acts on runs smart; a reader that returns raw material runs collector (`haiku`) at `low` or `medium`.
 - `tools`: exactly what the body calls. An omission can be the guard: the harness refuses a `Write` over a file an agent without `Read` has not read, so a taken path fails loud instead of being overwritten; a design doc names every such omission. A tool name the harness no longer serves fails silently: the agent never calls it.
 - `visibility.visible-to`: an agent spawned by one caller alone lists that caller, its description opening with the `{CALLER}-ONLY` class.
@@ -77,7 +77,7 @@ Run the loop as an `/how-to-build-iterative-improvement` lab on the agent, the a
 6. Failure: one mark per failure kind, one vocabulary across the agent and its callers; an error never shares a mark with an absence (`SEARCH FAILED` against `NOTHING FOUND`); a failed write returns `NOT SAVED — {reason}` with the content inline.
 7. NOT READ: every asked item not read, each with its next step; a list claim names each item, or counts the matches and names the exceptions.
 
-A contrastive example enters only where a bench run shows its rule leaking, written per `/how-to-build-prompt` § Teaching by example; where the model copied a ✗ line into its output, the plain rule stays alone.
+A contrastive example enters only where a bench run shows its rule leaking, written per `/prompt:use` § Teaching by example; where the model copied a ✗ line into its output, the plain rule stays alone.
 
 ### Derived tiers
 
@@ -96,7 +96,7 @@ An agent type registers at session start: an edited file runs in the next sessio
 `check [path…]`: no path means every `.md` under the project's `.claude/agents/` and `~/.claude/agents/`, symlinks resolved, `shared/` skipped; a declaration is checked on its render. Emit `APPROVED: {path}`, `REJECTED: {path} — checks {n,…}` with each failure in one line, or `UNREAD: {path} — {error}`; only a file read earns a verdict.
 
 1. Frontmatter: YAML that does not parse; a `name` other than the stem; `model` or `effort` neither set nor inherited through `from:`.
-2. Description: `/how-to-build-description` § Approval fails.
+2. Description: `/description:use` § Approval fails.
 3. Tools: a tool the body calls missing; one listed the body never calls and no design doc names as a guard; a `{CALLER}-ONLY` agent without `visibility.visible-to`; a writing script under a read-only list without `engines.codex.sandbox: workspace-write`.
 4. Brief: a field the body reads that no line names; a required field with no missing-field behaviour.
 5. Procedure: steps not numbered; a fan-out, re-read, retry or wait loop without a count.
@@ -107,6 +107,6 @@ An agent type registers at session start: an edited file runs in the next sessio
 10. Evidence: the model, effort or a cap rests on no recorded run, and no open item names it unbenched.
 11. Declaration: a `from:` file restating base text it does not override; a replaced section without its pin; a render that differs from a fresh one.
 12. Size: over the `pcm` agent's agent cap, where it sets one.
-13. Prose: the `/how-to-build-prompt` pre-commit self-check fails.
+13. Prose: the `/prompt:use` pre-commit self-check fails.
 
 The key exists before the first run, and a line stays only on the runs that earned it.

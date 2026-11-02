@@ -1,12 +1,12 @@
 ---
-name: how-to-build-md-forlint
-description: Lint/format markdown — `check [path]` reports, `fmt [path]` rewrites, `prompt-safe <file>` keeps machine-read markers intact, `audit` prices the policy, `profile <path>` names a path's category. Route every markdown lint/format/style ask here; load before changing `.rumdl.toml`. Prose quality lives in /how-to-build-prompt and /how-to-build-doc.
+name: md-forlint:use
+description: Lint/format markdown — `check [path]` reports, `fmt [path]` rewrites, `prompt-safe <file>` keeps machine-read markers intact, `audit` prices the policy, `profile <path>` names a path's category. Route every markdown lint/format/style ask here; load before changing `.rumdl.toml`. Prose quality lives in /prompt:use and /doc:use.
 argument-hint: "[check [path] | fmt [path] | prompt-safe <file> | audit | profile <path>]"
 ---
 
 # Markdown lint & format
 
-One config at the repo root (`.rumdl.toml`) decides every rule for every path; `rumdl` (single static binary, provisioned by `pfm install`, row in `pfm doctor`) is the only engine. This command owns the mechanics — whitespace, markers, tables, link integrity. Prose quality is `/how-to-build-prompt` (prompts) and `/how-to-build-doc` (reference docs).
+One config at the repo root (`.rumdl.toml`) decides every rule for every path; `rumdl` (single static binary, provisioned by `pfm install`, row in `pfm doctor`) is the only engine. This command owns the mechanics — whitespace, markers, tables, link integrity. Prose quality is `/prompt:use` (prompts) and `/doc:use` (reference docs).
 
 ## `check [path]` — report only
 

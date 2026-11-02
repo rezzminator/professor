@@ -67,28 +67,28 @@ var retiredNames = []retiredName{
 		match:     matchExact,
 	},
 	// releases/v0.77.0.md "/quality:md-forlint (renamed from /quality:forlint)".
-	{name: "/quality:forlint", kind: retiredCommand, successor: "/how-to-build-md-forlint", match: matchExact},
-	// Commit "rename the /quality:* family to the /how-to-build-* skills": each
-	// command became the skill of the same suffix. A name is matched exactly, so
-	// the longer /quality:md-forlint never reads as a shorter one.
-	{name: "/quality:claude-md", kind: retiredCommand, successor: "/how-to-build-claude-md", match: matchExact},
+	{name: "/quality:forlint", kind: retiredCommand, successor: "/md-forlint:use", match: matchExact},
+	// The /quality:* family became the /{x}:use commands: each /quality:{x}
+	// is now /{x}:use. A name is matched exactly, so the longer
+	// /quality:md-forlint never reads as a shorter one.
+	{name: "/quality:claude-md", kind: retiredCommand, successor: "/claude-md:use", match: matchExact},
 	{
 		name: "/quality:claude-selector", kind: retiredCommand,
-		successor: "/how-to-build-claude-selector", match: matchExact,
+		successor: "/claude-selector:use", match: matchExact,
 	},
-	{name: "/quality:description", kind: retiredCommand, successor: "/how-to-build-description", match: matchExact},
-	{name: "/quality:doc", kind: retiredCommand, successor: "/how-to-build-doc", match: matchExact},
+	{name: "/quality:description", kind: retiredCommand, successor: "/description:use", match: matchExact},
+	{name: "/quality:doc", kind: retiredCommand, successor: "/doc:use", match: matchExact},
 	{
 		name: "/quality:integration-suite", kind: retiredCommand,
-		successor: "/how-to-build-integration-suite", match: matchExact,
+		successor: "/integration-suite:use", match: matchExact,
 	},
-	{name: "/quality:llm-codebase", kind: retiredCommand, successor: "/how-to-build-llm-codebase", match: matchExact},
-	{name: "/quality:md-forlint", kind: retiredCommand, successor: "/how-to-build-md-forlint", match: matchExact},
-	{name: "/quality:prompt", kind: retiredCommand, successor: "/how-to-build-prompt", match: matchExact},
-	{name: "/quality:rules", kind: retiredCommand, successor: "/how-to-build-rules", match: matchExact},
+	{name: "/quality:llm-codebase", kind: retiredCommand, successor: "/llm-codebase:use", match: matchExact},
+	{name: "/quality:md-forlint", kind: retiredCommand, successor: "/md-forlint:use", match: matchExact},
+	{name: "/quality:prompt", kind: retiredCommand, successor: "/prompt:use", match: matchExact},
+	{name: "/quality:rules", kind: retiredCommand, successor: "/rules:use", match: matchExact},
 	{
 		name: "/iterative-improvement", kind: retiredCommand,
-		successor: "/how-to-build-iterative-improvement", match: matchExact,
+		successor: "/iterative-improvement:use", match: matchExact,
 	},
 	// releases/v0.78.0.md "Project: /pfm becomes /pcm": commands/pfm.md is
 	// renamed commands/pcm.md with its audit scopes inline; that /pcm command
@@ -118,7 +118,7 @@ var retiredNames = []retiredName{
 	// releases/v0.78.0.md "Project: retired project surface": /documenter and
 	// /documenter:archive ("Doc consolidation is the main session's work
 	// under /quality:doc"), /km, /audit:ai-output and six agents.
-	{name: "/documenter", kind: retiredCommand, successor: "/how-to-build-doc", match: matchFamily},
+	{name: "/documenter", kind: retiredCommand, successor: "/doc:use", match: matchFamily},
 	{name: "/km", kind: retiredCommand, match: matchExact},
 	{name: "/audit:ai-output", kind: retiredCommand, match: matchExact},
 	// Commit "remove /rnd end to end": the project-scope research command and

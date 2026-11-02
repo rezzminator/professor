@@ -48,7 +48,7 @@ PY
 step='pfm init --render'
 pfm init --render .
 step='orientation file'
-# Stands in for the interview's `/how-to-build-claude-md write CLAUDE.md` engine turn.
+# Stands in for the interview's `/claude-md:use write CLAUDE.md` engine turn.
 [ -f CLAUDE.md ] || printf '# Express Fixture — invented lane project\n\n# Vocabulary\n\n- express: the lane fixture — Node.js, `node --test` · `test/`\n' >CLAUDE.md
 step='project update report'
 if report="$(pfm doctor --project-updates 2>&1)"; then rc=0; else rc=$?; fi

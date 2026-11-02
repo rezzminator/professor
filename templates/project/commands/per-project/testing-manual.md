@@ -61,4 +61,4 @@ Fixed headings, fixed order; a section that does not apply says `none`. State th
 ## What not to test
 
 - Tests this project refuses: {kinds}.
-- This stack's spelling of the `/how-to-build-integration-suite` refused shapes: {shape → spelling}.
+- This stack's spelling of the `/integration-suite:use` refused shapes: {shape → spelling}.

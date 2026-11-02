@@ -1,7 +1,7 @@
 ---
 # professor: SOURCE TEMPLATE — edit here for a framework change (routes through the `pcm` agent); project-scaffold customization belongs in its installed local source; engine mirrors are never hand-edited.
-name: how-to-build-iterative-improvement
-description: 'Raises anything run by run — `/how-to-build-iterative-improvement [target] [angle…]`, or asks like "iteratively improve X", "optimize X again and again". Returns the before/after ledger and the version history. Not for an agent → /how-to-build-agent.'
+name: iterative-improvement:use
+description: 'Raises anything run by run — `/iterative-improvement:use [target] [angle…]`, or asks like "iteratively improve X", "optimize X again and again". Returns the before/after ledger and the version history. Not for an agent → /agent:use.'
 argument-hint: '[target] [angle…]'
 ---
 
@@ -11,7 +11,7 @@ The target: $ARGUMENTS — with none, the thing in hand in this chat: an agent, 
 
 ## Lab
 
-One directory carries the work across compactions and reboots: `$HOME/.local/state/pfm/how-to-build-iterative-improvement/{project}/{target}/`, `{project}` the repository's directory name minus a leading dot, `{target}` a kebab slug.
+One directory carries the work across compactions and reboots: `$HOME/.local/state/pfm/iterative-improvement/{project}/{target}/`, `{project}` the repository's directory name minus a leading dot, `{target}` a kebab slug.
 
 - `lab.md`: the resume brief on top (angle, metric, ladder, current version, next step), the round archive appended below a `---` marker. Rewrite the brief at every round's end, then compact.
 - `ledger.tsv`: one row per run — version, rung, run, where it stopped and why, every metric.

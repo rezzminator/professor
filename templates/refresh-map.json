@@ -94,34 +94,34 @@
     "global/commands/pfm/workbench.md": {
       "curated": true
     },
-    "global/skills/how-to-build-claude-md/SKILL.md": {
+    "global/commands/claude-md/use.md": {
       "curated": true
     },
-    "global/skills/how-to-build-description/SKILL.md": {
+    "global/commands/description/use.md": {
       "curated": true
     },
-    "global/skills/how-to-build-doc/SKILL.md": {
+    "global/commands/doc/use.md": {
       "curated": true
     },
-    "global/skills/how-to-build-integration-suite/SKILL.md": {
+    "global/commands/integration-suite/use.md": {
       "curated": true
     },
-    "global/skills/how-to-build-llm-codebase/SKILL.md": {
+    "global/commands/llm-codebase/use.md": {
       "curated": true
     },
-    "global/skills/how-to-build-md-forlint/SKILL.md": {
+    "global/commands/md-forlint/use.md": {
       "curated": true
     },
-    "global/skills/how-to-build-prompt/SKILL.md": {
+    "global/commands/prompt/use.md": {
       "curated": true
     },
-    "global/skills/how-to-build-rules/SKILL.md": {
+    "global/commands/rules/use.md": {
       "curated": true
     },
-    "global/skills/how-to-build-agent/SKILL.md": {
+    "global/commands/agent/use.md": {
       "curated": true
     },
-    "global/skills/how-to-build-iterative-improvement/SKILL.md": {
+    "global/commands/iterative-improvement/use.md": {
       "curated": true
     },
     "global/skills/ultimate/SKILL.md": {

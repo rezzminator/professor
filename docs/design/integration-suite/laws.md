@@ -1,6 +1,6 @@
 # The laws — tiers, shape, verdict
 
-This file covers Laws 1–18 of [`/how-to-build-integration-suite`](../../../templates/global/skills/how-to-build-integration-suite/SKILL.md), one section each: where each tier gates, the shape of the live suite, and what a verdict means. [validity.md](validity.md) covers Laws 19–31: how the suite stays honest over time, and the shapes a test may never take. Every section gives the rule, the failure it prevents, why it takes this shape and not a nearby one, and how it is checked; a section with published evidence names it. The laws hold for any project in any language; the examples are the kinds of systems the command designs for, not any one codebase.
+This file covers Laws 1–18 of [`/integration-suite:use`](../../../templates/global/commands/integration-suite/use.md), one section each: where each tier gates, the shape of the live suite, and what a verdict means. [validity.md](validity.md) covers Laws 19–31: how the suite stays honest over time, and the shapes a test may never take. Every section gives the rule, the failure it prevents, why it takes this shape and not a nearby one, and how it is checked; a section with published evidence names it. The laws hold for any project in any language; the examples are the kinds of systems the command designs for, not any one codebase.
 
 ## Contents
 

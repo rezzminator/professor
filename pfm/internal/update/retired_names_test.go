@@ -92,7 +92,8 @@ func TestRetiredNamesNeverHitALiveNameSharingAPrefix(t *testing.T) {
 		"the /pfm CLI guide",
 		"see ~/.claude/commands/pfm.md and $HOME/.claude/commands/pfm.md",
 		".claude/commands/pcm.md",
-		"/how-to-build-md-forlint check",
+		"/md-forlint:use check",
+		"/iterative-improvement:use target",
 		"mcp__chat-professor__call",
 		"tools: Read, mcp__forward-compaction__forward_compaction, mcp__forward-compaction__look_back",
 		"spawn super-rr",
@@ -795,12 +796,12 @@ func TestScanRetiredNamesStreamsTrackedTextToClean(t *testing.T) {
 	want := []professor.RetiredNameHit{
 		{Path: "large.txt", Line: 1, Name: "/wave", Kind: "command", Successor: flightsSuccessor},
 		{Path: "large.txt", Line: 4, Name: "/jc", Kind: "command"},
-		{Path: "large.txt", Line: 5, Name: "/quality:forlint", Kind: "command", Successor: "/how-to-build-md-forlint"},
+		{Path: "large.txt", Line: 5, Name: "/quality:forlint", Kind: "command", Successor: "/md-forlint:use"},
 	}
 	if len(scan.Failures) != 0 || len(scan.Incomplete) != 0 || !reflect.DeepEqual(scan.Hits, want) {
 		t.Errorf("large tracked scan = %+v, want complete hits %+v", scan, want)
 	}
-	clean := strings.NewReplacer("/wave", "/flights:doctor", "/jc", "/how-to-build-prompt", "/quality:forlint", "/how-to-build-md-forlint").
+	clean := strings.NewReplacer("/wave", "/flights:doctor", "/jc", "/prompt:use", "/quality:forlint", "/md-forlint:use").
 		Replace(content)
 	writeRetiredFixture(t, root, map[string]string{"large.txt": clean})
 	scan = ScanRetiredNames(root, nil)

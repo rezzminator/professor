@@ -1,6 +1,6 @@
-# /how-to-build-claude-md
+# /claude-md:use
 
-`/how-to-build-claude-md` is the law for a project's orientation file — `CLAUDE.md`, `AGENTS.md`, `GEMINI.md` or any engine's equivalent: the one text every session and every sub-agent reads before anything else. The law itself — spine, admission, budget, checks, write steps, the truth script — lives in `templates/global/skills/how-to-build-claude-md/SKILL.md`; this doc holds why each part is shaped as it is, the evidence behind it, and the decisions taken. Any project, any stack.
+`/claude-md:use` is the law for a project's orientation file — `CLAUDE.md`, `AGENTS.md`, `GEMINI.md` or any engine's equivalent: the one text every session and every sub-agent reads before anything else. The law itself — spine, admission, budget, checks, write steps, the truth script — lives in `templates/global/commands/claude-md/use.md`; this doc holds why each part is shaped as it is, the evidence behind it, and the decisions taken. Any project, any stack.
 
 ## Contents
 
@@ -20,7 +20,7 @@ The orientation file is paid on every load: each main session and each sub-agent
 ## The two metrics
 
 - Compact: bytes per load, measured with `wc -c` against the budget.
-- Useful: round-trips from a spoken term to its source. Target one — the reader finds the term in the file, and its next call opens the source. Measured over a sample of real asks (commit subjects, session transcripts): the reads spent before the first read of the right source file, the orientation-hops count `/how-to-build-llm-codebase` defines.
+- Useful: round-trips from a spoken term to its source. Target one — the reader finds the term in the file, and its next call opens the source. Measured over a sample of real asks (commit subjects, session transcripts): the reads spent before the first read of the right source file, the orientation-hops count `/llm-codebase:use` defines.
 
 Every rule serves one of the two. A rule that serves neither is cut.
 
@@ -74,17 +74,17 @@ Embedded in the command, run by `check` and by `write`'s final step as `bash {sc
 
 ## Relations
 
-- `/how-to-build-prompt` governs every line's prose; this law governs the orientation file's shape and admission, and runs the prompt law's self-check as check 11.
-- `/how-to-build-doc` governs reference docs; the orientation file cites them from Vocabulary entries and trigger lines and never holds their content.
-- `/how-to-build-description` governs the `description:` of this command, and the description of every skill a trigger line names.
-- `/how-to-build-llm-codebase` owns the glossary and its spelling census; the Vocabulary holds the glossary's canonical terms and homes, and its orientation-truth check and this law's truth script test the same fact from two sides.
+- `/prompt:use` governs every line's prose; this law governs the orientation file's shape and admission, and runs the prompt law's self-check as check 11.
+- `/doc:use` governs reference docs; the orientation file cites them from Vocabulary entries and trigger lines and never holds their content.
+- `/description:use` governs the `description:` of this command, and the description of every skill a trigger line names.
+- `/llm-codebase:use` owns the glossary and its spelling census; the Vocabulary holds the glossary's canonical terms and homes, and its orientation-truth check and this law's truth script test the same fact from two sides.
 - `/context-audit` runs the truth script and reads its prefixed lines.
 - In a framework install that routes prompt-file edits through a change manager, that manager's CLAUDE.md conventions point here instead of restating them.
 
 ## Decisions
 
-- Scope is a project's orientation file. A user-level file (`~/.claude/CLAUDE.md`) maps no repository, so closed world and the truth script do not apply to it; its prose still answers to `/how-to-build-prompt`.
-- Name `how-to-build-claude-md`: the file name people type. The body covers every engine's equivalent. Rejected: `how-to-build-orientation`, which nobody types; `how-to-build-agents-md`, which names one engine.
+- Scope is a project's orientation file. A user-level file (`~/.claude/CLAUDE.md`) maps no repository, so closed world and the truth script do not apply to it; its prose still answers to `/prompt:use`.
+- Name `/claude-md:use`: the name people type. The body covers every engine's equivalent. Rejected: `/orientation:use`, which nobody types; `/agents-md:use`, which names one engine.
 - A term-keyed Vocabulary instead of a directory tour: the tour is the content measured not to help; the term is the key the reader arrives with.
 - `# Rules`, not `# MANDATORY Rules`: a MANDATORY heading tells the model every rule beneath it is an invariant (vendor opinion on emphasis; the research run found no measured study of emphasis in orientation files); the sacred-ground `##` placed first in `# Rules` carries the weight.
 - Path vars under Vocabulary: the same name → path shape, defined before any rule uses them.

@@ -1,6 +1,6 @@
 ---
-name: how-to-build-integration-suite
-description: Designs every test tier — its validity law, and the live tier's lanes over shared state; `/how-to-build-integration-suite <project|subsystem>`, "design our test suite", "refactor the e2e suite", before building any test harness. Returns a design document with its ledgers and checks script; edits no code. Source-tree layout → /how-to-build-llm-codebase.
+name: integration-suite:use
+description: Designs every test tier — its validity law, and the live tier's lanes over shared state; `/integration-suite:use <project|subsystem>`, "design our test suite", "refactor the e2e suite", before building any test harness. Returns a design document with its ledgers and checks script; edits no code. Source-tree layout → /llm-codebase:use.
 argument-hint: <project|subsystem>
 ---
 
@@ -9,7 +9,7 @@ argument-hint: <project|subsystem>
 One procedure for any stack: a CLI, a web service, a UI, a daemon, a library with a unit tier only, a product with LLM-driven steps. Each rule below is one executable line; its reasoning, the failure it prevents and its evidence live in the design, read from disk at each decision point:
 
 ```bash
-DESIGN="$(cd "$(dirname "$(readlink -f "$HOME/.claude/skills/how-to-build-integration-suite/SKILL.md")")/../../../../docs/design/integration-suite" && pwd)"
+DESIGN="$(cd "$(dirname "$(readlink -f "$HOME/.claude/commands/integration-suite/use.md")")/../../../../docs/design/integration-suite" && pwd)"
 ```
 
 Run it first. When it fails, or `$DESIGN` lacks `integration-suite.md`, `laws.md` or `validity.md`, stop and report `DESIGN-UNREACHABLE <the directory the cd tried>`; never proceed from memory. A pointer `$DESIGN/<file> § <heading>` is an order: read that section before the decision it governs. Law N's section is `$DESIGN/laws.md § Law N` for 1–18 and `$DESIGN/validity.md § Law N` for 19–31 (the heading `Law N — …`); read it wherever a step names Law N, and before any judgement its line leaves open. Where this command and a section differ, the section governs and the reply names the difference. Before step 1, read `$DESIGN/integration-suite.md § The six ideas` and `$DESIGN/integration-suite.md § The shape`.
@@ -318,7 +318,7 @@ With no live tier, steps 6–8 become the unit and hermetic conversions of step 
 
 Read `$DESIGN/integration-suite.md § The checks` before adapting a row.
 
-`scripts/suite-checks.sh` runs plain (every commit) or with `--close`. Each check prints one line, `CHECK <name> PASS|FAIL|ERROR <detail>`; the script exits 0 when clean, 1 on a finding, 2 when a check could not run: the three-state protocol of `/how-to-build-llm-codebase` § Protocol. Each check proves both of its sets non-empty before comparing them. Every scope skips the `scope`-tagged paths of `exclusions.txt`. A design value a check reads (a Speed target, the headroom, the schedule window, `size-ceiling`) missing is that check's `ERROR`. Every ruling-bearing input is read as Where enforcement ends says.
+`scripts/suite-checks.sh` runs plain (every commit) or with `--close`. Each check prints one line, `CHECK <name> PASS|FAIL|ERROR <detail>`; the script exits 0 when clean, 1 on a finding, 2 when a check could not run: the three-state protocol of `/llm-codebase:use` § Protocol. Each check proves both of its sets non-empty before comparing them. Every scope skips the `scope`-tagged paths of `exclusions.txt`. A design value a check reads (a Speed target, the headroom, the schedule window, `size-ceiling`) missing is that check's `ERROR`. Every ruling-bearing input is read as Where enforcement ends says.
 
 Every ratchet baseline is a multiset of signatures, read as a list that excuses: a signature found more often than the baseline holds it fails even when the total fell, so a move keeps its count and a copy raises it; the baseline only shrinks. Its header carries the owner's burn-down ceiling as `# ceiling <YYYY-MM-DD> <count>` lines; the entry in force is the latest dated today or earlier, and the tighter of the two readings applies. A baseline above it fails, and a header with no entry in force is the ratchet's `ERROR`.
 

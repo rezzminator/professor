@@ -1,6 +1,6 @@
 ---
-name: how-to-build-prompt
-description: MANDATORY — load before editing any LLM-consumed prompt (CLAUDE.md, agents, commands, skills, rules); leanness plus correctness law. `cut <file>` rewrites the target leaner in place. Harness file rules → the `pcm` agent; CLAUDE.md shape → /how-to-build-claude-md; rule files → /how-to-build-rules; a `description:` → /how-to-build-description; doc shape → /how-to-build-doc; markdown mechanics → /how-to-build-md-forlint.
+name: prompt:use
+description: MANDATORY — load before editing any LLM-consumed prompt (CLAUDE.md, agents, commands, skills, rules); leanness plus correctness law. `cut <file>` rewrites the target leaner in place. Harness file rules → the `pcm` agent; CLAUDE.md shape → /claude-md:use; rule files → /rules:use; a `description:` → /description:use; doc shape → /doc:use; markdown mechanics → /md-forlint:use.
 ---
 
 # Prompt Quality
@@ -13,7 +13,7 @@ Make every prompt line pay for itself on every invocation, whatever the consumer
 
 If no — delete it.
 
-## Cut mode — `how-to-build-prompt cut <file>`
+## Cut mode — `/prompt:use cut <file>`
 
 Rewrite the target leaner in place: read it, apply every rule below, cut hard. Preserve every distinct behavioral rule, threshold, and behavior-pinning example; unsure = keep and flag. Never weaken a sacred-ground rule (secrets, personal data, and whatever the project's law marks sacred) to save tokens. Every cut names its justification — the duplicate's surviving location or the failed cut test; a negative claim ("no duplicate", "zero references", "unused") is grep-verified before the cut lands, and a duplicate section's heading is grep-checked for citers first (a cited section is a navigation index: keep it or retarget its citers). Report each cut in one line.
 
@@ -53,7 +53,7 @@ Every consumer imposes size limits on its prompt files; know the consumer's limi
 11. Cross-file restatement: a file restating rules or bodies (SQL/SDL/contracts, a whole section) that live in another file. Keep only the local delta: nothing else when that file is co-loaded in its stream (a child config vs the parent it always loads with), plus a doc + section citation when it is only co-read.
 12. Multiple options when one default suffices: "Use pypdf, pdfplumber, PyMuPDF, or pdf2image" → "Use pdfplumber. For OCR, use pdf2image+pytesseract."
 13. Examples that don't pin down behavior: an example earns its tokens only if the rule alone wouldn't produce the same output. An example naming an external reader of a format (a grep pattern that must keep matching) pins behavior — keep it.
-14. Vague descriptions: "Helps with documents", "Processes data" — the consumer cannot route to it; /how-to-build-description owns the fix.
+14. Vague descriptions: "Helps with documents", "Processes data" — the consumer cannot route to it; /description:use owns the fix.
 15. Deeply nested file references (entry file → reference.md → details.md): keep references one level deep.
 16. Token-heavy formatting: HTML tags (`<example>`, `<div>`), XML-style wrappers, drawn ASCII boxes, decorative dividers, decorative emoji legends, bold labels restating the code block they introduce, stray editing debris (empty fences, orphaned markup) — they cost tokens markdown gives free. Use `## Example` over `<example name=…>`, a fenced block over a drawn box, a single `—` over a rule of dashes. Keep the structure, drop the scaffolding.
 17. Run-on list-item definitions: a definition reads `- term: gloss`, a plain term, a colon, one tight gloss. The smell is a bold term, an em-dash, and clauses chained with `;` / `—` into a run-on. `- High: the default — step up only for a genuinely hard problem` beats `- **High** — the level you reach for in nearly all work; balances depth against cost; step up only when the task truly demands it`. Same rule for command references: a gloss restating the command's own flags is dead weight.

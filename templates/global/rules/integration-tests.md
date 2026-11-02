@@ -12,7 +12,7 @@ paths:
 
 # Integration tests prove only what a unit test cannot see
 
-Designing or restructuring a suite runs `/how-to-build-integration-suite`; these laws bind every test written in one.
+Designing or restructuring a suite runs `/integration-suite:use`; these laws bind every test written in one.
 
 - A test above the unit tier asserts one success and one refusal per operation, across a process boundary, real input and output, a boot path or the built artifact.
 - Boot the production entry point from the build output as a separate process with production's configuration path, never in-process.

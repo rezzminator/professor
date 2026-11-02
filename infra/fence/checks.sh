@@ -231,7 +231,7 @@ checks_templates_scratch_paths() {
 
 checks_templates_descriptions() {
   head_ "templates — description registry"
-  # A `description:` is the routing registry (/how-to-build-description). An
+  # A `description:` is the routing registry (/description:use). An
   # unquoted `: ` in one breaks the YAML: Claude Code's lenient parser still
   # registers the entry, a stricter runtime silently drops it, and no prompt
   # rule can see it. The script distinguishes its own broken state from a

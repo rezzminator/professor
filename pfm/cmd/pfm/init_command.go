@@ -70,7 +70,7 @@ func runInit(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime
 			"runs pfm init --render and deploys the per-project files\n",
 		filepath.Join(source, "docs", "SETUP.md"),
 	)
-	fmt.Fprintln(stdout, "next: write CLAUDE.md with /how-to-build-claude-md write CLAUDE.md")
+	fmt.Fprintln(stdout, "next: write CLAUDE.md with /claude-md:use write CLAUDE.md")
 	return 0
 }
 

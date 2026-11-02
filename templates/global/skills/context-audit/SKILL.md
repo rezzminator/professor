@@ -37,10 +37,10 @@ A `GAP` line saying `FINDING` means a layer is missing from the list: open the `
 
 ## 3 Limits
 
-Copy each `LIMIT` line verbatim. For every orientation file among the layers (`CLAUDE.md`, `AGENTS.md`), run the `/how-to-build-claude-md` truth script and relay its prefixed lines verbatim, the per-chain budget included:
+Copy each `LIMIT` line verbatim. For every orientation file among the layers (`CLAUDE.md`, `AGENTS.md`), run the `/claude-md:use` truth script and relay its prefixed lines verbatim, the per-chain budget included:
 
 ```bash
-F=${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/how-to-build-claude-md/SKILL.md
+F=${CLAUDE_CONFIG_DIR:-$HOME/.claude}/commands/claude-md/use.md
 awk '/^## The truth script/{s=1} s&&/^```bash/{f=1;next} f&&/^```/{exit} f' "$F" > /tmp/context-audit/truth.sh
 [ -s /tmp/context-audit/truth.sh ] || echo "ERROR: no truth script in $F"
 bash /tmp/context-audit/truth.sh {orientation file}

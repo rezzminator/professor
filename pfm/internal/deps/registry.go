@@ -138,21 +138,6 @@ var fixedCommands = []Entry{
 		InstallHint: "install util-linux or the BSD script command",
 	},
 	{
-		Name:        "setsid",
-		Purpose:     "detached Linux helper processes",
-		Required:    true,
-		Platforms:   []string{platformLinux},
-		VersionArgs: []string{versionFlag},
-		Parse:       firstVersion,
-		InstallHint: "install util-linux (setsid)",
-	},
-	{
-		Name:        "nohup",
-		Purpose:     "detached helper fallback where setsid is absent",
-		Platforms:   []string{platformLinux, platformDarwin},
-		InstallHint: "install coreutils (nohup)",
-	},
-	{
 		Name:        "sleep",
 		Purpose:     "bounded shell-side polling",
 		Required:    true,
@@ -367,18 +352,17 @@ func Resolve(name string) (string, error) {
 	if cached, ok := resolveCached(name); ok {
 		return cached, nil
 	}
+	if err := platformGate(name); err != nil {
+		return "", err
+	}
 	command := name
 	entries := Registry(Options{Home: ".", GOOS: runtime.GOOS, GOARCH: runtime.GOARCH})
 	for index := range entries {
 		entry := entries[index]
-		if entry.Name != name && entry.Command != name {
-			continue
+		if entry.Name == name || entry.Command == name {
+			command = entry.Command
+			break
 		}
-		if !entry.AppliesTo(runtime.GOOS) {
-			return "", fmt.Errorf("dependency %s is not supported on %s", entry.Name, runtime.GOOS)
-		}
-		command = entry.Command
-		break
 	}
 	path, err := exec.LookPath(command)
 	if err != nil {
@@ -386,6 +370,23 @@ func Resolve(name string) (string, error) {
 	}
 	rememberResolved(name, path)
 	return path, nil
+}
+
+// platformGate is the one platform gate: it refuses name when a registry row
+// names it and is gated to platforms other than this one. Only the fixed rows
+// carry Platforms, so it reads them without building the registry. Resolve
+// and RealRunner's bare argv[0] both pass through it.
+func platformGate(name string) error {
+	for index := range fixedCommands {
+		entry := &fixedCommands[index]
+		if entry.Name != name && (entry.Command == "" || entry.Command != name) {
+			continue
+		}
+		if !entry.AppliesTo(runtime.GOOS) {
+			return fmt.Errorf("dependency %s is not supported on %s", entry.Name, runtime.GOOS)
+		}
+	}
+	return nil
 }
 
 // Executable resolves name through Resolve and, when the lookup fails, hands
@@ -400,43 +401,6 @@ func Executable(name string) string {
 		return name
 	}
 	return path
-}
-
-// DetachLauncher resolves how this host detaches a helper into its own
-// session: setsid where it exists (Linux), nohup as the documented POSIX
-// fallback (macOS, and any other host without setsid). setsidOverride and
-// nohupOverride let a caller pin a specific binary (tests, config); an empty
-// override falls back to the bare name for a normal PATH lookup through
-// Resolve.
-//
-// prefixArgs carries setsid's own "-f" flag, prepended ahead of the caller's
-// argv; nohup takes no such flag, so prefixArgs is empty on that branch.
-// forked reports whether the launcher forks into the background and returns
-// immediately (setsid -f) or IS the detached helper itself (nohup) — a
-// caller may Run() the former but must Start() and Release() the latter, or
-// it blocks until the helper it meant to detach from finishes.
-func DetachLauncher(setsidOverride, nohupOverride string) (path string, prefixArgs []string, forked bool, err error) {
-	setsid := setsidOverride
-	if setsid == "" {
-		setsid = "setsid"
-	}
-	setsidPath, setsidErr := Resolve(setsid)
-	if setsidErr == nil {
-		return setsidPath, []string{"-f"}, true, nil
-	}
-	nohup := nohupOverride
-	if nohup == "" {
-		nohup = "nohup"
-	}
-	nohupPath, nohupErr := Resolve(nohup)
-	if nohupErr != nil {
-		return "", nil, false, fmt.Errorf(
-			"setsid unavailable (%v) and nohup unavailable (%w)",
-			setsidErr,
-			nohupErr,
-		)
-	}
-	return nohupPath, nil, false, nil
 }
 
 // AppliesTo reports whether the entry belongs to goos.

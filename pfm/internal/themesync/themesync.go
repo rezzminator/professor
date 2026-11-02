@@ -15,9 +15,9 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 )
 
 // Appearance is the resolved light/dark side a render uses.
@@ -178,7 +178,7 @@ type Env struct {
 	// ~/.local/bin/pfm (agentlauncher), and its systemd service elsewhere
 	// runs PfmBinary itself.
 	PfmBinary string
-	// Runner runs defaults, herdr, ps, launchctl and systemctl.
+	// Runner runs defaults, herdr, launchctl and systemctl.
 	Runner deps.Runner
 	// Tmux reaches pfm's chat servers.
 	Tmux TmuxServers
@@ -186,20 +186,22 @@ type Env struct {
 	// XPC_SERVICE_NAME: launchd sets it for the macOS agent, the Linux
 	// follower's systemd service sets it to the same label), "" outside it.
 	LaunchdJob string
-	// GOOS is the platform the run serves, "" meaning runtime.GOOS: darwin
-	// keeps its launch agent and ~/Library/Application Support VS Code dirs,
-	// every other platform a systemd user unit trio and the Linux VS Code
-	// settings (paths.VSCodeSettingsCandidates).
-	GOOS string
+	// Platform is the profile the run serves, nil meaning this host's:
+	// darwinPlatform keeps its launch agent and ~/Library/Application Support
+	// VS Code dirs, linuxPlatform a systemd user unit trio and the Linux VS
+	// Code settings (paths.VSCodeSettingsCandidates).
+	Platform *platform
+	// Proc is the process table the vscode row looks for a running VS Code
+	// in, nil meaning this host's own.
+	Proc gather.ProcFS
 }
 
-// darwin says whether the run serves macOS.
-func (env Env) darwin() bool {
-	goos := env.GOOS
-	if goos == "" {
-		goos = runtime.GOOS
+// proc is the process table the run reads: Env.Proc, else this host's.
+func (env Env) proc() gather.ProcFS {
+	if env.Proc == nil {
+		return gather.NewProcFS("")
 	}
-	return goos == "darwin"
+	return env.Proc
 }
 
 // FollowerLabel is the launchd job label of the follower's launch agent.

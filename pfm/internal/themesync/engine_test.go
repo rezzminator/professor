@@ -15,6 +15,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 )
 
 const (
@@ -107,18 +108,19 @@ type harness struct {
 	tmux     *fakeTmux
 	env      Env
 
-	appearanceOut      string // "Dark" or "" (missing key)
-	appearanceFail     string
-	herdrReload        deps.RunResult
-	herdrLink          deps.RunResult
-	herdrUnlink        deps.RunResult
-	psVscode           string
+	appearanceOut  string // "Dark" or "" (missing key)
+	appearanceFail string
+	herdrReload    deps.RunResult
+	herdrLink      deps.RunResult
+	herdrUnlink    deps.RunResult
+	// processes are the argvs of the process table the vscode row reads.
+	processes          [][]string
 	herdrOnPath        bool
 	runner             *deps.FakeRunner
 	launchctlPrintFail bool
-	// goos is the platform the run serves: darwin unless a Linux test sets
-	// linux and rearms.
-	goos string
+	// platform is the profile the run serves: darwinPlatform unless a Linux
+	// test sets linuxPlatform and rearms.
+	platform *platform
 	// unitsInactive scripts `systemctl --user is-active` answering inactive.
 	unitsInactive bool
 }
@@ -138,7 +140,7 @@ func newHarness(t *testing.T) *harness {
 		tmux:          newFakeTmux("cc-a", "cc-b"),
 		appearanceOut: "Dark",
 		herdrOnPath:   true,
-		goos:          "darwin",
+		platform:      darwinPlatform,
 		herdrReload: deps.RunResult{
 			Stdout: []byte(`{"result":{"type":"config_reload","status":"applied","diagnostics":[]}}`),
 		},
@@ -201,7 +203,6 @@ func (h *harness) rearm() {
 		runner.Script([]string{herdrBinary, "plugin", "link"}, h.herdrLink, nil)
 		runner.Script([]string{herdrBinary, "plugin", "unlink"}, h.herdrUnlink, nil)
 	}
-	runner.Script([]string{"ps", "-axo", "args="}, deps.RunResult{Stdout: []byte(h.psVscode)}, nil)
 	domain := fmt.Sprintf("gui/%d", os.Getuid())
 	runner.Script([]string{"launchctl", "bootout"}, deps.RunResult{}, nil)
 	runner.Script([]string{"launchctl", "bootstrap", domain}, deps.RunResult{}, nil)
@@ -218,8 +219,38 @@ func (h *harness) rearm() {
 	runner.Script([]string{"systemctl", "--user", "is-active"}, active, nil)
 	h.runner = runner
 	h.env = Env{
-		Home: h.home, StateDir: h.stateDir, PfmBinary: "/opt/bin/pfm", Runner: runner, Tmux: h.tmux, GOOS: h.goos,
+		Home: h.home, StateDir: h.stateDir, PfmBinary: "/opt/bin/pfm", Runner: runner, Tmux: h.tmux,
+		Platform: h.platform, Proc: h.procTable(),
 	}
+}
+
+// procTable stages h.processes as a Linux proc tree, pid 1 upward, each
+// argv its NUL-separated cmdline (empty for a kernel thread's), a nil argv a
+// pid whose cmdline is gone, and opens it.
+func (h *harness) procTable() gather.ProcFS {
+	h.t.Helper()
+	root := h.t.TempDir()
+	for index, argv := range h.processes {
+		dir := filepath.Join(root, fmt.Sprint(index+1))
+		if err := os.Mkdir(dir, 0o755); err != nil {
+			h.t.Fatal(err)
+		}
+		if argv == nil {
+			continue
+		}
+		cmdline := strings.Join(argv, "\x00")
+		if cmdline != "" {
+			cmdline += "\x00"
+		}
+		if err := os.WriteFile(filepath.Join(dir, "cmdline"), []byte(cmdline), 0o644); err != nil {
+			h.t.Fatal(err)
+		}
+	}
+	table, err := gather.OpenProcFS(root)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	return table
 }
 
 func (h *harness) on() Report {
@@ -634,7 +665,7 @@ func TestLogOnceDedupesTheSameLineUntilCleared(t *testing.T) {
 func TestVscodeRowFollowsTheAckAndTheProcessTable(t *testing.T) {
 	h := newHarness(t)
 	h.on()
-	h.psVscode = "/Applications/Visual Studio Code.app/Contents/MacOS/Electron\n"
+	h.processes = [][]string{{"/Applications/Visual Studio Code.app/Contents/MacOS/Electron"}}
 	h.rearm()
 	old := time.Now().Add(-time.Minute)
 	if err := os.Chtimes(h.path(".local/state/pfm/theme/current.json"), old, old); err != nil {

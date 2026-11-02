@@ -762,7 +762,7 @@ func TestVSCodePromptLintManifestAndAssets(t *testing.T) {
 		}
 	}
 
-	files, err := assetFiles()
+	files, err := assetFiles(nativeScheduler())
 	if err != nil {
 		t.Fatal(err)
 	}

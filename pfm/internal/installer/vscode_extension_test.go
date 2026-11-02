@@ -554,7 +554,7 @@ func TestVSCodeExtensionPackageJSONContractMatchesTheInstalledConstantsAndStages
 		t.Fatalf("package.json main %q does not name an embedded file: %v", manifest.Main, err)
 	}
 
-	files, err := assetFiles()
+	files, err := assetFiles(nativeScheduler())
 	if err != nil {
 		t.Fatal(err)
 	}

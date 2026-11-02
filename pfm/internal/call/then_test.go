@@ -5,16 +5,17 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
-	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestDeliverThenDoesNotRecordExcludedHandoffEdge(t *testing.T) {
@@ -315,20 +316,12 @@ func TestWaiterCarriesTheSenderTheChatResolved(t *testing.T) {
 // CHAT_SENDER_* names are the whole of what it knows about who armed it.
 func TestCommandThenSpawnerStatesTheSenderToTheWaiter(t *testing.T) {
 	scratch := t.TempDir()
-	dump := filepath.Join(scratch, "environment.txt")
-	stub := filepath.Join(scratch, "setsid-stub")
-	script := "#!/bin/sh\nenv > " + dump + "\n"
-	if err := testjail.WriteExecutable(stub, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
 	// An inherited definition must lose to the one this spawn states, or a
 	// chain hop signs as whoever spawned the hop before it.
 	t.Setenv(SenderSessionEnv, "cc-STALE-HOP")
 	t.Setenv(SenderLabelEnv, "STALE_LABEL")
-	spawner := CommandThenSpawner{
-		Executable: filepath.Join(scratch, "pfm"),
-		Setsid:     stub,
-	}
+	runner := &deps.FakeRunner{}
+	spawner := CommandThenSpawner{Executable: filepath.Join(scratch, "pfm"), Runner: runner}
 	err := spawner.Spawn(context.Background(), SteerSpawn{
 		SocketPath: filepath.Join(scratch, "cx-1-2-3"),
 		Target:     "%3",
@@ -342,16 +335,16 @@ func TestCommandThenSpawnerStatesTheSenderToTheWaiter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, err := os.ReadFile(dump)
-	if err != nil {
-		t.Fatal(err)
+	starts := runner.Starts()
+	if len(starts) != 1 {
+		t.Fatalf("starts = %+v, want exactly one", starts)
 	}
-	environment := string(raw)
+	environment := strings.Join(starts[0].Opts.Env, "\n")
 	for _, want := range []string{
 		SenderSessionEnv + "=cx-1700000000-1-1",
 		SenderIDEnv + "=019ffd1e-300f",
 	} {
-		if !strings.Contains(environment, want) {
+		if !slices.Contains(starts[0].Opts.Env, want) {
 			t.Fatalf("waiter environment lacks %q", want)
 		}
 	}
@@ -368,53 +361,63 @@ func TestCommandThenSpawnerStatesTheSenderToTheWaiter(t *testing.T) {
 	}
 }
 
-func TestCommandThenSpawnerFallsBackToNohup(t *testing.T) {
-	scratch := t.TempDir()
-	dump := filepath.Join(scratch, "nohup-arguments.txt")
-	nohup := filepath.Join(scratch, "nohup-stub")
-	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" > " + dump + "\n"
-	if err := testjail.WriteExecutable(nohup, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	spawner := CommandThenSpawner{
-		Executable: filepath.Join(scratch, "pfm-candidate"),
-		Setsid:     filepath.Join(scratch, "setsid-missing"),
-		Nohup:      nohup,
-	}
-	err := spawner.Spawn(context.Background(), SteerSpawn{
-		SocketPath: filepath.Join(scratch, "cc-1-2-3"),
-		Target:     "%4",
-		Steers:     []string{"continue after the primary"},
-		LogPath:    filepath.Join(scratch, "then.log"),
-	})
-	if err != nil {
-		t.Fatalf("nohup floor was not used: %v", err)
-	}
-	// The stub is a SPAWNED process, so this waits on the OS scheduler rather
-	// than on anything the engine does. One second is fine for a lone run and
-	// too tight under a full parallel suite; a generous ceiling costs nothing
-	// when the stub does run, and the assertion still fails if it never does.
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		raw, readErr := os.ReadFile(dump)
-		// The stub's `> dump` redirect CREATES the file before printf writes a
-		// byte into it, so an empty read is "not yet", never "the stub ran and
-		// passed no arguments" — under a loaded parallel suite that race is the
-		// whole difference between this test and a false red.
-		if readErr == nil && len(raw) > 0 {
-			arguments := string(raw)
-			if !strings.Contains(arguments, "pfm-candidate internal then") ||
-				strings.Contains(arguments, "-f ") {
-				t.Fatalf("nohup arguments = %q", arguments)
+// The waiter starts detached through the runner: its own argv with no
+// launcher in front, its log on stdout and stderr, and the handle released.
+// A start that fails names the waiter and takes back the armed record.
+func TestCommandThenSpawnerStartsTheWaiterDetached(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		startErr      error
+		wantErr       string
+		wantArmed     bool
+		wantLifecycle []deps.LifecycleCall
+	}{
+		{name: "started", wantArmed: true, wantLifecycle: []deps.LifecycleCall{{Pid: 4242, Action: "release"}}},
+		{name: "start fails", startErr: errors.New("boom"), wantErr: "start detached then waiter: boom"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			scratch := t.TempDir()
+			runner := &deps.FakeRunner{}
+			if tc.startErr != nil {
+				runner.ScriptStart([]string{"/jail/pfm"}, 0, nil, tc.startErr)
 			}
-			break
-		}
-		if time.Now().After(deadline) {
-			// Name which of the two happened: no dump file at all (the stub
-			// never ran) or an empty one (it ran and wrote nothing).
-			t.Fatalf("nohup stub wrote no arguments within the deadline: read error %v, bytes %d", readErr, len(raw))
-		}
-		time.Sleep(10 * time.Millisecond)
+			logPath := filepath.Join(scratch, "then.log")
+			err := CommandThenSpawner{Executable: "/jail/pfm", ConfigPath: "/jail/pfm.json", Runner: runner}.Spawn(
+				context.Background(),
+				SteerSpawn{
+					SocketPath: "/jail/tmux/cc-1-2-3",
+					Target:     "%4",
+					Steers:     []string{"continue after the primary"},
+					LogPath:    logPath,
+				},
+			)
+			if tc.wantErr == "" && err != nil || tc.wantErr != "" && (err == nil || err.Error() != tc.wantErr) {
+				t.Fatalf("Spawn() = %v, want error %q", err, tc.wantErr)
+			}
+			starts := runner.Starts()
+			if len(starts) != 1 {
+				t.Fatalf("starts = %+v, want exactly one", starts)
+			}
+			want := []string{
+				"/jail/pfm", "--config", "/jail/pfm.json", "internal", "then",
+				"--socket", "/jail/tmux/cc-1-2-3", "--target", "%4", "--steer", "continue after the primary",
+			}
+			if !slices.Equal(starts[0].Argv, want) {
+				t.Fatalf("waiter argv = %q, want %q", starts[0].Argv, want)
+			}
+			opts := starts[0].Opts
+			stdout, stdoutOK := opts.Stdout.(*os.File)
+			stderr, stderrOK := opts.Stderr.(*os.File)
+			if !opts.Detach || !stdoutOK || !stderrOK || stdout.Name() != logPath || stderr.Name() != logPath {
+				t.Fatalf("start options = %+v, want Detach with stdout and stderr on %s", opts, logPath)
+			}
+			if got := runner.LifecycleCalls(); !slices.Equal(got, tc.wantLifecycle) {
+				t.Fatalf("lifecycle = %+v, want %+v", got, tc.wantLifecycle)
+			}
+			if _, armed, err := readArmedRecord(armedPathFor(logPath)); err != nil || armed != tc.wantArmed {
+				t.Fatalf("armed record exists = %t (err %v), want %t", armed, err, tc.wantArmed)
+			}
+		})
 	}
 }
 
@@ -425,7 +428,7 @@ func TestCommandThenSpawnerFallsBackToNohup(t *testing.T) {
 // DeliverThen's waiter actually uses.
 func TestSteerSpawnFailureIsReportedNotSwallowed(t *testing.T) {
 	fake := &fakeTmux{capture: "conversation\n❯ ", submitOnEnter: true}
-	spawner := &fakeSpawner{err: errors.New("no setsid")}
+	spawner := &fakeSpawner{err: errors.New("waiter start failed")}
 	engine := newTestEngineWith(t, "cc-1-2-3", fake, spawner)
 	result, err := engine.callChain(context.Background(), Request{
 		Target:  "chat",
@@ -577,13 +580,8 @@ func TestDeliverThenLeavesACodexSteerUndeliveredWithoutATurnBoundary(t *testing.
 // waiter starts. A chain hop (Append) writes none: it is the same arming.
 func TestCommandThenSpawnerStatesTheEngineAndArmsTheRecord(t *testing.T) {
 	scratch := t.TempDir()
-	dump := filepath.Join(scratch, "arguments.txt")
-	stub := filepath.Join(scratch, "setsid-stub")
-	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" > " + dump + "\n"
-	if err := testjail.WriteExecutable(stub, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	spawner := CommandThenSpawner{Executable: filepath.Join(scratch, "pfm"), Setsid: stub}
+	runner := &deps.FakeRunner{}
+	spawner := CommandThenSpawner{Executable: filepath.Join(scratch, "pfm"), Runner: runner}
 	logPath := filepath.Join(scratch, "chat-then-cx_1_2_3._3.log")
 	before := time.Now().Unix()
 	err := spawner.Spawn(context.Background(), SteerSpawn{
@@ -596,12 +594,9 @@ func TestCommandThenSpawnerStatesTheEngineAndArmsTheRecord(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, err := os.ReadFile(dump)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(raw), "--engine "+string(pfmengine.Codex)) {
-		t.Fatalf("waiter argv lacks the engine: %q", raw)
+	if starts := runner.Starts(); len(starts) != 1 ||
+		!strings.Contains(strings.Join(starts[0].Argv, " "), "--engine "+string(pfmengine.Codex)) {
+		t.Fatalf("waiter starts = %+v, want one argv carrying the engine", starts)
 	}
 	record, exists, err := readArmedRecord(strings.TrimSuffix(logPath, ".log") + ".armed")
 	if err != nil || !exists {
@@ -632,12 +627,7 @@ func TestCommandThenSpawnerCarriesNativeBoundaryEvidence(t *testing.T) {
 		t.Run("backend-"+backend, func(t *testing.T) {
 			t.Setenv(herdrTurnEnv, "inherited-other-target")
 			root := t.TempDir()
-			dump := filepath.Join(root, "argv-env")
-			stub := filepath.Join(root, "setsid-stub")
-			script := "#!/bin/sh\nprintf '%s\\n%s\\n' \"$*\" \"${CHAT_THEN_HERDR_TURN-}\" > " + dump + "\n"
-			if err := testjail.WriteExecutable(stub, []byte(script), 0o700); err != nil {
-				t.Fatal(err)
-			}
+			runner := &deps.FakeRunner{}
 			request := SteerSpawn{
 				Backend:    backend,
 				SocketPath: "/native/socket",
@@ -654,18 +644,25 @@ func TestCommandThenSpawnerCarriesNativeBoundaryEvidence(t *testing.T) {
 					SawWorking:     true,
 				}
 			}
-			if err := (CommandThenSpawner{Executable: filepath.Join(root, "pfm"), Setsid: stub}).Spawn(
+			if err := (CommandThenSpawner{Executable: filepath.Join(root, "pfm"), Runner: runner}).Spawn(
 				context.Background(),
 				request,
 			); err != nil {
 				t.Fatal(err)
 			}
-			body, err := os.ReadFile(dump)
-			if err != nil {
-				t.Fatal(err)
+			starts := runner.Starts()
+			if len(starts) != 1 {
+				t.Fatalf("starts = %+v, want exactly one", starts)
 			}
-			lines := strings.SplitN(string(body), "\n", 3)
-			if len(lines) != 3 || !strings.Contains(lines[0], "internal then --socket /native/socket --target p2") {
+			turn := ""
+			for _, entry := range starts[0].Opts.Env {
+				if value, found := strings.CutPrefix(entry, herdrTurnEnv+"="); found {
+					turn = value
+				}
+			}
+			lines := []string{strings.Join(starts[0].Argv, " "), turn}
+			body := strings.Join(lines, "\n")
+			if !strings.Contains(lines[0], "internal then --socket /native/socket --target p2") {
 				t.Fatalf("detached argv/env=%q", body)
 			}
 			if backend == "herdr" {
@@ -690,17 +687,11 @@ func TestCommandThenSpawnerRefusesAnUnwritableLog(t *testing.T) {
 	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	dump := filepath.Join(scratch, "nohup-arguments.txt")
-	nohup := filepath.Join(scratch, "nohup-stub")
-	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" > " + dump + "\n"
-	if err := testjail.WriteExecutable(nohup, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	runner := &deps.FakeRunner{}
 	logPath := filepath.Join(blocker, "then.log")
 	err := CommandThenSpawner{
 		Executable: filepath.Join(scratch, "pfm-candidate"),
-		Setsid:     filepath.Join(scratch, "setsid-missing"),
-		Nohup:      nohup,
+		Runner:     runner,
 	}.Spawn(context.Background(), SteerSpawn{
 		SocketPath: filepath.Join(scratch, "cc-1-2-3"),
 		Target:     "%4",
@@ -711,7 +702,7 @@ func TestCommandThenSpawnerRefusesAnUnwritableLog(t *testing.T) {
 	if err == nil || err.Error() != want {
 		t.Fatalf("spawn error = %v, want %q", err, want)
 	}
-	if _, statErr := os.Stat(dump); !errors.Is(statErr, os.ErrNotExist) {
-		t.Fatalf("waiter started despite the unwritable log: stat %s = %v", dump, statErr)
+	if starts := runner.Starts(); len(starts) != 0 {
+		t.Fatalf("waiter started despite the unwritable log: %+v", starts)
 	}
 }

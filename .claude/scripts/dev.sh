@@ -352,12 +352,12 @@ act_pfm() {
       # hash identically. BROKEN STATE: no sha256 tool is TOOLCHAIN-MISSING and
       # red, never a pass; a failed build or scratch dir is red naming the label.
       local goos goarch label build_dir h1 h2 n
-      local sum_cmd=()
       goos="$(go env GOOS)"; goarch="$(go env GOARCH)"
       label="pfm: reproducible build ($goos/$goarch)"
-      if command -v sha256sum >/dev/null 2>&1; then sum_cmd=(sha256sum)
-      elif command -v shasum >/dev/null 2>&1; then sum_cmd=(shasum -a 256)
-      else fail_step "$label — TOOLCHAIN-MISSING: neither sha256sum nor shasum on PATH; the builds could not be compared"; return; fi
+      # Sourced here, not at the top: only this step needs the door, and fixtures copy dev.sh alone.
+      . "$REPO_ROOT/scripts/platform.sh" || { fail_step "$label — cannot source $REPO_ROOT/scripts/platform.sh"; return; }
+      # Probe the tool before building: the door returns 127 when neither sha256 tool exists.
+      if ! platform_sha256 /dev/null >/dev/null; then fail_step "$label — TOOLCHAIN-MISSING: neither $(platform_sha256_tools nor) on PATH; the builds could not be compared"; return; fi
       if ! mkdir -p "$TMP_BASE/build" || ! build_dir="$(mktemp -d "$TMP_BASE/build/repro.XXXXXX")"; then
         fail_step "$label — no scratch directory could be created under $TMP_BASE/build"; return
       fi
@@ -369,8 +369,8 @@ act_pfm() {
       if [[ ! -f "$build_dir/pfm.1" || ! -f "$build_dir/pfm.2" ]]; then
         fail_step "$label — go build ./cmd/pfm failed (see output)"
       else
-        h1="$("${sum_cmd[@]}" "$build_dir/pfm.1" | awk '{print $1}')"
-        h2="$("${sum_cmd[@]}" "$build_dir/pfm.2" | awk '{print $1}')"
+        h1="$(platform_sha256 "$build_dir/pfm.1" | awk '{print $1}')"
+        h2="$(platform_sha256 "$build_dir/pfm.2" | awk '{print $1}')"
         if [[ -n "$h1" && "$h1" == "$h2" ]]; then
           ok "$label — sha256 = $h1"
         else

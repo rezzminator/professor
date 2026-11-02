@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -22,7 +23,7 @@ const (
 func newLinuxHarness(t *testing.T) *harness {
 	t.Helper()
 	h := newHarness(t)
-	h.goos = "linux"
+	h.platform = linuxPlatform
 	h.write(linuxServerVscode, fixtureVscode)
 	h.rearm()
 	if err := os.RemoveAll(h.path("Library")); err != nil {
@@ -239,11 +240,29 @@ func TestLinuxVscodeFindsTheServerAndDesktopSettings(t *testing.T) {
 			t.Errorf("on backed up no %s: %v", rel, backups)
 		}
 	}
-	h.psVscode = h.home + "/.vscode-server/cli/servers/Stable-0123/server/node --max-old-space-size=8192 " +
-		h.home + "/.vscode-server/cli/servers/Stable-0123/server/out/server-main.js\n"
+	// A kernel thread (no argv), a process gone mid-scan (no cmdline) and a
+	// shell editing the server's settings are no VS Code.
+	h.processes = [][]string{{}, nil, {"/bin/zsh", "-l"}, {"/usr/bin/vim", h.path(linuxServerVscode)}}
 	h.rearm()
-	if got := row(t, h.status(), "vscode"); strings.Contains(got.Detail, vscodeDeferred) {
-		t.Errorf("vscode row = %s %q while the VS Code Server runs", got.Verdict, got.Detail)
+	if got := row(t, h.status(), "vscode"); got.Verdict != VerdictPending || got.Detail != vscodeDeferred {
+		t.Errorf("vscode row = %s %q with no VS Code running, want %s %q",
+			got.Verdict, got.Detail, VerdictPending, vscodeDeferred)
+	}
+	h.processes = append(h.processes, []string{
+		h.path(".vscode-server/bin/abc123/node"), h.path(".vscode-server/bin/abc123/out/server-main.js"),
+	})
+	h.rearm()
+	const waiting = "waiting for the extension to apply generation 1"
+	if got := row(t, h.status(), "vscode"); got.Verdict != VerdictPending || got.Detail != waiting {
+		t.Errorf("vscode row = %s %q while the VS Code Server runs, want %s %q",
+			got.Verdict, got.Detail, VerdictPending, waiting)
+	}
+	unlisted := filepath.Join(t.TempDir(), "proc")
+	h.env.Proc = gather.RealProcFS{Root: unlisted}
+	wantUnlisted := "themesync: list processes: read proc root: open " + unlisted + ": no such file or directory"
+	if got := row(t, h.status(), "vscode"); got.Verdict != VerdictError || got.Detail != wantUnlisted {
+		t.Errorf("vscode row = %s %q with an unreadable process table, want %s %q",
+			got.Verdict, got.Detail, VerdictError, wantUnlisted)
 	}
 
 	bare := newLinuxHarness(t)

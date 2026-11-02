@@ -421,6 +421,14 @@ func HomeFrom(env Env) (string, error) {
 	return home, nil
 }
 
+// LaunchAgentsDir is home's per-user launchd agent directory, where every
+// pfm launch agent plist lives (macOS).
+func LaunchAgentsDir(home string) string { return filepath.Join(home, "Library", "LaunchAgents") }
+
+// SystemdUserDir is home's systemd user unit directory, where every pfm user
+// unit lives (Linux).
+func SystemdUserDir(home string) string { return filepath.Join(home, ".config", "systemd", "user") }
+
 // ServicePath is the ONE search path every pfm service runs on — the
 // installer's launchd agents and systemd units, and the theme follower. A
 // service manager starts jobs on a bare PATH (launchd: /usr/bin:/bin:/usr/sbin:/sbin)

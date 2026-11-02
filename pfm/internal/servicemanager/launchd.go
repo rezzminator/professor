@@ -159,7 +159,7 @@ func (launchd Launchd) Target(label string) string { return ServiceTarget(launch
 
 // Run runs `launchctl args…` once.
 func (launchd Launchd) Run(ctx context.Context, args ...string) Answer {
-	return answerOf(ctx, launchd.Runner, append([]string{"launchctl"}, args...))
+	return answerOf(ctx, launchd.Runner, append([]string{LaunchctlBinary}, args...))
 }
 
 // Print runs `launchctl print` on label's target: OK is loaded, Unknown is

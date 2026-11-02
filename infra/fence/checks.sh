@@ -29,6 +29,7 @@ checks_templates_lanes_serial() {
 
 checks_templates_plugin_logs() {
   run "templates: plugin-logs self-test" -- bash "$REPO_ROOT/scripts/test-plugin-logs.sh"
+  run "templates: platform door self-test" -- bash "$REPO_ROOT/scripts/test-platform.sh"
 }
 
 # The plugin lab's hermetic half: its shell linted at warning level

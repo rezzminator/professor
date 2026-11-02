@@ -3,7 +3,6 @@ package themesync
 import (
 	"context"
 	"errors"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -14,9 +13,9 @@ import (
 // applied before) rather than stopping the sync: every surface still follows the
 // theme and the claude row names why the side was not read.
 func TestAutoAppearanceUnsupportedPlatformsDrawsDarkAndNamesWhy(t *testing.T) {
-	platforms := []string{"linux", "freebsd", "windows"}
-	if runtime.GOOS != "darwin" {
-		platforms = append(platforms, "") // production defaults to runtime.GOOS
+	platforms := map[string]*platform{"linux": linuxPlatform}
+	if hostPlatform == linuxPlatform {
+		platforms["host"] = nil // a zero Env serves this host's profile
 	}
 	operations := []struct {
 		name string
@@ -26,16 +25,16 @@ func TestAutoAppearanceUnsupportedPlatformsDrawsDarkAndNamesWhy(t *testing.T) {
 		{"Sync", func(ctx context.Context, env Env) (Report, error) { return Sync(ctx, env, false) }},
 		{"ForceSync", func(ctx context.Context, env Env) (Report, error) { return Sync(ctx, env, true) }},
 	}
-	for _, goos := range platforms {
+	for name, profile := range platforms {
 		for _, op := range operations {
-			t.Run(goos+"/"+op.name, func(t *testing.T) {
+			t.Run(name+"/"+op.name, func(t *testing.T) {
 				h := newLinuxHarness(t)
 				if op.name != "On" {
 					h.on() // explicit themes remain supported on Linux
 				}
 				h.write(settingsRel, `{"theme":"auto"}`)
 				h.rearm() // defaults would misleadingly succeed with Dark
-				h.env.GOOS = goos
+				h.env.Platform = profile
 				report, err := op.run(context.Background(), h.env)
 				if err != nil {
 					t.Fatalf("%s: %v", op.name, err)
@@ -83,10 +82,11 @@ func TestReadBackKeepsTheMatrixWhenTheAppearanceCannotBeRead(t *testing.T) {
 }
 
 func TestAppearanceForExplicitTheme(t *testing.T) {
-	for _, goos := range []string{"linux", "darwin", "freebsd", "windows", ""} {
+	platforms := map[string]*platform{"linux": linuxPlatform, "darwin": darwinPlatform, "host": nil}
+	for name, profile := range platforms {
 		for _, side := range []Appearance{Dark, Light} {
-			t.Run(goos+"/"+string(side), func(t *testing.T) {
-				env := Env{GOOS: goos, Runner: new(deps.FakeRunner)}
+			t.Run(name+"/"+string(side), func(t *testing.T) {
+				env := Env{Platform: profile, Runner: new(deps.FakeRunner)}
 				got, err := appearanceFor(context.Background(), env, Applied{Side: side})
 				if err != nil || got != side {
 					t.Fatalf("explicit appearance = %q, %v; want %q", got, err, side)
@@ -138,7 +138,7 @@ func TestDetectAppearance(t *testing.T) {
 				runner.ScriptLookPath("defaults", defaultsBinary, nil)
 			}
 			runner.Script(defaults, tc.result, tc.runErr)
-			got, err := DetectAppearance(context.Background(), Env{GOOS: "darwin", Runner: runner})
+			got, err := DetectAppearance(context.Background(), Env{Platform: darwinPlatform, Runner: runner})
 			if tc.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 					t.Fatalf("err = %v, want one containing %q", err, tc.wantErr)

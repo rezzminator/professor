@@ -8,10 +8,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func seatForeground(tty, group int) error {
-	return unix.IoctlSetPointerInt(tty, unix.TIOCSPGRP, group)
-}
-
 // seatTerminalPath resolves the controlling PTY even when launcher stdio is redirected.
 func seatTerminalPath(tty int) (string, error) {
 	device, err := unix.IoctlGetInt(tty, unix.TIOCGDEV)

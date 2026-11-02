@@ -48,8 +48,8 @@ func staleInstallBackups(env Env) ([]Row, error) {
 	var rows []Row
 	dirs := append(claudeDirs(env),
 		env.Home,
-		filepath.Join(env.Home, "Library", "LaunchAgents"),
-		filepath.Join(env.Home, ".config", "systemd", "user"),
+		paths.LaunchAgentsDir(env.Home),
+		paths.SystemdUserDir(env.Home),
 	)
 	for _, dir := range uniquePaths(dirs) {
 		for _, entry := range readDir(&rows, checkInstallBackup, dir) {

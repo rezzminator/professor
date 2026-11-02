@@ -53,6 +53,7 @@ func New(database *store.Store, dependencies Dependencies) (*Manager, error) {
 			Executable: dependencies.Executable,
 			ConfigPath: dependencies.ConfigPath,
 			LogDir:     resolved.SIDDir,
+			Runner:     dependencies.Runner,
 		}
 	}
 	codexHomes := dependencies.CodexHomes
@@ -138,11 +139,10 @@ const (
 // ConfirmExit verifies a killed live target's pane is actually gone within a
 // bounded wait instead of trusting that the detached finisher landed it.
 //
-// The detached finisher is spawned through `setsid -f`, which forks and
-// returns almost immediately — CommandSpawner.Spawn's own Wait() only
-// observes that harmless immediate return, never the finisher's real
-// completion, so nothing upstream of this call has ever verified the pane
-// actually closed. That is the defect this method exists to end: a caller
+// The detached finisher starts in a session of its own and
+// CommandSpawner.Spawn returns as soon as it started, releasing it — it never
+// observes the finisher's real completion, so nothing upstream of this call
+// has ever verified the pane actually closed. That is the defect this method exists to end: a caller
 // that reports "killed" the instant Kill() returns is reporting the spawn of
 // a detached process, not the state of the pane.
 //

@@ -16,6 +16,7 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/doctor"
+	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/mcpserv"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -74,6 +75,9 @@ func TestMain(m *testing.M) {
 	// would run the whole suite again, detached. A test that counts spawns
 	// replaces this stub.
 	statuslinePacedSpawn = func(string) error { return nil }
+	// The same holds for a kill's detached exit finisher: a test that reads
+	// the start replaces this recorder.
+	fleet.KillFinisherRunner = &deps.FakeRunner{}
 	doctor.DaemonReachabilityOverride = func(pfmconfig.Runtime) (mcpserv.DaemonStatus, error) {
 		return mcpserv.DaemonStatus{}, fmt.Errorf("%w: jailed test never probes a live daemon", mcpserv.ErrDaemonAbsent)
 	}

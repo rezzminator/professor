@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os/exec"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
@@ -162,6 +163,12 @@ func (process *loggedProcess) KillGroup() error {
 	return err
 }
 
+// SignalGroup forwards a signal unrecorded: it is no terminal of the child
+// (KillGroup, the terminal one, records its own).
+func (process *loggedProcess) SignalGroup(sig syscall.Signal) error {
+	return process.next.SignalGroup(sig)
+}
+
 func (process *loggedProcess) terminal(op string, level slog.Level, err error, attrs ...slog.Attr) {
 	record(process.ctx, compRunner, op, level, process.started, err,
 		append([]slog.Attr{slog.Int(FieldPID, process.Pid())}, attrs...)...)
@@ -263,6 +270,10 @@ func (process waitedProcess) Kill() error {
 
 func (process waitedProcess) KillGroup() error {
 	return fmt.Errorf("obs: process %d already exited: nothing to kill", process.pid)
+}
+
+func (process waitedProcess) SignalGroup(syscall.Signal) error {
+	return fmt.Errorf("obs: process %d already exited: nothing to signal", process.pid)
 }
 
 // StartFailed is Started's counterpart for a direct door whose *exec.Cmd

@@ -94,7 +94,7 @@ func TestClaudeLauncherAssetIsExactExecShim(t *testing.T) {
 		!strings.HasPrefix(string(raw), "#!/bin/sh\n") {
 		t.Fatalf("bin/claude=%q, want a sh shim ending in the pfm claude-launch exec", raw)
 	}
-	assets, err := assetFiles()
+	assets, err := assetFiles(nativeScheduler())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +110,7 @@ func TestClaudeLauncherAssetIsExactExecShim(t *testing.T) {
 }
 
 func TestStaticShimIsNotStaged(t *testing.T) {
-	assets, err := assetFiles()
+	assets, err := assetFiles(nativeScheduler())
 	if err != nil {
 		t.Fatal(err)
 	}

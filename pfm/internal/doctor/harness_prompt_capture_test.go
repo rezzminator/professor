@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -386,8 +387,9 @@ func (harnessCaptureHTTPProcess) StdinPipe() (io.WriteCloser, error) {
 func (harnessCaptureHTTPProcess) StdoutPipe() (io.ReadCloser, error) {
 	return nil, errors.New("stdout pipe unavailable")
 }
-func (harnessCaptureHTTPProcess) Kill() error      { return nil }
-func (harnessCaptureHTTPProcess) KillGroup() error { return nil }
+func (harnessCaptureHTTPProcess) Kill() error                      { return nil }
+func (harnessCaptureHTTPProcess) KillGroup() error                 { return nil }
+func (harnessCaptureHTTPProcess) SignalGroup(syscall.Signal) error { return nil }
 
 func TestVerboseHarnessCapturePreservesReviewEvidence(t *testing.T) {
 	for _, blocked := range []bool{false, true} {

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -13,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/rezzminator/professor/pfm/internal/naming"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -368,5 +370,151 @@ func TestProcessReadErrorUsesIndependentExistence(t *testing.T) {
 				)
 			}
 		})
+	}
+}
+
+// OpenProcFS: "" is the kernel's own table, a jail directory the Linux-shaped
+// reader on either OS, and a jail root never staged ErrNoProcRoot — never the
+// live table, so a caller keeps its own answer for "no table".
+func TestOpenProcFSSelectsTheTable(t *testing.T) {
+	native, err := OpenProcFS("")
+	if err != nil {
+		t.Fatalf("OpenProcFS(\"\") error = %v", err)
+	}
+	if _, isJail := native.(RealProcFS); isJail {
+		t.Fatalf("OpenProcFS(\"\") = %T, want the native table", native)
+	}
+	jail := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(jail, "4242"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeProcFixture(t, filepath.Join(jail, "4242", "stat"), "4242 (sh) S 1"+strings.Repeat(" 0", 50)+"\n")
+	table, err := OpenProcFS(jail)
+	if err != nil || table != (RealProcFS{Root: jail}) {
+		t.Fatalf("OpenProcFS(%s) = %#v, %v; want RealProcFS{Root: %s}", jail, table, err, jail)
+	}
+	missing := filepath.Join(jail, "missing-proc")
+	table, err = OpenProcFS(missing)
+	if table != nil || !errors.Is(err, ErrNoProcRoot) || !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("OpenProcFS(%s) = %#v, %v; want ErrNoProcRoot wrapping fs.ErrNotExist", missing, table, err)
+	}
+}
+
+// Stat finds the parent after the LAST ") ", since a command name may hold a
+// closing parenthesis, and names a truncated record instead of panicking.
+func TestRealProcFSStatParsesAfterTheCommandName(t *testing.T) {
+	root := t.TempDir()
+	for pid, record := range map[string]string{
+		"4242": "4242 (worker ) helper) S 41 4242 4242 0 -1" + strings.Repeat(" 0", 47) + "\n",
+		"4243": "4243 (fixture) S\n",
+	} {
+		if err := os.MkdirAll(filepath.Join(root, pid), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		writeProcFixture(t, filepath.Join(root, pid, "stat"), record)
+	}
+	proc := RealProcFS{Root: root}
+	if got, err := proc.Stat(4242); err != nil || got.ParentPID != 41 {
+		t.Fatalf("Stat(4242) = %+v, %v; want parent 41", got, err)
+	}
+	if _, err := proc.Stat(4243); err == nil || err.Error() != "short proc stat for pid 4243" {
+		t.Fatalf("Stat(4243) error = %v, want %q", err, "short proc stat for pid 4243")
+	}
+}
+
+// A refused environment of a process that can never be the caller's pane
+// (another uid's, or a terminal-less one holding capabilities the caller
+// lacks, as systemd --user) is ErrForeignProcess; a process with a terminal
+// keeps its plain read failure however privileged it is.
+func TestRealProcFSEnvironWithheldIsForeign(t *testing.T) {
+	root := t.TempDir()
+	proc := RealProcFS{Root: root}
+	for _, tc := range []struct {
+		name               string
+		pid                int
+		capabilities, stat string
+		otherOwner         bool
+		foreign            bool
+	}{
+		{"user manager", 4242, "0000000800000000", "4242 (systemd) S 1 4242 4242 0 -1", false, true},
+		{"unprivileged", 4243, "0000000000000000", "4243 (sh) S 1 4243 4243 0 -1", false, false},
+		{"privileged on a terminal", 4244, "0000000800000000", "4244 (claude) S 1 4244 4244 34816 4244", false, false},
+		{"privileged, terminal unread", 4245, "0000000800000000", "", false, false},
+		{"another uid's", 4246, "0000000000000000", "4246 (sh) S 1 4246 4246 34816 4246", true, true},
+	} {
+		dir := filepath.Join(root, strconv.Itoa(tc.pid))
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		writeProcFixture(t, filepath.Join(dir, "status"), "Name:\tfixture\nCapEff:\t"+tc.capabilities+"\n")
+		if tc.stat != "" {
+			writeProcFixture(t, filepath.Join(dir, "stat"), tc.stat+"\n")
+		}
+		environ := filepath.Join(dir, "environ")
+		writeProcFixture(t, environ, "A=1\x00")
+		if tc.otherOwner {
+			ownByAnotherUID(t, environ)
+		}
+		denied := &os.PathError{Op: "open", Path: environ, Err: syscall.EACCES}
+		err := proc.withheld(tc.pid, denied)
+		if !errors.Is(err, fs.ErrPermission) || errors.Is(err, ErrForeignProcess) != tc.foreign {
+			t.Errorf("%s: pid %d refused environ = %v, want foreign %t (fixture %s)",
+				tc.name, tc.pid, err, tc.foreign, dir)
+		}
+	}
+}
+
+// ownByAnotherUID makes path's owner differ from this process's effective uid:
+// root chowns it; any other uid points it at a root-owned file.
+func ownByAnotherUID(t *testing.T, path string) {
+	t.Helper()
+	if os.Geteuid() == 0 {
+		if err := os.Chown(path, 4246, 4246); err != nil {
+			t.Fatalf("chown %s: %v", path, err)
+		}
+		return
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("/", path); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLinuxEnvironTagsForeignProcess(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads every environment")
+	}
+	if _, err := os.ReadFile(filepath.Join(paths.SystemProcRoot(), "1", "environ")); !errors.Is(err, os.ErrPermission) {
+		t.Skipf("pid 1's environment is not refused here: %v", err)
+	}
+	_, err := RealProcFS{}.Environ(1)
+	if !errors.Is(err, ErrForeignProcess) || !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("pid 1 (root) was not tagged foreign: %v", err)
+	}
+}
+
+func TestLinuxEnvironKeepsOwnRefusedRead(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads a mode-000 file")
+	}
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "4242"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "4242", "environ"), []byte("A=1\x00"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	_, err := (RealProcFS{Root: root}).Environ(4242)
+	if !errors.Is(err, os.ErrPermission) || errors.Is(err, ErrForeignProcess) {
+		t.Fatalf("a refused read of the caller's own file must stay a read failure: %v", err)
+	}
+}
+
+func writeProcFixture(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
 	}
 }

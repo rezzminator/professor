@@ -16,6 +16,8 @@
 # cache is retired by name; an unknown cache without proof is visibly kept.
 set -euo pipefail
 
+. "$(dirname "${BASH_SOURCE[0]}")/../../scripts/platform.sh" || exit 2
+
 fail() { echo "install-engine-sync: $*" >&2; exit 1; }
 
 is_version() { [[ $1 =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; }
@@ -27,10 +29,6 @@ version_older() {
     for (i=1; i<=3; i++) { if (ac[i]+0 < bc[i]+0) exit 0; if (ac[i]+0 > bc[i]+0) exit 1 }
     exit !(a ~ /-/ && b !~ /-/)
   }'
-}
-checksum() {
-  if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1";
-  else shasum -a 256 "$1"; fi
 }
 
 
@@ -97,15 +95,16 @@ if [ -L "$slot" ] || [ -L "$slot/engine-sync" ]; then
   fail "release cache $slot is a user symlink — cannot prove ownership"
 fi
 if [ -f "$slot/engine-sync" ]; then
-  case $(uname -s) in Darwin) platform=darwin ;; Linux) platform=linux ;; *) platform=unknown ;; esac
-  case $(uname -m) in arm64|aarch64) architecture=arm64 ;; x86_64|amd64) architecture=amd64 ;; *) architecture=unknown ;; esac
-  asset="engine-sync_${release}_${platform}_${architecture}"
+  asset="engine-sync_${release}_$(platform_os)_$(platform_arch)"
   sums="$checkout/plugins/engine-sync/libexec/SHA256SUMS"
   expected=""
   if [ -f "$sums" ]; then expected=$(awk -v asset="$asset" '$2 == asset { print $1 }' "$sums"); fi
   remove=0
   if [[ $expected =~ ^[0-9a-fA-F]{64}$ ]]; then
-    actual=$(checksum "$slot/engine-sync") || fail "cannot checksum release cache $slot/engine-sync"
+    # The door is 127 and silent with neither tool; any other failure printed its own error.
+    rc=0; actual=$(platform_sha256 "$slot/engine-sync") || rc=$?
+    [ "$rc" -ne 127 ] || fail "neither $(platform_sha256_tools nor) on PATH"
+    [ "$rc" -eq 0 ] || fail "cannot checksum release cache $slot/engine-sync"
     [ "${actual%% *}" = "$expected" ] || remove=1
   else
     cached=$("$slot/engine-sync" version) || fail "cannot inspect release cache $slot/engine-sync"

@@ -32,7 +32,6 @@ echo "journalctl \$*" >> "$CALLS"
 [ -e "$STATE/nojournal" ] && exit 1
 echo "crash line"
 EOF
-printf '#!/usr/bin/env bash\necho Linux\n' > "$STUBS/uname"
 # pgrep answers only the pids this suite started, exiting 1 on none as pgrep
 # does; pkill records, never signals, so no host process matching the daemon's
 # pattern is ever touched.
@@ -45,6 +44,14 @@ EOF
 cat > "$STUBS/pkill" <<EOF
 #!/usr/bin/env bash
 echo "pkill \$*" >> "$CALLS"
+EOF
+# launchctl answers like a host with no agent loaded unless a case says
+# otherwise, so a developer Mac's real launchctl, later on PATH, is never asked
+# about (or told to kickstart) the installed daemon.
+cat > "$STUBS/launchctl" <<EOF
+#!/usr/bin/env bash
+echo "launchctl \$*" >> "$CALLS"
+exit 113
 EOF
 chmod 755 "$STUBS"/*
 
@@ -111,5 +118,27 @@ else
   bad "mcp-restart: expected the could-not-look line, rc 0" "want: $want" "got:  $out (rc $rc)"
 fi
 rm -f "$STATE/pgrepfails"
+
+# ---- make mcp-restart drives launchd when launchctl exists and systemd has no unit
+newhome
+: > "$STATE/nounit"
+rm -f "$STATE/kicked"
+# launchctl knows the agent only in this case; the cases above prove a host without it. It answers like a launchd host: `print` shows pid 111, then pid 222 once kickstarted.
+cat > "$STUBS/launchctl" <<EOF
+#!/usr/bin/env bash
+echo "launchctl \$*" >> "$CALLS"
+case "\$1" in
+  print) if [ -e "$STATE/kicked" ]; then printf '\tpid = 222\n'; else printf '\tpid = 111\n'; fi ;;
+  kickstart) : > "$STATE/kicked" ;;
+esac
+EOF
+chmod 755 "$STUBS/launchctl"
+out="$(mk mcp-restart)"; rc=$?
+if [ $rc -eq 0 ] && [ "$out" = "mcp: com.professor.pfm.mcp restarted, pid 222" ] \
+  && grep -qx "launchctl kickstart -k gui/$(id -u)/com.professor.pfm.mcp" "$CALLS"; then
+  ok "mcp-restart: a host with launchctl and no systemd unit kickstarts the launchd agent"
+else
+  bad "mcp-restart: expected the launchd restart line, rc 0 and a kickstart call" "$out (rc $rc)"
+fi
 
 shtest_end

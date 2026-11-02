@@ -11,6 +11,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 )
 
 func uintString(value uint64) string { return strconv.FormatUint(value, 10) }
@@ -74,11 +75,11 @@ func TestSamplerComputesInstantaneousTreeCPUFromTwoProcSamples(t *testing.T) {
 }
 
 func TestChatTreeIncludesTmuxServerAndMarksForeignDescendants(t *testing.T) {
-	current := map[int]processSample{
-		50:  {parent: 1, jiffies: 10, rss: 10, command: "/usr/bin/tmux"},
-		100: {parent: 50, jiffies: 20, rss: 20, command: "/opt/bin/claude"},
-		101: {parent: 100, jiffies: 30, rss: 30, command: "/usr/bin/node"},
-		102: {parent: 100, jiffies: 40, rss: 40, command: "/work/dev-server"},
+	current := map[int]gather.ProcessCounter{
+		50:  {Parent: 1, CPUTicks: 10, RSSBytes: 10, Command: "/usr/bin/tmux"},
+		100: {Parent: 50, CPUTicks: 20, RSSBytes: 20, Command: "/opt/bin/claude"},
+		101: {Parent: 100, CPUTicks: 30, RSSBytes: 30, Command: "/usr/bin/node"},
+		102: {Parent: 100, CPUTicks: 40, RSSBytes: 40, Command: "/work/dev-server"},
 	}
 	rows := []compose.Row{{
 		Kind: compose.LiveClaude, Socket: "probe-tree", Name: "worker", PanePIDs: []int{100},
@@ -774,6 +775,21 @@ func TestSamplerKeepsTheSampleWhenAHostCounterIsUnreadable(t *testing.T) {
 			},
 		},
 		{
+			name: "available memory",
+			breakFile: func(t *testing.T, proc string) {
+				writeStatsFile(t, filepath.Join(proc, "meminfo"), "MemTotal: 1000 kB\nSwapTotal: 400 kB\nSwapFree: 300 kB\n")
+			},
+			warning: func(proc string) string {
+				return "read host memory counters: no MemAvailable line in " + filepath.Join(proc, "meminfo")
+			},
+			check: func(t *testing.T, header Header) {
+				if header.MemoryBytes != 1000*1024 || header.RAMPercent != 0 || !header.RAMUnread || header.SwapUnread ||
+					header.SwapPercent != 25 {
+					t.Fatalf("header = %#v, want RAM unread, never 100%% used, and swap still read", header)
+				}
+			},
+		},
+		{
 			name: "pressure avg10",
 			breakFile: func(t *testing.T, proc string) {
 				writeStatsFile(t, filepath.Join(proc, "pressure", "cpu"), "some avg10=zz avg60=0.00\n")
@@ -957,6 +973,25 @@ func TestDockerIdentityFailureIsRetriedAfterTheSpacing(t *testing.T) {
 		if (step.warning == "") != (len(snapshot.Warnings) == 0) ||
 			(step.warning != "" && snapshot.Warnings[0] != step.warning) {
 			t.Fatalf("at %d: warnings = %q, want %q", step.atNS, snapshot.Warnings, step.warning)
+		}
+	}
+}
+
+// Where the kernel keeps no host tick counter (macOS), the total is the wall
+// clock in centiseconds times the CPU count, and idle is what the process
+// table's summed CPU leaves of it.
+func TestSynthesizedCPUFromTheProcessTable(t *testing.T) {
+	processes := map[int]gather.ProcessCounter{10: {CPUTicks: 100}, 11: {CPUTicks: 30, CPUUnknown: true}}
+	for _, tc := range []struct {
+		now      int64
+		cpuCount int
+		want     gather.CPU
+	}{
+		{now: 1_000_000_000, cpuCount: 2, want: gather.CPU{Total: 200, Idle: 70}},
+		{now: 1_000_000_000, cpuCount: 0, want: gather.CPU{Total: 100}},
+	} {
+		if got := synthesizedCPU(processes, tc.now, tc.cpuCount); got != tc.want {
+			t.Errorf("synthesizedCPU(now %d, %d CPUs) = %+v, want %+v", tc.now, tc.cpuCount, got, tc.want)
 		}
 	}
 }

@@ -154,6 +154,9 @@ func ClassifyCompatibleProxies(
 		return nil, nil, err
 	}
 	var sweepable, kept []Process
+	var census gather.ProcFDNames
+	var censusErr error
+	censusOpened := false
 	for _, process := range processes {
 		if !process.compatibleProxyCandidate {
 			sweepable = append(sweepable, process)
@@ -169,8 +172,15 @@ func ClassifyCompatibleProxies(
 				process.PID, process.Command, marker, err,
 			)
 		}
-		if _, rootErr := os.Stat(procRoot); rootErr == nil {
-			entries, readErr := os.ReadDir(filepath.Join(procRoot, strconv.Itoa(process.PID), "fd"))
+		if !censusOpened {
+			census, censusErr = descriptorCensus(procRoot)
+			censusOpened = true
+		}
+		if censusErr != nil {
+			return nil, nil, fmt.Errorf("inspect descriptor root %s: %w", procRoot, censusErr)
+		}
+		if census != nil {
+			names, readErr := census.FDNames(process.PID)
 			if readErr != nil {
 				if errors.Is(probe(process.PID), syscall.ESRCH) {
 					continue
@@ -183,8 +193,8 @@ func ClassifyCompatibleProxies(
 			for _, link := range links {
 				read[link.FD] = true
 			}
-			for _, entry := range entries {
-				fd, parseErr := strconv.Atoi(entry.Name())
+			for _, name := range names {
+				fd, parseErr := strconv.Atoi(name)
 				if parseErr == nil && fd >= 0 && !read[fd] {
 					return nil, nil, fmt.Errorf(
 						"inspect descriptors for pid=%d %s: descriptor %d was not readable",
@@ -192,8 +202,6 @@ func ClassifyCompatibleProxies(
 					)
 				}
 			}
-		} else if !errors.Is(rootErr, os.ErrNotExist) {
-			return nil, nil, fmt.Errorf("inspect descriptor root %s: %w", procRoot, rootErr)
 		}
 		if slices.ContainsFunc(links, func(link gather.FDLink) bool {
 			return filepath.Clean(link.Target) == marker
@@ -204,6 +212,21 @@ func ClassifyCompatibleProxies(
 		}
 	}
 	return sweepable, kept, nil
+}
+
+// descriptorCensus is the table that lists every descriptor entry at
+// procRoot, or nil where no table can (macOS, a jail root never staged): the
+// census then adds nothing to the readable links.
+func descriptorCensus(procRoot string) (gather.ProcFDNames, error) {
+	table, err := gather.OpenProcFS(procRoot)
+	if errors.Is(err, gather.ErrNoProcRoot) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	census, _ := table.(gather.ProcFDNames)
+	return census, nil
 }
 
 // SweepStaleProcesses TERMs every stale process this install launched, KILLs

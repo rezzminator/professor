@@ -102,9 +102,10 @@ func (installer *engine) refreshThemeFollower(ctx context.Context) error {
 	if !themesync.SyncOn(themesync.DefaultStateDir(home)) {
 		return nil
 	}
+	follower := installer.options.jobScheduler().followerName()
 	if !installer.apply {
 		installer.say(
-			"  plan    would refresh the " + strings.Replace(themeFollowerName(), "follower ", "follower's ", 1) +
+			"  plan    would refresh the " + strings.Replace(follower, "follower ", "follower's ", 1) +
 				": the theme sync is on",
 		)
 		return nil
@@ -115,27 +116,14 @@ func (installer *engine) refreshThemeFollower(ctx context.Context) error {
 	}
 	err := refresh(ctx, home)
 	if errors.Is(err, errThemeSyncInert) {
-		installer.skip(themeFollowerName() + ": the theme sync turned off before install reached it")
+		installer.skip(follower + ": the theme sync turned off before install reached it")
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("refresh the %s: %w", themeFollowerName(), err)
+		return fmt.Errorf("refresh the %s: %w", follower, err)
 	}
-	if schedulerIsLaunchd {
-		installer.ok("theme follower launch agent runs the stable launcher")
-	} else {
-		installer.ok("theme follower systemd units current")
-	}
+	installer.ok(installer.options.jobScheduler().followerCurrent())
 	return nil
-}
-
-// themeFollowerName is what install calls the follower on this platform: the
-// launch agent on macOS, its systemd units elsewhere (themesync's follower).
-func themeFollowerName() string {
-	if schedulerIsLaunchd {
-		return "theme follower launch agent"
-	}
-	return "theme follower systemd units"
 }
 
 // errThemeSyncInert is a refresh whose sync touched nothing: the state turned

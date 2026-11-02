@@ -119,17 +119,16 @@ func TestHideReloadedConversationRecordsAPermanentKillForTheConversationLeftBehi
 // running, never get closed out from under the conversation now living
 // there.
 //
-// To prove the absence of a spawn without ever risking a REAL one, PATH is
-// cleared first: deps.DetachLauncher cannot resolve setsid OR nohup with an
-// empty PATH, so if hideReloadedConversation ever forwarded a live address,
-// manager.Kill's spawn attempt would fail loudly right here with a "detach
-// kill finisher" error — never silently, and never by actually launching a
+// To prove the absence of a spawn without ever risking a REAL one, the
+// runtime carries no SID directory: the finisher's log has nowhere to open,
+// so if hideReloadedConversation ever forwarded a live address, manager.Kill
+// would fail loudly right here at the finisher's Prepare ("kill finisher log
+// directory is unset") — never silently, and never by actually launching a
 // detached process. Today's fixed code never reaches that call at all, so
-// this passes with no launcher on PATH and no error.
+// this passes with no error.
 func TestHideReloadedConversationNeverSpawnsTheExitFinisher(t *testing.T) {
 	root := jailTest(t)
 	t.Setenv("PFM_STATE_DB", filepath.Join(root, "shared.db"))
-	t.Setenv("PATH", "")
 	ctx := context.Background()
 	runtime := commandRuntime{Paths: paths.Values{Home: filepath.Join(root, "home")}}
 
@@ -137,7 +136,7 @@ func TestHideReloadedConversationNeverSpawnsTheExitFinisher(t *testing.T) {
 	var stderr bytes.Buffer
 	if _, err := hideReloadedConversation(ctx, runtime, pfmengine.Claude, id, "", &stderr); err != nil {
 		t.Fatalf(
-			"hide with no live address must never need a detach launcher: %v\nstderr=%s",
+			"hide with no live address must never start the exit finisher: %v\nstderr=%s",
 			err, stderr.String(),
 		)
 	}

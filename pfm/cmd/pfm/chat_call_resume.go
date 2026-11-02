@@ -157,14 +157,14 @@ func composeTranscriptIDFromPath(path string) string {
 }
 
 func runningClaudeSession(procRoot, id string) (bool, error) {
-	// A missing jail root holds no processes; only the system root falls through
-	// to the native table, which on macOS has no /proc to read.
-	if filepath.Clean(procRoot) != paths.SystemProcRoot() {
-		if _, err := os.Stat(procRoot); errors.Is(err, fs.ErrNotExist) {
-			return false, nil
-		}
+	// A missing jail root holds no processes; the system root is the native table (sysctl on macOS).
+	procfs, err := gather.OpenProcFS(procRoot)
+	if errors.Is(err, gather.ErrNoProcRoot) {
+		return false, nil
 	}
-	procfs := gather.NewProcFS(procRoot)
+	if err != nil {
+		return false, fmt.Errorf("list processes under %q: %w", procRoot, err)
+	}
 	pids, err := procfs.PIDs()
 	if err != nil {
 		return false, fmt.Errorf("list processes under %q: %w", procRoot, err)

@@ -7,6 +7,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 type linuxProcFS struct{ RealProcFS }
@@ -14,6 +16,20 @@ type linuxProcFS struct{ RealProcFS }
 // nativeProcFS returns the kernel's own process table. On Linux that is /proc,
 // augmented with identity metadata that does not require protected argv.
 func nativeProcFS() ProcFS { return linuxProcFS{RealProcFS: RealProcFS{}} }
+
+// The host readers' native source on Linux is the same proc tree a jail
+// fakes, read at the system root.
+func nativeHostMemory() (Memory, error) { return readLinuxMemory(paths.SystemProcRoot()) }
+
+func nativeHostCPU() (CPU, error) { return readLinuxCPU(paths.SystemProcRoot()) }
+
+func nativeHostCPUPressure() (float64, error) { return readLinuxCPUPressure(paths.SystemProcRoot()) }
+
+func nativeProcessCounters() (map[int]ProcessCounter, []string, error) {
+	return readLinuxProcessCounters(paths.SystemProcRoot())
+}
+
+func nativeUnixSockets() ([]string, error) { return readLinuxUnixSockets(paths.SystemProcRoot()) }
 
 // ProcessIdentity reads the short command name and effective uid from status.
 func (proc linuxProcFS) ProcessIdentity(pid int) (ProcessIdentity, error) {

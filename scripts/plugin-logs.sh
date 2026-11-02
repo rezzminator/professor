@@ -3,6 +3,7 @@
 set -euo pipefail
 umask 077
 command -v jq > /dev/null 2>&1 || { echo 'plugin-logs: jq absent' >&2; exit 5; }
+. "$(dirname "${BASH_SOURCE[0]}")/platform.sh" || exit 2
 usage() { echo "plugin-logs: $*; usage: report|rotate [--dir D] [--archive YYYY-MM-DD] [--today YYYY-MM-DD] [--root R]" >&2; exit 2; }
 unreadable() { printf 'folder unreadable: %s: %s\n' "$1" "$2"; exit 4; }
 mode=${1:-}; [[ "$mode" == report || "$mode" == rotate ]] || usage 'expected report or rotate'
@@ -42,8 +43,7 @@ temp_root=$(cd -- "${TMPDIR:-/tmp}" 2>/dev/null && pwd -P) ||
 check_scratch_dir() {
   local path=$1 private=$2 metadata owner permissions
   [ -d "$path" ] && [ ! -L "$path" ] || unreadable "$dir" "untrusted scratch folder: $path"
-  metadata=$(stat -c '%u %a' -- "$path" 2>/dev/null) ||
-    metadata=$(stat -f '%u %Lp' -- "$path" 2>/dev/null) ||
+  metadata=$(platform_owner_mode "$path" 2>/dev/null) ||
     unreadable "$dir" "cannot inspect scratch folder: $path"
   read -r owner permissions <<< "$metadata"
   if [ "$private" = 1 ]; then
@@ -78,8 +78,7 @@ cleanup() {
 }
 trap cleanup EXIT
 read_mtime() {
-  if mtime=$(stat -c %Y -- "$1" 2>/dev/null); then :
-  elif mtime=$(stat -f %m -- "$1" 2> "$scratch/err"); then :
+  if mtime=$(platform_mtime "$1" 2> "$scratch/err"); then :
   else unreadable "$1" "$(cat "$scratch/err")"; fi
 }
 if ! git config --file "$root/.gitmodules" --get-regexp '^submodule\..*\.path$' > "$scratch/modules" 2> "$scratch/err"; then

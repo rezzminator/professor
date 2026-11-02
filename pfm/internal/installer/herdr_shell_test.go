@@ -310,7 +310,10 @@ func TestHerdrShellPickerReturnsToShell(t *testing.T) {
 		t.Fatal(err)
 	}
 	wrapper := paths.HerdrShellWrapper(home)
-	command := testjail.PTYCommand("env", "SHELL="+wrapper, wrapper)
+	command, err := testjail.PTYCommand("env", "SHELL="+wrapper, wrapper)
+	if err != nil {
+		t.Fatal(err)
+	}
 	command.Env = append(
 		os.Environ(),
 		"HOME="+home,
@@ -657,7 +660,11 @@ func TestHerdrShellWrapper(t *testing.T) {
 			}
 			cmd := exec.Command("env", append([]string{"SHELL=" + realShell, wrapper}, tc.args...)...)
 			if tc.tty {
-				cmd = testjail.PTYCommand(append([]string{"env", "SHELL=" + realShell, wrapper}, tc.args...)...)
+				var err error
+				cmd, err = testjail.PTYCommand(append([]string{"env", "SHELL=" + realShell, wrapper}, tc.args...)...)
+				if err != nil {
+					t.Fatal(err)
+				}
 			}
 			cmd.Env = append(
 				os.Environ(),

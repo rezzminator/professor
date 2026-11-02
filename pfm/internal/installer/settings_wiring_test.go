@@ -9,12 +9,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/retired"
+	"github.com/rezzminator/professor/pfm/internal/servicemanager"
 )
 
 func TestInstallLeavesClaudeAccountFilesUnchanged(t *testing.T) {
@@ -61,14 +61,11 @@ func TestInstallLeavesClaudeAccountFilesUnchanged(t *testing.T) {
 		CodexHomes:    []string{},
 		Now:           now,
 		Runner:        runner,
+		scheduler:     schedulerFor(servicemanager.KindSystemd),
 	}); err != nil {
 		t.Fatal(err)
 	}
-	wantedProbe := nameSyncStateProbe
-	if schedulerIsLaunchd {
-		wantedProbe = "launchctl print gui/" + strconv.Itoa(os.Getuid()) + "/" + launchdLabel
-	}
-	if len(runner.calls) == 0 || runner.calls[0] != wantedProbe {
+	if len(runner.calls) == 0 || runner.calls[0] != nameSyncStateProbe {
 		t.Fatalf(
 			"installer did not probe the running-service gate before touching fixtures; fake runner calls: %v",
 			runner.calls,

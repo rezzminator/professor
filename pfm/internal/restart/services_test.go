@@ -396,16 +396,22 @@ func TestLaunchdKeepAliveReadsThePlist(t *testing.T) {
 
 func TestNativeServiceManagerIsLaunchdOnMacOSAndSystemdOnLinux(t *testing.T) {
 	home := t.TempDir()
-	launchdManager, ok := nativeServiceManager("darwin", &hostRunner{}, newTickClock(), home, 501).(LaunchdManager)
+	launchdManager, ok := nativeServiceManager(servicemanager.KindLaunchd, &hostRunner{}, newTickClock(), home, 501).(LaunchdManager)
 	if !ok || launchdManager.Dir != filepath.Join(home, "Library", "LaunchAgents") || launchdManager.UID != 501 {
-		t.Fatalf("darwin manager = %#v, want launchd over the LaunchAgents dir", launchdManager)
+		t.Fatalf("launchd manager = %#v, want launchd over the LaunchAgents dir", launchdManager)
 	}
-	systemdManager, ok := nativeServiceManager("linux", &hostRunner{}, newTickClock(), home, 501).(SystemdManager)
+	systemdManager, ok := nativeServiceManager(servicemanager.KindSystemd, &hostRunner{}, newTickClock(), home, 501).(SystemdManager)
 	if !ok || systemdManager.Dir != filepath.Join(home, ".config", "systemd", "user") {
-		t.Fatalf("linux manager = %#v, want systemd over the user unit dir", systemdManager)
+		t.Fatalf("systemd manager = %#v, want systemd over the user unit dir", systemdManager)
 	}
-	if manager := nativeServiceManager("freebsd", &hostRunner{}, newTickClock(), home, 501); manager != nil {
-		t.Fatalf("freebsd manager = %#v, want none", manager)
+	if manager := nativeServiceManager(
+		servicemanager.Kind("rc.d"),
+		&hostRunner{},
+		newTickClock(),
+		home,
+		501,
+	); manager != nil {
+		t.Fatalf("rc.d manager = %#v, want none", manager)
 	}
 }
 

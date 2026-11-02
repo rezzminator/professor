@@ -486,11 +486,7 @@ func runSeatEngine(
 			case <-done:
 				return
 			case sig := <-signals:
-				if err := syscall.Kill(
-					-process.Pid(),
-					sig.(syscall.Signal),
-				); err != nil &&
-					!errors.Is(err, syscall.ESRCH) {
+				if err := process.SignalGroup(sig.(syscall.Signal)); err != nil {
 					fmt.Fprintf(options.Stderr, "pfm internal seat-host: forward %s: %v\n", sig, err)
 				}
 			}
@@ -500,10 +496,7 @@ func runSeatEngine(
 	close(done)
 	<-forwarded
 	// The engine owns this group; reap any job it left behind before restoring the tty.
-	groupErr := syscall.Kill(-process.Pid(), syscall.SIGKILL)
-	if errors.Is(groupErr, syscall.ESRCH) {
-		groupErr = nil
-	}
+	groupErr := process.KillGroup()
 	var exit *exec.ExitError
 	if errors.As(waitErr, &exit) {
 		status := exit.ExitCode()
@@ -513,6 +506,11 @@ func runSeatEngine(
 		return status, true, groupErr
 	}
 	return 0, true, errors.Join(waitErr, groupErr)
+}
+
+// seatForeground hands the terminal's foreground to group.
+func seatForeground(tty, group int) error {
+	return unix.IoctlSetPointerInt(tty, unix.TIOCSPGRP, group)
 }
 
 func startSeatEngine(argv []string, options deps.StartOptions) (deps.Process, error) {

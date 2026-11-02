@@ -14,6 +14,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/servicemanager"
 )
 
@@ -42,14 +43,20 @@ type ServiceManager interface {
 		units []Unit, detail string, err error)
 }
 
-// nativeServiceManager is the manager pfm installs its services under on
-// goos: launchd per-user agents in the gui/<uid> domain on macOS, systemd
-// user units on Linux; nil where pfm installs none.
-func nativeServiceManager(goos string, runner deps.Runner, clk clock.Clock, home string, uid int) ServiceManager {
-	switch goos {
-	case "darwin":
+// nativeServiceManager is the manager pfm installs its services under for
+// kind: launchd per-user agents in the gui/<uid> domain, or systemd user
+// units; nil for a kind pfm installs none under.
+func nativeServiceManager(
+	kind servicemanager.Kind,
+	runner deps.Runner,
+	clk clock.Clock,
+	home string,
+	uid int,
+) ServiceManager {
+	switch kind {
+	case servicemanager.KindLaunchd:
 		return NewLaunchdManager(runner, clk, home, uid)
-	case "linux":
+	case servicemanager.KindSystemd:
 		return NewSystemdManager(runner, clk, home)
 	}
 	return nil
@@ -167,7 +174,7 @@ type LaunchdManager struct {
 func NewLaunchdManager(runner deps.Runner, clk clock.Clock, home string, uid int) LaunchdManager {
 	return LaunchdManager{
 		serviceTools: serviceTools{runner: runner, clock: clk},
-		Dir:          filepath.Join(home, "Library", "LaunchAgents"),
+		Dir:          paths.LaunchAgentsDir(home),
 		UID:          uid,
 	}
 }
@@ -179,7 +186,7 @@ func NewLaunchdManager(runner deps.Runner, clk clock.Clock, home string, uid int
 func (manager LaunchdManager) Units(
 	ctx context.Context, family string, match func(string) bool, verify Verifier,
 ) ([]Unit, string, error) {
-	if absent, err := manager.missing("launchctl"); absent || err != nil {
+	if absent, err := manager.missing(servicemanager.LaunchctlBinary); absent || err != nil {
 		return nil, "no launchctl on this host — no launch agents to restart", err
 	}
 	names, err := installedNames(manager.Dir, func(name string) bool {
@@ -393,7 +400,7 @@ type SystemdManager struct {
 func NewSystemdManager(runner deps.Runner, clk clock.Clock, home string) SystemdManager {
 	return SystemdManager{
 		serviceTools: serviceTools{runner: runner, clock: clk},
-		Dir:          filepath.Join(home, ".config", "systemd", "user"),
+		Dir:          paths.SystemdUserDir(home),
 	}
 }
 
@@ -406,7 +413,7 @@ func NewSystemdManager(runner deps.Runner, clk clock.Clock, home string) Systemd
 func (manager SystemdManager) Units(
 	ctx context.Context, family string, match func(string) bool, verify Verifier,
 ) ([]Unit, string, error) {
-	if absent, err := manager.missing("systemctl"); absent || err != nil {
+	if absent, err := manager.missing(servicemanager.SystemctlBinary); absent || err != nil {
 		return nil, "no systemctl on this host — no user units to restart", err
 	}
 	names, err := installedNames(manager.Dir, func(name string) bool {

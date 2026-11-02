@@ -15,6 +15,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 func TestRealRunnerRunCapturesStdoutStderrAndExitCode(t *testing.T) {
@@ -60,18 +62,21 @@ func TestRealRunnerRunRespectsEnvAndStdin(t *testing.T) {
 	}
 }
 
-// RealRunner.LookPath is Resolve: a name on PATH resolves to its file, and a
-// registry name gated to another platform is refused even when a binary of
-// that name sits on PATH.
-func TestRealRunnerLookPathResolvesThroughTheRegistry(t *testing.T) {
-	offPlatform := map[string]string{"linux": "vm_stat", "darwin": "setsid"}[runtime.GOOS]
+// The platform gate: RealRunner.LookPath is Resolve, and Run and Start pass a
+// bare argv[0] through the same gate, so a registry name gated to another
+// platform is refused before exec even when a binary of that name sits on
+// PATH. A name on PATH outside the registry resolves and runs, and a path
+// (it holds '/') is never gated, so a test's stub runs.
+func TestRealRunnerGatesOffPlatformRegistryNames(t *testing.T) {
+	offPlatform := map[string]string{"linux": "launchctl", "darwin": "getent"}[runtime.GOOS]
 	if offPlatform == "" {
 		t.Fatalf("no off-platform registry name pinned for %s", runtime.GOOS)
 	}
 	directory := t.TempDir()
-	staged := writeDetachTestScript(t, filepath.Join(directory, "pfm-lookpath-probe"))
-	writeDetachTestScript(t, filepath.Join(directory, offPlatform))
+	staged := writeExitZeroScript(t, filepath.Join(directory, "pfm-lookpath-probe"))
+	stub := writeExitZeroScript(t, filepath.Join(directory, offPlatform))
 	t.Setenv("PATH", directory+string(os.PathListSeparator)+os.Getenv("PATH"))
+	want := "dependency " + offPlatform + " is not supported on " + runtime.GOOS
 
 	var runner RealRunner
 	path, err := runner.LookPath("pfm-lookpath-probe")
@@ -79,9 +84,33 @@ func TestRealRunnerLookPathResolvesThroughTheRegistry(t *testing.T) {
 		t.Fatalf("LookPath(pfm-lookpath-probe) = %q, %v; want %q, nil", path, err, staged)
 	}
 	path, err = runner.LookPath(offPlatform)
-	want := "dependency " + offPlatform + " is not supported on " + runtime.GOOS
 	if err == nil || err.Error() != want {
 		t.Fatalf("LookPath(%s) = %q, %v; want the platform refusal %q", offPlatform, path, err, want)
+	}
+
+	result, err := runner.Run(context.Background(), []string{offPlatform, "print"}, RunOptions{})
+	if err == nil || err.Error() != want || result.ExitCode != -1 {
+		t.Fatalf("Run(%s print) = %+v, %v; want ExitCode -1 and %q", offPlatform, result, err, want)
+	}
+	result, err = runner.Run(context.Background(), []string{"sh", "-c", "exit 7"}, RunOptions{})
+	if err != nil || result.ExitCode != 7 {
+		t.Fatalf("Run(sh -c 'exit 7') = %+v, %v; want ExitCode 7, nil", result, err)
+	}
+	result, err = runner.Run(context.Background(), []string{stub, "print"}, RunOptions{})
+	if err != nil || result.ExitCode != 0 {
+		t.Fatalf("Run(%s print) = %+v, %v; want the path stub to run: ExitCode 0, nil", stub, result, err)
+	}
+
+	process, err := runner.Start(context.Background(), []string{offPlatform, "print"}, StartOptions{})
+	if err == nil || err.Error() != want || process != nil {
+		t.Fatalf("Start(%s print) = %v, %v; want nil and %q", offPlatform, process, err, want)
+	}
+	process, err = runner.Start(context.Background(), []string{stub, "print"}, StartOptions{})
+	if err != nil {
+		t.Fatalf("Start(%s print) error = %v; want the path stub to start", stub, err)
+	}
+	if err := process.Wait(); err != nil {
+		t.Fatalf("Start(%s print).Wait() = %v; want nil", stub, err)
 	}
 }
 
@@ -214,37 +243,96 @@ func TestRealRunnerStartWiresOrdinaryStdin(t *testing.T) {
 	}
 }
 
+// A Detach start leads its own session, hands the child its ExtraFiles from
+// descriptor 3, refuses Wait by name, and reaps the child once it exits.
 func TestRealRunnerStartDetachReleasesAndWaitNamesIt(t *testing.T) {
 	t.Parallel()
-	var runner RealRunner
-	process, err := runner.Start(
+	extra, err := os.Create(filepath.Join(t.TempDir(), "extra"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = extra.Close() }()
+	process, err := RealRunner{}.Start(
 		context.Background(),
-		[]string{"sh", "-c", "exit 0"},
-		StartOptions{Detach: true},
+		[]string{"/bin/sh", "-c", "echo on-fd-3 >&3; exec sleep 30"},
+		StartOptions{Detach: true, ExtraFiles: []*os.File{extra}},
 	)
 	if err != nil {
 		t.Fatalf("Start(Detach) error = %v", err)
 	}
-	if process.Pid() <= 0 {
-		t.Fatalf("Pid() = %d, want > 0", process.Pid())
+	pid := process.Pid()
+	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
+	if session, err := unix.Getsid(pid); err != nil || session != pid {
+		t.Fatalf("Getsid(%d) = %d, %v; want the detached child to lead its own session", pid, session, err)
 	}
-	if err := process.Wait(); err == nil {
-		t.Fatal("Wait() on a detached, released process returned nil error, want one naming the release")
+	want := fmt.Sprintf(
+		`deps: Process.Wait: "/bin/sh" (pid %d) was started detached and released; it cannot be waited on`,
+		pid,
+	)
+	if err := process.Wait(); err == nil || err.Error() != want {
+		t.Fatalf("Wait() = %v, want %q", err, want)
 	}
 	if err := process.Release(); err != nil {
 		t.Fatalf("Release() error = %v", err)
 	}
-	// A long-lived caller (the paced statusline worker) must not collect a
-	// zombie per detached child: once the child exits, its pid is reaped.
-	deadline := time.Now().Add(5 * time.Second)
-	for syscall.Kill(process.Pid(), 0) == nil {
+	deadline := time.Now().Add(6 * time.Second)
+	for {
+		body, err := os.ReadFile(extra.Name())
+		if err == nil && string(body) == "on-fd-3\n" {
+			break
+		}
 		if time.Now().After(deadline) {
-			t.Fatalf(
-				"detached pid %d still in the process table 5s after it exited: never reaped (zombie)",
-				process.Pid(),
-			)
+			t.Fatalf("%s = %q, %v; want the child's fd 3 line %q", extra.Name(), body, err, "on-fd-3\n")
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
+		t.Fatalf("stop detached pid %d: %v", pid, err)
+	}
+	// A long-lived caller (the paced statusline worker) must not collect a
+	// zombie per detached child: once the child exits, its pid is reaped.
+	deadline = time.Now().Add(6 * time.Second)
+	for syscall.Kill(pid, 0) == nil {
+		if time.Now().After(deadline) {
+			t.Fatalf("detached pid %d still in the process table 6s after it exited: never reaped (zombie)", pid)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// SignalGroup reaches a live group with the signal asked for, answers nil
+// once the group is gone, and refuses a child that has no group of its own.
+func TestRealRunnerSignalGroup(t *testing.T) {
+	t.Parallel()
+	live, err := RealRunner{}.Start(
+		context.Background(),
+		[]string{"sh", "-c", "sleep 30"},
+		StartOptions{ProcessGroup: true},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := live.SignalGroup(syscall.SIGTERM); err != nil {
+		t.Fatalf("SignalGroup(SIGTERM) on a live group = %v, want nil", err)
+	}
+	var exitErr *exec.ExitError
+	if err := live.Wait(); !errors.As(err, &exitErr) ||
+		exitErr.Sys().(syscall.WaitStatus).Signal() != syscall.SIGTERM {
+		t.Fatalf("Wait() after SignalGroup(SIGTERM) = %v, want the child terminated by SIGTERM", err)
+	}
+	if err := live.SignalGroup(syscall.SIGTERM); err != nil {
+		t.Fatalf("SignalGroup(SIGTERM) on an exited group = %v, want nil", err)
+	}
+	ungrouped, err := RealRunner{}.Start(context.Background(), []string{"sh", "-c", "exit 0"}, StartOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ungrouped.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	const want = "deps: process group was not requested"
+	if err := ungrouped.SignalGroup(syscall.SIGTERM); err == nil || err.Error() != want {
+		t.Fatalf("SignalGroup on an ungrouped child = %v, want %q", err, want)
 	}
 }
 
@@ -669,4 +757,12 @@ func TestRealRunnerStartCanonicalArgvAndForeground(t *testing.T) {
 			}
 		})
 	}
+}
+
+func writeExitZeroScript(t *testing.T, path string) string {
+	t.Helper()
+	if err := writeExecutableUnderForkLock(path, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }

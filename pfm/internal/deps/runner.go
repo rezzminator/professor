@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -81,6 +82,9 @@ type StartOptions struct {
 	// StdinPipe; use the latter when the caller owns an interactive stream.
 	Stdin          io.Reader
 	Stdout, Stderr io.Writer
+	// ExtraFiles are inherited open files the child finds from descriptor 3
+	// on, exec.Cmd's own ExtraFiles contract.
+	ExtraFiles []*os.File
 	// StdinPipe and StdoutPipe keep the native process pipes inside deps. The
 	// returned Process exposes the corresponding handles without leaking
 	// exec.Cmd to callers.
@@ -107,7 +111,12 @@ type Process interface {
 	StdinPipe() (io.WriteCloser, error)
 	StdoutPipe() (io.ReadCloser, error)
 	Kill() error
+	// KillGroup is SignalGroup(syscall.SIGKILL).
 	KillGroup() error
+	// SignalGroup sends sig to the child's whole process group; a group that
+	// has already exited answers nil. A child started without ProcessGroup or
+	// Foreground has no group of its own and is refused by name.
+	SignalGroup(sig syscall.Signal) error
 }
 
 // RealRunner runs argv through os/exec.
@@ -117,10 +126,14 @@ type RealRunner struct{}
 // command answering, not the Runner failing to run it — Run returns a nil
 // error with ExitCode set, the same contract probeOne already holds for a
 // version-probe subprocess; only a failure to start (lookup, permission,
-// context already done) returns a non-nil error.
+// context already done, a bare argv[0] gated to another platform) returns a
+// non-nil error.
 func (RealRunner) Run(ctx context.Context, argv []string, opts RunOptions) (RunResult, error) {
 	if len(argv) == 0 {
 		return RunResult{ExitCode: -1}, errors.New("deps: RealRunner.Run: empty argv")
+	}
+	if err := gateArgv0(argv[0]); err != nil {
+		return RunResult{ExitCode: -1}, err
 	}
 	command := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	command.Env = opts.Env
@@ -176,6 +189,9 @@ func (RealRunner) Start(ctx context.Context, argv []string, opts StartOptions) (
 	if len(argv) == 0 {
 		return nil, errors.New("deps: RealRunner.Start: empty argv")
 	}
+	if err := gateArgv0(argv[0]); err != nil {
+		return nil, err
+	}
 	if opts.Foreground && (opts.Detach || opts.Ctty < 0) {
 		return nil, errors.New("deps: foreground start requires a nonnegative terminal descriptor and cannot detach")
 	}
@@ -209,6 +225,7 @@ func (RealRunner) Start(ctx context.Context, argv []string, opts StartOptions) (
 	}
 	command.Stdout = opts.Stdout
 	command.Stderr = opts.Stderr
+	command.ExtraFiles = opts.ExtraFiles
 	var stdin io.WriteCloser
 	var stdout io.ReadCloser
 	var err error
@@ -248,6 +265,16 @@ func (RealRunner) Start(ctx context.Context, argv []string, opts StartOptions) (
 		stdout:       stdout,
 		processGroup: opts.ProcessGroup || opts.Foreground,
 	}, nil
+}
+
+// gateArgv0 refuses a bare argv[0] the registry gates to another platform
+// before anything execs, with Resolve's own text. A path (it holds '/') is
+// the caller's explicit choice, a test's stub included, and is not gated.
+func gateArgv0(argv0 string) error {
+	if strings.Contains(argv0, "/") {
+		return nil
+	}
+	return platformGate(argv0)
 }
 
 func startProcessAttributes(opts StartOptions) *syscall.SysProcAttr {
@@ -296,14 +323,16 @@ func (p *realProcess) Kill() error {
 	return p.command.Process.Kill()
 }
 
-func (p *realProcess) KillGroup() error {
+func (p *realProcess) KillGroup() error { return p.SignalGroup(syscall.SIGKILL) }
+
+func (p *realProcess) SignalGroup(sig syscall.Signal) error {
 	if !p.processGroup {
 		return errors.New("deps: process group was not requested")
 	}
 	if p.command.Process == nil {
 		return errors.New("deps: process has not started")
 	}
-	err := syscall.Kill(-p.command.Process.Pid, syscall.SIGKILL)
+	err := syscall.Kill(-p.command.Process.Pid, sig)
 	if errors.Is(err, syscall.ESRCH) {
 		return nil
 	}
@@ -344,6 +373,10 @@ func (p *releasedProcess) Kill() error {
 
 func (p *releasedProcess) KillGroup() error {
 	return errors.New("deps: detached process was released; it cannot be killed")
+}
+
+func (p *releasedProcess) SignalGroup(syscall.Signal) error {
+	return errors.New("deps: detached process was released; it cannot be signalled")
 }
 
 // FakeRunner scripts Runner responses by argv prefix and records every call
@@ -455,6 +488,12 @@ func (p *fakeProcess) Kill() error {
 
 func (p *fakeProcess) KillGroup() error {
 	p.owner.recordLifecycle(p.pid, "kill-group")
+	return p.groupErr
+}
+
+// SignalGroup records "signal-group {sig}" and answers the scripted GroupErr.
+func (p *fakeProcess) SignalGroup(sig syscall.Signal) error {
+	p.owner.recordLifecycle(p.pid, "signal-group "+sig.String())
 	return p.groupErr
 }
 

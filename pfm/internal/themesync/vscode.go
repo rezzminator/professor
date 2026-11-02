@@ -14,8 +14,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/clock"
-	"github.com/rezzminator/professor/pfm/internal/deps"
-	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 )
 
 const (
@@ -37,7 +36,7 @@ var wallClock clock.Clock = clock.Real
 var vscodeProducts = []string{"Code", "Code - Insiders", "VSCodium", "Cursor"}
 
 // vscodeLinuxMarkers identify a running VS Code family main binary or VS Code
-// Server (the extension host of a Remote-SSH window) in `ps -axo args=`
+// Server (the extension host of a Remote-SSH window) in a process's argv
 // outside macOS.
 var vscodeLinuxMarkers = []string{
 	"/.vscode-server/cli/servers/",
@@ -51,7 +50,7 @@ var vscodeLinuxMarkers = []string{
 	"/snap/code/",
 }
 
-// vscodeAppMarkers identify a running VS Code family main binary in `ps -axo args=` on macOS.
+// vscodeAppMarkers identify a running VS Code family main binary in a process's argv on macOS.
 var vscodeAppMarkers = []string{
 	"/Visual Studio Code.app/Contents/MacOS/",
 	"/Code.app/Contents/MacOS/",
@@ -286,9 +285,29 @@ func dropGoneWorkspaces(ack *vscodeAck) {
 	}
 }
 
-// vscodeRunning reports whether `ps -axo args=` lists a process one of markers names.
-func vscodeRunning(psOutput string, markers []string) bool {
-	for _, line := range strings.Split(psOutput, "\n") {
+// processArgs lists each process's argv joined by spaces, one per line. A
+// process that exits mid-scan, whose argv the kernel withholds (another
+// user's on macOS) or that has none (a kernel thread) contributes nothing:
+// no VS Code marker could match it.
+func processArgs(table gather.ProcFS) (string, error) {
+	pids, err := table.PIDs()
+	if err != nil {
+		return "", err
+	}
+	lines := make([]string, 0, len(pids))
+	for _, pid := range pids {
+		argv, err := table.Cmdline(pid)
+		if err != nil || len(argv) == 0 {
+			continue
+		}
+		lines = append(lines, strings.Join(argv, " "))
+	}
+	return strings.Join(lines, "\n"), nil
+}
+
+// vscodeRunning reports whether processArgs lists a process one of markers names.
+func vscodeRunning(processes string, markers []string) bool {
+	for _, line := range strings.Split(processes, "\n") {
 		for _, marker := range markers {
 			if strings.Contains(line, marker) {
 				return true
@@ -298,34 +317,12 @@ func vscodeRunning(psOutput string, markers []string) bool {
 	return false
 }
 
-// vscodeSettings are the settings.json files the vscode row looks for: on
-// macOS each product's under Application Support, elsewhere the one lookup
-// pfm install --vscode shares, the VS Code Server's Machine settings included.
-func (s *session) vscodeSettings() []string {
-	if !s.env.darwin() {
-		return paths.VSCodeSettingsCandidates(s.env.Home, false, paths.OSEnv{})
-	}
-	var settings []string
-	for _, product := range vscodeProducts {
-		settings = append(
-			settings,
-			filepath.Join(s.env.Home, "Library", "Application Support", product, "User", "settings.json"),
-		)
-	}
-	return settings
-}
+// vscodeSettings are the settings.json files the vscode row looks for on the
+// served platform.
+func (s *session) vscodeSettings() []string { return s.env.platform().vscodeSettings(s.env.Home) }
 
-// vscodeServerRoots are the VS Code Server installs outside macOS: a
-// Remote-SSH window's extension host runs from one, and its Machine
-// settings.json exists only once a Remote setting was saved, so the root
-// alone already makes VS Code present (the installer links its extension
-// there on the same evidence).
-func (s *session) vscodeServerRoots() []string {
-	if s.env.darwin() {
-		return nil
-	}
-	return []string{filepath.Join(s.env.Home, ".vscode-server"), filepath.Join(s.env.Home, ".vscode-server-insiders")}
-}
+// vscodeServerRoots are the VS Code Server installs on the served platform, none on macOS.
+func (s *session) vscodeServerRoots() []string { return s.env.platform().vscodeServerRoots(s.env.Home) }
 
 // vscodePresent says whether this host has a VS Code the contract serves: a
 // settings.json the row looks for, or a VS Code Server root. A path that
@@ -350,14 +347,6 @@ func (s *session) vscodePresent() (bool, string, error) {
 		}
 	}
 	return false, "", nil
-}
-
-// vscodeMarkers are the process markers of a running VS Code on this platform.
-func (s *session) vscodeMarkers() []string {
-	if s.env.darwin() {
-		return vscodeAppMarkers
-	}
-	return vscodeLinuxMarkers
 }
 
 func (s *session) vscodeContractPath() string { return filepath.Join(s.store.dir, vscodeContractFile) }
@@ -440,7 +429,7 @@ func (s *session) applyVscode(_ context.Context) SurfaceResult {
 	return s.result(surfaceVscode, VerdictApplied, s.vscodeContractPath(), "")
 }
 
-func (s *session) readVscode(ctx context.Context) SurfaceResult {
+func (s *session) readVscode(_ context.Context) SurfaceResult {
 	path := s.vscodeContractPath()
 	present, failedPath, err := s.vscodePresent()
 	if err != nil {
@@ -466,13 +455,9 @@ func (s *session) readVscode(ctx context.Context) SurfaceResult {
 		return s.failed(surfaceVscode, path, err)
 	}
 	dropGoneWorkspaces(&ack)
-	result, err := s.env.Runner.Run(ctx, []string{"ps", "-axo", "args="}, deps.RunOptions{})
-	if err != nil || result.ExitCode != 0 {
-		return s.failed(
-			surfaceVscode,
-			path,
-			fmt.Errorf("themesync: list processes: %v (exit %d)", err, result.ExitCode),
-		)
+	processes, err := processArgs(s.env.proc())
+	if err != nil {
+		return s.failed(surfaceVscode, path, fmt.Errorf("themesync: list processes: %w", err))
 	}
 	info, err := os.Stat(path)
 	if err != nil {
@@ -482,7 +467,7 @@ func (s *session) readVscode(ctx context.Context) SurfaceResult {
 		ack,
 		haveAck,
 		s.state.Generation,
-		vscodeRunning(string(result.Stdout), s.vscodeMarkers()),
+		vscodeRunning(processes, s.env.platform().vscodeMarkers),
 		wallClock.Now().Sub(info.ModTime()),
 		filepath.Join(s.store.dir, vscodeAckFile),
 	)

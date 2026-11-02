@@ -1,5 +1,3 @@
-internal/codexappendix/trust.go 1
 internal/deps/runner.go 3
 internal/hookentry/launch.go 2
-internal/hookentry/seathost.go 2
 internal/statusline/process.go 3

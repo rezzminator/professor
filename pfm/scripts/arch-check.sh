@@ -16,7 +16,7 @@
 # in review. With no baseline, --measure writes today's tree as the first one.
 #
 # The checks are independent, so they run as concurrent background jobs and print
-# in the order they always have: C1 … C23, C25, C26, C27, C28, then C24 (its own script). A job
+# in the order they always have: C1 … C23, C25, C26, C27, C28, C29, C30, then C24 (its own script). A job
 # that ends without leaving its CHECK line is reported as ERROR for that check,
 # never read as PASS.
 set -uo pipefail
@@ -61,11 +61,17 @@ grep '^cmd/pfm/' "$L/src.list" > "$L/cmd.list"
 # the caller passes still wins: the later flag rules).
 g() { local out=$1 list=$2; shift 2; [ -s "$list" ] || return 2; grep -H "$@" $(cat "$list") > "$out"; [ $? -le 1 ] || return 2; }
 
-# stale_baseline <name>: the baseline's Go-file keys (an optional `kind:` prefix
-# stripped) whose file no longer exists — a ledger entry that names nothing. A
-# deleted or renamed file must leave its baseline line (--measure prunes it), so
-# a green run never passes over a ledger that points at a file that is gone.
+# stale_baseline <name> [root]: the baseline's Go-file keys (an optional `kind:`
+# prefix stripped) whose file no longer exists — a ledger entry that names
+# nothing. A deleted or renamed file must leave its baseline line (--measure
+# prunes it), so a green run never passes over a ledger that points at a file
+# that is gone. With a root, every key is a file path read under that root (C30
+# names its shell files from the repo root).
 stale_baseline() {
+  if [ -n "${2:-}" ]; then
+    awk '{print $1}' "$BASE/$1.txt" | while read -r f; do [ -e "$2/$f" ] || echo "$f"; done
+    return
+  fi
   awk '{k = $1; sub(/^[a-z0-9]+:/, "", k); if (k ~ /\.go$/) print k}' "$BASE/$1.txt" | while read -r f; do [ -e "$f" ] || echo "$f"; done
 }
 
@@ -100,11 +106,12 @@ ratchet() {
   say "$id" PASS "$(wc -l < "$cur" | tr -d ' ') baselined, 0 new$note"
 }
 
-# ratchet_counts <id> <name> <current> [slack]: lines "<key> <count>" — FAIL on a
-# key the baseline lacks or a count above the baseline's (+ slack). A count that
-# shrank passes.
+# ratchet_counts <id> <name> <current> [slack] [root]: lines "<key> <count>" —
+# FAIL on a key the baseline lacks or a count above the baseline's (+ slack). A
+# count that shrank passes. A root makes every key a file under it for the stale
+# check (stale_baseline).
 ratchet_counts() {
-  local id=$1 name=$2 cur=$3 slack=${4:-0}
+  local id=$1 name=$2 cur=$3 slack=${4:-0} root=${5:-}
   sort -u "$cur" -o "$cur"
   if [ "$MODE" = --measure ]; then
     if ! mkdir -p "$BASE"; then
@@ -124,7 +131,7 @@ ratchet_counts() {
     say "$id" MEASURE "$(awk '{s+=$2} END {print s+0}' "$BASE/$name.txt") in $(wc -l < "$BASE/$name.txt" | tr -d ' ') keys -> .arch/$name.txt"; return
   fi
   [ -f "$BASE/$name.txt" ] || { say "$id" ERROR "baseline .arch/$name.txt missing — cannot tell new from old"; return; }
-  local stale; stale=$(stale_baseline "$name")
+  local stale; stale=$(stale_baseline "$name" "$root")
   if [ -n "$stale" ]; then say "$id" FAIL "stale: $(echo "$stale" | tr '\n' ' ')— .arch/$name.txt names a file that no longer exists; run --measure"; return; fi
   local over
   over=$(awk -v slack="$slack" 'FILENAME==ARGV[1] {base[$1]=$2; next} !($1 in base) {print $1" (new "$2")"; next} $2>base[$1]+slack {print $1" ("base[$1]"->"$2")"}' "$BASE/$name.txt" "$cur")
@@ -558,6 +565,65 @@ chk_C28() {
   else say C28-signal-door ERROR "grep could not read sources"; fi
 }
 
+# C29 one door per OS operation: an OS difference lives inside its door
+# (internal/{deps,servicemanager,gather,paths,atomicfile}); internal/mockengine,
+# internal/hostfixture and cmd/mock-engine build fake proc trees and scripted
+# platform commands, so they are skipped too. Elsewhere, in an untagged
+# production file, a line that reads or compares the OS name, reads /proc or a
+# cgroup, or names a one-OS command counts; the one-OS commands are every
+# internal/deps/registry.go Name whose Platforms list holds exactly one
+# element, derived here so the list never drifts from the registry. A file
+# selected by OS (an _{os}.go name or a //go:build line naming an OS) counts 1.
+# Count per file, only shrinks; each baselined entry carries its reason in
+# .arch/exceptions.md.
+chk_C29() {
+  local registry=internal/deps/registry.go names
+  if ! names=$(awk '
+      /^[[:space:]]*Name:[[:space:]]*"/ { n = $0; sub(/^[^"]*"/, "", n); sub(/".*/, "", n); next }
+      /^[[:space:]]*Name:/ { n = ""; next }
+      /Platforms:/ && n != "" { p = $0; sub(/.*\{/, "", p); sub(/\}.*/, "", p); if (p !~ /,/ && p ~ /[^[:space:]]/) print n; n = "" }
+    ' "$registry" | paste -sd'|' -); then
+    say C29-os-door ERROR "could not read $registry"; return
+  fi
+  [ -n "$names" ] || { say C29-os-door ERROR "no one-platform command derived from $registry — the enumerator did not run"; return; }
+  grep -vE '^internal/(deps|servicemanager|gather|paths|atomicfile|mockengine|hostfixture)/|^cmd/mock-engine/' "$L/src.list" > "$T/nodoor.list"
+  [ -s "$T/nodoor.list" ] || { say C29-os-door ERROR "no production sources outside the doors listed — the enumerator did not run"; return; }
+  # A //go:build line counts only before the package clause, where Go reads it.
+  if ! awk '
+      FNR == 1 && FILENAME ~ /_(linux|darwin|other|bsd|unix|windows)\.go$/ { print FILENAME; nextfile }
+      /^package / { nextfile }
+      /^\/\/go:build/ { if ($0 ~ /(^|[^A-Za-z0-9_])(linux|darwin|windows|freebsd|openbsd|netbsd|dragonfly|solaris|unix|bsd)([^A-Za-z0-9_]|$)/) print FILENAME; nextfile }
+    ' $(cat "$T/nodoor.list") > "$T/tagged.raw"; then
+    say C29-os-door ERROR "awk could not read the build constraints"; return
+  fi
+  sort -u "$T/tagged.raw" > "$T/tagged.list"
+  comm -23 "$T/nodoor.list" "$T/tagged.list" > "$T/untagged.list"
+  local os='\bruntime\.GOOS\b|(==|!=)[[:space:]]*"(darwin|linux)"|"(darwin|linux)"[[:space:]]*(==|!=)|case[[:space:]]+"(darwin|linux)"'
+  local proc='"/proc\b|"/sys/fs/cgroup|\bpaths\.(SystemProcRoot|ProcRootOr)\b|Join\(.*,[[:space:]]*"(stat|statm|status|cmdline|environ|exe|fd|fdinfo|cgroup|meminfo|loadavg|uptime|mountinfo)"\)|"net",[[:space:]]*"unix"'
+  if g "$T/raw" "$T/untagged.list" -nE "$os|$proc|\"($names)\""; then
+    { count_by_file "$T/raw"; awk '{print $1" 1"}' "$T/tagged.list"; } > "$T/c29"; ratchet_counts C29-os-door os-door "$T/c29"
+  else say C29-os-door ERROR "grep could not read sources"; fi
+}
+
+# C30 one shell door per OS operation: scripts/platform.sh is the door, and a
+# non-comment line elsewhere in scripts/, .claude/scripts/, pfm/scripts/ or
+# pfm/Makefile that branches on the OS name or names a one-OS or GNU/BSD-split
+# tool counts. Tests (_test.sh, test-*.sh) stub those tools, and this script
+# names them, so neither is read. Files are named from the repo root. Count per
+# file, only shrinks; each baselined entry carries its reason in
+# .arch/exceptions.md.
+chk_C30() {
+  if ! (cd .. && shopt -s nullglob && for f in scripts/*.sh .claude/scripts/*.sh pfm/scripts/*.sh pfm/Makefile; do if [ -f "$f" ]; then echo "$f"; fi; done) > "$T/shell.raw"; then
+    say C30-shell-platform ERROR "could not list the shell sources under $PFM/.."; return
+  fi
+  grep -vE '(^|/)[^/]*_test\.sh$|(^|/)test-[^/]*\.sh$|^scripts/platform\.sh$|^pfm/scripts/arch-check\.sh$' "$T/shell.raw" | sort -u > "$T/shell.list"
+  local pattern='\buname\b|\$OSTYPE|\bDarwin\b|\bsha256sum\b|\bshasum\b|\bstat[[:space:]]+-[cf]\b|\bnproc\b|\bgetconf\b|\bsysctl\b|\blaunchctl\b|\bsystemctl\b|\bjournalctl\b|\bpgrep\b|\bpkill\b'
+  if (cd .. && g "$T/raw" "$T/shell.list" -nE "$pattern"); then
+    grep -vE '^[^:]+:[0-9]+:[[:space:]]*#' "$T/raw" > "$T/code"
+    count_by_file "$T/code" > "$T/c30"; ratchet_counts C30-shell-platform shell-platform "$T/c30" 0 ..
+  else say C30-shell-platform ERROR "no shell sources listed under $PFM/.., or grep could not read them"; fi
+}
+
 # C24 lives in its own script; its exit status (0 PASS · 1 FAIL · 2 ERROR) joins the
 # maximum below, and the status file is how the job hands it over.
 chk_C24() { bash "$PFM/scripts/arch-c24.sh" "$MODE"; echo $? > "$L/jobs/C24.status"; }
@@ -577,7 +643,7 @@ for id in C1-ceiling-src C2-ceiling-test C3-cmd-budget C4-cmd-primitives C5-tmux
   C12-claude-pointers C13-test-mirror C14-usage-parity C15-internal-usage \
   C16-env-outside-paths C17-dup-functions C18-engine-spellings C19-env-namespace \
   C20-codex-home C21-test-jail C22-host-doors C23-bare-log C25-testmain-jail C26-exec-write C27-identity-env \
-  C28-signal-door C24-unwrapped-door; do
+  C28-signal-door C29-os-door C30-shell-platform C24-unwrapped-door; do
   job "$id"
 done
 

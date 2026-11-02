@@ -17,6 +17,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/servicemanager"
 	"github.com/rezzminator/professor/pfm/internal/themesync"
 	"github.com/rezzminator/professor/pfm/internal/themetmux"
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
@@ -45,9 +46,15 @@ type TmuxSpawner struct {
 	// A test injects a recorder here.
 	applyTheme func(ctx context.Context, servers themesync.TmuxServers, stateDir, socket string) error
 	// Env is the host-environment seam (pfm/TESTPLAN.md § Seams, paths.Env)
-	// serviceScopeCommand reads INVOCATION_ID through; nil defaults to
+	// chatServerCommand reads INVOCATION_ID through; nil defaults to
 	// paths.OSEnv{}.
 	Env paths.Env
+	// serviceKind is the service manager a chat server escapes; "" is
+	// servicemanager.Native(). A test sets the other kind here.
+	serviceKind servicemanager.Kind
+	// lookPath resolves the scope launcher; nil is the real runner's. A test
+	// points it at a fake.
+	lookPath func(string) (string, error)
 	// Screen is the pane door Pane hands out; nil is the call engine over
 	// Binary. A test injects a recorder here.
 	Screen pfmcall.Screen
@@ -295,7 +302,15 @@ func (tmux TmuxSpawner) newSessionCommand(
 	if env == nil {
 		env = paths.OSEnv{}
 	}
-	command, err := serviceScopeCommand(ctx, binary, commandArguments, environment, env)
+	kind := tmux.serviceKind
+	if kind == "" {
+		kind = servicemanager.Native()
+	}
+	lookPath := tmux.lookPath
+	if lookPath == nil {
+		lookPath = obs.Runner(deps.RealRunner{}).LookPath
+	}
+	command, err := chatServerCommand(ctx, kind, lookPath, binary, commandArguments, environment, env)
 	if err != nil {
 		return nil, err
 	}

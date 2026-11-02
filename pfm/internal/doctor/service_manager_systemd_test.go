@@ -1,5 +1,3 @@
-//go:build linux
-
 package doctor
 
 import (
@@ -13,14 +11,14 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
-// TestProbeServiceManagerLinuxNoSystemctlOnPath watches the "no service
+// TestProbeServiceManagerSystemdNoSystemctlOnPath watches the "no service
 // manager on this host" state: systemctl absent from PATH is a clean,
 // expected answer (report.Present=false), never a probe error.
-func TestProbeServiceManagerLinuxNoSystemctlOnPath(t *testing.T) {
+func TestProbeServiceManagerSystemdNoSystemctlOnPath(t *testing.T) {
 	fake := &deps.FakeRunner{}
 	fake.ScriptLookPath("systemctl", "", exec.ErrNotFound)
 
-	report := probeServiceManager(context.Background(), fake)
+	report := systemdServiceManager.service(context.Background(), fake)
 	if report.Present {
 		t.Fatalf("systemctl absent from PATH must report Present=false, got %+v", report)
 	}
@@ -39,12 +37,12 @@ var systemdShowArgv = []string{
 	"systemctl", "--user", "show", "--property=LoadState,UnitFileState,ActiveState", "pfm-mcp.service",
 }
 
-// TestProbeServiceManagerLinuxReadsOneShowAnswer drives the one
+// TestProbeServiceManagerSystemdReadsOneShowAnswer drives the one
 // `systemctl --user show` the probe asks through every answer it must read:
 // a completed show is an answer (present/enabled/active and the ActiveState
 // word), while a non-zero exit, unparsable output or a Run error is "could not
 // ask" carrying the exit code and stderr — never folded into "not active".
-func TestProbeServiceManagerLinuxReadsOneShowAnswer(t *testing.T) {
+func TestProbeServiceManagerSystemdReadsOneShowAnswer(t *testing.T) {
 	cases := []struct {
 		name    string
 		result  deps.RunResult
@@ -98,7 +96,7 @@ func TestProbeServiceManagerLinuxReadsOneShowAnswer(t *testing.T) {
 			fake.ScriptLookPath("systemctl", "/usr/bin/systemctl", nil)
 			fake.Script(systemdShowArgv, testCase.result, testCase.runErr)
 
-			report := probeServiceManager(context.Background(), fake)
+			report := systemdServiceManager.service(context.Background(), fake)
 			if !report.Present {
 				t.Fatalf("systemctl resolved on PATH; report.Present must be true, got %+v", report)
 			}
@@ -128,18 +126,18 @@ func TestProbeServiceManagerLinuxReadsOneShowAnswer(t *testing.T) {
 	}
 }
 
-// TestProbeServiceManagerLinuxTimeoutCouldNotAsk: a probe killed by its
+// TestProbeServiceManagerSystemdTimeoutCouldNotAsk: a probe killed by its
 // deadline reports a nil Run error (RealRunner folds the kill into an exit
 // code), so the expired probe context itself must read as could-not-ask,
 // naming the deadline.
-func TestProbeServiceManagerLinuxTimeoutCouldNotAsk(t *testing.T) {
+func TestProbeServiceManagerSystemdTimeoutCouldNotAsk(t *testing.T) {
 	fake := &deps.FakeRunner{}
 	fake.ScriptLookPath("systemctl", "/usr/bin/systemctl", nil)
 	fake.Script(systemdShowArgv, deps.RunResult{ExitCode: -1}, nil)
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
 	defer cancel()
 
-	report := probeServiceManager(ctx, fake)
+	report := systemdServiceManager.service(ctx, fake)
 	if report.Unit.Err == nil {
 		t.Fatalf("an expired probe must be could-not-ask, got %+v", report.Unit)
 	}

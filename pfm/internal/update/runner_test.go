@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
@@ -29,8 +30,9 @@ func (process scriptedUpdateProcess) StdinPipe() (io.WriteCloser, error) {
 func (process scriptedUpdateProcess) StdoutPipe() (io.ReadCloser, error) {
 	return nil, errors.New("stdout pipe not scripted")
 }
-func (process scriptedUpdateProcess) Kill() error      { return nil }
-func (process scriptedUpdateProcess) KillGroup() error { return nil }
+func (process scriptedUpdateProcess) Kill() error                      { return nil }
+func (process scriptedUpdateProcess) KillGroup() error                 { return nil }
+func (process scriptedUpdateProcess) SignalGroup(syscall.Signal) error { return nil }
 
 type scriptedUpdateRunner struct {
 	stdout    string

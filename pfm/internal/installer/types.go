@@ -224,14 +224,13 @@ type Options struct {
 	ThemeReleaseURL string
 	ThemeHTTPClient *http.Client
 
-	// launchGateUnprobed records that the launch-agent gate could not ask its
-	// question. It is set by Run, never by a caller.
-	launchGateUnprobed bool
-	// nameSyncGateUnprobed is the systemd twin: it records that the Linux
-	// name-sync gate's systemctl probe never ran at all (as opposed to
-	// running and reporting the service inactive). It is set by Run, never by
-	// a caller.
-	nameSyncGateUnprobed bool
+	// scheduler is the service manager the scheduled jobs run under; nil is
+	// this host's (jobScheduler). A test sets either kind.
+	scheduler scheduler
+	// schedulerGateUnprobed records that the scheduler gate could not ask its
+	// question (launchctl print or systemctl show never answered, as opposed
+	// to answering that no job runs). It is set by Run, never by a caller.
+	schedulerGateUnprobed bool
 }
 
 type Report struct {
@@ -314,10 +313,11 @@ func (runner execCommandRunner) Output(ctx context.Context, name string, args ..
 }
 
 // defaultProcRoot is the process table an install reads when neither
-// Options.ProcRoot nor its Env names one. The package's TestMain points it at an
-// empty jail, so a test whose fake Env omits PFM_PROC_ROOT never reads, or
-// signals, the processes of a suite running beside it.
-var defaultProcRoot = paths.SystemProcRoot()
+// Options.ProcRoot nor its Env names one: "", gather's own kernel table. The
+// package's TestMain points it at an empty jail, so a test whose fake Env
+// omits PFM_PROC_ROOT never reads, or signals, the processes of a suite
+// running beside it.
+var defaultProcRoot = ""
 
 func normalizeInstallerOptions(options Options) (Options, error) {
 	if options.SourceRepo != "" {

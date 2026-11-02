@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"sort"
 
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -693,13 +692,11 @@ func (installer *engine) unwireVSCode(
 func (installer *engine) vscodePlatform() (string, error) {
 	platform := installer.options.vscodePlatform
 	if platform == "" {
-		platform = runtime.GOOS
+		platform = vscodeHostPlatform
 	}
 	switch platform {
-	case "darwin", vscodePlatformOSX:
-		return vscodePlatformOSX, nil
-	case vscodePlatformLinux:
-		return "linux", nil
+	case vscodePlatformOSX, vscodePlatformLinux:
+		return platform, nil
 	default:
 		return "", fmt.Errorf("VS Code PFM terminal profile is unsupported on %s", platform)
 	}

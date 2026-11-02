@@ -53,6 +53,7 @@ REPO="${REPO:-$(cd "$PFM/.." && pwd)}"
 PROJECT="$(basename "$REPO")"; PROJECT="${PROJECT#.}"
 TMP_BASE="/tmp/$PROJECT"
 GOCMD="${GOCMD:-go}"
+. "$(dirname "${BASH_SOURCE[0]}")/../../scripts/platform.sh" || exit 2
 REPS=3
 REQUIRE_DOCKER=0
 JSON_DIR=""
@@ -63,13 +64,6 @@ SNAPSHOT_RAW=""
 SNAPSHOT_LOAD=""
 PARSED_LOAD=""
 TIMING_FILE=""
-
-nproc_online() {
-  if command -v nproc >/dev/null 2>&1; then nproc
-  elif command -v getconf >/dev/null 2>&1; then getconf _NPROCESSORS_ONLN
-  else return 1
-  fi
-}
 
 usage() {
   cat >&2 <<'EOF'
@@ -120,13 +114,13 @@ case "$QUIET_MAX_WAITS" in
     ;;
 esac
 
-p_sweep_set() { # deduped "1 2 4 8 <nproc>" in ascending order
+p_sweep_set() { # deduped "1 2 4 8 <NPROC>" in ascending order
   local n="$1"
   printf '%s\n' 1 2 4 8 "$n" | sort -nu | tr '\n' ' ' | sed 's/ $//'
 }
 
 if [ "$MODE" = plan ]; then
-  n="$(nproc_online)" || { echo "test-sweep: ERROR: could not determine online CPU count" >&2; exit 2; }
+  n="$(platform_cpus)" || { echo "test-sweep: ERROR: could not determine online CPU count" >&2; exit 2; }
   case "$n" in ''|*[!0-9]*|0) echo "test-sweep: ERROR: invalid online CPU count [$n]" >&2; exit 2 ;; esac
   pset="$(p_sweep_set "$n")"
   echo "SWEEP PLAN"
@@ -454,7 +448,7 @@ if [ "$MODE" = run ]; then
     echo "SWEEP-ERROR: go clean -testcache failed; no sweep was recorded" >&2
     exit 1
   fi
-  n="$(nproc_online)" || { echo "SWEEP-ERROR: could not determine online CPU count" >&2; exit 2; }
+  n="$(platform_cpus)" || { echo "SWEEP-ERROR: could not determine online CPU count" >&2; exit 2; }
   case "$n" in ''|*[!0-9]*|0) echo "SWEEP-ERROR: invalid online CPU count [$n]" >&2; exit 2 ;; esac
   time_cmd cache-warmup - - 1 -- go_test_command "${JSON_DIR:+$JSON_DIR/cache-warmup-p--parallel--rep1.json}" -count=1 ./... || { rc=$?; echo "SWEEP-ERROR: cache warm-up failed; no sweep verdict" >&2; exit "$rc"; }
 

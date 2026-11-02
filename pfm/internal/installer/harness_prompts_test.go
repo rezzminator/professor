@@ -62,7 +62,7 @@ func TestHarnessPromptReadmeIsEmbeddedButNeverStaged(t *testing.T) {
 	if _, err := harnessprompts.ReadPart("README.md"); err != nil {
 		t.Fatalf("read embedded README.md: %v", err)
 	}
-	assets, err := assetFiles()
+	assets, err := assetFiles(nativeScheduler())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -311,7 +311,7 @@ func TestVscodeVerdictJudgesWindowChrome(t *testing.T) {
 func TestVscodeChromeOfAGoneWorkspaceNoLongerCounts(t *testing.T) {
 	h := newHarness(t)
 	h.on()
-	h.psVscode = "/Applications/Visual Studio Code.app/Contents/MacOS/Electron\n"
+	h.processes = [][]string{{"/Applications/Visual Studio Code.app/Contents/MacOS/Electron"}}
 	h.rearm()
 	present := h.path("work/kept.code-workspace")
 	h.write("work/kept.code-workspace", "{}\n")

@@ -13,6 +13,7 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -174,5 +175,31 @@ func TestAppendResumeCallKeepsTheTailItCanRead(t *testing.T) {
 				t.Fatalf("appended event = %v, want sessionId %s parentUuid %s", appended, id, parent)
 			}
 		})
+	}
+}
+
+// The live-session guard reads gather's table: a jail process carrying the
+// session id is running, and a jail root never staged holds no process.
+func TestRunningClaudeSessionReadsTheProcessTable(t *testing.T) {
+	const id = "01234567-89ab-cdef-0123-456789abcdef"
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "4242"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	environ := resolve.ClaudeSessionEnv + "=" + id + "\x00"
+	if err := os.WriteFile(filepath.Join(root, "4242", "environ"), []byte(environ), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		root, id string
+		want     bool
+	}{
+		{root: root, id: id, want: true},
+		{root: root, id: "fedcba98-7654-3210-fedc-ba9876543210", want: false},
+		{root: filepath.Join(root, "missing-proc"), id: id, want: false},
+	} {
+		if got, err := runningClaudeSession(tc.root, tc.id); err != nil || got != tc.want {
+			t.Errorf("runningClaudeSession(%s, %s) = %t, %v; want %t", tc.root, tc.id, got, err, tc.want)
+		}
 	}
 }

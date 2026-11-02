@@ -13,6 +13,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/servicemanager"
 )
 
@@ -63,15 +64,11 @@ func (installer *engine) ensureLaunchdLogDir() error {
 
 // launchAgentPath returns where macOS expects a per-user agent to live.
 func (installer *engine) launchAgentPath() string {
-	return filepath.Join(
-		installer.options.Home, "Library", "LaunchAgents", launchdLabel+".plist",
-	)
+	return filepath.Join(paths.LaunchAgentsDir(installer.options.Home), launchdLabel+".plist")
 }
 
 func (installer *engine) mcpLaunchAgentPath() string {
-	return filepath.Join(
-		installer.options.Home, "Library", "LaunchAgents", mcpLaunchdLabel+".plist",
-	)
+	return filepath.Join(paths.LaunchAgentsDir(installer.options.Home), mcpLaunchdLabel+".plist")
 }
 
 // wireLaunchAgent installs the macOS half of the name-sync scheduler.

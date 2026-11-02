@@ -168,6 +168,16 @@ cp "$T/migrate/versions/1.2.0/engine-sync" "$T/published"
 if runsut "$T/migrate-home" ENGINE_SYNC_HOME="$T/migrate" && cmp -s "$T/published" "$T/migrate/versions/1.2.0/engine-sync"; then
   ok "a genuine checksum-verified wrapper release survives host migration"
 else bad "published release migration" "$(cat "$T/out" "$T/err")"; fi
+# With neither sha256 tool on PATH the checksum step names the missing tool, and nothing is retired.
+mkdir -p "$T/nosha"
+for tool in bash go jq mktemp dirname awk find rm cp ln mkdir readlink uname sh cat env cut grep chmod touch rmdir basename sed; do
+  ln -sf "$(command -v "$tool")" "$T/nosha/$tool"
+done
+if ! runsut "$T/migrate-home" ENGINE_SYNC_HOME="$T/migrate" PATH="$T/nosha" &&
+  [ "$(cat "$T/err")" = 'install-engine-sync: neither sha256sum nor shasum on PATH' ] &&
+  cmp -s "$T/published" "$T/migrate/versions/1.2.0/engine-sync"; then
+  ok "a host with neither sha256 tool fails naming both, and keeps the release cache"
+else bad "no sha256 tool" "$(cat "$T/out" "$T/err")"; fi
 printf '#!/bin/sh\necho "engine-sync 1.2.0"\n# host-built\n' > "$T/migrate/versions/1.2.0/engine-sync"
 printf 'operator data\n' > "$T/migrate/versions/1.2.0/personal"
 if runsut "$T/migrate-home" ENGINE_SYNC_HOME="$T/migrate" &&

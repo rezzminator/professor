@@ -2,18 +2,14 @@ package action
 
 import (
 	"context"
-	"os"
-	"path/filepath"
-	"sort"
-	"strconv"
-	"strings"
+	"fmt"
 	"syscall"
 
 	"github.com/rezzminator/professor/pfm/internal/gather"
-	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-// RealProcesses reads the small /proc subset needed by the stray sweep.
+// RealProcesses reads the process subset the stray sweep needs through
+// gather's table: Root "" is the kernel's own, an existing directory a jail.
 type RealProcesses struct {
 	Root string
 }
@@ -21,42 +17,39 @@ type RealProcesses struct {
 func (processes RealProcesses) Processes(
 	ctx context.Context,
 ) ([]Process, error) {
-	root := paths.ProcRootOr(processes.Root)
-	// A root that exists is always honoured — that is how the jail feeds this a
-	// fixture tree. When there is none, the kernel's own table answers instead:
-	// macOS has no /proc, and a stray sweep that could not enumerate processes
-	// would conclude there are no strays.
-	if info, statErr := os.Stat(root); statErr != nil || !info.IsDir() {
-		return nativeProcesses(ctx)
+	// A jail root that does not exist is an error, never the live table: a
+	// stray sweep that could not enumerate processes would conclude there are
+	// no strays.
+	table, err := gather.OpenProcFS(processes.Root)
+	if err != nil {
+		return nil, fmt.Errorf("read process table: %w", err)
 	}
-	table := gather.NewProcFS(root)
-	entries, err := os.ReadDir(root)
+	pids, err := table.PIDs()
 	if err != nil {
 		return nil, err
 	}
-	result := make([]Process, 0)
-	for _, entry := range entries {
+	terminals, ok := table.(gather.ProcTerminals)
+	if !ok {
+		return nil, fmt.Errorf("read process table: %T reports no terminals", table)
+	}
+	ttys, err := terminals.Terminals()
+	if err != nil {
+		return nil, err
+	}
+	result := make([]Process, 0, len(pids))
+	for _, pid := range pids {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		pid, err := strconv.Atoi(entry.Name())
-		if err != nil || pid <= 0 || !entry.IsDir() {
-			continue
-		}
+		// A process whose argv is withheld is not one of ours: the sweep
+		// matches on argv, so it could not have been a target anyway.
 		process, found := scanProcess(table, pid)
 		if !found {
 			continue
 		}
-		if target, err := os.Readlink(
-			filepath.Join(root, entry.Name(), "fd", "0"),
-		); err == nil {
-			process.TTY = strings.TrimPrefix(target, "/dev/")
-		}
+		process.TTY = ttys[pid]
 		result = append(result, process)
 	}
-	sort.Slice(result, func(left, right int) bool {
-		return result[left].PID < result[right].PID
-	})
 	return result, nil
 }
 

@@ -180,9 +180,9 @@ func writeManagerFakes(t *testing.T, systemctlBody, launchctlBody string) (binDi
 }
 
 // assertManagerConsulted proves the sandbox intercepted the platform's real
-// scheduler manager by design (schedulerIsLaunchd, scheduler_darwin.go /
-// scheduler_other.go) rather than by a PATH lookup happening not to find the
-// real binary: on Linux, only systemd may ever be consulted; on Darwin, only
+// scheduler manager by design (the installer's scheduler for
+// servicemanager.Native()) rather than by a PATH lookup happening not to find
+// the real binary: on Linux, only systemd may ever be consulted; on Darwin, only
 // launchd may ever be consulted. wantDarwinConsulted covers the one case
 // that differs across the two platforms — a dry-run preview reaches systemd
 // for plan messaging on Linux (wireUnits' unconditional probe) but reaches

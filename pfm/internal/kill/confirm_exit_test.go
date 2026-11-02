@@ -15,10 +15,9 @@ import (
 )
 
 // TestManagerConfirmExitFailsWhenPaneOutlivesEscalation reproduces the live
-// defect: `chat kill` reported "killed ... closing pane" while the detached
-// finisher's `setsid -f` wrapper exits almost instantly (it forks and
-// returns), so nothing the caller can see ever confirms the pane actually
-// closed. A target whose pane survives graceful close AND both escalations
+// defect: `chat kill` reported "killed ... closing pane" as soon as the
+// detached finisher started, so nothing the caller can see ever confirms the
+// pane actually closed. A target whose pane survives graceful close AND both escalations
 // (kill-pane, kill-server of its OWN socket) must make ConfirmExit report a
 // named error instead of letting the caller print success.
 func TestManagerConfirmExitFailsWhenPaneOutlivesEscalation(t *testing.T) {

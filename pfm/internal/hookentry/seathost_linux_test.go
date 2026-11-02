@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -72,19 +73,19 @@ func init() {
 	}
 	root := os.Getenv("PFM_S3_ROOT")
 	hup := make(chan os.Signal, 1)
-	signal.Notify(hup, syscall.SIGHUP)
+	signal.Notify(hup, syscall.SIGHUP, syscall.SIGINT)
 	if os.Args[0] == "seat-descendant" {
 		if err := os.WriteFile(filepath.Join(root, "descendant-ready"), []byte("ready"), 0o600); err != nil {
 			panic(err)
 		}
-		<-hup
-		if err := os.WriteFile(filepath.Join(root, "descendant-hup"), []byte("HUP"), 0o600); err != nil {
+		sig := <-hup
+		if err := os.WriteFile(filepath.Join(root, "descendant-hup"), []byte(sig.String()), 0o600); err != nil {
 			panic(err)
 		}
 		os.Exit(0)
 	}
 	var child *exec.Cmd
-	if os.Getenv("PFM_S3_MODE") == "hup" {
+	if os.Getenv("PFM_S3_MODE") == "hup" || os.Getenv("PFM_S3_MODE") == "int" {
 		child = exec.Command(os.Getenv("PFM_S3_BINARY"))
 		child.Args = []string{"seat-descendant"}
 		child.Env = os.Environ()
@@ -100,6 +101,18 @@ func init() {
 				panic("descendant not ready")
 			}
 			time.Sleep(time.Millisecond)
+		}
+	}
+	if os.Getenv("PFM_S3_MODE") == "int" {
+		// A job the engine leaves behind in its group, deaf to the forwarded
+		// SIGINT: only the host's final stop of the group ends it.
+		lingering := exec.Command("sh", "-c", `trap "" INT; exec sleep 60`)
+		if err := lingering.Start(); err != nil {
+			panic(err)
+		}
+		pid := []byte(strconv.Itoa(lingering.Process.Pid))
+		if err := os.WriteFile(filepath.Join(root, "lingering-pid"), pid, 0o600); err != nil {
+			panic(err)
 		}
 	}
 	foreground, err := unix.IoctlGetInt(0, unix.TIOCGPGRP)
@@ -187,8 +200,8 @@ func init() {
 		os.Exit(1)
 	}
 	if child != nil {
-		<-hup
-		if err := os.WriteFile(filepath.Join(root, "engine-hup"), []byte("HUP"), 0o600); err != nil {
+		sig := <-hup
+		if err := os.WriteFile(filepath.Join(root, "engine-hup"), []byte(sig.String()), 0o600); err != nil {
 			panic(err)
 		}
 		if err := child.Wait(); err != nil {
@@ -258,7 +271,7 @@ func TestSeatHostPTY(t *testing.T) {
 		os.Exit(SeatHost([]string{id}, os.Stdout, os.Stderr, runtime))
 	}
 	for _, mode := range []string{
-		"exit", "ordinary-stdio", "redirected-stdin", "hup", "launch", "failed-missing-recipe", "failed-malformed-recipe", "failed-missing-executable",
+		"exit", "ordinary-stdio", "redirected-stdin", "hup", "int", "launch", "failed-missing-recipe", "failed-malformed-recipe", "failed-missing-executable",
 		"ledger-on", "ledger-off", "launch-ledger-on", "launch-ledger-off",
 		"reload-failure-locked", "reload-success", "reload-retry", "reload-close", "reload-move-retry", "move-start", "raw-codex", "raw-opencode", "hangup-exit-one",
 		"relay",
@@ -532,7 +545,8 @@ func TestSeatHostPTY(t *testing.T) {
 					}
 				}
 			}
-			if mode == "hup" {
+			if mode == "hup" || mode == "int" {
+				sent := map[string]syscall.Signal{"hup": syscall.SIGHUP, "int": syscall.SIGINT}[mode]
 				deadline := time.NewTimer(8 * time.Second)
 				defer deadline.Stop()
 				tick := time.NewTicker(time.Millisecond)
@@ -551,7 +565,7 @@ func TestSeatHostPTY(t *testing.T) {
 						}
 					}
 				}
-				if err := command.Process.Signal(syscall.SIGHUP); err != nil {
+				if err := command.Process.Signal(sent); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -672,12 +686,32 @@ func TestSeatHostPTY(t *testing.T) {
 			if err != nil || len(files) != 0 {
 				t.Fatalf("ended recipes=%v err=%v", files, err)
 			}
-			if mode == "hup" {
+			if mode == "hup" || mode == "int" {
+				// The host forwards the signal it received to the engine's whole group.
+				want := map[string]string{"hup": "hangup", "int": "interrupt"}[mode]
 				for _, name := range []string{"engine-hup", "descendant-hup"} {
 					body, err := os.ReadFile(filepath.Join(root, name))
-					if err != nil || strings.TrimSpace(string(body)) != "HUP" {
-						t.Fatalf("%s=%q err=%v", name, body, err)
+					if err != nil || string(body) != want {
+						t.Fatalf("%s=%q err=%v, want %q", name, body, err, want)
 					}
+				}
+			}
+			if mode == "int" {
+				raw, err := os.ReadFile(filepath.Join(root, "lingering-pid"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				pid, err := strconv.Atoi(string(raw))
+				if err != nil {
+					t.Fatalf("lingering-pid %q: %v", raw, err)
+				}
+				t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
+				deadline := time.Now().Add(5 * time.Second)
+				for !errors.Is(syscall.Kill(pid, 0), syscall.ESRCH) {
+					if time.Now().After(deadline) {
+						t.Fatalf("job %d the engine left in its group outlived the host's final stop", pid)
+					}
+					time.Sleep(20 * time.Millisecond)
 				}
 			}
 		})

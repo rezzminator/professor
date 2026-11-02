@@ -71,7 +71,7 @@ func TestGlobalWiringWritesTheStoreForThreeAccounts(t *testing.T) {
 	home := t.TempDir()
 	var output bytes.Buffer
 	installer, first, _ := globalFanoutEngine(t, home, true, &output)
-	assets, err := assetFiles()
+	assets, err := assetFiles(nativeScheduler())
 	if err != nil {
 		t.Fatalf("assetFiles: %v", err)
 	}
@@ -240,7 +240,7 @@ func TestGlobalWiringDryRunPlansTheStore(t *testing.T) {
 	home := t.TempDir()
 	var output bytes.Buffer
 	installer, first, _ := globalFanoutEngine(t, home, false, &output)
-	assets, err := assetFiles()
+	assets, err := assetFiles(nativeScheduler())
 	if err != nil {
 		t.Fatalf("assetFiles: %v", err)
 	}

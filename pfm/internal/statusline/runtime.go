@@ -233,7 +233,6 @@ func (runtime Runtime) normalized() Runtime {
 	if runtime.TmuxDir == "" {
 		runtime.TmuxDir = paths.TmuxDirOf(runtime.CacheDir, runtime.UID)
 	}
-	runtime.ProcRoot = paths.ProcRootOr(runtime.ProcRoot)
 	if runtime.Command == nil {
 		runtime.Command = commandRunner{}
 	}

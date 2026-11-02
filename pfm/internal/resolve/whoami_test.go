@@ -15,6 +15,7 @@ import (
 	"time"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
@@ -72,8 +73,8 @@ func (proc fakeParentProcFS) Environ(int) (map[string]string, error) {
 	return map[string]string{}, nil
 }
 
-func (proc fakeParentProcFS) Stat(int) (ProcStat, error) {
-	return ProcStat{ParentPID: proc.parent}, nil
+func (proc fakeParentProcFS) Stat(int) (gather.ProcStat, error) {
+	return gather.ProcStat{ParentPID: proc.parent}, nil
 }
 
 func TestProcTreeParentUsesInjectedProcFS(t *testing.T) {
@@ -615,7 +616,7 @@ func TestIdentifyPreservesAncestryEnvironmentReadFailure(t *testing.T) {
 type environmentForeignTree struct{ fakeProcTree }
 
 func (environmentForeignTree) Environ(int) (map[string]string, error) {
-	return nil, fmt.Errorf("%w: %w", ErrForeignProcess, os.ErrPermission)
+	return nil, fmt.Errorf("%w: %w", gather.ErrForeignProcess, os.ErrPermission)
 }
 
 // An ssh login's ancestry crosses sshd's non-dumpable session; that ancestor is no pane of the caller's.

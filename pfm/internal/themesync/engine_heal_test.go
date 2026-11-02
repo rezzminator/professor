@@ -186,7 +186,7 @@ func TestSyncReappliesOnlyTheDriftedSurfaceAndRewritesNoState(t *testing.T) {
 	if err := os.Chtimes(h.path(".local/state/pfm/theme/current.json"), minuteAgo, minuteAgo); err != nil {
 		t.Fatal(err)
 	}
-	h.psVscode = "/Applications/Visual Studio Code.app/Contents/MacOS/Electron\n"
+	h.processes = [][]string{{"/Applications/Visual Studio Code.app/Contents/MacOS/Electron"}}
 	h.rearm()
 	// An ack left at another generation while VS Code runs is the one drift.
 	h.ackVscode(9)

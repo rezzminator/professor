@@ -18,7 +18,6 @@ import (
 	"testing"
 
 	harnessprompts "github.com/rezzminator/professor/pfm/harness-prompts"
-	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -676,31 +675,6 @@ func CleanHome(t *testing.T, dirs []string, files map[string]string) config.Runt
 	return loadedRuntime
 }
 
-// PTYCommand builds a command that runs argv on a REAL pty via script(1), for
-// behaviour that only happens on a terminal.
-//
-// The two script(1) implementations disagree about their own argv. util-linux
-// takes the command through -c and the typescript file LAST; BSD (macOS) takes
-// the typescript file FIRST and then the command and its arguments directly,
-// with no -c and no -f. Handing Linux's form to the BSD binary prints a usage
-// message and exits — and a test that then writes to its stdin fails with
-// "broken pipe", which reads as the code under test closing the pipe rather
-// than as the harness being wrong about the platform.
-func PTYCommand(argv ...string) *exec.Cmd {
-	scriptBinary, err := deps.Resolve("script")
-	if err != nil {
-		scriptBinary = "script"
-	}
-	if runtime.GOOS == "linux" {
-		quoted := make([]string, len(argv))
-		for index, argument := range argv {
-			quoted[index] = cmdparse.Quote(argument)
-		}
-		return exec.Command(scriptBinary, "-qefc", strings.Join(quoted, " "), "/dev/null")
-	}
-	return exec.Command(scriptBinary, append([]string{"-qe", "/dev/null"}, argv...)...)
-}
-
 // pinGoDirs sets GOCACHE, GOPATH, GOMODCACHE and TEST_TELEMETRY_DIR — each only
 // when unset — outside the jail, so a `go` child spawned under a jailed
 // HOME/XDG_CONFIG_HOME never writes into the jail. Returns a non-zero exit code
@@ -796,4 +770,16 @@ func StageClaudePlugins(t *testing.T, store string, ids []string) {
 			t.Fatal(err)
 		}
 	}
+}
+
+// PTYCommand builds a command that runs argv on a REAL pty via script(1), for
+// behaviour that only happens on a terminal. A script(1) that cannot be
+// resolved is the deps.Resolve error, never a bare name left to fail later.
+func PTYCommand(argv ...string) (*exec.Cmd, error) {
+	scriptBinary, err := deps.Resolve("script")
+	if err != nil {
+		return nil, err
+	}
+	scriptArgv := ptyScriptArgv(scriptBinary, argv)
+	return exec.Command(scriptArgv[0], scriptArgv[1:]...), nil
 }

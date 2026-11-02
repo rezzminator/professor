@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	goruntime "runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -348,7 +347,13 @@ func LiveDeps(runtime config.Runtime, warn io.Writer, spare []int, launchedFrom 
 	if err != nil {
 		fmt.Fprintf(warn, "pfm restart: resolve this binary (pfm processes are matched by name only): %v\n", err)
 	}
-	services := nativeServiceManager(goruntime.GOOS, runner, clock.Real, runtime.Paths.Home, servicemanager.UID())
+	services := nativeServiceManager(
+		servicemanager.Native(),
+		runner,
+		clock.Real,
+		runtime.Paths.Home,
+		servicemanager.UID(),
+	)
 	dependencies := Deps{
 		Runner:       runner,
 		Procs:        gather.NewProcFS(runtime.Paths.ProcRoot),

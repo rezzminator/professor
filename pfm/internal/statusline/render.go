@@ -510,14 +510,11 @@ func fleetCountsWithError(runtime Runtime) (map[pfmengine.ID]int, error) {
 			counts[id]++
 		}
 	}
-	if body, err := os.ReadFile(filepath.Join(runtime.ProcRoot, "net", "unix")); err == nil {
+	// The kernel's socket table counts only bound, live servers; where it
+	// cannot be read (macOS publishes none) the socket directory answers.
+	if sockets, err := gather.UnixSockets(runtime.ProcRoot); err == nil {
 		seen := map[string]bool{}
-		for _, line := range strings.Split(string(body), "\n") {
-			fields := strings.Fields(line)
-			if len(fields) < 8 {
-				continue
-			}
-			path := fields[len(fields)-1]
+		for _, path := range sockets {
 			if filepath.Clean(filepath.Dir(path)) != filepath.Clean(runtime.TmuxDir) {
 				continue
 			}

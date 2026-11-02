@@ -131,6 +131,16 @@ func TestServicePathIsTheOneServiceSearchPath(t *testing.T) {
 	}
 }
 
+// The per-user service unit directories are spelled once, under home.
+func TestServiceUnitDirsHangOffHome(t *testing.T) {
+	if got := LaunchAgentsDir("/h"); got != "/h/Library/LaunchAgents" {
+		t.Fatalf("LaunchAgentsDir(/h) = %q, want /h/Library/LaunchAgents", got)
+	}
+	if got := SystemdUserDir("/h"); got != "/h/.config/systemd/user" {
+		t.Fatalf("SystemdUserDir(/h) = %q, want /h/.config/systemd/user", got)
+	}
+}
+
 // The state and cache databases have distinct names in the pfm state directory.
 func TestResolveStateAndCacheDefaults(t *testing.T) {
 	testRoot := t.TempDir()

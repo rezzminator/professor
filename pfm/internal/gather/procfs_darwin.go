@@ -30,9 +30,9 @@ import (
 // returns an error here and is SKIPPED by the detectors, which is the correct
 // outcome: it is not a chat.
 type DarwinProcFS struct {
-	residentOnce sync.Once
-	resident     map[int]int64
-	residentErr  error
+	snapshotOnce sync.Once
+	snapshot     map[int]psRow
+	snapshotErr  error
 }
 
 // NewDarwinProcFS returns a process table reader for macOS. It carries a small
@@ -137,53 +137,51 @@ func (proc *DarwinProcFS) Birth(pid int) (int64, error) {
 // RSSKB returns a process's resident set size in kilobytes.
 //
 // The kernel does not carry usable resident memory in kinfo_proc — that lives
-// behind task_info, which needs cgo — so this shells out to ps ONCE and keeps
-// the whole table. The reaper sums a process subtree, so the alternative was a
-// fork per pid; one snapshot is also more honest, because every pid in a
-// subtree is then measured at the same instant.
+// behind task_info, which needs cgo — so it comes from the table's one ps
+// snapshot. The reaper sums a process subtree, so the alternative was a fork
+// per pid; one snapshot is also more honest, because every pid in a subtree is
+// then measured at the same instant.
 func (proc *DarwinProcFS) RSSKB(pid int) (int64, error) {
-	proc.residentOnce.Do(proc.loadResident)
-	if proc.residentErr != nil {
-		return 0, proc.residentErr
+	rows, err := proc.rows()
+	if err != nil {
+		return 0, fmt.Errorf("sample resident memory: %w", err)
 	}
-	kilobytes, found := proc.resident[pid]
-	if !found {
+	row, found := rows[pid]
+	if !found || row.rssUnknown {
 		return 0, fmt.Errorf("no resident size for pid %d", pid)
 	}
-	return kilobytes, nil
+	return int64(row.counter.RSSBytes / 1024), nil
 }
 
-func (proc *DarwinProcFS) loadResident() {
-	ps, err := deps.Resolve("ps")
+// Terminals maps pids to their controlling terminal from the table's one ps
+// snapshot, which prints the short form ("ttys001"); a process without one has
+// no entry. A snapshot that could not run is an error, never a table of no
+// terminals.
+func (proc *DarwinProcFS) Terminals() (map[int]string, error) {
+	rows, err := proc.rows()
 	if err != nil {
-		proc.residentErr = fmt.Errorf("sample resident memory: resolve ps: %w", err)
-		return
+		return nil, fmt.Errorf("map controlling terminals: %w", err)
 	}
-	result, err := obs.Runner(deps.RealRunner{}).Run(
-		context.Background(),
-		[]string{ps, "-A", "-o", "pid=,rss="},
-		deps.RunOptions{},
-	)
-	if err == nil && result.ExitCode != 0 {
-		err = fmt.Errorf("exit status %d", result.ExitCode)
-	}
-	if err != nil {
-		proc.residentErr = fmt.Errorf("sample resident memory via ps: %w", err)
-		return
-	}
-	output := result.Stdout
-	proc.resident = make(map[int]int64)
-	for _, line := range strings.Split(string(output), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) != 2 {
-			continue
-		}
-		pid, pidErr := strconv.Atoi(fields[0])
-		kilobytes, sizeErr := strconv.ParseInt(fields[1], 10, 64)
-		if pidErr == nil && sizeErr == nil {
-			proc.resident[pid] = kilobytes
+	terminals := make(map[int]string)
+	for pid, row := range rows {
+		if row.tty != "" {
+			terminals[pid] = row.tty
 		}
 	}
+	return terminals, nil
+}
+
+// rows is the table's one ps snapshot, taken on first use.
+func (proc *DarwinProcFS) rows() (map[int]psRow, error) {
+	proc.snapshotOnce.Do(func() {
+		var output string
+		output, proc.snapshotErr = runPSSnapshot()
+		if proc.snapshotErr != nil {
+			return
+		}
+		proc.snapshot, proc.snapshotErr = snapshotTable(output)
+	})
+	return proc.snapshot, proc.snapshotErr
 }
 
 // FDLinks returns a process's numeric file descriptors and their targets.

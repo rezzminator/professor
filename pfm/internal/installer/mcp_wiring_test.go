@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/servicemanager"
 )
 
 const chatRegistrationName = "chat-professor"
@@ -97,9 +99,6 @@ func TestMCPSystemdUnitStartsAtLogin(t *testing.T) {
 
 func TestMCPWireFailureStillRefreshesRunningLinuxDaemon(t *testing.T) {
 	t.Parallel()
-	if schedulerIsLaunchd {
-		t.Skip("Linux systemd daemon refresh")
-	}
 	home := t.TempDir()
 	codexHome := filepath.Join(home, ".codex")
 	codexConfig := filepath.Join(codexHome, "config.toml")
@@ -112,7 +111,8 @@ func TestMCPWireFailureStillRefreshesRunningLinuxDaemon(t *testing.T) {
 	runner := &fakeRunner{manager: true}
 	installer := engine{
 		options: Options{
-			Mode: ModeApply, Home: home, ConfigDir: filepath.Join(home, ".claude"),
+			scheduler: schedulerFor(servicemanager.KindSystemd),
+			Mode:      ModeApply, Home: home, ConfigDir: filepath.Join(home, ".claude"),
 			MCPEnabled: map[string]bool{"chat": true}, MCPPort: 8377, CodexHomes: []string{codexHome},
 			MCPConfigPath: testConfigPath(t), Runner: runner, Stdout: io.Discard,
 			Sleep: func(time.Duration) {},

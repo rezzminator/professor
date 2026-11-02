@@ -75,11 +75,7 @@ func Run(ctx context.Context, options Options) (report Report, err error) {
 		if gateErr != nil {
 			return Report{}, gateErr
 		}
-		if !probed && schedulerIsLaunchd {
-			options.launchGateUnprobed = true
-		} else if !probed {
-			options.nameSyncGateUnprobed = true
-		}
+		options.schedulerGateUnprobed = !probed
 	}
 
 	installer := &engine{
@@ -228,7 +224,7 @@ func (installer *engine) install(ctx context.Context) error {
 	vscodeThemes, err := installer.writeVSCodeThemes(installer.renderVSCodeThemes())
 	installer.deferFailure(err)
 	installer.vscodeThemes = vscodeThemes
-	assets, err := assetFiles()
+	assets, err := assetFiles(installer.options.jobScheduler())
 	if err != nil {
 		return fmt.Errorf("enumerate embedded install assets: %w", err)
 	}
@@ -266,43 +262,11 @@ func (installer *engine) install(ctx context.Context) error {
 	if len(installer.codexHomes()) != 0 {
 		installer.deferFailure(installer.wireCodexDefaults())
 	}
-	// The periodic name-sync has one job and two schedulers. Linux gets the
-	// systemd units; macOS gets a launchd agent that carries both triggers.
-	// Staging the other platform's files would leave an operator with a
-	// ~/.config/systemd/user full of units nothing will ever read.
-	if schedulerIsLaunchd {
-		if installer.apply {
-			if installer.options.launchGateUnprobed {
-				installer.skip(launchGateUnprobedNote)
-			} else {
-				installer.ok("launch-agent gate: name-sync is not mid-execution")
-			}
-		}
-		installer.deferFailure(installer.ensureLaunchdLogDir())
-		installer.deferFailure(installer.wireLaunchAgent(ctx))
-		installer.deferFailure(installer.wireScheduleLaunchAgent(ctx))
-		installer.deferFailure(installer.wireMCPLaunchAgent(ctx))
-		installer.deferFailure(installer.refreshThemeFollower(ctx))
-	} else {
-		if installer.apply && installer.options.nameSyncGateUnprobed {
-			installer.skip(nameSyncGateUnprobedNote)
-		}
-		unitChanged, err := installer.wireUnits(ctx)
-		installer.deferFailure(err)
-		reload := systemdAssetChanged || unitChanged
-		if !reload && installer.apply {
-			for _, unit := range []string{nameSyncPathUnit, nameSyncTimerUnit, scheduleTimerUnit} {
-				state, err := fleetUnitState(ctx, installer.options.Runner, unit)
-				if err != nil || state != unitStateActive {
-					reload = true
-					break
-				}
-			}
-		}
-		if reload {
-			installer.reloadUnits(ctx)
-		}
-	}
+	// The periodic name-sync has one job and two schedulers: systemd units or
+	// a launchd agent that carries both triggers. Staging the other
+	// scheduler's files would leave an operator with a ~/.config/systemd/user
+	// full of units nothing will ever read.
+	installer.options.jobScheduler().wire(ctx, installer, systemdAssetChanged)
 	// A failed plugin install is reported at once and fails the run only
 	// after every later step has landed.
 	installer.deferFailure(installer.ensureExtensions(ctx, false))
@@ -314,17 +278,7 @@ func (installer *engine) install(ctx context.Context) error {
 	installer.retireStateDirs()
 	installer.expireStateBackups()
 	mcpErr := installer.wireMCP()
-	// A host build replaces the binary without changing the unit file, and MCP
-	// client wiring can change without changing either. enable --now leaves an
-	// already-running process untouched, so always restart the enabled Linux
-	// daemon after its complete config/client transaction has landed.
-	// A restart that does not come back fails the run after every later step
-	// has landed, like a failed plugin install.
-	if !schedulerIsLaunchd && installer.apply &&
-		installer.options.MCPEnabled[chatName] &&
-		installer.userManagerAvailable(ctx) {
-		installer.deferFailure(installer.restartMCPUnit(ctx))
-	}
+	installer.options.jobScheduler().refreshMCPDaemon(ctx, installer)
 	installer.deferFailure(mcpErr)
 	installer.deferFailure(installer.wireOpenCodeInstructions())
 	installer.deferFailure(installer.wireOpenCodeEngineGuard())
@@ -613,7 +567,7 @@ func (installer *engine) uninstall(ctx context.Context) error {
 	if err := installer.removeRumdlUserConfig(); err != nil {
 		return err
 	}
-	assets, err := assetFiles()
+	assets, err := assetFiles(installer.options.jobScheduler())
 	if err != nil {
 		return fmt.Errorf("enumerate embedded install assets: %w", err)
 	}
@@ -649,52 +603,40 @@ func (installer *engine) uninstall(ctx context.Context) error {
 	installer.deferFailure(installer.wireEngineSyncGlobal(nil))
 	installer.deferFailure(installer.retireEngineSyncFile())
 	installer.deferFailure(installer.unwireEngineSyncPathLink())
-	if schedulerIsLaunchd {
-		if err := installer.unwireLaunchAgent(ctx); err != nil {
-			return err
-		}
-		if err := installer.unwireScheduleLaunchAgent(ctx); err != nil {
-			return err
-		}
+	if err := installer.options.jobScheduler().unwireAgents(ctx, installer); err != nil {
+		return err
 	}
 	// Last, on every OS: the theme follower's agent went with `pfm theme off`
 	// above, and `pfm theme` stages the launcher wherever it runs.
 	if err := installer.unwireAgentLauncher(); err != nil {
 		return err
 	}
-	managerAvailable := installer.userManagerAvailable(ctx)
+	managerAvailable := installer.options.jobScheduler().managerAvailable(ctx, installer)
 	if managerAvailable && installer.apply {
 		installer.runSystemctl(
 			ctx, "disable", "--now", nameSyncPathUnit, nameSyncTimerUnit, scheduleTimerUnit, mcpUnitName,
 		)
 	}
 	if _, err := installer.retireUnitEnablements(
-		filepath.Join(installer.options.Home, ".config", "systemd", "user"),
+		paths.SystemdUserDir(installer.options.Home),
 		installer.retiredUnitNames(),
 	); err != nil {
 		return err
 	}
 	if _, err := installer.retireRenamedUnits(
-		ctx, filepath.Join(installer.options.Home, ".config", "systemd", "user"), managerAvailable,
+		ctx, paths.SystemdUserDir(installer.options.Home), managerAvailable,
 	); err != nil {
 		return err
 	}
 	for _, enablement := range unitEnablements {
-		target := filepath.Join(
-			installer.options.Home,
-			".config",
-			"systemd",
-			"user",
-			enablement.wants,
-			enablement.unit,
-		)
+		target := filepath.Join(paths.SystemdUserDir(installer.options.Home), enablement.wants, enablement.unit)
 		if err := installer.unlinkOne(target); err != nil {
 			return err
 		}
 	}
 	for _, name := range append(append([]string(nil), unitNames...), mcpUnitName) {
 		if err := installer.unlinkOne(
-			filepath.Join(installer.options.Home, ".config", "systemd", "user", name),
+			filepath.Join(paths.SystemdUserDir(installer.options.Home), name),
 		); err != nil {
 			return err
 		}
@@ -1276,7 +1218,7 @@ func (installer *engine) retireRenamedUnits(
 }
 
 func (installer *engine) wireUnits(ctx context.Context) (bool, error) {
-	directory := filepath.Join(installer.options.Home, ".config", "systemd", "user")
+	directory := paths.SystemdUserDir(installer.options.Home)
 	installer.say("systemd user units -> %s", directory)
 	managerAvailable := installer.userManagerAvailable(ctx)
 	changed := false

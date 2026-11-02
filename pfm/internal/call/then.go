@@ -217,8 +217,6 @@ func (engine *Engine) waitForQuietTypist(
 type CommandThenSpawner struct {
 	Executable string
 	ConfigPath string
-	Setsid     string
-	Nohup      string
 	// Runner is the deps.Runner seam Spawn launches the waiter through; nil
 	// defaults to obs.Runner(deps.RealRunner{}).
 	Runner deps.Runner
@@ -263,12 +261,6 @@ func (spawner CommandThenSpawner) Spawn(
 	for _, steer := range request.Steers {
 		arguments = append(arguments, "--steer", steer)
 	}
-	launcher, prefixArgs, forked, err := deps.DetachLauncher(spawner.Setsid, spawner.Nohup)
-	if err != nil {
-		return fmt.Errorf("detach then waiter: %w", err)
-	}
-	usingNohup := !forked
-	arguments = append(prefixArgs, arguments...)
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -318,16 +310,9 @@ func (spawner CommandThenSpawner) Spawn(
 	if runner == nil {
 		runner = obs.Runner(deps.RealRunner{})
 	}
-	opts := deps.StartOptions{
-		Env:    env,
-		Stdout: log,
-		Stderr: log,
-		// The nohup floor detaches by releasing the process handle right
-		// after Start (deps.StartOptions' Detach shape); the setsid launcher
-		// already forks and returns on its own (setsid -f), so Spawn waits
-		// on it exactly as it waited on command.Run() before this seam.
-		Detach: usingNohup,
-	}
+	// The waiter outlives this caller in a session of its own; the runner
+	// reaps it in the background, so Release only gives up the handle.
+	opts := deps.StartOptions{Env: env, Stdout: log, Stderr: log, Detach: true}
 	// The armed record goes down BEFORE the waiter starts, so a schedule
 	// racing this one already sees the pane armed; a chain hop (Append) is
 	// the same arming and leaves the record to the hop that owns it.
@@ -340,26 +325,17 @@ func (spawner CommandThenSpawner) Spawn(
 			return err
 		}
 	}
-	process, err := runner.Start(ctx, append([]string{launcher}, arguments...), opts)
+	process, err := runner.Start(ctx, arguments, opts)
 	if err != nil {
 		if !request.Append && request.LogPath != "" {
 			if removeErr := os.Remove(armedPathFor(request.LogPath)); removeErr != nil {
 				err = errors.Join(err, fmt.Errorf("remove armed steer record after a failed start: %w", removeErr))
 			}
 		}
-		if usingNohup {
-			return fmt.Errorf("start detached then waiter with nohup: %w", err)
-		}
-		return fmt.Errorf("start detached then waiter with setsid: %w", err)
+		return fmt.Errorf("start detached then waiter: %w", err)
 	}
-	if usingNohup {
-		if err := process.Release(); err != nil {
-			return fmt.Errorf("release detached then waiter: %w", err)
-		}
-		return nil
-	}
-	if err := process.Wait(); err != nil {
-		return fmt.Errorf("start detached then waiter with setsid: %w", err)
+	if err := process.Release(); err != nil {
+		return fmt.Errorf("release detached then waiter: %w", err)
 	}
 	return nil
 }

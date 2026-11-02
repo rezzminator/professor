@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -682,36 +681,24 @@ func removeRoleSeatPrompt(sidDir, socket string) error {
 
 // availableKB reads the machine's own available memory, which is the only
 // honest measure of what a reap reclaimed — summed RSS double-counts the
-// runtime pages several node processes share. meminfo not existing at all —
-// no /proc on this platform, or a jail fixture that never staged one — is a
-// genuine absence: (0, nil). Any other read or parse failure is returned,
-// never folded into that same 0: a probe that could not run must not render
-// identically to "0 KB available", the one number here that would itself be
-// alarming.
+// runtime pages several node processes share. A memory source not existing at
+// all — no /proc on this platform, or a jail fixture that never staged one —
+// is a genuine absence: (0, nil). Any other read or parse failure is
+// returned, never folded into that same 0: a probe that could not run must
+// not render identically to "0 KB available", the one number here that would
+// itself be alarming.
 func (runner *Runner) availableKB() (int64, error) {
-	path := filepath.Join(runner.paths.ProcRoot, "meminfo")
-	content, err := os.ReadFile(path)
+	memory, err := gather.HostMemory(runner.paths.ProcRoot)
 	if errors.Is(err, fs.ErrNotExist) {
 		return 0, nil
 	}
 	if err != nil {
-		return 0, fmt.Errorf("read %s: %w", path, err)
+		return 0, err
 	}
-	for _, line := range strings.Split(string(content), "\n") {
-		if !strings.HasPrefix(line, "MemAvailable:") {
-			continue
-		}
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			return 0, fmt.Errorf("parse MemAvailable line %q in %s", line, path)
-		}
-		value, err := strconv.ParseInt(fields[1], 10, 64)
-		if err != nil {
-			return 0, fmt.Errorf("parse MemAvailable value in %s: %w", path, err)
-		}
-		return value, nil
+	if memory.AvailableErr != nil {
+		return 0, memory.AvailableErr
 	}
-	return 0, fmt.Errorf("no MemAvailable line in %s", path)
+	return int64(memory.AvailableKB), nil
 }
 
 // sessionIDFromPath reads the session id out of a transcript pathname.

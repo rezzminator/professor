@@ -261,14 +261,14 @@ func TestVSCodeDarwinUsesTheOSXTerminalKeysAndUserSettingsPath(t *testing.T) {
 	t.Parallel()
 	home := vscodeLawHome(t)
 	settings := filepath.Join(home, "Library", "Application Support", "Code", "User", "settings.json")
-	paths := (&engine{options: Options{Home: home, vscodePlatform: "darwin"}}).vscodeSettingsPaths()
+	paths := (&engine{options: Options{Home: home, vscodePlatform: vscodePlatformOSX}}).vscodeSettingsPaths()
 	if len(paths) != 1 || paths[0] != settings {
 		t.Fatalf("darwin settings paths=%q, want %q", paths, settings)
 	}
 	if _, err := Run(context.Background(), Options{
 		MCPConfigPath: testConfigPath(t),
 		Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, VSCode: true,
-		vscodePlatform: "darwin", vscodeSettingsPaths: []string{settings},
+		vscodePlatform: vscodePlatformOSX, vscodeSettingsPaths: []string{settings},
 	}); err != nil {
 		t.Fatal(err)
 	}

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/servicemanager"
 )
 
 func TestUnitStateRunningReadsEveryState(t *testing.T) {
@@ -37,9 +39,6 @@ func TestVerifyFleetUnitsActiveNamesUnreadableState(t *testing.T) {
 
 func TestInstallReportsMCPRestartThatDoesNotComeBack(t *testing.T) {
 	t.Parallel()
-	if schedulerIsLaunchd {
-		return
-	}
 	want := "fleet unit pfm-mcp.service is failed 3s after start — journalctl --user -u pfm-mcp.service -n 20"
 	for _, laterFails := range []bool{false, true} {
 		t.Run(fmt.Sprintf("later step fails=%v", laterFails), func(t *testing.T) {
@@ -49,6 +48,7 @@ func TestInstallReportsMCPRestartThatDoesNotComeBack(t *testing.T) {
 			var output bytes.Buffer
 			settled := time.Duration(0)
 			_, err := Run(context.Background(), Options{
+				scheduler:     schedulerFor(servicemanager.KindSystemd),
 				MCPConfigPath: testConfigPath(t),
 				Mode:          ModeApply, Home: home, Runner: runner, Stdout: &output,
 				MCPEnabled: map[string]bool{"chat": true},

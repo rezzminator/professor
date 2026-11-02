@@ -58,6 +58,10 @@ func TestIdentifiedLiveOpenCodeAbsorbsItsResumeRow(t *testing.T) {
 	if row.Name != "live one" || row.CWD != "/work/a" || row.Project != "a" {
 		t.Fatalf("row = %+v, want the indexed session's name and directory", row)
 	}
+	// The title was read from OpenCode's store: an automatic one, no user's.
+	if row.UserName != "" || !row.UserNameKnown {
+		t.Fatalf("UserName = %q known=%t, want \"\" read from the store", row.UserName, row.UserNameKnown)
+	}
 	if row.ServerCount != 1 {
 		t.Fatalf("ServerCount = %d, want 1", row.ServerCount)
 	}

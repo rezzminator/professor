@@ -748,7 +748,8 @@ describe("preflight S1, D1, T1", { concurrency: availableParallelism() }, () => 
       "CHANGELOG.md": "- dropped scripts/old.sh\n",
       ".professor/RR/notes.md": "old-agent\n",
       "pfm/internal/update/retired_names.go": "// old-agent retired\n",
-      "docs/live.md": "the old-agentx tool, the old-agent-sonnet role, scripts/old.sh.bak and scripts/old.shell\n",
+      "pfm/internal/update/retired_names_table.go": "// old-agent and scripts/old.sh retired\n",
+      "docs/live.md": "the old-agentx tool, the old-agent-sonnet role, the old-agent:use command, scripts/old.sh.bak and scripts/old.shell\n",
     }, "remove old.sh and old-agent");
     const check = async (files) => {
       if (files) await commit(r0, files, "more");
@@ -767,10 +768,11 @@ describe("preflight S1, D1, T1", { concurrency: availableParallelism() }, () => 
     ])
       assert.ok(r.out.split("\n").includes(line), `missing line ${JSON.stringify(line)}:\n${r.out}`);
   });
-  test("S1 a live file still names a removed path", async () => {
-    const r = await (await fixture()).check({ "docs/run.md": "intro\nrun scripts/old.sh first\n" });
+  test("S1 a live file still names a removed path or role", async () => {
+    const r = await (await fixture()).check({ "docs/run.md": "intro\nrun scripts/old.sh first\nold-agent: the old role\n" });
     assertFail(r, "S1");
     assert.match(r.out, /^FAIL S1: docs\/run\.md:2 — names the removed path scripts\/old\.sh$/m, r.out);
+    assert.match(r.out, /^FAIL S1: docs\/run\.md:3 — names the removed agent old-agent$/m, r.out);
   });
   test("S1 a design doc's history section is no exemption", async () => {
     const r = await (await fixture()).check({ "docs/design/x/x.md": "## History\n\nold-agent was retired\n" });

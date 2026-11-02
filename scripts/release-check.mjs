@@ -912,8 +912,7 @@ const SEAM_EXCLUDES = [
   "releases/",
   "CHANGELOG.md",
   ".professor/RR/",
-  "pfm/internal/update/retired_names.go",
-  "pfm/internal/update/retired_names_test.go",
+  "pfm/internal/update/retired_names*.go",
 ].map((p) => `:(top,exclude)${p}`);
 
 // The roots whose files are commands and skills a README line may name.
@@ -962,10 +961,11 @@ function seamRule(cwd, base, head, info) {
     for (const hit of hits)
       for (const t of tokens) {
         // A hyphen joins a longer name (flights-lander-sonnet is not
-        // flights-lander); a path continues through a further segment or
+        // flights-lander), and so does a colon before a name character
+        // (/x:use is not /x); a path continues through a further segment or
         // extension (scripts/old.sh.bak, scripts/old.shell are not scripts/old.sh).
         const named = words
-          ? new RegExp(`(?<![A-Za-z0-9_-])${reEscape(t)}(?![A-Za-z0-9_-])`).test(hit.text)
+          ? new RegExp(`(?<![A-Za-z0-9_-])${reEscape(t)}(?![A-Za-z0-9_-]|:[A-Za-z0-9_])`).test(hit.text)
           : new RegExp(`(?<![A-Za-z0-9_.-])${reEscape(t)}(?![A-Za-z0-9_/-]|\\.[A-Za-z0-9])`).test(hit.text);
         if (named) fails.push(fail("S1", `${hit.path}:${hit.line}`, `names the removed ${what(t)}`));
       }

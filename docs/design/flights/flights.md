@@ -32,7 +32,7 @@ Reading is the cost; writing is the product. The family raises the ratio three w
 
 - **One builder reads once.** The foreman reads what the build needs and writes the change itself; a child exists only for an area disjoint from its own.
 - **A big reading may go to a tracer once.** The answer is reused while its files are unchanged.
-- **Review and the full gate run once per worktree.** They happen at the very end, inside one lander, whose cheap children read what it spawns them for.
+- **Review and the full gate run once per worktree.** They happen at the very end, inside one lander, whose cheap children read what it spawns them for. Small work, every edit fixed in advance, has no lander.
 
 ## Why the foreman builds by its own hand
 
@@ -74,7 +74,7 @@ flight abandoned without merge -> writers stopped -> main chat -> gitter close
 ```
 
 1. **Settle.** The main chat settles open requirements with the user before any dispatch.
-2. **Place.** The main chat has gitter make the worktree, or names `develop` or the checkout, and passes the path in the brief. Several foremen may share one worktree on separate areas.
+2. **Place.** The main chat has gitter make the worktree, or names `develop` or the checkout, and passes the path in the brief. Several foremen may share one worktree on separate areas. Size is the judgment left in the edits, never the file count: work whose every edit is fixed in advance (a rename, a move, a known fix, a spec fixing every line), with no other agent writing its files, is small at any file count and skips the flight (`templates/global/rules/flights-life-cycle.md` rule 2).
 3. **Build.** A foreman builds the request by its own hand.
    - **Reads:** what the build needs; see [reading](#reading-and-the-trace-store).
    - **Writes:** the whole change, then runs the affected tests once, never after each edit; a fix's regression test runs red first.
@@ -153,7 +153,8 @@ In the build/land lifecycle:
 
 - **Who runs what:**
   - a foreman runs the affected tests once its change is whole, never after each edit; a fix's regression test runs red first;
-  - only the lander runs the full gate, once per worktree right before its merge, after every review finding is fixed and the affected tests are green.
+  - on a flight, only the lander runs the full gate, once per worktree right before its merge, after every review finding is fixed and the affected tests are green;
+  - on small work, the main chat runs the full gate when the change spans layers or the project's done-gate requires it, then hands gitter the passing check.
 - **A red full gate:** the lander fixes it, gets the failing tests green with the affected-test command, never a gate rerun, then runs that gate once more. That is the only repeat.
 - **The testing manual:** a project's testing manual, where one exists (this repo's `.claude/commands/pfm-testing-manual.md`), names the affected-test command and the full gate. Without one, agents use the project's documented test commands.
 - **Where tests run:** this repo runs every test in the fence through `.claude/scripts/test.sh`.

@@ -97,7 +97,7 @@ It never carries a file of its own: the brief is the message.
 
 - **Reading returns:** each child's return is a claim. The foreman checks it against the child's diff and the quoted test result lines, against the piece's acceptance.
 - **Testing:** with any child's piece in, it runs the affected tests through the testing manual's affected-test command.
-- **No full runs:** it runs no full suite and no full gate; the lander runs those once.
+- **No full runs:** it runs no full suite and no full gate; the lander runs those once, or the main chat on small work.
 
 ## Repairs
 

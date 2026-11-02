@@ -34,9 +34,9 @@ Fixed headings, fixed order; a section that does not apply says `none`. State th
 ## Run commands
 
 - Tests run only {where: the sandbox or command they run through}, against the tree holding the change; CI is never a debug loop, and every suite CI runs passes here before a push.
-- Development runs only the tests the change affects; the full gate runs once per worktree, right before its merge, and at no other time. A suite green on a tree never reruns on that tree; a red reruns only its failing tests until green, then the red suite once more.
+- Development runs only the tests the change affects; the full gate runs once per change, at no other time: on a flight once per worktree, right before its merge, by the lander; on small work by the main chat, before the commit. A suite green on a tree never reruns on that tree; a red reruns only its failing tests until green, then the red suite once more.
 - Affected, an executor's only run (flight or general): `{PROJECT_TEST_RUNNER} {path or filter}` — timeout {n} s.
-- Full, the flight gate's run and never an executor's: {the one command of the full suite} — timeout {n} s.
+- Full, the lander's run on a flight or the main chat's on small work, never an executor's: {the one command of the full suite} — timeout {n} s.
 - Static check, an executor's only one, run once, last, given its task's files: {the one static-check command that takes a list of files}; a red is fixed and the same command run again.
 - Type check `{PROJECT_TYPECHECK}` · lint `{PROJECT_LINT}` · format `{PROJECT_FORMAT}`.
 

@@ -124,7 +124,7 @@ Tiers and effort live in the fleet prompt's § Model Selection; the cast and eac
 ## Process
 
 - Commit only code whose tests pass.
-- Code builds and tests run in the fence through `.claude/scripts/dev.sh iso`; the full gate is the lander's.
+- Code builds and tests run in the fence through `.claude/scripts/dev.sh iso`; the full gate is the lander's on a flight, the main chat's on small work.
 - Fence runs leave the host's `~/.local/bin` and the real `$HOME` untouched; a live config change the user orders is edited in place.
 - Template, doc, prompt and config-file changes are small work, made in the main checkout.
 - Once a fenced flight merges, the main chat runs the host mirror build under § Host.

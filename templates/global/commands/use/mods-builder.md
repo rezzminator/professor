@@ -1,12 +1,12 @@
 ---
-name: extension-surface
-description: 'Opens closed systems to plugins — "make X extensible", "design a plugin or hook API", "is our extension API sound"; `design <system>` lays out the surface, `audit <system|path>` grades an existing one lever by lever. Returns a surface spec or a graded gap table. Not for writing a Claude Code mod → plugin-authoring.'
+name: use:mods-builder
+description: 'Designs/audits a system''s extension/mod surface — "make X extensible", "design a plugin or hook API", "is our extension API sound"; `design <system>` lays it out, `audit <system|path>` grades it lever by lever. Returns a surface spec or a graded gap table. Not for writing or building a Claude Code mod → plugin-authoring.'
 argument-hint: "design <system> | audit <system|path>"
 ---
 
-# Extension surface
+# use:mods-builder
 
-Ten levers decide how far outsiders reach into a system without touching its internals: `design` answers each lever's questions for the target, `audit` grades each against the target's code. The worked example is Claude Code's function hooks ("Mods"); `mods-example.md` beside this file holds its evidence per lever, each cited to a public source.
+Ten levers decide how far outsiders reach into a system without touching its internals: `design` answers each lever's questions for the target, `audit` grades each against the target's code. The worked example is Claude Code's function hooks ("Mods"); `docs/design/use/mods-example.md` in the Professor clone (`readlink -f ~/.claude/commands/use/mods-builder.md`, four directories up) holds its evidence per lever, each cited to a public source.
 
 ## Modes
 

@@ -1,6 +1,6 @@
 # Worked example: Claude Code function hooks ("Mods")
 
-How Claude Code's function hooks meet each lever of `SKILL.md`, quoted from public sources. Read a lever's section when its design or audit needs a concrete precedent.
+How Claude Code's function hooks meet each lever of `/use:mods-builder` (`templates/global/commands/use/mods-builder.md`), quoted from public sources. Read a lever's section when its design or audit needs a concrete precedent.
 
 ## Sources
 

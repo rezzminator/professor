@@ -121,6 +121,9 @@
     "global/commands/quality/rules.md": {
       "curated": true
     },
+    "global/commands/use/mods-builder.md": {
+      "curated": true
+    },
     "global/skills/ultimate/SKILL.md": {
       "curated": true
     },
@@ -137,12 +140,6 @@
       "curated": true
     },
     "global/skills/dude/SKILL.md": {
-      "curated": true
-    },
-    "global/skills/extension-surface/SKILL.md": {
-      "curated": true
-    },
-    "global/skills/extension-surface/mods-example.md": {
       "curated": true
     },
     "global/skills/sources.json": {

@@ -103,7 +103,7 @@ func TestOpenNativeFocusAcknowledgement(t *testing.T) {
 func TestOpenNativeLiveMovesIntoThePickerTab(t *testing.T) {
 	for _, tc := range []struct {
 		name, caller, callerTab, moveReason, diagnostic string
-		tmux                                            string
+		tmux, stale                                     string
 		swapReason, swapSource, moveTab                 string
 		flat, unproved, callerHostsChat                 bool
 		want                                            []string
@@ -163,6 +163,18 @@ func TestOpenNativeLiveMovesIntoThePickerTab(t *testing.T) {
 			name: "stale TMUX in Herdr", caller: "w6:p5", callerTab: "w6:t2", tmux: "/tmp/tmux-1/default,1,0",
 			want: []string{`pane.move {"destination":{"split":"right","tab_id":"w6:t2","target_pane_id":"w6:p5","type":"tab"},"focus":true,"pane_id":"w6:p3"}`, `pane.close {"pane_id":"w6:p5"}`},
 		},
+		// tmux run inside a Herdr pane: its HERDR_PANE_ID is the one the tmux
+		// server inherited, a pane recycled or gone, whose foreground is a tmux
+		// client outside the caller's ancestry; the chat in another tab of the
+		// workspace is viewed, never moved onto that pane (forecast C29).
+		{
+			name: "tmux inside Herdr, inherited pane recycled", caller: "w6:p5", callerTab: "w6:t2",
+			tmux: "/tmp/tmux-1/default,1,0", stale: "recycled", diagnostic: "Herdr attach failed",
+		},
+		{
+			name: "tmux inside Herdr, inherited pane gone", caller: "w6:p5", callerTab: "w6:t2",
+			tmux: "/tmp/tmux-1/default,1,0", stale: "gone", diagnostic: "Herdr attach failed",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			testjail.Fleet(t)
@@ -173,12 +185,25 @@ func TestOpenNativeLiveMovesIntoThePickerTab(t *testing.T) {
 				_ = json.Unmarshal(req.Params["pane_id"], &pane)
 				switch req.Method {
 				case "pane.get":
+					if tc.stale == "gone" && pane == tc.caller {
+						return nil, "pane_not_found"
+					}
 					info := testjail.HerdrPaneInfo(pane)
 					if pane == tc.caller {
 						info["pane"].(map[string]any)["tab_id"] = tc.callerTab
 					}
 					return info, ""
 				case "pane.process_info":
+					if tc.stale != "" {
+						// Every pane's foreground is a tmux client, none in the caller's ancestry.
+						return map[string]any{
+							"type": "pane_process_info",
+							"process_info": map[string]any{
+								"pane_id": pane, "shell_pid": 41,
+								"foreground_processes": []any{map[string]any{"pid": 700050, "name": "tmux"}},
+							},
+						}, ""
+					}
 					if pane == tc.caller {
 						foreground := []any{map[string]any{"pid": os.Getpid(), "name": "pfm"}}
 						if tc.unproved {
@@ -260,6 +285,15 @@ func TestOpenNativeLiveMovesIntoThePickerTab(t *testing.T) {
 			t.Setenv("HERDR_SOCKET_PATH", socket)
 			t.Setenv("HERDR_PANE_ID", tc.caller)
 			t.Setenv("TMUX", tc.tmux)
+			if tc.stale != "" {
+				bin := t.TempDir()
+				stub := []byte("#!/bin/sh\nexit 1\n")
+				if err := testjail.WriteExecutable(filepath.Join(bin, "herdr"), stub, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				// The stub shadows any real herdr; tmux stays reachable for the TMUX proof.
+				t.Setenv("PATH", bin+string(filepath.ListSeparator)+os.Getenv("PATH"))
+			}
 			var stdout, stderr bytes.Buffer
 			handled, code := openNativeRow(
 				context.Background(),

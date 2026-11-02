@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -284,6 +285,9 @@ func TestProveHerdrSeatSupervisorIdentity(t *testing.T) {
 		{"dead", "terminal-one", false, 9, false, true},
 		{"reused-pid", "terminal-one", true, 10, false, true},
 		{"recycled-during-proof", "terminal-one", true, 9, false, false},
+		// The kernel's own reader (sysctl on macOS, /proc on Linux) proves an
+		// exited supervisor dead before its recycled pane is asked (forecast C30).
+		{"dead-native-reader", "terminal-recycled", false, 9, false, true},
 		{"legacy-exact-host", "", true, 0, true, false},
 		{"legacy-launch", "", true, 0, true, false},
 		{"ambiguous-legacy-launch", "", true, 0, false, false},
@@ -323,6 +327,13 @@ func TestProveHerdrSeatSupervisorIdentity(t *testing.T) {
 			if test.stamp > 0 {
 				seat.SeatHostPID = 20
 				seat.SeatHostStart = 9
+			}
+			if test.name == "dead-native-reader" {
+				exited := exec.Command("true")
+				if err := exited.Run(); err != nil {
+					t.Fatalf("run an exiting supervisor: %v", err)
+				}
+				seat.SeatHostPID = exited.ProcessState.Pid()
 			}
 			if err := db.PutSeat(context.Background(), seat); err != nil {
 				t.Fatal(err)
@@ -373,6 +384,9 @@ func TestProveHerdrSeatSupervisorIdentity(t *testing.T) {
 			var reader ProcFS = proc
 			if test.name == "recycled-during-proof" {
 				reader = &recyclingHerdrProofProc{ProcFS: proc}
+			}
+			if test.name == "dead-native-reader" {
+				reader = nativeProcFS()
 			}
 			got, owned, err := ProveHerdrSeat(context.Background(), db, reader, seat)
 			if owned != test.owned || (err == nil) != (test.owned || test.dead) {

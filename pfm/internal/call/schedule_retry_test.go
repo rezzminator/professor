@@ -3,6 +3,7 @@ package call
 import (
 	"context"
 	"testing"
+	"time"
 )
 
 func TestScheduleRetryAdmitsOnlyIdleEmptyComposers(t *testing.T) {
@@ -65,6 +66,71 @@ func TestScheduleRetryReadsNativeAgentBeforeQueueing(t *testing.T) {
 					request.Method == "pane.send_key" {
 					t.Fatalf("retry mutated working agent through %s", request.Method)
 				}
+			}
+		})
+	}
+}
+
+// A wake fired into a working native Claude goes out through pane.send_input;
+// an Enter Herdr refuses leaves it typed but unconfirmed, the result the
+// schedule's transcript fallback keeps its receipt for, and the idle-only
+// retry it sends later into a still working or unknown agent types nothing
+// (forecast C22: send_input x working/unknown status x transcript fallback).
+// The schedule's half reads these exact results in
+// TestScheduleBusyRetryStaysDueUntilProofArrives.
+func TestScheduleWakeIntoWorkingNativeThenIdleOnlyRetry(t *testing.T) {
+	for _, retry := range []struct {
+		state string
+		code  int
+		busy  bool
+	}{
+		// A working agent refuses the idle-only retry as busy.
+		{state: "working", code: CodeBusy, busy: true},
+		// An unknown agent never shows a live composer: the startup hold refuses it.
+		{state: "unknown", code: CodeUndelivered},
+	} {
+		t.Run(retry.state, func(t *testing.T) {
+			state, inputs := "working", 0
+			socket := newNativeSocket(t, func(request nativeRequest) (any, string) {
+				switch request.Method {
+				case "agent.get":
+					return nativeAgent("agent_info", state), ""
+				case "pane.read":
+					return nativePaneRead(request, "────────\n❯ \n────────\nesc to interrupt"), ""
+				case "pane.send_input":
+					inputs++
+					return map[string]any{"type": "ok"}, ""
+				case "pane.send_keys":
+					return nil, "pane_send_failed"
+				}
+				t.Errorf("unexpected Herdr request %s", request.Method)
+				return nil, "unexpected_method"
+			})
+			target := Target{Backend: "herdr", SocketPath: socket.path, Pane: "w1:p2", Engine: "claude"}
+			engine := nativeEngine(t, target)
+			// The startup hold refuses the unknown agent once this bound runs out.
+			engine.options.ComposerWait, engine.options.Poll = time.Second, time.Millisecond
+			fired, err := engine.Call(context.Background(), Request{Target: "chat", Message: "scheduled wake"})
+			if err != nil || !fired.Typed || fired.Status != statusTypedUnconfirmed ||
+				fired.Code != CodeUndelivered || inputs != 1 {
+				t.Fatalf(
+					"fire into working agent=%+v err=%v inputs=%d; want typed_unconfirmed once",
+					fired,
+					err,
+					inputs,
+				)
+			}
+			state = retry.state
+			retried, err := engine.Call(
+				context.Background(),
+				Request{Target: "chat", Message: "scheduled wake", RequireIdle: true},
+			)
+			if err != nil || retried.Typed || retried.Status != "refused" || retried.Code != retry.code ||
+				retried.Busy != retry.busy || inputs != 1 {
+				t.Fatalf(
+					"idle-only retry into %s agent=%+v err=%v inputs=%d; want refused code=%d busy=%v, nothing typed",
+					retry.state, retried, err, inputs, retry.code, retry.busy,
+				)
 			}
 		})
 	}

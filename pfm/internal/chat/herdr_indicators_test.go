@@ -348,6 +348,9 @@ func TestHerdrTabNativeOwnershipProof(t *testing.T) {
 		{"proved supervisor death", false, true, nil, nil, 1, "dead"},
 		{"proved owner, foreground unavailable", true, false, errors.New("foreground evidence unavailable"), nil, 1, "unknown"},
 		{"ownership unproved", false, true, nil, errors.New("seat seat1 supervisor ownership unproved"), 0, ""},
+		// The engine gone from its pane never outranks an unproved supervisor
+		// (forecast C02): nothing is painted, never dead.
+		{"ownership unproved, engine gone", false, false, nil, errors.New("seat seat1 supervisor ownership unproved"), 0, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			warnings := &bytes.Buffer{}

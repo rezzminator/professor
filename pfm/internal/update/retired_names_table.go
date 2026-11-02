@@ -7,8 +7,8 @@ const chatlogSuccessor = "the chatlog skill"
 // place of sub-agent-compact's tools.
 const forwardCompactionSuccessor = "mcp__forward-compaction__forward_compaction / mcp__forward-compaction__look_back"
 
-// flightsSuccessor takes new work since /flights:spec retired, so the /wave
-// family, the wave-builder skill and /imagine:build-spec point there too.
+// flightsSuccessor takes new work, so the /wave family and the wave-builder
+// skill point there.
 const flightsSuccessor = "the flights-foreman agent"
 
 // pcmSuccessor is what replaced the /pcm command: dispatching its agent.
@@ -44,7 +44,7 @@ var retiredNames = []retiredName{
 	// releases/v0.78.0.md "Global: flights replaces wave": every /wave:*
 	// command and the wave-builder skill are removed. The bare /wave pair
 	// retired earlier (releases/v0.43.0.md). New work started with
-	// /flights:spec until it retired too (below): flights-foreman takes it now.
+	// /flights:spec; flights-foreman takes it now.
 	{name: "/wave", kind: retiredCommand, successor: flightsSuccessor, match: matchFamily},
 	{name: "wave-builder", kind: retiredSkill, successor: flightsSuccessor, match: matchExact},
 	// releases/v0.77.0.md "B: templates — /jc and /qa:live are gone"; commit
@@ -154,15 +154,15 @@ var retiredNames = []retiredName{
 	{name: "gpt-executor", kind: retiredAgent, match: matchExact},
 	// The flights family cut (docs/design/flights/flights.md § The family): the
 	// foreman-pro twins, the mechanical executors and the gpt speccer retire, and
-	// so do /flights:spec, /flights:init and /flights:orchestrate-cross-harness.
+	// so do /flights:init and /flights:orchestrate-cross-harness.
 	// None has a successor: the agents they once pointed at retired too.
-	// flights-speccer is no row: commit 5c7d67f1 restored it, and it ships.
+	// flights-speccer and /flights:spec are no rows: both were restored and ship
+	// (commit 5c7d67f1; /flights:spec now hands its requirements to the speccer).
 	{name: "foreman-pro", kind: retiredAgent, match: matchExact},
 	{name: "gpt-foreman-pro", kind: retiredAgent, match: matchExact},
 	{name: "flights-mechanical-executor", kind: retiredAgent, match: matchExact},
 	{name: "gpt-flights-mechanical-executor", kind: retiredAgent, match: matchExact},
 	{name: "gpt-flights-speccer", kind: retiredAgent, match: matchExact},
-	{name: "/flights:spec", kind: retiredCommand, match: matchExact},
 	{name: "/flights:init", kind: retiredCommand, match: matchExact},
 	{name: "/flights:orchestrate-cross-harness", kind: retiredCommand, match: matchExact},
 	// The one lander (docs/design/flights/flights-lander.md): its size tiers
@@ -237,7 +237,7 @@ var retiredNames = []retiredName{
 	// agent and the ultimate skill" retired every /imagine: subcommand, the
 	// imagine agent and the imagine-core skill (its law lives in the imaginator
 	// agent); /imagine itself is live, so it is no row. A spec without a build
-	// went to /flights:spec, which retired since: flights-foreman takes it.
+	// goes to /flights:spec.
 	// Commit 196ec68b "retire /imagine:evolve with its imagine-historian agent"
 	// left both with no successor.
 	{name: "/ultimate-spec", kind: retiredCommand, successor: imagineSuccessor, match: matchExact},
@@ -247,7 +247,7 @@ var retiredNames = []retiredName{
 	},
 	{name: "/imagine:build", kind: retiredCommand, successor: imagineSuccessor, match: matchExact},
 	{name: "/imagine:build-fast", kind: retiredCommand, successor: imagineSuccessor, match: matchExact},
-	{name: "/imagine:build-spec", kind: retiredCommand, successor: flightsSuccessor, match: matchExact},
+	{name: "/imagine:build-spec", kind: retiredCommand, successor: "/flights:spec", match: matchExact},
 	{name: "/imagine:callmeter", kind: retiredCommand, successor: imagineSuccessor, match: matchExact},
 	{name: "imagine-core", kind: retiredSkill, successor: "the imaginator agent", match: matchExact},
 	{name: "/imagine:evolve", kind: retiredCommand, match: matchExact},

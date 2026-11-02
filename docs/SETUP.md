@@ -196,6 +196,7 @@ Claude takes your answers and:
 | `legal` | Bundled `templates/project/skills/legal/` | None |
 | `god-speed` | host-global source-fetched (`templates/global/skills/sources.json`), fetched and linked by `pfm install` <https://github.com/rezzminator/god-speed> | None |
 | `/flights:doctor` | Command `templates/global/commands/flights/doctor.md` — host-global, linked by `pfm install` | None (pipeline-coupled) |
+| `/flights:spec` | Command `templates/global/commands/flights/spec.md` — host-global, linked by `pfm install` | None (pipeline-coupled) |
 | `/prompt:use` | Command `templates/global/commands/prompt/use.md` | Replace `{DOMAIN_ADJ}`, `{SENSITIVE_DATA}` |
 | `/doc:use` | Command `templates/global/commands/doc/use.md` | Replace `{DATABASE}`, `{ORM}`, `{API_PROTOCOL}` in examples |
 | `/description:use` | Command `templates/global/commands/description/use.md` | None |

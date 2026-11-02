@@ -14,7 +14,7 @@ func TestRetiredRegistryNames(t *testing.T) {
 		"command": {
 			"wave", "jc", "qa/live", "pfm/refresh", "quality/forlint", "chat",
 			"imagine/build", "imagine/build-fast", "imagine/build-spec", "imagine/callmeter", "imagine/evolve",
-			"flights/spec", "flights/init", "flights/orchestrate-cross-harness",
+			"flights/init", "flights/orchestrate-cross-harness",
 		},
 		"skill": {"wave-builder", "transcript", "close-out", "imagine-core"},
 	} {
@@ -27,6 +27,9 @@ func TestRetiredRegistryNames(t *testing.T) {
 	}
 	if names.Agents["flights-speccer"] {
 		t.Error("agent flights-speccer ships again (templates/global/agents) but is a retired registry name")
+	}
+	if names.Commands["flights/spec"] {
+		t.Error("command flights/spec ships again (templates/global/commands) but is a retired registry name")
 	}
 	for _, phrase := range []string{`subagent_type="ultimate"`, "pfm chat inject", "transcript skill", "mcp__professor__", "JC-COMMIT", "/wave", "mono-architect/"} {
 		for kind, set := range map[string]map[string]bool{"agent": names.Agents, "command": names.Commands, "skill": names.Skills} {

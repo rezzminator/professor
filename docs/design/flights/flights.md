@@ -55,9 +55,10 @@ Flight merges over the prior 60 days averaged 1.42 Go test lines per code line, 
 | `flights-lander` | agent | opus · medium | Reviews, fixes and gates a worktree change, then returns it for the merge |
 | `flights-speccer` | agent | opus · xhigh | On-demand specification outside the build/land lifecycle; returns a `spec.md` path and token price to its caller |
 | `flights-hunter`, `flights-spec-walker`, `flights-sub-lander` | agents | opus · sonnet · haiku | The lander's read-only children ([flights-lander.md](flights-lander.md#the-children)) |
+| `/flights:spec` | command | the main chat | Grills the user until no decision is open, writes `requirements.md`, hands it to `flights-speccer`; the spec waits for the user's go to build |
 | `/flights:doctor` | command | the main chat | Measures a flight: the measure first, then where the reading went |
 
-- **The speccer is user-invoked:** the user, or the main chat on the user's request, calls it independently. No foreman, lander or command hands work to it; it returns to its caller and hands off to nobody. Its spec, research and calibration files live in its flight directory, outside the message-only build/land protocol.
+- **The speccer is user-invoked:** the user, or the main chat on the user's request, calls it, most often through `/flights:spec`, which hands it the grilled `requirements.md`. No foreman or lander hands work to it; it returns to its caller and hands off to nobody. Its spec, research and calibration files live in its flight directory, outside the message-only build/land protocol.
 - **Landers are spawned only by the main chat.**
 - **`tracer` and `gitter`** are fleet agents the family uses; they are not its members.
 

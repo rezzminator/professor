@@ -1,6 +1,6 @@
 ---
 name: flights-speccer
-description: 'USER-ONLY Designs novel work — invoked by the user or main chat on the user''s request for a new subsystem, integration, layout or test suite; outside the build/land lifecycle. Returns the spec.md path and token price to its caller.'
+description: 'USER-ONLY Designs novel work — invoked by the user or main chat on the user''s request for a new subsystem, integration, layout or test suite; outside the build/land lifecycle. /flights:spec → here → main chat. Returns the spec.md path and token price to its caller.'
 visibility:
   visible-to:
     include: [main]

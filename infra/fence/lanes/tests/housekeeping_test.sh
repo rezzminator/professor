@@ -116,7 +116,8 @@ case "$1" in
     case "$2" in
       ls) _stub_f volumes ;;
       inspect) [ "${STUB_VOLUME:-1}" = 1 ] || { echo "Error response from daemon: get $3: no such volume" >&2; return 1; } ;;
-      rm) if _stub_inuse "$3"; then echo "Error response from daemon: remove $3: volume is in use - [0bad]" >&2; return 1; fi ;;
+      rm) [ "${STUB_VOLUME:-1}" = 1 ] || { echo "Error response from daemon: get $3: no such volume" >&2; return 1; }
+        if _stub_inuse "$3"; then echo "Error response from daemon: remove $3: volume is in use - [0bad]" >&2; return 1; fi ;;
       create) echo "$3" ;;
     esac ;;
   system)
@@ -159,6 +160,7 @@ export STUB_DOCKER_LOG="$T/docker.log" STUB_DIR="$T/stub" PFM_FENCE_STAMP_DIR="$
 . "$BIN/docker-stub.bash"
 export -f docker _stub_f _stub_inuse
 STAMP="$PFM_FENCE_STAMP_DIR/cache-budget.stamp"
+MARK="$PFM_FENCE_STAMP_DIR/pfm-dev-gocache.over-budget"
 
 # shellcheck source=/dev/null
 . "$HK"
@@ -282,9 +284,9 @@ if logged 'volume rm pfm-lane-uv-cache' &&
   ok "legacy volumes: retired cache is retried and removed after its container releases it"
 else bad "retired legacy volume retry" "$(grep '^volume' "$STUB_DOCKER_LOG")" "$(cat "$T/err")"; fi
 
-# 6 — budget: over → the volume is removed (no file walk, no alpine), day stamped
-fresh; STUB_MB=250 hk
-if logged 'volume rm pfm-dev-gocache' && [ -f "$STAMP" ] && grep -q '250 MB > 100 MB' "$T/err" &&
+# 6 — budget: over → the volume is removed (no file walk, no alpine), day stamped, an older mark cleared
+fresh; touch "$MARK"; STUB_MB=250 hk
+if logged 'volume rm pfm-dev-gocache' && [ -f "$STAMP" ] && [ ! -e "$MARK" ] && grep -q '250 MB > 100 MB' "$T/err" &&
   ! grep -q 'alpine\|find \|^run ' "$STUB_DOCKER_LOG" && nowarn; then
   ok "budget: over budget removes pfm-dev-gocache and stamps the day"
 else bad "budget over" "$(cat "$STUB_DOCKER_LOG")" "$(cat "$T/err")"; fi
@@ -294,11 +296,25 @@ fresh; STUB_MB=40 hk
 if ! grep -q '^volume rm pfm-dev-gocache' "$STUB_DOCKER_LOG" && [ -f "$STAMP" ] && nowarn; then ok "budget: under budget keeps the cache and stamps the day"
 else bad "budget under" "$(cat "$STUB_DOCKER_LOG")" "$(cat "$T/err")"; fi
 
-# 8 — budget: over but mounted → the daemon's refusal is a WARN naming size and reason, no stamp
+# 8 — budget: over but mounted → the daemon's refusal is a WARN naming size and reason, no stamp,
+#     and the volume is marked for the next container start
 fresh; printf 'pfm-dev-gocache\n' >"$STUB_DIR/inuse"; STUB_MB=250 hk
-if warned cache-budget && grep -q '250 MB' "$T/err" && grep -q 'in use' "$T/err" && [ ! -f "$STAMP" ]; then
-  ok "budget: a mounted over-budget cache warns with its size and reason and is retried"
-else bad "budget mounted" "$(cat "$T/err")"; fi
+if warned cache-budget && grep -q '250 MB' "$T/err" && grep -q 'in use' "$T/err" && [ ! -f "$STAMP" ] && [ -f "$MARK" ]; then
+  ok "budget: a mounted over-budget cache warns with its size and reason, is marked and retried"
+else bad "budget mounted" "$(cat "$T/err")" "$(ls "$PFM_FENCE_STAMP_DIR")"; fi
+
+# 8b — fence_cache_budget_pending, the container start's half: a marked volume nothing mounts
+#      is removed and unmarked; a still-mounted one stays marked with a WARN; a gone one is
+#      unmarked quietly; no mark, no docker call
+pend() { fence_cache_budget_pending >"$T/out" 2>"$T/err"; }
+fresh; touch "$MARK"; pend; r1=0
+logged 'volume rm pfm-dev-gocache' && [ ! -e "$MARK" ] && grep -q 'removed pfm-dev-gocache' "$T/err" && nowarn && r1=1
+fresh; touch "$MARK"; printf 'pfm-dev-gocache\n' >"$STUB_DIR/inuse"; pend; r2=0
+[ -f "$MARK" ] && warned cache-budget && grep -q 'in use' "$T/err" && r2=1
+fresh; touch "$MARK"; STUB_VOLUME=0 pend; r3=0; [ ! -e "$MARK" ] && nowarn && r3=1
+fresh; pend; r4=0; [ ! -s "$STUB_DOCKER_LOG" ] && nowarn && r4=1
+if [ "$r1$r2$r3$r4" = 1111 ]; then ok "budget: a container start removes a marked cache nothing mounts, keeps a mounted one marked, drops a gone one's mark"
+else bad "budget pending" "free=$r1 mounted=$r2 gone=$r3 none=$r4" "$(cat "$STUB_DOCKER_LOG")" "$(cat "$T/err")"; fi
 
 # 9 — budget: a fresh stamp skips the sizing entirely
 fresh; touch "$STAMP"; STUB_MB=250 hk

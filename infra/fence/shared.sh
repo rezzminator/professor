@@ -505,6 +505,7 @@ _fence_sh_ensure_locked() {
     fi
   fi
   _fence_sh_image || { return 1; }
+  fence_cache_budget_pending
   fence_volumes_ensure
   mounts=(-v "$FENCE_SH_MAIN:/repo:ro" -v "$PFM_DEV_GIT_COMMON:/pfm-git-common:ro" -v "$FENCE_SH_HOST:/pfm-fence"
     -v pfm-dev-gocache:/cache/go-build -v pfm-dev-gomod:/cache/gomod -v pfm-dev-lintcache:/cache/lint)

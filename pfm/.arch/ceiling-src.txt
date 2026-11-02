@@ -3,7 +3,7 @@ internal/compose/compose.go 1270
 internal/config/config.go 1442
 internal/doctor/doctor.go 1006
 internal/installer/installer.go 1663
-internal/reload/reload.go 863
+internal/reload/reload.go 873
 internal/stats/limits.go 1078
 internal/statusline/render.go 953
 internal/ui/cosmos.go 1549

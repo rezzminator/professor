@@ -1,13 +1,13 @@
 # The laws — tiers, shape, verdict
 
-This file covers Laws 1–18 of [`/integration-suite:use`](../../../templates/global/commands/integration-suite/use.md), one section each: where each tier gates, the shape of the live suite, and what a verdict means. [validity.md](validity.md) covers Laws 19–31: how the suite stays honest over time, and the shapes a test may never take. Every section gives the rule, the failure it prevents, why it takes this shape and not a nearby one, and how it is checked; a section with published evidence names it. The laws hold for any project in any language; the examples are the kinds of systems the command designs for, not any one codebase.
+This file covers Laws 1–18 and 32–34 of [`/integration-suite:use`](../../../templates/global/commands/integration-suite/use.md), one section each: where each tier gates, the shape of the live suite, what a verdict means, and the walk of the owner's journey. [validity.md](validity.md) covers Laws 19–31 and 35: how the suite stays honest over time, the shapes a test may never take, and how a beat's assertions grow after an escape. Every section gives the rule, the failure it prevents, why it takes this shape and not a nearby one, and how it is checked; a section with published evidence names it. The laws hold for any project in any language; the examples are the kinds of systems the command designs for, not any one codebase.
 
 ## Contents
 
 - [How the laws fit together](#how-the-laws-fit-together)
-- [Law 1 — the commit gate is hermetic](#law-1--the-commit-gate-is-hermetic)
+- [Law 1 — the commit gate is hermetic, the landing gate runs the sequence](#law-1--the-commit-gate-is-hermetic-the-landing-gate-runs-the-sequence)
 - [Law 2 — one scripted mock per dependency family, and every fake passes the real contract](#law-2--one-scripted-mock-per-dependency-family-and-every-fake-passes-the-real-contract)
-- [Law 3 — each tier asserts only what the tier below cannot observe](#law-3--each-tier-asserts-only-what-the-tier-below-cannot-observe)
+- [Law 3 — each tier is spent on what the tier below cannot observe](#law-3--each-tier-is-spent-on-what-the-tier-below-cannot-observe)
 - [Law 4 — the hermetic and live tiers run the product as production runs it](#law-4--the-hermetic-and-live-tiers-run-the-product-as-production-runs-it)
 - [Law 5 — LLM-driven steps run on a weaker model](#law-5--llm-driven-steps-run-on-a-weaker-model)
 - [Law 6 — one environment, lanes in sequence](#law-6--one-environment-lanes-in-sequence)
@@ -23,6 +23,9 @@ This file covers Laws 1–18 of [`/integration-suite:use`](../../../templates/gl
 - [Law 16 — observation neither disturbs the system nor waits on the clock](#law-16--observation-neither-disturbs-the-system-nor-waits-on-the-clock)
 - [Law 17 — one activity log per environment root](#law-17--one-activity-log-per-environment-root)
 - [Law 18 — meaning-bearing output is pinned from an independent source](#law-18--meaning-bearing-output-is-pinned-from-an-independent-source)
+- [Law 32 — the live tier walks one journey tree](#law-32--the-live-tier-walks-one-journey-tree)
+- [Law 33 — every action goes through the owner's entries](#law-33--every-action-goes-through-the-owners-entries)
+- [Law 34 — the root replicates the owner's machine](#law-34--the-root-replicates-the-owners-machine)
 - [Sources](#sources)
 
 ## How the laws fit together
@@ -36,63 +39,67 @@ The laws serve the six ideas in [integration-suite.md § The six ideas](integrat
 | What a verdict means | 11–18 | When a test is green, where its expected value comes from, and how a red, an absence or a broken check reports itself |
 | Keeping it honest over time | 19–24 ([validity.md](validity.md)) | How the ledgers, the budgets and the gates stay true after the designers have left |
 | What a test may not be | 25–31 ([validity.md](validity.md)) | The shapes that look like tests and test nothing, refused by rule |
+| Walking the owner's journey | 32–34, 35 ([validity.md](validity.md)) | How the live tier walks every path the owner takes, from the owner's own starting point, through the owner's own entries, and how its assertions grow when a defect escapes |
 
 Three tensions run through the whole set:
 
-- **Realism against speed.** The live tier is slow. Laws 1, 3, 7 and 20 keep it off the commit path and inside a budget, and Law 2 moves as much of its logic as possible into the fast tiers.
+- **Realism against speed.** The live tier is slow. Laws 1, 3, 7 and 20 keep it off the commit path and inside a budget, Law 32 prices every fork it walks, and Law 2 moves as much of its logic as possible into the fast tiers.
 - **Accumulated state against reproducibility.** Law 6 deliberately lets state pile up. Laws 7, 8, 10 and 15 keep every red row replayable and attributable anyway.
 - **A test written to pass against a test written to fail.** Whoever writes a test — a person under deadline or a model asked for green — is pulled toward assertions that cannot go red. Laws 12, 13, 14 and 15 make the pull visible: an oracle needs a source, a test needs a witnessed failure, coverage needs an observed invocation under the test's own id, and a check needs a named broken state. What the checks cannot see, and what only the owner's review can hold, is stated once in [integration-suite.md § The threat model](integration-suite.md#the-threat-model).
 
-## Law 1 — the commit gate is hermetic
+## Law 1 — the commit gate is hermetic, the landing gate runs the sequence
 
-**Rule:** The unit and hermetic tiers gate every commit. The live tier gates every release and the close of each multi-commit piece of work. The commit gate holds no credential and calls no paid or live dependency. Where the platform allows, it runs with outbound network denied.
+**Rule:** The unit and hermetic tiers gate every commit. The live tier's full sequence (Law 32) gates every landing and runs in CI on every operating system the Tiers section lists under `live-os:`, each paid or credentialed dependency there answered by its recorded mock (Law 2); with every dependency real, it gates each release. No gate below the release holds a credential or calls a paid or live dependency. Where the platform allows, each runs with outbound network denied. A gate that reads the map or a coverage table without running the sequence gates nothing.
 
-**Prevents.** Three failures of a commit gate:
+**Prevents.** Four failures:
 
 - **A gate that goes red for reasons unrelated to the change:** a third party's outage, a rate limit, a model's variance. People learn to rerun such a gate or route around it, and from then on it gates nothing.
 - **A gate that holds credentials.** Every contributor's job and every fork then carries a secret.
 - **A mock that silently isn't one.** A unit test that happens to reach the network passes on a connected machine and hides a dependency nobody declared.
+- **A suite green everywhere but on the user's machine.** A live tier that runs only at release, only on one operating system, or not at all while a check confirms that every capability has a mapped beat lets a landing that broke the journey merge on a green that walked nothing.
 
-**Why this shape.** The split follows cost against feedback latency. The commit gate must be fast and reliable, because it runs most often and it blocks the author. The live tier can tolerate latency, because the work has already landed when it runs. The live tier also gates the close of each multi-commit piece of work, not only the release, so a crossing defect surfaces at the close of the work that caused it, not weeks later in a release that bundles many merges. Network denial turns the seam law of the Doors step from a promise into a check: an unseamed door fails by name instead of reaching the real thing.
+**Why this shape.** The split follows cost against feedback latency. The commit gate must be fast and reliable, because it runs most often and it blocks the author. The live tier can tolerate latency, because it runs once per landing, not once per commit. It gates every landing, not only the release, so a defect in the journey surfaces in the change that caused it, not weeks later in a release that bundles many merges; and it runs on every operating system the product ships to, because a path through the system's processes, terminals and file system differs per system where a unit seam sees one. Below the release the recorded mocks answer for the paid and credentialed dependencies, so the landing gate holds no secret and no third party's variance while still walking every beat. A map check proves a beat is planned, never that it ran: standing in for the run, it is green on a journey nobody walked. Network denial turns the seam law of the Doors step from a promise into a check: an unseamed door fails by name instead of reaching the real thing.
 
-**Checked by.** The socket-refusal self-test of the commit-gate job is a line of `self-tests.txt`, so `self-tests` requires it in the census and passing on the merge subject; `collected` proves the gate runs what is on disk.
+**Checked by.** The socket-refusal self-test of the commit-gate job is a line of `self-tests.txt`, so `self-tests` requires it in the census and passing on the merge subject; `collected` proves the gate runs what is on disk, fails an operating system of `live-os:` with no CI job running the live tier's blocking command on it, and errors on an undeclared `live-os:`; `observed` reads the canonical ledger of the merge subject, so a landing whose sequence never ran has no ledger to pass on.
 
 **Evidence.** *Software Engineering at Google* ch. 23 stages the chain as a fast, hermetic presubmit, then postsubmit, then a release candidate at rising fidelity. Bazel defines hermeticity so that touching an undeclared dependency fails loudly.
 
 ## Law 2 — one scripted mock per dependency family, and every fake passes the real contract
 
-**Rule:** Each external dependency family gets one scripted mock, which speaks the real protocol from a scenario file. The mock's shapes are golden files captured from the real dependency during the live tier, and a capture that differs from the golden is a red beat. A request the scenario does not script fails the test by name. Every fake of an internal component — a store, a queue, a registry, a renderer — lives in the fakes directory and passes the same contract cases as the real implementation, run against both; a fake may not return a state the real component cannot produce, and it must be able to produce every state a test needs. A test never replaces a product module in place with an inline stand-in: that is a fake with no contract.
+**Rule:** Each external dependency family gets one scripted mock, which speaks the real protocol from a scenario file in both directions: its replies, and the events, hooks and callbacks it sends into the product. The mock's shapes are golden files captured from the real dependency in the release run, where the live tier runs against it; a capture that differs from the golden is a red beat, and a defect traced to a shape the mock lacked re-records it. A request the scenario does not script fails the test by name. Every fake of an internal component — a store, a queue, a registry, a renderer — lives in the fakes directory and passes the same contract cases as the real implementation, run against both; a fake may not return a state the real component cannot produce, and it must be able to produce every state a test needs. A test never replaces a product module in place with an inline stand-in: that is a fake with no contract.
 
-**Prevents.** Five failures:
+**Prevents.** Six failures:
 
 - **Mock proliferation.** Each hand-written fake imitates a different, partial version of the dependency, and each drifts its own way. One mock per family keeps the protocol knowledge in one place.
 - **A mock of a dependency that no longer exists.** The real API moves on while the fake keeps answering the old way, so the hermetic tier stays green against a protocol nobody speaks any more.
 - **The silent default.** An unscripted request answered with an empty or default value hides every new call the product starts making.
+- **A mock that only answers.** A dependency that also calls into the product (a hook it fires, an event it emits, a notification it sends) mocked by its replies alone leaves the product's handling of what it sends unwalked, and the mock's author supplies the field the real one leaves out.
 - **An impossible state pinned as behaviour.** A fake that returns null where the real component throws, or an empty registry where the real one is never empty, lets a test pass against a branch production can never take, and a fake that cannot emit an invalid frame or persist a row leaves the branch that handles it untested. An inline replacement of a product module — a registry answering empty, a renderer reduced to its props — is the same fake without even a file to hold it to a contract.
 - **A fake that drifts from the real thing under refactoring.** Without a contract suite that runs against both, the fake's behaviour is whatever its last editor remembered.
 
 **Why this shape.**
 
 - **Real protocol, not a stub.** The mock speaks the real protocol (a process, an HTTP server) rather than being a function stub, because the hermetic tier runs the real binary. The product's own client code has to be exercised.
-- **Golden shapes captured during the live tier.** The real dependency is being exercised there anyway, so the live tier audits the mock at no extra cost. This also answers the question the record-and-replay literature leaves open: how to detect that a recording has gone stale.
+- **Golden shapes captured in the release run, re-recorded on a shape defect.** The real dependency is being exercised there anyway, so the release run audits the mock at no extra cost; a defect traced to a shape the mock never produced re-records it at once, because a mock that never met the real shape keeps every landing green against it. This also answers the question the record-and-replay literature leaves open: how to detect that a recording has gone stale.
 - **One contract suite for the fake and the real thing, and one directory for the fakes.** The same cases run against both, so the fake is proven equivalent on every state a test relies on, and a new state the real component gains is a red fake until the fake learns it. The directory is what lets a check enumerate the fakes. The inline refusal covers every product module, because which modules hold a state a stand-in can misrepresent is a judgement no check can make, and the stand-ins that exist are grandfathered by the ratchet's baseline.
 
 **Checked by.** `collected`: every fake in the fakes directory has a contract suite collected against both implementations; `self-tests`: each mock's unscripted-request self-test is a line of `self-tests.txt`; `refused-shapes`: the language's module-mocking spelling applied to a product module.
 
 **Evidence.** The record-and-replay pattern for external APIs is to record once, replay deterministically, and fail on anything unrecorded. Every source that describes it leaves staleness detection unexplained.
 
-## Law 3 — each tier asserts only what the tier below cannot observe
+## Law 3 — each tier is spent on what the tier below cannot observe
 
-**Rule:** A live beat asserts only what the real dependency alone can show; every product-side assertion in it has a twin at the lowest tier that can observe it, named in the map (`twin:<row>`), or the live row is marked `live-only`. A hermetic row exists only for what a unit test cannot observe: a process boundary, real input and output, a boot path, the assembled artifact. One row per mechanism — at each tier above the unit tier, one success row and one refusal row per operation besides Law 9's crossing rows; its input variations are table-driven unit cases. Every hermetic and live row states `live-because:` — the observation no lower tier can make.
+**Rule:** A live row names a twin at the lowest tier that can observe the product-side decision it exists for (`twin:<row>` in the map), or is marked `live-only`; the twin never removes an assertion from the beat, which still asserts every effect it can observe (Law 11). A hermetic row exists only for what a unit test cannot observe: a process boundary, real input and output, a boot path, the assembled artifact. One row per mechanism — at each tier above the unit tier, one success row and one refusal row per operation, entry (Law 33) and branch (Law 32), besides Law 9's crossing rows. A literal input variation — another value of one input down the same code path — is a table-driven unit case; a dimension, which changes the backend, engine or code path that runs, never is. Every hermetic and live row states `live-because:` — the observation no lower tier can make.
 
-**Prevents.** Two failures:
+**Prevents.** Three failures:
 
-- **Product logic gated only at release.** The live tier runs rarely, so without a twin the product-side logic of a live beat is checked only when the live tier runs.
+- **Product logic gated only by the slowest tier.** The live tier runs at landing, not on every commit, so without a twin the product-side decision a live beat exists for is first checked after the work is done.
 - **Slow tiers spent on cheap proofs.** A fresh process boot, or a wait on a queue's visibility window, per input variation of a pure function or a guard buys in minutes what a unit test buys in milliseconds — whether the variations share one landscape id or are inventoried as five refusal rows of one operation. The suite grows slow without growing more certain, and the slow beats carry the most flake surface.
+- **A dimension pushed down to a unit table.** A backend, an engine or an entry tested as one row of a unit table proves one function's switch; the path each value takes through processes, hooks and stores runs nowhere, and the suite stays green while the product is broken for every value the live tier did not walk.
 
-**Why this shape.** Each tier costs more than the one below; the rule spends each tier only on what it alone can see. The `live-because:` field makes the designer name that observation, so a row whose reason is "another input" has nowhere to hide, and the one-success-one-refusal bound per operation is what a check can count where "same reason" is a judgement. The twin is at the lowest tier that can observe the assertion, not always the hermetic one, because a twin above the cheapest observing tier is itself a slow tier spent on a cheap proof. `live-only` exists so a beat whose whole point is the real dependency does not have to invent a twin.
+**Why this shape.** Each tier costs more than the one below; the rule spends each tier only on what it alone can see. The `live-because:` field makes the designer name that observation, so a row whose reason is "another input" has nowhere to hide, and the one-success-one-refusal bound per operation, entry and branch is what a check can count where "same reason" is a judgement. The line between a literal variation and a dimension is read from code: a dimension sits in `dimensions.tsv` with the `file:line` that dispatches on it, so whether a value takes another path is the product's fact, not the author's argument. The twin is at the lowest tier that can observe the decision, not always the hermetic one, because a twin above the cheapest observing tier is itself a slow tier spent on a cheap proof; it adds a fast check of the decision and takes nothing from the beat, because a beat narrowed to the dependency's side is the blind beat of Law 35. `live-only` exists so a beat whose whole point is the real dependency does not have to invent a twin.
 
-**Checked by.** `oracle`: a hermetic or live row without `live-because:`; `map-dup`: more than one success or one refusal row per operation at a tier above the unit tier besides `crossing:` rows, a `twin:` at the same tier or naming no row, a live row with neither `twin:` nor `live-only`.
+**Checked by.** `oracle`: a hermetic or live row without `live-because:`; `map-dup`: more than one success or one refusal row per operation, entry and branch at a tier above the unit tier besides `crossing:` rows, a `twin:` at the same tier or naming no row, a live row with neither `twin:` nor `live-only`; `branches`: a dimension no beat forks on and no cut names.
 
 ## Law 4 — the hermetic and live tiers run the product as production runs it
 
@@ -189,18 +196,20 @@ The declared parallel mode is the third way: it is admitted only where the cross
 
 ## Law 11 — the beat verdict
 
-**Rule:** A beat passes on its asserted result plus a clean activity log. Assertions read the system's own reports, stored state and rendered output, and each names the landscape id it reads. A beat that made no assertion on a mapped id cannot pass for that id. Expected values come from a source outside the code under test (Law 12), never from an LLM's own claim. A beat that fails on LLM variance alone is asserting the wrong thing.
+**Rule:** A beat passes on its asserted result plus a clean activity log. A beat asserts every effect of its action it can observe, not only the one it was written for: what the user sees (the screen's text, and the names, labels, badges and placement the product shows) and the system's own reports and stored state behind it, each assertion naming the landscape id it reads. A beat that made no assertion on a mapped id cannot pass for that id. Expected values come from a source outside the code under test (Law 12), never from an LLM's own claim. A beat that fails on LLM variance alone is asserting the wrong thing.
 
-**Prevents.** Four failures:
+**Prevents.** Six failures:
 
 - **A green beat with a hidden error.** The result looks right, but the product logged an error on the way: a retry that masked a failure, or a fallback that degraded the answer. That kind of degradation is invisible to a result-only assertion.
 - **A green beat that asserted nothing, or asserted one thing for three.** An action ran, nothing threw, and the runner counted a pass; or a beat mapped to three capabilities drove all three and asserted one value.
+- **A beat blind on its own path.** A beat written for one effect asserts that one; the action's other effects (where the new item landed, what it is called, what the screen says) change unwatched, and the beat stays green while the user meets the defect it ran through.
+- **A store right and a surface wrong.** Stored state proves the record; the user reads the screen, and a correct record shown in the wrong place, under the wrong name or with a stale badge passes a store-only beat.
 - **The judge being the thing judged.** When a model says "done", the claim is itself the thing under test.
 - **A beat that flakes by design.** Asserting on a model's words makes the suite fail on variance, which teaches everyone to rerun it.
 
-**Why this shape.** The clean-log clause turns every beat into two checks for the price of one: the behaviour it asserts, plus the absence of any failure it did not expect. An expected error is declared per beat (`expect-log <pattern>`), so the clean-log rule stays strict rather than becoming a judgement call. Assertions read the system's own reports because those reports are what the user reads; asserting internal state alone proves a store, not a surface. The `assert` verb names the id, so the ledger counts assertions per mapped id and "one assertion for three capabilities" is a verdict state, not an oversight.
+**Why this shape.** The clean-log clause turns every beat into two checks for the price of one: the behaviour it asserts, plus the absence of any failure it did not expect. An expected error is declared per beat (`expect-log <pattern>`), so the clean-log rule stays strict rather than becoming a judgement call. Assertions read what the user sees first, because the user's verdict is formed there, then the reports and stored state behind it, because a red on the surface alone does not say which layer broke. Every observable effect, not only the intended one, because the next defect on a beat's path is rarely the effect the beat was written for, and a beat already driving the path pays almost nothing to watch the rest; Law 35 is what remains when it does not. The `assert` verb names the id, so the ledger counts assertions per mapped id and "one assertion for three capabilities" is a verdict state, not an oversight.
 
-**Checked by.** `observed`: `NO-ASSERTION` on any mapped id with no `assert` naming it in that row's ledger.
+**Checked by.** `observed`: `NO-ASSERTION` on any mapped id with no `assert` naming it in that row's ledger. The reviewer reads every live row's `assert:` for what the user sees and every other effect its action leaves (§ The threat model).
 
 **Evidence.** A published post-mortem of an AI coding tool describes three regressions that shipped together because user reports were "challenging to distinguish from normal variation". Its remedy is a deterministic, named signal.
 
@@ -233,13 +242,13 @@ The declared parallel mode is the third way: it is admitted only where the cross
 
 ## Law 14 — coverage is observed, never declared
 
-**Rule:** A capability counts as covered only when the canonical run observed a mapped row invoking it under the row's own injected id and asserting on it. The runner derives, per row, the operations recorded with that row's injected id (the activity log's `op` and `beat` fields, Law 17), the goldens it compared and the assertions it made by landscape id, and writes them to the run ledger. The close gate reads the ledger, never the map: a row mapped to an id with no operation record carrying the row's id is `CLAIMED-NOT-INVOKED`; an id no row invoked is `UNOBSERVED`; a mapped id with no assertion naming it is `NO-ASSERTION`. A `tier-unit:` or `tier-hermetic:` row is held to the same standard through its own tier's ledger — the buffer handler's records or the coverage context reaching the capability's file at unit, the log slice at hermetic — and in addition the named test must exist and be collected by the blocking command (`TIER-UNCOLLECTED`), have passed on the merge subject (`TIER-NOT-RUN`), and have a bite row whose mutation lies in the capability's file or the op's handler (`TIER-NO-BITE`). A time-driven job is covered by a beat that triggers it through an operator entry point carrying the id, or by a unit row. The map is the plan; the ledger is the proof, at every tier.
+**Rule:** A capability counts as covered only when the canonical run observed a mapped row invoking it under the row's own injected id and asserting on it. The runner derives, per row, the operations recorded with that row's injected id (the activity log's `op` and `beat` fields, Law 17), the goldens it compared and the assertions it made by landscape id, and writes them to the run ledger. The close gate reads the ledger, never the map: a row mapped to an id with no operation record carrying the row's id is `CLAIMED-NOT-INVOKED`; an id no row invoked is `UNOBSERVED`; a mapped id with no assertion naming it is `NO-ASSERTION`. A `tier-unit:` or `tier-hermetic:` row is held to the same standard through its own tier's ledger — the buffer handler's records or the coverage context reaching the capability's file at unit, the log slice at hermetic — and in addition the named test must exist and be collected by the blocking command (`TIER-UNCOLLECTED`), have passed on the merge subject (`TIER-NOT-RUN`), and have a bite row whose mutation lies in the capability's file or the op's handler (`TIER-NO-BITE`). A time-driven job is covered by a beat that triggers it through an operator entry point carrying the id, or by a unit row. The journey tree's coverage is its edges: each beat on each branch is its own mapped row (Law 32), so an edge the canonical run did not walk is `CLAIMED-NOT-INVOKED`. The map is the plan; the ledger is the proof, at every tier.
 
-**Prevents.** Coverage credited by declaration or by neighbourhood. A map that is checked by set membership is satisfied by listing an id: a beat lists three operations and drives one; a registry name is moved into a beat's metadata by static reading and never touched; a covered set derived from the same registry the gate compares against covers a capability the instant it is registered. A slice attributed by log position credits a beat with a background consumer's or a scheduled job's operation that happened to land in its window. A beat that drives three capabilities and asserts one value is green for all three. Naming any passing unit test in a map row is the same fault one tier down.
+**Prevents.** Coverage credited by declaration or by neighbourhood. A map that is checked by set membership is satisfied by listing an id: a beat lists three operations and drives one; a registry name is moved into a beat's metadata by static reading and never touched; a covered set derived from the same registry the gate compares against covers a capability the instant it is registered. A slice attributed by log position credits a beat with a background consumer's or a scheduled job's operation that happened to land in its window. A beat that drives three capabilities and asserts one value is green for all three. Naming any passing unit test in a map row is the same fault one tier down. A capability counted once is the same fault across the tree: walked down one backend, it reads covered for every value of a dimension the run never took.
 
 **Why this shape.** Set membership answers "was it listed"; the ledger answers "did it run, under this row's id, and was it asserted". The activity log already records every entry point with its operation name, so the observation costs nothing extra — the seams wrapped for Law 17 pay a second time here; carrying the injected id through queues and jobs is the one product-side obligation, and it is the same correlation field production needs for its own tracing. A job the clock fires carries no id, so it is reached through the entry point that schedules it. A capability that leaves no operation record (a rendered screen, a generated file) declares the golden that evidences it, and the ledger records the golden compared. A unit test that reaches the capability below the point that records its operation — every unit test of a library, which has no log — proves its row by the coverage tool's per-test context instead, which every coverage tool already produces. The declared map survives, because the design must be complete on paper before a lane exists (`map-ids`, `map-beats`), but it never counts as coverage. A tier row needs the bite row on top of the observed invocation, because a unit test can reach a capability's file through a seam it exercises incidentally; the mutation inside the capability's own code is what proves the test guards that capability and not a neighbour.
 
-**Checked by.** `observed` at close, over the canonical ledger of the merge subject, the unit and hermetic ledgers, the collected census and `bites.tsv`; `map-names` derives the operation names from the built product's own registries, never from a package manifest, and in both directions.
+**Checked by.** `observed` at close, over the canonical ledger of the merge subject, the unit and hermetic ledgers, the collected census and `bites.tsv`; `branches`, over `dimensions.tsv`, `beats.md` and `cuts.tsv`; `map-names` derives the operation names from the built product's own registries, never from a package manifest, and in both directions.
 
 ## Law 15 — every check names its broken state
 
@@ -313,6 +322,46 @@ The declared parallel mode is the third way: it is admitted only where the cross
 **Checked by.** `copy`: every registry key pinned in exactly one test per locale, `ERROR` on a registry that is empty without the line `none`; `oracle`: in a mapped row's test, an expected-side string of three words or more equal to a rendered-from value that is not a registry key; `refused-shapes`: the same string in every other test, a write under the goldens directory, a snapshot store outside it, a snapshot-update flag in a committed runner configuration or CI step.
 
 **Evidence.** One neighbour CLI requires snapshot coverage for any change that affects user-visible UI. A terminal multiplexer diffs its real output against snapshots.
+
+## Law 32 — the live tier walks one journey tree
+
+**Rule:** The live tier's sequence walks one journey tree from the root (Law 34). `dimensions.tsv` lists, traced from code, every dimension — an axis whose value changes which backend, engine or code path runs after a beat — with its values and the `file:line` that branches on it, or the single line `none`. At each dimension the sequence forks: the beats that follow run once per value, in the same environment, each branch carrying its own state to its leaves. A dimension relating two actors — a caller and a callee, a sender and a receiver — forks over every ordered pair of the branches it joins. Each beat on each branch is a mapped row, its beat id carrying the branch key (`<lane>/<slug>@<branch key>`). A combination left unwalked is a `cuts.tsv` row with its paper cost and the owner's ruling, never an omission. A literal input variation stays a unit table row (Law 3), and an entry is never a dimension (Law 33).
+
+**Prevents.** Three failures:
+
+- **The one-path pass.** A capability with two backends or two engines is walked down the one its author uses; every capability reads covered, and every other path ships unwalked. The suite is green on every machine set up like the author's, and on no other machine has it run.
+- **The combination proven only in parts.** Each backend is proven alone and each call proven in one direction, but a caller on one backend reaching a callee on the other never runs, and the defect at the join is invisible to every beat.
+- **The silent cut.** A tree of combinations is expensive, and an unpriced tree is pruned by whoever writes the lanes, one branch at a time, until the cut is the suite and nobody decided it.
+
+**Why this shape.** A user's day is one chain of cause and effect: each state is produced by the action before it, and a defect that needs three earlier steps to appear is reached only by a sequence that took them. A fork keeps the chain per value: each branch inherits the state built before the fork, so every branch tests the path from the owner's starting point, not from a fresh fixture. The inventory is traced from code because the dispatch points are where a value changes the path, and the `file:line` lets the reviewer check one fork per dispatch. Every ordered pair, because a call's direction decides which side's code initiates and which receives, and each side has its own defects. Forks multiply beats, which is why a cut is admitted and why it is a priced, ruled row: the owner, not the lane author, decides what goes unwalked, and the ledger keeps the decision visible.
+
+**Checked by.** `branches`: a combination of `dimensions.tsv` values a forked beat spans with neither a `beats.md` row nor a `cuts.tsv` row; a branch key naming a value `dimensions.tsv` lacks; a dimension no beat forks on and no cut names; a `cuts.tsv` row without `cost_ms` or whose ruling is not a `references.tsv` row; `DERIVE-FAILED` when `dimensions.tsv` is unreadable or empty without the line `none`. `observed`: an edge the canonical run did not walk is `CLAIMED-NOT-INVOKED`. The reviewer reads `dimensions.tsv` against the product's dispatch points (§ The threat model).
+
+## Law 33 — every action goes through the owner's entries
+
+**Rule:** Every action beat acts through an entry the owner uses: keys into a screen or menu, a command typed where the product's hook receives it, the public command line, an integration's own call. An action with several entries is one landscape row per entry (`entry:<key>`), and every entry runs inside the same branch: the entries are neither branches nor alternatives where one suffices. An internal entry — a hidden or internal subcommand, a direct call into product code — may seed the root or observe, never stand in for an action.
+
+**Prevents.** Two failures:
+
+- **The shortcut past the product's wiring.** A beat that runs the internal command a hook would have run proves the command; the hook that should catch what the user typed, the parsing between them and the routing that differs per backend run nowhere, and their defects ship.
+- **One entry proven for all.** The owner reaches one action by typing it into the product and by running it from the command line; the two take different paths to one operation, and a beat that drives one leaves the other's defects unwalked.
+
+**Why this shape.** What the user does is the input the product is built to receive, and an internal entry skips exactly the layer where the test and the user differ. Several entries are rows in one branch rather than a fork, because they change how the action enters, not which backend runs after it; running them one after another in one branch also tests that each leaves state the next can build on. Seeding and observing are exempt because they stand outside the journey: the root build sets the stage and a probe reads the result, and routing either through a user's entry costs time and tests nothing more.
+
+**Checked by.** `refused-shapes`, the Internal entry as action row ([validity.md § The refused shapes](validity.md#the-refused-shapes)): an internal entry in an action beat outside a `need` prelude or an observation; `observed`: an `entry:` row no beat invoked is `UNOBSERVED`; `map-dup`: more than one success or refusal row per operation, entry and branch above the unit tier.
+
+## Law 34 — the root replicates the owner's machine
+
+**Rule:** The root replicates the owner's topology, read from the owner's machine into the root inventory: the shells and the folders they start in, the projects and nested projects, the workspaces or sessions open at once, the launcher the owner starts the product with. The root build builds it. Every dependency the root runs is the real one or its recorded mock (Law 2).
+
+**Prevents.** Two failures:
+
+- **The tidy root.** A root built for the test's convenience — every session started inside the project folder, one project, one workspace — makes every defect that depends on where the user's shell starts, on a nested project or on a second workspace unreachable; the suite is green for a machine nobody owns.
+- **The invented dependency.** A fake written from what its author believed the dependency does omits the field the real one leaves out, or sends one the real one never sends; every beat passes against a dependency that does not exist.
+
+**Why this shape.** The root is the first cause of every state in the tree, so a difference between it and the owner's machine propagates into every beat. Reading the inventory from the owner's machine, rather than designing it, keeps the author's assumptions out of the root; writing it into the design lets the reviewer compare the two and changes the root hash when the topology changes. A recorded mock, never an imagined one, because the mock is part of the root every beat starts from.
+
+**Checked by.** The reviewer reads the root inventory against the owner's machine, and the owner rules it (§ The threat model): no check can read the owner's machine, so this law rests on that review. The root hash covers the inventory, so a changed topology rebuilds the root instead of reusing a stale snapshot.
 
 ## Sources
 

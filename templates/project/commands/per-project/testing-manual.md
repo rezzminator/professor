@@ -20,7 +20,8 @@ Fixed headings, fixed order; a section that does not apply says `none`. State th
 ## Lanes and registries
 
 - A new or changed capability lands in one commit with its landscape row, its map row, and the unit, hermetic or live row mapping it together with that row's bite: {the landscape, map and ledger paths}.
-- Where a live tier exists, every close runs the full lane sequence: {the sequence command}.
+- Where a live tier exists, every landing runs the full lane sequence, in CI on every operating system the suite design lists: {the sequence command}.
+- An escaped bug's fix lands with the assertion the `testing` rule owes and its escape-ledger row: {the escape ledger path}.
 - Shared-core files with one editor per flight: {paths}.
 
 ## Mock boundary

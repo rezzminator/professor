@@ -95,6 +95,7 @@ func resumeUnkillKey(t *testing.T, account, body string) string {
 
 func TestReportHooksStillChecksCodexResidue(t *testing.T) {
 	home := t.TempDir()
+	stageRetiredLists(t, home, fixtureRetiredHooks)
 	stageOpenCodeGuard(t, home)
 	binary := filepath.Join(home, ".local", "bin", "pfm")
 	writeFixture(t, binary, "binary")
@@ -159,7 +160,7 @@ func ownedHooksBody(t *testing.T, home, extra string) string {
 	if extra == "" {
 		extra = `{"hooks":{}}`
 	}
-	body, _, _, err := updateCodexHooks([]byte(extra), home, false, nil)
+	body, _, _, err := updateCodexHooks(fixtureRetiredHooks, []byte(extra), home, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -312,7 +313,7 @@ func TestProbeCodexHooksReportsUnreadableTrustReceipt(t *testing.T) {
 	if err := os.Symlink(receipt, receipt); err != nil {
 		t.Fatal(err)
 	}
-	rows := probeCodexHooks(home, machine, filepath.Join(home, ".local", "bin", "pfm"))
+	rows := probeCodexHooks(home, machine, filepath.Join(home, ".local", "bin", "pfm"), fixtureRetiredHooks)
 	if len(rows) != 1 || rows[0].State != stateUnreadable || !strings.Contains(rows[0].Error, receipt) {
 		t.Fatalf("rows=%+v, want one unreadable trust receipt row, not one per handler", rows)
 	}

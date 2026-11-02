@@ -6,25 +6,24 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/rezzminator/professor/pfm/internal/codexappendix"
 )
 
 func TestCodexAppendixRejectsInvalidShapeBeforeMutation(t *testing.T) {
 	t.Parallel()
 	for _, raw := range []string{`null`, `{"hooks":"personal"}`, `{"hooks":{"SessionStart":"personal"}}`, `{"hooks":{"SessionStart":[null]}}`, `{"hooks":{"SessionStart":[{"hooks":[null]}]}}`} {
-		if _, _, _, err := updateCodexHooks([]byte(raw), t.TempDir(), false, nil); err == nil {
+		if _, _, _, err := updateCodexHooks(fixtureRetiredHooks, []byte(raw), t.TempDir(), false, nil); err == nil {
 			t.Fatalf("accepted %s", raw)
 		}
 	}
 }
 
-// An EXISTING install carries the retired SessionStart appendix hook. An
-// apply must take it away — not merely stop writing it — while an operator's
-// own handler in the same shared, symlinked file is untouched.
-func TestCodexApplyRetiresTheAppendixHookAndKeepsSharedSymlinks(t *testing.T) {
+// An EXISTING install carries a retired SessionStart hook. An apply must take
+// it away — not merely stop writing it — while an operator's own handler in
+// the same shared, symlinked file is untouched.
+func TestCodexApplyRetiresARetiredHookAndKeepsSharedSymlinks(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
+	retiredCommand := home + "/.local/bin/pfm internal compact-nudge"
 	shared := filepath.Join(home, "shared-hooks.json")
 	appendix, err := json.Marshal(map[string]any{
 		"hooks": map[string]any{
@@ -32,9 +31,9 @@ func TestCodexApplyRetiresTheAppendixHookAndKeepsSharedSymlinks(t *testing.T) {
 				"hooks": []any{map[string]any{"type": "command", "command": "echo personal"}},
 			}},
 			"SessionStart": []any{map[string]any{
-				"matcher": codexappendix.Matcher,
+				"matcher": "startup",
 				"hooks": []any{map[string]any{
-					"type": "command", "command": codexappendix.Command(home), "timeout": 10,
+					"type": "command", "command": retiredCommand, "timeout": 10,
 				}},
 			}},
 		},
@@ -53,7 +52,9 @@ func TestCodexApplyRetiresTheAppendixHookAndKeepsSharedSymlinks(t *testing.T) {
 		}
 	}
 	installer := engine{
-		options:     Options{Mode: ModeApply, Home: home, CodexHomes: homes, Stdout: io.Discard},
+		options: Options{
+			Mode: ModeApply, Home: home, CodexHomes: homes, Stdout: io.Discard, retired: &fixtureRetiredHooks,
+		},
 		apply:       true,
 		managedRoot: filepath.Join(home, "install"),
 	}
@@ -67,8 +68,8 @@ func TestCodexApplyRetiresTheAppendixHookAndKeepsSharedSymlinks(t *testing.T) {
 			t.Fatalf("symlink replaced: %s", path)
 		}
 		raw := readFixture(t, path)
-		if count := hookCommandCount(t, raw, "SessionStart", codexappendix.Command(home)); count != 0 {
-			t.Fatalf("retired appendix hook count=%d in %s:\n%s", count, path, raw)
+		if count := hookCommandCount(t, raw, "SessionStart", retiredCommand); count != 0 {
+			t.Fatalf("retired hook count=%d in %s:\n%s", count, path, raw)
 		}
 		if count := hookCommandCount(t, raw, "Stop", "echo personal"); count != 1 {
 			t.Fatalf("personal hook lost from %s:\n%s", path, raw)

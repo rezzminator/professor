@@ -1046,7 +1046,7 @@ grep -qF 'MODE: uninstall' <<<"$un" || bad="$bad pfm uninstall did not announce 
 [ -n "$un_summary" ] || bad="$bad pfm uninstall printed no 'summary changed=' line;"
 grep -qE 'changed=[1-9]' <<<"$un_summary" || bad="$bad pfm uninstall reports it changed nothing: ${un_summary:-<no summary>};"
 # I82/I83/I87: the managed root — every staged file gone, the ledger gone, nothing forced.
-for f in settings-hook-ownership.json source-repo mcp-auth-token mcp-ownership.json; do
+for f in settings-hook-ownership.json source-repo mcp-ownership.json; do
   [ ! -e "$MANAGED/$f" ] || bad="$bad $MANAGED/$f is still on disk (the ledger/metadata must be gone);"
 done
 if [ -e "$MANAGED" ]; then

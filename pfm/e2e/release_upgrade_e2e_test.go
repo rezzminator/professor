@@ -16,12 +16,20 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/semver"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // e2eOldTag names the older release the release-upgrade e2e updates from;
-// unset, the fifth-newest release tag of the source repository.
+// unset, the fifth-newest release tag of the source repository, never one
+// older than e2eOldestUpdatable.
 const e2eOldTag = "PFM_E2E_OLD_TAG"
+
+// e2eOldestUpdatable is the oldest release this tree updates from: the retired
+// lists ship empty, so an older host keeps state only a retirement cleared
+// (stats-cache.json linked into the store before v0.84.0, plugin ids before
+// {name}@professor before v0.86.0).
+const e2eOldestUpdatable = "v0.86.0"
 
 // failingDoctorSource is a file the rollback cases add to their candidate:
 // the candidate installs normally, and its doctor reports one failure.
@@ -324,9 +332,12 @@ func installShapedBase(
 	if err := os.Remove(binary); err != nil {
 		t.Fatalf("remove the staged %s build: %v", baseTag, err)
 	}
-	// --skip-harvest: releases before the harvester plugin downloaded its
-	// conversion sidecar at install; later ones accept the flag as a no-op.
-	h.requireSuccess("install "+baseTag, h.pfm(home, "install", "--yes", "--skip-harvest"))
+	install := []string{"install", "--yes"}
+	// Releases before v0.83.0 provision the harvest sidecar at install unless skipped.
+	if semver.Compare(baseTag, "v0.83.0") < 0 {
+		install = append(install, "--skip-harvest")
+	}
+	h.requireSuccess("install "+baseTag, h.pfm(home, install...))
 	return h, home
 }
 
@@ -469,6 +480,9 @@ func releaseTagFor(t *testing.T, tags []string, env string, index int) string {
 		t.Fatalf("%s unset and the repository holds %d release tag(s), not the %d needed: %s",
 			env, len(tags), index+1, strings.Join(tags, " "))
 	}
+	if semver.Compare(tags[index], e2eOldestUpdatable) < 0 {
+		return e2eOldestUpdatable
+	}
 	return tags[index]
 }
 
@@ -504,7 +518,7 @@ func nextPatchTag(t *testing.T, tag string) string {
 // canonicalPluginRecords re-hashes each Claude settings.json of snapshot, and
 // the installed_plugins.json beside it, as canonical JSON without the plugin
 // ids that settings.json disables. Install disables a retired plugin and never
-// uninstalls it (installer retiredClaudePlugins), so a host updated from a
+// uninstalls it (the retired lists' claudePlugins), so a host updated from a
 // release that installed one keeps it, disabled, by design; one still enabled
 // stays a difference.
 func canonicalPluginRecords(t *testing.T, home string, snapshot surfaceSnapshot) {

@@ -17,6 +17,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/restart"
+	"github.com/rezzminator/professor/pfm/internal/retired"
 )
 
 // ErrNameSyncRunning refuses a mutating install while the Linux name-sync
@@ -44,12 +45,11 @@ const (
 )
 
 const (
-	configTypeKey     = "type"
-	configCommandKey  = "command"
-	configArgsKey     = "args"
-	configEnvKey      = "env"
-	commandType       = "command"
-	legacyFleetBinary = "cc-fleet"
+	configTypeKey    = "type"
+	configCommandKey = "command"
+	configArgsKey    = "args"
+	configEnvKey     = "env"
+	commandType      = "command"
 )
 
 type CommandRunner interface {
@@ -84,6 +84,9 @@ func (adapter commandOutput) Run(ctx context.Context, argv []string, _ deps.RunO
 
 type Options struct {
 	Mode Mode
+	// retired stands in for the clone's retired lists in tests; nil reads the
+	// clone (retiredLists).
+	retired *retired.Lists
 	// herdrIndicatorDeps replaces the process-table, signal and start doors in tests.
 	herdrIndicatorDeps *restart.Deps
 	// LeaveVSCodeColors permits uninstall to leave known extension-owned keys;

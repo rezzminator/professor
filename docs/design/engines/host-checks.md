@@ -14,7 +14,7 @@
 
 `Severity` is a string; `Block` renders `BLOCK` and `Warn` renders `WARN`. `Row` holds `Severity`, stable `Check`, absolute `Path`, `Problem` and `Fix`. `Row.Line()` renders `{severity} {check} {path} — {problem}`.
 
-`Env` holds `Home`, `Store`, `ConfigPath`, `CloneConfigPath`, `LegacyConfigDir`, `StateDB`, `CacheDB`, `ManagedRoot`, `ConfigExplicit`, `MCPPort`, `Accounts` and `Now`. `EnvFor(runtime config.Runtime, now time.Time) Env` derives it from the loaded runtime: store and managed root through installer path functions, legacy config through `config.LegacyConfigDir`. `CloneConfigPath` is the recorded clone's `pfm.config.json`, or empty when the marker cannot resolve.
+`Env` holds `Home`, `Store`, `ConfigPath`, `StateDB`, `CacheDB`, `Accounts`, `AcceptedMCP`, `Now`, `Environ`, `TmuxDir`, `Tmux`, `ProcRoot`, `Retired` and `RetiredErr`. `EnvFor(runtime config.Runtime, now time.Time) Env` derives it from the loaded runtime: the store through `installer.ClaudeStore`, the retired lists through `retired.LoadLists`.
 
 `Detector` holds a stable `Check` and `Detect func(Env) ([]Row, error)`. `Detectors() []Detector` returns the ordered registry; `RunAll(env Env) []Row` concatenates findings; `Count(rows []Row, severity Severity) int` counts one severity. The installer package does not import hostcheck; hostcheck can use installer readers.
 
@@ -28,11 +28,11 @@ Doctor prints every finding as `host-check: {row.Line()}`, followed by `host-che
 
 The fix strings below are instructions for the operator. Detection and the install gate do not execute them. Install creates missing store entries and account links only after the gate; doctor also checks these targets ([claude-config-dir.md](claude-config-dir.md#pfm-doctor-checks)).
 
-An operator or a model applies a fix exactly as printed, so each fix must be safe as written, in any order. A fix that deletes or moves aside one path while keeping another goes through `removeKeeping` (`pfm/internal/hostcheck/hostcheck.go`). These are the present-target fixes of `legacy-config`, `legacy-state-db`, `legacy-cache-db` and `store-identity`, plus `pre-split-config` (b), `home-state-file`, `beside-backup` and every `account-entry-real` fix. The fix prints only when no deleted path is the same file as the kept one after following links (`os.SameFile`; a path with nothing at it is no file). One file under two names prints `{remove} and {keep} are one file through a link: delete neither; replace the link with a real copy, then rerun pfm doctor` instead. A failed stat, a dangling link included, prints the `UNREADABLE` row in place of the row, with no delete.
+An operator or a model applies a fix exactly as printed, so each fix must be safe as written, in any order. A fix that deletes or moves aside one path while keeping another goes through `removeKeeping` (`pfm/internal/hostcheck/hostcheck.go`). These are the present-target fix of `store-identity`, plus `home-state-file`, `beside-backup` and every `account-entry-real` fix. The fix prints only when no deleted path is the same file as the kept one after following links (`os.SameFile`; a path with nothing at it is no file). One file under two names prints `{remove} and {keep} are one file through a link: delete neither; replace the link with a real copy, then rerun pfm doctor` instead. A failed stat, a dangling link included, prints the `UNREADABLE` row in place of the row, with no delete.
 
 ## Paths and ordering
 
-`{home}` is the operator home, `{store}` is `~/.claude`, `{cfg}` is the runtime config path, `{legacy}` is `config.LegacyConfigDir`, `{acct}` is one roster account's `ConfigDir`, `{acct1}` is the lowest-ID account's directory, and `{managed}` is `~/.local/share/pfm/install`. Configured database targets are `{StateDB}` and `{CacheDB}`. `paths.LegacyStateDB` is `~/.cc/fleet.db`; `paths.LegacyCacheDB` is `~/.local/state/pfm/fleet.db`.
+`{home}` is the operator home, `{store}` is `~/.claude`, `{cfg}` is the runtime config path, `{acct}` is one roster account's `ConfigDir` and `{acct1}` is the lowest-ID account's directory.
 
 Detectors run in the table's order. Accounts are visited by ID, shared/account entries in installer list order, and directory names and MCP names lexically. Shared physical paths are inspected once where the check calls for deduplication. A real entry is present and is not a symlink. Manual merge fixes for real shared entries are chosen per `StoreEntries` entry.
 
@@ -42,16 +42,7 @@ The table gives one row per detector; exact problems and fixes follow under each
 
 | Check | Severity | Looks at | Problem | Fix |
 | --- | --- | --- | --- | --- |
-| `legacy-config` | BLOCK | legacy config files | config outside clone | move or compare/remove |
-| `pre-split-config` | BLOCK | raw config and sibling | old name, key or port | rename, split or edit |
-| `legacy-state-db` | BLOCK | legacy state and siblings | old database path | move or remove |
-| `legacy-cache-db` | BLOCK | legacy cache and siblings | old database path | move or remove |
 | `pfm-settings` | BLOCK | physical user settings | duplicate pfm launch values | remove owned keys |
-| `pfm-mcp` | BLOCK | registries and ownership | legacy pfm `mcpServers` entry or stale ownership state | use the printed legacy-entry fix; `pfm install` also applies the cutover |
-| `staged-shim` | BLOCK | shell source lines | retired staged shim | delete old source line |
-| `staged-prompts` | WARN | managed prompt dir | retired prompt staging | remove when unused |
-| `shared-db` | WARN | old shared database | retired file | remove |
-| `retired-harvester-config` | WARN | `harvester.config.json` beside the config, its `mcp.servers.harvester` | retired harvester settings | import with `harvester setup`, remove |
 | `stray-dir` | WARN | non-account `.cc` dirs | stray directory | inspect/remove |
 | `account-is-store` | BLOCK | physical account path | identity dir is store | unlink or configure |
 | `store-identity` | BLOCK | account entries in store | identity inside store | move, or move aside |
@@ -65,48 +56,6 @@ The table gives one row per detector; exact problems and fixes follow under each
 
 ## Detector details
 
-### legacy-config
-
-**Severity:** BLOCK
-
-Looks at `{legacy}/pfm.config.json`, `{legacy}/config.json`. With `ConfigExplicit`, only the explicit config is checked when its physical directory is `{legacy}` or below it; an explicit config elsewhere produces no rows.
-
-Problem: `legacy pfm config outside the clone`.
-
-Fix: target `{cfg}` absent: `mv {path} {cfg}`; present: `diff {path} {cfg} && rm {path}`.
-
-An explicit config inside the legacy config dir gets one row at its path with problem `explicit --config inside the legacy config dir`. Its target is the recorded clone's `pfm.config.json`: absent target, `mv {path} {clone}/pfm.config.json`; present target, `diff {path} {clone}/pfm.config.json && rm {path}`; unknown clone, `move {path} into the clone as pfm.config.json, then run pfm install from the clone`. An unreadable explicit config produces the `UNREADABLE` row.
-
-### pre-split-config
-
-**Severity:** BLOCK
-
-Looks at raw JSON of `{cfg}` and `dir({cfg})/config.json`; one row per finding.
-
-Problem: (a) `{cfg}` base name is `config.json`: `the config still has its pre-split name`; (b) a `config.json` beside a `pfm.config.json`: `a pre-split config.json beside the config`; (c) `mcp.http.port` is 8377: `mcp.http.port is the pre-split default 8377`.
-
-Fix: (a) `mv {cfg} {dir}/pfm.config.json`; (b) `rm {path}` once its content is in `{cfg}`; (c) `set mcp.http.port to 18377 in {cfg}; pfm install re-wires the chat client`.
-
-### legacy-state-db
-
-**Severity:** BLOCK
-
-Looks at `paths.LegacyStateDB(home)` and its `-wal`, `-shm`; skipped when it is physically `{StateDB}`.
-
-Problem: `legacy state database at the pre-layout path`.
-
-Fix: `{StateDB}` absent: `close every chat, stop pfm's services, then: mv {legacy} {StateDB}` plus `&& mv {legacy}-wal {StateDB}-wal` / `-shm` for each sibling present (pfm migrates the schema on its next open); present: `both exist — keep {StateDB}: rm {legacy} {legacy}-wal {legacy}-shm`.
-
-### legacy-cache-db
-
-**Severity:** BLOCK
-
-Looks at `paths.LegacyCacheDB(home)` and siblings, same rules against `{CacheDB}`.
-
-Problem: `legacy cache database at the pre-layout path`.
-
-Fix: same shape with `{CacheDB}`.
-
 ### pfm-settings
 
 **Severity:** BLOCK
@@ -116,56 +65,6 @@ Looks at each physical `settings.json` among `{store}` and every `{acct}`, once 
 Problem: `carries pfm's {items} — pfm supplies its own hooks and status lines through --settings at launch, so these entries are leftovers of an earlier install` (items from `installer.PFMSettingsLeftovers`: distinct `hook "{command}"` entries sorted by command, then `statusLine`, then `subagentStatusLine`, joined with `, `).
 
 Fix: `remove {items} from {path} (each hook entry running that command and each named key; keep every other entry)`.
-
-### pfm-mcp
-
-**Severity:** BLOCK
-
-Looks at every existing file from `installer.ClaudeUserRegistries(home, accounts, "")`, `{home}/.claude.json`, `{home}/.mcp.json`, once per physical file; plus `{managed}/mcp-ownership.json` `clients`. The installer uses the same registry inspector to remove exact pfm-owned legacy entries and reconcile enabled family entries without creating absent registry files. Doctor reports account registry state, foreign `professor` entries and unreadable files. The active `chat-professor` registration produces no `pfm-mcp` row; exact retired `harvester-professor` shapes are removed by install. For a legacy entry, the existing Problem is `carries pfm mcpServers.<legacy-name>` and its Fix is `remove mcpServers.<legacy-name> from <path>; pfm’s server rides --mcp-config at launch`. Rerunning `pfm install` removes exact pfm-owned legacy entries and reconciles chat. A ledger name counts only when the current entry equals a recorded entry under a ledger key resolving to that file, ignoring an empty `env`; pfm command shapes count independently. The names-only `clients` list never decides entry ownership.
-
-Problem: `carries pfm mcpServers.<legacy-name>`; ledger: `mcp-ownership.json still records pfm clients`.
-
-Fix: `remove mcpServers.<legacy-name> from <path>; pfm’s server rides --mcp-config at launch`; ledger: `remove "clients" from {path}`. These diagnostics apply only to legacy entries; modern owned family entries produce no `pfm-mcp` row. Rerunning `pfm install` is also a supported cutover path.
-
-### staged-shim
-
-**Severity:** BLOCK
-
-Looks at `{home}/.zshrc` lines where `installer.IsStagedShimLine(line)`.
-
-Problem: `sources pfm's retired staged shim`.
-
-Fix: `delete the line "{line}" from {home}/.zshrc; pfm install writes the clone's source line`.
-
-### staged-prompts
-
-**Severity:** WARN
-
-Looks at `{managed}/harness-prompts`.
-
-Problem: `retired staged prompt dir`.
-
-Fix: `rm -r {path} once no chat started before the move is open`.
-
-### shared-db
-
-**Severity:** WARN
-
-Looks at `{home}/.local/state/pfm/shared.db`.
-
-Problem: empty: `retired empty shared.db`; else `retired shared.db holds {n} bytes`.
-
-Fix: `rm {path}`.
-
-### retired-harvester-config
-
-**Severity:** WARN
-
-Looks at `harvester.config.json` beside the config, and the config's `mcp.servers.harvester`.
-
-Problem: file: `retired harvester.config.json; pfm no longer reads it`; entry: `retired mcp.servers.harvester entry; pfm no longer reads it`.
-
-Fix: file: `run harvester setup to import it into the harvester plugin's config, then rm {path}`; entry: `delete mcp.servers.harvester from {config}; the harvester plugin keeps its own config`.
 
 ### stray-dir
 
@@ -195,7 +94,7 @@ Fix:
 
 **Severity:** BLOCK
 
-Looks at each `AccountEntries` entry in `{store}` that is not in `RetiredStoreEntries` (those are `retired-store-entry`'s) and not `cache` (`storeRebuildableEntries`: a cache is rebuilt, and other tools' hooks write under the store's `cache/`, so a store holding only that raises no row; an account's own `cache` stays an account entry); for `state`, only `state/mcp-discover-verdicts.json` is checked. `{acct1}` is classified by `claudelaunch.InspectConfigDir`, as in `account-is-store`.
+Looks at each `AccountEntries` entry in `{store}` that is not in the `storeEntries` list of `templates/global/retired.json` (those are `retired-store-entry`'s) and not `cache` (`storeRebuildableEntries`: a cache is rebuilt, and other tools' hooks write under the store's `cache/`, so a store holding only that raises no row; an account's own `cache` stays an account entry); for `state`, only `state/mcp-discover-verdicts.json` is checked. `{acct1}` is classified by `claudelaunch.InspectConfigDir`, as in `account-is-store`.
 
 Problem: `{entry} is account identity inside the store, written by a Claude launched with CLAUDE_CONFIG_DIR set to the store (a loop over config dirs that still lists it)`. pfm launches always set `CLAUDE_CONFIG_DIR` to an account dir, so identity lands in the store only through a launch that points it at the store. For `backups` the problem adds `; a Claude launched without CLAUDE_CONFIG_DIR writes backups here too`: an unscoped Claude's config dir is the store. For `.claude.json`, `.claude.json.backup` and `backups` it ends with the file's birth, `({birth})` — see [Stray state birth](#stray-state-birth).
 
@@ -248,7 +147,7 @@ For `account-entry-real`, the fix is selected by entry. Each fix is one shell li
 
 **Severity:** WARN
 
-Looks at each `RetiredStoreEntries` entry: per account by ID, a link at `{acct}/{entry}` resolving to `{store}/{entry}` (skipped for an account `account-is-store` reports), then `{store}/{entry}`. A real `{acct}/{entry}` is the account's own file and gives no row.
+Looks at each entry of the `storeEntries` list of `templates/global/retired.json`: per account by ID, a link at `{acct}/{entry}` resolving to `{store}/{entry}` (skipped for an account `account-is-store` reports), then `{store}/{entry}`. A real `{acct}/{entry}` is the account's own file and gives no row.
 
 Problem: `{entry} links into the store; it is a per-account file now` for a link, `{entry} is a per-account file now; the store copy is retired` for the store copy. While an account has a live chat, which writes the entry, `pfm install` holds the migration back by design, through the same door it asks (`installer.LiveChatDeferral`, read here without the account guard): that account's link row and the store copy's row end `; deferred: account {dir} has live chats; close them and rerun pfm install --yes` (`; deferred: live chats in {dir} unreadable: {cause}` when the chats cannot be read).
 
@@ -268,7 +167,7 @@ Fix: `keep it; pfm doctor names it until a pfm release classifies it`.
 
 **Severity:** WARN
 
-Looks at top-level `mcpServers` names in every existing `{acct}/.claude.json` and `{home}/.claude.json`, excluding the modern owned `chat-professor` entry, which produces no third-party row. Harvester's native plugin registration is outside these pfm MCP registries. Foreign `professor` entries are preserved by install and reported by doctor; unreadable registries are surfaced as unreadable rather than absent.
+Looks at top-level `mcpServers` names in every existing `{acct}/.claude.json` and `{home}/.claude.json`. Every entry produces a row, except those `doctor.acceptedMCP` retains (exact absolute `path` + `server`): those print as an ACCEPTED row. Harvester's native plugin registration is outside these registries. Unreadable registries are surfaced as unreadable rather than absent.
 
 Problem: `mcpServers.{name} is declared outside pfm`.
 

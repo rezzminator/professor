@@ -1,6 +1,7 @@
 package hostcheck
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -17,6 +18,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/retired"
 )
 
 func fixtureEnv(t *testing.T) Env {
@@ -24,13 +26,19 @@ func fixtureEnv(t *testing.T) Env {
 	home := t.TempDir()
 	return Env{
 		Home: home, Store: installer.ClaudeStore(home),
-		ConfigPath:      filepath.Join(home, "clone", config.FileName),
-		LegacyConfigDir: filepath.Join(home, ".config", "pfm"),
-		StateDB:         paths.DefaultStateDB(home), CacheDB: paths.DefaultCacheDB(home),
-		ManagedRoot: installer.ManagedRoot(home), MCPPort: config.DefaultMCPPort,
+		ConfigPath: filepath.Join(home, "clone", config.FileName),
+		StateDB:    paths.DefaultStateDB(home), CacheDB: paths.DefaultCacheDB(home),
 		Accounts: []config.Account{{ID: 1, ConfigDir: config.DefaultAccountDir(home, 1)}},
 		Now:      time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC),
+		Retired:  fixtureRetired,
 	}
+}
+
+// fixtureRetired are the retired lists the detectors are tested on; the
+// shipped file's lists are empty.
+var fixtureRetired = retired.Lists{
+	StoreEntries: []string{".last-update-result.json", "stats-cache.json"},
+	HookCommands: []retired.HookCommand{{Name: "clear-hide", Subcommand: "internal clear-hide"}},
 }
 
 func TestLoadedStoreAccountReachesHostGate(t *testing.T) {
@@ -122,7 +130,7 @@ func TestHostcheckAPI(t *testing.T) {
 		t.Fatal("severity count")
 	}
 	want := strings.Fields(
-		"legacy-config pre-split-config legacy-state-db legacy-cache-db pfm-settings pfm-mcp staged-shim staged-prompts shared-db retired-harvester-config stray-dir account-is-store store-identity home-state-file account-entry-real retired-store-entry unclassified third-party-mcp stale-state-tmp beside-backup function-hook-modules shell-claude-env tmux-servers",
+		"pfm-settings stray-dir account-is-store store-identity home-state-file account-entry-real retired-store-entry unclassified third-party-mcp stale-state-tmp beside-backup function-hook-modules shell-claude-env tmux-servers",
 	)
 	var got []string
 	for _, detector := range Detectors() {
@@ -173,36 +181,20 @@ func TestRunErrorConversion(t *testing.T) {
 func TestEnvFor(t *testing.T) {
 	env := fixtureEnv(t)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(env.Home, "xdg"))
+	writeFile(t, filepath.Join(env.Home, ".professor", "templates", "global", "retired.json"),
+		`{"storeEntries":[".last-update-result.json","stats-cache.json"],`+
+			`"hookCommands":[{"name":"clear-hide","subcommand":"internal clear-hide"}]}`)
 	runtime := config.Runtime{
-		Config:         config.Config{Path: env.ConfigPath, Accounts: env.Accounts},
-		Paths:          paths.Values{Home: env.Home, StateDB: env.StateDB, CacheDB: env.CacheDB},
-		ConfigExplicit: true,
+		Config: config.Config{Path: env.ConfigPath, Accounts: env.Accounts},
+		Paths:  paths.Values{Home: env.Home, StateDB: env.StateDB, CacheDB: env.CacheDB},
 	}
-	runtime.Config.MCP.HTTP.Port = 19200
 	got := EnvFor(runtime, env.Now)
-	env.ConfigExplicit = true
-	env.LegacyConfigDir = filepath.Join(env.Home, "xdg", "pfm")
-	env.MCPPort = 19200
 	env.Environ = os.Environ()
 	if !slices.Contains(got.Environ, "XDG_CONFIG_HOME="+filepath.Join(env.Home, "xdg")) {
 		t.Fatalf("env.Environ=%v lacks the process environment", got.Environ)
 	}
 	if !reflect.DeepEqual(got, env) {
 		t.Fatalf("env=%+v want=%+v", got, env)
-	}
-	clone := filepath.Dir(env.ConfigPath)
-	makeDir(t, clone)
-	if err := paths.WriteSourceRepoMarker(env.Home, clone); err != nil {
-		t.Fatal(err)
-	}
-	if got := EnvFor(runtime, env.Now); got.CloneConfigPath != env.ConfigPath {
-		t.Fatalf("recorded clone config=%q, want %q", got.CloneConfigPath, env.ConfigPath)
-	}
-	if err := os.Rename(clone, clone+".moved"); err != nil {
-		t.Fatal(err)
-	}
-	if got := EnvFor(runtime, env.Now); got.CloneConfigPath != "" {
-		t.Fatalf("unusable marker clone config=%q, want empty", got.CloneConfigPath)
 	}
 }
 
@@ -332,21 +324,6 @@ func TestRemoveKeepingDoors(t *testing.T) {
 		check string
 		shape func(t *testing.T, env Env) (remove, keep string)
 	}{
-		{"legacy-config", func(t *testing.T, env Env) (string, string) {
-			remove := filepath.Join(env.LegacyConfigDir, config.FileName)
-			return remove, hardLink(t, env.ConfigPath, remove)
-		}},
-		{"legacy-state-db", func(t *testing.T, env Env) (string, string) {
-			remove := paths.LegacyStateDB(env.Home)
-			writeFile(t, remove+"-wal", "wal")
-			return remove, hardLink(t, env.StateDB, remove)
-		}},
-		{"pre-split-config", func(t *testing.T, env Env) (string, string) {
-			remove := filepath.Join(filepath.Dir(env.ConfigPath), "config.json")
-			writeFile(t, remove, "{}")
-			symlink(t, remove, env.ConfigPath)
-			return remove, env.ConfigPath
-		}},
 		{"home-state-file", func(t *testing.T, env Env) (string, string) {
 			remove, keep := filepath.Join(env.Home, ".claude.json"), filepath.Join(env.Accounts[0].ConfigDir, ".claude.json")
 			writeFile(t, remove, "{}")
@@ -384,15 +361,7 @@ func TestRemoveKeepingDoors(t *testing.T) {
 	}
 }
 
-func hardLink(t *testing.T, keep, remove string) string {
-	t.Helper()
-	writeFile(t, keep, "{}")
-	makeDir(t, filepath.Dir(remove))
-	if err := os.Link(keep, remove); err != nil {
-		t.Fatal(err)
-	}
-	return keep
-}
+func jsonDecodeError(raw string) error { var value any; return json.Unmarshal([]byte(raw), &value) }
 
 func symlink(t *testing.T, target, path string) {
 	t.Helper()

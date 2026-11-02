@@ -22,7 +22,6 @@ import (
 const (
 	Version        = 2
 	FileName       = "pfm.config.json"
-	LegacyFileName = "config.json"
 	DefaultMCPPort = 18377
 )
 
@@ -360,7 +359,6 @@ type rawMCP struct {
 	ThirdParty map[string]json.RawMessage `json:"thirdParty,omitempty"`
 	Servers    map[string]json.RawMessage `json:"servers,omitempty"`
 	HTTP       *rawMCPHTTP                `json:"http,omitempty"`
-	AuthToken  *string                    `json:"authToken,omitempty"`
 }
 
 type rawMCPServer struct {
@@ -935,9 +933,6 @@ func loadWithMCPServers(
 			result.MCP.HTTP.Port = raw.MCP.HTTP.Port
 			result.Sources["mcp.http.port"] = SourceFile
 		}
-		// authToken was briefly installer-owned. Keep accepting the legacy key
-		// so install can remove it, but it has no effective runtime value: the
-		// local MCP daemon is loopback-only and deliberately unauthenticated.
 	}
 	if err := applyChatAndAsk(&result, raw); err != nil {
 		return Config{}, err

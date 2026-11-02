@@ -47,12 +47,6 @@ func TestUninstallRemovesEveryMachineGlobalCommandAndSkillLink(t *testing.T) {
 		assertLink(t,
 			filepath.Join(config, "skills", "pcm"),
 			filepath.Join(repo, "templates", "global", "skills", "pcm"))
-		if err := os.Symlink(
-			filepath.Join(repo, "workflows", "deep-rr"),
-			filepath.Join(config, "skills", "deep-rr"),
-		); err != nil {
-			t.Fatal(err)
-		}
 	}
 
 	if _, err := Run(context.Background(), Options{
@@ -67,7 +61,6 @@ func TestUninstallRemovesEveryMachineGlobalCommandAndSkillLink(t *testing.T) {
 			filepath.Join("commands", "tools"),
 			filepath.Join("rules", "careful.md"),
 			filepath.Join("skills", "pcm"),
-			filepath.Join("skills", "deep-rr"),
 		} {
 			path := filepath.Join(config, relative)
 			if _, err := os.Lstat(path); !os.IsNotExist(err) {

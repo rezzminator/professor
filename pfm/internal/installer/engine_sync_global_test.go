@@ -557,8 +557,8 @@ func TestUninstallWithoutEngineSyncStillTearsDownEverythingPfmOwns(t *testing.T)
 	}
 }
 
-// An engine-sync step that fails outright (here the old config directory
-// cannot be inspected) is deferred as install defers it: the uninstall
+// An engine-sync step that fails outright (here engine-sync global refuses)
+// is deferred as install defers it: the uninstall
 // still unwires the scheduler and the global file, and the error comes
 // back at the end. The uninstall runs without the preflight, which would have
 // refused the same failure before touching anything.
@@ -576,7 +576,7 @@ func TestUninstallEngineSyncFailureStillUnwiresTheSchedulerAndTargets(t *testing
 	if _, err := os.Lstat(globalFile); err != nil {
 		t.Fatalf("install wrote no %s: %v", globalFile, err)
 	}
-	writeFixture(t, filepath.Join(home, ".config", "engine-sync"), "not a directory\n")
+	testjail.FakeEngineSync(t, `{"ok":false,"events":[],"error":"fixture global refused"}`, 1)
 	options, err := normalizeInstallerOptions(Options{
 		MCPConfigPath: testConfigPath(t), Mode: ModeUninstall, Home: home, Runner: runner,
 	})
@@ -590,7 +590,7 @@ func TestUninstallEngineSyncFailureStillUnwiresTheSchedulerAndTargets(t *testing
 	}
 	runner.calls = nil
 	failure := errors.Join(installer.uninstall(context.Background()), errors.Join(installer.deferred...))
-	if failure == nil || !strings.Contains(failure.Error(), "inspect engine-sync policy") {
+	if failure == nil || !strings.Contains(failure.Error(), "fixture global refused") {
 		t.Fatalf("uninstall error = %v, want the engine-sync failure\n%s", failure, output.String())
 	}
 	if _, statErr := os.Lstat(globalFile); !errors.Is(statErr, fs.ErrNotExist) {

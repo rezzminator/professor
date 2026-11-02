@@ -101,23 +101,27 @@ func TestMCPWireFailureStillRefreshesRunningLinuxDaemon(t *testing.T) {
 		t.Skip("Linux systemd daemon refresh")
 	}
 	home := t.TempDir()
-	configPath := filepath.Join(home, ".config", "pfm", "config.json")
-	if err := os.MkdirAll(configPath, 0o700); err != nil {
+	codexHome := filepath.Join(home, ".codex")
+	codexConfig := filepath.Join(codexHome, "config.toml")
+	if err := os.MkdirAll(codexHome, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(home, "absent.toml"), codexConfig); err != nil {
 		t.Fatal(err)
 	}
 	runner := &fakeRunner{manager: true}
 	installer := engine{
 		options: Options{
 			Mode: ModeApply, Home: home, ConfigDir: filepath.Join(home, ".claude"),
-			MCPEnabled: map[string]bool{"chat": true}, MCPPort: 8377,
-			MCPConfigPath: configPath, Runner: runner, Stdout: io.Discard,
+			MCPEnabled: map[string]bool{"chat": true}, MCPPort: 8377, CodexHomes: []string{codexHome},
+			MCPConfigPath: testConfigPath(t), Runner: runner, Stdout: io.Discard,
 			Sleep: func(time.Duration) {},
 		},
 		apply: true, managedRoot: filepath.Join(home, ".local", "share", "pfm", "install"), stamp: "fixture",
 	}
 	if err := errors.Join(
 		append([]error{installer.install(context.Background())}, installer.deferred...)...); err == nil ||
-		!strings.Contains(err.Error(), "load MCP config for legacy auth cleanup") {
+		!strings.Contains(err.Error(), "MCP config is a dangling symlink: "+codexConfig) {
 		t.Fatalf("fixture did not retain deferred wireMCP failure: %v", err)
 	}
 	if calls := strings.Join(runner.calls, "\n"); !strings.Contains(calls, "systemctl --user restart "+mcpUnitName) {
@@ -142,59 +146,6 @@ func TestMCPOpenCodeCreatesClientJSONWithoutClaimingABackup(t *testing.T) {
 	}
 	if matches, _ := filepath.Glob(path + ".pre-professor-*"); len(matches) != 0 {
 		t.Fatalf("fresh OpenCode registration made a backup: %v", matches)
-	}
-}
-
-func TestMCPInstallRemovesLegacyAuthOutsideClaudeAccountFiles(t *testing.T) {
-	home := t.TempDir()
-	configPath := filepath.Join(home, "pfm.config.json")
-	credentialPath := filepath.Join(managedRootForHome(home), mcpCredentialName)
-	registry := filepath.Join(home, ".claude.json")
-	legacyToken := strings.Repeat("a", 64)
-	writeFixture(
-		t,
-		configPath,
-		`{"version":2,"mcp":{"servers":{"chat":{"enabled":true}},"authToken":"`+legacyToken+`"}}`,
-	)
-	writeFixture(t, credentialPath, legacyToken+"\n")
-	writeFixture(t, registry, `{"mcpServers":{"chat":{"headers":{"Authorization":"Bearer `+legacyToken+`"}}}}`)
-	codex := filepath.Join(home, ".codex")
-	configTOML := filepath.Join(codex, "config.toml")
-	writeFixture(
-		t,
-		configTOML,
-		mcpFenceBegin+"\n[mcp_servers.chat]\nurl = \"http://127.0.0.1:8377/mcp/chat\"\n[mcp_servers.chat.headers]\nAuthorization = \"Bearer "+legacyToken+"\"\n"+mcpFenceEnd+"\n",
-	)
-	e := engine{
-		options: Options{
-			Home:          home,
-			MCPConfigPath: configPath,
-			CodexHomes:    []string{codex},
-			MCPEnabled:    map[string]bool{"chat": true},
-			MCPPort:       8377,
-			Stdout:        io.Discard,
-		},
-		managedRoot: managedRootForHome(home),
-		apply:       true,
-		stamp:       "fixture",
-	}
-	if err := e.wireMCP(); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(credentialPath); !os.IsNotExist(err) {
-		t.Fatalf("legacy credential remains: %v", err)
-	}
-	for _, path := range []string{configPath, configTOML} {
-		if raw := readFixture(
-			t,
-			path,
-		); strings.Contains(raw, legacyToken) || strings.Contains(raw, "authToken") ||
-			strings.Contains(raw, "Authorization") {
-			t.Fatalf("%s retained legacy MCP auth: %s", path, raw)
-		}
-	}
-	if raw := readFixture(t, registry); !strings.Contains(raw, legacyToken) {
-		t.Fatalf("Claude registry changed: %s", raw)
 	}
 }
 
@@ -313,49 +264,6 @@ func openCodeChatShape(home string) map[string]any {
 	}
 }
 
-// TestMCPOpenCodeInstallRemovesPFMLegacyEntriesTheLedgerNeverListed pins that
-// pfm's own pre-professor OpenCode entries go by exact shape alone — no
-// ledger entry names them — while every comment and foreign key survives.
-func TestMCPOpenCodeInstallRemovesPFMLegacyEntriesTheLedgerNeverListed(t *testing.T) {
-	t.Parallel()
-	home := t.TempDir()
-	configPath := OpenCodeConfigPath(home)
-	bin := filepath.Join(home, ".local", "bin", "pfm")
-	writeFixture(t, configPath, `{
-  // Operator comment.
-  "mcp": {
-    // Legacy pfm entries.
-    "chat": {"type": "local", "command": ["`+bin+`", "mcp", "chat", "serve"], "enabled": true},
-    "manual": {"type": "remote", "url": "https://gateway.example.invalid/mcp", "enabled": true}
-  }
-}
-`)
-	e := engine{
-		options:     Options{Home: home, OpenCodeConfigPath: configPath, MCPPort: 8456, Stdout: io.Discard},
-		managedRoot: filepath.Join(home, ".local", "share", "pfm", "install"),
-		apply:       true,
-		stamp:       "fixture",
-	}
-	if err := e.writeMCPOpenCodeJSON([]string{chatRegistrationName}); err != nil {
-		t.Fatal(err)
-	}
-	raw := readFixture(t, configPath)
-	if !strings.Contains(raw, "// Operator comment.") || !strings.Contains(raw, "// Legacy pfm entries.") {
-		t.Fatalf("OpenCode legacy cleanup discarded comments:\n%s", raw)
-	}
-	document, err := decodeJSONCObject([]byte(raw))
-	if err != nil {
-		t.Fatal(err)
-	}
-	servers, _ := document["mcp"].(map[string]any)
-	if _, ok := servers[chatName]; ok {
-		t.Fatalf("legacy local chat survived:\n%s", raw)
-	}
-	if servers["manual"] == nil || !sameJSONValue(servers[chatRegistrationName], openCodeChatShape(home)) {
-		t.Fatalf("servers=%#v, want manual kept and professor in its local stdio shape", servers)
-	}
-}
-
 func applyChatMCP(t *testing.T, home string) string {
 	t.Helper()
 	canonical := filepath.Join(home, ".claude")
@@ -391,35 +299,6 @@ func TestMCPInstallRegistersTheStdioChatFamilyInAFreshCodexHome(t *testing.T) {
 	}
 	if strings.Contains(codexConfig, "url = ") {
 		t.Fatalf("Codex registration carries a url line:\n%s", codexConfig)
-	}
-}
-
-func TestMCPOpenCodeLegacyRemovalIsNamedOnTheChangeLine(t *testing.T) {
-	t.Parallel()
-	home := t.TempDir()
-	configPath := OpenCodeConfigPath(home)
-	bin := filepath.Join(home, ".local", "bin", "pfm")
-	writeFixture(t, configPath,
-		`{"mcp":{"chat":{"type":"local","command":["`+bin+`","mcp","chat","serve"],"enabled":true}}}`)
-	var out strings.Builder
-	e := engine{
-		options:     Options{Home: home, OpenCodeConfigPath: configPath, MCPPort: 8456, Stdout: &out},
-		managedRoot: filepath.Join(home, ".local", "share", "pfm", "install"),
-		apply:       true,
-		stamp:       "fixture",
-	}
-	if err := e.writeMCPOpenCodeJSON([]string{chatRegistrationName}); err != nil {
-		t.Fatal(err)
-	}
-	var changeLine string
-	for _, line := range strings.Split(out.String(), "\n") {
-		if strings.Contains(line, "rewrite "+physicalSettingsPath(configPath)) {
-			changeLine = line
-			break
-		}
-	}
-	if !strings.HasSuffix(changeLine, " — remove pfm's legacy MCP clients chat") {
-		t.Fatalf("OpenCode change line %q does not end naming the removed legacy chat:\n%s", changeLine, out.String())
 	}
 }
 

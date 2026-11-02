@@ -407,118 +407,6 @@ func TestEnsureClaudePluginsKeepsAnUnparsableLocalManifest(t *testing.T) {
 	}
 }
 
-// TestEnsureClaudePluginsRetiresTheLegacyIDs: on every build an installed
-// {name}@professor takes over each legacy id enabled in settings.json: the
-// legacy ids disabled with the options of the enabled one carried, then every
-// legacy key dropped, through the store's settings link, every number and
-// string kept exactly. An -alpha build with no checkout touches nothing and
-// fails naming why. A dry run writes nothing.
-func TestEnsureClaudePluginsRetiresTheLegacyIDs(t *testing.T) {
-	github := func(p testPlugin) string { return p.Name + "@" + p.Name }
-	dev := func(p testPlugin) string { return p.Name + "@" + p.Name + "-dev" }
-	for _, test := range []struct {
-		name      string
-		version   string
-		checkouts bool
-	}{
-		{"alpha", alphaVersion, true},
-		{"release", "0.80.0", true},
-		{"alpha without a checkout", alphaVersion, false},
-	} {
-		for _, apply := range []bool{true, false} {
-			t.Run(fmt.Sprint(test.name, " apply=", apply), func(t *testing.T) {
-				root := t.TempDir()
-				inst, runner, out, home, first := alphaPluginEngine(t, root)
-				inst.options.Version = test.version
-				inst.apply = apply
-				enabled := map[string]any{}
-				ids := []string{}
-				for _, p := range testPlugins {
-					if test.checkouts {
-						writePluginCheckout(t, root, p.Name)
-					}
-					enabled[ownID(p.Name)] = true
-					enabled[github(p)] = false
-					enabled[dev(p)] = true
-					ids = append(ids, ownID(p.Name))
-				}
-				zero, one := testPlugins[0], testPlugins[1]
-				document := map[string]any{
-					"enabledPlugins": enabled,
-					"pluginConfigs": map[string]any{
-						github(zero):    map[string]any{"options": map[string]any{"logFile": "/tmp/old"}},
-						dev(zero):       map[string]any{"options": map[string]any{"logFile": "/tmp/x <&>"}},
-						github(one):     map[string]any{"options": map[string]any{"a": 1}},
-						ownID(one.Name): map[string]any{"options": map[string]any{"b": 2}},
-					},
-				}
-				raw, _ := json.Marshal(document)
-				// settings.json is the store's file, linked from the account dir.
-				store := filepath.Join(home, ".claude", "settings.json")
-				before := strings.Replace(string(raw), "{", `{"counter":9007199254740993,`, 1)
-				writeFixture(t, store, before)
-				if err := os.Symlink(store, filepath.Join(first, "settings.json")); err != nil {
-					t.Fatal(err)
-				}
-				writeInstalledPlugins(t, first, ids...)
-				err := inst.ensureClaudePlugins(context.Background())
-				fallback := !test.checkouts && test.version == alphaVersion
-				if fallback != (err != nil) ||
-					fallback && !strings.Contains(err.Error(), "is not installed on this alpha build") {
-					t.Fatalf("ensureClaudePlugins: %v\n%s", err, out.String())
-				}
-				if len(runner.calls) != 0 {
-					t.Fatalf("calls=%v, want none: every id is installed\n%s", runner.calls, out.String())
-				}
-				path := filepath.Join(first, "settings.json")
-				for _, p := range testPlugins {
-					line := "  change  disable " + dev(p) + " in " + path + ": " + ownID(p.Name) + " replaces it"
-					if p.Name == zero.Name {
-						line += "; copy its pluginConfigs to " + ownID(p.Name)
-					}
-					if fallback == strings.Contains(out.String(), line+"\n") {
-						t.Fatalf("fallback=%v, line %q:\n%s", fallback, line, out.String())
-					}
-				}
-				if info, err := os.Lstat(path); err != nil || info.Mode()&fs.ModeSymlink == 0 {
-					t.Fatalf("the account's settings link was replaced: %v %v", info, err)
-				}
-				after := readFixture(t, store)
-				if !apply || fallback {
-					if after != before {
-						t.Fatalf("settings written: %s", after)
-					}
-					return
-				}
-				if !strings.Contains(after, "9007199254740993") || !strings.Contains(after, "/tmp/x <&>") {
-					t.Fatalf("settings lost a value: %s", after)
-				}
-				var got map[string]any
-				if err := json.Unmarshal([]byte(after), &got); err != nil {
-					t.Fatal(err)
-				}
-				wantEnabled := map[string]any{}
-				for _, p := range testPlugins {
-					wantEnabled[ownID(p.Name)] = true
-				}
-				wantConfigs := map[string]any{
-					ownID(zero.Name): map[string]any{"options": map[string]any{"logFile": "/tmp/x <&>"}},
-					ownID(one.Name):  map[string]any{"options": map[string]any{"b": float64(2)}},
-				}
-				if !reflect.DeepEqual(got["enabledPlugins"], wantEnabled) ||
-					!reflect.DeepEqual(got["pluginConfigs"], wantConfigs) {
-					t.Fatalf("settings = %v\n%s", got, out.String())
-				}
-				out.Reset()
-				if err := inst.ensureClaudePlugins(context.Background()); err != nil ||
-					strings.Contains(out.String(), "  change  ") {
-					t.Fatalf("second run err=%v:\n%s", err, out.String())
-				}
-			})
-		}
-	}
-}
-
 // TestEnsureClaudePluginsAlphaWithoutACheckout: on -alpha each listed plugin
 // with a checkout installs as {name}@professor from the professor-dev
 // marketplace; one with no checkout installs nothing and fails naming where it
@@ -627,8 +515,8 @@ func TestEnsureClaudePluginsAlphaWithoutACheckout(t *testing.T) {
 
 // TestEnsureClaudePluginsUndecidedLeavesEveryID: an -alpha build that cannot
 // tell where a plugin's checkout is — its source clone moved away, or its
-// checkout cannot be read — decides nothing. It leaves the enabled legacy -dev
-// id and the disabled legacy GitHub id as they are, runs no plugin command,
+// checkout cannot be read — decides nothing. It leaves the plugin's enabled
+// and disabled ids from other marketplaces as they are, runs no plugin command,
 // and fails the step naming the error, never acting as if no checkout existed.
 func TestEnsureClaudePluginsUndecidedLeavesEveryID(t *testing.T) {
 	for _, test := range []struct {
@@ -711,18 +599,23 @@ func TestEnsureClaudePluginsUndecidedLeavesEveryID(t *testing.T) {
 func TestSettingsEditKeepsAWriteMadeAfterItsRead(t *testing.T) {
 	const name = "auto-effort"
 	target := &ClaudePluginTarget{Name: name, ID: ownID(name), Own: true}
+	installOnly := &ClaudePluginTarget{Name: name, ID: ownID(name), Own: true, InstallOnly: true}
 	for _, test := range []struct {
 		name     string
-		plan     func(string, *ClaudePluginTarget) (string, func() error, error)
+		plan     func(string) (string, func() error, error)
 		disabled string
 	}{
-		{"legacy copy retirement", planLegacyCopyRetirement, name + "@" + name},
-		{"retired plugin disable", planRetiredPluginDisable, "agent-effort@agent-effort"},
+		{"install-only disable", func(path string) (string, func() error, error) {
+			return planInstallOnlyDisable(path, installOnly)
+		}, ownID(name)},
+		{"retired plugin disable", func(path string) (string, func() error, error) {
+			return planRetiredPluginDisable(path, target, testRetiredPlugins[name])
+		}, "old-effort@old-effort"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "settings.json")
 			writeFixture(t, path, `{"enabledPlugins":{"`+test.disabled+`":true}}`)
-			message, edit, err := test.plan(path, target)
+			message, edit, err := test.plan(path)
 			if err != nil || message == "" {
 				t.Fatalf("plan = %q, %v; want an edit", message, err)
 			}

@@ -1,5 +1,4 @@
 all: internal/engine/engine.go internal/transcript/transcript.go
-command: internal/codexappendix/codexappendix.go internal/tmux/tmux.go
 defaults: internal/config/config.go internal/spawn/types.go
 find: internal/chat/find.go internal/stale/stale.go
 load: internal/config/config.go internal/professor/baseline.go internal/theme/theme.go

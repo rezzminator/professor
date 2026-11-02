@@ -178,9 +178,6 @@ func TestRegisterHookTrustPicksOnlyItsOwnHandlerAmongPersonalOnes(t *testing.T) 
 	if !HookTrustRecorded(account) {
 		t.Fatal("HookTrustRecorded=false after a registration")
 	}
-	if TrustRecorded(account) {
-		t.Fatal("the hook receipt answered the retired appendix's question")
-	}
 }
 
 func TestRegisterHookTrustErrorsWithTheCountWhenTheHandlerIsNotListed(t *testing.T) {
@@ -243,10 +240,6 @@ func TestUnregisterHookTrustRemovesOnlyItsOwnTablesAndReceipt(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeReceiptFile(t, account, `{"owned:key":"sha256:owned"}`)
-	appendixReceipt := filepath.Join(account, ".professor-appendix-trust.json")
-	if err := os.WriteFile(appendixReceipt, []byte(`{"foreign:key":"sha256:foreign"}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	if err := UnregisterHookTrust(account); err != nil {
 		t.Fatal(err)
 	}
@@ -260,9 +253,6 @@ func TestUnregisterHookTrustRemovesOnlyItsOwnTablesAndReceipt(t *testing.T) {
 	}
 	if HookTrustRecorded(account) {
 		t.Fatal("hook receipt survived")
-	}
-	if _, err := os.Stat(appendixReceipt); err != nil {
-		t.Fatalf("the appendix receipt was touched: %v", err)
 	}
 	if err := UnregisterHookTrust(account); err != nil {
 		t.Fatalf("repeated cleanup: %v", err)

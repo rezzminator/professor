@@ -62,8 +62,7 @@
     "http": {
       "port": 18377
     },
-    "thirdParty": {},
-    "authToken": null
+    "thirdParty": {}
   },
   "ask": {
     "claude": {

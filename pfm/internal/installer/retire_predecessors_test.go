@@ -2,62 +2,51 @@ package installer
 
 import (
 	"bytes"
-	"context"
-	"io"
+	"errors"
+	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
-	"github.com/rezzminator/professor/pfm/internal/fleetdb"
-	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/retired"
 )
 
-func TestMigrateLegacyCarrierUsesConfiguredStateDB(t *testing.T) {
+// TestRetirePredecessorsRemovesConfigFiles pins the configFiles door: a
+// literal path and every glob match retire under their reason, and a file
+// the lists do not name stays.
+func TestRetirePredecessorsRemovesConfigFiles(t *testing.T) {
 	home := t.TempDir()
-	writeFixture(t, filepath.Join(home, ".claude", ".cc-ls-hidden"), "retired-chat\n")
-	statePath := filepath.Join(home, "operator-state", "pfm.db")
+	config := filepath.Join(home, ".claude")
+	literal := filepath.Join(config, "bin", "cx-kill.sh")
+	backup := filepath.Join(config, "bin", "cx-recover.sh.pre-professor-20260101")
+	kept := filepath.Join(config, "bin", "cx-recover.sh")
+	for _, path := range []string{literal, backup, kept} {
+		writeFixture(t, path, "old\n")
+	}
+	var output bytes.Buffer
 	installer := &engine{
 		options: Options{
-			MCPConfigPath: testConfigPath(t),
-			Mode:          ModeApply,
-			Home:          home,
-			StateDB:       statePath,
-			Stdout:        io.Discard,
+			Home: home, ConfigDir: config, Stdout: &output,
+			retired: &retired.Lists{ConfigFiles: []retired.ConfigFile{
+				{Path: "bin/cx-kill.sh", Reason: "native pfm command"},
+				{Path: "bin/cx-recover.sh.pre-professor-*", Reason: "retired recovery artifact"},
+			}},
 		},
 		apply: true,
 	}
-	if err := installer.migrateLegacyCarrier(context.Background()); err != nil {
+	if err := installer.retirePredecessors(); err != nil {
 		t.Fatal(err)
 	}
-	state := fleetdb.OpenSharedState(context.Background(), paths.Values{StateDB: statePath})
-	killed, err := state.KilledAt(context.Background())
-	closeErr := state.Close()
-	if err != nil || closeErr != nil || killed["retired-chat"] != 0 || len(killed) != 1 {
-		t.Fatalf("configured state killed=%v err=%v close=%v", killed, err, closeErr)
+	want := "  change  retire " + literal + " (native pfm command)\n" +
+		"  change  retire " + backup + " (retired recovery artifact)\n"
+	if output.String() != want {
+		t.Fatalf("output = %q, want %q", output.String(), want)
 	}
-}
-
-// An install whose carrier merge into SQLite fails keeps the carrier, so the
-// chats it records as killed stay killed for the next run's merge.
-func TestInstallKeepsCarrierWhoseKillsDidNotMerge(t *testing.T) {
-	home := t.TempDir()
-	carrier := filepath.Join(home, ".claude", ".cc-ls-hidden")
-	writeFixture(t, carrier, "retired-chat\n")
-	blocker := filepath.Join(home, "not-a-dir")
-	writeFixture(t, blocker, "")
-	var output bytes.Buffer
-	_, err := Run(context.Background(), Options{
-		MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home, Runner: &fakeRunner{}, Stdout: &output,
-		StateDB: filepath.Join(blocker, "pfm.db"),
-	})
-	if err == nil || !strings.Contains(err.Error(), "open shared store before carrier retirement") {
-		t.Fatalf("install error=%v, want the failed carrier merge; output:\n%s", err, output.String())
+	for _, path := range []string{literal, backup} {
+		if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("retired %s survives: %v", path, err)
+		}
 	}
-	if got := readFixture(t, carrier); got != "retired-chat\n" {
-		t.Fatalf("carrier %s = %q, want the unmerged kill kept", carrier, got)
-	}
-	want := "  skip    keep retired kill carrier " + carrier + ": its kills did not merge into SQLite this run\n"
-	if !strings.Contains(output.String(), want) {
-		t.Fatalf("output lacks %q:\n%s", want, output.String())
+	if got := readFixture(t, kept); got != "old\n" {
+		t.Fatalf("unlisted %s = %q, want it untouched", kept, got)
 	}
 }

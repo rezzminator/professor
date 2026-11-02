@@ -150,7 +150,7 @@ The chat MCP family has no transcript-reading verbs: old-transcript inspection g
 
 Deliberately NOT exposed: `end`, `modal`, `watch`, `stream`, `recover`, and `history` — interactive/plumbing; the absence is stated in the server docstring.
 
-The Harvester plugin's measured tool names are `mcp__plugin_harvester_harvester__*` in Claude Code, `mcp__harvester__*` in Codex and `harvester_*` in OpenCode. The server name is `harvester`; `search_web` is exposed when the plugin's search configuration enables it. PFM retains only the one-time cleanup of exact legacy `harvester-professor` registrations.
+The Harvester plugin's measured tool names are `mcp__plugin_harvester_harvester__*` in Claude Code, `mcp__harvester__*` in Codex and `harvester_*` in OpenCode. The server name is `harvester`; `search_web` is exposed when the plugin's search configuration enables it.
 
 ## pfm model-cost
 

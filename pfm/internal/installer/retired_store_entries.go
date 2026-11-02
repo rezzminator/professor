@@ -10,13 +10,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-// RetiredStoreEntries names every file once linked from every account and now
-// per-account, each also in AccountEntries. Claude writes each by temp file and
-// rename at the account path, which replaces a link with a real file: the native
-// updater .last-update-result.json, /stats its stats-cache.json. A future
-// retirement is one more row here.
-var RetiredStoreEntries = []string{".last-update-result.json", "stats-cache.json"}
-
 var retiredStoreReadlink = os.Readlink
 
 // RetiredStoreArchive is the directory install moves a retired entry's store
@@ -59,11 +52,17 @@ func inspectRetiredStoreLink(store, base, path string) (string, bool, error) {
 // moves into the archive. A real account file is the account's own and stays.
 // An account that cannot be read or unlinked keeps that entry's store copy,
 // named, and costs no other account or entry.
+//
+// The entries are the retired lists' storeEntries, each also in AccountEntries:
+// Claude writes each by temp file and rename at the account path, which
+// replaces a link with a real file.
 func (installer *engine) retireStoreEntries() error {
+	// A failed read is deferred once by Run; no entry is retired without the list.
+	lists, _ := installer.retiredLists()
 	store := installer.options.ConfigDir
 	report := InspectClaudeStore(store, installer.options.ClaudeAccounts)
 	var failed error
-	for _, name := range RetiredStoreEntries {
+	for _, name := range lists.StoreEntries {
 		keep := ""
 		if len(installer.options.ClaudeAccounts) == 0 {
 			keep = "no account roster to check its links"

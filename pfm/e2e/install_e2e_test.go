@@ -782,9 +782,6 @@ func (h *e2eHarness) assertUninstalled(home string) {
 		if err := json.Unmarshal(raw, &codex); err != nil {
 			h.t.Fatalf("uninstall failed; differing paths: .codex/hooks.json parse; status: %v", err)
 		}
-		if containsJSONString(codex, filepath.Join(home, ".local", "bin", "pfm")+" internal clear-kill") {
-			h.t.Fatalf("uninstall failed; differing paths: retired installer Codex hook")
-		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		h.t.Fatalf("uninstall failed; differing paths: .codex/hooks.json; status: %v", err)
 	}

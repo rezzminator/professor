@@ -933,6 +933,7 @@ func newProjectUpdateFixture(t *testing.T) projectUpdateFixture {
 		t.Fatal(err)
 	}
 	home := t.TempDir()
+	stageRetiredLists(t, home, fixtureRetiredNames)
 	return projectUpdateFixture{
 		project: project,
 		store:   storeRoot,

@@ -267,10 +267,6 @@ func ReportGlobalRegistries(
 	}
 	for _, finding := range result.Findings {
 		switch finding.Class {
-		case RegistryStore:
-			fmt.Fprintf(w, "doctor: registry STORE %s -> %s — retired store; run pfm install --yes\n",
-				finding.Path, finding.Target)
-			failures++
 		case RegistryOrphan:
 			fmt.Fprintf(w, "doctor: registry ORPHAN %s -> %s — Professor no longer ships it; run pfm install --yes\n",
 				finding.Path, finding.Target)

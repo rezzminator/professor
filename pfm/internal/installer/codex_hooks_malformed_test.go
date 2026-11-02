@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rezzminator/professor/pfm/internal/codexappendix"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -69,15 +68,17 @@ func TestMalformedCodexHooksStillRefusesToStrandOwnedHooksOnUninstall(t *testing
 	codexHome := filepath.Join(home, ".codex")
 	hooks := filepath.Join(codexHome, "hooks.json")
 
-	// pfm writes no Codex hook any more — the appendix hook is retired — so
-	// the ownership an uninstall must not strand is one an OLDER install
-	// recorded, which is exactly what this ledger says.
+	// The ledger records the resume-unkill hook an earlier install wrote.
+	resumeUnkill, err := codexResumeUnkillHook(home)
+	if err != nil {
+		t.Fatal(err)
+	}
 	ledger, err := encodeSettingsHookOwnership(map[string]settingsHookCounts{
 		physicalSettingsPath(hooks): {
 			settingsHookKey{
-				Event:   "SessionStart",
-				Matcher: codexappendix.Matcher,
-				Command: codexappendix.Command(home),
+				Event:   resumeUnkill.Event,
+				Matcher: resumeUnkill.Matcher,
+				Command: resumeUnkill.Command,
 			}: 1,
 		},
 	})

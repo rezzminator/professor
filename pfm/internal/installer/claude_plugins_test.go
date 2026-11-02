@@ -19,6 +19,7 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/retired"
 )
 
 // testPlugin is a row of the default list the install tests ensure: its Name,
@@ -32,6 +33,18 @@ var testPlugins = []testPlugin{
 	{Name: "auto-effort", Source: "rezzminator/professor", ID: "auto-effort@professor"},
 	{Name: "tool-visibility-controller", Source: "rezzminator/professor", ID: "tool-visibility-controller@professor"},
 	{Name: "engine-sync", Source: "rezzminator/professor", ID: "engine-sync@professor"},
+}
+
+// testRetiredPlugins is the retired lists' claudePlugins these tests install
+// with: invented ids once ours, keyed by their successor's bare name.
+var testRetiredPlugins = map[string][]string{
+	"auto-effort": {
+		"old-effort@old-effort",
+		"old-effort@old-effort-dev",
+		"old-effort@professor",
+		"auto-effort@old-market",
+	},
+	"forward-compaction": {"old-compact@old-compact", "old-compact@old-compact-dev", "old-compact@professor"},
 }
 
 // pluginCall is one argv the fake runner saw, with the account it ran for.
@@ -100,6 +113,7 @@ func pluginEngine(home, binary, first, second string, runner deps.Runner, out *b
 		ClaudePlugins:    pfmconfig.DefaultClaudePlugins(),
 		ProcessRunner:    runner,
 		Stdout:           out,
+		retired:          &retired.Lists{ClaudePlugins: testRetiredPlugins},
 	}, apply: apply}
 }
 
@@ -367,8 +381,7 @@ func TestEnsureClaudePluginsInstallsTheListedPlugins(t *testing.T) {
 
 // TestEnsureClaudePluginsUnreadableMarketplaceRecordFailsOnlyItsPlugins: an unreadable
 // plugins/known_marketplaces.json fails each listed id that needs it, naming the record, and the
-// plugins that do not need it still install; a plugin of ours then fails its legacy check, which
-// reads the record for a legacy marketplace, naming it too.
+// plugins that do not need it still install.
 func TestEnsureClaudePluginsUnreadableMarketplaceRecordFailsOnlyItsPlugins(t *testing.T) {
 	home, binary, first, second := pluginFixture(t)
 	known := filepath.Join(first, "plugins", "known_marketplaces.json")
@@ -379,9 +392,7 @@ func TestEnsureClaudePluginsUnreadableMarketplaceRecordFailsOnlyItsPlugins(t *te
 	inst.options.ClaudePlugins = []pfmconfig.ClaudePlugin{{ID: "typesafe@typesafe-ai"}, {ID: "auto-effort"}}
 	err := inst.ensureClaudePlugins(context.Background())
 	want := "claude plugin typesafe@typesafe-ai in " + first + ": marketplace record unreadable, state unknown: parse " +
-		known + ": unexpected end of JSON input\n" +
-		"claude plugin auto-effort@professor in " + first +
-		": legacy ids of auto-effort@professor unchecked: parse " + known + ": unexpected end of JSON input"
+		known + ": unexpected end of JSON input"
 	if err == nil || err.Error() != want {
 		t.Fatalf("error = %v\nwant %s\n%s", err, want, out.String())
 	}
@@ -429,9 +440,8 @@ func TestEnsureClaudePluginsReportsAPluginItCannotInstall(t *testing.T) {
 	}
 }
 
-// TestEnsureClaudePluginsLeavesUnlistedPluginsUntouched: only the listed plugins are installed,
-// enabled or moved off their legacy ids; every other enabledPlugins entry (the legacy ids of a
-// plugin pfm used to install included) and its pluginConfigs keep their value.
+// TestEnsureClaudePluginsLeavesUnlistedPluginsUntouched: only the listed plugins are installed and
+// enabled; every other enabledPlugins entry and its pluginConfigs keep their value.
 func TestEnsureClaudePluginsLeavesUnlistedPluginsUntouched(t *testing.T) {
 	root := t.TempDir()
 	inst, runner, out, home, first := alphaPluginEngine(t, root)
@@ -442,7 +452,7 @@ func TestEnsureClaudePluginsLeavesUnlistedPluginsUntouched(t *testing.T) {
 	simulateClaude(t, runner)
 	writeFixture(t, filepath.Join(first, "settings.json"), `{"enabledPlugins":{`+
 		`"cache-live-control@cache-live-control":true,"cache-live-control@cache-live-control-dev":true,`+
-		`"swift-lsp@claude-plugins-official":true,"buddy@buddy":false,"auto-effort@auto-effort":true},`+
+		`"swift-lsp@claude-plugins-official":true,"buddy@buddy":false},`+
 		`"pluginConfigs":{"cache-live-control@cache-live-control":{"options":{"keep":1}}}}`)
 	if err := inst.ensureClaudePlugins(context.Background()); err != nil {
 		t.Fatalf("ensureClaudePlugins: %v\n%s", err, out.String())
@@ -857,22 +867,13 @@ func TestClaudePluginGapsNamesEnabledRetiredPlugins(t *testing.T) {
 		warning   bool
 		successor string
 	}{
-		{"agent-effort@agent-effort", true, true, "auto-effort"},
-		{"agent-effort@agent-effort-dev", true, true, "auto-effort"},
-		{"agent-effort@agent-effort", false, false, "auto-effort"},
-		{"agent-effort@professor", true, true, "auto-effort"},
-		{"agent-effort@rezzminator", true, true, "auto-effort"},
-		{"auto-effort-control@rezzminator", true, true, "auto-effort"},
-		{"auto-effort@rezzminator", true, true, "auto-effort"},
-		{"effort-live-control@effort-live-control", true, true, "auto-effort"},
-		{"effort-live-control@effort-live-control-dev", true, true, "auto-effort"},
-		{"effort-live-control@professor", true, true, "auto-effort"},
-		{"effort-live-control@rezzminator", true, true, "auto-effort"},
+		{"old-effort@old-effort", true, true, "auto-effort"},
+		{"old-effort@old-effort", false, false, "auto-effort"},
+		{"old-effort@professor", true, true, "auto-effort"},
+		{"auto-effort@old-market", true, true, "auto-effort"},
 		{"auto-effort@professor", true, false, "auto-effort"},
-		{"sub-agent-compact@sub-agent-compact", true, true, "forward-compaction"},
-		{"sub-agent-compact@sub-agent-compact-dev", true, true, "forward-compaction"},
-		{"sub-agent-compact@sub-agent-compact-dev", false, false, "forward-compaction"},
-		{"sub-agent-compact@professor", true, true, "forward-compaction"},
+		{"old-compact@old-compact-dev", true, true, "forward-compaction"},
+		{"old-compact@old-compact-dev", false, false, "forward-compaction"},
 		{"forward-compaction@professor", true, false, "forward-compaction"},
 	} {
 		t.Run(fmt.Sprintf("%s enabled=%v", row.id, row.enabled), func(t *testing.T) {
@@ -884,7 +885,7 @@ func TestClaudePluginGapsNamesEnabledRetiredPlugins(t *testing.T) {
 			if err := os.WriteFile(path, raw, 0o600); err != nil {
 				t.Fatal(err)
 			}
-			gaps, err := ClaudePluginGaps(path, nil)
+			gaps, err := ClaudePluginGaps(path, nil, testRetiredPlugins)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -899,7 +900,7 @@ func TestClaudePluginGapsNamesEnabledRetiredPlugins(t *testing.T) {
 				}
 			}
 			if !reflect.DeepEqual(gaps, want) {
-				t.Fatalf("legacy plugin gaps = %+v, want %+v", gaps, want)
+				t.Fatalf("retired plugin gaps = %+v, want %+v", gaps, want)
 			}
 		})
 	}

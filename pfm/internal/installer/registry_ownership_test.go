@@ -97,7 +97,7 @@ func TestInspectRegistryOwnershipClasses(t *testing.T) {
 				managed := managedRootForHome(h.home)
 				gone := filepath.Join(managed, "legacy", "group", "ls.command.md")
 				symlinkFixture(t, gone, filepath.Join(h.store, "commands", "legacy", "group", "old"))
-				symlinkFixture(t, filepath.Join(h.clone, "workflows", "deep-rr"), filepath.Join(h.store, "skills", "old"))
+				symlinkFixture(t, filepath.Join(managedRootForHome(h.home), "skills", "deep-rr"), filepath.Join(h.store, "skills", "old"))
 				symlinkFixture(t, gone, filepath.Join(h.home, ".agents", "skills", "old"))
 			},
 			want: []string{
@@ -119,22 +119,12 @@ func TestInspectRegistryOwnershipClasses(t *testing.T) {
 		{
 			name: "a target that cannot be inspected is an error",
 			setup: func(t *testing.T, h ownershipHome) {
-				target := filepath.Join(h.clone, "workflows", "deep-rr")
+				target := filepath.Join(managedRootForHome(h.home), "skills", "deep-rr")
 				writeFixture(t, filepath.Dir(target), "not a directory")
 				symlinkFixture(t, target, filepath.Join(h.store, "commands", "old"))
 			},
-			failAt: func(h ownershipHome) string { return filepath.Join(h.clone, "workflows", "deep-rr") },
+			failAt: func(h ownershipHome) string { return filepath.Join(managedRootForHome(h.home), "skills", "deep-rr") },
 			entry:  true,
-		},
-		{
-			name: "store links, present or gone",
-			setup: func(t *testing.T, h ownershipHome) {
-				stores := RetiredGeneratedStores(h.home)
-				symlinkFixture(t, filepath.Join(stores[0], "a.md"), filepath.Join(h.store, "agents", "a.md"))
-				writeFixture(t, filepath.Join(stores[1], "b.md"), "rendered")
-				symlinkFixture(t, filepath.Join(stores[1], "b.md"), filepath.Join(h.store, "agents", "b.md"))
-			},
-			want: []string{"STORE .claude/agents/a.md", "STORE .claude/agents/b.md"},
 		},
 		{
 			name: "an existing unplanned command is an orphan, a planned one is not",
@@ -257,7 +247,7 @@ func TestInspectRegistryOwnershipClasses(t *testing.T) {
 		{
 			name: "a registry root that is a dead link is DEAD, a live one is not an orphan",
 			setup: func(t *testing.T, h ownershipHome) {
-				symlinkFixture(t, filepath.Join(h.clone, "workflows", "retired-skills"), filepath.Join(h.home, ".agents", "skills"))
+				symlinkFixture(t, filepath.Join(managedRootForHome(h.home), "retired-skills"), filepath.Join(h.home, ".agents", "skills"))
 				writeFixture(t, filepath.Join(h.clone, "kept-commands", "x.md"), "x")
 				symlinkFixture(t, filepath.Join(h.clone, "kept-commands"), filepath.Join(h.store, "commands"))
 			},
@@ -341,8 +331,6 @@ func TestInspectRegistryOwnershipCounts(t *testing.T) {
 func ownershipRowsFixture(t *testing.T) ownershipHome {
 	t.Helper()
 	h := newOwnershipHome(t)
-	symlinkFixture(t,
-		filepath.Join(RetiredGeneratedStores(h.home)[0], "astra.md"), filepath.Join(h.store, "agents", "astra.md"))
 	oldSkill := filepath.Join(h.clone, "templates", "global", "skills", "old-skill")
 	if err := os.MkdirAll(oldSkill, 0o755); err != nil {
 		t.Fatal(err)
@@ -391,10 +379,7 @@ func TestRegistryOwnershipDoctorRows(t *testing.T) {
 		t.Parallel()
 		h := ownershipRowsFixture(t)
 		rows, warnings, failures := reportRegistries(h)
-		store := RetiredGeneratedStores(h.home)[0]
 		want := []string{
-			"doctor: registry STORE " + filepath.Join(h.store, "agents", "astra.md") + " -> " +
-				filepath.Join(store, "astra.md") + " — retired store; run pfm install --yes",
 			"doctor: registry DEAD " + filepath.Join(h.store, "commands", "gone.md") + " -> " +
 				filepath.Join(h.clone, "templates", "global", "commands", "gone.md") +
 				" — target gone; run pfm install --yes",
@@ -407,9 +392,9 @@ func TestRegistryOwnershipDoctorRows(t *testing.T) {
 		if !reflect.DeepEqual(rows, want) {
 			t.Fatalf("rows:\n%s\nwant:\n%s", strings.Join(rows, "\n"), strings.Join(want, "\n"))
 		}
-		if warnings != 2 || failures != 2 {
+		if warnings != 2 || failures != 1 {
 			t.Fatalf(
-				"warnings=%d failures=%d, want 2 and 2 (STORE and ORPHAN fail; DEAD and RETIRED warn)",
+				"warnings=%d failures=%d, want 2 and 1 (ORPHAN fails; DEAD and RETIRED warn)",
 				warnings,
 				failures,
 			)
@@ -472,8 +457,6 @@ func TestRetireRegistryOwnership(t *testing.T) {
 			retired := strings.Split(strings.TrimSuffix(output.String(), "\n"), "\n")
 			sort.Strings(retired)
 			want := []string{
-				"  change  retire " + filepath.Join(h.store, "agents", "astra.md") + " (retired store link -> " +
-					filepath.Join(RetiredGeneratedStores(h.home)[0], "astra.md") + ")",
 				"  change  retire " + filepath.Join(h.store, "commands", "gone.md") + " (dead pfm link -> " +
 					filepath.Join(h.clone, "templates", "global", "commands", "gone.md") + ")",
 				"  change  retire " + filepath.Join(h.store, "skills", "old-skill") + " (orphan pfm link -> " +

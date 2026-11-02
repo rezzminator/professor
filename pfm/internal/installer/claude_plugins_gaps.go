@@ -29,13 +29,17 @@ var ErrClaudeSettingsAbsent = errors.New("no settings.json")
 // ClaudePluginGaps reads the store's settings.json and names every target id
 // not enabled, every install-only plugin enabled, every local target whose
 // copy is missing, not a plain directory or not the checkout's content, every
-// other plugin enabled under two or more keys, every enabled retired default
-// plugin copy, every listed bare name a successor retired, and every retired
-// copy's pluginConfigs entry left beside its successor's. A plugin of ours
-// still under a legacy id is ClaudePluginLegacyGaps'. A
-// missing file returns ErrClaudeSettingsAbsent; a file that cannot be read or
-// parsed returns its error, never an answer, because its real state is unknown.
-func ClaudePluginGaps(path string, targets []ClaudePluginTarget) ([]ClaudePluginGap, error) {
+// other plugin enabled under two or more keys, and of retiredPlugins (the
+// retired lists' plugin ids once ours, keyed by their successor's bare name)
+// every enabled id, every listed bare name a successor retired, and every
+// retired id's pluginConfigs entry left beside its successor's. A missing file
+// returns ErrClaudeSettingsAbsent; a file that cannot be read or parsed
+// returns its error, never an answer, because its real state is unknown.
+func ClaudePluginGaps(
+	path string,
+	targets []ClaudePluginTarget,
+	retiredPlugins map[string][]string,
+) ([]ClaudePluginGap, error) {
 	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
 		return nil, fmt.Errorf("%w at %s", ErrClaudeSettingsAbsent, path)
 	}
@@ -46,7 +50,7 @@ func ClaudePluginGaps(path string, targets []ClaudePluginTarget) ([]ClaudePlugin
 	var gaps []ClaudePluginGap
 	for index := range targets {
 		target := &targets[index]
-		if successor := target.retiredSuccessor(); successor != "" {
+		if successor := target.retiredSuccessor(retiredPlugins); successor != "" {
 			// Its other gaps would send the reader to ensure the retired copy.
 			gaps = append(gaps, retiredListedGap(target.Name, successor))
 			continue
@@ -75,8 +79,8 @@ func ClaudePluginGaps(path string, targets []ClaudePluginTarget) ([]ClaudePlugin
 			}
 		}
 	}
-	for _, successor := range slices.Sorted(maps.Keys(retiredClaudePlugins)) {
-		for _, id := range retiredClaudePlugins[successor] {
+	for _, successor := range slices.Sorted(maps.Keys(retiredPlugins)) {
+		for _, id := range retiredPlugins[successor] {
 			if pluginEnabled(document, id) {
 				gaps = append(gaps, ClaudePluginGap{
 					Problem: "plugin " + id + " retired (now " + successor + ") but still enabled in " + path,
@@ -88,7 +92,7 @@ func ClaudePluginGaps(path string, targets []ClaudePluginTarget) ([]ClaudePlugin
 	}
 	for index := range targets {
 		target := &targets[index]
-		retired := retiredClaudePlugins[target.Name]
+		retired := retiredPlugins[target.Name]
 		if !target.Own || len(retired) == 0 {
 			continue
 		}
@@ -110,15 +114,15 @@ func ClaudePluginGaps(path string, targets []ClaudePluginTarget) ([]ClaudePlugin
 }
 
 // retiredSuccessor is the plugin that replaced a listed bare name of ours, read
-// from retiredClaudePlugins; "" for a full id, an install-only plugin or a
-// name no successor retired.
-func (target ClaudePluginTarget) retiredSuccessor() string {
+// from retiredPlugins; "" for a full id, an install-only plugin or a name no
+// successor retired.
+func (target ClaudePluginTarget) retiredSuccessor(retiredPlugins map[string][]string) string {
 	if !target.Own || target.InstallOnly {
 		return ""
 	}
-	for _, successor := range slices.Sorted(maps.Keys(retiredClaudePlugins)) {
-		for _, id := range retiredClaudePlugins[successor] {
-			// A successor's own name under a retired marketplace (auto-effort@rezzminator) retires that id alone.
+	for _, successor := range slices.Sorted(maps.Keys(retiredPlugins)) {
+		for _, id := range retiredPlugins[successor] {
+			// A successor's own name under a retired marketplace ({successor}@{old}) retires that id alone.
 			if name, _, _ := strings.Cut(id, "@"); name == target.Name && successor != target.Name {
 				return successor
 			}
@@ -309,10 +313,8 @@ func ClaudePluginsUnresolved(configDir string, targets []ClaudePluginTarget) (ma
 // claudePluginDuplicateGaps names every plugin enabled under two or more
 // name@marketplace keys in document, managed by pfm or not, sorted by name. A
 // plugin whose every enabled key claude.plugins lists is left alone: pfm
-// install enables each listed key again. A plugin of ours enabled only under
-// its own id and its legacy ids is left to ClaudePluginLegacyGaps, whose
-// repair pfm install owns. A key from the file prints with its control
-// characters escaped.
+// install enables each listed key again. A key from the file prints with its
+// control characters escaped.
 func claudePluginDuplicateGaps(document map[string]any, path string, targets []ClaudePluginTarget) []ClaudePluginGap {
 	enabled, _ := document["enabledPlugins"].(map[string]any)
 	byName := map[string][]string{}
@@ -324,12 +326,8 @@ func claudePluginDuplicateGaps(document map[string]any, path string, targets []C
 		byName[name] = append(byName[name], id)
 	}
 	listed := map[string]bool{}
-	managed := map[string][]string{}
 	for index := range targets {
 		listed[targets[index].ID] = true
-		if targets[index].Own {
-			managed[targets[index].Name] = append([]string{targets[index].ID}, targets[index].LegacyIDs()...)
-		}
 	}
 	var gaps []ClaudePluginGap
 	for _, name := range slices.Sorted(maps.Keys(byName)) {
@@ -338,8 +336,7 @@ func claudePluginDuplicateGaps(document map[string]any, path string, targets []C
 			continue
 		}
 		slices.Sort(ids)
-		ours := !slices.ContainsFunc(ids, func(id string) bool { return !slices.Contains(managed[name], id) })
-		if ours || !slices.ContainsFunc(ids, func(id string) bool { return !listed[id] }) {
+		if !slices.ContainsFunc(ids, func(id string) bool { return !listed[id] }) {
 			continue
 		}
 		shown := make([]string, len(ids))

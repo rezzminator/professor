@@ -91,7 +91,6 @@ func Keys() []KeyDefault {
 		{"mcp.servers.chat.enabled", false},
 		{"mcp.http.port", DefaultMCPPort},
 		{"mcp.thirdParty", map[string]any{}},
-		{"mcp.authToken", nil},
 		{"ask.engine", pfmengine.MustLookup(pfmengine.Codex).LongName},
 		{"ask.claude.model", "claude-haiku-4-5"},
 		{"ask.claude.effort", defaultAskEffort},

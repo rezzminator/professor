@@ -67,6 +67,7 @@ const TIER1 = [
           "agentlauncher",
           "workbench",
           "servicemanager",
+          "retired",
         ],
       },
       {
@@ -906,13 +907,13 @@ function notes(o) {
 
 // ---------------------------------------------------------------- preflight
 
-// Where a removed name may still stand: history, and the retired-name
-// registry, which names every removed command, agent and path on purpose.
+// Where a removed name may still stand: history, and the retired lists,
+// which name every removed command, agent and path on purpose.
 const SEAM_EXCLUDES = [
   "releases/",
   "CHANGELOG.md",
   ".professor/RR/",
-  "pfm/internal/update/retired_names*.go",
+  "templates/global/retired.json",
 ].map((p) => `:(top,exclude)${p}`);
 
 // The roots whose files are commands and skills a README line may name.

@@ -1,2 +1,0 @@
-internal/gather/tmuxprobe.go 1
-internal/spawn/socket.go 1

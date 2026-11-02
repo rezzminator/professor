@@ -443,10 +443,9 @@ func runHeadlessCall(args []string, stdout, stderr io.Writer, runtimes ...comman
 			"       `/compact` is refused here — pfm never types a compaction",
 		stderr,
 	)
-	var force, retiredNoSig, allowUnsigned bool
+	var force, allowUnsigned bool
 	flags.BoolVar(&force, "now", false, "interrupt a working chat instead of waiting")
 	flags.BoolVar(&force, "force-now", false, "interrupt a working chat instead of waiting")
-	flags.BoolVar(&retiredNoSig, "no-sig", false, "retired compatibility flag; signatures remain mandatory")
 	flags.BoolVar(&allowUnsigned, "allow-unsigned", false, "send even when no sender identity can be derived")
 	messageFile := flags.String("file", "", "read the message from a file")
 	var steers cli.StringList
@@ -461,9 +460,6 @@ func runHeadlessCall(args []string, stdout, stderr io.Writer, runtimes ...comman
 	// Parse only flags before the name; the message may start with a dash.
 	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
-	}
-	if retiredNoSig {
-		fmt.Fprintln(stderr, "pfm chat call: --no-sig is retired; delivery signatures remain enabled")
 	}
 	filePath := *messageFile
 	// Every refusal names its reason: a bare usage text sent a 42-chat

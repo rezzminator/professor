@@ -24,7 +24,7 @@ The user's law: "Rules must be pcm protected everywhere, like .claude/* and CLAU
 
 A live test proved prose is not enough. A fresh chat in a plugin checkout edited its `CLAUDE.md` with `sed -i` through Bash and ignored both the `CLAUDE.md` routing line and a path-scoped rule; a path-scoped rule never loads on a Bash write.
 
-An earlier guard (`pcm-guard.sh`, renamed `pfm-guard.sh`, shipped from v0.40.0 to v0.66.0; `pfm-guard.sh` and its `guard-stamp.sh` are retired names in `pfm/internal/update/retired_names.go`) opened its gate with session marker files. It paid for that state in marker-theft fixes, sandboxed stamps that failed silently, and deny/re-stamp loops (`releases/v0.43.0.md`, `v0.44.0.md`, `v0.48.0.md`). This guard keeps no state: it exempts by the hook payload's exact `agent_type`, as git-guard exempts `gitter`.
+An earlier guard (`pcm-guard.sh`, renamed `pfm-guard.sh`, shipped from v0.40.0 to v0.66.0, with its `guard-stamp.sh`) opened its gate with session marker files. It paid for that state in marker-theft fixes, sandboxed stamps that failed silently, and deny/re-stamp loops (`releases/v0.43.0.md`, `v0.44.0.md`, `v0.48.0.md`). This guard keeps no state: it exempts by the hook payload's exact `agent_type`, as git-guard exempts `gitter`.
 
 ## Where it runs
 
@@ -141,4 +141,3 @@ git-guard's fail mode ([git-guard.md](git-guard.md#how-it-fails)), with prompt-f
 - `docs/dev/pfm-surface.md` — the `internal` row.
 - `README.md` — the rules-that-bite paragraph.
 - `templates/global/agents/pcm.md`, this repo's override `.claude/agents/pcm.md`, `.claude/agents/themer.md` — the writers the deny sends every caller to.
-- `pfm/internal/update/retired_names.go` — the retired stamp-gated guard the comment there contrasts with this one.

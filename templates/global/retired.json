@@ -1,0 +1,16 @@
+{
+  "names": [],
+  "storeEntries": [],
+  "stateDirs": [],
+  "hookCommands": [],
+  "hookBinaries": [],
+  "hookShimHints": [],
+  "claudePlugins": {},
+  "globalAgents": [],
+  "units": [],
+  "configFiles": [],
+  "commands": {
+    "homeBin": [],
+    "accountBin": []
+  }
+}

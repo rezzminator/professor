@@ -15,7 +15,9 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/professor"
+	"github.com/rezzminator/professor/pfm/internal/retired"
 )
 
 func writeRetiredFixture(t *testing.T, root string, files map[string]string) {
@@ -29,6 +31,84 @@ func writeRetiredFixture(t *testing.T, root string, files map[string]string) {
 			t.Fatal(err)
 		}
 	}
+}
+
+const fixtureFlightsSuccessor = "the flights-foreman agent"
+
+// fixtureRetiredNames is the retired list the scanner tests read: one entry
+// per match shape, kind and probe they pin.
+var fixtureRetiredNames = []retired.Name{
+	{Name: "/wave", Kind: retired.KindCommand, Successor: fixtureFlightsSuccessor, Match: retired.MatchFamily},
+	{Name: "wave-builder", Kind: retired.KindSkill, Successor: fixtureFlightsSuccessor, Match: retired.MatchExact},
+	{Name: "/jc", Kind: retired.KindCommand, Match: retired.MatchFamily},
+	{Name: "/qa:live", Kind: retired.KindCommand, Match: retired.MatchExact},
+	{Name: "JC-COMMIT", Kind: retired.KindPhase, Successor: "COMMIT", Match: retired.MatchExact},
+	{Name: "JC-UPDATE", Kind: retired.KindPhase, Match: retired.MatchExact},
+	{Name: "/pfm:refresh", Kind: retired.KindCommand, Successor: "the pcm agent", Match: retired.MatchExact},
+	{Name: "/quality:forlint", Kind: retired.KindCommand, Successor: "/md-forlint:use", Match: retired.MatchExact},
+	{Name: ".claude/commands/pfm.md", Kind: retired.KindPath, Successor: "the pcm agent", Match: retired.MatchExact},
+	{Name: "/pcm", Kind: retired.KindCommand, Successor: "the pcm agent", Match: retired.MatchExact},
+	{Name: "mcp__chat__", Kind: retired.KindTool, Successor: "mcp__chat-professor__*", Match: retired.MatchPrefix},
+	{Name: "chat_inject", Kind: retired.KindTool, Successor: "mcp__chat-professor__call", Match: retired.MatchExact},
+	{Name: "/chat:", Kind: retired.KindCommand, Successor: "mcp__chat-professor__*", Match: retired.MatchPrefix},
+	{Name: "/documenter", Kind: retired.KindCommand, Successor: "/doc:use", Match: retired.MatchFamily},
+	{Name: "/km", Kind: retired.KindCommand, Match: retired.MatchExact},
+	{Name: "/rnd", Kind: retired.KindCommand, Match: retired.MatchFamily},
+	{Name: "mono-architect", Kind: retired.KindAgent, Match: retired.MatchExact},
+	{Name: "rndier", Kind: retired.KindAgent, Match: retired.MatchExact},
+	{Name: "rr-super", Kind: retired.KindAgent, Successor: "super-rr", Match: retired.MatchExact},
+	{
+		Name:      "/tokens",
+		Kind:      retired.KindCommand,
+		Successor: "the chatlog skill",
+		Match:     retired.MatchFamily,
+		Route:     true,
+	},
+	{Name: "pfm sketch", Kind: retired.KindCommand, Successor: "sketcher draw", Match: retired.MatchFamily},
+	{Name: "pfm doodle", Kind: retired.KindCommand, Match: retired.MatchExact},
+	{Name: "docs/agents", Kind: retired.KindPath, Successor: "docs/_index.md", Match: retired.MatchExact},
+	{Name: "pfm-guard.sh", Kind: retired.KindPath, Match: retired.MatchExact},
+	{Name: "scripts/codex-sync.sh", Kind: retired.KindPath, Successor: "engine-sync codex", Match: retired.MatchExact},
+	{
+		Name: `subagent_type: "ultimate"`, Kind: retired.KindAgent, Successor: "/imagine", Match: retired.MatchExact,
+		Probe: ".claude/agents/ultimate.md",
+	},
+	{
+		Name: "`ultimate` agent", Kind: retired.KindAgent, Successor: "/imagine", Match: retired.MatchExact,
+		Probe: ".claude/agents/ultimate.md",
+	},
+	{
+		Name: `subagent_type: "imagine"`, Kind: retired.KindAgent, Successor: "imaginator", Match: retired.MatchExact,
+		Probe: ".claude/agents/imagine.md",
+	},
+}
+
+// scanFixture is the scan over fixtureRetiredNames, opening files with open
+// (nil: the real files).
+func scanFixture(
+	root string,
+	pinned map[string]bool,
+	open func(string) (io.ReadCloser, error),
+) professor.RetiredNameScan {
+	if open == nil {
+		open = openRetiredFile
+	}
+	return scanRetiredNames(context.Background(), fixtureRetiredNames, root, pinned, open)
+}
+
+// stageRetiredLists writes names as the retired lists of home's clone, the
+// file RetiredNameScanner reads.
+func stageRetiredLists(t *testing.T, home string, names []retired.Name) {
+	t.Helper()
+	repo, err := paths.GlobalSourceRepo(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(retired.Lists{Names: names})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeRetiredFixture(t, repo, map[string]string{retired.FileRel: string(raw)})
 }
 
 // TestScanRetiredNamesReportsEachHitByPathAndLine: a retired name in an
@@ -55,7 +135,7 @@ func TestScanRetiredNamesReportsEachHitByPathAndLine(t *testing.T) {
 		"bin/tool":                     "\x00\x01/wave\n",
 	})
 
-	scan := ScanRetiredNames(root, map[string]bool{"CLAUDE.md": true})
+	scan := scanFixture(root, map[string]bool{"CLAUDE.md": true}, nil)
 
 	want := []professor.RetiredNameHit{
 		{
@@ -69,7 +149,7 @@ func TestScanRetiredNamesReportsEachHitByPathAndLine(t *testing.T) {
 			Path: ".codex/config.toml", Line: 2, Name: "chat_inject", Kind: "tool",
 			Successor: "mcp__chat-professor__call",
 		},
-		{Path: "scripts/legacy.sh", Line: 2, Name: "/wave", Kind: "command", Successor: flightsSuccessor},
+		{Path: "scripts/legacy.sh", Line: 2, Name: "/wave", Kind: "command", Successor: fixtureFlightsSuccessor},
 		{Path: "scripts/legacy.sh", Line: 3, Name: "JC-COMMIT", Kind: "phase", Successor: "COMMIT"},
 	}
 	if !reflect.DeepEqual(scan.Hits, want) {
@@ -111,61 +191,39 @@ func TestRetiredNamesNeverHitALiveNameSharingAPrefix(t *testing.T) {
 		"spawn the documenter agent",
 		"the pfm guard script and a xpfm-guard.sh or guard-stamp.shx",
 		"/random, /rndx and /rnd-seed; https://example.com/rnd",
+		"GET /tokens returns the list",
+		"curl -X POST /tokens",
+		"the /tokens/{id} route and /tokens{?page}",
 	} {
-		if hits := retiredNameHits("f", line); len(hits) != 0 {
+		if hits := retiredNameHits(fixtureRetiredNames, "f", line); len(hits) != 0 {
 			t.Errorf("line %q hit %+v, want none", line, hits)
 		}
 	}
 	for line, name := range map[string]string{
-		"/pfm:refresh is gone":                              "/pfm:refresh",
-		"run /wave":                                         "/wave",
-		"`/wave:refine`":                                    "/wave",
-		"(/jc:wave)":                                        "/jc",
-		"cat .claude/commands/pfm.md":                       ".claude/commands/pfm.md",
-		"\"mcp__chat__chat_ls\"":                            "mcp__chat__",
-		"/chat:save now":                                    "/chat:",
-		"agent: rr-super":                                   "rr-super",
-		".claude/agents/mono-architect.md":                  "mono-architect",
-		"use /quality:forlint.":                             "/quality:forlint",
-		"run /quality:claude-md now":                        "/quality:claude-md",
-		"run /quality:claude-selector now":                  "/quality:claude-selector",
-		"run /quality:description now":                      "/quality:description",
-		"run /quality:doc now":                              "/quality:doc",
-		"run /quality:integration-suite now":                "/quality:integration-suite",
-		"run /quality:llm-codebase now":                     "/quality:llm-codebase",
-		"run /quality:md-forlint now":                       "/quality:md-forlint",
-		"run /quality:prompt now":                           "/quality:prompt",
-		"run /quality:rules now":                            "/quality:rules",
-		"Phase: JC-COMMIT.":                                 "JC-COMMIT",
-		"/documenter:archive":                               "/documenter",
-		"skills/wave-builder/SKILL.md":                      "wave-builder",
-		"/qa:live":                                          "/qa:live",
-		"run /rnd new chain slug goal":                      "/rnd",
-		"dispatch it with /pcm audit all":                   "/pcm",
-		"(the user's `/pcm`)":                               "/pcm",
-		"(/rnd:hammer)":                                     "/rnd",
-		"x .claude/commands/pfm/references/audit-scopes.md": ".claude/commands/pfm/references/audit-scopes.md",
+		"/pfm:refresh is gone":             "/pfm:refresh",
+		"run /wave":                        "/wave",
+		"`/wave:refine`":                   "/wave",
+		"(/jc:wave)":                       "/jc",
+		"cat .claude/commands/pfm.md":      ".claude/commands/pfm.md",
+		"\"mcp__chat__chat_ls\"":           "mcp__chat__",
+		"/chat:save now":                   "/chat:",
+		"agent: rr-super":                  "rr-super",
+		".claude/agents/mono-architect.md": "mono-architect",
+		"use /quality:forlint.":            "/quality:forlint",
+		"Phase: JC-COMMIT.":                "JC-COMMIT",
+		"/documenter:archive":              "/documenter",
+		"skills/wave-builder/SKILL.md":     "wave-builder",
+		"/qa:live":                         "/qa:live",
+		"run /rnd new chain slug goal":     "/rnd",
+		"dispatch it with /pcm audit all":  "/pcm",
+		"(the user's `/pcm`)":              "/pcm",
+		"(/rnd:hammer)":                    "/rnd",
+		"run /tokens --today":              "/tokens",
+		"`/tokens:week`":                   "/tokens",
 	} {
-		hits := retiredNameHits("f", line)
+		hits := retiredNameHits(fixtureRetiredNames, "f", line)
 		if len(hits) != 1 || hits[0].Name != name {
 			t.Errorf("line %q hits %+v, want exactly %q", line, hits, name)
-		}
-	}
-}
-
-// TestRetiredNamesPinTheRemovedGuardScripts: a settings file or script that
-// still names the removed PreToolUse guard scripts is reported as a retired
-// path with no successor, in the form an adopter writes it.
-func TestRetiredNamesPinTheRemovedGuardScripts(t *testing.T) {
-	t.Parallel()
-	for line, name := range map[string]string{
-		`"command": "bash $CLAUDE_PROJECT_DIR/.claude/scripts/pfm-guard.sh"`: "pfm-guard.sh",
-		"bash .claude/scripts/guard-stamp.sh --read":                         "guard-stamp.sh",
-		"pfm-guard.sh": "pfm-guard.sh",
-	} {
-		want := []professor.RetiredNameHit{{Path: "f", Line: 1, Name: name, Kind: "path"}}
-		if hits := retiredNameHits("f", line); !reflect.DeepEqual(hits, want) {
-			t.Errorf("line %q hits %+v, want %+v", line, hits, want)
 		}
 	}
 }
@@ -187,7 +245,7 @@ func TestScanRetiredNamesReportsAnUnreadableFileAsAFailure(t *testing.T) {
 		return os.Open(path)
 	}
 
-	scan := scanRetiredNamesWith(root, nil, open)
+	scan := scanFixture(root, nil, open)
 
 	if len(scan.Failures) != 1 || scan.Failures[0].Path != "scripts/locked.sh" ||
 		!strings.Contains(scan.Failures[0].Error, "permission denied") {
@@ -197,57 +255,93 @@ func TestScanRetiredNamesReportsAnUnreadableFileAsAFailure(t *testing.T) {
 		t.Fatalf("hits = %+v, want the readable file's /jc", scan.Hits)
 	}
 
-	missing := ScanRetiredNames(filepath.Join(root, "absent"), nil)
+	missing := scanFixture(filepath.Join(root, "absent"), nil, nil)
 	if len(missing.Failures) != 1 || len(missing.Hits) != 0 {
 		t.Fatalf("missing root scan = %+v, want one failure", missing)
 	}
 }
 
 // TestRetiredPfmCommandReadsTheRetiredList: the dispatch of a retired `pfm
-// codex|opencode` reads the name and successor from retiredNames, the one
-// table; a command the table does not retire is no answer.
+// {command}` reads the name and successor from the retired list; a command
+// the list does not retire with a successor, or retires as another kind, is
+// no answer.
 func TestRetiredPfmCommandReadsTheRetiredList(t *testing.T) {
 	t.Parallel()
-	for _, testCase := range []struct{ command, name, successor string }{
-		{"codex", "pfm codex", "engine-sync codex"},
-		{"opencode", "pfm opencode", "engine-sync opencode"},
-	} {
-		name, successor, ok := RetiredPfmCommand(testCase.command)
-		if !ok || name != testCase.name || successor != testCase.successor {
-			t.Errorf("RetiredPfmCommand(%q) = %q, %q, %v; want %q, %q, true",
-				testCase.command, name, successor, ok, testCase.name, testCase.successor)
-		}
+	names := append([]retired.Name{
+		{Name: "pfm scribble", Kind: retired.KindTool, Successor: "scribbler", Match: retired.MatchExact},
+	}, fixtureRetiredNames...)
+	if name, successor, ok := RetiredPfmCommand(
+		names,
+		"sketch",
+	); !ok || name != "pfm sketch" ||
+		successor != "sketcher draw" {
+		t.Errorf(
+			"RetiredPfmCommand(sketch) = %q, %q, %v; want %q, %q, true",
+			name,
+			successor,
+			ok,
+			"pfm sketch",
+			"sketcher draw",
+		)
 	}
-	for _, command := range []string{"", "ls", "chat", "no-such-command"} {
-		if name, successor, ok := RetiredPfmCommand(command); ok {
+	for _, command := range []string{"", "doodle", "scribble", "ls", "sketch build"} {
+		if name, successor, ok := RetiredPfmCommand(names, command); ok {
 			t.Errorf("RetiredPfmCommand(%q) = %q, %q, true; want none", command, name, successor)
 		}
 	}
 }
 
-// TestDoctorProjectUpdatesNamesAFileHoldingARetiredPfmCodexCommand: an
-// adopter file holding `pfm codex build .` is a RETIRED-NAME row naming the
-// file, the line and the successor `engine-sync codex`, through the same
-// pass `pfm doctor --project-updates` runs.
-func TestDoctorProjectUpdatesNamesAFileHoldingARetiredPfmCodexCommand(t *testing.T) {
+// TestDoctorProjectUpdatesNamesAFileHoldingARetiredPfmCommand: an adopter
+// file holding a retired `pfm sketch build .` is a RETIRED-NAME row naming the
+// file, the line and the successor, through the same pass `pfm doctor
+// --project-updates` runs over the clone's retired list; a list that cannot
+// be read fails the report instead of passing for a clean scan.
+func TestDoctorProjectUpdatesNamesAFileHoldingARetiredPfmCommand(t *testing.T) {
 	t.Parallel()
 	fixture := newProjectUpdateFixture(t)
 	writeRetiredFixture(t, fixture.project, map[string]string{
-		"scripts/mirror.sh": "#!/bin/sh\npfm codex build .\npfm opencode check .\n",
+		"scripts/mirror.sh": "#!/bin/sh\npfm sketch build .\npfm doodle check .\n",
 	})
-	var stdout bytes.Buffer
-	if code := professor.RunProjectUpdates(
-		fixture.project, fixture.runtime.Paths.Home, false, &stdout, ScanRetiredNames,
-	); code != 1 {
-		t.Fatalf("RunProjectUpdates() code=%d, want 1 (review):\n%s", code, stdout.String())
+	run := func() (int, string) {
+		var stdout bytes.Buffer
+		code := professor.RunProjectUpdates(
+			fixture.project, fixture.runtime.Paths.Home, false, &stdout,
+			RetiredNameScanner(context.Background(), fixture.runtime.Paths.Home),
+		)
+		return code, stdout.String()
+	}
+
+	code, report := run()
+	if code != 1 {
+		t.Fatalf("RunProjectUpdates() code=%d, want 1 (review):\n%s", code, report)
 	}
 	for _, want := range []string{
-		"    scripts/mirror.sh:2   pfm codex — retired command, now engine-sync codex\n",
-		"    scripts/mirror.sh:3   pfm opencode — retired command, now engine-sync opencode\n",
+		"    scripts/mirror.sh:2   pfm sketch — retired command, now sketcher draw\n",
+		"    scripts/mirror.sh:3   pfm doodle — retired command, no successor\n",
 	} {
-		if !strings.Contains(stdout.String(), want) {
-			t.Fatalf("report missing %q:\n%s", want, stdout.String())
+		if !strings.Contains(report, want) {
+			t.Fatalf("report missing %q:\n%s", want, report)
 		}
+	}
+
+	repo, err := paths.GlobalSourceRepo(fixture.runtime.Paths.Home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(repo, filepath.FromSlash(retired.FileRel))
+	if err := os.WriteFile(file, []byte(`{"names":`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, report = run()
+	if code == 0 || code == 1 ||
+		!strings.Contains(report, "FAILED — 1 file(s) could not be scanned for retired names") ||
+		!strings.Contains(report, file) {
+		t.Fatalf(
+			"RunProjectUpdates() over an unreadable list code=%d, want a FAILED report naming %s:\n%s",
+			code,
+			file,
+			report,
+		)
 	}
 }
 
@@ -270,7 +364,7 @@ func TestScanRetiredNamesResolvesAProjectRootReachedThroughASymlink(t *testing.T
 		t.Fatal(err)
 	}
 
-	scan := ScanRetiredNames(link, nil)
+	scan := scanFixture(link, nil, nil)
 	if len(scan.Hits) != 1 || scan.Hits[0].Path != "scripts/old.sh" || len(scan.Failures) != 0 {
 		t.Fatalf("symlinked root scan = %+v, want the one hit in scripts/old.sh", scan)
 	}
@@ -279,7 +373,7 @@ func TestScanRetiredNamesResolvesAProjectRootReachedThroughASymlink(t *testing.T
 	if err := os.Symlink(filepath.Join(project, "absent"), dangling); err != nil {
 		t.Fatal(err)
 	}
-	scan = ScanRetiredNames(dangling, nil)
+	scan = scanFixture(dangling, nil, nil)
 	if len(scan.Failures) != 1 || len(scan.Hits) != 0 {
 		t.Fatalf("dangling root scan = %+v, want one failure", scan)
 	}
@@ -340,7 +434,7 @@ func TestScanRetiredNamesBoundsALineAndOnlyProbesBinary(t *testing.T) {
 		return os.Open(path)
 	}
 
-	scan := scanRetiredNamesWith(root, nil, open)
+	scan := scanFixture(root, nil, open)
 
 	if got := files["dump.bin"].read; got > retiredBinaryProbe {
 		t.Errorf("binary file: %d bytes read, want at most the %d-byte probe", got, retiredBinaryProbe)
@@ -367,9 +461,15 @@ func TestScanRetiredNamesBoundsALineAndOnlyProbesBinary(t *testing.T) {
 	}
 	for _, size := range []int{0, readCap, readCap + 1} {
 		file := &syntheticFile{size: size, nulAt: -1, first: "/wave\n"}
-		hits, incomplete, err := scanRetiredFile(context.Background(), func(string) (io.ReadCloser, error) {
-			return file, nil
-		}, "boundary.txt", "boundary.txt")
+		hits, incomplete, err := scanRetiredFile(
+			context.Background(),
+			fixtureRetiredNames,
+			func(string) (io.ReadCloser, error) {
+				return file, nil
+			},
+			"boundary.txt",
+			"boundary.txt",
+		)
 		wantHits := 1
 		if size == 0 {
 			wantHits = 0
@@ -418,7 +518,7 @@ func TestScanRetiredNamesReadsOnlyTheProjectsOwnText(t *testing.T) {
 		return os.Open(path)
 	}
 
-	scan := scanRetiredNamesWith(root, nil, open)
+	scan := scanFixture(root, nil, open)
 
 	var paths []string
 	for _, hit := range scan.Hits {
@@ -456,7 +556,7 @@ func TestScanRetiredNamesSkipsDependencyAndBuildDirsOutsideGit(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(locked, 0o700) })
 
-	scan := ScanRetiredNames(root, nil)
+	scan := scanFixture(root, nil, nil)
 
 	if len(scan.Hits) != 1 || scan.Hits[0].Path != "src/own.sh" || len(scan.Failures) != 0 {
 		t.Fatalf("scan = %+v, want src/own.sh's hit alone and no failure", scan)
@@ -473,7 +573,7 @@ func TestScanRetiredNamesDoesNotWidenToAWalkWhenGitFails(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	scan := ScanRetiredNames(root, nil)
+	scan := scanFixture(root, nil, nil)
 
 	if len(scan.Hits) != 0 || len(scan.Failures) != 1 || scan.Failures[0].Path != "." ||
 		!strings.Contains(scan.Failures[0].Error, "git") {
@@ -492,7 +592,10 @@ func TestRetiredNameInACurrentPinnedFileIsReported(t *testing.T) {
 	writeProjectFixtureFile(t, fixture.project, ".claude/updated-one.md", "local truth\nrun /jc\n")
 
 	var stdout bytes.Buffer
-	code := professor.RunProjectUpdates(fixture.project, fixture.runtime.Paths.Home, false, &stdout, ScanRetiredNames)
+	code := professor.RunProjectUpdates(
+		fixture.project, fixture.runtime.Paths.Home, false, &stdout,
+		RetiredNameScanner(context.Background(), fixture.runtime.Paths.Home),
+	)
 
 	report := stdout.String()
 	if code != 1 {
@@ -500,7 +603,7 @@ func TestRetiredNameInACurrentPinnedFileIsReported(t *testing.T) {
 	}
 	for _, want := range []string{
 		"  RETIRED-NAME  1\n",
-		"    .claude/current.md:2   /wave — retired command, now the flights-foreman agent\n",
+		"    .claude/current.md:2   /wave — retired command, now " + fixtureFlightsSuccessor + "\n",
 	} {
 		if !strings.Contains(report, want) {
 			t.Errorf("report missing %q:\n%s", want, report)
@@ -585,7 +688,7 @@ func TestScanRetiredNamesSkipsANameTheProjectDefines(t *testing.T) {
 		return got
 	}
 	if got, want := names(
-		ScanRetiredNames(defining, nil),
+		scanFixture(defining, nil, nil),
 	), []string{
 		"/jc",
 		"JC-UPDATE",
@@ -597,14 +700,14 @@ func TestScanRetiredNamesSkipsANameTheProjectDefines(t *testing.T) {
 	) {
 		t.Errorf("hits where the project defines the names = %v, want %v", got, want)
 	}
-	if got, want := names(ScanRetiredNames(skillOnly, nil)), []string{"subagent_type: \"ultimate\""}; !slices.Equal(
+	if got, want := names(scanFixture(skillOnly, nil, nil)), []string{"subagent_type: \"ultimate\""}; !slices.Equal(
 		got,
 		want,
 	) {
 		t.Errorf("hits where the project keeps only the live ultimate skill = %v, want %v", got, want)
 	}
 	if got, want := names(
-		ScanRetiredNames(bare, nil),
+		scanFixture(bare, nil, nil),
 	), []string{
 		"/jc",
 		"/km",
@@ -622,49 +725,13 @@ func TestScanRetiredNamesSkipsANameTheProjectDefines(t *testing.T) {
 	}
 }
 
-func TestChatCallRetiredNames(t *testing.T) {
-	t.Parallel()
-	root := t.TempDir()
-	writeRetiredFixture(
-		t,
-		root,
-		map[string]string{
-			"old.md": "mcp__chat__call\npfm chat inject target message\nchat_inject\n",
-			"new.md": "mcp__chat-professor__call\npfm chat call target message\n",
-		},
-	)
-	scan := ScanRetiredNames(root, nil)
-	if len(scan.Failures) != 0 {
-		t.Fatalf("scan failures = %+v", scan.Failures)
-	}
-	want := []professor.RetiredNameHit{
-		{
-			Path:      "old.md",
-			Line:      1,
-			Name:      "mcp__chat__",
-			Kind:      "tool",
-			Successor: "mcp__chat-professor__*",
-		},
-		{Path: "old.md", Line: 2, Name: "pfm chat inject", Kind: "command", Successor: "pfm chat call"},
-		{Path: "old.md", Line: 3, Name: "chat_inject", Kind: "tool", Successor: "mcp__chat-professor__call"},
-	}
-	if !reflect.DeepEqual(scan.Hits, want) {
-		t.Fatalf("retired hits = %+v, want %+v", scan.Hits, want)
-	}
-}
-
 func TestScanRetiredNamesReportsRetiredPathsEvenWhenPresent(t *testing.T) {
 	t.Parallel()
 	for _, row := range []struct{ name, exists string }{
 		{".claude/commands/pfm.md", ".claude/commands/pfm.md"},
-		{".claude/commands/pfm/references/audit-scopes.md", ".claude/commands/pfm/references/audit-scopes.md"},
 		{"docs/agents", "docs/agents/index.md"},
 		{"pfm-guard.sh", "pfm-guard.sh"},
 		{"pfm-guard.sh", ".claude/scripts/pfm-guard.sh"},
-		{"guard-stamp.sh", "guard-stamp.sh"},
-		{"guard-stamp.sh", ".claude/scripts/guard-stamp.sh"},
-		{"build-codex.mjs", "build-codex.mjs"},
-		{"build-codex.mjs", ".claude/scripts/build-codex.mjs"},
 		{"scripts/codex-sync.sh", "scripts/codex-sync.sh"},
 		{"scripts/codex-sync.sh", ".claude/scripts/codex-sync.sh"},
 	} {
@@ -675,7 +742,7 @@ func TestScanRetiredNamesReportsRetiredPathsEvenWhenPresent(t *testing.T) {
 				root,
 				map[string]string{row.exists: "legacy file\n", "notes.md": "run " + row.name + "\n"},
 			)
-			scan := ScanRetiredNames(root, nil)
+			scan := scanFixture(root, nil, nil)
 			if len(scan.Failures) != 0 || len(scan.Hits) != 1 || scan.Hits[0].Name != row.name ||
 				scan.Hits[0].Kind != "path" ||
 				scan.Hits[0].Path != "notes.md" {
@@ -685,98 +752,6 @@ func TestScanRetiredNamesReportsRetiredPathsEvenWhenPresent(t *testing.T) {
 				t.Fatalf("codex sync successor = %q, want engine-sync codex", scan.Hits[0].Successor)
 			}
 		})
-	}
-}
-
-func TestRetiredNamesReportRemovedTwinAgents(t *testing.T) {
-	t.Parallel()
-	for _, row := range []struct{ line, name, successor, definition string }{
-		{"spawn gpt-foreman", "", "", ""},
-		{"spawn gpt-lander", "gpt-lander", "", ""},
-		{"spawn gpt-executor", "gpt-executor", "", ""},
-		{`subagent_type: "terra"`, `subagent_type: "terra"`, "", ""},
-		{`subagent_type:"terra"`, `subagent_type:"terra"`, "", ""},
-		{`subagent_type: 'terra'`, `subagent_type: 'terra'`, "", ""},
-		{"subagent_type: terra", "subagent_type: terra", "", ""},
-		{`subagent_type="terra"`, `subagent_type="terra"`, "", ""},
-		{`{"subagent_type": "terra"}`, `subagent_type": "terra"`, "", ""},
-		{`{"subagent_type":"terra"}`, `subagent_type":"terra"`, "", ""},
-		{".claude/agents/terra.md", "agents/terra.md", "", ""},
-		{"the `terra` agent", "`terra` agent", "", ""},
-		{"the `terra` sub-agent", "`terra` sub-agent", "", ""},
-		{"the `terra` subagent", "`terra` subagent", "", ""},
-		{"terra firma and terra incognita", "", "", ""},
-		{"terrestrial prose and terra-cotta; /terra and `terra` skill", "", "", ""},
-		{`subagent_type: "terra" and .claude/agents/terra.md`, "", "", ".claude/agents/terra.md"},
-	} {
-		t.Run(row.line, func(t *testing.T) {
-			root := t.TempDir()
-			files := map[string]string{"notes.md": row.line + "\n"}
-			if row.definition != "" {
-				files[row.definition] = "mine\n"
-			}
-			writeRetiredFixture(t, root, files)
-			scan := ScanRetiredNames(root, nil)
-			var want []professor.RetiredNameHit
-			if row.name != "" {
-				want = []professor.RetiredNameHit{
-					{Path: "notes.md", Line: 1, Name: row.name, Kind: "agent", Successor: row.successor},
-				}
-			}
-			if len(scan.Failures) != 0 || !slices.Equal(scan.Hits, want) {
-				t.Fatalf("retired agent scan = %+v, want %+v", scan, want)
-			}
-		})
-	}
-}
-
-// TestRetiredNamesReportTheFlightsCut: every agent and command the flights
-// family cut retires is a hit with no successor, and the names beside them
-// that only share a prefix — the current foremen, gpt-foreman, /flights:doctor —
-// are none, nor are flights-speccer and /flights:spec, which ship again.
-func TestRetiredNamesReportTheFlightsCut(t *testing.T) {
-	t.Parallel()
-	rows := []struct{ line, name, kind, successor string }{
-		{"spawn foreman-pro for it", "foreman-pro", "agent", ""},
-		{"spawn gpt-foreman-pro for it", "gpt-foreman-pro", "agent", ""},
-		{"hand it to flights-mechanical-executor", "flights-mechanical-executor", "agent", ""},
-		{"hand it to gpt-flights-mechanical-executor", "gpt-flights-mechanical-executor", "agent", ""},
-		{"gpt-flights-speccer writes the spec", "gpt-flights-speccer", "agent", ""},
-		{"run /flights:init once", "/flights:init", "command", ""},
-		{"run /flights:orchestrate-cross-harness on codex", "/flights:orchestrate-cross-harness", "command", ""},
-	}
-	root := t.TempDir()
-	var content strings.Builder
-	var want []professor.RetiredNameHit
-	for index, row := range rows {
-		content.WriteString(row.line + "\n")
-		want = append(want, professor.RetiredNameHit{
-			Path: "notes.md", Line: index + 1, Name: row.name, Kind: row.kind, Successor: row.successor,
-		})
-	}
-	content.WriteString("spawn flights-foreman, flights-foreman-sonnet or gpt-foreman; run /flights:doctor\n")
-	content.WriteString("flights-speccer writes the spec\n")
-	content.WriteString("run /flights:spec first\n")
-	writeRetiredFixture(t, root, map[string]string{"notes.md": content.String()})
-	scan := ScanRetiredNames(root, nil)
-	if len(scan.Failures) != 0 || !reflect.DeepEqual(scan.Hits, want) {
-		t.Fatalf("flights cut scan =\n%+v\nwant\n%+v", scan, want)
-	}
-}
-
-func TestRetiredNamesReportTheLanderTiers(t *testing.T) {
-	t.Parallel()
-	root := t.TempDir()
-	writeRetiredFixture(t, root, map[string]string{"notes.md": "spawn flights-lander-mini for a small change\n" +
-		"spawn flights-lander-pro for a large one\n" +
-		"spawn flights-lander or gpt-flights-lander; it spawns flights-hunter and flights-sub-lander\n"})
-	want := []professor.RetiredNameHit{
-		{Path: "notes.md", Line: 1, Name: "flights-lander-mini", Kind: "agent", Successor: "flights-lander"},
-		{Path: "notes.md", Line: 2, Name: "flights-lander-pro", Kind: "agent", Successor: "flights-lander"},
-	}
-	scan := ScanRetiredNames(root, nil)
-	if len(scan.Failures) != 0 || !reflect.DeepEqual(scan.Hits, want) {
-		t.Fatalf("lander tiers scan =\n%+v\nwant\n%+v", scan, want)
 	}
 }
 
@@ -792,9 +767,9 @@ func TestScanRetiredNamesStreamsTrackedTextToClean(t *testing.T) {
 	) + " /jc\r\n/quality:forlint"
 	writeRetiredFixture(t, root, map[string]string{"large.txt": content})
 	gitTemp(t, root, "add", "large.txt")
-	scan := ScanRetiredNames(root, nil)
+	scan := scanFixture(root, nil, nil)
 	want := []professor.RetiredNameHit{
-		{Path: "large.txt", Line: 1, Name: "/wave", Kind: "command", Successor: flightsSuccessor},
+		{Path: "large.txt", Line: 1, Name: "/wave", Kind: "command", Successor: fixtureFlightsSuccessor},
 		{Path: "large.txt", Line: 4, Name: "/jc", Kind: "command"},
 		{Path: "large.txt", Line: 5, Name: "/quality:forlint", Kind: "command", Successor: "/md-forlint:use"},
 	}
@@ -804,7 +779,7 @@ func TestScanRetiredNamesStreamsTrackedTextToClean(t *testing.T) {
 	clean := strings.NewReplacer("/wave", "/flights:doctor", "/jc", "/prompt:use", "/quality:forlint", "/md-forlint:use").
 		Replace(content)
 	writeRetiredFixture(t, root, map[string]string{"large.txt": clean})
-	scan = ScanRetiredNames(root, nil)
+	scan = scanFixture(root, nil, nil)
 	if len(scan.Hits) != 0 || len(scan.Failures) != 0 || len(scan.Incomplete) != 0 {
 		t.Fatalf("edited large tracked file = %+v, want full clean coverage", scan)
 	}
@@ -839,7 +814,7 @@ func TestScanRetiredNamesRetainsCompletedHitsOnReadOrCloseFailure(t *testing.T) 
 				}
 				return file, nil
 			}
-			scan := scanRetiredNamesWith(root, nil, open)
+			scan := scanFixture(root, nil, open)
 			if len(scan.Hits) != 1 || scan.Hits[0].Line != 1 || scan.Hits[0].Name != "/wave" ||
 				len(scan.Failures) != 1 ||
 				!strings.Contains(scan.Failures[0].Error, "fixture "+operation+" failed") {

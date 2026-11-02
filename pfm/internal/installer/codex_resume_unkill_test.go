@@ -127,7 +127,7 @@ func stageResumeUnkillAccount(t *testing.T, home string) (account, binary, reque
 	if err != nil {
 		t.Fatal(err)
 	}
-	installed, _, _, err := updateCodexHooks([]byte(personalStopHook), home, false, nil)
+	installed, _, _, err := updateCodexHooks(fixtureRetiredHooks, []byte(personalStopHook), home, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,61 +305,35 @@ func TestCodexResumeUnkillHookAndTrustAreRemovedOnUninstall(t *testing.T) {
 	}
 }
 
-// A retired appendix receipt that will not clean up never skips the current
-// hook trust cleanup of the same account; each failure is named.
-func TestCodexHookTrustCleanupRunsPastARetiredReceiptFailure(t *testing.T) {
+// An unreadable hook trust receipt never skips the hook trust cleanup of the
+// same account; the failure is named.
+func TestCodexHookTrustCleanupRunsPastAnUnreadableReceipt(t *testing.T) {
 	t.Parallel()
-	for _, test := range []struct {
-		name             string
-		hookReceiptBroke bool
-	}{
-		{name: "retired receipt unreadable"},
-		{name: "both receipts unreadable", hookReceiptBroke: true},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			t.Parallel()
-			home := t.TempDir()
-			account, binary, _ := stageResumeUnkillAccount(t, home)
-			key := account + "/hooks.json:session_start:0:0"
-			apply := resumeUnkillEngine(home, account, binary, ModeApply, &bytes.Buffer{})
-			if err := apply.wireCodexHooks(); err != nil {
-				t.Fatal(err)
-			}
-			writeFixture(t, filepath.Join(account, "config.toml"),
-				"[hooks.state.\""+key+"\"]\nenabled = true\ntrusted_hash = 'sha256:deadbeef'\n")
-			retired := filepath.Join(account, ".professor-appendix-trust.json")
-			hookReceipt := filepath.Join(account, ".professor-hook-trust.json")
-			writeFixture(t, retired, "{")
-			want := "Codex hook trust for " + account + ": parse trust receipt " + retired +
-				": unexpected end of JSON input"
-			if test.hookReceiptBroke {
-				writeFixture(t, hookReceipt, "{")
-				want += "\nparse trust receipt " + hookReceipt + ": unexpected end of JSON input"
-			}
+	home := t.TempDir()
+	account, binary, _ := stageResumeUnkillAccount(t, home)
+	key := account + "/hooks.json:session_start:0:0"
+	apply := resumeUnkillEngine(home, account, binary, ModeApply, &bytes.Buffer{})
+	if err := apply.wireCodexHooks(); err != nil {
+		t.Fatal(err)
+	}
+	writeFixture(t, filepath.Join(account, "config.toml"),
+		"[hooks.state.\""+key+"\"]\nenabled = true\ntrusted_hash = 'sha256:deadbeef'\n")
+	hookReceipt := filepath.Join(account, ".professor-hook-trust.json")
+	writeFixture(t, hookReceipt, "{")
+	want := "Codex hook trust for " + account + ": parse trust receipt " + hookReceipt +
+		": unexpected end of JSON input"
 
-			var transcript bytes.Buffer
-			installer := resumeUnkillEngine(home, account, binary, ModeUninstall, &transcript)
-			if err := installer.wireCodexHooks(); err != nil {
-				t.Fatalf("%v\n%s", err, transcript.String())
-			}
-			got := errors.Join(installer.deferred...)
-			if got == nil || got.Error() != want {
-				t.Fatalf("deferred error:\n%v\nwant:\n%s", got, want)
-			}
-			if !strings.Contains(transcript.String(), "change  remove Codex hook trust "+account) {
-				t.Fatalf("the current hook trust cleanup did not run:\n%s", transcript.String())
-			}
-			if test.hookReceiptBroke {
-				return
-			}
-			if _, err := os.Stat(hookReceipt); !os.IsNotExist(err) {
-				t.Fatalf("hook trust receipt %s survived uninstall: %v", hookReceipt, err)
-			}
-			config := readFixture(t, filepath.Join(account, "config.toml"))
-			if strings.Contains(config, "sha256:deadbeef") {
-				t.Fatalf("hook trust table survived uninstall:\n%s", config)
-			}
-		})
+	var transcript bytes.Buffer
+	installer := resumeUnkillEngine(home, account, binary, ModeUninstall, &transcript)
+	if err := installer.wireCodexHooks(); err != nil {
+		t.Fatalf("%v\n%s", err, transcript.String())
+	}
+	got := errors.Join(installer.deferred...)
+	if got == nil || got.Error() != want {
+		t.Fatalf("deferred error:\n%v\nwant:\n%s", got, want)
+	}
+	if !strings.Contains(transcript.String(), "change  remove Codex hook trust "+account) {
+		t.Fatalf("the hook trust cleanup did not run:\n%s", transcript.String())
 	}
 }
 

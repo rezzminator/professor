@@ -413,73 +413,34 @@ func mirrorPluginTree(source, target string) error {
 	return os.RemoveAll(aside)
 }
 
-// planLegacyCopyRetirement plans the settings.json edit that runs before the
-// legacy ids' uninstall, which deletes their pluginConfigs: the pluginConfigs
-// entry of a legacy id (LegacyIDs), the first enabled one that has one, else
-// the first, copied to the build's id when that id has none, never
-// overwriting, and every enabled legacy id set false. An install-only target's own id is set false too: claude.plugins does
-// not list it. It returns "" when there is nothing to do. The edit writes
+// planInstallOnlyDisable plans the settings.json edit that sets an enabled
+// install-only target's id false: claude.plugins does not list it. It returns
+// "" for a listed target, one not enabled, or an absent file. The edit writes
 // through a settings.json symlink and keeps every number exactly.
-func planLegacyCopyRetirement(path string, target *ClaudePluginTarget) (string, func() error, error) {
-	raw, document, err := readSettingsForEdit(path)
-	if err != nil || document == nil {
-		return "", nil, err
-	}
-	disabled, carried := retireLegacyCopies(document, target)
-	if len(disabled) == 0 && carried == "" {
+func planInstallOnlyDisable(path string, target *ClaudePluginTarget) (string, func() error, error) {
+	if !target.InstallOnly {
 		return "", nil, nil
 	}
-	message := "copy the pluginConfigs of " + carried + " to " + target.ID + " in " + path
-	if len(disabled) != 0 {
-		reason := target.ID + " replaces it"
-		if target.InstallOnly {
-			reason = pfmconfig.KeyClaudePlugins + " does not list " + target.Name
-		}
-		message = "disable " + strings.Join(disabled, ", ") + " in " + path + ": " + reason
-		switch {
-		case carried == "":
-		case len(disabled) == 1 && disabled[0] == carried:
-			message += "; copy its pluginConfigs to " + target.ID
-		default:
-			message += "; copy the pluginConfigs of " + carried + " to " + target.ID
-		}
+	raw, document, err := readSettingsForEdit(path)
+	if err != nil || document == nil || !disableInstallOnly(document, target) {
+		return "", nil, err
 	}
+	message := "disable " + target.ID + " in " + path + ": " + pfmconfig.KeyClaudePlugins + " does not list " + target.Name
 	return message, writeSettingsDocument(path, raw, document, func(fresh map[string]any) error {
-		retireLegacyCopies(fresh, target)
+		disableInstallOnly(fresh, target)
 		return nil
 	}), nil
 }
 
-// retireLegacyCopies applies planLegacyCopyRetirement's edit to document and
-// names what it changed: the ids it set false and the id whose pluginConfigs
-// entry it carried to the build's id.
-func retireLegacyCopies(document map[string]any, target *ClaudePluginTarget) (disabled []string, carried string) {
-	legacy := target.LegacyIDs()
+// disableInstallOnly sets target.ID false in document's enabledPlugins when
+// it is enabled, reporting whether it was.
+func disableInstallOnly(document map[string]any, target *ClaudePluginTarget) bool {
 	enabled, _ := document["enabledPlugins"].(map[string]any)
-	if target.InstallOnly && enabled[target.ID] == true {
-		disabled = append(disabled, target.ID)
+	if enabled[target.ID] != true {
+		return false
 	}
-	for _, id := range legacy {
-		if enabled[id] == true {
-			disabled = append(disabled, id)
-		}
-	}
-	configs, _ := document["pluginConfigs"].(map[string]any)
-	if _, kept := configs[target.ID]; !kept {
-		// An enabled legacy id's options are the ones in use: they win.
-		for _, id := range legacy {
-			if _, ok := configs[id]; ok && (carried == "" || enabled[id] == true && enabled[carried] != true) {
-				carried = id
-			}
-		}
-		if carried != "" {
-			configs[target.ID] = configs[carried]
-		}
-	}
-	for _, id := range disabled {
-		enabled[id] = false
-	}
-	return disabled, carried
+	enabled[target.ID] = false
+	return true
 }
 
 // readSettingsForEdit reads path as an edit's base: its bytes, which the edit
@@ -660,38 +621,14 @@ func settingsEditTarget(path string) (string, fs.FileMode, error) {
 	return resolved, info.Mode().Perm(), nil
 }
 
-// retiredClaudePlugins are plugin ids once ours that a successor replaced,
-// keyed by the successor's bare name. Doctor flags each enabled one
-// (ClaudePluginGaps); install disables it, never uninstalls it, once the
-// successor is ensured.
-var retiredClaudePlugins = map[string][]string{
-	"auto-effort": {
-		"agent-effort@agent-effort",
-		"agent-effort@agent-effort-dev",
-		"agent-effort@professor",
-		"agent-effort@rezzminator",
-		"auto-effort-control@rezzminator",
-		"auto-effort@rezzminator",
-		"effort-live-control@effort-live-control",
-		"effort-live-control@effort-live-control-dev",
-		"effort-live-control@professor",
-		"effort-live-control@rezzminator",
-	},
-	"forward-compaction": {
-		"sub-agent-compact@professor",
-		"sub-agent-compact@sub-agent-compact",
-		"sub-agent-compact@sub-agent-compact-dev",
-	},
-}
-
-// planRetiredPluginDisable plans the settings.json edit that retires every
-// retired id of target's name: each enabled one set false in enabledPlugins,
+// planRetiredPluginDisable plans the settings.json edit that retires each of
+// retired, the retired lists' plugin ids of target's name (retired.Lists
+// ClaudePlugins): each enabled one set false in enabledPlugins,
 // and the plugin's pluginConfigs settled on target.ID alone (retireConfigs).
 // It returns "" when none is enabled, no entry needs settling or the file is
 // absent. The edit writes through a settings.json symlink and keeps every
 // number exactly.
-func planRetiredPluginDisable(path string, target *ClaudePluginTarget) (string, func() error, error) {
-	retired := retiredClaudePlugins[target.Name]
+func planRetiredPluginDisable(path string, target *ClaudePluginTarget, retired []string) (string, func() error, error) {
 	if len(retired) == 0 {
 		return "", nil, nil
 	}

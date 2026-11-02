@@ -4,7 +4,6 @@ cmd/pfm/chat_dispatch.go
 cmd/pfm/chat_keys_command.go
 cmd/pfm/engines.go
 cmd/pfm/heal_command.go
-cmd/pfm/index_command.go
 cmd/pfm/init_command.go
 cmd/pfm/mcp_serve_command.go
 cmd/pfm/namesync_command.go
@@ -49,9 +48,7 @@ internal/hookentry/doc.go
 internal/hookentry/launcher_repair.go
 internal/hookentry/prompt_block.go
 internal/hostfixture/doc.go
-internal/index/cxindex.go
 internal/index/incremental.go
-internal/index/sync_sources.go
 internal/index/walk.go
 internal/installer/assets.go
 internal/installer/codex_hooks.go

@@ -124,9 +124,8 @@ beat() { :; }; spends() { :; }
 pass() { printf 'PASS %s\n' "$*"; }; fail() { printf 'FAIL %s\n' "$*"; }
 install_again() {
   case "$variant" in
-    foreign-dropped) sed -i '/^\[mcp_servers.professor\]/,$d' "$TOML" ;;
+    foreign-dropped) sed -i '/^\[mcp_servers.lane-m-foreign\]/,$d' "$TOML" ;;
   esac
-  printf 'preserve foreign MCP client professor\n'
 }
 cp() {
   command cp "$@" || return

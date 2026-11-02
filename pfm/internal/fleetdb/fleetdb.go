@@ -98,28 +98,11 @@ type Store struct {
 	commsWrites atomic.Uint64
 }
 
-// CheckLegacyState refuses a state database create while the legacy
-// database still waits for the operator to apply pfm doctor's fix (paths.ErrLegacyPending).
-// Hand-built values with no Home skip the check.
-func CheckLegacyState(values paths.Values) error {
-	if values.Home == "" {
-		return nil
-	}
-	if err := paths.CheckLegacyPending(values.StateDB, paths.LegacyStateDB(values.Home)); err != nil {
-		return fmt.Errorf("shared state database: %w", err)
-	}
-	return nil
-}
-
 // OpenSharedState records a database initialization failure in Degraded. Operations then
 // return that failure instead of pretending an operator decision was stored.
 func OpenSharedState(ctx context.Context, values paths.Values) *Store {
 	store := &Store{
 		path: values.StateDB,
-	}
-	if err := CheckLegacyState(values); err != nil {
-		store.degraded = err
-		return store
 	}
 	db, err := openDatabase(ctx, values.StateDB)
 	if err != nil {
@@ -695,11 +678,7 @@ func SetClaudePrimaryAccount(
 			returnErr = errors.Join(returnErr, fmt.Errorf("close shared state: %w", err))
 		}
 	}()
-	// An unopenable database degrades to the mirror below, but a create refused
-	// while legacy state waits for pfm doctor's fix is never silently degraded.
-	if err := state.Degraded(); errors.Is(err, paths.ErrLegacyPending) {
-		return err
-	}
+	// An unopenable database degrades to the mirror below.
 	if err := state.SetMeta(
 		ctx,
 		PrimaryAccountKey,

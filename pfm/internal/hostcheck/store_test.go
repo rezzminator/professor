@@ -219,7 +219,7 @@ func TestStoreIdentity(t *testing.T) {
 				env.Accounts...)
 			var want []Row
 			for _, entry := range installer.AccountEntries {
-				if slices.Contains(installer.RetiredStoreEntries, entry) {
+				if slices.Contains(env.Retired.StoreEntries, entry) {
 					continue // retired-store-entry's, a warning
 				}
 				if entry == "cache" {

@@ -13,7 +13,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/hostcheck"
 	"github.com/rezzminator/professor/pfm/internal/installer"
-	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 const staleStamp = ".pre-professor-20300101-000000"
@@ -49,31 +48,13 @@ func seedStaleFile(t *testing.T, path string) {
 	}
 }
 
-func ensureStaleSuccessor(t *testing.T, path string) {
-	t.Helper()
-	if _, err := os.Lstat(path); errors.Is(err, fs.ErrNotExist) {
-		seedStaleFile(t, path)
-	} else if err != nil {
-		t.Fatalf("inspect %s: %v", path, err)
-	}
-}
-
-// seedStaleHome writes one path per retired-path kind pfm once wrote, each
-// successor present so none is held, and returns path → kind.
+// seedStaleHome writes one path per retired-path kind pfm once wrote and
+// returns path → kind.
 func seedStaleHome(t *testing.T, runtime config.Runtime) map[string]string {
 	t.Helper()
 	home := runtime.Paths.Home
 	store := installer.ClaudeStore(home)
-	legacyConfigDir := config.LegacyConfigDir(paths.OSEnv{}, home)
-	ensureStaleSuccessor(t, runtime.Config.Path)
-	ensureStaleSuccessor(t, runtime.Paths.StateDB)
-	ensureStaleSuccessor(t, runtime.Paths.CacheDB)
 	seeded := map[string]string{}
-	seeded[filepath.Join(legacyConfigDir, config.FileName)] = "legacy-config-dir"
-	seeded[paths.LegacyStateDB(home)] = "legacy-state-db"
-	seeded[paths.LegacyCacheDB(home)] = "legacy-cache-db"
-	seeded[filepath.Join(installer.ManagedRoot(home), "harness-prompts", "a.md")] = "staged-prompts"
-	seeded[filepath.Join(home, ".local", "state", "pfm", "shared.db")] = "shared-db"
 	seeded[filepath.Join(store, "settings.json"+staleStamp)] = "install-backup"
 	seeded[filepath.Join(home, ".zshrc"+staleStamp)] = "install-backup"
 	seeded[filepath.Join(home, "Library", "LaunchAgents", "com.professor.pfm.mcp.plist"+staleStamp)] = "install-backup"
@@ -82,12 +63,6 @@ func seedStaleHome(t *testing.T, runtime config.Runtime) map[string]string {
 	seeded[filepath.Join(installer.RetiredStoreArchive(home), ".last-update-result.json"+staleStamp)] = "retired-archive"
 	seeded[filepath.Join(home, ".local", "state", "pfm", "retired-commands", "cc-ls"+staleStamp)] = "retired-archive"
 	seeded[filepath.Join(config.DefaultAccountDir(home, 9), "settings.json")] = "dead-account-dir"
-	seeded[filepath.Join(home, ".local", "state", "pfm", "fleet.db.bak-before-v8")] = "retired-fleet-db"
-	seeded[filepath.Join(home, ".local", "state", "pfm", "retired-chat-skills.X8Z7oiYZ", "SKILL.md")] = "retired-chat-skills"
-	seeded[filepath.Join(installer.RetiredMigrationJournal(home), "20260928T100205Z", "journal.json")] = "retired-migration-journal"
-	for _, store := range installer.RetiredGeneratedStores(home) {
-		seeded[filepath.Join(store, "rr.toml")] = "retired-generated-store"
-	}
 	for path := range seeded {
 		seedStaleFile(t, path)
 	}
@@ -95,7 +70,7 @@ func seedStaleHome(t *testing.T, runtime config.Runtime) map[string]string {
 	if err := os.MkdirAll(filepath.Dir(link), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(filepath.Join(home, ".professor", "workflows", "deep-rr"), link); err != nil {
+	if err := os.Symlink(filepath.Join(installer.ManagedRoot(home), "skills", "deep-rr"), link); err != nil {
 		t.Fatalf("link %s: %v", link, err)
 	}
 	seeded[link] = "dead-registry-link"
@@ -106,11 +81,8 @@ func seedStaleHome(t *testing.T, runtime config.Runtime) map[string]string {
 // the retired directory holding it.
 func listedPath(seeded, kind string) string {
 	switch kind {
-	case "legacy-config-dir", "staged-prompts", "dead-account-dir", "retired-chat-skills",
-		"retired-generated-store":
+	case "dead-account-dir":
 		return filepath.Dir(seeded)
-	case "retired-migration-journal":
-		return filepath.Dir(filepath.Dir(seeded))
 	}
 	return seeded
 }
@@ -181,7 +153,7 @@ func TestDoctorStaleListsAndPurgesEveryRetiredPath(t *testing.T) {
 func TestDoctorStalePurgeReportsAFailedMove(t *testing.T) {
 	runtime := buildStaleCleanHome(t)
 	home := runtime.Paths.Home
-	failing := filepath.Join(home, ".local", "state", "pfm", "shared.db")
+	failing := filepath.Join(installer.ClaudeStore(home), "settings.json"+staleStamp)
 	moving := filepath.Join(home, ".zshrc"+staleStamp)
 	seedStaleFile(t, failing)
 	seedStaleFile(t, moving)
@@ -218,15 +190,15 @@ func TestDoctorStalePurgeReportsAFailedMove(t *testing.T) {
 func TestDoctorStaleBrokenConfigListsWhatNeedsNoAccountsAndRefusesPurge(t *testing.T) {
 	runtime := buildStaleCleanHome(t)
 	runtime.ConfigError = errors.New("config broken: unexpected end of JSON input")
-	shared := filepath.Join(runtime.Paths.Home, ".local", "state", "pfm", "shared.db")
-	seedStaleFile(t, shared)
+	backup := filepath.Join(runtime.Paths.Home, ".zshrc"+staleStamp)
+	seedStaleFile(t, backup)
 	root := filepath.Dir(config.DefaultAccountDir(runtime.Paths.Home, 1))
 	const unknown = "stale: config error=config broken: unexpected end of JSON input — the accounts are unknown, "
 
 	var stdout, stderr bytes.Buffer
 	code := runDoctor([]string{"--stale"}, &stdout, &stderr, runtime)
 	want := unknown + "so account-dependent rows are unknown\n" +
-		"stale: WARN shared-db " + shared + " — retired shared.db\n" +
+		"stale: WARN install-backup " + backup + " — pfm install's backup of .zshrc\n" +
 		"stale:   fix: pfm doctor --stale --purge moves it into one backup dir\n" +
 		"stale: BLOCK dead-account-dir " + root +
 		" — no account configured: cannot tell a live account dir from a dead one\n" +
@@ -246,8 +218,8 @@ func TestDoctorStaleBrokenConfigListsWhatNeedsNoAccountsAndRefusesPurge(t *testi
 			want,
 		)
 	}
-	if _, err := os.Lstat(shared); err != nil {
-		t.Fatalf("a refused purge moved %s: %v", shared, err)
+	if _, err := os.Lstat(backup); err != nil {
+		t.Fatalf("a refused purge moved %s: %v", backup, err)
 	}
 }
 

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
-	"slices"
 	"strings"
 	"unicode"
 )
@@ -18,48 +17,14 @@ import (
 // Source is what `claude plugin marketplace add` takes (owner/repo, a git or
 // https URL, a path) for a full id whose marketplace Claude Code does not know
 // yet; empty otherwise.
-// Former is the former name a bare entry was written with
-// (FormerClaudePluginNames), read as ID, its current name; empty otherwise.
 type ClaudePlugin struct {
 	ID     string
 	Source string
-	Former string
 }
 
 // ProfessorMarketplace is the marketplace every plugin of ours installs from:
 // a bare name's id is {name}@professor on every build.
 const ProfessorMarketplace = "professor"
-
-// FormerClaudePluginNames are the names a plugin of ours had before its
-// current one, keyed by the current name. A bare former name in claude.plugins
-// reads as the current one, and doctor names it.
-var FormerClaudePluginNames = map[string][]string{
-	"auto-effort": {"auto-effort-control"},
-}
-
-// CurrentClaudePluginName is the current name of a plugin of ours once called
-// name, else name itself.
-func CurrentClaudePluginName(name string) string {
-	for current, formers := range FormerClaudePluginNames {
-		if slices.Contains(formers, name) {
-			return current
-		}
-	}
-	return name
-}
-
-// LegacyClaudePluginIDs are the ids a plugin of ours installed as before
-// {name}@professor: {name}@{name}, its own GitHub marketplace, and
-// {name}@{name}-dev, the -alpha checkout copy; and for each former name
-// (FormerClaudePluginNames) {former}@professor and its own two. pfm install
-// moves each to {name}@professor.
-func LegacyClaudePluginIDs(name string) []string {
-	ids := []string{name + "@" + name, name + "@" + name + "-dev"}
-	for _, former := range FormerClaudePluginNames[name] {
-		ids = append(ids, former+"@"+ProfessorMarketplace, former+"@"+former, former+"@"+former+"-dev")
-	}
-	return ids
-}
 
 // claudePluginIDPattern is a plugin id: a name, or name@marketplace, each part
 // starting with a letter or digit so an id is one safe path element.
@@ -146,31 +111,28 @@ func decodeClaudePlugins(entries []json.RawMessage) ([]ClaudePlugin, error) {
 	return plugins, nil
 }
 
-// claudePluginCopyClash refuses a bare name listed beside a full id of its
-// own, {name}@professor or a legacy id (LegacyClaudePluginIDs): the bare entry
-// ensures {name}@professor and moves the legacy ids to it, so the full id
-// would be ensured twice or moved away again on every install.
+// claudePluginCopyClash refuses a bare name listed beside its own
+// {name}@professor id: the bare entry ensures that id, so it would be ensured
+// twice.
 func claudePluginCopyClash(plugin ClaudePlugin, index int, first map[string]int) error {
-	name := CurrentClaudePluginName(plugin.Name())
-	copies := append([]string{name + "@" + ProfessorMarketplace}, LegacyClaudePluginIDs(name)...)
+	name := plugin.Name()
+	id := name + "@" + ProfessorMarketplace
 	if plugin.Bare() {
-		for _, id := range copies {
-			if earlier, listed := first[id]; listed {
-				return fmt.Errorf(
-					"%s[%d] %s is a bare name of %s[%d] %s, which it ensures or moves: list the plugin once",
-					KeyClaudePlugins, index, plugin.ID, KeyClaudePlugins, earlier, id,
-				)
-			}
+		if earlier, listed := first[id]; listed {
+			return fmt.Errorf(
+				"%s[%d] %s is a bare name of %s[%d] %s, which it ensures: list the plugin once",
+				KeyClaudePlugins, index, plugin.ID, KeyClaudePlugins, earlier, id,
+			)
 		}
 		return nil
 	}
 	earlier, listed := first[name]
-	if !listed || !slices.Contains(copies, plugin.ID) {
+	if !listed || plugin.ID != id {
 		return nil
 	}
 	return fmt.Errorf(
-		"%s[%d] %s is an id of %s[%d] %s, which ensures %s@%s and moves its legacy ids to it: list the plugin once",
-		KeyClaudePlugins, index, plugin.ID, KeyClaudePlugins, earlier, name, name, ProfessorMarketplace,
+		"%s[%d] %s is the id of %s[%d] %s, which ensures it: list the plugin once",
+		KeyClaudePlugins, index, plugin.ID, KeyClaudePlugins, earlier, name,
 	)
 }
 
@@ -200,9 +162,6 @@ func decodeClaudePlugin(entry json.RawMessage) (ClaudePlugin, error) {
 	}
 	if !claudePluginIDPattern.MatchString(plugin.ID) {
 		return ClaudePlugin{}, fmt.Errorf("id must be a plugin name or name@marketplace, got %q", plugin.ID)
-	}
-	if current := CurrentClaudePluginName(plugin.ID); plugin.Bare() && current != plugin.ID {
-		plugin.Former, plugin.ID = plugin.ID, current
 	}
 	if source == nil {
 		return plugin, nil

@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
@@ -118,13 +117,6 @@ func NewDaemonHandler(options DaemonOptions) http.Handler {
 		case pfmconfig.MCPFamilyPath(pfmconfig.MCPServerChat):
 			serveDaemonRoute(writer, request, options.Chat, pfmconfig.MCPServerChat)
 		default:
-			if request.URL.Path == "/mcp/professor" || strings.HasPrefix(request.URL.Path, "/mcp/professor/") {
-				http.Error(writer, fmt.Sprintf(
-					"pfm mcp: /mcp/professor is retired; chat MCP moved to %s; restart the chat to reconnect with the current MCP registrations",
-					pfmconfig.MCPFamilyPath(pfmconfig.MCPServerChat),
-				), http.StatusGone)
-				return
-			}
 			http.NotFound(writer, request)
 		}
 	}))

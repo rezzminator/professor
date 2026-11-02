@@ -80,15 +80,6 @@ func TestCallReceiptPrintsResolverNoteOnStderr(t *testing.T) {
 	}
 }
 
-func TestCallAcceptsRetiredNoSigFlagWithWarning(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	code := runHeadlessCall([]string{"--no-sig"}, &stdout, &stderr)
-	if code != 2 || !strings.Contains(stderr.String(), "--no-sig is retired") ||
-		strings.Contains(stderr.String(), "flag provided but not defined") {
-		t.Fatalf("retired flag exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
-	}
-}
-
 func TestChatCallResolvesUnindexedLiveSessionAcrossProbeSockets(t *testing.T) {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux binary is not installed")

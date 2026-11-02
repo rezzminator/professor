@@ -97,7 +97,6 @@ const (
 
 const (
 	SettingsFlag       = flagSettings
-	MCPConfigFlag      = flagMCPConfig
 	PermissionModeFlag = flagPermissionMode
 )
 

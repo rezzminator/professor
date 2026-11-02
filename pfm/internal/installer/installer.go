@@ -17,6 +17,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/globallink"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/retired"
 	"github.com/rezzminator/professor/pfm/internal/themesync"
 )
 
@@ -51,6 +52,11 @@ type engine struct {
 	// staged extension, one per installed theme (vscode_themes.go); stageAssets
 	// lists them in its package.json.
 	vscodeThemes []themesync.VSCodeThemeFile
+	// retired, retiredErr and retiredRead hold the clone's retired lists, read
+	// once per run by retiredLists.
+	retired     retired.Lists
+	retiredErr  error
+	retiredRead bool
 }
 
 func Run(ctx context.Context, options Options) (report Report, err error) {
@@ -105,6 +111,14 @@ func Run(ctx context.Context, options Options) (report Report, err error) {
 		}
 	}
 
+	// Every retirement step reads the clone's retired lists and runs on empty
+	// lists without them: a clone without the file is a skip, like every other
+	// absent clone source; a file that cannot be read or parsed fails the run.
+	if _, listsErr := installer.retiredLists(); errors.Is(listsErr, fs.ErrNotExist) {
+		installer.skip("every retirement step: " + listsErr.Error())
+	} else if listsErr != nil {
+		installer.deferFailure(installer.fail(listsErr))
+	}
 	if options.Mode == ModeUninstall {
 		err = installer.uninstall(ctx)
 	} else {
@@ -223,19 +237,14 @@ func (installer *engine) install(ctx context.Context) error {
 	if err == nil {
 		installer.deferFailure(installer.pruneVSCodeThemes(installer.vscodeThemes, false))
 	}
-	installer.deferFailure(installer.retireGptHooks())
 	installer.deferFailure(installer.installManagedCleanup(ctx))
 	installer.deferFailure(installer.wireClaudeLauncher())
 	installer.deferFailure(installer.pruneClaudeVersions())
 	installer.deferFailure(installer.wireHostOverlays())
-	installer.deferFailure(installer.migrateOldState())
-	carrierErr := installer.migrateLegacyCarrier(ctx)
-	installer.deferFailure(carrierErr)
 	installer.deferFailure(installer.wireClaudeStore())
 	installer.deferFailure(installer.retireStoreEntries())
-	installer.deferFailure(installer.retirePredecessors(carrierErr == nil))
+	installer.deferFailure(installer.retirePredecessors())
 	installer.deferFailure(installer.retireRenamedGlobalAgents())
-	installer.deferFailure(installer.retireStagedManagedSurfaces(false))
 	if err == nil {
 		installer.deferFailure(installer.wireCommands(assets))
 		installer.deferFailure(installer.wireSkills(assets))
@@ -247,7 +256,6 @@ func (installer *engine) install(ctx context.Context) error {
 	installer.deferFailure(installer.retireDeadRegistryLinks())
 	installer.deferFailure(installer.wireGlobalSkills())
 	installer.deferFailure(installer.retireStaleLinkStages())
-	installer.deferFailure(installer.retireLegacySwapCommand())
 	// The global file first: engine-sync global unions its targets'
 	// capabilities with the flags, so a stale list would keep an opted-out
 	// agent linked, and without it engine-sync refuses to start beside the
@@ -303,10 +311,6 @@ func (installer *engine) install(ctx context.Context) error {
 	installer.deferFailure(installer.ensureClaudeEnv(false))
 	installer.deferFailure(installer.clearFullscreenAutoDisable())
 	installer.deferFailure(installer.wireCodexHooks())
-	if err := installer.removeRetiredNudgeState(); err != nil {
-		installer.warnRetiredNudge("retired compact-nudge state", err)
-	}
-	installer.retireMigrationJournal()
 	installer.retireStateDirs()
 	installer.expireStateBackups()
 	mcpErr := installer.wireMCP()
@@ -642,7 +646,6 @@ func (installer *engine) uninstall(ctx context.Context) error {
 	}
 	// Deferred, as install defers them: a failing engine-sync step must not
 	// leave the launch agent loaded and the machine targets wired.
-	installer.deferFailure(installer.retireOldEngineSyncFiles())
 	installer.deferFailure(installer.wireEngineSyncGlobal(nil))
 	installer.deferFailure(installer.retireEngineSyncFile())
 	installer.deferFailure(installer.unwireEngineSyncPathLink())
@@ -667,7 +670,7 @@ func (installer *engine) uninstall(ctx context.Context) error {
 	}
 	if _, err := installer.retireUnitEnablements(
 		filepath.Join(installer.options.Home, ".config", "systemd", "user"),
-		retiredUnitNames,
+		installer.retiredUnitNames(),
 	); err != nil {
 		return err
 	}
@@ -714,9 +717,6 @@ func (installer *engine) uninstall(ctx context.Context) error {
 	}
 	installer.deferFailure(installer.wireLoginDefault(true))
 	if err := installer.wireVSCode(); err != nil {
-		return err
-	}
-	if err := installer.retireStagedManagedSurfaces(true); err != nil {
 		return err
 	}
 	if err := installer.removeManagedAssets(assets); err != nil {
@@ -837,9 +837,6 @@ func (installer *engine) stageAssets(assets []assetFile) (bool, error) {
 }
 
 func (installer *engine) removeManagedAssets(assets []assetFile) error {
-	if err := installer.retireGptHooks(); err != nil {
-		return err
-	}
 	installer.say("managed assets -> %s", installer.managedRoot)
 	for _, asset := range assets {
 		target := filepath.Join(installer.managedRoot, filepath.FromSlash(asset.path))
@@ -1100,10 +1097,6 @@ func (installer *engine) unwireCommands(assets []assetFile) error {
 			return err
 		}
 	}
-
-	if err := installer.retireLegacySwapCommand(); err != nil {
-		return err
-	}
 	installer.say("")
 	return nil
 }
@@ -1170,19 +1163,6 @@ func skillTarget(configDir, asset string) (string, bool) {
 	return "", false
 }
 
-func (installer *engine) retireLegacySwapCommand() error {
-	path := filepath.Join(installer.options.ConfigDir, "commands", "swap.md")
-	if target, linked := resolvedLink(
-		path,
-	); linked &&
-		target == filepath.Join(installer.managedRoot, "swap.command.md") {
-		if err := installer.unlinkOne(path); err != nil {
-			return err
-		}
-	}
-	return installer.retire(filepath.Join(installer.managedRoot, "swap.command.md"), "retired swap command")
-}
-
 func (installer *engine) recordedProfessorSourceRepos() ([]string, error) {
 	repos := make([]string, 0, 2)
 	seen := map[string]bool{}
@@ -1242,10 +1222,11 @@ const (
 	systemdDefaultWants = "default.target.wants"
 )
 
-var retiredUnitNames = []string{
-	"cc-fleet-name-sync.path", "cc-fleet-name-sync.service", "cc-fleet-name-sync.timer",
-	"cc-name-sync.path", "cc-name-sync.service", "cc-name-sync.timer",
-	"pfm-reminder.service", "pfm-reminder.timer",
+// retiredUnitNames are the units pfm renamed away from (the retired lists'
+// units). A failed read is deferred once by Run.
+func (installer *engine) retiredUnitNames() []string {
+	lists, _ := installer.retiredLists()
+	return lists.Units
 }
 
 var unitEnablements = []struct {
@@ -1267,7 +1248,7 @@ func (installer *engine) retireRenamedUnits(
 	managerAvailable bool,
 ) (bool, error) {
 	changed := false
-	for _, name := range retiredUnitNames {
+	for _, name := range installer.retiredUnitNames() {
 		target := filepath.Join(directory, name)
 		_, statErr := os.Lstat(target)
 		if statErr != nil && !errors.Is(statErr, fs.ErrNotExist) {
@@ -1299,7 +1280,7 @@ func (installer *engine) wireUnits(ctx context.Context) (bool, error) {
 	installer.say("systemd user units -> %s", directory)
 	managerAvailable := installer.userManagerAvailable(ctx)
 	changed := false
-	enablementChanged, err := installer.retireUnitEnablements(directory, retiredUnitNames)
+	enablementChanged, err := installer.retireUnitEnablements(directory, installer.retiredUnitNames())
 	if err != nil {
 		return false, err
 	}
@@ -1585,37 +1566,6 @@ func (installer *engine) reportEarlyFleetCalls(content string) {
 	installer.say("          launchers are defined.")
 }
 
-func (installer *engine) migrateOldState() error {
-	oldState := filepath.Join(installer.options.Home, ".local", "state", legacyFleetBinary)
-	state := filepath.Join(installer.options.Home, ".local", "state", "pfm")
-	oldInfo, oldErr := os.Stat(oldState)
-	_, stateErr := os.Stat(state)
-	if oldErr == nil && oldInfo.IsDir() && errors.Is(stateErr, fs.ErrNotExist) {
-		return installer.change("migrate "+oldState+" -> "+state, func() error {
-			if err := os.MkdirAll(filepath.Dir(state), 0o700); err != nil {
-				return err
-			}
-			return os.Rename(oldState, state)
-		})
-	}
-	if oldErr == nil && stateErr == nil {
-		installer.skip("both old and pfm state directories exist; left both in place")
-	}
-	return nil
-}
-
-// retiredGlobalAgents names every global Claude agent identity a template
-// rename has retired: the OLD name, left behind as {config}/agents/OLD.md
-// once runGlobalAgents stops visiting it (it walks the CURRENT source
-// roster, so a renamed-away identity is simply never revisited, never
-// cleaned up on its own). frr -> rr (3976b53, "/ptm→/pfm, frr→rr, /rr→/deep-rr")
-// is the only rename `git log -- templates/global/agents` holds; a future
-// rename adds its OLD name here rather than inventing a second mechanism.
-// engine-sync's machine.retiredAgents is the Codex half of the same list: it
-// retires generated Codex roles and never visits {config}/agents/OLD.md, so
-// this list stays.
-var retiredGlobalAgents = []string{"frr", "rr-super"}
-
 // retireRenamedGlobalAgents deletes a stale pre-rename identity from the
 // global claude agent registry — but only when the file is unambiguously
 // the installer's own leftover, never a user's own agent that happens to
@@ -1636,8 +1586,12 @@ func (installer *engine) retireRenamedGlobalAgents() error {
 	}
 	repos = append(repos, filepath.Join(installer.options.Home, ".professor"))
 	config := installer.options.ConfigDir
-	for _, retired := range retiredGlobalAgents {
-		path := filepath.Join(config, "agents", retired+".md")
+	// The retired lists' globalAgents: the OLD name of each renamed global
+	// agent, left as {config}/agents/OLD.md once runGlobalAgents stops visiting
+	// it. A failed read is deferred once by Run.
+	lists, _ := installer.retiredLists()
+	for _, agent := range lists.GlobalAgents {
+		path := filepath.Join(config, "agents", agent+".md")
 		info, err := os.Lstat(path)
 		if errors.Is(err, fs.ErrNotExist) {
 			continue
@@ -1655,7 +1609,7 @@ func (installer *engine) retireRenamedGlobalAgents() error {
 			}
 			owned := false
 			for _, repo := range repos {
-				if filepath.Clean(target) == filepath.Join(repo, "templates", "global", "agents", retired+".md") {
+				if filepath.Clean(target) == filepath.Join(repo, "templates", "global", "agents", agent+".md") {
 					owned = true
 				}
 			}
@@ -1668,14 +1622,14 @@ func (installer *engine) retireRenamedGlobalAgents() error {
 			if readErr != nil {
 				return fmt.Errorf("read retired global agent %s: %w", path, readErr)
 			}
-			if frontmatterName != retired {
+			if frontmatterName != agent {
 				installer.skip(
-					path + " is not the retired " + retired + " agent (frontmatter name=" + frontmatterName + ") — left alone",
+					path + " is not the retired " + agent + " agent (frontmatter name=" + frontmatterName + ") — left alone",
 				)
 				continue
 			}
 		}
-		if err := installer.retire(path, "renamed global agent ("+retired+" -> current roster)"); err != nil {
+		if err := installer.retire(path, "renamed global agent ("+agent+" -> current roster)"); err != nil {
 			return err
 		}
 	}

@@ -740,15 +740,14 @@ describe("preflight S1, D1, T1", { concurrency: availableParallelism() }, () => 
       "scripts/old.sh": "echo old\n",
     });
     // The removal, and every place a removed name may stand: history and the
-    // retired-name registry; plus a longer word that only starts with one.
+    // retired lists; plus a longer word that only starts with one.
     await commit(r0, {
       "scripts/old.sh": null,
       "templates/global/agents/old-agent.md": null,
       "releases/v0.1.0.md": "scripts/old.sh and old-agent are gone\n",
       "CHANGELOG.md": "- dropped scripts/old.sh\n",
       ".professor/RR/notes.md": "old-agent\n",
-      "pfm/internal/update/retired_names.go": "// old-agent retired\n",
-      "pfm/internal/update/retired_names_table.go": "// old-agent and scripts/old.sh retired\n",
+      "templates/global/retired.json": '{"names": [{"name": "old-agent"}, {"name": "scripts/old.sh"}]}\n',
       "docs/live.md": "the old-agentx tool, the old-agent-sonnet role, the old-agent:use command, scripts/old.sh.bak and scripts/old.shell\n",
     }, "remove old.sh and old-agent");
     const check = async (files) => {

@@ -134,27 +134,15 @@ func OptionalRuntime(runtimes []Runtime) (Runtime, error) {
 	return LoadRuntime("")
 }
 
-// ErrNotMigrated marks a default config load refused because a legacy
-// config still waits for the operator to apply pfm doctor's fix.
-var ErrNotMigrated = errors.New("config not migrated: run pfm doctor for the fix")
-
 // LoadRuntime resolves paths, loads the config at configPath (the default
 // location when empty), and keeps Claude's resolved transcript roots.
-// A broken config is an error, and so is a default load that would run on
-// defaults while a legacy config waits (ErrNotMigrated).
+// A broken config is an error.
 func LoadRuntime(configPath string) (Runtime, error) {
-	runtime, err := loadConfigRuntime(configPath, false)
-	if err != nil {
-		return Runtime{}, err
-	}
-	if err := checkLegacyConfig(configPath, runtime.Paths.Home, runtime.Config); err != nil {
-		return Runtime{}, err
-	}
-	return runtime, nil
+	return loadConfigRuntime(configPath, false)
 }
 
-// LoadInstallRuntime permits defaults over an unusable marker or pending legacy
-// config: install names the marker fallback and its gate gives the legacy fix.
+// LoadInstallRuntime permits defaults over an unusable marker: install names
+// the marker fallback.
 func LoadInstallRuntime(configPath string) (Runtime, error) {
 	return loadConfigRuntime(configPath, true)
 }
@@ -210,65 +198,6 @@ func configPathIsExplicit(configPath, home string) (bool, error) {
 	return named != defaultAbsolute, nil
 }
 
-// checkLegacyConfig refuses a default load that found no clone config while
-// a legacy pfm.config.json or config.json waits in LegacyConfigDir. A named
-// --config path or PFM_CONFIG is never refused.
-func checkLegacyConfig(configPath, home string, loaded Config) error {
-	env := paths.OSEnv{}
-	if configPath != "" || configOverridden(env) || loaded.Exists {
-		return nil
-	}
-	target, resolveErr := ResolvePath(home)
-	if resolveErr != nil {
-		target = "no clone config"
-	}
-	legacy, err := LegacyConfigWaiting(LegacyConfigDir(env, home), "")
-	if err != nil {
-		return err
-	}
-	if legacy != "" {
-		return fmt.Errorf("%w (%s present, %s absent)", ErrNotMigrated, legacy, target)
-	}
-	return nil
-}
-
-// LegacyConfigWaiting returns the legacy pfm.config.json or config.json in
-// legacyDir when one exists while target does not ("" counts as absent), else
-// "". It ignores PFM_CONFIG and --config: the default-load refusal stands
-// until the operator applies pfm doctor's fix.
-func LegacyConfigWaiting(legacyDir, target string) (string, error) {
-	if target != "" {
-		_, err := os.Lstat(target)
-		if err == nil {
-			return "", nil
-		}
-		if !errors.Is(err, os.ErrNotExist) {
-			return "", fmt.Errorf("inspect target config %s: %w", target, err)
-		}
-	}
-	for _, name := range []string{FileName, LegacyFileName} {
-		legacy := filepath.Join(legacyDir, name)
-		_, err := os.Lstat(legacy)
-		if err == nil {
-			return legacy, nil
-		}
-		if !errors.Is(err, os.ErrNotExist) {
-			return "", fmt.Errorf("inspect legacy config %s: %w", legacy, err)
-		}
-	}
-	return "", nil
-}
-
-// LegacyConfigDir is the config directory pfm resolved before the config
-// moved into the clone: $XDG_CONFIG_HOME/pfm when that is absolute, else
-// {home}/.config/pfm.
-func LegacyConfigDir(env paths.Env, home string) string {
-	if xdg := env.Get("XDG_CONFIG_HOME"); filepath.IsAbs(xdg) {
-		return filepath.Join(xdg, "pfm")
-	}
-	return filepath.Join(home, ".config", "pfm")
-}
-
 // RuntimeOrDefault is the caller's runtime, or the default one loaded now —
 // the rule for every package API whose runtime parameter is optional.
 func RuntimeOrDefault(runtime *Runtime) (Runtime, error) {
@@ -298,9 +227,6 @@ func LoadDiagnosticRuntime(configPath string) (Runtime, error) {
 	configExplicit, err := configPathIsExplicit(configPath, resolved.Home)
 	if err != nil {
 		return Runtime{}, err
-	}
-	if configErr == nil {
-		configErr = checkLegacyConfig(configPath, resolved.Home, effective)
 	}
 	if configErr == nil {
 		applyStatePaths(&resolved, effective, paths.OSEnv{})

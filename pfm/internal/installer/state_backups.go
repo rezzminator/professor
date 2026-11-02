@@ -87,10 +87,6 @@ func stateBackupKinds(home, stateDB, cacheDB string) []stateBackupKind {
 		}
 	}
 	return append(kinds,
-		// The retired fleet.db's backups and an older pfm's chat-skill
-		// retirement temp dir: their writers are gone.
-		stateBackupKind{check: "retired-fleet-db", dir: state, prefix: "fleet.db.bak-", made: madeByMTime},
-		stateBackupKind{check: "retired-chat-skills", dir: state, prefix: "retired-chat-skills.", made: madeByMTime},
 		// archiveRetiredStoreEntry renames (keeping the old mtime) and
 		// retireLegacyCommand copies, both named by availableBackup with the
 		// install's local stamp.

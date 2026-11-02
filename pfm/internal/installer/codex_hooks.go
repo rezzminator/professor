@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/codexappendix"
+	"github.com/rezzminator/professor/pfm/internal/retired"
 )
 
 // codexResumeUnkillHookName names the one Codex hook pfm owns: the claude hook
@@ -37,11 +38,6 @@ func codexEngineGuardHook(home string) ExpectedHook {
 		Name:    "engine-guard",
 	}
 }
-
-// codexClearMatcher is the matcher the retired Codex SessionStart clear-kill
-// hook used to carry. It remains only so leftover entries can be removed; no
-// current ownership path recognizes or writes this retired shape.
-const codexClearMatcher = "startup|resume|clear"
 
 // codexResumeUnkillHook is the expected SessionStart "resume" hook of a Codex
 // account, read from the same template list the Claude settings use.
@@ -108,6 +104,7 @@ func ensureCodexHook(document map[string]any, hook ExpectedHook, timeoutSeconds 
 // compaction-dropped delivery developer_instructions replaced. An uninstall
 // strips the owned hook through the ledger.
 func updateCodexHooks(
+	lists retired.Lists,
 	raw []byte,
 	home string,
 	uninstall bool,
@@ -120,7 +117,6 @@ func updateCodexHooks(
 	if err := validateCodexHooks(document); err != nil {
 		return nil, false, nil, err
 	}
-	oldBinary := home + "/.local/bin/cc-fleet"
 	pfmBinary := home + "/.local/bin/pfm"
 
 	before := countSettingsHookCommands(document)
@@ -128,14 +124,18 @@ func updateCodexHooks(
 	if uninstall {
 		changed = removeOwnedSettingsHooks(document, owned)
 	} else {
+		// A hook started through a former binary name now starts pfm.
 		changed = rewriteCommandFields(document, func(command string) string {
-			if command == oldBinary || strings.HasPrefix(command, oldBinary+" ") {
-				return pfmBinary + strings.TrimPrefix(command, oldBinary)
+			for _, name := range lists.HookBinaries {
+				oldBinary := home + "/.local/bin/" + name
+				if command == oldBinary || strings.HasPrefix(command, oldBinary+" ") {
+					return pfmBinary + strings.TrimPrefix(command, oldBinary)
+				}
 			}
 			return command
 		})
 	}
-	if removeRetiredHookCommands(document, pfmBinary) {
+	if removeRetiredHookCommands(lists, document, pfmBinary) {
 		changed = true
 	}
 
@@ -145,8 +145,7 @@ func updateCodexHooks(
 		for _, hookValue := range hooks {
 			hook, _ := hookValue.(map[string]any)
 			command, _ := hook[configCommandKey].(string)
-			if _, retired := codexRetiredSessionStartHookName(command, home); retired ||
-				isRetiredHookCommand(command, pfmBinary) {
+			if isRetiredHookCommand(lists, command, pfmBinary) {
 				changed = true
 				continue
 			}
@@ -209,25 +208,6 @@ func updateCodexHooks(
 	return append(updated, '\n'), true, nextOwned, nil
 }
 
-// codexRetiredSessionStartHookName names a Codex SessionStart command pfm
-// used to own and now only removes: the clear-kill hook in each of its shapes
-// and binaries, and the appendix hook developer_instructions replaced. The
-// writer above strips it and doctor's probe reports it STALE.
-func codexRetiredSessionStartHookName(command, home string) (string, bool) {
-	oldBinary := home + "/.local/bin/cc-fleet"
-	pfmBinary := home + "/.local/bin/pfm"
-	switch command {
-	case pfmBinary + " internal clear-kill",
-		oldBinary + " internal clear-kill",
-		pfmBinary + ` internal clear-kill --parent "$PPID"`,
-		oldBinary + ` internal clear-kill --parent "$PPID"`:
-		return "codex-clear-kill", true
-	case codexappendix.Command(home):
-		return "codex-appendix", true
-	}
-	return "", false
-}
-
 func validateCodexHooks(document map[string]any) error {
 	if document == nil {
 		return fmt.Errorf("hooks document must be an object")
@@ -273,6 +253,8 @@ func validateCodexHooks(document map[string]any) error {
 const emptyCodexHooks = "{\"hooks\":{}}\n"
 
 func (installer *engine) wireCodexHooks() error {
+	// A failed read is deferred once by Run; residue is then judged on empty lists.
+	lists, _ := installer.retiredLists()
 	ownershipPath := settingsHookOwnershipPath(installer.managedRoot)
 	ownership, ownershipRaw, err := readSettingsHookOwnership(ownershipPath)
 	if err != nil {
@@ -338,6 +320,7 @@ func (installer *engine) wireCodexHooks() error {
 				return fmt.Errorf("read %s: %w", path, readErr)
 			}
 			updated, changed, nextOwned, updateErr := updateCodexHooks(
+				lists,
 				raw,
 				installer.options.Home,
 				installer.options.Mode == ModeUninstall,
@@ -403,7 +386,7 @@ func (installer *engine) wireCodexHooks() error {
 							current = []byte(emptyCodexHooks)
 						}
 						next, write, owned, err := updateCodexHooks(
-							current, installer.options.Home, uninstalling, ownership[physical],
+							lists, current, installer.options.Home, uninstalling, ownership[physical],
 						)
 						if err != nil {
 							return nil, false, fmt.Errorf("re-plan Codex hooks %s: %w", path, err)
@@ -490,7 +473,7 @@ func codexHooksCarried(raw []byte, home string) ([]ExpectedHook, error) {
 }
 
 // wireCodexHookTrust records or removes Codex's trust of every owned handler
-// per physical account, and cleans up after the retired appendix hook.
+// per physical account.
 func (installer *engine) wireCodexHookTrust(carriesHook map[string][]ExpectedHook) error {
 	if _, err := codexOwnedHooks(installer.options.Home); err != nil {
 		return err
@@ -502,19 +485,7 @@ func (installer *engine) wireCodexHookTrust(carriesHook map[string][]ExpectedHoo
 			continue
 		}
 		seenAccounts[physical] = true
-		err := func() error {
-			// Retired appendix trust is cleaned up on install and uninstall; a
-			// receipt that will not clean up never skips the current trust.
-			var retiredErr error
-			if codexappendix.TrustRecorded(account) {
-				retiredErr = installer.change(
-					"remove retired appendix hook trust "+account,
-					func() error { return codexappendix.Unregister(account) },
-				)
-			}
-			return errors.Join(retiredErr, installer.wireHandlerTrust(account, carriesHook))
-		}()
-		if err != nil {
+		if err := installer.wireHandlerTrust(account, carriesHook); err != nil {
 			//nolint:staticcheck // Codex is a product name.
 			failure := fmt.Errorf(
 				"Codex hook trust for %s: %w",

@@ -150,9 +150,8 @@ func printRowCensus(ctx context.Context, stdout io.Writer, database *store.Store
 
 // printUnreadCache prints the row for a cache database doctor did not read
 // and returns what each row that needs it prints instead, or "" for a cache
-// not yet created, which has nothing to report. A legacy cache waiting for
-// its move is the legacy-cache-db host check's BLOCK, which carries the fix;
-// any other open error is a failure doctor names and reads past.
+// not yet created, which has nothing to report; any other open error is a
+// failure doctor names and reads past.
 func printUnreadCache(stdout io.Writer, openErr error, path string, tally *doctorTally) string {
 	var mismatch *fleetdb.SchemaMismatchError
 	switch {
@@ -162,15 +161,6 @@ func printUnreadCache(stdout io.Writer, openErr error, path string, tally *docto
 	case errors.Is(openErr, fleetdb.ErrAbsent):
 		fmt.Fprintf(stdout, "doctor: database %s absent — the first pfm command that needs it creates it\n", path)
 		return ""
-	case errors.Is(openErr, paths.ErrLegacyPending):
-		tally.warn()
-		fmt.Fprintf(
-			stdout,
-			"doctor: database %s could not look: a legacy cache database waits for its move — "+
-				"apply the host-check legacy-cache-db fix\n",
-			path,
-		)
-		return "could not look: cache database " + path + " not created yet"
 	default:
 		tally.fail()
 		fmt.Fprintf(stdout, "doctor: unhealthy database: %v\n", openErr)
@@ -225,14 +215,6 @@ func printSharedStoreDoctor(stdout io.Writer, path string, degraded error, tally
 		)
 	case errors.As(degraded, &mismatch):
 		printSchemaWarning(stdout, degraded, mismatch, tally)
-	case errors.Is(degraded, paths.ErrLegacyPending):
-		tally.warn()
-		fmt.Fprintf(
-			stdout,
-			"doctor: shared store=%s could not look: a legacy state database waits for its move — "+
-				"apply the host-check legacy-state-db fix\n",
-			path,
-		)
 	default:
 		tally.warn()
 		fmt.Fprintf(stdout, "doctor: shared store=%s state=%s\n", path, degraded.Error())

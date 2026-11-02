@@ -1,41 +1,48 @@
 package update
 
-import "testing"
+import (
+	"reflect"
+	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/installer"
+	"github.com/rezzminator/professor/pfm/internal/retired"
+)
+
+// TestRetiredRegistryNames: an agent is its file stem (a contextual spelling
+// by its probe), a command its path below the commands registry, a skill its
+// directory; a phrase, a tool, a phase or a path is no registry entry.
 func TestRetiredRegistryNames(t *testing.T) {
 	t.Parallel()
-	names := RetiredRegistryNames()
-	for kind, want := range map[string][]string{
-		"agent": {
-			"rndier", "tracer-pro", "ultimate", "terra", "imagine", "imagine-historian",
-			"foreman-pro", "gpt-foreman-pro", "flights-mechanical-executor", "gpt-flights-mechanical-executor",
-			"gpt-flights-speccer",
+	names := append([]retired.Name{
+		{Name: "skills/transcript", Kind: retired.KindSkill, Match: retired.MatchExact},
+		{Name: "transcript skill", Kind: retired.KindSkill, Match: retired.MatchExact},
+		{Name: "/flights:init", Kind: retired.KindCommand, Match: retired.MatchExact},
+	}, fixtureRetiredNames...)
+	want := installer.RetiredRegistryNames{
+		Agents: map[string]bool{
+			"mono-architect": true,
+			"rndier":         true,
+			"rr-super":       true,
+			"ultimate":       true,
+			"imagine":        true,
 		},
-		"command": {
-			"wave", "jc", "qa/live", "pfm/refresh", "quality/forlint", "chat",
-			"imagine/build", "imagine/build-fast", "imagine/build-spec", "imagine/callmeter", "imagine/evolve",
-			"flights/init", "flights/orchestrate-cross-harness",
+		Commands: map[string]bool{
+			"flights/init":    true,
+			"wave":            true,
+			"jc":              true,
+			"qa/live":         true,
+			"pfm/refresh":     true,
+			"quality/forlint": true,
+			"pcm":             true,
+			"chat":            true,
+			"documenter":      true,
+			"km":              true,
+			"rnd":             true,
+			"tokens":          true,
 		},
-		"skill": {"wave-builder", "transcript", "close-out", "imagine-core"},
-	} {
-		set := map[string]map[string]bool{"agent": names.Agents, "command": names.Commands, "skill": names.Skills}[kind]
-		for _, name := range want {
-			if !set[name] {
-				t.Errorf("%s %q is not a retired registry name: %v", kind, name, set)
-			}
-		}
+		Skills: map[string]bool{"transcript": true, "wave-builder": true},
 	}
-	if names.Agents["flights-speccer"] {
-		t.Error("agent flights-speccer ships again (templates/global/agents) but is a retired registry name")
-	}
-	if names.Commands["flights/spec"] {
-		t.Error("command flights/spec ships again (templates/global/commands) but is a retired registry name")
-	}
-	for _, phrase := range []string{`subagent_type="ultimate"`, "pfm chat inject", "transcript skill", "mcp__professor__", "JC-COMMIT", "/wave", "mono-architect/"} {
-		for kind, set := range map[string]map[string]bool{"agent": names.Agents, "command": names.Commands, "skill": names.Skills} {
-			if set[phrase] {
-				t.Errorf("%s set holds %q, which is not one registry entry", kind, phrase)
-			}
-		}
+	if got := RetiredRegistryNames(names); !reflect.DeepEqual(got, want) {
+		t.Fatalf("RetiredRegistryNames() =\n%+v\nwant\n%+v", got, want)
 	}
 }

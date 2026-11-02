@@ -66,9 +66,8 @@ var version = config.DevelopmentVersion
 var topLevelSubcommands = []string{
 	versionCommand, "ls", chatCommand, headlessCommand, indexCommand, doctorCommand,
 	configCommand, "reap", archiveCommand, "heal", "name-sync", statuslineCommand,
-	pfmengine.MustLookup(pfmengine.OpenCode).LongName,
 	usageHookCommand, installCommand, "uninstall", "generate", updateCommand, initCommand, whoamiCommand,
-	mcpCommand, pfmengine.MustLookup(pfmengine.Codex).LongName, internalCommand, "log",
+	mcpCommand, internalCommand, "log",
 	"model-cost", "tokens", transcriptCommand, "theme", restartCommand,
 }
 
@@ -103,7 +102,7 @@ func run(args []string, stdout, stderr io.Writer) (exitCode int) {
 	}
 	load := config.LoadRuntime
 	if len(args) > 0 && args[0] == installCommand {
-		load = config.LoadInstallRuntime // the install gate names the legacy config and doctor's fix
+		load = config.LoadInstallRuntime // install names the marker fallback
 	}
 	runtime, err := load(configPath)
 	if err != nil {
@@ -113,9 +112,10 @@ func run(args []string, stdout, stderr io.Writer) (exitCode int) {
 		}
 		// A retired command's answer reads no config: it names its successor
 		// whatever state the machine config is in.
-		if len(args) > 0 && (args[0] == pfmengine.MustLookup(pfmengine.Codex).LongName ||
-			args[0] == pfmengine.MustLookup(pfmengine.OpenCode).LongName) {
-			return runRetiredCommand(args[0], stderr)
+		if len(args) > 0 {
+			if code, retired := answerRetiredCommand(args[0], stderr, false); retired {
+				return code
+			}
 		}
 		// Stale reads no config while the operator applies doctor's fix.
 		if len(args) > 1 && args[0] == internalCommand && args[1] == staleCommand {
@@ -214,14 +214,15 @@ func run(args []string, stdout, stderr io.Writer) (exitCode int) {
 		return runWhoami(args[1:], stdout, stderr, runtime)
 	case "mcp":
 		return runMCP(args[1:], stdout, stderr, runtime)
-	case pfmengine.MustLookup(pfmengine.Codex).LongName, pfmengine.MustLookup(pfmengine.OpenCode).LongName:
-		return runRetiredCommand(args[0], stderr)
 	case "internal":
 		return runInternal(args[1:], stdout, stderr, runtime)
 	case "help", "-h", "--help":
 		printUsage(stdout)
 		return 0
 	default:
+		if code, retired := answerRetiredCommand(args[0], stderr, true); retired {
+			return code
+		}
 		fmt.Fprintf(stderr, "pfm: unknown command %q\n", args[0])
 		printUsage(stderr)
 		return 2
@@ -586,8 +587,9 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		// registered (a rollback, a stale binary on PATH) would erase every
 		// prompt or deny every tool call. An unknown name is a non-blocking
 		// error that says what happened and how to converge.
-		if installer.RetiredInternalHook(args[0]) {
-			// Install refuses while account settings carry it (host check pfm-settings); a session's start-time hook
+		retiredHook, listsErr := installer.RetiredInternalHook(runtime.Paths.Home, args[0])
+		if retiredHook {
+			// Install strips it from account settings; a session's start-time hook
 			// snapshot still runs it, and no install can clear that. Silent
 			// success: hook stdout becomes prompt context, stderr a warning.
 			return 0
@@ -598,6 +600,9 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 			args[0],
 			config.DisplayVersion(version),
 		)
+		if listsErr != nil {
+			fmt.Fprintf(stderr, "pfm internal: retired hooks unread: %v\n", listsErr)
+		}
 		return 1
 	}
 	flags := cli.NewFlagSet(

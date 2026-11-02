@@ -69,7 +69,6 @@ func (installer *engine) retireDeadRegistryLinks() error {
 	directories := map[string]bool{}
 	for _, link := range result.Findings {
 		reason := map[string]string{
-			RegistryStore:  "retired store link -> ",
 			RegistryOrphan: "orphan pfm link -> ",
 			RegistryDead:   "dead pfm link -> ",
 		}[link.Class]

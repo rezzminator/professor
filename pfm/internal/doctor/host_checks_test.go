@@ -13,6 +13,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/hostcheck"
+	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -21,7 +22,6 @@ func TestPrintHostChecks(t *testing.T) {
 	for _, scenario := range []string{"clean", "BLOCK", "WARN", "unreadable"} {
 		t.Run(scenario, func(t *testing.T) {
 			home := t.TempDir()
-			t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 			runtime := config.Runtime{
 				Config: config.Defaults(home, nil),
 				Paths: paths.Values{
@@ -37,10 +37,15 @@ func TestPrintHostChecks(t *testing.T) {
 			var path, body string
 			switch scenario {
 			case "BLOCK":
-				path = filepath.Join(config.LegacyConfigDir(paths.OSEnv{}, home), config.FileName)
+				path = filepath.Join(installer.ClaudeStore(home), ".credentials.json")
 				body = `{}`
-				want = "host-check: BLOCK legacy-config " + path + " — legacy pfm config outside the clone\n" +
-					"host-check:   fix: mv " + path + " " + runtime.Config.Path + "\n"
+				account := config.DefaultAccountDir(home, 1)
+				want = "host-check: BLOCK store-identity " + path + " — .credentials.json is account identity inside the store, " +
+					"written by a Claude launched with CLAUDE_CONFIG_DIR set to the store (a loop over config dirs that still lists it)\n" +
+					"host-check:   fix: mkdir -m 700 -p " + account + " && mv " + path + " " + filepath.Join(
+					account,
+					".credentials.json",
+				) + "\n"
 				wantFailures = 1
 			case "WARN":
 				path = filepath.Join(home, ".claude.json.tmp.fixture")
@@ -48,17 +53,17 @@ func TestPrintHostChecks(t *testing.T) {
 					"host-check:   fix: rm " + path + "\n"
 				wantWarnings = 1
 			case "unreadable":
-				path = filepath.Dir(runtime.Config.Path)
+				// The account roots' parent as a file: stray-dir cannot look
+				// under it, while the configured account lives elsewhere.
+				runtime.Config.Accounts[0].ConfigDir = filepath.Join(home, "account")
+				path = filepath.Dir(config.DefaultAccountDir(home, 1))
 				body = "not a directory"
 				want = ""
-				for _, name := range []string{config.FileName, config.LegacyFileName} {
+				for _, name := range []string{".git", ".codex", ".agents"} {
 					unreadable := filepath.Join(path, name)
-					want += "host-check: BLOCK pre-split-config " + unreadable + " — UNREADABLE " + unreadable + ": " + syscall.ENOTDIR.Error() + "\n" +
+					want += "host-check: BLOCK stray-dir " + unreadable + " — UNREADABLE " + unreadable + ": " + syscall.ENOTDIR.Error() + "\n" +
 						"host-check:   fix: make " + unreadable + " readable to you, then rerun\n"
 				}
-				unreadable := filepath.Join(path, "harvester.config.json")
-				want += "host-check: BLOCK retired-harvester-config " + unreadable + " — UNREADABLE " + unreadable + ": " + syscall.ENOTDIR.Error() + "\n" +
-					"host-check:   fix: make " + unreadable + " readable to you, then rerun\n"
 				wantFailures = 3
 
 			}
@@ -111,7 +116,7 @@ func TestHostChecksDoctorTallies(t *testing.T) {
 			var path, body string
 			switch scenario.name {
 			case "BLOCK":
-				path = filepath.Join(config.LegacyConfigDir(paths.OSEnv{}, runtime.Paths.Home), config.FileName)
+				path = filepath.Join(installer.ClaudeStore(runtime.Paths.Home), ".credentials.json")
 				body = `{}`
 			case "WARN":
 				path = filepath.Join(runtime.Paths.Home, ".claude.json.tmp.fixture")

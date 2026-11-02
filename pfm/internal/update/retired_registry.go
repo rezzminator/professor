@@ -5,40 +5,41 @@ import (
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/installer"
+	"github.com/rezzminator/professor/pfm/internal/retired"
 )
 
-// RetiredRegistryNames derives from retiredNames the names the registry
+// RetiredRegistryNames derives from names the names the registry
 // ownership scan matches against an unmarked entry: an agent by file stem, a
 // command by its path below the commands registry (`/qa:live` is
 // qa/live), a skill by directory name (`skills/transcript` is transcript). A
 // name that is not one registry entry (a phrase, an MCP tool, a path) is left out.
-func RetiredRegistryNames() installer.RetiredRegistryNames {
-	names := installer.RetiredRegistryNames{
+func RetiredRegistryNames(names []retired.Name) installer.RetiredRegistryNames {
+	registry := installer.RetiredRegistryNames{
 		Agents: map[string]bool{}, Commands: map[string]bool{}, Skills: map[string]bool{},
 	}
-	for _, retired := range retiredNames {
-		name := retired.name
-		if retired.kind == retiredAgent && retired.probe != "" {
-			name = strings.TrimSuffix(path.Base(retired.probe), ".md")
+	for _, entry := range names {
+		name := entry.Name
+		if entry.Kind == retired.KindAgent && entry.Probe != "" {
+			name = strings.TrimSuffix(path.Base(entry.Probe), ".md")
 		}
 		if strings.ContainsAny(name, " ") {
 			continue
 		}
-		switch retired.kind {
-		case retiredAgent:
+		switch entry.Kind {
+		case retired.KindAgent:
 			if !strings.ContainsAny(name, "/:") {
-				names.Agents[name] = true
+				registry.Agents[name] = true
 			}
-		case retiredCommand:
+		case retired.KindCommand:
 			if command, found := strings.CutPrefix(name, "/"); found && command != "" {
-				names.Commands[strings.ReplaceAll(strings.TrimSuffix(command, ":"), ":", "/")] = true
+				registry.Commands[strings.ReplaceAll(strings.TrimSuffix(command, ":"), ":", "/")] = true
 			}
-		case retiredSkill:
+		case retired.KindSkill:
 			skill := strings.TrimPrefix(name, "skills/")
 			if !strings.ContainsAny(skill, "/:") {
-				names.Skills[skill] = true
+				registry.Skills[skill] = true
 			}
 		}
 	}
-	return names
+	return registry
 }

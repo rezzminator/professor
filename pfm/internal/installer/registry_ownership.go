@@ -15,8 +15,6 @@ import (
 // The classes the registry-ownership scan reports (spec D24-D26): ownership is
 // decided by a link's target against the install plan, never by an entry's name.
 const (
-	// RegistryStore: a link into the retired home store.
-	RegistryStore = "STORE"
 	// RegistryOrphan: an owned link whose target exists but which the install
 	// plan does not write.
 	RegistryOrphan = "ORPHAN"
@@ -288,10 +286,9 @@ func (scan RegistryScan) regular(
 	return nil
 }
 
-// link judges one registry link by its target: into a retired store is STORE;
-// otherwise, if it is not an owned root's, it is the user's; a gone target is
-// DEAD; an existing target the plan does not write is ORPHAN. A registry root
-// that is itself a link is judged STORE or DEAD only.
+// link judges one registry link by its target: if it is not an owned root's,
+// it is the user's; a gone target is DEAD; an existing target the plan does
+// not write is ORPHAN. A registry root that is itself a link is judged DEAD only.
 func (scan RegistryScan) link(result *RegistryOwnership, path, kind string, registryRoot bool) error {
 	target, err := os.Readlink(path)
 	if err != nil {
@@ -302,19 +299,8 @@ func (scan RegistryScan) link(result *RegistryOwnership, path, kind string, regi
 	}
 	target = filepath.Clean(target)
 	finding := RegistryFinding{Path: path, Target: target}
-	for _, store := range RetiredGeneratedStores(scan.Home) {
-		if withinGlobalSource(target, store) {
-			finding.Class = RegistryStore
-			result.Findings = append(result.Findings, finding)
-			return nil
-		}
-	}
 	owned := withinGlobalSource(target, managedRootForHome(scan.Home)) ||
 		ownedGlobalLink(scan.Roots, kind, filepath.Base(path), target)
-	for _, root := range scan.Roots {
-		// Legacy skill installs linked workflows before templates/global/skills.
-		owned = owned || withinGlobalSource(target, filepath.Join(root, "workflows"))
-	}
 	if !owned {
 		return nil
 	}

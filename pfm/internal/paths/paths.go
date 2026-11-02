@@ -478,52 +478,6 @@ func DefaultCacheDB(home string) string {
 	return filepath.Join(home, ".local", "state", "pfm", "pfm-cache.db")
 }
 
-// legacyDBName is the one name both pre-layout databases shared.
-const legacyDBName = "fleet.db"
-
-// ErrLegacyPending marks a database create refused because the legacy
-// database it replaces still waits for the operator to apply pfm doctor's fix.
-var ErrLegacyPending = errors.New("legacy database not migrated")
-
-// LegacyStateDB names the old state database; pfm doctor gives the fix for
-// moving it to DefaultStateDB.
-func LegacyStateDB(home string) string {
-	return filepath.Join(home, ".cc", legacyDBName)
-}
-
-// LegacyCacheDB names the old cache database; pfm doctor gives the fix for
-// moving it to DefaultCacheDB.
-func LegacyCacheDB(home string) string {
-	return filepath.Join(home, ".local", "state", "pfm", legacyDBName)
-}
-
-// CheckLegacyPending refuses to let a caller create target while legacy still
-// waits for the operator to apply pfm doctor's fix: a fresh target beside legacy
-// data forks the state. An existing target, or no legacy file, is nil. A stat
-// that fails for any reason but not-exist is an error, never read as absence.
-func CheckLegacyPending(target, legacy string) error {
-	_, err := os.Lstat(target)
-	if err == nil {
-		return nil
-	}
-	if !errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("inspect %s: %w", target, err)
-	}
-	_, err = os.Lstat(legacy)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("inspect %s: %w", legacy, err)
-	}
-	return fmt.Errorf(
-		"%w: %s not created while legacy %s still exists — run pfm doctor for the fix",
-		ErrLegacyPending,
-		target,
-		legacy,
-	)
-}
-
 // CodexHome is the Codex home holding its models_cache.json: PFM_CODEX_ROOT's first entry, else
 // the engine's default root under home.
 func CodexHome(home string) string {
@@ -653,11 +607,6 @@ func CostSinkLog(home string) string {
 // and activity logs. It never holds prompts, labels or transcript bodies.
 func SubagentStatuslineTrace(home string) string {
 	return filepath.Join(home, ".local", "state", "pfm", "log", "subagent-statusline.jsonl")
-}
-
-// LegacyHarnessPromptsDir identifies the former managed prompt directory.
-func LegacyHarnessPromptsDir(home string) string {
-	return filepath.Join(home, ".local", "share", "pfm", "install", "harness-prompts")
 }
 
 // HarnessBaselineDir resolves Claude's captured baselines in the recorded clone.

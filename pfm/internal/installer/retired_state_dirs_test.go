@@ -11,14 +11,21 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/enginesync"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/retired"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
-// TestRetireMigrationJournal pins the retire step's every door: apply removes
-// the whole tree and names what it freed, once; a dry run names it and keeps
-// it; an absent journal is silent; no sibling is touched. The failure door is
+// fixtureStateDirs is the retired state directory the retire step is tested
+// on; the shipped list is empty.
+var fixtureStateDirs = retired.Lists{
+	StateDirs: []retired.StateDir{{Name: "migrations", What: "retired migration journal"}},
+}
+
+// TestRetireStateDirs pins the retire step's every door: apply removes the
+// whole tree and names what it freed, once; a dry run names it and keeps it;
+// an absent directory is silent; no sibling is touched. The failure door is
 // removeStatePath's, pinned by TestExpireStateBackupsFailureWarnsAndKeeps.
-func TestRetireMigrationJournal(t *testing.T) {
+func TestRetireStateDirs(t *testing.T) {
 	cases := []struct {
 		name  string
 		apply bool
@@ -32,12 +39,12 @@ func TestRetireMigrationJournal(t *testing.T) {
 		{"dry run names it", false, true, func(journal string) string {
 			return "  change  remove retired migration journal " + journal + " (frees 14 bytes)\n"
 		}, false},
-		{"absent journal is silent", true, false, func(string) string { return "" }, true},
+		{"absent directory is silent", true, false, func(string) string { return "" }, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			home := t.TempDir()
-			journal := RetiredMigrationJournal(home)
+			journal := filepath.Join(home, ".local", "state", "pfm", "migrations")
 			sibling := filepath.Join(filepath.Dir(journal), "pfm.db")
 			writeFixture(t, sibling, "live")
 			if tc.seed {
@@ -46,8 +53,10 @@ func TestRetireMigrationJournal(t *testing.T) {
 				writeFixture(t, filepath.Join(journal, "20260929T002504Z", "scope.json"), "s")
 			}
 			var output bytes.Buffer
-			installer := &engine{options: Options{Home: home, Stdout: &output}, apply: tc.apply}
-			installer.retireMigrationJournal()
+			installer := &engine{
+				options: Options{Home: home, Stdout: &output, retired: &fixtureStateDirs}, apply: tc.apply,
+			}
+			installer.retireStateDirs()
 			want := tc.want(journal)
 			changed := 0
 			if strings.Contains(want, "change") {
@@ -67,7 +76,7 @@ func TestRetireMigrationJournal(t *testing.T) {
 				return
 			}
 			output.Reset()
-			installer.retireMigrationJournal()
+			installer.retireStateDirs()
 			if output.Len() != 0 {
 				t.Fatalf("second run printed %q", output.String())
 			}
@@ -76,13 +85,13 @@ func TestRetireMigrationJournal(t *testing.T) {
 }
 
 // TestInstallRetiresStateAndAFailedRemovalOnlyWarns runs pfm install over a
-// host holding the retired journal and an expired backup whose removal fails:
+// host holding a retired state directory and an expired backup whose removal fails:
 // the journal goes, the failure is one warn line, and the run still succeeds.
 func TestInstallRetiresStateAndAFailedRemovalOnlyWarns(t *testing.T) {
 	home := t.TempDir()
 	now := time.Date(2031, 2, 3, 4, 5, 6, 0, time.Local)
 	state := filepath.Join(home, ".local", "state", "pfm")
-	journal := RetiredMigrationJournal(home)
+	journal := filepath.Join(state, "migrations")
 	writeFixture(t, filepath.Join(journal, "20260928T100205Z", "journal.json"), "journal")
 	expired := filepath.Join(state, "pfm.db.bak-before-v3")
 	writeFixture(t, expired, "backup")
@@ -113,8 +122,9 @@ func TestInstallRetiresStateAndAFailedRemovalOnlyWarns(t *testing.T) {
 			paths.EnvProcRoot: emptyProcRoot(t, home),
 			enginesync.EnvBin: testjail.EngineSyncBin(),
 		}},
-		Now:    func() time.Time { return now },
-		Stdout: &output,
+		Now:     func() time.Time { return now },
+		Stdout:  &output,
+		retired: &fixtureStateDirs,
 	}
 	if _, err := Run(t.Context(), options); err != nil {
 		t.Fatalf("install failed on a failed expiry removal: %v\n%s", err, output.String())

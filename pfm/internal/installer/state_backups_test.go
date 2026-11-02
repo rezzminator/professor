@@ -56,8 +56,6 @@ func TestExpireStateBackups(t *testing.T) {
 		{"state db migration backup past its window", "pfm.db.bak-before-v3", "", old, old, true},
 		{"cache db migration backup with suffix", "pfm-cache.db.bak-before-v9.1", "", old, old, true},
 		{"migration backup inside its window", "pfm.db.bak-before-v4", "", young, young, false},
-		{"retired fleet.db backup", "fleet.db.bak-wiped-20260823-001808", "", old, old, true},
-		{"retired chat-skills temp dir", "retired-chat-skills.X8Z7oiYZ", "deep-rr/SKILL.md", old, old, true},
 		{"archived store entry stamped long ago", "retired-store-entries/.last-update-result.json.pre-professor-" +
 			stamp(old), "", young, old, true},
 		{"archived store entry stamped yesterday keeps its old mtime", "retired-store-entries/.claude.json" +

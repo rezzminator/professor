@@ -15,6 +15,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/codexappendix"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/retired"
 )
 
 // The states of one doctor hook row (docs/design/hooks/hooks.md § The pfm
@@ -89,7 +90,10 @@ func ProbeExpectedHooks(home string, config pfmconfig.Config) []HookProbeResult 
 			State: stateHookDrift, What: "executable", Want: binary, Got: verdict,
 		})
 	}
-	results = append(results, probeCodexHooks(home, config, binary)...)
+	// A hook the retired lists name is residue. Lists that cannot be read are
+	// doctor's retired_lists FAIL row; residue is then judged on empty lists.
+	lists, _ := retired.LoadLists(home)
+	results = append(results, probeCodexHooks(home, config, binary, lists)...)
 	results = append(results, probeOpenCodeEngineGuard(home)...)
 	ownershipPath := settingsHookOwnershipPath(managedRootForHome(home))
 	ownership, _, err := readSettingsHookOwnership(ownershipPath)
@@ -185,7 +189,7 @@ func executableVerdict(path string) string {
 // trust an UNTRUSTED row naming `pfm install --yes` — a failure, since
 // Codex refuses to run it; a healthy account none; STALE and UNREADABLE
 // rows report residue and files that could not be read.
-func probeCodexHooks(home string, config pfmconfig.Config, pfmBinary string) []HookProbeResult {
+func probeCodexHooks(home string, config pfmconfig.Config, pfmBinary string, lists retired.Lists) []HookProbeResult {
 	var results []HookProbeResult
 	owned, err := codexOwnedHooks(home)
 	if err != nil {
@@ -285,7 +289,7 @@ func probeCodexHooks(home string, config pfmconfig.Config, pfmBinary string) []H
 			})
 		}
 		for _, key := range sortedHookKeys(countSettingsHookCommands(document)) {
-			if stale, found := staleHookResult(target, path, key, pfmBinary, home, true); found {
+			if stale, found := staleHookResult(lists, target, path, key, pfmBinary); found {
 				results = append(results, stale)
 			}
 		}
@@ -293,14 +297,14 @@ func probeCodexHooks(home string, config pfmconfig.Config, pfmBinary string) []H
 	return results
 }
 
-// staleHookResult reports a retired or unknown pfm hook: the shared retired
-// table, Codex's own retired SessionStart shapes, and pfm's own shape naming
-// a subcommand this binary does not implement (issue #24 finding 2).
+// staleHookResult reports a retired or unknown pfm hook: the retired lists'
+// hook commands, and pfm's own shape naming a subcommand this binary does not
+// implement (issue #24 finding 2).
 func staleHookResult(
+	lists retired.Lists,
 	target, file string,
 	key settingsHookKey,
-	pfmBinary, home string,
-	codex bool,
+	pfmBinary string,
 ) (HookProbeResult, bool) {
 	stale := func(name, detail string) (HookProbeResult, bool) {
 		return HookProbeResult{
@@ -311,15 +315,10 @@ func staleHookResult(
 			State: stateStale, Error: detail,
 		}, true
 	}
-	if name, retired := retiredHookCommandName(key.Command); retired {
+	if name, isRetired := retiredHookCommandName(lists, key.Command); isRetired {
 		return stale(name, "retired hook command is still present")
 	}
-	if codex && key.Event == "SessionStart" {
-		if name, retired := codexRetiredSessionStartHookName(key.Command, home); retired {
-			return stale(name, "retired Codex hook command is still present")
-		}
-	}
-	if name, unknown := unknownPFMHookCommand(key.Command, pfmBinary); unknown {
+	if name, unknown := unknownPFMHookCommand(lists, key.Command, pfmBinary); unknown {
 		return stale("unknown:"+name,
 			"hook names a pfm subcommand this pfm does not implement (left by a newer or rolled-back pfm)")
 	}

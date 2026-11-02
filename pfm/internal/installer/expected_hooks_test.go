@@ -52,25 +52,26 @@ func TestClaudeHookTemplatesIncludesReloadIntercept(t *testing.T) {
 	}
 }
 
-func TestCodexHookWiringStripsALeftoverClearKillHookInEveryShape(t *testing.T) {
+func TestCodexHookWiringStripsALeftoverRetiredHookInEveryShape(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
-	canonical := filepath.Join(home, ".local", "bin", "pfm") + " internal clear-kill"
-	legacyParent := filepath.Join(home, ".local", "bin", "pfm") + ` internal clear-kill --parent "$PPID"`
+	const leftoverMatcher = "startup|resume|clear"
+	canonical := filepath.Join(home, ".local", "bin", "pfm") + " internal compact-nudge"
+	oldBinary := filepath.Join(home, ".local", "bin", "cc-fleet") + " internal compact-nudge"
 	raw := []byte(fmt.Sprintf(
 		`{"hooks":{"SessionStart":[`+
 			`{"matcher":%q,"hooks":[{"type":"prompt","command":%q}]},`+
 			`{"matcher":%q,"hooks":[{"type":"command","command":%q}]}`+
 			`]}}`,
-		codexClearMatcher, canonical,
-		codexClearMatcher, legacyParent,
+		leftoverMatcher, canonical,
+		leftoverMatcher, oldBinary,
 	))
-	updated, changed, owned, err := updateCodexHooks(raw, home, false, nil)
+	updated, changed, owned, err := updateCodexHooks(fixtureRetiredHooks, raw, home, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !changed {
-		t.Fatal("Codex hook wiring did not strip the leftover clear-kill hook")
+		t.Fatal("Codex hook wiring did not strip the leftover retired hook")
 	}
 	resumeUnkill := settingsHookKey{
 		Event:   "SessionStart",
@@ -95,13 +96,13 @@ func TestCodexHookWiringStripsALeftoverClearKillHookInEveryShape(t *testing.T) {
 		)
 	}
 	if got := hookCommandCount(t, string(updated), "SessionStart", canonical); got != 0 {
-		t.Fatalf("canonical clear-kill count=%d, want zero:\n%s", got, updated)
+		t.Fatalf("pfm retired hook count=%d, want zero:\n%s", got, updated)
 	}
-	if got := hookCommandCount(t, string(updated), "SessionStart", legacyParent); got != 0 {
-		t.Fatalf("shell-parent clear-kill count=%d, want zero:\n%s", got, updated)
+	if got := hookCommandCount(t, string(updated), "SessionStart", oldBinary); got != 0 {
+		t.Fatalf("old-binary retired hook count=%d, want zero:\n%s", got, updated)
 	}
-	if strings.Contains(string(updated), codexClearMatcher) {
-		t.Fatalf("a clear-kill matcher entry survived with nothing left to hold: %s", updated)
+	if strings.Contains(string(updated), leftoverMatcher) {
+		t.Fatalf("a retired hook's matcher entry survived with nothing left to hold: %s", updated)
 	}
 	if got := hookCommandCount(t, string(updated), "SessionStart", resumeUnkill.Command); got != 1 {
 		t.Fatalf("resume-unkill handler count=%d, want exactly one:\n%s", got, updated)
@@ -112,7 +113,7 @@ func TestCodexHookWiringStripsALeftoverClearKillHookInEveryShape(t *testing.T) {
 
 	// Idempotent: a second pass over the already-converged file changes
 	// nothing further.
-	again, changedAgain, _, err := updateCodexHooks(updated, home, false, nil)
+	again, changedAgain, _, err := updateCodexHooks(fixtureRetiredHooks, updated, home, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

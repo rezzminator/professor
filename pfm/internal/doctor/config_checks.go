@@ -149,19 +149,6 @@ func printConfigFileRows(stdout io.Writer, runtime config.Runtime) (warnings, fa
 	content, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		fmt.Fprintf(stdout, "doctor: config: missing %s — run pfm install\n", path)
-		// The host gate refuses pfm install while a legacy config waits, so the
-		// row names the host check's fix; under an explicit --config the check
-		// skips the file, and so does the row.
-		if runtime.Paths.Home != "" && !runtime.ConfigExplicit {
-			legacy := filepath.Join(config.LegacyConfigDir(paths.OSEnv{}, runtime.Paths.Home), config.FileName)
-			if _, err := os.Stat(legacy); err == nil {
-				fmt.Fprintf(
-					stdout,
-					"doctor: config: legacy file %s is not read — apply the host-check legacy-config fix\n",
-					legacy,
-				)
-			}
-		}
 		return 1, 0
 	}
 	if err != nil {

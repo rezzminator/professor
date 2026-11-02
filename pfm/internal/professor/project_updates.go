@@ -76,7 +76,7 @@ type RetiredNameScan struct {
 
 // RetiredNameScanner scans root's files for retired names, skipping every
 // slash-separated root-relative path in pinned. The registry and the scan
-// live in internal/update (update.ScanRetiredNames), which imports this
+// live in internal/update (update.RetiredNameScanner), which imports this
 // package, so the caller passes it in.
 type RetiredNameScanner func(root string, pinned map[string]bool) RetiredNameScan
 
@@ -357,7 +357,7 @@ func projectReportExit(reviewRequired, failed bool) int {
 // clean, 1 at least one review item, 3 failure (baseline not found, baseline
 // or store unreadable, any UPDATED diff unreadable, any file scan could not
 // read). It resolves the root itself and shares its report writing with
-// renderProjectCheck; scan (update.ScanRetiredNames from doctor) adds the
+// renderProjectCheck; scan (update.RetiredNameScanner from doctor) adds the
 // retired-name hits in the project's files.
 func RunProjectUpdates(rootFlag, home string, jsonOutput bool, stdout io.Writer, scan RetiredNameScanner) int {
 	root, found, err := ResolveProjectRoot(rootFlag)

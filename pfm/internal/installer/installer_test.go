@@ -12,9 +12,9 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
-	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/reload"
+	"github.com/rezzminator/professor/pfm/internal/retired"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -220,6 +220,16 @@ func TestZshrcCreateOnFreshHomeNamesItselfHonestly(t *testing.T) {
 	}
 }
 
+// fixtureConvergeRetired are the retired lists the converge test seeds a
+// leftover of each; the shipped lists are empty.
+var fixtureConvergeRetired = retired.Lists{
+	HookCommands:  fixtureRetiredHooks.HookCommands,
+	HookBinaries:  fixtureRetiredHooks.HookBinaries,
+	HookShimHints: fixtureRetiredHooks.HookShimHints,
+	Units:         []string{"cc-name-sync.path", "cc-name-sync.timer", "pfm-reminder.service", "pfm-reminder.timer"},
+	ConfigFiles:   []retired.ConfigFile{{Path: "bin/cc-kill.sh", Reason: "native pfm command"}},
+}
+
 func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
@@ -250,9 +260,8 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 		secondarySettings,
 		`{"hooks":{"UserPromptSubmit":[{"matcher":"","hooks":[{"type":"command","command":"pfm chat bb"},{"type":"command","command":"secondary-keep"}]}]}}`,
 	)
-	writeFixture(t, filepath.Join(config, ".cc-ls-hidden"), "killed-b\nkilled-a\n")
 	writeFixture(t, filepath.Join(config, "bin", "cc-kill.sh"), "retired\n")
-	writeFixture(t, filepath.Join(home, ".zshrc"), "alias keep=yes\nsource /old/cc-fleet.zsh\n")
+	writeFixture(t, filepath.Join(home, ".zshrc"), "alias keep=yes\n")
 	unitDir := filepath.Join(home, ".config", "systemd", "user")
 	legacyPathWant := filepath.Join(unitDir, "default.target.wants", "cc-name-sync.path")
 	legacyTimerWant := filepath.Join(unitDir, "timers.target.wants", "cc-name-sync.timer")
@@ -272,22 +281,13 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	seed := fleetdb.OpenSharedState(context.Background(), paths.Values{
-		Home: home, StateDB: filepath.Join(home, ".local", "state", "pfm", "pfm.db"),
-	})
-	if err := seed.Kill(context.Background(), "killed-a", 99); err != nil {
-		t.Fatal(err)
-	}
-	if err := seed.Close(); err != nil {
-		t.Fatal(err)
-	}
-
 	runner := &fakeRunner{}
 	now := func() time.Time { return time.Date(2030, 1, 2, 3, 4, 5, 0, time.UTC) }
 	var preview bytes.Buffer
 	previewReport, err := Run(context.Background(), Options{
 		MCPConfigPath: testConfigPath(t),
 		Mode:          ModeDryRun, Home: home, Now: now, Stdout: &preview, Runner: runner,
+		retired: &fixtureConvergeRetired,
 	})
 	if err != nil || previewReport.Changed == 0 {
 		t.Fatalf("dry run report=%#v err=%v", previewReport, err)
@@ -301,6 +301,7 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 	report, err := Run(context.Background(), Options{
 		MCPConfigPath: testConfigPath(t),
 		Mode:          ModeApply, Home: home, Now: now, Stdout: &applied, Runner: runner,
+		retired: &fixtureConvergeRetired,
 	})
 	if err != nil || report.Changed == 0 {
 		t.Fatalf("apply report=%#v err=%v\n%s", report, err, applied.String())
@@ -392,19 +393,14 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 	// The predecessor's enablement links are a systemd concept; a launchd host
 	// never wires systemd at all, so it has none to retire.
 	if !schedulerIsLaunchd {
-		for _, retired := range append([]string{legacyPathWant, legacyTimerWant, renamedTimerWant}, renamedUnits...) {
-			if _, err := os.Lstat(retired); !os.IsNotExist(err) {
-				t.Fatalf("retired unit or enablement link remains at %s: %v", retired, err)
+		for _, unit := range append([]string{legacyPathWant, legacyTimerWant, renamedTimerWant}, renamedUnits...) {
+			if _, err := os.Lstat(unit); !os.IsNotExist(err) {
+				t.Fatalf("retired unit or enablement link remains at %s: %v", unit, err)
 			}
 		}
 	}
-	for _, retired := range []string{
-		filepath.Join(config, ".cc-ls-hidden"),
-		filepath.Join(config, "bin", "cc-kill.sh"),
-	} {
-		if _, err := os.Lstat(retired); !os.IsNotExist(err) {
-			t.Fatalf("retired file remains at %s: %v", retired, err)
-		}
+	if _, err := os.Lstat(filepath.Join(config, "bin", "cc-kill.sh")); !os.IsNotExist(err) {
+		t.Fatalf("retired file remains at %s: %v", filepath.Join(config, "bin", "cc-kill.sh"), err)
 	}
 	// F1: host overlays are materialized under the managed root and symlinked
 	// at their contracted ~/.local/bin names, including the Claude launcher.
@@ -446,14 +442,6 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 	if strings.Contains(codexHooks, "dream hook codex-subagent-inject") {
 		t.Fatalf("Codex hooks retained paused Dream injection:\n%s", codexHooks)
 	}
-	// The Codex SessionStart clear-kill hook is retired: SessionStart(source=
-	// clear) fires on the new session's first turn, by which point every
-	// Codex chat on the host shares one app-server daemon pid, so it could
-	// never say which pane cleared. Install strips a leftover one and never
-	// writes it back.
-	if strings.Contains(codexHooks, "internal clear-kill") {
-		t.Fatalf("install wrote the retired Codex SessionStart clear-kill hook:\n%s", codexHooks)
-	}
 	if secondary := readFixture(t, secondarySettings); !strings.Contains(secondary, "secondary-keep") {
 		t.Fatalf("install changed secondary settings: %s", secondary)
 	}
@@ -463,24 +451,15 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 	); !strings.Contains(
 		zshrc,
 		sourceLine(filepath.Join(clone, "pfm", "internal", "installer", "assets", "shim", "pfm.zsh")),
-	) ||
-		strings.Contains(zshrc, "cc-fleet.zsh") {
+	) {
 		t.Fatalf("zshrc was not converged:\n%s", zshrc)
-	}
-
-	state := fleetdb.OpenSharedState(context.Background(), paths.Values{
-		Home: home, StateDB: filepath.Join(home, ".local", "state", "pfm", "pfm.db"),
-	})
-	killed, err := state.KilledAt(context.Background())
-	closeErr := state.Close()
-	if err != nil || closeErr != nil || len(killed) != 2 || killed["killed-a"] != 99 || killed["killed-b"] != 0 {
-		t.Fatalf("migrated killed=%v err=%v close=%v", killed, err, closeErr)
 	}
 
 	var second bytes.Buffer
 	secondReport, err := Run(context.Background(), Options{
 		MCPConfigPath: testConfigPath(t),
 		Mode:          ModeApply, Home: home, Now: now, Stdout: &second, Runner: runner,
+		retired: &fixtureConvergeRetired,
 	})
 	if err != nil || secondReport.Changed != 0 {
 		t.Fatalf("second apply report=%#v err=%v\n%s", secondReport, err, second.String())
@@ -490,6 +469,7 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 	if _, err := Run(context.Background(), Options{
 		MCPConfigPath: testConfigPath(t),
 		Mode:          ModeUninstall, Home: home, Now: now, Stdout: &removed, Runner: runner,
+		retired: &fixtureConvergeRetired,
 	}); err != nil {
 		t.Fatalf("uninstall: %v\n%s", err, removed.String())
 	}
@@ -505,13 +485,9 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 	if codexHooks := readFixture(
 		t,
 		filepath.Join(home, ".codex", "hooks.json"),
-	); strings.Contains(
-		codexHooks,
-		"internal clear-kill",
-	) ||
-		!strings.Contains(codexHooks, "fixture-codex-keep") ||
+	); !strings.Contains(codexHooks, "fixture-codex-keep") ||
 		strings.Contains(codexHooks, "dream hook codex-subagent-inject") {
-		t.Fatalf("uninstall did not remove only the owned Codex clear hook:\n%s", codexHooks)
+		t.Fatalf("uninstall did not keep only the operator's Codex hook:\n%s", codexHooks)
 	}
 	if _, err := os.Lstat(managed); !os.IsNotExist(err) {
 		t.Fatalf("uninstall left managed asset root: %v", err)
@@ -854,7 +830,10 @@ func TestRetireRenamedGlobalAgentsDeletesOnlyTheInstallersOwnFrrLeftover(t *test
 		}
 		if _, err := Run(
 			context.Background(),
-			Options{MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home, Runner: &fakeRunner{}},
+			Options{
+				MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home, Runner: &fakeRunner{},
+				retired: &retired.Lists{GlobalAgents: []string{"frr"}},
+			},
 		); err != nil {
 			t.Fatal(err)
 		}
@@ -869,7 +848,10 @@ func TestRetireRenamedGlobalAgentsDeletesOnlyTheInstallersOwnFrrLeftover(t *test
 		writeFixture(t, frr, "---\nname: frr\ndescription: pre-rename research agent\n---\nbody\n")
 		if _, err := Run(
 			context.Background(),
-			Options{MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home, Runner: &fakeRunner{}},
+			Options{
+				MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home, Runner: &fakeRunner{},
+				retired: &retired.Lists{GlobalAgents: []string{"frr"}},
+			},
 		); err != nil {
 			t.Fatal(err)
 		}
@@ -888,7 +870,10 @@ func TestRetireRenamedGlobalAgentsDeletesOnlyTheInstallersOwnFrrLeftover(t *test
 		)
 		if _, err := Run(
 			context.Background(),
-			Options{MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home, Runner: &fakeRunner{}},
+			Options{
+				MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home, Runner: &fakeRunner{},
+				retired: &retired.Lists{GlobalAgents: []string{"frr"}},
+			},
 		); err != nil {
 			t.Fatal(err)
 		}
@@ -903,7 +888,10 @@ func TestRetireRenamedGlobalAgentsDeletesOnlyTheInstallersOwnFrrLeftover(t *test
 		writeFixture(t, frr, "just prose, no frontmatter\n")
 		if _, err := Run(
 			context.Background(),
-			Options{MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home, Runner: &fakeRunner{}},
+			Options{
+				MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home, Runner: &fakeRunner{},
+				retired: &retired.Lists{GlobalAgents: []string{"frr"}},
+			},
 		); err != nil {
 			t.Fatal(err)
 		}
@@ -916,7 +904,10 @@ func TestRetireRenamedGlobalAgentsDeletesOnlyTheInstallersOwnFrrLeftover(t *test
 		home := t.TempDir()
 		if _, err := Run(
 			context.Background(),
-			Options{MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home, Runner: &fakeRunner{}},
+			Options{
+				MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home, Runner: &fakeRunner{},
+				retired: &retired.Lists{GlobalAgents: []string{"frr"}},
+			},
 		); err != nil {
 			t.Fatal(err)
 		}
@@ -1226,7 +1217,7 @@ func TestEarlyCallScanStopsWhereTheRewriterFindsTheSourceLine(t *testing.T) {
 	home := t.TempDir()
 	recordFixtureSourceRepo(t, home, t.TempDir())
 	zshrc := filepath.Join(home, ".zshrc")
-	writeFixture(t, zshrc, "cc\nsource /old/cc-fleet.zsh\ncc-ls\n")
+	writeFixture(t, zshrc, "cc\nsource /old/pfm.zsh\ncc-ls\n")
 
 	var output bytes.Buffer
 	if _, err := Run(context.Background(), Options{
@@ -1460,9 +1451,8 @@ func TestCopyCommandPlanTreeSkipsAnInterruptedLinkStage(t *testing.T) {
 	}
 }
 
-// A host that never ran an install of the build that renamed the reminder
-// still holds pfm-reminder.service and .timer: uninstall disables and unlinks
-// both, as the install that retires them does.
+// A host still holding units the retired lists name: uninstall disables and
+// unlinks each, as the install that retires them does.
 func TestLinuxUninstallRetiresTheRenamedReminderUnits(t *testing.T) {
 	if schedulerIsLaunchd {
 		t.Skip("the systemd units are Linux-only")
@@ -1481,6 +1471,7 @@ func TestLinuxUninstallRetiresTheRenamedReminderUnits(t *testing.T) {
 	var removed bytes.Buffer
 	if _, err := Run(context.Background(), Options{
 		MCPConfigPath: testConfigPath(t), Mode: ModeUninstall, Home: home, Stdout: &removed, Runner: runner,
+		retired: &retired.Lists{Units: []string{"pfm-reminder.service", "pfm-reminder.timer"}},
 	}); err != nil {
 		t.Fatalf("uninstall: %v\n%s", err, removed.String())
 	}

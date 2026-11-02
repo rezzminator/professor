@@ -284,8 +284,7 @@ func TestConfigCLIInitShowValidateAndBrokenDiagnostics(t *testing.T) {
 		[]string{"--config", path, "config", "show"},
 		&stdout,
 		&stderr,
-	); code != 0 ||
-		strings.Contains(stdout.String(), "authToken") {
+	); code != 0 {
 		t.Fatalf("config show code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 

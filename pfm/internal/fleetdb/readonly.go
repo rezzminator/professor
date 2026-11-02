@@ -78,10 +78,6 @@ func OpenReadOnlyAtSchema(ctx context.Context, name, path string, expected int) 
 // *SchemaMismatchError for a file at another schema version.
 func OpenSharedStateReadOnly(ctx context.Context, values paths.Values) *Store {
 	store := &Store{path: values.StateDB}
-	if err := CheckLegacyState(values); err != nil {
-		store.degraded = err
-		return store
-	}
 	db, err := OpenReadOnlyAtSchema(ctx, "state", values.StateDB, SchemaVersion)
 	if err != nil {
 		store.degraded = err

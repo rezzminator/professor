@@ -80,10 +80,6 @@ func TestClaudeStoreEntries(t *testing.T) {
 	if !reflect.DeepEqual(AccountEntries, accounts) {
 		t.Fatalf("accounts=%v", AccountEntries)
 	}
-	retired := []string{".last-update-result.json", "stats-cache.json"}
-	if !reflect.DeepEqual(RetiredStoreEntries, retired) {
-		t.Fatalf("retired=%v, want %v", RetiredStoreEntries, retired)
-	}
 	ignored := []string{
 		"ide",
 		".cc-new-children",

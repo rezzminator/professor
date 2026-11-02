@@ -16,7 +16,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/kill"
-	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
@@ -336,60 +335,6 @@ func TestDoctorCreatesNeitherDatabase(t *testing.T) {
 	}
 	if code != 0 || !strings.Contains(output, "doctor: clean") {
 		t.Fatalf("a host with no database yet is no longer clean: code=%d\n%s", code, output)
-	}
-}
-
-// TestDoctorReachesTheHostChecksPastAPendingLegacyDatabase: a legacy database
-// waiting for its move is a host-check BLOCK whose row carries the fix, so
-// doctor reads past the database it cannot open and prints that row — it
-// never stops at the open, creates the new database, or touches the legacy one.
-func TestDoctorReachesTheHostChecksPastAPendingLegacyDatabase(t *testing.T) {
-	for _, tc := range []struct {
-		check  string
-		legacy func(home string) string
-	}{
-		{check: "legacy-state-db", legacy: paths.LegacyStateDB},
-		{check: "legacy-cache-db", legacy: paths.LegacyCacheDB},
-	} {
-		t.Run(tc.check, func(t *testing.T) {
-			runtime := buildCleanDoctorHome(t)
-			databases := []string{runtime.Paths.StateDB, runtime.Paths.CacheDB}
-			for _, path := range databases {
-				for _, suffix := range []string{"", "-wal", "-shm"} {
-					if err := os.Remove(path + suffix); err != nil && !errors.Is(err, os.ErrNotExist) {
-						t.Fatal(err)
-					}
-				}
-			}
-			legacy := tc.legacy(runtime.Paths.Home)
-			if err := os.MkdirAll(filepath.Dir(legacy), 0o700); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(legacy, []byte("legacy rows"), 0o600); err != nil {
-				t.Fatal(err)
-			}
-
-			var stdout, stderr bytes.Buffer
-			code := runDoctor(nil, &stdout, &stderr, runtime)
-			output := stdout.String()
-			if code != 3 || !strings.Contains(output, "host-check: BLOCK "+tc.check+" ") {
-				t.Fatalf("doctor stopped before the %s host-check row: code=%d\n%s", tc.check, code, output)
-			}
-			if strings.Contains(output, "doctor: unhealthy database:") || !strings.Contains(output, "could not look") {
-				t.Fatalf("the pending legacy database is not a could-not-look row:\n%s", output)
-			}
-			if !strings.Contains(output, "doctor: failures=") {
-				t.Fatalf("doctor printed no failure count:\n%s", output)
-			}
-			for _, path := range databases {
-				if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
-					t.Fatalf("doctor created %s beside the pending legacy database (lstat err=%v)", path, err)
-				}
-			}
-			if body, err := os.ReadFile(legacy); err != nil || string(body) != "legacy rows" {
-				t.Fatalf("doctor touched the legacy database: %q err=%v", body, err)
-			}
-		})
 	}
 }
 

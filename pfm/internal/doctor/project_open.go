@@ -222,10 +222,7 @@ func unreadableCwdRow(cwd string, err error) string {
 
 // openProjectRow is one project's warning row, or "" when every row is closed.
 func openProjectRow(ctx context.Context, root, home string) string {
-	scan := func(root string, pinned map[string]bool) professor.RetiredNameScan {
-		return update.ScanRetiredNamesWithContext(ctx, root, pinned)
-	}
-	rows, err := professor.OpenProjectRowsWithContext(ctx, root, home, scan)
+	rows, err := professor.OpenProjectRowsWithContext(ctx, root, home, update.RetiredNameScanner(ctx, home))
 	if err != nil {
 		return fmt.Sprintf("doctor: warning project_updates root=%s UNREADABLE: %v\n", root, err)
 	}

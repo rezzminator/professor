@@ -115,15 +115,10 @@ func Run(
 		stderr,
 	)
 	verbose := flags.Bool("verbose", false, "write raw probe output under the pfm scratch dir (path printed)")
-	// A v0.82 updater passes --skip-harvest to the new binary's doctor.
-	skipHarvest := flags.Bool("skip-harvest", false, "retired no-op: harvest moved to the harvester plugin")
 	projectUpdates := bindProjectUpdatesFlags(flags)
 	stale := bindStaleFlags(flags)
 	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
-	}
-	if *skipHarvest {
-		fmt.Fprintln(stderr, "pfm doctor: --skip-harvest is retired and ignored; harvest moved to the harvester plugin")
 	}
 	if flags.NArg() != 0 {
 		flags.Usage()
@@ -260,6 +255,8 @@ func Run(
 	tally.warnings += depWarnings
 	tally.failures += depFailures
 	tally.failures += printHostOverlayDoctor(stdout, resolved.Home)
+	retiredLists, retiredFailures := loadRetiredLists(stdout, resolved.Home)
+	tally.failures += retiredFailures
 	claudeStore := installer.ClaudeStore(resolved.Home)
 	pluginBuild := doctorClaudePluginBuild(
 		runtime.Version, resolved.Home, runtime.Config.Claude,
@@ -276,10 +273,7 @@ func Run(
 		claudeStore,
 		installer.ClaudePluginEnvironment(dependencies.Env, claudeEnv),
 		pluginBuild,
-		installer.PluginChats{
-			ProcRoot: resolved.ProcRoot,
-			Dirs:     append([]string{claudeEnvDir}, runtime.Config.ClaudeConfigDirs()...),
-		},
+		retiredLists.ClaudePlugins,
 		tally,
 	)
 	printEngineSyncHookDoctor(stdout, pluginBuild.Plugins, pluginBuild.PluginsDefault, tally)
@@ -309,7 +303,7 @@ func Run(
 		dependencies.Env,
 		enginesync.HostCapabilities(runtime.Config.Claude.GptAgents),
 		runtime.Config.ClaudeConfigDirs(),
-		update.RetiredRegistryNames(),
+		update.RetiredRegistryNames(retiredLists.Names),
 		runtime.Config.CodexHomes(),
 	)
 	tally.warnings += globalAgentsWarnings

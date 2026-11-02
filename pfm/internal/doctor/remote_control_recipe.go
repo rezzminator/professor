@@ -35,7 +35,7 @@ func printRemoteControlRecipeDoctor(
 		switch {
 		case errors.Is(err, fleetdb.ErrAbsent):
 			fmt.Fprintln(out, "doctor: remote_control recipes checked=0 (state database absent)")
-		case errors.As(err, &mismatch), errors.Is(err, paths.ErrLegacyPending):
+		case errors.As(err, &mismatch):
 			// Like the schedule audit, defer counting known unread state to
 			// the shared-store row. Never migrate it or call its recipes clean.
 			fmt.Fprintf(

@@ -117,17 +117,6 @@ func TestInstallGeneratesClonePrompts(t *testing.T) {
 		}
 		generated[filename] = info
 	}
-	legacy := paths.LegacyHarnessPromptsDir(home)
-	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
-		t.Fatalf("install created legacy prompt dir: %v", err)
-	}
-	if err := os.MkdirAll(legacy, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	sentinel := filepath.Join(legacy, "operator-file")
-	if err := os.WriteFile(sentinel, []byte("keep"), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	if _, err := Run(
 		context.Background(),
 		Options{
@@ -149,9 +138,6 @@ func TestInstallGeneratesClonePrompts(t *testing.T) {
 		if !before.ModTime().Equal(after.ModTime()) {
 			t.Fatalf("reinstall rewrote unchanged prompt %s", filename)
 		}
-	}
-	if raw, err := os.ReadFile(sentinel); err != nil || string(raw) != "keep" {
-		t.Fatalf("existing legacy dir changed: %q %v", raw, err)
 	}
 }
 

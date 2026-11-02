@@ -68,9 +68,8 @@ func installCheckTree(t *testing.T, root string) map[string]string {
 }
 
 // installCheckHome stages a host with one Claude account under {home}/.cc/1
-// and its config in the clone (migrated) or in ~/.config/pfm (legacy, the
-// host the install gate refuses until the operator moves it).
-func installCheckHome(t *testing.T, legacy bool) (home, clone, account string) {
+// and its config in the clone.
+func installCheckHome(t *testing.T) (home, clone, account string) {
 	t.Helper()
 	home = t.TempDir()
 	clone, account = filepath.Join(home, "clone"), pfmconfig.DefaultAccountDir(home, 1)
@@ -93,12 +92,6 @@ func installCheckHome(t *testing.T, legacy bool) (home, clone, account string) {
 		t.Fatal(err)
 	}
 	configPath := filepath.Join(clone, pfmconfig.FileName)
-	if legacy {
-		configPath = filepath.Join(home, ".config", "pfm", pfmconfig.FileName)
-	}
-	if err := os.MkdirAll(filepath.Dir(configPath), 0o700); err != nil {
-		t.Fatal(err)
-	}
 	config := fmt.Sprintf(`{"version":2,"accounts":[{"id":1,"configDir":%q}]}`+"\n", account)
 	if err := os.WriteFile(configPath, []byte(config), 0o600); err != nil {
 		t.Fatal(err)
@@ -112,7 +105,7 @@ func TestInstallCheckPreChangeChecks(t *testing.T) {
 		"explicit missing",
 	} {
 		t.Run(scenario, func(t *testing.T) {
-			home, _, _ := installCheckHome(t, false)
+			home, _, _ := installCheckHome(t)
 			bin, _ := writeManagerFakes(
 				t,
 				"case \"$*\" in *ActiveState*) echo inactive;; esac\nexit 0",
@@ -277,7 +270,7 @@ func installDatabaseFile(t *testing.T, path string) string {
 // keeps the old binary — so a check, or a preview, that migrated a database
 // would lock the binary it kept out of its own state. Neither migrates.
 func TestInstallCheckAndPreviewLeaveOlderDatabasesUnmigrated(t *testing.T) {
-	installCheckHome(t, false)
+	installCheckHome(t)
 	bin, _ := writeManagerFakes(
 		t,
 		"case \"$*\" in *ActiveState*) echo inactive;; esac\nexit 0",

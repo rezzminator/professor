@@ -21,7 +21,7 @@ import (
 // SessionEnd releases the agent while the engine and its pane still exist.
 // Repeated observations must distinguish that transition from a broken agent.
 func TestHerdrTabProviderReleasedAgentTeardown(t *testing.T) {
-	for _, outcome := range []string{"exit", "closed", "alive", "recovered", "unreadable", "moved-exit", "replaced-pane", "kept-exit", "exit-beside-incomplete", "own-pane-incomplete"} {
+	for _, outcome := range []string{"exit", "closed", "alive", "recovered", "unreadable", "moved-exit", "replaced-pane", "kept-exit", "exit-beside-incomplete", "own-pane-incomplete", "alive-after-failed-turn"} {
 		t.Run(outcome, func(t *testing.T) {
 			t.Setenv("TMUX_TMPDIR", t.TempDir())
 			// kept-exit: herdr-shield's holder 5 runs shell 10, whose terminal's
@@ -98,12 +98,28 @@ func TestHerdrTabProviderReleasedAgentTeardown(t *testing.T) {
 				}
 			})
 			dir := t.TempDir()
+			// alive-after-failed-turn: the transcript's last turn failed, and the
+			// screen of the agent-less pane rests on its error text.
+			var transcriptPath string
+			screen := claudeBusyPane
+			if outcome == "alive-after-failed-turn" {
+				transcriptPath = filepath.Join(dir, "s1.jsonl")
+				failed := `{"type":"assistant","isApiErrorMessage":true,"error":"server_error",` +
+					`"message":{"role":"assistant","content":[{"type":"text","text":"API Error: overloaded"}]}}` + "\n"
+				if err := os.WriteFile(transcriptPath, []byte(failed), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				screen = "API Error: overloaded\n> \n"
+			}
 			var warnings bytes.Buffer
 			provider := herdrTabProvider{
 				clock: clk,
 				scan: func(context.Context) (FleetScan, error) {
 					return FleetScan{Rows: []compose.Row{
-						{Backend: "herdr", ID: "s1", Socket: socket, PaneID: "w1:p1", Kind: compose.LiveClaude},
+						{
+							Backend: "herdr", ID: "s1", Socket: socket, PaneID: "w1:p1", Kind: compose.LiveClaude,
+							Path: transcriptPath,
+						},
 					}}, nil
 				},
 				views: func(context.Context, headless.Chat, string) ([]herdr.TabDecoration, error) {
@@ -119,13 +135,15 @@ func TestHerdrTabProviderReleasedAgentTeardown(t *testing.T) {
 						Message: "target missing",
 					}
 				},
+				// The transcript turn an agent-less pane rests on is read as the painter reads it.
+				rest: NewSeatInspector(nil).Rest,
 				// Past the exit grace an engine still alive in an agent-less pane (a
 				// native seat Herdr tracks no agent for) is read from its own screen.
 				screen: func(_ context.Context, chat headless.Chat) (string, error) {
 					if chat.Socket != socket || chat.Pane != "w1:p1" || chat.Engine != pfmengine.Claude {
 						t.Errorf("screen read of %+v, want claude pane w1:p1 on %s", chat, socket)
 					}
-					return claudeBusyPane, nil
+					return screen, nil
 				},
 				mode: func() (string, error) { return "emoji", nil },
 				warn: tabIndicatorWarnings{dir: dir, stderr: &warnings},
@@ -174,6 +192,9 @@ func TestHerdrTabProviderReleasedAgentTeardown(t *testing.T) {
 					}
 					if phase > 0 && outcome == "alive" {
 						want = headless.StateWorking
+					}
+					if phase > 0 && outcome == "alive-after-failed-turn" {
+						want = headless.StateError
 					}
 					if views[0].State != want {
 						t.Fatalf("state=%q want %q", views[0].State, want)

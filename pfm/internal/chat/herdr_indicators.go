@@ -35,9 +35,12 @@ type herdrTabProvider struct {
 	missingAgents map[string]time.Time
 	scan          func(context.Context) (FleetScan, error)
 	inspect       func(context.Context, headless.Chat, time.Time) (headless.Status, error)
-	views         func(context.Context, headless.Chat, string) ([]herdr.TabDecoration, error)
-	screen        func(context.Context, headless.Chat) (string, error)
-	mode          func() (string, error)
+	// rest reads the transcript turn an agent-less pane at rest shows, through
+	// the reader inspect carries (SeatInspector.Rest); nil reads it whole.
+	rest   func(context.Context, headless.Chat, time.Time) (headless.Status, error)
+	views  func(context.Context, headless.Chat, string) ([]herdr.TabDecoration, error)
+	screen func(context.Context, headless.Chat) (string, error)
+	mode   func() (string, error)
 	// glyphs reads the theme's tab glyphs each tick; nil draws the defaults.
 	glyphs func() (herdr.TabGlyphs, error)
 	warn   io.Writer
@@ -139,6 +142,23 @@ func (provider *herdrTabProvider) tabs(ctx context.Context, socket string) ([]he
 				confirmed, confirmErr := missingTabAgentState(
 					ctx, target, views[0].Terminal, clk.Now().Sub(since), provider.screen,
 				)
+				if confirmErr == nil && confirmed == headless.StateIdle {
+					// A pane at rest keeps its transcript's failed turn, as an idle Herdr agent does.
+					restRead := provider.rest
+					if restRead == nil {
+						restRead = headless.Inspect
+					}
+					rest, restErr := restRead(ctx, target, clk.Now())
+					if restErr != nil {
+						confirmed, confirmErr = tabStateUnknown, fmt.Errorf(
+							"read the turn %s rests on: %w",
+							target.ID,
+							restErr,
+						)
+					} else if rest.State == headless.StateError {
+						confirmed = headless.StateError
+					}
+				}
 				if confirmErr == nil {
 					if confirmed == "" {
 						continue
@@ -244,6 +264,7 @@ func PaintHerdrIndicators(ctx context.Context, socket, lockDir string, stderr io
 	inspector := NewSeatInspector(&runtime)
 	provider := herdrTabProvider{
 		inspect: inspector.Inspect,
+		rest:    inspector.Rest,
 		warn:    warnings,
 		probe:   &tabProbe{openCodeRoots: runtime.Paths.Roots[pfmengine.OpenCode]},
 	}

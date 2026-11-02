@@ -80,6 +80,17 @@ func (inspector *SeatInspector) Inspect(
 	return status, err
 }
 
+// Rest is the transcript's own status of target, read through the transcripts
+// Inspect carries: a pane Herdr tracks no agent for rests on its transcript's
+// last turn, which Inspect read a moment before, so it costs no second read.
+func (inspector *SeatInspector) Rest(
+	ctx context.Context,
+	target headless.Chat,
+	now time.Time,
+) (headless.Status, error) {
+	return headless.InspectWith(ctx, target, now, inspector.transcripts)
+}
+
 // Sweep lets go of the transcripts not inspected since the last Sweep: a
 // watch sweeps once per poll, so it holds only the seats it still watches.
 func (inspector *SeatInspector) Sweep() {

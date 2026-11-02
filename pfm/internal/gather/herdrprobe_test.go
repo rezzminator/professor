@@ -899,7 +899,19 @@ func TestHerdrChatSeat(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(proc, "50", "cmdline"), 0o700); err != nil {
 		t.Fatal(err)
 	}
+	stat := "20 (pfm) S 10 " + strings.Repeat("0 ", 17) + "9 0\n"
+	if err := os.WriteFile(filepath.Join(proc, "20", "stat"), []byte(stat), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	moved := fleetdb.Seat{SeatID: "moved", Backend: "herdr", HerdrSocket: "/s", HerdrPane: "w9:p2", SeatHostPID: 20}
+	// stale sorts before born: an ended chat's seat whose supervisor pid the
+	// live chat's supervisor (started at 9) reuses.
+	stale := fleetdb.Seat{
+		SeatID: "a-stale", Backend: "herdr", HerdrSocket: "/s", HerdrPane: "w1:p1", SeatHostPID: 20, SeatHostStart: 5,
+	}
+	born := fleetdb.Seat{
+		SeatID: "b-born", Backend: "herdr", HerdrSocket: "/s", HerdrPane: "w9:p2", SeatHostPID: 20, SeatHostStart: 9,
+	}
 	legacy := fleetdb.Seat{SeatID: "legacy", Backend: "herdr", HerdrSocket: "/s", HerdrPane: "w6:p3"}
 	for _, tc := range []struct {
 		name, socket, env string
@@ -913,6 +925,7 @@ func TestHerdrChatSeat(t *testing.T) {
 		{name: "no ancestor", socket: "/s", env: "w6:p3", seats: []fleetdb.Seat{moved}, chain: []int{40, 30}},
 		{name: "legacy by env pane", socket: "/s", env: "w6:p3", seats: []fleetdb.Seat{legacy}, chain: []int{40, 20}, want: "legacy"},
 		{name: "legacy other pane", socket: "/s", env: "w1:p1", seats: []fleetdb.Seat{legacy}, chain: []int{40, 20}},
+		{name: "stale seat sharing the supervisor's reused pid", socket: "/s", env: "w6:p3", seats: []fleetdb.Seat{stale, born}, chain: []int{40, 20}, want: "b-born"},
 		{name: "legacy unreadable", socket: "/s", env: "w6:p3", seats: []fleetdb.Seat{legacy}, chain: []int{50, 20}, fails: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

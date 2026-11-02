@@ -614,7 +614,8 @@ func HerdrSupervisorArgv(argv []string, id string) bool {
 // HerdrWorkspace are the chat's current address, envPane only the pane's birth
 // id. A legacy seat (no saved supervisor; pfm never moves one) is found by
 // envPane and the supervisor argv of an ancestor. An ancestor that exited is no
-// supervisor; one whose argv cannot be read is an error, never "no seat".
+// supervisor, nor one born after the seat's saved supervisor (a reused pid);
+// one whose argv or birth cannot be read is an error, never "no seat".
 func HerdrChatSeat(
 	seats []fleetdb.Seat,
 	proc ProcFS,
@@ -628,7 +629,18 @@ func HerdrChatSeat(
 				continue
 			}
 			if seat.SeatHostPID > 0 && seat.SeatHostPID == pid {
-				return *seat, true, nil
+				if seat.SeatHostStart == 0 {
+					return *seat, true, nil
+				}
+				// An ended chat's seat keeps its supervisor pid: a reused pid is not its host.
+				dead, err := HerdrHostDead(proc, *seat)
+				if err != nil {
+					return fleetdb.Seat{}, false, err
+				}
+				if !dead {
+					return *seat, true, nil
+				}
+				continue
 			}
 			if seat.SeatHostPID != 0 || seat.HerdrPane != envPane {
 				continue

@@ -5,21 +5,49 @@ name: ci
 # merges, releases or publishes until every job here is green. The Linux gate
 # jobs run the local gate's own step list (infra/fence/checks.sh gate_run),
 # one slice per job, directly on the runner; publish.yml runs on the merge.
+# Started by hand on any branch, it skips the jobs `exclude` names:
+#   gh workflow run ci.yml --ref develop -f exclude='gate fresh-install build scan release'
 # The rule: .claude/rules/ci-workflows.md.
 on:
   pull_request:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      exclude:
+        description: "Jobs to skip, space- or comma-separated: gate, macos, fresh-install, build, scan, release"
+        required: false
+        default: ""
 
 concurrency:
-  group: ci-${{ github.event.pull_request.number }}
+  group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
+  # The dispatch's `exclude` as a JSON array; empty on a pull request. A name no
+  # job carries fails the `ci` job, which checks it against `needs`.
+  plan:
+    name: plan
+    runs-on: ubuntu-latest
+    outputs:
+      exclude: ${{ steps.exclude.outputs.json }}
+    steps:
+      - name: Read the jobs to exclude
+        id: exclude
+        env:
+          EXCLUDE: ${{ inputs.exclude }}
+        run: |
+          set -euo pipefail
+          json="$(jq -cn --arg s "${EXCLUDE:-}" '$s | [splits("[ ,]+")] | map(select(. != ""))')"
+          echo "json=$json" >> "$GITHUB_OUTPUT"
+          echo "excluded jobs: $json"
+
   gate:
     name: gate (${{ matrix.slice }})
+    needs: plan
+    if: ${{ !contains(fromJSON(needs.plan.outputs.exclude), 'gate') }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -115,6 +143,8 @@ jobs:
 
   macos:
     name: macos (${{ matrix.part }})
+    needs: plan
+    if: ${{ !contains(fromJSON(needs.plan.outputs.exclude), 'macos') }}
     runs-on: macos-15
     strategy:
       fail-fast: false
@@ -139,6 +169,8 @@ jobs:
 
   fresh-install:
     name: fresh-install (${{ matrix.os }})
+    needs: plan
+    if: ${{ !contains(fromJSON(needs.plan.outputs.exclude), 'fresh-install') }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -176,6 +208,8 @@ jobs:
 
   build:
     name: build (${{ matrix.goos }}/${{ matrix.goarch }})
+    needs: plan
+    if: ${{ !contains(fromJSON(needs.plan.outputs.exclude), 'build') }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -206,6 +240,8 @@ jobs:
   # awesome-ai-plugins catalog applies, so the source-side score is reproducible.
   scan:
     name: scan
+    needs: plan
+    if: ${{ !contains(fromJSON(needs.plan.outputs.exclude), 'scan') }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out the repository
@@ -258,6 +294,8 @@ jobs:
   # authored notes releases/v{VERSION}.md exist and pass the grammar.
   release:
     name: release
+    needs: plan
+    if: ${{ !contains(fromJSON(needs.plan.outputs.exclude), 'release') }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out the repository
@@ -278,18 +316,24 @@ jobs:
   # job it needs succeeded.
   ci:
     name: ci
-    needs: [gate, macos, fresh-install, build, scan, release]
+    needs: [plan, gate, macos, fresh-install, build, scan, release]
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - name: Every job succeeded
+      - name: Every job not excluded succeeded
         env:
           NEEDS: ${{ toJSON(needs) }}
+          EXCLUDE: ${{ needs.plan.outputs.exclude || '[]' }}
         run: |
           set -euo pipefail
-          failed="$(jq -r 'to_entries[] | select(.value.result != "success") | "\(.key)=\(.value.result)"' <<<"$NEEDS")"
+          unknown="$(jq -rn --argjson needs "$NEEDS" --argjson ex "$EXCLUDE" '$ex - ($needs | keys) | join(" ")')"
+          if [ -n "$unknown" ]; then
+            echo "::error::exclude names no job: $unknown (jobs: $(jq -r 'keys | join(" ")' <<<"$NEEDS"))"
+            exit 1
+          fi
+          failed="$(jq -r --argjson ex "$EXCLUDE" 'to_entries[] | select(.value.result != "success" and (.key | IN($ex[]) | not)) | "\(.key)=\(.value.result)"' <<<"$NEEDS")"
           if [ -n "$failed" ]; then
             echo "::error::not every CI job succeeded: $(tr '\n' ' ' <<<"$failed")"
             exit 1
           fi
-          echo "every CI job succeeded"
+          echo "every CI job not excluded succeeded (excluded: $EXCLUDE)"

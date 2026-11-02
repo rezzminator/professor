@@ -106,9 +106,9 @@ While the release pull request from `release/v{X.Y.Z}` into `main` is open, `ci.
 4. **`build`** — `pfm` for `linux/amd64`, `linux/arm64`, `darwin/arm64`, `darwin/amd64` (Go, `-trimpath`, `CGO_ENABLED=0`) through `make release-binary`; nothing is uploaded.
 5. **`scan`** — generates the Codex and OpenCode mirrors and runs the HOL AI Plugin Scanner over the tree.
 6. **`release`** — `make release`: fails unless `VERSION` moved past `main`'s as a plain `X.Y.Z`, `releases/v{VERSION}.md` exists, and `release-check notes` passes on it, so `main` takes only release pull requests.
-7. **`ci`** — fails unless every other job succeeded; a skipped or cancelled job counts as a failure.
+7. **`ci`** — fails unless every other job succeeded; a skipped or cancelled job counts as a failure, unless a hand-started run excluded it.
 
-`.github/workflows/macos.yml` runs the same macOS `unit` and `e2e` parts on demand (`workflow_dispatch` only) between releases.
+`gh workflow run ci.yml --ref {branch} -f exclude='{jobs}'` runs the same jobs on demand on any branch, skipping the jobs named (`gate fresh-install build scan release` leaves the macOS parts).
 
 Merging the pull request is the release. `publish.yml`'s `publish` job:
 

@@ -3,8 +3,8 @@ description: >-
   One part of pfm's macOS suite on a macOS runner: `unit` runs the refresh-scope
   fixture under the system Bash 3.2 and `go test ./...`; `e2e` runs the whole
   tagged e2e suite serially, the Darwin installer and the release-upgrade e2e
-  included. ci.yml runs both parts on every pull request into main, macos.yml
-  on demand. Needs the repository checked out with full history and Go set up;
+  included. ci.yml runs both parts on every pull request into main and on a
+  hand-started run (`-f exclude=` the other jobs for macOS alone). Needs the repository checked out with full history and Go set up;
   a failing install or test fails the job naming it.
 
 inputs:

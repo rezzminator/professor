@@ -541,12 +541,7 @@ func (model Model) updateKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 					model.killStatus = "resume refused — " + row.Name + " is still ending; resume once its pane has closed"
 					return model, nil
 				}
-				if isNewChatActionKind(row.Kind) {
-					row.Account = model.accountForKind(row.Kind)
-				}
-				model.outcome = OutcomeSelected
-				model.outcomeRow = row
-				return model, tea.Quit
+				return model.selectRow(row)
 			}
 		}
 		return model, nil
@@ -1311,10 +1306,6 @@ func (model *Model) rebuildOrder() {
 	model.elsewhere = model.outOfPlaceRows()
 }
 
-func isNewChatActionKind(kind compose.Kind) bool {
-	return kind == compose.NewClaude || kind == compose.NewCodex || kind == compose.NewOpenCode
-}
-
 func (model *Model) refilter(follow string, fallback int) {
 	query := strings.TrimSpace(model.query.Value())
 	model.filtered = model.filtered[:0]
@@ -1445,6 +1436,7 @@ func (model Model) Result() Outcome {
 		PrimaryAccount:       primary,
 		ClaudePrimaryAccount: model.primary,
 		Cache1H:              model.cache1H,
+		Resume:               model.resumeChoice,
 		Query:                model.query.Value(),
 		KillChanges:          model.appliedChanges(),
 	}

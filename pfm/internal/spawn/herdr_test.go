@@ -567,7 +567,7 @@ func TestHerdrBirthOutlivesAFailedRetire(t *testing.T) {
 	if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	// A SID directory that is a regular file: the dead seat's reload files cannot be removed.
+	// A SID directory that is a regular file: the dead seat's reload record cannot be removed.
 	blocked := filepath.Join(values.Home, "sid-is-a-file")
 	if err := os.WriteFile(blocked, nil, 0o600); err != nil {
 		t.Fatal(err)

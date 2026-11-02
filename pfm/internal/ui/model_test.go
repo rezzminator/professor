@@ -13,12 +13,14 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/spawn"
 )
 
-// A chat resumed from the picker opens on its engine's remembered account and
-// that account's remembered cache, falling back to the configured one.
+// A chat with no launch record resumed from the picker opens on its engine's
+// remembered account and that account's remembered cache, falling back to the
+// configured one.
 func TestResumeOpensOnTheRememberedAccountAndItsCache(t *testing.T) {
-	resume := compose.Row{Kind: compose.ResumeClaude, ID: "r", Name: "r", Project: "p", Account: 1}
+	resume := compose.Row{Kind: compose.ResumeClaude, ID: "r", Name: "r", Project: "p"}
 	for _, test := range []struct {
 		name    string
 		last    fleetdb.LaunchMemory
@@ -36,16 +38,13 @@ func TestResumeOpensOnTheRememberedAccountAndItsCache(t *testing.T) {
 				Cache1H: true, Cache1HByAccount: map[int]bool{1: true, 2: true},
 				LastLaunch: test.last,
 			})
-			model, _ = applyKey(t, model, specialKey(tea.KeyEnter))
+			model, _, _ = enterThrough(t, model)
 			result := model.Result()
-			if result.Kind != OutcomeSelected || result.PrimaryAccount != test.primary || result.Cache1H != test.want {
-				t.Fatalf(
-					"resume result account %d cache %t, want %d/%t",
-					result.PrimaryAccount,
-					result.Cache1H,
-					test.primary,
-					test.want,
-				)
+			want := &ResumeChoice{Account: test.primary, Cache1H: test.want}
+			if result.Kind != OutcomeSelected || result.PrimaryAccount != test.primary ||
+				!reflect.DeepEqual(result.Resume, want) {
+				t.Fatalf("resume result account %d resume %+v, want primary %d and %+v",
+					result.PrimaryAccount, result.Resume, test.primary, want)
 			}
 		})
 	}
@@ -587,9 +586,11 @@ func TestEnterOutcomeEveryKindAndLiveReboot(t *testing.T) {
 			NowNS:               fixtureNowNS,
 		}
 		model := NewModel(snapshot)
-		selected, command := applyKey(t, model, specialKey(tea.KeyEnter))
+		// A resumable chat's ⏎ walks its steps first; every other row selects at once.
+		selected, command, walked := enterThrough(t, model)
 		result := selected.Result()
-		if command == nil ||
+		resumable := row.Kind.IsResumable() && row.Backend != spawn.BackendHerdr
+		if command == nil || walked != resumable || (result.Resume != nil) != resumable ||
 			result.Kind != OutcomeSelected ||
 			compose.RowKey(result.Row) != compose.RowKey(row) ||
 			result.PrimaryAccount != 3 ||

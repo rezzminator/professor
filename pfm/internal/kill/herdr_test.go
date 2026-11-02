@@ -877,7 +877,7 @@ func TestHerdrKillSelfUsesTheSharedIdentity(t *testing.T) {
 	}
 }
 
-func TestHerdrForcedCloseRemovesReloadFiles(t *testing.T) {
+func TestHerdrForcedCloseRemovesReloadRecord(t *testing.T) {
 	for _, test := range []struct {
 		name string
 		// stuck plants a non-empty directory at the record, so its remove fails.
@@ -887,7 +887,7 @@ func TestHerdrForcedCloseRemovesReloadFiles(t *testing.T) {
 		{name: "removed with the seat"},
 		{
 			name:  "a file that will not go never keeps the closed pane's row",
-			stuck: true, wantWarning: "its reload files stay behind",
+			stuck: true, wantWarning: "its reload record stays behind",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -923,12 +923,11 @@ func TestHerdrForcedCloseRemovesReloadFiles(t *testing.T) {
 			if _, found, err := database.Shared().Seat(context.Background(), seat.SeatID); err != nil || found {
 				t.Fatalf("closed seat row found=%t err=%v; want it retired", found, err)
 			}
-			if !test.stuck {
-				for _, suffix := range []string{".pid", ".log"} {
-					if _, err := os.Stat(reloadFile(seat.SeatID, suffix)); !os.IsNotExist(err) {
-						t.Errorf("reload %s of the closed seat: stat err=%v; want it removed", suffix, err)
-					}
-				}
+			if _, err := os.Stat(reloadFile(seat.SeatID, ".pid")); !test.stuck && !os.IsNotExist(err) {
+				t.Errorf("reload record of the closed seat: stat err=%v; want it removed", err)
+			}
+			if _, err := os.Stat(reloadFile(seat.SeatID, ".log")); err != nil {
+				t.Errorf("reload log of the closed seat: %v; want it kept as the last reload's evidence", err)
 			}
 			if test.wantWarning == "" && log.Len() != 0 {
 				t.Errorf("kill warnings = %q, want none", log.String())

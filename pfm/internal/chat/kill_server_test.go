@@ -210,13 +210,14 @@ func TestEndHerdrClosesOnlyItsSeat(t *testing.T) {
 			if err := db.PutSeat(context.Background(), other); err != nil {
 				t.Fatal(err)
 			}
-			// The ended seat's reload schedule files go with it; another
-			// seat's, a sibling name and an unrelated file stay.
+			// The ended seat's reload schedule record goes with it; its
+			// reload log stays as the evidence of its last reload, and
+			// another seat's files, a sibling name and an unrelated file stay.
 			ended := []string{
 				paths.SIDReloadHerdrPrefix + seat.SeatID + ".pid",
-				paths.SIDReloadHerdrPrefix + seat.SeatID + ".log",
 			}
 			kept := []string{
+				paths.SIDReloadHerdrPrefix + seat.SeatID + ".log",
 				paths.SIDReloadHerdrPrefix + other.SeatID + ".pid",
 				paths.SIDReloadHerdrPrefix + other.SeatID + ".log",
 				paths.SIDReloadHerdrPrefix + seat.SeatID + "-2.log",

@@ -472,8 +472,8 @@ func endHerdrSteps(ctx context.Context, chat headless.Chat, values paths.Values,
 		}
 	}
 	// Before the seat row goes, so a failure here leaves the seat retryable.
-	if err := herdr.RemoveReloadFiles(values.SIDDir, seat.SeatID); err != nil {
-		return fmt.Errorf("remove ended seat reload files: %w", err)
+	if err := herdr.RemoveReloadRecord(values.SIDDir, seat.SeatID); err != nil {
+		return fmt.Errorf("remove ended seat reload record: %w", err)
 	}
 	if preserve {
 		before := seat

@@ -18,6 +18,7 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/kill"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/reload"
 	"github.com/rezzminator/professor/pfm/internal/store"
@@ -121,6 +122,7 @@ func reloadWorkerCapturedAccount(t *testing.T, captured string) string {
 
 func TestChatReloadWorkerFailureReachesThePaneAndLog(t *testing.T) {
 	configPath, socket, _ := reloadWorkerAccountFixture(t)
+	_, recorder := obs.Test(t)
 	runtime, err := pfmconfig.LoadRuntime(configPath)
 	if err != nil {
 		t.Fatal(err)
@@ -168,6 +170,20 @@ func TestChatReloadWorkerFailureReachesThePaneAndLog(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), displayed) {
 		t.Fatalf("pane message %q was absent from worker log %q", displayed, stderr.String())
+	}
+	// The worker's own log lives in the SID directory; the activity log keeps
+	// its error once that file is gone.
+	var failures []obs.Record
+	for _, record := range recorder.Records() {
+		if record.Message == "reload.failed" {
+			failures = append(failures, record)
+		}
+	}
+	want := "pfm chat reload: another reload of this pane is already in flight"
+	if len(failures) != 1 || failures[0].Level != "ERROR" || failures[0].Fields[obs.FieldErr] != want ||
+		failures[0].Fields[obs.FieldExit] != float64(1) {
+		t.Fatalf("reload.failed records = %+v, want one ERROR with err %q and exit 1 (activity log %q)",
+			failures, want, recorder.Raw())
 	}
 	displayed = ""
 	stdout.Reset()

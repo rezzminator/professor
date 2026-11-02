@@ -233,6 +233,11 @@ func RunHerdr(
 	} else {
 		submitted, err = typeExit(ctx, n.pane(), n.options.Clock, stderr)
 	}
+	if submitted {
+		// Past Enter the seat host starts the published recipe: the chat runs
+		// on its account from here, whatever the startup wait reports.
+		recordReloadLaunch(ctx, n.request, stderr)
+	}
 	if err != nil {
 		return Result{}, err
 	}
@@ -425,8 +430,8 @@ func nativeReloadRun(request Request, name string) (fleetdb.SeatRun, error) {
 func (n *nativeReload) ready(ctx context.Context, stash bool) error {
 	stable := 0
 	pane := n.pane()
-	// agentUnread is the last Herdr agent read that told nothing: it waits like
-	// a working chat and names itself if the tries run out.
+	// agentUnread is the last Herdr agent read that told nothing: it waits
+	// without reading the screen and names itself if the tries run out.
 	var agentUnread error
 	for attempt := 0; attempt < n.options.IdleTries; attempt++ {
 		screen, err := pane.capture(ctx)
@@ -458,15 +463,18 @@ func (n *nativeReload) ready(ctx context.Context, stash bool) error {
 			} else if state.Type != "agent_info" || state.Agent == nil {
 				agentUnread = errors.New("native reload malformed agent_info")
 			}
-			// An unread or unrecognized state polls as a working one does.
+			// Herdr vetoes only a chat waiting on its user or one it cannot
+			// classify; idleness is the screen's call, as on the tmux path.
+			// Claude stays working while background shells or sub-agents run
+			// behind an idle composer, and only the footer shows a live turn.
+			// An unread or unrecognized state polls without reading the screen.
 			settled := false
 			if agentUnread == nil {
 				switch status := state.Agent.Status; status {
 				case "blocked", "unknown":
 					return fmt.Errorf("native reload target is %s", status)
-				case "idle", "done":
+				case "idle", "done", "working":
 					settled = true
-				case "working":
 				default:
 					agentUnread = fmt.Errorf("native reload unknown agent state %q", status)
 				}

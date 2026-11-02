@@ -199,8 +199,16 @@ type Outcome struct {
 	PrimaryAccount       int
 	ClaudePrimaryAccount int
 	Cache1H              bool
+	Resume               *ResumeChoice // set by a finished resume walk: it overrides Row's account and Cache1H
 	Query                string
 	KillChanges          []KillChange
+}
+
+// ResumeChoice is what a resume walk chose for a resumable chat: the account
+// and prompt cache its session resumes under.
+type ResumeChoice struct {
+	Account int
+	Cache1H bool
 }
 
 // RefreshFailure is why a refresh pass produced no fleet: the stage that

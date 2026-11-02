@@ -184,9 +184,7 @@ func announceReloadWorkerFailure(
 	if handled {
 		return
 	}
-	lines := strings.Split(strings.TrimSpace(workerLog), "\n")
-	message := lines[len(lines)-1]
-	if err := display(context.Background(), socketPath, pane, message); err != nil {
+	if err := display(context.Background(), socketPath, pane, reload.WorkerFailureLine(workerLog)); err != nil {
 		fmt.Fprintf(stderr, "pfm chat reload: display worker failure on %s %s: %v\n", sock, pane, err)
 	}
 }
@@ -212,13 +210,16 @@ func runChatReloadWorkerWithRuntime(
 	workerStderr := io.MultiWriter(stderr, &workerLog)
 	stderr = workerStderr
 	defer func() {
-		if code == 0 || paneTold {
+		if code == 0 {
 			return
 		}
 		if workerLog.Len() == 0 {
 			fmt.Fprintf(workerStderr, "pfm chat reload: detached worker failed (exit %d)\n", code)
 		}
-		announceReloadWorkerFailure(args, workerLog.String(), nativeWorker, displayReloadWorkerFailure, stderr)
+		reload.RecordWorkerFailure(workerLog.String(), code)
+		if !paneTold {
+			announceReloadWorkerFailure(args, workerLog.String(), nativeWorker, displayReloadWorkerFailure, stderr)
+		}
 	}()
 	env = defaultEnv(env)
 	args = normalizeReloadArgs(args)

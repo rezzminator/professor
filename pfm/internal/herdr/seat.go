@@ -123,24 +123,22 @@ func (e *NotificationNotShownError) Error() string {
 	return fmt.Sprintf("herdr notification not shown (%s)", e.Reason)
 }
 
-// RemoveReloadFiles removes a retired native seat's reload schedule record and
-// log from sidDir; a file already gone is fine. An id that
+// RemoveReloadRecord removes a retired native seat's reload schedule record
+// from sidDir; a record already gone is fine. Its reload log stays: a reload
+// that failed ends the chat, and the log is the only record of why. An id that
 // reload.LockWorkerSchedule refuses to name a file with never had any. Every
 // door that retires a Herdr seat calls it before the seat row goes, so a
 // failure leaves the seat retryable.
-func RemoveReloadFiles(sidDir, seatID string) error {
+func RemoveReloadRecord(sidDir, seatID string) error {
 	if seatID == "" || seatID == "." || seatID == ".." || strings.ContainsAny(seatID, "/\x00") {
 		return nil
 	}
 	if sidDir == "" {
-		return errors.New("remove seat reload files: SID directory is unset")
+		return errors.New("remove seat reload record: SID directory is unset")
 	}
-	var errs []error
-	for _, suffix := range []string{".pid", ".log"} {
-		path := filepath.Join(sidDir, paths.SIDReloadHerdrPrefix+seatID+suffix)
-		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-			errs = append(errs, fmt.Errorf("remove %s: %w", path, err))
-		}
+	path := filepath.Join(sidDir, paths.SIDReloadHerdrPrefix+seatID+".pid")
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove %s: %w", path, err)
 	}
-	return errors.Join(errs...)
+	return nil
 }

@@ -49,6 +49,7 @@ type reloadHerdrFixture struct {
 	mode      string
 	canonical string
 	terminal  string
+	values    paths.Values
 	onRead    func()
 	onExit    func()
 	prompted  string
@@ -59,10 +60,41 @@ type reloadHerdrFixture struct {
 	agentReads int
 }
 
+// assertLaunchRecorded checks the launch record of the reloaded session: the
+// reload's account 2 and 5m cache when recorded, else no record at all.
+func (f *reloadHerdrFixture) assertLaunchRecorded(recorded bool) {
+	f.t.Helper()
+	launches, err := fleetdb.OpenLaunches(context.Background(), f.values)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	record, err := launches.LaunchFor(context.Background(), f.request.SessionID)
+	if closeErr := launches.Close(); closeErr != nil {
+		f.t.Error(closeErr)
+	}
+	if !recorded {
+		if !errors.Is(err, fleetdb.ErrNoLaunch) {
+			f.t.Fatalf(
+				"launch record of %s in %s = %+v, %v; want none",
+				f.request.SessionID,
+				f.values.StateDB,
+				record,
+				err,
+			)
+		}
+		return
+	}
+	if err != nil || record.Account != 2 || record.Cache1H || record.Engine != pfmengine.Claude {
+		f.t.Fatalf("launch record of %s in %s = %+v, %v; want account 2, 5m cache, claude",
+			f.request.SessionID, f.values.StateDB, record, err)
+	}
+}
+
 func newReloadHerdrFixture(t *testing.T) *reloadHerdrFixture {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv(paths.EnvStateDB, filepath.Join(home, "state", "pfm.db"))
+	t.Setenv(paths.EnvCacheDB, filepath.Join(home, "state", "pfm-cache.db"))
 	values, err := paths.Resolve()
 	if err != nil {
 		t.Fatal(err)
@@ -74,7 +106,7 @@ func newReloadHerdrFixture(t *testing.T) *reloadHerdrFixture {
 		}
 	})
 	socket := filepath.Join(testjail.ShortRoot(t), "h.sock")
-	f := &reloadHerdrFixture{t: t, db: db, text: "❯ ", canonical: "w6:p3", terminal: "reload-terminal"}
+	f := &reloadHerdrFixture{t: t, db: db, text: "❯ ", canonical: "w6:p3", terminal: "reload-terminal", values: values}
 	proc := t.TempDir()
 	f.proc = proc
 	t.Setenv(paths.EnvProcRoot, proc)
@@ -319,6 +351,8 @@ func (f *reloadHerdrFixture) respond(method string, p map[string]json.RawMessage
 		switch {
 		case f.mode == "blocked":
 			status = "blocked"
+		case f.mode == "working-behind-idle-composer" || f.mode == "working-turn":
+			status = "working"
 		case f.mode == "unrecognized-agent" || f.mode == "unrecognized-agent-once" && f.agentReads == 1:
 			status = "thinking"
 		case f.mode == "undecodable-agent-once" && f.agentReads == 1:
@@ -435,6 +469,13 @@ func TestRunHerdrLifecycle(t *testing.T) {
 		{name: "null-argv", mode: "null-argv", want: "argv"},
 		{name: "snapshot-error", mode: "read-error", want: "snapshot unavailable"},
 		{name: "blocked", mode: "blocked", want: "blocked"},
+		// Claude reports working while background shells or sub-agents run behind
+		// an idle composer; the screen decides idleness, as on the tmux path.
+		{name: "working-behind-idle-composer", mode: "working-behind-idle-composer"},
+		{
+			name: "working-turn-holds-exit", mode: "working-turn",
+			want: "native reload: chat still busy or input box not ready; /exit was not typed",
+		},
 		{name: "unrecognized-agent-state-waits", mode: "unrecognized-agent-once"},
 		{name: "undecodable-agent-state-waits", mode: "undecodable-agent-once"},
 		{
@@ -451,6 +492,13 @@ func TestRunHerdrLifecycle(t *testing.T) {
 			if tc.mode == "dim-hint" {
 				f.text = "❯ \x1b[2mTry running tests\x1b[0m"
 			}
+			switch tc.mode {
+			case "working-behind-idle-composer":
+				f.text = "────────\n❯ \n────────\n  ⏵⏵ bypass permissions on · 2 shells"
+			case "working-turn":
+				f.text = "✻ Thundering… (1m 50s · ↓ 9.3k tokens)\n────────\n❯ \n────────\n" +
+					"  ⏵⏵ bypass permissions on · esc to interrupt"
+			}
 			if tc.draft {
 				f.text = "❯ parked draft"
 				if tc.name == "same-text-draft" {
@@ -465,6 +513,22 @@ func TestRunHerdrLifecycle(t *testing.T) {
 			if tc.want != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.want) {
 					t.Fatalf("RunHerdr error=%v, want %q", err, tc.want)
+				}
+				// Once /exit is submitted the seat host starts the new recipe, so
+				// its account is recorded; a reload refused before it records none.
+				switch tc.mode {
+				case "failed-start":
+					f.assertLaunchRecorded(true)
+				case "blocked":
+					f.assertLaunchRecorded(false)
+				case "working-turn":
+					f.assertLaunchRecorded(false)
+					if err.Error() != tc.want || len(f.typed) != 0 || f.agentReads != f.options.IdleTries {
+						t.Fatalf(
+							"busy turn: error=%q typed=%q agent reads=%d, want %q, nothing typed, %d reads",
+							err, f.typed, f.agentReads, tc.want, f.options.IdleTries,
+						)
+					}
 				}
 				if tc.mode == "failed-start" {
 					current, found, readErr := f.db.Seat(context.Background(), f.seat.SeatID)
@@ -481,6 +545,7 @@ func TestRunHerdrLifecycle(t *testing.T) {
 			if result.Account != 2 {
 				t.Fatalf("result=%+v", result)
 			}
+			f.assertLaunchRecorded(true)
 			current, found, err := f.db.Seat(context.Background(), f.seat.SeatID)
 			if err != nil || !found || current.HerdrPane != f.request.Pane || current.ReloadPending ||
 				current.State != "live" {
@@ -500,6 +565,9 @@ func TestRunHerdrLifecycle(t *testing.T) {
 			}
 			if !reflect.DeepEqual(run, canonical) {
 				t.Fatalf("recipe=%+v, canonical=%+v", run, canonical)
+			}
+			if tc.mode == "working-behind-idle-composer" && !slices.Equal(f.typed, []string{"/exit"}) {
+				t.Fatalf("typed=%q, want [/exit]", f.typed)
 			}
 			if tc.mode == "dim-hint" && slices.Contains(f.keys, "ctrl+s") {
 				t.Fatalf("dim hint stashed as draft: %v", f.keys)

@@ -12,13 +12,13 @@ import (
 )
 
 // RetireHerdrSeat is the one retire path of a dead seat a revive replaced: its
-// old pane (RetireHerdrPane), then its reload schedule files, keyed by its id,
+// old pane (RetireHerdrPane), then its reload schedule record, keyed by its id,
 // which the new seat does not reuse, then its row and recipe. A pane that
 // stays is the returned warning; the chat already lives elsewhere.
 func RetireHerdrSeat(ctx context.Context, values paths.Values, seat fleetdb.Seat) (warning string, returnErr error) {
 	warning = RetireHerdrPane(ctx, seat)
-	if err := herdr.RemoveReloadFiles(values.SIDDir, seat.SeatID); err != nil {
-		return warning, fmt.Errorf("retire replaced native seat %s reload files: %w", seat.SeatID, err)
+	if err := herdr.RemoveReloadRecord(values.SIDDir, seat.SeatID); err != nil {
+		return warning, fmt.Errorf("retire replaced native seat %s reload record: %w", seat.SeatID, err)
 	}
 	state := fleetdb.OpenSharedState(ctx, values)
 	defer func() { returnErr = errors.Join(returnErr, state.Close()) }()

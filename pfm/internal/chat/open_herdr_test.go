@@ -395,11 +395,14 @@ func plantNativeReloadFiles(t *testing.T, sidDir, seatID string) []string {
 	return planted
 }
 
-func assertNativeReloadFilesGone(t *testing.T, planted []string) {
+// assertNativeReloadRecordRetired checks a retired seat's reload schedule
+// record is gone while its reload log stays as the last reload's evidence.
+func assertNativeReloadRecordRetired(t *testing.T, planted []string) {
 	t.Helper()
 	for _, path := range planted {
-		if _, err := os.Stat(path); !os.IsNotExist(err) {
-			t.Fatalf("retired seat's reload file %s still there (stat err=%v)", path, err)
+		_, err := os.Stat(path)
+		if gone, wantGone := os.IsNotExist(err), strings.HasSuffix(path, ".pid"); gone != wantGone {
+			t.Fatalf("retired seat's reload file %s gone=%t (stat err=%v), want gone=%t", path, gone, err, wantGone)
 		}
 	}
 }

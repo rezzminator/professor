@@ -105,6 +105,9 @@ type pcmGuardJudge struct {
 	pcmOnly, themeOnly []string
 	unreadable         bool
 	blind, read        []string
+	// heredocs holds, by absolute path, the text a heredoc earlier in the
+	// call left in a file (engineHeredoc); readFile reads it before the disk.
+	heredocs map[string]string
 	// scripts counts the script files the code being judged is read from.
 	scripts int
 }
@@ -381,6 +384,7 @@ func (judge *pcmGuardJudge) bash(command, cwd string, script cmdparse.Script, de
 			}
 			judge.program(&part, base, dir, depth)
 			if judge.scope.engine {
+				judge.engineHeredoc(&part, base, words, dir)
 				judge.enginePart(&part, base, dir, depth)
 			}
 			if copying {
@@ -436,7 +440,7 @@ func pcmGuardWords(part *cmdparse.Part, base string) []string {
 	}
 	var operands []string
 	switch base {
-	case "tee", "rm", pcmGuardUnlink:
+	case pcmGuardTee, "rm", pcmGuardUnlink:
 		operands, _ = pcmGuardSplit(part.Args)
 	case "touch":
 		operands, _ = pcmGuardSplit(part.Args, "-r", "--reference", "-d", "--date", "-t")

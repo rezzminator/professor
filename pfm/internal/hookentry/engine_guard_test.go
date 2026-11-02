@@ -237,6 +237,13 @@ func TestEngineGuardFrameworkFiles(t *testing.T) {
 			{"python3 big.py", blindDeny("python3 big.py")},
 			{"./big-run.sh", blindDeny("./big-run.sh")},
 			{"python3 new.py", blindDeny("python3 new.py")},
+			// A script an earlier part writes from a heredoc is judged from that body.
+			{"cat > new.py <<'EOF'\nprint('ok')\nEOF\npython3 new.py", ""},
+			{"cat > new.py <<'EOF'\nopen('AGENTS.md', 'w').write('x')\nEOF\npython3 new.py", fileDeny(p("AGENTS.md"))},
+			{"tee new.sh <<'EOF'\necho y > AGENTS.md\nEOF\nbash new.sh", fileDeny(p("AGENTS.md"))},
+			{"cat >> ok.sh <<'EOF'\necho y > AGENTS.md\nEOF\nbash ok.sh", fileDeny(p("AGENTS.md"))},
+			{"cat > run-new.sh <<'EOF'\n#!/bin/sh\necho y > CLAUDE.md\nEOF\n./run-new.sh", fileDeny(p("CLAUDE.md"))},
+			{"echo x | tee new.py; python3 new.py", blindDeny("python3 new.py")},
 			{
 				"rm " + filepath.Join(f.clone, "templates", "themes", "dusk", "theme.json"),
 				fileDeny(filepath.Join(f.clone, "templates", "themes", "dusk", "theme.json")),

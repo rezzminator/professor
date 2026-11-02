@@ -6,5 +6,5 @@ Binds every agent and the main chat on every engine, except a Claude agent whose
 - Everything else is gitter's, `git fetch` included: it moves remote-tracking refs, so check a remote with `git ls-remote origin <branch>`, never fetch.
 - Hand off on Claude: spawn `gitter` with the absolute repo path, the phase (SETUP, COMMIT, MERGE, PUSH, PULL, RELEASE) or the exact change, and the check that passed.
 - On Codex and OpenCode no chat or role writes git, gitter included: hand the exact change to the user.
-- A denied command goes to its hand-off as written: never retried, rephrased, split or wrapped to get past the guard.
+- A denied git command goes to its hand-off as written: never retried, rephrased, split or wrapped to get past the guard.
 - Push, tag and release run only on the user's explicit ask in the current turn, through gitter.

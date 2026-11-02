@@ -410,7 +410,7 @@ func (reporter *herdrReporter) runTmux(ctx context.Context, payload herdrPayload
 	}
 	session, panePID, err := reporter.tmuxSession(ctx)
 	if err != nil {
-		return reporter.tmuxReadFailure(err)
+		return errors.Join(reporter.tmuxReadFailure(err), reporter.settleUnprovedLater(ctx, payload))
 	}
 	reporter.session = session
 	if reporter.firedByEngine() {

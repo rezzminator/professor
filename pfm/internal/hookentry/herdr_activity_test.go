@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -214,6 +215,45 @@ func TestHerdrLostAgentStopExpiresWithoutAnotherHook(t *testing.T) {
 	if code != 0 || stderr.Len() != 0 {
 		t.Errorf("watch rc=%d stderr=%s", code, &stderr)
 	}
+	assertActivityReport(t, server, "idle", "")
+}
+
+// The watchdog's own re-send of idle, once the lease passed after a lost
+// SubagentStop, can fail while Herdr does not answer. It clears the record's
+// agents as it sends, so a retry of its own finds nothing left to expire: the
+// undelivered re-send goes to the settle process, which delivers it once
+// Herdr answers.
+func TestHerdrAgentWatchdogUndeliveredResendIsSettled(t *testing.T) {
+	server := newFakeHerdr(t)
+	jail := newHerdrJail(t)
+	now := int64(time.Second)
+	var spawned [][]string
+	jail.spawn = func(argv []string) error { spawned = append(spawned, argv); return nil }
+	for _, step := range []string{"prompt", "agent-start:a", "idle"} {
+		activityTestEvent(t, jail, server, &now, step)
+	}
+	deps := jail.deps(activityEnv(server), &now)
+	args := activityWatchArgs(t, deps, "activity-session")
+	now += int64(time.Hour + time.Second)
+	away := server.path + ".away"
+	if err := os.Rename(server.path, away); err != nil {
+		t.Fatal(err)
+	}
+	waits := 0
+	var stderr bytes.Buffer
+	code := watchHerdrAgentsWithWait(args, &stderr, deps, func() {
+		waits++
+		if waits > 2 {
+			t.Fatalf("watchdog never finished: %s", &stderr)
+		}
+		if err := os.Rename(away, server.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			t.Fatal(err)
+		}
+	})
+	if code != 0 || !strings.Contains(stderr.String(), "retrying") {
+		t.Fatalf("watchdog rc=%d stderr=%s, want exit 0 naming the undelivered re-send", code, &stderr)
+	}
+	runSpawned(t, slices.DeleteFunc(spawned, func(argv []string) bool { return argv[2] != herdrSettle }), deps)
 	assertActivityReport(t, server, "idle", "")
 }
 

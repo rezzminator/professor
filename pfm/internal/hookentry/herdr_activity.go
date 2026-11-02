@@ -104,7 +104,7 @@ func (reporter *herdrReporter) writeActivity(session string, state herdrActivity
 
 // runActivity holds the activity lock across the complete report, so a delayed
 // asynchronous tool hook cannot overwrite Stop or a synchronous agent lifecycle.
-func (reporter *herdrReporter) runActivity(ctx context.Context, payload herdrPayload) (returnErr error) {
+func (reporter *herdrReporter) runActivity(ctx context.Context, payload herdrPayload) error {
 	if reporter.options.engine != pfmengine.Claude || reporter.options.event.FiredByTmux() ||
 		payload.SessionID == "" || reporter.deps.lockDir == "" ||
 		(reporter.deps.identity().TMUX == "" && !reporter.processTarget().ok()) ||
@@ -117,9 +117,19 @@ func (reporter *herdrReporter) runActivity(ctx context.Context, payload herdrPay
 	}
 	unlock, err := reporter.lock(ctx, reporter.activityKey(payload.SessionID))
 	if err != nil {
-		return err
+		return errors.Join(err, reporter.settleEventLater(payload, err))
 	}
 	defer unlock()
+	return reporter.recordActivity(ctx, payload, reporter.run)
+}
+
+// recordActivity is the report under the held activity lock: it records the
+// event and delivers it through deliver.
+func (reporter *herdrReporter) recordActivity(
+	ctx context.Context,
+	payload herdrPayload,
+	deliver func(context.Context, herdrPayload) error,
+) (returnErr error) {
 	state, err := reporter.readActivity(payload.SessionID)
 	if err != nil {
 		return err
@@ -152,7 +162,7 @@ func (reporter *herdrReporter) runActivity(ctx context.Context, payload herdrPay
 		if agentEvent {
 			return nil
 		}
-		return reporter.run(ctx, payload)
+		return deliver(ctx, payload)
 	}
 	// planActivity updates the lifecycle fields, while preserving the pane result
 	// separately until all its hold rules have been evaluated.
@@ -162,7 +172,7 @@ func (reporter *herdrReporter) runActivity(ctx context.Context, payload herdrPay
 	state.Stored = action.stored
 	reporter.activity = &state
 	reporter.activityAction = action
-	err = reporter.run(ctx, payload)
+	err = deliver(ctx, payload)
 	if reporter.options.socket != "" {
 		state.TmuxSocket = reporter.options.socket
 		state.TmuxSession = reporter.session
@@ -408,7 +418,14 @@ func (reporter *herdrReporter) expireAgents(session string, generation ...int64)
 		return true, err
 	}
 	defer bridge()
-	return true, errors.Join(reporter.resendActivity(ctx, state), reporter.writeActivity(session, state))
+	resent := reporter.resendActivity(ctx, state)
+	if err := reporter.writeActivity(session, state); err != nil {
+		// The agents stay recorded: the next attempt expires them again.
+		return true, errors.Join(resent, err)
+	}
+	// The record no longer holds an agent to expire, so a retry of this watch
+	// would never re-send: the settle process delivers what Herdr missed.
+	return true, errors.Join(resent, reporter.settleRecordedLater(session, state, resent))
 }
 
 // resendActivity re-sends the activity's stored state to every pane it last

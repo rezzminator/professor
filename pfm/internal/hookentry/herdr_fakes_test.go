@@ -366,6 +366,9 @@ type fakeTmux struct {
 	panes  []string
 	calls  []string
 	failOn string
+	// hangOn is the subcommand a loaded server leaves unanswered until the
+	// caller's deadline.
+	hangOn string
 	// probeErr is what the pane-list door (deps.listPanes) answers instead of
 	// the panes: a dead or unresponsive server.
 	probeErr error
@@ -377,7 +380,14 @@ func newFakeTmux(session string) *fakeTmux {
 	return &fakeTmux{session: session, panePID: "50"}
 }
 
-func (tmux *fakeTmux) run(_ context.Context, socket string, args ...string) (string, error) {
+func (tmux *fakeTmux) run(ctx context.Context, socket string, args ...string) (string, error) {
+	tmux.mu.Lock()
+	hang := tmux.hangOn != "" && args[0] == tmux.hangOn
+	tmux.mu.Unlock()
+	if hang {
+		<-ctx.Done()
+		return "", fmt.Errorf("fake tmux %s did not answer: %w", args[0], ctx.Err())
+	}
 	if args[0] == "set-option" && args[len(args)-2] == herdrStoredOption && tmux.beforeWrite != nil {
 		tmux.beforeWrite(args[len(args)-1])
 	}

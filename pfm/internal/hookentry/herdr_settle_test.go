@@ -136,6 +136,156 @@ func TestHerdrNativeDroppedSettledStateIsResent(t *testing.T) {
 	}
 }
 
+// holdActivity takes a Claude session's activity lock the way another hook
+// of the same session (or its watchdog, or a settle process) holds it past
+// this hook's deadline under host load, until release.
+func holdActivity(t *testing.T, lockDir, session string) (release func()) {
+	t.Helper()
+	reporter := &herdrReporter{}
+	file, err := os.OpenFile(
+		filepath.Join(lockDir, reporter.activityKey(session)+".lock"), os.O_CREATE|os.O_RDWR, 0o600,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatalf("hold the activity lock: %v", err)
+	}
+	return func() { _ = file.Close() }
+}
+
+// A native hook that cannot take its session's activity lock before its
+// deadline records nothing, so the settle process F12 starts for an unsent
+// recorded state has nothing to re-send, and no later hook comes while the
+// chat waits on its user (the agent watchdog only after its hour-long lease).
+// Once the lock is free, the detached process the dropped hook started
+// records the event and settles the pane idle.
+func TestHerdrNativeEventDroppedAtTheActivityLockIsSettled(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		before  []string
+		dropped string
+	}{
+		{"last agent stop after Stop", []string{"prompt", "agent-start", "idle"}, "agent-stop"},
+		{"Stop", []string{"prompt"}, "idle"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			rig := newNativeActivityRig(t)
+			for _, step := range test.before {
+				if got := rig.event(step); got.rc != 0 || got.stderr != "" {
+					t.Fatalf("%s: rc=%d stderr=%s", step, got.rc, got.stderr)
+				}
+			}
+			release := holdActivity(t, rig.lockDir, "activity-session")
+			got := rig.event(test.dropped)
+			release()
+			if got.rc != 0 || !strings.Contains(got.stderr, "still held at the deadline") {
+				t.Fatalf("%s: rc=%d stderr=%q, want exit 0 naming the held activity lock",
+					test.dropped, got.rc, got.stderr)
+			}
+			runSpawned(t, slices.DeleteFunc(rig.spawned, func(argv []string) bool { return argv[2] != herdrSettle }),
+				rig.deps)
+			assertActivityReport(t, rig.server, "idle", "")
+		})
+	}
+}
+
+// A settle process records or replays only what a hook could hand it: a
+// recorded event needs the session it records into and an event a settle
+// records, an unproved replay the ancestry its engine proof walks.
+func TestHerdrSettleRefusesWhatNoHookHandsIt(t *testing.T) {
+	const stored, payload = `{"state":"idle"}`, `{"session_id":"activity-session"}`
+	for _, test := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "event without a session",
+			args: []string{herdrSettleEvent, "7", stored, `{}`, "idle"},
+			want: `pfm internal herdr-state settle event: session "", event "idle": ` +
+				"want a session id and an event a settle records\n",
+		},
+		{
+			name: "event a settle never records",
+			args: []string{herdrSettleEvent, "7", stored, payload, "agent-start"},
+			want: `pfm internal herdr-state settle event: session "activity-session", event "agent-start": ` +
+				"want a session id and an event a settle records\n",
+		},
+		{
+			name: "unproved without an ancestry",
+			args: []string{
+				herdrSettleUnproved, "7", stored, payload, `{"pane":"%1"}`, "--socket", "/fixture/tmux", "idle",
+			},
+			want: `pfm internal herdr-state settle: decode the engine proof "{\"pane\":\"%1\"}": ` +
+				"<nil>, want an ancestry\n",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var stderr bytes.Buffer
+			rc := settleHerdrStateWithWait(test.args, &stderr, herdrDeps{}, func() {
+				t.Fatal("a refused settle waited")
+			})
+			if rc != 1 || stderr.String() != test.want {
+				t.Fatalf("settle %q: rc=%d stderr=%q, want rc=1 stderr=%q", test.args, rc, stderr.String(), test.want)
+			}
+		})
+	}
+}
+
+// A tmux chat's Stop whose session read (display-message) got no answer
+// before the hook's deadline failed ahead of the engine proof, so it stored
+// and reported nothing, and Codex fires no later hook while it waits on its
+// user. The hook hands the settle process the event with the process ancestry
+// the proof walks; once tmux answers, the settle reads the session, proves the
+// engine and replays the event.
+func TestHerdrTmuxStopDroppedBeforeTheEngineProofIsSettled(t *testing.T) {
+	for _, engine := range []string{"claude", "codex"} {
+		t.Run(engine, func(t *testing.T) {
+			rig, session := newChatRig(t), "s1"
+			fire := func(event, extra string) herdrRun {
+				return rig.engine(event, `{"session_id":"s1"`+extra+`}`)
+			}
+			if engine == "codex" {
+				rig, session = codexRig(t), "x1"
+				rig.jail.paneEnv = map[int]map[string]string{
+					codexTUI: {"TMUX": rigSocket + ",4000,0", "TMUX_PANE": "%3"},
+				}
+				rig.env["TMUX"], rig.env["TMUX_PANE"] = rigSocket+",94682,0", "%0"
+				rig.tmux.panePID = "80"
+				fire = func(event, extra string) herdrRun { return rig.codex(event, "x1", extra) }
+			}
+			var spawned [][]string
+			rig.jail.spawn = func(argv []string) error { spawned = append(spawned, argv); return nil }
+			rig.seed(rig.registered("working", map[string]herdrClient{"4242": rig.client("w1:p1", "term_1")}))
+			rig.wantQuiet(fire("start", `,"source":"startup"`))
+			rig.wantQuiet(fire("working", `,"hook_event_name":"UserPromptSubmit"`))
+			rig.tmux.mu.Lock()
+			rig.tmux.hangOn = "display-message"
+			rig.tmux.mu.Unlock()
+			got := fire("idle", "")
+			rig.tmux.mu.Lock()
+			rig.tmux.hangOn = ""
+			rig.tmux.mu.Unlock()
+			if got.rc != 0 || !strings.Contains(got.stderr, "read tmux session") {
+				t.Fatalf("idle: rc=%d stderr=%q, want exit 0 naming the unanswered session read", got.rc, got.stderr)
+			}
+			deps := rig.jail.deps(rig.env, &rig.clock)
+			deps.tmux, deps.listPanes = rig.tmux.run, rig.tmux.listPanes
+			runSpawned(t, spawned, deps)
+			if stored := rig.tmux.storedState(t); stored.State != "idle" || stored.SessionID != session {
+				t.Errorf("stored = %q, want session %s idle", rig.tmux.stored, session)
+			}
+			calls := slices.DeleteFunc(rig.herdr.calls(), func(call string) bool {
+				return !strings.HasPrefix(call, "pane.report_agent")
+			})
+			if len(calls) == 0 || !strings.Contains(calls[len(calls)-1], `"state":"idle"`) {
+				t.Errorf("herdr requests = %q, want idle the last state reported to w1:p1", calls)
+			}
+		})
+	}
+}
+
 // A tmux chat's Stop whose @pfm_herdr write or client list timed out (a loaded
 // tmux server) stored and reported nothing, and no later hook comes while the
 // chat is idle. Once tmux answers, the detached process the hook started

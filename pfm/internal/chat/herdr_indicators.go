@@ -131,9 +131,12 @@ func (provider *herdrTabProvider) tabs(ctx context.Context, socket string) ([]he
 		if views[0].State == tabStateUnknown {
 			// Ownership is proved, but foreground evidence is unavailable.
 			// A transcript/cache must not overwrite that uncertainty.
-		} else if status, err := provider.inspect(ctx, target, clk.Now()); err != nil {
+		} else if status, err := provider.inspect(ctx, target, clk.Now()); err != nil || status.StateSource == herdrAgentUntracked {
+			// Herdr tracks no agent on the pane: the engine still in its foreground
+			// (herdrAgentUntracked), or a refusal whose foreground read failed.
 			var refusal *herdr.Refusal
-			if target.Backend == spawn.BackendHerdr && errors.As(err, &refusal) && refusal.Code == herdr.AgentNotFound {
+			if target.Backend == spawn.BackendHerdr &&
+				(err == nil || errors.As(err, &refusal) && refusal.Code == herdr.AgentNotFound) {
 				key := target.SeatID + "\x00" + target.ID + "\x00" + socket + "\x00" + views[0].Terminal
 				since, found := provider.missingAgents[key]
 				if !found {

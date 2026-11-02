@@ -339,7 +339,7 @@ func nativeClaudeCalls(session, startSource, state, message string) []string {
 }
 
 func TestHerdrNativeSeatReadOnlyReports(t *testing.T) {
-	for _, event := range []string{"working", "idle", "blocked", "notification", "legacy", "newer", "corrupt"} {
+	for _, event := range []string{"working", "idle", "blocked", "notification", "legacy", "older start", "newer", "corrupt"} {
 		t.Run(event, func(t *testing.T) {
 			root := t.TempDir()
 			server := newNativeReporterHerdr(t, "native-seat", "w6:p3", "native-terminal")
@@ -357,6 +357,10 @@ func TestHerdrNativeSeatReadOnlyReports(t *testing.T) {
 			switch event {
 			case "legacy":
 				statement, reportEvent, wantWarning = "PRAGMA user_version=5", "working", "schema"
+			case "older start":
+				// A start's own writable open migrates the file, so its seat read must not refuse it.
+				statement = fmt.Sprintf("PRAGMA user_version=%d", fleetdb.SchemaVersion-1)
+				reportEvent = "start"
 			case "newer":
 				statement = fmt.Sprintf("PRAGMA user_version=%d", fleetdb.SchemaVersion+1)
 				reportEvent, wantWarning = "start", "schema"
@@ -371,7 +375,7 @@ func TestHerdrNativeSeatReadOnlyReports(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if wantWarning == "" {
+			if statement == "BEGIN IMMEDIATE" {
 				defer func() {
 					if _, err := database.Exec("ROLLBACK"); err != nil {
 						t.Errorf("release native writer: %v", err)
@@ -416,6 +420,20 @@ func TestHerdrNativeSeatReadOnlyReports(t *testing.T) {
 				return
 			}
 
+			if event == "older start" {
+				var version int
+				if err := database.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
+					t.Fatal(err)
+				}
+				if version != fleetdb.SchemaVersion {
+					t.Errorf(
+						"native start left schema at %d, want %d (%s)",
+						version,
+						fleetdb.SchemaVersion,
+						values.StateDB,
+					)
+				}
+			}
 			state, message := "idle", ""
 			switch event {
 			case "working":

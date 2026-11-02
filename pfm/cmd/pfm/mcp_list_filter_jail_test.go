@@ -151,3 +151,23 @@ func indexResumableChat(t *testing.T, root, projectSlug, id string) {
 		t.Fatalf("index %s code=%d stderr=%q", projectSlug, code, stderr.String())
 	}
 }
+
+// A chat's MCP server keeps the chat's working directory, often a worktree
+// removed while the chat runs on; ls must still answer, since its scope is the
+// caller's repo, never the server's own directory.
+func TestMCPListAnswersFromARemovedWorkingDirectory(t *testing.T) {
+	root := jailTest(t)
+	indexResumableChat(t, root, "alpha-project", "11111111-1111-4111-8111-111111111112")
+	removed := filepath.Join(t.TempDir(), "worktree")
+	if err := os.Mkdir(removed, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(removed)
+	if err := os.Remove(removed); err != nil {
+		t.Fatal(err)
+	}
+	output := callChatTool[mcpserv.LSOutput](t, "ls", mcpserv.LSInput{All: true})
+	if output.Matched != 1 {
+		t.Fatalf("ls from a removed working directory = %+v, want the one indexed chat", output)
+	}
+}

@@ -46,7 +46,7 @@ func callChatTool[T any](t *testing.T, name string, arguments any) T {
 		t.Fatalf("%s: %v", name, err)
 	}
 	if result.IsError {
-		t.Fatalf("%s returned tool error: %#v", name, result.Content)
+		t.Fatalf("%s returned tool error: %s", name, toolResultText(result))
 	}
 	content, err := json.Marshal(result.StructuredContent)
 	if err != nil {

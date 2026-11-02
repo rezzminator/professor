@@ -3,6 +3,7 @@ package chat
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -129,11 +130,17 @@ func TestHerdrTabProviderReleasedAgentTeardown(t *testing.T) {
 					if phase == 1 && outcome == "recovered" {
 						return headless.Status{State: headless.StateIdle}, nil
 					}
-					return headless.Status{}, &herdr.Refusal{
-						Request: "agent.get pfm-seat",
-						Code:    herdr.AgentNotFound,
-						Message: "target missing",
+					// statusFromHerdr's two answers to agent_not_found that leave the
+					// pane to the painter: the refusal joined to an unreadable foreground,
+					// else the transcript verdict marked herdrAgentUntracked.
+					if outcome == "unreadable" {
+						return headless.Status{}, errors.Join(&herdr.Refusal{
+							Request: "agent.get pfm-seat",
+							Code:    herdr.AgentNotFound,
+							Message: "target missing",
+						}, errors.New("read Herdr foreground processes of w1:p1: process_read_failed"))
 					}
+					return headless.Status{State: headless.StateIdle, StateSource: herdrAgentUntracked}, nil
 				},
 				// The transcript turn an agent-less pane rests on is read as the painter reads it.
 				rest: NewSeatInspector(nil).Rest,

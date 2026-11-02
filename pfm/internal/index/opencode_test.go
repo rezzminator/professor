@@ -444,10 +444,11 @@ func TestSyncOpenCodeMirrorsChangedStoresOnly(t *testing.T) {
 		}
 		return count
 	}
+	roots := []string{root}
 	pass := func(step string, wantReads, wantMirrored int, wantIDs ...string) {
 		t.Helper()
 		var counters Counters
-		if err := SyncOpenCode(ctx, database, []string{root}, &counters); err != nil {
+		if err := SyncOpenCode(ctx, database, roots, &counters); err != nil {
 			t.Fatalf("%s: sync: %v", step, err)
 		}
 		stored, err := database.OpenCodeSessions(ctx)
@@ -490,4 +491,13 @@ func TestSyncOpenCodeMirrorsChangedStoresOnly(t *testing.T) {
 		t.Fatalf("delete child: %v", err)
 	}
 	pass("a commit only the WAL holds", 2, 2, "ses_gone", "ses_root")
+
+	// A second OpenCode data home (PFM_OPENCODE_ROOT lists several) adds its
+	// sessions to the mirror beside the first root's, never replacing them.
+	second := t.TempDir()
+	seedOpenCodeStore(t, second)
+	mutateOpenCodeStore(t, second, "DELETE FROM session WHERE id <> 'ses_root'")
+	mutateOpenCodeStore(t, second, "UPDATE session SET id = 'ses_second' WHERE id = 'ses_root'")
+	roots = append(roots, second)
+	pass("a second root", 4, 3, "ses_gone", "ses_root", "ses_second")
 }

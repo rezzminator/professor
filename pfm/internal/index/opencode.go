@@ -409,18 +409,23 @@ func openCodeStoreStamp(roots []string) (string, error) {
 	return hex.EncodeToString(signature.Sum(nil)), nil
 }
 
-// syncOpenCodeMirror replaces the oc_sessions mirror with one pass's view
-// and, when stamp is set, records it in the same transaction, so the stamp
-// stored always names the read the mirror holds, whichever pass wrote last.
+// syncOpenCodeMirror replaces the oc_sessions mirror with one pass's view of
+// every root and, when stamp is set, records it in the same transaction, so the
+// stamp stored always names the read the mirror holds, whichever pass wrote last.
 func syncOpenCodeMirror(
 	ctx context.Context,
 	database *store.Store,
-	root, stamp string,
+	roots []string,
+	stamp string,
 	counters *Counters,
 ) error {
-	sessions, err := ReadOpenCodeSessions(ctx, root)
-	if err != nil {
-		return fmt.Errorf("read opencode sessions: %w", err)
+	var sessions []store.OpenCodeSession
+	for _, root := range roots {
+		read, err := ReadOpenCodeSessions(ctx, root)
+		if err != nil {
+			return fmt.Errorf("read opencode sessions: %w", err)
+		}
+		sessions = append(sessions, read...)
 	}
 	if err := database.WithImmediateTx(ctx, func(tx *store.ImmediateTx) error {
 		if err := tx.ReplaceOpenCodeSessions(ctx, sessions); err != nil {

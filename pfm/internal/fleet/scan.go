@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"slices"
 	"strconv"
@@ -286,7 +287,15 @@ func ResolveEnv(request Request) (Env, error) {
 	currentDir := ""
 	if !request.NoCurrentDir {
 		var err error
-		if currentDir, err = os.Getwd(); err != nil {
+		currentDir, err = os.Getwd()
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			// A removed directory (a worktree gone under a long-lived MCP server
+			// or painter) holds no project to lead: compose from no directory.
+			obs.Logger(context.Background()).Warn("fleet scan: working directory removed; composing from none",
+				"error", err)
+			currentDir = ""
+		case err != nil:
 			return Env{}, fmt.Errorf("read current directory: %w", err)
 		}
 	}

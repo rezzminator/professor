@@ -35,7 +35,16 @@ func (reporter *herdrReporter) nativeSeat(ctx context.Context, payload herdrPayl
 		identity.HerdrPane == "" {
 		return false, nil
 	}
-	db := fleetdb.OpenSharedStateReadOnly(ctx, *reporter.deps.seatPaths)
+	var db *fleetdb.Store
+	if reporter.options.event == herdr.EventStart || reporter.options.event == herdr.EventEnd {
+		// Start and end bind the seat through a writable open, which migrates an older file.
+		var err error
+		if db, err = fleetdb.OpenSharedStateUnlessOlder(ctx, *reporter.deps.seatPaths); err != nil {
+			return true, fmt.Errorf("native seat ownership unproved: %w", err)
+		}
+	} else {
+		db = fleetdb.OpenSharedStateReadOnly(ctx, *reporter.deps.seatPaths)
+	}
 	defer func() {
 		if err := db.Close(); err != nil {
 			returnErr = errors.Join(returnErr, fmt.Errorf("close native seat state: %w", err))

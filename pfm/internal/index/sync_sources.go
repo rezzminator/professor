@@ -247,14 +247,5 @@ func SyncOpenCode(ctx context.Context, database *store.Store, roots []string, co
 			return nil
 		}
 	}
-	for i, root := range roots {
-		rootStamp := "" // the last root's replace is the mirror a pass leaves
-		if i == len(roots)-1 {
-			rootStamp = stamp
-		}
-		if err := syncOpenCodeMirror(ctx, database, root, rootStamp, counters); err != nil {
-			return err
-		}
-	}
-	return nil
+	return syncOpenCodeMirror(ctx, database, roots, stamp, counters)
 }

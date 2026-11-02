@@ -115,15 +115,10 @@ func (identifier *Whoami) herdrChatPane(
 	if err != nil {
 		return "", fmt.Errorf("resolve state paths: %w", err)
 	}
-	state := fleetdb.OpenSharedStateReadOnly(ctx, values)
-	var older *fleetdb.SchemaMismatchError
-	if errors.As(state.Degraded(), &older) && older.Found < older.Expected {
-		// identifyHerdr's writable open migrates an older file on this same
-		// call; the seat lookup must not refuse what that open would accept.
-		if err := state.Close(); err != nil {
-			return "", fmt.Errorf("close read-only caller seat state: %w", err)
-		}
-		state = fleetdb.OpenSharedState(ctx, values)
+	// identifyHerdr's writable open migrates an older file on this same call.
+	state, err := fleetdb.OpenSharedStateUnlessOlder(ctx, values)
+	if err != nil {
+		return "", fmt.Errorf("open caller seat state: %w", err)
 	}
 	defer func() {
 		if err := state.Close(); err != nil {

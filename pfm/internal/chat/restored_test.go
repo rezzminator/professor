@@ -33,11 +33,12 @@ func TestOpenRestoredIDRejectsMissingSession(t *testing.T) {
 }
 
 func TestOpenRestoredIDRebindsRecipeWithoutKeys(t *testing.T) {
-	for _, history := range []string{"never-bound absent", "unanswered", "answered", "malformed", "protocol mismatch", "unsafe live owner", "unsafe old probe", "agent missing", "agent denied", "pane agent missing", "unknown legacy", "same address legacy", "same address never-bound", "same address live legacy", "unlearned restore", "unrelated caller"} {
+	for _, history := range []string{"never-bound absent", "unanswered", "answered", "malformed", "protocol mismatch", "unsafe live owner", "unsafe old probe", "agent missing", "agent denied", "pane agent missing", "unknown legacy", "same address legacy", "same address never-bound", "same address live legacy", "unlearned restore", "unrelated caller", "unnamed"} {
 		t.Run(history, func(t *testing.T) {
 			testjail.Fleet(t)
 			notices := make(chan string, 4)
 			labels := make(chan string, 4)
+			tabLabels := make(chan string, 4)
 			socket := nativeChatSocket(t, func(req nativeChatRequest) (any, string) {
 				switch req.Method {
 				case "pane.list":
@@ -86,6 +87,9 @@ func TestOpenRestoredIDRebindsRecipeWithoutKeys(t *testing.T) {
 						"tab":  map[string]any{"tab_id": "w9:t1", "label": "INTEGRATION", "pane_count": 1},
 					}, ""
 				case "tab.rename":
+					var label string
+					_ = json.Unmarshal(req.Params["label"], &label)
+					tabLabels <- label
 					return map[string]any{"type": "ok"}, ""
 				case "pane.rename":
 					var label string
@@ -117,6 +121,12 @@ func TestOpenRestoredIDRebindsRecipeWithoutKeys(t *testing.T) {
 				!strings.HasPrefix(history, "same address") &&
 				history != "unlearned restore" {
 				seat = nativeChatHost(t, db, seat, history == "unsafe live owner" || history == "unsafe old probe")
+			}
+			if history == "unnamed" {
+				seat.Name = ""
+				if err := db.PutSeat(context.Background(), seat); err != nil {
+					t.Fatal(err)
+				}
 			}
 			if strings.HasPrefix(history, "same address") || history == "unlearned restore" {
 				if history == "same address never-bound" {
@@ -246,7 +256,18 @@ func TestOpenRestoredIDRebindsRecipeWithoutKeys(t *testing.T) {
 				}
 				return
 			}
-			if len(labels) != 1 || <-labels != seat.Name {
+			// A named chat's pane takes its name; an unnamed one's tab is named
+			// as a born tab is, after its project folder, its pane left unnamed.
+			if history == "unnamed" {
+				want := filepath.Base(runtime.Paths.Home)
+				if len(labels) != 0 || len(tabLabels) != 1 {
+					t.Fatalf("pane renames %d, tab renames %d, want only the tab named %q; stderr=%q",
+						len(labels), len(tabLabels), want, stderr.String())
+				}
+				if label := <-tabLabels; label != want {
+					t.Fatalf("restored tab label = %q, want %q", label, want)
+				}
+			} else if len(labels) != 1 || <-labels != seat.Name {
 				t.Fatal("restored pane label did not match durable name")
 			}
 			if code != 0 {

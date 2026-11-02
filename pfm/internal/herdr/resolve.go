@@ -183,10 +183,11 @@ func (resolver Resolver) PaneHolding(
 }
 
 // paneIDKey names a pane in a request; paneNotFound is Herdr's refusal of an
-// id it does not know.
+// id it does not know; paneInfoType is the type of its answer naming one pane.
 const (
 	paneIDKey    = "pane_id"
 	paneNotFound = "pane_not_found"
+	paneInfoType = "pane_info"
 )
 
 // PaneIdentity is a pane as Herdr's pane.get names it.
@@ -241,7 +242,7 @@ func paneIdentity(ctx context.Context, socket, pane string) (PaneIdentity, error
 	if err := json.Unmarshal(body, &info); err != nil {
 		return PaneIdentity{}, fmt.Errorf("decode pane %s identity: %w", pane, err)
 	}
-	if info.Type != "pane_info" || info.Pane.ID == "" || info.Pane.Workspace == "" || info.Pane.Terminal == "" ||
+	if info.Type != paneInfoType || info.Pane.ID == "" || info.Pane.Workspace == "" || info.Pane.Terminal == "" ||
 		!strings.HasPrefix(info.Pane.ID, info.Pane.Workspace+":") {
 		return PaneIdentity{}, fmt.Errorf("pane %s has malformed identity: %s", pane, body)
 	}

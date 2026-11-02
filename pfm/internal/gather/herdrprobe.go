@@ -107,11 +107,7 @@ func probeHerdrPanes(ctx context.Context, socket string) (map[string]string, jso
 		if _, duplicate := cwd[pane.PaneID]; duplicate {
 			return nil, nil, fmt.Errorf("pane.list: duplicate pane_id %q", pane.PaneID)
 		}
-		directory := pane.ForegroundCWD
-		if directory == "" {
-			directory = pane.CWD
-		}
-		cwd[pane.PaneID] = directory
+		cwd[pane.PaneID] = pane.Directory()
 	}
 	return cwd, body, nil
 }

@@ -109,11 +109,25 @@ func (reporter *herdrReporter) runActivity(ctx context.Context, payload herdrPay
 		payload.SessionID == "" || reporter.deps.lockDir == "" ||
 		(reporter.deps.identity().TMUX == "" && !reporter.processTarget().ok()) ||
 		(reporter.deps.identity().TMUX != "" && !reporter.hostHasHerdr()) {
-		if reporter.options.event == herdr.EventAgentStart || reporter.options.event == herdr.EventAgentStop {
-			// Without durable membership, an agent stop cannot establish main-turn activity.
+		if reporter.options.event == herdr.EventAgentStart || reporter.options.event == herdr.EventAgentStop ||
+			payload.AgentID != "" {
+			// Without durable membership, an agent stop cannot establish main-turn activity,
+			// and a sub-agent's tool event has no stored block to answer.
 			return nil
 		}
 		return reporter.run(ctx, payload)
+	}
+	if subagentToolEvent(reporter.options.engine, reporter.options.event, payload) &&
+		reporter.options.event == herdr.EventWorking {
+		// A sub-agent's tool report counts only as the answer to its own stored
+		// block: one with none to answer takes no lock (recordActivity checks again under it).
+		state, err := reporter.readActivity(payload.SessionID)
+		if err != nil {
+			return err
+		}
+		if !answersBlock(payload, state.Stored) {
+			return nil
+		}
 	}
 	unlock, err := reporter.lock(ctx, reporter.activityKey(payload.SessionID))
 	if err != nil {
@@ -145,6 +159,9 @@ func (reporter *herdrReporter) recordActivity(
 	// Counts commute by agent id, unlike main-turn reports: do not drop a delayed
 	// lifecycle event just because a newer hook acquired the lock first.
 	if state.Stored.Seq > reporter.seq && !agentEvent {
+		return nil
+	}
+	if payload.AgentID != "" && reporter.options.event == herdr.EventWorking && !answersBlock(payload, state.Stored) {
 		return nil
 	}
 	if state.Stored.Seq >= reporter.seq {
@@ -244,7 +261,9 @@ func (reporter *herdrReporter) planActivity(payload herdrPayload, state *herdrSt
 			reporter.warn("pfm internal herdr-state %s: hook_event_name %q, want %s (counted as %s)",
 				event, payload.HookEventName, expected, event)
 		}
-		if event == herdr.EventAgentStop && !state.Agents[payload.AgentID] {
+		// An agent no longer counted (its lease lapsed, or its start went unrecorded)
+		// still closes the dialog it asked for.
+		if event == herdr.EventAgentStop && !state.Agents[payload.AgentID] && !ownsBlock(payload.AgentID, *state) {
 			return nil, nil
 		}
 		if state.Agents == nil {
@@ -258,9 +277,12 @@ func (reporter *herdrReporter) planActivity(payload herdrPayload, state *herdrSt
 		next := *state
 		next.Engine = herdr.Label(pfmengine.Claude)
 		next.SessionID = payload.SessionID
-		if next.State != string(herdr.StateBlocked) {
+		// A stopped sub-agent's own dialog is closed; another's may still be open.
+		closed := event == herdr.EventAgentStop && ownsBlock(payload.AgentID, next)
+		if next.State != string(herdr.StateBlocked) || closed {
 			next.State = string(herdr.StateWorking)
 			next.Message = ""
+			next.Tool = ""
 		}
 		action = &herdrAction{stored: next}
 	case herdr.EventIdle:
@@ -268,13 +290,14 @@ func (reporter *herdrReporter) planActivity(payload herdrPayload, state *herdrSt
 			state.MainStoppedAt = reporter.deps.now().UnixNano()
 		}
 	case herdr.EventNotification:
-		if payload.NotificationType == "idle_prompt" && state.MainStoppedAt == 0 {
+		if payload.NotificationType == idlePromptNotification && state.MainStoppedAt == 0 {
 			state.MainStoppedAt = reporter.deps.now().UnixNano()
 		}
 	case herdr.EventWorking:
-		// A main-thread tool event also proves an automatic resume. Agent hooks
-		// were filtered at entry; stale main hooks are rejected by the sequence.
-		if action != nil {
+		// A main-thread tool event also proves an automatic resume. A sub-agent's
+		// reaches here only as the answer to its own block (recordActivity), and
+		// proves nothing of the main loop; stale main hooks are rejected by the sequence.
+		if action != nil && payload.AgentID == "" {
 			state.MainStoppedAt = 0
 		}
 	}

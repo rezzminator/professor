@@ -33,7 +33,17 @@ import (
 // keepsStored reports whether the stored state outlives this event unchanged:
 // nothing is stored, sent or watched anew.
 func keepsStored(event herdr.Event, payload herdrPayload, state herdrStored) bool {
-	return keepsToolMessage(event, payload, state) || holdsBlock(event, payload, state)
+	return keepsToolMessage(event, payload, state) || holdsBlock(event, payload, state) ||
+		holdsAgentBlock(event, payload, state)
+}
+
+// holdsAgentBlock reports whether the main thread's end of turn (Stop, or the
+// idle prompt) arrives over a sub-agent's open dialog: a background agent's
+// dialog outlives the main turn, and only its own call or its stop closes it.
+func holdsAgentBlock(event herdr.Event, payload herdrPayload, state herdrStored) bool {
+	idle := event == herdr.EventIdle ||
+		event == herdr.EventNotification && payload.NotificationType == idlePromptNotification
+	return idle && state.State == string(herdr.StateBlocked) && strings.HasPrefix(state.Tool, subagentCallPrefix)
 }
 
 // keepsToolMessage reports whether a permission_prompt Notification arrives
@@ -71,32 +81,71 @@ var claudeDialogTools = map[string]bool{"AskUserQuestion": true, "ExitPlanMode":
 // callFingerprint names one tool call: the tool and a digest of its input, decoded
 // and re-encoded so key order and spacing never tell two payloads of one call
 // apart. An input that is not JSON is digested as sent.
+// A sub-agent's call is also named by its agent, so the main thread's or another
+// agent's identical call never answers it.
 func callFingerprint(payload herdrPayload) string {
-	if claudeDialogTools[payload.ToolName] {
-		return payload.ToolName
-	}
-	input := []byte(payload.ToolInput)
-	var value any
-	decoder := json.NewDecoder(bytes.NewReader(input))
-	decoder.UseNumber()
-	if err := decoder.Decode(&value); err == nil {
-		if encoded, err := json.Marshal(value); err == nil {
-			input = encoded
+	call := payload.ToolName
+	if !claudeDialogTools[payload.ToolName] {
+		input := []byte(payload.ToolInput)
+		var value any
+		decoder := json.NewDecoder(bytes.NewReader(input))
+		decoder.UseNumber()
+		if err := decoder.Decode(&value); err == nil {
+			if encoded, err := json.Marshal(value); err == nil {
+				input = encoded
+			}
 		}
+		sum := sha256.Sum256(input)
+		call += " " + hex.EncodeToString(sum[:8])
 	}
-	sum := sha256.Sum256(input)
-	return payload.ToolName + " " + hex.EncodeToString(sum[:8])
+	if payload.AgentID != "" {
+		call = subagentCallPrefix + payload.AgentID + " " + call
+	}
+	return call
+}
+
+// subagentCallPrefix opens a sub-agent call's fingerprint, before its agent id.
+const subagentCallPrefix = "agent "
+
+// A sub-agent's permission dialog blocks the whole chat: Claude Code 2.1.316
+// builds every hook input in one function that adds the tool context's agentId,
+// so the sub-agent's PermissionRequest, PostToolUse and PostToolUseFailure carry
+// agent_id, while the dialog's permission_prompt Notification (built from the
+// session alone) carries none (binary probe, `function wf(e,n,r,s)` ...
+// `agent_id:s?.agentId`; `hook_event_name:"Notification"` from `wf(e,oh())`).
+// subagentToolEvent reports whether a sub-agent hook is one the reporter reads:
+// its tool request, which blocks as the main thread's does, and its tool's
+// working report, which counts only as the answer to that request (answersBlock).
+// Every other sub-agent event, as before, changes nothing.
+func subagentToolEvent(engine pfmengine.ID, event herdr.Event, payload herdrPayload) bool {
+	return engine == pfmengine.Claude && payload.AgentID != "" && payload.ToolName != "" &&
+		(event == herdr.EventBlocked || event == herdr.EventWorking)
+}
+
+// answersBlock reports whether a tool's working report is the very call the
+// stored block asks about.
+func answersBlock(payload herdrPayload, state herdrStored) bool {
+	return state.State == string(herdr.StateBlocked) && state.Tool != "" && callFingerprint(payload) == state.Tool
+}
+
+// ownsBlock reports whether the stored block asks about a call of agent: Claude
+// fires no hook when the user answers No or Esc, so that agent's stop is the
+// signal its dialog is closed.
+func ownsBlock(agent string, state herdrStored) bool {
+	return agent != "" && strings.HasPrefix(state.Tool, subagentCallPrefix+agent+" ")
 }
 
 // themeUnlessHeld marks the server's agent state for an event the stored state
-// does not hold: a held working report leaves the blocked colour on.
+// does not hold: a held working report, or a main Stop over a sub-agent's open
+// dialog, leaves the blocked colour on.
 func (reporter *herdrReporter) themeUnlessHeld(
 	ctx context.Context,
 	themeOn bool,
 	payload herdrPayload,
 	state herdrStored,
 ) {
-	if themeOn && !holdsBlock(reporter.options.event, payload, state) {
+	if themeOn && !holdsBlock(reporter.options.event, payload, state) &&
+		!holdsAgentBlock(reporter.options.event, payload, state) {
 		reporter.themeState(ctx, payload)
 	}
 }

@@ -30,8 +30,7 @@ import (
 const (
 	nativePaneIDKey = "pane_id"
 	// nativePaneInfo is the type of Herdr's answer naming one pane.
-	nativePaneInfo  = "pane_info"
-	nativeTargetKey = "target"
+	nativePaneInfo = "pane_info"
 )
 
 func nativeSeat(
@@ -97,52 +96,7 @@ func viewNative(ctx context.Context, seat fleetdb.Seat, stdout, stderr io.Writer
 		return fmt.Errorf("identify Herdr viewer: %w", callerErr)
 	}
 	if caller.Backend == spawn.BackendHerdr && caller.SocketPath == seat.HerdrSocket {
-		body, err := herdr.SeatRequest(
-			ctx,
-			seat.HerdrSocket,
-			"agent.focus",
-			map[string]string{nativeTargetKey: seat.HerdrPane},
-		)
-		if err != nil {
-			var refusal *herdr.Refusal
-			if errors.As(err, &refusal) && refusal.Code == "agent_not_found" {
-				body, err = herdr.SeatRequest(
-					ctx,
-					seat.HerdrSocket,
-					"pane.focus",
-					map[string]string{nativePaneIDKey: seat.HerdrPane},
-				)
-			}
-		}
-		if err != nil {
-			return fmt.Errorf("focus Herdr pane %s: %w", seat.HerdrPane, err)
-		}
-		var ack struct {
-			Type string `json:"type"`
-			Pane string `json:"pane_id"`
-			Info *struct {
-				Pane    string `json:"pane_id"`
-				Focused bool   `json:"focused"`
-			} `json:"pane"`
-			Agent *struct {
-				Pane    string `json:"pane_id"`
-				Focused bool   `json:"focused"`
-			} `json:"agent"`
-		}
-		if err := json.Unmarshal(body, &ack); err != nil {
-			return fmt.Errorf("decode Herdr focus: %w", err)
-		}
-		valid := ack.Type == "pane_focused" && ack.Pane == seat.HerdrPane
-		if ack.Type == nativePaneInfo {
-			valid = ack.Info != nil && ack.Info.Pane == seat.HerdrPane && ack.Info.Focused
-		}
-		if ack.Type == "agent_info" {
-			valid = ack.Agent != nil && ack.Agent.Pane == seat.HerdrPane && ack.Agent.Focused
-		}
-		if !valid {
-			return fmt.Errorf("unexpected Herdr focus acknowledgement: %s", body)
-		}
-		return nil
+		return herdr.FocusPane(ctx, seat.HerdrSocket, seat.HerdrPane)
 	}
 	if err := herdr.Attach(ctx, seat.HerdrSocket, seat.HerdrPane, os.Stdin, stdout, stderr); err != nil {
 		if ctx.Err() != nil {
@@ -421,7 +375,9 @@ var errOpenReported = errors.New("the open failed; its cause is reported above")
 // reviveNative is the one revive of a dead native seat, locked and proved
 // dead: one placement (placeChat, the seat's recorded Herdr host deciding for
 // a door with no caller) puts it in the caller's own Herdr pane (an
-// interactive open placed in place), a new tab on its Herdr host, or its
+// interactive open placed in place, when that pane's workspace is the chat's
+// place's: spawn.HerdrOpensInPlace), a new tab on its Herdr host (focused
+// when an interactive open asked for it from another place's pane), or its
 // engine's own tmux server through the one open door; the replaced seat
 // retires through spawn.RetireHerdrSeat, its old pane closed when Herdr proves
 // it is that seat's terminal.
@@ -438,12 +394,30 @@ func reviveNative(
 	}
 	ctx = WithPlacement(ctx, choice)
 	if choice.Backend == spawn.BackendHerdr && choice.InPlace && !detached {
-		// The chat resumes in the caller's own pane: the seat is rebound to
-		// this pane, whose process then execs the seat host.
-		return action.OpenResult{}, restoreNative(ctx, runtime, seat, choice, false, stdout, stderr)
+		inPlace, err := opensInPlace(ctx, runtime, seat, &choice)
+		if err != nil {
+			return action.OpenResult{}, err
+		}
+		if inPlace {
+			// The chat resumes in the caller's own pane: the seat is rebound to
+			// this pane, whose process then execs the seat host.
+			return action.OpenResult{}, restoreNative(ctx, runtime, seat, choice, false, stdout, stderr)
+		}
+		// Asked from another place's pane: the chat opens in its own place's
+		// workspace, focus follows it there, and the caller's pane stays as it was.
+		result, born, err := reviveNativeTab(ctx, runtime, seat, choice, stderr)
+		if err != nil {
+			return result, err
+		}
+		if err := herdr.FocusPane(ctx, born.HerdrSocket, born.HerdrPane); err != nil {
+			// The chat is open in its place's workspace either way.
+			fmt.Fprintf(stderr, "pfm chat open: %v\n%s\n", err, spawn.HerdrLocation(born))
+		}
+		return result, nil
 	}
 	if choice.Backend == spawn.BackendHerdr {
-		return reviveNativeTab(ctx, runtime, seat, choice, stderr)
+		result, _, err := reviveNativeTab(ctx, runtime, seat, choice, stderr)
+		return result, err
 	}
 	row, err := nativeResumeRow(ctx, seat, runtime, stderr)
 	if err != nil {
@@ -467,40 +441,66 @@ func reviveNative(
 	return result, err
 }
 
+// opensInPlace asks spawn.HerdrOpensInPlace about the seat's own directory;
+// the fleet scan it makes stays in choice for the new tab a placement
+// elsewhere births.
+func opensInPlace(
+	ctx context.Context,
+	runtime config.Runtime,
+	seat fleetdb.Seat,
+	choice *spawn.BackendChoice,
+) (bool, error) {
+	run, err := readSeatRun(ctx, runtime, seat)
+	if err != nil {
+		return false, err
+	}
+	inPlace, err := spawn.HerdrOpensInPlace(ctx, runtime.Paths, choice, run.CWD)
+	if err != nil {
+		return false, fmt.Errorf("place the open of chat %s: %w", seat.SessionID, err)
+	}
+	return inPlace, nil
+}
+
+// readSeatRun is the seat's recipe, read through its own state handle.
+func readSeatRun(ctx context.Context, runtime config.Runtime, seat fleetdb.Seat) (fleetdb.SeatRun, error) {
+	db := fleetdb.OpenSharedState(ctx, runtime.Paths)
+	run, readErr := db.ReadSeatRun(seat.SeatID)
+	return run, errors.Join(readErr, db.Close())
+}
+
 // reviveNativeTab births a dead native seat's chat as a new tab on the
-// placement's Herdr host, from its own recipe resumed at its newest segment.
+// placement's Herdr host, from its own recipe resumed at its newest segment,
+// and returns the seat it was born as.
 func reviveNativeTab(
 	ctx context.Context,
 	runtime config.Runtime,
 	seat fleetdb.Seat,
 	choice spawn.BackendChoice,
 	stderr io.Writer,
-) (result action.OpenResult, returnErr error) {
-	db := fleetdb.OpenSharedState(ctx, runtime.Paths)
-	run, readErr := db.ReadSeatRun(seat.SeatID)
-	if err := errors.Join(readErr, db.Close()); err != nil {
-		return result, err
+) (result action.OpenResult, born fleetdb.Seat, returnErr error) {
+	run, err := readSeatRun(ctx, runtime, seat)
+	if err != nil {
+		return result, born, err
 	}
 	next := seat
-	var err error
 	// The resume, and a seat born from it, carry the chat's newest segment.
 	if next.SessionID, err = resumedSession(ctx, runtime, seat, nil, stderr); err != nil {
-		return result, err
+		return result, born, err
 	}
 	if run, err = resumeNativeRun(run, next, runtime.Config, stderr); err != nil {
-		return result, err
+		return result, born, err
 	}
 	next.SeatID, next.HerdrTerminalID = "", ""
 	next.SeatHostPID, next.SeatHostStart, next.SeatHostBirth = 0, 0, 0
 	next.EndPending = false
 	next.State = liveState
-	born, err := spawn.SpawnHerdr(ctx, spawn.HerdrRequest{
+	spawned, err := spawn.SpawnHerdr(ctx, spawn.HerdrRequest{
 		Choice: choice, Seat: next, Run: run, Paths: runtime.Paths, Replaces: &seat,
 	})
 	return action.OpenResult{
-		Name: born.Seat.Name, Socket: born.Seat.HerdrSocket, State: "opened",
-		Detail: spawn.HerdrLocation(born.Seat), Warnings: born.Warnings,
-	}, err
+		Name: spawned.Seat.Name, Socket: spawned.Seat.HerdrSocket, State: "opened",
+		Detail: spawn.HerdrLocation(spawned.Seat), Warnings: spawned.Warnings,
+	}, spawned.Seat, err
 }
 
 func nativeRow(seat fleetdb.Seat) compose.Row {

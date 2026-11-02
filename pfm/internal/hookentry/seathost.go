@@ -144,6 +144,13 @@ func SeatHost(args []string, stdout, stderr io.Writer, runtime config.Runtime) i
 		if runErr == nil {
 			argv, options, runErr = seatCommand(run, descriptor.Binary, terminal, stdout, stderr)
 		}
+		if runErr == nil {
+			// An in-place open execs this host from the pane's shell: Herdr reads
+			// the pane's directory from it, so it works where its chat does.
+			if err := os.Chdir(run.CWD); err != nil {
+				runErr = fmt.Errorf("enter chat directory %s: %w", run.CWD, err)
+			}
+		}
 		status, started := 1, false
 		if runErr == nil {
 			// The bound seat's Herdr socket and pane, never a herdr-shield relay's.

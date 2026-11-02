@@ -43,7 +43,8 @@ func reportToHerdr(args []string, stdin io.Reader, stderr io.Writer, deps herdrD
 			return 0
 		}
 	}
-	if payload.AgentID != "" && options.event != herdr.EventAgentStart && options.event != herdr.EventAgentStop {
+	if payload.AgentID != "" && options.event != herdr.EventAgentStart && options.event != herdr.EventAgentStop &&
+		!subagentToolEvent(options.engine, options.event, payload) {
 		return 0
 	}
 	if options.event == herdr.EventAgentStart || options.event == herdr.EventAgentStop {

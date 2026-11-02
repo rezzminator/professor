@@ -301,6 +301,7 @@ func TestAgentAndTitleLinesAreExactlyHerdrsRequests(t *testing.T) {
 		{"tab.get", TabGet{Tab: "w6:t3", Seq: 10}.Line, `{"id":"pfm-10","method":"tab.get","params":{"tab_id":"w6:t3"}}`},
 		{"tab.rename", TabRename{Tab: "w6:t3", Label: " XC\tAWS\n", Seq: 11}.Line, `{"id":"pfm-11","method":"tab.rename","params":{"tab_id":"w6:t3","label":"XC AWS"}}`},
 		{"tab label capped on a rune boundary", TabRename{Tab: "t", Label: long, Seq: 12}.Line, `{"id":"pfm-12","method":"tab.rename","params":{"tab_id":"t","label":"` + strings.Repeat("é", 80) + `"}}`},
+		{"workspace.rename", WorkspaceRename{Workspace: "w1", Label: "lantern", Seq: 13}.Line, `{"id":"pfm-13","method":"workspace.rename","params":{"workspace_id":"w1","label":"lantern"}}`},
 	} {
 		if line, err := test.line(); err != nil || string(line) != test.want {
 			t.Errorf("%s: Line = %s, %v\nwant %s", test.name, line, err, test.want)
@@ -314,6 +315,8 @@ func TestAgentAndTitleLinesAreExactlyHerdrsRequests(t *testing.T) {
 		"tab.get without a tab":   TabGet{}.Line,
 		"tab label of controls":   TabRename{Tab: "t", Label: " \n\t "}.Line,
 		"tab.rename without tab":  TabRename{Label: "x"}.Line,
+		"workspace without label": WorkspaceRename{Workspace: "w1"}.Line,
+		"label without workspace": WorkspaceRename{Label: "lantern"}.Line,
 	} {
 		if got, err := line(); err == nil {
 			t.Errorf("%s: Line = %s, want an error", name, got)
@@ -373,6 +376,14 @@ func TestResultParsersReadHerdrsShapesAndRefuseOthers(t *testing.T) {
 	if err != nil || tab != (Tab{TabID: "w6:t3", Label: "1", PaneCount: 1}) {
 		t.Errorf("ParseTab = %+v, %v, want w6:t3 labelled 1 holding one pane", tab, err)
 	}
+	// The shape a live Herdr 0.9.5 answered for workspace.rename.
+	workspace, err := ParseWorkspace(json.RawMessage(
+		`{"type":"workspace_info","workspace":{"active_tab_id":"w1:t1","agent_status":"unknown","focused":true,` +
+			`"label":"gamma","number":1,"pane_count":1,"tab_count":1,"workspace_id":"w1"}}`,
+	))
+	if err != nil || workspace != (Workspace{WorkspaceID: "w1", Label: "gamma"}) {
+		t.Errorf("ParseWorkspace = %+v, %v, want w1 labelled gamma", workspace, err)
+	}
 	foregroundPIDs := func(body string) error {
 		processes, err := ParsePaneProcesses(json.RawMessage(body))
 		if err != nil {
@@ -386,7 +397,16 @@ func TestResultParsersReadHerdrsShapesAndRefuseOthers(t *testing.T) {
 			_, err := ParseTab(json.RawMessage(`{"type":"ok","tab":{"tab_id":"w6:t3","label":"1","pane_count":1}}`))
 			return err
 		},
-		"tab garbage":            func() error { _, err := ParseTab(json.RawMessage(`[1]`)); return err },
+		"tab garbage": func() error { _, err := ParseTab(json.RawMessage(`[1]`)); return err },
+		"workspace of another type": func() error {
+			_, err := ParseWorkspace(json.RawMessage(`{"type":"ok","workspace":{"workspace_id":"w1","label":"x"}}`))
+			return err
+		},
+		"workspace garbage": func() error { _, err := ParseWorkspace(json.RawMessage(`[1]`)); return err },
+		"workspace without its id": func() error {
+			_, err := ParseWorkspace(json.RawMessage(`{"type":"workspace_info","workspace":{"label":"x"}}`))
+			return err
+		},
 		"tab without its id":     func() error { _, err := ParseTab(json.RawMessage(`{"type":"tab_info","tab":{}}`)); return err },
 		"agents of another type": func() error { _, err := ParseAgentList(json.RawMessage(`{"type":"ok"}`)); return err },
 		"panes of another type":  func() error { _, err := ParsePanes(json.RawMessage(`{"type":"agent_list"}`)); return err },

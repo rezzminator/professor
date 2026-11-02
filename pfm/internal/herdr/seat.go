@@ -142,3 +142,45 @@ func RemoveReloadRecord(sidDir, seatID string) error {
 	}
 	return nil
 }
+
+// FocusPane is the one focus of a pane on its Herdr host: agent.focus, or
+// pane.focus when the pane hosts no agent, proved by Herdr's acknowledgement
+// naming that pane focused.
+func FocusPane(ctx context.Context, socket, pane string) error {
+	body, err := SeatRequest(ctx, socket, "agent.focus", map[string]string{"target": pane})
+	if err != nil {
+		var refusal *Refusal
+		if errors.As(err, &refusal) && refusal.Code == "agent_not_found" {
+			body, err = SeatRequest(ctx, socket, "pane.focus", map[string]string{paneIDKey: pane})
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("focus Herdr pane %s: %w", pane, err)
+	}
+	var ack struct {
+		Type string `json:"type"`
+		Pane string `json:"pane_id"`
+		Info *struct {
+			Pane    string `json:"pane_id"`
+			Focused bool   `json:"focused"`
+		} `json:"pane"`
+		Agent *struct {
+			Pane    string `json:"pane_id"`
+			Focused bool   `json:"focused"`
+		} `json:"agent"`
+	}
+	if err := json.Unmarshal(body, &ack); err != nil {
+		return fmt.Errorf("decode Herdr focus: %w", err)
+	}
+	valid := ack.Type == "pane_focused" && ack.Pane == pane
+	if ack.Type == paneInfoType {
+		valid = ack.Info != nil && ack.Info.Pane == pane && ack.Info.Focused
+	}
+	if ack.Type == "agent_info" {
+		valid = ack.Agent != nil && ack.Agent.Pane == pane && ack.Agent.Focused
+	}
+	if !valid {
+		return fmt.Errorf("unexpected Herdr focus acknowledgement: %s", body)
+	}
+	return nil
+}

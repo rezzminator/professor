@@ -37,6 +37,7 @@ type seatFixtureReport struct {
 	PID, Group, Foreground            int
 	Pane, Socket, Session             string
 	SupervisorPID                     int
+	SupervisorCWD                     string
 	LedgerMarker, LedgerPID, ArmCalls string
 	LedgerArmed                       bool
 	HostStart                         uint64
@@ -159,6 +160,10 @@ func init() {
 	report.HostStart = bound.SeatHostStart
 	report.HostBirth = bound.SeatHostBirth
 	report.Terminal = bound.HerdrTerminalID
+	report.SupervisorCWD, err = os.Readlink(fmt.Sprintf("/proc/%d/cwd", report.SupervisorPID))
+	if err != nil {
+		panic(err)
+	}
 	if bound.SeatHostPID != report.SupervisorPID {
 		panic(fmt.Sprintf("host PID %d expected supervisor %d", bound.SeatHostPID, report.SupervisorPID))
 	}
@@ -655,6 +660,13 @@ func TestSeatHostPTY(t *testing.T) {
 			}
 			if (mode == "launch" || strings.HasPrefix(mode, "launch-ledger-")) && report.Session == "" {
 				t.Fatalf("launcher did not persist session: %+v", report)
+			}
+			// Started from the test's own directory, the host works where its chat does,
+			// so Herdr reads the chat's directory as the pane's.
+			if wantCWD, err := filepath.EvalSymlinks(root); err != nil {
+				t.Fatal(err)
+			} else if mode != "launch" && !strings.HasPrefix(mode, "launch-ledger-") && report.SupervisorCWD != wantCWD {
+				t.Fatalf("supervisor directory %q, want the chat's %q", report.SupervisorCWD, wantCWD)
 			}
 			if strings.Contains(mode, "ledger-") {
 				enabled := strings.HasSuffix(mode, "ledger-on")

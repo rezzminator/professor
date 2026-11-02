@@ -2,6 +2,7 @@ package herdr
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -325,6 +326,78 @@ func (rename TabRename) Line() ([]byte, error) {
 	})
 }
 
+// WorkspaceRename is one workspace.rename request: the workspace's label
+// becomes Label.
+type WorkspaceRename struct {
+	Workspace string
+	Label     string
+	Seq       uint64
+}
+
+// Line renders the workspace.rename request line (no trailing newline); a
+// missing workspace or label is an error.
+func (rename WorkspaceRename) Line() ([]byte, error) {
+	if rename.Workspace == "" || rename.Label == "" {
+		return nil, fmt.Errorf(
+			"herdr workspace.rename: workspace %q and label %q are both required", rename.Workspace, rename.Label,
+		)
+	}
+	return json.Marshal(request{
+		ID:     fmt.Sprintf("pfm-%d", rename.Seq),
+		Method: "workspace.rename",
+		Params: struct {
+			WorkspaceID string `json:"workspace_id"`
+			Label       string `json:"label"`
+		}{rename.Workspace, rename.Label},
+	})
+}
+
+// Workspace is one workspace_info answer: the workspace and its label.
+type Workspace struct {
+	WorkspaceID string
+	Label       string
+}
+
+// ParseWorkspace decodes a workspace_info result
+// ({"type":"workspace_info","workspace":{…}}), what workspace.rename answers.
+func ParseWorkspace(result json.RawMessage) (Workspace, error) {
+	var decoded struct {
+		Type      string `json:"type"`
+		Workspace struct {
+			WorkspaceID string `json:"workspace_id"`
+			Label       string `json:"label"`
+		} `json:"workspace"`
+	}
+	if err := json.Unmarshal(result, &decoded); err != nil {
+		return Workspace{}, fmt.Errorf("herdr workspace_info: decode result %q: %w", result, err)
+	}
+	if decoded.Type != "workspace_info" || decoded.Workspace.WorkspaceID == "" {
+		return Workspace{}, fmt.Errorf("herdr workspace_info: unexpected result %s", result)
+	}
+	return Workspace(decoded.Workspace), nil
+}
+
+// RenameWorkspace relabels workspace on the Herdr server at socket, the one
+// workspace.rename door; an answer naming another workspace or label is an error.
+func RenameWorkspace(ctx context.Context, socket, workspace, label string) error {
+	line, err := (WorkspaceRename{Workspace: workspace, Label: label, Seq: 1}).Line()
+	if err != nil {
+		return err
+	}
+	results, err := Call(ctx, socket, line)
+	if err != nil {
+		return fmt.Errorf("rename Herdr workspace %s to %q: %w", workspace, label, err)
+	}
+	renamed, err := ParseWorkspace(results[0])
+	if err != nil {
+		return fmt.Errorf("herdr workspace %s may be renamed to %q: %w", workspace, label, err)
+	}
+	if renamed != (Workspace{WorkspaceID: workspace, Label: label}) {
+		return fmt.Errorf("herdr workspace %s may be renamed to %q: it answered %+v", workspace, label, renamed)
+	}
+	return nil
+}
+
 // PaneList is one pane.list request with no workspace filter: every pane Herdr
 // holds, each with the terminal that outlives a pane move.
 type PaneList struct {
@@ -354,6 +427,12 @@ type Pane struct {
 	Tokens        map[string]string
 	CWD           string
 	ForegroundCWD string
+}
+
+// Directory is the directory pane works in: its foreground process's, else its
+// shell's.
+func (pane Pane) Directory() string {
+	return cmp.Or(pane.ForegroundCWD, pane.CWD)
 }
 
 // paneWire is Pane under Herdr's wire names, converted field for field.

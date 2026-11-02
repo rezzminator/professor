@@ -388,23 +388,51 @@ func TestOpenNativeMoveHereOffersAccountChange(t *testing.T) {
 	}
 }
 
-// A dead native chat opened from a bare Herdr pane resumes in that pane: the
-// seat is rebound to the caller's pane and the line its shell runs execs the
-// seat host, with no new tab laid out. A caller pane hosting another live chat
-// (an agent's own pfm call) is never rebound: the one placement rule the
-// picker follows revives the chat in a new tab on the caller's Herdr host.
+// A dead native chat opened from a bare Herdr pane of its own place's
+// workspace resumes in that pane: the seat is rebound to the caller's pane and
+// the line its shell runs execs the seat host, with no new tab laid out; with
+// no workspace wearing the place's label, the caller's, holding nothing else,
+// takes it first. Opened from another place's workspace, it resumes in a new
+// tab of its own place's, focused, the caller's pane left as it was. A caller
+// pane hosting another live chat (an agent's own pfm call) is never rebound:
+// the one placement rule the picker follows revives the chat in a new tab on
+// the caller's Herdr host.
 func TestOpenNativeDeadResumesInTheCallerPane(t *testing.T) {
 	for _, tc := range []struct {
 		name            string
 		callerHostsChat bool
+		workspaces      []any // workspace.list's answer, nil for none
+		renamed         string
+		newTab          string // the pane the chat resumes in when not the caller's
 	}{
-		{name: "a plain caller pane"},
-		{name: "a caller pane hosting a chat", callerHostsChat: true},
+		{name: "a plain caller pane of an unlabelled workspace", renamed: "~"},
+		{
+			name:       "a plain caller pane of the place's workspace",
+			workspaces: []any{map[string]any{"workspace_id": "w6", "label": "~", "pane_count": 1}},
+		},
+		{
+			name: "a plain caller pane of another place's workspace",
+			workspaces: []any{
+				map[string]any{"workspace_id": "w6", "label": "orchard", "pane_count": 1},
+				map[string]any{"workspace_id": "w7", "label": "~", "pane_count": 1},
+			},
+			newTab: "w7:p10",
+		},
+		{name: "a caller pane hosting a chat", callerHostsChat: true, newTab: "w6:p10"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := testjail.Fleet(t)
-			var methods, unexpected []string
-			socket := nativeChatSocket(t, func(req nativeChatRequest) (any, string) {
+			var methods, unexpected, renames []string
+			workspaces := func(method, label string) (map[string]any, bool) {
+				if method == "workspace.rename" {
+					renames = append(renames, label)
+				}
+				if method == "workspace.list" && tc.workspaces != nil {
+					return map[string]any{"type": "workspace_list", "workspaces": tc.workspaces}, true
+				}
+				return testjail.HerdrWorkspaceReply(method, label, "w6")
+			}
+			socket := nativeChatSocketPlaced(t, workspaces, func(req nativeChatRequest) (any, string) {
 				methods = append(methods, req.Method)
 				var pane string
 				_ = json.Unmarshal(req.Params["pane_id"], &pane)
@@ -448,10 +476,20 @@ func TestOpenNativeDeadResumesInTheCallerPane(t *testing.T) {
 				case "notification.show":
 					return map[string]any{"type": "ok"}, ""
 				case "layout.apply":
-					if tc.callerHostsChat {
+					var workspace string
+					_ = json.Unmarshal(req.Params["workspace_id"], &workspace)
+					if tc.newTab != "" {
 						return map[string]any{"layout": map[string]any{
-							"workspace_id": "w6", "root": map[string]any{"type": "pane", "pane_id": "w6:p10"},
+							"workspace_id": workspace, "root": map[string]any{"type": "pane", "pane_id": tc.newTab},
 						}}, ""
+					}
+				case "agent.focus":
+					if !tc.callerHostsChat {
+						return nil, "agent_not_found"
+					}
+				case "pane.focus":
+					if !tc.callerHostsChat {
+						return map[string]any{"type": "pane_focused", "pane_id": pane}, ""
 					}
 				}
 				unexpected = append(unexpected, req.Method)
@@ -462,6 +500,8 @@ func TestOpenNativeDeadResumesInTheCallerPane(t *testing.T) {
 			seedClaudeChat(t, root, seat.SessionID)
 			if tc.callerHostsChat {
 				nativeChatCallerHostsChat(t, db, socket, "w6:p9")
+			}
+			if tc.newTab != "" {
 				binary := filepath.Join(runtime.Paths.Home, "native-engine")
 				if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 					t.Fatal(err)
@@ -490,12 +530,27 @@ func TestOpenNativeDeadResumesInTheCallerPane(t *testing.T) {
 				compose.Row{ID: seat.SessionID, SeatID: seat.SeatID, Backend: "herdr", Kind: compose.LiveClaude},
 				0, false, &stdout, &stderr, runtime,
 			)
-			if tc.callerHostsChat {
+			if strings.Join(renames, " ") != tc.renamed {
+				t.Fatalf("workspace renames %q, want %q; stderr=%q", renames, tc.renamed, stderr.String())
+			}
+			if tc.newTab != "" {
 				revived, found, err := db.SeatBySession(context.Background(), seat.SessionID)
-				if !handled || code != 0 || err != nil || !found || revived.HerdrPane != "w6:p10" ||
-					len(unexpected) != 0 || strings.Contains(strings.Join(methods, " "), "rename") {
-					t.Fatalf("handled=%v code=%d stderr=%q revived=%+v found=%t err=%v methods=%q unexpected=%q",
-						handled, code, stderr.String(), revived, found, err, methods, unexpected)
+				focus := strings.Contains(strings.Join(methods, " "), "pane.focus")
+				if !handled || code != 0 || err != nil || !found || revived.HerdrPane != tc.newTab ||
+					len(unexpected) != 0 || strings.Contains(strings.Join(methods, " "), "rename") ||
+					focus == tc.callerHostsChat || stdout.String() != "" {
+					t.Fatalf(
+						"handled=%v code=%d stdout=%q stderr=%q revived=%+v found=%t err=%v methods=%q unexpected=%q",
+						handled,
+						code,
+						stdout.String(),
+						stderr.String(),
+						revived,
+						found,
+						err,
+						methods,
+						unexpected,
+					)
 				}
 				if _, kept, err := db.Seat(context.Background(), seat.SeatID); err != nil || kept {
 					t.Fatalf("the replaced seat stays: kept=%t err=%v", kept, err)

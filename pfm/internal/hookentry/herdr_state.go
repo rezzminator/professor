@@ -335,7 +335,7 @@ func (reporter *herdrReporter) plan(payload herdrPayload) *herdrAction {
 		switch payload.NotificationType {
 		case "permission_prompt", "elicitation_dialog", "plugin_notification":
 			return report(herdr.StateBlocked, blockedMessage(payload))
-		case "idle_prompt":
+		case idlePromptNotification:
 			return report(herdr.StateIdle, "")
 		}
 		return nil
@@ -350,6 +350,10 @@ func (reporter *herdrReporter) plan(payload herdrPayload) *herdrAction {
 	}
 	return nil
 }
+
+// idlePromptNotification is the notification_type of Claude's idle prompt: the
+// main turn is over.
+const idlePromptNotification = "idle_prompt"
 
 // approvalPrefix opens the blocked message of an approval request that names
 // its tool.

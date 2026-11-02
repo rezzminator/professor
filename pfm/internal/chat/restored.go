@@ -242,6 +242,11 @@ func restoreNative(
 		if err := renameNativeOwned(ctx, db, current, current.Name); err != nil {
 			return fmt.Errorf("restore name: %w", err)
 		}
+	} else if err := herdr.LabelPaneTab(
+		ctx, current.HerdrSocket, current.HerdrPane, spawn.BirthTabLabel("", run.CWD), false,
+	); err != nil && !errors.Is(err, herdr.ErrTabNotSole) {
+		// The chat opens either way: its tab keeps its label until the chat is named.
+		fmt.Fprintf(stderr, "pfm chat open: Herdr tab of pane %s keeps its label: %v\n", current.HerdrPane, err)
 	}
 	if current.LostNote != "" {
 		if err := notifyNativeLoss(ctx, current, current.LostNote); err != nil {

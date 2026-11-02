@@ -82,7 +82,9 @@ func (current *composer) herdrRows() []Row {
 		row.Socket = seat.HerdrSocket
 		row.PaneID = seat.HerdrPane
 		row.SessionName = seat.Name
-		if native.CWD != "" {
+		// The chat's own record (transcript, rollout) names where it runs; the
+		// pane's directory is its supervisor's, used only when the chat names none.
+		if row.CWD == "" && native.CWD != "" {
 			row.CWD = native.CWD
 			row.Project = current.projects.of(native.CWD)
 		}

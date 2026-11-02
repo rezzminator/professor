@@ -212,7 +212,7 @@ func readTabPane(
 	if err := json.Unmarshal(bodies[0], &result); err != nil {
 		return TabPane{}, fmt.Errorf("decode tab pane: %w", err)
 	}
-	if result.Type != "pane_info" || !result.Pane.valid() {
+	if result.Type != paneInfoType || !result.Pane.valid() {
 		return TabPane{}, fmt.Errorf("incomplete pane.get: %s", bodies[0])
 	}
 	return result.Pane, nil

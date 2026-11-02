@@ -108,6 +108,93 @@ func TestHerdrBackgroundAgents(t *testing.T) {
 			"blocked",
 			"waiting for you",
 		},
+		// A sub-agent's dialog: its PermissionRequest and its call's own
+		// PostToolUse carry agent_id, the dialog's Notification none.
+		{
+			"sub-agent permission blocks",
+			[]string{"prompt", "agent-start:a", "idle", "agent-request:a/make", "permission-dialog"},
+			"blocked",
+			"waiting for approval: Bash",
+		},
+		{
+			"sub-agent's approved call leaves its block",
+			[]string{
+				"prompt", "agent-start:a", "idle", "agent-request:a/make", "permission-dialog", "agent-ran:a/make",
+			},
+			"working",
+			"1 agent running",
+		},
+		{
+			"sub-agent's approved call that fails leaves its block",
+			[]string{
+				"prompt", "agent-start:a", "idle", "agent-request:a/make", "permission-dialog", "agent-failed:a/make",
+			},
+			"working",
+			"1 agent running",
+		},
+		{
+			"sub-agent's approved call during the main turn is working",
+			[]string{"prompt", "agent-start:a", "agent-request:a/make", "permission-dialog", "agent-ran:a/make"},
+			"working",
+			"",
+		},
+		{
+			"a sibling sub-agent's other tool leaves the block",
+			[]string{"prompt", "agent-start:a", "agent-start:b", "idle", "agent-request:a/make", "agent-ran:b/ls"},
+			"blocked",
+			"waiting for approval: Bash",
+		},
+		{
+			"a sibling sub-agent's identical call leaves the block",
+			[]string{"prompt", "agent-start:a", "agent-start:b", "idle", "agent-request:a/make", "agent-ran:b/make"},
+			"blocked",
+			"waiting for approval: Bash",
+		},
+		{
+			"a sub-agent's call never answers the main thread's request",
+			[]string{"prompt", "agent-start:a", "main-request:make", "agent-ran:a/make"},
+			"blocked",
+			"waiting for approval: Bash",
+		},
+		{
+			"a sub-agent's tool never leaves a block no tool asked for",
+			[]string{"prompt", "agent-start:a", "idle", "permission-dialog", "agent-ran:a/ls"},
+			"blocked",
+			"Claude needs your permission",
+		},
+		{
+			"a sibling sub-agent's stop leaves the open dialog blocked",
+			[]string{"prompt", "agent-start:a", "agent-start:b", "idle", "agent-request:a/make", "agent-stop:b"},
+			"blocked",
+			"waiting for approval: Bash",
+		},
+		{
+			"the main Stop leaves a sub-agent's open dialog blocked",
+			[]string{"prompt", "agent-start:a", "agent-request:a/make", "permission-dialog", "idle", "notification"},
+			"blocked",
+			"waiting for approval: Bash",
+		},
+		{
+			"the requesting sub-agent's stop after the main Stop is idle",
+			[]string{"prompt", "agent-start:a", "agent-request:a/make", "permission-dialog", "idle", "agent-stop:a"},
+			"idle",
+			"",
+		},
+		{
+			"an uncounted sub-agent's stop closes its dialog",
+			[]string{"prompt", "idle", "agent-request:a/make", "permission-dialog", "agent-stop:a"},
+			"idle",
+			"",
+		},
+		{
+			"the requesting sub-agent's stop closes its dialog",
+			[]string{
+				"prompt", "agent-start:a", "agent-start:b", "idle", "agent-request:a/make", "permission-dialog",
+				"agent-stop:a",
+			},
+			"working",
+			"1 agent running",
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -118,6 +205,11 @@ func TestHerdrBackgroundAgents(t *testing.T) {
 				activityTestEvent(t, jail, server, &now, event)
 			}
 			assertActivityReport(t, server, test.want, test.message)
+			stored := jail.activityTmux.storedState(t)
+			if stored.State != test.want || stored.Message != test.message {
+				t.Fatalf("stored state=%s message=%q; want %s %q",
+					stored.State, stored.Message, test.want, test.message)
+			}
 		})
 	}
 }
@@ -125,8 +217,33 @@ func TestHerdrBackgroundAgents(t *testing.T) {
 func activityTestEvent(t *testing.T, jail *herdrJail, server *fakeHerdr, now *int64, step string) {
 	t.Helper()
 	event, value, _ := strings.Cut(step, ":")
-	payload := map[string]string{"session_id": "activity-session"}
+	payload := map[string]any{"session_id": "activity-session"}
+	agent, command, _ := strings.Cut(value, "/")
+	toolCall := func(hook string) {
+		payload["hook_event_name"] = hook
+		payload["tool_name"] = "Bash"
+		payload["tool_input"] = map[string]string{"command": command}
+		if agent != "" {
+			payload["agent_id"] = agent
+		}
+	}
 	switch event {
+	case "agent-request":
+		event = "blocked"
+		toolCall("PermissionRequest")
+	case "main-request":
+		event, agent, command = "blocked", "", value
+		toolCall("PermissionRequest")
+	case "agent-ran":
+		event = "working"
+		toolCall("PostToolUse")
+	case "agent-failed":
+		event = "working"
+		toolCall("PostToolUseFailure")
+	case "permission-dialog":
+		event = "notification"
+		payload["notification_type"] = "permission_prompt"
+		payload["message"] = "Claude needs your permission"
 	case "prompt":
 		event = "working"
 		payload["hook_event_name"] = "UserPromptSubmit"

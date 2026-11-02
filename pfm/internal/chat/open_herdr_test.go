@@ -37,6 +37,20 @@ type nativeChatRequest struct {
 
 func nativeChatSocket(t *testing.T, handle func(nativeChatRequest) (any, string)) string {
 	t.Helper()
+	// Every fixture's tabs land in w6: a birth creates its place's workspace there.
+	return nativeChatSocketPlaced(t, func(method, label string) (map[string]any, bool) {
+		return testjail.HerdrWorkspaceReply(method, label, "w6")
+	}, handle)
+}
+
+// nativeChatSocketPlaced is nativeChatSocket whose workspace requests
+// workspaces answers first, given the label a request carries.
+func nativeChatSocketPlaced(
+	t *testing.T,
+	workspaces func(method, label string) (map[string]any, bool),
+	handle func(nativeChatRequest) (any, string),
+) string {
+	t.Helper()
 	socket := filepath.Join(testjail.ShortRoot(t), "herdr.sock")
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
@@ -58,11 +72,9 @@ func nativeChatSocket(t *testing.T, handle func(nativeChatRequest) (any, string)
 					t.Errorf("decode native request: %v", err)
 					return
 				}
-				// Every fixture's tabs land in w6: a birth creates its place's
-				// workspace there.
 				var label string
 				_ = json.Unmarshal(req.Params["label"], &label)
-				if placed, handled := testjail.HerdrWorkspaceReply(req.Method, label, "w6"); handled {
+				if placed, handled := workspaces(req.Method, label); handled {
 					_ = json.NewEncoder(conn).Encode(map[string]any{"id": req.ID, "ok": true, "result": placed})
 					return
 				}

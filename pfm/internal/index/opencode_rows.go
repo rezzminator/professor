@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -231,6 +232,33 @@ func queryOpenCodeStore(
 		return fmt.Errorf("iterate opencode store %s: %w", OpenCodeStorePath(root), err)
 	}
 	return nil
+}
+
+// ReadOpenCodeTitles reads the titles of the sessions ids names from root's
+// store, keyed by id: a keyed read of those rows only, never the whole table.
+// An id the store does not hold is absent; a missing store is ErrNoOpenCodeStore.
+func ReadOpenCodeTitles(ctx context.Context, root string, ids []string) (map[string]string, error) {
+	titles := make(map[string]string, len(ids))
+	if len(ids) == 0 {
+		return titles, nil
+	}
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	query := "SELECT id, title FROM session WHERE id IN (?" + strings.Repeat(",?", len(ids)-1) + ")"
+	err := queryOpenCodeStore(ctx, root, query, args, func(rows *sql.Rows) error {
+		var id, title string
+		if err := rows.Scan(&id, &title); err != nil {
+			return fmt.Errorf("scan opencode session title: %w", err)
+		}
+		titles[id] = title
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return titles, nil
 }
 
 // OpenCodeModel is the model a user message asked for.

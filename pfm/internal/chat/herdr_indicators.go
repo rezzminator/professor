@@ -55,7 +55,7 @@ func (provider *herdrTabProvider) tabs(ctx context.Context, socket string) ([]he
 	}
 	pendingAgents := map[string]time.Time{}
 	defer func() { provider.missingAgents = pendingAgents }()
-	provider.probe.begin()
+	provider.probe.begin(ctx)
 	// An unreadable configuration never stops the tabs' status: it is named, and
 	// the tabs keep painting in the default mode while it lasts.
 	mode, err := provider.mode()
@@ -242,7 +242,11 @@ func PaintHerdrIndicators(ctx context.Context, socket, lockDir string, stderr io
 		return errors.Join(loadErr, writeErr)
 	}
 	inspector := NewSeatInspector(&runtime)
-	provider := herdrTabProvider{inspect: inspector.Inspect, warn: warnings, probe: &tabProbe{}}
+	provider := herdrTabProvider{
+		inspect: inspector.Inspect,
+		warn:    warnings,
+		probe:   &tabProbe{openCodeRoots: runtime.Paths.Roots[pfmengine.OpenCode]},
+	}
 	calls, err := NewCallEngine(false, &runtime)
 	if err != nil {
 		loadErr := fmt.Errorf("load tab indicator screen reader: %w", err)

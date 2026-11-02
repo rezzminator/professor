@@ -248,13 +248,15 @@ func (finder *discoverer) findMCPDaemon(table processTable, supervised bool, ser
 		// Claimed either way: another install's daemon, or one whose owner
 		// could not be read, is left running and never reaches the pfm family.
 		finder.claimed[proc.PID] = true
-		owned, err := finder.ownedByInstall(proc)
+		owned, gone, err := finder.ownedByInstall(proc)
 		if err != nil {
 			unowned = append(unowned, err)
 			continue
 		}
 		if !owned {
-			kept++
+			if !gone {
+				kept++
+			}
 			continue
 		}
 		daemons = append(daemons, proc)

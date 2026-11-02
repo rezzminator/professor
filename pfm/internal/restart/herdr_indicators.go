@@ -87,12 +87,12 @@ func (finder *discoverer) indicatorImage(proc process) (image gather.FileID, cou
 	if state != daemonOwned {
 		return gather.FileID{}, false, nil
 	}
-	owned, err := finder.ownedByInstall(proc)
+	owned, _, err := finder.ownedByInstall(proc)
 	if err != nil {
 		return gather.FileID{}, false, fmt.Errorf("herdr indicator: %w", err)
 	}
 	if !owned {
-		return gather.FileID{}, false, nil // another install's painter: never this install's to replace
+		return gather.FileID{}, false, nil // another install's painter, or gone: never this install's to replace
 	}
 	images, ok := finder.deps.Procs.(gather.ProcImage)
 	if !ok {

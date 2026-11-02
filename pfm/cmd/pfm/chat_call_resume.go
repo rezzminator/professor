@@ -10,7 +10,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 	"uuid"
@@ -26,6 +25,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/reload"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
 // agentsCommand is `claude agents`, the registry read the resume probe runs.
@@ -157,27 +157,27 @@ func composeTranscriptIDFromPath(path string) string {
 }
 
 func runningClaudeSession(procRoot, id string) (bool, error) {
-	entries, err := os.ReadDir(procRoot)
-	if errors.Is(err, fs.ErrNotExist) {
-		return false, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("read process jail %q: %w", procRoot, err)
-	}
-	needle := []byte("CLAUDE_CODE_SESSION_ID=" + id + "\x00")
-	for _, entry := range entries {
-		if _, err := strconv.Atoi(entry.Name()); err != nil || !entry.IsDir() {
-			continue
+	// A missing jail root holds no processes; only the system root falls through
+	// to the native table, which on macOS has no /proc to read.
+	if filepath.Clean(procRoot) != paths.SystemProcRoot() {
+		if _, err := os.Stat(procRoot); errors.Is(err, fs.ErrNotExist) {
+			return false, nil
 		}
-		path := filepath.Join(procRoot, entry.Name(), "environ")
-		raw, err := os.ReadFile(path)
+	}
+	procfs := gather.NewProcFS(procRoot)
+	pids, err := procfs.PIDs()
+	if err != nil {
+		return false, fmt.Errorf("list processes under %q: %w", procRoot, err)
+	}
+	for _, pid := range pids {
+		environment, err := procfs.Environ(pid)
 		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission) {
 			continue
 		}
 		if err != nil {
-			return false, fmt.Errorf("read process environment %q: %w", path, err)
+			return false, fmt.Errorf("read process environment pid=%d under %q: %w", pid, procRoot, err)
 		}
-		if bytes.Contains(raw, needle) {
+		if resolve.ProcessEnvironment(environment).ClaudeSessionID == id {
 			return true, nil
 		}
 	}

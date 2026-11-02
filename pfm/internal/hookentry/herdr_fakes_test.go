@@ -777,7 +777,13 @@ func newNativeReporterHerdrCount(
 					line, _ := json.Marshal(req)
 					server.mu.Lock()
 					server.lines = append(server.lines, string(line))
+					refused := server.refuse[req.Method]
 					server.mu.Unlock()
+					if refused != "" {
+						const refusal = `{"id":%q,"error":{"code":%q,"message":"refused by fake herdr"}}`
+						fmt.Fprintf(conn, refusal+"\n", req.ID, refused)
+						return
+					}
 					result = map[string]any{"type": "ok"}
 					switch req.Method {
 					case "pane.rename":

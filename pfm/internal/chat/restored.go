@@ -238,14 +238,9 @@ func restoreNative(
 		return fmt.Errorf("rebind restored seat: %w", err)
 	}
 	if current.Name != "" {
+		// A pane with no agent yet is named by pane and tab; seat-host registers the agent after launch.
 		if err := renameNativeOwned(ctx, db, current, current.Name); err != nil {
-			var refusal *herdr.Refusal
-			if !errors.As(err, &refusal) || refusal.Code != "agent_not_found" ||
-				!strings.HasPrefix(refusal.Request, "agent.rename ") {
-				return fmt.Errorf("restore name: %w", err)
-			}
-			// The pane label is acknowledged; seat-host registers the agent after launch.
-			fmt.Fprintf(stderr, "pfm chat open: restored pane named; agent not registered yet: %v\n", err)
+			return fmt.Errorf("restore name: %w", err)
 		}
 	}
 	if current.LostNote != "" {

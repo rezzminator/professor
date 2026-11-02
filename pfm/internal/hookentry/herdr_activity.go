@@ -167,7 +167,11 @@ func (reporter *herdrReporter) runActivity(ctx context.Context, payload herdrPay
 		state.TmuxSocket = reporter.options.socket
 		state.TmuxSession = reporter.session
 	}
-	return errors.Join(err, reporter.finishActivity(payload.SessionID, state, wasWaiting))
+	return errors.Join(
+		err,
+		reporter.finishActivity(payload.SessionID, state, wasWaiting),
+		reporter.settleNativeLater(payload.SessionID, state, err),
+	)
 }
 
 func (reporter *herdrReporter) removeActivity(session string) error {
@@ -191,8 +195,8 @@ func (reporter *herdrReporter) finishActivity(session string, state herdrActivit
 		// The process reads the durable lease, not a timer owned by this short hook.
 		if err := reporter.deps.spawn(
 			[]string{
-				"internal",
-				"herdr-state",
+				internalCommand,
+				herdrStateCommand,
 				herdrAgentsWatch,
 				session,
 				strconv.FormatInt(state.Stored.MainStoppedAt, 10),
@@ -337,22 +341,9 @@ func watchHerdrAgentsWithWait(args []string, stderr io.Writer, deps herdrDeps, w
 		return 1
 	}
 	reporter.session = args[0]
-	lastError := ""
-	for {
-		done, err := reporter.expireAgents(args[0], generation)
-		if err != nil {
-			if err.Error() != lastError {
-				reporter.warn("Claude agent watchdog (retrying): %v", err)
-				lastError = err.Error()
-			}
-		} else {
-			lastError = ""
-			if done {
-				return 0
-			}
-		}
-		wait()
-	}
+	return reporter.retry("Claude agent watchdog", func() (bool, error) {
+		return reporter.expireAgents(args[0], generation)
+	}, wait)
 }
 
 func (reporter *herdrReporter) expireAgents(session string, generation ...int64) (done bool, returnErr error) {
@@ -417,12 +408,19 @@ func (reporter *herdrReporter) expireAgents(session string, generation ...int64)
 		return true, err
 	}
 	defer bridge()
+	return true, errors.Join(reporter.resendActivity(ctx, state), reporter.writeActivity(session, state))
+}
+
+// resendActivity re-sends the activity's stored state to every pane it last
+// reached that no other owner or newer report has taken; the caller holds the
+// bridge.
+func (reporter *herdrReporter) resendActivity(ctx context.Context, state herdrActivity) error {
 	var errs []error
 	for _, saved := range state.Targets {
 		target := herdrTarget{socket: saved.Socket, pane: saved.Pane, terminal: saved.Terminal}
 		owner, err := reporter.paneOwner(target)
 		if err != nil {
-			errs = append(errs, err)
+			errs = append(errs, undelivered(err))
 			continue
 		}
 		if owner.Client != saved.Owner || owner.Seq > saved.Seq {
@@ -436,7 +434,7 @@ func (reporter *herdrReporter) expireAgents(session string, generation ...int64)
 				false,
 			)
 			if err != nil {
-				errs = append(errs, err)
+				errs = append(errs, undelivered(err))
 				continue
 			}
 			target.pane = resolved.Pane
@@ -446,8 +444,7 @@ func (reporter *herdrReporter) expireAgents(session string, generation ...int64)
 		reporter.seq = saved.Seq
 		reporter.nativeSeatReport = saved.Native
 		reporter.source = saved.Source
-		errs = append(errs, reporter.send(ctx, target, &herdrAction{stored: state.Stored}, saved.Seq+1))
+		errs = append(errs, undelivered(reporter.send(ctx, target, &herdrAction{stored: state.Stored}, saved.Seq+1)))
 	}
-	errs = append(errs, reporter.writeActivity(session, state))
-	return true, errors.Join(errs...)
+	return errors.Join(errs...)
 }

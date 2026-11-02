@@ -64,6 +64,9 @@ func routeHerdrState(args []string, stdin io.Reader, stderr io.Writer, deps herd
 	if len(args) != 0 && args[0] == herdrAgentsWatch {
 		return watchHerdrAgents(args[1:], stderr, deps)
 	}
+	if len(args) != 0 && args[0] == herdrSettle {
+		return settleHerdrState(args[1:], stderr, deps)
+	}
 	if len(args) != 0 && args[0] == herdrWatchVerb {
 		return watchForHerdr(
 			args[1:],
@@ -109,8 +112,19 @@ func (reporter *herdrReporter) watch(session string, next herdrStored, payload h
 		return fmt.Errorf("start the transcript watch: write %s: %w", record, err)
 	}
 	argv := []string{
-		"internal", "herdr-state", herdrWatchVerb, herdrSocketFlag, reporter.options.socket, "--session", session,
-		"--seq", seq, "--transcript", transcript, "--offset", strconv.FormatInt(info.Size(), 10),
+		internalCommand,
+		herdrStateCommand,
+		herdrWatchVerb,
+		herdrSocketFlag,
+		reporter.options.socket,
+		herdrSessionFlag,
+		session,
+		"--seq",
+		seq,
+		"--transcript",
+		transcript,
+		"--offset",
+		strconv.FormatInt(info.Size(), 10),
 	}
 	if err := reporter.deps.spawn(argv); err != nil {
 		return errors.Join(fmt.Errorf("start the transcript watch: %w", err), os.Remove(record))

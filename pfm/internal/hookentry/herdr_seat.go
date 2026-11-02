@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
@@ -75,11 +76,13 @@ func (reporter *herdrReporter) nativeSeat(ctx context.Context, payload herdrPayl
 			"native seat ownership unproved: no matching durable owner; repair: restore the intended pane with pfm chat open --restored",
 		)
 	}
-	unlock, err := reporter.lockNativeReport(ctx, seat)
+	unlockSession, unlockBridge, err := reporter.lockNativeReport(ctx, seat)
 	if err != nil {
 		return true, err
 	}
-	defer unlock()
+	defer unlockSession()
+	unlockBridge = sync.OnceFunc(unlockBridge)
+	defer unlockBridge()
 	source := seat
 	// Read-only hooks must not queue behind an unrelated database writer.
 	// Only a proved canonicalization that could not persist may retry writable.
@@ -194,9 +197,12 @@ func (reporter *herdrReporter) nativeSeat(ctx context.Context, payload herdrPayl
 		err = reporter.send(ctx, target, action, seq)
 	}
 	if err != nil {
-		return true, err
+		return true, undelivered(err)
 	}
 	if reporter.options.event != herdr.EventEnd {
+		// The name sync reads the transcript and renames through Herdr: no pane state write
+		// needs the host-wide bridge, so every other chat's report stops waiting on it here.
+		unlockBridge()
 		return true, reporter.syncNativeEngineName(ctx, seat, payload)
 	}
 	return true, nil
@@ -378,21 +384,23 @@ type herdrPayload struct {
 // task reports back; its hook payload carries no other mark.
 const taskNotificationPrompt = "<task-notification>"
 
-// Native and legacy reports share SESSION then BRIDGE ordering, including re-proofs.
-func (reporter *herdrReporter) lockNativeReport(ctx context.Context, seat fleetdb.Seat) (func(), error) {
+// Native and legacy reports share SESSION then BRIDGE ordering, including re-proofs:
+// the caller releases the bridge before the session.
+func (reporter *herdrReporter) lockNativeReport(
+	ctx context.Context,
+	seat fleetdb.Seat,
+) (unlockSession, unlockBridge func(), err error) {
 	identity := fleetdb.ConversationIdentity(seat.SessionID, seat.SeatID)
-	unlockSession, err := reporter.lock(ctx, identity)
+	unlockSession, err = reporter.lock(ctx, identity)
 	if err != nil {
-		return nil, fmt.Errorf("lock native reporter session: %w", err)
+		return nil, nil, fmt.Errorf("lock native reporter session: %w", err)
 	}
-	deps := reporter.deps
-	deps.lockDir = filepath.Join(deps.lockDir, "pfm-herdr-bridge")
-	unlockBridge, err := (&herdrReporter{deps: deps}).lock(ctx, "transaction")
+	unlockBridge, err = reporter.lockBridge(ctx)
 	if err != nil {
 		unlockSession()
-		return nil, fmt.Errorf("lock native reporter bridge: %w", err)
+		return nil, nil, fmt.Errorf("lock native reporter bridge: %w", err)
 	}
-	return func() { unlockBridge(); unlockSession() }, nil
+	return unlockSession, unlockBridge, nil
 }
 
 // This is the existing bridge owner-record protocol, not another ledger. A native

@@ -33,6 +33,9 @@ const (
 	herdrStoredOption = herdr.StoredOption
 	herdrDeadline     = herdr.ReportDeadline
 	herdrClientFlag   = "--client"
+	herdrEngineFlag   = "--engine"
+	herdrSessionFlag  = "--session"
+	herdrStateCommand = "herdr-state"
 	herdrLockPoll     = 10 * time.Millisecond
 	// herdrNameAttempts is the agent names tried for one pane: the slug, then
 	// the suffixes -2 … -9.
@@ -191,7 +194,7 @@ func parseHerdrOptions(args []string) (herdrOptions, error) {
 	var words []string
 	for index := 0; index < len(args); index++ {
 		switch args[index] {
-		case "--engine", herdrSocketFlag, "--session", herdrClientFlag:
+		case herdrEngineFlag, herdrSocketFlag, herdrSessionFlag, herdrClientFlag:
 			if index+1 >= len(args) {
 				if args[index] == herdrClientFlag {
 					// tmux expands #{client_pid} to nothing in a client-detached hook (the
@@ -203,7 +206,7 @@ func parseHerdrOptions(args []string) (herdrOptions, error) {
 			value := args[index+1]
 			index++
 			switch args[index-1] {
-			case "--engine":
+			case herdrEngineFlag:
 				id, err := pfmengine.Parse(value)
 				if err != nil {
 					return options, err
@@ -424,6 +427,7 @@ func (reporter *herdrReporter) runTmux(ctx context.Context, payload herdrPayload
 	if reporter.options.event == herdr.EventTitle {
 		return reporter.title(ctx, session, payload)
 	}
+	defer func() { returnErr = errors.Join(returnErr, reporter.settleTmuxLater(payload, returnErr)) }()
 	unlock, err := reporter.lock(ctx, session)
 	if err != nil {
 		reporter.themeUnlessHeld(ctx, themeOn, payload, herdrStored{})
@@ -436,7 +440,7 @@ func (reporter *herdrReporter) runTmux(ctx context.Context, payload herdrPayload
 	state, err := reporter.readState(ctx, session)
 	reporter.themeUnlessHeld(ctx, themeOn, payload, state)
 	if err != nil {
-		return err
+		return undelivered(err)
 	}
 	switch reporter.options.event {
 	case herdr.EventAttach:
@@ -601,10 +605,12 @@ func (reporter *herdrReporter) lock(ctx context.Context, session string) (func()
 		}
 		select {
 		case <-ctx.Done():
-			return nil, errors.Join(
+			// A lock held past the deadline frees once the holder ends: the one
+			// lock failure a settle process retries.
+			return nil, undelivered(errors.Join(
 				fmt.Errorf("lock session %s: %s still held at the deadline: %w", session, path, ctx.Err()),
 				file.Close(),
-			)
+			))
 		case <-clock.Real.After(herdrLockPoll):
 		}
 	}
@@ -669,7 +675,7 @@ func (reporter *herdrReporter) event(
 	}
 	split, err := reporter.liveClients(ctx, session, &state, !action.release)
 	if err != nil {
-		return err
+		return undelivered(err)
 	}
 	clients, moved, _, resolveErr := reporter.resolveClients(ctx, &state, action.release)
 	split.markMoved(clients, moved)
@@ -678,15 +684,15 @@ func (reporter *herdrReporter) event(
 	next.Name = state.Name
 	next.Clients = state.Clients
 	if err := reporter.writeState(ctx, session, next); err != nil {
-		return err
+		return undelivered(err)
 	}
 	errs := []error{split.errs, resolveErr, reporter.blankTitle(ctx, action), reporter.watch(session, next, payload)}
 	errs = append(errs, reporter.releaseAll(ctx, reporter.engineLabel(state), split.gone))
 	for _, pid := range sortedClientPIDs(clients) {
 		client := clients[pid]
-		errs = append(errs, reporter.send(
+		errs = append(errs, undelivered(reporter.send(
 			ctx, clientTarget(pid, client), action, reporter.nextSent(),
-		))
+		)))
 	}
 	if !action.release {
 		// A session start names every pane; any other event names only the

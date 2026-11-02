@@ -50,9 +50,7 @@ func (state ServerState) String() string {
 func ProbeServer(ctx context.Context, binary, socketPath string) (ServerState, []ProbePane, error) {
 	probeCtx, cancel := context.WithTimeout(ctx, ProbeTimeout)
 	defer cancel()
-	command := pfmtmux.Exec(probeCtx, binary, socketPath, "list-panes", "-a", "-F", paneFormat)
-	command.WaitDelay = probeWaitDelay
-	output, err := command.Output()
+	output, err := pfmtmux.Exec(probeCtx, binary, socketPath, "list-panes", "-a", "-F", paneFormat).Output()
 	if err != nil {
 		state, classified := classifyProbe(ctx, probeCtx, err, socketPath)
 		switch state {

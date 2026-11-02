@@ -223,5 +223,7 @@ func (tmux RealTmux) Attach(ctx context.Context, socket string) error {
 	if err := tmux.command(ctx, socket, "set-option", "-g", "window-size", "latest").Run(); err != nil {
 		return fmt.Errorf("set tmux window size: %w", err)
 	}
-	return tmux.command(ctx, socket, "attach").Run()
+	// An attach lasts as long as its user keeps it: tmux.Exec's default bound
+	// would end the session under them.
+	return pfmtmux.ExecAttached(ctx, tmux.Binary, filepath.Join(tmux.Dir, socket), "attach").Run()
 }

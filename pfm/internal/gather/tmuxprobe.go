@@ -105,10 +105,6 @@ var ErrServerUnresponsive = errors.New("tmux server did not answer")
 // milliseconds; a server past this is reported unreadable for this scan.
 const ProbeTimeout = 2 * time.Second
 
-// probeWaitDelay is how long a probe whose client was killed may keep its
-// output pipes open before they are closed under it.
-const probeWaitDelay = 500 * time.Millisecond
-
 // ReapCommand is the command that ends abandoned empty pfm tmux servers; every
 // message naming such a server names it as the fix.
 const ReapCommand = "pfm chat ls --reap"
@@ -162,17 +158,12 @@ func (tmux TmuxProbe) socketPath(socket string) string {
 }
 
 // probeCommand is the one tmux invocation this probe makes: built by the tmux
-// door (internal/tmux.Command — -S socket path, TMUX cleared) and completed
-// through the tmux component's record (pfmtmux.Observe) so each call writes
-// its subcommand, target and exit once.
+// door (internal/tmux.ExecWithin — -S socket path, TMUX cleared, a killed
+// client's pipes released) and recorded once, bounded by ProbeTimeout unless
+// the caller's context carries its own deadline: a server stopped after the
+// scan listed it never answers a later pid read or pane capture.
 func (tmux TmuxProbe) probeCommand(ctx context.Context, socket string, arguments ...string) *pfmtmux.Cmd {
-	command := pfmtmux.Command(ctx, tmux.Binary, tmux.socketPath(socket), arguments...)
-	// A tmux client hands its stdout to the server it talks to, so a client
-	// killed for a stopped server leaves that server holding the pipe: Wait
-	// would block on it forever. Past the delay the pipes are closed and the
-	// probe returns its error.
-	command.WaitDelay = probeWaitDelay
-	return pfmtmux.Observe(ctx, command, arguments...)
+	return pfmtmux.ExecWithin(ctx, ProbeTimeout, tmux.Binary, tmux.socketPath(socket), arguments...)
 }
 
 // ListPanes performs one list-panes -a call for socket.
@@ -280,8 +271,12 @@ func parseLegacyPaneOutput(socket string, output []byte) ([]ProbePane, error) {
 // signals comes from the server itself, never from a guess over a process
 // listing.
 func (tmux TmuxProbe) ServerPID(ctx context.Context, socket string) (int, error) {
-	output, err := tmux.probeCommand(ctx, socket, "display-message", "-p", "#{pid}").Output()
+	command := tmux.probeCommand(ctx, socket, "display-message", "-p", "#{pid}")
+	output, err := command.Output()
 	if err != nil {
+		if command.TimedOut() {
+			return 0, fmt.Errorf("read tmux server pid on %s: %w: %w", socket, ErrServerUnresponsive, err)
+		}
 		if TmuxServerGone(err) {
 			return 0, fmt.Errorf("read tmux server pid on %s: %w", socket, ErrServerGone)
 		}
@@ -307,6 +302,9 @@ func (tmux TmuxProbe) CapturePane(
 ) (string, error) {
 	command := tmux.probeCommand(ctx, socket, "capture-pane", "-t", paneID, "-p", "-J")
 	output, err := command.Output()
+	if err != nil && command.TimedOut() {
+		return "", fmt.Errorf("capture tmux pane %s %s: %w: %w", socket, paneID, ErrServerUnresponsive, err)
+	}
 	if err != nil {
 		return "", fmt.Errorf(
 			"capture tmux pane %s %s: %w",
@@ -414,6 +412,9 @@ func (tmux TmuxProbe) ShowGlobalOption(
 ) (string, error) {
 	command := tmux.probeCommand(ctx, socket, "show", "-gv", name)
 	output, err := command.Output()
+	if err != nil && command.TimedOut() {
+		return "", fmt.Errorf("read tmux option %s %s: %w: %w", socket, name, ErrServerUnresponsive, err)
+	}
 	if err != nil {
 		if TmuxServerGone(err) {
 			return "", fmt.Errorf("read tmux option %s %s: %w", socket, name, ErrServerGone)
@@ -655,15 +656,19 @@ func probeTmux(
 					result.Unreadable = map[string]string{}
 				}
 				result.Unreadable[socket.name] = err.Error()
-				result.ProbeWarnings = append(
-					result.ProbeWarnings,
-					fmt.Sprintf(
-						"%s: could not read this tmux server: %v — check it by hand: tmux -S %s list-sessions",
-						socket.name,
-						err,
-						socket.path,
-					),
+				warning := fmt.Sprintf(
+					"%s: could not read this tmux server: %v — check it by hand: tmux -S %s list-sessions",
+					socket.name,
+					err,
+					socket.path,
 				)
+				if errors.Is(err, ErrServerUnresponsive) {
+					warning += fmt.Sprintf(
+						"; a server stopped by SIGSTOP shows state T in `ps -eo pid,stat,args | grep %s`: resume it with kill -CONT {pid}",
+						socket.name,
+					)
+				}
+				result.ProbeWarnings = append(result.ProbeWarnings, warning)
 				mutex.Unlock()
 				return nil
 			}

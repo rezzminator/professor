@@ -106,8 +106,12 @@ func TestExecRecordsAtTheLevelOfItsOutcome(t *testing.T) {
 func TestExecRunAndCombinedOutputCarryTheExitCode(t *testing.T) {
 	ctx, recorder := obs.Test(t)
 	binary := fakeTmux(t, 3)
-	if err := Exec(ctx, binary, "/sockets/cc-1", "kill-server").Run(); err == nil {
+	killServer := Exec(ctx, binary, "/sockets/cc-1", "kill-server")
+	if err := killServer.Run(); err == nil {
 		t.Fatal("Run swallowed the exit status")
+	}
+	if killServer.TimedOut() {
+		t.Fatal("TimedOut() = true for a tmux that exited 3 on its own, want false")
 	}
 	if _, err := Exec(ctx, binary, "/sockets/cc-1", "list-panes", "-a").CombinedOutput(); err == nil {
 		t.Fatal("CombinedOutput swallowed the exit status")
@@ -206,5 +210,54 @@ func TestObserveRecordsALauncherAssembledCommand(t *testing.T) {
 	record := oneRecord(t, recorder)
 	if subcmd, _ := record.Field("subcmd"); subcmd != "new-session" {
 		t.Fatalf("subcmd = %v, want new-session", subcmd)
+	}
+}
+
+// TestExecBoundsACallWhoseContextHasNoDeadline: a tmux that never answers —
+// a stopped server's client blocks exactly so — is killed at the door's
+// default bound and the call returns its error, never hangs its caller.
+func TestExecBoundsACallWhoseContextHasNoDeadline(t *testing.T) {
+	binary := filepath.Join(t.TempDir(), "tmux-hung")
+	if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexec sleep 30\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	saved := defaultTimeout
+	defaultTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { defaultTimeout = saved })
+
+	started := time.Now()
+	command := Exec(context.Background(), binary, "socket", "display-message", "-p", "#{pid}")
+	_, err := command.Output()
+	if err == nil {
+		t.Fatal("a tmux that never answered returned no error")
+	}
+	if elapsed := time.Since(started); elapsed > 5*time.Second {
+		t.Fatalf("the unanswered call returned after %s, want it ended at the %s bound", elapsed, defaultTimeout)
+	}
+	if command.ProcessState == nil || command.ProcessState.Exited() {
+		t.Fatalf("client state %v, want it killed at the bound", command.ProcessState)
+	}
+	if !command.TimedOut() {
+		t.Fatalf("TimedOut() = false after the bound ended the call (err %v), want true", err)
+	}
+}
+
+// TestExecAttachedOutlivesTheDefaultBound: an attach lasts as long as its user
+// keeps it, so the default bound that ends an unanswered read never ends it.
+func TestExecAttachedOutlivesTheDefaultBound(t *testing.T) {
+	binary := filepath.Join(t.TempDir(), "tmux-attached")
+	if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexec sleep 0.6\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	saved := defaultTimeout
+	defaultTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { defaultTimeout = saved })
+
+	command := ExecAttached(context.Background(), binary, "socket", "attach")
+	if err := command.Run(); err != nil || command.TimedOut() {
+		t.Fatalf(
+			"attach past the %s default bound = %v (timed out %v), want it to run to its own exit",
+			defaultTimeout, err, command.TimedOut(),
+		)
 	}
 }

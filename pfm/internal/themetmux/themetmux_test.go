@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
@@ -139,5 +140,43 @@ func TestShowMarksOnlyTmuxsUnsetAnswerAsUnset(t *testing.T) {
 	_, err = Servers{Probe: timedOut}.Show(context.Background(), "cc-1", "@host_accent")
 	if err == nil || errors.Is(err, themesync.ErrTmuxOptionUnset) {
 		t.Fatalf("Show of a read that failed = %v, want its error, never ErrTmuxOptionUnset", err)
+	}
+}
+
+// barrierProbe answers ServerPID only once every expected call is in flight
+// at once, or fails at its deadline: a serial liveness loop never gets there.
+type barrierProbe struct {
+	fakeProbe
+	arrived chan struct{}
+	all     int
+}
+
+func (probe *barrierProbe) ServerPID(_ context.Context, socket string) (int, error) {
+	probe.arrived <- struct{}{}
+	deadline := time.After(2 * time.Second)
+	for len(probe.arrived) < probe.all {
+		select {
+		case <-deadline:
+			return 0, fmt.Errorf("%s: probed alone, %d of %d in flight", socket, len(probe.arrived), probe.all)
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	return 42, nil
+}
+
+// TestSocketsProbesEveryServerTogether: the liveness reads run concurrently,
+// so N stopped servers cost one probe bound, not N of them in a row.
+func TestSocketsProbesEveryServerTogether(t *testing.T) {
+	t.Setenv("PFM_TEST_PROBE_SOCKETS", "1")
+	directory := testjail.ShortRoot(t)
+	names := []string{"probe-cc-1", "probe-cc-2", "probe-cc-3", "probe-cc-4"}
+	for _, name := range names {
+		listenSocket(t, directory, name)
+	}
+	probe := &barrierProbe{arrived: make(chan struct{}, len(names)), all: len(names)}
+
+	got, err := Servers{Probe: probe, TmuxDir: directory}.Sockets(context.Background())
+	if err != nil || !reflect.DeepEqual(got, names) {
+		t.Fatalf("Sockets = %v, %v; want %v with every server probed at once", got, err, names)
 	}
 }

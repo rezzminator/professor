@@ -275,9 +275,10 @@ jobs:
           min_score: 80
           fail_on_severity: high
           # .plugin-scanner.toml (fixture paths that plant fake credentials)
-          # counts only for a pull request from this repository. A fork's
-          # pull request is scanned with no repository suppressions.
-          trust_repository_policy: ${{ github.event.pull_request.head.repo.full_name == github.repository && 'true' || 'false' }}
+          # counts for a hand-started run (only this repository's branches can
+          # start one) and a pull request from this repository. A fork's pull
+          # request is scanned with no repository suppressions.
+          trust_repository_policy: ${{ (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) && 'true' || 'false' }}
 
       # Every plugin keeps the one-check CI shape (.claude/rules/ci-workflows.md).
       # It checks the plugins out only after the scanner ran, so the scanner scores

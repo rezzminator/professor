@@ -105,7 +105,6 @@ jobs:
         env:
           PFM_DEV_FENCE: "1"
           PFM_FENCE_PROFILE: native
-          PFM_HARVESTPY_OFFLINE: "1"
           PFM_GATE_ONLY: ${{ matrix.only }}
           PFM_GATE_SKIP: ${{ matrix.skip }}
           # The fence's per-step bound derives from its own gate budget; a

@@ -53,6 +53,7 @@
 
 LANE_LIB_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 . "$LANE_LIB_DIR/../shared.sh" || return 1
+. "$LANE_LIB_DIR/../../../scripts/platform.sh" || return 1
 fence_config_values || return 1
 : "${LANE_GAPS:=$LANE_LIB_DIR/known-gaps.yml}"
 : "${LANE_STAMP:=$(date +%Y%m%d-%H%M%S)}"
@@ -78,6 +79,8 @@ export PFM_LOG_LEVEL=debug
 # identical block copy-pasted at the top of every lane script (the jscpd
 # clone the gate flagged).
 lane_preamble() {
+  # A lane drives a live pfm over the machine's own state: it runs only in the fence.
+  platform_in_fence || { echo 'lane: requires the fence' >&2; exit 1; }
   export PATH="$HOME/.local/bin:$PATH"
   export IS_SANDBOX=1 # root fence: Claude Code refuses the bypass flag under root without it
   cd /tmp 2>/dev/null || true

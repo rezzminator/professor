@@ -4,7 +4,8 @@ set -uo pipefail
 SHTEST_TAG=lane-herdr-test
 source "$(dirname -- "${BASH_SOURCE[0]}")/../../../../scripts/shtest.sh"
 LANES="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
-if [ "${PFM_DEV_FENCE:-}" != 1 ] || [ "$(uname -s)" != Linux ]; then
+. "$LANES/../../../scripts/platform.sh" || exit 2
+if ! platform_in_fence || [ "$(uname -s)" != Linux ]; then
   bad "FIXTURE-BOOTSTRAP-FAILED" "requires the Linux development fence"; shtest_end; exit 1
 fi
 for tool in herdr go jq sqlite3 python3 timeout ps find awk sort cmp grep tmux; do

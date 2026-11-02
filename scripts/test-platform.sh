@@ -117,4 +117,29 @@ expect 'cpus falls back to getconf _NPROCESSORS_ONLN' 0 7 ''
 door "$(stubs no-cpu)" platform_cpus
 expect 'cpus with neither tool is rc 1 and silent' 1 '' ''
 
+# ---- platform_in_fence ------------------------------------------------------
+# fence MARKER [VAR=value]...: platform_in_fence MARKER under /bin/sh with only those variables set.
+fence() {
+  local marker=$1
+  shift
+  RC=0
+  env -i PATH="$(stubs no-tools)" "$@" /bin/sh -c '. "$1" && platform_in_fence "$2"' sh "$DOOR" "$marker" \
+    > "$T/out" 2> "$T/err" || RC=$?
+}
+: > "$T/dockerenv"
+fence "$T/dockerenv" PFM_DEV_FENCE=1
+expect 'in_fence: the fence variable inside a container passes' 0 '' ''
+fence "$T/no-dockerenv" PFM_DEV_FENCE=1 PFM_STATE_DB="$T/live.db"
+expect 'in_fence: a host shell exporting the fence variable and a store path is refused' 1 '' ''
+fence "$T/dockerenv"
+expect 'in_fence: a container without the fence variable is refused' 1 '' ''
+fence "$T/dockerenv" PFM_DEV_FENCE=true
+expect 'in_fence: the fence variable set to another word is refused' 1 '' ''
+fence "$T/no-dockerenv" GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted
+expect 'in_fence: a GitHub-hosted runner passes' 0 '' ''
+fence "$T/no-dockerenv" GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=self-hosted
+expect 'in_fence: a self-hosted runner is refused' 1 '' ''
+fence "$T/no-dockerenv" RUNNER_ENVIRONMENT=github-hosted
+expect 'in_fence: a runner environment outside GitHub Actions is refused' 1 '' ''
+
 shtest_end

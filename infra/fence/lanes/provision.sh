@@ -2,9 +2,10 @@
 # Build the lane tools and stage only invented, registered fixture seats; `held`
 # provisions lane HELD's machine on the root (lanes/root.sh --machine held).
 set -euo pipefail
-[ "${PFM_DEV_FENCE:-}" = 1 ] || { echo 'provision: requires the fence' >&2; exit 1; }
-: "${PFM_CONFIG:?PFM_CONFIG is required in the container}"
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+. "$HERE/../../../scripts/platform.sh" || exit 2
+platform_in_fence || { echo 'provision: requires the fence' >&2; exit 1; }
+: "${PFM_CONFIG:?PFM_CONFIG is required in the container}"
 export PATH="$HOME/.local/bin:$PATH"
 trap 'rc=$?; echo "provision: ${1:-unknown} failed at line $LINENO (exit $rc)" >&2; exit "$rc"' ERR
 case "${1:-}" in

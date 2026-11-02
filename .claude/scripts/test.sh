@@ -343,7 +343,9 @@ fence_half() {
 }
 
 if [ "${1:-}" = --fence ]; then
-  [ -n "${PFM_DEV_FENCE:-}" ] || { echo 'test.sh: --fence runs inside the fence only' >&2; exit 2; }
+  # shellcheck source=scripts/platform.sh
+  . "$ROOT/scripts/platform.sh" || { echo "test.sh: cannot source $ROOT/scripts/platform.sh" >&2; exit 2; }
+  platform_in_fence || { echo 'test.sh: --fence runs inside the fence only' >&2; exit 2; }
   shift
   rc=0; fence_half "$@" || rc=$?
   exit "$rc"

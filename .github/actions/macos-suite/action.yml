@@ -32,7 +32,6 @@ runs:
       env:
         PART: ${{ inputs.part }}
         PFM_DEV_FENCE: "1"
-        PFM_HARVESTPY_OFFLINE: "1"
       run: |
         set -euo pipefail
         case "$PART" in

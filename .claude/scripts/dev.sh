@@ -645,12 +645,13 @@ TARGET="${2:-all}"
 # container (/.dockerenv): an exported variable alone never passes. A
 # GitHub-hosted runner (GITHUB_ACTIONS=true, RUNNER_ENVIRONMENT=github-hosted)
 # passes too: it is a throwaway machine, so ci.yml runs the gate on it natively.
-# Everywhere else the suite runs in the fence instead; pfm/internal/testjail/fence.go
-# (inFence, onHostedRunner) applies the same rule.
+# Everywhere else the suite runs in the fence instead. scripts/platform.sh
+# (platform_in_fence) is the rule; pfm/internal/testjail/fence.go (admitted) applies it to Go.
 case "$CMD" in
-  test|cover|all|verify|gate)
-    if [[ ( "${PFM_DEV_FENCE:-}" != 1 || ! -e /.dockerenv ) \
-          && ( "${GITHUB_ACTIONS:-}" != true || "${RUNNER_ENVIRONMENT:-}" != github-hosted ) ]]; then
+  test|e2e|cover|all|verify|gate)
+    # shellcheck source=../../scripts/platform.sh
+    . "$REPO_ROOT/scripts/platform.sh" || { echo "dev.sh: cannot source $REPO_ROOT/scripts/platform.sh" >&2; exit 2; }
+    if ! platform_in_fence; then
       echo "FENCE-ONLY: dev.sh $CMD never runs on the host — running: dev.sh iso $CMD ${2:-}" >&2
       exec bash "${BASH_SOURCE[0]}" iso "$CMD" ${2:+"$2"}
     fi ;;

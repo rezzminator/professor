@@ -77,3 +77,16 @@ func TestDarwinProcFSProbesWithoutTheirBinaryCannotLook(t *testing.T) {
 		})
 	}
 }
+
+// launchd is root's: kern.procargs2 refuses its environment to any other uid
+// with a bare EINVAL, which reads as foreign, not as a failed look, so the
+// caller lookup and the chat-call guard pass over it.
+func TestDarwinEnvironTagsForeignProcess(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads every environment")
+	}
+	_, err := NewDarwinProcFS().Environ(1)
+	if !errors.Is(err, ErrForeignProcess) || !errors.Is(err, fs.ErrPermission) {
+		t.Fatalf("pid 1 (root) was not tagged foreign: %v", err)
+	}
+}

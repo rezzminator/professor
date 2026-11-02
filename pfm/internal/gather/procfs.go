@@ -508,3 +508,15 @@ func processReadError(pid int, readErr, probeErr error) error {
 	}
 	return readErr
 }
+
+// environWithheld tags a failed environment read on a kernel without /proc,
+// where kern.procargs2 answers EINVAL alike for every refusal: a live process
+// this one may not signal (the probe's EPERM) is another uid's, whose
+// environment the kernel withholds, as RealProcFS.withheld tags it on Linux.
+// Any other failure stays its read error.
+func environWithheld(readErr, probeErr error) error {
+	if errors.Is(probeErr, syscall.EPERM) {
+		return fmt.Errorf("%w: %w (probe: %w)", ErrForeignProcess, readErr, probeErr)
+	}
+	return readErr
+}

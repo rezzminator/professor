@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Deterministic adoption of an invented local node project; no engine turn.
 set -euo pipefail
-[ "${PFM_DEV_FENCE:-}" = 1 ] || { echo 'adopt: requires the fence' >&2; exit 1; }
+. "$(dirname -- "${BASH_SOURCE[0]}")/../../../scripts/platform.sh" || exit 2
+platform_in_fence || { echo 'adopt: requires the fence' >&2; exit 1; }
 export PATH="$HOME/.local/bin:$PATH"
 step='create project'
 trap 'rc=$?; echo "adopt: $step failed at line $LINENO (exit $rc) — output above" >&2; exit 1' ERR

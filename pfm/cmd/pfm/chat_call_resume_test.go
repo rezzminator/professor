@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -179,7 +180,9 @@ func TestAppendResumeCallKeepsTheTailItCanRead(t *testing.T) {
 }
 
 // The live-session guard reads gather's table: a jail process carrying the
-// session id is running, and a jail root never staged holds no process.
+// session id is running, and a jail root never staged holds no process. A
+// table it could not read is never "not running": the transcript append is
+// refused, since the chat may be live.
 func TestRunningClaudeSessionReadsTheProcessTable(t *testing.T) {
 	const id = "01234567-89ab-cdef-0123-456789abcdef"
 	root := t.TempDir()
@@ -190,16 +193,52 @@ func TestRunningClaudeSessionReadsTheProcessTable(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "4242", "environ"), []byte(environ), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	notATable := filepath.Join(root, "not-a-table")
+	if err := os.WriteFile(notATable, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	unreadable := filepath.Join(root, "unreadable-environ")
+	if err := os.MkdirAll(filepath.Join(unreadable, "4243", "environ"), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	for _, tc := range []struct {
 		root, id string
 		want     bool
+		wantErr  string
 	}{
 		{root: root, id: id, want: true},
 		{root: root, id: "fedcba98-7654-3210-fedc-ba9876543210", want: false},
 		{root: filepath.Join(root, "missing-proc"), id: id, want: false},
+		{
+			root:    notATable,
+			id:      id,
+			wantErr: fmt.Sprintf("list processes under %q: open proc root %s: not a directory", notATable, notATable),
+		},
+		{
+			root: unreadable,
+			id:   id,
+			wantErr: fmt.Sprintf(
+				"read process environment pid=4243 under %q: read %s: is a directory",
+				unreadable,
+				filepath.Join(unreadable, "4243", "environ"),
+			),
+		},
 	} {
-		if got, err := runningClaudeSession(tc.root, tc.id); err != nil || got != tc.want {
-			t.Errorf("runningClaudeSession(%s, %s) = %t, %v; want %t", tc.root, tc.id, got, err, tc.want)
+		got, err := runningClaudeSession(tc.root, tc.id)
+		gotErr := ""
+		if err != nil {
+			gotErr = err.Error()
+		}
+		if got != tc.want || gotErr != tc.wantErr {
+			t.Errorf(
+				"runningClaudeSession(%s, %s) = %t, %q; want %t, %q",
+				tc.root,
+				tc.id,
+				got,
+				gotErr,
+				tc.want,
+				tc.wantErr,
+			)
 		}
 	}
 }

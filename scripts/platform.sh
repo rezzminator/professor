@@ -59,3 +59,13 @@ platform_cpus() {
   else return 1
   fi
 }
+
+# platform_in_fence [MARKER]: rc 0 on a machine a suite may run on and provisioning may write:
+# the development fence (PFM_DEV_FENCE=1 inside a container, MARKER, default /.dockerenv, present)
+# or a GitHub-hosted runner (GITHUB_ACTIONS=true, RUNNER_ENVIRONMENT=github-hosted), a throwaway
+# machine. The variable alone never passes: a host shell exporting it once ran a suite against the
+# live pfm.db. pfm/internal/testjail/fence.go (admitted) applies the same rule.
+platform_in_fence() {
+  { [ "${PFM_DEV_FENCE:-}" = 1 ] && [ -e "${1:-/.dockerenv}" ]; } ||
+    { [ "${GITHUB_ACTIONS:-}" = true ] && [ "${RUNNER_ENVIRONMENT:-}" = github-hosted ]; }
+}

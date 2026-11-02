@@ -170,12 +170,16 @@ func (door Door) refuse(id Identity) error {
 	return nil
 }
 
-// generationOutcome classifies live against the captured identity.
+// generationOutcome classifies live against the captured identity. A capture
+// with no argv is one taken mid-exec: the kernel publishes argv only after it
+// closes the exec's close-on-exec fds, which is when a starter's Start returns,
+// so an empty capture is unknown, like an unreadable executable, and the
+// generation is told by start, owner and executable.
 func generationOutcome(captured, live Identity) Outcome {
 	switch {
 	case live.Start != captured.Start:
 		return OutcomeGone
-	case live.UID != captured.UID, !slices.Equal(live.Argv, captured.Argv):
+	case live.UID != captured.UID, len(captured.Argv) != 0 && !slices.Equal(live.Argv, captured.Argv):
 		return OutcomeChanged
 	case live.Executable != "" && captured.Executable != "" && live.Executable != captured.Executable:
 		return OutcomeChanged

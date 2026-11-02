@@ -41,7 +41,7 @@ const jailMarkerEnv = "PFM_TESTJAIL"
 // include t.TempDir's test name, so macOS's long TMPDIR can exceed its 104-byte
 // limit. Resolving /tmp once also collapses macOS's /private alias.
 func Run(m *testing.M) int {
-	if !inFence() && !onHostedRunner() {
+	if !admitted(paths.OSEnv{}, fenceMarker) {
 		return runInFence() // fence.go: no test ever runs on the machine that started it
 	}
 	// A chat exports its live state store's paths and its install's mark; a jailed

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -16,6 +17,7 @@ import (
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
@@ -324,6 +326,44 @@ func TestWhoamiProcTreeReadsAJailedProcRoot(t *testing.T) {
 	}
 }
 
+// kernelTableChildEnv marks the child TestWhoamiProcTreeReadsTheKernelTable
+// starts from its own test binary: the variable its environment must show.
+const kernelTableChildEnv = "PFM_TEST_KERNEL_TABLE_CHILD"
+
+// The kernel's own table answers ancestry recovery's two facts for a live
+// process on either OS: its environment and its parent. On macOS this read
+// once returned "not implemented", failing every caller lookup there.
+func TestWhoamiProcTreeReadsTheKernelTable(t *testing.T) {
+	if os.Getenv(kernelTableChildEnv) != "" {
+		_, _ = io.Copy(io.Discard, os.Stdin) // held until the parent has read it
+		return
+	}
+	marker := "held-by-" + strconv.Itoa(os.Getpid())
+	child := exec.Command(os.Args[0], "-test.run=^TestWhoamiProcTreeReadsTheKernelTable$")
+	child.Env = append(os.Environ(), kernelTableChildEnv+"="+marker)
+	stdin, err := child.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := child.Start(); err != nil {
+		t.Fatalf("start the held child: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = stdin.Close()
+		_ = child.Process.Kill()
+		_ = child.Wait()
+	})
+	tree := ProcTree{Root: paths.SystemProcRoot()}
+	environment, err := tree.Environ(child.Process.Pid)
+	if err != nil || environment[kernelTableChildEnv] != marker {
+		t.Fatalf("Environ(child %d) %s=%q, %v; want %q",
+			child.Process.Pid, kernelTableChildEnv, environment[kernelTableChildEnv], err, marker)
+	}
+	if parent, err := tree.Parent(child.Process.Pid); err != nil || parent != os.Getpid() {
+		t.Fatalf("Parent(child %d) = %d, %v; want this test %d", child.Process.Pid, parent, err, os.Getpid())
+	}
+}
+
 type fixedPaneNamer struct{ pid int }
 
 func (namer fixedPaneNamer) SessionPane(context.Context, string, string) (string, int, error) {
@@ -598,18 +638,63 @@ func (environmentDeniedTree) Environ(int) (map[string]string, error) {
 	return nil, os.ErrPermission
 }
 
+// An ancestor whose environment could not be read is a failed look, never
+// "not in a chat" — also when the Codex seat rung, the last one, holds no seat
+// for the caller's thread; a seat that holds it still answers.
 func TestIdentifyPreservesAncestryEnvironmentReadFailure(t *testing.T) {
-	identifier, err := NewWhoami(WhoamiDependencies{
-		Environment: &WhoamiEnvironment{},
-		Processes:   environmentDeniedTree{fakeProcTree{parents: map[int]int{4300: 1}}},
-		SelfPID:     4300, TmuxDir: t.TempDir(),
-	})
-	if err != nil {
-		t.Fatal(err)
+	seat := CodexSeat{
+		ThreadID: "thread-abc", Backend: "herdr", SeatID: "s1",
+		SocketPath: "/h/herdr.sock", Pane: "wA:p2", HerdrWorkspace: "wA",
 	}
-	_, err = identifier.Identify(context.Background())
-	if !errors.Is(err, os.ErrPermission) || errors.Is(err, ErrNotInChat) {
-		t.Fatalf("unreadable environment became absence: %v", err)
+	for _, tc := range []struct {
+		name        string
+		environment WhoamiEnvironment
+		seats       []CodexSeat
+		wantSeat    string
+	}{
+		{name: "no engine thread", environment: WhoamiEnvironment{}},
+		{name: "codex thread on no live seat", environment: WhoamiEnvironment{CodexThreadID: "thread-abc"}},
+		{
+			name:        "codex thread on a live seat",
+			environment: WhoamiEnvironment{CodexThreadID: "thread-abc"},
+			seats:       []CodexSeat{seat},
+			wantSeat:    "s1",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			looked := false
+			identifier, err := NewWhoami(WhoamiDependencies{
+				Environment: &tc.environment,
+				Processes:   environmentDeniedTree{fakeProcTree{parents: map[int]int{4300: 1}}},
+				SelfPID:     4300, TmuxDir: t.TempDir(),
+				CodexSeats: func(context.Context) ([]CodexSeat, error) {
+					looked = true
+					return tc.seats, nil
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			identity, err := identifier.Identify(context.Background())
+			if looked != (tc.environment.CodexThreadID != "") {
+				t.Fatalf("Codex seat rung ran = %t for environment %+v", looked, tc.environment)
+			}
+			if tc.wantSeat != "" {
+				if err != nil || identity.SeatID != tc.wantSeat || identity.Source != "codex-thread" {
+					t.Fatalf(
+						"Identify() = %+v, %v; want seat %s from the codex-thread rung",
+						identity,
+						err,
+						tc.wantSeat,
+					)
+				}
+				return
+			}
+			const want = "look up the caller: read environment of pid 4300: permission denied"
+			if err == nil || err.Error() != want || !errors.Is(err, os.ErrPermission) || errors.Is(err, ErrNotInChat) {
+				t.Fatalf("unreadable environment became absence: %v, want %q", err, want)
+			}
+		})
 	}
 }
 

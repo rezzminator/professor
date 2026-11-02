@@ -82,7 +82,7 @@ Fixed headings, fixed order. Detail lives in `pfm/CLAUDE.md` § Testing Rules, `
 - The fence mounts the worktree read-only: `PFM_UPDATE_GOLDENS=1` regenerates in a writable scratch copy through `dev.sh iso run`; diff the result against the tracked golden, then apply it on the host.
 - `codex` is a shell function on a developer host: a test or script calls `command codex`.
 - A probe that launches an engine closes stdin (`</dev/null`) or it hangs.
-- The e2e harness refuses to run without `PFM_DEV_FENCE=1`: that red on a host is the fence law, not a defect.
+- The e2e harness refuses to run without `PFM_DEV_FENCE=1`: that red on a host is the fence law, not a defect; suites and provisioning scripts gate on `scripts/platform.sh` `platform_in_fence` (the variable AND `/.dockerenv`), never the variable alone.
 - `internal/hookentry` (socket path length) is red on a macOS host and green in the fence.
 - A shell poll counts its bound in 0.1 s ticks or from `$EPOCHREALTIME`, never whole `date +%s` seconds (a 1 s bound then waits up to 2 s); a fixed grace is a parameter a self-test can shorten (`MCP_STDIO_GRACE_SECS`).
 - A closed listener keeps accepting while a parallel test's fork holds its fd until exec: a test expecting a refused dial on a closed port stays serial.

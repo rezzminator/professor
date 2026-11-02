@@ -347,16 +347,20 @@ func TestProcExecutablePathUsesKernelPathNotArgv(t *testing.T) {
 	}
 }
 
+// A refused kern.procargs2 read is told apart by the independent probe: a
+// vanished process is absent, and an environment read of another uid's
+// process (kill 0 answers EPERM) is withheld, foreign as on Linux, so the
+// caller lookup and the chat-call guard pass over it instead of failing.
 func TestProcessReadErrorUsesIndependentExistence(t *testing.T) {
 	for _, tc := range []struct {
-		name  string
-		probe error
-		gone  bool
+		name          string
+		probe         error
+		gone, foreign bool
 	}{
-		{"same uid EINVAL", nil, false},
-		{"other uid EINVAL", syscall.EPERM, false},
-		{"vanished EINVAL", syscall.ESRCH, true},
-		{"unknown probe", syscall.EIO, false},
+		{"same uid EINVAL", nil, false, false},
+		{"other uid EINVAL", syscall.EPERM, false, true},
+		{"vanished EINVAL", syscall.ESRCH, true, false},
+		{"unknown probe", syscall.EIO, false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := processReadError(42, syscall.EINVAL, tc.probe)
@@ -369,6 +373,15 @@ func TestProcessReadErrorUsesIndependentExistence(t *testing.T) {
 					tc.gone,
 				)
 			}
+			environ := environWithheld(err, tc.probe)
+			if errors.Is(environ, ErrForeignProcess) != tc.foreign ||
+				errors.Is(environ, fs.ErrPermission) != tc.foreign || !tc.gone && !errors.Is(environ, syscall.EINVAL) {
+				t.Fatalf(
+					"environment read error=%v, want foreign and permission %t with EINVAL kept",
+					environ,
+					tc.foreign,
+				)
+			}
 		})
 	}
 }
@@ -376,13 +389,19 @@ func TestProcessReadErrorUsesIndependentExistence(t *testing.T) {
 // OpenProcFS: "" is the kernel's own table, a jail directory the Linux-shaped
 // reader on either OS, and a jail root never staged ErrNoProcRoot — never the
 // live table, so a caller keeps its own answer for "no table".
+//
+// The system root is the native table too, never stat'ed as a jail: macOS has
+// no /proc, and a missing one read as "no process" let pfm chat call append
+// into a live chat.
 func TestOpenProcFSSelectsTheTable(t *testing.T) {
-	native, err := OpenProcFS("")
-	if err != nil {
-		t.Fatalf("OpenProcFS(\"\") error = %v", err)
-	}
-	if _, isJail := native.(RealProcFS); isJail {
-		t.Fatalf("OpenProcFS(\"\") = %T, want the native table", native)
+	for _, root := range []string{"", paths.SystemProcRoot()} {
+		native, err := OpenProcFS(root)
+		if err != nil {
+			t.Fatalf("OpenProcFS(%q) error = %v", root, err)
+		}
+		if _, isJail := native.(RealProcFS); isJail {
+			t.Fatalf("OpenProcFS(%q) = %#v, want the native table", root, native)
+		}
 	}
 	jail := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(jail, "4242"), 0o700); err != nil {

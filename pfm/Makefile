@@ -140,8 +140,8 @@ lint-new: ## Findings on lines changed since LINT_BASE (origin/main) — the gat
 vet: ## go vet the whole module
 	go vet ./...
 
-# Suites never run on the host: there `cover` runs in the fence instead (testjail/fence.go).
-IN_FENCE := $(shell [ -e /.dockerenv ] && [ "$$PFM_DEV_FENCE" = 1 ] && echo 1)
+# Suites never run on the host: there `cover` runs in the fence instead (scripts/platform.sh platform_in_fence).
+IN_FENCE := $(shell . "$(REPO)/scripts/platform.sh" && platform_in_fence && echo 1)
 ifneq ($(IN_FENCE),1)
 cover:
 	bash "$(DEV)" iso cover pfm

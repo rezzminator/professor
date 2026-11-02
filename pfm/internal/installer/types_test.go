@@ -54,7 +54,9 @@ func TestExecCommandRunnerAbsentBinaryIsALookupNotARun(t *testing.T) {
 	for _, output := range []bool{false, true} {
 		t.Run(map[bool]string{false: "Run", true: "Output"}[output], func(t *testing.T) {
 			ctx, recorder := obs.Test(t)
-			const name = "systemctl"
+			// Absent on every platform and in no dependency registry row, so
+			// no platform gate answers before the lookup this test pins.
+			const name = "pfm-absent-command"
 			var err error
 			if output {
 				_, err = (execCommandRunner{}).Output(ctx, name)

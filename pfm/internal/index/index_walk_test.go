@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
@@ -35,9 +37,10 @@ func TestWalkClaudeRootsUsesGivenSymlinkPaths(t *testing.T) {
 	}
 }
 
-// pathMax is Linux's PATH_MAX: a path this long or longer is refused to every
-// user, root included, so it stands in for an unreadable entry in the fence.
-const pathMax = 4096
+// pathMax is the platform's PATH_MAX (4096 on Linux, 1024 on macOS): a path
+// this long or longer is refused to every user, root included, so it stands in
+// for an unreadable entry in the fence.
+const pathMax = unix.PathMax
 
 // overlongClaudeRoot builds a Claude root of exactly rootLen characters
 // holding p/good.jsonl, by renaming a short last component long once its

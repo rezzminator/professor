@@ -4,6 +4,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/codexmeta"
@@ -89,7 +90,12 @@ func TestClaudePassKeepsGoingPastAnUnreadableTranscript(t *testing.T) {
 	if len(prompts) != 2 || prompts["broken"] != "kept from before" || prompts["sibling"] != "second" {
 		t.Fatalf("transcript last prompts = %v, want broken kept from before and sibling second", prompts)
 	}
-	want := `claude transcript|open "` + broken + `": open ` + broken + ": no such device or address"
+	// open(2) of a socket fails ENXIO on Linux, EOPNOTSUPP on macOS.
+	refusal := map[string]string{
+		"linux":  "no such device or address",
+		"darwin": "operation not supported on socket",
+	}[runtime.GOOS]
+	want := `claude transcript|open "` + broken + `": open ` + broken + ": " + refusal
 	if got := unreadableWarnings(recorder, broken); len(got) != 1 || got[0] != want {
 		t.Fatalf("warnings for %s = %q, want [%q]", broken, got, want)
 	}

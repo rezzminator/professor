@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/sys/unix"
+
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -120,13 +122,13 @@ func TestArchiveSubagentsReportsWhatItCouldNotRead(t *testing.T) {
 		{
 			name: "unstatable transcript",
 			arrange: func(t *testing.T, _ *paths.Values, project string) (string, string) {
-				// A directory just under PATH_MAX lists, but its entry's full
-				// path is too long for lstat.
+				// A directory just under the platform's PATH_MAX lists, but
+				// its entry's full path is too long for lstat.
 				directory := project
-				for len(directory)+201 < 3900 {
+				for len(directory)+201 < unix.PathMax-196 {
 					directory = filepath.Join(directory, strings.Repeat("d", 200))
 				}
-				directory = filepath.Join(directory, strings.Repeat("e", 3950-len(directory)-1))
+				directory = filepath.Join(directory, strings.Repeat("e", unix.PathMax-146-len(directory)-1))
 				if err := os.MkdirAll(directory, 0o700); err != nil {
 					t.Fatal(err)
 				}

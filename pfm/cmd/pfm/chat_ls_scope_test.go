@@ -54,22 +54,20 @@ func TestChatLSScopesByRepositoryNotByPathPrefix(t *testing.T) {
 		t.Fatalf("chat ls from another repository = %q, want the seat counted as elsewhere", got)
 	}
 
-	// A deleted working directory has no repository to scope to: ls lists every repo and says so.
-	gone := t.TempDir()
-	t.Chdir(gone)
-	if err := os.Remove(gone); err != nil {
-		t.Fatal(err)
-	}
+	// A working directory pfm cannot name has no repository to scope to: ls lists every repo and says so.
+	testjail.ChdirUnnamable(t)
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"chat", "ls"}, &stdout, &stderr); code != 0 {
-		t.Fatalf("chat ls from a deleted directory code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+		t.Fatalf(
+			"chat ls from an unnamable directory code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String(),
+		)
 	}
 	if got := stdout.String(); !strings.HasPrefix(got, "live chats everywhere (") || !strings.Contains(got, socket) {
-		t.Fatalf("chat ls from a deleted directory stdout = %q, want every repo listed with %q", got, socket)
+		t.Fatalf("chat ls from an unnamable directory stdout = %q, want every repo listed with %q", got, socket)
 	}
 	if got := stderr.String(); !strings.HasPrefix(got, "pfm chat ls: read the current directory: ") ||
 		!strings.HasSuffix(got, "; listing every repo\n") {
-		t.Fatalf("chat ls from a deleted directory stderr = %q, want the fallback named", got)
+		t.Fatalf("chat ls from an unnamable directory stderr = %q, want the fallback named", got)
 	}
 }
 

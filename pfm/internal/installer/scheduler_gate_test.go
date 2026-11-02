@@ -299,6 +299,9 @@ func TestNameSyncServiceRunningClassifiesProbeAnswers(t *testing.T) {
 // `is-active`, as real systemd does for a oneshot mid-run: a gate that trusts
 // the is-active exit reads a running job as idle.
 func TestNameSyncServiceRunningProductionShape(t *testing.T) {
+	if schedulerIsLaunchd {
+		t.Skip("the systemd gate is Linux-only; the dependency registry refuses systemctl on macOS")
+	}
 	answer := func(state string) string {
 		return "#!/bin/sh\ncase \"$*\" in *show*) echo " + state + "; exit 0;; esac\nexit 3\n"
 	}

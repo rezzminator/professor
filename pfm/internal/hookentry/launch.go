@@ -452,11 +452,13 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 	// can record its status and close the last pane before that connection.
 	// The durable status is authoritative only after the bounded wait ended;
 	// a timeout above still fails, and absent or invalid status never succeeds.
+	// A waiter that lost that race fails with a valid status beside it: the
+	// failure is reported only when the status cannot vouch for the run.
 	status, err := readLaunchStatus(statusPath)
-	if waitErr != nil {
-		fmt.Fprintf(stderr, "pfm internal launch: wait for launcher status signal: %v\n", waitErr)
-	}
 	if err != nil {
+		if waitErr != nil {
+			fmt.Fprintf(stderr, "pfm internal launch: wait for launcher status signal: %v\n", waitErr)
+		}
 		fmt.Fprintf(stderr, "pfm internal launch: %v\n", err)
 		return 1
 	}

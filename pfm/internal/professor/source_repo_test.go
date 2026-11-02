@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func writeSourceRepoFixture(t *testing.T, root string, files ...string) {
@@ -48,23 +49,15 @@ func TestIsSourceRepoRefusesAScaffoldedAdopterProject(t *testing.T) {
 func TestDiscoverSourceRepoLogsAnUnresolvableWorkingDirectory(t *testing.T) {
 	_, recorder := obs.Test(t)
 	t.Setenv("PFM_SOURCE_REPO", "")
-	gone := filepath.Join(t.TempDir(), "gone")
-	if err := os.Mkdir(gone, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	t.Chdir(gone)
-	t.Setenv("PWD", gone)
-	if err := os.Remove(gone); err != nil {
-		t.Fatal(err)
-	}
+	testjail.ChdirUnnamable(t)
 	if got := DiscoverSourceRepo(); got != "" {
-		t.Fatalf("DiscoverSourceRepo() = %q, want \"\" from a removed working directory", got)
+		t.Fatalf("DiscoverSourceRepo() = %q, want \"\" from an unnamable working directory", got)
 	}
 	records := recorder.Records()
 	if len(records) != 1 || records[0].Message != "professor.source_repo.unreadable" || records[0].Level != "WARN" {
 		t.Fatalf("records = %+v, want one WARN professor.source_repo.unreadable", records)
 	}
-	if got, _ := records[0].Field(obs.FieldErr); got != "getwd: no such file or directory" {
-		t.Fatalf("err field = %v, want getwd: no such file or directory", got)
+	if got, _ := records[0].Field(obs.FieldErr); got != "getwd: file name too long" {
+		t.Fatalf("err field = %v, want getwd: file name too long", got)
 	}
 }

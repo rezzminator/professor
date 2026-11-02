@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"golang.org/x/sys/unix"
 )
 
 func TestParseCrumbNameStrictGrammar(t *testing.T) {
@@ -125,7 +127,7 @@ func TestReadCrumbsReadOnlyLeavesStalePane(t *testing.T) {
 
 // overlongSIDDir builds a directory whose path is exactly length characters,
 // written by populate under a short name and then renamed long: an entry
-// whose own path then passes Linux's PATH_MAX (4096) is refused to every
+// whose own path then passes the platform's PATH_MAX (unix.PathMax) is refused to every
 // user, root included, while its shorter siblings stay readable.
 func overlongSIDDir(t *testing.T, length int, populate func(dir string)) string {
 	t.Helper()
@@ -162,7 +164,7 @@ func TestScanCrumbsCostsOnlyTheCrumbItCannotReadOrSweep(t *testing.T) {
 		longSocket + ".%7": "/transcripts/unremovable.jsonl",
 		"cc-4-5-6.%3":      "/transcripts/on-an-unread-socket.jsonl",
 	}
-	sidDir := overlongSIDDir(t, 4000, func(dir string) {
+	sidDir := overlongSIDDir(t, unix.PathMax-96, func(dir string) {
 		for name, content := range files {
 			if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
 				t.Fatal(err)

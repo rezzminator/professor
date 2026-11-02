@@ -611,8 +611,9 @@ func callOneHeadless(call headlessCall, targetName string, stdout, stderr io.Wri
 		fmt.Fprintf(stderr, "pfm chat call: %v\n", err)
 		return codeUndelivered
 	}
-	if result.Code == pfmcall.CodeUnknown && !strings.Contains(strings.ToLower(result.Message), "ambiguous") {
-		target, found, resolveErr := resolveResumeTarget(targetName, runtimes...)
+	result, ladderTarget, dormant := pfmchat.DormantCallTarget(ctx, result, targetName, firstRuntime(runtimes))
+	if dormant {
+		target, found, resolveErr := resolveResumeTarget(ladderTarget, runtimes...)
 		if resolveErr != nil {
 			fmt.Fprintf(stderr, "pfm chat call: %v\n", resolveErr)
 			return codeUnknownChat

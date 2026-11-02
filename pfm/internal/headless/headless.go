@@ -281,7 +281,14 @@ func InspectWith(
 		status.State = StateWorking
 	}
 	if chat.Live && chat.Engine == pfmengine.Codex {
-		applyCodexTurnRecord(&status, meta.CodexTurn)
+		turn := meta.CodexTurn
+		// Codex writes nothing on resume: a turn left open by a killed process stays
+		// open in the rollout, so a seat minted after the rollout's last write never ran it.
+		if birth := pfmengine.SocketBirth(chat.Socket); turn == transcript.CodexTurnOpen && birth > 0 &&
+			meta.ModifiedUnixNS > 0 && meta.ModifiedUnixNS < birth*int64(time.Second) {
+			turn = transcript.CodexTurnEnded
+		}
+		applyCodexTurnRecord(&status, turn)
 	}
 	if chat.Live && chat.Engine == pfmengine.Claude && chat.ID != "" {
 		sidechainWorking, err := newerClaudeSidechain(chat.Path, chat.ID, meta.ModifiedUnixNS)

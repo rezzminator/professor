@@ -1,6 +1,7 @@
 package claudelaunch
 
 import (
+	"slices"
 	"strings"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
@@ -164,6 +165,31 @@ var hygiene = []string{
 	envAutoCompactWindow, envDisableNonessentialTraffic,
 	envDisableNonstreamingFallback, envGatewayDiscovery,
 	envCodexThreadID,
+}
+
+// codexToolCallID marks a Codex tool shell: Codex sets it on each exec tool call's shell and the
+// Codex process itself carries none of codexToolShell; CODEX_CI is not the marker, being a name a
+// CI runner may export on its own.
+const codexToolCallID = "CODEX_TOOL_CALL_ID"
+
+// codexToolShell is what Codex injects into a tool shell for a non-interactive command: a chat born
+// from one would start monochrome and pager-less, tagged with the caller's Codex call.
+var codexToolShell = []string{
+	"NO_COLOR", "PAGER", "GIT_PAGER", "GH_PAGER", "CODEX_CI", "CODEX_SESSION_ID",
+	codexToolCallID, "CODEX_VERSION", "CODEX_APPLY_PATCH_PRESERVE_LINE_ENDINGS",
+}
+
+// WithoutCodexToolShell is environ without codexToolShell when environ is a Codex tool shell, else
+// environ unchanged: a NO_COLOR the user exported in a login shell stays.
+func WithoutCodexToolShell(environ []string) []string {
+	marked := func(entry string) bool { return strings.HasPrefix(entry, codexToolCallID+"=") }
+	if !slices.ContainsFunc(environ, marked) {
+		return environ
+	}
+	return slices.DeleteFunc(slices.Clone(environ), func(entry string) bool {
+		name, _, _ := strings.Cut(entry, "=")
+		return slices.Contains(codexToolShell, name)
+	})
 }
 
 // Knobs is the ordered inventory of values carried into a Claude launch.

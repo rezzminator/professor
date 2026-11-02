@@ -3,6 +3,7 @@ package headless
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -358,17 +359,24 @@ const (
 // turn: the assistant commentary Codex writes between tool calls is newest
 // through every quiet gap of a turn still running.
 func TestACodexTurnIsIdleOnlyAfterItsEndRecord(t *testing.T) {
+	// The rollout's last write is 10 minutes old; a seat socket minted after it
+	// is a resume whose process never ran the open turn.
+	resumedSeat := fmt.Sprintf("cx-%d-4242-1717", time.Now().Add(-5*time.Minute).Unix())
+	seatOlderThanTheTurn := fmt.Sprintf("cx-%d-4242-1717", time.Now().Add(-20*time.Minute).Unix())
 	for _, testCase := range []struct {
-		name  string
-		lines []string
-		want  string
+		name   string
+		lines  []string
+		want   string
+		socket string
 	}{
-		{"commentary mid-turn", []string{codexTurnStartLine, codexUserLine, codexAssistantLine}, StateWorking},
-		{"task_complete", []string{codexTurnStartLine, codexUserLine, codexAssistantLine, codexTurnCompleteLine}, StateIdle},
-		{"turn_aborted", []string{codexTurnStartLine, codexUserLine, codexAssistantLine, codexAbortLine}, StateIdle},
-		{"task_complete after a tool call", []string{codexTurnStartLine, codexUserLine, codexToolLine, codexTurnCompleteLine}, StateIdle},
-		{"a prompt after the turn ended", []string{codexTurnStartLine, codexAssistantLine, codexTurnCompleteLine, codexUserLine}, StateWorking},
-		{"no turn record keeps the newest-entry rule", []string{codexUserLine, codexAssistantLine}, StateIdle},
+		{"commentary mid-turn", []string{codexTurnStartLine, codexUserLine, codexAssistantLine}, StateWorking, ""},
+		{"an open turn the resumed seat never ran", []string{codexTurnStartLine, codexUserLine, codexToolLine}, StateIdle, resumedSeat},
+		{"an open turn written after the seat was born", []string{codexTurnStartLine, codexUserLine, codexToolLine}, StateWorking, seatOlderThanTheTurn},
+		{"task_complete", []string{codexTurnStartLine, codexUserLine, codexAssistantLine, codexTurnCompleteLine}, StateIdle, ""},
+		{"turn_aborted", []string{codexTurnStartLine, codexUserLine, codexAssistantLine, codexAbortLine}, StateIdle, ""},
+		{"task_complete after a tool call", []string{codexTurnStartLine, codexUserLine, codexToolLine, codexTurnCompleteLine}, StateIdle, ""},
+		{"a prompt after the turn ended", []string{codexTurnStartLine, codexAssistantLine, codexTurnCompleteLine, codexUserLine}, StateWorking, ""},
+		{"no turn record keeps the newest-entry rule", []string{codexUserLine, codexAssistantLine}, StateIdle, ""},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			path := writeChat(t, testCase.lines...)
@@ -376,8 +384,17 @@ func TestACodexTurnIsIdleOnlyAfterItsEndRecord(t *testing.T) {
 			if err := os.Chtimes(path, stamp, stamp); err != nil {
 				t.Fatal(err)
 			}
-			status, err := Inspect(context.Background(),
-				Chat{Name: "seat", Engine: pfmengine.Codex, Path: path, Live: true}, time.Now())
+			status, err := Inspect(
+				context.Background(),
+				Chat{
+					Name:   "seat",
+					Engine: pfmengine.Codex,
+					Path:   path,
+					Live:   true,
+					Socket: testCase.socket,
+				},
+				time.Now(),
+			)
 			if err != nil {
 				t.Fatalf("Inspect() error = %v", err)
 			}

@@ -524,6 +524,16 @@ func CheckLegacyPending(target, legacy string) error {
 	)
 }
 
+// CodexHome is the Codex home holding its models_cache.json: PFM_CODEX_ROOT's first entry, else
+// the engine's default root under home.
+func CodexHome(home string) string {
+	descriptor := pfmengine.MustLookup(pfmengine.Codex)
+	if roots := filepath.SplitList((OSEnv{}).Get(descriptor.RootEnv)); len(roots) > 0 {
+		return roots[0]
+	}
+	return descriptor.DefaultRoots(home)[0]
+}
+
 func Resolve() (Values, error) {
 	home, err := Home()
 	if err != nil {

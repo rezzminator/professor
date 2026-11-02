@@ -14,6 +14,7 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/themesync"
@@ -285,6 +286,11 @@ func (tmux TmuxSpawner) newSessionCommand(
 		tmux.Binary,
 		filepath.Join(tmux.TmuxDir, socket),
 		arguments...)
+	// The chat lives in its own pane: the caller's Herdr pane identity would attribute it to the
+	// caller (an attach re-copies the attaching client's through update-environment), and a Codex
+	// tool shell's injections would start it monochrome and pager-less. tmux sets TMUX and
+	// TMUX_PANE in the pane itself, so the caller's never reach it.
+	environment = claudelaunch.WithoutCodexToolShell(herdr.StripPane(environment))
 	env := tmux.Env
 	if env == nil {
 		env = paths.OSEnv{}

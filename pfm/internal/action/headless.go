@@ -16,6 +16,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/launchnotice"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
@@ -109,7 +110,7 @@ func CodexEffortArg(effort string) []string {
 // codexModelArgs renders a Codex seat's `--model` pair, a bare roster tier (astra) resolved to its
 // full Codex id through pfmengine.CodexModel; no model renders no flag.
 func codexModelArgs(model, home string) ([]string, error) {
-	resolved, err := pfmengine.CodexModel(model, home)
+	resolved, err := pfmengine.CodexModel(model, home, paths.CodexHome(home))
 	if err != nil || resolved == "" {
 		return nil, err
 	}

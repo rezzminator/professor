@@ -1,6 +1,7 @@
 package transcript
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,9 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/codexmeta"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // historyUnparsedRole marks the HistoryMessage standing in for a row that is not JSON.
@@ -64,12 +68,51 @@ func newestHistoryMatch(pool, slug, sid string) (string, error) {
 	return newest, nil
 }
 
-// ReadHistory is the native port of history.sh's jq pipeline: tail
+// ReadHistory returns the last count user/assistant turns of the transcript at
+// path. A Codex rollout is read through its own parser; any other file is a
+// Claude transcript read by readClaudeHistory.
+func ReadHistory(path string, count int) ([]HistoryMessage, error) {
+	read := readClaudeHistory
+	if codexmeta.IsRolloutName(filepath.Base(path)) {
+		read = readCodexHistory
+	}
+	messages, err := read(path)
+	if err != nil {
+		return nil, err
+	}
+	if len(messages) > count {
+		messages = messages[len(messages)-count:]
+	}
+	return messages, nil
+}
+
+// readCodexHistory keeps a rollout's user and assistant entries as From reads
+// them: harness instructions and tool calls are already left out.
+func readCodexHistory(path string) ([]HistoryMessage, error) {
+	entries, _, err := From(context.Background(), path, string(pfmengine.Codex), 0)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	var messages []HistoryMessage
+	for _, entry := range entries {
+		if entry.Role != RoleUser && entry.Role != RoleAssistant {
+			continue
+		}
+		timestamp := entry.Timestamp
+		if timestamp == "" {
+			timestamp = "?"
+		}
+		messages = append(messages, HistoryMessage{Timestamp: timestamp, Role: entry.Role, Text: entry.Text})
+	}
+	return messages, nil
+}
+
+// readClaudeHistory is the native port of history.sh's jq pipeline: tail
 // generously, keep only user/assistant records with non-empty rendered text,
-// drop synthetic reminder and caveat preambles, then take the last count
-// survivors. The file is read whole, so every line of its tail is complete;
-// a row that is not JSON stays in the list as an "unparsed" marker.
-func ReadHistory(path string, count int) (messages []HistoryMessage, returnErr error) {
+// drop synthetic reminder and caveat preambles. The file is read whole, so
+// every line of its tail is complete; a row that is not JSON stays in the list
+// as an "unparsed" marker.
+func readClaudeHistory(path string) (messages []HistoryMessage, returnErr error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", path, err)
@@ -117,9 +160,6 @@ func ReadHistory(path string, count int) (messages []HistoryMessage, returnErr e
 			timestamp = "?"
 		}
 		messages = append(messages, HistoryMessage{Timestamp: timestamp, Role: record.Type, Text: text})
-	}
-	if len(messages) > count {
-		messages = messages[len(messages)-count:]
 	}
 	return messages, nil
 }

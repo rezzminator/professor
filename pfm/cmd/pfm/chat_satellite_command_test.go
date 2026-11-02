@@ -279,6 +279,30 @@ func TestChatHistoryUsesConfiguredRootsToResolveTheTranscript(t *testing.T) {
 	}
 }
 
+// TestChatHistoryRendersACodexRollout: a rollout path is read as Codex, its
+// harness instructions and tool calls left out, never as an empty Claude file.
+func TestChatHistoryRendersACodexRollout(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rollout-2026-01-02T03-04-05-71717171-7171-4171-8171-717171717171.jsonl")
+	lines := strings.Join([]string{
+		`{"timestamp":"2026-01-02T03:04:05Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"# AGENTS.md instructions\n\n<INSTRUCTIONS>\nbe brief\n</INSTRUCTIONS>"}]}}`,
+		`{"timestamp":"2026-01-02T03:04:06Z","type":"event_msg","payload":{"type":"user_message","message":"reply with OK"}}`,
+		`{"timestamp":"2026-01-02T03:04:07Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{}"}}`,
+		`{"timestamp":"2026-01-02T03:04:08Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"OK"}]}}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(lines), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := runChatSatellite("history", []string{path, "5"}, strings.NewReader(""), &stdout, &stderr, nil, nil,
+		commandRuntime{})
+	want := "== " + path + " · last 5 messages ==\n" +
+		"\n───── 2026-01-02T03:04:06Z · user ─────\nreply with OK\n" +
+		"\n───── 2026-01-02T03:04:08Z · assistant ─────\nOK\n"
+	if code != 0 || stdout.String() != want {
+		t.Fatalf("history code=%d stdout=%q, want 0 and %q; stderr=%q", code, stdout.String(), want, stderr.String())
+	}
+}
+
 func TestChatFindSearchesEveryConfiguredTranscriptRegistry(t *testing.T) {
 	root := t.TempDir()
 	home := filepath.Join(root, "home")

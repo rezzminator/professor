@@ -502,6 +502,9 @@ func TestAwaitKeepsTheFrontierAcrossARolloutDecompressedToResume(t *testing.T) {
 	}
 }
 
+// codexAgentsInstructionsLine is the AGENTS.md block a Codex rollout records as a user message.
+const codexAgentsInstructionsLine = `{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"# AGENTS.md instructions\n\n<INSTRUCTIONS>\nbe brief\n</INSTRUCTIONS>"}]}}`
+
 func codexSaid(text string) string {
 	return `{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"` +
 		text + `"}]}}`
@@ -540,6 +543,15 @@ func TestAwaitHoldsACodexTurnUntilItsEndRecord(t *testing.T) {
 			name:   "codex without turn records keeps the newest-entry rule",
 			engine: pfmengine.Codex,
 			turn:   []string{codexUserLine, codexToolLine, codexSaid("answered")},
+			answer: "answered",
+		},
+		{
+			name:   "codex harness instructions written as a user message are no human turn",
+			engine: pfmengine.Codex,
+			turn: []string{
+				codexAgentsInstructionsLine, codexTurnStartLine, codexUserLine, codexSaid("answered"),
+			},
+			end:    codexTurnCompleteLine,
 			answer: "answered",
 		},
 		{
@@ -582,8 +594,8 @@ func TestAwaitHoldsACodexTurnUntilItsEndRecord(t *testing.T) {
 					t.Fatal("Await() still waiting after the turn's end record")
 				}
 			}
-			if turn.State != StateIdle || turn.Answer != testCase.answer || !turn.Delivered {
-				t.Fatalf("turn = %#v, want delivered idle with answer %q", turn, testCase.answer)
+			if turn.State != StateIdle || turn.Answer != testCase.answer || !turn.Delivered || turn.Superseded {
+				t.Fatalf("turn = %#v, want delivered idle with answer %q, not superseded", turn, testCase.answer)
 			}
 		})
 	}

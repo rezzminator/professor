@@ -14,6 +14,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/launchnotice"
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
@@ -208,7 +209,7 @@ func codexWorkbenchArgs(args []string, home string, stderr io.Writer) ([]string,
 	}
 	var inserted []string
 	if persona.Model != "" && !model {
-		resolved, err := pfmengine.CodexModel(persona.Model, home)
+		resolved, err := pfmengine.CodexModel(persona.Model, home, paths.CodexHome(home))
 		if err != nil {
 			fmt.Fprintf(stderr, "%s: %v; launching on Codex's default model\n", prefix, err)
 		} else {

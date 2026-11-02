@@ -2,11 +2,13 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -14,6 +16,7 @@ import (
 	"time"
 
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
@@ -400,46 +403,7 @@ func TestChatCallResumeLadderPathSessionAndExcerpt(t *testing.T) {
 		}},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
-			root := testjail.ShortRoot(t)
-			home := filepath.Join(root, "home")
-			project := filepath.Join(root, "claude", "project")
-			for _, directory := range []string{
-				home, project, filepath.Join(root, "tmux"),
-				filepath.Join(root, "codex"), filepath.Join(root, "proc"),
-			} {
-				if err := os.MkdirAll(directory, 0o700); err != nil {
-					t.Fatal(err)
-				}
-			}
-			claudeBinary := filepath.Join(home, ".local", "bin", "claude")
-			if err := os.MkdirAll(filepath.Dir(claudeBinary), 0o700); err != nil {
-				t.Fatal(err)
-			}
-			const registryStub = "#!/bin/sh\n" +
-				"if [ \"$1\" = agents ] && [ \"$2\" = --json ]; then\n" +
-				"  printf '[]\\n'\n" +
-				"else\n  exit 2\nfi\n"
-			if err := testjail.WriteExecutable(claudeBinary, []byte(registryStub), 0o700); err != nil {
-				t.Fatal(err)
-			}
-			transcript := filepath.Join(project, id+".jsonl")
-			line := fmt.Sprintf(
-				`{"type":"user","uuid":"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee","sessionId":%q,"cwd":"/jail/project","version":"1","gitBranch":"","timestamp":"2026-08-16T00:00:00.000Z","message":{"role":"user","content":"distinctive transcript sentence for the resume ladder"}}`+"\n",
-				id,
-			)
-			if err := os.WriteFile(transcript, []byte(line), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			t.Setenv("HOME", home)
-			t.Setenv("TMUX", "")
-			t.Setenv("PFM_HOME", home)
-			t.Setenv("PFM_CACHE_DB", filepath.Join(root, "pfm-cache.db"))
-			t.Setenv("PFM_STATE_DB", filepath.Join(root, "shared.db"))
-			t.Setenv("PFM_SID_DIR", filepath.Join(root, "sid"))
-			t.Setenv("PFM_CLAUDE_ROOTS", filepath.Join(root, "claude"))
-			t.Setenv("PFM_CODEX_ROOT", filepath.Join(root, "codex"))
-			t.Setenv("PFM_TMUX_DIR", filepath.Join(root, "tmux"))
-			t.Setenv("PFM_PROC_ROOT", filepath.Join(root, "proc"))
+			home, transcript := resumeLadderJail(t, id)
 			statedTestSender(t)
 			var stdout, stderr bytes.Buffer
 			code := run(
@@ -463,6 +427,120 @@ func TestChatCallResumeLadderPathSessionAndExcerpt(t *testing.T) {
 			backups, err := filepath.Glob(filepath.Join(home, ".claude-sessions", ".chat-call-backups", "*.jsonl"))
 			if err != nil || len(backups) != 1 {
 				t.Fatalf("backups=%v err=%v", backups, err)
+			}
+		})
+	}
+}
+
+// resumeLadderJail stages a jail holding one dormant Claude transcript, id,
+// whose first user turn is the resume ladder's distinctive sentence.
+func resumeLadderJail(t *testing.T, id string) (home, transcript string) {
+	t.Helper()
+	root := testjail.ShortRoot(t)
+	home = filepath.Join(root, "home")
+	project := filepath.Join(root, "claude", "project")
+	for _, directory := range []string{
+		home, project, filepath.Join(root, "tmux"),
+		filepath.Join(root, "codex"), filepath.Join(root, "proc"),
+	} {
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	claudeBinary := filepath.Join(home, ".local", "bin", "claude")
+	if err := os.MkdirAll(filepath.Dir(claudeBinary), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	const registryStub = "#!/bin/sh\n" +
+		"if [ \"$1\" = agents ] && [ \"$2\" = --json ]; then\n" +
+		"  printf '[]\\n'\n" +
+		"else\n  exit 2\nfi\n"
+	if err := testjail.WriteExecutable(claudeBinary, []byte(registryStub), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	transcript = filepath.Join(project, id+".jsonl")
+	line := fmt.Sprintf(
+		`{"type":"user","uuid":"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee","sessionId":%q,"cwd":"/jail/project","version":"1","gitBranch":"","timestamp":"2026-08-16T00:00:00.000Z","message":{"role":"user","content":"distinctive transcript sentence for the resume ladder"}}`+"\n",
+		id,
+	)
+	if err := os.WriteFile(transcript, []byte(line), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("TMUX", "")
+	t.Setenv("PFM_HOME", home)
+	t.Setenv("PFM_CACHE_DB", filepath.Join(root, "pfm-cache.db"))
+	t.Setenv("PFM_STATE_DB", filepath.Join(root, "shared.db"))
+	t.Setenv("PFM_SID_DIR", filepath.Join(root, "sid"))
+	t.Setenv("PFM_CLAUDE_ROOTS", filepath.Join(root, "claude"))
+	t.Setenv("PFM_CODEX_ROOT", filepath.Join(root, "codex"))
+	t.Setenv("PFM_TMUX_DIR", filepath.Join(root, "tmux"))
+	t.Setenv("PFM_PROC_ROOT", filepath.Join(root, "proc"))
+	return home, transcript
+}
+
+// A dead chat the registry knows by name is answered from its row, never by
+// excerpt-matching the name: a dead Codex chat exits codeDeadChat naming how
+// to revive it, and a dead Claude chat resumes into its own session.
+func TestChatCallAnswersARegisteredDeadChatFromItsRow(t *testing.T) {
+	const claudeID = "22222222-2222-4333-8444-555555555555"
+	const codexID = "33333333-2222-4333-8444-555555555555"
+	for _, testCase := range []struct {
+		name, engine, session string
+		wantCode              int
+		wantSession           string
+		wantStderr            string
+	}{
+		{
+			name: "walk-dead-cx", engine: "cx", session: codexID, wantCode: codeDeadChat,
+			wantStderr: `"walk-dead-cx" is dead (engine cx, session ` + codexID +
+				"); revive it with: pfm chat open walk-dead-cx\n",
+		},
+		{
+			name: "walk-dead-cc", engine: "cc", session: claudeID,
+			wantSession: claudeID,
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			_, transcript := resumeLadderJail(t, claudeID)
+			before, err := os.ReadFile(transcript)
+			if err != nil {
+				t.Fatal(err)
+			}
+			state := fleetdb.OpenSharedState(context.Background(), jailPaths(t))
+			if err := state.PutSeat(context.Background(), fleetdb.Seat{
+				SeatID: "dead-" + testCase.engine, SessionID: testCase.session, Engine: testCase.engine,
+				Backend: "herdr", State: "lost", Name: testCase.name, LostNote: "fixture retired",
+				HerdrSocket: filepath.Join(filepath.Dir(transcript), "gone.sock"), HerdrPane: "w1:p1",
+				HerdrWorkspace: "w1",
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if err := state.Close(); err != nil {
+				t.Fatal(err)
+			}
+			statedTestSender(t)
+			var stdout, stderr bytes.Buffer
+			code := run([]string{"chat", "call", testCase.name, "registered dead message"}, &stdout, &stderr)
+			after, err := os.ReadFile(transcript)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if testCase.wantCode != 0 {
+				if code != testCase.wantCode || stdout.String() != "" || stderr.String() != testCase.wantStderr ||
+					!bytes.Equal(after, before) {
+					t.Fatalf("exit=%d want %d\nstdout=%q\nstderr=%q\nwant  =%q\ntranscript %s changed=%t",
+						code, testCase.wantCode, stdout.String(), stderr.String(), testCase.wantStderr,
+						transcript, !bytes.Equal(after, before))
+				}
+				return
+			}
+			session := regexp.MustCompile(`^called RESUME user turn \S+ \(parent \S+\) into session (\S+) `).
+				FindStringSubmatch(stdout.String())
+			if code != 0 || len(session) != 2 || session[1] != testCase.wantSession ||
+				!strings.Contains(string(after), "registered dead message") {
+				t.Fatalf("exit=%d stdout=%q stderr=%q transcript %s = %q",
+					code, stdout.String(), stderr.String(), transcript, after)
 			}
 		})
 	}

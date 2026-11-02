@@ -299,6 +299,37 @@ func TestChatNewSpawnsANamedCodexChat(t *testing.T) {
 	}
 }
 
+// TestChatNewRefusesACodexModelTheCatalogueLacks: a model Codex does not offer is a usage error
+// before any tmux server or chat row exists.
+func TestChatNewRefusesACodexModelTheCatalogueLacks(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	jail := newRunJail(t)
+	defer jail.killSockets(t)
+	root := filepath.Join(jail.root, "codex")
+	if err := os.WriteFile(
+		filepath.Join(root, "models_cache.json"),
+		[]byte(`{"models":[{"slug":"gpt-6-astra"}]}`),
+		0o644,
+	); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := run([]string{
+		"chat", "new", "--engine", "codex", "--model", "gpt-9-nova", "--name", "refused model",
+		"--cwd", filepath.Join(jail.root, "work"), "hello",
+	}, &stdout, &stderr)
+	want := "pfm chat new: codex model \"gpt-9-nova\" is not offered by Codex (catalogue " +
+		filepath.Join(root, "models_cache.json") + "); offered: gpt-6-astra\n"
+	if code != 2 || stderr.String() != want {
+		t.Fatalf("exit=%d stderr=%q, want exit 2 and %q", code, stderr.String(), want)
+	}
+	if entries, err := os.ReadDir(jail.tmuxDir); err != nil || len(entries) != 0 {
+		t.Fatalf("jailed tmux sockets = %v (err=%v), want none", entries, err)
+	}
+}
+
 // TestChatNewNamesACodexChatSlowToLeaveItsStartupOverlay is the rename under
 // a loaded machine: the engine repaints late after the Escape that clears its
 // startup overlay, so pfm, seeing the overlay hold, sends it spare Escapes.

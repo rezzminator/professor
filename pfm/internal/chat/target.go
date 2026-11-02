@@ -12,6 +12,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -97,6 +99,52 @@ func TargetIn(
 		return headless.Chat{}, &TargetError{Name: name, Err: ErrUnknownChat}
 	}
 	return found, nil
+}
+
+// DormantCallTarget decides whether a call every live namespace missed runs
+// the dormant ladder, and on what. A CodeUnknown result that names no
+// ambiguity is answered from the registry first: a dead Claude chat it knows
+// resumes through its own transcript, the returned ladder target; any other
+// dead chat becomes a CodeDead result naming its engine, session and how to
+// revive it, and a registry that could not be read a CodeUndelivered one. A
+// target the registry does not know, or a live row the call engine missed,
+// reaches the ladder as typed. dormant is false when the result stands.
+func DormantCallTarget(
+	ctx context.Context,
+	result pfmcall.Result,
+	name string,
+	runtime *pfmconfig.Runtime,
+) (answer pfmcall.Result, ladderTarget string, dormant bool) {
+	if result.Code != pfmcall.CodeUnknown || strings.Contains(strings.ToLower(result.Message), "ambiguous") {
+		return result, name, false
+	}
+	chat, err := Target(ctx, name, runtime)
+	switch {
+	case errors.Is(err, ErrUnknownChat):
+		return result, name, true
+	case err != nil:
+		result.Code = pfmcall.CodeUndelivered
+		result.Message = fmt.Sprintf("registry lookup of %q failed: %v", name, err)
+		return result, name, false
+	case chat.Live:
+		return result, name, true
+	}
+	if chat.Engine == pfmengine.Claude && chat.Path != "" {
+		info, statErr := os.Stat(chat.Path)
+		if statErr == nil && info.Mode().IsRegular() {
+			return result, chat.Path, true
+		}
+		if statErr != nil && !errors.Is(statErr, fs.ErrNotExist) {
+			result.Code = pfmcall.CodeUndelivered
+			result.Message = fmt.Sprintf("stat transcript of %q: %v", name, statErr)
+			return result, name, false
+		}
+	}
+	result.Code = pfmcall.CodeDead
+	result.Message = fmt.Sprintf(
+		"%q is dead (engine %s, session %s); revive it with: pfm chat open %s", name, chat.Engine, chat.ID, name,
+	)
+	return result, name, false
 }
 
 // DeliverName sends a rename command to one live chat. A concrete pane is an

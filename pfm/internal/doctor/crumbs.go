@@ -12,12 +12,11 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/agentrole"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
-
-const probeHomeLeakAge = 10 * time.Minute
 
 func printLeakedProbeHomes(stdout io.Writer, sidDir string, now time.Time) int {
 	return printLeakedProbeHomesWith(stdout, sidDir, now, os.ReadDir)
@@ -49,7 +48,7 @@ func printLeakedProbeHomesWith(
 			continue
 		}
 		age := now.Sub(info.ModTime())
-		if age <= probeHomeLeakAge {
+		if age <= deps.ProbeHomeLeakAge {
 			continue
 		}
 		path := filepath.Join(sidDir, entry.Name())

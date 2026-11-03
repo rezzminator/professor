@@ -5,7 +5,7 @@
       "WebFetch(*)",
       "WebSearch(*)",
       "Workflow(*)",
-      "Read(*)",
+      "Read",
       "Write(*)"
     ]
   },

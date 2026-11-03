@@ -94,6 +94,9 @@
     "global/commands/pfm/workbench.md": {
       "curated": true
     },
+    "global/commands/shoestring.md": {
+      "curated": true
+    },
     "global/commands/claude-md/use.md": {
       "curated": true
     },

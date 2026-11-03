@@ -1,10 +1,10 @@
 ---
-name: done-herewith
-description: 'USER-ONLY Finishes a chat completely — /done-herewith: sweeps open threads, unfinished or unverified work, uncommitted changes, running agents; does what needs no ruling, asks the rest. Returns the closing report.'
+name: close-out
+description: 'USER-ONLY Finishes a chat completely — /close-out: sweeps open threads, unfinished or unverified work, uncommitted changes, running agents; does what needs no ruling, asks the rest, offers to exit the chat. Returns the closing report.'
 disable-model-invocation: true
 ---
 
-# done-herewith
+# close-out
 
 The user is leaving this chat for good. Every item the sweep finds ends one of three ways: done and verified, ruled by the user, or named in the report with what it needs.
 
@@ -36,6 +36,8 @@ Finish every Do item through the project's own gates and verify each by running 
 
 Put every Ask item to the user at once with AskUserQuestion: each question carries its own context, options ranked with the recommendation first; more than four questions go most consequential first, each later round simpler. Carry out the rulings, then re-sweep only what they touched. A user who declines to rule leaves that item open.
 
+The last round ends with one more question, asked even when no Ask item exists: exit this chat through `mcp__chat-professor__exit`, or keep it open. With no chat MCP exit tool loaded, the question is skipped and the report says so.
+
 ## 5. Report
 
 One final message, sections left out when empty:
@@ -46,6 +48,8 @@ One final message, sections left out when empty:
 4. Before you go: the Tell items.
 
 Close with "Nothing left open." only when section 3 is empty and every sweep check ran.
+
+On "exit", the report message goes out first, then `mcp__chat-professor__exit` is the last call, followed by one line ending the turn; on "keep open", nothing more.
 
 ### Example — a promise in the middle of the chat
 

@@ -1,5 +1,12 @@
 {
-  "names": [],
+  "names": [
+    {
+      "name": "done-herewith",
+      "kind": "skill",
+      "successor": "close-out",
+      "match": "exact"
+    }
+  ],
   "storeEntries": [],
   "stateDirs": [],
   "hookCommands": [],

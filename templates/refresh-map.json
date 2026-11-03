@@ -94,7 +94,7 @@
     "global/commands/pfm/workbench.md": {
       "curated": true
     },
-    "global/commands/shoestring.md": {
+    "global/commands/token-saving-mode.md": {
       "curated": true
     },
     "global/commands/claude-md/use.md": {
@@ -136,7 +136,7 @@
     "global/skills/chatlog/SKILL.md": {
       "curated": true
     },
-    "global/skills/done-herewith/SKILL.md": {
+    "global/skills/close-out/SKILL.md": {
       "curated": true
     },
     "global/skills/context-audit/SKILL.md": {

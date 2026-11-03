@@ -1,0 +1,27 @@
+# door spellings over pfm product source: each mechanism has one seam
+exec.Command(
+exec.CommandContext(
+os.Getenv(
+os.LookupEnv(
+os.Environ(
+time.Now(
+time.Since(
+time.Sleep(
+os.WriteFile(
+os.Create(
+os.OpenFile(
+os.Remove(
+os.RemoveAll(
+os.Rename(
+net.Dial(
+net.Listen(
+http.Get(
+http.Post(
+http.DefaultClient
+syscall.Kill(
+os.FindProcess(
+"/proc/
+os.UserHomeDir(
+log.Printf(
+fmt.Fprintf(os.Stderr
+fmt.Println(

@@ -62,11 +62,11 @@ func TestBirthBackendHonorsRequestBoundary(t *testing.T) {
 }
 
 func TestBirthHerdrAwaitsTranscriptAndAttachesNativePane(t *testing.T) {
-	for _, mode := range []string{"await", "attach", "cancel", "timeout", "raw", "codex-prompt", "codex-dash-prompt", "trust", "stale-trust", "stale-trust-working"} {
+	for _, mode := range []string{"await", "no-await", "attach", "cancel", "timeout", "raw", "codex-prompt", "codex-dash-prompt", "trust", "stale-trust", "stale-trust-working"} {
 		t.Run(mode, func(t *testing.T) {
 			root := testjail.Fleet(t)
 			const id = "ad8c2104-88c4-43df-86a9-cd7126949b44"
-			if mode != "trust" {
+			if mode != "trust" && mode != "no-await" {
 				seedClaudeChat(t, root, id, assistantSaid("native answer"))
 			}
 			values, err := paths.Resolve()
@@ -181,7 +181,7 @@ func TestBirthHerdrAwaitsTranscriptAndAttachesNativePane(t *testing.T) {
 				options.Timeout = 100 * time.Millisecond
 				options.Poll = time.Millisecond
 			}
-			if mode == "timeout" {
+			if mode == "timeout" || mode == "no-await" {
 				options.Timeout = time.Nanosecond
 			}
 			if strings.HasPrefix(mode, "stale-trust") {
@@ -225,6 +225,13 @@ func TestBirthHerdrAwaitsTranscriptAndAttachesNativePane(t *testing.T) {
 			}
 			if !born || code != 0 {
 				t.Fatalf("birth born=%t code=%d out=%q err=%q", born, code, stdout.String(), stderr.String())
+			}
+			if mode == "no-await" {
+				want := "cc\tINTEGRATION\therdr\t" + socket + "\tw6:p9\tstarting\n"
+				if stdout.String() != want || stderr.String() != "" {
+					t.Fatalf("no-await stdout=%q want=%q stderr=%q want empty", stdout.String(), want, stderr.String())
+				}
+				return
 			}
 			if strings.HasPrefix(mode, "codex-") {
 				state := fleetdb.OpenSharedState(ctx, values)

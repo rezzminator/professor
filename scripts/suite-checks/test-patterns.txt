@@ -1,0 +1,3 @@
+_test\.go$
+^pfm/e2e/testdata/.*\.txtar$
+^infra/fence/journey/lanes/.*\.sh$

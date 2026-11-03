@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // Record is one decoded activity line: the level and message slog wrote, and
@@ -96,7 +97,7 @@ func Test(t *testing.T, opts ...TestOption) (context.Context, *Recorder) {
 	t.Helper()
 	recorder := &Recorder{}
 	handler := slog.NewJSONHandler(recorder, &slog.HandlerOptions{Level: slog.LevelDebug, ReplaceAttr: Scrub})
-	installed := &scope{logger: slog.New(handler), timing: clock.Real}
+	installed := &scope{logger: slog.New(attributed(handler, &paths.MapEnv{}, "")), timing: clock.Real}
 	for _, opt := range opts {
 		opt(installed)
 	}

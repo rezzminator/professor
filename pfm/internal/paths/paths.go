@@ -59,7 +59,9 @@ const (
 func SIDScratchDirs() []string { return []string{SIDScratchDoctor, SIDScratchChatLoads} }
 
 const (
-	EnvConfig      = "PFM_CONFIG"
+	EnvConfig = "PFM_CONFIG"
+	// EnvUnitPrefix isolates the supervised services of one installation.
+	EnvUnitPrefix  = "PFM_UNIT_PREFIX"
 	EnvCacheDB     = "PFM_CACHE_DB"
 	EnvStateDB     = "PFM_STATE_DB"
 	EnvSIDDir      = "PFM_SID_DIR"

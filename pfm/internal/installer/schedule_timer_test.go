@@ -226,43 +226,71 @@ func TestScheduleUnitsAreManagedAndEnabled(t *testing.T) {
 // Install, uninstall and reinstall leave the schedule pair exactly as name-sync's
 // is left: linked and enabled, gone, then linked and enabled again.
 func TestScheduleUnitsSurviveInstallUninstallReinstall(t *testing.T) {
-	t.Parallel()
-	home := t.TempDir()
-	unitDir := filepath.Join(home, ".config", "systemd", "user")
-	managed := filepath.Join(home, ".local", "share", "pfm", "install")
-	serviceLink := filepath.Join(unitDir, scheduleServiceUnit)
-	timerLink := filepath.Join(unitDir, scheduleTimerUnit)
-	enableLink := filepath.Join(unitDir, "timers.target.wants", scheduleTimerUnit)
-	links := map[string]string{
-		serviceLink: filepath.Join(managed, "systemd", scheduleServiceUnit),
-		timerLink:   filepath.Join(managed, "systemd", scheduleTimerUnit),
-		enableLink:  timerLink,
+	for _, row := range []struct {
+		name, prefix, service, timer string
+	}{
+		{"default", "pfm", "pfm-schedule.service", "pfm-schedule.timer"},
+		{"namespace", "journey-atlas", "journey-atlas-schedule.service", "journey-atlas-schedule.timer"},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			t.Setenv(paths.EnvUnitPrefix, row.prefix)
+			home := t.TempDir()
+			unitDir := filepath.Join(home, ".config", "systemd", "user")
+			managed := filepath.Join(home, ".local", "share", "pfm", "install")
+			serviceLink := filepath.Join(unitDir, row.service)
+			timerLink := filepath.Join(unitDir, row.timer)
+			enableLink := filepath.Join(unitDir, "timers.target.wants", row.timer)
+			links := map[string]string{
+				serviceLink: filepath.Join(managed, "systemd", row.service),
+				timerLink:   filepath.Join(managed, "systemd", row.timer),
+				enableLink:  timerLink,
+			}
+			run := func(mode Mode) {
+				t.Helper()
+				var output strings.Builder
+				if _, err := Run(context.Background(), Options{
+					scheduler:     schedulerFor(servicemanager.KindSystemd),
+					MCPConfigPath: testConfigPath(t),
+					Mode:          mode,
+					Home:          home,
+					Stdout:        &output,
+					Runner:        &fakeRunner{manager: true, unitPrefix: row.prefix},
+				}); err != nil {
+					t.Fatalf("mode %d: %v\n%s", mode, err, output.String())
+				}
+			}
+			run(ModeApply)
+			for link, want := range links {
+				assertLink(t, link, want)
+			}
+			content, err := os.ReadFile(timerLink)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := systemdSetting(string(content), "Unit"); got != row.service {
+				t.Fatalf("%s Unit=%q, want %q", timerLink, got, row.service)
+			}
+			run(ModeUninstall)
+			for link := range links {
+				if _, err := os.Lstat(link); !os.IsNotExist(err) {
+					t.Fatalf("uninstall left %s: %v", link, err)
+				}
+			}
+			run(ModeApply)
+			for link, want := range links {
+				assertLink(t, link, want)
+			}
+		})
 	}
-	run := func(mode Mode) {
-		t.Helper()
-		var output strings.Builder
-		if _, err := Run(context.Background(), Options{
-			scheduler:     schedulerFor(servicemanager.KindSystemd),
-			MCPConfigPath: testConfigPath(t),
-			Mode:          mode, Home: home, Stdout: &output, Runner: &fakeRunner{manager: true},
-		}); err != nil {
-			t.Fatalf("mode %d: %v\n%s", mode, err, output.String())
+}
+
+func systemdSetting(content, name string) string {
+	for _, line := range strings.Split(content, "\n") {
+		if key, value, ok := strings.Cut(line, "="); ok && key == name {
+			return value
 		}
 	}
-	run(ModeApply)
-	for link, want := range links {
-		assertLink(t, link, want)
-	}
-	run(ModeUninstall)
-	for link := range links {
-		if _, err := os.Lstat(link); !os.IsNotExist(err) {
-			t.Fatalf("uninstall left %s: %v", link, err)
-		}
-	}
-	run(ModeApply)
-	for link, want := range links {
-		assertLink(t, link, want)
-	}
+	return "<missing>"
 }
 
 func TestScheduleTimerDrift(t *testing.T) {

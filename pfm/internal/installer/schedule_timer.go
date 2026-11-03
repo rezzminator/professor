@@ -11,6 +11,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/servicemanager"
 )
 
 // The schedule scheduler: `pfm internal schedule-fire` every 5 minutes, a
@@ -36,10 +37,17 @@ func ScheduleTimerDrift(home string, required ...bool) (path string, drifted boo
 // with what install writes. Once any of them exists (or installed says the
 // scheduler must be there), a missing one is drift.
 func scheduleFilesDrift(sched scheduler, home string, installed bool) (path string, drifted bool, err error) {
+	names, err := servicemanager.CurrentUnitNames()
+	if err != nil {
+		return "", false, err
+	}
 	if home == "" {
 		return "", false, fmt.Errorf("schedule timer drift: no home directory")
 	}
 	files := sched.scheduleFiles(home)
+	for index := range files {
+		files[index].path = names.Name(files[index].path)
+	}
 	for _, file := range files {
 		if _, statErr := os.Lstat(file.path); !errors.Is(statErr, fs.ErrNotExist) {
 			installed = true
@@ -76,7 +84,7 @@ func scheduleFilesDrift(sched scheduler, home string, installed bool) (path stri
 
 // scheduleLaunchAgentPath returns where macOS expects the schedule agent.
 func (installer *engine) scheduleLaunchAgentPath() string {
-	return scheduleLaunchAgentFile(installer.options.Home)
+	return installer.names.Name(scheduleLaunchAgentFile(installer.options.Home))
 }
 
 func scheduleLaunchAgentFile(home string) string {
@@ -150,7 +158,7 @@ func (installer *engine) unwireScheduleLaunchAgent(ctx context.Context) error {
 
 // unwireScheduleLaunchAgentLabel unloads and removes one schedule agent plist.
 func (installer *engine) unwireScheduleLaunchAgentLabel(ctx context.Context, label string) error {
-	path := filepath.Join(paths.LaunchAgentsDir(installer.options.Home), label+".plist")
+	path := filepath.Join(paths.LaunchAgentsDir(installer.options.Home), installer.names.Name(label+".plist"))
 	if _, err := os.Lstat(path); errors.Is(err, fs.ErrNotExist) {
 		return nil
 	} else if err != nil {

@@ -1,0 +1,10 @@
+fixture	source	provenance
+rows.tsv	docs/design/pfm-integration-suite/beats.md	Build-time extraction of retained canonical branches; no claim of execution.
+projection_test.py	MERGE.md process-birth and lineage contract	Synthetic kernel-birth and observation inputs; never live-run captures.
+reload-observation.json	chat.py annotate public carry contract	Requests read-only capture of actual owned reload pid/log files.
+continued.json	mockengine native --continue contract	Synthetic future response; native transcript selection determines the actual continued session ID.
+input_test.py	chat-reload native input and handoff receipt contracts	Runs the actual lane input reader and native edge decoder against independently specified synthetic receipts.
+entries.sh	chat-reload quota and continuation beat contracts	Public-entry scenario composition shared by the reload lane's branches.
+handoff.py	ruling-mock-background-handoff; native continued-in transcript schema	Projects actual engine JSONL receipt edges; no transcript or product-store writes.
+lost_index.py	ruling-c58-real-exec-failure	Composes public owner reload entries and shared faults around actual isolated cwd, process births and cached transcript path.
+lost-index-ready.json	Native mock turn scenario contract	Synthetic future reply for the isolated lost-index retry role; no fabricated product state.

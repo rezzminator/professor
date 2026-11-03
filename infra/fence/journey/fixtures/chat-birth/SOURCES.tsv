@@ -1,0 +1,13 @@
+fixture	field	status	source	note
+scenario.json	pane.busy, pane.compacted, pane.composer	synthetic-unverified	infra/fence/journey/scenarios/default.json	Same explicit mock shapes as the root; not claimed to be raw engine captures.
+scenario.json	steps	synthetic	owner journey fixture	One deterministic readiness turn; later turns use explicit inline steps.
+name-mcp.json	input	synthetic	pfm/internal/mcpserv/actions.go	Calls the real name tool as the engine's own MCP client.
+../../goldens/chat-birth/claude-composer.txt	all	product-pinned	pfm/internal/mockengine/pane.go	Empty composer shape implemented by the shared engine mock; no banner is invented.
+../../goldens/chat-birth/codex-composer.txt	all	product-pinned	pfm/internal/mockengine/codex.go	Empty composer shape implemented by the shared engine mock.
+../../goldens/chat-birth/opencode-composer.txt	all	synthetic-unverified	scenario.json	Exact supplied mock composer, awaiting release capture of the engine shape.
+boot-rows.json	startup and trust inputs	synthetic-unverified	pfm/internal/mockengine	Ready holds and exit controls drive actual native startup; trust output is checked against the mock's retained exact frame, not claimed as an upstream recording.
+edge-rows.json	forecast projections	synthetic	owner forecast contracts	Literal assertions for actual public doctor/install, native shell guards, and scoped account-settings replacement.
+topology-rows.json	forecast projections	synthetic	owner forecast contracts	Literal assertions for actual wrapper ancestry, public reopen, native shell child creation and tmux attach environment.
+../../goldens/chat-birth/trust-numbered.txt	all	product-pinned	pfm/internal/mockengine/pane.go	Retained native modal confirm row; the test also checks the emitted cancel row and actual startup order.
+../../goldens/chat-birth/trust-unnumbered.txt	all	synthetic-unverified	pfm/internal/mockengine/pane.go	Explicit unnumbered native mock variant; no upstream recording is claimed.
+opencode-retitle.json	steps	synthetic	pfm/internal/mockengine/opencode_store.go	Native engine writes its database and OSC title without emitting session.updated; this input is not an upstream protocol recording.

@@ -1,9 +1,7 @@
 package mockengine
 
 import (
-	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -13,7 +11,6 @@ import (
 	"uuid"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
-	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 )
 
@@ -32,8 +29,30 @@ type openCodeInvocation struct {
 }
 
 const (
-	openCodeRunSubcommand = "run"
-	openCodeRoleKey       = "role"
+	openCodeProviderIDKey     = "providerID"
+	openCodeRunSubcommand     = "run"
+	openCodeRoleKey           = "role"
+	openCodeBuildAgent        = "build"
+	openCodeModelIDKey        = "modelID"
+	openCodeStatusKey         = "status"
+	openCodeToolKey           = "tool"
+	openCodeAgentKey          = "agent"
+	openCodeModelKey          = "model"
+	openCodeTitleKey          = "title"
+	openCodeDirectoryKey      = "directory"
+	openCodeCreatedKey        = "created"
+	openCodePartsKey          = "parts"
+	openCodeInfoKey           = "info"
+	openCodeCallIDKey         = "callID"
+	openCodeArgsKey           = "args"
+	openCodePluginKey         = "plugin"
+	openCodeTimeKey           = "time"
+	openCodeInputKey          = "input"
+	openCodeCacheReadKey      = "read"
+	openCodeCompactionPart    = "compaction"
+	openCodeMessageKey        = "message"
+	openCodeCallbackOutputKey = "output"
+	openCodeToolOutputKey     = "output"
 )
 
 var openCodeValueFlags = map[string]bool{
@@ -94,13 +113,6 @@ func parseOpenCodeArgs(args []string) openCodeInvocation {
 
 func serveOpenCode(proc *process) int {
 	call := parseOpenCodeArgs(proc.args)
-	for index := range proc.script.Steps {
-		if proc.script.Steps[index].Type == StepMCP {
-			warn(proc.stderr, "opencode MCP wiring is unpinned in this mock — pfm has no opencode.json writer or "+
-				"reader (map § 2c UNRESOLVED); the step is refused, not guessed")
-			return ExitUnpinned
-		}
-	}
 	if call.subcommand == "serve" {
 		return openCodeServe(proc, call)
 	}
@@ -181,26 +193,32 @@ CREATE TABLE IF NOT EXISTS part (
 // session rows on first use, then a user message with a text part and an
 // assistant message with the usage the reader sums.
 func openCodeRun(proc *process, call openCodeInvocation) (returnErr error) {
-	step := proc.script.next()
-	for !step.terminal() {
-		step = proc.script.next()
-	}
-	if step.Type == StepCrash {
-		return fmt.Errorf("crash step: exit %d", step.ExitCode)
-	}
-	reply, busyMS, usage := proc.script.turnReply(step)
-	if !sleepOrCancel(proc.ctx, time.Duration(busyMS)*time.Millisecond) {
-		return errors.New("cancelled")
-	}
 	session := newOpenCodeSession(proc, call)
 	if err := session.start(call.sessionID != ""); err != nil {
 		return err
 	}
 	defer func() { returnErr = errors.Join(returnErr, session.finish("other")) }()
+	if _, err := session.prompt(call.prompt); err != nil {
+		return err
+	}
 	if err := session.recordUser(call.prompt); err != nil {
 		return err
 	}
+	step, err := session.headlessSteps(proc.script.forPrompt(call.prompt))
+	if err != nil {
+		return err
+	}
+	if step.Error != "" {
+		return errors.Join(errors.New(step.Error), session.turnError(step))
+	}
+	reply, busyMS, usage := proc.script.turnReply(step)
+	if !sleepOrCancel(proc.ctx, time.Duration(busyMS)*time.Millisecond) {
+		return errors.New("cancelled")
+	}
 	if err := session.recordAssistant(reply, usage); err != nil {
+		return err
+	}
+	if err := session.stop(); err != nil {
 		return err
 	}
 	if _, err := fmt.Fprintln(proc.stdout, reply); err != nil {
@@ -217,6 +235,11 @@ type openCodeSession struct {
 	database              *sql.DB
 	title                 string
 	lastMessageMS         int64
+	plugins               *openCodePlugins
+	projectID             string
+	createdMS, updatedMS  int64
+	pendingRequestID      string
+	requestNumber         int
 }
 
 func newOpenCodeSession(proc *process, call openCodeInvocation) *openCodeSession {
@@ -249,7 +272,7 @@ func (session *openCodeSession) busyLine(time.Duration, Tokens) string {
 }
 func (session *openCodeSession) compactedLine() string { return session.proc.script.Pane.Compacted }
 
-func (session *openCodeSession) start(bool) (returnErr error) {
+func (session *openCodeSession) start(resumed bool) (returnErr error) {
 	proc := session.proc
 	storePath := openCodeStore(proc)
 	if err := os.MkdirAll(filepath.Dir(storePath), 0o700); err != nil {
@@ -259,8 +282,13 @@ func (session *openCodeSession) start(bool) (returnErr error) {
 	if err != nil {
 		return fmt.Errorf("open opencode store: %w", err)
 	}
+	pluginsStarted := false
 	defer func() {
 		if returnErr != nil {
+			if pluginsStarted {
+				returnErr = errors.Join(returnErr, session.plugins.close())
+				session.plugins = nil
+			}
 			if err := database.Close(); err != nil {
 				returnErr = errors.Join(returnErr, fmt.Errorf("close opencode store: %w", err))
 			}
@@ -302,11 +330,24 @@ func (session *openCodeSession) start(bool) (returnErr error) {
 	); err != nil {
 		return fmt.Errorf("upsert session: %w", err)
 	}
-	if err := database.QueryRowContext(ctx, "SELECT title FROM session WHERE id = ?", session.id).
-		Scan(&session.title); err != nil {
-		return fmt.Errorf("read session title: %w", err)
-	}
 	session.database = database
+	session.projectID = projectID
+	if err := database.QueryRowContext(ctx, "SELECT title, time_created, time_updated FROM session WHERE id = ?", session.id).
+		Scan(&session.title, &session.createdMS, &session.updatedMS); err != nil {
+		return fmt.Errorf("read session metadata: %w", err)
+	}
+	if session.plugins == nil {
+		session.plugins, err = startOpenCodePlugins(proc)
+		if err != nil {
+			return err
+		}
+		pluginsStarted = session.plugins != nil
+	}
+	if !resumed {
+		if err := session.created(); err != nil {
+			return err
+		}
+	}
 	if session.call.subcommand != "run" {
 		bound, err := bindSeat(proc, engineOpenCode, "")
 		if err != nil {
@@ -318,143 +359,17 @@ func (session *openCodeSession) start(bool) (returnErr error) {
 	return nil
 }
 
-func (session *openCodeSession) prompt(string) (string, error) { return "", nil }
-
-func (session *openCodeSession) nextMessageTime() int64 {
-	now := time.Now().UnixMilli()
-	if now <= session.lastMessageMS {
-		now = session.lastMessageMS + 1
-	}
-	session.lastMessageMS = now
-	return now
-}
-
-func (session *openCodeSession) recordUser(text string) error {
-	ctx, database := session.proc.ctx, session.database
-	now := session.nextMessageTime()
-	userData, err := json.Marshal(map[string]any{
-		openCodeRoleKey: roleUser,
-		"agent":         "build",
-		"model":         map[string]string{"providerID": session.provider, "modelID": session.modelID},
-	})
-	if err != nil {
-		return fmt.Errorf("encode user message: %w", err)
-	}
-	userID := "msg_" + strings.ReplaceAll(uuid.NewV4().String(), "-", "")[:20]
-	if err := insertOpenCodeMessage(ctx, database, userID, session.id, now, userData); err != nil {
-		return err
-	}
-	partData, err := json.Marshal(map[string]any{keyType: blockText, blockText: text})
-	if err != nil {
-		return fmt.Errorf("encode text part: %w", err)
-	}
-	if _, err := database.ExecContext(
-		ctx,
-		"INSERT INTO part (id, message_id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?, ?)",
-		"prt_"+strings.ReplaceAll(uuid.NewV4().String(), "-", "")[:20],
-		userID,
-		session.id,
-		now,
-		now,
-		string(partData),
-	); err != nil {
-		return fmt.Errorf("insert part: %w", err)
-	}
-	if session.title == "" {
-		session.title = firstWords(text)
-		if err := session.rename(session.title); err != nil {
-			return err
-		}
-	}
-	return session.touch(now)
-}
-
-func (session *openCodeSession) recordAssistant(_ string, usage Tokens) error {
-	ctx, database := session.proc.ctx, session.database
-	now := session.nextMessageTime()
-	assistantData, err := json.Marshal(map[string]any{
-		"role": roleAssistant, "agent": "build", "providerID": session.provider, "modelID": session.modelID,
-		"tokens": map[string]int64{"input": usage.Input, "output": usage.Output}, "cost": usageCost(usage),
-	})
-	if err != nil {
-		return fmt.Errorf("encode assistant message: %w", err)
-	}
-	if err := insertOpenCodeMessage(
-		ctx,
-		database,
-		"msg_"+strings.ReplaceAll(uuid.NewV4().String(), "-", "")[:20],
-		session.id,
-		now,
-		assistantData,
-	); err != nil {
-		return err
-	}
-	return session.touch(now)
-}
-
-func (session *openCodeSession) touch(now int64) error {
-	if _, err := session.database.ExecContext(
-		session.proc.ctx,
-		"UPDATE session SET time_updated = ? WHERE id = ?",
-		now,
-		session.id,
-	); err != nil {
-		return fmt.Errorf("update session timestamp: %w", err)
-	}
-	return nil
-}
-
-func (session *openCodeSession) paintTitle() error {
-	if _, err := fmt.Fprintf(
-		session.proc.stdout,
-		"\x1b]0;%s%s\a",
-		gather.OpenCodePaneTitlePrefix,
-		session.title,
-	); err != nil {
-		return fmt.Errorf("paint opencode title: %w", err)
-	}
-	return nil
-}
-
-func (session *openCodeSession) rename(name string) error {
-	if _, err := session.database.ExecContext(
-		session.proc.ctx,
-		"UPDATE session SET title = ? WHERE id = ?",
-		name,
-		session.id,
-	); err != nil {
-		return fmt.Errorf("rename opencode session: %w", err)
-	}
-	session.title = name
-	if session.call.subcommand != "run" {
-		return session.paintTitle()
-	}
-	return nil
-}
-
-func (session *openCodeSession) tool(Step) (string, error) {
-	return "", errors.New("opencode tool records are unpinned")
-}
-
-func (session *openCodeSession) compact(Step) error {
-	return errors.New("opencode compaction records are unpinned")
-}
-
-func (session *openCodeSession) background(Step) (string, error) {
-	return "", errors.New("opencode background records are unpinned")
-}
-
-func (session *openCodeSession) mcp(Step) error {
-	return errors.New("opencode MCP wiring is unpinned in this mock; the step is refused, not guessed")
-}
-
 func (session *openCodeSession) clear() error                      { return errors.New("opencode clear is unpinned") }
 func (session *openCodeSession) statusLine(Tokens) (string, error) { return "", nil }
 func (session *openCodeSession) finish(string) error {
 	var result error
+	if session.plugins != nil {
+		result = errors.Join(result, session.disposed(), session.plugins.close())
+		session.plugins = nil
+	}
 	if session.database != nil {
 		if err := session.database.Close(); err != nil {
-			result = fmt.Errorf("close opencode store: %w", err)
+			result = errors.Join(result, fmt.Errorf("close opencode store: %w", err))
 		}
 		session.database = nil
 	}
@@ -463,22 +378,4 @@ func (session *openCodeSession) finish(string) error {
 		session.seat = nil
 	}
 	return result
-}
-
-func insertOpenCodeMessage(ctx context.Context, database *sql.DB, id, sessionID string, at int64, data []byte) error {
-	if _, err := database.ExecContext(ctx,
-		"INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?)",
-		id, sessionID, at, at, string(data)); err != nil {
-		return fmt.Errorf("insert message: %w", err)
-	}
-	return nil
-}
-
-// firstWords is the session title OpenCode derives from the first prompt.
-func firstWords(prompt string) string {
-	words := strings.Fields(prompt)
-	if len(words) > 6 {
-		words = words[:6]
-	}
-	return strings.Join(words, " ")
 }

@@ -1,0 +1,1 @@
+[{"type":"tool_call","tool":"Agent","input":{"description":"journey research","subagent_type":"general-purpose","prompt":"research mock-engine: [{\"type\":\"hold\",\"until_gone\":\"$HOLD\"},{\"type\":\"turn\",\"reply\":\"research delivered\",\"busy_ms\":1}]"}},{"type":"turn","reply":"research delivered","busy_ms":1}]

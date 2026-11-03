@@ -335,9 +335,9 @@ chk_C14() {
 
 # C15 every `pfm internal` entry appears in its usage line (structural once hooks.Table lands).
 chk_C15() {
-  iv=$(awk '/^func runInternal\(/,/^}/' cmd/pfm/main.go | grep -oE 'args\[0\] (==|!=) "[a-z-]+"' | grep -oE '"[a-z-]+"' | tr -d '"' | sort -u)
+  iv=$(awk '/^func runInternal(Input)?\(/,/^}/' cmd/pfm/main.go | grep -oE 'args\[0\] (==|!=) "[a-z-]+"' | grep -oE '"[a-z-]+"' | tr -d '"' | sort -u)
   line=$(grep -oE 'usage: pfm internal [a-z-]+(\|[a-z-]+)+' cmd/pfm/main.go | head -1)
-  if [ -z "$iv" ]; then say C15-internal-usage ERROR "no entries parsed from cmd/pfm/main.go runInternal()"
+  if [ -z "$iv" ]; then say C15-internal-usage ERROR "no entries parsed from cmd/pfm/main.go runInternalInput()"
   elif [ -z "$line" ]; then say C15-internal-usage ERROR "no multi-entry 'usage: pfm internal a|b' line in cmd/pfm/main.go"
   else
     : > "$T/c15"; for v in $iv; do grep -qE "(^|[ |])$v([|]|$)" <<<"$line" || echo "$v" >> "$T/c15"; done

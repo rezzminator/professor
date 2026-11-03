@@ -1,0 +1,9 @@
+row	ids	cost_ms
+machine-lifecycle/doctor-after-chats-ended@linux	ops.doctor-after-ends	4000
+machine-lifecycle/uninstall-keeps-foreign@linux	lifecycle.uninstall	20000
+machine-lifecycle/uninstall-again-changes-nothing@linux	lifecycle.uninstall-again	5000
+machine-lifecycle/doctor-after-chats-ended@macos	ops.doctor-after-ends	4000
+machine-lifecycle/uninstall-keeps-foreign@macos	lifecycle.uninstall	20000
+machine-lifecycle/uninstall-again-changes-nothing@macos	lifecycle.uninstall-again	5000
+machine-lifecycle/forecast-command-pfm-uninstall-surface-themed-terminal-and-editor-theme-sync-on@linux	lifecycle.uninstall	21000
+machine-lifecycle/forecast-service-manager-launchd-follower-loaded-uninstall-state-theme-sync-on-os-macos@macos	lifecycle.uninstall	21000

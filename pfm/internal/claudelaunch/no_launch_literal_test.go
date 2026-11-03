@@ -62,8 +62,11 @@ var launchLiteralReaders = map[string]launchLiteralAllowance{
 		"mock argv",
 		[]string{
 			"--settings", "--system-prompt-file", "--session-id", "--mcp-config",
-			"--resume", "--fork-session", "CLAUDE_CODE_SESSION_ID=",
+			"--resume", "--fork-session", "CLAUDE_CODE_SESSION_ID=", "--remote-control",
 		},
+	},
+	"internal/mockengine/claude_capture.go": {
+		"recorded headless request sent to doctor capture sink", []string{"ANTHROPIC_BASE_URL"},
 	},
 	"internal/resolve/whoami.go": {"reads caller session identity", []string{"CLAUDE_CODE_SESSION_ID"}},
 	"internal/statusline/render.go": {"reads engine telemetry", []string{

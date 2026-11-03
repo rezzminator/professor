@@ -41,11 +41,19 @@ var ErrNoAccounts = errors.New("no Claude account settings.json under ~/.claude 
 // ErrNoAccounts.
 func accountSettings(home string) ([]string, error) {
 	candidates := []string{filepath.Join(home, ".claude", "settings.json")}
-	matches, err := filepath.Glob(filepath.Join(home, ".cc", "*", "settings.json"))
-	if err != nil {
+	directory := filepath.Join(home, ".cc")
+	entries, err := os.ReadDir(directory)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("themesync: list account settings: %w", err)
 	}
-	candidates = append(candidates, matches...)
+	for _, entry := range entries {
+		accountDir := filepath.Join(directory, entry.Name())
+		info, err := os.Stat(accountDir)
+		if err != nil || !info.IsDir() {
+			continue
+		}
+		candidates = append(candidates, filepath.Join(accountDir, "settings.json"))
+	}
 	seen := map[string]bool{}
 	var paths []string
 	for _, candidate := range candidates {

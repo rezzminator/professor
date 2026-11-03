@@ -21,6 +21,9 @@ import (
 // pfm registers hooks through internal/claudelaunch/hooks.go HookTemplates.
 // A project may also register Stop, which the mock fires at every turn end.
 const (
+	permissionAllow      = "allow"
+	permissionDeny       = "deny"
+	toolResultDone       = "done"
 	hookSessionStart     = "SessionStart"
 	hookUserPromptSubmit = "UserPromptSubmit"
 	hookPreToolUse       = "PreToolUse"
@@ -33,17 +36,46 @@ const (
 // longer, but a test hook that hangs must fail the test, not stall it.
 const hookTimeout = 30 * time.Second
 
-// hookEntry is one `{"matcher": …, "hooks": [{"type":"command","command": …}]}`
+// hookEntry is one `{"matcher": …, "hooks": [{"type":"command",keyCommand: …}]}`
 // row of settings.json / --settings (internal/claudelaunch/render.go hookSettings).
 type hookEntry struct {
 	matcher  *regexp.Regexp
 	handlers []hookHandler
-	timeout  time.Duration
 }
 
 type hookHandler struct {
 	command string
 	async   bool
+	timeout time.Duration
+}
+
+const hookGateCompleted = "completed"
+
+type hookGate struct {
+	Event     string `json:"event"`
+	Command   string `json:"command"`
+	UntilGone string `json:"until_gone"`
+}
+
+func (gate *hookGate) record(rec recorder, payload []byte, phase string, exitCode int, runErr error) error {
+	message := ""
+	if runErr != nil {
+		message = runErr.Error()
+	}
+	record := struct {
+		Event     string          `json:"event"`
+		Command   string          `json:"command"`
+		UntilGone string          `json:"until_gone"`
+		Phase     string          `json:"phase"`
+		Input     json.RawMessage `json:"input"`
+		ExitCode  int             `json:"exit_code"`
+		Error     string          `json:"error"`
+	}{gate.Event, gate.Command, gate.UntilGone, phase, payload, exitCode, message}
+	raw, err := json.Marshal(record)
+	if err != nil {
+		return err
+	}
+	return rec.write("hook-gates.jsonl", string(raw)+"\n")
 }
 
 // hookSet is every registered hook keyed by event.
@@ -53,96 +85,6 @@ func (set hookSet) merge(project hookSet) {
 	for event, entries := range project {
 		set[event] = append(set[event], entries...)
 	}
-}
-
-// hookPayload carries the session identity and the event's prompt or tool.
-type hookPayload struct {
-	SessionID      string          `json:"session_id"`
-	TranscriptPath string          `json:"transcript_path"`
-	CWD            string          `json:"cwd"`
-	PermissionMode string          `json:"permission_mode"`
-	Event          string          `json:"hook_event_name"`
-	Source         string          `json:"source,omitempty"`
-	Reason         string          `json:"reason,omitempty"`
-	Prompt         string          `json:"prompt,omitempty"`
-	ToolName       string          `json:"tool_name,omitempty"`
-	ToolInput      json.RawMessage `json:"tool_input,omitempty"`
-	ToolUseID      string          `json:"tool_use_id,omitempty"`
-	ToolResponse   json.RawMessage `json:"tool_response,omitempty"`
-	DurationMS     *int64          `json:"duration_ms,omitempty"`
-}
-
-func (session *claudeSession) payload(event string) hookPayload {
-	return hookPayload{
-		SessionID: session.sessionID, TranscriptPath: session.transcript, CWD: session.proc.cwd,
-		PermissionMode: "bypassPermissions", Event: event,
-	}
-}
-
-func (session *claudeSession) fire(event, subject string, payload hookPayload) ([]hookAnswer, error) {
-	if session.proc.script.Quiet {
-		return nil, nil
-	}
-	return session.hooks.fire(
-		session.proc.ctx, event, subject, payload, session.proc.cwd, session.environ, session.proc.stderr,
-	)
-}
-
-// foldContext writes a meta user record every pfm transcript reader skips.
-func (session *claudeSession) foldContext(answer *hookAnswer) error {
-	reminder := answer.Specific.AdditionalContext
-	if reminder == "" {
-		return nil
-	}
-	return session.write(session.userRecord("<system-reminder>\n"+reminder+"\n</system-reminder>", true))
-}
-
-func (session *claudeSession) prompt(text string) (string, error) {
-	payload := session.payload(hookUserPromptSubmit)
-	payload.Prompt = text
-	answers, err := session.fire(hookUserPromptSubmit, "", payload)
-	if err != nil {
-		return "", err
-	}
-	for index := range answers {
-		if blocked, reason := answers[index].blocks(); blocked {
-			return reason, nil
-		}
-		if err := session.foldContext(&answers[index]); err != nil {
-			return "", err
-		}
-	}
-	return "", nil
-}
-
-func (session *claudeSession) stop() error {
-	if session.proc.script.Quiet || len(session.hooks[hookStop]) == 0 {
-		return nil
-	}
-	answers, fireErr := session.fire(hookStop, "", session.payload(hookStop))
-	type recordedAnswer struct {
-		ExitCode int        `json:"exit_code"`
-		Stderr   string     `json:"stderr,omitempty"`
-		Answer   hookAnswer `json:"answer"`
-	}
-	record := struct {
-		Answers []recordedAnswer `json:"answers"`
-		Error   string           `json:"error,omitempty"`
-	}{}
-	for index := range answers {
-		record.Answers = append(
-			record.Answers,
-			recordedAnswer{answers[index].exitCode, answers[index].stderr, answers[index]},
-		)
-	}
-	if fireErr != nil {
-		record.Error = fireErr.Error()
-	}
-	encoded, err := json.Marshal(record)
-	if err != nil {
-		return errors.Join(fireErr, fmt.Errorf("encode Stop hook answers: %w", err))
-	}
-	return errors.Join(fireErr, session.proc.recorder.write("hook-Stop.json", string(encoded)+"\n"))
 }
 
 // hookAnswer is what a handler said back: its exit code, stderr, and the JSON
@@ -157,6 +99,10 @@ type hookAnswer struct {
 		AdditionalContext        string `json:"additionalContext"`
 		PermissionDecision       string `json:"permissionDecision"`
 		PermissionDecisionReason string `json:"permissionDecisionReason"`
+		Decision                 struct {
+			Behavior string `json:"behavior"`
+			Message  string `json:"message"`
+		} `json:"decision"`
 	} `json:"hookSpecificOutput"`
 	SystemMessage string `json:"systemMessage"`
 }
@@ -199,7 +145,7 @@ func decodeHookDocument(content []byte, source string) (hookSet, string, error) 
 	set := hookSet{}
 	for event, entries := range document.Hooks {
 		for _, raw := range entries {
-			entry := hookEntry{timeout: hookTimeout}
+			entry := hookEntry{}
 			if raw.Matcher != "" && raw.Matcher != "*" {
 				pattern, err := regexp.Compile(raw.Matcher)
 				if err != nil {
@@ -211,10 +157,14 @@ func decodeHookDocument(content []byte, source string) (hookSet, string, error) 
 				if handler.Type != "command" || handler.Command == "" {
 					continue
 				}
-				entry.handlers = append(entry.handlers, hookHandler{command: handler.Command, async: handler.Async})
+				timeout := hookTimeout
 				if handler.Timeout > 0 {
-					entry.timeout = time.Duration(handler.Timeout * float64(time.Second))
+					timeout = time.Duration(handler.Timeout * float64(time.Second))
 				}
+				entry.handlers = append(
+					entry.handlers,
+					hookHandler{command: handler.Command, async: handler.Async, timeout: timeout},
+				)
 			}
 			if len(entry.handlers) > 0 {
 				set[event] = append(set[event], entry)
@@ -279,6 +229,7 @@ func (set hookSet) fire(
 	cwd string,
 	environ []string,
 	warnings io.Writer,
+	proc *process,
 ) ([]hookAnswer, error) {
 	encoded, err := json.Marshal(payload)
 	if err != nil {
@@ -296,24 +247,68 @@ func (set hookSet) fire(
 				continue
 			}
 			seen[handler.command] = true
-			answer, err := runHookCommand(ctx, handler.command, encoded, cwd, environ, entry.timeout)
+			var gate *hookGate
+			rec := recorder{}
+			if proc != nil && proc.script != nil {
+				rec = proc.recorder
+				for index := range proc.script.HookGates {
+					candidate := &proc.script.HookGates[index]
+					if candidate.Event == event && candidate.Command == handler.command {
+						gate = candidate
+						break
+					}
+				}
+			}
+			if handler.async {
+				background, cancel := context.WithCancel(ctx)
+				done := make(chan struct{})
+				var answer hookAnswer
+				var runErr error
+				proc.backgroundMu.Lock()
+				proc.background = append(proc.background, shellTask{cancel: func() {
+					cancel()
+					<-done
+					// Serialize diagnostics with the session's foreground writes at teardown.
+					if runErr != nil {
+						warn(warnings, "async %s hook %q: %v", event, handler.command, runErr)
+					} else if answer.exitCode != 0 {
+						warn(
+							warnings,
+							"async %s hook %q: exit %d: %s",
+							event,
+							handler.command,
+							answer.exitCode,
+							answer.stderr,
+						)
+					}
+				}, done: done})
+				proc.backgroundMu.Unlock()
+				go func() {
+					defer close(done)
+					defer cancel()
+					answer, runErr = runHookCommand(
+						background,
+						handler.command,
+						encoded,
+						cwd,
+						environ,
+						handler.timeout,
+						gate,
+						rec,
+					)
+				}()
+				continue
+			}
+			answer, err := runHookCommand(ctx, handler.command, encoded, cwd, environ, handler.timeout, gate, rec)
 			if err != nil {
 				failure := fmt.Errorf("%s hook %q: %w", event, handler.command, err)
-				if handler.async {
-					// Real Claude runs an async handler in the background and
-					// ignores its outcome: the failure is reported, never fatal.
-					warn(warnings, "async %v", failure)
-					continue
-				}
 				if event != hookStop {
 					return answers, failure
 				}
 				failures = errors.Join(failures, failure)
 				continue
 			}
-			if !handler.async {
-				answers = append(answers, answer)
-			}
+			answers = append(answers, answer)
 		}
 	}
 	return answers, failures
@@ -329,36 +324,46 @@ func runHookCommand(
 	cwd string,
 	environ []string,
 	timeout time.Duration,
-) (hookAnswer, error) {
+	gate *hookGate,
+	rec recorder,
+) (answer hookAnswer, runErr error) {
 	shell, err := deps.Resolve("sh")
 	if err != nil {
 		return hookAnswer{}, fmt.Errorf("sh not found: %w", err)
 	}
 	bounded, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	cmd := exec.CommandContext(bounded, shell, "-c", command)
-	cmd.Dir = cwd
-	cmd.Env = environ
-	cmd.Stdin = bytes.NewReader(payload)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	cmd.WaitDelay = hookWaitDelay
-	err = cmd.Run()
-	answer := hookAnswer{stderr: strings.TrimSpace(stderr.String())}
-	var exitErr *exec.ExitError
-	switch {
-	case err == nil:
-	case errors.Is(err, exec.ErrWaitDelay):
-	case errors.As(err, &exitErr):
-		answer.exitCode = exitErr.ExitCode()
-	default:
+	if gate != nil {
+		if err := gate.record(rec, payload, "entered", -1, nil); err != nil {
+			return hookAnswer{}, err
+		}
+		phase := "cancelled"
+		defer func() {
+			code := -1
+			if phase == hookGateCompleted {
+				code = answer.exitCode
+			}
+			runErr = errors.Join(runErr, gate.record(rec, payload, phase, code, runErr))
+		}()
+		if err := waitHold(bounded, gate.UntilGone); err != nil {
+			return hookAnswer{}, fmt.Errorf("hook gate: %w", err)
+		}
+		phase = hookGateCompleted
+	}
+	result, err := (deps.RealRunner{}).Run(bounded, []string{shell, "-c", command}, deps.RunOptions{
+		Dir: cwd, Env: environ, Stdin: payload, WaitDelay: hookWaitDelay, ProcessGroup: true,
+	})
+	answer = hookAnswer{exitCode: result.ExitCode, stderr: strings.TrimSpace(string(result.Stderr))}
+	if errors.Is(err, exec.ErrWaitDelay) {
+		answer.exitCode = 0
+	}
+	if err != nil && !errors.Is(err, exec.ErrWaitDelay) && bounded.Err() == nil {
 		return hookAnswer{}, fmt.Errorf("run: %w", err)
 	}
 	if errors.Is(bounded.Err(), context.DeadlineExceeded) {
 		return hookAnswer{}, fmt.Errorf("timed out after %s", timeout)
 	}
-	if text := strings.TrimSpace(stdout.String()); text != "" && strings.HasPrefix(text, "{") {
+	if text := strings.TrimSpace(string(result.Stdout)); text != "" && strings.HasPrefix(text, "{") {
 		if err := json.Unmarshal([]byte(text), &answer); err != nil {
 			return hookAnswer{}, fmt.Errorf("decode stdout %q: %w", text, err)
 		}
@@ -379,7 +384,7 @@ func (answer hookAnswer) blocks() (bool, string) {
 
 // denies reports whether a PreToolUse answer refuses the tool, and why.
 func (answer hookAnswer) denies() (bool, string) {
-	if answer.Specific.PermissionDecision == "deny" {
+	if answer.Specific.PermissionDecision == permissionDeny {
 		return true, answer.Specific.PermissionDecisionReason
 	}
 	if answer.exitCode == 2 {
@@ -390,7 +395,14 @@ func (answer hookAnswer) denies() (bool, string) {
 
 // invokeStatusLine feeds the statusLine command its input and returns the first
 // line it printed — the line the pane shows under the composer.
-func invokeStatusLine(ctx context.Context, command string, input any, cwd string, environ []string) (string, error) {
+func invokeStatusLine(
+	ctx context.Context,
+	command string,
+	input any,
+	cwd string,
+	environ []string,
+	rec recorder,
+) (string, error) {
 	if command == "" {
 		return "", nil
 	}
@@ -411,8 +423,39 @@ func invokeStatusLine(ctx context.Context, command string, input any, cwd string
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("statusline %q: %w: %s", command, err, strings.TrimSpace(stderr.String()))
+	cmd.WaitDelay = hookWaitDelay
+	runErr := cmd.Run()
+	callback := statuslineCallback{
+		Input:    encoded,
+		Stdout:   stdout.String(),
+		Stderr:   stderr.String(),
+		ExitCode: -1,
+		Argv:     cmd.Args,
+	}
+	if cmd.Process != nil {
+		callback.PID = cmd.Process.Pid
+	}
+	if cmd.ProcessState != nil {
+		callback.ExitCode = cmd.ProcessState.ExitCode()
+	}
+	for _, variable := range cmd.Environ() {
+		if value, ok := strings.CutPrefix(variable, "CLAUDE_CONFIG_DIR="); ok {
+			callback.ConfigDir = value
+		}
+	}
+	receipt, err := json.Marshal(callback)
+	if err != nil {
+		return "", fmt.Errorf("encode statusline callback: %w", err)
+	}
+	recordErr := rec.write("statusline-callbacks.jsonl", string(receipt)+"\n")
+	if runErr != nil {
+		return "", errors.Join(
+			fmt.Errorf("statusline %q: %w: %s", command, runErr, strings.TrimSpace(stderr.String())),
+			recordErr,
+		)
+	}
+	if recordErr != nil {
+		return "", recordErr
 	}
 	line, _, _ := strings.Cut(stdout.String(), "\n")
 	return line, nil

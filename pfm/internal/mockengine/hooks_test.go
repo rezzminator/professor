@@ -30,6 +30,7 @@ func TestRunHookCommandTimeoutDoesNotWaitForOrphan(t *testing.T) {
 		t.TempDir(),
 		os.Environ(),
 		200*time.Millisecond,
+		nil, recorder{},
 	)
 	elapsed := time.Since(start)
 	if err == nil || err.Error() != "timed out after 200ms" {
@@ -45,11 +46,27 @@ func TestRunHookCommandTimeoutDoesNotWaitForOrphan(t *testing.T) {
 func TestHookShellNamesAMissingShell(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	notFound := `sh not found: exec: "sh": executable file not found in $PATH`
-	_, hookErr := runHookCommand(context.Background(), "true", nil, t.TempDir(), os.Environ(), time.Second)
+	_, hookErr := runHookCommand(
+		context.Background(),
+		"true",
+		nil,
+		t.TempDir(),
+		os.Environ(),
+		time.Second,
+		nil,
+		recorder{},
+	)
 	if hookErr == nil || hookErr.Error() != notFound {
 		t.Fatalf("runHookCommand error = %v, want %q", hookErr, notFound)
 	}
-	_, lineErr := invokeStatusLine(context.Background(), "true", map[string]string{}, t.TempDir(), os.Environ())
+	_, lineErr := invokeStatusLine(
+		context.Background(),
+		"true",
+		map[string]string{},
+		t.TempDir(),
+		os.Environ(),
+		recorder{},
+	)
 	if want := "statusline: " + notFound; lineErr == nil || lineErr.Error() != want {
 		t.Fatalf("invokeStatusLine error = %v, want %q", lineErr, want)
 	}
@@ -58,7 +75,16 @@ func TestHookShellNamesAMissingShell(t *testing.T) {
 func TestRunHookCommandReadsAnswerWithoutWaitingForBackgroundChild(t *testing.T) {
 	command := `printf '%s\n' '{"decision":"block","reason":"orphan"}'; sleep 5 &`
 	start := time.Now()
-	answer, err := runHookCommand(context.Background(), command, nil, t.TempDir(), os.Environ(), 10*time.Second)
+	answer, err := runHookCommand(
+		context.Background(),
+		command,
+		nil,
+		t.TempDir(),
+		os.Environ(),
+		10*time.Second,
+		nil,
+		recorder{},
+	)
 	elapsed := time.Since(start)
 	if err != nil {
 		t.Fatalf("runHookCommand: %v", err)
@@ -176,7 +202,12 @@ func TestClaudeSettingsLayersFireAllPlayedEventsInOrder(t *testing.T) {
 	writeHookSettings(t, filepath.Join(fix.configDir, "settings.json"), layer("account"))
 	writeHookSettings(t, filepath.Join(fix.work, ".claude", "settings.json"), layer("project"))
 	fix.write(Scenario{SessionID: fixtureSession, BusyMS: intPtr(0), Steps: []Step{
-		{Type: StepToolCall, Tool: "Bash"}, {Type: StepTurn, Reply: "finished"},
+		{
+			Type:  StepToolCall,
+			Tool:  "Bash",
+			Input: json.RawMessage(`{"command":"true"}`),
+		},
+		{Type: StepTurn, Reply: "finished"},
 	}})
 	session := fix.startTUI("claude", []string{"--settings", inlineHookSettings(t, layer("inline"), "")}, nil)
 	session.waitFrame("the composer", func(frame string) bool { return strings.Contains(frame, "❯") })
@@ -205,7 +236,7 @@ func TestClaudeInlineStopFiresAtEveryTurnEnd(t *testing.T) {
 	settings := inlineHookSettings(t, map[string]any{
 		hookStop: commandHook(`printf 'stop\n' >> "` + stop + `"`),
 	}, "")
-	fix.write(Scenario{SessionID: fixtureSession, BusyMS: intPtr(0)})
+	fix.write(Scenario{SessionID: fixtureSession, BusyMS: intPtr(0), Steps: []Step{{Type: StepTurn}, {Type: StepTurn}}})
 	session := fix.startTUI("claude", []string{"--settings", settings}, nil)
 	session.waitFrame("the composer", func(frame string) bool { return strings.Contains(frame, "❯") })
 	session.typeLine("one")
@@ -304,6 +335,7 @@ func TestClaudeSettingsPathStatusPrecedenceMatchersAndDedup(t *testing.T) {
 			fix.work,
 			os.Environ(),
 			io.Discard,
+			nil,
 		); err != nil {
 			t.Fatal(err)
 		}
@@ -320,44 +352,6 @@ func TestClaudeSettingsPathStatusPrecedenceMatchersAndDedup(t *testing.T) {
 	}
 	if _, status, err := loadClaudeHooks(fix.configDir, fix.work, ""); err != nil || status != mark("status-account") {
 		t.Fatalf("account status=%q err=%v", status, err)
-	}
-}
-
-func TestClaudeInlineAsyncRunsWithoutApplyingItsAnswer(t *testing.T) {
-	fix := newFixture(t)
-	t.Chdir(fix.work)
-	marker := filepath.Join(fix.recordDir, "async")
-	command := `printf 'ran\n' >> "` + marker + `"; printf '%s\n' '{"decision":"block","reason":"async block","hookSpecificOutput":{"permissionDecision":"deny","permissionDecisionReason":"async deny","additionalContext":"async context"}}'`
-	settings := inlineHookSettings(t, map[string]any{
-		hookUserPromptSubmit: []any{
-			map[string]any{"hooks": []any{map[string]any{"type": "command", "command": command, "async": true}}},
-		},
-		hookPreToolUse: []any{
-			map[string]any{"hooks": []any{map[string]any{"type": "command", "command": command, "async": true}}},
-		},
-	}, "")
-	fix.write(
-		Scenario{
-			SessionID: fixtureSession,
-			BusyMS:    intPtr(0),
-			Steps:     []Step{{Type: StepToolCall, Tool: "Bash"}, {Type: StepTurn, Reply: "continued"}},
-		},
-	)
-	session := fix.startTUI("claude", []string{"--settings", settings}, nil)
-	session.waitFrame("the composer", func(frame string) bool { return strings.Contains(frame, "❯") })
-	session.typeLine("go")
-	session.waitFrame("continued", func(frame string) bool { return strings.Contains(frame, "continued") })
-	session.typeLine("/exit")
-	if code := session.waitExit(); code != 0 {
-		t.Fatalf("exit=%d stderr=%s", code, session.stderr.String())
-	}
-	if got := readFile(t, marker); got != "ran\nran\n" {
-		t.Fatalf("async runs=%q", got)
-	}
-	transcriptText := readFile(t, fix.claudeTranscript(fixtureSession))
-	if strings.Contains(transcriptText, "async context") || strings.Contains(transcriptText, "async deny") ||
-		strings.Contains(transcriptText, "async block") {
-		t.Fatalf("async answer applied: %s", transcriptText)
 	}
 }
 
@@ -430,7 +424,10 @@ func TestClaudeInlinePromptBlockAndToolDenial(t *testing.T) {
 			Scenario{
 				SessionID: fixtureSession,
 				BusyMS:    intPtr(0),
-				Steps:     []Step{{Type: StepToolCall, Tool: "Bash"}, {Type: StepTurn, Reply: "finished"}},
+				Steps: []Step{
+					{Type: StepToolCall, Tool: "Bash", Input: json.RawMessage(`{"command":"true"}`)},
+					{Type: StepTurn, Reply: "finished"},
+				},
 			},
 		)
 		session := fix.startTUI("claude", []string{"--settings", settings}, nil)
@@ -476,7 +473,10 @@ func TestClaudeInlinePromptBlockAndToolDenial(t *testing.T) {
 			Scenario{
 				SessionID: fixtureSession,
 				BusyMS:    intPtr(0),
-				Steps:     []Step{{Type: StepToolCall, Tool: "Bash"}, {Type: StepTurn, Reply: "finished"}},
+				Steps: []Step{
+					{Type: StepToolCall, Tool: "Bash", Input: json.RawMessage(`{"command":"true"}`)},
+					{Type: StepTurn, Reply: "finished"},
+				},
 			},
 		)
 		session := fix.startTUI("claude", []string{"--settings", settings}, nil)
@@ -509,7 +509,10 @@ func TestClaudeQuietSuppressesInlineHooksAndStatusLine(t *testing.T) {
 			SessionID: fixtureSession,
 			BusyMS:    intPtr(0),
 			Quiet:     true,
-			Steps:     []Step{{Type: StepToolCall, Tool: "Bash"}, {Type: StepTurn, Reply: "finished"}},
+			Steps: []Step{
+				{Type: StepToolCall, Tool: "Bash", Input: json.RawMessage(`{"command":"true"}`)},
+				{Type: StepTurn, Reply: "finished"},
+			},
 		},
 	)
 	session := fix.startTUI("claude", []string{"--settings", settings}, nil)
@@ -558,7 +561,10 @@ func TestClaudePfmsRenderedSettingsRunPlayedHooks(t *testing.T) {
 		Scenario{
 			SessionID: fixtureSession,
 			BusyMS:    intPtr(0),
-			Steps:     []Step{{Type: StepToolCall, Tool: "Bash"}, {Type: StepTurn, Reply: "finished"}},
+			Steps: []Step{
+				{Type: StepToolCall, Tool: "Bash", Input: json.RawMessage(`{"command":"true"}`)},
+				{Type: StepTurn, Reply: "finished"},
+			},
 		},
 	)
 	session := fix.startTUI("claude", launch.Argv, nil)
@@ -636,7 +642,11 @@ func TestClaudeProjectHooksMergeWithSeatHooksAndStopEachTurn(t *testing.T) {
 		"Stop": commandHook(command("project-stop", "project-Stop", ":")),
 	})
 	fix.write(
-		Scenario{SessionID: fixtureSession, BusyMS: intPtr(0), Steps: []Step{{Type: StepToolCall, Tool: "Write"}}},
+		Scenario{
+			SessionID: fixtureSession,
+			BusyMS:    intPtr(0),
+			Steps:     []Step{{Type: StepToolCall, Tool: "Write"}, {Type: StepTurn}, {Type: StepTurn}},
+		},
 	)
 	session := fix.startTUI("claude", claudeArgs(), nil)
 	session.waitFrame("the composer", func(frame string) bool { return strings.Contains(frame, "❯") })
@@ -774,6 +784,7 @@ func TestClaudeFiresTheInstalledHooksAndHonoursTheirAnswers(t *testing.T) {
 	fix.write(Scenario{SessionID: fixtureSession, BusyMS: intPtr(0), Steps: []Step{
 		{Type: StepToolCall, Tool: "Agent", Input: json.RawMessage(`{"subagent_type":"Explore","prompt":"look"}`)},
 		{Type: StepTurn, Reply: "mapped"},
+		{Type: StepTurn},
 	}})
 	session := fix.startTUI("claude", claudeArgs("--name", "hooked"), nil)
 	session.waitFrame("the composer", func(frame string) bool { return strings.Contains(frame, "❯") })

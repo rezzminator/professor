@@ -1,0 +1,4 @@
+[
+  {"type": "mcp", "server": "chat-professor", "tool": "name", "input": {"target": "self", "name": "atlas-desk"}},
+  {"type": "turn", "reply": "birth-name-complete", "busy_ms": 200}
+]

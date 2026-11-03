@@ -15,7 +15,10 @@ import (
 func TestHookRecordsNameDecisionReasonAndDuration(t *testing.T) {
 	ctx, recorder := Test(t)
 	var stdout bytes.Buffer
-	tee, finish := Hook(ctx, "exit-intercept", &stdout)
+	ctx = With(ctx, FieldBeat, "permission", FieldRun, "synthetic")
+	tee, finish := Hook(ctx, "store-guard", &stdout)
+	requireField(t, recorder.Records()[0], FieldAction, "hook.store-guard")
+	requireField(t, recorder.Records()[0], FieldBeat, "permission")
 	if _, err := tee.Write([]byte(`{"decision":"block","reason":"another reload is in flight"}` + "\n")); err != nil {
 		t.Fatal(err)
 	}
@@ -23,7 +26,7 @@ func TestHookRecordsNameDecisionReasonAndDuration(t *testing.T) {
 	if !strings.HasPrefix(stdout.String(), `{"decision":"block"`) {
 		t.Fatalf("the hook's stdout did not reach the caller: %q", stdout.String())
 	}
-	records := recorder.Records()
+	records := hookResults(t, recorder)
 	if len(records) != 1 {
 		t.Fatalf("records = %d, want 1: %s", len(records), recorder.Raw())
 	}
@@ -32,7 +35,7 @@ func TestHookRecordsNameDecisionReasonAndDuration(t *testing.T) {
 		t.Fatalf("record = %s at %s", record.Message, record.Level)
 	}
 	requireField(t, record, FieldComp, "hooks")
-	requireField(t, record, "hook", "exit-intercept")
+	requireField(t, record, "hook", "store-guard")
 	requireField(t, record, "decision", "block")
 	requireField(t, record, "reason", "another reload is in flight")
 	requireField(t, record, FieldExit, float64(0))
@@ -57,7 +60,7 @@ func TestHookDecisionFromExitCodeAndPermissionShape(t *testing.T) {
 		),
 	)
 	finish(0)
-	records := recorder.Records()
+	records := hookResults(t, recorder)
 	if len(records) != 4 {
 		t.Fatalf("records = %d, want 4: %s", len(records), recorder.Raw())
 	}
@@ -80,7 +83,7 @@ func TestHookNativeHangupIsInterruptedNotFailure(t *testing.T) {
 			ctx, recorder := Test(t)
 			_, finish := Hook(ctx, name, &bytes.Buffer{})
 			finish(129)
-			record := recorder.Records()[0]
+			record := hookResults(t, recorder)[0]
 			requireField(t, record, FieldExit, float64(129))
 			if name == "then" {
 				requireField(t, record, "decision", "error")
@@ -113,8 +116,20 @@ func TestHookCapturesOnlyAHeadOfStdout(t *testing.T) {
 	if stdout.Len() != len(big) {
 		t.Fatalf("passed through %d bytes, want %d", stdout.Len(), len(big))
 	}
-	record := recorder.Records()[0]
+	record := hookResults(t, recorder)[0]
 	if _, found := record.Field("reason"); found || strings.Contains(recorder.Raw(), "PLANTED") {
 		t.Fatalf("non-JSON stdout leaked into the record: %s", recorder.Raw())
 	}
+}
+
+func hookResults(t *testing.T, recorder *Recorder) []Record {
+	t.Helper()
+	var records []Record
+	for _, record := range recorder.Records() {
+		if record.Message == "action.start" {
+			continue
+		}
+		records = append(records, record)
+	}
+	return records
 }

@@ -1,0 +1,2 @@
+file	source	status
+turn.json	fixtures/fleet-reader/turn.json and literal reader-prompt input	Synthetic expected prompt/answer pair; live transcript comparison still required.

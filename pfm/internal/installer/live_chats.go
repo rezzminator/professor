@@ -1,6 +1,7 @@
 package installer
 
 import (
+	"context"
 	"errors"
 	"io/fs"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"syscall"
 
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 func liveChatPIDs(procRoot, configDir string) ([]string, error) {
@@ -71,6 +73,7 @@ func (installer *engine) openAccountChats(dir string, guarded bool) (*accountCha
 	if !guarded || !installer.apply {
 		return chats, nil
 	}
+	obs.Action(context.Background(), "lifecycle.account-entry", obs.DoorCLI)
 	guard, err := gather.AcquireAccountGuard(dir, false)
 	if errors.Is(err, syscall.EWOULDBLOCK) {
 		chats.starting = true

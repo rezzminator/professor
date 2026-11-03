@@ -1,0 +1,13 @@
+{
+  "agent": "claude",
+  "manifest_source": "bundled",
+  "matched_rule": {
+    "id": "live_prompt_box",
+    "priority": 950,
+    "region": "prompt_box_body",
+    "state": "idle"
+  },
+  "screen_detection_skipped": false,
+  "state": "idle",
+  "visible_idle": true
+}

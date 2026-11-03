@@ -1,0 +1,2 @@
+superuser-bypasses-file-modes
+filesystem-is-case-sensitive

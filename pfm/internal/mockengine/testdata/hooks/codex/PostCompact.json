@@ -1,0 +1,9 @@
+{
+  "session_id": "019ff700-0000-7000-8000-000000000001",
+  "transcript_path": "/fixture/rollout.jsonl",
+  "cwd": "/fixture/atlas",
+  "model": "codex-fixture-model",
+  "hook_event_name": "PostCompact",
+  "turn_id": "turn-atlas",
+  "trigger": "manual"
+}

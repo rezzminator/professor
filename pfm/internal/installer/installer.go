@@ -18,10 +18,12 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/globallink"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/retired"
+	"github.com/rezzminator/professor/pfm/internal/servicemanager"
 	"github.com/rezzminator/professor/pfm/internal/themesync"
 )
 
 type engine struct {
+	names       servicemanager.UnitNames
 	options     Options
 	report      Report
 	apply       bool
@@ -66,6 +68,10 @@ func Run(ctx context.Context, options Options) (report Report, err error) {
 	if err != nil {
 		return Report{}, fmt.Errorf("resolve installer options: %w", err)
 	}
+	names, err := servicemanager.CurrentUnitNames()
+	if err != nil {
+		return Report{}, err
+	}
 	if options.Mode > ModeUninstall {
 		return Report{}, fmt.Errorf("unknown installer mode %d", options.Mode)
 	}
@@ -79,6 +85,7 @@ func Run(ctx context.Context, options Options) (report Report, err error) {
 	}
 
 	installer := &engine{
+		names:       names,
 		options:     options,
 		apply:       options.Mode != ModeDryRun,
 		stamp:       options.Now().Format("20060102-150405"),
@@ -175,7 +182,11 @@ func (installer *engine) preflight(ctx context.Context, mode Mode) error {
 	options := installer.options
 	options.Stdout = io.Discard
 	preview := &engine{
-		options: options, apply: false, stamp: installer.stamp, managedRoot: installer.managedRoot,
+		options:     options,
+		apply:       false,
+		stamp:       installer.stamp,
+		managedRoot: installer.managedRoot,
+		names:       installer.names,
 	}
 	var (
 		planErr error
@@ -629,14 +640,18 @@ func (installer *engine) uninstall(ctx context.Context) error {
 		return err
 	}
 	for _, enablement := range unitEnablements {
-		target := filepath.Join(paths.SystemdUserDir(installer.options.Home), enablement.wants, enablement.unit)
+		target := filepath.Join(
+			paths.SystemdUserDir(installer.options.Home),
+			enablement.wants,
+			installer.names.Name(enablement.unit),
+		)
 		if err := installer.unlinkOne(target); err != nil {
 			return err
 		}
 	}
 	for _, name := range append(append([]string(nil), unitNames...), mcpUnitName) {
 		if err := installer.unlinkOne(
-			filepath.Join(paths.SystemdUserDir(installer.options.Home), name),
+			filepath.Join(paths.SystemdUserDir(installer.options.Home), installer.names.Name(name)),
 		); err != nil {
 			return err
 		}
@@ -734,13 +749,14 @@ func (installer *engine) stageAssets(assets []assetFile) (bool, error) {
 			content, err = renderVSCodeExtensionManifest(content, installer.vscodeThemes)
 		case asset.path == "systemd/"+nameSyncTimerUnit:
 			content, err = renderNameSyncTimerAsset(content, installer.options)
-		case strings.HasPrefix(asset.path, "systemd/"):
+		}
+		if err == nil && strings.HasPrefix(asset.path, "systemd/") {
 			content, err = renderServiceEnv(content, installer.options.Home)
 		}
 		if err != nil {
 			return false, fmt.Errorf("render embedded asset %s: %w", asset.path, err)
 		}
-		target := filepath.Join(installer.managedRoot, filepath.FromSlash(asset.path))
+		target := filepath.Join(installer.managedRoot, filepath.FromSlash(installer.names.Name(asset.path)))
 		if sameFile(target, content, asset.mode) {
 			installer.ok(target)
 			continue
@@ -756,7 +772,7 @@ func (installer *engine) stageAssets(assets []assetFile) (bool, error) {
 	}
 	if !installer.options.MCPEnabled[chatName] {
 		for _, relative := range []string{"systemd/pfm-mcp.service", "launchd/com.professor.pfm.mcp.plist"} {
-			mcpAsset := filepath.Join(installer.managedRoot, filepath.FromSlash(relative))
+			mcpAsset := filepath.Join(installer.managedRoot, filepath.FromSlash(installer.names.Name(relative)))
 			if _, err := os.Lstat(mcpAsset); err == nil {
 				message := fmt.Sprintf(
 					"remove %s (chat MCP server is disabled in %s)",
@@ -781,7 +797,7 @@ func (installer *engine) stageAssets(assets []assetFile) (bool, error) {
 func (installer *engine) removeManagedAssets(assets []assetFile) error {
 	installer.say("managed assets -> %s", installer.managedRoot)
 	for _, asset := range assets {
-		target := filepath.Join(installer.managedRoot, filepath.FromSlash(asset.path))
+		target := filepath.Join(installer.managedRoot, filepath.FromSlash(installer.names.Name(asset.path)))
 		if _, err := os.Lstat(target); errors.Is(err, fs.ErrNotExist) {
 			continue
 		} else if err != nil {
@@ -1191,6 +1207,7 @@ func (installer *engine) retireRenamedUnits(
 ) (bool, error) {
 	changed := false
 	for _, name := range installer.retiredUnitNames() {
+		name = installer.names.Name(name)
 		target := filepath.Join(directory, name)
 		_, statErr := os.Lstat(target)
 		if statErr != nil && !errors.Is(statErr, fs.ErrNotExist) {
@@ -1236,7 +1253,7 @@ func (installer *engine) wireUnits(ctx context.Context) (bool, error) {
 	if installer.options.MCPEnabled[chatName] {
 		managedNames = append(managedNames, mcpUnitName)
 	} else {
-		mcpTarget := filepath.Join(directory, mcpUnitName)
+		mcpTarget := filepath.Join(directory, installer.names.Name(mcpUnitName))
 		if _, err := os.Lstat(mcpTarget); err == nil {
 			if managerAvailable && installer.apply {
 				installer.runSystemctl(ctx, "disable", "--now", mcpUnitName)
@@ -1250,6 +1267,7 @@ func (installer *engine) wireUnits(ctx context.Context) (bool, error) {
 		}
 	}
 	for _, name := range managedNames {
+		name = installer.names.Name(name)
 		source := filepath.Join(installer.managedRoot, "systemd", name)
 		target := filepath.Join(directory, name)
 		linkChanged, err := installer.ensureLink(source, target)
@@ -1259,8 +1277,9 @@ func (installer *engine) wireUnits(ctx context.Context) (bool, error) {
 		changed = changed || linkChanged
 	}
 	for _, enablement := range unitEnablements {
-		source := filepath.Join(directory, enablement.unit)
-		target := filepath.Join(directory, enablement.wants, enablement.unit)
+		unit := installer.names.Name(enablement.unit)
+		source := filepath.Join(directory, unit)
+		target := filepath.Join(directory, enablement.wants, unit)
 		if enablement.unit == mcpUnitName && !installer.options.MCPEnabled[chatName] {
 			info, err := os.Lstat(target)
 			if errors.Is(err, fs.ErrNotExist) {
@@ -1298,6 +1317,7 @@ func (installer *engine) retireUnitEnablements(directory string, names []string)
 	changed := false
 	for _, wants := range []string{systemdDefaultWants, "timers.target.wants"} {
 		for _, name := range names {
+			name = installer.names.Name(name)
 			target := filepath.Join(directory, wants, name)
 			info, err := os.Lstat(target)
 			if errors.Is(err, fs.ErrNotExist) {
@@ -1329,6 +1349,9 @@ func (installer *engine) reloadUnits(ctx context.Context) {
 		enablements = append(enablements, []string{mcpUnitName})
 	}
 	for _, units := range enablements {
+		for index := range units {
+			units[index] = installer.names.Name(units[index])
+		}
 		args := append([]string{"enable", "--now"}, units...)
 		if err := installer.userSystemctl(ctx, args...).Err(); err != nil {
 			installer.deferFailure(installer.fail(
@@ -1338,12 +1361,13 @@ func (installer *engine) reloadUnits(ctx context.Context) {
 	}
 	// Enabling a timer is not evidence that it is ticking. A silent failed
 	// start would strand every due wake until another install repaired it.
-	state, err := fleetUnitState(ctx, installer.options.Runner, scheduleTimerUnit)
+	timer := installer.names.Name(scheduleTimerUnit)
+	state, err := fleetUnitState(ctx, installer.options.Runner, timer)
 	if err != nil {
 		installer.deferFailure(installer.fail(fmt.Errorf("verify schedule timer after enable --now: %w", err)))
 	} else if state != unitStateActive {
 		installer.deferFailure(installer.fail(fmt.Errorf(
-			"schedule timer %s is %s after enable --now; due wakes will not run", scheduleTimerUnit, state,
+			"schedule timer %s is %s after enable --now; due wakes will not run", timer, state,
 		)))
 	}
 }
@@ -1356,17 +1380,18 @@ func (installer *engine) userManagerAvailable(ctx context.Context) bool {
 // came back active; a restart that fails or does not come back is an error,
 // reported at once, never a skip.
 func (installer *engine) restartMCPUnit(ctx context.Context) error {
-	err := installer.userSystemctl(ctx, "restart", mcpUnitName).Err()
+	unit := installer.names.Name(mcpUnitName)
+	err := installer.userSystemctl(ctx, "restart", unit).Err()
 	if err != nil {
-		err = fmt.Errorf("systemctl --user restart %s: %w", mcpUnitName, err)
+		err = fmt.Errorf("systemctl --user restart %s: %w", unit, err)
 	} else {
 		installer.pause(fleetUnitSettle)
-		err = verifyFleetUnitsActive(ctx, installer.options.Runner, []string{mcpUnitName})
+		err = verifyFleetUnitsActive(ctx, installer.options.Runner, []string{unit})
 	}
 	if err != nil {
 		return installer.fail(err)
 	}
-	installer.ok("systemctl --user restart " + mcpUnitName)
+	installer.ok("systemctl --user restart " + unit)
 	return nil
 }
 

@@ -1,0 +1,8 @@
+forecast	cell	rank	factors	worst_outcome	held	beat
+pfm-herdr-tmux	C1	1	herdr_shield=on,door=seat_proof	wrong-state	UNHELD	machine-restart/forecast-seat-proof@linux+herdr-shield+project+claude
+pfm-herdr-tmux	C21	null	multiplexer=herdr,runtime_event=version_pruned	wrong-state	held	machine-restart/forecast-multiplexer-herdr-runtime-event-version-pruned@linux
+pfm-herdr-tmux	C23	null	herdr_indicators=on,runtime_event=herdr_server_stop	wrong-state	held	machine-restart/forecast-herdr-indicators-on-runtime-event-herdr-server-stop@linux
+os-doors	C19	8	service_manager=systemd_user,unit_state=active_before_stop,trigger_unit=timer_up	wrong-state	held	machine-restart/forecast-service-manager-systemd-user-unit-state-active-before-stop-trigger-unit-timer-up@linux
+darwin-linux-launchd-systemd-proc-sysctl-setsid	C52	null	seat_restart=native_seat_relaunch,engine=claude_code,recorded_binary=pruned_version	wrong-state	held	machine-restart/forecast-seat-restart-native-seat-relaunch-engine-claude-code-recorded-binary-pruned-version@macos
+darwin-linux-launchd-systemd-proc-sysctl-setsid	C53	null	supervisor_state=outlived_preference_change,engine=claude_code,seat_state=revived_on_restart	wrong-state	held	machine-restart/forecast-supervisor-state-outlived-preference-change-engine-claude-code-seat-state-revived-on-restart@linux
+darwin-linux-launchd-systemd-proc-sysctl-setsid	C89	null	unit_state_before=stopped,mcp_daemon=supervised_or_by_hand,service_manager=systemd	wrong-state	held	machine-restart/forecast-unit-state-before-stopped-mcp-daemon-supervised-or-by-hand-service-manager-systemd@linux

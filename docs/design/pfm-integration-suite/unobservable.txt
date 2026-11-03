@@ -1,0 +1,7 @@
+generated-chat-id
+engine-session-id
+timestamp
+process-id
+ephemeral-port
+fresh-tmux-socket-path
+herdr-pane-id

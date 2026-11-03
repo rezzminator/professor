@@ -125,6 +125,26 @@ func TestLinuxFollowerIsASystemdUnitTrioNeverALaunchAgent(t *testing.T) {
 	}
 	h.write(linuxUnitDir+"pfm-theme.path", "[Path]\n")
 	wantVerdict(t, h.status(), "follower", VerdictDrift, "pfm-theme.path differs from the render")
+	t.Run("namespace", func(t *testing.T) {
+		t.Setenv(paths.EnvUnitPrefix, "journey-atlas")
+		h := newLinuxHarness(t)
+		h.on()
+		if got, want := strings.Join(systemctlCalls(h, 0), "; "),
+			"daemon-reload; enable journey-atlas-theme.path journey-atlas-theme.timer; restart journey-atlas-theme.path journey-atlas-theme.timer"; got != want {
+			t.Fatalf("on ran %q, want %q", got, want)
+		}
+		path := linuxUnitDir + "journey-atlas-theme.path"
+		var reference string
+		for _, line := range strings.Split(h.read(path), "\n") {
+			if value, ok := strings.CutPrefix(line, "Unit="); ok {
+				reference = value
+			}
+		}
+		if want := "journey-atlas-theme.service"; reference != want {
+			t.Fatalf("%s Unit=%q, want %q", path, reference, want)
+		}
+		wantVerdict(t, h.status(), "follower", VerdictInSync, "")
+	})
 }
 
 // A rewritten unit owes the user manager a reload until one succeeds: a

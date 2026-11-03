@@ -14,6 +14,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	herdrpkg "github.com/rezzminator/professor/pfm/internal/herdr"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 )
@@ -279,24 +280,34 @@ func TestAChatThatWillNotEndIsAFailedStep(t *testing.T) {
 }
 
 func TestASupervisedDaemonBelongsToItsServiceUnit(t *testing.T) {
-	var order []string
-	dependencies, _, _, _ := fullHost(t, &order)
-	dependencies.Services = &fakeServices{units: []Unit{serviceUnit(&order, "systemd "+mcpSystemdUnit)}}
-	plan := BuildPlan(context.Background(), dependencies)
-	names := unitNames(plan.Units)
-	if !slices.Contains(names, "services: systemd pfm-mcp.service") {
-		t.Fatalf("the daemon's unit is missing: %v", names)
-	}
-	for _, name := range names {
-		if strings.HasPrefix(name, "mcp-daemon:") || strings.Contains(name, "pid 11") {
-			t.Fatalf("a supervised daemon is stopped by pid too: %v", names)
-		}
-	}
-	for index := range plan.Units {
-		unit := &plan.Units[index]
-		if unit.Name == "systemd pfm-mcp.service" && !strings.HasSuffix(unit.StartHow, "+ probe") {
-			t.Fatalf("the supervised daemon starts without its status probe: %q", unit.StartHow)
-		}
+	for _, row := range []struct {
+		name, prefix, unit string
+	}{
+		{"default", "pfm", "pfm-mcp.service"},
+		{"namespace", "journey-atlas", "journey-atlas-mcp.service"},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			t.Setenv(paths.EnvUnitPrefix, row.prefix)
+			var order []string
+			dependencies, _, _, _ := fullHost(t, &order)
+			dependencies.Services = &fakeServices{units: []Unit{serviceUnit(&order, "systemd "+row.unit)}}
+			plan := BuildPlan(context.Background(), dependencies)
+			names := unitNames(plan.Units)
+			if !slices.Contains(names, "services: systemd "+row.unit) {
+				t.Fatalf("the daemon's unit is missing: %v", names)
+			}
+			for _, name := range names {
+				if strings.HasPrefix(name, "mcp-daemon:") || strings.Contains(name, "pid 11") {
+					t.Fatalf("a supervised daemon is stopped by pid too: %v", names)
+				}
+			}
+			for index := range plan.Units {
+				unit := &plan.Units[index]
+				if unit.Name == "systemd "+row.unit && !strings.HasSuffix(unit.StartHow, "+ probe") {
+					t.Fatalf("the supervised daemon starts without its status probe: %q", unit.StartHow)
+				}
+			}
+		})
 	}
 }
 

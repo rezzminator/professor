@@ -27,10 +27,6 @@ const (
 	// serviceStopWithin, one per servicemanager.BootstrapRetryInterval, the
 	// first at once.
 	launchdBootstrapAttempts = int(serviceStopWithin/servicemanager.BootstrapRetryInterval) + 1
-	// pfmLaunchdPrefix opens every launch agent label pfm installs.
-	pfmLaunchdPrefix = "com.professor.pfm."
-	// pfmSystemdPrefix opens every systemd user unit pfm installs.
-	pfmSystemdPrefix = "pfm-"
 	// launchdLoaded is the word for a launch agent launchd knows.
 	launchdLoaded = "loaded"
 )

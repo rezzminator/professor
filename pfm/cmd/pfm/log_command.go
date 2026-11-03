@@ -18,6 +18,7 @@ func openActivityLog(args []string, runtime commandRuntime, stderr io.Writer) fu
 		Cmd: obs.Verb(
 			args,
 		),
+		Args:       args,
 		Version:    config.DisplayVersion(version),
 		Level:      machine.Level,
 		Components: machine.Components,

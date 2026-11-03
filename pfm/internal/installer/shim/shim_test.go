@@ -253,7 +253,7 @@ func TestPfmOwnTerminalClosesOwnedAndPreservesOthers(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		command.Env = append(os.Environ(), "HOME="+home, "TMUX=", "TERM=dumb")
+		command.Env = append(os.Environ(), "HOME="+home, "TMUX=", "HERDR_ENV=", "TERM=dumb")
 		output, err := command.CombinedOutput()
 		if err != nil {
 			t.Fatalf("owned terminal: %v: %s", err, output)
@@ -262,6 +262,45 @@ func TestPfmOwnTerminalClosesOwnedAndPreservesOthers(t *testing.T) {
 			t.Fatalf("an owned terminal kept running past _pfm_own_terminal: %q", output)
 		}
 	})
+
+	for _, test := range []struct {
+		name, call, status string
+	}{
+		{"native Herdr helper", "_pfm_own_terminal 0", "0"},
+		{"native Herdr failure", "_pfm_own_terminal 7", "7"},
+		{"native Herdr Claude caller", "claude", "0"},
+		{"native Herdr Codex caller", "codex", "0"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			home := t.TempDir()
+			bin := filepath.Join(home, ".local", "bin")
+			if err := os.MkdirAll(bin, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			for _, name := range []string{"pfm", "claude"} {
+				writeShimFile(t, filepath.Join(bin, name), "#!/bin/sh\nexit 0\n")
+			}
+			driver := filepath.Join(home, "driver.zsh")
+			before, after := filepath.Join(home, "before"), filepath.Join(home, "after")
+			writeShimFile(t, driver, "source "+quoteZsh(shimPath)+"\n"+
+				"print -r -- $$ >"+quoteZsh(before)+"\n"+test.call+"\n"+
+				"print -r -- \"after=$?:$$\" >"+quoteZsh(after)+"\n")
+			command, err := testjail.PTYCommand(zsh, "-fi", driver)
+			if err != nil {
+				t.Fatal(err)
+			}
+			command.Env = append(os.Environ(), "HOME="+home, "TMUX=", "TERM=dumb",
+				"HERDR_ENV=1", "HERDR_SOCKET_PATH="+filepath.Join(home, "herdr.sock"), "HERDR_PANE_ID=w2:p4")
+			command.Stdin = strings.NewReader("x")
+			output, runErr := command.CombinedOutput()
+			want := "after=" + test.status + ":" + strings.TrimSpace(readShimFile(t, before)) + "\n"
+			actual, readErr := os.ReadFile(after)
+			if runErr != nil || readErr != nil || string(actual) != want {
+				t.Fatalf("native caller receipt expected=%q actual=%q path=%s run=%v read=%v output=%q",
+					want, actual, after, runErr, readErr, output)
+			}
+		})
+	}
 
 	t.Run("preserves a script or nested-chat shell", func(t *testing.T) {
 		home := t.TempDir()

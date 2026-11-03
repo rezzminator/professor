@@ -1,0 +1,54 @@
+[
+  {
+    "factors": "receipt_state=historical_fingerprint,native_handler_state=disabled,engine=codex",
+    "kind": "trust-doctor",
+    "expected": {
+      "historical_receipt_present": true,
+      "native_enabled": false,
+      "doctor_disabled": true,
+      "receipt_preserved": true,
+      "config_preserved": true,
+      "fault_restored": true
+    }
+  },
+  {
+    "factors": "trust_receipt=present,handler_state=operator_disabled,engine=codex",
+    "kind": "trust-install",
+    "expected": {
+      "historical_receipt_present": true,
+      "native_enabled": false,
+      "doctor_disabled": true,
+      "receipt_preserved": true,
+      "config_preserved": true,
+      "fault_restored": true,
+      "installer_preserved_operator_choice": true
+    }
+  },
+  {
+    "factors": "script_reference=dollar_zero_self_dir,guard_input=shell_body_without_origin,engine=codex",
+    "kind": "guard",
+    "expected": {
+      "denied_without_origin": true,
+      "allowed_with_origin": true,
+      "allowed_stdout": "edge-allowed\n",
+      "refused_execution": "n/a:hook-denied"
+    }
+  },
+  {
+    "factors": "login_default=sentinel_inherited,claude_updater=temp_and_rename_at_account_path,launch_origin=outside_pfm_shell",
+    "kind": "updater",
+    "expected": {
+      "configured_accounts": [
+        2
+      ],
+      "outside_shell_launcher": true,
+      "inherited_sentinel": true,
+      "updater_temp_and_rename": true,
+      "carried_account": 2,
+      "native_account": 2,
+      "child_state": "idle",
+      "settings_restored": true,
+      "shared_config_preserved": true
+    }
+  }
+]

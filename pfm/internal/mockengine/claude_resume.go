@@ -8,9 +8,71 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"strings"
+	"time"
 )
 
 const claudeCustomTitle = "custom-title"
+
+func latestClaudeSession(directory string) (string, error) {
+	entries, err := os.ReadDir(directory)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return "", fmt.Errorf("read continued sessions %s: %w", directory, err)
+	}
+	var latest string
+	var modified time.Time
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".jsonl") {
+			continue
+		}
+		path := filepath.Join(directory, entry.Name())
+		info, err := entry.Info()
+		if err != nil {
+			return "", fmt.Errorf("stat continued session %s: %w", path, err)
+		}
+		if !info.ModTime().After(modified) {
+			continue
+		}
+		eligible, err := claudeContinueEligible(path)
+		if err != nil {
+			return "", err
+		}
+		if eligible {
+			latest, modified = strings.TrimSuffix(entry.Name(), ".jsonl"), info.ModTime()
+		}
+	}
+	if latest == "" {
+		return "", errors.New("No conversation found to continue") //nolint:staticcheck // Native Claude wording.
+	}
+	return latest, nil
+}
+
+func claudeContinueEligible(path string) (bool, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return false, fmt.Errorf("read continued session %s: %w", path, err)
+	}
+	defer func() { _ = file.Close() }()
+	decoder := json.NewDecoder(file)
+	for {
+		var record claudeRecord
+		if err := decoder.Decode(&record); errors.Is(err, io.EOF) {
+			return false, nil
+		} else if err != nil {
+			return false, fmt.Errorf("decode continued session %s: %w", path, err)
+		}
+		if record.Type != roleUser || record.IsSidechain || record.IsMeta || record.Message == nil {
+			continue
+		}
+		prompt, ok := record.Message.Content.(string)
+		if !ok {
+			continue
+		}
+		word, _, _ := strings.Cut(strings.TrimSpace(prompt), " ")
+		return record.PromptSource != "sdk" && !strings.HasPrefix(record.Entrypoint, "sdk-") && word != "/loop", nil
+	}
+}
 
 func claudeTranscriptTitle(path string) (string, error) {
 	file, err := os.Open(path)

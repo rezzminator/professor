@@ -13,6 +13,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/servicemanager"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 )
 
@@ -103,6 +104,10 @@ func (finder *discoverer) failed(family string, err error) {
 // `docker ps` and `docker inspect`.
 func BuildPlan(ctx context.Context, dependencies Deps) Plan {
 	finder := &discoverer{deps: dependencies, claimed: map[int]bool{}}
+	if _, err := servicemanager.CurrentUnitNames(); err != nil {
+		finder.failed(FamilyServices, err)
+		return finder.plan
+	}
 	finder.findChats(ctx)
 	table, tableErr := finder.readTable()
 	if tableErr != nil {
@@ -205,18 +210,26 @@ func (finder *discoverer) chatUnit(chat headless.Chat) Unit {
 // beside it is the mcp-daemon family's. A failed find returns its error: who
 // supervises the daemon is then unknown, never "nobody".
 func (finder *discoverer) findServices(ctx context.Context) (bool, error) {
+	names, err := servicemanager.CurrentUnitNames()
+	if err != nil {
+		finder.failed(FamilyServices, err)
+		return false, err
+	}
 	if finder.deps.Services == nil {
 		finder.found(FamilyServices, "no service manager on this platform — no supervised services")
 		return false, nil
 	}
-	units, detail, err := finder.deps.Services.Units(ctx, FamilyServices, func(name string) bool {
-		return strings.HasPrefix(name, pfmLaunchdPrefix) || strings.HasPrefix(name, pfmSystemdPrefix)
-	}, func(name string) func(context.Context) error {
-		if name == mcpLaunchdLabel || name == mcpSystemdUnit {
-			return finder.deps.DaemonProbe
-		}
-		return nil
-	})
+	units, detail, err := finder.deps.Services.Units(
+		ctx,
+		FamilyServices,
+		names.Matches,
+		func(name string) func(context.Context) error {
+			if name == names.Name(mcpLaunchdLabel) || name == names.Name(mcpSystemdUnit) {
+				return finder.deps.DaemonProbe
+			}
+			return nil
+		},
+	)
 	if err != nil {
 		finder.failed(FamilyServices, err)
 		return false, err
@@ -225,7 +238,8 @@ func (finder *discoverer) findServices(ctx context.Context) (bool, error) {
 	finder.plan.Units = append(finder.plan.Units, units...)
 	for index := range units {
 		unit := &units[index]
-		if !unit.StaysStopped && (unit.Name == "launchd "+mcpLaunchdLabel || unit.Name == "systemd "+mcpSystemdUnit) {
+		if !unit.StaysStopped &&
+			(unit.Name == "launchd "+names.Name(mcpLaunchdLabel) || unit.Name == "systemd "+names.Name(mcpSystemdUnit)) {
 			return true, nil
 		}
 	}

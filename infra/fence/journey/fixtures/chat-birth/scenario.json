@@ -1,0 +1,10 @@
+{
+  "pane": {
+    "busy": "Working (1s · esc to interrupt) · esc interrupt",
+    "compacted": "Context compacted",
+    "composer": "FIXTURE-OPENCODE-PROMPT"
+  },
+  "steps": [
+    {"type": "turn", "reply": "birth-ready", "busy_ms": 200}
+  ]
+}

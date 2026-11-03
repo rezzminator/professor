@@ -13,8 +13,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 )
 
 const (
@@ -37,6 +35,8 @@ type openCodeServerState struct {
 	messages map[string][]byte
 	sessions map[string]struct{}
 	proc     *process
+	engines  map[string]*openCodeSession
+	plugins  *openCodePlugins
 }
 
 func openCodeServe(proc *process, call openCodeInvocation) int {
@@ -58,6 +58,7 @@ func openCodeServe(proc *process, call openCodeInvocation) int {
 		}
 	}()
 	state := &openCodeServerState{proc: proc, messages: make(map[string][]byte)}
+	defer state.close()
 	server := &http.Server{Handler: state}
 	if _, err := fmt.Fprintf(
 		proc.stdout,
@@ -111,10 +112,22 @@ func (state *openCodeServerState) ServeHTTP(writer http.ResponseWriter, request 
 			state.mu.Lock()
 			_, exists := state.sessions[parts[0]]
 			delete(state.sessions, parts[0])
+			engineSession := state.engines[parts[0]]
+			delete(state.engines, parts[0])
 			state.mu.Unlock()
 			if !exists {
 				http.NotFound(writer, request)
 				return
+			}
+			if engineSession != nil {
+				if err := engineSession.notification(Step{NotificationType: "session.deleted"}); err != nil {
+					http.Error(writer, err.Error(), http.StatusInternalServerError)
+					return
+				}
+				if err := engineSession.database.Close(); err != nil {
+					http.Error(writer, err.Error(), http.StatusInternalServerError)
+					return
+				}
 			}
 			openCodeHTTPJSON(writer, true)
 			return
@@ -150,146 +163,6 @@ func openCodeHTTPJSON(writer http.ResponseWriter, value any) {
 	}
 }
 
-func (state *openCodeServerState) message(writer http.ResponseWriter, request *http.Request, sessionID string) {
-	var input struct {
-		NoReply bool            `json:"noReply"`
-		Format  json.RawMessage `json:"format"`
-		Parts   []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
-		} `json:"parts"`
-	}
-	if err := json.NewDecoder(io.LimitReader(request.Body, 1<<20)).Decode(&input); err != nil {
-		http.Error(writer, fmt.Sprintf("decode opencode message: %v", err), http.StatusBadRequest)
-		return
-	}
-	if input.NoReply || len(input.Format) != 0 {
-		http.Error(writer, openCodeSchemaRefusal, http.StatusNotImplemented)
-		return
-	}
-	var texts []string
-	for _, part := range input.Parts {
-		if part.Type == blockText {
-			texts = append(texts, part.Text)
-		}
-	}
-	prompt := strings.Join(texts, "\n")
-	state.mu.Lock()
-	state.next++
-	number := state.next
-	state.mu.Unlock()
-	userID, assistantID := fmt.Sprintf("msg_user%08d", number), fmt.Sprintf("msg_assistant%08d", number)
-	state.scriptMu.Lock()
-	running := state.proc.script.forPrompt(prompt)
-	step := running.next()
-	for !step.terminal() {
-		if step.sideEffecting() {
-			warn(state.proc.stderr, "opencode run fast-forwards past scripted %s step", step.Type)
-		}
-		step = running.next()
-	}
-	state.scriptMu.Unlock()
-	if step.Type == StepCrash || step.Type == StepExit {
-		message := fmt.Sprintf("crash step: exit %d", step.ExitCode)
-		marker := map[string]any{
-			openCodeSessionIDKey: sessionID,
-			"userMessageID":      userID,
-			"assistantIDs":       []string{},
-			"error": map[string]any{
-				openCodeNameKey: "MockCrash",
-				"data":          map[string]string{payloadMessage: message},
-			},
-		}
-		if err := state.marker(marker); err != nil {
-			http.Error(writer, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		http.Error(writer, message, http.StatusInternalServerError)
-		return
-	}
-	reply, busyMS, usage := running.turnReply(step)
-	if !sleepOrCancel(request.Context(), time.Duration(busyMS)*time.Millisecond) {
-		http.Error(writer, "opencode message cancelled", http.StatusInternalServerError)
-		return
-	}
-	now := time.Now().UnixMilli()
-	cost := usageCost(usage)
-	tokens := map[string]any{
-		"input":           usage.Input,
-		openCodeOutputKey: usage.Output,
-		"reasoning":       0,
-		"cache":           map[string]int64{"read": usage.CacheRead, "write": usage.CacheCreation},
-	}
-	partBase := map[string]any{openCodeSessionIDKey: sessionID, openCodeMessageIDKey: assistantID}
-	textPart := map[string]any{
-		"id":                 fmt.Sprintf("prt_text%08d", number),
-		openCodeSessionIDKey: partBase[openCodeSessionIDKey],
-		openCodeMessageIDKey: partBase[openCodeMessageIDKey],
-		keyType:              blockText,
-		blockText:            reply,
-		"time":               map[string]int64{"end": now},
-	}
-	finishPart := map[string]any{
-		"id":                 fmt.Sprintf("prt_finish%08d", number),
-		openCodeSessionIDKey: sessionID,
-		openCodeMessageIDKey: assistantID,
-		keyType:              "step-finish",
-		"reason":             "stop",
-		openCodeCostKey:      cost,
-		openCodeTokensKey:    tokens,
-	}
-	snapshot := map[string]any{
-		"info": map[string]any{
-			"id":                 assistantID,
-			openCodeSessionIDKey: sessionID,
-			"role":               "assistant",
-			"parentID":           userID,
-			"finish":             "stop",
-			openCodeCostKey:      cost,
-			openCodeTokensKey:    tokens,
-			"time":               map[string]int64{"created": now, "completed": now},
-		},
-		"parts": []any{textPart, finishPart},
-	}
-	encoded, err := json.Marshal(snapshot)
-	if err != nil {
-		http.Error(writer, fmt.Sprintf("encode assistant snapshot: %v", err), http.StatusInternalServerError)
-		return
-	}
-	state.mu.Lock()
-	state.messages[assistantID] = encoded
-	state.mu.Unlock()
-	marker := map[string]any{
-		openCodeSessionIDKey: sessionID,
-		"userMessageID":      userID,
-		"assistantIDs":       []string{assistantID},
-		"error":              nil,
-	}
-	if err := state.marker(marker); err != nil {
-		http.Error(writer, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	writer.Header().Set("Content-Type", "application/json")
-	if _, err := writer.Write(encoded); err != nil {
-		warn(state.proc.stderr, "write assistant response: %v", err)
-	}
-}
-
-func (state *openCodeServerState) marker(value any) error {
-	path := state.proc.env("PFM_OPENCODE_ASSISTANTS_FILE")
-	if path == "" {
-		return nil
-	}
-	data, err := json.Marshal(value)
-	if err != nil {
-		return fmt.Errorf("encode opencode assistant marker: %w", err)
-	}
-	if err := atomicfile.Write(path, data, 0o600); err != nil {
-		return fmt.Errorf("publish opencode assistant marker: %w", err)
-	}
-	return nil
-}
-
 func openCodeAttach(proc *process, call openCodeInvocation) int {
 	prompt := call.prompt
 	if prompt == "" {
@@ -317,7 +190,7 @@ func openCodeAttach(proc *process, call openCodeInvocation) int {
 		}
 		target := *endpoint
 		target.Path = path
-		target.RawQuery = url.Values{"directory": []string{proc.cwd}}.Encode()
+		target.RawQuery = url.Values{openCodeDirectoryKey: []string{proc.cwd}}.Encode()
 		request, err := http.NewRequestWithContext(proc.ctx, http.MethodPost, target.String(), bytes.NewReader(body))
 		if err != nil {
 			return nil, 0, fmt.Errorf("build opencode attach request: %w", err)
@@ -355,7 +228,7 @@ func openCodeAttach(proc *process, call openCodeInvocation) int {
 	}
 	data, status, err = send(
 		"/session/"+url.PathEscape(session.ID)+"/message",
-		map[string]any{"parts": []map[string]string{{keyType: "text", blockText: prompt}}},
+		map[string]any{openCodePartsKey: []map[string]string{{keyType: "text", blockText: prompt}}},
 	)
 	if err != nil {
 		warn(proc.stderr, "submit opencode attached message: %v", err)
@@ -365,6 +238,8 @@ func openCodeAttach(proc *process, call openCodeInvocation) int {
 		_, _ = fmt.Fprint(proc.stderr, string(data))
 		_, code, found := strings.Cut(string(data), "crash step: exit ")
 		if found {
+			code, _, _ = strings.Cut(code, "\n")
+			code, _, _ = strings.Cut(code, ":")
 			if parsed, parseErr := strconv.Atoi(strings.TrimSpace(code)); parseErr == nil && parsed != 0 {
 				return parsed
 			}

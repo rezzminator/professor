@@ -1,0 +1,12 @@
+file	source	values
+rows.tsv	docs/design/pfm-integration-suite/beats.md	Generated row identities, mapped capability ids, and forecast preconditions; no execution credit.
+turn.json	Synthetic reader turn input	Pinned reader-answer response and observable working interval.
+native-version-seed.json	pfm/internal/mockengine/scenario.go DefaultClaudeVersion; native mock public version input	An independently pinned Claude version response for the actual installed launcher passthrough; no engine turn or birth is authored.
+launch-inputs.json	Owned public launcher inputs	User-owned local OTLP endpoint and a bounded unopened native startup gate; no request or telemetry response is synthesized.
+presence-seed.json	Owned native Claude input; pfm/internal/picker/pipeline.go idle CPU budget	One real raw-native prompt/answer creates the transcript; native quiet witness uses a 12-second interval and the existing two-percent own-CPU budget, never an injected clock or an internal parked flag.
+theme-generation-bumps.json	pfm/internal/themesync/engine.go SetTheme and Disable	The actual public on/off pair advances generation by one and then two; the owned effect is never rolled back.
+theme-intents.json	Public pfm theme status/on/off/sync CLI contracts	Independent literal argv for each typed receipt; launchd-owned child provenance is checked separately.
+partial-seed.json	Synthetic native-engine startup input	No initial responses or usage, so each partial-read actor's first independently specified turn stays attributable.
+partial-token-seed.json	Synthetic Claude startup input; pfm/internal/tokens/testdata/fixtures/model-cost.json	Fresh Sonnet 4.6 actor with zero initial tokens; the actual subsequent native turn supplies 1000 input/100 output tokens, independently priced at $0.0045 by the checked-in price fixture.
+../../goldens/fleet-reader/herdr-methods.json	Pinned Herdr 0.9.5 public herdr api schema; captured in journey-harness/herdr-api-schema.json	Complete advertised request method set, protocol 22; no inferred request-log or pane-recycle method.
+../../goldens/fleet-reader/empty-server-warning.txt	Public fleet stderr contract: pfm/internal/fleet/gather.go StderrWarn and pfm/internal/gather/tmuxprobe.go EmptyServerWarning	Exact abandoned-empty-server message with the owned socket basename substituted; includes the public reap command and accepts no unrelated warning.

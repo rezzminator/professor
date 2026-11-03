@@ -101,6 +101,13 @@ func TestNativeClaudeSessionLifecycleMetadata(t *testing.T) {
 	if warning := run("end", `{"session_id":"s1","reason":"prompt_input_exit"}`); warning != "" {
 		t.Fatal(warning)
 	}
+	calls := server.calls()
+	if len(calls) <= seen {
+		t.Fatalf("native end sent no release: received=%q", calls)
+	}
+	if got, want := calls[seen], `pane.release_agent {"agent":"claude","pane_id":"w6:p3","source":"pfm"}`; got != want {
+		t.Fatalf("native end release: received=%q want=%q", got, want)
+	}
 	lines := server.requests()
 	if !strings.Contains(lines[len(lines)-2], `"method":"pane.release_agent"`) ||
 		!strings.Contains(lines[len(lines)-1], `"clear_title":true`) {

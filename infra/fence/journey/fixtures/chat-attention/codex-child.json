@@ -1,0 +1,1 @@
+[{"type":"background_agent","name":"researcher","agent_type":"general-purpose","status":"child research complete"},{"type":"hold","until_gone":"$HOLD"},{"type":"turn","reply":"child created","busy_ms":1}]

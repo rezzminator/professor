@@ -107,6 +107,7 @@ suites:
       github.com/rezzminator/professor/pfm/internal/updatecheck: 2
       github.com/rezzminator/professor/pfm/internal/usagehook: 2
       github.com/rezzminator/professor/pfm/internal/workbench: 2
+      github.com/rezzminator/professor/pfm/scripts/helpops: 2
   e2e:
     wall_s: 150
     packages:

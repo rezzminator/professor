@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -332,13 +333,35 @@ func TestClaudePluginInstallInvalidRecords(t *testing.T) {
 }
 
 func TestClaudeMarketplaceWritesNothing(t *testing.T) {
-	fix := newFixture(t)
-	if code, msg := pluginCLI(t, fix, fix.configDir, "plugin", "marketplace", "add", "source"); code != 0 {
-		t.Fatalf("%d %s", code, msg)
-	}
-	entries, err := os.ReadDir(fix.configDir)
-	if err != nil || len(entries) != 0 {
-		t.Fatalf("entries=%v err=%v", entries, err)
+	missing := filepath.Join(t.TempDir(), "missing")
+	for _, row := range []struct {
+		checkout, message string
+		code              int
+	}{
+		{},
+		{"relative", "mock-engine: marketplace checkout \"relative\" is not an absolute path\n", ExitUsage},
+		{missing, "mock-engine: marketplace manifest " + filepath.Join(missing, ".claude-plugin", "marketplace.json") + " has no name\n", ExitUsage},
+	} {
+		t.Run(row.checkout, func(t *testing.T) {
+			fix := newFixture(t)
+			fix.write(Scenario{SourceCheckouts: map[string]string{"source": row.checkout}})
+			if code, msg := pluginCLI(
+				t,
+				fix,
+				fix.configDir,
+				"plugin",
+				"marketplace",
+				"add",
+				"source",
+			); code != row.code ||
+				msg != row.message {
+				t.Fatalf("exit=%d stderr=%q, want %d %q", code, msg, row.code, row.message)
+			}
+			entries, err := os.ReadDir(fix.configDir)
+			if err != nil || len(entries) != 0 {
+				t.Fatalf("entries=%v err=%v", entries, err)
+			}
+		})
 	}
 }
 
@@ -366,25 +389,13 @@ func writePluginVersion(t *testing.T, dir, name, version string) {
 // The account starts fresh, or knowing the professor marketplace from GitHub,
 // which pfm's re-point answers with the same `marketplace add`.
 func TestClaudeDirectoryMarketplaceCacheContract(t *testing.T) {
-	for _, known := range []string{
-		"",
-		`{"professor":{"source":{"source":"github","repo":"rezzminator/professor"},"installLocation":"/elsewhere"}}`,
-	} {
-		t.Run(fmt.Sprint(known != ""), func(t *testing.T) { claudeDirectoryMarketplaceCase(t, known) })
+	for _, remote := range []bool{false, true} {
+		t.Run(fmt.Sprint(remote), func(t *testing.T) { claudeDirectoryMarketplaceCase(t, remote) })
 	}
 }
 
-func claudeDirectoryMarketplaceCase(t *testing.T, known string) {
+func claudeDirectoryMarketplaceCase(t *testing.T, remote bool) {
 	fix := newFixture(t)
-	if known != "" {
-		path := filepath.Join(fix.configDir, "plugins", "known_marketplaces.json")
-		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte(known), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
 	marketplace := filepath.Join(fix.home, ".local", "share", "professor-dev")
 	manifest := filepath.Join(marketplace, ".claude-plugin", "marketplace.json")
 	if err := os.MkdirAll(filepath.Dir(manifest), 0o700); err != nil {
@@ -397,6 +408,55 @@ func claudeDirectoryMarketplaceCase(t *testing.T, known string) {
 	}
 	checkout := filepath.Join(marketplace, "plugins", "example")
 	writePluginVersion(t, checkout, "example", "1.2.3")
+	if remote {
+		if err := os.WriteFile(
+			manifest,
+			[]byte(
+				`{"name":"professor","plugins":[{"name":"example","source":{"source":"git-subdir","url":"https://example.invalid/plugin.git","path":"./plugins/example","ref":"main"}}]}`,
+			),
+			0o600,
+		); err != nil {
+			t.Fatal(err)
+		}
+		fix.write(Scenario{SourceCheckouts: map[string]string{
+			"fixture-owner/catalog": marketplace, "https://example.invalid/plugin.git": marketplace,
+		}})
+		for _, args := range [][]string{
+			{"plugin", "marketplace", "add", "fixture-owner/catalog"},
+			{"plugin", "install", "example@professor", "-y"},
+		} {
+			if code, msg := pluginCLI(t, fix, fix.configDir, args...); code != 0 {
+				t.Fatalf("%v exit=%d %s", args, code, msg)
+			}
+		}
+		versions, err := installer.ClaudePluginRecordedVersions(fix.configDir, "example@professor")
+		if err != nil || !slices.Equal(versions, []string{"1.2.3"}) {
+			t.Errorf("%s: remote install versions=%v err=%v, want [1.2.3]", fix.configDir, versions, err)
+		}
+		fix.write(Scenario{})
+		want := "mock-engine: " + manifest + ": plugin example source https://example.invalid/plugin.git has no absolute scripted checkout\n"
+		if code, msg := pluginCLI(
+			t,
+			fix,
+			fix.configDir,
+			"plugin",
+			"update",
+			"example@professor",
+			"--scope",
+			"user",
+			"-y",
+		); code != ExitUsage ||
+			msg != want {
+			t.Fatalf("unrecorded update exit=%d stderr=%q, want %d %q", code, msg, ExitUsage, want)
+		}
+		if err := os.WriteFile(
+			manifest,
+			[]byte(`{"name":"professor","plugins":[{"name":"example","source":"./plugins/example"}]}`),
+			0o600,
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
 	targets := []installer.ClaudePluginTarget{{
 		Name: "example", ID: "example@professor", Source: marketplace, Local: true,
 		Marketplace: marketplace, Checkout: checkout,
@@ -418,7 +478,7 @@ func claudeDirectoryMarketplaceCase(t *testing.T, known string) {
 		return cache
 	}
 	wantStale := 0
-	if known != "" {
+	if remote {
 		wantStale = 1
 	}
 	if stale, err := installer.ClaudePluginMarketplaceGaps(fix.configDir, targets); err != nil ||

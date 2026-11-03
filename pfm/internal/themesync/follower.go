@@ -64,6 +64,10 @@ func followerWatchPaths(home string, darwin bool) ([]string, error) {
 // service PATH (launchd's bare default holds neither tmux nor herdr) and with
 // this install's mark, as every unit pfm writes carries it.
 func followerPlist(program, home, stateDir string) (string, error) {
+	names, err := servicemanager.CurrentUnitNames()
+	if err != nil {
+		return "", err
+	}
 	watch, err := followerWatchPaths(home, true)
 	if err != nil {
 		return "", err
@@ -76,7 +80,11 @@ func followerPlist(program, home, stateDir string) (string, error) {
 		return out.String()
 	}
 	logPath := filepath.Join(stateDir, "follow.log")
-	return `<?xml version="1.0" encoding="UTF-8"?>
+	prefixEnv := ""
+	if prefix := names.Prefix(); prefix != "" {
+		prefixEnv = "\t\t<key>" + paths.EnvUnitPrefix + "</key>\n\t\t<string>" + prefix + "</string>\n"
+	}
+	content := `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
@@ -98,7 +106,7 @@ func followerPlist(program, home, stateDir string) (string, error) {
 	<dict>
 		<key>PATH</key>
 		<string>` + followerEscape(paths.ServicePath(home)) + `</string>
-		<key>` + paths.EnvInstallMark + `</key>
+` + prefixEnv + `		<key>` + paths.EnvInstallMark + `</key>
 		<string>` + paths.InstallMark(home) + `</string>
 	</dict>
 	<key>StandardOutPath</key>
@@ -107,11 +115,12 @@ func followerPlist(program, home, stateDir string) (string, error) {
 	<string>` + followerEscape(logPath) + `</string>
 </dict>
 </plist>
-`, nil
+`
+	return names.Render(content), nil
 }
 
 func (s *session) followerPath() string {
-	return filepath.Join(paths.LaunchAgentsDir(s.env.Home), followerLabel+".plist")
+	return filepath.Join(paths.LaunchAgentsDir(s.env.Home), s.unitNames.Name(followerLabel+".plist"))
 }
 
 // launchd is the calling user's GUI domain over the session's runner, its
@@ -121,7 +130,7 @@ func (s *session) launchd() servicemanager.Launchd {
 }
 
 func (s *session) followerTarget() string {
-	return s.launchd().Target(followerLabel)
+	return s.launchd().Target(s.unitNames.Name(followerLabel))
 }
 
 // followerLoaded asks launchd whether the agent is bootstrapped.
@@ -175,9 +184,12 @@ var errFollowerReloadDue = errors.New(
 )
 
 // followerInOwnJob says whether this process is the follower's launchd job.
-func (s *session) followerInOwnJob() bool { return s.env.LaunchdJob == followerLabel }
+func (s *session) followerInOwnJob() bool { return s.env.LaunchdJob == s.unitNames.Name(followerLabel) }
 
 func (s *session) applyFollower(ctx context.Context) SurfaceResult {
+	if s.unitNameErr != nil {
+		return s.failed(surfaceFollower, s.followerPath(), s.unitNameErr)
+	}
 	if s.env.platform().follower == servicemanager.KindSystemd {
 		return s.applySystemdFollower(ctx)
 	}
@@ -229,6 +241,9 @@ func (s *session) applyFollower(ctx context.Context) SurfaceResult {
 }
 
 func (s *session) readFollower(ctx context.Context) SurfaceResult {
+	if s.unitNameErr != nil {
+		return s.failed(surfaceFollower, s.followerPath(), s.unitNameErr)
+	}
 	if s.env.platform().follower == servicemanager.KindSystemd {
 		return s.readSystemdFollower(ctx)
 	}
@@ -267,6 +282,9 @@ func (s *session) readFollower(ctx context.Context) SurfaceResult {
 }
 
 func (s *session) restoreFollower(ctx context.Context) SurfaceResult {
+	if s.unitNameErr != nil {
+		return s.failed(surfaceFollower, s.followerPath(), s.unitNameErr)
+	}
 	if s.env.platform().follower == servicemanager.KindSystemd {
 		return s.restoreSystemdFollower(ctx)
 	}

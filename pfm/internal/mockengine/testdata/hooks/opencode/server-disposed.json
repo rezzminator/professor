@@ -1,0 +1,6 @@
+{
+  "type": "server.instance.disposed",
+  "properties": {
+    "directory": "/fixture/atlas"
+  }
+}

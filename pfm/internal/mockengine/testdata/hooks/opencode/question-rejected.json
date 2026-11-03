@@ -1,0 +1,7 @@
+{
+  "type": "question.rejected",
+  "properties": {
+    "sessionID": "ses_atlas01",
+    "requestID": "per_00000002"
+  }
+}

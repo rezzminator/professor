@@ -1,6 +1,7 @@
 package themesync
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -191,39 +192,74 @@ func containsAll(text string, parts ...string) bool {
 }
 
 func TestAccountSettingsDedupesASymlinkedAccountByRealPath(t *testing.T) {
-	home := t.TempDir()
-	for _, rel := range []string{".claude", ".claude2"} {
-		if err := os.MkdirAll(filepath.Join(home, rel), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(
-			filepath.Join(home, rel, "settings.json"),
-			[]byte(`{"theme":"dark"}`),
-			0o644,
-		); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := os.MkdirAll(filepath.Join(home, ".cc"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(filepath.Join(home, ".claude2"), filepath.Join(home, ".cc", "2")); err != nil {
-		t.Fatal(err)
-	}
-	got, err := accountSettings(home)
-	if err != nil {
-		t.Fatal(err)
-	}
-	canonical := func(rel string) string {
-		resolved, err := filepath.EvalSymlinks(filepath.Join(home, rel, "settings.json"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		return resolved
-	}
-	want := []string{canonical(".claude"), canonical(".claude2")}
-	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
-		t.Fatalf("accountSettings = %v, want %v", got, want)
+	for _, tc := range []struct {
+		name, listError string
+	}{
+		{name: "symlinked"},
+		{name: "stray-file"},
+		{name: "unlistable-loop", listError: "open %s: too many levels of symbolic links"},
+		{name: "unlistable-file", listError: "open %s: not a directory"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			for _, rel := range []string{".claude", ".claude2"} {
+				if err := os.MkdirAll(filepath.Join(home, rel), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(
+					filepath.Join(home, rel, "settings.json"),
+					[]byte(`{"theme":"dark"}`),
+					0o644,
+				); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cc := filepath.Join(home, ".cc")
+			switch tc.name {
+			case "unlistable-loop":
+				if err := os.Symlink(cc, cc); err != nil {
+					t.Fatal(err)
+				}
+			case "unlistable-file":
+				if err := os.WriteFile(cc, []byte("not a directory\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			default:
+				if err := os.MkdirAll(cc, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(filepath.Join(home, ".claude2"), filepath.Join(cc, "2")); err != nil {
+					t.Fatal(err)
+				}
+				if tc.name == "stray-file" {
+					if err := os.WriteFile(filepath.Join(cc, "stray"), []byte("not an account\n"), 0o644); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			got, err := accountSettings(home)
+			if tc.listError != "" {
+				want := "themesync: list account settings: " + fmt.Sprintf(tc.listError, cc)
+				if err == nil || err.Error() != want || got != nil {
+					t.Fatalf("accountSettings = %v, %v; want nil, %q", got, err, want)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			canonical := func(rel string) string {
+				resolved, err := filepath.EvalSymlinks(filepath.Join(home, rel, "settings.json"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				return resolved
+			}
+			want := []string{canonical(".claude"), canonical(".claude2")}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("accountSettings = %v, want %v", got, want)
+			}
+		})
 	}
 }
 

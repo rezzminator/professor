@@ -14,6 +14,7 @@ import (
 	"time"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/hookentry"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/statusline"
@@ -242,6 +243,21 @@ func TestCodexSeatUsageHookNeverTouchesClaudeCredentials(t *testing.T) {
 	// this suite runs in would make the hook take the Claude path.
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
 	t.Setenv("CLAUDE_CONFIG_DIR", claudeConfig)
+
+	captures := filepath.Join(root, "captures")
+	t.Setenv(hookentry.EnvHookCaptureDir, captures)
+	const payload = " {\"hook_event_name\":\"UserPromptSubmit\",\"session_id\":\"atlas\"}\n"
+	inputPath := filepath.Join(root, "payload.json")
+	if err := os.WriteFile(inputPath, []byte(payload), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	input, err := os.Open(inputPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := os.Stdin
+	os.Stdin = input
+	t.Cleanup(func() { os.Stdin = previous; _ = input.Close() })
 	var stdout, stderr bytes.Buffer
 	if code := runUsageHookWithRuntime(
 		nil,
@@ -257,6 +273,14 @@ func TestCodexSeatUsageHookNeverTouchesClaudeCredentials(t *testing.T) {
 			stdout.String(),
 			stderr.String(),
 		)
+	}
+	files, err := filepath.Glob(filepath.Join(captures, "*.json"))
+	if err != nil || len(files) != 1 {
+		t.Fatalf("%s: files=%v, %v; want one raw event", captures, files, err)
+	}
+	raw, err := os.ReadFile(files[0])
+	if err != nil || string(raw) != payload {
+		t.Fatalf("%s: raw=%q, %v; want %q", files[0], raw, err, payload)
 	}
 }
 

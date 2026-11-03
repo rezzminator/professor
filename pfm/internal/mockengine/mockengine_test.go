@@ -81,6 +81,11 @@ func newFixture(t *testing.T) *fixture {
 	t.Setenv(helperEnv, "1")
 	t.Setenv("PATH", fix.bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("HOME", fix.home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(fix.home, ".config"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(fix.home, ".local", "share"))
+	t.Setenv("OPENCODE_CONFIG_DIR", "")
+	t.Setenv("OPENCODE_CONFIG", "")
+	t.Setenv("OPENCODE_CONFIG_CONTENT", "")
 	t.Setenv("CLAUDE_CONFIG_DIR", fix.configDir)
 	t.Setenv("CODEX_HOME", fix.codexHome)
 	t.Setenv("TMUX", "")
@@ -105,6 +110,9 @@ func newFixture(t *testing.T) *fixture {
 // busy time so every mock lands its evidence without waiting between turns.
 func (fix *fixture) write(scenario Scenario) {
 	fix.t.Helper()
+	if scenario.Steps == nil {
+		scenario.Steps = []Step{{Type: StepTurn}}
+	}
 	if scenario.Jail == (Jail{}) {
 		scenario.Jail = Jail{ProcRoot: fix.procRoot, SIDDir: fix.sidDir}
 	}

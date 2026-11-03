@@ -215,10 +215,10 @@ func (s *session) tmuxSockets(ctx context.Context) ([]string, error) {
 		return nil, nil
 	}
 	sockets, err := s.servers.Sockets(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("themesync: list tmux servers: %w", err)
-	}
 	sort.Strings(sockets)
+	if err != nil {
+		return sockets, fmt.Errorf("themesync: list tmux servers: %w", err)
+	}
 	return sockets, nil
 }
 
@@ -231,7 +231,7 @@ func tmuxServerCount(count int) string {
 
 func (s *session) applyTmux(ctx context.Context) SurfaceResult {
 	sockets, err := s.tmuxSockets(ctx)
-	if err != nil {
+	if err != nil && len(sockets) == 0 {
 		return s.failed(surfaceTmux, "", err)
 	}
 	if len(sockets) == 0 {
@@ -245,15 +245,18 @@ func (s *session) applyTmux(ctx context.Context) SurfaceResult {
 		}
 	}
 	if len(failures) > 0 {
-		return s.failed(surfaceTmux, "", fmt.Errorf("%d of %s failed: %s",
+		err = errors.Join(err, fmt.Errorf("%d of %s failed: %s",
 			len(failures), tmuxServerCount(len(sockets)), strings.Join(failures, "; ")))
+	}
+	if err != nil {
+		return s.failed(surfaceTmux, "", err)
 	}
 	return s.result(surfaceTmux, VerdictApplied, "", "")
 }
 
 func (s *session) readTmux(ctx context.Context) SurfaceResult {
 	sockets, err := s.tmuxSockets(ctx)
-	if err != nil {
+	if err != nil && len(sockets) == 0 {
 		return s.failed(surfaceTmux, "", err)
 	}
 	if len(sockets) == 0 {
@@ -262,6 +265,9 @@ func (s *session) readTmux(ctx context.Context) SurfaceResult {
 	s.serverCount = len(sockets)
 	options := tmuxOptions(s.theme(), s.state.Appearance, s.state.Generation)
 	var errs, drift []string
+	if err != nil {
+		errs = append(errs, err.Error())
+	}
 	generation := 0
 	for _, socket := range sockets {
 		for _, option := range options {
@@ -357,13 +363,16 @@ func (s *session) tmuxRestoreSocket(ctx context.Context, socket string) error {
 
 func (s *session) restoreTmux(ctx context.Context) SurfaceResult {
 	sockets, err := s.tmuxSockets(ctx)
-	if err != nil {
+	if err != nil && len(sockets) == 0 {
 		return s.failed(surfaceTmux, "", err)
 	}
 	if len(sockets) == 0 {
 		return s.absent(surfaceTmux, "", "no live pfm chat servers")
 	}
 	var failures []string
+	if err != nil {
+		failures = append(failures, err.Error())
+	}
 	for _, socket := range sockets {
 		if err := s.tmuxRestoreSocket(ctx, socket); err != nil {
 			failures = append(failures, err.Error())

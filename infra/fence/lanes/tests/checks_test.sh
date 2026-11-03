@@ -191,8 +191,8 @@ graph_order() {
 }
 static_names() { sed -n '/^BARRIER$/,$p' "$T/registered" | sed '1d' | sort | paste -sd, -; }
 pfm_static='pfm.lint-new,pfm.fmt-check,pfm.vet,pfm.vet-darwin,pfm.arch,pfm.testplan'
-templates_static='templates.check-map,templates.clone,templates.leak,templates.plugin-logs,templates.plugin-lab,templates.placeholders,templates.scratch-paths,templates.descriptions,templates.mirrors,templates.generated-agents,templates.release-check,templates.refresh-scope,templates.plugin-workflows,templates.worktree-script,templates.dev-report,templates.format-md,templates.flight-templates,templates.theme-glyphs,templates.test-tests,templates.unit-path-tests,templates.engine-sync-action-tests,templates.skill-tests'
-heavy_names='pfm.e2e,pfm.fmt-check,pfm.lint-new,pfm.race,pfm.unit,pfm.vet,pfm.vet-darwin,templates.check-map'
+templates_static='templates.check-map,templates.suite-checks,templates.clone,templates.leak,templates.plugin-logs,templates.plugin-lab,templates.placeholders,templates.scratch-paths,templates.descriptions,templates.mirrors,templates.generated-agents,templates.release-check,templates.refresh-scope,templates.plugin-workflows,templates.worktree-script,templates.dev-report,templates.format-md,templates.flight-templates,templates.theme-glyphs,templates.test-tests,templates.unit-path-tests,templates.engine-sync-action-tests,templates.skill-tests'
+heavy_names='pfm.e2e,pfm.fmt-check,pfm.lint-new,pfm.race,pfm.unit,pfm.vet,pfm.vet-darwin,templates.check-map,templates.suite-checks'
 if gate_run all >"$T/all.out" &&
   [ "$(grep -c '^templates\.leak$' "$T/registered")" -eq 1 ] &&
   [ "$(grep -c '^templates\.mirrors$' "$T/registered")" -eq 1 ] &&
@@ -226,7 +226,7 @@ else bad 'real summary' "$(cat "$T/pfm.out")"; fi
 
 if gate_run templates >"$T/templates.out" &&
   [ "$(static_names)" = "$(printf '%s' "$templates_static" | tr ',' '\n' | sort | paste -sd, -)" ] &&
-  [ "$(cat "$T/heavy")" = templates.check-map ] &&
+  [ "$(cat "$T/heavy")" = "$(printf 'templates.check-map\ntemplates.suite-checks')" ] &&
   graph_order templates; then
   ok 'templates graph runs its tests before static checks'
 else bad 'templates graph' "$(cat "$T/registered")"; fi

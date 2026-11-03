@@ -50,6 +50,12 @@ var nonChatTargetTools = map[string]bool{
 // tool error — the daemon survives and the next request runs normally.
 func Tool[In, Out any](name string, handler mcp.ToolHandlerFor[In, Out]) mcp.ToolHandlerFor[In, Out] {
 	return func(ctx context.Context, request *mcp.CallToolRequest, input In) (result *mcp.CallToolResult, output Out, err error) {
+		if request != nil && request.Params != nil {
+			if trace, ok := request.Params.Meta["pfmTrace"].(map[string]any); ok {
+				ctx = withTrace(ctx, trace)
+			}
+		}
+		Action(Component(ctx, compMCP), toolOperation(name), DoorMCP)
 		timing := current(ctx).timing
 		started := timing.Now()
 		defer func() {

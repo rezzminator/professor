@@ -46,6 +46,9 @@ func CheckScheduler(
 	runner CommandRunner,
 	sleepers ...func(time.Duration),
 ) (unprobed string, err error) {
+	if _, err := servicemanager.CurrentUnitNames(); err != nil {
+		return "", err
+	}
 	if runner == nil {
 		runner = execCommandRunner{}
 	}
@@ -61,21 +64,25 @@ func CheckScheduler(
 }
 
 func SchedulerRefusal(command string, err error) string {
+	names, nameErr := servicemanager.CurrentUnitNames()
+	if nameErr != nil {
+		return "pfm " + command + ": " + nameErr.Error()
+	}
 	switch {
 	case errors.Is(err, ErrNameSyncRunning):
 		return "pfm " + command +
-			": the pfm name-sync service is running; wait for it to finish or run `systemctl --user stop pfm-name-sync.service`, then retry"
+			": the pfm name-sync service is running; wait for it to finish or run `systemctl --user stop " + names.Name("pfm-name-sync.service") + "`, then retry"
 	case errors.Is(err, ErrScheduleRunning):
 		return "pfm " + command +
-			": the pfm schedule service is running; wait for it to finish or run `systemctl --user stop pfm-schedule.service`, then retry"
+			": the pfm schedule service is running; wait for it to finish or run `systemctl --user stop " + names.Name(scheduleServiceUnit) + "`, then retry"
 	case errors.Is(err, ErrScheduleAgentRunning):
 		return "pfm " + command +
 			": the pfm schedule launch agent is running; wait for it to finish or `launchctl bootout " +
-			servicemanager.ShellTarget(scheduleLaunchdLabel) + "` first"
+			servicemanager.ShellTarget(names.Name(scheduleLaunchdLabel)) + "` first"
 	case errors.Is(err, ErrLaunchAgentRunning):
 		return "pfm " + command +
 			": the pfm name-sync launch agent is running; wait for it to finish or `launchctl bootout " +
-			servicemanager.ShellTarget(launchdLabel) + "` first"
+			servicemanager.ShellTarget(names.Name(launchdLabel)) + "` first"
 	}
 	return ""
 }

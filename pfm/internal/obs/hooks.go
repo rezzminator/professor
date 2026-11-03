@@ -27,6 +27,7 @@ const hookCaptureBytes = 4096
 // error, at ERROR. Stdin — the hook's payload, a prompt or a transcript —
 // is never read here.
 func Hook(ctx context.Context, name string, stdout io.Writer) (io.Writer, func(exitCode int)) {
+	Action(Component(ctx, compHooks), hookActions[name], DoorHook)
 	started := current(ctx).timing.Now()
 	capture := &headCapture{next: stdout}
 	return capture, func(exitCode int) {

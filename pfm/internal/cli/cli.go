@@ -98,8 +98,23 @@ func (list *StringList) Set(value string) error {
 var _ flag.Value = (*StringList)(nil)
 
 // WriteLines renders CLI usage with one newline per line, including blank lines.
-func WriteLines(writer io.Writer, lines []string) {
+func WriteLines(writer io.Writer, lines []string) error {
 	for _, line := range lines {
-		fmt.Fprintln(writer, line)
+		if _, err := fmt.Fprintln(writer, line); err != nil {
+			return err
+		}
 	}
+	return nil
+}
+
+// DiagnosticCommand permits diagnosis and fail-open hooks when configuration is broken.
+func DiagnosticCommand(args []string) bool {
+	if len(args) == 0 {
+		return false
+	}
+	switch args[0] {
+	case "doctor", "statusline", "internal", "usage-hook":
+		return true // the statusline renders a broken config on its cache segment; hooks and launchers warn
+	}
+	return args[0] == "config" && len(args) > 1 && (args[1] == "show" || args[1] == "validate")
 }

@@ -58,6 +58,46 @@ func TestRunWritesCommandStartAndExit(t *testing.T) {
 			t.Fatalf("cmd.exit carries no %s: %+v", key, last.Fields)
 		}
 	}
+	for _, row := range []struct {
+		name   string
+		args   []string
+		action string
+	}{
+		{"action", []string{"chat", "call"}, "chat.call"},
+		{"observer", []string{"chat", "status"}, ""},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			jailTest(t)
+			t.Setenv(obs.EnvBeat, "entry")
+			t.Setenv(obs.EnvRun, "synthetic")
+			finish := openActivityLog(row.args, commandRuntime{}, &stderr)
+			finish(0)
+			var actions []obs.Record
+			records := readJailLog(t)
+			for _, record := range records {
+				if _, exists := record.Field(obs.FieldAction); exists {
+					actions = append(actions, record)
+				}
+			}
+			if records[0].Message != "cmd.start" {
+				t.Fatalf("entry did not run: %+v", records)
+			}
+			if row.action == "" {
+				if len(actions) != 0 {
+					t.Fatalf("observer credited actions: %+v", actions)
+				}
+				return
+			}
+			if len(actions) != 1 {
+				t.Fatalf("actions=%+v, want one %s", actions, row.action)
+			}
+			for key, want := range map[string]string{obs.FieldAction: row.action, obs.FieldBeat: "entry", obs.FieldRun: "synthetic"} {
+				if got, _ := actions[0].Field(key); got != want {
+					t.Fatalf("action %s=%v, want %q", key, got, want)
+				}
+			}
+		})
+	}
 }
 
 // TestLogVerbReadsWhatTheProcessWrote closes the loop: the verb registered in

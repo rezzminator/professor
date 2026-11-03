@@ -1,0 +1,8 @@
+{
+  "type": "permission.replied",
+  "properties": {
+    "sessionID": "ses_atlas01",
+    "requestID": "per_00000001",
+    "reply": "reject"
+  }
+}

@@ -1,0 +1,105 @@
+row	ids	fork_of	forecast	factors
+chat-attention/indicators-survive-worktree-removal@linux+herdr-shield	herdr.indicators-worktree-removed			herdr_indicators=on,runtime_event=worktree_removed
+chat-attention/forecast-lifecycle-worktree-removed-while-daemon-runs-daemon-launch-cwd-removed-worktree-reader-herdr-indicator-scan@linux+herdr-shield	herdr.indicators-worktree-removed	chat-attention/indicators-survive-worktree-removal@linux+herdr-shield	darwin-linux-launchd-systemd-proc-sysctl-setsid/C33	lifecycle=worktree_removed_while_daemon_runs,daemon_launch_cwd=removed_worktree,reader=herdr_indicator_scan
+chat-attention/turn-works-then-idles@linux+herdr-shield+project+claude	status.turn			
+chat-attention/question-blocks@linux+herdr-shield+project+claude	status.question-blocked			
+chat-attention/answer-unblocks@linux+herdr-shield+project+claude	status.answer-unblocks			
+chat-attention/permission-blocks@linux+herdr-shield+project+claude	status.permission-blocked			
+chat-attention/permission-answered-unblocks@linux+herdr-shield+project+claude	status.permission-answered			
+chat-attention/subagent-holds-working@linux+herdr-shield+project+claude	status.subagent-hold			
+chat-attention/turn-idles-after-dropped-report@linux+herdr-shield+project+claude	status.dropped-report-recovers			
+chat-attention/turn-fails-shows-error@linux+herdr-shield+project+claude	status.turn-error			
+chat-attention/notification-turn-works-then-idles@linux+herdr-shield+project+claude	status.notification-turn			
+chat-attention/subagent-sibling-does-not-unblock@linux+herdr-shield+project+claude	status.subagent-hold	chat-attention/subagent-holds-working@linux+herdr-shield+project+claude		
+chat-attention/notification-settle-does-not-create-ghost-child@linux+herdr-shield+project+claude	status.notification-turn	chat-attention/notification-turn-works-then-idles@linux+herdr-shield+project+claude		
+chat-attention/opted-in-agent-attaches-to-carried-parent@linux+herdr-shield+project+claude	status.subagent-hold	chat-attention/subagent-holds-working@linux+herdr-shield+project+claude		
+chat-attention/forecast-engine-claude-hook-origin-subagent@linux+herdr-shield+project+claude	status.subagent-hold	chat-attention/subagent-holds-working@linux+herdr-shield+project+claude	pfm-herdr-tmux/C14	engine=claude,hook_origin=subagent
+chat-attention/forecast-herdr-shield-on-pane-state-working@linux+herdr-shield+project+claude	status.turn	chat-attention/turn-works-then-idles@linux+herdr-shield+project+claude	pfm-herdr-tmux/C15	herdr_shield=on,pane_state=working
+chat-attention/forecast-engine-claude-pane-state-blocked@linux+herdr-shield+project+claude	status.question-blocked	chat-attention/question-blocks@linux+herdr-shield+project+claude	pfm-herdr-tmux/C26	engine=claude,pane_state=blocked
+chat-attention/forecast-multiplexer-herdr-pane-state-working@linux+herdr-shield+project+claude	status.turn	chat-attention/turn-works-then-idles@linux+herdr-shield+project+claude	pfm-herdr-tmux/C33	multiplexer=herdr,pane_state=working
+chat-attention/forecast-tmux-server-gone-at-session-end-hook-payload-over-one-mib-tool-response-engine-claude-code@linux+herdr-shield+project+claude	status.turn	chat-attention/turn-works-then-idles@linux+herdr-shield+project+claude	darwin-linux-launchd-systemd-proc-sysctl-setsid/C10	tmux_server=gone_at_session_end,hook_payload=over_1_mib_tool_response,engine=claude_code
+chat-attention/forecast-engine-claude-code-host-load-lock-or-call-timeout-herdr-state-settled-state-dropped@linux+herdr-shield+project+claude	status.dropped-report-recovers	chat-attention/turn-idles-after-dropped-report@linux+herdr-shield+project+claude	darwin-linux-launchd-systemd-proc-sysctl-setsid/C02	engine=claude_code,host_load=lock_or_call_timeout,herdr_state=settled_state_dropped
+chat-attention/forecast-prompt-origin-background-task-notification-engine-claude-code-hook-event-user-prompt-submit@linux+herdr-shield+project+claude	status.notification-turn	chat-attention/notification-turn-works-then-idles@linux+herdr-shield+project+claude	darwin-linux-launchd-systemd-proc-sysctl-setsid/C03	prompt_origin=background_task_notification,engine=claude_code,hook_event=user_prompt_submit
+chat-attention/forecast-notification-type-plugin-notification-engine-claude-code@linux+herdr-shield+project+claude	status.question-blocked	chat-attention/question-blocks@linux+herdr-shield+project+claude	darwin-linux-launchd-systemd-proc-sysctl-setsid/C06	notification_type=plugin_notification,engine=claude_code
+chat-attention/forecast-payload-is-interrupt-true-engine-claude-code-event-order-async-post-tool-use-after-block@linux+herdr-shield+project+claude	status.question-blocked	chat-attention/question-blocks@linux+herdr-shield+project+claude	darwin-linux-launchd-systemd-proc-sysctl-setsid/C07	payload=is_interrupt_true,engine=claude_code,event_order=async_post_tool_use_after_block
+chat-attention/forecast-trigger-esc-or-no-at-permission-dialog-engine-claude-code-hook-gap-no-hook-fired@linux+herdr-shield+project+claude	status.question-blocked	chat-attention/question-blocks@linux+herdr-shield+project+claude	darwin-linux-launchd-systemd-proc-sysctl-setsid/C09	trigger=esc_or_no_at_permission_dialog,engine=claude_code,hook_gap=no_hook_fired
+chat-attention/forecast-herdr-state-event-dropped-lock-state-activity-lock-held-past-deadline-engine-claude-code@linux+herdr-shield+project+claude	status.dropped-report-recovers	chat-attention/turn-idles-after-dropped-report@linux+herdr-shield+project+claude	darwin-linux-launchd-systemd-proc-sysctl-setsid/C20	herdr_state=event_dropped,lock_state=activity_lock_held_past_deadline,engine=claude_code
+chat-attention/forecast-engine-claude-code-hook-call-pretooluse-agent-spawn-launch-settings-pre-upgrade-chat@linux+herdr-shield+project+claude	status.subagent-hold	chat-attention/subagent-holds-working@linux+herdr-shield+project+claude	darwin-linux-launchd-systemd-proc-sysctl-setsid/C115	engine=claude_code,hook_call=pretooluse_agent_spawn,launch_settings=pre_upgrade_chat
+chat-attention/forecast-reader-stream-follow-seat-state-folder-trust-blocked-backend-herdr@linux+herdr-shield+project+claude	status.question-blocked	chat-attention/question-blocks@linux+herdr-shield+project+claude	darwin-linux-launchd-systemd-proc-sysctl-setsid/C67	reader=stream_follow,seat_state=folder_trust_blocked,backend=herdr
+chat-attention/turn-works-then-idles@linux+herdr-shield+project+codex	status.turn			
+chat-attention/question-blocks@linux+herdr-shield+project+codex	status.question-blocked			
+chat-attention/answer-unblocks@linux+herdr-shield+project+codex	status.answer-unblocks			
+chat-attention/permission-blocks@linux+herdr-shield+project+codex	status.permission-blocked			
+chat-attention/permission-answered-unblocks@linux+herdr-shield+project+codex	status.permission-answered			
+chat-attention/turn-idles-after-dropped-report@linux+herdr-shield+project+codex	status.dropped-report-recovers			
+chat-attention/turn-fails-shows-error@linux+herdr-shield+project+codex	status.turn-error			
+chat-attention/forecast-codex-blocked@linux+herdr-shield+project+codex	status.permission-blocked	chat-attention/permission-blocks@linux+herdr-shield+project+codex		engine=codex,pane_state=blocked
+chat-attention/forecast-engine-codex-hook-origin-subagent@linux+herdr-shield+project+codex	status.question-blocked	chat-attention/question-blocks@linux+herdr-shield+project+codex	pfm-herdr-tmux/C12	engine=codex,hook_origin=subagent
+chat-attention/forecast-pane-lookup-process-ancestry-hook-origin-sub-agent-engine-codex@linux+herdr-shield+project+codex	status.question-blocked	chat-attention/question-blocks@linux+herdr-shield+project+codex	darwin-linux-launchd-systemd-proc-sysctl-setsid/C48	pane_lookup=process_ancestry,hook_origin=sub_agent,engine=codex
+chat-attention/forecast-herdr-state-blocked-after-denied-approval-tmux-server-chat-owned-server-ends-with-chat-engine-codex@linux+herdr-shield+project+codex	status.question-blocked	chat-attention/question-blocks@linux+herdr-shield+project+codex	darwin-linux-launchd-systemd-proc-sysctl-setsid/C78	herdr_state=blocked_after_denied_approval,tmux_server=chat_owned_server_ends_with_chat,engine=codex
+chat-attention/turn-works-then-idles@linux+herdr-shield+project+opencode	status.turn			
+chat-attention/question-blocks@linux+herdr-shield+project+opencode	status.question-blocked			
+chat-attention/answer-unblocks@linux+herdr-shield+project+opencode	status.answer-unblocks			
+chat-attention/permission-blocks@linux+herdr-shield+project+opencode	status.permission-blocked			
+chat-attention/permission-answered-unblocks@linux+herdr-shield+project+opencode	status.permission-answered			
+chat-attention/turn-idles-after-dropped-report@linux+herdr-shield+project+opencode	status.dropped-report-recovers			
+chat-attention/turn-fails-shows-error@linux+herdr-shield+project+opencode	status.turn-error			
+chat-attention/turn-works-then-idles@linux+tmux+project+claude	status.turn			
+chat-attention/question-blocks@linux+tmux+project+claude	status.question-blocked			
+chat-attention/answer-unblocks@linux+tmux+project+claude	status.answer-unblocks			
+chat-attention/permission-blocks@linux+tmux+project+claude	status.permission-blocked			
+chat-attention/permission-answered-unblocks@linux+tmux+project+claude	status.permission-answered			
+chat-attention/subagent-holds-working@linux+tmux+project+claude	status.subagent-hold			
+chat-attention/notification-turn-works-then-idles@linux+tmux+project+claude	status.notification-turn			
+chat-attention/turn-works-then-idles@linux+tmux+project+codex	status.turn			
+chat-attention/question-blocks@linux+tmux+project+codex	status.question-blocked			
+chat-attention/answer-unblocks@linux+tmux+project+codex	status.answer-unblocks			
+chat-attention/permission-blocks@linux+tmux+project+codex	status.permission-blocked			
+chat-attention/permission-answered-unblocks@linux+tmux+project+codex	status.permission-answered			
+chat-attention/turn-works-then-idles@linux+tmux+project+opencode	status.turn			
+chat-attention/question-blocks@linux+tmux+project+opencode	status.question-blocked			
+chat-attention/answer-unblocks@linux+tmux+project+opencode	status.answer-unblocks			
+chat-attention/permission-blocks@linux+tmux+project+opencode	status.permission-blocked			
+chat-attention/permission-answered-unblocks@linux+tmux+project+opencode	status.permission-answered			
+chat-attention/indicators-survive-worktree-removal@macos+herdr-native	herdr.indicators-worktree-removed			
+chat-attention/turn-works-then-idles@macos+herdr-native+project+claude	status.turn			
+chat-attention/question-blocks@macos+herdr-native+project+claude	status.question-blocked			
+chat-attention/answer-unblocks@macos+herdr-native+project+claude	status.answer-unblocks			
+chat-attention/permission-blocks@macos+herdr-native+project+claude	status.permission-blocked			
+chat-attention/permission-answered-unblocks@macos+herdr-native+project+claude	status.permission-answered			
+chat-attention/subagent-holds-working@macos+herdr-native+project+claude	status.subagent-hold			
+chat-attention/turn-idles-after-dropped-report@macos+herdr-native+project+claude	status.dropped-report-recovers			
+chat-attention/turn-fails-shows-error@macos+herdr-native+project+claude	status.turn-error			
+chat-attention/notification-turn-works-then-idles@macos+herdr-native+project+claude	status.notification-turn			
+chat-attention/forecast-engine-claude-code-report-source-pfm-legacy-herdr-detection-native-claude-foreground@macos+herdr-native+project+claude	bundle:exact workspace/project label and id, tab label, pane/window identity, focus and relevant pane text; every carried chat picker projection including badge; stored seat/session/lineage/cwd/account/launch recipe and lifecycle markers; exact named foreign-sentinel projection; attributable clean log slice; all inapplicable fields explicit n/a	chat-attention/turn-works-then-idles@macos+herdr-native+project+claude	darwin-linux-launchd-systemd-proc-sysctl-setsid/C08	engine=claude_code,report_source=pfm_legacy,herdr_detection=native_claude_foreground
+chat-attention/turn-works-then-idles@macos+herdr-native+project+codex	status.turn			
+chat-attention/question-blocks@macos+herdr-native+project+codex	status.question-blocked			
+chat-attention/answer-unblocks@macos+herdr-native+project+codex	status.answer-unblocks			
+chat-attention/permission-blocks@macos+herdr-native+project+codex	status.permission-blocked			
+chat-attention/permission-answered-unblocks@macos+herdr-native+project+codex	status.permission-answered			
+chat-attention/turn-idles-after-dropped-report@macos+herdr-native+project+codex	status.dropped-report-recovers			
+chat-attention/turn-fails-shows-error@macos+herdr-native+project+codex	status.turn-error			
+chat-attention/turn-works-then-idles@macos+herdr-native+project+opencode	status.turn			
+chat-attention/question-blocks@macos+herdr-native+project+opencode	status.question-blocked			
+chat-attention/answer-unblocks@macos+herdr-native+project+opencode	status.answer-unblocks			
+chat-attention/permission-blocks@macos+herdr-native+project+opencode	status.permission-blocked			
+chat-attention/permission-answered-unblocks@macos+herdr-native+project+opencode	status.permission-answered			
+chat-attention/turn-idles-after-dropped-report@macos+herdr-native+project+opencode	status.dropped-report-recovers			
+chat-attention/turn-fails-shows-error@macos+herdr-native+project+opencode	status.turn-error			
+chat-attention/turn-works-then-idles@macos+tmux+project+claude	status.turn			
+chat-attention/question-blocks@macos+tmux+project+claude	status.question-blocked			
+chat-attention/answer-unblocks@macos+tmux+project+claude	status.answer-unblocks			
+chat-attention/permission-blocks@macos+tmux+project+claude	status.permission-blocked			
+chat-attention/permission-answered-unblocks@macos+tmux+project+claude	status.permission-answered			
+chat-attention/subagent-holds-working@macos+tmux+project+claude	status.subagent-hold			
+chat-attention/notification-turn-works-then-idles@macos+tmux+project+claude	status.notification-turn			
+chat-attention/turn-works-then-idles@macos+tmux+project+codex	status.turn			
+chat-attention/question-blocks@macos+tmux+project+codex	status.question-blocked			
+chat-attention/answer-unblocks@macos+tmux+project+codex	status.answer-unblocks			
+chat-attention/permission-blocks@macos+tmux+project+codex	status.permission-blocked			
+chat-attention/permission-answered-unblocks@macos+tmux+project+codex	status.permission-answered			
+chat-attention/turn-works-then-idles@macos+tmux+project+opencode	status.turn			
+chat-attention/question-blocks@macos+tmux+project+opencode	status.question-blocked			
+chat-attention/answer-unblocks@macos+tmux+project+opencode	status.answer-unblocks			
+chat-attention/permission-blocks@macos+tmux+project+opencode	status.permission-blocked			
+chat-attention/permission-answered-unblocks@macos+tmux+project+opencode	status.permission-answered			

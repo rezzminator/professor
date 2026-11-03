@@ -1,0 +1,1 @@
+[{"type":"permission","tool":"Bash","input":{"command":"printf permission-proof"}},{"type":"turn","reply":"permission-resolved","busy_ms":200}]

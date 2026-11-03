@@ -69,6 +69,11 @@ var declaredKeys = map[string]bool{
 	FieldErr:        true,
 	FieldExit:       true,
 	FieldComp:       true,
+	FieldBeat:       true,
+	FieldRun:        true,
+	FieldCaller:     true,
+	FieldCallee:     true,
+	FieldParent:     true,
 	// Operational fields every corner of the engine reports with: what it
 	// decided, why, over what, and how much.
 	"state":    true,
@@ -111,6 +116,7 @@ var declaredKeys = map[string]bool{
 	"line":    true, // A failed cost sink write names the rejected line.
 	"kind":    true,
 	"op":      true,
+	"action":  true,
 	"route":   true,
 	"method":  true,
 	"prior":   true,

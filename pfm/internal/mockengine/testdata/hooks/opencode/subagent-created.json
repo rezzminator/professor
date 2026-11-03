@@ -1,0 +1,19 @@
+{
+  "type": "session.created",
+  "properties": {
+    "sessionID": "ses_child_atlas",
+    "info": {
+      "id": "ses_child_atlas",
+      "slug": "ses_child_atlas",
+      "projectID": "prj_atlas",
+      "directory": "/fixture/atlas",
+      "title": "Atlas helper",
+      "version": "1.14.30",
+      "parentID": "ses_atlas01",
+      "time": {
+        "created": 1700000000000,
+        "updated": 1700000000001
+      }
+    }
+  }
+}

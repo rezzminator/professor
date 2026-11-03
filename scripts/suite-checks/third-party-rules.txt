@@ -1,0 +1,2 @@
+shellcheck SC2086	15
+go vet lostcancel	15

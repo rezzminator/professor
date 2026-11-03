@@ -1,0 +1,1 @@
+self-kill is not supported for OpenCode chats (socket {socket}): OpenCode exports no session id, so this pane cannot name itself — kill it by name or id from another chat

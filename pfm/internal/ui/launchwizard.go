@@ -305,8 +305,14 @@ func (model Model) selectRow(row compose.Row) (tea.Model, tea.Cmd) {
 			return model.beginResumeWizard(row, engine)
 		}
 	}
-	if isNewChatActionKind(row.Kind) {
+	switch {
+	case isNewChatActionKind(row.Kind):
 		row.Account = model.accountForKind(row.Kind)
+		model.action("chat.new", nil)
+	case row.Kind.IsResumable():
+		model.action("chat.resume", nil)
+	default:
+		model.action("chat.open", nil)
 	}
 	model.outcome = OutcomeSelected
 	model.outcomeRow = row
@@ -368,6 +374,7 @@ func (model Model) finishWizard(row compose.Row) (tea.Model, tea.Cmd) {
 		if hasCacheChoice(wizard.engine) {
 			choice.Cache1H = wizard.cache
 		}
+		model.action("chat.resume", nil)
 		model.resumeChoice = &choice
 		model.outcome = OutcomeSelected
 		model.outcomeRow = row
@@ -391,6 +398,7 @@ func (model Model) finishWizard(row compose.Row) (tea.Model, tea.Cmd) {
 		model.killStatus = "new chat is not available for " + string(wizard.engine)
 		return model, nil
 	}
+	model.action("chat.new", nil)
 	model.outcome = OutcomeSelected
 	model.outcomeRow = selected
 	return model, tea.Quit

@@ -1,0 +1,124 @@
+row	landscape_id	why	owner	expires
+chat-ending/forecast-seat-event-pane-reused-runtime-event-kill@linux+herdr-shield+project+claude	chat.kill-cli	Pinned Herdr 0.9.5 exposes no isolated pane respawn, recycle, or restart operation and offers no guarantee that a pane ID will be reused after close/create (https://herdr.dev/agent-guide.md).	owner	2027-05-03
+chat-ending/archive-after-end@*+*+project+opencode	ops.archive	ruling:ruling-gap-opencode-archive	owner	until-product-flight
+chat-ending/branch-after-end@*+*+project+opencode	chat.branch-cli	ruling:ruling-gap-opencode-branch	owner	until-product-flight
+chat-ending/recover-after-end@*+*+project+*	chat.recover-cli	ruling:ruling-gap-recover-codex-only	owner	until-product-flight
+chat-reload/reload-typed@*+*+*+codex	chat.reload-typed	ruling:ruling-gap-codex-typed-reload	owner	until-product-flight
+chat-reload/reload-typed@*+*+*+opencode	chat.reload-typed	ruling:ruling-gap-opencode-reload	owner	until-product-flight
+chat-reload/reload-from-cli@*+*+*+opencode	chat.reload-cli	ruling:ruling-gap-opencode-reload	owner	until-product-flight
+chat-reload/reload-from-picker@*+*+*+opencode	chat.reload-picker	ruling:ruling-gap-opencode-reload	owner	until-product-flight
+chat-birth/new-typed@*+*+*+opencode	chat.new-typed	ruling:ruling-gap-opencode-launcher	owner	until-product-flight
+chat-birth/new-from-cli@*+tmux+*+opencode	chat.new-cli	ruling:ruling-gap-opencode-tmux	owner	until-product-flight
+chat-birth/new-typed-fork-shell-start-home@linux+herdr-shield+project+opencode	chat.new-typed	ruling:ruling-gap-opencode-launcher	owner	until-product-flight
+chat-birth/new-typed-fork-shell-start-project@linux+herdr-shield+project+opencode	chat.new-typed	ruling:ruling-gap-opencode-launcher	owner	until-product-flight
+chat-birth/open-from-foreign-workspace-fork-shell-start-home@linux+herdr-shield+project+opencode	herdr.place-from-foreign-workspace	ruling:ruling-gap-opencode-launcher	owner	until-product-flight
+chat-birth/open-from-foreign-workspace-fork-shell-start-project@linux+herdr-shield+project+opencode	herdr.place-from-foreign-workspace	ruling:ruling-gap-opencode-launcher	owner	until-product-flight
+chat-birth/new-typed-fork-shell-start-home@macos+herdr-native+project+opencode	chat.new-typed	ruling:ruling-gap-opencode-launcher	owner	until-product-flight
+chat-birth/new-typed-fork-shell-start-project@macos+herdr-native+project+opencode	chat.new-typed	ruling:ruling-gap-opencode-launcher	owner	until-product-flight
+chat-birth/open-from-foreign-workspace-fork-shell-start-home@macos+herdr-native+project+opencode	herdr.place-from-foreign-workspace	ruling:ruling-gap-opencode-launcher	owner	until-product-flight
+chat-birth/open-from-foreign-workspace-fork-shell-start-project@macos+herdr-native+project+opencode	herdr.place-from-foreign-workspace	ruling:ruling-gap-opencode-launcher	owner	until-product-flight
+chat-birth/open-from-foreign-workspace@*+*+*+opencode	herdr.place-from-foreign-workspace	ruling:ruling-gap-opencode-launcher	owner	until-product-flight
+chat-birth/rename-from-cli@linux+herdr-shield+project+claude	chat.name-cli	Pinned Herdr API exposes no request log or cursor for counting exact agent.rename requests (https://herdr.dev/agent-guide.md).	owner	2027-05-03
+chat-reload/reload-fresh@*+*+*+opencode	chat.reload-new	ruling:ruling-gap-opencode-reload	owner	until-product-flight
+chat-reload/reload-fresh-hidden@*+*+*+opencode	chat.reload-new-hide	ruling:ruling-gap-opencode-reload	owner	until-product-flight
+chat-reload/forecast-seat-event-pane-reused-runtime-event-reload@linux+herdr-shield+project+claude	chat.reload-cli	Pinned Herdr 0.9.5 exposes no isolated pane respawn, recycle, or restart operation and offers no guarantee that a pane ID will be reused after close/create (https://herdr.dev/agent-guide.md).	owner	2027-05-03
+terminal-open/plain-shell-stays-plain@linux+herdr-shield	picker.auto-open-off	pfm offers no plain-shell entry in Herdr; a new pane always arms the picker	owner	until-owner-decision
+terminal-open/plain-shell-stays-plain@macos+herdr-native	picker.auto-open-off	pfm offers no plain-shell entry in Herdr; a new pane always arms the picker	owner	until-owner-decision
+machine-lifecycle/install-over-live-chat@*	lifecycle.install	ruling:ruling-gap-install-deferral-session	owner	until-product-flight
+machine-lifecycle/doctor-reads-clean@*	ops.doctor	ruling:ruling-gap-doctor-healthy-hooks	owner	until-product-flight
+fleet-reader/ls-from-cli@linux	chat.ls-cli	ruling:ruling-gap-chat-ls-json	owner	until-product-flight
+fleet-reader/ls-from-cli@macos	chat.ls-cli	ruling:ruling-gap-chat-ls-json	owner	until-product-flight
+fleet-reader/whoami-after-workspace-move@*	herdr.whoami-moved	ruling:ruling-gap-herdr-move-tab-key	owner	until-product-flight
+fleet-reader/forecast-seat-owner-herdr-seat-row-process-table-empty-kinfo-or-eio-os-macos@macos	chat.ls-cli	ruling:ruling-gap-darwin-empty-kinfo	owner	until-product-flight
+chat-mesh/call-from-mcp@linux+herdr-shield+project+claude+to-tmux-project-opencode	chat.call-mcp	ruling:ruling-gap-opencode-tmux	owner	until-product-flight
+chat-mesh/call-from-cli@linux+herdr-shield+project+claude+to-tmux-project-opencode	chat.call-cli	ruling:ruling-gap-opencode-tmux	owner	until-product-flight
+chat-mesh/call-from-mcp@linux+herdr-shield+project+codex+to-tmux-project-opencode	chat.call-mcp	ruling:ruling-gap-opencode-tmux	owner	until-product-flight
+chat-mesh/call-from-mcp@linux+herdr-shield+project+opencode+to-tmux-project-opencode	chat.call-mcp	ruling:ruling-gap-opencode-tmux	owner	until-product-flight
+chat-mesh/call-from-mcp@linux+tmux+project+claude+to-tmux-project-opencode	chat.call-mcp	ruling:ruling-gap-opencode-tmux	owner	until-product-flight
+chat-mesh/call-from-cli@linux+tmux+project+claude+to-tmux-project-opencode	chat.call-cli	ruling:ruling-gap-opencode-tmux	owner	until-product-flight
+chat-mesh/call-from-mcp@linux+tmux+project+codex+to-tmux-project-opencode	chat.call-mcp	ruling:ruling-gap-opencode-tmux	owner	until-product-flight
+chat-mesh/spawn-child-from-mcp@linux+tmux+project+opencode	chat.new-mcp	ruling:ruling-gap-opencode-tmux	owner	until-product-flight
+chat-mesh/spawn-child-from-mcp@linux+herdr-shield+project+claude	chat.new-mcp	ruling:ruling-gap-chat-ls-json	owner	until-product-flight
+chat-mesh/spawn-child-from-mcp@linux+herdr-shield+project+codex	chat.new-mcp	ruling:ruling-gap-chat-ls-json	owner	until-product-flight
+chat-mesh/spawn-child-from-mcp@linux+herdr-shield+project+opencode	chat.new-mcp	ruling:ruling-gap-chat-ls-json	owner	until-product-flight
+chat-mesh/spawn-child-from-mcp@linux+tmux+project+claude	chat.new-mcp	ruling:ruling-gap-chat-ls-json	owner	until-product-flight
+chat-mesh/spawn-child-from-mcp@linux+tmux+project+codex	chat.new-mcp	ruling:ruling-gap-chat-ls-json	owner	until-product-flight
+chat-mesh/spawn-child-from-mcp@linux+tmux+project+opencode	chat.new-mcp	ruling:ruling-gap-chat-ls-json	owner	until-product-flight
+chat-mesh/keys-and-capture-child@linux+tmux+project+opencode	chat.capture-mcp	ruling:ruling-gap-opencode-tmux	owner	until-product-flight
+chat-mesh/call-from-mcp@linux+tmux+project+opencode+to-herdr-shield-project-claude	chat.call-mcp	ruling:ruling-gap-opencode-tmux	owner	until-product-flight
+chat-mesh/call-from-mcp@linux+tmux+project+opencode+to-herdr-shield-project-codex	chat.call-mcp	ruling:ruling-gap-opencode-tmux	owner	until-product-flight
+chat-mesh/call-from-mcp@linux+tmux+project+opencode+to-herdr-shield-project-opencode	chat.call-mcp	ruling:ruling-gap-opencode-tmux	owner	until-product-flight
+chat-mesh/call-from-mcp@linux+tmux+project+opencode+to-tmux-project-claude	chat.call-mcp	ruling:ruling-gap-opencode-tmux	owner	until-product-flight
+chat-mesh/call-from-mcp@linux+tmux+project+opencode+to-tmux-project-codex	chat.call-mcp	ruling:ruling-gap-opencode-tmux	owner	until-product-flight
+chat-mesh/call-from-mcp@linux+tmux+project+opencode+to-tmux-project-opencode	chat.call-mcp	ruling:ruling-gap-opencode-tmux	owner	until-product-flight
+chat-mesh/call-from-mcp@macos+herdr-native+project+claude+to-tmux-project-opencode	chat.call-mcp	ruling:ruling-gap-opencode-tmux	owner	until-product-flight
+chat-mesh/call-from-cli@macos+herdr-native+project+claude+to-tmux-project-opencode	chat.call-cli	ruling:ruling-gap-opencode-tmux	owner	until-product-flight
+chat-mesh/call-from-mcp@macos+herdr-native+project+codex+to-tmux-project-opencode	chat.call-mcp	ruling:ruling-gap-opencode-tmux	owner	until-product-flight
+chat-mesh/call-from-mcp@macos+herdr-native+project+opencode+to-tmux-project-opencode	chat.call-mcp	ruling:ruling-gap-opencode-tmux	owner	until-product-flight
+chat-mesh/call-from-mcp@macos+tmux+project+claude+to-tmux-project-opencode	chat.call-mcp	ruling:ruling-gap-opencode-tmux	owner	until-product-flight
+chat-mesh/call-from-cli@macos+tmux+project+claude+to-tmux-project-opencode	chat.call-cli	ruling:ruling-gap-opencode-tmux	owner	until-product-flight
+chat-mesh/call-from-mcp@macos+tmux+project+codex+to-tmux-project-opencode	chat.call-mcp	ruling:ruling-gap-opencode-tmux	owner	until-product-flight
+chat-mesh/spawn-child-from-mcp@macos+tmux+project+opencode	chat.new-mcp	ruling:ruling-gap-opencode-tmux	owner	until-product-flight
+chat-mesh/spawn-child-from-mcp@macos+herdr-native+project+claude	chat.new-mcp	ruling:ruling-gap-chat-ls-json	owner	until-product-flight
+chat-mesh/spawn-child-from-mcp@macos+herdr-native+project+codex	chat.new-mcp	ruling:ruling-gap-chat-ls-json	owner	until-product-flight
+chat-mesh/spawn-child-from-mcp@macos+herdr-native+project+opencode	chat.new-mcp	ruling:ruling-gap-chat-ls-json	owner	until-product-flight
+chat-mesh/spawn-child-from-mcp@macos+tmux+project+claude	chat.new-mcp	ruling:ruling-gap-chat-ls-json	owner	until-product-flight
+chat-mesh/spawn-child-from-mcp@macos+tmux+project+codex	chat.new-mcp	ruling:ruling-gap-chat-ls-json	owner	until-product-flight
+chat-mesh/spawn-child-from-mcp@macos+tmux+project+opencode	chat.new-mcp	ruling:ruling-gap-chat-ls-json	owner	until-product-flight
+chat-mesh/keys-and-capture-child@macos+tmux+project+opencode	chat.capture-mcp	ruling:ruling-gap-opencode-tmux	owner	until-product-flight
+chat-mesh/call-from-mcp@macos+tmux+project+opencode+to-herdr-native-project-claude	chat.call-mcp	ruling:ruling-gap-opencode-tmux	owner	until-product-flight
+chat-mesh/call-from-mcp@macos+tmux+project+opencode+to-herdr-native-project-codex	chat.call-mcp	ruling:ruling-gap-opencode-tmux	owner	until-product-flight
+chat-mesh/call-from-mcp@macos+tmux+project+opencode+to-herdr-native-project-opencode	chat.call-mcp	ruling:ruling-gap-opencode-tmux	owner	until-product-flight
+chat-mesh/call-from-mcp@macos+tmux+project+opencode+to-tmux-project-claude	chat.call-mcp	ruling:ruling-gap-opencode-tmux	owner	until-product-flight
+chat-mesh/call-from-mcp@macos+tmux+project+opencode+to-tmux-project-codex	chat.call-mcp	ruling:ruling-gap-opencode-tmux	owner	until-product-flight
+chat-mesh/call-from-mcp@macos+tmux+project+opencode+to-tmux-project-opencode	chat.call-mcp	ruling:ruling-gap-opencode-tmux	owner	until-product-flight
+chat-reload/reload-into-missing-account-refused@*	chat.reload-account-refused	ruling:ruling-gap-chat-reload-account-refused	owner	until-product-flight
+chat-attention/answer-unblocks@*herdr-*+*	status.answer-unblocks	ruling:ruling-gap-working-blink	owner	until-product-flight
+chat-attention/forecast-engine-claude-code-hook-call-pretooluse-agent-spawn-launch-settings-pre-upgrade-chat@*herdr-*+*	status.subagent-hold	ruling:ruling-gap-working-blink	owner	until-product-flight
+chat-attention/forecast-engine-claude-code-report-source-pfm-legacy-herdr-detection-native-claude-foreground@*herdr-*+*	status.turn	ruling:ruling-gap-working-blink	owner	until-product-flight
+chat-attention/forecast-engine-claude-hook-origin-subagent@*herdr-*+*	status.subagent-hold	ruling:ruling-gap-working-blink	owner	until-product-flight
+chat-attention/forecast-herdr-shield-on-pane-state-working@*herdr-*+*	status.turn	ruling:ruling-gap-working-blink	owner	until-product-flight
+chat-attention/forecast-multiplexer-herdr-pane-state-working@*herdr-*+*	status.turn	ruling:ruling-gap-working-blink	owner	until-product-flight
+chat-attention/forecast-prompt-origin-background-task-notification-engine-claude-code-hook-event-user-prompt-submit@*herdr-*+*	status.notification-turn	ruling:ruling-gap-working-blink	owner	until-product-flight
+chat-attention/forecast-tmux-server-gone-at-session-end-hook-payload-over-one-mib-tool-response-engine-claude-code@*herdr-*+*	status.turn	ruling:ruling-gap-working-blink	owner	until-product-flight
+chat-attention/notification-turn-works-then-idles@*herdr-*+*	status.notification-turn	ruling:ruling-gap-working-blink	owner	until-product-flight
+chat-attention/permission-answered-unblocks@*herdr-*+*	status.permission-answered	ruling:ruling-gap-working-blink	owner	until-product-flight
+chat-attention/subagent-holds-working@*herdr-*+*	status.subagent-hold	ruling:ruling-gap-working-blink	owner	until-product-flight
+chat-attention/turn-works-then-idles@*herdr-*+*	status.turn	ruling:ruling-gap-working-blink	owner	until-product-flight
+chat-attention/answer-unblocks@*+tmux+*	status.answer-unblocks	ruling:ruling-gap-tmux-attention-state-mark	owner	until-product-flight
+chat-attention/notification-turn-works-then-idles@*+tmux+*	status.notification-turn	ruling:ruling-gap-tmux-attention-state-mark	owner	until-product-flight
+chat-attention/permission-answered-unblocks@*+tmux+*	status.permission-answered	ruling:ruling-gap-tmux-attention-state-mark	owner	until-product-flight
+chat-attention/permission-blocks@*+tmux+*	status.permission-blocked	ruling:ruling-gap-tmux-attention-state-mark	owner	until-product-flight
+chat-attention/question-blocks@*+tmux+*	status.question-blocked	ruling:ruling-gap-tmux-attention-state-mark	owner	until-product-flight
+chat-attention/subagent-holds-working@*+tmux+*	status.subagent-hold	ruling:ruling-gap-tmux-attention-state-mark	owner	until-product-flight
+chat-attention/turn-works-then-idles@*+tmux+*	status.turn	ruling:ruling-gap-tmux-attention-state-mark	owner	until-product-flight
+fleet-reader/whoami-from-cli@*+tmux+*+opencode	chat.whoami-cli	ruling:ruling-gap-opencode-tmux	owner	until-product-flight
+fleet-reader/whoami-from-mcp@*+tmux+*+opencode	chat.whoami-mcp	ruling:ruling-gap-opencode-tmux	owner	until-product-flight
+fleet-reader/status-and-last@*+tmux+*+opencode	chat.status-cli	ruling:ruling-gap-opencode-tmux	owner	until-product-flight
+fleet-reader/status-and-last@*+tmux+*+opencode	chat.status-mcp	ruling:ruling-gap-opencode-tmux	owner	until-product-flight
+fleet-reader/status-and-last@*+tmux+*+opencode	chat.last-mcp	ruling:ruling-gap-opencode-tmux	owner	until-product-flight
+fleet-reader/transcript-reads-engine-log@*+tmux+*+opencode	report.transcript	ruling:ruling-gap-opencode-tmux	owner	until-product-flight
+fleet-reader/theme-carried-fleet@*+tmux+*+opencode	theme.use	ruling:ruling-gap-opencode-tmux	owner	until-product-flight
+chat-mesh/spawn-child-from-mcp@linux+herdr-shield+project+claude	chat.new-mcp	Pinned Herdr 0.9.5 exposes no scoped tab-colour channel; https://herdr.dev/agent-guide.md	owner	2027-05-03
+chat-mesh/spawn-child-from-mcp@linux+herdr-shield+project+codex	chat.new-mcp	Pinned Herdr 0.9.5 exposes no scoped tab-colour channel; https://herdr.dev/agent-guide.md	owner	2027-05-03
+chat-mesh/spawn-child-from-mcp@linux+herdr-shield+project+opencode	chat.new-mcp	Pinned Herdr 0.9.5 exposes no scoped tab-colour channel; https://herdr.dev/agent-guide.md	owner	2027-05-03
+chat-mesh/spawn-child-from-mcp@macos+herdr-native+project+claude	chat.new-mcp	Pinned Herdr 0.9.5 exposes no scoped tab-colour channel; https://herdr.dev/agent-guide.md	owner	2027-05-03
+chat-mesh/spawn-child-from-mcp@macos+herdr-native+project+codex	chat.new-mcp	Pinned Herdr 0.9.5 exposes no scoped tab-colour channel; https://herdr.dev/agent-guide.md	owner	2027-05-03
+chat-mesh/spawn-child-from-mcp@macos+herdr-native+project+opencode	chat.new-mcp	Pinned Herdr 0.9.5 exposes no scoped tab-colour channel; https://herdr.dev/agent-guide.md	owner	2027-05-03
+fleet-reader/ls-lists-lost-seat@linux+herdr-shield	herdr.ls-lost-seat	Pinned Herdr 0.9.5 has no per-pane recycle or respawn API and cannot guarantee pane ID reuse after close/create; https://herdr.dev/agent-guide.md	owner	2027-05-03
+fleet-reader/picker-refresh-with-dead-seat@linux+herdr-shield	herdr.picker-refresh-dead-seat	Pinned Herdr 0.9.5 has no API request log for observing pane.get counts; https://herdr.dev/agent-guide.md	owner	2027-05-03
+fleet-reader/picker-refresh-with-dead-seat@macos+herdr-native	herdr.picker-refresh-dead-seat	Pinned Herdr 0.9.5 has no API request log for observing pane.get counts; https://herdr.dev/agent-guide.md	owner	2027-05-03
+fleet-reader/forecast-multiplexer-tmux-in-herdr-seat-event-pane-reused@linux+herdr-shield	herdr.ls-lost-seat	Pinned Herdr 0.9.5 has no per-pane recycle API and cannot guarantee pane ID reuse after close/create; https://herdr.dev/agent-guide.md	owner	2027-05-03
+fleet-reader/forecast-seat-event-pane-reused-door-seat-proof@linux+herdr-shield	herdr.ls-lost-seat	Pinned Herdr 0.9.5 has no per-pane recycle API and cannot guarantee pane ID reuse after close/create; https://herdr.dev/agent-guide.md	owner	2027-05-03
+fleet-reader/forecast-seat-event-pane-reused-door-paint@linux+herdr-shield	herdr.ls-lost-seat	Pinned Herdr 0.9.5 has no per-pane recycle API and cannot guarantee pane ID reuse after close/create; https://herdr.dev/agent-guide.md	owner	2027-05-03
+fleet-reader/forecast-herdr-pane-recycled-occupant-seat-ownership-proved-dead-supervisor-exited@linux+herdr-shield	herdr.ls-lost-seat	Pinned Herdr 0.9.5 has no per-pane recycle or respawn API; https://herdr.dev/agent-guide.md	owner	2027-05-03
+fleet-reader/forecast-herdr-pane-recycled-occupant-backend-ownership-changed-seat-host-dead@linux+herdr-shield+project+claude	chat.whoami-cli	Pinned Herdr 0.9.5 has no per-pane recycle or respawn API; https://herdr.dev/agent-guide.md	owner	2027-05-03
+machine-lifecycle/forecast-stat-flavor-bsd-stat-f-os-macos-temp-alias-var-to-private-var@*	ops.doctor	ruling:ruling-gap-forecast-tooling-unheld	owner	until-product-flight
+machine-lifecycle/forecast-pfm-exit-before-stdin-read-stdin-input-whole-buffer-written-host-vscode-extension-host@*	ops.doctor	ruling:ruling-gap-forecast-tooling-unheld	owner	until-product-flight
+chat-attention/forecast-payload-is-interrupt-true-engine-claude-code-event-order-async-post-tool-use-after-block@linux+herdr-shield+project+claude	status.question-blocked	ruling:ruling-gap-working-blink	owner	until-product-flight
+chat-attention/forecast-trigger-esc-or-no-at-permission-dialog-engine-claude-code-hook-gap-no-hook-fired@linux+herdr-shield+project+claude	status.question-blocked	ruling:ruling-gap-working-blink	owner	until-product-flight
+chat-attention/forecast-reader-stream-follow-seat-state-folder-trust-blocked-backend-herdr@linux+herdr-shield+project+claude	status.question-blocked	ruling:ruling-gap-working-blink	owner	until-product-flight
+chat-attention/forecast-herdr-state-blocked-after-denied-approval-tmux-server-chat-owned-server-ends-with-chat-engine-codex@linux+herdr-shield+project+codex	status.question-blocked	ruling:ruling-gap-working-blink	owner	until-product-flight
+chat-attention/forecast-engine-codex-hook-origin-subagent@linux+herdr-shield+project+codex	status.question-blocked	ruling:ruling-gap-working-blink	owner	until-product-flight
+chat-attention/forecast-pane-lookup-process-ancestry-hook-origin-sub-agent-engine-codex@linux+herdr-shield+project+codex	status.question-blocked	ruling:ruling-gap-working-blink	owner	until-product-flight
+chat-attention/forecast-engine-claude-code-hook-call-pretooluse-agent-spawn-launch-settings-pre-upgrade-chat@linux+herdr-shield+project+claude	status.subagent-hold	ruling:ruling-gap-c115-prior-inline-settings	owner	until-product-flight

@@ -111,8 +111,33 @@ func TestParseFlagsAroundNameKeepsFlagLookingPromptWords(t *testing.T) {
 
 func TestWriteLinesPreservesUsageLines(t *testing.T) {
 	var out bytes.Buffer
-	WriteLines(&out, []string{"usage", "", "command"})
+	if err := WriteLines(&out, []string{"usage", "", "command"}); err != nil {
+		t.Fatal(err)
+	}
 	if out.String() != "usage\n\ncommand\n" {
-		t.Fatalf("usage = %q", out.String())
+		t.Fatalf("usage = %q, want %q", out.String(), "usage\n\ncommand\n")
+	}
+}
+
+func TestDiagnosticCommand(t *testing.T) {
+	for _, row := range []struct {
+		args []string
+		want bool
+	}{
+		{nil, false},
+		{[]string{"doctor"}, true},
+		{[]string{"statusline"}, true},
+		{[]string{"internal", "primary-get"}, true},
+		{[]string{"usage-hook"}, true},
+		{[]string{"config"}, false},
+		{[]string{"config", "show"}, true},
+		{[]string{"config", "validate"}, true},
+		{[]string{"config", "init"}, false},
+		{[]string{"ls"}, false},
+		{[]string{"chat", "ls"}, false},
+	} {
+		if actual := DiagnosticCommand(row.args); actual != row.want {
+			t.Fatalf("DiagnosticCommand(%q) = %t, want %t", row.args, actual, row.want)
+		}
 	}
 }

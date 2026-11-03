@@ -1,0 +1,7 @@
+docs/design/pfm-integration-suite/*	hash
+docs/*	hash
+scripts/suite-checks/corpus-*	scope
+pfm/internal/lintrules/testdata/*	scope
+pfm/fakes/migrations/*	scope
+pfm/fakes/synthetic-log/*	scope
+plugins/*	scope

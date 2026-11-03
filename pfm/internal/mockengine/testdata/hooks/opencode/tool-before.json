@@ -1,0 +1,13 @@
+{
+  "hook": "tool.execute.before",
+  "input": {
+    "sessionID": "ses_atlas01",
+    "tool": "bash",
+    "callID": "call_fixture"
+  },
+  "output": {
+    "args": {
+      "command": "printf ready"
+    }
+  }
+}

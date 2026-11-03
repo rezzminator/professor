@@ -56,10 +56,11 @@ STRUCTURAL_COUNT=$(( $(printf '%s' "$STRUCTURAL_PATTERN" | tr -cd '|' | wc -c) +
 #   /home/account-42, /home/tester, /home/test, /home/me, /home/x
 #                    — the Go suites' synthetic HOMEs; no machine on earth is any of these
 #   ~/work/alpha, ~/work/Foo — invented project names in a fixture statusline and a doc example
+#   ~/work/atlas    — the journey suite's invented root project and its scratch siblings (docs/design/pfm-integration-suite)
 #   ~/work/professor — this repo's own public name, quoted in a historical release note
 #   mreza0100       — this repo's former GitHub owner, still quoted by historical release
 #                     notes; a private term that is a substring of it must not fail them
-BENIGN_TOKENS='(/home/account-42|~/work/professor|mreza0100|/home/tester|~/work/alpha|/home/test|~/work/Foo|/home/me|/home/x)'
+BENIGN_TOKENS='(/home/account-42|~/work/atlas-scratch-|~/work/professor|~/work/atlas|mreza0100|/home/tester|~/work/alpha|/home/test|~/work/Foo|/home/me|/home/x)'
 
 # The one door for a grep that matches PATTERN: UTF-8 locale for that command only, binary files read as text.
 match_grep() {

@@ -12,13 +12,11 @@ import (
 
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/chat"
-	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	claudeengine "github.com/rezzminator/professor/pfm/internal/engine/claude"
 	codexengine "github.com/rezzminator/professor/pfm/internal/engine/codex"
 	opencodeengine "github.com/rezzminator/professor/pfm/internal/engine/opencode"
 	"github.com/rezzminator/professor/pfm/internal/gather"
-	"github.com/rezzminator/professor/pfm/internal/headless/run"
 	"github.com/rezzminator/professor/pfm/internal/index"
 	"github.com/rezzminator/professor/pfm/internal/mcpserv"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -28,6 +26,56 @@ import (
 )
 
 const fixtureSession = "b1111111-1111-4111-8111-111111111111"
+
+func TestClaudeRemoteControlTitleDoesNotConsumeATurn(t *testing.T) {
+	for _, row := range []struct {
+		name               string
+		args               []string
+		remoteName, prompt string
+	}{
+		{"named", []string{"--remote-control", "carried-chat", "--session-id", fixtureSession, "--name", "carried-chat"}, "carried-chat", ""},
+		{"bare", []string{"--remote-control", "--session-id", fixtureSession, "--name", "carried-chat"}, "", ""},
+		{"inline", []string{"--remote-control=carried-chat", "--session-id", fixtureSession, "--name", "carried-chat"}, "carried-chat", ""},
+		{"prompt", []string{"--remote-control", "carried-chat", "--session-id", fixtureSession, "--name", "carried-chat", "inspect atlas"}, "carried-chat", "inspect atlas"},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			actual := parseClaudeArgs(row.args)
+			if actual.remoteName != row.remoteName || actual.prompt != row.prompt ||
+				actual.sessionID != fixtureSession ||
+				actual.name != "carried-chat" {
+				t.Fatalf(
+					"argv=%q: remote=%q prompt=%q session=%q name=%q, want %q %q %q carried-chat",
+					row.args,
+					actual.remoteName,
+					actual.prompt,
+					actual.sessionID,
+					actual.name,
+					row.remoteName,
+					row.prompt,
+					fixtureSession,
+				)
+			}
+			fix := newFixture(t)
+			fix.write(Scenario{Steps: []Step{{Type: StepTurn, Reply: "scripted response"}}})
+			session := fix.startTUI(engineClaude, row.args, nil)
+			if row.prompt == "" {
+				session.waitFrame("idle composer", func(frame string) bool { return strings.Contains(frame, "❯") })
+				session.typeLine("inspect atlas")
+			}
+			session.waitFrame(
+				"one scripted response",
+				func(frame string) bool { return strings.Contains(frame, "scripted response") },
+			)
+			session.typeLine("/exit")
+			if code := session.waitExit(); code != 0 {
+				t.Fatalf("argv=%q: exit=%d stderr=%q, want 0", row.args, code, session.stderr.String())
+			}
+			if actual := readFile(t, fix.scenario+cursorSuffix); actual != "1" {
+				t.Fatalf("%s: cursor=%q, want 1", fix.scenario, actual)
+			}
+		})
+	}
+}
 
 const verbsStdioProfessorArg = "mockengine-verbs-stdio-professor"
 
@@ -134,55 +182,6 @@ func readMeta(t *testing.T, path string) transcript.Meta {
 	return meta
 }
 
-func TestClaudeTurnShowsABusyFooterThenAReplyAndWritesTheTranscript(t *testing.T) {
-	fix := newFixture(t)
-	t.Chdir(fix.work)
-	fix.write(Scenario{
-		SessionID: fixtureSession,
-		Steps: []Step{
-			{
-				Type:   StepTurn,
-				Reply:  "granite",
-				BusyMS: 700,
-				Tokens: &Tokens{Input: 20, Output: 5, CacheRead: 300, CacheCreation: 7},
-			},
-		},
-	})
-	session := fix.startTUI("claude", claudeArgs(), nil)
-	session.waitFrame("the composer", func(frame string) bool { return strings.Contains(frame, "❯") })
-	if pfmcall.IsBusy(session.out.frame()) {
-		t.Fatalf("an idle composer reads busy:\n%s", session.out.frame())
-	}
-	session.typeLine("hello there")
-	session.waitFrame("the busy footer pfmcall.IsBusy matches", pfmcall.IsBusy)
-	frame := session.waitFrame("the reply with the footer gone", func(frame string) bool {
-		return !pfmcall.IsBusy(frame) && strings.Contains(frame, "granite")
-	})
-	if pfmcall.SelectorLine(frame) != "" {
-		t.Fatalf("an idle reply frame reads as an open menu: %q", pfmcall.SelectorLine(frame))
-	}
-
-	path := fix.claudeTranscript(fixtureSession)
-	meta := readMeta(t, path)
-	if meta.HumanPrompts != 1 || meta.Model != "claude-sonnet-4-5-fixture" || meta.ContextTokens != 20+300+7 {
-		t.Fatalf("ReadMeta = %+v, want 1 human prompt, the --model word, 327 context tokens", meta)
-	}
-	rows := fix.indexedTranscripts()
-	if len(rows) != 1 || rows[0].UUID != fixtureSession || rows[0].CWD != fix.work ||
-		rows[0].FirstPrompt != "hello there" || rows[0].PromptCount != 1 || rows[0].IsBG {
-		t.Fatalf("indexed transcripts = %+v, want one interactive row for %s in %s", rows, fixtureSession, fix.work)
-	}
-	last := ""
-	for _, line := range strings.Split(strings.TrimSpace(readFile(t, path)), "\n") {
-		if entry, ok := transcript.Parse([]byte(line), string(pfmengine.Claude)); ok {
-			last = entry.Role + ":" + entry.Text
-		}
-	}
-	if last != transcript.RoleAssistant+":granite" {
-		t.Fatalf("last transcript entry = %q, want the assistant reply", last)
-	}
-}
-
 func readFile(t *testing.T, path string) string {
 	t.Helper()
 	content, err := os.ReadFile(path)
@@ -240,78 +239,6 @@ func TestClaudeMenuIsAnOpenSelectorUntilAnswered(t *testing.T) {
 	})
 }
 
-func TestClaudeCompactPrintsTheReceiptAndMarksTheTranscript(t *testing.T) {
-	fix := newFixture(t)
-	t.Chdir(fix.work)
-	fix.write(Scenario{SessionID: fixtureSession, BusyMS: intPtr(0), Steps: []Step{
-		{Type: StepTurn, Reply: "first"},
-		{Type: StepCompact, PostTokens: 777},
-	}})
-	session := fix.startTUI("claude", claudeArgs(), nil)
-	session.waitFrame("the composer", func(frame string) bool { return strings.Contains(frame, "❯") })
-	session.typeLine("warm up")
-	session.waitFrame("the first reply", func(frame string) bool { return strings.Contains(frame, "first") })
-	if pfmcall.CompactionReceipt(session.out.frame()) {
-		t.Fatal("a receipt is showing before any compaction")
-	}
-	session.typeLine("/compact")
-	session.waitFrame("the compaction receipt pfmcall.CompactionReceipt matches", pfmcall.CompactionReceipt)
-	meta := readMeta(t, fix.claudeTranscript(fixtureSession))
-	if !meta.CompactedAfterUsage || meta.PostCompactTokens != 777 || meta.HumanPrompts != 1 {
-		t.Fatalf("ReadMeta = %+v, want a compaction after usage with 777 post tokens and 1 human prompt", meta)
-	}
-}
-
-func TestClaudeBackgroundAgentIsIdleAndExitAsksToStopIt(t *testing.T) {
-	fix := newFixture(t)
-	t.Chdir(fix.work)
-	fix.write(Scenario{SessionID: fixtureSession, BusyMS: intPtr(0), Steps: []Step{
-		{Type: StepBackgroundAgent, Name: "tracer", Status: "mapping the seams"},
-		{Type: StepTurn, Reply: "dispatched"},
-	}})
-	session := fix.startTUI("claude", claudeArgs(), nil)
-	session.waitFrame("the composer", func(frame string) bool { return strings.Contains(frame, "❯") })
-	session.typeLine("map it")
-	frame := session.waitFrame("the reply beside an agent row", func(frame string) bool {
-		return strings.Contains(frame, "dispatched") && strings.Contains(frame, "● tracer")
-	})
-	if pfmcall.IsBusy(frame) {
-		t.Fatalf("a background agent must leave the main turn idle:\n%s", frame)
-	}
-	if pfmcall.SelectorLine(frame) != "" {
-		t.Fatalf("the agent row read as a menu: %q", pfmcall.SelectorLine(frame))
-	}
-	session.typeLine("/exit")
-	frame = session.waitFrame("the exit confirmation pfmcall.ExitDialogOpen matches", pfmcall.ExitDialogOpen)
-	if !strings.Contains(pfmcall.SelectorLine(frame), "Exit") {
-		t.Fatalf("selector = %q, want the Exit row preselected", pfmcall.SelectorLine(frame))
-	}
-	session.typeRaw("\r")
-	if code := session.waitExit(); code != 0 {
-		t.Fatalf("exit code after confirming = %d", code)
-	}
-	meta := readMeta(t, fix.claudeTranscript(fixtureSession))
-	rows := fix.indexedTranscripts()
-	if meta.HumanPrompts != 1 || len(rows) != 1 || rows[0].PromptCount != 1 {
-		t.Fatalf("sidechain records leaked into the count: meta=%+v rows=%+v", meta, rows)
-	}
-}
-
-func TestClaudeExitWithoutBackgroundWorkQuitsAtOnce(t *testing.T) {
-	fix := newFixture(t)
-	t.Chdir(fix.work)
-	fix.write(Scenario{SessionID: fixtureSession})
-	session := fix.startTUI("claude", claudeArgs(), nil)
-	session.waitFrame("the composer", func(frame string) bool { return strings.Contains(frame, "❯") })
-	session.typeLine("/exit")
-	if code := session.waitExit(); code != 0 {
-		t.Fatalf("exit code = %d", code)
-	}
-	if pfmcall.ExitDialogOpen(session.out.all()) {
-		t.Fatal("an exit dialog appeared with no background work to stop")
-	}
-}
-
 func TestClaudeCrashStepExitsMidTurnWithItsCode(t *testing.T) {
 	fix := newFixture(t)
 	t.Chdir(fix.work)
@@ -327,81 +254,35 @@ func TestClaudeCrashStepExitsMidTurnWithItsCode(t *testing.T) {
 	}
 }
 
-func TestClaudeHoldStaysBusyUntilTheGateFileIsGone(t *testing.T) {
-	fix := newFixture(t)
-	t.Chdir(fix.work)
-	gate := filepath.Join(fix.root, "gate")
-	if err := os.WriteFile(gate, nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	fix.write(Scenario{SessionID: fixtureSession, BusyMS: intPtr(0), Steps: []Step{
-		{Type: StepHold, UntilGone: gate},
-		{Type: StepTurn, Reply: "released"},
-	}})
-	session := fix.startTUI("claude", claudeArgs(), nil)
-	session.waitFrame("the composer", func(frame string) bool { return strings.Contains(frame, "❯") })
-	session.typeLine("wait for me")
-	session.waitFrame("busy while the gate exists", pfmcall.IsBusy)
-	time.Sleep(400 * time.Millisecond)
-	if frame := session.out.frame(); !pfmcall.IsBusy(frame) || strings.Contains(frame, "released") {
-		t.Fatalf("the hold released before the gate went:\n%s", frame)
-	}
-	if err := os.Remove(gate); err != nil {
-		t.Fatal(err)
-	}
-	session.waitFrame("the reply once the gate is gone", func(frame string) bool {
-		return !pfmcall.IsBusy(frame) && strings.Contains(frame, "released")
-	})
-}
-
-// TestClaudeHoldAbortsOnANonAbsenceStatError covers F3: a stat failure that
-// is not the gate's confirmed absence (here ENOTDIR, a component of the path
-// is a regular file) must abort the hold with a named failure, never release
-// it the way a genuine removal does.
-func TestClaudeHoldAbortsOnANonAbsenceStatError(t *testing.T) {
-	fix := newFixture(t)
-	t.Chdir(fix.work)
-	notADir := filepath.Join(fix.root, "not-a-dir")
-	if err := os.WriteFile(notADir, nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	gate := filepath.Join(notADir, "gate")
-	fix.write(Scenario{SessionID: fixtureSession, BusyMS: intPtr(0), Steps: []Step{
-		{Type: StepHold, UntilGone: gate},
-		{Type: StepTurn, Reply: "unreachable"},
-	}})
-	session := fix.startTUI("claude", claudeArgs(), nil)
-	session.waitFrame("the composer", func(frame string) bool { return strings.Contains(frame, "❯") })
-	session.typeLine("wait for me")
-	if code := session.waitExit(); code != ExitUnpinned {
-		t.Fatalf("exit = %d, want %d (a non-absence stat error aborts the hold)", code, ExitUnpinned)
-	}
-	if !strings.Contains(session.stderr.String(), "hold") {
-		t.Fatalf("stderr = %q, want it to name the failed hold", session.stderr.String())
-	}
-}
-
 func TestClaudeResumeAppendsToTheSameTranscript(t *testing.T) {
-	fix := newFixture(t)
-	t.Chdir(fix.work)
-	fix.write(Scenario{BusyMS: intPtr(0)})
-	first := fix.startTUI("claude", claudeArgs("--session-id", fixtureSession), nil)
-	first.waitFrame("the composer", func(frame string) bool { return strings.Contains(frame, "❯") })
-	first.typeLine("one")
-	first.waitFrame("the first reply", func(frame string) bool { return strings.Contains(frame, DefaultReply) })
-	first.typeLine("/exit")
-	if code := first.waitExit(); code != 0 {
-		t.Fatalf("first exit = %d", code)
-	}
-	second := fix.startTUI("claude", claudeArgs("--resume", fixtureSession), nil)
-	second.waitFrame("the resumed composer", func(frame string) bool { return strings.Contains(frame, "❯") })
-	second.typeLine("two")
-	second.waitFrame("the second reply", func(frame string) bool { return strings.Contains(frame, DefaultReply) })
-	if meta := readMeta(t, fix.claudeTranscript(fixtureSession)); meta.HumanPrompts != 2 {
-		t.Fatalf("resumed transcript ReadMeta = %+v, want 2 human prompts in one file", meta)
-	}
-	if rows := fix.indexedTranscripts(); len(rows) != 1 || rows[0].PromptCount != 2 || rows[0].LastPrompt != "two" {
-		t.Fatalf("indexed = %+v, want one row with both prompts", rows)
+	for _, args := range [][]string{{"--resume", fixtureSession}, {"--continue"}, {"-c"}} {
+		t.Run(args[0], func(t *testing.T) {
+			fix := newFixture(t)
+			t.Chdir(fix.work)
+			fix.write(Scenario{BusyMS: intPtr(0), Steps: []Step{{Type: StepTurn}, {Type: StepTurn}}})
+			first := fix.startTUI("claude", claudeArgs("--session-id", fixtureSession), nil)
+			first.waitFrame("the composer", func(frame string) bool { return strings.Contains(frame, "❯") })
+			first.typeLine("one")
+			first.waitFrame("the first reply", func(frame string) bool { return strings.Contains(frame, DefaultReply) })
+			first.typeLine("/exit")
+			if code := first.waitExit(); code != 0 {
+				t.Fatalf("first exit = %d", code)
+			}
+			second := fix.startTUI("claude", claudeArgs(args...), nil)
+			second.waitFrame("the resumed composer", func(frame string) bool { return strings.Contains(frame, "❯") })
+			second.typeLine("two")
+			second.waitFrame(
+				"the second reply",
+				func(frame string) bool { return strings.Contains(frame, DefaultReply) },
+			)
+			if meta := readMeta(t, fix.claudeTranscript(fixtureSession)); meta.HumanPrompts != 2 {
+				t.Fatalf("resumed transcript ReadMeta = %+v, want 2 human prompts in one file", meta)
+			}
+			if rows := fix.indexedTranscripts(); len(rows) != 1 || rows[0].PromptCount != 2 ||
+				rows[0].LastPrompt != "two" {
+				t.Fatalf("indexed = %+v, want one row with both prompts", rows)
+			}
+		})
 	}
 }
 
@@ -422,82 +303,17 @@ func TestClaudeSessionIDFlagNamesTheTranscript(t *testing.T) {
 	}
 }
 
-func TestClaudeHeadlessEnvelopeIsReadByPfmsOwnRunner(t *testing.T) {
-	fix := newFixture(t)
-	fix.write(Scenario{SessionID: fixtureSession, BusyMS: intPtr(0), Steps: []Step{
-		{Type: StepTurn, Reply: "forty-two", Tokens: &Tokens{Input: 11, Output: 4, CacheRead: 100, CacheCreation: 9}},
-		{Type: StepTurn, Structured: json.RawMessage(`{"ok":true}`)},
-	}})
-	machine := pfmconfig.Config{
-		Claude:   pfmconfig.ClaudePrefs{Binary: "claude"},
-		Accounts: []pfmconfig.Account{{ID: 1, ConfigDir: fix.configDir}},
-	}
-	result, err := run.Run(context.Background(), run.Request{
-		Config:  machine,
-		Engine:  pfmengine.Claude,
-		Prompt:  "what is the answer",
-		CWD:     fix.work,
-		Timeout: 20 * time.Second,
-	})
-	if err != nil {
-		t.Fatalf("headless run: %v (stdout=%q stderr=%q)", err, result.Stdout, result.Stderr)
-	}
-	if result.Answer != "forty-two" || result.ExitCode != 0 || result.IsError {
-		t.Fatalf("result = %+v", result)
-	}
-	if result.Usage == nil || result.Usage.Input != 11 || result.Usage.Output != 4 ||
-		result.Usage.CachedInput != 100 || result.Usage.CacheCreation != 9 {
-		t.Fatalf("usage = %+v, want the step's tokens through modelUsage", result.Usage)
-	}
-	if result.TotalCostUSD == nil || *result.TotalCostUSD <= 0 {
-		t.Fatalf("total cost = %v, want a positive receipt", result.TotalCostUSD)
-	}
-	if meta := readMeta(t, fix.claudeTranscript(fixtureSession)); meta.HumanPrompts != 1 {
-		t.Fatalf("a headless turn left no transcript: %+v", meta)
-	}
-
-	structured, err := run.Run(context.Background(), run.Request{
-		Config: machine, Engine: pfmengine.Claude, Prompt: "shape it", CWD: fix.work, Timeout: 20 * time.Second,
-		Schema: json.RawMessage(`{"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"]}`),
-	})
-	if err != nil {
-		t.Fatalf("structured headless run: %v (stdout=%q)", err, structured.Stdout)
-	}
-	if string(structured.StructuredOutput) != `{"ok":true}` {
-		t.Fatalf("structured_output = %s", structured.StructuredOutput)
-	}
-}
-
-func TestClaudeHeadlessNoSessionPersistenceWritesNoTranscript(t *testing.T) {
-	fix := newFixture(t)
-	fix.write(Scenario{SessionID: fixtureSession, BusyMS: intPtr(0)})
-	machine := pfmconfig.Config{
-		Claude:   pfmconfig.ClaudePrefs{Binary: "claude"},
-		Accounts: []pfmconfig.Account{{ID: 1, ConfigDir: fix.configDir}},
-	}
-	result, err := run.Run(context.Background(), run.Request{
-		Config: machine, Engine: pfmengine.Claude, Prompt: "ephemeral", CWD: fix.work,
-		Timeout: 20 * time.Second, NoSessionPersistence: true,
-	})
-	if err != nil || result.Answer != DefaultReply {
-		t.Fatalf("result=%+v err=%v", result, err)
-	}
-	if _, err := os.Stat(fix.claudeTranscript(fixtureSession)); !os.IsNotExist(err) {
-		t.Fatalf("a --no-session-persistence run wrote a transcript (stat err=%v)", err)
-	}
-}
-
 func TestClaudeInlineTurnsKeepThePositionalCursor(t *testing.T) {
 	for _, row := range []struct {
 		name, directive, reply string
 		refused                bool
 	}{
 		{"object", `{"type":"turn","reply":"R1"}`, "R1", false},
-		{"compact", `{"type":"compact"}`, "fallback", false},
-		{"unknown type", `{"type":"nope"}`, "unknown step type", true},
-		{"broken JSON", `{"type":`, "", true},
-		{"unknown field", `{"type":"turn","delay":3}`, "unknown field", true},
-		{"trailing JSON", `{"type":"turn"} {}`, "", true},
+		{"compact", `[{"type":"compact"},{"type":"turn","reply":"fallback"}]`, "fallback", false},
+		{"unknown type", `{"type":"nope"}`, `step 0: unknown step type "nope"`, true},
+		{"broken JSON", `{"type":`, "decode step: unexpected EOF", true},
+		{"unknown field", `{"type":"turn","delay":3}`, `decode step: json: unknown field "delay"`, true},
+		{"trailing JSON", `{"type":"turn"} {}`, "unexpected JSON after inline steps", true},
 	} {
 		t.Run(row.name, func(t *testing.T) {
 			fix := newFixture(t)
@@ -509,6 +325,18 @@ func TestClaudeInlineTurnsKeepThePositionalCursor(t *testing.T) {
 			session.waitFrame("the composer", func(frame string) bool { return strings.Contains(frame, "❯") })
 			prompt := "hi mock-engine: " + row.directive
 			session.typeLine(prompt)
+			if row.refused {
+				code := session.waitExit()
+				expected := "mock-engine: inline steps refused — " + row.reply + "\n"
+				if code != ExitUnpinned || session.stderr.String() != expected {
+					t.Fatalf("refusal=(%d,%q), want (%d,%q)", code, session.stderr.String(), ExitUnpinned, expected)
+				}
+				entries := parsedEntries(t, fix.claudeTranscript(fixtureSession))
+				if len(entries) != 1 || entries[0].Text != prompt {
+					t.Fatalf("refused transcript=%+v, want submitted prompt only", entries)
+				}
+				return
+			}
 			frame := session.waitFrame("a completed turn", func(frame string) bool {
 				return !pfmcall.IsBusy(frame) && strings.Contains(frame, "⏺ ")
 			})
@@ -563,7 +391,8 @@ func TestClaudeInlineArrayAndQueuedPromptsHaveTheirOwnSteps(t *testing.T) {
 		}
 	}
 	entries := parsedEntries(t, fix.claudeTranscript(fixtureSession))
-	if len(entries) != 6 || entries[0].Text != first || entries[2].Text != second || entries[5].Text != "positional" {
+	if len(entries) != 7 || entries[0].Text != first || entries[1].Role != "tool" || entries[1].Tool != "Agent" ||
+		entries[3].Text != second || entries[6].Text != "positional" {
 		t.Fatalf("queued transcript = %+v", entries)
 	}
 	sidechains, err := filepath.Glob(
@@ -576,212 +405,6 @@ func TestClaudeInlineArrayAndQueuedPromptsHaveTheirOwnSteps(t *testing.T) {
 		t.Fatalf("queued cursor=%q, want only the plain turn consumed", got)
 	}
 }
-
-func TestClaudeInlineHeadlessEnvelopeIsReadByPfmsOwnRunner(t *testing.T) {
-	for _, directive := range []string{`{"type":"turn","reply":"H1","structured":{"word":"w"}}`, `{"type":"nope"}`, `{"type":`} {
-		t.Run(directive, func(t *testing.T) {
-			fix := newFixture(t)
-			fix.write(
-				Scenario{
-					SessionID: fixtureSession,
-					BusyMS:    intPtr(0),
-					Steps:     []Step{{Type: StepTurn, Reply: "positional"}},
-				},
-			)
-			machine := pfmconfig.Config{
-				Claude:   pfmconfig.ClaudePrefs{Binary: "claude"},
-				Accounts: []pfmconfig.Account{{ID: 1, ConfigDir: fix.configDir}},
-			}
-			prompt := "headless mock-engine: " + directive
-			var schema json.RawMessage
-			if strings.Contains(directive, "H1") {
-				schema = json.RawMessage(`{"type":"object","properties":{"word":{"type":"string"}}}`)
-			}
-			result, err := run.Run(context.Background(), run.Request{
-				Config: machine, Engine: pfmengine.Claude, Prompt: prompt, CWD: fix.work, Timeout: 20 * time.Second,
-				Schema: schema,
-			})
-			if err != nil || result.ExitCode != 0 || result.IsError {
-				t.Fatalf("inline headless=%+v err=%v", result, err)
-			}
-			if strings.Contains(directive, "H1") {
-				if result.Answer != "H1" || string(result.StructuredOutput) != `{"word":"w"}` {
-					t.Fatalf("inline envelope=%+v", result)
-				}
-			} else if !strings.HasPrefix(result.Answer, "mock-engine: inline steps refused — ") {
-				t.Fatalf("refusal=%q", result.Answer)
-			}
-			if _, err := os.Stat(fix.scenario + cursorSuffix); !os.IsNotExist(err) {
-				t.Fatalf("headless inline consumed the positional cursor: %v", err)
-			}
-			entries := parsedEntries(t, fix.claudeTranscript(fixtureSession))
-			if len(entries) != 2 || entries[0].Text != prompt {
-				t.Fatalf("headless records=%+v", entries)
-			}
-		})
-	}
-}
-
-func TestClaudeMCPStepCallsPfmsOwnServer(t *testing.T) {
-	for _, fileConfig := range []bool{false, true} {
-		t.Run(fmt.Sprint(fileConfig), func(t *testing.T) {
-			fix := newFixture(t)
-			t.Chdir(fix.work)
-			executable, err := os.Executable()
-			if err != nil {
-				t.Fatal(err)
-			}
-			identityFile := filepath.Join(fix.recordDir, "mcp-identity")
-			config := string(mustJSON(t, map[string]any{"mcpServers": map[string]any{"chat-professor": map[string]any{
-				"type": "stdio", "command": "sh", "args": []string{
-					"-c",
-					fmt.Sprintf(
-						`printf '%%s\n' "$TMUX" "$TMUX_PANE" "$CLAUDE_CODE_SESSION_ID" "$PWD" > %q; exec "$@"`,
-						identityFile,
-					),
-					"fixture",
-					executable,
-					verbsStdioProfessorArg,
-				},
-			}}}))
-			if fileConfig {
-				path := filepath.Join(fix.root, "mcp.json")
-				if err := os.WriteFile(path, []byte(config), 0o600); err != nil {
-					t.Fatal(err)
-				}
-				config = path
-			}
-			fix.write(Scenario{SessionID: fixtureSession, BusyMS: intPtr(0)})
-			session := fix.startTUI(
-				"claude",
-				claudeArgs("--mcp-config", config),
-				map[string]string{"TMUX": "/fixture/cc-fixture,42,0", "TMUX_PANE": "%7"},
-			)
-			session.waitFrame("the composer", func(frame string) bool { return strings.Contains(frame, "❯") })
-			session.typeLine("violet archive fixture")
-			session.waitFrame("the seed reply", func(frame string) bool { return strings.Contains(frame, "⏺ ok") })
-			fix.indexedTranscripts()
-			session.typeLine(
-				fmt.Sprintf(
-					`query mock-engine: [{"type":"mcp","tool":"last","input":{"target":%q}},{"type":"turn","reply":"MCP finished"}]`,
-					fixtureSession,
-				),
-			)
-			session.waitFrame(
-				"the MCP reply",
-				func(frame string) bool { return strings.Contains(frame, "⏺ MCP finished") },
-			)
-			result := readFile(t, filepath.Join(fix.recordDir, "mcp-call-last.json"))
-			if !strings.Contains(result, fixtureSession) || !strings.Contains(result, `"text":"ok"`) {
-				t.Fatalf("pfm's tools/call answer=%s", result)
-			}
-			var uses, results int
-			for _, line := range strings.Split(strings.TrimSpace(readFile(t, fix.claudeTranscript(fixtureSession))), "\n") {
-				var record struct {
-					Message struct{ Content json.RawMessage }
-				}
-				if err := json.Unmarshal([]byte(line), &record); err != nil {
-					t.Fatal(err)
-				}
-				if len(record.Message.Content) == 0 || record.Message.Content[0] != '[' {
-					continue
-				}
-				var parts []contentPart
-				if err := json.Unmarshal(record.Message.Content, &parts); err != nil {
-					t.Fatal(err)
-				}
-				for _, part := range parts {
-					if part.Type == "tool_use" && part.Name == "last" {
-						uses++
-					}
-					if part.Type == "tool_result" && strings.Contains(part.Content, fixtureSession) && !part.IsError {
-						results++
-					}
-				}
-			}
-			if uses != 1 || results != 1 {
-				t.Fatalf("tool records: use=%d result=%d", uses, results)
-			}
-			if got := readFile(
-				t,
-				identityFile,
-			); got != "/fixture/cc-fixture,42,0\n%7\n"+fixtureSession+"\n"+fix.work+"\n" {
-				t.Fatalf("MCP child identity=%q", got)
-			}
-		})
-	}
-}
-
-func TestClaudeMCPFailuresAreToolResultsAndKeepThePaneLive(t *testing.T) {
-	for _, row := range []struct{ name, config, tool, cause string }{
-		{"missing server", `{"mcpServers":{}}`, "last", "professor"},
-		{"broken config", `{`, "last", "decode"},
-		{"spawn", `{"mcpServers":{"chat-professor":{"command":"/tmp/mockengine-command-absent"}}}`, "last", "initialize"},
-		{"call", "", "unknown_fixture_tool", "tools/call"},
-	} {
-		t.Run(row.name, func(t *testing.T) {
-			fix := newFixture(t)
-			t.Chdir(fix.work)
-			config := row.config
-			if config == "" {
-				executable, err := os.Executable()
-				if err != nil {
-					t.Fatal(err)
-				}
-				config = string(
-					mustJSON(
-						t,
-						map[string]any{
-							"mcpServers": map[string]any{
-								"chat-professor": map[string]any{
-									"command": executable,
-									"args":    []string{verbsStdioProfessorArg},
-								},
-							},
-						},
-					),
-				)
-			}
-			fix.write(
-				Scenario{SessionID: fixtureSession, BusyMS: intPtr(0), Steps: []Step{{Type: StepMCP, Tool: row.tool}}},
-			)
-			session := fix.startTUI("claude", claudeArgs("--mcp-config", config), nil)
-			session.waitFrame("the composer", func(frame string) bool { return strings.Contains(frame, "❯") })
-			session.typeLine("call the tool")
-			session.waitFrame(
-				"the turn after the failed tool",
-				func(frame string) bool { return strings.Contains(frame, "⏺ ok") },
-			)
-			content := readFile(t, fix.claudeTranscript(fixtureSession))
-			if !strings.Contains(content, `"is_error":true`) || !strings.Contains(content, row.cause) {
-				t.Fatalf("failure result lacks %q: %s", row.cause, content)
-			}
-			session.typeLine("still alive")
-			waitFile(
-				t,
-				fix.claudeTranscript(fixtureSession),
-				func(content string) bool { return strings.Contains(content, "still alive") },
-			)
-		})
-	}
-}
-
-func TestClaudeMCPWithoutAToolKeepsItsNamedRefusal(t *testing.T) {
-	fix := newFixture(t)
-	t.Chdir(fix.work)
-	fix.write(Scenario{Steps: []Step{{Type: StepMCP}}})
-	session := fix.startTUI("claude", claudeArgs(), nil)
-	session.waitFrame("the composer", func(frame string) bool { return strings.Contains(frame, "❯") })
-	session.typeLine("handshake")
-	if code := session.waitExit(); code != ExitUnpinned ||
-		!strings.Contains(session.stderr.String(), "claude MCP client calls are not scripted here") {
-		t.Fatalf("exit=%d stderr=%q", code, session.stderr.String())
-	}
-}
-
-// quietCommands is a closed CommandRunner: a statusline render in this test
-// never shells out to git.
-type quietCommands struct{}
 
 func (quietCommands) Output(context.Context, string, ...string) ([]byte, error) {
 	return nil, os.ErrNotExist

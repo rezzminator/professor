@@ -67,7 +67,7 @@ _pfm_owns_terminal() {
 
 # _pfm_own_terminal <status> — the terminal belongs to the harness that was typed into it, so
 # a harness that ENDS takes the terminal with it (the VS Code tab closes) instead of falling
-# back to a prompt nobody asked for. Three guards keep it from eating anything else: only an
+# back to a prompt nobody asked for. Guards keep it from eating anything else: only an
 # interactive shell on a real tty is ever ended, so a script, a Bash-tool shell and a piped
 # run return untouched; only a caller that actually ran a harness calls it, so the picker
 # (pfm) still escapes to the prompt on Esc; and a NON-ZERO exit holds the terminal for a
@@ -75,6 +75,8 @@ _pfm_owns_terminal() {
 # exit while jobs are suspended is the right refusal, and is left alone.
 _pfm_own_terminal() {
   local exit_status="${1:-0}"
+  # Native Herdr seat hosts close their own panes; a birth elsewhere leaves this caller alone.
+  [[ "${HERDR_ENV:-}" == 1 && -z "${TMUX:-}" ]] && return "$exit_status"
   _pfm_owns_terminal || return "$exit_status"
   # A bare terminal or a bunker pane exists to hold a harness, so it goes when the harness
   # goes. Inside any OTHER tmux — a chat pane, an ad-hoc work window — the terminal is

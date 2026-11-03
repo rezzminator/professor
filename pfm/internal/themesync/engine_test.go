@@ -369,6 +369,16 @@ func TestOnReadBackOffRoundTrip(t *testing.T) {
 	if !off.OK() || off.Enabled {
 		t.Fatalf("Off = %+v, want every surface restored", off)
 	}
+	if state := h.state(); off.Generation != 2 || state.Generation != 2 {
+		t.Fatalf("on/off generation = report %d state %d, want exactly 2", off.Generation, state.Generation)
+	}
+	again, err := Off(context.Background(), h.env)
+	if err != nil || again.Generation != 2 || h.state().Generation != 2 {
+		t.Fatalf(
+			"already-disabled off = %+v, %v, stored generation %d; want exactly 2",
+			again, err, h.state().Generation,
+		)
+	}
 	wantVerdict(t, off, "claude", VerdictSource, "never written")
 	if got := h.read(settingsRel) + h.read(tokyoNightRel); got != claudeBefore {
 		t.Error("the Claude settings or theme file changed across on and off")

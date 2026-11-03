@@ -16,7 +16,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/reload"
 	"github.com/rezzminator/professor/pfm/internal/statusline"
-	"github.com/rezzminator/professor/pfm/internal/usagehook"
 )
 
 var statuslineCodexOptions = func() statusline.CodexOptions {
@@ -169,27 +168,5 @@ func runUsageHookWithRuntime(
 	runtime commandRuntime,
 	env paths.Env,
 ) int {
-	env = defaultEnv(env)
-	flags := cli.NewFlagSet("usage-hook", "usage: pfm usage-hook", stderr)
-	if code, ok := cli.ParseFlags(flags, args); !ok {
-		return code
-	}
-	if flags.NArg() != 0 {
-		flags.Usage()
-		return 2
-	}
-	id, _ := statusline.EngineFromEnvironment(env.Get)
-	if id == pfmengine.Codex {
-		return 0
-	}
-	accountDirs := make(map[string]int, len(runtime.Config.Accounts))
-	for _, account := range runtime.Config.Accounts {
-		accountDirs[account.ConfigDir] = account.ID
-	}
-	return hookentry.UsageHook(stdout, stderr, usagehook.Options{
-		AccountDirs:  accountDirs,
-		Version:      runtime.Version,
-		ClaudeBinary: runtime.Config.Claude.Binary,
-		Offline:      paths.UsageOffline(),
-	})
+	return hookentry.UsageHookEntry(args, os.Stdin, stdout, stderr, runtime, env)
 }

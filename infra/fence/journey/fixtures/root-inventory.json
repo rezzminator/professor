@@ -1,0 +1,18 @@
+{
+  "shell": "zsh",
+  "terminal": {"linux": "herdr-shield", "macos": "herdr-native"},
+  "shell_start": "home",
+  "workspaces": ["~", "atlas", "beacon", "cobalt"],
+  "workspace_states": {"misnamed-exclusive": "atlas-exclusive", "mixed": "atlas-beacon-mixed"},
+  "projects": ["atlas", "beacon", "cobalt"],
+  "nested": ["atlas/docs/specs", "atlas/.worktrees/flight-export", "atlas-worktrees/flight-review", "atlas/plugins/lantern", "atlas/bench/report-desk"],
+  "claude_accounts": [1, 2, 3],
+  "claude_themes": {"1":"aurora", "2":"paper-lantern", "3":"cobalt-dazzle"},
+  "claude_function_hook_modules": true,
+  "codex_homes": [1],
+  "opencode_accounts": [],
+  "tmux_session": "owner",
+  "sentinel": {"name": "foreign-sentinel", "project": "cobalt", "engine": "claude", "account": 3},
+  "previous_release": "v0.86.0",
+  "historical_residue": {"stats_cache_link": {"account": 1, "shared_target": "legacy/stats-cache.json"}}
+}

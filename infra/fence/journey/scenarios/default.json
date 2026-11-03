@@ -1,0 +1,1 @@
+{"pane":{"busy":"Working (1s · esc to interrupt) · esc interrupt","compacted":"Context compacted","composer":"FIXTURE-OPENCODE-PROMPT"},"rate_limits":{"primary":{"usedPercent":12,"windowDurationMins":300,"resetsAt":4102444800},"secondary":{"usedPercent":34,"windowDurationMins":10080,"resetsAt":4102444800},"planType":"plus"},"jail":{"sid_dir":"/tmp/cc-sid"}}

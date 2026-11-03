@@ -97,6 +97,7 @@ func (model Model) updateCosmosKey(key string) (tea.Model, tea.Cmd) {
 	case keyDown, "j":
 		model.moveCosmosSelection(1)
 	case "enter":
+		model.action("picker.cosmos", nil)
 		return model.openCosmosSelection()
 	case "s":
 		model.cycleCosmosFocus()
@@ -112,7 +113,10 @@ func (model Model) updateCosmosKey(key string) (tea.Model, tea.Cmd) {
 		model.toggleCosmosPlay()
 	case "n":
 		model.cosmosReturnToNow()
+	default:
+		return model, nil
 	}
+	model.action("picker.cosmos", nil)
 	return model, nil
 }
 

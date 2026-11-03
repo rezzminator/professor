@@ -1,0 +1,6 @@
+{
+  "type": "session.compacted",
+  "properties": {
+    "sessionID": "ses_atlas01"
+  }
+}

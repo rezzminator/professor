@@ -129,7 +129,7 @@ func answerCodexPluginCLI(proc *process) int {
 			err = os.WriteFile(
 				path,
 				[]byte(
-					`{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"printf fixture"}]}],"UserPromptSubmit":[{"hooks":[{"type":"command","command":"printf fixture"}]}],"SubagentStart":[{"hooks":[{"type":"command","command":"printf fixture"}]}]}}`,
+					`{"hooks":{"SessionStart":[{"hooks":[{"type":"command",keyCommand:"printf fixture"}]}],"UserPromptSubmit":[{"hooks":[{"type":"command",keyCommand:"printf fixture"}]}],"SubagentStart":[{"hooks":[{"type":"command",keyCommand:"printf fixture"}]}]}}`,
 				),
 				0o600,
 			)

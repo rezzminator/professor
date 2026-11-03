@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -654,7 +655,7 @@ func switchCaseStringLiterals(body *ast.BlockStmt) map[string]bool {
 }
 
 // findFuncDecl parses main.go once and returns the *ast.FuncDecl body for
-// name — "run" or "runInternal", the two functions topLevelSubcommands and
+// name — "run" or "runInternalInput", the two functions topLevelSubcommands and
 // internalSubcommands must stay in lockstep with.
 func findFuncDecl(t *testing.T, name string) *ast.BlockStmt {
 	t.Helper()
@@ -690,12 +691,12 @@ func TestTopLevelSubcommandsReachTheirHandler(t *testing.T) {
 
 // Advertised internal subcommands must reach their dispatcher handlers.
 func TestInternalSubcommandsReachTheirHandler(t *testing.T) {
-	body := findFuncDecl(t, "runInternal")
+	body := findFuncDecl(t, "runInternalInput")
 	comparisons := argsZeroStringLiterals(body)
 	for _, name := range internalSubcommands {
 		if !comparisons[name] {
 			t.Fatalf(
-				"internalSubcommands names %q, but runInternal's if-chain never compares args[0] against it — it falls through to \"pfm internal: unknown subcommand\"",
+				"internalSubcommands names %q, but runInternalInput's if-chain never compares args[0] against it — it falls through to \"pfm internal: unknown subcommand\"",
 				name,
 			)
 		}
@@ -865,4 +866,101 @@ func stageStorePlugins(t *testing.T, home string) {
 		t.Fatal(err)
 	}
 	testjail.StageClaudePlugins(t, storeDir, ids)
+}
+
+func TestHelpOperations(t *testing.T) {
+	jailTest(t)
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"help", "--ops"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("help --ops code = %d, stderr = %q", code, stderr.String())
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("help --ops stderr = %q, want empty", got)
+	}
+	operations := strings.Split(strings.TrimSuffix(stdout.String(), "\n"), "\n")
+	var roots []string
+	for _, operation := range operations {
+		if strings.HasPrefix(operation, "pfm ") && len(strings.Fields(operation)) == 2 {
+			roots = append(roots, operation)
+		}
+	}
+	wantRoots := []string{
+		"pfm archive",
+		"pfm chat",
+		"pfm config",
+		"pfm doctor",
+		"pfm generate",
+		"pfm headless",
+		"pfm heal",
+		"pfm index",
+		"pfm init",
+		"pfm install",
+		"pfm log",
+		"pfm ls",
+		"pfm mcp",
+		"pfm model-cost",
+		"pfm name-sync",
+		"pfm reap",
+		"pfm restart",
+		"pfm statusline",
+		"pfm theme",
+		"pfm tokens",
+		"pfm transcript",
+		"pfm uninstall",
+		"pfm update",
+		"pfm usage-hook",
+		"pfm version",
+		"pfm whoami",
+	}
+	if !reflect.DeepEqual(roots, wantRoots) {
+		t.Fatalf("help --ops public commands = %#v, want %#v", roots, wantRoots)
+	}
+	for _, row := range []struct {
+		prefix string
+		want   []string
+	}{
+		{"hook.claude.", []string{
+			"hook.claude.Notification.herdr-notification",
+			"hook.claude.PermissionRequest.herdr-blocked",
+			"hook.claude.PostToolUse.herdr-working-tool",
+			"hook.claude.PostToolUseFailure.herdr-working-tool-failure",
+			"hook.claude.PreToolUse.git-guard",
+			"hook.claude.PreToolUse.pcm-guard",
+			"hook.claude.PreToolUse.store-guard",
+			"hook.claude.SessionEnd.clear-kill",
+			"hook.claude.SessionEnd.exit-close",
+			"hook.claude.SessionEnd.herdr-end",
+			"hook.claude.SessionStart.clear-name-start",
+			"hook.claude.SessionStart.herdr-start",
+			"hook.claude.SessionStart.launcher-repair",
+			"hook.claude.SessionStart.resume-unkill",
+			"hook.claude.Stop.herdr-idle",
+			"hook.claude.SubagentStart.herdr-agent-start",
+			"hook.claude.SubagentStart.rr-dir",
+			"hook.claude.SubagentStop.herdr-agent-stop",
+			"hook.claude.UserPromptSubmit.clear-name-prompt",
+			"hook.claude.UserPromptSubmit.epic-inject",
+			"hook.claude.UserPromptSubmit.exit-intercept",
+			"hook.claude.UserPromptSubmit.herdr-working-prompt",
+			"hook.claude.UserPromptSubmit.reload-intercept",
+			"hook.claude.UserPromptSubmit.usage",
+		}},
+		{"pfm config", []string{"pfm config", "pfm config claude", "pfm config init", "pfm config show", "pfm config validate"}},
+		{"pfm chat schedule", []string{"pfm chat schedule", "pfm chat schedule ls", "pfm chat schedule rm", "pfm chat schedule set"}},
+		{"pfm update", []string{"pfm update", "pfm update accept", "pfm update adopt", "pfm update check", "pfm update drop", "pfm update ignore", "pfm update pin"}},
+		{"pfm theme", []string{"pfm theme", "pfm theme check", "pfm theme list", "pfm theme off", "pfm theme on", "pfm theme status", "pfm theme sync", "pfm theme use"}},
+		{"pfm mcp", []string{"pfm mcp", "pfm mcp chat disable", "pfm mcp chat enable", "pfm mcp ls", "pfm mcp serve"}},
+		{"pfm transcript", []string{"pfm transcript", "pfm transcript agents", "pfm transcript locate", "pfm transcript show"}},
+		{"mcp__chat-professor__", []string{"mcp__chat-professor__call", "mcp__chat-professor__capture", "mcp__chat-professor__exit", "mcp__chat-professor__keys", "mcp__chat-professor__kill", "mcp__chat-professor__last", "mcp__chat-professor__ls", "mcp__chat-professor__name", "mcp__chat-professor__new", "mcp__chat-professor__open", "mcp__chat-professor__resolve", "mcp__chat-professor__save", "mcp__chat-professor__status", "mcp__chat-professor__unkill", "mcp__chat-professor__whoami"}},
+	} {
+		var got []string
+		for _, operation := range operations {
+			if strings.HasPrefix(operation, row.prefix) {
+				got = append(got, operation)
+			}
+		}
+		if !reflect.DeepEqual(got, row.want) {
+			t.Fatalf("help --ops prefix %q = %#v, want %#v", row.prefix, got, row.want)
+		}
+	}
 }

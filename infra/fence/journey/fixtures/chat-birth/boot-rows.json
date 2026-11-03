@@ -1,0 +1,32 @@
+[
+  {
+    "factors": "trust_dialog_rows=unnumbered,engine=claude_code,spawn_order=readiness_before_trust",
+    "kind": "trust",
+    "scenario": {"trust_dialog_unnumbered": true},
+    "confirm": "❯ Yes, I trust this folder",
+    "cancel": "No, exit"
+  },
+  {
+    "factors": "launch_state=folder_trust_dialog,backend=tmux_remain_on_exit,engine=claude_code",
+    "kind": "trust",
+    "scenario": {"trust_dialog": true},
+    "confirm": "❯ 1. Yes, I trust this folder",
+    "cancel": "2. No, exit",
+    "remain_on_exit": true
+  },
+  {
+    "factors": "process_group=private_pgid,descendant_state=holds_stdout_pipe,helper=codex_app_server",
+    "kind": "stdout",
+    "scenario": {}
+  },
+  {
+    "factors": "last_pane=closed,backend=tmux,child_exit=before_waiter_connects",
+    "kind": "waiter",
+    "scenario": {"startup_exit_code": 23}
+  },
+  {
+    "factors": "launcher_exit=before_wait_registered,backend=tmux_wait_for",
+    "kind": "waiter",
+    "scenario": {"startup_exit_code": 23}
+  }
+]

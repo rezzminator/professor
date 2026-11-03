@@ -1,0 +1,21 @@
+fixture	source	provenance
+turn.json	merged/beats.md turn-works-then-idles	Synthetic deterministic reply; tool/hold/turn are mockengine Scenario.Step fields.
+question.json	merged/beats.md question-blocks and answer-unblocks	Synthetic choices and answer; native question shape is owned by mockengine.
+permission.json	merged/beats.md permission-blocks and permission-answered-unblocks	Synthetic requested file bytes; only the approving engine writes them.
+subagent.json	pfm/internal/mockengine/testdata/hooks/claude/Stop.json and SubagentStop.json	Recorded-schema keys retained; fixture identities and runtime path bindings are synthetic.
+notification.json	pfm/internal/hookentry/herdr_seat_test.go task notification turn; mockengine Claude hook fixtures	Documented prompt-shaped task notification, never a fabricated is-task-notification key.
+failure.json	merged/beats.md turn-fails-shows-error	Synthetic API error; native failure delivery is owned by mockengine.
+rows.tsv	docs/design/pfm-integration-suite/beats.md	Build-time extraction of retained canonical branches; no claim of execution.
+state.py	public observation.terminal; naming.ClipRunes24	Actual pane tokens sampled through the public reader; tmux names compared independently to fixture display names.
+sibling.json	mockengine recorded PostToolUse + existing subagent fixture	Two actual native sidechain starts; unrelated sibling PostToolUse delivered during owning permission chooser. Owning blocked fingerprint is compared before and after actual sibling stop.
+interrupted.json	mockengine recorded PostToolUseFailure.json	is_interrupt=true and runtime identity bindings, delivered natively while chooser stays open.
+agent.json	mockengine foreground Agent contract	Normal Agent owner entry with nested deterministic child prompt and runtime hold gate; generated native agent identity is not preseeded.
+ghost.json	mockengine background shell + native task-notification prompt	A real held child completes while notification/Stop delivery settles; live child count is read from the public activity observer.
+denied.json	mockengine Claude answerAttention(false)	Native Escape denies without firing a tool-result hook; working/idle and cleared blocked owner are observed through public state readers.
+trust-reader.json	mockengine trust_dialog contract and chat_dispatch.go stream default-follow	A distinct actual held-trust role is streamed through a separate shell; exact exit6/error, unchanged frame/birth, then user1 acceptance followed by normal question/answer.
+legacy-codex.json	mockengine Codex denied permission contract	Native tmux launch staged through an actual Herdr owner; native seat and display pane are observed independently.
+large.json	mockengine Bash/tool receipt contract; ruling-c10-split-hangup-order-unit-tier	Actual engine-child shell returns 1048577 bytes through the registered native PostToolUse hook; receipt hash is independently specified.
+native-idle-detection.json	Herdr bundled Claude live_prompt_box detection; ruling-c08-native-detector-via-agent-explain	Exact public detector fields and actual matched-rule metadata; raw full responses are retained alongside projections.
+previous_settings.py	root previous-install account artifacts; faults.preserved_file	Scoped exact prior-install launch input and recorded version/hash; active account contents restored even if launch fails.
+indicator_setup.py	public projects.worktree; chat shell/scenario/capture	Genuine independent linked worktree and public Claude launch; no birth worktree or invented carry is reused.
+previous-agent.json	mockengine background Agent inline-child contract	Native Agent PreToolUse/SubagentStart, real main Stop before gated child permission, native result and SubagentStop; actual generated agent ID comes from its sidechain.

@@ -1,0 +1,1 @@
+[{"type":"notification","notification_type":"plugin_notification","message":"Plugin needs attention"},{"type":"hold","until_gone":"$HOLD"},{"type":"turn","reply":"plugin notification settled","busy_ms":1}]

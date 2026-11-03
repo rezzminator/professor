@@ -7,9 +7,53 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/reload"
 )
+
+func TestClaudeContinueSelectsLatestEligibleSession(t *testing.T) {
+	for _, row := range []struct{ name, newer, want string }{
+		{"latest", `{"type":"user","message":{"role":"user","content":"new"}}`, "new"},
+		{"sdk", `{"type":"user","entrypoint":"sdk-cli","message":{"role":"user","content":"new"}}`, "old"},
+		{"loop", `{"type":"user","message":{"role":"user","content":"/loop watch"}}`, "old"},
+		{"sidechain", `{"type":"user","isSidechain":true,"message":{"role":"user","content":"new"}}`, "old"},
+		{"empty", `{"type":"system"}`, "old"},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			directory := t.TempDir()
+			for index, item := range []struct{ name, record string }{
+				{"old", `{"type":"user","message":{"role":"user","content":"prior"}}`},
+				{"new", row.newer},
+			} {
+				path := filepath.Join(directory, item.name+".jsonl")
+				if err := os.WriteFile(path, []byte(item.record+"\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				at := time.Unix(int64(index+1), 0)
+				if err := os.Chtimes(path, at, at); err != nil {
+					t.Fatal(err)
+				}
+			}
+			got, err := latestClaudeSession(directory)
+			if err != nil || got != row.want {
+				t.Fatalf("continue %s=%q, %v; want %q", directory, got, err, row.want)
+			}
+		})
+	}
+	fix := newFixture(t)
+	t.Chdir(fix.work)
+	fix.write(Scenario{})
+	session := fix.startTUI(engineClaude, claudeArgs("--continue"), nil)
+	if code := session.waitExit(); code != ExitUsage ||
+		session.stderr.String() != "mock-engine: No conversation found to continue\n" {
+		t.Fatalf(
+			"continue empty directory exit=%d stderr=%q; want 2 and native no-conversation error",
+			code,
+			session.stderr.String(),
+		)
+	}
+}
 
 func TestClaudeTranscriptTitlePrecedenceAndErrors(t *testing.T) {
 	fix := newFixture(t)

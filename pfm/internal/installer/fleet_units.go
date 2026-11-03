@@ -27,6 +27,11 @@ func unitStateRunning(state string) (running, known bool) {
 }
 
 func fleetUnitState(ctx context.Context, runner CommandRunner, unit string) (string, error) {
+	names, err := servicemanager.CurrentUnitNames()
+	if err != nil {
+		return "", err
+	}
+	unit = names.Name(unit)
 	args := []string{"show", "--property=ActiveState", "--value", unit}
 	reader, ok := runner.(OutputRunner)
 	if !ok {
@@ -41,8 +46,13 @@ func fleetUnitState(ctx context.Context, runner CommandRunner, unit string) (str
 }
 
 func verifyFleetUnitsActive(ctx context.Context, runner CommandRunner, units []string) error {
+	names, err := servicemanager.CurrentUnitNames()
+	if err != nil {
+		return err
+	}
 	var failures []error
 	for _, unit := range units {
+		unit = names.Name(unit)
 		state, err := fleetUnitState(ctx, runner, unit)
 		if err != nil {
 			failures = append(failures, fmt.Errorf("fleet unit %s state unreadable after start: %w", unit, err))

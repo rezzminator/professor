@@ -78,6 +78,12 @@ func launchNative(
 	// The supervisor, not a birth-door process, applies the saved ledger policy.
 	environment = append(environment, paths.EnvStateDB+"="+runtime.Paths.StateDB)
 	ctx := context.Background()
+	if choice.InPlace {
+		if choice.InPlace, err = spawn.HerdrOpensInPlace(ctx, runtime.Paths, &choice, cwd); err != nil {
+			fmt.Fprintf(stderr, "pfm internal launch: place native chat: %v\n", err)
+			return 1
+		}
+	}
 	birth := spawn.HerdrRequest{
 		Choice: choice,
 		Paths:  runtime.Paths,

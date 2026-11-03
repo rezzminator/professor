@@ -64,11 +64,11 @@ func (installer *engine) ensureLaunchdLogDir() error {
 
 // launchAgentPath returns where macOS expects a per-user agent to live.
 func (installer *engine) launchAgentPath() string {
-	return filepath.Join(paths.LaunchAgentsDir(installer.options.Home), launchdLabel+".plist")
+	return filepath.Join(paths.LaunchAgentsDir(installer.options.Home), installer.names.Name(launchdLabel+".plist"))
 }
 
 func (installer *engine) mcpLaunchAgentPath() string {
-	return filepath.Join(paths.LaunchAgentsDir(installer.options.Home), mcpLaunchdLabel+".plist")
+	return filepath.Join(paths.LaunchAgentsDir(installer.options.Home), installer.names.Name(mcpLaunchdLabel+".plist"))
 }
 
 // wireLaunchAgent installs the macOS half of the name-sync scheduler.
@@ -195,6 +195,7 @@ func (installer *engine) reloadLaunchAgent(ctx context.Context, path string, pli
 // that is the one outcome where the installer left the host worse than it
 // found it, and it must never read like a plain "not loaded".
 func (installer *engine) reloadLaunchAgentWithLabel(ctx context.Context, path, label string, plistChanged bool) error {
+	label = installer.names.Name(label)
 	launchd := installer.launchd()
 	domain := servicemanager.Domain(launchd.UID)
 	loaded := launchd.Print(ctx, label).OK()

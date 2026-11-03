@@ -2,8 +2,11 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/hookentry"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
@@ -20,7 +23,12 @@ func TestRunInternalRecordsEveryDispatchUnderTheHooksComponent(t *testing.T) {
 	if code := runInternal([]string{"hook-from-a-newer-pfm"}, &stdout, &stderr, commandRuntime{}); code != 1 {
 		t.Fatalf("unknown exit = %d", code)
 	}
-	records := recorder.Records()
+	var records []obs.Record
+	for _, record := range recorder.Records() {
+		if record.Message != "action.start" {
+			records = append(records, record)
+		}
+	}
 	if len(records) != 2 {
 		t.Fatalf("records = %d, want one per dispatch: %s", len(records), recorder.Raw())
 	}
@@ -48,5 +56,44 @@ func TestRunInternalRecordsEveryDispatchUnderTheHooksComponent(t *testing.T) {
 	}
 	if exit, _ := records[1].Field(obs.FieldExit); exit != float64(1) {
 		t.Fatalf("unknown subcommand exit = %v, want 1", exit)
+	}
+	directory := t.TempDir()
+	t.Setenv(hookentry.EnvHookCaptureDir, directory)
+	t.Run("capture read failure", func(t *testing.T) {
+		input, err := os.Create(filepath.Join(t.TempDir(), "closed-input"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := input.Close(); err != nil {
+			t.Fatal(err)
+		}
+		previous := os.Stdin
+		os.Stdin = input
+		t.Cleanup(func() { os.Stdin = previous })
+		var output, warning bytes.Buffer
+		code := runInternal([]string{"store-guard"}, &output, &warning, commandRuntime{})
+		want := "capture store-guard hook input: read: read " + input.Name() + ": file already closed\n"
+		if code != 1 || output.String() != "" || warning.String() != want {
+			t.Fatalf(
+				"capture failure = (%d, %q, %q), want (1, empty, %q)",
+				code,
+				output.String(),
+				warning.String(),
+				want,
+			)
+		}
+	})
+	const payload = " {\"hook_event_name\":\"PreToolUse\",\"session_id\":\"atlas\",\"tool_name\":\"Read\"}\n"
+	code, output, warning := runInternalHookPayload(t, "store-guard", payload)
+	if code != 0 || output != "" || warning != "" {
+		t.Fatalf("captured hook = (%d, %q, %q), want (0, empty, empty)", code, output, warning)
+	}
+	files, err := filepath.Glob(filepath.Join(directory, "*.json"))
+	if err != nil || len(files) != 1 {
+		t.Fatalf("%s: captures = %v, %v; want one event", directory, files, err)
+	}
+	raw, err := os.ReadFile(files[0])
+	if err != nil || string(raw) != payload {
+		t.Fatalf("%s = %q, %v; want %q", files[0], raw, err, payload)
 	}
 }

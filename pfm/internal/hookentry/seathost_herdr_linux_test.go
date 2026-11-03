@@ -60,6 +60,15 @@ func newSeatHostHerdr(t *testing.T, roots ...string) *fakeHerdr {
 				switch req.Method {
 				case "ping":
 					result = map[string]any{"type": "pong", "version": "fixture", "protocol": 22}
+				case "workspace.list":
+					result, _ = testjail.HerdrWorkspaceReply(req.Method, "", "w6")
+					label := "~"
+					if len(roots) > 0 {
+						label = filepath.Base(roots[0])
+					}
+					result["workspaces"] = []any{
+						map[string]any{"workspace_id": "w6", "label": label, "pane_count": 1},
+					}
 				case "pane.get":
 					result = testjail.HerdrPaneInfo(pane)
 					result["pane"].(map[string]any)["terminal_id"] = "stable-terminal"

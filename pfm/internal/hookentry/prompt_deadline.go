@@ -8,7 +8,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/cli"
+	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/statusline"
 	"github.com/rezzminator/professor/pfm/internal/usagehook"
 )
 
@@ -188,4 +193,44 @@ func (c *promptHookCommits) closeAndWait(grace time.Duration) (waited, finished 
 	case <-wait.Done():
 		return true, false
 	}
+}
+
+// UsageHookEntry is the public usage hook's capture, validation and evaluation door.
+func UsageHookEntry(
+	args []string,
+	stdin io.Reader,
+	stdout, stderr io.Writer,
+	runtime config.Runtime,
+	env paths.Env,
+) int {
+	if env == nil {
+		env = paths.OSEnv{}
+	}
+	if _, err := CaptureHookInput([]string{"usage-hook"}, stdin, env); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+
+	flags := cli.NewFlagSet("usage-hook", "usage: pfm usage-hook", stderr)
+	if code, ok := cli.ParseFlags(flags, args); !ok {
+		return code
+	}
+	if flags.NArg() != 0 {
+		flags.Usage()
+		return 2
+	}
+	id, _ := statusline.EngineFromEnvironment(env.Get)
+	if id == pfmengine.Codex {
+		return 0
+	}
+	accountDirs := make(map[string]int, len(runtime.Config.Accounts))
+	for _, account := range runtime.Config.Accounts {
+		accountDirs[account.ConfigDir] = account.ID
+	}
+	return UsageHook(stdout, stderr, usagehook.Options{
+		AccountDirs:  accountDirs,
+		Version:      runtime.Version,
+		ClaudeBinary: runtime.Config.Claude.Binary,
+		Offline:      paths.UsageOffline(),
+	})
 }

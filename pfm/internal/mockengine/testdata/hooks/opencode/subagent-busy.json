@@ -1,0 +1,9 @@
+{
+  "type": "session.status",
+  "properties": {
+    "sessionID": "ses_child_atlas",
+    "status": {
+      "type": "busy"
+    }
+  }
+}

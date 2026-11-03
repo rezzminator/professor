@@ -22,7 +22,11 @@ func TestClaudeQuietKeepsThePaneAndTranscriptWithoutAnnouncingTheSeat(t *testing
 		"PreToolUse": commandHook(`cat >> "` + fix.recordDir + `/project-pre.jsonl"`),
 	})
 	fix.write(
-		Scenario{SessionID: fixtureSession, BusyMS: intPtr(0), Steps: []Step{{Type: StepToolCall, Tool: "Agent"}}},
+		Scenario{
+			SessionID: fixtureSession,
+			BusyMS:    intPtr(0),
+			Steps:     []Step{{Type: StepToolCall, Tool: "Agent"}, {Type: StepTurn}},
+		},
 	)
 	setScenarioField(t, fix, "quiet", true)
 	if code, _, stderr := runOnce(fix, "claude", []string{"--version"}, ""); code != 0 {

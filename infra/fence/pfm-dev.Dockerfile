@@ -13,7 +13,7 @@ FROM ubuntu:24.04@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffb
 # cgo): CGO_ENABLED stays 0 below, so every build stays static, and the gate's
 # race step (infra/fence/checks.sh checks_pfm_race) turns cgo on for itself.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl git jq make zsh tmux python3 python3-yaml xz-utils rsync sqlite3 tcpdump iproute2 \
+    ca-certificates curl git jq make zsh tmux openssh-server python3 python3-yaml python3-pyte xz-utils rsync sqlite3 tcpdump iproute2 \
     libgl1 libglib2.0-0 libxcb1 \
     gcc libc6-dev \
  && rm -rf /var/lib/apt/lists/*

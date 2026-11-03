@@ -19,9 +19,75 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/mockengine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
+
+const harnessCaptureMockArg = "mockengine-harness-capture"
+
+func init() {
+	if len(os.Args) > 1 && os.Args[1] == harnessCaptureMockArg {
+		os.Exit(mockengine.Main(context.Background(), "claude", os.Args[2:], os.Stdin, os.Stdout, os.Stderr, os.Getenv))
+	}
+}
+
+func TestHarnessCaptureReadsMockEngineRequests(t *testing.T) {
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	binary := filepath.Join(root, "claude")
+	t.Setenv("MOCK_ENGINE_CAPTURE_HELPER", executable)
+	t.Setenv(mockengine.EnvScenario, "")
+	t.Setenv(mockengine.EnvEngine, "")
+	if err := testjail.WriteExecutable(
+		binary,
+		[]byte("#!/bin/sh\nexec \"$MOCK_ENGINE_CAPTURE_HELPER\" "+harnessCaptureMockArg+" \"$@\"\n"),
+		0o700,
+	); err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range []struct{ alias, model, baseline string }{
+		{"sonnet", "claude-sonnet-5-5", "harness-original-v2.1.316.md"},
+		{"opus", "claude-opus-5-5", "harness-opus-v2.1.316.md"},
+	} {
+		t.Run(row.alias, func(t *testing.T) {
+			verbose := t.TempDir()
+			machine := config.Config{}
+			machine.Claude.Binary = binary
+			capture, err := captureHarnessPrompt(t.Context(), root, machine, row.alias, verbose)
+			if err != nil {
+				t.Fatalf("doctor mock capture failed: %v", err)
+			}
+			baseline := filepath.Join("..", "..", "harness-prompts", "claude", "baselines", row.baseline)
+			expected, err := os.ReadFile(baseline)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if capture.Prompt != string(expected) || capture.ResolvedModel != row.model ||
+				capture.CLIVersion != "2.1.270 (Claude Code)" {
+				t.Fatalf(
+					"%s: capture model=%q cli=%q prompt-match=%v, want model=%q cli=2.1.270 (Claude Code) exact recorded baseline",
+					baseline,
+					capture.ResolvedModel,
+					capture.CLIVersion,
+					capture.Prompt == string(expected),
+					row.model,
+				)
+			}
+			hits := filepath.Join(verbose, "sink-hits-"+row.alias+".txt")
+			actual, err := os.ReadFile(hits)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(actual) != "TOTAL_HITS 1\nPOST /v1/messages\n" {
+				t.Fatalf("%s: sink hits=%q, want TOTAL_HITS 1\\nPOST /v1/messages\\n", hits, actual)
+			}
+		})
+	}
+}
 
 // writeFakeHarnessClaude stages a shell `claude` stand-in used only by the
 // capture regression tests in this file. It never touches a network endpoint

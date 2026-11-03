@@ -1,0 +1,12 @@
+golden	key	status	source	basis
+stats-cache.json	version	observed	$HOME/.cc/2/stats-cache.json	schema observed; values synthetic seeded fixture
+stats-cache.json	lastComputedDate	observed	$HOME/.cc/2/stats-cache.json	schema observed; values synthetic seeded fixture
+stats-cache.json	dailyActivity	observed	$HOME/.cc/2/stats-cache.json	schema observed; values synthetic seeded fixture
+stats-cache.json	dailyModelTokens	observed	$HOME/.cc/2/stats-cache.json	schema observed; values synthetic seeded fixture
+stats-cache.json	dailyModelTokensVersion	observed	$HOME/.cc/2/stats-cache.json	schema observed; values synthetic seeded fixture
+stats-cache.json	modelUsage	observed	$HOME/.cc/2/stats-cache.json	schema observed; values synthetic seeded fixture
+stats-cache.json	totalSessions	observed	$HOME/.cc/2/stats-cache.json	schema observed; values synthetic seeded fixture
+stats-cache.json	totalMessages	observed	$HOME/.cc/2/stats-cache.json	schema observed; values synthetic seeded fixture
+stats-cache.json	longestSession	observed	$HOME/.cc/2/stats-cache.json	schema observed; values synthetic seeded fixture
+stats-cache.json	firstSessionDate	observed	$HOME/.cc/2/stats-cache.json	schema observed; values synthetic seeded fixture
+stats-cache.json	hourCounts	observed	$HOME/.cc/2/stats-cache.json	schema observed; values synthetic seeded fixture

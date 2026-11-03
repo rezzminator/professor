@@ -1,0 +1,1 @@
+[{"type":"question","message":"Pick a target","options":["atlas","beacon"],"selected":1},{"type":"hold","until_gone":"$HOLD"},{"type":"turn","reply":"target 2","busy_ms":1}]

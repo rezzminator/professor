@@ -90,7 +90,7 @@ const installFix = "run pfm install --yes"
 // the theme sync is off is out of install's reach (install refreshes it only
 // while the sync is on), so `pfm theme off` removes it, or with no sync state
 // at all nothing pfm runs owns it any more.
-func launcherFix(home, label, path string) string {
+func launcherFix(home, label, path string, names servicemanager.UnitNames) string {
 	if label != themesync.FollowerLabel {
 		return installFix
 	}
@@ -101,7 +101,7 @@ func launcherFix(home, label, path string) string {
 	if _, err := os.Lstat(filepath.Join(stateDir, themesync.StateFileName)); err == nil {
 		return "run pfm theme off"
 	}
-	return "run launchctl bootout " + servicemanager.ShellTarget(label) + ", then remove " + path
+	return "run launchctl bootout " + servicemanager.ShellTarget(names.Name(label)) + ", then remove " + path
 }
 
 // LaunchAgentLauncherDrift lists every pfm launch agent under home whose
@@ -109,10 +109,14 @@ func launcherFix(home, label, path string) string {
 // agents exist and it is missing or not what install writes. agents counts the
 // plists examined; a plist that cannot be parsed is a finding, never skipped.
 func LaunchAgentLauncherDrift(home string) (agents int, findings []LauncherFinding) {
+	names, err := servicemanager.CurrentUnitNames()
+	if err != nil {
+		return 0, []LauncherFinding{{Path: paths.LaunchAgentsDir(home), Detail: err.Error(), Fix: installFix}}
+	}
 	want := agentlauncher.Program(home)
 	for _, label := range pfmLaunchAgentLabels {
-		path := filepath.Join(paths.LaunchAgentsDir(home), label+".plist")
-		fix := launcherFix(home, label, path)
+		path := filepath.Join(paths.LaunchAgentsDir(home), names.Name(label+".plist"))
+		fix := launcherFix(home, label, path, names)
 		info, err := os.Lstat(path)
 		if errors.Is(err, fs.ErrNotExist) {
 			continue

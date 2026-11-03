@@ -8,6 +8,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/servicemanager"
 )
 
@@ -186,7 +187,10 @@ func TestPrintServiceManagerDoctorDisabledInConfigNeverProbes(t *testing.T) {
 	if warnings := printServiceManagerDoctor(context.Background(), &output, nil, runtime); warnings != 0 {
 		t.Fatalf("disabled-in-config reported %d warnings, output=%q", warnings, output.String())
 	}
-	manager, unit := serviceManagerIdentity()
+	manager, unit, err := serviceManagerIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
 	want := "doctor: service-manager=" + manager + " unit=" + unit + " disabled-in-config\n"
 	if output.String() != want {
 		t.Fatalf("output = %q, want %q", output.String(), want)
@@ -205,4 +209,25 @@ func TestServiceManagerForPicksTheKindsRows(t *testing.T) {
 			t.Fatalf("serviceManagerFor(%s) = %q, want %q", kind, got, want)
 		}
 	}
+	t.Run("namespace", func(t *testing.T) {
+		t.Setenv(paths.EnvUnitPrefix, "journey-atlas")
+		for kind, want := range map[servicemanager.Kind][2]string{
+			servicemanager.KindSystemd: {"journey-atlas-mcp.service", "journey-atlas-schedule.timer"},
+			servicemanager.KindLaunchd: {"com.professor.journey-atlas.mcp", "com.professor.journey-atlas.schedule"},
+		} {
+			probe := serviceManagerFor(kind)
+			var asked []string
+			probe.probeUnit = func(_ context.Context, _ deps.Runner, unit string) serviceManagerUnitState {
+				asked = append(asked, unit)
+				return serviceManagerUnitState{Unit: unit}
+			}
+			runner := &deps.FakeRunner{}
+			runner.ScriptLookPath(probe.binary, "/fixture/"+probe.binary, nil)
+			probe.service(context.Background(), runner)
+			probe.schedule(context.Background(), runner)
+			if got := strings.Join(asked, ","); got != strings.Join(want[:], ",") {
+				t.Fatalf("%s asked %q, want %q", kind, got, strings.Join(want[:], ","))
+			}
+		}
+	})
 }

@@ -292,9 +292,7 @@ func TestScopedRunnerScopesLookPathToTheBoundContext(t *testing.T) {
 	if len(records) != 2 {
 		t.Fatalf("records = %d, want 2: %s", len(records), recorder.Raw())
 	}
-	if _, found := records[0].Field(FieldChat); found {
-		t.Fatalf("Runner(next)'s LookPath carried a scope it was never given: %v", records[0].Fields)
-	}
+	requireField(t, records[0], FieldChat, "")
 	requireField(t, records[1], FieldChat, "cc-42")
 }
 

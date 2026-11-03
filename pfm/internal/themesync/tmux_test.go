@@ -77,6 +77,60 @@ func TestTmuxPriorOptionNameAndSentinel(t *testing.T) {
 	}
 }
 
+type partialDiscoveryTmux struct {
+	*fakeTmux
+	shows []string
+}
+
+func (fake *partialDiscoveryTmux) Sockets(context.Context) ([]string, error) {
+	return []string{"stopped", "healthy"}, errors.New("fixture discovery unreadable")
+}
+
+func (fake *partialDiscoveryTmux) Show(ctx context.Context, socket, name string) (string, error) {
+	fake.shows = append(fake.shows, socket+"/"+name)
+	if socket == "stopped" {
+		return "", gather.ErrServerUnresponsive
+	}
+	return fake.fakeTmux.Show(ctx, socket, name)
+}
+
+func TestTmuxPartialDiscoveryKeepsHealthyServers(t *testing.T) {
+	for _, tc := range []struct {
+		operation, style, theme, detail string
+	}{
+		{"apply", "bg=#221634,fg=#ff9ed6", "custom:tokyo-night", "themesync: list tmux servers: fixture discovery unreadable\n1 of 2 servers failed: tmux stopped: tmux server did not answer"},
+		{"read", "bg=#221634,fg=#ff9ed6", "custom:tokyo-night", "themesync: list tmux servers: fixture discovery unreadable; tmux stopped: read status-style: tmux server did not answer"},
+		{"restore", "bg=green,fg=black", "", "themesync: list tmux servers: fixture discovery unreadable; tmux stopped: tmux server did not answer"},
+	} {
+		t.Run(tc.operation, func(t *testing.T) {
+			ctx := context.Background()
+			fake := &partialDiscoveryTmux{fakeTmux: newFakeTmux("healthy")}
+			applied := tokyoNightApplied(t)
+			s := &session{servers: fake, state: themeState{Applied: &applied, Appearance: Dark, Generation: 3}}
+			if tc.operation != "apply" {
+				if err := s.tmuxApplySocket(ctx, "healthy"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			fake.shows = nil
+			operation := map[string]func(context.Context) SurfaceResult{"apply": s.applyTmux, "read": s.readTmux, "restore": s.restoreTmux}[tc.operation]
+			result := operation(ctx)
+			if got := fake.servers["healthy"]["status-style"]; got != tc.style {
+				t.Errorf("healthy status-style = %q, want %q", got, tc.style)
+			}
+			if got := fake.servers["healthy"][tmuxThemeKey]; got != tc.theme {
+				t.Errorf("healthy theme = %q, want %q", got, tc.theme)
+			}
+			if len(fake.shows) == 0 || fake.shows[0] != "healthy/status-style" {
+				t.Errorf("first server read = %q, want healthy/status-style", fake.shows)
+			}
+			if result.Verdict != VerdictError || result.Detail != tc.detail {
+				t.Errorf("partial discovery result = %#v, want ERROR detail %q", result, tc.detail)
+			}
+		})
+	}
+}
+
 // The real gather probe executes vectors sequentially, not as an atomic batch.
 // Its executable fixture persists each option before the next vector can fail.
 type prefixFaultTmux struct {

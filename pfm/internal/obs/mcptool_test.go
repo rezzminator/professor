@@ -76,7 +76,7 @@ func TestToolRecordsNameTargetArgumentShapeResultShapeAndDurationNeverAValue(t *
 		t.Fatalf("the wrapper changed the input: %+v", seen)
 	}
 
-	record := onlyRecord(t, recorder)
+	record := toolResultRecord(t, recorder)
 	if record.Message != "mcp.call" || record.Level != slog.LevelInfo.String() {
 		t.Fatalf("record = %s %s, want INFO mcp.call", record.Level, record.Message)
 	}
@@ -116,7 +116,7 @@ func TestToolRecordsAHandlerErrorAtErrorLevelCappedAtTheFieldLimit(t *testing.T)
 	if result.StructuredContent != nil {
 		t.Fatalf("zero output gained structured content: %+v", result.StructuredContent)
 	}
-	record := onlyRecord(t, recorder)
+	record := toolResultRecord(t, recorder)
 	if record.Level != slog.LevelError.String() {
 		t.Fatalf("a failed tool logged at %s, want ERROR", record.Level)
 	}
@@ -145,7 +145,7 @@ func TestToolWarnsWhenTheResultItselfIsAnError(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	record := onlyRecord(t, recorder)
+	record := toolResultRecord(t, recorder)
 	if record.Level != slog.LevelWarn.String() {
 		t.Fatalf("an IsError result logged at %s, want WARN", record.Level)
 	}
@@ -179,7 +179,7 @@ func TestToolKeepsTypedOutputBesideAHandlerError(t *testing.T) {
 	if string(encoded) != `{"status":"dead"}` {
 		t.Fatalf("structuredContent = %s", encoded)
 	}
-	record := onlyRecord(t, recorder)
+	record := toolResultRecord(t, recorder)
 	if record.Level != slog.LevelError.String() {
 		t.Fatalf("level = %s", record.Level)
 	}
@@ -203,7 +203,7 @@ func TestToolKeepsJSONRPCErrorAsProtocolError(t *testing.T) {
 	if err == nil || result != nil {
 		t.Fatalf("call = %+v, %v; want protocol error without result", result, err)
 	}
-	record := onlyRecord(t, recorder)
+	record := toolResultRecord(t, recorder)
 	if record.Level != slog.LevelError.String() {
 		t.Fatalf("level = %s", record.Level)
 	}
@@ -236,7 +236,7 @@ func TestToolRecoversAPanicIntoAnErrorRecordAndSurvives(t *testing.T) {
 	if result == nil || !result.IsError {
 		t.Fatalf("a panicking handler did not become a tool error: %+v", result)
 	}
-	record := onlyRecord(t, recorder)
+	record := toolResultRecord(t, recorder)
 	if record.Level != slog.LevelError.String() || record.Message != "mcp.call" {
 		t.Fatalf("record = %s %s, want ERROR mcp.call", record.Level, record.Message)
 	}
@@ -273,7 +273,7 @@ func TestToolNeverRecordsChatSaveTargetAsAChat(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	record := onlyRecord(t, recorder)
+	record := toolResultRecord(t, recorder)
 	if _, found := record.Field("target"); found {
 		t.Fatalf("save's file path was recorded as a target: %v", record.Fields)
 	}
@@ -316,4 +316,18 @@ func TestArgumentShapeCoversStructsPointersMapsAndScalars(t *testing.T) {
 	if got := targetOf(42); got != "" {
 		t.Fatalf("targetOf on a scalar = %q, want empty", got)
 	}
+}
+
+func toolResultRecord(t *testing.T, recorder *Recorder) Record {
+	t.Helper()
+	var records []Record
+	for _, record := range recorder.Records() {
+		if record.Message != "action.start" {
+			records = append(records, record)
+		}
+	}
+	if len(records) != 1 {
+		t.Fatalf("records=%v, want one mcp result: %s", records, recorder.Raw())
+	}
+	return records[0]
 }

@@ -1,0 +1,1529 @@
+landscape_id	row	reason
+lifecycle.install-stats-link	machine-lifecycle/install-after-stats-replaced-link@linux	live-only
+lifecycle.install	machine-lifecycle/install-over-live-chat@linux	crossing: live-only
+lifecycle.install-again	machine-lifecycle/install-again-changes-nothing@linux	live-only
+ops.doctor	machine-lifecycle/doctor-reads-clean@linux	live-only
+lifecycle.live-chat-upgrade	machine-lifecycle/live-chat-adopts-release@linux	live-only
+lifecycle.install	machine-lifecycle/install-keeps-going-after-bad-account-record@linux	live-only
+ops.doctor	machine-lifecycle/doctor-names-unreadable-probes@linux	live-only
+lifecycle.init	machine-lifecycle/init-preserves-owner-edits@linux	live-only
+ops.doctor	machine-lifecycle/doctor-names-staged-opencode-guard@linux	live-only
+ops.doctor	machine-lifecycle/forecast-herdr-shield-on-door-doctor@linux	live-only
+lifecycle.install	machine-lifecycle/forecast-multiplexer-herdr-runtime-event-install@linux	live-only
+lifecycle.install	machine-lifecycle/forecast-herdr-indicators-on-runtime-event-install@linux	live-only
+lifecycle.install	machine-lifecycle/forecast-process-table-procfs-root-install-phase-harvest-provision-process-state-harvester-running-superseded-env@linux	live-only
+lifecycle.install	machine-lifecycle/forecast-lock-holder-herdr-blinker-lock-painter-state-stale-executable-image-process-table-procfs-exe-reads@linux	live-only
+lifecycle.install	machine-lifecycle/forecast-service-manager-systemd-user-install-step-enable-now-timer-state-enabled-not-active@linux	live-only
+lifecycle.install	machine-lifecycle/forecast-service-manager-systemd-user-unit-state-inactive@linux	live-only
+lifecycle.install	machine-lifecycle/forecast-plugin-copy-retired-mark-present-chat-state-live-started-before-retirement-start-time-source-unavailable-on-platform@linux	live-only
+lifecycle.install	machine-lifecycle/forecast-stat-error-permission-denied-not-absent-product-root-vscode-app-dir-installer-record-recorded-extension-link@linux	live-only
+ops.doctor	machine-lifecycle/forecast-stat-flavor-bsd-stat-f-os-macos-temp-alias-var-to-private-var@linux	live-only; known gap: ruling:ruling-gap-forecast-tooling-unheld
+ops.doctor	machine-lifecycle/forecast-stat-flavor-bsd-stat-f-os-macos-temp-alias-var-to-private-var@macos	live-only; known gap: ruling:ruling-gap-forecast-tooling-unheld
+ops.doctor	tier-unit:forecast-tooling-psi-io-ambiguity	unit-tier holder: pfm/scripts/test-contention_test.sh I/O-pressure table
+lifecycle.install	machine-lifecycle/forecast-service-manager-systemd-user-unit-state-running-fire@linux	live-only
+lifecycle.install	machine-lifecycle/forecast-process-state-pid-reused-after-exit-process-table-linux-procfs-start-time-install-phase-install-during-launch@linux	live-only
+lifecycle.install	machine-lifecycle/forecast-os-linux-launch-phase-fork-before-exec-install-scan-concurrent-busy-check@linux	live-only
+lifecycle.install	machine-lifecycle/forecast-launch-claim-live-account-launch-install-mode-apply-busy-account-account-path-symlink-alias@linux	live-only
+ops.doctor	tier-unit:forecast-tooling-current-user-scratch	unit-tier holder: scripts/test-plugin-logs.sh user-owned scratch assertions
+lifecycle.install	machine-lifecycle/forecast-install-step-retired-plugin-copy-removal-engine-claude-code-chat-started-before-retirement-mark@linux	live-only
+lifecycle.install	machine-lifecycle/forecast-legacy-record-project-scope-stale-install-mode-pfm-update-engine-claude-code@linux	live-only
+lifecycle.install	machine-lifecycle/forecast-target-install-scope-project-only-legacy-entry-scope-user-engine-claude-code@linux	live-only
+ops.doctor	machine-lifecycle/forecast-pfm-exit-before-stdin-read-stdin-input-whole-buffer-written-host-vscode-extension-host@linux	live-only; known gap: ruling:ruling-gap-forecast-tooling-unheld
+ops.doctor	machine-lifecycle/forecast-pfm-exit-before-stdin-read-stdin-input-whole-buffer-written-host-vscode-extension-host@macos	live-only; known gap: ruling:ruling-gap-forecast-tooling-unheld
+lifecycle.install	machine-lifecycle/forecast-process-env-pfm-env-without-override-claude-env-overrides-state-path-engine-claude-code-plugin-hooks@linux	live-only
+ops.doctor	tier-unit:forecast-tooling-nested-remote-refs	unit-tier holder: scripts/test-leak-check.sh F9
+ops.doctor	tier-unit:forecast-vscode-independent-workspace-history	unit-tier holder: pfm/internal/installer/vscode_native_test.go independent workspace tests
+lifecycle.install	machine-lifecycle/forecast-binary-provenance-go-vcs-revision-git-state-rebased-onto-develop-install-history-rebased-preserved@linux	live-only
+lifecycle.install	machine-lifecycle/forecast-guard-proof-patch-id-only-git-history-rebased-upstream-installed-build-pre-rebase-commit@linux	live-only
+lifecycle.install	machine-lifecycle/forecast-job-state-retired-reminder-firing-scheduler-systemd-or-launchd-actor-pfm-install@linux	live-only
+lifecycle.install	machine-lifecycle/forecast-install-mode-apply-path-form-symlink-alias-config-home-symlinked-dir@linux	live-only
+lifecycle.install	machine-lifecycle/forecast-concurrent-actor-install-account-scan-launch-phase-fork-before-exec-lock-semantics-flock-open-file-description@linux	live-only
+lifecycle.install	machine-lifecycle/forecast-diagnostic-pfm-doctor-install-check-probe-config-dir-ambient-store-claude-auth-logged-out@linux	live-only
+ops.doctor	machine-lifecycle/forecast-process-owner-same-uid-pfm-serve-doctor-scan-mcp-serve-snapshot-process-state-zombie@linux	live-only
+lifecycle.install	machine-lifecycle/forecast-install-action-binary-replaced-painter-image-pre-install-binary-painter-lock-blinker-held@linux	live-only
+lifecycle.install	machine-lifecycle/forecast-chat-process-running-launch-state-claim-pending-install-state-rewiring-account@linux	live-only
+lifecycle.install	machine-lifecycle/forecast-host-no-account-roster-claude-process-plugin-install-on-store-claude-config-dir-store-without-roster@linux	live-only
+lifecycle.install	machine-lifecycle/forecast-config-dir-flag-set-roster-host-configured-config-dir-target-shared-store@linux	live-only
+ops.doctor	tier-unit:forecast-tooling-fence-mirror-staging	unit-tier holder: infra/fence/lanes/tests/checks_test.sh mirror staging assertions
+lifecycle.install	machine-lifecycle/forecast-flag-skip-harvest-retired-binary-new-install-updater-build-pre-harvest-move@linux	live-only
+ops.doctor	machine-lifecycle/forecast-herdr-server-absent-pane-env-outside-herdr-pane-backend-auto@linux	live-only
+ops.doctor	machine-lifecycle/forecast-herdr-default-shell-herdr-keep-herdr-resume-agents-on-restore-false-herdr-keep-doctor-refuses-to-guard@linux	live-only
+ops.doctor	machine-lifecycle/forecast-seat-setting-env-engine-sync-bin-pinned-claude-seat-store-plus-accounts-engine-sync-binaries-two-versions@linux	live-only
+lifecycle.install	machine-lifecycle/forecast-prune-guard-procfs-scan-process-state-harvester-sidecar-running-env-state-superseded-env-in-use@linux	live-only
+lifecycle.install	machine-lifecycle/forecast-install-mode-apply-scheduler-job-reminder-unit-running-os-linux@linux	live-only
+lifecycle.install	machine-lifecycle/forecast-herdr-default-shell-user-owned-install-state-wrapper-not-staged-pane-wrapper-herdr-keep@linux	live-only
+lifecycle.install	machine-lifecycle/forecast-install-env-tool-shell-bash-herdr-wrapper-uses-install-shell@linux	live-only
+lifecycle.install	machine-lifecycle/forecast-plugin-copies-two-enabled-engine-sync-ids-build-release-claude-plugin-state-enabled@linux	live-only
+lifecycle.install	machine-lifecycle/forecast-plugin-source-directory-marketplace-engine-claude-code-cache-state-snapshot-behind-checkout@linux	live-only
+lifecycle.install	machine-lifecycle/forecast-config-entry-retired-name-listed-plugin-source-github-copy-successor-pass-disables-copies@linux	live-only
+lifecycle.install	machine-lifecycle/forecast-engine-claude-code-record-state-disabled-older-version-marketplace-cache-stale-listing@linux	live-only
+lifecycle.install	machine-lifecycle/forecast-claude-lock-lexical-path-even-for-symlink-engine-claude-code-writer-pfm-fullscreen-auto-disable@linux	live-only
+lifecycle.install	machine-lifecycle/forecast-claude-lock-lexical-path-even-for-symlink-engine-claude-code-writer-pfm-mcp-cutover@linux	live-only
+lifecycle.install	machine-lifecycle/forecast-checkout-gitignored-typings-claude-code-build-regenerated-typings-plugin-snapshot-cache-copy-differs@linux	live-only
+lifecycle.install	machine-lifecycle/forecast-claude-read-path-plugin-folder-plugin-source-directory-marketplace-pfm-check-versioned-cache-compare@linux	live-only
+ops.doctor	tier-unit:forecast-tooling-fixture-git-hook-isolation	unit-tier holder: infra/fence/lanes/tests/steps_test.sh shtest_isolate_host
+ops.doctor	tier-unit:forecast-tooling-testjail-store-paths	unit-tier holder: pfm/internal/testjail/testjail_test.go TestRunKeepsTheStorePathsAJailedTestHandsItsHelper
+ops.doctor	tier-unit:forecast-vscode-foreign-window-lock	unit-tier holder: pfm/internal/installer/vscode_theme_lock_test.go TestVSCodeThemeLocksPreserveOtherWindows
+ops.doctor	tier-unit:forecast-vscode-remote-workspace-scope	unit-tier holder: VSCode workspace-scope tests
+ops.doctor	tier-unit:forecast-tooling-gone-worktree-volumes	unit-tier holder: infra/fence/lanes/tests/housekeeping_test.sh checkouts volume ownership
+ops.doctor	tier-unit:forecast-tooling-machine-policy-roster	unit-tier holder: scripts/check-agent-roster.test.mjs machine policy cases
+picker.open-herdr-tab	terminal-open/open-picker@linux+herdr-shield	live-only
+picker.open-typed	terminal-open/open-picker-typed@linux+herdr-shield	live-only
+picker.open-bash	terminal-open/open-picker-bash@linux+herdr-shield	live-only
+picker.auto-open-off	terminal-open/plain-shell-stays-plain@linux+herdr-shield	live-only
+picker.quit	terminal-open/picker-quit-leaves-shell@linux+herdr-shield	live-only
+picker.auto-open-off	terminal-open/forecast-pane-occupant-plain-shell-door-paint@linux+herdr-shield	live-only
+picker.auto-open-off	terminal-open/forecast-multiplexer-tmux-in-herdr-door-paint@linux+herdr-shield	live-only
+picker.open-typed	terminal-open/open-picker@linux+tmux	live-only
+picker.open-typed	terminal-open/open-picker-typed@linux+tmux	live-only
+picker.open-bash	terminal-open/open-picker-bash@linux+tmux	live-only
+picker.quit	terminal-open/picker-quit-leaves-shell@linux+tmux	live-only
+chat.new-storm	chat-birth/storm-of-births@linux+herdr-shield	live-only
+chat.new-picker	chat-birth/new-from-picker@linux+herdr-shield+project+claude	live-only
+herdr.restore	chat-birth/new-from-picker@linux+herdr-shield+project+claude	crossing: live-only
+chat.new-typed	chat-birth/new-typed@linux+herdr-shield+project+claude	live-only
+lifecycle.install	chat-birth/new-typed@linux+herdr-shield+project+claude	crossing: live-only
+chat.new-typed	chat-birth/new-typed-owner-label@linux+herdr-shield+project+claude	live-only
+lifecycle.install	chat-birth/new-typed-owner-label@linux+herdr-shield+project+claude	live-only
+chat.new-typed	chat-birth/new-typed-fresh-label@linux+herdr-shield+project+claude	live-only
+lifecycle.install	chat-birth/new-typed-fresh-label@linux+herdr-shield+project+claude	live-only
+chat.new-typed	chat-birth/new-typed-owner-label@macos+herdr-native+project+claude	live-only
+lifecycle.install	chat-birth/new-typed-owner-label@macos+herdr-native+project+claude	live-only
+chat.new-typed	chat-birth/new-typed-fresh-label@macos+herdr-native+project+claude	live-only
+lifecycle.install	chat-birth/new-typed-fresh-label@macos+herdr-native+project+claude	live-only
+chat.new-cli	chat-birth/new-from-cli@linux+herdr-shield+project+claude	live-only
+chat.ls-cli	chat-birth/new-from-cli@linux+herdr-shield+project+claude	crossing: live-only
+herdr.place-from-foreign-workspace	chat-birth/open-from-foreign-workspace@linux+herdr-shield+project+claude	live-only
+chat.name-cli	chat-birth/rename-from-cli@linux+herdr-shield+project+claude	live-only
+chat.name-mcp	chat-birth/rename-from-mcp@linux+herdr-shield+project+claude	live-only
+herdr.rename-inside-engine	chat-birth/rename-inside-engine-updates-tab@linux+herdr-shield+project+claude	live-only
+herdr.rename-replaced-session	chat-birth/rename-after-session-replaced@linux+herdr-shield+project+claude	live-only
+chat.new-typed	chat-birth/forecast-herdr-spawn@linux+herdr-shield+project+claude	live-only
+chat.new-picker	chat-birth/new-from-picker-fork-shell-start-home-workspace-state-named@linux+herdr-shield+project+claude	live-only
+herdr.restore	chat-birth/new-from-picker-fork-shell-start-home-workspace-state-named@linux+herdr-shield+project+claude	live-only
+chat.new-picker	chat-birth/new-from-picker-fork-shell-start-home-workspace-state-misnamed-exclusive@linux+herdr-shield+project+claude	live-only
+herdr.restore	chat-birth/new-from-picker-fork-shell-start-home-workspace-state-misnamed-exclusive@linux+herdr-shield+project+claude	live-only
+chat.new-picker	chat-birth/new-from-picker-fork-shell-start-home-workspace-state-mixed@linux+herdr-shield+project+claude	live-only
+herdr.restore	chat-birth/new-from-picker-fork-shell-start-home-workspace-state-mixed@linux+herdr-shield+project+claude	live-only
+chat.new-picker	chat-birth/new-from-picker-fork-shell-start-project-workspace-state-named@linux+herdr-shield+project+claude	live-only
+herdr.restore	chat-birth/new-from-picker-fork-shell-start-project-workspace-state-named@linux+herdr-shield+project+claude	live-only
+chat.new-picker	chat-birth/new-from-picker-fork-shell-start-project-workspace-state-misnamed-exclusive@linux+herdr-shield+project+claude	live-only
+herdr.restore	chat-birth/new-from-picker-fork-shell-start-project-workspace-state-misnamed-exclusive@linux+herdr-shield+project+claude	live-only
+chat.new-picker	chat-birth/new-from-picker-fork-shell-start-project-workspace-state-mixed@linux+herdr-shield+project+claude	live-only
+herdr.restore	chat-birth/new-from-picker-fork-shell-start-project-workspace-state-mixed@linux+herdr-shield+project+claude	live-only
+chat.new-typed	chat-birth/new-typed-fork-shell-start-home-workspace-state-named@linux+herdr-shield+project+claude	live-only
+lifecycle.install	chat-birth/new-typed-fork-shell-start-home-workspace-state-named@linux+herdr-shield+project+claude	live-only
+chat.new-typed	chat-birth/new-typed-fork-shell-start-home-workspace-state-misnamed-exclusive@linux+herdr-shield+project+claude	live-only
+lifecycle.install	chat-birth/new-typed-fork-shell-start-home-workspace-state-misnamed-exclusive@linux+herdr-shield+project+claude	live-only
+chat.new-typed	chat-birth/new-typed-fork-shell-start-home-workspace-state-mixed@linux+herdr-shield+project+claude	live-only
+lifecycle.install	chat-birth/new-typed-fork-shell-start-home-workspace-state-mixed@linux+herdr-shield+project+claude	live-only
+chat.new-typed	chat-birth/new-typed-fork-shell-start-project-workspace-state-named@linux+herdr-shield+project+claude	live-only
+lifecycle.install	chat-birth/new-typed-fork-shell-start-project-workspace-state-named@linux+herdr-shield+project+claude	live-only
+chat.new-typed	chat-birth/new-typed-fork-shell-start-project-workspace-state-misnamed-exclusive@linux+herdr-shield+project+claude	live-only
+lifecycle.install	chat-birth/new-typed-fork-shell-start-project-workspace-state-misnamed-exclusive@linux+herdr-shield+project+claude	live-only
+chat.new-typed	chat-birth/new-typed-fork-shell-start-project-workspace-state-mixed@linux+herdr-shield+project+claude	live-only
+lifecycle.install	chat-birth/new-typed-fork-shell-start-project-workspace-state-mixed@linux+herdr-shield+project+claude	live-only
+chat.new-cli	chat-birth/new-from-cli-fork-shell-start-home-workspace-state-named@linux+herdr-shield+project+claude	live-only
+chat.ls-cli	chat-birth/new-from-cli-fork-shell-start-home-workspace-state-named@linux+herdr-shield+project+claude	live-only
+chat.new-cli	chat-birth/new-from-cli-fork-shell-start-home-workspace-state-misnamed-exclusive@linux+herdr-shield+project+claude	live-only
+chat.ls-cli	chat-birth/new-from-cli-fork-shell-start-home-workspace-state-misnamed-exclusive@linux+herdr-shield+project+claude	live-only
+chat.new-cli	chat-birth/new-from-cli-fork-shell-start-home-workspace-state-mixed@linux+herdr-shield+project+claude	live-only
+chat.ls-cli	chat-birth/new-from-cli-fork-shell-start-home-workspace-state-mixed@linux+herdr-shield+project+claude	live-only
+chat.new-cli	chat-birth/new-from-cli-fork-shell-start-project-workspace-state-named@linux+herdr-shield+project+claude	live-only
+chat.ls-cli	chat-birth/new-from-cli-fork-shell-start-project-workspace-state-named@linux+herdr-shield+project+claude	live-only
+chat.new-cli	chat-birth/new-from-cli-fork-shell-start-project-workspace-state-misnamed-exclusive@linux+herdr-shield+project+claude	live-only
+chat.ls-cli	chat-birth/new-from-cli-fork-shell-start-project-workspace-state-misnamed-exclusive@linux+herdr-shield+project+claude	live-only
+chat.new-cli	chat-birth/new-from-cli-fork-shell-start-project-workspace-state-mixed@linux+herdr-shield+project+claude	live-only
+chat.ls-cli	chat-birth/new-from-cli-fork-shell-start-project-workspace-state-mixed@linux+herdr-shield+project+claude	live-only
+herdr.place-from-foreign-workspace	chat-birth/open-from-foreign-workspace-fork-shell-start-home-workspace-state-named@linux+herdr-shield+project+claude	live-only
+herdr.place-from-foreign-workspace	chat-birth/open-from-foreign-workspace-fork-shell-start-home-workspace-state-misnamed-exclusive@linux+herdr-shield+project+claude	live-only
+herdr.place-from-foreign-workspace	chat-birth/open-from-foreign-workspace-fork-shell-start-home-workspace-state-mixed@linux+herdr-shield+project+claude	live-only
+herdr.place-from-foreign-workspace	chat-birth/open-from-foreign-workspace-fork-shell-start-project-workspace-state-named@linux+herdr-shield+project+claude	live-only
+herdr.place-from-foreign-workspace	chat-birth/open-from-foreign-workspace-fork-shell-start-project-workspace-state-misnamed-exclusive@linux+herdr-shield+project+claude	live-only
+herdr.place-from-foreign-workspace	chat-birth/open-from-foreign-workspace-fork-shell-start-project-workspace-state-mixed@linux+herdr-shield+project+claude	live-only
+chat.name-cli	chat-birth/forecast-multiplexer-herdr-chat-name-unnamed@linux+herdr-shield+project+claude	live-only
+chat.name-cli	chat-birth/forecast-multiplexer-herdr-runtime-event-rename@linux+herdr-shield+project+claude	live-only
+chat.new-cli	chat-birth/forecast-pane-command-compound-shell-wrapper-engine-launch-child-of-wrapper-process-table-tty-scan@linux+herdr-shield+project+claude	live-only
+chat.ls-cli	chat-birth/forecast-pane-command-compound-shell-wrapper-engine-launch-child-of-wrapper-process-table-tty-scan@linux+herdr-shield+project+claude	live-only
+chat.new-cli	chat-birth/forecast-process-group-private-pgid-descendant-state-holds-stdout-pipe-helper-codex-app-server@linux+herdr-shield+project+codex	live-only
+chat.ls-cli	chat-birth/forecast-process-group-private-pgid-descendant-state-holds-stdout-pipe-helper-codex-app-server@linux+herdr-shield+project+codex	live-only
+chat.new-cli	chat-birth/forecast-rename-timing-before-session-registers-engine-claude-code-launch-mode-resume-in-place@linux+herdr-shield+project+claude	live-only
+chat.ls-cli	chat-birth/forecast-rename-timing-before-session-registers-engine-claude-code-launch-mode-resume-in-place@linux+herdr-shield+project+claude	live-only
+chat.new-cli	chat-birth/forecast-trust-dialog-rows-unnumbered-engine-claude-code-spawn-order-readiness-before-trust@linux+herdr-shield+project+claude	live-only
+chat.ls-cli	chat-birth/forecast-trust-dialog-rows-unnumbered-engine-claude-code-spawn-order-readiness-before-trust@linux+herdr-shield+project+claude	live-only
+chat.new-picker	chat-birth/new-from-picker@linux+herdr-shield+project+codex	live-only
+herdr.restore	chat-birth/new-from-picker@linux+herdr-shield+project+codex	crossing: live-only
+chat.new-typed	chat-birth/new-typed@linux+herdr-shield+project+codex	live-only
+lifecycle.install	chat-birth/new-typed@linux+herdr-shield+project+codex	crossing: live-only
+chat.new-cli	chat-birth/new-from-cli@linux+herdr-shield+project+codex	live-only
+chat.ls-cli	chat-birth/new-from-cli@linux+herdr-shield+project+codex	crossing: live-only
+herdr.place-from-foreign-workspace	chat-birth/open-from-foreign-workspace@linux+herdr-shield+project+codex	live-only
+chat.name-cli	chat-birth/rename-from-cli@linux+herdr-shield+project+codex	live-only
+chat.name-mcp	chat-birth/rename-from-mcp@linux+herdr-shield+project+codex	live-only
+chat.new-picker	chat-birth/new-from-picker-fork-shell-start-home@linux+herdr-shield+project+codex	live-only
+herdr.restore	chat-birth/new-from-picker-fork-shell-start-home@linux+herdr-shield+project+codex	live-only
+chat.new-picker	chat-birth/new-from-picker-fork-shell-start-project@linux+herdr-shield+project+codex	live-only
+herdr.restore	chat-birth/new-from-picker-fork-shell-start-project@linux+herdr-shield+project+codex	live-only
+chat.new-typed	chat-birth/new-typed-fork-shell-start-home@linux+herdr-shield+project+codex	live-only
+lifecycle.install	chat-birth/new-typed-fork-shell-start-home@linux+herdr-shield+project+codex	live-only
+chat.new-typed	chat-birth/new-typed-fork-shell-start-project@linux+herdr-shield+project+codex	live-only
+lifecycle.install	chat-birth/new-typed-fork-shell-start-project@linux+herdr-shield+project+codex	live-only
+chat.new-cli	chat-birth/new-from-cli-fork-shell-start-home@linux+herdr-shield+project+codex	live-only
+chat.ls-cli	chat-birth/new-from-cli-fork-shell-start-home@linux+herdr-shield+project+codex	live-only
+chat.new-cli	chat-birth/new-from-cli-fork-shell-start-project@linux+herdr-shield+project+codex	live-only
+chat.ls-cli	chat-birth/new-from-cli-fork-shell-start-project@linux+herdr-shield+project+codex	live-only
+herdr.place-from-foreign-workspace	chat-birth/open-from-foreign-workspace-fork-shell-start-home@linux+herdr-shield+project+codex	live-only
+herdr.place-from-foreign-workspace	chat-birth/open-from-foreign-workspace-fork-shell-start-project@linux+herdr-shield+project+codex	live-only
+chat.name-cli	chat-birth/forecast-engine-codex-runtime-event-rename@linux+herdr-shield+project+codex	live-only
+chat.new-cli	chat-birth/forecast-codex-home-ambient-real-home-engine-codex@linux+herdr-shield+project+codex	live-only
+chat.ls-cli	chat-birth/forecast-codex-home-ambient-real-home-engine-codex@linux+herdr-shield+project+codex	live-only
+chat.new-cli	chat-birth/forecast-trust-receipt-present-handler-state-operator-disabled-engine-codex@linux+herdr-shield+project+codex	live-only
+chat.ls-cli	chat-birth/forecast-trust-receipt-present-handler-state-operator-disabled-engine-codex@linux+herdr-shield+project+codex	live-only
+chat.new-cli	chat-birth/forecast-receipt-state-historical-fingerprint-native-handler-state-disabled-engine-codex@linux+herdr-shield+project+codex	live-only
+chat.ls-cli	chat-birth/forecast-receipt-state-historical-fingerprint-native-handler-state-disabled-engine-codex@linux+herdr-shield+project+codex	live-only
+chat.new-cli	chat-birth/forecast-tmux-attach-update-environment-recopies-pane-env-inherited-by-chat-caller-engine-codex-tool-shell@linux+herdr-shield+project+codex	live-only
+chat.ls-cli	chat-birth/forecast-tmux-attach-update-environment-recopies-pane-env-inherited-by-chat-caller-engine-codex-tool-shell@linux+herdr-shield+project+codex	live-only
+chat.new-cli	chat-birth/forecast-script-reference-dollar-zero-self-dir-guard-input-shell-body-without-origin-engine-codex@linux+herdr-shield+project+codex	live-only
+chat.ls-cli	chat-birth/forecast-script-reference-dollar-zero-self-dir-guard-input-shell-body-without-origin-engine-codex@linux+herdr-shield+project+codex	live-only
+chat.new-picker	chat-birth/new-from-picker@linux+herdr-shield+project+opencode	live-only
+herdr.restore	chat-birth/new-from-picker@linux+herdr-shield+project+opencode	crossing: live-only
+chat.new-typed	chat-birth/new-typed@linux+herdr-shield+project+opencode	live-only
+lifecycle.install	chat-birth/new-typed@linux+herdr-shield+project+opencode	crossing: live-only
+chat.new-cli	chat-birth/new-from-cli@linux+herdr-shield+project+opencode	live-only
+chat.ls-cli	chat-birth/new-from-cli@linux+herdr-shield+project+opencode	crossing: live-only
+herdr.place-from-foreign-workspace	chat-birth/open-from-foreign-workspace@linux+herdr-shield+project+opencode	live-only
+chat.name-cli	chat-birth/rename-from-cli@linux+herdr-shield+project+opencode	live-only
+chat.name-mcp	chat-birth/rename-from-mcp@linux+herdr-shield+project+opencode	live-only
+herdr.rename-inside-engine	chat-birth/rename-inside-engine-updates-tab@linux+herdr-shield+project+opencode	live-only
+chat.new-picker	chat-birth/new-from-picker-fork-shell-start-home@linux+herdr-shield+project+opencode	live-only
+herdr.restore	chat-birth/new-from-picker-fork-shell-start-home@linux+herdr-shield+project+opencode	live-only
+chat.new-picker	chat-birth/new-from-picker-fork-shell-start-project@linux+herdr-shield+project+opencode	live-only
+herdr.restore	chat-birth/new-from-picker-fork-shell-start-project@linux+herdr-shield+project+opencode	live-only
+chat.new-typed	chat-birth/new-typed-fork-shell-start-home@linux+herdr-shield+project+opencode	live-only
+lifecycle.install	chat-birth/new-typed-fork-shell-start-home@linux+herdr-shield+project+opencode	live-only
+chat.new-typed	chat-birth/new-typed-fork-shell-start-project@linux+herdr-shield+project+opencode	live-only
+lifecycle.install	chat-birth/new-typed-fork-shell-start-project@linux+herdr-shield+project+opencode	live-only
+chat.new-cli	chat-birth/new-from-cli-fork-shell-start-home@linux+herdr-shield+project+opencode	live-only
+chat.ls-cli	chat-birth/new-from-cli-fork-shell-start-home@linux+herdr-shield+project+opencode	live-only
+chat.new-cli	chat-birth/new-from-cli-fork-shell-start-project@linux+herdr-shield+project+opencode	live-only
+chat.ls-cli	chat-birth/new-from-cli-fork-shell-start-project@linux+herdr-shield+project+opencode	live-only
+herdr.place-from-foreign-workspace	chat-birth/open-from-foreign-workspace-fork-shell-start-home@linux+herdr-shield+project+opencode	live-only
+herdr.place-from-foreign-workspace	chat-birth/open-from-foreign-workspace-fork-shell-start-project@linux+herdr-shield+project+opencode	live-only
+chat.new-picker	chat-birth/new-from-picker@linux+herdr-shield+subfolder+claude	live-only
+herdr.restore	chat-birth/new-from-picker@linux+herdr-shield+subfolder+claude	crossing: live-only
+chat.new-typed	chat-birth/new-typed@linux+herdr-shield+subfolder+claude	live-only
+lifecycle.install	chat-birth/new-typed@linux+herdr-shield+subfolder+claude	crossing: live-only
+chat.new-cli	chat-birth/new-from-cli@linux+herdr-shield+subfolder+claude	live-only
+chat.ls-cli	chat-birth/new-from-cli@linux+herdr-shield+subfolder+claude	crossing: live-only
+herdr.place-from-foreign-workspace	chat-birth/open-from-foreign-workspace@linux+herdr-shield+subfolder+claude	live-only
+chat.new-picker	chat-birth/new-from-picker-fork-shell-start-home@linux+herdr-shield+subfolder+claude	live-only
+herdr.restore	chat-birth/new-from-picker-fork-shell-start-home@linux+herdr-shield+subfolder+claude	live-only
+chat.new-typed	chat-birth/new-typed-fork-shell-start-home@linux+herdr-shield+subfolder+claude	live-only
+lifecycle.install	chat-birth/new-typed-fork-shell-start-home@linux+herdr-shield+subfolder+claude	live-only
+chat.new-cli	chat-birth/new-from-cli-fork-shell-start-home@linux+herdr-shield+subfolder+claude	live-only
+chat.ls-cli	chat-birth/new-from-cli-fork-shell-start-home@linux+herdr-shield+subfolder+claude	live-only
+herdr.place-from-foreign-workspace	chat-birth/open-from-foreign-workspace-fork-shell-start-home@linux+herdr-shield+subfolder+claude	live-only
+chat.new-picker	chat-birth/new-from-picker@linux+herdr-shield+worktree+claude	live-only
+herdr.restore	chat-birth/new-from-picker@linux+herdr-shield+worktree+claude	crossing: live-only
+chat.new-typed	chat-birth/new-typed@linux+herdr-shield+worktree+claude	live-only
+lifecycle.install	chat-birth/new-typed@linux+herdr-shield+worktree+claude	crossing: live-only
+chat.new-cli	chat-birth/new-from-cli@linux+herdr-shield+worktree+claude	live-only
+chat.ls-cli	chat-birth/new-from-cli@linux+herdr-shield+worktree+claude	crossing: live-only
+herdr.place-from-foreign-workspace	chat-birth/open-from-foreign-workspace@linux+herdr-shield+worktree+claude	live-only
+chat.new-picker	chat-birth/new-from-picker-fork-shell-start-home@linux+herdr-shield+worktree+claude	live-only
+herdr.restore	chat-birth/new-from-picker-fork-shell-start-home@linux+herdr-shield+worktree+claude	live-only
+chat.new-typed	chat-birth/new-typed-fork-shell-start-home@linux+herdr-shield+worktree+claude	live-only
+lifecycle.install	chat-birth/new-typed-fork-shell-start-home@linux+herdr-shield+worktree+claude	live-only
+chat.new-cli	chat-birth/new-from-cli-fork-shell-start-home@linux+herdr-shield+worktree+claude	live-only
+chat.ls-cli	chat-birth/new-from-cli-fork-shell-start-home@linux+herdr-shield+worktree+claude	live-only
+herdr.place-from-foreign-workspace	chat-birth/open-from-foreign-workspace-fork-shell-start-home@linux+herdr-shield+worktree+claude	live-only
+chat.new-storm	chat-birth/storm-of-births@linux+tmux	live-only
+tmux.server-stopped-new	chat-birth/new-typed-tmux-server-stopped@linux+tmux	live-only
+chat.new-picker	chat-birth/new-from-picker@linux+tmux+project+claude	live-only
+chat.new-typed	chat-birth/new-typed@linux+tmux+project+claude	live-only
+lifecycle.install	chat-birth/new-typed@linux+tmux+project+claude	crossing: live-only
+chat.new-cli	chat-birth/new-from-cli@linux+tmux+project+claude	live-only
+chat.ls-cli	chat-birth/new-from-cli@linux+tmux+project+claude	crossing: live-only
+chat.name-cli	chat-birth/rename-from-cli@linux+tmux+project+claude	live-only
+chat.name-mcp	chat-birth/rename-from-mcp@linux+tmux+project+claude	live-only
+chat.new-cancelled	chat-birth/forecast-spawn-cancelled@linux+tmux+project+claude	live-only
+chat.new-cli	chat-birth/forecast-login-default-sentinel-inherited-claude-updater-temp-and-rename-at-account-path-launch-origin-outside-pfm-shell@linux+tmux+project+claude	live-only
+chat.ls-cli	chat-birth/forecast-login-default-sentinel-inherited-claude-updater-temp-and-rename-at-account-path-launch-origin-outside-pfm-shell@linux+tmux+project+claude	live-only
+chat.new-cli	chat-birth/forecast-last-pane-closed-backend-tmux-child-exit-before-waiter-connects@linux+tmux+project+claude	live-only
+chat.ls-cli	chat-birth/forecast-last-pane-closed-backend-tmux-child-exit-before-waiter-connects@linux+tmux+project+claude	live-only
+chat.new-cli	chat-birth/forecast-launcher-exit-before-wait-registered-backend-tmux-wait-for@linux+tmux+project+claude	live-only
+chat.ls-cli	chat-birth/forecast-launcher-exit-before-wait-registered-backend-tmux-wait-for@linux+tmux+project+claude	live-only
+chat.new-cli	chat-birth/forecast-launch-state-folder-trust-dialog-backend-tmux-remain-on-exit-engine-claude-code@linux+tmux+project+claude	live-only
+chat.ls-cli	chat-birth/forecast-launch-state-folder-trust-dialog-backend-tmux-remain-on-exit-engine-claude-code@linux+tmux+project+claude	live-only
+chat.new-picker	chat-birth/new-from-picker@linux+tmux+project+codex	live-only
+chat.new-typed	chat-birth/new-typed@linux+tmux+project+codex	live-only
+lifecycle.install	chat-birth/new-typed@linux+tmux+project+codex	crossing: live-only
+chat.new-cli	chat-birth/new-from-cli@linux+tmux+project+codex	live-only
+chat.ls-cli	chat-birth/new-from-cli@linux+tmux+project+codex	crossing: live-only
+chat.name-cli	chat-birth/rename-from-cli@linux+tmux+project+codex	live-only
+chat.name-mcp	chat-birth/rename-from-mcp@linux+tmux+project+codex	live-only
+chat.new-picker	chat-birth/new-from-picker@linux+tmux+project+opencode	live-only
+chat.new-typed	chat-birth/new-typed@linux+tmux+project+opencode	live-only
+lifecycle.install	chat-birth/new-typed@linux+tmux+project+opencode	crossing: live-only
+chat.new-cli	chat-birth/new-from-cli@linux+tmux+project+opencode	live-only
+chat.ls-cli	chat-birth/new-from-cli@linux+tmux+project+opencode	crossing: live-only
+chat.name-cli	chat-birth/rename-from-cli@linux+tmux+project+opencode	live-only
+chat.name-mcp	chat-birth/rename-from-mcp@linux+tmux+project+opencode	live-only
+chat.reload-typed	chat-reload/reload-typed@linux+herdr-shield+project+claude	live-only
+chat.reload-cli	chat-reload/reload-from-cli@linux+herdr-shield+project+claude	live-only
+chat.reload-picker	chat-reload/reload-from-picker@linux+herdr-shield+project+claude	live-only
+chat.reload-account	chat-reload/reload-into-account@linux+herdr-shield+project+claude	live-only
+report.statusline	chat-reload/reload-into-account@linux+herdr-shield+project+claude	crossing: live-only
+chat.reload-account-refused	chat-reload/reload-into-missing-account-refused@linux+herdr-shield+project+claude	live-only
+chat.reload-background-work	chat-reload/reload-typed-with-background-work@linux+herdr-shield+project+claude	live-only
+herdr.reload-retired-seat	chat-reload/reload-after-retired-seat@linux+herdr-shield+project+claude	live-only
+chat.reload-continued	chat-reload/reload-continued-chat@linux+herdr-shield+project+claude	live-only
+chat.reload-continued	chat-reload/reload-continued-chat-background-handoff@linux+herdr-shield+project+claude	live-only
+chat.reload-account	chat-reload/switch-account-keeps-quota-cache-private@linux+herdr-shield+project+claude	live-only
+report.statusline	chat-reload/switch-account-keeps-quota-cache-private@linux+herdr-shield+project+claude	live-only
+chat.reload-new	chat-reload/reload-fresh@linux+herdr-shield+project+claude	twin:tier-hermetic:reload-new-starts-fresh-conversation
+chat.reload-new-hide	chat-reload/reload-fresh-hidden@linux+herdr-shield+project+claude	live-only
+chat.reload-continued	chat-reload/forecast-multiplexer-herdr-seat-event-session-continued@linux+herdr-shield+project+claude	live-only
+chat.reload-continued	chat-reload/forecast-multiplexer-herdr-seat-event-session-continued-background-handoff@linux+herdr-shield+project+claude	live-only
+chat.reload-cli	chat-reload/forecast-seat-event-pane-reused-runtime-event-reload@linux+herdr-shield+project+claude	live-only
+chat.reload-cli	chat-reload/forecast-multiplexer-herdr-runtime-event-reload@linux+herdr-shield+project+claude	live-only
+chat.reload-continued	chat-reload/forecast-session-state-continued-in-new-session-engine-claude-code-index-state-newest-path-lost@linux+herdr-shield+project+claude	live-only
+chat.reload-continued	chat-reload/forecast-engine-claude-code-seat-identity-launch-id-after-continuation-reload-path-herdr-or-tmux-reload@linux+herdr-shield+project+claude	live-only
+chat.reload-continued	chat-reload/forecast-engine-claude-code-seat-identity-launch-id-after-continuation-reload-path-herdr-or-tmux-reload-background-handoff@linux+herdr-shield+project+claude	live-only
+chat.reload-typed	chat-reload/reload-typed@linux+herdr-shield+project+codex	live-only
+chat.reload-cli	chat-reload/reload-from-cli@linux+herdr-shield+project+codex	live-only
+chat.reload-picker	chat-reload/reload-from-picker@linux+herdr-shield+project+codex	live-only
+chat.reload-new	chat-reload/reload-fresh@linux+herdr-shield+project+codex	twin:tier-hermetic:reload-new-starts-fresh-conversation
+chat.reload-new-hide	chat-reload/reload-fresh-hidden@linux+herdr-shield+project+codex	live-only
+chat.reload-typed	chat-reload/reload-typed@linux+herdr-shield+project+opencode	live-only
+chat.reload-cli	chat-reload/reload-from-cli@linux+herdr-shield+project+opencode	live-only
+chat.reload-picker	chat-reload/reload-from-picker@linux+herdr-shield+project+opencode	live-only
+chat.reload-new	chat-reload/reload-fresh@linux+herdr-shield+project+opencode	twin:tier-hermetic:reload-new-starts-fresh-conversation
+chat.reload-new-hide	chat-reload/reload-fresh-hidden@linux+herdr-shield+project+opencode	live-only
+chat.reload-typed	chat-reload/reload-typed@linux+herdr-shield+subfolder+claude	live-only
+chat.reload-cli	chat-reload/reload-from-cli@linux+herdr-shield+subfolder+claude	live-only
+chat.reload-continued	chat-reload/reload-continued-chat@linux+herdr-shield+subfolder+claude	live-only
+chat.reload-continued	chat-reload/reload-continued-chat-background-handoff@linux+herdr-shield+subfolder+claude	live-only
+chat.reload-new	chat-reload/reload-fresh@linux+herdr-shield+subfolder+claude	twin:tier-hermetic:reload-new-starts-fresh-conversation
+chat.reload-new-hide	chat-reload/reload-fresh-hidden@linux+herdr-shield+subfolder+claude	live-only
+chat.reload-typed	chat-reload/reload-typed@linux+herdr-shield+worktree+claude	live-only
+chat.reload-cli	chat-reload/reload-from-cli@linux+herdr-shield+worktree+claude	live-only
+chat.reload-continued	chat-reload/reload-continued-chat@linux+herdr-shield+worktree+claude	live-only
+chat.reload-continued	chat-reload/reload-continued-chat-background-handoff@linux+herdr-shield+worktree+claude	live-only
+chat.reload-new	chat-reload/reload-fresh@linux+herdr-shield+worktree+claude	twin:tier-hermetic:reload-new-starts-fresh-conversation
+chat.reload-new-hide	chat-reload/reload-fresh-hidden@linux+herdr-shield+worktree+claude	live-only
+chat.reload-typed	chat-reload/reload-typed@linux+tmux+project+claude	live-only
+chat.reload-cli	chat-reload/reload-from-cli@linux+tmux+project+claude	live-only
+chat.reload-picker	chat-reload/reload-from-picker@linux+tmux+project+claude	live-only
+chat.reload-account	chat-reload/reload-into-account@linux+tmux+project+claude	live-only
+report.statusline	chat-reload/reload-into-account@linux+tmux+project+claude	crossing: live-only
+chat.reload-account-refused	chat-reload/reload-into-missing-account-refused@linux+tmux+project+claude	live-only
+chat.reload-background-work	chat-reload/reload-typed-with-background-work@linux+tmux+project+claude	live-only
+chat.reload-continued	chat-reload/reload-continued-chat@linux+tmux+project+claude	live-only
+chat.reload-continued	chat-reload/reload-continued-chat-background-handoff@linux+tmux+project+claude	live-only
+chat.reload-new	chat-reload/reload-fresh@linux+tmux+project+claude	twin:tier-hermetic:reload-new-starts-fresh-conversation
+chat.reload-new-hide	chat-reload/reload-fresh-hidden@linux+tmux+project+claude	live-only
+chat.reload-typed	chat-reload/reload-typed@linux+tmux+project+codex	live-only
+chat.reload-cli	chat-reload/reload-from-cli@linux+tmux+project+codex	live-only
+chat.reload-picker	chat-reload/reload-from-picker@linux+tmux+project+codex	live-only
+chat.reload-new	chat-reload/reload-fresh@linux+tmux+project+codex	twin:tier-hermetic:reload-new-starts-fresh-conversation
+chat.reload-new-hide	chat-reload/reload-fresh-hidden@linux+tmux+project+codex	live-only
+chat.reload-typed	chat-reload/reload-typed@linux+tmux+project+opencode	live-only
+chat.reload-cli	chat-reload/reload-from-cli@linux+tmux+project+opencode	live-only
+chat.reload-picker	chat-reload/reload-from-picker@linux+tmux+project+opencode	live-only
+chat.reload-new	chat-reload/reload-fresh@linux+tmux+project+opencode	twin:tier-hermetic:reload-new-starts-fresh-conversation
+chat.reload-new-hide	chat-reload/reload-fresh-hidden@linux+tmux+project+opencode	live-only
+herdr.indicators-worktree-removed	chat-attention/indicators-survive-worktree-removal@linux+herdr-shield	live-only
+herdr.indicators-worktree-removed	chat-attention/forecast-lifecycle-worktree-removed-while-daemon-runs-daemon-launch-cwd-removed-worktree-reader-herdr-indicator-scan@linux+herdr-shield	live-only
+status.turn	chat-attention/turn-works-then-idles@linux+herdr-shield+project+claude	live-only
+status.question-blocked	chat-attention/question-blocks@linux+herdr-shield+project+claude	live-only
+status.answer-unblocks	chat-attention/answer-unblocks@linux+herdr-shield+project+claude	live-only
+status.permission-blocked	chat-attention/permission-blocks@linux+herdr-shield+project+claude	live-only
+status.permission-answered	chat-attention/permission-answered-unblocks@linux+herdr-shield+project+claude	live-only
+status.subagent-hold	chat-attention/subagent-holds-working@linux+herdr-shield+project+claude	live-only
+status.dropped-report-recovers	chat-attention/turn-idles-after-dropped-report@linux+herdr-shield+project+claude	live-only
+status.turn-error	chat-attention/turn-fails-shows-error@linux+herdr-shield+project+claude	live-only
+status.notification-turn	chat-attention/notification-turn-works-then-idles@linux+herdr-shield+project+claude	live-only
+status.subagent-hold	chat-attention/subagent-sibling-does-not-unblock@linux+herdr-shield+project+claude	live-only
+status.notification-turn	chat-attention/notification-settle-does-not-create-ghost-child@linux+herdr-shield+project+claude	live-only
+status.subagent-hold	chat-attention/opted-in-agent-attaches-to-carried-parent@linux+herdr-shield+project+claude	live-only
+status.subagent-hold	chat-attention/forecast-engine-claude-hook-origin-subagent@linux+herdr-shield+project+claude	live-only
+status.turn	chat-attention/forecast-herdr-shield-on-pane-state-working@linux+herdr-shield+project+claude	live-only
+status.question-blocked	chat-attention/forecast-engine-claude-pane-state-blocked@linux+herdr-shield+project+claude	live-only
+status.turn	chat-attention/forecast-multiplexer-herdr-pane-state-working@linux+herdr-shield+project+claude	live-only
+status.turn	chat-attention/forecast-tmux-server-gone-at-session-end-hook-payload-over-one-mib-tool-response-engine-claude-code@linux+herdr-shield+project+claude	live-only
+status.dropped-report-recovers	chat-attention/forecast-engine-claude-code-host-load-lock-or-call-timeout-herdr-state-settled-state-dropped@linux+herdr-shield+project+claude	live-only
+status.notification-turn	chat-attention/forecast-prompt-origin-background-task-notification-engine-claude-code-hook-event-user-prompt-submit@linux+herdr-shield+project+claude	live-only
+status.question-blocked	chat-attention/forecast-notification-type-plugin-notification-engine-claude-code@linux+herdr-shield+project+claude	live-only
+status.question-blocked	chat-attention/forecast-payload-is-interrupt-true-engine-claude-code-event-order-async-post-tool-use-after-block@linux+herdr-shield+project+claude	live-only
+status.question-blocked	chat-attention/forecast-trigger-esc-or-no-at-permission-dialog-engine-claude-code-hook-gap-no-hook-fired@linux+herdr-shield+project+claude	live-only
+status.dropped-report-recovers	chat-attention/forecast-herdr-state-event-dropped-lock-state-activity-lock-held-past-deadline-engine-claude-code@linux+herdr-shield+project+claude	live-only
+status.subagent-hold	chat-attention/forecast-engine-claude-code-hook-call-pretooluse-agent-spawn-launch-settings-pre-upgrade-chat@linux+herdr-shield+project+claude	live-only
+status.question-blocked	chat-attention/forecast-reader-stream-follow-seat-state-folder-trust-blocked-backend-herdr@linux+herdr-shield+project+claude	live-only
+status.turn	chat-attention/turn-works-then-idles@linux+herdr-shield+project+codex	live-only
+status.question-blocked	chat-attention/question-blocks@linux+herdr-shield+project+codex	live-only
+status.answer-unblocks	chat-attention/answer-unblocks@linux+herdr-shield+project+codex	live-only
+status.permission-blocked	chat-attention/permission-blocks@linux+herdr-shield+project+codex	live-only
+status.permission-answered	chat-attention/permission-answered-unblocks@linux+herdr-shield+project+codex	live-only
+status.dropped-report-recovers	chat-attention/turn-idles-after-dropped-report@linux+herdr-shield+project+codex	live-only
+status.turn-error	chat-attention/turn-fails-shows-error@linux+herdr-shield+project+codex	live-only
+status.permission-blocked	chat-attention/forecast-codex-blocked@linux+herdr-shield+project+codex	live-only
+status.question-blocked	chat-attention/forecast-engine-codex-hook-origin-subagent@linux+herdr-shield+project+codex	live-only
+status.question-blocked	chat-attention/forecast-pane-lookup-process-ancestry-hook-origin-sub-agent-engine-codex@linux+herdr-shield+project+codex	live-only
+status.question-blocked	chat-attention/forecast-herdr-state-blocked-after-denied-approval-tmux-server-chat-owned-server-ends-with-chat-engine-codex@linux+herdr-shield+project+codex	live-only
+status.turn	chat-attention/turn-works-then-idles@linux+herdr-shield+project+opencode	live-only
+status.question-blocked	chat-attention/question-blocks@linux+herdr-shield+project+opencode	live-only
+status.answer-unblocks	chat-attention/answer-unblocks@linux+herdr-shield+project+opencode	live-only
+status.permission-blocked	chat-attention/permission-blocks@linux+herdr-shield+project+opencode	live-only
+status.permission-answered	chat-attention/permission-answered-unblocks@linux+herdr-shield+project+opencode	live-only
+status.dropped-report-recovers	chat-attention/turn-idles-after-dropped-report@linux+herdr-shield+project+opencode	live-only
+status.turn-error	chat-attention/turn-fails-shows-error@linux+herdr-shield+project+opencode	live-only
+status.turn	chat-attention/turn-works-then-idles@linux+tmux+project+claude	live-only
+status.question-blocked	chat-attention/question-blocks@linux+tmux+project+claude	live-only
+status.answer-unblocks	chat-attention/answer-unblocks@linux+tmux+project+claude	live-only
+status.permission-blocked	chat-attention/permission-blocks@linux+tmux+project+claude	live-only
+status.permission-answered	chat-attention/permission-answered-unblocks@linux+tmux+project+claude	live-only
+status.subagent-hold	chat-attention/subagent-holds-working@linux+tmux+project+claude	live-only
+status.notification-turn	chat-attention/notification-turn-works-then-idles@linux+tmux+project+claude	live-only
+status.turn	chat-attention/turn-works-then-idles@linux+tmux+project+codex	live-only
+status.question-blocked	chat-attention/question-blocks@linux+tmux+project+codex	live-only
+status.answer-unblocks	chat-attention/answer-unblocks@linux+tmux+project+codex	live-only
+status.permission-blocked	chat-attention/permission-blocks@linux+tmux+project+codex	live-only
+status.permission-answered	chat-attention/permission-answered-unblocks@linux+tmux+project+codex	live-only
+status.turn	chat-attention/turn-works-then-idles@linux+tmux+project+opencode	live-only
+status.question-blocked	chat-attention/question-blocks@linux+tmux+project+opencode	live-only
+status.answer-unblocks	chat-attention/answer-unblocks@linux+tmux+project+opencode	live-only
+status.permission-blocked	chat-attention/permission-blocks@linux+tmux+project+opencode	live-only
+status.permission-answered	chat-attention/permission-answered-unblocks@linux+tmux+project+opencode	live-only
+chat.new-mcp	chat-mesh/spawn-child-from-mcp@linux+herdr-shield+project+claude	live-only
+chat.keys-mcp	chat-mesh/keys-and-capture-child@linux+herdr-shield+project+claude	live-only
+chat.capture-mcp	chat-mesh/keys-and-capture-child@linux+herdr-shield+project+claude	live-only
+chat.call-dead-refused	chat-mesh/call-dead-refused@linux+herdr-shield+project+claude	live-only
+chat.new-mcp	chat-mesh/mcp-new-returns-before-child-ready@linux+herdr-shield+project+claude	live-only
+chat.new-mcp	chat-mesh/mcp-new-returns-before-child-ready@macos+herdr-native+project+claude	live-only
+chat.call-mcp	chat-mesh/call-from-mcp@linux+herdr-shield+project+claude+to-herdr-shield-project-claude	crossing: live-only
+chat.call-cli	chat-mesh/call-from-cli@linux+herdr-shield+project+claude+to-herdr-shield-project-claude	live-only
+chat.call-cli	chat-mesh/call-herdr-to-herdr-claude-to-claude-recipient-idle@linux+herdr-shield+project+claude+to-herdr-shield-project-claude	live-only
+chat.call-cli	chat-mesh/call-herdr-to-herdr-claude-to-claude-recipient-working@linux+herdr-shield+project+claude+to-herdr-shield-project-claude	live-only
+chat.call-cli	chat-mesh/call-herdr-to-herdr-claude-to-claude-recipient-draft@linux+herdr-shield+project+claude+to-herdr-shield-project-claude	live-only
+chat.call-cli	chat-mesh/call-herdr-to-herdr-claude-to-claude-recipient-modal@linux+herdr-shield+project+claude+to-herdr-shield-project-claude	live-only
+chat.call-cli	chat-mesh/call-herdr-to-herdr-claude-to-claude-recipient-blocked@linux+herdr-shield+project+claude+to-herdr-shield-project-claude	live-only
+chat.call-mcp	chat-mesh/agentless-call-preserves-modal-composer@linux+herdr-shield+project+claude+to-herdr-shield-project-claude	live-only
+chat.call-mcp	chat-mesh/call-from-cli-born-chat@linux+herdr-shield+project+claude+to-herdr-shield-project-claude	live-only
+chat.call-mcp	chat-mesh/call-from-picker-born-chat@linux+herdr-shield+project+claude+to-herdr-shield-project-claude	live-only
+chat.call-mcp	chat-mesh/forecast-herdr-shield-on-door-call@linux+herdr-shield+project+claude+to-herdr-shield-project-claude	live-only
+chat.call-mcp	chat-mesh/forecast-multiplexer-herdr-door-call@linux+herdr-shield+project+claude+to-herdr-shield-project-claude	live-only
+chat.call-mcp	chat-mesh/call-from-mcp@linux+herdr-shield+project+claude+to-herdr-shield-project-codex	crossing: live-only
+chat.call-cli	chat-mesh/call-from-cli@linux+herdr-shield+project+claude+to-herdr-shield-project-codex	live-only
+chat.call-cli	chat-mesh/call-herdr-to-herdr-claude-to-codex-recipient-idle@linux+herdr-shield+project+claude+to-herdr-shield-project-codex	live-only
+chat.call-cli	chat-mesh/call-herdr-to-herdr-claude-to-codex-recipient-working@linux+herdr-shield+project+claude+to-herdr-shield-project-codex	live-only
+chat.call-cli	chat-mesh/call-herdr-to-herdr-claude-to-codex-recipient-draft@linux+herdr-shield+project+claude+to-herdr-shield-project-codex	live-only
+chat.call-cli	chat-mesh/call-herdr-to-herdr-claude-to-codex-recipient-modal@linux+herdr-shield+project+claude+to-herdr-shield-project-codex	live-only
+chat.call-cli	chat-mesh/call-herdr-to-herdr-claude-to-codex-recipient-blocked@linux+herdr-shield+project+claude+to-herdr-shield-project-codex	live-only
+chat.call-mcp	chat-mesh/call-from-mcp@linux+herdr-shield+project+claude+to-herdr-shield-project-opencode	crossing: live-only
+chat.call-cli	chat-mesh/call-from-cli@linux+herdr-shield+project+claude+to-herdr-shield-project-opencode	live-only
+chat.call-mcp	chat-mesh/call-from-mcp@linux+herdr-shield+project+claude+to-tmux-project-claude	crossing: live-only
+chat.call-cli	chat-mesh/call-from-cli@linux+herdr-shield+project+claude+to-tmux-project-claude	live-only
+chat.call-cli	chat-mesh/call-herdr-to-tmux-claude-to-claude-recipient-idle@linux+herdr-shield+project+claude+to-tmux-project-claude	live-only
+chat.call-cli	chat-mesh/call-herdr-to-tmux-claude-to-claude-recipient-working@linux+herdr-shield+project+claude+to-tmux-project-claude	live-only
+chat.call-cli	chat-mesh/call-herdr-to-tmux-claude-to-claude-recipient-draft@linux+herdr-shield+project+claude+to-tmux-project-claude	live-only
+chat.call-cli	chat-mesh/call-herdr-to-tmux-claude-to-claude-recipient-modal@linux+herdr-shield+project+claude+to-tmux-project-claude	live-only
+chat.call-cli	chat-mesh/call-herdr-to-tmux-claude-to-claude-recipient-blocked@linux+herdr-shield+project+claude+to-tmux-project-claude	live-only
+chat.call-mcp	chat-mesh/call-from-cli-born-chat@linux+herdr-shield+project+claude+to-tmux-project-claude	live-only
+chat.call-mcp	chat-mesh/call-from-picker-born-chat@linux+herdr-shield+project+claude+to-tmux-project-claude	live-only
+chat.call-mcp	chat-mesh/call-from-mcp@linux+herdr-shield+project+claude+to-tmux-project-codex	crossing: live-only
+chat.call-cli	chat-mesh/call-from-cli@linux+herdr-shield+project+claude+to-tmux-project-codex	live-only
+chat.call-cli	chat-mesh/call-herdr-to-tmux-claude-to-codex-recipient-idle@linux+herdr-shield+project+claude+to-tmux-project-codex	live-only
+chat.call-cli	chat-mesh/call-herdr-to-tmux-claude-to-codex-recipient-working@linux+herdr-shield+project+claude+to-tmux-project-codex	live-only
+chat.call-cli	chat-mesh/call-herdr-to-tmux-claude-to-codex-recipient-draft@linux+herdr-shield+project+claude+to-tmux-project-codex	live-only
+chat.call-cli	chat-mesh/call-herdr-to-tmux-claude-to-codex-recipient-modal@linux+herdr-shield+project+claude+to-tmux-project-codex	live-only
+chat.call-cli	chat-mesh/call-herdr-to-tmux-claude-to-codex-recipient-blocked@linux+herdr-shield+project+claude+to-tmux-project-codex	live-only
+chat.call-mcp	chat-mesh/call-from-mcp@linux+herdr-shield+project+claude+to-tmux-project-opencode	crossing: live-only
+chat.call-cli	chat-mesh/call-from-cli@linux+herdr-shield+project+claude+to-tmux-project-opencode	live-only
+chat.new-mcp	chat-mesh/spawn-child-from-mcp@linux+herdr-shield+project+codex	live-only
+chat.keys-mcp	chat-mesh/keys-and-capture-child@linux+herdr-shield+project+codex	live-only
+chat.capture-mcp	chat-mesh/keys-and-capture-child@linux+herdr-shield+project+codex	live-only
+chat.call-mcp	chat-mesh/call-from-mcp@linux+herdr-shield+project+codex+to-herdr-shield-project-claude	crossing: live-only
+chat.call-mcp	chat-mesh/call-from-mcp@linux+herdr-shield+project+codex+to-herdr-shield-project-codex	crossing: live-only
+chat.call-mcp	chat-mesh/call-from-mcp@linux+herdr-shield+project+codex+to-herdr-shield-project-opencode	crossing: live-only
+chat.call-mcp	chat-mesh/call-from-mcp@linux+herdr-shield+project+codex+to-tmux-project-claude	crossing: live-only
+chat.call-mcp	chat-mesh/call-from-mcp@linux+herdr-shield+project+codex+to-tmux-project-codex	crossing: live-only
+chat.call-mcp	chat-mesh/call-from-mcp@linux+herdr-shield+project+codex+to-tmux-project-opencode	crossing: live-only
+chat.new-mcp	chat-mesh/spawn-child-from-mcp@linux+herdr-shield+project+opencode	live-only
+chat.keys-mcp	chat-mesh/keys-and-capture-child@linux+herdr-shield+project+opencode	live-only
+chat.capture-mcp	chat-mesh/keys-and-capture-child@linux+herdr-shield+project+opencode	live-only
+chat.call-mcp	chat-mesh/call-from-mcp@linux+herdr-shield+project+opencode+to-herdr-shield-project-claude	crossing: live-only
+chat.call-mcp	chat-mesh/call-from-mcp@linux+herdr-shield+project+opencode+to-herdr-shield-project-codex	crossing: live-only
+chat.call-mcp	chat-mesh/call-from-mcp@linux+herdr-shield+project+opencode+to-herdr-shield-project-opencode	crossing: live-only
+chat.call-mcp	chat-mesh/call-from-mcp@linux+herdr-shield+project+opencode+to-tmux-project-claude	crossing: live-only
+chat.call-mcp	chat-mesh/call-from-mcp@linux+herdr-shield+project+opencode+to-tmux-project-codex	crossing: live-only
+chat.call-mcp	chat-mesh/call-from-mcp@linux+herdr-shield+project+opencode+to-tmux-project-opencode	crossing: live-only
+chat.new-mcp	chat-mesh/spawn-child-from-mcp@linux+tmux+project+claude	live-only
+chat.keys-mcp	chat-mesh/keys-and-capture-child@linux+tmux+project+claude	live-only
+chat.capture-mcp	chat-mesh/keys-and-capture-child@linux+tmux+project+claude	live-only
+chat.call-dead-refused	chat-mesh/call-dead-refused@linux+tmux+project+claude	live-only
+chat.call-mcp	chat-mesh/call-from-mcp@linux+tmux+project+claude+to-herdr-shield-project-claude	crossing: live-only
+chat.call-cli	chat-mesh/call-from-cli@linux+tmux+project+claude+to-herdr-shield-project-claude	live-only
+chat.call-cli	chat-mesh/call-tmux-to-herdr-claude-to-claude-recipient-idle@linux+tmux+project+claude+to-herdr-shield-project-claude	live-only
+chat.call-cli	chat-mesh/call-tmux-to-herdr-claude-to-claude-recipient-working@linux+tmux+project+claude+to-herdr-shield-project-claude	live-only
+chat.call-cli	chat-mesh/call-tmux-to-herdr-claude-to-claude-recipient-draft@linux+tmux+project+claude+to-herdr-shield-project-claude	live-only
+chat.call-cli	chat-mesh/call-tmux-to-herdr-claude-to-claude-recipient-modal@linux+tmux+project+claude+to-herdr-shield-project-claude	live-only
+chat.call-cli	chat-mesh/call-tmux-to-herdr-claude-to-claude-recipient-blocked@linux+tmux+project+claude+to-herdr-shield-project-claude	live-only
+chat.call-mcp	chat-mesh/call-from-cli-born-chat@linux+tmux+project+claude+to-herdr-shield-project-claude	live-only
+chat.call-mcp	chat-mesh/call-from-picker-born-chat@linux+tmux+project+claude+to-herdr-shield-project-claude	live-only
+chat.call-mcp	chat-mesh/call-from-mcp@linux+tmux+project+claude+to-herdr-shield-project-codex	crossing: live-only
+chat.call-cli	chat-mesh/call-from-cli@linux+tmux+project+claude+to-herdr-shield-project-codex	live-only
+chat.call-cli	chat-mesh/call-tmux-to-herdr-claude-to-codex-recipient-idle@linux+tmux+project+claude+to-herdr-shield-project-codex	live-only
+chat.call-cli	chat-mesh/call-tmux-to-herdr-claude-to-codex-recipient-working@linux+tmux+project+claude+to-herdr-shield-project-codex	live-only
+chat.call-cli	chat-mesh/call-tmux-to-herdr-claude-to-codex-recipient-draft@linux+tmux+project+claude+to-herdr-shield-project-codex	live-only
+chat.call-cli	chat-mesh/call-tmux-to-herdr-claude-to-codex-recipient-modal@linux+tmux+project+claude+to-herdr-shield-project-codex	live-only
+chat.call-cli	chat-mesh/call-tmux-to-herdr-claude-to-codex-recipient-blocked@linux+tmux+project+claude+to-herdr-shield-project-codex	live-only
+chat.call-mcp	chat-mesh/call-from-mcp@linux+tmux+project+claude+to-herdr-shield-project-opencode	crossing: live-only
+chat.call-cli	chat-mesh/call-from-cli@linux+tmux+project+claude+to-herdr-shield-project-opencode	live-only
+chat.call-mcp	chat-mesh/call-from-mcp@linux+tmux+project+claude+to-tmux-project-claude	crossing: live-only
+chat.call-cli	chat-mesh/call-from-cli@linux+tmux+project+claude+to-tmux-project-claude	live-only
+chat.call-cli	chat-mesh/call-tmux-to-tmux-claude-to-claude-recipient-idle@linux+tmux+project+claude+to-tmux-project-claude	live-only
+chat.call-cli	chat-mesh/call-tmux-to-tmux-claude-to-claude-recipient-working@linux+tmux+project+claude+to-tmux-project-claude	live-only
+chat.call-cli	chat-mesh/call-tmux-to-tmux-claude-to-claude-recipient-draft@linux+tmux+project+claude+to-tmux-project-claude	live-only
+chat.call-cli	chat-mesh/call-tmux-to-tmux-claude-to-claude-recipient-modal@linux+tmux+project+claude+to-tmux-project-claude	live-only
+chat.call-cli	chat-mesh/call-tmux-to-tmux-claude-to-claude-recipient-blocked@linux+tmux+project+claude+to-tmux-project-claude	live-only
+chat.call-mcp	chat-mesh/call-from-cli-born-chat@linux+tmux+project+claude+to-tmux-project-claude	live-only
+chat.call-mcp	chat-mesh/call-from-picker-born-chat@linux+tmux+project+claude+to-tmux-project-claude	live-only
+chat.call-mcp	chat-mesh/call-from-mcp@linux+tmux+project+claude+to-tmux-project-codex	crossing: live-only
+chat.call-cli	chat-mesh/call-from-cli@linux+tmux+project+claude+to-tmux-project-codex	live-only
+chat.call-cli	chat-mesh/call-tmux-to-tmux-claude-to-codex-recipient-idle@linux+tmux+project+claude+to-tmux-project-codex	live-only
+chat.call-cli	chat-mesh/call-tmux-to-tmux-claude-to-codex-recipient-working@linux+tmux+project+claude+to-tmux-project-codex	live-only
+chat.call-cli	chat-mesh/call-tmux-to-tmux-claude-to-codex-recipient-draft@linux+tmux+project+claude+to-tmux-project-codex	live-only
+chat.call-cli	chat-mesh/call-tmux-to-tmux-claude-to-codex-recipient-modal@linux+tmux+project+claude+to-tmux-project-codex	live-only
+chat.call-cli	chat-mesh/call-tmux-to-tmux-claude-to-codex-recipient-blocked@linux+tmux+project+claude+to-tmux-project-codex	live-only
+chat.call-mcp	chat-mesh/call-from-mcp@linux+tmux+project+claude+to-tmux-project-opencode	crossing: live-only
+chat.call-cli	chat-mesh/call-from-cli@linux+tmux+project+claude+to-tmux-project-opencode	live-only
+chat.new-mcp	chat-mesh/spawn-child-from-mcp@linux+tmux+project+codex	live-only
+chat.keys-mcp	chat-mesh/keys-and-capture-child@linux+tmux+project+codex	live-only
+chat.capture-mcp	chat-mesh/keys-and-capture-child@linux+tmux+project+codex	live-only
+chat.call-mcp	chat-mesh/call-from-mcp@linux+tmux+project+codex+to-herdr-shield-project-claude	crossing: live-only
+chat.call-mcp	chat-mesh/call-from-mcp@linux+tmux+project+codex+to-herdr-shield-project-codex	crossing: live-only
+chat.call-mcp	chat-mesh/call-from-mcp@linux+tmux+project+codex+to-herdr-shield-project-opencode	crossing: live-only
+chat.call-mcp	chat-mesh/call-from-mcp@linux+tmux+project+codex+to-tmux-project-claude	crossing: live-only
+chat.call-mcp	chat-mesh/call-from-mcp@linux+tmux+project+codex+to-tmux-project-codex	crossing: live-only
+chat.call-mcp	chat-mesh/call-from-mcp@linux+tmux+project+codex+to-tmux-project-opencode	crossing: live-only
+chat.new-mcp	chat-mesh/spawn-child-from-mcp@linux+tmux+project+opencode	live-only
+chat.keys-mcp	chat-mesh/keys-and-capture-child@linux+tmux+project+opencode	live-only
+chat.capture-mcp	chat-mesh/keys-and-capture-child@linux+tmux+project+opencode	live-only
+chat.call-mcp	chat-mesh/call-from-mcp@linux+tmux+project+opencode+to-herdr-shield-project-claude	crossing: live-only
+chat.call-mcp	chat-mesh/call-from-mcp@linux+tmux+project+opencode+to-herdr-shield-project-codex	crossing: live-only
+chat.call-mcp	chat-mesh/call-from-mcp@linux+tmux+project+opencode+to-herdr-shield-project-opencode	crossing: live-only
+chat.call-mcp	chat-mesh/call-from-mcp@linux+tmux+project+opencode+to-tmux-project-claude	crossing: live-only
+chat.call-mcp	chat-mesh/call-from-mcp@linux+tmux+project+opencode+to-tmux-project-codex	crossing: live-only
+chat.call-mcp	chat-mesh/call-from-mcp@linux+tmux+project+opencode+to-tmux-project-opencode	crossing: live-only
+chat.ls-picker	fleet-reader/picker-lists-the-fleet@linux+herdr-shield+project+claude	live-only
+chat.ls-cli	fleet-reader/ls-from-cli@linux	crossing: live-only
+chat.ls-mcp	fleet-reader/ls-from-mcp@linux	live-only
+picker.deleted-cwd	fleet-reader/picker-keeps-deleted-cwd-chat@linux	live-only
+chat.ls-cli	fleet-reader/forecast-engine-codex-multiplexer-herdr@linux	live-only
+chat.ls-cli	fleet-reader/forecast-multiplexer-tmux-seat-event-seat-dead@linux	live-only
+chat.ls-cli	fleet-reader/forecast-herdr-indicators-on-engine-opencode@linux	live-only
+chat.ls-cli	fleet-reader/forecast-multiplexer-herdr-door-list@linux	live-only
+chat.ls-cli	fleet-reader/forecast-engine-opencode-multiplexer-herdr@linux	live-only
+chat.ls-cli	fleet-reader/forecast-multiplexer-herdr-pane-state-unknown@linux	live-only
+chat.ls-cli	fleet-reader/forecast-herdr-indicators-on-pane-state-idle@linux	live-only
+chat.ls-cli	fleet-reader/forecast-os-linux-login-env-source-environment-d-claude-origin-outside-pfm@linux	live-only
+report.statusline	fleet-reader/forecast-os-unix-caller-lifetime-long-lived-child-state-detached-exited-unreaped@linux+herdr-shield+project+claude	live-only
+chat.ls-cli	fleet-reader/forecast-pane-wrapper-herdr-keep-engine-claude-code-herdr-detection-attach-client-foreground@linux	live-only
+chat.ls-cli	tier-unit:fleet-reader-older-seat-schema	unit-tier holder: pfm/internal/hookentry/herdr_seat_test.go::TestHerdrNativeSeatReadOnlyReports
+theme.use	fleet-reader/forecast-backend-tmux-theme-prior-failed-read-as-unset-tmux-answer-invalid-option-unset@linux+herdr-shield+project+claude	live-only
+chat.ls-cli	tier-unit:fleet-reader-empty-dead-pane-pid	unit-tier holder: pfm/internal/gather/tmuxserver_test.go::TestProbeServerNeverReadsAFailureAsDead
+chat.ls-cli	fleet-reader/forecast-tmux-server-sigstopped-probe-site-gather-probe-without-deadline-client-pipe-held-by-stopped-server@linux	live-only
+chat.ls-cli	fleet-reader/forecast-exit-empty-off-socket-holder-live-process-tmux-server-running-no-session@linux	live-only
+picker.open-typed	fleet-reader/forecast-chat-row-resumable-or-bg-tmux-socket-gone-or-refusing-picker-state-parked@linux+herdr-shield+project+claude	live-only
+chat.ls-cli	fleet-reader/forecast-hook-claude-usage-hook-invoker-claude-code-config-state-invalid@linux	live-only
+chat.ls-cli	fleet-reader/forecast-engine-claude-code-account-source-no-launch-record-no-live-seat-transcript-state-absent-before-first-prompt@linux	live-only
+chat.reload-typed	tier-unit:fleet-reader-reload-quoted-backslashes	unit-tier holder: pfm/internal/hookentry/reload_intercept_test.go::TestRunReloadIntercept
+chat.ls-cli	fleet-reader/forecast-herdr-pane-replaced-by-new-client-pane-state-moved-client-registry-stale-tmux-client@linux	live-only
+chat.new-picker	fleet-reader/forecast-pane-fronted-false-pane-env-inherited-stale-backend-tmux-shell@linux+herdr-shield+project+claude	live-only
+chat.ls-cli	tier-unit:fleet-reader-claude-attach-without-report	unit-tier holder: pfm/internal/hookentry/herdr_clients_test.go::TestHerdrStateAttachRegistersTheClientThatAttached/attach_with_nothing_reported_yet_in_cc-1:_unknown_under_claude
+chat.new-picker	fleet-reader/forecast-tab-label-user-hand-set-backend-herdr-with-tmux-chat-launch-in-place-exec@linux+herdr-shield+project+claude	live-only
+chat.ls-cli	fleet-reader/forecast-herdr-pane-herdr-keep-protected-herdr-keep-listing-per-socket-query-foreground-process-herdr-keep-attach-client@linux	live-only
+chat.ls-cli	fleet-reader/forecast-shell-exit-nested-zsh-ctrl-d-herdr-drops-agent-report-on-bare-shell-shell-state-bare-shell-foreground@linux	live-only
+chat.ls-cli	fleet-reader/forecast-pane-owner-parent-shell-done-herdr-title-unsequenced-metadata-shell-nesting-nested-zsh-exit@linux	live-only
+herdr.ls-lost-seat	fleet-reader/ls-lists-lost-seat@linux+herdr-shield	live-only
+herdr.picker-refresh-dead-seat	fleet-reader/picker-refresh-with-dead-seat@linux+herdr-shield	live-only
+herdr.ls-lost-seat	fleet-reader/forecast-multiplexer-tmux-in-herdr-seat-event-pane-reused@linux+herdr-shield	live-only
+herdr.ls-lost-seat	fleet-reader/forecast-seat-event-pane-reused-door-seat-proof@linux+herdr-shield	live-only
+herdr.ls-lost-seat	fleet-reader/forecast-seat-event-seat-dead-door-list@linux+herdr-shield	live-only
+herdr.ls-lost-seat	fleet-reader/forecast-seat-event-pane-reused-door-paint@linux+herdr-shield	live-only
+herdr.ls-lost-seat	fleet-reader/forecast-herdr-pane-recycled-occupant-seat-ownership-proved-dead-supervisor-exited@linux+herdr-shield	live-only
+herdr.ls-lost-seat	fleet-reader/forecast-supervisor-pid-dead-or-reused-herdr-pane-recycled-or-moved-seat-row-stale@linux+herdr-shield	live-only
+herdr.ls-lost-seat	fleet-reader/forecast-supervisor-state-absent-scan-mode-writable-herdr-pane-pane-not-found@linux+herdr-shield	live-only
+chat.whoami-cli	fleet-reader/whoami-from-cli@linux+herdr-shield+project+claude	live-only
+chat.whoami-mcp	fleet-reader/whoami-from-mcp@linux+herdr-shield+project+claude	live-only
+chat.status-cli	fleet-reader/status-and-last@linux+herdr-shield+project+claude	live-only
+chat.status-mcp	fleet-reader/status-and-last@linux+herdr-shield+project+claude	live-only
+chat.last-mcp	fleet-reader/status-and-last@linux+herdr-shield+project+claude	live-only
+report.transcript	fleet-reader/transcript-reads-engine-log@linux+herdr-shield+project+claude	live-only
+report.statusline	fleet-reader/statusline-renders@linux+herdr-shield+project+claude	crossing: live-only
+herdr.whoami-moved	fleet-reader/whoami-after-workspace-move@linux+herdr-shield+project+claude	live-only
+report.index	fleet-reader/index-keeps-good-engine-sessions-after-bad-record@linux+herdr-shield+project+claude	live-only
+headless.exec	fleet-reader/headless-names-partial-usage@linux+herdr-shield+project+claude	live-only
+report.tokens	fleet-reader/tokens-names-partial-transcript-read@linux+herdr-shield+project+claude	live-only
+ops.name-sync	fleet-reader/name-sync-preserves-good-name-after-partial-read@linux+herdr-shield+project+claude	live-only
+chat.watch-cli	fleet-reader/watch-keeps-child-activity-working@linux+herdr-shield+project+claude	live-only
+report.statusline	fleet-reader/statusline-warns-on-partial-account-read@linux+herdr-shield+project+claude	live-only
+chat.whoami-cli	fleet-reader/forecast-seat-event-pane-moved-door-whoami@linux+herdr-shield+project+claude	live-only
+chat.whoami-cli	tier-unit:fleet-reader-privileged-user-manager	unit-tier holder: pfm/internal/gather/procfs_test.go::TestRealProcFSEnvironWithheldIsForeign
+chat.whoami-cli	fleet-reader/forecast-herdr-pane-recycled-occupant-backend-ownership-changed-seat-host-dead@linux+herdr-shield+project+claude	live-only
+herdr.whoami-moved	fleet-reader/forecast-env-pane-birth-id-inherited-herdr-event-pane-moved-workspace-seat-supervisor-ancestor-in-chain@linux+herdr-shield+project+claude	live-only
+chat.whoami-mcp	fleet-reader/forecast-caller-identity-bare-seat-id-seat-name-unnamed-lookup-chat-mcp-transcript-id@linux+herdr-shield+project+claude	live-only
+chat.new-cli	fleet-reader/forecast-settings-json-unreadable-engine-claude-code-telemetry-env-user-otlp-set@linux+herdr-shield+project+claude	live-only
+report.transcript	tier-unit:fleet-reader-transcript-append-read-window	unit-tier holder: pfm/internal/transcript/reader_test.go::TestAReadingIsNeverDatedBeforeTheNewestRecordItRead; pfm/internal/transcript/reader_test.go::TestReaderNeverServesARecordItDidNotRead
+report.statusline	tier-unit:fleet-reader-background-cost-without-session	unit-tier holder: pfm/internal/costsink/sink_test.go::TestSinkAcceptsRequestScopedBackgroundWithoutSession
+report.statusline	fleet-reader/forecast-harness-payload-omits-usage-window-shared-cache-present-fresh-engine-claude-code@linux+herdr-shield+project+claude	live-only
+chat.whoami-cli	fleet-reader/whoami-from-cli@linux+herdr-shield+project+codex	live-only
+chat.whoami-mcp	fleet-reader/whoami-from-mcp@linux+herdr-shield+project+codex	live-only
+chat.status-cli	fleet-reader/status-and-last@linux+herdr-shield+project+codex	live-only
+chat.status-mcp	fleet-reader/status-and-last@linux+herdr-shield+project+codex	live-only
+chat.last-mcp	fleet-reader/status-and-last@linux+herdr-shield+project+codex	live-only
+report.transcript	fleet-reader/transcript-reads-engine-log@linux+herdr-shield+project+codex	live-only
+herdr.whoami-moved	fleet-reader/whoami-after-workspace-move@linux+herdr-shield+project+codex	live-only
+chat.whoami-cli	fleet-reader/forecast-seat-lookup-not-in-chat-process-environ-read-permission-denied-engine-codex@linux+herdr-shield+project+codex	live-only
+report.transcript	tier-unit:fleet-reader-held-compressed-rollout	unit-tier holder: pfm/internal/gather/codexproc_test.go::TestDetectCodexThreadsMarksOnlyAnFDHeldRolloutAsHeld
+report.transcript	tier-unit:fleet-reader-compressed-rollout-name	unit-tier holder: pfm/internal/gather/codexproc_test.go::TestCodexRolloutIDAcceptsTimestampedAndUntimestampedFiles
+chat.whoami-cli	fleet-reader/whoami-from-cli@linux+herdr-shield+project+opencode	live-only
+chat.whoami-mcp	fleet-reader/whoami-from-mcp@linux+herdr-shield+project+opencode	live-only
+chat.status-cli	fleet-reader/status-and-last@linux+herdr-shield+project+opencode	live-only
+chat.status-mcp	fleet-reader/status-and-last@linux+herdr-shield+project+opencode	live-only
+chat.last-mcp	fleet-reader/status-and-last@linux+herdr-shield+project+opencode	live-only
+report.transcript	fleet-reader/transcript-reads-engine-log@linux+herdr-shield+project+opencode	live-only
+herdr.whoami-moved	fleet-reader/whoami-after-workspace-move@linux+herdr-shield+project+opencode	live-only
+chat.whoami-cli	fleet-reader/whoami-from-cli@linux+herdr-shield+subfolder+claude	live-only
+chat.whoami-mcp	fleet-reader/whoami-from-mcp@linux+herdr-shield+subfolder+claude	live-only
+chat.whoami-cli	fleet-reader/whoami-from-cli@linux+herdr-shield+worktree+claude	live-only
+chat.whoami-mcp	fleet-reader/whoami-from-mcp@linux+herdr-shield+worktree+claude	live-only
+chat.whoami-cli	fleet-reader/whoami-from-cli@linux+tmux+project+claude	live-only
+chat.whoami-mcp	fleet-reader/whoami-from-mcp@linux+tmux+project+claude	live-only
+chat.status-cli	fleet-reader/status-and-last@linux+tmux+project+claude	live-only
+chat.status-mcp	fleet-reader/status-and-last@linux+tmux+project+claude	live-only
+chat.last-mcp	fleet-reader/status-and-last@linux+tmux+project+claude	live-only
+report.transcript	fleet-reader/transcript-reads-engine-log@linux+tmux+project+claude	live-only
+report.statusline	fleet-reader/statusline-renders@linux+tmux+project+claude	crossing: live-only
+theme.use	fleet-reader/theme-keeps-healthy-rows-beside-stopped-tmux@linux+tmux+project+claude	live-only
+ops.reap	fleet-reader/reap-preview-retains-live-foreign-owner@linux+tmux+project+claude	live-only
+headless.exec	fleet-reader/headless-retains-valid-answer-after-partial-read@linux+tmux+project+claude	live-only
+chat.whoami-cli	fleet-reader/forecast-process-state-stopped-tmux-server-job-control-stopped-caller-context-outside-pane@linux+tmux+project+claude	live-only
+launcher.version	fleet-reader/forecast-tmux-server-sigstopped-caller-claude-launch-outside-pane@linux+tmux+project+claude	live-only
+chat.whoami-cli	fleet-reader/whoami-from-cli@linux+tmux+project+codex	live-only
+chat.whoami-mcp	fleet-reader/whoami-from-mcp@linux+tmux+project+codex	live-only
+chat.status-cli	fleet-reader/status-and-last@linux+tmux+project+codex	live-only
+chat.status-mcp	fleet-reader/status-and-last@linux+tmux+project+codex	live-only
+chat.last-mcp	fleet-reader/status-and-last@linux+tmux+project+codex	live-only
+report.transcript	fleet-reader/transcript-reads-engine-log@linux+tmux+project+codex	live-only
+chat.whoami-cli	fleet-reader/whoami-from-cli@linux+tmux+project+opencode	live-only
+chat.whoami-mcp	fleet-reader/whoami-from-mcp@linux+tmux+project+opencode	live-only
+chat.status-cli	fleet-reader/status-and-last@linux+tmux+project+opencode	live-only
+chat.status-mcp	fleet-reader/status-and-last@linux+tmux+project+opencode	live-only
+chat.last-mcp	fleet-reader/status-and-last@linux+tmux+project+opencode	live-only
+report.transcript	fleet-reader/transcript-reads-engine-log@linux+tmux+project+opencode	live-only
+herdr.restore	machine-restart/herdr-restart-restores@linux	crossing: live-only
+chat.call-mcp	machine-restart/after-restore-call-delivers@linux	crossing: live-only
+tmux.server-stopped	machine-restart/tmux-server-gone@linux	live-only
+lifecycle.restart	machine-restart/daemons-restart@linux	live-only
+herdr.restore	machine-restart/restore-renames-carried-tabs@linux	live-only
+herdr.restore	machine-restart/forecast-multiplexer-herdr-runtime-event-version-pruned@linux	live-only
+herdr.restore	machine-restart/forecast-herdr-indicators-on-runtime-event-herdr-server-stop@linux	live-only
+lifecycle.restart	machine-restart/forecast-service-manager-systemd-user-unit-state-active-before-stop-trigger-unit-timer-up@linux	live-only
+herdr.restore	machine-restart/forecast-supervisor-state-outlived-preference-change-engine-claude-code-seat-state-revived-on-restart@linux	live-only
+lifecycle.restart	machine-restart/forecast-unit-state-before-stopped-mcp-daemon-supervised-or-by-hand-service-manager-systemd@linux	live-only
+chat.whoami-cli	machine-restart/forecast-seat-proof@linux+herdr-shield+project+claude	live-only
+chat.call-mcp	machine-restart/mcp-route-herdr-to-herdr-local-fallback@linux+herdr-shield+project+claude+to-herdr-shield-project-claude	live-only
+chat.call-mcp	machine-restart/mcp-route-herdr-to-herdr-daemon-proxy@linux+herdr-shield+project+claude+to-herdr-shield-project-claude	live-only
+chat.call-mcp	machine-restart/mcp-route-herdr-to-tmux-local-fallback@linux+herdr-shield+project+claude+to-tmux-project-claude	live-only
+chat.call-mcp	machine-restart/mcp-route-herdr-to-tmux-daemon-proxy@linux+herdr-shield+project+claude+to-tmux-project-claude	live-only
+chat.call-mcp	machine-restart/mcp-route-tmux-to-herdr-local-fallback@linux+tmux+project+claude+to-herdr-shield-project-claude	live-only
+chat.call-mcp	machine-restart/mcp-route-tmux-to-herdr-daemon-proxy@linux+tmux+project+claude+to-herdr-shield-project-claude	live-only
+chat.call-mcp	machine-restart/mcp-route-tmux-to-tmux-local-fallback@linux+tmux+project+claude+to-tmux-project-claude	live-only
+chat.call-mcp	machine-restart/mcp-route-tmux-to-tmux-daemon-proxy@linux+tmux+project+claude+to-tmux-project-claude	live-only
+chat.exit-typed	chat-ending/exit-typed@linux+herdr-shield+project+claude	live-only
+chat.exit-native	chat-ending/exit-native@linux+herdr-shield+project+claude	live-only
+ops.doctor-after-ends	chat-ending/exit-native@linux+herdr-shield+project+claude	crossing: live-only
+chat.exit-mcp	chat-ending/exit-from-mcp@linux+herdr-shield+project+claude	live-only
+chat.resume-picker	chat-ending/resume-from-picker@linux+herdr-shield+project+claude	live-only
+chat.open-cli	chat-ending/resume-from-cli@linux+herdr-shield+project+claude	live-only
+chat.unkill-picker	chat-ending/unkill-from-picker@linux+herdr-shield+project+claude	live-only
+chat.clear	chat-ending/clear-hides-old-conversation@linux+herdr-shield+project+claude	live-only
+chat.unkill-cli	chat-ending/unkill-from-cli@linux+herdr-shield+project+claude	live-only
+chat.kill-lost-seat	chat-ending/kill-lost-seat-from-picker@linux+herdr-shield+project+claude	live-only
+chat.open-cli	chat-ending/resume-after-native-exit-cli@linux+herdr-shield+project+claude	live-only
+chat.kill-cli	chat-ending/kill-from-cli@linux+herdr-shield+project+claude	live-only
+chat.open-mcp	chat-ending/resume-after-cli-kill-mcp@linux+herdr-shield+project+claude	live-only
+chat.kill-mcp	chat-ending/kill-from-mcp@linux+herdr-shield+project+claude	live-only
+chat.resume-picker	chat-ending/resume-after-mcp-kill-picker@linux+herdr-shield+project+claude	live-only
+chat.kill-picker	chat-ending/kill-hides-from-picker@linux+herdr-shield+project+claude	live-only
+chat.open-cli	chat-ending/resume-after-picker-hide-cli@linux+herdr-shield+project+claude	live-only
+chat.end-cli	chat-ending/end-from-cli@linux+herdr-shield+project+claude	live-only
+chat.open-cli	chat-ending/history-after-end@linux+herdr-shield+project+claude	live-only
+chat.branch-cli	chat-ending/branch-after-end@linux+herdr-shield+project+claude	live-only
+chat.recover-cli	chat-ending/recover-after-end@linux+herdr-shield+project+claude	live-only
+ops.archive	chat-ending/archive-after-end@linux+herdr-shield+project+claude	live-only
+chat.kill-cli	chat-ending/forecast-seat-event-pane-reused-runtime-event-kill@linux+herdr-shield+project+claude	live-only
+chat.kill-cli	chat-ending/forecast-seat-event-seat-dead-runtime-event-kill@linux+herdr-shield+project+claude	live-only
+chat.kill-cli	chat-ending/forecast-multiplexer-herdr-runtime-event-kill@linux+herdr-shield+project+claude	live-only
+chat.clear	chat-ending/forecast-multiplexer-herdr-runtime-event-clear@linux+herdr-shield+project+claude	live-only
+chat.branch-cli	chat-ending/forecast-spawn-request-codex-home-unset-codex-account-home-non-default-launch-path-chat-branch-spawn@linux+herdr-shield+project+codex	live-only
+chat.exit-typed	chat-ending/exit-typed@linux+herdr-shield+project+codex	live-only
+chat.exit-native	chat-ending/exit-native@linux+herdr-shield+project+codex	live-only
+ops.doctor-after-ends	chat-ending/exit-native@linux+herdr-shield+project+codex	crossing: live-only
+chat.exit-mcp	chat-ending/exit-from-mcp@linux+herdr-shield+project+codex	live-only
+chat.resume-picker	chat-ending/resume-from-picker@linux+herdr-shield+project+codex	live-only
+chat.open-cli	chat-ending/resume-from-cli@linux+herdr-shield+project+codex	live-only
+chat.unkill-picker	chat-ending/unkill-from-picker@linux+herdr-shield+project+codex	live-only
+chat.unkill-cli	chat-ending/unkill-from-cli@linux+herdr-shield+project+codex	live-only
+chat.kill-lost-seat	chat-ending/kill-lost-seat-from-picker@linux+herdr-shield+project+codex	live-only
+chat.open-cli	chat-ending/resume-after-native-exit-cli@linux+herdr-shield+project+codex	live-only
+chat.kill-cli	chat-ending/kill-from-cli@linux+herdr-shield+project+codex	live-only
+chat.open-mcp	chat-ending/resume-after-cli-kill-mcp@linux+herdr-shield+project+codex	live-only
+chat.kill-mcp	chat-ending/kill-from-mcp@linux+herdr-shield+project+codex	live-only
+chat.resume-picker	chat-ending/resume-after-mcp-kill-picker@linux+herdr-shield+project+codex	live-only
+chat.kill-picker	chat-ending/kill-hides-from-picker@linux+herdr-shield+project+codex	live-only
+chat.open-cli	chat-ending/resume-after-picker-hide-cli@linux+herdr-shield+project+codex	live-only
+chat.end-cli	chat-ending/end-from-cli@linux+herdr-shield+project+codex	live-only
+chat.open-cli	chat-ending/history-after-end@linux+herdr-shield+project+codex	live-only
+chat.branch-cli	chat-ending/branch-after-end@linux+herdr-shield+project+codex	live-only
+chat.recover-cli	chat-ending/recover-after-end@linux+herdr-shield+project+codex	live-only
+ops.archive	chat-ending/archive-after-end@linux+herdr-shield+project+codex	live-only
+chat.exit-typed	chat-ending/exit-typed@linux+herdr-shield+project+opencode	live-only
+chat.exit-native	chat-ending/exit-native@linux+herdr-shield+project+opencode	live-only
+ops.doctor-after-ends	chat-ending/exit-native@linux+herdr-shield+project+opencode	crossing: live-only
+chat.exit-mcp	chat-ending/exit-from-mcp@linux+herdr-shield+project+opencode	live-only
+chat.resume-picker	chat-ending/resume-from-picker@linux+herdr-shield+project+opencode	live-only
+chat.open-cli	chat-ending/resume-from-cli@linux+herdr-shield+project+opencode	live-only
+chat.unkill-picker	chat-ending/unkill-from-picker@linux+herdr-shield+project+opencode	live-only
+chat.unkill-cli	chat-ending/unkill-from-cli@linux+herdr-shield+project+opencode	live-only
+chat.kill-self-refused	chat-ending/kill-self-refused@linux+herdr-shield+project+opencode	live-only
+chat.kill-lost-seat	chat-ending/kill-lost-seat-from-picker@linux+herdr-shield+project+opencode	live-only
+chat.open-cli	chat-ending/resume-after-native-exit-cli@linux+herdr-shield+project+opencode	live-only
+chat.kill-cli	chat-ending/kill-from-cli@linux+herdr-shield+project+opencode	live-only
+chat.open-mcp	chat-ending/resume-after-cli-kill-mcp@linux+herdr-shield+project+opencode	live-only
+chat.kill-mcp	chat-ending/kill-from-mcp@linux+herdr-shield+project+opencode	live-only
+chat.resume-picker	chat-ending/resume-after-mcp-kill-picker@linux+herdr-shield+project+opencode	live-only
+chat.kill-picker	chat-ending/kill-hides-from-picker@linux+herdr-shield+project+opencode	live-only
+chat.open-cli	chat-ending/resume-after-picker-hide-cli@linux+herdr-shield+project+opencode	live-only
+chat.end-cli	chat-ending/end-from-cli@linux+herdr-shield+project+opencode	live-only
+chat.open-cli	chat-ending/history-after-end@linux+herdr-shield+project+opencode	live-only
+chat.branch-cli	chat-ending/branch-after-end@linux+herdr-shield+project+opencode	live-only
+chat.recover-cli	chat-ending/recover-after-end@linux+herdr-shield+project+opencode	live-only
+ops.archive	chat-ending/archive-after-end@linux+herdr-shield+project+opencode	live-only
+chat.exit-native	chat-ending/exit-native@linux+herdr-shield+subfolder+claude	live-only
+ops.doctor-after-ends	chat-ending/exit-native@linux+herdr-shield+subfolder+claude	crossing: live-only
+chat.end-cli	chat-ending/end-from-cli@linux+herdr-shield+subfolder+claude	live-only
+chat.resume-picker	chat-ending/resume-from-picker@linux+herdr-shield+subfolder+claude	live-only
+chat.exit-native	chat-ending/exit-native@linux+herdr-shield+worktree+claude	live-only
+ops.doctor-after-ends	chat-ending/exit-native@linux+herdr-shield+worktree+claude	crossing: live-only
+chat.end-cli	chat-ending/end-from-cli@linux+herdr-shield+worktree+claude	live-only
+chat.resume-picker	chat-ending/resume-from-picker@linux+herdr-shield+worktree+claude	live-only
+chat.exit-typed	chat-ending/exit-typed@linux+tmux+project+claude	live-only
+chat.exit-native	chat-ending/exit-native@linux+tmux+project+claude	live-only
+ops.doctor-after-ends	chat-ending/exit-native@linux+tmux+project+claude	crossing: live-only
+chat.exit-mcp	chat-ending/exit-from-mcp@linux+tmux+project+claude	live-only
+chat.resume-picker	chat-ending/resume-from-picker@linux+tmux+project+claude	live-only
+chat.open-cli	chat-ending/resume-from-cli@linux+tmux+project+claude	live-only
+chat.unkill-picker	chat-ending/unkill-from-picker@linux+tmux+project+claude	live-only
+chat.clear	chat-ending/clear-hides-old-conversation@linux+tmux+project+claude	live-only
+chat.unkill-cli	chat-ending/unkill-from-cli@linux+tmux+project+claude	live-only
+chat.open-ssh	chat-ending/resume-from-cli-over-ssh@linux+tmux+project+claude	live-only
+ops.archive	chat-ending/archive-ends-only-selected-live-process@linux+tmux+project+claude	live-only
+chat.open-cli	chat-ending/resume-after-native-exit-cli@linux+tmux+project+claude	live-only
+chat.kill-cli	chat-ending/kill-from-cli@linux+tmux+project+claude	live-only
+chat.open-mcp	chat-ending/resume-after-cli-kill-mcp@linux+tmux+project+claude	live-only
+chat.kill-mcp	chat-ending/kill-from-mcp@linux+tmux+project+claude	live-only
+chat.resume-picker	chat-ending/resume-after-mcp-kill-picker@linux+tmux+project+claude	live-only
+chat.kill-picker	chat-ending/kill-hides-from-picker@linux+tmux+project+claude	live-only
+chat.open-cli	chat-ending/resume-after-picker-hide-cli@linux+tmux+project+claude	live-only
+chat.end-cli	chat-ending/end-from-cli@linux+tmux+project+claude	live-only
+chat.open-cli	chat-ending/history-after-end@linux+tmux+project+claude	live-only
+chat.branch-cli	chat-ending/branch-after-end@linux+tmux+project+claude	live-only
+chat.recover-cli	chat-ending/recover-after-end@linux+tmux+project+claude	live-only
+ops.archive	chat-ending/archive-after-end@linux+tmux+project+claude	live-only
+chat.open-ssh	chat-ending/forecast-os-linux-caller-session-ssh-privsep-nondumpable-process-owner-foreign-uid@linux+tmux+project+claude	live-only
+chat.open-ssh	chat-ending/forecast-transport-ssh-os-linux-process-sshd-nondumpable-ancestor@linux+tmux+project+claude	live-only
+chat.exit-typed	chat-ending/exit-typed@linux+tmux+project+codex	live-only
+chat.exit-native	chat-ending/exit-native@linux+tmux+project+codex	live-only
+ops.doctor-after-ends	chat-ending/exit-native@linux+tmux+project+codex	crossing: live-only
+chat.exit-mcp	chat-ending/exit-from-mcp@linux+tmux+project+codex	live-only
+chat.resume-picker	chat-ending/resume-from-picker@linux+tmux+project+codex	live-only
+chat.open-cli	chat-ending/resume-from-cli@linux+tmux+project+codex	live-only
+chat.unkill-picker	chat-ending/unkill-from-picker@linux+tmux+project+codex	live-only
+chat.unkill-cli	chat-ending/unkill-from-cli@linux+tmux+project+codex	live-only
+chat.open-cli	chat-ending/resume-after-native-exit-cli@linux+tmux+project+codex	live-only
+chat.kill-cli	chat-ending/kill-from-cli@linux+tmux+project+codex	live-only
+chat.open-mcp	chat-ending/resume-after-cli-kill-mcp@linux+tmux+project+codex	live-only
+chat.kill-mcp	chat-ending/kill-from-mcp@linux+tmux+project+codex	live-only
+chat.resume-picker	chat-ending/resume-after-mcp-kill-picker@linux+tmux+project+codex	live-only
+chat.kill-picker	chat-ending/kill-hides-from-picker@linux+tmux+project+codex	live-only
+chat.open-cli	chat-ending/resume-after-picker-hide-cli@linux+tmux+project+codex	live-only
+chat.end-cli	chat-ending/end-from-cli@linux+tmux+project+codex	live-only
+chat.open-cli	chat-ending/history-after-end@linux+tmux+project+codex	live-only
+chat.branch-cli	chat-ending/branch-after-end@linux+tmux+project+codex	live-only
+chat.recover-cli	chat-ending/recover-after-end@linux+tmux+project+codex	live-only
+ops.archive	chat-ending/archive-after-end@linux+tmux+project+codex	live-only
+chat.exit-typed	chat-ending/exit-typed@linux+tmux+project+opencode	live-only
+chat.exit-native	chat-ending/exit-native@linux+tmux+project+opencode	live-only
+ops.doctor-after-ends	chat-ending/exit-native@linux+tmux+project+opencode	crossing: live-only
+chat.exit-mcp	chat-ending/exit-from-mcp@linux+tmux+project+opencode	live-only
+chat.resume-picker	chat-ending/resume-from-picker@linux+tmux+project+opencode	live-only
+chat.open-cli	chat-ending/resume-from-cli@linux+tmux+project+opencode	live-only
+chat.unkill-picker	chat-ending/unkill-from-picker@linux+tmux+project+opencode	live-only
+chat.unkill-cli	chat-ending/unkill-from-cli@linux+tmux+project+opencode	live-only
+chat.kill-self-refused	chat-ending/kill-self-refused@linux+tmux+project+opencode	live-only
+chat.open-cli	chat-ending/resume-after-native-exit-cli@linux+tmux+project+opencode	live-only
+chat.kill-cli	chat-ending/kill-from-cli@linux+tmux+project+opencode	live-only
+chat.open-mcp	chat-ending/resume-after-cli-kill-mcp@linux+tmux+project+opencode	live-only
+chat.kill-mcp	chat-ending/kill-from-mcp@linux+tmux+project+opencode	live-only
+chat.resume-picker	chat-ending/resume-after-mcp-kill-picker@linux+tmux+project+opencode	live-only
+chat.kill-picker	chat-ending/kill-hides-from-picker@linux+tmux+project+opencode	live-only
+chat.open-cli	chat-ending/resume-after-picker-hide-cli@linux+tmux+project+opencode	live-only
+chat.end-cli	chat-ending/end-from-cli@linux+tmux+project+opencode	live-only
+chat.open-cli	chat-ending/history-after-end@linux+tmux+project+opencode	live-only
+chat.branch-cli	chat-ending/branch-after-end@linux+tmux+project+opencode	live-only
+chat.recover-cli	chat-ending/recover-after-end@linux+tmux+project+opencode	live-only
+ops.archive	chat-ending/archive-after-end@linux+tmux+project+opencode	live-only
+ops.doctor-after-ends	machine-lifecycle/doctor-after-chats-ended@linux	crossing: live-only
+lifecycle.uninstall	machine-lifecycle/uninstall-keeps-foreign@linux	live-only
+lifecycle.uninstall-again	machine-lifecycle/uninstall-again-changes-nothing@linux	live-only
+lifecycle.uninstall	machine-lifecycle/forecast-command-pfm-uninstall-surface-themed-terminal-and-editor-theme-sync-on@linux	live-only
+lifecycle.install-stats-link	machine-lifecycle/install-after-stats-replaced-link@macos	live-only
+lifecycle.install	machine-lifecycle/install-over-live-chat@macos	crossing: live-only
+lifecycle.install-again	machine-lifecycle/install-again-changes-nothing@macos	live-only
+ops.doctor	machine-lifecycle/doctor-reads-clean@macos	live-only
+lifecycle.live-chat-upgrade	machine-lifecycle/live-chat-adopts-release@macos	live-only
+lifecycle.install	machine-lifecycle/forecast-engine-sync-global-wire-failed-service-manager-launchd-os-macos@macos	live-only
+lifecycle.install	machine-lifecycle/forecast-launchd-job-loaded-unchanged-plist-binary-swap-pfm-replaced-after-start-os-macos@macos	live-only
+lifecycle.install	machine-lifecycle/forecast-install-shell-tool-shell-bash-login-shell-lookup-dscl-os-macos@macos	live-only
+lifecycle.install	machine-lifecycle/forecast-rebuild-pfm-binary-rewritten-service-manager-launchd-os-macos@macos	live-only
+lifecycle.install	machine-lifecycle/forecast-checksum-tool-shasum-fallback-release-cache-host-built-slot-os-macos@macos	live-only
+ops.doctor	machine-lifecycle/forecast-probe-mcp-serve-snapshot-os-macos-process-state-zombie@macos	live-only
+lifecycle.install	machine-lifecycle/forecast-launchd-state-spawn-failed-or-stale-pid-binary-swap-pfm-replaced-while-running-os-macos@macos	live-only
+lifecycle.install	machine-lifecycle/forecast-launch-agent-state-reregistered-on-build-launchd-program-rebuilt-adhoc-pfm-os-macos@macos	live-only
+picker.open-herdr-tab	terminal-open/open-picker@macos+herdr-native	live-only
+picker.open-typed	terminal-open/open-picker-typed@macos+herdr-native	live-only
+picker.open-bash	terminal-open/open-picker-bash@macos+herdr-native	live-only
+picker.auto-open-off	terminal-open/plain-shell-stays-plain@macos+herdr-native	live-only
+picker.quit	terminal-open/picker-quit-leaves-shell@macos+herdr-native	live-only
+picker.open-typed	terminal-open/open-picker@macos+tmux	live-only
+picker.open-typed	terminal-open/open-picker-typed@macos+tmux	live-only
+picker.open-bash	terminal-open/open-picker-bash@macos+tmux	live-only
+picker.quit	terminal-open/picker-quit-leaves-shell@macos+tmux	live-only
+chat.new-storm	chat-birth/storm-of-births@macos+herdr-native	live-only
+chat.new-picker	chat-birth/new-from-picker@macos+herdr-native+project+claude	live-only
+herdr.restore	chat-birth/new-from-picker@macos+herdr-native+project+claude	crossing: live-only
+chat.new-typed	chat-birth/new-typed@macos+herdr-native+project+claude	live-only
+lifecycle.install	chat-birth/new-typed@macos+herdr-native+project+claude	crossing: live-only
+chat.new-cli	chat-birth/new-from-cli@macos+herdr-native+project+claude	live-only
+chat.ls-cli	chat-birth/new-from-cli@macos+herdr-native+project+claude	crossing: live-only
+herdr.place-from-foreign-workspace	chat-birth/open-from-foreign-workspace@macos+herdr-native+project+claude	live-only
+chat.name-cli	chat-birth/rename-from-cli@macos+herdr-native+project+claude	live-only
+chat.name-mcp	chat-birth/rename-from-mcp@macos+herdr-native+project+claude	live-only
+herdr.rename-inside-engine	chat-birth/rename-inside-engine-updates-tab@macos+herdr-native+project+claude	live-only
+herdr.rename-replaced-session	chat-birth/rename-after-session-replaced@macos+herdr-native+project+claude	live-only
+chat.new-picker	chat-birth/new-from-picker-fork-shell-start-home-workspace-state-named@macos+herdr-native+project+claude	live-only
+herdr.restore	chat-birth/new-from-picker-fork-shell-start-home-workspace-state-named@macos+herdr-native+project+claude	live-only
+chat.new-picker	chat-birth/new-from-picker-fork-shell-start-home-workspace-state-misnamed-exclusive@macos+herdr-native+project+claude	live-only
+herdr.restore	chat-birth/new-from-picker-fork-shell-start-home-workspace-state-misnamed-exclusive@macos+herdr-native+project+claude	live-only
+chat.new-picker	chat-birth/new-from-picker-fork-shell-start-home-workspace-state-mixed@macos+herdr-native+project+claude	live-only
+herdr.restore	chat-birth/new-from-picker-fork-shell-start-home-workspace-state-mixed@macos+herdr-native+project+claude	live-only
+chat.new-picker	chat-birth/new-from-picker-fork-shell-start-project-workspace-state-named@macos+herdr-native+project+claude	live-only
+herdr.restore	chat-birth/new-from-picker-fork-shell-start-project-workspace-state-named@macos+herdr-native+project+claude	live-only
+chat.new-picker	chat-birth/new-from-picker-fork-shell-start-project-workspace-state-misnamed-exclusive@macos+herdr-native+project+claude	live-only
+herdr.restore	chat-birth/new-from-picker-fork-shell-start-project-workspace-state-misnamed-exclusive@macos+herdr-native+project+claude	live-only
+chat.new-picker	chat-birth/new-from-picker-fork-shell-start-project-workspace-state-mixed@macos+herdr-native+project+claude	live-only
+herdr.restore	chat-birth/new-from-picker-fork-shell-start-project-workspace-state-mixed@macos+herdr-native+project+claude	live-only
+chat.new-typed	chat-birth/new-typed-fork-shell-start-home-workspace-state-named@macos+herdr-native+project+claude	live-only
+lifecycle.install	chat-birth/new-typed-fork-shell-start-home-workspace-state-named@macos+herdr-native+project+claude	live-only
+chat.new-typed	chat-birth/new-typed-fork-shell-start-home-workspace-state-misnamed-exclusive@macos+herdr-native+project+claude	live-only
+lifecycle.install	chat-birth/new-typed-fork-shell-start-home-workspace-state-misnamed-exclusive@macos+herdr-native+project+claude	live-only
+chat.new-typed	chat-birth/new-typed-fork-shell-start-home-workspace-state-mixed@macos+herdr-native+project+claude	live-only
+lifecycle.install	chat-birth/new-typed-fork-shell-start-home-workspace-state-mixed@macos+herdr-native+project+claude	live-only
+chat.new-typed	chat-birth/new-typed-fork-shell-start-project-workspace-state-named@macos+herdr-native+project+claude	live-only
+lifecycle.install	chat-birth/new-typed-fork-shell-start-project-workspace-state-named@macos+herdr-native+project+claude	live-only
+chat.new-typed	chat-birth/new-typed-fork-shell-start-project-workspace-state-misnamed-exclusive@macos+herdr-native+project+claude	live-only
+lifecycle.install	chat-birth/new-typed-fork-shell-start-project-workspace-state-misnamed-exclusive@macos+herdr-native+project+claude	live-only
+chat.new-typed	chat-birth/new-typed-fork-shell-start-project-workspace-state-mixed@macos+herdr-native+project+claude	live-only
+lifecycle.install	chat-birth/new-typed-fork-shell-start-project-workspace-state-mixed@macos+herdr-native+project+claude	live-only
+chat.new-cli	chat-birth/new-from-cli-fork-shell-start-home-workspace-state-named@macos+herdr-native+project+claude	live-only
+chat.ls-cli	chat-birth/new-from-cli-fork-shell-start-home-workspace-state-named@macos+herdr-native+project+claude	live-only
+chat.new-cli	chat-birth/new-from-cli-fork-shell-start-home-workspace-state-misnamed-exclusive@macos+herdr-native+project+claude	live-only
+chat.ls-cli	chat-birth/new-from-cli-fork-shell-start-home-workspace-state-misnamed-exclusive@macos+herdr-native+project+claude	live-only
+chat.new-cli	chat-birth/new-from-cli-fork-shell-start-home-workspace-state-mixed@macos+herdr-native+project+claude	live-only
+chat.ls-cli	chat-birth/new-from-cli-fork-shell-start-home-workspace-state-mixed@macos+herdr-native+project+claude	live-only
+chat.new-cli	chat-birth/new-from-cli-fork-shell-start-project-workspace-state-named@macos+herdr-native+project+claude	live-only
+chat.ls-cli	chat-birth/new-from-cli-fork-shell-start-project-workspace-state-named@macos+herdr-native+project+claude	live-only
+chat.new-cli	chat-birth/new-from-cli-fork-shell-start-project-workspace-state-misnamed-exclusive@macos+herdr-native+project+claude	live-only
+chat.ls-cli	chat-birth/new-from-cli-fork-shell-start-project-workspace-state-misnamed-exclusive@macos+herdr-native+project+claude	live-only
+chat.new-cli	chat-birth/new-from-cli-fork-shell-start-project-workspace-state-mixed@macos+herdr-native+project+claude	live-only
+chat.ls-cli	chat-birth/new-from-cli-fork-shell-start-project-workspace-state-mixed@macos+herdr-native+project+claude	live-only
+herdr.place-from-foreign-workspace	chat-birth/open-from-foreign-workspace-fork-shell-start-home-workspace-state-named@macos+herdr-native+project+claude	live-only
+herdr.place-from-foreign-workspace	chat-birth/open-from-foreign-workspace-fork-shell-start-home-workspace-state-misnamed-exclusive@macos+herdr-native+project+claude	live-only
+herdr.place-from-foreign-workspace	chat-birth/open-from-foreign-workspace-fork-shell-start-home-workspace-state-mixed@macos+herdr-native+project+claude	live-only
+herdr.place-from-foreign-workspace	chat-birth/open-from-foreign-workspace-fork-shell-start-project-workspace-state-named@macos+herdr-native+project+claude	live-only
+herdr.place-from-foreign-workspace	chat-birth/open-from-foreign-workspace-fork-shell-start-project-workspace-state-misnamed-exclusive@macos+herdr-native+project+claude	live-only
+herdr.place-from-foreign-workspace	chat-birth/open-from-foreign-workspace-fork-shell-start-project-workspace-state-mixed@macos+herdr-native+project+claude	live-only
+chat.new-picker	chat-birth/new-from-picker@macos+herdr-native+project+codex	live-only
+herdr.restore	chat-birth/new-from-picker@macos+herdr-native+project+codex	crossing: live-only
+chat.new-typed	chat-birth/new-typed@macos+herdr-native+project+codex	live-only
+lifecycle.install	chat-birth/new-typed@macos+herdr-native+project+codex	crossing: live-only
+chat.new-cli	chat-birth/new-from-cli@macos+herdr-native+project+codex	live-only
+chat.ls-cli	chat-birth/new-from-cli@macos+herdr-native+project+codex	crossing: live-only
+herdr.place-from-foreign-workspace	chat-birth/open-from-foreign-workspace@macos+herdr-native+project+codex	live-only
+chat.name-cli	chat-birth/rename-from-cli@macos+herdr-native+project+codex	live-only
+chat.name-mcp	chat-birth/rename-from-mcp@macos+herdr-native+project+codex	live-only
+chat.new-picker	chat-birth/new-from-picker-fork-shell-start-home@macos+herdr-native+project+codex	live-only
+herdr.restore	chat-birth/new-from-picker-fork-shell-start-home@macos+herdr-native+project+codex	live-only
+chat.new-picker	chat-birth/new-from-picker-fork-shell-start-project@macos+herdr-native+project+codex	live-only
+herdr.restore	chat-birth/new-from-picker-fork-shell-start-project@macos+herdr-native+project+codex	live-only
+chat.new-typed	chat-birth/new-typed-fork-shell-start-home@macos+herdr-native+project+codex	live-only
+lifecycle.install	chat-birth/new-typed-fork-shell-start-home@macos+herdr-native+project+codex	live-only
+chat.new-typed	chat-birth/new-typed-fork-shell-start-project@macos+herdr-native+project+codex	live-only
+lifecycle.install	chat-birth/new-typed-fork-shell-start-project@macos+herdr-native+project+codex	live-only
+chat.new-cli	chat-birth/new-from-cli-fork-shell-start-home@macos+herdr-native+project+codex	live-only
+chat.ls-cli	chat-birth/new-from-cli-fork-shell-start-home@macos+herdr-native+project+codex	live-only
+chat.new-cli	chat-birth/new-from-cli-fork-shell-start-project@macos+herdr-native+project+codex	live-only
+chat.ls-cli	chat-birth/new-from-cli-fork-shell-start-project@macos+herdr-native+project+codex	live-only
+herdr.place-from-foreign-workspace	chat-birth/open-from-foreign-workspace-fork-shell-start-home@macos+herdr-native+project+codex	live-only
+herdr.place-from-foreign-workspace	chat-birth/open-from-foreign-workspace-fork-shell-start-project@macos+herdr-native+project+codex	live-only
+chat.new-picker	chat-birth/new-from-picker@macos+herdr-native+project+opencode	live-only
+herdr.restore	chat-birth/new-from-picker@macos+herdr-native+project+opencode	crossing: live-only
+chat.new-typed	chat-birth/new-typed@macos+herdr-native+project+opencode	live-only
+lifecycle.install	chat-birth/new-typed@macos+herdr-native+project+opencode	crossing: live-only
+chat.new-cli	chat-birth/new-from-cli@macos+herdr-native+project+opencode	live-only
+chat.ls-cli	chat-birth/new-from-cli@macos+herdr-native+project+opencode	crossing: live-only
+herdr.place-from-foreign-workspace	chat-birth/open-from-foreign-workspace@macos+herdr-native+project+opencode	live-only
+chat.name-cli	chat-birth/rename-from-cli@macos+herdr-native+project+opencode	live-only
+chat.name-mcp	chat-birth/rename-from-mcp@macos+herdr-native+project+opencode	live-only
+herdr.rename-inside-engine	chat-birth/rename-inside-engine-updates-tab@macos+herdr-native+project+opencode	live-only
+chat.new-picker	chat-birth/new-from-picker-fork-shell-start-home@macos+herdr-native+project+opencode	live-only
+herdr.restore	chat-birth/new-from-picker-fork-shell-start-home@macos+herdr-native+project+opencode	live-only
+chat.new-picker	chat-birth/new-from-picker-fork-shell-start-project@macos+herdr-native+project+opencode	live-only
+herdr.restore	chat-birth/new-from-picker-fork-shell-start-project@macos+herdr-native+project+opencode	live-only
+chat.new-typed	chat-birth/new-typed-fork-shell-start-home@macos+herdr-native+project+opencode	live-only
+lifecycle.install	chat-birth/new-typed-fork-shell-start-home@macos+herdr-native+project+opencode	live-only
+chat.new-typed	chat-birth/new-typed-fork-shell-start-project@macos+herdr-native+project+opencode	live-only
+lifecycle.install	chat-birth/new-typed-fork-shell-start-project@macos+herdr-native+project+opencode	live-only
+chat.new-cli	chat-birth/new-from-cli-fork-shell-start-home@macos+herdr-native+project+opencode	live-only
+chat.ls-cli	chat-birth/new-from-cli-fork-shell-start-home@macos+herdr-native+project+opencode	live-only
+chat.new-cli	chat-birth/new-from-cli-fork-shell-start-project@macos+herdr-native+project+opencode	live-only
+chat.ls-cli	chat-birth/new-from-cli-fork-shell-start-project@macos+herdr-native+project+opencode	live-only
+herdr.place-from-foreign-workspace	chat-birth/open-from-foreign-workspace-fork-shell-start-home@macos+herdr-native+project+opencode	live-only
+herdr.place-from-foreign-workspace	chat-birth/open-from-foreign-workspace-fork-shell-start-project@macos+herdr-native+project+opencode	live-only
+chat.new-picker	chat-birth/new-from-picker@macos+herdr-native+subfolder+claude	live-only
+herdr.restore	chat-birth/new-from-picker@macos+herdr-native+subfolder+claude	crossing: live-only
+chat.new-typed	chat-birth/new-typed@macos+herdr-native+subfolder+claude	live-only
+lifecycle.install	chat-birth/new-typed@macos+herdr-native+subfolder+claude	crossing: live-only
+chat.new-cli	chat-birth/new-from-cli@macos+herdr-native+subfolder+claude	live-only
+chat.ls-cli	chat-birth/new-from-cli@macos+herdr-native+subfolder+claude	crossing: live-only
+herdr.place-from-foreign-workspace	chat-birth/open-from-foreign-workspace@macos+herdr-native+subfolder+claude	live-only
+chat.new-picker	chat-birth/new-from-picker-fork-shell-start-home@macos+herdr-native+subfolder+claude	live-only
+herdr.restore	chat-birth/new-from-picker-fork-shell-start-home@macos+herdr-native+subfolder+claude	live-only
+chat.new-typed	chat-birth/new-typed-fork-shell-start-home@macos+herdr-native+subfolder+claude	live-only
+lifecycle.install	chat-birth/new-typed-fork-shell-start-home@macos+herdr-native+subfolder+claude	live-only
+chat.new-cli	chat-birth/new-from-cli-fork-shell-start-home@macos+herdr-native+subfolder+claude	live-only
+chat.ls-cli	chat-birth/new-from-cli-fork-shell-start-home@macos+herdr-native+subfolder+claude	live-only
+herdr.place-from-foreign-workspace	chat-birth/open-from-foreign-workspace-fork-shell-start-home@macos+herdr-native+subfolder+claude	live-only
+chat.new-picker	chat-birth/new-from-picker@macos+herdr-native+worktree+claude	live-only
+herdr.restore	chat-birth/new-from-picker@macos+herdr-native+worktree+claude	crossing: live-only
+chat.new-typed	chat-birth/new-typed@macos+herdr-native+worktree+claude	live-only
+lifecycle.install	chat-birth/new-typed@macos+herdr-native+worktree+claude	crossing: live-only
+chat.new-cli	chat-birth/new-from-cli@macos+herdr-native+worktree+claude	live-only
+chat.ls-cli	chat-birth/new-from-cli@macos+herdr-native+worktree+claude	crossing: live-only
+herdr.place-from-foreign-workspace	chat-birth/open-from-foreign-workspace@macos+herdr-native+worktree+claude	live-only
+chat.new-picker	chat-birth/new-from-picker-fork-shell-start-home@macos+herdr-native+worktree+claude	live-only
+herdr.restore	chat-birth/new-from-picker-fork-shell-start-home@macos+herdr-native+worktree+claude	live-only
+chat.new-typed	chat-birth/new-typed-fork-shell-start-home@macos+herdr-native+worktree+claude	live-only
+lifecycle.install	chat-birth/new-typed-fork-shell-start-home@macos+herdr-native+worktree+claude	live-only
+chat.new-cli	chat-birth/new-from-cli-fork-shell-start-home@macos+herdr-native+worktree+claude	live-only
+chat.ls-cli	chat-birth/new-from-cli-fork-shell-start-home@macos+herdr-native+worktree+claude	live-only
+herdr.place-from-foreign-workspace	chat-birth/open-from-foreign-workspace-fork-shell-start-home@macos+herdr-native+worktree+claude	live-only
+chat.new-storm	chat-birth/storm-of-births@macos+tmux	live-only
+tmux.server-stopped-new	chat-birth/new-typed-tmux-server-stopped@macos+tmux	live-only
+chat.new-picker	chat-birth/new-from-picker@macos+tmux+project+claude	live-only
+chat.new-typed	chat-birth/new-typed@macos+tmux+project+claude	live-only
+lifecycle.install	chat-birth/new-typed@macos+tmux+project+claude	crossing: live-only
+chat.new-cli	chat-birth/new-from-cli@macos+tmux+project+claude	live-only
+chat.ls-cli	chat-birth/new-from-cli@macos+tmux+project+claude	crossing: live-only
+chat.name-cli	chat-birth/rename-from-cli@macos+tmux+project+claude	live-only
+chat.name-mcp	chat-birth/rename-from-mcp@macos+tmux+project+claude	live-only
+chat.new-picker	chat-birth/new-from-picker@macos+tmux+project+codex	live-only
+chat.new-typed	chat-birth/new-typed@macos+tmux+project+codex	live-only
+lifecycle.install	chat-birth/new-typed@macos+tmux+project+codex	crossing: live-only
+chat.new-cli	chat-birth/new-from-cli@macos+tmux+project+codex	live-only
+chat.ls-cli	chat-birth/new-from-cli@macos+tmux+project+codex	crossing: live-only
+chat.name-cli	chat-birth/rename-from-cli@macos+tmux+project+codex	live-only
+chat.name-mcp	chat-birth/rename-from-mcp@macos+tmux+project+codex	live-only
+chat.new-picker	chat-birth/new-from-picker@macos+tmux+project+opencode	live-only
+chat.new-typed	chat-birth/new-typed@macos+tmux+project+opencode	live-only
+lifecycle.install	chat-birth/new-typed@macos+tmux+project+opencode	crossing: live-only
+chat.new-cli	chat-birth/new-from-cli@macos+tmux+project+opencode	live-only
+chat.ls-cli	chat-birth/new-from-cli@macos+tmux+project+opencode	crossing: live-only
+chat.name-cli	chat-birth/rename-from-cli@macos+tmux+project+opencode	live-only
+chat.name-mcp	chat-birth/rename-from-mcp@macos+tmux+project+opencode	live-only
+chat.reload-typed	chat-reload/reload-typed@macos+herdr-native+project+claude	live-only
+chat.reload-cli	chat-reload/reload-from-cli@macos+herdr-native+project+claude	live-only
+chat.reload-picker	chat-reload/reload-from-picker@macos+herdr-native+project+claude	live-only
+chat.reload-account	chat-reload/reload-into-account@macos+herdr-native+project+claude	live-only
+report.statusline	chat-reload/reload-into-account@macos+herdr-native+project+claude	crossing: live-only
+chat.reload-account-refused	chat-reload/reload-into-missing-account-refused@macos+herdr-native+project+claude	live-only
+chat.reload-background-work	chat-reload/reload-typed-with-background-work@macos+herdr-native+project+claude	live-only
+herdr.reload-retired-seat	chat-reload/reload-after-retired-seat@macos+herdr-native+project+claude	live-only
+chat.reload-continued	chat-reload/reload-continued-chat@macos+herdr-native+project+claude	live-only
+chat.reload-continued	chat-reload/reload-continued-chat-background-handoff@macos+herdr-native+project+claude	live-only
+chat.reload-new	chat-reload/reload-fresh@macos+herdr-native+project+claude	twin:tier-hermetic:reload-new-starts-fresh-conversation
+chat.reload-new-hide	chat-reload/reload-fresh-hidden@macos+herdr-native+project+claude	live-only
+chat.reload-cli	chat-reload/forecast-seat-state-native-seat-hook-origin-prompt-hook-backend-herdr@macos+herdr-native+project+claude	live-only
+chat.reload-typed	chat-reload/reload-typed@macos+herdr-native+project+codex	live-only
+chat.reload-cli	chat-reload/reload-from-cli@macos+herdr-native+project+codex	live-only
+chat.reload-picker	chat-reload/reload-from-picker@macos+herdr-native+project+codex	live-only
+chat.reload-new	chat-reload/reload-fresh@macos+herdr-native+project+codex	twin:tier-hermetic:reload-new-starts-fresh-conversation
+chat.reload-new-hide	chat-reload/reload-fresh-hidden@macos+herdr-native+project+codex	live-only
+chat.reload-typed	chat-reload/reload-typed@macos+herdr-native+project+opencode	live-only
+chat.reload-cli	chat-reload/reload-from-cli@macos+herdr-native+project+opencode	live-only
+chat.reload-picker	chat-reload/reload-from-picker@macos+herdr-native+project+opencode	live-only
+chat.reload-new	chat-reload/reload-fresh@macos+herdr-native+project+opencode	twin:tier-hermetic:reload-new-starts-fresh-conversation
+chat.reload-new-hide	chat-reload/reload-fresh-hidden@macos+herdr-native+project+opencode	live-only
+chat.reload-typed	chat-reload/reload-typed@macos+herdr-native+subfolder+claude	live-only
+chat.reload-cli	chat-reload/reload-from-cli@macos+herdr-native+subfolder+claude	live-only
+chat.reload-continued	chat-reload/reload-continued-chat@macos+herdr-native+subfolder+claude	live-only
+chat.reload-continued	chat-reload/reload-continued-chat-background-handoff@macos+herdr-native+subfolder+claude	live-only
+chat.reload-new	chat-reload/reload-fresh@macos+herdr-native+subfolder+claude	twin:tier-hermetic:reload-new-starts-fresh-conversation
+chat.reload-new-hide	chat-reload/reload-fresh-hidden@macos+herdr-native+subfolder+claude	live-only
+chat.reload-typed	chat-reload/reload-typed@macos+herdr-native+worktree+claude	live-only
+chat.reload-cli	chat-reload/reload-from-cli@macos+herdr-native+worktree+claude	live-only
+chat.reload-continued	chat-reload/reload-continued-chat@macos+herdr-native+worktree+claude	live-only
+chat.reload-continued	chat-reload/reload-continued-chat-background-handoff@macos+herdr-native+worktree+claude	live-only
+chat.reload-new	chat-reload/reload-fresh@macos+herdr-native+worktree+claude	twin:tier-hermetic:reload-new-starts-fresh-conversation
+chat.reload-new-hide	chat-reload/reload-fresh-hidden@macos+herdr-native+worktree+claude	live-only
+chat.reload-typed	chat-reload/reload-typed@macos+tmux+project+claude	live-only
+chat.reload-cli	chat-reload/reload-from-cli@macos+tmux+project+claude	live-only
+chat.reload-picker	chat-reload/reload-from-picker@macos+tmux+project+claude	live-only
+chat.reload-account	chat-reload/reload-into-account@macos+tmux+project+claude	live-only
+report.statusline	chat-reload/reload-into-account@macos+tmux+project+claude	crossing: live-only
+chat.reload-account-refused	chat-reload/reload-into-missing-account-refused@macos+tmux+project+claude	live-only
+chat.reload-background-work	chat-reload/reload-typed-with-background-work@macos+tmux+project+claude	live-only
+chat.reload-continued	chat-reload/reload-continued-chat@macos+tmux+project+claude	live-only
+chat.reload-continued	chat-reload/reload-continued-chat-background-handoff@macos+tmux+project+claude	live-only
+chat.reload-new	chat-reload/reload-fresh@macos+tmux+project+claude	twin:tier-hermetic:reload-new-starts-fresh-conversation
+chat.reload-new-hide	chat-reload/reload-fresh-hidden@macos+tmux+project+claude	live-only
+chat.reload-typed	chat-reload/reload-typed@macos+tmux+project+codex	live-only
+chat.reload-cli	chat-reload/reload-from-cli@macos+tmux+project+codex	live-only
+chat.reload-picker	chat-reload/reload-from-picker@macos+tmux+project+codex	live-only
+chat.reload-new	chat-reload/reload-fresh@macos+tmux+project+codex	twin:tier-hermetic:reload-new-starts-fresh-conversation
+chat.reload-new-hide	chat-reload/reload-fresh-hidden@macos+tmux+project+codex	live-only
+chat.reload-typed	chat-reload/reload-typed@macos+tmux+project+opencode	live-only
+chat.reload-cli	chat-reload/reload-from-cli@macos+tmux+project+opencode	live-only
+chat.reload-picker	chat-reload/reload-from-picker@macos+tmux+project+opencode	live-only
+chat.reload-new	chat-reload/reload-fresh@macos+tmux+project+opencode	twin:tier-hermetic:reload-new-starts-fresh-conversation
+chat.reload-new-hide	chat-reload/reload-fresh-hidden@macos+tmux+project+opencode	live-only
+herdr.indicators-worktree-removed	chat-attention/indicators-survive-worktree-removal@macos+herdr-native	live-only
+status.turn	chat-attention/turn-works-then-idles@macos+herdr-native+project+claude	live-only
+status.question-blocked	chat-attention/question-blocks@macos+herdr-native+project+claude	live-only
+status.answer-unblocks	chat-attention/answer-unblocks@macos+herdr-native+project+claude	live-only
+status.permission-blocked	chat-attention/permission-blocks@macos+herdr-native+project+claude	live-only
+status.permission-answered	chat-attention/permission-answered-unblocks@macos+herdr-native+project+claude	live-only
+status.subagent-hold	chat-attention/subagent-holds-working@macos+herdr-native+project+claude	live-only
+status.dropped-report-recovers	chat-attention/turn-idles-after-dropped-report@macos+herdr-native+project+claude	live-only
+status.turn-error	chat-attention/turn-fails-shows-error@macos+herdr-native+project+claude	live-only
+status.notification-turn	chat-attention/notification-turn-works-then-idles@macos+herdr-native+project+claude	live-only
+status.turn	chat-attention/forecast-engine-claude-code-report-source-pfm-legacy-herdr-detection-native-claude-foreground@macos+herdr-native+project+claude	live-only
+status.turn	chat-attention/turn-works-then-idles@macos+herdr-native+project+codex	live-only
+status.question-blocked	chat-attention/question-blocks@macos+herdr-native+project+codex	live-only
+status.answer-unblocks	chat-attention/answer-unblocks@macos+herdr-native+project+codex	live-only
+status.permission-blocked	chat-attention/permission-blocks@macos+herdr-native+project+codex	live-only
+status.permission-answered	chat-attention/permission-answered-unblocks@macos+herdr-native+project+codex	live-only
+status.dropped-report-recovers	chat-attention/turn-idles-after-dropped-report@macos+herdr-native+project+codex	live-only
+status.turn-error	chat-attention/turn-fails-shows-error@macos+herdr-native+project+codex	live-only
+status.turn	chat-attention/turn-works-then-idles@macos+herdr-native+project+opencode	live-only
+status.question-blocked	chat-attention/question-blocks@macos+herdr-native+project+opencode	live-only
+status.answer-unblocks	chat-attention/answer-unblocks@macos+herdr-native+project+opencode	live-only
+status.permission-blocked	chat-attention/permission-blocks@macos+herdr-native+project+opencode	live-only
+status.permission-answered	chat-attention/permission-answered-unblocks@macos+herdr-native+project+opencode	live-only
+status.dropped-report-recovers	chat-attention/turn-idles-after-dropped-report@macos+herdr-native+project+opencode	live-only
+status.turn-error	chat-attention/turn-fails-shows-error@macos+herdr-native+project+opencode	live-only
+status.turn	chat-attention/turn-works-then-idles@macos+tmux+project+claude	live-only
+status.question-blocked	chat-attention/question-blocks@macos+tmux+project+claude	live-only
+status.answer-unblocks	chat-attention/answer-unblocks@macos+tmux+project+claude	live-only
+status.permission-blocked	chat-attention/permission-blocks@macos+tmux+project+claude	live-only
+status.permission-answered	chat-attention/permission-answered-unblocks@macos+tmux+project+claude	live-only
+status.subagent-hold	chat-attention/subagent-holds-working@macos+tmux+project+claude	live-only
+status.notification-turn	chat-attention/notification-turn-works-then-idles@macos+tmux+project+claude	live-only
+status.turn	chat-attention/turn-works-then-idles@macos+tmux+project+codex	live-only
+status.question-blocked	chat-attention/question-blocks@macos+tmux+project+codex	live-only
+status.answer-unblocks	chat-attention/answer-unblocks@macos+tmux+project+codex	live-only
+status.permission-blocked	chat-attention/permission-blocks@macos+tmux+project+codex	live-only
+status.permission-answered	chat-attention/permission-answered-unblocks@macos+tmux+project+codex	live-only
+status.turn	chat-attention/turn-works-then-idles@macos+tmux+project+opencode	live-only
+status.question-blocked	chat-attention/question-blocks@macos+tmux+project+opencode	live-only
+status.answer-unblocks	chat-attention/answer-unblocks@macos+tmux+project+opencode	live-only
+status.permission-blocked	chat-attention/permission-blocks@macos+tmux+project+opencode	live-only
+status.permission-answered	chat-attention/permission-answered-unblocks@macos+tmux+project+opencode	live-only
+chat.new-mcp	chat-mesh/spawn-child-from-mcp@macos+herdr-native+project+claude	live-only
+chat.keys-mcp	chat-mesh/keys-and-capture-child@macos+herdr-native+project+claude	live-only
+chat.capture-mcp	chat-mesh/keys-and-capture-child@macos+herdr-native+project+claude	live-only
+chat.call-dead-refused	chat-mesh/call-dead-refused@macos+herdr-native+project+claude	live-only
+chat.call-mcp	chat-mesh/call-from-mcp@macos+herdr-native+project+claude+to-herdr-native-project-claude	crossing: live-only
+chat.call-cli	chat-mesh/call-from-cli@macos+herdr-native+project+claude+to-herdr-native-project-claude	live-only
+chat.call-cli	chat-mesh/call-herdr-to-herdr-claude-to-claude-recipient-idle@macos+herdr-native+project+claude+to-herdr-native-project-claude	live-only
+chat.call-cli	chat-mesh/call-herdr-to-herdr-claude-to-claude-recipient-working@macos+herdr-native+project+claude+to-herdr-native-project-claude	live-only
+chat.call-cli	chat-mesh/call-herdr-to-herdr-claude-to-claude-recipient-draft@macos+herdr-native+project+claude+to-herdr-native-project-claude	live-only
+chat.call-cli	chat-mesh/call-herdr-to-herdr-claude-to-claude-recipient-modal@macos+herdr-native+project+claude+to-herdr-native-project-claude	live-only
+chat.call-cli	chat-mesh/call-herdr-to-herdr-claude-to-claude-recipient-blocked@macos+herdr-native+project+claude+to-herdr-native-project-claude	live-only
+chat.call-mcp	chat-mesh/call-from-cli-born-chat@macos+herdr-native+project+claude+to-herdr-native-project-claude	live-only
+chat.call-mcp	chat-mesh/call-from-picker-born-chat@macos+herdr-native+project+claude+to-herdr-native-project-claude	live-only
+chat.call-mcp	chat-mesh/forecast-process-table-sysctl-not-procfs-live-chat-claude-session-running-os-macos@macos+herdr-native+project+claude+to-herdr-native-project-claude	live-only
+chat.call-mcp	chat-mesh/call-from-mcp@macos+herdr-native+project+claude+to-herdr-native-project-codex	crossing: live-only
+chat.call-cli	chat-mesh/call-from-cli@macos+herdr-native+project+claude+to-herdr-native-project-codex	live-only
+chat.call-cli	chat-mesh/call-herdr-to-herdr-claude-to-codex-recipient-idle@macos+herdr-native+project+claude+to-herdr-native-project-codex	live-only
+chat.call-cli	chat-mesh/call-herdr-to-herdr-claude-to-codex-recipient-working@macos+herdr-native+project+claude+to-herdr-native-project-codex	live-only
+chat.call-cli	chat-mesh/call-herdr-to-herdr-claude-to-codex-recipient-draft@macos+herdr-native+project+claude+to-herdr-native-project-codex	live-only
+chat.call-cli	chat-mesh/call-herdr-to-herdr-claude-to-codex-recipient-modal@macos+herdr-native+project+claude+to-herdr-native-project-codex	live-only
+chat.call-cli	chat-mesh/call-herdr-to-herdr-claude-to-codex-recipient-blocked@macos+herdr-native+project+claude+to-herdr-native-project-codex	live-only
+chat.call-mcp	chat-mesh/call-from-mcp@macos+herdr-native+project+claude+to-herdr-native-project-opencode	crossing: live-only
+chat.call-cli	chat-mesh/call-from-cli@macos+herdr-native+project+claude+to-herdr-native-project-opencode	live-only
+chat.call-mcp	chat-mesh/call-from-mcp@macos+herdr-native+project+claude+to-tmux-project-claude	crossing: live-only
+chat.call-cli	chat-mesh/call-from-cli@macos+herdr-native+project+claude+to-tmux-project-claude	live-only
+chat.call-cli	chat-mesh/call-herdr-to-tmux-claude-to-claude-recipient-idle@macos+herdr-native+project+claude+to-tmux-project-claude	live-only
+chat.call-cli	chat-mesh/call-herdr-to-tmux-claude-to-claude-recipient-working@macos+herdr-native+project+claude+to-tmux-project-claude	live-only
+chat.call-cli	chat-mesh/call-herdr-to-tmux-claude-to-claude-recipient-draft@macos+herdr-native+project+claude+to-tmux-project-claude	live-only
+chat.call-cli	chat-mesh/call-herdr-to-tmux-claude-to-claude-recipient-modal@macos+herdr-native+project+claude+to-tmux-project-claude	live-only
+chat.call-cli	chat-mesh/call-herdr-to-tmux-claude-to-claude-recipient-blocked@macos+herdr-native+project+claude+to-tmux-project-claude	live-only
+chat.call-mcp	chat-mesh/call-from-cli-born-chat@macos+herdr-native+project+claude+to-tmux-project-claude	live-only
+chat.call-mcp	chat-mesh/call-from-picker-born-chat@macos+herdr-native+project+claude+to-tmux-project-claude	live-only
+chat.call-mcp	chat-mesh/call-from-mcp@macos+herdr-native+project+claude+to-tmux-project-codex	crossing: live-only
+chat.call-cli	chat-mesh/call-from-cli@macos+herdr-native+project+claude+to-tmux-project-codex	live-only
+chat.call-cli	chat-mesh/call-herdr-to-tmux-claude-to-codex-recipient-idle@macos+herdr-native+project+claude+to-tmux-project-codex	live-only
+chat.call-cli	chat-mesh/call-herdr-to-tmux-claude-to-codex-recipient-working@macos+herdr-native+project+claude+to-tmux-project-codex	live-only
+chat.call-cli	chat-mesh/call-herdr-to-tmux-claude-to-codex-recipient-draft@macos+herdr-native+project+claude+to-tmux-project-codex	live-only
+chat.call-cli	chat-mesh/call-herdr-to-tmux-claude-to-codex-recipient-modal@macos+herdr-native+project+claude+to-tmux-project-codex	live-only
+chat.call-cli	chat-mesh/call-herdr-to-tmux-claude-to-codex-recipient-blocked@macos+herdr-native+project+claude+to-tmux-project-codex	live-only
+chat.call-mcp	chat-mesh/call-from-mcp@macos+herdr-native+project+claude+to-tmux-project-opencode	crossing: live-only
+chat.call-cli	chat-mesh/call-from-cli@macos+herdr-native+project+claude+to-tmux-project-opencode	live-only
+chat.new-mcp	chat-mesh/spawn-child-from-mcp@macos+herdr-native+project+codex	live-only
+chat.keys-mcp	chat-mesh/keys-and-capture-child@macos+herdr-native+project+codex	live-only
+chat.capture-mcp	chat-mesh/keys-and-capture-child@macos+herdr-native+project+codex	live-only
+chat.call-mcp	chat-mesh/call-from-mcp@macos+herdr-native+project+codex+to-herdr-native-project-claude	crossing: live-only
+chat.call-mcp	chat-mesh/call-from-mcp@macos+herdr-native+project+codex+to-herdr-native-project-codex	crossing: live-only
+chat.call-mcp	chat-mesh/call-from-mcp@macos+herdr-native+project+codex+to-herdr-native-project-opencode	crossing: live-only
+chat.call-mcp	chat-mesh/call-from-mcp@macos+herdr-native+project+codex+to-tmux-project-claude	crossing: live-only
+chat.call-mcp	chat-mesh/call-from-mcp@macos+herdr-native+project+codex+to-tmux-project-codex	crossing: live-only
+chat.call-mcp	chat-mesh/call-from-mcp@macos+herdr-native+project+codex+to-tmux-project-opencode	crossing: live-only
+chat.new-mcp	chat-mesh/spawn-child-from-mcp@macos+herdr-native+project+opencode	live-only
+chat.keys-mcp	chat-mesh/keys-and-capture-child@macos+herdr-native+project+opencode	live-only
+chat.capture-mcp	chat-mesh/keys-and-capture-child@macos+herdr-native+project+opencode	live-only
+chat.call-mcp	chat-mesh/call-from-mcp@macos+herdr-native+project+opencode+to-herdr-native-project-claude	crossing: live-only
+chat.call-mcp	chat-mesh/call-from-mcp@macos+herdr-native+project+opencode+to-herdr-native-project-codex	crossing: live-only
+chat.call-mcp	chat-mesh/call-from-mcp@macos+herdr-native+project+opencode+to-herdr-native-project-opencode	crossing: live-only
+chat.call-mcp	chat-mesh/call-from-mcp@macos+herdr-native+project+opencode+to-tmux-project-claude	crossing: live-only
+chat.call-mcp	chat-mesh/call-from-mcp@macos+herdr-native+project+opencode+to-tmux-project-codex	crossing: live-only
+chat.call-mcp	chat-mesh/call-from-mcp@macos+herdr-native+project+opencode+to-tmux-project-opencode	crossing: live-only
+chat.new-mcp	chat-mesh/spawn-child-from-mcp@macos+tmux+project+claude	live-only
+chat.keys-mcp	chat-mesh/keys-and-capture-child@macos+tmux+project+claude	live-only
+chat.capture-mcp	chat-mesh/keys-and-capture-child@macos+tmux+project+claude	live-only
+chat.call-dead-refused	chat-mesh/call-dead-refused@macos+tmux+project+claude	live-only
+chat.call-mcp	chat-mesh/call-from-mcp@macos+tmux+project+claude+to-herdr-native-project-claude	crossing: live-only
+chat.call-cli	chat-mesh/call-from-cli@macos+tmux+project+claude+to-herdr-native-project-claude	live-only
+chat.call-cli	chat-mesh/call-tmux-to-herdr-claude-to-claude-recipient-idle@macos+tmux+project+claude+to-herdr-native-project-claude	live-only
+chat.call-cli	chat-mesh/call-tmux-to-herdr-claude-to-claude-recipient-working@macos+tmux+project+claude+to-herdr-native-project-claude	live-only
+chat.call-cli	chat-mesh/call-tmux-to-herdr-claude-to-claude-recipient-draft@macos+tmux+project+claude+to-herdr-native-project-claude	live-only
+chat.call-cli	chat-mesh/call-tmux-to-herdr-claude-to-claude-recipient-modal@macos+tmux+project+claude+to-herdr-native-project-claude	live-only
+chat.call-cli	chat-mesh/call-tmux-to-herdr-claude-to-claude-recipient-blocked@macos+tmux+project+claude+to-herdr-native-project-claude	live-only
+chat.call-mcp	chat-mesh/call-from-cli-born-chat@macos+tmux+project+claude+to-herdr-native-project-claude	live-only
+chat.call-mcp	chat-mesh/call-from-picker-born-chat@macos+tmux+project+claude+to-herdr-native-project-claude	live-only
+chat.call-mcp	chat-mesh/call-from-mcp@macos+tmux+project+claude+to-herdr-native-project-codex	crossing: live-only
+chat.call-cli	chat-mesh/call-from-cli@macos+tmux+project+claude+to-herdr-native-project-codex	live-only
+chat.call-cli	chat-mesh/call-tmux-to-herdr-claude-to-codex-recipient-idle@macos+tmux+project+claude+to-herdr-native-project-codex	live-only
+chat.call-cli	chat-mesh/call-tmux-to-herdr-claude-to-codex-recipient-working@macos+tmux+project+claude+to-herdr-native-project-codex	live-only
+chat.call-cli	chat-mesh/call-tmux-to-herdr-claude-to-codex-recipient-draft@macos+tmux+project+claude+to-herdr-native-project-codex	live-only
+chat.call-cli	chat-mesh/call-tmux-to-herdr-claude-to-codex-recipient-modal@macos+tmux+project+claude+to-herdr-native-project-codex	live-only
+chat.call-cli	chat-mesh/call-tmux-to-herdr-claude-to-codex-recipient-blocked@macos+tmux+project+claude+to-herdr-native-project-codex	live-only
+chat.call-mcp	chat-mesh/call-from-mcp@macos+tmux+project+claude+to-herdr-native-project-opencode	crossing: live-only
+chat.call-cli	chat-mesh/call-from-cli@macos+tmux+project+claude+to-herdr-native-project-opencode	live-only
+chat.call-mcp	chat-mesh/call-from-mcp@macos+tmux+project+claude+to-tmux-project-claude	crossing: live-only
+chat.call-cli	chat-mesh/call-from-cli@macos+tmux+project+claude+to-tmux-project-claude	live-only
+chat.call-cli	chat-mesh/call-tmux-to-tmux-claude-to-claude-recipient-idle@macos+tmux+project+claude+to-tmux-project-claude	live-only
+chat.call-cli	chat-mesh/call-tmux-to-tmux-claude-to-claude-recipient-working@macos+tmux+project+claude+to-tmux-project-claude	live-only
+chat.call-cli	chat-mesh/call-tmux-to-tmux-claude-to-claude-recipient-draft@macos+tmux+project+claude+to-tmux-project-claude	live-only
+chat.call-cli	chat-mesh/call-tmux-to-tmux-claude-to-claude-recipient-modal@macos+tmux+project+claude+to-tmux-project-claude	live-only
+chat.call-cli	chat-mesh/call-tmux-to-tmux-claude-to-claude-recipient-blocked@macos+tmux+project+claude+to-tmux-project-claude	live-only
+chat.call-mcp	chat-mesh/call-from-cli-born-chat@macos+tmux+project+claude+to-tmux-project-claude	live-only
+chat.call-mcp	chat-mesh/call-from-picker-born-chat@macos+tmux+project+claude+to-tmux-project-claude	live-only
+chat.call-mcp	chat-mesh/call-from-mcp@macos+tmux+project+claude+to-tmux-project-codex	crossing: live-only
+chat.call-cli	chat-mesh/call-from-cli@macos+tmux+project+claude+to-tmux-project-codex	live-only
+chat.call-cli	chat-mesh/call-tmux-to-tmux-claude-to-codex-recipient-idle@macos+tmux+project+claude+to-tmux-project-codex	live-only
+chat.call-cli	chat-mesh/call-tmux-to-tmux-claude-to-codex-recipient-working@macos+tmux+project+claude+to-tmux-project-codex	live-only
+chat.call-cli	chat-mesh/call-tmux-to-tmux-claude-to-codex-recipient-draft@macos+tmux+project+claude+to-tmux-project-codex	live-only
+chat.call-cli	chat-mesh/call-tmux-to-tmux-claude-to-codex-recipient-modal@macos+tmux+project+claude+to-tmux-project-codex	live-only
+chat.call-cli	chat-mesh/call-tmux-to-tmux-claude-to-codex-recipient-blocked@macos+tmux+project+claude+to-tmux-project-codex	live-only
+chat.call-mcp	chat-mesh/call-from-mcp@macos+tmux+project+claude+to-tmux-project-opencode	crossing: live-only
+chat.call-cli	chat-mesh/call-from-cli@macos+tmux+project+claude+to-tmux-project-opencode	live-only
+chat.new-mcp	chat-mesh/spawn-child-from-mcp@macos+tmux+project+codex	live-only
+chat.keys-mcp	chat-mesh/keys-and-capture-child@macos+tmux+project+codex	live-only
+chat.capture-mcp	chat-mesh/keys-and-capture-child@macos+tmux+project+codex	live-only
+chat.call-mcp	chat-mesh/call-from-mcp@macos+tmux+project+codex+to-herdr-native-project-claude	crossing: live-only
+chat.call-mcp	chat-mesh/call-from-mcp@macos+tmux+project+codex+to-herdr-native-project-codex	crossing: live-only
+chat.call-mcp	chat-mesh/call-from-mcp@macos+tmux+project+codex+to-herdr-native-project-opencode	crossing: live-only
+chat.call-mcp	chat-mesh/call-from-mcp@macos+tmux+project+codex+to-tmux-project-claude	crossing: live-only
+chat.call-mcp	chat-mesh/call-from-mcp@macos+tmux+project+codex+to-tmux-project-codex	crossing: live-only
+chat.call-mcp	chat-mesh/call-from-mcp@macos+tmux+project+codex+to-tmux-project-opencode	crossing: live-only
+chat.new-mcp	chat-mesh/spawn-child-from-mcp@macos+tmux+project+opencode	live-only
+chat.keys-mcp	chat-mesh/keys-and-capture-child@macos+tmux+project+opencode	live-only
+chat.capture-mcp	chat-mesh/keys-and-capture-child@macos+tmux+project+opencode	live-only
+chat.call-mcp	chat-mesh/call-from-mcp@macos+tmux+project+opencode+to-herdr-native-project-claude	crossing: live-only
+chat.call-mcp	chat-mesh/call-from-mcp@macos+tmux+project+opencode+to-herdr-native-project-codex	crossing: live-only
+chat.call-mcp	chat-mesh/call-from-mcp@macos+tmux+project+opencode+to-herdr-native-project-opencode	crossing: live-only
+chat.call-mcp	chat-mesh/call-from-mcp@macos+tmux+project+opencode+to-tmux-project-claude	crossing: live-only
+chat.call-mcp	chat-mesh/call-from-mcp@macos+tmux+project+opencode+to-tmux-project-codex	crossing: live-only
+chat.call-mcp	chat-mesh/call-from-mcp@macos+tmux+project+opencode+to-tmux-project-opencode	crossing: live-only
+chat.ls-picker	fleet-reader/picker-lists-the-fleet@macos	live-only
+chat.ls-cli	fleet-reader/ls-from-cli@macos	crossing: live-only
+chat.ls-mcp	fleet-reader/ls-from-mcp@macos	live-only
+picker.deleted-cwd	fleet-reader/picker-keeps-deleted-cwd-chat@macos	live-only
+lifecycle.install	tier-unit:fleet-reader-kernel-executable-path	unit-tier holders: pfm/internal/gather/procfs_test.go::TestProcExecutablePathUsesKernelPathNotArgv; pfm/internal/gather/signal_test.go::TestInstallOwns
+chat.ls-cli	fleet-reader/forecast-seat-owner-herdr-seat-row-process-table-empty-kinfo-or-eio-os-macos@macos	live-only
+chat.ls-cli	fleet-reader/forecast-recipe-origin-mcp-new-chat-os-macos-launcher-launchd-daemon@macos	live-only
+chat.ls-cli	tier-unit:fleet-reader-darwin-foreign-environment	unit-tier holder: pfm/internal/gather/procfs_test.go::TestProcessReadErrorUsesIndependentExistence/other_uid_EINVAL; pfm/internal/gather/procfs_darwin_test.go::TestDarwinEnvironTagsForeignProcess
+chat.ls-cli	tier-unit:fleet-reader-legacy-native-vanished-target	unit-tier holder: pfm/internal/hookentry/herdr_native_test.go::TestNativeRetirementOwnershipAndMovedTerminal/gone
+chat.ls-cli	fleet-reader/forecast-pane-env-herdr-pane-terminal-recipe-env-no-terminal-captured-launcher-launchd-daemon@macos	live-only
+herdr.ls-lost-seat	fleet-reader/ls-lists-lost-seat@macos+herdr-native	live-only
+herdr.picker-refresh-dead-seat	fleet-reader/picker-refresh-with-dead-seat@macos+herdr-native	live-only
+chat.whoami-cli	fleet-reader/whoami-from-cli@macos+herdr-native+project+claude	live-only
+chat.whoami-mcp	fleet-reader/whoami-from-mcp@macos+herdr-native+project+claude	live-only
+chat.status-cli	fleet-reader/status-and-last@macos+herdr-native+project+claude	live-only
+chat.status-mcp	fleet-reader/status-and-last@macos+herdr-native+project+claude	live-only
+chat.last-mcp	fleet-reader/status-and-last@macos+herdr-native+project+claude	live-only
+report.transcript	fleet-reader/transcript-reads-engine-log@macos+herdr-native+project+claude	live-only
+report.statusline	fleet-reader/statusline-renders@macos+herdr-native+project+claude	crossing: live-only
+herdr.whoami-moved	fleet-reader/whoami-after-workspace-move@macos+herdr-native+project+claude	live-only
+chat.whoami-cli	fleet-reader/forecast-process-table-kern-procargstwo-caller-resolve-lookup-os-macos@macos+herdr-native+project+claude	live-only
+theme.use	fleet-reader/theme-carried-fleet@macos+herdr-native+project+claude	twin:tier-hermetic:theme-use-writes-profile
+theme.use	fleet-reader/theme-carried-fleet@linux+herdr-shield+project+claude	twin:tier-hermetic:theme-use-writes-profile
+theme.use	fleet-reader/theme-carried-fleet@linux+herdr-shield+project+codex	twin:tier-hermetic:theme-use-writes-profile
+theme.use	fleet-reader/theme-carried-fleet@linux+herdr-shield+project+opencode	twin:tier-hermetic:theme-use-writes-profile
+theme.use	fleet-reader/theme-carried-fleet@linux+herdr-shield+subfolder+claude	twin:tier-hermetic:theme-use-writes-profile
+theme.use	fleet-reader/theme-carried-fleet@linux+herdr-shield+worktree+claude	twin:tier-hermetic:theme-use-writes-profile
+theme.use	fleet-reader/theme-carried-fleet@linux+tmux+project+claude	twin:tier-hermetic:theme-use-writes-profile
+theme.use	fleet-reader/theme-carried-fleet@linux+tmux+project+codex	twin:tier-hermetic:theme-use-writes-profile
+theme.use	fleet-reader/theme-carried-fleet@linux+tmux+project+opencode	twin:tier-hermetic:theme-use-writes-profile
+theme.use	fleet-reader/theme-carried-fleet@macos+herdr-native+project+codex	twin:tier-hermetic:theme-use-writes-profile
+theme.use	fleet-reader/theme-carried-fleet@macos+herdr-native+project+opencode	twin:tier-hermetic:theme-use-writes-profile
+theme.use	fleet-reader/theme-carried-fleet@macos+herdr-native+subfolder+claude	twin:tier-hermetic:theme-use-writes-profile
+theme.use	fleet-reader/theme-carried-fleet@macos+herdr-native+worktree+claude	twin:tier-hermetic:theme-use-writes-profile
+theme.use	fleet-reader/theme-carried-fleet@macos+tmux+project+claude	twin:tier-hermetic:theme-use-writes-profile
+theme.use	fleet-reader/theme-carried-fleet@macos+tmux+project+codex	twin:tier-hermetic:theme-use-writes-profile
+theme.use	fleet-reader/theme-carried-fleet@macos+tmux+project+opencode	twin:tier-hermetic:theme-use-writes-profile
+theme.use	fleet-reader/forecast-account-discovery-settings-unlistable-os-macos-service-manager-launchd-watch-paths@macos+herdr-native+project+claude	live-only
+theme.use	fleet-reader/forecast-service-manager-launchd-launchd-job-follower-own-job-os-macos@macos+herdr-native+project+claude	live-only
+theme.use	fleet-reader/forecast-os-macos-service-manager-launchd-watch-paths-settings-layout-symlinked-settings-json@macos+herdr-native+project+claude	live-only
+theme.use	fleet-reader/forecast-job-context-follower-inside-own-job-service-manager-launchd-os-macos@macos+herdr-native+project+claude	live-only
+theme.use	fleet-reader/forecast-launchd-watch-reduced-set-account-discovery-read-failed-os-macos@macos+herdr-native+project+claude	live-only
+chat.whoami-cli	fleet-reader/whoami-from-cli@macos+herdr-native+project+codex	live-only
+chat.whoami-mcp	fleet-reader/whoami-from-mcp@macos+herdr-native+project+codex	live-only
+chat.status-cli	fleet-reader/status-and-last@macos+herdr-native+project+codex	live-only
+chat.status-mcp	fleet-reader/status-and-last@macos+herdr-native+project+codex	live-only
+chat.last-mcp	fleet-reader/status-and-last@macos+herdr-native+project+codex	live-only
+report.transcript	fleet-reader/transcript-reads-engine-log@macos+herdr-native+project+codex	live-only
+herdr.whoami-moved	fleet-reader/whoami-after-workspace-move@macos+herdr-native+project+codex	live-only
+chat.whoami-cli	fleet-reader/whoami-from-cli@macos+herdr-native+project+opencode	live-only
+chat.whoami-mcp	fleet-reader/whoami-from-mcp@macos+herdr-native+project+opencode	live-only
+chat.status-cli	fleet-reader/status-and-last@macos+herdr-native+project+opencode	live-only
+chat.status-mcp	fleet-reader/status-and-last@macos+herdr-native+project+opencode	live-only
+chat.last-mcp	fleet-reader/status-and-last@macos+herdr-native+project+opencode	live-only
+report.transcript	fleet-reader/transcript-reads-engine-log@macos+herdr-native+project+opencode	live-only
+herdr.whoami-moved	fleet-reader/whoami-after-workspace-move@macos+herdr-native+project+opencode	live-only
+chat.whoami-cli	fleet-reader/whoami-from-cli@macos+herdr-native+subfolder+claude	live-only
+chat.whoami-mcp	fleet-reader/whoami-from-mcp@macos+herdr-native+subfolder+claude	live-only
+chat.whoami-cli	fleet-reader/whoami-from-cli@macos+herdr-native+worktree+claude	live-only
+chat.whoami-mcp	fleet-reader/whoami-from-mcp@macos+herdr-native+worktree+claude	live-only
+chat.whoami-cli	fleet-reader/whoami-from-cli@macos+tmux+project+claude	live-only
+chat.whoami-mcp	fleet-reader/whoami-from-mcp@macos+tmux+project+claude	live-only
+chat.status-cli	fleet-reader/status-and-last@macos+tmux+project+claude	live-only
+chat.status-mcp	fleet-reader/status-and-last@macos+tmux+project+claude	live-only
+chat.last-mcp	fleet-reader/status-and-last@macos+tmux+project+claude	live-only
+report.transcript	fleet-reader/transcript-reads-engine-log@macos+tmux+project+claude	live-only
+report.statusline	fleet-reader/statusline-renders@macos+tmux+project+claude	crossing: live-only
+chat.whoami-cli	fleet-reader/whoami-from-cli@macos+tmux+project+codex	live-only
+chat.whoami-mcp	fleet-reader/whoami-from-mcp@macos+tmux+project+codex	live-only
+chat.status-cli	fleet-reader/status-and-last@macos+tmux+project+codex	live-only
+chat.status-mcp	fleet-reader/status-and-last@macos+tmux+project+codex	live-only
+chat.last-mcp	fleet-reader/status-and-last@macos+tmux+project+codex	live-only
+report.transcript	fleet-reader/transcript-reads-engine-log@macos+tmux+project+codex	live-only
+chat.whoami-cli	fleet-reader/whoami-from-cli@macos+tmux+project+opencode	live-only
+chat.whoami-mcp	fleet-reader/whoami-from-mcp@macos+tmux+project+opencode	live-only
+chat.status-cli	fleet-reader/status-and-last@macos+tmux+project+opencode	live-only
+chat.status-mcp	fleet-reader/status-and-last@macos+tmux+project+opencode	live-only
+chat.last-mcp	fleet-reader/status-and-last@macos+tmux+project+opencode	live-only
+report.transcript	fleet-reader/transcript-reads-engine-log@macos+tmux+project+opencode	live-only
+herdr.restore	machine-restart/herdr-restart-restores@macos	crossing: live-only
+chat.call-mcp	machine-restart/after-restore-call-delivers@macos	crossing: live-only
+tmux.server-stopped	machine-restart/tmux-server-gone@macos	live-only
+lifecycle.restart	machine-restart/daemons-restart@macos	live-only
+herdr.restore	machine-restart/forecast-seat-restart-native-seat-relaunch-engine-claude-code-recorded-binary-pruned-version@macos	live-only
+chat.call-mcp	machine-restart/mcp-route-herdr-to-herdr-local-fallback@macos+herdr-native+project+claude+to-herdr-native-project-claude	live-only
+chat.call-mcp	machine-restart/mcp-route-herdr-to-herdr-daemon-proxy@macos+herdr-native+project+claude+to-herdr-native-project-claude	live-only
+chat.call-mcp	machine-restart/mcp-route-herdr-to-tmux-local-fallback@macos+herdr-native+project+claude+to-tmux-project-claude	live-only
+chat.call-mcp	machine-restart/mcp-route-herdr-to-tmux-daemon-proxy@macos+herdr-native+project+claude+to-tmux-project-claude	live-only
+chat.call-mcp	machine-restart/mcp-route-tmux-to-herdr-local-fallback@macos+tmux+project+claude+to-herdr-native-project-claude	live-only
+chat.call-mcp	machine-restart/mcp-route-tmux-to-herdr-daemon-proxy@macos+tmux+project+claude+to-herdr-native-project-claude	live-only
+chat.call-mcp	machine-restart/mcp-route-tmux-to-tmux-local-fallback@macos+tmux+project+claude+to-tmux-project-claude	live-only
+chat.call-mcp	machine-restart/mcp-route-tmux-to-tmux-daemon-proxy@macos+tmux+project+claude+to-tmux-project-claude	live-only
+chat.exit-typed	chat-ending/exit-typed@macos+herdr-native+project+claude	live-only
+chat.exit-native	chat-ending/exit-native@macos+herdr-native+project+claude	live-only
+ops.doctor-after-ends	chat-ending/exit-native@macos+herdr-native+project+claude	crossing: live-only
+chat.exit-mcp	chat-ending/exit-from-mcp@macos+herdr-native+project+claude	live-only
+chat.resume-picker	chat-ending/resume-from-picker@macos+herdr-native+project+claude	live-only
+chat.open-cli	chat-ending/resume-from-cli@macos+herdr-native+project+claude	live-only
+chat.unkill-picker	chat-ending/unkill-from-picker@macos+herdr-native+project+claude	live-only
+chat.clear	chat-ending/clear-hides-old-conversation@macos+herdr-native+project+claude	live-only
+chat.unkill-cli	chat-ending/unkill-from-cli@macos+herdr-native+project+claude	live-only
+chat.kill-lost-seat	chat-ending/kill-lost-seat-from-picker@macos+herdr-native+project+claude	live-only
+chat.open-cli	chat-ending/resume-after-native-exit-cli@macos+herdr-native+project+claude	live-only
+chat.kill-cli	chat-ending/kill-from-cli@macos+herdr-native+project+claude	live-only
+chat.open-mcp	chat-ending/resume-after-cli-kill-mcp@macos+herdr-native+project+claude	live-only
+chat.kill-mcp	chat-ending/kill-from-mcp@macos+herdr-native+project+claude	live-only
+chat.resume-picker	chat-ending/resume-after-mcp-kill-picker@macos+herdr-native+project+claude	live-only
+chat.kill-picker	chat-ending/kill-hides-from-picker@macos+herdr-native+project+claude	live-only
+chat.open-cli	chat-ending/resume-after-picker-hide-cli@macos+herdr-native+project+claude	live-only
+chat.end-cli	chat-ending/end-from-cli@macos+herdr-native+project+claude	live-only
+chat.open-cli	chat-ending/history-after-end@macos+herdr-native+project+claude	live-only
+chat.branch-cli	chat-ending/branch-after-end@macos+herdr-native+project+claude	live-only
+chat.recover-cli	chat-ending/recover-after-end@macos+herdr-native+project+claude	live-only
+ops.archive	chat-ending/archive-after-end@macos+herdr-native+project+claude	live-only
+chat.clear	chat-ending/forecast-engine-event-claude-clear-herdr-seat-native-seat-name-source-pfm-chat-name@macos+herdr-native+project+claude	live-only
+chat.exit-typed	chat-ending/exit-typed@macos+herdr-native+project+codex	live-only
+chat.exit-native	chat-ending/exit-native@macos+herdr-native+project+codex	live-only
+ops.doctor-after-ends	chat-ending/exit-native@macos+herdr-native+project+codex	crossing: live-only
+chat.exit-mcp	chat-ending/exit-from-mcp@macos+herdr-native+project+codex	live-only
+chat.resume-picker	chat-ending/resume-from-picker@macos+herdr-native+project+codex	live-only
+chat.open-cli	chat-ending/resume-from-cli@macos+herdr-native+project+codex	live-only
+chat.unkill-picker	chat-ending/unkill-from-picker@macos+herdr-native+project+codex	live-only
+chat.unkill-cli	chat-ending/unkill-from-cli@macos+herdr-native+project+codex	live-only
+chat.kill-lost-seat	chat-ending/kill-lost-seat-from-picker@macos+herdr-native+project+codex	live-only
+chat.open-cli	chat-ending/resume-after-native-exit-cli@macos+herdr-native+project+codex	live-only
+chat.kill-cli	chat-ending/kill-from-cli@macos+herdr-native+project+codex	live-only
+chat.open-mcp	chat-ending/resume-after-cli-kill-mcp@macos+herdr-native+project+codex	live-only
+chat.kill-mcp	chat-ending/kill-from-mcp@macos+herdr-native+project+codex	live-only
+chat.resume-picker	chat-ending/resume-after-mcp-kill-picker@macos+herdr-native+project+codex	live-only
+chat.kill-picker	chat-ending/kill-hides-from-picker@macos+herdr-native+project+codex	live-only
+chat.open-cli	chat-ending/resume-after-picker-hide-cli@macos+herdr-native+project+codex	live-only
+chat.end-cli	chat-ending/end-from-cli@macos+herdr-native+project+codex	live-only
+chat.open-cli	chat-ending/history-after-end@macos+herdr-native+project+codex	live-only
+chat.branch-cli	chat-ending/branch-after-end@macos+herdr-native+project+codex	live-only
+chat.recover-cli	chat-ending/recover-after-end@macos+herdr-native+project+codex	live-only
+ops.archive	chat-ending/archive-after-end@macos+herdr-native+project+codex	live-only
+chat.exit-typed	chat-ending/exit-typed@macos+herdr-native+project+opencode	live-only
+chat.exit-native	chat-ending/exit-native@macos+herdr-native+project+opencode	live-only
+ops.doctor-after-ends	chat-ending/exit-native@macos+herdr-native+project+opencode	crossing: live-only
+chat.exit-mcp	chat-ending/exit-from-mcp@macos+herdr-native+project+opencode	live-only
+chat.resume-picker	chat-ending/resume-from-picker@macos+herdr-native+project+opencode	live-only
+chat.open-cli	chat-ending/resume-from-cli@macos+herdr-native+project+opencode	live-only
+chat.unkill-picker	chat-ending/unkill-from-picker@macos+herdr-native+project+opencode	live-only
+chat.unkill-cli	chat-ending/unkill-from-cli@macos+herdr-native+project+opencode	live-only
+chat.kill-self-refused	chat-ending/kill-self-refused@macos+herdr-native+project+opencode	live-only
+chat.kill-lost-seat	chat-ending/kill-lost-seat-from-picker@macos+herdr-native+project+opencode	live-only
+chat.open-cli	chat-ending/resume-after-native-exit-cli@macos+herdr-native+project+opencode	live-only
+chat.kill-cli	chat-ending/kill-from-cli@macos+herdr-native+project+opencode	live-only
+chat.open-mcp	chat-ending/resume-after-cli-kill-mcp@macos+herdr-native+project+opencode	live-only
+chat.kill-mcp	chat-ending/kill-from-mcp@macos+herdr-native+project+opencode	live-only
+chat.resume-picker	chat-ending/resume-after-mcp-kill-picker@macos+herdr-native+project+opencode	live-only
+chat.kill-picker	chat-ending/kill-hides-from-picker@macos+herdr-native+project+opencode	live-only
+chat.open-cli	chat-ending/resume-after-picker-hide-cli@macos+herdr-native+project+opencode	live-only
+chat.end-cli	chat-ending/end-from-cli@macos+herdr-native+project+opencode	live-only
+chat.open-cli	chat-ending/history-after-end@macos+herdr-native+project+opencode	live-only
+chat.branch-cli	chat-ending/branch-after-end@macos+herdr-native+project+opencode	live-only
+chat.recover-cli	chat-ending/recover-after-end@macos+herdr-native+project+opencode	live-only
+ops.archive	chat-ending/archive-after-end@macos+herdr-native+project+opencode	live-only
+chat.exit-native	chat-ending/exit-native@macos+herdr-native+subfolder+claude	live-only
+ops.doctor-after-ends	chat-ending/exit-native@macos+herdr-native+subfolder+claude	crossing: live-only
+chat.end-cli	chat-ending/end-from-cli@macos+herdr-native+subfolder+claude	live-only
+chat.resume-picker	chat-ending/resume-from-picker@macos+herdr-native+subfolder+claude	live-only
+chat.exit-native	chat-ending/exit-native@macos+herdr-native+worktree+claude	live-only
+ops.doctor-after-ends	chat-ending/exit-native@macos+herdr-native+worktree+claude	crossing: live-only
+chat.end-cli	chat-ending/end-from-cli@macos+herdr-native+worktree+claude	live-only
+chat.resume-picker	chat-ending/resume-from-picker@macos+herdr-native+worktree+claude	live-only
+chat.exit-typed	chat-ending/exit-typed@macos+tmux+project+claude	live-only
+chat.exit-native	chat-ending/exit-native@macos+tmux+project+claude	live-only
+ops.doctor-after-ends	chat-ending/exit-native@macos+tmux+project+claude	crossing: live-only
+chat.exit-mcp	chat-ending/exit-from-mcp@macos+tmux+project+claude	live-only
+chat.resume-picker	chat-ending/resume-from-picker@macos+tmux+project+claude	live-only
+chat.open-cli	chat-ending/resume-from-cli@macos+tmux+project+claude	live-only
+chat.unkill-picker	chat-ending/unkill-from-picker@macos+tmux+project+claude	live-only
+chat.clear	chat-ending/clear-hides-old-conversation@macos+tmux+project+claude	live-only
+chat.unkill-cli	chat-ending/unkill-from-cli@macos+tmux+project+claude	live-only
+chat.open-ssh	chat-ending/resume-from-cli-over-ssh@macos+tmux+project+claude	live-only
+chat.open-cli	chat-ending/resume-after-native-exit-cli@macos+tmux+project+claude	live-only
+chat.kill-cli	chat-ending/kill-from-cli@macos+tmux+project+claude	live-only
+chat.open-mcp	chat-ending/resume-after-cli-kill-mcp@macos+tmux+project+claude	live-only
+chat.kill-mcp	chat-ending/kill-from-mcp@macos+tmux+project+claude	live-only
+chat.resume-picker	chat-ending/resume-after-mcp-kill-picker@macos+tmux+project+claude	live-only
+chat.kill-picker	chat-ending/kill-hides-from-picker@macos+tmux+project+claude	live-only
+chat.open-cli	chat-ending/resume-after-picker-hide-cli@macos+tmux+project+claude	live-only
+chat.end-cli	chat-ending/end-from-cli@macos+tmux+project+claude	live-only
+chat.open-cli	chat-ending/history-after-end@macos+tmux+project+claude	live-only
+chat.branch-cli	chat-ending/branch-after-end@macos+tmux+project+claude	live-only
+chat.recover-cli	chat-ending/recover-after-end@macos+tmux+project+claude	live-only
+ops.archive	chat-ending/archive-after-end@macos+tmux+project+claude	live-only
+chat.exit-typed	chat-ending/exit-typed@macos+tmux+project+codex	live-only
+chat.exit-native	chat-ending/exit-native@macos+tmux+project+codex	live-only
+ops.doctor-after-ends	chat-ending/exit-native@macos+tmux+project+codex	crossing: live-only
+chat.exit-mcp	chat-ending/exit-from-mcp@macos+tmux+project+codex	live-only
+chat.resume-picker	chat-ending/resume-from-picker@macos+tmux+project+codex	live-only
+chat.open-cli	chat-ending/resume-from-cli@macos+tmux+project+codex	live-only
+chat.unkill-picker	chat-ending/unkill-from-picker@macos+tmux+project+codex	live-only
+chat.unkill-cli	chat-ending/unkill-from-cli@macos+tmux+project+codex	live-only
+chat.open-cli	chat-ending/resume-after-native-exit-cli@macos+tmux+project+codex	live-only
+chat.kill-cli	chat-ending/kill-from-cli@macos+tmux+project+codex	live-only
+chat.open-mcp	chat-ending/resume-after-cli-kill-mcp@macos+tmux+project+codex	live-only
+chat.kill-mcp	chat-ending/kill-from-mcp@macos+tmux+project+codex	live-only
+chat.resume-picker	chat-ending/resume-after-mcp-kill-picker@macos+tmux+project+codex	live-only
+chat.kill-picker	chat-ending/kill-hides-from-picker@macos+tmux+project+codex	live-only
+chat.open-cli	chat-ending/resume-after-picker-hide-cli@macos+tmux+project+codex	live-only
+chat.end-cli	chat-ending/end-from-cli@macos+tmux+project+codex	live-only
+chat.open-cli	chat-ending/history-after-end@macos+tmux+project+codex	live-only
+chat.branch-cli	chat-ending/branch-after-end@macos+tmux+project+codex	live-only
+chat.recover-cli	chat-ending/recover-after-end@macos+tmux+project+codex	live-only
+ops.archive	chat-ending/archive-after-end@macos+tmux+project+codex	live-only
+chat.exit-typed	chat-ending/exit-typed@macos+tmux+project+opencode	live-only
+chat.exit-native	chat-ending/exit-native@macos+tmux+project+opencode	live-only
+ops.doctor-after-ends	chat-ending/exit-native@macos+tmux+project+opencode	crossing: live-only
+chat.exit-mcp	chat-ending/exit-from-mcp@macos+tmux+project+opencode	live-only
+chat.resume-picker	chat-ending/resume-from-picker@macos+tmux+project+opencode	live-only
+chat.open-cli	chat-ending/resume-from-cli@macos+tmux+project+opencode	live-only
+chat.unkill-picker	chat-ending/unkill-from-picker@macos+tmux+project+opencode	live-only
+chat.unkill-cli	chat-ending/unkill-from-cli@macos+tmux+project+opencode	live-only
+chat.kill-self-refused	chat-ending/kill-self-refused@macos+tmux+project+opencode	live-only
+chat.open-cli	chat-ending/resume-after-native-exit-cli@macos+tmux+project+opencode	live-only
+chat.kill-cli	chat-ending/kill-from-cli@macos+tmux+project+opencode	live-only
+chat.open-mcp	chat-ending/resume-after-cli-kill-mcp@macos+tmux+project+opencode	live-only
+chat.kill-mcp	chat-ending/kill-from-mcp@macos+tmux+project+opencode	live-only
+chat.resume-picker	chat-ending/resume-after-mcp-kill-picker@macos+tmux+project+opencode	live-only
+chat.kill-picker	chat-ending/kill-hides-from-picker@macos+tmux+project+opencode	live-only
+chat.open-cli	chat-ending/resume-after-picker-hide-cli@macos+tmux+project+opencode	live-only
+chat.end-cli	chat-ending/end-from-cli@macos+tmux+project+opencode	live-only
+chat.open-cli	chat-ending/history-after-end@macos+tmux+project+opencode	live-only
+chat.branch-cli	chat-ending/branch-after-end@macos+tmux+project+opencode	live-only
+chat.recover-cli	chat-ending/recover-after-end@macos+tmux+project+opencode	live-only
+ops.archive	chat-ending/archive-after-end@macos+tmux+project+opencode	live-only
+ops.doctor-after-ends	machine-lifecycle/doctor-after-chats-ended@macos	crossing: live-only
+lifecycle.uninstall	machine-lifecycle/uninstall-keeps-foreign@macos	live-only
+lifecycle.uninstall-again	machine-lifecycle/uninstall-again-changes-nothing@macos	live-only
+lifecycle.uninstall	machine-lifecycle/forecast-service-manager-launchd-follower-loaded-uninstall-state-theme-sync-on-os-macos@macos	live-only
+chat.read-cli	tier-hermetic:chat-read-prints-transcript	
+chat.last-cli	tier-hermetic:chat-last-prints-answer	
+chat.stream-cli	tier-hermetic:chat-stream-follows-turns	
+chat.ask-cli	tier-hermetic:chat-ask-replays-recorded-answer	
+chat.watch-cli	tier-hermetic:chat-watch-follows-status	
+chat.capture-cli	tier-hermetic:chat-capture-reads-pane	
+chat.keys-cli	tier-hermetic:chat-keys-types-into-pane	
+chat.recover-cli	tier-hermetic:chat-recover-reattaches	
+schedule.fire	tier-hermetic:schedule-fires-through-timer	
+chat.schedule-set	tier-hermetic:schedule-fires-through-timer	
+chat.save-cli	tier-hermetic:chat-save-writes-transcript	
+chat.save-mcp	tier-hermetic:mcp-save-writes-transcript	
+chat.branch-cli	tier-hermetic:chat-branch-forks-session	
+chat.modal-cli	tier-hermetic:chat-modal-opens-popup	
+chat.open-mcp	tier-hermetic:mcp-open-resumes-chat	
+chat.kill-mcp	tier-hermetic:mcp-kill-hides-chat	
+chat.unkill-mcp	tier-hermetic:mcp-unkill-shows-chat	
+chat.reload-new	tier-hermetic:reload-new-starts-fresh-conversation	
+report.tokens	tier-hermetic:tokens-sums-transcript	
+report.log	tier-hermetic:log-filters-records	
+headless.exec	tier-hermetic:headless-exec-replays-recorded-run	
+theme.use	tier-hermetic:theme-use-writes-profile	
+config.init	tier-hermetic:config-init-writes-defaults	
+ops.reap	tier-hermetic:reap-removes-dead-seats	
+ops.archive	tier-hermetic:archive-moves-old-chats	
+ops.heal	tier-hermetic:heal-repairs-launcher	
+ops.name-sync	tier-hermetic:name-sync-follows-codex-index	
+lifecycle.generate	tier-hermetic:generate-renders-mirrors	
+lifecycle.update-check	tier-hermetic:update-check-reports-rows	
+lifecycle.update-adopt	tier-hermetic:update-adopt-closes-row	
+lifecycle.update-pin	tier-hermetic:update-pin-closes-row	
+lifecycle.update-ignore	tier-hermetic:update-ignore-closes-row	
+lifecycle.update-drop	tier-hermetic:update-drop-closes-row	
+lifecycle.update-accept	tier-hermetic:update-accept-closes-row	
+lifecycle.init	tier-hermetic:init-scaffolds-project	
+lifecycle.upgrade-previous	tier-hermetic:release-upgrade-from-previous	
+mcp.serve	tier-hermetic:mcp-serve-answers-tools-list	
+daemon.update-check	tier-hermetic:update-picker-shows-update-row	
+hook.launcher-repair	tier-hermetic:launcher-repair-restores-link	
+report.statusline-large-transcript	tier-hermetic:statusline-renders-large-transcript	
+hook.launcher-fast-exit	tier-hermetic:launcher-fast-exit-prints-nothing	
+mcp.ls-removed-cwd	tier-hermetic:mcp-ls-from-removed-cwd	
+herdr.seat-old-state	tier-hermetic:session-start-owns-seat-on-old-state	
+report.usage-hook-killed	tier-hermetic:usage-hook-killed-leaves-no-probe-home	
+chat.whoami-reused-pid	tier-hermetic:whoami-skips-ended-seat-with-reused-pid	
+picker.scan-enrichment-warning	tier-hermetic:picker-scan-warns-on-failed-enrichment	
+hook.launcher-leading-comment	tier-hermetic:launcher-execs-below-leading-comment	
+ops.doctor-no-codex	tier-hermetic:doctor-without-codex	
+chat.schedule-ls	tier-unit:schedule-ls-lists-rows	
+chat.schedule-rm	tier-unit:schedule-rm-removes-row	
+chat.find-cli	tier-unit:chat-find-matches-name	
+chat.history-cli	tier-unit:chat-history-lists-sessions	
+chat.resolve-cli	tier-unit:resolve-address-table	
+chat.resolve-mcp	tier-unit:resolve-address-table-mcp	
+chat.new-account-cli	tier-unit:new-account-selects-config-dir	
+chat.reload-then	tier-unit:reload-then-queues-prompt	
+chat.reload-model	tier-unit:reload-model-and-effort-table	
+report.model-cost	tier-unit:model-cost-prices-fixture	
+report.index	tier-unit:index-builds-from-fixture	
+report.usage-hook	tier-unit:usage-hook-records-turn	
+config.show	tier-unit:config-show-prints-merged	
+config.validate	tier-unit:config-validate-refuses-unknown-key	
+config.claude-account	tier-unit:config-claude-account-table	
+mcp.ls	tier-unit:mcp-ls-lists-servers	
+mcp.enable-disable	tier-unit:mcp-enable-disable-toggles	
+ops.version	tier-unit:version-prints-build	
+ops.help	tier-unit:help-lists-public-verbs	
+picker.tabs	tier-unit:picker-tabs-switch-views	
+picker.stats-sort	tier-unit:picker-stats-sort	
+picker.limits-scroll	tier-unit:picker-limits-scroll	
+picker.cosmos	tier-unit:picker-cosmos-navigation	
+picker.omnibox	tier-unit:picker-omnibox-modes	
+picker.query-edit	tier-unit:picker-query-edit-keys	
+picker.carousel-deactive	tier-unit:picker-carousel-deactivates	
+hook.git-guard	tier-unit:git-guard-denies-writes	
+hook.store-guard	tier-unit:store-guard-denies-store-runs	
+hook.pcm-guard	tier-unit:pcm-guard-denies-theme-writes	
+hook.engine-guard	tier-unit:engine-guard-denies-writes	
+hook.epic-inject	tier-unit:epic-inject-adds-manifest	
+hook.resume-unkill	tier-unit:resume-unkill-clears-killed	
+hook.rr-dir	tier-unit:rr-dir-creates-dir	
+report.statusline-subagent	tier-unit:statusline-subagent-row-gauge	
+chat.call-refused	tier-unit:call-unknown-name-refused	
+ops.opencode-mirror-roots	tier-unit:opencode-mirror-multiple-roots	
+ops.process-read-gone	tier-unit:process-read-exited-reads-gone	
+report.model-cost-broken-table	tier-unit:model-cost-check-flags-broken-table	
+chat.new-cancelled	tier-unit:new-cancelled-spawn-names-cancellation	
+ops.process-walk-pid-zero	tier-unit:process-walk-ignores-pid-zero	
+herdr.stale-shim-refused	tier-unit:stale-shim-call-refused	
+report.price-catalog-columns	tier-unit:openai-catalog-parses-renamed-column	
+chat.reload-intercept-error	tier-unit:reload-intercept-error-names-line-column	
+chat.unkill-mcp	chat-ending/unkill-from-mcp@linux+herdr-shield+project+claude	live-only
+chat.unkill-mcp	chat-ending/unkill-from-mcp@linux+herdr-shield+project+codex	live-only
+chat.unkill-mcp	chat-ending/unkill-from-mcp@linux+herdr-shield+project+opencode	live-only
+chat.unkill-mcp	chat-ending/unkill-from-mcp@linux+tmux+project+claude	live-only
+chat.unkill-mcp	chat-ending/unkill-from-mcp@linux+tmux+project+codex	live-only
+chat.unkill-mcp	chat-ending/unkill-from-mcp@linux+tmux+project+opencode	live-only
+chat.unkill-mcp	chat-ending/unkill-from-mcp@macos+herdr-native+project+claude	live-only
+chat.unkill-mcp	chat-ending/unkill-from-mcp@macos+herdr-native+project+codex	live-only
+chat.unkill-mcp	chat-ending/unkill-from-mcp@macos+herdr-native+project+opencode	live-only
+chat.unkill-mcp	chat-ending/unkill-from-mcp@macos+tmux+project+claude	live-only
+chat.unkill-mcp	chat-ending/unkill-from-mcp@macos+tmux+project+codex	live-only
+chat.unkill-mcp	chat-ending/unkill-from-mcp@macos+tmux+project+opencode	live-only
+herdr.ls-lost-seat	tier-unit:fleet-reader-herdr-supervisor-pid-reuse	unit-tier holder: pfm/internal/resolve/herdr_test.go:TestWhoamiHerdrRequiresPersistedSeatAndEngineAncestor/saved-host-reused
+chat.ls-cli	tier-unit:fleet-reader-darwin-process-exit	unit-tier holder: pfm/internal/gather/procfs_darwin_test.go:TestDarwinProcFSReadsOfAnExitedPIDAreNotExist
+lifecycle.restart	tier-unit:machine-restart-exited-daemon	unit-tier holders: pfm/internal/restart/processes_test.go::TestFindMCPDaemonCountsAnExitingDaemonAsNoInstalls
+lifecycle.restart	tier-unit:machine-restart-empty-argv	unit-tier holders: pfm/internal/restart/processes_test.go::TestReadTableSkipsWhatIsProvablyNotOurs; pfm/internal/gather/signal_linux_test.go::TestPidfdOutlivesItsProcess
+lifecycle.uninstall	tier-unit:machine-lifecycle-vscode-restore-pending	unit-tier holders: pfm/internal/themesync/vscode_restore_test.go::TestVSCodePendingRestoresWithoutStateOrInstallation; pfm/internal/themesync/vscode_restore_test.go::TestOffRetainsGlobalOwnershipWithoutStateOrVSCode; pfm/internal/installer/theme_sync_off_test.go::TestUninstallWaitsForVSCodeOwnershipOrExplicitLeave
+report.statusline	tier-unit:fleet-reader-costsink-partial-success	unit-tier holder: pfm/internal/costsink/sink_test.go:TestSinkAnswers200ForAPartiallyRefusedBatchAndCountsTheRefusal; pfm/internal/costledger/costledger_test.go:TestReadCountsAFaultForATornTailAndIgnoresUnknownKeys; pfm/internal/statusline/ledger_spend_test.go:TestLedgerSpendKeepsTranscriptToolsAndAdvisor
+theme.use	tier-unit:fleet-reader-nondarwin-auto-appearance	unit-tier holder: pfm/internal/themesync/appearance_test.go:TestAutoAppearanceUnsupportedPlatformsDrawsDarkAndNamesWhy; TestDetectAppearance Darwin error arms
+status.turn	tier-unit:TestHerdrStateEndAfterTmuxServerGone	unit-tier holders: pfm/internal/hookentry/herdr_state_test.go::TestHerdrStateEndAfterTmuxServerGone; TestHerdrStateLargePayload; pfm/internal/hookentry/herdr_origin_test.go::TestReadHerdrPayloadValidatesTheWholeStream
+status.question-blocked	tier-unit:chat-attention-end-title-blank	unit-tier holder: pfm/internal/hookentry/herdr_clients_test.go::TestHerdrStateEndBlanksTheTmuxTitle
+chat.ls-cli	tier-unit:fleet-reader-in-app-resume-unkill	unit-tier holder: pfm/cmd/pfm/internal_clear_kill_jail_test.go::TestResumeUnkillHookLiftsAKillWhenTheThreadIsResumed
+chat.ls-cli	tier-unit:fleet-reader-shared-codex-app-server	unit-tier holder: pfm/internal/hookentry/herdr_codex_test.go::TestHerdrCodexReportsOnlyToTheRegisteredPane
+chat.ls-cli	tier-unit:fleet-reader-restarted-client-terminal	unit-tier holder: pfm/internal/hookentry/herdr_clients_test.go::TestHerdrStateRebindsAClientWhoseTerminalVanished

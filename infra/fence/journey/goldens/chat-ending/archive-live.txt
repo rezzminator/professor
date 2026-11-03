@@ -1,0 +1,4 @@
+mode: killed chats
+
+archive: 0 file(s), 0.0 MB   live (skipped): 1   orphaned kills: 0   unsupported (kept killed): 0
+dry run — nothing moved. Re-run with --apply.

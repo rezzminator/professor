@@ -1,0 +1,1 @@
+[{"type":"permission","tool":"Write","input":{"file_path":"report.txt","content":"journey report: approved\n"},"message":"Write report.txt?","options":["Allow","Deny"]},{"type":"hold","until_gone":"$HOLD"},{"type":"turn","reply":"report written","busy_ms":1}]

@@ -1,0 +1,26 @@
+856719f4	fence	a host go test with PFM_STATE_DB exported overwrote the owner's live pfm.db; unit-tier holder: pfm/internal/testjail/fence_test.go:TestGateAdmitsOnlyTheFence (host shell exporting the fence variable and a store path), added by 856719f4; ruling-cut-os-fault-unit-tier
+80ff07b3	ci	the unit suite failed on macOS (PATH_MAX, socket errno, getwd assumptions)
+76257ef1	ci	a hand-started CI run flagged the fixtures' planted fake credentials as 10 high findings
+a4edcb00	fence	Go build scratch filled the capped /tmp in the fence
+8124dd9a	fence	the pfm-dev-gocache volume grew to 96 GB against its 15 GB budget
+9593957f	release-tooling	release preflight read /x:use as the removed /x and flagged the retired-name registry
+3de4b8f4	other	a second fault sweep fixed 42 unspecified faults (partial index reads, bad records stopping installer and stats)
+29d42b64	rules-templates	flights sized work by file count instead of the judgment left in its edits
+0eecf0bf	release-tooling	/pfm:release did not stop while a tracked plugin held commits past its latest release
+0e2d09b0	other	docs only: CLAUDE.md and the testing manual named new doors; no owner-visible defect
+c19bca42	ci	the root-only suite died on an unset SHTEST_TAG instead of naming its missing-root failure
+d67798c5	fence	RAM scratch admission refused runs because reclaimable page cache counted as used
+bb360b02	other	modernc.org/libc was refreshed past the exact version sqlite requires
+2ad9222e	rules-templates	writing-code and testing rules reached agents beyond the foremen and lander
+2d17e07d	rules-templates	one-door-per-operation rule trimmed to its core
+feca0d31	rules-templates	the gitter rule did not name the fetch trap or ls-remote; rm -rf rule cut
+e8c10000	fence	a host go test overwrote the owner's live pfm.db because the exported PFM_STATE_DB was not cleared
+6f372845	release-tooling	release flow replaced (rehearsal, READY stamp, releaser retired); a plugin remote failure hid other plugins' rows
+6a91f686	rules-templates	/quality:prompt failed its own prompt lint (1 error, 7 warnings)
+56dc6d95	plugin	a cancelled plugin-log write printed its rows to the screen
+9702752a	rules-templates	templates used rm -rf with a variable or mktemp -d directory
+c85787d2	release-tooling	the self-hosted manifest hash was stale after pfm:update changed
+5bfa6129	fence	installer tests read the host's process table; service desk and retro inbox retired
+0842f999	other	GPT-twin remnants left in git-guard, hook matchers and roster checks
+f7dbe767	rules-templates	agent-investigator edited the chatlog kit instead of reporting a KIT FAULT
+130a5403	rules-templates	the flights hunter and spec-walker tools check missed forward-compaction tools

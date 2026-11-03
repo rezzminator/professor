@@ -22,6 +22,8 @@ type omniMode uint8
 // findPrompt is the find bar's prompt in its default mode.
 const findPrompt = "find › "
 
+const pickerOmniboxAction = "picker.omnibox"
+
 const (
 	omniFind omniMode = iota
 	omniGo
@@ -396,9 +398,11 @@ func (model Model) omniKey(key string) (Model, bool) {
 		if key == "shift+left" {
 			direction = -1
 		}
+		model.action(pickerOmniboxAction, nil)
 		model.swapPlace(direction)
 		return model, true
 	case key == keyEnter && mode == omniGo:
+		model.action(pickerOmniboxAction, nil)
 		return model.commitGo(), true
 	}
 	return model, false

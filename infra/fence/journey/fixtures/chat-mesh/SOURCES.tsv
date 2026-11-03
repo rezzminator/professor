@@ -1,0 +1,6 @@
+file	source	values
+rows.tsv	docs/design/pfm-integration-suite/beats.md	Generated row identities, mapped capability ids, and forecast preconditions; no execution credit.
+turn.json	Synthetic mesh turn input	Pinned pong response and a bounded observable working interval.
+seed.json	Synthetic prelude input	One explicit status turn; exhaustion still fails in the engine mock.
+modal.json	pfm/internal/mockengine/scenario.go StepMenu input	Synthetic choices; native mock owns rendered menu bytes.
+blocked.json	pfm/internal/mockengine/scenario.go StepPermission input	Synthetic command; native mock owns permission hooks and approval execution.

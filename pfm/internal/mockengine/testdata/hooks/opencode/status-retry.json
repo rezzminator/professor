@@ -1,0 +1,12 @@
+{
+  "type": "session.status",
+  "properties": {
+    "sessionID": "ses_atlas01",
+    "status": {
+      "type": "retry",
+      "attempt": 1,
+      "message": "retrying",
+      "next": 0
+    }
+  }
+}

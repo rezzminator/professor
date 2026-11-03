@@ -1,0 +1,213 @@
+slug	branch	ids	entry	shell_start	workspace_state	forecast_factors
+new-from-picker	linux+herdr-shield+project+claude	chat.new-picker herdr.restore	new-from-picker	project	named	none
+new-typed	linux+herdr-shield+project+claude	chat.new-typed lifecycle.install	new-typed	project	named	none
+new-from-cli	linux+herdr-shield+project+claude	chat.new-cli chat.ls-cli	new-from-cli	project	named	none
+new-typed-owner-label	linux+herdr-shield+project+claude	chat.new-typed lifecycle.install	new-typed	project	named	none
+new-typed-fresh-label	linux+herdr-shield+project+claude	chat.new-typed lifecycle.install	new-typed	project	named	none
+open-from-foreign-workspace	linux+herdr-shield+project+claude	herdr.place-from-foreign-workspace	open-from-foreign-workspace	project	named	none
+rename-from-cli	linux+herdr-shield+project+claude	chat.name-cli	rename-from-cli	project	named	none
+rename-from-mcp	linux+herdr-shield+project+claude	chat.name-mcp	rename-from-mcp	project	named	none
+rename-inside-engine-updates-tab	linux+herdr-shield+project+claude	herdr.rename-inside-engine	rename-inside-engine-updates-tab	project	named	none
+rename-after-session-replaced	linux+herdr-shield+project+claude	herdr.rename-replaced-session	rename-after-session-replaced	project	named	none
+new-from-picker-fork-shell-start-home-workspace-state-misnamed-exclusive	linux+herdr-shield+project+claude	chat.new-picker herdr.restore	new-from-picker	home	misnamed-exclusive	none
+new-from-picker-fork-shell-start-home-workspace-state-mixed	linux+herdr-shield+project+claude	chat.new-picker herdr.restore	new-from-picker	home	mixed	none
+new-from-picker-fork-shell-start-home-workspace-state-named	linux+herdr-shield+project+claude	chat.new-picker herdr.restore	new-from-picker	home	named	none
+new-from-picker-fork-shell-start-project-workspace-state-misnamed-exclusive	linux+herdr-shield+project+claude	chat.new-picker herdr.restore	new-from-picker	project	misnamed-exclusive	none
+new-from-picker-fork-shell-start-project-workspace-state-mixed	linux+herdr-shield+project+claude	chat.new-picker herdr.restore	new-from-picker	project	mixed	none
+new-from-picker-fork-shell-start-project-workspace-state-named	linux+herdr-shield+project+claude	chat.new-picker herdr.restore	new-from-picker	project	named	none
+forecast-herdr-spawn	linux+herdr-shield+project+claude	chat.new-typed	new-typed	project	named	multiplexer=herdr,door=spawn
+new-typed-fork-shell-start-home-workspace-state-misnamed-exclusive	linux+herdr-shield+project+claude	chat.new-typed lifecycle.install	new-typed	home	misnamed-exclusive	none
+new-typed-fork-shell-start-home-workspace-state-mixed	linux+herdr-shield+project+claude	chat.new-typed lifecycle.install	new-typed	home	mixed	none
+new-typed-fork-shell-start-home-workspace-state-named	linux+herdr-shield+project+claude	chat.new-typed lifecycle.install	new-typed	home	named	none
+new-typed-fork-shell-start-project-workspace-state-misnamed-exclusive	linux+herdr-shield+project+claude	chat.new-typed lifecycle.install	new-typed	project	misnamed-exclusive	none
+new-typed-fork-shell-start-project-workspace-state-mixed	linux+herdr-shield+project+claude	chat.new-typed lifecycle.install	new-typed	project	mixed	none
+new-typed-fork-shell-start-project-workspace-state-named	linux+herdr-shield+project+claude	chat.new-typed lifecycle.install	new-typed	project	named	none
+forecast-pane-command-compound-shell-wrapper-engine-launch-child-of-wrapper-process-table-tty-scan	linux+herdr-shield+project+claude	chat.new-cli chat.ls-cli	new-from-cli	project	named	pane_command=compound_shell_wrapper,engine_launch=child_of_wrapper,process_table=tty_scan
+forecast-process-group-private-pgid-descendant-state-holds-stdout-pipe-helper-codex-app-server	linux+herdr-shield+project+codex	chat.new-cli chat.ls-cli	new-from-cli	project	named	process_group=private_pgid,descendant_state=holds_stdout_pipe,helper=codex_app_server
+forecast-rename-timing-before-session-registers-engine-claude-code-launch-mode-resume-in-place	linux+herdr-shield+project+claude	chat.new-cli chat.ls-cli	new-from-cli	project	named	rename_timing=before_session_registers,engine=claude_code,launch_mode=resume_in_place
+forecast-trust-dialog-rows-unnumbered-engine-claude-code-spawn-order-readiness-before-trust	linux+herdr-shield+project+claude	chat.new-cli chat.ls-cli	new-from-cli	project	named	trust_dialog_rows=unnumbered,engine=claude_code,spawn_order=readiness_before_trust
+new-from-cli-fork-shell-start-home-workspace-state-misnamed-exclusive	linux+herdr-shield+project+claude	chat.new-cli chat.ls-cli	new-from-cli	home	misnamed-exclusive	none
+new-from-cli-fork-shell-start-home-workspace-state-mixed	linux+herdr-shield+project+claude	chat.new-cli chat.ls-cli	new-from-cli	home	mixed	none
+new-from-cli-fork-shell-start-home-workspace-state-named	linux+herdr-shield+project+claude	chat.new-cli chat.ls-cli	new-from-cli	home	named	none
+new-from-cli-fork-shell-start-project-workspace-state-misnamed-exclusive	linux+herdr-shield+project+claude	chat.new-cli chat.ls-cli	new-from-cli	project	misnamed-exclusive	none
+new-from-cli-fork-shell-start-project-workspace-state-mixed	linux+herdr-shield+project+claude	chat.new-cli chat.ls-cli	new-from-cli	project	mixed	none
+new-from-cli-fork-shell-start-project-workspace-state-named	linux+herdr-shield+project+claude	chat.new-cli chat.ls-cli	new-from-cli	project	named	none
+open-from-foreign-workspace-fork-shell-start-home-workspace-state-misnamed-exclusive	linux+herdr-shield+project+claude	herdr.place-from-foreign-workspace	open-from-foreign-workspace	home	misnamed-exclusive	none
+open-from-foreign-workspace-fork-shell-start-home-workspace-state-mixed	linux+herdr-shield+project+claude	herdr.place-from-foreign-workspace	open-from-foreign-workspace	home	mixed	none
+open-from-foreign-workspace-fork-shell-start-home-workspace-state-named	linux+herdr-shield+project+claude	herdr.place-from-foreign-workspace	open-from-foreign-workspace	home	named	none
+open-from-foreign-workspace-fork-shell-start-project-workspace-state-misnamed-exclusive	linux+herdr-shield+project+claude	herdr.place-from-foreign-workspace	open-from-foreign-workspace	project	misnamed-exclusive	none
+open-from-foreign-workspace-fork-shell-start-project-workspace-state-mixed	linux+herdr-shield+project+claude	herdr.place-from-foreign-workspace	open-from-foreign-workspace	project	mixed	none
+open-from-foreign-workspace-fork-shell-start-project-workspace-state-named	linux+herdr-shield+project+claude	herdr.place-from-foreign-workspace	open-from-foreign-workspace	project	named	none
+forecast-multiplexer-herdr-chat-name-unnamed	linux+herdr-shield+project+claude	chat.name-cli	rename-from-cli	project	named	multiplexer=herdr,chat_name=unnamed
+forecast-multiplexer-herdr-runtime-event-rename	linux+herdr-shield+project+claude	chat.name-cli	rename-from-cli	project	named	multiplexer=herdr,runtime_event=rename
+new-from-picker	linux+herdr-shield+project+codex	chat.new-picker herdr.restore	new-from-picker	project	named	none
+new-typed	linux+herdr-shield+project+codex	chat.new-typed lifecycle.install	new-typed	project	named	none
+new-from-cli	linux+herdr-shield+project+codex	chat.new-cli chat.ls-cli	new-from-cli	project	named	none
+open-from-foreign-workspace	linux+herdr-shield+project+codex	herdr.place-from-foreign-workspace	open-from-foreign-workspace	project	named	none
+rename-from-cli	linux+herdr-shield+project+codex	chat.name-cli	rename-from-cli	project	named	none
+rename-from-mcp	linux+herdr-shield+project+codex	chat.name-mcp	rename-from-mcp	project	named	none
+new-from-picker-fork-shell-start-home	linux+herdr-shield+project+codex	chat.new-picker herdr.restore	new-from-picker	home	named	none
+new-from-picker-fork-shell-start-project	linux+herdr-shield+project+codex	chat.new-picker herdr.restore	new-from-picker	project	named	none
+new-typed-fork-shell-start-home	linux+herdr-shield+project+codex	chat.new-typed lifecycle.install	new-typed	home	named	none
+new-typed-fork-shell-start-project	linux+herdr-shield+project+codex	chat.new-typed lifecycle.install	new-typed	project	named	none
+forecast-codex-home-ambient-real-home-engine-codex	linux+herdr-shield+project+codex	chat.new-cli chat.ls-cli	new-from-cli	project	named	codex_home=ambient_real_home,engine=codex
+forecast-receipt-state-historical-fingerprint-native-handler-state-disabled-engine-codex	linux+herdr-shield+project+codex	chat.new-cli chat.ls-cli	new-from-cli	project	named	receipt_state=historical_fingerprint,native_handler_state=disabled,engine=codex
+forecast-script-reference-dollar-zero-self-dir-guard-input-shell-body-without-origin-engine-codex	linux+herdr-shield+project+codex	chat.new-cli chat.ls-cli	new-from-cli	project	named	script_reference=dollar_zero_self_dir,guard_input=shell_body_without_origin,engine=codex
+forecast-tmux-attach-update-environment-recopies-pane-env-inherited-by-chat-caller-engine-codex-tool-shell	linux+herdr-shield+project+codex	chat.new-cli chat.ls-cli	new-from-cli	project	named	tmux_attach=update_environment_recopies,pane_env=inherited_by_chat,caller_engine=codex_tool_shell
+forecast-trust-receipt-present-handler-state-operator-disabled-engine-codex	linux+herdr-shield+project+codex	chat.new-cli chat.ls-cli	new-from-cli	project	named	trust_receipt=present,handler_state=operator_disabled,engine=codex
+new-from-cli-fork-shell-start-home	linux+herdr-shield+project+codex	chat.new-cli chat.ls-cli	new-from-cli	home	named	none
+new-from-cli-fork-shell-start-project	linux+herdr-shield+project+codex	chat.new-cli chat.ls-cli	new-from-cli	project	named	none
+open-from-foreign-workspace-fork-shell-start-home	linux+herdr-shield+project+codex	herdr.place-from-foreign-workspace	open-from-foreign-workspace	home	named	none
+open-from-foreign-workspace-fork-shell-start-project	linux+herdr-shield+project+codex	herdr.place-from-foreign-workspace	open-from-foreign-workspace	project	named	none
+forecast-engine-codex-runtime-event-rename	linux+herdr-shield+project+codex	chat.name-cli	rename-from-cli	project	named	engine=codex,runtime_event=rename
+new-from-picker	linux+herdr-shield+project+opencode	chat.new-picker herdr.restore	new-from-picker	project	named	none
+new-typed	linux+herdr-shield+project+opencode	chat.new-typed lifecycle.install	new-typed	project	named	none
+new-from-cli	linux+herdr-shield+project+opencode	chat.new-cli chat.ls-cli	new-from-cli	project	named	none
+open-from-foreign-workspace	linux+herdr-shield+project+opencode	herdr.place-from-foreign-workspace	open-from-foreign-workspace	project	named	none
+rename-from-cli	linux+herdr-shield+project+opencode	chat.name-cli	rename-from-cli	project	named	none
+rename-from-mcp	linux+herdr-shield+project+opencode	chat.name-mcp	rename-from-mcp	project	named	none
+rename-inside-engine-updates-tab	linux+herdr-shield+project+opencode	herdr.rename-inside-engine	rename-inside-engine-updates-tab	project	named	none
+new-from-picker-fork-shell-start-home	linux+herdr-shield+project+opencode	chat.new-picker herdr.restore	new-from-picker	home	named	none
+new-from-picker-fork-shell-start-project	linux+herdr-shield+project+opencode	chat.new-picker herdr.restore	new-from-picker	project	named	none
+new-typed-fork-shell-start-home	linux+herdr-shield+project+opencode	chat.new-typed lifecycle.install	new-typed	home	named	none
+new-typed-fork-shell-start-project	linux+herdr-shield+project+opencode	chat.new-typed lifecycle.install	new-typed	project	named	none
+new-from-cli-fork-shell-start-home	linux+herdr-shield+project+opencode	chat.new-cli chat.ls-cli	new-from-cli	home	named	none
+new-from-cli-fork-shell-start-project	linux+herdr-shield+project+opencode	chat.new-cli chat.ls-cli	new-from-cli	project	named	none
+open-from-foreign-workspace-fork-shell-start-home	linux+herdr-shield+project+opencode	herdr.place-from-foreign-workspace	open-from-foreign-workspace	home	named	none
+open-from-foreign-workspace-fork-shell-start-project	linux+herdr-shield+project+opencode	herdr.place-from-foreign-workspace	open-from-foreign-workspace	project	named	none
+new-from-picker	linux+herdr-shield+subfolder+claude	chat.new-picker herdr.restore	new-from-picker	project	named	none
+new-typed	linux+herdr-shield+subfolder+claude	chat.new-typed lifecycle.install	new-typed	project	named	none
+new-from-cli	linux+herdr-shield+subfolder+claude	chat.new-cli chat.ls-cli	new-from-cli	project	named	none
+open-from-foreign-workspace	linux+herdr-shield+subfolder+claude	herdr.place-from-foreign-workspace	open-from-foreign-workspace	project	named	none
+new-from-picker-fork-shell-start-home	linux+herdr-shield+subfolder+claude	chat.new-picker herdr.restore	new-from-picker	home	named	none
+new-typed-fork-shell-start-home	linux+herdr-shield+subfolder+claude	chat.new-typed lifecycle.install	new-typed	home	named	none
+new-from-cli-fork-shell-start-home	linux+herdr-shield+subfolder+claude	chat.new-cli chat.ls-cli	new-from-cli	home	named	none
+open-from-foreign-workspace-fork-shell-start-home	linux+herdr-shield+subfolder+claude	herdr.place-from-foreign-workspace	open-from-foreign-workspace	home	named	none
+new-from-picker	linux+herdr-shield+worktree+claude	chat.new-picker herdr.restore	new-from-picker	project	named	none
+new-typed	linux+herdr-shield+worktree+claude	chat.new-typed lifecycle.install	new-typed	project	named	none
+new-from-cli	linux+herdr-shield+worktree+claude	chat.new-cli chat.ls-cli	new-from-cli	project	named	none
+open-from-foreign-workspace	linux+herdr-shield+worktree+claude	herdr.place-from-foreign-workspace	open-from-foreign-workspace	project	named	none
+new-from-picker-fork-shell-start-home	linux+herdr-shield+worktree+claude	chat.new-picker herdr.restore	new-from-picker	home	named	none
+new-typed-fork-shell-start-home	linux+herdr-shield+worktree+claude	chat.new-typed lifecycle.install	new-typed	home	named	none
+new-from-cli-fork-shell-start-home	linux+herdr-shield+worktree+claude	chat.new-cli chat.ls-cli	new-from-cli	home	named	none
+open-from-foreign-workspace-fork-shell-start-home	linux+herdr-shield+worktree+claude	herdr.place-from-foreign-workspace	open-from-foreign-workspace	home	named	none
+new-from-picker	linux+tmux+project+claude	chat.new-picker	new-from-picker	project	named	none
+new-typed	linux+tmux+project+claude	chat.new-typed lifecycle.install	new-typed	project	named	none
+new-from-cli	linux+tmux+project+claude	chat.new-cli chat.ls-cli	new-from-cli	project	named	none
+rename-from-cli	linux+tmux+project+claude	chat.name-cli	rename-from-cli	project	named	none
+rename-from-mcp	linux+tmux+project+claude	chat.name-mcp	rename-from-mcp	project	named	none
+forecast-last-pane-closed-backend-tmux-child-exit-before-waiter-connects	linux+tmux+project+claude	chat.new-cli chat.ls-cli	new-from-cli	project	named	last_pane=closed,backend=tmux,child_exit=before_waiter_connects
+forecast-launch-state-folder-trust-dialog-backend-tmux-remain-on-exit-engine-claude-code	linux+tmux+project+claude	chat.new-cli chat.ls-cli	new-from-cli	project	named	launch_state=folder_trust_dialog,backend=tmux_remain_on_exit,engine=claude_code
+forecast-launcher-exit-before-wait-registered-backend-tmux-wait-for	linux+tmux+project+claude	chat.new-cli chat.ls-cli	new-from-cli	project	named	launcher_exit=before_wait_registered,backend=tmux_wait_for
+forecast-login-default-sentinel-inherited-claude-updater-temp-and-rename-at-account-path-launch-origin-outside-pfm-shell	linux+tmux+project+claude	chat.new-cli chat.ls-cli	new-from-cli	project	named	login_default=sentinel_inherited,claude_updater=temp_and_rename_at_account_path,launch_origin=outside_pfm_shell
+forecast-spawn-cancelled	linux+tmux+project+claude	chat.new-cancelled	new-from-cli	project	named	multiplexer=tmux,runtime_event=spawn_cancelled
+new-from-picker	linux+tmux+project+codex	chat.new-picker	new-from-picker	project	named	none
+new-typed	linux+tmux+project+codex	chat.new-typed lifecycle.install	new-typed	project	named	none
+new-from-cli	linux+tmux+project+codex	chat.new-cli chat.ls-cli	new-from-cli	project	named	none
+rename-from-cli	linux+tmux+project+codex	chat.name-cli	rename-from-cli	project	named	none
+rename-from-mcp	linux+tmux+project+codex	chat.name-mcp	rename-from-mcp	project	named	none
+new-from-picker	linux+tmux+project+opencode	chat.new-picker	new-from-picker	project	named	none
+new-typed	linux+tmux+project+opencode	chat.new-typed lifecycle.install	new-typed	project	named	none
+new-from-cli	linux+tmux+project+opencode	chat.new-cli chat.ls-cli	new-from-cli	project	named	none
+rename-from-cli	linux+tmux+project+opencode	chat.name-cli	rename-from-cli	project	named	none
+rename-from-mcp	linux+tmux+project+opencode	chat.name-mcp	rename-from-mcp	project	named	none
+storm-of-births	linux+herdr-shield	chat.new-storm	storm-of-births	project	named	none
+storm-of-births	linux+tmux	chat.new-storm	storm-of-births	project	named	none
+new-typed-tmux-server-stopped	linux+tmux	tmux.server-stopped-new	new-typed-tmux-server-stopped	project	named	none
+new-from-picker	macos+herdr-native+project+claude	chat.new-picker herdr.restore	new-from-picker	project	named	none
+new-typed	macos+herdr-native+project+claude	chat.new-typed lifecycle.install	new-typed	project	named	none
+new-from-cli	macos+herdr-native+project+claude	chat.new-cli chat.ls-cli	new-from-cli	project	named	none
+new-typed-owner-label	macos+herdr-native+project+claude	chat.new-typed lifecycle.install	new-typed	project	named	none
+new-typed-fresh-label	macos+herdr-native+project+claude	chat.new-typed lifecycle.install	new-typed	project	named	none
+open-from-foreign-workspace	macos+herdr-native+project+claude	herdr.place-from-foreign-workspace	open-from-foreign-workspace	project	named	none
+rename-from-cli	macos+herdr-native+project+claude	chat.name-cli	rename-from-cli	project	named	none
+rename-from-mcp	macos+herdr-native+project+claude	chat.name-mcp	rename-from-mcp	project	named	none
+rename-inside-engine-updates-tab	macos+herdr-native+project+claude	herdr.rename-inside-engine	rename-inside-engine-updates-tab	project	named	none
+rename-after-session-replaced	macos+herdr-native+project+claude	herdr.rename-replaced-session	rename-after-session-replaced	project	named	none
+new-from-picker-fork-shell-start-home-workspace-state-misnamed-exclusive	macos+herdr-native+project+claude	chat.new-picker herdr.restore	new-from-picker	home	misnamed-exclusive	none
+new-from-picker-fork-shell-start-home-workspace-state-mixed	macos+herdr-native+project+claude	chat.new-picker herdr.restore	new-from-picker	home	mixed	none
+new-from-picker-fork-shell-start-home-workspace-state-named	macos+herdr-native+project+claude	chat.new-picker herdr.restore	new-from-picker	home	named	none
+new-from-picker-fork-shell-start-project-workspace-state-misnamed-exclusive	macos+herdr-native+project+claude	chat.new-picker herdr.restore	new-from-picker	project	misnamed-exclusive	none
+new-from-picker-fork-shell-start-project-workspace-state-mixed	macos+herdr-native+project+claude	chat.new-picker herdr.restore	new-from-picker	project	mixed	none
+new-from-picker-fork-shell-start-project-workspace-state-named	macos+herdr-native+project+claude	chat.new-picker herdr.restore	new-from-picker	project	named	none
+new-typed-fork-shell-start-home-workspace-state-misnamed-exclusive	macos+herdr-native+project+claude	chat.new-typed lifecycle.install	new-typed	home	misnamed-exclusive	none
+new-typed-fork-shell-start-home-workspace-state-mixed	macos+herdr-native+project+claude	chat.new-typed lifecycle.install	new-typed	home	mixed	none
+new-typed-fork-shell-start-home-workspace-state-named	macos+herdr-native+project+claude	chat.new-typed lifecycle.install	new-typed	home	named	none
+new-typed-fork-shell-start-project-workspace-state-misnamed-exclusive	macos+herdr-native+project+claude	chat.new-typed lifecycle.install	new-typed	project	misnamed-exclusive	none
+new-typed-fork-shell-start-project-workspace-state-mixed	macos+herdr-native+project+claude	chat.new-typed lifecycle.install	new-typed	project	mixed	none
+new-typed-fork-shell-start-project-workspace-state-named	macos+herdr-native+project+claude	chat.new-typed lifecycle.install	new-typed	project	named	none
+new-from-cli-fork-shell-start-home-workspace-state-misnamed-exclusive	macos+herdr-native+project+claude	chat.new-cli chat.ls-cli	new-from-cli	home	misnamed-exclusive	none
+new-from-cli-fork-shell-start-home-workspace-state-mixed	macos+herdr-native+project+claude	chat.new-cli chat.ls-cli	new-from-cli	home	mixed	none
+new-from-cli-fork-shell-start-home-workspace-state-named	macos+herdr-native+project+claude	chat.new-cli chat.ls-cli	new-from-cli	home	named	none
+new-from-cli-fork-shell-start-project-workspace-state-misnamed-exclusive	macos+herdr-native+project+claude	chat.new-cli chat.ls-cli	new-from-cli	project	misnamed-exclusive	none
+new-from-cli-fork-shell-start-project-workspace-state-mixed	macos+herdr-native+project+claude	chat.new-cli chat.ls-cli	new-from-cli	project	mixed	none
+new-from-cli-fork-shell-start-project-workspace-state-named	macos+herdr-native+project+claude	chat.new-cli chat.ls-cli	new-from-cli	project	named	none
+open-from-foreign-workspace-fork-shell-start-home-workspace-state-misnamed-exclusive	macos+herdr-native+project+claude	herdr.place-from-foreign-workspace	open-from-foreign-workspace	home	misnamed-exclusive	none
+open-from-foreign-workspace-fork-shell-start-home-workspace-state-mixed	macos+herdr-native+project+claude	herdr.place-from-foreign-workspace	open-from-foreign-workspace	home	mixed	none
+open-from-foreign-workspace-fork-shell-start-home-workspace-state-named	macos+herdr-native+project+claude	herdr.place-from-foreign-workspace	open-from-foreign-workspace	home	named	none
+open-from-foreign-workspace-fork-shell-start-project-workspace-state-misnamed-exclusive	macos+herdr-native+project+claude	herdr.place-from-foreign-workspace	open-from-foreign-workspace	project	misnamed-exclusive	none
+open-from-foreign-workspace-fork-shell-start-project-workspace-state-mixed	macos+herdr-native+project+claude	herdr.place-from-foreign-workspace	open-from-foreign-workspace	project	mixed	none
+open-from-foreign-workspace-fork-shell-start-project-workspace-state-named	macos+herdr-native+project+claude	herdr.place-from-foreign-workspace	open-from-foreign-workspace	project	named	none
+new-from-picker	macos+herdr-native+project+codex	chat.new-picker herdr.restore	new-from-picker	project	named	none
+new-typed	macos+herdr-native+project+codex	chat.new-typed lifecycle.install	new-typed	project	named	none
+new-from-cli	macos+herdr-native+project+codex	chat.new-cli chat.ls-cli	new-from-cli	project	named	none
+open-from-foreign-workspace	macos+herdr-native+project+codex	herdr.place-from-foreign-workspace	open-from-foreign-workspace	project	named	none
+rename-from-cli	macos+herdr-native+project+codex	chat.name-cli	rename-from-cli	project	named	none
+rename-from-mcp	macos+herdr-native+project+codex	chat.name-mcp	rename-from-mcp	project	named	none
+new-from-picker-fork-shell-start-home	macos+herdr-native+project+codex	chat.new-picker herdr.restore	new-from-picker	home	named	none
+new-from-picker-fork-shell-start-project	macos+herdr-native+project+codex	chat.new-picker herdr.restore	new-from-picker	project	named	none
+new-typed-fork-shell-start-home	macos+herdr-native+project+codex	chat.new-typed lifecycle.install	new-typed	home	named	none
+new-typed-fork-shell-start-project	macos+herdr-native+project+codex	chat.new-typed lifecycle.install	new-typed	project	named	none
+new-from-cli-fork-shell-start-home	macos+herdr-native+project+codex	chat.new-cli chat.ls-cli	new-from-cli	home	named	none
+new-from-cli-fork-shell-start-project	macos+herdr-native+project+codex	chat.new-cli chat.ls-cli	new-from-cli	project	named	none
+open-from-foreign-workspace-fork-shell-start-home	macos+herdr-native+project+codex	herdr.place-from-foreign-workspace	open-from-foreign-workspace	home	named	none
+open-from-foreign-workspace-fork-shell-start-project	macos+herdr-native+project+codex	herdr.place-from-foreign-workspace	open-from-foreign-workspace	project	named	none
+new-from-picker	macos+herdr-native+project+opencode	chat.new-picker herdr.restore	new-from-picker	project	named	none
+new-typed	macos+herdr-native+project+opencode	chat.new-typed lifecycle.install	new-typed	project	named	none
+new-from-cli	macos+herdr-native+project+opencode	chat.new-cli chat.ls-cli	new-from-cli	project	named	none
+open-from-foreign-workspace	macos+herdr-native+project+opencode	herdr.place-from-foreign-workspace	open-from-foreign-workspace	project	named	none
+rename-from-cli	macos+herdr-native+project+opencode	chat.name-cli	rename-from-cli	project	named	none
+rename-from-mcp	macos+herdr-native+project+opencode	chat.name-mcp	rename-from-mcp	project	named	none
+rename-inside-engine-updates-tab	macos+herdr-native+project+opencode	herdr.rename-inside-engine	rename-inside-engine-updates-tab	project	named	none
+new-from-picker-fork-shell-start-home	macos+herdr-native+project+opencode	chat.new-picker herdr.restore	new-from-picker	home	named	none
+new-from-picker-fork-shell-start-project	macos+herdr-native+project+opencode	chat.new-picker herdr.restore	new-from-picker	project	named	none
+new-typed-fork-shell-start-home	macos+herdr-native+project+opencode	chat.new-typed lifecycle.install	new-typed	home	named	none
+new-typed-fork-shell-start-project	macos+herdr-native+project+opencode	chat.new-typed lifecycle.install	new-typed	project	named	none
+new-from-cli-fork-shell-start-home	macos+herdr-native+project+opencode	chat.new-cli chat.ls-cli	new-from-cli	home	named	none
+new-from-cli-fork-shell-start-project	macos+herdr-native+project+opencode	chat.new-cli chat.ls-cli	new-from-cli	project	named	none
+open-from-foreign-workspace-fork-shell-start-home	macos+herdr-native+project+opencode	herdr.place-from-foreign-workspace	open-from-foreign-workspace	home	named	none
+open-from-foreign-workspace-fork-shell-start-project	macos+herdr-native+project+opencode	herdr.place-from-foreign-workspace	open-from-foreign-workspace	project	named	none
+new-from-picker	macos+herdr-native+subfolder+claude	chat.new-picker herdr.restore	new-from-picker	project	named	none
+new-typed	macos+herdr-native+subfolder+claude	chat.new-typed lifecycle.install	new-typed	project	named	none
+new-from-cli	macos+herdr-native+subfolder+claude	chat.new-cli chat.ls-cli	new-from-cli	project	named	none
+open-from-foreign-workspace	macos+herdr-native+subfolder+claude	herdr.place-from-foreign-workspace	open-from-foreign-workspace	project	named	none
+new-from-picker-fork-shell-start-home	macos+herdr-native+subfolder+claude	chat.new-picker herdr.restore	new-from-picker	home	named	none
+new-typed-fork-shell-start-home	macos+herdr-native+subfolder+claude	chat.new-typed lifecycle.install	new-typed	home	named	none
+new-from-cli-fork-shell-start-home	macos+herdr-native+subfolder+claude	chat.new-cli chat.ls-cli	new-from-cli	home	named	none
+open-from-foreign-workspace-fork-shell-start-home	macos+herdr-native+subfolder+claude	herdr.place-from-foreign-workspace	open-from-foreign-workspace	home	named	none
+new-from-picker	macos+herdr-native+worktree+claude	chat.new-picker herdr.restore	new-from-picker	project	named	none
+new-typed	macos+herdr-native+worktree+claude	chat.new-typed lifecycle.install	new-typed	project	named	none
+new-from-cli	macos+herdr-native+worktree+claude	chat.new-cli chat.ls-cli	new-from-cli	project	named	none
+open-from-foreign-workspace	macos+herdr-native+worktree+claude	herdr.place-from-foreign-workspace	open-from-foreign-workspace	project	named	none
+new-from-picker-fork-shell-start-home	macos+herdr-native+worktree+claude	chat.new-picker herdr.restore	new-from-picker	home	named	none
+new-typed-fork-shell-start-home	macos+herdr-native+worktree+claude	chat.new-typed lifecycle.install	new-typed	home	named	none
+new-from-cli-fork-shell-start-home	macos+herdr-native+worktree+claude	chat.new-cli chat.ls-cli	new-from-cli	home	named	none
+open-from-foreign-workspace-fork-shell-start-home	macos+herdr-native+worktree+claude	herdr.place-from-foreign-workspace	open-from-foreign-workspace	home	named	none
+new-from-picker	macos+tmux+project+claude	chat.new-picker	new-from-picker	project	named	none
+new-typed	macos+tmux+project+claude	chat.new-typed lifecycle.install	new-typed	project	named	none
+new-from-cli	macos+tmux+project+claude	chat.new-cli chat.ls-cli	new-from-cli	project	named	none
+rename-from-cli	macos+tmux+project+claude	chat.name-cli	rename-from-cli	project	named	none
+rename-from-mcp	macos+tmux+project+claude	chat.name-mcp	rename-from-mcp	project	named	none
+new-from-picker	macos+tmux+project+codex	chat.new-picker	new-from-picker	project	named	none
+new-typed	macos+tmux+project+codex	chat.new-typed lifecycle.install	new-typed	project	named	none
+new-from-cli	macos+tmux+project+codex	chat.new-cli chat.ls-cli	new-from-cli	project	named	none
+rename-from-cli	macos+tmux+project+codex	chat.name-cli	rename-from-cli	project	named	none
+rename-from-mcp	macos+tmux+project+codex	chat.name-mcp	rename-from-mcp	project	named	none
+new-from-picker	macos+tmux+project+opencode	chat.new-picker	new-from-picker	project	named	none
+new-typed	macos+tmux+project+opencode	chat.new-typed lifecycle.install	new-typed	project	named	none
+new-from-cli	macos+tmux+project+opencode	chat.new-cli chat.ls-cli	new-from-cli	project	named	none
+rename-from-cli	macos+tmux+project+opencode	chat.name-cli	rename-from-cli	project	named	none
+rename-from-mcp	macos+tmux+project+opencode	chat.name-mcp	rename-from-mcp	project	named	none
+storm-of-births	macos+herdr-native	chat.new-storm	storm-of-births	project	named	none
+storm-of-births	macos+tmux	chat.new-storm	storm-of-births	project	named	none
+new-typed-tmux-server-stopped	macos+tmux	tmux.server-stopped-new	new-typed-tmux-server-stopped	project	named	none

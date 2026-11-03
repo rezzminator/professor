@@ -1,0 +1,15 @@
+{
+  "type": "permission.asked",
+  "properties": {
+    "id": "per_00000001",
+    "sessionID": "ses_atlas01",
+    "permission": "bash",
+    "patterns": [
+      "*"
+    ],
+    "metadata": {},
+    "always": [
+      "*"
+    ]
+  }
+}

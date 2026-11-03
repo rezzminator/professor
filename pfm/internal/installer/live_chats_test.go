@@ -2,6 +2,8 @@ package installer
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -12,6 +14,8 @@ import (
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 func TestLiveChatPIDs(t *testing.T) {
@@ -140,5 +144,67 @@ func TestAccountChatsLiveCountsAChatOnce(t *testing.T) {
 	live, err := (&accountChats{dir: dir, guard: install}).live()
 	if err != nil || !reflect.DeepEqual(live, []string{strconv.Itoa(self)}) {
 		t.Fatalf("live = %v, %v; want [%d] once", live, err, self)
+	}
+}
+
+func TestAccountEntryAttributesApplyAndLeavesObserversUncredited(t *testing.T) {
+	for _, row := range []struct {
+		name           string
+		apply, guarded bool
+		actions        []string
+	}{
+		{"apply", true, true, []string{"lifecycle.account-entry"}},
+		{"preview", false, true, nil},
+		{"observer", true, false, nil},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			obs.Test(t)
+			directory := t.TempDir()
+			channel := filepath.Join(directory, "beat.json")
+			writeFixture(t, channel, `{"beat":"A","run":"synthetic"}`)
+			logPath := filepath.Join(directory, "activity.jsonl")
+			_, finish := obs.OpenLog(context.Background(), obs.Settings{
+				Cmd:  "log",
+				Args: []string{"log"},
+				Path: logPath,
+				Env: &paths.MapEnv{
+					Values: map[string]string{obs.EnvBeatFile: channel, obs.EnvBeat: "birth", obs.EnvRun: "birth"},
+				},
+			})
+			defer finish(0)
+			writeFixture(t, channel, `{"beat":"B","run":"synthetic"}`)
+			account := filepath.Join(directory, "account")
+			stats := filepath.Join(account, "stats-cache.json")
+			writeFixture(t, stats, `{"version":2}`)
+			installer := &engine{options: Options{ProcRoot: emptyProcRoot(t, directory)}, apply: row.apply}
+			chats, err := installer.openAccountChats(account, row.guarded)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := chats.release(); err != nil {
+				t.Fatal(err)
+			}
+			raw, err := os.ReadFile(logPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var actions []string
+			for _, line := range bytes.Split(bytes.TrimSpace(raw), []byte{'\n'}) {
+				var record map[string]any
+				if err := json.Unmarshal(line, &record); err != nil {
+					t.Fatal(err)
+				}
+				if action, found := record[obs.FieldAction]; found {
+					actions = append(actions, action.(string))
+					if record["beat"] != "B" || record["run"] != "synthetic" {
+						t.Fatalf("%s: record = %v, want beat B/run synthetic", logPath, record)
+					}
+				}
+			}
+			if !reflect.DeepEqual(actions, row.actions) {
+				t.Fatalf("%s: actions = %v, want %v; log=%s", logPath, actions, row.actions, raw)
+			}
+			assertContent(t, stats, `{"version":2}`)
+		})
 	}
 }

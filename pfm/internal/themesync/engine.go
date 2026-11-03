@@ -14,6 +14,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/servicemanager"
 )
 
 const (
@@ -37,10 +38,12 @@ type flipOrigin struct {
 // session is one locked run over the state: the environment, the state being
 // edited, the source row, the tmux seam and the latency being measured.
 type session struct {
-	env     Env
-	store   stateStore
-	state   themeState
-	servers TmuxServers
+	unitNames   servicemanager.UnitNames
+	unitNameErr error
+	env         Env
+	store       stateStore
+	state       themeState
+	servers     TmuxServers
 	// source is the claude row: the governing account and its theme, or the
 	// error that stopped the run before any surface was written.
 	source      SurfaceResult
@@ -321,6 +324,9 @@ func beginActive(env Env) (stateStore, func() error, error) {
 
 // begin validates the environment, takes the lock and loads the state.
 func begin(env Env) (stateStore, func() error, error) {
+	if _, err := servicemanager.CurrentUnitNames(); err != nil {
+		return stateStore{}, nil, err
+	}
 	if env.Runner == nil {
 		return stateStore{}, nil, errors.New("themesync: Env.Runner is nil")
 	}
@@ -337,7 +343,15 @@ func (env Env) withStateDir() Env {
 }
 
 func newSession(env Env, store stateStore, state themeState) *session {
-	return &session{env: env.withStateDir(), store: store, state: state, servers: env.Tmux}
+	names, err := servicemanager.CurrentUnitNames()
+	return &session{
+		env:         env.withStateDir(),
+		store:       store,
+		state:       state,
+		servers:     env.Tmux,
+		unitNames:   names,
+		unitNameErr: err,
+	}
 }
 
 // sourceState is the read-only source resolved for one run.

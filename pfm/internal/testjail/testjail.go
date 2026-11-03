@@ -52,7 +52,7 @@ func Run(m *testing.M) int {
 	// fence's disk for go's build scratch, and t.TempDir honours it since Go 1.25:
 	// test scratch stays on TMPDIR's tmpfs, where the timing budgets were set.
 	if _, child := (paths.OSEnv{}).Lookup(jailMarkerEnv); !child {
-		for _, name := range []string{"PFM_STATE_DB", "PFM_CACHE_DB", paths.EnvInstallMark, "GOTMPDIR"} {
+		for _, name := range []string{"PFM_STATE_DB", "PFM_CACHE_DB", paths.EnvInstallMark, paths.EnvUnitPrefix, "GOTMPDIR"} {
 			if err := os.Unsetenv(name); err != nil {
 				warnSetup("clear %s: %v", name, err)
 				return 1

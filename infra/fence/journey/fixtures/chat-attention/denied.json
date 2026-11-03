@@ -1,0 +1,1 @@
+[{"type":"hold","until_gone":"$MAIN_STOP_HOLD"},{"type":"permission","tool":"Write","input":{"file_path":"journey-denied-report.txt","content":"must not be written\n"},"message":"Write report.txt?","options":["Allow","Deny"]},{"type":"hold","until_gone":"$HOLD"},{"type":"turn","reply":"report denied","busy_ms":1}]

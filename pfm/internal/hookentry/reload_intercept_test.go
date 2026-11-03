@@ -6,11 +6,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 func TestRunReloadIntercept(t *testing.T) {
@@ -18,18 +22,27 @@ func TestRunReloadIntercept(t *testing.T) {
 		name, prompt, frontOutput, wantStderr string
 		frontCode, wantExit                   int
 		frontWanted, wantNoStderr             bool
+		wantAction                            bool
 		wantArgs                              []string
 	}{
 		{name: "plain prompt never touches reload", prompt: "hello", wantNoStderr: true},
 		{name: "near miss slash command is not a match", prompt: "/reloaded", wantNoStderr: true},
-		{name: "bare reload calls front with no args", prompt: "/reload", frontOutput: "reload scheduled\n", frontWanted: true, wantArgs: []string{}, wantNoStderr: true},
-		{name: "quoted then payload splits into one word", prompt: `/reload --account 2 --then "go on, friend"`, frontOutput: "reload scheduled\n", frontWanted: true, wantArgs: []string{"--account", "2", "--then", "go on, friend"}, wantNoStderr: true},
-		{name: "backslash inside double quotes stays as the shell keeps it", prompt: `/reload --then "C:\dir \"x\" a\\b"`, frontOutput: "reload scheduled\n", frontWanted: true, wantArgs: []string{"--then", `C:\dir "x" a\b`}, wantNoStderr: true},
-		{name: "front failure stays loud", prompt: "/reload --account 2", frontOutput: "pfm chat reload: bad account\n", frontCode: 1, frontWanted: true, wantArgs: []string{"--account", "2"}, wantExit: 2, wantStderr: "reload: pfm chat reload: bad account\n"},
-		{name: "unterminated quote is reported", prompt: `/reload --then "go on`, wantExit: 2},
-		{name: "unquoted operator is reported at its column in the prompt", prompt: "/reload --then go; on", wantExit: 2, wantStderr: "reload: split shell words: 1:18: `;` is not a valid word\n"},
+		{name: "bare reload calls front with no args", prompt: "/reload", frontOutput: "reload scheduled\n", frontWanted: true, wantArgs: []string{}, wantNoStderr: true, wantAction: true},
+		{name: "quoted then payload splits into one word", prompt: `/reload --account 2 --then "go on, friend"`, frontOutput: "reload scheduled\n", frontWanted: true, wantArgs: []string{"--account", "2", "--then", "go on, friend"}, wantNoStderr: true, wantAction: true},
+		{name: "backslash inside double quotes stays as the shell keeps it", prompt: `/reload --then "C:\dir \"x\" a\\b"`, frontOutput: "reload scheduled\n", frontWanted: true, wantArgs: []string{"--then", `C:\dir "x" a\b`}, wantNoStderr: true, wantAction: true},
+		{name: "front failure stays loud", prompt: "/reload --account 2", frontOutput: "pfm chat reload: bad account\n", frontCode: 1, frontWanted: true, wantArgs: []string{"--account", "2"}, wantExit: 2, wantStderr: "reload: pfm chat reload: bad account\n", wantAction: true},
+		{name: "unterminated quote is reported", prompt: `/reload --then "go on`, wantExit: 2, wantAction: true},
+		{name: "unquoted operator is reported at its column in the prompt", prompt: "/reload --then go; on", wantExit: 2, wantStderr: "reload: split shell words: 1:18: `;` is not a valid word\n", wantAction: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			activity := filepath.Join(t.TempDir(), "activity.jsonl")
+			_, finish := obs.OpenLog(context.Background(), obs.Settings{
+				Cmd:  "internal",
+				Path: activity,
+				Env: &paths.MapEnv{
+					Values: map[string]string{obs.EnvBeat: "reload", obs.EnvRun: "synthetic", obs.EnvDoor: "hook"},
+				},
+			})
 			var calls [][]string
 			front := func(_ context.Context, args []string, stdout, _ io.Writer, _ config.Runtime) int {
 				if !test.frontWanted {
@@ -45,6 +58,41 @@ func TestRunReloadIntercept(t *testing.T) {
 			}
 			var stdout, stderr bytes.Buffer
 			code := ReloadIntercept(bytes.NewReader(payload), &stdout, &stderr, config.Runtime{}, front)
+			finish(code)
+			raw, err := os.ReadFile(activity)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var recorder obs.Recorder
+			if _, err := recorder.Write(raw); err != nil {
+				t.Fatal(err)
+			}
+			actions := []map[string]any{}
+			for _, record := range recorder.Records() {
+				if _, exists := record.Field(obs.FieldAction); exists {
+					fields := map[string]any{}
+					for _, key := range []string{obs.FieldAction, obs.FieldDoor, obs.FieldBeat, obs.FieldRun, obs.FieldOp} {
+						fields[key], _ = record.Field(key)
+					}
+					actions = append(actions, fields)
+				}
+			}
+			wanted := []map[string]any{}
+			if test.wantAction {
+				wanted = append(
+					wanted,
+					map[string]any{
+						obs.FieldAction: "chat.reload",
+						obs.FieldDoor:   "typed",
+						obs.FieldBeat:   "reload",
+						obs.FieldRun:    "synthetic",
+						obs.FieldOp:     "action.start",
+					},
+				)
+			}
+			if !reflect.DeepEqual(actions, wanted) {
+				t.Fatalf("%s: actions=%#v, want %#v", activity, actions, wanted)
+			}
 			success := test.frontWanted && test.frontCode == 0
 			if success {
 				// A successful /reload must answer with a NON-empty reason:

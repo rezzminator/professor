@@ -1,0 +1,3 @@
+escape_line	row	assertion
+60	machine-lifecycle/doctor-after-chats-ended@linux	pfm doctor crumb row after native-seat ends and kills == OK, invalid count 0
+70	machine-lifecycle/uninstall-keeps-foreign@linux	settings.json after uninstall == valid JSON equal to the pre-install bytes

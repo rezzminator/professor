@@ -84,7 +84,7 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            tmux zsh jq python3-yaml sqlite3 rsync xz-utils libgl1 libglib2.0-0 libxcb1
+            tmux zsh jq python3-yaml python3-pyte sqlite3 rsync xz-utils libgl1 libglib2.0-0 libxcb1
 
       - name: Install the pinned shellcheck, rumdl, Node and Herdr
         run: |

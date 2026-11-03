@@ -13,6 +13,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
@@ -42,6 +43,9 @@ func reportToHerdr(args []string, stdin io.Reader, stderr io.Writer, deps herdrD
 		if threadWithoutRollout(options.engine, payload) {
 			return 0
 		}
+	}
+	if payload.HookEventName == "UserPromptSubmit" {
+		obs.Action(obs.With(context.Background(), obs.FieldSession, payload.SessionID), "chat.prompt", obs.DoorTyped)
 	}
 	if payload.AgentID != "" && options.event != herdr.EventAgentStart && options.event != herdr.EventAgentStop &&
 		!subagentToolEvent(options.engine, options.event, payload) {

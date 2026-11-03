@@ -1,0 +1,121 @@
+hook.claude.Notification.herdr-notification
+hook.claude.PermissionRequest.herdr-blocked
+hook.claude.PostToolUse.herdr-working-tool
+hook.claude.PostToolUseFailure.herdr-working-tool-failure
+hook.claude.PreToolUse.git-guard
+hook.claude.PreToolUse.pcm-guard
+hook.claude.PreToolUse.store-guard
+hook.claude.SessionEnd.clear-kill
+hook.claude.SessionEnd.exit-close
+hook.claude.SessionEnd.herdr-end
+hook.claude.SessionStart.clear-name-start
+hook.claude.SessionStart.herdr-start
+hook.claude.SessionStart.launcher-repair
+hook.claude.SessionStart.resume-unkill
+hook.claude.Stop.herdr-idle
+hook.claude.SubagentStart.herdr-agent-start
+hook.claude.SubagentStart.rr-dir
+hook.claude.SubagentStop.herdr-agent-stop
+hook.claude.UserPromptSubmit.clear-name-prompt
+hook.claude.UserPromptSubmit.epic-inject
+hook.claude.UserPromptSubmit.exit-intercept
+hook.claude.UserPromptSubmit.herdr-working-prompt
+hook.claude.UserPromptSubmit.reload-intercept
+hook.claude.UserPromptSubmit.usage
+mcp__chat-professor__call
+mcp__chat-professor__capture
+mcp__chat-professor__exit
+mcp__chat-professor__keys
+mcp__chat-professor__kill
+mcp__chat-professor__last
+mcp__chat-professor__ls
+mcp__chat-professor__name
+mcp__chat-professor__new
+mcp__chat-professor__open
+mcp__chat-professor__resolve
+mcp__chat-professor__save
+mcp__chat-professor__status
+mcp__chat-professor__unkill
+mcp__chat-professor__whoami
+pfm archive
+pfm chat
+pfm chat ask
+pfm chat branch
+pfm chat call
+pfm chat capture
+pfm chat end
+pfm chat find
+pfm chat history
+pfm chat keys
+pfm chat kill
+pfm chat last
+pfm chat ls
+pfm chat modal
+pfm chat name
+pfm chat new
+pfm chat open
+pfm chat read
+pfm chat recover
+pfm chat reload
+pfm chat resolve
+pfm chat save
+pfm chat schedule
+pfm chat schedule ls
+pfm chat schedule rm
+pfm chat schedule set
+pfm chat status
+pfm chat stream
+pfm chat unkill
+pfm chat watch
+pfm chat whoami
+pfm config
+pfm config claude
+pfm config init
+pfm config show
+pfm config validate
+pfm doctor
+pfm generate
+pfm headless
+pfm headless exec
+pfm headless run
+pfm headless transcript
+pfm heal
+pfm index
+pfm init
+pfm install
+pfm log
+pfm ls
+pfm mcp
+pfm mcp chat disable
+pfm mcp chat enable
+pfm mcp ls
+pfm mcp serve
+pfm model-cost
+pfm name-sync
+pfm reap
+pfm restart
+pfm statusline
+pfm theme
+pfm theme check
+pfm theme list
+pfm theme off
+pfm theme on
+pfm theme status
+pfm theme sync
+pfm theme use
+pfm tokens
+pfm transcript
+pfm transcript agents
+pfm transcript locate
+pfm transcript show
+pfm uninstall
+pfm update
+pfm update accept
+pfm update adopt
+pfm update check
+pfm update drop
+pfm update ignore
+pfm update pin
+pfm usage-hook
+pfm version
+pfm whoami

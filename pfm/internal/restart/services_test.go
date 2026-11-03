@@ -82,7 +82,7 @@ func newLaunchd(t *testing.T, loaded ...string) (LaunchdManager, *launchd, *host
 }
 
 func pfmService(name string) bool {
-	return strings.HasPrefix(name, pfmLaunchdPrefix) || strings.HasPrefix(name, pfmSystemdPrefix)
+	return (servicemanager.UnitNames{}).Matches(name)
 }
 
 func TestLaunchdUnitsFindPfmAgentsWithTheDaemonStartingFirst(t *testing.T) {

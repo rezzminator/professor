@@ -1,0 +1,38 @@
+[
+  {
+    "factors": "pane_command=compound_shell_wrapper,engine_launch=child_of_wrapper,process_table=tty_scan",
+    "kind": "wrapper",
+    "expected": {
+      "child_engine": "claude",
+      "child_backend": "tmux",
+      "pane_command": "bash",
+      "engine_is_wrapper_child": true,
+      "same_tty": true,
+      "new_birth_in_same_terminal": true,
+      "same_native_session": true,
+      "public_open_before_quiet_fallback": true,
+      "native_birth_records_bound": true,
+      "native_spawn_exit": "0",
+      "native_open_exit": "0"
+    }
+  },
+  {
+    "factors": "tmux_attach=update_environment_recopies,pane_env=inherited_by_chat,caller_engine=codex_tool_shell",
+    "kind": "attach",
+    "expected": {
+      "caller_engine": "codex",
+      "native_shell_parent_is_caller": true,
+      "native_shell_receipt_bound": true,
+      "native_child_record_bound": true,
+      "child_engine": "claude",
+      "child_backend": "tmux",
+      "child_pane_identity_stripped": true,
+      "child_codex_injections_stripped": true,
+      "attach_recopied_caller_pane": true,
+      "attach_control_client": true,
+      "same_child_birth_after_attach": true,
+      "native_spawn_exit": 0,
+      "native_attach_exit": 0
+    }
+  }
+]

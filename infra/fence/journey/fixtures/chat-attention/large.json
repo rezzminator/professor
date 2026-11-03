@@ -1,0 +1,1 @@
+[{"type":"tool_call","tool":"Bash","input":{"command":"python3 -c 'import sys; sys.stdout.write(\"x\" * 1048577)'"}},{"type":"hold","until_gone":"$HOLD"},{"type":"turn","reply":"large tool response delivered","busy_ms":1}]

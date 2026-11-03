@@ -28,9 +28,7 @@ func TestWithScopesAChatSeatEngineAndSocketOntoEveryRecord(t *testing.T) {
 			t.Fatalf("scoped record %s = %v (found %t), want %v", field.key, got, found, field.want)
 		}
 	}
-	if _, found := records[1].Field(FieldChat); found {
-		t.Fatalf("the unscoped record inherited a chat: %s", recorder.Raw())
-	}
+	requireField(t, records[1], FieldChat, "")
 	if With(ctx) != ctx {
 		t.Fatal("With(ctx) with no pairs returned a different context")
 	}

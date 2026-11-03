@@ -10,6 +10,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/reload"
+	"github.com/rezzminator/professor/pfm/internal/servicemanager"
 )
 
 //go:embed assets
@@ -120,6 +121,11 @@ const (
 // a unit without a PATH marker is returned unchanged, and one with a PATH but
 // no mark is an error, since every unit that starts pfm carries both.
 func renderServiceEnv(content []byte, home string) ([]byte, error) {
+	names, err := servicemanager.CurrentUnitNames()
+	if err != nil {
+		return nil, err
+	}
+	content = []byte(names.Render(string(content)))
 	if !strings.Contains(string(content), servicePathMarker) {
 		return content, nil
 	}
@@ -130,6 +136,23 @@ func renderServiceEnv(content []byte, home string) ([]byte, error) {
 	rendered, err = replaceSingleAssetMarker(rendered, serviceMarkMarker, paths.InstallMark(home))
 	if err != nil {
 		return nil, err
+	}
+	if prefix := names.Prefix(); prefix != "" {
+		if strings.Contains(rendered, "Environment=PFM_INSTALL_MARK=") {
+			rendered = strings.Replace(
+				rendered,
+				"Environment=PFM_INSTALL_MARK=",
+				"Environment="+paths.EnvUnitPrefix+"="+prefix+"\nEnvironment=PFM_INSTALL_MARK=",
+				1,
+			)
+		} else {
+			rendered = strings.Replace(
+				rendered,
+				"<key>"+paths.EnvInstallMark+"</key>",
+				"<key>"+paths.EnvUnitPrefix+"</key>\n\t\t<string>"+prefix+"</string>\n\t\t<key>"+paths.EnvInstallMark+"</key>",
+				1,
+			)
+		}
 	}
 	return []byte(rendered), nil
 }

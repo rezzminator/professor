@@ -1,10 +1,15 @@
 package hookentry
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // Codex's memory consolidation thread fires hooks from the chat's own Codex
@@ -82,6 +87,58 @@ func TestReadHerdrPayloadValidatesTheWholeStream(t *testing.T) {
 			}
 			if gotSkipped != tc.skipped {
 				t.Fatalf("skipped = %q, want %q", gotSkipped, tc.skipped)
+			}
+		})
+	}
+}
+
+func TestHerdrPromptActionAtTheReceivingDoor(t *testing.T) {
+	for _, row := range []struct {
+		event  string
+		action string
+	}{
+		{"UserPromptSubmit", "chat.prompt"}, {"PostToolUse", ""},
+	} {
+		t.Run(row.event, func(t *testing.T) {
+			rig := newChatRig(t)
+			path := filepath.Join(t.TempDir(), "activity.jsonl")
+			_, finish := obs.OpenLog(context.Background(), obs.Settings{
+				Cmd: "internal", Path: path,
+				Env: &paths.MapEnv{Values: map[string]string{obs.EnvBeat: "prompt", obs.EnvRun: "synthetic"}},
+			})
+			payload := `{"hook_event_name":"` + row.event + `","session_id":"s1","prompt":"hello"}`
+			result := rig.run([]string{"working"}, payload)
+			finish(0)
+			if result.rc != 0 {
+				t.Fatalf("hook result=%+v", result)
+			}
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var recorder obs.Recorder
+			if _, err := recorder.Write(raw); err != nil {
+				t.Fatal(err)
+			}
+			var actions []obs.Record
+			for _, record := range recorder.Records() {
+				if _, exists := record.Field(obs.FieldAction); exists {
+					actions = append(actions, record)
+				}
+			}
+			if row.action == "" {
+				if len(actions) != 0 {
+					t.Fatalf("%s: tool report credited a prompt: %+v", path, actions)
+				}
+				return
+			}
+			if len(actions) != 1 {
+				t.Fatalf("%s: actions=%+v, want one chat.prompt", path, actions)
+			}
+			for key, want := range map[string]string{obs.FieldAction: "chat.prompt", obs.FieldBeat: "prompt", obs.FieldRun: "synthetic", obs.FieldSession: "s1", obs.FieldDoor: "typed"} {
+				if got, _ := actions[0].Field(key); got != want {
+					t.Fatalf("%s: %s=%v, want %q", path, key, got, want)
+				}
 			}
 		})
 	}

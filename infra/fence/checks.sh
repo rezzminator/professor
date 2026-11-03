@@ -7,6 +7,7 @@ fence_config_values || return 1
 # engine_sync_build: the fence's one way to get the engine-sync binary (infra/fence/engine-sync.sh).
 # shellcheck source=engine-sync.sh
 . "${BASH_SOURCE[0]%/*}/engine-sync.sh"
+. "${BASH_SOURCE[0]%/*}/../../scripts/suite-checks/fence.sh"
 
 checks_templates_clone() {
   # Clone ratchet over the shell / JS / Python surface (scripts/clone-check.sh,
@@ -778,6 +779,7 @@ checks_templates_step_serial() { shift; "$@"; }
 
 checks_templates() {
   checks_templates_check_map_serial
+  checks_templates_suite
   checks_templates_lanes_serial
   checks_templates_steps checks_templates_step_serial
 }
@@ -1147,16 +1149,8 @@ checks_templates_mirrors() {
 }
 
 checks_gate_check_map() { # run dir
-  local run_dir="$1" check_map_pfm="$1/bin/pfm"
-  # The pfm pfm.unit prebuilt (test-shard.sh --bin-dir) when this gate ran it and it built; else build one.
-  if [[ ! -x "$check_map_pfm" ]]; then
-    check_map_pfm="$run_dir/check-map-pfm"
-    if ! go -C pfm build -o "$check_map_pfm" ./cmd/pfm; then
-      fail_step "templates: check-map pfm build FAILED"
-      return
-    fi
-  fi
-  run "templates: lane↔command map (check-map)" -- bash infra/fence/lanes/check-map.sh --pfm "$check_map_pfm"
+  checks_gate_pfm_binary "$1" check-map || return 1
+  run "templates: lane↔command map (check-map)" -- bash infra/fence/lanes/check-map.sh --pfm "$CHECKS_SUITE_PFM"
 }
 
 # gate_resources_stop <sampler pid> <run dir>: stops the gate's resource sampler and says when its
@@ -1259,6 +1253,7 @@ gate_run() { # pfm, templates, or all
   fi
   if [[ "$target" == templates || "$target" == all ]]; then
     steps_add_heavy templates.check-map checks_gate_check_map "$run_dir" || return 1
+    steps_add_heavy templates.suite-checks checks_gate_suite "$run_dir" || return 1
     checks_templates_steps steps_add || return 1
   fi
   if [[ -n "$filter" ]] && (( ${#STEPS_NAMES[@]} == 0 )); then

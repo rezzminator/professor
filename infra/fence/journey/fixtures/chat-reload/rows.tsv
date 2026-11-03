@@ -1,0 +1,116 @@
+row	ids	fork_of	forecast	factors
+chat-reload/reload-typed@linux+herdr-shield+project+claude	chat.reload-typed			
+chat-reload/reload-from-cli@linux+herdr-shield+project+claude	chat.reload-cli			
+chat-reload/reload-from-picker@linux+herdr-shield+project+claude	chat.reload-picker			
+chat-reload/reload-into-account@linux+herdr-shield+project+claude	chat.reload-account report.statusline			
+chat-reload/reload-into-missing-account-refused@linux+herdr-shield+project+claude	chat.reload-account-refused			
+chat-reload/reload-typed-with-background-work@linux+herdr-shield+project+claude	chat.reload-background-work			
+chat-reload/reload-after-retired-seat@linux+herdr-shield+project+claude	herdr.reload-retired-seat			
+chat-reload/reload-continued-chat@linux+herdr-shield+project+claude	chat.reload-continued			
+chat-reload/reload-continued-chat-background-handoff@linux+herdr-shield+project+claude	chat.reload-continued	chat-reload/reload-continued-chat@linux+herdr-shield+project+claude		
+chat-reload/switch-account-keeps-quota-cache-private@linux+herdr-shield+project+claude	chat.reload-account report.statusline	chat-reload/reload-into-account@linux+herdr-shield+project+claude		
+chat-reload/reload-fresh@linux+herdr-shield+project+claude	chat.reload-new	chat-reload/reload-from-cli@linux+herdr-shield+project+claude		
+chat-reload/reload-fresh-hidden@linux+herdr-shield+project+claude	chat.reload-new-hide	chat-reload/reload-from-cli@linux+herdr-shield+project+claude		
+chat-reload/forecast-multiplexer-herdr-seat-event-session-continued@linux+herdr-shield+project+claude	chat.reload-continued	chat-reload/reload-continued-chat@linux+herdr-shield+project+claude	pfm-herdr-tmux/C11	multiplexer=herdr,seat_event=session_continued
+chat-reload/forecast-multiplexer-herdr-seat-event-session-continued-background-handoff@linux+herdr-shield+project+claude	chat.reload-continued	chat-reload/forecast-multiplexer-herdr-seat-event-session-continued@linux+herdr-shield+project+claude	pfm-herdr-tmux/C11	multiplexer=herdr,seat_event=session_continued,continuation=native-handoff
+chat-reload/forecast-seat-event-pane-reused-runtime-event-reload@linux+herdr-shield+project+claude	chat.reload-cli	chat-reload/reload-from-cli@linux+herdr-shield+project+claude	pfm-herdr-tmux/C16	seat_event=pane_reused,runtime_event=reload
+chat-reload/forecast-multiplexer-herdr-runtime-event-reload@linux+herdr-shield+project+claude	chat.reload-cli	chat-reload/reload-from-cli@linux+herdr-shield+project+claude	pfm-herdr-tmux/C32	multiplexer=herdr,runtime_event=reload
+chat-reload/forecast-session-state-continued-in-new-session-engine-claude-code-index-state-newest-path-lost@linux+herdr-shield+project+claude	chat.reload-continued	chat-reload/reload-continued-chat@linux+herdr-shield+project+claude	darwin-linux-launchd-systemd-proc-sysctl-setsid/C58	session_state=continued_in_new_session,engine=claude_code,index_state=newest_path_lost
+chat-reload/forecast-engine-claude-code-seat-identity-launch-id-after-continuation-reload-path-herdr-or-tmux-reload@linux+herdr-shield+project+claude	chat.reload-continued	chat-reload/reload-continued-chat@linux+herdr-shield+project+claude	darwin-linux-launchd-systemd-proc-sysctl-setsid/C59	engine=claude_code,seat_identity=launch_id_after_continuation,reload_path=herdr_or_tmux_reload
+chat-reload/forecast-engine-claude-code-seat-identity-launch-id-after-continuation-reload-path-herdr-or-tmux-reload-background-handoff@linux+herdr-shield+project+claude	chat.reload-continued	chat-reload/forecast-engine-claude-code-seat-identity-launch-id-after-continuation-reload-path-herdr-or-tmux-reload@linux+herdr-shield+project+claude	darwin-linux-launchd-systemd-proc-sysctl-setsid/C59	engine=claude_code,seat_identity=launch_id_after_continuation,reload_path=herdr_or_tmux_reload,continuation=native-handoff
+chat-reload/reload-typed@linux+herdr-shield+project+codex	chat.reload-typed			
+chat-reload/reload-from-cli@linux+herdr-shield+project+codex	chat.reload-cli			
+chat-reload/reload-from-picker@linux+herdr-shield+project+codex	chat.reload-picker			
+chat-reload/reload-fresh@linux+herdr-shield+project+codex	chat.reload-new	chat-reload/reload-from-cli@linux+herdr-shield+project+codex		
+chat-reload/reload-fresh-hidden@linux+herdr-shield+project+codex	chat.reload-new-hide	chat-reload/reload-from-cli@linux+herdr-shield+project+codex		
+chat-reload/reload-typed@linux+herdr-shield+project+opencode	chat.reload-typed			
+chat-reload/reload-from-cli@linux+herdr-shield+project+opencode	chat.reload-cli			
+chat-reload/reload-from-picker@linux+herdr-shield+project+opencode	chat.reload-picker			
+chat-reload/reload-fresh@linux+herdr-shield+project+opencode	chat.reload-new	chat-reload/reload-from-cli@linux+herdr-shield+project+opencode		
+chat-reload/reload-fresh-hidden@linux+herdr-shield+project+opencode	chat.reload-new-hide	chat-reload/reload-from-cli@linux+herdr-shield+project+opencode		
+chat-reload/reload-typed@linux+herdr-shield+subfolder+claude	chat.reload-typed			
+chat-reload/reload-from-cli@linux+herdr-shield+subfolder+claude	chat.reload-cli			
+chat-reload/reload-continued-chat@linux+herdr-shield+subfolder+claude	chat.reload-continued			
+chat-reload/reload-continued-chat-background-handoff@linux+herdr-shield+subfolder+claude	chat.reload-continued	chat-reload/reload-continued-chat@linux+herdr-shield+subfolder+claude		
+chat-reload/reload-fresh@linux+herdr-shield+subfolder+claude	chat.reload-new	chat-reload/reload-from-cli@linux+herdr-shield+subfolder+claude		
+chat-reload/reload-fresh-hidden@linux+herdr-shield+subfolder+claude	chat.reload-new-hide	chat-reload/reload-from-cli@linux+herdr-shield+subfolder+claude		
+chat-reload/reload-typed@linux+herdr-shield+worktree+claude	chat.reload-typed			
+chat-reload/reload-from-cli@linux+herdr-shield+worktree+claude	chat.reload-cli			
+chat-reload/reload-continued-chat@linux+herdr-shield+worktree+claude	chat.reload-continued			
+chat-reload/reload-continued-chat-background-handoff@linux+herdr-shield+worktree+claude	chat.reload-continued	chat-reload/reload-continued-chat@linux+herdr-shield+worktree+claude		
+chat-reload/reload-fresh@linux+herdr-shield+worktree+claude	chat.reload-new	chat-reload/reload-from-cli@linux+herdr-shield+worktree+claude		
+chat-reload/reload-fresh-hidden@linux+herdr-shield+worktree+claude	chat.reload-new-hide	chat-reload/reload-from-cli@linux+herdr-shield+worktree+claude		
+chat-reload/reload-typed@linux+tmux+project+claude	chat.reload-typed			
+chat-reload/reload-from-cli@linux+tmux+project+claude	chat.reload-cli			
+chat-reload/reload-from-picker@linux+tmux+project+claude	chat.reload-picker			
+chat-reload/reload-into-account@linux+tmux+project+claude	chat.reload-account report.statusline			
+chat-reload/reload-into-missing-account-refused@linux+tmux+project+claude	chat.reload-account-refused			
+chat-reload/reload-typed-with-background-work@linux+tmux+project+claude	chat.reload-background-work			
+chat-reload/reload-continued-chat@linux+tmux+project+claude	chat.reload-continued			
+chat-reload/reload-continued-chat-background-handoff@linux+tmux+project+claude	chat.reload-continued	chat-reload/reload-continued-chat@linux+tmux+project+claude		
+chat-reload/reload-fresh@linux+tmux+project+claude	chat.reload-new	chat-reload/reload-from-cli@linux+tmux+project+claude		
+chat-reload/reload-fresh-hidden@linux+tmux+project+claude	chat.reload-new-hide	chat-reload/reload-from-cli@linux+tmux+project+claude		
+chat-reload/reload-typed@linux+tmux+project+codex	chat.reload-typed			
+chat-reload/reload-from-cli@linux+tmux+project+codex	chat.reload-cli			
+chat-reload/reload-from-picker@linux+tmux+project+codex	chat.reload-picker			
+chat-reload/reload-fresh@linux+tmux+project+codex	chat.reload-new	chat-reload/reload-from-cli@linux+tmux+project+codex		
+chat-reload/reload-fresh-hidden@linux+tmux+project+codex	chat.reload-new-hide	chat-reload/reload-from-cli@linux+tmux+project+codex		
+chat-reload/reload-typed@linux+tmux+project+opencode	chat.reload-typed			
+chat-reload/reload-from-cli@linux+tmux+project+opencode	chat.reload-cli			
+chat-reload/reload-from-picker@linux+tmux+project+opencode	chat.reload-picker			
+chat-reload/reload-fresh@linux+tmux+project+opencode	chat.reload-new	chat-reload/reload-from-cli@linux+tmux+project+opencode		
+chat-reload/reload-fresh-hidden@linux+tmux+project+opencode	chat.reload-new-hide	chat-reload/reload-from-cli@linux+tmux+project+opencode		
+chat-reload/reload-typed@macos+herdr-native+project+claude	chat.reload-typed			
+chat-reload/reload-from-cli@macos+herdr-native+project+claude	chat.reload-cli			
+chat-reload/reload-from-picker@macos+herdr-native+project+claude	chat.reload-picker			
+chat-reload/reload-into-account@macos+herdr-native+project+claude	chat.reload-account report.statusline			
+chat-reload/reload-into-missing-account-refused@macos+herdr-native+project+claude	chat.reload-account-refused			
+chat-reload/reload-typed-with-background-work@macos+herdr-native+project+claude	chat.reload-background-work			
+chat-reload/reload-after-retired-seat@macos+herdr-native+project+claude	herdr.reload-retired-seat			
+chat-reload/reload-continued-chat@macos+herdr-native+project+claude	chat.reload-continued			
+chat-reload/reload-continued-chat-background-handoff@macos+herdr-native+project+claude	chat.reload-continued	chat-reload/reload-continued-chat@macos+herdr-native+project+claude		
+chat-reload/reload-fresh@macos+herdr-native+project+claude	chat.reload-new	chat-reload/reload-from-cli@macos+herdr-native+project+claude		
+chat-reload/reload-fresh-hidden@macos+herdr-native+project+claude	chat.reload-new-hide	chat-reload/reload-from-cli@macos+herdr-native+project+claude		
+chat-reload/forecast-seat-state-native-seat-hook-origin-prompt-hook-backend-herdr@macos+herdr-native+project+claude	chat.reload-cli	chat-reload/reload-from-cli@macos+herdr-native+project+claude	darwin-linux-launchd-systemd-proc-sysctl-setsid/C75	seat_state=native_seat,hook_origin=prompt_hook,backend=herdr
+chat-reload/reload-typed@macos+herdr-native+project+codex	chat.reload-typed			
+chat-reload/reload-from-cli@macos+herdr-native+project+codex	chat.reload-cli			
+chat-reload/reload-from-picker@macos+herdr-native+project+codex	chat.reload-picker			
+chat-reload/reload-fresh@macos+herdr-native+project+codex	chat.reload-new	chat-reload/reload-from-cli@macos+herdr-native+project+codex		
+chat-reload/reload-fresh-hidden@macos+herdr-native+project+codex	chat.reload-new-hide	chat-reload/reload-from-cli@macos+herdr-native+project+codex		
+chat-reload/reload-typed@macos+herdr-native+project+opencode	chat.reload-typed			
+chat-reload/reload-from-cli@macos+herdr-native+project+opencode	chat.reload-cli			
+chat-reload/reload-from-picker@macos+herdr-native+project+opencode	chat.reload-picker			
+chat-reload/reload-fresh@macos+herdr-native+project+opencode	chat.reload-new	chat-reload/reload-from-cli@macos+herdr-native+project+opencode		
+chat-reload/reload-fresh-hidden@macos+herdr-native+project+opencode	chat.reload-new-hide	chat-reload/reload-from-cli@macos+herdr-native+project+opencode		
+chat-reload/reload-typed@macos+herdr-native+subfolder+claude	chat.reload-typed			
+chat-reload/reload-from-cli@macos+herdr-native+subfolder+claude	chat.reload-cli			
+chat-reload/reload-continued-chat@macos+herdr-native+subfolder+claude	chat.reload-continued			
+chat-reload/reload-continued-chat-background-handoff@macos+herdr-native+subfolder+claude	chat.reload-continued	chat-reload/reload-continued-chat@macos+herdr-native+subfolder+claude		
+chat-reload/reload-fresh@macos+herdr-native+subfolder+claude	chat.reload-new	chat-reload/reload-from-cli@macos+herdr-native+subfolder+claude		
+chat-reload/reload-fresh-hidden@macos+herdr-native+subfolder+claude	chat.reload-new-hide	chat-reload/reload-from-cli@macos+herdr-native+subfolder+claude		
+chat-reload/reload-typed@macos+herdr-native+worktree+claude	chat.reload-typed			
+chat-reload/reload-from-cli@macos+herdr-native+worktree+claude	chat.reload-cli			
+chat-reload/reload-continued-chat@macos+herdr-native+worktree+claude	chat.reload-continued			
+chat-reload/reload-continued-chat-background-handoff@macos+herdr-native+worktree+claude	chat.reload-continued	chat-reload/reload-continued-chat@macos+herdr-native+worktree+claude		
+chat-reload/reload-fresh@macos+herdr-native+worktree+claude	chat.reload-new	chat-reload/reload-from-cli@macos+herdr-native+worktree+claude		
+chat-reload/reload-fresh-hidden@macos+herdr-native+worktree+claude	chat.reload-new-hide	chat-reload/reload-from-cli@macos+herdr-native+worktree+claude		
+chat-reload/reload-typed@macos+tmux+project+claude	chat.reload-typed			
+chat-reload/reload-from-cli@macos+tmux+project+claude	chat.reload-cli			
+chat-reload/reload-from-picker@macos+tmux+project+claude	chat.reload-picker			
+chat-reload/reload-into-account@macos+tmux+project+claude	chat.reload-account report.statusline			
+chat-reload/reload-into-missing-account-refused@macos+tmux+project+claude	chat.reload-account-refused			
+chat-reload/reload-typed-with-background-work@macos+tmux+project+claude	chat.reload-background-work			
+chat-reload/reload-continued-chat@macos+tmux+project+claude	chat.reload-continued			
+chat-reload/reload-continued-chat-background-handoff@macos+tmux+project+claude	chat.reload-continued	chat-reload/reload-continued-chat@macos+tmux+project+claude		
+chat-reload/reload-fresh@macos+tmux+project+claude	chat.reload-new	chat-reload/reload-from-cli@macos+tmux+project+claude		
+chat-reload/reload-fresh-hidden@macos+tmux+project+claude	chat.reload-new-hide	chat-reload/reload-from-cli@macos+tmux+project+claude		
+chat-reload/reload-typed@macos+tmux+project+codex	chat.reload-typed			
+chat-reload/reload-from-cli@macos+tmux+project+codex	chat.reload-cli			
+chat-reload/reload-from-picker@macos+tmux+project+codex	chat.reload-picker			
+chat-reload/reload-fresh@macos+tmux+project+codex	chat.reload-new	chat-reload/reload-from-cli@macos+tmux+project+codex		
+chat-reload/reload-fresh-hidden@macos+tmux+project+codex	chat.reload-new-hide	chat-reload/reload-from-cli@macos+tmux+project+codex		
+chat-reload/reload-typed@macos+tmux+project+opencode	chat.reload-typed			
+chat-reload/reload-from-cli@macos+tmux+project+opencode	chat.reload-cli			
+chat-reload/reload-from-picker@macos+tmux+project+opencode	chat.reload-picker			
+chat-reload/reload-fresh@macos+tmux+project+opencode	chat.reload-new	chat-reload/reload-from-cli@macos+tmux+project+opencode		
+chat-reload/reload-fresh-hidden@macos+tmux+project+opencode	chat.reload-new-hide	chat-reload/reload-from-cli@macos+tmux+project+opencode		

@@ -1,0 +1,25 @@
+check	mode	inputs	algorithm	FAIL	ERROR
+map-ids	both	landscape.md;map.tsv	Landscape IDs and mapped IDs are nonempty and set-equal	Unmapped or unknown ID	DERIVE-FAILED
+map-beats	both	beats.md;map.tsv;pending.txt;run collection	Every mapped branch row exists in code or pending; close has no pending	Missing row or pending at close	DERIVE-FAILED or pending unreadable
+map-names	both	installed CLI/MCP/picker registry dumps;landscape.md	Compare built public registry and qualified ops in both directions; evidence writer exists	Missing/extra operation or nonexistent writer	DERIVE-FAILED
+map-dup	both	map.tsv;tier ledgers	One success/refusal per op+entry+branch; crossing/twin obligations hold	Duplicate or invalid crossing/twin	DERIVE-FAILED
+branches	both	dimensions.tsv;cuts.tsv;expanded edge manifest	Stream complete conditional product; every edge has row or ratified costed cut	Missing edge/value/dimension or invalid cut	DERIVE-FAILED
+landscape-scope	both	landscape.md;landscape-exclusions.shell	Only running/installed product behavior; required fields and ruled surfaces	Build/toolchain/config-source assertion presented as product	Empty spellings
+names	both	IDs;collected tests;names.shell;violating-actions.shell;name-allowlist.txt	Property names have actions that violate the property; signature ratchet	Refused name or unsupported property claim	No files/IDs or empty spellings
+oracle	both	assertion AST;references.tsv;locator spellings;rendered-from manifest	Independent expected side; exact observable subject; ruled reference; live reason	Weak/tautological oracle or uncited ruled row	Unreadable source set or extractor
+copy	both	ruled-copy.tsv;assertion census	Exactly one test per ruled key and locale; explicit none otherwise	Missing/duplicated pin	Unreadable registry or ambiguous empty
+refused-shapes	both	shape spellings;planted corpus;source/test tree;baselines	Each listed refused shape detected and signature ratchet enforced	Signature beyond baseline	Empty corpus/spellings/tree or zero scanned
+gaps	both	gaps.tsv;roster.txt;own-identifiers.txt	Only externally unfixable gap with owner/reference/future expiry	Expired/internal gap or wrong owner	Unreadable input
+budgets	both	beat costs;Speed values;budgets.tsv;named runs	Sum every expanded row; pin max of three same-root greens plus headroom	Unruled/over target/unpinned/invalid ratchet	Unreadable runs/values
+collected	both	test patterns;repo inventory;CI YAML;blocking logs	Every test/check collected once; each live OS and fake/real contract gates	Uncollected/duplicate/skipped OS/no close invocation	Missing logs/CI/patterns
+self-tests	both	self-tests.txt;census;blocking results	Each scanner/check/filter has each error input plus planted red; all collected	Missing or failing test; dropped failure block	Unreadable census
+retired	both	merge-base assertions;deletion diff;retired.tsv;successor runs	Exact signature equality and preserved subject/expected value or valid disposition	Missing/extra retirement or unproved successor	Unreadable merge base/extractor
+escapes	both	escapes.tsv;beat bodies;stored revert diffs;red runs	Escape assertion in test; exact reverted-fix diff caused that row red	Absent assertion/red or hash mismatch	Missing run/diff/ledger
+env-twice	both	config schema;trigger paths;base/perturbed and shuffle runs	Same unit result under both roots; fresh scheduled leg	Different outcomes or expired window	Missing leg/key set/trigger
+bare-doors	both	door AST;doors.go;baseline	One production door per mechanism; no signature growth	New bypass/copy	Absent extractor/spellings or zero scanned
+clones	both	test tree;token detector;baseline	Test-tree token clones within same-subject signature baseline	New clone	No detector/matched files
+size	both	test/lane inventory;size-ceiling;baseline	Every scoped file within ruled ceiling or ratchet	File above bound	Missing size ceiling or unreadable file
+tree	close	canonical and solo ledgers;subject/dirty/root hashes	Correct clean same subject, serial timeline, real separate product PID	Wrong subject/mode/dirty/overlap or absent required solo	No usable ledger
+observed	close	expanded map;canonical logs/ledger;tier contexts	Each edge observed with its own ID and every mapped ID asserted	CLAIMED-NOT-INVOKED,UNOBSERVED,NO-ASSERTION,TIER-NO-BITE	LOG-ABSENT or missing tier
+bite	close	bites.tsv;diffs;red runs;third-party-rules.txt	One guarded-statement mutation per row/check/rule; drift needs both sides	No red, wrong file/hash, unconditional failure or oversized mutation	Missing run/diff
+flakes	close	all attempts;configuration/root/subject hashes;shuffle logs	Recompute failed-and-passed row on identical configuration; no blanket retry	Flake, illegal retry or missing shuffle	Unreadable ledgers

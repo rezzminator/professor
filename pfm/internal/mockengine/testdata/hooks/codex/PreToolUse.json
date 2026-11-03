@@ -1,0 +1,14 @@
+{
+  "session_id": "019ff700-0000-7000-8000-000000000001",
+  "transcript_path": "/fixture/rollout.jsonl",
+  "cwd": "/fixture/atlas",
+  "model": "codex-fixture-model",
+  "permission_mode": "bypassPermissions",
+  "hook_event_name": "PreToolUse",
+  "turn_id": "turn-atlas",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "printf atlas"
+  },
+  "tool_use_id": "call_atlas"
+}

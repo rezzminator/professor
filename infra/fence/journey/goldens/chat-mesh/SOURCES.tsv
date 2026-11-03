@@ -1,0 +1,4 @@
+file	source	status
+delivered.json	MERGE.md recipient-state delivery invariant	Spec expectation; live receipt comparison still required.
+undelivered.json	Protected composer refusal invariant	Spec expectation; per-backend live comparison still required.
+dead.json	beats.md call-dead-refused	Spec expectation; dead-engine setup still blocked.

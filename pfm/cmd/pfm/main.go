@@ -124,7 +124,7 @@ func run(args []string, stdout, stderr io.Writer) (exitCode int) {
 		if len(args) > 1 && args[0] == internalCommand && args[1] == reloadRunCommand {
 			return reloadWorkerConfigFailure(args[2:], err, stderr)
 		}
-		if !diagnosticCommand(args) {
+		if !cli.DiagnosticCommand(args) {
 			fmt.Fprintf(stderr, "pfm: config: %v\n", err)
 			return 1
 		}
@@ -217,8 +217,7 @@ func run(args []string, stdout, stderr io.Writer) (exitCode int) {
 	case "internal":
 		return runInternal(args[1:], stdout, stderr, runtime)
 	case "help", "-h", "--help":
-		printUsage(stdout)
-		return 0
+		return cli.RunHelp(args[1:], stdout, stderr, printUsage)
 	default:
 		if code, retired := answerRetiredCommand(args[0], stderr, true); retired {
 			return code
@@ -259,17 +258,6 @@ func printUsage(w io.Writer) {
 		"  usage-hook the fail-open usage-limit prompt hook",
 		"  mcp       list, configure, or serve registered MCP servers (stdio or loopback HTTP)",
 	})
-}
-
-func diagnosticCommand(args []string) bool {
-	if len(args) == 0 {
-		return false
-	}
-	switch args[0] {
-	case doctorCommand, statuslineCommand, internalCommand, usageHookCommand:
-		return true // the statusline renders a broken config on its cache segment; hooks and launchers warn
-	}
-	return args[0] == configCommand && len(args) > 1 && (args[1] == "show" || args[1] == "validate")
 }
 
 func runMCP(
@@ -437,11 +425,15 @@ func runUnkill(args []string, stdout, stderr io.Writer, runtimes ...commandRunti
 	return 0
 }
 
-func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime) (exitCode int) {
+func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime) int {
+	return hookentry.CapturedHook(args, os.Stdin, stdout, stderr, runtime, runInternalInput)
+}
+
+func runInternalInput(args []string, input io.Reader, stdout, stderr io.Writer, runtime commandRuntime) (exitCode int) {
 	stdout, finishHook := obs.Hook(context.Background(), obs.Verb(args), stdout)
 	defer func() { finishHook(exitCode) }()
 	if len(args) != 0 && (args[0] == "clear-kill" || args[0] == "clear-name" || args[0] == "resume-unkill") {
-		return hookentry.ClearHook(args, os.Stdin, stdout, stderr, runtime)
+		return hookentry.ClearHook(args, input, stdout, stderr, runtime)
 	}
 	if len(args) != 0 && args[0] == "agent-open" {
 		return hookentry.AgentOpen(args[1:], stderr, runtime)
@@ -468,22 +460,22 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		return hookentry.ClaudeVersion(args[1:], stdout, stderr, runtime)
 	}
 	if len(args) != 0 && (args[0] == "herdr-state" || args[0] == "herdr-shell") {
-		return hookentry.PayloadHook(args, os.Stdin, stderr)
+		return hookentry.PayloadHook(args, input, stderr)
 	}
 	if len(args) != 0 && (args[0] == "cost-launch" || args[0] == "cost-sink") {
 		return costsink.Main(args, stderr, paths.OSEnv{})
 	}
 	if len(args) != 0 && (args[0] == "git-guard" || args[0] == "store-guard") {
-		return hookentry.BashGuard(args[0], os.Stdin, stdout, stderr)
+		return hookentry.BashGuard(args[0], input, stdout, stderr)
 	}
 	if len(args) != 0 && args[0] == "pcm-guard" {
-		return hookentry.PcmGuard(os.Stdin, stdout, stderr)
+		return hookentry.PcmGuard(input, stdout, stderr)
 	}
 	if len(args) != 0 && args[0] == "engine-guard" {
-		return hookentry.EngineGuard(args[1:], os.Stdin, stdout, stderr)
+		return hookentry.EngineGuard(args[1:], input, stdout, stderr)
 	}
 	if len(args) != 0 && args[0] == "orchestrator-wait" {
-		return hookentry.OrchestratorWait(os.Stdin, stdout, stderr)
+		return hookentry.OrchestratorWait(input, stdout, stderr)
 	}
 	if len(args) != 0 && args[0] == "herdr-indicators" {
 		// The painter outlives the hook's directory, often a worktree removed under it, and every scan reads it.
@@ -497,22 +489,22 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		return pfmchat.HerdrPlacesEntry(stderr, paths.OSEnv{}, runtime)
 	}
 	if len(args) != 0 && args[0] == "rr-dir" {
-		return runRRDirEntry(os.Stdin, stdout, stderr, paths.OSEnv{})
+		return runRRDirEntry(input, stdout, stderr, paths.OSEnv{})
 	}
 	if len(args) != 0 && args[0] == "epic-inject" {
-		return hookentry.EpicInject(os.Stdin, stdout, stderr)
+		return hookentry.EpicInject(input, stdout, stderr)
 	}
 	if len(args) != 0 && args[0] == "reload-intercept" {
 		reloadFront := func(ctx context.Context, args []string, stdout, stderr io.Writer, runtime commandRuntime) int {
 			return runChatReloadWithRuntime(ctx, args, stdout, stderr, runtime, paths.OSEnv{})
 		}
-		return hookentry.ReloadIntercept(os.Stdin, stdout, stderr, runtime, reloadFront)
+		return hookentry.ReloadIntercept(input, stdout, stderr, runtime, reloadFront)
 	}
 	if len(args) != 0 && args[0] == "exit-intercept" {
-		return hookentry.ExitIntercept(os.Stdin, stdout, stderr, runtime, runKill)
+		return hookentry.ExitIntercept(input, stdout, stderr, runtime, runKill)
 	}
 	if len(args) != 0 && args[0] == "exit-close" {
-		return hookentry.ExitClose(os.Stdin, stderr)
+		return hookentry.ExitClose(input, stderr)
 	}
 	if len(args) != 0 && args[0] == "reload-run" {
 		return runChatReloadWorkerWithRuntime(args[1:], os.Stdout, stderr, runtime, paths.OSEnv{})
@@ -551,7 +543,7 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		return stale.Run(args[1:], stdout, stderr)
 	}
 	if len(args) != 0 && args[0] == "statusline" {
-		return runStatuslineWithRuntime(args[1:], os.Stdin, stdout, stderr, runtime, paths.OSEnv{})
+		return runStatuslineWithRuntime(args[1:], input, stdout, stderr, runtime, paths.OSEnv{})
 	}
 	if len(args) != 0 && args[0] == "primary-set" {
 		flags := cli.NewFlagSet("internal primary-set", "usage: pfm internal primary-set <account>", stderr)

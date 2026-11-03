@@ -1,0 +1,9 @@
+forecast	cell	rank	factors	worst_outcome	held	beat
+pfm-herdr-tmux	C8	null	seat_event=pane_reused,runtime_event=kill	data-loss	held	chat-ending/forecast-seat-event-pane-reused-runtime-event-kill@linux+herdr-shield+project+claude
+pfm-herdr-tmux	C9	null	seat_event=seat_dead,runtime_event=kill	wrong-target	held	chat-ending/forecast-seat-event-seat-dead-runtime-event-kill@linux+herdr-shield+project+claude
+pfm-herdr-tmux	C22	null	multiplexer=herdr,runtime_event=kill	wrong-state	held	chat-ending/forecast-multiplexer-herdr-runtime-event-kill@linux+herdr-shield+project+claude
+pfm-herdr-tmux	C40	null	multiplexer=herdr,runtime_event=clear	cosmetic	held	chat-ending/forecast-multiplexer-herdr-runtime-event-clear@linux+herdr-shield+project+claude
+os-doors	C03	null	os=linux,caller_session=ssh_privsep_nondumpable,process_owner=foreign_uid	wrong-state	held	chat-ending/forecast-os-linux-caller-session-ssh-privsep-nondumpable-process-owner-foreign-uid@linux+tmux+project+claude
+darwin-linux-launchd-systemd-proc-sysctl-setsid	C04	null	engine_event=claude_clear,herdr_seat=native_seat,name_source=pfm_chat_name	wrong-state	held	chat-ending/forecast-engine-event-claude-clear-herdr-seat-native-seat-name-source-pfm-chat-name@macos+herdr-native+project+claude
+darwin-linux-launchd-systemd-proc-sysctl-setsid	C25	null	transport=ssh,os=linux,process=sshd_nondumpable_ancestor	wrong-state	held	chat-ending/forecast-transport-ssh-os-linux-process-sshd-nondumpable-ancestor@linux+tmux+project+claude
+darwin-linux-launchd-systemd-proc-sysctl-setsid	C38	null	spawn_request=codex_home_unset,codex_account_home=non_default,launch_path=chat_branch_spawn	wrong-target	held	chat-ending/forecast-spawn-request-codex-home-unset-codex-account-home-non-default-launch-path-chat-branch-spawn@linux+herdr-shield+project+codex

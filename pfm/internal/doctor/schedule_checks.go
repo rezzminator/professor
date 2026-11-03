@@ -96,7 +96,12 @@ func renderScheduleDoctor(
 ) int {
 	manager, unit := schedule.Manager, schedule.Unit.Unit
 	if unit == "" {
-		manager, unit = scheduleTimerIdentity()
+		var identityErr error
+		manager, unit, identityErr = scheduleTimerIdentity()
+		if identityErr != nil {
+			schedule.Unit.Err = identityErr
+			schedule.Present = true
+		}
 	}
 	problem := false
 	var hints []string

@@ -1,0 +1,95 @@
+golden	key	status	source	basis
+SessionStart.json	session_id	observed	$HOME/.local/state/callmeter/callmeter.db#events.event_id=fa055dac22f1b18f17173f7ad62911414d72a4bf1bd92502df3c55b1c9c55aea	key presence projected by Callmeter; values sanitized fixtures
+SessionStart.json	transcript_path	unverified	https://code.claude.com/docs/en/hooks#sessionstart-input	documented schema; raw capture pending; values sanitized fixtures
+SessionStart.json	cwd	unverified	https://code.claude.com/docs/en/hooks#sessionstart-input	documented schema; raw capture pending; values sanitized fixtures
+SessionStart.json	permission_mode	unverified	https://code.claude.com/docs/en/hooks#sessionstart-input	documented schema; raw capture pending; values sanitized fixtures
+SessionStart.json	hook_event_name	observed	$HOME/.local/state/callmeter/callmeter.db#events.event_id=fa055dac22f1b18f17173f7ad62911414d72a4bf1bd92502df3c55b1c9c55aea	key presence projected by Callmeter; values sanitized fixtures
+SessionStart.json	source	observed	$HOME/.local/state/callmeter/callmeter.db#events.event_id=fa055dac22f1b18f17173f7ad62911414d72a4bf1bd92502df3c55b1c9c55aea	key presence projected by Callmeter; values sanitized fixtures
+UserPromptSubmit.json	session_id	observed	$HOME/.local/state/callmeter/callmeter.db#events.event_id=cc555ecfc94a9541371503c2f2428f4ba1320761525eaffe2b27946dc2ab07c3	key presence projected by Callmeter; values sanitized fixtures
+UserPromptSubmit.json	transcript_path	unverified	https://code.claude.com/docs/en/hooks#userpromptsubmit-input	documented schema; raw capture pending; values sanitized fixtures
+UserPromptSubmit.json	cwd	unverified	https://code.claude.com/docs/en/hooks#userpromptsubmit-input	documented schema; raw capture pending; values sanitized fixtures
+UserPromptSubmit.json	permission_mode	observed	$HOME/.local/state/callmeter/callmeter.db#events.event_id=cc555ecfc94a9541371503c2f2428f4ba1320761525eaffe2b27946dc2ab07c3	key presence projected by Callmeter; values sanitized fixtures
+UserPromptSubmit.json	hook_event_name	observed	$HOME/.local/state/callmeter/callmeter.db#events.event_id=cc555ecfc94a9541371503c2f2428f4ba1320761525eaffe2b27946dc2ab07c3	key presence projected by Callmeter; values sanitized fixtures
+UserPromptSubmit.json	prompt	observed	$HOME/.local/state/callmeter/callmeter.db#events.event_id=cc555ecfc94a9541371503c2f2428f4ba1320761525eaffe2b27946dc2ab07c3	key presence projected by Callmeter; values sanitized fixtures
+PreToolUse.json	session_id	unverified	https://code.claude.com/docs/en/hooks#pretooluse-input	documented schema; raw capture pending; values sanitized fixtures
+PreToolUse.json	transcript_path	unverified	https://code.claude.com/docs/en/hooks#pretooluse-input	documented schema; raw capture pending; values sanitized fixtures
+PreToolUse.json	cwd	unverified	https://code.claude.com/docs/en/hooks#pretooluse-input	documented schema; raw capture pending; values sanitized fixtures
+PreToolUse.json	permission_mode	unverified	https://code.claude.com/docs/en/hooks#pretooluse-input	documented schema; raw capture pending; values sanitized fixtures
+PreToolUse.json	hook_event_name	unverified	https://code.claude.com/docs/en/hooks#pretooluse-input	documented schema; raw capture pending; values sanitized fixtures
+PreToolUse.json	tool_name	unverified	https://code.claude.com/docs/en/hooks#pretooluse-input	documented schema; raw capture pending; values sanitized fixtures
+PreToolUse.json	tool_input	unverified	https://code.claude.com/docs/en/hooks#pretooluse-input	documented schema; raw capture pending; values sanitized fixtures
+PreToolUse.json	tool_use_id	unverified	https://code.claude.com/docs/en/hooks#pretooluse-input	documented schema; raw capture pending; values sanitized fixtures
+PostToolUse.json	session_id	unverified	https://code.claude.com/docs/en/hooks#posttooluse-input	documented schema; raw capture pending; values sanitized fixtures
+PostToolUse.json	transcript_path	unverified	https://code.claude.com/docs/en/hooks#posttooluse-input	documented schema; raw capture pending; values sanitized fixtures
+PostToolUse.json	cwd	unverified	https://code.claude.com/docs/en/hooks#posttooluse-input	documented schema; raw capture pending; values sanitized fixtures
+PostToolUse.json	permission_mode	unverified	https://code.claude.com/docs/en/hooks#posttooluse-input	documented schema; raw capture pending; values sanitized fixtures
+PostToolUse.json	hook_event_name	unverified	https://code.claude.com/docs/en/hooks#posttooluse-input	documented schema; raw capture pending; values sanitized fixtures
+PostToolUse.json	tool_name	unverified	https://code.claude.com/docs/en/hooks#posttooluse-input	documented schema; raw capture pending; values sanitized fixtures
+PostToolUse.json	tool_input	unverified	https://code.claude.com/docs/en/hooks#posttooluse-input	documented schema; raw capture pending; values sanitized fixtures
+PostToolUse.json	tool_use_id	unverified	https://code.claude.com/docs/en/hooks#posttooluse-input	documented schema; raw capture pending; values sanitized fixtures
+PostToolUse.json	tool_response	unverified	https://code.claude.com/docs/en/hooks#posttooluse-input	documented schema; raw capture pending; values sanitized fixtures
+PostToolUse.json	duration_ms	unverified	https://code.claude.com/docs/en/hooks#posttooluse-input	documented schema; raw capture pending; values sanitized fixtures
+PostToolUseFailure.json	session_id	unverified	https://code.claude.com/docs/en/hooks#posttoolusefailure-input	documented schema; raw capture pending; values sanitized fixtures
+PostToolUseFailure.json	transcript_path	unverified	https://code.claude.com/docs/en/hooks#posttoolusefailure-input	documented schema; raw capture pending; values sanitized fixtures
+PostToolUseFailure.json	cwd	unverified	https://code.claude.com/docs/en/hooks#posttoolusefailure-input	documented schema; raw capture pending; values sanitized fixtures
+PostToolUseFailure.json	permission_mode	unverified	https://code.claude.com/docs/en/hooks#posttoolusefailure-input	documented schema; raw capture pending; values sanitized fixtures
+PostToolUseFailure.json	hook_event_name	unverified	https://code.claude.com/docs/en/hooks#posttoolusefailure-input	documented schema; raw capture pending; values sanitized fixtures
+PostToolUseFailure.json	tool_name	unverified	https://code.claude.com/docs/en/hooks#posttoolusefailure-input	documented schema; raw capture pending; values sanitized fixtures
+PostToolUseFailure.json	tool_input	unverified	https://code.claude.com/docs/en/hooks#posttoolusefailure-input	documented schema; raw capture pending; values sanitized fixtures
+PostToolUseFailure.json	tool_use_id	unverified	https://code.claude.com/docs/en/hooks#posttoolusefailure-input	documented schema; raw capture pending; values sanitized fixtures
+PostToolUseFailure.json	error	unverified	https://code.claude.com/docs/en/hooks#posttoolusefailure-input	documented schema; raw capture pending; values sanitized fixtures
+PostToolUseFailure.json	is_interrupt	unverified	https://code.claude.com/docs/en/hooks#posttoolusefailure-input	documented schema; raw capture pending; values sanitized fixtures
+PermissionRequest.json	session_id	observed	$HOME/.local/state/callmeter/callmeter.db#events.event_id=964d937cc12fe2cb4c8f94de7458c2c247725ad34f16e652b01febac1969daef	key presence projected by Callmeter; values sanitized fixtures
+PermissionRequest.json	transcript_path	unverified	https://code.claude.com/docs/en/hooks#permissionrequest-input	documented schema; raw capture pending; values sanitized fixtures
+PermissionRequest.json	cwd	unverified	https://code.claude.com/docs/en/hooks#permissionrequest-input	documented schema; raw capture pending; values sanitized fixtures
+PermissionRequest.json	permission_mode	observed	$HOME/.local/state/callmeter/callmeter.db#events.event_id=964d937cc12fe2cb4c8f94de7458c2c247725ad34f16e652b01febac1969daef	key presence projected by Callmeter; values sanitized fixtures
+PermissionRequest.json	hook_event_name	observed	$HOME/.local/state/callmeter/callmeter.db#events.event_id=964d937cc12fe2cb4c8f94de7458c2c247725ad34f16e652b01febac1969daef	key presence projected by Callmeter; values sanitized fixtures
+PermissionRequest.json	tool_name	observed	$HOME/.local/state/callmeter/callmeter.db#events.event_id=964d937cc12fe2cb4c8f94de7458c2c247725ad34f16e652b01febac1969daef	key presence projected by Callmeter; values sanitized fixtures
+PermissionRequest.json	tool_input	observed	$HOME/.local/state/callmeter/callmeter.db#events.event_id=964d937cc12fe2cb4c8f94de7458c2c247725ad34f16e652b01febac1969daef	key presence projected by Callmeter; values sanitized fixtures
+Notification-subagent-permission.json	session_id	observed	$HOME/.local/state/callmeter/callmeter.db#events.event_id=97d935126b8ae07686ce8638c153d22dbc2f35801a237de40e1415a88ff52627	key presence projected by Callmeter; values sanitized fixtures
+Notification-subagent-permission.json	transcript_path	unverified	https://code.claude.com/docs/en/hooks#notification-input	documented schema; raw capture pending; values sanitized fixtures
+Notification-subagent-permission.json	cwd	unverified	https://code.claude.com/docs/en/hooks#notification-input	documented schema; raw capture pending; values sanitized fixtures
+Notification-subagent-permission.json	permission_mode	unverified	https://code.claude.com/docs/en/hooks#notification-input	documented schema; raw capture pending; values sanitized fixtures
+Notification-subagent-permission.json	hook_event_name	observed	$HOME/.local/state/callmeter/callmeter.db#events.event_id=97d935126b8ae07686ce8638c153d22dbc2f35801a237de40e1415a88ff52627	key presence projected by Callmeter; values sanitized fixtures
+Notification-subagent-permission.json	message	observed	$HOME/.local/state/callmeter/callmeter.db#events.event_id=97d935126b8ae07686ce8638c153d22dbc2f35801a237de40e1415a88ff52627	key presence projected by Callmeter; values sanitized fixtures
+Notification-subagent-permission.json	notification_type	observed	$HOME/.local/state/callmeter/callmeter.db#events.event_id=97d935126b8ae07686ce8638c153d22dbc2f35801a237de40e1415a88ff52627	key presence projected by Callmeter; values sanitized fixtures
+Notification-subagent-permission.json	agent_id:absent	unverified	https://code.claude.com/docs/en/hooks#notification-input	explicit regression shape; Callmeter NULL does not prove raw absence
+SubagentStart.json	session_id	observed	$HOME/.local/state/callmeter/callmeter.db#events.event_id=8b5a16054ab9b4db32eafc41d7a32f121bcc4bbf7b7967a3eaa88cc5f04b6011	key presence projected by Callmeter; values sanitized fixtures
+SubagentStart.json	transcript_path	unverified	https://code.claude.com/docs/en/hooks#subagentstart-input	documented schema; raw capture pending; values sanitized fixtures
+SubagentStart.json	cwd	unverified	https://code.claude.com/docs/en/hooks#subagentstart-input	documented schema; raw capture pending; values sanitized fixtures
+SubagentStart.json	permission_mode	unverified	https://code.claude.com/docs/en/hooks#subagentstart-input	documented schema; raw capture pending; values sanitized fixtures
+SubagentStart.json	hook_event_name	observed	$HOME/.local/state/callmeter/callmeter.db#events.event_id=8b5a16054ab9b4db32eafc41d7a32f121bcc4bbf7b7967a3eaa88cc5f04b6011	key presence projected by Callmeter; values sanitized fixtures
+SubagentStart.json	agent_id	observed	$HOME/.local/state/callmeter/callmeter.db#events.event_id=8b5a16054ab9b4db32eafc41d7a32f121bcc4bbf7b7967a3eaa88cc5f04b6011	key presence projected by Callmeter; values sanitized fixtures
+SubagentStart.json	agent_type	observed	$HOME/.local/state/callmeter/callmeter.db#events.event_id=8b5a16054ab9b4db32eafc41d7a32f121bcc4bbf7b7967a3eaa88cc5f04b6011	key presence projected by Callmeter; values sanitized fixtures
+SubagentStop.json	session_id	observed	$HOME/.local/state/callmeter/callmeter.db#events.event_id=f531b528bc51bcc6c5449c0fbd25ac30884d2ea356a72b4b7a0a667c11709bd3	key presence projected by Callmeter; values sanitized fixtures
+SubagentStop.json	transcript_path	unverified	https://code.claude.com/docs/en/hooks#subagentstop-input	documented schema; raw capture pending; values sanitized fixtures
+SubagentStop.json	cwd	unverified	https://code.claude.com/docs/en/hooks#subagentstop-input	documented schema; raw capture pending; values sanitized fixtures
+SubagentStop.json	permission_mode	observed	$HOME/.local/state/callmeter/callmeter.db#events.event_id=f531b528bc51bcc6c5449c0fbd25ac30884d2ea356a72b4b7a0a667c11709bd3	key presence projected by Callmeter; values sanitized fixtures
+SubagentStop.json	hook_event_name	observed	$HOME/.local/state/callmeter/callmeter.db#events.event_id=f531b528bc51bcc6c5449c0fbd25ac30884d2ea356a72b4b7a0a667c11709bd3	key presence projected by Callmeter; values sanitized fixtures
+SubagentStop.json	agent_id	observed	$HOME/.local/state/callmeter/callmeter.db#events.event_id=f531b528bc51bcc6c5449c0fbd25ac30884d2ea356a72b4b7a0a667c11709bd3	key presence projected by Callmeter; values sanitized fixtures
+SubagentStop.json	agent_type	observed	$HOME/.local/state/callmeter/callmeter.db#events.event_id=f531b528bc51bcc6c5449c0fbd25ac30884d2ea356a72b4b7a0a667c11709bd3	key presence projected by Callmeter; values sanitized fixtures
+SubagentStop.json	agent_transcript_path	observed	$HOME/.local/state/callmeter/callmeter.db#events.event_id=f531b528bc51bcc6c5449c0fbd25ac30884d2ea356a72b4b7a0a667c11709bd3	key presence projected by Callmeter; values sanitized fixtures
+SubagentStop.json	stop_hook_active	unverified	https://code.claude.com/docs/en/hooks#subagentstop-input	documented schema; raw capture pending; values sanitized fixtures
+SubagentStop.json	last_assistant_message	unverified	https://code.claude.com/docs/en/hooks#subagentstop-input	documented schema; raw capture pending; values sanitized fixtures
+Stop.json	session_id	observed	$HOME/.local/state/callmeter/callmeter.db#events.event_id=578a9a19183aedf495428b4c24fd89ea89a37d521f236e8a99ef20c89df742db	key presence projected by Callmeter; values sanitized fixtures
+Stop.json	transcript_path	unverified	https://code.claude.com/docs/en/hooks#stop-input	documented schema; raw capture pending; values sanitized fixtures
+Stop.json	cwd	unverified	https://code.claude.com/docs/en/hooks#stop-input	documented schema; raw capture pending; values sanitized fixtures
+Stop.json	permission_mode	observed	$HOME/.local/state/callmeter/callmeter.db#events.event_id=578a9a19183aedf495428b4c24fd89ea89a37d521f236e8a99ef20c89df742db	key presence projected by Callmeter; values sanitized fixtures
+Stop.json	hook_event_name	observed	$HOME/.local/state/callmeter/callmeter.db#events.event_id=578a9a19183aedf495428b4c24fd89ea89a37d521f236e8a99ef20c89df742db	key presence projected by Callmeter; values sanitized fixtures
+Stop.json	stop_hook_active	unverified	https://code.claude.com/docs/en/hooks#stop-input	documented schema; raw capture pending; values sanitized fixtures
+Stop.json	last_assistant_message	unverified	https://code.claude.com/docs/en/hooks#stop-input	documented schema; raw capture pending; values sanitized fixtures
+SessionEnd.json	session_id	observed	$HOME/.local/state/callmeter/callmeter.db#events.event_id=c64fc0797dbc8564049b33efc3e0bb496415ac793a812fe1c88228b6fae64fb6	key presence projected by Callmeter; values sanitized fixtures
+SessionEnd.json	transcript_path	unverified	https://code.claude.com/docs/en/hooks#sessionend-input	documented schema; raw capture pending; values sanitized fixtures
+SessionEnd.json	cwd	unverified	https://code.claude.com/docs/en/hooks#sessionend-input	documented schema; raw capture pending; values sanitized fixtures
+SessionEnd.json	permission_mode	unverified	https://code.claude.com/docs/en/hooks#sessionend-input	documented schema; raw capture pending; values sanitized fixtures
+SessionEnd.json	hook_event_name	observed	$HOME/.local/state/callmeter/callmeter.db#events.event_id=c64fc0797dbc8564049b33efc3e0bb496415ac793a812fe1c88228b6fae64fb6	key presence projected by Callmeter; values sanitized fixtures
+SessionEnd.json	reason	observed	$HOME/.local/state/callmeter/callmeter.db#events.event_id=c64fc0797dbc8564049b33efc3e0bb496415ac793a812fe1c88228b6fae64fb6	key presence projected by Callmeter; values sanitized fixtures
+StopFailure.json	session_id	unverified	https://code.claude.com/docs/en/hooks#stopfailure	documented contract; synthetic values; raw capture pending
+StopFailure.json	transcript_path	unverified	https://code.claude.com/docs/en/hooks#stopfailure	documented contract; synthetic values; raw capture pending
+StopFailure.json	cwd	unverified	https://code.claude.com/docs/en/hooks#stopfailure	documented contract; synthetic values; raw capture pending
+StopFailure.json	permission_mode	unverified	https://code.claude.com/docs/en/hooks#stopfailure	documented contract; synthetic values; raw capture pending
+StopFailure.json	hook_event_name	unverified	https://code.claude.com/docs/en/hooks#stopfailure	documented contract; synthetic values; raw capture pending
+StopFailure.json	error	unverified	https://code.claude.com/docs/en/hooks#stopfailure	documented contract; synthetic values; raw capture pending
+StopFailure.json	error_details	unverified	https://code.claude.com/docs/en/hooks#stopfailure	documented contract; synthetic values; raw capture pending
+StopFailure.json	last_assistant_message	unverified	https://code.claude.com/docs/en/hooks#stopfailure	documented contract; synthetic values; raw capture pending
+PostToolUse.json	tool_response.stdout,stderr,interrupted	unverified	https://code.claude.com/docs/en/hooks#posttooluse	real shell output; Bash response keys need release capture

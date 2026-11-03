@@ -1,0 +1,21 @@
+golden	key	status	source	basis
+sonnet.json	model	unverified	$HOME/.professor/.worktrees/journey-suite/pfm/harness-prompts/claude/baselines/harness-original.model	request shape reconstructed; raw request not retained; fixture prompt x and max_tokens synthetic
+sonnet.json	max_tokens	unverified	https://platform.claude.com/docs/en/api/messages	request shape reconstructed; raw request not retained; fixture prompt x and max_tokens synthetic
+sonnet.json	system	unverified	https://platform.claude.com/docs/en/api/messages	request shape reconstructed; raw request not retained; fixture prompt x and max_tokens synthetic
+sonnet.json	messages	unverified	https://platform.claude.com/docs/en/api/messages	request shape reconstructed; raw request not retained; fixture prompt x and max_tokens synthetic
+sonnet.json	messages[].role	unverified	https://platform.claude.com/docs/en/api/messages	request shape reconstructed; raw request not retained; fixture prompt x and max_tokens synthetic
+sonnet.json	messages[].content	unverified	https://platform.claude.com/docs/en/api/messages	request shape reconstructed; raw request not retained; fixture prompt x and max_tokens synthetic
+sonnet.json	messages[].content[].type	unverified	https://platform.claude.com/docs/en/api/messages	request shape reconstructed; raw request not retained; fixture prompt x and max_tokens synthetic
+sonnet.json	messages[].content[].text	unverified	https://platform.claude.com/docs/en/api/messages	request shape reconstructed; raw request not retained; fixture prompt x and max_tokens synthetic
+sonnet.json	system[].type	unverified	https://platform.claude.com/docs/en/api/messages	request shape reconstructed; raw request not retained; fixture prompt x and max_tokens synthetic
+sonnet.json	system[].text	observed	$HOME/.professor/.worktrees/journey-suite/pfm/harness-prompts/claude/baselines/harness-original-v2.1.316.md	recorded system-text projection; verified sha256 e313a45b305925f69769b79e475ccd8a91d20336c929b698888ece7c1a24a64e; block framing reconstructed
+opus.json	model	unverified	$HOME/.professor/.worktrees/journey-suite/pfm/harness-prompts/claude/baselines/harness-opus.model	request shape reconstructed; raw request not retained; fixture prompt x and max_tokens synthetic
+opus.json	max_tokens	unverified	https://platform.claude.com/docs/en/api/messages	request shape reconstructed; raw request not retained; fixture prompt x and max_tokens synthetic
+opus.json	system	unverified	https://platform.claude.com/docs/en/api/messages	request shape reconstructed; raw request not retained; fixture prompt x and max_tokens synthetic
+opus.json	messages	unverified	https://platform.claude.com/docs/en/api/messages	request shape reconstructed; raw request not retained; fixture prompt x and max_tokens synthetic
+opus.json	messages[].role	unverified	https://platform.claude.com/docs/en/api/messages	request shape reconstructed; raw request not retained; fixture prompt x and max_tokens synthetic
+opus.json	messages[].content	unverified	https://platform.claude.com/docs/en/api/messages	request shape reconstructed; raw request not retained; fixture prompt x and max_tokens synthetic
+opus.json	messages[].content[].type	unverified	https://platform.claude.com/docs/en/api/messages	request shape reconstructed; raw request not retained; fixture prompt x and max_tokens synthetic
+opus.json	messages[].content[].text	unverified	https://platform.claude.com/docs/en/api/messages	request shape reconstructed; raw request not retained; fixture prompt x and max_tokens synthetic
+opus.json	system[].type	unverified	https://platform.claude.com/docs/en/api/messages	request shape reconstructed; raw request not retained; fixture prompt x and max_tokens synthetic
+opus.json	system[].text	observed	$HOME/.professor/.worktrees/journey-suite/pfm/harness-prompts/claude/baselines/harness-opus-v2.1.316.md	recorded system-text projection; verified sha256 16d122601fc0fd047a12c419227d6e6ab3b272a0d0e519d5b88af7acab58177f; block framing reconstructed

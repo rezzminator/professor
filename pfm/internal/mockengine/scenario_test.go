@@ -50,53 +50,6 @@ func TestClaudeOnlyScenarioDoors(t *testing.T) {
 	}
 }
 
-func TestInlineDirectiveParser(t *testing.T) {
-	for _, row := range []struct {
-		name, prompt    string
-		count           int
-		refused, absent bool
-	}{
-		{"no marker", "plain prompt", 0, false, true},
-		{"object", `hi mock-engine: {"type":"turn","reply":"R1"}`, 1, false, false},
-		{"array", `mock-engine: [{"type":"background_agent","name":"a"},{"type":"turn","reply":"R2"}]`, 2, false, false},
-		{"empty array", `mock-engine: []`, 0, false, false},
-		{"first line", "mock-engine: {\"type\":\"turn\"}\nnext line", 1, false, false},
-		{"compact", `mock-engine: {"type":"compact"}`, 1, false, false},
-		{"unknown type", `mock-engine: {"type":"nope"}`, 0, true, false},
-		{"unknown field", `mock-engine: {"type":"turn","oops":true}`, 0, true, false},
-		{"broken JSON", `mock-engine: {"type":`, 0, true, false},
-		{"trailing object", `mock-engine: {"type":"turn"} {}`, 0, true, false},
-		{"unsigned footer", `mock-engine: {"type":"turn","reply":"R"} — UNSIGNED — sender identity underivable; no session id`, 1, false, false},
-		{"signed footer", `mock-engine: [{"type":"turn","reply":"R"}] — sid 1234abcd · to reply: call lane <message>`, 1, false, false},
-		{"force delivered footer", `mock-engine: {"type":"turn","reply":"R"} — ⚠ FORCE-DELIVERED via Esc (…) — sid 1234abcd`, 1, false, false},
-		{"trailing garbage", `mock-engine: {"type":"turn"} garbage`, 0, true, false},
-		{"null", `mock-engine: null`, 0, true, false},
-		{"hold without gate", `mock-engine: {"type":"hold"}`, 0, true, false},
-	} {
-		t.Run(row.name, func(t *testing.T) {
-			steps, err := parseInlineSteps(row.prompt)
-			if row.refused {
-				if err == nil {
-					t.Fatalf("bad directive accepted: %+v", steps)
-				}
-				if row.name == "trailing garbage" {
-					reply := (&script{}).forPrompt(row.prompt).Steps[0].Reply
-					if !strings.HasPrefix(reply, "mock-engine: inline steps refused — ") {
-						t.Fatalf("refusal reply = %q", reply)
-					}
-				}
-				return
-			}
-			if err != nil || len(steps) != row.count || (steps == nil) != row.absent {
-				t.Fatalf("steps=%+v err=%v, want count=%d absent=%v", steps, err, row.count, row.absent)
-			}
-			if strings.Contains(row.name, "footer") && steps[0].Reply != "R" {
-				t.Fatalf("footer step reply = %q, want R", steps[0].Reply)
-			}
-		})
-	}
-}
-
 func mustJSON(t *testing.T, value any) []byte {
 	t.Helper()
 	content, err := json.Marshal(value)
@@ -109,12 +62,30 @@ func mustJSON(t *testing.T, value any) []byte {
 func TestLoadScenarioRefusesUnknownFieldsAndBrokenSteps(t *testing.T) {
 	dir := t.TempDir()
 	for name, body := range map[string]string{
-		"unknown field":     `{"steps":[],"delay":3}`,
-		"hold without gate": `{"steps":[{"type":"hold"}]}`,
-		"unknown step":      `{"steps":[{"type":"dance"}]}`,
-		"menu no options":   `{"steps":[{"type":"menu"}]}`,
-		"menu selected":     `{"steps":[{"type":"menu","options":["a"],"selected":4}]}`,
-		"tool no name":      `{"steps":[{"type":"tool_call"}]}`,
+		"unknown field":             `{"steps":[],"delay":3}`,
+		"hold without gate":         `{"steps":[{"type":"hold"}]}`,
+		"unknown step":              `{"steps":[{"type":"dance"}]}`,
+		"menu no options":           `{"steps":[{"type":"menu"}]}`,
+		"menu selected":             `{"steps":[{"type":"menu","options":["a"],"selected":4}]}`,
+		"tool no name":              `{"steps":[{"type":"tool_call"}]}`,
+		"ready relative":            `{"ready_hold":"relative"}`,
+		"stdout relative":           `{"app_server_stdout_hold":"relative"}`,
+		"ready timeout zero":        `{"ready_timeout_ms":0}`,
+		"ready timeout negative":    `{"ready_timeout_ms":-1}`,
+		"boot exit negative":        `{"startup_exit_code":-1}`,
+		"boot exit too large":       `{"startup_exit_code":256}`,
+		"turn quota null":           `{"steps":[{"type":"turn","rate_limits":null}]}`,
+		"turn quota scalar":         `{"steps":[{"type":"turn","rate_limits":7}]}`,
+		"native title missing name": `{"steps":[{"type":"native_title"}]}`,
+		"handoff missing id":        `{"steps":[{"type":"background_handoff"}]}`,
+		"handoff path id":           `{"steps":[{"type":"background_handoff","session_id":"../escape"}]}`,
+		"idle zero count":           `{"idle_statusline_refresh":{"count":0,"interval_ms":1}}`,
+		"idle zero interval":        `{"idle_statusline_refresh":{"count":1,"interval_ms":0}}`,
+		"idle relative stop":        `{"idle_statusline_refresh":{"count":1,"interval_ms":1,"stop_when_exists":"relative"}}`,
+		"gate relative path":        `{"hook_gates":[{"event":"SessionStart","command":"true","until_gone":"relative"}]}`,
+		"during turn":               `{"steps":[{"type":"turn","during":[{"type":"notification"}]}]}`,
+		"during tool":               `{"steps":[{"type":"question","during":[{"type":"tool_call","tool":"Write"}]}]}`,
+		"during nested":             `{"steps":[{"type":"permission","tool":"Bash","during":[{"type":"notification","during":[{"type":"notification"}]}]}]}`,
 	} {
 		path := filepath.Join(dir, strings.ReplaceAll(name, " ", "-")+".json")
 		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
@@ -136,8 +107,23 @@ func TestScenarioRoundTripsThroughWrite(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "s.json")
 	busy := 5
 	want := Scenario{
-		SessionID: "abc", BusyMS: &busy, Pane: PaneShapes{Busy: "b"}, Jail: Jail{ProcRoot: "/p"},
-		Steps: []Step{{Type: StepTurn, Reply: "r"}, {Type: StepHold, UntilGone: "/g"}},
+		SessionID:             "abc",
+		BusyMS:                &busy,
+		Pane:                  PaneShapes{Busy: "b"},
+		Jail:                  Jail{ProcRoot: "/p"},
+		ReadyHold:             "/gate",
+		ReadyTimeoutMS:        17,
+		StartupExitCode:       intPtr(9),
+		AppServerStdoutHold:   "/stdout",
+		TrustDialogUnnumbered: true,
+		IdleStatuslineRefresh: &statuslineRefresh{Count: 1, IntervalMS: 1},
+		HookGates:             []hookGate{{Event: hookSessionStart, Command: "true", UntilGone: "/gate"}},
+		Steps: []Step{
+			{Type: StepTurn, Reply: "r", RateLimits: json.RawMessage(`{}`)},
+			{Type: StepHold, UntilGone: "/g"},
+			{Type: StepBackgroundHandoff, SessionID: fixtureSession},
+			{Type: StepQuestion, During: []Step{{Type: StepHold, UntilGone: "/during"}, {Type: StepNotification}}},
+		},
 	}
 	if err := want.Write(path); err != nil {
 		t.Fatal(err)
@@ -147,7 +133,10 @@ func TestScenarioRoundTripsThroughWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got.SessionID != "abc" || *got.BusyMS != 5 || got.Pane.Busy != "b" || got.Jail.ProcRoot != "/p" ||
-		len(got.Steps) != 2 || got.Steps[1].UntilGone != "/g" {
+		len(got.Steps) != 4 || got.Steps[1].UntilGone != "/g" || string(got.Steps[0].RateLimits) != "{}" ||
+		got.ReadyHold != "/gate" || got.ReadyTimeoutMS != 17 || got.StartupExitCode == nil || *got.StartupExitCode != 9 ||
+		got.AppServerStdoutHold != "/stdout" || !got.TrustDialogUnnumbered || len(got.Steps[3].During) != 2 || got.Steps[3].During[0].UntilGone != "/during" ||
+		got.Steps[2].SessionID != fixtureSession || got.IdleStatuslineRefresh == nil || *got.IdleStatuslineRefresh != (statuslineRefresh{Count: 1, IntervalMS: 1}) {
 		t.Fatalf("round trip = %+v", got)
 	}
 }
@@ -203,32 +192,6 @@ func TestLaneDefaultScenarioLoadsForEveryEngine(t *testing.T) {
 		if len(fields["rate_limits"]) == 0 || scenario.Pane.Composer == "" || scenario.Pane.Busy == "" ||
 			scenario.Pane.Compacted == "" {
 			t.Fatalf("%s default scenario lacks lane shapes: %+v", engine, scenario)
-		}
-	}
-}
-
-func TestScriptFallsBackToDefaultsWhenStepsRunOut(t *testing.T) {
-	running := newScript(Scenario{Steps: []Step{{Type: StepTurn, Reply: "first", BusyMS: 9}}}, engineClaude)
-	if running.Model != DefaultClaudeModel || running.Version != DefaultClaudeVersion || running.Reply != DefaultReply {
-		t.Fatalf("defaults = %+v", running.Scenario)
-	}
-	reply, busy, usage := running.turnReply(running.next())
-	if reply != "first" || busy != 9 || usage.Input == 0 {
-		t.Fatalf("first turn = (%q, %d, %+v)", reply, busy, usage)
-	}
-	step := running.next()
-	reply, busy, _ = running.turnReply(step)
-	if step.Type != StepTurn || reply != DefaultReply || busy != DefaultBusyMS {
-		t.Fatalf("exhausted list gave (%+v, %q, %d)", step, reply, busy)
-	}
-	for _, step := range []Step{{Type: StepTurn}, {Type: StepMenu}, {Type: StepCrash}, {Type: StepExit}} {
-		if !step.terminal() {
-			t.Fatalf("%s must end a turn", step.Type)
-		}
-	}
-	for _, step := range []Step{{Type: StepHold}, {Type: StepToolCall}, {Type: StepBackgroundAgent}, {Type: StepCompact}, {Type: StepMCP}} {
-		if step.terminal() {
-			t.Fatalf("%s must run inside a turn", step.Type)
 		}
 	}
 }

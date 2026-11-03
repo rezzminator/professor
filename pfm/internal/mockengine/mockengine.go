@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -30,34 +31,44 @@ var (
 
 // Spellings shared by the engines' records and command lines.
 const (
-	roleUser        = "user"
-	roleAssistant   = "assistant"
-	roleDeveloper   = "developer"
-	sourceStartup   = "startup"
-	sourceClear     = "clear"
-	sourceResume    = "resume"
-	flagModel       = "--model"
-	blockText       = "text"
-	blockInputText  = "input_text"
-	blockOutputText = "output_text"
-	keyType         = "type"
-	keyCWD          = "cwd"
+	roleUser          = "user"
+	roleAssistant     = "assistant"
+	roleDeveloper     = "developer"
+	sourceStartup     = "startup"
+	sourceClear       = "clear"
+	sourceResume      = "resume"
+	flagModel         = "--model"
+	blockText         = "text"
+	blockInputText    = "input_text"
+	blockOutputText   = "output_text"
+	keyText           = "text"
+	keyType           = "type"
+	keyCWD            = "cwd"
+	keyError          = "error"
+	keyData           = "data"
+	keyCommand        = "command"
+	sourceCLI         = "cli"
+	blockToolUse      = "tool_use"
+	agentCompleted    = "completed"
+	openCodeWriteTool = "write"
 )
 
 // process is one mock engine run: the engine, its argv, its streams, the
 // resolved scenario and the host facts every mode shares.
 type process struct {
-	ctx      context.Context
-	engine   string
-	args     []string
-	stdin    io.Reader
-	stdout   io.Writer
-	stderr   io.Writer
-	env      func(string) string
-	script   *script
-	cwd      string
-	pid      int
-	recorder recorder
+	ctx          context.Context
+	engine       string
+	args         []string
+	stdin        io.Reader
+	stdout       io.Writer
+	stderr       io.Writer
+	env          func(string) string
+	script       *script
+	cwd          string
+	pid          int
+	recorder     recorder
+	backgroundMu sync.Mutex
+	background   []shellTask
 }
 
 // Main is the whole mock: argv0 selects the engine, args are its command line,
@@ -70,6 +81,9 @@ func Main(
 	stdout, stderr io.Writer,
 	env func(string) string,
 ) int {
+	if gate := env(envStdoutHold); gate != "" {
+		return stdoutHolder(ctx, gate, stdout, stderr, env)
+	}
 	engine := filepath.Base(argv0)
 	switch engine {
 	case engineClaude, engineCodex, engineOpenCode:
@@ -102,6 +116,7 @@ func Main(
 		script: newScript(scenario, engine), cwd: cwd, pid: os.Getpid(),
 		recorder: recorder{dir: scenario.RecordDir},
 	}
+	defer proc.stopShellTasks()
 	if err := proc.script.resume(env(EnvScenario)); err != nil {
 		fmt.Fprintf(stderr, "mock-engine: %v\n", err)
 		return ExitUsage
@@ -118,6 +133,13 @@ func Main(
 	}
 	if code, answered := answerCLI(proc); answered {
 		return code
+	}
+	if err := proc.startup(); err != nil {
+		warn(stderr, "%v", err)
+		return ExitUsage
+	}
+	if proc.script.StartupExitCode != nil {
+		return *proc.script.StartupExitCode
 	}
 	switch engine {
 	case engineClaude:

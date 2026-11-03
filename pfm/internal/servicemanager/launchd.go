@@ -63,6 +63,15 @@ type Answer struct {
 // answerOf runs argv once through runner. A coded runner error's exit code is
 // copied into Result.ExitCode, so every reading looks at one field.
 func answerOf(ctx context.Context, runner Runner, argv []string) Answer {
+	names, nameErr := CurrentUnitNames()
+	if nameErr != nil {
+		return Answer{Argv: argv, RunErr: nameErr}
+	}
+	qualified := make([]string, len(argv))
+	for index, word := range argv {
+		qualified[index] = names.Name(word)
+	}
+	argv = qualified
 	result, err := runner.Run(ctx, argv, deps.RunOptions{})
 	if code := deps.ExitCode(err); code > 0 && result.ExitCode == 0 {
 		result.ExitCode = code

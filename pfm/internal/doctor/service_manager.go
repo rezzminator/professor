@@ -69,6 +69,15 @@ var hostServiceManager = serviceManagerFor(servicemanager.Native())
 // never folded into "could not ask": LookPath failing is a clean, expected
 // answer, not a probe that could not run.
 func (probe serviceManagerProbe) report(ctx context.Context, runner deps.Runner, unit string) ServiceManagerReport {
+	names, err := servicemanager.CurrentUnitNames()
+	if err != nil {
+		return ServiceManagerReport{
+			Manager: probe.manager,
+			Present: true,
+			Unit:    serviceManagerUnitState{Unit: unit, Err: err},
+		}
+	}
+	unit = names.Name(unit)
 	report := ServiceManagerReport{Manager: probe.manager, Unit: serviceManagerUnitState{Unit: unit}}
 	if _, err := runner.LookPath(probe.binary); err != nil {
 		return report
@@ -100,14 +109,19 @@ func probeScheduleTimer(ctx context.Context, runner deps.Runner) ServiceManagerR
 
 // serviceManagerIdentity names the manager and MCP unit the row reports
 // without asking the manager anything.
-func serviceManagerIdentity() (manager, unit string) {
-	return hostServiceManager.manager, hostServiceManager.mcpUnit
+func serviceManagerIdentity() (manager, unit string, err error) {
+	return serviceManagerUnitIdentity(hostServiceManager.mcpUnit)
 }
 
 // scheduleTimerIdentity names the manager and schedule unit the schedules row
 // reports without asking the manager anything.
-func scheduleTimerIdentity() (manager, unit string) {
-	return hostServiceManager.manager, hostServiceManager.scheduleUnit
+func scheduleTimerIdentity() (manager, unit string, err error) {
+	return serviceManagerUnitIdentity(hostServiceManager.scheduleUnit)
+}
+
+func serviceManagerUnitIdentity(unit string) (string, string, error) {
+	names, err := servicemanager.CurrentUnitNames()
+	return hostServiceManager.manager, names.Name(unit), err
 }
 
 // scheduleTimerArmed reports whether this host's schedule unit fires.
@@ -143,7 +157,11 @@ func configuredServiceManagerProbe(ctx context.Context, runner deps.Runner) Serv
 // the row says disabled-in-config and the manager is never asked.
 func printServiceManagerDoctor(ctx context.Context, stdout io.Writer, runner deps.Runner, runtime config.Runtime) int {
 	if !mcpConfigured(runtime) {
-		manager, unit := serviceManagerIdentity()
+		manager, unit, err := serviceManagerIdentity()
+		if err != nil {
+			fmt.Fprintf(stdout, "doctor: service-manager=%s unit=%s could_not_ask error=%v\n", manager, unit, err)
+			return 1
+		}
 		fmt.Fprintf(stdout, "doctor: service-manager=%s unit=%s disabled-in-config\n", manager, unit)
 		return 0
 	}

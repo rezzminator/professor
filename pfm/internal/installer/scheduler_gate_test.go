@@ -19,6 +19,7 @@ import (
 // fakeRunner is the package tests' systemd/launchd runner: Run answers the
 // manager calls, Output the ActiveState probes.
 type fakeRunner struct {
+	unitPrefix     string
 	manager        bool
 	nameSyncActive bool
 	// nameSyncActive makes the state probe for pfm-name-sync.service answer
@@ -75,7 +76,13 @@ const reminderStateProbe = "systemctl --user show --property=ActiveState --value
 func (runner *fakeRunner) Output(_ context.Context, name string, args ...string) ([]byte, error) {
 	call := name + " " + strings.Join(args, " ")
 	runner.calls = append(runner.calls, call)
-	if call == reminderStateProbe || (name == "launchctl" && strings.HasSuffix(call, "/"+retiredScheduleLaunchdLabel)) {
+	probe := call
+	if runner.unitPrefix != "" {
+		probe = strings.ReplaceAll(probe, runner.unitPrefix+"-", "pfm-")
+		probe = strings.ReplaceAll(probe, "com.professor."+runner.unitPrefix+".", "com.professor.pfm.")
+	}
+	if probe == reminderStateProbe ||
+		(name == "launchctl" && strings.HasSuffix(probe, "/"+retiredScheduleLaunchdLabel)) {
 		switch {
 		case len(runner.reminderStates) != 0:
 			state := runner.reminderStates[0]
@@ -96,7 +103,7 @@ func (runner *fakeRunner) Output(_ context.Context, name string, args ...string)
 		}
 	}
 	if len(runner.scheduleStates) != 0 {
-		if call == scheduleStateProbe || (name == "launchctl" && strings.HasSuffix(call, "/"+scheduleLaunchdLabel)) {
+		if probe == scheduleStateProbe || (name == "launchctl" && strings.HasSuffix(probe, "/"+scheduleLaunchdLabel)) {
 			state := runner.scheduleStates[0]
 			if len(runner.scheduleStates) > 1 {
 				runner.scheduleStates = runner.scheduleStates[1:]
@@ -109,7 +116,7 @@ func (runner *fakeRunner) Output(_ context.Context, name string, args ...string)
 			}
 			return []byte(state + "\n"), nil
 		}
-		if name == "launchctl" && strings.HasSuffix(call, "/"+launchdLabel) {
+		if name == "launchctl" && strings.HasSuffix(probe, "/"+launchdLabel) {
 			state := "not running"
 			if runner.nameSyncActive {
 				state = "running"
@@ -117,7 +124,7 @@ func (runner *fakeRunner) Output(_ context.Context, name string, args ...string)
 			return []byte("state = " + state + "\n"), nil
 		}
 	}
-	if call == nameSyncStateProbe {
+	if probe == nameSyncStateProbe {
 		if runner.nameSyncActive {
 			return []byte("activating\n"), nil
 		}
@@ -125,7 +132,7 @@ func (runner *fakeRunner) Output(_ context.Context, name string, args ...string)
 			return []byte("inactive\n"), nil
 		}
 	}
-	if call == scheduleStateProbe {
+	if probe == scheduleStateProbe {
 		if runner.scheduleActive {
 			return []byte("activating\n"), nil
 		}
@@ -133,10 +140,10 @@ func (runner *fakeRunner) Output(_ context.Context, name string, args ...string)
 			return []byte("inactive\n"), nil
 		}
 	}
-	if runner.manager && call == "systemctl --user show --property=ActiveState --value "+scheduleTimerUnit {
+	if runner.manager && probe == "systemctl --user show --property=ActiveState --value "+scheduleTimerUnit {
 		return []byte("active\n"), nil
 	}
-	if call == "systemctl --user show --property=ActiveState --value "+mcpUnitName {
+	if probe == "systemctl --user show --property=ActiveState --value "+mcpUnitName {
 		if runner.mcpState == "" {
 			return []byte("active\n"), nil
 		}

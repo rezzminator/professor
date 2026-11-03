@@ -53,6 +53,7 @@ func reloadInterceptBody(
 	if !isReloadPrompt(payload.Prompt) {
 		return 0
 	}
+	obs.Action(ctx, "chat.reload", obs.DoorTyped)
 	trimmed := strings.TrimSpace(payload.Prompt)
 	// Blanking the command word keeps the parser's line:column on the prompt
 	// the user typed.

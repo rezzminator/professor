@@ -36,6 +36,7 @@ const StderrMirror = "stderr"
 // to os.Stderr.
 type Settings struct {
 	Cmd        string
+	Args       []string
 	Version    string
 	Level      string
 	Components map[string]string
@@ -100,7 +101,7 @@ func OpenLog(ctx context.Context, settings Settings) (context.Context, func(exit
 		if openErr != nil {
 			fmt.Fprintf(stderr, "pfm: activity log unavailable: %v\n", openErr)
 		}
-		destination = levelHandler{next: destination, levels: levels}
+		destination = levelHandler{next: attributed(destination, env, settings.Cmd), levels: levels}
 	}
 	logger := slog.New(destination).With(
 		FieldCmd, settings.Cmd,
@@ -114,6 +115,11 @@ func OpenLog(ctx context.Context, settings Settings) (context.Context, func(exit
 	started := timing.Now()
 	logger.LogAttrs(ctx, slog.LevelInfo, "cmd.start")
 	scoped := context.WithValue(ctx, contextKey{}, opened)
+	args := settings.Args
+	if args == nil {
+		args = []string{settings.Cmd}
+	}
+	Action(scoped, CommandOperation(args), "")
 	return scoped, func(exitCode int) {
 		logger.LogAttrs(
 			scoped,

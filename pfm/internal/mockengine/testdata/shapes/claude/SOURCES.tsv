@@ -1,0 +1,2 @@
+golden	key	status	source	basis
+trust-unnumbered.txt	frame	unverified	pfm/internal/engine/trust_dialog.go	Known native trust labels; numbering removed to model requested layout; full raw screen capture pending release leg.

@@ -1,0 +1,10 @@
+{
+  "five_hour": {
+    "used_percentage": 89,
+    "resets_at": 4102444800
+  },
+  "seven_day": {
+    "used_percentage": 34,
+    "resets_at": 4102531200
+  }
+}

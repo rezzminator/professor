@@ -65,7 +65,7 @@ func codexHookRPC(proc *process, method string, params json.RawMessage) (any, er
 		for _, cwd := range input.CWDs {
 			data = append(data, map[string]any{"cwd": cwd, "hooks": hooks})
 		}
-		return map[string]any{"data": data}, nil
+		return map[string]any{keyData: data}, nil
 	}
 	var input struct {
 		KeyPath string `json:"keyPath"`

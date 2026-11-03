@@ -1,0 +1,8 @@
+golden	key	status	source	basis
+quota89.json	five_hour.used_percentage	unverified	https://code.claude.com/docs/en/statusline#rate-limit-usage	documented native schema; synthetic quota value; raw release capture pending
+quota89.json	five_hour.resets_at	unverified	https://code.claude.com/docs/en/statusline#rate-limit-usage	documented Unix epoch seconds; synthetic future reset; raw release capture pending
+quota89.json	seven_day.used_percentage	unverified	https://code.claude.com/docs/en/statusline#rate-limit-usage	documented native schema; synthetic quota value; raw release capture pending
+quota89.json	seven_day.resets_at	unverified	https://code.claude.com/docs/en/statusline#rate-limit-usage	documented Unix epoch seconds; synthetic future reset; raw release capture pending
+weekly-only.json	five_hour:absent	unverified	https://code.claude.com/docs/en/statusline#available-data	documented independently absent window; raw release capture pending
+weekly-only.json	seven_day.used_percentage	unverified	https://code.claude.com/docs/en/statusline#rate-limit-usage	documented native schema; synthetic quota value; raw release capture pending
+weekly-only.json	seven_day.resets_at	unverified	https://code.claude.com/docs/en/statusline#rate-limit-usage	documented Unix epoch seconds; synthetic future reset; raw release capture pending

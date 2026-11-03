@@ -1,0 +1,1 @@
+pfm: tmux probe warning: @SOCKET@: abandoned empty tmux server — it runs with no session and no pane yet holds this pfm chat socket; reap it: pfm chat ls --reap

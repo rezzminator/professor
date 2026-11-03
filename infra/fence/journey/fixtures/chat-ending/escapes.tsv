@@ -1,0 +1,8 @@
+escape_line	row	assertion
+7	chat-ending/resume-from-picker@linux+herdr-shield+project+claude	picker screen after Enter on an inactive chat == new-chat wizard with account 2 and cache 1h prefilled
+12	chat-ending/resume-from-cli@linux+herdr-shield+project+codex	pfm chat status of the resumed Codex seat == idle
+64	chat-ending/kill-lost-seat-from-picker@linux+herdr-shield+project+claude	picker rows after Ctrl-X on a lost native chat == chat absent, no tmux socket error text
+80	chat-ending/clear-hides-old-conversation@linux+herdr-shield+project+claude	picker rows for a chat continued under a new session id == 1 row, no detached agent row
+82	chat-ending/resume-from-cli-over-ssh@linux+tmux+project+claude	stderr and pane of pfm chat open run over ssh == the chat resumed, no permission denied
+90	chat-ending/clear-hides-old-conversation@linux+herdr-shield+project+claude	picker rows after /clear of a named chat == old conversation hidden, one row
+102	chat-ending/kill-lost-seat-from-picker@linux+herdr-shield+project+claude	pfm chat kill message and picker rows for a retired seat without a saved birth == hidden, exit message "killed"

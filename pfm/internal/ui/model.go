@@ -461,7 +461,7 @@ func (model Model) updateKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 	model = next
 	if key == keyEsc || key == "ctrl+c" {
 		model.outcome = OutcomeCancelled
-		return model, tea.Quit
+		return model.action("picker.quit", tea.Quit)
 	}
 	switch key {
 	case keyLeft:
@@ -499,7 +499,7 @@ func (model Model) updateKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if row, ok := model.selectedRow(); ok && row.Kind.IsLiveSeat() {
 			model.outcome = OutcomeReboot
 			model.outcomeRow = row
-			return model, tea.Quit
+			return model.action("chat.reload", tea.Quit)
 		}
 		return model, nil
 	case "enter":
@@ -521,7 +521,7 @@ func (model Model) updateKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 				if row.Kind.IsLiveSeat() {
 					model.outcome = OutcomeReboot
 					model.outcomeRow = row
-					return model, tea.Quit
+					return model.action("chat.reload", tea.Quit)
 				}
 			case 2:
 				model.toggleKilled()
@@ -535,7 +535,7 @@ func (model Model) updateKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 				default:
 					model.killStatus = "deactive refused — " + row.Name + " is not running"
 				}
-				return model, nil
+				return model.action("picker.carousel-deactive", nil)
 			default:
 				if model.nativeEndPending(row) {
 					model.killStatus = "resume refused — " + row.Name + " is still ending; resume once its pane has closed"
@@ -601,10 +601,10 @@ func (model Model) navigateHorizontal(direction int) (tea.Model, tea.Cmd) {
 		model.statsSubtab = StatsSubtab(
 			(int(model.statsSubtab) + int(statsSubtabCount) + direction) % int(statsSubtabCount),
 		)
-		return model, nil
+		return model.action("picker.tabs", nil)
 	}
 	if model.tab == TabStats && model.statsFocus == StatsFocusContent {
-		return model, nil
+		return model.action("picker.tabs", nil)
 	}
 	previous := model.tab
 	model.tab = Tab((int(model.tab) + int(tabCount) + direction) % int(tabCount))
@@ -612,7 +612,7 @@ func (model Model) navigateHorizontal(direction int) (tea.Model, tea.Cmd) {
 		model.statsFocus = StatsFocusSubtab
 	}
 	command := model.samplingTabTransition(previous)
-	return model, command
+	return model.action("picker.tabs", command)
 }
 
 func (model Model) switchTab(direction int) (tea.Model, tea.Cmd) {
@@ -622,7 +622,7 @@ func (model Model) switchTab(direction int) (tea.Model, tea.Cmd) {
 		model.statsFocus = StatsFocusSubtab
 	}
 	command := model.samplingTabTransition(previous)
-	return model, command
+	return model.action("picker.tabs", command)
 }
 
 // samplingTabTransition owns cancellation-by-generation for the live tabs.
@@ -706,7 +706,7 @@ func (model Model) navigateChatHorizontal(direction int) (tea.Model, tea.Cmd) {
 		return model, nil
 	}
 	model.actionIndex = (model.actionIndex + len(carouselActions) + direction) % len(carouselActions)
-	return model, nil
+	return model.action("picker.carousel-deactive", nil)
 }
 
 func (model Model) accountForKind(kind compose.Kind) int {
@@ -746,9 +746,11 @@ func (model Model) updateStatsKey(key string) (tea.Model, tea.Cmd) {
 	case "c":
 		model.statsSort = StatsSortCPU
 		model.sortStats(model.selectedStatsKey(), model.selectedDockerKey())
+		return model.action("picker.stats-sort", nil)
 	case "m":
 		model.statsSort = StatsSortRAM
 		model.sortStats(model.selectedStatsKey(), model.selectedDockerKey())
+		return model.action("picker.stats-sort", nil)
 	}
 	return model, nil
 }
@@ -769,8 +771,10 @@ func (model Model) updateLimitsKey(key string) (tea.Model, tea.Cmd) {
 		model.limitsOffset = 0
 	case "end":
 		model.limitsOffset = maximum
+	default:
+		return model, nil
 	}
-	return model, nil
+	return model.action("picker.limits-scroll", nil)
 }
 
 func (model Model) limitViewportDimensions() (int, int) {
@@ -974,6 +978,7 @@ func (model Model) selectedDockerKey() string {
 }
 
 func (model *Model) updateQuery(value string) {
+	model.queryAction(value)
 	follow := model.selectedKey()
 	if runes := []rune(value); len(runes) > model.query.CharLimit &&
 		model.query.CharLimit > 0 {
@@ -1101,6 +1106,7 @@ func (model *Model) toggleKilled() {
 	fallback := model.cursor
 	index := model.filtered[model.cursor]
 	row := model.rows[index]
+	model.killAction(row.Killed)
 	// Refusals are SPOKEN, never silent: a swallowed ⌃X looks identical to a
 	// kill that landed, and the row's return on the next open then reads as
 	// the store losing the order.

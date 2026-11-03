@@ -63,7 +63,7 @@ func (s *session) followerUnitDir() string {
 
 // systemdFollowerPath is the follower row's file outside macOS: the path unit.
 func (s *session) systemdFollowerPath() string {
-	return filepath.Join(s.followerUnitDir(), followerPathUnit)
+	return filepath.Join(s.followerUnitDir(), s.unitNames.Name(followerPathUnit))
 }
 
 // followerUnits renders the trio for the run's pfm, home and state dir. The
@@ -71,6 +71,9 @@ func (s *session) systemdFollowerPath() string {
 // launchd sets for the macOS agent, so its sync is the quiet one; PATH is
 // paths.ServicePath, the one search path every pfm unit runs on.
 func (s *session) followerUnits() ([]followerUnit, error) {
+	if s.unitNameErr != nil {
+		return nil, s.unitNameErr
+	}
 	watches, err := followerWatchPaths(s.env.Home, false)
 	if err != nil {
 		return nil, err
@@ -90,6 +93,9 @@ func (s *session) followerUnits() ([]followerUnit, error) {
 		"ExecStart=" + systemdExecWord(s.env.PfmBinary) + " theme sync\n" +
 		"StandardOutput=append:" + logPath + "\n" +
 		"StandardError=append:" + logPath + "\n"
+	if prefix := s.unitNames.Prefix(); prefix != "" {
+		service += "Environment=" + systemdEnvironment(paths.EnvUnitPrefix, prefix) + "\n"
+	}
 	pathUnit := header + "[Unit]\n" +
 		"Description=Run pfm theme sync when a Claude account's settings.json or themes dir changes\n\n" +
 		"[Path]\n" + watch.String() + "Unit=" + followerService + "\n\n" +
@@ -101,9 +107,9 @@ func (s *session) followerUnits() ([]followerUnit, error) {
 		"[Install]\nWantedBy=timers.target\n"
 	dir := s.followerUnitDir()
 	return []followerUnit{
-		{filepath.Join(dir, followerService), service},
-		{filepath.Join(dir, followerPathUnit), pathUnit},
-		{filepath.Join(dir, followerTimerUnit), timer},
+		{filepath.Join(dir, s.unitNames.Name(followerService)), s.unitNames.Render(service)},
+		{filepath.Join(dir, s.unitNames.Name(followerPathUnit)), s.unitNames.Render(pathUnit)},
+		{filepath.Join(dir, s.unitNames.Name(followerTimerUnit)), s.unitNames.Render(timer)},
 	}, nil
 }
 
@@ -249,7 +255,7 @@ func (s *session) restoreSystemdFollower(ctx context.Context) SurfaceResult {
 	// Removal needs only the installed names, never account discovery.
 	var units []followerUnit
 	for _, name := range []string{followerService, followerPathUnit, followerTimerUnit} {
-		units = append(units, followerUnit{path: filepath.Join(s.followerUnitDir(), name)})
+		units = append(units, followerUnit{path: filepath.Join(s.followerUnitDir(), s.unitNames.Name(name))})
 	}
 	existed := false
 	present := map[string]bool{}
@@ -272,7 +278,7 @@ func (s *session) restoreSystemdFollower(ctx context.Context) SurfaceResult {
 	// disables only the triggers still there, and is never stuck on.
 	disable := []string{"disable", "--now"}
 	for _, trigger := range followerTriggers {
-		if present[trigger] {
+		if present[s.unitNames.Name(trigger)] {
 			disable = append(disable, trigger)
 		}
 	}

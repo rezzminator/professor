@@ -1,0 +1,3 @@
+forecast	cell	rank	factors	worst_outcome	held	beat
+os-doors	C29	null	service_manager=launchd_follower_loaded,uninstall_state=theme_sync_on,os=macos	wrong-state	held	machine-lifecycle/forecast-service-manager-launchd-follower-loaded-uninstall-state-theme-sync-on-os-macos@macos
+darwin-linux-launchd-systemd-proc-sysctl-setsid	C61	null	command=pfm_uninstall,surface=themed_terminal_and_editor,theme_sync=on	wrong-state	held	machine-lifecycle/forecast-command-pfm-uninstall-surface-themed-terminal-and-editor-theme-sync-on@linux

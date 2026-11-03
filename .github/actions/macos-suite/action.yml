@@ -23,6 +23,8 @@ runs:
         brew install tmux jq
         python3 -c 'import yaml' 2>/dev/null || python3 -m pip install --break-system-packages 'PyYAML>=6.0.2,<7'
         python3 -c 'import yaml; print("PyYAML", yaml.__version__)'
+        python3 -c 'import pyte' 2>/dev/null || python3 -m pip install --break-system-packages 'pyte>=0.8.2,<0.9'
+        python3 -c 'import pyte; print("pyte", pyte.__file__)'
 
     - name: Build engine-sync
       uses: ./.github/actions/engine-sync

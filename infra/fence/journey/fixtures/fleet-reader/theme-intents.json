@@ -1,0 +1,11 @@
+{
+  "theme-before": ["pfm","theme","status","--json"],
+  "theme-on": ["pfm","theme","on","--json"],
+  "theme-off": ["pfm","theme","off","--json"],
+  "failure-sync-1": ["pfm","theme","sync","--json"],
+  "failure-sync-2": ["pfm","theme","sync","--json"],
+  "failure-status-1": ["pfm","theme","status","--json"],
+  "failure-status-2": ["pfm","theme","status","--json"],
+  "symlink-sync": ["pfm","theme","sync","--json"],
+  "outside-sync": ["pfm","theme","sync","--json"]
+}

@@ -1,0 +1,8 @@
+escape_line	row	assertion
+2	machine-restart/daemons-restart@linux	process table after pfm restart: child started 1s before the restart == absent
+28	machine-restart/daemons-restart@linux	pfm restart plan lines naming kept other-install processes == none
+30	machine-restart/tmux-server-gone@linux	picker screen with the tmux server SIGSTOPped == rendered with warning naming kill -CONT
+66	machine-restart/herdr-restart-restores@linux	relaunched native seat after Herdr restart with its build pruned: engine version == current build, pane text == restored chat
+68	machine-restart/herdr-restart-restores@linux	process table after the herdr server stops: herdr-indicators daemon == absent
+75	machine-restart/daemons-restart@linux	restart handoff output when the old MCP daemon exits mid-read == new daemon on the new path
+99	machine-restart/daemons-restart@linux	restart output with an exiting MCP daemon's empty environment == restarted on the recorded source repo

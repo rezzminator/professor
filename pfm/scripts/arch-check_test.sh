@@ -831,6 +831,50 @@ if green_fixture "$REPO_GREEN"; then
   else
     bad "exit: expected rc 0, 30 PASS lines in order" "rc=$rc passes=$passes" "$order" "$out"
   fi
+
+  sed -i 's/^func runInternal(/func runInternalInput(/' "$REPO_GREEN/cmd/pfm/main.go"
+  cat >> "$REPO_GREEN/cmd/pfm/main.go" <<'GO'
+
+func runInternal(args []string) {
+    runInternalInput(args)
+}
+GO
+  line=$(check_line "$REPO_GREEN" C15-internal-usage)
+  expected=$(printf 'CHECK %-22s %-7s %s' C15-internal-usage PASS '0 baselined, 0 new')
+  if [ "$line" = "$expected" ]; then
+    ok "C15: usage covers the input dispatcher behind the capture wrapper"
+  else
+    bad "C15: expected the wrapped dispatcher to pass" "expected: $expected" "actual: $line"
+  fi
+  cp "$REPO_GREEN/cmd/pfm/main.go" "$T/c15-main.go"
+
+  sed -i 's/usage: pfm internal a|b/usage: pfm internal a|c/' "$REPO_GREEN/cmd/pfm/main.go"
+  line=$(check_line "$REPO_GREEN" C15-internal-usage)
+  expected=$(printf 'CHECK %-22s %-7s %s' C15-internal-usage FAIL 'new: b ')
+  if [ "$line" = "$expected" ]; then
+    ok "C15: an undocumented input dispatcher entry fails by name"
+  else
+    bad "C15: expected the missing usage entry" "expected: $expected" "actual: $line"
+  fi
+
+  sed -i 's/args\[0\]/args[1]/g' "$REPO_GREEN/cmd/pfm/main.go"
+  line=$(check_line "$REPO_GREEN" C15-internal-usage)
+  expected=$(printf 'CHECK %-22s %-7s %s' C15-internal-usage ERROR 'no entries parsed from cmd/pfm/main.go runInternalInput()')
+  if [ "$line" = "$expected" ]; then
+    ok "C15: an empty input dispatcher reports ERROR"
+  else
+    bad "C15: expected a loud empty dispatcher error" "expected: $expected" "actual: $line"
+  fi
+
+  cp "$T/c15-main.go" "$REPO_GREEN/cmd/pfm/main.go"
+  sed -i '/usage: pfm internal/d' "$REPO_GREEN/cmd/pfm/main.go"
+  line=$(check_line "$REPO_GREEN" C15-internal-usage)
+  expected=$(printf 'CHECK %-22s %-7s %s' C15-internal-usage ERROR "no multi-entry 'usage: pfm internal a|b' line in cmd/pfm/main.go")
+  if [ "$line" = "$expected" ]; then
+    ok "C15: missing usage reports ERROR"
+  else
+    bad "C15: expected a loud missing usage error" "expected: $expected" "actual: $line"
+  fi
 else
   bad "exit: could not build the green fixture"
 fi

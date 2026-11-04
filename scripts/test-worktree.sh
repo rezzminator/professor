@@ -358,4 +358,16 @@ invoke land locked-land
 if [[ "$rc" -eq 0 && "$(fgit "$repo" rev-parse main)" == "$tip" && -d "$w" && "$out" == *"Worktree kept (locked): $w — post-merge gate running"* ]] && has_branch locked-land && ! grep -qx 'free locked-land' "$trace"; then
   ok 'land: a locked worktree lands and is kept with its branch, its lock reason reported'
 else bad 'land: a locked worktree lands and is kept with its branch, its lock reason reported' "rc=$rc; out=$out"; fi
+# The fixed interface: the header, the case dispatch and the rule name one verb set (git-guard keys on it).
+RULE="${2:-$SOURCE_ROOT/templates/project/rules/git-writes-through-gitter.md}"
+source "$SOURCE_ROOT/scripts/worktree-verbs.sh"
+worktree_verbs_agree "$SUT" "$RULE"; agree=$?
+if [[ "$agree" -eq 0 && "$WORKTREE_VERBS_REPORT" == "header($SUT)={create land list prune remove } case={create land list prune remove } rule($RULE)={create land list prune remove }" ]]; then
+  ok 'interface: the header, the case dispatch and the rule name the same verbs'
+else bad 'interface: the header, the case dispatch and the rule name the same verbs' "rc=$agree; $WORKTREE_VERBS_REPORT"; fi
+sed 's/^  prune)/  sweep)/' "$SUT" > "$T/drifted.sh" || exit 2
+worktree_verbs_agree "$T/drifted.sh" "$RULE"; agree=$?
+if [[ "$agree" -eq 1 && "$WORKTREE_VERBS_REPORT" == "header($T/drifted.sh)={create land list prune remove } case={create land list remove sweep } rule($RULE)={create land list prune remove }" ]]; then
+  ok 'interface: a dispatch verb the header and the rule do not name is a mismatch'
+else bad 'interface: a dispatch verb the header and the rule do not name is a mismatch' "rc=$agree; $WORKTREE_VERBS_REPORT"; fi
 shtest_end

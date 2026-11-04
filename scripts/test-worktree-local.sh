@@ -104,4 +104,16 @@ invoke remove unpushed --discard
 if [[ "$rc" -eq 2 && -d "$w" && "$out" == 'Error: unknown removal option: --discard (discarding is gitter'"'"'s); nothing removed' ]]; then
   ok 'remove: --discard is refused, discarding stays gitter'"'"'s'
 else bad 'remove: --discard is refused, discarding stays gitter'"'"'s' "rc=$rc; out=$out"; fi
+# The fixed interface: the header, the case dispatch and the rule name one verb set (git-guard keys on it).
+RULE="${2:-$SOURCE_ROOT/.claude/rules/git-writes-through-gitter.md}"
+source "$SOURCE_ROOT/scripts/worktree-verbs.sh"
+worktree_verbs_agree "$SUT" "$RULE"; agree=$?
+if [[ "$agree" -eq 0 && "$WORKTREE_VERBS_REPORT" == "header($SUT)={create land list remove } case={create land list remove } rule($RULE)={create land list remove }" ]]; then
+  ok 'interface: the header, the case dispatch and the rule name the same verbs'
+else bad 'interface: the header, the case dispatch and the rule name the same verbs' "rc=$agree; $WORKTREE_VERBS_REPORT"; fi
+sed 's/^  list)/  ls)/' "$SUT" > "$T/drifted.sh" || exit 2
+worktree_verbs_agree "$T/drifted.sh" "$RULE"; agree=$?
+if [[ "$agree" -eq 1 && "$WORKTREE_VERBS_REPORT" == "header($T/drifted.sh)={create land list remove } case={create land ls remove } rule($RULE)={create land list remove }" ]]; then
+  ok 'interface: a dispatch verb the header and the rule do not name is a mismatch'
+else bad 'interface: a dispatch verb the header and the rule do not name is a mismatch' "rc=$agree; $WORKTREE_VERBS_REPORT"; fi
 shtest_end

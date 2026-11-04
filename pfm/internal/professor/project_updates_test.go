@@ -193,7 +193,7 @@ func TestProjectUpdatesDiffReadsAFencedLinkedWorktreeStore(t *testing.T) {
 	linkedRoot := filepath.Join(t.TempDir(), "linked-worktree")
 	runStoreGit(t, "-C", repository, "worktree", "add", "--detach", "-q", linkedRoot, "HEAD")
 	for _, dir := range []string{ // git carries no empty directory; the store layout needs them
-		"commands", "agents", "scripts", "skills", "epics", "codex", "docs-commands", "docs-hub",
+		"commands", "agents", "scripts", "skills", "epics", "codex", "docs-commands", "docs-hub", "rules",
 	} {
 		if err := os.MkdirAll(filepath.Join(linkedRoot, "templates", "project", dir), 0o700); err != nil {
 			t.Fatal(err)

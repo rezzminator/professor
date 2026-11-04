@@ -27,9 +27,10 @@ const (
 	// gitGuardExemptAgent is the one writer; only its exact agent_type is exempt.
 	gitGuardExemptAgent = "gitter"
 	gitGuardWorktreeSh  = ".claude/scripts/worktree.sh"
-	gitGuardOnlyGitter  = `Only gitter writes this: spawn Agent(subagent_type: "gitter") with the repo path and the exact change.`
-	gitGuardUnreadable  = "could not read this command; split it so each git call is its own simple command."
-	gitGuardBounded     = "could not read this command in full: it passes a parse bound (over 64 KiB, or a `-c`" +
+	gitGuardOnlyGitter  = `Only gitter writes this: spawn Agent(subagent_type: "gitter") with the repo path and the exact change.` +
+		" Never retry, rephrase, split or wrap the denied command to get past the guard."
+	gitGuardUnreadable = "could not read this command; split it so each git call is its own simple command."
+	gitGuardBounded    = "could not read this command in full: it passes a parse bound (over 64 KiB, or a `-c`" +
 		" string nested past 8 levels). Shorten the command; write long content to a file with the Write tool."
 	gitGuardNoSetupHint = "gitter creates and removes worktrees (Phase SETUP)."
 	gitGuardDiscard     = "--discard"

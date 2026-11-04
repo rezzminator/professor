@@ -37,7 +37,7 @@ func newScaffoldFixtureStore(t *testing.T) string {
 		}
 	}
 	for _, dir := range []string{
-		"commands", "agents", "scripts", "skills", "epics", "codex", "docs-commands", "docs-hub",
+		"commands", "agents", "scripts", "skills", "epics", "codex", "docs-commands", "docs-hub", "rules",
 	} {
 		if err := os.MkdirAll(filepath.Join(root, "templates", "project", dir), 0o700); err != nil {
 			t.Fatal(err)
@@ -100,6 +100,13 @@ func TestScaffoldPersistsPinsForEntriesWrittenBeforeAFailure(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(
+		filepath.Join(source, "templates", "project", "rules", "after.md"),
+		[]byte("# after rule\n"),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Chmod(locked, 0); err != nil {
 		t.Fatal(err)
 	}
@@ -114,9 +121,9 @@ func TestScaffoldPersistsPinsForEntriesWrittenBeforeAFailure(t *testing.T) {
 
 	var stdout bytes.Buffer
 	count, err := Scaffold(source, target, true, &stdout)
-	wantErr := "2 template(s) not deployed (SKIPPED above); the other 2 are deployed and pinned"
-	if err == nil || err.Error() != wantErr || count != 2 {
-		t.Fatalf("Scaffold() count=%d err=%v, want 2 and %q; stdout=%q", count, err, wantErr, stdout.String())
+	wantErr := "2 template(s) not deployed (SKIPPED above); the other 3 are deployed and pinned"
+	if err == nil || err.Error() != wantErr || count != 3 {
+		t.Fatalf("Scaffold() count=%d err=%v, want 3 and %q; stdout=%q", count, err, wantErr, stdout.String())
 	}
 	wantRead := "SKIPPED read template project/commands/locked.md: read " + locked + ": permission denied\n"
 	if !strings.Contains(stdout.String(), wantRead) ||
@@ -132,7 +139,11 @@ func TestScaffoldPersistsPinsForEntriesWrittenBeforeAFailure(t *testing.T) {
 		pinned = append(pinned, local+"="+pin.Template)
 	}
 	sort.Strings(pinned)
-	want := []string{".claude/agents/after.md=project/agents/after.md", ".claude/settings.json=project/settings.json"}
+	want := []string{
+		".claude/agents/after.md=project/agents/after.md",
+		".claude/rules/after.md=project/rules/after.md",
+		".claude/settings.json=project/settings.json",
+	}
 	if !reflect.DeepEqual(pinned, want) {
 		t.Fatalf("pins = %v, want %v", pinned, want)
 	}

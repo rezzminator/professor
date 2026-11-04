@@ -131,7 +131,8 @@ func TestGitGuardMainChatWorktreeAddNamesTheRightWay(t *testing.T) {
 			reason := gitGuardDenyReason(t, stdout)
 			for _, want := range []string{
 				"git worktree add -b b .worktrees/b HEAD",
-				`Only gitter writes this: spawn Agent(subagent_type: "gitter") with the repo path and the exact change`,
+				`Only gitter writes this: spawn Agent(subagent_type: "gitter") with the repo path and the exact change.` +
+					" Never retry, rephrase, split or wrap the denied command to get past the guard.",
 				test.want,
 			} {
 				if !strings.Contains(reason, want) {

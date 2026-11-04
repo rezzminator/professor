@@ -211,6 +211,9 @@
     "project/epics/TEMPLATE.md": {
       "curated": true
     },
+    "project/rules/git-writes-through-gitter.md": {
+      "curated": true
+    },
     "project/rumdl-policy.toml": {
       "curated": true
     },

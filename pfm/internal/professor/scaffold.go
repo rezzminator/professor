@@ -35,6 +35,7 @@ var initTemplatePaths = []struct {
 	{source: "project/codex", target: ".codex"},
 	{source: "project/docs-commands", target: "docs/commands"},
 	{source: "project/docs-hub", target: "docs"},
+	{source: "project/rules", target: ".claude/rules"},
 }
 
 // renamedProjectTemplates are the project templates a release renamed, with the

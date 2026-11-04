@@ -30,7 +30,7 @@ func TestInitDeploysMappedTemplatesAndPinsExactlyTheDeployedSet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load deployed baseline: %v", err)
 	}
-	if got, want := len(baseline.Files), 10; got != want {
+	if got, want := len(baseline.Files), 11; got != want {
 		t.Fatalf("pin count=%d, want %d: %#v", got, want, baseline.Files)
 	}
 	if _, ok := baseline.Files[".claude/commands/per-project/testing-manual.md"]; ok {
@@ -50,6 +50,7 @@ func TestInitDeploysMappedTemplatesAndPinsExactlyTheDeployedSet(t *testing.T) {
 		".codex/config.toml",
 		"docs/commands/git/references/gitter-history.md",
 		"docs/_index.md",
+		".claude/rules/git-writes-through-gitter.md",
 	} {
 		if _, err := os.Stat(filepath.Join(target, filepath.FromSlash(relative))); err != nil {
 			t.Fatalf("deployed %s: %v", relative, err)
@@ -96,7 +97,7 @@ func TestInitDeploysMappedTemplatesAndPinsExactlyTheDeployedSet(t *testing.T) {
 	) + " § Install interview — it records your answers in .professor/manifest.json, " +
 		"runs pfm init --render and deploys the per-project files"
 	next := "\nnext: write CLAUDE.md with /claude-md:use write CLAUDE.md\n"
-	if !strings.Contains(stdout.String(), "deployed 10 project files") || !strings.Contains(stdout.String(), handoff) ||
+	if !strings.Contains(stdout.String(), "deployed 11 project files") || !strings.Contains(stdout.String(), handoff) ||
 		!strings.HasSuffix(stdout.String(), next) {
 		t.Fatalf("init output=%q", stdout.String())
 	}
@@ -372,6 +373,10 @@ func newScaffoldStoreFixture(t *testing.T) string {
 			mode:    0o600,
 		},
 		"templates/project/docs-hub/_index.md": {content: "# Documentation Hub\n", mode: 0o600},
+		"templates/project/rules/git-writes-through-gitter.md": {
+			content: "---\nvisible-to:\n  include: [\"main\"]\n---\n# Only gitter writes git\n",
+			mode:    0o600,
+		},
 		"docs/PLACEHOLDERS.md": {
 			content: "# Placeholders\n\nInstall-time: {TOKEN}.\n\n## Runtime metavariables\n\nRuntime: {SHA}.\n",
 			mode:    0o600,

@@ -23,14 +23,16 @@
 #   *_test.sh, scripts/test-*.sh  bash, no selector; .claude/scripts/x.sh brings scripts/test-x.sh
 #                             (dev.sh: scripts/test-dev-report.sh and infra/fence/lanes/tests/
 #                             iso-housekeeping_test.sh, format-md.sh: scripts/test-format-md.sh on that
-#                             copy, worktree.sh: scripts/test-worktree-local.sh,
-#                             templates/project/scripts/worktree.sh: scripts/test-worktree.sh);
+#                             copy, worktree.sh and .claude/rules/git-writes-through-gitter.md:
+#                             scripts/test-worktree-local.sh, templates/project/scripts/worktree.sh and
+#                             templates/project/rules/git-writes-through-gitter.md:
+#                             scripts/test-worktree.sh);
 #                             infra/fence/x.sh, infra/fence/lanes/x.sh bring
 #                             infra/fence/lanes/tests/x_test.sh;
-#                             a sourced helper brings its users' tests: scripts/shtest.sh and
-#                             scripts/stub-root.sh every tracked test naming it, infra/fence/mkdir-lock.sh
-#                             its own and the shared, root and gate-history tests, infra/fence/local-env.sh
-#                             the fence-env and iso-housekeeping tests
+#                             a sourced helper brings its users' tests: scripts/shtest.sh,
+#                             scripts/stub-root.sh and scripts/worktree-verbs.sh every tracked test naming
+#                             it, infra/fence/mkdir-lock.sh its own and the shared, root and gate-history
+#                             tests, infra/fence/local-env.sh the fence-env and iso-housekeeping tests
 # The rules hold under pfm/ as everywhere. Any other file brings no test, only checks, and is named on
 # its own `TEST UNCOVERED <file>` line, a gap that does not fail the run. The checks, every one run
 # even after one fails:
@@ -472,7 +474,7 @@ derive() { # derive <repository-relative path> <has selector 0|1> <selector>
         .claude/scripts/dev.sh)
           shell_test scripts/test-dev-report.sh .claude/scripts/dev.sh
           [ ! -f "$ROOT/infra/fence/lanes/tests/iso-housekeeping_test.sh" ] || shell_test infra/fence/lanes/tests/iso-housekeeping_test.sh ;;
-        scripts/shtest.sh | scripts/stub-root.sh)
+        scripts/shtest.sh | scripts/stub-root.sh | scripts/worktree-verbs.sh)
           while IFS= read -r sib; do
             [ -z "$sib" ] || [ "$sib" = "$f" ] || [ ! -f "$ROOT/$sib" ] || ! grep -qF -- "$f" "$ROOT/$sib" || shell_test "$sib"
           done < <(git -C "$ROOT" ls-files -- '*_test.sh' 'scripts/test-*.sh') ;;
@@ -486,8 +488,8 @@ derive() { # derive <repository-relative path> <has selector 0|1> <selector>
             [ ! -f "$ROOT/$sib" ] || shell_test "$sib"
           done ;;
         .claude/scripts/format-md.sh | templates/project/scripts/format-md.sh) shell_test scripts/test-format-md.sh "$f" ;;
-        .claude/scripts/worktree.sh) shell_test scripts/test-worktree-local.sh ;;
-        templates/project/scripts/worktree.sh) shell_test scripts/test-worktree.sh ;;
+        .claude/scripts/worktree.sh | .claude/rules/git-writes-through-gitter.md) shell_test scripts/test-worktree-local.sh ;;
+        templates/project/scripts/worktree.sh | templates/project/rules/git-writes-through-gitter.md) shell_test scripts/test-worktree.sh ;;
         .claude/scripts/*.sh | scripts/*.sh | scripts/*.py)
           for sib in "scripts/test-${base%.*}.sh" "scripts/test-${base%.*}.py"; do
             [ -f "$ROOT/$sib" ] || continue

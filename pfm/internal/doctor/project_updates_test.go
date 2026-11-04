@@ -131,7 +131,7 @@ func newProjectUpdatesStore(t *testing.T) string {
 		writeProjectUpdatesFixture(t, store, relative, content)
 	}
 	for _, dir := range []string{
-		"commands", "agents", "scripts", "skills", "epics", "codex", "docs-commands", "docs-hub",
+		"commands", "agents", "scripts", "skills", "epics", "codex", "docs-commands", "docs-hub", "rules",
 	} {
 		if err := os.MkdirAll(filepath.Join(store, "templates", "project", dir), 0o700); err != nil {
 			t.Fatal(err)

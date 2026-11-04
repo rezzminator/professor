@@ -393,6 +393,12 @@ func buildAdoptAtStoreFixture(t *testing.T, root string) []string {
 
 	writeProjectFixtureFile(t, root, "templates/project/commands/dev.md", "new\n")
 	writeProjectFixtureFile(t, root, "templates/project/commands/later.md", "later\n")
+	writeProjectFixtureFile(
+		t,
+		root,
+		"templates/project/rules/git-writes-through-gitter.md",
+		"# Only gitter writes git\n",
+	)
 	gitTemp(t, root, "add", "-A")
 	gitTemp(t, root, "commit", "-qm", "new templates")
 	return []string{oldSHA, projectGitShortSHA(t, root)}
@@ -444,7 +450,8 @@ func buildScaffoldStoreFixture(t *testing.T, root string) []string {
 			content: "# Gitter History\n",
 			mode:    0o600,
 		},
-		"templates/project/docs-hub/_index.md": {content: "# Documentation Hub\n", mode: 0o600},
+		"templates/project/docs-hub/_index.md":                 {content: "# Documentation Hub\n", mode: 0o600},
+		"templates/project/rules/git-writes-through-gitter.md": {content: "# Only gitter writes git\n", mode: 0o600},
 	}
 	for relative, fixture := range files {
 		path := filepath.Join(root, filepath.FromSlash(relative))

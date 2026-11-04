@@ -212,7 +212,7 @@ func TestUpdateAdoptPinsExistingInstall(t *testing.T) {
 	runtime := config.Runtime{Paths: paths.Values{Home: home}}
 	headSHA := projectGitShortSHA(t, store)
 
-	const planSize = 10
+	const planSize = 11
 
 	// An unreadable local file costs its own pin only: the readable one
 	// still pins and saves, the unreadable one is named and reads NEW.
@@ -305,6 +305,9 @@ func TestUpdateAdoptAtPinsAgainstBlueprintRefAndValidatesIt(t *testing.T) {
 	if !strings.Contains(stdout.String(), "absent-at-ref 1") {
 		t.Fatalf("adopt --at stdout missing absent-at-ref: %q", stdout.String())
 	}
+	if !strings.Contains(stdout.String(), "  absent        10  (mapped template, no local file") {
+		t.Fatalf("adopt --at stdout missing absent 10 (project/rules mapped): %q", stdout.String())
+	}
 	baseline, err := professor.Load(project)
 	if err != nil {
 		t.Fatal(err)
@@ -341,8 +344,10 @@ func TestUpdateAdoptAtPinsAgainstBlueprintRefAndValidatesIt(t *testing.T) {
 			t.Fatalf("check missing %q in dev.md UPDATED report:\n%s", want, stdout.String())
 		}
 	}
-	if !strings.Contains(stdout.String(), "project/commands/later.md — adopt:") {
-		t.Fatalf("check did not report later.md NEW:\n%s", stdout.String())
+	for _, want := range []string{"project/commands/later.md — adopt:", "project/rules/git-writes-through-gitter.md — adopt:"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("check did not report %q NEW:\n%s", want, stdout.String())
+		}
 	}
 
 	noGitStore := t.TempDir()
@@ -358,6 +363,7 @@ func TestUpdateAdoptAtPinsAgainstBlueprintRefAndValidatesIt(t *testing.T) {
 		"templates/project/codex/config.toml":                              "model=\"x\"\n",
 		"templates/project/docs-commands/git/references/gitter-history.md": "# Gitter History\n",
 		"templates/project/docs-hub/_index.md":                             "# Documentation Hub\n",
+		"templates/project/rules/git-writes-through-gitter.md":             "# Only gitter writes git\n",
 	} {
 		writeProjectFixtureFile(t, noGitStore, relative, content)
 	}

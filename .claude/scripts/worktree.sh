@@ -1,13 +1,18 @@
 #!/usr/bin/env bash
-# worktree.sh — this repo's flight worktrees, run by the main chat while git tracks it unchanged
-# from HEAD (git-guard); prune, discarding and every refusal go to gitter.
+# worktree.sh — this repo's flight worktrees.
 #
-# Usage:
+# Interface, fixed: pfm's git-guard keys on this path (.claude/scripts/worktree.sh) and on the verb names
+# below, and lets the main chat run create, land and remove only while git tracks this file unchanged from
+# HEAD; pruning, discarding and every refusal go to gitter. Every refusal exits non-zero with one stderr
+# line. Renaming or dropping a verb, or exiting 0 on a refusal, breaks the main chat's access. This block
+# stays in sync with .claude/rules/git-writes-through-gitter.md; everything behind the verbs is free.
+#
 #   .claude/scripts/worktree.sh create <name> [base]           # base defaults to BASE_BRANCH
 #   .claude/scripts/worktree.sh land <name> [-m <msg>]         # fast-forward BASE_BRANCH, then remove
 #   .claude/scripts/worktree.sh remove <name> [--delete-branch]
 #   .claude/scripts/worktree.sh list
 #
+# <name> is the kebab-case flight name: branch flight/<name>, path .worktrees/<name>.
 # <name> is the kebab-case flight name: branch flight/<name>, path .worktrees/<name>.
 
 set -euo pipefail

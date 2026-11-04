@@ -151,6 +151,25 @@ invoke prune
 if [[ "$rc" -ne 0 && ! -d "$repo/.worktrees/a-nukefails" && ! -d "$repo/.worktrees/b-orphan" && "$out" == *'Prune complete: 2 orphaned'* && "$out" == *'teardown failed for 1 pruned worktree(s): a-nukefails'* ]] && grep -qx a-nukefails "$repo/nuke-trace" && grep -qx b-orphan "$repo/nuke-trace" && grep -qx 'free b-orphan' "$trace"; then
   ok 'F5: a failed stack teardown does not abort the prune: the rest is pruned, the summary printed, the failure named and non-zero'
 else bad 'F5: a failed stack teardown does not abort the prune: the rest is pruned, the summary printed, the failure named and non-zero' "rc=$rc; out=$out"; fi
+# A caller umask of 077 checks the tree out world-readable (a container of another uid bind-mounts its
+# files), while the env files create writes after the checkout keep that umask.
+mode() { ls -ld "$1" | cut -c1-10; }
+ENV_FILES=.env.test fixture
+mkdir -p "$repo/init" && printf 'init\n' > "$repo/init/01-init.txt" && printf '#!/bin/sh\n' > "$repo/init/02-init.sh" || exit 2
+chmod 755 "$repo/init/02-init.sh" && fgit "$repo" add init && fgit "$repo" commit -q -m init || exit 2
+printf 'PORT=1\n' > "$repo/.env.test" && chmod 644 "$repo/.env.test" || exit 2
+caller_umask="$(umask)"; umask 077
+invoke create umask-077
+umask "$caller_umask"
+w="$repo/.worktrees/umask-077"
+modes="file=$(mode "$w/init/01-init.txt") exec=$(mode "$w/init/02-init.sh") dir=$(mode "$w/init")"
+if [[ "$rc" -eq 0 && "$modes" == 'file=-rw-r--r-- exec=-rwxr-xr-x dir=drwxr-xr-x' ]]; then
+  ok 'umask: a 077 caller gets a checkout readable by another uid (644 files, 755 executables and dirs)'
+else bad 'umask: a 077 caller gets a checkout readable by another uid (644 files, 755 executables and dirs)' "rc=$rc; $modes; out=$out"; fi
+envmodes="env=$(mode "$w/.env.test") ports=$(mode "$w/.env.ports")"
+if [[ "$rc" -eq 0 && "$envmodes" == 'env=-rw------- ports=-rw-------' ]]; then
+  ok 'umask: the env files create writes after the checkout keep the caller 077 umask (600)'
+else bad 'umask: the env files create writes after the checkout keep the caller 077 umask (600)' "rc=$rc; $envmodes; out=$out"; fi
 # provisioned_fixture <name> [tracked|ignored]: copy/rewrite inside create, before final bytes are recorded.
 provisioned_fixture() {
   ENV_FILES=.env.test fixture

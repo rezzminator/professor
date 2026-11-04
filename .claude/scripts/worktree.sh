@@ -13,7 +13,6 @@
 #   .claude/scripts/worktree.sh list
 #
 # <name> is the kebab-case flight name: branch flight/<name>, path .worktrees/<name>.
-# <name> is the kebab-case flight name: branch flight/<name>, path .worktrees/<name>.
 
 set -euo pipefail
 

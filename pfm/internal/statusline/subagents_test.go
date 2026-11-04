@@ -117,7 +117,7 @@ func renderSubagentWith(t *testing.T, session, task string, now time.Time, colum
 	payload := `{"transcript_path":` + jsonText(session) + `,"cwd":"/work/repo","columns":` + jsonText(columns) +
 		`,"tasks":[` + task + `]}`
 	var warn bytes.Buffer
-	got, err := RenderSubagents([]byte(payload), now, t.TempDir(), testPrices(t), "", noEnv, "", &warn)
+	got, err := RenderSubagents([]byte(payload), now, t.TempDir(), testPrices(t), "", noEnv, &warn)
 	if err != nil {
 		t.Fatalf("RenderSubagents: %v", err)
 	}
@@ -265,209 +265,34 @@ func TestRenderSubagentsRowBodies(t *testing.T) {
 	}
 }
 
-// An agent definition names the role it plays: the identity renders that
-// role, read from the project's definitions first — the session cwd's and its
-// parents' through the git root, never home's own — then the user's.
-func TestRenderSubagentsIdentityIsTheDefinitionsRole(t *testing.T) {
-	const task = `{"id":"a1","type":"local_agent","status":"running","model":"gpt-6-sol","effort":"high",` +
-		`"tokenCount":4200,"tokenSamples":[2100,4200]}`
-	definition := func(frontmatter string) string {
-		return "---\n" + frontmatter + "\n---\n\nbody\nrole: not-frontmatter\n"
+// A row names the agent type it was launched as, never the family its
+// definition's role key names: rr-pro and rr-pro-max must not both read rr.
+func TestRenderSubagentsIdentityIsTheLaunchedAgentType(t *testing.T) {
+	repo := t.TempDir()
+	definition := filepath.Join(repo, ".claude", "agents", "rr-pro.md")
+	if err := os.MkdirAll(filepath.Dir(definition), 0o700); err != nil {
+		t.Fatal(err)
 	}
-	cases := []struct {
-		name    string
-		project map[string]string // file name → body under <project>/.claude/agents
-		user    map[string]string // file name → body under the user agents dir
-		outer   map[string]string // path under home → body, outside the project
-		below   string            // the session cwd under <project>; "" = the project itself
-		noGit   bool              // the project is no git repository
-		meta    string            // the row's own agentType; "" = flights-foreman-sonnet
-		torn    bool              // the user's definition is a directory, unreadable
-		want    string
-		warn    string // what stderr must carry; "" = nothing
-	}{
-		{
-			name: "the user's definition names its role",
-			user: map[string]string{
-				"flights-foreman-sonnet.md": definition(
-					"name: flights-foreman-sonnet\nmodel: gpt-6-sol\nrole: flights-foreman",
-				),
-			},
-			want: "│flights-foreman│sol-6·▰▰▰ high│",
-		},
-		{
-			name:    "the project's definition wins over the user's",
-			project: map[string]string{"flights-foreman-sonnet.md": definition("role: project-foreman")},
-			user:    map[string]string{"flights-foreman-sonnet.md": definition("role: flights-foreman")},
-			want:    "│project-foreman│sol-6·▰▰▰ high│",
-		},
-		{
-			name: "a quoted role loses its quotes",
-			user: map[string]string{"flights-foreman-sonnet.md": definition(`role: "flights-foreman"`)},
-			want: "│flights-foreman│sol-6·▰▰▰ high│",
-		},
-		{
-			name: "a definition with no role key keeps the agentType",
-			user: map[string]string{"flights-foreman-sonnet.md": definition("name: flights-foreman-sonnet")},
-			want: "│flights-foreman-sonnet│sol-6·▰▰▰ high│",
-		},
-		{
-			name: "a role in the body is not a role",
-			user: map[string]string{"flights-foreman-sonnet.md": "no frontmatter\nrole: flights-foreman\n"},
-			want: "│flights-foreman-sonnet│sol-6·▰▰▰ high│",
-		},
-		{
-			name: "no definition file keeps the agentType",
-			want: "│flights-foreman-sonnet│sol-6·▰▰▰ high│",
-		},
-		{
-			name:    "a session below the project root reads the root's definition",
-			below:   filepath.Join("pfm", "internal"),
-			project: map[string]string{"flights-foreman-sonnet.md": definition("role: project-foreman")},
-			user:    map[string]string{"flights-foreman-sonnet.md": definition("role: flights-foreman")},
-			want:    "│project-foreman│sol-6·▰▰▰ high│",
-		},
-		{
-			name: "a padded agentType in the meta resolves its definition",
-			meta: " flights-foreman-sonnet ",
-			user: map[string]string{"flights-foreman-sonnet.md": definition("role: flights-foreman")},
-			want: "│flights-foreman│sol-6·▰▰▰ high│",
-		},
-		{
-			name: "an unreadable definition keeps the agentType and says why",
-			torn: true,
-			want: "│flights-foreman-sonnet│sol-6·▰▰▰ high│",
-			warn: "agent definition (rows show flights-foreman-sonnet)",
-		},
-		{
-			name: "a definition above the git root is no project's",
-			outer: map[string]string{
-				filepath.Join("work", ".claude", "agents", "flights-foreman-sonnet.md"): definition(
-					"role: outer-foreman",
-				),
-			},
-			want: "│flights-foreman-sonnet│sol-6·▰▰▰ high│",
-		},
-		{
-			name:  "outside a git repository home's own .claude is not a project's",
-			noGit: true,
-			outer: map[string]string{
-				filepath.Join(".claude", "agents", "flights-foreman-sonnet.md"): definition("role: home-foreman"),
-			},
-			want: "│flights-foreman-sonnet│sol-6·▰▰▰ high│",
-		},
+	if err := os.WriteFile(definition, []byte("---\nname: rr-pro\nrole: rr\n---\n"), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			agentType := tc.meta
-			if agentType == "" {
-				agentType = "flights-foreman-sonnet"
-			}
-			// Two rows of one type: the definition is read, and an unreadable
-			// one reported, once per render.
-			session := subagentSession(t,
-				map[string][]string{"a1": agentTranscriptLines[:1], "a2": agentTranscriptLines[:1]},
-				map[string]string{"a1": agentType, "a2": agentType})
-			home, userDir := t.TempDir(), t.TempDir()
-			if tc.torn {
-				if err := os.Mkdir(filepath.Join(userDir, "flights-foreman-sonnet.md"), 0o700); err != nil {
-					t.Fatal(err)
-				}
-			}
-			project := filepath.Join(home, "work", "proj")
-			cwd := filepath.Join(project, tc.below)
-			if err := os.MkdirAll(cwd, 0o700); err != nil {
-				t.Fatal(err)
-			}
-			if !tc.noGit {
-				if err := os.Mkdir(filepath.Join(project, ".git"), 0o700); err != nil {
-					t.Fatal(err)
-				}
-			}
-			files := map[string]string{}
-			for name, body := range tc.project {
-				files[filepath.Join(project, ".claude", "agents", name)] = body
-			}
-			for name, body := range tc.user {
-				files[filepath.Join(userDir, name)] = body
-			}
-			for rel, body := range tc.outer {
-				files[filepath.Join(home, rel)] = body
-			}
-			for path, body := range files {
-				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-					t.Fatal(err)
-				}
-			}
-			payload := `{"transcript_path":` + jsonText(session) + `,"cwd":` + jsonText(cwd) +
-				`,"columns":200,"tasks":[` + task + `,` + strings.Replace(task, `"a1"`, `"a2"`, 1) + `]}`
-			var warn bytes.Buffer
-			got, err := RenderSubagents(
-				[]byte(payload),
-				subagentNow,
-				t.TempDir(),
-				testPrices(t),
-				home,
-				noEnv,
-				userDir,
-				&warn,
-			)
-			if err != nil {
-				t.Fatalf("RenderSubagents: %v", err)
-			}
-			lines := strings.Split(strings.TrimSpace(got), "\n")
-			if len(lines) != 2 {
-				t.Fatalf("rows = %q, want two", got)
-			}
-			for _, line := range lines {
-				var row subagentRow
-				if err := json.Unmarshal([]byte(line), &row); err != nil {
-					t.Fatalf("row %q: %v", line, err)
-				}
-				if content := stripANSICodes(row.Content); !strings.Contains(content, tc.want) {
-					t.Fatalf("row %s content =\n  %q\nwant it to hold\n  %q", row.ID, content, tc.want)
-				}
-			}
-			if tc.warn == "" && warn.Len() != 0 || tc.warn != "" && strings.Count(warn.String(), tc.warn) != 1 {
-				t.Fatalf("warn = %q, want %q once", warn.String(), tc.warn)
-			}
-		})
+	session := subagentSession(
+		t,
+		map[string][]string{"a1": agentTranscriptLines[:1]},
+		map[string]string{"a1": "rr-pro"},
+	)
+	payload := `{"transcript_path":` + jsonText(session) + `,"cwd":` + jsonText(repo) + `,"columns":200,"tasks":[` +
+		`{"id":"a1","type":"local_agent","status":"running","model":"claude-opus-5-5","tokenCount":10}]}`
+	got, err := RenderSubagents([]byte(payload), subagentNow, t.TempDir(), testPrices(t), "", noEnv, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("RenderSubagents: %v", err)
 	}
-}
-
-// An edited definition shows on the next render: nothing outlives one.
-func TestRenderSubagentsRoleIsReadAgainEachRender(t *testing.T) {
-	session := subagentSession(t, map[string][]string{"a1": agentTranscriptLines[:1]},
-		map[string]string{"a1": "flights-foreman-sonnet"})
-	userDir := t.TempDir()
-	path := filepath.Join(userDir, "flights-foreman-sonnet.md")
-	render := func() string {
-		payload := `{"transcript_path":` + jsonText(session) + `,"cwd":"/work/repo","columns":200,"tasks":[` +
-			`{"id":"a1","type":"local_agent","status":"running","model":"gpt-6-sol","tokenCount":10}]}`
-		var warn bytes.Buffer
-		got, err := RenderSubagents([]byte(payload), subagentNow, t.TempDir(), testPrices(t), "", noEnv, userDir, &warn)
-		if err != nil {
-			t.Fatalf("RenderSubagents: %v", err)
-		}
-		var row subagentRow
-		if err := json.Unmarshal([]byte(strings.TrimSpace(got)), &row); err != nil {
-			t.Fatalf("row %q: %v", got, err)
-		}
-		return stripANSICodes(row.Content)
+	var row subagentRow
+	if err := json.Unmarshal([]byte(strings.TrimSpace(got)), &row); err != nil {
+		t.Fatalf("row %q: %v", got, err)
 	}
-	for _, step := range []struct{ body, want string }{
-		{"---\nrole: flights-foreman\n---\n", "│flights-foreman│sol-6│"},
-		{"---\nrole: flights-lander\n---\n", "│flights-lander│sol-6│"},
-	} {
-		if err := os.WriteFile(path, []byte(step.body), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if got := render(); !strings.Contains(got, step.want) {
-			t.Fatalf("content = %q, want it to hold %q", got, step.want)
-		}
+	if content := stripANSICodes(row.Content); !strings.Contains(content, "│rr-pro│") {
+		t.Fatalf("content = %q, want the launched type rr-pro", content)
 	}
 }
 
@@ -527,7 +352,7 @@ func TestRenderSubagentsOneLinePerTaskInOrder(t *testing.T) {
 		{"id":"first","tokenCount":10,"contextWindowSize":100},
 		{"id":"unknown"},
 		{"label":"no id"},
-		{"id":"second","tokenCount":20,"contextWindowSize":100}]}`), subagentNow, t.TempDir(), testPrices(t), "", noEnv, "", &bytes.Buffer{})
+		{"id":"second","tokenCount":20,"contextWindowSize":100}]}`), subagentNow, t.TempDir(), testPrices(t), "", noEnv, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("RenderSubagents: %v", err)
 	}
@@ -552,7 +377,6 @@ func TestRenderSubagentsRejectsMalformedInput(t *testing.T) {
 		testPrices(t),
 		"",
 		noEnv,
-		"",
 		&bytes.Buffer{},
 	)
 	if err == nil {
@@ -577,7 +401,6 @@ func TestRenderSubagentsRowIsBrightNotFaint(t *testing.T) {
 		testPrices(t),
 		"",
 		noEnv,
-		"",
 		&bytes.Buffer{},
 	)
 	if err != nil {

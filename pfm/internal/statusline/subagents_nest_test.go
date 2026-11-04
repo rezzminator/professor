@@ -396,7 +396,7 @@ func renderPayload(
 	list := strings.Join(tasks, ",")
 	payload := `{"transcript_path":` + jsonText(session) + `,"cwd":"/work/repo","tasks":[` + list + `]}`
 	var warn bytes.Buffer
-	got, err := RenderSubagents([]byte(payload), now, t.TempDir(), testPrices(t), "", noEnv, "", &warn)
+	got, err := RenderSubagents([]byte(payload), now, t.TempDir(), testPrices(t), "", noEnv, &warn)
 	if err != nil {
 		t.Fatal(err)
 	}

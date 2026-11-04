@@ -99,7 +99,7 @@ func TestParitySubagentCatalogOverridesHarnessGuess(t *testing.T) {
 	raw := []byte(
 		`{"tasks":[{"id":"a","model":"gpt-6.1-sol-fast[1m]","tokenCount":70300,"contextWindowSize":1000000}]}`,
 	)
-	out, err := RenderSubagents(raw, r.now(), r.SIDDir, nil, r.Home, &paths.MapEnv{Values: r.Env}, "", os.Stderr)
+	out, err := RenderSubagents(raw, r.now(), r.SIDDir, nil, r.Home, &paths.MapEnv{Values: r.Env}, os.Stderr)
 	if err != nil {
 		t.Fatal(err)
 	}

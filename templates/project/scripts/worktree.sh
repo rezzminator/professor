@@ -201,8 +201,10 @@ cmd_create() {
       git branch "$branch" "$BASE_BRANCH"
     fi
 
-    # Create worktree — full repo checkout
-    git worktree add "$worktree_dir" "$branch"
+    # Create worktree — full repo checkout, umask 022 in this subshell only: a 077 caller's 600/700
+    # tree is unreadable to a container running as another uid that bind-mounts its files; the env
+    # files written below keep the caller's umask, so a 077 caller's stay 600.
+    (umask 022 && git worktree add "$worktree_dir" "$branch")
     marker="$(provision_marker "$worktree_dir")" || return 1
     if ! : > "$marker"; then
       echo "Error: could not mark provisioning incomplete; partial worktree: $worktree_dir" >&2

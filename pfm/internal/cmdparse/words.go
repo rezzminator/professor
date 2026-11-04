@@ -19,6 +19,9 @@ import (
 type word struct {
 	vals []string
 	ok   bool
+	// split: an unquoted expansion put a blank into a value, which the
+	// shell word-splits (eval).
+	split bool
 }
 
 const maxExpansions = 64
@@ -26,6 +29,9 @@ const maxExpansions = 64
 // digits matches a decimal integer, an optional sign included.
 var digits = regexp.MustCompile(`^[+-]?\d+$`)
 
+// eval evaluates a word to its values. An unquoted expansion holding a
+// blank word-splits on the default IFS: alone in its word, each value is
+// its fields; beside other text the word is unknown.
 func (p *callParser) eval(w *syntax.Word) word {
 	out := word{vals: []string{""}, ok: true}
 	for _, part := range w.Parts {
@@ -34,8 +40,21 @@ func (p *callParser) eval(w *syntax.Word) word {
 			return word{}
 		}
 	}
-	return out
+	if !out.split {
+		return out
+	}
+	if len(w.Parts) != 1 {
+		return word{}
+	}
+	var fields []string
+	for _, v := range out.vals {
+		fields = append(fields, strings.FieldsFunc(v, func(r rune) bool { return strings.ContainsRune(ifs, r) })...)
+	}
+	return word{vals: fields, ok: true}
 }
+
+// ifs is the shell's default field separator set.
+const ifs = " \t\n"
 
 func (p *callParser) evalPart(part syntax.WordPart, out *word, quoted bool) {
 	switch x := part.(type) {
@@ -57,6 +76,9 @@ func (p *callParser) evalPart(part syntax.WordPart, out *word, quoted bool) {
 			out.ok = false
 			return
 		}
+		out.split = out.split || !quoted && slices.ContainsFunc(vals, func(v string) bool {
+			return strings.ContainsAny(v, ifs)
+		})
 		out.appendAll(vals)
 	case *syntax.CmdSubst:
 		dir, ok := p.selfDir(x)

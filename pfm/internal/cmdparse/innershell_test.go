@@ -44,6 +44,32 @@ func TestInnerShellAndArrays(t *testing.T) {
 			want:    []step{{"bash", []string{"-c", "$G push"}}, {"$G", []string{"push"}}},
 		},
 		{
+			name:    "dash and ksh -c are parsed as shell",
+			command: `dash -c 'cat x'; ksh -c 'cat y'`,
+			want: []step{
+				{"dash", []string{"-c", "cat x"}},
+				{"cat", []string{"x"}},
+				{"ksh", []string{"-c", "cat y"}},
+				{"cat", []string{"y"}},
+			},
+		},
+		{
+			name:    "eval parses its words joined as shell",
+			command: `eval "git commit -m x"; eval git status '&&' cat y`,
+			want: []step{
+				{"eval", []string{"git commit -m x"}},
+				{"git", []string{"commit", "-m", "x"}},
+				{"eval", []string{"git", "status", "&&", "cat", "y"}},
+				{"git", []string{"status"}},
+				{"cat", []string{"y"}},
+			},
+		},
+		{
+			name:    "eval runs in the calling shell",
+			command: `eval 'G=git'; $G push`,
+			want:    []step{{"eval", []string{"G=git"}}, {"git", []string{"push"}}},
+		},
+		{
 			name:    "a non-literal -c string is not parsed",
 			command: `bash -c "$CMD"`,
 			want:    []step{{"bash", []string{"-c", `"$CMD"`}}},
@@ -103,13 +129,15 @@ func TestInnerShellParseErrorIsOneErrorPart(t *testing.T) {
 // one, parsed in place, does not.
 func TestInnerShellUnknownStringIsUnread(t *testing.T) {
 	t.Parallel()
-	for _, command := range []string{`bash -c "rm x $X"`, `sh -lc "$CMD"`, `zsh -c "echo $Z"`} {
+	for _, command := range []string{
+		`bash -c "rm x $X"`, `sh -lc "$CMD"`, `zsh -c "echo $Z"`, `dash -c "$C"`, `eval "$CMD"`, `eval git $X`,
+	} {
 		parts := parseOne(t, command)
 		if len(parts) != 1 || !parts[0].Unread || parts[0].Status != StatusOK {
 			t.Errorf("%s: parts = %+v, want one ok part marked Unread", command, parts)
 		}
 	}
-	for _, command := range []string{`bash -c 'rm x'`, `X=a; bash -c "rm x $X"`, `echo "$X"`} {
+	for _, command := range []string{`bash -c 'rm x'`, `X=a; bash -c "rm x $X"`, `echo "$X"`, `X=a; eval rm $X`} {
 		for _, part := range parseOne(t, command) {
 			if part.Unread {
 				t.Errorf("%s: part %+v is marked Unread", command, part)

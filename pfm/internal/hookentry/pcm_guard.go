@@ -53,7 +53,6 @@ const (
 	pcmGuardUnknownName = "__pcm-guard-unknown-name__"
 	pcmGuardPushd       = "pushd"
 	pcmGuardPopd        = "popd"
-	pcmGuardDash        = "dash"
 	pcmGuardTemplates   = "templates"
 )
 
@@ -181,7 +180,7 @@ func PcmGuard(input io.Reader, stdout, stderr io.Writer) int {
 // CLAUDE_CONFIG_DIR; engine adds engineGuardRoots. What it cannot read
 // leaves that root unguarded, with one stderr line.
 func pcmGuardNewScope(stderr io.Writer, engine bool) pcmGuardScope {
-	home := storeGuardGet("HOME")
+	home := storeGuardGet(guardHomeEnv)
 	scope := pcmGuardScope{home: home, engine: engine}
 	if engine {
 		scope.roots = engineGuardRoots(home)
@@ -370,7 +369,7 @@ func (judge *pcmGuardJudge) bash(command, cwd string, script cmdparse.Script, de
 	}
 	parsed, err := cmdparse.ParseBatch([]cmdparse.Call{{
 		ID: "pcm-guard", Command: command,
-		Vars: map[string]string{"HOME": judge.scope.home}, Script: script,
+		Vars: map[string]string{guardHomeEnv: judge.scope.home}, Script: script,
 	}})
 	if err != nil {
 		return err
@@ -537,17 +536,14 @@ func (judge *pcmGuardJudge) copies(base string, args []string, dir string) {
 
 // pcmGuardCodeFlags are the short flags whose value is inline code, per
 // interpreter; python names every python* program.
-// dash and ksh are here because cmdparse parses only a bash, sh or zsh -c
-// string (cmdparse.shellScript), so pcmGuardJudge.program parses theirs.
 var pcmGuardCodeFlags = map[string]string{
 	pcmGuardPython: "c", pcmGuardNode: "ep", "nodejs": "ep", pcmGuardPerl: "eE", pcmGuardRuby: "e",
-	pcmGuardDash: "c", "ksh": "c",
 }
 
 // pcmGuardCode returns the inline code an interpreter runs: the value of a
 // code flag (alone or in a short cluster: -c, -e, -pe, the code the next
-// word or joined to it: -c'code'), --eval and --print. A bash, sh or zsh -c
-// string is no code here: cmdparse parses it into parts of its own, or marks
+// word or joined to it: -c'code'), --eval and --print. A shell's -c string
+// (bash, sh, zsh, dash, ksh) is no code here: cmdparse parses it into parts of its own, or marks
 // its part Unread when it cannot know the string (PcmGuard's bash). Its
 // heredocs and here-strings are pcmGuardStdin's.
 func pcmGuardCode(part *cmdparse.Part, base string) []string {

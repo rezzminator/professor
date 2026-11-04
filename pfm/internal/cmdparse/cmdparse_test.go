@@ -2,6 +2,7 @@ package cmdparse
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -77,7 +78,37 @@ func TestForLoopItemsBind(t *testing.T) {
 		command string
 		want    []step
 	}{
-		{"literal items", `for f in a b; do grep x "$f"; done`, []step{{"grep", []string{"x", "a", "b"}}}},
+		{
+			"the body runs once per literal item",
+			`for f in a b; do grep x "$f"; done`,
+			[]step{{"grep", []string{"x", "a"}}, {"grep", []string{"x", "b"}}},
+		},
+		{
+			"an unquoted item variable word-splits",
+			`for c in "status --short" "branch --show-current"; do git -C /r $c; done`,
+			[]step{
+				{"git", []string{"-C", "/r", "status", "--short"}},
+				{"git", []string{"-C", "/r", "branch", "--show-current"}},
+			},
+		},
+		{
+			"each item judged on its own",
+			`for c in status commit; do git $c; done`,
+			[]step{{"git", []string{"status"}}, {"git", []string{"commit"}}},
+		},
+		{
+			"an item joined to a literal",
+			`for p in plugins/x plugins/y; do git -C /r/$p status; done`,
+			[]step{
+				{"git", []string{"-C", "/r/plugins/x", "status"}},
+				{"git", []string{"-C", "/r/plugins/y", "status"}},
+			},
+		},
+		{
+			"nested loops past the expansion bound leave the inner variable unknown",
+			`for a in 1 2 3 4 5 6 7 8; do for b in 1 2 3 4 5 6 7 8 9; do cat $a$b; done; done`,
+			slices.Repeat([]step{{"cat", []string{"$a$b"}}}, 8),
+		},
 		{
 			"a glob item stays as written",
 			`for f in *.md; do grep x "$f"; done`,
@@ -94,6 +125,54 @@ func TestForLoopItemsBind(t *testing.T) {
 			t.Parallel()
 			assertSteps(t, parseOne(t, tc.command), tc.want)
 		})
+	}
+}
+
+// TestUnquotedExpansionWordSplits: an unquoted variable holding blanks is
+// its fields, as bash splits it; beside other text the parse leaves it
+// unknown; quoted it stays one word.
+func TestUnquotedExpansionWordSplits(t *testing.T) {
+	t.Parallel()
+	assertSteps(
+		t,
+		parseOne(t, `c="status --short"; git $c; git "$c"; git x$c; c=commit; git $c -m x`),
+		[]step{
+			{"git", []string{"status", "--short"}},
+			{"git", []string{"status --short"}},
+			{"git", []string{"x$c"}},
+			{"git", []string{"commit", "-m", "x"}},
+		},
+	)
+}
+
+// TestPartLasting: a part is Lasting when its effect on the shell reaches
+// every later part: on the call's top-level list, in a { } block, or on the
+// left of && or ||; never in a child shell or on a condition.
+func TestPartLasting(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		command string
+		want    []bool
+	}{
+		{`cd /a; ./s`, []bool{true, true}},
+		{`cd /a && ./s`, []bool{true, false}},
+		{`cd /a || exit; ./s`, []bool{true, false, true}},
+		{`true && cd /a; ./s`, []bool{true, false, true}},
+		{`(cd /a); ./s`, []bool{false, true}},
+		{`{ cd /a; }; ./s`, []bool{true, true}},
+		{`cd /a | cat`, []bool{false, false}},
+		{`cd /a & ./s`, []bool{false, true}},
+		{`if true; then cd /a; fi`, []bool{false, false}},
+		{`x=$(cd /b); bash -c 'cd /a'; eval cd /c`, []bool{false, true, false, true, false}},
+		{`find . -exec cat {} \;`, []bool{true, false}},
+	} {
+		var got []bool
+		for _, part := range parseOne(t, tc.command) {
+			got = append(got, part.Lasting)
+		}
+		if !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("%s: Lasting = %v, want %v", tc.command, got, tc.want)
+		}
 	}
 }
 

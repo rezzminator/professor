@@ -6,11 +6,9 @@ import (
 	"testing"
 )
 
-// The gauge's tokens come from Claude Code's payload tokenCount only when it is
-// above zero and shows a percent above 0% (any count above zero when the window
-// is unknown); otherwise from the prompt size of the newest completed call in the
-// agent's own transcript; otherwise a count the payload stated, a zero included;
-// otherwise `?`.
+// The gauge's tokens come from the prompt size of the newest completed call in
+// the agent's own transcript; otherwise from Claude Code's payload tokenCount
+// when it is above zero or stated (a zero included); otherwise `?`.
 func TestRenderSubagentsGaugeFallsBackToTheTranscript(t *testing.T) {
 	task := func(model, counters string) string {
 		return `{"id":"p","type":"local_agent","status":"running","startTime":1790244000000,` +
@@ -43,10 +41,16 @@ func TestRenderSubagentsGaugeFallsBackToTheTranscript(t *testing.T) {
 			want:  "▰▰▱▱▱▱▱▱ 30% 300.0K/1.0M",
 		},
 		{
-			name:  "a payload count showing a percent beats the transcript's call",
+			name:  "a payload count showing a percent yields to the transcript's call",
 			task:  task("claude-opus-5-5", window+`,"tokenCount":300000`),
 			lines: []string{completed("m1", 490000, 9990)},
-			want:  "▰▰▱▱▱▱▱▱ 30% 300.0K/1.0M",
+			want:  "▰▰▰▰▱▱▱▱ 50% 500.0K/1.0M",
+		},
+		{
+			name:  "an output-only payload count yields to the transcript's far larger context",
+			task:  task("claude-opus-5-5", `,"contextWindowSize":200000,"tokenCount":3000`),
+			lines: []string{completed("m1", 110000, 9990)},
+			want:  "▰▰▰▰▱▱▱▱ 60% 120.0K/200.0K",
 		},
 		{
 			name:  "a stated zero falls back to the transcript's call",
@@ -85,9 +89,9 @@ func TestRenderSubagentsGaugeFallsBackToTheTranscript(t *testing.T) {
 			want:  "▰▰▱▱▱▱▱▱ 30% 300.0K/1.0M",
 		},
 		{
-			name:  "an unknown window shows no percent: a payload count above zero stands",
+			name:  "an unknown window shows no percent: a payload count above zero stands without a completed call",
 			task:  task("gpt-6-sol", `,"tokenCount":252`),
-			lines: []string{completed("m1", 290000, 9990)},
+			lines: []string{streaming},
 			want:  "252/? ctx missing",
 		},
 		{

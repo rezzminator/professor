@@ -462,10 +462,44 @@ func TestRenderSubagentsLedgerRowFallsBackAndKeepsTheAdvisor(t *testing.T) {
 	if want := "1.0K/1.0M Σ$0.01/2.0K/35/2"; !strings.Contains(rows["fresh"], want) {
 		t.Errorf("row without ledger rows = %q, want transcript pricing %q", rows["fresh"], want)
 	}
-	// the payload's 1.0K shows 0% of the window, so the gauge reads the transcript's call:
+	// the gauge reads the transcript's call, not the payload's 1.0K:
 	// its last executor iteration (2 + 87829 + 890), never the top level's sum of both
 	if want := "88.7K/1.0M Σ$1.00/10/20/0 adv $0.48"; !strings.Contains(rows["adv1"], want) {
 		t.Errorf("ledger-priced row = %q, want %q", rows["adv1"], want)
+	}
+}
+
+// A sub-agent whose ledger rows all lack a cost (a span-only join) keeps its transcript's price,
+// tokens and tool calls: the ledger prices nothing of it, so it must not overwrite them with $0.00.
+func TestRenderSubagentsLedgerRowsWithoutCostKeepTheTranscriptPrice(t *testing.T) {
+	dir := useLedgerSample(t)
+	if err := costledger.Append(dir, costledger.Row{
+		RequestID: "req_null", TS: "2026-10-09T18:40:00.000Z", SessionID: ledgerSampleSession, AgentID: "fresh",
+		Model: "claude-opus-5-5", InputTokens: 10, OutputTokens: 20, Join: costledger.JoinSpan,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	session := nestedSession(t, map[string][]string{"fresh": agentTranscriptLines}, map[string]string{"fresh": ""})
+	got := renderLedgerRows(t, dir, ledgerSampleSession, session, "fresh")["fresh"]
+	if want := "Σ$0.01/2.0K/35/2"; !strings.Contains(got, want) || strings.Contains(got, "Σ$0.00") {
+		t.Errorf("row whose ledger rows carry no cost = %q, want the transcript price %q", got, want)
+	}
+}
+
+// A sub-agent whose transcript did not read and whose ledger rows all lack a cost keeps the
+// ledger's tokens with unknown dollars: neither a manufactured $0.00 nor a row of "?".
+func TestRenderSubagentsCostlessLedgerRowsStandInForAnUnreadTranscript(t *testing.T) {
+	dir := useLedgerSample(t)
+	if err := costledger.Append(dir, costledger.Row{
+		RequestID: "req_ghost", TS: "2026-10-09T18:40:00.000Z", SessionID: ledgerSampleSession, AgentID: "ghost",
+		Model: "claude-opus-5-5", InputTokens: 10, OutputTokens: 20, Join: costledger.JoinSpan,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	session := nestedSession(t, map[string][]string{"fresh": agentTranscriptLines}, map[string]string{"fresh": ""})
+	got := renderLedgerRows(t, dir, ledgerSampleSession, session, "ghost")["ghost"]
+	if want := "Σ$?/10/20/?"; !strings.Contains(got, want) {
+		t.Errorf("row with costless ledger rows and no transcript = %q, want %q", got, want)
 	}
 }
 
@@ -483,16 +517,18 @@ func TestRenderSubagentsSpendPricesAGatewayGptAtItsCodexRow(t *testing.T) {
 	const task = `{"id":"p","type":"local_agent","status":"completed","startTime":1790244000000,` +
 		`"model":"gpt-6-sol","contextWindowSize":1000000,"tokenCount":1000,"label":"orchestrate"}`
 	for _, tc := range []struct {
-		name  string
-		lines []string
-		want  string // what follows the gauge, ANSI stripped
+		name   string
+		lines  []string
+		tokens string // the gauge's tokens
+		want   string // what follows the gauge, ANSI stripped
 	}{
 		{
 			// 100K+10K at $2, 150K read at $0.2, 1M out at $10: 0.22 + 0.03 + 10.
 			name: "the base tier, a cache write billed as input",
 			lines: gpt(`{"input_tokens":100000,"output_tokens":1000000,"cache_read_input_tokens":150000,` +
 				`"cache_creation_input_tokens":10000}`),
-			want: "Σ$10.25/260.0K/1.0M/0 API-eq",
+			tokens: "260.0K",
+			want:   "Σ$10.25/260.0K/1.0M/0 API-eq",
 		},
 		{
 			name: "a model no row prices stays unpriced",
@@ -500,16 +536,17 @@ func TestRenderSubagentsSpendPricesAGatewayGptAtItsCodexRow(t *testing.T) {
 				`{"type":"assistant","message":{"id":"g-1","model":"gpt-nonesuch-9","usage":` +
 					`{"input_tokens":1000,"output_tokens":100,"cache_read_input_tokens":0}}}`, turnEnded,
 			},
-			want: "Σ$?/1.0K/100/0 API-eq",
+			tokens: "1.0K",
+			want:   "Σ$?/1.0K/100/0 API-eq",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			session := nestedSession(t, map[string][]string{"p": tc.lines}, map[string]string{"p": ""})
 			// the row is read inside the minute after the turn ended, before a finished row collapses
 			got, _ := renderSubagentAt(t, session, task, subagentStart.Add(90*time.Second))
-			// the payload's 1K beats the transcript's call; the catalog this test never
+			// the transcript's call leads the payload's 1K; the catalog this test never
 			// writes leaves the gpt window unknown
-			if !strings.Contains(got, "1.0K/? ctx missing "+tc.want+"│") {
+			if !strings.Contains(got, tc.tokens+"/? ctx missing "+tc.want+"│") {
 				t.Fatalf("content = %q, want the gauge followed by %q", got, tc.want)
 			}
 		})

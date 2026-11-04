@@ -211,7 +211,7 @@ A row's spend field `Σ$1.24/3.1M/42K/12` (`spendSegment`; the muted `Σ` marks 
 
 | Number | Source |
 | --- | --- |
-| dollars | with a ledger: `cost_usd_micros` of the rows of that `agent_id` and of every agent below it, at any depth, its side calls included; the tree is the rows' `parent_agent_id` edges joined with the meta files' `parentAgentId`. An agent the ledger holds no row of yet (rows reach it up to 20 s late) keeps its transcripts' price. Without a ledger: the transcripts' price at pfm's price table |
+| dollars | with a ledger: `cost_usd_micros` of the rows of that `agent_id` and of every agent below it, at any depth, its side calls included; the tree is the rows' `parent_agent_id` edges joined with the meta files' `parentAgentId`. An agent the ledger holds no row of yet (rows reach it up to 20 s late), or whose rows all lack a cost (a span-only join leaves `cost_usd_micros` null), keeps its transcripts' price, unless its own transcript cannot be read: then the ledger's tokens stand with `$?`. Without a ledger: the transcripts' price at pfm's price table |
 | prompt tokens | with a ledger: `input + cache_read + cache_creation` of the same rows; else the transcripts' |
 | output tokens | with a ledger: `output_tokens` of the same rows; else the transcripts' |
 | tool calls | the agent's transcript and every agent below it, always |

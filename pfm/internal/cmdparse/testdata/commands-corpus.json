@@ -421,7 +421,30 @@
     "args": [
      "-n",
      "1,12p",
-     "da98cbc4e849.md",
+     "da98cbc4e849.md"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "grep",
+    "args": [
+     "-iE",
+     "method|rungs|source:"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "echo",
+    "args": [
+     "--"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "sed",
+    "args": [
+     "-n",
+     "1,12p",
      "514e9eeb33f3.md"
     ],
     "status": "ok"
@@ -498,7 +521,29 @@
     "args": [
      "-nEi",
      "alpha-suite|qa\\b|test pattern|convention|/quality|test",
-     "templates/global/agents/flights-foreman.md",
+     "templates/global/agents/flights-foreman.md"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "wc",
+    "args": [
+     "-l"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "echo",
+    "args": [
+     "\"=== $f ($(wc -l <$f) lines)\""
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "grep",
+    "args": [
+     "-nEi",
+     "alpha-suite|qa\\b|test pattern|convention|/quality|test",
      "templates/global/agents/flights-lander.md"
     ],
     "status": "ok"
@@ -1593,7 +1638,28 @@
    {
     "program": "echo",
     "args": [
-     "== 20260911T173252",
+     "== 20260911T173252"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "/bin/ls",
+    "args": [
+     "20260911T173252"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "tail",
+    "args": [
+     "-8",
+     "20260911T173252/main.log"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "echo",
+    "args": [
      "== 20260911T173251"
     ],
     "status": "ok"
@@ -1601,7 +1667,6 @@
    {
     "program": "/bin/ls",
     "args": [
-     "20260911T173252",
      "20260911T173251"
     ],
     "status": "ok"
@@ -1610,7 +1675,6 @@
     "program": "tail",
     "args": [
      "-8",
-     "20260911T173252/main.log",
      "20260911T173251/main.log"
     ],
     "status": "ok"
@@ -2703,6 +2767,37 @@
     "args": [
      "-f",
      "/tmp/demo-proj/logs/pfm*/*.log",
+     "]"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "echo",
+    "args": [
+     "== /tmp/demo-proj/logs/pfm*/*.log"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "grep",
+    "args": [
+     "-iE",
+     "browser|app-shell",
+     "/tmp/demo-proj/logs/pfm*/*.log"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "tail",
+    "args": [
+     "-5"
+    ],
+    "status": "ok"
+   },
+   {
+    "program": "[",
+    "args": [
+     "-f",
      "/tmp/demo-proj/state/pfm/*.log",
      "]"
     ],
@@ -2711,7 +2806,6 @@
    {
     "program": "echo",
     "args": [
-     "== /tmp/demo-proj/logs/pfm*/*.log",
      "== /tmp/demo-proj/state/pfm/*.log"
     ],
     "status": "ok"
@@ -2721,7 +2815,6 @@
     "args": [
      "-iE",
      "browser|app-shell",
-     "/tmp/demo-proj/logs/pfm*/*.log",
      "/tmp/demo-proj/state/pfm/*.log"
     ],
     "status": "ok"

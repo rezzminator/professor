@@ -127,6 +127,8 @@ func TestEngineGuardGit(t *testing.T) {
 		"git bisect start", "git sparse-checkout set src", "git init sub", "git reflog expire --all",
 		"git read-tree HEAD", "git commit-tree HEAD^{tree}", "git maintenance run", "git co main",
 		"bash .claude/scripts/worktree.sh list",
+		"git submodule init", "git submodule foreach git commit -m x", "git config edit", "git worktree",
+		"git remote rename a b",
 	}
 	allowed := []string{
 		"git status", "git log --oneline", "git diff", "git show HEAD", "git blame notes.md", "git branch",
@@ -134,6 +136,8 @@ func TestEngineGuardGit(t *testing.T) {
 		"git rev-parse HEAD", "git config --get user.name", "git grep x", "git stash list", "git stash show",
 		"git apply --check ok.diff", "git apply ok.diff", "git checkout -- notes.md",
 		"git --version", "git rev-list HEAD", "git cat-file -p HEAD", "git reflog", "git merge-base a b",
+		"git submodule status", "git submodule foreach git status", "git config get user.name", "git remote -v",
+		"git worktree list", "for r in a b; do git -C $r status; done",
 	}
 	for _, engine := range []string{"codex", "opencode"} {
 		for _, command := range denied {

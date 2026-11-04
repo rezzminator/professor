@@ -3,7 +3,10 @@ package cmdparse
 import (
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
+
+	"mvdan.cc/sh/v3/syntax"
 )
 
 // wrapper is one program that runs another: the flags it takes before that
@@ -143,4 +146,29 @@ func (w wrapper) skip(args []arg) (int, bool) {
 		}
 	}
 	return len(args), false
+}
+
+// findRunners are find's actions that run a command: its words up to a `;`
+// argument, or a `+` right after `{}`.
+var findRunners = strings.Fields("-exec -execdir -ok -okdir")
+
+// findExec emits the command of each running action in find's arguments as
+// a part of its own, run in a child process, under the find's prefix
+// assignments and wrapper ops.
+func (p *callParser) findExec(rest []arg, prefix []*syntax.Assign, ops []envOp) {
+	for i := 0; i < len(rest); i++ {
+		if !slices.Contains(findRunners, rest[i].text) {
+			continue
+		}
+		start := i + 1
+		end := start
+		for end < len(rest) && rest[end].text != ";" && (rest[end].text != "+" || rest[end-1].text != "{}") {
+			end++
+		}
+		if end > start {
+			p.now = false
+			p.run(rest[start:end], prefix, ops)
+		}
+		i = end
+	}
 }

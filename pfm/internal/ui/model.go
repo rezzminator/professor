@@ -272,7 +272,9 @@ func NewModel(snapshot Snapshot) Model {
 			statsRefreshMaxInterval,
 		),
 		mergeNewChat: snapshot.MergeNewChat,
-		placeState:   placeState{projectDirs: snapshot.ProjectDirs, dirExists: snapshot.DirExists},
+		placeState: placeState{
+			projectDirs: snapshot.ProjectDirs, dirExists: snapshot.DirExists, herdrSpace: snapshot.HerdrSpace,
+		},
 		deck: deckState{
 			home: snapshot.Home, rev: 1, agg: &deckAgg{}, freshNS: snapshot.NowNS,
 			factsError: snapshot.FactsError, scanError: snapshot.ScanError,

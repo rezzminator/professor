@@ -85,6 +85,24 @@ func TestPickerOpensOnItsPlaceWithNestedChatsAndNothingElse(t *testing.T) {
 	}
 }
 
+func TestPickerOpensOnThePlaceWearingItsHerdrSpaceLabel(t *testing.T) {
+	for _, test := range []struct{ space, place, launch string }{
+		{space: "ops", place: "/src/ops", launch: "/src/ops"},
+		{space: "nowhere", place: "/src/app", launch: "/src/app"}, // no such place: compose's choice stands
+		{space: "", place: "/src/app", launch: "/src/app"},
+	} {
+		rows, dirs := placeFixtureRows()
+		model := NewModel(Snapshot{
+			Rows: rows, ProjectDirs: dirs, Home: "/jail/me", MergeNewChat: true, HerdrSpace: test.space,
+			PrimaryAccount: 1, AccountIDs: []int{1}, NowNS: fixtureNowNS, Width: 120, Height: 30,
+		})
+		if model.place != test.place || launchRow(t, model).CWD != test.launch {
+			t.Fatalf("space %q: place %q launch %q, want %q and %q",
+				test.space, model.place, launchRow(t, model).CWD, test.place, test.launch)
+		}
+	}
+}
+
 func TestShiftArrowsSwapPlacesAndTheLaunchRowFollows(t *testing.T) {
 	model, command := applyKey(t, placeModel(nil), shiftKey(tea.KeyRight))
 	if command != nil || model.place != "/src/ops" || visibleNames(model) != "away" {

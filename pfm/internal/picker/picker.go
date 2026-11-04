@@ -179,6 +179,7 @@ func Run(
 		scan.Snapshot.ApplyKill = applier
 		scan.Snapshot.ApplyDeactivate = deactivateApplier(ctx, scan.Paths)
 		scan.Snapshot.MergeNewChat = true
+		scan.Snapshot.HerdrSpace = herdrSpace(ctx, runtime.Paths.Home, stderr)
 		scan.Snapshot.LastLaunch = lastLaunch
 		if memoryErr != nil {
 			scan.Snapshot.LaunchMemoryError = memoryErr.Error()

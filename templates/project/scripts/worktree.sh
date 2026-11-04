@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # worktree.sh — Create and manage git worktrees for parallel pipeline work
 #
-# Interface, fixed: pfm's git-guard keys on this path (.claude/scripts/worktree.sh) and on the verb names
-# below, and lets the main chat run create, land and remove only while git tracks this file unchanged from
-# HEAD. Every refusal exits non-zero with one stderr line. Renaming or dropping a verb, or exiting 0 on a
-# refusal, breaks the main chat's access. This block stays in sync with
+# Interface, fixed: pfm's git-guard keys on this path (.claude/scripts/worktree.sh) and leaves the script,
+# every verb below, to the Claude main chat alone while git tracks this file (and a worktree/ helper
+# directory beside it, where one exists) unchanged from HEAD; sub-agents but gitter are denied. Every
+# refusal exits non-zero with one stderr line and goes to gitter. The verb lines below stay in sync with
 # .claude/rules/git-writes-through-gitter.md; customize everything behind the verbs.
 #
 #   ./.claude/scripts/worktree.sh create <pipeline>

@@ -110,8 +110,9 @@ var (
 	// engineGuardGitPathValued are git checkout's and restore's flags taking a
 	// value that is no path they write.
 	engineGuardGitPathValued = strings.Fields("-s --source -b -B --orphan --conflict --pathspec-from-file")
-	// engineGuardGitReads are the git subcommands that only read, the engine
-	// mode's allowlist beside the subcommands gitGuardBlocks judges by mode.
+	// engineGuardGitReads are the git subcommands that only read: git-guard's
+	// allowlist, Claude's and the engines' alike, beside the subcommands
+	// gitGuardBlocks judges by mode.
 	engineGuardGitReads = strings.Fields("status log diff show blame annotate ls-files ls-tree ls-remote rev-parse" +
 		" rev-list cat-file grep describe shortlog merge-base for-each-ref name-rev show-ref show-branch" +
 		" check-ignore check-attr check-ref-format var help version whatchanged diff-tree diff-files diff-index" +

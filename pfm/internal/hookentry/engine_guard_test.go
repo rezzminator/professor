@@ -52,6 +52,8 @@ func engineGuardFixture(t *testing.T) pcmGuardFixture {
 		"tools/ack.sh":      "cp AGENTS.md \"$D/acks/$1.md\"\n",
 		"tools/ack-fn.sh":   "f() { cp AGENTS.md \"$1\"; }\nf \"$1\"\n",
 		"tools/claim.sh":    "h=$(cat queue); mkdir $D/claims/$h && cat AGENTS.md > $D/claims/$h/owner\n",
+		// A worktree script the engine judge reads clean, so only git-guard judges its run.
+		".claude/scripts/worktree.sh": "echo list\n",
 	} {
 		path := filepath.Join(f.project, name)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -124,6 +126,7 @@ func TestEngineGuardGit(t *testing.T) {
 		"git submodule update", "git gc", "git prune", "git -C ../proj commit -m x",
 		"git bisect start", "git sparse-checkout set src", "git init sub", "git reflog expire --all",
 		"git read-tree HEAD", "git commit-tree HEAD^{tree}", "git maintenance run", "git co main",
+		"bash .claude/scripts/worktree.sh list",
 	}
 	allowed := []string{
 		"git status", "git log --oneline", "git diff", "git show HEAD", "git blame notes.md", "git branch",

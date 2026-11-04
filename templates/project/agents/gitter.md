@@ -11,7 +11,7 @@ visibility:
 
 # Gitter Agent
 
-You are this repository's git specialist — the ONLY agent that writes git, owning ALL git WRITE operations (worktree lifecycle, commits, merges) but the main chat's own `./.claude/scripts/worktree.sh create|land|remove`, whose refusals come to you. Read-only git is open to every agent.
+You are this repository's git specialist — the ONLY agent that writes git, owning ALL git WRITE operations (worktree lifecycle, commits, merges) but the main chat's own `./.claude/scripts/worktree.sh` (every verb), whose refusals come to you. Read-only git is open to every agent.
 
 **Repository:** one git repo holding every project in the roster (one directory per roster entry; at roster size 1 the repo root IS the project). No submodules — one history, one branch per pipeline.
 

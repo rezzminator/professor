@@ -44,7 +44,9 @@ func runGitGuard(t *testing.T, payload string) (int, string, string) {
 }
 
 func TestGitGuardAllowsGitterEverything(t *testing.T) {
-	for _, command := range []string{"git commit -m x", "git worktree add ../x"} {
+	for _, command := range []string{
+		"git commit -m x", "git worktree add ../x", "git archive HEAD", "bash .claude/scripts/worktree.sh prune",
+	} {
 		t.Run(command, func(t *testing.T) {
 			code, stdout, stderr := runGitGuard(t, gitGuardPayload(t, "Bash", command, "/tmp", "gitter"))
 			if code != 0 || stdout != "" || stderr != "" {
@@ -113,8 +115,8 @@ func TestGitGuardMainChatWorktreeAddNamesTheRightWay(t *testing.T) {
 	for _, test := range []struct{ name, cwd, want, absent string }{
 		{
 			name: "repo ships worktree.sh, cwd is a subdirectory", cwd: filepath.Join(withScript, "pfm"),
-			want: "worktrees go through " + script + " create|land|remove — the main chat runs it itself while git" +
-				" tracks it unchanged from HEAD; prune, --discard and every other caller go to gitter.",
+			want: "worktrees go through " + script + " — the main chat's alone, run while git tracks it (and its" +
+				" worktree/ helpers) unchanged from HEAD; every other caller goes to gitter.",
 			absent: "Phase SETUP",
 		},
 		{
@@ -200,6 +202,14 @@ func TestGitGuardBlocksSharedStateWritesForAnExecutor(t *testing.T) {
 		"git --no-pager -c core.pager=cat cherry-pick abc",
 		"bash .claude/scripts/worktree.sh create x",
 		".claude/scripts/worktree.sh prune",
+		"bash .claude/scripts/worktree.sh list",
+		"bash -x .claude/scripts/worktree.sh create x",
+		"git bisect start",
+		"git sparse-checkout set x",
+		"git init",
+		"git archive HEAD",
+		"git archive HEAD pfm",
+		"git reflog expire --all",
 	} {
 		t.Run(command, func(t *testing.T) {
 			code, stdout, stderr := runGitGuard(t, gitGuardPayload(t, "Bash", command, cwd, gitGuardExecutor))
@@ -219,6 +229,9 @@ func TestGitGuardAllowsReadsAndOwnFileWritesForAnExecutor(t *testing.T) {
 		{name: "status", command: "git status"},
 		{name: "diff", command: "git diff HEAD --stat"},
 		{name: "log", command: "git log -3"},
+		{name: "ls-remote", command: "git ls-remote origin develop"},
+		{name: "version", command: "git --version"},
+		{name: "reflog", command: "git reflog"},
 		{name: "stash push of named paths around a test", command: "git stash push -- a.py && pytest; git stash pop"},
 		{name: "stash pop", command: "git stash pop"},
 		{name: "stash list", command: "git stash list"},
@@ -228,7 +241,6 @@ func TestGitGuardAllowsReadsAndOwnFileWritesForAnExecutor(t *testing.T) {
 		{name: "branch show-current", command: "git branch --show-current"},
 		{name: "branch list", command: "git branch -a"},
 		{name: "tag list", command: "git tag -l 'v*'"},
-		{name: "archive", command: "git archive HEAD pfm"},
 		{name: "apply check", command: "git apply --check p.diff"},
 		{name: "apply to the working tree", command: "git apply p.diff"},
 		{name: "worktree list", command: "git worktree list"},
@@ -237,7 +249,7 @@ func TestGitGuardAllowsReadsAndOwnFileWritesForAnExecutor(t *testing.T) {
 		{name: "rm dry run", command: "git rm -n f"},
 		{name: "clean dry run", command: "git clean -nd"},
 		{name: "notes show", command: "git notes show HEAD"},
-		{name: "worktree.sh list", command: "bash .claude/scripts/worktree.sh list"},
+		{name: "worktree.sh read, not run", command: "cat .claude/scripts/worktree.sh"},
 		{name: "git only as an echo argument", command: "echo git commit"},
 		{name: "heredoc body mentions git push", command: "cat > notes.txt <<'EOF'\nthen git push the branch\nEOF"},
 		{name: "non-Bash tool", tool: "Read", command: "git push"},
@@ -537,10 +549,10 @@ func TestGitGuardAllowsAnUnparsableCommandWithGitOnlyInsideAWord(t *testing.T) {
 	}
 }
 
-// The main chat (no agent_id) runs a repo's worktree script's create, land
-// and remove itself while git tracks the script unchanged from HEAD; prune,
-// --discard, an edited or untracked script, a command that changes
-// directory and every sub-agent still go to gitter.
+// The main chat (no agent_id) runs a repo's worktree script, any verb, while
+// git tracks the script and its worktree/ helpers unchanged from HEAD; an
+// edited or untracked script or helper, a command that changes directory and
+// every sub-agent go to gitter.
 func TestGitGuardMainChatRunsTheCommittedWorktreeScript(t *testing.T) {
 	git := func(repo string, args ...string) {
 		t.Helper()
@@ -553,7 +565,18 @@ func TestGitGuardMainChatRunsTheCommittedWorktreeScript(t *testing.T) {
 			t.Fatalf("git %v: exit %d: %v: %s", args, result.ExitCode, err, result.Stderr)
 		}
 	}
-	repoWith := func(commit, edit bool) string {
+	// helper writes a file into the script's worktree/ helper directory.
+	helper := func(repo, name, body string) {
+		t.Helper()
+		lib := filepath.Join(repo, filepath.FromSlash(gitGuardWorktreeSh+"/../worktree"), name)
+		if err := os.MkdirAll(filepath.Dir(lib), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(lib, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	repoWith := func(commit, edit, helpers bool) string {
 		t.Helper()
 		repo := t.TempDir()
 		script := filepath.Join(repo, filepath.FromSlash(gitGuardWorktreeSh))
@@ -562,6 +585,9 @@ func TestGitGuardMainChatRunsTheCommittedWorktreeScript(t *testing.T) {
 		}
 		if err := testjail.WriteExecutable(script, []byte("#!/bin/sh\n"), 0o755); err != nil {
 			t.Fatal(err)
+		}
+		if helpers {
+			helper(repo, "land.sh", "land() { :; }\n")
 		}
 		git(repo, "init", "-q")
 		if commit {
@@ -575,7 +601,23 @@ func TestGitGuardMainChatRunsTheCommittedWorktreeScript(t *testing.T) {
 		}
 		return repo
 	}
-	committed, edited, untracked := repoWith(true, false), repoWith(true, true), repoWith(false, false)
+	committed, edited, untracked := repoWith(
+		true,
+		false,
+		false,
+	), repoWith(
+		true,
+		true,
+		false,
+	), repoWith(
+		false,
+		false,
+		false,
+	)
+	withHelpers, helperEdited, helperUntracked := repoWith(true, false, true), repoWith(true, false, true),
+		repoWith(true, false, true)
+	helper(helperEdited, "land.sh", "land() { git push; }\n")
+	helper(helperUntracked, "extra.sh", "extra() { git push; }\n")
 	script := "." + string(filepath.Separator) + filepath.FromSlash(gitGuardWorktreeSh)
 	for _, row := range []struct {
 		name, command, cwd, agentType string
@@ -588,13 +630,19 @@ func TestGitGuardMainChatRunsTheCommittedWorktreeScript(t *testing.T) {
 			name:    "main chat absolute committed script from another repo",
 			command: filepath.Join(committed, gitGuardWorktreeSh) + " land x", cwd: untracked, allow: true,
 		},
-		{name: "main chat prune", command: script + " prune", cwd: committed},
-		{name: "main chat discard", command: script + " remove x --discard", cwd: committed},
+		{name: "main chat list", command: script + " list", cwd: committed, allow: true},
+		{name: "main chat prune", command: script + " prune", cwd: committed, allow: true},
+		{name: "main chat discard", command: script + " remove x --discard", cwd: committed, allow: true},
+		{name: "main chat no verb", command: "bash " + script, cwd: committed, allow: true},
+		{name: "main chat committed helpers", command: script + " land x", cwd: withHelpers, allow: true},
+		{name: "main chat edited helper", command: script + " land x", cwd: helperEdited},
+		{name: "main chat untracked helper", command: script + " land x", cwd: helperUntracked},
 		{name: "main chat after cd", command: "cd " + edited + " && " + script + " land x", cwd: committed},
 		{name: "main chat edited script", command: script + " land x", cwd: edited},
 		{name: "main chat untracked script", command: script + " create x", cwd: untracked},
 		{name: "sub-agent land", command: script + " land x", cwd: committed, agentType: gitGuardExecutor},
 		{name: "sub-agent create", command: script + " create x", cwd: committed, agentType: gitGuardExecutor},
+		{name: "sub-agent list", command: script + " list", cwd: committed, agentType: gitGuardExecutor},
 	} {
 		t.Run(row.name, func(t *testing.T) {
 			code, stdout, stderr := runGitGuard(t, gitGuardPayload(t, "Bash", row.command, row.cwd, row.agentType))

@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # worktree.sh — this repo's flight worktrees.
 #
-# Interface, fixed: pfm's git-guard keys on this path (.claude/scripts/worktree.sh) and on the verb names
-# below, and lets the main chat run create, land and remove only while git tracks this file unchanged from
-# HEAD; pruning, discarding and every refusal go to gitter. Every refusal exits non-zero with one stderr
-# line. Renaming or dropping a verb, or exiting 0 on a refusal, breaks the main chat's access. This block
-# stays in sync with .claude/rules/git-writes-through-gitter.md; everything behind the verbs is free.
+# Interface, fixed: pfm's git-guard keys on this path (.claude/scripts/worktree.sh) and leaves the script,
+# every verb below, to the Claude main chat alone while git tracks this file unchanged from HEAD; sub-agents
+# but gitter are denied. Every refusal exits non-zero with one stderr line and goes to gitter. The verb
+# lines below stay in sync with .claude/rules/git-writes-through-gitter.md; everything behind the verbs is
+# free.
 #
 #   .claude/scripts/worktree.sh create <name> [base]           # base defaults to BASE_BRANCH
 #   .claude/scripts/worktree.sh land <name> [-m <msg>]         # fast-forward BASE_BRANCH, then remove

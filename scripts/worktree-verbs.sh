@@ -2,7 +2,7 @@
 # Sourced by the worktree.sh suites after scripts/shtest.sh: the three verb sets that must agree —
 # the ones a worktree.sh header declares (its `#   .claude/scripts/worktree.sh <verb> …` lines), the
 # ones its top-level `case "${1:-…}"` dispatches, and the ones its rule's `.claude/scripts/worktree.sh`
-# item names in backticks. git-guard keys on these verb names, so any drift breaks the main chat's access.
+# item names in backticks. The rule and the header tell the main chat one interface; drift misleads it.
 #   worktree_verbs_agree <worktree.sh> <rule.md>  → 0 when all three sets are equal and non-empty
 # BROKEN STATE: an unreadable file or an empty set returns 2 and WORKTREE_VERBS_REPORT names it, never
 # a match; a disagreement returns 1 with every set in WORKTREE_VERBS_REPORT.

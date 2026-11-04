@@ -1,15 +1,20 @@
 package hookentry
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/cmdparse"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 type gitGuardHookInput struct {
@@ -33,8 +38,10 @@ const (
 	gitGuardBounded    = "could not read this command in full: it passes a parse bound (over 64 KiB, or a `-c`" +
 		" string nested past 8 levels). Shorten the command; write long content to a file with the Write tool."
 	gitGuardNoSetupHint = "gitter creates and removes worktrees (Phase SETUP)."
-	gitGuardDiscard     = "--discard"
-	gitGuardStashHint   = "To park only your own files, " + "`git stash push -- <path>...`" +
+	// gitGuardScriptHelpers is the directory beside the worktree script whose
+	// files an adopter's script sources as its verbs.
+	gitGuardScriptHelpers = "worktree"
+	gitGuardStashHint     = "To park only your own files, " + "`git stash push -- <path>...`" +
 		" is allowed (restore with " + "`git stash pop`" +
 		"); a whole-tree stash moves every other agent's uncommitted work."
 )
@@ -53,7 +60,8 @@ const (
 
 // The sub-verbs that write, per command, and the config and notes reads.
 var (
-	gitGuardScriptWrites   = []string{"create", "land", gitGuardVerbRemove, gitGuardVerbPrune}
+	// gitGuardScriptRunners run a script named as an argument.
+	gitGuardScriptRunners  = strings.Fields("bash sh zsh dash ksh source .")
 	gitGuardWorktreeWrites = []string{
 		gitGuardVerbAdd, gitGuardVerbRemove, gitGuardVerbPrune, "move", "lock", "unlock", "repair",
 	}
@@ -105,9 +113,9 @@ type gitGuardBlock struct {
 // GitGuard is the PreToolUse hook on Bash that denies a write to shared git
 // state (worktrees, history, branches and tags, remotes, the index, wide
 // working-tree destruction, repository settings) to every caller but the
-// gitter agent; the main chat (no agent_id) may also run a repo's worktree
-// script's create, land and remove while git tracks it unchanged from HEAD
-// (gitGuardPart). A read or decode failure is fail-open to stderr; a command
+// gitter agent; a repo's worktree script is the main chat's (no agent_id)
+// alone, run while git tracks it and its worktree/ helpers unchanged from
+// HEAD (gitGuardPart). A read or decode failure is fail-open to stderr; a command
 // that mentions git (gitGuardMentionsGit) but does not parse is denied, and
 // so is every command that passed the git filter and hits a parse bound.
 func GitGuard(input io.Reader, stdout, stderr io.Writer) int {
@@ -142,7 +150,7 @@ func GitGuard(input io.Reader, stdout, stderr io.Writer) int {
 // reason, "" to allow. engine is the Codex and OpenCode reading
 // (EngineGuard): a whole stash is a write too, and the reason names no
 // gitter, since no git writer runs there. mainChat is a Claude main chat,
-// which gitGuardPart lets run the worktree script's own verbs. A parser
+// which gitGuardPart lets run the committed worktree script. A parser
 // error is fail-open to stderr.
 func gitGuardCheck(command, cwd string, engine, mainChat bool, stderr io.Writer) string {
 	if !strings.Contains(command, "git") && !strings.Contains(command, "worktree.sh") {
@@ -157,7 +165,7 @@ func gitGuardCheck(command, cwd string, engine, mainChat bool, stderr io.Writer)
 	unreadable, bounded := false, false
 	parts := parsed["git-guard"]
 	// A directory change leaves the hook cwd naming the wrong script, so the
-	// main chat's script verbs go to gitter in a command that moves.
+	// main chat's script run goes to gitter in a command that moves.
 	mainChat = mainChat && !slices.ContainsFunc(parts, func(p cmdparse.Part) bool {
 		return slices.Contains([]string{"cd", pcmGuardPushd, pcmGuardPopd}, filepath.Base(p.Program))
 	})
@@ -214,24 +222,25 @@ func gitGuardWordByte(b byte) bool {
 	return b == '_' || ('0' <= b && b <= '9') || ('a' <= b && b <= 'z') || ('A' <= b && b <= 'Z')
 }
 
-// gitGuardPart decides one parsed part: a git call, or a repo's worktree
-// script run with create, land, remove or prune. The main chat outside the
-// engines may run the script's create, land and remove, never prune or
-// --discard, and only while git tracks the script unchanged from HEAD
-// (engineGuardCommitted), so no caller can widen it by editing it first.
+// gitGuardPart decides one parsed part: a git call, or a run of a repo's
+// worktree script, as the program or under a shell, with any verb or none.
+// The script is a Claude main chat's alone, and only while it and its
+// worktree/ helpers are committed unchanged (gitGuardScriptCommitted), so no
+// caller can widen it by editing it first; every other caller goes to gitter.
 func gitGuardPart(part *cmdparse.Part, cwd string, engine, mainChat bool) (gitGuardBlock, bool) {
 	written := strings.TrimSpace(part.Program + " " + strings.Join(part.Args, " "))
-	scriptIsProgram := strings.HasSuffix(part.Program, gitGuardWorktreeSh)
-	if scriptIsProgram || (len(part.Args) > 0 && strings.HasSuffix(part.Args[0], gitGuardWorktreeSh)) {
-		script, verbs := part.Program, part.Args
-		if !scriptIsProgram {
-			script, verbs = part.Args[0], part.Args[1:]
+	isScript := func(word string) bool { return strings.HasSuffix(word, gitGuardWorktreeSh) }
+	script := ""
+	if isScript(part.Program) {
+		script = part.Program
+	} else if slices.Contains(gitGuardScriptRunners, filepath.Base(part.Program)) {
+		if i := slices.IndexFunc(part.Args, isScript); i >= 0 {
+			script = part.Args[i]
 		}
-		if len(verbs) == 0 || !slices.Contains(gitGuardScriptWrites, verbs[0]) {
-			return gitGuardBlock{}, false
-		}
-		if mainChat && !engine && verbs[0] != gitGuardVerbPrune && !slices.Contains(verbs, gitGuardDiscard) &&
-			filepath.IsAbs(gitGuardJoin(cwd, script)) && engineGuardCommitted(gitGuardJoin(cwd, script)) {
+	}
+	if script != "" {
+		abs := gitGuardJoin(cwd, script)
+		if mainChat && !engine && filepath.IsAbs(abs) && gitGuardScriptCommitted(abs) {
 			return gitGuardBlock{}, false
 		}
 		return gitGuardBlock{command: written, worktree: true, repoDir: cwd}, true
@@ -242,6 +251,30 @@ func gitGuardPart(part *cmdparse.Part, cwd string, engine, mainChat bool) (gitGu
 	repoDir, sub, rest := gitGuardSplit(part.Args, cwd)
 	blocked, worktree := gitGuardBlocks(sub, rest, repoDir, engine)
 	return gitGuardBlock{command: written, worktree: worktree, stash: sub == "stash", repoDir: repoDir}, blocked
+}
+
+// gitGuardScriptCommitted reports a worktree script git tracks unchanged
+// from HEAD (engineGuardCommitted) whose worktree/ helper directory, when one
+// sits beside it, holds no modified, staged, untracked or ignored file. Any
+// failure (no repo, git missing, an unreadable directory) is uncommitted.
+func gitGuardScriptCommitted(abs string) bool {
+	if !engineGuardCommitted(abs) {
+		return false
+	}
+	helpers := filepath.Join(filepath.Dir(abs), gitGuardScriptHelpers)
+	info, err := os.Stat(helpers)
+	if errors.Is(err, fs.ErrNotExist) || (err == nil && !info.IsDir()) {
+		return true
+	}
+	if err != nil {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), engineGuardGitTimeout)
+	defer cancel()
+	status, err := obs.Runner(deps.RealRunner{}).Run(ctx, []string{
+		"git", "-C", helpers, "status", "--porcelain", "--untracked-files=all", "--ignored", "--", ".",
+	}, deps.RunOptions{})
+	return err == nil && status.ExitCode == 0 && strings.TrimSpace(string(status.Stdout)) == ""
 }
 
 // gitGuardSplit skips git's global options and returns the repository
@@ -274,7 +307,8 @@ func gitGuardSplit(args []string, cwd string) (string, string, []string) {
 
 // gitGuardBlocks reports whether one git subcommand writes shared state, and
 // whether that write is a worktree write; engine blocks every stash but its
-// list and show, and every subcommand that is neither judged here nor a read.
+// list and show. A subcommand no case judges is allowed only when the read
+// allowlist names it (engineGuardGitReads).
 func gitGuardBlocks(sub string, rest []string, repoDir string, engine bool) (blocked, worktree bool) {
 	first := gitGuardFirstOperand(rest)
 	switch sub {
@@ -320,11 +354,11 @@ func gitGuardBlocks(sub string, rest []string, repoDir string, engine bool) (blo
 	case "submodule":
 		return slices.Contains(gitGuardSubmoduleWrites, first), false
 	case "reflog":
-		return engine && !slices.Contains(engineGuardGitReflogReads, first), false
+		return !slices.Contains(engineGuardGitReflogReads, first), false
 	}
-	// Engine mode reads by allowlist: a subcommand no case above judges and
-	// no read below names (bisect, sparse-checkout, init, an alias) writes.
-	return engine && sub != "" && !slices.Contains(engineGuardGitReads, sub), false
+	// Git reads by allowlist: a subcommand no case above judges and no read
+	// names (archive, bisect, sparse-checkout, init, an alias) is blocked.
+	return sub != "" && !slices.Contains(engineGuardGitReads, sub), false
 }
 
 // gitGuardCheckout blocks a branch switch or creation and a pathspec that
@@ -574,8 +608,8 @@ func gitGuardReason(blocks []gitGuardBlock, unreadable, bounded, engine bool) st
 		if top := gitGuardTopLevel(block.repoDir); top != "" {
 			script := filepath.Join(top, filepath.FromSlash(gitGuardWorktreeSh))
 			if info, err := os.Stat(script); err == nil && !info.IsDir() {
-				hint = "worktrees go through " + script + " create|land|remove — the main chat runs it itself while git" +
-					" tracks it unchanged from HEAD; prune, --discard and every other caller go to gitter."
+				hint = "worktrees go through " + script + " — the main chat's alone, run while git tracks it (and its" +
+					" worktree/ helpers) unchanged from HEAD; every other caller goes to gitter."
 			}
 		}
 		if !slices.Contains(lines, hint) {

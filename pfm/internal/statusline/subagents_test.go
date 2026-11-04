@@ -599,23 +599,6 @@ func TestRenderSubagentsClaudeCacheKeepsItsWindowBesideOpenAI(t *testing.T) {
 	}
 }
 
-// TestStampTurnFailureLeavesOnlyTheTurnUnknown pins that a transcript whose
-// mtime cannot be read after its lines were (it went in between) makes the
-// agent's turn unread, never the row's activity and spend.
-func TestStampTurnFailureLeavesOnlyTheTurnUnknown(t *testing.T) {
-	activity := agentActivity{turn: agentTurn{open: true}}
-	activity.stampTurn(filepath.Join(t.TempDir(), "agent-gone.jsonl"))
-	if activity.err != nil || activity.turn.err == nil {
-		t.Fatalf("err = %v, turn.err = %v; want the row readable and the turn unknown", activity.err, activity.turn.err)
-	}
-	tree := &agentTree{
-		open: map[string]turnState{}, reads: map[string]*agentActivity{"gone": &activity}, warned: map[string]bool{},
-	}
-	if got := tree.turn("gone"); got != turnUnread {
-		t.Fatalf("turn = %v, want turnUnread", got)
-	}
-}
-
 // The gauge rounds to the nearest percent, so 69.1K of 1.0M reads 7%, not a
 // truncated 6%; a window not yet full never reads 100%.
 func TestRenderSubagentsGaugeRoundsToNearest(t *testing.T) {

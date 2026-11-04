@@ -248,7 +248,7 @@ func RenderSubagents(
 		if task.Type == localAgentTask {
 			if tree == nil {
 				tree = scanAgentTree(data.TranscriptPath, prices, scans)
-				tree.judgeLiveness(now, liveTasks(data.Tasks))
+				tree.judgeLiveness(liveTasks(data.Tasks))
 			}
 			read := *tree.read(task.ID)
 			task.Model = currentModel(task.Model, read.model)
@@ -529,15 +529,8 @@ func readAgentActivity(sessionTranscript, id string, prices *pricing.Prices, sca
 		return activity
 	}
 	activity.last, activity.cacheHit, activity.context = fold.Last, fold.CacheHit, fold.Context
-	activity.turn = agentTurn{
-		open: fold.Turn.Open, delegating: fold.Turn.Delegating, last: fold.Turn.Last, seen: fold.Turn.Seen,
-	}
-	if !activity.turn.seen {
-		activity.turn.open = true // no reply yet: the first turn is under way
-	}
-	if fold.Turn.Last.IsZero() {
-		activity.stampTurn(path)
-	}
+	// No message entry yet: the first turn is under way.
+	activity.turn = agentTurn{open: fold.Turn.Open || !fold.Turn.Seen, seen: fold.Turn.Seen}
 	return activity
 }
 

@@ -5,8 +5,8 @@
       "WebFetch(*)",
       "WebSearch(*)",
       "Workflow(*)",
-      "Read(*)",
-      "Write(*)"
+      "Read",
+      "Write"
     ]
   },
   "hooks": {

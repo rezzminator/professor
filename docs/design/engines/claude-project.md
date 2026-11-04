@@ -23,7 +23,7 @@ The Claude Code settings a project carries in its own tree: this repo's `.claude
 
 `.claude/settings.json` — two keys:
 
-- **`permissions.allow`** (no `deny`): the repo gates `Bash(.claude/scripts/dev.sh:*)`, `Bash(scripts/leak-check.sh:*)`, `Bash(scripts/refresh-scope.sh:*)`; `Bash(engine-sync codex:*)`; read-only git (`status`, `diff`, `log`, `show`, `rev-parse`); `go vet`, `go build`, `go test`; `Read(*)`, `Grep(*)`, `Glob(*)` (`.claude/settings.json:2-18`).
+- **`permissions.allow`** (no `deny`): the repo gates `Bash(.claude/scripts/dev.sh:*)`, `Bash(scripts/leak-check.sh:*)`, `Bash(scripts/refresh-scope.sh:*)`; `Bash(engine-sync codex:*)`; read-only git (`status`, `diff`, `log`, `show`, `rev-parse`); `go vet`, `go build`, `go test`; `Read`, `Grep`, `Glob` (`.claude/settings.json:2-19`).
 - **`hooks`**: `PostToolUse`, one matcher group, one command: `format-md.sh` (`:21`).
 
 `.claude/settings.local.json` is untracked and holds `disabledMcpjsonServers: ["playwright"]`.
@@ -32,7 +32,7 @@ The Claude Code settings a project carries in its own tree: this repo's `.claude
 
 `templates/project/settings.json` — two keys, `permissions` and `hooks`. Agent teams are switched off by every pfm launch ([claude-launch.md](claude-launch.md#knobs)), so no project file carries the variable.
 
-- **`permissions.allow`** (no `deny`): `Bash(*)`, `WebFetch(*)`, `WebSearch(*)`, `Workflow(*)`, `Read(*)`, `Write(*)` (`templates/project/settings.json:2-10`).
+- **`permissions.allow`** (no `deny`): `Bash(*)`, `WebFetch(*)`, `WebSearch(*)`, `Workflow(*)`, `Read`, `Write` (`templates/project/settings.json:2-10`).
 - **`hooks`**: identical to this repo's (`templates/project/settings.json:12`).
 
 ## Differences

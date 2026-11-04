@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "fetched_at": "2026-10-30T19:18:12Z",
+  "fetched_at": "2026-11-02T21:14:16Z",
   "sources": [
     {"provider":"anthropic","url":"https://platform.claude.com/docs/en/about-claude/pricing.md"},
     {"provider":"openai","url":"https://developers.openai.com/api/docs/pricing.md"}
@@ -27,15 +27,9 @@
     {"key":"claude-sonnet-5","engine":"claude","in":2,"out":10,"hit":0.2,"w5m":2.5,"w1h":4},
     {"key":"claude-sonnet-5-5","engine":"claude","in":2,"out":10,"hit":0.1,"w5m":2.5,"w1h":4},
     {"key":"chat-latest","engine":"codex","in":5,"out":30,"cached":0.5},
-    {"key":"gpt-3.5-turbo","engine":"codex","in":0.5,"out":1.5},
-    {"key":"gpt-3.5-turbo-0125","engine":"codex","in":0.5,"out":1.5},
-    {"key":"gpt-4-0613","engine":"codex","in":30,"out":60},
-    {"key":"gpt-4-turbo-2024-04-09","engine":"codex","in":10,"out":30},
     {"key":"gpt-4.1","engine":"codex","in":2,"out":8,"cached":0.5},
     {"key":"gpt-4.1-mini","engine":"codex","in":0.4,"out":1.6,"cached":0.1},
-    {"key":"gpt-4.1-nano","engine":"codex","in":0.1,"out":0.4,"cached":0.025},
     {"key":"gpt-4o","engine":"codex","in":2.5,"out":10,"cached":1.25},
-    {"key":"gpt-4o-2024-05-13","engine":"codex","in":5,"out":15},
     {"key":"gpt-4o-mini","engine":"codex","in":0.15,"out":0.6,"cached":0.075},
     {"key":"gpt-5","engine":"codex","in":1.25,"out":10,"cached":0.125},
     {"key":"gpt-5-mini","engine":"codex","in":0.25,"out":2,"cached":0.025},
@@ -65,11 +59,7 @@
     {"key":"gpt-6.1-terra","engine":"codex","in":1,"out":5,"cached":0.05,"long":{"above":272000,"in":2,"out":7.5,"cached":0.1}},
     {"key":"gpt-rosalind-discovery","engine":"codex","in":5,"out":25,"cached":0.5},
     {"key":"gpt-rosalind-research","engine":"codex","in":5,"out":25,"cached":0.5},
-    {"key":"o1","engine":"codex","in":15,"out":60,"cached":7.5},
-    {"key":"o1-pro","engine":"codex","in":150,"out":600},
     {"key":"o3","engine":"codex","in":2,"out":8,"cached":0.5},
-    {"key":"o3-mini","engine":"codex","in":1.1,"out":4.4,"cached":0.55},
-    {"key":"o3-pro","engine":"codex","in":20,"out":80},
-    {"key":"o4-mini","engine":"codex","in":1.1,"out":4.4,"cached":0.275}
+    {"key":"o3-pro","engine":"codex","in":20,"out":80}
   ]
 }

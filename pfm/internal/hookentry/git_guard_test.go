@@ -2,12 +2,14 @@ package hookentry
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -23,7 +25,9 @@ func gitGuardPayload(t *testing.T, tool, command, cwd, agentType string) string 
 		payload["cwd"] = cwd
 	}
 	if agentType != "" {
+		// Claude Code sets agent_id only inside a sub-agent, beside its type.
 		payload["agent_type"] = agentType
+		payload["agent_id"] = "a" + agentType
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
@@ -109,8 +113,8 @@ func TestGitGuardMainChatWorktreeAddNamesTheRightWay(t *testing.T) {
 	for _, test := range []struct{ name, cwd, want, absent string }{
 		{
 			name: "repo ships worktree.sh, cwd is a subdirectory", cwd: filepath.Join(withScript, "pfm"),
-			want: "gitter creates and removes worktrees with " + script +
-				" create|remove|prune — the only right way here",
+			want: "worktrees go through " + script + " create|land|remove — the main chat runs it itself while git" +
+				" tracks it unchanged from HEAD; prune, --discard and every other caller go to gitter.",
 			absent: "Phase SETUP",
 		},
 		{
@@ -529,5 +533,83 @@ func TestGitGuardDeniesAnUnparsableCommandNamingQuotedGit(t *testing.T) {
 func TestGitGuardAllowsAnUnparsableCommandWithGitOnlyInsideAWord(t *testing.T) {
 	for _, command := range []string{"echo digits && (", "echo digit && (", "echo legit x && (", "echo mygit_x && ("} {
 		gitGuardRequireAllowed(t, command, t.TempDir())
+	}
+}
+
+// The main chat (no agent_id) runs a repo's worktree script's create, land
+// and remove itself while git tracks the script unchanged from HEAD; prune,
+// --discard, an edited or untracked script, a command that changes
+// directory and every sub-agent still go to gitter.
+func TestGitGuardMainChatRunsTheCommittedWorktreeScript(t *testing.T) {
+	git := func(repo string, args ...string) {
+		t.Helper()
+		argv := append([]string{
+			"git", "-C", repo, "-c", "user.name=probe", "-c", "user.email=probe@example.invalid",
+			"-c", "commit.gpgsign=false",
+		}, args...)
+		result, err := deps.RealRunner{}.Run(context.Background(), argv, deps.RunOptions{})
+		if err != nil || result.ExitCode != 0 {
+			t.Fatalf("git %v: exit %d: %v: %s", args, result.ExitCode, err, result.Stderr)
+		}
+	}
+	repoWith := func(commit, edit bool) string {
+		t.Helper()
+		repo := t.TempDir()
+		script := filepath.Join(repo, filepath.FromSlash(gitGuardWorktreeSh))
+		if err := os.MkdirAll(filepath.Dir(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := testjail.WriteExecutable(script, []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		git(repo, "init", "-q")
+		if commit {
+			git(repo, "add", ".")
+			git(repo, "commit", "-q", "-m", "probe")
+		}
+		if edit {
+			if err := testjail.WriteExecutable(script, []byte("#!/bin/sh\ngit push\n"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return repo
+	}
+	committed, edited, untracked := repoWith(true, false), repoWith(true, true), repoWith(false, false)
+	script := "." + string(filepath.Separator) + filepath.FromSlash(gitGuardWorktreeSh)
+	for _, row := range []struct {
+		name, command, cwd, agentType string
+		allow                         bool
+	}{
+		{name: "main chat create", command: "bash " + script + " create x", cwd: committed, allow: true},
+		{name: "main chat land", command: script + " land x -m 'wip'", cwd: committed, allow: true},
+		{name: "main chat remove", command: script + " remove x --delete-branch", cwd: committed, allow: true},
+		{
+			name:    "main chat absolute committed script from another repo",
+			command: filepath.Join(committed, gitGuardWorktreeSh) + " land x", cwd: untracked, allow: true,
+		},
+		{name: "main chat prune", command: script + " prune", cwd: committed},
+		{name: "main chat discard", command: script + " remove x --discard", cwd: committed},
+		{name: "main chat after cd", command: "cd " + edited + " && " + script + " land x", cwd: committed},
+		{name: "main chat edited script", command: script + " land x", cwd: edited},
+		{name: "main chat untracked script", command: script + " create x", cwd: untracked},
+		{name: "sub-agent land", command: script + " land x", cwd: committed, agentType: gitGuardExecutor},
+		{name: "sub-agent create", command: script + " create x", cwd: committed, agentType: gitGuardExecutor},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			code, stdout, stderr := runGitGuard(t, gitGuardPayload(t, "Bash", row.command, row.cwd, row.agentType))
+			if code != 0 || stderr != "" {
+				t.Fatalf("code=%d stdout=%q stderr=%q, want a silent successful hook", code, stdout, stderr)
+			}
+			if row.allow {
+				if stdout != "" {
+					t.Fatalf("stdout=%q, want allowed with no output", stdout)
+				}
+				return
+			}
+			want := "git-guard blocked `" + strings.TrimPrefix(row.command, "cd "+edited+" && ") + "`."
+			if reason := gitGuardDenyReason(t, stdout); !strings.HasPrefix(reason, want) {
+				t.Fatalf("reason=%q, want it to start %q", reason, want)
+			}
+		})
 	}
 }

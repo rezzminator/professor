@@ -3,6 +3,7 @@
 #
 # Usage:
 #   ./.claude/scripts/worktree.sh create <pipeline>
+#   ./.claude/scripts/worktree.sh land <pipeline> [-m <msg>]   # fast-forward BASE_BRANCH, then remove
 #   ./.claude/scripts/worktree.sh remove <pipeline> [--delete-branch] [--discard]
 #   ./.claude/scripts/worktree.sh list [pipeline]
 #   ./.claude/scripts/worktree.sh prune          # remove orphaned worktree dirs
@@ -17,6 +18,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 ALLOC="${ROOT}/.claude/scripts/alloc-ports.sh"
+# The branch every pipeline starts from and lands on.
+BASE_BRANCH="main"
 
 # The roster entry whose Makefile owns the docker test stack, and its per-pipeline
 # teardown target. SETUP pins the directory; "-" when no roster entry owns infra.
@@ -86,14 +89,10 @@ provision_marker() {
   echo "${gitdir}/provisioning-incomplete"
 }
 
-# Snapshot final provisioned bytes in the private Git directory, not the checkout.
-# Git's read-only object hash needs no extra tool and --no-filters hashes the actual bytes.
-# On success PROVISIONED_ENV_FILES is the list whose snapshots were recorded or verified.
-provisioned_env_hashes() {
-  local mode="$1" tree="$2" marker hashes action=inspect entry dir kind install env_files ef path key digest saved
-  [ "$mode" != record ] || action=record
-  marker="$(provision_marker "$tree")" || return 1
-  hashes="${marker%/*}/provisioned-env-hashes"
+# Set PROVISIONED_ENV_FILES to every env file create provisions, relative to the worktree root:
+# .env.ports, then each roster entry's env_files.
+provisioned_env_paths() {
+  local entry dir kind install env_files ef
   PROVISIONED_ENV_FILES=(.env.ports)
   for entry in "${PROJECTS[@]+"${PROJECTS[@]}"}"; do
     IFS='|' read -r dir kind install env_files <<< "$entry"
@@ -102,6 +101,17 @@ provisioned_env_hashes() {
       if [ "$dir" = '.' ]; then PROVISIONED_ENV_FILES+=("$ef"); else PROVISIONED_ENV_FILES+=("$dir/$ef"); fi
     done
   done
+}
+
+# Snapshot final provisioned bytes in the private Git directory, not the checkout.
+# Git's read-only object hash needs no extra tool and --no-filters hashes the actual bytes.
+# On success PROVISIONED_ENV_FILES is the list whose snapshots were recorded or verified.
+provisioned_env_hashes() {
+  local mode="$1" tree="$2" marker hashes action=inspect path key digest saved
+  [ "$mode" != record ] || action=record
+  marker="$(provision_marker "$tree")" || return 1
+  hashes="${marker%/*}/provisioned-env-hashes"
+  provisioned_env_paths
   local error="Error: could not $action provisioned env hashes for $tree"
   if [[ -L "$hashes" || ( -e "$hashes" && ! -d "$hashes" ) ]]; then
     echo "$error: invalid metadata directory $hashes" >&2; return 1
@@ -181,9 +191,9 @@ cmd_create() {
     # failed or interrupted create resumes here and reports readiness only on success.
     echo "Resuming incomplete provisioning: $worktree_dir"
   else
-    # Create branch from main if it doesn't exist
+    # Create branch from BASE_BRANCH if it doesn't exist
     if ! git rev-parse --verify "$branch" >/dev/null 2>&1; then
-      git branch "$branch" main
+      git branch "$branch" "$BASE_BRANCH"
     fi
 
     # Create worktree — full repo checkout
@@ -393,6 +403,98 @@ cmd_remove() {
   echo "Pipeline cleaned up: $pipeline"
 }
 
+# A worktree's uncommitted changes, submodule content included; extra arguments are pathspecs to exclude.
+land_status() {
+  git -C "$1" status --porcelain --untracked-files=all --ignore-submodules=none -- . "${@:2}"
+}
+
+# Land a pipeline: commit its leftover work when -m names a message, fast-forward BASE_BRANCH in the
+# main checkout to its branch, then remove the worktree and delete the branch. Anything but a
+# fast-forward is refused, the branch keeping its commits: gitter syncs it (Phase MERGE).
+cmd_land() {
+  local pipeline="$1"
+  shift
+  local msg=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -m)
+        if [[ $# -lt 2 ]]; then echo "Error: -m needs a message; nothing landed" >&2; return 2; fi
+        msg="$2"; shift ;;
+      *) echo "Error: unknown land option: $1; nothing landed" >&2; return 2 ;;
+    esac
+    shift
+  done
+  local branch="pipeline/${pipeline}"
+  local worktree_dir="${ROOT}/.worktrees/${pipeline}"
+  local top head status cur gitdir path rc=0
+  if [ ! -d "$worktree_dir" ] || ! top="$(git -C "$worktree_dir" rev-parse --show-toplevel 2>/dev/null)" \
+    || [ "$top" != "$(cd "$worktree_dir" && pwd -P)" ]; then
+    echo "Error: no worktree at $worktree_dir; nothing landed" >&2; return 1
+  fi
+  if ! head="$(git -C "$worktree_dir" symbolic-ref -q --short HEAD)" || [ "$head" != "$branch" ]; then
+    echo "Error: $worktree_dir is on ${head:-a detached HEAD}, not its own branch $branch; nothing landed" >&2; return 1
+  fi
+  if git -C "$worktree_dir" rev-parse -q --verify MERGE_HEAD >/dev/null; then
+    echo "Error: a merge is in progress in $worktree_dir (MERGE_HEAD); gitter concludes it (Phase MERGE); nothing landed" >&2
+    return 1
+  fi
+  # The env files create provisioned hold this worktree's ports: never committed, never dirt.
+  provisioned_env_paths
+  local -a provisioned=()
+  for path in "${PROVISIONED_ENV_FILES[@]}"; do
+    provisioned+=(":(exclude,literal)$path")
+  done
+  if ! status="$(land_status "$worktree_dir" "${provisioned[@]}")"; then
+    echo "Error: could not inspect $worktree_dir; nothing landed" >&2; return 1
+  fi
+  if [[ -n "$status" ]]; then
+    if [[ -z "$msg" ]]; then
+      echo "Error: $worktree_dir has uncommitted changes; pass -m <message> to commit them; nothing landed" >&2; return 1
+    fi
+    if ! git -C "$worktree_dir" add -A -- . "${provisioned[@]}"; then
+      echo "Error: could not stage the changes in $worktree_dir; nothing landed" >&2; return 1
+    fi
+    if ! git -C "$worktree_dir" diff --cached --quiet && ! git -C "$worktree_dir" commit -q -m "$msg"; then
+      echo "Error: commit failed in $worktree_dir (its changes stay staged); nothing landed" >&2; return 1
+    fi
+    # git add stages no edit inside a submodule: what is left is work the commit could not take.
+    if ! status="$(land_status "$worktree_dir" "${provisioned[@]}")"; then
+      echo "Error: could not inspect $worktree_dir after the commit; nothing landed" >&2; return 1
+    fi
+    if [[ -n "$status" ]]; then
+      echo "Error: $worktree_dir is still dirty after the commit (work inside a submodule?): ${status//$'\n'/, }; nothing landed" >&2
+      return 1
+    fi
+  fi
+  if ! cur="$(git -C "$ROOT" symbolic-ref -q --short HEAD)" || [ "$cur" != "$BASE_BRANCH" ]; then
+    echo "Error: the main checkout is on ${cur:-a detached HEAD}, not $BASE_BRANCH; gitter syncs it (Phase MERGE); nothing landed" >&2
+    return 1
+  fi
+  git -C "$ROOT" merge-base --is-ancestor "$BASE_BRANCH" "$branch" || rc=$?
+  case "$rc" in
+    0) ;;
+    1) echo "Error: $BASE_BRANCH has commits $branch lacks; gitter syncs it (Phase MERGE); $branch keeps its commits; nothing landed" >&2
+       return 1 ;;
+    *) echo "Error: could not compare $BASE_BRANCH with $branch; nothing landed" >&2; return 1 ;;
+  esac
+  if ! git -C "$ROOT" merge --ff-only -q "$branch"; then
+    echo "Error: fast-forward of $BASE_BRANCH to $branch refused (see git above); nothing landed" >&2; return 1
+  fi
+  echo "Landed: $branch on $BASE_BRANCH"
+  if ! gitdir="$(git -C "$worktree_dir" rev-parse --absolute-git-dir)"; then
+    echo "Error: $branch landed on $BASE_BRANCH, but its worktree's Git directory is unreadable; worktree kept: $worktree_dir" >&2
+    return 1
+  fi
+  if [ -e "$gitdir/locked" ]; then
+    echo "Worktree kept (locked): $worktree_dir — $(cat "$gitdir/locked")"
+    echo "Branch kept: $branch"
+    return 0
+  fi
+  if ! cmd_remove "$pipeline" --delete-branch; then
+    echo "Error: $branch landed on $BASE_BRANCH, but closing its worktree failed (see above)" >&2; return 1
+  fi
+}
+
 cmd_prune() {
   # Remove ORPHANED worktree directories: present on disk but not a registered
   # git worktree AND with no active pipeline docs. Registered-but-inactive
@@ -527,11 +629,12 @@ cmd_list() {
 
 case "${1:-help}" in
   create)  cmd_create "${2:?pipeline required}" ;;
+  land)    shift; cmd_land "${1:?pipeline required}" "${@:2}" ;;
   remove)  shift; cmd_remove "${1:?pipeline required}" "${@:2}" ;;
   list)    cmd_list   "${2:-}" ;;
   prune)   cmd_prune ;;
   *)
-    echo "Usage: $0 {create|remove|list|prune} <pipeline>" >&2
+    echo "Usage: $0 {create|land|remove|list|prune} <pipeline>" >&2
     exit 1
     ;;
 esac

@@ -575,9 +575,14 @@ checks_templates_plugin_workflows() {
 checks_templates_worktree_script() {
   head_ "templates — shipped worktree.sh lifecycle safety"
   if bash "$REPO_ROOT/scripts/test-worktree.sh"; then
-    ok "worktree.sh refuses dirty removal, keeps registered paths with spaces, and names failed provisioning"
+    ok "worktree.sh refuses dirty removal, keeps registered paths with spaces, names failed provisioning, and lands only a fast-forward"
   else
-    fail_step "worktree.sh lifecycle regression FAILED — dirty removal, prune registration, or provisioning failure handling broke (see output)"
+    fail_step "worktree.sh lifecycle regression FAILED — dirty removal, prune registration, provisioning failure handling or land broke (see output)"
+  fi
+  if bash "$REPO_ROOT/scripts/test-worktree-local.sh"; then
+    ok "this repo's worktree.sh populates plugins, lands only a fast-forward of develop, and keeps plugin work on remove"
+  else
+    fail_step "this repo's worktree.sh regression FAILED — plugin init fallback, land or the plugin proof before --force broke (see output)"
   fi
 }
 

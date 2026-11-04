@@ -167,7 +167,7 @@ func EngineGuard(args []string, input io.Reader, stdout, stderr io.Writer) int {
 		if workdir := hook.ToolInput.Workdir; workdir != "" {
 			cwd = gitGuardJoin(cwd, workdir)
 		}
-		reasons = append(reasons, gitGuardCheck(command, cwd, true, stderr))
+		reasons = append(reasons, gitGuardCheck(command, cwd, true, false, stderr))
 		if err := judge.bash(command, cwd, cmdparse.Script{}, 0); err != nil {
 			fmt.Fprintf(stderr, "pfm internal engine-guard: parse command (fail-open): %v\n", err)
 		}

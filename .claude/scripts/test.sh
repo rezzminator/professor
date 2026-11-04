@@ -23,7 +23,9 @@
 #   *_test.sh, scripts/test-*.sh  bash, no selector; .claude/scripts/x.sh brings scripts/test-x.sh
 #                             (dev.sh: scripts/test-dev-report.sh and infra/fence/lanes/tests/
 #                             iso-housekeeping_test.sh, format-md.sh: scripts/test-format-md.sh on that
-#                             copy); infra/fence/x.sh, infra/fence/lanes/x.sh bring
+#                             copy, worktree.sh: scripts/test-worktree-local.sh,
+#                             templates/project/scripts/worktree.sh: scripts/test-worktree.sh);
+#                             infra/fence/x.sh, infra/fence/lanes/x.sh bring
 #                             infra/fence/lanes/tests/x_test.sh;
 #                             a sourced helper brings its users' tests: scripts/shtest.sh and
 #                             scripts/stub-root.sh every tracked test naming it, infra/fence/mkdir-lock.sh
@@ -484,6 +486,8 @@ derive() { # derive <repository-relative path> <has selector 0|1> <selector>
             [ ! -f "$ROOT/$sib" ] || shell_test "$sib"
           done ;;
         .claude/scripts/format-md.sh | templates/project/scripts/format-md.sh) shell_test scripts/test-format-md.sh "$f" ;;
+        .claude/scripts/worktree.sh) shell_test scripts/test-worktree-local.sh ;;
+        templates/project/scripts/worktree.sh) shell_test scripts/test-worktree.sh ;;
         .claude/scripts/*.sh | scripts/*.sh | scripts/*.py)
           for sib in "scripts/test-${base%.*}.sh" "scripts/test-${base%.*}.py"; do
             [ -f "$ROOT/$sib" ] || continue

@@ -316,4 +316,46 @@ if [[ "$rc" -eq 0 && ! -d "$w" && "$out" == *'Worktree removed'* ]]; then
   ok 'F1: a submodule pinned to a remote tag on no branch is removed without --discard'
 else bad 'F1: a submodule pinned to a remote tag on no branch is removed without --discard' "rc=$rc; out=$out"; fi
 unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+# land commits in the worktree under this identity.
+export GIT_AUTHOR_NAME=fixture GIT_AUTHOR_EMAIL=fixture@example.invalid GIT_COMMITTER_NAME=fixture GIT_COMMITTER_EMAIL=fixture@example.invalid
+# land_fixture <name>: a script-created worktree holding one committed change; tip is its branch's commit.
+land_fixture() {
+  fixture
+  invoke create "$1"
+  [[ "$rc" -eq 0 ]] || { echo "test-worktree: setup failure: create $1 failed: $out" >&2; exit 2; }
+  w="$repo/.worktrees/$1"
+  printf 'work\n' > "$w/work.txt" && fgit "$w" add work.txt && fgit "$w" commit -q -m work || exit 2
+  tip="$(fgit "$w" rev-parse HEAD)" && base="$(fgit "$repo" rev-parse main)" || exit 2
+}
+has_branch() { /usr/bin/git -C "$repo" show-ref --verify --quiet "refs/heads/pipeline/$1"; }
+land_fixture clean-land
+invoke land clean-land
+if [[ "$rc" -eq 0 && "$(fgit "$repo" rev-parse main)" == "$tip" && ! -d "$w" && "$out" == *'Landed: pipeline/clean-land on main'* ]] && ! has_branch clean-land && grep -qx 'free clean-land' "$trace"; then
+  ok 'land: a clean branch fast-forwards main, then the worktree and branch are removed'
+else bad 'land: a clean branch fast-forwards main, then the worktree and branch are removed' "rc=$rc; out=$out"; fi
+land_fixture dirty-land
+printf 'uncommitted\n' > "$w/base.txt"
+invoke land dirty-land
+if [[ "$rc" -ne 0 && "$(cat "$w/base.txt")" == uncommitted && "$(fgit "$repo" rev-parse main)" == "$base" && "$out" == "Error: $w has uncommitted changes; pass -m <message> to commit them; nothing landed" ]] && has_branch dirty-land; then
+  ok 'land: a dirty worktree without -m refuses in one line, landing and committing nothing'
+else bad 'land: a dirty worktree without -m refuses in one line, landing and committing nothing' "rc=$rc; out=$out"; fi
+land_fixture message-land
+printf 'leftover\n' > "$w/base.txt"
+invoke land message-land -m 'leftover work'
+if [[ "$rc" -eq 0 && "$(fgit "$repo" log -1 --format=%s main)" == 'leftover work' && "$(fgit "$repo" show main:base.txt)" == leftover && "$(fgit "$repo" show --name-only --format= main)" == base.txt && ! -d "$w" ]] && ! has_branch message-land; then
+  ok 'land: -m commits the dirty work (never the provisioned .env.ports) and lands it'
+else bad 'land: -m commits the dirty work (never the provisioned .env.ports) and lands it' "rc=$rc; out=$out"; fi
+land_fixture moved-land
+printf 'moved\n' > "$repo/moved.txt" && fgit "$repo" add moved.txt && fgit "$repo" commit -q -m moved || exit 2
+moved="$(fgit "$repo" rev-parse main)"
+invoke land moved-land
+if [[ "$rc" -ne 0 && "$(fgit "$repo" rev-parse main)" == "$moved" && "$(fgit "$repo" rev-parse pipeline/moved-land)" == "$tip" && -d "$w" && "$out" == 'Error: main has commits pipeline/moved-land lacks; gitter syncs it (Phase MERGE); pipeline/moved-land keeps its commits; nothing landed' ]]; then
+  ok 'land: a base that moved refuses in one line, keeping the branch, its commit and the worktree'
+else bad 'land: a base that moved refuses in one line, keeping the branch, its commit and the worktree' "rc=$rc; out=$out"; fi
+land_fixture locked-land
+/usr/bin/git -C "$repo" worktree lock --reason 'post-merge gate running' "$w" || exit 2
+invoke land locked-land
+if [[ "$rc" -eq 0 && "$(fgit "$repo" rev-parse main)" == "$tip" && -d "$w" && "$out" == *"Worktree kept (locked): $w — post-merge gate running"* ]] && has_branch locked-land && ! grep -qx 'free locked-land' "$trace"; then
+  ok 'land: a locked worktree lands and is kept with its branch, its lock reason reported'
+else bad 'land: a locked worktree lands and is kept with its branch, its lock reason reported' "rc=$rc; out=$out"; fi
 shtest_end

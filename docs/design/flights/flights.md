@@ -65,17 +65,17 @@ Flight merges over the prior 60 days averaged 1.42 Go test lines per code line, 
 ## The life cycle
 
 ```text
-main chat -> gitter worktree (or develop) -> foreman tier, worktree path in its brief
+main chat -> worktree.sh create (gitter without the script; or develop) -> foreman tier, worktree path in its brief
 foreman -> reads, writes the whole change, runs the affected tests once -> one return message
 (a child only for an area disjoint from the foreman's own, while the foreman is busy with its part)
 every foreman on the worktree returned -> main chat -> flights-lander -> its own review, children in the background
 lander fixes all findings -> affected tests until green -> full gate once -> lander returns
-main chat -> gitter commits / merges -> same-dispatch verified teardown (or KEEP lock)
-flight abandoned without merge -> writers stopped -> main chat -> gitter close
+main chat -> worktree.sh land (gitter commits / merges on a refusal or without the script) -> verified teardown (or KEEP lock, gitter's)
+flight abandoned without merge -> writers stopped -> main chat -> worktree.sh remove (gitter on a refusal or without the script)
 ```
 
 1. **Settle.** The main chat settles open requirements with the user before any dispatch.
-2. **Place.** The main chat has gitter make the worktree, or names `develop` or the checkout, and passes the path in the brief. Several foremen may share one worktree on separate areas. Size is the judgment left in the edits, never the file count: work whose every edit is fixed in advance (a rename, a move, a known fix, a spec fixing every line), with no other agent writing its files, is small at any file count and skips the flight (`templates/global/rules/flights-life-cycle.md` rule 2).
+2. **Place.** The main chat makes the worktree with the repo's `worktree.sh create` where it has one (gitter makes it on a refusal and in a repo without the script), or names `develop` or the checkout, and passes the path in the brief. Several foremen may share one worktree on separate areas. Size is the judgment left in the edits, never the file count: work whose every edit is fixed in advance (a rename, a move, a known fix, a spec fixing every line), with no other agent writing its files, is small at any file count and skips the flight (`templates/global/rules/flights-life-cycle.md` rule 2).
 3. **Build.** A foreman builds the request by its own hand.
    - **Reads:** what the build needs; see [reading](#reading-and-the-trace-store).
    - **Writes:** the whole change, then runs the affected tests once, never after each edit; a fix's regression test runs red first.
@@ -90,8 +90,8 @@ flight abandoned without merge -> writers stopped -> main chat -> gitter close
    6. returns.
 
    One worktree gets one lander: no separate reviewer, no second round, no second lander.
-5. **Merge and tear down.** On `PASS` or `FIXED`, the main chat sends gitter to commit and merge, with the lander's report path as its REPORT_PATH. Teardown belongs to that same MERGE dispatch, verified by `git worktree list`. The return ends `worktree removed: {path} · branch {deleted|kept}` or `worktree kept (locked): {path} — {reason}`. A needed keep is `KEEP: {reason}` in the brief, never a teardown ban; gitter keeps the branch and locks the worktree with that reason. A reasonless removal ban becomes a lock with reason `kept by caller, no reason given`. The main chat that kept it carries the `kept (locked)` line in its Verdict until it orders gitter to unlock and remove it.
-6. **Close without a merge.** A lander `FAIL` not retried, an abandoned foreman `PARTIAL`, a dropped flight or an abandoned dead agent's flight still closes, after its writers stop. The main chat sends gitter to remove the clean linked worktree, keeping and naming any unmerged branch (`-d` only, never `-D`). Dirty work is locked with the reason it waits and the user is asked what to do with its changes; the Verdict names what stayed. The main checkout is never a close target.
+5. **Merge and tear down.** On `PASS` or `FIXED`, the main chat runs `worktree.sh land {name}` where the repo has it: it commits a dirty worktree (`-m`), fast-forwards the base and removes the worktree and branch, one stderr line and a non-zero exit on every refusal. Gitter takes every refusal and every repo without the script: it commits and merges with the lander's report path as its REPORT_PATH, and teardown belongs to that same MERGE dispatch. Either way `git worktree list` verifies it. The return ends `worktree removed: {path} · branch {deleted|kept}` or `worktree kept (locked): {path} — {reason}`. A needed keep is `KEEP: {reason}` in the brief, never a teardown ban; gitter keeps the branch and locks the worktree with that reason. A reasonless removal ban becomes a lock with reason `kept by caller, no reason given`. The main chat that kept it carries the `kept (locked)` line in its Verdict until it orders gitter to unlock and remove it.
+6. **Close without a merge.** A lander `FAIL` not retried, an abandoned foreman `PARTIAL`, a dropped flight or an abandoned dead agent's flight still closes, after its writers stop. The main chat removes the clean linked worktree with `worktree.sh remove` where the repo has it (gitter on a refusal and without the script), keeping and naming any unmerged branch (`-d` only, never `-D`). Dirty work is locked with the reason it waits and the user is asked what to do with its changes; the Verdict names what stayed. The main checkout is never a close target.
 7. **Measure.** `/flights:doctor`, run by the user, reports the measure for the tree.
 
 ## Choosing a tier

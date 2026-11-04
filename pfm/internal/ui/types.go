@@ -110,7 +110,10 @@ type Snapshot struct {
 	Width             int
 	Height            int
 	InitialQuery      string
-	InitialCursorID   string
+	// HerdrSpace is the label of the Herdr space a picker opened in ~ runs in;
+	// the picker opens on the place wearing it (omnibox.go). "" elsewhere.
+	HerdrSpace      string
+	InitialCursorID string
 	// ScheduleError is a failed read of the unseen-schedule flags, shown in
 	// the Chats header so a broken read never renders as "no schedules".
 	ScheduleError string

@@ -310,6 +310,9 @@ func (model *Model) indexPlaces() {
 				break
 			}
 		}
+		if entry, found := model.herdrSpacePlace(); found {
+			model.launchHome.project, model.launchHome.cwd = entry.Label, entry.Root
+		}
 	}
 	built := model.buildPlaces()
 	if !model.placeChosen {
@@ -339,6 +342,23 @@ func (model *Model) indexPlaces() {
 		built = model.buildPlaces()
 	}
 	model.places, model.rowDir, model.rowPlace = built.places, built.rowDir, built.rowPlace
+}
+
+// herdrSpacePlace is the place wearing the Herdr space's label, as Herdr
+// placement labels a place's space (place.Fleet.Labeled): a picker opened in ~
+// has no project of its own, and compose's launch row would start in the
+// busiest project instead of the one the space holds.
+func (model Model) herdrSpacePlace() (fleetplace.Place, bool) {
+	if model.herdrSpace == "" {
+		return fleetplace.Place{}, false
+	}
+	fleet := fleetplace.Fleet{Rows: model.rows, ProjectDirs: model.projectDirs, Home: model.deck.home}
+	for _, entry := range fleet.Labeled().Places {
+		if entry.Label == model.herdrSpace && entry.Root != fleetplace.Clean(model.deck.home) {
+			return entry, true
+		}
+	}
+	return fleetplace.Place{}, false
 }
 
 // buildPlaces derives the rail from the rows the Model holds now.
@@ -375,6 +395,7 @@ type placeState struct {
 	projectDirs map[string]string
 	dirExists   func(string) (bool, error)
 	launchHome  struct{ project, cwd string }
+	herdrSpace  string // Snapshot.HerdrSpace
 }
 
 // omniKey takes the keys the rail and the omnibox own before the picker's own

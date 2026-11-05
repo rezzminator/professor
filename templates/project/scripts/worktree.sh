@@ -18,6 +18,12 @@
 # Each pipeline gets a SINGLE worktree of the entire repo at .worktrees/<pipeline>/.
 # One branch, one checkout, every project in the roster included. At roster size 1
 # the worktree IS the repo root (no per-project subdir).
+#
+# create prints `Worktree ready: <dir>`, `Branch: <branch>` and the port lines, then one line per
+# submodule its remote could not serve, also on stderr when it happens; the exit stays 0, so the
+# caller greps `^WARN submodule `:
+#   WARN submodule <path>: pinned <sha12> not fetchable from remote — initialised from local clone <main clone> (push it)
+#   WARN submodule <path>: not initialised (<git's last error line>) — worktree created without it
 
 set -euo pipefail
 
@@ -178,6 +184,51 @@ provisioned_env_hashes() {
   return 0
 }
 
+# init_submodules <worktree>: populate every submodule .gitmodules lists, recursively, and never fail
+# the create. A gitlink its remote cannot serve inits from the main checkout's clone instead
+# (init_from_main_clone); one neither serves stays empty and joins UNINITIALISED_SUBMODULES. Either
+# fallback adds one WARN line to SUBMODULE_WARNINGS, printed on stderr at once and after the summary.
+SUBMODULE_WARNINGS=()
+UNINITIALISED_SUBMODULES=()
+submodule_warn() { SUBMODULE_WARNINGS+=("$1"); echo "$1" >&2; }
+init_submodules() {
+  local wt="$1" entries key path name pin err
+  [ -f "$wt/.gitmodules" ] || return 0
+  if ! entries="$(git -C "$wt" config -f .gitmodules --get-regexp '^submodule\..*\.path$')"; then
+    submodule_warn "WARN submodule .gitmodules: not initialised (unreadable) — worktree created without any submodule"
+    return 0
+  fi
+  while read -r key path <&3; do
+    name="${key#submodule.}"; name="${name%.path}"
+    err="$(git -C "$wt" submodule update --init --recursive -- "$path" 2>&1 >/dev/null)" && continue
+    printf '%s\n' "$err" >&2
+    pin="$(git -C "$wt" rev-parse --short=12 "HEAD:$path" 2>/dev/null || echo unknown)"
+    if [ ! -e "$ROOT/$path/.git" ]; then
+      err="no local clone at $ROOT/$path; ${err##*$'\n'}"
+    elif err="$(init_from_main_clone "$wt" "$name" "$path" 2>&1 >/dev/null)"; then
+      submodule_warn "WARN submodule $path: pinned $pin not fetchable from remote — initialised from local clone $ROOT/$path (push it)"
+      continue
+    else
+      printf '%s\n' "$err" >&2
+    fi
+    err="${err##*$'\n'}"
+    UNINITIALISED_SUBMODULES+=("$path")
+    submodule_warn "WARN submodule $path: not initialised (${err:-git gave no reason}) — worktree created without it"
+  done 3<<< "$entries"
+}
+
+# init_from_main_clone <worktree> <name> <path>: populate one submodule from the main checkout's clone.
+# A remote clone that landed without the gitlink keeps its remote and fetches the clone's HEAD and
+# branches; with no clone, the submodule clones from the main checkout's, which hands over every object.
+init_from_main_clone() {
+  if [ -e "$1/$3/.git" ]; then
+    git -C "$1/$3" fetch -q "$ROOT/$3" HEAD 'refs/heads/*:refs/remotes/main-checkout/*' &&
+      git -C "$1" submodule update --recursive -- "$3"
+  else
+    git -C "$1" -c protocol.file.allow=always -c "submodule.$2.url=$ROOT/$3" submodule update --init --recursive -- "$3"
+  fi
+}
+
 cmd_create() {
   local pipeline="$1"
   local branch="pipeline/${pipeline}"
@@ -212,14 +263,9 @@ cmd_create() {
     fi
   fi
 
-  # A roster entry backed by a git submodule is left EMPTY by `git worktree add`.
-  # Its install would then run against an empty directory and silently produce a
-  # worktree with no dependencies, so populate submodules before installing. No-op
-  # in a repo that has none.
-  if ! git -C "$worktree_dir" submodule update --init --recursive; then
-    echo "Error: submodule initialization failed; partial worktree: $worktree_dir" >&2
-    return 1
-  fi
+  # A roster entry backed by a git submodule is left EMPTY by `git worktree add`,
+  # so populate submodules before installing. No-op in a repo that has none.
+  init_submodules "$worktree_dir"
 
   # Install dependencies for each project in the roster — a REAL install per
   # worktree, per the NO-SYMLINK LAW above.
@@ -228,6 +274,8 @@ cmd_create() {
     IFS='|' read -r dir install_kind install_cmd env_files <<< "$entry"
     src_path="$(proj_path "$ROOT" "$dir")"
     dst_path="$(proj_path "$worktree_dir" "$dir")"
+    # A submodule init_submodules left empty has nothing to install; its WARN line names it.
+    [[ " ${UNINITIALISED_SUBMODULES[*]-} " != *" $dir "* ]] || install_kind=none
     case "$install_kind" in
       install)
         # Propagate this project's gitignored env files BEFORE the install —
@@ -316,6 +364,7 @@ cmd_create() {
   echo "Worktree ready: $worktree_dir"
   echo "Branch: $branch"
   echo "$ports"
+  (( ${#SUBMODULE_WARNINGS[@]} == 0 )) || printf '%s\n' "${SUBMODULE_WARNINGS[@]}"
 }
 
 cmd_remove() {

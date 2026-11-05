@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # This repo's own worktree script: create populates every plugin (from the main checkout's copy when
-# the plugin's remote lacks the gitlink), land only fast-forwards develop, remove keeps plugin work.
+# the plugin's remote lacks the gitlink, a WARN either way it falls back), land only fast-forwards
+# develop, remove keeps plugin work.
 set -uo pipefail
 SOURCE_ROOT="${SOURCE_ROOT:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)}"
 SUT="${1:-$SOURCE_ROOT/.claude/scripts/worktree.sh}"
@@ -40,16 +41,24 @@ else bad 'land: a clean branch fast-forwards develop, then the worktree and bran
 # A gitlink the plugin's remote does not hold: only the main checkout's copy has the commit.
 printf 'v2\n' > "$repo/plugins/p/lib.txt" && g "$repo/plugins/p" commit -q -am v2 && g "$repo" commit -q -am 'bump p' || exit 2
 local_sha="$(g "$repo/plugins/p" rev-parse HEAD)"
+# warned <line>: create printed the WARN line twice — on stderr when it happened and in the summary.
+warned() { [[ "$(grep -cxF "$1" "$T/out")" == 2 ]]; }
+local_warn="WARN submodule plugins/p: pinned ${local_sha:0:12} not fetchable from remote — initialised from local clone $repo/plugins/p (push it)"
 invoke create fallback
-if [[ "$rc" -eq 0 && "$(g "$repo/.worktrees/fallback/plugins/p" rev-parse HEAD 2>&1)" == "$local_sha" ]]; then
-  ok "create: a plugin whose remote lacks the gitlink inits from the main checkout's copy"
-else bad "create: a plugin whose remote lacks the gitlink inits from the main checkout's copy" "rc=$rc; out=$out"; fi
+if [[ "$rc" -eq 0 && "$out" == *'Worktree ready:'* && "$(g "$repo/.worktrees/fallback/plugins/p" rev-parse HEAD 2>&1)" == "$local_sha" ]] && warned "$local_warn"; then
+  ok "create: a plugin whose remote lacks the gitlink inits from the main checkout's copy, WARN on stderr and in the summary, exit 0"
+else bad "create: a plugin whose remote lacks the gitlink inits from the main checkout's copy, WARN on stderr and in the summary, exit 0" "rc=$rc; out=$out"; fi
 mv "$remote" "$remote.gone" || exit 2
 invoke create offline
-mv "$remote.gone" "$remote" || exit 2
-if [[ "$rc" -eq 0 && "$(g "$repo/.worktrees/offline/plugins/p" rev-parse HEAD 2>&1)" == "$local_sha" ]]; then
+if [[ "$rc" -eq 0 && "$(g "$repo/.worktrees/offline/plugins/p" rev-parse HEAD 2>&1)" == "$local_sha" ]] && warned "$local_warn"; then
   ok "create: a plugin whose remote cannot be cloned at all clones from the main checkout's copy"
 else bad "create: a plugin whose remote cannot be cloned at all clones from the main checkout's copy" "rc=$rc; out=$out"; fi
+mv "$repo/plugins/p/.git" "$T/p.git.away" || exit 2
+invoke create unserved
+mv "$T/p.git.away" "$repo/plugins/p/.git" && mv "$remote.gone" "$remote" || exit 2
+if [[ "$rc" -eq 0 && "$out" == *'Worktree ready: '"$repo/.worktrees/unserved"* && ! -e "$repo/.worktrees/unserved/plugins/p/lib.txt" && "$(grep -cE "^WARN submodule plugins/p: not initialised \\(no local clone at $repo/plugins/p; .+\\) — worktree created without it$" "$T/out")" == 2 ]]; then
+  ok "create: a plugin neither its remote nor the main checkout serves leaves it empty, WARN on stderr and in the summary, exit 0"
+else bad "create: a plugin neither its remote nor the main checkout serves leaves it empty, WARN on stderr and in the summary, exit 0" "rc=$rc; out=$out"; fi
 
 invoke create dirty
 w="$repo/.worktrees/dirty"; before="$(g "$repo" rev-parse develop)"

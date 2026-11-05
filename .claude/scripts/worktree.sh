@@ -13,6 +13,12 @@
 #   .claude/scripts/worktree.sh list
 #
 # <name> is the kebab-case flight name: branch flight/<name>, path .worktrees/<name>.
+#
+# create prints `Worktree ready: <dir>` and `Branch: <branch> (from <base> at <sha12>)`, then one line per
+# plugin its remote could not serve, also on stderr when it happens; the exit stays 0, so the caller
+# greps `^WARN submodule `:
+#   WARN submodule <path>: pinned <sha12> not fetchable from remote — initialised from local clone <main copy> (push it)
+#   WARN submodule <path>: not initialised (<git's last error line>) — worktree created without it
 
 set -euo pipefail
 
@@ -54,28 +60,37 @@ cmd_create() {
     echo "Error: git worktree add failed (see git above): $worktree_dir" >&2; return 1
   fi
   # The fence mounts the worktree read-only and cannot clone, so every plugin is populated now. A
-  # gitlink the plugin's remote does not hold yet fails to fetch: that one inits from the main
-  # checkout's copy instead (init_from_main_copy).
-  local -a failed=()
-  if [ -f "$worktree_dir/.gitmodules" ]; then
-    local entries
-    if ! entries="$(git -C "$worktree_dir" config -f .gitmodules --get-regexp '^submodule\..*\.path$')"; then
-      echo "Error: could not read .gitmodules; partial worktree: $worktree_dir" >&2; return 1
+  # gitlink the plugin's remote does not serve inits from the main checkout's copy instead
+  # (init_from_main_copy); one neither serves stays empty. Neither fails the create: each adds a WARN.
+  local -a warnings=()
+  local entries="" pin err warn
+  if [ -f "$worktree_dir/.gitmodules" ] &&
+    ! entries="$(git -C "$worktree_dir" config -f .gitmodules --get-regexp '^submodule\..*\.path$')"; then
+    warnings+=("WARN submodule .gitmodules: not initialised (unreadable) — worktree created without any plugin")
+    echo "${warnings[-1]}" >&2; entries=""
+  fi
+  while [ -n "$entries" ] && read -r key path <&3; do
+    sub="${key#submodule.}"; sub="${sub%.path}"
+    err="$(git -C "$worktree_dir" submodule update --init -- "$path" 2>&1 >/dev/null)" && continue
+    printf '%s\n' "$err" >&2
+    pin="$(git -C "$worktree_dir" rev-parse --short=12 "HEAD:$path" 2>/dev/null || echo unknown)"
+    if [ ! -e "$ROOT/$path/.git" ]; then
+      err="no local clone at $ROOT/$path; ${err##*$'\n'}"
+    elif err="$(init_from_main_copy "$worktree_dir" "$sub" "$path" 2>&1 >/dev/null)"; then
+      err=""
+    else
+      printf '%s\n' "$err" >&2; err="${err##*$'\n'}"; err="${err:-git gave no reason}"
     fi
-    while read -r key path; do
-      sub="${key#submodule.}"; sub="${sub%.path}"
-      git -C "$worktree_dir" submodule update --init -- "$path" ||
-        init_from_main_copy "$worktree_dir" "$sub" "$path" ||
-        failed+=("$path")
-    done <<< "$entries"
-  fi
-  if (( ${#failed[@]} )); then
-    local names
-    printf -v names '%s, ' "${failed[@]}"
-    echo "Error: submodule init failed for ${names%, }; partial worktree: $worktree_dir" >&2; return 1
-  fi
+    if [ -z "$err" ]; then
+      warn="WARN submodule $path: pinned $pin not fetchable from remote — initialised from local clone $ROOT/$path (push it)"
+    else
+      warn="WARN submodule $path: not initialised ($err) — worktree created without it"
+    fi
+    warnings+=("$warn"); echo "$warn" >&2
+  done 3<<< "$entries"
   echo "Worktree ready: $worktree_dir"
   echo "Branch: $branch (from $base at ${sha:0:12})"
+  (( ${#warnings[@]} == 0 )) || printf '%s\n' "${warnings[@]}"
 }
 
 # A worktree's uncommitted changes, plugin content included.

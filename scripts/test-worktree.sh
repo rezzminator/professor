@@ -98,11 +98,6 @@ FAIL_LIST=1 invoke prune
 if [[ "$rc" -ne 0 && -d "$repo/.worktrees/orphan" && ! -f "$trace" && "$out" == *'enumerat'* ]]; then
   ok 'F9: failed registration enumeration deletes nothing and fails visibly'
 else bad 'F9: failed registration enumeration deletes nothing and fails visibly' "rc=$rc; out=$out"; fi
-fixture
-FAIL_SUBMODULE=1 invoke create submodule-failed
-if [[ "$rc" -ne 0 && -d "$repo/.worktrees/submodule-failed" && "$out" == *'partial worktree:'* && "$out" != *'Worktree ready:'* && ! -f "$trace" ]]; then
-  ok 'F16: failed submodule setup names partial worktree and never claims readiness'
-else bad 'F16: failed submodule setup names partial worktree and never claims readiness' "rc=$rc; out=$out"; fi
 INSTALL_CASE=1 fixture
 invoke create install-failed
 if [[ "$rc" -ne 0 && -d "$repo/.worktrees/install-failed" && "$out" == *'partial worktree:'* && "$out" != *'Worktree ready:'* && ! -f "$trace" ]]; then
@@ -268,7 +263,9 @@ if [[ "$rc" -eq 0 && "$out" == *'Worktree ready:'* && "$out" == *'Resuming incom
 else bad 'F6: retry after hashing recovers records final bytes before readiness' "rc=$rc; out=$out"; fi
 # A repo with a submodule: create populates it, so a clean worktree holds an initialized submodule
 # (`ignore = dirty`, as this repo's plugins carry it, hides the submodule's own edits from plain status).
-submodule_fixture() {
+# submodule_repo: a fixture whose main checkout holds the initialized submodule vendor; submodule_fixture
+# then creates worktree <name> from it.
+submodule_repo() {
   fixture
   local sub="$T/sub $seq"
   /usr/bin/git init -q -b main "$sub" || exit 2
@@ -279,10 +276,27 @@ submodule_fixture() {
   /usr/bin/git -C "$repo" config -f .gitmodules submodule.vendor.ignore dirty || exit 2
   /usr/bin/git -C "$repo" add .gitmodules
   /usr/bin/git -C "$repo" -c user.name=fixture -c user.email=fixture@example.invalid -c commit.gpgsign=false commit -q -m vendor || exit 2
+}
+submodule_fixture() {
+  submodule_repo
   invoke create "$1"
   [[ "$rc" -eq 0 && -f "$repo/.worktrees/$1/vendor/lib.txt" ]] || { echo "test-worktree: setup failure: create did not populate the submodule: $out" >&2; exit 2; }
 }
 export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=protocol.file.allow GIT_CONFIG_VALUE_0=always
+# A gitlink only the main checkout's clone holds: its remote never received the commit.
+submodule_repo
+sgit() { /usr/bin/git -C "$1" -c user.name=fixture -c user.email=fixture@example.invalid -c commit.gpgsign=false "${@:2}"; }
+printf 'local only\n' > "$repo/vendor/lib.txt" && sgit "$repo/vendor" commit -q -am local && sgit "$repo" commit -q -am 'bump vendor' || exit 2
+local_sha="$(sgit "$repo/vendor" rev-parse HEAD)"
+invoke create unpushed-pin
+if [[ "$rc" -eq 0 && "$out" == *'Worktree ready:'* && "$(sgit "$repo/.worktrees/unpushed-pin/vendor" rev-parse HEAD 2>&1)" == "$local_sha" && "$(grep -c "^WARN submodule vendor: pinned ${local_sha:0:12} not fetchable from remote — initialised from local clone $repo/vendor (push it)$" "$T/out")" == 2 ]]; then
+  ok 'F16: a pinned submodule commit missing on its remote inits from the main checkout clone, WARN on stderr and in the summary, exit 0'
+else bad 'F16: a pinned submodule commit missing on its remote inits from the main checkout clone, WARN on stderr and in the summary, exit 0' "rc=$rc; out=$out"; fi
+submodule_repo
+FAIL_SUBMODULE=1 invoke create submodule-failed
+if [[ "$rc" -eq 0 && "$out" == *'Worktree ready:'* && ! -e "$repo/.worktrees/submodule-failed/vendor/lib.txt" && "$(grep -c '^WARN submodule vendor: not initialised (synthetic submodule failure) — worktree created without it$' "$T/out")" == 2 ]] && grep -qx 'alloc submodule-failed' "$trace"; then
+  ok 'F16: a submodule neither its remote nor the main checkout clone serves leaves the create complete, WARN on stderr and in the summary, exit 0'
+else bad 'F16: a submodule neither its remote nor the main checkout clone serves leaves the create complete, WARN on stderr and in the summary, exit 0' "rc=$rc; out=$out"; fi
 submodule_fixture clean-sub
 invoke remove clean-sub
 if [[ "$rc" -eq 0 && ! -d "$repo/.worktrees/clean-sub" && "$out" == *'Worktree removed'* ]] && grep -qx 'free clean-sub' "$trace"; then
@@ -304,7 +318,6 @@ invoke remove unpushed-sub
 if [[ "$rc" -ne 0 && -d "$w/vendor" && "$out" == *'on no remote branch'* && "$out" != *'Worktree removed'* ]] && ! grep -qx 'free unpushed-sub' "$trace"; then
   ok 'F1: a submodule commit on no remote branch refuses removal without --discard (its objects go with the worktree)'
 else bad 'F1: a submodule commit on no remote branch refuses removal without --discard (its objects go with the worktree)' "rc=$rc; out=$out"; fi
-sgit() { /usr/bin/git -C "$1" -c user.name=fixture -c user.email=fixture@example.invalid -c commit.gpgsign=false "${@:2}"; }
 # A commit on a local submodule branch whose HEAD went back to the recorded commit: status is clean,
 # yet the branch's objects live only in this worktree's private Git directory.
 submodule_fixture branch-sub

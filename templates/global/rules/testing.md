@@ -1,6 +1,6 @@
 ---
 visible-to:
-  include: ["flights-foreman", "flights-foreman-sonnet", "flights-lander", "flights-speccer"]
+  include: ["main", "flights-foreman", "flights-foreman-sonnet", "flights-lander", "flights-speccer"]
 ---
 
 # Tests: the fewest that reach the most

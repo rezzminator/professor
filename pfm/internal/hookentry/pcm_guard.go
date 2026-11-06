@@ -93,6 +93,7 @@ type pcmGuardScope struct {
 	configs     []string
 	engine      bool
 	roots       []string
+	warn        io.Writer
 }
 
 // pcmGuardJudge collects one call's verdict: the paths only pcm writes, the
@@ -116,6 +117,8 @@ type pcmGuardJudge struct {
 	escapedBlind      []string
 	// trusted memoises trusts' git reads by script path.
 	trusted map[string]bool
+	// grants memoises each grant file's directories for agent, by path.
+	grants map[string][]string
 }
 
 // PcmGuard is the PreToolUse hook on the edit tools and Bash that denies a
@@ -123,7 +126,9 @@ type pcmGuardJudge struct {
 // (in a Claude config dir only agents/, commands/, rules/ and skills/), the
 // Professor clone's templates/ — to every caller but the pcm agent, and a
 // write under templates/themes/ to every caller but themer. It keeps no
-// state: the payload's exact agent_type is the exemption. A read or decode
+// state: the payload's exact agent_type is the exemption, and a project's
+// .claude/pcm-guard.json may grant an agent directories under that .claude/
+// (pcmGuardJudge.granted). A read or decode
 // failure and a parser error are fail-open to stderr; a write target or a
 // part it cannot read is denied when the command names a prompt file.
 func PcmGuard(input io.Reader, stdout, stderr io.Writer) int {
@@ -181,7 +186,7 @@ func PcmGuard(input io.Reader, stdout, stderr io.Writer) int {
 // leaves that root unguarded, with one stderr line.
 func pcmGuardNewScope(stderr io.Writer, engine bool) pcmGuardScope {
 	home := storeGuardGet(guardHomeEnv)
-	scope := pcmGuardScope{home: home, engine: engine}
+	scope := pcmGuardScope{home: home, engine: engine, warn: stderr}
 	if engine {
 		scope.roots = engineGuardRoots(home)
 	}
@@ -290,7 +295,7 @@ func (judge *pcmGuardJudge) path(abs string) {
 		if !slices.Contains(judge.themeOnly, abs) {
 			judge.themeOnly = append(judge.themeOnly, abs)
 		}
-	case !theme && judge.agent != pcmGuardWriter:
+	case !theme && judge.agent != pcmGuardWriter && !judge.granted(abs):
 		if !slices.Contains(judge.pcmOnly, abs) {
 			judge.pcmOnly = append(judge.pcmOnly, abs)
 		}

@@ -144,5 +144,5 @@ In order: "Infrastructure updated, N files changed"; the changes (what and why);
 - Keep it DRY: reference `CLAUDE.md` from agents, define once, prefer deletion over addition.
 - Every pipeline artifact names its consumer; a write-only artifact is not added.
 - Parallel agents get their exact slice and read list plus a thin shared header; a shared contract lives once in a file each brief names.
-- Every check names what its own broken state reports (the `coding` rule): build the signal telling broken from clean into the instrument (probe, gate, audit, lint), or it is a coincidence detector.
+- Every check names what its own broken state reports: build the signal telling broken from clean into the instrument (probe, gate, audit, lint), or it is a coincidence detector.
 - After each run, confirm this file's wiring still matches the pipeline; if stale, update it before reporting.

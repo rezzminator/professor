@@ -4,9 +4,9 @@ One prompt per engine, assembled at install from three source parts, plus the Cl
 
 ## The assembly
 
-Every engine reads the same Professor: a shared head (identity, voice, stance, work rhythm),
-an engine middle (the mechanics only that harness has), and a shared tail (orchestration and
-the standing laws). `pfm install` and `pfm generate` join the three from the parts in the
+Every engine reads the same Professor: a shared head (identity, craft, command execution, work rhythm, boundaries, model selection),
+an engine middle (the mechanics only that harness has), and a shared tail (orchestration, then
+§ Talking to the user: voice, stance, replies, the Verdict and whole example replies). `pfm install` and `pfm generate` join the three from the parts in the
 recorded clone's `pfm/harness-prompts/` and write one file per engine, so what an engine reads is
 one file on disk, not an assembly the launcher has to get right. A host with no such tree (a
 binary-only install, whose tree holds only `generated/`) joins the copy embedded in the binary;
@@ -44,7 +44,7 @@ exist after install.
   installed there. `pfm doctor`'s `codex developer_instructions=` row reports `ok`, `MISSING`,
   `CHECK FAILED` and related states (e.g. `no-accounts`, `MISMATCH`) for each configured account. Full-history children inherit context; fresh/partial-history
   children whose role or custom instruction replaces the prompt need the native coordination and waiting
-  rules plus the two orchestration sections in their briefing. These instructions guide tool
+  rules plus § Orchestration in their briefing. These instructions guide tool
   selection; they do not remove the professor MCP's chat_* tools.
   Ordinary child completions queue mailbox messages with `trigger_turn=false`; they do not start an idle
   parent turn. The Codex appendix keeps the parent turn active and calls `wait_agent` with its configured

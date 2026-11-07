@@ -245,10 +245,10 @@ func TestTransitionsQuietMonitorCarriesAnswerWithoutWorking(t *testing.T) {
 		"x": {idleFor(7, "first"), working("first"), working("first"), idleFor(1, "second"), gone()},
 	})
 	// A one-section reply ends on its lone Verdict; a sectioned one ends on the
-	// Final verdict that follows its section verdicts.
+	// Ultimate verdict that follows its section verdicts.
 	answers := []string{
 		"Heading\n\n**Verdict:** DONE with a \"quote\"\nAnother line",
-		"First\n\n**Verdict:** first section\n\nSecond\n\n**Verdict:** second section\n\n**Final verdict:** BOTH done\n",
+		"First\n\n**Verdict:** first section\n\nSecond\n\n**Verdict:** second section\n\n**Ultimate verdict:** BOTH done\n",
 	}
 	calls := 0
 	lines, _, err := runFleet(t, namedFleet(seats, "x"), WatchOptions{
@@ -269,7 +269,7 @@ func TestTransitionsQuietMonitorCarriesAnswerWithoutWorking(t *testing.T) {
 	}
 	assertLines(t, lines, []string{
 		`SEEN x idle idle_seconds=7 answer="**Verdict:** DONE with a \"quote\""`,
-		`IDLE x idle_seconds=1 answer="**Final verdict:** BOTH done"`,
+		`IDLE x idle_seconds=1 answer="**Ultimate verdict:** BOTH done"`,
 		"EXIT x",
 	})
 }

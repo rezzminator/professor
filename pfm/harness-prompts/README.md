@@ -6,7 +6,7 @@ One prompt per engine, assembled at install from three source parts, plus the Cl
 
 Every engine reads the same Professor: a shared head (identity, craft, command execution, work rhythm, boundaries, model selection),
 an engine middle (the mechanics only that harness has), and a shared tail (orchestration, then
-§ Talking to the user: voice, stance, replies, the Verdict and whole example replies). `pfm install` and `pfm generate` join the three from the parts in the
+§ Talking to the user: words, shape, questions, the Verdict and whole example replies). `pfm install` and `pfm generate` join the three from the parts in the
 recorded clone's `pfm/harness-prompts/` and write one file per engine, so what an engine reads is
 one file on disk, not an assembly the launcher has to get right. A host with no such tree (a
 binary-only install, whose tree holds only `generated/`) joins the copy embedded in the binary;

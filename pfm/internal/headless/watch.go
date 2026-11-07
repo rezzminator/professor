@@ -533,7 +533,7 @@ func (run *fleetRun) answerSuffix(ctx context.Context, seat *watchedSeat) string
 		}
 		// The reply's last verdict line concludes it: a sectioned reply ends on
 		// its Ultimate verdict, after the section verdicts.
-		if strings.HasPrefix(line, "**Verdict:**") || strings.HasPrefix(line, "**Ultimate verdict:**") {
+		if strings.HasPrefix(line, "**Verdict:**") || strings.HasPrefix(line, "# Ultimate verdict:") {
 			verdict = line
 		}
 	}

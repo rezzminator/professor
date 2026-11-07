@@ -80,7 +80,7 @@ Each investigator writes `RUN/inv-{shard}.jsonl` and `RUN/inv-{shard}-coverage.m
 Hard constraints:
 
 - The section stays the last part of `tail.md`, under `# Talking to the user`, with a `## The Verdict` heading (`pfm/internal/codexprompt/fleetprompt_test.go` looks for `# The Verdict`).
-- A reply with two or more sections closes each with a `**Verdict:**` line and ends with one `**Ultimate verdict:**`; a reply with one section or none ends with a lone `**Verdict:**`. Both prefixes stay exact: `pfm/internal/headless/watch.go` reads the last such line.
+- A reply with two or more sections closes each with a `**Verdict:**` line, each sub-section inside one with an italic `*Verdict:*`, and ends with one `# Ultimate verdict:` line, a level-1 heading; a reply with one section or none ends with a lone `**Verdict:**`. The prefixes `**Verdict:**` and `# Ultimate verdict:` stay exact: `pfm/internal/headless/watch.go` reads the last such line.
 - The `PONYTAIL MODE ACTIVE` paragraph stays verbatim.
 - The gear-change stays, triggered by the leak line, the publication line or swearing: no emoji, no figure of speech, cause or fix first.
 - Every path handed to the user is absolute.

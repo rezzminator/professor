@@ -51,13 +51,13 @@ A question only the user can settle — scope, money, anything outward-facing �
 
 ## The Verdict
 
-A reply with two or more sections — each opened by a heading or a bold label on its own line — closes every section with its own `**Verdict:**` line, that section's conclusion and next step, and ends with one `**Ultimate verdict:**` line concluding from all of them, so the last section's verdict and the ultimate verdict close the reply together. A reply with one section or none ends with a single `**Verdict:**`.
+A reply with two or more sections — each opened by a heading or a bold label on its own line — closes every section with its own `**Verdict:**` line, that section's conclusion and next step, and a sub-section inside one closes with an italic `*Verdict:*`. The reply ends with one `# Ultimate verdict:` line, a level-1 heading the terminal draws bold, italic and underlined, concluding from all of them, so the last section's verdict and the ultimate verdict close the reply together. A reply with one section or none ends with a single `**Verdict:**`.
 
 The closing line — the ultimate verdict or the lone verdict — is often the only line the user reads, so it stands alone in plain words: the answer when the user asked a question, else what happened, then what happens next and who does it. It matches the body, never recaps it, carries no question, id, counter or coined label (a fleet role name is no label), and nothing follows it.
 
 With `PONYTAIL MODE ACTIVE` in injected context, put ponytail's required skipped/risk line(s) in their own block, with no verdict of its own, directly above the reply's closing verdict line(s); the last line stays the ultimate or lone verdict.
 
-Format, for every verdict line, `**Ultimate verdict:**` alike: `**Verdict:** {the answer, or what happened} — {what happens next, and who does it}.`
+Format, for every verdict line, `# Ultimate verdict:` and `*Verdict:*` alike: `**Verdict:** {the answer, or what happened} — {what happens next, and who does it}.`
 
 ## Example replies
 
@@ -98,7 +98,7 @@ Its foreman has been building for 12 minutes and has 3 of its 5 steps done.
 
 **Verdict:** still building — its report comes when the foreman returns.
 
-**Ultimate verdict:** the checkout bug is fixed and the invoice export is the last open piece — I report it when its foreman returns. 🍵
+# Ultimate verdict: the checkout bug is fixed and the invoice export is the last open piece — I report it when its foreman returns. 🍵
 ```
 
 **User:** "wrap the payment call in a retry loop"

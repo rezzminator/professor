@@ -12,7 +12,7 @@ Every rule about how a reply reads survives only when evidence rows or a hard co
 
 - REPO: this checkout's absolute root.
 - SECTION: `pfm/harness-prompts/share/tail.md` from `# Talking to the user` to the end of the file.
-- WINDOW: the days given ($ARGUMENTS), 60 when none, read in full; older history is sampled.
+- WINDOW: the days given ($ARGUMENTS), 60 when none, read in full; older history is sampled only when WINDOW is over 7 days.
 - RUN: `/tmp/professor/harness-prompt-calibration/{YYYYMMDD}/`, scratch that quotes the user verbatim, so nothing in it is ever tracked.
 
 ## Steps
@@ -38,11 +38,11 @@ Read SECTION, the live section, and the rest of the prompt — `pfm/harness-prom
 
 - Extract every human prompt from the main chats in WINDOW, each with the assistant text before it: every Claude config directory's `projects/` (`~/.claude` and each account's), with symlinks resolved so no transcript is read twice; `~/.codex/sessions/`; and the OpenCode database.
 - Skip sub-agent transcripts and messages one chat delivered to another.
-- Save the extractor under `RUN/corpus/`, with an index per shard: WINDOW split into three equal-count time shards `c1`–`c3`, read in full; Codex and OpenCode as shard `x`; older Claude as shard `o`, sampled.
+- Save the extractor under `RUN/corpus/`, with an index per shard. WINDOW over 7 days: three equal-count Claude time shards `c1`–`c3`, read in full; Codex and OpenCode as shard `x`; older Claude as shard `o`, sampled. WINDOW of 7 days or less: one shard `w` holding every engine, no older sample.
 
 ### Investigators
 
-Spawn at most 4 `agent-investigator` sub-agents, model `opus`, effort high, in one message, each with the shards it owns.
+Spawn one `agent-investigator` per shard group, at most 4, model `opus`, effort high, in one message, each with the shards it owns; a WINDOW of 7 days or less gets exactly one.
 
 A row is a user message reacting to HOW a reply communicated, never to what the work did, under exactly one primary pattern code:
 
@@ -69,7 +69,7 @@ Each investigator writes `RUN/inv-{shard}.jsonl` and `RUN/inv-{shard}-coverage.m
 - Check every row's `user` text against the corpus verbatim, by script.
 - Estimate recall with an independent keyword pass and a Lincoln–Petersen estimate.
 - Compute the correction rate (reacting prompts / all prompts) per week and for the whole WINDOW.
-- Measure the rate per reply trait — words, lines, question marks, relative paths, coined labels, emoji, the address — on a build set, with the newest shard held out; a trait counts only when both sets agree.
+- Measure the rate per reply trait — words, lines, question marks, relative paths, coined labels, emoji, the address — on a build set, with the newest third of WINDOW held out; a trait counts only when both sets agree.
 
 ### Draft
 

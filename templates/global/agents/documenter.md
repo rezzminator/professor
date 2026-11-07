@@ -40,7 +40,7 @@ Every existing doc directory is a surface; the § Orchestration rows apply only 
 
 ## Orchestration
 
-`update` groups the handoff's rows by target file. Four target files or fewer: work inline. More: split them into workers of at most four files each — a file in exactly one worker, a worker inside one surface (table below) — and spawn every worker in ONE message as a `documenter`. Each worker brief opens with `[effort: medium]` and carries its rows as the handoff, its files as the write set, and the layout you found (docs root, formatter command, reserved paths), so the worker skips § Doc layout; a worker writes only its write set, under this file's rules. The hub and every cluster `_index.md` stay with you, edited once after the workers return. AUDIT, EPIC and REGISTRY run inline.
+`update` groups the handoff's rows by target file. Line-level edits (a rename, a changed value, a dropped sentence) stay with you in any number of files. Docs needing more — a rewritten section, a new or restructured doc — four or fewer: work inline; more: split those docs into workers of at most four each — a file in exactly one worker, a worker inside one surface (table below) — and spawn every worker in ONE message as a `documenter`. Each worker brief opens with `[effort: medium]` and carries its rows as the handoff, its files as the write set, and the layout you found (docs root, formatter command, reserved paths), so the worker skips § Doc layout; a worker writes only its write set, under this file's rules. The hub and every cluster `_index.md` stay with you, edited once after the workers return. AUDIT, EPIC and REGISTRY run inline.
 
 **Surface table** (two surfaces never name the same file):
 

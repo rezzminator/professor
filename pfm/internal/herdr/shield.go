@@ -292,22 +292,23 @@ func (shield *Shield) paneHolder(ctx context.Context, socket, pane string) (*Shi
 	if err != nil {
 		return nil, fmt.Errorf("herdr pane %s runs herdr-shield: %w", pane, err)
 	}
-	var bound *ShieldHolder
+	var bound []*ShieldHolder
 	for index := range holders {
 		holder := &holders[index]
-		if holder.Binding.Socket != upstream || holder.Binding.Pane != pane || !holder.running() {
-			continue
+		if holder.Binding.Socket == upstream && holder.Binding.Pane == pane && holder.running() {
+			bound = append(bound, holder)
 		}
-		if bound != nil {
-			return nil, fmt.Errorf("herdr pane %s: herdr-shield binds holders %s and %s", pane, bound.ID, holder.ID)
-		}
-		bound = holder
 	}
-	if bound == nil && panes[pane] == shieldProtected {
+	switch {
+	case len(bound) == 1:
+		return bound[0], nil
+	case len(bound) > 1:
+		return shield.innermostHolder(pane, bound)
+	case panes[pane] == shieldProtected:
 		return nil, fmt.Errorf("herdr pane %s: herdr-shield marks it %s but lists no running holder bound to it on %s",
 			pane, shieldProtected, upstream)
 	}
-	return bound, nil
+	return nil, nil
 }
 
 // list runs `herdr-shield list --json` against the Herdr server at socket, or

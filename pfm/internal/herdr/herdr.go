@@ -5,6 +5,8 @@
 // clears pfm's title. A native Claude pane Herdr detects is Herdr's own: its
 // screen detection reads the state and its bundled Claude integration
 // (integration.go) reports the session. Outside Herdr nothing here runs.
+// A holder `herdr-shield attach` moved to another pane is followed there
+// (shield_move.go).
 package herdr
 
 import (

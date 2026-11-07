@@ -186,6 +186,11 @@ func proveHerdrSeatSnapshot(
 			candidate = pane
 		}
 	}
+	if candidate == nil && seat.SeatHostPID > 0 {
+		if candidate, err = herdrShieldMovedPane(ctx, proc, seat, panes); err != nil {
+			return seat, false, fmt.Errorf("seat %s ownership unproved: %w", seat.SeatID, err)
+		}
+	}
 	if candidate == nil {
 		if seat.SeatHostPID == 0 {
 			retired, err := HerdrSeatRetired(ctx, proc, seat)

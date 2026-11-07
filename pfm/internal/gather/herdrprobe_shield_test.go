@@ -12,14 +12,24 @@ import (
 
 // A pane herdr-shield holds shows Herdr only the attach client: its owner is
 // proved through the holder bound to that pane, whose shell runs the
-// supervisor, and never through a holder bound to another pane.
+// supervisor, and never through a holder bound to another pane. A seat whose
+// pane is gone follows its holder to the pane `herdr-shield attach` moved it to.
 func TestProveHerdrSeatThroughHerdrShield(t *testing.T) {
 	for _, tc := range []struct {
-		name, bound string
-		owned       bool
+		name, bound, seatPane, seatTerminal string
+		owned                               bool
+		diagnostic                          string
 	}{
-		{"holder bound to the pane", "w1:p1", true},
-		{"holder bound to another pane", "w1:p9", false},
+		{name: "holder bound to the pane", bound: "w1:p1", seatPane: "w1:p1", seatTerminal: "terminal-one", owned: true},
+		{
+			name: "holder bound to another pane", bound: "w1:p9", seatPane: "w1:p1", seatTerminal: "terminal-one",
+			diagnostic: "seat owner supervisor is outside pane process tree",
+		},
+		{name: "holder moved from a closed pane", bound: "w1:p1", seatPane: "w1:p0", seatTerminal: "terminal-old", owned: true},
+		{
+			name: "holder moved to a pane Herdr does not list", bound: "w1:p9", seatPane: "w1:p0", seatTerminal: "terminal-old",
+			diagnostic: "seat owner ownership unproved: terminal not present in pane.list",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
@@ -41,7 +51,7 @@ func TestProveHerdrSeatThroughHerdrShield(t *testing.T) {
 			testjail.StageHerdrShield(t, testjail.HerdrShieldListing(5, 2, 10, 3, tc.bound, socket), 0)
 			seat := fleetdb.Seat{
 				SeatID: "owner", Backend: "herdr", State: "live", HerdrSocket: socket,
-				HerdrPane: "w1:p1", HerdrWorkspace: "w1", HerdrTerminalID: "terminal-one",
+				HerdrPane: tc.seatPane, HerdrWorkspace: "w1", HerdrTerminalID: tc.seatTerminal,
 				SeatHostPID: 20, SeatHostStart: 9,
 			}
 			if err := db.PutSeat(ctx, seat); err != nil {
@@ -64,11 +74,23 @@ func TestProveHerdrSeatThroughHerdrShield(t *testing.T) {
 				},
 			}}
 			got, owned, err := ProveHerdrSeat(ctx, db, proc, seat)
-			if owned != tc.owned || (err == nil) != tc.owned {
-				t.Fatalf("proof owned=%v err=%v; want owned=%v", owned, err, tc.owned)
+			if tc.diagnostic != "" {
+				if owned || err == nil || err.Error() != tc.diagnostic {
+					t.Fatalf("proof owned=%v err=%v; want error %q", owned, err, tc.diagnostic)
+				}
+				return
 			}
-			if owned && (got.HerdrPane != "w1:p1" || got.SeatHostPID != 20) {
-				t.Fatalf("proved seat=%+v, want pane w1:p1 supervisor 20", got)
+			if !owned || err != nil {
+				t.Fatalf("proof owned=%v err=%v; want owned", owned, err)
+			}
+			stored, found, err := db.Seat(ctx, "owner")
+			if err != nil || !found {
+				t.Fatalf("read proved seat: found=%v err=%v", found, err)
+			}
+			for _, row := range []fleetdb.Seat{got, stored} {
+				if row.HerdrPane != "w1:p1" || row.HerdrTerminalID != "terminal-one" || row.SeatHostPID != 20 {
+					t.Fatalf("proved seat=%+v, want pane w1:p1 terminal-one supervisor 20", row)
+				}
 			}
 		})
 	}

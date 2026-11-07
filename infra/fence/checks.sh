@@ -606,9 +606,9 @@ checks_templates_format_md() {
 
 }
 
-checks_templates_flight_templates() {
-  head_ "templates — flight prompt contracts"
-  run "templates: flight prompt contracts" -- bash "$REPO_ROOT/scripts/test-flight-templates.sh"
+checks_templates_reviewer_templates() {
+  head_ "templates — reviewer prompt contracts"
+  run "templates: reviewer prompt contracts" -- bash "$REPO_ROOT/scripts/test-reviewer-templates.sh"
 }
 
 checks_templates_unit_script() { # <name>: scripts/test-<name>.sh, the self-test of .claude/scripts/<name>.sh, on its default script
@@ -772,7 +772,7 @@ checks_templates_steps() { # <callback>: callback <step name> <command> [args...
   local add="$1" name
   checks_named_template_steps "$add" clone leak plugin-logs plugin-lab placeholders scratch-paths descriptions mirrors \
     generated-agents release-check refresh-scope plugin-workflows worktree-script dev-report \
-    format-md flight-templates theme-glyphs || return 1
+    format-md reviewer-templates theme-glyphs || return 1
   for name in test unit-path; do
     "$add" "templates.$name-tests" checks_templates_unit_script "$name" || return 1
   done

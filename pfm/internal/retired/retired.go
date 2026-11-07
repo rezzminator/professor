@@ -95,6 +95,14 @@ type Name struct {
 	Route bool `json:"route,omitempty"`
 }
 
+// InSuccessor reports whether the match of n.Name at start in line is part of
+// n's own successor, which spells the old name inside it
+// (`flights:lander-inventory` succeeds `lander-inventory`): the live name.
+func (n Name) InSuccessor(line string, start int) bool {
+	at := strings.Index(n.Successor, n.Name)
+	return at >= 0 && start >= at && strings.HasPrefix(line[start-at:], n.Successor)
+}
+
 // StateDir is one retired directory under ~/.local/state/pfm.
 type StateDir struct {
 	Name string `json:"name"`

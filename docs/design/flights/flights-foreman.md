@@ -1,4 +1,4 @@
-# flights-foreman
+# flights:foreman
 
 A foreman turns one request into landed-ready code for the fewest tokens read. It builds by its own hand: it reads what the build needs, writes the whole change and tests it once. A child exists only for an area disjoint from its own. It never lands, commits or asks the user. Why one builder: [flights.md](flights.md#why-the-foreman-builds-by-its-own-hand) (one brief built three ways: $8.04, $19.03 for the foreman tree, $6.87 for a one-builder prototype).
 
@@ -24,10 +24,10 @@ A foreman turns one request into landed-ready code for the fewest tokens read. I
 
 | Agent | Model · effort | For |
 | --- | --- | --- |
-| `flights-foreman` | opus · high | design choices or ambiguity, unfamiliar code, an unknown cause, work across several modules, the toughest work |
-| `flights-foreman-sonnet` | sonnet · high | a clear path: the pattern is in the code |
+| `flights:foreman` | opus · high | design choices or ambiguity, unfamiliar code, an unknown cause, work across several modules, the toughest work |
+| `flights:foreman-sonnet` | sonnet · high | a clear path: the pattern is in the code |
 
-Difficulty and ambiguity choose the tier, never size: a 3,000-line rename with a pattern is `flights-foreman-sonnet` work, and a 40-line race is `flights-foreman` work.
+Difficulty and ambiguity choose the tier, never size: a 3,000-line rename with a pattern is `flights:foreman-sonnet` work, and a 40-line race is `flights:foreman` work.
 
 ## Effort
 
@@ -64,8 +64,8 @@ A child goes out only when both hold: the foreman is busy with its own part, and
 
 | Area | Goes to |
 | --- | --- |
-| A clear path, the pattern is in the code | `flights-foreman-sonnet` |
-| Design, debugging, judgment | `flights-foreman` |
+| A clear path, the pattern is in the code | `flights:foreman-sonnet` |
+| Design, debugging, judgment | `flights:foreman` |
 | Docs | `documenter` |
 | Prompt files | `pcm` |
 
@@ -78,7 +78,7 @@ A child's brief carries:
 
 - the piece;
 - `OWNS`, the files it changes, and `NOT YOURS`, the foreman's files;
-- the exact change, or the problem for a `flights-foreman` child;
+- the exact change, or the problem for a `flights:foreman` child;
 - the acceptance;
 - the test command;
 - the worktree;
@@ -102,7 +102,7 @@ It never carries a file of its own: the brief is the message.
 ## Repairs
 
 - **First failure:** a child whose return fails its acceptance gets one SendMessage naming the cause, and resumes.
-- **Second failure:** if it fails again, the foreman fixes the piece itself or hands it to a `flights-foreman` child.
+- **Second failure:** if it fails again, the foreman fixes the piece itself or hands it to a `flights:foreman` child.
 - **No stopping:** the foreman does not stop the flight for a red.
 
 ## Limits
@@ -139,6 +139,6 @@ One message:
 
 ## Declaration
 
-- **Base:** `templates/global/agents/flights-foreman.md`, opus at effort high, `effortControl` floor medium and ceiling xhigh.
-- **Sonnet tier:** `flights-foreman-sonnet.md` is a `from: flights-foreman` declaration on sonnet, rendered into `templates/generated/agents/`. The base carries no `tools:` line, so every tool, the effort buttons included, is available as for `general-purpose`; the sonnet render inherits that and the `effortControl` band ([flights.md](flights.md#effort-buttons)).
+- **Base:** `plugins/flights/plugins/flights/agents/foreman.md`, opus at effort high, `effortControl` floor medium and ceiling xhigh.
+- **Sonnet tier:** `plugins/flights/plugins/flights/agents/foreman-sonnet.md` is a full agent file on sonnet at effort high with the same `effortControl` band. The base carries no `tools:` line, so every tool, the effort buttons included, is available as for `general-purpose`; the sonnet file carries none either ([flights.md](flights.md#effort-buttons)).
 - **Tools:** every tool, no `tools:` line.

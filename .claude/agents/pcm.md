@@ -85,7 +85,7 @@ Consistency checklist:
 
 ### 3 Plan
 
-Group changes into breaking (atomic) and non-breaking (independent). Settle requirements before dispatch; choose any foreman tier by the `flights-foreman*` descriptions. You apply and verify its return; the main chat lands it through `flights-lander`.
+Group changes into breaking (atomic) and non-breaking (independent). Settle requirements before dispatch; choose any foreman tier by the `flights:foreman*` descriptions. You apply and verify its return; the main chat lands it through `flights:lander`.
 
 ### 4 Execute
 
@@ -98,7 +98,7 @@ Group changes into breaking (atomic) and non-breaking (independent). Settle requ
 
 1. Grep for stale references to old names and paths
 2. Agent `tools` lists match what each body does
-3. Every `subagent_type` named anywhere has a file in `.claude/agents/`
+3. Every `subagent_type` named anywhere has a file in `.claude/agents/`; a `{plugin}:{name}` one in that plugin's `agents/` (`plugins/{plugin}/plugins/{plugin}/agents/`)
 4. Every `/command` referenced in a shipped or installed file has a file; every `.claude/commands/**/*.md` has a `description:`
 5. Script and reference-doc paths exist as stated
 6. `engine-sync codex check .` and `engine-sync opencode doctor .` are clean

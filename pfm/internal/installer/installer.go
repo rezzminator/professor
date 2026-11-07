@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/claudeplugin"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/globallink"
@@ -1560,7 +1561,7 @@ func (installer *engine) retireRenamedGlobalAgents() error {
 				continue
 			}
 		} else {
-			frontmatterName, readErr := agentFrontmatterName(path)
+			frontmatterName, readErr := claudeplugin.AgentFrontmatterName(path)
 			if readErr != nil {
 				return fmt.Errorf("read retired global agent %s: %w", path, readErr)
 			}
@@ -1577,29 +1578,4 @@ func (installer *engine) retireRenamedGlobalAgents() error {
 	}
 
 	return nil
-}
-
-// agentFrontmatterName reads the `name:` field out of an agent Markdown
-// file's leading YAML frontmatter block, empty when the file has none or
-// the field is absent — the same shape engine-sync compiles agent identity
-// from.
-func agentFrontmatterName(path string) (string, error) {
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	lines := strings.Split(string(content), "\n")
-	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
-		return "", nil
-	}
-	for _, line := range lines[1:] {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "---" {
-			break
-		}
-		if name, found := strings.CutPrefix(trimmed, "name:"); found {
-			return strings.TrimSpace(name), nil
-		}
-	}
-	return "", nil
 }

@@ -36,8 +36,8 @@ func TestRunLineNamesTheRunAndItsTopRepeat(t *testing.T) {
 		},
 		{
 			name: "a typed sub-agent shows its type",
-			r:    &run{kind: "agent", agentType: "flights-lander", title: "land"},
-			want: []string{"flights-lander: land"},
+			r:    &run{kind: "agent", agentType: "flights:lander", title: "land"},
+			want: []string{"flights:lander: land"},
 		},
 	}
 	for _, c := range cases {

@@ -17,6 +17,7 @@ import (
 	"syscall"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/claudeplugin"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
 
@@ -167,10 +168,13 @@ func (installer *engine) ensureClaudePluginCopy(target *ClaudePluginTarget) erro
 		}
 		// Every other plugin's entry stays: each target adds its own.
 		manifest.Name = pfmconfig.ProfessorMarketplace
-		manifest.Owner = &devMarketplaceOwner{Name: claudePluginOwner, URL: "https://github.com/" + claudePluginOwner}
-		manifest.Plugins = append(slices.DeleteFunc(manifest.Plugins, func(entry devMarketplaceEntry) bool {
+		manifest.Owner = &claudeplugin.MarketplaceOwner{
+			Name: claudePluginOwner,
+			URL:  "https://github.com/" + claudePluginOwner,
+		}
+		manifest.Plugins = append(slices.DeleteFunc(manifest.Plugins, func(entry claudeplugin.MarketplaceEntry) bool {
 			return entry.Name == target.Name
-		}), devMarketplaceEntry{Name: target.Name, Source: "./plugins/" + target.Name})
+		}), claudeplugin.MarketplaceEntry{Name: target.Name, Source: "./plugins/" + target.Name})
 		if err := installer.writeDevMarketplaceManifest(message, manifestPath, backup, manifest); err != nil {
 			return err
 		}
@@ -192,7 +196,7 @@ func (installer *engine) ensureClaudePluginCopy(target *ClaudePluginTarget) erro
 // message, the current file copied to backup first when backup is set.
 func (installer *engine) writeDevMarketplaceManifest(
 	message, path, backup string,
-	manifest devMarketplaceManifest,
+	manifest claudeplugin.Marketplace,
 ) error {
 	raw, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
@@ -214,8 +218,8 @@ func (installer *engine) writeDevMarketplaceManifest(
 // other keys (a description) included; a manifest of another name or one that
 // does not parse is not current and comes back empty, rewritten whole; one
 // missing the plugin comes back with the entries it has.
-func devMarketplaceCurrent(path, plugin string) (devMarketplaceManifest, bool, error) {
-	var manifest devMarketplaceManifest
+func devMarketplaceCurrent(path, plugin string) (claudeplugin.Marketplace, bool, error) {
+	var manifest claudeplugin.Marketplace
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return manifest, false, nil
@@ -224,7 +228,7 @@ func devMarketplaceCurrent(path, plugin string) (devMarketplaceManifest, bool, e
 		return manifest, false, fmt.Errorf("read %s: %w", path, err)
 	}
 	if json.Unmarshal(raw, &manifest) != nil || manifest.Name != pfmconfig.ProfessorMarketplace {
-		return devMarketplaceManifest{}, false, nil
+		return claudeplugin.Marketplace{}, false, nil
 	}
 	for _, entry := range manifest.Plugins {
 		if entry.Name == plugin && entry.Source == "./plugins/"+plugin {
@@ -232,25 +236,6 @@ func devMarketplaceCurrent(path, plugin string) (devMarketplaceManifest, bool, e
 		}
 	}
 	return manifest, false, nil
-}
-
-// devMarketplaceManifest is a directory marketplace's .claude-plugin/marketplace.json.
-type devMarketplaceManifest struct {
-	Name        string                `json:"name"`
-	Description string                `json:"description,omitempty"`
-	Owner       *devMarketplaceOwner  `json:"owner,omitempty"`
-	Plugins     []devMarketplaceEntry `json:"plugins"`
-}
-
-type devMarketplaceOwner struct {
-	Name string `json:"name"`
-	URL  string `json:"url"`
-}
-
-// devMarketplaceEntry's Source is any: Claude also accepts an object source.
-type devMarketplaceEntry struct {
-	Name   string `json:"name"`
-	Source any    `json:"source"`
 }
 
 // pluginCopyChange is the change that brings mirror to checkout's content, or

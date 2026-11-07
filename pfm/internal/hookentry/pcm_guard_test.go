@@ -219,7 +219,7 @@ func (f pcmGuardFixture) bashWrites() []string {
 
 func TestPcmGuardDeniesEveryEditToolToTheMainChatAndOtherAgents(t *testing.T) {
 	f := pcmGuardHome(t)
-	for _, agent := range []string{"", "general-purpose", "flights-foreman", "PCM", "pcm2", "themer"} {
+	for _, agent := range []string{"", "general-purpose", "flights:foreman", "PCM", "pcm2", "themer"} {
 		for _, tool := range []string{"Edit", "Write", "MultiEdit", "NotebookEdit"} {
 			for _, target := range f.editTargets() {
 				t.Run(agent+"/"+tool+"/"+target, func(t *testing.T) {

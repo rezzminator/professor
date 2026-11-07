@@ -40,7 +40,7 @@ func TestRetiredRegistryNames(t *testing.T) {
 			"rnd":             true,
 			"tokens":          true,
 		},
-		Skills: map[string]bool{"transcript": true, "wave-builder": true},
+		Skills: map[string]bool{"plot-inventory": true, "transcript": true, "wave-builder": true},
 	}
 	if got := RetiredRegistryNames(names); !reflect.DeepEqual(got, want) {
 		t.Fatalf("RetiredRegistryNames() =\n%+v\nwant\n%+v", got, want)

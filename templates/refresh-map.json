@@ -37,9 +37,6 @@
     "global/agents/documenter.md": {
       "curated": true
     },
-    "global/agents/flights-foreman-sonnet.md": {
-      "curated": true
-    },
     "global/agents/reviewer-nt.md": {
       "curated": true
     },

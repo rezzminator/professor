@@ -31,7 +31,8 @@
       "forward-compaction",
       "auto-effort",
       "tool-visibility-controller",
-      "engine-sync"
+      "engine-sync",
+      "flights"
     ],
     "env": {},
     "costLedger": true,

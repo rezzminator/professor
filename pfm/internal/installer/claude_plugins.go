@@ -2,17 +2,15 @@ package installer
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
+	"github.com/rezzminator/professor/pfm/internal/claudeplugin"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/obs"
@@ -206,24 +204,6 @@ func (target ClaudePluginTarget) UndecidedNote() string {
 	return "its checkout is undecided: " + target.Undecided
 }
 
-func readClaudeSettingsDocument(path string) (map[string]any, error) {
-	raw, err := os.ReadFile(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		return map[string]any{}, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", path, err)
-	}
-	var document map[string]any
-	if err := json.Unmarshal(raw, &document); err != nil {
-		return nil, fmt.Errorf("parse %s: %w", path, err)
-	}
-	if document == nil {
-		document = map[string]any{}
-	}
-	return document, nil
-}
-
 func pluginEnabled(document map[string]any, id string) bool {
 	enabled, _ := document["enabledPlugins"].(map[string]any)
 	return enabled[id] == true
@@ -290,7 +270,7 @@ func (installer *engine) ensureClaudePlugins(ctx context.Context) error {
 	}
 	targets := ClaudePluginTargets(build)
 	var err error
-	run.document, err = readClaudeSettingsDocument(run.settingsPath)
+	run.document, err = claudeplugin.ReadSettings(run.settingsPath)
 	if err != nil {
 		return errors.Join(append(run.failures,
 			installer.pluginStepFailure(dir, fmt.Errorf("settings unreadable, state unknown: %w", err)))...)
@@ -487,7 +467,7 @@ func (installer *engine) refreshClaudePluginMarketplace(
 		return
 	}
 	// An unreadable record cannot say the marketplace is unknown, so the refresh still runs.
-	if _, known, err := readKnownMarketplaces(run.dir); err == nil {
+	if _, known, err := claudeplugin.ReadKnownMarketplaces(run.dir); err == nil {
 		if _, ok := known[marketplace]; !ok {
 			return
 		}
@@ -535,14 +515,14 @@ func (installer *engine) updateClaudePluginRecord(
 	run *claudePluginRun,
 	target *ClaudePluginTarget,
 ) error {
-	record, err := readClaudePluginInstalls(run.dir)
+	record, err := claudeplugin.ReadInstalls(run.dir)
 	if err != nil {
 		return err
 	}
 	_, failures := installer.updateClaudePluginEntries(ctx, run, target.ID, record[target.ID],
-		func(entry claudePluginInstall) string {
-			recorded := "at version " + EscapeControl(entry.version())
-			if entry.version() == "" {
+		func(entry claudeplugin.Install) string {
+			recorded := "at version " + EscapeControl(entry.Version)
+			if entry.Version == "" {
 				recorded = "with no version string"
 			}
 			return "plugin " + target.ID + " is disabled " + recorded +

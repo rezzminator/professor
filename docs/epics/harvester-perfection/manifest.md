@@ -8,7 +8,7 @@ The harvester gets every target — page, document, paper, file — by every tec
 
 ## Rulings (the user's, binding)
 
-- One item per brief, dispatched one at a time; every brief carries: "no flights-speccer, no flights-orchestrator, no gater — execute this yourself, start to finish; run only the affected tests in the fence, never the full suite."
+- One item per brief, dispatched one at a time; every brief carries: "no flights:speccer, no flights-orchestrator, no gater — execute this yourself, start to finish; run only the affected tests in the fence, never the full suite."
 - Merges to `develop` and host installs are authorized; push, tag and release are not.
 - Only gitter writes git; never `git stash`; the user's uncommitted files in the main checkout are patch-preserved and their count checked before and after every fast-forward.
 - No more reviewer agents on this wave.

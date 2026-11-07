@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/claudeplugin"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 )
@@ -27,7 +28,7 @@ import (
 // be read or parsed returns its error, never an answer. A string read from the
 // file prints with its control characters escaped.
 func ClaudePluginMarketplaceGaps(store string, targets []ClaudePluginTarget) ([]ClaudePluginGap, error) {
-	path, known, err := readKnownMarketplaces(store)
+	path, known, err := claudeplugin.ReadKnownMarketplaces(store)
 	if err != nil {
 		return nil, err
 	}
@@ -44,9 +45,9 @@ func ClaudePluginMarketplaceGaps(store string, targets []ClaudePluginTarget) ([]
 		}
 		var got string
 		switch entry.Source.Kind {
-		case claudeMarketplaceGitHub:
+		case claudeplugin.MarketplaceGitHub:
 			got = entry.Source.Repo
-		case claudeMarketplaceDirectory:
+		case claudeplugin.MarketplaceDirectory:
 			got = entry.Source.Path
 		default:
 			got = strings.TrimSpace(entry.Source.Kind + " " + entry.Source.URL)
@@ -64,31 +65,6 @@ func ClaudePluginMarketplaceGaps(store string, targets []ClaudePluginTarget) ([]
 		})
 	}
 	return gaps, nil
-}
-
-// knownMarketplace is one known_marketplaces.json entry.
-type knownMarketplace struct {
-	Source claudeMarketplaceRecord `json:"source"`
-}
-
-// readKnownMarketplaces reads store's plugins/known_marketplaces.json, keyed by
-// marketplace name, and returns its path beside them. A missing file means
-// none is known; a file that cannot be read or parsed returns its error, never
-// an answer.
-func readKnownMarketplaces(store string) (string, map[string]knownMarketplace, error) {
-	path := filepath.Join(store, "plugins", "known_marketplaces.json")
-	raw, err := os.ReadFile(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		return path, nil, nil
-	}
-	if err != nil {
-		return path, nil, fmt.Errorf("read %s: %w", path, err)
-	}
-	var known map[string]knownMarketplace
-	if err := json.Unmarshal(raw, &known); err != nil {
-		return path, nil, fmt.Errorf("parse %s: %w", path, err)
-	}
-	return path, known, nil
 }
 
 // claudeMarketplaceGapFix repairs a marketplace registered from another
@@ -130,7 +106,7 @@ func MarketplacePluginNames(sourceRepo string) (string, []string, error) {
 	if err != nil {
 		return path, nil, fmt.Errorf("read the marketplace plugin list %s: %w", path, err)
 	}
-	var manifest devMarketplaceManifest
+	var manifest claudeplugin.Marketplace
 	if err := json.Unmarshal(raw, &manifest); err != nil {
 		return path, nil, fmt.Errorf("parse the marketplace plugin list %s: %w", path, err)
 	}
@@ -204,22 +180,6 @@ func (build ClaudePluginBuild) WithMarketplacePlugins() (ClaudePluginBuild, erro
 	return build, err
 }
 
-// claudeMarketplaceRecord is the source Claude Code records for one marketplace
-// in known_marketplaces.json: a github repo, a git or url record's url, or a
-// directory's path.
-type claudeMarketplaceRecord struct {
-	Kind string `json:"source"`
-	Repo string `json:"repo"`
-	Path string `json:"path"`
-	URL  string `json:"url"`
-}
-
-// The record kinds pfm compares a source with.
-const (
-	claudeMarketplaceGitHub    = "github"
-	claudeMarketplaceDirectory = "directory"
-)
-
 // claudeGitHubShorthand is an owner/repo source, with an optional #ref.
 var claudeGitHubShorthand = regexp.MustCompile(`^[A-Za-z0-9_-][A-Za-z0-9_.-]*/[A-Za-z0-9_.-]+(#\S+)?$`)
 
@@ -231,16 +191,16 @@ var claudeGitHubShorthand = regexp.MustCompile(`^[A-Za-z0-9_-][A-Za-z0-9_.-]*/[A
 // GitHub URL) is not compared. A relative or ~ path resolves where the add
 // runs, so a directory record is not compared. Every other pairing is a
 // different source.
-func claudeMarketplaceSourceMatches(source string, record claudeMarketplaceRecord) bool {
+func claudeMarketplaceSourceMatches(source string, record claudeplugin.MarketplaceSource) bool {
 	switch {
 	case strings.Contains(source, "://") || strings.HasPrefix(source, "git@"):
-		return record.Kind == claudeMarketplaceGitHub || (record.URL != "" && record.URL == source)
+		return record.Kind == claudeplugin.MarketplaceGitHub || (record.URL != "" && record.URL == source)
 	case filepath.IsAbs(source):
-		return record.Kind == claudeMarketplaceDirectory && filepath.Clean(record.Path) == filepath.Clean(source)
+		return record.Kind == claudeplugin.MarketplaceDirectory && filepath.Clean(record.Path) == filepath.Clean(source)
 	case claudeGitHubShorthand.MatchString(source):
 		repo, _, _ := strings.Cut(source, "#")
-		return record.Kind == claudeMarketplaceGitHub && record.Repo == repo
+		return record.Kind == claudeplugin.MarketplaceGitHub && record.Repo == repo
 	default:
-		return record.Kind == claudeMarketplaceDirectory
+		return record.Kind == claudeplugin.MarketplaceDirectory
 	}
 }

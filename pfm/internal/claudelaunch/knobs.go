@@ -374,7 +374,7 @@ var Knobs = func() []Knob {
 			36500,
 			"Keep managed transcripts.",
 		},
-		Knob{knobHooks, WireSettings, knobHooks, SourceConstant, "24 registrations", "Attach the fleet hook set."},
+		Knob{knobHooks, WireSettings, knobHooks, SourceConstant, "25 registrations", "Attach the fleet hook set."},
 		Knob{knobStatusLine, WireSettings, knobStatusLine, SourceConstant, "pfm-statusline", "Show fleet status."},
 		Knob{
 			knobSubagentStatusLine,

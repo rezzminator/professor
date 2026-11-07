@@ -7,6 +7,7 @@ Professor tracks only each plugin's commit: an edit under `{name}/` belongs to t
 - auto-effort: reasoning effort for the main chat and the sub-agents it launches — the main chat's per turn, moved by the model's `set_effort`, raised by failing tests, a cache gate per model; a tag at the start of an Agent prompt sets that sub-agent's; an agent whose frontmatter carries `effortControl` is raised at each failing test run or red sub-task, brought home once the trouble resolves, and moves its own with `effort_up`, `effort_down`, `effort_auto` · `auto-effort/`
 - tool-visibility-controller: a `visibility` field in agent, skill and command frontmatter, plus a scope file, decides per loop which agents, skills, MCP tools and built-in tools it sees and may invoke · `tool-visibility-controller/`
 - rule-control: a `visible-to` key in a rule file's frontmatter names the loops that receive the rule — `main` for the main chat, agent types, `*` globs — every loop when absent · `rule-control/`
+- flights: the flights family (`flights:*` agents, `/flights:{spec|doctor}`), plus a codebase map, one `{dir}/: {synopsis}` line per package read by a real parser from its front door, cached per commit and ordered hottest first by reads, given to the main chat at SessionStart and to the flights foremen, lander, hunter and sub-lander at SubagentStart · `flights/`
 - buddy: an ASCII companion above the prompt that reacts to the work and answers `/buddy` · `buddy/`
 - cache-live-control: `/cache` sets the prompt-cache TTL of the main chat and its sub-agents · `cache-live-control/`
 - cache-keepwarm: keeps the prompt cache of the main chat and waiting sub-agents warm through background waits with visible pokes, capped per wait and each admitted by a budget against the rewrite it saves · `cache-keepwarm/`
@@ -47,7 +48,7 @@ Professor tracks only each plugin's commit: an edit under `{name}/` belongs to t
 ## Standalone
 
 - Dependency runs one way: pfm may depend on a plugin; a plugin depends on neither pfm, Professor nor another plugin, and installs and works fully alone.
-- A plugin's code and every file it writes carry no Professor path, agent, policy or wording; credit in its README and manifest is the one exception.
+- A plugin's code and every file it writes carry no Professor path, agent, policy or wording; the exceptions are credit in its README and manifest, and flights, the flights family's home, whose prompts name the Professor agents and pfm verbs that family drives.
 - Professor-specific behavior enters through the plugin's own integration surface — a config file, flag, environment variable or extension hook — with a neutral default; Professor's install and project files supply Professor's values; a new option adds its `{PLUGIN}_{OPTION}` variable, read in a function-hooks plugin by a string-literal `$.env.get('NAME')`.
 
 ## Identity

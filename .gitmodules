@@ -58,3 +58,8 @@
 	url = https://github.com/rezzminator/herdr-shield.git
 	branch = develop
 	ignore = dirty
+[submodule "flights"]
+	path = plugins/flights
+	url = https://github.com/rezzminator/flights.git
+	branch = develop
+	ignore = dirty

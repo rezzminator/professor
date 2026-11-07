@@ -22,7 +22,7 @@ You are the Professor Change Manager. The dispatch prompt carries the user's req
 
 - `{clone}`: the Professor clone, `readlink -f "$HOME/.claude/agents/pcm.md"` minus `/templates/global/agents/pcm.md`
 - `CLAUDE.md`: the orientation file (Vocabulary, Runtime, Rules)
-- `.claude/commands/**/*.md`: project slash commands; machine-global commands (`/flights:*`, `/pfm`, `/pfm:workbench`) live in `~/.claude/commands/`, symlinked to `{clone}` by `pfm install`
+- `.claude/commands/**/*.md`: project slash commands; machine-global commands (`/pfm`, `/pfm:workbench`) live in `~/.claude/commands/`, symlinked to `{clone}` by `pfm install`; `/flights:*` ship in the flights plugin
 - `.claude/agents/*.md`: the project's own agents (`ls`), among them any `{proj}-{role}` specialist wrapper; machine-global agents, this one too, in `~/.claude/agents/`
 - `.claude/commands/{project}-testing-manual.md`: a project's testing law where it has one, read by the flights agents
 - `.claude/skills/*/SKILL.md`: reusable skills
@@ -35,7 +35,7 @@ You are the Professor Change Manager. The dispatch prompt carries the user's req
 ### Critical invariants
 
 - Path variables: agents use `$DOCS`, `$WORKTREE`, `$CDOCS`, `$REFS`, never hardcoded paths; the brief that spawns an executor defines them.
-- Pipeline flow lives in the `flights-*` descriptions (main chat → a `flights-foreman` tier → main chat → `flights-lander` → gitter; `/flights:doctor` meters a flight at any time); `CLAUDE.md` redirects there and never duplicates it.
+- Pipeline flow lives in the `flights:*` descriptions (main chat → a `flights:foreman` tier → main chat → `flights:lander` → gitter; `/flights:doctor` meters a flight at any time); `CLAUDE.md` redirects there and never duplicates it.
 - Agent frontmatter matches behavior: `name`, `description`, `tools`.
 - Registry over tables: a command's or skill's `description:` is its routing, written to `/description:use`; `disable-model-invocation: true` hides a command from the model and goes only on user-triggered-by-design commands.
 - No command over 35KB, no agent over 15KB. Every `general-purpose` spawn carries the full root `CLAUDE.md`, so a root line is the most expensive line; `@path` imports expand at launch, so cut content, never relocate it.
@@ -86,13 +86,13 @@ Consistency checklist:
 - Project dir names in `CLAUDE.md` match the directories
 - Agent frontmatter matches behavior and the tools needed
 - Where the project has `worktree.sh`, its project resolution matches directory names
-- Every `flights-*` agent and `/flights:doctor` named resolves to an installed file
+- Every `flights:*` agent and `/flights:doctor` named resolves to a file the enabled flights plugin ships
 - Tech stack descriptions match the dependency manifests
-- The chain each `flights-*` description names (predecessor → successor) matches its agent protocol and its neighbours' descriptions
+- The chain each `flights:*` description names (predecessor → successor) matches its agent protocol and its neighbours' descriptions
 
 ### 3 Plan
 
-Group changes into breaking (atomic) and non-breaking (independent). Settle requirements before dispatch; choose any foreman tier by the `flights-foreman*` descriptions. You apply and verify its return; the main chat lands it through `flights-lander`.
+Group changes into breaking (atomic) and non-breaking (independent). Settle requirements before dispatch; choose any foreman tier by the `flights:foreman*` descriptions. You apply and verify its return; the main chat lands it through `flights:lander`.
 
 ### 4 Execute
 
@@ -105,7 +105,7 @@ Group changes into breaking (atomic) and non-breaking (independent). Settle requ
 
 1. Grep for stale references to old names and paths
 2. Agent `tools` lists match what each body does
-3. Every `subagent_type` named anywhere has a file in `.claude/agents/` or `~/.claude/agents/`
+3. Every `subagent_type` named anywhere has a file in `.claude/agents/` or `~/.claude/agents/`; a `{plugin}:{name}` one in that enabled plugin's `agents/`
 4. Every command referenced in `CLAUDE.md` has a file; every `.claude/commands/*.md` has a `description:`
 5. Script and reference-doc paths exist as stated
 6. `engine-sync codex check .` and `engine-sync opencode doctor .` are clean

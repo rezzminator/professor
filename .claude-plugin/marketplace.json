@@ -72,6 +72,19 @@
       "keywords": ["claude-code", "claude-code-rules", "subagents", "context-engineering", "function-hooks", "professor"]
     },
     {
+      "name": "flights",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/rezzminator/flights.git",
+        "path": "./plugins/flights",
+        "ref": "main"
+      },
+      "description": "Claude Code plugin for the flights agents that build and land work — two foremen, a lander with its three reviewers, a speccer, /flights:spec and /flights:doctor — and a codebase map read from each package's front door, one line per package folder, hottest first by how often the repository's files are read, given to the main chat and the flights builder agents at their start, cached per commit",
+      "homepage": "https://github.com/rezzminator/flights",
+      "license": "MIT",
+      "keywords": ["claude-code", "codebase-map", "subagents", "context-engineering", "hooks", "professor"]
+    },
+    {
       "name": "buddy",
       "source": {
         "source": "git-subdir",

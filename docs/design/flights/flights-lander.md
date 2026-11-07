@@ -1,4 +1,4 @@
-# flights-lander
+# flights:lander
 
 The lander takes one worktree's whole change after every foreman on it has returned. It reviews the change itself with cheap children it spawns, fixes every finding, proves the fixes with the affected tests and runs the full gate once, right before the merge. One worktree gets one lander: there is no separate reviewer, no second round and no second lander.
 
@@ -21,10 +21,10 @@ The lander takes one worktree's whole change after every foreman on it has retur
 
 | Agent | Model · effort | Visible to | Job |
 | --- | --- | --- | --- |
-| `flights-lander` | opus · medium | the main chat | reviews, judges, fixes, tests, gates |
-| `flights-hunter` | opus | both landers | hunts defects inside one cluster of the production diff |
-| `flights-spec-walker` | sonnet | both landers | holds a range of the request's numbered rows against the code |
-| `flights-sub-lander` | haiku | both landers | follows inventory rows or threads past the diff and flags each |
+| `flights:lander` | opus · medium | the main chat | reviews, judges, fixes, tests, gates |
+| `flights:hunter` | opus | both landers | hunts defects inside one cluster of the production diff |
+| `flights:spec-walker` | sonnet | both landers | holds a range of the request's numbered rows against the code |
+| `flights:sub-lander` | haiku | both landers | follows inventory rows or threads past the diff and flags each |
 
 Only the main chat spawns a lander. The children are read-only (`Read, Grep, Glob, Bash`, Bash for `grep`, `sed -n` and read-only `git`), write nothing and judge nothing: each returns candidates or flags for the lander to verify.
 
@@ -55,7 +55,7 @@ When TARGET's tip is not an ancestor of the worktree's HEAD, the lander has `git
 
 ## The inventory and the computed spawn
 
-Call 1 runs `lander-inventory.py`, shipped as the machine-global kit skill `templates/global/skills/lander-inventory/` and invoked as `python3 -I $HOME/.claude/skills/lander-inventory/lander-inventory.py {WORKTREE} {BASE} --spec {FILES}`. It diffs BASE against the working tree, so a foreman's uncommitted and untracked work counts with its commits. Its output file sits beside REPORT_PATH (`.md` → `.inventory.txt`):
+Call 1 runs `lander-inventory.py`, shipped as the `flights:lander-inventory` skill of the `flights` plugin, `plugins/flights/plugins/flights/skills/lander-inventory/` and invoked as `python3 -I ${CLAUDE_PLUGIN_ROOT}/skills/lander-inventory/lander-inventory.py {WORKTREE} {BASE} --spec {FILES}`. It diffs BASE against the working tree, so a foreman's uncommitted and untracked work counts with its commits. Its output file sits beside REPORT_PATH (`.md` → `.inventory.txt`):
 
 - `LEFT`: a name the diff removed everywhere it touched, still in the tree outside history files.
 - `LITERAL`: a name a code or data file dropped from inside a string or key on a replaced line, so a matcher or a stored format there knows only the new spelling.
@@ -74,9 +74,9 @@ Call 2 is one message spawning exactly the PLAN rows in the background: no row a
 
 ## The children
 
-- `flights-hunter`: one cluster's diff and the spec rows naming its files; reads every changed function whole and asks SPEC, LINES, PATHS, MANY, GUARDS, STATE, COMMENTS and TESTS at each. Budget 30 tool calls. Returns `C{n} · severity · path:line`, the line copied from its own `grep -n` output and the failure, then `GAPS`, `READ` and `NOT READ`.
-- `flights-spec-walker`: one row range of a spec; finds the line keeping each row's promise in every state the row names. Budget 30 tool calls. Returns candidates tied to a row, then `HELD`, `NOT FOUND` and `NOT READ`; a row it cannot find is `NOT FOUND`, never held.
-- `flights-sub-lander`: a range of inventory rows, or up to 3 threads the lander cut (CONTRACT, ABSENCE, HAND-OFF, CONCURRENT), each followed to its far side, 3 hops at most. Budget 25 tool calls, back within about four minutes. Returns three-line flags `UNSAFE | UNSURE` with `LOOK` and `WHY`, and one `SAFE` line naming the ranges it read; a line only grepped is `UNSURE`, never `SAFE`.
+- `flights:hunter`: one cluster's diff and the spec rows naming its files; reads every changed function whole and asks SPEC, LINES, PATHS, MANY, GUARDS, STATE, COMMENTS and TESTS at each. Budget 30 tool calls. Returns `C{n} · severity · path:line`, the line copied from its own `grep -n` output and the failure, then `GAPS`, `READ` and `NOT READ`.
+- `flights:spec-walker`: one row range of a spec; finds the line keeping each row's promise in every state the row names. Budget 30 tool calls. Returns candidates tied to a row, then `HELD`, `NOT FOUND` and `NOT READ`; a row it cannot find is `NOT FOUND`, never held.
+- `flights:sub-lander`: a range of inventory rows, or up to 3 threads the lander cut (CONTRACT, ABSENCE, HAND-OFF, CONCURRENT), each followed to its far side, 3 hops at most. Budget 25 tool calls, back within about four minutes. Returns three-line flags `UNSAFE | UNSURE` with `LOOK` and `WHY`, and one `SAFE` line naming the ranges it read; a line only grepped is `UNSURE`, never `SAFE`.
 
 ## The lander's own hunt
 
@@ -138,6 +138,6 @@ This lander's review phase (`STOP_AT review`), two runs per flight, scored again
 
 ## Declaration
 
-- `templates/global/agents/flights-lander.md`: opus at effort medium, no `effortControl` and no effort buttons; its `tools:` line holds `Agent` (the children and gitter) and `SendMessage` (gitter's conflict hand-back, a critical decision to main).
-- `templates/global/agents/flights-{hunter,spec-walker,sub-lander}.md`: Claude originals, each `visible-to` `flights-lander`.
-- `templates/global/skills/lander-inventory/`: the inventory kit, its `SKILL.md` visible to both landers.
+- `plugins/flights/plugins/flights/agents/lander.md`: opus at effort medium, no `effortControl` and no effort buttons; its `tools:` line holds `Agent` (the children and gitter) and `SendMessage` (gitter's conflict hand-back, a critical decision to main).
+- `plugins/flights/plugins/flights/agents/{hunter,spec-walker,sub-lander}.md`: Claude originals, each `visible-to` `flights:lander`.
+- `plugins/flights/plugins/flights/skills/lander-inventory/`: the inventory kit, its `SKILL.md` visible to both landers.

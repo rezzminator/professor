@@ -1,7 +1,6 @@
 package installer
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -13,6 +12,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/rezzminator/professor/pfm/internal/claudeplugin"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
 
@@ -43,7 +43,7 @@ func ClaudePluginGaps(
 	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
 		return nil, fmt.Errorf("%w at %s", ErrClaudeSettingsAbsent, path)
 	}
-	document, err := readClaudeSettingsDocument(path)
+	document, err := claudeplugin.ReadSettings(path)
 	if err != nil {
 		return nil, err
 	}
@@ -148,7 +148,7 @@ func retiredListedGap(name, successor string) ClaudePluginGap {
 // file means none is installed; a file that cannot be read or parsed returns
 // its error, never an answer.
 func ClaudePluginsNotInstalled(configDir string, targets []ClaudePluginTarget) ([]string, error) {
-	record, err := readClaudePluginInstalls(configDir)
+	record, err := claudeplugin.ReadInstalls(configDir)
 	if err != nil {
 		return nil, err
 	}
@@ -169,87 +169,19 @@ func ClaudePluginsNotInstalled(configDir string, targets []ClaudePluginTarget) (
 	return missing, nil
 }
 
-// claudePluginInstall is one install record Claude Code keeps for a plugin id
-// in plugins/installed_plugins.json: one per scope it is installed in, a
-// project or local one naming its project. Claude Code owns the shape: a
-// scope, projectPath or version that is not a string reads as empty rather
-// than failing the record every other reader needs, and an entry whose
-// installPath is not one reads as not installed.
-type claudePluginInstall struct {
-	Scope       string
-	ProjectPath string
-	InstallPath string
-	Version     string
-}
-
-// UnmarshalJSON reads one entry, its loose fields as recordString does.
-func (install *claudePluginInstall) UnmarshalJSON(raw []byte) error {
-	var entry struct {
-		Scope       json.RawMessage `json:"scope"`
-		ProjectPath json.RawMessage `json:"projectPath"`
-		InstallPath json.RawMessage `json:"installPath"`
-		Version     json.RawMessage `json:"version"`
-	}
-	if err := json.Unmarshal(raw, &entry); err != nil {
-		return err
-	}
-	*install = claudePluginInstall{
-		Scope:       recordString(entry.Scope),
-		ProjectPath: recordString(entry.ProjectPath),
-		InstallPath: recordString(entry.InstallPath),
-		Version:     recordString(entry.Version),
-	}
-	return nil
-}
-
-// recordString is a raw record value as a string; empty when it is absent or
-// not a JSON string.
-func recordString(raw json.RawMessage) string {
-	var text string
-	if err := json.Unmarshal(raw, &text); err != nil {
-		return ""
-	}
-	return text
-}
-
-// version is the record's version string; empty when it names none or names
-// one that is not a JSON string.
-func (install claudePluginInstall) version() string { return install.Version }
-
-// readClaudePluginInstalls reads configDir's plugins/installed_plugins.json,
-// keyed by plugin id. A missing file means none is installed; a file that
-// cannot be read or parsed returns its error, never an answer.
-func readClaudePluginInstalls(configDir string) (map[string][]claudePluginInstall, error) {
-	path := filepath.Join(configDir, "plugins", "installed_plugins.json")
-	raw, err := os.ReadFile(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", path, err)
-	}
-	var record struct {
-		Plugins map[string][]claudePluginInstall `json:"plugins"`
-	}
-	if err := json.Unmarshal(raw, &record); err != nil {
-		return nil, fmt.Errorf("parse %s: %w", path, err)
-	}
-	return record.Plugins, nil
-}
-
 // ClaudePluginRecordedVersions is every version configDir's install record
 // holds for id, one per entry naming one, control characters escaped; none
 // when id has no record. A record that cannot be read returns its error, never
 // an answer.
 func ClaudePluginRecordedVersions(configDir, id string) ([]string, error) {
-	record, err := readClaudePluginInstalls(configDir)
+	record, err := claudeplugin.ReadInstalls(configDir)
 	if err != nil {
 		return nil, err
 	}
 	versions := make([]string, 0, len(record[id]))
 	for _, entry := range record[id] {
-		if entry.version() != "" {
-			versions = append(versions, EscapeControl(entry.version()))
+		if entry.Version != "" {
+			versions = append(versions, EscapeControl(entry.Version))
 		}
 	}
 	return versions, nil
@@ -273,7 +205,7 @@ func ClaudePluginsUnresolved(configDir string, targets []ClaudePluginTarget) (ma
 	if len(candidates) == 0 {
 		return nil, nil
 	}
-	document, err := readClaudeSettingsDocument(filepath.Join(configDir, "settings.json"))
+	document, err := claudeplugin.ReadSettings(filepath.Join(configDir, "settings.json"))
 	if err != nil {
 		return nil, err
 	}
@@ -281,16 +213,9 @@ func ClaudePluginsUnresolved(configDir string, targets []ClaudePluginTarget) (ma
 	if err != nil {
 		return nil, err
 	}
-	path := filepath.Join(configDir, "plugins", "known_marketplaces.json")
-	raw, err := os.ReadFile(path)
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return nil, fmt.Errorf("read %s: %w", path, err)
-	}
-	known := map[string]json.RawMessage{}
-	if err == nil {
-		if err := json.Unmarshal(raw, &known); err != nil {
-			return nil, fmt.Errorf("parse %s: %w", path, err)
-		}
+	known, err := claudeplugin.KnownMarketplaceNames(configDir)
+	if err != nil {
+		return nil, err
 	}
 	unresolved := map[string]ClaudePluginGap{}
 	for index := range candidates {
@@ -298,7 +223,7 @@ func ClaudePluginsUnresolved(configDir string, targets []ClaudePluginTarget) (ma
 		if pluginEnabled(document, target.ID) && !slices.Contains(missing, target.ID) {
 			continue
 		}
-		if _, ok := known[target.MarketplaceName]; ok {
+		if known[target.MarketplaceName] {
 			continue
 		}
 		unresolved[target.ID] = ClaudePluginGap{

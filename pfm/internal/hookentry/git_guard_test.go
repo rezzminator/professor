@@ -16,7 +16,7 @@ import (
 
 const (
 	gitGuardDenied   = `"permissionDecision":"deny"`
-	gitGuardExecutor = "flights-foreman"
+	gitGuardExecutor = "flights:foreman"
 )
 
 func gitGuardPayload(t *testing.T, tool, command, cwd, agentType string) string {
@@ -66,7 +66,8 @@ func TestGitGuardAllowsOnlyExactNativeWriterIdentities(t *testing.T) {
 		{name: "gpt-gitter is an ordinary agent", metadata: `,"agent_type":"gpt-gitter"`},
 		{name: "omitted"},
 		{name: "empty", metadata: `,"agent_type":""`},
-		{name: "ordinary", metadata: `,"agent_type":"flights-foreman"`},
+		{name: "ordinary", metadata: `,"agent_type":"flights:foreman"`},
+		{name: "plugin-namespaced lookalike", metadata: `,"agent_type":"flights:gitter"`},
 		{name: "gitter lookalike", metadata: `,"agent_type":"gitter-api"`},
 		{name: "prefix lookalike", metadata: `,"agent_type":"xgitter"`},
 		{name: "canonical path", metadata: `,"agent_type":"agents/gitter"`},
@@ -76,8 +77,8 @@ func TestGitGuardAllowsOnlyExactNativeWriterIdentities(t *testing.T) {
 		{name: "native backslash path", metadata: `,"agent_type":"agents\\gitter-x"`},
 		{name: "whitespace", metadata: `,"agent_type":"gitter "`},
 		{name: "case", metadata: `,"agent_type":"Gitter"`},
-		{name: "role spoof", metadata: `,"agent_type":"flights-foreman","role":"gitter"`},
-		{name: "model spoof", metadata: `,"agent_type":"flights-foreman","model":"gpt-gitter"`},
+		{name: "role spoof", metadata: `,"agent_type":"flights:foreman","role":"gitter"`},
+		{name: "model spoof", metadata: `,"agent_type":"flights:foreman","model":"gpt-gitter"`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			payload := `{"tool_name":"Bash","tool_input":{"command":"git commit -m x"}` + test.metadata + `}`
@@ -352,7 +353,7 @@ func TestGitGuardNamesEveryBlockedPartOfOneCall(t *testing.T) {
 	command := "git status && git add f && git commit -m x; git push"
 	code, stdout, stderr := runGitGuard(
 		t,
-		gitGuardPayload(t, "Bash", command, t.TempDir(), "flights-foreman-sonnet"),
+		gitGuardPayload(t, "Bash", command, t.TempDir(), "flights:foreman-sonnet"),
 	)
 	if code != 0 || !strings.Contains(stdout, gitGuardDenied) {
 		t.Fatalf("code=%d stdout=%q stderr=%q, want a deny", code, stdout, stderr)
@@ -402,7 +403,7 @@ func TestGitGuardFailsOpenLoudlyOnAMalformedPayload(t *testing.T) {
 // unreadable-command message.
 func gitGuardRequireUnreadable(t *testing.T, command, cwd string) {
 	t.Helper()
-	code, stdout, stderr := runGitGuard(t, gitGuardPayload(t, "Bash", command, cwd, "flights-foreman-sonnet"))
+	code, stdout, stderr := runGitGuard(t, gitGuardPayload(t, "Bash", command, cwd, "flights:foreman-sonnet"))
 	if code != 0 || !strings.Contains(stdout, gitGuardDenied) {
 		t.Fatalf("code=%d stdout=%q stderr=%q, want a deny", code, stdout, stderr)
 	}
@@ -456,7 +457,7 @@ func TestGitGuardDeniesShellNestingOverTheDepthBound(t *testing.T) {
 	gitGuardRequireBounded(t, gitGuardNestShell("git status", 9), cwd)
 	code, stdout, stderr := runGitGuard(
 		t,
-		gitGuardPayload(t, "Bash", gitGuardNestShell("git worktree add x", 8), cwd, "flights-foreman-sonnet"),
+		gitGuardPayload(t, "Bash", gitGuardNestShell("git worktree add x", 8), cwd, "flights:foreman-sonnet"),
 	)
 	if code != 0 || !strings.Contains(stdout, gitGuardDenied) {
 		t.Fatalf("code=%d stdout=%q stderr=%q, want a deny", code, stdout, stderr)

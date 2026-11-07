@@ -77,7 +77,7 @@ func TestDoctorProjectUpdatesReportsRetiredNamesInUnpinnedFiles(t *testing.T) {
 	writeProjectUpdatesFixture(t, project, "scripts/live.sh", "/pfm:release cut; /pfm:workbench; /pcmx\n")
 	clone := t.TempDir()
 	writeProjectUpdatesFixture(t, clone, retired.FileRel, `{"names":[
-		{"name":"/wave","kind":"command","successor":"the flights-foreman agent","match":"family"},
+		{"name":"/wave","kind":"command","successor":"the flights:foreman agent","match":"family"},
 		{"name":"/pfm:refresh","kind":"command","successor":"the pcm agent","match":"exact"},
 		{"name":"/pcm","kind":"command","successor":"the pcm agent","match":"exact"},
 		{"name":"mcp__chat__","kind":"tool","successor":"mcp__chat-professor__*","match":"prefix"}]}`)
@@ -95,7 +95,7 @@ func TestDoctorProjectUpdatesReportsRetiredNamesInUnpinnedFiles(t *testing.T) {
 	}
 	for _, want := range []string{
 		"  RETIRED-NAME  2\n",
-		"    scripts/legacy.sh:2   /wave — retired command, now the flights-foreman agent\n",
+		"    scripts/legacy.sh:2   /wave — retired command, now the flights:foreman agent\n",
 		"    .claude/codex-build.json:3   mcp__chat__ — retired tool, now mcp__chat-professor__*\n",
 	} {
 		if !strings.Contains(stdout.String(), want) {
@@ -141,7 +141,7 @@ func newProjectUpdatesStore(t *testing.T) string {
 }
 
 // waveRetired is a retired lists file naming the /wave command family.
-const waveRetired = `{"names":[{"name":"/wave","kind":"command","successor":"the flights-foreman agent","match":"family"}]}`
+const waveRetired = `{"names":[{"name":"/wave","kind":"command","successor":"the flights:foreman agent","match":"family"}]}`
 
 // stageRetiredLists writes raw as the retired lists of home's default clone
 // and returns home.

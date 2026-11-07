@@ -23,6 +23,7 @@ var doctorPluginIDs = []string{
 	"auto-effort@professor",
 	"tool-visibility-controller@professor",
 	"engine-sync@professor",
+	"flights@professor",
 }
 
 var releaseTargets = installer.ClaudePluginTargets(
@@ -233,7 +234,13 @@ func TestClaudePluginsDoctorStore(t *testing.T) {
 				writeDoctorCache(t, store, doctorPluginIDs[1], "0.9.0", nil)
 			case "uninstalled":
 				writeDoctorInstalledPlugins(
-					t, store, doctorPluginIDs[0], doctorPluginIDs[2], doctorPluginIDs[3], doctorPluginIDs[4],
+					t,
+					store,
+					doctorPluginIDs[0],
+					doctorPluginIDs[2],
+					doctorPluginIDs[3],
+					doctorPluginIDs[4],
+					doctorPluginIDs[5],
 				)
 			case "settings unreadable":
 				if err := os.Remove(path); err != nil {
@@ -498,6 +505,7 @@ func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
 		"auto-effort",
 		"tool-visibility-controller",
 		"engine-sync",
+		"flights",
 	}
 	for _, state := range []string{
 		"alpha clean", "alpha retired copy enabled", "alpha copy symlinked", "alpha copy missing", "alpha fallback",

@@ -126,13 +126,13 @@ func TestChatNewCarriesTheAgentRole(t *testing.T) {
 		calls = append(calls, append([]string(nil), args...))
 		return 0
 	}})
-	input := NewInput{Name: "seat", Model: "claude-sonnet-5-5", Effort: "xhigh", AgentRole: "flights-foreman"}
+	input := NewInput{Name: "seat", Model: "claude-sonnet-5-5", Effort: "xhigh", AgentRole: "flights:foreman"}
 	if _, _, err := service.chatNew(context.Background(), nil, input); err != nil {
 		t.Fatal(err)
 	}
 	want := [][]string{{
 		"chat", "new", "--name", "seat", "--model", "claude-sonnet-5-5", "--effort", "xhigh",
-		"--agent-role", "flights-foreman",
+		"--agent-role", "flights:foreman",
 	}}
 	if !reflect.DeepEqual(calls, want) {
 		t.Fatalf("new calls = %q, want %q", calls, want)
@@ -221,7 +221,7 @@ func TestChatNewDescriptionRoutesEveryModelRunHere(t *testing.T) {
 	if example == nil {
 		t.Fatalf("new description has no example call: %q", description)
 	}
-	for _, key := range regexp.MustCompile(`(\w+):`).FindAllStringSubmatch(example[1], -1) {
+	for _, key := range regexp.MustCompile(`(?:^|,\s*)(\w+):`).FindAllStringSubmatch(example[1], -1) {
 		if _, found := schema.Properties[key[1]]; !found {
 			t.Fatalf("new example names %q, not a schema field: %q", key[1], example[0])
 		}

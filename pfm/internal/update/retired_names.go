@@ -437,7 +437,7 @@ func foundIn(r retired.Name, line string) bool {
 			return false
 		}
 		start := offset + index
-		if !insideURL(line, start) && boundedAt(r, line, start, start+len(r.Name)) {
+		if !insideURL(line, start) && !r.InSuccessor(line, start) && boundedAt(r, line, start, start+len(r.Name)) {
 			return true
 		}
 		offset = start + 1

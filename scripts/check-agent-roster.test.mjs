@@ -674,7 +674,7 @@ for (const sourceDir of [".claude/agents", "demo-child/.claude/agents"]) {
 }
 
 const CAPABILITY = 'gpt-agents';
-const otherVariants = ['flights-foreman-sonnet', 'rr-pro', 'rr-pro-max', 'reviewer-nt'];
+const otherVariants = ['rr-pro', 'rr-pro-max', 'reviewer-nt'];
 const renderErrors = /SECTION-DRIFT|SECTION-MISSING|RENAME-UNUSED|UNSET-MISSING|FRONTMATTER-INVALID/;
 
 // `engine-sync global` over the shipped declaration, into a jail home and Codex home: the real machine
@@ -765,9 +765,7 @@ test('no OpenCode mirror, gitter included, holds a Git write permission', () => 
 // auto-effort steers an agent whose frontmatter carries `effortControl`, and only a steered agent may press
 // its buttons: exactly these Claude roles hold both; every other rendered agent and pcm neither.
 const effortButtons = ['effort_up', 'effort_down', 'effort_auto'].map((tool) => `mcp__auto-effort__${tool}`);
-const foremanEffort = { floor: 'medium', ceiling: 'xhigh' };
 const effortSteered = new Map([
-  ['flights-foreman', foremanEffort], ['flights-foreman-sonnet', foremanEffort],
   ['reviewer', true], ['reviewer-pro', true], ['reviewer-nt', true], ['documenter', true],
 ]);
 function assertEffortPermission(name, text) {

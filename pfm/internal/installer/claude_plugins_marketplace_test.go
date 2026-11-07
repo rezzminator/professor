@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/claudeplugin"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
 
@@ -468,7 +469,7 @@ func TestEnsureClaudePluginsAlphaMarketplacePlugins(t *testing.T) {
 			if err != nil || len(gaps) != 0 {
 				t.Fatalf("marketplaces left foreign: %v %v", gaps, err)
 			}
-			var manifest devMarketplaceManifest
+			var manifest claudeplugin.Marketplace
 			if err := json.Unmarshal([]byte(readFixture(t,
 				filepath.Join(marketplace, ".claude-plugin", "marketplace.json"))), &manifest); err != nil {
 				t.Fatal(err)

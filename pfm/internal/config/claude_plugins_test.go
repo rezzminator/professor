@@ -29,6 +29,7 @@ func TestClaudePluginsKey(t *testing.T) {
 				{ID: "auto-effort"},
 				{ID: "tool-visibility-controller"},
 				{ID: "engine-sync"},
+				{ID: "flights"},
 			},
 			source: SourceDefault,
 		},

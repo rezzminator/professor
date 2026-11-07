@@ -33,7 +33,7 @@ func writeRetiredFixture(t *testing.T, root string, files map[string]string) {
 	}
 }
 
-const fixtureFlightsSuccessor = "the flights-foreman agent"
+const fixtureFlightsSuccessor = "the flights:foreman agent"
 
 // fixtureRetiredNames is the retired list the scanner tests read: one entry
 // per match shape, kind and probe they pin.
@@ -57,6 +57,7 @@ var fixtureRetiredNames = []retired.Name{
 	{Name: "mono-architect", Kind: retired.KindAgent, Match: retired.MatchExact},
 	{Name: "rndier", Kind: retired.KindAgent, Match: retired.MatchExact},
 	{Name: "rr-super", Kind: retired.KindAgent, Successor: "super-rr", Match: retired.MatchExact},
+	{Name: "plot-inventory", Kind: retired.KindSkill, Successor: "plots:plot-inventory", Match: retired.MatchExact},
 	{
 		Name:      "/tokens",
 		Kind:      retired.KindCommand,
@@ -194,6 +195,7 @@ func TestRetiredNamesNeverHitALiveNameSharingAPrefix(t *testing.T) {
 		"GET /tokens returns the list",
 		"curl -X POST /tokens",
 		"the /tokens/{id} route and /tokens{?page}",
+		"load the plots:plot-inventory skill",
 	} {
 		if hits := retiredNameHits(fixtureRetiredNames, "f", line); len(hits) != 0 {
 			t.Errorf("line %q hit %+v, want none", line, hits)
@@ -220,6 +222,7 @@ func TestRetiredNamesNeverHitALiveNameSharingAPrefix(t *testing.T) {
 		"(/rnd:hammer)":                    "/rnd",
 		"run /tokens --today":              "/tokens",
 		"`/tokens:week`":                   "/tokens",
+		"run the plot-inventory skill":     "plot-inventory",
 	} {
 		hits := retiredNameHits(fixtureRetiredNames, "f", line)
 		if len(hits) != 1 || hits[0].Name != name {

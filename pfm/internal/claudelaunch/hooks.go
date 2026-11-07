@@ -47,6 +47,15 @@ func HookTemplates(home string) []Hook {
 		{Event: "SessionEnd", Command: binary + " internal exit-close", Name: "exit-close"},
 		{Event: hookEventPreToolUse, Matcher: "Bash", Command: binary + " internal git-guard", Name: "git-guard"},
 		{Event: hookEventPreToolUse, Matcher: "Bash", Command: binary + " internal store-guard", Name: "store-guard"},
+		// orchestrator-wait judges only the agent types its door names
+		// (hookentry/orchestrator_wait.go): a plugin agent's frontmatter hooks
+		// never load, so the launch carries it for every loop.
+		{
+			Event:   hookEventPreToolUse,
+			Matcher: "Bash",
+			Command: binary + " internal orchestrator-wait",
+			Name:    "orchestrator-wait",
+		},
 		{
 			Event:   hookEventPreToolUse,
 			Matcher: HookPcmGuardMatcher,

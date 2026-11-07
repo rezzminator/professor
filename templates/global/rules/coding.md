@@ -1,6 +1,6 @@
 ---
 visible-to:
-  include: ["main", "flights-foreman", "flights-foreman-sonnet", "flights-lander", "flights-speccer"]
+  include: ["main", "flights:foreman", "flights:foreman-sonnet", "flights:lander", "flights:speccer"]
 ---
 
 # Code: one home per thing

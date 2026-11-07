@@ -5,6 +5,54 @@
       "kind": "skill",
       "successor": "close-out",
       "match": "exact"
+    },
+    {
+      "name": "flights-foreman",
+      "kind": "agent",
+      "successor": "flights:foreman",
+      "match": "exact"
+    },
+    {
+      "name": "flights-foreman-sonnet",
+      "kind": "agent",
+      "successor": "flights:foreman-sonnet",
+      "match": "exact"
+    },
+    {
+      "name": "flights-hunter",
+      "kind": "agent",
+      "successor": "flights:hunter",
+      "match": "exact"
+    },
+    {
+      "name": "flights-lander",
+      "kind": "agent",
+      "successor": "flights:lander",
+      "match": "exact"
+    },
+    {
+      "name": "flights-spec-walker",
+      "kind": "agent",
+      "successor": "flights:spec-walker",
+      "match": "exact"
+    },
+    {
+      "name": "flights-speccer",
+      "kind": "agent",
+      "successor": "flights:speccer",
+      "match": "exact"
+    },
+    {
+      "name": "flights-sub-lander",
+      "kind": "agent",
+      "successor": "flights:sub-lander",
+      "match": "exact"
+    },
+    {
+      "name": "lander-inventory",
+      "kind": "skill",
+      "successor": "flights:lander-inventory",
+      "match": "exact"
     }
   ],
   "storeEntries": [],
@@ -13,7 +61,15 @@
   "hookBinaries": [],
   "hookShimHints": [],
   "claudePlugins": {},
-  "globalAgents": [],
+  "globalAgents": [
+    "flights-foreman",
+    "flights-foreman-sonnet",
+    "flights-hunter",
+    "flights-lander",
+    "flights-spec-walker",
+    "flights-speccer",
+    "flights-sub-lander"
+  ],
   "units": [],
   "configFiles": [],
   "commands": {

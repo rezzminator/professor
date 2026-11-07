@@ -12,7 +12,10 @@
     "retiredFiles": [],
     "sourceGeneratedAgentsDir": "templates/generated/agents",
     "sourceAgentsDir": "templates/global/agents",
-    "agentMarkerDir": "templates/global/agents"
+    "agentMarkerDir": "templates/global/agents",
+    "plugins": [
+      "flights"
+    ]
   },
   "codex": {
     "globalCommands": true,

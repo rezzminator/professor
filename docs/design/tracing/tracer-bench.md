@@ -185,7 +185,7 @@ These drove the kit mechanisms: `new --seek` PRIOR hops, `--questions` with `QUE
 
 ### The foreman flight
 
-`flights-foreman`'s first flight under its tracer rule, audited for its use of tracer. The tracer run cost $0.56 — lead $0.41, 13 sub-tracers $0.15 — 20% of the foreman's round-1 spend.
+`flights:foreman`'s first flight under its tracer rule, audited for its use of tracer. The tracer run cost $0.56 — lead $0.41, 13 sub-tracers $0.15 — 20% of the foreman's round-1 spend.
 
 - The foreman never loaded the caller's manual: no Skill call and no `tracetree.py` call in 113 rows.
 - Its tracer questions were survey-shaped where the build needed each door's surface and test fixture.
@@ -233,7 +233,7 @@ A live tracer run after write-time refusal and drift landed: 2 nodes, 62 of 62 h
 
 ## Field runs
 
-Every run directory written under `/tmp/{project}/tracer/` from 2026-10-09 21:00, when the tree landed, to 2026-10-11 01:04: 259 runs, each re-checked with `tt check` on 2026-10-11 and joined to the lead transcript that ran its `tt new`, the lead's agent type read from the transcript's `.meta.json`. Claude-led runs by caller: `reviewer` and its bench variants 159, main chats 11, `clone-distiller` 10, `general-purpose` 3, `gpt-foreman` 3, `flights-foreman` 2.
+Every run directory written under `/tmp/{project}/tracer/` from 2026-10-09 21:00, when the tree landed, to 2026-10-11 01:04: 259 runs, each re-checked with `tt check` on 2026-10-11 and joined to the lead transcript that ran its `tt new`, the lead's agent type read from the transcript's `.meta.json`. Claude-led runs by caller: `reviewer` and its bench variants 159, main chats 11, `clone-distiller` 10, `general-purpose` 3, `gpt-foreman` 3, `flights:foreman` 2.
 
 ### Kit counts by lead
 

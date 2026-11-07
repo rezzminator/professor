@@ -68,6 +68,7 @@ const TIER1 = [
           "workbench",
           "servicemanager",
           "retired",
+          "claudeplugin",
         ],
       },
       {
@@ -921,8 +922,9 @@ const COMMAND_ROOTS = ["templates/global/commands/", "templates/project/commands
 const SKILL_ROOTS = ["templates/global/skills/", "templates/project/skills/", ".claude/skills/"];
 const ASSET_ROOT = "pfm/internal/installer/assets/";
 // shortcut: commands README.md names that no tree here holds — Claude Code's
-// own and the listed plugins' (their trees live in the submodules' own
-// repositories); a new one joins this list in the same change as its README line.
+// own and the listed plugins' that pluginRoles cannot read as `/p:n` from a
+// plugin's commands/ (their trees live in the submodules' own repositories);
+// a new one joins this list in the same change as its README line.
 const README_EXTERNAL = new Set(["/reload-plugins", "/buddy", "/cache", "/keepwarm"]);
 
 // `git grep` at a commit: [{path, line, text}]; exit 1 with no stderr is no hit.
@@ -953,7 +955,10 @@ function seamRule(cwd, base, head, info) {
   const paths = [
     ...new Set(changes.flatMap((c) => (c.status === "D" ? [c.path] : c.status === "R" ? [c.oldPath] : []))),
   ].sort();
-  const roles = roleChanges(cwd, base, head, changes).removed;
+  // A role moved into a listed plugin is renamed, not removed: its old name
+  // stays live as the plugin's Codex/OpenCode twin (`p-n`) or its command or skill.
+  const moved = pluginRoles(cwd, head);
+  const roles = roleChanges(cwd, base, head, changes).removed.filter((r) => !moved.has(`${r.kind} ${r.name}`));
   info.push(`SEAMS ${paths.length} removed paths, ${roles.length} removed roles swept`);
   const fails = [];
   const sweep = (tokens, words, what) => {
@@ -961,8 +966,8 @@ function seamRule(cwd, base, head, info) {
     const hits = grepAt(cwd, head, [...(words ? ["-w"] : []), "-F", ...tokens.flatMap((t) => ["-e", t])]);
     for (const hit of hits)
       for (const t of tokens) {
-        // A hyphen joins a longer name (flights-lander-sonnet is not
-        // flights-lander), and so does a colon before a name character
+        // A hyphen joins a longer name (reviewer-pro is not reviewer),
+        // and so does a colon before a name character
         // (/x:use is not /x); a path continues through a further segment or
         // extension (scripts/old.sh.bak, scripts/old.shell are not scripts/old.sh).
         const named = words
@@ -992,6 +997,7 @@ function readmeRule(cwd, head, info) {
       const m = /^([^/]+)\//.exec(p.slice(root.length));
       if (m) shipped.add(`/${m[1]}`);
     }
+  for (const role of pluginRoles(cwd, head)) if (role.startsWith("command ")) shipped.add(role.slice("command ".length));
   for (const p of listed(ASSET_ROOT)) {
     const m = /^([^/]+)\.(?:command|skill)\.md$/.exec(p.slice(ASSET_ROOT.length));
     if (m) shipped.add(`/${m[1]}`);
@@ -1009,30 +1015,61 @@ function readmeRule(cwd, head, info) {
   return fails;
 }
 
-// T1 — every plugin the marketplace lists is pinned at a published tag of its repository.
-function pluginRule(cwd, head, info) {
-  const file = ".claude-plugin/marketplace.json";
-  if (!treeHas(cwd, head, file)) throw new CheckError(`${file} is absent at ${head}`);
+const MARKETPLACE = ".claude-plugin/marketplace.json";
+
+// The marketplace's plugins at a commit, each with its submodule path and the
+// gitlink pinned there (null when the path holds none).
+function marketplacePlugins(cwd, head) {
+  if (!treeHas(cwd, head, MARKETPLACE)) throw new CheckError(`${MARKETPLACE} is absent at ${head}`);
   let plugins;
   try {
-    plugins = JSON.parse(git(cwd, ["show", `${head}:${file}`])).plugins;
+    plugins = JSON.parse(git(cwd, ["show", `${head}:${MARKETPLACE}`])).plugins;
   } catch (err) {
     if (err instanceof CheckError) throw err;
-    throw new CheckError(`${file} at ${head} is not valid JSON: ${err.message}`);
+    throw new CheckError(`${MARKETPLACE} at ${head} is not valid JSON: ${err.message}`);
   }
-  if (!Array.isArray(plugins)) throw new CheckError(`${file} at ${head} holds no plugins list`);
+  if (!Array.isArray(plugins)) throw new CheckError(`${MARKETPLACE} at ${head} holds no plugins list`);
+  return plugins.map((p) => {
+    const path = String(p?.source?.path ?? "").replace(/^\.\//, "").replace(/\/$/, "");
+    const entry = path ? nulSplit(git(cwd, ["ls-tree", "-z", head, "--", path]))[0] ?? "" : "";
+    return { plugin: p, path, gitlink: /^160000 commit ([0-9a-f]{40})\t/.exec(entry)?.[1] ?? null };
+  });
+}
+
+// The roles the listed plugins ship at their gitlinks, keyed `${kind} ${name}`
+// as roleOf names them: agent `p-n` (the twin of `p:n`), command `/p:n`, skill
+// `n`. A plugin whose tree at its gitlink cannot be listed is an ERROR, never
+// "ships nothing"; one with no gitlink is T1's to report.
+function pluginRoles(cwd, head) {
+  const roles = new Set();
+  if (!treeHas(cwd, head, MARKETPLACE)) return roles;
+  for (const { plugin, path, gitlink } of marketplacePlugins(cwd, head)) {
+    const name = plugin?.name;
+    if (!gitlink || typeof name !== "string") continue;
+    const dir = `plugins/${name}/`;
+    for (const p of nulSplit(git(join(cwd, path), ["ls-tree", "-r", "--name-only", "-z", gitlink, "--", dir]))) {
+      const rest = p.slice(dir.length);
+      let m;
+      if ((m = /^agents\/([^/]+)\.md$/.exec(rest))) roles.add(`agent ${name}-${m[1]}`);
+      else if ((m = /^commands\/([^/]+)\.md$/.exec(rest))) roles.add(`command /${name}:${m[1]}`);
+      else if ((m = /^skills\/([^/]+)\//.exec(rest))) roles.add(`skill ${m[1]}`);
+    }
+  }
+  return roles;
+}
+
+// T1 — every plugin the marketplace lists is pinned at a published tag of its repository.
+function pluginRule(cwd, head, info) {
+  const plugins = marketplacePlugins(cwd, head);
   const fails = [];
   const unlisted = [];
-  for (const p of plugins) {
-    const path = String(p?.source?.path ?? "").replace(/^\.\//, "").replace(/\/$/, "");
+  for (const { plugin: p, path, gitlink } of plugins) {
     const url = p?.source?.url;
     if (!path || !url) {
-      fails.push(fail("T1", file, `plugin ${p?.name} names no source.path and source.url`));
+      fails.push(fail("T1", MARKETPLACE, `plugin ${p?.name} names no source.path and source.url`));
       continue;
     }
-    const entry = nulSplit(git(cwd, ["ls-tree", "-z", head, "--", path]))[0] ?? "";
-    const m = /^160000 commit ([0-9a-f]{40})\t/.exec(entry);
-    if (!m) {
+    if (!gitlink) {
       fails.push(fail("T1", path, `plugin ${p.name} has no submodule gitlink at ${head.slice(0, 7)}`));
       continue;
     }
@@ -1045,8 +1082,8 @@ function pluginRule(cwd, head, info) {
       unlisted.push(err.message);
       continue;
     }
-    if (!tagged.has(m[1]))
-      fails.push(fail("T1", path, `plugin ${p.name}'s gitlink ${m[1].slice(0, 7)} is no published tag of ${url}`));
+    if (!tagged.has(gitlink))
+      fails.push(fail("T1", path, `plugin ${p.name}'s gitlink ${gitlink.slice(0, 7)} is no published tag of ${url}`));
   }
   info.push(`PLUGINS ${plugins.length - unlisted.length} checked, ${unlisted.length} unlistable`);
   return { fails, unlisted };

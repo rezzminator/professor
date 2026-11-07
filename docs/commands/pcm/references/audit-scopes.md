@@ -38,7 +38,7 @@ Files: `templates/**`, `docs/{SETUP,PLACEHOLDERS,RELEASE}.md`, `templates/refres
 This is the scope with adopters downstream of it — a FAIL here ships.
 
 - **Internal reference resolution:** every template referencing another template, agent, command, script, or reference card → the target exists under `templates/` (a pointer that only resolves in the source project is a broken install)
-- **Return tokens ↔ their writers:** every token a `flights-*` agent's `description:` returns (`DONE`, `PARTIAL`, `PASS`, `FIXED`, `FAIL`) is one its body's § Return writes (`templates/global/agents/flights-*.md`)
+- **Return tokens ↔ their writers:** every token a `flights:*` agent's `description:` returns (`DONE`, `PARTIAL`, `PASS`, `FIXED`, `FAIL`) is one its body's § Return writes (`plugins/flights/plugins/flights/agents/*.md`)
 - **Placeholder integrity:** every `{TOKEN}` in a template is registered in `PLACEHOLDERS.md`; every registered token is used or knowingly retired; no template carries a source-project value where a token belongs
 - **SETUP coverage:** every file under `templates/` has a write step in `SETUP.md`; every path `SETUP.md` writes has a template
 - **Cast consistency:** `README.md` agent/command/skill lists match a live `ls` of `templates/project/agents/` and `templates/project/commands/`

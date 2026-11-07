@@ -35,14 +35,14 @@ Files: every SKILL.md under `.claude/` (`find .claude -name 'SKILL.md'` — incl
 
 ## `pipeline` — Walk the flight chain end-to-end
 
-Files: `~/.claude/agents/flights-*.md` and `~/.claude/commands/flights/doctor.md` (machine-global), all agents they reference
+Files: the enabled flights plugin's `agents/*.md` and `commands/doctor.md` (root: a directory marketplace's checkout of the plugin, per `{config}/plugins/known_marketplaces.json`, else its `installed_plugins.json` `installPath`), all agents they reference
 
 - **Reference resolution:** every "Read and follow" path → target file exists
-- **Agent spawn validity:** every `subagent_type` referenced → matches a registered agent name/description in `.claude/agents/`, child agents, or `~/.claude/agents/`
+- **Agent spawn validity:** every `subagent_type` referenced → matches a registered agent name/description in `.claude/agents/`, child agents, `~/.claude/agents/`, or for a `{plugin}:{name}` id that enabled plugin's `agents/`
 - **Path variables:** `$DOCS`, `$WORKTREE` used — no hardcoded `docs/dev/` or `.worktrees/` paths
-- **Return tokens ↔ their writers:** every token a `flights-*` agent's `description:` returns (`DONE`, `PARTIAL`, `PASS`, `FIXED`, `FAIL`) is one its body's § Return writes
-- **Script references:** every script a `flights-*` agent or the project's gitter names (`worktree.sh`, `alloc-ports.sh` where the project has them) → file exists and is executable
-- **Flow integrity:** main chat → a `flights-foreman` tier → main chat → `flights-lander` → gitter; no step references an agent from a later phase
+- **Return tokens ↔ their writers:** every token a `flights:*` agent's `description:` returns (`DONE`, `PARTIAL`, `PASS`, `FIXED`, `FAIL`) is one its body's § Return writes
+- **Script references:** every script a `flights:*` agent or the project's gitter names (`worktree.sh`, `alloc-ports.sh` where the project has them) → file exists and is executable
+- **Flow integrity:** main chat → a `flights:foreman` tier → main chat → `flights:lander` → gitter; no step references an agent from a later phase
 
 ## `scripts` — Walk each script
 

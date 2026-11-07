@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -746,53 +745,6 @@ func TestHerdrStateBridgeLockDoesNotAliasAUserSession(t *testing.T) {
 	rig.seed(rig.registered("working", map[string]herdrClient{"4242": rig.client("w1:p1", "term_1")}))
 	rig.wantQuiet(rig.engine("idle", `{"session_id":"s1"}`))
 	rig.wantCalls(listCall, reportCall("w1:p1", "idle", ""))
-}
-
-// A watcher is ordered by the blocked event, not the later reannouncement's
-// wall clock. Rebinding and reannouncing must not strand its pane as blocked.
-func TestHerdrStateWatcherSurvivesBridgeReconciliation(t *testing.T) {
-	for _, operation := range []string{"reannounce", "move", "adopt"} {
-		t.Run(operation, func(t *testing.T) {
-			rig := newChatRig(t)
-			clients := map[string]herdrClient{"4242": rig.client("w1:p1", "term_1")}
-			if operation == "adopt" {
-				clients = nil
-			}
-			state := rig.registered("blocked", clients)
-			state.Seq = 700
-			rig.seed(state)
-			rig.tmux.clients = []string{"4242"}
-			rig.clientEnv(4242, "w1:p1")
-			deps := rig.jail.deps(rig.env, &rig.clock)
-			deps.tmux, deps.listPanes = rig.tmux.run, rig.tmux.listPanes
-			pane := "w1:p1"
-			switch operation {
-			case "reannounce":
-				if _, err := reannounceOn(context.Background(), rigSocket, deps); err != nil {
-					t.Fatal(err)
-				}
-			case "move":
-				rig.herdr.move(pane, "w2:p3")
-				pane = "w2:p3"
-				rig.wantQuiet(rig.hook("sync", "--client", "4242"))
-			}
-			reporter := &herdrReporter{
-				deps: deps, session: "cc-1", stderr: io.Discard,
-				options: herdrOptions{engine: pfmengine.Claude, event: "idle", socket: rigSocket},
-			}
-			watch := &herdrWatch{reporter: reporter, seq: 700}
-			before := len(rig.herdr.calls())
-			if err := watch.report(); err != nil {
-				t.Fatal(err)
-			}
-			if calls := rig.herdr.calls()[before:]; !slices.Contains(calls, reportCall(pane, "idle", "")) {
-				t.Fatalf("watch after %s: wire=%q, want idle in %s", operation, calls, pane)
-			}
-			if got := rig.tmux.storedState(t); got.State != "idle" || got.Seq != 701 {
-				t.Fatalf("watch stored=%+v, want idle at 701", got)
-			}
-		})
-	}
 }
 
 func TestHerdrStateSteadyReportKeepsOwnershipGeneration(t *testing.T) {

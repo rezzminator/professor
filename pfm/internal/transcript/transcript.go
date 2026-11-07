@@ -161,7 +161,7 @@ func parseClaude(parsed record) (Entry, bool) {
 		if text == "" {
 			return Entry{}, false
 		}
-		if parsed.Type == "user" && strings.HasPrefix(text, claudeInterruptMarker) {
+		if parsed.Type == "user" && ClaudeInterrupted(text) {
 			// Before the junk drop: the marker starts with "[Request", which
 			// naming.IsJunkPrompt discards, and an interrupted turn must not
 			// vanish from the record.
@@ -272,9 +272,13 @@ func codexTurnEnd(raw json.RawMessage, timestamp string) (Entry, bool) {
 	return Entry{Role: RoleAssistant, Text: text, Error: kind, Timestamp: timestamp}, true
 }
 
-// claudeInterruptMarker starts the user record Claude Code writes when its
+// ClaudeInterruptMarker starts the user record Claude Code writes when its
 // human interrupts a turn ("[Request interrupted by user]", "... for tool use]").
-const claudeInterruptMarker = "[Request interrupted by user"
+const ClaudeInterruptMarker = "[Request interrupted by user"
+
+// ClaudeInterrupted reports whether the text of a Claude user record is the
+// interrupt marker that ends its turn.
+func ClaudeInterrupted(text string) bool { return strings.HasPrefix(text, ClaudeInterruptMarker) }
 
 // interruptedTurn is the entry for a turn its human aborted (Codex's
 // turn_aborted, Claude's interrupt marker). The abort stands in the assistant's

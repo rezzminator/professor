@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -57,6 +58,14 @@ type ProcIdentity interface {
 // clock, so a ProcFS that cannot supply one stays usable everywhere else.
 type ProcBirth interface {
 	Birth(pid int) (int64, error)
+}
+
+// ProcStart is the optional ProcFS extension that reports when the kernel
+// created a process, to its clock tick: a hook's spawn moment, which a slow
+// exec and runtime start under load do not move. Only the kernel's own table
+// has one; a jail's fixture tree has no clock its ticks count from.
+type ProcStart interface {
+	Started(pid int) (time.Time, error)
 }
 
 // ProcMemory is the optional ProcFS extension that reports a process's

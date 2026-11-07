@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -84,6 +85,7 @@ type herdrDeps struct {
 	// a process table's "no such process" retires a record; nil when the table
 	// is a fixture whose pids name no real process.
 	processAlive func(pid int) (bool, error)
+	started      func(pid int) (time.Time, error) // a process's spawn (gather.ProcStart): firedSeq's clock
 	getpid       func() int
 	// cmdline and environ read one process's command line and environment:
 	// the Codex TUI's own, which name the pane it runs in (herdr_codex.go).
@@ -112,6 +114,9 @@ func realHerdrDeps() herdrDeps {
 	}
 	if env.Get(paths.EnvProcRoot) == "" {
 		deps.processAlive = gather.ProcessAlive
+		if table, ok := procfs.(gather.ProcStart); ok {
+			deps.started = table.Started
+		}
 	}
 	home, err := paths.HomeFrom(env)
 	// A real reporter always enables durable-seat resolution, even when home
@@ -248,6 +253,9 @@ type herdrReporter struct {
 	// them in the order they were made.
 	seq  uint64
 	sent uint64
+	// fired is when Claude fired a hook's main-turn event (firedSeq), the
+	// clock main_seq orders by; zero is seq.
+	fired uint64
 	// session is the chat session once known: the name its error log carries.
 	session string
 	// tmuxPane is the engine's tmux pane (tmuxOrigin, or a Codex session's
@@ -316,7 +324,8 @@ func (reporter *herdrReporter) plan(payload herdrPayload) *herdrAction {
 	case herdr.EventWorking:
 		// A tool the user interrupted (Esc) ends the turn, or a batch sibling's
 		// failure cancelled it mid-turn: neither says the chat works on, so the
-		// state stands and a block stays for the transcript watch to settle.
+		// state stands for the transcript watch, which settles the turn idle
+		// once Claude writes its interrupt entry (herdr_watch.go).
 		if payload.IsInterrupt {
 			return nil
 		}
@@ -672,6 +681,7 @@ func (reporter *herdrReporter) event(
 	if err != nil {
 		return err
 	}
+	unlockBridge = sync.OnceFunc(unlockBridge)
 	defer unlockBridge()
 	action := reporter.plan(payload)
 	if action == nil || state.Seq > reporter.seq || keepsStored(reporter.options.event, payload, state) {
@@ -690,7 +700,7 @@ func (reporter *herdrReporter) event(
 	if err := reporter.writeState(ctx, session, next); err != nil {
 		return undelivered(err)
 	}
-	errs := []error{split.errs, resolveErr, reporter.blankTitle(ctx, action), reporter.watch(session, next, payload)}
+	errs := []error{split.errs, resolveErr, reporter.blankTitle(ctx, action)}
 	errs = append(errs, reporter.releaseAll(ctx, reporter.engineLabel(state), split.gone))
 	for _, pid := range sortedClientPIDs(clients) {
 		client := clients[pid]
@@ -707,7 +717,10 @@ func (reporter *herdrReporter) event(
 		}
 		errs = append(errs, reporter.nameSync(ctx, session, next, clientTargets(clients), clientTargets(named)))
 	}
-	return errors.Join(errs...)
+	// The watch walks the hook's ancestry and forks: no other chat's report
+	// waits on the host-wide bridge for it, as in nativeSeat.
+	unlockBridge()
+	return errors.Join(append(errs, reporter.watch(payload, next))...)
 }
 
 // send writes the action to the pane's Herdr socket. A refused resume command

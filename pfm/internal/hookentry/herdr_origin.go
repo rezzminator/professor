@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
@@ -25,6 +26,9 @@ func reportToHerdr(args []string, stdin io.Reader, stderr io.Writer, deps herdrD
 	}
 	reporter.options = options
 	reporter.session = options.session
+	if options.engine == pfmengine.Claude && !options.event.FiredByTmux() {
+		reporter.fired = reporter.firedSeq()
+	}
 	var payload herdrPayload
 	if !options.event.FiredByTmux() {
 		// Read every identity field before reporting, even after a large response.
@@ -62,6 +66,74 @@ func reportToHerdr(args []string, stdin io.Reader, stderr io.Writer, deps herdrD
 		reporter.warn("pfm internal herdr-state %s: %v (fail-open)", options.event, err)
 	}
 	return 0
+}
+
+// herdrFireWindow bounds how long before its run a hook's spawn may lie: an
+// older process right under the engine is no hook spawn.
+const herdrFireWindow = time.Minute
+
+// firedSeq is when Claude fired a hook's event: the spawn of the process right
+// under the engine in its ancestry, this hook or the shell Claude ran it in. Claude spawns its async hooks at their
+// event, but under load one can run seconds later, past an interrupt Claude
+// wrote meanwhile; ordered among main-turn events by its spawn (main_seq), the
+// stale hook stays behind that interrupt's idle (herdr_watch.go), while its
+// reports keep the run's seq every other writer orders by. With no process
+// table, no Claude process above the hook, or no spawn within herdrFireWindow,
+// it is the run's own time.
+func (reporter *herdrReporter) firedSeq() uint64 {
+	ran := reporter.seq // the run's own time, read as the reporter began
+	now := time.Unix(0, int64(ran))
+	if reporter.deps.started == nil {
+		return ran
+	}
+	ancestry, err := reporter.hookAncestry()
+	if err != nil {
+		reporter.warn("pfm internal herdr-state %s: ordered by its run, not its spawn: %v",
+			reporter.options.event, err)
+		return ran
+	}
+	index := engineIndex(ancestry)
+	// Only a Claude process spawns its hooks per event; under any other engine
+	// (a launcher, a script standing in for Claude) the process below it may be
+	// one long-lived child that ran every hook, its spawn no event's.
+	if index < 1 || !pfmengine.MatchCommand(pfmengine.Claude, []string{ancestry[index].Command}, true) {
+		return ran
+	}
+	spawn := ancestry[index-1].PID
+	if index > 1 {
+		// Claude runs each hook command through a shell's -c: any other
+		// process between it and this hook ran before the event, not for it.
+		argv, err := reporter.deps.cmdline(spawn)
+		if err != nil {
+			reporter.warn(
+				"pfm internal herdr-state %s: ordered by its run, not its spawn: read the command line of pid %d: %v",
+				reporter.options.event, spawn, err)
+			return ran
+		}
+		if !shellRunsCommand(argv) {
+			return ran
+		}
+	}
+	spawned, err := reporter.deps.started(spawn)
+	if err != nil {
+		reporter.warn("pfm internal herdr-state %s: ordered by its run, not its spawn: read the start of pid %d: %v",
+			reporter.options.event, spawn, err)
+		return ran
+	}
+	if spawned.After(now) || now.Sub(spawned) > herdrFireWindow {
+		return ran
+	}
+	return uint64(spawned.UnixNano())
+}
+
+// shellRunsCommand reports whether argv is a shell running one command
+// string: `sh -c …`, `bash -lc …`.
+func shellRunsCommand(argv []string) bool {
+	if len(argv) < 2 || !isShellOrPfm(argv[0]) {
+		return false
+	}
+	flag := argv[1]
+	return strings.HasPrefix(flag, "-") && !strings.HasPrefix(flag, "--") && strings.Contains(flag, "c")
 }
 
 // tmuxOrigin settles the tmux server and pane this run reports through. A

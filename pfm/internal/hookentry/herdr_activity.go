@@ -156,13 +156,26 @@ func (reporter *herdrReporter) recordActivity(
 		defer func() { returnErr = errors.Join(returnErr, err) }()
 	}
 	agentEvent := reporter.options.event == herdr.EventAgentStart || reporter.options.event == herdr.EventAgentStop
+	mainEvent := !agentEvent && payload.AgentID == ""
 	// Counts commute by agent id, unlike main-turn reports: do not drop a delayed
-	// lifecycle event just because a newer hook acquired the lock first.
-	if state.Stored.Seq > reporter.seq && !agentEvent {
+	// lifecycle event just because a newer hook acquired the lock first. For the
+	// same reason a main-turn event is stale only behind a newer main-turn one:
+	// a sub-agent stopping as an Esc aborts it never outranks the Esc's idle.
+	fired := cmp.Or(reporter.fired, reporter.seq)
+	switch {
+	case mainEvent && state.Stored.MainSeq != 0:
+		if state.Stored.MainSeq > fired {
+			return nil
+		}
+	case state.Stored.Seq > reporter.seq && !agentEvent:
 		return nil
 	}
 	if payload.AgentID != "" && reporter.options.event == herdr.EventWorking && !answersBlock(payload, state.Stored) {
 		return nil
+	}
+	mainSeq := state.Stored.MainSeq
+	if mainEvent {
+		mainSeq = fired
 	}
 	if state.Stored.Seq >= reporter.seq {
 		reporter.seq = state.Stored.Seq + 1
@@ -186,6 +199,7 @@ func (reporter *herdrReporter) recordActivity(
 	action.stored.Agents = state.Stored.Agents
 	action.stored.MainStoppedAt = state.Stored.MainStoppedAt
 	action.stored.Seq = reporter.seq
+	action.stored.MainSeq = mainSeq
 	state.Stored = action.stored
 	reporter.activity = &state
 	reporter.activityAction = action
@@ -197,13 +211,17 @@ func (reporter *herdrReporter) recordActivity(
 	return errors.Join(
 		err,
 		reporter.finishActivity(payload.SessionID, state, wasWaiting),
+		reporter.endWatch(payload, state.Stored),
 		reporter.settleNativeLater(payload.SessionID, state, err),
 	)
 }
 
+// removeActivity removes an ended session's record and its transcript watch's.
 func (reporter *herdrReporter) removeActivity(session string) error {
-	if err := os.Remove(reporter.activityPath(session)); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("remove ended Claude activity: %w", err)
+	for _, path := range []string{reporter.activityPath(session), reporter.watchRecord(session)} {
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("remove ended Claude activity: %w", err)
+		}
 	}
 	return nil
 }

@@ -272,7 +272,9 @@ func newNativeTitleRig(t *testing.T, title string, beforeSend ...func()) nativeT
 	})
 	prompt := func() herdrRun {
 		var stderr bytes.Buffer
-		rc := reportToHerdr([]string{"working"}, bytes.NewReader(payload), &stderr, realHerdrDeps())
+		deps := realHerdrDeps()
+		deps.spawn = nil // the transcript watch is herdr_watch_test.go's
+		rc := reportToHerdr([]string{"working"}, bytes.NewReader(payload), &stderr, deps)
 		return herdrRun{rc: rc, stderr: stderr.String()}
 	}
 	return nativeTitleRig{server: server, db: db, seat: seat, lockDir: paths.HerdrLockDir(root), prompt: prompt}

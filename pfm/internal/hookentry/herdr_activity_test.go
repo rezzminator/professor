@@ -217,7 +217,11 @@ func TestHerdrBackgroundAgents(t *testing.T) {
 func activityTestEvent(t *testing.T, jail *herdrJail, server *fakeHerdr, now *int64, step string) {
 	t.Helper()
 	event, value, _ := strings.Cut(step, ":")
-	payload := map[string]any{"session_id": "activity-session"}
+	transcript := filepath.Join(filepath.Dir(jail.lockDir), "activity-session.jsonl")
+	if err := os.WriteFile(transcript, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	payload := map[string]any{"session_id": "activity-session", "transcript_path": transcript}
 	agent, command, _ := strings.Cut(value, "/")
 	toolCall := func(hook string) {
 		payload["hook_event_name"] = hook
@@ -316,8 +320,8 @@ func TestHerdrLostAgentStopExpiresWithoutAnotherHook(t *testing.T) {
 	for _, step := range []string{"prompt", "agent-start:a", "idle"} {
 		activityTestEvent(t, jail, server, &now, step)
 	}
-	if len(spawned) != 1 {
-		t.Errorf("detached watchdogs=%d; want 1", len(spawned))
+	if watchdogs := spawnedVerb(spawned, herdrAgentsWatch); len(watchdogs) != 1 {
+		t.Errorf("detached watchdogs=%q; want 1", watchdogs)
 	}
 	now += int64(time.Hour + time.Second)
 	var stderr bytes.Buffer
@@ -423,11 +427,15 @@ func TestHerdrNativeBackgroundAgents(t *testing.T) {
 	if err := db.PutSeat(context.Background(), seat); err != nil {
 		t.Fatal(err)
 	}
+	transcript := filepath.Join(root, "activity-session.jsonl")
+	if err := os.WriteFile(transcript, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	deps := realHerdrDeps()
 	now := time.Unix(1000, 0)
 	deps.now = func() time.Time { now = now.Add(time.Millisecond); return now }
-	spawned := 0
-	deps.spawn = func([]string) error { spawned++; return nil }
+	var spawned [][]string
+	deps.spawn = func(argv []string) error { spawned = append(spawned, argv); return nil }
 	// The fake records each request's params with sorted keys, its seq left out.
 	const argv = `"resume_argv":["pfm","chat","open","--restored","activity-session"]`
 	report := func(state, message string) string {
@@ -460,8 +468,8 @@ func TestHerdrNativeBackgroundAgents(t *testing.T) {
 			`{"session_id":"activity-session","hook_event_name":"UserPromptSubmit"}`,
 			[]string{
 				`pane.release_agent {"agent":"claude","pane_id":"w6:p3","source":"pfm"}`,
-				`pane.report_agent_session {"agent":"claude","agent_session_id":"activity-session","pane_id":"w6:p3",` +
-					argv + `,"source":"herdr:claude"}`,
+				fmt.Sprintf(`pane.report_agent_session {"agent":"claude","agent_session_id":"activity-session",`+
+					`"agent_session_path":%q,"pane_id":"w6:p3",`, transcript) + argv + `,"source":"herdr:claude"}`,
 				working,
 			},
 		},
@@ -504,7 +512,9 @@ func TestHerdrNativeBackgroundAgents(t *testing.T) {
 		},
 	} {
 		var stderr bytes.Buffer
-		rc := reportToHerdr([]string{test.event}, strings.NewReader(test.payload), &stderr, deps)
+		payload := strings.Replace(test.payload, `{"session_id":"activity-session"`,
+			fmt.Sprintf(`{"session_id":"activity-session","transcript_path":%q`, transcript), 1)
+		rc := reportToHerdr([]string{test.event}, strings.NewReader(payload), &stderr, deps)
 		if rc != 0 || stderr.Len() != 0 {
 			t.Fatalf("%s: rc=%d stderr=%s", test.name, rc, &stderr)
 		}
@@ -517,9 +527,13 @@ func TestHerdrNativeBackgroundAgents(t *testing.T) {
 			)
 		}
 	}
-	// One watchdog per stopped turn holding an agent: the first Stop, the late agent.
-	if spawned != 2 {
-		t.Errorf("agent watchdogs=%d, want 2", spawned)
+	// One watchdog per stopped turn holding an agent: the first Stop, the late
+	// agent; one transcript watch per main turn: the prompt's, the resumed turn's.
+	if watchdogs := spawnedVerb(spawned, herdrAgentsWatch); len(watchdogs) != 2 {
+		t.Errorf("agent watchdogs=%q, want 2", watchdogs)
+	}
+	if watches := spawnedVerb(spawned, herdrWatchVerb); len(watches) != 2 {
+		t.Errorf("transcript watches=%q, want 2", watches)
 	}
 	now = now.Add(time.Hour + time.Second)
 	var stderr bytes.Buffer
@@ -538,7 +552,7 @@ func TestHerdrNativeBackgroundAgents(t *testing.T) {
 
 func TestHerdrBackgroundAgentsThroughTmux(t *testing.T) {
 	rig := newWatchRig(t)
-	rig.wantQuiet(rig.engine("working", `{"session_id":"s1","hook_event_name":"UserPromptSubmit"}`))
+	rig.wantQuiet(rig.engine("working", rig.payload(`,"hook_event_name":"UserPromptSubmit"`)))
 	rig.wantQuiet(rig.engine("agent-start", `{"session_id":"s1","agent_id":"a","hook_event_name":"SubagentStart"}`))
 	rig.wantQuiet(rig.engine("idle", `{"session_id":"s1"}`))
 	assertActivityReport(t, rig.herdr, "working", "1 agent running")
@@ -579,7 +593,7 @@ func TestHerdrInterruptWithBackgroundAgentStaysWorking(t *testing.T) {
 	rig.wantQuiet(rig.engine("agent-start", `{"session_id":"s1","agent_id":"a","hook_event_name":"SubagentStart"}`))
 	argv := rig.block("Bash")
 	rig.appendEntries(watchRejectionEntry, watchInterruptEntry)
-	watch := rig.start(argv, fastWatch)
+	watch := rig.start(argv, fastPoll)
 	watch.wait(t, time.Second)
 	assertActivityReport(t, rig.herdr, "working", "1 agent running")
 	if state := rig.tmux.storedState(t); state.State != "working" || len(state.Agents) != 1 {
@@ -661,13 +675,13 @@ func TestHerdrLateAgentStartGetsItsOwnWatch(t *testing.T) {
 	server := newFakeHerdr(t)
 	jail := newHerdrJail(t)
 	now := int64(time.Second)
-	spawned := 0
-	jail.spawn = func([]string) error { spawned++; return nil }
+	var spawned [][]string
+	jail.spawn = func(argv []string) error { spawned = append(spawned, argv); return nil }
 	for _, event := range []string{"prompt", "idle", "agent-start:a"} {
 		activityTestEvent(t, jail, server, &now, event)
 	}
-	if spawned != 1 {
-		t.Fatalf("late start watchdogs=%d; want 1", spawned)
+	if watchdogs := spawnedVerb(spawned, herdrAgentsWatch); len(watchdogs) != 1 {
+		t.Fatalf("late start watchdogs=%q; want 1", watchdogs)
 	}
 }
 
@@ -787,71 +801,138 @@ func TestHerdrAgentWatchRetriesAReadFailure(t *testing.T) {
 	assertActivityReport(t, server, "idle", "")
 }
 
+// The watch's idle never lowers the activity record's stale-event fence: a
+// held hook (a parallel tool finishing while the dialog stays open) advanced
+// the record above the tmux block, and the interrupt after it is stored at the
+// interrupt's own later time.
 func TestHerdrTranscriptWatchPreservesActivityFence(t *testing.T) {
 	rig := newWatchRig(t)
-	rig.block("Bash")
+	argv := rig.block("Bash")
 	blocked := rig.tmux.storedState(t)
-	rig.wantQuiet(rig.engine("working", `{"session_id":"s1","hook_event_name":"PostToolUse","tool_name":"Read"}`))
-	deps := rig.jail.deps(rig.env, &rig.clock)
-	deps.tmux = rig.tmux.run
-	deps.listPanes = rig.tmux.listPanes
-	options, err := parseHerdrOptions([]string{"idle", "--socket", rigSocket, "--session", "cc-1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	reporter := &herdrReporter{deps: deps, options: options, session: "cc-1"}
+	rig.wantQuiet(rig.engine("working", rig.payload(`,"hook_event_name":"PostToolUse","tool_name":"Read"`)))
+	reporter := &herdrReporter{deps: rig.watchDeps()}
 	before, err := reporter.readActivity("s1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if before.Stored.Seq <= blocked.Seq {
+	if before.Stored.Seq <= blocked.Seq || rig.tmux.storedState(t).Seq != blocked.Seq {
 		t.Fatal("fixture did not advance activity independently of tmux")
 	}
-	watch := &herdrWatch{reporter: reporter, seq: blocked.Seq}
-	if err := watch.report(); err != nil {
-		t.Fatal(err)
-	}
+	watch := rig.start(argv, fastPoll)
+	rig.appendEntries(watchRejectionEntry, watchInterruptEntry)
+	watch.wait(t, 3*time.Second)
 	after, err := reporter.readActivity("s1")
-	if err != nil || after.Stored.Seq <= before.Stored.Seq {
-		t.Fatalf(
-			"activity sequence moved backward: before=%d after=%d err=%v",
-			before.Stored.Seq,
-			after.Stored.Seq,
-			err,
-		)
+	if err != nil || after.Stored.State != "idle" || after.Stored.Seq != watchInterruptAt {
+		t.Fatalf("activity after the interrupt = %+v (err %v), want idle at seq %d above the held %d",
+			after.Stored, err, uint64(watchInterruptAt), before.Stored.Seq)
 	}
 }
 
+// A tmux session that holds another conversation by the time the interrupt
+// lands keeps that conversation's state: the watch settles only its own.
 func TestHerdrTranscriptWatchDoesNotCrossSessions(t *testing.T) {
 	rig := newWatchRig(t)
-	rig.block("Bash")
-	blocked := rig.tmux.storedState(t)
-	deps := rig.jail.deps(rig.env, &rig.clock)
-	reads := 0
-	deps.listPanes = rig.tmux.listPanes
-	deps.tmux = func(ctx context.Context, socket string, args ...string) (string, error) {
-		if len(args) > 0 && args[0] == "show-options" && args[len(args)-1] == herdrStoredOption {
-			reads++
-			if reads == 2 {
-				changed := blocked
-				changed.SessionID = "replacement-session"
-				rig.seed(changed)
-			}
-		}
-		return rig.tmux.run(ctx, socket, args...)
+	argv := rig.block("Bash")
+	replacement := rig.tmux.storedState(t)
+	replacement.SessionID = "replacement-session"
+	rig.seed(replacement)
+	before, sent := rig.tmux.stored, len(rig.herdr.calls())
+	watch := rig.start(argv, fastPoll)
+	rig.appendEntries(watchRejectionEntry, watchInterruptEntry)
+	watch.wait(t, 3*time.Second)
+	if got := rig.herdr.calls()[sent:]; len(got) != 0 || rig.tmux.stored != before {
+		t.Fatalf("requests %q, stored %q, want none and the replacement's %q", got, rig.tmux.stored, before)
 	}
-	options, err := parseHerdrOptions([]string{"idle", "--socket", rigSocket, "--session", "cc-1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	reporter := &herdrReporter{deps: deps, options: options, session: "cc-1"}
-	watch := &herdrWatch{reporter: reporter, seq: blocked.Seq}
-	if err := watch.report(); err != nil {
-		t.Fatal(err)
-	}
+	reporter := &herdrReporter{deps: rig.watchDeps()}
 	if _, err := os.Stat(reporter.activityPath("replacement-session")); !os.IsNotExist(err) {
-		t.Fatalf("watch touched a session whose lock it never held: %v", err)
+		t.Fatalf("watch touched a session it does not watch: %v", err)
 	}
+	if own, err := reporter.readActivity("s1"); err != nil || own.Stored.State != "idle" {
+		t.Fatalf("own activity = %+v (err %v), want the interrupted s1 idle", own.Stored, err)
+	}
+}
+
+// A native Claude seat interrupted mid-turn settles through the settle
+// process a Stop hook falls back to (a detached watch cannot prove the seat
+// by its own ancestry): idle, or working "1 agent running" while a sub-agent
+// remains, and the watch exits with its record gone.
+func TestHerdrNativeWatchReportsIdleOnTheInterruptEntry(t *testing.T) {
+	for _, test := range []struct {
+		name, state, message string
+		before               []string
+	}{
+		{"Esc while the model streams", "idle", "", []string{"prompt"}},
+		{"Esc with a sub-agent running", "working", "1 agent running", []string{"prompt", "agent-start"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			rig := newNativeActivityRig(t)
+			for _, step := range test.before {
+				if got := rig.event(step); got.rc != 0 || got.stderr != "" {
+					t.Fatalf("%s: rc=%d stderr=%s", step, got.rc, got.stderr)
+				}
+			}
+			watches := spawnedVerb(rig.spawned, herdrWatchVerb)
+			if len(watches) != 1 {
+				t.Fatalf("spawned %q, want one transcript watch", rig.spawned)
+			}
+			argv := watches[0]
+			// 900002 is the fixture's claude, between the seat host and the hook.
+			if slices.Contains(argv, herdrSocketFlag) || argv[len(argv)-1] != "activity-session" ||
+				flagValue(t, argv, "--pid") != "900002" || flagValue(t, argv, "--command") != "claude" {
+				t.Fatalf("watch argv = %q, want no tmux socket, session activity-session, engine 900002 claude", argv)
+			}
+			settles := make(chan []string, 1)
+			deps := rig.deps
+			deps.spawn = func(argv []string) error {
+				if argv[2] == herdrSettle {
+					settles <- argv
+				}
+				return nil
+			}
+			var stderr bytes.Buffer
+			done := make(chan int)
+			go func() { done <- watchForHerdr(argv[3:], &stderr, deps, fastPoll) }()
+			file, err := os.OpenFile(rig.transcript, os.O_APPEND|os.O_WRONLY, 0o600)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := file.WriteString(watchModelInterruptEntry + "\n"); err != nil {
+				t.Fatal(err)
+			}
+			_ = file.Close()
+			var settle []string
+			select {
+			case settle = <-settles:
+			case <-time.After(3 * time.Second):
+				t.Fatal("the watch started no settle process within 3s of the interrupt entry")
+			}
+			runSpawned(t, [][]string{settle}, rig.deps)
+			select {
+			case rc := <-done:
+				if rc != 0 || stderr.Len() != 0 {
+					t.Fatalf("watch rc=%d stderr=%s, want a quiet exit 0", rc, &stderr)
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatal("the watch still runs 3s after its idle was recorded")
+			}
+			assertActivityReport(t, rig.server, test.state, test.message)
+			reporter := &herdrReporter{deps: rig.deps}
+			if _, err := os.Stat(reporter.watchRecord("activity-session")); !os.IsNotExist(err) {
+				t.Fatalf("watch record after the idle: %v, want it gone", err)
+			}
+		})
+	}
+}
+
+// spawnedVerb is every spawned argv of one herdr-state verb.
+func spawnedVerb(spawned [][]string, verb string) [][]string {
+	var argvs [][]string
+	for _, argv := range spawned {
+		if len(argv) > 2 && argv[2] == verb {
+			argvs = append(argvs, argv)
+		}
+	}
+	return argvs
 }
 
 func activityEnv(server *fakeHerdr) map[string]string {

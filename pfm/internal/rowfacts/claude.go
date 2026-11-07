@@ -58,7 +58,7 @@ func claudeTurn(line []byte, record claudeRecord, isAssistant bool) (working boo
 	switch {
 	case bytes.HasPrefix(content, []byte(`"<command-name>`)),
 		bytes.HasPrefix(content, []byte(`"<local-command`)),
-		bytes.Contains(line, []byte(`[Request interrupted by user`)):
+		bytes.Contains(line, []byte(claudetranscript.ClaudeInterruptMarker)):
 		return false
 	}
 	return true

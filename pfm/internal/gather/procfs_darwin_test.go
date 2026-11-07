@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"syscall"
 	"testing"
+	"time"
 )
 
 // An exited pid reads as absent, as a missing /proc entry does on Linux, so a
@@ -28,6 +29,7 @@ func TestDarwinProcFSReadsOfAnExitedPIDAreNotExist(t *testing.T) {
 		{"Environ", func(pid int) error { _, err := proc.Environ(pid); return err }},
 		{"ProcessIdentity", func(pid int) error { _, err := proc.ProcessIdentity(pid); return err }},
 		{"Birth", func(pid int) error { _, err := proc.Birth(pid); return err }},
+		{"Started", func(pid int) error { _, err := proc.Started(pid); return err }},
 		{"Executable", func(pid int) error { _, err := proc.Executable(pid); return err }},
 		{"Image", func(pid int) error { _, err := proc.Image(pid); return err }},
 		{"FDLinks", func(pid int) error { _, err := proc.FDLinks(pid); return err }},
@@ -88,5 +90,28 @@ func TestDarwinEnvironTagsForeignProcess(t *testing.T) {
 	_, err := NewDarwinProcFS().Environ(1)
 	if !errors.Is(err, ErrForeignProcess) || !errors.Is(err, fs.ErrPermission) {
 		t.Fatalf("pid 1 (root) was not tagged foreign: %v", err)
+	}
+}
+
+// A process's start is the wall-clock moment of its spawn, between the
+// moments before and after it.
+func TestDarwinProcFSStartedPlacesTheSpawnOnTheWallClock(t *testing.T) {
+	before := time.Now()
+	command := exec.Command("sleep", "5")
+	if err := command.Start(); err != nil {
+		t.Fatalf("start sleep: %v", err)
+	}
+	after := time.Now()
+	t.Cleanup(func() {
+		_ = command.Process.Kill()
+		_ = command.Wait()
+	})
+	started, err := NewDarwinProcFS().Started(command.Process.Pid)
+	if err != nil {
+		t.Fatalf("Started(%d): %v", command.Process.Pid, err)
+	}
+	if started.Before(before.Truncate(time.Microsecond)) || started.After(after) {
+		t.Fatalf("Started(%d) = %s, want between %s and %s", command.Process.Pid,
+			started.Format(time.RFC3339Nano), before.Format(time.RFC3339Nano), after.Format(time.RFC3339Nano))
 	}
 }

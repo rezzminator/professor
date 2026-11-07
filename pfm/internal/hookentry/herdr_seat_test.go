@@ -102,6 +102,7 @@ func TestHerdrNativeSeatReporter(t *testing.T) {
 			}
 			payload, _ := json.Marshal(map[string]string{"session_id": reportedSession, "source": "startup"})
 			deps := realHerdrDeps()
+			deps.spawn = nil // the transcript watch is herdr_watch_test.go's
 			if event == "delayed working" {
 				reportEvent = "working"
 				reads := 0
@@ -509,11 +510,13 @@ func TestNativeLossNoteClearsOnlyOnActualPrompt(t *testing.T) {
 				t.Fatal(err)
 			}
 			var stderr bytes.Buffer
+			deps := realHerdrDeps()
+			deps.spawn = nil // the transcript watch is herdr_watch_test.go's
 			if rc := reportToHerdr(
 				[]string{"--engine", string(engine), tc.event},
 				strings.NewReader(tc.payload),
 				&stderr,
-				realHerdrDeps(),
+				deps,
 			); rc != 0 ||
 				stderr.Len() != 0 {
 				t.Fatalf("hook rc=%d stderr=%s", rc, &stderr)
@@ -706,7 +709,7 @@ func TestNativeReporterProvesItsSupervisorAndCanonicalTarget(t *testing.T) {
 				}
 				if err := os.WriteFile(
 					file,
-					[]byte(strings.Replace(string(raw), "S 900001 ", "S 1 ", 1)),
+					[]byte(strings.Replace(string(raw), "S 900002 ", "S 1 ", 1)),
 					0o600,
 				); err != nil {
 					t.Fatal(err)

@@ -7,7 +7,11 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
+	"golang.org/x/sys/unix"
+
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -30,6 +34,24 @@ func nativeProcessCounters() (map[int]ProcessCounter, []string, error) {
 }
 
 func nativeUnixSockets() ([]string, error) { return readLinuxUnixSockets(paths.SystemProcRoot()) }
+
+// Started reads a process's start tick from /proc/<pid>/stat and places it on
+// the wall clock through CLOCK_BOOTTIME, the clock the tick counts from: btime
+// is whole seconds, too coarse to order a hook against an engine's own
+// millisecond timestamps.
+func (proc linuxProcFS) Started(pid int) (time.Time, error) {
+	stat, err := proc.Stat(pid)
+	if err != nil {
+		return time.Time{}, err
+	}
+	var boot unix.Timespec
+	if err := unix.ClockGettime(unix.CLOCK_BOOTTIME, &boot); err != nil {
+		return time.Time{}, fmt.Errorf("read the boot clock for pid %d's start: %w", pid, err)
+	}
+	now := clock.Real.Now()
+	age := time.Duration(boot.Nano()) - time.Duration(stat.StartTime)*(time.Second/userHZ)
+	return now.Add(-age), nil
+}
 
 // ProcessIdentity reads the short command name and effective uid from status.
 func (proc linuxProcFS) ProcessIdentity(pid int) (ProcessIdentity, error) {

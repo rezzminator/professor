@@ -240,7 +240,7 @@ func (reporter *herdrReporter) lookupCodexPane(session, path string) (codexPane,
 	if err != nil {
 		return codexPane{}, fmt.Errorf("read the pane of Codex session %s (skipped): %w", session, err)
 	}
-	alive, err := reporter.codexProcessAlive(pane)
+	alive, err := reporter.processRuns(pane.PID, pane.Command)
 	if err != nil {
 		return codexPane{}, fmt.Errorf(
 			"could not read the TUI process %d of Codex session %s (registration kept, skipped): %w",
@@ -259,33 +259,34 @@ func (reporter *herdrReporter) lookupCodexPane(session, path string) (codexPane,
 	)
 }
 
-// codexProcessAlive reports whether a record's process still runs its
-// recorded command; without a process table it is believed. A process table
-// with no entry is gone only once the one pid probe (deps.processAlive) agrees:
-// a table that cannot show a running process proves nothing. Any other
-// unreadable entry is an error: the process may well be running.
-func (reporter *herdrReporter) codexProcessAlive(pane codexPane) (bool, error) {
+// processRuns reports whether a recorded process (a Codex pane's TUI, a
+// transcript watch's engine) still runs its recorded command; without a
+// process table it is believed. A process table with no entry is gone only
+// once the one pid probe (deps.processAlive) agrees: a table that cannot show
+// a running process proves nothing. Any other unreadable entry is an error:
+// the process may well be running.
+func (reporter *herdrReporter) processRuns(pid int, recorded string) (bool, error) {
 	if reporter.deps.procInfo == nil {
 		return true, nil
 	}
-	_, command, err := reporter.deps.procInfo(pane.PID)
+	_, command, err := reporter.deps.procInfo(pid)
 	if errors.Is(err, fs.ErrNotExist) {
 		if reporter.deps.processAlive == nil {
 			return false, nil
 		}
-		alive, probeErr := reporter.deps.processAlive(pane.PID)
+		alive, probeErr := reporter.deps.processAlive(pid)
 		if probeErr != nil {
 			return false, errors.Join(err, probeErr)
 		}
 		if alive {
-			return false, fmt.Errorf("process %d runs but the process table cannot show its command: %w", pane.PID, err)
+			return false, fmt.Errorf("process %d runs but the process table cannot show its command: %w", pid, err)
 		}
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	return command == pane.Command, nil
+	return command == recorded, nil
 }
 
 // sweepCodexPanes removes every record but kept that names process pid or a
@@ -306,7 +307,7 @@ func (reporter *herdrReporter) sweepCodexPanes(kept string, pid int) error {
 			continue
 		}
 		if err == nil && pane.PID != pid {
-			if alive, aliveErr := reporter.codexProcessAlive(pane); alive || aliveErr != nil {
+			if alive, aliveErr := reporter.processRuns(pane.PID, pane.Command); alive || aliveErr != nil {
 				continue
 			}
 		}

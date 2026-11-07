@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"golang.org/x/sys/unix"
 
@@ -123,6 +124,16 @@ func (proc *DarwinProcFS) Stat(pid int) (ProcStat, error) {
 		ParentPID: int(process.Eproc.Ppid),
 		StartTime: uint64(started.Sec)*1_000_000 + uint64(started.Usec),
 	}, nil
+}
+
+// Started is the process's p_starttime, the wall-clock microsecond the kernel
+// created it.
+func (proc *DarwinProcFS) Started(pid int) (time.Time, error) {
+	stat, err := proc.Stat(pid)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return time.UnixMicro(int64(stat.StartTime)), nil
 }
 
 // Birth returns the process start time in epoch seconds.

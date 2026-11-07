@@ -203,7 +203,10 @@ func (reporter *herdrReporter) nativeSeat(ctx context.Context, payload herdrPayl
 		// The name sync reads the transcript and renames through Herdr: no pane state write
 		// needs the host-wide bridge, so every other chat's report stops waiting on it here.
 		unlockBridge()
-		return true, reporter.syncNativeEngineName(ctx, seat, payload)
+		return true, errors.Join(
+			reporter.watch(payload, action.stored),
+			reporter.syncNativeEngineName(ctx, seat, payload),
+		)
 	}
 	return true, nil
 }

@@ -43,7 +43,7 @@ func TestHerdrWatchScanTakesNoControllingTerminal(t *testing.T) {
 		t.Fatal(err)
 	}
 	watch := &herdrWatch{transcript: transcript}
-	if found, err := watch.scan(); found || err == nil || !strings.Contains(err.Error(), "not a regular file") {
+	if _, found, err := watch.scan(); found || err == nil || !strings.Contains(err.Error(), "not a regular file") {
 		t.Fatalf("scan() = %v, %v, want an error naming a file that is not regular", found, err)
 	}
 	if tty, err := os.Open("/dev/tty"); err == nil {

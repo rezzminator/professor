@@ -102,6 +102,7 @@ func (reporter *herdrReporter) settleEventLater(payload herdrPayload, err error)
 			return nil
 		}
 		stored = action.stored
+		stored.MainSeq = reporter.fired // the replay is ordered among main-turn events as the hook was
 	}
 	return reporter.spawnSettle(herdrSettleEvent, stored, payload, string(reporter.options.event))
 }
@@ -327,6 +328,7 @@ func settleHerdrStateWithWait(args []string, stderr io.Writer, deps herdrDeps, w
 			return 1
 		}
 		reporter.options.event, reporter.session, reporter.seq = herdr.Event(args[4]), payload.SessionID, seq
+		reporter.fired = stored.MainSeq
 		if reporter.options.event != herdr.EventAgentStop {
 			reporter.activityAction = &herdrAction{stored: stored}
 		}

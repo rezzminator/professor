@@ -3,6 +3,7 @@ package hookentry
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -33,6 +34,17 @@ func holdBridge(t *testing.T, lockDir string) (release func()) {
 	return func() { _ = file.Close() }
 }
 
+// chatTranscript is an empty Claude transcript of session s1 the test owns:
+// the one a main turn's hooks name for its transcript watch.
+func chatTranscript(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "s1.jsonl")
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 // runSpawned runs every detached process the hooks started, as each runs once
 // its hook has exited; each must exit 0 and quiet.
 func runSpawned(t *testing.T, spawned [][]string, deps herdrDeps) {
@@ -46,12 +58,13 @@ func runSpawned(t *testing.T, spawned [][]string, deps herdrDeps) {
 }
 
 // nativeActivityRig is a proved native Claude seat in Herdr pane w6:p3 whose
-// hooks keep their detached processes in spawned.
+// hooks name its transcript and keep their detached processes in spawned.
 type nativeActivityRig struct {
-	server  *fakeHerdr
-	deps    herdrDeps
-	lockDir string
-	spawned [][]string
+	server     *fakeHerdr
+	deps       herdrDeps
+	lockDir    string
+	transcript string
+	spawned    [][]string
 }
 
 func newNativeActivityRig(t *testing.T) *nativeActivityRig {
@@ -75,7 +88,13 @@ func newNativeActivityRig(t *testing.T) *nativeActivityRig {
 	if err := db.PutSeat(context.Background(), seat); err != nil {
 		t.Fatal(err)
 	}
-	rig := &nativeActivityRig{server: server, deps: realHerdrDeps(), lockDir: paths.HerdrLockDir(root)}
+	rig := &nativeActivityRig{
+		server: server, deps: realHerdrDeps(), lockDir: paths.HerdrLockDir(root),
+		transcript: filepath.Join(root, "activity-session.jsonl"),
+	}
+	if err := os.WriteFile(rig.transcript, []byte(watchToolUseEntry+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	now := time.Unix(1000, 0)
 	rig.deps.now = func() time.Time { now = now.Add(time.Millisecond); return now }
 	rig.deps.spawn = func(argv []string) error { rig.spawned = append(rig.spawned, argv); return nil }
@@ -85,15 +104,16 @@ func newNativeActivityRig(t *testing.T) *nativeActivityRig {
 // event fires one Claude hook of session activity-session: prompt,
 // agent-start, agent-stop (agent a) or idle.
 func (rig *nativeActivityRig) event(step string) herdrRun {
-	event, payload := step, `{"session_id":"activity-session"}`
+	event, fields := step, ""
 	switch step {
 	case "prompt":
-		event, payload = "working", `{"session_id":"activity-session","hook_event_name":"UserPromptSubmit"}`
+		event, fields = "working", `,"hook_event_name":"UserPromptSubmit"`
 	case "agent-start":
-		payload = `{"session_id":"activity-session","agent_id":"a","hook_event_name":"SubagentStart"}`
+		fields = `,"agent_id":"a","hook_event_name":"SubagentStart"`
 	case "agent-stop":
-		payload = `{"session_id":"activity-session","agent_id":"a","hook_event_name":"SubagentStop"}`
+		fields = `,"agent_id":"a","hook_event_name":"SubagentStop"`
 	}
+	payload := fmt.Sprintf(`{"session_id":"activity-session","transcript_path":%q%s}`, rig.transcript, fields)
 	var stderr bytes.Buffer
 	rc := reportToHerdr([]string{event}, strings.NewReader(payload), &stderr, rig.deps)
 	return herdrRun{rc: rc, stderr: stderr.String()}
@@ -242,9 +262,9 @@ func TestHerdrSettleRefusesWhatNoHookHandsIt(t *testing.T) {
 func TestHerdrTmuxStopDroppedBeforeTheEngineProofIsSettled(t *testing.T) {
 	for _, engine := range []string{"claude", "codex"} {
 		t.Run(engine, func(t *testing.T) {
-			rig, session := newChatRig(t), "s1"
+			rig, session, transcript := newChatRig(t), "s1", chatTranscript(t)
 			fire := func(event, extra string) herdrRun {
-				return rig.engine(event, `{"session_id":"s1"`+extra+`}`)
+				return rig.engine(event, fmt.Sprintf(`{"session_id":"s1","transcript_path":%q%s}`, transcript, extra))
 			}
 			if engine == "codex" {
 				rig, session = codexRig(t), "x1"
@@ -272,7 +292,7 @@ func TestHerdrTmuxStopDroppedBeforeTheEngineProofIsSettled(t *testing.T) {
 			}
 			deps := rig.jail.deps(rig.env, &rig.clock)
 			deps.tmux, deps.listPanes = rig.tmux.run, rig.tmux.listPanes
-			runSpawned(t, spawned, deps)
+			runSpawned(t, spawnedVerb(spawned, herdrSettle), deps)
 			if stored := rig.tmux.storedState(t); stored.State != "idle" || stored.SessionID != session {
 				t.Errorf("stored = %q, want session %s idle", rig.tmux.stored, session)
 			}
@@ -305,9 +325,12 @@ func TestHerdrTmuxDroppedStopIsResent(t *testing.T) {
 	} {
 		for _, engine := range []string{"claude", "codex"} {
 			t.Run(test.name+"/"+engine, func(t *testing.T) {
-				rig, session := newChatRig(t), "s1"
+				rig, session, transcript := newChatRig(t), "s1", chatTranscript(t)
 				fire := func(event, extra string) herdrRun {
-					return rig.engine(event, `{"session_id":"s1"`+extra+`}`)
+					return rig.engine(
+						event,
+						fmt.Sprintf(`{"session_id":"s1","transcript_path":%q%s}`, transcript, extra),
+					)
 				}
 				if engine == "codex" {
 					rig, session = codexRig(t), "x1"
@@ -340,7 +363,7 @@ func TestHerdrTmuxDroppedStopIsResent(t *testing.T) {
 				}
 				deps := rig.jail.deps(rig.env, &rig.clock)
 				deps.tmux, deps.listPanes = rig.tmux.run, rig.tmux.listPanes
-				runSpawned(t, spawned, deps)
+				runSpawned(t, spawnedVerb(spawned, herdrSettle), deps)
 				if stored := rig.tmux.storedState(t); stored.State != test.want || stored.SessionID != session {
 					t.Errorf("stored = %q, want session %s %s", rig.tmux.stored, session, test.want)
 				}
@@ -380,7 +403,8 @@ func TestHerdrPermanentFailureIsNotRetried(t *testing.T) {
 		var spawned [][]string
 		rig.jail.spawn = func(argv []string) error { spawned = append(spawned, argv); return nil }
 		rig.seed(rig.registered("working", map[string]herdrClient{"4242": rig.client("w1:p1", "term_1")}))
-		rig.wantQuiet(rig.engine("working", `{"session_id":"s1","hook_event_name":"UserPromptSubmit"}`))
+		rig.wantQuiet(rig.engine("working", fmt.Sprintf(
+			`{"session_id":"s1","hook_event_name":"UserPromptSubmit","transcript_path":%q}`, chatTranscript(t))))
 		rig.herdr.mu.Lock()
 		rig.herdr.refuse["pane.report_agent idle"] = "pane_not_found"
 		rig.herdr.mu.Unlock()

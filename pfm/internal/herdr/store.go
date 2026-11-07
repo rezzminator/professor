@@ -26,6 +26,11 @@ type Stored struct {
 	State         string          `json:"state"`
 	Message       string          `json:"message"`
 	Seq           uint64          `json:"seq"`
+	// MainSeq is the seq of the newest main-turn event recorded (a main-thread
+	// hook, or the transcript watch's interrupt): main-turn events are ordered
+	// against each other alone, while a sub-agent's lifecycle, which commutes
+	// with them, still advances Seq.
+	MainSeq uint64 `json:"main_seq,omitempty"`
 	// Tool names the tool call a Claude permission request's block asks about:
 	// only that call's own working report leaves the block.
 	Tool string `json:"tool,omitempty"`

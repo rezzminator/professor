@@ -546,6 +546,9 @@ type herdrJail struct {
 	procFails map[int]error
 	// answers is each process the pid probe still finds; a pid it lacks is gone.
 	answers map[int]bool
+	// started is each process's spawn, in Unix nanoseconds; nil leaves the
+	// spawn clock out of the run, so a hook is ordered by its run.
+	started map[int]int64
 }
 
 // newHerdrJail lays out the usual chat: the engine (pid 50) is the pane's own
@@ -626,6 +629,15 @@ func (jail *herdrJail) deps(env map[string]string, clock *int64) herdrDeps {
 			}
 			return environment, nil
 		},
+	}
+	if jail.started != nil {
+		deps.started = func(pid int) (time.Time, error) {
+			spawned, ok := jail.started[pid]
+			if !ok {
+				return time.Time{}, fmt.Errorf("fake process table has no start for pid %d: %w", pid, fs.ErrNotExist)
+			}
+			return time.Unix(0, spawned), nil
+		}
 	}
 	if jail.activityTmux != nil {
 		deps.tmux = jail.activityTmux.run
@@ -718,7 +730,9 @@ func newNativeReporterHerdrCount(
 		}
 	}
 	write(900001, 1, "/fixture/pfm\x00internal\x00seat-host\x00"+seatID+"\x00")
-	write(os.Getpid(), 900001, "/fixture/pfm\x00internal\x00herdr-state\x00working\x00")
+	// The seat host runs the engine, whose hook is this process.
+	write(900002, 900001, "claude\x00")
+	write(os.Getpid(), 900002, "/fixture/pfm\x00internal\x00herdr-state\x00working\x00")
 	t.Setenv(paths.EnvProcRoot, proc)
 	server := &fakeHerdr{path: filepath.Join(root, "h.sock")}
 	listener, err := net.Listen("unix", server.path)

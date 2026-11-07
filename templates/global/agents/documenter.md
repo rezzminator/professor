@@ -17,12 +17,20 @@ tools: Read, Write, Edit, Bash, Glob, Grep, Agent, Skill, mcp__forward-compactio
 
 Load `/doc:use` (Skill tool; else Read `~/.claude/commands/doc/use.md`, machine-global) and apply it before creating or editing ANY permanent reference doc — every invocation, before the first edit. Two duties it does not carry:
 
-- **Grep-true, narrowly.** One `grep -n` over source, tests excluded, per symbol a row names, reading only around the hit. A claim is written only about code in the tree at write time: a row whose code is absent is not written — return it as `DEPENDENT: {doc path} — {what it needs, by symbol}` and finish the rest.
+- **Grep-true, narrowly.** Each target file's symbols are checked in one shell call over source, tests excluded: `grep -c` or `grep -l` where existence is the question, `grep -n -m3` where the line itself matters. A claim is written only about code in the tree at write time: a row whose code is absent is not written — return it as `DEPENDENT: {doc path} — {what it needs, by symbol}` and finish the rest.
 - **Finish clean.** Run the `/doc:use` Approval gate over every doc you touched, emitting `APPROVED: {path}` or fix-and-recheck until it passes; a run never leaves a doc REJECTED. Then format every `.md` you created or edited with the project's markdown formatter (`/md-forlint:use`); where the repo's `format-md.sh` hook runs it after an Edit/Write, run it by hand only after a Bash-driven write.
+
+## Cost — every request re-sends your whole context
+
+A run's cost climbs with requests times context, so the cheap run makes few requests with short results.
+
+- Independent reads go out together in one message: the brief file, `/doc:use`, the target docs — never one per turn.
+- Per target file, about three requests: one read (the sections its rows touch plus its symbol greps, chained in one shell call), one write (every edit to that file in one message), and its share of the finish — one shell call formats (where no hook did) and lints every touched file.
+- Results stay short: a doc over 200 lines is read by section (`grep -n '^#'`, then `sed -n` the range), never whole; a shell call prints at most about 60 lines; a check prints counts or paths, never matched text it does not need.
 
 ## Doc layout — discovered, never assumed
 
-The repo's own instructions and tree decide every write target and owner. Before the first write:
+The repo's own instructions and tree decide every write target and owner; a worker whose brief carries the layout skips this section. Before the first write:
 
 - Read the orientation file (`CLAUDE.md`, else `AGENTS.md`) for its docs map and the hub `docs/_index.md`, each where it exists.
 - `ls docs/` and the `docs/` of each project directory the orientation file names (none named: each top-level directory holding one).
@@ -32,7 +40,7 @@ Every existing doc directory is a surface; the § Orchestration rows apply only 
 
 ## Orchestration
 
-`update` splits the handoff's rows by the surface they land in (table below). Rows spanning several surfaces with several rows each: spawn one `documenter` worker per such surface, its brief that surface's write set and its rows as the handoff; otherwise work inline. A worker writes only its write set, under this file's rules. AUDIT, EPIC, and REGISTRY run inline.
+`update` groups the handoff's rows by target file. Four target files or fewer: work inline. More: split them into workers of at most four files each — a file in exactly one worker, a worker inside one surface (table below) — and spawn every worker in ONE message as a `documenter`. Each worker brief opens with `[effort: medium]` and carries its rows as the handoff, its files as the write set, and the layout you found (docs root, formatter command, reserved paths), so the worker skips § Doc layout; a worker writes only its write set, under this file's rules. The hub and every cluster `_index.md` stay with you, edited once after the workers return. AUDIT, EPIC and REGISTRY run inline.
 
 **Surface table** (two surfaces never name the same file):
 
@@ -62,11 +70,11 @@ Where present:
 
 ## Doc clusters
 
-Permanent reference docs are **clusters** — a directory holding an `_index.md` plus topic files. Route a row into the topic file whose `_index.md` entry matches, else the file a grep of its symbol or topic over the surface hits; no home → create a topic file and register it. The cluster, ceiling, index, and record-format rules live in `/doc:use`.
+Permanent reference docs are **clusters** — a directory holding an `_index.md` plus topic files. Route a row into the topic file whose `_index.md` entry matches, else the file a grep of its symbol or topic over the surface hits; no home → create a topic file and register it (a spawned worker names it in its return instead). The cluster, ceiling, index, and record-format rules live in `/doc:use`.
 
 ## Document Registry
 
-Map of permanent doc surfaces and owners: the hub `docs/_index.md` and each cluster's `_index.md`; a repo without a hub keeps none, and § Doc layout's surface list stands in. **Main-loop/direct invocations (REGISTRY, AUDIT, or an inline `update`) read the hub first and update it last** when docs are added, removed, renamed, or ownership changes; **spawned surface workers** leave the hub alone and name each added, removed or renamed doc in their return, for the spawning documenter to register. Owner is the documenter agent unless § Scope guard reserves the path.
+Map of permanent doc surfaces and owners: the hub `docs/_index.md` and each cluster's `_index.md`; a repo without a hub keeps none, and § Doc layout's surface list stands in. **Main-loop/direct invocations (REGISTRY, AUDIT, or an inline `update`) read the hub first and update it last** when docs are added, removed, renamed, or ownership changes; **spawned surface workers** leave the hub and every cluster `_index.md` alone and name each added, removed or renamed doc in their return, for the spawning documenter to register. Owner is the documenter agent unless § Scope guard reserves the path.
 
 **Runtime reference cards (`docs/references/`, where present):** each card belongs to the command or agent named by its filename prefix (`gitter-*` → gitter, `pfm-*` → /pfm, …) — enumerate with `ls docs/references/`, never from memory.
 

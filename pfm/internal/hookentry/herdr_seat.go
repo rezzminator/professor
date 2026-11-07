@@ -120,15 +120,17 @@ func (reporter *herdrReporter) nativeSeat(ctx context.Context, payload herdrPayl
 		return true, nil
 	}
 	action := reporter.plan(payload)
-	// Herdr detects a native Claude from the pane's foreground and keys its state
-	// by herdr:claude, so pfm reports there; in a pane herdr-shield holds Herdr sees
-	// the attach client, so pfm reports under its own source.
-	// An event that changes nothing skips the read; a start still needs it.
+	// Herdr detects a native Claude from the pane's foreground and owns it: its
+	// screen detection reads the state and its own Claude integration reports the
+	// session, so pfm sends nothing. Where Herdr's foreground is herdr-shield's
+	// attach client instead, Herdr sees no agent, so pfm reports there under its
+	// own source. An event that changes nothing skips the read; a start still needs it.
 	detected := false
 	if reporter.options.engine == pfmengine.Claude && (action != nil || reporter.options.event == herdr.EventStart) {
 		processes, err := reporter.deps.shield.Read(ctx, seat.HerdrSocket, seat.HerdrPane)
 		if err != nil {
-			// The read only picks the report's source: an unread pane still gets the state, under pfm's own.
+			// Only a held pane's read needs herdr-shield, so an unread pane is taken as held:
+			// it still gets the state, under pfm's own source.
 			reporter.warn("pfm internal herdr-state %s: native Claude seat %s: read pane %s foreground "+
 				"(any report goes under pfm's own source): %v", reporter.options.event, seat.SeatID, seat.HerdrPane, err)
 		} else {
@@ -136,7 +138,7 @@ func (reporter *herdrReporter) nativeSeat(ctx context.Context, payload herdrPayl
 		}
 	}
 	if detected && reporter.options.event == herdr.EventStart && action == nil {
-		// Compaction/fork still refresh session metadata, never lifecycle state.
+		// Compaction/fork still bind the seat's new session, never lifecycle state.
 		action = &herdrAction{}
 	}
 	if action == nil {
@@ -180,23 +182,30 @@ func (reporter *herdrReporter) nativeSeat(ctx context.Context, payload herdrPayl
 			return true, fmt.Errorf("bind native seat: %w", err)
 		}
 	}
-	reporter.nativeSeatReport = true
-	action.stored.SessionID = seat.SessionID
 	seq := reporter.seq
 	if seq == 0 {
 		seq = reporter.nextSent()
 	}
+	// The owner record orders this seat's hooks even where pfm reports nothing.
 	if err := reporter.reserveNativeOwnership(seat, seq); err != nil {
 		return true, err
 	}
-	target := herdrTarget{socket: seat.HerdrSocket, pane: seat.HerdrPane, terminal: seat.HerdrTerminalID}
 	payload.SessionID = seat.SessionID
-	if detected && !action.release {
-		err = reporter.reportNativeClaude(ctx, target, payload, action, seq)
-	} else {
-		err = reporter.send(ctx, target, action, seq)
+	if detected {
+		if err := reporter.releaseSeenPane(ctx, seat); err != nil {
+			return true, err
+		}
+		if reporter.options.event == herdr.EventEnd {
+			// The pane keeps pfm's title (syncNativeEngineName) until it is cleared.
+			return true, reporter.clearNativeTitle(ctx, seat)
+		}
+		unlockBridge()
+		return true, reporter.syncNativeEngineName(ctx, seat, payload)
 	}
-	if err != nil {
+	reporter.nativeSeatReport = true
+	action.stored.SessionID = seat.SessionID
+	target := herdrTarget{socket: seat.HerdrSocket, pane: seat.HerdrPane, terminal: seat.HerdrTerminalID}
+	if err := reporter.send(ctx, target, action, seq); err != nil {
 		return true, undelivered(err)
 	}
 	if reporter.options.event != herdr.EventEnd {
@@ -317,20 +326,6 @@ func (reporter *herdrReporter) resumeArgv(sessionID string) ([]string, error) {
 	}
 	argv[len(argv)-1] = sessionID
 	return append(argv[:3:3], "--restored", sessionID), nil
-}
-
-// releaseSettled turns Herdr's pane-not-found for a release (the pane closed
-// since it was resolved) into success; every other failure remains visible.
-func releaseSettled(err error) error {
-	if isHerdrNotFound(err) {
-		return nil
-	}
-	return err
-}
-
-func isHerdrNotFound(err error) bool {
-	var refusal *herdr.Refusal
-	return errors.As(err, &refusal) && (refusal.Code == herdrPaneNotFound || refusal.Code == herdrNotFound)
 }
 
 // tmuxSeatLifecycle updates only this launcher's durable row; it does not

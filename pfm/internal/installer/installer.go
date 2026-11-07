@@ -1,3 +1,7 @@
+// Package installer owns the host-level pfm command, hook, launcher, and unit
+// wiring. Its assets are embedded so one pfm binary is a complete installer.
+//
+// herdr_claude.go: Herdr's own Claude integration, once per Claude settings store.
 package installer
 
 import (
@@ -283,6 +287,7 @@ func (installer *engine) install(ctx context.Context) error {
 	installer.deferFailure(installer.wireLogDefault())
 	installer.deferFailure(installer.wireShell(false))
 	installer.deferFailure(installer.wireHerdrShell(false))
+	installer.deferFailure(installer.wireHerdrClaudeIntegration(ctx))
 	installer.deferFailure(installer.convergeHerdrIndicators(ctx))
 	installer.deferFailure(installer.wireVSCode())
 	installer.deferFailure(installer.writeUpdateMetadata())

@@ -48,9 +48,8 @@ func (reporter *herdrReporter) lockBridge(ctx context.Context) (func(), error) {
 }
 
 type herdrPaneOwner struct {
-	Client          string `json:"client"`
-	Seq             uint64 `json:"seq"`
-	NativeDetection bool   `json:"native_detection,omitempty"`
+	Client string `json:"client"`
+	Seq    uint64 `json:"seq"`
 }
 
 func (reporter *herdrReporter) paneOwnerPath(target herdrTarget) string {

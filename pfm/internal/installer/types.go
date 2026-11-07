@@ -1,5 +1,3 @@
-// Package installer owns the host-level pfm command, hook, launcher, and unit
-// wiring. Its assets are embedded so one pfm binary is a complete installer.
 package installer
 
 import (
@@ -145,6 +143,10 @@ type Options struct {
 	// are part of the result (for example rumdl and uv). Runner remains the
 	// compatibility seam for simple command/status probes.
 	ProcessRunner deps.Runner
+	// ReleaseNativeClaudeReports hands a Claude pane's Herdr state to Herdr's own
+	// Claude integration once the install step made it present (herdr_claude.go):
+	// called once per apply on a Herdr host with Home; nil skips it.
+	ReleaseNativeClaudeReports func(ctx context.Context, home string) error
 
 	MCPEnabled    map[string]bool
 	MCPPort       int

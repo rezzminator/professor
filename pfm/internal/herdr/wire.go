@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"syscall"
 	"time"
 	"unicode"
 
@@ -89,12 +90,11 @@ func (report Report) Line() ([]byte, error) {
 	})
 }
 
-// SessionReport publishes restore metadata without taking ownership of lifecycle
-// state. Native Claude panes leave that state to Herdr's screen detection.
+// SessionReport publishes a pane's session without taking ownership of its
+// lifecycle state, which a native Claude pane leaves to Herdr's screen detection.
 type SessionReport struct {
-	Pane, Source, Agent, SessionID, SessionPath, StartSource string
-	ResumeArgv                                               []string
-	Seq                                                      uint64
+	Pane, Source, Agent, SessionID string
+	Seq                            uint64
 }
 
 // Line renders pane.report_agent_session; state and message are not in its schema.
@@ -109,15 +109,12 @@ func (report SessionReport) Line() ([]byte, error) {
 	return json.Marshal(request{
 		ID: fmt.Sprintf("pfm-%d", report.Seq), Method: "pane.report_agent_session",
 		Params: struct {
-			Pane        string   `json:"pane_id"`
-			Source      string   `json:"source"`
-			Agent       string   `json:"agent"`
-			SessionID   string   `json:"agent_session_id,omitempty"`
-			SessionPath string   `json:"agent_session_path,omitempty"`
-			StartSource string   `json:"session_start_source,omitempty"`
-			ResumeArgv  []string `json:"resume_argv,omitempty"`
-			Seq         uint64   `json:"seq"`
-		}{report.Pane, sourceOr(report.Source), report.Agent, report.SessionID, report.SessionPath, report.StartSource, report.ResumeArgv, report.Seq},
+			Pane      string `json:"pane_id"`
+			Source    string `json:"source"`
+			Agent     string `json:"agent"`
+			SessionID string `json:"agent_session_id,omitempty"`
+			Seq       uint64 `json:"seq"`
+		}{report.Pane, sourceOr(report.Source), report.Agent, report.SessionID, report.Seq},
 	})
 }
 
@@ -592,6 +589,12 @@ func (refusal *Refusal) Error() string {
 func RefusedResume(err error) bool {
 	var refusal *Refusal
 	return errors.As(err, &refusal) && (refusal.Code == "invalid_resume_argv" || refusal.Code == "resume_not_accepted")
+}
+
+// SocketGone reports whether err is a dial to a Herdr socket nothing serves:
+// its file is gone, or no server listens on it. No Herdr holds a report there.
+func SocketGone(err error) bool {
+	return errors.Is(err, syscall.ENOENT) || errors.Is(err, syscall.ECONNREFUSED)
 }
 
 // Send writes each request line to the Herdr socket in turn, one connection

@@ -320,7 +320,8 @@ func requestMethod(t *testing.T, line string) string {
 // The engine-name sync of a native hook reads the whole transcript, opens the
 // state database and asks Herdr to rename pane, agent and tab: none of it is
 // the pane's state write, so it runs once the host-wide bridge lock is free,
-// as the tmux transport's sync does, while the state report stays under it.
+// as the tmux transport's sync does, while the state report pfm sends a pane
+// herdr-shield holds stays under it.
 func TestNativeTitleSyncRunsOutsideTheBridgeLock(t *testing.T) {
 	var mu sync.Mutex
 	var held []bool
@@ -335,6 +336,7 @@ func TestNativeTitleSyncRunsOutsideTheBridgeLock(t *testing.T) {
 		mu.Unlock()
 	}
 	rig := newNativeTitleRig(t, "Renamed Desk", probe)
+	holdNativeReporterPane(t, rig.server, "w6:p3")
 	mu.Lock()
 	lockDir = rig.lockDir
 	mu.Unlock()

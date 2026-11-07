@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"slices"
 	"strings"
 	"time"
 
@@ -16,11 +17,13 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 )
 
-// The herdr-integration check keeps Herdr's own bundled integration for
-// claude, codex or opencode off the host: when one is installed, Herdr holds
-// the pane's agent state under its own source and pfm's reporter is locked out
-// of it (docs/design/hooks/hooks.md § Herdr reporter). Herdr is optional: a
-// host without it passes.
+// The herdr-integration check keeps Herdr's own bundled integration for codex
+// or opencode off the host: when one is installed, Herdr holds the pane's agent
+// state under its own source and pfm's reporter is locked out of it
+// (docs/design/hooks/hooks.md § Herdr reporter). Claude is the other way round:
+// Herdr's own Claude integration must be present, exactly once per Claude
+// settings store (herdr.ClaudeStores). Herdr is optional: a host without it
+// passes.
 const (
 	herdrIntegrationRow = "doctor: herdr-integration:"
 	// herdrStatusBound caps the one subprocess the check starts.
@@ -42,12 +45,11 @@ const (
 	herdrReporterWindow      = herdrReporterWindowHours * time.Hour
 )
 
-// herdrJudgedEngines are the engines pfm reports for, in the order the rows
-// print; Herdr names them by the engine's long name.
+// herdrJudgedEngines are the engines whose bundled Herdr integration must not
+// be installed, in the order the rows print; Herdr names them by the engine's
+// long name.
 func herdrJudgedEngines() []string {
-	return []string{
-		herdr.Label(pfmengine.Claude), herdr.Label(pfmengine.Codex), herdr.Label(pfmengine.OpenCode),
-	}
+	return []string{herdr.Label(pfmengine.Codex), herdr.Label(pfmengine.OpenCode)}
 }
 
 // printHerdrDoctor prints the herdr-integration rows and returns their warning
@@ -64,39 +66,42 @@ func printHerdrDoctor(
 	machines ...config.Config,
 ) (warnings, failures int) {
 	warnings, failures = printHerdrIntegrationHome(ctx, stdout, dependencies, nil, herdrJudgedEngines(), "", "")
+	var claudeDirs []string
+	for i := range machines {
+		for _, dir := range machines[i].ClaudeConfigDirs() {
+			if !slices.Contains(claudeDirs, dir) {
+				claudeDirs = append(claudeDirs, dir)
+			}
+		}
+	}
+	w, f := printHerdrClaudeStores(stdout, dependencies, claudeDirs)
+	warnings += w
+	failures += f
+	codex := herdr.Label(pfmengine.Codex)
 	seen := map[string]bool{}
 	for i := range machines {
-		machine := &machines[i]
-		for _, engine := range []struct {
-			name, key string
-			homes     []string
-		}{
-			{herdr.Label(pfmengine.Claude), "CLAUDE_CONFIG_DIR", machine.ClaudeConfigDirs()},
-			{herdr.Label(pfmengine.Codex), "CODEX_HOME", machine.CodexHomes()},
-		} {
-			for _, home := range engine.homes {
-				if seen[engine.key+"="+home] {
-					continue
-				}
-				seen[engine.key+"="+home] = true
-				scope := " engine=" + engine.name + " home=" + home
-				if home == "" {
-					warnings++
-					fmt.Fprintf(stdout, "%s WARN%s: managed integration home is empty\n", herdrIntegrationRow, scope)
-					continue
-				}
-				w, f := printHerdrIntegrationHome(
-					ctx,
-					stdout,
-					dependencies,
-					deps.EnvironmentWith(engine.key, home),
-					[]string{engine.name},
-					scope,
-					engine.key+"="+cmdparse.Quote(home)+" ",
-				)
-				warnings += w
-				failures += f
+		for _, home := range machines[i].CodexHomes() {
+			if seen[home] {
+				continue
 			}
+			seen[home] = true
+			scope := " engine=" + codex + " home=" + home
+			if home == "" {
+				warnings++
+				fmt.Fprintf(stdout, "%s WARN%s: managed integration home is empty\n", herdrIntegrationRow, scope)
+				continue
+			}
+			w, f := printHerdrIntegrationHome(
+				ctx,
+				stdout,
+				dependencies,
+				deps.EnvironmentWith("CODEX_HOME", home),
+				[]string{codex},
+				scope,
+				"CODEX_HOME="+cmdparse.Quote(home)+" ",
+			)
+			warnings += w
+			failures += f
 		}
 	}
 	return warnings, failures

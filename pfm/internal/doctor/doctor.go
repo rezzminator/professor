@@ -1,3 +1,8 @@
+// Package doctor is pfm's health pass: one row per probe over config,
+// engines, MCP, the index, crumbs, hooks, the harness prompt, and the
+// external plugin runtime, with healthy, broken, and could-not-look kept distinct.
+//
+// herdr_claude.go: the herdr-integration row of each Claude settings store.
 package doctor
 
 import (

@@ -3,18 +3,12 @@ package hookentry
 import (
 	"cmp"
 	"context"
-	"crypto/sha256"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 	"strconv"
-	"syscall"
 	"time"
 
-	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
@@ -45,61 +39,9 @@ type herdrActivityTarget struct {
 	Owner    string `json:"owner,omitempty"`
 	Seq      uint64 `json:"seq"`
 	Native   bool   `json:"native,omitempty"`
-	// Source is the Herdr source the target's state was reported under.
+	// Source is the Herdr source the target's state was reported under: pfm's
+	// own, or herdr:claude from an older build (retireNativeTargets releases it).
 	Source string `json:"source,omitempty"`
-}
-
-func (reporter *herdrReporter) activityKey(session string) string {
-	return fmt.Sprintf("activity-%x", sha256.Sum256([]byte(session)))
-}
-
-func (reporter *herdrReporter) activityPath(session string) string {
-	return filepath.Join(reporter.deps.lockDir, reporter.activityKey(session)+".json")
-}
-
-func (reporter *herdrReporter) readActivity(session string) (herdrActivity, error) {
-	var state herdrActivity
-	file, err := os.OpenFile(reporter.activityPath(session), os.O_RDONLY|syscall.O_NONBLOCK|syscall.O_NOFOLLOW, 0)
-	if errors.Is(err, os.ErrNotExist) {
-		return state, nil
-	}
-	if err != nil {
-		return state, fmt.Errorf("open Claude activity: %w", err)
-	}
-	defer func() { _ = file.Close() }()
-	info, err := file.Stat()
-	if err != nil {
-		return state, fmt.Errorf("inspect Claude activity: %w", err)
-	}
-	const maxActivityBytes = 1 << 20
-	if !info.Mode().IsRegular() || info.Size() > maxActivityBytes {
-		return state, fmt.Errorf("claude activity is not a regular file of at most %d bytes", maxActivityBytes)
-	}
-	data, err := io.ReadAll(io.LimitReader(file, maxActivityBytes+1))
-	if err != nil {
-		return state, fmt.Errorf("read Claude activity: %w", err)
-	}
-	if len(data) > maxActivityBytes {
-		return state, fmt.Errorf("claude activity exceeds %d bytes", maxActivityBytes)
-	}
-	if err := json.Unmarshal(data, &state); err != nil {
-		// A corrupt file must not freeze the session: this event rewrites it.
-		reporter.warn("pfm internal herdr-state %s: decode Claude activity %s (starting empty): %v",
-			reporter.options.event, reporter.activityPath(session), err)
-		return herdrActivity{}, nil
-	}
-	return state, nil
-}
-
-func (reporter *herdrReporter) writeActivity(session string, state herdrActivity) error {
-	data, err := json.Marshal(state)
-	if err != nil {
-		return fmt.Errorf("encode Claude activity: %w", err)
-	}
-	if err := atomicfile.Write(reporter.activityPath(session), data, 0o600); err != nil {
-		return fmt.Errorf("store Claude activity: %w", err)
-	}
-	return nil
 }
 
 // runActivity holds the activity lock across the complete report, so a delayed
@@ -148,7 +90,7 @@ func (reporter *herdrReporter) recordActivity(
 	if err != nil {
 		return err
 	}
-	if err := reporter.retireNativeTargets(ctx, payload.SessionID, &state); err != nil {
+	if err := reporter.retireNativeTargets(ctx, reporter.activityPath(payload.SessionID), &state); err != nil {
 		var pending herdrRetirementPending
 		if !errors.As(err, &pending) {
 			return err
@@ -214,16 +156,6 @@ func (reporter *herdrReporter) recordActivity(
 		reporter.endWatch(payload, state.Stored),
 		reporter.settleNativeLater(payload.SessionID, state, err),
 	)
-}
-
-// removeActivity removes an ended session's record and its transcript watch's.
-func (reporter *herdrReporter) removeActivity(session string) error {
-	for _, path := range []string{reporter.activityPath(session), reporter.watchRecord(session)} {
-		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("remove ended Claude activity: %w", err)
-		}
-	}
-	return nil
 }
 
 func (reporter *herdrReporter) finishActivity(session string, state herdrActivity, wasWaiting bool) error {
@@ -360,7 +292,7 @@ func (reporter *herdrReporter) rememberActivityTarget(target herdrTarget, seq ui
 		Owner:    owner.Client,
 		Seq:      seq,
 		Native:   reporter.nativeSeatReport,
-		Source:   cmp.Or(reporter.source, herdr.Source),
+		Source:   herdr.Source,
 	}
 	for i, old := range reporter.activity.Targets {
 		if old.Socket == saved.Socket && old.Pane == saved.Pane {
@@ -409,7 +341,7 @@ func (reporter *herdrReporter) expireAgents(session string, generation ...int64)
 	if err != nil {
 		return true, err
 	}
-	if err := reporter.retireNativeTargets(ctx, session, &state); err != nil {
+	if err := reporter.retireNativeTargets(ctx, reporter.activityPath(session), &state); err != nil {
 		var pending herdrRetirementPending
 		if !errors.As(err, &pending) {
 			return true, err
@@ -501,7 +433,6 @@ func (reporter *herdrReporter) resendActivity(ctx context.Context, state herdrAc
 		// replace a more recent reporter's state after this watch was scheduled.
 		reporter.seq = saved.Seq
 		reporter.nativeSeatReport = saved.Native
-		reporter.source = saved.Source
 		errs = append(errs, undelivered(reporter.send(ctx, target, &herdrAction{stored: state.Stored}, saved.Seq+1)))
 	}
 	return errors.Join(errs...)

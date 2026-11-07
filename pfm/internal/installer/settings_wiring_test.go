@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/retired"
 	"github.com/rezzminator/professor/pfm/internal/servicemanager"
 )
@@ -61,6 +63,9 @@ func TestInstallLeavesClaudeAccountFilesUnchanged(t *testing.T) {
 		CodexHomes:    []string{},
 		Now:           now,
 		Runner:        runner,
+		// Herdr's own Claude integration writes its hook into the store on a
+		// Herdr host (herdr_claude_test.go); pfm's wiring is what is judged here.
+		ProcessRunner: noHerdrRunner{obs.Runner(deps.RealRunner{})},
 		scheduler:     schedulerFor(servicemanager.KindSystemd),
 	}); err != nil {
 		t.Fatal(err)
@@ -93,6 +98,7 @@ func TestInstallLeavesClaudeAccountFilesUnchanged(t *testing.T) {
 		Now:           now,
 		Stdout:        &second,
 		Runner:        &fakeRunner{},
+		ProcessRunner: noHerdrRunner{obs.Runner(deps.RealRunner{})},
 	})
 	if err != nil || report.Changed != 0 {
 		t.Fatalf("second apply report=%#v err=%v\n%s", report, err, second.String())

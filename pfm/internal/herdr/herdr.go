@@ -1,11 +1,10 @@
 // Package herdr integrates pfm chats with the Herdr terminal multiplexer
-// (https://herdr.dev). Tmux chats and native Codex/OpenCode report lifecycle
-// state, session metadata and resume commands under the stable pfm source.
-// A native Claude pane Herdr detects reports the same under ClaudeSource,
-// Herdr's native Claude identity, the one source Herdr takes its state and
-// restore record from. Old pfm ownership is released with a newer sequence
-// before metadata is republished; end also clears pfm's title.
-// Outside Herdr nothing here runs.
+// (https://herdr.dev). Tmux chats, native Codex/OpenCode and a native Claude
+// behind herdr-shield's attach client report lifecycle state, session metadata
+// and resume commands under the stable pfm source; end releases the report and
+// clears pfm's title. A native Claude pane Herdr detects is Herdr's own: its
+// screen detection reads the state and its bundled Claude integration
+// (integration.go) reports the session. Outside Herdr nothing here runs.
 package herdr
 
 import (
@@ -23,9 +22,10 @@ import (
 // integrations use the `herdr:` prefix; pfm must never start with it.
 const Source = "pfm"
 
-// ClaudeSource is Herdr's own Claude identity. Once Herdr sees claude as a
-// pane's foreground it keys that pane's state and restore record by this
-// source alone, so pfm reports a detected native Claude pane under it.
+// ClaudeSource is Herdr's own Claude identity: its bundled Claude integration
+// reports a session under it, and an older pfm build reported a detected
+// native Claude's state under it, which hookentry.ReleaseNativeClaudeReports
+// releases, republishing the session there.
 const ClaudeSource = "herdr:claude"
 
 // ReportDeadline bounds one reporter run, from its first tmux call through its

@@ -1,6 +1,7 @@
 package testjail
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -40,6 +41,62 @@ func StageHerdrShell(t *testing.T, home string) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+// HerdrClaudeHook is the SessionStart command `herdr integration install
+// claude` (Herdr 0.9.5, script v11) writes for the Claude config dir dir.
+func HerdrClaudeHook(dir string) string {
+	return "bash '" + dir + "/hooks/herdr-agent-state.sh' session"
+}
+
+// HerdrClaudeSettings renders a Claude settings.json holding one Herdr
+// SessionStart entry per dir, with Herdr's matcher and timeout.
+func HerdrClaudeSettings(dirs ...string) string {
+	entries := make([]string, len(dirs))
+	for at, dir := range dirs {
+		entries[at] = `{"matcher":"^(startup|resume|clear|compact|fork)$","hooks":[{"type":"command","command":` +
+			fmt.Sprintf("%q", HerdrClaudeHook(dir)) + `,"timeout":10}]}`
+	}
+	return `{"theme":"dark","hooks":{"SessionStart":[` + strings.Join(entries, ",") + `]}}`
+}
+
+// StageHerdrClaudeHook adds Herdr's Claude hook for dir to dir's settings.json
+// through its link, keeping every other key and adding nothing when the hook
+// is there, the way Herdr's installer does: an installed home on a Herdr host
+// holds it.
+func StageHerdrClaudeHook(t *testing.T, dir string) {
+	t.Helper()
+	path := filepath.Join(dir, "settings.json")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("stage Herdr Claude hook: %v", err)
+	}
+	var settings, entry map[string]any
+	if err := json.Unmarshal(raw, &settings); err != nil {
+		t.Fatalf("stage Herdr Claude hook: decode %s: %v", path, err)
+	}
+	if err := json.Unmarshal([]byte(HerdrClaudeSettings(dir)), &entry); err != nil {
+		t.Fatal(err)
+	}
+	hooks, _ := settings["hooks"].(map[string]any)
+	if hooks == nil {
+		hooks = map[string]any{}
+		settings["hooks"] = hooks
+	}
+	sessionStart, _ := hooks["SessionStart"].([]any)
+	for _, present := range sessionStart {
+		if strings.Contains(fmt.Sprint(present), HerdrClaudeHook(dir)) {
+			return
+		}
+	}
+	hooks["SessionStart"] = append(sessionStart, entry["hooks"].(map[string]any)["SessionStart"].([]any)...)
+	encoded, err := json.Marshal(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, encoded, 0o600); err != nil {
+		t.Fatalf("stage Herdr Claude hook: write %s: %v", path, err)
+	}
 }
 
 // HerdrPaneInfo returns the required Herdr 0.9.5 PaneInfo identity fields.

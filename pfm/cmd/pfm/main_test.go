@@ -542,6 +542,7 @@ func jailTest(t *testing.T) string {
 	dirs, files := storeLayout()
 	testjail.StageAccountLinks(t, filepath.Join(root, "home"), filepath.Join(root, "home", ".cc", "1"), dirs, files)
 	stageStorePlugins(t, filepath.Join(root, "home"))
+	testjail.StageHerdrClaudeHook(t, filepath.Join(root, "home", ".cc", "1"))
 	// The jailed home reaches no user service manager: macOS always has
 	// launchctl, whose real gui domain holds no plist in this home.
 	previous := doctor.ScheduleTimerProbeOverride

@@ -399,12 +399,12 @@ func TestHerdrAgentPayloadRequiresIdentity(t *testing.T) {
 	}
 }
 
-// A native Claude seat Herdr detects reports its lifecycle under herdr:claude,
-// the session's restore identity, with the same sub-agent hold as a tmux seat.
+// A native Claude seat in a pane herdr-shield holds reports its lifecycle under
+// pfm's own source, with the same sub-agent hold as a tmux seat.
 func TestHerdrNativeBackgroundAgents(t *testing.T) {
 	root := t.TempDir()
 	server := newNativeReporterHerdr(t, "native-seat", "w6:p3", "native-terminal")
-	server.addPane("w6:p3", "native-terminal")
+	holdNativeReporterPane(t, server, "w6:p3")
 	t.Setenv(paths.EnvHome, root)
 	t.Setenv(paths.EnvStateDB, filepath.Join(root, "pfm.db"))
 	t.Setenv("TMUX", "")
@@ -443,7 +443,7 @@ func TestHerdrNativeBackgroundAgents(t *testing.T) {
 			message = `"message":"` + message + `",`
 		}
 		return `pane.report_agent {"agent":"claude","agent_session_id":"activity-session",` + message +
-			`"pane_id":"w6:p3",` + argv + `,"source":"herdr:claude","state":"` + state + `"}`
+			`"pane_id":"w6:p3",` + argv + `,"source":"pfm","state":"` + state + `"}`
 	}
 	working, idle := report("working", ""), report("idle", "")
 	seen := 0
@@ -463,15 +463,10 @@ func TestHerdrNativeBackgroundAgents(t *testing.T) {
 		want                 []string
 	}{
 		{
-			"prompt takes the pane from pfm and reports working",
+			"prompt reports working",
 			"working",
 			`{"session_id":"activity-session","hook_event_name":"UserPromptSubmit"}`,
-			[]string{
-				`pane.release_agent {"agent":"claude","pane_id":"w6:p3","source":"pfm"}`,
-				fmt.Sprintf(`pane.report_agent_session {"agent":"claude","agent_session_id":"activity-session",`+
-					`"agent_session_path":%q,"pane_id":"w6:p3",`, transcript) + argv + `,"source":"herdr:claude"}`,
-				working,
-			},
+			[]string{working},
 		},
 		{
 			"agent start",

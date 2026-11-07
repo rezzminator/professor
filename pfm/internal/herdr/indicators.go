@@ -704,8 +704,7 @@ func clearRecordedIndicators(
 		if err := painter.writeStop(ctx); err != nil {
 			failures = append(failures, err)
 		}
-		if err := painter.clear(ctx); err != nil && (errors.Is(err, errIndicatorOwnership) ||
-			!errors.Is(err, syscall.ENOENT) && !errors.Is(err, syscall.ECONNREFUSED)) {
+		if err := painter.clear(ctx); err != nil && (errors.Is(err, errIndicatorOwnership) || !SocketGone(err)) {
 			failures = append(failures, fmt.Errorf("herdr indicators: clear socket %s: %w", socket, err))
 			continue
 		}

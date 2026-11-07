@@ -57,8 +57,9 @@ func runSpawned(t *testing.T, spawned [][]string, deps herdrDeps) {
 	}
 }
 
-// nativeActivityRig is a proved native Claude seat in Herdr pane w6:p3 whose
-// hooks name its transcript and keep their detached processes in spawned.
+// nativeActivityRig is a proved native Claude seat in Herdr pane w6:p3, which
+// herdr-shield holds so pfm reports its state, whose hooks name its transcript
+// and keep their detached processes in spawned.
 type nativeActivityRig struct {
 	server     *fakeHerdr
 	deps       herdrDeps
@@ -71,7 +72,7 @@ func newNativeActivityRig(t *testing.T) *nativeActivityRig {
 	t.Helper()
 	root := t.TempDir()
 	server := newNativeReporterHerdr(t, "native-seat", "w6:p3", "native-terminal")
-	server.addPane("w6:p3", "native-terminal")
+	holdNativeReporterPane(t, server, "w6:p3")
 	t.Setenv(paths.EnvHome, root)
 	t.Setenv(paths.EnvStateDB, filepath.Join(root, "pfm.db"))
 	t.Setenv("TMUX", "")

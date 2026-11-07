@@ -52,8 +52,8 @@ func TestHerdrNativeClaudeDefersLifecycle(t *testing.T) {
 
 func TestHerdrNativeSeatReporter(t *testing.T) {
 	events := []string{
-		"start", "working", "idle", "attach", "detach", "sync", "invalid resume", "delayed working",
-		"held start", "held idle", "unread idle",
+		"start", "working", "idle", "attach", "detach", "sync",
+		"held start", "held idle", "held invalid resume", "held delayed working", "unread idle",
 	}
 	for _, event := range events {
 		t.Run(event, func(t *testing.T) {
@@ -62,6 +62,8 @@ func TestHerdrNativeSeatReporter(t *testing.T) {
 			reportEvent, held := strings.CutPrefix(event, "held ")
 			reportEvent, unread := strings.CutPrefix(reportEvent, "unread ")
 			held = held || unread
+			// name is the row's hook without its pane's fate.
+			name := reportEvent
 			if held {
 				holdNativeReporterPane(t, server, "w6:p3")
 				if unread {
@@ -96,14 +98,14 @@ func TestHerdrNativeSeatReporter(t *testing.T) {
 			}
 			var stderr bytes.Buffer
 			reportedSession := "new-session"
-			if event == "invalid resume" {
+			if name == "invalid resume" {
 				reportedSession = "bad'session"
 				reportEvent = "start"
 			}
 			payload, _ := json.Marshal(map[string]string{"session_id": reportedSession, "source": "startup"})
 			deps := realHerdrDeps()
 			deps.spawn = nil // the transcript watch is herdr_watch_test.go's
-			if event == "delayed working" {
+			if name == "delayed working" {
 				reportEvent = "working"
 				reads := 0
 				deps.now = func() time.Time {
@@ -121,11 +123,13 @@ func TestHerdrNativeSeatReporter(t *testing.T) {
 					"foreground (any report goes under pfm's own source): herdr refused pane.process_info pfm-seat pane w6:p3: " +
 					"server_error: refused by fake herdr\n"
 			}
-			if rc != 0 || (stderr.String() != wantStderr && event != "invalid resume") {
-				t.Fatalf("report rc=%d stderr=%q, want %q", rc, stderr.String(), wantStderr)
+			if name == "invalid resume" {
+				wantStderr = `pfm internal herdr-state start: no resume command for session "bad'session" ` +
+					`(state still reported): resume_argv: word "bad'session--restored" holds an apostrophe, ` +
+					"which Herdr refuses\n"
 			}
-			if event == "invalid resume" && !strings.Contains(stderr.String(), "resume") {
-				t.Fatalf("invalid resume warning=%s", &stderr)
+			if rc != 0 || stderr.String() != wantStderr {
+				t.Fatalf("report rc=%d stderr=%q, want %q", rc, stderr.String(), wantStderr)
 			}
 			got, found, err := db.Seat(context.Background(), seat.SeatID)
 			if err != nil || !found {
@@ -140,61 +144,48 @@ func TestHerdrNativeSeatReporter(t *testing.T) {
 			if got.SessionID != reportedSession {
 				t.Fatalf("native seat binding = %q, want %s", got.SessionID, reportedSession)
 			}
-			lines := server.requests()
-			wantResume := []string{herdr.ResumeCommand, "chat", "open", "--restored", "new-session"}
-			if held {
-				// Herdr cannot see Claude behind herdr-shield's attach client: pfm reports
-				// the idle state, or the pane reads unknown.
-				want := map[string]any{
-					"pane_id": "w6:p3", "source": "pfm", "agent": "claude", "state": "idle",
-					"agent_session_id": "new-session", "resume_argv": wantResume,
-				}
-				if len(lines) != 1 {
-					t.Fatalf("held pane requests=%q, want one pane.report_agent %v", lines, want)
-				}
-				var request struct {
-					Method string         `json:"method"`
-					Params map[string]any `json:"params"`
-				}
-				if err := json.Unmarshal([]byte(lines[0]), &request); err != nil {
-					t.Fatal(err)
-				}
-				delete(request.Params, "seq")
-				wantJSON, _ := json.Marshal(want)
-				gotJSON, _ := json.Marshal(request.Params)
-				if request.Method != "pane.report_agent" || !bytes.Equal(gotJSON, wantJSON) {
-					t.Fatalf("held pane report = %s %s, want pane.report_agent %s", request.Method, gotJSON, wantJSON)
+			if !held {
+				// Herdr detects Claude in the pane and owns it: its screen detection reads
+				// the state and its own integration reports the session.
+				if calls := server.calls(); len(calls) != 0 {
+					t.Fatalf("detected pane: Herdr received\n%s\nwant nothing", strings.Join(calls, "\n"))
 				}
 				return
 			}
-			// Herdr detects Claude in the pane: pfm hands the pane from its own source to
-			// herdr:claude, the restore identity, and reports the state there.
-			state := map[string]string{
-				"start": "idle", "working": "working", "idle": "idle", "delayed working": "working",
-			}[event]
-			want := nativeClaudeCalls("new-session", "startup", state, "")
-			if event == "invalid resume" {
-				// No restore command for this id: its session report fails visibly, and
-				// the state still reaches Herdr without one.
-				want = []string{
-					want[0],
-					`pane.report_agent {"agent":"claude","agent_session_id":"bad'session","pane_id":"w6:p3",` +
-						`"source":"herdr:claude","state":"idle"}`,
-				}
+			// Herdr cannot see Claude behind herdr-shield's attach client: pfm reports
+			// the state, or the pane reads unknown.
+			want := map[string]any{
+				"pane_id": "w6:p3", "source": "pfm", "agent": "claude", "state": "idle",
+				"agent_session_id": reportedSession,
+				"resume_argv":      []string{herdr.ResumeCommand, "chat", "open", "--restored", reportedSession},
 			}
-			if calls := server.calls(); !slices.Equal(calls, want) {
-				t.Fatalf("Herdr received\n%s\nwant\n%s", strings.Join(calls, "\n"), strings.Join(want, "\n"))
+			switch name {
+			case "invalid resume":
+				// No restore command for this id: the state still reaches Herdr without one.
+				delete(want, "resume_argv")
+			case "delayed working":
+				want["state"] = "working"
+			}
+			lines := server.requests()
+			if len(lines) != 1 {
+				t.Fatalf("held pane requests=%q, want one pane.report_agent %v", lines, want)
 			}
 			var request struct {
-				Params struct {
-					Seq uint64 `json:"seq"`
-				} `json:"params"`
+				Method string         `json:"method"`
+				Params map[string]any `json:"params"`
 			}
-			if err := json.Unmarshal([]byte(lines[1]), &request); err != nil {
+			if err := json.Unmarshal([]byte(lines[0]), &request); err != nil {
 				t.Fatal(err)
 			}
-			if event == "delayed working" && request.Params.Seq != 102 {
-				t.Fatalf("native release/session sequence=%d want ingress+2=102", request.Params.Seq)
+			// A delayed hook reports at its ingress, never at the later clock.
+			if seq := request.Params["seq"]; name == "delayed working" && seq != float64(100) {
+				t.Fatalf("held pane report seq=%v, want the hook's ingress 100", seq)
+			}
+			delete(request.Params, "seq")
+			wantJSON, _ := json.Marshal(want)
+			gotJSON, _ := json.Marshal(request.Params)
+			if request.Method != "pane.report_agent" || !bytes.Equal(gotJSON, wantJSON) {
+				t.Fatalf("held pane report = %s %s, want pane.report_agent %s", request.Method, gotJSON, wantJSON)
 			}
 		})
 	}
@@ -319,24 +310,16 @@ func TestHerdrTmuxSeatFailurePreservesBridge(t *testing.T) {
 	}
 }
 
-// nativeClaudeCalls is what Herdr receives on a detected native Claude pane's
-// first report: pfm's own source released, then the session and its state
-// under herdr:claude, as fakeHerdr.calls records them (sorted keys, no seq).
-func nativeClaudeCalls(session, startSource, state, message string) []string {
-	argv := `"resume_argv":["pfm","chat","open","--restored","` + session + `"]`
-	if startSource != "" {
-		startSource = `,"session_start_source":"` + startSource + `"`
-	}
+// heldClaudeCall is what Herdr receives from a native Claude in a pane
+// herdr-shield holds, as fakeHerdr.calls records it (sorted keys, no seq): the
+// state under pfm's own source, with the session and its restore command.
+func heldClaudeCall(session, state, message string) string {
 	if message != "" {
 		message = `"message":"` + message + `",`
 	}
-	return []string{
-		`pane.release_agent {"agent":"claude","pane_id":"w6:p3","source":"pfm"}`,
-		`pane.report_agent_session {"agent":"claude","agent_session_id":"` + session + `","pane_id":"w6:p3",` +
-			argv + startSource + `,"source":"herdr:claude"}`,
-		`pane.report_agent {"agent":"claude","agent_session_id":"` + session + `",` + message + `"pane_id":"w6:p3",` +
-			argv + `,"source":"herdr:claude","state":"` + state + `"}`,
-	}
+	return `pane.report_agent {"agent":"claude","agent_session_id":"` + session + `",` + message +
+		`"pane_id":"w6:p3","resume_argv":["pfm","chat","open","--restored","` + session + `"],` +
+		`"source":"pfm","state":"` + state + `"}`
 }
 
 func TestHerdrNativeSeatReadOnlyReports(t *testing.T) {
@@ -344,7 +327,8 @@ func TestHerdrNativeSeatReadOnlyReports(t *testing.T) {
 		t.Run(event, func(t *testing.T) {
 			root := t.TempDir()
 			server := newNativeReporterHerdr(t, "native-seat", "w6:p3", "native-terminal")
-			server.addPane("w6:p3", "native")
+			// A held pane is the one pfm reports to, so the report proves the hook ran.
+			holdNativeReporterPane(t, server, "w6:p3")
 			values := paths.Values{StateDB: filepath.Join(root, "pfm.db")}
 			seat := fleetdb.Seat{
 				SeatID: "native-seat", SessionID: "bound", Backend: "herdr", State: "live", Engine: "cc",
@@ -393,6 +377,7 @@ func TestHerdrNativeSeatReadOnlyReports(t *testing.T) {
 				}
 				return environment[key]
 			}
+			deps.shield = realHerdrDeps().shield
 			var stderr bytes.Buffer
 			rc := reportToHerdr(
 				[]string{reportEvent},
@@ -442,7 +427,7 @@ func TestHerdrNativeSeatReadOnlyReports(t *testing.T) {
 			case "blocked":
 				state, message = "blocked", "waiting for approval: Bash"
 			}
-			want := nativeClaudeCalls("bound", "startup", state, message)
+			want := []string{heldClaudeCall("bound", state, message)}
 			if got := server.calls(); !slices.Equal(got, want) || stderr.Len() != 0 {
 				t.Fatalf(
 					"read-only native %s: Herdr received\n%s\nwant\n%s\nstderr=%s",
@@ -461,10 +446,10 @@ func TestNativeLossNoteClearsOnlyOnActualPrompt(t *testing.T) {
 		name, event, payload string
 		engine               pfmengine.ID
 		clear, pending       bool
-		// start and state are a Claude row's session start source and reported state.
-		start, state string
+		// state is a Claude row's reported state.
+		state string
 	}{
-		{name: "resume", event: "start", payload: `{"session_id":"sid","source":"resume"}`, start: "resume", state: "idle"},
+		{name: "resume", event: "start", payload: `{"session_id":"sid","source":"resume"}`, state: "idle"},
 		{name: "idle", event: "idle", payload: `{"session_id":"sid"}`, state: "idle"},
 		{name: "tool working", event: "working", payload: `{"session_id":"sid","hook_event_name":"PostToolUse","tool_name":"Bash"}`, state: "working"},
 		{name: "prompt", event: "working", payload: `{"session_id":"sid","hook_event_name":"UserPromptSubmit","prompt":"private"}`, clear: true, state: "working"},
@@ -479,7 +464,14 @@ func TestNativeLossNoteClearsOnlyOnActualPrompt(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			server := newNativeReporterHerdr(t, "seat-note", "w6:p3", "native-terminal")
-			server.addPane("w6:p3", "native")
+			engine := tc.engine
+			if engine == "" {
+				engine = pfmengine.Claude
+				// A held pane is the one pfm reports a Claude to, so the report proves the hook ran.
+				holdNativeReporterPane(t, server, "w6:p3")
+			} else {
+				server.addPane("w6:p3", "native")
+			}
 			root := t.TempDir()
 			t.Setenv(paths.EnvHome, root)
 			t.Setenv(paths.EnvStateDB, filepath.Join(root, "pfm.db"))
@@ -490,10 +482,6 @@ func TestNativeLossNoteClearsOnlyOnActualPrompt(t *testing.T) {
 			db := fleetdb.OpenSharedState(context.Background(), paths.Values{StateDB: filepath.Join(root, "pfm.db")})
 			defer func() { _ = db.Close() }()
 			note := "your last message was not answered — re-send it"
-			engine := tc.engine
-			if engine == "" {
-				engine = pfmengine.Claude
-			}
 			seat := fleetdb.Seat{
 				SeatID:        "seat-note",
 				SessionID:     "sid",
@@ -538,7 +526,7 @@ func TestNativeLossNoteClearsOnlyOnActualPrompt(t *testing.T) {
 					t.Fatalf("pending reload released pane: %v", server.requests())
 				}
 			case engine == pfmengine.Claude:
-				want := nativeClaudeCalls("sid", tc.start, tc.state, "")
+				want := []string{heldClaudeCall("sid", tc.state, "")}
 				if got := server.calls(); !slices.Equal(got, want) {
 					t.Fatalf(
 						"native Claude: Herdr received\n%s\nwant\n%s",

@@ -189,7 +189,7 @@ func mainTurnOpen(stored herdrStored) bool {
 // watchRecord is the session's transcript watch record, beside its activity
 // record and under the same lock.
 func (reporter *herdrReporter) watchRecord(session string) string {
-	return filepath.Join(reporter.deps.lockDir, reporter.activityKey(session)+herdrWatchRecord)
+	return reporter.activityFile(reporter.activityKey(session), herdrWatchRecord)
 }
 
 // hookEngine is the engine process that fired this hook: the first process up

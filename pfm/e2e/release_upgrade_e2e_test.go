@@ -145,11 +145,16 @@ func TestUpdateRollbackFromPreviousReleaseE2E(t *testing.T) {
 	h, home := installBase(t, tag, tag, candidate, map[string]string{
 		"pfm/cmd/pfm/zz_e2e_failing_doctor.go": failingDoctorSource,
 	})
-	if differences := h.updateRollsBack(home, tag, candidate); len(differences) != 0 {
+	if differences := h.updateRollsBack(home, tag, candidate, releasedHerdrClaudeFail); len(differences) != 0 {
 		t.Logf("rollback to %s kept candidate state it cannot know: %s", tag, strings.Join(differences, ", "))
 	}
 	doctor := h.pfm(home, "doctor")
 	var exit *exec.ExitError
+	if doctor.err != nil && errors.As(doctor.err, &exit) && exit.ExitCode() == 3 &&
+		failsOnlyOn(doctor.stdout, releasedHerdrClaudeFail) {
+		t.Logf("doctor of the host rolled back to %s fails only on Herdr's Claude hook the candidate installed", tag)
+		return
+	}
 	if doctor.err != nil && (!errors.As(doctor.err, &exit) || exit.ExitCode() != 1) {
 		t.Fatalf("doctor of the host rolled back to %s: %v, want exit 0 or 1 (warnings); stdout=%q stderr=%q",
 			tag, doctor.err, doctor.stdout, doctor.stderr)
@@ -242,11 +247,40 @@ func holdUpgradeSlot(t *testing.T) {
 	t.Cleanup(func() { <-upgradeSlot })
 }
 
+// releasedHerdrClaudeFail starts the row a release before Herdr's own Claude
+// integration became required prints for it: on a Herdr host the candidate
+// installs that hook, state a released doctor fails and its updater cannot know.
+const releasedHerdrClaudeFail = "doctor: herdr-integration: FAIL need=no bundled claude integration "
+
+// injectedDoctorFail is the row failingDoctorSource's doctor prints.
+const injectedDoctorFail = "e2e candidate FAIL injected"
+
+// failsOnlyOn reports whether every FAIL row of a doctor's output starts with
+// row, at least one doing so. In an update's output only the rows after the
+// candidate's injected failure count: the rolled-back release's doctor.
+func failsOnlyOn(output, row string) bool {
+	if at := strings.LastIndex(output, injectedDoctorFail); at >= 0 {
+		output = output[at+len(injectedDoctorFail):]
+	}
+	matched := false
+	for _, line := range strings.Split(output, "\n") {
+		if !strings.Contains(line, " FAIL ") {
+			continue
+		}
+		if !strings.HasPrefix(line, row) {
+			return false
+		}
+		matched = true
+	}
+	return matched
+}
+
 // updateRollsBack runs `pfm update --to candidate`, which must fail on the
 // candidate's injected doctor failure and roll back to base: the binary, its
-// version and the source revision restored, no residue claimed. It returns the
+// version and the source revision restored, no residue claimed beyond the
+// released doctor's FAIL rows starting with a tolerated row. It returns the
 // paths of the host that differ from before the update.
-func (h *e2eHarness) updateRollsBack(home, base, candidate string) []string {
+func (h *e2eHarness) updateRollsBack(home, base, candidate string, tolerated ...string) []string {
 	h.t.Helper()
 	before, err := h.snapshot(home)
 	if err != nil {
@@ -261,12 +295,15 @@ func (h *e2eHarness) updateRollsBack(home, base, candidate string) []string {
 	if result.err == nil {
 		h.t.Fatalf("update to a candidate whose doctor fails succeeded, want a rollback; output=%q", output)
 	}
-	if !strings.Contains(output, "e2e candidate FAIL injected") ||
+	if !strings.Contains(output, injectedDoctorFail) ||
 		!strings.Contains(output, "rolled back source to") {
 		h.t.Fatalf("update did not roll back on the candidate's failed doctor; output=%q", output)
 	}
 	if strings.Contains(output, "rollback residue") {
-		h.t.Fatalf("rollback to %s claimed residue; output=%q", base, output)
+		if len(tolerated) == 0 || !failsOnlyOn(output, tolerated[0]) {
+			h.t.Fatalf("rollback to %s claimed residue; output=%q", base, output)
+		}
+		h.t.Logf("rollback to %s claimed residue on state it cannot know: %s", base, tolerated[0])
 	}
 	h.requireVersion(home, base)
 	if after := runGit(h.repo, "rev-parse", "HEAD"); after.err != nil || after.stdout != head.stdout {

@@ -244,7 +244,6 @@ type herdrReporter struct {
 	activity         *herdrActivity
 	activityAction   *herdrAction
 	nativeSeatReport bool
-	source           string // the Herdr source send reports under; empty is herdr.Source
 	options          herdrOptions
 	deps             herdrDeps
 	stderr           io.Writer
@@ -740,7 +739,7 @@ func (reporter *herdrReporter) send(ctx context.Context, target herdrTarget, act
 	}
 	label := action.stored.Engine
 	if action.release {
-		line, err := herdr.Release{Pane: target.pane, Source: reporter.source, Agent: label, Seq: seq}.Line()
+		line, err := herdr.Release{Pane: target.pane, Agent: label, Seq: seq}.Line()
 		if err != nil {
 			return err
 		}
@@ -751,7 +750,7 @@ func (reporter *herdrReporter) send(ctx context.Context, target herdrTarget, act
 		return releaseSettled(herdr.Send(ctx, target.socket, line, clearTitle))
 	}
 	report := herdr.Report{
-		Pane: target.pane, Source: reporter.source, Agent: label, State: herdr.State(action.stored.State),
+		Pane: target.pane, Agent: label, State: herdr.State(action.stored.State),
 		Message: action.stored.Message, SessionID: action.stored.SessionID, Seq: seq,
 	}
 	if report.SessionID != "" {

@@ -51,16 +51,15 @@ type fakeTab struct {
 // code) for a vacated pane id. As Herdr does, it serves ONE request per
 // connection, then closes it.
 type fakeHerdr struct {
-	sessionResumeRefusals int
-	path                  string
-	mu                    sync.Mutex
-	lines                 []string
-	refuse                map[string]string
-	refuseRename          map[string]string
-	panes                 []fakePane
-	vacated               map[string]bool
-	aliases               map[string]string
-	agents                []fakeAgent
+	path         string
+	mu           sync.Mutex
+	lines        []string
+	refuse       map[string]string
+	refuseRename map[string]string
+	panes        []fakePane
+	vacated      map[string]bool
+	aliases      map[string]string
+	agents       []fakeAgent
 	// tabOf is the tab agent.list names for an agent's pane; tabs answers
 	// tab.get, and tab.rename relabels one.
 	tabOf map[string]string
@@ -194,10 +193,6 @@ func (server *fakeHerdr) serve(conn net.Conn) {
 	server.mu.Lock()
 	server.lines = append(server.lines, line)
 	code, result := server.answer(request.Method, request.Params.PaneID, request.Params.Target, request.Params.Name)
-	if request.Method == "pane.report_agent_session" && server.sessionResumeRefusals > 0 {
-		server.sessionResumeRefusals--
-		code = "resume_not_accepted"
-	}
 	if code == "" && strings.HasPrefix(request.Method, "tab.") {
 		code, result = server.answerTab(request.Method, request.Params.TabID, request.Params.Label)
 	}

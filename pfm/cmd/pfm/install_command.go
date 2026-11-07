@@ -16,6 +16,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/doctor"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
+	"github.com/rezzminator/professor/pfm/internal/hookentry"
 	"github.com/rezzminator/professor/pfm/internal/hostcheck"
 	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/obs"
@@ -229,12 +230,13 @@ func newInstallerOptions(
 	runtimes ...commandRuntime,
 ) installer.Options {
 	options := installer.Options{
-		Mode:                mode,
-		Offline:             offline,
-		ConfigDir:           configDir,
-		Stdout:              stdout,
-		SkillSourcesOffline: paths.SkillSourcesOffline(),
-		ThemesOffline:       paths.ThemesOffline(),
+		Mode:                       mode,
+		Offline:                    offline,
+		ConfigDir:                  configDir,
+		Stdout:                     stdout,
+		SkillSourcesOffline:        paths.SkillSourcesOffline(),
+		ThemesOffline:              paths.ThemesOffline(),
+		ReleaseNativeClaudeReports: hookentry.ReleaseNativeClaudeReports,
 	}
 	if len(runtimes) != 0 {
 		runtime := runtimes[0]

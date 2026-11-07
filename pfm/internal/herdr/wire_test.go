@@ -43,11 +43,8 @@ func TestReportLineIsExactlyHerdrsRequest(t *testing.T) {
 }
 
 func TestSessionReportLineIsExactlyHerdrsRequest(t *testing.T) {
-	line, err := (SessionReport{
-		Pane: "w1:p1", Agent: "claude", SessionID: "s1", SessionPath: "/fixture/session.jsonl",
-		StartSource: "compact", ResumeArgv: []string{"pfm", "chat", "open", "--restored", "s1"}, Seq: 43,
-	}).Line()
-	want := `{"id":"pfm-43","method":"pane.report_agent_session","params":{"pane_id":"w1:p1","source":"pfm","agent":"claude","agent_session_id":"s1","agent_session_path":"/fixture/session.jsonl","session_start_source":"compact","resume_argv":["pfm","chat","open","--restored","s1"],"seq":43}}`
+	line, err := (SessionReport{Pane: "w1:p1", Source: "herdr:claude", Agent: "claude", SessionID: "s1", Seq: 43}).Line()
+	want := `{"id":"pfm-43","method":"pane.report_agent_session","params":{"pane_id":"w1:p1","source":"herdr:claude","agent":"claude","agent_session_id":"s1","seq":43}}`
 	if err != nil || string(line) != want {
 		t.Fatalf("session wire=%s err=%v want=%s", line, err, want)
 	}

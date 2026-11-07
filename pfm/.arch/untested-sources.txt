@@ -22,7 +22,6 @@ internal/claudelaunch/doc.go
 internal/compose/doc.go
 internal/compose/order.go
 internal/compose/types.go
-internal/doctor/doc.go
 internal/doctor/harness_prompt_baselines.go
 internal/engine/builtin.go
 internal/engine/claude/capabilities.go
@@ -43,7 +42,7 @@ internal/headless/run/process_unix.go
 internal/headless/stream.go
 internal/heal/runner.go
 internal/hookentry/claude_version.go
-internal/hookentry/doc.go
+internal/hookentry/hookentry.go
 internal/hookentry/launcher_repair.go
 internal/hookentry/prompt_block.go
 internal/hostfixture/doc.go

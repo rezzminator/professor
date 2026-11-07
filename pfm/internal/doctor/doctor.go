@@ -262,8 +262,7 @@ func Run(
 		runtime.Version, resolved.Home, runtime.Config.Claude,
 		runtime.Config.Source(config.KeyClaudePlugins) == config.SourceDefault,
 	)
-	pluginBuild.Plugins = runtime.Config.ExtensionClaudePlugins()
-	claudeEnv := runtime.Config.ExtensionClaudeEnv(dependencies.Env, resolved.Home)
+	claudeEnv := runtime.Config.EffectiveClaudeEnv(dependencies.Env, resolved.Home)
 	claudeEnvDir := primary.ConfigDir
 	if len(runtime.Config.Accounts) == 0 || claudeEnvDir == "" {
 		claudeEnvDir = filepath.Join(resolved.Home, ".claude")
@@ -292,7 +291,6 @@ func Run(
 		),
 		tally,
 	)
-	printExtensionsDoctor(ctx, stdout, resolved.Home, claudeEnvDir, runtime.Config, dependencies.Env, tally)
 	printFullscreenDoctor(stdout, resolved.Home, runtime.Config, tally)
 	printRuntimeRemoteControlDoctor(stdout, runtime, dependencies.Env, tally)
 	printRemoteControlRecipeDoctor(ctx, stdout, resolved, runtime.Config, tally)

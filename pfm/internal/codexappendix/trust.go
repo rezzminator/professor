@@ -21,6 +21,7 @@ import (
 const (
 	rpcMethodKey = "method"
 	rpcParamsKey = "params"
+	rpcCWDsKey   = "cwds"
 	trustedState = "trusted"
 )
 

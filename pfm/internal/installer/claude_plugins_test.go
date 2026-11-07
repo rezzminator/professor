@@ -905,3 +905,27 @@ func TestClaudePluginGapsNamesEnabledRetiredPlugins(t *testing.T) {
 		})
 	}
 }
+
+// TestConfigureClaudePluginsReadsTheMachineConfig pins the three Options the
+// plugin and env steps take from the machine config: the list, whether it is the
+// default, and claude.env with callmeter's cost ledger.
+func TestConfigureClaudePluginsReadsTheMachineConfig(t *testing.T) {
+	machine := pfmconfig.Defaults(t.TempDir(), nil)
+	machine.Claude.Plugins = []pfmconfig.ClaudePlugin{{ID: "callmeter"}}
+	machine.Claude.Env = map[string]string{"X": "1"}
+	machine.Sources[pfmconfig.KeyClaudePlugins] = pfmconfig.SourceFile
+	options := Options{Home: "/h", Env: &paths.MapEnv{Values: map[string]string{paths.EnvCostLedgerDir: "/ledger"}}}
+	ConfigureClaudePlugins(&options, machine)
+	if !reflect.DeepEqual(options.ClaudePlugins, machine.Claude.Plugins) || options.ClaudePluginsDefault {
+		t.Fatalf("plugins = %v default=%t", options.ClaudePlugins, options.ClaudePluginsDefault)
+	}
+	want := map[string]string{"X": "1", pfmconfig.CallmeterCostLedgerDirEnv: "/ledger"}
+	if !reflect.DeepEqual(options.ClaudeEnv, want) {
+		t.Fatalf("env = %v, want %v", options.ClaudeEnv, want)
+	}
+	defaults := Options{}
+	ConfigureClaudePlugins(&defaults, pfmconfig.Defaults(t.TempDir(), nil))
+	if !defaults.ClaudePluginsDefault {
+		t.Fatal("an unset claude.plugins is not reported as the default")
+	}
+}

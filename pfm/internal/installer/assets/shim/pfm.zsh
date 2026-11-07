@@ -103,8 +103,8 @@ _pfm_tui_call() {
 
 # A harness typed straight into a terminal closes that terminal on exit, exactly as a fleet
 # chat does. claude bypasses recursion by calling the managed absolute launcher path, while
-# codex delegates to the managed launch door, which resolves the real binary, carries extension
-# env, and selects --no-daemon for a TUI without an explicit transport.
+# codex delegates to the managed launch door, which resolves the real binary,
+# and selects --no-daemon for a TUI without an explicit transport.
 # Only this shell's own typing is affected — pfm, hooks and scripts exec the binary and never
 # see these functions. An agent tool shell replays a snapshot that keeps `claude`/`codex` but drops
 # every `_`-prefixed helper, and is not interactive — the guard keeps it from calling them.

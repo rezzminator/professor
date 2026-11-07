@@ -15,13 +15,25 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
-	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // claudeConfigDirEnv is the variable that points a claude process at one
 // account's config directory.
 const claudeConfigDirEnv = "CLAUDE_CONFIG_DIR"
+
+// ConfigureClaudePlugins hands the plugin and env steps the machine config's
+// claude.plugins, whether it is the default list, and claude.env as pfm writes it.
+func ConfigureClaudePlugins(options *Options, machine pfmconfig.Config) {
+	options.ClaudePlugins = machine.Claude.Plugins
+	env := options.Env
+	if env == nil {
+		env = paths.OSEnv{}
+	}
+	options.ClaudeEnv = machine.EffectiveClaudeEnv(env, options.Home)
+	options.ClaudePluginsDefault = machine.Source(pfmconfig.KeyClaudePlugins) == pfmconfig.SourceDefault
+}
 
 // claudePluginCommand is the claude subcommand every plugin command runs under.
 const claudePluginCommand = "plugin"
@@ -649,14 +661,6 @@ func (installer *engine) installClaudePlugin(
 	target *ClaudePluginTarget,
 ) error {
 	install := []string{binary, claudePluginCommand, "install", target.ID, "-y"}
-	for name, definition := range pfmconfig.ExtensionRegistry() {
-		if installer.options.Extensions[name].Active(pfmengine.MustLookup(pfmengine.Claude).LongName) &&
-			definition.Engines[pfmengine.MustLookup(pfmengine.Claude).LongName].ID == target.ID {
-			install = append(
-				install,
-				definition.Engines[pfmengine.MustLookup(pfmengine.Claude).LongName].InstallSuffix...)
-		}
-	}
 	var add []string
 	message := fmt.Sprintf("run %s=%s %s", claudeConfigDirEnv, dir, shellCommandLine(install...))
 	if target.Source != "" {

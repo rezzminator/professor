@@ -95,10 +95,6 @@ func TestClaudeStoreEntries(t *testing.T) {
 		"keybindings.json",
 		"hooks",
 		"engine-sync.json",
-		".ponytail-active",
-		".ponytail-band",
-		".ponytail-statusline-nudged",
-		"ponytail-modes",
 	}
 	if !reflect.DeepEqual(IgnoredEntries, ignored) {
 		t.Fatalf("ignored=%v", IgnoredEntries)

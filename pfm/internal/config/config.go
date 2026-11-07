@@ -222,8 +222,7 @@ func (config AskConfig) PrefsFor(id pfmengine.ID) EnginePrefs {
 // Config is the fully materialized configuration. Sources records whether
 // each effective value came from the machine file or from a default.
 type Config struct {
-	Extensions map[string]Extension
-	Chat       ChatConfig
+	Chat ChatConfig
 	// SeedContent carries the validated seed bytes into installation.
 	SeedContent      []byte `json:"-"`
 	Version          int
@@ -267,21 +266,20 @@ type rawState struct {
 }
 
 type rawConfig struct {
-	Extensions json.RawMessage `json:"extensions,omitempty"`
-	Chat       *rawChat        `json:"chat,omitempty"`
-	Version    *int            `json:"version"`
-	Theme      *string         `json:"theme,omitempty"`
-	State      *rawState       `json:"state,omitempty"`
-	Accounts   *[]rawAccount   `json:"accounts,omitempty"`
-	Claude     *rawClaude      `json:"claude,omitempty"`
-	Codex      *rawCodex       `json:"codex,omitempty"`
-	OpenCode   *rawOpenCode    `json:"opencode,omitempty"`
-	Tmux       *rawTmux        `json:"tmux,omitempty"`
-	NameSync   *rawNameSync    `json:"nameSync,omitempty"`
-	Doctor     *rawDoctor      `json:"doctor,omitempty"`
-	MCP        *rawMCP         `json:"mcp,omitempty"`
-	Log        *rawLog         `json:"log,omitempty"`
-	Ask        *rawAsk         `json:"ask,omitempty"`
+	Chat     *rawChat      `json:"chat,omitempty"`
+	Version  *int          `json:"version"`
+	Theme    *string       `json:"theme,omitempty"`
+	State    *rawState     `json:"state,omitempty"`
+	Accounts *[]rawAccount `json:"accounts,omitempty"`
+	Claude   *rawClaude    `json:"claude,omitempty"`
+	Codex    *rawCodex     `json:"codex,omitempty"`
+	OpenCode *rawOpenCode  `json:"opencode,omitempty"`
+	Tmux     *rawTmux      `json:"tmux,omitempty"`
+	NameSync *rawNameSync  `json:"nameSync,omitempty"`
+	Doctor   *rawDoctor    `json:"doctor,omitempty"`
+	MCP      *rawMCP       `json:"mcp,omitempty"`
+	Log      *rawLog       `json:"log,omitempty"`
+	Ask      *rawAsk       `json:"ask,omitempty"`
 }
 
 type rawTmux struct {
@@ -715,13 +713,6 @@ func loadWithMCPServers(
 	raw, err := decodeVersioned(result.Path, content)
 	if err != nil {
 		return Config{}, err
-	}
-	if raw.Extensions != nil {
-		result.Sources["extensions"] = SourceFile
-	}
-	result.Extensions, err = decodeExtensions(raw.Extensions)
-	if err != nil {
-		return Config{}, fmt.Errorf("config %s: %w", result.Path, err)
 	}
 	if raw.Version != nil { // an absent version reads as the current one, its source left default
 		result.Sources[keyVersion] = SourceFile
@@ -1418,9 +1409,6 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 		},
 		"ask": askValue,
 		"log": MarshalLog(config.Log),
-	}
-	if config.Extensions != nil {
-		value["extensions"] = config.Extensions
 	}
 	if len(config.MCP.ThirdParty) != 0 {
 		value["mcp"].(map[string]any)["thirdParty"] = config.MCP.ThirdParty

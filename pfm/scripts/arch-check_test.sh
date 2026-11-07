@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Self-test for scripts/arch-check.sh's C1, C5, C9, C10, C12, C23, C25, C26, C27, C28, C29 and C30 ratchets and for
+# Self-test for scripts/arch-check.sh's C1, C5, C10, C12, C23, C25, C26, C27, C28, C29, C30 and C31 ratchets and for
 # how it folds its concurrent checks: print order, exit status, and a check job
 # that dies. It runs arch-check.sh against a throwaway git fixture (PFM=<fixture>),
 # never against this repo, and asserts on the relevant CHECK line rather than the
@@ -44,44 +44,89 @@ check_line() {
   env -u PFM_DEV_REPO_GIT_DIR -u PFM_DEV_REPO_WORK_TREE PFM="$repo" bash "$SUT" </dev/null 2>&1 | grep "CHECK $id "
 }
 
-# ---- C9: every package needs a package doc ---------------------------------
+# ---- C31: every package's front door carries the menu of its files ---------
 
-REPO_C9="$T/package-doc"
-if fixture "$REPO_C9"; then
-  : > "$REPO_C9/.arch/no-package-doc.txt"
-  for f in "$REPO_C9"/internal/{loud,obs}/*.go "$REPO_C9"/cmd/pfm/*.go; do
-    sed -i '1i// Package fixture documents this package.' "$f"
-  done
-  sed -i '1d' "$REPO_C9/internal/loud/loud.go"
-  line=$(check_line "$REPO_C9" C9-package-doc)
-  if [[ "$line" == *FAIL* && "$line" == *"new: internal/loud"* ]]; then
-    ok "C9: a package without a doc FAILs naming its directory"
+# c31_want <verdict> <detail>: the exact CHECK line arch-check prints for C31.
+c31_want() { printf 'CHECK %-22s %-7s %s' C31-front-door "$1" "$2"; }
+
+REPO_C31="$T/front-door"
+if fixture "$REPO_C31"; then
+  : > "$REPO_C31/.arch/front-door.txt"
+  line=$(check_line "$REPO_C31" C31-front-door)
+  want=$(c31_want FAIL "cmd/pfm (new 1) internal/loud (new 1) internal/obs (new 1) ")
+  if [ "$line" = "$want" ]; then
+    ok "C31: a front door without a package doc FAILs, package main's main.go included"
   else
-    bad "C9: expected FAIL for an undocumented package" "$line"
+    bad "C31: expected every undocumented front door to FAIL" "want: $want" "got:  $line"
   fi
 
-  sed -i '1i// Package loud documents this package.' "$REPO_C9/internal/loud/loud.go"
-  line=$(check_line "$REPO_C9" C9-package-doc)
-  if [[ "$line" == *PASS* && "$line" == *"0 baselined, 0 new"* ]]; then
-    ok "C9: documented packages pass"
+  sed -i '1i// Package obs is the fixture log.' "$REPO_C31/internal/obs/obs.go"
+  sed -i '1i// Package main is the fixture CLI.' "$REPO_C31/cmd/pfm/main.go"
+  printf '// Package loud shouts.\n//\n// bigwhisper.go: quiet.\npackage loud\n' > "$REPO_C31/internal/loud/loud.go"
+  printf 'package loud\n' > "$REPO_C31/internal/loud/whisper.go"
+  line=$(check_line "$REPO_C31" C31-front-door)
+  want=$(c31_want FAIL "internal/loud (new 1) ")
+  if [ "$line" = "$want" ]; then
+    ok "C31: a file the menu does not name FAILs; a longer name containing it does not count"
   else
-    bad "C9: expected PASS for documented packages" "$line"
+    bad "C31: expected FAIL for an unnamed file" "want: $want" "got:  $line"
+  fi
+
+  printf '// Package loud shouts.\n//\n//   - whisper.go: quiet.\npackage loud\n' > "$REPO_C31/internal/loud/loud.go"
+  mkdir -p "$REPO_C31/internal/two-words"
+  printf '// Package twowords is named for its package clause.\npackage twowords\n' > "$REPO_C31/internal/two-words/twowords.go"
+  line=$(check_line "$REPO_C31" C31-front-door)
+  want=$(c31_want PASS "0 in 0 keys, none above baseline")
+  if [ "$line" = "$want" ]; then
+    ok "C31: a menu naming every file passes; the front door is {package}.go, not {dir}.go"
+  else
+    bad "C31: expected PASS for complete menus" "want: $want" "got:  $line"
+  fi
+
+  printf 'internal/loud 1\n' > "$REPO_C31/.arch/front-door.txt"
+  printf '// Package loud shouts.\npackage loud\n' > "$REPO_C31/internal/loud/loud.go"
+  line=$(check_line "$REPO_C31" C31-front-door)
+  want=$(c31_want PASS "1 in 1 keys, none above baseline")
+  if [ "$line" = "$want" ]; then
+    ok "C31: a baselined package at its baselined count of unnamed files passes"
+  else
+    bad "C31: expected PASS at the baselined count" "want: $want" "got:  $line"
+  fi
+
+  printf 'package loud\n' > "$REPO_C31/internal/loud/hush.go"
+  line=$(check_line "$REPO_C31" C31-front-door)
+  want=$(c31_want FAIL "internal/loud (1->2) ")
+  if [ "$line" = "$want" ]; then
+    ok "C31: a baselined package that gains an unnamed file FAILs"
+  else
+    bad "C31: expected FAIL when a baselined package grows" "want: $want" "got:  $line"
+  fi
+
+  printf '// Package loud shouts: whisper.go, hush.go.\n\npackage loud\n' > "$REPO_C31/internal/loud/loud.go"
+  mkdir -p "$REPO_C31/internal/gone"
+  printf '// Package gone has no gone.go.\npackage gone\n' > "$REPO_C31/internal/gone/other.go"
+  line=$(check_line "$REPO_C31" C31-front-door)
+  want=$(c31_want FAIL "internal/gone (new 2) internal/loud (1->3) ")
+  if [ "$line" = "$want" ]; then
+    ok "C31: a doc detached by a blank line is no doc, and a package without {package}.go has no front door"
+  else
+    bad "C31: expected FAIL for a detached doc and a missing front door" "want: $want" "got:  $line"
   fi
 else
-  bad "C9: could not build the git fixture"
+  bad "C31: could not build the git fixture"
 fi
 
-REPO_C9_EMPTY="$T/empty-sources"
-if fixture "$REPO_C9_EMPTY"; then
-  find "$REPO_C9_EMPTY" -name '*.go' -delete
-  if output=$(env -u PFM_DEV_REPO_GIT_DIR -u PFM_DEV_REPO_WORK_TREE PFM="$REPO_C9_EMPTY" bash "$SUT" </dev/null 2>&1); then check_rc=0; else check_rc=$?; fi
+REPO_EMPTY="$T/empty-sources"
+if fixture "$REPO_EMPTY"; then
+  find "$REPO_EMPTY" -name '*.go' -delete
+  if output=$(env -u PFM_DEV_REPO_GIT_DIR -u PFM_DEV_REPO_WORK_TREE PFM="$REPO_EMPTY" bash "$SUT" </dev/null 2>&1); then check_rc=0; else check_rc=$?; fi
   if [ "$check_rc" -eq 2 ] && [[ "$output" == *"CHECK setup"* && "$output" == *"no Go sources listed"* ]]; then
-    ok "C9: an empty source list reports setup ERROR with rc 2"
+    ok "setup: an empty source list reports setup ERROR with rc 2"
   else
-    bad "C9: expected rc 2 setup ERROR for an empty source list" "rc=$check_rc" "$output"
+    bad "setup: expected rc 2 setup ERROR for an empty source list" "rc=$check_rc" "$output"
   fi
 else
-  bad "C9: could not build the empty-source fixture"
+  bad "setup: could not build the empty-source fixture"
 fi
 
 # ---- C12: a named knob needs a production read -----------------------------
@@ -144,18 +189,33 @@ else
   bad "C12: could not build the git fixture"
 fi
 
-# ---- C1: an unbaselined file over the source ceiling FAILs ------------------
+# ---- C1: a file over its ceiling FAILs; a front door gets CEIL_FRONT ------
+
+# c1_want <verdict> <detail>: the exact CHECK line arch-check prints for C1.
+c1_want() { printf 'CHECK %-22s %-7s %s' C1-ceiling-src "$1" "$2"; }
 
 REPO_C1="$T/ceiling-src"
 if fixture "$REPO_C1"; then
   : > "$REPO_C1/.arch/ceiling-src.txt"
-  printf 'package loud\n' > "$REPO_C1/internal/loud/loud.go"
-  for _ in {1..10}; do printf '\n' >> "$REPO_C1/internal/loud/loud.go"; done
-  line=$(CEIL_SRC=10 check_line "$REPO_C1" C1-ceiling-src)
-  if [[ "$line" == *FAIL* && "$line" == *"internal/loud/loud.go (new 11)"* ]]; then
-    ok "C1: a new source file over the ceiling FAILs naming the file"
+  # loud.go is package loud's front door (CEIL_FRONT=20); whisper.go and hush.go are not (CEIL_SRC=10).
+  { printf 'package loud\n'; for _ in {1..19}; do printf '\n'; done; } > "$REPO_C1/internal/loud/loud.go"
+  { printf 'package loud\n'; for _ in {1..10}; do printf '\n'; done; } > "$REPO_C1/internal/loud/whisper.go"
+  { printf 'package loud\n'; for _ in {1..9}; do printf '\n'; done; } > "$REPO_C1/internal/loud/hush.go"
+  line=$(CEIL_SRC=10 CEIL_FRONT=20 check_line "$REPO_C1" C1-ceiling-src)
+  want=$(c1_want FAIL "internal/loud/whisper.go (new 11) ")
+  if [ "$line" = "$want" ]; then
+    ok "C1: a source file one line over CEIL_SRC FAILs; one at it, and a front door at CEIL_FRONT, pass"
   else
-    bad "C1: expected FAIL for an unbaselined over-ceiling source" "$line"
+    bad "C1: expected FAIL naming only the file over CEIL_SRC" "want: $want" "got:  $line"
+  fi
+
+  printf '\n' >> "$REPO_C1/internal/loud/loud.go"
+  line=$(CEIL_SRC=10 CEIL_FRONT=20 check_line "$REPO_C1" C1-ceiling-src)
+  want=$(c1_want FAIL "internal/loud/loud.go (new 21) internal/loud/whisper.go (new 11) ")
+  if [ "$line" = "$want" ]; then
+    ok "C1: a front door one line over CEIL_FRONT FAILs"
+  else
+    bad "C1: expected FAIL for a front door over CEIL_FRONT" "want: $want" "got:  $line"
   fi
 else
   bad "C1: could not build the git fixture"
@@ -818,8 +878,8 @@ run_all() {
   out=$(env -u PFM_DEV_REPO_GIT_DIR -u PFM_DEV_REPO_WORK_TREE "$@" PFM="$dir" bash "$SUT" </dev/null 2>/dev/null); rc=$?
 }
 
-# Today's order: C1 … C23, then C25, C26, C27, C28, C29, C30, then C24 (its own script, last).
-EXPECTED_ORDER="C1-ceiling-src C2-ceiling-test C3-cmd-budget C4-cmd-primitives C5-tmux-runner C6-atomic-write C7-sql-open C8-negation-dirs C9-package-doc C10-mcp-argv C11-db-names C12-claude-pointers C13-test-mirror C14-usage-parity C15-internal-usage C16-env-outside-paths C17-dup-functions C18-engine-spellings C19-env-namespace C20-codex-home C21-test-jail C22-host-doors C23-bare-log C25-testmain-jail C26-exec-write C27-identity-env C28-signal-door C29-os-door C30-shell-platform C24-unwrapped-door"
+# Today's order: C1 … C8, C10 … C23, then C25 … C31, then C24 (its own script, last).
+EXPECTED_ORDER="C1-ceiling-src C2-ceiling-test C3-cmd-budget C4-cmd-primitives C5-tmux-runner C6-atomic-write C7-sql-open C8-negation-dirs C10-mcp-argv C11-db-names C12-claude-pointers C13-test-mirror C14-usage-parity C15-internal-usage C16-env-outside-paths C17-dup-functions C18-engine-spellings C19-env-namespace C20-codex-home C21-test-jail C22-host-doors C23-bare-log C25-testmain-jail C26-exec-write C27-identity-env C28-signal-door C29-os-door C30-shell-platform C31-front-door C24-unwrapped-door"
 
 REPO_GREEN="$T/green/pfm"
 if green_fixture "$REPO_GREEN"; then

@@ -4,11 +4,12 @@
 
 A baseline entry that a wave ADDED (not measured from the old tree) carries its reason here, one line each: check, file, reason. The ratchet never reads this file.
 
+- C1 `ceiling-src.txt`, C31 `front-door.txt`: re-seeded by delete + `--measure` on 2026-11-07, the ruled ceiling change 800 → 240 source lines (400 for a front door) and the new front-door menu check; every entry is a file or package as it stood that day.
 - C17 `parse`, `render`, `renderheadless`, `resolve` in `internal/claudelaunch/`: Parse/Render/RenderHeadless/Resolve are the names docs/design/engines/claude-launch.md mandates.
 - C17 `internal/tmux/tmux.go` `SocketPath(value string)` parses the socket from a `TMUX` environment value; `internal/paths/paths.go` `SocketPath(socket string) (string, error)` resolves and validates a socket path. The shared name is required by the spec, and these distinct contracts stay in their respective packages.
 - C23 `internal/statusline/cache_window.go`: the statusline writes nothing to stdout but the rendered line, so launch-record failures go to stderr beside the visible `💾⚠` segment marker.
-- C13 `internal/claudelaunch/doc.go`: a package-doc file with no code; its doc-prose test was deleted, and C9 keeps the package comment required.
-- C13 `internal/hostfixture/doc.go`: a package-doc file with no code; its doc-prose test was deleted, and C9 keeps the package comment required.
+- C13 `internal/claudelaunch/doc.go`: a package-doc file with no code; its doc-prose test was deleted, and C31 keeps the package comment required on the front door.
+- C13 `internal/hostfixture/doc.go`: a package-doc file with no code; its doc-prose test was deleted, and C31 keeps the package comment required on the front door.
 - C13 `internal/testjail/pty_linux.go`, `internal/testjail/pty_darwin.go`: each is one build-tagged line selecting `ptyScriptArgv`; the two argv builders it selects are untagged in `pty.go`, and `pty_test.go` drives both in the Linux fence.
 - C3 `cmd/pfm` budget 8698: `ThemesOffline` in `cmd/pfm/install_command.go` wires `paths.ThemesOffline` into the installer options beside `SkillSourcesOffline`; `askAwaitTimings` in `cmd/pfm/chat_ask_command.go` is the Await poll and settle seam `TestAskHoldsATwoWayConversation` sets, since `--settle` takes whole seconds.
 - C3 `cmd/pfm` budget 8740: `reloadRequestedAccount` in `cmd/pfm/chat_reload_args.go` and the roster check in `runChatReloadWithRuntime` (`cmd/pfm/chat_reload_command.go`) refuse `pfm chat reload --account N` for an account outside the roster before the worker is scheduled, where the caller still reads (exit 2 on stderr), instead of a "scheduled" that the worker later refuses into its log.

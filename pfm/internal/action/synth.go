@@ -336,7 +336,6 @@ func Synthesize(request Request) (Plan, error) {
 		}
 		var command strings.Builder
 		command.WriteString(opencodeHygiene)
-		command.WriteString(ExtensionShellEnv(machine, pfmengine.MustLookup(pfmengine.OpenCode).LongName))
 		personaEnv, err := openCodePersonaEnv(request)
 		if err != nil {
 			return Plan{}, err
@@ -369,7 +368,6 @@ func Synthesize(request Request) (Plan, error) {
 		}
 		var command strings.Builder
 		command.WriteString(opencodeHygiene)
-		command.WriteString(ExtensionShellEnv(machine, pfmengine.MustLookup(pfmengine.OpenCode).LongName))
 		personaEnv, err := openCodePersonaEnv(request)
 		if err != nil {
 			return Plan{}, err
@@ -661,7 +659,6 @@ func codexCommandWithAccount(
 	var command strings.Builder
 	policy := machine.EffectiveCodex(account)
 	command.WriteString(environmentStrip)
-	command.WriteString(ExtensionShellEnv(machine, pfmengine.MustLookup(pfmengine.Codex).LongName))
 	if selected, found := machine.CodexAccountByID(account); found {
 		command.WriteString(" CODEX_HOME=")
 		command.WriteString(cmdparse.Quote(selected.Home))

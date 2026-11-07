@@ -177,3 +177,13 @@ func TestLogDefaultInsertion(t *testing.T) {
 		t.Fatal("a damaged file was not an error")
 	}
 }
+
+// RedactSecrets matches a credential name however it is separated and keeps a
+// large integer exact in the display.
+func TestRedactSecretsSeparatedNamesAndLargeNumbers(t *testing.T) {
+	got := string(RedactSecrets([]byte(`{"api-key":"s1","API_KEY":"s2","id":9007199254740993}`)))
+	want := "{\n  \"API_KEY\": \"<redacted>\",\n  \"api-key\": \"<redacted>\",\n  \"id\": 9007199254740993\n}\n"
+	if got != want {
+		t.Fatalf("RedactSecrets = %q, want %q", got, want)
+	}
+}

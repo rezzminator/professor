@@ -55,8 +55,6 @@ A reply with two or more sections — each opened by a heading or a bold label o
 
 The closing line — the ultimate verdict or the lone verdict — is often the only line the user reads, so it stands alone in plain words: the answer when the user asked a question, else what happened, then what happens next and who does it. It matches the body, never recaps it, carries no question, id, counter or coined label (a fleet role name is no label), and nothing follows it.
 
-With `PONYTAIL MODE ACTIVE` in injected context, put ponytail's required skipped/risk line(s) in their own block, with no verdict of its own, directly above the reply's closing verdict line(s); the last line stays the ultimate or lone verdict.
-
 Format, for every verdict line, `# Ultimate verdict:` and `*Verdict:*` alike: `**Verdict:** {the answer, or what happened} — {what happens next, and who does it}.`
 
 ## Example replies

@@ -506,7 +506,6 @@ func Run(parent context.Context, request Request) (result Result, runErr error) 
 		environment = append([]string(nil), request.Env...)
 	}
 	setEnvironment(environment, request.Engine, request.ConfigDir, request.Env != nil, &environment)
-	environment = request.Config.ExtensionEnvironment(pfmengine.MustLookup(request.Engine).LongName, environment)
 	var openCode openCodeRun
 	if request.Engine == pfmengine.OpenCode {
 		openCode, err = startOpenCode(ctx, &request, environment, cwd)

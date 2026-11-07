@@ -269,9 +269,7 @@ func (installer *engine) install(ctx context.Context) error {
 	installer.options.jobScheduler().wire(ctx, installer, systemdAssetChanged)
 	// A failed plugin install is reported at once and fails the run only
 	// after every later step has landed.
-	installer.deferFailure(installer.ensureExtensions(ctx, false))
 	installer.deferFailure(installer.ensureClaudePlugins(ctx))
-	installer.deferFailure(installer.recordClaudeExtensionMarketplaces())
 	installer.deferFailure(installer.ensureClaudeEnv(false))
 	installer.deferFailure(installer.clearFullscreenAutoDisable())
 	installer.deferFailure(installer.wireCodexHooks())
@@ -572,9 +570,6 @@ func (installer *engine) uninstall(ctx context.Context) error {
 		return fmt.Errorf("enumerate embedded install assets: %w", err)
 	}
 	if err := installer.unwireClaudeLauncher(); err != nil {
-		return err
-	}
-	if err := installer.ensureExtensions(ctx, true); err != nil {
 		return err
 	}
 	if err := installer.ensureClaudeEnv(true); err != nil {

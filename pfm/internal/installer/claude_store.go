@@ -75,13 +75,11 @@ var AccountEntries = []string{
 // (chrome, dev-mods, keybindings), and engine-sync's machine policy
 // (engine-sync.json), which pfm install renders into the store itself and no
 // account directory carries: engine-sync reads it from $HOME/.claude whatever
-// CLAUDE_CONFIG_DIR says. The ponytail plugin keeps its mode and band state
-// per config dir (.ponytail-*, ponytail-modes): plugin runtime, not identity.
+// CLAUDE_CONFIG_DIR says.
 var IgnoredEntries = []string{
 	"ide", ".cc-new-children", ".cc-pane-children", claudeLocalSettingsName,
 	"debug", "daemon.lock", "daemon.status.json", ".claude.json.lock", "tmp",
 	"chrome", "dev-mods", "keybindings.json", "hooks", "engine-sync.json",
-	".ponytail-active", ".ponytail-band", ".ponytail-statusline-nudged", "ponytail-modes",
 }
 
 // EntryClass classifies a top-level Claude entry.

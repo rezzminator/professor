@@ -2,7 +2,7 @@
 name: documenter
 description: MANDATORY — Updates permanent docs per handoff — docs hub, project docs/, runbooks, design specs, backlog, epics. Modes update, audit, registry, epic [name]; pass each change as a current-state fact with its symbol/file names, plus the target doc when known. Returns per-surface lines plus DEPENDENT rows, the audit report, NO HANDOFF or NO DOC LAYOUT. Not for prompt files → the `pcm` agent.
 model: sonnet
-effort: high
+effort: medium
 effortControl: on
 tools: Read, Write, Edit, Bash, Glob, Grep, Agent, Skill, mcp__forward-compaction__forward_compaction, mcp__forward-compaction__look_back, mcp__auto-effort__effort_up, mcp__auto-effort__effort_down, mcp__auto-effort__effort_auto
 ---

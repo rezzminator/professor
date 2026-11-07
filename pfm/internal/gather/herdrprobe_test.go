@@ -11,7 +11,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -83,9 +82,10 @@ func TestProbeHerdrSeatsReusesSocketFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The peer hangs up on every connection: a socket failure that costs no
+	// I/O timeout, so the count alone tells a reused failure from a re-dial.
 	var accepts atomic.Int32
-	var peers sync.WaitGroup
-	release, done := make(chan struct{}), make(chan struct{})
+	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		for {
@@ -94,11 +94,10 @@ func TestProbeHerdrSeatsReusesSocketFailure(t *testing.T) {
 				return
 			}
 			accepts.Add(1)
-			peers.Add(1)
-			go func() { defer peers.Done(); defer func() { _ = conn.Close() }(); <-release }()
+			_ = conn.Close()
 		}
 	}()
-	defer func() { _ = listener.Close(); <-done; close(release); peers.Wait() }()
+	defer func() { _ = listener.Close(); <-done }()
 	rows := probeHerdrSeatRows(context.Background(), []fleetdb.Seat{
 		{SeatID: "one", Backend: "herdr", State: "live", HerdrSocket: socket, HerdrPane: "w1:p1"},
 		{SeatID: "two", Backend: "herdr", State: "live", HerdrSocket: socket, HerdrPane: "w1:p2"},

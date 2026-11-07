@@ -14,9 +14,16 @@ import (
 // testjail.HerdrClaudeSettings' entry because testjail imports config, which
 // imports this package.
 func herdrClaudeEntry(dir string) string {
-	return `{"matcher":"^(startup|resume|clear|compact|fork)$","hooks":[{"type":"command","command":` +
-		fmt.Sprintf("%q", "bash '"+dir+"/hooks/herdr-agent-state.sh' session") + `,"timeout":10}]}`
+	return herdrClaudeEntryRunning("bash '" + dir + "/hooks/herdr-agent-state.sh' session")
 }
+
+// herdrClaudeEntryRunning is that entry for an explicit hook command.
+func herdrClaudeEntryRunning(command string) string {
+	return `{"matcher":"^(startup|resume|clear|compact|fork)$","hooks":[{"type":"command","command":` +
+		fmt.Sprintf("%q", command) + `,"timeout":10}]}`
+}
+
+const guardedHerdrHook = `[ -n "${HERDR_SHIELD_INNER:-}" ] || bash '{cc3}/hooks/herdr-agent-state.sh' session`
 
 // TestClaudeStoresGroupsDirsByPhysicalSettings is the store door's table: dirs
 // sharing one settings.json through symlinks are one store, the chosen dir
@@ -56,6 +63,14 @@ func TestClaudeStoresGroupsDirsByPhysicalSettings(t *testing.T) {
 					Settings: "{cc3}/settings.json", Dirs: []string{"{cc3}"}, Chosen: "{cc3}",
 					Hooks: []string{"bash '{cc3}/hooks/herdr-agent-state.sh' session"},
 				},
+			},
+		},
+		{
+			name:   "one guarded hook chooses the dir it names",
+			shared: `{"hooks":{"SessionStart":[` + herdrClaudeEntryRunning(guardedHerdrHook) + `]}}`,
+			want: []ClaudeStore{
+				{Settings: "{store}", Dirs: []string{"{cc1}", "{cc2}"}, Chosen: "{cc3}", Hooks: []string{guardedHerdrHook}},
+				{Settings: "{cc3}/settings.json", Dirs: []string{"{cc3}"}, Chosen: "{cc3}"},
 			},
 		},
 		{
@@ -154,6 +169,38 @@ func TestClaudeIntegrationCommand(t *testing.T) {
 	} {
 		if got := ClaudeIntegrationCommand(tc.binary, "/h/it's"); got != tc.want {
 			t.Fatalf("ClaudeIntegrationCommand(%q) = %q, want %q", tc.binary, got, tc.want)
+		}
+	}
+}
+
+// The guard is one door: a hook command is guarded once, the settings text
+// changes in that one literal and nowhere else, and a command that is not
+// exactly one literal in the file is an error.
+func TestGuardClaudeHook(t *testing.T) {
+	const raw = "bash '/h/hooks/herdr-agent-state.sh' session"
+	const guarded = `[ -n "${HERDR_SHIELD_INNER:-}" ] || ` + raw
+	if got := GuardClaudeHook(raw); got != guarded {
+		t.Fatalf("GuardClaudeHook(%q) = %q, want %q", raw, got, guarded)
+	}
+	if got := GuardClaudeHook(guarded); got != guarded {
+		t.Fatalf("GuardClaudeHook(guarded) = %q, want it unchanged %q", got, guarded)
+	}
+	if ClaudeHookGuarded(raw) || !ClaudeHookGuarded(guarded) {
+		t.Fatalf("ClaudeHookGuarded(raw) = %t, (guarded) = %t, want false, true",
+			ClaudeHookGuarded(raw), ClaudeHookGuarded(guarded))
+	}
+	if got := claudeIntegrationDir(guarded); got != "/h" {
+		t.Fatalf("claudeIntegrationDir(guarded) = %q, want /h", got)
+	}
+	in := `{"b": 1, "hooks": {"x": ["` + raw + `"]}, "a": 2}`
+	want := `{"b": 1, "hooks": {"x": ["[ -n \"${HERDR_SHIELD_INNER:-}\" ] || ` + raw + `"]}, "a": 2}`
+	got, err := GuardClaudeSettings([]byte(in), raw)
+	if err != nil || string(got) != want {
+		t.Fatalf("GuardClaudeSettings = %q (err %v), want %q", got, err, want)
+	}
+	for name, text := range map[string]string{"absent": `{}`, "twice": in + in} {
+		if _, err := GuardClaudeSettings([]byte(text), raw); err == nil {
+			t.Fatalf("GuardClaudeSettings with the command %s did not fail", name)
 		}
 	}
 }

@@ -48,21 +48,41 @@ func TestHerdrClaudeStoresDoctor(t *testing.T) {
 			wantFailures: 1,
 		},
 		{
-			name:     "store with one herdr hook from the second dir",
-			settings: testjail.HerdrClaudeSettings("{second}"),
+			name:     "store with one guarded herdr hook from the second dir",
+			settings: testjail.GuardedHerdrClaudeSettings("{second}"),
 			wantRows: []string{
-				herdrIntegrationRow + " ok claude: herdr integration hook in {settings}: " + testjail.HerdrClaudeHook("{second}"),
+				herdrIntegrationRow + " ok claude: herdr integration hook in {settings}: " + testjail.GuardedHerdrClaudeHook("{second}"),
 			},
 		},
 		{
-			name:     "store with two herdr hooks",
-			settings: testjail.HerdrClaudeSettings("{first}", "{second}"),
+			name:     "store with one unguarded herdr hook",
+			settings: testjail.HerdrClaudeSettings("{second}"),
+			wantRows: []string{
+				herdrIntegrationRow + " FAIL need=guarded herdr claude integration hook checked={settings} hook=" +
+					fmt.Sprintf("%q", testjail.HerdrClaudeHook("{second}")) + " — fix: pfm install --yes",
+			},
+			wantFailures: 1,
+		},
+		{
+			name:     "store with two guarded herdr hooks",
+			settings: testjail.GuardedHerdrClaudeSettings("{first}", "{second}"),
 			wantRows: []string{
 				herdrIntegrationRow + " WARN need=one herdr claude integration hook checked={settings} hooks=" +
-					fmt.Sprintf("%q, %q", testjail.HerdrClaudeHook("{first}"), testjail.HerdrClaudeHook("{second}")) +
+					fmt.Sprintf("%q, %q", testjail.GuardedHerdrClaudeHook("{first}"), testjail.GuardedHerdrClaudeHook("{second}")) +
 					" — fix: delete all but one from {settings}, then rerun pfm doctor",
 			},
 			wantWarnings: 1,
+		},
+		{
+			name: "store with a guarded and an unguarded herdr hook",
+			settings: strings.Replace(testjail.HerdrClaudeSettings("{first}", "{second}"),
+				fmt.Sprintf("%q", testjail.HerdrClaudeHook("{first}")), fmt.Sprintf("%q", testjail.GuardedHerdrClaudeHook("{first}")), 1),
+			wantRows: []string{
+				herdrIntegrationRow + " FAIL need=one guarded herdr claude integration hook checked={settings} hooks=" +
+					fmt.Sprintf("%q, %q", testjail.GuardedHerdrClaudeHook("{first}"), testjail.HerdrClaudeHook("{second}")) +
+					" — fix: delete all but one from {settings}, then pfm install --yes",
+			},
+			wantFailures: 1,
 		},
 		{
 			name:     "store unreadable",

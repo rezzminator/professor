@@ -67,6 +67,22 @@ type fakeHerdr struct {
 	// processInfoAnswers, when set, is how many pane.process_info requests the
 	// native fixture answers before it refuses every later one.
 	processInfoAnswers, processInfoSeen int
+	// unanswered counts down, per method or "{method} {state}", the requests
+	// the fake reads and then drops, unrecorded and unanswered, as a Herdr too
+	// loaded to answer before the reporter gives up on it.
+	unanswered map[string]int
+}
+
+// dropsUnanswered reports whether the request is one unanswered still counts
+// down, and counts it; called with the lock held.
+func (server *fakeHerdr) dropsUnanswered(method, state string) bool {
+	for _, key := range []string{method + " " + state, method} {
+		if server.unanswered[key] > 0 {
+			server.unanswered[key]--
+			return true
+		}
+	}
+	return false
 }
 
 func newFakeHerdr(t *testing.T) *fakeHerdr {
@@ -191,6 +207,10 @@ func (server *fakeHerdr) serve(conn net.Conn) {
 	}
 	_ = json.Unmarshal([]byte(line), &request)
 	server.mu.Lock()
+	if server.dropsUnanswered(request.Method, request.Params.State) {
+		server.mu.Unlock()
+		return
+	}
 	server.lines = append(server.lines, line)
 	code, result := server.answer(request.Method, request.Params.PaneID, request.Params.Target, request.Params.Name)
 	if code == "" && strings.HasPrefix(request.Method, "tab.") {
@@ -794,7 +814,13 @@ func newNativeReporterHerdrCount(
 						check()
 					}
 					line, _ := json.Marshal(req)
+					var state string
+					_ = json.Unmarshal(req.Params["state"], &state)
 					server.mu.Lock()
+					if server.dropsUnanswered(req.Method, state) {
+						server.mu.Unlock()
+						return
+					}
 					server.lines = append(server.lines, string(line))
 					refused := server.refuse[req.Method]
 					server.mu.Unlock()

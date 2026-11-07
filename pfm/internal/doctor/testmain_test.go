@@ -74,7 +74,7 @@ func jailTest(t *testing.T) string {
 	dirs, files := storeLayout()
 	testjail.StageAccountLinks(t, filepath.Join(root, "home"), filepath.Join(root, "home", ".cc", "1"), dirs, files)
 	stageStorePlugins(t, filepath.Join(root, "home"))
-	testjail.StageHerdrClaudeHook(t, filepath.Join(root, "home", ".cc", "1"))
+	testjail.StageInstalledHerdrClaudeHook(t, filepath.Join(root, "home", ".cc", "1"))
 	testjail.PinClaudeAsk(t, filepath.Join(root, "home"))
 	return root
 }

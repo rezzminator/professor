@@ -120,41 +120,161 @@ func (rig *nativeActivityRig) event(step string) herdrRun {
 	return herdrRun{rc: rc, stderr: stderr.String()}
 }
 
-// A native report dropped at the host-wide bridge lock (another chat's
-// transaction held it past the hook's deadline) has no later hook to repair a
-// settled state: the last agent stop after Stop, or the Stop itself. Once the
-// lock is free, the detached processes the hooks started settle the pane idle.
-func TestHerdrNativeDroppedSettledStateIsResent(t *testing.T) {
+// darkenHerdr makes the fake Herdr's socket take no dial, as a Herdr too loaded
+// to accept one, until light; its listener serves the path again once lit.
+func darkenHerdr(t *testing.T, server *fakeHerdr) (light func()) {
+	t.Helper()
+	dark := server.path + ".dark"
+	if err := os.Rename(server.path, dark); err != nil {
+		t.Fatal(err)
+	}
+	lit := false
+	light = func() {
+		if lit {
+			return
+		}
+		lit = true
+		if err := os.Rename(dark, server.path); err != nil {
+			t.Error(err)
+		}
+	}
+	t.Cleanup(light)
+	return light
+}
+
+// quietly fires the native rig's steps, each of which must exit 0 and quiet.
+func (rig *nativeActivityRig) quietly(t *testing.T, steps ...string) {
+	t.Helper()
+	for _, step := range steps {
+		if got := rig.event(step); got.rc != 0 || got.stderr != "" {
+			t.Fatalf("%s: rc=%d stderr=%s", step, got.rc, got.stderr)
+		}
+	}
+}
+
+// dropUnder fires step with fault holding, which the hook must name in its one
+// fail-open line, and returns the settle process the hook started for it and
+// the fault's release (a no-op once released).
+func (rig *nativeActivityRig) dropUnder(t *testing.T, fault, step string) (settle []string, release func()) {
+	t.Helper()
+	var named string
+	switch fault {
+	case "bridge lock":
+		release, named = holdBridge(t, rig.lockDir), "transaction.lock still held at the deadline"
+	case "no dial":
+		release, named = darkenHerdr(t, rig.server), "dial unix "+rig.server.path+": connect: no such file or directory"
+	case "unanswered report":
+		rig.server.mu.Lock()
+		rig.server.unanswered = map[string]int{"pane.report_agent": 1}
+		rig.server.mu.Unlock()
+		release, named = func() {}, "read response to pane.report_agent"
+	default:
+		t.Fatalf("unknown fault %q", fault)
+	}
+	got := rig.event(step)
+	if got.rc != 0 || strings.Count(got.stderr, "\n") != 1 || !strings.Contains(got.stderr, named) {
+		t.Fatalf("%s under %s: rc=%d stderr=%q, want exit 0 and one line naming %q",
+			step, fault, got.rc, got.stderr, named)
+	}
+	settles := spawnedVerb(rig.spawned, herdrSettle)
+	if len(settles) != 1 {
+		t.Fatalf("%s under %s: spawned %q, want one settle process for the dropped state", step, fault, rig.spawned)
+	}
+	return settles[0], release
+}
+
+// A native report dropped under host load would leave the pane on the last
+// state Herdr got until the session's next hook, and a settled state (the last
+// agent stop after Stop, the Stop itself) has none while the chat waits on its
+// user: the host-wide bridge lock another chat's transaction held past the
+// hook's deadline, a Herdr socket too loaded to take a dial (the seat proof's
+// first request, then the settle's own first attempts), or a report Herdr never
+// answered. The settle process the dropped hook started delivers the state once
+// Herdr answers.
+func TestHerdrNativeDroppedStateIsResent(t *testing.T) {
 	for _, test := range []struct {
-		name    string
-		before  []string
-		dropped string
+		name, fault, dropped, want, message string
+		before                              []string
+		darkAttempts                        int
 	}{
-		{"last agent stop after Stop", []string{"prompt", "agent-start", "idle"}, "agent-stop"},
-		{"Stop", []string{"prompt"}, "idle"},
+		{
+			name: "last agent stop after Stop", fault: "bridge lock", dropped: "agent-stop", want: "idle",
+			before: []string{"prompt", "agent-start", "idle"},
+		},
+		{name: "Stop", fault: "bridge lock", dropped: "idle", want: "idle", before: []string{"prompt"}},
+		{name: "Stop", fault: "no dial", dropped: "idle", want: "idle", before: []string{"prompt"}, darkAttempts: 2},
+		{
+			name: "prompt after Stop", fault: "no dial", dropped: "prompt", want: "working",
+			before: []string{"prompt", "idle"}, darkAttempts: 2,
+		},
+		{
+			name: "prompt after Stop", fault: "unanswered report", dropped: "prompt", want: "working",
+			before: []string{"prompt", "idle"},
+		},
+		{
+			name: "agent start after Stop", fault: "unanswered report", dropped: "agent-start", want: "working",
+			message: "1 agent running", before: []string{"prompt", "idle"},
+		},
 	} {
-		t.Run(test.name, func(t *testing.T) {
+		t.Run(test.fault+"/"+test.name, func(t *testing.T) {
 			rig := newNativeActivityRig(t)
-			for _, step := range test.before {
-				if got := rig.event(step); got.rc != 0 || got.stderr != "" {
-					t.Fatalf("%s: rc=%d stderr=%s", step, got.rc, got.stderr)
+			rig.quietly(t, test.before...)
+			settle, release := rig.dropUnder(t, test.fault, test.dropped)
+			if test.darkAttempts == 0 {
+				release()
+			}
+			waits := 0
+			var stderr bytes.Buffer
+			rc := settleHerdrStateWithWait(settle[3:], &stderr, rig.deps, func() {
+				waits++
+				if waits == test.darkAttempts {
+					release()
 				}
+				if waits > test.darkAttempts {
+					t.Fatalf("settle retried after Herdr took its dial: %s", &stderr)
+				}
+			})
+			wantStderr := ""
+			if test.darkAttempts > 0 {
+				wantStderr = "pfm internal herdr-state settle (retrying): "
 			}
-			release := holdBridge(t, rig.lockDir)
-			got := rig.event(test.dropped)
-			release()
-			if got.rc != 0 || !strings.Contains(got.stderr, "transaction.lock") {
-				t.Fatalf(
-					"%s: rc=%d stderr=%q, want exit 0 naming the held bridge lock",
-					test.dropped,
-					got.rc,
-					got.stderr,
-				)
+			if rc != 0 || waits != test.darkAttempts || !strings.HasPrefix(stderr.String(), wantStderr) ||
+				strings.Count(stderr.String(), "\n") != test.darkAttempts {
+				t.Fatalf("settle: rc=%d waits=%d stderr=%q, want exit 0 after %d waits, "+
+					"one retrying line per failed attempt", rc, waits, &stderr, test.darkAttempts)
 			}
-			runSpawned(t, rig.spawned, rig.deps)
-			assertActivityReport(t, rig.server, "idle", "")
+			assertActivityReport(t, rig.server, test.want, test.message)
 		})
 	}
+}
+
+// A newer event recorded while the settle process waits between attempts
+// supersedes the state it holds: its next attempt finds the newer seq under
+// the activity lock and stops without sending, so Herdr keeps the newer state.
+func TestHerdrNativeSettleStopsAtANewerEvent(t *testing.T) {
+	rig := newNativeActivityRig(t)
+	rig.quietly(t, "prompt", "idle")
+	settle, light := rig.dropUnder(t, "no dial", "prompt")
+	var afterNewer []string
+	waits := 0
+	var stderr bytes.Buffer
+	rc := settleHerdrStateWithWait(settle[3:], &stderr, rig.deps, func() {
+		waits++
+		if waits > 1 {
+			t.Fatalf("settle retried past the newer event: %s", &stderr)
+		}
+		light()
+		rig.quietly(t, "idle")
+		afterNewer = rig.server.requests()
+	})
+	if rc != 0 || waits != 1 || !strings.HasPrefix(stderr.String(), "pfm internal herdr-state settle (retrying): ") ||
+		strings.Count(stderr.String(), "\n") != 1 {
+		t.Fatalf("settle: rc=%d waits=%d stderr=%q, want exit 0 after one failed attempt", rc, waits, &stderr)
+	}
+	if got := rig.server.requests(); !slices.Equal(got, afterNewer) {
+		t.Errorf("Herdr requests after the newer idle:\n%q\nwant none past\n%q", got, afterNewer)
+	}
+	assertActivityReport(t, rig.server, "idle", "")
 }
 
 // holdActivity takes a Claude session's activity lock the way another hook
@@ -207,49 +327,6 @@ func TestHerdrNativeEventDroppedAtTheActivityLockIsSettled(t *testing.T) {
 			runSpawned(t, slices.DeleteFunc(rig.spawned, func(argv []string) bool { return argv[2] != herdrSettle }),
 				rig.deps)
 			assertActivityReport(t, rig.server, "idle", "")
-		})
-	}
-}
-
-// A settle process records or replays only what a hook could hand it: a
-// recorded event needs the session it records into and an event a settle
-// records, an unproved replay the ancestry its engine proof walks.
-func TestHerdrSettleRefusesWhatNoHookHandsIt(t *testing.T) {
-	const stored, payload = `{"state":"idle"}`, `{"session_id":"activity-session"}`
-	for _, test := range []struct {
-		name string
-		args []string
-		want string
-	}{
-		{
-			name: "event without a session",
-			args: []string{herdrSettleEvent, "7", stored, `{}`, "idle"},
-			want: `pfm internal herdr-state settle event: session "", event "idle": ` +
-				"want a session id and an event a settle records\n",
-		},
-		{
-			name: "event a settle never records",
-			args: []string{herdrSettleEvent, "7", stored, payload, "agent-start"},
-			want: `pfm internal herdr-state settle event: session "activity-session", event "agent-start": ` +
-				"want a session id and an event a settle records\n",
-		},
-		{
-			name: "unproved without an ancestry",
-			args: []string{
-				herdrSettleUnproved, "7", stored, payload, `{"pane":"%1"}`, "--socket", "/fixture/tmux", "idle",
-			},
-			want: `pfm internal herdr-state settle: decode the engine proof "{\"pane\":\"%1\"}": ` +
-				"<nil>, want an ancestry\n",
-		},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			var stderr bytes.Buffer
-			rc := settleHerdrStateWithWait(test.args, &stderr, herdrDeps{}, func() {
-				t.Fatal("a refused settle waited")
-			})
-			if rc != 1 || stderr.String() != test.want {
-				t.Fatalf("settle %q: rc=%d stderr=%q, want rc=1 stderr=%q", test.args, rc, stderr.String(), test.want)
-			}
 		})
 	}
 }
@@ -307,21 +384,28 @@ func TestHerdrTmuxStopDroppedBeforeTheEngineProofIsSettled(t *testing.T) {
 	}
 }
 
-// A tmux chat's Stop whose @pfm_herdr write or client list timed out (a loaded
-// tmux server) stored and reported nothing, and no later hook comes while the
-// chat is idle. Once tmux answers, the detached process the hook started
-// stores the idle state and reports it to the pane, unless a newer event fired
-// meanwhile: a prompt dropped the same way leaves the pane working.
+// A tmux chat's event whose @pfm_herdr write or client list timed out (a loaded
+// tmux server) stored and reported nothing, and one whose report Herdr never
+// answered left the pane on the state before it; no later hook comes while the
+// chat is idle, and a prompt's is the turn's end. Once tmux and Herdr answer,
+// the detached process the hook started stores the event's state and reports
+// it to the pane, unless a newer event fired meanwhile: a prompt dropped the
+// same way leaves the pane working.
 func TestHerdrTmuxDroppedStopIsResent(t *testing.T) {
+	const prompt = `,"hook_event_name":"UserPromptSubmit"`
 	for _, test := range []struct {
-		name, failing, failure, want string
-		newerPrompt                  bool
+		name, failing, unanswered, failure, want string
+		newerPrompt, promptAfterStop             bool
 	}{
 		{name: "store timed out", failing: "set-option", failure: "store state", want: "idle"},
 		{name: "client list timed out", failing: "list-clients", failure: "list tmux clients", want: "idle"},
 		{
 			name: "a newer prompt dropped too", failing: "set-option", failure: "store state", want: "working",
 			newerPrompt: true,
+		},
+		{
+			name: "a prompt's report unanswered", unanswered: "pane.report_agent working",
+			failure: "read response to pane.report_agent", want: "working", promptAfterStop: true,
 		},
 	} {
 		for _, engine := range []string{"claude", "codex"} {
@@ -346,13 +430,21 @@ func TestHerdrTmuxDroppedStopIsResent(t *testing.T) {
 				rig.jail.spawn = func(argv []string) error { spawned = append(spawned, argv); return nil }
 				rig.seed(rig.registered("working", map[string]herdrClient{"4242": rig.client("w1:p1", "term_1")}))
 				rig.wantQuiet(fire("start", `,"source":"startup"`))
-				rig.wantQuiet(fire("working", `,"hook_event_name":"UserPromptSubmit"`))
+				rig.wantQuiet(fire("working", prompt))
+				dropped, extra := "idle", ""
+				if test.promptAfterStop {
+					rig.wantQuiet(fire("idle", ""))
+					dropped, extra = "working", prompt
+				}
 				rig.tmux.mu.Lock()
 				rig.tmux.failOn = test.failing
 				rig.tmux.mu.Unlock()
-				got := fire("idle", "")
+				rig.herdr.mu.Lock()
+				rig.herdr.unanswered = map[string]int{test.unanswered: 1}
+				rig.herdr.mu.Unlock()
+				got := fire(dropped, extra)
 				if test.newerPrompt {
-					if prompt := fire("working", `,"hook_event_name":"UserPromptSubmit"`); prompt.rc != 0 {
+					if prompt := fire("working", prompt); prompt.rc != 0 {
 						t.Fatalf("newer prompt: rc=%d stderr=%q", prompt.rc, prompt.stderr)
 					}
 				}
@@ -360,7 +452,7 @@ func TestHerdrTmuxDroppedStopIsResent(t *testing.T) {
 				rig.tmux.failOn = ""
 				rig.tmux.mu.Unlock()
 				if got.rc != 0 || !strings.Contains(got.stderr, test.failure) {
-					t.Fatalf("idle: rc=%d stderr=%q, want exit 0 naming %q", got.rc, got.stderr, test.failure)
+					t.Fatalf("%s: rc=%d stderr=%q, want exit 0 naming %q", dropped, got.rc, got.stderr, test.failure)
 				}
 				deps := rig.jail.deps(rig.env, &rig.clock)
 				deps.tmux, deps.listPanes = rig.tmux.run, rig.tmux.listPanes

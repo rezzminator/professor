@@ -2,4 +2,6 @@
 //
 // herdr_activity_record.go keeps each Claude session's Herdr activity record and hands the
 // native Claude panes an older build reported under herdr:claude back to Herdr (pfm install's cutover).
+// herdr_settle_process.go is the detached settle process: the mode a hook hands it and its
+// bounded, backing-off retry of a Herdr state the host's load left undelivered.
 package hookentry

@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"slices"
 	"strings"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
@@ -17,9 +20,12 @@ const herdrClaudeInstallBound = 30 * time.Second
 
 // wireHerdrClaudeIntegration makes Herdr's own Claude integration present on a
 // Herdr host: one SessionStart hook per physical settings.json the Claude
-// config dirs share (herdr.ClaudeStores). A store without the hook gets one
-// install under its chosen dir; a store with one is refreshed under the dir
-// that hook names (idempotent); a store with more is left alone and warned.
+// config dirs share (herdr.ClaudeStores), guarded so it does nothing inside a
+// herdr-shield pane (herdr.GuardClaudeHook). A store without the hook gets one
+// install under its chosen dir, then the guard; a store with one unguarded hook
+// is refreshed under the dir that hook names (idempotent) and guarded in place;
+// a guarded one is left alone, since Herdr's install over it adds an unguarded
+// duplicate; a store with more is left alone and warned.
 // Once every store holds the hook, pfm's own native Claude reports are
 // released (Options.ReleaseNativeClaudeReports).
 func (installer *engine) wireHerdrClaudeIntegration(ctx context.Context) error {
@@ -55,19 +61,34 @@ func (installer *engine) wireHerdrClaudeStore(ctx context.Context, runner deps.R
 		err := installer.change(
 			"herdr claude integration in "+store.Settings+": "+
 				herdr.ClaudeIntegrationCommand(herdr.HostBinary(installer.env().Get), store.Chosen),
-			func() error { return installer.runHerdrClaudeInstall(ctx, runner, store.Chosen) },
+			func() error {
+				if err := installer.runHerdrClaudeInstall(ctx, runner, store.Chosen); err != nil {
+					return err
+				}
+				return guardHerdrClaudeStore(store.Settings)
+			},
 		)
 		if err != nil {
 			return installer.fail(err)
 		}
 		return nil
 	case 1:
-		if installer.apply {
-			if err := installer.runHerdrClaudeInstall(ctx, runner, store.Chosen); err != nil {
-				return installer.fail(err)
-			}
+		if herdr.ClaudeHookGuarded(store.Hooks[0]) {
+			installer.ok("herdr claude integration in " + store.Settings + ": " + store.Hooks[0])
+			return nil
 		}
-		installer.ok("herdr claude integration in " + store.Settings + ": " + store.Hooks[0])
+		err := installer.change(
+			"herdr claude integration in "+store.Settings+": guard "+store.Hooks[0]+" against herdr-shield panes",
+			func() error {
+				if err := installer.runHerdrClaudeInstall(ctx, runner, store.Chosen); err != nil {
+					return err
+				}
+				return guardHerdrClaudeStore(store.Settings)
+			},
+		)
+		if err != nil {
+			return installer.fail(err)
+		}
 		return nil
 	}
 	quoted := make([]string, len(store.Hooks))
@@ -79,8 +100,45 @@ func (installer *engine) wireHerdrClaudeStore(ctx context.Context, runner deps.R
 			"delete all but one, then rerun pfm install",
 		store.Settings, len(store.Hooks), strings.Join(quoted, ", "),
 	)
+	if slices.ContainsFunc(store.Hooks, func(hook string) bool { return !herdr.ClaudeHookGuarded(hook) }) {
+		// An unguarded one stores herdr:claude in every herdr-shield pane it starts in.
+		return installer.fail(fmt.Errorf("%s; an unguarded one runs in herdr-shield panes", message))
+	}
 	installer.say("  warn    %s", message)
 	installer.record("warn", message, nil)
+	return nil
+}
+
+// guardHerdrClaudeStore rewrites the one Herdr hook in the physical settings.json
+// to its guarded form, in place through the physical path so a symlinked account
+// settings.json stays a link; a store whose hook is already guarded is not written.
+func guardHerdrClaudeStore(settings string) error {
+	hooks, err := herdr.ClaudeIntegrationHooks(settings)
+	if err != nil {
+		return fmt.Errorf("herdr claude integration: %w", err)
+	}
+	if len(hooks) != 1 {
+		return fmt.Errorf(
+			"herdr claude integration: %s holds %d Herdr hooks after install, want 1", settings, len(hooks))
+	}
+	if herdr.ClaudeHookGuarded(hooks[0]) {
+		return nil
+	}
+	raw, err := os.ReadFile(settings)
+	if err != nil {
+		return fmt.Errorf("herdr claude integration: read %s: %w", settings, err)
+	}
+	info, err := os.Stat(settings)
+	if err != nil {
+		return fmt.Errorf("herdr claude integration: stat %s: %w", settings, err)
+	}
+	guarded, err := herdr.GuardClaudeSettings(raw, hooks[0])
+	if err != nil {
+		return fmt.Errorf("herdr claude integration: %s: %w", settings, err)
+	}
+	if err := atomicfile.Write(settings, guarded, info.Mode().Perm()); err != nil {
+		return fmt.Errorf("herdr claude integration: write %s: %w", settings, err)
+	}
 	return nil
 }
 

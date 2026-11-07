@@ -66,7 +66,8 @@ func runEnv(opts deps.RunOptions, key string) string {
 // dirs whose settings.json are symlinks to one shared store: each pass is one
 // install, asserting its rows, the herdr runs and their CLAUDE_CONFIG_DIR, the
 // release seam's calls, the store's Herdr hooks after it and that both links
-// still point at the store.
+// still point at the store. Herdr's hook comes back guarded against
+// herdr-shield panes, and a guarded hook is neither run over nor rewritten.
 func TestInstallHerdrClaudeIntegration(t *testing.T) {
 	type pass struct {
 		rows      []string
@@ -74,6 +75,8 @@ func TestInstallHerdrClaudeIntegration(t *testing.T) {
 		releases  int
 		wantErr   bool
 		wantHooks []string
+		// wantStore is the store's whole content after the pass ("" skips the check).
+		wantStore string
 	}
 	for _, tc := range []struct {
 		name   string
@@ -93,35 +96,81 @@ func TestInstallHerdrClaudeIntegration(t *testing.T) {
 						"  change  herdr claude integration in {store}: " +
 							"CLAUDE_CONFIG_DIR='{cc1}' herdr integration install claude",
 					},
-					runDirs: []string{"{cc1}"}, releases: 1, wantHooks: []string{testjail.HerdrClaudeHook("{cc1}")},
+					runDirs: []string{"{cc1}"}, releases: 1, wantHooks: []string{testjail.GuardedHerdrClaudeHook("{cc1}")},
+					wantStore: `{"hooks":{"SessionStart":[{"hooks":[` +
+						`{"command":` + fmt.Sprintf("%q", testjail.GuardedHerdrClaudeHook("{cc1}")) + `,"timeout":10,"type":"command"}],` +
+						`"matcher":"^(startup|resume|clear|compact|fork)$"}]},"theme":"dark"}`,
 				},
 				{
-					rows:    []string{"  ok      herdr claude integration in {store}: " + testjail.HerdrClaudeHook("{cc1}")},
-					runDirs: []string{"{cc1}"}, releases: 1, wantHooks: []string{testjail.HerdrClaudeHook("{cc1}")},
+					rows:     []string{"  ok      herdr claude integration in {store}: " + testjail.GuardedHerdrClaudeHook("{cc1}")},
+					releases: 1, wantHooks: []string{testjail.GuardedHerdrClaudeHook("{cc1}")},
 				},
 			},
 		},
 		{
-			name:   "one hook refreshes under the dir it names",
+			name:   "one unguarded hook refreshes under the dir it names and is guarded",
 			shared: testjail.HerdrClaudeSettings("{cc2}"),
 			mode:   ModeApply,
 			passes: []pass{{
-				rows:    []string{"  ok      herdr claude integration in {store}: " + testjail.HerdrClaudeHook("{cc2}")},
-				runDirs: []string{"{cc2}"}, releases: 1, wantHooks: []string{testjail.HerdrClaudeHook("{cc2}")},
+				rows: []string{
+					"  change  herdr claude integration in {store}: guard " + testjail.HerdrClaudeHook("{cc2}") +
+						" against herdr-shield panes",
+				},
+				runDirs: []string{"{cc2}"}, releases: 1, wantHooks: []string{testjail.GuardedHerdrClaudeHook("{cc2}")},
+				wantStore: testjail.GuardedHerdrClaudeSettings("{cc2}"),
 			}},
 		},
 		{
-			name:   "two hooks run nothing and warn",
-			shared: testjail.HerdrClaudeSettings("{cc1}", "{cc2}"),
+			name:   "one guarded hook runs nothing and writes nothing",
+			shared: testjail.GuardedHerdrClaudeSettings("{cc2}"),
+			mode:   ModeApply,
+			passes: []pass{{
+				rows:      []string{"  ok      herdr claude integration in {store}: " + testjail.GuardedHerdrClaudeHook("{cc2}")},
+				releases:  1,
+				wantHooks: []string{testjail.GuardedHerdrClaudeHook("{cc2}")},
+				wantStore: testjail.GuardedHerdrClaudeSettings("{cc2}"),
+			}},
+		},
+		{
+			name:   "dry run leaves an unguarded hook as it is",
+			shared: testjail.HerdrClaudeSettings("{cc2}"),
+			mode:   ModeDryRun,
+			passes: []pass{{
+				rows: []string{
+					"  change  herdr claude integration in {store}: guard " + testjail.HerdrClaudeHook("{cc2}") +
+						" against herdr-shield panes",
+				},
+				wantStore: testjail.HerdrClaudeSettings("{cc2}"),
+			}},
+		},
+		{
+			name:   "two guarded hooks run nothing and warn",
+			shared: testjail.GuardedHerdrClaudeSettings("{cc1}", "{cc2}"),
 			mode:   ModeApply,
 			passes: []pass{{
 				rows: []string{
 					"  warn    herdr claude integration: {store} holds 2 Herdr hooks, each run on every Claude " +
-						"session start: " + fmt.Sprintf("%q, %q", testjail.HerdrClaudeHook("{cc1}"), testjail.HerdrClaudeHook("{cc2}")) +
+						"session start: " + fmt.Sprintf("%q, %q", testjail.GuardedHerdrClaudeHook("{cc1}"), testjail.GuardedHerdrClaudeHook("{cc2}")) +
 						" — delete all but one, then rerun pfm install",
 				},
 				releases:  1,
+				wantHooks: []string{testjail.GuardedHerdrClaudeHook("{cc1}"), testjail.GuardedHerdrClaudeHook("{cc2}")},
+				wantStore: testjail.GuardedHerdrClaudeSettings("{cc1}", "{cc2}"),
+			}},
+		},
+		{
+			name:   "two hooks one unguarded run nothing, write nothing and fail",
+			shared: testjail.HerdrClaudeSettings("{cc1}", "{cc2}"),
+			mode:   ModeApply,
+			passes: []pass{{
+				rows: []string{
+					"  FAIL    herdr claude integration: {store} holds 2 Herdr hooks, each run on every Claude " +
+						"session start: " + fmt.Sprintf("%q, %q", testjail.HerdrClaudeHook("{cc1}"), testjail.HerdrClaudeHook("{cc2}")) +
+						" — delete all but one, then rerun pfm install; an unguarded one runs in herdr-shield panes",
+				},
+				wantErr:   true,
 				wantHooks: []string{testjail.HerdrClaudeHook("{cc1}"), testjail.HerdrClaudeHook("{cc2}")},
+				wantStore: testjail.HerdrClaudeSettings("{cc1}", "{cc2}"),
 			}},
 		},
 		{
@@ -253,6 +302,12 @@ func TestInstallHerdrClaudeIntegration(t *testing.T) {
 						t.Fatalf("pass %d store hooks %q (err %v), want %q", index, hooks, hooksErr, wantHooks)
 					}
 				}
+				if want.wantStore != "" {
+					wantStore := fill.Replace(want.wantStore)
+					if got, readErr := os.ReadFile(store); readErr != nil || string(got) != wantStore {
+						t.Fatalf("pass %d store %s = %q (err %v), want %q", index, store, got, readErr, wantStore)
+					}
+				}
 				for _, dir := range []string{cc1, cc2} {
 					if target, linkErr := os.Readlink(
 						filepath.Join(dir, "settings.json"),
@@ -280,7 +335,7 @@ func TestInstallHerdrClaudeIntegrationReleaseFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	settings := []byte(testjail.HerdrClaudeSettings(dir))
+	settings := []byte(testjail.GuardedHerdrClaudeSettings(dir))
 	if err := os.WriteFile(filepath.Join(dir, "settings.json"), settings, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -299,7 +354,7 @@ func TestInstallHerdrClaudeIntegrationReleaseFailure(t *testing.T) {
 	want := "  ok      herdr claude integration in " + filepath.Join(
 		dir,
 		"settings.json",
-	) + ": " + testjail.HerdrClaudeHook(
+	) + ": " + testjail.GuardedHerdrClaudeHook(
 		dir,
 	) + "\n" +
 		"  FAIL    herdr claude integration: release pfm's native Claude reports: report lock held\n"

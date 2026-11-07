@@ -163,12 +163,12 @@ func (tmux TmuxProbe) socketPath(socket string) string {
 // the caller's context carries its own deadline: a server stopped after the
 // scan listed it never answers a later pid read or pane capture.
 func (tmux TmuxProbe) probeCommand(ctx context.Context, socket string, arguments ...string) *pfmtmux.Cmd {
-	return pfmtmux.ExecWithin(ctx, ProbeTimeout, tmux.Binary, tmux.socketPath(socket), arguments...)
+	return pfmtmux.ExecWithin(ctx, probeTimeout(ctx), tmux.Binary, tmux.socketPath(socket), arguments...)
 }
 
 // ListPanes performs one list-panes -a call for socket.
 func (tmux TmuxProbe) ListPanes(ctx context.Context, socket string) ([]ProbePane, error) {
-	probeCtx, cancel := context.WithTimeout(ctx, ProbeTimeout)
+	probeCtx, cancel := context.WithTimeout(ctx, probeTimeout(ctx))
 	defer cancel()
 	command := tmux.probeCommand(probeCtx, socket, "list-panes", "-a", "-F", paneFormat)
 	output, err := command.Output()

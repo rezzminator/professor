@@ -41,7 +41,7 @@ func (reporter *herdrReporter) nativeSeat(ctx context.Context, payload herdrPayl
 		// Start and end bind the seat through a writable open, which migrates an older file.
 		var err error
 		if db, err = fleetdb.OpenSharedStateUnlessOlder(ctx, *reporter.deps.seatPaths); err != nil {
-			return true, fmt.Errorf("native seat ownership unproved: %w", err)
+			return true, undeliveredUnderLoad(ctx, fmt.Errorf("native seat ownership unproved: %w", err))
 		}
 	} else {
 		db = fleetdb.OpenSharedStateReadOnly(ctx, *reporter.deps.seatPaths)
@@ -57,10 +57,10 @@ func (reporter *herdrReporter) nativeSeat(ctx context.Context, payload herdrPayl
 		)
 	}
 	if err := db.Degraded(); err != nil {
-		return true, fmt.Errorf(
+		return true, undeliveredUnderLoad(ctx, fmt.Errorf(
 			"native seat ownership unproved: resolve native seat state: %w; repair: restore the intended pane with pfm chat open --restored",
 			err,
-		)
+		))
 	}
 	values := *reporter.deps.seatPaths
 	if values.ProcRoot == "" {
@@ -69,7 +69,7 @@ func (reporter *herdrReporter) nativeSeat(ctx context.Context, payload herdrPayl
 	proc := gather.NewProcFS(values.ProcRoot)
 	seat, found, err := reporter.nativeReporterSeat(ctx, db, proc)
 	if err != nil {
-		return true, fmt.Errorf("resolve native seat: %w", err)
+		return true, undeliveredUnderLoad(ctx, fmt.Errorf("resolve native seat: %w", err))
 	}
 	if !found {
 		return true, fmt.Errorf(
@@ -94,7 +94,8 @@ func (reporter *herdrReporter) nativeSeat(ctx context.Context, payload herdrPayl
 		err = errors.Join(err, writable.Close())
 	}
 	if err != nil {
-		return true, fmt.Errorf("prove native reporter seat: %w", err)
+		// A proof the host's load cut short leaves this event's state for the settle process.
+		return true, undeliveredUnderLoad(ctx, fmt.Errorf("prove native reporter seat: %w", err))
 	}
 	if !owned {
 		return true, fmt.Errorf("native reporter seat %s supervisor is dead", seat.SeatID)

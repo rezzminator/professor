@@ -36,7 +36,7 @@ func herdrClaudeOKRow(t *testing.T, dir string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	hook := testjail.HerdrClaudeHook(dir)
+	hook := testjail.GuardedHerdrClaudeHook(dir)
 	return herdrIntegrationRow + " ok claude: herdr integration hook in " + settings + ": " + hook
 }
 
@@ -316,7 +316,7 @@ func TestHerdrIntegrationDoctorExit(t *testing.T) {
 				t.Fatal(err)
 			}
 			if !scenario.claudeOff {
-				testjail.StageHerdrClaudeHook(t, dir)
+				testjail.StageInstalledHerdrClaudeHook(t, dir)
 			}
 			// The fix runs the herdr this host found: the stub HERDR_BIN_PATH names.
 			stub := filepath.Join(t.TempDir(), "herdr")
@@ -628,7 +628,7 @@ func TestHerdrDoctorChecksEveryManagedHome(t *testing.T) {
 	for _, engine := range []string{"claude", "codex"} {
 		t.Run(engine, func(t *testing.T) {
 			runtime := buildCleanDoctorHome(t)
-			testjail.StageHerdrClaudeHook(t, runtime.Config.ClaudeConfigDirs()[0])
+			testjail.StageInstalledHerdrClaudeHook(t, runtime.Config.ClaudeConfigDirs()[0])
 			root, err := filepath.EvalSymlinks(t.TempDir())
 			if err != nil {
 				t.Fatal(err)
@@ -675,7 +675,7 @@ func TestHerdrDoctorLabelsScopedErrorsAndRepair(t *testing.T) {
 	for _, bad := range []string{"installed", "command failed", "unreadable output"} {
 		t.Run(bad, func(t *testing.T) {
 			runtime := buildCleanDoctorHome(t)
-			testjail.StageHerdrClaudeHook(t, runtime.Config.ClaudeConfigDirs()[0])
+			testjail.StageInstalledHerdrClaudeHook(t, runtime.Config.ClaudeConfigDirs()[0])
 			second := filepath.Join(t.TempDir(), "second home")
 			runtime.Config.CodexAccounts = append(
 				runtime.Config.CodexAccounts,

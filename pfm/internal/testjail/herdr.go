@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/cmdparse"
+	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -49,6 +50,12 @@ func HerdrClaudeHook(dir string) string {
 	return "bash '" + dir + "/hooks/herdr-agent-state.sh' session"
 }
 
+// GuardedHerdrClaudeHook is HerdrClaudeHook as pfm install leaves it: guarded
+// against herdr-shield panes.
+func GuardedHerdrClaudeHook(dir string) string {
+	return herdr.GuardClaudeHook(HerdrClaudeHook(dir))
+}
+
 // HerdrClaudeSettings renders a Claude settings.json holding one Herdr
 // SessionStart entry per dir, with Herdr's matcher and timeout.
 func HerdrClaudeSettings(dirs ...string) string {
@@ -60,11 +67,36 @@ func HerdrClaudeSettings(dirs ...string) string {
 	return `{"theme":"dark","hooks":{"SessionStart":[` + strings.Join(entries, ",") + `]}}`
 }
 
+// GuardedHerdrClaudeSettings is HerdrClaudeSettings with every hook guarded.
+func GuardedHerdrClaudeSettings(dirs ...string) string {
+	text := HerdrClaudeSettings(dirs...)
+	for _, dir := range dirs {
+		text = strings.ReplaceAll(
+			text,
+			fmt.Sprintf("%q", HerdrClaudeHook(dir)),
+			fmt.Sprintf("%q", GuardedHerdrClaudeHook(dir)),
+		)
+	}
+	return text
+}
+
 // StageHerdrClaudeHook adds Herdr's Claude hook for dir to dir's settings.json
 // through its link, keeping every other key and adding nothing when the hook
 // is there, the way Herdr's installer does: an installed home on a Herdr host
 // holds it.
 func StageHerdrClaudeHook(t *testing.T, dir string) {
+	t.Helper()
+	addHerdrClaudeHook(t, dir, false)
+}
+
+// StageInstalledHerdrClaudeHook is StageHerdrClaudeHook with the hook guarded
+// as pfm install leaves it: an installed home on a Herdr host holds this one.
+func StageInstalledHerdrClaudeHook(t *testing.T, dir string) {
+	t.Helper()
+	addHerdrClaudeHook(t, dir, true)
+}
+
+func addHerdrClaudeHook(t *testing.T, dir string, guarded bool) {
 	t.Helper()
 	path := filepath.Join(dir, "settings.json")
 	raw, err := os.ReadFile(path)
@@ -89,7 +121,12 @@ func StageHerdrClaudeHook(t *testing.T, dir string) {
 			return
 		}
 	}
-	hooks["SessionStart"] = append(sessionStart, entry["hooks"].(map[string]any)["SessionStart"].([]any)...)
+	added := entry["hooks"].(map[string]any)["SessionStart"].([]any)
+	if guarded {
+		command := added[0].(map[string]any)["hooks"].([]any)[0].(map[string]any)
+		command["command"] = GuardedHerdrClaudeHook(dir)
+	}
+	hooks["SessionStart"] = append(sessionStart, added...)
 	encoded, err := json.Marshal(settings)
 	if err != nil {
 		t.Fatal(err)

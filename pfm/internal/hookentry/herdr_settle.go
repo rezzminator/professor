@@ -5,25 +5,22 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
-	"github.com/rezzminator/professor/pfm/internal/clock"
-	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 )
 
-// A settled state (idle, blocked) has no later hook to repair it while the chat
-// waits on its user. A hook that could not store or send one under host load
-// (a held lock, a tmux or Herdr call past its deadline) starts this verb
-// detached: it delivers the state once the host answers, until a newer event
-// supersedes it or herdrAgentLease passes.
+// A hook that could not store or send its state under host load (a held lock, a
+// tmux or Herdr call past its deadline, a Herdr socket that took no dial) would
+// leave the pane on the last delivered state until the session's next hook, and
+// a settled state (idle, blocked) has none while the chat waits on its user. Any
+// state, so, starts the settle verb detached (herdr_settle_process.go): it
+// delivers the state once the host answers, unless a newer event supersedes it.
 const (
 	herdrSettle       = "settle"
 	herdrSettleNative = "native"
@@ -56,12 +53,23 @@ func isUndelivered(err error) bool {
 	return errors.As(err, &failure)
 }
 
-func settledState(stored herdrStored) bool {
-	return stored.State == string(herdr.StateIdle) || stored.State == string(herdr.StateBlocked)
+// undeliveredUnderLoad marks err undelivered when the host's load caused it
+// rather than an answer: the hook's deadline passed (a herdr-shield list or a
+// state database read it cut short), a Herdr socket took no dial, or a call
+// timed out. A native seat proof failing so says nothing about the seat, so
+// the settle process re-sends the recorded state to the panes the session's
+// state last reached; a proof that answered no stands.
+func undeliveredUnderLoad(ctx context.Context, err error) error {
+	var notSent *herdr.InputNotSentError
+	if err != nil && (ctx.Err() != nil || errors.As(err, &notSent) ||
+		errors.Is(err, context.DeadlineExceeded) || errors.Is(err, os.ErrDeadlineExceeded)) {
+		return undelivered(err)
+	}
+	return err
 }
 
-// settleNativeLater starts the settle process for a native Claude's settled
-// state the activity record holds but this event could not deliver.
+// settleNativeLater starts the settle process for a native Claude's state the
+// activity record holds but this event could not deliver.
 func (reporter *herdrReporter) settleNativeLater(session string, state herdrActivity, err error) error {
 	if reporter.options.socket != "" {
 		return nil
@@ -69,11 +77,11 @@ func (reporter *herdrReporter) settleNativeLater(session string, state herdrActi
 	return reporter.settleRecordedLater(session, state, err)
 }
 
-// settleRecordedLater starts the settle process that re-sends the settled
-// state the activity record holds to the panes it last reached, which err left
-// undelivered.
+// settleRecordedLater starts the settle process that re-sends the state the
+// activity record holds to the panes it last reached, which err left
+// undelivered. A release records no state: an ended session has no record.
 func (reporter *herdrReporter) settleRecordedLater(session string, state herdrActivity, err error) error {
-	if !isUndelivered(err) || !settledState(state.Stored) || len(state.Targets) == 0 || reporter.deps.spawn == nil {
+	if !isUndelivered(err) || state.Stored.State == "" || len(state.Targets) == 0 || reporter.deps.spawn == nil {
 		return nil
 	}
 	seq := strconv.FormatUint(state.Stored.Seq, 10)
@@ -218,8 +226,11 @@ func (reporter *herdrReporter) proveFrom(proof herdrHookProof) {
 	}
 }
 
-// settleTmuxLater starts the settle process for a settled state a tmux chat's
-// event could not store or send; it replays the event at this event's seq.
+// settleTmuxLater starts the settle process for a state a tmux chat's event
+// could not store or send; it replays the event at this event's seq. The mark
+// comes first: the stored seq may never have moved, so only the mark keeps an
+// older event's settle process off the pane this one leaves. No settle replays
+// a release.
 func (reporter *herdrReporter) settleTmuxLater(payload herdrPayload, err error) error {
 	if !isUndelivered(err) || reporter.options.event.FiredByTmux() {
 		return nil
@@ -228,13 +239,8 @@ func (reporter *herdrReporter) settleTmuxLater(payload herdrPayload, err error) 
 	if action == nil {
 		return nil
 	}
-	if action.release || !settledState(action.stored) {
-		// No settle replays this event, and the stored seq never moved: only
-		// the mark keeps an older settled state's replay off a working pane.
-		return reporter.markUnsettled(reporter.session)
-	}
-	if reporter.deps.spawn == nil {
-		return nil
+	if err := reporter.markUnsettled(reporter.session); err != nil || action.release || reporter.deps.spawn == nil {
+		return err
 	}
 	return reporter.spawnSettle(herdrSettleTmux, action.stored, payload,
 		herdrEngineFlag, string(reporter.options.engine), herdrSocketFlag, reporter.options.socket,
@@ -282,126 +288,6 @@ func (reporter *herdrReporter) unsettled(session string) (uint64, error) {
 		return 0, fmt.Errorf("decode the undelivered event mark %s: %w", path, err)
 	}
 	return seq, nil
-}
-
-func settleHerdrState(args []string, stderr io.Writer, deps herdrDeps) int {
-	return settleHerdrStateWithWait(args, stderr, deps, func() { <-clock.Real.After(time.Second) })
-}
-
-func settleHerdrStateWithWait(args []string, stderr io.Writer, deps herdrDeps, wait func()) int {
-	reporter := &herdrReporter{
-		deps:    deps,
-		stderr:  stderr,
-		options: herdrOptions{engine: pfmengine.Claude, event: herdr.EventIdle},
-	}
-	var attempt func() (bool, error)
-	switch {
-	case len(args) == 3 && args[0] == herdrSettleNative && args[2] != "":
-		seq, err := strconv.ParseUint(args[1], 10, 64)
-		if err != nil {
-			reporter.warn("pfm internal herdr-state settle: invalid seq %q: %v", args[1], err)
-			return 1
-		}
-		reporter.session = args[2]
-		attempt = func() (bool, error) { return reporter.settleActivity(args[2], seq) }
-	case len(args) > 4 && args[0] == herdrSettleTmux:
-		seq, stored, payload, ok := reporter.parseSettled(args[1:4])
-		if !ok {
-			return 1
-		}
-		options, err := parseHerdrOptions(args[4:])
-		if err != nil || options.socket == "" || options.session == "" {
-			reporter.warn("pfm internal herdr-state settle: %v, want --socket and --session", err)
-			return 1
-		}
-		reporter.options, reporter.session, reporter.seq = options, options.session, seq
-		reporter.activityAction = &herdrAction{stored: stored}
-		attempt = func() (bool, error) { return reporter.settleTmux(payload) }
-	case len(args) == 5 && args[0] == herdrSettleEvent:
-		seq, stored, payload, ok := reporter.parseSettled(args[1:4])
-		if !ok {
-			return 1
-		}
-		if payload.SessionID == "" || !recordsLater(herdr.Event(args[4])) {
-			reporter.warn("pfm internal herdr-state settle event: session %q, event %q: want a session id "+
-				"and an event a settle records", payload.SessionID, args[4])
-			return 1
-		}
-		reporter.options.event, reporter.session, reporter.seq = herdr.Event(args[4]), payload.SessionID, seq
-		reporter.fired = stored.MainSeq
-		if reporter.options.event != herdr.EventAgentStop {
-			reporter.activityAction = &herdrAction{stored: stored}
-		}
-		recorded := false
-		attempt = func() (bool, error) {
-			if !recorded {
-				if err := reporter.recordEvent(payload); err != nil {
-					return reporter.settled(err)
-				}
-				recorded = true
-			}
-			return reporter.settleActivity(payload.SessionID, reporter.seq)
-		}
-	case len(args) > 5 && args[0] == herdrSettleUnproved:
-		seq, stored, payload, ok := reporter.parseSettled(args[1:4])
-		if !ok {
-			return 1
-		}
-		var proof herdrHookProof
-		if err := json.Unmarshal([]byte(args[4]), &proof); err != nil || len(proof.Ancestry) == 0 {
-			reporter.warn("pfm internal herdr-state settle: decode the engine proof %q: %v, want an ancestry",
-				args[4], err)
-			return 1
-		}
-		options, err := parseHerdrOptions(args[5:])
-		if err != nil || options.socket == "" || options.session != "" {
-			reporter.warn("pfm internal herdr-state settle unproved: options %q: %v, want --socket and no --session",
-				args[5:], err)
-			return 1
-		}
-		reporter.options, reporter.seq = options, seq
-		reporter.activityAction = &herdrAction{stored: stored}
-		reporter.proveFrom(proof)
-		attempt = func() (bool, error) { return reporter.settleUnproved(payload) }
-	default:
-		reporter.warn("usage: pfm internal herdr-state settle native {seq} {session id}\n" +
-			"       pfm internal herdr-state settle tmux {seq} {stored} {payload} " +
-			"--engine {engine} --socket {tmux socket} --session {tmux session} {event}\n" +
-			"       pfm internal herdr-state settle event {seq} {stored} {payload} {event}\n" +
-			"       pfm internal herdr-state settle unproved {seq} {stored} {payload} {proof} " +
-			"--engine {engine} --socket {tmux socket} {event}")
-		return 1
-	}
-	until := deps.now().Add(herdrAgentLease)
-	return reporter.retry("pfm internal herdr-state settle", func() (bool, error) {
-		if deps.now().After(until) {
-			reporter.warn("pfm internal herdr-state settle: undelivered after %s, the next event reports the pane",
-				herdrAgentLease)
-			return true, nil
-		}
-		return attempt()
-	}, wait)
-}
-
-// retry runs attempt each wait until it reports done without an error, warning
-// each new failure once.
-func (reporter *herdrReporter) retry(what string, attempt func() (bool, error), wait func()) int {
-	lastError := ""
-	for {
-		done, err := attempt()
-		if err != nil {
-			if err.Error() != lastError {
-				reporter.warn("%s (retrying): %v", what, err)
-				lastError = err.Error()
-			}
-		} else {
-			lastError = ""
-			if done {
-				return 0
-			}
-		}
-		wait()
-	}
 }
 
 // settleActivity re-sends the native Claude's recorded state to the panes it

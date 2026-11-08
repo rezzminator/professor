@@ -188,13 +188,9 @@ func (shield *Shield) Processes(ctx context.Context, socket string, body json.Ra
 	if err != nil || !shieldAttached(processes.Foreground) {
 		return processes, err
 	}
-	holder, err := shield.paneHolder(ctx, socket, processes.Pane)
+	holder, foreground, err := shield.paneHolder(ctx, socket, processes.Pane)
 	if err != nil || holder == nil {
 		return processes, err
-	}
-	foreground, err := shield.innerForeground(*holder)
-	if err != nil {
-		return processes, fmt.Errorf("herdr pane %s: herdr-shield holder %s: %w", processes.Pane, holder.ID, err)
 	}
 	processes.Shell, processes.Foreground, processes.Holder = holder.Child.PID, foreground, holder
 	return processes, nil
@@ -281,16 +277,16 @@ func (shield *Shield) relayHolder(ctx context.Context, socket string) (ShieldHol
 	return ShieldHolder{}, fmt.Errorf("map herdr-shield relay %s upstream: herdr-shield lists no holder %s", socket, id)
 }
 
-// paneHolder is the running holder bound to pane on socket, nil when
-// herdr-shield does not protect the pane.
-func (shield *Shield) paneHolder(ctx context.Context, socket, pane string) (*ShieldHolder, error) {
+// paneHolder is the running holder bound to pane on socket and its shell's
+// foreground (paneForeground), nil when herdr-shield does not protect the pane.
+func (shield *Shield) paneHolder(ctx context.Context, socket, pane string) (*ShieldHolder, []Process, error) {
 	upstream, _, err := shield.Upstream(ctx, socket, pane)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	holders, panes, err := shield.list(ctx, upstream)
 	if err != nil {
-		return nil, fmt.Errorf("herdr pane %s runs herdr-shield: %w", pane, err)
+		return nil, nil, fmt.Errorf("herdr pane %s runs herdr-shield: %w", pane, err)
 	}
 	var bound []*ShieldHolder
 	for index := range holders {
@@ -301,14 +297,22 @@ func (shield *Shield) paneHolder(ctx context.Context, socket, pane string) (*Shi
 	}
 	switch {
 	case len(bound) == 1:
-		return bound[0], nil
+		foreground, err := shield.paneForeground(pane, bound[0])
+		if err != nil {
+			return nil, nil, err
+		}
+		return bound[0], foreground, nil
 	case len(bound) > 1:
 		return shield.innermostHolder(pane, bound)
 	case panes[pane] == shieldProtected:
-		return nil, fmt.Errorf("herdr pane %s: herdr-shield marks it %s but lists no running holder bound to it on %s",
-			pane, shieldProtected, upstream)
+		return nil, nil, fmt.Errorf(
+			"herdr pane %s: herdr-shield marks it %s but lists no running holder bound to it on %s",
+			pane,
+			shieldProtected,
+			upstream,
+		)
 	}
-	return nil, nil
+	return nil, nil, nil
 }
 
 // list runs `herdr-shield list --json` against the Herdr server at socket, or

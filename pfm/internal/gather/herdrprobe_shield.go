@@ -10,6 +10,34 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 )
 
+// herdrSeatPane is the pane of panes seat lives in: the one holding its saved
+// terminal (its saved pane when it has none), else, for a seat with a saved
+// supervisor, the pane herdrShieldMovedPane follows. Nil when neither is listed.
+func herdrSeatPane(ctx context.Context, proc ProcFS, seat fleetdb.Seat, panes []herdr.Pane) (*herdr.Pane, error) {
+	var candidate *herdr.Pane
+	for i := range panes {
+		pane := &panes[i]
+		matches := pane.PaneID == seat.HerdrPane
+		if seat.HerdrTerminalID != "" {
+			matches = pane.TerminalID == seat.HerdrTerminalID
+		}
+		if matches {
+			if candidate != nil {
+				return nil, fmt.Errorf("ownership pane.list: duplicate terminal identity")
+			}
+			candidate = pane
+		}
+	}
+	if candidate != nil || seat.SeatHostPID <= 0 {
+		return candidate, nil
+	}
+	moved, err := herdrShieldMovedPane(ctx, proc, seat, panes)
+	if err != nil {
+		return nil, fmt.Errorf("seat %s ownership unproved: %w", seat.SeatID, err)
+	}
+	return moved, nil
+}
+
 // herdrShieldMovedPane is the pane a `herdr-shield attach` moved seat's chat
 // to: the pane bound to the running holder whose shell is the nearest such
 // shell above the seat's supervisor, verified by start time. Nil when no

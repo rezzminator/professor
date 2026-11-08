@@ -23,30 +23,45 @@ func (shield *Shield) Running(ctx context.Context, socket string) ([]ShieldHolde
 }
 
 // innermostHolder picks, among holders bound to one pane, the one a
-// `herdr-shield attach` moved there from inside another held shell: each
-// outer holder's foreground is the attach client of the one inside it, so the
-// pane's shell is the one holder whose foreground is no attach client.
-func (shield *Shield) innermostHolder(pane string, bound []*ShieldHolder) (*ShieldHolder, error) {
+// `herdr-shield attach` moved there from inside another held shell, with its
+// shell's foreground: each outer holder's foreground is the attach client of
+// the one inside it, so the pane's shell is the one holder whose foreground is
+// no attach client.
+func (shield *Shield) innermostHolder(pane string, bound []*ShieldHolder) (*ShieldHolder, []Process, error) {
 	var innermost *ShieldHolder
+	var innermostForeground []Process
 	ids := make([]string, 0, len(bound))
 	for _, holder := range bound {
 		ids = append(ids, holder.ID)
-		foreground, err := shield.innerForeground(*holder)
+		foreground, err := shield.paneForeground(pane, holder)
 		if err != nil {
-			return nil, fmt.Errorf("herdr pane %s: herdr-shield holder %s: %w", pane, holder.ID, err)
+			return nil, nil, err
 		}
 		if shieldAttached(foreground) {
 			continue
 		}
 		if innermost != nil {
-			return nil, fmt.Errorf("herdr pane %s: herdr-shield binds holders %s and %s, neither attaching the other",
-				pane, innermost.ID, holder.ID)
+			return nil, nil, fmt.Errorf(
+				"herdr pane %s: herdr-shield binds holders %s and %s, neither attaching the other",
+				pane,
+				innermost.ID,
+				holder.ID,
+			)
 		}
-		innermost = holder
+		innermost, innermostForeground = holder, foreground
 	}
 	if innermost == nil {
-		return nil, fmt.Errorf("herdr pane %s: herdr-shield holders %s all attach another holder",
+		return nil, nil, fmt.Errorf("herdr pane %s: herdr-shield holders %s all attach another holder",
 			pane, strings.Join(ids, ", "))
 	}
-	return innermost, nil
+	return innermost, innermostForeground, nil
+}
+
+// paneForeground is innerForeground of holder, a holder bound to pane.
+func (shield *Shield) paneForeground(pane string, holder *ShieldHolder) ([]Process, error) {
+	foreground, err := shield.innerForeground(*holder)
+	if err != nil {
+		return nil, fmt.Errorf("herdr pane %s: herdr-shield holder %s: %w", pane, holder.ID, err)
+	}
+	return foreground, nil
 }

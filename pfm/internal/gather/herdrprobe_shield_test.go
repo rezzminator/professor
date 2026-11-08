@@ -3,6 +3,7 @@ package gather
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
@@ -13,22 +14,43 @@ import (
 // A pane herdr-shield holds shows Herdr only the attach client: its owner is
 // proved through the holder bound to that pane, whose shell runs the
 // supervisor, and never through a holder bound to another pane. A seat whose
-// pane is gone follows its holder to the pane `herdr-shield attach` moved it to.
+// pane is gone follows its holder to the pane `herdr-shield attach` moved it to,
+// never a holder whose child is a reused pid, and never past a failed listing.
 func TestProveHerdrSeatThroughHerdrShield(t *testing.T) {
 	for _, tc := range []struct {
 		name, bound, seatPane, seatTerminal string
-		owned                               bool
-		diagnostic                          string
+		// childStart is the start time herdr-shield records for its child, pid 10
+		// (started 3); shieldExit nonzero makes `herdr-shield list --json` fail.
+		childStart, shieldExit int
+		// diagnostic is the whole proof error, {socket} the Herdr socket; empty
+		// when the proof owns the seat.
+		diagnostic string
 	}{
-		{name: "holder bound to the pane", bound: "w1:p1", seatPane: "w1:p1", seatTerminal: "terminal-one", owned: true},
+		{
+			name: "holder bound to the pane", bound: "w1:p1", seatPane: "w1:p1", seatTerminal: "terminal-one",
+			childStart: 3,
+		},
 		{
 			name: "holder bound to another pane", bound: "w1:p9", seatPane: "w1:p1", seatTerminal: "terminal-one",
-			diagnostic: "seat owner supervisor is outside pane process tree",
+			childStart: 3, diagnostic: "seat owner supervisor is outside pane process tree",
 		},
-		{name: "holder moved from a closed pane", bound: "w1:p1", seatPane: "w1:p0", seatTerminal: "terminal-old", owned: true},
+		{
+			name: "holder moved from a closed pane", bound: "w1:p1", seatPane: "w1:p0", seatTerminal: "terminal-old",
+			childStart: 3,
+		},
 		{
 			name: "holder moved to a pane Herdr does not list", bound: "w1:p9", seatPane: "w1:p0", seatTerminal: "terminal-old",
-			diagnostic: "seat owner ownership unproved: terminal not present in pane.list",
+			childStart: 3, diagnostic: "seat owner ownership unproved: terminal not present in pane.list",
+		},
+		{
+			name: "moved holder whose child is a reused pid", bound: "w1:p1", seatPane: "w1:p0", seatTerminal: "terminal-old",
+			childStart: 4, diagnostic: "seat owner ownership unproved: terminal not present in pane.list",
+		},
+		{
+			name: "holders unlisted for a closed pane", bound: "w1:p1", seatPane: "w1:p0", seatTerminal: "terminal-old",
+			childStart: 3, shieldExit: 1,
+			diagnostic: "seat owner ownership unproved: terminal not present in pane.list; follow a moved herdr-shield holder: " +
+				"herdr-shield list --json against {socket}: exit 1: user manager unavailable",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -48,7 +70,11 @@ func TestProveHerdrSeatThroughHerdrShield(t *testing.T) {
 					"foreground_processes": []any{map[string]any{"pid": 8, "name": "herdr-shield"}},
 				},
 			)
-			testjail.StageHerdrShield(t, testjail.HerdrShieldListing(5, 2, 10, 3, tc.bound, socket), 0)
+			listing := testjail.HerdrShieldListing(5, 2, 10, tc.childStart, tc.bound, socket)
+			if tc.shieldExit != 0 {
+				listing = "user manager unavailable"
+			}
+			testjail.StageHerdrShield(t, listing, tc.shieldExit)
 			seat := fleetdb.Seat{
 				SeatID: "owner", Backend: "herdr", State: "live", HerdrSocket: socket,
 				HerdrPane: tc.seatPane, HerdrWorkspace: "w1", HerdrTerminalID: tc.seatTerminal,
@@ -75,8 +101,9 @@ func TestProveHerdrSeatThroughHerdrShield(t *testing.T) {
 			}}
 			got, owned, err := ProveHerdrSeat(ctx, db, proc, seat)
 			if tc.diagnostic != "" {
-				if owned || err == nil || err.Error() != tc.diagnostic {
-					t.Fatalf("proof owned=%v err=%v; want error %q", owned, err, tc.diagnostic)
+				want := strings.ReplaceAll(tc.diagnostic, "{socket}", socket)
+				if owned || err == nil || err.Error() != want {
+					t.Fatalf("proof owned=%v err=%v; want error %q", owned, err, want)
 				}
 				return
 			}

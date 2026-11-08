@@ -172,24 +172,9 @@ func proveHerdrSeatSnapshot(
 	if err != nil {
 		return seat, false, fmt.Errorf("prove seat %s ownership: %w", seat.SeatID, err)
 	}
-	var candidate *herdr.Pane
-	for i := range panes {
-		pane := &panes[i]
-		matches := pane.PaneID == seat.HerdrPane
-		if seat.HerdrTerminalID != "" {
-			matches = pane.TerminalID == seat.HerdrTerminalID
-		}
-		if matches {
-			if candidate != nil {
-				return seat, false, fmt.Errorf("ownership pane.list: duplicate terminal identity")
-			}
-			candidate = pane
-		}
-	}
-	if candidate == nil && seat.SeatHostPID > 0 {
-		if candidate, err = herdrShieldMovedPane(ctx, proc, seat, panes); err != nil {
-			return seat, false, fmt.Errorf("seat %s ownership unproved: %w", seat.SeatID, err)
-		}
+	candidate, err := herdrSeatPane(ctx, proc, seat, panes)
+	if err != nil {
+		return seat, false, err
 	}
 	if candidate == nil {
 		if seat.SeatHostPID == 0 {

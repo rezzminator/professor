@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"os"
 	"path/filepath"
 	"sync"
 	"syscall"
@@ -129,22 +128,17 @@ type Proc interface {
 }
 
 // Shield reads herdr-shield for the panes it holds. A listing of a Herdr socket
-// serves every read of that socket within shieldListFresh of it, so one
-// operation runs herdr-shield once per socket.
+// serves every read of that socket within shieldListFresh of it, and every read
+// of a pass that Hold keeps it for (shield_list.go), so one operation runs
+// herdr-shield once per socket. Clock times the listings (nil: clock.Real).
 type Shield struct {
 	Runner deps.Runner
 	Proc   Proc
+	Clock  clock.Clock
 
 	mu       sync.Mutex
 	listings map[string]shieldList
-}
-
-// shieldList is one `herdr-shield list --json` run against one Herdr socket.
-type shieldList struct {
-	at      time.Time
-	holders []ShieldHolder
-	panes   map[string]string
-	err     error
+	holds    int
 }
 
 // ParsePaneProcesses decodes a pane.process_info result as Herdr answered it.
@@ -313,91 +307,6 @@ func (shield *Shield) paneHolder(ctx context.Context, socket, pane string) (*Shi
 		)
 	}
 	return nil, nil, nil
-}
-
-// list runs `herdr-shield list --json` against the Herdr server at socket, or
-// answers from a listing of it still fresh. herdr-shield enumerates the server
-// HERDR_SOCKET_PATH names and refuses to run under a held shell's
-// HERDR_SHIELD_INNER, which pfm inherits when it runs in one.
-// A nil Shield reads no holder: every herdr-shield question to it is an error.
-func (shield *Shield) list(ctx context.Context, socket string) ([]ShieldHolder, map[string]string, error) {
-	if shield == nil {
-		return nil, nil, errors.New("no herdr-shield reader is wired here")
-	}
-	shield.mu.Lock()
-	defer shield.mu.Unlock()
-	now := clock.Real.Now()
-	if listed, found := shield.listings[socket]; found && now.Sub(listed.at) < shieldListFresh {
-		return listed.holders, listed.panes, listed.err
-	}
-	runner := shield.Runner
-	if runner == nil {
-		runner = deps.RealRunner{}
-	}
-	bounded, cancel := context.WithTimeout(ctx, shieldListBound)
-	defer cancel()
-	listed := shieldList{at: now}
-	shieldPath, resolveErr := deps.Resolve(ShieldBinary)
-	var result deps.RunResult
-	var err error
-	if resolveErr == nil {
-		result, err = runner.Run(bounded, []string{shieldPath, "list", "--json"}, deps.RunOptions{
-			Env:          append(without(os.Environ(), []string{EnvShieldInner, EnvSocket}), EnvSocket+"="+socket),
-			WaitDelay:    2 * time.Second,
-			ProcessGroup: true,
-		})
-	}
-	switch {
-	case resolveErr != nil:
-		listed.err = fmt.Errorf("resolve %s: %w", ShieldBinary, resolveErr)
-	case err != nil:
-		listed.err = fmt.Errorf("run %s list --json against %s: %w", ShieldBinary, socket, err)
-	case result.ExitCode != 0:
-		listed.err = fmt.Errorf(
-			"%s list --json against %s: exit %d: %s",
-			ShieldBinary,
-			socket,
-			result.ExitCode,
-			deps.FirstLine(string(result.Stderr)),
-		)
-	default:
-		listed.holders, listed.panes, listed.err = parseShieldList(result.Stdout)
-	}
-	// A run its caller cut short says nothing about herdr-shield: never serve it on.
-	if ctx.Err() == nil {
-		if shield.listings == nil {
-			shield.listings = map[string]shieldList{}
-		}
-		shield.listings[socket] = listed
-	}
-	return listed.holders, listed.panes, listed.err
-}
-
-func parseShieldList(stdout []byte) ([]ShieldHolder, map[string]string, error) {
-	var listing struct {
-		Enumeration string         `json:"enumeration"`
-		Error       *string        `json:"error"`
-		Holders     []ShieldHolder `json:"holders"`
-		Panes       []struct {
-			ID     string `json:"pane_id"`
-			Status string `json:"status"`
-		} `json:"panes"`
-	}
-	if err := json.Unmarshal(stdout, &listing); err != nil {
-		return nil, nil, fmt.Errorf("decode %s list --json: %w", ShieldBinary, err)
-	}
-	if listing.Enumeration != shieldListed {
-		reason := "no error given"
-		if listing.Error != nil {
-			reason = *listing.Error
-		}
-		return nil, nil, fmt.Errorf("%s list --json: enumeration %q: %s", ShieldBinary, listing.Enumeration, reason)
-	}
-	panes := make(map[string]string, len(listing.Panes))
-	for _, pane := range listing.Panes {
-		panes[pane.ID] = pane.Status
-	}
-	return listing.Holders, panes, nil
 }
 
 // innerForeground verifies the holder and its child by start time, then

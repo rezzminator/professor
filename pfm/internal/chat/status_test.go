@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
@@ -354,7 +355,7 @@ func TestHerdrWatchFreshTranscriptCapsNativeIdle(t *testing.T) {
 	target.Socket = socket
 	nativeStatus := headless.Status{State: headless.StateIdle, IdleSeconds: 3}
 	var observed nativeStatusObservation
-	got, err := statusFromHerdr(context.Background(), target, nativeStatus, &observed)
+	got, err := statusFromHerdr(context.Background(), pfmcall.HerdrProofs{}, target, nativeStatus, &observed)
 	if err != nil {
 		t.Fatal(err)
 	}

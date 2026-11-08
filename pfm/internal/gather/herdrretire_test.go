@@ -105,7 +105,7 @@ func TestProvedListingRetiresDeadSeatOnce(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		rows := proveHerdrSeats(ctx, db, proc, probeHerdrSeatRows(ctx, seats), false)
+		rows := proveHerdrSeats(ctx, db, proc, HerdrShield(proc), probeHerdrSeatRows(ctx, seats), false)
 		if scan == 2 {
 			if len(rows) != 0 {
 				t.Fatalf("second scan probed retired seats again: %+v", rows)
@@ -194,7 +194,14 @@ func TestProvedListingNeverRetiresUnprovedDeath(t *testing.T) {
 			if err := db.PutSeat(ctx, seat); err != nil {
 				t.Fatal(err)
 			}
-			rows := proveHerdrSeats(ctx, db, tc.proc, probeHerdrSeatRows(ctx, []fleetdb.Seat{seat}), false)
+			rows := proveHerdrSeats(
+				ctx,
+				db,
+				tc.proc,
+				HerdrShield(tc.proc),
+				probeHerdrSeatRows(ctx, []fleetdb.Seat{seat}),
+				false,
+			)
 			if len(rows) != 1 || rows[0].Err == nil ||
 				strings.Contains(rows[0].Err.Error(), retireDeadLabel) != tc.dead {
 				t.Fatalf("row=%+v (want dead=%t)", rows, tc.dead)

@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -29,27 +28,6 @@ type bridgeProver struct {
 	proc       gather.ProcFS
 	foreground func(ctx context.Context, socket, pane string) ([]int, error)
 	tmux       func(ctx context.Context, socketPath string, args ...string) (string, error)
-}
-
-// ProveHerdrBridge proves the Herdr pane hosts a pfm tmux chat client: a
-// foreground tmux client of a server under pfm's tmux directory, attached to a
-// session holding pfm's Herdr record, whose start identity held across the proof.
-func ProveHerdrBridge(ctx context.Context, socket, pane string) (HerdrBridge, error) {
-	values, err := paths.Resolve()
-	if err != nil {
-		return HerdrBridge{}, fmt.Errorf("herdr pane %s bridge ownership unproved: resolve paths: %w", pane, err)
-	}
-	proc := gather.NewProcFS(values.ProcRoot)
-	return bridgeProver{
-		values: values,
-		proc:   proc,
-		foreground: bridgeForeground(
-			herdr.Call,
-			func() uint64 { return uint64(clock.Real.Now().UnixNano()) },
-			gather.HerdrShield(proc),
-		),
-		tmux: bridgeTmux,
-	}.prove(ctx, socket, pane)
 }
 
 // bridgeForeground reads one pane's foreground pids through pane.process_info

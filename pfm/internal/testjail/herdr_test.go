@@ -61,7 +61,7 @@ func TestHerdrWorkspaceReplyCreatesTheAskedLabel(t *testing.T) {
 }
 
 func TestStageHerdrShieldAnswersListOnly(t *testing.T) {
-	StageHerdrShield(t, `{"enumeration":"OK"}`, 0)
+	runs := StageHerdrShield(t, `{"enumeration":"OK"}`, 0)
 	for _, tc := range []struct {
 		name, socket, inner, want string
 		exit                      int
@@ -94,5 +94,8 @@ func TestStageHerdrShieldAnswersListOnly(t *testing.T) {
 	}
 	if err := exec.Command("herdr-shield", "kill", "x").Run(); err == nil {
 		t.Fatal("herdr-shield kill ran; the fake answers list --json only")
+	}
+	if got := runs(); got != 4 {
+		t.Fatalf("herdr-shield run count = %d; want 4 (three listings and the refused kill)", got)
 	}
 }

@@ -525,7 +525,14 @@ func TestProvedListingKeepsMovedSupervisor(t *testing.T) {
 					}
 				}()
 			}
-			rows := proveHerdrSeats(ctx, proofDB, proc, probeHerdrSeatRows(ctx, []fleetdb.Seat{seat}), readOnly)
+			rows := proveHerdrSeats(
+				ctx,
+				proofDB,
+				proc,
+				HerdrShield(proc),
+				probeHerdrSeatRows(ctx, []fleetdb.Seat{seat}),
+				readOnly,
+			)
 			if len(rows) != 1 || rows[0].Err != nil || rows[0].Seat.HerdrPane != "w8:p4" ||
 				rows[0].CWD != "/jail/project" {
 				t.Fatalf("moved listing=%+v", rows)
@@ -731,7 +738,15 @@ func TestProveHerdrSeatClosure(t *testing.T) {
 				if err := db.UpdateSeat(ctx, seat, current); err != nil {
 					t.Fatal(err)
 				}
-				got, owned, err = proveHerdrSeatSnapshot(ctx, db, proc, seat, json.RawMessage(list), false)
+				got, owned, err = proveHerdrSeatSnapshot(
+					ctx,
+					db,
+					proc,
+					HerdrShield(proc),
+					seat,
+					json.RawMessage(list),
+					false,
+				)
 			} else {
 				got, owned, err = ProveHerdrSeat(ctx, db, proc, seat)
 			}
@@ -873,7 +888,7 @@ func TestProvedListingRetiresDeadSeatOnly(t *testing.T) {
 					}
 				}()
 			}
-			rows := proveHerdrSeats(ctx, proofDB, proc, probeHerdrSeatRows(ctx, seats), readOnly)
+			rows := proveHerdrSeats(ctx, proofDB, proc, HerdrShield(proc), probeHerdrSeatRows(ctx, seats), readOnly)
 			if len(rows) != 3 {
 				t.Fatalf("listing dropped a seat: %+v", rows)
 			}

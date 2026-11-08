@@ -22,6 +22,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/herdr"
 	fleetindex "github.com/rezzminator/professor/pfm/internal/index"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -47,6 +48,9 @@ type Request struct {
 	// neither seeds its project's root nor leads the order, so every row files
 	// under the same place wherever the scanning command runs.
 	NoCurrentDir bool
+	// Shield reads herdr-shield for the native seat proofs, one listing per socket
+	// shared with the caller's other proofs; nil: a shield of this scan alone.
+	Shield *herdr.Shield
 }
 
 // Env is the machine state one scan composes against.
@@ -136,7 +140,7 @@ func Scan(
 			return Result{}, err
 		}
 	}
-	output, failures := composeNativeFleet(ctx, database, env, request.View, data, live, request.ReadOnly)
+	output, failures := composeNativeFleet(ctx, database, env, request, data, live)
 	failures = append(slices.Clone(env.Faults), failures...)
 	return Result{
 		Errors:   failures,
@@ -171,10 +175,9 @@ func ScanCached(
 		ctx,
 		database,
 		env,
-		request.View,
+		request,
 		data,
 		gather.Snapshot{},
-		request.ReadOnly,
 	)
 	failures = append(slices.Clone(env.Faults), failures...)
 	return Result{

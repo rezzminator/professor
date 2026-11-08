@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
@@ -32,7 +33,7 @@ import (
 type tabProbe struct {
 	// panes reads the endpoint's panes (nil: herdr.ReadTabPanes); foreground
 	// says whether a seat's engine is its pane's foreground (nil:
-	// tabEngineForeground).
+	// call.HerdrProofs{}.Engine).
 	panes      func(context.Context, string) ([]herdr.TabPane, error)
 	foreground func(context.Context, fleetdb.Seat) (bool, error)
 	// openCodeRoots are the OpenCode stores a tabbed OpenCode chat's title is
@@ -190,7 +191,7 @@ func (probe *tabProbe) surface(ctx context.Context, socket, mode, glyphs string,
 	}
 	foreground := probe.foreground
 	if foreground == nil {
-		foreground = tabEngineForeground
+		foreground = call.HerdrProofs{}.Engine
 	}
 	panes, err := readPanes(ctx, socket)
 	if err != nil {

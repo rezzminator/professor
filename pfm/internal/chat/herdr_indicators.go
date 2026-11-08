@@ -46,6 +46,8 @@ type herdrTabProvider struct {
 	warn   io.Writer
 	// probe, when set, takes each enumeration's baseline for changed.
 	probe *tabProbe
+	// proofs reads a released agent's pane foreground (missingTabAgentState).
+	proofs call.HerdrProofs
 }
 
 func (provider *herdrTabProvider) tabs(ctx context.Context, socket string) ([]herdr.TabDecoration, error) {
@@ -143,7 +145,7 @@ func (provider *herdrTabProvider) tabs(ctx context.Context, socket string) ([]he
 					since = clk.Now()
 				}
 				confirmed, confirmErr := missingTabAgentState(
-					ctx, target, views[0].Terminal, clk.Now().Sub(since), provider.screen,
+					ctx, target, views[0].Terminal, clk.Now().Sub(since), provider.screen, provider.proofs.Engine,
 				)
 				if confirmErr == nil && confirmed == headless.StateIdle {
 					// A pane at rest keeps its transcript's failed turn, as an idle Herdr agent does.
@@ -215,6 +217,7 @@ func missingTabAgentState(
 	terminal string,
 	elapsed time.Duration,
 	screen func(context.Context, headless.Chat) (string, error),
+	engine func(context.Context, fleetdb.Seat) (bool, error),
 ) (string, error) {
 	panes, err := herdr.ReadTabPanes(ctx, target.Socket)
 	// An incomplete listing still holds every complete pane: this chat's pane is
@@ -227,7 +230,7 @@ func missingTabAgentState(
 		if terminal != "" && pane.Terminal != terminal || terminal == "" && pane.Pane != target.Pane {
 			continue
 		}
-		alive, err := tabEngineForeground(
+		alive, err := engine(
 			ctx,
 			fleetdb.Seat{HerdrSocket: target.Socket, HerdrPane: pane.Pane, Engine: string(target.Engine)},
 		)
@@ -264,12 +267,18 @@ func PaintHerdrIndicators(ctx context.Context, socket, lockDir string, stderr io
 		_, writeErr := fmt.Fprintln(persisted, loadErr)
 		return errors.Join(loadErr, writeErr)
 	}
+	// One herdr-shield reader serves every proof of the painter's ticks, so a
+	// tick asks herdr-shield once per socket however many chats it proves.
+	proc := gather.NewProcFS(runtime.Paths.ProcRoot)
+	proofs := call.HerdrProofs{Shield: gather.HerdrShield(proc)}
 	inspector := NewSeatInspector(&runtime)
+	inspector.shareProofs(proofs)
 	provider := herdrTabProvider{
 		inspect: inspector.Inspect,
 		rest:    inspector.Rest,
 		warn:    warnings,
-		probe:   &tabProbe{openCodeRoots: runtime.Paths.Roots[pfmengine.OpenCode]},
+		probe:   &tabProbe{openCodeRoots: runtime.Paths.Roots[pfmengine.OpenCode], foreground: proofs.Engine},
+		proofs:  proofs,
 	}
 	calls, err := NewCallEngine(false, &runtime)
 	if err != nil {
@@ -292,18 +301,20 @@ func PaintHerdrIndicators(ctx context.Context, socket, lockDir string, stderr io
 	provider.scan = func(ctx context.Context) (FleetScan, error) {
 		loaded = false
 		inspector.Sweep()
-		return ScanRows(ctx, persisted, &runtime)
+		return ScanRows(ctx, persisted, &runtime, proofs.Shield)
 	}
-	proc := gather.NewProcFS(runtime.Paths.ProcRoot)
 	addresses := tabViewReader{
 		runtime: &runtime,
 		warn:    warnings,
 		tmux:    runTmux,
+		prove:   proofs.Seat,
+		engine:  proofs.Engine,
+		bridge:  proofs.Bridge,
 		resolve: herdr.WireResolver(
 			proc.Environ,
 			herdr.Call,
 			func() uint64 { return uint64(clock.Real.Now().UnixNano()) },
-			gather.HerdrShield(proc),
+			proofs.Shield,
 		).Resolve,
 	}
 	provider.views = func(ctx context.Context, target headless.Chat, socket string) ([]herdr.TabDecoration, error) {
@@ -334,7 +345,8 @@ func PaintHerdrIndicators(ctx context.Context, socket, lockDir string, stderr io
 		persisted,
 		provider.tabs,
 		provider.changed,
-		call.ProveHerdrPane,
+		proofs.Pane,
+		proofs.Shield,
 	)
 }
 
@@ -380,7 +392,7 @@ func (writer tabIndicatorWarnings) Write(body []byte) (int, error) {
 }
 
 // tabViewReader's prove is the native seat ownership proof (nil: nativeAlive),
-// engine its foreground engine probe (nil: tabEngineForeground).
+// engine its foreground engine probe (nil: call.HerdrProofs{}.Engine).
 type tabViewReader struct {
 	runtime *pfmconfig.Runtime
 	tmux    func(context.Context, string, ...string) (string, error)
@@ -415,7 +427,7 @@ func (reader *tabViewReader) liveness(
 	}
 	engine := reader.engine
 	if engine == nil {
-		engine = tabEngineForeground
+		engine = call.HerdrProofs{}.Engine
 	}
 	// The supervisor outlives an abruptly dead engine until it retires the seat.
 	alive, err := engine(ctx, canonical)
@@ -434,20 +446,6 @@ func (reader *tabViewReader) liveness(
 		return headless.StateDead, true, nil
 	}
 	return "", true, nil
-}
-
-// tabEngineForeground reports whether the seat's engine is in its pane's
-// foreground, from Herdr's pane.process_info (through herdr-shield).
-func tabEngineForeground(ctx context.Context, seat fleetdb.Seat) (bool, error) {
-	values, err := paths.Resolve()
-	if err != nil {
-		return false, fmt.Errorf("read Herdr foreground processes of %s: resolve paths: %w", seat.HerdrPane, err)
-	}
-	processes, err := gather.HerdrShield(gather.NewProcFS(values.ProcRoot)).Read(ctx, seat.HerdrSocket, seat.HerdrPane)
-	if err != nil {
-		return false, fmt.Errorf("read Herdr foreground processes of %s: %w", seat.HerdrPane, err)
-	}
-	return herdr.EngineForeground(processes, seat.HerdrPane, pfmengine.ID(seat.Engine))
 }
 
 // unproved records, through the painter's diagnostic writer (the Herdr plugin

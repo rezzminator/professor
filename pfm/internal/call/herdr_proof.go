@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
@@ -13,9 +15,21 @@ import (
 
 var errNoHerdrOwner = errors.New("no durable owner")
 
+// HerdrProofs proves who owns a Herdr pane and reads what runs in it, every
+// proof reading herdr-shield through Shield: the proofs of one pass (a tab
+// painter tick) share its listing of a socket, so herdr-shield runs once per
+// socket however many panes they prove. The zero HerdrProofs reads through a
+// shield of each proof alone.
+type HerdrProofs struct{ Shield *herdr.Shield }
+
 // ProveHerdrTarget resolves the durable supervisor before a pane-addressed
 // operation, returning its current address rather than trusting a stale target.
 func ProveHerdrTarget(ctx context.Context, target Target) (Target, error) {
+	return HerdrProofs{}.Target(ctx, target)
+}
+
+// Target is ProveHerdrTarget through proofs' shield.
+func (proofs HerdrProofs) Target(ctx context.Context, target Target) (Target, error) {
 	values, err := paths.Resolve()
 	if err != nil {
 		return target, fmt.Errorf("herdr ownership unproved: resolve paths: %w", err)
@@ -60,7 +74,7 @@ func ProveHerdrTarget(ctx context.Context, target Target) (Target, error) {
 	if owner.HerdrSocket != target.SocketPath || target.Engine != "" && owner.Engine != target.Engine {
 		return target, fmt.Errorf("herdr pane %s ownership unproved: durable owner changed", target.Pane)
 	}
-	proved, owned, err := gather.ResolveHerdrSeat(ctx, values, *owner)
+	proved, owned, err := proofs.Seat(ctx, *owner, values)
 	if err != nil {
 		return target, fmt.Errorf("herdr seat %s ownership unproved: %w", owner.SeatID, err)
 	}
@@ -82,15 +96,21 @@ func ProveHerdrTarget(ctx context.Context, target Target) (Target, error) {
 // A pane no durable seat owns is proved when it hosts a pfm tmux chat client.
 // Positive absence of both returns herdr.ErrNotFleetPane; a failed read never does.
 func ProveHerdrPane(ctx context.Context, socket, pane string) error {
-	return proveHerdrPaneOrBridge(ctx, socket, pane, ProveHerdrBridge)
+	return HerdrProofs{}.Pane(ctx, socket, pane)
+}
+
+// Pane is ProveHerdrPane through proofs' shield.
+func (proofs HerdrProofs) Pane(ctx context.Context, socket, pane string) error {
+	return proveHerdrPaneOrBridge(ctx, proofs, socket, pane, proofs.Bridge)
 }
 
 func proveHerdrPaneOrBridge(
 	ctx context.Context,
+	proofs HerdrProofs,
 	socket, pane string,
 	bridge func(context.Context, string, string) (HerdrBridge, error),
 ) error {
-	proved, err := ProveHerdrTarget(ctx, Target{SocketPath: socket, Pane: pane})
+	proved, err := proofs.Target(ctx, Target{SocketPath: socket, Pane: pane})
 	if err != nil {
 		if _, bridgeErr := bridge(ctx, socket, pane); bridgeErr != nil {
 			if errors.Is(err, errNoHerdrOwner) && errors.Is(bridgeErr, errNoHerdrBridge) {
@@ -108,4 +128,62 @@ func proveHerdrPaneOrBridge(
 		)
 	}
 	return nil
+}
+
+// ProveHerdrBridge proves the Herdr pane hosts a pfm tmux chat client: a
+// foreground tmux client of a server under pfm's tmux directory, attached to a
+// session holding pfm's Herdr record, whose start identity held across the proof.
+func ProveHerdrBridge(ctx context.Context, socket, pane string) (HerdrBridge, error) {
+	return HerdrProofs{}.Bridge(ctx, socket, pane)
+}
+
+// Bridge is ProveHerdrBridge through proofs' shield.
+func (proofs HerdrProofs) Bridge(ctx context.Context, socket, pane string) (HerdrBridge, error) {
+	values, err := paths.Resolve()
+	if err != nil {
+		return HerdrBridge{}, fmt.Errorf("herdr pane %s bridge ownership unproved: resolve paths: %w", pane, err)
+	}
+	proc := gather.NewProcFS(values.ProcRoot)
+	shield := proofs.Shield
+	if shield == nil {
+		shield = gather.HerdrShield(proc)
+	}
+	return bridgeProver{
+		values: values,
+		proc:   proc,
+		foreground: bridgeForeground(
+			herdr.Call,
+			func() uint64 { return uint64(clock.Real.Now().UnixNano()) },
+			shield,
+		),
+		tmux: bridgeTmux,
+	}.prove(ctx, socket, pane)
+}
+
+// Seat proves and persists seat's current address (gather.ResolveHerdrSeat)
+// through proofs' shield. Callers must refuse mutation on an error or !owned.
+func (proofs HerdrProofs) Seat(
+	ctx context.Context,
+	seat fleetdb.Seat,
+	values paths.Values,
+) (fleetdb.Seat, bool, error) {
+	return gather.ResolveHerdrSeatWith(ctx, values, proofs.Shield, seat)
+}
+
+// Engine reports whether seat's engine is in its pane's foreground, from
+// Herdr's pane.process_info through proofs' shield.
+func (proofs HerdrProofs) Engine(ctx context.Context, seat fleetdb.Seat) (bool, error) {
+	values, err := paths.Resolve()
+	if err != nil {
+		return false, fmt.Errorf("read Herdr foreground processes of %s: resolve paths: %w", seat.HerdrPane, err)
+	}
+	shield := proofs.Shield
+	if shield == nil {
+		shield = gather.HerdrShield(gather.NewProcFS(values.ProcRoot))
+	}
+	processes, err := shield.Read(ctx, seat.HerdrSocket, seat.HerdrPane)
+	if err != nil {
+		return false, fmt.Errorf("read Herdr foreground processes of %s: %w", seat.HerdrPane, err)
+	}
+	return herdr.EngineForeground(processes, seat.HerdrPane, pfmengine.ID(seat.Engine))
 }

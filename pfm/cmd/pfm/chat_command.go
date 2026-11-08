@@ -558,7 +558,8 @@ func runChatLS(args []string, stdout, stderr io.Writer, clk clock.Clock, runtime
 			request.Repo = gitroot.RepoRoot(directory)
 		}
 	}
-	listed, err := pfmchat.List(context.Background(), firstRuntime(runtimes), request, stderr)
+	listed, statuses, inspectErrs, err := pfmchat.ListInspected(
+		context.Background(), firstRuntime(runtimes), request, clk.Now(), stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat ls: %v\n", err)
 		return 1
@@ -573,13 +574,11 @@ func runChatLS(args []string, stdout, stderr io.Writer, clk clock.Clock, runtime
 	}
 	for index := range listed.Rows {
 		row := &listed.Rows[index]
-		chat := pfmchat.FromRow(*row)
-		status, inspectErr := pfmchat.InspectSeat(context.Background(), firstRuntime(runtimes), chat, clk.Now(), nil)
 		state := doctor.StateUnknown
-		if inspectErr != nil {
-			fmt.Fprintf(stderr, "pfm chat ls: inspect %s: %v\n", chat.Name, inspectErr)
+		if inspectErrs[index] != nil {
+			fmt.Fprintf(stderr, "pfm chat ls: inspect %s: %v\n", row.Name, inspectErrs[index])
 		} else {
-			state = status.State
+			state = statuses[index].State
 		}
 		// Name is the actionable identity; retain the raw tmux session second
 		// so parsers lose no information.

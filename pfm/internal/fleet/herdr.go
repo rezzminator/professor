@@ -10,6 +10,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
@@ -21,12 +22,18 @@ const liveSeat = "live"
 // Non-live rows retain their failure without probing an address they no longer
 // own; a positively dead seat arrives non-live from the probe and is such a row.
 // Live probe failures, unknown ownership included, remain rows and scan errors.
-func NativeSeats(ctx context.Context, values paths.Values, readOnly bool) ([]gather.HerdrSeat, []string, error) {
+// The proofs read herdr-shield through shield (nil: one of this read alone).
+func NativeSeats(
+	ctx context.Context,
+	values paths.Values,
+	readOnly bool,
+	shield *herdr.Shield,
+) ([]gather.HerdrSeat, []string, error) {
 	durable, err := fleetdb.ReadSeats(ctx, values)
 	if err != nil {
 		return nil, nil, fmt.Errorf("read durable seats: %w", err)
 	}
-	seats := gather.ProbeHerdrSeats(ctx, values, durable, readOnly)
+	seats := gather.ProbeHerdrSeats(ctx, values, durable, readOnly, shield)
 	for index := range durable {
 		seat := &durable[index]
 		if seat.Backend == "herdr" && seat.State != liveSeat {
@@ -92,18 +99,17 @@ func EnrichNative(ctx context.Context, database *store.Store, data Data, native 
 }
 
 // composeNativeFleet is the shared native-read policy after a scan has loaded
-// indexed data and, for a full scan, gathered its tmux snapshot. Native database
-// failure must never discard that healthy snapshot.
+// indexed data and, for a full scan, gathered its tmux snapshot, in request's
+// view. Native database failure must never discard that healthy snapshot.
 func composeNativeFleet(
 	ctx context.Context,
 	database *store.Store,
 	environment Env,
-	view compose.View,
+	request Request,
 	data Data,
 	live gather.Snapshot,
-	readOnly bool,
 ) (compose.Output, []string) {
-	native, failures, err := NativeSeats(ctx, environment.Paths, readOnly)
+	native, failures, err := NativeSeats(ctx, environment.Paths, request.ReadOnly, request.Shield)
 	if err != nil {
 		failures = append(failures, err.Error())
 	}
@@ -113,5 +119,5 @@ func composeNativeFleet(
 	if err != nil {
 		failures = append(failures, err.Error())
 	}
-	return ComposeFleet(environment, view, data, live, native...), failures
+	return ComposeFleet(environment, request.View, data, live, native...), failures
 }

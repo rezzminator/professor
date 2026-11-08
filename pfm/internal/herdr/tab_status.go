@@ -388,6 +388,7 @@ func tabTargetGone(err error) bool {
 // PaintIndicatorsWithTabs reuses the sidebar clock, failure bound and
 // singleton; changed, when not nil, is consulted on every blinker tick that
 // would not re-read the tabs, and a change it reports makes the tick re-read.
+// shield is the herdr-shield reader behind tabs and proof, held for each paint.
 func PaintIndicatorsWithTabs(
 	ctx context.Context,
 	socket, lockDir string,
@@ -395,6 +396,7 @@ func PaintIndicatorsWithTabs(
 	tabs TabProvider,
 	changed TabProbe,
 	proof PaneProof,
+	shield *Shield,
 ) error {
 	if stderr == nil {
 		stderr = io.Discard
@@ -406,7 +408,7 @@ func PaintIndicatorsWithTabs(
 		call:     Call,
 		clock:    clock.Real,
 		reported: map[string]bool{},
-		tabs:     tabs, tabsChanged: changed, provePane: proof,
+		tabs:     tabs, tabsChanged: changed, provePane: proof, shield: shield,
 	}
 	return painter.run(ctx)
 }

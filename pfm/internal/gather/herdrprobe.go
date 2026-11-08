@@ -10,25 +10,12 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 const nativeHerdrBackend = "herdr"
-
-// HerdrShield is the herdr-shield door over proc.
-func HerdrShield(proc ProcFS) *herdr.Shield {
-	return &herdr.Shield{Runner: deps.RealRunner{}, Proc: shieldProc{proc}}
-}
-
-type shieldProc struct{ ProcFS }
-
-func (proc shieldProc) Stat(pid int) (herdr.ProcStat, error) {
-	stat, err := proc.ProcFS.Stat(pid)
-	return herdr.ProcStat{Start: stat.StartTime, Group: stat.Group, TerminalGroup: stat.TerminalGroup}, err
-}
 
 // HerdrSeat is a durable native seat and its visible probe failure, if any.
 type HerdrSeat struct {
@@ -125,13 +112,16 @@ func ProveHerdrSeat(
 	proc ProcFS,
 	seat fleetdb.Seat,
 ) (fleetdb.Seat, bool, error) {
-	return proveHerdrSeatSnapshot(ctx, db, proc, seat, nil, false)
+	return proveHerdrSeatSnapshot(ctx, db, proc, HerdrShield(proc), seat, nil, false)
 }
 
+// proveHerdrSeatSnapshot reads herdr-shield through shield, whose listing of
+// a socket serves every seat a listing proves on it.
 func proveHerdrSeatSnapshot(
 	ctx context.Context,
 	db *fleetdb.Store,
 	proc ProcFS,
+	shield *herdr.Shield,
 	seat fleetdb.Seat,
 	snapshot json.RawMessage,
 	observe bool,
@@ -172,7 +162,7 @@ func proveHerdrSeatSnapshot(
 	if err != nil {
 		return seat, false, fmt.Errorf("prove seat %s ownership: %w", seat.SeatID, err)
 	}
-	candidate, err := herdrSeatPane(ctx, proc, seat, panes)
+	candidate, err := herdrSeatPane(ctx, proc, shield, seat, panes)
 	if err != nil {
 		return seat, false, err
 	}
@@ -197,7 +187,7 @@ func proveHerdrSeatSnapshot(
 	if err != nil {
 		return seat, false, fmt.Errorf("prove seat %s shell: %w", seat.SeatID, err)
 	}
-	processes, err := HerdrShield(proc).Processes(ctx, seat.HerdrSocket, body)
+	processes, err := shield.Processes(ctx, seat.HerdrSocket, body)
 	if err != nil {
 		return seat, false, fmt.Errorf("seat %s ownership shell identity unavailable: %w", seat.SeatID, err)
 	}
@@ -339,18 +329,6 @@ func proveHerdrSeatSnapshot(
 	return latest, true, nil
 }
 
-// ResolveHerdrSeat proves and persists the current address using the jail-aware
-// process reader. Callers must refuse mutation on either an error or !owned.
-func ResolveHerdrSeat(
-	ctx context.Context,
-	values paths.Values,
-	seat fleetdb.Seat,
-) (result fleetdb.Seat, owned bool, returnErr error) {
-	db := fleetdb.OpenSharedState(ctx, values)
-	defer func() { returnErr = errors.Join(returnErr, db.Close()) }()
-	return ProveHerdrSeat(ctx, db, NewProcFS(values.ProcRoot), seat)
-}
-
 // HerdrHostDead positively identifies the disappearance of the saved host, not
 // the absence of foreground engine evidence. A reused PID is the old host's death.
 func HerdrHostDead(proc ProcFS, seat fleetdb.Seat) (bool, error) {
@@ -444,14 +422,25 @@ func belowHerdrShell(proc ProcFS, pid, shell int) (bool, error) {
 // visible diagnostics, never recycled occupant metadata. One listing per socket.
 // A positively dead seat reads as lost (non-live), and a writable listing
 // retires it durably; unknown evidence stays live with its error, so callers
-// count it as a failure.
-func ProbeHerdrSeats(ctx context.Context, values paths.Values, seats []fleetdb.Seat, readOnly bool) []HerdrSeat {
+// count it as a failure. Every proof reads herdr-shield through shield, one
+// listing per socket; nil reads through a shield of this listing alone.
+func ProbeHerdrSeats(
+	ctx context.Context,
+	values paths.Values,
+	seats []fleetdb.Seat,
+	readOnly bool,
+	shield *herdr.Shield,
+) []HerdrSeat {
 	open := fleetdb.OpenSharedState
 	if readOnly {
 		open = fleetdb.OpenSharedStateReadOnly
 	}
 	db := open(ctx, values)
-	rows := proveHerdrSeats(ctx, db, NewProcFS(values.ProcRoot), probeHerdrSeatRows(ctx, seats), readOnly)
+	proc := NewProcFS(values.ProcRoot)
+	if shield == nil {
+		shield = HerdrShield(proc)
+	}
+	rows := proveHerdrSeats(ctx, db, proc, shield, probeHerdrSeatRows(ctx, seats), readOnly)
 	if err := db.Close(); err != nil {
 		for i := range rows {
 			rows[i].Err = errors.Join(rows[i].Err, fmt.Errorf("close seat listing state: %w", err))
@@ -460,13 +449,21 @@ func ProbeHerdrSeats(ctx context.Context, values paths.Values, seats []fleetdb.S
 	return rows
 }
 
-func proveHerdrSeats(ctx context.Context, db *fleetdb.Store, proc ProcFS, rows []HerdrSeat, readOnly bool) []HerdrSeat {
+func proveHerdrSeats(
+	ctx context.Context,
+	db *fleetdb.Store,
+	proc ProcFS,
+	shield *herdr.Shield,
+	rows []HerdrSeat,
+	readOnly bool,
+) []HerdrSeat {
+	defer shield.Hold()() // one herdr-shield listing per socket serves the whole listing
 	for i := range rows {
 		row := &rows[i]
 		if row.snapshot == nil {
 			continue
 		}
-		canonical, owned, err := proveHerdrSeatSnapshot(ctx, db, proc, row.Seat, row.snapshot, readOnly)
+		canonical, owned, err := proveHerdrSeatSnapshot(ctx, db, proc, shield, row.Seat, row.snapshot, readOnly)
 		row.CWD = ""
 		if err != nil {
 			row.Err = fmt.Errorf("HERDR ERROR %s: %w", row.Seat.HerdrSocket, err)

@@ -233,7 +233,7 @@ func TestHerdrPaneProofDistinguishesNonFleet(t *testing.T) {
 					return "", errors.New("fleet server refused")
 				},
 			}
-			err := proveHerdrPaneOrBridge(context.Background(), socket, pane, prover.prove)
+			err := proveHerdrPaneOrBridge(context.Background(), HerdrProofs{}, socket, pane, prover.prove)
 			if err == nil || errors.Is(err, herdr.ErrNotFleetPane) != tc.notFleet {
 				t.Fatalf("proof = %v; non-fleet=%t, want %t", err, errors.Is(err, herdr.ErrNotFleetPane), tc.notFleet)
 			}
@@ -261,6 +261,7 @@ func TestHerdrPaneProofAcceptsBridge(t *testing.T) {
 			var asked string
 			err := proveHerdrPaneOrBridge(
 				context.Background(),
+				HerdrProofs{},
 				"/fixture/herdr.sock",
 				"w6:p3",
 				func(_ context.Context, socket, pane string) (HerdrBridge, error) {

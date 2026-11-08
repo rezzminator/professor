@@ -1,6 +1,7 @@
 // Package gather probes live tmux and process state without indexing files.
 // A native Herdr seat's pane is its saved terminal's, else the one the
-// herdr-shield holder that moved its chat is bound to (herdrprobe_shield.go).
+// herdr-shield holder that moved its chat is bound to; every seat proof reads
+// herdr-shield through the one HerdrShield its pass shares (herdrprobe_shield.go).
 package gather
 
 import (

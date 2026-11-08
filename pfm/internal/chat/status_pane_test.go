@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
@@ -449,6 +450,7 @@ func TestHerdrStatusRequiresDurableOwnership(t *testing.T) {
 	})
 	_, err := statusFromHerdr(
 		context.Background(),
+		pfmcall.HerdrProofs{},
 		headless.Chat{Backend: "herdr", Socket: socket, Pane: "w6:p3", Engine: pfmengine.Claude},
 		headless.Status{},
 	)

@@ -296,10 +296,9 @@ func TestNativeReadFailurePreservesLiveTmuxSnapshot(t *testing.T) {
 		context.Background(),
 		nil,
 		environment,
-		compose.DefaultView,
+		Request{View: compose.DefaultView, ReadOnly: true},
 		data,
 		live,
-		true,
 	)
 	if len(failures) != 1 || !strings.Contains(failures[0], "durable seats") {
 		t.Fatalf("native DB failure not explicit beside live snapshot: %v", failures)

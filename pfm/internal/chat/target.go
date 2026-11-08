@@ -1,10 +1,3 @@
-// Package chat is the verb layer: one operation on one chat, reachable from
-// the CLI, the MCP server, the picker and the daemon as a typed call — never
-// as argv into package main. A verb takes a typed request and returns a typed
-// result, or an error whose kind each surface maps onto its own contract: a
-// *TargetError wrapping ErrUnknownChat when nothing answers to the target,
-// ErrNoTranscript and ErrNoAnswer when the chat exists but has nothing to
-// read, and any other error when a step could not run.
 package chat
 
 import (
@@ -23,29 +16,13 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/naming"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
-
-type resolvedSelfKey struct{}
-
-// WithResolvedSelf binds an immutable, request-local caller seat. A shared MCP
-// daemon uses it to resolve self without consulting process-global identity.
-func WithResolvedSelf(ctx context.Context, self headless.Chat) context.Context {
-	return context.WithValue(ctx, resolvedSelfKey{}, self)
-}
-
-// ScopedSelf returns the exact request-local caller seat, when one was bound.
-func ScopedSelf(ctx context.Context) (headless.Chat, bool) {
-	if ctx == nil {
-		return headless.Chat{}, false
-	}
-	self, ok := ctx.Value(resolvedSelfKey{}).(headless.Chat)
-	return self, ok
-}
 
 var (
 	// ErrUnknownChat: nothing in the fleet answers to the target.
@@ -436,7 +413,7 @@ func targetPaths(runtime *pfmconfig.Runtime) (paths.Values, error) {
 
 // Rows is one read-only scan of the whole fleet (the all view).
 func Rows(ctx context.Context, warn io.Writer, runtime *pfmconfig.Runtime) ([]compose.Row, error) {
-	scan, err := ScanRows(ctx, warn, runtime)
+	scan, err := ScanRows(ctx, warn, runtime, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -452,8 +429,10 @@ type FleetScan struct {
 	Unreadable map[string]string
 }
 
-// ScanRows is Rows with the sockets the scan could not read.
-func ScanRows(ctx context.Context, warn io.Writer, runtime *pfmconfig.Runtime) (result FleetScan, returnErr error) {
+// ScanRows is Rows, its seat proofs through shield (nil: the scan's own), with the sockets the scan could not read.
+func ScanRows(ctx context.Context, warn io.Writer, runtime *pfmconfig.Runtime, shield *herdr.Shield) (
+	result FleetScan, returnErr error,
+) {
 	database, err := store.Open(store.WithWarningWriter(warn))
 	if err != nil {
 		return FleetScan{}, err
@@ -464,7 +443,7 @@ func ScanRows(ctx context.Context, warn io.Writer, runtime *pfmconfig.Runtime) (
 		}
 	}()
 	scan, err := fleet.Scan(ctx, database, fleet.Request{
-		View: compose.AllView, ReadOnly: true, Runtime: runtime,
+		View: compose.AllView, ReadOnly: true, Runtime: runtime, Shield: shield,
 	}, warn)
 	if err != nil {
 		return FleetScan{}, err

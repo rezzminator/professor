@@ -6,7 +6,7 @@
 // screen detection reads the state and its bundled Claude integration
 // (integration.go) reports the session. Outside Herdr nothing here runs.
 // A holder `herdr-shield attach` moved to another pane is followed there
-// (shield_move.go).
+// (shield_move.go); one `herdr-shield list` serves a whole pass (shield_list.go).
 package herdr
 
 import (

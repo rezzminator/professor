@@ -7,7 +7,7 @@
 - Waiting for spawned agents: end the message with one line and no tool call; the harness re-invokes you as each return lands.
 - Executors and probes are spawned with the Agent tool, never with `isolation: "worktree"` — `.claude/worktrees/` is not a fleet worktree. A flight that needs isolation gets `.worktrees/{flight}/` from `gitter`, and the path travels in the brief.
 - Spawn depth and concurrency are pfm settings on the launch line (`CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`, `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`), never worked around: a refused spawn waits for a free slot.
-- The tiers, by model alias, named inline at each spawn site: apex `fable` · smart `opus` · mechanical `sonnet` · collector `haiku`. Unsure? `inherit`.
+- An agent whose definition pins `model:` is spawned with no `model`: its pin is its tier, and overriding it takes the user's say. A spawn of a type with no pin (`general-purpose`, `Explore`, `Plan`, `claude`) names its tier by alias: apex `fable` · smart `opus` · mechanical `sonnet` · collector `haiku`. Unsure? `inherit`.
 
 # GPT
 

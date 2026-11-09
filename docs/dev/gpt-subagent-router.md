@@ -128,7 +128,7 @@ A GPT agent exists only in a session started through the router. pfm's launch li
 `Agent(subagent_type: "sol", description: …, prompt: …)`, with no `model`. A spawn-time `model` silently overrides the GPT definition back to Claude (W9).
 
 - **The foreman needs no change.** `flights:foreman` already spawns its child foremen (`flights:foreman-sonnet`, `flights:foreman`) by name with no model override (`plugins/flights/plugins/flights/agents/foreman.md`).
-- **The fleet prompt needs an exception.** It names a tier alias at each spawn site (`pfm/harness-prompts/claude/professor.md`, § Claude Code: "The tiers, by model alias, named inline at each spawn site"). A GPT-pinned agent must be spawned with no `model`.
+- **The fleet prompt needs no change.** It spawns an agent whose definition pins `model:` with no `model` (`pfm/harness-prompts/claude/professor.md`, § Claude Code), so a GPT-pinned agent keeps its pin.
 
 ## Translator
 

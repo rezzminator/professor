@@ -257,6 +257,16 @@ func (installer *engine) install(ctx context.Context) error {
 	installer.deferFailure(installer.retireDeadRegistryLinks())
 	installer.deferFailure(installer.wireGlobalSkills())
 	installer.deferFailure(installer.retireStaleLinkStages())
+	// The periodic name-sync has one job and two schedulers: systemd units or
+	// a launchd agent that carries both triggers. Staging the other
+	// scheduler's files would leave an operator with a ~/.config/systemd/user
+	// full of units nothing will ever read.
+	installer.options.jobScheduler().wire(ctx, installer, systemdAssetChanged)
+	// A failed plugin install is reported at once and fails the run only
+	// after every later step has landed. It runs before engine-sync global,
+	// which builds the plugin agents' Codex and OpenCode twins from the plugin
+	// copies this step refreshes.
+	installer.deferFailure(installer.ensureClaudePlugins(ctx))
 	// The global file first: engine-sync global unions its targets'
 	// capabilities with the flags, so a stale list would keep an opted-out
 	// agent linked, and without it engine-sync refuses to start beside the
@@ -267,14 +277,6 @@ func (installer *engine) install(ctx context.Context) error {
 	if len(installer.codexHomes()) != 0 {
 		installer.deferFailure(installer.wireCodexDefaults())
 	}
-	// The periodic name-sync has one job and two schedulers: systemd units or
-	// a launchd agent that carries both triggers. Staging the other
-	// scheduler's files would leave an operator with a ~/.config/systemd/user
-	// full of units nothing will ever read.
-	installer.options.jobScheduler().wire(ctx, installer, systemdAssetChanged)
-	// A failed plugin install is reported at once and fails the run only
-	// after every later step has landed.
-	installer.deferFailure(installer.ensureClaudePlugins(ctx))
 	installer.deferFailure(installer.ensureClaudeEnv(false))
 	installer.deferFailure(installer.clearFullscreenAutoDisable())
 	installer.deferFailure(installer.wireCodexHooks())

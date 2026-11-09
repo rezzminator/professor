@@ -337,6 +337,51 @@ func installRunsAgainstTheCapabilitiesItWrites(t *testing.T, mode Mode) {
 	}
 }
 
+// An -alpha install refreshes each plugin's local copy before engine-sync
+// global reads it for the plugin agents' Codex and OpenCode twins: one install
+// after a plugin agent changes leaves no twin built from the previous copy.
+func TestInstallRefreshesPluginCopiesBeforeEngineSyncGlobal(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("XDG_DATA_HOME", "")
+	home := t.TempDir()
+	clone := filepath.Join(home, ".professor")
+	writeFixture(t, engineSyncPolicySource(clone), engineSyncTemplate)
+	root := t.TempDir()
+	name := testPlugins[0].Name
+	writePluginCheckout(t, root, name)
+	mirror := filepath.Join(home, ".local", "share", "professor-dev", "plugins", name)
+	fake := testjail.FakeEngineSync(t, everyEventReply, 0)
+	seen := fake + ".copy"
+	wrapper := filepath.Join(t.TempDir(), "engine-sync")
+	script := "#!/bin/sh\ncase \" $* \" in *' global '*) if [ -f '" +
+		filepath.Join(mirror, ".claude-plugin", "plugin.json") + "' ]; then echo present; else echo absent; fi >> '" +
+		seen + "';; esac\nexec '" + os.Getenv("ENGINE_SYNC_BIN") + "' \"$@\"\n"
+	if err := testjail.WriteExecutable(wrapper, []byte(script), 0o755); err != nil {
+		t.Fatalf("write the engine-sync wrapper %s: %v", wrapper, err)
+	}
+	t.Setenv("ENGINE_SYNC_BIN", wrapper)
+	var output bytes.Buffer
+	// No claude binary resolves, so the plugin install itself fails the run;
+	// the copy refresh and engine-sync global both land before it is reported.
+	_, err := Run(context.Background(), Options{
+		MCPConfigPath: testConfigPath(t), SourceRepo: clone, Mode: ModeApply, Home: home,
+		ConfigDir: filepath.Join(home, "account"), Version: alphaVersion,
+		ClaudePluginCheckoutRoot: root, ClaudePlugins: bareList(name),
+		Stdout: &output, Runner: &fakeRunner{},
+	})
+	if err != nil && !strings.Contains(err.Error(), "claude plugin") {
+		t.Fatalf("install: %v\n%s", err, output.String())
+	}
+	raw, readErr := os.ReadFile(seen)
+	if readErr != nil {
+		t.Fatalf("engine-sync global never ran (%s): %v\n%s", seen, readErr, output.String())
+	}
+	if got := string(raw); got != "present\n" {
+		t.Fatalf("plugin copy %s when engine-sync global ran: got %q, want %q\n%s",
+			mirror, got, "present\n", output.String())
+	}
+}
+
 func withoutEngineSync(t *testing.T) {
 	t.Helper()
 	t.Setenv("ENGINE_SYNC_BIN", "")

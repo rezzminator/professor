@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -16,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/claudeplugin"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/doctor"
@@ -147,12 +147,13 @@ func TestInstallCheckPreChangeChecks(t *testing.T) {
 			}
 			t.Setenv("PATH", bin)
 			if scenario == "kit missing python3 present" || scenario == "python3 missing" {
-				// A fresh machine has not got the tracetree kit the install links:
-				// the pre-change check never judges the kit. python3 is a registry
-				// dependency like git, judged by the probe the cases below script.
-				kit := filepath.Join(home, ".claude", "skills", "tracetree")
-				if _, err := os.Lstat(kit); !errors.Is(err, fs.ErrNotExist) {
-					t.Fatalf("the fresh home already carries %s (err=%v)", kit, err)
+				// A fresh machine has not got the flights plugin whose folder holds
+				// the tracetree kit: the pre-change check never judges the kit.
+				// python3 is a registry dependency like git, judged by the probe the
+				// cases below script.
+				roots, err := claudeplugin.Roots(installer.ClaudeStore(home), "flights")
+				if err != nil || len(roots) != 0 {
+					t.Fatalf("the fresh home already enables the flights plugin: roots=%v err=%v", roots, err)
 				}
 			}
 			savedProbe, savedInstaller := doctor.DependencyProbeOverride, runInstaller
@@ -229,7 +230,7 @@ func TestInstallCheckPreChangeChecks(t *testing.T) {
 				}
 			case "python3 missing":
 				want := "doctor: dep python3 path=(none) MISSING required — install: install python3; " +
-					"the tracer's tracetree kit runs on it\n"
+					"flights:tracer's tracetree kit runs on it\n"
 				if !strings.Contains(out.String(), want) ||
 					errOut.String() != "pfm install: required dependency preflight failed\n" {
 					t.Fatalf("stdout=%q stderr=%q, want stdout holding %q", out.String(), errOut.String(), want)

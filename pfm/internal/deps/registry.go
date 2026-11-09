@@ -76,16 +76,16 @@ var fixedCommands = []Entry{
 		InstallHint: "install git",
 	},
 	// python3 is checked, never provisioned: pfm install does not install it. The
-	// tracer's tracetree kit is Python 3 standard library only and states no
+	// flights:tracer's tracetree kit is Python 3 standard library only and states no
 	// minimum version, so none is pinned here.
 	{
 		Name:        "python3",
-		Purpose:     "the tracer's tracetree kit",
+		Purpose:     "flights:tracer's tracetree kit",
 		Required:    true,
 		Platforms:   []string{platformLinux, platformDarwin},
 		VersionArgs: []string{versionFlag},
 		Parse:       prefixedVersion("Python"),
-		InstallHint: "install python3; the tracer's tracetree kit runs on it",
+		InstallHint: "install python3; flights:tracer's tracetree kit runs on it",
 	},
 	{Name: "sh", Purpose: "portable shell command execution", Required: true, InstallHint: "install a POSIX shell"},
 	{

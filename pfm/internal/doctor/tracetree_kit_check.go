@@ -2,23 +2,22 @@ package doctor
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/claudeplugin"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/installer"
 )
 
-// The tracetree-kit check proves the tracer's kit can run on this host:
-// python3 resolves, the kit file the install links under the default Claude
-// config dir is readable, and the kit, run the way the tracer runs it
-// (`python3 {kit}`) with no subcommand, prints its usage line.
+// The tracetree-kit check proves flights:tracer's kit can run on this host:
+// python3 resolves, the kit file in the flights plugin folder Claude Code loads
+// is readable, and the kit, run the way the tracer runs it (`python3 {kit}`)
+// with no subcommand, prints its usage line.
 const (
 	tracetreeKitRow = "doctor: tracetree-kit:"
 	// tracerPythonName is the dependency registry row the check resolves python3
@@ -27,47 +26,58 @@ const (
 	// tracetreeUsage opens the line the kit prints when it is given no
 	// subcommand (tracetree.py's usage failure).
 	tracetreeUsage = "usage: tracetree.py"
+	// tracerPlugin is the plugin that ships the tracer and its kit.
+	tracerPlugin = "flights"
 
 	// tracerFixPython is the consequence of a python3 failure; the install step
 	// is the registry row's InstallHint, which the doctor: dep python3 row prints.
-	tracerFixPython = "the tracer cannot run without python3, a required dependency (the kit uses only the Python 3 " +
-		"standard library and states no minimum version): install it as the doctor: dep python3 row says, and put it " +
-		"on the PATH Claude is launched with"
-	tracerFixKit = "run pfm install --yes to relink the tracetree skill"
+	tracerFixPython = "flights:tracer cannot run without python3, a required dependency (the kit uses only the " +
+		"Python 3 standard library and states no minimum version): install it as the doctor: dep python3 row says, " +
+		"and put it on the PATH Claude is launched with"
+	tracerFixKit = "run pfm install --yes to refresh the flights plugin copy"
 	// tracerFixRelink serves every run failure: a kit that did not print its
-	// usage is a broken link or file, a missing interpreter, or a kit that hung.
-	tracerFixRelink = "run pfm install --yes to relink the kit; " + tracerFixPython
+	// usage is a broken copy, a missing interpreter, or a kit that hung.
+	tracerFixRelink = tracerFixKit + "; " + tracerFixPython
 )
 
 // tracetreeKitBound caps every subprocess the check starts; a variable so a
 // test can prove the timeout row in a second.
 var tracetreeKitBound = 20 * time.Second
 
-// tracetreeKitPath is the kit file the tracer runs, under the home's default
-// Claude config dir, where pfm install links the tracetree skill.
-func tracetreeKitPath(home string) string {
-	return filepath.Join(home, ".claude", "skills", "tracetree", "tracetree.py")
+// tracetreeKitPath is the kit file flights:tracer runs: skills/tracetree/
+// tracetree.py in the folder Claude Code loads the flights plugin from, read
+// from the shared Claude store's plugin records through claudeplugin.Roots,
+// the door agentrole reads plugin roles through. enabled is false when the
+// store enables no flights plugin; enabled with an empty kit is a plugin no
+// record names a folder for. The first enabled key with a folder wins, as in
+// agentrole.
+func tracetreeKitPath(home string) (kit string, enabled bool, err error) {
+	roots, err := claudeplugin.Roots(installer.ClaudeStore(home), tracerPlugin)
+	if err != nil {
+		return "", false, err
+	}
+	for _, root := range roots {
+		if root.Dir != "" {
+			return filepath.Join(root.Dir, "skills", "tracetree", "tracetree.py"), true, nil
+		}
+	}
+	return "", len(roots) != 0, nil
 }
 
 // printTracetreeKitDoctor prints the tracetree-kit rows and returns their
 // failure count. python3 is judged on doctor's own PATH: a chat's tracer runs
 // on the PATH Claude was launched with, which doctor cannot see.
 //
-// A kit the install has not linked yet is a non-failing row: `pfm install --yes`
-// brings it. The installer records no individual skill link; its
-// ~/.local/share/pfm/install/skill-links.json names the directories it links
-// skills into. So "placed" is read from the link at the kit's path: its
-// directory absent is not installed yet, unless that record shows the kit
-// linked in another directory (a FAIL: the tracer reads only the default
-// config dir) or cannot be read (a FAIL); present with the kit file
-// unreadable or dangling is a failure.
+// A store that enables no flights plugin is a non-failing row: `pfm install
+// --yes` brings it. Plugin records that cannot be read, an enabled plugin with
+// no recorded folder, and a kit file absent or unreadable in that folder are
+// failures.
 func printTracetreeKitDoctor(
 	ctx context.Context,
 	stdout io.Writer,
 	home string,
 	dependencies Dependencies,
 ) (failures int) {
-	kit := tracetreeKitPath(home)
 	fail := func(need, checked, key, detail, fix string) {
 		failures++
 		fmt.Fprintf(
@@ -82,11 +92,21 @@ func printTracetreeKitDoctor(
 		)
 	}
 	python, version, pythonOK := checkTracerPython(ctx, dependencies.Runner, home, fail)
-	pending, kitOK := checkTracerKit(home, kit, fail)
-	if pending {
-		fmt.Fprintf(stdout, "%s kit not installed yet — run pfm install --yes\n", tracetreeKitRow)
+	kit, enabled, err := tracetreeKitPath(home)
+	records := "the " + tracerPlugin + " plugin records in " + installer.ClaudeStore(home)
+	switch {
+	case err != nil:
+		fail("kit", records, "error", err.Error(), "repair the file the error names, then run pfm install --yes")
+		return failures
+	case !enabled:
+		fmt.Fprintf(stdout, "%s %s plugin not installed yet — run pfm install --yes\n", tracetreeKitRow, tracerPlugin)
+		return failures
+	case kit == "":
+		fail("kit", records, "error", "the "+tracerPlugin+" plugin is enabled but no record names its folder",
+			tracerFixKit)
 		return failures
 	}
+	kitOK := checkTracerKit(kit, fail)
 	if !pythonOK || !kitOK {
 		fail("run", tracerPythonName+" "+kit, "error", "not run: python3 or the kit failed above",
 			"fix the rows above, then rerun pfm doctor")
@@ -146,76 +166,28 @@ func checkTracerPython(
 	return result.Path, "", false
 }
 
-// checkTracerKit judges the kit file. pending is true when the install has
-// not linked the kit anywhere yet.
-func checkTracerKit(home, kit string, fail tracerFailer) (pending, ok bool) {
-	if _, err := os.Lstat(filepath.Dir(kit)); errors.Is(err, fs.ErrNotExist) {
-		return kitNotLinkedAtPath(home, kit, fail)
-	} else if err != nil {
-		fail("kit", filepath.Dir(kit), "error", err.Error(), tracerFixKit)
-		return false, false
-	}
+// checkTracerKit judges the kit file in the flights plugin folder: present,
+// a regular file and openable.
+func checkTracerKit(kit string, fail tracerFailer) (ok bool) {
 	info, err := os.Stat(kit)
 	if err != nil {
 		fail("kit", kit, "error", err.Error(), tracerFixKit)
-		return false, false
+		return false
 	}
 	if !info.Mode().IsRegular() {
 		fail("kit", kit, "error", "not a regular file", tracerFixKit)
-		return false, false
+		return false
 	}
 	file, err := os.Open(kit)
 	if err != nil {
 		fail("kit", kit, "error", err.Error(), tracerFixKit)
-		return false, false
+		return false
 	}
 	if err := file.Close(); err != nil {
 		fail("kit", kit, "error", err.Error(), tracerFixKit)
-		return false, false
+		return false
 	}
-	return false, true
-}
-
-// kitNotLinkedAtPath decides what an absent kit directory at the kit's path
-// means, from the installer's skill-links.json: the directories it links
-// skills into. No file is no install, so the kit is pending. A file that cannot
-// be read is a FAIL. The kit linked in a listed directory other than the
-// default config dir is a FAIL naming both paths: the install put it where the
-// tracer does not read, and pfm install --yes will not move it. Linked nowhere
-// is pending.
-func kitNotLinkedAtPath(home, kit string, fail tracerFailer) (pending, ok bool) {
-	ledger := filepath.Join(installer.ManagedRoot(home), "skill-links.json")
-	dirs, recorded, err := installer.SkillLinkDirs(home)
-	if err != nil {
-		fail("kit", ledger, "error", err.Error(), "repair or delete "+ledger+", then run pfm install --yes")
-		return false, false
-	}
-	if !recorded {
-		return true, false
-	}
-	skillsDir := filepath.Dir(filepath.Dir(kit))
-	for _, dir := range dirs {
-		if filepath.Clean(dir) == skillsDir {
-			continue
-		}
-		linked := filepath.Join(dir, filepath.Base(filepath.Dir(kit)))
-		if _, err := os.Lstat(linked); errors.Is(err, fs.ErrNotExist) {
-			continue
-		} else if err != nil {
-			fail("kit", linked, "error", err.Error(), tracerFixKit)
-			return false, false
-		}
-		fail(
-			"kit",
-			kit,
-			"error",
-			"the install linked the tracetree kit at "+linked+", but the tracer reads "+
-				filepath.Dir(kit)+"; the tracer cannot run on this host",
-			"pfm install --yes does not fix this: link the kit at the tracer's path, or install without --config-dir",
-		)
-		return false, false
-	}
-	return true, false
+	return true
 }
 
 // runTracetreeKit runs `python3 {kit}` with no subcommand, bounded: a kit

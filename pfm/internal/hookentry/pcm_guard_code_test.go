@@ -27,14 +27,15 @@ func (f pcmGuardFixture) script(t *testing.T, rel string) string {
 // merely names a prompt file pass, each run where its paths are protected.
 func TestPcmGuardAdmitsReadsDataAndWritesElsewhere(t *testing.T) {
 	f := pcmGuardHome(t)
-	f.script(t, ".claude/skills/tracetree/tracetree.py")
+	kit := f.script(t, ".claude/plugins/cache/professor/flights/1.0.0/skills/tracetree/tracetree.py")
 	f.script(t, "proj/tool.sh")
 	for _, command := range []string{
 		// A: the heredoc is stdin data for a script that exists.
-		`python3 $HOME/.claude/skills/tracetree/tracetree.py write /tmp/x 1 <<'HOPS'` +
+		`python3 $HOME/.claude/plugins/cache/professor/flights/1.0.0/skills/tracetree/tracetree.py write /tmp/x 1 ` +
+			`<<'HOPS'` +
 			"\nTHREAD 9: read .claude/scripts/test.sh, CLAUDE.md and templates/global/agents/x.md\n" +
 			"ANSWER\n- open('CLAUDE.md', 'w') is pcm's [templates/global/rules/x.md:4]\nHOPS",
-		`python3 -u ` + filepath.Join(f.home, ".claude", "skills", "tracetree", "tracetree.py") +
+		`python3 -u ` + kit +
 			` read <<< "templates/global/rules/x.md CLAUDE.md"`,
 		// B: a read in inline code.
 		`python3 -c "import json; print(json.load(open('templates/refresh-map.json')))"`,

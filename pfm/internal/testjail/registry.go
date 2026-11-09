@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -122,13 +123,12 @@ func globalAgentFixtures() ([]globalAgentFixture, error) {
 	return agentFixtureCache.rows, agentFixtureCache.err
 }
 
-// stageTracetreeKit stages what the tracer's tracetree kit needs on a
-// healthy host: the checkout's tracetree skill linked at
-// {home}/.claude/skills/tracetree, the link pfm install makes, and a python3 in
-// shimDir, the one directory beyond the canonical bin the jail's PATH holds.
-// The shim runs the interpreter the test process resolved; a host without one
-// fails the test here, as the doctor check would fail it later.
-func stageTracetreeKit(t *testing.T, home, shimDir string) {
+// stagePython3 stages the python3 a healthy host has, the interpreter
+// flights:tracer's tracetree kit runs on: a shim in shimDir, the one directory
+// beyond the canonical bin the jail's PATH holds. The shim runs the
+// interpreter the test process resolved; a host without one fails the test
+// here, as the doctor check would fail it later.
+func stagePython3(t *testing.T, shimDir string) {
 	t.Helper()
 	python, err := deps.Resolve("python3")
 	if err != nil {
@@ -139,12 +139,38 @@ func stageTracetreeKit(t *testing.T, home, shimDir string) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	skills := filepath.Join(home, ".claude", "skills")
-	if err := os.MkdirAll(skills, 0o755); err != nil {
-		t.Fatal(err)
+}
+
+// tracetreeKitStub prints the usage line the shipped kit prints when it is
+// given no subcommand. The shipped kit lives in the flights plugin, whose
+// checkout a Professor test never reads, so a staged plugin folder carries
+// this stand-in; the flights repo's own tests run the real kit.
+const tracetreeKitStub = "import sys\nsys.exit(\"usage: tracetree.py <command> ...\")\n"
+
+// stagedPluginPath is the installPath StageClaudePlugins records for id.
+func stagedPluginPath(store, id string) string { return filepath.Join(store, "plugins", "cache", id) }
+
+// StageTracetreeKit places the tracetree kit in the folder StageClaudePlugins
+// staged for every flights plugin among ids, where pfm install's copy puts it:
+// {folder}/skills/tracetree/tracetree.py. ids holding no flights plugin fail
+// the test.
+func StageTracetreeKit(t *testing.T, store string, ids []string) {
+	t.Helper()
+	staged := 0
+	for _, id := range ids {
+		if plugin, _, _ := strings.Cut(id, "@"); plugin != "flights" {
+			continue
+		}
+		dir := filepath.Join(stagedPluginPath(store, id), "skills", "tracetree")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "tracetree.py"), []byte(tracetreeKitStub), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		staged++
 	}
-	source := filepath.Join(checkoutRoot(), "templates", "global", "skills", "tracetree")
-	if err := os.Symlink(source, filepath.Join(skills, "tracetree")); err != nil {
-		t.Fatal(err)
+	if staged == 0 {
+		t.Fatalf("plugin ids %v hold no flights plugin to stage the tracetree kit for", ids)
 	}
 }

@@ -169,4 +169,5 @@ func stageStorePlugins(t *testing.T, home string) {
 		t.Fatal(err)
 	}
 	testjail.StageClaudePlugins(t, storeDir, ids)
+	testjail.StageTracetreeKit(t, storeDir, ids)
 }

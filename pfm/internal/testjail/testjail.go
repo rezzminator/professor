@@ -608,7 +608,7 @@ func CleanHome(t *testing.T, dirs []string, files map[string]string) config.Runt
 	if err := WriteExecutable(filepath.Join(hostShimDir, "pfm"), []byte("host-pfm"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	stageTracetreeKit(t, home, hostShimDir)
+	stagePython3(t, hostShimDir)
 	managedClaude := filepath.Join(home, ".local", "share", "pfm", "install", "bin", claudeBinary)
 	if err := os.MkdirAll(filepath.Dir(managedClaude), 0o700); err != nil {
 		t.Fatal(err)
@@ -753,7 +753,7 @@ func StageClaudePlugins(t *testing.T, store string, ids []string) {
 	enabled := make(map[string]bool)
 	records := make(map[string]any)
 	for _, id := range ids {
-		installPath := filepath.Join(store, "plugins", "cache", id)
+		installPath := stagedPluginPath(store, id)
 		if err := os.MkdirAll(installPath, 0o700); err != nil {
 			t.Fatal(err)
 		}

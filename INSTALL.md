@@ -25,7 +25,7 @@ Shortest path first.
 
 ## Runtime prerequisites for the `pfm` install paths
 
-Paths 1 and 2 use the same host runtime. Both require Linux or macOS on `amd64` or `arm64`, plus `tmux` ≥ 1.8, `git`, `jq`, `python3` (the tracer's tracetree kit and its launch hook run on it; `pfm install` checks it and never installs it), a POSIX `sh`, `bash`, `zsh`, and `sleep`. Linux also requires `setsid`; macOS requires `ps`, `lsof`, `launchctl`, and `/usr/bin/security`. `systemd` on Linux is optional when user units are unavailable, but the scheduler surface cannot be enabled without it.
+Paths 1 and 2 use the same host runtime. Both require Linux or macOS on `amd64` or `arm64`, plus `tmux` ≥ 1.8, `git`, `jq`, `python3` (flights:tracer's tracetree kit runs on it; `pfm install` checks it and never installs it), a POSIX `sh`, `bash`, `zsh`, and `sleep`. Linux also requires `setsid`; macOS requires `ps`, `lsof`, `launchctl`, and `/usr/bin/security`. `systemd` on Linux is optional when user units are unavailable, but the scheduler surface cannot be enabled without it.
 
 ### The engine-sync binary
 

@@ -63,7 +63,7 @@ need "the pfm MCP daemon on :$PORT" \
 # chat dies under a later beat. No --account: the Codex primary is the one home
 # this run stages.
 open_main() {
-  pfm chat new --name "$CHAT" --engine cx --agent-role tracer --cwd "$CWD" --await --timeout 300 \
+  pfm chat new --name "$CHAT" --engine cx --agent-role collector --cwd "$CWD" --await --timeout 300 \
     "You are $CHAT, the Codex chat an automated Tier B lane drives. Reply with one word: ready. Then wait and do exactly what each next message says, nothing more." 2>&1
 }
 lane_reopen 'open_main'

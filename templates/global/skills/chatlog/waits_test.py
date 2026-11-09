@@ -51,7 +51,7 @@ class World(Fixture):
         with open(self.sub(aid)[:-len(".jsonl")] + ".meta.json", "w") as f:
             f.write(meta if isinstance(meta, str) else json.dumps(meta))
 
-    def session(self, child="tracer", model=None, tail=""):
+    def session(self, child="tracer", model=None, tail="", reviewer="reviewer"):
         """Main: spawns the reviewer at 50 s, its result at 600 s, a reply at 700 s that re-writes 30,000 cached
         tokens. Reviewer (100-504 s): spawns a `child` at 101 s (writing 20,000), the child returns at 500 s,
         a Read at 502 s re-writes all 20,000, a final at 504 s reads them from the cache and names a review file
@@ -62,7 +62,7 @@ class World(Fixture):
             f.write("# review\nF1 one\n- F2 two\nF1 again\n")
         self.jsonl(self.path("projects", "p", "sess0001.jsonl"), [
             c_user("Review it.", 0),
-            c_call("toolu_rev", "Agent", {"subagent_type": "reviewer"}, 50, usage=(100, 10, 0, 30000)),
+            c_call("toolu_rev", "Agent", {"subagent_type": reviewer}, 50, usage=(100, 10, 0, 30000)),
             c_result("toolu_rev", "reviewed", 600), reply("Done.", 700, "root", (10, 10, 0, 30000))])
         first = c_call("toolu_tr", "Agent", {"subagent_type": child}, 101, usage=(10, 10, 0, 20000)) if child \
             else c_call("toolu_tr", "Bash", {"command": "sleep 399"}, 101, usage=(10, 10, 0, 20000))
@@ -72,7 +72,7 @@ class World(Fixture):
             c_user("Review.", 100), first, c_result("toolu_tr", "traced", 500),
             c_call("r2", "Read", {"file_path": "/fx/a"}, 502, usage=(10, 10, 0, 20000)), c_result("r2", "x", 503),
             reply("Review at " + review, 504, "rev", (10, 5, 20010, 0))], tail)
-        self.meta("rev1", {"agentType": "reviewer", "toolUseId": "toolu_rev"})
+        self.meta("rev1", {"agentType": reviewer, "toolUseId": "toolu_rev"})
         if child:
             self.jsonl(self.sub("tr1"), [c_user("Trace.", 110), reply("traced", 490, "tr", (100, 20, 0, 0))])
             self.meta("tr1", {"agentType": child, "toolUseId": "toolu_tr"})
@@ -91,6 +91,23 @@ class World(Fixture):
         return {c: row[c] for c in cols}
 
 
+SPAN_COLS = (*COLS[2:22], "children_any", "concurrent_siblings", "reviewer_dormant_s", "rewrites_child_wait",
+             "rewrite_usd_child_wait", "agent_type", "start_utc", "review_path")
+
+
+def span_row(review, **over):
+    """The SPAN_COLS of World.session()'s one row under the default sweep; over replaces columns."""
+    return dict(dict(
+        parent_type="main", reviewer_wall_s="404", tracer_runs="1", tracer_wall_s="399",
+        reviewer_longest_idle_s="399", reviewer_idle_total_s="399", parent_idle_s="454",
+        cache_rewrites_after_wait="1", rewrite_tokens="20000", rewrite_usd="0.0690", usd_reviewer="0.1565",
+        usd_tracer_tree="0.0006", usd_parent_during_wait="0.0000", findings_count="2", parent_idle_total_s="454",
+        parent_rewrites="1", parent_rewrite_tokens="30000", parent_rewrite_usd="0.1035",
+        waits_over_gap_no_spike="0", w5m_tokens="40000", children_any="1", concurrent_siblings="0",
+        reviewer_dormant_s="0", rewrites_child_wait="1", rewrite_usd_child_wait="0.0690", agent_type="reviewer",
+        start_utc="2026-01-01T10:01:40Z", review_path=review), **over)
+
+
 class WaitsSweep(World):
     def test_child_span_idle_and_rewrite_after_the_wait(self):
         review = self.session()
@@ -101,17 +118,7 @@ class WaitsSweep(World):
         # reviewer's end (504). Rewrite: 20,000 tokens at 3.75 instead of 0.3 per million = $0.0690; the parent's
         # 30,000 = $0.1035. Reviewer: 2 × (10·3 + 10·15 + 20,000·3.75) + (10·3 + 5·15 + 20,010·0.3) µ$ = $0.1565;
         # tracer 100·3 + 20·15 µ$ = $0.0006
-        self.assertEqual(self.pick(row, *COLS[2:22], "children_any", "concurrent_siblings", "reviewer_dormant_s",
-                                   "rewrites_child_wait", "rewrite_usd_child_wait", "agent_type", "start_utc",
-                                   "review_path"), dict(
-            parent_type="main", reviewer_wall_s="404", tracer_runs="1", tracer_wall_s="399",
-            reviewer_longest_idle_s="399", reviewer_idle_total_s="399", parent_idle_s="454",
-            cache_rewrites_after_wait="1", rewrite_tokens="20000", rewrite_usd="0.0690", usd_reviewer="0.1565",
-            usd_tracer_tree="0.0006", usd_parent_during_wait="0.0000", findings_count="2", parent_idle_total_s="454",
-            parent_rewrites="1", parent_rewrite_tokens="30000", parent_rewrite_usd="0.1035",
-            waits_over_gap_no_spike="0", w5m_tokens="40000", children_any="1", concurrent_siblings="0",
-            reviewer_dormant_s="0", rewrites_child_wait="1", rewrite_usd_child_wait="0.0690", agent_type="reviewer",
-            start_utc="2026-01-01T10:01:40Z", review_path=review))
+        self.assertEqual(self.pick(row, *SPAN_COLS), span_row(review))
         self.assertEqual(row["transcript_path"], self.sub("rev1"))
         self.assertEqual(row["parent_path"], self.path("projects", "p", "sess0001.jsonl"))
         self.assertIn("RUNS 1 · ", out)
@@ -121,6 +128,11 @@ class WaitsSweep(World):
         self.assertNotIn("FAILED /", out)
         self.assertNotIn("GAPS", out)
         self.assertTrue(out.rstrip().splitlines()[-1].startswith("# waits 1 runs · 0 FAILED"), out)
+
+    def test_plugin_named_types_match_the_defaults(self):
+        review = self.session(child="flights:sub-tracer", reviewer="flights:reviewer")
+        [row] = self.rows(self.waits("--since", ALL).stdout)
+        self.assertEqual(self.pick(row, *SPAN_COLS), span_row(review, agent_type="flights:reviewer"))
 
     def test_the_gap_threshold_splits_rewrites_from_held_waits(self):
         self.session()

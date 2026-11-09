@@ -20,8 +20,8 @@ Where Vocabulary, Runtime or On demand disagrees with the code on a path, comman
 - fleet prompt: the main chat's system layer per engine, gitignored at `pfm/harness-prompts/generated/{engine}.md`; sub-agents never receive it, so the dispatch law lives under § Rules here · generated from `pfm/harness-prompts/` by `pfm install`
 - host assets: the files `pfm install` stages onto the host, owned here alone · `pfm/internal/installer/assets/`
 - harvester: the standalone web and document harvester, over a pinned Python conversion sidecar · `plugins/harvester/`
-- flights: the foreman tiers and the lander that build and land work, and `/flights:doctor`, their meter, shipped by the flights plugin · `plugins/flights/plugins/flights/{agents,commands,skills}/` · design `docs/design/flights/`
-- use laws: the `/{x}:use` command family every prompt and orientation-file edit loads, `/tracer:use` its caller-manual sibling · `templates/global/commands/{x}/use.md` · design `docs/design/use/`
+- flights: the foreman tiers and the lander that build and land work, the tracer with its tracetree kit and caller manual, the reviewers, and `/flights:doctor`, their meter, shipped by the flights plugin · `plugins/flights/plugins/flights/{agents,commands,skills}/` · design `docs/design/flights/`
+- use laws: the `/{x}:use` command family every prompt and orientation-file edit loads, `/flights:tracer-use` its caller-manual sibling, shipped by the flights plugin · `templates/global/commands/{x}/use.md` · design `docs/design/use/`
 - fence: the shared `pfm-dev` container, own namespaces, HOME and `/tmp` per call, and the `pfm-sim` browser target · `infra/fence/` · design `docs/dev/isolated-dev-foundation.md`
 - install record: this repo's own pfm install (`VERSION`, `manifest.json`, whose `installed_from.repo` pfm's theme install reads) and its saved rr reports (`RR/`) · `.professor/`
 - this repo's install: the project tier this repo runs, source of truth for its engine mirrors; machine-global originals reach it only through `~/.claude/` symlinks, never a local copy · `.claude/`

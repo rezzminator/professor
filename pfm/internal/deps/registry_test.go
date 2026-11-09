@@ -264,7 +264,7 @@ func TestAtLeastComparesNumericFieldsIncludingPreReleaseSuffixes(t *testing.T) {
 }
 
 // TestPython3RegistryEntryIsRequiredAndPlatformGated pins the python3 row: the
-// tracer's tracetree kit runs on it, so a missing python3
+// flights:tracer's tracetree kit runs on it, so a missing python3
 // fails the install's pre-change check and the doctor dependency preflight like
 // git or tmux, and the row's version parse reads the interpreter's own banner.
 func TestPython3RegistryEntryIsRequiredAndPlatformGated(t *testing.T) {

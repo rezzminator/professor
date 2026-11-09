@@ -60,7 +60,7 @@ Flight merges over the prior 60 days averaged 1.42 Go test lines per code line, 
 
 - **The speccer is user-invoked:** the user, or the main chat on the user's request, calls it, most often through `/flights:spec`, which hands it the grilled `requirements.md`. No foreman or lander hands work to it; it returns to its caller and hands off to nobody. Its spec, research and calibration files live in its flight directory, outside the message-only build/land protocol.
 - **Landers are spawned only by the main chat.**
-- **`tracer` and `gitter`** are fleet agents the family uses; they are not its members.
+- **`flights:tracer` and `gitter`** are fleet agents the family uses; they are not its members.
 
 ## The life cycle
 
@@ -167,7 +167,7 @@ The `auto-effort` plugin gives an agent whose frontmatter carries `effortControl
 | Agent | `effortControl` |
 | --- | --- |
 | `flights:foreman`, `flights:foreman-sonnet` | `on` (floor medium, ceiling xhigh), both starting at high |
-| `reviewer`, `reviewer-pro`, `reviewer-nt`, `documenter` | `on` |
+| `flights:reviewer`, `flights:reviewer-pro`, `documenter` | `on` |
 
 `pcm` does not carry `effortControl`. `flights:lander` and its children carry no `effortControl` and no buttons. Every steered agent but the two foremen lists the three tools in its own `tools:` line under the `mcp__auto-effort__` prefix; the two foremen carry every tool and have no `tools:` line. A foreman steers itself: effort up before a design choice the code leaves open or a red whose cause it cannot name, effort down for a stretch of mechanical edits, effort auto once that stretch is over.
 
@@ -192,7 +192,7 @@ The `auto-effort` plugin gives an agent whose frontmatter carries `effortControl
 
 ## Harness settings
 
-The deepest chain is main → foreman → child foreman → tracer → sub-tracer: four levels below the main chat; a foreman reaches it only when it spawns. pfm writes `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` and `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` onto every Claude Code launch line (`pfm/internal/claudelaunch/knobs.go`). A spawn refused at the concurrency limit never started, and goes out again once a slot frees.
+The deepest chain is main → foreman → child foreman → `flights:tracer` → `flights:sub-tracer`: four levels below the main chat; a foreman reaches it only when it spawns. pfm writes `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` and `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` onto every Claude Code launch line (`pfm/internal/claudelaunch/knobs.go`). A spawn refused at the concurrency limit never started, and goes out again once a slot frees.
 
 ## Surfaces that stay in sync
 
@@ -204,7 +204,7 @@ The deepest chain is main → foreman → child foreman → tracer → sub-trace
 | The measurement | `pfm tokens --tree` in `pfm/internal/tokens/` | The measure's numbers |
 | Dispatch routing | `plugins/flights/plugins/flights/agents/foreman.md`, `plugins/flights/plugins/flights/agents/foreman-sonnet.md` — `description:` | Foreman suitability; main chat → foreman → main chat → flights:lander → gitter |
 | Landing | `plugins/flights/plugins/flights/agents/lander.md` | Main-only landing after every foreman returns: sync, review, fix, affected tests, full gate, report |
-| The tracer | `templates/global/agents/tracer.md`, `templates/global/skills/tracetree/`, `docs/design/tracing/` | The store and its reuse |
+| The tracer | `plugins/flights/plugins/flights/agents/tracer.md`, `plugins/flights/plugins/flights/skills/tracetree/`, `docs/design/tracing/` | The store and its reuse |
 | This directory | `docs/design/flights/` | One file per member, this file for what they share |
 
 ## Open items

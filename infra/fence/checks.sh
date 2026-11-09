@@ -606,11 +606,6 @@ checks_templates_format_md() {
 
 }
 
-checks_templates_reviewer_templates() {
-  head_ "templates — reviewer prompt contracts"
-  run "templates: reviewer prompt contracts" -- bash "$REPO_ROOT/scripts/test-reviewer-templates.sh"
-}
-
 checks_templates_unit_script() { # <name>: scripts/test-<name>.sh, the self-test of .claude/scripts/<name>.sh, on its default script
   head_ "templates — test-$1.sh self-test"
   run "templates: test-$1.sh self-test" -- bash "$REPO_ROOT/scripts/test-$1.sh"
@@ -698,7 +693,7 @@ PY
 
 checks_templates_skill_tests() {
   local skill cp_out
-  for skill in codeprobe tracetree chatlog; do
+  for skill in codeprobe chatlog; do
     head_ "templates — $skill skill tests"
     cp_out="$TMP_BASE/templates/$skill.txt"
     if [[ ! -f templates/global/skills/$skill/${skill}_test.py ]]; then
@@ -772,7 +767,7 @@ checks_templates_steps() { # <callback>: callback <step name> <command> [args...
   local add="$1" name
   checks_named_template_steps "$add" clone leak plugin-logs plugin-lab placeholders scratch-paths descriptions mirrors \
     generated-agents release-check refresh-scope plugin-workflows worktree-script dev-report \
-    format-md reviewer-templates theme-glyphs || return 1
+    format-md theme-glyphs || return 1
   for name in test unit-path; do
     "$add" "templates.$name-tests" checks_templates_unit_script "$name" || return 1
   done

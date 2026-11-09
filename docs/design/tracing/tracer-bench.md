@@ -1,6 +1,6 @@
 # tracer bench
 
-Every measured `tracer` run: the single-agent bench behind the model, the tree bench behind the lead and its sub-tracers, the replay of past heavy briefs, the caller probes and their audits, the rejected-hop survey behind the resolver and drift, the runs that checked the kit, and the field runs swept from disk. The design is [tracer.md](tracer.md), the kit [tracetree.md](tracetree.md).
+Every measured `flights:tracer` run: the single-agent bench behind the model, the tree bench behind the lead and its sub-tracers, the replay of past heavy briefs, the caller probes and their audits, the rejected-hop survey behind the resolver and drift, the runs that checked the kit, and the field runs swept from disk. The design is [tracer.md](tracer.md), the kit [tracetree.md](tracetree.md).
 
 ## Contents
 
@@ -22,7 +22,7 @@ A blind `opus` `general-purpose` judge scored each return, handed the key, the b
 
 ### Prompt bench
 
-`tracer` on `opus` while its body was designed. The baseline is a caller's own `general-purpose` collector, inheriting `opus` at effort `high`. Cost at the assumed list rates of the time; the model bench re-prices the two runs it shares.
+`flights:tracer` on `opus` while its body was designed. The baseline is a caller's own `general-purpose` collector, inheriting `opus` at effort `high`. Cost at the assumed list rates of the time; the model bench re-prices the two runs it shares.
 
 | Run | Accuracy /30 | Wrong | Cost (USD) | Requests | Seconds | Return (KB) | Sub-asks half-answered | Fenced lines exact |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -35,7 +35,7 @@ Run 2 wins on wrong statements, cost, requests, latency and verbatim fidelity, a
 
 ### Model bench
 
-The final single-agent body on each model and effort. A Sonnet run spawns `tracer` with a `sonnet` override and the effort in an `[effort: X]` brief prefix; every request's model and effort is read back from its transcript. Cost at list rates per MTok (input / 5m cache write / 1h cache write / cache read / output): Opus 5.5 4 / 5 / 8 / 0.20 / 20, Sonnet 5.5 2 / 2.50 / 4 / 0.20 / 10.
+The final single-agent body on each model and effort. A Sonnet run spawns `flights:tracer` with a `sonnet` override and the effort in an `[effort: X]` brief prefix; every request's model and effort is read back from its transcript. Cost at list rates per MTok (input / 5m cache write / 1h cache write / cache read / output): Opus 5.5 4 / 5 / 8 / 0.20 / 20, Sonnet 5.5 2 / 2.50 / 4 / 0.20 / 10.
 
 Lines exact: a non-blank fenced line counts when it appears verbatim in the repository's tracked source, config or Makefile lines once the fence's own indent is stripped. A clean block has every line exact, so it pastes into a task file as it stands.
 
@@ -45,7 +45,7 @@ Lines exact: a non-blank fenced line counts when it appears verbatim in the repo
 | `opus` `medium` (prompt run 2) | 28.0 | 2 | 0.80 | 15 | 158 | 19.5 | 84/84 | 9/9 |
 | Sonnet 5.5 `xhigh`, run 1 | 28.5 | 2 | 0.50 | 10 | 146 | 22.5 | 77/78 | 12/13 |
 | Sonnet 5.5 `xhigh`, run 2 | 28.0 | 2 | 0.77 | 16 | 242 | 22.7 | 87/88 | 11/12 |
-| Sonnet 5.5 `high`, the shipped `tracer` | 27.5 | 3 | 0.34 | 7 | 94 | 23.7 | 32/96 | 7/12 |
+| Sonnet 5.5 `high`, the shipped `flights:tracer` | 27.5 | 3 | 0.34 | 7 | 94 | 23.7 | 32/96 | 7/12 |
 | Sonnet 5.5 `medium`, run 1 | 27.0 | 2 | 0.25 | 6 | 67 | 17.3 | 54/76 | 5/12 |
 | Sonnet 5.5 `medium`, run 2 | 27.5 | 3 | 0.24 | 7 | 75 | 19.3 | 77/86 | 6/11 |
 
@@ -62,7 +62,7 @@ Each setup's share of the `opus` `medium` lead; Sonnet 5.5 `xhigh` is the mean o
 | --- | --- | --- | --- | --- |
 | `opus` `medium` | 100% | 100% | 100% | 158 |
 | Sonnet 5.5 `xhigh` | 79% (62–96%) | 101% | 92% | 194 |
-| Sonnet 5.5 `high`, the shipped `tracer` | 43% | 98% | 58% | 94 |
+| Sonnet 5.5 `high`, the shipped `flights:tracer` | 43% | 98% | 58% | 94 |
 | Sonnet 5.5 `medium` | 31% | 97% | 48% | 71 |
 
 ## Tree bench
@@ -115,7 +115,7 @@ One run per setup unless marked; each version changed several rules at once, so 
 
 ## Replay bench
 
-The shipped tree re-ran five of the costliest past `tracer` calls, each past brief verbatim. There were 395 past runs costing $336 in total. Two briefs were over a private Python repo and three over this one.
+The shipped tree re-ran five of the costliest past `flights:tracer` calls, each past brief verbatim. There were 395 past runs costing $336 in total. Two briefs were over a private Python repo and three over this one.
 
 A blind judge (`opus`, `high`) graded each pair, the past answer and the tree's, without being told which design wrote which. It graded each sub-ask FULL, PARTIAL, MISSING or WRONG and checked claims against the code: the past answer against the code of its own day, the tree's against today's. A past fact the code has since changed counts as drift, not an error.
 
@@ -241,7 +241,7 @@ Drift is measured at the re-check, not the walk, so a worktree edited after its 
 
 | Lead | Runs | No hops | Hops | Rejected | Bad address | Refused once, of nodes | Flagged, of answer lines | Drifted |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `tracer`, `sonnet` `high` | 171 | 2 | 30,617 | 0.17% | 0.11% | 6.1% | 11.1% | 2.8% |
+| `flights:tracer`, `sonnet` `high` | 171 | 2 | 30,617 | 0.17% | 0.11% | 6.1% | 11.1% | 2.8% |
 | `gpt-tracer`, `gpt-6-sol` | 85 | 1 | 6,746 | 0.84% | 8.3% | 8.6% | 89.0% | 84.6% |
 
 - `gpt-foreman` edited the worktrees its twins had traced, so most of their hops drifted and their flags follow; rejections and bad addresses do not depend on drift.
@@ -261,7 +261,7 @@ Over the 183 Claude lead transcripts:
 | Final carrying RUN, MAP and NOT READ | 180 |
 | Final length | median 18,369 characters, p90 25,320 |
 
-Spend over the 72 hours to 2026-10-11 01:37, from `pfm tokens`: `tracer` 219 runs, $84.89, median $0.35, p90 $0.59, max $0.97; `sub-tracer` 1,801 runs, $21.85, median $0.01; `gpt-tracer` 61 runs, $33.30, max $11.23; `gpt-sub-tracer` 562 runs, $4.83.
+Spend over the 72 hours to 2026-10-11 01:37, from `pfm tokens`: `flights:tracer` 219 runs, $84.89, median $0.35, p90 $0.59, max $0.97; `flights:sub-tracer` 1,801 runs, $21.85, median $0.01; `gpt-tracer` 61 runs, $33.30, max $11.23; `gpt-sub-tracer` 562 runs, $4.83.
 
 ### Lead audit
 

@@ -43,7 +43,7 @@ Three sources, in order:
 
 1. The commit messages of the range: the author wrote them when the change was made, and they carry the why that a model reading a diff misses (Evidence in [release.md](release.md#evidence)). The project contract requires an adopter-facing change to say so in its message.
 2. The diff, for the surfaces: which template paths, global roles, commands, flags, config keys and hooks changed; `DIR/scope.md` lists the paths and the removed names.
-3. The code, to settle a question the first two leave open: what the installer does with a symlink whose original was deleted, whether `pfm config validate` rejects a key that no longer exists, whether the update prints the new line or the old one. A question like that goes to a `tracer` with the exact code question; a note never asserts an adopter-side effect it did not read.
+3. The code, to settle a question the first two leave open: what the installer does with a symlink whose original was deleted, whether `pfm config validate` rejects a key that no longer exists, whether the update prints the new line or the old one. A question like that goes to a `flights:tracer` with the exact code question; a note never asserts an adopter-side effect it did not read.
 
 Every bullet traces to the commits the ledger gives it. A statement no commit supports is not written. A commit message is a claim about the code, not proof of it: where the code or the permanent docs contradict what a message says a verb, flag or key does, the bullet follows the code.
 

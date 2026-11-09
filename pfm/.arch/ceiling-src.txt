@@ -81,7 +81,6 @@ internal/doctor/mcp_serve_check.go 283
 internal/doctor/plugin_logs_check.go 291
 internal/doctor/project_open.go 251
 internal/doctor/spawn_audit.go 563
-internal/doctor/tracetree_kit_check.go 264
 internal/enginesync/calls.go 359
 internal/fleet/codexpanes.go 415
 internal/fleet/reconcile.go 579
@@ -171,7 +170,7 @@ internal/installer/registry_ownership.go 330
 internal/installer/settings.go 303
 internal/installer/settings_ownership.go 278
 internal/installer/skill_sources.go 799
-internal/installer/skill_sources_report.go 317
+internal/installer/skill_sources_report.go 309
 internal/installer/themes.go 626
 internal/installer/themes_profile.go 382
 internal/installer/types.go 374

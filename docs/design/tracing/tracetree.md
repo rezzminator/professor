@@ -1,8 +1,8 @@
 # tracetree
 
-The kit under `tracer` and `sub-tracer`, in `templates/global/skills/tracetree/`: it opens a trace run, stores each node's hops once, waits for the whole tree, re-reads every quoted line from disk, places a hop whose path names no file, bounds its work on a very large file, checks hops pinned to a git revision, tells drifted code and moved files from a wrong quote, warns when a node broke the hop contract, and maps the components. The agents' rules are in [tracer.md](tracer.md); the measurements behind each mechanism are in [tracer-bench.md](tracer-bench.md).
+The kit under `flights:tracer` and `flights:sub-tracer`, the internal skill `flights:tracetree` in `plugins/flights/plugins/flights/skills/tracetree/`: it opens a trace run, stores each node's hops once, waits for the whole tree, re-reads every quoted line from disk, places a hop whose path names no file, bounds its work on a very large file, checks hops pinned to a git revision, tells drifted code and moved files from a wrong quote, warns when a node broke the hop contract, and maps the components. The agents' rules are in [tracer.md](tracer.md); the measurements behind each mechanism are in [tracer-bench.md](tracer-bench.md).
 
-`tt` below stands for `python3 $HOME/.claude/skills/tracetree/tracetree.py`; every prompt spells it with `$HOME`, since a `~` inside a quoted string or variable never expands and the call fails with `can't open file` (a field foreman's only kit call died that way). Python 3 standard library only; it reads the repository and writes only the run directory. A failure prints `TRACETREE FAILED — {reason}` to stderr and exits 2.
+`tt` below stands for `python3 ${CLAUDE_PLUGIN_ROOT}/skills/tracetree/tracetree.py`; `${CLAUDE_PLUGIN_ROOT}` is the flights plugin's own folder, which engine-sync writes as an absolute path in the Codex and OpenCode twins, since a `~` inside a quoted string or variable never expands and the call fails with `can't open file` (a field foreman's only kit call died that way). Python 3 standard library only; it reads the repository and writes only the run directory. A failure prints `TRACETREE FAILED — {reason}` to stderr and exits 2.
 
 ## Contents
 
@@ -32,8 +32,8 @@ The kit under `tracer` and `sub-tracer`, in `templates/global/skills/tracetree/`
 | `loom.html`, `book.html` | The two page shells: title, tabs or header, and the `/*LOOM_STYLE*/`, `<!--LOOM_PARTS-->` and data slots |
 | `loom_wall.html`, `loom_custody.html`, `loom_hourglass.html`, `loom_key.html`, `book_view.html` | The views, one template and one component each, mounted by the runtime on first show |
 | `loom_dc.html`, `loom.css` | The small component runtime and the style every view shares |
-| `tracetree_test.py` | The spec, run by the fence's templates gate (`checks_templates_skill_tests` in `infra/fence/checks.sh`) |
-| `SKILL.md` | The agents' command table and the check, visible to `tracer` and `sub-tracer` only |
+| `tests/test_tracetree.py` (flights repo) | The spec, run by the flights repo's `make test` |
+| `SKILL.md` | The agents' command table and the check, visible to `flights:tracer` and `flights:sub-tracer` only |
 
 ## The run directory
 
@@ -102,13 +102,13 @@ With `--questions`, the [recall](#recall) of those questions follows (`recall_in
 
 ### start
 
-**Function:** `cmd_start` — **Run by:** each sub-tracer, as its first call
+**Function:** `cmd_start` — **Run by:** each `flights:sub-tracer`, as its first call
 
 `start RUN ID PATH:LINE [QUESTION]` appends `{PATH:LINE}<tab>{QUESTION}` to `{ID}.started`. For a QUESTION of the form `Q{n}` it prints `QUESTION Q{n}: {text}` from `questions`, or names why it cannot. Then `started {ID} — {path}` and PATH from LINE−3 to LINE+40, numbered. A FROM path resolves by its tail like a hop's; `{rev}:{path}:{line}` reads the file at that git revision ([Pinned revisions](#pinned-revisions)). A FROM file past 1 MiB is named after the `started` line ([Very large files](#very-large-files)).
 
 ### write
 
-**Function:** `cmd_write` — **Run by:** each sub-tracer, once
+**Function:** `cmd_write` — **Run by:** each `flights:sub-tracer`, once
 
 `write RUN ID < hops` checks the file's structure, then places every hop through [the resolver](#the-resolver) and refuses once a file with a hop that does not hold ([Write-time refusal](#write-time-refusal)). On storing it writes `{ID}.write.json` and `{ID}.hops` and prints `stored {ID}: {n} hops, {k} answer lines — {path}`, adding how many hops it re-addressed and how many it stored not holding. A write after the store fails: the file is final. Its stderr warnings are under [WARNINGS](#warnings).
 

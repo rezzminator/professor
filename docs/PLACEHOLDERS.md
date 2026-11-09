@@ -180,9 +180,7 @@ They are listed because the template token gate (`dev.sh verify templates`) FAIL
 | `{SCOPE}` | `global/agents/pcm.md` | the audit scope being run |
 | `{CALLER}` | `global/commands/description/use.md` and every description carrying a `{CALLER}-ONLY` token | the name of the only entity allowed to invoke the entry |
 | `{STATUS_LITERAL}` | `commands/audit/code-hygiene.md` | an example status string literal in the code being audited |
-| `{PATHSPECS}` / `{HEAD7}` | `global/agents/reviewer.md`, `global/agents/reviewer-pro.md` | the brief's pathspecs restricting the reviewed diff; the reviewed HEAD's seven-character short sha |
 | `{HHMMSS}` | `global/agents/agent-investigator.md` | the UTC time of the report's write, hours, minutes and seconds |
-| `{RUN}` / `{ID}` / `{QUESTION}` | `global/agents/tracer.md`, `global/agents/sub-tracer.md`, `global/commands/tracer/use.md` | the trace run's directory `tt new` printed; a sub-tracer's dotted node id; the card's `Q{n}` question number |
 | `{WORKTREE}` / `{BASE}` / `{TARGET}` / `{TIP}` / `{REPORT_PATH}` / `{INV}` / `{FILES}` | `plugins/flights/plugins/flights/agents/lander.md`, `plugins/flights/plugins/flights/skills/lander-inventory/SKILL.md` | the brief's worktree, base ref and target branch; the target's tip the worktree syncs to; the brief's report path; the inventory file beside it; the spec files the inventory reads |
 | `{ROOT}` / `{CLUSTER}` / `{SPEC}` | `plugins/flights/plugins/flights/agents/hunter.md`, `plugins/flights/plugins/flights/agents/spec-walker.md`, `plugins/flights/plugins/flights/agents/sub-lander.md` | the worktree root the lander passes; a hunter's cluster of changed files; the spec file a walker reads |
 | `{PLUGIN_NAME}` / `{CLAUDE_CODE_VERSION}` / `{NODE_VERSION}` | `global/plugin-ci/ci.yml`, `global/plugin-ci/publish.yml`, `global/plugin-ci/README.md` | the plugin's name and tool pins, filled when a plugin builds its own workflows from the template |

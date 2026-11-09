@@ -1,6 +1,6 @@
 # clone-distiller
 
-`clone-distiller` investigates an external repository: given its URL, a numbered batch of questions and a `Goal:` line, it clones the repository into `/tmp`, answers each question from the code (how the project does something, its patterns, where something lives, when it changed), writes a result file whose every piece of evidence is an absolute `path:line` into the clone, and returns a commit-linked finding per question. It clones and digs the history itself and hands the code questions to `tracer`, pointed at the clone. Any caller may spawn it; `rr-pro` and `rr-pro-max` send their repository lane to it.
+`clone-distiller` investigates an external repository: given its URL, a numbered batch of questions and a `Goal:` line, it clones the repository into `/tmp`, answers each question from the code (how the project does something, its patterns, where something lives, when it changed), writes a result file whose every piece of evidence is an absolute `path:line` into the clone, and returns a commit-linked finding per question. It clones and digs the history itself and hands the code questions to `flights:tracer`, pointed at the clone. Any caller may spawn it; `rr-pro` and `rr-pro-max` send their repository lane to it.
 
 ## Contents
 
@@ -23,10 +23,10 @@
 | --- | --- |
 | Kind | original agent, `templates/global/agents/clone-distiller.md`, linked by `pfm install` |
 | Class | any caller |
-| Model, effort | `opus`, `medium` — with the code read by `tracer`, what is left is the history and the ruling across both; on the `openai/codex` bench, `sonnet` at `high` matched `opus` per dollar (Q .79 at $1.12 and .50 at $0.80, against .79 at $1.22, graded blind against the clone) but its cheaper run missed the commit that admits the busy-wait and wrote that none did |
+| Model, effort | `opus`, `medium` — with the code read by `flights:tracer`, what is left is the history and the ruling across both; on the `openai/codex` bench, `sonnet` at `high` matched `opus` per dollar (Q .79 at $1.12 and .50 at $0.80, against .79 at $1.22, graded blind against the clone) but its cheaper run missed the commit that admits the busy-wait and wrote that none did |
 | Tools | `Bash, Read, Grep, Glob, Agent` — no `Write`: the result file is written by `Bash` (§ The result file) |
 | Budget | 30 tool calls |
-| Spawns | one `tracer`, for the code part of every question (§ Reading) |
+| Spawns | one `flights:tracer`, for the code part of every question (§ Reading) |
 | Writes | its clone under `/tmp/clone-distiller/repos/`, and one result file under `{OUT-DIR}/clone-distiller/`, or `/tmp/clone-distiller/results/` with no `OUT-DIR:` |
 | Codex sandbox | workspace-write (`engines.codex.sandbox`): the clone and the result file are writes; network inside Codex's sandbox is the engine's |
 | Start hook | none — `pfm/internal/claudelaunch/hooks.go` (`HookRRDirMatcher`) lists exact names and omits it; an RR lead passes its directory as `OUT-DIR:` in the brief |
@@ -71,14 +71,14 @@ The directory is keyed by commit so it never changes under a reader: two diggers
 
 ## Reading
 
-The code goes to `tracer` and the history stays with the digger, both in its second message. One `tracer` call carries `Repo root: {clone dir}`, the `Goal:` line and the code part of each question, numbered as the brief numbers it; its `haiku` sub-tracers walk the code and its kit checks every quote against the clone, and the digger drops the spec-writer lines (`CHECK`, `TESTS`, `MAP`, `RUN`; the `RUN` line's check command is kept for a marked answer) and turns each cited range into an `@@` pointer the SAVE script resolves or refuses. On the bench dig of `openai/codex`, three code questions cost $1.39 read by the `opus` digger alone and $0.45 through `tracer` ($0.36 lead, $0.09 for nine sub-tracers), every one of 156 quotes verified. An answer line ending ` ⚠ node {ID} broke the hop contract` rests on hops the kit placed, refused or rejected, so the digger treats it as unchecked: it drills that node with the `RUN` line's check command and `--hops {ID}`, or reads the lines in the clone, before a finding cites it. The digger carries no `Skill` tool, so the `RUN` line alone must serve. The digger reads the clone itself only for a `tracer` `NOT READ` item its `Goal:` turns on, under these rules:
+The code goes to `flights:tracer` and the history stays with the digger, both in its second message. One `flights:tracer` call carries `Repo root: {clone dir}`, the `Goal:` line and the code part of each question, numbered as the brief numbers it; its `haiku` sub-tracers walk the code and its kit checks every quote against the clone, and the digger drops the spec-writer lines (`CHECK`, `TESTS`, `MAP`, `RUN`; the `RUN` line's check command is kept for a marked answer) and turns each cited range into an `@@` pointer the SAVE script resolves or refuses. On the bench dig of `openai/codex`, three code questions cost $1.39 read by the `opus` digger alone and $0.45 through `flights:tracer` ($0.36 lead, $0.09 for nine sub-tracers), every one of 156 quotes verified. An answer line ending ` ⚠ node {ID} broke the hop contract` rests on hops the kit placed, refused or rejected, so the digger treats it as unchecked: it drills that node with the `RUN` line's check command and `--hops {ID}`, or reads the lines in the clone, before a finding cites it. The digger carries no `Skill` tool, so the `RUN` line alone must serve. The digger reads the clone itself only for a `flights:tracer` `NOT READ` item its `Goal:` turns on, under these rules:
 
 - Every read of a round in one message; a file read once is not read again; a file over 300 lines is read by `grep -n` hits and line ranges, never whole.
 - Read to the answer: follow a call to the line that decides, returns, raises or writes; a fact not read goes under `Not read`.
 - Search the whole clone with `grep -rn` unless the question narrows it; a search that finds nothing is stated with its pattern and scope.
 - A list claim names each item or counts the share and names the exceptions.
 - History only in a `+history` clone, each command under `timeout 90`: `git log`, `git log -p -- {path}`, `git log -S{text}`, `git show {commit}:{path}`; a timeout, or a history question in a shallow clone, goes under `Not read` with the command. The limit sits below the Bash tool's 120 s, past which the harness moves a command to the background and its completion notice re-invokes a digger that has already returned.
-- Only `git` read commands, file-read commands and the check command of `tracer`'s `RUN` line run: never the repository's code, build, tests, package manager or install scripts, never `fetch`, `gh`, `curl` or a second clone. `fetch` is also refused by the fleet's git-guard hook.
+- Only `git` read commands, file-read commands and the check command of `flights:tracer`'s `RUN` line run: never the repository's code, build, tests, package manager or install scripts, never `fetch`, `gh`, `curl` or a second clone. `fetch` is also refused by the fleet's git-guard hook.
 - Every read command starts with `emulate sh 2>/dev/null;`: the Bash tool runs the user's shell, which may be zsh, where `echo ====`, an unquoted `--include=*.ts` and `$P:src` abort the command, so a search that never ran reads like one that found little. bash ignores the prefix. The CLONE and SAVE recipes run under `bash -s` and need none.
 
 ## The result file
@@ -138,7 +138,7 @@ The digger reads a stranger's repository while holding `Bash`. Its prompt treats
 | Surface | File |
 | --- | --- |
 | The agent | `templates/global/agents/clone-distiller.md` |
-| The code reader it spawns | `templates/global/agents/tracer.md`, whose brief contract the code call follows |
+| The code reader it spawns | `plugins/flights/plugins/flights/agents/tracer.md`, whose brief contract the code call follows |
 | The lane its briefs come from | `templates/global/agents/shared/repo-lane.md`, the shared file `rr-pro` and `rr-pro-max` put in § Spawning |
 | The section the lane overrides | `templates/global/agents/rr.md`, § Spawning |
 | The renderer's gate | `scripts/check-agent-roster.test.mjs`, "the shipped variants render with zero errors with and without the gpt-agents capability" |

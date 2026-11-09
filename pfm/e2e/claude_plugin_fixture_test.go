@@ -17,8 +17,16 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
+// githubPluginsEnv names the folder standing in for the plugin folders GitHub
+// serves the professor marketplace from: {folder}/{plugin}. The fence has no
+// network, so `plugin install` copies a plugin's files from there, as real
+// Claude copies its download into the install path; a plugin with no folder
+// there installs an empty one, since only flights' tracetree kit is read.
+const githubPluginsEnv = "PFM_E2E_GITHUB_PLUGINS"
+
 // TestClaudePluginInstallFixture is run by the jailed Claude stub for plugin
-// commands. It writes enabledPlugins in settings.json and the plugin install records and cache dirs.
+// commands. It writes enabledPlugins in settings.json and the plugin install
+// records, and installs each plugin's files from githubPluginsEnv's folder.
 func TestClaudePluginInstallFixture(t *testing.T) {
 	if os.Getenv("PFM_E2E_CLAUDE_PLUGIN") != "1" {
 		t.Skip("Claude plugin fixture subprocess only")
@@ -94,13 +102,13 @@ func TestClaudePluginInstallFixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	installPath := filepath.Join(pluginsDir, "cache", id)
-	if uninstall {
-		err = os.RemoveAll(installPath)
-	} else {
-		err = os.MkdirAll(installPath, 0o700)
-	}
-	if err != nil {
+	if err := os.RemoveAll(installPath); err != nil {
 		t.Fatal(err)
+	}
+	if !uninstall {
+		if err := installGitHubPluginFiles(installPath, id); err != nil {
+			t.Fatal(err)
+		}
 	}
 	recordPath := filepath.Join(pluginsDir, "installed_plugins.json")
 	record := struct {
@@ -128,6 +136,27 @@ func TestClaudePluginInstallFixture(t *testing.T) {
 	if err := os.WriteFile(recordPath, append(updated, '\n'), 0o600); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// installGitHubPluginFiles fills installPath with plugin id's files from
+// githubPluginsEnv's folder, or leaves it an empty folder when that folder
+// holds none for the plugin.
+func installGitHubPluginFiles(installPath, id string) error {
+	root := os.Getenv(githubPluginsEnv)
+	if root == "" {
+		return fmt.Errorf("plugin fixture requires %s", githubPluginsEnv)
+	}
+	name, _, _ := strings.Cut(id, "@")
+	source := filepath.Join(root, name)
+	if _, err := os.Stat(source); errors.Is(err, fs.ErrNotExist) {
+		return os.MkdirAll(installPath, 0o700)
+	} else if err != nil {
+		return fmt.Errorf("inspect %s: %w", source, err)
+	}
+	if err := os.CopyFS(installPath, os.DirFS(source)); err != nil {
+		return fmt.Errorf("copy %s to %s: %w", source, installPath, err)
+	}
+	return nil
 }
 
 func (h *e2eHarness) newHome(binary string) string {
@@ -172,10 +201,18 @@ func (h *e2eHarness) newHome(binary string) string {
 	// internal/installer/claude_versions.go).
 	native := filepath.Join(home, ".local", "share", "claude", "versions", "2.1.238")
 	launcherEvidence := filepath.Join(home, "launcher-evidence")
+	githubPlugins, err := filepath.Abs(filepath.Join("testdata", "github-plugins"))
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	if _, err := os.Stat(githubPlugins); err != nil {
+		h.t.Fatalf("stage the plugin folders GitHub serves: %v", err)
+	}
 	body := "#!/bin/sh\n" +
 		"if [ \"${1-}\" = -p ]; then exec env PFM_E2E_CLAUDE_CAPTURE=1 " + shellQuoteFixture(testBinary) + " -test.run '^TestClaudeHarnessCaptureFixture$' -- \"$@\"; fi\n" +
 		"if [ \"${1-}\" = plugin ]; then exec env PFM_E2E_CLAUDE_PLUGIN=1 " +
-		"PFM_E2E_PLUGIN_CONFIG_DIR=\"$CLAUDE_CONFIG_DIR\" " + shellQuoteFixture(testBinary) +
+		"PFM_E2E_PLUGIN_CONFIG_DIR=\"$CLAUDE_CONFIG_DIR\" " +
+		githubPluginsEnv + "=" + shellQuoteFixture(githubPlugins) + " " + shellQuoteFixture(testBinary) +
 		" -test.run '^TestClaudePluginInstallFixture$' -- \"$@\"; fi\n" +
 		"if [ \"${1-}\" = --version ]; then printf '2.1.238 (Claude Code)\\n'; exit 0; fi\n" +
 		"printf '%s\\n' \"${TMUX%%,*}\" > " + shellQuoteFixture(launcherEvidence) + "\n" +

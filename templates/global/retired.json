@@ -1,6 +1,12 @@
 {
   "names": [
     {
+      "name": "/tracer:use",
+      "kind": "command",
+      "successor": "/flights:tracer-use",
+      "match": "exact"
+    },
+    {
       "name": "done-herewith",
       "kind": "skill",
       "successor": "close-out",
@@ -53,6 +59,57 @@
       "kind": "skill",
       "successor": "flights:lander-inventory",
       "match": "exact"
+    },
+    {
+      "name": "subagent_type: \"reviewer\"",
+      "kind": "agent",
+      "successor": "flights:reviewer",
+      "match": "exact",
+      "probe": ".claude/agents/reviewer.md"
+    },
+    {
+      "name": "`reviewer` agent",
+      "kind": "agent",
+      "successor": "flights:reviewer",
+      "match": "exact",
+      "probe": ".claude/agents/reviewer.md"
+    },
+    {
+      "name": "reviewer-nt",
+      "kind": "agent",
+      "match": "exact"
+    },
+    {
+      "name": "reviewer-pro",
+      "kind": "agent",
+      "successor": "flights:reviewer-pro",
+      "match": "exact"
+    },
+    {
+      "name": "sub-tracer",
+      "kind": "agent",
+      "successor": "flights:sub-tracer",
+      "match": "exact"
+    },
+    {
+      "name": "subagent_type: \"tracer\"",
+      "kind": "agent",
+      "successor": "flights:tracer",
+      "match": "exact",
+      "probe": ".claude/agents/tracer.md"
+    },
+    {
+      "name": "`tracer` agent",
+      "kind": "agent",
+      "successor": "flights:tracer",
+      "match": "exact",
+      "probe": ".claude/agents/tracer.md"
+    },
+    {
+      "name": "tracetree",
+      "kind": "skill",
+      "successor": "flights:tracetree",
+      "match": "exact"
     }
   ],
   "storeEntries": [],
@@ -68,7 +125,12 @@
     "flights-lander",
     "flights-spec-walker",
     "flights-speccer",
-    "flights-sub-lander"
+    "flights-sub-lander",
+    "reviewer",
+    "reviewer-nt",
+    "reviewer-pro",
+    "sub-tracer",
+    "tracer"
   ],
   "units": [],
   "configFiles": [],

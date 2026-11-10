@@ -108,7 +108,7 @@ The definitions list no `Agent` tool. Three forms of delegation were benched aga
 - two Sonnet foremen splitting one task in one worktree (+44% dollars, 5.3 min against 4.6);
 - a tracer reading first (+85% and +39%, 76 and 60 requests against 23 and 30).
 
-A child pays its own start and re-reads what its parent read. Work that splits into areas is split by the main chat: several foremen on separate files of one worktree. A file a guard refuses goes under `OUTSIDE` with its exact new text.
+A worker tier (one Sonnet high worker per work-list group, spawned in one message) was benched on the list rung and lost on price and wall (7.53 and 8.48 dollars against 6.70 and 7.71; 38.0 and 47.8 min against 32.4 and 32.3), winning completeness only (1 and 0 minor items open against 4 and 4); see the bench ledger's B4. A child pays its own start and re-reads what its parent read. Work that splits into areas is split by the main chat: several foremen on separate files of one worktree. A file a guard refuses goes under `OUTSIDE` with its exact new text.
 
 ## Effort
 
@@ -206,3 +206,6 @@ Unbenched:
 - A trace whose questions are the foreman's own ("where does each change land").
 - A blind grade of the heavy builds.
 - The heavy rungs' wall time on an idle host.
+- A many-edits script: edit requests emit about 47k output tokens a run, the old text and the new; an editor addressed by line range would emit the new text only. At most about 10% of a run.
+- A start context without the skill listing for a foreman whose brief names no skill: about 4% of a run (30,101 characters re-read by every request).
+- A read hook that appends the code around a search's matches to the search's own result, so the follow-up range read is not needed: at most about 8% of a run; it grows every search's result.

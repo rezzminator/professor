@@ -12,6 +12,7 @@ The bench behind [flights-foreman.md](flights-foreman.md): inputs, judges, price
 - [Confirm run](#confirm-run)
 - [What the grades turned on](#what-the-grades-turned-on)
 - [Store analysis behind the law](#store-analysis-behind-the-law)
+- [Heavy rungs](#heavy-rungs)
 
 ## Bench input
 
@@ -48,6 +49,10 @@ Dollars per million tokens: Opus input 4, output 20, cache read 0.2, 5-minute ca
 | law 3 | law 2 + the probe step |
 | scout | law 3 with one tracer run in place of the Locate round |
 | shipped | law 3 as the agent's own body, with the tools list and `PROBES`/`UNTESTED` in the return |
+| price law | `shipped`, unchanged, as the heavy rungs first met it: "§ Build's rounds are the whole run" |
+| work list | price law + § Work list and the rule that the run's size, context and price are never the why for `PARTIAL` (heavy rungs) |
+| reverted status sentence | work list + the status rule + "`PARTIAL` with a sound why is a correct return" (heavy rungs) |
+| shipped text | work list + the status rule and the sentence that a check that cannot be run is `UNTESTED`, never an open item (heavy rungs) |
 
 ## Results: dollars [requests] and blind grade
 
@@ -111,3 +116,59 @@ Replay of one week (134 runs, $1,262, 19,863 requests; the replay model prices t
 Mid-run cache misses were 2.6% of the dollars.
 
 Under the law, edits per read or search by request: 0.30 to 0.75 across the five tasks.
+
+## Heavy rungs
+
+Two heavy briefs, replayed verbatim from history in clones at their recorded base commits, each run in its own chat and worktree. The report-hang rung: a Go command-line tool over a 1.8 GB SQLite store whose report command hangs, cause unknown; acceptance: every one of 21 report topics exits 0 and a second run takes under 10 s. The list rung: a TypeScript front end with about ten named restyle items, a lint sweep over 153 sites, and a file listing 24 minor items. Prices as in § Price table; versions as in § Versions.
+
+### B1. The report-hang rung
+
+| Run | Dollars | Requests | Wall min | Model + tool min | Peak context | Return | Second run of a topic (bar: under 10 s) |
+| --- | ---: | ---: | ---: | --- | ---: | --- | --- |
+| foreman before the price law (history) | 12.41 | 202 | 71 | 28 + 43 | 303k | PARTIAL | 40-46 s |
+| price law, Opus medium, run 1 | 9.12 | 147 | 93.5 | 26.3 + 67.2 | 260k | PARTIAL | 19-31 s |
+| price law, Opus medium, run 2 | 9.55 | 184 | 102.1 | 25.1 + 77.0 | 202k | PARTIAL | 31-40 s |
+| price law, Sonnet high | 6.00 | 172 | 91.8 | - | 341k | PARTIAL | 85-115 s |
+| work list, Opus medium | 7.79 | 160 | 112.4 | 19.8 + 92.6 | 205k | PARTIAL | 12-26 s without the cost ledger, 78-132 s with it |
+| work list + a trace named in the brief, run 1 | 7.61 (+1.35 tracer) | 160 | 93.8 | 17.9 + 75.9 | 201k | PARTIAL | 23.5 s without the ledger |
+| work list + a trace named in the brief, run 2 | 9.70 (+1.35 tracer) | 171 | 99.0 | 25.3 + 73.8 | 205k | PARTIAL | 37-56 s |
+
+Every run leaves the same one acceptance item open (the 10-second bar needs a stored-progress design the brief puts out of scope), as the landed build did. Wall time on this rung is confounded: three runs raced CPU-bound report commands on one host at load 20-27; model time is the comparable figure.
+
+Landers on the two price-law Opus builds (history: 6.19 dollars with children, 69 min): 3.68 dollars, 80 requests, 37.7 min, no verdict (it ended its message while two background commands ran, which its definition forbids); 4.24 dollars, 94 requests, 40.7 min, FAIL on the same open item. Whole flight, foreman plus lander: 18.60 dollars and 140 min before; 13.79 dollars and 142.8 min after (-26% dollars at the same wall).
+
+### B2. The list rung (24 minor items listed in a file the brief points to)
+
+| Run | Dollars | Requests | Wall min | Peak context | Compactions | Return opens with | Minor items left open (of 24) |
+| --- | ---: | ---: | ---: | ---: | ---: | --- | ---: |
+| foreman before the price law, first return (history) | 12.64 | 259 | 45 | 206k | - | PARTIAL | 2 |
+| price law, Opus medium, run 1 | 9.26 | 210 | 41.8 | 203k | 1 | PARTIAL | 10 |
+| price law, Opus medium, run 2 | 3.92 | 65 | 23.7 | 195k | 0 | PARTIAL | 24 |
+| price law, Sonnet high | 2.35 | 82 | 23.1 | 214k | 0 | PARTIAL | 23 |
+| work list, Opus medium, run 1 | 8.88 | 173 | 41.7 | 205k | 1 | DONE with a row open | 1 |
+| work list, Opus medium, run 2 | 9.30 | 220 | 42.3 | 202k | 1 | PARTIAL | 3 |
+| work list, Sonnet high, run 1 | 2.98 | 108 | 25.0 | 233k | 0 | DONE with rows open | 8 |
+| work list, Sonnet high, run 2 | 3.40 | 150 | 32.2 | 205k | 1 | PARTIAL | 6 |
+| + status rule with the reverted sentence, Opus medium | 5.20 | 96 | 25.0 | 202k | 1 | PARTIAL | about 13 |
+| + status rule with the reverted sentence, Sonnet high, run 1 | 3.15 | 110 | 22.6 | 235k | 0 | PARTIAL | about 12 |
+| + status rule with the reverted sentence, Sonnet high, run 2 | 4.94 | 166 | 29.5 | 280k | 0 | PARTIAL | 8 |
+| shipped text, Opus medium, run 1 | 6.70 | 130 | 32.4 | 217k | 1 | PARTIAL | 4 |
+| shipped text, Sonnet high, run 1 | 5.38 | 211 | 39.9 | 256k | 1 | PARTIAL | 4 |
+| shipped text, Sonnet high, run 2 | 4.01 | 136 | 25.5 | 272k | 0 | other words before PARTIAL | about 14 |
+| shipped text, Opus medium, run 2 | 7.71 | 151 | 32.3 | 213k | 1 | PARTIAL | 4 |
+
+Shipped text on Opus medium, mean of 2: 7.21 dollars and 32.4 min, against 12.64 dollars and 45 min for the first return of the foreman before the price law (-43% dollars, -28% wall) with 4 and 4 minor items open against 2; each open item carries a why outside the run (another owner's file, a routing decision, no code site found). Both returns are the labelled block (15 and 23 lines).
+
+Hidden check of every list-rung build: front-end lint 0 and the affected test suites green. No blind grader ran on the heavy rungs; open-item counts and the hidden checks stand in for the grade.
+
+### B3. Shape facts of the heavy runs (from transcripts)
+
+- 96-97% of requests carry one tool call (a Bash call chaining 11 to 16 commands); 75% of requests are reads; 600-870 output tokens a request; context reaches 200k by request 60 to 91; a compaction leaves 25k to 34k.
+- Requests that only wait on a running command: 20 to 32 a run on the report-hang rung (0.94 to 1.07 dollars, 10-14% of the run), 0 to 1 on the list rung.
+- Effort is no price lever inside a run: 0.045 dollars a request at xhigh against 0.044 at medium in one run that changed effort.
+
+### B4. Negative results
+
+- A trace run named in the brief (one tracer run, 1.35 dollars, five questions about the report path; its path and questions prepended to the foreman's brief): 7.61 and 9.70 dollars against 7.79 without it, inside the run-to-run spread, the trace run named in 2 of 160 to 171 requests. Not built into the plugin.
+- An earlier compaction point, by replay of 22 recorded runs of 60 minutes and more: a reset past 180k changes dollars by -2%, past 150k -1%, past 130k +4%, past 110k +18% (each reset pays a 51k floor again); no live run was spent on it.
+- The status sentence "`PARTIAL` with a sound why is a correct return": reverted (table B2).

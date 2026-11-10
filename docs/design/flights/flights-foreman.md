@@ -1,6 +1,6 @@
 # flights:foreman
 
-A foreman turns one request into tested code where its parent points it, by its own hand, for the fewest dollars: three reading rounds, one write-and-prove round, one probe. It spawns nothing, never lands, commits or asks the user. The price evidence is in the ledger [flights-foreman-bench.md](flights-foreman-bench.md); the one-builder case is [flights.md](flights.md#why-the-foreman-builds-by-its-own-hand).
+A foreman turns one request into tested code where its parent points it, by its own hand, for the fewest dollars: three reading rounds, one write-and-prove round (a group at a time on a work list), one probe. It spawns nothing, never lands, commits or asks the user. The price evidence is in the ledger [flights-foreman-bench.md](flights-foreman-bench.md); the one-builder case is [flights.md](flights.md#why-the-foreman-builds-by-its-own-hand).
 
 ## Contents
 
@@ -8,6 +8,7 @@ A foreman turns one request into tested code where its parent points it, by its 
 - [The price model](#the-price-model)
 - [Reading](#reading)
 - [Building](#building)
+- [Work list](#work-list)
 - [Probe](#probe)
 - [Children: none](#children-none)
 - [Effort](#effort)
@@ -34,6 +35,8 @@ Ledger § Results: on five tasks in five repositories the foreman before this ch
 
 What the cut costs: on the two hard tasks the earlier foreman was graded 9 and 9 (merge as is); the law on opus · medium 6 to 8 and 7 to 9 over two graded runs each, on sonnet · high 5 to 7 and 8 (merge after small fixes, one fail), so the lander's review carries more on hard work.
 
+Heavy work (ledger § Heavy rungs): `flights:foreman` on opus · medium is the heavy-work foreman. On the list rung the shipped text costs $6.70 and $7.71 on opus · medium against $12.64 for the foreman before the price law, with 4 and 4 of 24 minor items open; `flights:foreman-sonnet` on sonnet · high costs $4.01 and $5.38, about two thirds of that (the two-runs-each means are $4.70 against $7.21), and is not reliable on a heavy list: 4 to 14 of 24 minor items open over six runs, four of six returns of 45 to 73 lines with bullets against the 25-line block, one opening with other words before `PARTIAL`. The brief's difficulty still chooses the tier; a heavy list that must come back complete goes to opus.
+
 A spawn tagged `[effort: high]` scored 7 and 9 on those two tasks for 46% more dollars than medium, mean grade 7.5 against 7.1 over four runs each: medium is the default, and the tag is the caller's for work where one missed rule costs more than a dollar.
 
 ## The price model
@@ -41,6 +44,10 @@ A spawn tagged `[effort: high]` scored 7 and 9 on those two tasks for 46% more d
 The law states it: a run is billed three ways. Every request re-reads the whole context; every token a read or a command's output brings in is billed on entry and re-read by each later request; every written token, thinking included, costs the most.
 
 Why: in 818 Opus foreman runs over 40 days, requests that only read or search were 68.1% of the dollars and 73% of the requests; dollars track request count (Spearman 0.96); the median run spent 31% of its dollars before its first edit.
+
+The law ends: the build's rounds, every one of them taken, are the whole run for work one write-and-prove round holds; larger work repeats them group by group ([Work list](#work-list)). Price shapes how a round is packed, never how much of the brief is built.
+
+Why: on the list rung, 2 of 3 runs of the previous text ("the rounds are the whole run") returned `PARTIAL` at 65 and 82 requests with the whole 24-item list unbuilt, exactly when their context reached the 200k compaction notice; the leftover is a second foreman's price (ledger § Heavy rungs, table B2).
 
 ## Reading
 
@@ -66,6 +73,18 @@ How the batching happens: inside one Bash call (20 to 28 commands chained), not 
 - **Every named item is built,** or the return is `PARTIAL` naming it.
 
 Why the table: blind graders found the first law's cheaper builds correct but thinner in tests; with the table rule the opus · medium builds passed all three clearer tasks (8, 8, 9).
+
+## Work list
+
+Work one write-and-prove round cannot hold, several items or one item across many files, is built group by group:
+
+1. Right after Locate, one Write saves the list to a file outside the tree, named for the request (`worklist-{the request in three words}.md`), a line an item, `open {item} — {files}`; items sharing files, a pattern or a test command form one group, the groups the acceptance names first.
+2. A group takes one Read, one Fill where needed, then one write-and-prove round; the same edit at many sites is one script run over all of them.
+3. The message opening the next group's Read rewrites the finished group's lines: `done {item} — {test name or file:line}` or `open {item} — {why}`.
+4. One probe after the last group.
+5. The compaction notice is answered at the next group's end, the list's path in `load_files`.
+
+Why: every Opus run with the list compacted once at the notice (about 205k down to 34k) and went on; open minor items fell from 10 and 24 (previous text) to 1, 3, 4 and 4 (table B2). The file is named for the request because two foremen of one chat first wrote one shared `worklist.md` (a bench run killed at 16 and 11 requests).
 
 ## Probe
 
@@ -127,6 +146,7 @@ The project contract is already in context.
 - **Waiting:** a waited command runs in the foreground with a timeout, nothing is started in the background and polled; one longer than 10 minutes gets one blocking wait.
 - **Gates:** a failing gate is fixed in the code; a limit rises only through the project's documented exception route.
 - **Decisions:** the foreman decides everything the work leaves open, never asks the user, sends a critical decision to `SendMessage(to: "main")` and keeps working.
+- **Nothing named is left open:** an item the brief names, or a file it points to lists, is built, or the return is `PARTIAL` naming it. The run's size, its context and its price are never the why (the definition carries one ✗ and one ✓ example). Neither is a check it cannot run (a screen it cannot see, a device, a live service): the item is built from the code, and what could not be checked goes under `UNTESTED`. Why: with the size rule alone, five of seven runs still left 6 to 13 listed items open as "needs a rendered check"; with the sentence the two Opus runs left 4 and 4 and one Sonnet run 4, the other Sonnet run about 14 (it disobeyed the sentence).
 - **Law:** it stays inside the request; a deletion leaves nothing behind.
 
 ## The return
@@ -147,7 +167,11 @@ The labels, in order:
 - `UNTESTED`: behaviour neither a test nor a probe ran, with why;
 - `OUTSIDE`.
 
-`DONE` only when every acceptance row is `met`. `UNTESTED` and the `open:` rows are the foreman's NOT READ.
+`DONE` only when every acceptance row is `met`. One `open` row makes the status `PARTIAL`, whoever owns the item and however sound its why: an item narrowed, deferred, met in part or left to another owner is `open`. `UNTESTED` and the `open:` rows are the foreman's NOT READ.
+
+A work list of more than 10 items returns one `ACCEPTANCE` row a group, one for each `open` line, and the list's path under `FILES`.
+
+Why the status rule: without it 2 of 4 list-rung runs opened with `DONE` while a row was open (`DONE (with … left open)`, `DONE with caveats`); with it, none of 7 runs did. A variant that added "`PARTIAL` with a sound why is a correct return" was reverted: its Opus run stopped at 96 requests with about 13 items left in one open line (ledger table B2).
 
 ## Never
 
@@ -166,10 +190,19 @@ The labels, in order:
 
 ## Open items
 
+Open after the heavy-rung bench:
+
+- The work list's folder is not pinned: "a file outside the tree" landed in the session scratch folder (2 runs), the shared temp root (2 runs) and the brief's own folder (2 runs).
+- Sonnet on a heavy list is not reliable: 4 to 14 of 24 minor items open over six runs; four of six Sonnet returns run 45 to 73 lines with bullets against the 25-line block; one opened with other words before `PARTIAL`.
+- One tool call a request is still the norm on heavy runs; the reading rounds become ten and more single-call reads on a many-item brief.
+- Wait-only requests cost 10-14% of a run that waits on long commands; no rule: a wait longer than the 5-minute prompt cache makes the next request re-write the whole context.
+
 Unbenched:
 
-- Compaction point: replay prices a compaction at 150k tokens 11.4% lower and one at 80k 10.5% higher; no live run tested it.
+- Compaction point: replay prices a compaction at 150k tokens 11.4% lower and one at 80k 10.5% higher; a replay of 22 runs of 60 minutes and more puts a reset past 180k at -2%, past 130k at +4%, past 110k at +18%; no live run tested it.
 - A brief that carries the reading list (exact files and symbols): not tested live.
-- Runs past 100 requests: no bench task is that large; the five tasks run 8 to 43 requests.
 - The same law on the lander, tracer and reviewers.
-- Splitting large work across several foremen: benched only on one small task.
+- A main chat splitting a heavy flight into several foremen of under 60 requests each.
+- A trace whose questions are the foreman's own ("where does each change land").
+- A blind grade of the heavy builds.
+- The heavy rungs' wall time on an idle host.

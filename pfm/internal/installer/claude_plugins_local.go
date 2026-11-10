@@ -39,16 +39,17 @@ func professorDevMarketplace(home string) string {
 }
 
 // pluginCopySkipped names the entries, by path under the plugin root, the copy
-// leaves out: dependencies, Finder's .DS_Store, and the typings and tsconfig.json
-// Claude Code generates into a plugin folder it loads, so a chat loading the copy
-// never reads as drift.
+// leaves out: dependencies, Finder's .DS_Store, the __pycache__ bytecode Python
+// writes beside a script it imports, and the typings and tsconfig.json Claude
+// Code generates into a plugin folder it loads, so a chat loading or running the
+// copy never reads as drift.
 func pluginCopySkipped(rel string) bool {
 	switch rel {
 	case filepath.Join(".claude-plugin", "types"), "tsconfig.json":
 		return true
 	}
 	name := filepath.Base(rel)
-	return name == "node_modules" || name == ".DS_Store"
+	return name == "node_modules" || name == ".DS_Store" || name == "__pycache__"
 }
 
 // localClaudePluginTarget turns an -alpha build's target local when its

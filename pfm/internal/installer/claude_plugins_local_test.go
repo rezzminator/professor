@@ -22,7 +22,8 @@ import (
 const alphaVersion = "0.80.0-alpha"
 
 // writePluginCheckout lays out {root}/{name}/plugins/{name} the way a plugin
-// repository does, plus the node_modules and .DS_Store entries a mirror skips.
+// repository does, plus the node_modules, .DS_Store and __pycache__ entries a
+// mirror skips.
 func writePluginCheckout(t *testing.T, root, name string) string {
 	t.Helper()
 	plugin := filepath.Join(root, name, "plugins", name)
@@ -30,6 +31,7 @@ func writePluginCheckout(t *testing.T, root, name string) string {
 	writeFixture(t, filepath.Join(plugin, "node_modules", "dep", "index.js"), "module.exports = 1\n")
 	writeFixture(t, filepath.Join(plugin, ".DS_Store"), "finder")
 	writeFixture(t, filepath.Join(plugin, "hooks", ".DS_Store"), "finder")
+	writeFixture(t, filepath.Join(plugin, "hooks", "__pycache__", "run.cpython-312.pyc"), "checkout bytecode")
 	return plugin
 }
 
@@ -361,6 +363,8 @@ func TestEnsureClaudePluginsAlphaInstallsTheLocalCopy(t *testing.T) {
 	// Finder drops .DS_Store into a copy it shows; the copy still matches.
 	writeFixture(t, filepath.Join(mirror(zero), ".DS_Store"), "finder")
 	writeFixture(t, filepath.Join(mirror(zero), "hooks", ".DS_Store"), "finder")
+	// Python writes its own bytecode cache beside a script a chat runs from the copy.
+	writeFixture(t, filepath.Join(mirror(zero), "hooks", "__pycache__", "run.cpython-312.pyc"), "copy bytecode")
 	// Claude Code writes typings and a tsconfig.json into a plugin folder it loads.
 	writeFixture(
 		t,

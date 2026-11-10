@@ -30,7 +30,7 @@ The foreman exists to raise the ratio of code written to tokens read. That ratio
 
 Reading is the cost; writing is the product. The family raises the ratio three ways:
 
-- **One builder reads once.** The foreman reads what the build needs and writes the change itself; a child exists only for an area disjoint from its own.
+- **One builder reads once.** The foreman reads what the build needs and writes the change itself; it spawns nothing, and the main chat splits work that divides by area.
 - **A big reading may go to a tracer once.** The answer is reused while its files are unchanged.
 - **Review and the full gate run once per worktree.** They happen at the very end, inside one lander, whose cheap children read what it spawns them for. Small work, every edit fixed in advance, has no lander.
 
@@ -44,14 +44,14 @@ One brief (`pfm restart`, base `e4e4fa09`) was built three ways on 2026-10-18 an
 | `flights:foreman` tree | $19.03 | 59 min | 550 | 24 agents; 6 workers on one package, 18 of 21 test runs red from siblings' half-written files; the foreman idle about 37 of the 59 min; workers re-read 15 of the 27 files their briefs summarized from the tracer |
 | one-builder prototype | $6.87 | 39 min | 133 | one agent |
 
-Flight merges over the prior 60 days averaged 1.42 Go test lines per code line, against 0.92 and 0.78 for the two single agents. So the foreman is the builder: it reads what the build needs, writes the whole change, and tests once it is whole. Splitting costs reading (each child re-reads what its brief summarized) and wall time (siblings break each other's runs), so it is the exception.
+Flight merges over the prior 60 days averaged 1.42 Go test lines per code line, against 0.92 and 0.78 for the two single agents. So the foreman is the builder: it reads what the build needs, writes the whole change, and tests once it is whole. Splitting costs reading (each child re-reads what its brief summarized) and wall time (siblings break each other's runs), so a foreman spawns no child; the main chat splits work across several foremen on separate files of one worktree.
 
 ## The family
 
 | Member | Kind | Model · effort | Does |
 | --- | --- | --- | --- |
 | `flights:foreman-sonnet` | agent | sonnet · high | Foreman for a clear path: the pattern is in the code; the same protocol as `flights:foreman`, in its own file |
-| `flights:foreman` | agent | opus · high | Foreman for design choices, ambiguity, unfamiliar code, an unknown cause, several modules and the toughest work |
+| `flights:foreman` | agent | opus · medium | Foreman for design choices, ambiguity, unfamiliar code, an unknown cause, several modules |
 | `flights:lander` | agent | opus · medium | Reviews, fixes and gates a worktree change, then returns it for the merge |
 | `flights:speccer` | agent | opus · xhigh | On-demand specification outside the build/land lifecycle; returns a `spec.md` path and token price to its caller |
 | `flights:hunter`, `flights:spec-walker`, `flights:sub-lander` | agents | opus · sonnet · haiku | The lander's read-only children ([flights-lander.md](flights-lander.md#the-children)) |
@@ -67,7 +67,6 @@ Flight merges over the prior 60 days averaged 1.42 Go test lines per code line, 
 ```text
 main chat -> worktree.sh create (gitter without the script; or develop) -> foreman tier, worktree path in its brief
 foreman -> reads, writes the whole change, runs the affected tests once -> one return message
-(a child only for an area disjoint from the foreman's own, while the foreman is busy with its part)
 every foreman on the worktree returned -> main chat -> flights:lander -> its own review, children in the background
 lander fixes all findings -> affected tests until green -> full gate once -> lander returns
 main chat -> worktree.sh land (gitter commits / merges on a refusal or without the script) -> verified teardown (or KEEP lock, gitter's)
@@ -77,9 +76,9 @@ flight abandoned without merge -> writers stopped -> main chat -> worktree.sh re
 1. **Settle.** The main chat settles open requirements with the user before any dispatch.
 2. **Place.** The main chat makes the worktree with the repo's `worktree.sh create` where it has one (gitter makes it on a refusal and in a repo without the script), or names `develop` or the checkout, and passes the path in the brief. Several foremen may share one worktree on separate areas. Size is the judgment left in the edits, never the file count: work whose every edit is fixed in advance (a rename, a move, a known fix, a spec fixing every line), with no other agent writing its files, is small at any file count and skips the flight (`templates/global/rules/flights-life-cycle.md` rule 2).
 3. **Build.** A foreman builds the request by its own hand.
-   - **Reads:** what the build needs; see [reading](#reading-and-the-trace-store).
-   - **Writes:** the whole change, then runs the affected tests once, never after each edit; a fix's regression test runs red first.
-   - **Children:** a child only when both hold: the foreman is busy with its own part, and the other area has no file in common with its own.
+   - **Reads:** what the build needs, in three rounds; see [reading](#reading-and-the-trace-store).
+   - **Writes:** the tests and the change in one round, the new tests run on the unchanged code first, then one foreground run of the affected tests and static checks, then one probe script.
+   - **Children:** none; the foreman spawns no agent.
    - **Returns:** one message; every item the brief names is built, or the return is `PARTIAL` naming it.
 4. **Land.** Once every foreman on a worktree has returned, the main chat spawns one `flights:lander`. The lander:
    1. syncs the worktree to TARGET's tip;
@@ -96,12 +95,11 @@ flight abandoned without merge -> writers stopped -> main chat -> worktree.sh re
 
 ## Choosing a tier
 
-The main chat chooses at dispatch; a foreman chooses for the rare child it spawns.
+The main chat chooses at dispatch; a foreman spawns nothing.
 
 | Choice | Decided by | Rule |
 | --- | --- | --- |
-| Foreman tier | difficulty and ambiguity, never size | `flights:foreman-sonnet`: the path is clear, the pattern is in the code · `flights:foreman`: design choices, ambiguity, unfamiliar code, an unknown cause, several modules, the toughest work |
-| Child tier | what the area needs | `flights:foreman-sonnet`: a clear path, the pattern is in the code · `flights:foreman`: design, debugging, judgment · `documenter`: docs · `pcm`: prompt files |
+| Foreman tier | difficulty and ambiguity, never size | `flights:foreman-sonnet`: the path is clear, the pattern is in the code · `flights:foreman`: design choices, ambiguity, unfamiliar code, an unknown cause, several modules |
 | Lander children | the lander's inventory PLAN, computed from the diff and the spec files | hunters k = min(4, ceil(production diff lines / 600)) · spec walkers per spec with 10+ numbered rows · sub-landers by inventory row ranges |
 
 The lander itself has no tiers: `flights:lander` lands every worktree.
@@ -112,19 +110,15 @@ In the build/land lifecycle:
 
 - **Messages only.** A brief is the spawn prompt, and a return is the final message.
 - **No build/land files.** The build/land protocol creates no flight directory, run log, brief file, return file, gate file or spec file.
-- **The one path that travels** is a tracer run, when one exists, named in a brief so the receiver may reuse it.
+- **The one path that travels** is a tracer run, when one exists, named in a brief so the receiver may reuse it (a foreman spawns no tracer).
 - **A foreman's brief carries:**
   - the work and its acceptance;
   - where to work;
   - the testing manual path, if one exists;
-  - a tracer run path, when one exists;
-  - for a child, the interface it must fit.
+  - a tracer run path, when one exists.
 - **A foreman's return:**
   - first line `DONE {name}` or `PARTIAL {name}: {what is left}`;
-  - then the decisions it made, the files it changed, and the tests it ran with their result lines;
-  - a `TRACER` line naming any tracer run it made or used, so a later agent can reuse it;
-  - an `OUTSIDE` line naming any change beyond the request, which it never makes.
-- **A child's return** has a foreman's shape. It is a claim. The parent checks it against the diff and the test lines.
+  - the fixed block of 25 lines at most: `ACCEPTANCE`, `DECISIONS`, `CRITICAL`, `FILES`, `TESTS`, `PROBES`, `UNTESTED`, `OUTSIDE` ([flights-foreman.md](flights-foreman.md#the-return)).
 - **A lander's return:**
   - first line `PASS`, `FIXED` or `FAIL {worktree}`;
   - then each finding, fixed or listed;
@@ -136,8 +130,7 @@ In the build/land lifecycle:
 ## Reading and the trace store
 
 - **The foreman reads what the build needs:** the files it changes, the code it calls at its signatures and contracts, and the closest pattern once.
-- **The tracer is optional.** A foreman may call one; it is not required to.
-- **A run may travel.** When a tracer run exists, its path may go into a child's brief.
+- **A foreman calls no tracer.** It reads in three Bash-batched rounds; a tracer run path in its brief may be reused.
 - **The store is per repo.** Every tracer run lives under `/tmp/{project}/tracer/`, and each answer records the sha256 of every file it cited.
 - **The tracer checks the store first.** Recall searches every earlier run of the same repo root, with no age limit.
   - An answer whose cited files all match their recorded hashes is fresh: it is returned with no walk.
@@ -153,7 +146,7 @@ In the build/land lifecycle:
 ## Tests
 
 - **Who runs what:**
-  - a foreman runs the affected tests once its change is whole, never after each edit; a fix's regression test runs red first;
+  - a foreman runs the new tests red on the unchanged code, then the affected tests and static checks once after the change, then one probe script;
   - on a flight, only the lander runs the full gate, once per worktree right before its merge, after every review finding is fixed and the affected tests are green;
   - on small work, the main chat runs the full gate when the change spans layers or the project's done-gate requires it, then hands gitter the passing check.
 - **A red full gate:** the lander fixes it, gets the failing tests green with the affected-test command, never a gate rerun, then runs that gate once more. That is the only repeat.
@@ -166,10 +159,10 @@ The `auto-effort` plugin gives an agent whose frontmatter carries `effortControl
 
 | Agent | `effortControl` |
 | --- | --- |
-| `flights:foreman`, `flights:foreman-sonnet` | `on` (floor medium, ceiling xhigh), both starting at high |
+| `flights:foreman`, `flights:foreman-sonnet` | floor medium, ceiling xhigh; `flights:foreman` starts at medium, `flights:foreman-sonnet` at high |
 | `flights:reviewer`, `flights:reviewer-pro`, `documenter` | `on` |
 
-`pcm` does not carry `effortControl`. `flights:lander` and its children carry no `effortControl` and no buttons. Every steered agent but the two foremen lists the three tools in its own `tools:` line under the `mcp__auto-effort__` prefix; the two foremen carry every tool and have no `tools:` line. A foreman steers itself: effort up before a design choice the code leaves open or a red whose cause it cannot name, effort down for a stretch of mechanical edits, effort auto once that stretch is over.
+`pcm` does not carry `effortControl`. `flights:lander` and its children carry no `effortControl` and no buttons. Every steered agent but the two foremen lists the three tools in its own `tools:` line under the `mcp__auto-effort__` prefix; the two foremen carry no effort buttons and a `tools:` line without them. The plugin steers a foreman: one step up at a failing test run, home at the next green ([flights-foreman.md](flights-foreman.md#effort)).
 
 ## Decisions
 
@@ -183,16 +176,16 @@ The `auto-effort` plugin gives an agent whose frontmatter carries `effortControl
 | Absent | Instead |
 | --- | --- |
 | Agent hooks (cut gate, call cap, stop hooks, wait denial) | the protocol in the agent file |
-| A call or round cap | the foreman decides when its change is whole |
+| A call or round cap | the foreman's three reading rounds and one write round are its protocol |
+| A foreman's child | the main chat splits work across foremen |
 | Flight files and a run log | messages |
-| A lander or gitter spawned by a foreman | the main chat owns both |
 | Review lenses (a security seat, fixed tracers) | the lander's hunt and the children its computed PLAN spawns |
 | A second gate round | fixes inside the one lander |
 | A required specification or requirements interview step | the main chat settles requirements; the user may independently request `flights:speccer` |
 
 ## Harness settings
 
-The deepest chain is main → foreman → child foreman → `flights:tracer` → `flights:sub-tracer`: four levels below the main chat; a foreman reaches it only when it spawns. pfm writes `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` and `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` onto every Claude Code launch line (`pfm/internal/claudelaunch/knobs.go`). A spawn refused at the concurrency limit never started, and goes out again once a slot frees.
+The deepest chain is main → `flights:reviewer-pro` → `flights:tracer` → `flights:sub-tracer` → its child `flights:sub-tracer`: four levels below the main chat; a foreman spawns nothing and sits at one. pfm writes `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` and `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` onto every Claude Code launch line (`pfm/internal/claudelaunch/knobs.go`). A spawn refused at the concurrency limit never started, and goes out again once a slot frees.
 
 ## Surfaces that stay in sync
 

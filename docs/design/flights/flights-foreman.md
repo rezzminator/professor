@@ -1,144 +1,175 @@
 # flights:foreman
 
-A foreman turns one request into landed-ready code for the fewest tokens read. It builds by its own hand: it reads what the build needs, writes the whole change and tests it once. A child exists only for an area disjoint from its own. It never lands, commits or asks the user. Why one builder: [flights.md](flights.md#why-the-foreman-builds-by-its-own-hand) (one brief built three ways: $8.04, $19.03 for the foreman tree, $6.87 for a one-builder prototype).
+A foreman turns one request into tested code where its parent points it, by its own hand, for the fewest dollars: three reading rounds, one write-and-prove round, one probe. It spawns nothing, never lands, commits or asks the user. The price evidence is in the ledger [flights-foreman-bench.md](flights-foreman-bench.md); the one-builder case is [flights.md](flights.md#why-the-foreman-builds-by-its-own-hand).
 
 ## Contents
 
 - [Tiers](#tiers)
-- [Effort](#effort)
-- [Input](#input)
+- [The price model](#the-price-model)
 - [Reading](#reading)
 - [Building](#building)
-- [Children](#children)
-- [Children's briefs](#childrens-briefs)
-- [Waiting](#waiting)
-- [Integrating and testing](#integrating-and-testing)
-- [Repairs](#repairs)
-- [Limits](#limits)
-- [Decisions](#decisions)
+- [Probe](#probe)
+- [Children: none](#children-none)
+- [Effort](#effort)
+- [Tools](#tools)
+- [Input](#input)
+- [Waiting, gates, decisions, law](#waiting-gates-decisions-law)
 - [The return](#the-return)
 - [Never](#never)
 - [Declaration](#declaration)
+- [Open items](#open-items)
 
 ## Tiers
 
 | Agent | Model · effort | For |
 | --- | --- | --- |
-| `flights:foreman` | opus · high | design choices or ambiguity, unfamiliar code, an unknown cause, work across several modules, the toughest work |
+| `flights:foreman` | opus · medium | design choices or ambiguity, unfamiliar code, an unknown cause, work across several modules |
 | `flights:foreman-sonnet` | sonnet · high | a clear path: the pattern is in the code |
 
-Difficulty and ambiguity choose the tier, never size: a 3,000-line rename with a pattern is `flights:foreman-sonnet` work, and a 40-line race is `flights:foreman` work.
+Difficulty and ambiguity choose the tier, never size. Both files carry the same body, byte for byte (pinned by `test_sonnet_foreman_carries_the_foreman_manual`).
 
-## Effort
+### Why these two setups
 
-Both Claude foremen start at effort high and carry the effort buttons (`effortControl`, floor medium, ceiling xhigh):
+Ledger § Results: on five tasks in five repositories the foreman before this change (opus · high, the earlier manual) cost $8.60 at a blind-grader mean of 9.0. The law as it ships costs $4.93 on opus · medium (43% less) and $2.68 on sonnet · high (69% less), every hidden test passing (ledger § Confirm run). Sonnet · medium costs $1.81 and fails correctness on 3 of 5 tasks, so it is not shipped.
 
-- **Effort up** before a design choice the code leaves open, or a red whose cause it cannot name.
-- **Effort down** for a stretch of mechanical edits.
-- **Effort auto** once that stretch is over.
+What the cut costs: on the two hard tasks the earlier foreman was graded 9 and 9 (merge as is); the law on opus · medium 6 to 8 and 7 to 9 over two graded runs each, on sonnet · high 5 to 7 and 8 (merge after small fixes, one fail), so the lander's review carries more on hard work.
 
-## Input
+A spawn tagged `[effort: high]` scored 7 and 9 on those two tasks for 46% more dollars than medium, mean grade 7.5 against 7.1 over four runs each: medium is the default, and the tag is the caller's for work where one missed rule costs more than a dollar.
 
-The brief, as the spawn prompt:
+## The price model
 
-- the work and its acceptance;
-- where to work: a path or a branch, named by the parent (the foreman's own prompt names no worktree: it works where its parent points it);
-- the testing manual path, when the project has one;
-- for a child: the interface its piece must fit, and a tracer run path when one exists.
+The law states it: a run is billed three ways. Every request re-reads the whole context; every token a read or a command's output brings in is billed on entry and re-read by each later request; every written token, thinking included, costs the most.
+
+Why: in 818 Opus foreman runs over 40 days, requests that only read or search were 68.1% of the dollars and 73% of the requests; dollars track request count (Spearman 0.96); the median run spent 31% of its dollars before its first edit.
 
 ## Reading
 
-- **It reads what the build needs:** the files it changes, the code it calls at its signatures and contracts, and the closest pattern once.
-- **The tracer is optional.** It may call one; it is not required to. The store comes first when it does: a tracer reuses every earlier answer whose files are unchanged; see [the trace store](flights.md#reading-and-the-trace-store).
+Three rounds before the first edit:
+
+- **Locate:** one Bash call: a grep for every name the brief gives, line counts, test names, the testing manual's run commands.
+- **Read:** the exact ranges Locate found.
+- **Fill:** only what Read left open. A round past the third opens with one line naming its question.
+
+A read brings in the lines its decision needs (ranges, context greps), a file over 300 lines is read by range, a command's output is cut where it is produced.
+
+Why: replaying last week's 134 Opus runs with read streaks batched four to a request prices them 23.1% lower (unlimited: 29.0%); capping each read result at 3,000 tokens 8.8% lower. Live, the law cut requests on the three replays from 37–42 to 12–25.
+
+How the batching happens: inside one Bash call (20 to 28 commands chained), not as parallel tool calls: 357 of 368 tool-calling messages under the law carry one tool call.
 
 ## Building
 
-- **By its own hand.** It writes the whole change itself.
-- **Tests once the change is whole.** It runs the affected tests when the change is whole, never after each edit. A fix's regression test runs red first.
-- **Every named item is built.** Every item the brief names is built, or the return is `PARTIAL` naming it; narrowing the brief is never `DONE`.
-- **Beyond the request.** A change beyond the request is named under the return's `OUTSIDE` line, never made.
+- **Tests are one table:** a row per case the acceptance names and per boundary of a guard, each asserting the exact value.
+- **Write and prove in one round:** the test edits, the new tests run on the unchanged code (the red proof), the change, then one foreground call chaining the affected tests and the static checks, each step ending `|| echo "FAILED: {step}"`.
+- **A red in the change:** read to its cause, every cause fixed in one round, one rerun.
+- **A red in a file the foreman did not touch:** its first error line under `OUTSIDE`, uninvestigated.
+- **The full suite and the gate** stay the lander's.
+- **Every named item is built,** or the return is `PARTIAL` naming it.
 
-## Children
+Why the table: blind graders found the first law's cheaper builds correct but thinner in tests; with the table rule the opus · medium builds passed all three clearer tasks (8, 8, 9).
 
-A child goes out only when both hold: the foreman is busy with its own part, and the other area has no file in common with its own.
+## Probe
 
-| Area | Goes to |
-| --- | --- |
-| A clear path, the pattern is in the code | `flights:foreman-sonnet` |
-| Design, debugging, judgment | `flights:foreman` |
-| Docs | `documenter` |
-| Prompt files | `pcm` |
+Once the tests are green, one Bash call runs one throwaway script, kept outside the tree, that drives the change with inputs the tests leave out:
 
-- **Disjoint files.** No two children, and no child and the foreman, share a file: the foreman lists both file sets before the spawn, and a file on both lists keeps the area its own.
-- **No caps.** No call or round cap exists; the foreman decides when its change is whole.
+- the input built to break each absolute in the acceptance;
+- the other kind of input or code path;
+- the empty and malformed input;
+- the failure path;
+- the commonest real form from the repository's own fixtures.
 
-## Children's briefs
+It prints input then result, one line each. A wrong result is fixed and becomes a test row.
 
-A child's brief carries:
+Why: the earlier foreman's quality lead came from about five ad-hoc probes of its own build, about $0.20 a run, not from its extra reading (its context before the first edit was the same size as the law's: 128k against 120k tokens). With the probe step, opus · medium scored 8 and 6 on the check task and 9 and 7 on the hook task over two runs each, against 6 and 7 without it, for about 7% more dollars: a gain inside the run-to-run spread, kept because each confirm build's probes found and fixed wrong results its tests had passed (a 15-second parse cut to 63 ms, three missed coordinate forms). As a rule alone the step leaked: none of five sonnet · medium runs probed. So the printed lines are a field of the return (`PROBES`).
 
-- the piece;
-- `OWNS`, the files it changes, and `NOT YOURS`, the foreman's files;
-- the exact change, or the problem for a `flights:foreman` child;
-- the acceptance;
-- the test command;
-- the worktree;
-- the interface it must fit;
-- a tracer run path that covers its area, when one exists.
+## Children: none
 
-It never carries a file of its own: the brief is the message.
+The definitions list no `Agent` tool. Three forms of delegation were benched against the foreman building alone, and each cost more:
 
-## Waiting
+- an Opus foreman designing for Sonnet children ($7.49 against $6.63 for the same law alone, lower grades);
+- two Sonnet foremen splitting one task in one worktree (+44% dollars, 5.3 min against 4.6);
+- a tracer reading first (+85% and +39%, 76 and 60 requests against 23 and 30).
 
-- **Waiting on children:** the foreman ends its turn only to wait for its children; each return arrives as a notification.
-- **Commands:** they run in the foreground with a timeout. One longer than 10 minutes runs in the background and is waited on with one blocking wait.
-- **Never with a command running:** the foreman never ends its turn while its own command runs.
+A child pays its own start and re-reads what its parent read. Work that splits into areas is split by the main chat: several foremen on separate files of one worktree. A file a guard refuses goes under `OUTSIDE` with its exact new text.
 
-## Integrating and testing
+## Effort
 
-- **Reading returns:** each child's return is a claim. The foreman checks it against the child's diff and the quoted test result lines, against the piece's acceptance.
-- **Testing:** with any child's piece in, it runs the affected tests through the testing manual's affected-test command.
-- **No full runs:** it runs no full suite and no full gate; the lander runs those once, or the main chat on small work.
+No effort buttons and no effort prose. `effortControl` (floor medium, ceiling xhigh) stays: the effort plugin raises a foreman one step at a failing test run and returns it home at the next green. The red proof is a failing test run, so the write that follows runs one step above the reading.
 
-## Repairs
+Measured in the plugin's decision log over 57 bench runs: 56 first-failure and 34 second-failure raises; 14% to 26% of a run's requests ran above its home level; the foreman at home high ran 19.4% of its requests at xhigh.
 
-- **First failure:** a child whose return fails its acceptance gets one SendMessage naming the cause, and resumes.
-- **Second failure:** if it fails again, the foreman fixes the piece itself or hands it to a `flights:foreman` child.
-- **No stopping:** the foreman does not stop the flight for a red.
+Why no buttons: 0 presses in 85 bench runs, 37 presses in 922 runs over 40 days.
 
-## Limits
+## Tools
 
-- **A failing gate is fixed in the code.**
-- **The exception route.** A foreman raises a limit only through the project's documented exception route, the reason recorded there and in its `DECISIONS`; the lander judges it.
+`Read, Write, Edit, Bash, Skill, SendMessage` and the two forward-compaction tools. Each has its reason:
 
-## Decisions
+- `Edit` and `Write` refuse a file the agent has not `Read`;
+- `Skill` loads a testing manual that is a skill (650 of the foremen's 736 Skill calls in 40 days);
+- `SendMessage` carries a critical decision to main, and listed it needs no `ToolSearch` first (the lander, with a list, made 41 SendMessage calls and no ToolSearch call; the unlisted foremen made 178 ToolSearch calls beside 289 SendMessage calls);
+- the compaction tools hold a long run.
 
-- **It decides.** The foreman decides everything the work leaves open, and lists every decision first in its return.
-- **Critical decisions go to the main chat, without stopping.** A critical decision is one where being wrong costs data, privacy or patient data, money, security, or anything irreversible. The foreman sends it to `SendMessage(to: "main")` with the choice it is proceeding with, and keeps working. If the answer differs, it adopts it.
-- **It never asks the user.**
+Absent on purpose: `Agent` ([Children: none](#children-none)), `ToolSearch` and its deferred-tool list, `Grep` and `Glob` (0 calls in 922 runs: foremen search through Bash), the effort buttons ([Effort](#effort)), every other MCP tool.
+
+Start load: a foreman's first request was 29.9k to 36.2k tokens across the five repositories with every tool, and is 22.9k to 28.9k with the list, 20% to 23% less.
+
+## Input
+
+The brief:
+
+- the work and its acceptance (absent: one acceptance row per thing the work asks for);
+- where to work (absent: the current directory);
+- the testing manual, a path or a skill (absent: the test command the project's own build files name).
+
+The project contract is already in context.
+
+## Waiting, gates, decisions, law
+
+- **Waiting:** a waited command runs in the foreground with a timeout, nothing is started in the background and polled; one longer than 10 minutes gets one blocking wait.
+- **Gates:** a failing gate is fixed in the code; a limit rises only through the project's documented exception route.
+- **Decisions:** the foreman decides everything the work leaves open, never asks the user, sends a critical decision to `SendMessage(to: "main")` and keeps working.
+- **Law:** it stays inside the request; a deletion leaves nothing behind.
 
 ## The return
 
-One message:
+One message, the fixed block alone, 25 lines at most, its first word `DONE` or `PARTIAL`, every line opening with its label, and whatever return the brief asks for placed under the label it fits.
 
-- **First line:** `DONE {name}`, or `PARTIAL {name}: {what is left}`.
-- **Acceptance:** each acceptance item of the brief, in its words, `met` with its evidence or `open`; one `open` row makes the return `PARTIAL`.
-- **Decisions:** each with its one-line reason.
-- **Changed files.**
-- **Tests:** the commands run and their result lines, quoted from what ran.
-- **`TRACER`:** the tracer run it made or used, so a later agent can reuse it.
-- **`OUTSIDE`:** any change beyond the request, named, never made.
+Why: bench briefs carry their own loose return section, and with the shape stated alone 3 of 5 sonnet returns came back as free prose with one to four labels; with this sentence 3 of 3 reruns opened with the status word and carried every label, the sonnet ones at 31 and 39 lines.
+
+The labels, in order:
+
+- `DONE` or `PARTIAL`;
+- `ACCEPTANCE`: each item `met: {test name or file:line}` or `open: {why}`;
+- `DECISIONS`: each with its reason and how to flip it;
+- `CRITICAL`;
+- `FILES`;
+- `TESTS`: command and printed result line, or `COULD NOT RUN: {first error line}`;
+- `PROBES`: input and printed result, `none: {the change runs no code}`, or `COULD NOT RUN`;
+- `UNTESTED`: behaviour neither a test nor a probe ran, with why;
+- `OUTSIDE`.
+
+`DONE` only when every acceptance row is `met`. `UNTESTED` and the `open:` rows are the foreman's NOT READ.
 
 ## Never
 
-- **Machinery:** no hooks, no call or round cap, no cutting tool, no flight files or run log.
-- **Narrowing:** no `DONE` over a brief item left unbuilt.
-- **Scope:** no change beyond the request.
-- **Landing:** no lander, no gitter, no commit, no merge; those belong to the main chat.
-- **People and relays:** no question to the user, and no relay that hands the whole request to an identical foreman.
-- **Testing:** no full suite, no full gate.
+- no child, tracer or other agent;
+- no effort button;
+- no full suite or gate;
+- no commit, merge or landing;
+- no question to the user;
+- no `DONE` over an item left unbuilt;
+- no change beyond the request.
 
 ## Declaration
 
-- **Base:** `plugins/flights/plugins/flights/agents/foreman.md`, opus at effort high, `effortControl` floor medium and ceiling xhigh.
-- **Sonnet tier:** `plugins/flights/plugins/flights/agents/foreman-sonnet.md` is a full agent file on sonnet at effort high with the same `effortControl` band. The base carries no `tools:` line, so every tool, the effort buttons included, is available as for `general-purpose`; the sonnet file carries none either ([flights.md](flights.md#effort-buttons)).
-- **Tools:** every tool, no `tools:` line.
+- **`plugins/flights/plugins/flights/agents/foreman.md`:** opus, effort medium, `effortControl` floor medium and ceiling xhigh, the `tools:` line of [Tools](#tools).
+- **`plugins/flights/plugins/flights/agents/foreman-sonnet.md`:** a full file, sonnet at effort high, the same band, tools and body.
+
+## Open items
+
+Unbenched:
+
+- Compaction point: replay prices a compaction at 150k tokens 11.4% lower and one at 80k 10.5% higher; no live run tested it.
+- A brief that carries the reading list (exact files and symbols): not tested live.
+- Runs past 100 requests: no bench task is that large; the five tasks run 8 to 43 requests.
+- The same law on the lander, tracer and reviewers.
+- Splitting large work across several foremen: benched only on one small task.

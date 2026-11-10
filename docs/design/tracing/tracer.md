@@ -107,7 +107,7 @@ Each rule holds in the prompts or the kit today; the clause after it is why.
 - send a question the run does not settle back to tracer before calling it unsettled, and never re-ask a fact the final cites;
 - cite the repository's `path:line` in a tracked file, never the run, which is scratch.
 
-A flights foreman may send an area it will not edit to tracer, with `Repo root:` and a `RECALL: {run}` line per run it holds, and may pass the run paths covering a child's area in its brief; no foreman is required to trace. `flights:reviewer` puts every question that leaves its own reading into one tracer run, `flights:reviewer-pro` into at most three, one per area, each brief carrying the `RECALL` lines and told to skip CHECK, TESTS and lines to paste. `clone-distiller` sends the code part of every question about an external clone to one tracer, its prompt naming the clone read-only, runs the history commands itself and drops CHECK and TESTS.
+A flights foreman calls no tracer and spawns no child: its definitions list no `Agent` tool, and a tracer reading first cost it +85% and +39% dollars in the bench ([flights-foreman-bench.md](../flights/flights-foreman-bench.md#versions)); the main chat may pass a tracer run path in a foreman's brief. `flights:reviewer` puts every question that leaves its own reading into one tracer run, `flights:reviewer-pro` into at most three, one per area, each brief carrying the `RECALL` lines and told to skip CHECK, TESTS and lines to paste. `clone-distiller` sends the code part of every question about an external clone to one tracer, its prompt naming the clone read-only, runs the history commands itself and drops CHECK and TESTS.
 
 ## Harness behaviour
 

@@ -22,9 +22,9 @@ The lander takes one worktree's whole change after every foreman on it has retur
 | Agent | Model · effort | Visible to | Job |
 | --- | --- | --- | --- |
 | `flights:lander` | opus · medium | the main chat | reviews, judges, fixes, tests, gates |
-| `flights:hunter` | opus | both landers | hunts defects inside one cluster of the production diff |
-| `flights:spec-walker` | sonnet | both landers | holds a range of the request's numbered rows against the code |
-| `flights:sub-lander` | haiku | both landers | follows inventory rows or threads past the diff and flags each |
+| `flights:diff-checker` | opus | both landers | hunts defects inside one cluster of the production diff |
+| `flights:spec-checker` | sonnet | both landers | holds a range of the request's numbered rows against the code |
+| `flights:usage-checker` | haiku | both landers | follows inventory rows or threads past the diff and flags each |
 
 Only the main chat spawns a lander. The children are read-only (`Read, Grep, Glob, Bash`, Bash for `grep`, `sed -n` and read-only `git`), write nothing and judge nothing: each returns candidates or flags for the lander to verify.
 
@@ -32,7 +32,7 @@ Only the main chat spawns a lander. The children are read-only (`Read, Grep, Glo
 
 ```text
 lander -> sync to TARGET's tip -> inventory (call 1) -> one spawn message (call 2)
--> hunters / spec walkers / sub-landers in the background
+-> diff-checkers / spec-checkers / usage-checkers in the background
 -> lander hunts the seams -> every candidate verified on disk -> report
 -> fix every finding -> affected tests until green -> full gate once -> return
 ```
@@ -64,23 +64,23 @@ Call 1 runs `lander-inventory.py`, shipped as the `flights:lander-inventory` ski
 
 | PLAN row | Rule | Cap |
 | --- | --- | --- |
-| `PLAN HUNTER` | k = min(4, ceil(production diff lines / 600)) clusters in path order, each with the tests beside its files; none at 400 production lines or fewer | 4 |
-| `PLAN WALKER` | a spec file with 10 or more numbered rows gets 2 ranges, 3 past 60 rows; the largest spec first | 4 in all |
-| `PLAN SUB-LANDER` | inventory rows by line number: `LEFT`+`GONE` in batches of about 12, `LITERAL` of about 25 | 6 |
+| `PLAN DIFF-CHECKER` | k = min(4, ceil(production diff lines / 600)) clusters in path order, each with the tests beside its files; none at 400 production lines or fewer | 4 |
+| `PLAN SPEC-CHECKER` | a spec file with 10 or more numbered rows gets 2 ranges, 3 past 60 rows; the largest spec first | 4 in all |
+| `PLAN USAGE-CHECKER` | inventory rows by line number: `LEFT`+`GONE` in batches of about 12, `LITERAL` of about 25 | 6 |
 
-Production lines exclude tests, docs, generated, lock and history files. Exit 2 prints `FAILED` with its cause; the lander then names it in COVERAGE, spawns hunters by module by hand and cuts the removed threads in its own hunt.
+Production lines exclude tests, docs, generated, lock and history files. Exit 2 prints `FAILED` with its cause; the lander then names it in COVERAGE, spawns diff-checkers by module by hand and cuts the removed threads in its own hunt.
 
 Call 2 is one message spawning exactly the PLAN rows in the background: no row added, dropped, merged or re-cut. The spawn is computed because a written spawn rule was disobeyed in 2 of 2 bench runs, while the computed PLAN was obeyed in 4 of 4; two runs on one change spawn alike.
 
 ## The children
 
-- `flights:hunter`: one cluster's diff and the spec rows naming its files; reads every changed function whole and asks SPEC, LINES, PATHS, MANY, GUARDS, STATE, COMMENTS and TESTS at each. Budget 30 tool calls. Returns `C{n} · severity · path:line`, the line copied from its own `grep -n` output and the failure, then `GAPS`, `READ` and `NOT READ`.
-- `flights:spec-walker`: one row range of a spec; finds the line keeping each row's promise in every state the row names. Budget 30 tool calls. Returns candidates tied to a row, then `HELD`, `NOT FOUND` and `NOT READ`; a row it cannot find is `NOT FOUND`, never held.
-- `flights:sub-lander`: a range of inventory rows, or up to 3 threads the lander cut (CONTRACT, ABSENCE, HAND-OFF, CONCURRENT), each followed to its far side, 3 hops at most. Budget 25 tool calls, back within about four minutes. Returns three-line flags `UNSAFE | UNSURE` with `LOOK` and `WHY`, and one `SAFE` line naming the ranges it read; a line only grepped is `UNSURE`, never `SAFE`.
+- `flights:diff-checker`: one cluster's diff and the spec rows naming its files; reads every changed function whole and asks SPEC, LINES, PATHS, MANY, GUARDS, STATE, COMMENTS and TESTS at each. Budget 30 tool calls. Returns `C{n} · severity · path:line`, the line copied from its own `grep -n` output and the failure, then `GAPS`, `READ` and `NOT READ`.
+- `flights:spec-checker`: one row range of a spec; finds the line keeping each row's promise in every state the row names. Budget 30 tool calls. Returns candidates tied to a row, then `HELD`, `NOT FOUND` and `NOT READ`; a row it cannot find is `NOT FOUND`, never held.
+- `flights:usage-checker`: a range of inventory rows, or up to 3 threads the lander cut (CONTRACT, ABSENCE, HAND-OFF, CONCURRENT), each followed to its far side, 3 hops at most. Budget 25 tool calls, back within about four minutes. Returns three-line flags `UNSAFE | UNSURE` with `LOOK` and `WHY`, and one `SAFE` line naming the ranges it read; a line only grepped is `UNSURE`, never `SAFE`.
 
 ## The lander's own hunt
 
-With the children out, the lander owns what no cluster owns: the seams between clusters, each INTENT claim, every changed file no hunter row lists (docs, prompts, configs, deleted files) and the untracked files, read whole. It reads every changed function with the helpers it relies on and checks LINES, PATHS, GUARDS, REMOVED, CONCURRENCY and HOT PATH, INPUTS, TESTS, CLAIMS and TWIN DOORS. Two or more threads leaving the diff go to one more background sub-lander.
+With the children out, the lander owns what no cluster owns: the seams between clusters, each INTENT claim, every changed file no diff-checker row lists (docs, prompts, configs, deleted files) and the untracked files, read whole. It reads every changed function with the helpers it relies on and checks LINES, PATHS, GUARDS, REMOVED, CONCURRENCY and HOT PATH, INPUTS, TESTS, CLAIMS and TWIN DOORS. Two or more threads leaving the diff go to one more background usage-checker.
 
 ## Judge and report
 
@@ -94,7 +94,7 @@ With the children out, the lander owns what no cluster owns: the seams between c
 - Every finding inside the change is fixed, an unchecked one or an open thread read to its cause first, and marked `status: resolved in {file:line}`; a finding outside the change stays `status: open` and goes to the residuals. Fixes are not reviewed again.
 - The affected tests of the change and the fixes run with the testing manual's command until green.
 - The full gate runs once, right before the merge; a red gate is fixed, its failing tests run green, and that gate runs once more — the only repeat.
-- No test, build or gate runs while a sub-lander is out or a finding inside the change is open. A command longer than 10 minutes runs in the background with one blocking wait.
+- No test, build or gate runs while a usage-checker is out or a finding inside the change is open. A command longer than 10 minutes runs in the background with one blocking wait.
 - A critical decision goes to `SendMessage(to: "main")` with the choice it proceeds with; the lander never asks the user.
 
 ## The return
@@ -139,5 +139,5 @@ This lander's review phase (`STOP_AT review`), two runs per flight, scored again
 ## Declaration
 
 - `plugins/flights/plugins/flights/agents/lander.md`: opus at effort medium, no `effortControl` and no effort buttons; its `tools:` line holds `Agent` (the children and gitter) and `SendMessage` (gitter's conflict hand-back, a critical decision to main).
-- `plugins/flights/plugins/flights/agents/{hunter,spec-walker,sub-lander}.md`: Claude originals, each `visible-to` `flights:lander`.
+- `plugins/flights/plugins/flights/agents/{diff-checker,spec-checker,usage-checker}.md`: Claude originals, each `visible-to` `flights:lander`.
 - `plugins/flights/plugins/flights/skills/lander-inventory/`: the inventory kit, its `SKILL.md` visible to both landers.

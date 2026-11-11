@@ -54,7 +54,7 @@ Flight merges over the prior 60 days averaged 1.42 Go test lines per code line, 
 | `flights:foreman` | agent | opus · medium | Foreman for design choices, ambiguity, unfamiliar code, an unknown cause, several modules |
 | `flights:lander` | agent | opus · medium | Reviews, fixes and gates a worktree change, then returns it for the merge |
 | `flights:speccer` | agent | opus · xhigh | On-demand specification outside the build/land lifecycle; returns a `spec.md` path and token price to its caller |
-| `flights:hunter`, `flights:spec-walker`, `flights:sub-lander` | agents | opus · sonnet · haiku | The lander's read-only children ([flights-lander.md](flights-lander.md#the-children)) |
+| `flights:diff-checker`, `flights:spec-checker`, `flights:usage-checker` | agents | opus · sonnet · haiku | The lander's read-only children ([flights-lander.md](flights-lander.md#the-children)) |
 | `/flights:spec` | command | the main chat | Grills the user until no decision is open, writes `requirements.md`, hands it to `flights:speccer`; the spec waits for the user's go to build |
 | `/flights:doctor` | command | the main chat | Measures a flight: the measure first, then where the reading went |
 
@@ -100,7 +100,7 @@ The main chat chooses at dispatch; a foreman spawns nothing.
 | Choice | Decided by | Rule |
 | --- | --- | --- |
 | Foreman tier | difficulty and ambiguity, never size | `flights:foreman-sonnet`: the path is clear, the pattern is in the code · `flights:foreman`: design choices, ambiguity, unfamiliar code, an unknown cause, several modules |
-| Lander children | the lander's inventory PLAN, computed from the diff and the spec files | hunters k = min(4, ceil(production diff lines / 600)) · spec walkers per spec with 10+ numbered rows · sub-landers by inventory row ranges |
+| Lander children | the lander's inventory PLAN, computed from the diff and the spec files | diff-checkers k = min(4, ceil(production diff lines / 600)) · spec-checkers per spec with 10+ numbered rows · usage-checkers by inventory row ranges |
 
 The lander itself has no tiers: `flights:lander` lands every worktree.
 
@@ -203,4 +203,4 @@ The deepest chain is main → `flights:reviewer-pro` → `flights:tracer` → `f
 ## Open items
 
 - The baseline before this design: a median of 41 landed lines per million input tokens over 166 flights in the 14 days to 2026-10-18. Agents that wrote no code took 61% of the input. The first flights on this design are measured against it with `/flights:doctor`.
-- The lander's PLAN constants (600 lines per hunter, 10 rows per walker, the caps) are first values; tune them from `/flights:doctor` reports.
+- The lander's PLAN constants (600 lines per diff-checker, 10 rows per spec-checker, the caps) are first values; tune them from `/flights:doctor` reports.

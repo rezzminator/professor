@@ -92,7 +92,7 @@ Unproven: the user's account is that both agents were grown from a greenfield br
 - Model on the bench's pick: `flights:tracer` `sonnet` `high`, `flights:sub-tracer` `haiku` `low` (a `medium` node cost about $0.04, mostly thinking, `low` $0.01–0.02), sub-rr and collector `haiku` `medium`.
 - A tool omission can be the guard: rr holds no `Read`, so a Write over a taken run directory is refused and the lead takes `-2` instead of erasing the first run; rr-pro-max adds `Read` and gives the guard up, a recorded ruling (`rr.md` § The document, `rr-pro-max.md` § Read, and the name guard it gives up).
 - A stale tool name fails silently: sub-rr's harvester calls rose from 0–2 to 10–22 a run once `tools:` named the live tools (`docs/design/RR/sub-rr.md` § What the runs measured).
-- `visibility.visible-to` with the class token: sub-rr, `flights:sub-tracer` and the lander's hunters are reachable only from their callers.
+- `visibility.visible-to` with the class token: sub-rr, `flights:sub-tracer` and the lander's diff-checkers are reachable only from their callers.
 - `skills:` and `hooks:` load only for a registered `subagent_type`: the caller manual reaches `flights:reviewer`, `flights:reviewer-pro` and clone-distiller through `skills: [flights:tracer-use]` with no Skill tool (26ecad5e).
 - `engines.codex.sandbox: workspace-write`: Codex compiles a tools list without a write tool read-only (`interface.md` § Agent frontmatter), and tracer's kit writes its run directory (`tracer.md` § Model).
 - Brief fields spelled as written: tracer's `RECALL: {run}` and `BUDGET {n}`, sub-rr's `Report: {path}` and `Report: none — {reason}`.

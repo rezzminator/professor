@@ -27,7 +27,7 @@
     {
       "name": "flights-hunter",
       "kind": "agent",
-      "successor": "flights:hunter",
+      "successor": "flights:diff-checker",
       "match": "exact"
     },
     {
@@ -39,7 +39,7 @@
     {
       "name": "flights-spec-walker",
       "kind": "agent",
-      "successor": "flights:spec-walker",
+      "successor": "flights:spec-checker",
       "match": "exact"
     },
     {
@@ -51,7 +51,25 @@
     {
       "name": "flights-sub-lander",
       "kind": "agent",
-      "successor": "flights:sub-lander",
+      "successor": "flights:usage-checker",
+      "match": "exact"
+    },
+    {
+      "name": "flights:hunter",
+      "kind": "agent",
+      "successor": "flights:diff-checker",
+      "match": "exact"
+    },
+    {
+      "name": "flights:spec-walker",
+      "kind": "agent",
+      "successor": "flights:spec-checker",
+      "match": "exact"
+    },
+    {
+      "name": "flights:sub-lander",
+      "kind": "agent",
+      "successor": "flights:usage-checker",
       "match": "exact"
     },
     {

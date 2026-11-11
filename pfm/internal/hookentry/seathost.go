@@ -211,6 +211,7 @@ func SeatHost(args []string, stdout, stderr io.Writer, runtime config.Runtime) i
 					break
 				}
 			}
+			refreshSeatHostImage(gather.NewProcFS(runtime.Paths.ProcRoot), os.Executable, syscall.Exec, stderr)
 			current, found, err := db.Seat(ctx, seat.SeatID)
 			if err != nil || !found {
 				fmt.Fprintf(stderr, "pfm internal seat-host: read retry seat: found=%t: %v\n", found, err)
@@ -233,6 +234,7 @@ func SeatHost(args []string, stdout, stderr io.Writer, runtime config.Runtime) i
 			return 1
 		}
 		if found && next.ReloadPending && runErr == nil {
+			refreshSeatHostImage(gather.NewProcFS(runtime.Paths.ProcRoot), os.Executable, syscall.Exec, stderr)
 			seat = next
 			continue
 		}
@@ -381,12 +383,7 @@ func currentClaudeBinary(recorded, home, configured string) (string, error) {
 	return resolved, nil
 }
 
-func seatCommand(
-	run fleetdb.SeatRun,
-	argv0 string,
-	tty *os.File,
-	_, _ io.Writer,
-) ([]string, deps.StartOptions, error) {
+func seatCommand(run fleetdb.SeatRun, argv0 string, tty *os.File, _, _ io.Writer) ([]string, deps.StartOptions, error) {
 	if !filepath.IsAbs(run.Binary) || !filepath.IsAbs(run.CWD) {
 		return nil, deps.StartOptions{}, fmt.Errorf("binary and cwd must be absolute")
 	}

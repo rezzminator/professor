@@ -140,7 +140,7 @@ In the build/land lifecycle:
 ## Waiting
 
 - **Agents** are waited on by ending the turn. Their return arrives as a notification.
-- **Commands** run in the foreground with a timeout. One longer than the Bash tool's 10-minute limit runs in the background and is waited on with one blocking wait (`timeout {s} bash -c 'until [ -s "$1" ]; do sleep 20; done; cat "$1"' _ {file}`).
+- **Commands** run in the foreground with a timeout of at most 270 s, in `flights:lander`, `flights:foreman` and `flights:foreman-sonnet`. One that can run longer runs in the background (`{command} > {log} 2>&1; echo $? > {log}.rc`) and is awaited by repeating `timeout 270 bash -c 'until [ -s "$1" ]; do sleep 15; done; cat "$1"' _ {log}.rc` until it prints. Why: past 300 s the prompt cache expires and the next request re-pays the whole context; over 239 past landings the requests that followed one wait of 290 s or more cost $77, against $9 in 270 s slices.
 - **Never end a turn while your own command runs.** An agent woken by its own finished background command can have its final notice delivered to the main chat instead of its parent.
 
 ## Tests

@@ -137,13 +137,16 @@ The brief:
 
 - the work and its acceptance (absent: one acceptance row per thing the work asks for);
 - where to work (absent: the current directory);
-- the testing manual, a path or a skill (absent: the test command the project's own build files name).
+- the testing manual, a path or a skill (absent: the test command the project's own build files name);
+- optional `TRACE {RUN} · nodes {IDs}`: a tracer run holding the code the work touches.
+
+With a `TRACE` line the foreman's one locating call is `for n in {IDs}; do tt check {RUN} --full $n; done` (`tt` is the plugin's tracetree kit). What it prints is the foreman's read, and it opens a file only for lines no node printed. Why: in the forced-trace probe a Sonnet foreman given the trace this way cost 27% less in dollars ($0.845 against $1.15, mean of 2), with 35% fewer requests and 29% less wall time, the two ranges not overlapping ([flights-foreman-bench.md](flights-foreman-bench.md) § Forced-trace probe). The tracer run that fed it cost $2.14, so a trace pays for itself through foremen alone only from about 7 Sonnet pieces; when the main chat traces anyway to plan, putting the trace in the briefs is free.
 
 The project contract is already in context.
 
 ## Waiting, gates, decisions, law
 
-- **Waiting:** a waited command runs in the foreground with a timeout, nothing is started in the background and polled; one longer than 10 minutes gets one blocking wait.
+- **Waiting:** a waited command runs in the foreground with a timeout of at most 270 s; one that can run longer runs in the background (`{command} > {log} 2>&1; echo $? > {log}.rc`) and is awaited by repeating `timeout 270 bash -c 'until [ -s "$1" ]; do sleep 15; done; cat "$1"' _ {log}.rc` until it prints, never by shorter polls. Why: past 300 s the prompt cache expires and the next request re-pays the whole context; over 239 past landings the requests that followed one wait of 290 s or more cost $77, against $9 in 270 s slices.
 - **Gates:** a failing gate is fixed in the code; a limit rises only through the project's documented exception route.
 - **Decisions:** the foreman decides everything the work leaves open, never asks the user, sends a critical decision to `SendMessage(to: "main")` and keeps working.
 - **Nothing named is left open:** an item the brief names, or a file it points to lists, is built, or the return is `PARTIAL` naming it. The run's size, its context and its price are never the why (the definition carries one ✗ and one ✓ example). Neither is a check it cannot run (a screen it cannot see, a device, a live service): the item is built from the code, and what could not be checked goes under `UNTESTED`. Why: with the size rule alone, five of seven runs still left 6 to 13 listed items open as "needs a rendered check"; with the sentence the two Opus runs left 4 and 4 and one Sonnet run 4, the other Sonnet run about 14 (it disobeyed the sentence).
@@ -195,14 +198,16 @@ Open after the heavy-rung bench:
 - The work list's folder is not pinned: "a file outside the tree" landed in the session scratch folder (2 runs), the shared temp root (2 runs) and the brief's own folder (2 runs).
 - Sonnet on a heavy list is not reliable: 4 to 14 of 24 minor items open over six runs; four of six Sonnet returns run 45 to 73 lines with bullets against the 25-line block; one opened with other words before `PARTIAL`.
 - One tool call a request is still the norm on heavy runs; the reading rounds become ten and more single-call reads on a many-item brief.
-- Wait-only requests cost 10-14% of a run that waits on long commands; no rule: a wait longer than the 5-minute prompt cache makes the next request re-write the whole context.
+- Wait-only requests cost 10-14% of a run that waits on long commands; waits are cut into 270 s slices (§ Waiting, gates, decisions, law).
 
 Unbenched:
 
 - Compaction point: replay prices a compaction at 150k tokens 11.4% lower and one at 80k 10.5% higher; a replay of 22 runs of 60 minutes and more puts a reset past 180k at -2%, past 130k at +4%, past 110k at +18%; no live run tested it.
 - A brief that carries the reading list (exact files and symbols): not tested live.
 - The same law on the lander, tracer and reviewers.
-- A main chat splitting a heavy flight into several foremen of under 60 requests each.
+- The Opus foreman's use of a trace.
+- The four forced-trace builds were not graded blind.
+- The planning rule's text (briefs from the request, a tracer only for a question the cut cannot be decided without, the fewest foremen cut by tier, core first): not benched.
 - A trace whose questions are the foreman's own ("where does each change land").
 - A blind grade of the heavy builds.
 - The heavy rungs' wall time on an idle host.

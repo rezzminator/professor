@@ -34,7 +34,8 @@ Only the main chat spawns a lander. The children are read-only (`Read, Grep, Glo
 lander -> sync to TARGET's tip -> inventory (call 1) -> one spawn message (call 2)
 -> diff-checkers / spec-checkers / usage-checkers in the background
 -> lander hunts the seams -> every candidate verified on disk -> report
--> fix every finding -> affected tests until green -> full gate once -> return
+-> fix every finding -> shed the review (forward_compaction) -> affected tests until green
+-> full gate once -> return
 ```
 
 The lander never waits on a child: it keeps hunting, verifying and writing the report while they work, and ends its turn only when its own work is done; each child's return re-invokes it.
@@ -91,11 +92,25 @@ With the children out, the lander owns what no cluster owns: the seams between c
 
 ## Fix, test, gate
 
-- Every finding inside the change is fixed, an unchecked one or an open thread read to its cause first, and marked `status: resolved in {file:line}`; a finding outside the change stays `status: open` and goes to the residuals. Fixes are not reviewed again.
+- Every finding inside the change is fixed first, with the review still in context, an unchecked one or an open thread read to its cause first, and marked `status: resolved in {file:line}`; a finding outside the change stays `status: open` and goes to the residuals. Fixes are not reviewed again.
+- The lander then sheds the review with one `forward_compaction` call: `objective` carries WORKTREE, BASE, TARGET, MANUALS and REPORT_PATH, `remaining` the steps left and `load_files` REPORT_PATH, so its next request starts from that frontier and the report. A testing manual is opened only after this call.
 - The affected tests of the change and the fixes run with the testing manual's command until green.
-- The full gate runs once, right before the merge; a red gate is fixed, its failing tests run green, and that gate runs once more — the only repeat.
-- No test, build or gate runs while a usage-checker is out or a finding inside the change is open. A command longer than 10 minutes runs in the background with one blocking wait.
+- The full gate runs once, right before the merge; a red gate is fixed, its failing tests made green with the affected-test command, and that gate runs once more — the only repeat.
+- No test, build or gate runs while a usage-checker is out or a finding inside the change is open.
+- **Waits:** a command runs in the foreground with a timeout of at most 270 s; one that can run longer runs in the background (`{command} > {log} 2>&1; echo $? > {log}.rc`) and is awaited by repeating `timeout 270 bash -c 'until [ -s "$1" ]; do sleep 15; done; cat "$1"' _ {log}.rc` until it prints.
 - A critical decision goes to `SendMessage(to: "main")` with the choice it proceeds with; the lander never asks the user.
+
+### Why the shed
+
+In past landings the tests and the gate are 41% of a large landing's own dollars (gate 34%, tests 7%), each request re-reading about 150,000 tokens of review. The shed starts those requests from the frontier and the report.
+
+### Why the fixes come first
+
+A fix needs the lines the review already read. A bench landing that shed before fixing spent 41 requests and $1.45 after the shed, re-reading each file, against 6 requests and $0.23 where the fixes came first.
+
+### Why the waits are 270 s
+
+Past 300 s the prompt cache expires and the next request re-pays the whole context. Over 239 past landings the requests that followed one wait of 290 s or more cost $77, against $9 in 270 s slices.
 
 ## The return
 
@@ -134,7 +149,23 @@ This lander's review phase (`STOP_AT review`), two runs per flight, scored again
 
 - 0 of its 69 findings were invalid, and it found real defects the old lander missed.
 - Bias: the answer keys are the old lander's own findings, so a defect only the new lander finds earns it nothing, and a miss is scored against the old lander's view of the change.
-- Unbenched: a full landing (fix, tests, gate) on this version, and pull-sync on this version.
+- Unbenched: pull-sync on this version.
+
+### The lander bench
+
+The ledger [flights-lander-bench.md](flights-lander-bench.md) holds three rungs of real commit ranges with planted defects, review-only and full landings, and the replay of past landings.
+
+- **The shed** (fixes first, then one `forward_compaction`, tests and gate from the report): replayed over 95 past landings of 1000 or more changed lines it saves 19.8% / 17.3% / 14.8% of the lander's own dollars at a wake of 35k / 45k / 55k tokens. Live, the lander went from 121,000 tokens of context to 31,000 and returned `FIXED` 6 requests later.
+- **The waits:** 270 s slices against one long wait, $9 against $77 over 239 past landings.
+- **The review cut by area** (diff-checker clusters by directory of about 600 changed lines, 12 at most, a `PLAN OWN` row, a diff-checker that returns `CONTRACTS`) is held, not shipped: it found more real defects and wrote no false finding, but cost $2.27 (+42%) more in a full landing of the 5,480-line rung, and lost on the price metric fixed before the first run.
+- **Sonnet diff readers** are rejected on the blind grade: 9 to 12 of 14 planted defects against 13 to 14 for Opus.
+
+Open items:
+
+- The review cut by area with the fixes before the shed is unbenched as a full landing.
+- Verifying the checkers' candidates after the shed, each checker's return kept in a file, is unbenched.
+- A rung in a second repository was not run.
+- A real long gate was not run: the Professor gate took 64 minutes at host load 24, and the bench gate takes under a minute.
 
 ## Declaration
 

@@ -74,7 +74,7 @@ flight abandoned without merge -> writers stopped -> main chat -> worktree.sh re
 ```
 
 1. **Settle.** The main chat settles open requirements with the user before any dispatch.
-2. **Place.** The main chat makes the worktree with the repo's `worktree.sh create` where it has one (gitter makes it on a refusal and in a repo without the script), or names `develop` or the checkout, and passes the path in the brief. Several foremen may share one worktree, one per piece cut by file ownership, built in phases from the core outward (`templates/global/rules/flights-life-cycle.md` rules 3–6). Size is the judgment left in the edits, never the file count: work whose every edit is fixed in advance (a rename, a move, a known fix, a spec fixing every line), with no other agent writing its files, is small at any file count and skips the flight (`templates/global/rules/flights-life-cycle.md` rule 2).
+2. **Place.** The main chat makes the worktree with the repo's `worktree.sh create` where it has one (gitter makes it on a refusal and in a repo without the script), or names `develop` or the checkout, and passes the path in the brief. Several foremen may share one worktree, cut by tier into the fewest foremen and built core first (`templates/global/rules/flights-life-cycle.md` rules 3–5). Size is the judgment left in the edits, never the file count: work whose every edit is fixed in advance (a rename, a move, a known fix, a spec fixing every line), with no other agent writing its files, is small at any file count and skips the flight (`templates/global/rules/flights-life-cycle.md` rule 2).
 3. **Build.** A foreman builds the request by its own hand.
    - **Reads:** what the build needs, in three rounds; see [reading](#reading-and-the-trace-store).
    - **Writes:** the tests and the change in one round, the new tests run on the unchanged code first, then one foreground run of the affected tests and static checks, then one probe script.
@@ -99,7 +99,7 @@ The main chat chooses at dispatch; a foreman spawns nothing.
 
 | Choice | Decided by | Rule |
 | --- | --- | --- |
-| Foreman tier | difficulty and ambiguity, never size | `flights:foreman-sonnet`: a rest piece, its edits all following the core or existing code, its brief naming the code it copies · `flights:foreman`: a core piece — what other pieces depend on or copy, design choices, ambiguity, unfamiliar code, an unknown cause, several modules, or no pattern to name |
+| Foreman tier | difficulty and ambiguity, never size | `flights:foreman-sonnet`: the rest, edits a pattern fixes (existing code, a rule, the finished core), its brief naming that pattern, a large rest split by area · `flights:foreman`: the core, what the rest depends on or copies and all judgment left (design choices, ambiguity, unfamiliar code, an unknown cause, several modules) · all judgment or all pattern: one foreman |
 | Lander children | the lander's inventory PLAN, computed from the diff and the spec files | diff-checkers k = min(4, ceil(production diff lines / 600)) · spec-checkers per spec with 10+ numbered rows · usage-checkers by inventory row ranges |
 
 The lander itself has no tiers: `flights:lander` lands every worktree.

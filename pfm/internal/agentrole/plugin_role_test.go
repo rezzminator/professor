@@ -71,7 +71,7 @@ func TestResolveClaudePluginRole(t *testing.T) {
 		},
 		{
 			name: "enabled plugin without the agent",
-			role: "flights:hunter",
+			role: "flights:diff-checker",
 			prepare: func(t *testing.T, config, market, _, _ string) {
 				enablePlugin(t, config, "flights@professor", true)
 				knowDirectoryMarketplace(t, config, market)
@@ -79,8 +79,8 @@ func TestResolveClaudePluginRole(t *testing.T) {
 					"---\nname: foreman\n---\nBuild it.\n")
 			},
 			wantErr: func(_, market, _, _ string) string {
-				return "agent role: no claude role \"flights:hunter\" found\n  searched flights@professor: " +
-					filepath.Join(market, "plugins", "flights", "agents") + " has no agent hunter"
+				return "agent role: no claude role \"flights:diff-checker\" found\n  searched flights@professor: " +
+					filepath.Join(market, "plugins", "flights", "agents") + " has no agent diff-checker"
 			},
 		},
 		{

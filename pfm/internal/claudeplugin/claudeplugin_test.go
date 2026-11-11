@@ -126,7 +126,7 @@ func TestAgentFileMatchesTheFrontmatterName(t *testing.T) {
 	root := t.TempDir()
 	writeFixture(t, filepath.Join(root, "agents", "foreman.md"), "---\nname: foreman\n---\nA\n")
 	writeFixture(t, filepath.Join(root, "agents", "plain.md"), "no frontmatter\n")
-	writeFixture(t, filepath.Join(root, "agents", "lander.md"), "---\nname: sub-lander\n---\nB\n")
+	writeFixture(t, filepath.Join(root, "agents", "lander.md"), "---\nname: usage-checker\n---\nB\n")
 	writeFixture(t, filepath.Join(root, "agents", "land.md"), "---\nname: lander\n---\nC\n")
 	for _, test := range []struct {
 		agent, want string
@@ -135,8 +135,8 @@ func TestAgentFileMatchesTheFrontmatterName(t *testing.T) {
 		{agent: "foreman", want: filepath.Join(root, "agents", "foreman.md"), found: true},
 		{agent: "plain", want: filepath.Join(root, "agents", "plain.md"), found: true},
 		{agent: "lander", want: filepath.Join(root, "agents", "land.md"), found: true},
-		{agent: "sub-lander", want: filepath.Join(root, "agents", "lander.md"), found: true},
-		{agent: "hunter"},
+		{agent: "usage-checker", want: filepath.Join(root, "agents", "lander.md"), found: true},
+		{agent: "diff-checker"},
 	} {
 		path, found, err := AgentFile(root, test.agent)
 		if err != nil || path != test.want || found != test.found {

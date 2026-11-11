@@ -13,6 +13,7 @@ The bench behind [flights-foreman.md](flights-foreman.md): inputs, judges, price
 - [What the grades turned on](#what-the-grades-turned-on)
 - [Store analysis behind the law](#store-analysis-behind-the-law)
 - [Heavy rungs](#heavy-rungs)
+- [Forced-trace probe](#forced-trace-probe)
 
 ## Bench input
 
@@ -185,3 +186,28 @@ Hidden check of every list-rung build: front-end lint 0 and the affected test su
 - A read reminder hook. Design benched, not shipped: the shipped text plus a `hooks:` block in the agent's frontmatter, PostToolUse on Bash, running a script that counts requests in a row that only read (greps, `sed -n` ranges, cats, chained or alone) and on every third appends one line to the tool result (`READS {n} requests in a row only read, and each re-read your whole context. Name everything this group still needs and bring it in with the next call: …`). A frontmatter `hooks:` block of a project agent fires for the spawned sub-agent; the event carries `session_id`, `agent_id`, `agent_type` and the command; the hook's `additionalContext` reaches the model appended to that tool result as a system-reminder. One run (table B2): 6.95 dollars, 148 requests, 30.6 min, 4 minor items open, hidden check green (lint 0; 15 suites, 469 tests), against 6.70 and 7.71, 130 and 151 requests, 32.4 and 32.3 min, 4 and 4 open. 16 reminders fired from request 32 on (the hook's first version counted single-command reads and never fired; it was corrected while the run was in flight, so requests 1 to 31 ran without it). After a reminder the foreman called `look`, the first real calls of any run, but its read requests did not fall: 93, against 84 and 101. A reminder changes which reader is called, not how many requests read: each read answers a question the last one raised.
 - A context reset after each group (reset size 34k), by replay over the heavy Opus foreman runs in the usage store; no live run: a reset past 180k of context changes dollars by -9%, past 150k -9%, past 130k -8%, past 110k -4%, past 90k +8%, past 75k +39%.
 - The status sentence "`PARTIAL` with a sound why is a correct return": reverted (table B2).
+- The planned multi-foreman flight. An Opus main chat planned the flight as a tracer first, a foreman per ownership piece, phases (core outward), on the 6-item UI request; two runs, both stopped unfinished:
+
+| Run | Dollars | Minutes | Pieces | State at the stop |
+| --- | --- | --- | --- | --- |
+| control: one Opus foreman, no tracer | 6.70, 7.71 (+ main chat 0.3 to 1) | 32 | 1 | finished, 4 open items |
+| planned flight 1 | 17.85 (sub-agents 15.15 + Opus main chat 2.70 in 25 requests) | 33.0 | 7 Opus foremen 12.35 | phase 1 returned, 3 phase-2 foremen building; 93 files, +1,410 -775, lint 0, jest 30 suites and 848 tests green, 29 formal-address words left |
+| planned flight 2 | 10.99 (8.55 + 2.44) | 25.9 | 5 Opus 5.34, 3 Sonnet 0.73 | phase 1 returned, phase 2 just spawned; 15 files changed |
+
+  Why it lost: the tracer run cost $2.5 to $2.8 before any build (37 to 42% of a whole control flight; tracer 0.84 and 22 sub-tracers 1.96 in run 1, 0.83 and 17 sub-tracers 1.65 in run 2), the Opus main chat $2.4 to $2.7 against the control's $0.3 to $1, and each extra Opus foreman pays its own reading ($1.07 to $1.22; a Sonnet piece $0.24). Run 1 tiered all 7 pieces as Opus. No blind grade of the two trees. It is the fourth delegation form that lost to one foreman building alone (an Opus foreman designing for Sonnet children, two foremen sharing a worktree and a tracer reading first being the others). The rule that replaced it is in [flights.md](flights.md) and unbenched.
+
+## Forced-trace probe
+
+A Sonnet foreman (`flights:foreman-sonnet`) on the six-item UI piece of a task; two runs with the plain brief, two with the trace forced into the brief (`TRACE {RUN} · nodes {IDs}`). Hidden check on all four: jest green.
+
+| Arm | Dollars | Requests | Requests before the first edit | Wall min | Status |
+| --- | --- | --- | --- | --- | --- |
+| plain, run 1 | 0.99 | 39 | 26 | 8.1 | DONE |
+| plain, run 2 | 1.31 | 55 | 27 | 12.4 | PARTIAL |
+| trace forced, run 1 | 0.77 | 29 | 16 | 7.3 | DONE |
+| trace forced, run 2 | 0.92 | 32 | 20 | 7.2 | DONE |
+
+- Reading: forcing the trace is -27% dollars ($0.845 against $1.15), -35% requests and -29% wall time, the two ranges not overlapping.
+- The tracer run that fed the trace cost $2.14 (Sonnet lead $0.70 and 13 Haiku readers $1.44): through foremen alone it pays for itself from about 7 Sonnet pieces up; when the main chat traces anyway to plan, forcing the trace into the briefs is free.
+- Shipped as the `TRACE` input line of both foremen.
+- Open: the four builds were not graded blind; the Opus foreman's use of a trace is unbenched.

@@ -81,7 +81,8 @@ Hard constraints:
 
 - The section stays the last part of `tail.md`, under `# Talking to the user`, with a `## The Verdict` heading (`pfm/internal/codexprompt/fleetprompt_test.go` looks for `# The Verdict`).
 - A reply with two or more sections closes each with a `**Verdict:**` line, each sub-section inside one with an italic `*Verdict:*`, and ends with one `# Ultimate verdict:` line, a level-1 heading; a reply with one section or none ends with a lone `**Verdict:**`. The prefixes `**Verdict:**` and `# Ultimate verdict:` stay exact: `pfm/internal/headless/watch.go` reads the last such line.
-- The gear-change stays, triggered by the leak line, the publication line or swearing: no emoji, no figure of speech, cause or fix first.
+- The `## Voice` subsection stays, the user's ruling: enthusiasm and catchphrases in every reply, the user's own catchphrases caught and thrown back, a figurative line keeping the real name in it or the plain fact beside it; evidence rows tune its rules, never remove the voice.
+- The gear-change stays, triggered by the leak line, the publication line or swearing: no emoji, no catchphrase or figure of speech, cause or fix first.
 - Every path handed to the user is absolute.
 - Nothing identifying: no names, client or private project names, `/home/…` or `/Users/…` paths, or transcript quotes; examples are invented, their paths under `/srv/shop/`.
 

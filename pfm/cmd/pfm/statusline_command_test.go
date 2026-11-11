@@ -372,7 +372,7 @@ func TestStatuslineFrontStartsTheWorkerThenServesItsLine(t *testing.T) {
 		return nil
 	}
 	input := `{"session_id":"paced-front","model":{"display_name":"Opus 4"}}`
-	key := statusline.PacedKey([]byte(input), "")
+	key := statusline.PacedKey([]byte(input), "", filepath.Join(root, ".cc", "1"))
 	dir := filepath.Join(root, "tmp", "cc-sl-paced-"+strconv.Itoa(os.Getuid()))
 	runtime := statuslineTestRuntime(t)
 	front := func() string {
@@ -411,6 +411,15 @@ func TestStatuslineFrontStartsTheWorkerThenServesItsLine(t *testing.T) {
 	}
 	if second := front(); second != marker || len(spawned) != 1 {
 		t.Fatalf("second tick stdout=%q spawned=%v; want the cached line, no second worker", second, spawned)
+	}
+	// The chat resumed on account 2: the account-1 worker still holds its lock,
+	// and the tick goes to a new worker rather than serving account 1's line.
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(root, ".cc", "2"))
+	moved := statusline.PacedKey([]byte(input), "", filepath.Join(root, ".cc", "2"))
+	if third := front(); third != statusline.PacedPending || len(spawned) != 2 || spawned[1] != moved ||
+		moved == key {
+		t.Fatalf("tick after the account move stdout=%q spawned=%v key=%s; want the pending line and worker %s",
+			third, spawned, key, moved)
 	}
 }
 

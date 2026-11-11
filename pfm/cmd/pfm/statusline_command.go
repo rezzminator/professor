@@ -85,7 +85,7 @@ func runStatuslineWithRuntime(
 		return 0
 	}
 	statusline.RecordSession(raw, machine.Paths.SIDDir, stderr)
-	paced.Key = statusline.PacedKey(raw, env.Get("COLUMNS"))
+	paced.Key = statusline.PacedKey(raw, env.Get("COLUMNS"), env.Get(pfmengine.MustLookup(pfmengine.Claude).HomeEnv))
 	paced.Front(raw, stdout)
 	return 0
 }

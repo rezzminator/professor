@@ -38,7 +38,7 @@ func newPacedRig(t *testing.T) *pacedRig {
 	rig := &pacedRig{t: t, now: time.Now(), output: "\x1b[1mrendered\x1b[0m line\n"}
 	rig.paced = Paced{
 		CacheDir: t.TempDir(),
-		Key:      PacedKey([]byte(pacedTestInput), ""),
+		Key:      PacedKey([]byte(pacedTestInput), "", ""),
 		Render: func(raw []byte) (string, error) {
 			rig.renders = append(rig.renders, string(raw))
 			rig.renderAt = append(rig.renderAt, rig.now)
@@ -258,7 +258,7 @@ func TestPacedFrontFallsBackInlineWhenThePacerBreaks(t *testing.T) {
 func TestPacedFrontWithNoChatKeyRendersInlineAndKeepsNoFile(t *testing.T) {
 	rig := newPacedRig(t)
 	raw := `{"model":{"display_name":"Opus"}}`
-	rig.paced.Key = PacedKey([]byte(raw), "120")
+	rig.paced.Key = PacedKey([]byte(raw), "120", "")
 	var stdout strings.Builder
 	rig.paced.Front([]byte(raw), &stdout)
 	if rig.paced.Key != "" || stdout.String() != rig.output || len(rig.spawned) != 0 {
@@ -270,9 +270,10 @@ func TestPacedFrontWithNoChatKeyRendersInlineAndKeepsNoFile(t *testing.T) {
 	}
 }
 
-func TestPacedKeyNamesTheChatAndItsWidth(t *testing.T) {
-	bySession := PacedKey([]byte(`{"session_id":"s","transcript_path":"/t"}`), "")
-	byTranscript := PacedKey([]byte(`{"transcript_path":"/t"}`), "")
+func TestPacedKeyNamesTheChatItsWidthAndItsAccount(t *testing.T) {
+	bySession := PacedKey([]byte(`{"session_id":"s","transcript_path":"/t"}`), "", "")
+	byTranscript := PacedKey([]byte(`{"transcript_path":"/t"}`), "", "")
+	onAccount := func(dir string) string { return PacedKey([]byte(`{"session_id":"s"}`), "", dir) }
 	for _, tc := range []struct {
 		name string
 		got  string
@@ -281,10 +282,11 @@ func TestPacedKeyNamesTheChatAndItsWidth(t *testing.T) {
 		{"session id", bySession, true},
 		{"transcript path", byTranscript, true},
 		{"session wins over transcript", bySession, bySession != byTranscript},
-		{"width is part of the key", PacedKey([]byte(`{"session_id":"s"}`), "80"), bySession != PacedKey(
-			[]byte(`{"session_id":"s"}`), "80")},
-		{"neither", PacedKey([]byte(`{"model":{}}`), ""), false},
-		{"not json", PacedKey([]byte(`{`), ""), false},
+		{"width is part of the key", PacedKey([]byte(`{"session_id":"s"}`), "80", ""), bySession != PacedKey(
+			[]byte(`{"session_id":"s"}`), "80", "")},
+		{"config dir is part of the key", onAccount("/a/1"), onAccount("/a/1") != onAccount("/a/2")},
+		{"neither", PacedKey([]byte(`{"model":{}}`), "", ""), false},
+		{"not json", PacedKey([]byte(`{`), "", ""), false},
 	} {
 		if (tc.got != "") != tc.want || (tc.got != "" && len(tc.got) != 32) {
 			t.Fatalf("%s: key %q", tc.name, tc.got)

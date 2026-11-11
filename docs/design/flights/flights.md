@@ -54,7 +54,7 @@ Flight merges over the prior 60 days averaged 1.42 Go test lines per code line, 
 | `flights:foreman` | agent | opus · medium | Foreman for design choices, ambiguity, unfamiliar code, an unknown cause, several modules |
 | `flights:lander` | agent | opus · medium | Reviews, fixes and gates a worktree change, then returns it for the merge |
 | `flights:speccer` | agent | opus · xhigh | On-demand specification outside the build/land lifecycle; returns a `spec.md` path and token price to its caller |
-| `flights:hunter`, `flights:spec-walker`, `flights:sub-lander` | agents | opus · sonnet · haiku | The lander's read-only children ([flights-lander.md](flights-lander.md#the-children)) |
+| `flights:diff-checker`, `flights:spec-checker`, `flights:usage-checker` | agents | opus · sonnet · haiku | The lander's read-only children ([flights-lander.md](flights-lander.md#the-children)) |
 | `/flights:spec` | command | the main chat | Grills the user until no decision is open, writes `requirements.md`, hands it to `flights:speccer`; the spec waits for the user's go to build |
 | `/flights:doctor` | command | the main chat | Measures a flight: the measure first, then where the reading went |
 
@@ -74,7 +74,7 @@ flight abandoned without merge -> writers stopped -> main chat -> worktree.sh re
 ```
 
 1. **Settle.** The main chat settles open requirements with the user before any dispatch.
-2. **Place.** The main chat makes the worktree with the repo's `worktree.sh create` where it has one (gitter makes it on a refusal and in a repo without the script), or names `develop` or the checkout, and passes the path in the brief. Several foremen may share one worktree on separate areas. Size is the judgment left in the edits, never the file count: work whose every edit is fixed in advance (a rename, a move, a known fix, a spec fixing every line), with no other agent writing its files, is small at any file count and skips the flight (`templates/global/rules/flights-life-cycle.md` rule 2).
+2. **Place.** The main chat makes the worktree with the repo's `worktree.sh create` where it has one (gitter makes it on a refusal and in a repo without the script), or names `develop` or the checkout, and passes the path in the brief. Several foremen may share one worktree, cut by tier into the fewest foremen and built core first (`templates/global/rules/flights-life-cycle.md` rules 3–5). Size is the judgment left in the edits, never the file count: work whose every edit is fixed in advance (a rename, a move, a known fix, a spec fixing every line), with no other agent writing its files, is small at any file count and skips the flight (`templates/global/rules/flights-life-cycle.md` rule 2).
 3. **Build.** A foreman builds the request by its own hand.
    - **Reads:** what the build needs, in three rounds; see [reading](#reading-and-the-trace-store).
    - **Writes:** the tests and the change in one round, the new tests run on the unchanged code first, then one foreground run of the affected tests and static checks, then one probe script.
@@ -99,8 +99,8 @@ The main chat chooses at dispatch; a foreman spawns nothing.
 
 | Choice | Decided by | Rule |
 | --- | --- | --- |
-| Foreman tier | difficulty and ambiguity, never size | `flights:foreman-sonnet`: the path is clear, the pattern is in the code · `flights:foreman`: design choices, ambiguity, unfamiliar code, an unknown cause, several modules |
-| Lander children | the lander's inventory PLAN, computed from the diff and the spec files | hunters k = min(4, ceil(production diff lines / 600)) · spec walkers per spec with 10+ numbered rows · sub-landers by inventory row ranges |
+| Foreman tier | difficulty and ambiguity, never size | `flights:foreman-sonnet`: the rest, edits a pattern fixes (existing code, a rule, the finished core), its brief naming that pattern, a large rest split by area · `flights:foreman`: the core, what the rest depends on or copies and all judgment left (design choices, ambiguity, unfamiliar code, an unknown cause, several modules) · all judgment or all pattern: one foreman |
+| Lander children | the lander's inventory PLAN, computed from the diff and the spec files | diff-checkers k = min(4, ceil(production diff lines / 600)) · spec-checkers per spec with 10+ numbered rows · usage-checkers by inventory row ranges |
 
 The lander itself has no tiers: `flights:lander` lands every worktree.
 
@@ -140,7 +140,7 @@ In the build/land lifecycle:
 ## Waiting
 
 - **Agents** are waited on by ending the turn. Their return arrives as a notification.
-- **Commands** run in the foreground with a timeout. One longer than the Bash tool's 10-minute limit runs in the background and is waited on with one blocking wait (`timeout {s} bash -c 'until [ -s "$1" ]; do sleep 20; done; cat "$1"' _ {file}`).
+- **Commands** run in the foreground with a timeout of at most 270 s, in `flights:lander`, `flights:foreman` and `flights:foreman-sonnet`. One that can run longer runs in the background (`{command} > {log} 2>&1; echo $? > {log}.rc`) and is awaited by repeating `timeout 270 bash -c 'until [ -s "$1" ]; do sleep 15; done; cat "$1"' _ {log}.rc` until it prints. Why: past 300 s the prompt cache expires and the next request re-pays the whole context; over 239 past landings the requests that followed one wait of 290 s or more cost $77, against $9 in 270 s slices.
 - **Never end a turn while your own command runs.** An agent woken by its own finished background command can have its final notice delivered to the main chat instead of its parent.
 
 ## Tests
@@ -203,4 +203,4 @@ The deepest chain is main → `flights:reviewer-pro` → `flights:tracer` → `f
 ## Open items
 
 - The baseline before this design: a median of 41 landed lines per million input tokens over 166 flights in the 14 days to 2026-10-18. Agents that wrote no code took 61% of the input. The first flights on this design are measured against it with `/flights:doctor`.
-- The lander's PLAN constants (600 lines per hunter, 10 rows per walker, the caps) are first values; tune them from `/flights:doctor` reports.
+- The lander's PLAN constants (600 lines per diff-checker, 10 rows per spec-checker, the caps) are first values; tune them from `/flights:doctor` reports.

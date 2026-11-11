@@ -4,4 +4,5 @@
 // native Claude panes an older build reported under herdr:claude back to Herdr (pfm install's cutover).
 // herdr_settle_process.go is the detached settle process: the mode a hook hands it and its
 // bounded, backing-off retry of a Herdr state the host's load left undelivered.
+// seathost_image.go re-execs a seat-host from the installed pfm when an install replaced its binary.
 package hookentry

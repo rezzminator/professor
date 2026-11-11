@@ -81,10 +81,10 @@ type pacedLine struct {
 }
 
 // PacedKey names a chat for Paced: the first 16 bytes of the SHA-256 of its
-// session_id (else its transcript_path) and the terminal width the render
-// reads, hex. A payload naming neither, or not JSON, has no key: it renders
-// inline as before the pacer.
-func PacedKey(raw []byte, columns string) string {
+// session_id (else its transcript_path), the terminal width and the Claude
+// config directory the render reads, hex. A payload naming neither, or not
+// JSON, has no key: it renders inline as before the pacer.
+func PacedKey(raw []byte, columns, configDir string) string {
 	var chat struct {
 		SessionID      string `json:"session_id"`
 		TranscriptPath string `json:"transcript_path"`
@@ -99,9 +99,11 @@ func PacedKey(raw []byte, columns string) string {
 	if id == "" {
 		return ""
 	}
-	// The width is the one render input the worker cannot read from stdin: it
-	// keeps its spawner's COLUMNS, so a resized terminal is another chat key.
-	digest := sha256.Sum256([]byte(id + "\x00" + columns))
+	// The worker keeps its spawner's environment, so every render input stdin
+	// does not carry is part of the key: COLUMNS, so a resized terminal is
+	// another chat key, and the config directory, so a chat resumed on another
+	// account never renders with the old account's badge and limits.
+	digest := sha256.Sum256([]byte(id + "\x00" + columns + "\x00" + configDir))
 	return hex.EncodeToString(digest[:16])
 }
 

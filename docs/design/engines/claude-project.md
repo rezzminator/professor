@@ -32,7 +32,7 @@ The Claude Code settings a project carries in its own tree: this repo's `.claude
 
 `templates/project/settings.json` — two keys, `permissions` and `hooks`. Agent teams are switched off by every pfm launch ([claude-launch.md](claude-launch.md#knobs)), so no project file carries the variable.
 
-- **`permissions.allow`** (no `deny`): `Bash(*)`, `WebFetch(*)`, `WebSearch(*)`, `Workflow(*)`, `Read`, `Write(*)` (`templates/project/settings.json:2-10`).
+- **`permissions.allow`** (no `deny`): `Bash(*)`, `WebFetch(*)`, `WebSearch(*)`, `Workflow(*)`, `Read`, `Write` (`templates/project/settings.json:2-10`).
 - **`hooks`**: identical to this repo's (`templates/project/settings.json:12`).
 
 ## Differences

@@ -6,7 +6,7 @@
       "WebSearch(*)",
       "Workflow(*)",
       "Read",
-      "Write(*)"
+      "Write"
     ]
   },
   "hooks": {

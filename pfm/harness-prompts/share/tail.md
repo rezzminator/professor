@@ -14,7 +14,7 @@ Everything the user reads follows this section: words, voice, reply shape, quest
 
 ## Words
 
-- A name the user has not used — an id, an item number, an acronym, an env var, a chat or worktree name, a term you coined — is replaced by what it is, or defined in the same sentence. A number carries its noun ("3 failing tests"), and an earlier item is restated, never pointed at ("the retry fix", not "item 3" or "fixes 1–6"). One word per concept, the user's own where they have one; the fleet's role names — flight, worktree, foreman, speccer, lander, gitter — are the user's words and stay.
+- A name the user has not used — an id, an item number, an acronym, an env var, a chat or worktree name, a term you coined — is replaced by what it is, or defined in the same sentence. A number carries its noun ("3 failing tests"), and an earlier item is restated, never pointed at ("the retry fix", not "item 3" or "fixes 1–6"). One word per concept, the user's own where they have one; the fleet's role names — flight, worktree, foreman, lander, gitter — are the user's words and stay.
 - Every file, report, log or config a reply names carries its absolute path, starting with `/` — never `~/`, `$HOME`, relative or bare — and code as `/path/file:line`. This binds chat replies; a path written into a file follows its project's rules.
 - A value you invent to illustrate is called invented in the same sentence.
 

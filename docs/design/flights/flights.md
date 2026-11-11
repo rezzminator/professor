@@ -53,12 +53,12 @@ Flight merges over the prior 60 days averaged 1.42 Go test lines per code line, 
 | `flights:foreman-sonnet` | agent | sonnet · high | Foreman for a clear path: the pattern is in the code; the same protocol as `flights:foreman`, in its own file |
 | `flights:foreman` | agent | opus · medium | Foreman for design choices, ambiguity, unfamiliar code, an unknown cause, several modules |
 | `flights:lander` | agent | opus · medium | Reviews, fixes and gates a worktree change, then returns it for the merge |
-| `flights:speccer` | agent | opus · xhigh | On-demand specification outside the build/land lifecycle; returns a `spec.md` path and token price to its caller |
+| `flights:foreman-pro` | agent | opus · high (`effortControl` medium–xhigh) | MAIN-ONLY foreman for work the codebase has never done: designs it, then builds it by its own hand; see the bullet below |
 | `flights:diff-checker`, `flights:spec-checker`, `flights:usage-checker` | agents | opus · sonnet · haiku | The lander's read-only children ([flights-lander.md](flights-lander.md#the-children)) |
-| `/flights:spec` | command | the main chat | Grills the user until no decision is open, writes `requirements.md`, hands it to `flights:speccer`; the spec waits for the user's go to build |
+| `/flights:spec` | command | the main chat | Grills the user until no decision is open and writes `requirements.md` only; on the user's go the main chat hands the build to `flights:foreman-pro` with `requirements.md`, the flight directory, tracer RUN paths, testing manual paths and a recommended LEVEL |
 | `/flights:doctor` | command | the main chat | Measures a flight: the measure first, then where the reading went |
 
-- **The speccer is user-invoked:** the user, or the main chat on the user's request, calls it, most often through `/flights:spec`, which hands it the grilled `requirements.md`. No foreman or lander hands work to it; it returns to its caller and hands off to nobody. Its spec, research and calibration files live in its flight directory, outside the message-only build/land protocol.
+- **`flights:foreman-pro` designs, then builds:** visible to the main chat alone, in the lifecycle main chat → `flights:foreman-pro` → main chat → `flights:lander` → gitter. It preloads the `ultimate` skill and has the `Agent` tool (it spawns `flights:tracer`, and `rr`, `rr-pro`, `rr-pro-max`, `clone-distiller` by level). It reads the whole path, writes `{flight directory}/design.md` before its first edit, then builds it. A fork only the user can settle ends the run `BLOCKED` with the design and its questions, no edit made; under god speed it decides and marks the decision `USER`. The brief line `LEVEL {0–10}` (default 5) sets research and design depth: 0–3 no research, the simplest design; 4–6 `rr` only for a question the code cannot settle, two alternatives per load-bearing decision, /ultimate's raise-the-ask altitude and depth; 7–8 `rr-pro`, `clone-distiller` for prior art, two whole designs compared, raise-the-ask and completeness; 9–10 `rr-pro-max` for the hardest question, the boldest design, all of /ultimate. It returns first word `DONE`, `PARTIAL` or `BLOCKED` and a `DESIGN {path} · LEVEL {n}` line. The model and effort pin rests on one probe run, no bench.
 - **Landers are spawned only by the main chat.**
 - **`flights:tracer` and `gitter`** are fleet agents the family uses; they are not its members.
 
@@ -181,7 +181,7 @@ The `auto-effort` plugin gives an agent whose frontmatter carries `effortControl
 | Flight files and a run log | messages |
 | Review lenses (a security seat, fixed tracers) | the lander's hunt and the children its computed PLAN spawns |
 | A second gate round | fixes inside the one lander |
-| A required specification or requirements interview step | the main chat settles requirements; the user may independently request `flights:speccer` |
+| A required specification or requirements interview step | the main chat settles requirements; `flights:foreman-pro` designs only work the codebase has never done, after the grill |
 
 ## Harness settings
 

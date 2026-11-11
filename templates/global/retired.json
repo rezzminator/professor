@@ -45,7 +45,7 @@
     {
       "name": "flights-speccer",
       "kind": "agent",
-      "successor": "flights:speccer",
+      "successor": "flights:foreman-pro",
       "match": "exact"
     },
     {
@@ -64,6 +64,12 @@
       "name": "flights:spec-walker",
       "kind": "agent",
       "successor": "flights:spec-checker",
+      "match": "exact"
+    },
+    {
+      "name": "flights:speccer",
+      "kind": "agent",
+      "successor": "flights:foreman-pro",
       "match": "exact"
     },
     {

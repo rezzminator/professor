@@ -340,9 +340,10 @@ func TestRotatorWritersSharingAHomeKeepWholeGenerations(t *testing.T) {
 	}
 }
 
-// TestRotatorReportsARotationFailureAndRecovers: a rotation step that fails is
-// reported on stderr and returned, and the next write after the cause is gone
-// attaches to the log again.
+// TestRotatorReportsARotationFailureAndRecovers: a rotation that cannot drop its
+// oldest generation keeps the current file live, so no record is lost; the
+// failure is reported on stderr once inside the rate-limit window, and the first
+// write after the cause is gone rotates and announces the recovery.
 func TestRotatorReportsARotationFailureAndRecovers(t *testing.T) {
 	var stderr bytes.Buffer
 	first, _, path := openPair(t, 2, 1, &stderr)
@@ -353,14 +354,18 @@ func TestRotatorReportsARotationFailureAndRecovers(t *testing.T) {
 		t.Fatal(err)
 	}
 	record := []byte(strings.Repeat("r", 600*1024) + "\n")
-	if _, err := first.Write(record); err != nil {
-		t.Fatal(err)
+	for written := 0; written < 3; written++ {
+		if _, err := first.Write(record); err != nil {
+			t.Fatalf("write %d lost its record to a failed rotation: %v", written, err)
+		}
 	}
-	if _, err := first.Write(record); err == nil {
-		t.Fatal("a rotation that could not drop the oldest generation reported success")
+	if info, err := os.Stat(path); err != nil || info.Size() != 3*int64(len(record)) {
+		t.Fatalf("live file = %v, %v; want all three records appended", info, err)
 	}
-	if !strings.Contains(stderr.String(), path+".1") {
-		t.Fatalf("the rotation failure did not reach stderr naming the generation: %q", stderr.String())
+	failure := "pfm: activity log: drop oldest activity log " + path + ".1: remove " + path +
+		".1: directory not empty\n"
+	if stderr.String() != failure {
+		t.Fatalf("stderr = %q, want %q", stderr.String(), failure)
 	}
 	if err := os.RemoveAll(path + ".1"); err != nil {
 		t.Fatal(err)
@@ -368,10 +373,33 @@ func TestRotatorReportsARotationFailureAndRecovers(t *testing.T) {
 	if _, err := first.Write([]byte("after\n")); err != nil {
 		t.Fatalf("write after the cause was removed: %v", err)
 	}
-	if !strings.Contains(stderr.String(), "recovered") {
-		t.Fatalf("the recovery was not announced: %q", stderr.String())
+	if want := failure + "pfm: activity log: writes to " + path + " recovered\n"; stderr.String() != want {
+		t.Fatalf("stderr = %q, want %q", stderr.String(), want)
 	}
 	if !strings.HasSuffix(readFile(t, path), "after\n") {
 		t.Fatal("the record after recovery is not in the live file")
+	}
+}
+
+// TestRotatorRotatesPastAHandleThatIsAlreadyClosed: a live handle that is closed under the writer
+// (the descriptor was released elsewhere) is dropped at the next rotation, not kept to fail every
+// later write: the record that triggers the rotation lands in a fresh current file.
+func TestRotatorRotatesPastAHandleThatIsAlreadyClosed(t *testing.T) {
+	first, _, path := openPair(t, 2, 1, io.Discard)
+	record := []byte(strings.Repeat("r", 600*1024) + "\n")
+	if _, err := first.Write(record); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.Write(record); err != nil {
+		t.Fatalf("write that rotates over the closed handle: %v", err)
+	}
+	if got := readFile(t, path+".1"); got != string(record) {
+		t.Fatalf("%s.1 = %d bytes, want the first record", path, len(got))
+	}
+	if got := readFile(t, path); got != string(record) {
+		t.Fatalf("%s = %d bytes, want only the record that rotated", path, len(got))
 	}
 }

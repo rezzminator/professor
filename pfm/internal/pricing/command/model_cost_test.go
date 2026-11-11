@@ -44,6 +44,7 @@ type fixture struct {
 	home, file, configPath string
 	calls                  int
 	fail                   error
+	claude                 string // the Claude page served in place of claudePage
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -94,6 +95,9 @@ func (f *fixture) run(at time.Time, offline bool, args ...string) (int, string, 
 			body := openAIPage
 			if r.URL.Host == "platform.claude.com" {
 				body = claudePage
+				if f.claude != "" {
+					body = f.claude
+				}
 			}
 			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))}, nil
 		})},
@@ -305,6 +309,19 @@ func TestModelCostFetchFailureWarnsAndFailsOnlyWhenForced(t *testing.T) {
 	}
 }
 
+func TestModelCostWarnsOfAModelItKeptThePreviousRowOf(t *testing.T) {
+	f := newFixture(t)
+	f.claude = strings.Replace(claudePage, "| Claude Opus 4.1 | $15 / MTok |",
+		"| Claude Opus 4.1 | $16 / MTok | $18.75 / MTok | $30 / MTok | $1.50 / MTok | $75 / MTok |\n"+
+			"| Claude Opus 4.1 | $15 / MTok |", 1)
+	code, _, stderr := f.run(t0.Add(25*time.Hour), false, "claude-opus-4-1")
+	want := "pfm model-cost: warning: the fetched pages price these models in a way the parser cannot fold, " +
+		"keeping their previous rows: claude-opus-4-1\n"
+	if code != 0 || stderr != want {
+		t.Fatalf("code %d stderr %q; want 0 and %q", code, stderr, want)
+	}
+}
+
 func TestModelCostUnknownModelNamesTheListCommand(t *testing.T) {
 	f := newFixture(t)
 	code, stdout, stderr := f.run(t0.Add(time.Hour), false, "gpt-nonesuch")
@@ -327,6 +344,12 @@ func TestModelCostCheckPrintsTheSummaryAndFailsOnAnInvalidOverride(t *testing.T)
 	code, _, stderr := f.run(t0.Add(time.Hour), false, "--check")
 	if code != 1 || !strings.Contains(stderr, config.PricesPath(f.configPath)) {
 		t.Fatalf("invalid override: code %d stderr %q; want 1 naming %s", code, stderr, config.PricesPath(f.configPath))
+	}
+	// A lookup still answers from the published table, the override named.
+	code, stdout, stderr = f.run(t0.Add(time.Hour), false, "--all")
+	if code != 0 || !strings.Contains(stdout, "override: none") ||
+		!strings.Contains(stderr, "; serving the published table without it\n") {
+		t.Fatalf("lookup beside an invalid override: code %d stdout %q stderr %q", code, stdout, stderr)
 	}
 }
 

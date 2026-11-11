@@ -46,7 +46,7 @@ func TestInstallManagedCleanup(t *testing.T) {
 			options.Stdout = &output
 			installer := &engine{options: options, apply: apply}
 			err := installer.installManagedCleanup(context.Background())
-			if scenario == "unreadable" || scenario == "noninteger" {
+			if scenario == "unreadable" {
 				if err == nil || !strings.Contains(err.Error(), "managed-cleanup "+path+":") {
 					t.Fatalf("err=%v", err)
 				}
@@ -66,14 +66,15 @@ func TestInstallManagedCleanup(t *testing.T) {
 				t.Fatalf("output=%q want=%q", output.String(), want)
 			}
 			changed := 0
-			if scenario == "absent" || scenario == "wrong" || scenario == "keyless" || scenario == "preview" {
+			if scenario == "absent" || scenario == "wrong" || scenario == "keyless" || scenario == "noninteger" ||
+				scenario == "preview" {
 				changed = 1
 			}
 			if installer.report.Changed != changed {
 				t.Fatalf("Changed=%d want=%d", installer.report.Changed, changed)
 			}
 			switch scenario {
-			case "absent", "wrong", "keyless", "correct":
+			case "absent", "wrong", "keyless", "noninteger", "correct":
 				raw, err := os.ReadFile(path)
 				content := "{\"cleanupPeriodDays\":36500,\"prependPlugins\":[]}\n"
 				if scenario == "correct" {
@@ -189,7 +190,8 @@ func TestInspectManagedCleanup(t *testing.T) {
 		{`{}`, "wrong", 36500, 0, true},
 		{`{}`, "wrong", 0, 0, true},
 		{`null`, "wrong", 36500, 0, true},
-		{`{"cleanupPeriodDays":"30"}`, "unreadable", 36500, 0, false},
+		{`{"cleanupPeriodDays":"30"}`, "wrong", 36500, 0, false},
+		{`{"cleanupPeriodDays":30.0}`, "wrong", 36500, 0, false},
 	} {
 		t.Run(fmt.Sprintf("%s_%s_want_%d", tc.state, tc.raw, tc.want), func(t *testing.T) {
 			dir := t.TempDir()

@@ -14,9 +14,10 @@ type rowSet interface {
 }
 
 func collectRows[T any](
+	ctx context.Context,
 	rows rowSet,
 	scan func(rowSet) (T, error),
-	scanContext, iterationContext, closeContext string,
+	table, iterationContext, closeContext string,
 ) (result []T, returnErr error) {
 	result = make([]T, 0)
 	defer func() {
@@ -27,7 +28,8 @@ func collectRows[T any](
 	for rows.Next() {
 		value, err := scan(rows)
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", scanContext, err)
+			skipRow(ctx, table, err)
+			continue
 		}
 		result = append(result, value)
 	}
@@ -113,7 +115,7 @@ LIMIT ?`, sinceNS, limit)
 	if err != nil {
 		return nil, fmt.Errorf("query comms events: %w", err)
 	}
-	return collectRows(rows, func(rows rowSet) (CommsEvent, error) {
+	return collectRows(ctx, rows, func(rows rowSet) (CommsEvent, error) {
 		var event CommsEvent
 		err := rows.Scan(
 			&event.ID,
@@ -130,7 +132,7 @@ LIMIT ?`, sinceNS, limit)
 			&event.Message,
 		)
 		return event, err
-	}, "scan comms event", "iterate comms events", "close comms rows")
+	}, "comms", "iterate comms events", "close comms rows")
 }
 
 // CommsStamp is the ledger's change signal: two stamps that compare equal mean

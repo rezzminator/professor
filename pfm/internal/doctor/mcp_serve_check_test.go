@@ -310,6 +310,9 @@ func TestMCPServeProcessesDoctorReportsFreshAndStaleRows(t *testing.T) {
 
 func TestMCPServeProcessesDoctorClassifiesCompatibleProxies(t *testing.T) {
 	runtime, _, replaced := newMCPServeDoctorFixture(t)
+	// A jail proc root that does not exist: the descriptor census has no table
+	// and the fixture's links alone decide, so the host's /proc is never read.
+	runtime.Paths.ProcRoot = filepath.Join(t.TempDir(), "proc")
 	handle, err := stale.HoldCompatibleProxy(runtime.Paths.Home)
 	if err != nil {
 		t.Fatal(err)

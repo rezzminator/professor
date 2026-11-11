@@ -55,9 +55,34 @@ func TestNameSyncDefaultsToPreview(t *testing.T) {
 			resolved.FirstRoot(pfmengine.Codex),
 		),
 	}
+	// An OpenCode root under a regular file fails the index pass; the sync still plans on the last index.
+	blocker := filepath.Join(root, "opencode-blocker")
+	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runtime.Paths.Roots[pfmengine.OpenCode] = []string{filepath.Join(blocker, "opencode")}
+	// An unreadable primary account: the sync composes on the implicit one and says so.
+	mirror := filepath.Join(resolved.Home, ".claude-primary")
+	if err := os.WriteFile(mirror, []byte("garbage\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	var stdout, stderr bytes.Buffer
 	if code := runNameSync(nil, &stdout, &stderr, runtime); code != 0 {
 		t.Fatalf("runNameSync() code=%d stderr=%q", code, stderr.String())
+	}
+	store := filepath.Join(blocker, "opencode", "opencode.db")
+	prefix := "pfm name-sync: index pass: index engine ox: stat opencode store " + store + ": "
+	if got := stderr.String(); !strings.HasPrefix(got, prefix) ||
+		!strings.Contains(got, "; converging on the last index\n") {
+		t.Fatalf("runNameSync() stderr=%q, want the failed index pass named", got)
+	}
+	fault := "pfm name-sync: primary account unreadable (read primary account: parse primary account mirror: " +
+		`strconv.Atoi: parsing "garbage": invalid syntax); composing on account 1` + "\n"
+	if got := stderr.String(); !strings.Contains(got, fault) {
+		t.Fatalf("runNameSync() stderr=%q, want the account fault %q", got, fault)
+	}
+	if err := os.Remove(mirror); err != nil {
+		t.Fatal(err)
 	}
 	if got := readProbe(t, socketPath, "display-message", "-p", "#{window_name}"); got != original {
 		t.Fatalf("window name = %q, want unchanged %q in the default preview", got, original)

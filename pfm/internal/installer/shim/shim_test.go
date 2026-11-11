@@ -199,7 +199,10 @@ case " $* " in *" attach "*) printf '%s\n' "$$" > "$SHIM_TMUX_PID" ;; esac
 			"print -r -- \"$$\" > \"$SHIM_SHELL_PID\"\n"+
 			"cx\n",
 	)
-	command := testjail.PTYCommand(zsh, "-fi", driver)
+	command, err := testjail.PTYCommand(zsh, "-fi", driver)
+	if err != nil {
+		t.Fatal(err)
+	}
 	command.Env = append(
 		os.Environ(),
 		"HOME="+home,
@@ -246,7 +249,10 @@ func TestPfmOwnTerminalClosesOwnedAndPreservesOthers(t *testing.T) {
 				"_pfm_own_terminal 0\n"+
 				"print -r -- UNREACHABLE\n",
 		)
-		command := testjail.PTYCommand(zsh, "-fi", driver)
+		command, err := testjail.PTYCommand(zsh, "-fi", driver)
+		if err != nil {
+			t.Fatal(err)
+		}
 		command.Env = append(os.Environ(), "HOME="+home, "TMUX=", "TERM=dumb")
 		output, err := command.CombinedOutput()
 		if err != nil {
@@ -433,7 +439,10 @@ printf 'PICKER-LAUNCHED\n'
 	driver := filepath.Join(home, "driver.zsh")
 	writeShimFile(t, driver, "source "+quoteZsh(shimPath)+"\n")
 
-	command := testjail.PTYCommand(zsh, "-fi", driver)
+	command, err := testjail.PTYCommand(zsh, "-fi", driver)
+	if err != nil {
+		t.Fatal(err)
+	}
 	command.Env = append(os.Environ(),
 		"HOME="+home,
 		"PATH="+binDir+":/usr/bin:/bin",
@@ -550,7 +559,10 @@ printf 'tmux %s TMUX=[%s]\n' "$*" "$TMUX" >> "$SHIM_TMUX_LOG"
 					"pfm\n"+
 					"print -r -- SHELL-CAME-BACK\n",
 			)
-			command := testjail.PTYCommand(zsh, "-fi", driver)
+			command, err := testjail.PTYCommand(zsh, "-fi", driver)
+			if err != nil {
+				t.Fatal(err)
+			}
 			command.Env = append(
 				os.Environ(),
 				"HOME="+home,

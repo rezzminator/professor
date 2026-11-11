@@ -3,7 +3,9 @@ package reap
 import (
 	"context"
 	"path/filepath"
+	"reflect"
 	"testing"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
@@ -102,5 +104,58 @@ func TestTmuxReaperSessionsCouldNotRunIsAnError(t *testing.T) {
 	}
 	if sessions != nil {
 		t.Fatalf("sessions = %v, want nil alongside the error", sessions)
+	}
+}
+
+// scriptedTmux plays tmux answering every call with stdout and exit status.
+func scriptedTmux(t *testing.T, stdout string, exit int) string {
+	t.Helper()
+	binary := filepath.Join(t.TempDir(), "tmux")
+	script := "#!/bin/sh\nprintf '%s' '" + stdout + "'\necho 'no server running' >&2\n" +
+		"exit " + string(rune('0'+exit)) + "\n"
+	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return binary
+}
+
+// One session line tmux answers in an unreadable shape costs only that line: it is
+// kept, named, with its idle unknown, and the bunker's other sessions list normally.
+func TestTmuxReaperSessionsKeepsAnUnreadableLineAsUnknown(t *testing.T) {
+	const sep = "\x1f"
+	now := time.Unix(10_000, 0)
+	output := "good" + sep + "1" + sep + "9000\n" +
+		"short" + sep + "0\n" +
+		"stamp" + sep + "0" + sep + "soon\n"
+	tmux := TmuxReaper{Binary: scriptedTmux(t, output, 0), TmuxDir: t.TempDir(), Now: func() time.Time { return now }}
+	got, err := tmux.Sessions(context.Background(), "vsct")
+	if err != nil {
+		t.Fatalf("Sessions() = %v, want the readable lines listed", err)
+	}
+	want := []VSCTSession{
+		{Name: "good", Attached: true, Idle: 1000 * time.Second},
+		{Name: "short" + sep + "0", Unreadable: `2 session fields in "short\x1f0" on vsct`},
+		{
+			Name:       "stamp",
+			Unreadable: `session activity "soon" on vsct: strconv.ParseInt: parsing "soon": invalid syntax`,
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Sessions() = %#v, want %#v", got, want)
+	}
+	for _, session := range got[1:] {
+		decision := planVSCT(Input{Apply: true, VSCTMaxIdle: time.Minute}, session)
+		if decision.State != StateUnknown || decision.Action != ActionNone {
+			t.Fatalf("an unreadable session %q planned %+v, want unknown and never killed", session.Name, decision)
+		}
+	}
+}
+
+// A list-clients that fails is the probe's own error, never "no client answered".
+func TestTmuxReaperClientIdleReturnsAFailedProbe(t *testing.T) {
+	tmux := TmuxReaper{Binary: scriptedTmux(t, "", 1), TmuxDir: t.TempDir()}
+	_, found, err := tmux.ClientIdle(context.Background(), "cc-1-2-3")
+	if found || err == nil || err.Error() != "tmux cc-1-2-3 list-clients: exit status 1" {
+		t.Fatalf("ClientIdle() = found %t, err %v; want the exit failure returned", found, err)
 	}
 }

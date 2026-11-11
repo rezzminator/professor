@@ -2,9 +2,11 @@ package installer
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -69,7 +71,7 @@ func TestGlobalWiringWritesTheStoreForThreeAccounts(t *testing.T) {
 	home := t.TempDir()
 	var output bytes.Buffer
 	installer, first, _ := globalFanoutEngine(t, home, true, &output)
-	assets, err := assetFiles()
+	assets, err := assetFiles(nativeScheduler())
 	if err != nil {
 		t.Fatalf("assetFiles: %v", err)
 	}
@@ -149,13 +151,96 @@ func TestGlobalCommandsWriteTheStore(t *testing.T) {
 	}
 }
 
+// TestGlobalWiringUnreadableEntryCostsOnlyItself pins that one clone entry
+// sorting first that cannot be inspected (a symlink loop) never stops the
+// entries after it: a command costs its own link, a skill is skipped by name.
+func TestGlobalWiringUnreadableEntryCostsOnlyItself(t *testing.T) {
+	t.Parallel()
+	for _, row := range []struct {
+		registry, entry, later string
+		step                   func(*engine) error
+		wantErr, wantSkip      func(home, loop string) string
+	}{
+		{
+			registry: "commands", entry: "aaa.md", later: "alpha.md",
+			step: (*engine).wireGlobalCommands,
+			wantErr: func(home, loop string) string {
+				return "inspect global link " + filepath.Join(home, ".claude", "commands", "aaa.md") +
+					": inspect global link target " + loop + ": stat " + loop + ": too many levels of symbolic links"
+			},
+			wantSkip: func(string, string) string { return "" },
+		},
+		{
+			registry: "skills", entry: "aaa", later: "beta",
+			step:    (*engine).wireGlobalSkills,
+			wantErr: func(string, string) string { return "" },
+			wantSkip: func(_, loop string) string {
+				return "  skip    SKILL-SOURCE-UNREADABLE aaa (stat " + loop + ": too many levels of symbolic links)"
+			},
+		},
+	} {
+		t.Run(row.registry, func(t *testing.T) {
+			t.Parallel()
+			home := t.TempDir()
+			var output bytes.Buffer
+			installer, store, _ := globalFanoutEngine(t, home, true, &output)
+			sources := filepath.Join(installer.options.SourceRepo, "templates", "global", row.registry)
+			loop := filepath.Join(sources, row.entry)
+			if err := os.Symlink(loop, loop); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(filepath.Join(store, row.registry), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(loop, filepath.Join(store, row.registry, row.entry)); err != nil {
+				t.Fatal(err)
+			}
+			err := row.step(installer)
+			if got := fmt.Sprint(err); err != nil && got != row.wantErr(home, loop) ||
+				err == nil && row.wantErr(home, loop) != "" {
+				t.Fatalf("step error = %v, want %q\n%s", err, row.wantErr(home, loop), output.String())
+			}
+			if want := row.wantSkip(
+				home,
+				loop,
+			); want != "" &&
+				!slices.Contains(strings.Split(output.String(), "\n"), want) {
+				t.Fatalf("output never carried %q:\n%s", want, output.String())
+			}
+			assertFanoutLink(t, filepath.Join(store, row.registry, row.later), filepath.Join(sources, row.later))
+		})
+	}
+}
+
+// TestGlobalSkillsLinkPastAFailedSourceFetch pins that a source-fetched step
+// that fails (an unreadable skill link ledger) costs those skills alone: the
+// template skills still link, and the step returns the ledger's error.
+func TestGlobalSkillsLinkPastAFailedSourceFetch(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	var output bytes.Buffer
+	installer, store, _ := globalFanoutEngine(t, home, true, &output)
+	installer.options.SkillSourcesOffline = true
+	writeFixture(t, filepath.Join(installer.options.SourceRepo, filepath.FromSlash(skillSourcesRelative)),
+		skillRegistryJSON(map[string]string{"fetched": "https://example.invalid/fetched"}))
+	ledger := skillLinkLedgerPath(home)
+	writeFixture(t, ledger, "{")
+
+	err := installer.wireGlobalSkills()
+	if want := "skill link ledger " + ledger + ": unexpected end of JSON input"; fmt.Sprint(err) != want {
+		t.Fatalf("wireGlobalSkills error = %v, want %q\n%s", err, want, output.String())
+	}
+	assertFanoutLink(t, filepath.Join(store, "skills", "beta"),
+		filepath.Join(installer.options.SourceRepo, "templates", "global", "skills", "beta"))
+}
+
 // TestGlobalWiringDryRunPlansTheStore checks that preview names the store paths.
 func TestGlobalWiringDryRunPlansTheStore(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	var output bytes.Buffer
 	installer, first, _ := globalFanoutEngine(t, home, false, &output)
-	assets, err := assetFiles()
+	assets, err := assetFiles(nativeScheduler())
 	if err != nil {
 		t.Fatalf("assetFiles: %v", err)
 	}
@@ -277,36 +362,28 @@ func assertFanoutLink(t *testing.T, target, source string) {
 }
 
 // TestGlobalAgentsDoctorUnreadableMarkerIsUnresolvedNotNoClone pins the other
-// half: a marker path that could not even be LOOKED at (its parent directory
-// unreadable) is UNRESOLVED — "we failed to look" — never NO-CLONE, which
-// would misreport a failed look as an absent clone.
+// half: a marker that cannot be read as a clone is UNRESOLVED — "we failed to
+// look" — never NO-CLONE, which would misreport a failed look as an absent
+// clone; the engine-sync rows that need no clone still report.
 func TestGlobalAgentsDoctorUnreadableMarkerIsUnresolvedNotNoClone(t *testing.T) {
-	t.Parallel()
-	if os.Geteuid() == 0 {
-		t.Skip(
-			"running as root — chmod 000 never blocks root's own Lstat, so the unreadable-marker fixture cannot be produced",
-		)
-	}
 	home := t.TempDir()
-	markerDir := filepath.Join(home, ".local", "share", "pfm", "install")
-	if err := os.MkdirAll(markerDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chmod(markerDir, 0o000); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(markerDir, 0o755) })
+	t.Setenv("ENGINE_SYNC_BIN", "")
+	t.Setenv("ENGINE_SYNC_HOME", "")
+	t.Setenv("XDG_DATA_HOME", "")
+	writeFixture(t, paths.SourceRepoPath(home), "\n")
 
 	var output bytes.Buffer
 	warnings, failures := ReportGlobalAgents(&output, home, false, paths.OSEnv{}, nil, nil, nil)
-	if warnings != 1 || failures != 0 {
-		t.Fatalf("warnings=%d failures=%d, want 1/0\n%s", warnings, failures, output.String())
+	if warnings != 1 || failures != 1 {
+		t.Fatalf("warnings=%d failures=%d, want 1/1\n%s", warnings, failures, output.String())
 	}
-	if !strings.Contains(output.String(), "state=UNRESOLVED") {
-		t.Fatalf("an unreadable marker was not reported as UNRESOLVED:\n%s", output.String())
-	}
-	if strings.Contains(output.String(), "state=NO-CLONE") {
-		t.Fatalf("a failed look at the marker was rendered as an absent clone:\n%s", output.String())
+	stable := filepath.Join(home, ".local", "share", "engine-sync", "bin", "engine-sync")
+	want := "doctor: global-agents source=" + home + " state=UNRESOLVED error=source repository marker " +
+		paths.SourceRepoPath(home) + " is not one path: recorded source repository is unusable" +
+		" hint=\"run pfm install\"\n" +
+		"doctor: global-agents state=FAIL engine-sync binary unavailable: " + stable + ": "
+	if !strings.HasPrefix(output.String(), want) {
+		t.Fatalf("output = %q, want prefix %q", output.String(), want)
 	}
 }
 

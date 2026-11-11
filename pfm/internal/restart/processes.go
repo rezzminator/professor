@@ -340,13 +340,15 @@ func (finder *discoverer) findHelpers(table processTable) {
 		if kind == "" || finder.claimed[proc.PID] {
 			continue
 		}
-		owned, err := finder.ownedByInstall(proc)
+		owned, gone, err := finder.ownedByInstall(proc)
 		if err != nil {
 			unowned = append(unowned, err)
 			continue
 		}
 		if !owned {
-			kept++
+			if !gone {
+				kept++
+			}
 			continue
 		}
 		finder.claimed[proc.PID] = true
@@ -363,19 +365,20 @@ func (finder *discoverer) findHelpers(table processTable) {
 }
 
 // ownedByInstall reports whether proc was launched by this install
-// (gather.Install.Owns); a pid gone since the table read is not.
-func (finder *discoverer) ownedByInstall(proc process) (bool, error) {
-	owned, err := finder.deps.Install.Owns(
+// (gather.Install.Owns). gone says its pid exited since the table read: a torn
+// read of an exiting process is neither this install's nor another's.
+func (finder *discoverer) ownedByInstall(proc process) (owned, gone bool, err error) {
+	owned, err = finder.deps.Install.Owns(
 		finder.deps.Procs,
 		gather.Identity{PID: proc.PID, Start: proc.Start, Argv: proc.Argv},
 	)
 	if gather.IsGone(err) {
-		return false, nil
+		return false, true, nil
 	}
 	if err != nil {
-		return false, fmt.Errorf("pid %d install ownership: %w", proc.PID, err)
+		return false, false, fmt.Errorf("pid %d install ownership: %w", proc.PID, err)
 	}
-	return owned, nil
+	return owned, false, nil
 }
 
 // keptNote names the processes of another install a family left running.
@@ -405,13 +408,15 @@ func (finder *discoverer) findPFM(table processTable) {
 			slices.Contains(finder.deps.Spare, proc.PID) {
 			continue
 		}
-		owned, err := finder.ownedByInstall(proc)
+		owned, gone, err := finder.ownedByInstall(proc)
 		if err != nil {
 			unowned = append(unowned, err)
 			continue
 		}
 		if !owned {
-			kept++
+			if !gone {
+				kept++
+			}
 			continue
 		}
 		finder.claimed[proc.PID] = true

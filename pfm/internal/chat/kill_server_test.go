@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -209,13 +210,14 @@ func TestEndHerdrClosesOnlyItsSeat(t *testing.T) {
 			if err := db.PutSeat(context.Background(), other); err != nil {
 				t.Fatal(err)
 			}
-			// The ended seat's reload schedule files go with it; another
-			// seat's, a sibling name and an unrelated file stay.
+			// The ended seat's reload schedule record goes with it; its
+			// reload log stays as the evidence of its last reload, and
+			// another seat's files, a sibling name and an unrelated file stay.
 			ended := []string{
 				paths.SIDReloadHerdrPrefix + seat.SeatID + ".pid",
-				paths.SIDReloadHerdrPrefix + seat.SeatID + ".log",
 			}
 			kept := []string{
+				paths.SIDReloadHerdrPrefix + seat.SeatID + ".log",
 				paths.SIDReloadHerdrPrefix + other.SeatID + ".pid",
 				paths.SIDReloadHerdrPrefix + other.SeatID + ".log",
 				paths.SIDReloadHerdrPrefix + seat.SeatID + "-2.log",
@@ -434,7 +436,11 @@ func TestNativePendingEndReprovesDowngradedBinding(t *testing.T) {
 func TestEndHerdrStepsLogEachStepAndTheFailure(t *testing.T) {
 	for _, scenario := range []struct {
 		name, refusal string
-		want          []string
+		// ack is the pane.close result; closes drops the pane from pane.list
+		// once the close arrives.
+		ack    any
+		closes bool
+		want   []string
 	}{
 		{
 			name: "success",
@@ -456,12 +462,34 @@ func TestEndHerdrStepsLogEachStepAndTheFailure(t *testing.T) {
 				"pane.close failed",
 			},
 		},
+		{
+			// An unreadable ack is not a failed kill once the pane is gone.
+			name:   "unreadable ack, pane gone",
+			ack:    "closed",
+			closes: true,
+			want: []string{
+				"seat read",
+				"owner proved",
+				"pane.close sending",
+				"pane.close failed: decode Herdr pane close: json: cannot unmarshal string",
+				"terminal absent confirmed after the close failure",
+				"seat retired",
+			},
+		},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			testjail.Fleet(t)
+			var closed atomic.Bool
 			socket := nativeChatSocket(t, func(req nativeChatRequest) (any, string) {
+				if req.Method == "pane.list" && closed.Load() {
+					return map[string]any{"type": "pane_list", "panes": []any{}}, ""
+				}
 				if value, code, ok := nativeChatProof(req, "w6:p3"); ok {
 					return value, code
+				}
+				closed.Store(scenario.closes)
+				if scenario.ack != nil {
+					return scenario.ack, scenario.refusal
 				}
 				return map[string]any{"type": "ok"}, scenario.refusal
 			})

@@ -19,8 +19,8 @@ func TestOfflineUnregisterPreservesPersonalConfigAndSymlink(t *testing.T) {
 	if err := os.Symlink(physical, path); err != nil {
 		t.Fatal(err)
 	}
-	writeReceipt(t, account, `{"owned.path:key": "sha256:owned"}`)
-	if err := Unregister(account); err != nil {
+	writeReceiptFile(t, account, `{"owned.path:key": "sha256:owned"}`)
+	if err := UnregisterHookTrust(account); err != nil {
 		t.Fatal(err)
 	}
 	got, err := os.ReadFile(path)
@@ -34,7 +34,7 @@ func TestOfflineUnregisterPreservesPersonalConfigAndSymlink(t *testing.T) {
 	if info, err := os.Lstat(path); err != nil || info.Mode()&os.ModeSymlink == 0 {
 		t.Fatal("config symlink replaced")
 	}
-	if err := Unregister(account); err != nil {
+	if err := UnregisterHookTrust(account); err != nil {
 		t.Fatalf("repeated cleanup: %v", err)
 	}
 }
@@ -50,20 +50,11 @@ func TestTrustCleanupRejectsUnsafeInlineLayout(t *testing.T) {
 // as "nothing recorded" and retire the receipt, never panic on it.
 func TestNullReceiptFailsWithoutPanic(t *testing.T) {
 	account := t.TempDir()
-	writeReceipt(t, account, "null")
-	if err := Unregister(account); err != nil {
+	writeReceiptFile(t, account, "null")
+	if err := UnregisterHookTrust(account); err != nil {
 		t.Fatalf("cleanup over a null receipt: %v", err)
 	}
-	if _, err := os.Stat(receiptPath(account)); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(hookReceiptPath(account)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("null receipt survived cleanup: %v", err)
-	}
-}
-
-// writeReceipt stages the trust receipt the retired registration wrote, which
-// is the only input the cleanup reads.
-func writeReceipt(t *testing.T, account, body string) {
-	t.Helper()
-	if err := os.WriteFile(receiptPath(account), []byte(body), 0o600); err != nil {
-		t.Fatal(err)
 	}
 }

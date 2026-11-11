@@ -1,4 +1,4 @@
-# Professor markdown policy — read by `rumdl` (see /quality:md-forlint).
+# Professor markdown policy — read by `rumdl` (see /md-forlint:use).
 #
 # One config, one policy table: `[global]` is the union of rules that run
 # everywhere, `[per-file-ignores]` removes the ones a category must not obey.
@@ -7,7 +7,7 @@
 # What this file reports when IT is broken: an unknown rule option does NOT fail
 # the run. rumdl prints `Using default values for rule MDxxx` on stderr and
 # formats with that rule's DEFAULT — a typo in `style = "compact"` silently pads
-# every table it was told to compact. `/quality:md-forlint check` greps for that
+# every table it was told to compact. `/md-forlint:use check` greps for that
 # warning and fails; a bare `rumdl fmt` exit 0 is not evidence this config loaded.
 
 [global]
@@ -84,7 +84,7 @@ line-length = 100000
 enabled = true
 style = "compact"
 
-# The byline/deferred-work gate: /quality:doc bans `Last updated:` bylines and
+# The byline/deferred-work gate: /doc:use bans `Last updated:` bylines and
 # root CLAUDE.md bans deferred TODOs. The one legitimate user of these words is
 # the hygiene audit that hunts them, exempted at the bottom of this file.
 [MD061]

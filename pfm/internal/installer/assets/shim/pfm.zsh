@@ -10,28 +10,6 @@ export CLAUDE_DISABLE_ADOPT=1
 export CLAUDE_CODE_DISABLE_BG_EXIT_HANDOFF=1
 export CLAUDE_CODE_STOP_HOOK_BLOCK_CAP=2
 
-# Re-sourcing an updated install also removes legacy functions and aliases
-# already loaded in this shell. External executables (including /usr/bin/cc)
-# are untouched.
-if (( ${+precmd_functions} )); then
-  precmd_functions=("${(@)precmd_functions:#_cc_auto_open}")
-fi
-for _pfm_retired in cc cc1 cc2 cc3 cc4 cc-clean cc-ls cc-open cc-revive cc-swap \
-  _cc_accounts _cc_acct _cc_agents _cc_ago _cc_arm1h _cc_c1h_tty _cc_cachew \
-  _cc_cfgdir _cc_dir _cc_fleet_eval _cc_has _cc_hsize _cc_in_bunker _cc_isbg \
-  _cc_isgpt _cc_label _cc_lastprompt _cc_medal _cc_meta _cc_metac _cc_newprompts \
-  _cc_open_gate _cc_open_lock _cc_own_terminal _cc_owns_terminal _cc_primary \
-  _cc_resume_acct _cc_run _cc_selfswitch _cc_solo _cc_stat _cc_tui_call _cc_auto_open \
-  cc_children_args cc_detach cc_epoch cc_find_meta cc_find_newest cc_listening \
-  cc_mem cc_mtime cc_mtime0 cc_pane_of cc_penv cc_pfiles cc_ppid cc_pstart \
-  cc_sed_i cc_session_live cc_size cc_size0 cc_timeout cc_trylock cc_unlock \
-  cc_master_item cc_account_meta cc_item_sfx cc_read_item cc_expires_of \
-  cc_freshest_token cc_promote _pfm_eval _pfm_primary; do
-  unfunction "$_pfm_retired" 2>/dev/null || true
-  unalias "$_pfm_retired" 2>/dev/null || true
-done
-unset _pfm_retired _cc_auto_what PFM_CLAUDE_PROMPTED
-
 # cx — a CODEX chat on the same per-chat-server pattern, socket prefix cx-* instead of cc-*.
 # The prefix IS the engine marker: codex writes no statusline breadcrumbs and no ~/.claude
 # transcript, so pfm recognizes (and lists) a live Codex chat by socket name alone. Claude
@@ -125,8 +103,8 @@ _pfm_tui_call() {
 
 # A harness typed straight into a terminal closes that terminal on exit, exactly as a fleet
 # chat does. claude bypasses recursion by calling the managed absolute launcher path, while
-# codex delegates to the managed launch door, which resolves the real binary, carries extension
-# env, and selects --no-daemon for a TUI without an explicit transport.
+# codex delegates to the managed launch door, which resolves the real binary,
+# and selects --no-daemon for a TUI without an explicit transport.
 # Only this shell's own typing is affected — pfm, hooks and scripts exec the binary and never
 # see these functions. An agent tool shell replays a snapshot that keeps `claude`/`codex` but drops
 # every `_`-prefixed helper, and is not interactive — the guard keeps it from calling them.

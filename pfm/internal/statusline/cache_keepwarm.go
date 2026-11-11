@@ -4,9 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"os"
-	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -18,25 +16,17 @@ const keepwarmOff = "off"
 // writer's start time may read before the pid counts as reused.
 const keepwarmBirthSlackMS = 2000
 
-type keepwarmPokes struct {
-	Count int `json:"count"`
-	Max   int `json:"max"`
-}
-
-// keepwarmRecord is the public cache-keepwarm v1 protocol, not the plugin's
-// internal persistence. A quiet live session's record does not expire by age.
+// keepwarmRecord is the public cache-keepwarm v1 protocol's part the shield
+// reads: the writer's identity (sessionId, pid, updatedAt) and its state. The
+// record's other fields (enabled, source, reason, pokes, nextAt,
+// protectingTokensEq) are never read here, so nothing gates on them. A quiet
+// live session's record does not expire by age.
 type keepwarmRecord struct {
-	Version    int            `json:"v"`
-	SessionID  string         `json:"sessionId"`
-	PID        int            `json:"pid"`
-	UpdatedAt  int64          `json:"updatedAt"`
-	Enabled    *bool          `json:"enabled"`
-	Source     string         `json:"source"`
-	State      string         `json:"state"`
-	Reason     string         `json:"reason"`
-	Pokes      *keepwarmPokes `json:"pokes"`
-	NextAt     *int64         `json:"nextAt"`
-	Protecting *float64       `json:"protectingTokensEq"`
+	Version   int    `json:"v"`
+	SessionID string `json:"sessionId"`
+	PID       int    `json:"pid"`
+	UpdatedAt int64  `json:"updatedAt"`
+	State     string `json:"state"`
 }
 
 type keepwarmState struct {
@@ -125,33 +115,13 @@ func (record keepwarmRecord) validate(sessionID string) error {
 	if record.SessionID != sessionID {
 		return fmt.Errorf("sessionId %q, want %q", record.SessionID, sessionID)
 	}
-	if record.PID <= 0 || record.UpdatedAt <= 0 || record.Enabled == nil {
-		return errors.New("invalid or missing pid, updatedAt or enabled")
-	}
-	if record.Source != "launch" && record.Source != "session" {
-		return fmt.Errorf("unknown source %q", record.Source)
+	if record.PID <= 0 || record.UpdatedAt <= 0 {
+		return errors.New("invalid or missing pid or updatedAt")
 	}
 	switch record.State {
 	case "warming", "on", "stopped", keepwarmOff:
 	default:
 		return fmt.Errorf("unknown state %q", record.State)
-	}
-	if strings.TrimSpace(record.Reason) == "" {
-		return errors.New("missing reason")
-	}
-	if *record.Enabled == (record.State == keepwarmOff) {
-		return errors.New("enabled disagrees with state")
-	}
-	if record.Pokes != nil &&
-		(record.Pokes.Count < 0 || record.Pokes.Max < 1 || record.Pokes.Count > record.Pokes.Max) {
-		return errors.New("invalid poke counters")
-	}
-	if record.NextAt != nil && *record.NextAt < 0 {
-		return errors.New("negative nextAt")
-	}
-	if record.Protecting != nil &&
-		(*record.Protecting < 0 || math.IsNaN(*record.Protecting) || math.IsInf(*record.Protecting, 0)) {
-		return errors.New("invalid protectingTokensEq")
 	}
 	return nil
 }

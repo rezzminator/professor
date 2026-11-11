@@ -16,12 +16,20 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/semver"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // e2eOldTag names the older release the release-upgrade e2e updates from;
-// unset, the fifth-newest release tag of the source repository.
+// unset, the fifth-newest release tag of the source repository, never one
+// older than e2eOldestUpdatable.
 const e2eOldTag = "PFM_E2E_OLD_TAG"
+
+// e2eOldestUpdatable is the oldest release this tree updates from: the retired
+// lists ship empty, so an older host keeps state only a retirement cleared
+// (stats-cache.json linked into the store before v0.84.0, plugin ids before
+// {name}@professor before v0.86.0).
+const e2eOldestUpdatable = "v0.86.0"
 
 // failingDoctorSource is a file the rollback cases add to their candidate:
 // the candidate installs normally, and its doctor reports one failure.
@@ -137,11 +145,16 @@ func TestUpdateRollbackFromPreviousReleaseE2E(t *testing.T) {
 	h, home := installBase(t, tag, tag, candidate, map[string]string{
 		"pfm/cmd/pfm/zz_e2e_failing_doctor.go": failingDoctorSource,
 	})
-	if differences := h.updateRollsBack(home, tag, candidate); len(differences) != 0 {
+	if differences := h.updateRollsBack(home, tag, candidate, releasedHerdrClaudeFail); len(differences) != 0 {
 		t.Logf("rollback to %s kept candidate state it cannot know: %s", tag, strings.Join(differences, ", "))
 	}
 	doctor := h.pfm(home, "doctor")
 	var exit *exec.ExitError
+	if doctor.err != nil && errors.As(doctor.err, &exit) && exit.ExitCode() == 3 &&
+		failsOnlyOn(doctor.stdout, releasedHerdrClaudeFail) {
+		t.Logf("doctor of the host rolled back to %s fails only on Herdr's Claude hook the candidate installed", tag)
+		return
+	}
 	if doctor.err != nil && (!errors.As(doctor.err, &exit) || exit.ExitCode() != 1) {
 		t.Fatalf("doctor of the host rolled back to %s: %v, want exit 0 or 1 (warnings); stdout=%q stderr=%q",
 			tag, doctor.err, doctor.stdout, doctor.stderr)
@@ -234,11 +247,40 @@ func holdUpgradeSlot(t *testing.T) {
 	t.Cleanup(func() { <-upgradeSlot })
 }
 
+// releasedHerdrClaudeFail starts the row a release before Herdr's own Claude
+// integration became required prints for it: on a Herdr host the candidate
+// installs that hook, state a released doctor fails and its updater cannot know.
+const releasedHerdrClaudeFail = "doctor: herdr-integration: FAIL need=no bundled claude integration "
+
+// injectedDoctorFail is the row failingDoctorSource's doctor prints.
+const injectedDoctorFail = "e2e candidate FAIL injected"
+
+// failsOnlyOn reports whether every FAIL row of a doctor's output starts with
+// row, at least one doing so. In an update's output only the rows after the
+// candidate's injected failure count: the rolled-back release's doctor.
+func failsOnlyOn(output, row string) bool {
+	if at := strings.LastIndex(output, injectedDoctorFail); at >= 0 {
+		output = output[at+len(injectedDoctorFail):]
+	}
+	matched := false
+	for _, line := range strings.Split(output, "\n") {
+		if !strings.Contains(line, " FAIL ") {
+			continue
+		}
+		if !strings.HasPrefix(line, row) {
+			return false
+		}
+		matched = true
+	}
+	return matched
+}
+
 // updateRollsBack runs `pfm update --to candidate`, which must fail on the
 // candidate's injected doctor failure and roll back to base: the binary, its
-// version and the source revision restored, no residue claimed. It returns the
+// version and the source revision restored, no residue claimed beyond the
+// released doctor's FAIL rows starting with a tolerated row. It returns the
 // paths of the host that differ from before the update.
-func (h *e2eHarness) updateRollsBack(home, base, candidate string) []string {
+func (h *e2eHarness) updateRollsBack(home, base, candidate string, tolerated ...string) []string {
 	h.t.Helper()
 	before, err := h.snapshot(home)
 	if err != nil {
@@ -253,12 +295,15 @@ func (h *e2eHarness) updateRollsBack(home, base, candidate string) []string {
 	if result.err == nil {
 		h.t.Fatalf("update to a candidate whose doctor fails succeeded, want a rollback; output=%q", output)
 	}
-	if !strings.Contains(output, "e2e candidate FAIL injected") ||
+	if !strings.Contains(output, injectedDoctorFail) ||
 		!strings.Contains(output, "rolled back source to") {
 		h.t.Fatalf("update did not roll back on the candidate's failed doctor; output=%q", output)
 	}
 	if strings.Contains(output, "rollback residue") {
-		h.t.Fatalf("rollback to %s claimed residue; output=%q", base, output)
+		if len(tolerated) == 0 || !failsOnlyOn(output, tolerated[0]) {
+			h.t.Fatalf("rollback to %s claimed residue; output=%q", base, output)
+		}
+		h.t.Logf("rollback to %s claimed residue on state it cannot know: %s", base, tolerated[0])
 	}
 	h.requireVersion(home, base)
 	if after := runGit(h.repo, "rev-parse", "HEAD"); after.err != nil || after.stdout != head.stdout {
@@ -324,9 +369,12 @@ func installShapedBase(
 	if err := os.Remove(binary); err != nil {
 		t.Fatalf("remove the staged %s build: %v", baseTag, err)
 	}
-	// --skip-harvest: releases before the harvester plugin downloaded its
-	// conversion sidecar at install; later ones accept the flag as a no-op.
-	h.requireSuccess("install "+baseTag, h.pfm(home, "install", "--yes", "--skip-harvest"))
+	install := []string{"install", "--yes"}
+	// Releases before v0.83.0 provision the harvest sidecar at install unless skipped.
+	if semver.Compare(baseTag, "v0.83.0") < 0 {
+		install = append(install, "--skip-harvest")
+	}
+	h.requireSuccess("install "+baseTag, h.pfm(home, install...))
 	return h, home
 }
 
@@ -469,6 +517,9 @@ func releaseTagFor(t *testing.T, tags []string, env string, index int) string {
 		t.Fatalf("%s unset and the repository holds %d release tag(s), not the %d needed: %s",
 			env, len(tags), index+1, strings.Join(tags, " "))
 	}
+	if semver.Compare(tags[index], e2eOldestUpdatable) < 0 {
+		return e2eOldestUpdatable
+	}
 	return tags[index]
 }
 
@@ -504,7 +555,7 @@ func nextPatchTag(t *testing.T, tag string) string {
 // canonicalPluginRecords re-hashes each Claude settings.json of snapshot, and
 // the installed_plugins.json beside it, as canonical JSON without the plugin
 // ids that settings.json disables. Install disables a retired plugin and never
-// uninstalls it (installer retiredClaudePlugins), so a host updated from a
+// uninstalls it (the retired lists' claudePlugins), so a host updated from a
 // release that installed one keeps it, disabled, by design; one still enabled
 // stays a difference.
 func canonicalPluginRecords(t *testing.T, home string, snapshot surfaceSnapshot) {

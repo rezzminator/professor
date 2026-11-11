@@ -111,7 +111,7 @@ func followerPlist(program, home, stateDir string) (string, error) {
 }
 
 func (s *session) followerPath() string {
-	return filepath.Join(s.env.Home, "Library", "LaunchAgents", followerLabel+".plist")
+	return filepath.Join(paths.LaunchAgentsDir(s.env.Home), followerLabel+".plist")
 }
 
 // launchd is the calling user's GUI domain over the session's runner, its
@@ -178,7 +178,7 @@ var errFollowerReloadDue = errors.New(
 func (s *session) followerInOwnJob() bool { return s.env.LaunchdJob == followerLabel }
 
 func (s *session) applyFollower(ctx context.Context) SurfaceResult {
-	if !s.env.darwin() {
+	if s.env.platform().follower == servicemanager.KindSystemd {
 		return s.applySystemdFollower(ctx)
 	}
 	path := s.followerPath()
@@ -229,7 +229,7 @@ func (s *session) applyFollower(ctx context.Context) SurfaceResult {
 }
 
 func (s *session) readFollower(ctx context.Context) SurfaceResult {
-	if !s.env.darwin() {
+	if s.env.platform().follower == servicemanager.KindSystemd {
 		return s.readSystemdFollower(ctx)
 	}
 	path := s.followerPath()
@@ -267,7 +267,7 @@ func (s *session) readFollower(ctx context.Context) SurfaceResult {
 }
 
 func (s *session) restoreFollower(ctx context.Context) SurfaceResult {
-	if !s.env.darwin() {
+	if s.env.platform().follower == servicemanager.KindSystemd {
 		return s.restoreSystemdFollower(ctx)
 	}
 	existed, err := s.followerRetire(ctx)

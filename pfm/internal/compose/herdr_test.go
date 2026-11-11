@@ -72,8 +72,11 @@ func TestHerdrSeatsUseCanonicalEligibility(t *testing.T) {
 
 func TestHerdrSeatsKeepDistinctAddressesAndTranscriptMetadata(t *testing.T) {
 	input := Input{
-		Options:     Options{View: AllView},
-		Transcripts: []store.Transcript{{UUID: "shared", Path: "/jail/shared.jsonl", PromptCount: 3, Size: 42}},
+		Options: Options{View: AllView},
+		Transcripts: []store.Transcript{{
+			UUID: "shared", Path: "/jail/shared.jsonl", PromptCount: 3, Size: 42,
+			CWD: "/jail/work/lantern/.worktrees/demo",
+		}},
 		Snapshot: gather.Snapshot{
 			Panes: []gather.ProbePane{{Socket: "cc-1-2-3", PaneID: "%0"}},
 			Crumbs: []gather.Crumb{
@@ -104,16 +107,33 @@ func TestHerdrSeatsKeepDistinctAddressesAndTranscriptMetadata(t *testing.T) {
 					HerdrSocket: "/jail/herdr.sock",
 					HerdrPane:   "w6:p4",
 				},
+				// The pane's directory is its supervisor's, opened in the home directory.
+				CWD: "/jail",
+			},
+			{
+				Seat: fleetdb.Seat{
+					SeatID:      "native3",
+					SessionID:   "unrecorded",
+					Engine:      "cc",
+					Backend:     "herdr",
+					State:       "live",
+					HerdrSocket: "/jail/herdr.sock",
+					HerdrPane:   "w6:p5",
+				},
+				CWD: "/jail/work/orchard",
 			},
 		},
 	}
 	output := Compose(input)
-	if len(output.Rows) != 3 {
-		t.Fatalf("rows=%+v; want original tmux seat and both native seats", output.Rows)
+	if len(output.Rows) != 4 {
+		t.Fatalf("rows=%+v; want original tmux seat and three native seats", output.Rows)
 	}
 	bySeat := map[string]Row{}
 	for _, row := range output.Rows {
 		bySeat[row.SeatID] = row
+		if row.SeatID == "native3" {
+			continue
+		}
 		if row.ID != "shared" || row.Path != "/jail/shared.jsonl" || row.PromptCount != 3 || row.Size != 42 {
 			t.Fatalf("session metadata lost: %+v", row)
 		}
@@ -122,6 +142,11 @@ func TestHerdrSeatsKeepDistinctAddressesAndTranscriptMetadata(t *testing.T) {
 		bySeat["native1"].BackendError == "" ||
 		bySeat["native2"].BackendError != "" {
 		t.Fatalf("seat address or error lost: %+v", bySeat)
+	}
+	// The chat's own record names where it runs; a chat with none takes its pane's.
+	if bySeat["native2"].CWD != "/jail/work/lantern/.worktrees/demo" || bySeat["native3"].CWD != "/jail/work/orchard" {
+		t.Fatalf("row directories native2 %q native3 %q; want the transcript's %q and the pane's %q",
+			bySeat["native2"].CWD, bySeat["native3"].CWD, "/jail/work/lantern/.worktrees/demo", "/jail/work/orchard")
 	}
 }
 

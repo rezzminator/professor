@@ -145,7 +145,7 @@ func TestALightPaletteDrawsItsInputsOffClawdsInk(t *testing.T) {
 // TestDeriveLiftsSyntaxOffTheSelection: a keyword clear of the editor but
 // lost on the selection is lifted until it reads there too.
 func TestDeriveLiftsSyntaxOffTheSelection(t *testing.T) {
-	tokens, side := customPalette("dark", map[string]string{})
+	tokens, side, _ := customPalette("dark", map[string]string{})
 	variant, err := deriveVariant("custom:t", tokens)
 	if err != nil {
 		t.Fatal(err)

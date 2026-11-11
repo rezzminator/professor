@@ -91,7 +91,7 @@ Anti-patterns are more common than prescriptions in well-maintained files:
 
 ### Sources
 
-- Augmentcode: "How to Build agents.md" (augmentcode.com/guides/how-to-build-agents-md)
+- Augmentcode: "How to Build agents.md" (augmentcode.com/guides)
 - GitHub Blog: "How to Write a Great agents.md" (2500 repos study)
 - builder.io/blog/agents-md
 - factory.ai/docs/cli/configuration/agents-md

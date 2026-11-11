@@ -27,6 +27,7 @@ const (
 	// The write names more than one language's table spells.
 	pcmGuardOpen    = "open"
 	pcmGuardUnlink  = "unlink"
+	pcmGuardTee     = "tee"
 	pcmGuardRename  = "rename"
 	pcmGuardReplace = "replace"
 	// pcmGuardInto joins a copy's destination and source in one target, for

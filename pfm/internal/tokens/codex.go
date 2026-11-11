@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -165,6 +166,7 @@ func (a *auditor) codexUsageFast(file string) fastUsage {
 		peaks     codexPeaks
 		baselines []transcript.CodexTokenUsage
 		baseline  transcript.CodexTokenUsage
+		lastAt    = math.NaN() // the newest stamp the rollout has carried
 	)
 	_, _, err := transcript.ReadLines(file, 0, func(line []byte, complete bool) {
 		if !complete || (!bytes.Contains(line, tokenCountMark) && !bytes.Contains(line, turnContextMark)) {
@@ -188,22 +190,21 @@ func (a *auditor) codexUsageFast(file string) fastUsage {
 		if total == nil {
 			return
 		}
-		previousPeak := peaks.seg
 		if peaks.started && total.TotalTokens < peaks.prev {
-			if previousPeak != nil {
+			if peaks.seg != nil {
 				baselines = append(baselines, baseline)
 			}
-			baseline, previousPeak = transcript.CodexTokenUsage{}, nil
+			baseline = transcript.CodexTokenUsage{}
 		}
 		changed := peaks.add(*total)
+		// An undated counter is placed at the previous stamp, else the
+		// rollout's own modification time: the stamp only decides whether the
+		// usage falls in the window, never whether it counts.
 		at, stamped := dateParse(keyString(record.timestamp), a.loc)
-		if !stamped {
-			a.scan.noTimestamp++
-			peaks.seg = previousPeak // Keep reset boundaries, not undated usage.
+		if stamped {
+			lastAt = at
+		} else if at = a.undatedAt(file, lastAt); math.IsNaN(at) {
 			return
-		}
-		if peaks.seg == nil || total.TotalTokens > peaks.seg.TotalTokens {
-			peaks.seg, changed = total, true // A stamped repeat can resolve undated usage.
 		}
 		if at < a.since {
 			baseline = *total

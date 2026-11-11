@@ -2,18 +2,21 @@ package hookentry
 
 import (
 	"bytes"
+	"cmp"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 const (
 	gitGuardDenied   = `"permissionDecision":"deny"`
-	gitGuardExecutor = "flights-foreman"
+	gitGuardExecutor = "flights:foreman"
 )
 
 func gitGuardPayload(t *testing.T, tool, command, cwd, agentType string) string {
@@ -23,7 +26,9 @@ func gitGuardPayload(t *testing.T, tool, command, cwd, agentType string) string 
 		payload["cwd"] = cwd
 	}
 	if agentType != "" {
+		// Claude Code sets agent_id only inside a sub-agent, beside its type.
 		payload["agent_type"] = agentType
+		payload["agent_id"] = "a" + agentType
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
@@ -40,7 +45,9 @@ func runGitGuard(t *testing.T, payload string) (int, string, string) {
 }
 
 func TestGitGuardAllowsGitterEverything(t *testing.T) {
-	for _, command := range []string{"git commit -m x", "git worktree add ../x"} {
+	for _, command := range []string{
+		"git commit -m x", "git worktree add ../x", "git archive HEAD", "bash .claude/scripts/worktree.sh prune",
+	} {
 		t.Run(command, func(t *testing.T) {
 			code, stdout, stderr := runGitGuard(t, gitGuardPayload(t, "Bash", command, "/tmp", "gitter"))
 			if code != 0 || stdout != "" || stderr != "" {
@@ -59,7 +66,8 @@ func TestGitGuardAllowsOnlyExactNativeWriterIdentities(t *testing.T) {
 		{name: "gpt-gitter is an ordinary agent", metadata: `,"agent_type":"gpt-gitter"`},
 		{name: "omitted"},
 		{name: "empty", metadata: `,"agent_type":""`},
-		{name: "ordinary", metadata: `,"agent_type":"flights-foreman"`},
+		{name: "ordinary", metadata: `,"agent_type":"flights:foreman"`},
+		{name: "plugin-namespaced lookalike", metadata: `,"agent_type":"flights:gitter"`},
 		{name: "gitter lookalike", metadata: `,"agent_type":"gitter-api"`},
 		{name: "prefix lookalike", metadata: `,"agent_type":"xgitter"`},
 		{name: "canonical path", metadata: `,"agent_type":"agents/gitter"`},
@@ -69,8 +77,8 @@ func TestGitGuardAllowsOnlyExactNativeWriterIdentities(t *testing.T) {
 		{name: "native backslash path", metadata: `,"agent_type":"agents\\gitter-x"`},
 		{name: "whitespace", metadata: `,"agent_type":"gitter "`},
 		{name: "case", metadata: `,"agent_type":"Gitter"`},
-		{name: "role spoof", metadata: `,"agent_type":"flights-foreman","role":"gitter"`},
-		{name: "model spoof", metadata: `,"agent_type":"flights-foreman","model":"gpt-gitter"`},
+		{name: "role spoof", metadata: `,"agent_type":"flights:foreman","role":"gitter"`},
+		{name: "model spoof", metadata: `,"agent_type":"flights:foreman","model":"gpt-gitter"`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			payload := `{"tool_name":"Bash","tool_input":{"command":"git commit -m x"}` + test.metadata + `}`
@@ -109,8 +117,8 @@ func TestGitGuardMainChatWorktreeAddNamesTheRightWay(t *testing.T) {
 	for _, test := range []struct{ name, cwd, want, absent string }{
 		{
 			name: "repo ships worktree.sh, cwd is a subdirectory", cwd: filepath.Join(withScript, "pfm"),
-			want: "gitter creates and removes worktrees with " + script +
-				" create|remove|prune — the only right way here",
+			want: "worktrees go through " + script + " — the main chat's alone, run while git tracks it (and its" +
+				" worktree/ helpers) unchanged from HEAD; every other caller goes to gitter.",
 			absent: "Phase SETUP",
 		},
 		{
@@ -127,7 +135,8 @@ func TestGitGuardMainChatWorktreeAddNamesTheRightWay(t *testing.T) {
 			reason := gitGuardDenyReason(t, stdout)
 			for _, want := range []string{
 				"git worktree add -b b .worktrees/b HEAD",
-				`Only gitter writes this: spawn Agent(subagent_type: "gitter") with the repo path and the exact change`,
+				`Only gitter writes this: spawn Agent(subagent_type: "gitter") with the repo path and the exact change.` +
+					" Never retry, rephrase, split or wrap the denied command to get past the guard.",
 				test.want,
 			} {
 				if !strings.Contains(reason, want) {
@@ -195,6 +204,41 @@ func TestGitGuardBlocksSharedStateWritesForAnExecutor(t *testing.T) {
 		"git --no-pager -c core.pager=cat cherry-pick abc",
 		"bash .claude/scripts/worktree.sh create x",
 		".claude/scripts/worktree.sh prune",
+		"bash .claude/scripts/worktree.sh list",
+		"bash -x .claude/scripts/worktree.sh create x",
+		"git bisect start",
+		"git sparse-checkout set x",
+		"git init",
+		"git archive HEAD",
+		"git archive HEAD pfm",
+		"git reflog expire --all",
+		"git submodule init",
+		"git submodule set-url plugins/x y",
+		"git submodule set-branch -b main plugins/x",
+		"git submodule absorbgitdirs",
+		"git submodule foreach 'git commit -m x'",
+		"git submodule --quiet foreach --recursive git push",
+		"git config edit",
+		"git config set a.b c",
+		"git config unset a.b",
+		"git config rename-section a b",
+		"git config remove-section a",
+		"git config --file /r/x a.b c",
+		"git worktree",
+		"git worktree move a b",
+		"git remote prune origin",
+		"git remote set-head origin -a",
+		`eval "git commit -m x"`,
+		"eval git push",
+		"dash -c 'git commit -m x'",
+		"ksh -c 'git commit -m x'",
+		`find . -name x -exec git commit -m x \;`,
+		"find . -execdir git add {} +",
+		`find . -ok git rm {} \;`,
+		`find . -okdir git checkout main \;`,
+		"for c in status commit; do git $c; done",
+		"c=commit; git $c -m x",
+		"g''it push",
 	} {
 		t.Run(command, func(t *testing.T) {
 			code, stdout, stderr := runGitGuard(t, gitGuardPayload(t, "Bash", command, cwd, gitGuardExecutor))
@@ -214,6 +258,9 @@ func TestGitGuardAllowsReadsAndOwnFileWritesForAnExecutor(t *testing.T) {
 		{name: "status", command: "git status"},
 		{name: "diff", command: "git diff HEAD --stat"},
 		{name: "log", command: "git log -3"},
+		{name: "ls-remote", command: "git ls-remote origin develop"},
+		{name: "version", command: "git --version"},
+		{name: "reflog", command: "git reflog"},
 		{name: "stash push of named paths around a test", command: "git stash push -- a.py && pytest; git stash pop"},
 		{name: "stash pop", command: "git stash pop"},
 		{name: "stash list", command: "git stash list"},
@@ -223,16 +270,48 @@ func TestGitGuardAllowsReadsAndOwnFileWritesForAnExecutor(t *testing.T) {
 		{name: "branch show-current", command: "git branch --show-current"},
 		{name: "branch list", command: "git branch -a"},
 		{name: "tag list", command: "git tag -l 'v*'"},
-		{name: "archive", command: "git archive HEAD pfm"},
 		{name: "apply check", command: "git apply --check p.diff"},
 		{name: "apply to the working tree", command: "git apply p.diff"},
 		{name: "worktree list", command: "git worktree list"},
+		{name: "worktree list porcelain piped", command: "git worktree list --porcelain | grep worktree"},
+		{name: "submodule bare", command: "git submodule"},
+		{name: "submodule status", command: "git -C /r submodule status"},
+		{name: "submodule summary", command: "git submodule summary"},
+		{name: "submodule foreach read", command: "git submodule foreach git status"},
+		{name: "submodule quiet foreach read", command: "git submodule --quiet foreach 'git log -1'"},
+		{
+			name:    "submodule recursive foreach read",
+			command: `git -C /r submodule foreach --quiet --recursive 'git -C "$toplevel/$sm_path" status --porcelain'`,
+		},
+		{name: "remote bare", command: "git remote"},
+		{name: "remote verbose", command: "git remote -v"},
+		{name: "remote show", command: "git remote show origin"},
+		{name: "remote get-url", command: "git remote get-url origin"},
+		{name: "config get subcommand", command: "git config get user.name"},
+		{name: "config list subcommand", command: "git config list --show-origin"},
+		{name: "config get all", command: "git config get --all --regexp alias"},
+		{name: "config get-regexp", command: "git config --get-regexp alias"},
+		{name: "eval read", command: `eval "git status"`},
+		{name: "dash read", command: "dash -c 'git log -1'"},
+		{name: "find exec read", command: `find . -name '*.go' -exec git log -1 -- {} \;`},
+		{name: "loop over two reads", command: "for c in status log; do git $c; done"},
+		{name: "loop over one read with a flag", command: "for c in log; do git $c -1; done"},
+		{name: "variable read", command: "c=status; git $c"},
+		{name: "loop over repos", command: "for r in a b; do git -C $r status; done"},
+		{
+			name:    "loop over plugin paths",
+			command: "for p in plugins/x plugins/y; do git -C /r/$p status --porcelain; done",
+		},
+		{
+			name:    "loop over quoted subcommands",
+			command: `for c in "status --short" "branch --show-current"; do git -C /r $c; done`,
+		},
 		{name: "config get", command: "git config --get user.name"},
 		{name: "config single key read", command: "git -C /r config user.name"},
 		{name: "rm dry run", command: "git rm -n f"},
 		{name: "clean dry run", command: "git clean -nd"},
 		{name: "notes show", command: "git notes show HEAD"},
-		{name: "worktree.sh list", command: "bash .claude/scripts/worktree.sh list"},
+		{name: "worktree.sh read, not run", command: "cat .claude/scripts/worktree.sh"},
 		{name: "git only as an echo argument", command: "echo git commit"},
 		{name: "heredoc body mentions git push", command: "cat > notes.txt <<'EOF'\nthen git push the branch\nEOF"},
 		{name: "non-Bash tool", tool: "Read", command: "git push"},
@@ -274,7 +353,7 @@ func TestGitGuardNamesEveryBlockedPartOfOneCall(t *testing.T) {
 	command := "git status && git add f && git commit -m x; git push"
 	code, stdout, stderr := runGitGuard(
 		t,
-		gitGuardPayload(t, "Bash", command, t.TempDir(), "flights-foreman-sonnet"),
+		gitGuardPayload(t, "Bash", command, t.TempDir(), "flights:foreman-sonnet"),
 	)
 	if code != 0 || !strings.Contains(stdout, gitGuardDenied) {
 		t.Fatalf("code=%d stdout=%q stderr=%q, want a deny", code, stdout, stderr)
@@ -324,13 +403,14 @@ func TestGitGuardFailsOpenLoudlyOnAMalformedPayload(t *testing.T) {
 // unreadable-command message.
 func gitGuardRequireUnreadable(t *testing.T, command, cwd string) {
 	t.Helper()
-	code, stdout, stderr := runGitGuard(t, gitGuardPayload(t, "Bash", command, cwd, "flights-foreman-sonnet"))
+	code, stdout, stderr := runGitGuard(t, gitGuardPayload(t, "Bash", command, cwd, "flights:foreman-sonnet"))
 	if code != 0 || !strings.Contains(stdout, gitGuardDenied) {
 		t.Fatalf("code=%d stdout=%q stderr=%q, want a deny", code, stdout, stderr)
 	}
-	const unreadable = "could not read this command; split it so each git call is its own simple command"
-	if reason := gitGuardDenyReason(t, stdout); !strings.Contains(reason, unreadable) {
-		t.Fatalf("reason=%q, want the unreadable-command message", reason)
+	// The whole reason: the route line forbids the split this deny asks for.
+	const unreadable = "git-guard could not read this command; split it so each git call is its own simple command."
+	if reason := gitGuardDenyReason(t, stdout); reason != unreadable {
+		t.Fatalf("reason=%q, want exactly %q", reason, unreadable)
 	}
 }
 
@@ -377,7 +457,7 @@ func TestGitGuardDeniesShellNestingOverTheDepthBound(t *testing.T) {
 	gitGuardRequireBounded(t, gitGuardNestShell("git status", 9), cwd)
 	code, stdout, stderr := runGitGuard(
 		t,
-		gitGuardPayload(t, "Bash", gitGuardNestShell("git worktree add x", 8), cwd, "flights-foreman-sonnet"),
+		gitGuardPayload(t, "Bash", gitGuardNestShell("git worktree add x", 8), cwd, "flights:foreman-sonnet"),
 	)
 	if code != 0 || !strings.Contains(stdout, gitGuardDenied) {
 		t.Fatalf("code=%d stdout=%q stderr=%q, want a deny", code, stdout, stderr)
@@ -529,5 +609,156 @@ func TestGitGuardDeniesAnUnparsableCommandNamingQuotedGit(t *testing.T) {
 func TestGitGuardAllowsAnUnparsableCommandWithGitOnlyInsideAWord(t *testing.T) {
 	for _, command := range []string{"echo digits && (", "echo digit && (", "echo legit x && (", "echo mygit_x && ("} {
 		gitGuardRequireAllowed(t, command, t.TempDir())
+	}
+}
+
+// The main chat (no agent_id) runs a repo's worktree script, any verb, while
+// git tracks the script and its worktree/ helpers unchanged from HEAD; an
+// edited or untracked script or helper, a command that changes directory and
+// every sub-agent go to gitter.
+func TestGitGuardMainChatRunsTheCommittedWorktreeScript(t *testing.T) {
+	git := func(repo string, args ...string) {
+		t.Helper()
+		argv := append([]string{
+			"git", "-C", repo, "-c", "user.name=probe", "-c", "user.email=probe@example.invalid",
+			"-c", "commit.gpgsign=false",
+		}, args...)
+		result, err := deps.RealRunner{}.Run(context.Background(), argv, deps.RunOptions{})
+		if err != nil || result.ExitCode != 0 {
+			t.Fatalf("git %v: exit %d: %v: %s", args, result.ExitCode, err, result.Stderr)
+		}
+	}
+	// helper writes a file into the script's worktree/ helper directory.
+	helper := func(repo, name, body string) {
+		t.Helper()
+		lib := filepath.Join(repo, filepath.FromSlash(gitGuardWorktreeSh+"/../worktree"), name)
+		if err := os.MkdirAll(filepath.Dir(lib), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(lib, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	repoWith := func(commit, edit, helpers bool) string {
+		t.Helper()
+		repo := t.TempDir()
+		script := filepath.Join(repo, filepath.FromSlash(gitGuardWorktreeSh))
+		if err := os.MkdirAll(filepath.Dir(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := testjail.WriteExecutable(script, []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if helpers {
+			helper(repo, "land.sh", "land() { :; }\n")
+		}
+		git(repo, "init", "-q")
+		if commit {
+			git(repo, "add", ".")
+			git(repo, "commit", "-q", "-m", "probe")
+		}
+		if edit {
+			if err := testjail.WriteExecutable(script, []byte("#!/bin/sh\ngit push\n"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return repo
+	}
+	committed, edited, untracked := repoWith(
+		true,
+		false,
+		false,
+	), repoWith(
+		true,
+		true,
+		false,
+	), repoWith(
+		false,
+		false,
+		false,
+	)
+	withHelpers, helperEdited, helperUntracked := repoWith(true, false, true), repoWith(true, false, true),
+		repoWith(true, false, true)
+	helper(helperEdited, "land.sh", "land() { git push; }\n")
+	helper(helperUntracked, "extra.sh", "extra() { git push; }\n")
+	script := "." + string(filepath.Separator) + filepath.FromSlash(gitGuardWorktreeSh)
+	for _, row := range []struct {
+		name, command, cwd, agentType, blocked, lost string
+		allow                                        bool
+	}{
+		{name: "main chat create", command: "bash " + script + " create x", cwd: committed, allow: true},
+		{name: "main chat land", command: script + " land x -m 'wip'", cwd: committed, allow: true},
+		{name: "main chat remove", command: script + " remove x --delete-branch", cwd: committed, allow: true},
+		{
+			name:    "main chat absolute committed script from another repo",
+			command: filepath.Join(committed, gitGuardWorktreeSh) + " land x", cwd: untracked, allow: true,
+		},
+		{name: "main chat list", command: script + " list", cwd: committed, allow: true},
+		{name: "main chat prune", command: script + " prune", cwd: committed, allow: true},
+		{name: "main chat discard", command: script + " remove x --discard", cwd: committed, allow: true},
+		{name: "main chat no verb", command: "bash " + script, cwd: committed, allow: true},
+		{name: "main chat committed helpers", command: script + " land x", cwd: withHelpers, allow: true},
+		{name: "main chat edited helper", command: script + " land x", cwd: helperEdited},
+		{name: "main chat untracked helper", command: script + " land x", cwd: helperUntracked},
+		{name: "main chat after cd", command: "cd " + edited + " && " + script + " land x", cwd: committed},
+		{
+			name: "main chat after cd to a committed script", command: "cd " + committed + "; " + script + " land x",
+			cwd: untracked, allow: true,
+		},
+		{
+			name:    "main chat after a relative cd",
+			command: "cd " + filepath.Base(committed) + " && " + script + " list", cwd: filepath.Dir(committed),
+			allow: true,
+		},
+		{
+			name:    "main chat absolute script after cd",
+			command: "cd " + untracked + " && " + filepath.Join(committed, gitGuardWorktreeSh) + " list",
+			cwd:     untracked, allow: true,
+		},
+		{
+			name: "main chat after an unknown cd", command: "cd $D && " + script + " land x", cwd: committed,
+			blocked: script + " land x", lost: "cd $D",
+		},
+		{
+			name: "main chat after a subshell cd", command: "(cd " + committed + "); " + script + " land x",
+			cwd: committed, blocked: script + " land x", lost: "cd " + committed,
+		},
+		{
+			name: "main chat after a conditional cd", command: "true && cd " + committed + "; " + script + " land x",
+			cwd: committed, blocked: script + " land x", lost: "cd " + committed,
+		},
+		{
+			name: "main chat after pushd", command: "pushd " + committed + " && " + script + " land x", cwd: committed,
+			blocked: script + " land x", lost: "pushd " + committed,
+		},
+		{name: "main chat edited script", command: script + " land x", cwd: edited},
+		{name: "main chat untracked script", command: script + " create x", cwd: untracked},
+		{name: "sub-agent land", command: script + " land x", cwd: committed, agentType: gitGuardExecutor},
+		{name: "sub-agent create", command: script + " create x", cwd: committed, agentType: gitGuardExecutor},
+		{name: "sub-agent list", command: script + " list", cwd: committed, agentType: gitGuardExecutor},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			code, stdout, stderr := runGitGuard(t, gitGuardPayload(t, "Bash", row.command, row.cwd, row.agentType))
+			if code != 0 || stderr != "" {
+				t.Fatalf("code=%d stdout=%q stderr=%q, want a silent successful hook", code, stdout, stderr)
+			}
+			if row.allow {
+				if stdout != "" {
+					t.Fatalf("stdout=%q, want allowed with no output", stdout)
+				}
+				return
+			}
+			blocked := cmp.Or(row.blocked, strings.TrimPrefix(row.command, "cd "+edited+" && "))
+			want := "git-guard blocked `" + blocked + "`."
+			reason := gitGuardDenyReason(t, stdout)
+			if !strings.HasPrefix(reason, want) {
+				t.Fatalf("reason=%q, want it to start %q", reason, want)
+			}
+			lost := "git-guard cannot follow `" + row.lost + "` to the worktree script it runs:" +
+				" run the script by its absolute path, without the directory change."
+			if row.lost != "" && !strings.Contains(reason, lost) {
+				t.Fatalf("reason=%q, want it to contain %q", reason, lost)
+			}
+		})
 	}
 }

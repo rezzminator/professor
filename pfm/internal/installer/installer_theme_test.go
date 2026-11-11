@@ -102,7 +102,7 @@ func TestThemeProfilesFallBackToReleaseWhenTheCloneHoldsNone(t *testing.T) {
 	listing := `[{"name":"README.md","type":"file"},{"name":"lagoon","type":"dir"}]`
 	client := releaseThemeClient(t, "v1.0.0", nil, listing)
 
-	profiles, err := loadThemeProfiles(context.Background(), Options{
+	profiles, _, err := loadThemeProfiles(context.Background(), Options{
 		SourceRepo:      t.TempDir(),
 		ThemeReleaseURL: releaseThemeURL("v1.0.0"),
 		ThemeHTTPClient: client,

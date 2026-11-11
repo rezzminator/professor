@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/claudeplugin"
 	"github.com/rezzminator/professor/pfm/internal/enginesync"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -181,7 +182,7 @@ func unpinnedEngineSyncSeats(w io.Writer, stable string, seats []string) (unpinn
 			failures++
 			continue
 		}
-		document, err := readClaudeSettingsDocument(path)
+		document, err := claudeplugin.ReadSettings(path)
 		if err != nil {
 			fmt.Fprintf(w, "doctor: engine-sync state=FAIL seat settings: %v\n", err)
 			failures++

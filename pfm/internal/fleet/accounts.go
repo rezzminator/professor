@@ -44,6 +44,18 @@ func PrimaryAccount(values paths.Values, configs ...pfmconfig.Config) (int, erro
 	return machine.ImplicitAccount(), nil
 }
 
+// PrimaryAccountOrImplicit is the fleet's one primary-account decision for every
+// launcher, installer and scan: the fleet primary, else, when the store cannot
+// be read, the implicit account returned beside the read error, so the caller
+// says it stood in and never stops on it.
+func PrimaryAccountOrImplicit(values paths.Values, machine pfmconfig.Config) (int, error) {
+	id, err := PrimaryAccount(values, machine)
+	if err != nil {
+		return machine.ImplicitAccount(), err
+	}
+	return id, nil
+}
+
 // SetPrimaryAccount validates the operator-facing roster before committing
 // the fleet DB row and statusline mirror as one reported operation.
 func SetPrimaryAccount(values paths.Values, machine pfmconfig.Config, account int) error {

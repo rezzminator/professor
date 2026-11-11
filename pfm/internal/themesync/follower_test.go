@@ -251,15 +251,15 @@ func TestFollowerRunsThroughTheStableLauncher(t *testing.T) {
 }
 
 func TestFollowerDiscoveryFailureKeepsLastValidWatches(t *testing.T) {
-	for _, platform := range []string{"darwin", "linux"} {
-		t.Run(platform, func(t *testing.T) {
+	for name, profile := range map[string]*platform{"darwin": darwinPlatform, "linux": linuxPlatform} {
+		t.Run(name, func(t *testing.T) {
 			h := newHarness(t)
-			h.goos = platform
+			h.platform = profile
 			h.rearm()
 			h.on()
 			s := newSession(h.env, stateStore{dir: h.stateDir}, h.state())
 			path := s.followerPath()
-			if platform == "linux" {
+			if profile == linuxPlatform {
 				path = s.systemdFollowerPath()
 			}
 			before, err := os.ReadFile(path)

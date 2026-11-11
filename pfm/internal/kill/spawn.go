@@ -15,8 +15,6 @@ import (
 // CommandSpawner starts the binary's killed finisher under a new session.
 type CommandSpawner struct {
 	Executable string
-	Setsid     string
-	Nohup      string
 	ConfigPath string
 	// LogDir is the SID dir, where the finisher's stdout and stderr append to
 	// paths.SIDKillExitLogPrefix+socketName+".log" — reload's worker logs
@@ -72,12 +70,7 @@ func (spawner CommandSpawner) Spawn(
 			return fmt.Errorf("resolve pfm executable: %w", err)
 		}
 	}
-	launcher, prefixArgs, forked, err := deps.DetachLauncher(spawner.Setsid, spawner.Nohup)
-	if err != nil {
-		return fmt.Errorf("detach kill finisher: %w", err)
-	}
-	arguments := append([]string{}, prefixArgs...)
-	arguments = append(arguments, executable)
+	arguments := []string{executable}
 	if spawner.ConfigPath != "" {
 		arguments = append(arguments, "--config", spawner.ConfigPath)
 	}
@@ -110,29 +103,14 @@ func (spawner CommandSpawner) Spawn(
 	if runner == nil {
 		runner = obs.Runner(deps.RealRunner{})
 	}
-	// !forked (the POSIX floor with no `setsid -f`) starts asynchronously and
-	// releases the process handle so the finisher outlives this caller —
-	// under nohup the launched process IS the finisher, so waiting on it
-	// would block until the finisher itself completes.
-	process, err := runner.Start(ctx, append([]string{launcher}, arguments...), deps.StartOptions{
-		Stdout: log,
-		Stderr: log,
-		Detach: !forked,
-	})
+	// The finisher outlives this caller in a session of its own; the runner
+	// reaps it in the background, so Release only gives up the handle.
+	process, err := runner.Start(ctx, arguments, deps.StartOptions{Stdout: log, Stderr: log, Detach: true})
 	if err != nil {
-		if !forked {
-			return fmt.Errorf("start detached kill finisher with nohup: %w", err)
-		}
-		return fmt.Errorf("start detached kill finisher with setsid: %w", err)
+		return fmt.Errorf("start detached kill finisher: %w", err)
 	}
-	if !forked {
-		if err := process.Release(); err != nil {
-			return fmt.Errorf("release detached kill finisher: %w", err)
-		}
-		return nil
-	}
-	if err := process.Wait(); err != nil {
-		return fmt.Errorf("start detached kill finisher with setsid: %w", err)
+	if err := process.Release(); err != nil {
+		return fmt.Errorf("release detached kill finisher: %w", err)
 	}
 	return nil
 }

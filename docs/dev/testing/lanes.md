@@ -9,12 +9,16 @@ Tier B drives the pfm binary against a mock engine that plays `claude`, `codex` 
 ```
 pfm-lane-root:<hash>          built once per template change (root.sh), never pushed
    └─► ONE offline container per run  the fleet's state accumulates lane after lane:
-       O1 → E1 → E2 → E3 → F → M → A → O2
+       O1 → E1 → E2 → E3 → F → M → A → H → O2
+pfm-lane-held:<hash>          built by root.sh --machine held on the root image
+   └─► its own systemd machine, after the sequence:
+       HELD
 ```
 
 - **One container, lanes in sequence.** Every lane inherits the pfm state the lanes before it built: E1's named chat is still alive when F storms, when M restarts the daemon, when A rewrites the adopter's hooks. pfm is ONE state (one daemon, one `pfm.db` and one `pfm-cache.db`, one tmux server, one hook set) and the effect of each area on that shared state is where the bugs live.
 - **Any lane runs alone.** `run.sh --lanes M` starts a fresh container from the same root and runs M only; its `need` prelude makes the preconditions the sequence would have made (a live chat, the daemon, a working directory) and is a no-op when they already exist. A solo lane is the dev/qa loop; the sequence checks accumulated state.
 - **No `--parallel`, ever.** Concurrency is a scripted beat (`storm`, two writers, inject-during-busy), never a scheduling strategy: two lanes racing on one fleet would make every red row order-dependent.
+- **Lane HELD runs on its own machine, after the sequence.** `pfm-lane-held:<hash>`, built by `root.sh --machine held` on the root image, boots systemd as PID 1 and runs the lane as user `lane` (uid 1000) under a real `user@1000.service`, over real Herdr whose panes herdr-shield holds; it never runs inside the sequence's container.
 - **Order is a design decision:** state builders first, readers over the richest state, destroyers last. Lane O is one area with two entry points — **O1** before any chat exists, **O2** the destructive tail that ends with `uninstall`.
 
 ## Run one lane
@@ -23,7 +27,10 @@ pfm-lane-root:<hash>          built once per template change (root.sh), never pu
 infra/fence/lanes/run.sh --lanes E1 --dry-run     # the plan: hash, image decision, beats, seats
 infra/fence/lanes/run.sh --lanes E1                # solo, one Claude seat, from the root image
 LANE_PROFILE=1 infra/fence/lanes/run.sh --lanes E1 # record each wait and print the ten longest
+infra/fence/lanes/run.sh --lanes HELD              # the held machine alone, over real Herdr and herdr-shield
 ```
+
+`--lanes HELD` takes the herdr-shield source from `HERDR_SHIELD_SRC`, else the worktree's `plugins/herdr-shield`, else the main checkout's; none there is `run: ✗ HELD SUBSTRATE — herdr-shield source missing at <path> (check out plugins/herdr-shield, or set HERDR_SHIELD_SRC)`, and Docker below 28 is `held: docker <ver> has no writable-cgroups (needs ≥ 28)`, both exit 1. A booted machine prints `held: systemd running · user@1000.service active`; one that does not boot within `LANE_HELD_BOOT_SECS` prints `held: BOOT-FAILED <state> (user@1000.service <state>) after <N>s`, one that finishes booting `degraded` prints the same line at once without the wait, and both print `held: boot journal <out dir>/held-boot.log`. A held machine that will not start, does not boot or fails its credential scan is HELD's failed row (`run: ✗ the held machine would not start from <image>`, `run: ✗ CREDENTIAL-REFUSED on the held machine — …`); the root lanes before it still report.
 
 `--dry-run` creates no container and runs no beat; it prints the root decision, lane order, budgets and seats. A non-dry run starts one `egress.sh` capture before its first lane and ends with its `EGRESS PASS`, `EGRESS FAIL` or `EGRESS NOT RECORDED` verdict as the last line. A run prints `✓ / ✗ / known / blocked` per beat with the lane prefix and writes `/tmp/{project}/lanes/<stamp>/`:
 

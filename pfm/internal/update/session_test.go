@@ -2,6 +2,7 @@ package update
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -65,7 +66,9 @@ func (f projectUpdateFixture) sessionVerb(args ...string) (code int, stdout, std
 // sessionReport is the report a session re-runs: the retired-name scan on.
 func (f projectUpdateFixture) sessionReport() (code int, stdout string) {
 	var out bytes.Buffer
-	code = professor.RunProjectUpdates(f.project, f.runtime.Paths.Home, false, &out, ScanRetiredNames)
+	code = professor.RunProjectUpdates(
+		f.project, f.runtime.Paths.Home, false, &out, RetiredNameScanner(context.Background(), f.runtime.Paths.Home),
+	)
 	return code, out.String()
 }
 
@@ -390,7 +393,10 @@ func TestSessionAcceptsReviewedIncompleteCoverage(t *testing.T) {
 			}
 			if row.hit {
 				_, report := fixture.sessionReport()
-				rows, err := professor.OpenProjectRows(fixture.project, fixture.runtime.Paths.Home, ScanRetiredNames)
+				rows, err := professor.OpenProjectRows(
+					fixture.project, fixture.runtime.Paths.Home,
+					RetiredNameScanner(context.Background(), fixture.runtime.Paths.Home),
+				)
 				if err != nil || len(rows) != 1 || !strings.Contains(report, "RETIRED-NAME  1") {
 					t.Fatalf("coverage must leave earlier hit open: rows=%+v err=%v report=%s", rows, err, report)
 				}
@@ -406,7 +412,10 @@ func TestSessionAcceptsReviewedIncompleteCoverage(t *testing.T) {
 				strings.Contains(report, "matches nothing now") {
 				t.Fatalf("accepted coverage must be explicit and close review: code=%d\n%s", code, report)
 			}
-			rows, err := professor.OpenProjectRows(fixture.project, fixture.runtime.Paths.Home, ScanRetiredNames)
+			rows, err := professor.OpenProjectRows(
+				fixture.project, fixture.runtime.Paths.Home,
+				RetiredNameScanner(context.Background(), fixture.runtime.Paths.Home),
+			)
 			if err != nil || len(rows) != 0 {
 				t.Fatalf("accepted coverage remains open: rows=%+v err=%v", rows, err)
 			}

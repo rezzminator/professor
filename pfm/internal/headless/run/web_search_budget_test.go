@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -72,6 +73,8 @@ func (delayedWaitProcess) StdoutPipe() (io.ReadCloser, error) {
 func (delayedWaitProcess) Kill() error { return nil }
 
 func (delayedWaitProcess) KillGroup() error { return nil }
+
+func (delayedWaitProcess) SignalGroup(syscall.Signal) error { return nil }
 
 type blockedWaitRunner struct {
 	started chan struct{}

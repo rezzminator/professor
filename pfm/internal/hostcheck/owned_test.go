@@ -86,7 +86,7 @@ func TestPFMSettings(t *testing.T) {
 		path := filepath.Join(env.Store, "settings.json")
 		command := env.Home + "/private-ledger-hook"
 		writeFile(t, path, fmt.Sprintf(`{"hooks":{"SessionStart":[{"hooks":[{"command":%q}]}]}}`, command))
-		ledger := filepath.Join(env.ManagedRoot, "settings-hook-ownership.json")
+		ledger := filepath.Join(installer.ManagedRoot(env.Home), "settings-hook-ownership.json")
 		writeFile(
 			t,
 			ledger,
@@ -122,182 +122,11 @@ func TestPFMSettings(t *testing.T) {
 	})
 }
 
-func mcpFixture(t *testing.T, env Env, path string) {
-	t.Helper()
-	raw, err := json.Marshal(map[string]any{"mcpServers": map[string]any{
-		"professor": map[string]any{
-			"type":    "stdio",
-			"command": filepath.Join(env.Home, ".local", "bin", "pfm"),
-			"args":    []string{"mcp", "serve", "--stdio"},
-		},
-		"foreign": map[string]any{"command": "invented"},
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	writeFile(t, path, string(raw))
-}
-
-func TestPFMMCP(t *testing.T) {
-	t.Run("current-family-registrations", func(t *testing.T) {
-		env := fixtureEnv(t)
-		path := filepath.Join(env.Accounts[0].ConfigDir, ".claude.json")
-		servers := map[string]any{}
-		servers["chat-professor"] = map[string]any{
-			"type": "stdio", "command": filepath.Join(env.Home, ".local", "bin", "pfm"),
-			"args": []string{"mcp", "serve", "--stdio", "--family", "chat"},
-		}
-		raw, err := json.Marshal(map[string]any{"mcpServers": servers})
-		if err != nil {
-			t.Fatal(err)
-		}
-		writeFile(t, path, string(raw))
-		assertRows(t, detect(t, "pfm-mcp", env))
-		assertRows(t, detect(t, "third-party-mcp", env))
-	})
-	t.Run("legacy-account-can-reach-cutover", func(t *testing.T) {
-		env := fixtureEnv(t)
-		path := filepath.Join(env.Accounts[0].ConfigDir, ".claude.json")
-		mcpFixture(t, env, path)
-		for _, row := range detect(t, "pfm-mcp", env) {
-			if row.Severity == Block {
-				t.Fatalf("owned legacy account blocks install migration: %+v", row)
-			}
-		}
-	})
-	env := fixtureEnv(t)
-	account := filepath.Join(env.Accounts[0].ConfigDir, ".claude.json")
-	ambient := filepath.Join(env.Home, ".claude.json")
-	homeMCP := filepath.Join(env.Home, ".mcp.json")
-	var want []Row
-	for _, path := range []string{account, ambient, homeMCP} {
-		mcpFixture(t, env, path)
-		severity, remedy := Warn, "run pfm install --yes to cut over owned account registrations"
-		if path == homeMCP {
-			severity = Block
-			remedy = "remove mcpServers.professor from " + path + "; pfm's server rides --mcp-config at launch"
-		}
-		want = append(
-			want,
-			Row{
-				severity,
-				"pfm-mcp",
-				path,
-				"carries pfm mcpServers.professor",
-				remedy,
-			},
-		)
-	}
-	ledger := filepath.Join(env.ManagedRoot, "mcp-ownership.json")
-	writeFile(t, ledger, `{"clients":["professor"]}`)
-	want = append(
-		want,
-		Row{
-			Warn,
-			"pfm-mcp",
-			ledger,
-			"mcp-ownership.json still records pfm clients",
-			"remove \"clients\" from " + ledger,
-		},
-	)
-	assertRows(t, detect(t, "pfm-mcp", env), want...)
-	t.Run("unreadable-continues", func(t *testing.T) {
-		env := fixtureEnv(t)
-		path := filepath.Join(env.Accounts[0].ConfigDir, ".claude.json")
-		makeDir(t, path)
-		other := filepath.Join(env.Home, ".mcp.json")
-		mcpFixture(t, env, other)
-		rows := detect(t, "pfm-mcp", env)
-		assertUnreadable(t, rows[:1], "pfm-mcp", path, syscall.EISDIR)
-		assertRows(
-			t,
-			rows[1:],
-			Row{
-				Block,
-				"pfm-mcp",
-				other,
-				"carries pfm mcpServers.professor",
-				"remove mcpServers.professor from " + other + "; pfm's server rides --mcp-config at launch",
-			},
-		)
-	})
-	t.Run("physical-registry-once", func(t *testing.T) {
-		env := fixtureEnv(t)
-		homePath := filepath.Join(env.Home, ".mcp.json")
-		writeFile(t, homePath, `{"mcpServers":{"client":{"command":"invented"},"registered":{"command":"invented"}}}`)
-		path := filepath.Join(env.Accounts[0].ConfigDir, ".claude.json")
-		makeDir(t, filepath.Dir(path))
-		if err := os.Symlink(homePath, path); err != nil {
-			t.Fatal(err)
-		}
-		ledger, err := json.Marshal(
-			map[string]any{
-				"clients": []string{"client"},
-				"registrations": map[string]any{
-					path: map[string]any{"registered": map[string]any{"command": "invented"}},
-				},
-			},
-		)
-		if err != nil {
-			t.Fatal(err)
-		}
-		ledgerPath := filepath.Join(env.ManagedRoot, "mcp-ownership.json")
-		writeFile(t, ledgerPath, string(ledger))
-		assertRows(
-			t,
-			detect(t, "pfm-mcp", env),
-			Row{
-				Block,
-				"pfm-mcp",
-				path,
-				"carries pfm mcpServers.registered",
-				"remove mcpServers.registered from " + path + "; pfm's server rides --mcp-config at launch",
-			},
-			Row{
-				Block,
-				"pfm-mcp",
-				ledgerPath,
-				"mcp-ownership.json still records pfm clients",
-				"remove \"clients\" from " + ledgerPath,
-			},
-		)
-	})
-	t.Run("operator-professor", func(t *testing.T) {
-		env := fixtureEnv(t)
-		path := filepath.Join(env.Accounts[0].ConfigDir, ".claude.json")
-		writeFile(t, path, `{"mcpServers":{"professor":{"command":"/opt/operator/mcp"}}}`)
-		writeFile(
-			t,
-			filepath.Join(env.ManagedRoot, "mcp-ownership.json"),
-			fmt.Sprintf(`{"registrations":{%q:{"professor":{"command":"old"}}}}`, path),
-		)
-		assertRows(t, detect(t, "pfm-mcp", env))
-		assertRows(t, detect(t, "third-party-mcp", env), Row{
-			Warn,
-			"third-party-mcp",
-			path,
-			"mcpServers.professor is declared outside pfm",
-			"move it to mcp.thirdParty.professor in " + env.ConfigPath + ", then remove mcpServers.professor from " + path,
-		})
-	})
-	t.Run("clients-only", func(t *testing.T) {
-		env := fixtureEnv(t)
-		writeFile(t, filepath.Join(env.Home, ".mcp.json"), `{"mcpServers":{"client":{"command":"invented"}}}`)
-		ledger := filepath.Join(env.ManagedRoot, "mcp-ownership.json")
-		writeFile(t, ledger, `{"clients":["client"]}`)
-		assertRows(t, detect(t, "pfm-mcp", env), Row{
-			Block, "pfm-mcp", ledger,
-			"mcp-ownership.json still records pfm clients",
-			"remove \"clients\" from " + ledger,
-		})
-	})
-}
-
 func TestOwnershipLedgerUnreadable(t *testing.T) {
-	for _, test := range []struct{ check, name string }{{"pfm-settings", "settings-hook-ownership.json"}, {"pfm-mcp", "mcp-ownership.json"}} {
+	for _, test := range []struct{ check, name string }{{"pfm-settings", "settings-hook-ownership.json"}} {
 		t.Run(test.check, func(t *testing.T) {
 			env := fixtureEnv(t)
-			path := filepath.Join(env.ManagedRoot, test.name)
+			path := filepath.Join(installer.ManagedRoot(env.Home), test.name)
 			writeFile(t, path, "{")
 			rows := detect(t, test.check, env)
 			if len(rows) != 1 || rows[0].Severity != Block || rows[0].Path != path ||
@@ -312,7 +141,7 @@ func TestOwnershipLedgerUnreadable(t *testing.T) {
 func TestThirdPartyMCP(t *testing.T) {
 	env := fixtureEnv(t)
 	path := filepath.Join(env.Accounts[0].ConfigDir, ".claude.json")
-	mcpFixture(t, env, path)
+	writeFile(t, path, `{"mcpServers":{"foreign":{"command":"invented"}}}`)
 	assertRows(
 		t,
 		detect(t, "third-party-mcp", env),
@@ -324,23 +153,12 @@ func TestThirdPartyMCP(t *testing.T) {
 			"move it to mcp.thirdParty.foreign in " + env.ConfigPath + ", then remove mcpServers.foreign from " + path,
 		},
 	)
-	// The ledger, as well as shape matching, excludes pfm's entries.
-	ledger, err := json.Marshal(
-		map[string]any{
-			"registrations": map[string]any{path: map[string]any{"foreign": map[string]any{"command": "invented"}}},
-		},
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	writeFile(t, filepath.Join(env.ManagedRoot, "mcp-ownership.json"), string(ledger))
-	assertRows(t, detect(t, "third-party-mcp", env))
 	t.Run("unreadable-continues", func(t *testing.T) {
 		env := fixtureEnv(t)
 		path := filepath.Join(env.Accounts[0].ConfigDir, ".claude.json")
 		makeDir(t, path)
 		other := filepath.Join(env.Home, ".claude.json")
-		mcpFixture(t, env, other)
+		writeFile(t, other, `{"mcpServers":{"foreign":{"command":"invented"}}}`)
 		rows := detect(t, "third-party-mcp", env)
 		assertUnreadable(t, rows[:1], "third-party-mcp", path, syscall.EISDIR)
 		assertRows(
@@ -364,16 +182,27 @@ func TestThirdPartyMCP(t *testing.T) {
 }
 
 func TestThirdPartyMCPAcceptedDeclarationIsExactAndReadable(t *testing.T) {
+	const reason = "active user integration"
 	for _, test := range []struct {
-		name, path, server, body string
-		accepted                 bool
-		warnings                 int
+		name, path, server, body, reason, problem string
+		accepted                                  bool
+		warnings                                  int
 	}{
-		{"exact", "", "agent-browser", `{"mcpServers":{"agent-browser":{}}}`, true, 0},
-		{"other server", "", "other", `{"mcpServers":{"agent-browser":{}}}`, false, 1},
-		{"other path", "/other/.claude.json", "agent-browser", `{"mcpServers":{"agent-browser":{}}}`, false, 1},
-		{"broken json", "", "agent-browser", `{`, false, 0},
-		{"mixed registry", "", "agent-browser", `{"mcpServers":{"agent-browser":{},"other":{"command":"invented"}}}`, true, 1},
+		{
+			"exact", "", "agent-browser", `{"mcpServers":{"agent-browser":{}}}`, reason,
+			"mcpServers.agent-browser retained by doctor.acceptedMCP: " + reason, true, 0,
+		},
+		{
+			"exact without a reason", "", "agent-browser", `{"mcpServers":{"agent-browser":{}}}`, "",
+			"mcpServers.agent-browser retained by doctor.acceptedMCP", true, 0,
+		},
+		{"other server", "", "other", `{"mcpServers":{"agent-browser":{}}}`, reason, "", false, 1},
+		{"other path", "/other/.claude.json", "agent-browser", `{"mcpServers":{"agent-browser":{}}}`, reason, "", false, 1},
+		{"broken json", "", "agent-browser", `{`, reason, "", false, 0},
+		{
+			"mixed registry", "", "agent-browser", `{"mcpServers":{"agent-browser":{},"other":{"command":"invented"}}}`, reason,
+			"mcpServers.agent-browser retained by doctor.acceptedMCP: " + reason, true, 1,
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			env := fixtureEnv(t)
@@ -384,12 +213,12 @@ func TestThirdPartyMCPAcceptedDeclarationIsExactAndReadable(t *testing.T) {
 				acceptedPath = path
 			}
 			env.AcceptedMCP = []config.AcceptedMCP{
-				{Path: acceptedPath, Server: test.server, Reason: "active user integration"},
+				{Path: acceptedPath, Server: test.server, Reason: test.reason},
 			}
 			rows := detect(t, "third-party-mcp", env)
 			if test.accepted {
 				if len(rows) != 1+test.warnings || rows[0].Severity != Accepted ||
-					!strings.Contains(rows[0].Problem, "active user integration") ||
+					rows[0].Problem != test.problem ||
 					Count(rows, Warn) != test.warnings {
 					t.Fatalf("accepted rows=%+v", rows)
 				}
@@ -404,46 +233,5 @@ func TestThirdPartyMCPAcceptedDeclarationIsExactAndReadable(t *testing.T) {
 				t.Fatalf("unaccepted or unreadable rows=%+v", rows)
 			}
 		})
-	}
-}
-
-func TestRetiredMCPPreflightAllowsOwnedCutover(t *testing.T) {
-	checked := 0
-	for _, name := range installer.LegacyMCPNames() {
-		if !strings.HasSuffix(name, "-professor") {
-			continue
-		}
-		for _, oldBinary := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s/old-binary=%t", name, oldBinary), func(t *testing.T) {
-				env := fixtureEnv(t)
-				family := strings.TrimSuffix(name, "-professor")
-				binary, args := family, []string{"mcp"}
-				if oldBinary {
-					binary, args = "pfm", []string{"mcp", "serve", "--stdio", "--family", family}
-				}
-				entry := map[string]any{
-					"type": "stdio", "command": filepath.Join(env.Home, ".local", "bin", binary), "args": args,
-				}
-				raw, err := json.Marshal(map[string]any{"mcpServers": map[string]any{name: entry}})
-				if err != nil {
-					t.Fatal(err)
-				}
-				writeFile(t, filepath.Join(env.Accounts[0].ConfigDir, ".claude.json"), string(raw))
-				ledger, err := json.Marshal(map[string]any{"clients": installer.LegacyMCPNames()})
-				if err != nil {
-					t.Fatal(err)
-				}
-				writeFile(t, filepath.Join(env.ManagedRoot, "mcp-ownership.json"), string(ledger))
-				for _, row := range RunAll(env) {
-					if row.Check == checkPFMMCP && row.Severity == Block {
-						t.Fatalf("owned retired registration blocks install before cleanup: %+v", row)
-					}
-				}
-			})
-			checked++
-		}
-	}
-	if checked == 0 {
-		t.Fatal("retired registration fixtures did not exercise preflight")
 	}
 }

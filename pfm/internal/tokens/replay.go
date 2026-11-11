@@ -487,7 +487,7 @@ func (a *auditor) attribute(
 	}
 }
 
-// span widens the run's window to a booking at ts.
+// span widens the run's window to a charge at ts.
 func (r *run) span(ts float64) {
 	if r.t0 == 0 {
 		r.t0 = ts
@@ -495,7 +495,7 @@ func (r *run) span(ts float64) {
 	r.t1 = ts
 }
 
-// bookSpend books a priced booking's dollars: the billing columns, the run's
+// bookSpend records a priced charge's dollars: the billing columns, the run's
 // totals, its context band, its kind · model · effort row, its cache-write tier,
 // its hour and window bin.
 func (a *auditor) bookSpend(r *run, parts pricing.ClaudeParts, ctx, out, ts float64, effortKey, project string) {

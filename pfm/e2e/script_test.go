@@ -43,9 +43,14 @@ const (
 
 var e2eCoverageAtStart = os.Getenv("GOCOVERDIR")
 
-type jailedTestMain struct{ m *testing.M }
+type jailedTestMain struct {
+	m *testing.M
+	// restoreTMPDIR undoes stageCommandsBesideBinary before any test runs.
+	restoreTMPDIR func()
+}
 
 func (m jailedTestMain) Run() int {
+	m.restoreTMPDIR()
 	if os.Getenv("PFM_E2E_REQUIRE_FENCE_HELPER") == "1" ||
 		os.Getenv("PFM_E2E_CLAUDE_CAPTURE") == "1" ||
 		os.Getenv("PFM_E2E_CLAUDE_PLUGIN") == "1" ||
@@ -103,7 +108,7 @@ func TestMain(m *testing.M) {
 			os.Exit(1)
 		}
 	}
-	testscript.Main(jailedTestMain{m}, map[string]func(){
+	commands := map[string]func(){
 		"jail-pfm":      runPFMCommand,
 		"jail-tmux":     runTmuxCommand,
 		"jail-until":    runSleepUntilCommand,
@@ -111,7 +116,39 @@ func TestMain(m *testing.M) {
 		"jail-mcp-exit": runMCPExitCommand,
 		"jail-ls-lacks": runLSLacksCommand,
 		"jail-pfm-rc":   runPFMRCCommand,
-	})
+	}
+	restore := func() {}
+	if commands[filepath.Base(os.Args[0])] == nil {
+		restore = stageCommandsBesideBinary()
+	}
+	testscript.Main(jailedTestMain{m: m, restoreTMPDIR: restore}, commands)
+}
+
+// stageCommandsBesideBinary points TMPDIR at this test binary's directory while
+// testscript stages its commands, and returns the undo. testscript hard-links the
+// binary into a fresh TMPDIR directory per command and falls back to a full copy
+// across filesystems; with GOTMPDIR off the fence's capped /tmp, every shard's
+// copies filled that tmpfs. An unwritable binary directory keeps TMPDIR as it is.
+func stageCommandsBesideBinary() func() {
+	executable, err := os.Executable()
+	if err != nil || syscall.Access(filepath.Dir(executable), 2) != nil { // 2 = W_OK
+		return func() {}
+	}
+	previous, wasSet := os.LookupEnv("TMPDIR")
+	if err := os.Setenv("TMPDIR", filepath.Dir(executable)); err != nil {
+		fmt.Fprintf(os.Stderr, "stage testscript commands beside %s: %v\n", executable, err)
+		return func() {}
+	}
+	return func() {
+		restoreErr := os.Unsetenv("TMPDIR")
+		if wasSet {
+			restoreErr = os.Setenv("TMPDIR", previous)
+		}
+		if restoreErr != nil {
+			fmt.Fprintf(os.Stderr, "restore TMPDIR after staging testscript commands: %v\n", restoreErr)
+			os.Exit(1)
+		}
+	}
 }
 
 func prepareScriptBinary() error {

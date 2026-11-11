@@ -252,6 +252,8 @@ func TestSourceFetchedSkillsValidateTheRegistryAtEntry(t *testing.T) {
 	t.Run("entries", func(t *testing.T) {
 		t.Parallel()
 		home := t.TempDir()
+		longName := strings.Repeat("a", 300)
+		longClash := filepath.Join(home, ".professor", "templates", "global", "skills", longName)
 		writeFixture(
 			t,
 			filepath.Join(home, ".professor", "templates", "global", "skills", "shared", "SKILL.md"),
@@ -261,9 +263,14 @@ func TestSourceFetchedSkillsValidateTheRegistryAtEntry(t *testing.T) {
 			"unresolved": "https://example.invalid/{OTHER_TOKEN}/x",
 			"shared":     "https://example.invalid/shared",
 			"Bad_Name":   "https://example.invalid/bad",
+			longName:     "https://example.invalid/long",
 		}))
 		output := runSkillInstall(t, home, ModeApply)
 		for _, want := range []string{
+			// stat of an over-long name is ENAMETOOLONG, not ENOENT, even as root:
+			// that skill is skipped by name and the rest of the registry still loads.
+			"SKILL-SOURCE-UNREADABLE " + longName + ": inspect template skill " + longClash +
+				": stat " + longClash + ": file name too long",
 			"SKILL-SOURCE-UNRESOLVED unresolved: repo https://example.invalid/{OTHER_TOKEN}/x carries unresolved placeholder {OTHER_TOKEN}",
 			"SKILL-SOURCE-CLASH shared: ",
 			"SKILL-SOURCE-INVALID Bad_Name: ",
@@ -285,6 +292,46 @@ func TestSourceFetchedSkillsValidateTheRegistryAtEntry(t *testing.T) {
 			!strings.Contains(output, "resolve registered placeholder {GH_USER}") {
 			t.Fatalf("an unresolvable {GH_USER} was not a named failure:\n%s", output)
 		}
+	})
+	t.Run("owner from the release URL past a broken manifest", func(t *testing.T) {
+		t.Parallel()
+		home := t.TempDir()
+		manifest := filepath.Join(home, ".professor", ".professor", "manifest.json")
+		writeFixture(t, manifest, `{"installed_from":`)
+		writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"x": "https://github.com/{GH_USER}/x"}))
+		output := runSkillInstall(t, home, ModeDryRun, func(options *Options) {
+			options.ThemeReleaseURL = "https://raw.githubusercontent.com/release-owner/professor/v1.0.0/templates/themes/"
+		})
+		for _, want := range []string{
+			"  skip    SKILL-SOURCES-OWNER decode " + manifest + ": unexpected end of JSON input; " +
+				"{GH_USER} resolved from the release theme URL instead\n",
+			"  change  fetch https://github.com/release-owner/x -> " + filepath.Join(skillStoreRoot(home), "x") + "\n",
+		} {
+			if !strings.Contains(output, want) {
+				t.Fatalf("missing %q:\n%s", want, output)
+			}
+		}
+	})
+	t.Run("unknown keys", func(t *testing.T) {
+		t.Parallel()
+		home := t.TempDir()
+		repo := skillFixtureRepo(t, filepath.Join(t.TempDir(), "kept"), map[string]string{"SKILL.md": "# kept\n"})
+		path := writeSkillRegistry(t, home, `{"_comment":"c","pinned":{},"source_fetched":{`+
+			`"extra":{"repo":"https://example.invalid/extra","ref":"v1"},"kept":{"repo":"file://`+repo+`"}}}`)
+		output := runSkillInstall(t, home, ModeApply)
+		for _, want := range []string{
+			"  skip    SKILL-SOURCES-UNKNOWN-KEY pinned in " + path + ": ignored\n",
+			"  skip    SKILL-SOURCE-INVALID extra: decode its record in " + path + `: json: unknown field "ref"` + "\n",
+		} {
+			if !strings.Contains(output, want) {
+				t.Fatalf("missing %q:\n%s", want, output)
+			}
+		}
+		store := filepath.Join(skillStoreRoot(home), "kept")
+		if got := readSkillFile(t, filepath.Join(store, "SKILL.md")); got != "# kept\n" {
+			t.Fatalf("the valid entry beside the unknown keys was not fetched: %q\n%s", got, output)
+		}
+		assertLink(t, filepath.Join(home, ".agents", "skills", "kept"), store)
 	})
 	t.Run("unparsable", func(t *testing.T) {
 		t.Parallel()
@@ -728,7 +775,7 @@ func TestShippedSkillSourcesRegistryLoads(t *testing.T) {
 		t.Fatal("find test source")
 	}
 	repo := filepath.Join(filepath.Dir(source), "..", "..", "..")
-	sources, present, err := loadSkillSources(repo, ThemeReleaseURL(""))
+	sources, present, _, err := loadSkillSources(repo, ThemeReleaseURL(""))
 	if err != nil || !present || len(sources) == 0 {
 		t.Fatalf("load %s: present=%t sources=%d err=%v", skillSourcesRelative, present, len(sources), err)
 	}

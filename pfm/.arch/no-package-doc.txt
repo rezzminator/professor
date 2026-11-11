@@ -1,5 +1,0 @@
-cmd/pfm
-internal/engine/claude
-internal/engine/codex
-internal/engine/opencode
-internal/statusline

@@ -98,28 +98,11 @@ type Store struct {
 	commsWrites atomic.Uint64
 }
 
-// CheckLegacyState refuses a state database create while the legacy
-// database still waits for the operator to apply pfm doctor's fix (paths.ErrLegacyPending).
-// Hand-built values with no Home skip the check.
-func CheckLegacyState(values paths.Values) error {
-	if values.Home == "" {
-		return nil
-	}
-	if err := paths.CheckLegacyPending(values.StateDB, paths.LegacyStateDB(values.Home)); err != nil {
-		return fmt.Errorf("shared state database: %w", err)
-	}
-	return nil
-}
-
 // OpenSharedState records a database initialization failure in Degraded. Operations then
 // return that failure instead of pretending an operator decision was stored.
 func OpenSharedState(ctx context.Context, values paths.Values) *Store {
 	store := &Store{
 		path: values.StateDB,
-	}
-	if err := CheckLegacyState(values); err != nil {
-		store.degraded = err
-		return store
 	}
 	db, err := openDatabase(ctx, values.StateDB)
 	if err != nil {
@@ -159,9 +142,10 @@ func openDatabase(ctx context.Context, path string) (*sql.DB, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate shared state database: %w", err)
 	}
+	// The two cleanups below keep their rows when they fail and retry at the
+	// next open: retired or stale rows never cost the store.
 	if err := dropRetiredIssuesTable(ctx, db, path); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("migrate shared state database: %w", err)
+		obs.Logger(ctx).Warn("fleet.issues.kept", "path", path, obs.FieldErr, err.Error())
 	}
 	if err := addScheduleOnce(ctx, db, path); err != nil {
 		_ = db.Close()
@@ -172,8 +156,7 @@ func openDatabase(ctx context.Context, path string) (*sql.DB, error) {
 		return nil, fmt.Errorf("migrate seat ownership: %w", err)
 	}
 	if err := retireMovedTmuxSeats(ctx, db, path); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("repair moved tmux seats: %w", err)
+		obs.Logger(ctx).Warn("fleet.seats.repair_deferred", "path", path, obs.FieldErr, err.Error())
 	}
 	return db, nil
 }
@@ -392,7 +375,15 @@ func (s *Store) KilledRecords(ctx context.Context) (records map[string]KilledRec
 		var killedAt int64
 		var payload sql.NullInt64
 		if err := rows.Scan(&id, &killedAt, &payload); err != nil {
-			return nil, fmt.Errorf("scan shared kill: %w", err)
+			skipRow(ctx, "hidden", fmt.Errorf("scan shared kill: %w", err))
+			// The kill is the operator's decision: a row whose id still reads
+			// stays killed, its time unknown and its clear baseline dropped, so it
+			// never auto-unkills on a guess.
+			var at, baseline any
+			if rows.Scan(&id, &at, &baseline) == nil && id != "" {
+				records[id] = KilledRecord{}
+			}
+			continue
 		}
 		record := KilledRecord{KilledAt: killedAt}
 		if payload.Valid {
@@ -591,10 +582,12 @@ func (s *Store) BranchSeats(ctx context.Context) (result map[string]BranchSeat, 
 		var key, parent string
 		var createdAt int64
 		if err := rows.Scan(&key, &parent, &createdAt); err != nil {
-			return nil, fmt.Errorf("scan shared branch seat: %w", err)
+			skipRow(ctx, "meta", fmt.Errorf("scan shared branch seat: %w", err))
+			continue
 		}
 		socket := strings.TrimPrefix(key, branchSeatPrefix)
-		if socket == "" || socket == key {
+		if socket == "" {
+			skipRow(ctx, "meta", fmt.Errorf("branch seat key %q names no socket", key))
 			continue
 		}
 		result[socket] = BranchSeat{
@@ -685,11 +678,7 @@ func SetClaudePrimaryAccount(
 			returnErr = errors.Join(returnErr, fmt.Errorf("close shared state: %w", err))
 		}
 	}()
-	// An unopenable database degrades to the mirror below, but a create refused
-	// while legacy state waits for pfm doctor's fix is never silently degraded.
-	if err := state.Degraded(); errors.Is(err, paths.ErrLegacyPending) {
-		return err
-	}
+	// An unopenable database degrades to the mirror below.
 	if err := state.SetMeta(
 		ctx,
 		PrimaryAccountKey,

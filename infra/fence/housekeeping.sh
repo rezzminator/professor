@@ -8,12 +8,14 @@
 #
 #   fence_housekeeping [lane-hash]   # the nine steps below, in order
 #   fence_volumes_ensure             # the five shared cache volumes exist
+#   fence_cache_budget_pending       # a container start removes the caches marked over budget
 #   fence_sim_volume <checkout>      # that checkout's `iso sim` harvester volume
 #
 # Only fence-owned objects are ever removed: containers and dangling images
 # labelled pfm.fence=1 (pfm-dev.Dockerfile, docker-compose.yml and every fence
 # `docker run` set it), lane images (label professor.lane-root, tag
-# pfm-lane-base:*), the three shared cache volumes, volumes named
+# pfm-lane-base:*), the three shared cache volumes, lane HELD's two cargo
+# volumes, volumes named
 # ^(fence|infra)_pfm-dev-, the retired pfm-lane-{harvest,uv}-cache volumes,
 # and this clone's recorded pfm-sim-harvest- volumes,
 # build cache no build used for a week, and scratch under the roots this repo's
@@ -76,10 +78,19 @@
 #                   `docker system df -v` (bounded to 120 s where the host has
 #                   `timeout`) against its budget in MB — pfm-dev-gocache
 #                   PFM_FENCE_GOCACHE_MB (15000), pfm-dev-gomod PFM_FENCE_GOMOD_MB
-#                   (4000), pfm-dev-lintcache PFM_FENCE_LINTCACHE_MB (2000); over
+#                   (4000), pfm-dev-lintcache PFM_FENCE_LINTCACHE_MB (2000), and
+#                   lane HELD's herdr-shield build volumes (lanes/root.sh --machine
+#                   held creates them on first use) pfm-dev-cargo PFM_FENCE_CARGO_MB
+#                   (2000) and pfm-dev-herdr-shield-target
+#                   PFM_FENCE_HERDR_SHIELD_TARGET_MB (6000), a volume not created
+#                   yet skipped; over
 #                   budget the volume is removed — `docker volume rm`, which the
 #                   daemon refuses atomically while any container mounts it — and
-#                   the next fence run recreates it empty: one cold build.
+#                   the next fence run recreates it empty: one cold build. This pass
+#                   runs after a shared container starts and mounts the caches, so a
+#                   refusal marks the volume ({stamp dir}/{volume}.over-budget) and
+#                   the next container start removes it before its `docker run`
+#                   (fence_cache_budget_pending).
 #   scratch         age: under /tmp/{project}, each live checkout's scratch root
 #                   and each live checkout's repo-local tmp/, an entry with no
 #                   file modified in PFM_FENCE_SCRATCH_DAYS (default 7) days is
@@ -111,7 +122,9 @@ FENCE_CACHE_VOLUMES="pfm-dev-gocache pfm-dev-gomod pfm-dev-lintcache"
 # volume · budget variable · default MB, one row per shared cache volume
 FENCE_CACHE_BUDGETS="pfm-dev-gocache PFM_FENCE_GOCACHE_MB $PFM_FENCE_GOCACHE_MB
 pfm-dev-gomod PFM_FENCE_GOMOD_MB $PFM_FENCE_GOMOD_MB
-pfm-dev-lintcache PFM_FENCE_LINTCACHE_MB $PFM_FENCE_LINTCACHE_MB"
+pfm-dev-lintcache PFM_FENCE_LINTCACHE_MB $PFM_FENCE_LINTCACHE_MB
+pfm-dev-cargo PFM_FENCE_CARGO_MB $PFM_FENCE_CARGO_MB
+pfm-dev-herdr-shield-target PFM_FENCE_HERDR_SHIELD_TARGET_MB $PFM_FENCE_HERDR_SHIELD_TARGET_MB"
 
 _fence_hk_warn() { printf 'WARN fence housekeeping: %s failed: %s\n' "$1" "$2" >&2; }
 _fence_hk_say() { printf 'fence housekeeping: %s\n' "$1" >&2; }
@@ -324,13 +337,36 @@ _fence_hk_cache_budget() {
       fi
       [ "$used" -gt "$budget" ] || continue
       if out="$(docker volume rm "$v" 2>&1)"; then
+        rm -f "$dir/$v.over-budget"
         _fence_hk_say "removed $v, $used MB > $budget MB budget, freed $used MB — the next fence run recreates it empty"
       else
         _fence_hk_warn cache-budget "$v is $used MB > $budget MB and was kept — docker volume rm: $(_fence_hk_line "$out")"; all_ok=0
+        case "$out" in *"in use"*) : >"$dir/$v.over-budget" || _fence_hk_warn cache-budget "could not mark $v over budget in $dir" ;; esac
       fi
     done <<<"$FENCE_CACHE_BUDGETS"
   fi
   [ "$all_ok" = 1 ] && _fence_hk_stamp cache-budget "$stamp"
+}
+
+# fence_cache_budget_pending: the container start's half of cache-budget, run before `docker run`
+# mounts the caches: each volume the detached pass marked over budget is removed while no container
+# holds it; one another container still mounts stays marked for the next start. Never fails its caller.
+fence_cache_budget_pending() {
+  local dir m v out
+  dir="$(_fence_hk_stamp_dir)"
+  for m in "$dir"/*.over-budget; do
+    [ -e "$m" ] || continue
+    v="$(basename "$m" .over-budget)"
+    if out="$(docker volume rm "$v" 2>&1)"; then
+      rm -f "$m"; _fence_hk_say "removed $v, marked over budget — this fence run recreates it empty"
+    else
+      case "$out" in
+        *[Nn]"o such volume"*) rm -f "$m" ;;
+        *) _fence_hk_warn cache-budget "$v stays marked over budget — docker volume rm: $(_fence_hk_line "$out")" ;;
+      esac
+    fi
+  done
+  return 0
 }
 
 _fence_hk_build_cache() {

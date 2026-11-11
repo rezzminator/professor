@@ -5,8 +5,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-
-	"github.com/rezzminator/professor/pfm/internal/codexappendix"
 )
 
 // beyondFloat64 is 2^53+1, the first integer a float64 cannot hold: decoded
@@ -42,12 +40,12 @@ func TestUnmarshalKeepingNumbersIsAsStrictAsUnmarshal(t *testing.T) {
 func TestCodexHooksRewriteKeepsIntegersBeyondFloat64(t *testing.T) {
 	t.Parallel()
 	// The Codex hook file is rewritten only to take something away now, so
-	// the fixture carries the retired appendix hook for the pass to remove.
+	// the fixture carries a retired hook for the pass to remove.
 	home := t.TempDir()
-	raw := []byte(`{"counter":` + beyondFloat64 + `,"hooks":{"SessionStart":[{"matcher":` +
-		strconv.Quote(codexappendix.Matcher) + `,"hooks":[{"type":"command","command":` +
-		strconv.Quote(codexappendix.Command(home)) + `}]}]}}`)
-	updated, changed, _, err := updateCodexHooks(raw, home, false, nil)
+	raw := []byte(`{"counter":` + beyondFloat64 + `,"hooks":{"SessionStart":[{"matcher":"startup",` +
+		`"hooks":[{"type":"command","command":` +
+		strconv.Quote(home+"/.local/bin/pfm internal compact-nudge") + `}]}]}}`)
+	updated, changed, _, err := updateCodexHooks(fixtureRetiredHooks, raw, home, false, nil)
 	if err != nil || !changed {
 		t.Fatalf("updateCodexHooks changed=%v err=%v; want a rewrite", changed, err)
 	}

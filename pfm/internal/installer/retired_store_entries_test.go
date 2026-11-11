@@ -11,14 +11,19 @@ import (
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/retired"
 )
+
+// fixtureStoreEntries are the retired store entries install's migration is
+// tested on; the shipped list is empty.
+var fixtureStoreEntries = retired.Lists{StoreEntries: []string{".last-update-result.json", "stats-cache.json"}}
 
 // TestRetireStoreEntries runs install's migration on the shape a retired entry
 // leaves behind: Claude replaced the store link with a real file in accounts 1
 // and 3, account 2 still links into the store, and the store holds its copy.
 // Account 4's link points outside the store and is the operator's own.
 func TestRetireStoreEntries(t *testing.T) {
-	for _, scenario := range []string{"apply", "preview", "archive-error"} {
+	for _, scenario := range []string{"apply", "preview", "archive-error", "unreadable-account"} {
 		t.Run(scenario, func(t *testing.T) {
 			home := t.TempDir()
 			store := ClaudeStore(home)
@@ -26,14 +31,31 @@ func TestRetireStoreEntries(t *testing.T) {
 			for id := 1; id <= 4; id++ {
 				accounts = append(accounts, pfmconfig.Account{ID: id, ConfigDir: pfmconfig.DefaultAccountDir(home, id)})
 			}
+			// A dangling account link is unreadable: it keeps every store copy
+			// and costs no other account its unlink.
+			unreadable := filepath.Join(home, "gone-account")
+			if scenario == "unreadable-account" {
+				accounts = append(accounts, pfmconfig.Account{ID: 5, ConfigDir: unreadable})
+			}
 			var output bytes.Buffer
 			runner := &engine{
-				options: Options{Home: home, ConfigDir: store, ClaudeAccounts: accounts, Stdout: &output},
-				apply:   scenario != "preview",
-				stamp:   "20261004-000000",
+				options: Options{
+					Home: home, ConfigDir: store, ClaudeAccounts: accounts, Stdout: &output,
+					retired: &fixtureStoreEntries,
+				},
+				apply: scenario != "preview",
+				stamp: "20261004-000000",
 			}
 			if err := (&engine{options: runner.options, apply: true}).wireClaudeStore(); err != nil {
 				t.Fatal(err)
+			}
+			if scenario == "unreadable-account" {
+				if err := os.RemoveAll(unreadable); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(filepath.Join(home, "nowhere"), unreadable); err != nil {
+					t.Fatal(err)
+				}
 			}
 			write := func(path, content string) {
 				t.Helper()
@@ -63,7 +85,7 @@ func TestRetireStoreEntries(t *testing.T) {
 				// A file where the archive dir belongs fails the mkdir for root too.
 				write(archiveDir, "blocked")
 			}
-			for _, name := range RetiredStoreEntries {
+			for _, name := range fixtureStoreEntries.StoreEntries {
 				write(filepath.Join(store, name), "store copy of "+name)
 				write(filepath.Join(accounts[0].ConfigDir, name), "account 1's own")
 				link(filepath.Join(store, name), filepath.Join(accounts[1].ConfigDir, name))
@@ -73,7 +95,7 @@ func TestRetireStoreEntries(t *testing.T) {
 			output.Reset()
 			err := runner.retireStoreEntries()
 			if scenario == "archive-error" {
-				name := RetiredStoreEntries[0]
+				name := fixtureStoreEntries.StoreEntries[0]
 				if err == nil || !strings.Contains(err.Error(), filepath.Join(store, name)) ||
 					!strings.Contains(err.Error(), archiveDir) {
 					t.Fatalf("contextual failure=%v", err)
@@ -84,7 +106,21 @@ func TestRetireStoreEntries(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, name := range RetiredStoreEntries {
+			if scenario == "unreadable-account" {
+				for _, name := range fixtureStoreEntries.StoreEntries {
+					storePath, linked := filepath.Join(store, name), filepath.Join(accounts[1].ConfigDir, name)
+					keep := "  skip    keep " + storePath + ": account 5 " + unreadable + " unreadable: stat " +
+						unreadable + ": no such file or directory — pfm doctor names the fix\n"
+					if !strings.Contains(output.String(), keep) {
+						t.Fatalf("want %q in:\n%s", keep, output.String())
+					}
+					assertContent(t, storePath, "store copy of "+name)
+					assertAbsent(t, linked)
+				}
+				assertAbsent(t, archiveDir)
+				return
+			}
+			for _, name := range fixtureStoreEntries.StoreEntries {
 				storePath, linked := filepath.Join(store, name), filepath.Join(accounts[1].ConfigDir, name)
 				archive := filepath.Join(archiveDir, name+".pre-professor-"+runner.stamp)
 				unlink := "  change  unlink " + linked
@@ -120,7 +156,7 @@ func TestRetireStoreEntries(t *testing.T) {
 			if output.Len() != 0 {
 				t.Fatalf("second run acted:\n%s", output.String())
 			}
-			for _, name := range RetiredStoreEntries {
+			for _, name := range fixtureStoreEntries.StoreEntries {
 				assertAbsent(t, filepath.Join(archiveDir, name+".pre-professor-"+runner.stamp+".1"))
 			}
 		})
@@ -131,7 +167,9 @@ func TestRetireStoreEntries(t *testing.T) {
 		path := filepath.Join(store, ".last-update-result.json")
 		writeFixture(t, path, "store copy")
 		var output bytes.Buffer
-		runner := &engine{options: Options{Home: home, ConfigDir: store, Stdout: &output}, apply: true}
+		runner := &engine{
+			options: Options{Home: home, ConfigDir: store, Stdout: &output, retired: &fixtureStoreEntries}, apply: true,
+		}
 		if err := runner.retireStoreEntries(); err != nil {
 			t.Fatal(err)
 		}
@@ -163,7 +201,7 @@ func TestRetiredStoreEntriesRespectBusyAccountGuard(t *testing.T) {
 	home := t.TempDir()
 	store := ClaudeStore(home)
 	account := filepath.Join(home, "account")
-	name := RetiredStoreEntries[0]
+	name := fixtureStoreEntries.StoreEntries[0]
 	writeFixture(t, filepath.Join(store, name), "shared bytes")
 	symlinkFixture(t, filepath.Join(store, name), filepath.Join(account, name))
 	guard, err := gather.AcquireAccountGuard(account, false)
@@ -183,6 +221,7 @@ func TestRetiredStoreEntriesRespectBusyAccountGuard(t *testing.T) {
 			ConfigDir:      store,
 			ClaudeAccounts: []pfmconfig.Account{{ID: 1, ConfigDir: account}},
 			Stdout:         &output,
+			retired:        &fixtureStoreEntries,
 		},
 	}
 	if err := e.retireStoreEntries(); err != nil {
@@ -199,7 +238,7 @@ func TestRetiredStoreEntriesKeepReplacementBetweenOwnershipAndMutation(t *testin
 	home := t.TempDir()
 	store := ClaudeStore(home)
 	account := filepath.Join(home, "account")
-	name := RetiredStoreEntries[0]
+	name := fixtureStoreEntries.StoreEntries[0]
 	path := filepath.Join(account, name)
 	operator := filepath.Join(home, "operator")
 	writeFixture(t, filepath.Join(store, name), "shared bytes")
@@ -222,6 +261,7 @@ func TestRetiredStoreEntriesKeepReplacementBetweenOwnershipAndMutation(t *testin
 	e := &engine{apply: true, options: Options{
 		Home: home, ConfigDir: store,
 		ClaudeAccounts: []pfmconfig.Account{{ID: 1, ConfigDir: account}}, Stdout: &bytes.Buffer{},
+		retired: &fixtureStoreEntries,
 	}}
 	if err := e.retireStoreEntries(); err == nil {
 		t.Fatal("replacement between ownership and mutation was silently retired")

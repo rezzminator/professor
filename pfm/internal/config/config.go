@@ -22,7 +22,6 @@ import (
 const (
 	Version        = 2
 	FileName       = "pfm.config.json"
-	LegacyFileName = "config.json"
 	DefaultMCPPort = 18377
 )
 
@@ -48,6 +47,9 @@ const (
 const (
 	PermissionBypass = "bypass"
 	PermissionPrompt = "prompted"
+	// PermissionAuto starts a chat in auto mode (the permission classifier)
+	// with bypass reachable through shift+tab.
+	PermissionAuto = "auto"
 
 	// claude.systemPrompt values: which system prompt every managed Claude
 	// launch carries. Production leaves the CLI's own prompt untouched; lean
@@ -220,8 +222,7 @@ func (config AskConfig) PrefsFor(id pfmengine.ID) EnginePrefs {
 // Config is the fully materialized configuration. Sources records whether
 // each effective value came from the machine file or from a default.
 type Config struct {
-	Extensions map[string]Extension
-	Chat       ChatConfig
+	Chat ChatConfig
 	// SeedContent carries the validated seed bytes into installation.
 	SeedContent      []byte `json:"-"`
 	Version          int
@@ -265,21 +266,20 @@ type rawState struct {
 }
 
 type rawConfig struct {
-	Extensions json.RawMessage `json:"extensions,omitempty"`
-	Chat       *rawChat        `json:"chat,omitempty"`
-	Version    *int            `json:"version"`
-	Theme      *string         `json:"theme,omitempty"`
-	State      *rawState       `json:"state,omitempty"`
-	Accounts   *[]rawAccount   `json:"accounts,omitempty"`
-	Claude     *rawClaude      `json:"claude,omitempty"`
-	Codex      *rawCodex       `json:"codex,omitempty"`
-	OpenCode   *rawOpenCode    `json:"opencode,omitempty"`
-	Tmux       *rawTmux        `json:"tmux,omitempty"`
-	NameSync   *rawNameSync    `json:"nameSync,omitempty"`
-	Doctor     *rawDoctor      `json:"doctor,omitempty"`
-	MCP        *rawMCP         `json:"mcp,omitempty"`
-	Log        *rawLog         `json:"log,omitempty"`
-	Ask        *rawAsk         `json:"ask,omitempty"`
+	Chat     *rawChat      `json:"chat,omitempty"`
+	Version  *int          `json:"version"`
+	Theme    *string       `json:"theme,omitempty"`
+	State    *rawState     `json:"state,omitempty"`
+	Accounts *[]rawAccount `json:"accounts,omitempty"`
+	Claude   *rawClaude    `json:"claude,omitempty"`
+	Codex    *rawCodex     `json:"codex,omitempty"`
+	OpenCode *rawOpenCode  `json:"opencode,omitempty"`
+	Tmux     *rawTmux      `json:"tmux,omitempty"`
+	NameSync *rawNameSync  `json:"nameSync,omitempty"`
+	Doctor   *rawDoctor    `json:"doctor,omitempty"`
+	MCP      *rawMCP       `json:"mcp,omitempty"`
+	Log      *rawLog       `json:"log,omitempty"`
+	Ask      *rawAsk       `json:"ask,omitempty"`
 }
 
 type rawTmux struct {
@@ -357,7 +357,6 @@ type rawMCP struct {
 	ThirdParty map[string]json.RawMessage `json:"thirdParty,omitempty"`
 	Servers    map[string]json.RawMessage `json:"servers,omitempty"`
 	HTTP       *rawMCPHTTP                `json:"http,omitempty"`
-	AuthToken  *string                    `json:"authToken,omitempty"`
 }
 
 type rawMCPServer struct {
@@ -629,7 +628,7 @@ func discoverAccounts(home string) ([]Account, []AccountSkip) {
 	accounts := make([]Account, 0, len(candidates))
 	skips := make([]AccountSkip, 0)
 	for _, candidate := range candidates {
-		if !hasValidAccountCredentials(candidate.path) {
+		if !hasAccountCredentials(candidate.path) {
 			skips = append(skips, AccountSkip{
 				ID: candidate.id, ConfigDir: candidate.path, Reason: "no valid credentials",
 			})
@@ -643,17 +642,19 @@ func discoverAccounts(home string) ([]Account, []AccountSkip) {
 	return accounts, skips
 }
 
-func hasValidAccountCredentials(configDir string) bool {
+// hasAccountCredentials is false only for an absent file or one with no access
+// token: an unreadable or torn one (mid OAuth rotation) keeps its account.
+func hasAccountCredentials(configDir string) bool {
 	body, err := os.ReadFile(filepath.Join(configDir, ".credentials.json"))
 	if err != nil {
-		return false
+		return !errors.Is(err, os.ErrNotExist)
 	}
 	var marker struct {
 		OAuth struct {
 			AccessToken string `json:"accessToken"`
 		} `json:"claudeAiOauth"`
 	}
-	return json.Unmarshal(body, &marker) == nil && strings.TrimSpace(marker.OAuth.AccessToken) != ""
+	return json.Unmarshal(body, &marker) != nil || strings.TrimSpace(marker.OAuth.AccessToken) != ""
 }
 
 func skipsOutsideDir(skips []AccountSkip, root string) []AccountSkip {
@@ -681,10 +682,6 @@ func loadWithMCPServers(
 	registered map[string]MCPServer,
 	codexHomes ...string,
 ) (Config, error) {
-	openCodeHome := openCodeAccountHome(home)
-	if _, err := openCodeStoreExists(openCodeHome); err != nil {
-		return Config{}, fmt.Errorf("discover OpenCode account data %s: %w", openCodeHome, err)
-	}
 	result := defaultsWithMCPServers(home, projectRoots, registered, codexHomes...)
 	if path == "" {
 		var err error
@@ -717,15 +714,10 @@ func loadWithMCPServers(
 	if err != nil {
 		return Config{}, err
 	}
-	if raw.Extensions != nil {
-		result.Sources["extensions"] = SourceFile
+	if raw.Version != nil { // an absent version reads as the current one, its source left default
+		result.Sources[keyVersion] = SourceFile
+		result.InputVersion = *raw.Version
 	}
-	result.Extensions, err = decodeExtensions(raw.Extensions)
-	if err != nil {
-		return Config{}, fmt.Errorf("config %s: %w", result.Path, err)
-	}
-	result.Sources[keyVersion] = SourceFile
-	result.InputVersion = *raw.Version
 	// Version 1 is accepted as a compatibility input, but callers always see
 	// the current materialized schema version.
 	result.Version = Version
@@ -932,9 +924,6 @@ func loadWithMCPServers(
 			result.MCP.HTTP.Port = raw.MCP.HTTP.Port
 			result.Sources["mcp.http.port"] = SourceFile
 		}
-		// authToken was briefly installer-owned. Keep accepting the legacy key
-		// so install can remove it, but it has no effective runtime value: the
-		// local MCP daemon is loopback-only and deliberately unauthenticated.
 	}
 	if err := applyChatAndAsk(&result, raw); err != nil {
 		return Config{}, err
@@ -1420,9 +1409,6 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 		},
 		"ask": askValue,
 		"log": MarshalLog(config.Log),
-	}
-	if config.Extensions != nil {
-		value["extensions"] = config.Extensions
 	}
 	if len(config.MCP.ThirdParty) != 0 {
 		value["mcp"].(map[string]any)["thirdParty"] = config.MCP.ThirdParty

@@ -16,6 +16,7 @@ import (
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/naming"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
@@ -129,6 +130,10 @@ func (resolver *Resolver) Resolve(
 	}
 }
 
+// lstatListed stats a socket the directory listing just named; a test swaps it
+// to stage a stat failure between the listing and the stat.
+var lstatListed = os.Lstat
+
 func (resolver *Resolver) allPanes(ctx context.Context) ([]ResolvedPane, error) {
 	entries, err := os.ReadDir(resolver.tmuxDir)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -139,7 +144,13 @@ func (resolver *Resolver) allPanes(ctx context.Context) ([]ResolvedPane, error) 
 	}
 	socketPaths := make([]string, 0, len(entries))
 	for _, entry := range entries {
-		info, err := entry.Info()
+		info, err := lstatListed(filepath.Join(resolver.tmuxDir, entry.Name()))
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			// An entry gone since the listing is an ended server; any other
+			// stat failure is said before its socket drops out of this pass.
+			obs.Logger(ctx).Warn("resolve.socket.skipped",
+				obs.FieldSock, filepath.Join(resolver.tmuxDir, entry.Name()), obs.FieldErr, err.Error())
+		}
 		if err != nil || info.Mode()&os.ModeSocket == 0 {
 			continue
 		}
@@ -201,6 +212,9 @@ func (resolver *Resolver) resolveLabel(
 	panes []ResolvedPane,
 ) (Outcome, error) {
 	results := make([]captureResult, 0)
+	// A pane whose screen cannot be read may hold the label: a miss names
+	// those panes rather than reading as no chat at all.
+	unreadable := make([]string, 0)
 	var mutex sync.Mutex
 	group, groupContext := errgroup.WithContext(ctx)
 	group.SetLimit(32)
@@ -217,6 +231,12 @@ func (resolver *Resolver) resolveLabel(
 				pane.PaneID,
 			)
 			if err != nil {
+				mutex.Lock()
+				unreadable = append(
+					unreadable,
+					fmt.Sprintf("pane %s (socket %s): %v", pane.PaneID, pane.SocketPath, err),
+				)
+				mutex.Unlock()
 				return nil
 			}
 			label := naming.BookmarkLabelFor(capture, resolver.accountEmojis)
@@ -261,7 +281,14 @@ func (resolver *Resolver) resolveLabel(
 	}
 	switch len(matches) {
 	case 0:
-		return Outcome{Code: 1}, nil
+		if len(unreadable) == 0 {
+			return Outcome{Code: 1}, nil
+		}
+		sort.Strings(unreadable)
+		return Outcome{
+			Code:   1,
+			Stderr: "could not read the screen of " + strings.Join(unreadable, "; ") + "\n",
+		}, nil
 	case 1:
 		return Outcome{
 			Code:   0,

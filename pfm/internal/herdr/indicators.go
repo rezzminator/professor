@@ -110,13 +110,15 @@ var errIndicatorOwnership = errors.New("pane ownership unproved")
 
 type indicatorPainter struct {
 	provePane PaneProof
+	shield    *Shield // the herdr-shield reader behind provePane and tabs
 	socket    string
 	lockDir   string
 	stderr    io.Writer
 	call      func(ctx context.Context, socket string, lines ...[]byte) ([]json.RawMessage, error)
 	clock     clock.Clock
 	// seq numbers the request ids; reported holds the unexpected agent_status
-	// strings already named on stderr, so a blinking pane names one once.
+	// strings and id-less list entries already named on stderr, so a blinking
+	// pane names one once.
 	seq      uint64
 	reported map[string]bool
 	// hasDone keeps the blinker reconciling unseen completions: marking an
@@ -294,8 +296,10 @@ func (painter *indicatorPainter) paint(ctx context.Context) (blocked, wrote bool
 }
 
 // paintFrom is paint; scan false reuses the tab observations already read and
-// paints tabs only while one animates.
+// paints tabs only while one animates. It holds shield, so a paint runs
+// herdr-shield once per socket however many panes it proves.
 func (painter *indicatorPainter) paintFrom(ctx context.Context, scan bool) (blocked, wrote bool, err error) {
+	defer painter.shield.Hold()()
 	defer func() { painter.cadence.lastBlocked = blocked }()
 	targets, err := painter.list(ctx)
 	if err != nil {
@@ -431,9 +435,16 @@ func (painter *indicatorPainter) list(ctx context.Context) ([]indicatorTarget, e
 			len(results),
 		)
 	}
-	targets, err := decodeIndicatorTargets(results[0], results[1])
+	targets, skipped, err := decodeIndicatorTargets(results[0], results[1])
 	if err != nil {
 		return nil, fmt.Errorf("herdr indicators: socket %s: %w", painter.socket, err)
+	}
+	for _, entry := range skipped {
+		// Named once per painter, as an unrecognised status is: a blinker lists every tick.
+		if !painter.reported[entry] {
+			painter.reported[entry] = true
+			painter.logf("herdr indicators: socket %s: %s, left unpainted", painter.socket, entry)
+		}
 	}
 	return targets, nil
 }
@@ -696,8 +707,7 @@ func clearRecordedIndicators(
 		if err := painter.writeStop(ctx); err != nil {
 			failures = append(failures, err)
 		}
-		if err := painter.clear(ctx); err != nil && (errors.Is(err, errIndicatorOwnership) ||
-			!errors.Is(err, syscall.ENOENT) && !errors.Is(err, syscall.ECONNREFUSED)) {
+		if err := painter.clear(ctx); err != nil && (errors.Is(err, errIndicatorOwnership) || !SocketGone(err)) {
 			failures = append(failures, fmt.Errorf("herdr indicators: clear socket %s: %w", socket, err))
 			continue
 		}

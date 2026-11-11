@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -143,14 +144,31 @@ func (pane TabPane) valid() bool {
 	return pane.Pane != "" && pane.Terminal != "" && pane.Workspace != "" && pane.Tab != "" && pane.Focused != nil
 }
 
+// IncompleteTabPanesError names the panes pane.list listed without a full
+// identity. ReadTabPanes returns it beside every complete pane: a caller may
+// paint those, but must not read a skipped pane as gone.
+type IncompleteTabPanesError struct {
+	Skipped []string
+}
+
+func (e *IncompleteTabPanesError) Error() string {
+	quoted := make([]string, len(e.Skipped))
+	for index, pane := range e.Skipped {
+		quoted[index] = strconv.Quote(pane)
+	}
+	return "tab panes: incomplete PaneInfo for " + strings.Join(quoted, ", ")
+}
+
 // ReadTabPanes reads pane.list (ListPanes) and validates its identity fields
-// at data entry.
+// at data entry. An incomplete pane is skipped and named in an
+// IncompleteTabPanesError returned with the complete ones.
 func ReadTabPanes(ctx context.Context, socket string) ([]TabPane, error) {
 	listed, err := ListPanes(ctx, socket)
 	if err != nil {
 		return nil, fmt.Errorf("list tab panes: %w", err)
 	}
 	panes := make([]TabPane, 0, len(listed))
+	var skipped []string
 	for index := range listed {
 		pane := &listed[index]
 		tab := TabPane{
@@ -158,9 +176,13 @@ func ReadTabPanes(ctx context.Context, socket string) ([]TabPane, error) {
 			Focused: pane.Focused, Revision: pane.Revision, Session: pane.AgentSession, State: pane.AgentStatus,
 		}
 		if !tab.valid() {
-			return nil, fmt.Errorf("tab panes: incomplete PaneInfo for %q", tab.Pane)
+			skipped = append(skipped, tab.Pane)
+			continue
 		}
 		panes = append(panes, tab)
+	}
+	if len(skipped) > 0 {
+		return panes, &IncompleteTabPanesError{Skipped: skipped}
 	}
 	return panes, nil
 }
@@ -190,7 +212,7 @@ func readTabPane(
 	if err := json.Unmarshal(bodies[0], &result); err != nil {
 		return TabPane{}, fmt.Errorf("decode tab pane: %w", err)
 	}
-	if result.Type != "pane_info" || !result.Pane.valid() {
+	if result.Type != paneInfoType || !result.Pane.valid() {
 		return TabPane{}, fmt.Errorf("incomplete pane.get: %s", bodies[0])
 	}
 	return result.Pane, nil
@@ -366,6 +388,7 @@ func tabTargetGone(err error) bool {
 // PaintIndicatorsWithTabs reuses the sidebar clock, failure bound and
 // singleton; changed, when not nil, is consulted on every blinker tick that
 // would not re-read the tabs, and a change it reports makes the tick re-read.
+// shield is the herdr-shield reader behind tabs and proof, held for each paint.
 func PaintIndicatorsWithTabs(
 	ctx context.Context,
 	socket, lockDir string,
@@ -373,6 +396,7 @@ func PaintIndicatorsWithTabs(
 	tabs TabProvider,
 	changed TabProbe,
 	proof PaneProof,
+	shield *Shield,
 ) error {
 	if stderr == nil {
 		stderr = io.Discard
@@ -384,7 +408,7 @@ func PaintIndicatorsWithTabs(
 		call:     Call,
 		clock:    clock.Real,
 		reported: map[string]bool{},
-		tabs:     tabs, tabsChanged: changed, provePane: proof,
+		tabs:     tabs, tabsChanged: changed, provePane: proof, shield: shield,
 	}
 	return painter.run(ctx)
 }

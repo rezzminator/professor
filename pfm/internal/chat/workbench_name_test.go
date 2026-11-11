@@ -1,7 +1,9 @@
 package chat
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -162,6 +164,20 @@ func TestWorkbenchNameClaimsAcrossIndependentProducers(t *testing.T) {
 	second, found, err := WorkbenchName(context.Background(), dir, io.Discard, nil)
 	if err != nil || !found || second == first {
 		t.Fatalf("separate producers chose %q and %q: %v", first, second, err)
+	}
+	// A claim pfm cannot read keeps its number and the next one is chosen.
+	claims := filepath.Join(root, "sid", ".name-claims")
+	broken := filepath.Join(claims, fmt.Sprintf("%x", sha256.Sum256([]byte("_SCRIBE:3"))))
+	if err := atomicfile.Write(broken, []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var warn bytes.Buffer
+	third, found, err := WorkbenchName(context.Background(), dir, &warn, nil)
+	wantWarn := "pfm WARN: parse workbench claim " + broken +
+		": unexpected end of JSON input; _SCRIBE:3 treated as taken\n"
+	if err != nil || !found || third != "_SCRIBE:4" || warn.String() != wantWarn {
+		t.Fatalf("past an unreadable claim chose %q, %t, %v; warned %q, want _SCRIBE:4 and %q",
+			third, found, err, warn.String(), wantWarn)
 	}
 }
 

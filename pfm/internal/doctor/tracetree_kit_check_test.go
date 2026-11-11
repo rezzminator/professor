@@ -3,6 +3,7 @@ package doctor
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,13 +22,13 @@ const (
 	tracerPythonChecked = "registry entry python3 on doctor's PATH (the launch passes Claude its caller's PATH, " +
 		"which pfm does not set)"
 	tracerPythonMissing = "python3 not found on doctor's PATH"
-	tracerFixPythonText = "the tracer cannot run without python3, a required dependency (the kit uses only the " +
+	tracerFixPythonText = "flights:tracer cannot run without python3, a required dependency (the kit uses only the " +
 		"Python 3 standard library and states no minimum version): install it as the doctor: dep python3 row says, " +
 		"and put it on the PATH Claude is launched with"
-	tracerFixKitText    = "run pfm install --yes to relink the tracetree skill"
-	tracerFixRelinkText = "run pfm install --yes to relink the kit; " + tracerFixPythonText
+	tracerFixKitText    = "run pfm install --yes to refresh the flights plugin copy"
+	tracerFixRelinkText = tracerFixKitText + "; " + tracerFixPythonText
 	tracerNotRunText    = ` error="not run: python3 or the kit failed above" — fix: fix the rows above, then rerun pfm doctor`
-	tracerPendingRow    = "doctor: tracetree-kit: kit not installed yet — run pfm install --yes"
+	tracerPendingRow    = "doctor: tracetree-kit: flights plugin not installed yet — run pfm install --yes"
 )
 
 // recordingRunner passes every call to the real runner and keeps each
@@ -53,54 +54,78 @@ func tracetreeKitRows(output string) []string {
 	return rows
 }
 
-func removeKitLink(t *testing.T, home string) {
+// healthyKit is the kit file the healthy jail staged in the flights plugin
+// folder.
+func healthyKit(t *testing.T, home string) string {
 	t.Helper()
-	if err := os.Remove(filepath.Join(home, ".claude", "skills", "tracetree")); err != nil {
+	kit, enabled, err := tracetreeKitPath(home)
+	if err != nil || !enabled || kit == "" {
+		t.Fatalf("the healthy jail stages no flights kit: kit=%q enabled=%v err=%v", kit, enabled, err)
+	}
+	return kit
+}
+
+// writeKit replaces the staged kit file with source.
+func writeKit(t *testing.T, home, source string) {
+	t.Helper()
+	if err := os.WriteFile(healthyKit(t, home), []byte(source), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
 
-// writeSkillLinkLedger writes the installer's record of the directories it
-// links skills into.
-func writeSkillLinkLedger(t *testing.T, home, body string) {
+// editStoreRecord rewrites the JSON document at rel under the shared Claude
+// store through edit.
+func editStoreRecord(t *testing.T, home, rel string, edit func(document map[string]any)) {
 	t.Helper()
-	path := filepath.Join(installer.ManagedRoot(home), "skill-links.json")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	path := filepath.Join(installer.ClaudeStore(home), rel)
+	raw, err := os.ReadFile(path)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+	var document map[string]any
+	if err := json.Unmarshal(raw, &document); err != nil {
+		t.Fatalf("parse %s: %v", path, err)
+	}
+	edit(document)
+	content, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, content, 0o600); err != nil {
 		t.Fatal(err)
 	}
 }
 
-// replaceKitLink swaps the healthy jail's tracetree link for a real directory
-// holding the given kit source.
-func replaceKitLink(t *testing.T, home, source string) {
+// flightsKeys calls each for every flights@ key of the record map.
+func flightsKeys(records any, each func(records map[string]any, key string)) {
+	table, _ := records.(map[string]any)
+	for key := range table {
+		if strings.HasPrefix(key, "flights@") {
+			each(table, key)
+		}
+	}
+}
+
+// disableFlights leaves the flights plugin installed but not enabled.
+func disableFlights(t *testing.T, home string) {
 	t.Helper()
-	link := filepath.Join(home, ".claude", "skills", "tracetree")
-	removeKitLink(t, home)
-	if err := os.Mkdir(link, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if source == "" {
-		return
-	}
-	if err := os.WriteFile(filepath.Join(link, "tracetree.py"), []byte(source), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	editStoreRecord(t, home, "settings.json", func(document map[string]any) {
+		flightsKeys(document["enabledPlugins"], func(enabled map[string]any, key string) { enabled[key] = false })
+	})
 }
 
 // TestTracetreeKitDoctor is the tracetree-kit check's whole table: each state
 // of the kit's needs is a case that asserts the rows printed and doctor's exit
-// status. The cases run the real python3; the kit is the shipped one only in
-// the healthy case, and a stub kit otherwise.
+// status. The cases run the real python3 over the stub kit the jail stages in
+// the flights plugin folder, or a broken kit written over it.
 func TestTracetreeKitDoctor(t *testing.T) {
 	for _, scenario := range []struct {
-		name         string
-		stage        func(t *testing.T, home string)
-		rows         func(kit, python string) []string
-		code         int
-		failureCount string
+		name  string
+		stage func(t *testing.T, home string)
+		rows  func(kit, python string) []string
+		code  int
+		// count is the summary's failures= count, or its warnings= count when code is 1.
+		count string
 	}{
 		{
 			name:  "python3 absent from PATH",
@@ -112,7 +137,7 @@ func TestTracetreeKitDoctor(t *testing.T) {
 					tracetreeKitRow + ` FAIL need=run checked=python3 ` + kit + tracerNotRunText,
 				}
 			},
-			code: 3, failureCount: "2",
+			code: 3, count: "2",
 		},
 		{
 			name: "python3 found but its version probe failing",
@@ -135,7 +160,7 @@ func TestTracetreeKitDoctor(t *testing.T) {
 					tracetreeKitRow + ` FAIL need=run checked=python3 ` + kit + tracerNotRunText,
 				}
 			},
-			code: 3, failureCount: "2",
+			code: 3, count: "2",
 		},
 		{
 			// A relative PATH entry (a project's venv/bin, say) resolves python3
@@ -162,26 +187,12 @@ func TestTracetreeKitDoctor(t *testing.T) {
 					tracetreeKitRow + ` FAIL need=run checked=python3 ` + kit + tracerNotRunText,
 				}
 			},
-			code: 3, failureCount: "2",
+			code: 3, count: "2",
 		},
 		{
-			name:  "kit file absent from its linked directory",
-			stage: func(t *testing.T, home string) { replaceKitLink(t, home, "") },
-			rows: func(kit, _ string) []string {
-				return []string{
-					tracetreeKitRow + ` FAIL need=kit checked=` + kit +
-						` error="stat ` + kit + `: no such file or directory" — fix: ` + tracerFixKitText,
-					tracetreeKitRow + ` FAIL need=run checked=python3 ` + kit + tracerNotRunText,
-				}
-			},
-			code: 3, failureCount: "2",
-		},
-		{
-			name: "kit placed then its source removed leaves a dangling link",
+			name: "kit file absent from the plugin folder",
 			stage: func(t *testing.T, home string) {
-				removeKitLink(t, home)
-				link := filepath.Join(home, ".claude", "skills", "tracetree")
-				if err := os.Symlink(filepath.Join(home, "removed-kit"), link); err != nil {
+				if err := os.Remove(healthyKit(t, home)); err != nil {
 					t.Fatal(err)
 				}
 			},
@@ -192,11 +203,31 @@ func TestTracetreeKitDoctor(t *testing.T) {
 					tracetreeKitRow + ` FAIL need=run checked=python3 ` + kit + tracerNotRunText,
 				}
 			},
-			code: 3, failureCount: "2",
+			code: 3, count: "2",
+		},
+		{
+			name: "kit path holding a directory",
+			stage: func(t *testing.T, home string) {
+				kit := healthyKit(t, home)
+				if err := os.Remove(kit); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Mkdir(kit, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			},
+			rows: func(kit, _ string) []string {
+				return []string{
+					tracetreeKitRow + ` FAIL need=kit checked=` + kit + ` error="not a regular file" — fix: ` +
+						tracerFixKitText,
+					tracetreeKitRow + ` FAIL need=run checked=python3 ` + kit + tracerNotRunText,
+				}
+			},
+			code: 3, count: "2",
 		},
 		{
 			name:  "kit present but failing to import",
-			stage: func(t *testing.T, home string) { replaceKitLink(t, home, "import tracemap_gone\n") },
+			stage: func(t *testing.T, home string) { writeKit(t, home, "import tracemap_gone\n") },
 			rows: func(kit, python string) []string {
 				return []string{
 					tracetreeKitRow + ` FAIL need=run checked=` + python + ` ` + kit +
@@ -204,11 +235,11 @@ func TestTracetreeKitDoctor(t *testing.T) {
 						`ModuleNotFoundError: No module named 'tracemap_gone'" — fix: ` + tracerFixRelinkText,
 				}
 			},
-			code: 3, failureCount: "1",
+			code: 3, count: "1",
 		},
 		{
 			name:  "kit running but printing no usage",
-			stage: func(t *testing.T, home string) { replaceKitLink(t, home, "import sys\nsys.exit(0)\n") },
+			stage: func(t *testing.T, home string) { writeKit(t, home, "import sys\nsys.exit(0)\n") },
 			rows: func(kit, python string) []string {
 				return []string{
 					tracetreeKitRow + ` FAIL need=run checked=` + python + ` ` + kit +
@@ -216,18 +247,19 @@ func TestTracetreeKitDoctor(t *testing.T) {
 						tracerFixRelinkText,
 				}
 			},
-			code: 3, failureCount: "1",
+			code: 3, count: "1",
 		},
 		{
-			name:  "kit not linked yet on a fresh home",
-			stage: removeKitLink,
+			name:  "flights plugin not enabled",
+			stage: disableFlights,
 			rows:  func(_, _ string) []string { return []string{tracerPendingRow} },
-			code:  0,
+			// The claude_plugins row warns that flights is not enabled; the kit row only says it is pending.
+			code: 1, count: "1",
 		},
 		{
-			name: "kit not linked yet and python3 absent",
+			name: "flights plugin not enabled and python3 absent",
 			stage: func(t *testing.T, home string) {
-				removeKitLink(t, home)
+				disableFlights(t, home)
 				t.Setenv("PATH", filepath.Join(home, ".local", "bin"))
 			},
 			rows: func(_, _ string) []string {
@@ -237,60 +269,42 @@ func TestTracetreeKitDoctor(t *testing.T) {
 					tracerPendingRow,
 				}
 			},
-			code: 3, failureCount: "1",
+			code: 3, count: "1",
 		},
 		{
-			name: "kit linked elsewhere than the tracer reads",
+			name: "flights plugin enabled with no folder recorded",
 			stage: func(t *testing.T, home string) {
-				elsewhere := filepath.Join(home, "elsewhere", "skills")
-				removeKitLink(t, home)
-				if err := os.MkdirAll(elsewhere, 0o755); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.Symlink(filepath.Join(home, "removed-kit"), filepath.Join(elsewhere, "tracetree")); err != nil {
-					t.Fatal(err)
-				}
-				writeSkillLinkLedger(t, home, `{"version":1,"link_dirs":["`+elsewhere+`"]}`)
+				editStoreRecord(t, home, filepath.Join("plugins", "installed_plugins.json"), func(document map[string]any) {
+					flightsKeys(document["plugins"], func(records map[string]any, key string) { delete(records, key) })
+				})
 			},
 			rows: func(kit, _ string) []string {
-				elsewhere := filepath.Join(strings.TrimSuffix(kit, "/.claude/skills/tracetree/tracetree.py"), "elsewhere", "skills", "tracetree")
+				claudeStore, _, _ := strings.Cut(kit, "/plugins/cache/")
 				return []string{
-					tracetreeKitRow + ` FAIL need=kit checked=` + kit + ` error="the install linked the tracetree kit at ` +
-						elsewhere + `, but the tracer reads ` + filepath.Dir(kit) +
-						`; the tracer cannot run on this host" — fix: pfm install --yes does not fix this: ` +
-						`link the kit at the tracer's path, or install without --config-dir`,
-					tracetreeKitRow + ` FAIL need=run checked=python3 ` + kit + tracerNotRunText,
+					tracetreeKitRow + ` FAIL need=kit checked=the flights plugin records in ` + claudeStore +
+						` error="the flights plugin is enabled but no record names its folder" — fix: ` + tracerFixKitText,
 				}
 			},
-			code: 3, failureCount: "2",
+			code: 3, count: "1",
 		},
 		{
-			name: "install records present but naming the kit nowhere",
+			name: "flights plugin records unreadable",
 			stage: func(t *testing.T, home string) {
-				removeKitLink(t, home)
-				writeSkillLinkLedger(t, home, `{"version":1,"link_dirs":["`+filepath.Join(home, ".claude", "skills")+`"]}`)
-			},
-			rows: func(_, _ string) []string { return []string{tracerPendingRow} },
-			code: 0,
-		},
-		{
-			name: "install records corrupt",
-			stage: func(t *testing.T, home string) {
-				removeKitLink(t, home)
-				writeSkillLinkLedger(t, home, "{not json")
+				path := filepath.Join(installer.ClaudeStore(home), "plugins", "known_marketplaces.json")
+				if err := os.WriteFile(path, []byte("{not json"), 0o600); err != nil {
+					t.Fatal(err)
+				}
 			},
 			rows: func(kit, _ string) []string {
-				ledger := filepath.Join(strings.TrimSuffix(kit, "/.claude/skills/tracetree/tracetree.py"),
-					".local", "share", "pfm", "install", "skill-links.json")
+				claudeStore, _, _ := strings.Cut(kit, "/plugins/cache/")
 				return []string{
-					tracetreeKitRow + ` FAIL need=kit checked=` + ledger + ` error="skill link ledger ` + ledger +
-						`: invalid character 'n' looking for beginning of object key string" — fix: repair or delete ` +
-						ledger + `, then run pfm install --yes`,
-					tracetreeKitRow + ` FAIL need=run checked=python3 ` + kit + tracerNotRunText,
+					tracetreeKitRow + ` FAIL need=kit checked=the flights plugin records in ` + claudeStore +
+						` error="parse ` + claudeStore + `/plugins/known_marketplaces.json: invalid character 'n' looking for ` +
+						`beginning of object key string" — fix: repair the file the error names, then run pfm install --yes`,
 				}
 			},
-			// The existing skill-source row fails on the same file: one failure beside the two tracetree-kit rows.
-			code: 3, failureCount: "3",
+			// The claude_plugins row fails on the same file: one failure beside the tracetree-kit row.
+			code: 3, count: "2",
 		},
 		{
 			name:  "healthy",
@@ -304,9 +318,9 @@ func TestTracetreeKitDoctor(t *testing.T) {
 		t.Run(scenario.name, func(t *testing.T) {
 			runtime := buildCleanDoctorHome(t)
 			home := runtime.Paths.Home
+			kit := healthyKit(t, home)
 			scenario.stage(t, home)
 			python, _ := exec.LookPath("python3")
-			kit := tracetreeKitPath(home)
 			recorder := &recordingRunner{Runner: deps.RealRunner{}}
 			dependencies := testDependencies()
 			dependencies.Runner = recorder
@@ -338,9 +352,12 @@ func TestTracetreeKitDoctor(t *testing.T) {
 					stderr.String(),
 				)
 			}
-			wantSummary := "doctor: failures=" + scenario.failureCount + "\n"
-			if scenario.code == 0 {
+			wantSummary := "doctor: failures=" + scenario.count + "\n"
+			switch scenario.code {
+			case 0:
 				wantSummary = "doctor: clean\n"
+			case 1:
+				wantSummary = "doctor: warnings=" + scenario.count + "\n"
 			}
 			if !strings.Contains(stdout.String(), wantSummary) {
 				t.Fatalf("summary: want %q in stdout:\n%s", wantSummary, stdout.String())
@@ -359,14 +376,14 @@ func TestTracetreeKitDoctor(t *testing.T) {
 func TestTracetreeKitDoctorTimesOut(t *testing.T) {
 	runtime := buildCleanDoctorHome(t)
 	home := runtime.Paths.Home
-	replaceKitLink(t, home, "import time\ntime.sleep(60)\n")
+	writeKit(t, home, "import time\ntime.sleep(60)\n")
 	previous := tracetreeKitBound
 	tracetreeKitBound = time.Second
 	t.Cleanup(func() { tracetreeKitBound = previous })
 	python, _ := exec.LookPath("python3")
 	var stdout, stderr bytes.Buffer
 	code := Run(nil, &stdout, &stderr, runtime, testDependencies())
-	want := tracetreeKitRow + " FAIL need=run checked=" + python + " " + tracetreeKitPath(home) +
+	want := tracetreeKitRow + " FAIL need=run checked=" + python + " " + healthyKit(t, home) +
 		` error="timed out after 1s" — fix: ` + tracerFixRelinkText
 	if rows := tracetreeKitRows(stdout.String()); !slices.Equal(rows, []string{want}) {
 		t.Fatalf("rows=%q, want %q", rows, want)

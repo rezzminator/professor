@@ -13,10 +13,13 @@
 # wave fixed and nothing else: with a baseline present it keeps only entries
 # still violating and lowers counts to today's, never adding an entry or
 # raising a count. A genuinely new exception is a hand edit to .arch/, visible
-# in review. With no baseline, --measure writes today's tree as the first one.
+# in review. With no baseline, --measure writes today's tree as the first one;
+# that is also the one sanctioned reset, for a ruled change to what a check
+# counts (a lowered ceiling): delete that .arch/<name>.txt, run --measure, and
+# record the ruling in .arch/exceptions.md.
 #
 # The checks are independent, so they run as concurrent background jobs and print
-# in the order they always have: C1 … C23, C25, C26, C27, C28, then C24 (its own script). A job
+# in the order they always have: C1 … C8, C10 … C23, C25 … C31, then C24 (its own script). A job
 # that ends without leaving its CHECK line is reported as ERROR for that check,
 # never read as PASS.
 set -uo pipefail
@@ -26,7 +29,8 @@ export LC_ALL=C
 PFM="${PFM:-$(cd "$(dirname "$0")/.." && pwd)}"
 SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
 BASE="$PFM/.arch"
-CEIL_SRC="${CEIL_SRC:-800}"; CEIL_TEST="${CEIL_TEST:-1000}"
+# A front door (C31) may be longer than the other files of its package.
+CEIL_SRC="${CEIL_SRC:-240}"; CEIL_FRONT="${CEIL_FRONT:-400}"; CEIL_TEST="${CEIL_TEST:-1000}"
 # A baselined over-ceiling file may carry CEIL_SLACK lines of move churn (an
 # import line gained when a symbol it calls moved packages); logic growth fails.
 CEIL_SLACK="${CEIL_SLACK:-5}"
@@ -52,6 +56,13 @@ grep -v '_test\.go$' "$L/all.list" > "$L/src.list"
 grep '_test\.go$' "$L/all.list" > "$L/test.list"
 [ -s "$L/src.list" ] || { say setup ERROR "no Go sources listed under $PFM — the enumerator did not run"; exit 2; }
 grep '^cmd/pfm/' "$L/src.list" > "$L/cmd.list"
+# A package's front door is the file named for its package clause, {package}.go
+# (main.go for package main): front.list holds "<dir> <front door>" per package
+# directory, front.files the front doors that exist. C1 and C31 read them.
+awk '/^package / { d = FILENAME; f = $2 ".go"; if (sub(/\/[^/]*$/, "", d)) f = d "/" f; else d = "."; print d " " f; nextfile }' \
+  $(cat "$L/src.list") | sort -u -k1,1 > "$L/front.list" || { say setup ERROR "awk could not read the package clauses"; exit 2; }
+[ -s "$L/front.list" ] || { say setup ERROR "no package clause parsed under $PFM — the enumerator did not run"; exit 2; }
+awk '{print $2}' "$L/front.list" | sort -u | comm -12 - "$L/src.list" > "$L/front.files"
 
 # g <out> <list> <grep args...>: grep over a file list; returns 2 when grep could
 # not read (rc ≥ 2), so an unreadable tree never passes as a clean one.
@@ -61,11 +72,17 @@ grep '^cmd/pfm/' "$L/src.list" > "$L/cmd.list"
 # the caller passes still wins: the later flag rules).
 g() { local out=$1 list=$2; shift 2; [ -s "$list" ] || return 2; grep -H "$@" $(cat "$list") > "$out"; [ $? -le 1 ] || return 2; }
 
-# stale_baseline <name>: the baseline's Go-file keys (an optional `kind:` prefix
-# stripped) whose file no longer exists — a ledger entry that names nothing. A
-# deleted or renamed file must leave its baseline line (--measure prunes it), so
-# a green run never passes over a ledger that points at a file that is gone.
+# stale_baseline <name> [root]: the baseline's Go-file keys (an optional `kind:`
+# prefix stripped) whose file no longer exists — a ledger entry that names
+# nothing. A deleted or renamed file must leave its baseline line (--measure
+# prunes it), so a green run never passes over a ledger that points at a file
+# that is gone. With a root, every key is a file path read under that root (C30
+# names its shell files from the repo root).
 stale_baseline() {
+  if [ -n "${2:-}" ]; then
+    awk '{print $1}' "$BASE/$1.txt" | while read -r f; do [ -e "$2/$f" ] || echo "$f"; done
+    return
+  fi
   awk '{k = $1; sub(/^[a-z0-9]+:/, "", k); if (k ~ /\.go$/) print k}' "$BASE/$1.txt" | while read -r f; do [ -e "$f" ] || echo "$f"; done
 }
 
@@ -100,11 +117,12 @@ ratchet() {
   say "$id" PASS "$(wc -l < "$cur" | tr -d ' ') baselined, 0 new$note"
 }
 
-# ratchet_counts <id> <name> <current> [slack]: lines "<key> <count>" — FAIL on a
-# key the baseline lacks or a count above the baseline's (+ slack). A count that
-# shrank passes.
+# ratchet_counts <id> <name> <current> [slack] [root]: lines "<key> <count>" —
+# FAIL on a key the baseline lacks or a count above the baseline's (+ slack). A
+# count that shrank passes. A root makes every key a file under it for the stale
+# check (stale_baseline).
 ratchet_counts() {
-  local id=$1 name=$2 cur=$3 slack=${4:-0}
+  local id=$1 name=$2 cur=$3 slack=${4:-0} root=${5:-}
   sort -u "$cur" -o "$cur"
   if [ "$MODE" = --measure ]; then
     if ! mkdir -p "$BASE"; then
@@ -124,7 +142,7 @@ ratchet_counts() {
     say "$id" MEASURE "$(awk '{s+=$2} END {print s+0}' "$BASE/$name.txt") in $(wc -l < "$BASE/$name.txt" | tr -d ' ') keys -> .arch/$name.txt"; return
   fi
   [ -f "$BASE/$name.txt" ] || { say "$id" ERROR "baseline .arch/$name.txt missing — cannot tell new from old"; return; }
-  local stale; stale=$(stale_baseline "$name")
+  local stale; stale=$(stale_baseline "$name" "$root")
   if [ -n "$stale" ]; then say "$id" FAIL "stale: $(echo "$stale" | tr '\n' ' ')— .arch/$name.txt names a file that no longer exists; run --measure"; return; fi
   local over
   over=$(awk -v slack="$slack" 'FILENAME==ARGV[1] {base[$1]=$2; next} !($1 in base) {print $1" (new "$2")"; next} $2>base[$1]+slack {print $1" ("base[$1]"->"$2")"}' "$BASE/$name.txt" "$cur")
@@ -137,9 +155,12 @@ ratchet_counts() {
 # count_by_file <raw grep -n output> → "<file> <count>"
 count_by_file() { cut -d: -f1 "$1" | sort | uniq -c | awk '{print $2" "$1}'; }
 
-# C1/C2 size ceilings: an over-ceiling file may not appear, and a listed one may not grow.
+# C1/C2 size ceilings: an over-ceiling file may not appear, and a listed one may
+# not grow. A front door's ceiling is CEIL_FRONT, every other source's CEIL_SRC.
 chk_C1() {
-  wc -l $(cat "$L/src.list") | awk -v ceil="$CEIL_SRC" '$2 != "total" && $1 > ceil {print $2" "$1}' > "$T/c1"
+  wc -l $(cat "$L/src.list") | awk -v ceil="$CEIL_SRC" -v front="$CEIL_FRONT" '
+    FILENAME == ARGV[1] { door[$1]; next }
+    $2 != "total" && $1 > (($2 in door) ? front : ceil) + 0 { print $2" "$1 }' "$L/front.files" - > "$T/c1"
   ratchet_counts C1-ceiling-src ceiling-src "$T/c1" "$CEIL_SLACK"
 }
 
@@ -226,18 +247,6 @@ chk_C7() {
 chk_C8() {
   if find internal cmd -type d \( -iname '*util*' -o -name helpers -o -name common -o -name misc -o -name shared \) > "$T/c8"; then ratchet C8-negation-dirs negation-dirs "$T/c8"
   else say C8-negation-dirs ERROR "find failed under internal/ cmd/"; fi
-}
-
-# C9 every package states what it owns in a `// Package` doc comment.
-chk_C9() {
-  awk '{sub(/\/[^/]*$/, ""); print}' "$L/src.list" | sort -u > "$T/pkgdirs"
-  if g "$T/docs.list" "$L/src.list" -l '^// Package '; then
-    awk '{sub(/\/[^/]*$/, ""); print}' "$T/docs.list" | sort -u > "$T/docdirs"
-    comm -23 "$T/pkgdirs" "$T/docdirs" > "$T/c9"
-    ratchet C9-package-doc no-package-doc "$T/c9"
-  else
-    say C9-package-doc ERROR "grep could not read sources"
-  fi
 }
 
 # C10 MCP reaches chat verbs through typed calls, never argv into package main,
@@ -558,6 +567,107 @@ chk_C28() {
   else say C28-signal-door ERROR "grep could not read sources"; fi
 }
 
+# C29 one door per OS operation: an OS difference lives inside its door
+# (internal/{deps,servicemanager,gather,paths,atomicfile}); internal/mockengine,
+# internal/hostfixture and cmd/mock-engine build fake proc trees and scripted
+# platform commands, so they are skipped too. Elsewhere, in an untagged
+# production file, a line that reads or compares the OS name, reads /proc or a
+# cgroup, or names a one-OS command counts; the one-OS commands are every
+# internal/deps/registry.go Name whose Platforms list holds exactly one
+# element, derived here so the list never drifts from the registry. A file
+# selected by OS (an _{os}.go name or a //go:build line naming an OS) counts 1.
+# Count per file, only shrinks; each baselined entry carries its reason in
+# .arch/exceptions.md.
+chk_C29() {
+  local registry=internal/deps/registry.go names
+  if ! names=$(awk '
+      /^[[:space:]]*Name:[[:space:]]*"/ { n = $0; sub(/^[^"]*"/, "", n); sub(/".*/, "", n); next }
+      /^[[:space:]]*Name:/ { n = ""; next }
+      /Platforms:/ && n != "" { p = $0; sub(/.*\{/, "", p); sub(/\}.*/, "", p); if (p !~ /,/ && p ~ /[^[:space:]]/) print n; n = "" }
+    ' "$registry" | paste -sd'|' -); then
+    say C29-os-door ERROR "could not read $registry"; return
+  fi
+  [ -n "$names" ] || { say C29-os-door ERROR "no one-platform command derived from $registry — the enumerator did not run"; return; }
+  grep -vE '^internal/(deps|servicemanager|gather|paths|atomicfile|mockengine|hostfixture)/|^cmd/mock-engine/' "$L/src.list" > "$T/nodoor.list"
+  [ -s "$T/nodoor.list" ] || { say C29-os-door ERROR "no production sources outside the doors listed — the enumerator did not run"; return; }
+  # A //go:build line counts only before the package clause, where Go reads it.
+  if ! awk '
+      FNR == 1 && FILENAME ~ /_(linux|darwin|other|bsd|unix|windows)\.go$/ { print FILENAME; nextfile }
+      /^package / { nextfile }
+      /^\/\/go:build/ { if ($0 ~ /(^|[^A-Za-z0-9_])(linux|darwin|windows|freebsd|openbsd|netbsd|dragonfly|solaris|unix|bsd)([^A-Za-z0-9_]|$)/) print FILENAME; nextfile }
+    ' $(cat "$T/nodoor.list") > "$T/tagged.raw"; then
+    say C29-os-door ERROR "awk could not read the build constraints"; return
+  fi
+  sort -u "$T/tagged.raw" > "$T/tagged.list"
+  comm -23 "$T/nodoor.list" "$T/tagged.list" > "$T/untagged.list"
+  local os='\bruntime\.GOOS\b|(==|!=)[[:space:]]*"(darwin|linux)"|"(darwin|linux)"[[:space:]]*(==|!=)|case[[:space:]]+"(darwin|linux)"'
+  local proc='"/proc\b|"/sys/fs/cgroup|\bpaths\.(SystemProcRoot|ProcRootOr)\b|Join\(.*,[[:space:]]*"(stat|statm|status|cmdline|environ|exe|fd|fdinfo|cgroup|meminfo|loadavg|uptime|mountinfo)"\)|"net",[[:space:]]*"unix"'
+  if g "$T/raw" "$T/untagged.list" -nE "$os|$proc|\"($names)\""; then
+    { count_by_file "$T/raw"; awk '{print $1" 1"}' "$T/tagged.list"; } > "$T/c29"; ratchet_counts C29-os-door os-door "$T/c29"
+  else say C29-os-door ERROR "grep could not read sources"; fi
+}
+
+# C30 one shell door per OS operation: scripts/platform.sh is the door, and a
+# non-comment line elsewhere in scripts/, .claude/scripts/, pfm/scripts/ or
+# pfm/Makefile that branches on the OS name or names a one-OS or GNU/BSD-split
+# tool counts. Tests (_test.sh, test-*.sh) stub those tools, and this script
+# names them, so neither is read. Files are named from the repo root. Count per
+# file, only shrinks; each baselined entry carries its reason in
+# .arch/exceptions.md.
+chk_C30() {
+  if ! (cd .. && shopt -s nullglob && for f in scripts/*.sh .claude/scripts/*.sh pfm/scripts/*.sh pfm/Makefile; do if [ -f "$f" ]; then echo "$f"; fi; done) > "$T/shell.raw"; then
+    say C30-shell-platform ERROR "could not list the shell sources under $PFM/.."; return
+  fi
+  grep -vE '(^|/)[^/]*_test\.sh$|(^|/)test-[^/]*\.sh$|^scripts/platform\.sh$|^pfm/scripts/arch-check\.sh$' "$T/shell.raw" | sort -u > "$T/shell.list"
+  local pattern='\buname\b|\$OSTYPE|\bDarwin\b|\bsha256sum\b|\bshasum\b|\bstat[[:space:]]+-[cf]\b|\bnproc\b|\bgetconf\b|\bsysctl\b|\blaunchctl\b|\bsystemctl\b|\bjournalctl\b|\bpgrep\b|\bpkill\b'
+  if (cd .. && g "$T/raw" "$T/shell.list" -nE "$pattern"); then
+    grep -vE '^[^:]+:[0-9]+:[[:space:]]*#' "$T/raw" > "$T/code"
+    count_by_file "$T/code" > "$T/c30"; ratchet_counts C30-shell-platform shell-platform "$T/c30" 0 ..
+  else say C30-shell-platform ERROR "no shell sources listed under $PFM/.., or grep could not read them"; fi
+}
+
+# C31 every package has a front door whose menu names its files: the front door
+# ($L/front.list) opens with the `// Package` doc comment, the comment block
+# directly above its package clause, and that block names every other non-test
+# file of the package by its base name. Counted per package directory: 1 when
+# the front door is missing or has no package doc, plus 1 per file its menu does
+# not name, so a baselined package that gains an unnamed file grows its count
+# and FAILs. It holds the package-doc rule (formerly C9) too: no doc counts 1.
+chk_C31() {
+  # shellcheck disable=SC2016 # the awk program is single-quoted on purpose
+  if ! awk '
+      # named: text names the file name as a whole word, not inside a longer one.
+      function named(text, name,   i) {
+        while ((i = index(text, name)) > 0) {
+          if (substr(text, i - 1, 1) !~ /[A-Za-z0-9_.\/-]/ && substr(text, i + length(name), 1) !~ /[A-Za-z0-9_]/) return 1
+          text = substr(text, i + 1)
+        }
+        return 0
+      }
+      FILENAME == ARGV[1] { front[$1] = $2; isfront[$2]; next }
+      FILENAME == ARGV[2] {
+        if ($0 in isfront) next
+        d = $0; b = $0; if (!sub(/\/[^/]*$/, "", d)) d = "."; sub(/.*\//, "", b)
+        others[d] = others[d] SUBSEP b; next
+      }
+      FNR == 1 { block = "" }
+      /^\/\// { block = block "\n" $0; next }
+      /^package / { doc[FILENAME] = block; nextfile }
+      { block = "" }
+      END {
+        for (d in front) {
+          text = doc[front[d]]; n = (text ~ /^\n\/\/ Package /) ? 0 : 1
+          c = split(others[d], files, SUBSEP)
+          for (i = 1; i <= c; i++) if (files[i] != "" && !named(text, files[i])) n++
+          if (n) print d " " n
+        }
+      }
+    ' "$L/front.list" "$L/src.list" $(cat "$L/front.files") > "$T/c31"; then
+    say C31-front-door ERROR "awk could not read the front doors"; return
+  fi
+  ratchet_counts C31-front-door front-door "$T/c31"
+}
+
 # C24 lives in its own script; its exit status (0 PASS · 1 FAIL · 2 ERROR) joins the
 # maximum below, and the status file is how the job hands it over.
 chk_C24() { bash "$PFM/scripts/arch-c24.sh" "$MODE"; echo $? > "$L/jobs/C24.status"; }
@@ -573,11 +683,11 @@ job() { # job <CHECK id>: run chk_<the id up to its first dash> in the backgroun
   IDS+=("$id"); PIDS+=("$!")
 }
 for id in C1-ceiling-src C2-ceiling-test C3-cmd-budget C4-cmd-primitives C5-tmux-runner \
-  C6-atomic-write C7-sql-open C8-negation-dirs C9-package-doc C10-mcp-argv C11-db-names \
+  C6-atomic-write C7-sql-open C8-negation-dirs C10-mcp-argv C11-db-names \
   C12-claude-pointers C13-test-mirror C14-usage-parity C15-internal-usage \
   C16-env-outside-paths C17-dup-functions C18-engine-spellings C19-env-namespace \
   C20-codex-home C21-test-jail C22-host-doors C23-bare-log C25-testmain-jail C26-exec-write C27-identity-env \
-  C28-signal-door C24-unwrapped-door; do
+  C28-signal-door C29-os-door C30-shell-platform C31-front-door C24-unwrapped-door; do
   job "$id"
 done
 

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/rezzminator/professor/pfm/internal/claudeplugin"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
@@ -28,7 +29,7 @@ type claudePluginCache struct {
 	record      string
 	want        string
 	unversioned bool
-	behind      []claudePluginInstall
+	behind      []claudeplugin.Install
 }
 
 // readClaudePluginCache reads target's install record entries in configDir.
@@ -37,7 +38,7 @@ func readClaudePluginCache(configDir string, target ClaudePluginTarget) (claudeP
 		target: target,
 		record: filepath.Join(configDir, "plugins", "installed_plugins.json"),
 	}
-	record, err := readClaudePluginInstalls(configDir)
+	record, err := claudeplugin.ReadInstalls(configDir)
 	entries := record[target.ID]
 	if err != nil || len(entries) == 0 {
 		return cache, err
@@ -50,7 +51,7 @@ func readClaudePluginCache(configDir string, target ClaudePluginTarget) (claudeP
 		return cache, nil
 	}
 	for _, entry := range entries {
-		if entry.version() != cache.want {
+		if entry.Version != cache.want {
 			cache.behind = append(cache.behind, entry)
 		}
 	}
@@ -59,13 +60,13 @@ func readClaudePluginCache(configDir string, target ClaudePluginTarget) (claudeP
 
 // behindGap names an entry recording a version other than the checkout's,
 // with the repair updateDir names for an entry pfm cannot move.
-func (cache claudePluginCache) behindGap(entry claudePluginInstall) ClaudePluginGap {
+func (cache claudePluginCache) behindGap(entry claudeplugin.Install) ClaudePluginGap {
 	scope := "scope " + EscapeControl(entry.Scope)
 	if entry.ProjectPath != "" {
 		scope += " " + EscapeControl(entry.ProjectPath)
 	}
-	recorded := "version " + EscapeControl(entry.version())
-	if entry.version() == "" {
+	recorded := "version " + EscapeControl(entry.Version)
+	if entry.Version == "" {
 		recorded = "no version string"
 	}
 	gap := ClaudePluginGap{
@@ -125,7 +126,7 @@ func ClaudePluginCacheGaps(configDir string, targets []ClaudePluginTarget) ([]Cl
 
 // updateDir is the working directory `claude plugin update --scope` moves
 // entry from (claudePluginScopeDir).
-func (cache claudePluginCache) updateDir(entry claudePluginInstall) (dir, repair string) {
+func (cache claudePluginCache) updateDir(entry claudeplugin.Install) (dir, repair string) {
 	return claudePluginScopeDir(cache.target.ID, "update", entry)
 }
 
@@ -134,7 +135,7 @@ func (cache claudePluginCache) updateDir(entry claudePluginInstall) (dir, repair
 // project or local one. An entry pfm cannot reach — a project that is not an
 // absolute directory, a scope the command does not take — returns the repair
 // the user runs instead.
-func claudePluginScopeDir(id, verb string, entry claudePluginInstall) (dir, repair string) {
+func claudePluginScopeDir(id, verb string, entry claudeplugin.Install) (dir, repair string) {
 	switch entry.Scope {
 	case "user":
 		return "", ""
@@ -165,8 +166,8 @@ func (installer *engine) updateClaudePluginEntries(
 	ctx context.Context,
 	run *claudePluginRun,
 	id string,
-	entries []claudePluginInstall,
-	why func(claudePluginInstall) string,
+	entries []claudeplugin.Install,
+	why func(claudeplugin.Install) string,
 ) (map[[2]string]bool, []error) {
 	var failures []error
 	moved := map[[2]string]bool{}
@@ -226,7 +227,7 @@ func (installer *engine) ensureClaudePluginCache(
 			cache.behindGap(cache.behind[0]).Problem, run.resolveErr)
 	}
 	moved, failures := installer.updateClaudePluginEntries(ctx, run, target.ID, cache.behind,
-		func(entry claudePluginInstall) string { return cache.behindGap(entry).Problem })
+		func(entry claudeplugin.Install) string { return cache.behindGap(entry).Problem })
 	if !installer.apply {
 		return errors.Join(failures...)
 	}

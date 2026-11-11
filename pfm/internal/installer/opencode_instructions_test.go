@@ -243,7 +243,6 @@ func TestOpenCodeInstructionsOtherClones(t *testing.T) {
 			composed := filepath.Join(clone, "pfm", "harness-prompts", "generated", "opencode.md")
 			entries := []string{
 				"/srv/old-clone/pfm/harness-prompts/generated/opencode.md",
-				filepath.Join(home, ".local", "share", "pfm", "install", "harness-prompts", "opencode.md"),
 				"./house-rules.md",
 			}
 			want := []string{composed, entries[0], "./house-rules.md"}

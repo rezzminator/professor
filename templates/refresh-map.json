@@ -2,7 +2,7 @@
   "_comment": [
     "refresh-map.json \u2014 template \u2192 live-source map with the SHA-256 of each live source as of the last sync.",
     "Consumed by scripts/refresh-scope.sh (scan = incremental refresh scope; regen = re-baseline at the refresh pass's end).",
-    "Template keys are relative to templates/, every key carrying its scope prefix \u2014 project/ (per-install templates) or global/ (machine-global originals). curated: true = hand-curated, no live source (the global reviewer/tracer/rr originals are curated; other globals still refresh from their live sources). Source paths are relative to the source project root: the live project the refresh pass names, never this clone's same-named files; each SHA-256 is that project's file as of the last sync, and a hand-authored template edit is no sync and restamps nothing;",
+    "Template keys are relative to templates/, every key carrying its scope prefix \u2014 project/ (per-install templates) or global/ (machine-global originals). curated: true = hand-curated, no live source (the global rr originals are curated; other globals still refresh from their live sources). Source paths are relative to the source project root: the live project the refresh pass names, never this clone's same-named files; each SHA-256 is that project's file as of the last sync, and a hand-authored template edit is no sync and restamps nothing;",
     "{project:ROLE} tokens resolve via the project's .professor/manifest.json .interview.projects[ROLE]; leading ~/ resolves to $HOME (host-level sources).",
     "curated: true = hand-curated template with no live source \u2014 never auto-derived.",
     "Multi-source entries list every live file whose change forces re-derivation (representative-pattern templates).",
@@ -37,31 +37,16 @@
     "global/agents/documenter.md": {
       "curated": true
     },
-    "global/agents/flights-foreman-sonnet.md": {
-      "curated": true
-    },
-    "global/agents/reviewer-nt.md": {
-      "curated": true
-    },
     "global/agents/rr-pro-max.md": {
       "curated": true
     },
     "global/agents/rr-pro.md": {
       "curated": true
     },
-    "global/agents/reviewer-pro.md": {
-      "curated": true
-    },
-    "global/agents/reviewer.md": {
-      "curated": true
-    },
     "global/agents/rr.md": {
       "curated": true
     },
     "global/agents/clone-distiller.md": {
-      "curated": true
-    },
-    "global/agents/tracer.md": {
       "curated": true
     },
     "global/agents/imaginator.md": {
@@ -82,9 +67,6 @@
     "global/commands/imagine.md": {
       "curated": true
     },
-    "global/commands/iterative-improvement.md": {
-      "curated": true
-    },
     "global/commands/live-audit.md": {
       "curated": true
     },
@@ -97,28 +79,37 @@
     "global/commands/pfm/workbench.md": {
       "curated": true
     },
-    "global/commands/quality/claude-md.md": {
+    "global/commands/token-saving-mode.md": {
       "curated": true
     },
-    "global/commands/quality/description.md": {
+    "global/commands/claude-md/use.md": {
       "curated": true
     },
-    "global/commands/quality/doc.md": {
+    "global/commands/description/use.md": {
       "curated": true
     },
-    "global/commands/quality/integration-suite.md": {
+    "global/commands/doc/use.md": {
       "curated": true
     },
-    "global/commands/quality/llm-codebase.md": {
+    "global/commands/integration-suite/use.md": {
       "curated": true
     },
-    "global/commands/quality/md-forlint.md": {
+    "global/commands/llm-codebase/use.md": {
       "curated": true
     },
-    "global/commands/quality/prompt.md": {
+    "global/commands/md-forlint/use.md": {
       "curated": true
     },
-    "global/commands/quality/rules.md": {
+    "global/commands/prompt/use.md": {
+      "curated": true
+    },
+    "global/commands/rules/use.md": {
+      "curated": true
+    },
+    "global/commands/agent/use.md": {
+      "curated": true
+    },
+    "global/commands/iterative-improvement/use.md": {
       "curated": true
     },
     "global/commands/use/mods-builder.md": {
@@ -133,7 +124,7 @@
     "global/skills/chatlog/SKILL.md": {
       "curated": true
     },
-    "global/skills/done-herewith/SKILL.md": {
+    "global/skills/close-out/SKILL.md": {
       "curated": true
     },
     "global/skills/context-audit/SKILL.md": {
@@ -206,6 +197,9 @@
       "curated": true
     },
     "project/epics/TEMPLATE.md": {
+      "curated": true
+    },
+    "project/rules/git-writes-through-gitter.md": {
       "curated": true
     },
     "project/rumdl-policy.toml": {
@@ -313,6 +307,15 @@
       "curated": true
     },
     "global/pcm/audit-scopes.md": {
+      "curated": true
+    },
+    "global/plugin-ci/README.md": {
+      "curated": true
+    },
+    "global/plugin-ci/ci.yml": {
+      "curated": true
+    },
+    "global/plugin-ci/publish.yml": {
       "curated": true
     }
   }

@@ -148,6 +148,10 @@ func (service *Service) chatNew(
 		}
 		directory = filepath.Join(self.CWD, directory)
 	} else if directory == "" && caller.valid {
+		if strings.TrimSpace(self.CWD) == "" {
+			// Without --cwd the CLI would start the chat in this server's own directory.
+			return nil, ActionOutput{}, fmt.Errorf("new: caller working directory is unknown: pass an absolute cwd")
+		}
 		directory = self.CWD
 	}
 	var nameClaim chat.NameReservation
@@ -206,14 +210,19 @@ func (service *Service) chatNew(
 		}()
 	}
 	args := []string{chatCommand, "new", "--name", input.Name}
+	benchNote := ""
 	if input.Engine != "" {
 		args = append(args, "--engine", input.Engine)
 	} else if caller.valid && caller.row.Engine != "" {
 		bench, found, err := workbench.Nearest(directory)
 		if err != nil {
-			return nil, ActionOutput{}, fmt.Errorf("new: resolve workbench: %w", err)
+			benchNote = fmt.Sprintf(
+				"workbench lookup failed, so the caller's engine %s was kept: %v",
+				caller.row.Engine,
+				err,
+			)
 		}
-		if !found || bench.Err != nil || bench.Enables(caller.row.Engine) {
+		if err != nil || !found || bench.Err != nil || bench.Enables(caller.row.Engine) {
 			args = append(args, "--engine", string(caller.row.Engine))
 		}
 	}
@@ -259,6 +268,9 @@ func (service *Service) chatNew(
 	result, output, returnErr = service.cliAction(ctx, args...)
 	if returnErr == nil && output.Code == 0 && errors.Is(callerErr, resolve.ErrNotRegistered) {
 		output.Message = "caller seat not registered yet; born in a new tab of its place's Herdr workspace"
+	}
+	if benchNote != "" {
+		output.Message = strings.TrimSpace(output.Message + "\n" + benchNote)
 	}
 	if nameClaim.Name != "" && returnErr == nil && output.Code == 0 {
 		if commitErr := nameClaim.Commit(); commitErr != nil {

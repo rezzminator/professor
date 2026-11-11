@@ -20,14 +20,14 @@ const (
 	fenceLauncher = ".claude/scripts/dev.sh"
 )
 
-func inFence() bool {
-	_, err := os.Stat(fenceMarker)
-	return err == nil && paths.OSEnv{}.Get(paths.EnvDevFence) == "1"
-}
-
-func onHostedRunner() bool {
-	env := paths.OSEnv{}
-	return env.Get("GITHUB_ACTIONS") == "true" && env.Get("RUNNER_ENVIRONMENT") == "github-hosted"
+// admitted is the one decision whether a suite may run here: PFM_DEV_FENCE=1 inside a container
+// (marker present), or a GitHub-hosted runner. scripts/platform.sh's platform_in_fence applies
+// the same rule for the shell.
+func admitted(env paths.Env, marker string) bool {
+	_, err := os.Stat(marker)
+	inFence := err == nil && env.Get(paths.EnvDevFence) == "1"
+	onHostedRunner := env.Get("GITHUB_ACTIONS") == "true" && env.Get("RUNNER_ENVIRONMENT") == "github-hosted"
+	return inFence || onHostedRunner
 }
 
 // hostPathFlags name files on the starting machine, which the fence cannot see.

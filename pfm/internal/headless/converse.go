@@ -158,6 +158,7 @@ func Await(
 	var chat Chat
 	found := false
 	resolvedAt := time.Time{}
+	resolveFailures := 0
 	for {
 		if err := ctx.Err(); err != nil {
 			return finish(turn, answers, start, options.Now()), err
@@ -166,16 +167,35 @@ func Await(
 		// They run on different clocks so a wait can watch the transcript
 		// closely without re-scanning the fleet several times a second — on a
 		// loaded box that cost lands on every other chat too.
+		// One failed fleet scan is no news of the chat: the last lookup holds
+		// and the next poll retries, until UnreadablePolls fail in a row.
 		if resolvedAt.IsZero() || options.Now().Sub(resolvedAt) >= options.ResolveEvery {
-			var err error
-			chat, found, err = resolve(ctx)
-			if err != nil {
-				if errors.Is(err, ErrTrustDialog) {
-					turn.Name, turn.Engine, turn.State = chat.Name, string(chat.Engine), StateBlocked
-				}
+			resolved, resolvedFound, err := resolve(ctx)
+			switch {
+			case errors.Is(err, ErrTrustDialog):
+				turn.Name, turn.Engine, turn.State = resolved.Name, string(resolved.Engine), StateBlocked
 				return finish(turn, answers, start, options.Now()), err
+			case err != nil:
+				resolveFailures++
+				if resolveFailures >= UnreadablePolls {
+					return finish(turn, answers, start, options.Now()),
+						fmt.Errorf("chat lookup failed %d times in a row: %w", resolveFailures, err)
+				}
+				obs.Logger(ctx).Warn(
+					"await: chat lookup failed; keeping the last one and retrying",
+					"failures", resolveFailures,
+					obs.FieldErr, err.Error(),
+				)
+				if resolvedAt.IsZero() {
+					if err := waitForNextPoll(ctx, options.Clock, options.Poll); err != nil {
+						return finish(turn, answers, start, options.Now()), err
+					}
+					continue
+				}
+			default:
+				chat, found, resolveFailures = resolved, resolvedFound, 0
+				resolvedAt = options.Now()
 			}
-			resolvedAt = options.Now()
 		}
 		if !found {
 			if options.Now().Sub(start) >= options.Grace {
@@ -261,10 +281,7 @@ func Await(
 			assistantAnswered(newestRole) &&
 			options.Now().Sub(quietSince) >= options.Settle
 		if answered && chat.Engine == pfmengine.Codex {
-			open, err := codexTurn.open(path, offset)
-			if err != nil {
-				return finish(turn, answers, start, options.Now()), err
-			}
+			open, _ := codexTurn.open(ctx, path, offset)
 			answered = !open
 		}
 		if answered {
@@ -300,16 +317,23 @@ type codexTurnRead struct {
 // the end-record rule Inspect applies (applyCodexTurnRecord). Codex writes
 // assistant commentary between the tool calls of one turn, so a quiet gap
 // after it is not an answer until a task_complete or a turn_aborted lands. A
-// rollout holding no turn record keeps the newest-entry rule.
-func (read *codexTurnRead) open(path string, offset int64) (bool, error) {
+// rollout holding no turn record keeps the newest-entry rule, and so does one
+// whose turn records cannot be read (logged, read false): the answer is
+// already in hand, though no turn record proved it whole.
+func (read *codexTurnRead) open(ctx context.Context, path string, offset int64) (open, readOK bool) {
 	if read.at != offset {
 		meta, err := transcript.ReadMeta(path, string(pfmengine.Codex))
 		if err != nil {
-			return false, fmt.Errorf("read Codex turn records %s: %w", path, err)
+			obs.Logger(ctx).Warn(
+				"await: Codex turn records could not be read; the newest entry decides",
+				"path", path,
+				obs.FieldErr, err.Error(),
+			)
+			return false, false
 		}
 		read.at, read.state = offset, meta.CodexTurn
 	}
-	return read.state == transcript.CodexTurnOpen, nil
+	return read.state == transcript.CodexTurnOpen, true
 }
 
 // Frontier is the transcript offset to record before speaking.

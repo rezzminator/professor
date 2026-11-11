@@ -420,6 +420,19 @@ func endHerdrSteps(ctx context.Context, chat headless.Chat, values paths.Values,
 			"pane.close",
 			map[string]string{nativePaneIDKey: seat.HerdrPane},
 		)
+		if err == nil {
+			// An ack pfm cannot read is a failed close: whether the pane went is
+			// then confirmed from Herdr's terminal list, as after a refused close.
+			var ack struct {
+				Type string `json:"type"`
+				Pane string `json:"pane_id"`
+			}
+			if decodeErr := json.Unmarshal(body, &ack); decodeErr != nil {
+				err = fmt.Errorf("decode Herdr pane close: %w", decodeErr)
+			} else if ack.Type != "ok" && (ack.Type != "pane_closed" || ack.Pane != seat.HerdrPane) {
+				err = fmt.Errorf("unexpected Herdr pane close acknowledgement: %s", body)
+			}
+		}
 		if err != nil {
 			endStep(steps, "pane.close failed: %v", err)
 			absent, confirmErr := endedTerminalAbsent(ctx, seat, values)
@@ -432,16 +445,6 @@ func endHerdrSteps(ctx context.Context, chat headless.Chat, values paths.Values,
 			}
 			endStep(steps, "terminal absent confirmed after the close failure")
 		} else {
-			var ack struct {
-				Type string `json:"type"`
-				Pane string `json:"pane_id"`
-			}
-			if err := json.Unmarshal(body, &ack); err != nil {
-				return fmt.Errorf("decode Herdr pane close: %w", err)
-			}
-			if ack.Type != "ok" && (ack.Type != "pane_closed" || ack.Pane != seat.HerdrPane) {
-				return fmt.Errorf("unexpected Herdr pane close acknowledgement: %s", body)
-			}
 			endStep(steps, "pane.close acknowledged")
 		}
 	}
@@ -469,8 +472,8 @@ func endHerdrSteps(ctx context.Context, chat headless.Chat, values paths.Values,
 		}
 	}
 	// Before the seat row goes, so a failure here leaves the seat retryable.
-	if err := herdr.RemoveReloadFiles(values.SIDDir, seat.SeatID); err != nil {
-		return fmt.Errorf("remove ended seat reload files: %w", err)
+	if err := herdr.RemoveReloadRecord(values.SIDDir, seat.SeatID); err != nil {
+		return fmt.Errorf("remove ended seat reload record: %w", err)
 	}
 	if preserve {
 		before := seat

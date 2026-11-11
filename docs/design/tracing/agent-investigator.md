@@ -60,7 +60,7 @@ An uncapped investigation once fanned out to 17 agents three levels deep in 13 m
 
 ## Bench
 
-Run on real transcripts on this host: a `tracer` audit, a 56 MB main chat (digest 904 KB, split into four reader ranges in 10 s) for its user corrections, and a 5.6 MB `flights-foreman` run audited end to end — 41 calls, 11 minutes, every finding cited by transcript line and every reader row verified.
+Run on real transcripts on this host: a `flights:tracer` audit, a 56 MB main chat (digest 904 KB, split into four reader ranges in 10 s) for its user corrections, and a 5.6 MB `flights:foreman` run audited end to end — 41 calls, 11 minutes, every finding cited by transcript line and every reader row verified.
 
 ## Surfaces that stay in sync
 

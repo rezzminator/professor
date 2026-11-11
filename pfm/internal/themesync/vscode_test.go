@@ -67,6 +67,43 @@ func TestVscodeAckPublicationFailureOverridesSameGenerationSuccess(t *testing.T)
 	wantVerdict(t, h.status(), surfaceVscode, VerdictError, "ACK mutex")
 }
 
+// A failure record that cannot be parsed, or that names no error, never takes the
+// extension's ack with it: the unreadable one is skipped and named in the row, an
+// older generation's one is ignored whatever it holds, and one for the current
+// generation with no error text still fails the row.
+func TestVscodeAckFailureRecordsThatCannotBeReadCostOnlyThemselves(t *testing.T) {
+	h := newHarness(t)
+	report := h.on()
+	h.ackVscode(report.Generation)
+	dir := filepath.Join(h.stateDir, "vscode-ack-failures")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	torn := filepath.Join(dir, "torn.json")
+	if err := os.WriteFile(torn, []byte(`{"generation":`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	wantVerdict(t, h.status(), surfaceVscode, VerdictInSync,
+		"acknowledgement failure "+torn+" unreadable, skipped: unexpected end of JSON input")
+	session := newSession(h.env, stateStore{dir: h.stateDir}, h.state())
+	session.state.LastFlip = &Flip{At: time.Now().Format(time.RFC3339Nano)}
+	if flip := session.flipWithAck(); flip == nil || flip.Ack != nil {
+		t.Errorf("flipWithAck() = %+v, want no ack offset past an unreadable failure record", flip)
+	}
+	older := fmt.Sprintf(`{"generation":%d,"error":""}`, report.Generation-1)
+	if err := os.WriteFile(filepath.Join(dir, "older.json"), []byte(older), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	wantVerdict(t, h.status(), surfaceVscode, VerdictInSync, "unreadable, skipped")
+	current := fmt.Sprintf(`{"generation":%d,"target":"global","error":""}`, report.Generation)
+	failure := filepath.Join(dir, "current.json")
+	if err := os.WriteFile(failure, []byte(current), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	wantVerdict(t, h.status(), surfaceVscode, VerdictError,
+		"acknowledgement publication "+failure+" (global): no error text recorded")
+}
+
 func TestVscodeContractKeysAndValues(t *testing.T) {
 	applied := tokyoNightApplied(t)
 	contract := applied.vscodeContract(Dark, 4)
@@ -274,7 +311,7 @@ func TestVscodeVerdictJudgesWindowChrome(t *testing.T) {
 func TestVscodeChromeOfAGoneWorkspaceNoLongerCounts(t *testing.T) {
 	h := newHarness(t)
 	h.on()
-	h.psVscode = "/Applications/Visual Studio Code.app/Contents/MacOS/Electron\n"
+	h.processes = [][]string{{"/Applications/Visual Studio Code.app/Contents/MacOS/Electron"}}
 	h.rearm()
 	present := h.path("work/kept.code-workspace")
 	h.write("work/kept.code-workspace", "{}\n")
@@ -526,7 +563,7 @@ func TestShippedProfileFramesUseOnlyTheirDefinedColors(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			tokens, side := customPalette(profile.Base, profile.Overrides)
+			tokens, side, _ := customPalette(profile.Base, profile.Overrides)
 			variant, err := deriveVariant(CustomValue(entry.Name()), tokens)
 			if err != nil {
 				t.Fatal(err)

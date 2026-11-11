@@ -337,9 +337,13 @@ func (installer *engine) removeOwnedTheme(
 // absolute paths, sorted.
 func SourceProfiles(sourceRepo string) ([]string, error) {
 	directory := filepath.Join(sourceRepo, filepath.FromSlash(themeProfilesRelative))
-	names, err := localProfileDirs(directory)
+	names, refused, err := localProfileDirs(directory)
 	if err != nil {
 		return nil, err
+	}
+	// A check names every entry that is no theme, where an install skips it.
+	if len(refused) != 0 {
+		return nil, errors.Join(refused...)
 	}
 	paths := make([]string, 0, len(names))
 	for _, name := range names {

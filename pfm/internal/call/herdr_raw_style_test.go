@@ -12,6 +12,10 @@ type herdrRawCase struct {
 	id                                            pfmengine.ID
 	wantCode                                      int
 	wantTyped                                     bool
+	// promptRefusal is Herdr's refusal of agent.prompt to a ready agent;
+	// shieldForeground makes herdr-shield's attach client the pane's foreground then.
+	promptRefusal    string
+	shieldForeground bool
 }
 
 // herdrRawStyleCases are TestHerdrCallRaw's styled-capture rows: a dim placeholder

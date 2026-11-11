@@ -119,9 +119,6 @@ func OpenContext(ctx context.Context, options ...OpenOption) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := fleetdb.CheckLegacyState(resolved); err != nil {
-		return nil, err
-	}
 
 	info, statErr := os.Stat(resolved.CacheDB)
 	if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
@@ -154,19 +151,11 @@ func OpenContext(ctx context.Context, options ...OpenOption) (*Store, error) {
 	return store, nil
 }
 
-// resolveOpen resolves both database paths and the open settings, refusing
-// while the legacy cache file waits for pfm doctor's fix. The state pair is
-// the caller's: OpenContext refuses on it before anything opens, and
-// OpenWithoutMigrating carries it in SharedDegraded so doctor reads past it.
+// resolveOpen resolves both database paths and the open settings.
 func resolveOpen(options []OpenOption) (paths.Values, openOptions, error) {
 	resolved, err := pfmconfig.ResolvePaths()
 	if err != nil {
 		return paths.Values{}, openOptions{}, fmt.Errorf("resolve store paths: %w", err)
-	}
-	if resolved.Home != "" {
-		if err := paths.CheckLegacyPending(resolved.CacheDB, paths.LegacyCacheDB(resolved.Home)); err != nil {
-			return paths.Values{}, openOptions{}, err
-		}
 	}
 	settings := openOptions{warn: os.Stderr, clock: clock.Real}
 	for _, option := range options {
@@ -252,7 +241,7 @@ func (s *Store) migrate(ctx context.Context, existed bool) (returnErr error) {
 			}
 		}
 		if version < 2 {
-			if err := migrateCodexLineageKills(ctx, tx); err != nil {
+			if err := s.migrateCodexLineageKills(ctx, tx); err != nil {
 				return fmt.Errorf("migrate Codex lineage kills: %w", err)
 			}
 		}
@@ -363,8 +352,15 @@ func (s *Store) adoptLocalKills(ctx context.Context) error {
 		var id string
 		var killedAt int64
 		if err := rows.Scan(&id, &killedAt); err != nil {
-			_ = rows.Close()
-			return fmt.Errorf("scan kill awaiting adoption: %w", err)
+			// The kill is the operator's decision: a row whose id still reads is
+			// adopted with its time unknown, so migration 9 never drops it unread.
+			var at any
+			if rows.Scan(&id, &at) != nil || id == "" {
+				s.warningf("WARNING: pfm skipped a kill with no readable chat id in %s: %v\n", s.path, err)
+				continue
+			}
+			s.warningf("WARNING: pfm adopted the kill of %q from %s with its time unknown: %v\n", id, s.path, err)
+			killedAt = 0
 		}
 		adopted[id] = killedAt
 	}

@@ -292,18 +292,14 @@ func TestNativeReadFailurePreservesLiveTmuxSnapshot(t *testing.T) {
 		},
 		ClaudeProcesses: []gather.ClaudeProcess{{Socket: "cc-1-2-3"}},
 	}
-	output, failures, err := composeNativeFleet(
+	output, failures := composeNativeFleet(
 		context.Background(),
 		nil,
 		environment,
-		compose.DefaultView,
+		Request{View: compose.DefaultView, ReadOnly: true},
 		data,
 		live,
-		true,
 	)
-	if err != nil {
-		t.Fatalf("native DB failure discarded healthy live snapshot: %v", err)
-	}
 	if len(failures) != 1 || !strings.Contains(failures[0], "durable seats") {
 		t.Fatalf("native DB failure not explicit beside live snapshot: %v", failures)
 	}
@@ -317,6 +313,35 @@ func TestNativeReadFailurePreservesLiveTmuxSnapshot(t *testing.T) {
 		}
 	}
 	t.Fatalf("native DB error omitted healthy live tmux row: %+v", output.Rows)
+}
+
+// One seat whose store read fails must cost only that seat's enrichment: the
+// loaded rows and every other seat survive, and the error names the seat.
+func TestEnrichNativeKeepsTheDataPastAnUnreadableSeat(t *testing.T) {
+	testjail.Fleet(t)
+	database, err := store.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	loaded := Data{
+		CachedCounts: &store.CachedCounts{},
+		Transcripts:  []store.Transcript{{UUID: "claude-chat", CustomTitle: "LOADED"}},
+	}
+	native := []gather.HerdrSeat{
+		{Seat: fleetdb.Seat{SeatID: "seat-claude", SessionID: "claude-chat", Engine: "cc"}},
+		{Seat: fleetdb.Seat{SeatID: "seat-codex", SessionID: "codex-thread", Engine: "cx"}},
+	}
+	data, err := EnrichNative(context.Background(), database, loaded, native)
+	want := `native seat seat-codex rollout: query rollout "codex-thread": sql: database is closed`
+	if err == nil || err.Error() != want {
+		t.Fatalf("EnrichNative() error = %v, want %q", err, want)
+	}
+	if len(data.Transcripts) != 1 || data.Transcripts[0].CustomTitle != "LOADED" || data.CachedCounts == nil {
+		t.Fatalf("EnrichNative() data = %+v, want the loaded transcript and cached counts kept", data)
+	}
 }
 
 func TestReadOnlyNativeScanDoesNotCreateState(t *testing.T) {

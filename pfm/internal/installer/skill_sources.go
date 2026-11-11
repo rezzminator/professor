@@ -44,11 +44,6 @@ var (
 	unresolvedPlaceholder = regexp.MustCompile(`\{[A-Z][A-Z0-9_]*\}`)
 )
 
-type skillSourceRegistry struct {
-	Comment       string                       `json:"_comment,omitempty"`
-	SourceFetched map[string]skillSourceRecord `json:"source_fetched"`
-}
-
 type skillSourceRecord struct {
 	Repo         string   `json:"repo"`
 	Parameterize []string `json:"parameterize"`
@@ -66,44 +61,57 @@ func skillStoreRoot(home string) string {
 	return filepath.Join(managedRootForHome(home), "skills")
 }
 
-// loadSkillSources reads and validates the registry at
-// {sourceRepo}/templates/global/skills/sources.json. present=false is an
-// absent file; any other read, placeholder or decode failure is an error
-// naming the path — never an empty registry.
-func loadSkillSources(sourceRepo, releaseURL string) ([]skillSource, bool, error) {
+// loadSkillSources reads {sourceRepo}/templates/global/skills/sources.json.
+// present=false is an absent file; a read, placeholder or registry decode
+// failure is an error naming the path, never an empty registry. A record that
+// does not decode is its entry's Problem; an unknown key or an owner fallback is a note.
+func loadSkillSources(sourceRepo, releaseURL string) (sources []skillSource, present bool, notes []string, err error) {
 	path := filepath.Join(sourceRepo, filepath.FromSlash(skillSourcesRelative))
 	content, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil, false, nil
+		return nil, false, nil, nil
 	}
 	if err != nil {
-		return nil, false, fmt.Errorf("read %s: %w", path, err)
+		return nil, false, nil, fmt.Errorf("read %s: %w", path, err)
 	}
-	content, err = resolveOwnerPlaceholder(content, sourceRepo, releaseURL)
+	content, ownerNote, err := resolveOwnerPlaceholder(content, sourceRepo, releaseURL)
 	if err != nil {
-		return nil, false, fmt.Errorf("%s: %w", path, err)
+		return nil, false, nil, fmt.Errorf("%s: %w", path, err)
 	}
-	var registry skillSourceRegistry
+	if ownerNote != "" {
+		notes = append(notes, ownerNote)
+	}
+	var registry map[string]json.RawMessage
 	decoder := json.NewDecoder(bytes.NewReader(content))
-	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&registry); err != nil {
-		return nil, false, fmt.Errorf("decode %s: %w", path, err)
+		return nil, false, nil, fmt.Errorf("decode %s: %w", path, err)
 	}
-	if registry.SourceFetched == nil {
-		return nil, false, fmt.Errorf("decode %s: no source_fetched object", path)
+	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
+		return nil, false, nil, fmt.Errorf("decode %s: trailing content after the registry object", path)
 	}
-	var extra any
-	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
-		return nil, false, fmt.Errorf("decode %s: trailing content after the registry object", path)
+	var records map[string]json.RawMessage
+	if err := json.Unmarshal(registry["source_fetched"], &records); err != nil || records == nil {
+		return nil, false, nil, fmt.Errorf("decode %s: no source_fetched object", path)
 	}
+	for key := range registry {
+		if key != "_comment" && key != "source_fetched" {
+			notes = append(notes, "SKILL-SOURCES-UNKNOWN-KEY "+key+" in "+path+": ignored")
+		}
+	}
+	sort.Strings(notes)
 	templates := filepath.Join(sourceRepo, "templates", "global", "skills")
-	sources := make([]skillSource, 0, len(registry.SourceFetched))
-	for name, record := range registry.SourceFetched {
+	sources = make([]skillSource, 0, len(records))
+	for name, raw := range records {
+		record, recordDecoder := skillSourceRecord{}, json.NewDecoder(bytes.NewReader(raw))
+		recordDecoder.DisallowUnknownFields()
+		decodeErr := recordDecoder.Decode(&record)
 		source := skillSource{Name: name, Repo: strings.TrimSpace(record.Repo)}
 		switch {
 		case !skillSourceName.MatchString(name):
 			source.Problem = "SKILL-SOURCE-INVALID " + name + ": name must be one segment matching " +
 				skillSourceName.String()
+		case decodeErr != nil:
+			source.Problem = "SKILL-SOURCE-INVALID " + name + ": decode its record in " + path + ": " + decodeErr.Error()
 		case source.Repo == "":
 			source.Problem = "SKILL-SOURCE-INVALID " + name + ": repo is empty in " + path
 		case unresolvedPlaceholder.MatchString(source.Repo):
@@ -119,23 +127,26 @@ func loadSkillSources(sourceRepo, releaseURL string) ([]skillSource, bool, error
 				source.Problem = "SKILL-SOURCE-CLASH " + name + ": " + clash +
 					" ships a template skill of the same name; the template skill is linked"
 			} else if statErr != nil && !errors.Is(statErr, fs.ErrNotExist) {
-				return nil, false, fmt.Errorf("inspect template skill %s: %w", clash, statErr)
+				source.Problem = "SKILL-SOURCE-UNREADABLE " + name + ": inspect template skill " + clash + ": " + statErr.Error()
 			}
 		}
 		sources = append(sources, source)
 	}
 	sort.Slice(sources, func(left, right int) bool { return sources[left].Name < sources[right].Name })
-	return sources, true, nil
+	return sources, true, notes, nil
 }
 
 // wireSourceFetchedSkills fetches registered skills into managed storage and links
 // them into {ConfigDir}/skills and ~/.agents/skills.
 func (installer *engine) wireSourceFetchedSkills(sourceRepo string) error {
 	registry := filepath.Join(sourceRepo, filepath.FromSlash(skillSourcesRelative))
-	sources, present, err := loadSkillSources(sourceRepo, installer.options.ThemeReleaseURL)
+	sources, present, notes, err := loadSkillSources(sourceRepo, installer.options.ThemeReleaseURL)
 	if err != nil {
 		installer.skip("SKILL-SOURCES-FAILED " + err.Error())
 		return nil
+	}
+	for _, note := range notes {
+		installer.skip(note)
 	}
 	if !present {
 		installer.skip("source-fetched skills registry absent at " + registry + " (0 entries)")
@@ -179,6 +190,7 @@ func (installer *engine) wireSourceFetchedSkills(sourceRepo string) error {
 	if err := installer.retireSkillSources(active); err != nil {
 		return err
 	}
+	var failed error // one source's failure costs only that source's links
 	for _, source := range sources {
 		if source.Problem != "" {
 			installer.skip(source.Problem)
@@ -186,23 +198,18 @@ func (installer *engine) wireSourceFetchedSkills(sourceRepo string) error {
 		}
 		store := filepath.Join(storeRoot, source.Name)
 		linkable, err := installer.fetchSkillSource(source, store)
-		if err != nil {
-			return err
-		}
-		if !linkable {
+		if failed = errors.Join(failed, err); err != nil || !linkable {
 			continue
 		}
 		for _, target := range installer.skillSourceLinkTargets(source.Name) {
-			if err := installer.wireSkillSourceLink(store, target, storeRoot); err != nil {
-				return err
-			}
+			failed = errors.Join(failed, installer.wireSkillSourceLink(store, target, storeRoot))
 		}
 	}
 	if rootExists {
 		dirs := installer.skillSourceLinkDirs()
 		recorded, _, err := readSkillLinkLedger(installer.options.Home)
 		if err != nil {
-			return err
+			return errors.Join(failed, err)
 		}
 		seen := map[string]bool{}
 		for _, dir := range dirs {
@@ -216,7 +223,7 @@ func (installer *engine) wireSourceFetchedSkills(sourceRepo string) error {
 		}
 		content, err := json.MarshalIndent(skillLinkLedger{Version: skillLinkLedgerVersion, LinkDirs: dirs}, "", "  ")
 		if err != nil {
-			return fmt.Errorf("encode skill link ledger: %w", err)
+			return errors.Join(failed, fmt.Errorf("encode skill link ledger: %w", err))
 		}
 		content = append(content, '\n')
 		ledger := skillLinkLedgerPath(installer.options.Home)
@@ -225,12 +232,12 @@ func (installer *engine) wireSourceFetchedSkills(sourceRepo string) error {
 			if err := installer.change("record skill link dirs "+strings.Join(dirs, ", ")+" in "+ledger, func() error {
 				return atomicfile.Write(ledger, content, 0o644)
 			}); err != nil {
-				return err
+				return errors.Join(failed, err)
 			}
 		}
 	}
 	installer.say("")
-	return nil
+	return failed
 }
 
 // checkSkillStoreRoot refuses a store root that exists as anything but a real

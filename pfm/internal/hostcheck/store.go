@@ -147,7 +147,7 @@ func storeIdentity(env Env) ([]Row, error) {
 		}
 	}
 	for _, entry := range installer.AccountEntries {
-		if slices.Contains(installer.RetiredStoreEntries, entry) {
+		if slices.Contains(env.Retired.StoreEntries, entry) {
 			// Its store copy is retired-store-entry's: pfm install archives it.
 			continue
 		}

@@ -36,7 +36,7 @@ const (
 	// SIDReloadHerdrPrefix names a native Herdr chat's reload schedule,
 	// SIDReloadHerdrPrefix+seat+".pid" (the scheduled worker's record) and
 	// SIDReloadHerdrPrefix+seat+".log" (its log); the doctor's crumb audit
-	// accepts both, and ending the seat removes both.
+	// accepts both, and ending the seat removes the record and keeps the log.
 	SIDReloadHerdrPrefix = "reload-herdr-"
 	// SIDHarnessConfigDirPrefix names the throwaway config directory the
 	// doctor's harness-prompt capture creates (os.MkdirTemp) in the SID dir;
@@ -421,6 +421,14 @@ func HomeFrom(env Env) (string, error) {
 	return home, nil
 }
 
+// LaunchAgentsDir is home's per-user launchd agent directory, where every
+// pfm launch agent plist lives (macOS).
+func LaunchAgentsDir(home string) string { return filepath.Join(home, "Library", "LaunchAgents") }
+
+// SystemdUserDir is home's systemd user unit directory, where every pfm user
+// unit lives (Linux).
+func SystemdUserDir(home string) string { return filepath.Join(home, ".config", "systemd", "user") }
+
 // ServicePath is the ONE search path every pfm service runs on — the
 // installer's launchd agents and systemd units, and the theme follower. A
 // service manager starts jobs on a bare PATH (launchd: /usr/bin:/bin:/usr/sbin:/sbin)
@@ -478,50 +486,14 @@ func DefaultCacheDB(home string) string {
 	return filepath.Join(home, ".local", "state", "pfm", "pfm-cache.db")
 }
 
-// legacyDBName is the one name both pre-layout databases shared.
-const legacyDBName = "fleet.db"
-
-// ErrLegacyPending marks a database create refused because the legacy
-// database it replaces still waits for the operator to apply pfm doctor's fix.
-var ErrLegacyPending = errors.New("legacy database not migrated")
-
-// LegacyStateDB names the old state database; pfm doctor gives the fix for
-// moving it to DefaultStateDB.
-func LegacyStateDB(home string) string {
-	return filepath.Join(home, ".cc", legacyDBName)
-}
-
-// LegacyCacheDB names the old cache database; pfm doctor gives the fix for
-// moving it to DefaultCacheDB.
-func LegacyCacheDB(home string) string {
-	return filepath.Join(home, ".local", "state", "pfm", legacyDBName)
-}
-
-// CheckLegacyPending refuses to let a caller create target while legacy still
-// waits for the operator to apply pfm doctor's fix: a fresh target beside legacy
-// data forks the state. An existing target, or no legacy file, is nil. A stat
-// that fails for any reason but not-exist is an error, never read as absence.
-func CheckLegacyPending(target, legacy string) error {
-	_, err := os.Lstat(target)
-	if err == nil {
-		return nil
+// CodexHome is the Codex home holding its models_cache.json: PFM_CODEX_ROOT's first entry, else
+// the engine's default root under home.
+func CodexHome(home string) string {
+	descriptor := pfmengine.MustLookup(pfmengine.Codex)
+	if roots := filepath.SplitList((OSEnv{}).Get(descriptor.RootEnv)); len(roots) > 0 {
+		return roots[0]
 	}
-	if !errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("inspect %s: %w", target, err)
-	}
-	_, err = os.Lstat(legacy)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("inspect %s: %w", legacy, err)
-	}
-	return fmt.Errorf(
-		"%w: %s not created while legacy %s still exists — run pfm doctor for the fix",
-		ErrLegacyPending,
-		target,
-		legacy,
-	)
+	return descriptor.DefaultRoots(home)[0]
 }
 
 func Resolve() (Values, error) {
@@ -643,11 +615,6 @@ func CostSinkLog(home string) string {
 // and activity logs. It never holds prompts, labels or transcript bodies.
 func SubagentStatuslineTrace(home string) string {
 	return filepath.Join(home, ".local", "state", "pfm", "log", "subagent-statusline.jsonl")
-}
-
-// LegacyHarnessPromptsDir identifies the former managed prompt directory.
-func LegacyHarnessPromptsDir(home string) string {
-	return filepath.Join(home, ".local", "share", "pfm", "install", "harness-prompts")
 }
 
 // HarnessBaselineDir resolves Claude's captured baselines in the recorded clone.

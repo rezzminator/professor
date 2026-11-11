@@ -228,10 +228,42 @@ func TestLaunchdAbsentIsNamedAndALookupFailureIsAnError(t *testing.T) {
 	}
 	runner.lookErr = nil
 	runner.paths["launchctl"] = "/bin/launchctl"
+}
+
+// TestLaunchdAnUnreadableAgentFailsAloneAndTheRestRestart: a launchctl print
+// that cannot answer, and a plist that cannot be read, each fail only their
+// own agent's stop step, named; the readable loaded agent restarts and the
+// plan exits 1.
+func TestLaunchdAnUnreadableAgentFailsAloneAndTheRestRestart(t *testing.T) {
+	manager, model, runner := newLaunchd(t, "com.professor.pfm.mcp")
+	plist := filepath.Join(manager.Dir, "com.professor.pfm.schedule.plist")
+	if err := os.Remove(plist); err != nil {
+		t.Fatal(err)
+	}
+	gone := filepath.Join(t.TempDir(), "gone.plist")
+	if err := os.Symlink(gone, plist); err != nil { // dangling: unreadable even for root
+		t.Fatal(err)
+	}
+	units, _, err := manager.Units(context.Background(), FamilyServices, pfmService, nil)
+	if err != nil {
+		t.Fatalf("one unreadable plist failed the whole listing: %v", err)
+	}
+	printed, executed, code := printAndRun(t, units)
+	want := "stop   services       launchd com.professor.pfm.schedule  FAILED  state unreadable: read launch agent " +
+		plist + ": open " + plist + ": no such file or directory\n"
+	if code != 1 || !strings.Contains(executed, want) || !strings.Contains(executed, "restart: 1 step(s) FAILED\n") ||
+		!strings.Contains(executed, "start  services       launchd com.professor.pfm.mcp  ok  ") ||
+		!model.loaded["com.professor.pfm.mcp"] {
+		t.Fatalf("code=%d printed:\n%s\nexecuted (want line %q):\n%s", code, printed, want, executed)
+	}
 	runner.handle = func([]string) (deps.RunResult, error) { return exitWith(1, "launchd is wedged") }
-	if _, _, err := manager.Units(context.Background(), FamilyServices, pfmService, nil); err == nil ||
+	units, _, err = manager.Units(context.Background(), FamilyServices, pfmService, nil)
+	if err != nil || len(units) != 2 {
+		t.Fatalf("a wedged launchctl print = %d units, %v; want both listed", len(units), err)
+	}
+	if _, err := units[1].Stop(context.Background()); err == nil ||
 		!strings.Contains(err.Error(), "launchd is wedged") {
-		t.Fatalf("an unreadable launchctl print = %v", err)
+		t.Fatalf("an unreadable launchctl print = %v, want the stop step to fail naming it", err)
 	}
 }
 
@@ -364,16 +396,22 @@ func TestLaunchdKeepAliveReadsThePlist(t *testing.T) {
 
 func TestNativeServiceManagerIsLaunchdOnMacOSAndSystemdOnLinux(t *testing.T) {
 	home := t.TempDir()
-	launchdManager, ok := nativeServiceManager("darwin", &hostRunner{}, newTickClock(), home, 501).(LaunchdManager)
+	launchdManager, ok := nativeServiceManager(servicemanager.KindLaunchd, &hostRunner{}, newTickClock(), home, 501).(LaunchdManager)
 	if !ok || launchdManager.Dir != filepath.Join(home, "Library", "LaunchAgents") || launchdManager.UID != 501 {
-		t.Fatalf("darwin manager = %#v, want launchd over the LaunchAgents dir", launchdManager)
+		t.Fatalf("launchd manager = %#v, want launchd over the LaunchAgents dir", launchdManager)
 	}
-	systemdManager, ok := nativeServiceManager("linux", &hostRunner{}, newTickClock(), home, 501).(SystemdManager)
+	systemdManager, ok := nativeServiceManager(servicemanager.KindSystemd, &hostRunner{}, newTickClock(), home, 501).(SystemdManager)
 	if !ok || systemdManager.Dir != filepath.Join(home, ".config", "systemd", "user") {
-		t.Fatalf("linux manager = %#v, want systemd over the user unit dir", systemdManager)
+		t.Fatalf("systemd manager = %#v, want systemd over the user unit dir", systemdManager)
 	}
-	if manager := nativeServiceManager("freebsd", &hostRunner{}, newTickClock(), home, 501); manager != nil {
-		t.Fatalf("freebsd manager = %#v, want none", manager)
+	if manager := nativeServiceManager(
+		servicemanager.Kind("rc.d"),
+		&hostRunner{},
+		newTickClock(),
+		home,
+		501,
+	); manager != nil {
+		t.Fatalf("rc.d manager = %#v, want none", manager)
 	}
 }
 
@@ -437,14 +475,30 @@ func TestSystemdAUnitInactiveBeforeStaysStopped(t *testing.T) {
 	assertStaysStopped(t, printed, executed, "systemd pfm-name-sync.timer", "ActiveState=inactive")
 }
 
-// TestSystemdAnUnreadableActiveStateFailsThePlan: a state word systemd's
-// documentation does not list is a failed read, never "stopped".
-func TestSystemdAnUnreadableActiveStateFailsThePlan(t *testing.T) {
+// TestSystemdAnUnreadableActiveStateFailsOnlyItsUnits: a state word systemd's
+// documentation does not list is a failed read, never "stopped": that unit and
+// the service it triggers fail their stop step, named, and the rest restart.
+func TestSystemdAnUnreadableActiveStateFailsOnlyItsUnits(t *testing.T) {
 	manager, model := newSystemd(t)
 	model.state["pfm-schedule.timer"] = "bewildered"
-	if _, _, err := manager.Units(context.Background(), FamilyServices, pfmService, nil); err == nil ||
-		!strings.Contains(err.Error(), `"bewildered"`) {
-		t.Fatalf("an unknown ActiveState = %v, want the plan failed with the word named", err)
+	units, _, err := manager.Units(context.Background(), FamilyServices, pfmService, nil)
+	if err != nil {
+		t.Fatalf("one unreadable ActiveState failed the whole listing: %v", err)
+	}
+	_, executed, code := printAndRun(t, units)
+	cause := `state unreadable: systemctl --user show pfm-schedule.timer: unknown ActiveState "bewildered"`
+	for _, want := range []string{
+		"stop   services       systemd pfm-schedule.timer  FAILED  " + cause + "\n",
+		"stop   services       systemd pfm-schedule.service  FAILED  " + cause + "\n",
+		"restart: 2 step(s) FAILED\n",
+		"start  services       systemd pfm-mcp.service  ok  ActiveState=active\n",
+	} {
+		if !strings.Contains(executed, want) {
+			t.Errorf("result lines lack %q:\n%s", want, executed)
+		}
+	}
+	if code != 1 {
+		t.Fatalf("Execute = %d, want 1", code)
 	}
 }
 

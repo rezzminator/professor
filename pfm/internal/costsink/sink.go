@@ -90,6 +90,14 @@ func (s *Sink) noteIdentity(path, session, identity string) {
 	}
 }
 
+// noteUnreadableCounts faults a record whose token attributes were present but no number: the row
+// is still written, its counts read 0, and the log names what was lost.
+func (s *Sink) noteUnreadableCounts(path, requestID, unreadable string) {
+	if unreadable != "" {
+		s.fault("%s: request %q: token attribute(s) %s unreadable, counted as 0", path, requestID, unreadable)
+	}
+}
+
 // LastPost is when the sink last received a POST, zero before the first.
 func (s *Sink) LastPost() time.Time {
 	nanos := s.last.Load()
@@ -167,7 +175,7 @@ func (s *Sink) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.fault("%s: %v", r.URL.Path, err)
 		answer = s.partialSuccess(r.URL.Path, refused)
 	case err != nil:
-		s.fault("%s: %v", r.URL.Path, err)
+		s.fault("%s: %v (body of %d bytes starts %q)", r.URL.Path, err, len(body), bodyPrefix(body))
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
@@ -222,8 +230,14 @@ func tooLargeOr(err error, fallback int) int {
 	return fallback
 }
 
+// logPrefixBytes is how much of a refused body the sink log keeps: enough to see what the sender
+// wrote, never a body-sized line.
+const logPrefixBytes = 256
+
+func bodyPrefix(body []byte) []byte { return body[:min(len(body), logPrefixBytes)] }
+
 func (s *Sink) ingestLogs(body []byte, now time.Time) error {
-	halves, err := DecodeLogs(body)
+	halves, undecodable, err := DecodeLogs(body)
 	if err != nil {
 		return err
 	}
@@ -235,14 +249,15 @@ func (s *Sink) ingestLogs(body []byte, now time.Time) error {
 			continue
 		}
 		row := logOnlyRow(*half, now)
+		s.noteUnreadableCounts(pathLogs, row.RequestID, half.UnreadableCounts)
 		s.noteIdentity(pathLogs, half.SessionID, row.Identity())
 		s.joiner.AddLog(*half, now)
 	}
-	return unsafeSessions(refused)
+	return refusals(refused, undecodable)
 }
 
 func (s *Sink) ingestSpans(body []byte, now time.Time) error {
-	halves, err := DecodeSpans(body)
+	halves, undecodable, err := DecodeSpans(body)
 	if err != nil {
 		return err
 	}
@@ -254,15 +269,25 @@ func (s *Sink) ingestSpans(body []byte, now time.Time) error {
 			continue
 		}
 		row := spanOnlyRow(*half, now)
+		s.noteUnreadableCounts(pathTraces, row.RequestID, half.UnreadableCounts)
 		s.noteIdentity(pathTraces, half.SessionID, row.Identity())
 		s.joiner.AddSpan(*half, now)
 	}
-	return unsafeSessions(refused)
+	return refusals(refused, undecodable)
 }
 
-func unsafeSessions(count int) error {
-	if count == 0 {
+// refusals is the RefusedError for the records a batch lost to an unsafe session id and to a shape
+// the decoder could not read; nil when it lost none.
+func refusals(unsafe, undecodable int) error {
+	var reasons []string
+	if unsafe > 0 {
+		reasons = append(reasons, fmt.Sprintf("%d records refused: unsafe session id", unsafe))
+	}
+	if undecodable > 0 {
+		reasons = append(reasons, fmt.Sprintf("%d records undecodable", undecodable))
+	}
+	if len(reasons) == 0 {
 		return nil
 	}
-	return &RefusedError{Count: count, Reason: fmt.Sprintf("%d records refused: unsafe session id", count)}
+	return &RefusedError{Count: unsafe + undecodable, Reason: strings.Join(reasons, "; ")}
 }

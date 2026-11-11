@@ -149,9 +149,10 @@ func Fetch(ctx context.Context, options Options, account int) (usage Usage, conf
 		ClaudeRateLimitDir(options.Env.Get(paths.EnvHome)), account, options.ConfigDir, now, options.TTL,
 	)
 	if err != nil {
-		notes = append(notes, fmt.Errorf("statusline snapshot not used: %w", err))
-	} else if found && snapshot.FiveHour.Utilization != nil {
-		return snapshot, snapshotAt, nil
+		notes = append(notes, fmt.Errorf("statusline snapshot: %w", err))
+	}
+	if found && snapshot.FiveHour.Utilization != nil {
+		return finish(doorAnswer{usage: snapshot, confirmedAt: snapshotAt})
 	}
 	cachePath := CachePath(options.CacheDir, account)
 	view := readCacheView(cachePath, options.ConfigDir, now)
@@ -244,7 +245,7 @@ func refreshHeld(ctx context.Context, options Options, cachePath string, now tim
 		cacheErr := WriteCacheRecord(cachePath, CacheRecord{
 			Usage: previousUsage, ConfigDir: options.ConfigDir, FetchedAt: previousFetchedAt,
 			Backoff: &CacheBackoff{
-				Message: message, RetryAfter: retryAfter, RecordedAt: now, Credential: credentialID, Refusal: refusal,
+				Message: message, RetryAfter: retryAfter, Credential: credentialID, Refusal: refusal,
 			},
 		})
 		var rateLimit *RateLimitError
@@ -507,13 +508,15 @@ func request(ctx context.Context, options Options) (usageResult Usage, credentia
 	}
 	var decoded Usage
 	if err := json.Unmarshal(fresh, &decoded); err != nil {
-		return Usage{}, credentialID, fmt.Errorf("decode usage response: %w", err)
+		return Usage{}, credentialID, fmt.Errorf("decode usage response: %w; body: %s", err, bodyExcerpt(fresh))
 	}
 	// A window the response leaves out is not on the account's plan: an
 	// answer, not a failure. A body naming no usage key at all (an error
 	// object, null) answers nothing and fails.
 	if !logUnknownUsageKeys(fresh, options.Log) {
-		return Usage{}, credentialID, fmt.Errorf("decode usage response: no usage key in %d-byte body", len(fresh))
+		return Usage{}, credentialID, fmt.Errorf(
+			"decode usage response: no usage key in %d-byte body: %s", len(fresh), bodyExcerpt(fresh),
+		)
 	}
 	return decoded, credentialID, nil
 }
@@ -544,11 +547,17 @@ func providerError(body io.Reader) (errorType, message string, err error) {
 	if json.Unmarshal(raw, &decoded) == nil && (decoded.Error.Type != "" || decoded.Error.Message != "") {
 		return decoded.Error.Type, decoded.Error.Message, nil
 	}
+	return "", bodyExcerpt(raw), nil
+}
+
+// bodyExcerpt is a provider body as one line of at most 200 bytes, the text a
+// failure carries of a body it could not use.
+func bodyExcerpt(raw []byte) string {
 	text := strings.Join(strings.Fields(string(raw)), " ")
 	if len(text) > 200 {
 		text = text[:200]
 	}
-	return "", text, nil
+	return text
 }
 
 // joinBodyErr keeps the status typed (errors.As still finds it) while an

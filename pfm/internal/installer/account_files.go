@@ -6,9 +6,11 @@ import (
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
+	"github.com/rezzminator/professor/pfm/internal/retired"
 )
 
 func accountSettingsLeftovers(
+	lists retired.Lists,
 	raw []byte,
 	home string,
 	owned settingsHookCounts,
@@ -21,11 +23,17 @@ func accountSettingsLeftovers(
 	if err := validateAccountHooks(document); err != nil {
 		return nil, err
 	}
-	leftovers := settingsLeftovers(document, home, owned, ledgerReadable)
+	leftovers := settingsLeftovers(lists, document, home, owned, ledgerReadable)
 	return leftovers, nil
 }
 
-func settingsLeftovers(document map[string]any, home string, owned settingsHookCounts, ledgerReadable bool) []string {
+func settingsLeftovers(
+	lists retired.Lists,
+	document map[string]any,
+	home string,
+	owned settingsHookCounts,
+	ledgerReadable bool,
+) []string {
 	commands := map[string]bool{}
 	for _, hook := range claudeHookTemplates(home) {
 		commands[hook.Command] = true
@@ -34,7 +42,7 @@ func settingsLeftovers(document map[string]any, home string, owned settingsHookC
 	found := map[string]bool{}
 	for key, count := range countSettingsHookCommands(document) {
 		if count > 0 &&
-			(commands[key.Command] || isRetiredHookCommand(key.Command, pfmBinary) ||
+			(commands[key.Command] || isRetiredHookCommand(lists, key.Command, pfmBinary) ||
 				ledgerReadable && owned[key] > 0 && strings.SplitN(key.Command, " ", 2)[0] == pfmBinary) {
 			found[key.Command] = true
 		}
@@ -106,95 +114,4 @@ func validateAccountHooks(document map[string]any) error {
 		}
 	}
 	return nil
-}
-
-// mcpShaped reports whether a registration under name is in a pfm shape; nil
-// judges by the ledger alone.
-type mcpShaped func(name string, registration map[string]any) bool
-
-// accountMCPLeftovers names the mcpServers entries pfm owns in a Claude MCP
-// file: registrations matching their ledger records plus shape-matched ones.
-func accountMCPLeftovers(raw []byte, owned map[string][]any, shaped mcpShaped) ([]string, error) {
-	document, err := parseAccountDocument(raw)
-	if err != nil {
-		return nil, err
-	}
-	servers, err := accountMCPServers(document)
-	if err != nil {
-		return nil, err
-	}
-	return ownedMCPNames(servers, owned, shaped), nil
-}
-
-func accountMCPServers(document map[string]any) (map[string]any, error) {
-	value, present := document["mcpServers"]
-	if !present {
-		return nil, nil
-	}
-	servers, ok := value.(map[string]any)
-	if !ok || servers == nil {
-		return nil, fmt.Errorf("mcpServers must be an object")
-	}
-	return servers, nil
-}
-
-// ledgerOwnedMCP returns the registrations recorded for one physical registry
-// file. A key matches when it resolves to that file: older installs keyed the
-// path as reached, and a link on the way (macOS /tmp is /private/tmp) makes
-// that differ from the physical path.
-func ledgerOwnedMCP(registrations map[string]map[string]any, physical string) map[string][]any {
-	keys := []string{}
-	for key := range registrations {
-		if key != physical && physicalSettingsPath(key) != physical {
-			continue
-		}
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	owned := map[string][]any{}
-	for _, key := range keys {
-		for name, record := range registrations[key] {
-			owned[name] = append(owned[name], record)
-		}
-	}
-	return owned
-}
-
-func ownedMCPNames(servers map[string]any, owned map[string][]any, shaped mcpShaped) []string {
-	seen := map[string]bool{}
-	for name, records := range owned {
-		current, present := servers[name]
-		if !present {
-			continue
-		}
-		for _, record := range records {
-			if sameClaudeRegistration(current, record) {
-				seen[name] = true
-				break
-			}
-		}
-	}
-	if shaped != nil {
-		for name := range servers {
-			if registration, ok := servers[name].(map[string]any); ok && shaped(name, registration) {
-				seen[name] = true
-			}
-		}
-	}
-	result := make([]string, 0, len(seen))
-	for name := range seen {
-		result = append(result, "mcpServers."+name)
-	}
-	sort.Strings(result)
-	return result
-}
-
-func sameClaudeRegistration(current, recorded any) bool {
-	if registration, ok := current.(map[string]any); ok {
-		current = withoutEmptyEnv(registration)
-	}
-	if registration, ok := recorded.(map[string]any); ok {
-		recorded = withoutEmptyEnv(registration)
-	}
-	return sameJSONValue(current, recorded)
 }

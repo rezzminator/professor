@@ -3,6 +3,7 @@ package chat
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/compose"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -20,10 +22,10 @@ import (
 // SessionEnd releases the agent while the engine and its pane still exist.
 // Repeated observations must distinguish that transition from a broken agent.
 func TestHerdrTabProviderReleasedAgentTeardown(t *testing.T) {
-	for _, outcome := range []string{"exit", "closed", "alive", "recovered", "unreadable", "moved-exit", "replaced-pane", "kept-exit"} {
+	for _, outcome := range []string{"exit", "closed", "alive", "recovered", "unreadable", "moved-exit", "replaced-pane", "kept-exit", "exit-beside-incomplete", "own-pane-incomplete", "alive-after-failed-turn"} {
 		t.Run(outcome, func(t *testing.T) {
 			t.Setenv("TMUX_TMPDIR", t.TempDir())
-			// kept-exit: herdr-keep's holder 5 runs shell 10, whose terminal's
+			// kept-exit: herdr-shield's holder 5 runs shell 10, whose terminal's
 			// foreground group 41 runs the engine, then a bare shell.
 			proc := t.TempDir()
 			if outcome == "kept-exit" {
@@ -32,7 +34,7 @@ func TestHerdrTabProviderReleasedAgentTeardown(t *testing.T) {
 			foreground := func(argv0 string) {
 				zeros := strings.Repeat("0 ", 13)
 				for pid, file := range map[string]string{
-					"5/stat":     "5 (herdr-keep) S 1 5 5 0 -1 " + zeros + "2 0\n",
+					"5/stat":     "5 (herdr-shield) S 1 5 5 0 -1 " + zeros + "2 0\n",
 					"10/stat":    "10 (zsh) S 5 10 10 0 41 " + zeros + "3 0\n",
 					"41/stat":    "41 (" + argv0 + ") S 10 41 10 0 41 " + zeros + "4 0\n",
 					"41/cmdline": argv0 + "\x00",
@@ -60,18 +62,26 @@ func TestHerdrTabProviderReleasedAgentTeardown(t *testing.T) {
 						pane.(map[string]any)["terminal_id"] = "different-terminal"
 					}
 					panes := []any{pane}
+					if phase > 0 && outcome == "exit-beside-incomplete" {
+						// Another pane Herdr lists without its identity is skipped alone.
+						panes = append(panes, map[string]any{"pane_id": "w1:p9"})
+					}
+					if phase > 0 && outcome == "own-pane-incomplete" {
+						panes = []any{map[string]any{"pane_id": "w1:p1"}}
+					}
 					if phase > 0 && outcome == "closed" {
 						panes = []any{} // Herdr lists no pane as [], never null
 					}
 					return map[string]any{"type": "pane_list", "panes": panes}, ""
 				case "pane.process_info":
 					name := "claude"
-					if phase > 0 && (outcome == "exit" || outcome == "moved-exit") {
+					if phase > 0 && (outcome == "exit" || outcome == "moved-exit" ||
+						outcome == "exit-beside-incomplete" || outcome == "own-pane-incomplete") {
 						name = "bash"
 					}
 					if outcome == "kept-exit" {
-						// Herdr sees only herdr-keep's attach client.
-						name = "herdr-keep"
+						// Herdr sees only herdr-shield's attach client.
+						name = "herdr-shield"
 					}
 					if outcome == "unreadable" {
 						return nil, "process_read_failed"
@@ -89,12 +99,28 @@ func TestHerdrTabProviderReleasedAgentTeardown(t *testing.T) {
 				}
 			})
 			dir := t.TempDir()
+			// alive-after-failed-turn: the transcript's last turn failed, and the
+			// screen of the agent-less pane rests on its error text.
+			var transcriptPath string
+			screen := claudeBusyPane
+			if outcome == "alive-after-failed-turn" {
+				transcriptPath = filepath.Join(dir, "s1.jsonl")
+				failed := `{"type":"assistant","isApiErrorMessage":true,"error":"server_error",` +
+					`"message":{"role":"assistant","content":[{"type":"text","text":"API Error: overloaded"}]}}` + "\n"
+				if err := os.WriteFile(transcriptPath, []byte(failed), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				screen = "API Error: overloaded\n> \n"
+			}
 			var warnings bytes.Buffer
 			provider := herdrTabProvider{
 				clock: clk,
 				scan: func(context.Context) (FleetScan, error) {
 					return FleetScan{Rows: []compose.Row{
-						{Backend: "herdr", ID: "s1", Socket: socket, PaneID: "w1:p1", Kind: compose.LiveClaude},
+						{
+							Backend: "herdr", ID: "s1", Socket: socket, PaneID: "w1:p1", Kind: compose.LiveClaude,
+							Path: transcriptPath,
+						},
 					}}, nil
 				},
 				views: func(context.Context, headless.Chat, string) ([]herdr.TabDecoration, error) {
@@ -104,17 +130,33 @@ func TestHerdrTabProviderReleasedAgentTeardown(t *testing.T) {
 					if phase == 1 && outcome == "recovered" {
 						return headless.Status{State: headless.StateIdle}, nil
 					}
-					return headless.Status{}, &herdr.Refusal{
-						Request: "agent.get pfm-seat",
-						Code:    herdr.AgentNotFound,
-						Message: "target missing",
+					// statusFromHerdr's two answers to agent_not_found that leave the
+					// pane to the painter: the refusal joined to an unreadable foreground,
+					// else the transcript verdict marked herdrAgentUntracked.
+					if outcome == "unreadable" {
+						return headless.Status{}, errors.Join(&herdr.Refusal{
+							Request: "agent.get pfm-seat",
+							Code:    herdr.AgentNotFound,
+							Message: "target missing",
+						}, errors.New("read Herdr foreground processes of w1:p1: process_read_failed"))
 					}
+					return headless.Status{State: headless.StateIdle, StateSource: herdrAgentUntracked}, nil
+				},
+				// The transcript turn an agent-less pane rests on is read as the painter reads it.
+				rest: NewSeatInspector(nil).Rest,
+				// Past the exit grace an engine still alive in an agent-less pane (a
+				// native seat Herdr tracks no agent for) is read from its own screen.
+				screen: func(_ context.Context, chat headless.Chat) (string, error) {
+					if chat.Socket != socket || chat.Pane != "w1:p1" || chat.Engine != pfmengine.Claude {
+						t.Errorf("screen read of %+v, want claude pane w1:p1 on %s", chat, socket)
+					}
+					return screen, nil
 				},
 				mode: func() (string, error) { return "emoji", nil },
 				warn: tabIndicatorWarnings{dir: dir, stderr: &warnings},
 			}
 			if outcome == "kept-exit" {
-				testjail.StageHerdrKeep(t, testjail.HerdrKeepListing(5, 2, 10, 3, "w1:p1", socket), 0)
+				testjail.StageHerdrShield(t, testjail.HerdrShieldListing(5, 2, 10, 3, "w1:p1", socket), 0)
 			}
 			for phase = 0; phase < 3; phase++ {
 				if outcome == "kept-exit" && phase == 0 {
@@ -126,7 +168,7 @@ func TestHerdrTabProviderReleasedAgentTeardown(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				wantError := outcome == "unreadable" || phase > 0 && outcome == "alive"
+				wantError := outcome == "unreadable" || outcome == "own-pane-incomplete" && phase > 0
 				records, err := herdr.RecentErrors(dir, time.Time{})
 				if err != nil {
 					t.Fatal(err)
@@ -148,11 +190,18 @@ func TestHerdrTabProviderReleasedAgentTeardown(t *testing.T) {
 				}
 				if len(views) > 0 {
 					want := "unknown"
-					if phase > 0 && (outcome == "exit" || outcome == "moved-exit" || outcome == "kept-exit") {
+					if phase > 0 && (outcome == "exit" || outcome == "moved-exit" || outcome == "kept-exit" ||
+						outcome == "exit-beside-incomplete") {
 						want = headless.StateDead
 					}
 					if phase == 1 && outcome == "recovered" {
 						want = headless.StateIdle
+					}
+					if phase > 0 && outcome == "alive" {
+						want = headless.StateWorking
+					}
+					if phase > 0 && outcome == "alive-after-failed-turn" {
+						want = headless.StateError
 					}
 					if views[0].State != want {
 						t.Fatalf("state=%q want %q", views[0].State, want)

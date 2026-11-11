@@ -10,6 +10,7 @@ import (
 	"time"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/servicemanager"
 )
 
 // One value, two schedulers. A host that lowers nameSync.interval and later
@@ -130,11 +131,9 @@ func TestNameSyncScheduleSummaryReportsBothSchedulers(t *testing.T) {
 // OnUnitInactiveSec is a unit systemd refuses to load at all.
 func TestApplyStagesTheTimerWithTheConfiguredInterval(t *testing.T) {
 	t.Parallel()
-	if schedulerIsLaunchd {
-		t.Skip("systemd units are not staged on a launchd host")
-	}
 	home := t.TempDir()
 	if _, err := Run(context.Background(), Options{
+		scheduler:     schedulerFor(servicemanager.KindSystemd),
 		MCPConfigPath: testConfigPath(t),
 		Mode:          ModeApply, Home: home, Runner: &fakeRunner{},
 		NameSyncInterval: 4 * time.Minute,

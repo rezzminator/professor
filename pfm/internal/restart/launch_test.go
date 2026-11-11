@@ -161,6 +161,21 @@ func TestFollowAWorkerGoneWithoutItsMarkerIsAFailure(t *testing.T) {
 	}
 }
 
+func TestFollowAnUnreadableExitMarkerIsNamedAndFails(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "worker.log")
+	writeLog(t, logPath, "stop  chats  a  ok\n"+ExitMarker+"two\n")
+	var stdout, stderr bytes.Buffer
+	launcher := Launcher{Clock: newTickClock(), Exited: func(int) (bool, error) { return false, nil }}
+	if code := launcher.Follow(context.Background(), 7, logPath, &stdout, &stderr); code != 1 {
+		t.Fatalf("Follow = %d, want 1", code)
+	}
+	want := "pfm restart: worker pid 7: unreadable exit marker \"two\": " +
+		"strconv.Atoi: parsing \"two\": invalid syntax; log " + logPath + "\n"
+	if stderr.String() != want {
+		t.Fatalf("stderr = %q, want %q", stderr.String(), want)
+	}
+}
+
 func TestSpawnStartsTheWorkerDetachedIntoItsLog(t *testing.T) {
 	runner := &hostRunner{}
 	launcher := Launcher{Runner: runner}

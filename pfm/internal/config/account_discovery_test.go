@@ -2,9 +2,11 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -168,5 +170,35 @@ func TestDefaultsDoesNotReadADirectoryAsAnOpenCodeStore(t *testing.T) {
 	got := Defaults(home, nil)
 	if len(got.OpenCodeAccounts) != 0 {
 		t.Fatalf("OpenCodeAccounts = %#v, want none when both candidates are directories", got.OpenCodeAccounts)
+	}
+}
+
+// An OpenCode data home that cannot be inspected costs only its account: the
+// config still loads, the failure named as a discovery skip.
+func TestLoadKeepsTheConfigWhenOpenCodeDiscoveryFails(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	blocker := filepath.Join(root, "not-a-directory")
+	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	openCodeHome := filepath.Join(blocker, "opencode")
+	t.Setenv(pfmengine.MustLookup(pfmengine.OpenCode).RootEnv, openCodeHome)
+	path := filepath.Join(root, "config.json")
+	if err := os.WriteFile(path, []byte(`{"version":2,"theme":"tokyo-night"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(path, home, nil)
+	if err != nil {
+		t.Fatalf("Load(%s) error = %v, want the config kept", path, err)
+	}
+	inspect := filepath.Join(openCodeHome, "opencode.db")
+	want := AccountSkip{
+		ConfigDir: openCodeHome,
+		Reason:    fmt.Sprintf("OpenCode discovery failed: inspect %s: stat %s: not a directory", inspect, inspect),
+	}
+	if got.Theme != "tokyo-night" || len(got.OpenCodeAccounts) != 0 || !slices.Contains(got.AccountSkips, want) {
+		t.Fatalf("Load(%s) theme=%q opencode=%v skips=%#v, want tokyo-night, none and %#v",
+			path, got.Theme, got.OpenCodeAccounts, got.AccountSkips, want)
 	}
 }

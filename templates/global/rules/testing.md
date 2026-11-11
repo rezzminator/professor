@@ -1,7 +1,8 @@
 ---
 visible-to:
-  include: ["flights-foreman", "flights-foreman-sonnet", "flights-lander", "flights-speccer"]
+  include: ["main", "flights:foreman", "flights:foreman-sonnet", "flights:lander", "flights:speccer"]
 ---
+
 # Tests: the fewest that reach the most
 
 Binds every agent writing tests.
@@ -14,7 +15,7 @@ Binds every agent writing tests.
 - Watch every test fail once: a regression on the unfixed code, else by breaking one statement it guards.
 - A fixture never performs a step the code under test owns.
 - An absence assertion sits beside a presence assertion proving the subject ran.
-- Pin a fixed user-visible failure in the existing test of the surface the user saw (the round trip, not the parser).
+- Pin a fixed user-visible failure in the existing test of the surface the user saw (the round trip, not the parser); an escaped bug grows the assertions of the test that ran its path blind.
 - A test runs code, never reads source as its subject.
 - A test never asserts that something removed stays absent.
 - Test a guard both ways, a bound at the boundary and one step either side.

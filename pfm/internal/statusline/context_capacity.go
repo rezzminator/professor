@@ -98,11 +98,16 @@ func (catalog *contextCatalog) capacity(model string) (int64, string) {
 			catalog.state = catalogError
 			return
 		}
+		// The decoded body stands whatever follows it.
 		var trailing json.RawMessage
 		if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-			catalog.err = fmt.Errorf("trailing catalog content: %v", err)
-			catalog.state = catalogError
-			return
+			fmt.Fprintf(
+				catalog.warn,
+				"statusline: context catalog %s: content after the catalog object ignored (%d bytes decoded, next: %v)\n",
+				catalog.path,
+				decoder.InputOffset(),
+				err,
+			)
 		}
 		if len(body.Models) == 0 {
 			catalog.err = fmt.Errorf("catalog has no models")
@@ -110,16 +115,25 @@ func (catalog *contextCatalog) capacity(model string) (int64, string) {
 			return
 		}
 		catalog.windows = map[string]int64{}
-		for _, m := range body.Models {
+		// One bad entry costs only that model's window, never its siblings'.
+		for index, m := range body.Models {
 			if m.Slug == "" {
-				catalog.err = fmt.Errorf("catalog model has no slug")
-				catalog.state = catalogError
-				return
+				fmt.Fprintf(
+					catalog.warn,
+					"statusline: context catalog %s: model %d has no slug (skipped)\n",
+					catalog.path,
+					index,
+				)
+				continue
 			}
 			if _, duplicate := catalog.windows[m.Slug]; duplicate || (m.Window != nil && *m.Window <= 0) {
-				catalog.err = fmt.Errorf("catalog model %s has duplicate slug or invalid capacity", m.Slug)
-				catalog.state = catalogError
-				return
+				fmt.Fprintf(
+					catalog.warn,
+					"statusline: context catalog %s: model %s has a duplicate slug or invalid capacity (skipped)\n",
+					catalog.path,
+					m.Slug,
+				)
+				continue
 			}
 			catalog.windows[m.Slug] = 0
 			if m.Window != nil {

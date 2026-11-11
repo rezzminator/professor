@@ -66,7 +66,6 @@ func TestDoctorWarnsOncePerProjectNamingEveryUnresolvedRow(t *testing.T) {
 	// UPDATED: upstream moved a pinned template; NEW: upstream added one.
 	writeProjectUpdatesFixture(t, blueprint, "templates/project/settings.json", "{\"changed\": true}\n")
 	writeProjectUpdatesFixture(t, blueprint, "templates/project/commands/added.md", "# added upstream\n")
-	writeProjectUpdatesFixture(t, open, "scripts/legacy.sh", "#!/bin/sh\nclaude -p '/wave:refine'\n")
 	if err := os.MkdirAll(filepath.Join(open, "sub", "dir"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -104,10 +103,9 @@ func TestDoctorWarnsOncePerProjectNamingEveryUnresolvedRow(t *testing.T) {
 		t.Fatalf("project_updates warning rows = %d, want 2 (the open project and the unreadable one):\n%s", rows, out)
 	}
 	for _, want := range []string{
-		"doctor: warning project_updates root=" + open + " unresolved=3 — ",
+		"doctor: warning project_updates root=" + open + " unresolved=2 — ",
 		"UPDATED .claude/settings.json",
 		"NEW project/commands/added.md",
-		"RETIRED-NAME scripts/legacy.sh×1",
 		"pfm doctor --project-updates --root " + open,
 		"doctor: warning project_updates root=" + broken + " UNREADABLE: ",
 		"doctor: project_updates projects=3 unresolved=2 ",
@@ -140,7 +138,8 @@ func TestDoctorSaysSoWhenTheChatIndexCannotBeRead(t *testing.T) {
 
 	var stdout bytes.Buffer
 	if warnings := printOpenProjectsDoctor(
-		context.Background(), &stdout, nil, errors.New("pfm.db is locked"), t.TempDir(), &paths.MapEnv{},
+		context.Background(), &stdout, nil, errors.New("pfm.db is locked"),
+		stageRetiredLists(t, t.TempDir(), `{}`), &paths.MapEnv{},
 	); warnings < 2 {
 		t.Errorf("warnings=%d, want the unreadable index and the open project counted", warnings)
 	}
@@ -243,7 +242,8 @@ func TestDoctorLedgerFoldsSpellingsAndNamesWhatItCannotInspect(t *testing.T) {
 	}
 
 	var stdout bytes.Buffer
-	printOpenProjectsDoctor(context.Background(), &stdout, nil, nil, t.TempDir(), &paths.MapEnv{})
+	home := stageRetiredLists(t, t.TempDir(), `{}`)
+	printOpenProjectsDoctor(context.Background(), &stdout, nil, nil, home, &paths.MapEnv{})
 	if strings.Count(stdout.String(), "root=") != 1 ||
 		!strings.Contains(stdout.String(), "root="+open+" unresolved=1 ") {
 		t.Errorf("doctor run inside the worktree must name its project once:\n%s", stdout.String())
@@ -252,11 +252,13 @@ func TestDoctorLedgerFoldsSpellingsAndNamesWhatItCannotInspect(t *testing.T) {
 
 // TestDoctorLedgerBoundsAProjectThatNeverAnswers: a project whose baseline is
 // a FIFO blocks its report forever; the ledger gives it an UNREADABLE
-// timed-out row at the deadline and still prints every other project's row.
+// timed-out row at the deadline and still prints every other project's row,
+// its retired-name hits folded per file.
 func TestDoctorLedgerBoundsAProjectThatNeverAnswers(t *testing.T) {
 	blueprint := newProjectUpdatesStore(t)
 	open := scaffoldAdopter(t, blueprint)
 	writeProjectUpdatesFixture(t, blueprint, "templates/project/commands/added.md", "# added upstream\n")
+	writeProjectUpdatesFixture(t, open, "scripts/legacy.sh", "#!/bin/sh\nclaude -p '/wave:refine'\n")
 	stuck := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(stuck, ".professor"), 0o700); err != nil {
 		t.Fatal(err)
@@ -275,9 +277,12 @@ func TestDoctorLedgerBoundsAProjectThatNeverAnswers(t *testing.T) {
 	openProjectDeadline = 2 * time.Second
 	t.Cleanup(func() { openProjectDeadline = previous })
 
-	rows := buildOpenProjectRows([]string{open, stuck}, t.TempDir())
-	if !strings.HasPrefix(rows[0], "doctor: warning project_updates root="+open+" unresolved=1 — NEW ") {
-		t.Errorf("the answering project's row = %q", rows[0])
+	rows := buildOpenProjectRows([]string{open, stuck}, stageRetiredLists(t, t.TempDir(), waveRetired))
+	want := "doctor: warning project_updates root=" + open + " unresolved=2 — NEW project/commands/added.md · " +
+		"RETIRED-NAME scripts/legacy.sh×1 — close each with a pfm update verb: pfm doctor --project-updates --root " +
+		open + "\n"
+	if rows[0] != want {
+		t.Errorf("the answering project's row = %q, want %q", rows[0], want)
 	}
 	if rows[1] != "doctor: warning project_updates root="+stuck+" UNREADABLE: report not built within 2s\n" {
 		t.Errorf("the stuck project's row = %q, want the timed-out UNREADABLE row", rows[1])
@@ -287,6 +292,7 @@ func TestDoctorLedgerBoundsAProjectThatNeverAnswers(t *testing.T) {
 func TestDoctorUpdateHealthSkipsOnlyTheHostLedger(t *testing.T) {
 	t.Setenv("PFM_UPDATE_DOCTOR_HOST_ONLY", "1")
 	runtime := buildCleanDoctorHome(t)
+	stageRetiredClone(t, runtime.Paths.Home, waveRetired)
 	t.Chdir(t.TempDir())
 	blueprint := newProjectUpdatesStore(t)
 	project := scaffoldAdopter(t, blueprint)
@@ -329,7 +335,7 @@ func TestDoctorLedgerCancelsGitWithItsDeadline(t *testing.T) {
 	previous := openProjectDeadline
 	openProjectDeadline = 100 * time.Millisecond
 	t.Cleanup(func() { openProjectDeadline = previous })
-	rows := buildOpenProjectRows([]string{root}, t.TempDir())
+	rows := buildOpenProjectRows([]string{root}, stageRetiredLists(t, t.TempDir(), `{}`))
 	if len(rows) != 1 || !strings.Contains(rows[0], "UNREADABLE") {
 		t.Fatalf("ledger rows=%q, want an unreadable timed-out project", rows)
 	}

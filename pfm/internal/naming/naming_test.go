@@ -188,6 +188,9 @@ func TestIsJunkPrompt(t *testing.T) {
 		{prompt: "[Requester", want: true},
 		{prompt: "[request", want: false},
 		{prompt: "prefix [Request", want: false},
+		{prompt: "# AGENTS.md instructions\n\n<INSTRUCTIONS>", want: true},
+		{prompt: "# AGENTS.md instruction", want: false},
+		{prompt: "# agents.md instructions", want: false},
 	}
 
 	for _, test := range tests {

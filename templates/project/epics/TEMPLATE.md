@@ -18,7 +18,7 @@ docs/epics/{name}/
 
 ## Consolidation contract
 
-Governs every epic write. Sections named here are created on first write, so older epics converge on their next update. Epic files are working context, not reference clusters — skip the `/quality:doc` load.
+Governs every epic write. Sections named here are created on first write, so older epics converge on their next update. Epic files are working context, not reference clusters — skip the `/doc:use` load.
 
 1. **Resolve the epic:** the name given; else the `docs/epics/*/manifest.md` with `status: IN_PROGRESS` whose scope matches the work; no unambiguous match → list candidates and ask the user.
 2. **Consolidate** — for a session save, walk the ENTIRE conversation, not just recent turns; for a flight, the merged diff + report:

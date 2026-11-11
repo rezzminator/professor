@@ -2,7 +2,8 @@
 // agent role from birth." It reads the constitution a --role seat is born
 // having read — the Codex base prompt plus the compiled role's
 // developer_instructions for a cx seat, the
-// .claude/agents/<role>.md body for a cc seat — and returns it as plain text
+// .claude/agents/<role>.md body for a cc seat, a plugin's agents/<name>.md
+// for a cc seat's <plugin>:<name> role (plugin_role.go) — and returns it as plain text
 // for the caller to fold into the launch prompt, or an error naming exactly
 // what went wrong.
 //
@@ -24,6 +25,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/rezzminator/professor/pfm/internal/claudeplugin"
 	"github.com/rezzminator/professor/pfm/internal/codexprompt"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/workbench"
@@ -132,6 +134,9 @@ func otherEngine(engineID pfmengine.ID) (pfmengine.ID, bool) {
 func Resolve(engineID pfmengine.ID, role, cwd, home string) (string, Artifact, error) {
 	if strings.TrimSpace(role) == "" {
 		return "", Artifact{}, errors.New("agent role: role name is empty")
+	}
+	if plugin, agent, namespaced := strings.Cut(role, ":"); namespaced && engineID == pfmengine.Claude {
+		return resolvePluginRole(claudeplugin.ConfigDir(home), role, plugin, agent)
 	}
 	kind, err := kindFor(engineID)
 	if err != nil {

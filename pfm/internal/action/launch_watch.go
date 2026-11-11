@@ -93,9 +93,15 @@ func (executor *Executor) watchLaunch(
 			}
 		}
 		if err != nil {
+			// The last screen an earlier poll read is all that is left of
+			// what the chat printed; none read is the loss, said as such.
+			printed := "what it printed was lost"
+			if previous != "" {
+				printed = "its pane last read: " + paneWords(previous)
+			}
 			return nil, fmt.Errorf(
-				"the chat %s died at launch: its server on socket %s is gone (%w) — what it printed was lost",
-				name, socket, err,
+				"the chat %s died at launch: its server on socket %s is gone (%w) — %s",
+				name, socket, err, printed,
 			)
 		}
 		screen := pane.Screen

@@ -256,22 +256,19 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 		fmt.Fprintf(stderr, "pfm internal launch: %v\n", err)
 		return 1
 	}
-	primary, primaryErr := fleet.PrimaryAccount(runtime.Paths, runtime.Config)
-	if primaryErr != nil {
-		fmt.Fprintf(stderr, "pfm internal launch: read primary account: %v\n", primaryErr)
-		return 1
-	}
+	primary := launchPrimaryAccount(runtime, stderr)
 	configDir, accountID := launcherSeatAccount(runtime, primary, paths.OSEnv{})
 	identity, resuming, continuing := action.LauncherIdentity(arguments)
 	mode := workbench.New
 	if resuming || continuing {
 		mode = workbench.Resume
 	}
-	persona, err := action.WorkbenchPersona(workingDir, pfmengine.Claude, mode)
+	persona, personaWarnings, err := action.LaunchPersona(workingDir, pfmengine.Claude, mode)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm internal launch: %v\n", err)
 		return 1
 	}
+	launchnotice.Print(stderr, "pfm internal launch", personaWarnings)
 	freshID := ""
 	if identity == "" && !continuing {
 		var idErr error
@@ -455,11 +452,13 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 	// can record its status and close the last pane before that connection.
 	// The durable status is authoritative only after the bounded wait ended;
 	// a timeout above still fails, and absent or invalid status never succeeds.
+	// A waiter that lost that race fails with a valid status beside it: the
+	// failure is reported only when the status cannot vouch for the run.
 	status, err := readLaunchStatus(statusPath)
-	if waitErr != nil {
-		fmt.Fprintf(stderr, "pfm internal launch: wait for launcher status signal: %v\n", waitErr)
-	}
 	if err != nil {
+		if waitErr != nil {
+			fmt.Fprintf(stderr, "pfm internal launch: wait for launcher status signal: %v\n", waitErr)
+		}
 		fmt.Fprintf(stderr, "pfm internal launch: %v\n", err)
 		return 1
 	}
@@ -492,4 +491,14 @@ func readLaunchStatus(path string) (int, error) {
 
 func launchTmuxCommand(ctx context.Context, binary, socketPath string, args ...string) *pfmtmux.Cmd {
 	return pfmtmux.Exec(ctx, binary, socketPath, args...)
+}
+
+// launchPrimaryAccount is the launchers' primary-account read: an unreadable
+// store launches on the implicit account with a warning, as pfm install does.
+func launchPrimaryAccount(runtime config.Runtime, stderr io.Writer) int {
+	primary, err := fleet.PrimaryAccountOrImplicit(runtime.Paths, runtime.Config)
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm: primary account unreadable (%v); launching on account %d\n", err, primary)
+	}
+	return primary
 }

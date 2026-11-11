@@ -86,6 +86,9 @@ func (engine *Engine) awaitHerdrNative(
 			)
 		}
 		agent, err := decodeHerdrAgent(result, "agent_info", target)
+		if errors.Is(err, errHerdrStatusUnrecognized) {
+			return target, agent, "", err
+		}
 		if err != nil {
 			base.Code, base.Message = CodeUndelivered, err.Error()
 			return target, agent, "", nil

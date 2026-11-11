@@ -97,8 +97,10 @@ func ValidateNotificationShown(body json.RawMessage) error {
 	if err := json.Unmarshal(body, &ack); err != nil {
 		return fmt.Errorf("decode Herdr notification: %w", err)
 	}
-	if ack.Type != "notification_show" || ack.Shown == nil || ack.Reason == "" ||
-		(*ack.Shown && ack.Reason != "shown") || (!*ack.Shown && ack.Reason == "shown") {
+	// shown=true is the delivery; its reason is only a label. A notification
+	// not shown must say why, or no caller can tell a retry from a refusal.
+	if ack.Type != "notification_show" || ack.Shown == nil ||
+		(!*ack.Shown && (ack.Reason == "" || ack.Reason == "shown")) {
 		return fmt.Errorf("unexpected Herdr notification acknowledgement: %s", body)
 	}
 	if !*ack.Shown {
@@ -121,24 +123,64 @@ func (e *NotificationNotShownError) Error() string {
 	return fmt.Sprintf("herdr notification not shown (%s)", e.Reason)
 }
 
-// RemoveReloadFiles removes a retired native seat's reload schedule record and
-// log from sidDir; a file already gone is fine. An id that
+// RemoveReloadRecord removes a retired native seat's reload schedule record
+// from sidDir; a record already gone is fine. Its reload log stays: a reload
+// that failed ends the chat, and the log is the only record of why. An id that
 // reload.LockWorkerSchedule refuses to name a file with never had any. Every
 // door that retires a Herdr seat calls it before the seat row goes, so a
 // failure leaves the seat retryable.
-func RemoveReloadFiles(sidDir, seatID string) error {
+func RemoveReloadRecord(sidDir, seatID string) error {
 	if seatID == "" || seatID == "." || seatID == ".." || strings.ContainsAny(seatID, "/\x00") {
 		return nil
 	}
 	if sidDir == "" {
-		return errors.New("remove seat reload files: SID directory is unset")
+		return errors.New("remove seat reload record: SID directory is unset")
 	}
-	var errs []error
-	for _, suffix := range []string{".pid", ".log"} {
-		path := filepath.Join(sidDir, paths.SIDReloadHerdrPrefix+seatID+suffix)
-		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-			errs = append(errs, fmt.Errorf("remove %s: %w", path, err))
+	path := filepath.Join(sidDir, paths.SIDReloadHerdrPrefix+seatID+".pid")
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove %s: %w", path, err)
+	}
+	return nil
+}
+
+// FocusPane is the one focus of a pane on its Herdr host: agent.focus, or
+// pane.focus when the pane hosts no agent, proved by Herdr's acknowledgement
+// naming that pane focused.
+func FocusPane(ctx context.Context, socket, pane string) error {
+	body, err := SeatRequest(ctx, socket, "agent.focus", map[string]string{"target": pane})
+	if err != nil {
+		var refusal *Refusal
+		if errors.As(err, &refusal) && refusal.Code == "agent_not_found" {
+			body, err = SeatRequest(ctx, socket, "pane.focus", map[string]string{paneIDKey: pane})
 		}
 	}
-	return errors.Join(errs...)
+	if err != nil {
+		return fmt.Errorf("focus Herdr pane %s: %w", pane, err)
+	}
+	var ack struct {
+		Type string `json:"type"`
+		Pane string `json:"pane_id"`
+		Info *struct {
+			Pane    string `json:"pane_id"`
+			Focused bool   `json:"focused"`
+		} `json:"pane"`
+		Agent *struct {
+			Pane    string `json:"pane_id"`
+			Focused bool   `json:"focused"`
+		} `json:"agent"`
+	}
+	if err := json.Unmarshal(body, &ack); err != nil {
+		return fmt.Errorf("decode Herdr focus: %w", err)
+	}
+	valid := ack.Type == "pane_focused" && ack.Pane == pane
+	if ack.Type == paneInfoType {
+		valid = ack.Info != nil && ack.Info.Pane == pane && ack.Info.Focused
+	}
+	if ack.Type == "agent_info" {
+		valid = ack.Agent != nil && ack.Agent.Pane == pane && ack.Agent.Focused
+	}
+	if !valid {
+		return fmt.Errorf("unexpected Herdr focus acknowledgement: %s", body)
+	}
+	return nil
 }

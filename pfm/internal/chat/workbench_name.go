@@ -105,12 +105,13 @@ func ReserveWorkbenchName(
 		}
 		err = atomicfile.Create(path, content, 0o600)
 		if errors.Is(err, os.ErrExist) {
+			// A claim pfm cannot read still holds its number: skip past it, never refuse every name.
 			receipt, readErr := readWorkbenchNameReceipt(path)
-			if readErr != nil {
-				return claim, false, readErr
+			if readErr == nil && receipt.Name != candidate {
+				readErr = fmt.Errorf("invalid workbench name claim %s: names %q", path, receipt.Name)
 			}
-			if receipt.Name != candidate {
-				return claim, false, fmt.Errorf("invalid workbench name claim %s", path)
+			if readErr != nil {
+				_, _ = fmt.Fprintf(warn, "pfm WARN: %v; %s treated as taken\n", readErr, candidate)
 			}
 			names = append(names, candidate)
 			continue

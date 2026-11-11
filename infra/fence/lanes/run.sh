@@ -1,17 +1,26 @@
 #!/usr/bin/env bash
-# run.sh — the Tier B runner: ONE container per run, the selected lanes in
-# canonical order inside it, over the pfm state they accumulate.
+# run.sh — the Tier B runner: ONE container per machine per run, the selected
+# lanes in canonical order inside it, over the pfm state they accumulate.
 #
 #   run.sh [--lanes E1,F,…] [--root reuse|rebuild] [--seats cc:1] [--dry-run]
 #
-# Canonical order is O1 → E1 → E2 → E3 → F → M → A → O2 whatever order --lanes
-# names, because each lane reads the state the ones before it built (E1's named
+# Canonical order is O1 → E1 → E2 → E3 → F → M → A → H → O2 → HELD whatever
+# order --lanes names, because each lane reads the state the ones before it built (E1's named
 # chat is alive when F storms, when M restarts the daemon, when A rewrites the
 # adopter's hooks). One lane alone (`--lanes M`) starts a fresh container from
 # the same root and runs that lane only — its `need` prelude makes the
 # preconditions the sequence would have made. There is NO --parallel and no
 # lane-level concurrency: concurrency is a scripted beat (storm, two writers),
 # never a scheduling strategy, or every red row becomes order-dependent.
+#
+# Lane HELD runs on its own machine after the sequence: pfm-lane-held:<hash>
+# (root.sh --machine held), systemd as PID 1, the lane run as user lane (uid
+# 1000) over real Herdr and herdr-shield. It needs the herdr-shield source
+# fence-env.sh resolves (absent: `run: ✗ HELD SUBSTRATE — …`, exit 1) and Docker
+# >= 28 (`held: docker <ver> has no writable-cgroups (needs ≥ 28)`, exit 1); a
+# machine that does not reach `held: systemd running · user@1000.service
+# active` within LANE_HELD_BOOT_SECS is `held: BOOT-FAILED <state>` and a
+# failed row. Its credential scan and egress capture run in that container.
 #
 # Written per run, under /tmp/{project}/lanes/<stamp>/:
 #   <lane>.log     every beat line, the failed beats' raw pane bytes, log slices
@@ -39,7 +48,7 @@ set -uo pipefail
 
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 ROOT="$(cd -- "$HERE/../../.." && pwd -P)"
-CANONICAL="O1 E1 E2 E3 F M A H O2"
+CANONICAL="O1 E1 E2 E3 F M A H O2 HELD"
 BUDGETS="$HERE/budgets.yml"
 PENDING="$HERE/pending.txt"
 ROOT_SH="${LANE_ROOT_SH:-$HERE/root.sh}"
@@ -126,6 +135,14 @@ ORDER="$(printf '%s' "$KEPT" | sed 's/^ //')"
 COUNT="$(printf '%s\n' "$ORDER" | wc -w | tr -d ' ')"
 MODE=sequence
 [ "$COUNT" -eq 1 ] && MODE=solo
+# The machine each lane runs on: HELD needs a systemd user manager, every other
+# lane shares the root machine's accumulated state.
+lane_machine() { case "$1" in HELD) printf 'held\n' ;; *) printf 'root\n' ;; esac; }
+ROOT_ORDER="" HELD_ORDER=""
+for l in $ORDER; do
+  if [ "$(lane_machine "$l")" = held ]; then HELD_ORDER="$HELD_ORDER $l"; else ROOT_ORDER="$ROOT_ORDER $l"; fi
+done
+ROOT_ORDER="${ROOT_ORDER# }" HELD_ORDER="${HELD_ORDER# }"
 
 case "${LANE_H_SCOPE:-}" in
   "") ;;
@@ -190,16 +207,28 @@ fi
 
 # ─── the root image ─────────────────────────────────────────────────────────
 
+if [ -n "$HELD_ORDER" ]; then
+  ROOT="$ROOT" FENCE_CALLER=lanes-run . "$HERE/../fence-env.sh"
+  [ -z "$PFM_DEV_HERDR_SHIELD_MISSING" ] || die "✗ HELD SUBSTRATE — $PFM_DEV_HERDR_SHIELD_MISSING" 1
+fi
+image_decision() { # image_decision <image> — the reuse decision a plan prints
+  if [ "$ROOT_MODE" = rebuild ]; then
+    printf 'REBUILD (--root rebuild)'
+  elif ! command -v docker >/dev/null; then
+    printf 'UNKNOWN — docker is not on PATH (TOOLCHAIN-MISSING at run time)'
+  elif docker image inspect "$1" >/dev/null 2>&1; then
+    printf 'REUSE (image present)'
+  else
+    printf 'BUILD (no image for this hash)'
+  fi
+}
 HASH="$(root_sh --print-hash 2>&1)" || die "root hash: $HASH" 2
 IMAGE="pfm-lane-root:$HASH"
-if [ "$ROOT_MODE" = rebuild ]; then
-  ROOT_DECISION="REBUILD (--root rebuild)"
-elif ! command -v docker >/dev/null; then
-  ROOT_DECISION="UNKNOWN — docker is not on PATH (TOOLCHAIN-MISSING at run time)"
-elif docker image inspect "$IMAGE" >/dev/null 2>&1; then
-  ROOT_DECISION="REUSE (image present)"
-else
-  ROOT_DECISION="BUILD (no image for this hash)"
+ROOT_DECISION="$(image_decision "$IMAGE")"
+if [ -n "$HELD_ORDER" ]; then
+  HELD_HASH="$(root_sh --machine held --print-hash 2>&1)" || die "held hash: $HELD_HASH" 2
+  HELD_IMAGE="pfm-lane-held:$HELD_HASH"
+  HELD_DECISION="$(image_decision "$HELD_IMAGE")"
 fi
 
 beats_in() { grep -cE '^[[:space:]]*beat ' "$(lane_script "$1")" 2>/dev/null || echo 0; }
@@ -212,9 +241,10 @@ seats_in() {
     awk '{ print $2 }' | tr -d '"' | sort -u | tr '\n' ' ')"
   printf '%s' "${s:-none}"
 }
-prior_of() { # the lanes that run before <lane> in this run
-  local l out=""
-  for l in $ORDER; do
+prior_of() { # the lanes that run before <lane> on its machine in this run
+  local l out="" lanes="$ROOT_ORDER"
+  [ "$(lane_machine "$1")" = held ] && lanes="$HELD_ORDER"
+  for l in $lanes; do
     [ "$l" = "$1" ] && break
     out="$out $l"
   done
@@ -229,6 +259,7 @@ if [ "$DRY" -eq 1 ]; then
   say "run: mode        $MODE"
   say "run: root hash   $HASH (the root's build inputs — root.sh HASH_PATHS)"
   say "run: root image  $IMAGE — $ROOT_DECISION"
+  [ -n "$HELD_ORDER" ] && say "run: held image  $HELD_IMAGE — $HELD_DECISION"
   say "run: lane order  $(printf '%s' "$ORDER" | tr ' ' '>' | sed 's/>/ → /g')"
   say "run: seats       $SEATS"
   say "run: out dir     $OUT"
@@ -236,7 +267,9 @@ if [ "$DRY" -eq 1 ]; then
   plan_reds=0
   for l in $ORDER; do
     verdict="$(budget_verdict "lane $l" 0 "$(budget_for "$l")")" || plan_reds=$((plan_reds + 1))
-    say "lane $l · $(beats_in "$l") beats · spends $(seats_in "$l" | sed 's/ *$//') · $(printf '%s' "$verdict" | sed 's/^budget: //')"
+    machine=""
+    [ "$(lane_machine "$l")" = held ] && machine=" · machine held · image $HELD_IMAGE"
+    say "lane $l$machine · $(beats_in "$l") beats · spends $(seats_in "$l" | sed 's/ *$//') · $(printf '%s' "$verdict" | sed 's/^budget: //')"
   done
   verdict="$(budget_verdict sequence 0 "$SEQ_BUDGET")" || plan_reds=$((plan_reds + 1))
   say "run: sequence budget — $(printf '%s' "$verdict" | sed 's/^budget: //')"
@@ -259,84 +292,175 @@ elif ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
   root_sh >"$OUT/root.log" || { tail -n 40 "$OUT/root.log" >&2; die "the root image could not be built — full build output: $OUT/root.log" 1; }
 fi
 docker image inspect "$IMAGE" >/dev/null 2>&1 || die "no image $IMAGE after the root build — nothing to run" 1
+if [ -n "$HELD_ORDER" ]; then
+  docker_version="$(docker version --format '{{.Server.Version}}' 2>&1)" || die "docker version: $docker_version" 2
+  if ! [[ "${docker_version%%.*}" =~ ^[0-9]+$ ]] || [ "${docker_version%%.*}" -lt 28 ]; then
+    printf 'held: docker %s has no writable-cgroups (needs ≥ 28)\n' "$docker_version" >&2
+    exit 1
+  fi
+  held_flags=()
+  [ "$ROOT_MODE" = rebuild ] && held_flags=(--rebuild)
+  if [ "$ROOT_MODE" = rebuild ] || ! docker image inspect "$HELD_IMAGE" >/dev/null 2>&1; then
+    root_sh --machine held "${held_flags[@]}" >"$OUT/held-build.log" ||
+      { tail -n 40 "$OUT/held-build.log" >&2; die "the held image could not be built — full build output: $OUT/held-build.log" 1; }
+  fi
+  docker image inspect "$HELD_IMAGE" >/dev/null 2>&1 || die "no image $HELD_IMAGE after the held build — nothing to run" 1
+fi
 
 # shellcheck source=container.sh
 . "$HERE/container.sh"
 FENCE_CALLER=lanes-run lane_fence_env "$ROOT"
-# This run's own name — worktree, stamp, pid and a random part — so two runs started in the same
-# second never share one; the only container a run removes is the one it started.
+# This run's own names — worktree, stamp, pid and a random part — so two runs started in the same
+# second never share one; the only containers a run removes are the ones it started.
 wt_tag="$(basename "$ROOT" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9_.\n-' '-')"; wt_tag="${wt_tag#[.-]}"
 rand="$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')"
 [ "${#rand}" -eq 8 ] || die "no random part for the lane container's name from /dev/urandom" 1
 CNAME="pfm-lane-${wt_tag:-wt}-$STAMP-$$-$rand"
-trap 'docker rm -f "$CNAME" >/dev/null 2>&1' EXIT
-lane_run "$CNAME" "$IMAGE" none || die "the lane container would not start from $IMAGE" 1
-scan="$(docker exec "$CNAME" bash /worktree/infra/fence/lanes/cred-scan.sh 2>&1)" ||
-  die "✗ CREDENTIAL-REFUSED — $scan" 1
-
-
-say "run: $MODE · container $CNAME · image $IMAGE ($ROOT_DECISION) · seats $SEATS · out $OUT"
-[ -n "$SKIPPED" ] && say "run: NOT WRITTEN — pending lanes not run:$SKIPPED"
+HNAME="pfm-lane-held-${wt_tag:-wt}-$STAMP-$$-$rand"
+STARTED=""
+trap 'for started in $STARTED; do docker rm -f "$started" >/dev/null 2>&1; done' EXIT
 CONT_OUT="/tmp/lanes/$STAMP"
-printf -v egress_wait 'touch %q; until [ -e %q ]; do sleep 0.2; done' \
-  "$CONT_OUT/egress.ready" "$CONT_OUT/egress.stop"
-printf -v egress_command 'PFM_TEST_TIMING_DIR=%q bash /worktree/infra/fence/egress.sh run bash -c %q >%q 2>&1' \
-  "$CONT_OUT" "$egress_wait" "$CONT_OUT/egress.out"
-egress_ready=0
-if docker exec "$CNAME" mkdir -p "$CONT_OUT" &&
-  docker exec -d "$CNAME" bash -c "$egress_command"; then
-  deadline=$(( ${EPOCHREALTIME/./} + EGRESS_READY_SECS * 1000000 ))
+H_PFM_OVERRIDE=""
+failed_lanes="" missing_rows="" MACHINES_RUN=""
+declare -A EGRESS_READY EGRESS_STOP_ERROR EGRESS_EVIDENCE_ERROR EGRESS_VERDICT
+
+# held_boot <container> — systemd's own state, polled until the system runs and
+# the lane user's manager is active; BOOT-FAILED names the state and the failed
+# units, and keeps the journal beside the run.
+held_boot() {
+  local state="" user="" deadline waited=" after ${LANE_HELD_BOOT_SECS}s"
+  deadline=$(( ${EPOCHREALTIME/./} + LANE_HELD_BOOT_SECS * 1000000 ))
   while :; do
-    if docker exec "$CNAME" test -e "$CONT_OUT/egress.ready"; then
-      egress_ready=1
-      break
+    # An empty answer is named in place, so the two words never shift into each other.
+    read -r state user < <(docker exec "$1" bash -c \
+      's="$(systemctl is-system-running 2>/dev/null)" u="$(systemctl is-active user@1000.service 2>/dev/null)"
+      printf "%s %s\n" "${s:-unreachable}" "${u:-unknown}"' 2>/dev/null)
+    if [ "$state" = running ] && [ "$user" = active ]; then
+      say "held: systemd running · user@1000.service active"
+      return 0
     fi
+    # degraded is a finished boot with a failed unit: it fails at once, never after the wait.
+    [ "$state" = degraded ] && waited="" && break
     [ "${EPOCHREALTIME/./}" -lt "$deadline" ] || break
-    # POLL-STEP: the capture's ready file.
+    # POLL-STEP: systemd's system state and the user manager's unit state.
     sleep 0.2
   done
-fi
-H_PFM_OVERRIDE=""
-if [ -n "${LANE_H_PFM:-}" ]; then
-  H_PFM_OVERRIDE="$CONT_OUT/pfm"
-  docker cp "$LANE_H_PFM" "$CNAME:$H_PFM_OVERRIDE" || die "isolated H product copy failed" 1
-fi
-failed_lanes="" missing_rows=""
-for l in $ORDER; do
-  prior="$(prior_of "$l")"
-  say "── lane $l${prior:+ (after $prior)}"
-  docker exec -w /tmp \
-    -e "LANE_MODE=$MODE" -e "LANE_PRIOR=$prior" -e "LANE_SEATS=$SEATS" \
-    -e "LANE_OUT_DIR=$CONT_OUT" -e "LANE_STAMP=$STAMP" -e "LANE_PROFILE=${LANE_PROFILE:-}" \
-    -e "LANE_H_SCOPE=${LANE_H_SCOPE:-all}" -e "H_PFM_OVERRIDE=$H_PFM_OVERRIDE" -e IS_SANDBOX=1 -e GOPROXY=off \
-    "$CNAME" bash "/worktree/infra/fence/lanes/$l.sh" 2>&1 | tee "$OUT/$l.stream.log"
-  rc="${PIPESTATUS[0]}"
-  for f in "$l.log" "$l.timeline.tsv" "$l.row.tsv" "$l.logstate" "$l.seats" "$l.waits.tsv"; do
-    docker cp "$CNAME:$CONT_OUT/$f" "$OUT/$f" >/dev/null 2>&1
-  done
-  if [ ! -f "$OUT/$l.row.tsv" ]; then
-    say "run: ✗ lane $l produced no result row (exit $rc) — it died before lane_end; its stream is $OUT/$l.stream.log"
-    missing_rows="$missing_rows $l"
-    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$l" 0 0 1 0 0 >"$OUT/$l.row.tsv"
-  fi
-  [ "$rc" -ne 0 ] && failed_lanes="$failed_lanes $l"
-done
+  say "held: BOOT-FAILED ${state:-unreachable} (user@1000.service ${user:-unknown})$waited"
+  docker exec "$1" systemctl --failed --no-legend 2>&1 | sed 's/^/held:   /'
+  docker exec "$1" journalctl -b --no-pager >"$OUT/held-boot.log" 2>&1
+  say "held: boot journal $OUT/held-boot.log"
+  return 1
+}
 
-egress_stop_error="" egress_evidence_error="" egress_verdict=""
-docker exec "$CNAME" touch "$CONT_OUT/egress.stop" || egress_stop_error="egress: could not stop the capture"
-deadline=$(( ${EPOCHREALTIME/./} + EGRESS_VERDICT_SECS * 1000000 ))
-while :; do
-  docker exec "$CNAME" grep -q '^EGRESS ' "$CONT_OUT/egress.out" && break
-  [ "${EPOCHREALTIME/./}" -lt "$deadline" ] || break
-  # POLL-STEP: the capture's verdict line.
-  sleep 0.2
-done
-if docker cp "$CNAME:$CONT_OUT/egress.out" "$OUT/egress.out" >/dev/null 2>&1; then
-  egress_verdict="$(grep -m1 '^EGRESS ' "$OUT/egress.out")"
-fi
-mkdir -p "$OUT/egress"
-docker cp "$CNAME:$CONT_OUT/egress/." "$OUT/egress/" >/dev/null 2>&1 ||
-  egress_evidence_error="egress: could not copy recorder evidence to $OUT/egress/"
+# held_failed <lane…> — each held lane's failed row, when its machine never ran it.
+held_failed() {
+  local l
+  for l in "$@"; do
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$l" 0 0 1 0 0 >"$OUT/$l.row.tsv"
+    failed_lanes="$failed_lanes $l"
+  done
+}
+
+# machine_run <root|held> <container> <image> <decision> <lane…> — one machine:
+# start, boot (held), credential scan, egress capture, the lanes, the verdict.
+machine_run() {
+  local machine="$1" name="$2" image="$3" decision="$4" pre="" whose="the" mode="$MODE" scan l prior rc f deadline
+  local exec_args=() egress_wait egress_command
+  shift 4
+  [ "$machine" = held ] && pre="held-" whose="the held machine's"
+  STARTED="$STARTED $name"
+  if [ "$machine" = held ]; then
+    # The root lanes have run by now: a held machine that cannot start, boot or
+    # pass the scan is HELD's failed row, and their report still aggregates.
+    if ! lane_run "$name" "$image" none held; then
+      say "run: ✗ the held machine would not start from $image"
+      held_failed "$@"; return 0
+    fi
+    if ! held_boot "$name"; then held_failed "$@"; return 0; fi
+    if ! scan="$(docker exec "$name" bash /worktree/infra/fence/lanes/cred-scan.sh 2>&1)"; then
+      say "run: ✗ CREDENTIAL-REFUSED on the held machine — $scan"
+      held_failed "$@"; return 0
+    fi
+    exec_args=("${LANE_HELD_EXEC[@]}" -e XDG_RUNTIME_DIR=/run/user/1000
+      -e DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus)
+    mode=solo
+  else
+    lane_run "$name" "$image" none root || die "the lane container would not start from $image" 1
+    scan="$(docker exec "$name" bash /worktree/infra/fence/lanes/cred-scan.sh 2>&1)" ||
+      die "✗ CREDENTIAL-REFUSED — $scan" 1
+  fi
+  MACHINES_RUN="$MACHINES_RUN $machine"
+  if [ "$machine" = held ]; then
+    say "run: held · container $name · image $image ($decision) · seats $SEATS · out $OUT"
+  else
+    say "run: $MODE · container $name · image $image ($decision) · seats $SEATS · out $OUT"
+    [ -n "$SKIPPED" ] && say "run: NOT WRITTEN — pending lanes not run:$SKIPPED"
+  fi
+  printf -v egress_wait 'touch %q; until [ -e %q ]; do sleep 0.2; done' \
+    "$CONT_OUT/egress.ready" "$CONT_OUT/egress.stop"
+  printf -v egress_command 'PFM_TEST_TIMING_DIR=%q bash /worktree/infra/fence/egress.sh run bash -c %q >%q 2>&1' \
+    "$CONT_OUT" "$egress_wait" "$CONT_OUT/egress.out"
+  EGRESS_READY[$machine]=0
+  if docker exec "$name" mkdir -p "$CONT_OUT" &&
+    { [ "$machine" = root ] || docker exec "$name" chown 1000:1000 "$CONT_OUT"; } &&
+    docker exec -d "$name" bash -c "$egress_command"; then
+    deadline=$(( ${EPOCHREALTIME/./} + EGRESS_READY_SECS * 1000000 ))
+    while :; do
+      if docker exec "$name" test -e "$CONT_OUT/egress.ready"; then
+        EGRESS_READY[$machine]=1
+        break
+      fi
+      [ "${EPOCHREALTIME/./}" -lt "$deadline" ] || break
+      # POLL-STEP: the capture's ready file.
+      sleep 0.2
+    done
+  fi
+  if [ "$machine" = root ] && [ -n "${LANE_H_PFM:-}" ]; then
+    H_PFM_OVERRIDE="$CONT_OUT/pfm"
+    docker cp "$LANE_H_PFM" "$name:$H_PFM_OVERRIDE" || die "isolated H product copy failed" 1
+  fi
+  [ "$machine" = root ] && [ "$#" -eq 1 ] && mode=solo
+  for l in "$@"; do
+    prior="$(prior_of "$l")"
+    say "── lane $l${prior:+ (after $prior)}$( [ "$machine" = held ] && printf ' · held machine')"
+    docker exec "${exec_args[@]}" -w /tmp \
+      -e "LANE_MODE=$mode" -e "LANE_PRIOR=$prior" -e "LANE_SEATS=$SEATS" \
+      -e "LANE_OUT_DIR=$CONT_OUT" -e "LANE_STAMP=$STAMP" -e "LANE_PROFILE=${LANE_PROFILE:-}" \
+      -e "LANE_H_SCOPE=${LANE_H_SCOPE:-all}" -e "H_PFM_OVERRIDE=$H_PFM_OVERRIDE" -e IS_SANDBOX=1 -e GOPROXY=off \
+      "$name" bash "/worktree/infra/fence/lanes/$l.sh" 2>&1 | tee "$OUT/$l.stream.log"
+    rc="${PIPESTATUS[0]}"
+    for f in "$l.log" "$l.timeline.tsv" "$l.row.tsv" "$l.logstate" "$l.seats" "$l.waits.tsv"; do
+      docker cp "$name:$CONT_OUT/$f" "$OUT/$f" >/dev/null 2>&1
+    done
+    if [ ! -f "$OUT/$l.row.tsv" ]; then
+      say "run: ✗ lane $l produced no result row (exit $rc) — it died before lane_end; its stream is $OUT/$l.stream.log"
+      missing_rows="$missing_rows $l"
+      printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$l" 0 0 1 0 0 >"$OUT/$l.row.tsv"
+    fi
+    [ "$rc" -ne 0 ] && failed_lanes="$failed_lanes $l"
+  done
+
+  EGRESS_STOP_ERROR[$machine]="" EGRESS_EVIDENCE_ERROR[$machine]="" EGRESS_VERDICT[$machine]=""
+  docker exec "$name" touch "$CONT_OUT/egress.stop" || EGRESS_STOP_ERROR[$machine]="egress: could not stop $whose capture"
+  deadline=$(( ${EPOCHREALTIME/./} + EGRESS_VERDICT_SECS * 1000000 ))
+  while :; do
+    docker exec "$name" grep -q '^EGRESS ' "$CONT_OUT/egress.out" && break
+    [ "${EPOCHREALTIME/./}" -lt "$deadline" ] || break
+    # POLL-STEP: the capture's verdict line.
+    sleep 0.2
+  done
+  if docker cp "$name:$CONT_OUT/egress.out" "$OUT/${pre}egress.out" >/dev/null 2>&1; then
+    EGRESS_VERDICT[$machine]="$(grep -m1 '^EGRESS ' "$OUT/${pre}egress.out")"
+  fi
+  mkdir -p "$OUT/${pre}egress"
+  docker cp "$name:$CONT_OUT/egress/." "$OUT/${pre}egress/" >/dev/null 2>&1 ||
+    EGRESS_EVIDENCE_ERROR[$machine]="egress: could not copy ${pre:+$whose }recorder evidence to $OUT/${pre}egress/"
+}
+
+# shellcheck disable=SC2086 # the lane lists are space-delimited lane keys.
+[ -z "$ROOT_ORDER" ] || machine_run root "$CNAME" "$IMAGE" "$ROOT_DECISION" $ROOT_ORDER
+# shellcheck disable=SC2086
+[ -z "$HELD_ORDER" ] || machine_run held "$HNAME" "$HELD_IMAGE" "$HELD_DECISION" $HELD_ORDER
 
 # ─── aggregation ────────────────────────────────────────────────────────────
 
@@ -370,7 +494,13 @@ for l in $ORDER; do
 "
 done
 if [ "$MODE" = sequence ]; then
-  line="$(budget_verdict sequence "$total_wall" "$SEQ_BUDGET")" || budget_reds=$((budget_reds + 1))
+  # The sequence budget is the root machine's: lane HELD runs on its own machine after it.
+  sequence_wall=0
+  for l in $ROOT_ORDER; do
+    wall="$(awk -F'\t' -v l="$l" '$1 == l { print $2; exit }' "$OUT/lanes.tsv")"
+    sequence_wall=$((sequence_wall + ${wall:-0}))
+  done
+  line="$(budget_verdict sequence "$sequence_wall" "$SEQ_BUDGET")" || budget_reds=$((budget_reds + 1))
   budget_lines="$budget_lines$line
 "
 fi
@@ -386,9 +516,16 @@ done
   printf -- '- lane order: %s\n' "$(printf '%s' "$ORDER" | sed 's/ / → /g')"
   for l in $ORDER; do
     prior="$(prior_of "$l")"
-    printf -- '  - %s — ran after: %s\n' "$l" "${prior:-nothing (first in this run)}"
+    if [ "$(lane_machine "$l")" = held ]; then
+      printf -- '  - %s — ran after: %s\n' "$l" "${prior:-nothing (first on its own held machine)}"
+    else
+      printf -- '  - %s — ran after: %s\n' "$l" "${prior:-nothing (first in this run)}"
+    fi
   done
   printf -- '- root image: `%s` (%s)\n' "$IMAGE" "$ROOT_DECISION"
+  [ -n "$HELD_ORDER" ] && printf -- '- held image: `%s` (%s)\n' "$HELD_IMAGE" "$HELD_DECISION"
+  printf -- '- containers:%s%s\n' "$( [ -n "$ROOT_ORDER" ] && printf ' root `%s`' "$CNAME")" \
+    "$( [ -n "$HELD_ORDER" ] && printf ' · held `%s`' "$HNAME")"
   printf -- '- seats: %s\n' "$SEATS"
   [ -n "$SKIPPED" ] && printf -- '- NOT WRITTEN (pending.txt), not run:%s\n' "$SKIPPED"
   printf -- '- totals: %s beats · %s failed · %s known-gap · %s blocked · %ss wall\n\n' \
@@ -436,14 +573,18 @@ status=0
 [ -n "$unmapped" ] && status=1
 [ -n "$log_absent" ] && status=1
 [ "$budget_reds" -gt 0 ] && { say "run: ✗ $budget_reds budget verdict(s) red"; status=1; }
-[ "$egress_ready" -eq 0 ] && { say "egress: ✗ NOT RECORDED — the capture did not start in ${EGRESS_READY_SECS}s"; status=1; }
-[ -n "$egress_stop_error" ] && { say "$egress_stop_error"; status=1; }
-[ -n "$egress_evidence_error" ] && say "$egress_evidence_error"
-if [ -n "$egress_verdict" ]; then
-  case "$egress_verdict" in EGRESS\ PASS\ *) ;; *) status=1 ;; esac
-  awk '/^EGRESS / { verdict=$0; next } { print } END { print verdict }' "$OUT/egress.out"
-else
-  say "egress: ✗ NOT RECORDED — no verdict from egress.sh in ${EGRESS_VERDICT_SECS}s"
-  status=1
-fi
+for machine in $MACHINES_RUN; do
+  pre="" whose="the"
+  [ "$machine" = held ] && pre="held-" whose="the held machine's"
+  [ "${EGRESS_READY[$machine]}" -eq 0 ] && { say "egress: ✗ NOT RECORDED — $whose capture did not start in ${EGRESS_READY_SECS}s"; status=1; }
+  [ -n "${EGRESS_STOP_ERROR[$machine]}" ] && { say "${EGRESS_STOP_ERROR[$machine]}"; status=1; }
+  [ -n "${EGRESS_EVIDENCE_ERROR[$machine]}" ] && say "${EGRESS_EVIDENCE_ERROR[$machine]}"
+  if [ -n "${EGRESS_VERDICT[$machine]}" ]; then
+    case "${EGRESS_VERDICT[$machine]}" in EGRESS\ PASS\ *) ;; *) status=1 ;; esac
+    awk '/^EGRESS / { verdict=$0; next } { print } END { print verdict }' "$OUT/${pre}egress.out"
+  else
+    say "egress: ✗ NOT RECORDED — no verdict from ${pre:+$whose }egress.sh in ${EGRESS_VERDICT_SECS}s"
+    status=1
+  fi
+done
 exit "$status"

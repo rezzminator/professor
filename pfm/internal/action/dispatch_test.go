@@ -126,6 +126,11 @@ func TestDirectTmuxArgumentsPreserveQuotedData(t *testing.T) {
 	if !direct || !reflect.DeepEqual(got, want) {
 		t.Fatalf("directTmuxArguments() = %q, %v; want %q, true", got, direct, want)
 	}
+	// An unterminated quote is not the splitter's to refuse: zsh gets the line.
+	got, direct, err = directTmuxArguments(`TMUX= exec tmux -L 'cc-1 attach`)
+	if err != nil || direct || got != nil {
+		t.Fatalf("directTmuxArguments(unterminated) = %q, %v, %v; want nil, false, nil", got, direct, err)
+	}
 }
 
 func replaceActionTestEnvironment(environment []string, replacements map[string]string) []string {

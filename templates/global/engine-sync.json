@@ -8,21 +8,14 @@
   },
   "machine": {
     "managedBy": "professor",
-    "retiredAgents": [
-      "frr",
-      "gpt-executor",
-      "gpt-lander",
-      "imagine",
-      "rr-super",
-      "terra",
-      "ultimate"
-    ],
-    "retiredFiles": [
-      ".codex/agents/explorer.toml"
-    ],
+    "retiredAgents": [],
+    "retiredFiles": [],
     "sourceGeneratedAgentsDir": "templates/generated/agents",
     "sourceAgentsDir": "templates/global/agents",
-    "agentMarkerDir": "templates/global/agents"
+    "agentMarkerDir": "templates/global/agents",
+    "plugins": [
+      "flights"
+    ]
   },
   "codex": {
     "globalCommands": true,

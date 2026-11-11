@@ -17,6 +17,7 @@ import (
 	"syscall"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/claudeplugin"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
 
@@ -37,8 +38,18 @@ func professorDevMarketplace(home string) string {
 	return filepath.Join(home, ".local", "share", pfmconfig.ProfessorMarketplace+"-dev")
 }
 
-// pluginCopySkipped names the checkout entries the copy leaves out.
-func pluginCopySkipped(name string) bool { return name == "node_modules" || name == ".DS_Store" }
+// pluginCopySkipped names the entries, by path under the plugin root, the copy
+// leaves out: dependencies, Finder's .DS_Store, and the typings and tsconfig.json
+// Claude Code generates into a plugin folder it loads, so a chat loading the copy
+// never reads as drift.
+func pluginCopySkipped(rel string) bool {
+	switch rel {
+	case filepath.Join(".claude-plugin", "types"), "tsconfig.json":
+		return true
+	}
+	name := filepath.Base(rel)
+	return name == "node_modules" || name == ".DS_Store"
+}
 
 // localClaudePluginTarget turns an -alpha build's target local when its
 // checkout exists under the checkout root, and otherwise says why not. The
@@ -144,17 +155,27 @@ func (installer *engine) ensureClaudePluginCopy(target *ClaudePluginTarget) erro
 		return err
 	}
 	if !current {
+		message, backup := "add "+target.Name+" to "+manifestPath, ""
+		if manifest.Name != pfmconfig.ProfessorMarketplace {
+			// A manifest that does not parse or names another marketplace is
+			// rewritten whole: its bytes are kept beside it first.
+			if _, err := os.Lstat(manifestPath); err == nil {
+				backup = availableBackup(manifestPath, installer.stamp)
+				message += "; the manifest it replaces kept as " + backup
+			} else if !errors.Is(err, fs.ErrNotExist) {
+				return fmt.Errorf("inspect %s: %w", manifestPath, err)
+			}
+		}
 		// Every other plugin's entry stays: each target adds its own.
 		manifest.Name = pfmconfig.ProfessorMarketplace
-		manifest.Owner = &devMarketplaceOwner{Name: claudePluginOwner, URL: "https://github.com/" + claudePluginOwner}
-		manifest.Plugins = append(slices.DeleteFunc(manifest.Plugins, func(entry devMarketplaceEntry) bool {
+		manifest.Owner = &claudeplugin.MarketplaceOwner{
+			Name: claudePluginOwner,
+			URL:  "https://github.com/" + claudePluginOwner,
+		}
+		manifest.Plugins = append(slices.DeleteFunc(manifest.Plugins, func(entry claudeplugin.MarketplaceEntry) bool {
 			return entry.Name == target.Name
-		}), devMarketplaceEntry{Name: target.Name, Source: "./plugins/" + target.Name})
-		if err := installer.writeDevMarketplaceManifest(
-			"add "+target.Name+" to "+manifestPath,
-			manifestPath,
-			manifest,
-		); err != nil {
+		}), claudeplugin.MarketplaceEntry{Name: target.Name, Source: "./plugins/" + target.Name})
+		if err := installer.writeDevMarketplaceManifest(message, manifestPath, backup, manifest); err != nil {
 			return err
 		}
 	}
@@ -172,13 +193,23 @@ func (installer *engine) ensureClaudePluginCopy(target *ClaudePluginTarget) erro
 
 // writeDevMarketplaceManifest is the one writer of the local professor
 // marketplace's manifest at path: manifest, indented, as one change line
-// message.
-func (installer *engine) writeDevMarketplaceManifest(message, path string, manifest devMarketplaceManifest) error {
+// message, the current file copied to backup first when backup is set.
+func (installer *engine) writeDevMarketplaceManifest(
+	message, path, backup string,
+	manifest claudeplugin.Marketplace,
+) error {
 	raw, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode %s: %w", path, err)
 	}
-	return installer.change(message, func() error { return atomicfile.Write(path, append(raw, '\n'), 0o644) })
+	return installer.change(message, func() error {
+		if backup != "" {
+			if err := copyBackup(path, backup); err != nil {
+				return fmt.Errorf("back up %s: %w", path, err)
+			}
+		}
+		return atomicfile.Write(path, append(raw, '\n'), 0o644)
+	})
 }
 
 // devMarketplaceCurrent reads the local professor marketplace's manifest at
@@ -187,8 +218,8 @@ func (installer *engine) writeDevMarketplaceManifest(message, path string, manif
 // other keys (a description) included; a manifest of another name or one that
 // does not parse is not current and comes back empty, rewritten whole; one
 // missing the plugin comes back with the entries it has.
-func devMarketplaceCurrent(path, plugin string) (devMarketplaceManifest, bool, error) {
-	var manifest devMarketplaceManifest
+func devMarketplaceCurrent(path, plugin string) (claudeplugin.Marketplace, bool, error) {
+	var manifest claudeplugin.Marketplace
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return manifest, false, nil
@@ -197,7 +228,7 @@ func devMarketplaceCurrent(path, plugin string) (devMarketplaceManifest, bool, e
 		return manifest, false, fmt.Errorf("read %s: %w", path, err)
 	}
 	if json.Unmarshal(raw, &manifest) != nil || manifest.Name != pfmconfig.ProfessorMarketplace {
-		return devMarketplaceManifest{}, false, nil
+		return claudeplugin.Marketplace{}, false, nil
 	}
 	for _, entry := range manifest.Plugins {
 		if entry.Name == plugin && entry.Source == "./plugins/"+plugin {
@@ -205,25 +236,6 @@ func devMarketplaceCurrent(path, plugin string) (devMarketplaceManifest, bool, e
 		}
 	}
 	return manifest, false, nil
-}
-
-// devMarketplaceManifest is a directory marketplace's .claude-plugin/marketplace.json.
-type devMarketplaceManifest struct {
-	Name        string                `json:"name"`
-	Description string                `json:"description,omitempty"`
-	Owner       *devMarketplaceOwner  `json:"owner,omitempty"`
-	Plugins     []devMarketplaceEntry `json:"plugins"`
-}
-
-type devMarketplaceOwner struct {
-	Name string `json:"name"`
-	URL  string `json:"url"`
-}
-
-// devMarketplaceEntry's Source is any: Claude also accepts an object source.
-type devMarketplaceEntry struct {
-	Name   string `json:"name"`
-	Source any    `json:"source"`
 }
 
 // pluginCopyChange is the change that brings mirror to checkout's content, or
@@ -257,8 +269,8 @@ func pluginCopyChange(checkout, mirror string) (string, error) {
 }
 
 // walkPluginTree visits root and everything under it, root's own rel "",
-// following symlinks to what they name and leaving out each entry skip
-// names. A dangling link, a symlink loop or a special file is an error.
+// following symlinks to what they name and leaving out each entry whose path
+// under root skip names. A dangling link, a symlink loop or a special file is an error.
 func walkPluginTree(root string, skip func(string) bool, visit func(rel, path string, info fs.FileInfo) error) error {
 	active := map[string]bool{}
 	var walk func(path, rel string) error
@@ -290,7 +302,7 @@ func walkPluginTree(root string, skip func(string) bool, visit func(rel, path st
 			return err
 		}
 		for _, entry := range entries {
-			if skip != nil && skip(entry.Name()) {
+			if skip != nil && skip(filepath.Join(rel, entry.Name())) {
 				continue
 			}
 			if err := walk(filepath.Join(path, entry.Name()), filepath.Join(rel, entry.Name())); err != nil {
@@ -386,73 +398,34 @@ func mirrorPluginTree(source, target string) error {
 	return os.RemoveAll(aside)
 }
 
-// planLegacyCopyRetirement plans the settings.json edit that runs before the
-// legacy ids' uninstall, which deletes their pluginConfigs: the pluginConfigs
-// entry of a legacy id (LegacyIDs), the first enabled one that has one, else
-// the first, copied to the build's id when that id has none, never
-// overwriting, and every enabled legacy id set false. An install-only target's own id is set false too: claude.plugins does
-// not list it. It returns "" when there is nothing to do. The edit writes
+// planInstallOnlyDisable plans the settings.json edit that sets an enabled
+// install-only target's id false: claude.plugins does not list it. It returns
+// "" for a listed target, one not enabled, or an absent file. The edit writes
 // through a settings.json symlink and keeps every number exactly.
-func planLegacyCopyRetirement(path string, target *ClaudePluginTarget) (string, func() error, error) {
-	raw, document, err := readSettingsForEdit(path)
-	if err != nil || document == nil {
-		return "", nil, err
-	}
-	disabled, carried := retireLegacyCopies(document, target)
-	if len(disabled) == 0 && carried == "" {
+func planInstallOnlyDisable(path string, target *ClaudePluginTarget) (string, func() error, error) {
+	if !target.InstallOnly {
 		return "", nil, nil
 	}
-	message := "copy the pluginConfigs of " + carried + " to " + target.ID + " in " + path
-	if len(disabled) != 0 {
-		reason := target.ID + " replaces it"
-		if target.InstallOnly {
-			reason = pfmconfig.KeyClaudePlugins + " does not list " + target.Name
-		}
-		message = "disable " + strings.Join(disabled, ", ") + " in " + path + ": " + reason
-		switch {
-		case carried == "":
-		case len(disabled) == 1 && disabled[0] == carried:
-			message += "; copy its pluginConfigs to " + target.ID
-		default:
-			message += "; copy the pluginConfigs of " + carried + " to " + target.ID
-		}
+	raw, document, err := readSettingsForEdit(path)
+	if err != nil || document == nil || !disableInstallOnly(document, target) {
+		return "", nil, err
 	}
+	message := "disable " + target.ID + " in " + path + ": " + pfmconfig.KeyClaudePlugins + " does not list " + target.Name
 	return message, writeSettingsDocument(path, raw, document, func(fresh map[string]any) error {
-		retireLegacyCopies(fresh, target)
+		disableInstallOnly(fresh, target)
 		return nil
 	}), nil
 }
 
-// retireLegacyCopies applies planLegacyCopyRetirement's edit to document and
-// names what it changed: the ids it set false and the id whose pluginConfigs
-// entry it carried to the build's id.
-func retireLegacyCopies(document map[string]any, target *ClaudePluginTarget) (disabled []string, carried string) {
-	legacy := target.LegacyIDs()
+// disableInstallOnly sets target.ID false in document's enabledPlugins when
+// it is enabled, reporting whether it was.
+func disableInstallOnly(document map[string]any, target *ClaudePluginTarget) bool {
 	enabled, _ := document["enabledPlugins"].(map[string]any)
-	if target.InstallOnly && enabled[target.ID] == true {
-		disabled = append(disabled, target.ID)
+	if enabled[target.ID] != true {
+		return false
 	}
-	for _, id := range legacy {
-		if enabled[id] == true {
-			disabled = append(disabled, id)
-		}
-	}
-	configs, _ := document["pluginConfigs"].(map[string]any)
-	if _, kept := configs[target.ID]; !kept {
-		// An enabled legacy id's options are the ones in use: they win.
-		for _, id := range legacy {
-			if _, ok := configs[id]; ok && (carried == "" || enabled[id] == true && enabled[carried] != true) {
-				carried = id
-			}
-		}
-		if carried != "" {
-			configs[target.ID] = configs[carried]
-		}
-	}
-	for _, id := range disabled {
-		enabled[id] = false
-	}
-	return disabled, carried
+	enabled[target.ID] = false
+	return true
 }
 
 // readSettingsForEdit reads path as an edit's base: its bytes, which the edit
@@ -633,38 +606,14 @@ func settingsEditTarget(path string) (string, fs.FileMode, error) {
 	return resolved, info.Mode().Perm(), nil
 }
 
-// retiredClaudePlugins are plugin ids once ours that a successor replaced,
-// keyed by the successor's bare name. Doctor flags each enabled one
-// (ClaudePluginGaps); install disables it, never uninstalls it, once the
-// successor is ensured.
-var retiredClaudePlugins = map[string][]string{
-	"auto-effort": {
-		"agent-effort@agent-effort",
-		"agent-effort@agent-effort-dev",
-		"agent-effort@professor",
-		"agent-effort@rezzminator",
-		"auto-effort-control@rezzminator",
-		"auto-effort@rezzminator",
-		"effort-live-control@effort-live-control",
-		"effort-live-control@effort-live-control-dev",
-		"effort-live-control@professor",
-		"effort-live-control@rezzminator",
-	},
-	"forward-compaction": {
-		"sub-agent-compact@professor",
-		"sub-agent-compact@sub-agent-compact",
-		"sub-agent-compact@sub-agent-compact-dev",
-	},
-}
-
-// planRetiredPluginDisable plans the settings.json edit that retires every
-// retired id of target's name: each enabled one set false in enabledPlugins,
+// planRetiredPluginDisable plans the settings.json edit that retires each of
+// retired, the retired lists' plugin ids of target's name (retired.Lists
+// ClaudePlugins): each enabled one set false in enabledPlugins,
 // and the plugin's pluginConfigs settled on target.ID alone (retireConfigs).
 // It returns "" when none is enabled, no entry needs settling or the file is
 // absent. The edit writes through a settings.json symlink and keeps every
 // number exactly.
-func planRetiredPluginDisable(path string, target *ClaudePluginTarget) (string, func() error, error) {
-	retired := retiredClaudePlugins[target.Name]
+func planRetiredPluginDisable(path string, target *ClaudePluginTarget, retired []string) (string, func() error, error) {
 	if len(retired) == 0 {
 		return "", nil, nil
 	}

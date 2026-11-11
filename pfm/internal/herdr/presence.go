@@ -69,8 +69,8 @@ type Probe struct {
 	// Environ reads another process's environment (gather's ProcFS.Environ):
 	// how a tmux client no hook registered is found to run in Herdr.
 	Environ func(pid int) (map[string]string, error)
-	// Keep reads the panes herdr-keep holds.
-	Keep *Keep
+	// Shield reads the panes herdr-shield holds.
+	Shield *Shield
 	// Hookless says whether the chat of a seat was launched without the Herdr
 	// reporter hooks; known is false when its launch cannot be read, and the
 	// detail is then left out, never guessed.
@@ -163,10 +163,14 @@ func (probe Probe) seatPresence(ctx context.Context, seat Seat, sockets map[stri
 	if err != nil {
 		return "", fmt.Errorf("read %s of %s: %w", StoredOption, target, err)
 	}
+	// Registered clients that cannot be read are unplaced, never absent: the
+	// live tmux clients are still resolved, and the seat names what it lost.
 	var stored Stored
+	var unplaced []error
 	if raw := strings.TrimSpace(output); raw != "" {
 		if err := json.Unmarshal([]byte(raw), &stored); err != nil {
-			return "", fmt.Errorf("decode %s of %s (%q): %w", StoredOption, target, raw, err)
+			stored = Stored{}
+			unplaced = append(unplaced, fmt.Errorf("decode %s of %s (%q): %w", StoredOption, target, raw, err))
 		}
 	}
 	live, err := probe.liveClients(ctx, seat, target)
@@ -175,11 +179,13 @@ func (probe Probe) seatPresence(ctx context.Context, seat Seat, sockets map[stri
 	}
 	pids := clientPIDs(stored, live)
 	if len(pids) == 0 {
+		if len(unplaced) > 0 {
+			return "", errors.Join(unplaced...)
+		}
 		return PresenceNotInHerdr, nil
 	}
 	resolver := probe.resolver(sockets)
 	var shown []string
-	var unplaced []error
 	outside := 0
 	hooklessKnown, hookless := false, false
 	for _, pid := range pids {
@@ -187,13 +193,14 @@ func (probe Probe) seatPresence(ctx context.Context, seat Seat, sockets map[stri
 		var found bool
 		if client, registered := stored.Clients[pid]; registered {
 			if client.Socket == "" || (client.Pane == "" && client.Terminal == "") {
-				return "", fmt.Errorf(
+				unplaced = append(unplaced, fmt.Errorf(
 					"%s of %s: client %s names no pane or no Herdr socket: %+v",
 					StoredOption,
 					target,
 					pid,
 					client,
-				)
+				))
+				continue
 			}
 			view := probe.socketViewOf(ctx, client.Socket, sockets)
 			if view.err != nil {
@@ -331,10 +338,10 @@ func (probe Probe) resolver(sockets map[string]*socketView) Resolver {
 		sequence++
 		return sequence
 	}
-	wire := WireResolver(probe.Environ, probe.Call, next, probe.Keep)
+	wire := WireResolver(probe.Environ, probe.Call, next, probe.Shield)
 	return Resolver{
 		Environ: probe.Environ,
-		Keep:    probe.Keep,
+		Shield:  probe.Shield,
 		Panes: func(ctx context.Context, socket string) ([]Pane, error) {
 			view := probe.socketViewOf(ctx, socket, sockets)
 			if view.err != nil {
@@ -357,11 +364,14 @@ func (probe Probe) socketViewOf(ctx context.Context, socket string, sockets map[
 }
 
 // socketView is what one Herdr socket answered for a listing: its panes, the
-// agents on them and the workspace labels, or why it could not.
+// agents on them and the workspace labels, or why it could not. agentsErr is
+// an agent.list that could not be read beside readable panes: no pane is then
+// shown as holding no agent.
 type socketView struct {
 	panes      []Pane
 	agents     map[string]Agent
 	workspaces map[string]string
+	agentsErr  error
 	err        error
 }
 
@@ -397,18 +407,27 @@ func (probe Probe) look(ctx context.Context, socket string) *socketView {
 	if view.panes, err = ParsePanes(results[0]); err != nil {
 		return fail(err)
 	}
+	// Panes alone place a client: an unreadable agent or label list is named
+	// and shown as such, never the whole socket unreachable.
 	agents, err := ParseAgentList(results[1])
 	if err != nil {
-		return fail(err)
+		view.agentsErr = err
+		probe.warn("pfm chat ls: herdr socket %s: %v — panes shown with %s", socket, err, agentsUnread)
 	}
 	for _, agent := range agents {
 		view.agents[agent.PaneID] = agent
 	}
-	if view.workspaces, err = ParseWorkspaceList(results[2]); err != nil {
-		return fail(err)
+	workspaces, err := ParseWorkspaceList(results[2])
+	if err != nil {
+		probe.warn("pfm chat ls: herdr socket %s: %v — panes shown by workspace id", socket, err)
+	} else {
+		view.workspaces = workspaces
 	}
 	return view
 }
+
+// agentsUnread stands in a pane's agent fields when agent.list could not be read.
+const agentsUnread = "agents-unread"
 
 // presenceHit is one client's pane as shown: its text and the agent status the
 // text carries ("" for a pane with no agent).
@@ -436,9 +455,12 @@ func (view *socketView) describe(client Client) (hit presenceHit, found bool) {
 		fields := []string{pane.PaneID, workspace}
 		agent, hasAgent := view.agents[pane.PaneID]
 		status := ""
-		if !hasAgent {
+		switch {
+		case !hasAgent && view.agentsErr != nil:
+			fields = append(fields, agentsUnread)
+		case !hasAgent:
 			fields = append(fields, "no-agent")
-		} else {
+		default:
 			status = agent.Status
 			fields = append(fields, agent.Status)
 			if agent.Name != "" {

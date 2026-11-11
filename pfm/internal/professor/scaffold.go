@@ -35,6 +35,7 @@ var initTemplatePaths = []struct {
 	{source: "project/codex", target: ".codex"},
 	{source: "project/docs-commands", target: "docs/commands"},
 	{source: "project/docs-hub", target: "docs"},
+	{source: "project/rules", target: ".claude/rules"},
 }
 
 // renamedProjectTemplates are the project templates a release renamed, with the
@@ -115,57 +116,53 @@ func Scaffold(source, target string, force bool, stdout io.Writer) (count int, e
 		Files: make(map[string]FilePin),
 	}
 	pinnedAt := clock.Real.Now().Format(time.DateOnly)
+	// One entry that cannot be read or written is named SKIPPED and left
+	// unpinned (it reads NEW); every other entry still deploys and pins.
+	var skipped []error
+	skip := func(err error) {
+		fmt.Fprintf(stdout, "SKIPPED %v\n", err)
+		skipped = append(skipped, err)
+	}
 	for _, entry := range plan {
 		targetPath := filepath.Join(target, filepath.FromSlash(entry.local))
 		if _, err := os.Stat(targetPath); err == nil && !force {
 			fmt.Fprintf(stdout, "CONFLICT %s: exists\n", entry.local)
 			continue
 		} else if err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return persistScaffoldFailure(target, baseline, fmt.Errorf("inspect target %s: %w", entry.local, err))
+			skip(fmt.Errorf("inspect target %s: %w", entry.local, err))
+			continue
 		}
-		raw, err := os.ReadFile(entry.source)
+		raw, err := readStoreFile(entry.source)
 		if err != nil {
-			return persistScaffoldFailure(target, baseline, fmt.Errorf("read template %s: %w", entry.template, err))
+			skip(fmt.Errorf("read template %s: %w", entry.template, err))
+			continue
 		}
 		raw = addScaffoldMarker(entry.local, entry.template, store.SHA, raw)
 		if err := atomicfile.Write(targetPath, raw, entry.mode); err != nil {
-			return persistScaffoldFailure(
-				target,
-				baseline,
-				fmt.Errorf("deploy %s to %s: %w", entry.template, entry.local, err),
-			)
+			skip(fmt.Errorf("deploy %s to %s: %w", entry.template, entry.local, err))
+			continue
 		}
 		hash, err := HashTemplate(entry.source)
 		if err != nil {
-			return persistScaffoldFailure(target, baseline, err)
+			skip(err)
+			continue
 		}
 		baseline.Files[entry.local] = FilePin{
 			Template: entry.template, TemplateHash: hash, PinnedSHA: store.SHA, PinnedAt: pinnedAt,
 		}
 	}
 	if err := Save(target, baseline); err != nil {
-		return 0, err
+		return 0, errors.Join(append(skipped, err)...)
+	}
+	if len(skipped) != 0 {
+		return len(baseline.Files), fmt.Errorf(
+			"%d template(s) not deployed (SKIPPED above); the other %d are deployed and pinned",
+			len(skipped),
+			len(baseline.Files),
+		)
 	}
 	trail.Reach("scaffolded", "files pinned")
 	return len(baseline.Files), nil
-}
-
-// persistScaffoldFailure saves the pins for every entry a failed Scaffold
-// pass already wrote durably to disk before returning cause (L3-F8): without
-// this, a per-entry failure orphaned earlier entries from the baseline
-// forever — a retry (`pfm init --force`) would hit `CONFLICT … exists` on
-// them and they would never be pinned, so `pfm doctor --project-updates`
-// reported them NEW forever with no hint they were pfm's own output. cause is always what
-// is returned; a Save failure here is reported alongside it, never in place
-// of it.
-func persistScaffoldFailure(target string, baseline Baseline, cause error) (int, error) {
-	if len(baseline.Files) == 0 {
-		return 0, cause
-	}
-	if err := Save(target, baseline); err != nil {
-		return 0, fmt.Errorf("%w (also failed to persist pins for already-written files: %v)", cause, err)
-	}
-	return 0, cause
 }
 
 func planInitCopies(store Store) ([]initCopy, error) {

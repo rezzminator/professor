@@ -446,7 +446,7 @@ func ObserveCodexPanes(
 	}
 	return observations, DecideCodexPanes(
 		observations, cxNames, CodexTitleThreads(ctx, runtime, warn),
-		codexLineageRoots(ctx, database), codexRetiredThreads(ctx, database),
+		codexLineageRoots(ctx, database), codexRetiredThreads(ctx, database, warn),
 	)
 }
 
@@ -499,12 +499,12 @@ func CodexTitleThreads(
 // reading the kill table at most once per pass and only when asked.
 //
 // The "known" return is what keeps this honest. A kill table that could not be
-// read answers (false, false), and every caller treats that as "do not act" —
-// so a store outage can never be mistaken for proof that a thread is alive,
-// nor let a live binding be dropped. Only a CLEAR retirement counts: an
+// read is warned once with its error and answers (false, false), and every
+// caller treats that as "do not act" — so a store outage can never be mistaken
+// for proof that a thread is alive, nor let a live binding be dropped. Only a CLEAR retirement counts: an
 // explicit `pfm chat kill` hides a chat that is still perfectly alive in its
 // pane, and dropping that pane's binding would be wrong.
-func codexRetiredThreads(ctx context.Context, database *store.Store) CodexThreadRetired {
+func codexRetiredThreads(ctx context.Context, database *store.Store, warn Warn) CodexThreadRetired {
 	var (
 		loaded  bool
 		broken  bool
@@ -519,6 +519,7 @@ func codexRetiredThreads(ctx context.Context, database *store.Store) CodexThread
 			killed, err := database.KilledChats(ctx)
 			if err != nil {
 				broken = true
+				warn(fmt.Sprintf("codex panes: read killed chats: %v; no binding moves on a /clear this pass", err))
 			} else {
 				records = make(map[string]store.Killed, len(killed))
 				for _, record := range killed {

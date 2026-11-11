@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,6 +13,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
@@ -209,14 +211,21 @@ type nativeStatusObservation struct {
 	} `json:"agent_session"`
 }
 
-// statusFromHerdr reconciles live native activity with transcript turn evidence.
+// herdrAgentUntracked is the StateSource of a live pane Herdr tracks no agent
+// for while its engine still holds the foreground: the tab painter reads that
+// pane's own screen instead (missingTabAgentState).
+const herdrAgentUntracked = "transcript (Herdr agent untracked)"
+
+// statusFromHerdr reconciles live native activity with transcript turn
+// evidence, proving the seat's pane through proofs.
 func statusFromHerdr(
 	ctx context.Context,
+	proofs pfmcall.HerdrProofs,
 	chat headless.Chat,
 	status headless.Status,
 	observations ...*nativeStatusObservation,
 ) (headless.Status, error) {
-	target, err := pfmcall.ProveHerdrTarget(ctx, pfmcall.Target{
+	target, err := proofs.Target(ctx, pfmcall.Target{
 		Backend:    chat.Backend,
 		SeatID:     chat.SeatID,
 		SocketPath: chat.Socket,
@@ -228,6 +237,22 @@ func statusFromHerdr(
 	}
 	chat.Socket, chat.Pane = target.SocketPath, target.Pane
 	body, err := herdr.SeatRequest(ctx, chat.Socket, "agent.get", map[string]string{"target": chat.Pane})
+	if refusal := (*herdr.Refusal)(nil); errors.As(err, &refusal) && refusal.Code == herdr.AgentNotFound {
+		// Herdr tracks no agent on the pane: an answer, settled by the pane's foreground.
+		alive, foregroundErr := proofs.Engine(
+			ctx,
+			fleetdb.Seat{HerdrSocket: chat.Socket, HerdrPane: chat.Pane, Engine: string(chat.Engine)},
+		)
+		switch {
+		case foregroundErr != nil:
+			return status, fmt.Errorf("read %s Herdr state: %w", chat.Name, errors.Join(err, foregroundErr))
+		case !alive:
+			status.State, status.IdleSeconds, status.Error = headless.StateDead, 0, ""
+		default:
+			status.StateSource = herdrAgentUntracked
+		}
+		return status, nil
+	}
 	if err != nil {
 		return status, fmt.Errorf("read %s Herdr state: %w", chat.Name, err)
 	}
@@ -252,10 +277,9 @@ func statusFromHerdr(
 		status.State = result.Agent.State
 		status.IdleSeconds = 0
 		status.Error = ""
-	case "unknown":
-		status.StateSource = "transcript (Herdr unknown)"
 	default:
-		return status, fmt.Errorf("herdr pane %s has unknown state %q", chat.Pane, result.Agent.State)
+		// A state Herdr reports outside the known set keeps the transcript verdict, named.
+		status.StateSource = "transcript (Herdr " + cmp.Or(result.Agent.State, "unknown") + ")"
 	}
 	for _, observation := range observations {
 		if observation != nil {

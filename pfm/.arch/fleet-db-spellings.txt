@@ -1,1 +1,0 @@
-internal/paths/paths.go 1

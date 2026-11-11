@@ -110,7 +110,6 @@ func TestLimitsSamplerStaleRateLimitStatusPreservesRetryTime(t *testing.T) {
 					Backoff: &usagehook.CacheBackoff{
 						Message:    retryMessage,
 						RetryAfter: now.Add(10 * time.Minute),
-						RecordedAt: now,
 					},
 				},
 			); err != nil {

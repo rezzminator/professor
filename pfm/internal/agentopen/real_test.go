@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -46,36 +45,63 @@ func TestExecCommandsQueriesAndViewsWithoutRecording(t *testing.T) {
 }
 
 func TestExecCommandsResumeWorkbench(t *testing.T) {
-	for _, invalid := range []bool{false, true} {
-		t.Run(fmt.Sprintf("invalid=%v", invalid), func(t *testing.T) {
+	for _, test := range []struct {
+		name, manifest string
+		wantPersona    bool
+		wantEffort     string
+		// wantWarning is what the resume tells its stderr, dir and manifest
+		// substituted for {dir} and {manifest}.
+		wantWarning string
+	}{
+		{
+			name: "valid", manifest: `{"prompt":"scribe.md","effort":"xhigh","model":"sonnet"}`,
+			wantPersona: true, wantEffort: "xhigh",
+		},
+		{
+			name: "unknown effort", manifest: `{"prompt":"scribe.md","effort":"turbo","model":"sonnet"}`,
+			wantPersona: true,
+			wantWarning: `pfm: workbench {dir}: unknown Claude effort "turbo" (want low, medium, high, xhigh or max); ` +
+				"launching the persona on the default effort\n",
+		},
+		{
+			name: "invalid manifest", manifest: `{"prompt":""}`,
+			wantWarning: `pfm: workbench persona not applied ({manifest}: "prompt" is required); launching without it` + "\n",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
 			commands, argvPath, values, accountDir := testExecCommands(t)
+			var stderr bytes.Buffer
+			commands.Stderr = &stderr
 			dir := filepath.Join(values.Home, "acme", "docs", "scribe")
 			prompt := filepath.Join(dir, ".professor", "scribe.md")
-			manifest := `{"prompt":"scribe.md","effort":"xhigh","model":"sonnet"}`
-			if invalid {
-				manifest = `{"prompt":""}`
+			files := map[string]string{
+				filepath.Join(values.Home, "acme", ".professor", "baseline.json"): "{}",
+				prompt: "You are scribe.",
 			}
-			for path, body := range map[string]string{filepath.Join(values.Home, "acme", ".professor", "baseline.json"): "{}", paths.WorkbenchManifest(dir): manifest, prompt: "You are scribe."} {
+			files[paths.WorkbenchManifest(dir)] = test.manifest
+			for path, body := range files {
 				if err := atomicfile.Write(path, []byte(body), 0o600); err != nil {
 					t.Fatal(err)
 				}
 			}
 			const id = "44444444-4444-4444-8444-444444444444"
-			err := commands.Resume(context.Background(), accountDir, dir, id, true)
-			if invalid {
-				want := "resume agent session: " + paths.WorkbenchManifest(dir) + `: "prompt" is required`
-				if err == nil || err.Error() != want {
-					t.Fatalf("resume error = %v, want %s", err, want)
-				}
-				return
+			if err := commands.Resume(context.Background(), accountDir, dir, id, true); err != nil {
+				t.Fatalf("resume refused: %v", err)
 			}
-			if err != nil {
-				t.Fatal(err)
+			wantWarning := strings.NewReplacer("{dir}", dir, "{manifest}", paths.WorkbenchManifest(dir)).
+				Replace(test.wantWarning)
+			if stderr.String() != wantWarning {
+				t.Fatalf("resume stderr = %q, want %q", stderr.String(), wantWarning)
 			}
 			parsed := assertAgentLaunch(t, argvPath, "--resume", id)
-			if parsed.Resume != id || parsed.PromptFile != prompt || parsed.Effort != "xhigh" ||
-				parsed.Model != "sonnet" {
-				t.Fatalf("persona = %+v", parsed)
+			wantPrompt, wantModel := "", ""
+			if test.wantPersona {
+				wantPrompt, wantModel = prompt, "sonnet"
+			}
+			if parsed.Resume != id || parsed.PromptFile != wantPrompt || parsed.Effort != test.wantEffort ||
+				parsed.Model != wantModel {
+				t.Fatalf("persona = %+v, want prompt %q effort %q model %q",
+					parsed, wantPrompt, test.wantEffort, wantModel)
 			}
 		})
 	}

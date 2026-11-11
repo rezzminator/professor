@@ -3,18 +3,19 @@ package themesync
 import (
 	"context"
 	"errors"
-	"reflect"
-	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
-func TestAutoAppearanceUnsupportedPlatforms(t *testing.T) {
-	platforms := []string{"linux", "freebsd", "windows"}
-	if runtime.GOOS != "darwin" {
-		platforms = append(platforms, "") // production defaults to runtime.GOOS
+// Auto on a platform with no system appearance to read draws dark (no side was
+// applied before) rather than stopping the sync: every surface still follows the
+// theme and the claude row names why the side was not read.
+func TestAutoAppearanceUnsupportedPlatformsDrawsDarkAndNamesWhy(t *testing.T) {
+	platforms := map[string]*platform{"linux": linuxPlatform}
+	if hostPlatform == linuxPlatform {
+		platforms["host"] = nil // a zero Env serves this host's profile
 	}
 	operations := []struct {
 		name string
@@ -23,52 +24,69 @@ func TestAutoAppearanceUnsupportedPlatforms(t *testing.T) {
 		{"On", On},
 		{"Sync", func(ctx context.Context, env Env) (Report, error) { return Sync(ctx, env, false) }},
 		{"ForceSync", func(ctx context.Context, env Env) (Report, error) { return Sync(ctx, env, true) }},
-		{"ReadBack", ReadBack},
 	}
-	for _, goos := range platforms {
+	for name, profile := range platforms {
 		for _, op := range operations {
-			t.Run(goos+"/"+op.name, func(t *testing.T) {
+			t.Run(name+"/"+op.name, func(t *testing.T) {
 				h := newLinuxHarness(t)
-				stateBefore := ""
 				if op.name != "On" {
 					h.on() // explicit themes remain supported on Linux
-					stateBefore = h.read(".local/state/pfm/theme/state.json")
 				}
 				h.write(settingsRel, `{"theme":"auto"}`)
 				h.rearm() // defaults would misleadingly succeed with Dark
-				h.env.GOOS = goos
-				herdrBefore, callsBefore := h.read(".config/herdr/config.toml"), h.tmux.applyCalls
+				h.env.Platform = profile
 				report, err := op.run(context.Background(), h.env)
-				want := "auto appearance detection unsupported; choose an explicit theme/appearance"
-				if err == nil || !strings.Contains(err.Error(), want) {
-					t.Fatalf("%s = %+v, %v; want actionable unsupported-auto error", op.name, report, err)
+				if err != nil {
+					t.Fatalf("%s: %v", op.name, err)
 				}
-				if !reflect.DeepEqual(report, Report{}) {
-					t.Errorf("%s returned a guessed appearance or report: %+v", op.name, report)
+				wantVerdict(t, report, "claude", VerdictSource, "system appearance unreadable, drawing dark: "+
+					"themesync: auto appearance detection unsupported; choose an explicit theme/appearance")
+				if report.Appearance != Dark || !report.Enabled || h.tmux.servers["cc-a"]["@pfm-c-bg"] != "#000000" {
+					t.Errorf("%s = appearance %s enabled %v tmux bg %q, want the theme drawn dark #000000",
+						op.name, report.Appearance, report.Enabled, h.tmux.servers["cc-a"]["@pfm-c-bg"])
 				}
-				if calls := h.runner.Calls(); len(calls) != 0 {
-					t.Errorf("unsupported detection ran external commands: %+v", calls)
-				}
-				if h.tmux.applyCalls != callsBefore || h.read(".config/herdr/config.toml") != herdrBefore {
-					t.Error("unsupported auto changed a surface")
-				}
-				if stateBefore == "" {
-					if h.exists(".local/state/pfm/theme/state.json") {
-						t.Error("unsupported auto created theme state")
-					}
-				} else if h.read(".local/state/pfm/theme/state.json") != stateBefore {
-					t.Error("unsupported auto changed theme state")
+				if state := h.state(); state.Appearance != Dark {
+					t.Errorf("stored appearance = %q, want dark", state.Appearance)
 				}
 			})
 		}
 	}
 }
 
+// A read-back writes nothing, so it never needs a guessed side: with the system
+// appearance unreadable it still reads every surface, against the appearance last
+// applied, and the claude row says it could not look.
+func TestReadBackKeepsTheMatrixWhenTheAppearanceCannotBeRead(t *testing.T) {
+	h := newLinuxHarness(t)
+	h.on() // an explicit theme is supported on Linux
+	stateBefore := h.read(".local/state/pfm/theme/state.json")
+	h.write(settingsRel, `{"theme":"auto"}`)
+	h.rearm()
+	report, err := ReadBack(context.Background(), h.env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Surfaces) != 5 {
+		t.Fatalf("read-back rows = %+v, want all five surfaces", report.Surfaces)
+	}
+	wantVerdict(
+		t,
+		report,
+		"claude",
+		VerdictError,
+		"themesync: auto appearance detection unsupported; choose an explicit theme/appearance",
+	)
+	if got := h.read(".local/state/pfm/theme/state.json"); got != stateBefore {
+		t.Error("a read-back changed the theme state")
+	}
+}
+
 func TestAppearanceForExplicitTheme(t *testing.T) {
-	for _, goos := range []string{"linux", "darwin", "freebsd", "windows", ""} {
+	platforms := map[string]*platform{"linux": linuxPlatform, "darwin": darwinPlatform, "host": nil}
+	for name, profile := range platforms {
 		for _, side := range []Appearance{Dark, Light} {
-			t.Run(goos+"/"+string(side), func(t *testing.T) {
-				env := Env{GOOS: goos, Runner: new(deps.FakeRunner)}
+			t.Run(name+"/"+string(side), func(t *testing.T) {
+				env := Env{Platform: profile, Runner: new(deps.FakeRunner)}
 				got, err := appearanceFor(context.Background(), env, Applied{Side: side})
 				if err != nil || got != side {
 					t.Fatalf("explicit appearance = %q, %v; want %q", got, err, side)
@@ -120,7 +138,7 @@ func TestDetectAppearance(t *testing.T) {
 				runner.ScriptLookPath("defaults", defaultsBinary, nil)
 			}
 			runner.Script(defaults, tc.result, tc.runErr)
-			got, err := DetectAppearance(context.Background(), Env{GOOS: "darwin", Runner: runner})
+			got, err := DetectAppearance(context.Background(), Env{Platform: darwinPlatform, Runner: runner})
 			if tc.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 					t.Fatalf("err = %v, want one containing %q", err, tc.wantErr)

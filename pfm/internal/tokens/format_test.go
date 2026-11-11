@@ -86,6 +86,8 @@ func TestModelNamesAndCacheMix(t *testing.T) {
 	cases := []struct{ name, got, want string }{
 		{"stem drops prefix and snapshot", modelStem("claude-sonnet-4-5-20250929"), "sonnet-4-5"},
 		{"stem keeps an undated id", modelStem("claude-opus-5"), "opus-5"},
+		{"stem drops a gateway asset path", modelStem("gw:catalog/claude-opus-5"), "opus-5"},
+		{"stem drops a gateway window tag", modelStem("gw:catalog/claude-fable-5-1[1m]"), "fable-5-1"},
 		{"stem of nothing", modelStem(""), "?"},
 		{"codexShort drops gpt-", codexShort("gpt-5.6-sol"), "5.6-sol"},
 		{"codexShort of nothing", codexShort(""), "?"},

@@ -146,3 +146,27 @@ func TestClaudeEnvRefusesLaunchNames(t *testing.T) {
 		t.Fatal("no launch variable carries a default plugin's prefix: the check ran on nothing")
 	}
 }
+
+// A chat born from a Codex tool shell drops what Codex injected there, the marker included, and
+// keeps the rest; a shell without the marker keeps everything, a user's own NO_COLOR included.
+func TestWithoutCodexToolShell(t *testing.T) {
+	toolShell := []string{
+		"PATH=/usr/bin", "NO_COLOR=1", "PAGER=cat", "GIT_PAGER=cat", "GH_PAGER=cat", "CODEX_CI=1",
+		"CODEX_SESSION_ID=0a1b", "CODEX_TOOL_CALL_ID=exec-0a1b", "CODEX_VERSION=0.166.0",
+		"CODEX_APPLY_PATCH_PRESERVE_LINE_ENDINGS=1", "CODEX_HOME=/srv/tester/.codex",
+	}
+	login := []string{"PATH=/usr/bin", "NO_COLOR=1", "PAGER=less", "CODEX_CI=1"}
+	for _, test := range []struct {
+		name          string
+		environ, want []string
+	}{
+		{"codex tool shell", toolShell, []string{"PATH=/usr/bin", "CODEX_HOME=/srv/tester/.codex"}},
+		{"login shell without the marker", login, login},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := WithoutCodexToolShell(test.environ); !reflect.DeepEqual(got, test.want) {
+				t.Fatalf("WithoutCodexToolShell(%q) = %q, want %q", test.environ, got, test.want)
+			}
+		})
+	}
+}

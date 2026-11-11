@@ -412,7 +412,7 @@ func TestResolveRejectsRegisteredOffPlatformCommand(t *testing.T) {
 	case "linux":
 		command = "launchctl"
 	case "darwin":
-		command = "setsid"
+		command = "getent"
 	default:
 		t.Skip("registry platform contract is Linux/Darwin only")
 	}

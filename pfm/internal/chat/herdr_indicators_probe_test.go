@@ -14,6 +14,8 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
+	"github.com/rezzminator/professor/pfm/internal/index"
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 )
 
 // TestHerdrTabProbeSeesWhatNoHookAnnounces pins the provider's probe: after an
@@ -132,4 +134,109 @@ func TestHerdrTabProbeSeesWhatNoHookAnnounces(t *testing.T) {
 		t.Fatal("a failed scan enumerated")
 	}
 	assertChanged("after a failed enumeration", true)
+}
+
+// TestHerdrTabProbeSeesATabbedOpenCodeChatRetitled pins the OpenCode twin of a
+// tabbed chat's transcript: OpenCode writes none, and the title its tab paints
+// lands only in its store, which the fleet scan's mirror re-reads once the
+// store changed. A retitle no hook announces is a change; a turn of an
+// untabbed OpenCode chat is none, so the probe never re-reads the whole store.
+// A retitle landing while the scan runs, after its mirror read, painted the
+// old title, so it is a change too; so is a newly tabbed chat, whose title no
+// read before the scan holds.
+func TestHerdrTabProbeSeesATabbedOpenCodeChatRetitled(t *testing.T) {
+	root := t.TempDir()
+	ctx := context.Background()
+	store, err := sqlitedb.OpenStore(ctx, index.OpenCodeStorePath(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	if _, err := store.Exec(
+		`CREATE TABLE session(id TEXT,parent_id TEXT,title TEXT,directory TEXT,time_created INT,time_updated INT);` +
+			`INSERT INTO session VALUES('ses_tab',NULL,'New session','/work',1,1),('ses_other',NULL,'other','/work',1,1);`,
+	); err != nil {
+		t.Fatal(err)
+	}
+	focused := true
+	var duringScan func()
+	probe := &tabProbe{
+		panes: func(context.Context, string) ([]herdr.TabPane, error) {
+			return []herdr.TabPane{{
+				Pane: "w1:p1", Terminal: "term1", Workspace: "w1", Tab: "w1:t1",
+				Focused: &focused, Revision: 1, State: "idle",
+			}}, nil
+		},
+		foreground:    func(context.Context, fleetdb.Seat) (bool, error) { return true, nil },
+		openCodeRoots: []string{root},
+	}
+	provider := herdrTabProvider{
+		scan: func(context.Context) (FleetScan, error) {
+			if duringScan != nil {
+				duringScan()
+				duringScan = nil
+			}
+			return FleetScan{Rows: []compose.Row{{
+				Backend: "herdr", SeatID: "seat1", ID: "ses_tab", Socket: "endpoint", PaneID: "w1:p1",
+				Name: "New session", Kind: compose.LiveOpenCode,
+			}}}, nil
+		},
+		inspect: func(context.Context, headless.Chat, time.Time) (headless.Status, error) {
+			return headless.Status{State: "idle"}, nil
+		},
+		views: func(_ context.Context, c headless.Chat, _ string) ([]herdr.TabDecoration, error) {
+			return []herdr.TabDecoration{{Pane: c.Pane, Identity: c.SeatID + ":" + c.ID}}, nil
+		},
+		mode:  func() (string, error) { return "emoji", nil },
+		warn:  &bytes.Buffer{},
+		probe: probe,
+	}
+	assertChanged := func(step string, want bool) {
+		t.Helper()
+		got, err := provider.changed(ctx, "endpoint")
+		if err != nil || got != want {
+			t.Fatalf("%s: changed = %t, %v; want %t", step, got, err, want)
+		}
+	}
+	if _, err := provider.tabs(ctx, "endpoint"); err != nil {
+		t.Fatal(err)
+	}
+	assertChanged("a newly tabbed OpenCode chat, its title not read before the scan", true)
+	if _, err := provider.tabs(ctx, "endpoint"); err != nil {
+		t.Fatal(err)
+	}
+	assertChanged("after the enumeration", false)
+	if _, err := store.Exec(
+		`UPDATE session SET title='other retitled',time_updated=2 WHERE id='ses_other'`,
+	); err != nil {
+		t.Fatal(err)
+	}
+	assertChanged("an untabbed OpenCode chat retitled", false)
+	if _, err := store.Exec(`UPDATE session SET title='Fix the parser',time_updated=3 WHERE id='ses_tab'`); err != nil {
+		t.Fatal(err)
+	}
+	assertChanged("the tabbed OpenCode chat retitled", true)
+	if _, err := provider.tabs(ctx, "endpoint"); err != nil {
+		t.Fatal(err)
+	}
+	assertChanged("after re-enumerating", false)
+	duringScan = func() {
+		if _, err := store.Exec(
+			`UPDATE session SET title='Fix the lexer',time_updated=4 WHERE id='ses_tab'`,
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := provider.tabs(ctx, "endpoint"); err != nil {
+		t.Fatal(err)
+	}
+	assertChanged("the tabbed OpenCode chat retitled during the scan", true)
+	if _, err := provider.tabs(ctx, "endpoint"); err != nil {
+		t.Fatal(err)
+	}
+	assertChanged("after the enumeration that painted it", false)
 }

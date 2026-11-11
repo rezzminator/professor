@@ -126,13 +126,13 @@ func TestChatNewCarriesTheAgentRole(t *testing.T) {
 		calls = append(calls, append([]string(nil), args...))
 		return 0
 	}})
-	input := NewInput{Name: "seat", Model: "claude-sonnet-5-5", Effort: "xhigh", AgentRole: "flights-foreman"}
+	input := NewInput{Name: "seat", Model: "claude-sonnet-5-5", Effort: "xhigh", AgentRole: "flights:foreman"}
 	if _, _, err := service.chatNew(context.Background(), nil, input); err != nil {
 		t.Fatal(err)
 	}
 	want := [][]string{{
 		"chat", "new", "--name", "seat", "--model", "claude-sonnet-5-5", "--effort", "xhigh",
-		"--agent-role", "flights-foreman",
+		"--agent-role", "flights:foreman",
 	}}
 	if !reflect.DeepEqual(calls, want) {
 		t.Fatalf("new calls = %q, want %q", calls, want)
@@ -221,7 +221,7 @@ func TestChatNewDescriptionRoutesEveryModelRunHere(t *testing.T) {
 	if example == nil {
 		t.Fatalf("new description has no example call: %q", description)
 	}
-	for _, key := range regexp.MustCompile(`(\w+):`).FindAllStringSubmatch(example[1], -1) {
+	for _, key := range regexp.MustCompile(`(?:^|,\s*)(\w+):`).FindAllStringSubmatch(example[1], -1) {
 		if _, found := schema.Properties[key[1]]; !found {
 			t.Fatalf("new example names %q, not a schema field: %q", key[1], example[0])
 		}
@@ -267,7 +267,10 @@ func chatNewWorkbenchFixture(t *testing.T) (string, string) {
 }
 
 func TestChatNewWorkbench(t *testing.T) {
-	for _, name := range []string{"auto-name", "outside", "no cwd", "named", "caller disabled", "caller enabled", "caller cwd", "roster error"} {
+	for _, name := range []string{
+		"auto-name", "outside", "no cwd", "named", "caller disabled", "caller enabled", "caller cwd",
+		"caller cwd unknown", "workbench unreadable", "roster error",
+	} {
 		t.Run(name, func(t *testing.T) {
 			root, dir := chatNewWorkbenchFixture(t)
 			var calls [][]string
@@ -291,10 +294,14 @@ func TestChatNewWorkbench(t *testing.T) {
 			case "named":
 				input = NewInput{Name: "child"}
 				want = []string{"chat", "new", "--name", "child"}
-			case "caller disabled", "caller enabled", "caller cwd":
+			case "caller disabled", "caller enabled", "caller cwd", "caller cwd unknown", "workbench unreadable":
 				engine, kind, socket := pfmengine.Codex, compose.LiveCodex, "cx-caller"
 				if name != "caller disabled" {
 					engine, kind, socket = pfmengine.Claude, compose.LiveClaude, "cc-caller"
+				}
+				callerCWD := dir
+				if name == "caller cwd unknown" {
+					callerCWD = ""
 				}
 				backend.chat = &fakeChatVerbs{
 					listed: chat.ListResult{
@@ -306,7 +313,7 @@ func TestChatNewWorkbench(t *testing.T) {
 								SessionName: "caller",
 								Socket:      socket,
 								PaneID:      "%0",
-								CWD:         dir,
+								CWD:         callerCWD,
 							},
 						},
 						Matched: 1,
@@ -326,8 +333,24 @@ func TestChatNewWorkbench(t *testing.T) {
 				if name != "caller disabled" {
 					want = []string{"chat", "new", "--name", "_SCRIBE:1", "--engine", "cc", "--cwd", dir}
 				}
-				if name == "caller cwd" {
+				switch name {
+				case "caller cwd":
 					input.CWD = ""
+				case "caller cwd unknown":
+					input = NewInput{
+						Name: "child",
+					} // without a cwd the CLI would start it in the server's own directory
+				case "workbench unreadable":
+					// A manifest that is a directory: the workbench lookup fails, for root too.
+					manifest := paths.WorkbenchManifest(dir)
+					if err := os.Remove(manifest); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.Mkdir(manifest, 0o700); err != nil {
+						t.Fatal(err)
+					}
+					input.Name = "child"
+					want = []string{"chat", "new", "--name", "child", "--engine", "cc", "--cwd", dir}
 				}
 			case "roster error":
 				blocker := filepath.Join(root, "blocker")
@@ -336,7 +359,29 @@ func TestChatNewWorkbench(t *testing.T) {
 				}
 				t.Setenv(paths.EnvCacheDB, filepath.Join(blocker, "index.db"))
 			}
-			_, _, err := service.chatNew(context.Background(), request, input)
+			_, output, err := service.chatNew(context.Background(), request, input)
+			if name == "caller cwd unknown" {
+				if err == nil || err.Error() != "new: caller working directory is unknown: pass an absolute cwd" ||
+					len(calls) != 0 {
+					t.Fatalf("caller cwd unknown = %v, calls %q", err, calls)
+				}
+				return
+			}
+			if name == "workbench unreadable" {
+				wantMessage := "workbench lookup failed, so the caller's engine cc was kept: inspect workbench " +
+					paths.WorkbenchManifest(dir) + ": not a regular file"
+				if err != nil || !reflect.DeepEqual(calls, [][]string{want}) || output.Message != wantMessage {
+					t.Fatalf(
+						"new = %v, calls %q, message %q; want %q and %q",
+						err,
+						calls,
+						output.Message,
+						want,
+						wantMessage,
+					)
+				}
+				return
+			}
 			if name == "outside" {
 				if err == nil || err.Error() != "name is required outside a workbench" || len(calls) != 0 {
 					t.Fatalf("outside = %v, calls %q", err, calls)
@@ -688,6 +733,7 @@ func TestBirthNewHerdrCallerPlacement(t *testing.T) {
 							Socket:         "/h/herdr.sock",
 							PaneID:         "wC:p24",
 							HerdrWorkspace: "wC",
+							CWD:            "/work/herdr",
 						},
 					},
 				},

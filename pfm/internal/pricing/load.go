@@ -131,9 +131,21 @@ func fetchedBefore(a, b Table) bool {
 	return aErr == nil && bErr == nil && at.Before(bt)
 }
 
+// OverrideError is an override file ServeTable could not read or decode. The
+// Prices returned beside it are the published table served without the
+// override, so a caller can tell it from a table that could not be served.
+type OverrideError struct {
+	Err error
+}
+
+func (e *OverrideError) Error() string { return e.Err.Error() }
+
+func (e *OverrideError) Unwrap() error { return e.Err }
+
 // ServeTable merges the override beside pfmConfigPath ("" for none) into a
 // published table. A missing override file is none; an unreadable or invalid
-// one is an error naming it.
+// one is an *OverrideError naming it, returned beside the published table
+// served without it.
 func ServeTable(published Table, origin Origin, pfmConfigPath string) (Prices, error) {
 	prices := Prices{Table: published, Origin: origin, Billing: defaultBilling()}
 	prices.Rows = make([]Row, len(published.Rows))
@@ -155,11 +167,11 @@ func ServeTable(published Table, origin Origin, pfmConfigPath string) (Prices, e
 		return prices, nil
 	}
 	if err != nil {
-		return Prices{}, fmt.Errorf("prices override %s: %w", path, err)
+		return prices, &OverrideError{Err: fmt.Errorf("prices override %s: %w", path, err)}
 	}
 	overrides, billing, err := decodeOverride(content, path)
 	if err != nil {
-		return Prices{}, err
+		return prices, &OverrideError{Err: err}
 	}
 	prices.Billing = billing
 	applyBilling(&prices)

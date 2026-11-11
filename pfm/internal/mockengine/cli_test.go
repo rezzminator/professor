@@ -203,7 +203,7 @@ func TestClaudePluginInstallReaderContract(t *testing.T) {
 	if err != nil || len(missing) != 0 {
 		t.Fatalf("missing=%v err=%v", missing, err)
 	}
-	gaps, err := installer.ClaudePluginGaps(filepath.Join(fix.configDir, "settings.json"), releaseTargets)
+	gaps, err := installer.ClaudePluginGaps(filepath.Join(fix.configDir, "settings.json"), releaseTargets, nil)
 	if err != nil || len(gaps) != 0 {
 		t.Fatalf("gaps=%v err=%v", gaps, err)
 	}

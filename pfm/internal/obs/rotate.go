@@ -71,6 +71,9 @@ type rotator struct {
 	lock         *os.File    // the sidecar path+".lock", flocked around every write
 	failing      bool
 	lastReported time.Time
+	// degraded is a retention or rotation failure that left the writer able to
+	// append: the next write reports it, in place of the recovered line.
+	degraded error
 }
 
 // newRotator opens path for append, creating its directory and the lock
@@ -109,12 +112,8 @@ func newRotator(path string, keep, maxMB, keepDays int, timing clock.Clock, stde
 		}
 		return nil, err
 	}
-	if err := opened.prune(); err != nil {
-		if closeErr := opened.Close(); closeErr != nil {
-			return nil, fmt.Errorf("%w (and close: %w)", err, closeErr)
-		}
-		return nil, err
-	}
+	// A generation that cannot be pruned costs the retention limit, never the log.
+	opened.degraded = opened.prune()
 	return opened, nil
 }
 
@@ -214,6 +213,11 @@ func (writer *rotator) Write(record []byte) (int, error) {
 		writer.reportFailureLocked(wrapped)
 		return written, wrapped
 	}
+	if writer.degraded != nil {
+		writer.reportFailureLocked(writer.degraded)
+		writer.degraded = nil
+		return written, nil
+	}
 	writer.reportRecoveredLocked()
 	return written, nil
 }
@@ -261,13 +265,30 @@ func (writer *rotator) Close() error {
 	return errors.Join(failures...)
 }
 
-// rotate shifts the generations down and opens a fresh current file. The
-// caller holds the mutex.
+// rotate shifts the generations down and opens a fresh current file. A shift
+// that fails leaves the current file live and still appended to, and a prune
+// that fails after a good rotation costs only the retention limit, and so does
+// a handle that fails to close: all are reported by the next write, never a
+// dropped record. The caller holds the mutex.
 func (writer *rotator) rotate() error {
-	if err := writer.file.Close(); err != nil {
-		return fmt.Errorf("close activity log %s before rotation: %w", writer.path, err)
+	// A handle that will not close is unusable either way: it is dropped, never kept for the next
+	// write to fail on, and rotation goes on with the failure reported like a failed shift.
+	closeErr := writer.dropHandle()
+	shiftErr := errors.Join(closeErr, writer.shiftGenerations())
+	if err := writer.reopen(); err != nil {
+		return errors.Join(shiftErr, err)
 	}
-	writer.file = nil
+	if shiftErr != nil {
+		writer.degraded = shiftErr
+		return nil
+	}
+	writer.degraded = writer.prune()
+	return nil
+}
+
+// shiftGenerations ages every kept generation by one and moves the current file
+// into the first.
+func (writer *rotator) shiftGenerations() error {
 	// keep counts every file the home retains, so the oldest generation is
 	// keep-1: it is dropped, and each younger one ages by one.
 	oldest := writer.path + "." + strconv.Itoa(writer.keep-1)
@@ -288,8 +309,5 @@ func (writer *rotator) rotate() error {
 	} else if err := os.Remove(writer.path); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("drop activity log %s: %w", writer.path, err)
 	}
-	if err := writer.reopen(); err != nil {
-		return err
-	}
-	return writer.prune()
+	return nil
 }

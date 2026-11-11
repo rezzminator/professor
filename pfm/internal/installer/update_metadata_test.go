@@ -167,6 +167,28 @@ func TestInstallSkipsPrePushGateWhenGitIsUnavailable(t *testing.T) {
 	}
 }
 
+// A pre-push hook the gate refuses to arm is a FAIL row of its own: the
+// binary-ownership ledger pfm update relies on is still written.
+func TestWriteUpdateMetadataWritesTheLedgerPastARefusedGate(t *testing.T) {
+	t.Parallel()
+	home, clone := t.TempDir(), t.TempDir()
+	hook := filepath.Join(clone, ".githooks", "pre-push")
+	writeFixture(t, hook, "#!/bin/sh\nexit 0\n")
+	var stdout bytes.Buffer
+	installer := &engine{options: Options{Home: home, SourceRepo: clone, Stdout: &stdout}, apply: true}
+	err := installer.writeUpdateMetadata()
+	refusal := hook + " is not an executable regular file — refusing to arm a broken pre-push hook"
+	if err == nil || err.Error() != refusal {
+		t.Fatalf("writeUpdateMetadata() error = %v, want %q", err, refusal)
+	}
+	if !strings.Contains(stdout.String(), "  FAIL    "+refusal+"\n") {
+		t.Fatalf("stdout = %q, want the FAIL row %q", stdout.String(), refusal)
+	}
+	if _, statErr := os.Stat(binaryOwnershipPath(home)); statErr != nil {
+		t.Fatalf("binary-ownership ledger not written past the refused gate: %v", statErr)
+	}
+}
+
 // TestReadSourceRepoMarkerDistinguishesAbsenceFromAnUnusableClone is a
 // REGRESSION test for one error shape serving two opposite answers: "no
 // install ever recorded a clone" and "a clone was recorded and it is gone or

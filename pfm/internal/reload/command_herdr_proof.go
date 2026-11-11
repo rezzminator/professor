@@ -97,7 +97,7 @@ func (n *nativeReload) seat(ctx context.Context) (fleetdb.Seat, error) {
 	if seat.EndPending {
 		return seat, errors.New("native reload seat end is pending")
 	}
-	if seat.State != "live" && seat.State != nativeReloadFailed {
+	if seat.State != nativeSeatLive && seat.State != nativeReloadFailed {
 		return seat, fmt.Errorf("native reload seat is %s", seat.State)
 	}
 	return seat, nil

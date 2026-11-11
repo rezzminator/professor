@@ -180,6 +180,9 @@ type fakeLaunch struct {
 	gone    bool
 	// unreadable: the server runs but its pane cannot be read.
 	unreadable bool
+	// goneAfterReads: the pane shows screen for this many reads, then its
+	// server is gone, as a launcher that prints and exits between two polls.
+	goneAfterReads int
 }
 
 func (tmux *fakeActionTmux) LaunchPane(
@@ -195,6 +198,10 @@ func (tmux *fakeActionTmux) LaunchPane(
 	}
 	tmux.launchReads++
 	launch, found := tmux.launches[socket]
+	if launch.goneAfterReads > 0 && tmux.launchReads > launch.goneAfterReads {
+		launch.gone = true
+		tmux.launches[socket] = launch
+	}
 	if !tmux.alive[socket] || launch.gone {
 		return LaunchPaneState{}, errors.New("no server running on " + socket)
 	}

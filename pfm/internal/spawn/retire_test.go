@@ -17,7 +17,7 @@ import (
 // The one retire path of a revived chat's dead seat closes its old pane only
 // when Herdr proves the pane still holds that seat's terminal; a pane already
 // gone needs nothing, and one now holding another terminal stays, named. The
-// seat's reload files, row and recipe go whatever the pane's fate.
+// seat's reload record, row and recipe go whatever the pane's fate.
 func TestRetireHerdrSeatClosesOnlyItsOwnPane(t *testing.T) {
 	for _, tc := range []struct {
 		name, terminal string

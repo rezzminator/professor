@@ -14,10 +14,14 @@ type Parsed struct {
 	SettingsEnv                                                   map[string]string
 	Hooks                                                         []Hook
 	PromptFile, MCPConfig, SessionID, Resume, Name, Model, Effort string
+	PermissionMode                                                string
 	Fork, Autonomy                                                bool
 	RemoteControl                                                 bool
 	RemoteControlName                                             string
 	Rest                                                          []string
+	// Warnings names every part of the command line Parse could not read and
+	// left out; the rest of the line is parsed as if it were absent.
+	Warnings []string
 }
 
 // Parse decodes a Claude command line, including its leading binary word.
@@ -57,7 +61,8 @@ func Parse(argv []string) (Parsed, error) {
 			flagEffort,
 			flagPromptFile,
 			flagSettings,
-			flagMCPConfig:
+			flagMCPConfig,
+			flagPermissionMode:
 			word, err := value()
 			if err != nil {
 				return Parsed{}, err
@@ -79,36 +84,15 @@ func Parse(argv []string) (Parsed, error) {
 				parsed.Effort = word
 			case flagPromptFile:
 				parsed.PromptFile = word
+			case flagPermissionMode:
+				parsed.PermissionMode = word
 			case flagSettings:
 				if !strings.HasPrefix(strings.TrimSpace(word), "{") {
 					parsed.SettingsFile = word
 					parsed.Rest = append(parsed.Rest, flag, word)
 					continue
 				}
-				if err := json.Unmarshal([]byte(word), &parsed.Settings); err != nil {
-					return Parsed{}, fmt.Errorf("--settings: %w", err)
-				}
-				if parsed.Settings == nil {
-					return Parsed{}, fmt.Errorf("--settings: expected object")
-				}
-				if raw, ok := parsed.Settings["env"]; ok {
-					values, ok := raw.(map[string]any)
-					if !ok {
-						return Parsed{}, fmt.Errorf("--settings env: expected object")
-					}
-					parsed.SettingsEnv = make(map[string]string, len(values))
-					for name, value := range values {
-						stringValue, ok := value.(string)
-						if !ok {
-							return Parsed{}, fmt.Errorf("--settings env.%s: expected string", name)
-						}
-						parsed.SettingsEnv[name] = stringValue
-					}
-				}
-				parsed.Hooks, err = parseHooks(parsed.Settings[knobHooks])
-				if err != nil {
-					return Parsed{}, fmt.Errorf("--settings hooks: %w", err)
-				}
+				parsed.readInlineSettings(flag, word)
 			case flagMCPConfig:
 				// Render passes a file path; inline JSON is still Claude's
 				// other accepted form and is validated as an object.
@@ -118,10 +102,9 @@ func Parse(argv []string) (Parsed, error) {
 				}
 				var object map[string]any
 				if err := json.Unmarshal([]byte(word), &object); err != nil {
-					return Parsed{}, fmt.Errorf("--mcp-config: %w", err)
-				}
-				if object == nil {
-					return Parsed{}, fmt.Errorf("--mcp-config: expected object")
+					parsed.Warnings = append(parsed.Warnings, fmt.Sprintf("--mcp-config: %v; kept as written", err))
+				} else if object == nil {
+					parsed.Warnings = append(parsed.Warnings, "--mcp-config: expected object; kept as written")
 				}
 				parsed.MCPConfig = word
 			}
@@ -154,6 +137,7 @@ func splitValueFlag(word string) (string, string, bool) {
 		flagPromptFile,
 		flagSettings,
 		flagMCPConfig,
+		flagPermissionMode,
 		flagRemoteControl:
 		return name, value, inline
 	default:
@@ -195,38 +179,83 @@ func resumesInPlace(request Request) bool {
 	return false
 }
 
-func parseHooks(raw any) ([]Hook, error) {
+// readInlineSettings reads an inline --settings object into parsed. A word that is
+// not a JSON object stays in Rest for Claude to judge; an env or hooks part that
+// cannot be read, or one entry of either, is left out and named in Warnings.
+func (parsed *Parsed) readInlineSettings(flag, word string) {
+	var settings map[string]any
+	if err := json.Unmarshal([]byte(word), &settings); err != nil {
+		parsed.Warnings = append(parsed.Warnings, fmt.Sprintf("--settings: %v; left to Claude as written", err))
+		parsed.Rest = append(parsed.Rest, flag, word)
+		return
+	}
+	if settings == nil {
+		parsed.Warnings = append(parsed.Warnings, "--settings: expected object; left to Claude as written")
+		parsed.Rest = append(parsed.Rest, flag, word)
+		return
+	}
+	parsed.Settings = settings
+	if raw, ok := settings["env"]; ok {
+		if values, ok := raw.(map[string]any); !ok {
+			parsed.Warnings = append(parsed.Warnings, "--settings env: expected object; its variables left out")
+		} else {
+			parsed.SettingsEnv = make(map[string]string, len(values))
+			for name, value := range values {
+				stringValue, ok := value.(string)
+				if !ok {
+					parsed.Warnings = append(
+						parsed.Warnings, fmt.Sprintf("--settings env.%s: expected string; left out", name))
+					continue
+				}
+				parsed.SettingsEnv[name] = stringValue
+			}
+		}
+	}
+	var hookWarnings []string
+	parsed.Hooks, hookWarnings = parseHooks(settings[knobHooks])
+	for _, warning := range hookWarnings {
+		parsed.Warnings = append(parsed.Warnings, "--settings hooks: "+warning)
+	}
+}
+
+// parseHooks reads a settings hooks object. A group or command that is not the
+// expected shape is left out and named in warnings; every other hook is kept.
+func parseHooks(raw any) (result []Hook, warnings []string) {
 	if raw == nil {
 		return nil, nil
 	}
 	events, ok := raw.(map[string]any)
 	if !ok {
-		return nil, fmt.Errorf("expected object")
+		return nil, []string{"expected object; every hook left out"}
 	}
-	var result []Hook
 	for event, groupsRaw := range events {
 		groups, ok := groupsRaw.([]any)
 		if !ok {
-			return nil, fmt.Errorf("%s: expected groups", event)
+			warnings = append(warnings, event+": expected groups; its hooks left out")
+			continue
 		}
 		for _, groupRaw := range groups {
 			group, ok := groupRaw.(map[string]any)
 			if !ok {
-				return nil, fmt.Errorf("%s: expected group object", event)
+				warnings = append(warnings, event+": expected group object; left out")
+				continue
 			}
 			matcher, _ := group["matcher"].(string)
 			commands, ok := group[knobHooks].([]any)
 			if !ok {
-				return nil, fmt.Errorf("%s: expected hooks array", event)
+				warnings = append(warnings, event+": expected hooks array; group left out")
+				continue
 			}
 			for _, commandRaw := range commands {
 				command, ok := commandRaw.(map[string]any)
 				if !ok {
-					return nil, fmt.Errorf("%s: expected command object", event)
+					warnings = append(warnings, event+": expected command object; left out")
+					continue
 				}
 				text, ok := command[commandWord].(string)
 				if !ok {
-					return nil, fmt.Errorf("%s: expected command string", event)
+					warnings = append(warnings, event+": expected command string; left out")
+					continue
 				}
 				async, _ := command["async"].(bool)
 				result = append(
@@ -242,7 +271,7 @@ func parseHooks(raw any) ([]Hook, error) {
 			}
 		}
 	}
-	return result, nil
+	return result, warnings
 }
 
 // parsedHookName is a rendered command's registry name: its last word, where

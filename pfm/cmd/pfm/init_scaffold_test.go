@@ -30,7 +30,7 @@ func TestInitDeploysMappedTemplatesAndPinsExactlyTheDeployedSet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load deployed baseline: %v", err)
 	}
-	if got, want := len(baseline.Files), 10; got != want {
+	if got, want := len(baseline.Files), 11; got != want {
 		t.Fatalf("pin count=%d, want %d: %#v", got, want, baseline.Files)
 	}
 	if _, ok := baseline.Files[".claude/commands/per-project/testing-manual.md"]; ok {
@@ -50,6 +50,7 @@ func TestInitDeploysMappedTemplatesAndPinsExactlyTheDeployedSet(t *testing.T) {
 		".codex/config.toml",
 		"docs/commands/git/references/gitter-history.md",
 		"docs/_index.md",
+		".claude/rules/git-writes-through-gitter.md",
 	} {
 		if _, err := os.Stat(filepath.Join(target, filepath.FromSlash(relative))); err != nil {
 			t.Fatalf("deployed %s: %v", relative, err)
@@ -95,10 +96,50 @@ func TestInitDeploysMappedTemplatesAndPinsExactlyTheDeployedSet(t *testing.T) {
 		"SETUP.md",
 	) + " § Install interview — it records your answers in .professor/manifest.json, " +
 		"runs pfm init --render and deploys the per-project files"
-	next := "\nnext: write CLAUDE.md with /quality:claude-md write CLAUDE.md\n"
-	if !strings.Contains(stdout.String(), "deployed 10 project files") || !strings.Contains(stdout.String(), handoff) ||
+	next := "\nnext: write CLAUDE.md with /claude-md:use write CLAUDE.md\n"
+	if !strings.Contains(stdout.String(), "deployed 11 project files") || !strings.Contains(stdout.String(), handoff) ||
 		!strings.HasSuffix(stdout.String(), next) {
 		t.Fatalf("init output=%q", stdout.String())
+	}
+}
+
+func TestInitWithoutAUsableMarkerScaffoldsFromTheDiscoveredClone(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		marker string // "" writes no marker
+	}{
+		{name: "no marker"},
+		{name: "marker names a gone directory", marker: "/nonexistent-pfm-clone\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := newScaffoldStoreFixture(t)
+			t.Setenv("PFM_SOURCE_REPO", source)
+			target := t.TempDir()
+			home := t.TempDir()
+			wantStderr := ""
+			if tc.marker != "" {
+				markerPath := paths.SourceRepoPath(home)
+				if err := os.MkdirAll(filepath.Dir(markerPath), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(markerPath, []byte(tc.marker), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				wantStderr = "pfm init: warning: inspect recorded source repository /nonexistent-pfm-clone: " +
+					"recorded source repository is unusable: stat /nonexistent-pfm-clone: no such file or directory\n"
+			}
+			runtime := commandRuntime{Paths: paths.Values{Home: home}}
+			var stdout, stderr bytes.Buffer
+			if code := runInit([]string{target}, &stdout, &stderr, runtime); code != 0 {
+				t.Fatalf("runInit() code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+			}
+			if want := "initialized " + target + " from " + source + "\n"; !strings.Contains(stdout.String(), want) {
+				t.Fatalf("runInit() stdout=%q, want %q", stdout.String(), want)
+			}
+			if stderr.String() != wantStderr {
+				t.Fatalf("runInit() stderr=%q, want %q", stderr.String(), wantStderr)
+			}
+		})
 	}
 }
 
@@ -332,6 +373,10 @@ func newScaffoldStoreFixture(t *testing.T) string {
 			mode:    0o600,
 		},
 		"templates/project/docs-hub/_index.md": {content: "# Documentation Hub\n", mode: 0o600},
+		"templates/project/rules/git-writes-through-gitter.md": {
+			content: "---\nvisible-to:\n  include: [\"main\"]\n---\n# Only gitter writes git\n",
+			mode:    0o600,
+		},
 		"docs/PLACEHOLDERS.md": {
 			content: "# Placeholders\n\nInstall-time: {TOKEN}.\n\n## Runtime metavariables\n\nRuntime: {SHA}.\n",
 			mode:    0o600,

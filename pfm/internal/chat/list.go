@@ -12,7 +12,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
-	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/gitroot"
@@ -41,6 +40,10 @@ type ListRequest struct {
 	Repo     string
 	LiveOnly bool
 	ReadOnly bool
+	// NoCurrentDir scans without the working directory, for a caller that cannot read it.
+	NoCurrentDir bool
+	// Shield is the herdr-shield reader the scan proves its native seats through (nil: its own).
+	Shield *herdr.Shield
 }
 
 // ListResult is the listed rows plus the counts a capped answer must still
@@ -81,7 +84,8 @@ func List(
 		}
 	}()
 	scan, err := fleet.Scan(ctx, database, fleet.Request{
-		View: request.View, Runtime: runtime, ReadOnly: request.ReadOnly,
+		View: request.View, Runtime: runtime, ReadOnly: request.ReadOnly, NoCurrentDir: request.NoCurrentDir,
+		Shield: request.Shield,
 	}, warn)
 	if err != nil {
 		return ListResult{}, fmt.Errorf("chat list: scan fleet: %w", err)
@@ -90,26 +94,12 @@ func List(
 	result.Errors = scan.Errors
 	result.Home = scan.Env.Paths.Home
 	result.Herdr = rowsPresence(
-		ctx, realHerdrProbe(warn, scan.Env.Paths, scan.Env.Config.Claude.Binary), scan.Env.Paths, result.Rows,
+		ctx,
+		realHerdrProbe(warn, scan.Env.Paths, scan.Env.Config.Claude.Binary, request.Shield),
+		scan.Env.Paths,
+		result.Rows,
 	)
 	return result, nil
-}
-
-// realHerdrProbe is the probe on the host's own environment, tmux and Herdr
-// sockets and process table (under values' proc root, the Claude binary being
-// what a chat's pane runs); every failed lookup is also written to warn.
-func realHerdrProbe(warn io.Writer, values paths.Values, claudeBinary string) herdr.Probe {
-	proc := gather.NewProcFS(values.ProcRoot)
-	return herdr.Probe{
-		Getenv:   paths.OSEnv{}.Get,
-		LookPath: deps.RealRunner{}.LookPath,
-		Tmux:     runTmux,
-		Call:     herdr.Call,
-		Environ:  proc.Environ,
-		Keep:     gather.HerdrKeep(proc),
-		Hookless: hooklessLaunch(warn, proc, claudeBinary),
-		Warn:     warn,
-	}
 }
 
 // herdrHookPrefix leads the registry name of every Herdr reporter hook a Claude
@@ -141,6 +131,10 @@ func hooklessLaunch(warn io.Writer, proc gather.ProcFS, claudeBinary string) fun
 				continue
 			}
 			parsed, err := claudelaunch.Parse(argv)
+			if err == nil && len(parsed.Warnings) > 0 {
+				// A payload Parse could not read may hold the hooks: unverified, never hookless.
+				err = errors.New(strings.Join(parsed.Warnings, "; "))
+			}
 			if err != nil {
 				_, _ = fmt.Fprintf(
 					warn,

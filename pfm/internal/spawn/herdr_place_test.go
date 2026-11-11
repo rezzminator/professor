@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -19,7 +20,9 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/place"
+	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
 type placeCall struct {
@@ -29,11 +32,13 @@ type placeCall struct {
 
 // placeHerdr is a Herdr server whose workspaces, panes and moves a test reads
 // back: workspaces label → id (pane counts in panes), the listed panes by id
-// with their terminal, and every call in order.
+// with their terminal and the directory pane.list reports, and every call in
+// order. A move that empties a workspace closes it, as Herdr does.
 type placeHerdr struct {
 	mu         sync.Mutex
 	workspaces [][3]any // id, label, pane count
 	panes      map[string]string
+	cwds       map[string]string
 	calls      []placeCall
 	listDelay  time.Duration // how long each workspace.list takes to answer
 }
@@ -61,6 +66,17 @@ func (fake *placeHerdr) answer(call placeCall) (any, string) {
 		return map[string]any{
 			"type": "workspace_created", "workspace": map[string]any{"workspace_id": id, "label": call.Params["label"]},
 		}, ""
+	case "workspace.rename":
+		for index := range fake.workspaces {
+			if id := fake.workspaces[index][0]; id == call.Params["workspace_id"] {
+				fake.workspaces[index][1] = call.Params["label"]
+				return map[string]any{
+					"type":      "workspace_info",
+					"workspace": map[string]any{"workspace_id": id, "label": call.Params["label"]},
+				}, ""
+			}
+		}
+		return nil, "workspace_not_found"
 	case "layout.apply":
 		workspace := call.Params["workspace_id"]
 		return map[string]any{"layout": map[string]any{
@@ -70,7 +86,9 @@ func (fake *placeHerdr) answer(call placeCall) (any, string) {
 		listed := []any{}
 		for id, terminal := range fake.panes {
 			workspace, _, _ := strings.Cut(id, ":")
-			listed = append(listed, map[string]any{"pane_id": id, "workspace_id": workspace, "terminal_id": terminal})
+			listed = append(listed, map[string]any{
+				"pane_id": id, "workspace_id": workspace, "terminal_id": terminal, "cwd": fake.cwds[id],
+			})
 		}
 		return map[string]any{"type": "pane_list", "panes": listed}, ""
 	case "pane.get":
@@ -93,13 +111,21 @@ func (fake *placeHerdr) answer(call placeCall) (any, string) {
 		if !found {
 			return nil, "pane_not_found"
 		}
-		moved := workspace + ":p8"
+		moved, left := workspace+":p8", strings.Split(pane, ":")[0]
 		delete(fake.panes, pane)
 		fake.panes[moved] = terminal
-		return map[string]any{"type": "pane_move", "move_result": map[string]any{
-			"changed": true, "previous_pane_id": pane, "previous_workspace_id": strings.Split(pane, ":")[0],
+		result := map[string]any{
+			"changed": true, "previous_pane_id": pane, "previous_workspace_id": left,
 			"pane": map[string]any{"pane_id": moved, "workspace_id": workspace, "terminal_id": terminal},
-		}}, ""
+		}
+		for id := range fake.panes {
+			if strings.HasPrefix(id, left+":") {
+				return map[string]any{"type": "pane_move", "move_result": result}, ""
+			}
+		}
+		result["closed_workspace_id"] = left
+		fake.workspaces = slices.DeleteFunc(fake.workspaces, func(listed [3]any) bool { return listed[0] == left })
+		return map[string]any{"type": "pane_move", "move_result": result}, ""
 	}
 	return nil, "unexpected_method"
 }
@@ -381,7 +407,9 @@ func TestReconcileHerdrMovesAMisplacedChatAndRewritesItsSeat(t *testing.T) {
 			moves++
 			destination := call.Params["destination"].(map[string]any)
 			if call.Params["pane_id"] != "wF:p3" || destination["type"] != "new_tab" ||
-				destination["workspace_id"] != "wE" || call.Params["focus"] != false {
+				destination["label"] != "ops-seat" ||
+				destination["workspace_id"] != "wE" ||
+				call.Params["focus"] != false {
 				t.Fatalf("pane.move = %+v", call.Params)
 			}
 		}
@@ -407,10 +435,10 @@ func TestReconcileHerdrMovesAMisplacedChatAndRewritesItsSeat(t *testing.T) {
 	}
 }
 
-// A chat that is the last pane of its workspace stays, named, since moving it
-// would close that workspace, and a birth beside it goes on, naming it; a
-// fleet with no live Herdr chat asks Herdr nothing.
-func TestReconcileHerdrNeverClosesAWorkspace(t *testing.T) {
+// A chat that is the last pane of another place's workspace moves into its
+// own, and Herdr closes the workspace the move emptied; a birth beside it then
+// finds every chat placed. A fleet with no live Herdr chat asks Herdr nothing.
+func TestReconcileHerdrMovesTheLastPaneOfAWorkspace(t *testing.T) {
 	testjail.Fleet(t)
 	ctx := context.Background()
 	values, err := paths.Resolve()
@@ -425,32 +453,32 @@ func TestReconcileHerdrNeverClosesAWorkspace(t *testing.T) {
 	if err := ReconcileHerdr(ctx, values, socket, fleetDesk(), ""); err != nil || len(fake.methods()) != 0 {
 		t.Fatalf("a fleet with no live Herdr chat: err %v, calls %v", err, fake.methods())
 	}
-	writeSeatHost(t, values, "ops-seat")
-	state := fleetdb.OpenSharedState(ctx, values)
-	defer func() {
-		if err := state.Close(); err != nil {
-			t.Error(err)
-		}
-	}()
-	if err := state.PutSeat(ctx, fleetdb.Seat{
-		SeatID: "ops-seat", SessionID: "6fafd8a7-5059-4288-bf58-23e60c5fdb88", Engine: "cc", Name: "OPS",
-		Backend: BackendHerdr, State: "live", HerdrSocket: socket, HerdrPane: "wS:p1", HerdrWorkspace: "wS",
-		HerdrTerminalID: "term-ops", SeatHostPID: 42, SeatHostStart: 100,
-	}); err != nil {
-		t.Fatal(err)
-	}
+	state := putOpsSeat(t, values, socket, "wS:p1")
 	fleet := fleetDesk()
 	fleet.Rows = append(fleet.Rows, compose.Row{
 		Kind: compose.LiveClaude, Backend: BackendHerdr, Project: "fleet-desk", CWD: "/fixture/fleet-desk", Name: "OPS",
 		SeatID: "ops-seat", Socket: socket, PaneID: "wS:p1", HerdrWorkspace: "wS",
 	})
-	err = ReconcileHerdr(ctx, values, socket, fleet, "")
-	if err == nil || !strings.Contains(err.Error(), "last pane of workspace wS") {
-		t.Fatalf("err = %v, want the last-pane refusal", err)
+	if err := ReconcileHerdr(ctx, values, socket, fleet, ""); err != nil {
+		t.Fatal(err)
 	}
-	if _, moved := fake.call("pane.move"); moved {
-		t.Fatalf("the last pane of a workspace moved: %v", fake.methods())
+	move, found := fake.call("pane.move")
+	want := map[string]any{
+		"pane_id":     "wS:p1",
+		"destination": map[string]any{"type": "new_tab", "workspace_id": "wE", "label": "OPS"},
+		"focus":       false,
 	}
+	if !found || !reflect.DeepEqual(move.Params, want) {
+		t.Fatalf("pane.move = %+v (found %v), want %+v", move.Params, found, want)
+	}
+	if want := [][3]any{{"wE", "fleet-desk", float64(6)}}; !reflect.DeepEqual(fake.listed(), want) {
+		t.Fatalf("workspaces = %v, want %v: the emptied scratch workspace closed", fake.listed(), want)
+	}
+	moved, found, err := state.Seat(ctx, "ops-seat")
+	if err != nil || !found || moved.HerdrPane != "wE:p8" || moved.HerdrWorkspace != "wE" {
+		t.Fatalf("seat after the move = %+v (found %v, err %v), want wE:p8", moved, found, err)
+	}
+	fleet.Rows[len(fleet.Rows)-1].PaneID, fleet.Rows[len(fleet.Rows)-1].HerdrWorkspace = "wE:p8", "wE"
 	workspace, unmoved, err := placeHerdrBirth(ctx, HerdrRequest{
 		Paths: values,
 		Choice: BackendChoice{
@@ -458,57 +486,269 @@ func TestReconcileHerdrNeverClosesAWorkspace(t *testing.T) {
 		},
 		Run: fleetdb.SeatRun{CWD: "/fixture/fleet-desk"},
 	}, fleet)
-	if err != nil || workspace != "wE" || unmoved == nil ||
-		!strings.Contains(unmoved.Error(), "last pane of workspace wS") {
-		t.Fatalf("birth beside an unmovable chat: workspace %q, unmoved %v, err %v; want wE with the chat named",
-			workspace, unmoved, err)
+	if err != nil || workspace != "wE" || unmoved != nil {
+		t.Fatalf("birth beside a placed chat: workspace %q, unmoved %v, err %v; want wE", workspace, unmoved, err)
 	}
 }
 
-// A chat that cannot move gets its place no workspace: one is created only for
-// a chat proved movable into it. A scan fault is named, never a quiet fleet.
-func TestReconcileHerdrCreatesNoWorkspaceForAnUnmovableChat(t *testing.T) {
-	testjail.Fleet(t)
-	ctx := context.Background()
-	values, err := paths.Resolve()
-	if err != nil {
-		t.Fatal(err)
-	}
-	fake := &placeHerdr{
-		workspaces: [][3]any{{"wS", "scratch", 1}},
-		panes:      map[string]string{"wS:p1": "term-ops"},
-	}
-	socket := servePlaceHerdr(t, fake)
+// putOpsSeat records OPS, a live Claude chat proved in pane on socket, with
+// the seat host writeSeatHost seeds; the returned state closes with the test.
+func putOpsSeat(t *testing.T, values paths.Values, socket, pane string) *fleetdb.Store {
+	t.Helper()
 	writeSeatHost(t, values, "ops-seat")
-	state := fleetdb.OpenSharedState(ctx, values)
-	defer func() {
+	state := fleetdb.OpenSharedState(context.Background(), values)
+	t.Cleanup(func() {
 		if err := state.Close(); err != nil {
 			t.Error(err)
 		}
-	}()
-	if err := state.PutSeat(ctx, fleetdb.Seat{
+	})
+	workspace, _, _ := strings.Cut(pane, ":")
+	if err := state.PutSeat(context.Background(), fleetdb.Seat{
 		SeatID: "ops-seat", SessionID: "6fafd8a7-5059-4288-bf58-23e60c5fdb88", Engine: "cc", Name: "OPS",
-		Backend: BackendHerdr, State: "live", HerdrSocket: socket, HerdrPane: "wS:p1", HerdrWorkspace: "wS",
+		Backend: BackendHerdr, State: "live", HerdrSocket: socket, HerdrPane: pane, HerdrWorkspace: workspace,
 		HerdrTerminalID: "term-ops", SeatHostPID: 42, SeatHostStart: 100,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	fleet := fleetDesk()
-	fleet.Rows = append(fleet.Rows, compose.Row{
-		Kind: compose.LiveClaude, Backend: BackendHerdr, Project: "fleet-desk", CWD: "/fixture/fleet-desk", Name: "OPS",
-		SeatID: "ops-seat", Socket: socket, PaneID: "wS:p1", HerdrWorkspace: "wS",
-	})
-	err = ReconcileHerdr(ctx, values, socket, fleet, "")
-	if err == nil || !strings.Contains(err.Error(), "last pane of workspace wS") {
-		t.Fatalf("err = %v, want the last-pane refusal", err)
+	return state
+}
+
+// listed is the fake's workspaces as a test reads them back.
+func (fake *placeHerdr) listed() [][3]any {
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	listed := make([][3]any, 0, len(fake.workspaces))
+	for _, workspace := range fake.workspaces {
+		// Pane counts read back as JSON numbers do.
+		workspace[2] = float64(workspace[2].(int))
+		listed = append(listed, workspace)
 	}
-	if created, found := fake.call("workspace.create"); found {
-		t.Fatalf("a workspace was created for a chat that stays: %+v", created)
+	return listed
+}
+
+// With no workspace wearing its place's label, a chat's workspace takes the
+// label when it holds nothing but the place's chats and shells (a shell under
+// the place counts, wherever its supervisor sits); one holding another place's
+// pane keeps its label, and the place gets a workspace the chat moves into.
+// A scan fault is named, never a quiet fleet.
+func TestReconcileHerdrRenamesAWorkspaceHoldingOnlyItsPlace(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		neighbour  string // the directory pane.list reports for wS:p2, "" for no second pane
+		chat       string // the directory of the chat running in wS:p2, "" for a shell
+		workspaces [][3]any
+		pane       string
+	}{
+		{"only the chat", "", "", [][3]any{{"wS", "fleet-desk", float64(1)}}, "wS:p1"},
+		{"a shell under the place", "/fixture/fleet-desk/docs", "", [][3]any{{"wS", "fleet-desk", float64(2)}}, "wS:p1"},
+		{
+			"a shell of another place", "/fixture/orchard", "",
+			[][3]any{{"wS", "scratch", float64(2)}, {"w91", "fleet-desk", float64(1)}},
+			"w91:p8",
+		},
+		{
+			"another place's chat in the place's directory", "/fixture/fleet-desk", "/fixture/orchard",
+			[][3]any{{"wS", "scratch", float64(2)}, {"w91", "fleet-desk", float64(1)}},
+			"w91:p8",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			testjail.Fleet(t)
+			ctx := context.Background()
+			values, err := paths.Resolve()
+			if err != nil {
+				t.Fatal(err)
+			}
+			fake := &placeHerdr{
+				workspaces: [][3]any{{"wS", "scratch", 1}},
+				panes:      map[string]string{"wS:p1": "term-ops"},
+			}
+			if test.neighbour != "" {
+				fake.workspaces[0][2] = 2
+				fake.panes["wS:p2"] = "term-neighbour"
+				fake.cwds = map[string]string{"wS:p2": test.neighbour}
+			}
+			socket := servePlaceHerdr(t, fake)
+			state := putOpsSeat(t, values, socket, "wS:p1")
+			fleet := fleetDesk()
+			fleet.Rows = append(fleet.Rows, compose.Row{
+				Kind: compose.LiveClaude, Backend: BackendHerdr, Project: "fleet-desk", CWD: "/fixture/fleet-desk",
+				Name: "OPS", SeatID: "ops-seat", Socket: socket, PaneID: "wS:p1", HerdrWorkspace: "wS",
+			})
+			if test.chat != "" {
+				fleet.Rows = append(fleet.Rows, compose.Row{
+					Kind: compose.LiveClaude, Backend: BackendHerdr, Project: "orchard", CWD: test.chat,
+					Name: "GROVE", SeatID: "grove-seat", Socket: socket, PaneID: "wS:p2", HerdrWorkspace: "wS",
+				})
+			}
+			if err := ReconcileHerdr(ctx, values, socket, fleet, ""); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(fake.listed(), test.workspaces) {
+				t.Fatalf("workspaces = %v, want %v (calls %v)", fake.listed(), test.workspaces, fake.methods())
+			}
+			seat, found, err := state.Seat(ctx, "ops-seat")
+			if err != nil || !found || seat.HerdrPane != test.pane {
+				t.Fatalf("seat = %+v (found %v, err %v), want pane %s", seat, found, err, test.pane)
+			}
+		})
+	}
+	testjail.Fleet(t)
+	values, err := paths.Resolve()
+	if err != nil {
+		t.Fatal(err)
 	}
 	faulted := fleetDesk()
 	faulted.Faults = []string{"read native seats: database is locked"}
-	err = ReconcileHerdr(ctx, values, socket, faulted, "")
-	if err == nil || !strings.Contains(err.Error(), "fleet scan: read native seats: database is locked") {
+	err = ReconcileHerdr(context.Background(), values, servePlaceHerdr(t, &placeHerdr{}), faulted, "")
+	if err == nil || err.Error() != "fleet scan: read native seats: database is locked" {
 		t.Fatalf("err = %v, want the scan fault named", err)
+	}
+}
+
+// A chat files by its own directory, never by its pane's: a chat opened in a
+// pane whose supervisor works in the home directory, running in a worktree or
+// workbench of its project, sits in its project's workspace, never in "~".
+func TestReconcileHerdrPlacesAChatByItsOwnDirectory(t *testing.T) {
+	repo := testjail.GitRepoWithWorktrees(t, "lantern")
+	bench := filepath.Join(repo.Repo, ".workbenches", "outreach")
+	if err := os.MkdirAll(bench, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct{ name, cwd, pane, want string }{
+		{"a worktree chat in the home workspace", repo.Inner, "wH:p2", "wI:p8"},
+		{"a workbench chat in the home workspace", bench, "wH:p2", "wI:p8"},
+		{"a worktree chat already in its project's workspace", repo.Inner, "wI:p2", "wI:p2"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			testjail.Fleet(t)
+			ctx := context.Background()
+			values, err := paths.Resolve()
+			if err != nil {
+				t.Fatal(err)
+			}
+			fake := &placeHerdr{
+				workspaces: [][3]any{{"wH", "~", 2}, {"wI", "lantern", 1}},
+				panes:      map[string]string{"wH:p1": "term-shell", "wI:p1": "term-shell-2", test.pane: "term-ops"},
+				cwds:       map[string]string{"wH:p1": values.Home, "wI:p1": repo.Repo, test.pane: values.Home},
+			}
+			socket := servePlaceHerdr(t, fake)
+			state := putOpsSeat(t, values, socket, test.pane)
+			seat, _, err := state.Seat(ctx, "ops-seat")
+			if err != nil {
+				t.Fatal(err)
+			}
+			scan := compose.Compose(compose.Input{
+				Options: compose.Options{View: compose.AllView},
+				Transcripts: []store.Transcript{
+					{UUID: seat.SessionID, Path: filepath.Join(values.Home, "ops.jsonl"), CWD: test.cwd},
+				},
+				HerdrSeats: []gather.HerdrSeat{{Seat: seat, CWD: values.Home}},
+			})
+			fleet := place.Fleet{
+				Rows:        scan.Rows,
+				ProjectDirs: scan.ProjectDirs,
+				Home:        values.Home,
+				Benches: []workbench.Bench{
+					{Dir: bench, Root: repo.Repo, Project: "lantern", Key: "lantern › outreach"},
+				},
+			}
+			if err := ReconcileHerdr(ctx, values, socket, fleet, ""); err != nil {
+				t.Fatal(err)
+			}
+			if _, ran := fake.call("workspace.list"); !ran {
+				t.Fatalf("reconcile never listed the workspaces: %v", fake.methods())
+			}
+			if move, moved := fake.call("pane.move"); moved && !reflect.DeepEqual(
+				move.Params["destination"], map[string]any{"type": "new_tab", "workspace_id": "wI", "label": "OPS"},
+			) {
+				t.Fatalf("pane.move = %+v, want a new OPS tab in lantern's wI", move.Params)
+			}
+			want := [][3]any{{"wH", "~", float64(2)}, {"wI", "lantern", float64(1)}}
+			if !reflect.DeepEqual(fake.listed(), want) {
+				t.Fatalf("workspaces = %v, want %v (calls %v)", fake.listed(), want, fake.methods())
+			}
+			placed, found, err := state.Seat(ctx, "ops-seat")
+			if err != nil || !found || placed.HerdrPane != test.want {
+				t.Fatalf("seat = %+v (found %v, err %v), want pane %s", placed, found, err, test.want)
+			}
+		})
+	}
+}
+
+// An open happens in the caller's pane only when the caller's workspace is
+// the chat's place's, renamed to the place's label first when no workspace
+// wears it and the caller's holds nothing but the place's; otherwise it opens
+// in a new tab of the place's workspace. A chat filed under no place opens in
+// place, asking Herdr nothing.
+func TestHerdrOpensInPlaceOnlyInItsPlaceWorkspace(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		workspaces [][3]any
+		neighbour  string // the directory of the caller's neighbour pane wC:p4
+		cwd        string
+		inPlace    bool
+		want       [][3]any
+	}{
+		{
+			"the caller's workspace is the place's",
+			[][3]any{{"wC", "orchard", 2}},
+			"/fixture/fleet-desk",
+			"/fixture/orchard", true,
+			[][3]any{{"wC", "orchard", float64(2)}},
+		},
+		{
+			"the place's workspace is another",
+			[][3]any{{"wC", "orchard", 2}, {"wE", "fleet-desk", 1}},
+			"/fixture/orchard",
+			"/fixture/fleet-desk", false,
+			[][3]any{{"wC", "orchard", float64(2)}, {"wE", "fleet-desk", float64(1)}},
+		},
+		{
+			"no workspace wears the label and the caller's holds only the place's",
+			[][3]any{{"wC", "scratch", 2}},
+			"/fixture/fleet-desk/docs", "/fixture/fleet-desk", true,
+			[][3]any{{"wC", "fleet-desk", float64(2)}},
+		},
+		{
+			"no workspace wears the label and the caller's holds another place's",
+			[][3]any{{"wC", "scratch", 2}},
+			"/fixture/orchard", "/fixture/fleet-desk", false,
+			[][3]any{{"wC", "scratch", float64(2)}},
+		},
+		{"a chat filed under no place", [][3]any{{"wC", "scratch", 2}}, "/fixture/orchard", "", true, nil},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			testjail.Fleet(t)
+			values, err := paths.Resolve()
+			if err != nil {
+				t.Fatal(err)
+			}
+			fake := &placeHerdr{
+				workspaces: test.workspaces,
+				panes:      map[string]string{"wC:p3": "term-caller", "wC:p4": "term-neighbour"},
+				cwds:       map[string]string{"wC:p3": "/fixture/attic", "wC:p4": test.neighbour},
+			}
+			socket := servePlaceHerdr(t, fake)
+			inPlace, err := HerdrOpensInPlace(context.Background(), values, &BackendChoice{
+				Backend: BackendHerdr, HerdrSocket: socket, HerdrPane: "wC:p3", HerdrWorkspace: "wC",
+				Places: scanned(fleetDesk()),
+			}, test.cwd)
+			if err != nil || inPlace != test.inPlace {
+				t.Fatalf("HerdrOpensInPlace = %v, %v; want %v (calls %v)", inPlace, err, test.inPlace, fake.methods())
+			}
+			if test.want == nil {
+				if calls := fake.methods(); len(calls) != 0 {
+					t.Fatalf("an unplaced chat asked Herdr %v", calls)
+				}
+				return
+			}
+			if !reflect.DeepEqual(fake.listed(), test.want) {
+				t.Fatalf("workspaces = %v, want %v (calls %v)", fake.listed(), test.want, fake.methods())
+			}
+			if _, created := fake.call("workspace.create"); created {
+				t.Fatalf("an open decision created a workspace: %v", fake.methods())
+			}
+		})
 	}
 }

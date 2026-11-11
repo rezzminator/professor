@@ -1,0 +1,141 @@
+{
+  "names": [
+    {
+      "name": "/tracer:use",
+      "kind": "command",
+      "successor": "/flights:tracer-use",
+      "match": "exact"
+    },
+    {
+      "name": "done-herewith",
+      "kind": "skill",
+      "successor": "close-out",
+      "match": "exact"
+    },
+    {
+      "name": "flights-foreman",
+      "kind": "agent",
+      "successor": "flights:foreman",
+      "match": "exact"
+    },
+    {
+      "name": "flights-foreman-sonnet",
+      "kind": "agent",
+      "successor": "flights:foreman-sonnet",
+      "match": "exact"
+    },
+    {
+      "name": "flights-hunter",
+      "kind": "agent",
+      "successor": "flights:hunter",
+      "match": "exact"
+    },
+    {
+      "name": "flights-lander",
+      "kind": "agent",
+      "successor": "flights:lander",
+      "match": "exact"
+    },
+    {
+      "name": "flights-spec-walker",
+      "kind": "agent",
+      "successor": "flights:spec-walker",
+      "match": "exact"
+    },
+    {
+      "name": "flights-speccer",
+      "kind": "agent",
+      "successor": "flights:speccer",
+      "match": "exact"
+    },
+    {
+      "name": "flights-sub-lander",
+      "kind": "agent",
+      "successor": "flights:sub-lander",
+      "match": "exact"
+    },
+    {
+      "name": "lander-inventory",
+      "kind": "skill",
+      "successor": "flights:lander-inventory",
+      "match": "exact"
+    },
+    {
+      "name": "subagent_type: \"reviewer\"",
+      "kind": "agent",
+      "successor": "flights:reviewer",
+      "match": "exact",
+      "probe": ".claude/agents/reviewer.md"
+    },
+    {
+      "name": "`reviewer` agent",
+      "kind": "agent",
+      "successor": "flights:reviewer",
+      "match": "exact",
+      "probe": ".claude/agents/reviewer.md"
+    },
+    {
+      "name": "reviewer-nt",
+      "kind": "agent",
+      "match": "exact"
+    },
+    {
+      "name": "reviewer-pro",
+      "kind": "agent",
+      "successor": "flights:reviewer-pro",
+      "match": "exact"
+    },
+    {
+      "name": "sub-tracer",
+      "kind": "agent",
+      "successor": "flights:sub-tracer",
+      "match": "exact"
+    },
+    {
+      "name": "subagent_type: \"tracer\"",
+      "kind": "agent",
+      "successor": "flights:tracer",
+      "match": "exact",
+      "probe": ".claude/agents/tracer.md"
+    },
+    {
+      "name": "`tracer` agent",
+      "kind": "agent",
+      "successor": "flights:tracer",
+      "match": "exact",
+      "probe": ".claude/agents/tracer.md"
+    },
+    {
+      "name": "tracetree",
+      "kind": "skill",
+      "successor": "flights:tracetree",
+      "match": "exact"
+    }
+  ],
+  "storeEntries": [],
+  "stateDirs": [],
+  "hookCommands": [],
+  "hookBinaries": [],
+  "hookShimHints": [],
+  "claudePlugins": {},
+  "globalAgents": [
+    "flights-foreman",
+    "flights-foreman-sonnet",
+    "flights-hunter",
+    "flights-lander",
+    "flights-spec-walker",
+    "flights-speccer",
+    "flights-sub-lander",
+    "reviewer",
+    "reviewer-nt",
+    "reviewer-pro",
+    "sub-tracer",
+    "tracer"
+  ],
+  "units": [],
+  "configFiles": [],
+  "commands": {
+    "homeBin": [],
+    "accountBin": []
+  }
+}

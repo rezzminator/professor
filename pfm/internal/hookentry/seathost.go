@@ -144,9 +144,16 @@ func SeatHost(args []string, stdout, stderr io.Writer, runtime config.Runtime) i
 		if runErr == nil {
 			argv, options, runErr = seatCommand(run, descriptor.Binary, terminal, stdout, stderr)
 		}
+		if runErr == nil {
+			// An in-place open execs this host from the pane's shell: Herdr reads
+			// the pane's directory from it, so it works where its chat does.
+			if err := os.Chdir(run.CWD); err != nil {
+				runErr = fmt.Errorf("enter chat directory %s: %w", run.CWD, err)
+			}
+		}
 		status, started := 1, false
 		if runErr == nil {
-			// The bound seat's Herdr socket and pane, never a herdr-keep relay's.
+			// The bound seat's Herdr socket and pane, never a herdr-shield relay's.
 			options.Env = seatEnvironment(
 				options.Env,
 				[]string{
@@ -486,11 +493,7 @@ func runSeatEngine(
 			case <-done:
 				return
 			case sig := <-signals:
-				if err := syscall.Kill(
-					-process.Pid(),
-					sig.(syscall.Signal),
-				); err != nil &&
-					!errors.Is(err, syscall.ESRCH) {
+				if err := process.SignalGroup(sig.(syscall.Signal)); err != nil {
 					fmt.Fprintf(options.Stderr, "pfm internal seat-host: forward %s: %v\n", sig, err)
 				}
 			}
@@ -500,10 +503,7 @@ func runSeatEngine(
 	close(done)
 	<-forwarded
 	// The engine owns this group; reap any job it left behind before restoring the tty.
-	groupErr := syscall.Kill(-process.Pid(), syscall.SIGKILL)
-	if errors.Is(groupErr, syscall.ESRCH) {
-		groupErr = nil
-	}
+	groupErr := process.KillGroup()
 	var exit *exec.ExitError
 	if errors.As(waitErr, &exit) {
 		status := exit.ExitCode()
@@ -513,6 +513,11 @@ func runSeatEngine(
 		return status, true, groupErr
 	}
 	return 0, true, errors.Join(waitErr, groupErr)
+}
+
+// seatForeground hands the terminal's foreground to group.
+func seatForeground(tty, group int) error {
+	return unix.IoctlSetPointerInt(tty, unix.TIOCSPGRP, group)
 }
 
 func startSeatEngine(argv []string, options deps.StartOptions) (deps.Process, error) {

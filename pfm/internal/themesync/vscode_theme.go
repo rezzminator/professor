@@ -4,6 +4,7 @@ import (
 	"bytes"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"regexp"
@@ -131,7 +132,7 @@ func (style *VSCodeSemanticStyle) UnmarshalJSON(content []byte) error {
 func validateVSCodeTheme(theme *VSCodeTheme) error {
 	for _, key := range slices.Sorted(maps.Keys(theme.Colors)) {
 		if !vscodeColorIDs[key] {
-			return fmt.Errorf("vscode theme colors %q: not a VS Code colour id (vscode_color_ids.txt)", key)
+			return errors.New(unknownColourNote(key))
 		}
 		if !vscodeHexColour.MatchString(theme.Colors[key]) {
 			return fmt.Errorf(
@@ -189,6 +190,11 @@ func validateVSCodeTheme(theme *VSCodeTheme) error {
 		}
 	}
 	return nil
+}
+
+// unknownColourNote is what names a theme colour id the registry lacks.
+func unknownColourNote(key string) string {
+	return fmt.Sprintf("vscode theme colors %q: not a VS Code colour id (vscode_color_ids.txt)", key)
 }
 
 // foldThemePins lays a theme's colours for the contract's keys under the
@@ -262,7 +268,8 @@ func RenderVSCodeTheme(stem string, content []byte) (VSCodeThemeFile, error) {
 		return VSCodeThemeFile{}, fmt.Errorf("themesync: VS Code theme %s: %w", stem, err)
 	}
 	value := CustomValue(stem)
-	tokens, side := customPalette(profile.Base, profile.Overrides)
+	// ParseProfile held every override a colour, so no note is set aside here.
+	tokens, side, _ := customPalette(profile.Base, profile.Overrides)
 	variant, err := deriveVariant(value, tokens)
 	if err != nil {
 		return VSCodeThemeFile{}, fmt.Errorf("themesync: VS Code theme %s: %w", stem, err)

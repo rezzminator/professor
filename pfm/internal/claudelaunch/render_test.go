@@ -162,8 +162,8 @@ func TestRenderFreshInteractive(t *testing.T) {
 			t.Errorf("env %s=%q, want %q", name, got, want)
 		}
 	}
-	if len(parsed.Hooks) != 24 {
-		t.Errorf("hooks=%d", len(parsed.Hooks))
+	if len(parsed.Hooks) != 25 {
+		t.Errorf("hooks=%d, want 25", len(parsed.Hooks))
 	}
 	if parsed.Settings["statusLine"] == nil || parsed.Settings["subagentStatusLine"] == nil {
 		t.Errorf("status lines=%#v", parsed.Settings)
@@ -409,6 +409,35 @@ func TestRenderPrompted(t *testing.T) {
 	_, parsed := renderParsed(t, Request{Purpose: PurposeInteractive, Home: home}, machine)
 	if parsed.Autonomy {
 		t.Error("prompted launch carries autonomy")
+	}
+}
+
+// Auto mode starts the chat under the permission classifier and keeps bypass
+// reachable; the launcher wraps a user's own claude and gets neither.
+func TestRenderAutoPermissionMode(t *testing.T) {
+	home, machine := renderMachine(t)
+	machine.Claude.PermissionMode = pfmconfig.PermissionAuto
+	want := []string{flagAllowBypass, flagPermissionMode, permissionModeAuto}
+	for _, request := range []Request{
+		{Purpose: PurposeInteractive, Home: home},
+		{Purpose: PurposeResume, Home: home, Resume: "R"},
+		{Purpose: PurposeLauncher, Home: home, Binary: "/bin/claude"},
+	} {
+		launch, parsed := renderParsed(t, request, machine)
+		if request.Purpose == PurposeLauncher {
+			if slices.Contains(launch.Argv, flagPermissionMode) || parsed.PermissionMode != "" ||
+				slices.Contains(launch.Argv, flagAllowBypass) {
+				t.Errorf("launcher carries auto mode: %q", launch.Argv)
+			}
+			continue
+		}
+		index := slices.Index(launch.Argv, flagAllowBypass)
+		if index < 0 || index+len(want) > len(launch.Argv) || !slices.Equal(launch.Argv[index:index+len(want)], want) {
+			t.Errorf("purpose %d argv %q lacks %q", request.Purpose, launch.Argv, want)
+		}
+		if parsed.PermissionMode != permissionModeAuto || parsed.Autonomy {
+			t.Errorf("purpose %d parsed mode=%q autonomy=%t", request.Purpose, parsed.PermissionMode, parsed.Autonomy)
+		}
 	}
 }
 

@@ -75,13 +75,11 @@ var AccountEntries = []string{
 // (chrome, dev-mods, keybindings), and engine-sync's machine policy
 // (engine-sync.json), which pfm install renders into the store itself and no
 // account directory carries: engine-sync reads it from $HOME/.claude whatever
-// CLAUDE_CONFIG_DIR says. The ponytail plugin keeps its mode and band state
-// per config dir (.ponytail-*, ponytail-modes): plugin runtime, not identity.
+// CLAUDE_CONFIG_DIR says.
 var IgnoredEntries = []string{
 	"ide", ".cc-new-children", ".cc-pane-children", claudeLocalSettingsName,
 	"debug", "daemon.lock", "daemon.status.json", ".claude.json.lock", "tmp",
 	"chrome", "dev-mods", "keybindings.json", "hooks", "engine-sync.json",
-	".ponytail-active", ".ponytail-band", ".ponytail-statusline-nudged", "ponytail-modes",
 }
 
 // EntryClass classifies a top-level Claude entry.
@@ -233,29 +231,38 @@ func InspectAccountLink(store, base, path, entry string) LinkState {
 func (installer *engine) wireClaudeStore() error {
 	store := installer.options.ConfigDir
 	report := InspectClaudeStore(store, installer.options.ClaudeAccounts)
+	// One store entry or account that fails costs only itself: no account links
+	// to a failed entry, and every other entry and account still wires.
+	var failures []error
+	failed := map[string]bool{}
 	for index, entry := range report.Entries {
+		shape := StoreEntries[index]
+		var err error
 		switch entry.State {
 		case "ok":
 			installer.ok(entry.Path)
 		case stateBroken:
-			return fmt.Errorf(
+			err = fmt.Errorf(
 				"store entry %s broken: %v — remove %s, then run pfm install --yes",
 				entry.Path,
 				entry.Err,
 				entry.Path,
 			)
 		case stateUnreadable:
-			return fmt.Errorf("inspect store entry %s: %w", entry.Path, entry.Err)
+			err = fmt.Errorf("inspect store entry %s: %w", entry.Path, entry.Err)
 		case string(HostOverlayMissing):
-			shape := StoreEntries[index]
-			if err := installer.change("create "+entry.Path, func() error {
+			if createErr := installer.change("create "+entry.Path, func() error {
 				if shape.Dir {
 					return os.MkdirAll(entry.Path, 0o700)
 				}
 				return atomicfile.Write(entry.Path, []byte(shape.Seed), 0o600)
-			}); err != nil {
-				return fmt.Errorf("create store entry %s: %w", entry.Path, err)
+			}); createErr != nil {
+				err = fmt.Errorf("create store entry %s: %w", entry.Path, createErr)
 			}
+		}
+		if err != nil {
+			failures = append(failures, installer.fail(err))
+			failed[shape.Name] = true
 		}
 	}
 	seen := make(map[string]int)
@@ -276,13 +283,16 @@ func (installer *engine) wireClaudeStore() error {
 			)
 			continue
 		case stateUnreadable:
-			return fmt.Errorf("inspect account %d %s: %w", account.ID, account.Dir, account.Err)
+			failures = append(failures, installer.fail(
+				fmt.Errorf("inspect account %d %s: %w", account.ID, account.Dir, account.Err)))
+			continue
 		case string(HostOverlayMissing):
 			if err := installer.change(
 				"create "+account.Dir,
 				func() error { return os.MkdirAll(account.Dir, 0o700) },
 			); err != nil {
-				return fmt.Errorf("create account %s: %w", account.Dir, err)
+				failures = append(failures, installer.fail(fmt.Errorf("create account %s: %w", account.Dir, err)))
+				continue
 			}
 		case "ok":
 			installer.ok(account.Dir)
@@ -304,6 +314,10 @@ func (installer *engine) wireClaudeStore() error {
 			liveRead := false
 			for _, link := range account.Links {
 				target := filepath.Join(store, link.Entry)
+				if failed[link.Entry] {
+					installer.skip(fmt.Sprintf("%s left as it is: store entry %s failed above", link.Path, target))
+					continue
+				}
 				switch link.State {
 				case "ok":
 					installer.ok(link.Path)
@@ -364,8 +378,8 @@ func (installer *engine) wireClaudeStore() error {
 			return nil
 		}()
 		if accountErr != nil {
-			return accountErr
+			failures = append(failures, installer.fail(accountErr))
 		}
 	}
-	return nil
+	return errors.Join(failures...)
 }

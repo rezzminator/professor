@@ -1,3 +1,8 @@
+// Package doctor is pfm's health pass: one row per probe over config,
+// engines, MCP, the index, crumbs, hooks, the harness prompt, and the
+// external plugin runtime, with healthy, broken, and could-not-look kept distinct.
+//
+// herdr_claude.go: the herdr-integration row of each Claude settings store.
 package doctor
 
 import (
@@ -99,14 +104,6 @@ func (t *doctorTally) summarize(stdout io.Writer) {
 	}
 }
 
-// abort ends a run whose later rows cannot be read: its row, one failure, the summary, exit 3.
-func (t *doctorTally) abort(stdout io.Writer, format string, args ...any) int {
-	fmt.Fprintf(stdout, format, args...)
-	t.fail()
-	t.summarize(stdout)
-	return 3
-}
-
 var DependencyProbeOverride func(context.Context, []deps.Entry, deps.ProbeOptions) []deps.Result
 
 // Run performs one health pass and returns 0 clean, 1 warnings, 2 usage, or 3 failures.
@@ -123,15 +120,10 @@ func Run(
 		stderr,
 	)
 	verbose := flags.Bool("verbose", false, "write raw probe output under the pfm scratch dir (path printed)")
-	// A v0.82 updater passes --skip-harvest to the new binary's doctor.
-	skipHarvest := flags.Bool("skip-harvest", false, "retired no-op: harvest moved to the harvester plugin")
 	projectUpdates := bindProjectUpdatesFlags(flags)
 	stale := bindStaleFlags(flags)
 	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
-	}
-	if *skipHarvest {
-		fmt.Fprintln(stderr, "pfm doctor: --skip-harvest is retired and ignored; harvest moved to the harvester plugin")
 	}
 	if flags.NArg() != 0 {
 		flags.Usage()
@@ -268,13 +260,14 @@ func Run(
 	tally.warnings += depWarnings
 	tally.failures += depFailures
 	tally.failures += printHostOverlayDoctor(stdout, resolved.Home)
+	retiredLists, retiredFailures := loadRetiredLists(stdout, resolved.Home)
+	tally.failures += retiredFailures
 	claudeStore := installer.ClaudeStore(resolved.Home)
 	pluginBuild := doctorClaudePluginBuild(
 		runtime.Version, resolved.Home, runtime.Config.Claude,
 		runtime.Config.Source(config.KeyClaudePlugins) == config.SourceDefault,
 	)
-	pluginBuild.Plugins = runtime.Config.ExtensionClaudePlugins()
-	claudeEnv := runtime.Config.ExtensionClaudeEnv(dependencies.Env, resolved.Home)
+	claudeEnv := runtime.Config.EffectiveClaudeEnv(dependencies.Env, resolved.Home)
 	claudeEnvDir := primary.ConfigDir
 	if len(runtime.Config.Accounts) == 0 || claudeEnvDir == "" {
 		claudeEnvDir = filepath.Join(resolved.Home, ".claude")
@@ -284,10 +277,7 @@ func Run(
 		claudeStore,
 		installer.ClaudePluginEnvironment(dependencies.Env, claudeEnv),
 		pluginBuild,
-		installer.PluginChats{
-			ProcRoot: resolved.ProcRoot,
-			Dirs:     append([]string{claudeEnvDir}, runtime.Config.ClaudeConfigDirs()...),
-		},
+		retiredLists.ClaudePlugins,
 		tally,
 	)
 	printEngineSyncHookDoctor(stdout, pluginBuild.Plugins, pluginBuild.PluginsDefault, tally)
@@ -306,7 +296,6 @@ func Run(
 		),
 		tally,
 	)
-	printExtensionsDoctor(ctx, stdout, resolved.Home, claudeEnvDir, runtime.Config, dependencies.Env, tally)
 	printFullscreenDoctor(stdout, resolved.Home, runtime.Config, tally)
 	printRuntimeRemoteControlDoctor(stdout, runtime, dependencies.Env, tally)
 	printRemoteControlRecipeDoctor(ctx, stdout, resolved, runtime.Config, tally)
@@ -317,7 +306,7 @@ func Run(
 		dependencies.Env,
 		enginesync.HostCapabilities(runtime.Config.Claude.GptAgents),
 		runtime.Config.ClaudeConfigDirs(),
-		update.RetiredRegistryNames(),
+		update.RetiredRegistryNames(retiredLists.Names),
 		runtime.Config.CodexHomes(),
 	)
 	tally.warnings += globalAgentsWarnings
@@ -351,9 +340,7 @@ func Run(
 	tally.warnings += cleanupWarnings
 	tally.failures += cleanupFailures
 
-	if code, aborted := printDatabaseDoctor(ctx, stdout, database, databaseErr, resolved, tally); aborted {
-		return code
-	}
+	printDatabaseDoctor(ctx, stdout, database, databaseErr, resolved, tally)
 
 	// The process table is probed by READING it, not by stat'ing /proc. macOS has
 	// no /proc and never will — pfm reads its process table through sysctl there

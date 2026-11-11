@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -386,8 +387,9 @@ func (harnessCaptureHTTPProcess) StdinPipe() (io.WriteCloser, error) {
 func (harnessCaptureHTTPProcess) StdoutPipe() (io.ReadCloser, error) {
 	return nil, errors.New("stdout pipe unavailable")
 }
-func (harnessCaptureHTTPProcess) Kill() error      { return nil }
-func (harnessCaptureHTTPProcess) KillGroup() error { return nil }
+func (harnessCaptureHTTPProcess) Kill() error                      { return nil }
+func (harnessCaptureHTTPProcess) KillGroup() error                 { return nil }
+func (harnessCaptureHTTPProcess) SignalGroup(syscall.Signal) error { return nil }
 
 func TestVerboseHarnessCapturePreservesReviewEvidence(t *testing.T) {
 	for _, blocked := range []bool{false, true} {
@@ -411,8 +413,14 @@ func TestVerboseHarnessCapturePreservesReviewEvidence(t *testing.T) {
 				Dependencies{Runner: harnessCaptureHTTPRunner{binary: binary}},
 			)
 			if blocked {
-				if err == nil || !strings.Contains(err.Error(), "write harness capture request evidence") {
-					t.Fatalf("failed evidence write hidden: %v", err)
+				// The capture is still judged; the unwritten evidence is a line beside its verdict.
+				sum := sha256.Sum256([]byte(normalizeHarnessPrompt(captured.Prompt)))
+				line, warn := harnessPromptVerdict(hex.EncodeToString(sum[:]), "fixture.md", captured.Prompt, err)
+				want := "doctor: harness-prompt: matches baseline fixture.md\n" +
+					"doctor: harness-prompt --verbose request evidence not written: " +
+					"write verbose output harness-prompt-sonnet.request.json: open " + path + ": is a directory"
+				if line != want || !warn {
+					t.Fatalf("verdict = (%q, %v), want (%q, true)", line, warn, want)
 				}
 				return
 			}

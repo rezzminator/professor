@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -16,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/claudeplugin"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/doctor"
@@ -68,9 +68,8 @@ func installCheckTree(t *testing.T, root string) map[string]string {
 }
 
 // installCheckHome stages a host with one Claude account under {home}/.cc/1
-// and its config in the clone (migrated) or in ~/.config/pfm (legacy, the
-// host the install gate refuses until the operator moves it).
-func installCheckHome(t *testing.T, legacy bool) (home, clone, account string) {
+// and its config in the clone.
+func installCheckHome(t *testing.T) (home, clone, account string) {
 	t.Helper()
 	home = t.TempDir()
 	clone, account = filepath.Join(home, "clone"), pfmconfig.DefaultAccountDir(home, 1)
@@ -93,12 +92,6 @@ func installCheckHome(t *testing.T, legacy bool) (home, clone, account string) {
 		t.Fatal(err)
 	}
 	configPath := filepath.Join(clone, pfmconfig.FileName)
-	if legacy {
-		configPath = filepath.Join(home, ".config", "pfm", pfmconfig.FileName)
-	}
-	if err := os.MkdirAll(filepath.Dir(configPath), 0o700); err != nil {
-		t.Fatal(err)
-	}
 	config := fmt.Sprintf(`{"version":2,"accounts":[{"id":1,"configDir":%q}]}`+"\n", account)
 	if err := os.WriteFile(configPath, []byte(config), 0o600); err != nil {
 		t.Fatal(err)
@@ -112,7 +105,7 @@ func TestInstallCheckPreChangeChecks(t *testing.T) {
 		"explicit missing",
 	} {
 		t.Run(scenario, func(t *testing.T) {
-			home, _, _ := installCheckHome(t, false)
+			home, _, _ := installCheckHome(t)
 			bin, _ := writeManagerFakes(
 				t,
 				"case \"$*\" in *ActiveState*) echo inactive;; esac\nexit 0",
@@ -154,12 +147,13 @@ func TestInstallCheckPreChangeChecks(t *testing.T) {
 			}
 			t.Setenv("PATH", bin)
 			if scenario == "kit missing python3 present" || scenario == "python3 missing" {
-				// A fresh machine has not got the tracetree kit the install links:
-				// the pre-change check never judges the kit. python3 is a registry
-				// dependency like git, judged by the probe the cases below script.
-				kit := filepath.Join(home, ".claude", "skills", "tracetree")
-				if _, err := os.Lstat(kit); !errors.Is(err, fs.ErrNotExist) {
-					t.Fatalf("the fresh home already carries %s (err=%v)", kit, err)
+				// A fresh machine has not got the flights plugin whose folder holds
+				// the tracetree kit: the pre-change check never judges the kit.
+				// python3 is a registry dependency like git, judged by the probe the
+				// cases below script.
+				roots, err := claudeplugin.Roots(installer.ClaudeStore(home), "flights")
+				if err != nil || len(roots) != 0 {
+					t.Fatalf("the fresh home already enables the flights plugin: roots=%v err=%v", roots, err)
 				}
 			}
 			savedProbe, savedInstaller := doctor.DependencyProbeOverride, runInstaller
@@ -236,7 +230,7 @@ func TestInstallCheckPreChangeChecks(t *testing.T) {
 				}
 			case "python3 missing":
 				want := "doctor: dep python3 path=(none) MISSING required — install: install python3; " +
-					"the tracer's tracetree kit runs on it\n"
+					"flights:tracer's tracetree kit runs on it\n"
 				if !strings.Contains(out.String(), want) ||
 					errOut.String() != "pfm install: required dependency preflight failed\n" {
 					t.Fatalf("stdout=%q stderr=%q, want stdout holding %q", out.String(), errOut.String(), want)
@@ -277,7 +271,7 @@ func installDatabaseFile(t *testing.T, path string) string {
 // keeps the old binary — so a check, or a preview, that migrated a database
 // would lock the binary it kept out of its own state. Neither migrates.
 func TestInstallCheckAndPreviewLeaveOlderDatabasesUnmigrated(t *testing.T) {
-	installCheckHome(t, false)
+	installCheckHome(t)
 	bin, _ := writeManagerFakes(
 		t,
 		"case \"$*\" in *ActiveState*) echo inactive;; esac\nexit 0",

@@ -674,7 +674,7 @@ for (const sourceDir of [".claude/agents", "demo-child/.claude/agents"]) {
 }
 
 const CAPABILITY = 'gpt-agents';
-const otherVariants = ['flights-foreman-sonnet', 'rr-pro', 'rr-pro-max', 'reviewer-nt'];
+const otherVariants = ['rr-pro', 'rr-pro-max'];
 const renderErrors = /SECTION-DRIFT|SECTION-MISSING|RENAME-UNUSED|UNSET-MISSING|FRONTMATTER-INVALID/;
 
 // `engine-sync global` over the shipped declaration, into a jail home and Codex home: the real machine
@@ -765,11 +765,7 @@ test('no OpenCode mirror, gitter included, holds a Git write permission', () => 
 // auto-effort steers an agent whose frontmatter carries `effortControl`, and only a steered agent may press
 // its buttons: exactly these Claude roles hold both; every other rendered agent and pcm neither.
 const effortButtons = ['effort_up', 'effort_down', 'effort_auto'].map((tool) => `mcp__auto-effort__${tool}`);
-const foremanEffort = { floor: 'medium', ceiling: 'xhigh' };
-const effortSteered = new Map([
-  ['flights-foreman', foremanEffort], ['flights-foreman-sonnet', foremanEffort],
-  ['reviewer', true], ['reviewer-pro', true], ['reviewer-nt', true], ['documenter', true],
-]);
+const effortSteered = new Map([['documenter', true]]);
 function assertEffortPermission(name, text) {
   const fm = parseFrontmatter(name, text);
   const tools = (fm.tools ?? '').split(',').map((tool) => tool.trim());
@@ -804,7 +800,7 @@ test('effort permission gate evaluates native exclusions without reducing inheri
     const denied = effortButtons.filter((button) => button !== surviving);
     assert.throws(() => assertEffortPermission('unapproved', `---\nname: unapproved\ndisallowedTools: ${JSON.stringify(denied)}\n---\nRead.\n`));
   }
-  assert.throws(() => assertEffortPermission('reviewer', `---\nname: reviewer\neffortControl: true\ndisallowedTools: [${effortButtons[0]}]\n---\nReview.\n`));
+  assert.throws(() => assertEffortPermission('documenter', `---\nname: documenter\neffortControl: true\ndisallowedTools: [${effortButtons[0]}]\n---\nDocument.\n`));
 });
 
 test('effort buttons ride exactly the steered Claude roles, never another rendered agent or pcm', () => {
@@ -841,7 +837,7 @@ test('every shipped agent naming forward-compaction holds forward_compaction and
 test('canonical investigation and trace visibility stays separate from GPT helpers', () => {
   const render = renderShipped([CAPABILITY]);
   for (const [child, callers] of [
-    ['transcript-reader', ['agent-investigator']], ['sub-tracer', ['tracer', 'sub-tracer']],
+    ['transcript-reader', ['agent-investigator']],
   ]) {
     const text = renderedText(render, child);
     assert.ok(text, `${child}: no rendered helper`);

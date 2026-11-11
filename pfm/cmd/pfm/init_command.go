@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -38,10 +39,17 @@ func runInit(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime
 		fmt.Fprintf(stderr, "pfm init: config: %v\n", err)
 		return 1
 	}
+	// The installed marker first; without it, the clone this runs in (or PFM_SOURCE_REPO).
 	source, err := paths.ReadSourceRepoMarker(runtime.Paths.Home)
 	if err != nil {
-		fmt.Fprintf(stderr, "pfm init: %v\n", err)
-		return 1
+		if !errors.Is(err, paths.ErrNoSourceRepoMarker) {
+			// A broken or unreadable marker is said aloud before the clone discovery stands in.
+			fmt.Fprintf(stderr, "pfm init: warning: %v\n", err)
+		}
+		if source = professor.DiscoverSourceRepo(); source == "" {
+			fmt.Fprintf(stderr, "pfm init: %v\n", err)
+			return 1
+		}
 	}
 	if *render {
 		return runInitRender(source, target, stdout, stderr)
@@ -62,7 +70,7 @@ func runInit(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime
 			"runs pfm init --render and deploys the per-project files\n",
 		filepath.Join(source, "docs", "SETUP.md"),
 	)
-	fmt.Fprintln(stdout, "next: write CLAUDE.md with /quality:claude-md write CLAUDE.md")
+	fmt.Fprintln(stdout, "next: write CLAUDE.md with /claude-md:use write CLAUDE.md")
 	return 0
 }
 

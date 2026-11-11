@@ -189,13 +189,24 @@ func TestAcceptCoverageIsExplicitAndUndoIsScoped(t *testing.T) {
 		hits, incomplete bool
 		flags            []string
 		wantCode         int
+		unscanned        string // a file the scan could not read
+		wantStderr       string
 	}{
-		{"legacy hit accept", true, true, nil, 0},
-		{"explicit coverage accept", true, true, []string{"--coverage"}, 0},
-		{"coverage cannot accept hits", true, false, []string{"--coverage"}, 1},
-		{"hits cannot accept coverage", false, true, nil, 1},
-		{"empty scan", false, false, []string{"--coverage"}, 1},
-		{"coverage and name conflict", true, true, []string{"--coverage", "--name", "/km"}, 2},
+		{"legacy hit accept", true, true, nil, 0, "", ""},
+		{"explicit coverage accept", true, true, []string{"--coverage"}, 0, "", ""},
+		{"coverage cannot accept hits", true, false, []string{"--coverage"}, 1, "", ""},
+		{"hits cannot accept coverage", false, true, nil, 1, "", ""},
+		{"empty scan", false, false, []string{"--coverage"}, 1, "", ""},
+		{"coverage and name conflict", true, true, []string{"--coverage", "--name", "/km"}, 2, "", ""},
+		{"unscanned file elsewhere", true, true, nil, 0, "bin/blob", ""},
+		{
+			"unscanned file under the path", true, true, nil, 1, "docs/locked.md",
+			"pfm update accept: docs could not be scanned (docs/locked.md: permission denied); fix that first\n",
+		},
+		{
+			"whole scan failed", false, false, nil, 1, ".",
+			"pfm update accept: docs could not be scanned (.: permission denied); fix that first\n",
+		},
 	} {
 		t.Run(row.name, func(t *testing.T) {
 			project, home := newUpdatedGitStoreProject(t, newGitScaffoldStore(t))
@@ -207,6 +218,9 @@ func TestAcceptCoverageIsExplicitAndUndoIsScoped(t *testing.T) {
 				}
 				if row.incomplete {
 					result.Incomplete = []RetiredNameFailure{{Path: "docs/archive.txt", Error: "scan limit"}}
+				}
+				if row.unscanned != "" {
+					result.Failures = []RetiredNameFailure{{Path: row.unscanned, Error: "permission denied"}}
 				}
 				return result
 			}
@@ -227,6 +241,9 @@ func TestAcceptCoverageIsExplicitAndUndoIsScoped(t *testing.T) {
 			}
 			if row.incomplete && !row.hits && len(row.flags) == 0 && !strings.Contains(errOut.String(), "--coverage") {
 				t.Fatalf("incomplete refusal lacks closing verb: %s", errOut.String())
+			}
+			if row.wantStderr != "" && errOut.String() != row.wantStderr {
+				t.Fatalf("accept stderr = %q, want %q", errOut.String(), row.wantStderr)
 			}
 			if row.wantCode != 0 {
 				if len(baseline.RetiredAccepted) != 0 {

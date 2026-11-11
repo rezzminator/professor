@@ -14,8 +14,10 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/servicemanager"
 	"github.com/rezzminator/professor/pfm/internal/themesync"
 	"github.com/rezzminator/professor/pfm/internal/themetmux"
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
@@ -44,9 +46,15 @@ type TmuxSpawner struct {
 	// A test injects a recorder here.
 	applyTheme func(ctx context.Context, servers themesync.TmuxServers, stateDir, socket string) error
 	// Env is the host-environment seam (pfm/TESTPLAN.md § Seams, paths.Env)
-	// serviceScopeCommand reads INVOCATION_ID through; nil defaults to
+	// chatServerCommand reads INVOCATION_ID through; nil defaults to
 	// paths.OSEnv{}.
 	Env paths.Env
+	// serviceKind is the service manager a chat server escapes; "" is
+	// servicemanager.Native(). A test sets the other kind here.
+	serviceKind servicemanager.Kind
+	// lookPath resolves the scope launcher; nil is the real runner's. A test
+	// points it at a fake.
+	lookPath func(string) (string, error)
 	// Screen is the pane door Pane hands out; nil is the call engine over
 	// Binary. A test injects a recorder here.
 	Screen pfmcall.Screen
@@ -166,9 +174,21 @@ func (tmux TmuxSpawner) NewSession(
 	}
 	started = true
 	if guard != nil {
-		output, queryErr := tmux.command(ctx, spec.Socket, "display-message", "-p", "-t", spec.Session+":", "#{pane_pid}").
-			Output()
-		pid, parseErr := strconv.Atoi(strings.TrimSpace(string(output)))
+		// A freshly born pane can answer once with nothing: ask again before ending the server.
+		var (
+			queryErr, parseErr error
+			pid                int
+		)
+		for attempt := 0; attempt < 2; attempt++ {
+			var output []byte
+			output, queryErr = tmux.command(
+				ctx, spec.Socket, "display-message", "-p", "-t", spec.Session+":", "#{pane_pid}",
+			).Output()
+			pid, parseErr = strconv.Atoi(strings.TrimSpace(string(output)))
+			if queryErr == nil && parseErr == nil || ctx.Err() != nil {
+				break
+			}
+		}
 		recordErr := queryErr
 		if recordErr == nil && parseErr != nil {
 			recordErr = fmt.Errorf("read account launch pane pid: %w", parseErr)
@@ -273,11 +293,24 @@ func (tmux TmuxSpawner) newSessionCommand(
 		tmux.Binary,
 		filepath.Join(tmux.TmuxDir, socket),
 		arguments...)
+	// The chat lives in its own pane: the caller's Herdr pane identity would attribute it to the
+	// caller (an attach re-copies the attaching client's through update-environment), and a Codex
+	// tool shell's injections would start it monochrome and pager-less. tmux sets TMUX and
+	// TMUX_PANE in the pane itself, so the caller's never reach it.
+	environment = claudelaunch.WithoutCodexToolShell(herdr.StripPane(environment))
 	env := tmux.Env
 	if env == nil {
 		env = paths.OSEnv{}
 	}
-	command, err := serviceScopeCommand(ctx, binary, commandArguments, environment, env)
+	kind := tmux.serviceKind
+	if kind == "" {
+		kind = servicemanager.Native()
+	}
+	lookPath := tmux.lookPath
+	if lookPath == nil {
+		lookPath = obs.Runner(deps.RealRunner{}).LookPath
+	}
+	command, err := chatServerCommand(ctx, kind, lookPath, binary, commandArguments, environment, env)
 	if err != nil {
 		return nil, err
 	}

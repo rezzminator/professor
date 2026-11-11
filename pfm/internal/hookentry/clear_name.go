@@ -77,6 +77,15 @@ func ClearName(args []string, stdin io.Reader, stdout, stderr io.Writer, runtime
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), promptHookDeadline)
 	defer cancel()
+	if payload.Path != "" && !filepath.IsAbs(payload.Path) {
+		fmt.Fprintf(
+			stderr,
+			"pfm internal clear-name: session %s transcript_path %q is not absolute; naming from the payload title\n",
+			payload.SessionID,
+			payload.Path,
+		)
+		payload.Path = ""
+	}
 	if err := clearNameEvent(ctx, payload, stdout, runtime); err != nil {
 		if payload.Event == claudelaunch.HookEventUserPromptSubmit {
 			fmt.Fprintf(stderr, "pfm internal clear-name: session %s pending title check failed (fail-open): %v\n",
@@ -103,9 +112,6 @@ func clearNameEvent(
 ) (returnErr error) {
 	if !engine.IsUUID(payload.SessionID) {
 		return fmt.Errorf("session_id %q is not a session id", payload.SessionID)
-	}
-	if payload.Path != "" && !filepath.IsAbs(payload.Path) {
-		return fmt.Errorf("successor transcript_path %q is not absolute", payload.Path)
 	}
 	state := fleetdb.OpenSharedState(ctx, runtime.Paths)
 	defer func() { returnErr = errors.Join(returnErr, state.Close()) }()

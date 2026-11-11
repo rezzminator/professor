@@ -8,6 +8,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/servicemanager"
 )
 
 // mcpEnabledRuntime is a runtime whose config serves one MCP server, so the
@@ -189,5 +190,19 @@ func TestPrintServiceManagerDoctorDisabledInConfigNeverProbes(t *testing.T) {
 	want := "doctor: service-manager=" + manager + " unit=" + unit + " disabled-in-config\n"
 	if output.String() != want {
 		t.Fatalf("output = %q, want %q", output.String(), want)
+	}
+}
+
+// TestServiceManagerForPicksTheKindsRows: each kind reports its own manager
+// word, binary and units, whichever OS runs the test.
+func TestServiceManagerForPicksTheKindsRows(t *testing.T) {
+	for kind, want := range map[servicemanager.Kind][4]string{
+		servicemanager.KindSystemd: {"systemd", "systemctl", "pfm-mcp.service", "pfm-schedule.timer"},
+		servicemanager.KindLaunchd: {"launchd", "launchctl", "com.professor.pfm.mcp", "com.professor.pfm.schedule"},
+	} {
+		probe := serviceManagerFor(kind)
+		if got := [4]string{probe.manager, probe.binary, probe.mcpUnit, probe.scheduleUnit}; got != want {
+			t.Fatalf("serviceManagerFor(%s) = %q, want %q", kind, got, want)
+		}
 	}
 }

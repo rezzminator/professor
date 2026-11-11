@@ -4,15 +4,15 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 )
 
 // ReadStatuslineSnapshot answers with this seat's newest reading inside
 // maxAge: another config directory or another account's file never answers,
-// the answer carries its reading's confirmation, and a file claiming the wrong
-// account under this account's name is an error rather than silence.
+// the answer carries its reading's confirmation, and a bad file under this
+// account's name (the wrong account claimed, undecodable, undated, no regular
+// file, an out-of-range window) is skipped by name while its siblings answer.
 func TestReadStatuslineSnapshotKeepsOnlyThisSeatsNewestReading(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
 	directory := t.TempDir()
@@ -48,11 +48,63 @@ func TestReadStatuslineSnapshotKeepsOnlyThisSeatsNewestReading(t *testing.T) {
 		t.Fatalf("maxAge 10s: found=%v err=%v, want nothing young enough", found, err)
 	}
 
-	write("acct-3.liar.json", 5, configDir, time.Second, 10)
-	if _, _, _, err := ReadStatuslineSnapshot(
-		directory, 3, configDir, now, time.Hour,
-	); err == nil || !strings.Contains(err.Error(), "claims account 5") {
-		t.Fatalf("mislabelled snapshot: err=%v, want a claims-account error", err)
+	for _, test := range []struct {
+		name    string
+		plant   func(path string)
+		wantErr string
+	}{
+		{
+			name:    "wrong account claimed",
+			plant:   func(string) { write("acct-3.bad.json", 5, configDir, time.Second, 10) },
+			wantErr: "skipped statusline quota acct-3.bad.json: claims account 5, want 3",
+		},
+		{
+			name: "undecodable",
+			plant: func(path string) {
+				if err := os.WriteFile(path, []byte("{"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantErr: "skipped statusline quota acct-3.bad.json: decode: unexpected end of JSON input",
+		},
+		{
+			name:    "undated",
+			plant:   func(string) { write("acct-3.bad.json", 3, configDir, -time.Hour, 10) },
+			wantErr: "skipped statusline quota acct-3.bad.json: invalid confirmation time",
+		},
+		{
+			name: "no regular file",
+			plant: func(path string) {
+				if err := os.Mkdir(path, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantErr: "skipped statusline quota acct-3.bad.json: not a regular file",
+		},
+		{
+			name:    "window out of range",
+			plant:   func(string) { write("acct-3.bad.json", 3, configDir, time.Second, 150) },
+			wantErr: "skipped statusline quota acct-3.bad.json window five_hour: utilization 150 is outside 0..100",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			bad := filepath.Join(directory, "acct-3.bad.json")
+			test.plant(bad)
+			t.Cleanup(func() {
+				if err := os.RemoveAll(bad); err != nil {
+					t.Error(err)
+				}
+			})
+			usage, confirmedAt, found, err := ReadStatuslineSnapshot(directory, 3, configDir, now, time.Hour)
+			if err == nil || err.Error() != test.wantErr {
+				t.Fatalf("err=%v, want %q", err, test.wantErr)
+			}
+			if !found || !confirmedAt.Equal(now.Add(-30*time.Second)) || usage.FiveHour.Utilization == nil ||
+				*usage.FiveHour.Utilization != 40 {
+				t.Fatalf("found=%v answered %v at %s, want the siblings' 40%% confirmed 30s ago",
+					found, usage.FiveHour, confirmedAt)
+			}
+		})
 	}
 }
 

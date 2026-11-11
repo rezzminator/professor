@@ -77,14 +77,14 @@ func TestLaunchPassThroughPredicate(t *testing.T) {
 }
 
 func TestLaunchWorkbench(t *testing.T) {
-	for _, scenario := range []string{"new", "resume", "explicit", "invalid", "disabled", "disabled session id", "disabled resume", "outside", "version", "mcp"} {
+	for _, scenario := range []string{"new", "resume", "explicit", "invalid", "unknown effort", "disabled", "disabled session id", "disabled resume", "outside", "version", "mcp", "unreadable primary"} {
 		t.Run(scenario, func(t *testing.T) {
 			root := testjail.ShortRoot(t)
 			dir := filepath.Join(root, "acme", "docs", "scribe")
 			prompt := filepath.Join(dir, ".professor", "scribe.md")
 			manifest := `{"prompt":"scribe.md","effort":"xhigh"}`
 			args := []string{}
-			wantPrompt, wantEffort, wantError := prompt, "xhigh", ""
+			wantPrompt, wantEffort, wantError, wantWarning := prompt, "xhigh", "", ""
 			switch scenario {
 			case "resume":
 				args = []string{"--resume", "44444444-4444-4444-8444-444444444444"}
@@ -92,8 +92,16 @@ func TestLaunchWorkbench(t *testing.T) {
 				args = []string{"--effort", "low", "--system-prompt-file", "/work/alt.md"}
 				wantPrompt, wantEffort = "/work/alt.md", "low"
 			case "invalid":
+				// A persona that cannot resolve launches the chat without it, said.
 				manifest = `{"prompt":""}`
-				wantError = "pfm internal launch: " + paths.WorkbenchManifest(dir) + `: "prompt" is required` + "\n"
+				wantPrompt, wantEffort = "", ""
+				wantWarning = "pfm internal launch: workbench persona not applied (" + paths.WorkbenchManifest(dir) +
+					`: "prompt" is required); launching without it` + "\n"
+			case "unknown effort":
+				manifest = `{"prompt":"scribe.md","effort":"turbo"}`
+				wantEffort = ""
+				wantWarning = "pfm internal launch: workbench " + dir + `: unknown Claude effort "turbo" ` +
+					"(want low, medium, high, xhigh or max); launching the persona on the default effort\n"
 			case "disabled", "disabled session id", "disabled resume":
 				manifest = `{"prompt":"scribe.md","engines":["codex"],"effort":"xhigh"}`
 				if scenario == "disabled session id" {
@@ -110,6 +118,16 @@ func TestLaunchWorkbench(t *testing.T) {
 				}
 			case "outside":
 				wantPrompt, wantEffort = "", ""
+			case "unreadable primary":
+				if err := atomicfile.Write(
+					filepath.Join(root, ".claude-primary"),
+					[]byte("garbage"),
+					0o600,
+				); err != nil {
+					t.Fatal(err)
+				}
+				wantWarning = "pfm: primary account unreadable (read primary account: parse primary account mirror: " +
+					`strconv.Atoi: parsing "garbage": invalid syntax); launching on account 1` + "\n"
 			case "version", "mcp":
 				manifest = `{"prompt":""}`
 				args = []string{"--version"}
@@ -182,6 +200,9 @@ func TestLaunchWorkbench(t *testing.T) {
 			}
 			if code != 0 {
 				t.Fatalf("launch = %d: %s", code, stderr.String())
+			}
+			if wantWarning != "" && stderr.String() != wantWarning {
+				t.Fatalf("launch stderr = %q, want %q", stderr.String(), wantWarning)
 			}
 			if scenario == "version" || scenario == "mcp" {
 				return

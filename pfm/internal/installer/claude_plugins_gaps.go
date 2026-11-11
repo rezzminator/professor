@@ -1,7 +1,6 @@
 package installer
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -13,6 +12,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/rezzminator/professor/pfm/internal/claudeplugin"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
 
@@ -29,24 +29,28 @@ var ErrClaudeSettingsAbsent = errors.New("no settings.json")
 // ClaudePluginGaps reads the store's settings.json and names every target id
 // not enabled, every install-only plugin enabled, every local target whose
 // copy is missing, not a plain directory or not the checkout's content, every
-// other plugin enabled under two or more keys, every enabled retired default
-// plugin copy, every listed bare name a successor retired, and every retired
-// copy's pluginConfigs entry left beside its successor's. A plugin of ours
-// still under a legacy id is ClaudePluginLegacyGaps'. A
-// missing file returns ErrClaudeSettingsAbsent; a file that cannot be read or
-// parsed returns its error, never an answer, because its real state is unknown.
-func ClaudePluginGaps(path string, targets []ClaudePluginTarget) ([]ClaudePluginGap, error) {
+// other plugin enabled under two or more keys, and of retiredPlugins (the
+// retired lists' plugin ids once ours, keyed by their successor's bare name)
+// every enabled id, every listed bare name a successor retired, and every
+// retired id's pluginConfigs entry left beside its successor's. A missing file
+// returns ErrClaudeSettingsAbsent; a file that cannot be read or parsed
+// returns its error, never an answer, because its real state is unknown.
+func ClaudePluginGaps(
+	path string,
+	targets []ClaudePluginTarget,
+	retiredPlugins map[string][]string,
+) ([]ClaudePluginGap, error) {
 	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
 		return nil, fmt.Errorf("%w at %s", ErrClaudeSettingsAbsent, path)
 	}
-	document, err := readClaudeSettingsDocument(path)
+	document, err := claudeplugin.ReadSettings(path)
 	if err != nil {
 		return nil, err
 	}
 	var gaps []ClaudePluginGap
 	for index := range targets {
 		target := &targets[index]
-		if successor := target.retiredSuccessor(); successor != "" {
+		if successor := target.retiredSuccessor(retiredPlugins); successor != "" {
 			// Its other gaps would send the reader to ensure the retired copy.
 			gaps = append(gaps, retiredListedGap(target.Name, successor))
 			continue
@@ -75,8 +79,8 @@ func ClaudePluginGaps(path string, targets []ClaudePluginTarget) ([]ClaudePlugin
 			}
 		}
 	}
-	for _, successor := range slices.Sorted(maps.Keys(retiredClaudePlugins)) {
-		for _, id := range retiredClaudePlugins[successor] {
+	for _, successor := range slices.Sorted(maps.Keys(retiredPlugins)) {
+		for _, id := range retiredPlugins[successor] {
 			if pluginEnabled(document, id) {
 				gaps = append(gaps, ClaudePluginGap{
 					Problem: "plugin " + id + " retired (now " + successor + ") but still enabled in " + path,
@@ -88,7 +92,7 @@ func ClaudePluginGaps(path string, targets []ClaudePluginTarget) ([]ClaudePlugin
 	}
 	for index := range targets {
 		target := &targets[index]
-		retired := retiredClaudePlugins[target.Name]
+		retired := retiredPlugins[target.Name]
 		if !target.Own || len(retired) == 0 {
 			continue
 		}
@@ -110,15 +114,15 @@ func ClaudePluginGaps(path string, targets []ClaudePluginTarget) ([]ClaudePlugin
 }
 
 // retiredSuccessor is the plugin that replaced a listed bare name of ours, read
-// from retiredClaudePlugins; "" for a full id, an install-only plugin or a
-// name no successor retired.
-func (target ClaudePluginTarget) retiredSuccessor() string {
+// from retiredPlugins; "" for a full id, an install-only plugin or a name no
+// successor retired.
+func (target ClaudePluginTarget) retiredSuccessor(retiredPlugins map[string][]string) string {
 	if !target.Own || target.InstallOnly {
 		return ""
 	}
-	for _, successor := range slices.Sorted(maps.Keys(retiredClaudePlugins)) {
-		for _, id := range retiredClaudePlugins[successor] {
-			// A successor's own name under a retired marketplace (auto-effort@rezzminator) retires that id alone.
+	for _, successor := range slices.Sorted(maps.Keys(retiredPlugins)) {
+		for _, id := range retiredPlugins[successor] {
+			// A successor's own name under a retired marketplace ({successor}@{old}) retires that id alone.
 			if name, _, _ := strings.Cut(id, "@"); name == target.Name && successor != target.Name {
 				return successor
 			}
@@ -144,7 +148,7 @@ func retiredListedGap(name, successor string) ClaudePluginGap {
 // file means none is installed; a file that cannot be read or parsed returns
 // its error, never an answer.
 func ClaudePluginsNotInstalled(configDir string, targets []ClaudePluginTarget) ([]string, error) {
-	record, err := readClaudePluginInstalls(configDir)
+	record, err := claudeplugin.ReadInstalls(configDir)
 	if err != nil {
 		return nil, err
 	}
@@ -165,86 +169,19 @@ func ClaudePluginsNotInstalled(configDir string, targets []ClaudePluginTarget) (
 	return missing, nil
 }
 
-// claudePluginInstall is one install record Claude Code keeps for a plugin id
-// in plugins/installed_plugins.json: one per scope it is installed in, a
-// project or local one naming its project. Claude Code owns the shape: a
-// scope, projectPath or version that is not a string reads as empty rather
-// than failing the record every other reader needs; installPath stays strict.
-type claudePluginInstall struct {
-	Scope       string
-	ProjectPath string
-	InstallPath string
-	Version     string
-}
-
-// UnmarshalJSON reads one entry, its loose fields as recordString does.
-func (install *claudePluginInstall) UnmarshalJSON(raw []byte) error {
-	var entry struct {
-		Scope       json.RawMessage `json:"scope"`
-		ProjectPath json.RawMessage `json:"projectPath"`
-		InstallPath string          `json:"installPath"`
-		Version     json.RawMessage `json:"version"`
-	}
-	if err := json.Unmarshal(raw, &entry); err != nil {
-		return err
-	}
-	*install = claudePluginInstall{
-		Scope:       recordString(entry.Scope),
-		ProjectPath: recordString(entry.ProjectPath),
-		InstallPath: entry.InstallPath,
-		Version:     recordString(entry.Version),
-	}
-	return nil
-}
-
-// recordString is a raw record value as a string; empty when it is absent or
-// not a JSON string.
-func recordString(raw json.RawMessage) string {
-	var text string
-	if err := json.Unmarshal(raw, &text); err != nil {
-		return ""
-	}
-	return text
-}
-
-// version is the record's version string; empty when it names none or names
-// one that is not a JSON string.
-func (install claudePluginInstall) version() string { return install.Version }
-
-// readClaudePluginInstalls reads configDir's plugins/installed_plugins.json,
-// keyed by plugin id. A missing file means none is installed; a file that
-// cannot be read or parsed returns its error, never an answer.
-func readClaudePluginInstalls(configDir string) (map[string][]claudePluginInstall, error) {
-	path := filepath.Join(configDir, "plugins", "installed_plugins.json")
-	raw, err := os.ReadFile(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", path, err)
-	}
-	var record struct {
-		Plugins map[string][]claudePluginInstall `json:"plugins"`
-	}
-	if err := json.Unmarshal(raw, &record); err != nil {
-		return nil, fmt.Errorf("parse %s: %w", path, err)
-	}
-	return record.Plugins, nil
-}
-
 // ClaudePluginRecordedVersions is every version configDir's install record
 // holds for id, one per entry naming one, control characters escaped; none
 // when id has no record. A record that cannot be read returns its error, never
 // an answer.
 func ClaudePluginRecordedVersions(configDir, id string) ([]string, error) {
-	record, err := readClaudePluginInstalls(configDir)
+	record, err := claudeplugin.ReadInstalls(configDir)
 	if err != nil {
 		return nil, err
 	}
 	versions := make([]string, 0, len(record[id]))
 	for _, entry := range record[id] {
-		if entry.version() != "" {
-			versions = append(versions, EscapeControl(entry.version()))
+		if entry.Version != "" {
+			versions = append(versions, EscapeControl(entry.Version))
 		}
 	}
 	return versions, nil
@@ -268,7 +205,7 @@ func ClaudePluginsUnresolved(configDir string, targets []ClaudePluginTarget) (ma
 	if len(candidates) == 0 {
 		return nil, nil
 	}
-	document, err := readClaudeSettingsDocument(filepath.Join(configDir, "settings.json"))
+	document, err := claudeplugin.ReadSettings(filepath.Join(configDir, "settings.json"))
 	if err != nil {
 		return nil, err
 	}
@@ -276,16 +213,9 @@ func ClaudePluginsUnresolved(configDir string, targets []ClaudePluginTarget) (ma
 	if err != nil {
 		return nil, err
 	}
-	path := filepath.Join(configDir, "plugins", "known_marketplaces.json")
-	raw, err := os.ReadFile(path)
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return nil, fmt.Errorf("read %s: %w", path, err)
-	}
-	known := map[string]json.RawMessage{}
-	if err == nil {
-		if err := json.Unmarshal(raw, &known); err != nil {
-			return nil, fmt.Errorf("parse %s: %w", path, err)
-		}
+	known, err := claudeplugin.KnownMarketplaceNames(configDir)
+	if err != nil {
+		return nil, err
 	}
 	unresolved := map[string]ClaudePluginGap{}
 	for index := range candidates {
@@ -293,7 +223,7 @@ func ClaudePluginsUnresolved(configDir string, targets []ClaudePluginTarget) (ma
 		if pluginEnabled(document, target.ID) && !slices.Contains(missing, target.ID) {
 			continue
 		}
-		if _, ok := known[target.MarketplaceName]; ok {
+		if known[target.MarketplaceName] {
 			continue
 		}
 		unresolved[target.ID] = ClaudePluginGap{
@@ -308,10 +238,8 @@ func ClaudePluginsUnresolved(configDir string, targets []ClaudePluginTarget) (ma
 // claudePluginDuplicateGaps names every plugin enabled under two or more
 // name@marketplace keys in document, managed by pfm or not, sorted by name. A
 // plugin whose every enabled key claude.plugins lists is left alone: pfm
-// install enables each listed key again. A plugin of ours enabled only under
-// its own id and its legacy ids is left to ClaudePluginLegacyGaps, whose
-// repair pfm install owns. A key from the file prints with its control
-// characters escaped.
+// install enables each listed key again. A key from the file prints with its
+// control characters escaped.
 func claudePluginDuplicateGaps(document map[string]any, path string, targets []ClaudePluginTarget) []ClaudePluginGap {
 	enabled, _ := document["enabledPlugins"].(map[string]any)
 	byName := map[string][]string{}
@@ -323,12 +251,8 @@ func claudePluginDuplicateGaps(document map[string]any, path string, targets []C
 		byName[name] = append(byName[name], id)
 	}
 	listed := map[string]bool{}
-	managed := map[string][]string{}
 	for index := range targets {
 		listed[targets[index].ID] = true
-		if targets[index].Own {
-			managed[targets[index].Name] = append([]string{targets[index].ID}, targets[index].LegacyIDs()...)
-		}
 	}
 	var gaps []ClaudePluginGap
 	for _, name := range slices.Sorted(maps.Keys(byName)) {
@@ -337,8 +261,7 @@ func claudePluginDuplicateGaps(document map[string]any, path string, targets []C
 			continue
 		}
 		slices.Sort(ids)
-		ours := !slices.ContainsFunc(ids, func(id string) bool { return !slices.Contains(managed[name], id) })
-		if ours || !slices.ContainsFunc(ids, func(id string) bool { return !listed[id] }) {
+		if !slices.ContainsFunc(ids, func(id string) bool { return !listed[id] }) {
 			continue
 		}
 		shown := make([]string, len(ids))

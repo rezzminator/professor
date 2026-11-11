@@ -179,6 +179,7 @@ func Run(
 		scan.Snapshot.ApplyKill = applier
 		scan.Snapshot.ApplyDeactivate = deactivateApplier(ctx, scan.Paths)
 		scan.Snapshot.MergeNewChat = true
+		scan.Snapshot.HerdrSpace = herdrSpace(ctx, runtime.Paths.Home, stderr)
 		scan.Snapshot.LastLaunch = lastLaunch
 		if memoryErr != nil {
 			scan.Snapshot.LaunchMemoryError = memoryErr.Error()
@@ -289,11 +290,13 @@ func Run(
 			fmt.Fprintf(stderr, "pfm ls: %v\n", err)
 			return 1
 		}
+		var primary int
+		selectedRow, primary, cache1H = resumeUnder(selectedRow, outcome, cache1H)
 		return openAndRemember(ctx, sharedState, outcome, stderr, func() int {
 			return pfmchat.OpenRow(
 				ctx,
 				selectedRow,
-				outcome.PrimaryAccount,
+				primary,
 				cache1H,
 				"",
 				stdout,
@@ -389,7 +392,9 @@ func resolveSelectedRow(
 	runtime *pfmconfig.Runtime,
 	stderr io.Writer,
 ) (compose.Row, error) {
-	if row.ID == "" || !isResumeRowKind(row.Kind) {
+	// The resumable kinds are the ones scanFleetCached's empty gather can
+	// paint for a chat that is actually live right now.
+	if row.ID == "" || !row.Kind.IsResumable() {
 		return row, nil
 	}
 	scan, err := fleet.Scan(ctx, database, fleet.Request{
@@ -422,16 +427,16 @@ func resolveSelectedRow(
 	)
 }
 
-// isResumeRowKind reports whether kind is one of the resumable-only kinds
-// resolveSelectedRow re-resolves: the kinds scanFleetCached's empty gather
-// can paint for a chat that is actually live right now.
-func isResumeRowKind(kind compose.Kind) bool {
-	switch kind {
-	case compose.ResumeClaude, compose.ResumeCodex, compose.ResumeOpenCode:
-		return true
-	default:
-		return false
+// resumeUnder applies a resume walk's choice to the chat it opens: the row's
+// account, which a Claude resume launches under, the primary account a Codex
+// or OpenCode resume launches under, and the prompt cache. A row no longer
+// resumable (resumed elsewhere since the Enter) opens as it is.
+func resumeUnder(row compose.Row, outcome ui.Outcome, cache1H bool) (compose.Row, int, bool) {
+	if outcome.Resume == nil || !row.Kind.IsResumable() {
+		return row, outcome.PrimaryAccount, cache1H
 	}
+	row.Account = outcome.Resume.Account
+	return row, outcome.Resume.Account, outcome.Resume.Cache1H
 }
 
 func limitAccounts(runtime pfmconfig.Runtime) []pfmstats.LimitAccount {

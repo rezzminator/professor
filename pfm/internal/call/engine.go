@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -96,7 +95,7 @@ func New(dependencies Dependencies) (*Engine, error) {
 		return nil, err
 	}
 	options := withDefaults(dependencies.Options)
-	applyEnvironment(&options, dependencies.Env)
+	applyEnvironment(&options, dependencies.Env, dependencies.WarningWriter)
 	if options.BodyRoot == "" {
 		options.BodyRoot = filepath.Join(resolved.Home, ".local", "state", "pfm", "call-bodies")
 	}
@@ -176,61 +175,6 @@ func cloneEngineBinaries(values map[pfmengine.ID]string) map[pfmengine.ID]string
 		cloned[id] = binary
 	}
 	return cloned
-}
-
-func applyEnvironment(options *Options, env paths.Env) {
-	seconds := []struct {
-		name   string
-		target *time.Duration
-	}{
-		{"CHAT_CALL_POLL", &options.Poll},
-		{"CHAT_CALL_ENTER_SETTLE", &options.EnterSettle},
-		{"CHAT_CALL_PROOF_SETTLE", &options.ProofSettle},
-		{"CHAT_CALL_LOCK_TIMEOUT", &options.LockTimeout},
-		{"CHAT_CALL_LOCK_POLL", &options.LockPoll},
-		{"CHAT_CALL_LOCK_MAXHOLD", &options.LockMaxHold},
-		{"CHAT_CALL_COMMAND_GAP", &options.CommandChunkGap},
-		{"CHAT_CALL_TYPIST_QUIET", &options.TypistQuiet},
-		{"CHAT_THEN_MIN", &options.ThenMin},
-		{"CHAT_THEN_IDLE_POLL", &options.ThenIdlePoll},
-		{"CHAT_THEN_SETTLE", &options.ThenSettle},
-	}
-	for _, setting := range seconds {
-		value := env.Get(setting.name)
-		if value == "" {
-			continue
-		}
-		parsed, err := strconv.ParseFloat(value, 64)
-		if err == nil && parsed >= 0 {
-			*setting.target = time.Duration(parsed * float64(time.Second))
-		}
-	}
-	integers := []struct {
-		name   string
-		target *int
-	}{
-		{"CHAT_CALL_BUSY_TRIES", &options.BusyTries},
-		{"CHAT_CALL_INTR_TRIES", &options.InterruptTries},
-		{"CHAT_CALL_STASH_TRIES", &options.StashTries},
-		{"CHAT_CALL_SETTLE_TRIES", &options.SettleTries},
-		{"CHAT_CALL_ENTER_TRIES", &options.EnterTries},
-		{"CHAT_CALL_SCROLLBACK", &options.Scrollback},
-		{"CHAT_CALL_PROOF_LINES", &options.ProofLines},
-		{"CHAT_CALL_COMMAND_CHUNK", &options.CommandChunkRunes},
-		{"CHAT_THEN_BUSY_TRIES", &options.ThenBusyTries},
-		{"CHAT_THEN_IDLE_TRIES", &options.ThenIdleTries},
-		{"CHAT_THEN_IDLE_STABLE", &options.ThenIdleStable},
-	}
-	for _, setting := range integers {
-		value := env.Get(setting.name)
-		if value == "" {
-			continue
-		}
-		parsed, err := strconv.Atoi(value)
-		if err == nil && parsed > 0 {
-			*setting.target = parsed
-		}
-	}
 }
 
 func withDefaults(options Options) Options {
@@ -409,18 +353,10 @@ func (engine *Engine) Capture(
 		FullScrollback,
 	)
 	if err != nil {
-		if pfmtmux.CouldNotRun(err) {
-			// tmux itself never started (missing binary, bad configured
-			// socket dir) — a probe that could not run, never a pane that
-			// answered dead. Folding this into CodeDead would tell the
-			// caller a live chat's pane is gone when the truth is "could
-			// not look"; the cause rides in detail since this door's err
-			// return stays nil for every prior caller (mcpserv among them).
-			return target, "", CodeCaptureFailed, fmt.Sprintf(
-				"could not run tmux to capture %q: %v", target.Pane, err,
-			), nil
-		}
-		return target, "", CodeDead, "target pane is dead or unreadable", nil
+		// The cause rides in detail: this door's err return stays nil for
+		// every prior caller (mcpserv among them).
+		code, detail := paneUnreadable(target.Pane, "", err)
+		return target, "", code, detail, nil
 	}
 	if tailLines > 0 {
 		capture = lastNonEmptyLines(capture, tailLines)
@@ -569,8 +505,7 @@ func (engine *Engine) callResolved(
 
 	capture, err := engine.capturePane(ctx, target, 0)
 	if err != nil {
-		base.Code = CodeDead
-		base.Message = "target pane is dead or unreadable"
+		base.Code, base.Message = paneUnreadable(target.Pane, "", err)
 		return base, nil
 	}
 	command, commandErr := engine.tmux.PaneCommand(ctx, target.SocketPath, target.Pane)
@@ -615,8 +550,7 @@ func (engine *Engine) callResolved(
 			engine.sleepContext(ctx, engine.options.Poll)
 			capture, err = engine.capturePane(ctx, target, 0)
 			if err != nil {
-				base.Code = CodeDead
-				base.Message = "target pane died while interrupting"
+				base.Code, base.Message = paneUnreadable(target.Pane, " while interrupting", err)
 				return base, nil
 			}
 		}
@@ -625,8 +559,7 @@ func (engine *Engine) callResolved(
 			engine.sleepContext(ctx, engine.options.Poll)
 			capture, err = engine.capturePane(ctx, target, 0)
 			if err != nil {
-				base.Code = CodeDead
-				base.Message = "target pane died while waiting for idle"
+				base.Code, base.Message = paneUnreadable(target.Pane, " while waiting for idle", err)
 				return base, nil
 			}
 			if !IsBusyFor(paneEngine, capture) {
@@ -651,8 +584,7 @@ func (engine *Engine) callResolved(
 		engine.sleepContext(ctx, engine.options.Poll)
 		capture, err = engine.capturePane(ctx, target, 0)
 		if err != nil {
-			base.Code = CodeDead
-			base.Message = "target pane died while leaving the agents panel"
+			base.Code, base.Message = paneUnreadable(target.Pane, " while leaving the agents panel", err)
 			return base, nil
 		}
 		if agentPanelFocused(capture) {
@@ -724,8 +656,7 @@ func (engine *Engine) callResolved(
 		engine.sleepContext(ctx, engine.options.Poll)
 		capture, err = engine.capturePane(ctx, target, 0)
 		if err != nil {
-			base.Code = CodeDead
-			base.Message = "target pane died while dismissing an overlay"
+			base.Code, base.Message = paneUnreadable(target.Pane, " while dismissing an overlay", err)
 			return base, nil
 		}
 	}
@@ -777,8 +708,7 @@ func (engine *Engine) callResolved(
 		engine.sleepContext(ctx, engine.options.Poll)
 		capture, err = engine.capturePane(ctx, target, 0)
 		if err != nil {
-			base.Code = CodeDead
-			base.Message = "target pane died during draft guard"
+			base.Code, base.Message = paneUnreadable(target.Pane, " during draft guard", err)
 			return base, nil
 		}
 		base.DraftStashed = strings.Contains(
@@ -887,7 +817,7 @@ func (engine *Engine) callResolved(
 		)
 	}
 	if sendErr != nil {
-		return Result{}, sendErr
+		return typingFailed(base, target.Pane, sendErr), nil
 	}
 	base.Typed = true
 	normalized := normalizeSpace(message)
@@ -1264,12 +1194,23 @@ func (engine *Engine) exitCopyModeForDelivery(
 	engine.sleepContext(ctx, engine.options.Poll)
 	screen, err := engine.capturePane(ctx, target, 0)
 	if err != nil {
-		base.Code = CodeDead
-		base.Message = "target pane died while leaving copy mode" + when
+		base.Code, base.Message = paneUnreadable(target.Pane, " while leaving copy mode"+when, err)
 		return true
 	}
 	*capture = screen
 	return false
+}
+
+// paneUnreadable is the verdict on a failed pane capture, during naming the
+// delivery step: tmux that never started (missing binary, bad socket dir) is
+// CodeCaptureFailed, a probe that could not look, never a pane that answered
+// gone; anything else is CodeDead. The capture's own error always rides in
+// the message, since it alone tells a gone pane from an unreadable one.
+func paneUnreadable(pane, during string, err error) (int, string) {
+	if pfmtmux.CouldNotRun(err) {
+		return CodeCaptureFailed, fmt.Sprintf("could not run tmux to capture %q%s: %v", pane, during, err)
+	}
+	return CodeDead, fmt.Sprintf("target pane is dead or unreadable%s: %v", during, err)
 }
 
 func (engine *Engine) capturePane(
@@ -1512,6 +1453,29 @@ func (engine *Engine) senderLabel(
 
 func refused(code int, message string) Result {
 	return Result{Status: "refused", Code: code, Message: message}
+}
+
+// typingFailed reports a send that failed mid-text without losing what was
+// typed: paced chunks already sent, or bytes tmux may have admitted, stay in
+// the composer, so a blind retry would type the text a second time.
+func typingFailed(base Result, pane string, err error) Result {
+	if errors.Is(err, errLockLost) {
+		return lockLost(base, pane, err)
+	}
+	base.Typed = base.LiteralChunks > 0 || !pfmtmux.CouldNotRun(err)
+	if !base.Typed {
+		base.Status, base.Code = statusUndelivered, CodeUndelivered
+		base.Message = fmt.Sprintf("could not type into %q; nothing was typed: %v", pane, err)
+		return base
+	}
+	base.Status, base.Code = statusTypedUnconfirmed, CodeUndelivered
+	base.Message = fmt.Sprintf(
+		"typing into %q failed after %d command chunk(s): %v — the composer may hold part of the text and nothing was submitted; do not retry blindly",
+		pane,
+		base.LiteralChunks,
+		err,
+	)
+	return base
 }
 
 // lockLost fills base for a delivery whose heartbeat could no longer prove

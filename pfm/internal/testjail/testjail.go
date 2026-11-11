@@ -18,7 +18,6 @@ import (
 	"testing"
 
 	harnessprompts "github.com/rezzminator/professor/pfm/harness-prompts"
-	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -42,16 +41,18 @@ const jailMarkerEnv = "PFM_TESTJAIL"
 // include t.TempDir's test name, so macOS's long TMPDIR can exceed its 104-byte
 // limit. Resolving /tmp once also collapses macOS's /private alias.
 func Run(m *testing.M) int {
-	if !inFence() && !onHostedRunner() {
+	if !admitted(paths.OSEnv{}, fenceMarker) {
 		return runInFence() // fence.go: no test ever runs on the machine that started it
 	}
 	// A chat exports its live state store's paths and its install's mark; a jailed
 	// test must open the jail's own store, and a process it starts must never carry
 	// the operator's mark, or a stop acting for the operator's install would own it.
 	// A test binary a jailed test re-execs as its own helper inherits jailMarkerEnv
-	// and keeps the store paths and the jail mark that test handed it.
+	// and keeps the store paths and the jail mark that test handed it. GOTMPDIR is the
+	// fence's disk for go's build scratch, and t.TempDir honours it since Go 1.25:
+	// test scratch stays on TMPDIR's tmpfs, where the timing budgets were set.
 	if _, child := (paths.OSEnv{}).Lookup(jailMarkerEnv); !child {
-		for _, name := range []string{"PFM_STATE_DB", "PFM_CACHE_DB", paths.EnvInstallMark} {
+		for _, name := range []string{"PFM_STATE_DB", "PFM_CACHE_DB", paths.EnvInstallMark, "GOTMPDIR"} {
 			if err := os.Unsetenv(name); err != nil {
 				warnSetup("clear %s: %v", name, err)
 				return 1
@@ -607,7 +608,7 @@ func CleanHome(t *testing.T, dirs []string, files map[string]string) config.Runt
 	if err := WriteExecutable(filepath.Join(hostShimDir, "pfm"), []byte("host-pfm"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	stageTracetreeKit(t, home, hostShimDir)
+	stagePython3(t, hostShimDir)
 	managedClaude := filepath.Join(home, ".local", "share", "pfm", "install", "bin", claudeBinary)
 	if err := os.MkdirAll(filepath.Dir(managedClaude), 0o700); err != nil {
 		t.Fatal(err)
@@ -672,31 +673,6 @@ func CleanHome(t *testing.T, dirs []string, files map[string]string) config.Runt
 		t.Fatal(err)
 	}
 	return loadedRuntime
-}
-
-// PTYCommand builds a command that runs argv on a REAL pty via script(1), for
-// behaviour that only happens on a terminal.
-//
-// The two script(1) implementations disagree about their own argv. util-linux
-// takes the command through -c and the typescript file LAST; BSD (macOS) takes
-// the typescript file FIRST and then the command and its arguments directly,
-// with no -c and no -f. Handing Linux's form to the BSD binary prints a usage
-// message and exits — and a test that then writes to its stdin fails with
-// "broken pipe", which reads as the code under test closing the pipe rather
-// than as the harness being wrong about the platform.
-func PTYCommand(argv ...string) *exec.Cmd {
-	scriptBinary, err := deps.Resolve("script")
-	if err != nil {
-		scriptBinary = "script"
-	}
-	if runtime.GOOS == "linux" {
-		quoted := make([]string, len(argv))
-		for index, argument := range argv {
-			quoted[index] = cmdparse.Quote(argument)
-		}
-		return exec.Command(scriptBinary, "-qefc", strings.Join(quoted, " "), "/dev/null")
-	}
-	return exec.Command(scriptBinary, append([]string{"-qe", "/dev/null"}, argv...)...)
 }
 
 // pinGoDirs sets GOCACHE, GOPATH, GOMODCACHE and TEST_TELEMETRY_DIR — each only
@@ -777,7 +753,7 @@ func StageClaudePlugins(t *testing.T, store string, ids []string) {
 	enabled := make(map[string]bool)
 	records := make(map[string]any)
 	for _, id := range ids {
-		installPath := filepath.Join(store, "plugins", "cache", id)
+		installPath := stagedPluginPath(store, id)
 		if err := os.MkdirAll(installPath, 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -794,4 +770,16 @@ func StageClaudePlugins(t *testing.T, store string, ids []string) {
 			t.Fatal(err)
 		}
 	}
+}
+
+// PTYCommand builds a command that runs argv on a REAL pty via script(1), for
+// behaviour that only happens on a terminal. A script(1) that cannot be
+// resolved is the deps.Resolve error, never a bare name left to fail later.
+func PTYCommand(argv ...string) (*exec.Cmd, error) {
+	scriptBinary, err := deps.Resolve("script")
+	if err != nil {
+		return nil, err
+	}
+	scriptArgv := ptyScriptArgv(scriptBinary, argv)
+	return exec.Command(scriptArgv[0], scriptArgv[1:]...), nil
 }

@@ -258,8 +258,8 @@ grep -qxF "deployed $expected project files; baseline: $INIT_DIR/.professor/base
   bad="$bad want 'deployed $expected project files; baseline: …' (store has $expected mapped files), got: $(printf '%s' "$out" | grep '^deployed' | head -1);"
 grep -qF "follow $SOURCE_REPO/docs/SETUP.md § Install interview" <<<"$out" ||
   bad="$bad the handoff line does not name $SOURCE_REPO/docs/SETUP.md;"
-grep -qxF 'next: write CLAUDE.md with /quality:claude-md write CLAUDE.md' <<<"$out" ||
-  bad="$bad no 'next: write CLAUDE.md with /quality:claude-md write CLAUDE.md' line;"
+grep -qxF 'next: write CLAUDE.md with /claude-md:use write CLAUDE.md' <<<"$out" ||
+  bad="$bad no 'next: write CLAUDE.md with /claude-md:use write CLAUDE.md' line;"
 pinned="$(jq '.files | length' "$INIT_DIR/.professor/baseline.json" 2>/dev/null)"
 [ "$pinned" = "$expected" ] || bad="$bad baseline.json pins ${pinned:-<unreadable>} file(s), want $expected;"
 for local_path in .claude/settings.json .rumdl.toml .claude/agents/gitter.md docs/_index.md; do
@@ -505,7 +505,13 @@ else
   step "pin $D_L2 --unkeep" 0 "pinned 1 file(s) at $D_SHA" pfm update pin "$D_L2" --unkeep
   jq -e --arg l "$D_L2" '.files[$l].kept == null' "$BASELINE" >/dev/null 2>&1 ||
     bad="$bad pin --unkeep left the keep recorded for $D_L2;"
-  printf '%s\n' 'run /jc now' >"$EXPRESS/lane-a-retired.txt"
+  # The shipped retired lists are empty: the clone gets one lane-owned name
+  # for the accept steps, and its own file back after them.
+  RETIRED_JSON="$SOURCE_REPO/templates/global/retired.json"
+  cp "$RETIRED_JSON" "$BK/retired.json.orig" || bad="$bad could not save $RETIRED_JSON;"
+  jq '.names = [{"name":"/lane-a-gone","kind":"command","match":"family"}]' "$BK/retired.json.orig" >"$RETIRED_JSON" ||
+    bad="$bad could not stage the lane's retired name in $RETIRED_JSON;"
+  printf '%s\n' 'run /lane-a-gone now' >"$EXPRESS/lane-a-retired.txt"
   step "accept a path no hit lives at" 1 "covers no matching retired-name hit" pfm update accept lane-a-nothing-here --reason "no hit"
   step "accept without a reason" 2 "" pfm update accept lane-a-retired.txt
   step "accept lane-a-retired.txt" 0 "accepted retired-name hits under 1 path(s)" pfm update accept lane-a-retired.txt --reason "lane-a record"
@@ -513,6 +519,7 @@ else
   grep -qE '^  ACCEPTED +1 ' <<<"$acc_rep" || bad="$bad the report has no ACCEPTED row after accept: $(one_line "$(printf '%s' "$acc_rep" | head -8)");"
   step "accept --undo lane-a-retired.txt" 0 "removed 1 retired-name rule(s)" pfm update accept --undo lane-a-retired.txt
   rm -f "$EXPRESS/lane-a-retired.txt"
+  cp "$BK/retired.json.orig" "$RETIRED_JSON" || bad="$bad could not restore $RETIRED_JSON;"
   step "pin of a local with no pin" 1 "pfm update pin: lane-a-no-such-local has no pin; use --template for a new adoption" pfm update pin lane-a-no-such-local
   cp "$B/templates/$NEW_T" "$EXPRESS/$NEW_L" || bad="$bad the NEW template could not be copied locally;"
   step "pin --template (adopt NEW)" 0 "pinned 1 file(s) at $D_SHA" pfm update pin --template "$NEW_T" "$NEW_L"

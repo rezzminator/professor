@@ -12,8 +12,10 @@ import (
 	"testing"
 	"time"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -156,6 +158,34 @@ func TestInspectSeatReportsDurableLossUntilNextPrompt(t *testing.T) {
 		if err != nil || status.LostNote != note {
 			t.Fatalf("status=%+v err=%v want lost_note=%q", status, err, note)
 		}
+	}
+	// An unreadable seat store costs only the note, which says it could not look.
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runtime.Paths.StateDB = filepath.Join(blocker, "state.db")
+	status, err := InspectSeat(
+		context.Background(),
+		&runtime,
+		headless.Chat{
+			ID:      seat.SessionID,
+			SeatID:  seat.SeatID,
+			Backend: "herdr",
+			Engine:  pfmengine.Claude,
+			Name:    seat.Name,
+		},
+		time.Now(),
+		nil,
+	)
+	if err != nil || !strings.HasPrefix(status.LostNote, "loss note unknown: ") ||
+		!strings.Contains(status.LostNote, blocker) || status.Name != seat.Name {
+		t.Fatalf(
+			"status=%+v err=%v; want the status with lost_note naming the unreadable store %s",
+			status,
+			err,
+			blocker,
+		)
 	}
 }
 
@@ -325,7 +355,7 @@ func TestHerdrWatchFreshTranscriptCapsNativeIdle(t *testing.T) {
 	target.Socket = socket
 	nativeStatus := headless.Status{State: headless.StateIdle, IdleSeconds: 3}
 	var observed nativeStatusObservation
-	got, err := statusFromHerdr(context.Background(), target, nativeStatus, &observed)
+	got, err := statusFromHerdr(context.Background(), pfmcall.HerdrProofs{}, target, nativeStatus, &observed)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -350,5 +380,75 @@ func TestHerdrWatchFreshTranscriptCapsNativeIdle(t *testing.T) {
 	inspector.observeNativeIdle(target, now.Add(3*time.Second), observed, &got, nil)
 	if got.IdleSeconds != 0 {
 		t.Fatalf("endpoint replacement did not reset idle: %+v", got)
+	}
+}
+
+// Herdr answering agent.get with agent_not_found is an answer, not a failed
+// read — `pfm chat ls` and `pfm chat status` must classify the seat from the
+// pane's foreground: engine gone is dead, engine still there keeps the
+// transcript's verdict; only an unreadable foreground stays an error.
+func TestHerdrStatusAgentNotFoundIsAnAnswer(t *testing.T) {
+	for _, testCase := range []struct {
+		name, foreground, want, source string
+		fails                          bool
+	}{
+		{name: "engine exited", foreground: "bash", want: headless.StateDead},
+		{name: "engine untracked", foreground: "claude", want: headless.StateIdle, source: herdrAgentUntracked},
+		{name: "foreground unreadable", fails: true},
+	} {
+		for _, watch := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/watch=%t", testCase.name, watch), func(t *testing.T) {
+				root := testjail.Fleet(t)
+				t.Setenv("PFM_STATE_DB", filepath.Join(t.TempDir(), "state.db"))
+				t.Setenv("PFM_PROC_ROOT", t.TempDir())
+				const id = "c3333333-3333-4333-8333-333333333333"
+				seedClaudeChat(t, root, id, assistantSaid("ready"))
+				socket := nativeChatSocket(t, func(req nativeChatRequest) (any, string) {
+					switch req.Method {
+					case "agent.get":
+						return nil, herdr.AgentNotFound
+					case "pane.process_info":
+						if testCase.fails {
+							return nil, "process_read_failed"
+						}
+						return map[string]any{"type": "pane_process_info", "process_info": map[string]any{
+							"pane_id":   "w6:p3",
+							"shell_pid": 41,
+							"foreground_processes": []any{
+								map[string]any{"pid": os.Getpid(), "name": testCase.foreground},
+							},
+						}}, ""
+					}
+					if proof, code, ok := nativeChatProof(req, "w6:p3"); ok {
+						return proof, code
+					}
+					return nil, "unexpected_method"
+				})
+				_, db, seat := nativeChatSeat(t, socket, "live")
+				_ = nativeChatHost(t, db, seat, true)
+				target := headless.Chat{
+					ID: id, Name: "gone", Backend: "herdr", Engine: pfmengine.Claude,
+					Live: true, Pane: "w6:p3", Socket: socket,
+					Path: filepath.Join(root, "claude", "project", id+".jsonl"),
+				}
+				inspect := NewSeatInspector(nil).Inspect
+				if !watch {
+					inspect = func(ctx context.Context, chat headless.Chat, now time.Time) (headless.Status, error) {
+						return InspectSeat(ctx, nil, chat, now, nil)
+					}
+				}
+				got, err := inspect(context.Background(), target, time.Now().Add(time.Minute))
+				if testCase.fails {
+					if err == nil || !strings.Contains(err.Error(), socket) || !strings.Contains(err.Error(), "w6:p3") {
+						t.Fatalf("unreadable foreground status=%+v err=%v; want a named endpoint error", got, err)
+					}
+					return
+				}
+				if err != nil || got.State != testCase.want || got.StateSource != testCase.source {
+					t.Fatalf("agent_not_found with foreground %s: status=%+v err=%v; want state %s source %q",
+						testCase.foreground, got, err, testCase.want, testCase.source)
+				}
+			})
+		}
 	}
 }

@@ -78,10 +78,6 @@ func OpenReadOnlyAtSchema(ctx context.Context, name, path string, expected int) 
 // *SchemaMismatchError for a file at another schema version.
 func OpenSharedStateReadOnly(ctx context.Context, values paths.Values) *Store {
 	store := &Store{path: values.StateDB}
-	if err := CheckLegacyState(values); err != nil {
-		store.degraded = err
-		return store
-	}
 	db, err := OpenReadOnlyAtSchema(ctx, "state", values.StateDB, SchemaVersion)
 	if err != nil {
 		store.degraded = err
@@ -89,4 +85,20 @@ func OpenSharedStateReadOnly(ctx context.Context, values paths.Values) *Store {
 	}
 	store.db = db
 	return store
+}
+
+// OpenSharedStateUnlessOlder is OpenSharedStateReadOnly for a caller whose same
+// call opens the file writable, which migrates an older schema: a file at an
+// older schema reopens writable here, so the read never refuses what that
+// write would accept. Any other degradation stays on the read-only store.
+func OpenSharedStateUnlessOlder(ctx context.Context, values paths.Values) (*Store, error) {
+	state := OpenSharedStateReadOnly(ctx, values)
+	var older *SchemaMismatchError
+	if !errors.As(state.Degraded(), &older) || older.Found >= older.Expected {
+		return state, nil
+	}
+	if err := state.Close(); err != nil {
+		return nil, fmt.Errorf("close read-only state %s before its migration: %w", values.StateDB, err)
+	}
+	return OpenSharedState(ctx, values), nil
 }

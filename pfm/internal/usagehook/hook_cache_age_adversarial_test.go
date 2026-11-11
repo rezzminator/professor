@@ -362,19 +362,39 @@ func TestReadCacheRecordKeepsLegacyMetadataWithItsBytes(t *testing.T) {
 	}
 }
 
-// The error-preserving statusline selector keeps real readings with unknown
-// resets, while the legacy hook selector continues to require a future reset.
+// The error-preserving selector keeps real readings with unknown resets, an
+// empty one quietly and a malformed one beside its decode error, while the
+// legacy selector continues to require a future reset.
 func TestFableWindowAtKeepsUnknownResetWithoutChangingLegacySelector(t *testing.T) {
 	now := time.Now().UTC()
-	percent := 0.0
-	limit := ScopedLimit{Kind: "weekly_scoped", Percent: &percent}
-	limit.Scope.Model.DisplayName = "Fable"
-	usage := Usage{Limits: []ScopedLimit{limit}}
-	window, ok, err := usage.FableWindowAt(now)
-	if err != nil || !ok || window.Utilization == nil || *window.Utilization != 0 || window.ResetsAt != "" {
-		t.Fatalf("unknown-reset selector lost reading: window=%+v ok=%v err=%v", window, ok, err)
-	}
-	if _, legacy := usage.fableWindow(now); legacy {
-		t.Fatal("legacy selector unexpectedly accepted unknown reset")
+	for _, test := range []struct {
+		name, reset, wantErr string
+	}{
+		{name: "empty", reset: ""},
+		{
+			name: "malformed", reset: "soon",
+			wantErr: `decode cached Fable reset "soon": parsing time "soon" as "2006-01-02T15:04:05Z07:00": ` +
+				`cannot parse "soon" as "2006"`,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			percent := 0.0
+			limit := ScopedLimit{Kind: "weekly_scoped", Percent: &percent, ResetsAt: test.reset}
+			limit.Scope.Model.DisplayName = "Fable"
+			usage := Usage{Limits: []ScopedLimit{limit}}
+			window, ok, err := usage.FableWindowAt(now)
+			gotErr := ""
+			if err != nil {
+				gotErr = err.Error()
+			}
+			if gotErr != test.wantErr || !ok || window.Utilization == nil || *window.Utilization != 0 ||
+				window.ResetsAt != test.reset {
+				t.Fatalf("unknown-reset selector: window=%+v ok=%v err=%q, want the reading at %q beside %q",
+					window, ok, gotErr, test.reset, test.wantErr)
+			}
+			if _, legacy := usage.fableWindow(now); legacy {
+				t.Fatal("legacy selector unexpectedly accepted unknown reset")
+			}
+		})
 	}
 }

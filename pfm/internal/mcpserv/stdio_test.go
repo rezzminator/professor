@@ -563,7 +563,7 @@ func (stdioTestProcessTree) Environ(int) (map[string]string, error) { return map
 
 // A Codex caller's _meta.threadId crosses the stdio forwarder unchanged, beside
 // the pfmProxy identity the forwarder adds, and skips the Claude crumb refresh
-// (whose relative breadcrumb directory here would refuse the call).
+// (whose relative breadcrumb directory here would warn).
 func TestRunStdioForwardsCodexCallerMetadataToProfessor(t *testing.T) {
 	previous := proxyWhoami
 	proxyWhoami = resolve.WhoamiDependencies{
@@ -607,18 +607,13 @@ func TestRunStdioForwardsCodexCallerMetadataToProfessor(t *testing.T) {
 	session := stdioTestSession(t, stdioTestProfessor(t, local), StdioOptions{
 		DaemonAddress: proxyTestAddress(server), Home: resolved.Home, SIDDir: "relative-sid", Warnings: &warnings,
 	})
-	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+	if _, err := session.CallTool(context.Background(), &mcp.CallToolParams{
 		Meta: mcp.Meta{"threadId": "thread-codex"}, Name: "ls", Arguments: map[string]any{},
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
-	content, err := json.Marshal(result.Content)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(content), "refresh Claude caller transcript") {
-		t.Fatalf("Codex caller ran the Claude crumb refresh: %s", content)
+	if strings.Contains(warnings.String(), "refresh Claude caller transcript") {
+		t.Fatalf("Codex caller ran the Claude crumb refresh: %s", warnings.String())
 	}
 	mutex.Lock()
 	defer mutex.Unlock()

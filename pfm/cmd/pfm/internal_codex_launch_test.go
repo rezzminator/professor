@@ -89,7 +89,7 @@ func TestCodexLaunchWorkbench(t *testing.T) {
 			personaArgs := append([]string{"--model", "gpt-x"}, action.CodexEffortArg("xhigh")...)
 			personaArgs = append(personaArgs, action.CodexDeveloperInstructionsArg("You are duo.")...)
 			transport := []string{"--no-daemon"}
-			wantError := ""
+			wantError, wantWarning := "", ""
 			mirror := true
 			mirrorRecord := testjail.FakeEngineSync(t, testjail.CleanMirrorReply, 0)
 			switch scenario {
@@ -127,7 +127,10 @@ func TestCodexLaunchWorkbench(t *testing.T) {
 				if err := os.WriteFile(paths.WorkbenchManifest(duo), []byte(`{"prompt":""}`), 0o600); err != nil {
 					t.Fatal(err)
 				}
-				wantError = "launch Codex: " + paths.WorkbenchManifest(duo) + `: "prompt" is required` + "\n"
+				personaArgs = nil
+				mirror = false
+				wantWarning = "launch Codex: workbench persona not applied (" + paths.WorkbenchManifest(duo) +
+					`: "prompt" is required); launching without it` + "\n"
 			case "mirror failure":
 				mirrorRecord = testjail.FakeEngineSync(t, testjail.FailedMirrorReply, 1)
 				persona, err := workbench.ForLaunch(duo, pfmengine.Codex, workbench.New)
@@ -138,7 +141,7 @@ func TestCodexLaunchWorkbench(t *testing.T) {
 				if err == nil {
 					t.Fatal("mirror fixture must fail")
 				}
-				wantError = "launch Codex: " + err.Error() + "\n"
+				wantWarning = "launch Codex: " + err.Error() + "; launching on the mirror as it stands\n"
 			case "outside":
 				dir = root
 				personaArgs = nil
@@ -195,8 +198,8 @@ func TestCodexLaunchWorkbench(t *testing.T) {
 				}
 				return
 			}
-			if code != 0 || !called || stderr.Len() != 0 {
-				t.Fatalf("launch = %d, called %v, stderr %q", code, called, stderr.String())
+			if code != 0 || !called || stderr.String() != wantWarning {
+				t.Fatalf("launch = %d, called %v, stderr %q; want %q", code, called, stderr.String(), wantWarning)
 			}
 		})
 	}

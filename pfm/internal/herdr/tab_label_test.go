@@ -2,13 +2,17 @@ package herdr
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // LabelSoleTab is the one tab-label rule: a tab one pane sits in alone takes
@@ -102,5 +106,51 @@ func TestLabelSoleTab(t *testing.T) {
 				t.Fatalf("requests = %v, want %v", methods, test.wantMethods)
 			}
 		})
+	}
+}
+
+// A corrupt tab-label record never blocks the tab's label: it is named in the
+// reporter log doctor reads, read as empty, and replaced by the next write.
+func TestACorruptTabLabelRecordIsNamedAndReplaced(t *testing.T) {
+	dir := t.TempDir()
+	socket, tab := "/fake/herdr.sock", "w1:t1"
+	path := filepath.Join(dir, fmt.Sprintf("tab-%x", sha256.Sum256([]byte(socket+"\x00"+tab)))) + ".json"
+	if err := os.WriteFile(path, []byte("{torn"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var renamed []string
+	call := func(_ context.Context, _ string, lines ...[]byte) ([]json.RawMessage, error) {
+		var req struct {
+			Method string `json:"method"`
+			Params struct {
+				Label string `json:"label"`
+			} `json:"params"`
+		}
+		if err := json.Unmarshal(lines[0], &req); err != nil {
+			return nil, err
+		}
+		if req.Method == "tab.rename" {
+			renamed = append(renamed, req.Params.Label)
+			return []json.RawMessage{json.RawMessage(`{"type":"ok"}`)}, nil
+		}
+		info := `{"type":"tab_info","tab":{"tab_id":"w1:t1","label":"1","pane_count":1}}`
+		return []json.RawMessage{json.RawMessage(info)}, nil
+	}
+	var seq uint64
+	if err := writeSoleTabLabel(
+		context.Background(), socket, dir, tab, "Fix It", true, func() uint64 { seq++; return seq }, call,
+	); err != nil {
+		t.Fatalf("label over a corrupt record = %v", err)
+	}
+	if !slices.Equal(renamed, []string{"Fix It"}) {
+		t.Fatalf("renames = %q, want [Fix It]", renamed)
+	}
+	if record, err := readTabLabel(path); err != nil || record.Base != "Fix It" {
+		t.Fatalf("record %s after the label = %+v, %v; want base Fix It", path, record, err)
+	}
+	records, err := RecentErrors(dir, time.Time{})
+	want := "decode tab label " + path + ": invalid character 't' looking for beginning of object key string; read as empty"
+	if err != nil || len(records) != 1 || records[0].Session != tabLabelLogSession || records[0].Message != want {
+		t.Fatalf("reporter log = %+v, %v; want one %q record %q", records, err, tabLabelLogSession, want)
 	}
 }

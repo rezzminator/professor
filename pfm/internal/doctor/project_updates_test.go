@@ -9,7 +9,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/professor"
+	"github.com/rezzminator/professor/pfm/internal/retired"
 )
 
 // TestDoctorProjectUpdatesFlagRunsOnlyTheProjectReport pins 1-a: with
@@ -73,6 +75,15 @@ func TestDoctorProjectUpdatesReportsRetiredNamesInUnpinnedFiles(t *testing.T) {
 		t, project, ".claude/codex-build.json", "{\n  \"skills\": [],\n  \"tools\": [\"mcp__chat__chat_ls\"]\n}\n",
 	)
 	writeProjectUpdatesFixture(t, project, "scripts/live.sh", "/pfm:release cut; /pfm:workbench; /pcmx\n")
+	clone := t.TempDir()
+	writeProjectUpdatesFixture(t, clone, retired.FileRel, `{"names":[
+		{"name":"/wave","kind":"command","successor":"the flights:foreman agent","match":"family"},
+		{"name":"/pfm:refresh","kind":"command","successor":"the pcm agent","match":"exact"},
+		{"name":"/pcm","kind":"command","successor":"the pcm agent","match":"exact"},
+		{"name":"mcp__chat__","kind":"tool","successor":"mcp__chat-professor__*","match":"prefix"}]}`)
+	if err := paths.WriteSourceRepoMarker(runtime.Paths.Home, clone); err != nil {
+		t.Fatal(err)
+	}
 
 	var stdout, stderr bytes.Buffer
 	code := runDoctor([]string{"--project-updates", "--root", project}, &stdout, &stderr, runtime)
@@ -84,7 +95,7 @@ func TestDoctorProjectUpdatesReportsRetiredNamesInUnpinnedFiles(t *testing.T) {
 	}
 	for _, want := range []string{
 		"  RETIRED-NAME  2\n",
-		"    scripts/legacy.sh:2   /wave — retired command, now the flights-foreman agent\n",
+		"    scripts/legacy.sh:2   /wave — retired command, now the flights:foreman agent\n",
 		"    .claude/codex-build.json:3   mcp__chat__ — retired tool, now mcp__chat-professor__*\n",
 	} {
 		if !strings.Contains(stdout.String(), want) {
@@ -120,13 +131,35 @@ func newProjectUpdatesStore(t *testing.T) string {
 		writeProjectUpdatesFixture(t, store, relative, content)
 	}
 	for _, dir := range []string{
-		"commands", "agents", "scripts", "skills", "epics", "codex", "docs-commands", "docs-hub",
+		"commands", "agents", "scripts", "skills", "epics", "codex", "docs-commands", "docs-hub", "rules",
 	} {
 		if err := os.MkdirAll(filepath.Join(store, "templates", "project", dir), 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
 	return store
+}
+
+// waveRetired is a retired lists file naming the /wave command family.
+const waveRetired = `{"names":[{"name":"/wave","kind":"command","successor":"the flights:foreman agent","match":"family"}]}`
+
+// stageRetiredLists writes raw as the retired lists of home's default clone
+// and returns home.
+func stageRetiredLists(t *testing.T, home, raw string) string {
+	t.Helper()
+	writeProjectUpdatesFixture(t, filepath.Join(home, ".professor"), retired.FileRel, raw)
+	return home
+}
+
+// stageRetiredClone points home's source repository marker at a fixture
+// clone holding only raw as its retired lists.
+func stageRetiredClone(t *testing.T, home, raw string) {
+	t.Helper()
+	clone := t.TempDir()
+	writeProjectUpdatesFixture(t, clone, retired.FileRel, raw)
+	if err := paths.WriteSourceRepoMarker(home, clone); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // scaffoldAdopter is a project scaffolded from store whose manifest names the

@@ -3,6 +3,7 @@ package workbench
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -52,11 +53,29 @@ func TestWorkbenchCacheMissingAndCorrupt(t *testing.T) {
 	if benches != nil || faults != nil || err != nil {
 		t.Fatalf("missing cache = %v, %v, %v", benches, faults, err)
 	}
-	for _, raw := range []string{"{broken", `{"version":2}`, `{"version":1} {}`, `{"version":1,"workbenches":[{"dir":"relative","root":"/work/acme"}]}`} {
+	for _, raw := range []string{"{broken", `{"version":2}`, `{"version":1} {}`} {
 		writeBenchFile(t, path, raw)
 		if _, _, err := ReadCache(path); err == nil {
 			t.Fatalf("corrupt cache %q accepted", raw)
 		}
+	}
+	// One invalid entry is one walk error; the valid workbench beside it loads.
+	root, scribe := benchFixture(t)
+	writeBenchFile(t, path, fmt.Sprintf(
+		`{"version":1,"workbenches":[{"dir":"relative","root":"/work/acme"},{"dir":%q,"root":%q}],"errors":[]}`,
+		scribe, root,
+	))
+	benches, faults, err = ReadCache(path)
+	want := "workbench cache " + path + `: invalid workbench directory "relative" under "/work/acme"`
+	if err != nil || len(benches) != 1 || benches[0].Dir != scribe || len(faults) != 1 ||
+		faults[0].Err.Error() != want || faults[0].Path != path {
+		t.Fatalf(
+			"one invalid entry = %#v, %#v, %v; want the valid bench and the walk error %q",
+			benches,
+			faults,
+			err,
+			want,
+		)
 	}
 }
 

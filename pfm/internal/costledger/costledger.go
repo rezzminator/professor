@@ -132,28 +132,33 @@ func Path(dir, sessionID string) (string, error) {
 // the legacy session-file contract consumed by callmeter.
 func ObservationsDir(dir string) string { return filepath.Join(dir, "observations") }
 
-// SessionIDs lists session ledgers, including request-less observations.
-func SessionIDs(dir string) ([]string, error) {
+// SessionIDs lists session ledgers, including request-less observations. A .jsonl file whose name
+// is no session id (the sink never writes one, and ForSession could not open it) is no ledger, and
+// comes back by name in skipped so the caller can say it was left out.
+func SessionIDs(dir string) (ids, skipped []string, err error) {
 	seen := map[string]bool{}
-	var ids []string
 	for _, root := range []string{dir, ObservationsDir(dir)} {
 		entries, err := os.ReadDir(root)
 		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
 		if err != nil {
-			return nil, fmt.Errorf("cost ledger: list %s: %w", root, err)
+			return nil, nil, fmt.Errorf("cost ledger: list %s: %w", root, err)
 		}
 		for _, entry := range entries {
 			id, ok := strings.CutSuffix(entry.Name(), ".jsonl")
-			if entry.IsDir() || !ok || !ValidSessionID(id) || seen[id] {
+			if entry.IsDir() || !ok || seen[id] {
+				continue
+			}
+			if !ValidSessionID(id) {
+				skipped = append(skipped, filepath.Join(root, entry.Name()))
 				continue
 			}
 			seen[id] = true
 			ids = append(ids, id)
 		}
 	}
-	return ids, nil
+	return ids, skipped, nil
 }
 
 func ledgerPath(dir string, row Row) (string, error) {
@@ -175,9 +180,6 @@ func Unattributed(dir string) (Ledger, error) {
 // Append writes row as one line, one write(2) on an O_APPEND descriptor, to its session's file
 // under dir, creating the directory 0700 and the file 0600.
 func Append(dir string, row Row) error {
-	if row.RequestID == "" && joinRank(row.Join) == 0 {
-		return fmt.Errorf("cost ledger: row has invalid join %q", row.Join)
-	}
 	path, err := ledgerPath(dir, row)
 	if err != nil {
 		return err
@@ -204,6 +206,8 @@ func Append(dir string, row Row) error {
 	return nil
 }
 
+// joinRank orders the joins of one request's lines; a label no join names ranks 0, below every
+// real one, and gates nothing.
 func joinRank(join string) int {
 	switch join {
 	case JoinLogSpan:
@@ -258,7 +262,7 @@ func readLedger(path, sessionID string) (Ledger, error) {
 		}
 		var row Row
 		if err := json.Unmarshal(line, &row); err != nil || !bytes.HasPrefix(line, []byte("{")) ||
-			row.SessionID != sessionID || (row.RequestID == "" && joinRank(row.Join) == 0) {
+			row.SessionID != sessionID {
 			ledger.Faults++
 			continue
 		}

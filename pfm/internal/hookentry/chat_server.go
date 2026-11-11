@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/chat"
+	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
@@ -78,11 +79,17 @@ func ChatServer(args []string, stdout, stderr io.Writer, runtime config.Runtime,
 func chatServerNative(ctx context.Context, args []string, stdout, stderr io.Writer, newChat NewChat) int {
 	typed := args[3:]
 	if _, words, _ := strings.Cut(args[2], codexLaunchEntry); len(typed) == 0 && strings.TrimSpace(words) != "" {
-		// A shell that sourced an older shim passes cx's words only inside the run string.
-		fmt.Fprintf(stderr, "pfm internal chat-server: this shell's cx predates this pfm and passed %s only "+
-			"inside its run string; open a new shell (or run: source ~/.zshrc) and run cx again\n",
-			strings.TrimSpace(words))
-		return 1
+		// A shell that sourced an older shim passes cx's words only inside the run string, shell-quoted.
+		split, err := cmdparse.SplitShellWords(words)
+		if err != nil {
+			fmt.Fprintf(stderr, "pfm internal chat-server: this shell's cx predates this pfm and passed %s only "+
+				"inside its run string, which does not split (%v); open a new shell (or run: source ~/.zshrc) "+
+				"and run cx again\n", strings.TrimSpace(words), err)
+			return 1
+		}
+		fmt.Fprintln(stderr, "pfm internal chat-server: this shell's cx predates this pfm and passed its words only "+
+			"inside its run string; carried from there — open a new shell (or run: source ~/.zshrc)")
+		typed = split
 	}
 	if len(typed) > 1 || len(typed) == 1 && (strings.HasPrefix(typed[0], "-") ||
 		codexNonTUISubcommands[typed[0]] || codexSessionSubcommands[typed[0]]) {

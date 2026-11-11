@@ -56,10 +56,12 @@ func rrDirLine(input io.Reader, home string) (string, error) {
 	if err := json.Unmarshal(raw, &hook); err != nil {
 		return "", fmt.Errorf("decode hook payload: %w", err)
 	}
-	if !filepath.IsAbs(hook.Cwd) {
-		return "", fmt.Errorf("hook payload cwd %q is not an absolute path", hook.Cwd)
+	// Claude runs the hook in the session's directory: a relative or absent
+	// cwd resolves against the hook's own working directory.
+	cwd, err := filepath.Abs(hook.Cwd)
+	if err != nil {
+		return "", fmt.Errorf("resolve hook payload cwd %q: %w", hook.Cwd, err)
 	}
-	cwd := filepath.Clean(hook.Cwd)
 	// The blueprint clone conventionally lives at {home}/.professor — a
 	// directory NAMED like a ledger that is not one: {clone}/RR is the clone's
 	// repo root. Resolved up front so the walk can step over it; a clone that

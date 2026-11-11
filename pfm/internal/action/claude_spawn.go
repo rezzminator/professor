@@ -224,7 +224,7 @@ func launchEnvironment(environ []string, launch claudelaunch.Launch) []string {
 		dropped[name] = true
 	}
 	result := make([]string, 0, len(environ)+len(launch.Env))
-	for _, entry := range environ {
+	for _, entry := range claudelaunch.WithoutCodexToolShell(environ) {
 		name, _, _ := strings.Cut(entry, "=")
 		if !dropped[name] {
 			result = append(result, entry)

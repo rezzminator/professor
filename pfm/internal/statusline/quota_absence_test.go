@@ -107,7 +107,6 @@ func TestAFailureShowsERROnlyForWindowsTheLastAnswerCarried(t *testing.T) {
 		Backoff: &usagehook.CacheBackoff{
 			Message:    "rate-limited — retry (429 Too Many Requests)",
 			RetryAfter: start.Add(10 * time.Minute),
-			RecordedAt: start,
 		},
 	})
 	for _, after := range []time.Duration{0, 20 * time.Minute, 2 * time.Hour} {

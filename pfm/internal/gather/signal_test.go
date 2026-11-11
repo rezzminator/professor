@@ -90,6 +90,16 @@ func TestDoorSignal(t *testing.T) {
 			want:   gather.OutcomeSent, wantOut: sentTo(300, syscall.SIGTERM),
 		},
 		{
+			// A child read the moment its starter returns: the kernel publishes argv
+			// after it closes the exec's close-on-exec fds, so the capture saw none.
+			name: "argv not yet published at capture still identifies by start, owner and executable",
+			target: func(id gather.Identity) gather.Target {
+				id.Argv = nil
+				return gather.Target{Identity: id}
+			},
+			want: gather.OutcomeSent, wantOut: sentTo(300, syscall.SIGTERM),
+		},
+		{
 			name:   "gone",
 			mutate: func(table *gathertest.Table) { delete(table.Processes, 300) },
 			want:   gather.OutcomeGone,

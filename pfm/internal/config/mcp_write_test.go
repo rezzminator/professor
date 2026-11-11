@@ -149,35 +149,3 @@ func TestSetMCPServerWritesValidJSON(t *testing.T) {
 		t.Fatalf("written version = %#v, want %d", decoded["version"], Version)
 	}
 }
-
-func TestRemoveLegacyMCPAuthTokenPreservesUnrelatedConfig(t *testing.T) {
-	home := t.TempDir()
-	path := filepath.Join(home, FileName)
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	legacy := `{"version":2,"theme":"midnight","mcp":{"authToken":"retired-secret","http":{"port":8456},"servers":{"external":{"enabled":true,"extra":"kept"}}}}`
-	if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	config, err := Load(path, home, nil)
-	if err != nil {
-		t.Fatalf("legacy config must remain loadable for cleanup: %v", err)
-	}
-	changed, err := RemoveMCPAuthToken(config)
-	if err != nil || !changed {
-		t.Fatalf("RemoveMCPAuthToken changed=%t err=%v", changed, err)
-	}
-	body, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(body), "authToken") || strings.Contains(string(body), "retired-secret") {
-		t.Fatalf("legacy auth survived cleanup: %s", body)
-	}
-	for _, retained := range []string{`"theme": "midnight"`, `"port": 8456`, `"external"`, `"extra": "kept"`} {
-		if !strings.Contains(string(body), retained) {
-			t.Fatalf("cleanup dropped unrelated config %q: %s", retained, body)
-		}
-	}
-}

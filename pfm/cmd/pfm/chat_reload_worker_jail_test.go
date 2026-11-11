@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -16,6 +18,7 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/kill"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/reload"
 	"github.com/rezzminator/professor/pfm/internal/store"
@@ -119,6 +122,7 @@ func reloadWorkerCapturedAccount(t *testing.T, captured string) string {
 
 func TestChatReloadWorkerFailureReachesThePaneAndLog(t *testing.T) {
 	configPath, socket, _ := reloadWorkerAccountFixture(t)
+	_, recorder := obs.Test(t)
 	runtime, err := pfmconfig.LoadRuntime(configPath)
 	if err != nil {
 		t.Fatal(err)
@@ -166,6 +170,20 @@ func TestChatReloadWorkerFailureReachesThePaneAndLog(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), displayed) {
 		t.Fatalf("pane message %q was absent from worker log %q", displayed, stderr.String())
+	}
+	// The worker's own log lives in the SID directory; the activity log keeps
+	// its error once that file is gone.
+	var failures []obs.Record
+	for _, record := range recorder.Records() {
+		if record.Message == "reload.failed" {
+			failures = append(failures, record)
+		}
+	}
+	want := "pfm chat reload: another reload of this pane is already in flight"
+	if len(failures) != 1 || failures[0].Level != "ERROR" || failures[0].Fields[obs.FieldErr] != want ||
+		failures[0].Fields[obs.FieldExit] != float64(1) {
+		t.Fatalf("reload.failed records = %+v, want one ERROR with err %q and exit 1 (activity log %q)",
+			failures, want, recorder.Raw())
 	}
 	displayed = ""
 	stdout.Reset()
@@ -352,6 +370,12 @@ func TestChatReloadWorkerContinuesBoundCodexConversationAfterNew(t *testing.T) {
 		t.Fatal(err)
 	}
 	runtime.Paths.ProcRoot = "/proc"
+	// A second home no search can read (a NUL byte fails lstat even for root)
+	// while oldID's transcript is known only from the pane's crumb: --hide
+	// cannot look the conversation up, warns, and hides it by id alone.
+	runtime.Config.CodexAccounts = append(
+		runtime.Config.CodexAccounts, pfmconfig.CodexAccount{ID: 2, Home: "unreadable\x00home"},
+	)
 	socket := strings.Replace(probeReloadSocket(t, "bound-new"), "cc-probe-", "cx-probe-", 1)
 	server := exec.Command(
 		"tmux",
@@ -376,7 +400,7 @@ func TestChatReloadWorkerContinuesBoundCodexConversationAfterNew(t *testing.T) {
 		t.Fatal(err)
 	}
 	pane := strings.TrimSpace(string(paneOutput))
-	for _, id := range []string{oldID, newID} {
+	for _, id := range []string{newID} {
 		rollout := filepath.Join(codexHome, "sessions", "rollout-2026-08-24T00-00-00-"+id+".jsonl")
 		if err := os.MkdirAll(filepath.Dir(rollout), 0o700); err != nil {
 			t.Fatal(err)
@@ -404,6 +428,17 @@ func TestChatReloadWorkerContinuesBoundCodexConversationAfterNew(t *testing.T) {
 		}
 	}
 	bind(oldID)
+	crumb := filepath.Join(runtime.Paths.SIDDir, filepath.Base(socket)+"."+pane)
+	crumbTranscript := filepath.Join(t.TempDir(), oldID+".jsonl")
+	if err := os.WriteFile(crumbTranscript, []byte(`{"cwd":"`+root+`"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(crumb), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(crumb, []byte(crumbTranscript+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("PFM_RELOAD_DELAY_MS", "0")
 	t.Setenv("PFM_RELOAD_POLL_MS", "20")
 	t.Setenv("PFM_RELOAD_EXIT_TRIES", "50")
@@ -418,6 +453,16 @@ func TestChatReloadWorkerContinuesBoundCodexConversationAfterNew(t *testing.T) {
 		nil,
 	); code != 0 {
 		t.Fatalf("new reload rc=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	wantWarning := `pfm chat reload: find conversation to hide: search Codex rollouts under "unreadable\x00home": ` +
+		"lstat unreadable\x00home/sessions: invalid argument; hiding it by id alone"
+	if !slices.Contains(strings.Split(stderr.String(), "\n"), wantWarning) ||
+		!strings.Contains(stdout.String(), "hid the conversation left behind ("+oldID+")") {
+		t.Fatalf("new reload stdout=%q stderr=%q, want the hide of %s beside the warning %q",
+			stdout.String(), stderr.String(), oldID, wantWarning)
+	}
+	if err := os.Remove(crumb); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		t.Fatal(err) // the bound conversation, not the crumb, names the chat from here on
 	}
 	lockPath := reload.LockPath(runtime.Paths.SIDDir, filepath.Base(socket), pane)
 	readHandoff := func() (string, string) {

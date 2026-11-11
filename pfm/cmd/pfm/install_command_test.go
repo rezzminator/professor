@@ -180,9 +180,9 @@ func writeManagerFakes(t *testing.T, systemctlBody, launchctlBody string) (binDi
 }
 
 // assertManagerConsulted proves the sandbox intercepted the platform's real
-// scheduler manager by design (schedulerIsLaunchd, scheduler_darwin.go /
-// scheduler_other.go) rather than by a PATH lookup happening not to find the
-// real binary: on Linux, only systemd may ever be consulted; on Darwin, only
+// scheduler manager by design (the installer's scheduler for
+// servicemanager.Native()) rather than by a PATH lookup happening not to find
+// the real binary: on Linux, only systemd may ever be consulted; on Darwin, only
 // launchd may ever be consulted. wantDarwinConsulted covers the one case
 // that differs across the two platforms — a dry-run preview reaches systemd
 // for plan messaging on Linux (wireUnits' unconditional probe) but reaches
@@ -412,39 +412,6 @@ func TestInstallOfflineReachesInstallerAndDefaultFailureStaysLoud(t *testing.T) 
 	stderr.Reset()
 	if code := runInstall([]string{"--yes", "--offline"}, &stdout, &stderr, runtime); code != 0 {
 		t.Fatalf("skip apply code=%d stdout=%q stderr=%q, want success", code, stdout.String(), stderr.String())
-	}
-}
-
-// TestInstallAcceptsTheRetiredSkipHarvestFlag: a v0.82 updater passes
-// --skip-harvest to the new binary's install --yes; it is a named no-op, so
-// the install exits as it does without the flag instead of rolling back.
-func TestInstallAcceptsTheRetiredSkipHarvestFlag(t *testing.T) {
-	previous := runInstaller
-	t.Cleanup(func() { runInstaller = previous })
-	runInstaller = func(context.Context, installer.Options) (installer.Report, error) {
-		return installer.Report{}, nil
-	}
-	runtime := commandRuntime{Paths: paths.Values{Home: t.TempDir()}}
-	for _, args := range [][]string{{"--yes"}, {}} {
-		var plainOut, plainErr, stdout, stderr bytes.Buffer
-		plain := runInstall(args, &plainOut, &plainErr, runtime)
-		code := runInstall(append([]string{"--skip-harvest"}, args...), &stdout, &stderr, runtime)
-		if code != plain || code != 0 {
-			t.Fatalf(
-				"args=%q code=%d without the flag=%d stdout=%q stderr=%q",
-				args,
-				code,
-				plain,
-				stdout.String(),
-				stderr.String(),
-			)
-		}
-		if want := "pfm install: --skip-harvest is retired and ignored; harvest moved to the harvester plugin\n"; stderr.String() != want {
-			t.Fatalf("args=%q stderr=%q, want %q", args, stderr.String(), want)
-		}
-		if stdout.String() != plainOut.String() {
-			t.Fatalf("args=%q stdout=%q, want the flagless %q", args, stdout.String(), plainOut.String())
-		}
 	}
 }
 

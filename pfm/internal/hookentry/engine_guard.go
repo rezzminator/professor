@@ -2,16 +2,23 @@ package hookentry
 
 import (
 	"cmp"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/cmdparse"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -62,12 +69,15 @@ const (
 	engineGuardFileBan = "Codex and OpenCode never change framework files (any CLAUDE.md or AGENTS.md, .claude/," +
 		" .codex/, .opencode/, .git/, the Claude, Codex and OpenCode config dirs, the Professor clone's" +
 		" templates/): only Claude does. Return the exact change to the user."
-	engineGuardBlindLine = "it runs code or applies a patch the guard cannot read: pass code inline (-c, -e)," +
-		" as a script file or a heredoc, and a patch as a file or a heredoc."
+	engineGuardBlindLine = "it runs code or applies a patch the guard cannot read (not on disk yet, a pipe, a" +
+		" terminal): pass code inline (-c, -e) or as a heredoc to the interpreter, or write the script or patch" +
+		" file in one command and run it in the next."
 	engineGuardUnreadable = "engine-guard could not read this command, and it names a framework file:" +
 		" split it into simple commands with literal paths."
 	// engineGuardMaxRead bounds a script or patch file the guard reads.
 	engineGuardMaxRead = 1 << 20
+	// engineGuardGitTimeout bounds the git reads that trust a script.
+	engineGuardGitTimeout = 2 * time.Second
 )
 
 var (
@@ -100,8 +110,9 @@ var (
 	// engineGuardGitPathValued are git checkout's and restore's flags taking a
 	// value that is no path they write.
 	engineGuardGitPathValued = strings.Fields("-s --source -b -B --orphan --conflict --pathspec-from-file")
-	// engineGuardGitReads are the git subcommands that only read, the engine
-	// mode's allowlist beside the subcommands gitGuardBlocks judges by mode.
+	// engineGuardGitReads are the git subcommands that only read: git-guard's
+	// allowlist, Claude's and the engines' alike, beside the subcommands
+	// gitGuardBlocks judges by mode.
 	engineGuardGitReads = strings.Fields("status log diff show blame annotate ls-files ls-tree ls-remote rev-parse" +
 		" rev-list cat-file grep describe shortlog merge-base for-each-ref name-rev show-ref show-branch" +
 		" check-ignore check-attr check-ref-format var help version whatchanged diff-tree diff-files diff-index" +
@@ -157,7 +168,7 @@ func EngineGuard(args []string, input io.Reader, stdout, stderr io.Writer) int {
 		if workdir := hook.ToolInput.Workdir; workdir != "" {
 			cwd = gitGuardJoin(cwd, workdir)
 		}
-		reasons = append(reasons, gitGuardCheck(command, cwd, true, stderr))
+		reasons = append(reasons, gitGuardCheck(command, cwd, true, false, stderr))
 		if err := judge.bash(command, cwd, cmdparse.Script{}, 0); err != nil {
 			fmt.Fprintf(stderr, "pfm internal engine-guard: parse command (fail-open): %v\n", err)
 		}
@@ -388,12 +399,20 @@ func engineGuardOnlyAsks(args []string) bool {
 // read past its first two bytes.
 func (judge *pcmGuardJudge) shebang(program string, args []string, dir string, depth int) {
 	abs, ok := judge.resolve(program, dir)
-	if !ok || !engineGuardIsScript(abs) {
+	if !ok {
 		return
 	}
-	text, ok := judge.readFile(program, dir)
-	if !ok {
-		judge.blindTo(program)
+	text, written := judge.heredocs[abs]
+	if !written && !engineGuardIsScript(abs) {
+		return
+	}
+	if !written {
+		if text, ok = judge.readFile(program, dir); !ok {
+			judge.blindTo(program)
+			return
+		}
+	}
+	if !strings.HasPrefix(text, "#!") {
 		return
 	}
 	line, _, _ := strings.Cut(text[2:], "\n")
@@ -425,7 +444,85 @@ func engineGuardIsScript(abs string) bool {
 
 // run judges code the script file holds, as program judges inline code; the
 // shell code reads `$0` and its arguments from script.
+//
+// A script file the engine could not have changed is trusted: one it may not
+// write (a framework file) or one git tracks with HEAD's content (the engine
+// cannot commit). Its own unreadable and blind parts do not count and its
+// text is no mention, so the repo's test entries run; what it plainly writes
+// still lands in pcmOnly, and an untrusted script it runs is judged in full.
 func (judge *pcmGuardJudge) run(lang, code, dir string, script cmdparse.Script, depth int) {
+	if !judge.trusts(script.Path) {
+		unreadable, blind := judge.unreadable, len(judge.blind)
+		judge.runCode(lang, code, dir, script, depth)
+		if judge.trusting > 0 {
+			judge.escapedUnreadable = judge.escapedUnreadable || (judge.unreadable && !unreadable)
+			judge.escapedBlind = append(judge.escapedBlind, judge.blind[blind:]...)
+		}
+		return
+	}
+	unreadable, blind := judge.unreadable, len(judge.blind)
+	if i := slices.Index(judge.read, code); i >= 0 {
+		judge.read = slices.Delete(judge.read, i, i+1)
+	}
+	judge.trusting++
+	judge.runCode(lang, code, dir, script, depth)
+	judge.trusting--
+	if i := slices.Index(judge.read, code); i >= 0 {
+		judge.read = slices.Delete(judge.read, i, i+1)
+	}
+	judge.unreadable = unreadable || judge.escapedUnreadable
+	kept := judge.blind[:blind]
+	for _, b := range judge.blind[blind:] {
+		if slices.Contains(judge.escapedBlind, b) && !slices.Contains(kept, b) {
+			kept = append(kept, b)
+		}
+	}
+	judge.blind = kept
+}
+
+// trusts reports a script file the engine could not have changed.
+func (judge *pcmGuardJudge) trusts(abs string) bool {
+	if abs == "" || !judge.scope.engine {
+		return false
+	}
+	if protected, _ := judge.scope.class(abs); protected {
+		return true
+	}
+	if trusted, ok := judge.trusted[abs]; ok {
+		return trusted
+	}
+	if judge.trusted == nil {
+		judge.trusted = map[string]bool{}
+	}
+	judge.trusted[abs] = engineGuardCommitted(abs)
+	return judge.trusted[abs]
+}
+
+// engineGuardCommitted reports a file git tracks whose content on disk is
+// HEAD's. Any failure (no repo, untracked, git missing) is untrusted.
+func engineGuardCommitted(abs string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), engineGuardGitTimeout)
+	defer cancel()
+	run := obs.Runner(deps.RealRunner{})
+	dir, base := filepath.Dir(abs), filepath.Base(abs)
+	head, err := run.Run(
+		ctx,
+		[]string{"git", "-C", dir, "rev-parse", "--verify", "-q", "HEAD:./" + base},
+		deps.RunOptions{},
+	)
+	if err != nil || head.ExitCode != 0 {
+		return false
+	}
+	disk, err := run.Run(ctx, []string{"git", "-C", dir, "hash-object", "--", base}, deps.RunOptions{})
+	if err != nil || disk.ExitCode != 0 {
+		return false
+	}
+	sum := strings.TrimSpace(string(head.Stdout))
+	return sum != "" && sum == strings.TrimSpace(string(disk.Stdout))
+}
+
+// runCode dispatches code to the shell reading or the interpreter reading.
+func (judge *pcmGuardJudge) runCode(lang, code, dir string, script cmdparse.Script, depth int) {
 	if lang == pcmGuardSh {
 		judge.shell(code, dir, script, depth)
 		return
@@ -478,14 +575,18 @@ func (judge *pcmGuardJudge) diffs(part *cmdparse.Part, files []string, dir, root
 	}
 }
 
-// readFile reads a regular file a Bash word names in dir, bounded by
+// readFile reads a regular file a Bash word names in dir: the text a heredoc
+// earlier in the call left there, else the disk's, bounded by
 // engineGuardMaxRead; past the bound it is unread, and each caller holds
-// its part blind, whatever the file names. What it reads
+// its part blind, whatever the file names. What it reads from disk
 // joins the texts a mention is looked for in.
 func (judge *pcmGuardJudge) readFile(word, dir string) (string, bool) {
 	abs, ok := judge.resolve(word, dir)
 	if !ok {
 		return "", false
+	}
+	if text, ok := judge.heredocs[abs]; ok {
+		return text, true // the heredoc is in the command, already a read text
 	}
 	info, err := os.Stat(abs)
 	if err != nil || !info.Mode().IsRegular() {
@@ -500,6 +601,59 @@ func (judge *pcmGuardJudge) readFile(word, dir string) (string, bool) {
 	}
 	judge.read = append(judge.read, string(raw))
 	return string(raw), true
+}
+
+// engineHeredoc records what one part leaves in the files it writes, so a
+// later part running one is judged from that text: a cat with no file
+// operand, or a tee, fed a heredoc writes its body to each `>`-style target
+// and tee operand, after the file's current text under `>>` or tee -a (an
+// append to a file the guard cannot read records nothing). Every other write
+// forgets the file, which is read from disk again.
+func (judge *pcmGuardJudge) engineHeredoc(part *cmdparse.Part, base string, words []string, dir string) {
+	texts := map[string]string{}
+	bodies, _ := pcmGuardStdin(part)
+	operands, _ := pcmGuardSplit(part.Args)
+	if len(bodies) > 0 && (base == pcmGuardTee || base == "cat" && len(operands) == 0) {
+		body := bodies[len(bodies)-1] // stdin is the last heredoc
+		appends := map[string]bool{}
+		var targets []string
+		for _, r := range part.Redirs {
+			if r.Op != "<>" && slices.Contains(pcmGuardWriteOps, r.Op) {
+				targets = append(targets, r.Target)
+				appends[r.Target] = strings.HasSuffix(r.Op, ">>")
+			}
+		}
+		if base == pcmGuardTee {
+			tail := slices.Contains(part.Args, "-a") || slices.Contains(part.Args, "--append")
+			for _, operand := range operands {
+				targets = append(targets, operand)
+				appends[operand] = tail
+			}
+		}
+		for _, target := range targets {
+			abs, ok := judge.resolve(target, dir)
+			if !ok {
+				continue
+			}
+			prior := ""
+			_, recorded := judge.heredocs[abs]
+			if _, err := os.Lstat(abs); appends[target] && (recorded || !errors.Is(err, fs.ErrNotExist)) {
+				if prior, ok = judge.readFile(target, dir); !ok {
+					continue
+				}
+			}
+			texts[abs] = prior + body
+		}
+	}
+	for _, word := range words {
+		if abs, ok := judge.resolve(word, dir); ok {
+			delete(judge.heredocs, abs)
+		}
+	}
+	if judge.heredocs == nil {
+		judge.heredocs = map[string]string{}
+	}
+	maps.Copy(judge.heredocs, texts)
 }
 
 func (judge *pcmGuardJudge) blindTo(written string) {

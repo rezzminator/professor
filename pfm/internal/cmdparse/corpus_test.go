@@ -91,7 +91,7 @@ func TestRealCommandsCorpus(t *testing.T) {
 	cases := loadCorpus(t)
 	calls := make([]Call, len(cases))
 	for i, c := range cases {
-		calls[i] = Call{ID: fmt.Sprintf("corpus-%d", i), Command: c.Command, Cwd: c.Cwd}
+		calls[i] = Call{ID: fmt.Sprintf("corpus-%d", i), Command: c.Command}
 	}
 	got, err := ParseBatch(calls)
 	if err != nil {

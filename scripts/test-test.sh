@@ -40,6 +40,8 @@ done
 
 cp "$SUT" "$R/.claude/scripts/test.sh" || true
 cp "$HERE/.claude/scripts/unit-path.sh" "$R/.claude/scripts/unit-path.sh"
+mkdir -p "$R/scripts"
+cp "$HERE/scripts/platform.sh" "$R/scripts/platform.sh" # the fence half's door: platform_in_fence
 chmod +x "$R/.claude/scripts/test.sh" 2>/dev/null || true
 
 # --- fixture repository ---------------------------------------------------------------------------

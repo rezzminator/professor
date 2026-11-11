@@ -16,7 +16,7 @@ Each `releases/vX.Y.Z.md` is written for the adopter updating onto it. Its secti
 
 ## Releases
 
-- [v0.86.0](releases/v0.86.0.md) — Codex and OpenCode never write git or framework files; pfm works inside herdr-keep-protected Herdr panes; every plugin is self-contained and installs as {plugin}@professor; the Herdr indicator daemon stops re-reading OpenCode's store and rescanning on every turn
+- [v0.86.0](releases/v0.86.0.md) — Codex and OpenCode never write git or framework files; pfm works inside herdr-shield-protected Herdr panes; every plugin is self-contained and installs as {plugin}@professor; the Herdr indicator daemon stops re-reading OpenCode's store and rescanning on every turn
 - [v0.85.0](releases/v0.85.0.md) — pcm is a global agent
 - [v0.84.0](releases/v0.84.0.md) — One-command release; CI tests macOS and fresh machines; every plugin released
 - [v0.83.0](releases/v0.83.0.md) — native Herdr seats, pfm theme sync across Claude Code, Herdr, VS Code and Ghostty, `pfm restart`, sub-agent-compact renamed forward-compaction, no GPT agents shipped, pruned project templates

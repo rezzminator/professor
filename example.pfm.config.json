@@ -31,7 +31,8 @@
       "forward-compaction",
       "auto-effort",
       "tool-visibility-controller",
-      "engine-sync"
+      "engine-sync",
+      "flights"
     ],
     "env": {},
     "costLedger": true,
@@ -62,8 +63,7 @@
     "http": {
       "port": 18377
     },
-    "thirdParty": {},
-    "authToken": null
+    "thirdParty": {}
   },
   "ask": {
     "claude": {

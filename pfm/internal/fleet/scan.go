@@ -8,9 +8,12 @@ package fleet
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
+	"slices"
 	"strconv"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
@@ -19,6 +22,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/herdr"
 	fleetindex "github.com/rezzminator/professor/pfm/internal/index"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -44,6 +48,9 @@ type Request struct {
 	// neither seeds its project's root nor leads the order, so every row files
 	// under the same place wherever the scanning command runs.
 	NoCurrentDir bool
+	// Shield reads herdr-shield for the native seat proofs, one listing per socket
+	// shared with the caller's other proofs; nil: a shield of this scan alone.
+	Shield *herdr.Shield
 }
 
 // Env is the machine state one scan composes against.
@@ -56,6 +63,9 @@ type Env struct {
 	NowNS           int64
 	// Primary is the operator's primary Claude account (see PrimaryAccount).
 	Primary int
+	// Faults are environment reads that fell back to a default; every scan
+	// reports them among its Errors.
+	Faults []string
 }
 
 // Runtime is the Env's machine policy in the shape every fleet writer takes.
@@ -93,6 +103,12 @@ func Scan(
 	counters, err := indexer.Run(ctx, fleetindex.Options{
 		PriorityCWD: env.CurrentDir,
 	})
+	var partial *fleetindex.PartialError
+	if errors.As(err, &partial) {
+		// Failed engines keep their prior rows: list from the index and say so.
+		fmt.Fprintf(stderr, "pfm: index warning: %v\n", err)
+		err = nil
+	}
 	if err != nil {
 		return Result{}, err
 	}
@@ -124,10 +140,8 @@ func Scan(
 			return Result{}, err
 		}
 	}
-	output, failures, err := composeNativeFleet(ctx, database, env, request.View, data, live, request.ReadOnly)
-	if err != nil {
-		return Result{}, err
-	}
+	output, failures := composeNativeFleet(ctx, database, env, request, data, live)
+	failures = append(slices.Clone(env.Faults), failures...)
 	return Result{
 		Errors:   failures,
 		Output:   output,
@@ -157,18 +171,15 @@ func ScanCached(
 	if err != nil {
 		return Result{}, err
 	}
-	output, failures, err := composeNativeFleet(
+	output, failures := composeNativeFleet(
 		ctx,
 		database,
 		env,
-		request.View,
+		request,
 		data,
 		gather.Snapshot{},
-		request.ReadOnly,
 	)
-	if err != nil {
-		return Result{}, err
-	}
+	failures = append(slices.Clone(env.Faults), failures...)
 	return Result{
 		Output: output,
 		Errors: failures,
@@ -279,7 +290,15 @@ func ResolveEnv(request Request) (Env, error) {
 	currentDir := ""
 	if !request.NoCurrentDir {
 		var err error
-		if currentDir, err = os.Getwd(); err != nil {
+		currentDir, err = os.Getwd()
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			// A removed directory (a worktree gone under a long-lived MCP server
+			// or painter) holds no project to lead: compose from no directory.
+			obs.Logger(context.Background()).Warn("fleet scan: working directory removed; composing from none",
+				"error", err)
+			currentDir = ""
+		case err != nil:
 			return Env{}, fmt.Errorf("read current directory: %w", err)
 		}
 	}
@@ -291,25 +310,39 @@ func ResolveEnv(request Request) (Env, error) {
 		}
 		nowNS = parsed
 	}
-	primary, err := PrimaryAccount(resolved, machine)
-	if err != nil {
-		return Env{}, fmt.Errorf("resolve primary account: %w", err)
-	}
 	env := Env{
 		Paths:      resolved,
 		CurrentDir: currentDir,
 		NowNS:      nowNS,
-		Primary:    primary,
 		Config:     machine,
 	}
+	primary, err := PrimaryAccountOrImplicit(resolved, machine)
+	if err != nil {
+		// An unreadable store must not blank the fleet: compose on the
+		// implicit account, as the launchers do, and say so.
+		fault := fmt.Sprintf("primary account unreadable (%v); composing on account %d", err, primary)
+		obs.Logger(context.Background()).Warn("fleet.primary.unreadable", obs.FieldErr, fault)
+		env.Faults = append(env.Faults, fault)
+	}
+	env.Primary = primary
 	if request.Workbenches {
 		benches, faults, err := workbench.ReadCache(paths.WorkbenchCache(resolved))
 		if err == nil {
 			env.Workbenches, env.WorkbenchErrors = benches, faults
 		} else {
-			env.WorkbenchErrors = []workbench.WalkError{
+			// An unreadable cache must not hide the benches: discover them live
+			// under the cwd's managed root and keep the cache failure among the rows.
+			faults := []workbench.WalkError{
 				{Root: currentDir, Path: paths.WorkbenchCache(resolved), Err: err},
 			}
+			roots, rootsErr := workbench.ManagedRoots([]string{currentDir})
+			if rootsErr != nil {
+				faults = append(faults, workbench.WalkError{Root: currentDir, Path: currentDir, Err: rootsErr})
+			}
+			var walkErrors []workbench.WalkError
+			env.Workbenches, walkErrors = workbench.Discover(roots)
+			faults = append(faults, walkErrors...)
+			env.WorkbenchErrors = faults
 		}
 	}
 	return env, nil

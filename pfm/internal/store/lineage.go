@@ -248,7 +248,7 @@ func (s *Store) ReconcileCodexLineageRoots(ctx context.Context) error {
 // collapses the v1 per-rollout Codex kills onto that root, keeping the newest
 // killed_at. The merged row's baseline_prompts is NULL because these are
 // explicit permanent kills, so lineage repair must not invent /clear state.
-func migrateCodexLineageKills(
+func (s *Store) migrateCodexLineageKills(
 	ctx context.Context,
 	tx *ImmediateTx,
 ) error {
@@ -285,8 +285,10 @@ ORDER BY id`)
 	for rows.Next() {
 		killed, err := scanKilled(rows)
 		if err != nil {
-			_ = rows.Close()
-			return err
+			// The unreadable row stays where it is, a per-rollout kill: one bad
+			// row never costs the migration or its siblings.
+			s.warningf("WARNING: pfm left one unreadable Codex kill in %s uncollapsed: %v\n", s.path, err)
+			continue
 		}
 		kills = append(kills, killed)
 	}

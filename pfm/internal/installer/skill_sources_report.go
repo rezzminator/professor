@@ -28,14 +28,6 @@ func skillLinkLedgerPath(home string) string {
 	return filepath.Join(managedRootForHome(home), skillLinkLedgerName)
 }
 
-// SkillLinkDirs is the directories the installer's skill-links.json records it
-// links skills into. recorded is false only when the file is absent (no
-// install has written it); a file that is present but unreadable or invalid
-// is an error, never absence.
-func SkillLinkDirs(home string) (dirs []string, recorded bool, err error) {
-	return readSkillLinkLedger(home)
-}
-
 func readSkillLinkLedger(home string) ([]string, bool, error) {
 	path := skillLinkLedgerPath(home)
 	content, err := os.ReadFile(path)
@@ -84,6 +76,7 @@ const (
 	SkillSourceCheckFailed SkillSourceState = "CHECK-FAILED"
 	SkillSourceNoClone     SkillSourceState = "NO-CLONE"
 	SkillSourceNoRegistry  SkillSourceState = "NO-REGISTRY"
+	SkillSourceNote        SkillSourceState = "NOTE"
 )
 
 // SkillSourceStatus is one doctor row: a registered skill (Name set) or the
@@ -126,7 +119,7 @@ func (status SkillSourceStatus) Describe() string {
 		return line + ` note="not fetched: PFM_SKILL_SOURCES_OFFLINE=1 is set, and pfm install fetches nothing while it is"`
 	case SkillSourceConflict:
 		return line + ` hint="the conflicting path is not pfm's; remove it, then run pfm install --yes"`
-	case SkillSourceSkipped:
+	case SkillSourceSkipped, SkillSourceNote:
 		return line
 	default:
 		return line + ` hint="run pfm install --yes"`
@@ -147,7 +140,7 @@ func InspectSkillSources(home string, offline bool) []SkillSourceStatus {
 		return []SkillSourceStatus{{Path: repo, State: SkillSourceCheckFailed, Error: err.Error()}}
 	}
 	registry := filepath.Join(repo, filepath.FromSlash(skillSourcesRelative))
-	sources, present, err := loadSkillSources(repo, ThemeReleaseURL(""))
+	sources, present, notes, err := loadSkillSources(repo, ThemeReleaseURL(""))
 	if err != nil {
 		return []SkillSourceStatus{{Path: registry, State: SkillSourceCheckFailed, Error: err.Error()}}
 	}
@@ -166,6 +159,10 @@ func InspectSkillSources(home string, offline bool) []SkillSourceStatus {
 	for _, source := range sources {
 		store := filepath.Join(storeRoot, source.Name)
 		statuses = append(statuses, inspectSkillSource(source, storeRoot, store, linkDirs, offline))
+	}
+	// What install prints as a skip line (an owner resolved past a broken manifest) is a warning here.
+	for _, note := range notes {
+		statuses = append(statuses, SkillSourceStatus{Path: registry, State: SkillSourceNote, Error: note})
 	}
 	return statuses
 }
@@ -262,10 +259,6 @@ func ReportGlobalRegistries(
 	}
 	for _, finding := range result.Findings {
 		switch finding.Class {
-		case RegistryStore:
-			fmt.Fprintf(w, "doctor: registry STORE %s -> %s — retired store; run pfm install --yes\n",
-				finding.Path, finding.Target)
-			failures++
 		case RegistryOrphan:
 			fmt.Fprintf(w, "doctor: registry ORPHAN %s -> %s — Professor no longer ships it; run pfm install --yes\n",
 				finding.Path, finding.Target)
@@ -292,9 +285,10 @@ func ReportGlobalRegistries(
 }
 
 // ReportSkillSources prints one "doctor: skill-source" line per registered
-// skill (or one for the registry when it could not be read). MISSING and
-// CHECK-FAILED are failures — a state pfm install --yes owns, or a check that
-// did not run; NOT-FETCHED, CONFLICT and SKIPPED are warnings; linked,
+// skill (or one for the registry when it could not be read), then one per
+// registry note. MISSING and CHECK-FAILED are failures — a state pfm install
+// --yes owns, or a check that did not run; NOT-FETCHED, CONFLICT, SKIPPED and
+// NOTE are warnings; linked,
 // OFFLINE, NO-CLONE and NO-REGISTRY count neither.
 func ReportSkillSources(
 	w io.Writer,

@@ -148,7 +148,7 @@ func TestSynthesizePickerNewRowsUseNativeClaudeAndShellCodexLaunches(t *testing.
 	if err != nil {
 		t.Fatalf("Synthesize(NewClaude) error = %v", err)
 	}
-	if claudePlan.Line != attachLine("cc-configured-new-42", "cc-configured-new-42", false) ||
+	if claudePlan.Line != AttachLine("cc-configured-new-42", "cc-configured-new-42", false) ||
 		claudePlan.ChatServer == nil || claudePlan.ChatServer.Run != claudePlan.Run || claudePlan.ChatServer.CWD != "/work/project" {
 		t.Fatalf(
 			"new Claude picker line = %q, server = %#v, run = %q",

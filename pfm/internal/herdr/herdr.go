@@ -1,11 +1,12 @@
 // Package herdr integrates pfm chats with the Herdr terminal multiplexer
-// (https://herdr.dev). Tmux chats and native Codex/OpenCode report lifecycle
-// state, session metadata and resume commands under the stable pfm source.
-// Native Claude reports session/restore metadata only under herdr:claude,
-// joining Herdr's native identity so state-free restore commands persist.
-// Herdr detects its lifecycle state. Old pfm ownership is released with a
-// newer sequence before metadata is republished; end also clears pfm's title.
-// Outside Herdr nothing here runs.
+// (https://herdr.dev). Tmux chats, native Codex/OpenCode and a native Claude
+// behind herdr-shield's attach client report lifecycle state, session metadata
+// and resume commands under the stable pfm source; end releases the report and
+// clears pfm's title. A native Claude pane Herdr detects is Herdr's own: its
+// screen detection reads the state and its bundled Claude integration
+// (integration.go) reports the session. Outside Herdr nothing here runs.
+// A holder `herdr-shield attach` moved to another pane is followed there
+// (shield_move.go); one `herdr-shield list` serves a whole pass (shield_list.go).
 package herdr
 
 import (
@@ -19,9 +20,15 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
-// Source is the one integration identity pfm reports under. Herdr's own
+// Source is the integration identity pfm reports under. Herdr's own
 // integrations use the `herdr:` prefix; pfm must never start with it.
 const Source = "pfm"
+
+// ClaudeSource is Herdr's own Claude identity: its bundled Claude integration
+// reports a session under it, and an older pfm build reported a detected
+// native Claude's state under it, which hookentry.ReleaseNativeClaudeReports
+// releases, republishing the session there.
+const ClaudeSource = "herdr:claude"
 
 // ReportDeadline bounds one reporter run, from its first tmux call through its
 // error log. EngineKillTimeout is the kill timer an engine (Codex's handler

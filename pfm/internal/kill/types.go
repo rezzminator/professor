@@ -6,6 +6,7 @@ import (
 	"time"
 
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -112,8 +113,11 @@ type Dependencies struct {
 	// Screen is the one pane door (call.Engine) the finisher reads the footer
 	// and composer through, types the exit command into and answers the exit
 	// confirmation with, on whichever host the target lives; nil is the real one.
-	Screen       pfmcall.Screen
-	Spawner      ExitSpawner
+	Screen  pfmcall.Screen
+	Spawner ExitSpawner
+	// Runner is the deps.Runner the default CommandSpawner launches the
+	// finisher through; nil is obs.Runner(deps.RealRunner{}).
+	Runner       deps.Runner
 	Now          func() time.Time
 	Executable   string
 	Delay        time.Duration

@@ -38,13 +38,14 @@ func decodeClaudePrefs(raw rawClaude, path, scope string, index int) (ClaudePref
 		if mode == "prompt" {
 			mode = PermissionPrompt
 		}
-		if mode != PermissionBypass && mode != PermissionPrompt {
+		if mode != PermissionBypass && mode != PermissionPrompt && mode != PermissionAuto {
 			return ClaudePrefs{}, fmt.Errorf(
-				"config %s: %s.permissionMode must be %q or %q, got %q",
+				"config %s: %s.permissionMode must be %q, %q or %q, got %q",
 				path,
 				configScope(scope, index),
 				PermissionBypass,
 				PermissionPrompt,
+				PermissionAuto,
 				*raw.PermissionMode,
 			)
 		}

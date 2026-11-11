@@ -95,6 +95,8 @@ func watchCommand(
 	if *transitions {
 		precheck = nil // first sight answers with SEEN or ERROR
 	}
+	// Each seat's transcript is read from where the last poll left it.
+	inspector := pfmchat.NewSeatInspector(runtime)
 	// The precheck's scan is the first poll's: a watch that starts pays for
 	// one scan, shared with the watches starting beside it.
 	var first *watchRound
@@ -103,7 +105,7 @@ func watchCommand(
 		if pollClock != nil {
 			now = pollClock.Now
 		}
-		first = &watchRound{runtime: runtime, share: share, since: now()}
+		first = &watchRound{runtime: runtime, inspector: inspector, share: share, since: now()}
 	}
 	for _, target := range precheck {
 		if _, err := pfmchat.TargetIn(ctx, target, first.rows, runtime); err != nil {
@@ -122,15 +124,13 @@ func watchCommand(
 	} else {
 		fingerprint = func(_ context.Context, chat headless.Chat) (string, bool) { return printer.Print(chat) }
 	}
-	// Each seat's transcript is read from where the last poll left it.
-	inspector := pfmchat.NewSeatInspector(runtime)
 	fleet := headless.FleetWatcher{
 		Targets: targets,
 		Discover: func(since time.Time) headless.Discovery {
 			inspector.Sweep() // one poll per discovery: the seats not inspected since the last
 			round := first
 			if first = nil; round == nil {
-				round = &watchRound{runtime: runtime, share: share, since: since}
+				round = &watchRound{runtime: runtime, inspector: inspector, share: share, since: since}
 			}
 			return round.discovery()
 		},
@@ -186,18 +186,19 @@ func watchCommand(
 // share, the scan is the one another watch took at this poll's tick, when one
 // did (pfmchat.ScanShare).
 type watchRound struct {
-	runtime *commandRuntime
-	share   *pfmchat.ScanShare
-	since   time.Time
-	scanned bool
-	scan    pfmchat.FleetScan
-	err     error
+	runtime   *commandRuntime
+	inspector *pfmchat.SeatInspector // its herdr-shield reader proves the scan's native seats
+	share     *pfmchat.ScanShare
+	since     time.Time
+	scanned   bool
+	scan      pfmchat.FleetScan
+	err       error
 }
 
 func (round *watchRound) load(ctx context.Context) (pfmchat.FleetScan, error) {
 	if !round.scanned {
 		scan := func(ctx context.Context) (pfmchat.FleetScan, error) {
-			return pfmchat.ScanRows(ctx, io.Discard, round.runtime)
+			return pfmchat.ScanRows(ctx, io.Discard, round.runtime, round.inspector.Shield())
 		}
 		if round.share != nil {
 			round.scan, round.err = round.share.Scan(ctx, round.since, scan)

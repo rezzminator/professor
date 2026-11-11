@@ -44,12 +44,11 @@ func lastRecordTime(path string) (stamp time.Time, found bool) {
 			// record before it — keep walking backward rather than giving up.
 			continue
 		}
-		if record.Timestamp != "" {
-			if parsed, ok := parseTimestampField(record.Timestamp); ok {
-				return parsed, true
-			}
-			continue
+		if parsed, ok := parseTimestampField(record.Timestamp); ok {
+			return parsed, true
 		}
+		// An absent or unparseable "timestamp" is not a verdict on the record:
+		// its "ts" field is still tried.
 		if parsed, ok := parseTSField(record.TS); ok {
 			return parsed, true
 		}

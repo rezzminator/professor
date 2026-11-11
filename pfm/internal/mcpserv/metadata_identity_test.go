@@ -555,11 +555,13 @@ func TestMCPMetadataIdentityRejectsAmbiguousRowsAndNamesListFailures(t *testing.
 		paths: resolved,
 		chat:  &fakeChatVerbs{err: errors.New("fleet database busy")},
 	}
-	_, err = listBackend.callerForRequest(
+	caller, err = listBackend.callerForRequest(
 		context.Background(), mcp.Meta{"threadId": "thread-a"},
 	)
-	if err == nil || !strings.Contains(err.Error(), "list live chats: fleet database busy") {
-		t.Fatalf("list failure collapsed into absence: %v", err)
+	const wantDetail = `resolve MCP caller thread "thread-a": list live chats: fleet database busy`
+	if err != nil || !caller.present || caller.valid || caller.detail != wantDetail ||
+		identityFailureStatus(caller.err) != statusError {
+		t.Fatalf("list failure caller = %+v err=%v, want present-invalid %q, never absent", caller, err, wantDetail)
 	}
 
 	for _, malformed := range []compose.Row{
@@ -702,5 +704,56 @@ func TestBirthProxyBackendDisagreementRefused(t *testing.T) {
 	)
 	if err != nil || caller.valid {
 		t.Fatalf("backend disagreement caller=%+v err=%v, want refused", caller, err)
+	}
+}
+
+func TestCallEngineForRequestFindsThreadIDBeyondPublicListLimit(t *testing.T) {
+	setupBackendFixture(t)
+	resolved, err := paths.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := make([]compose.Row, defaultChatLSLimit+1)
+	for index := range defaultChatLSLimit {
+		rows[index] = compose.Row{ID: "historical", Kind: compose.ResumeClaude}
+	}
+	rows[defaultChatLSLimit] = compose.Row{
+		SessionName: "cx-seat", ID: "thread-a", Kind: compose.LiveCodex, Socket: "cx-seat", PaneID: "%7",
+	}
+	verbs := &cappedProxyChat{fakeChatVerbs: &fakeChatVerbs{
+		listed: chat.ListResult{Rows: rows, Matched: len(rows)},
+	}}
+	caller, err := (&backend{paths: resolved, chat: verbs}).callerForRequest(context.Background(), mcp.Meta{
+		"threadId": "thread-a",
+	})
+	if err != nil || !caller.valid || caller.row.Session != "cx-seat" {
+		t.Fatalf("threadId caller beyond public list limit = %+v err=%v", caller, err)
+	}
+}
+
+func TestCallEngineForRequestKeepsThreadIDPrecedenceAndEmptyMetadata(t *testing.T) {
+	setupBackendFixture(t)
+	resolved, err := paths.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	live := compose.Row{
+		SessionName: "cx-seat", ID: "thread-a", Kind: compose.LiveCodex, Socket: "cx-seat", PaneID: "%0",
+	}
+	current := &backend{
+		paths: resolved,
+		chat:  &fakeChatVerbs{listed: chat.ListResult{Rows: []compose.Row{live}, Matched: 1}},
+	}
+	caller, err := current.callerForRequest(context.Background(), mcp.Meta{
+		"threadId": "thread-a",
+		"pfmProxy": map[string]any{"v": 0, "session": "must-not-be-read"},
+	})
+	if err != nil || !caller.valid || caller.identity.Source != "mcp-thread-meta" || caller.identity.ID != "thread-a" {
+		t.Fatalf("threadId did not retain precedence: caller=%+v err=%v", caller, err)
+	}
+
+	empty, err := current.callerForRequest(context.Background(), nil)
+	if err != nil || !reflect.DeepEqual(empty, callerIdentity{}) {
+		t.Fatalf("metadata-free caller = %+v err=%v, want zero caller", empty, err)
 	}
 }

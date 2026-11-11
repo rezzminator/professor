@@ -16,7 +16,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/kill"
-	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
@@ -339,55 +338,63 @@ func TestDoctorCreatesNeitherDatabase(t *testing.T) {
 	}
 }
 
-// TestDoctorReachesTheHostChecksPastAPendingLegacyDatabase: a legacy database
-// waiting for its move is a host-check BLOCK whose row carries the fix, so
-// doctor reads past the database it cannot open and prints that row — it
-// never stops at the open, creates the new database, or touches the legacy one.
-func TestDoctorReachesTheHostChecksPastAPendingLegacyDatabase(t *testing.T) {
-	for _, tc := range []struct {
-		check  string
-		legacy func(home string) string
+// TestDoctorReadsPastADatabaseRowItCannotRead pins that one database row doctor
+// cannot read is that row alone: a corrupt advisory busy counter is one warning
+// naming its value, a census query that fails is one failure, and every later
+// row (the WAL, the busy counters, the process table, the crumbs) still prints.
+func TestDoctorReadsPastADatabaseRowItCannotRead(t *testing.T) {
+	for _, testCase := range []struct {
+		name  string
+		stage func(context.Context, *store.Store, string) error
+		row   string
+		code  int
 	}{
-		{check: "legacy-state-db", legacy: paths.LegacyStateDB},
-		{check: "legacy-cache-db", legacy: paths.LegacyCacheDB},
-	} {
-		t.Run(tc.check, func(t *testing.T) {
-			runtime := buildCleanDoctorHome(t)
-			databases := []string{runtime.Paths.StateDB, runtime.Paths.CacheDB}
-			for _, path := range databases {
-				for _, suffix := range []string{"", "-wal", "-shm"} {
-					if err := os.Remove(path + suffix); err != nil && !errors.Is(err, os.ErrNotExist) {
-						t.Fatal(err)
-					}
+		{
+			name: "corrupt busy counter",
+			stage: func(ctx context.Context, database *store.Store, _ string) error {
+				return database.SetMeta(ctx, "busy_kill_warnings", "garbage")
+			},
+			row:  "doctor: warning busy_warnings unreadable: busy_kill_warnings has invalid value \"garbage\"\n",
+			code: 1,
+		},
+		{
+			name: "census query fails",
+			stage: func(_ context.Context, _ *store.Store, cache string) error {
+				db, err := sqlitedb.OpenReadWrite(cache, time.Second)
+				if err != nil {
+					return err
 				}
-			}
-			legacy := tc.legacy(runtime.Paths.Home)
-			if err := os.MkdirAll(filepath.Dir(legacy), 0o700); err != nil {
+				_, err = db.Exec("DROP TABLE cx_names")
+				return errors.Join(err, db.Close())
+			},
+			row:  "doctor: unhealthy row counts: count fleet rows: SQL logic error: no such table: cx_names (1)\n",
+			code: 3,
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			runtime := buildCleanDoctorHome(t)
+			database, err := store.Open(store.WithWarningWriter(io.Discard))
+			if err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(legacy, []byte("legacy rows"), 0o600); err != nil {
+			stageErr := testCase.stage(context.Background(), database, runtime.Paths.CacheDB)
+			if err := errors.Join(stageErr, database.Close()); err != nil {
 				t.Fatal(err)
 			}
 
 			var stdout, stderr bytes.Buffer
 			code := runDoctor(nil, &stdout, &stderr, runtime)
 			output := stdout.String()
-			if code != 3 || !strings.Contains(output, "host-check: BLOCK "+tc.check+" ") {
-				t.Fatalf("doctor stopped before the %s host-check row: code=%d\n%s", tc.check, code, output)
+			if !strings.Contains(output, testCase.row) {
+				t.Fatalf("doctor output lacks the row %q:\n%s", testCase.row, output)
 			}
-			if strings.Contains(output, "doctor: unhealthy database:") || !strings.Contains(output, "could not look") {
-				t.Fatalf("the pending legacy database is not a could-not-look row:\n%s", output)
-			}
-			if !strings.Contains(output, "doctor: failures=") {
-				t.Fatalf("doctor printed no failure count:\n%s", output)
-			}
-			for _, path := range databases {
-				if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
-					t.Fatalf("doctor created %s beside the pending legacy database (lstat err=%v)", path, err)
+			for _, later := range []string{"doctor: wal_bytes=", "doctor: process_table ", "doctor: crumbs entries="} {
+				if !strings.Contains(output, later) {
+					t.Fatalf("doctor stopped before the %q row:\n%s", later, output)
 				}
 			}
-			if body, err := os.ReadFile(legacy); err != nil || string(body) != "legacy rows" {
-				t.Fatalf("doctor touched the legacy database: %q err=%v", body, err)
+			if code != testCase.code {
+				t.Fatalf("doctor code=%d, want %d\n%s", code, testCase.code, output)
 			}
 		})
 	}

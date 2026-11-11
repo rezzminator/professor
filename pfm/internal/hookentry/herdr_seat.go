@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io/fs"
 	"path/filepath"
+	"strings"
+	"sync"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
@@ -34,7 +36,16 @@ func (reporter *herdrReporter) nativeSeat(ctx context.Context, payload herdrPayl
 		identity.HerdrPane == "" {
 		return false, nil
 	}
-	db := fleetdb.OpenSharedStateReadOnly(ctx, *reporter.deps.seatPaths)
+	var db *fleetdb.Store
+	if reporter.options.event == herdr.EventStart || reporter.options.event == herdr.EventEnd {
+		// Start and end bind the seat through a writable open, which migrates an older file.
+		var err error
+		if db, err = fleetdb.OpenSharedStateUnlessOlder(ctx, *reporter.deps.seatPaths); err != nil {
+			return true, undeliveredUnderLoad(ctx, fmt.Errorf("native seat ownership unproved: %w", err))
+		}
+	} else {
+		db = fleetdb.OpenSharedStateReadOnly(ctx, *reporter.deps.seatPaths)
+	}
 	defer func() {
 		if err := db.Close(); err != nil {
 			returnErr = errors.Join(returnErr, fmt.Errorf("close native seat state: %w", err))
@@ -46,10 +57,10 @@ func (reporter *herdrReporter) nativeSeat(ctx context.Context, payload herdrPayl
 		)
 	}
 	if err := db.Degraded(); err != nil {
-		return true, fmt.Errorf(
+		return true, undeliveredUnderLoad(ctx, fmt.Errorf(
 			"native seat ownership unproved: resolve native seat state: %w; repair: restore the intended pane with pfm chat open --restored",
 			err,
-		)
+		))
 	}
 	values := *reporter.deps.seatPaths
 	if values.ProcRoot == "" {
@@ -58,18 +69,20 @@ func (reporter *herdrReporter) nativeSeat(ctx context.Context, payload herdrPayl
 	proc := gather.NewProcFS(values.ProcRoot)
 	seat, found, err := reporter.nativeReporterSeat(ctx, db, proc)
 	if err != nil {
-		return true, fmt.Errorf("resolve native seat: %w", err)
+		return true, undeliveredUnderLoad(ctx, fmt.Errorf("resolve native seat: %w", err))
 	}
 	if !found {
 		return true, fmt.Errorf(
 			"native seat ownership unproved: no matching durable owner; repair: restore the intended pane with pfm chat open --restored",
 		)
 	}
-	unlock, err := reporter.lockNativeReport(ctx, seat)
+	unlockSession, unlockBridge, err := reporter.lockNativeReport(ctx, seat)
 	if err != nil {
 		return true, err
 	}
-	defer unlock()
+	defer unlockSession()
+	unlockBridge = sync.OnceFunc(unlockBridge)
+	defer unlockBridge()
 	source := seat
 	// Read-only hooks must not queue behind an unrelated database writer.
 	// Only a proved canonicalization that could not persist may retry writable.
@@ -81,7 +94,8 @@ func (reporter *herdrReporter) nativeSeat(ctx context.Context, payload herdrPayl
 		err = errors.Join(err, writable.Close())
 	}
 	if err != nil {
-		return true, fmt.Errorf("prove native reporter seat: %w", err)
+		// A proof the host's load cut short leaves this event's state for the settle process.
+		return true, undeliveredUnderLoad(ctx, fmt.Errorf("prove native reporter seat: %w", err))
 	}
 	if !owned {
 		return true, fmt.Errorf("native reporter seat %s supervisor is dead", seat.SeatID)
@@ -107,21 +121,25 @@ func (reporter *herdrReporter) nativeSeat(ctx context.Context, payload herdrPayl
 		return true, nil
 	}
 	action := reporter.plan(payload)
-	// Herdr detects a native Claude from the pane's foreground, except in a pane
-	// herdr-keep holds: there it sees the attach client, so pfm reports the state.
-	// An event that changes nothing skips the read; a start still needs it.
+	// Herdr detects a native Claude from the pane's foreground and owns it: its
+	// screen detection reads the state and its own Claude integration reports the
+	// session, so pfm sends nothing. Where Herdr's foreground is herdr-shield's
+	// attach client instead, Herdr sees no agent, so pfm reports there under its
+	// own source. An event that changes nothing skips the read; a start still needs it.
 	detected := false
 	if reporter.options.engine == pfmengine.Claude && (action != nil || reporter.options.event == herdr.EventStart) {
-		processes, err := reporter.deps.keep.Read(ctx, seat.HerdrSocket, seat.HerdrPane)
+		processes, err := reporter.deps.shield.Read(ctx, seat.HerdrSocket, seat.HerdrPane)
 		if err != nil {
-			return true, fmt.Errorf(
-				"native Claude seat %s: read pane %s foreground: %w", seat.SeatID, seat.HerdrPane, err,
-			)
+			// Only a held pane's read needs herdr-shield, so an unread pane is taken as held:
+			// it still gets the state, under pfm's own source.
+			reporter.warn("pfm internal herdr-state %s: native Claude seat %s: read pane %s foreground "+
+				"(any report goes under pfm's own source): %v", reporter.options.event, seat.SeatID, seat.HerdrPane, err)
+		} else {
+			detected = processes.Holder == nil
 		}
-		detected = processes.Holder == nil
 	}
-	if detected && reporter.options.event == herdr.EventStart {
-		// Compaction/fork still refresh session metadata, never lifecycle state.
+	if detected && reporter.options.event == herdr.EventStart && action == nil {
+		// Compaction/fork still bind the seat's new session, never lifecycle state.
 		action = &herdrAction{}
 	}
 	if action == nil {
@@ -142,7 +160,10 @@ func (reporter *herdrReporter) nativeSeat(ctx context.Context, payload herdrPayl
 	if payload.SessionID != "" {
 		seat.SessionID = payload.SessionID
 	}
-	promptSubmitted := payload.HookEventName == claudelaunch.HookEventUserPromptSubmit ||
+	// A task notification opens a turn through UserPromptSubmit with the notification
+	// as its prompt, but the user re-sent nothing.
+	promptSubmitted := (payload.HookEventName == claudelaunch.HookEventUserPromptSubmit &&
+		!strings.HasPrefix(payload.Prompt, taskNotificationPrompt)) ||
 		(reporter.options.engine == pfmengine.OpenCode && payload.HookEventName == "chat.message")
 	if reporter.options.event == herdr.EventWorking && promptSubmitted && !payload.IsInterrupt {
 		seat.LostNote = ""
@@ -162,27 +183,40 @@ func (reporter *herdrReporter) nativeSeat(ctx context.Context, payload herdrPayl
 			return true, fmt.Errorf("bind native seat: %w", err)
 		}
 	}
-	reporter.nativeSeatReport = true
-	action.stored.SessionID = seat.SessionID
 	seq := reporter.seq
 	if seq == 0 {
 		seq = reporter.nextSent()
 	}
+	// The owner record orders this seat's hooks even where pfm reports nothing.
 	if err := reporter.reserveNativeOwnership(seat, seq); err != nil {
 		return true, err
 	}
-	target := herdrTarget{socket: seat.HerdrSocket, pane: seat.HerdrPane, terminal: seat.HerdrTerminalID}
 	payload.SessionID = seat.SessionID
-	if detected && !action.release {
-		err = reporter.deferNativeClaude(ctx, target, payload, seq)
-	} else {
-		err = reporter.send(ctx, target, action, seq)
+	if detected {
+		if err := reporter.releaseSeenPane(ctx, seat); err != nil {
+			return true, err
+		}
+		if reporter.options.event == herdr.EventEnd {
+			// The pane keeps pfm's title (syncNativeEngineName) until it is cleared.
+			return true, reporter.clearNativeTitle(ctx, seat)
+		}
+		unlockBridge()
+		return true, reporter.syncNativeEngineName(ctx, seat, payload)
 	}
-	if err != nil {
-		return true, err
+	reporter.nativeSeatReport = true
+	action.stored.SessionID = seat.SessionID
+	target := herdrTarget{socket: seat.HerdrSocket, pane: seat.HerdrPane, terminal: seat.HerdrTerminalID}
+	if err := reporter.send(ctx, target, action, seq); err != nil {
+		return true, undelivered(err)
 	}
 	if reporter.options.event != herdr.EventEnd {
-		return true, reporter.syncNativeEngineName(ctx, seat, payload)
+		// The name sync reads the transcript and renames through Herdr: no pane state write
+		// needs the host-wide bridge, so every other chat's report stops waiting on it here.
+		unlockBridge()
+		return true, errors.Join(
+			reporter.watch(payload, action.stored),
+			reporter.syncNativeEngineName(ctx, seat, payload),
+		)
 	}
 	return true, nil
 }
@@ -295,20 +329,6 @@ func (reporter *herdrReporter) resumeArgv(sessionID string) ([]string, error) {
 	return append(argv[:3:3], "--restored", sessionID), nil
 }
 
-// releaseSettled turns Herdr's pane-not-found for a release (the pane closed
-// since it was resolved) into success; every other failure remains visible.
-func releaseSettled(err error) error {
-	if isHerdrNotFound(err) {
-		return nil
-	}
-	return err
-}
-
-func isHerdrNotFound(err error) bool {
-	var refusal *herdr.Refusal
-	return errors.As(err, &refusal) && (refusal.Code == herdrPaneNotFound || refusal.Code == herdrNotFound)
-}
-
 // tmuxSeatLifecycle updates only this launcher's durable row; it does not
 // change tmux bridge state, hooks, target selection or attach choreography.
 func (reporter *herdrReporter) tmuxSeatLifecycle(ctx context.Context, payload herdrPayload) (returnErr error) {
@@ -359,21 +379,27 @@ type herdrPayload struct {
 	Prompt           string          `json:"prompt"`
 }
 
-// Native and legacy reports share SESSION then BRIDGE ordering, including re-proofs.
-func (reporter *herdrReporter) lockNativeReport(ctx context.Context, seat fleetdb.Seat) (func(), error) {
+// taskNotificationPrompt opens the prompt Claude Code submits when a background
+// task reports back; its hook payload carries no other mark.
+const taskNotificationPrompt = "<task-notification>"
+
+// Native and legacy reports share SESSION then BRIDGE ordering, including re-proofs:
+// the caller releases the bridge before the session.
+func (reporter *herdrReporter) lockNativeReport(
+	ctx context.Context,
+	seat fleetdb.Seat,
+) (unlockSession, unlockBridge func(), err error) {
 	identity := fleetdb.ConversationIdentity(seat.SessionID, seat.SeatID)
-	unlockSession, err := reporter.lock(ctx, identity)
+	unlockSession, err = reporter.lock(ctx, identity)
 	if err != nil {
-		return nil, fmt.Errorf("lock native reporter session: %w", err)
+		return nil, nil, fmt.Errorf("lock native reporter session: %w", err)
 	}
-	deps := reporter.deps
-	deps.lockDir = filepath.Join(deps.lockDir, "pfm-herdr-bridge")
-	unlockBridge, err := (&herdrReporter{deps: deps}).lock(ctx, "transaction")
+	unlockBridge, err = reporter.lockBridge(ctx)
 	if err != nil {
 		unlockSession()
-		return nil, fmt.Errorf("lock native reporter bridge: %w", err)
+		return nil, nil, fmt.Errorf("lock native reporter bridge: %w", err)
 	}
-	return func() { unlockBridge(); unlockSession() }, nil
+	return unlockSession, unlockBridge, nil
 }
 
 // This is the existing bridge owner-record protocol, not another ledger. A native

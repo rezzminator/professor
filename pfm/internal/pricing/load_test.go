@@ -216,9 +216,14 @@ func TestServeRejectsAnInvalidOverrideNamingIt(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			configPath := configWithOverride(t, body)
-			_, err := ServeTable(published, Origin{From: FromEmbedded}, configPath)
+			prices, err := ServeTable(published, Origin{From: FromEmbedded}, configPath)
 			if err == nil || !strings.Contains(err.Error(), config.PricesPath(configPath)) {
 				t.Fatalf("ServeTable error = %v, want one naming %s", err, config.PricesPath(configPath))
+			}
+			// The invalid override loses only itself: the published table is served beside the error.
+			if len(prices.Rows) != len(published.Rows) || prices.Override != nil || prices.From != FromEmbedded {
+				t.Fatalf("ServeTable beside the error = %d rows from %q override %v, want %d published rows",
+					len(prices.Rows), prices.From, prices.Override, len(published.Rows))
 			}
 		})
 	}

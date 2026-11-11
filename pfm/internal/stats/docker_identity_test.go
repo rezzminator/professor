@@ -100,7 +100,7 @@ func TestNewSamplerWithDockerSocketWiresResolveDockerIdentities(t *testing.T) {
 		t.Fatal("NewSamplerWithDockerSocket built a Sampler with a nil DockerInspect")
 	}
 	containers := []Container{{ID: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}}
-	if warnings := sampler.resolveDockerIdentities(containers); len(warnings) != 0 {
+	if warnings := sampler.resolveDockerIdentities(containers, 0); len(warnings) != 0 {
 		t.Fatalf("resolveDockerIdentities warnings = %v, want none", warnings)
 	}
 	if containers[0].Name != "professor-web" || containers[0].Image != "registry.example/professor:web" {

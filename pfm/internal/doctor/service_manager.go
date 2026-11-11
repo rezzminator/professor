@@ -29,18 +29,89 @@ type serviceManagerUnitState struct {
 	Err     error
 }
 
-// ServiceManagerReport is what probeServiceManager — defined once per
-// platform in service_manager_linux.go / service_manager_darwin.go, same
-// identifier on both so the caller here stays platform-blind (pfm/CLAUDE.md
-// § Code Standards, "one binary, two kernels") — returns: the manager this
-// platform uses, whether it could be asked at all, and the pfm MCP daemon
-// unit's state under it (assets/systemd/pfm-mcp.service, M47;
+// ServiceManagerReport is what probeServiceManager returns: the manager this
+// host uses, whether it could be asked at all, and the pfm MCP daemon unit's
+// state under it (assets/systemd/pfm-mcp.service, M47;
 // assets/launchd/com.professor.pfm.mcp.plist, M48).
 type ServiceManagerReport struct {
 	Manager string
 	Present bool
 	Unit    serviceManagerUnitState
 }
+
+// serviceManagerProbe is one service manager's doctor rows: the manager word
+// the rows print, its binary, the MCP daemon and schedule units it supervises,
+// how one unit is asked about, and when the schedule unit counts as armed.
+// service_manager_systemd.go and service_manager_launchd.go define one each;
+// serviceManagerFor picks between them, so both run in a Linux test.
+type serviceManagerProbe struct {
+	manager      string
+	binary       string
+	mcpUnit      string
+	scheduleUnit string
+	probeUnit    func(context.Context, deps.Runner, string) serviceManagerUnitState
+	armed        func(serviceManagerUnitState) bool
+}
+
+// serviceManagerFor is kind's doctor rows.
+func serviceManagerFor(kind servicemanager.Kind) serviceManagerProbe {
+	if kind == servicemanager.KindLaunchd {
+		return launchdServiceManager
+	}
+	return systemdServiceManager
+}
+
+// hostServiceManager is this host's rows, chosen once.
+var hostServiceManager = serviceManagerFor(servicemanager.Native())
+
+// report asks the manager about unit. A manager binary absent from PATH — the
+// container/unmanaged-host case M.06 exercises — is report.Present=false,
+// never folded into "could not ask": LookPath failing is a clean, expected
+// answer, not a probe that could not run.
+func (probe serviceManagerProbe) report(ctx context.Context, runner deps.Runner, unit string) ServiceManagerReport {
+	report := ServiceManagerReport{Manager: probe.manager, Unit: serviceManagerUnitState{Unit: unit}}
+	if _, err := runner.LookPath(probe.binary); err != nil {
+		return report
+	}
+	report.Present = true
+	report.Unit = probe.probeUnit(ctx, runner, unit)
+	return report
+}
+
+// service asks the manager about the pfm MCP daemon unit.
+func (probe serviceManagerProbe) service(ctx context.Context, runner deps.Runner) ServiceManagerReport {
+	return probe.report(ctx, runner, probe.mcpUnit)
+}
+
+// schedule asks the manager about the pfm schedule unit.
+func (probe serviceManagerProbe) schedule(ctx context.Context, runner deps.Runner) ServiceManagerReport {
+	return probe.report(ctx, runner, probe.scheduleUnit)
+}
+
+// probeServiceManager asks this host's manager about the pfm MCP daemon unit.
+func probeServiceManager(ctx context.Context, runner deps.Runner) ServiceManagerReport {
+	return hostServiceManager.service(ctx, runner)
+}
+
+// probeScheduleTimer asks this host's manager about the pfm schedule unit.
+func probeScheduleTimer(ctx context.Context, runner deps.Runner) ServiceManagerReport {
+	return hostServiceManager.schedule(ctx, runner)
+}
+
+// serviceManagerIdentity names the manager and MCP unit the row reports
+// without asking the manager anything.
+func serviceManagerIdentity() (manager, unit string) {
+	return hostServiceManager.manager, hostServiceManager.mcpUnit
+}
+
+// scheduleTimerIdentity names the manager and schedule unit the schedules row
+// reports without asking the manager anything.
+func scheduleTimerIdentity() (manager, unit string) {
+	return hostServiceManager.manager, hostServiceManager.scheduleUnit
+}
+
+// scheduleTimerArmed reports whether this host's schedule unit fires.
+func scheduleTimerArmed(unit serviceManagerUnitState) bool { return hostServiceManager.armed(unit) }
 
 // ServiceManagerProbeOverride lets tests exercise printServiceManagerDoctor's
 // three-state formatting without depending on the build's own platform probe

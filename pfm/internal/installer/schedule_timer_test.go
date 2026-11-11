@@ -15,6 +15,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/agentlauncher"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/servicemanager"
 )
 
 // The schedule tick is fixed at five minutes: the systemd timer and the launchd
@@ -55,11 +56,9 @@ func TestScheduleServiceAssetFiresAndStagesWithoutMarkers(t *testing.T) {
 			t.Errorf("schedule service asset is missing %q:\n%s", want, service)
 		}
 	}
-	if schedulerIsLaunchd {
-		return
-	}
 	home := t.TempDir()
 	if _, err := Run(context.Background(), Options{
+		scheduler:     schedulerFor(servicemanager.KindSystemd),
 		MCPConfigPath: testConfigPath(t),
 		Mode:          ModeApply, Home: home, Runner: &fakeRunner{},
 	}); err != nil {
@@ -228,9 +227,6 @@ func TestScheduleUnitsAreManagedAndEnabled(t *testing.T) {
 // is left: linked and enabled, gone, then linked and enabled again.
 func TestScheduleUnitsSurviveInstallUninstallReinstall(t *testing.T) {
 	t.Parallel()
-	if schedulerIsLaunchd {
-		t.Skip("systemd units are not installed on a launchd host")
-	}
 	home := t.TempDir()
 	unitDir := filepath.Join(home, ".config", "systemd", "user")
 	managed := filepath.Join(home, ".local", "share", "pfm", "install")
@@ -246,6 +242,7 @@ func TestScheduleUnitsSurviveInstallUninstallReinstall(t *testing.T) {
 		t.Helper()
 		var output strings.Builder
 		if _, err := Run(context.Background(), Options{
+			scheduler:     schedulerFor(servicemanager.KindSystemd),
 			MCPConfigPath: testConfigPath(t),
 			Mode:          mode, Home: home, Stdout: &output, Runner: &fakeRunner{manager: true},
 		}); err != nil {
@@ -269,97 +266,109 @@ func TestScheduleUnitsSurviveInstallUninstallReinstall(t *testing.T) {
 }
 
 func TestScheduleTimerDrift(t *testing.T) {
-	scenarios := []string{"no drift", "drifted unit", "nothing installed", "armed none", "unreadable unit", "no home"}
-	if !schedulerIsLaunchd {
-		// Only systemd units are links into the managed root.
-		scenarios = append(scenarios, "dangling unit link", "missing service")
-	}
-	for _, scenario := range scenarios {
-		t.Run(scenario, func(t *testing.T) {
-			home := t.TempDir()
-			path := filepath.Join(home, ".config", "systemd", "user", scheduleTimerUnit)
-			if schedulerIsLaunchd {
-				path = filepath.Join(home, "Library", "LaunchAgents", scheduleLaunchdLabel+".plist")
-			}
-			if scenario == "no drift" || scenario == "drifted unit" || scenario == "dangling unit link" ||
-				scenario == "missing service" {
-				if schedulerIsLaunchd {
-					installer := engine{apply: true, stamp: "test", options: Options{
-						Home: home, Runner: &fakeRunner{}, Stdout: io.Discard, Sleep: func(time.Duration) {},
-					}}
-					if err := installer.wireScheduleLaunchAgent(context.Background()); err != nil {
-						t.Fatal(err)
-					}
-				} else {
-					if _, err := Run(context.Background(), Options{
-						Mode: ModeApply, Home: home, MCPConfigPath: testConfigPath(t),
-						Runner: &fakeRunner{manager: true}, Stdout: io.Discard,
-					}); err != nil {
-						t.Fatal(err)
+	for _, kind := range schedulerKinds {
+		launchd := kind == servicemanager.KindLaunchd
+		scenarios := []string{
+			"no drift",
+			"drifted unit",
+			"nothing installed",
+			"armed none",
+			"unreadable unit",
+			"no home",
+		}
+		if !launchd {
+			// Only systemd units are links into the managed root.
+			scenarios = append(scenarios, "dangling unit link", "missing service")
+		}
+		for _, scenario := range scenarios {
+			t.Run(string(kind)+" "+scenario, func(t *testing.T) {
+				home := t.TempDir()
+				path := filepath.Join(home, ".config", "systemd", "user", scheduleTimerUnit)
+				if launchd {
+					path = filepath.Join(home, "Library", "LaunchAgents", scheduleLaunchdLabel+".plist")
+				}
+				if scenario == "no drift" || scenario == "drifted unit" || scenario == "dangling unit link" ||
+					scenario == "missing service" {
+					if launchd {
+						installer := engine{apply: true, stamp: "test", options: Options{
+							Home: home, Runner: &fakeRunner{}, Stdout: io.Discard, Sleep: func(time.Duration) {},
+							scheduler: schedulerFor(kind),
+						}}
+						if err := installer.wireScheduleLaunchAgent(context.Background()); err != nil {
+							t.Fatal(err)
+						}
+					} else {
+						if _, err := Run(context.Background(), Options{
+							Mode: ModeApply, Home: home, MCPConfigPath: testConfigPath(t),
+							Runner: &fakeRunner{manager: true}, Stdout: io.Discard,
+							scheduler: schedulerFor(kind),
+						}); err != nil {
+							t.Fatal(err)
+						}
 					}
 				}
-			}
-			if scenario == "drifted unit" {
-				if !schedulerIsLaunchd {
+				if scenario == "drifted unit" {
+					if !launchd {
+						path = filepath.Join(home, ".config", "systemd", "user", scheduleServiceUnit)
+					}
+					if err := os.WriteFile(path, []byte("stale\n"), 0o644); err != nil {
+						t.Fatal(err)
+					}
+					if !launchd {
+						target, err := os.Readlink(path)
+						if err != nil {
+							t.Fatalf("drift fixture must retain the installed symlink: %v", err)
+						}
+						if raw, err := os.ReadFile(target); err != nil || string(raw) != "stale\n" {
+							t.Fatalf("link target=%q err=%v", raw, err)
+						}
+					}
+				}
+				if scenario == "missing service" {
 					path = filepath.Join(home, ".config", "systemd", "user", scheduleServiceUnit)
+					if err := os.Remove(path); err != nil {
+						t.Fatal(err)
+					}
 				}
-				if err := os.WriteFile(path, []byte("stale\n"), 0o644); err != nil {
-					t.Fatal(err)
-				}
-				if !schedulerIsLaunchd {
+				if scenario == "dangling unit link" {
 					target, err := os.Readlink(path)
 					if err != nil {
-						t.Fatalf("drift fixture must retain the installed symlink: %v", err)
+						t.Fatalf("dangling fixture must start from the installed symlink: %v", err)
 					}
-					if raw, err := os.ReadFile(target); err != nil || string(raw) != "stale\n" {
-						t.Fatalf("link target=%q err=%v", raw, err)
+					if err := os.Remove(target); err != nil {
+						t.Fatal(err)
 					}
 				}
-			}
-			if scenario == "missing service" {
-				path = filepath.Join(home, ".config", "systemd", "user", scheduleServiceUnit)
-				if err := os.Remove(path); err != nil {
-					t.Fatal(err)
+				if scenario == "unreadable unit" {
+					if err := os.MkdirAll(path, 0o700); err != nil {
+						t.Fatal(err)
+					}
 				}
-			}
-			if scenario == "dangling unit link" {
-				target, err := os.Readlink(path)
-				if err != nil {
-					t.Fatalf("dangling fixture must start from the installed symlink: %v", err)
+				if scenario == "no home" {
+					home = ""
 				}
-				if err := os.Remove(target); err != nil {
-					t.Fatal(err)
+				gotPath, drifted, err := scheduleFilesDrift(schedulerFor(kind), home, scenario == "armed none")
+				switch scenario {
+				case "no home":
+					if err == nil || err.Error() != "schedule timer drift: no home directory" || drifted ||
+						gotPath != "" {
+						t.Fatalf("path=%q drifted=%t err=%v", gotPath, drifted, err)
+					}
+				case "unreadable unit":
+					if err == nil || !strings.HasPrefix(err.Error(), "read "+path+":") || drifted || gotPath != "" {
+						t.Fatalf("path=%q drifted=%t err=%v", gotPath, drifted, err)
+					}
+				case "drifted unit", "dangling unit link", "missing service", "armed none":
+					if err != nil || !drifted || gotPath != path {
+						t.Fatalf("path=%q drifted=%t err=%v want drift=%s", gotPath, drifted, err, path)
+					}
+				default:
+					if err != nil || drifted || gotPath != "" {
+						t.Fatalf("path=%q drifted=%t err=%v", gotPath, drifted, err)
+					}
 				}
-			}
-			if scenario == "unreadable unit" {
-				if err := os.MkdirAll(path, 0o700); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if scenario == "no home" {
-				home = ""
-			}
-			gotPath, drifted, err := ScheduleTimerDrift(home, scenario == "armed none")
-			switch scenario {
-			case "no home":
-				if err == nil || err.Error() != "schedule timer drift: no home directory" || drifted ||
-					gotPath != "" {
-					t.Fatalf("path=%q drifted=%t err=%v", gotPath, drifted, err)
-				}
-			case "unreadable unit":
-				if err == nil || !strings.HasPrefix(err.Error(), "read "+path+":") || drifted || gotPath != "" {
-					t.Fatalf("path=%q drifted=%t err=%v", gotPath, drifted, err)
-				}
-			case "drifted unit", "dangling unit link", "missing service", "armed none":
-				if err != nil || !drifted || gotPath != path {
-					t.Fatalf("path=%q drifted=%t err=%v want drift=%s", gotPath, drifted, err, path)
-				}
-			default:
-				if err != nil || drifted || gotPath != "" {
-					t.Fatalf("path=%q drifted=%t err=%v", gotPath, drifted, err)
-				}
-			}
-		})
+			})
+		}
 	}
 }
 

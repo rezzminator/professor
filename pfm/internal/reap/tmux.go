@@ -86,31 +86,25 @@ func (tmux TmuxReaper) Sessions(
 		}
 		fields := pfmtmux.FormatSplit(line, 3)
 		if len(fields) != 3 {
-			return nil, fmt.Errorf(
-				"tmux %s returned %d session fields in %q",
-				socket,
-				len(fields),
-				line,
-			)
+			// The line names no session we can trust: keep it by its text, unknown.
+			sessions = append(sessions, VSCTSession{
+				Name:       line,
+				Unreadable: fmt.Sprintf("%d session fields in %q on %s", len(fields), line, socket),
+			})
+			continue
 		}
+		session := VSCTSession{Name: fields[0], Attached: fields[1] == "1"}
 		activity, err := strconv.ParseInt(fields[2], 10, 64)
 		if err != nil {
-			return nil, fmt.Errorf(
-				"tmux %s session activity %q: %w",
-				socket,
-				fields[2],
-				err,
-			)
+			session.Unreadable = fmt.Sprintf("session activity %q on %s: %v", fields[2], socket, err)
+			sessions = append(sessions, session)
+			continue
 		}
-		idle := now().Sub(time.Unix(activity, 0))
-		if idle < 0 {
-			idle = 0
+		session.Idle = now().Sub(time.Unix(activity, 0))
+		if session.Idle < 0 {
+			session.Idle = 0
 		}
-		sessions = append(sessions, VSCTSession{
-			Name:     fields[0],
-			Attached: fields[1] == "1",
-			Idle:     idle,
-		})
+		sessions = append(sessions, session)
 	}
 	return sessions, nil
 }
@@ -124,10 +118,10 @@ func (tmux TmuxReaper) ClientIdle(
 ) (time.Duration, bool, error) {
 	output, err := tmux.command(ctx, socket, "list-clients", "-F", "#{client_activity}").Output()
 	if err != nil {
-		// tmux errors "no clients attached" identically to any other reason
-		// list-clients found nothing — that is the ordinary shape of a
-		// socket nobody currently has open, not a probe failure.
-		return 0, false, nil
+		// A failed probe is returned, never read as a socket nobody has open:
+		// the caller records it as the probe's error and the socket reads
+		// unknown. (list-clients with no clients answers an empty list, exit 0.)
+		return 0, false, fmt.Errorf("tmux %s list-clients: %w", socket, err)
 	}
 	now := tmux.Now
 	if now == nil {

@@ -17,6 +17,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gitroot"
 	"github.com/rezzminator/professor/pfm/internal/naming"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/reload"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
@@ -304,6 +305,15 @@ type callerIdentity struct {
 	absent   bool
 }
 
+// lookupFailed is a caller whose identity could not be looked up: present and
+// invalid, never absent, so a self target refuses naming the failure and an
+// explicit target goes on as for any identity that did not bind.
+func (caller callerIdentity) lookupFailed(err error) callerIdentity {
+	caller.row, caller.identity, caller.valid = ChatRow{}, resolve.Identity{}, false
+	caller.err, caller.detail = err, err.Error()
+	return caller
+}
+
 func (current *backend) proxySeatMatches(proxy ProxyIdentity, row ChatRow) (selected bool, detail string) {
 	if row.Kind == compose.LiveSplit.String() {
 		return current.proxySocketMatches(proxy, row)
@@ -476,18 +486,19 @@ func (current *backend) callerForRequest(
 		if proxy.Engine != "" {
 			parsedEngine, parseErr := pfmengine.Parse(proxy.Engine)
 			if parseErr != nil {
-				caller.detail = fmt.Sprintf("MCP _meta.pfmProxy engine %q is invalid: %v", proxy.Engine, parseErr)
-				return caller, nil
+				// The engine only feeds the conflict check: unreadable, it is skipped, never the caller.
+				obs.Logger(ctx).Warn("mcp.caller_engine_invalid", "session", proxy.Session,
+					obs.FieldEngine, proxy.Engine, obs.FieldErr, parseErr.Error())
 			}
 			proxyEngine = parsedEngine
 		}
 		listed, err := current.listUnbounded(ctx, LSInput{All: true})
 		if err != nil {
-			return caller, fmt.Errorf(
+			return caller.lookupFailed(fmt.Errorf(
 				"resolve MCP proxy session %q: list live chats: %w",
 				proxy.Session,
 				err,
-			)
+			)), nil
 		}
 		matches := make([]ChatRow, 0, 1)
 		conflictDetail := ""
@@ -548,10 +559,10 @@ func (current *backend) callerForRequest(
 				return caller, nil
 			}
 			if !filepath.IsAbs(current.paths.SIDDir) {
-				return caller, fmt.Errorf(
+				return caller.lookupFailed(fmt.Errorf(
 					"resolve MCP proxy split pane %q: breadcrumb directory is not absolute",
 					proxy.Pane,
-				)
+				)), nil
 			}
 			boundID, _, bindErr := reload.SessionFromPaneCrumb(
 				current.paths.SIDDir,
@@ -567,11 +578,11 @@ func (current *backend) callerForRequest(
 					)
 					return caller, nil
 				}
-				return caller, fmt.Errorf(
+				return caller.lookupFailed(fmt.Errorf(
 					"resolve MCP proxy split pane %q breadcrumb: %w",
 					proxy.Pane,
 					bindErr,
-				)
+				)), nil
 			}
 			if boundID == "" {
 				caller.row = ChatRow{}
@@ -591,37 +602,38 @@ func (current *backend) callerForRequest(
 				)
 				return caller, nil
 			}
-			if current.database == nil {
-				return caller, fmt.Errorf("resolve MCP proxy split transcript %q: store is not configured", proxy.ID)
+			// The breadcrumb bound the pane exactly; the indexed transcript only
+			// adds its directory, path and name. Not indexed yet (or unreadable),
+			// directory and path stay unknown, never the split row's (another
+			// pane's), and the name stays the row's.
+			var transcript store.Transcript
+			found, lookupErr := false, errors.New("store is not configured")
+			if current.database != nil {
+				transcript, found, lookupErr = current.database.Transcript(ctx, proxy.ID)
 			}
-			transcript, found, err := current.database.Transcript(ctx, proxy.ID)
-			if err != nil {
-				return caller, fmt.Errorf("resolve MCP proxy split transcript %q: %w", proxy.ID, err)
+			if lookupErr != nil {
+				obs.Logger(ctx).Warn("mcp.caller_transcript_unread", "session", proxy.Session,
+					obs.FieldChat, proxy.ID, obs.FieldErr, lookupErr.Error())
 			}
-			if !found || strings.TrimSpace(transcript.CWD) == "" {
-				caller.row = ChatRow{}
-				caller.detail = fmt.Sprintf(
-					"MCP _meta.pfmProxy split transcript %q has no indexed working directory",
-					proxy.ID,
-				)
-				return caller, nil
-			}
-			caller.row.ID = transcript.UUID
+			caller.row.ID = proxy.ID
 			caller.row.Session = proxy.Session
 			caller.row.Dir = transcript.CWD
-			caller.row.Name = naming.LiveFallback(
-				naming.DisplayName(transcript.CustomTitle, transcript.AITitle, transcript.FirstPrompt),
-				"",
-				"",
-				"",
-				transcript.LastPrompt,
-				true,
-			)
+			caller.row.transcriptPath = transcript.Path
+			if found {
+				caller.row.Name = naming.LiveFallback(
+					naming.DisplayName(transcript.CustomTitle, transcript.AITitle, transcript.FirstPrompt),
+					"",
+					"",
+					"",
+					transcript.LastPrompt,
+					true,
+				)
+			}
 			caller.row.Pane = proxy.Pane
 		}
 		caller.identity, err = current.identityFromRow(caller.row)
 		if err != nil {
-			return caller, fmt.Errorf("resolve MCP proxy session %q: %w", proxy.Session, err)
+			return caller.lookupFailed(fmt.Errorf("resolve MCP proxy session %q: %w", proxy.Session, err)), nil
 		}
 		if proxy.ID != "" {
 			caller.identity.ID = proxy.ID
@@ -640,7 +652,7 @@ func (current *backend) callerForRequest(
 	}
 	listed, err := current.listUnbounded(ctx, LSInput{All: true})
 	if err != nil {
-		return caller, fmt.Errorf("resolve MCP caller thread %q: list live chats: %w", threadID, err)
+		return caller.lookupFailed(fmt.Errorf("resolve MCP caller thread %q: list live chats: %w", threadID, err)), nil
 	}
 	seats := current.codexSeatsFromRows(listed.Rows)
 	identity, seatErr := resolve.CodexThreadSeat(threadID, seats)
@@ -659,7 +671,7 @@ func (current *backend) callerForRequest(
 	}
 	caller.identity, err = current.identityFromRow(caller.row)
 	if err != nil {
-		return caller, fmt.Errorf("resolve MCP caller thread %q: %w", threadID, err)
+		return caller.lookupFailed(fmt.Errorf("resolve MCP caller thread %q: %w", threadID, err)), nil
 	}
 	caller.identity.Recovered = identity.Recovered
 	caller.identity.Source = "mcp-thread-meta"

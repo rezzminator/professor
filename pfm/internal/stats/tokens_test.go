@@ -39,6 +39,9 @@ func TestApplyTokenRecordCountsEachResponseOnce(t *testing.T) {
 				`{"input_tokens":100,"output_tokens":20,"type":"message"},` +
 				`{"input_tokens":50,"output_tokens":5,"type":"advisor_message","model":"claude-opus-5-5"}]}}}`,
 		}, 100 + 20 + 50 + 5, 0, true},
+		{"an odd-typed requestId reads as absent beside its usage", []string{
+			`{"type":"assistant","requestId":7,"message":{"id":"m5","usage":{"input_tokens":3,"output_tokens":2}}}`,
+		}, 5, 0, true},
 		{"a Codex token_count sets the lifetime total; an info-less one is ignored", []string{
 			`{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":900}}}}`,
 			`{"type":"event_msg","payload":{"type":"token_count","info":null}}`,
@@ -195,12 +198,21 @@ func TestApplyTokenRecordUpdatesRepeatedResponseUsage(t *testing.T) {
 	}
 }
 
-// A negative count inside usage.iterations is as malformed as one at the top
-// level: the fold would subtract it from the chat's tokens.
-func TestApplyTokenRecordRefusesANegativeIterationCount(t *testing.T) {
-	entry := &tokenCacheEntry{}
-	line := `{"type":"assistant","message":{"id":"m1","usage":{"iterations":[{"input_tokens":-50},{"output_tokens":10}]}}}`
-	if err := applyTokenRecord(entry, []byte(line)); err == nil || entry.claudeTokens != 0 {
-		t.Fatalf("applyTokenRecord = %v with %d tokens; want the negative count refused", err, entry.claudeTokens)
+// A usage the fold cannot trust is refused, never counted: a negative count
+// inside usage.iterations would subtract from the chat's tokens, and a count of
+// another type would read as 0 — whatever odd member sits beside it.
+func TestApplyTokenRecordRefusesAnUntrustworthyUsage(t *testing.T) {
+	for _, line := range []string{
+		`{"type":"assistant","message":{"id":"m1","usage":{"iterations":[{"input_tokens":-50},{"output_tokens":10}]}}}`,
+		`{"type":"assistant","message":{"id":"m2","usage":{"input_tokens":"300","output_tokens":2}}}`,
+		`{"type":"assistant","requestId":7,"message":{"id":"m3","usage":{"input_tokens":3,"output_tokens":12.5}}}`,
+		`{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":"900"}}}}`,
+	} {
+		entry := &tokenCacheEntry{}
+		err := applyTokenRecord(entry, []byte(line))
+		if err == nil || entry.claudeTokens != 0 || entry.codexTokens != 0 {
+			t.Fatalf("applyTokenRecord(%s) = %v with %d/%d tokens; want the usage refused",
+				line, err, entry.claudeTokens, entry.codexTokens)
+		}
 	}
 }

@@ -16,12 +16,22 @@ func printHerdrIndicatorsDoctor(stdout io.Writer, home string, procs gather.Proc
 		Install: gather.InstallAt(home), Executable: agentlauncher.ExecTarget(home),
 	})
 	if err != nil {
+		// The pids returned beside the error are the painters that were read and found stale:
+		// a painter that could not be read never hides the ones that could.
+		if len(pids) != 0 {
+			fmt.Fprintf(
+				stdout,
+				"doctor: herdr-indicators: WARN stale executable pids=%v — fix: pfm install --yes\n",
+				pids,
+			)
+			warnings = 1
+		}
 		fmt.Fprintf(
 			stdout,
 			"doctor: herdr-indicators: ERROR %s — fix: repair process-table access, then rerun pfm doctor\n",
 			err,
 		)
-		return 0, 1
+		return warnings, 1
 	}
 	if len(pids) != 0 {
 		fmt.Fprintf(stdout, "doctor: herdr-indicators: WARN stale executable pids=%v — fix: pfm install --yes\n", pids)

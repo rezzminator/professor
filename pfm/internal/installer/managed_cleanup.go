@@ -56,9 +56,12 @@ const (
 
 // ManagedCleanupStatus is the shared install and doctor inspection result.
 type ManagedCleanupStatus struct {
-	Path      string
-	State     string
-	Value     int
+	Path  string
+	State string
+	Value int
+	// Raw is the cleanupPeriodDays value as written (its JSON text), shown
+	// when it is not the integer pfm wants.
+	Raw       string
 	KeyAbsent bool
 	Err       error
 	// Prepend is the PrependSet|PrependOther|PrependInvalid|PrependAbsent|
@@ -100,11 +103,9 @@ func InspectManagedCleanup(dir string, require bool, want int) ManagedCleanupSta
 		if !present {
 			status.State = ManagedCleanupWrong
 			status.KeyAbsent = true
-		} else if decodeErr := json.Unmarshal(value, &status.Value); decodeErr != nil {
-			status.State = ManagedCleanupUnreadable
-			status.Err = fmt.Errorf("%s: %w", cleanupPeriodKey, decodeErr)
-			return status
-		} else if status.Value != want {
+		} else if status.Raw = string(value); json.Unmarshal(value, &status.Value) != nil || status.Value != want {
+			// pfm's own key in pfm's own drop-in: a value of another type is
+			// wrong and rewritten, never an unreadable drop-in.
 			status.State = ManagedCleanupWrong
 		}
 	}

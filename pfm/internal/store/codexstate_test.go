@@ -4,14 +4,17 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 )
 
@@ -280,17 +283,105 @@ CREATE TABLE threads (id TEXT PRIMARY KEY, cwd TEXT, created_at INTEGER)`); err 
 		UpdatedAt:    5,
 	})
 
+	// One row Codex wrote in a shape pfm cannot read costs that row alone.
+	live, err := sql.Open("sqlite", filepath.Join(root, "state_3.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := live.Exec(
+		`CREATE TEMP TABLE garbled AS SELECT * FROM threads;
+UPDATE garbled SET id = 'garbled', created_at = 'noon';
+INSERT INTO threads SELECT * FROM garbled`,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := live.Close(); err != nil {
+		t.Fatal(err)
+	}
+
 	files, err := CodexStateFiles(root)
 	if err != nil {
 		t.Fatalf("CodexStateFiles() error = %v", err)
 	}
-	threads, err := ReadCodexThreads(context.Background(), files)
+	ctx, recorder := obs.Test(t)
+	threads, err := ReadCodexThreads(ctx, files)
 	if err != nil {
 		t.Fatalf("ReadCodexThreads() error = %v", err)
 	}
 	if len(threads) != 1 || threads[0].ID != "live" {
 		t.Fatalf("ReadCodexThreads() = %#v, want only the readable generation", threads)
 	}
+	want := []string{"WARN " + filepath.Join(root, "state_3.sqlite") + ` 1: sql: Scan error on column index 2, ` +
+		`name "COALESCE(created_at, 0)": converting driver.Value type string ("noon") to a int64: invalid syntax`}
+	if got := warnings(recorder, "store.codex_rows.skipped", "path", "count"); !slices.Equal(got, want) {
+		t.Fatalf("skip records = %q, want %q\n%s", got, want, recorder.Raw())
+	}
+}
+
+// A Codex home pfm cannot list is named on stderr and costs only its own
+// threads: the resolver still matches the threads of every other home.
+func TestCodexThreadResolverNamesAnUnreadableHome(t *testing.T) {
+	root := t.TempDir()
+	unreadable := filepath.Join(root, "not-a-home")
+	if err := os.WriteFile(unreadable, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	home := filepath.Join(root, "home")
+	if err := os.Mkdir(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	buildCodexState(t, filepath.Join(home, "state_5.sqlite"), codexStateThread{
+		ID: "kept", RolloutPath: "/codex/sessions/rollout-kept.jsonl", CWD: "/work",
+		ThreadSource: "user", CreatedAt: 100, UpdatedAt: 100,
+	})
+	ctx, recorder := obs.Test(t)
+	resolver := NewCodexThreadResolverRoots(ctx, []string{unreadable, home}, nil)
+	id, rollout := resolver("kept", "", 0, "", "")
+	if id != "kept" || rollout != "/codex/sessions/rollout-kept.jsonl" {
+		t.Fatalf("resolver = %q, %q; want the other home's thread", id, rollout)
+	}
+	want := []string{"WARN " + unreadable + ": read Codex root \"" + unreadable + "\": open " + unreadable +
+		": not a directory"}
+	if got := warnings(recorder, "store.codex_home.skipped", "path"); !slices.Equal(got, want) {
+		t.Fatalf("skip records = %q, want %q\n%s", got, want, recorder.Raw())
+	}
+}
+
+// A Codex home whose every state generation is unreadable leaves the
+// resolver no candidates, and says so: the pane still resolves by its id.
+func TestCodexThreadResolverNamesUnreadableThreads(t *testing.T) {
+	home := t.TempDir()
+	if err := os.WriteFile(filepath.Join(home, "state_5.sqlite"), []byte("not a database"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, recorder := obs.Test(t)
+	resolver := NewCodexThreadResolverRoots(ctx, []string{home}, nil)
+	if id, rollout := resolver("exported", "", 0, "", ""); id != "exported" || rollout != "" {
+		t.Fatalf("resolver = %q, %q; want the exported id with no rollout", id, rollout)
+	}
+	want := []string{"WARN: read Codex state: all 1 generation(s) were unreadable"}
+	if got := warnings(recorder, "store.codex_threads.unreadable"); !slices.Equal(got, want) {
+		t.Fatalf("records = %q, want %q\n%s", got, want, recorder.Raw())
+	}
+}
+
+// warnings renders each record named message as "LEVEL field… : err", the
+// named fields joined by spaces.
+func warnings(recorder *obs.Recorder, message string, fields ...string) []string {
+	var got []string
+	for _, record := range recorder.Records() {
+		if record.Message != message {
+			continue
+		}
+		line := record.Level
+		for _, field := range fields {
+			value, _ := record.Field(field)
+			line += fmt.Sprintf(" %v", value)
+		}
+		text, _ := record.Field(obs.FieldErr)
+		got = append(got, fmt.Sprintf("%s: %v", line, text))
+	}
+	return got
 }
 
 // L1-F4: skipping every generation is not the same as there being nothing to

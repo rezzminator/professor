@@ -605,6 +605,7 @@ func (h *e2eHarness) assertInit(project, source string) {
 		{"codex", ".codex", ""},
 		{"docs-commands", "docs/commands", ""},
 		{"docs-hub", "docs", ""},
+		{"rules", ".claude/rules", ""},
 	} {
 		sourceDir := filepath.Join(templates, mapping.source)
 		targetDir := filepath.Join(project, mapping.target)
@@ -781,9 +782,6 @@ func (h *e2eHarness) assertUninstalled(home string) {
 		var codex map[string]any
 		if err := json.Unmarshal(raw, &codex); err != nil {
 			h.t.Fatalf("uninstall failed; differing paths: .codex/hooks.json parse; status: %v", err)
-		}
-		if containsJSONString(codex, filepath.Join(home, ".local", "bin", "pfm")+" internal clear-kill") {
-			h.t.Fatalf("uninstall failed; differing paths: retired installer Codex hook")
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		h.t.Fatalf("uninstall failed; differing paths: .codex/hooks.json; status: %v", err)

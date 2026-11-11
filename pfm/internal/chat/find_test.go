@@ -1,8 +1,8 @@
 package chat
 
 import (
-	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -47,7 +48,7 @@ func TestExcerptNeedlesStripsDecorationAndKeepsTheFiveLongest(t *testing.T) {
 // error, so no surface reads "could not search" as "not there".
 func TestFindRanksByHitsAndNamesEachEmptyAnswer(t *testing.T) {
 	root := testjail.Fleet(t)
-	ctx := context.Background()
+	ctx, recorder := obs.Test(t)
 	if _, err := Find(
 		ctx,
 		nil,
@@ -73,9 +74,53 @@ func TestFindRanksByHitsAndNamesEachEmptyAnswer(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// A transcript removed since the listing is no longer a candidate, never a failed search.
+	if err := os.Symlink(filepath.Join(directory, "removed"), filepath.Join(directory, "gone.jsonl")); err != nil {
+		t.Fatal(err)
+	}
+	// One transcript and one project directory that cannot be read cost only themselves.
+	loop := filepath.Join(directory, "loop.jsonl")
+	if err := os.Symlink(loop, loop); err != nil {
+		t.Fatal(err)
+	}
+	badProject := filepath.Join(root, "claude", "bad")
+	if err := os.MkdirAll(badProject, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	listProject := readProjectDirectory
+	readProjectDirectory = func(path string) ([]os.DirEntry, error) {
+		if path == badProject {
+			return nil, errors.New("project listing denied")
+		}
+		return listProject(path)
+	}
+	t.Cleanup(func() { readProjectDirectory = listProject })
 	matches, err := Find(ctx, nil, FindRequest{Excerpt: first + "\n" + second})
 	if err != nil || len(matches) != 2 {
 		t.Fatalf("Find = %+v, %v; want the two transcripts that hold a needle", matches, err)
+	}
+	var warned []string
+	for _, record := range recorder.Records() {
+		path, _ := record.Field("path")
+		cause, _ := record.Field("err")
+		warned = append(warned, fmt.Sprintf("%s %s: %v", record.Message, path, cause))
+	}
+	wantWarned := []string{
+		"transcript project directory skipped " + badProject + ": project listing denied",
+		"find skipped an unreadable transcript " + loop + ": open " + loop + ": too many levels of symbolic links",
+	}
+	if !reflect.DeepEqual(warned, wantWarned) {
+		t.Fatalf("find warnings = %q, want %q", warned, wantWarned)
+	}
+	// A surface resolving one chat never picks from a partial list.
+	wantPartial := "2 transcript(s) or project director(ies) could not be read: the best match among the rest may not be the chat meant"
+	if partial, err := Find(ctx, nil, FindRequest{Excerpt: first + "\n" + second, Complete: true}); partial != nil ||
+		err == nil || err.Error() != wantPartial {
+		t.Fatalf("Find(Complete) = %+v, %v; want %q", partial, err, wantPartial)
+	}
+	if files, skipped, err := ClaudeTranscripts(nil); err != nil || skipped != 1 || len(files) != 5 {
+		t.Fatalf("ClaudeTranscripts() = %d files, %d skipped, %v; want the 5 listed transcripts and 1 skipped",
+			len(files), skipped, err)
 	}
 	if best := matches[0]; best.ID != "both" || best.Hits != 2 || best.Needles != 2 ||
 		best.First != "2026-01-01T00:00:00Z" || best.Last != "2026-01-02T00:00:00Z" {
@@ -85,15 +130,11 @@ func TestFindRanksByHitsAndNamesEachEmptyAnswer(t *testing.T) {
 		len(matches) != 1 || matches[0].ID != "one" {
 		t.Fatalf("Find(Self: both) = %+v, %v; want the asking session's transcript left out", matches, err)
 	}
-	if _, err := Find(
-		ctx,
-		nil,
-		FindRequest{Excerpt: "a sentence no transcript here holds"},
-	); !errors.Is(
-		err,
-		ErrNoExcerptMatch,
-	) {
-		t.Fatalf("Find(absent) = %v, want ErrNoExcerptMatch", err)
+	_, err = Find(ctx, nil, FindRequest{Excerpt: "a sentence no transcript here holds"})
+	if want := ErrNoExcerptMatch.Error() +
+		"; 2 transcript(s) or project director(ies) could not be read and were skipped"; !errors.Is(err, ErrNoExcerptMatch) ||
+		err.Error() != want {
+		t.Fatalf("Find(absent) = %v, want ErrNoExcerptMatch naming what was skipped: %q", err, want)
 	}
 	if _, err := Find(ctx, nil, FindRequest{Excerpt: "  "}); !errors.Is(err, ErrNoExcerpt) {
 		t.Fatalf("Find(blank) = %v, want ErrNoExcerpt", err)
@@ -127,9 +168,9 @@ func TestClaudeTranscriptsUsesGivenPaths(t *testing.T) {
 	}
 	t.Setenv("PFM_CLAUDE_ROOTS", strings.Join([]string{mirror, shared, third}, string(os.PathListSeparator)))
 
-	files, err := ClaudeTranscripts(nil)
-	if err != nil {
-		t.Fatalf("ClaudeTranscripts() error = %v, want the roots listed", err)
+	files, skipped, err := ClaudeTranscripts(nil)
+	if err != nil || skipped != 0 {
+		t.Fatalf("ClaudeTranscripts() skipped %d, error = %v; want the roots listed whole", skipped, err)
 	}
 	want := []string{
 		filepath.Join(mirror, "p", "live.jsonl"),

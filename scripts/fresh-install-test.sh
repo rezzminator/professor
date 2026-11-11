@@ -158,7 +158,7 @@ fi
 # 4. Updates from older releases and rollbacks, against the real tags.
 work_tree=$(src_git rev-parse --show-toplevel) || fail "e2e: cannot resolve the work tree"
 git_dir=$(src_git rev-parse --absolute-git-dir) || fail "e2e: cannot resolve the git dir"
-PFM_DEV_FENCE=1 PFM_HARVESTPY_OFFLINE=1 \
+PFM_DEV_FENCE=1 \
   PFM_E2E_SOURCE_REPO="${PFM_E2E_SOURCE_REPO:-$work_tree}" \
   PFM_DEV_REPO_WORK_TREE="${PFM_DEV_REPO_WORK_TREE:-$work_tree}" \
   PFM_DEV_REPO_GIT_DIR="${PFM_DEV_REPO_GIT_DIR:-$git_dir}" \

@@ -1,0 +1,6 @@
+TRANSCRIPT claude · ? · model ? · flights-foreman · Build unit be
+FILE {HOME}/.claude/projects/-work-repo/11111111-2222-3333-4444-555555555555/subagents/agent-a0123456789abcdef.jsonl · 22 bytes · 2 records · cwd ? (shown as ./)
+SPAN no timestamps
+CALLS 0, 0 err, 0 without result: none
+FILTER only prompt,reply,call,note,final · results brief · text 500 · shown 0 of 0 events
+SKIPPED 2 records: ? 2

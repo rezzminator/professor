@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -168,6 +169,31 @@ func TestRefreshPastTheWindowWritesChangedRows(t *testing.T) {
 			result.CheckedAt,
 			now,
 		)
+	}
+}
+
+func TestRefreshKeepsThePublishedRowOfAModelItCannotFold(t *testing.T) {
+	home, file := refreshHome(t, fixtureTable(t, t0, 99))
+	claude, openai := conflictingPages()
+	prices, result := refreshAt(t, home, t0.Add(25*time.Hour), &fakeFetch{claude: claude, openai: openai}, false, false)
+	if want := []string{"claude-opus-4-1", "gpt-6-astra"}; result.Status != StatusRefreshed ||
+		!slices.Equal(result.Carried, want) {
+		t.Fatalf("status %q carried %v, want refreshed carrying %v", result.Status, result.Carried, want)
+	}
+	persisted, err := pricing.DecodeTable([]byte(readFile(t, file)), file)
+	if err != nil {
+		t.Fatalf("decode the persisted file %s: %v", file, err)
+	}
+	for key, in := range map[string]float64{"claude-opus-4-1": 15, "gpt-6-astra": 10} {
+		for name, rows := range map[string][]pricing.Row{"served": prices.Rows, "persisted": persisted.Rows} {
+			at := slices.IndexFunc(rows, func(row pricing.Row) bool { return row.Key == key })
+			if at < 0 || rows[at].In == nil || *rows[at].In != in {
+				t.Fatalf("%s %s row = %+v (index %d), want input rate %v", name, key, rows, at, in)
+			}
+		}
+	}
+	if report := PriceDocument(prices, result, "", nil).Refresh; !slices.Equal(report.Carried, result.Carried) {
+		t.Fatalf("document carried = %v, want %v", report.Carried, result.Carried)
 	}
 }
 

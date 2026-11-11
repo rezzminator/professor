@@ -222,12 +222,15 @@ func NewCodexThreadResolverRoots(
 		for _, codexHome := range codexHomes {
 			rootFiles, err := CodexStateFiles(codexHome)
 			if err != nil {
+				obs.Logger(ctx).Warn("store.codex_home.skipped", "path", codexHome, obs.FieldErr, err.Error())
 				continue
 			}
 			files = append(files, rootFiles...)
 		}
 		threads, err := ReadCodexThreads(ctx, files)
 		if err != nil {
+			// No candidates: a pane matches only by its binding or exported id.
+			obs.Logger(ctx).Warn("store.codex_threads.unreadable", obs.FieldErr, err.Error())
 			return nil
 		}
 		rows := make([]resolve.CodexThread, 0, len(threads))
@@ -312,6 +315,16 @@ func readCodexState(ctx context.Context, file string) (threads []CodexThread, re
 	}()
 
 	threads = make([]CodexThread, 0)
+	// One row Codex wrote in a shape pfm cannot read costs that row, never
+	// the generation: the count and the first cause are named once.
+	unreadable := 0
+	var firstUnreadable error
+	defer func() {
+		if unreadable > 0 {
+			obs.Logger(ctx).Warn("store.codex_rows.skipped",
+				"path", file, "count", unreadable, obs.FieldErr, firstUnreadable.Error())
+		}
+	}()
 	for rows.Next() {
 		var thread CodexThread
 		var threadSource, title, firstUserMessage, preview string
@@ -332,7 +345,11 @@ func readCodexState(ctx context.Context, file string) (threads []CodexThread, re
 			&recencyAt,
 			&tokensUsed,
 		); err != nil {
-			return nil, fmt.Errorf("scan Codex state store %q: %w", file, err)
+			if unreadable == 0 {
+				firstUnreadable = err
+			}
+			unreadable++
+			continue
 		}
 		if thread.ID == "" {
 			continue

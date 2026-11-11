@@ -49,7 +49,12 @@ status_line || { echo "fake startup statusLine.command failed" >&2; exit 1; }
 drop=''
 ''',
         'while IFS= read -r line; do': '''bind '\"\\C-s\": unix-line-discard'
-while IFS= read -e -r -p '❯ ' line; do
+# Claude Code's composer box: a rule above and below the prompt row, which
+# pfm's composer guard reads as the bounded, empty composer.
+composer_rule='────────────────────────────────────────'
+composer() { printf '%s\\n\\n%s\\033[1A\\r' "$composer_rule" "$composer_rule"; }
+while composer; IFS= read -e -r -p '❯ ' line; do
+  printf '\\r\\033[2K'
   line=${line//$'\\033[200~'/}
   line=${line//$'\\033[201~'/}
   line=${line//$'\\023'/}''',
@@ -57,7 +62,64 @@ while IFS= read -e -r -p '❯ ' line; do
   jq -nc --arg s "$sid" --arg n "$fixture_name" '{type:"custom-title",sessionId:$s,customTitle:$n}' >> "$transcript"
 fi
 now_iso() {''',
+        # Lane HELD's turn directives: a held turn, a turn whose sub-agent outlives
+        # it, and a turn a task notification starts: Claude Code writes the notification
+        # as a user record, then fires UserPromptSubmit with it as the prompt and no
+        # other mark, as callmeter records real Claude Code doing. Each
+        # waits on a gate file the driver removes, on read ticks, so no child
+        # process joins the fake's foreground group while it waits.
+        "stop() { # the Stop hook, then the stop-hook summary Claude Code writes after it": '''exec {held_tick_fd}<> <(:)
+held_wait() { # held_wait <gate> — the turn stays open while the gate file exists
+  while [ -e "$1" ]; do read -r -t 0.1 -u "$held_tick_fd" _; done
+}
+held_submit() { hook UserPromptSubmit "{$(base UserPromptSubmit),\\"prompt\\":$(jq -Rn --arg l "$line" '$l')}"; }
+# A held turn renders Claude Code's busy footer above an empty composer box the
+# moment it starts, as a model turn does, and erases those four rows when it
+# ends; its UserPromptSubmit output goes to a log, never between them.
+held_busy() { printf '%s\\n%s\\n❯ \\n%s\\n' '✻ Holding… (esc to interrupt)' "$composer_rule" "$composer_rule"; }
+held_idle() { printf '\\033[4A\\r\\033[J'; }
+held_user() { jq -nc --arg s "$sid" --arg l "$1" '{type:"user",sessionId:$s,message:{role:"user",content:$l}}' >> "$transcript"; }
+held_assistant() {
+  jq -nc --arg s "$sid" \\
+    '{type:"assistant",sessionId:$s,message:{model:"claude-haiku-fake",role:"assistant",content:[{type:"text",text:"READY"}],usage:{input_tokens:10,output_tokens:2}}}' >> "$transcript"
+}
+held_directive() { # H_HOLD <gate> | H_SUBAGENT <id> <gate> | H_NOTIFY <gate>
+  local note
+  case "$1" in
+    H_HOLD)
+      held_busy
+      held_submit >>"$H_FIXTURE/held-hooks-$sid.log" 2>&1
+      held_user "$line"; held_wait "$2"; held_idle; held_assistant; stop ;;
+    H_SUBAGENT)
+      held_submit
+      hook SubagentStart "{$(base SubagentStart),\\"agent_id\\":\\"$2\\",\\"agent_type\\":\\"general-purpose\\"}"
+      held_user "$line"; held_assistant; stop
+      ( held_wait "$3"
+        hook SubagentStop "{$(base SubagentStop),\\"agent_id\\":\\"$2\\",\\"agent_type\\":\\"general-purpose\\",\\"agent_transcript_path\\":\\"${transcript%.jsonl}/subagents/agent-$2.jsonl\\",\\"stop_hook_active\\":false}" ) & ;;
+    H_NOTIFY)
+      note=$(printf '<task-notification>\\n<task-id>held-task</task-id>\\n<status>completed</status>\\n</task-notification>')
+      jq -nc --arg s "$sid" --arg c "$note" \\
+        '{type:"user",sessionId:$s,isSidechain:false,userType:"external",entrypoint:"cli",promptSource:"system",turnOrigin:"task_notification",origin:{kind:"task-notification",producer:"session-task",runId:"held-run"},message:{role:"user",content:$c}}' >> "$transcript"
+      held_busy
+      hook UserPromptSubmit "{$(base UserPromptSubmit),\\"prompt\\":$(jq -Rn --arg c "$note" '$c')}" >>"$H_FIXTURE/held-hooks-$sid.log" 2>&1
+      held_wait "$2"; held_idle; held_assistant; stop ;;
+  esac
+  status_line || { echo "fake statusLine.command failed" >&2; exit 1; }
+}
+stop() { # the Stop hook, then the stop-hook summary Claude Code writes after it''',
+        '''  hook UserPromptSubmit "{$(base UserPromptSubmit),\\"prompt\\":$(jq -Rn --arg l "$line" '$l')}"''': '''  case "$line" in H_HOLD\\ *|H_SUBAGENT\\ *|H_NOTIFY\\ *)
+    # shellcheck disable=SC2086 # the directive's words are its arguments
+    held_directive $line
+    printf 'READY\\n'
+    continue ;;
+  esac
+  hook UserPromptSubmit "{$(base UserPromptSubmit),\\"prompt\\":$(jq -Rn --arg l "$line" '$l')}"''',
     }
+    # The exit command names its session in the fixture, so a lane tells an
+    # engine that ended by its exit command from a forced pane close.
+    patches['  if [ "$line" = /exit ]; then hook SessionEnd'] = (
+        '  if [ "$line" = /exit ]; then printf \'%s\\n\' "$sid" >>"$H_FIXTURE/held-exits.log"; hook SessionEnd'
+    )
     for old, new in patches.items():
         if text.count(old) != 1:
             raise ValueError(f"plugin fake source drift: expected one {old!r}")

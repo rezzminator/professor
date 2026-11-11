@@ -42,7 +42,8 @@ func TestEngineForegroundEvidence(t *testing.T) {
 		{name: "null", processes: `null`, diagnostic: "foreground evidence unavailable"},
 		{name: "shell", processes: `[{"pid":7,"name":"zsh"}]`},
 		{name: "engine", processes: `[{"pid":7,"argv0":"claude"}]`, want: true},
-		{name: "partial", processes: `[{"pid":7,"name":"claude"},{"pid":0,"name":"zsh"}]`, diagnostic: "valid pid or identity"},
+		{name: "partial", processes: `[{"pid":7,"name":"claude"},{"pid":0,"name":"zsh"}]`, want: true},
+		{name: "unidentified-beside-shell", processes: `[{"pid":7,"name":"zsh"},{"pid":8}]`, diagnostic: "valid pid or identity"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			body := `{"type":"pane_process_info","process_info":{"pane_id":"w6:p3","foreground_processes":` + tc.processes + `}}`

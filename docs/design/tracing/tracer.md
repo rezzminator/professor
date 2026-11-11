@@ -1,6 +1,6 @@
 # tracer
 
-`tracer` answers a caller's numbered questions about a repository from its code, in prose: each fact a `path:line` with the line quoted, plus test homes, the check command and NOT READ. A `sonnet` lead looks wide once and cuts the questions into threads; `haiku` `sub-tracer` agents walk each thread hop by hop and split where it forks; the `tracetree` kit stores each node's hops once, re-reads every quoted line from disk and maps the components; the caller sends its questions and works the finished run by `/tracer:use`. Exact text without a question goes to `collector`.
+`flights:tracer` answers a caller's numbered questions about a repository from its code, in prose: each fact a `path:line` with the line quoted, plus test homes, the check command and NOT READ. A `sonnet` lead looks wide once and cuts the questions into threads; `haiku` `flights:sub-tracer` agents walk each thread hop by hop and split where it forks; the `tracetree` kit stores each node's hops once, re-reads every quoted line from disk and maps the components; the caller sends its questions and works the finished run by `/flights:tracer-use`. Exact text without a question goes to `collector`.
 
 The kit's commands, check states and run directory are in [tracetree.md](tracetree.md); every measurement a rule below cites is in [tracer-bench.md](tracer-bench.md).
 
@@ -19,12 +19,12 @@ The kit's commands, check states and run directory are in [tracetree.md](tracetr
 
 | Part | File | Model, effort |
 | --- | --- | --- |
-| Lead | `templates/global/agents/tracer.md` | `sonnet`, `high` |
-| Reader | `templates/global/agents/sub-tracer.md` | `haiku`, `low` |
-| Kit | `templates/global/skills/tracetree/`: `tracetree.py`, `tracemap.py`, `tracemap_html.py`, `loom.py`, the `loom*.html` and `book*.html` page parts with `loom.css`, `tracetree_test.py`, `SKILL.md` | — |
-| Caller's manual | `templates/global/commands/tracer/use.md`, preloaded by agent frontmatter `skills: [tracer:use]` | — |
+| Lead | `plugins/flights/plugins/flights/agents/tracer.md` | `sonnet`, `high` |
+| Reader | `plugins/flights/plugins/flights/agents/sub-tracer.md` | `haiku`, `low` |
+| Kit | `plugins/flights/plugins/flights/skills/tracetree/` (the internal skill `flights:tracetree`): `tracetree.py`, `tracemap.py`, `tracemap_html.py`, `loom.py`, the `loom*.html` and `book*.html` page parts with `loom.css`, `SKILL.md`; its tests are `tests/test_tracetree.py` in the flights repo, run by its `make test` | — |
+| Caller's manual | `plugins/flights/plugins/flights/skills/tracer-use/SKILL.md` (the skill `/flights:tracer-use`), preloaded by agent frontmatter `skills: [flights:tracer-use]` | — |
 
-`sub-tracer` and the `tracetree` skill are visible only to `tracer` and `sub-tracer`. In the prompts, `tt` stands for `python3 $HOME/.claude/skills/tracetree/tracetree.py`.
+`flights:sub-tracer` (`visible-to: include: [flights:tracer, flights:sub-tracer]`) and the `flights:tracetree` skill are visible only to `flights:tracer` and `flights:sub-tracer`. In the prompts, `tt` stands for `python3 ${CLAUDE_PLUGIN_ROOT}/skills/tracetree/tracetree.py`; `${CLAUDE_PLUGIN_ROOT}` is the flights plugin's own folder, which engine-sync writes as an absolute path in the Codex and OpenCode twins.
 
 ## Why a tree
 
@@ -36,17 +36,17 @@ The tree pays where a brief makes one agent carry much code: on B4 it cost 29% l
 
 1. The lead's one Bash call: `tt new {root} --seek '{names}' [--recall {run}]… --questions`, a `--recall` per `RECALL: {run}` line of the brief, opens the run directory `/tmp/{project}/tracer/{stamp}`, stores the brief's numbered questions, prints the `PRIOR` hops earlier runs on this root verified, then the [recall](tracetree.md#recall) of the questions over every earlier run on this root, the `--recall` runs first. The same call greps every symbol, file and string the brief names.
 2. Per question the recall's `TRACE Q{n}` line rules the threads: `none` — every recalled line is FRESH, its cited files unchanged since they were walked — gets no thread; `whole question` is threaded whole; otherwise one thread per `REWALK Q{n} · {run} node {ID}` line, from its FROM, for its `re-walk for:` reason, and threads for the rest of the TRACE scope under a `REWALK Q{n} · … cut by the cap` fold line. Every FRESH row is served verbatim. A `RECALL FAILED` line threads every question.
-3. The lead cuts threads, each with an ID, FUEL and a card, and spawns every one as a `sub-tracer` in one message whose last call is `tt wait {RUN} {IDs}`. A brief's `BUDGET {n}` caps the run's sub-tracers, threads plus fuel over both rounds (none given: 24).
+3. The lead cuts threads, each with an ID, FUEL and a card, and spawns every one as a `flights:sub-tracer` in one message whose last call is `tt wait {RUN} {IDs}`. A brief's `BUDGET {n}` caps the run's sub-tracers, threads plus fuel over both rounds (none given: 24).
 4. Each sub-tracer's first call is `tt start`, which registers it and prints its question and FROM window. It walks hop by hop, spawns children `{ID}.1`, `{ID}.2`… where the thread forks into another file and fuel remains, stores its hops once through `tt write`, and returns one line.
 5. `tt wait` returns once every named and every started node has written and the run has been quiet 15 s. It prints the WARNINGS block, the answers view of the named nodes and their children, COUNTS, the `MAP` line and the OPEN block.
 6. After each wait the lead drills at most twice (`tt check --hops {ID}`, a node once), runs at most one gap round, reads what stays open through `tt read`, and writes the final.
 7. The final: the WARNINGS lines, if any; the answers by the brief's question numbers; `CHECK`, `TESTS`, `NOT READ`; the last wait's `MAP` line; `RUN {RUN} · {COUNTS}` with a runnable `check --hops | grep` command.
-8. While the tree walks, the caller works on what no question covers. The final is its answer: it relays the WARNINGS lines and, by `/tracer:use`, asks the run before it asks tracer again or writes a NOT READ item as unsettled.
+8. While the tree walks, the caller works on what no question covers. The final is its answer: it relays the WARNINGS lines and, by `/flights:tracer-use`, asks the run before it asks tracer again or writes a NOT READ item as unsettled.
 
 ## Host check
 
-- python3 is a required install dependency (`pfm/internal/deps/registry.go`): a missing python3 stops `pfm install`'s pre-change check with `install python3; the tracer's tracetree kit runs on it`. pfm checks python3 and never installs it.
-- `pfm doctor` proves the kit can run on the host (`printTracetreeKitDoctor`, `pfm/internal/doctor/tracetree_kit_check.go`), its rows starting `doctor: tracetree-kit:`. It judges python3 through the `python3` dependency registry row on doctor's own PATH, needs the kit file under the default Claude config dir (`~/.claude/skills/tracetree/tracetree.py`) readable, then runs `python3 {kit}` with no subcommand and expects the line opening `usage: tracetree.py`, every subprocess bounded at 20 s. A healthy host gets one `ok` row naming python3, its version and the kit; each broken need is a FAIL row naming the need, what was checked and the fix, and a failed python3 or kit row adds a `need=run` FAIL instead of the run. A kit the install has not linked yet is the non-failing `kit not installed yet — run pfm install --yes`; a kit linked under another config dir than the default (read from `skill-links.json`) is a FAIL, and an unreadable `skill-links.json` is a FAIL.
+- python3 is a required install dependency (`pfm/internal/deps/registry.go`): a missing python3 stops `pfm install`'s pre-change check with `install python3; flights:tracer's tracetree kit runs on it`. pfm checks python3 and never installs it.
+- `pfm doctor` proves the kit can run on the host (`printTracetreeKitDoctor`, `pfm/internal/doctor/tracetree_kit_check.go`), its rows starting `doctor: tracetree-kit:`. It judges python3 through the `python3` dependency registry row on doctor's own PATH, reads the kit at `skills/tracetree/tracetree.py` in the folder the shared Claude store's plugin records (`~/.claude/settings.json` `enabledPlugins`, `known_marketplaces.json`, `installed_plugins.json`) give the enabled flights plugin, then runs `python3 {kit}` with no subcommand and expects the line opening `usage: tracetree.py`, every subprocess bounded at 20 s. A healthy host gets one `ok` row naming python3, its version and the kit; each broken need is a FAIL row naming the need, what was checked and the fix, and a failed python3 or kit row adds a `need=run` FAIL instead of the run. A store enabling no flights plugin prints the non-failing row `doctor: tracetree-kit: flights plugin not installed yet — run pfm install --yes`. Plugin records that cannot be read, an enabled flights plugin no record names a folder for, a kit file missing or not a regular file, a kit failing to import or printing no usage line and a kit past its bound are FAIL rows, with the fix `run pfm install --yes to refresh the flights plugin copy`.
 
 ## Rules
 
@@ -90,12 +90,12 @@ Each rule holds in the prompts or the kit today; the clause after it is why.
 - Facts come from unflagged answer lines, hops and the lead's own reads; a list claim names each item, or counts them and names the exceptions. The single-agent body wrote "all 12 catches give X" when 5 did not.
 - It always carries test homes, the check command and anchors. Fenced lines come only when the brief asks for quotes or writes task files, copied from `--full` with `path:A-B` above: probe 1's 2,903 fenced characters went unused.
 - NOT READ copies the last wait's unsettled OPEN lines with their suffix, and gives each sub-ask of the lead's own a next step: `run: node {ID}` only for what a drill left open or a node past the two drills of a wait, else `ask: {question}`. Probe 2's caller called 4 of 8 open items unsettled while the run held parts of 2; in probe 3, 12 of 34 items carried no next step.
-- The last two lines are the `MAP` line and `RUN {RUN} · {COUNTS} — before another tracer question or writing a NOT READ item as unsettled: … check {RUN} --hops | grep -n '{symbol}' shows what this run verified, and the same check with `--hops {ID}` drills a marked node; /tracer:use has the rest`. The callers of probes 2 and 3 never loaded the skill a pointer named; a runnable command needs no skill.
+- The last two lines are the `MAP` line and `RUN {RUN} · {COUNTS} — before another tracer question or writing a NOT READ item as unsettled: … check {RUN} --hops | grep -n '{symbol}' shows what this run verified, and the same check with `--hops {ID}` drills a marked node; /flights:tracer-use has the rest`. The callers of probes 2 and 3 never loaded the skill a pointer named; a runnable command needs no skill.
 - A wake after the final is answered with the final again, unchanged: a late wake's reply replaces the final, and on v4 the lead rewrote it at 18K output tokens.
 
 ### The caller
 
-`/tracer:use` is the caller's manual, `templates/global/commands/tracer/use.md`: agent frontmatter `skills: [tracer:use]` preloads it into `reviewer`, `reviewer-pro` and `clone-distiller` (and their rendered twins), none of which needs the `Skill` tool for it, and its `MANDATORY` description routes the main chat to it. It has the caller:
+`/flights:tracer-use` is the caller's manual, `plugins/flights/plugins/flights/skills/tracer-use/SKILL.md`: agent frontmatter `skills: [flights:tracer-use]` preloads it into `flights:reviewer`, `flights:reviewer-pro` and `clone-distiller`, none of which needs the `Skill` tool for it, and its `MANDATORY` description routes the main chat to it. It has the caller:
 
 - trace code it will change, judge or brief on and has not read: a quick overview of file and symbol names, then one spawn of numbered fact questions in the terms of its next move, never a survey and never a closed-world door list; a run its brief hands it is drilled before it traces more;
 - add a `RECALL: {run}` line per tracer run it holds: tracer reads those runs first, and a question whose cited files are unchanged since they were walked comes back from the store with no walk;
@@ -107,7 +107,7 @@ Each rule holds in the prompts or the kit today; the clause after it is why.
 - send a question the run does not settle back to tracer before calling it unsettled, and never re-ask a fact the final cites;
 - cite the repository's `path:line` in a tracked file, never the run, which is scratch.
 
-A flights foreman may send an area it will not edit to tracer, with `Repo root:` and a `RECALL: {run}` line per run it holds, and may pass the run paths covering a child's area in its brief; no foreman is required to trace. `reviewer` puts every question that leaves its own reading into one tracer run, `reviewer-pro` into at most three, one per area, each brief carrying the `RECALL` lines and told to skip CHECK, TESTS and lines to paste. `clone-distiller` sends the code part of every question about an external clone to one tracer, its prompt naming the clone read-only, runs the history commands itself and drops CHECK and TESTS.
+A flights foreman calls no tracer and spawns no child: its definitions list no `Agent` tool, and a tracer reading first cost it +85% and +39% dollars in the bench ([flights-foreman-bench.md](../flights/flights-foreman-bench.md#versions)); the main chat may pass a tracer run path in a foreman's brief. `flights:reviewer` puts every question that leaves its own reading into one tracer run, `flights:reviewer-pro` into at most three, one per area, each brief carrying the `RECALL` lines and told to skip CHECK, TESTS and lines to paste. `clone-distiller` sends the code part of every question about an external clone to one tracer, its prompt naming the clone read-only, runs the history commands itself and drops CHECK and TESTS.
 
 ## Harness behaviour
 
@@ -121,10 +121,10 @@ What the tree rests on, each observed in the lab:
 
 ## Model
 
-`tracer` runs on `sonnet` at `high` effort; its sub-tracers on `haiku` at `low`. On the single-agent body before the tree, it cost 43% of an `opus` lead's price at 98% of its accuracy and 58% of its clean blocks ([tracer bench](tracer-bench.md#against-an-opus-lead)).
+`flights:tracer` runs on `sonnet` at `high` effort; its sub-tracers on `haiku` at `low`. On the single-agent body before the tree, it cost 43% of an `opus` lead's price at 98% of its accuracy and 58% of its clean blocks ([tracer bench](tracer-bench.md#against-an-opus-lead)).
 
 - The bench measured Sonnet 5.5 behind the alias `sonnet`; a new Sonnet release behind the alias re-opens the bench.
-- Codex: `tracer` and `sub-tracer` carry `engines.codex.sandbox: workspace-write`, since `tt` writes the run directory and a read-only role could not.
+- Codex: `flights:tracer` and `flights:sub-tracer` carry `engines.codex.sandbox: workspace-write`, since `tt` writes the run directory and a read-only role could not.
 
 ## Open items
 

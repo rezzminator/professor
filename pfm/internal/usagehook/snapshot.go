@@ -2,6 +2,7 @@ package usagehook
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -68,8 +69,9 @@ func NewerReading(used float64, resetsAt int64, thanUsed float64, thanResetsAt i
 // confirmation is at most maxAge old, as Usage, confirmed at the oldest
 // confirmation among the readings it answers with. Account number alone is not
 // identity, so a snapshot written before config_dir was recorded, or belonging
-// to a different config directory, is ignored. found=false with a nil error means nothing qualifying is on disk; an
-// error means a snapshot could not be read or is malformed.
+// to a different config directory, is ignored. found=false with a nil error means nothing qualifying is on disk.
+// An unreadable or malformed snapshot file, or one out-of-range window in it, costs only that file or window: the
+// error names every one skipped, beside whatever the rest answered (found=true with an error is a partial answer).
 func ReadStatuslineSnapshot(
 	directory string,
 	account int,
@@ -95,38 +97,24 @@ func ReadStatuslineSnapshot(
 	// plan dropped it, so an older seat's reading of it is not merged back.
 	carried, omitted := map[string]time.Time{}, map[string]time.Time{}
 	found := false
+	var skipped []error
 	for _, entry := range entries {
 		if !strings.HasPrefix(entry.Name(), prefix) || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
 		}
-		info, err := entry.Info()
+		name := entry.Name()
+		snapshot, err := readSnapshotFile(directory, entry, account)
 		if err != nil {
-			return Usage{}, time.Time{}, false, fmt.Errorf("stat statusline quota %s: %w", entry.Name(), err)
-		}
-		if !info.Mode().IsRegular() {
-			return Usage{}, time.Time{}, false, fmt.Errorf("statusline quota %s is not a regular file", entry.Name())
-		}
-		body, err := os.ReadFile(filepath.Join(directory, entry.Name()))
-		if err != nil {
-			return Usage{}, time.Time{}, false, fmt.Errorf("read statusline quota %s: %w", entry.Name(), err)
-		}
-		var snapshot statuslineSnapshot
-		if err := json.Unmarshal(body, &snapshot); err != nil {
-			return Usage{}, time.Time{}, false, fmt.Errorf("decode statusline quota %s: %w", entry.Name(), err)
-		}
-		if snapshot.Account != account {
-			return Usage{}, time.Time{}, false, fmt.Errorf(
-				"statusline quota %s claims account %d, want %d", entry.Name(), snapshot.Account, account,
-			)
+			skipped = append(skipped, err)
+			continue
 		}
 		if snapshot.ConfigDir == "" || !SameConfigDir(snapshot.ConfigDir, configDir) {
 			continue
 		}
 		confirmedAt := time.Unix(snapshot.ConfirmedAt, 0)
 		if snapshot.ConfirmedAt <= 0 || confirmedAt.After(now) {
-			return Usage{}, time.Time{}, false, fmt.Errorf(
-				"statusline quota %s has invalid confirmation time", entry.Name(),
-			)
+			skipped = append(skipped, fmt.Errorf("skipped statusline quota %s: invalid confirmation time", name))
+			continue
 		}
 		if now.Sub(confirmedAt) > maxAge {
 			continue
@@ -146,16 +134,26 @@ func ReadStatuslineSnapshot(
 			}
 		}
 		for key, reading := range readings {
+			if reading.ResetsAt <= now.Unix() {
+				continue
+			}
+			if usageReadsWindow(key) && (reading.UsedPercentage < 0 || reading.UsedPercentage > 100) {
+				skipped = append(skipped, fmt.Errorf(
+					"skipped statusline quota %s window %s: utilization %v is outside 0..100",
+					name, key, reading.UsedPercentage,
+				))
+				continue
+			}
 			best, seen := merged[key]
-			if reading.ResetsAt > now.Unix() && (!seen || NewerReading(
+			if !seen || NewerReading(
 				reading.UsedPercentage, reading.ResetsAt, best.reading.UsedPercentage, best.reading.ResetsAt,
-			)) {
+			) {
 				merged[key] = pick{reading: reading, confirmedAt: confirmedAt}
 			}
 		}
 	}
 	if !found {
-		return Usage{}, time.Time{}, false, nil
+		return Usage{}, time.Time{}, false, errors.Join(skipped...)
 	}
 	for key, at := range omitted {
 		if at.After(carried[key]) {
@@ -170,14 +168,37 @@ func ReadStatuslineSnapshot(
 			answeredAt = chosen.confirmedAt
 		}
 	}
-	usage, err := statuslineSnapshot{Windows: windows}.usage(now)
-	if err != nil {
-		return Usage{}, time.Time{}, false, err
-	}
+	usage := statuslineSnapshot{Windows: windows}.usage(now)
 	if len(usage.NamedWindowsAt(now)) == 0 {
-		return Usage{}, time.Time{}, false, nil
+		return Usage{}, time.Time{}, false, errors.Join(skipped...)
 	}
-	return usage, answeredAt, true, nil
+	return usage, answeredAt, true, errors.Join(skipped...)
+}
+
+// readSnapshotFile reads one statusline quota file of account; its error names
+// the file, which the caller skips.
+func readSnapshotFile(directory string, entry os.DirEntry, account int) (statuslineSnapshot, error) {
+	info, err := entry.Info()
+	if err != nil {
+		return statuslineSnapshot{}, fmt.Errorf("skipped statusline quota %s: stat: %w", entry.Name(), err)
+	}
+	if !info.Mode().IsRegular() {
+		return statuslineSnapshot{}, fmt.Errorf("skipped statusline quota %s: not a regular file", entry.Name())
+	}
+	body, err := os.ReadFile(filepath.Join(directory, entry.Name()))
+	if err != nil {
+		return statuslineSnapshot{}, fmt.Errorf("skipped statusline quota %s: read: %w", entry.Name(), err)
+	}
+	var snapshot statuslineSnapshot
+	if err := json.Unmarshal(body, &snapshot); err != nil {
+		return statuslineSnapshot{}, fmt.Errorf("skipped statusline quota %s: decode: %w", entry.Name(), err)
+	}
+	if snapshot.Account != account {
+		return statuslineSnapshot{}, fmt.Errorf(
+			"skipped statusline quota %s: claims account %d, want %d", entry.Name(), snapshot.Account, account,
+		)
+	}
+	return snapshot, nil
 }
 
 // usageReadsWindow names the snapshot windows statuslineSnapshot.usage carries
@@ -210,8 +231,9 @@ func (snapshot statuslineSnapshot) readings() map[string]snapshotWindow {
 }
 
 // usage keeps only windows whose reset is still ahead. A window Usage has no
-// field for (spend_limit) is not read.
-func (snapshot statuslineSnapshot) usage(now time.Time) (Usage, error) {
+// field for (spend_limit) is not read. The reader dropped every out-of-range
+// utilization before merging.
+func (snapshot statuslineSnapshot) usage(now time.Time) Usage {
 	usage := Usage{}
 	for key, reading := range snapshot.readings() {
 		var target *Window
@@ -229,11 +251,6 @@ func (snapshot statuslineSnapshot) usage(now time.Time) (Usage, error) {
 		if reading.ResetsAt <= now.Unix() {
 			continue
 		}
-		if reading.UsedPercentage < 0 || reading.UsedPercentage > 100 {
-			return Usage{}, fmt.Errorf(
-				"statusline quota %s utilization %v is outside 0..100", key, reading.UsedPercentage,
-			)
-		}
 		percent := reading.UsedPercentage
 		resetsAt := time.Unix(reading.ResetsAt, 0).UTC().Format(time.RFC3339)
 		if target != nil {
@@ -248,7 +265,7 @@ func (snapshot statuslineSnapshot) usage(now time.Time) (Usage, error) {
 		scoped.Scope.Model.DisplayName = "Fable"
 		usage.Limits = append(usage.Limits, scoped)
 	}
-	return usage, nil
+	return usage
 }
 
 // SameConfigDir compares two config directories by their physical location,

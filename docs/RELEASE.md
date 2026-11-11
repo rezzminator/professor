@@ -90,6 +90,8 @@ Maintainer command, run in this repo only:
 
 - `/pfm:release cut {patch|minor|major} "{summary}" [--dry]` — releases `develop`'s tip as it stands at the cut, in one pass: the full gate, the leak scan, `release-check preflight`, the note and, when the cut changes the update path, one review, all at once; then the release commit (the note, `CHANGELOG.md` and the version stamps, nothing else), `make release-check`, the pull request from `release/v{X.Y.Z}` into `main`, whose `ci.yml` run must pass, its merge — which tags and publishes — and the merge back into `develop`. Typing it is the maintainer's publish request; `--dry` stops before any push. Every check is a stop: nothing is fixed inside a release, the fix lands on `develop` and the maintainer cuts again.
 
+Plugins release first. The cut stops while any plugin `.gitmodules` registers holds a commit past its own latest GitHub release, in professor's gitlink or in the plugin's `develop`. Release each such plugin through its own release pull request (`develop` into `main`, green `ci`, merge; its publish workflow tags it), pin professor's gitlink on `develop` at that released commit, then cut.
+
 The procedure is `.claude/commands/pfm/release.md`; the design and the reasons are `docs/design/release/`.
 
 ## What the release pull request triggers
@@ -104,9 +106,9 @@ While the release pull request from `release/v{X.Y.Z}` into `main` is open, `ci.
 4. **`build`** — `pfm` for `linux/amd64`, `linux/arm64`, `darwin/arm64`, `darwin/amd64` (Go, `-trimpath`, `CGO_ENABLED=0`) through `make release-binary`; nothing is uploaded.
 5. **`scan`** — generates the Codex and OpenCode mirrors and runs the HOL AI Plugin Scanner over the tree.
 6. **`release`** — `make release`: fails unless `VERSION` moved past `main`'s as a plain `X.Y.Z`, `releases/v{VERSION}.md` exists, and `release-check notes` passes on it, so `main` takes only release pull requests.
-7. **`ci`** — fails unless every other job succeeded; a skipped or cancelled job counts as a failure.
+7. **`ci`** — fails unless every other job succeeded; a skipped or cancelled job counts as a failure, unless a hand-started run excluded it.
 
-`.github/workflows/macos.yml` runs the same macOS `unit` and `e2e` parts on demand (`workflow_dispatch` only) between releases.
+`gh workflow run ci.yml --ref {branch} -f exclude='{jobs}'` runs the same jobs on demand on any branch, skipping the jobs named (`gate fresh-install build scan release` leaves the macOS parts).
 
 Merging the pull request is the release. `publish.yml`'s `publish` job:
 

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -33,6 +34,9 @@ const (
 	herdrStoredOption = herdr.StoredOption
 	herdrDeadline     = herdr.ReportDeadline
 	herdrClientFlag   = "--client"
+	herdrEngineFlag   = "--engine"
+	herdrSessionFlag  = "--session"
+	herdrStateCommand = "herdr-state"
 	herdrLockPoll     = 10 * time.Millisecond
 	// herdrNameAttempts is the agent names tried for one pane: the slug, then
 	// the suffixes -2 … -9.
@@ -81,6 +85,7 @@ type herdrDeps struct {
 	// a process table's "no such process" retires a record; nil when the table
 	// is a fixture whose pids name no real process.
 	processAlive func(pid int) (bool, error)
+	started      func(pid int) (time.Time, error) // a process's spawn (gather.ProcStart): firedSeq's clock
 	getpid       func() int
 	// cmdline and environ read one process's command line and environment:
 	// the Codex TUI's own, which name the pane it runs in (herdr_codex.go).
@@ -95,7 +100,7 @@ type herdrDeps struct {
 	sidDir    string
 	codexHome string
 	seatPaths *paths.Values
-	keep      *herdr.Keep // reads the panes herdr-keep holds
+	shield    *herdr.Shield // reads the panes herdr-shield holds
 }
 
 func realHerdrDeps() herdrDeps {
@@ -105,10 +110,13 @@ func realHerdrDeps() herdrDeps {
 		getenv: env.Get, tmux: runTmuxForHerdr, listPanes: listTmuxPanesForHerdr, now: clock.Real.Now,
 		lookPath: hostdeps.RealRunner{}.LookPath,
 		procInfo: realProcInfo(procfs), getpid: os.Getpid, cmdline: procfs.Cmdline, environ: procfs.Environ,
-		sidDir: paths.SIDDirFrom(env), spawn: startHerdrWatch, keep: gather.HerdrKeep(procfs),
+		sidDir: paths.SIDDirFrom(env), spawn: startHerdrWatch, shield: gather.HerdrShield(procfs),
 	}
 	if env.Get(paths.EnvProcRoot) == "" {
 		deps.processAlive = gather.ProcessAlive
+		if table, ok := procfs.(gather.ProcStart); ok {
+			deps.started = table.Started
+		}
 	}
 	home, err := paths.HomeFrom(env)
 	// A real reporter always enables durable-seat resolution, even when home
@@ -191,7 +199,7 @@ func parseHerdrOptions(args []string) (herdrOptions, error) {
 	var words []string
 	for index := 0; index < len(args); index++ {
 		switch args[index] {
-		case "--engine", herdrSocketFlag, "--session", herdrClientFlag:
+		case herdrEngineFlag, herdrSocketFlag, herdrSessionFlag, herdrClientFlag:
 			if index+1 >= len(args) {
 				if args[index] == herdrClientFlag {
 					// tmux expands #{client_pid} to nothing in a client-detached hook (the
@@ -203,7 +211,7 @@ func parseHerdrOptions(args []string) (herdrOptions, error) {
 			value := args[index+1]
 			index++
 			switch args[index-1] {
-			case "--engine":
+			case herdrEngineFlag:
 				id, err := pfmengine.Parse(value)
 				if err != nil {
 					return options, err
@@ -244,6 +252,9 @@ type herdrReporter struct {
 	// them in the order they were made.
 	seq  uint64
 	sent uint64
+	// fired is when Claude fired a hook's main-turn event (firedSeq), the
+	// clock main_seq orders by; zero is seq.
+	fired uint64
 	// session is the chat session once known: the name its error log carries.
 	session string
 	// tmuxPane is the engine's tmux pane (tmuxOrigin, or a Codex session's
@@ -312,7 +323,8 @@ func (reporter *herdrReporter) plan(payload herdrPayload) *herdrAction {
 	case herdr.EventWorking:
 		// A tool the user interrupted (Esc) ends the turn, or a batch sibling's
 		// failure cancelled it mid-turn: neither says the chat works on, so the
-		// state stands and a block stays for the transcript watch to settle.
+		// state stands for the transcript watch, which settles the turn idle
+		// once Claude writes its interrupt entry (herdr_watch.go).
 		if payload.IsInterrupt {
 			return nil
 		}
@@ -331,7 +343,7 @@ func (reporter *herdrReporter) plan(payload herdrPayload) *herdrAction {
 		switch payload.NotificationType {
 		case "permission_prompt", "elicitation_dialog", "plugin_notification":
 			return report(herdr.StateBlocked, blockedMessage(payload))
-		case "idle_prompt":
+		case idlePromptNotification:
 			return report(herdr.StateIdle, "")
 		}
 		return nil
@@ -346,6 +358,10 @@ func (reporter *herdrReporter) plan(payload herdrPayload) *herdrAction {
 	}
 	return nil
 }
+
+// idlePromptNotification is the notification_type of Claude's idle prompt: the
+// main turn is over.
+const idlePromptNotification = "idle_prompt"
 
 // approvalPrefix opens the blocked message of an approval request that names
 // its tool.
@@ -406,7 +422,7 @@ func (reporter *herdrReporter) runTmux(ctx context.Context, payload herdrPayload
 	}
 	session, panePID, err := reporter.tmuxSession(ctx)
 	if err != nil {
-		return reporter.tmuxReadFailure(err)
+		return errors.Join(reporter.tmuxReadFailure(err), reporter.settleUnprovedLater(ctx, payload))
 	}
 	reporter.session = session
 	if reporter.firedByEngine() {
@@ -423,6 +439,7 @@ func (reporter *herdrReporter) runTmux(ctx context.Context, payload herdrPayload
 	if reporter.options.event == herdr.EventTitle {
 		return reporter.title(ctx, session, payload)
 	}
+	defer func() { returnErr = errors.Join(returnErr, reporter.settleTmuxLater(payload, returnErr)) }()
 	unlock, err := reporter.lock(ctx, session)
 	if err != nil {
 		reporter.themeUnlessHeld(ctx, themeOn, payload, herdrStored{})
@@ -435,7 +452,7 @@ func (reporter *herdrReporter) runTmux(ctx context.Context, payload herdrPayload
 	state, err := reporter.readState(ctx, session)
 	reporter.themeUnlessHeld(ctx, themeOn, payload, state)
 	if err != nil {
-		return err
+		return undelivered(err)
 	}
 	switch reporter.options.event {
 	case herdr.EventAttach:
@@ -569,32 +586,6 @@ func (reporter *herdrReporter) paneEngineFired(panePIDText string) (bool, error)
 	)
 }
 
-// envCommand is env(1), the most common command wrapper.
-const envCommand = "env"
-
-// isCommandWrapper names the commands that run another command in their own
-// process: a wrapper between an engine and its pane is not an engine.
-func isCommandWrapper(command string) bool {
-	switch filepath.Base(command) {
-	case envCommand, "timeout", "gtimeout", "caffeinate", "script", "nice", "nohup", "stdbuf", "time":
-		return true
-	}
-	return false
-}
-
-func isNodeLauncher(command string) bool {
-	return filepath.Base(command) == "node"
-}
-
-func isShellOrPfm(command string) bool {
-	base := filepath.Base(strings.TrimPrefix(command, "-"))
-	switch base {
-	case "sh", "bash", "zsh", "dash", "fish", "pfm":
-		return true
-	}
-	return strings.HasPrefix(base, "pfm.")
-}
-
 // lock serializes every reporter of one chat session: a flock on a file in
 // the pfm state directory, retried until the hook's deadline. The state read,
 // compare, write and the requests to Herdr all happen inside it.
@@ -626,10 +617,12 @@ func (reporter *herdrReporter) lock(ctx context.Context, session string) (func()
 		}
 		select {
 		case <-ctx.Done():
-			return nil, errors.Join(
+			// A lock held past the deadline frees once the holder ends: the one
+			// lock failure a settle process retries.
+			return nil, undelivered(errors.Join(
 				fmt.Errorf("lock session %s: %s still held at the deadline: %w", session, path, ctx.Err()),
 				file.Close(),
-			)
+			))
 		case <-clock.Real.After(herdrLockPoll):
 		}
 	}
@@ -648,7 +641,8 @@ func (reporter *herdrReporter) readState(ctx context.Context, session string) (h
 		return stored, nil
 	}
 	if err := json.Unmarshal([]byte(raw), &stored); err != nil {
-		return stored, fmt.Errorf("decode %s of %s (%q): %w", herdrStoredOption, session, raw, err)
+		reporter.warn("pfm internal herdr-state %s: decode %s of %s (%q), this event rewrites it: %v",
+			reporter.options.event, herdrStoredOption, session, raw, err)
 	}
 	return stored, nil
 }
@@ -686,6 +680,7 @@ func (reporter *herdrReporter) event(
 	if err != nil {
 		return err
 	}
+	unlockBridge = sync.OnceFunc(unlockBridge)
 	defer unlockBridge()
 	action := reporter.plan(payload)
 	if action == nil || state.Seq > reporter.seq || keepsStored(reporter.options.event, payload, state) {
@@ -693,7 +688,7 @@ func (reporter *herdrReporter) event(
 	}
 	split, err := reporter.liveClients(ctx, session, &state, !action.release)
 	if err != nil {
-		return err
+		return undelivered(err)
 	}
 	clients, moved, _, resolveErr := reporter.resolveClients(ctx, &state, action.release)
 	split.markMoved(clients, moved)
@@ -702,15 +697,15 @@ func (reporter *herdrReporter) event(
 	next.Name = state.Name
 	next.Clients = state.Clients
 	if err := reporter.writeState(ctx, session, next); err != nil {
-		return err
+		return undelivered(err)
 	}
-	errs := []error{split.errs, resolveErr, reporter.blankTitle(ctx, action), reporter.watch(session, next, payload)}
+	errs := []error{split.errs, resolveErr, reporter.blankTitle(ctx, action)}
 	errs = append(errs, reporter.releaseAll(ctx, reporter.engineLabel(state), split.gone))
 	for _, pid := range sortedClientPIDs(clients) {
 		client := clients[pid]
-		errs = append(errs, reporter.send(
+		errs = append(errs, undelivered(reporter.send(
 			ctx, clientTarget(pid, client), action, reporter.nextSent(),
-		))
+		)))
 	}
 	if !action.release {
 		// A session start names every pane; any other event names only the
@@ -721,7 +716,10 @@ func (reporter *herdrReporter) event(
 		}
 		errs = append(errs, reporter.nameSync(ctx, session, next, clientTargets(clients), clientTargets(named)))
 	}
-	return errors.Join(errs...)
+	// The watch walks the hook's ancestry and forks: no other chat's report
+	// waits on the host-wide bridge for it, as in nativeSeat.
+	unlockBridge()
+	return errors.Join(append(errs, reporter.watch(payload, next))...)
 }
 
 // send writes the action to the pane's Herdr socket. A refused resume command

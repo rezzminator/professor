@@ -25,10 +25,9 @@ const (
 	// it. It is never linked anywhere.
 	EnvBin = "ENGINE_SYNC_BIN"
 	// EnvHome overrides {engine-sync home} when absolute.
-	EnvHome          = "ENGINE_SYNC_HOME"
-	envXDGDataHome   = "XDG_DATA_HOME"
-	envXDGConfigHome = "XDG_CONFIG_HOME"
-	binaryName       = "engine-sync"
+	EnvHome        = "ENGINE_SYNC_HOME"
+	envXDGDataHome = "XDG_DATA_HOME"
+	binaryName     = "engine-sync"
 )
 
 // Runner execs engine-sync. Its zero value runs the real process table under
@@ -108,20 +107,6 @@ func DataHome(env paths.Env, home string) string {
 // `pfm install` ran `engine-sync global` over.
 func GlobalConfigPath(home string) string {
 	return filepath.Join(home, ".claude", "engine-sync.json")
-}
-
-// OldConfigDirs are the directories engine-sync once read its machine config
-// from and now refuses to start beside: {home}/.config/engine-sync and, when
-// $XDG_CONFIG_HOME is absolute, $XDG_CONFIG_HOME/engine-sync. The first
-// entry is the default one; the second appears only when it differs.
-func OldConfigDirs(env paths.Env, home string) []string {
-	dirs := []string{filepath.Join(home, ".config", binaryName)}
-	if dir := env.Get(envXDGConfigHome); filepath.IsAbs(dir) {
-		if xdg := filepath.Join(dir, binaryName); xdg != dirs[0] {
-			dirs = append(dirs, xdg)
-		}
-	}
-	return dirs
 }
 
 // StablePath is {engine-sync home}/bin/engine-sync, the link the plugin

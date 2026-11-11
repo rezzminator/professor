@@ -215,7 +215,7 @@ func TestArchiveMovesOnlyResolvableDeadKilledChats(t *testing.T) {
 		{ID: liveID, Engine: "cc"},
 		{ID: ghostID, Engine: "cc"},
 		{ID: codexID, Engine: "cx"},
-	}}
+	}, failOn: ghostID}
 	runner, err := New(Dependencies{Paths: values, Kills: kills, Proc: emptyProc{}})
 	if err != nil {
 		t.Fatal(err)
@@ -251,8 +251,18 @@ func TestArchiveMovesOnlyResolvableDeadKilledChats(t *testing.T) {
 	if len(report.Orphans) != 1 || report.Orphans[0] != ghostID {
 		t.Fatalf("orphans = %v, want [%s]", report.Orphans, ghostID)
 	}
-	if report.Unkilled != 4 {
-		t.Fatalf("kills retired = %d, want 4 (every decided id)", report.Unkilled)
+	// The store refusing one retirement keeps that kill and reports it; the
+	// ids decided after it are still retired.
+	if got, want := strings.Join(kills.unkilled, ","), liveID+","+deadID+","+codexID; got != want {
+		t.Fatalf("kills retired = %s, want %s (every decided id but the refused one)", got, want)
+	}
+	if report.Unkilled != 3 {
+		t.Fatalf("Unkilled = %d, want 3", report.Unkilled)
+	}
+	if got, want := fmt.Sprint(report.UnresolvedErrors), fmt.Sprint(map[string]string{
+		ghostID: "retire the kill: store is busy",
+	}); got != want {
+		t.Fatalf("UnresolvedErrors = %s, want %s", got, want)
 	}
 
 	archived := filepath.Join(values.ArchiveDir, "claude", project, deadID+".jsonl")
@@ -438,86 +448,63 @@ func TestArchiveReplaysSidecarCleanupBeforeRetiringKill(t *testing.T) {
 	}
 }
 
-// Subagent mode is age-gated, because a running subagent appends to its
-// transcript for as long as it runs.
-func TestArchiveSubagentsRespectsTheAgeGate(t *testing.T) {
+// A history.jsonl the run cannot prune holds back only the moved chat's kill
+// (its next run replays the cleanup): the orphan decided beside it is retired,
+// the codex index is still pruned, and the failure stays the run's error.
+func TestArchiveDecidesTheRestWhenOneSidecarCannotBePruned(t *testing.T) {
 	values := archiveJail(t)
-	project := filepath.Join(values.Roots[pfmengine.Claude][0], "-p")
-	old := filepath.Join(project, "aaaaaaaa-0000-4000-8000-000000000001.jsonl")
-	fresh := filepath.Join(project, "bbbbbbbb-0000-4000-8000-000000000002.jsonl")
-	chat := filepath.Join(project, "cccccccc-0000-4000-8000-000000000003.jsonl")
-	writeFile(t, old, `{"isSidechain":true,"type":"user"}`+"\n")
-	writeFile(t, fresh, `{"isSidechain":true,"type":"user"}`+"\n")
-	writeFile(t, chat, `{"type":"user","message":"hello"}`+"\n")
-	past := time.Now().Add(-72 * time.Hour)
-	for _, path := range []string{old, chat} {
-		if err := os.Chtimes(path, past, past); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	kills := &fakeKills{}
+	const (
+		movedID  = "88888888-8888-4888-8888-888888888888"
+		ghostID  = "33333333-3333-4333-8333-333333333333"
+		codexRow = "99999999-9999-4999-8999-999999999999"
+	)
+	writeFile(t, filepath.Join(values.Roots[pfmengine.Claude][0], "-p", movedID+".jsonl"), "{}\n")
+	oversized := `{"sessionId":"` + movedID + `","display":"` + strings.Repeat("x", 8*1024*1024) + `"}` + "\n"
+	writeFile(t, filepath.Join(values.Home, ".claude", "history.jsonl"), oversized)
+	index := filepath.Join(values.Roots[pfmengine.Codex][0], "session_index.jsonl")
+	writeFile(
+		t,
+		index,
+		`{"id":"`+movedID+`","thread_name":"moved"}`+"\n"+`{"id":"`+codexRow+`","thread_name":"kept"}`+"\n",
+	)
+	kills := &fakeKills{rows: []KilledChat{
+		{ID: movedID, Engine: pfmengine.Claude},
+		{ID: ghostID, Engine: pfmengine.Claude},
+	}}
 	runner, err := New(Dependencies{Paths: values, Kills: kills, Proc: emptyProc{}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	report, err := runner.Run(context.Background(), Options{
-		Apply:     true,
-		Subagents: true,
-		OlderThan: 48 * time.Hour,
-	})
-	if err != nil {
-		t.Fatal(err)
+	ctx, recorder := obs.Test(t)
+	report, err := runner.Run(ctx, Options{Apply: true})
+	if err == nil || !strings.Contains(err.Error(), "token too long") {
+		t.Fatalf("Run error = %v, want the history prune failure", err)
 	}
-	if len(report.Moves) != 1 || report.Moves[0].Source != old {
-		t.Fatalf("moves = %#v, want only the aged sidechain", report.Moves)
+	// The move happened on disk, so its trail records it despite the failed cleanup.
+	var moves []string
+	for _, record := range recorder.Records() {
+		if prior, _ := record.Field("prior"); record.Message == "state.transition" && prior == "chat" {
+			next, _ := record.Field("next")
+			moves = append(moves, next.(string))
+		}
 	}
-	if _, err := os.Stat(fresh); err != nil {
-		t.Fatalf("a fresh sidechain was archived: %v", err)
+	if got := strings.Join(moves, ","); got != "moved" {
+		t.Fatalf("archive chat transitions = %q, want moved: %s", got, recorder.Raw())
 	}
-	if _, err := os.Stat(chat); err != nil {
-		t.Fatalf("a real chat transcript was archived as a sidechain: %v", err)
+	if got, want := strings.Join(kills.unkilled, ","), ghostID; got != want {
+		t.Fatalf("kills retired = %q, want %q (the orphan, never the moved chat)", got, want)
 	}
-	if len(kills.unkilled) != 0 {
-		t.Fatalf("subagent mode touched the killed list: %v", kills.unkilled)
+	if report.Unkilled != 1 || report.IndexPruned != 1 || report.HistoryPruned != 0 {
+		t.Fatalf("Unkilled=%d IndexPruned=%d HistoryPruned=%d, want 1, 1, 0: %+v",
+			report.Unkilled, report.IndexPruned, report.HistoryPruned, report)
 	}
-}
-
-// A live subagent transcript is left alone even when its file is old enough:
-// liveness is re-read at run time and outranks the age gate.
-func TestArchiveSubagentsSkipsLiveTranscripts(t *testing.T) {
-	values := archiveJail(t)
-	project := filepath.Join(values.Roots[pfmengine.Claude][0], "-p")
-	const id = "aaaaaaaa-0000-4000-8000-000000000001"
-	path := filepath.Join(project, id+".jsonl")
-	writeFile(t, path, `{"isSidechain":true}`+"\n")
-	past := time.Now().Add(-72 * time.Hour)
-	if err := os.Chtimes(path, past, past); err != nil {
-		t.Fatal(err)
+	if got := report.UnresolvedErrors[movedID]; !strings.HasPrefix(got, "sidecar cleanup failed; kill retained: ") {
+		t.Fatalf("UnresolvedErrors[%s] = %q, want the retained-kill cause", movedID, got)
 	}
-	writeFile(t, filepath.Join(values.SIDDir, "cc-1800000001-42-1"), path+"\n")
-
-	runner, err := New(Dependencies{
-		Paths: values,
-		Kills: &fakeKills{},
-		Proc:  emptyProc{},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	report, err := runner.Run(context.Background(), Options{
-		Apply:     true,
-		Subagents: true,
-		OlderThan: 48 * time.Hour,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(report.Moves) != 0 {
-		t.Fatalf("a live transcript was archived: %#v", report.Moves)
-	}
-	if _, err := os.Stat(path); err != nil {
-		t.Fatalf("the live transcript is gone: %v", err)
+	content, err := os.ReadFile(index)
+	if want := `{"id":"` + codexRow + `","thread_name":"kept"}`; err != nil ||
+		strings.TrimSpace(string(content)) != want {
+		t.Fatalf("codex index = %q, %v; want only %q", content, err, want)
 	}
 }
 

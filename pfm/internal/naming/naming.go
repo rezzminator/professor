@@ -166,9 +166,11 @@ func launchWindowName(windowName, sessionName string) bool {
 }
 
 // IsJunkPrompt reports whether prompt starts with one of the injected-record
-// prefixes matched by ^(<[a-z]|Caveat:|\[Request).
+// prefixes matched by ^(<[a-z]|Caveat:|\[Request|# AGENTS\.md instructions) — the last
+// is the AGENTS.md block a Codex rollout records as a user message.
 func IsJunkPrompt(prompt string) bool {
-	if strings.HasPrefix(prompt, "Caveat:") || strings.HasPrefix(prompt, "[Request") {
+	if strings.HasPrefix(prompt, "Caveat:") || strings.HasPrefix(prompt, "[Request") ||
+		strings.HasPrefix(prompt, "# AGENTS.md instructions") {
 		return true
 	}
 	return len(prompt) >= 2 &&

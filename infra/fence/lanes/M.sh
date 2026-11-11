@@ -329,28 +329,15 @@ if defaults_cfg="$(tmp_config defaults 'del(.mcp.servers)')"; then
 else
   bad="$bad M30: could not write the config copy for the default-layer probe;"
 fi
-# M33: reconcile existing account registries, with legacy cutover and foreign
-# data preservation. A missing registry stays missing.
+# M33: install never touches an account registry: an existing one keeps its
+# servers and data, a missing one stays missing.
 registry="$SEAT_DIR/.claude.json"
 had_registry=0
 registry_before=""
-legacy_probe="not planted (registry absent or professor already present)"
 if [ -e "$registry" ] || [ -L "$registry" ]; then
   had_registry=1
   registry_before="$(claude_registry_without_family_entries "$registry" 2>&1)" ||
     bad="$bad M33: could not read $registry before reinstall: $(one_line "$registry_before");"
-  # Plant an exact owned legacy entry only when no professor entry exists.
-  # A foreign professor is retained and compared against the saved state.
-  if jq -e '(.mcpServers // {}) | has("professor") | not' "$registry" >/dev/null 2>&1; then
-    registry_tmp="$(mktemp)"
-    if jq --arg bin "$PFM_BIN" '.mcpServers = ((.mcpServers // {}) + {professor: {type: "stdio", command: $bin, args: ["mcp", "serve", "--stdio"]}})' "$registry" >"$registry_tmp" &&
-      cat "$registry_tmp" >"$registry"; then
-      legacy_probe="owned legacy fixture removed"
-    else
-      bad="$bad M33: could not plant the owned legacy professor fixture;"
-    fi
-    rm -f "$registry_tmp"
-  fi
 fi
 INSTALL_OUT="$(install_again)"
 install_rc=$?
@@ -360,17 +347,12 @@ if [ "$had_registry" -eq 0 ]; then
 elif [ ! -f "$registry" ]; then
   bad="$bad M33: existing account registry $registry disappeared or became unreadable;"
 else
-  for family in chat; do
-    jq -e --arg family "$family" --arg bin "$PFM_BIN" \
-      '.mcpServers[$family + "-professor"] | .type == "stdio" and .command == $bin and .args == ["mcp", "serve", "--stdio", "--family", $family]' "$registry" >/dev/null 2>&1 ||
-      bad="$bad M33: $registry lacks the enabled $family-professor account registration;"
-  done
   registry_after="$(claude_registry_without_family_entries "$registry" 2>&1)" ||
     bad="$bad M33: could not read $registry after reinstall: $(one_line "$registry_after");"
-  [ "$registry_after" = "$registry_before" ] || bad="$bad M33: reinstall retained the seeded legacy entry or changed foreign/unrelated account data in $registry;"
+  [ "$registry_after" = "$registry_before" ] || bad="$bad M33: reinstall changed account data in $registry;"
 fi
 if [ -n "$bad" ]; then fail "$bad"; else
-  pass "live Claude launch carries chat via pfm in --mcp-config; default layer reads chat disabled; reinstall reconciled existing account family entries and preserved foreign/unrelated data; legacy probe: $legacy_probe; absent registries stayed absent"
+  pass "live Claude launch carries chat via pfm in --mcp-config; default layer reads chat disabled; reinstall left existing account registries as they were; absent registries stayed absent"
 fi
 
 # ─── M.02 — Codex registration: chat over stdio, fenced, foreign kept ──
@@ -392,24 +374,22 @@ else
   [ "$(printf '%s\n' "$fence" | sed '/^[[:space:]]*$/d')" = "$FENCE_WANT" ] ||
     bad="$bad M34: the fence does not contain chat stdio tables: $(one_line "$fence");"
   [ "$(grep -cxF "$FENCE_BEGIN" "$TOML")" -eq 1 ] || bad="$bad M34: $TOML carries $(grep -cxF "$FENCE_BEGIN" "$TOML") installer fences (want exactly one);"
-  # M35: a foreign [mcp_servers.professor] OUTSIDE the fence survives a
+  # M35: a foreign [mcp_servers.lane-m-foreign] OUTSIDE the fence survives a
   # re-install untouched; chat registrations remain inside the fence.
   cp "$TOML" "$SCRATCH/config.toml.orig"
-  printf '\n[mcp_servers.professor]\nurl = "http://127.0.0.1:1/lane-m-foreign"\n' >>"$TOML"
+  printf '\n[mcp_servers.lane-m-foreign]\nurl = "http://127.0.0.1:1/lane-m-foreign"\n' >>"$TOML"
   foreign_out="$(install_again)"
   foreign_rc=$?
   fence_after="$(fence_of "$TOML")"
-  [ "$foreign_rc" -eq 0 ] || bad="$bad M35: pfm install --yes with a foreign professor entry exited $foreign_rc: $(one_line "$(printf '%s\n' "$foreign_out" | tail -3)");"
-  grep -qE "preserv[^[:space:]]* .*professor|professor.*preserv" <<<"$foreign_out" ||
-    bad="$bad M35: the install did not name the preserved conflict ('preserve foreign MCP client professor'): $(one_line "$(printf '%s\n' "$foreign_out" | grep -i professor | head -3)");"
+  [ "$foreign_rc" -eq 0 ] || bad="$bad M35: pfm install --yes with a foreign table exited $foreign_rc: $(one_line "$(printf '%s\n' "$foreign_out" | tail -3)");"
+  grep -qxF '[mcp_servers.lane-m-foreign]' "$TOML" || bad="$bad M35: the foreign table header was rewritten or dropped;"
   grep -qxF 'url = "http://127.0.0.1:1/lane-m-foreign"' "$TOML" || bad="$bad M35: the foreign url line was rewritten or dropped;"
-  grep -qxF '[mcp_servers.professor]' <<<"$fence_after" && bad="$bad M35: the fence STILL declares [mcp_servers.professor] beside the foreign one (a duplicate table Codex cannot parse);"
   [ "$(printf '%s\n' "$fence_after" | sed '/^[[:space:]]*$/d')" = "$FENCE_WANT" ] ||
     bad="$bad M35: reinstall changed the family commands, args or sixteen inherited names;"
   cp "$SCRATCH/config.toml.orig" "$TOML"
   [ "$(fence_of "$TOML" | sed '/^[[:space:]]*$/d')" = "$FENCE_WANT" ] || bad="$bad restore: $TOML was not put back (the fence lacks the family stdio entries);"
   if [ -n "$bad" ]; then fail "$bad"; else
-    pass "$TOML fence wires chat over stdio, one fence; a foreign professor table outside the fence survived a re-install by name and the family fence stayed intact; restored"
+    pass "$TOML fence wires chat over stdio, one fence; a foreign table outside the fence survived a re-install by name and the family fence stayed intact; restored"
   fi
 fi
 

@@ -140,8 +140,8 @@ lint-new: ## Findings on lines changed since LINT_BASE (origin/main) — the gat
 vet: ## go vet the whole module
 	go vet ./...
 
-# Suites never run on the host: there `cover` runs in the fence instead (testjail/fence.go).
-IN_FENCE := $(shell [ -e /.dockerenv ] && [ "$$PFM_DEV_FENCE" = 1 ] && echo 1)
+# Suites never run on the host: there `cover` runs in the fence instead (scripts/platform.sh platform_in_fence).
+IN_FENCE := $(shell . "$(REPO)/scripts/platform.sh" && platform_in_fence && echo 1)
 ifneq ($(IN_FENCE),1)
 cover:
 	bash "$(DEV)" iso cover pfm
@@ -272,7 +272,7 @@ mcp-restart: ## Restart the MCP daemon so it serves the binary now on disk
 	  fi; \
 	  pid="$$(systemctl --user show -p MainPID --value $(UNIT))"; \
 	  echo "mcp: $(UNIT) restarted, pid $$pid"; \
-	elif [ "$$(uname)" = Darwin ] && launchctl print "gui/$$(id -u)/$(AGENT)" >/dev/null 2>&1; then \
+	elif command -v launchctl >/dev/null 2>&1 && launchctl print "gui/$$(id -u)/$(AGENT)" >/dev/null 2>&1; then \
 	  agent_pid() { launchctl print "gui/$$(id -u)/$(AGENT)" | awk '$$1 == "pid" && $$2 == "=" { print $$3; exit }'; }; \
 	  old="$$(agent_pid)"; \
 	  launchctl kickstart -k "gui/$$(id -u)/$(AGENT)"; \
@@ -321,7 +321,7 @@ mcp-status: ## Report the daemon, then every pfm process still running a replace
 	    systemctl --user cat $(UNIT) >/dev/null 2>&1; then \
 	  echo "unit:  $$(systemctl --user is-active $(UNIT))"; \
 	  echo "pid:   $$(systemctl --user show -p MainPID --value $(UNIT))"; \
-	elif [ "$$(uname)" = Darwin ] && launchctl print "gui/$$(id -u)/$(AGENT)" >/dev/null 2>&1; then \
+	elif command -v launchctl >/dev/null 2>&1 && launchctl print "gui/$$(id -u)/$(AGENT)" >/dev/null 2>&1; then \
 	  launchctl print "gui/$$(id -u)/$(AGENT)" | awk '($$1 == "state" || $$1 == "pid") && $$2 == "=" && !seen[$$1]++ { printf "%-6s %s\n", $$1 ":", $$3 }'; \
 	else \
 	  echo "unit:  not installed"; \

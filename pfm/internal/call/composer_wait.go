@@ -137,8 +137,7 @@ func (engine *Engine) awaitInputScreen(
 	case err != nil && ctx.Err() != nil:
 		return capture, fmt.Errorf("call into %q: %w", target.Pane, err)
 	case err != nil:
-		base.Code = CodeDead
-		base.Message = fmt.Sprintf("target pane died while waiting for its Codex composer: %v", err)
+		base.Code, base.Message = paneUnreadable(target.Pane, " while waiting for its Codex composer", err)
 		return capture, nil
 	}
 	if refused, held := refuseTrustDialog(*base, target.Pane, ready); held {

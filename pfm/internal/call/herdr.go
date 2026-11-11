@@ -3,6 +3,7 @@ package call
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -65,18 +66,17 @@ func herdrCaptureSource(ctx context.Context, target Target, lines int, source, f
 	var response struct {
 		Type string `json:"type"`
 		Read *struct {
-			Format    string  `json:"format"`
-			Pane      string  `json:"pane_id"`
-			Workspace string  `json:"workspace_id"`
-			Text      *string `json:"text"`
-			Truncated *bool   `json:"truncated"`
+			Format    string          `json:"format"`
+			Pane      string          `json:"pane_id"`
+			Workspace string          `json:"workspace_id"`
+			Text      *string         `json:"text"`
+			Truncated json.RawMessage `json:"truncated"`
 		} `json:"read"`
 	}
 	if err := json.Unmarshal(result, &response); err != nil {
 		return "", "", fmt.Errorf("decode herdr capture %q: %w", target.Pane, err)
 	}
-	if response.Type != "pane_read" || response.Read == nil || response.Read.Text == nil ||
-		response.Read.Truncated == nil {
+	if response.Type != "pane_read" || response.Read == nil || response.Read.Text == nil {
 		return "", "", fmt.Errorf("herdr capture %q: malformed pane_read result (type %q)", target.Pane, response.Type)
 	}
 	if format != "" && response.Read.Format != format {
@@ -87,9 +87,12 @@ func herdrCaptureSource(ctx context.Context, target Target, lines int, source, f
 	if response.Read.Pane != target.Pane && response.Read.Workspace+":"+response.Read.Pane != target.Pane {
 		return "", "", fmt.Errorf("herdr capture %q: result belongs to pane %q", target.Pane, response.Read.Pane)
 	}
+	// truncated only labels the detail: a reply without it, or with a value
+	// that is not a bool, is still the screen.
+	truncated := string(response.Read.Truncated) == "true"
 	detail := ""
-	if lines <= 0 || lines > herdrRecentLines || *response.Read.Truncated {
-		detail = fmt.Sprintf("Herdr recent snapshot limited to %d lines; truncated=%t", limit, *response.Read.Truncated)
+	if lines <= 0 || lines > herdrRecentLines || truncated {
+		detail = fmt.Sprintf("Herdr recent snapshot limited to %d lines; truncated=%t", limit, truncated)
 	}
 	return *response.Read.Text, detail, nil
 }
@@ -135,21 +138,24 @@ func decodeHerdrAgent(result json.RawMessage, kind string, target Target) (herdr
 			response.Agent.Terminal,
 		)
 	}
-	if kind == "agent_prompted" && response.Agent.Terminal == "" {
-		return response, fmt.Errorf("herdr %s for %q: missing terminal identity", kind, target.Pane)
-	}
 	switch response.Agent.Status {
 	case herdrIdle, herdrWorking, herdrBlocked, herdrDone, herdrUnknown:
 		return response, nil
 	default:
 		return response, fmt.Errorf(
-			"herdr %s for %q: invalid agent status %q",
+			"herdr %s for %q: %w %q",
 			kind,
 			target.Pane,
+			errHerdrStatusUnrecognized,
 			response.Agent.Status,
 		)
 	}
 }
+
+// errHerdrStatusUnrecognized marks a decoded agent whose status is none of
+// the five Herdr documents: its state is unknown to pfm, so a caller falls back
+// to the raw-screen composer guards rather than refusing the pane outright.
+var errHerdrStatusUnrecognized = errors.New("unrecognized agent status")
 
 // callHerdrRaw preserves the existing composer guard and confirmation without
 // relying on native agent detection for an engine whose capability is unproven.
@@ -257,10 +263,9 @@ func (engine *Engine) deliverHerdrThen(ctx context.Context, wait ThenWait) (resu
 
 func (engine *Engine) waitHerdrTurn(ctx context.Context, target Target, turn herdrTurn) error {
 	if turn.Raw {
-		id, err := pfmengine.Parse(target.Engine)
-		if err != nil {
-			return fmt.Errorf("raw Herdr turn engine: %w", err)
-		}
+		// An engine this binary cannot name reads the engine-neutral busy
+		// footer, as the tmux waiter does (then.go).
+		id := pfmengine.ID(target.Engine)
 		for attempt := 0; attempt < engine.options.ThenBusyTries+engine.options.ThenIdleTries; attempt++ {
 			if err := ctx.Err(); err != nil {
 				return fmt.Errorf("raw Herdr turn for %q: %w", target.Pane, err)
@@ -328,7 +333,7 @@ func (engine *Engine) waitHerdrTurn(ctx context.Context, target Target, turn her
 			return fmt.Errorf("herdr agent.wait for %q: %w", target.Pane, err)
 		}
 		agent, err := decodeHerdrAgent(result, "agent_info", target)
-		if err != nil {
+		if err != nil && !errors.Is(err, errHerdrStatusUnrecognized) {
 			return err
 		}
 		if (turn.Terminal != "" && agent.Agent.Terminal != turn.Terminal) ||
@@ -337,8 +342,13 @@ func (engine *Engine) waitHerdrTurn(ctx context.Context, target Target, turn her
 			return fmt.Errorf("herdr turn identity changed for %q", target.Pane)
 		}
 		state := agent.Agent.Status
-		if state == herdrBlocked || state == herdrUnknown {
+		if state == herdrBlocked {
 			return fmt.Errorf("herdr target %q is %s", target.Pane, state)
+		}
+		if err != nil || state == herdrUnknown {
+			// Herdr cannot tell this turn's state: the screen still can.
+			turn.Raw = true
+			return engine.waitHerdrTurn(ctx, target, turn)
 		}
 		matched := false
 		for _, allowed := range until {

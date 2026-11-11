@@ -2,8 +2,10 @@ package professor
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -11,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmpaths "github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -190,7 +193,7 @@ func TestProjectUpdatesDiffReadsAFencedLinkedWorktreeStore(t *testing.T) {
 	linkedRoot := filepath.Join(t.TempDir(), "linked-worktree")
 	runStoreGit(t, "-C", repository, "worktree", "add", "--detach", "-q", linkedRoot, "HEAD")
 	for _, dir := range []string{ // git carries no empty directory; the store layout needs them
-		"commands", "agents", "scripts", "skills", "epics", "codex", "docs-commands", "docs-hub",
+		"commands", "agents", "scripts", "skills", "epics", "codex", "docs-commands", "docs-hub", "rules",
 	} {
 		if err := os.MkdirAll(filepath.Join(linkedRoot, "templates", "project", dir), 0o700); err != nil {
 			t.Fatal(err)
@@ -640,8 +643,8 @@ func TestRenamedDocsHubReportsMovedNotGoneUpstreamAndNew(t *testing.T) {
 
 // TestRenamedTemplateWithAnUnreadableSuccessorIsAFailureNotGoneUpstream: only
 // a successor that is absent from the store leaves the old pin GONE-UPSTREAM;
-// one the store cannot be asked about fails the report by name, never printing
-// advice to delete a populated hub.
+// one the store cannot be asked about is an UNREADABLE row that fails the
+// report by name, never printing advice to delete a populated hub.
 func TestRenamedTemplateWithAnUnreadableSuccessorIsAFailureNotGoneUpstream(t *testing.T) {
 	project, home, store := newRenamedDocsHubProject(t)
 	hub := filepath.Join(store, "templates", "project", "docs-hub")
@@ -656,9 +659,16 @@ func TestRenamedTemplateWithAnUnreadableSuccessorIsAFailureNotGoneUpstream(t *te
 	code := RunProjectUpdates(project, home, false, &stdout, nil)
 
 	report := stdout.String()
-	if code != 3 || !strings.Contains(report, "FAILED — UNREADABLE ") ||
-		!strings.Contains(report, filepath.Join("docs-hub", "_index.md")) {
-		t.Fatalf("code=%d, want 3 and FAILED — UNREADABLE naming the successor:\n%s", code, report)
+	successor := filepath.Join(hub, "_index.md")
+	row := "    docs/agents/_index.md — UNREADABLE " + successor + ": stat " + successor + ": not a directory\n"
+	if code != 3 || !strings.Contains(report, row) ||
+		!strings.HasSuffix(report, "FAILED — 2 item(s) could not be read; nothing was written.\n") {
+		t.Fatalf(
+			"code=%d, want 3, the UNREADABLE row %q naming the successor and a FAILED terminal:\n%s",
+			code,
+			row,
+			report,
+		)
 	}
 	if strings.Contains(report, "delete it") {
 		t.Fatalf("report advises deleting while the successor is unreadable:\n%s", report)
@@ -687,5 +697,66 @@ func TestRetiredCoverageIncompleteIsVisibleAndNonfatal(t *testing.T) {
 	}
 	if failed := captureRetiredNames(&report, func(string, map[string]bool) RetiredNameScan { return scan }); failed {
 		t.Error("incomplete scan marked failed")
+	}
+}
+
+// failingGitVerbRunner runs git for real except verb, which exits 128 the way
+// git does on a broken object store.
+type failingGitVerbRunner struct {
+	deps.Runner
+	verb string
+}
+
+func (runner failingGitVerbRunner) Run(
+	ctx context.Context,
+	argv []string,
+	opts deps.RunOptions,
+) (deps.RunResult, error) {
+	if len(argv) > 1 && argv[1] == runner.verb {
+		return deps.RunResult{ExitCode: 128, Stderr: []byte("fatal: scripted failure\n")}, nil
+	}
+	return runner.Runner.Run(ctx, argv, opts)
+}
+
+// TestProjectUpdatesKeepsTheDiffWhenPinHistoryIsUnreadable: the UPDATED diff
+// read, so a pinned-template read or commit log that fails costs only the
+// history line, never the diff, and the report stays a review, not a failure.
+func TestProjectUpdatesKeepsTheDiffWhenPinHistoryIsUnreadable(t *testing.T) {
+	for _, row := range []struct{ verb, want string }{
+		{"log", "commit log unreadable: git log: git exited with status 128: fatal: scripted failure"},
+		{"show", "pinned template unreadable, so this diff is unverified against the pin: " +
+			"show project/settings.json at %s: git exited with status 128: fatal: scripted failure"},
+	} {
+		t.Run(row.verb, func(t *testing.T) {
+			project, home := newUpdatedGitStoreProject(t, newGitScaffoldStore(t))
+			report, err := buildProjectReport(project, home)
+			if err != nil {
+				t.Fatal(err)
+			}
+			report.Store.runner = failingGitVerbRunner{Runner: deps.RealRunner{}, verb: row.verb}
+			if failed := captureProjectDiffs(&report); failed {
+				t.Fatalf("captureProjectDiffs() failed = true, want the diff kept: %+v", report.Items)
+			}
+			item := report.Items[0]
+			want := row.want
+			if strings.Contains(want, "%s") {
+				want = fmt.Sprintf(want, item.Pin.PinnedSHA)
+			}
+			if item.Status != projectUpdated || item.HistoryError != want ||
+				!strings.Contains(item.Diff, "\n+upstream line\n") {
+				t.Fatalf("item = %+v, want UPDATED with its diff and historyError %q", item, want)
+			}
+			var stdout bytes.Buffer
+			writeProjectHuman(&stdout, report)
+			for _, line := range []string{
+				"      upstream commits UNAVAILABLE — " + want + "\n",
+				"      +upstream line\n",
+				"REVIEW REQUIRED — 1 items; nothing was written.\n",
+			} {
+				if !strings.Contains(stdout.String(), line) {
+					t.Fatalf("report lacks %q:\n%s", line, stdout.String())
+				}
+			}
+		})
 	}
 }

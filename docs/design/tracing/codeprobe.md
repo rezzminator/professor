@@ -1,6 +1,6 @@
 # codeprobe
 
-`codeprobe` is the script under `collector`. It extracts code text verbatim into a file and prints a manifest of it in the shape the caller checks; the agent only turns the caller's orders into one plan. This file holds the script; [collector.md](collector.md) holds the agent. `tracer` reads in prose without the script: [tracer.md](tracer.md).
+`codeprobe` is the script under `collector`. It extracts code text verbatim into a file and prints a manifest of it in the shape the caller checks; the agent only turns the caller's orders into one plan. This file holds the script; [collector.md](collector.md) holds the agent. `flights:tracer` reads in prose without the script: [tracer.md](tracer.md).
 
 A change lands here first, then in the templates, then in every surface under [Surfaces that stay in sync](#surfaces-that-stay-in-sync).
 

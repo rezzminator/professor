@@ -31,12 +31,55 @@ type Cmd struct {
 	clock   clock.Clock
 	started time.Time
 	done    bool
+	// cancel releases the bound Exec added; nil when the caller set its own.
+	cancel context.CancelFunc
 }
 
-// Exec is Command with a completion record: the same binary, socket argv
-// and cleared TMUX, returned as a Cmd whose completing methods log once.
+// defaultTimeout bounds a tmux call whose context carries no deadline: a
+// stopped or wedged server accepts the connection and never answers, so an
+// unbounded call hangs its caller and leaves its client blocked forever.
+var defaultTimeout = 10 * time.Second
+
+// waitDelay is how long a killed client may keep its pipes open: a tmux
+// client hands its stdout to the server it talks to, so a client killed for
+// a stopped server leaves that server holding the pipe and Wait would block
+// on it forever. Past the delay the pipes are closed and the call returns.
+const waitDelay = 500 * time.Millisecond
+
+// Exec is Command with a completion record and a deadline: the same binary,
+// socket argv and cleared TMUX, returned as a Cmd whose completing methods
+// log once. A context with no deadline is bounded by defaultTimeout; a
+// caller that needs longer passes a context carrying its own.
 func Exec(ctx context.Context, binary, socketPath string, arguments ...string) *Cmd {
+	return ExecWithin(ctx, defaultTimeout, binary, socketPath, arguments...)
+}
+
+// ExecWithin is Exec bounded by timeout when ctx carries no deadline of its
+// own. On the deadline the client is killed and the call returns its error.
+func ExecWithin(ctx context.Context, timeout time.Duration, binary, socketPath string, arguments ...string) *Cmd {
+	var cancel context.CancelFunc
+	if _, bounded := ctx.Deadline(); !bounded {
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+	}
+	command := Command(ctx, binary, socketPath, arguments...)
+	command.WaitDelay = waitDelay
+	observed := Observe(ctx, command, arguments...)
+	observed.cancel = cancel
+	return observed
+}
+
+// ExecAttached is Exec for a call that lasts as long as its user keeps it —
+// an interactive attach: the same record, never a default bound, so only the
+// caller's own context ends it.
+func ExecAttached(ctx context.Context, binary, socketPath string, arguments ...string) *Cmd {
 	return Observe(ctx, Command(ctx, binary, socketPath, arguments...), arguments...)
+}
+
+// TimedOut reports whether the call was ended at its deadline — the server
+// did not answer in time — rather than by tmux's own exit: a caller names it
+// "did not answer", never a bare "signal: killed".
+func (command *Cmd) TimedOut() bool {
+	return errors.Is(command.ctx.Err(), context.DeadlineExceeded)
 }
 
 // Observe is the completion record over a tmux command another launcher
@@ -118,6 +161,9 @@ func (command *Cmd) finish(err error) {
 		return
 	}
 	command.done = true
+	if command.cancel != nil {
+		command.cancel()
+	}
 	exit, failure := 0, slog.LevelInfo
 	var exitErr *exec.ExitError
 	switch {

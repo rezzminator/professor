@@ -21,6 +21,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 )
 
 type Header struct {
@@ -33,6 +34,10 @@ type Header struct {
 	RAMPercent     float64
 	SwapPercent    float64
 	MemoryBytes    uint64
+	// RAMUnread and SwapUnread mark a counter that could not be read (its
+	// warning names why): the column is unknown, never a 0% reading.
+	RAMUnread  bool
+	SwapUnread bool
 }
 
 type Chat struct {
@@ -121,13 +126,6 @@ type Snapshot struct {
 	SampleTime        int64
 }
 
-type processSample struct {
-	parent  int
-	jiffies uint64
-	rss     uint64
-	command string
-}
-
 type dockerSample struct {
 	usageMicros uint64
 }
@@ -136,7 +134,7 @@ type rawSample struct {
 	timeNS      int64
 	systemTotal uint64
 	systemIdle  uint64
-	processes   map[int]processSample
+	processes   map[int]gather.ProcessCounter
 	docker      map[string]dockerSample
 }
 
@@ -228,7 +226,7 @@ func (sampler *Sampler) sample(rows []compose.Row, includeLimits bool) (Snapshot
 			docker[index].MemoryPercent = percent(docker[index].MemoryBytes, header.MemoryBytes)
 		}
 	}
-	dockerWarnings = append(dockerWarnings, sampler.resolveDockerIdentities(docker)...)
+	dockerWarnings = append(dockerWarnings, sampler.resolveDockerIdentities(docker, now)...)
 	sort.Slice(docker, func(i, j int) bool {
 		if docker[i].Name != docker[j].Name {
 			return docker[i].Name < docker[j].Name
@@ -246,7 +244,9 @@ func (sampler *Sampler) sample(rows []compose.Row, includeLimits bool) (Snapshot
 	sampler.previous = current
 	sampler.mu.Unlock()
 
-	if previous != nil && total > previous.systemTotal {
+	// A zero previous total is a sample whose CPU counter was unreadable, no
+	// baseline to take a delta from.
+	if previous != nil && previous.systemTotal > 0 && total > previous.systemTotal {
 		deltaTotal := total - previous.systemTotal
 		if idle >= previous.systemIdle {
 			deltaIdle := idle - previous.systemIdle
@@ -271,8 +271,8 @@ func (sampler *Sampler) sample(rows []compose.Row, includeLimits bool) (Snapshot
 	if previous != nil && now > previous.timeNS {
 		for index := range docker {
 			prior, found := previous.docker[docker[index].ID]
-			currentDocker := dockerRaw[docker[index].ID]
-			if !found || currentDocker.usageMicros < prior.usageMicros {
+			currentDocker, read := dockerRaw[docker[index].ID]
+			if !found || !read || currentDocker.usageMicros < prior.usageMicros {
 				continue
 			}
 			deltaMicros := currentDocker.usageMicros - prior.usageMicros
@@ -294,169 +294,112 @@ type hostResources struct {
 	total     uint64
 	idle      uint64
 	header    Header
-	processes map[int]processSample
+	processes map[int]gather.ProcessCounter
 	warnings  []string
 }
 
-func readLinuxHostResources(root string) (hostResources, error) {
-	total, idle, err := readLinuxSystemCPU(root)
-	if err != nil {
-		return hostResources{}, err
-	}
-	header, err := readLinuxHeader(root)
-	if err != nil {
-		return hostResources{}, err
-	}
-	processes, warnings, err := readLinuxProcesses(root)
-	if err != nil {
-		return hostResources{}, err
-	}
-	return hostResources{total: total, idle: idle, header: header, processes: processes, warnings: warnings}, nil
-}
-
-func readLinuxSystemCPU(root string) (total, idle uint64, err error) {
-	content, err := os.ReadFile(filepath.Join(root, "stat"))
-	if err != nil {
-		return 0, 0, fmt.Errorf("read host CPU counters: %w", err)
-	}
-	line, _, _ := strings.Cut(string(content), "\n")
-	fields := strings.Fields(line)
-	if len(fields) < 5 || fields[0] != "cpu" {
-		return 0, 0, fmt.Errorf("read host CPU counters: malformed first line")
-	}
-	values := make([]uint64, 0, len(fields)-1)
-	for _, field := range fields[1:] {
-		value, parseErr := strconv.ParseUint(field, 10, 64)
-		if parseErr != nil {
-			return 0, 0, fmt.Errorf("parse host CPU counter %q: %w", field, parseErr)
-		}
-		total += value
-		values = append(values, value)
-	}
-	idle = values[3]
-	if len(values) > 4 {
-		idle += values[4]
-	}
-	return total, idle, nil
-}
-
-func readLinuxHeader(root string) (Header, error) {
-	content, err := os.ReadFile(filepath.Join(root, "meminfo"))
-	if err != nil {
-		return Header{}, fmt.Errorf("read host memory counters: %w", err)
-	}
-	values := make(map[string]uint64)
-	for _, line := range strings.Split(string(content), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			continue
-		}
-		key := strings.TrimSuffix(fields[0], ":")
-		value, parseErr := strconv.ParseUint(fields[1], 10, 64)
-		if parseErr == nil {
-			values[key] = value * 1024
-		}
-	}
-	total := values["MemTotal"]
-	available := values["MemAvailable"]
-	swapTotal := values["SwapTotal"]
-	swapFree := values["SwapFree"]
-	header := Header{MemoryBytes: total}
-	if total > 0 && available <= total {
-		header.RAMPercent = percent(total-available, total)
-	}
-	if swapTotal > 0 && swapFree <= swapTotal {
-		header.SwapPercent = percent(swapTotal-swapFree, swapTotal)
-	}
-	pressure, err := os.ReadFile(filepath.Join(root, "pressure", "cpu"))
-	if err != nil {
-		// No PSI (CONFIG_PSI off, or psi=0: absent or EOPNOTSUPP) is one
-		// unavailable column, never a failed sample of the whole tab.
-		if os.IsNotExist(err) || errors.Is(err, syscall.EOPNOTSUPP) {
-			header.PSIUnavailable = true
-			return header, nil
-		}
-		return Header{}, fmt.Errorf("read CPU pressure: %w", err)
-	}
-	for _, field := range strings.Fields(string(pressure)) {
-		if strings.HasPrefix(field, "avg10=") {
-			header.PSIPercent, err = strconv.ParseFloat(strings.TrimPrefix(field, "avg10="), 64)
-			if err != nil {
-				return Header{}, fmt.Errorf("parse CPU pressure avg10: %w", err)
-			}
-			break
-		}
-	}
-	return header, nil
-}
-
-func readLinuxProcesses(root string) (map[int]processSample, []string, error) {
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		return nil, nil, fmt.Errorf("read process root: %w", err)
-	}
-	processes := make(map[int]processSample)
+// readHostResources samples the host and its process table through gather.
+// A host counter that cannot be read leaves that column unknown with a
+// warning; it never aborts the sample of the chats and containers beside it.
+// A zero total is the "no CPU counter" marker the deltas refuse.
+func readHostResources(root string, now int64, cpuCount int) (hostResources, error) {
 	var warnings []string
-	for _, entry := range entries {
-		pid, parseErr := strconv.Atoi(entry.Name())
-		if parseErr != nil || pid <= 0 || !entry.IsDir() {
-			continue
-		}
-		content, readErr := os.ReadFile(filepath.Join(root, entry.Name(), "stat"))
-		if readErr != nil {
-			if !os.IsNotExist(readErr) {
-				warnings = append(warnings, fmt.Sprintf("read process %d stat: %v", pid, readErr))
-			}
-			continue
-		}
-		process, parseErr := parseProcessStat(pid, content)
-		if parseErr != nil {
-			warnings = append(warnings, parseErr.Error())
-			continue
-		}
-		if statm, readErr := os.ReadFile(filepath.Join(root, entry.Name(), "statm")); readErr == nil {
-			fields := strings.Fields(string(statm))
-			if len(fields) >= 2 {
-				pages, parseErr := strconv.ParseUint(fields[1], 10, 64)
-				if parseErr == nil {
-					process.rss = pages * uint64(os.Getpagesize())
-				}
-			}
-		} else if !os.IsNotExist(readErr) {
-			warnings = append(warnings, fmt.Sprintf("read process %d memory: %v", pid, readErr))
-		}
-		if command, readErr := os.ReadFile(filepath.Join(root, entry.Name(), "cmdline")); readErr == nil {
-			process.command, _, _ = strings.Cut(string(command), "\x00")
-		} else if !os.IsNotExist(readErr) {
-			warnings = append(warnings, fmt.Sprintf("read process %d command: %v", pid, readErr))
-		}
-		processes[pid] = process
+	cpu, err := gather.HostCPU(root)
+	// A host with no tick counter (macOS) gets a total synthesized from the
+	// process table below, so there the table's failure is a warning too.
+	synthesized := errors.Is(err, errors.ErrUnsupported)
+	if err != nil && !synthesized {
+		cpu = gather.CPU{}
+		warnings = append(warnings, err.Error())
 	}
-	return processes, warnings, nil
+	header, headerWarnings := readHostHeader(root)
+	warnings = append(warnings, headerWarnings...)
+	processes, processWarnings, err := gather.ProcessCounters(root)
+	if err != nil && !synthesized {
+		return hostResources{}, err
+	}
+	if err != nil {
+		// No process table is a warning and an empty table, not a failed
+		// sample: the header stays, and the zero total is the "no CPU
+		// counter" marker the deltas refuse.
+		warnings = append(warnings, err.Error())
+		return hostResources{header: header, processes: map[int]gather.ProcessCounter{}, warnings: warnings}, nil
+	}
+	warnings = append(warnings, processWarnings...)
+	if synthesized {
+		cpu = synthesizedCPU(processes, now, cpuCount)
+	}
+	return hostResources{
+		total: cpu.Total, idle: cpu.Idle, header: header, processes: processes, warnings: warnings,
+	}, nil
 }
 
-func parseProcessStat(pid int, content []byte) (processSample, error) {
-	closeParen := strings.LastIndex(string(content), ") ")
-	if closeParen < 0 {
-		return processSample{}, fmt.Errorf("parse process %d stat: missing command terminator", pid)
+// synthesizedCPU derives host totals where the kernel keeps none. Processes
+// report cumulative CPU in centiseconds; a wall-clock counter multiplied by
+// the logical CPU count gives the matching host-total unit, so the shared
+// delta math calculates both host and subtree CPU rates.
+func synthesizedCPU(processes map[int]gather.ProcessCounter, now int64, cpuCount int) gather.CPU {
+	var busy uint64
+	for _, process := range processes {
+		busy += process.CPUTicks
 	}
-	fields := strings.Fields(string(content[closeParen+2:]))
-	if len(fields) <= 12 {
-		return processSample{}, fmt.Errorf("parse process %d stat: short record", pid)
+	total := uint64(now / 10_000_000)
+	if cpuCount > 0 {
+		total *= uint64(cpuCount)
 	}
-	parent, err := strconv.Atoi(fields[1])
+	idle := uint64(0)
+	if busy <= total {
+		idle = total - busy
+	}
+	return gather.CPU{Total: total, Idle: idle}
+}
+
+// readHostHeader reads the memory and pressure columns. A counter it cannot read
+// or parse leaves its columns unknown and returns a warning naming it; the
+// sample goes on.
+func readHostHeader(root string) (Header, []string) {
+	var warnings []string
+	header := Header{}
+	memory, err := gather.HostMemory(root)
 	if err != nil {
-		return processSample{}, fmt.Errorf("parse process %d parent: %w", pid, err)
+		warnings = append(warnings, fmt.Sprintf("read host memory counters: %v", err))
+		header.RAMUnread, header.SwapUnread = true, true
+	} else {
+		warnings = append(warnings, memory.Warnings...)
+		total, available := memory.TotalKB*1024, memory.AvailableKB*1024
+		header.MemoryBytes = total
+		switch {
+		case memory.AvailableErr != nil:
+			// No available-memory reading is an unknown RAM column, never 100% used.
+			header.RAMUnread = true
+			warnings = append(warnings, fmt.Sprintf("read host memory counters: %v", memory.AvailableErr))
+		case total > 0 && available <= total:
+			header.RAMPercent = percent(total-available, total)
+		default:
+			header.RAMUnread = true
+			warnings = append(warnings, "read host memory counters: meminfo holds no usable MemTotal and MemAvailable")
+		}
+		if memory.SwapErr != nil {
+			header.SwapUnread = true
+			warnings = append(warnings, memory.SwapErr.Error())
+		} else if memory.SwapTotalKB > 0 && memory.SwapFreeKB <= memory.SwapTotalKB {
+			header.SwapPercent = percent(memory.SwapTotalKB-memory.SwapFreeKB, memory.SwapTotalKB)
+		}
 	}
-	user, err := strconv.ParseUint(fields[11], 10, 64)
+	pressure, err := gather.HostCPUPressure(root)
 	if err != nil {
-		return processSample{}, fmt.Errorf("parse process %d user ticks: %w", pid, err)
+		// No PSI (CONFIG_PSI off, or psi=0: absent or EOPNOTSUPP; macOS) is
+		// one unavailable column, never a failed sample of the whole tab; any
+		// other failure is the same column, with the failure named.
+		header.PSIUnavailable = true
+		if !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, syscall.EOPNOTSUPP) &&
+			!errors.Is(err, errors.ErrUnsupported) {
+			warnings = append(warnings, err.Error())
+		}
+		return header, warnings
 	}
-	system, err := strconv.ParseUint(fields[12], 10, 64)
-	if err != nil {
-		return processSample{}, fmt.Errorf("parse process %d system ticks: %w", pid, err)
-	}
-	return processSample{parent: parent, jiffies: user + system}, nil
+	header.PSIPercent = pressure
+	return header, warnings
 }
 
 type chatTree struct {
@@ -467,7 +410,7 @@ type chatTree struct {
 
 func chatTrees(
 	rows []compose.Row,
-	current map[int]processSample,
+	current map[int]gather.ProcessCounter,
 	previous *rawSample,
 	systemTotal uint64,
 	cpuCount int,
@@ -492,7 +435,7 @@ func chatTrees(
 	}
 	children := make(map[int][]int)
 	for pid, process := range current {
-		children[process.parent] = append(children[process.parent], pid)
+		children[process.Parent] = append(children[process.Parent], pid)
 	}
 	chats := make([]Chat, 0, len(bySeat))
 	for _, tree := range bySeat {
@@ -506,9 +449,9 @@ func chatTrees(
 			if !found {
 				continue
 			}
-			parent, found := current[process.parent]
-			if found && tmuxCommand(parent.command) {
-				roots = append(roots, process.parent)
+			parent, found := current[process.Parent]
+			if found && tmuxCommand(parent.Command) {
+				roots = append(roots, process.Parent)
 			}
 		}
 		tree.roots = roots
@@ -519,7 +462,7 @@ func chatTrees(
 			rootSet[root] = true
 		}
 		var currentTicks, priorTicks uint64
-		found := false
+		found, cpuUnknown := false, false
 		for len(stack) > 0 {
 			pid := stack[len(stack)-1]
 			stack = stack[:len(stack)-1]
@@ -532,14 +475,16 @@ func chatTrees(
 				continue
 			}
 			found = true
-			currentTicks += process.jiffies
-			tree.chat.RSSBytes += process.rss
+			currentTicks += process.CPUTicks
+			cpuUnknown = cpuUnknown || process.CPUUnknown
+			tree.chat.RSSBytes += process.RSSBytes
 			if previous != nil {
 				if prior, found := previous.processes[pid]; found {
-					priorTicks += prior.jiffies
+					priorTicks += prior.CPUTicks
+					cpuUnknown = cpuUnknown || prior.CPUUnknown
 				}
 			}
-			if !rootSet[pid] && !engineCommand(process.command) && !shellCommand(process.command) {
+			if !rootSet[pid] && !engineCommand(process.Command) && !shellCommand(process.Command) {
 				tree.chat.GearCount++
 			}
 			stack = append(stack, children[pid]...)
@@ -553,7 +498,8 @@ func chatTrees(
 		if memoryTotal > 0 {
 			tree.chat.RAMPercent = percent(tree.chat.RSSBytes, memoryTotal)
 		}
-		if previous != nil && systemTotal > previous.systemTotal && currentTicks >= priorTicks {
+		if previous != nil && previous.systemTotal > 0 && systemTotal > previous.systemTotal &&
+			!cpuUnknown && currentTicks >= priorTicks {
 			tree.chat.CPUPercent = percent(
 				currentTicks-priorTicks,
 				systemTotal-previous.systemTotal,
@@ -628,10 +574,11 @@ func readDocker(root string) ([]Container, map[string]dockerSample, []string, er
 		}
 		id := dockerID(filepath.Base(path))
 		name := shortDockerID(id)
-		usage, err := readKeyUint(filepath.Join(path, "cpu.stat"), "usage_usec")
-		if err != nil {
-			warnings = append(warnings, fmt.Sprintf("read Docker CPU %s: %v", name, err))
-			return filepath.SkipDir
+		// An unreadable CPU counter leaves this container's CPU unknown (no raw
+		// sample, so CPUValid never sets); its memory still shows.
+		usage, usageErr := readKeyUint(filepath.Join(path, "cpu.stat"), "usage_usec")
+		if usageErr != nil {
+			warnings = append(warnings, fmt.Sprintf("read Docker CPU %s: %v", name, usageErr))
 		}
 		memory, err := readUintFile(filepath.Join(path, "memory.current"))
 		if err != nil {
@@ -656,7 +603,9 @@ func readDocker(root string) ([]Container, map[string]dockerSample, []string, er
 			container.MemoryPercent = percent(memory, limit)
 		}
 		containers = append(containers, container)
-		raw[id] = dockerSample{usageMicros: usage}
+		if usageErr == nil {
+			raw[id] = dockerSample{usageMicros: usage}
+		}
 		return filepath.SkipDir
 	})
 	if err != nil {

@@ -10,10 +10,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func seatForeground(tty, group int) error {
-	return unix.IoctlSetPointerInt(tty, unix.TIOCSPGRP, group)
-}
-
 // seatTerminalPath uses the kernel's controlling device, not redirected launcher fds.
 func seatTerminalPath(tty int) (string, error) {
 	group, err := unix.IoctlGetInt(tty, unix.TIOCGPGRP)

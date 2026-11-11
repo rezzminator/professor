@@ -14,20 +14,39 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-func TestRunRejectsUnreadableHandoffBeforeChangingPane(t *testing.T) {
-	dir := t.TempDir()
-	lockPath := LockPath(dir, "probe-1", "%7")
-	if err := os.WriteFile(lockPath, []byte("{"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	tmux := &fakeReloadTmux{}
-	_, err := Run(context.Background(), Request{
-		Engine: pfmengine.Claude, SocketPath: "/tmp/probe-1", Pane: "%7",
-		SessionID: "11111111-1111-4111-8111-111111111111", Account: 1, AccountIDs: []int{1},
-	}, Options{SIDDir: dir, Delay: -1, Poll: -1}, tmux, nil, nil)
-	if err == nil || !strings.Contains(err.Error(), lockPath) || !strings.Contains(err.Error(), "remove it") ||
-		tmux.literal != "" {
-		t.Fatalf("unreadable handoff error=%v literal=%q", err, tmux.literal)
+func TestRunIgnoresUnusableHandoffAndReloads(t *testing.T) {
+	for _, tc := range []struct{ content, why string }{
+		{"{", "unexpected end of JSON input"},
+		{"null", "no written_at"},
+		{"{}", "no written_at"},
+		{`{"engine":"cc","account":2}`, "no written_at"},
+		{
+			`{"engine":"zz","written_at":"1970-01-01T00:00:42Z"}`,
+			`engine: unknown engine "zz" (want cc/claude, cx/codex, ox/opencode)`,
+		},
+	} {
+		t.Run(tc.content, func(t *testing.T) {
+			dir := t.TempDir()
+			lockPath := LockPath(dir, "probe-1", "%7")
+			if err := os.WriteFile(lockPath, []byte(tc.content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			tmux := &fakeReloadTmux{}
+			var stderr strings.Builder
+			result, err := Run(context.Background(), Request{
+				Engine: pfmengine.Claude, SocketPath: "/tmp/probe-1", Pane: "%7",
+				SessionID: "11111111-1111-4111-8111-111111111111", Account: 1, AccountIDs: []int{1},
+				CWD: "/jail/project", Machine: reloadTestMachine("", dir),
+			}, Options{SIDDir: dir, Delay: -1, Poll: -1, ExitTries: 2}, tmux, nil, &stderr)
+			want := "pfm chat reload: ignoring reload handoff " + lockPath + ": reload handoff record unusable: " +
+				tc.why + "\n"
+			if err != nil || tmux.respawn == "" ||
+				parsedReloadShell(t, tmux.respawn).Resume != "11111111-1111-4111-8111-111111111111" ||
+				!strings.HasPrefix(stderr.String(), want) {
+				t.Fatalf("err=%v respawned=%t result=%+v\nstderr=%q\nwant prefix %q",
+					err, tmux.respawn != "", result, stderr.String(), want)
+			}
+		})
 	}
 }
 
@@ -76,24 +95,6 @@ func TestHandoffRecordRoundTripsAndSurvivesARead(t *testing.T) {
 	}
 }
 
-func TestHandoffRejectsUnreadableRecord(t *testing.T) {
-	for _, content := range []string{"{", "null", "{}"} {
-		t.Run(content, func(t *testing.T) {
-			lock, err := os.CreateTemp(t.TempDir(), "lock")
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() { _ = lock.Close() })
-			if _, err := lock.WriteString(content); err != nil {
-				t.Fatal(err)
-			}
-			if _, _, err := readHandoff(lock); err == nil {
-				t.Fatalf("invalid record %q accepted", content)
-			}
-		})
-	}
-}
-
 func TestAdoptHandoffUsesEntryAndBreadcrumbAndExplicitFlags(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv(paths.EnvHome, t.TempDir())
@@ -112,6 +113,13 @@ func TestAdoptHandoffUsesEntryAndBreadcrumbAndExplicitFlags(t *testing.T) {
 	if err != nil || !adopted || left != record.SessionID || got.SessionID != record.SessionID ||
 		got.Account != 2 || !got.Cache1H || got.CWD != cwd || !got.fresh {
 		t.Fatalf("adopted=%t left=%q request=%+v err=%v", adopted, left, got, err)
+	}
+	bare, bareRequest := record, request
+	bare.Account, bare.CWD, bareRequest.Home = 0, "", cwd
+	got, left, adopted, err = adoptHandoff(bareRequest, bare, entry, dir)
+	if err != nil || !adopted || left != record.SessionID || got.Account != 1 || got.CWD != cwd ||
+		got.cwdNotice != "opened in "+cwd+": no directory of its own was recorded" {
+		t.Fatalf("record without account or cwd adopted=%t left=%q request=%+v err=%v", adopted, left, got, err)
 	}
 	request.AccountGiven, request.CacheGiven = true, true
 	got, _, _, err = adoptHandoff(request, record, entry, dir)

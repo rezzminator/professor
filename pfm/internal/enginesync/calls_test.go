@@ -337,8 +337,23 @@ func TestMachineDoctor(t *testing.T) {
 			wantErr: "/h/.claude/engine-sync.json: machine.modelMap is removed; use codex.modelMap",
 		},
 		{
-			name: "an unknown level is an error", stdout: `{"ok":true,"rows":[{"level":"info","message":"m"}]}`,
-			wantErr: `unknown level "info"`,
+			name:   "an unknown level is kept as a warning naming it",
+			stdout: `{"ok":true,"rows":[{"level":"info","message":"m"},{"level":"ok","message":"n"}]}`,
+			want: []Row{
+				{Level: LevelWarn, Message: `m (engine-sync level "info")`},
+				{Level: LevelOK, Message: "n"},
+			},
+			argv: []string{"doctor", "--machine", "--home", "/h", "--json"},
+		},
+		{
+			name:   "an unknown level that alone explains a failing reply is a failure",
+			code:   1,
+			stdout: `{"ok":false,"rows":[{"level":"error","message":"m"},{"level":"warn","message":""}]}`,
+			want: []Row{
+				{Level: LevelFail, Message: `m (engine-sync level "error")`},
+				{Level: LevelWarn, Message: "engine-sync doctor --machine: row 1 has no message"},
+			},
+			argv: []string{"doctor", "--machine", "--home", "/h", "--json"},
 		},
 		{
 			name: "ok over a failing row is an error", stdout: `{"ok":true,"rows":[{"level":"fail","message":"m"}]}`,

@@ -62,7 +62,7 @@ func TestHarnessPromptReadmeIsEmbeddedButNeverStaged(t *testing.T) {
 	if _, err := harnessprompts.ReadPart("README.md"); err != nil {
 		t.Fatalf("read embedded README.md: %v", err)
 	}
-	assets, err := assetFiles()
+	assets, err := assetFiles(nativeScheduler())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,17 +117,6 @@ func TestInstallGeneratesClonePrompts(t *testing.T) {
 		}
 		generated[filename] = info
 	}
-	legacy := paths.LegacyHarnessPromptsDir(home)
-	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
-		t.Fatalf("install created legacy prompt dir: %v", err)
-	}
-	if err := os.MkdirAll(legacy, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	sentinel := filepath.Join(legacy, "operator-file")
-	if err := os.WriteFile(sentinel, []byte("keep"), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	if _, err := Run(
 		context.Background(),
 		Options{
@@ -150,31 +139,39 @@ func TestInstallGeneratesClonePrompts(t *testing.T) {
 			t.Fatalf("reinstall rewrote unchanged prompt %s", filename)
 		}
 	}
-	if raw, err := os.ReadFile(sentinel); err != nil || string(raw) != "keep" {
-		t.Fatalf("existing legacy dir changed: %q %v", raw, err)
-	}
 }
 
-// A failed output enumeration is an install error, not permission to continue
-// configuring consumers against a missing or empty prompt.
+// One engine's prompt that fails to generate costs that prompt and its
+// consumers alone: the other engines' prompts and the rest of the install land,
+// never configuring a consumer against a missing or stale prompt.
 func TestInstallNamesHarnessGenerationFailure(t *testing.T) {
 	home, clone := t.TempDir(), t.TempDir()
 	seedHarnessPromptTree(t, clone, nil)
 	configPath := filepath.Join(home, "pfm.config.json")
 	writeFixture(t, configPath, "{\"version\":2}\n")
-	blocked := filepath.Join(clone, "pfm", "harness-prompts", "generated")
-	writeFixture(t, blocked, "not a directory")
+	blocked := paths.GeneratedHarnessPromptIn(clone, pfmengine.Codex)
+	if err := os.MkdirAll(blocked, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv(paths.EnvConfig, configPath)
+	var output bytes.Buffer
 	_, err := Run(context.Background(), Options{
 		Mode: ModeApply, Home: home, SourceRepo: clone, MCPConfigPath: configPath,
-		Runner: &fakeRunner{}, Stdout: io.Discard,
+		Runner: &fakeRunner{}, Stdout: &output,
 	})
-	if err == nil || !strings.Contains(err.Error(), "generate harness prompts") ||
-		!strings.Contains(err.Error(), blocked) {
-		t.Fatalf("generation failure was not named: %v", err)
+	failure := "generate harness prompts: read generated harness prompt " + blocked + ": "
+	if err == nil || !strings.Contains(err.Error(), failure) || strings.Contains(err.Error(), "preflight") {
+		t.Fatalf("generation failure was not named as %q: %v", failure, err)
+	}
+	skip := "  skip    Codex config defaults and fleet prompt skipped: the codex harness prompt failed to generate above\n"
+	if !strings.Contains(output.String(), skip) {
+		t.Fatalf("output lacks %q:\n%s", skip, output.String())
 	}
 	if _, err := os.Stat(filepath.Join(home, ".codex", "config.toml")); !os.IsNotExist(err) {
 		t.Fatalf("consumer ran after generation failure: %v", err)
+	}
+	if _, err := os.Stat(paths.GeneratedHarnessPromptIn(clone, pfmengine.Claude)); err != nil {
+		t.Fatalf("the claude prompt did not land past the codex failure: %v", err)
 	}
 }
 

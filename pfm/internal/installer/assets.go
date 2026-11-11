@@ -20,7 +20,7 @@ type assetFile struct {
 	mode fs.FileMode
 }
 
-func assetFiles() ([]assetFile, error) {
+func assetFiles(sched scheduler) ([]assetFile, error) {
 	var files []assetFile
 	err := fs.WalkDir(embeddedAssets, "assets", func(name string, entry fs.DirEntry, err error) error {
 		if err != nil {
@@ -33,7 +33,7 @@ func assetFiles() ([]assetFile, error) {
 		if relative == "shim/pfm.zsh" || relative == herdrShellAsset {
 			return nil
 		}
-		if !schedulerAsset(relative) {
+		if !schedulerAsset(sched, relative) {
 			// The other platform's scheduler files are embedded (one binary
 			// serves both) but never staged: an operator on macOS should not
 			// find a ~/.config/systemd/user of units nothing will read, and an
@@ -60,14 +60,14 @@ func assetFiles() ([]assetFile, error) {
 	return files, nil
 }
 
-// schedulerAsset reports whether an embedded asset belongs on this platform.
-// The launch agent is not staged even on macOS: launchd refuses a symlinked
-// plist, so wireLaunchAgent writes a real file into ~/Library/LaunchAgents
-// instead of linking one out of the managed root.
-func schedulerAsset(relative string) bool {
+// schedulerAsset reports whether an embedded asset belongs under sched. The
+// launch agent is never staged: launchd refuses a symlinked plist, so
+// wireLaunchAgent writes a real file into ~/Library/LaunchAgents instead of
+// linking one out of the managed root.
+func schedulerAsset(sched scheduler, relative string) bool {
 	switch {
 	case strings.HasPrefix(relative, "systemd/"):
-		return !schedulerIsLaunchd
+		return sched.stagesUnits()
 	case strings.HasPrefix(relative, "launchd/"):
 		return false
 	default:

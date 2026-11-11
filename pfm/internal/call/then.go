@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"strings"
 	"time"
@@ -218,8 +217,6 @@ func (engine *Engine) waitForQuietTypist(
 type CommandThenSpawner struct {
 	Executable string
 	ConfigPath string
-	Setsid     string
-	Nohup      string
 	// Runner is the deps.Runner seam Spawn launches the waiter through; nil
 	// defaults to obs.Runner(deps.RealRunner{}).
 	Runner deps.Runner
@@ -264,12 +261,6 @@ func (spawner CommandThenSpawner) Spawn(
 	for _, steer := range request.Steers {
 		arguments = append(arguments, "--steer", steer)
 	}
-	launcher, prefixArgs, forked, err := deps.DetachLauncher(spawner.Setsid, spawner.Nohup)
-	if err != nil {
-		return fmt.Errorf("detach then waiter: %w", err)
-	}
-	usingNohup := !forked
-	arguments = append(prefixArgs, arguments...)
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -297,45 +288,31 @@ func (spawner CommandThenSpawner) Spawn(
 	// Stdin is left unset: a deps.Runner.Start child reads from the null
 	// device by default (os/exec's own contract for a nil Stdin) exactly as
 	// the explicit /dev/null wiring this replaced did.
-	null, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
-	if err != nil {
-		return fmt.Errorf("open null device for then waiter: %w", err)
-	}
-	defer func() {
-		if err := null.Close(); err != nil {
-			returnErr = errors.Join(returnErr, fmt.Errorf("close null device for then waiter: %w", err))
-		}
-	}()
 	// A fresh chain truncates the log; a HOP appends — truncating on a hop
 	// would wipe the chain's earlier hops while they are still being written.
 	flags := os.O_CREATE | os.O_WRONLY | os.O_TRUNC
 	if request.Append {
 		flags = os.O_CREATE | os.O_WRONLY | os.O_APPEND
 	}
-	var stdout, stderr io.Writer = null, null
+	// The log is the waiter's only voice once detached: an undelivered steer
+	// is kept there. A waiter that cannot write it is never started.
 	log, err := os.OpenFile(request.LogPath, flags, 0o600)
-	if err == nil {
-		defer func() {
-			if err := log.Close(); err != nil {
-				returnErr = errors.Join(returnErr, fmt.Errorf("close then waiter log %s: %w", request.LogPath, err))
-			}
-		}()
-		stdout, stderr = log, log
+	if err != nil {
+		return fmt.Errorf("open then waiter log: %w", err)
 	}
+	defer func() {
+		if err := log.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close then waiter log %s: %w", request.LogPath, err))
+		}
+	}()
+
 	runner := spawner.Runner
 	if runner == nil {
 		runner = obs.Runner(deps.RealRunner{})
 	}
-	opts := deps.StartOptions{
-		Env:    env,
-		Stdout: stdout,
-		Stderr: stderr,
-		// The nohup floor detaches by releasing the process handle right
-		// after Start (deps.StartOptions' Detach shape); the setsid launcher
-		// already forks and returns on its own (setsid -f), so Spawn waits
-		// on it exactly as it waited on command.Run() before this seam.
-		Detach: usingNohup,
-	}
+	// The waiter outlives this caller in a session of its own; the runner
+	// reaps it in the background, so Release only gives up the handle.
+	opts := deps.StartOptions{Env: env, Stdout: log, Stderr: log, Detach: true}
 	// The armed record goes down BEFORE the waiter starts, so a schedule
 	// racing this one already sees the pane armed; a chain hop (Append) is
 	// the same arming and leaves the record to the hop that owns it.
@@ -348,26 +325,17 @@ func (spawner CommandThenSpawner) Spawn(
 			return err
 		}
 	}
-	process, err := runner.Start(ctx, append([]string{launcher}, arguments...), opts)
+	process, err := runner.Start(ctx, arguments, opts)
 	if err != nil {
 		if !request.Append && request.LogPath != "" {
 			if removeErr := os.Remove(armedPathFor(request.LogPath)); removeErr != nil {
 				err = errors.Join(err, fmt.Errorf("remove armed steer record after a failed start: %w", removeErr))
 			}
 		}
-		if usingNohup {
-			return fmt.Errorf("start detached then waiter with nohup: %w", err)
-		}
-		return fmt.Errorf("start detached then waiter with setsid: %w", err)
+		return fmt.Errorf("start detached then waiter: %w", err)
 	}
-	if usingNohup {
-		if err := process.Release(); err != nil {
-			return fmt.Errorf("release detached then waiter: %w", err)
-		}
-		return nil
-	}
-	if err := process.Wait(); err != nil {
-		return fmt.Errorf("start detached then waiter with setsid: %w", err)
+	if err := process.Release(); err != nil {
+		return fmt.Errorf("release detached then waiter: %w", err)
 	}
 	return nil
 }

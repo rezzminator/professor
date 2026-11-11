@@ -87,7 +87,7 @@ func (printer *SeatPrinter) Print(chat headless.Chat) (string, bool) {
 		return "", false
 	}
 	for _, entry := range crumbs {
-		// Only what the scan's crumb route reads (gather.ReadCrumbs): the
+		// Only what the scan's crumb route reads (gather.ParseCrumbName, inside its scanCrumbs): the
 		// statusline's effort records and their scratch files, rewritten on
 		// every render of every chat, are no input of the row.
 		if _, _, crumb := gather.ParseCrumbName(entry.Name()); !crumb || !entry.Type().IsRegular() {

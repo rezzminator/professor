@@ -89,13 +89,28 @@ func TestStatuslineOnABrokenConfigRendersTheConfigWarning(t *testing.T) {
 	}
 }
 
-func TestUsageHookOnABrokenConfigStopsAtTheDispatcher(t *testing.T) {
+// The usage hook runs on defaults and names the broken config, while a
+// command that edits the config still refuses and leaves the file as written.
+func TestUsageHookOnABrokenConfigRunsOnDefaults(t *testing.T) {
 	root := jailTest(t)
 	configPath := writeConfigFixture(t, root, "{")
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"--config", configPath, "usage-hook"}, &stdout, &stderr); code != 1 ||
-		!strings.HasPrefix(stderr.String(), "pfm: config:") {
-		t.Fatalf("broken config usage-hook code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	code := run([]string{"--config", configPath, "usage-hook"}, &stdout, &stderr)
+	first, _, _ := strings.Cut(stderr.String(), "\n")
+	want := "pfm: config: parse config " + configPath +
+		" at byte 1: unexpected EOF; running on defaults until it is fixed (pfm doctor)"
+	if code != 0 || first != want {
+		t.Fatalf("broken config usage-hook code=%d first stderr line=%q, want 0 and %q (stdout=%q stderr=%q)",
+			code, first, want, stdout.String(), stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := run([]string{"--config", configPath, mcpCommand, "chat", "disable"}, &stdout, &stderr); code != 1 {
+		t.Fatalf("broken config mcp chat disable code=%d stdout=%q stderr=%q, want 1", code, stdout.String(),
+			stderr.String())
+	}
+	if got := string(mustReadFile(t, configPath)); got != "{" {
+		t.Fatalf("broken config %s after mcp chat disable = %q, want %q", configPath, got, "{")
 	}
 }
 

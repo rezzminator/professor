@@ -20,21 +20,28 @@ type diskFile struct {
 	MTimeNS int64
 }
 
-func walkClaudeRoots(ctx context.Context, roots []string) ([]diskFile, error) {
+// walkClaudeRoots lists every transcript under roots. A root, directory or
+// file it cannot read is warned and skipped, its siblings still listed;
+// complete is false then, so the caller never prunes a row it could not look
+// for. Only a cancelled ctx or an unresolvable root path is an error.
+func walkClaudeRoots(ctx context.Context, roots []string) ([]diskFile, bool, error) {
 	seenRoots := make(map[string]struct{})
 	filesByPath := make(map[string]diskFile)
+	complete := true
 
 	for _, root := range roots {
 		absolute, err := filepath.Abs(root)
 		if err != nil {
-			return nil, fmt.Errorf("make Claude root absolute %q: %w", root, err)
+			return nil, false, fmt.Errorf("make Claude root absolute %q: %w", root, err)
 		}
 		_, err = os.Stat(absolute)
 		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
 		if err != nil {
-			return nil, fmt.Errorf("stat Claude root %q: %w", root, err)
+			warnUnreadable(ctx, "claude root", absolute, err)
+			complete = false
+			continue
 		}
 		if _, duplicate := seenRoots[absolute]; duplicate {
 			continue
@@ -44,11 +51,19 @@ func walkClaudeRoots(ctx context.Context, roots []string) ([]diskFile, error) {
 		// The trailing "/." makes WalkDir descend a symlinked root; filepath.Join would clean it away.
 		walkRoot := fmt.Sprintf("%s%c.", absolute, os.PathSeparator)
 		err = filepath.WalkDir(walkRoot, func(path string, entry fs.DirEntry, walkErr error) error {
-			if walkErr != nil {
-				return walkErr
-			}
 			if err := ctx.Err(); err != nil {
 				return err
+			}
+			if errors.Is(walkErr, fs.ErrNotExist) {
+				return nil // removed mid-walk: gone, not unread
+			}
+			if walkErr != nil {
+				warnUnreadable(ctx, "claude directory", path, walkErr)
+				complete = false
+				if entry != nil && entry.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
 			}
 
 			relative, err := filepath.Rel(walkRoot, path)
@@ -72,8 +87,13 @@ func walkClaudeRoots(ctx context.Context, roots []string) ([]diskFile, error) {
 			}
 
 			info, err := entry.Info()
+			if errors.Is(err, fs.ErrNotExist) {
+				return nil // removed mid-walk: gone, not unread
+			}
 			if err != nil {
-				return err
+				warnUnreadable(ctx, "claude transcript", path, err)
+				complete = false
+				return nil
 			}
 			path = filepath.Clean(path)
 			filesByPath[path] = diskFile{
@@ -85,19 +105,24 @@ func walkClaudeRoots(ctx context.Context, roots []string) ([]diskFile, error) {
 			return nil
 		})
 		if err != nil {
-			return nil, fmt.Errorf("walk Claude root %q: %w", absolute, err)
+			return nil, false, fmt.Errorf("walk Claude root %q: %w", absolute, err)
 		}
 	}
 
-	return sortedDiskFiles(filesByPath), nil
+	return sortedDiskFiles(filesByPath), complete, nil
 }
 
 // walkCodexRollouts lists codexHome's live rollouts. The index reads sessions/
-// only: an archived thread is no live or resumable seat.
-func walkCodexRollouts(ctx context.Context, codexHome string) ([]diskFile, error) {
+// only: an archived thread is no live or resumable seat. What the walk could
+// not read is warned and complete is false, the rollouts it did list kept;
+// only a cancelled ctx is an error.
+func walkCodexRollouts(ctx context.Context, codexHome string) ([]diskFile, bool, error) {
 	rollouts, errs := codexmeta.WalkRollouts(ctx, codexHome, codexmeta.SessionsDir)
-	if err := errors.Join(errs...); err != nil {
-		return nil, fmt.Errorf("walk Codex rollouts under %q: %w", codexHome, err)
+	if err := ctx.Err(); err != nil {
+		return nil, false, fmt.Errorf("walk Codex rollouts under %q: %w", codexHome, err)
+	}
+	for _, walkErr := range errs {
+		warnUnreadable(ctx, "codex rollouts", codexHome, walkErr)
 	}
 	files := make([]diskFile, 0, len(rollouts))
 	for _, rollout := range rollouts {
@@ -108,7 +133,7 @@ func walkCodexRollouts(ctx context.Context, codexHome string) ([]diskFile, error
 			MTimeNS: rollout.ModTime.UnixNano(),
 		})
 	}
-	return files, nil
+	return files, len(errs) == 0, nil
 }
 
 func sortedDiskFiles(filesByPath map[string]diskFile) []diskFile {

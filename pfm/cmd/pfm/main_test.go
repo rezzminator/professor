@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"go/ast"
 	"go/parser"
-	"go/printer"
 	"go/token"
 	"os"
 	"os/exec"
@@ -20,7 +19,6 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/doctor"
-	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/hostcheck"
 	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -544,6 +542,7 @@ func jailTest(t *testing.T) string {
 	dirs, files := storeLayout()
 	testjail.StageAccountLinks(t, filepath.Join(root, "home"), filepath.Join(root, "home", ".cc", "1"), dirs, files)
 	stageStorePlugins(t, filepath.Join(root, "home"))
+	testjail.StageInstalledHerdrClaudeHook(t, filepath.Join(root, "home", ".cc", "1"))
 	// The jailed home reaches no user service manager: macOS always has
 	// launchctl, whose real gui domain holds no plist in this home.
 	previous := doctor.ScheduleTimerProbeOverride
@@ -636,14 +635,8 @@ func argsZeroStringLiterals(body *ast.BlockStmt) map[string]bool {
 
 // switchCaseStringLiterals collects every string literal a top-level
 // "switch args[0]" case clause names.
-// switchCaseStringLiterals collects every case's plain string literal AND
-// the printed source text of every non-literal case expression — run's own
-// "codex" case matches on pfmengine.MustLookup(pfmengine.Codex).LongName,
-// not a bare "codex" literal, so a caller that needs that one name checks
-// the printed-text set with pfmengine's own known selector text instead.
-func switchCaseStringLiterals(fset *token.FileSet, body *ast.BlockStmt) (literals, printedExprs map[string]bool) {
-	literals = map[string]bool{}
-	printedExprs = map[string]bool{}
+func switchCaseStringLiterals(body *ast.BlockStmt) map[string]bool {
+	literals := map[string]bool{}
 	ast.Inspect(body, func(n ast.Node) bool {
 		clause, ok := n.(*ast.CaseClause)
 		if !ok {
@@ -654,22 +647,17 @@ func switchCaseStringLiterals(fset *token.FileSet, body *ast.BlockStmt) (literal
 				if value, err := strconv.Unquote(literal.Value); err == nil {
 					literals[value] = true
 				}
-				continue
-			}
-			var buf bytes.Buffer
-			if err := printer.Fprint(&buf, fset, expr); err == nil {
-				printedExprs[buf.String()] = true
 			}
 		}
 		return true
 	})
-	return literals, printedExprs
+	return literals
 }
 
 // findFuncDecl parses main.go once and returns the *ast.FuncDecl body for
 // name — "run" or "runInternal", the two functions topLevelSubcommands and
 // internalSubcommands must stay in lockstep with.
-func findFuncDecl(t *testing.T, name string) (*ast.BlockStmt, *token.FileSet) {
+func findFuncDecl(t *testing.T, name string) *ast.BlockStmt {
 	t.Helper()
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "main.go", nil, 0)
@@ -679,28 +667,19 @@ func findFuncDecl(t *testing.T, name string) (*ast.BlockStmt, *token.FileSet) {
 	for _, decl := range file.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
 		if ok && fn.Name.Name == name {
-			return fn.Body, fset
+			return fn.Body
 		}
 	}
 	t.Fatalf("main.go declares no func %s", name)
-	return nil, nil
+	return nil
 }
 
 // Every advertised top-level subcommand must reach its dispatcher handler.
 func TestTopLevelSubcommandsReachTheirHandler(t *testing.T) {
-	body, fset := findFuncDecl(t, "run")
-	literals, printedExprs := switchCaseStringLiterals(fset, body)
-	// Engine cases match on registry LongName expressions, not bare literals;
-	// topLevelSubcommands carries those same runtime values.
-	selectors := map[string]string{
-		pfmengine.MustLookup(pfmengine.Codex).LongName:    "pfmengine.MustLookup(pfmengine.Codex).LongName",
-		pfmengine.MustLookup(pfmengine.OpenCode).LongName: "pfmengine.MustLookup(pfmengine.OpenCode).LongName",
-	}
+	body := findFuncDecl(t, "run")
+	literals := switchCaseStringLiterals(body)
 	for _, name := range topLevelSubcommands {
 		if literals[name] {
-			continue
-		}
-		if selector, ok := selectors[name]; ok && printedExprs[selector] {
 			continue
 		}
 		t.Fatalf(
@@ -712,7 +691,7 @@ func TestTopLevelSubcommandsReachTheirHandler(t *testing.T) {
 
 // Advertised internal subcommands must reach their dispatcher handlers.
 func TestInternalSubcommandsReachTheirHandler(t *testing.T) {
-	body, _ := findFuncDecl(t, "runInternal")
+	body := findFuncDecl(t, "runInternal")
 	comparisons := argsZeroStringLiterals(body)
 	for _, name := range internalSubcommands {
 		if !comparisons[name] {
@@ -724,73 +703,29 @@ func TestInternalSubcommandsReachTheirHandler(t *testing.T) {
 	}
 }
 
-// legacyConfigJail is a jailed installed home whose default config load finds
-// no clone config while a legacy ~/.config/pfm/pfm.config.json waits.
-func legacyConfigJail(t *testing.T) string {
+// brokenConfigJail is a jailed installed home whose default config does not
+// parse; it returns the config's path.
+func brokenConfigJail(t *testing.T) string {
 	t.Helper()
 	root := jailTest(t)
 	t.Setenv(paths.EnvConfig, "")
-	home := jailPaths(t).Home
-	clone := filepath.Join(root, "clone") // a jailed clone with no pfm.config.json
+	clone := filepath.Join(root, "clone")
 	if err := os.MkdirAll(clone, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := paths.WriteSourceRepoMarker(home, clone); err != nil {
+	if err := paths.WriteSourceRepoMarker(jailPaths(t).Home, clone); err != nil {
 		t.Fatal(err)
 	}
-	legacy := filepath.Join(pfmconfig.LegacyConfigDir(paths.OSEnv{}, home), pfmconfig.FileName)
-	if err := os.MkdirAll(filepath.Dir(legacy), 0o700); err != nil {
+	path := filepath.Join(clone, pfmconfig.FileName)
+	if err := os.WriteFile(path, []byte("{"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	content, err := pfmconfig.MarshalDefault(home, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(legacy, content, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	return legacy
+	return path
 }
 
-func TestInstallRefusesWhileLegacyConfigWaits(t *testing.T) {
-	legacy := legacyConfigJail(t)
-	previous := runInstaller
-	t.Cleanup(func() { runInstaller = previous })
-	var modes []installer.Mode
-	runInstaller = func(_ context.Context, options installer.Options) (installer.Report, error) {
-		modes = append(modes, options.Mode)
-		return installer.Report{}, nil
-	}
-	for _, args := range [][]string{{"install", "--offline"}, {"install", "--yes", "--offline"}} {
-		var stdout, stderr bytes.Buffer
-		if code := run(args, &stdout, &stderr); code != 4 {
-			t.Fatalf("run(%q) code=%d stdout=%q stderr=%q", args, code, stdout.String(), stderr.String())
-		}
-		want := "pfm install: BLOCK legacy-config " + legacy + " — legacy pfm config outside the clone\n"
-		if !strings.Contains(stderr.String(), want) {
-			t.Fatalf("stderr=%q, want %q", stderr.String(), want)
-		}
-	}
-	if len(modes) != 0 {
-		t.Fatalf("installer modes=%v, want no installer run", modes)
-	}
-}
-
-func TestDoctorReportsConfigNotMigrated(t *testing.T) {
-	legacy := legacyConfigJail(t)
-	var stdout, stderr bytes.Buffer
-	if code := run([]string{"doctor"}, &stdout, &stderr); code != 3 {
-		t.Fatalf("doctor code=%d stdout=%q stderr=%q, want failure", code, stdout.String(), stderr.String())
-	}
-	want := "doctor: config error=config not migrated: run pfm doctor for the fix"
-	if !strings.Contains(stdout.String(), want) || !strings.Contains(stdout.String(), legacy) {
-		t.Fatalf("doctor stdout=%q stderr=%q, want %q naming %s", stdout.String(), stderr.String(), want, legacy)
-	}
-}
-
-// Version answers while a legacy config waits for the operator to apply doctor's fix.
-func TestVersionAnswersWhileLegacyConfigWaits(t *testing.T) {
-	legacyConfigJail(t)
+// Version answers on a default config that does not parse.
+func TestVersionAnswersOnABrokenConfig(t *testing.T) {
+	brokenConfigJail(t)
 	for _, arg := range []string{"--version", versionCommand} {
 		var stdout, stderr bytes.Buffer
 		if code := run([]string{arg}, &stdout, &stderr); code != 0 {
@@ -802,9 +737,9 @@ func TestVersionAnswersWhileLegacyConfigWaits(t *testing.T) {
 	}
 }
 
-// Stale needs no config during binary replacement while the legacy config waits.
-func TestInternalStaleAnswersWhileLegacyConfigWaits(t *testing.T) {
-	legacyConfigJail(t)
+// Stale needs no config during binary replacement, a broken one included.
+func TestInternalStaleAnswersOnABrokenConfig(t *testing.T) {
+	brokenConfigJail(t)
 	bin := filepath.Join(jailPaths(t).Home, ".local", "bin", "pfm")
 	if err := os.MkdirAll(filepath.Dir(bin), 0o700); err != nil {
 		t.Fatal(err)
@@ -826,52 +761,44 @@ func TestInternalStaleAnswersWhileLegacyConfigWaits(t *testing.T) {
 	}
 }
 
-// Every other internal command still refuses while the legacy config waits.
-func TestInternalCommandsRefuseWhileLegacyConfigWaits(t *testing.T) {
-	legacyConfigJail(t)
+// A hook or launcher runs on defaults over a broken config: a refusal there
+// would keep Claude from starting and fail every guard open.
+func TestInternalCommandsRunOnDefaultsOnABrokenConfig(t *testing.T) {
+	path := brokenConfigJail(t)
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{internalCommand, "git-guard"}, &stdout, &stderr); code != 1 {
-		t.Fatalf("internal git-guard code=%d stdout=%q stderr=%q, want 1", code, stdout.String(), stderr.String())
+	if code := run([]string{internalCommand, "primary-get"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("internal primary-get code=%d stdout=%q stderr=%q, want 0", code, stdout.String(), stderr.String())
 	}
-	if want := "pfm: config: config not migrated: run pfm doctor for the fix"; !strings.HasPrefix(
-		stderr.String(),
-		want,
-	) {
-		t.Fatalf("internal git-guard stderr=%q, want %q", stderr.String(), want)
+	if stdout.String() != "1\n" {
+		t.Fatalf("internal primary-get stdout=%q, want the default account %q", stdout.String(), "1\n")
+	}
+	want := "pfm: config: parse config " + path +
+		" at byte 1: unexpected EOF; running on defaults until it is fixed (pfm doctor)\n"
+	if stderr.String() != want {
+		t.Fatalf("internal primary-get stderr=%q, want %q", stderr.String(), want)
 	}
 }
 
-// pfm config show keeps naming the pending legacy config; its exit stays 0.
-func TestConfigShowNamesNotMigrated(t *testing.T) {
-	legacyConfigJail(t)
-	var stdout, stderr bytes.Buffer
-	if code := run([]string{configCommand, "show"}, &stdout, &stderr); code != 0 {
-		t.Fatalf("config show code=%d stdout=%q stderr=%q, want 0", code, stdout.String(), stderr.String())
-	}
-	if want := "pfm config show: configuration error: config not migrated"; !strings.Contains(stderr.String(), want) {
-		t.Fatalf("config show stderr=%q, want %q", stderr.String(), want)
-	}
-}
-
-func TestCommandsRefuseWhileLegacyConfigWaits(t *testing.T) {
-	legacy := legacyConfigJail(t)
+func TestCommandsRefuseOnABrokenConfig(t *testing.T) {
+	path := brokenConfigJail(t)
 	for _, args := range [][]string{{"ls"}, {"chat", "ls"}} {
 		var stdout, stderr bytes.Buffer
 		if code := run(args, &stdout, &stderr); code != 1 {
 			t.Fatalf("ls code=%d stdout=%q stderr=%q, want 1", code, stdout.String(), stderr.String())
 		}
-		want := "pfm: config: config not migrated: run pfm doctor for the fix"
-		if !strings.HasPrefix(stderr.String(), want) || !strings.Contains(stderr.String(), legacy) {
-			t.Fatalf("ls stderr=%q, want %q naming %s", stderr.String(), want, legacy)
+		want := "pfm: config: parse config " + path + " at byte 1: unexpected EOF"
+		if !strings.HasPrefix(stderr.String(), want) {
+			t.Fatalf("ls stderr=%q, want it to begin %q", stderr.String(), want)
 		}
 	}
 }
 
-func TestInstallWithMissingNamedLegacyConfig(t *testing.T) {
-	legacy := legacyConfigJail(t)
-	if err := os.Remove(legacy); err != nil {
+func TestInstallWithMissingNamedConfig(t *testing.T) {
+	broken := brokenConfigJail(t)
+	if err := os.Remove(broken); err != nil {
 		t.Fatal(err)
 	}
+	missing := filepath.Join(filepath.Dir(broken), "missing", pfmconfig.FileName)
 	account := pfmconfig.DefaultAccountDir(jailPaths(t).Home, 42)
 	if err := os.MkdirAll(account, 0o700); err != nil {
 		t.Fatal(err)
@@ -890,9 +817,9 @@ func TestInstallWithMissingNamedLegacyConfig(t *testing.T) {
 		{[]string{"install", "--check", "--offline"}, 1, "pfm install: "},
 	} {
 		var stdout, stderr bytes.Buffer
-		args := append([]string{"--config", legacy}, scenario.args...)
+		args := append([]string{"--config", missing}, scenario.args...)
 		code := run(args, &stdout, &stderr)
-		want := scenario.prefix + "--config " + legacy + " does not exist; refusing to converge host wiring on defaults (a missing explicit config would disable every MCP service it names)\n"
+		want := scenario.prefix + "--config " + missing + " does not exist; refusing to converge host wiring on defaults (a missing explicit config would disable every MCP service it names)\n"
 		output := stderr.String()
 		if scenario.code == 0 {
 			output = stdout.String()
@@ -939,4 +866,5 @@ func stageStorePlugins(t *testing.T, home string) {
 		t.Fatal(err)
 	}
 	testjail.StageClaudePlugins(t, storeDir, ids)
+	testjail.StageTracetreeKit(t, storeDir, ids)
 }

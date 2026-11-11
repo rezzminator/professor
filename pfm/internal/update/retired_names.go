@@ -17,55 +17,17 @@ import (
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/professor"
+	"github.com/rezzminator/professor/pfm/internal/retired"
 )
-
-// retiredMatch is how far past a retired name a reference may run.
-type retiredMatch int
-
-const (
-	// matchExact: the name alone — `/pfm:refresh`, never `/pfm:refreshed` or
-	// `/pfm:refresh:x`.
-	matchExact retiredMatch = iota
-	// matchFamily: the name alone or as a namespace — `/wave` and
-	// `/wave:refine`, never `/waveform`.
-	matchFamily
-	// matchPrefix: any text the name starts — `mcp__chat__chat_inject`.
-	matchPrefix
-)
-
-// The kinds a retired name is reported as.
-const (
-	retiredCommand = "command"
-	retiredAgent   = "agent"
-	retiredSkill   = "skill"
-	retiredPhase   = "phase"
-	retiredTool    = "tool"
-	retiredPath    = "path"
-)
-
-// retiredName is one name the framework retired that a project file may
-// still reference: a command, agent, skill, gitter phase, MCP tool or
-// project-tier path.
-type retiredName struct {
-	name      string
-	kind      string
-	successor string // "" when nothing replaced it
-	match     retiredMatch
-	// probe is the root-relative file whose existence means the project defines
-	// the thing itself, for a name that is a context around the thing rather
-	// than the thing (`subagent_type: "ultimate"`); "" derives it from name.
-	probe string
-}
 
 // RetiredPfmCommand answers the dispatch of a retired `pfm {command}`: the
-// retired name and the successor the retired list gives it, read from
-// retiredNames (the one table). ok is false for a command the list does not
-// retire as a command with a successor.
-func RetiredPfmCommand(command string) (name, successor string, ok bool) {
+// retired name and the successor names gives it. ok is false for a command
+// names does not retire as a command with a successor.
+func RetiredPfmCommand(names []retired.Name, command string) (name, successor string, ok bool) {
 	name = "pfm " + command
-	for _, retired := range retiredNames {
-		if retired.kind == retiredCommand && retired.name == name && retired.successor != "" {
-			return retired.name, retired.successor, true
+	for _, entry := range names {
+		if entry.Kind == retired.KindCommand && entry.Name == name && entry.Successor != "" {
+			return entry.Name, entry.Successor, true
 		}
 	}
 	return "", "", false
@@ -75,21 +37,21 @@ func RetiredPfmCommand(command string) (name, successor string, ok bool) {
 // project itself still defines the retired name: its own command, agent or
 // skill file. Retired paths, phases, MCP tools and commands spelled with a
 // space are defined by no project file; a legacy path cannot exempt itself.
-func (r retiredName) definitionProbes() []string {
-	if r.probe != "" {
-		return []string{r.probe}
+func definitionProbes(r retired.Name) []string {
+	if r.Probe != "" {
+		return []string{r.Probe}
 	}
-	switch r.kind {
-	case retiredCommand:
-		command := strings.ReplaceAll(strings.TrimSuffix(strings.TrimPrefix(r.name, "/"), ":"), ":", "/")
+	switch r.Kind {
+	case retired.KindCommand:
+		command := strings.ReplaceAll(strings.TrimSuffix(strings.TrimPrefix(r.Name, "/"), ":"), ":", "/")
 		if command == "" || strings.ContainsAny(command, " ") {
 			return nil
 		}
 		return []string{".claude/commands/" + command + ".md", ".claude/commands/" + command}
-	case retiredAgent:
-		return []string{".claude/agents/" + r.name + ".md"}
-	case retiredSkill:
-		return []string{".claude/skills/" + strings.TrimSuffix(strings.TrimPrefix(r.name, "skills/"), " skill")}
+	case retired.KindAgent:
+		return []string{".claude/agents/" + r.Name + ".md"}
+	case retired.KindSkill:
+		return []string{".claude/skills/" + strings.TrimSuffix(strings.TrimPrefix(r.Name, "skills/"), " skill")}
 	}
 	return nil
 }
@@ -98,12 +60,12 @@ func (r retiredName) definitionProbes() []string {
 // itself: a project that keeps its own /km command is not naming a retired
 // one. A probe that cannot be statted for any reason but absence leaves the
 // name flagged.
-func dropDefinedNames(root string, hits []professor.RetiredNameHit) []professor.RetiredNameHit {
+func dropDefinedNames(names []retired.Name, root string, hits []professor.RetiredNameHit) []professor.RetiredNameHit {
 	defined := map[string]bool{}
-	for _, retired := range retiredNames {
-		for _, probe := range retired.definitionProbes() {
+	for _, entry := range names {
+		for _, probe := range definitionProbes(entry) {
 			if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(probe))); err == nil {
-				defined[retired.name] = true
+				defined[entry.Name] = true
 				break
 			}
 		}
@@ -145,41 +107,41 @@ const retiredMaxRead = 8 << 20
 // newline-free dump costs at most this much whatever its size.
 const retiredMaxLine = 4 << 20
 
-// ScanRetiredNames is the retired-name pass of `pfm doctor --project-updates`:
-// the project's own text files except the ones the caller skips (pinned files
-// whose report row covers them; slash-separated, root-relative), pfm's own
-// baseline and the generated engine mirrors, each line checked against
-// retiredNames. In a git work tree the project's own
-// text is git's tracked and unignored files; elsewhere it is a walk of the
-// root minus the dependency, build and cache directories. A file or
-// directory it cannot read is a Failure, never a clean result.
-func ScanRetiredNames(root string, pinned map[string]bool) professor.RetiredNameScan {
-	return ScanRetiredNamesWithContext(context.Background(), root, pinned)
+// RetiredNameScanner is the retired-name pass of `pfm doctor
+// --project-updates` over the names of home's clone (retired.LoadLists), read
+// once: the project's own text files except the ones the caller skips (pinned
+// files whose report row covers them; slash-separated, root-relative), pfm's
+// own baseline and the generated engine mirrors, each line checked against
+// the names. In a git work tree the project's own text is git's tracked and
+// unignored files; elsewhere it is a walk of the root minus the dependency,
+// build and cache directories. ctx bounds git enumeration and stops the scan
+// between file reads. A file or directory it cannot read, or a list that
+// cannot load, is a Failure, never a clean result.
+func RetiredNameScanner(ctx context.Context, home string) professor.RetiredNameScanner {
+	lists, err := retired.LoadLists(home)
+	if err != nil {
+		return func(string, map[string]bool) professor.RetiredNameScan {
+			return professor.RetiredNameScan{
+				Hits:     []professor.RetiredNameHit{},
+				Failures: []professor.RetiredNameFailure{{Path: ".", Error: err.Error()}},
+			}
+		}
+	}
+	return func(root string, pinned map[string]bool) professor.RetiredNameScan {
+		return scanRetiredNames(ctx, lists.Names, root, pinned, openRetiredFile)
+	}
 }
 
-// ScanRetiredNamesWithContext shares the caller's deadline with git enumeration
-// and stops between regular-file reads when the context is cancelled.
-func ScanRetiredNamesWithContext(ctx context.Context, root string, pinned map[string]bool) professor.RetiredNameScan {
-	return scanRetiredNamesOpening(ctx, root, pinned, openRetiredFile)
-}
-
-func scanRetiredNamesWith(
-	root string,
-	pinned map[string]bool,
-	open func(string) (io.ReadCloser, error),
-) professor.RetiredNameScan {
-	return scanRetiredNamesOpening(context.Background(), root, pinned, open)
-}
-
-func scanRetiredNamesOpening(
+func scanRetiredNames(
 	ctx context.Context,
+	names []retired.Name,
 	root string,
 	pinned map[string]bool,
 	open func(string) (io.ReadCloser, error),
 ) professor.RetiredNameScan {
-	scan := scanRetiredNamesRaw(ctx, root, pinned, open)
+	scan := scanRetiredNamesRaw(ctx, names, root, pinned, open)
 	if resolved, err := filepath.EvalSymlinks(root); err == nil {
-		scan.Hits = dropDefinedNames(resolved, scan.Hits)
+		scan.Hits = dropDefinedNames(names, resolved, scan.Hits)
 	}
 	return scan
 }
@@ -188,6 +150,7 @@ func scanRetiredNamesOpening(
 // weighed.
 func scanRetiredNamesRaw(
 	ctx context.Context,
+	names []retired.Name,
 	root string,
 	pinned map[string]bool,
 	open func(string) (io.ReadCloser, error),
@@ -197,7 +160,7 @@ func scanRetiredNamesRaw(
 		scan.Failures = append(scan.Failures, professor.RetiredNameFailure{Path: relative, Error: err.Error()})
 	}
 	scanFile := func(current, relative string) {
-		hits, incomplete, err := scanRetiredFile(ctx, open, current, relative)
+		hits, incomplete, err := scanRetiredFile(ctx, names, open, current, relative)
 		if incomplete != "" {
 			scan.Incomplete = append(scan.Incomplete, professor.RetiredNameFailure{Path: relative, Error: incomplete})
 		}
@@ -355,6 +318,7 @@ func retiredInSkippedDir(relative string) bool {
 // naming where the unscanned text starts, the hits before it kept.
 func scanRetiredFile(
 	ctx context.Context,
+	names []retired.Name,
 	open func(string) (io.ReadCloser, error),
 	current, relative string,
 ) (hits []professor.RetiredNameHit, incomplete string, err error) {
@@ -398,7 +362,7 @@ func scanRetiredFile(
 					lineNumber,
 				), nil
 			}
-			for _, hit := range retiredNameHits(relative, line) {
+			for _, hit := range retiredNameHits(names, relative, line) {
 				hit.Line = lineNumber
 				hits = append(hits, hit)
 			}
@@ -448,17 +412,17 @@ func retiredSkippedFile(relative string, pinned map[string]bool) bool {
 }
 
 // retiredNameHits returns one hit per retired name per line it appears on.
-func retiredNameHits(relative, content string) []professor.RetiredNameHit {
+func retiredNameHits(names []retired.Name, relative, content string) []professor.RetiredNameHit {
 	var hits []professor.RetiredNameHit
 	for index, line := range strings.Split(content, "\n") {
-		for _, retired := range retiredNames {
-			if retired.foundIn(line) {
+		for _, entry := range names {
+			if foundIn(entry, line) {
 				hits = append(hits, professor.RetiredNameHit{
 					Path:      relative,
 					Line:      index + 1,
-					Name:      retired.name,
-					Kind:      retired.kind,
-					Successor: retired.successor,
+					Name:      entry.Name,
+					Kind:      entry.Kind,
+					Successor: entry.Successor,
 				})
 			}
 		}
@@ -466,14 +430,14 @@ func retiredNameHits(relative, content string) []professor.RetiredNameHit {
 	return hits
 }
 
-func (r retiredName) foundIn(line string) bool {
+func foundIn(r retired.Name, line string) bool {
 	for offset := 0; offset < len(line); {
-		index := strings.Index(line[offset:], r.name)
+		index := strings.Index(line[offset:], r.Name)
 		if index < 0 {
 			return false
 		}
 		start := offset + index
-		if !insideURL(line, start) && r.boundedAt(line, start, start+len(r.name)) {
+		if !insideURL(line, start) && !r.InSuccessor(line, start) && boundedAt(r, line, start, start+len(r.Name)) {
 			return true
 		}
 		offset = start + 1
@@ -486,9 +450,10 @@ func (r retiredName) foundIn(line string) bool {
 // may not follow a `/` or `.` (`~/.claude/commands/pfm.md` is the live
 // machine-global guide, `.claude/commands/pfm.md` the retired project file).
 // On the right a name byte ends the match for every kind but a prefix, and a
-// `:` continues it only for a family.
-func (r retiredName) boundedAt(line string, start, end int) bool {
-	if r.name == "/tokens" || r.name == "/reminder" {
+// `:` continues it only for a family. A route name followed by `/` or `{`, or
+// after an HTTP method, is the route, never the name.
+func boundedAt(r retired.Name, line string, start, end int) bool {
+	if r.Route {
 		if end < len(line) && (line[end] == '/' || line[end] == '{') {
 			return false
 		}
@@ -505,16 +470,16 @@ func (r retiredName) boundedAt(line string, start, end int) bool {
 		if isRetiredNameByte(before) {
 			return false
 		}
-		if (r.name[0] == '/' || r.name[0] == '.') && (before == '/' || before == '.') {
+		if (r.Name[0] == '/' || r.Name[0] == '.') && (before == '/' || before == '.') {
 			return false
 		}
 	}
-	if r.match == matchPrefix || end == len(line) {
+	if r.Match == retired.MatchPrefix || end == len(line) {
 		return true
 	}
 	next := line[end]
 	if next == ':' {
-		return r.match == matchFamily
+		return r.Match == retired.MatchFamily
 	}
 	return !isRetiredNameByte(next)
 }

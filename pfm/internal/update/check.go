@@ -1,6 +1,7 @@
 package update
 
 import (
+	"context"
 	"fmt"
 	"io"
 
@@ -30,5 +31,7 @@ func runUpdateCheckAlias(args []string, stdout, stderr io.Writer, runtimes []con
 		stderr,
 		"pfm update check: kept for older instructions; the current command is pfm doctor --project-updates",
 	)
-	return professor.RunProjectUpdates(*root, runtime.Paths.Home, *jsonOutput, stdout, ScanRetiredNames)
+	return professor.RunProjectUpdates(
+		*root, runtime.Paths.Home, *jsonOutput, stdout, RetiredNameScanner(context.Background(), runtime.Paths.Home),
+	)
 }

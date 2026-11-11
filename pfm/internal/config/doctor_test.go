@@ -48,9 +48,9 @@ func TestMarshalDoctorWithoutIgnoreWarnings(t *testing.T) {
 
 // TestDoctorIgnoreWarningsLoadsAndValidatesAtLoad pins doctor.ignoreWarnings
 // at data entry: an absent or null key is today's behaviour (nothing
-// ignored, source default), a list of well-formed IDs loads with source
-// file, and a malformed entry is a config error naming its index — never an
-// entry quietly dropped.
+// ignored, source default), and a list loads as written with source file —
+// a malformed id included, which doctor reports as unknown instead of the
+// whole machine config being refused.
 func TestDoctorIgnoreWarningsLoadsAndValidatesAtLoad(t *testing.T) {
 	for _, test := range []struct {
 		name, body string
@@ -68,10 +68,13 @@ func TestDoctorIgnoreWarningsLoadsAndValidatesAtLoad(t *testing.T) {
 			want:   []string{"vscode-link", "vscode-settings"},
 			source: SourceFile,
 		},
-		{name: "empty id", body: `, "doctor": {"ignoreWarnings": [""]}`, err: "doctor.ignoreWarnings[0] must be a doctor warning id"},
-		{name: "underscore", body: `, "doctor": {"ignoreWarnings": ["vscode-link", "vscode_link"]}`, err: "doctor.ignoreWarnings[1] must be"},
-		{name: "upper case", body: `, "doctor": {"ignoreWarnings": ["VSCode-link"]}`, err: "doctor.ignoreWarnings[0] must be"},
-		{name: "padded", body: `, "doctor": {"ignoreWarnings": [" vscode-link"]}`, err: "doctor.ignoreWarnings[0] must be"},
+		{name: "empty id", body: `, "doctor": {"ignoreWarnings": [""]}`, want: []string{""}, source: SourceFile},
+		{
+			name:   "malformed ids",
+			body:   `, "doctor": {"ignoreWarnings": ["vscode-link", "vscode_link", "VSCode-link", " vscode-link"]}`,
+			want:   []string{"vscode-link", "vscode_link", "VSCode-link", " vscode-link"},
+			source: SourceFile,
+		},
 		{name: "not a string", body: `, "doctor": {"ignoreWarnings": [1]}`, err: "ignoreWarnings"},
 		{name: "unknown doctor key", body: `, "doctor": {"ignore": ["vscode-link"]}`, err: "ignore"},
 	} {
@@ -132,7 +135,7 @@ func TestDoctorAcceptedMCPLoadsValidatesAndRoundTrips(t *testing.T) {
 		{"valid", `{"path":"/chosen/account/.claude.json","server":"agent-browser","reason":"active user integration"}`, ""},
 		{"relative path", `{"path":"account/.claude.json","server":"agent-browser","reason":"active"}`, "absolute"},
 		{"empty server", `{"path":"/chosen/account/.claude.json","server":"","reason":"active"}`, "server"},
-		{"empty reason", `{"path":"/chosen/account/.claude.json","server":"agent-browser","reason":" "}`, "reason"},
+		{"empty reason", `{"path":"/chosen/account/.claude.json","server":"agent-browser","reason":" "}`, ""},
 		{"nonclean path", `{"path":"/chosen/account/../account/.claude.json","server":"agent-browser","reason":"active"}`, "clean"},
 		{"padded server", `{"path":"/chosen/account/.claude.json","server":" agent-browser","reason":"active"}`, "server"},
 		{"duplicate", `{"path":"/chosen/account/.claude.json","server":"agent-browser","reason":"active"},{"path":"/chosen/account/.claude.json","server":"agent-browser","reason":"other"}`, "duplicate"},

@@ -174,9 +174,9 @@ func printArchiveReport(
 	resolved paths.Values,
 	stdout io.Writer,
 ) {
-	mode := "killed chats"
+	mode, kept := "killed chats", "kept killed"
 	if subagents {
-		mode = "sidechain transcripts"
+		mode, kept = "sidechain transcripts", "left in place" // an unresolved entry is a transcript path
 	}
 	fmt.Fprintf(stdout, "mode: %s\n", mode)
 	for _, move := range report.Moves {
@@ -190,7 +190,7 @@ func printArchiveReport(
 		}
 	}
 	for _, id := range report.Unresolved {
-		fmt.Fprintf(stdout, "  UNRESOLVED %s — kept killed: %s\n", id, report.UnresolvedErrors[id])
+		fmt.Fprintf(stdout, "  UNRESOLVED %s — %s: %s\n", id, kept, report.UnresolvedErrors[id])
 	}
 	for _, warning := range report.Unclassified {
 		fmt.Fprintf(stdout, "  UNCLASSIFIED — kept sidecar line: %s\n", warning)

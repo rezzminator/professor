@@ -115,7 +115,8 @@ func MachineOptions(runtime config.Runtime) Options {
 // Result is what one refresh did. Reason says why an offline status was not
 // the switch's doing (a running pfm update); Err is a failed fetch or derivation;
 // Changed and Persisted, PersistErr and a stamp write's StampErr describe a
-// refreshed table; StampErr also carries an unreadable stamp; CheckedAt is the
+// refreshed table; Carried names the models the fetched pages priced but the
+// parser could not fold, whose previously served rows stayed; StampErr also carries an unreadable stamp; CheckedAt is the
 // check that confirmed the clone file, zero when none applies.
 type Result struct {
 	Status               string
@@ -123,6 +124,7 @@ type Result struct {
 	Err                  error
 	Changed, Persisted   bool
 	PersistErr, StampErr error
+	Carried              []string
 	CheckedAt            time.Time
 }
 
@@ -136,8 +138,10 @@ type Result struct {
 // fetched and the clone file
 // rewritten only when its rows or sources changed, so an unchanged refresh
 // leaves the tracked file alone and records the check in the stamp. A failed
-// fetch serves the loaded table. The error is a table that cannot be served
-// (an invalid override); the Result is meaningful either way.
+// fetch serves the loaded table. The error is either a published table that
+// cannot be loaded (no Prices at all) or a *pricing.OverrideError, returned
+// beside the published table served without the override; the Result is
+// meaningful either way.
 func Refresh(ctx context.Context, options Options) (pricing.Prices, Result, error) {
 	ticker := options.Clock
 	if ticker == nil {
@@ -211,11 +215,10 @@ func Refresh(ctx context.Context, options Options) (pricing.Prices, Result, erro
 	default:
 		result.StampErr = fmt.Errorf("%w; %w", result.StampErr, binaryErr)
 	}
+	// An invalid override returns its error beside the published table served
+	// without it: a caller that can price by that table does.
 	prices, err := pricing.ServeTable(served, origin, options.ConfigPath)
-	if err != nil {
-		return pricing.Prices{}, result, err
-	}
-	return prices, result, nil
+	return prices, result, err
 }
 
 // PriceDocument is the --json document of a served table and the refresh that
@@ -233,6 +236,7 @@ func PriceDocument(prices pricing.Prices, result Result, model string, rows []pr
 	if !result.CheckedAt.IsZero() {
 		doc.CheckedAt = result.CheckedAt.UTC().Format(time.RFC3339Nano)
 	}
+	doc.Refresh.Carried = result.Carried
 	if result.Status == StatusRefreshed {
 		changed, persisted := result.Changed, result.Persisted
 		doc.Refresh.Changed, doc.Refresh.Persisted = &changed, &persisted
@@ -276,7 +280,7 @@ func refreshNow(
 	catalogs, err := fetch(ctx)
 	var fresh pricing.Table
 	if err == nil {
-		fresh, err = Derive(catalogs, now.Format(time.RFC3339))
+		fresh, result.Carried, err = Derive(catalogs, now.Format(time.RFC3339), published.Rows)
 	}
 	if err != nil {
 		result.Status, result.Err = StatusFailed, err

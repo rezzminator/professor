@@ -2,6 +2,7 @@ package headless
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path"
 	"sort"
@@ -96,8 +97,12 @@ func (run *fleetRun) pollNamed(ctx context.Context, round Discovery, seat *watch
 		return nil
 	}
 	chat, found, err := round.Resolve(ctx, seat.name)
+	var ambiguous *AmbiguousTargetError
+	if errors.As(err, &ambiguous) {
+		return run.failSeat(ctx, seat, err) // a refusal of the name: no later poll can read it
+	}
 	if err != nil {
-		return run.failSeat(ctx, seat, err)
+		return run.deferFailure(ctx, seat, err)
 	}
 	if found && chat.Live {
 		if seat.bound != nil && !sameSeat(*seat.bound, chat) && !sameConversation(*seat.bound, chat) {
@@ -108,7 +113,7 @@ func (run *fleetRun) pollNamed(ctx context.Context, round Discovery, seat *watch
 		return run.follow(ctx, seat, chat)
 	}
 	if why := run.unreadable(round, seat); why != "" {
-		return run.deferSeat(ctx, seat, why)
+		return run.deferSeat(ctx, seat, unreadableServer(why))
 	}
 	return run.advance(ctx, seat, chat, found)
 }
@@ -117,7 +122,7 @@ func (run *fleetRun) pollNamed(ctx context.Context, round Discovery, seat *watch
 func (run *fleetRun) followBound(ctx context.Context, round Discovery, seat *watchedSeat) error {
 	chats, err := round.List(ctx)
 	if err != nil {
-		return run.failSeat(ctx, seat, err)
+		return run.deferFailure(ctx, seat, err)
 	}
 	bound := *seat.bound
 	for index := range chats {
@@ -132,12 +137,11 @@ func (run *fleetRun) followBound(ctx context.Context, round Discovery, seat *wat
 	for index := range chats {
 		chat := chats[index]
 		if chat.Live && chat.Socket == "" && chat.Pane == "" && bound.ID != "" && chat.ID == bound.ID {
-			seat.unread = 0
 			return run.advance(ctx, seat, chat, true)
 		}
 	}
 	if why := run.unreadable(round, seat); why != "" {
-		return run.deferSeat(ctx, seat, why)
+		return run.deferSeat(ctx, seat, unreadableServer(why))
 	}
 	return run.leaveBound(ctx, seat, chats)
 }
@@ -200,15 +204,30 @@ func (run *fleetRun) unreadable(round Discovery, seat *watchedSeat) string {
 	return names[0] + ": " + sockets[names[0]]
 }
 
-// deferSeat holds a seat's verdict for a poll its server could not be read
-// in, and fails it once that has lasted UnreadablePolls polls.
-func (run *fleetRun) deferSeat(ctx context.Context, seat *watchedSeat, why string) error {
+// deferSeat holds a seat's verdict for a poll that could not read it (its
+// server unreadable, its lookup, listing or inspect failed), and fails it with
+// cause once that has lasted UnreadablePolls polls in a row.
+func (run *fleetRun) deferSeat(ctx context.Context, seat *watchedSeat, cause error) error {
 	seat.unread++
 	if seat.unread < UnreadablePolls {
 		return nil
 	}
-	return run.failSeat(ctx, seat, fmt.Errorf(
-		"tmux server unreadable for %d polls in a row, so whether the chat lives is unknown: %s", seat.unread, why))
+	return run.failSeat(ctx, seat, fmt.Errorf("%w (%d polls in a row)", cause, seat.unread))
+}
+
+// deferFailure holds the verdict of a target already read through a failed
+// lookup, listing or inspect (deferSeat). A target never read has no verdict
+// to hold: it fails at once, as a refusal (an ambiguous name) must.
+func (run *fleetRun) deferFailure(ctx context.Context, seat *watchedSeat, cause error) error {
+	if !seat.read {
+		return run.failSeat(ctx, seat, cause)
+	}
+	return run.deferSeat(ctx, seat, cause)
+}
+
+// unreadableServer is why a poll whose tmux server went unread holds a seat.
+func unreadableServer(why string) error {
+	return fmt.Errorf("tmux server unreadable, so whether the chat lives is unknown: %s", why)
 }
 
 // pollGlobs lists the fleet once for every glob: each live seat whose name a
@@ -218,7 +237,10 @@ func (run *fleetRun) deferSeat(ctx context.Context, seat *watchedSeat, why strin
 func (run *fleetRun) pollGlobs(ctx context.Context, round Discovery) error {
 	chats, err := round.List(ctx)
 	if err != nil {
-		return run.failGlobs(ctx, err)
+		return run.deferGlobs(ctx, err)
+	}
+	for _, glob := range run.globs {
+		glob.unread, glob.read = 0, true
 	}
 	live := map[seatKey]Chat{}
 	for index := range chats {
@@ -254,7 +276,7 @@ func (run *fleetRun) pollGlobs(ctx context.Context, round Discovery) error {
 			continue
 		}
 		if why := run.unreadable(round, seat); why != "" {
-			if err := run.deferSeat(ctx, seat, why); err != nil {
+			if err := run.deferSeat(ctx, seat, unreadableServer(why)); err != nil {
 				return err
 			}
 			continue

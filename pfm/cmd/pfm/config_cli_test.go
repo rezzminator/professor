@@ -284,8 +284,7 @@ func TestConfigCLIInitShowValidateAndBrokenDiagnostics(t *testing.T) {
 		[]string{"--config", path, "config", "show"},
 		&stdout,
 		&stderr,
-	); code != 0 ||
-		strings.Contains(stdout.String(), "authToken") {
+	); code != 0 {
 		t.Fatalf("config show code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 
@@ -359,7 +358,7 @@ func TestConfigShowReportsClaudePlugins(t *testing.T) {
 	for _, test := range []struct{ name, content, want string }{
 		{
 			"unset", `{"version":2}`,
-			"config claude.plugins=cache-live-control,forward-compaction,auto-effort,tool-visibility-controller,engine-sync (default)",
+			"config claude.plugins=cache-live-control,forward-compaction,auto-effort,tool-visibility-controller,engine-sync,flights (default)",
 		},
 		{
 			"listed",

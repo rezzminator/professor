@@ -42,8 +42,9 @@ import (
 //	          agents that wrote 0 bytes; null with no input), worktree, base,
 //	          landedLines, landedPerMillionInput, landedExcluded {testLines,
 //	          docLines, generatedLines, lockLines, binaryFiles}, and
-//	          landedNotMeasured (the reason; null when measured, and then the
-//	          landed fields are null)
+//	          landedNotMeasured (the reason, which names the failure when
+//	          --worktree was given and the count failed; null when measured,
+//	          and then the landed fields are null)
 //	types     one object per agent type, the most input first: type, agents,
 //	          inputTokens, writtenBytes, readBytes, writtenReadRatio (null
 //	          when nothing was read)
@@ -51,10 +52,14 @@ import (
 //	          for the session), parent, depth (null when its meta is
 //	          unreadable), model, inputTokens, uncachedInputTokens,
 //	          cacheReadTokens, cacheWriteTokens, usd, writtenBytes, readBytes,
-//	          writtenReadRatio, unreadable (null, or why the row was not read)
+//	          writtenReadRatio, unreadable (null, or why the row was not read:
+//	          a meta, a transcript or a parent chain that could not be read),
+//	          and undecodableLines (present only when a transcript line was no
+//	          record: its writes and reads are in neither byte total)
 //
 // An unreadable agent stays a row and counts in notRead, never in a total;
-// the run then exits 1.
+// the run then exits 1, as it does when the landed lines could not be counted
+// (the report still prints, the lines marked not measured).
 
 // landedNotMeasured is what the landed fields say without --worktree/--base.
 const landedNotMeasured = "NOT MEASURED — pass --worktree DIR --base SHA"
@@ -73,6 +78,9 @@ type treeAgent struct {
 	usd                                *float64
 	written, read                      int64
 	unreadable                         string
+	// undecodable counts the transcript lines that were no record: their tool
+	// uses and results are in neither byte total.
+	undecodable int
 }
 
 func (n *treeAgent) input() float64 { return n.in + n.cacheRead + n.cacheWrite }
@@ -205,8 +213,15 @@ func (a *auditor) buildTree(id string) (*spawnTree, error) {
 			tree.agents = append(tree.agents, node)
 			continue
 		}
-		if depth, inside := depthUnder(node, rootID, tree.session, nodes); inside {
+		depth, inside, broken := depthUnder(node, rootID, tree.session, nodes)
+		switch {
+		case inside:
 			node.depth = depth
+			tree.agents = append(tree.agents, node)
+		case broken != "":
+			// Its place is unknown, not its absence: it stays a row, counted
+			// in notRead, never in a total.
+			node.depth, node.unreadable = -1, "parent chain: "+broken
 			tree.agents = append(tree.agents, node)
 		}
 	}
@@ -229,24 +244,27 @@ func (a *auditor) buildTree(id string) (*spawnTree, error) {
 
 // depthUnder is node's distance below rootID along its parent chain, the
 // session's main agent standing above every agent no parent names; inside is
-// false when the chain never reaches rootID (or loops).
-func depthUnder(node *treeAgent, rootID, session string, nodes map[string]*treeAgent) (int, bool) {
-	depth := 0
+// false when the chain never reaches rootID. broken names why a chain could
+// not be followed (a parent with no transcript, a loop) and is "" when the
+// chain ended elsewhere, at another root.
+func depthUnder(
+	node *treeAgent, rootID, session string, nodes map[string]*treeAgent,
+) (depth int, inside bool, broken string) {
 	seen := map[string]bool{}
 	for at := node; ; {
 		if at.id == rootID {
-			return depth, true
+			return depth, true, ""
 		}
 		if at.parent == "" || at.parent == session {
-			return depth + 1, rootID == session
+			return depth + 1, rootID == session, ""
 		}
 		if seen[at.id] {
-			return 0, false
+			return 0, false, "agent " + at.id + " is its own ancestor"
 		}
 		seen[at.id] = true
 		next, known := nodes[at.parent]
 		if !known {
-			return 0, false
+			return 0, false, "parent " + at.parent + " not found"
 		}
 		at = next
 		depth++
@@ -292,7 +310,7 @@ func (a *auditor) measure(node *treeAgent, scope string) {
 			node.usd = &usd
 		}
 	}
-	if node.written, node.read, err = toolBytes(node.file, scope); err != nil {
+	if node.written, node.read, node.undecodable, err = toolBytes(node.file, scope); err != nil {
 		node.unreadable = describe(err)
 	}
 }
@@ -300,11 +318,12 @@ func (a *auditor) measure(node *treeAgent, scope string) {
 // toolBytes sums the bytes an agent wrote under scope through its own tool
 // calls and the text bytes of every tool result it received, each tool_use
 // and tool_result counted once however many lines repeat it.
-func toolBytes(file, scope string) (written, read int64, err error) {
+func toolBytes(file, scope string) (written, read int64, undecodable int, err error) {
 	uses, results := map[string]bool{}, map[string]bool{}
 	err = eachLine(file, func(raw []byte) {
 		line, ok := transcript.DecodeClaudeRecord(raw)
 		if !ok {
+			undecodable++
 			return
 		}
 		kind, _ := line.Kind()
@@ -329,7 +348,7 @@ func toolBytes(file, scope string) (written, read int64, err error) {
 			}
 		}
 	})
-	return written, read, err
+	return written, read, undecodable, err
 }
 
 // writeInput is the members of a file-writing tool's input the count reads.
@@ -356,12 +375,17 @@ func writtenBytes(name string, raw json.RawMessage, scope string) int64 {
 	case "Edit":
 		size = int64(len(jsString(input.NewString)))
 	case "MultiEdit":
-		var edits []struct {
-			NewString json.RawMessage `json:"new_string"`
-		}
+		// Each edit reads on its own: one that is no object counts nothing and
+		// never zeroes the bytes of its siblings.
+		var edits []json.RawMessage
 		if json.Unmarshal(input.Edits, &edits) == nil {
-			for _, edit := range edits {
-				size += int64(len(jsString(edit.NewString)))
+			for _, raw := range edits {
+				var edit struct {
+					NewString json.RawMessage `json:"new_string"`
+				}
+				if json.Unmarshal(raw, &edit) == nil {
+					size += int64(len(jsString(edit.NewString)))
+				}
 			}
 		}
 	case "NotebookEdit":
@@ -427,12 +451,16 @@ func (a *auditor) runTree(ctx context.Context) (int, error) {
 		a.measure(node, tree.scope)
 	}
 	var landed *landedLines
+	landedFailure := ""
 	if a.opts.worktree != "" {
+		// A landed-lines failure never throws away the tokens, dollars and
+		// bytes already measured: the report prints with the lines marked
+		// not measured, the failure named, and the run exits 1 for the gap.
 		if landed, err = measureLanded(ctx, obs.Runner(nil), a.opts.worktree, a.opts.base); err != nil {
-			return 1, failure("--tree %s: landed lines: %v", tree.target, err)
+			landed, landedFailure = nil, fmt.Sprintf("--tree %s: landed lines: %v", tree.target, err)
 		}
 	}
-	document := a.treeDocument(tree, landed)
+	document := a.treeDocument(tree, landed, landedFailure)
 	encoded, err := json.MarshalIndent(document, "", "  ")
 	if err != nil {
 		return 1, failure("--tree %s: encode the report: %v", tree.target, err)
@@ -453,6 +481,10 @@ func (a *auditor) runTree(ctx context.Context) (int, error) {
 		if !a.opts.json {
 			a.print(fmt.Sprintf("\nfull data → %s (%d bytes)", a.opts.out, size))
 		}
+	}
+	if landedFailure != "" {
+		a.printErr(errPrefix + landedFailure)
+		return 1, nil
 	}
 	if document.Tree.NotRead != 0 {
 		return 1, nil
@@ -524,6 +556,7 @@ type treeRow struct {
 	ReadBytes           int64    `json:"readBytes"`
 	WrittenReadRatio    *float64 `json:"writtenReadRatio"`
 	Unreadable          *string  `json:"unreadable"`
+	UndecodableLines    int      `json:"undecodableLines,omitempty"`
 }
 
 // ratio is written/read, nil when nothing was read.
@@ -535,7 +568,7 @@ func ratio(written, read int64) *float64 {
 	return &value
 }
 
-func (a *auditor) treeDocument(tree *spawnTree, landed *landedLines) treeDocument {
+func (a *auditor) treeDocument(tree *spawnTree, landed *landedLines, landedFailure string) treeDocument {
 	agents := append([]*treeAgent(nil), tree.agents...)
 	sort.SliceStable(agents, func(i, j int) bool {
 		left, right := agents[i], agents[j]
@@ -579,6 +612,7 @@ func (a *auditor) treeDocument(tree *spawnTree, landed *landedLines) treeDocumen
 		row.CacheReadTokens, row.CacheWriteTokens = int64(node.cacheRead), int64(node.cacheWrite)
 		row.WrittenBytes, row.ReadBytes = node.written, node.read
 		row.WrittenReadRatio = ratio(node.written, node.read)
+		row.UndecodableLines = node.undecodable
 		rows = append(rows, row)
 		totals.InputTokens += row.InputTokens
 		totals.UncachedInputTokens += row.UncachedInputTokens
@@ -615,6 +649,9 @@ func (a *auditor) treeDocument(tree *spawnTree, landed *landedLines) treeDocumen
 	}
 	if landed == nil {
 		reason := landedNotMeasured
+		if landedFailure != "" {
+			reason = "NOT MEASURED — " + landedFailure
+		}
 		totals.LandedNotMeasured = &reason
 	} else {
 		worktree, base, lines := a.opts.worktree, a.opts.base, landed.code
@@ -648,8 +685,8 @@ func (a *auditor) printTree(doc treeDocument) {
 	}
 	a.print(fmt.Sprintf("%s · %d agents · writes counted under %s", head, t.Agents, t.WriteScope))
 	if t.LandedLines == nil {
-		a.print(treeLine("landed code lines", landedNotMeasured))
-		a.print(treeLine("landed lines per M input", landedNotMeasured))
+		a.print(treeLine("landed code lines", *t.LandedNotMeasured))
+		a.print(treeLine("landed lines per M input", *t.LandedNotMeasured))
 	} else {
 		x := t.LandedExcluded
 		a.print(treeLine("landed code lines", fmt.Sprintf(
@@ -710,9 +747,13 @@ func (a *auditor) printTree(doc treeDocument) {
 			a.print(lead + " unreadable: " + *row.Unreadable)
 			continue
 		}
-		a.print(fmt.Sprintf("%s %-22s %12d %12d %12d %10d %12d %8s %10s", lead, row.Model, row.InputTokens,
+		tail := ""
+		if row.UndecodableLines != 0 {
+			tail = fmt.Sprintf("  (%d undecodable lines: their writes and reads are not counted)", row.UndecodableLines)
+		}
+		a.print(fmt.Sprintf("%s %-22s %12d %12d %12d %10d %12d %8s %10s%s", lead, row.Model, row.InputTokens,
 			row.CacheReadTokens, row.CacheWriteTokens, row.WrittenBytes, row.ReadBytes,
-			optional(row.WrittenReadRatio, "%.3f"), usdOrNA(row.USD)))
+			optional(row.WrittenReadRatio, "%.3f"), usdOrNA(row.USD), tail))
 	}
 	a.print("\n" + a.gapsLine())
 }

@@ -47,6 +47,9 @@ type Agent struct {
 	PID       int    `json:"pid"`
 	Status    string `json:"status"`
 	State     string `json:"state"`
+	// PIDText is the registry's pid word when it is not an integer: PID is then
+	// 0, which is unknown, never "no process".
+	PIDText string `json:"-"`
 }
 
 // Claude has emitted pid as both a JSON number and a quoted number across
@@ -64,12 +67,12 @@ func (agent *Agent) UnmarshalJSON(content []byte) error {
 	if err := json.Unmarshal(content, &wire); err != nil {
 		return err
 	}
-	pid := 0
+	pid, pidText := 0, ""
 	if len(wire.PID) != 0 && string(wire.PID) != "null" {
 		value := strings.Trim(string(wire.PID), "\"")
 		parsed, err := strconv.Atoi(value)
 		if err != nil {
-			return fmt.Errorf("parse agent pid %q: %w", value, err)
+			pidText = value // the row stays; one odd pid never empties the registry
 		}
 		pid = parsed
 	}
@@ -80,6 +83,7 @@ func (agent *Agent) UnmarshalJSON(content []byte) error {
 		PID:       pid,
 		Status:    wire.Status,
 		State:     wire.State,
+		PIDText:   pidText,
 	}
 	return nil
 }
@@ -277,6 +281,27 @@ func (opener *Opener) Open(ctx context.Context, request Request) error {
 	}
 
 	account := opener.accountForConfig(hitConfig)
+	if hit.PIDText != "" {
+		// The row's pid is unknown, so "no live process" is unproven: prove it from
+		// the process table before any take-over, as for a missing row.
+		fmt.Fprintf(
+			opener.stderr,
+			"pfm internal agent-open: registry row for %s has an unreadable pid %q — proving no live claude holds it\n",
+			request.ID,
+			hit.PIDText,
+		)
+		held, err := opener.holdsSession(ctx, request.ID)
+		if err != nil {
+			return fmt.Errorf("prove no live claude holds %s: %w", request.ID, err)
+		}
+		if held {
+			return fmt.Errorf(
+				"registry row for %s has an unreadable pid %q, and a live claude holds it — refusing the double-resume",
+				request.ID,
+				hit.PIDText,
+			)
+		}
+	}
 	if hit.PID > 0 && opener.processes.Alive(hit.PID) {
 		socket, err := opener.tmux.SocketForPID(ctx, hit.PID)
 		if err != nil {

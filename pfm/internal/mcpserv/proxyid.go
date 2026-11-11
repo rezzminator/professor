@@ -34,7 +34,6 @@ type ProxyIdentity struct {
 	Pane           string              `json:"pane,omitempty"`
 	Engine         string              `json:"engine,omitempty"`
 	ID             string              `json:"id,omitempty"`
-	Source         string              `json:"source,omitempty"`
 }
 
 // parseProxyIdentity decodes the untyped JSON object carried in
@@ -86,7 +85,6 @@ func parseProxyIdentity(raw any) (ProxyIdentity, string, error) {
 		{name: "pane", value: &payload.Pane},
 		{name: "engine", value: &payload.Engine},
 		{name: "id", value: &payload.ID},
-		{name: "source", value: &payload.Source},
 	}
 	for _, field := range fields {
 		value, exists := object[field.name]
@@ -104,15 +102,17 @@ func parseProxyIdentity(raw any) (ProxyIdentity, string, error) {
 		if !ok {
 			return ProxyIdentity{}, "MCP _meta.pfmProxy error must be an object", nil
 		}
-		kind, kindOK := errorObject["kind"].(string)
-		message, messageOK := errorObject["message"].(string)
-		if !kindOK || !messageOK || strings.TrimSpace(message) == "" {
-			return ProxyIdentity{}, "MCP _meta.pfmProxy error must carry string kind and non-empty message", nil
+		// The kind decides; the message only displays: a bad one never voids the kind.
+		kind, _ := errorObject["kind"].(string)
+		message, _ := errorObject["message"].(string)
+		if strings.TrimSpace(message) == "" {
+			message = "caller identity lookup failed without a message"
 		}
 		switch kind {
 		case proxyNotInChat, statusNotRegistered, statusAmbiguous, proxyFailed:
 		default:
-			return ProxyIdentity{}, fmt.Sprintf("MCP _meta.pfmProxy error kind %q is unknown", kind), nil
+			message = fmt.Sprintf("%s (unknown error kind %#v)", message, errorObject["kind"])
+			kind = proxyFailed
 		}
 		payload.Error = &ProxyIdentityError{Kind: kind, Message: message}
 	}

@@ -1,7 +1,9 @@
 package obs
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -122,6 +124,8 @@ func TestDatabaseRecordsLevelByOutcome(t *testing.T) {
 		{"slow success", SlowCall, 0, nil, "INFO", "INFO"},
 		{"retried success", time.Millisecond, 1, nil, "INFO", "DEBUG"},
 		{"failure", time.Millisecond, 0, errors.New("database is locked"), "ERROR", "ERROR"},
+		// A picker the user dismissed cancels its query: the caller ended it on purpose.
+		{"cancelled by its caller", time.Millisecond, 0, fmt.Errorf("query comms: %w", context.Canceled), "INFO", "INFO"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fake := clock.NewFake(time.Date(2026, 10, 18, 12, 0, 0, 0, time.UTC))

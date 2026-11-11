@@ -128,6 +128,8 @@ PFM_FENCE_SCRATCH_DAYS|7|int|=
 PFM_FENCE_GOCACHE_MB|15000|int|=
 PFM_FENCE_GOMOD_MB|4000|int|=
 PFM_FENCE_LINTCACHE_MB|2000|int|=
+PFM_FENCE_CARGO_MB|2000|int|=
+PFM_FENCE_HERDR_SHIELD_TARGET_MB|6000|int|=
 PFM_FENCE_DF_TIMEOUT_S|120|int|=
 LANE_EGRESS_READY_SECS|10|uint|=
 LANE_EGRESS_VERDICT_SECS|30|uint|=
@@ -136,6 +138,7 @@ LANE_STORM_EVERY_SECS|0.5|number|=
 LANE_ALIVE_RETRY_SECS|1|number|=
 LANE_WAIT_LAST_EVERY_SECS|0.5|number|=
 LANE_WAIT_FOR_EVERY_SECS|0.2|number|=
+LANE_HELD_BOOT_SECS|30|uint|=
 PFM_FENCE_LANE_ROOT_LOCK_TICKS|18000|int|=
 PFM_FENCE_LANE_TOLERANCE|1.25|number|=
 PFM_FENCE_LANE_SEQUENCE_S|763|int|=
@@ -147,6 +150,7 @@ PFM_FENCE_LANE_F_S|134|int|=
 PFM_FENCE_LANE_M_S|156|int|=
 PFM_FENCE_LANE_A_S|49|int|=
 PFM_FENCE_LANE_H_S|unpinned|budget|=
+PFM_FENCE_LANE_HELD_S|unpinned|budget|=
 PFM_FENCE_LANE_O2_S|86|int|=
 CONFIG
 }
@@ -501,6 +505,7 @@ _fence_sh_ensure_locked() {
     fi
   fi
   _fence_sh_image || { return 1; }
+  fence_cache_budget_pending
   fence_volumes_ensure
   mounts=(-v "$FENCE_SH_MAIN:/repo:ro" -v "$PFM_DEV_GIT_COMMON:/pfm-git-common:ro" -v "$FENCE_SH_HOST:/pfm-fence"
     -v pfm-dev-gocache:/cache/go-build -v pfm-dev-gomod:/cache/gomod -v pfm-dev-lintcache:/cache/lint)
@@ -621,7 +626,10 @@ fence_shared_exec() {
     _fence_sh_leave_old_key
     envs=(-e "PFM_FENCE_RUN_ID=$id" -e "PFM_DEV_REPO_GIT_DIR=/pfm-git-common/$PFM_DEV_GIT_DIR_REL" -e PFM_DEV_REPO_WORK_TREE=/worktree
       -e "PFM_DEV_ENGINE_SYNC_MISSING=${PFM_DEV_ENGINE_SYNC_MISSING:-}" -e PFM_TEST_TIMING_DIR=/pfm-timing
-      -e "HARVESTER_FENCE_SRC=$hs" -e "PFM_DEV_HARVESTER_MISSING=${PFM_DEV_HARVESTER_MISSING:-}")
+      -e "HARVESTER_FENCE_SRC=$hs" -e "PFM_DEV_HARVESTER_MISSING=${PFM_DEV_HARVESTER_MISSING:-}"
+      -e "GOPROXY=${PFM_GOPROXY:-}")
+    # GOPROXY rides each run, not the long-lived container's start: a container started under
+    # another infra/fence/.env (local-env.sh) still hands this run the caller's proxy; empty is Go's default.
     # Gate knobs: a suite the gate nests starts from none of them (scripts/shtest.sh
     # shtest_unset_gate_env; infra/fence/lanes/tests/steps_test.sh derives this block's names).
     # Only generated timing artifacts are writable: /pfm-timing is the worktree's timing base.

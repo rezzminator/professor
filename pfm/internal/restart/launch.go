@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	goruntime "runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -257,6 +256,8 @@ func (launcher Launcher) Follow(ctx context.Context, pid int, logPath string, st
 			if code, ok := strings.CutPrefix(string(line), ExitMarker); ok {
 				parsed, err := strconv.Atoi(strings.TrimSpace(code))
 				if err != nil {
+					fmt.Fprintf(stderr, "pfm restart: worker pid %d: unreadable exit marker %q: %v; log %s\n",
+						pid, strings.TrimSpace(code), err, logPath)
 					return 1
 				}
 				return parsed
@@ -320,7 +321,7 @@ type liveFleet struct {
 }
 
 func (fleet liveFleet) Live(ctx context.Context) ([]headless.Chat, map[string]string, error) {
-	scan, err := pfmchat.ScanRows(ctx, fleet.warn, &fleet.runtime)
+	scan, err := pfmchat.ScanRows(ctx, fleet.warn, &fleet.runtime, nil)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -346,7 +347,13 @@ func LiveDeps(runtime config.Runtime, warn io.Writer, spare []int, launchedFrom 
 	if err != nil {
 		fmt.Fprintf(warn, "pfm restart: resolve this binary (pfm processes are matched by name only): %v\n", err)
 	}
-	services := nativeServiceManager(goruntime.GOOS, runner, clock.Real, runtime.Paths.Home, servicemanager.UID())
+	services := nativeServiceManager(
+		servicemanager.Native(),
+		runner,
+		clock.Real,
+		runtime.Paths.Home,
+		servicemanager.UID(),
+	)
 	dependencies := Deps{
 		Runner:       runner,
 		Procs:        gather.NewProcFS(runtime.Paths.ProcRoot),

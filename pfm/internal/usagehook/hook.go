@@ -83,6 +83,13 @@ type ScopedLimit struct {
 	IsActive bool     `json:"is_active"`
 }
 
+// FableWeekly reports whether the limit is the weekly Fable window, the one
+// scoped limit the statusline reads.
+func (limit ScopedLimit) FableWeekly() bool {
+	return strings.TrimSpace(limit.Kind) == "weekly_scoped" &&
+		strings.EqualFold(strings.TrimSpace(limit.Scope.Model.DisplayName), "Fable")
+}
+
 // Usage is the typed quota-bearing core of the OAuth usage response. Unknown
 // top-level provider metadata is intentionally ignored rather than presented
 // as a rate-limit window.
@@ -171,19 +178,19 @@ func (usage Usage) fableWindow(now time.Time) (Window, bool) {
 	return window, ok
 }
 
-// FableWindowAt keeps unknown resets and reports malformed ones to renderers.
+// FableWindowAt keeps unknown resets: an empty one is unknown, and a malformed
+// one is too when no well-formed Fable limit answers, coming back as the error
+// beside the window it belongs to.
 func (usage Usage) FableWindowAt(now time.Time) (Window, bool, error) {
 	return usage.selectFableWindow(now, true)
 }
 
 func (usage Usage) selectFableWindow(now time.Time, allowUnknown bool) (Window, bool, error) {
-	var fallback *ScopedLimit
-	var invalidReset error
+	var fallback, malformed *ScopedLimit
+	var invalidReset, malformedErr error
 	for index := range usage.Limits {
 		limit := &usage.Limits[index]
-		if strings.TrimSpace(limit.Kind) != "weekly_scoped" ||
-			!strings.EqualFold(strings.TrimSpace(limit.Scope.Model.DisplayName), "Fable") ||
-			limit.Percent == nil {
+		if !limit.FableWeekly() || limit.Percent == nil {
 			continue
 		}
 		stamp := strings.TrimSpace(limit.ResetsAt)
@@ -194,6 +201,9 @@ func (usage Usage) selectFableWindow(now time.Time, allowUnknown bool) (Window, 
 			resetAt, err := time.Parse(time.RFC3339, stamp)
 			if err != nil {
 				invalidReset = fmt.Errorf("decode cached Fable reset %q: %w", limit.ResetsAt, err)
+				if allowUnknown && (malformed == nil || limit.IsActive && !malformed.IsActive) {
+					malformed, malformedErr = limit, invalidReset
+				}
 				continue
 			}
 			if !resetAt.After(now) {
@@ -207,13 +217,20 @@ func (usage Usage) selectFableWindow(now time.Time, allowUnknown bool) (Window, 
 			fallback = limit
 		}
 	}
-	if fallback == nil {
-		return Window{}, false, invalidReset
+	switch {
+	case fallback != nil:
+		return Window{Utilization: fallback.Percent, ResetsAt: fallback.ResetsAt}, true, nil
+	case malformed != nil:
+		return Window{Utilization: malformed.Percent, ResetsAt: malformed.ResetsAt}, true, malformedErr
 	}
-	return Window{Utilization: fallback.Percent, ResetsAt: fallback.ResetsAt}, true, nil
+	return Window{}, false, invalidReset
 }
 
 type usageWindow = Window
+
+// removeWarnedFlag lifts an account's warned flag; a test replaces it to fail
+// the one removal a root-run test cannot otherwise refuse.
+var removeWarnedFlag = os.Remove
 
 type credentials struct {
 	OAuth struct {
@@ -238,7 +255,11 @@ func Evaluate(ctx context.Context, options Options) (string, error) {
 		}
 		return "", err
 	}
-	account := accountNumber(options.Home, options.ConfigDir, options.AccountDirs)
+	account, known := accountNumber(options.Home, options.ConfigDir, options.AccountDirs)
+	if !known {
+		fmt.Fprintf(options.Log, "pfm usage-hook: no account number for config dir %s; reporting it as account 1\n",
+			options.ConfigDir)
+	}
 	if err := paths.EnsurePrivateDir("usage cache directory", options.CacheDir); err != nil {
 		return "", err
 	}
@@ -255,11 +276,13 @@ func Evaluate(ctx context.Context, options Options) (string, error) {
 	five, seven := planUtilization(cached.FiveHour, now), planUtilization(cached.SevenDay, now)
 	opus := currentUtilization(cached.SevenOpus, now, -1)
 	fable := -1
-	for _, named := range cached.NamedWindowsAt(now) {
-		if named.Key == sevenDayFableKey {
-			fable = utilization(named.Window, -1)
-			break
-		}
+	// An unknown Fable reset is never expired, as for 5h and 7d (resetPassed).
+	fableWindow, fableFound, fableErr := cached.FableWindowAt(now)
+	if fableErr != nil {
+		fmt.Fprintf(options.Log, "pfm usage-hook: Fable reset unknown: %v\n", fableErr)
+	}
+	if fableFound {
+		fable = utilization(fableWindow, -1)
 	}
 	maximum := maximumInt(five, seven, opus, fable)
 	flagPath := filepath.Join(options.CacheDir, fmt.Sprintf("warned-%d", account))
@@ -269,8 +292,9 @@ func Evaluate(ctx context.Context, options Options) (string, error) {
 			return "", err
 		}
 		if err == nil && (CacheRecord{ConfigDir: string(flag)}).MatchesConfigDir(options.ConfigDir) {
-			if err := os.Remove(flagPath); err != nil {
-				return "", err
+			// A flag left behind repeats this notice next prompt; never worth losing it now.
+			if err := removeWarnedFlag(flagPath); err != nil {
+				fmt.Fprintf(options.Log, "pfm usage-hook: clear warned flag %s: %v\n", flagPath, err)
 			}
 			back := make([]string, 0, 2)
 			if five >= 0 {
@@ -293,8 +317,9 @@ func Evaluate(ctx context.Context, options Options) (string, error) {
 		}
 		return "", nil
 	}
+	// Without the flag the next recovery goes unannounced; the warning still goes out.
 	if err := atomicfile.Write(flagPath, []byte(options.ConfigDir), 0o600); err != nil {
-		return "", err
+		fmt.Fprintf(options.Log, "pfm usage-hook: record warned flag %s: %v\n", flagPath, err)
 	}
 	parts := make([]string, 0, 4)
 	if five >= 0 {
@@ -326,6 +351,9 @@ func Evaluate(ctx context.Context, options Options) (string, error) {
 }
 
 func normalize(options Options) Options {
+	if options.Log == nil {
+		options.Log = io.Discard
+	}
 	if options.Clock == nil {
 		options.Clock = clock.Real
 	}
@@ -351,13 +379,13 @@ func normalize(options Options) Options {
 		options.CacheDir = cacheDirForEnv(options.Env)
 	}
 	if options.Warn <= 0 {
-		options.Warn = envInt(options.Env, "CC_USAGE_WARN", 80)
+		options.Warn = envInt(options.Env, options.Log, "CC_USAGE_WARN", 80)
 	}
 	if options.Critical <= 0 {
-		options.Critical = envInt(options.Env, "CC_USAGE_CRIT", 95)
+		options.Critical = envInt(options.Env, options.Log, "CC_USAGE_CRIT", 95)
 	}
 	if options.TTL <= 0 {
-		options.TTL = time.Duration(envInt(options.Env, "CC_USAGE_TTL", 180)) * time.Second
+		options.TTL = time.Duration(envInt(options.Env, options.Log, "CC_USAGE_TTL", 180)) * time.Second
 	}
 	if options.Client == nil {
 		options.Client = &http.Client{Timeout: 6 * time.Second}
@@ -366,44 +394,41 @@ func normalize(options Options) Options {
 	if options.Endpoint == "" {
 		options.Endpoint = defaultEndpoint
 	}
-	if options.Log == nil {
-		options.Log = io.Discard
-	}
 	if options.Version == "" {
 		options.Version = pfmconfig.DevelopmentVersion
 	}
 	return options
 }
 
-func accountNumber(home, configDir string, accountDirs ...map[string]int) int {
+// accountNumber names configDir's account; known=false is the account-1
+// fallback for a directory nothing names.
+func accountNumber(home, configDir string, accountDirs map[string]int) (account int, known bool) {
 	physical, err := filepath.EvalSymlinks(configDir)
 	if err != nil {
 		physical = configDir
 	}
-	if len(accountDirs) != 0 {
-		for directory, account := range accountDirs[0] {
-			candidate := directory
-			if resolved, resolveErr := filepath.EvalSymlinks(directory); resolveErr == nil {
-				candidate = resolved
-			}
-			if filepath.Clean(physical) == filepath.Clean(candidate) {
-				return account
-			}
+	for directory, id := range accountDirs {
+		candidate := directory
+		if resolved, resolveErr := filepath.EvalSymlinks(directory); resolveErr == nil {
+			candidate = resolved
+		}
+		if filepath.Clean(physical) == filepath.Clean(candidate) {
+			return id, true
 		}
 	}
 	switch filepath.Clean(physical) {
 	case filepath.Join(home, ".claude"):
-		return 1
+		return 1, true
 	case filepath.Join(home, ".claude3"):
-		return 2
+		return 2, true
 	case filepath.Join(home, ".cc", "3"):
-		return 3
+		return 3, true
 	}
 	value, err := strconv.Atoi(filepath.Base(physical))
 	if err == nil && value > 0 {
-		return value
+		return value, true
 	}
-	return 1
+	return 1, false
 }
 
 // UsageCacheDir returns the usage cache directory nested under base using the
@@ -469,7 +494,6 @@ func RefreshLockPath(cacheDir string, account int) string {
 type CacheBackoff struct {
 	Message    string       `json:"message"`
 	RetryAfter time.Time    `json:"retry_after"`
-	RecordedAt time.Time    `json:"recorded_at"`
 	Credential string       `json:"credential,omitempty"`
 	Refusal    *StatusError `json:"refusal,omitempty"`
 }
@@ -721,9 +745,16 @@ func formatReset(raw string, now time.Time, layout string) string {
 	return parsed.In(now.Location()).Format(layout)
 }
 
-func envInt(env paths.Env, name string, fallback int) int {
-	value, err := strconv.Atoi(env.Get(name))
+// envInt is name's integer value, fallback when unset; a malformed value is
+// logged and falls back too.
+func envInt(env paths.Env, log io.Writer, name string, fallback int) int {
+	raw := env.Get(name)
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.Atoi(raw)
 	if err != nil {
+		fmt.Fprintf(log, "pfm usage-hook: %s=%q is not a whole number; using %d\n", name, raw, fallback)
 		return fallback
 	}
 	return value

@@ -102,7 +102,7 @@ The root image build. Its steps build the shared `pfm-lane-root:<hash>` image ev
 
 ## Lane A — adopter
 
-- `A.01-scaffold` · the scaffold roster lands from `pfm init` (settings, commands, agents, scripts, skills, epics, codex + docs mirrors; its next line names `/quality:claude-md write`); `pfm init --render` fills a second scratch project's install-time tokens from its manifest · spends none
+- `A.01-scaffold` · the scaffold roster lands from `pfm init` (settings, commands, agents, scripts, skills, epics, codex + docs mirrors; its next line names `/claude-md:use write`); `pfm init --render` fills a second scratch project's install-time tokens from its manifest · spends none
 - `A.02-phase2-never-deployed` · Phase-2-only scaffold is confirmed never auto-deployed by `pfm` · spends none
 - `A.03-baseline-pin` · `.professor/baseline.json` pins the install · spends none
 - `A.04-project-updates` · `pfm doctor --project-updates` is clean; every status class is exercised · spends none
@@ -141,7 +141,6 @@ Runs FIRST in the sequence: it asserts the machine the other lanes will live on,
 - `O1.17-transcript` · `pfm transcript` help names its verbs; an unknown verb exits 2 naming the invalid choice; a fixture transcript's `show` prints its `TRANSCRIPT claude` header and its prompt; `locate` of an id nothing holds exits 1 naming `NOT FOUND` · spends none
 - `O1.18-theme` · `pfm theme status` (and bare `pfm theme`) and `pfm theme sync` in a home that never ran `on` print the off line and exit 0; the retired `ls` and `set` verbs and an unknown verb exit 2 naming the unknown subcommand · spends none
 - `O1.19-restart-dry-run` · `pfm restart --dry-run` opens with the plan header, has a `find` line for every family (chats, chat-helpers, herdr, services, mcp-daemon, search-backend, pfm), exits 0 or 1 only with a `FAILED` find named, names its `last` pfm process (the restart worker a plain run detaches) and spawns no worker; `pfm restart now` exits 2 with the usage, and `pfm internal restart-run` without `--front` exits 2 with its own · spends none
-- `O1.20-extensions` · fixture `ponytail` ON/OFF across Claude, Codex and OpenCode runs install and requires doctor's `installed`, `enabled`, `options`, `env` and Codex `hook trust` extension rows with no extension `FAIL`; restores the original machine config and reruns install to converge afterward · spends none
 
 ## Lane O2 — ops & host, the destructive tail
 
@@ -176,10 +175,37 @@ Runs after the state-building lanes and before destructive O2. Its prelude creat
 - `H.herdr-to-tmux` · actual sender ancestry, signed prompt and same-target --then in recipient transcript · spends cc:$SEAT
 - `H.herdr-to-herdr` · actual sender ancestry, signed prompt and same-target --then in recipient transcript · spends cc:$SEAT
 - `H.watch` · actual native idle is reported · spends cc:$SEAT
-- `H.open-live` · BLOCKED: pinned agent.focus acknowledgement differs from product expectation · spends cc:$SEAT
+- `H.open-live` · BLOCKED: `pfm chat open` attaches a Herdr client, which exits `Os { code: 25, … "Not a tty" }` under the lane's tty-less exec · spends cc:$SEAT
 - `H.name` · durable name and actual Herdr pane label agree · spends cc:$SEAT
-- `H.reload` · BLOCKED: pinned pane.send_keys rejects product tmux key spelling C-s · spends cc:$SEAT
+- `H.reload` · same pane and terminal, a new engine with the reloaded model, pending observed and cleared, same live SID · spends cc:$SEAT
 - `H.open-restored` · automatic unattended real-server resume rebinds exact carried SID live · spends cc:$SEAT
+
+## Lane HELD — real Herdr, herdr-shield-held panes, fake engines
+
+Runs alone on its own machine after the sequence (`run.sh --lanes HELD`): systemd as PID 1, the lane as user `lane` under a real `user@1000.service`, Herdr configured as the owner runs it, `default_shell` herdr-shield around pfm's shell wrapper. Chats are born only through default-shell doors (the picker, `claude` typed in a held shell). `HELD.topology` proves the wrapping first; every later beat requires it. Every beat spends only fixture cc:1, with no credentials or providers.
+
+- `HELD.topology` · the workspace's root pane is PROTECTED: one running holder bound to it, in `user@1000.service`, its shell outside Herdr's pane process · spends none
+- `HELD.birth-picker` · the picker's New chat in a held pane gives seat `herdr|<upstream socket>|<pane>|live`, its engine under the pane's holder · spends cc:1
+- `HELD.name` · `pfm chat name` sets the seat name and the held pane's label · spends cc:1
+- `HELD.whoami` · the engine's own descendant resolves its chat through the herdr-shield relay to the upstream socket and pane · spends cc:1
+- `HELD.discovery` · `pfm ls` carries the held chat live with its name and upstream socket · spends cc:1
+- `HELD.status` · `pfm chat status` reads the held chat idle · spends cc:1
+- `HELD.indicator-idle` · Herdr reads the held pane's `agent_status` idle · spends cc:1
+- `HELD.status-working` · `pfm chat status` reads working while a held turn runs · spends cc:1
+- `HELD.indicator-working` · Herdr reads working during the held turn, idle once it ends · spends cc:1
+- `HELD.subagent-hold` · Herdr reads working after Stop while a sub-agent runs, idle after its stop · spends cc:1
+- `HELD.notification-turn` · Herdr reads working through a turn that opens with a notification, idle after · spends cc:1
+- `HELD.call` · an operator call reaches the held chat's transcript · spends cc:1
+- `HELD.keys` · literal keys and Enter reach the transcript and the held pane · spends cc:1
+- `HELD.capture` · capture shows the typed marker · spends cc:1
+- `HELD.open` · `pfm chat open` typed in another held shell brings the chat into that tab, focused, same engine and holder · spends cc:1
+- `HELD.reload` · reload relaunches the engine with `--model sonnet` in the same holder and shell · spends cc:1
+- `HELD.shield-unlistable` · a herdr-shield that cannot list is an error naming the socket, never an absent holder · spends cc:1
+- `HELD.birth-launcher` · `claude` typed in a held shell gives a live seat, its engine under the pane's holder · spends cc:1
+- `HELD.call-signed` · a held chat's call reaches its held peer signed, prompt and steer · spends cc:1
+- `HELD.reload-retired` · reload in a held pane that also holds a retired seat relaunches the live chat; the retired seat stays lost · spends cc:1
+- `HELD.kill` · kill types the exit command into the held engine, closes the held pane, ends its holder and removes the seat; HELD_MAIN untouched · spends cc:1
+- `HELD.exit` · `kill --exit` ends the held engine; HELD_MAIN untouched · spends cc:1
 
 ## Coverage
 

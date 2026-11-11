@@ -1,5 +1,3 @@
-// Package installer owns the host-level pfm command, hook, launcher, and unit
-// wiring. Its assets are embedded so one pfm binary is a complete installer.
 package installer
 
 import (
@@ -17,6 +15,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/restart"
+	"github.com/rezzminator/professor/pfm/internal/retired"
 )
 
 // ErrNameSyncRunning refuses a mutating install while the Linux name-sync
@@ -44,12 +43,11 @@ const (
 )
 
 const (
-	configTypeKey     = "type"
-	configCommandKey  = "command"
-	configArgsKey     = "args"
-	configEnvKey      = "env"
-	commandType       = "command"
-	legacyFleetBinary = "cc-fleet"
+	configTypeKey    = "type"
+	configCommandKey = "command"
+	configArgsKey    = "args"
+	configEnvKey     = "env"
+	commandType      = "command"
 )
 
 type CommandRunner interface {
@@ -84,6 +82,9 @@ func (adapter commandOutput) Run(ctx context.Context, argv []string, _ deps.RunO
 
 type Options struct {
 	Mode Mode
+	// retired stands in for the clone's retired lists in tests; nil reads the
+	// clone (retiredLists).
+	retired *retired.Lists
 	// herdrIndicatorDeps replaces the process-table, signal and start doors in tests.
 	herdrIndicatorDeps *restart.Deps
 	// LeaveVSCodeColors permits uninstall to leave known extension-owned keys;
@@ -142,6 +143,10 @@ type Options struct {
 	// are part of the result (for example rumdl and uv). Runner remains the
 	// compatibility seam for simple command/status probes.
 	ProcessRunner deps.Runner
+	// ReleaseNativeClaudeReports hands a Claude pane's Herdr state to Herdr's own
+	// Claude integration once the install step made it present (herdr_claude.go):
+	// called once per apply on a Herdr host with Home; nil skips it.
+	ReleaseNativeClaudeReports func(ctx context.Context, home string) error
 
 	MCPEnabled    map[string]bool
 	MCPPort       int
@@ -171,8 +176,7 @@ type Options struct {
 	ClaudePluginsDefault bool
 	// ClaudeEnv is claude.env: the plugin options as environment variables
 	// pfm writes into the primary seat's settings.json env (ensureClaudeEnv).
-	ClaudeEnv  map[string]string
-	Extensions map[string]pfmconfig.Extension
+	ClaudeEnv map[string]string
 	// NameSyncInterval is the machine config's nameSync.interval. It renders
 	// into BOTH schedulers — the launchd job's StartInterval and the systemd
 	// timer's OnUnitInactiveSec — from this ONE value, so a host that switches
@@ -221,14 +225,13 @@ type Options struct {
 	ThemeReleaseURL string
 	ThemeHTTPClient *http.Client
 
-	// launchGateUnprobed records that the launch-agent gate could not ask its
-	// question. It is set by Run, never by a caller.
-	launchGateUnprobed bool
-	// nameSyncGateUnprobed is the systemd twin: it records that the Linux
-	// name-sync gate's systemctl probe never ran at all (as opposed to
-	// running and reporting the service inactive). It is set by Run, never by
-	// a caller.
-	nameSyncGateUnprobed bool
+	// scheduler is the service manager the scheduled jobs run under; nil is
+	// this host's (jobScheduler). A test sets either kind.
+	scheduler scheduler
+	// schedulerGateUnprobed records that the scheduler gate could not ask its
+	// question (launchctl print or systemctl show never answered, as opposed
+	// to answering that no job runs). It is set by Run, never by a caller.
+	schedulerGateUnprobed bool
 }
 
 type Report struct {
@@ -311,10 +314,11 @@ func (runner execCommandRunner) Output(ctx context.Context, name string, args ..
 }
 
 // defaultProcRoot is the process table an install reads when neither
-// Options.ProcRoot nor its Env names one. The package's TestMain points it at an
-// empty jail, so a test whose fake Env omits PFM_PROC_ROOT never reads, or
-// signals, the processes of a suite running beside it.
-var defaultProcRoot = paths.SystemProcRoot()
+// Options.ProcRoot nor its Env names one: "", gather's own kernel table. The
+// package's TestMain points it at an empty jail, so a test whose fake Env
+// omits PFM_PROC_ROOT never reads, or signals, the processes of a suite
+// running beside it.
+var defaultProcRoot = ""
 
 func normalizeInstallerOptions(options Options) (Options, error) {
 	if options.SourceRepo != "" {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -15,6 +16,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
@@ -22,6 +24,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
@@ -33,13 +36,32 @@ func SeatForReload(ctx context.Context, values paths.Values, socket, pane string
 	if err != nil {
 		return nil, fmt.Errorf("read reload backend: %w", err)
 	}
+	var matched []*fleetdb.Seat
 	for i := range seats {
 		seat := &seats[i]
 		if seat.Backend == spawn.BackendHerdr && seat.HerdrSocket == socket && seat.HerdrPane == pane {
-			return seat, nil
+			matched = append(matched, seat)
 		}
 	}
-	return nil, nil
+	if matched = liveFirst(matched); len(matched) == 0 {
+		return nil, nil
+	}
+	return matched[0], nil
+}
+
+// liveFirst keeps only the live seats when any matched: a retired seat keeps
+// its last pane for its resume recipe, so the live chat on that pane owns it.
+func liveFirst(matched []*fleetdb.Seat) []*fleetdb.Seat {
+	var live []*fleetdb.Seat
+	for _, seat := range matched {
+		if seat.State == nativeSeatLive {
+			live = append(live, seat)
+		}
+	}
+	if len(live) > 0 {
+		return live
+	}
+	return matched
 }
 
 // NativeTarget's handled result distinguishes native refusal from a tmux target.
@@ -88,7 +110,7 @@ func NativeTarget(
 	if err != nil {
 		return nil, ambient, fmt.Errorf("read native seats: %w", err)
 	}
-	var chosen *fleetdb.Seat
+	var matched []*fleetdb.Seat
 	handled := ambient
 	for i := range seats {
 		seat := &seats[i]
@@ -99,15 +121,17 @@ func NativeTarget(
 		if pane != "" && pane != seat.HerdrPane {
 			continue
 		}
-		if chosen != nil {
-			return nil, true, errors.New("native socket has multiple panes — specify --pane")
-		}
-		chosen = seat
+		matched = append(matched, seat)
 	}
-	if chosen == nil && handled {
+	switch matched = liveFirst(matched); {
+	case len(matched) > 1:
+		return nil, true, errors.New("native socket has multiple panes — specify --pane")
+	case len(matched) == 1:
+		return matched[0], handled, nil
+	case handled:
 		return nil, true, fmt.Errorf("no native seat for %s %s", socket, pane)
 	}
-	return chosen, handled, nil
+	return nil, false, nil
 }
 
 // notifyRetryDelays are the waits before each retry of a failure notification
@@ -156,6 +180,23 @@ func NotifyWorkerFailure(
 			return true, fmt.Errorf("native reload failure notification: %w (retry cancelled: %w)", err, waitErr)
 		}
 	}
+}
+
+// WorkerFailureLine is a failed worker's error: the last line it wrote.
+func WorkerFailureLine(workerLog string) string {
+	lines := strings.Split(strings.TrimSpace(workerLog), "\n")
+	return lines[len(lines)-1]
+}
+
+// RecordWorkerFailure writes a failed worker's error to the activity log: its
+// own log file goes when the SID directory is cleared, and a tmux worker's
+// has no seat to name it.
+func RecordWorkerFailure(workerLog string, exitCode int) {
+	ctx := obs.Component(context.Background(), "hooks")
+	obs.Logger(ctx).LogAttrs(ctx, slog.LevelError, "reload.failed",
+		slog.String(obs.FieldErr, WorkerFailureLine(workerLog)),
+		slog.Int(obs.FieldExit, exitCode),
+	)
 }
 
 // WorkerArguments carries the validated CLI values to a backend-specific request.
@@ -243,13 +284,9 @@ func OptionsForWorker(values paths.Values, env paths.Env, duration func(string, 
 		ClaudeRoots: values.Roots[pfmengine.Claude],
 		Delay:       duration("PFM_RELOAD_DELAY_MS", 1500, env),
 		Poll:        duration("PFM_RELOAD_POLL_MS", 1000, env),
-		ExitTries: ParseIntEnv(
-			paths.OSEnv{},
-			"PFM_RELOAD_EXIT_TRIES",
-			20,
-		),
-		IdleTries: ParseIntEnv(paths.OSEnv{}, "PFM_RELOAD_IDLE_TRIES", 120),
-		ThenTries: ParseIntEnv(paths.OSEnv{}, "PFM_RELOAD_THEN_TRIES", 900),
+		ExitTries:   pfmcall.PositiveIntEnv(paths.OSEnv{}, "PFM_RELOAD_EXIT_TRIES", 20, os.Stderr),
+		IdleTries:   pfmcall.PositiveIntEnv(paths.OSEnv{}, "PFM_RELOAD_IDLE_TRIES", 120, os.Stderr),
+		ThenTries:   pfmcall.PositiveIntEnv(paths.OSEnv{}, "PFM_RELOAD_THEN_TRIES", 900, os.Stderr),
 	}
 }
 

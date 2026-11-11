@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -31,33 +30,12 @@ type bridgeProver struct {
 	tmux       func(ctx context.Context, socketPath string, args ...string) (string, error)
 }
 
-// ProveHerdrBridge proves the Herdr pane hosts a pfm tmux chat client: a
-// foreground tmux client of a server under pfm's tmux directory, attached to a
-// session holding pfm's Herdr record, whose start identity held across the proof.
-func ProveHerdrBridge(ctx context.Context, socket, pane string) (HerdrBridge, error) {
-	values, err := paths.Resolve()
-	if err != nil {
-		return HerdrBridge{}, fmt.Errorf("herdr pane %s bridge ownership unproved: resolve paths: %w", pane, err)
-	}
-	proc := gather.NewProcFS(values.ProcRoot)
-	return bridgeProver{
-		values: values,
-		proc:   proc,
-		foreground: bridgeForeground(
-			herdr.Call,
-			func() uint64 { return uint64(clock.Real.Now().UnixNano()) },
-			gather.HerdrKeep(proc),
-		),
-		tmux: bridgeTmux,
-	}.prove(ctx, socket, pane)
-}
-
 // bridgeForeground reads one pane's foreground pids through pane.process_info
-// and keep, refusing a reply that does not name that very pane.
+// and shield, refusing a reply that does not name that very pane.
 func bridgeForeground(
 	call func(ctx context.Context, socket string, lines ...[]byte) ([]json.RawMessage, error),
 	seq func() uint64,
-	keep *herdr.Keep,
+	shield *herdr.Shield,
 ) func(ctx context.Context, socket, pane string) ([]int, error) {
 	return func(ctx context.Context, socket, pane string) ([]int, error) {
 		line, err := herdr.ProcessInfo{Pane: pane, Seq: seq()}.Line()
@@ -71,7 +49,7 @@ func bridgeForeground(
 		if len(results) != 1 {
 			return nil, fmt.Errorf("pane.process_info of %s answered %d results, want 1", pane, len(results))
 		}
-		processes, err := keep.Processes(ctx, socket, results[0])
+		processes, err := shield.Processes(ctx, socket, results[0])
 		if err != nil {
 			return nil, fmt.Errorf("decode pane.process_info of %s: %w", pane, err)
 		}

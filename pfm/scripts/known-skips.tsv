@@ -10,7 +10,6 @@ github.com/rezzminator/professor/pfm/internal/agentrole	TestUnreadableDirectoryI
 github.com/rezzminator/professor/pfm/internal/globallink	TestClassifyUnreadableIsAnErrorNeverMissing	root-noop	the fence runs as root, where permission bits deny nothing
 github.com/rezzminator/professor/pfm/internal/compose	TestCodexLineageStress	opt-in-stress	stress battery, opt-in with PFM_STRESS=1
 github.com/rezzminator/professor/pfm/internal/compose	TestComposeStress	opt-in-stress	stress battery, opt-in with PFM_STRESS=1
-github.com/rezzminator/professor/pfm/internal/deps	TestDetachLauncherOnDarwinIsRefusedByThePlatformGateNotAbsence	platform	darwin-only gate
 github.com/rezzminator/professor/pfm/internal/gather	TestGatherStress	opt-in-stress	stress battery, opt-in with PFM_STRESS=1
 github.com/rezzminator/professor/pfm/internal/index	TestIndexStress	opt-in-stress	stress battery, opt-in with PFM_STRESS=1
 github.com/rezzminator/professor/pfm/internal/index	TestIndexStressHelper	helper	re-exec fixture: runs only as the child of its parent test
@@ -18,6 +17,7 @@ github.com/rezzminator/professor/pfm/internal/installer	TestGlobalAgentsDoctorUn
 github.com/rezzminator/professor/pfm/internal/installer	TestInspectVSCodeSurvivesOneUnreadableSettingsFileAndReportsEveryOtherRow	root-noop	the fence runs as root, where permission bits deny nothing
 github.com/rezzminator/professor/pfm/internal/installer	TestLaunchAgentGateAnnouncesWhenItCannotProbe	platform	darwin-only gate
 github.com/rezzminator/professor/pfm/internal/installer	TestLaunchAgentGateRefusesOnlyMidExecution	platform	darwin-only gate
+github.com/rezzminator/professor/pfm/internal/installer	TestNameSyncServiceRunningProductionShape	platform	linux-only gate
 github.com/rezzminator/professor/pfm/internal/kill	TestKillStressProcessHelper	helper	re-exec fixture: runs only as the child of its parent test
 github.com/rezzminator/professor/pfm/internal/statusline	TestCodexAppServerFixture	helper	re-exec fixture: runs only as the child of its parent test
 github.com/rezzminator/professor/pfm/internal/store	TestKilledWriteHelperProcess	helper	re-exec fixture: runs only as the child of its parent test
@@ -25,7 +25,8 @@ github.com/rezzminator/professor/pfm/internal/store	TestSharedKillsNeedNoBridgeI
 github.com/rezzminator/professor/pfm/internal/store	TestStoreStress	opt-in-stress	stress battery, opt-in with PFM_STRESS=1
 github.com/rezzminator/professor/pfm/internal/store	TestStoreStressKilledHelper	helper	re-exec fixture: runs only as the child of its parent test
 github.com/rezzminator/professor/pfm/internal/transcript	TestFlattenPromptTextStress	opt-in-stress	stress battery, opt-in with PFM_STRESS=1
-github.com/rezzminator/professor/pfm/internal/resolve	TestLinuxEnvironKeepsOwnRefusedRead	root-noop	the fence runs as root, which reads every process environment and a mode-000 file
-github.com/rezzminator/professor/pfm/internal/resolve	TestLinuxEnvironTagsForeignProcess	root-noop	the fence runs as root, which reads every process environment and a mode-000 file
+github.com/rezzminator/professor/pfm/internal/gather	TestDarwinEnvironTagsForeignProcess	root-noop	root reads every process environment, so no environment is withheld from it
+github.com/rezzminator/professor/pfm/internal/gather	TestLinuxEnvironKeepsOwnRefusedRead	root-noop	the fence runs as root, which reads every process environment and a mode-000 file
+github.com/rezzminator/professor/pfm/internal/gather	TestLinuxEnvironTagsForeignProcess	root-noop	the fence runs as root, which reads every process environment and a mode-000 file
 github.com/rezzminator/professor/pfm/internal/reload	TestLockNativeReloadSafety/foreign-lock	root-only	only root hands a file to another uid; a non-root run (macOS CI) cannot build the foreign-owned lock
 github.com/rezzminator/professor/pfm/internal/statusline	TestScanCheckpointsTrustOnlyThisUsersPrivateDirectory/owned_by_another_uid	root-only	only root hands a file to another uid; a non-root run (the hosted CI runner) cannot plant the foreign-owned checkpoint

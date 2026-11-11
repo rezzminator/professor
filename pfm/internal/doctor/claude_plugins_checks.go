@@ -68,9 +68,10 @@ func printEngineSyncHookDoctor(
 // printClaudePluginsDoctor checks the shared store once for the plugins build
 // ensures: each {name}@professor id, from its checkout copy on an -alpha build
 // with checkouts and from the professor marketplace otherwise, each -alpha
-// plugin with no checkout a gap, and each legacy copy of one a gap
-// (installer.ClaudePluginLegacyGaps), a warning while a live chat of chats
-// holds its removal back. An -alpha build also checks
+// plugin with no checkout a gap, and each id of retiredPlugins (the retired
+// lists' plugin ids once ours, keyed by their successor's bare name; nil when
+// the lists could not be read, a failure the caller reports) a gap while it is
+// enabled, listed or configured (installer.ClaudePluginGaps). An -alpha build also checks
 // every plugin the source clone's marketplace lists that claude.plugins does
 // not, installed with no copy enabled; a marketplace list it cannot read is a
 // failure. On an -alpha build each gap of a plugin of ours claude.plugins
@@ -88,32 +89,19 @@ func printEngineSyncHookDoctor(
 // warning each with its repair. An unreadable marketplace record is a failure
 // for the ids that need it; every other listed plugin is still checked. An
 // enabled Go binary plugin checkout copy whose matching executable is gone
-// is a gap (installer.GoPluginBinaryGap). A bare former name in claude.plugins
-// (pfmconfig.FormerClaudePluginNames) is one warning naming its current name.
+// is a gap (installer.GoPluginBinaryGap).
 func printClaudePluginsDoctor(
 	stdout io.Writer,
 	store string,
 	env paths.Env,
 	build installer.ClaudePluginBuild,
-	chats installer.PluginChats,
+	retiredPlugins map[string][]string,
 	tally *doctorTally,
 ) {
 	build, listErr := build.WithMarketplacePlugins()
 	if listErr != nil {
 		tally.fail()
 		fmt.Fprintf(stdout, "doctor: claude_plugins %v — repair it, then run pfm install --yes\n", listErr)
-	}
-	renamed := 0
-	for index, plugin := range build.Plugins {
-		if plugin.Former != "" {
-			renamed++
-			tally.warn()
-			fmt.Fprintf(
-				stdout,
-				"doctor: claude_plugins %s[%d] %s is the former name of %s, read as it — write %s there\n",
-				pfmconfig.KeyClaudePlugins, index, plugin.Former, plugin.ID, plugin.ID,
-			)
-		}
 	}
 	targets := installer.ClaudePluginTargets(build)
 	failing := listedPluginGaps(build.Version, targets)
@@ -147,7 +135,7 @@ func printClaudePluginsDoctor(
 		}
 		if recordErr != nil && target.NeedsKnownMarketplace() {
 			// The unreadable records hide whether its marketplace is known; the id itself comes from config.
-			if !enabledAndInstalled(store, *target) {
+			if !enabledAndInstalled(store, *target, retiredPlugins) {
 				cannotInstall = append(cannotInstall, installer.ClaudePluginGap{
 					Problem: "plugin " + target.ID + " cannot be checked: marketplace " + target.MarketplaceName +
 						" cannot be looked up while the plugin records are unreadable, and its " +
@@ -161,7 +149,7 @@ func printClaudePluginsDoctor(
 	}
 	targets = resolved
 	path := filepath.Join(store, "settings.json")
-	gaps, err := installer.ClaudePluginGaps(path, targets)
+	gaps, err := installer.ClaudePluginGaps(path, targets, retiredPlugins)
 	if errors.Is(err, installer.ErrClaudeSettingsAbsent) {
 		fmt.Fprintf(stdout, "doctor: claude_plugins skipped: %v (store never set up)\n", err)
 		printClaudePluginGaps(stdout, cannotInstall, tally, failing)
@@ -203,34 +191,24 @@ func printClaudePluginsDoctor(
 	gaps = append(gaps, cacheGaps...)
 	gaps = bareNameInstallFixes(gaps, targets, store)
 	marketplaceGaps, marketplaceErr := installer.ClaudePluginMarketplaceGaps(store, targets)
-	// An unreadable known_marketplaces.json is one failure, reported once: by recordErr, else here,
-	// never again by the legacy check below.
+	// An unreadable known_marketplaces.json is one failure, reported once: by recordErr, else here.
 	knownMarketplaces := filepath.Join(store, "plugins", "known_marketplaces.json")
 	if marketplaceErr != nil && (recordErr == nil || !strings.Contains(recordErr.Error(), knownMarketplaces)) {
 		tally.fail()
 		fmt.Fprintf(stdout, "doctor: claude_plugins could not read %s: %v\n", knownMarketplaces, marketplaceErr)
 	}
 	gaps = append(gaps, marketplaceGaps...)
-	legacyGaps, deferredGaps, legacyErr := installer.ClaudePluginLegacyGaps(store, build.Home, targets, chats)
-	if legacyErr != nil && (marketplaceErr == nil || !strings.Contains(legacyErr.Error(), knownMarketplaces)) {
-		tally.fail()
-		fmt.Fprintf(stdout, "doctor: claude_plugins could not look for legacy plugin copies: %v\n", legacyErr)
-	}
-	gaps = append(gaps, legacyGaps...)
 	for index := range targets {
 		if gap, found := installer.GoPluginBinaryGap(env, build.Home, targets[index]); found {
 			gaps = append(gaps, gap)
 		}
 	}
 	gaps = append(gaps, cannotInstall...)
-	if len(gaps)+len(deferredGaps) == 0 && listErr == nil && recordErr == nil && marketplaceErr == nil &&
-		cacheErr == nil && legacyErr == nil && renamed == 0 {
+	if len(gaps) == 0 && listErr == nil && recordErr == nil && marketplaceErr == nil && cacheErr == nil {
 		fmt.Fprintln(stdout, "doctor: claude_plugins ok")
 		return
 	}
 	printClaudePluginGaps(stdout, gaps, tally, failing)
-	// Install holds these back by design while a chat may run from them: a warning, never a failure.
-	printClaudePluginGaps(stdout, deferredGaps, tally, func(installer.ClaudePluginGap) bool { return false })
 }
 
 // undecidedCopyFix is the repair of a bare name whose source clone or checkout could not be read.
@@ -242,9 +220,13 @@ const unreadableRecordsFix = "repair the unreadable file named above, then run p
 // enabledAndInstalled reports whether target is proven enabled in the store's settings.json and
 // installed in its plugins/installed_plugins.json, which needs no marketplace lookup. A record
 // that cannot be read proves nothing.
-func enabledAndInstalled(store string, target installer.ClaudePluginTarget) bool {
+func enabledAndInstalled(
+	store string,
+	target installer.ClaudePluginTarget,
+	retiredPlugins map[string][]string,
+) bool {
 	one := []installer.ClaudePluginTarget{target}
-	gaps, err := installer.ClaudePluginGaps(filepath.Join(store, "settings.json"), one)
+	gaps, err := installer.ClaudePluginGaps(filepath.Join(store, "settings.json"), one, retiredPlugins)
 	if err != nil || len(gaps) != 0 {
 		return false
 	}

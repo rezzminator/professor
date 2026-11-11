@@ -50,6 +50,14 @@ func detectAgentsFrom(
 		sessionIDs := ClaudeSessionIDs(cmdline)
 		environment, err := proc.Environ(pid)
 		if err != nil {
+			// Gone since the listing, or another user's process (macOS SIP
+			// too): no agent of this user's to find. Anything else is a
+			// failure to look.
+			if !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, fs.ErrPermission) {
+				warnings = append(warnings, fmt.Sprintf(
+					"claude process %d environment unreadable; an agent session there may be missing: %v", pid, err,
+				))
+			}
 			continue
 		}
 		// A Claude started outside pfm carries no CLAUDE_CONFIG_DIR, or the

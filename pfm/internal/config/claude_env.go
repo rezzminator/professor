@@ -4,9 +4,38 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
+
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
+
+// CallmeterCostLedgerDirEnv is callmeter's own option naming the cost ledger
+// it reads; callmeter reads none while it is unset.
+const CallmeterCostLedgerDirEnv = "CALLMETER_COST_LEDGER_DIR"
+
+// EffectiveClaudeEnv is claude.env as pfm writes it. While callmeter is among
+// claude.plugins it also hands callmeter pfm's cost ledger (paths.CostLedgerDir
+// under home) through CallmeterCostLedgerDirEnv, unless claude.env names one.
+func (config Config) EffectiveClaudeEnv(env paths.Env, home string) map[string]string {
+	result := maps.Clone(config.Claude.Env)
+	if result == nil {
+		result = map[string]string{}
+	}
+	callmeter := slices.ContainsFunc(config.Claude.Plugins, func(plugin ClaudePlugin) bool {
+		return plugin.Name() == "callmeter"
+	})
+	if _, named := result[CallmeterCostLedgerDirEnv]; callmeter && !named {
+		// An unresolved home would hand callmeter a path relative to its cwd.
+		if dir := paths.CostLedgerDir(env, home); filepath.IsAbs(dir) {
+			result[CallmeterCostLedgerDirEnv] = dir
+		}
+	}
+	return result
+}
 
 // claudeEnvNamePattern is a claude.env name: upper snake, starting with a
 // letter, so it is a portable environment variable name.

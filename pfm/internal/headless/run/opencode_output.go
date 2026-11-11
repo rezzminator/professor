@@ -38,12 +38,18 @@ func collectOpenCodeRunOutput(
 ) (string, error) {
 	ticker := request.Clock.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
+	var markerDecodeErr error
 	for {
 		markerBody, markerErr := os.ReadFile(assistantPath)
 		if markerErr == nil {
 			var marker openCodeAssistantMarker
 			if err := json.Unmarshal(markerBody, &marker); err != nil {
-				return "", fmt.Errorf("decode OpenCode assistant marker: %w", err)
+				// the plugin writes the marker atomically: an unreadable one is read again next tick, and
+				// named if the wait ends on it
+				markerDecodeErr = fmt.Errorf("decode OpenCode assistant marker: %w", err)
+				marker = openCodeAssistantMarker{}
+			} else {
+				markerDecodeErr = nil
 			}
 			if len(marker.Error) != 0 && string(marker.Error) != jsonNull {
 				var output bytes.Buffer
@@ -92,7 +98,7 @@ func collectOpenCodeRunOutput(
 		}
 		select {
 		case <-ctx.Done():
-			return "", fmt.Errorf("wait for OpenCode run result: %w", ctx.Err())
+			return "", errors.Join(fmt.Errorf("wait for OpenCode run result: %w", ctx.Err()), markerDecodeErr)
 		case <-ticker.C():
 		}
 	}
@@ -151,16 +157,17 @@ func openCodeMessageSnapshotComplete(body []byte, request Request) (bool, error)
 				Completed json.RawMessage `json:"completed"`
 			} `json:"time"`
 		} `json:"info"`
-		Parts []struct {
-			Type  string `json:"type"`
-			Tool  string `json:"tool"`
-			State struct {
-				Status string `json:"status"`
-			} `json:"state"`
-		} `json:"parts"`
+		Parts []json.RawMessage `json:"parts"`
 	}
 	if err := json.Unmarshal(body, &message); err != nil {
 		return false, fmt.Errorf("decode OpenCode assistant completion: %w", err)
+	}
+	var parts []openCodeSnapshotPart
+	for _, raw := range message.Parts {
+		var part openCodeSnapshotPart
+		if json.Unmarshal(raw, &part) == nil { // an unreadable part is reported by openCodeMessagesAsJSONL
+			parts = append(parts, part)
+		}
 	}
 	if message.Info.Role != "assistant" {
 		return false, nil
@@ -172,13 +179,13 @@ func openCodeMessageSnapshotComplete(body []byte, request Request) (bool, error)
 		return true, nil
 	}
 	if request.Schema != nil {
-		for _, part := range message.Parts {
+		for _, part := range parts {
 			if part.Type == openCodePartTool && part.Tool == openCodeStructuredTool &&
 				part.State.Status == openCodeStateCompleted {
 				// A completed StructuredOutput part can be persisted before the
 				// assistant's final step metadata. Wait for the message timestamp
 				// or a persisted step before treating this snapshot as stable.
-				for _, candidate := range message.Parts {
+				for _, candidate := range parts {
 					if candidate.Type == "step-finish" {
 						return true, nil
 					}
@@ -189,6 +196,15 @@ func openCodeMessageSnapshotComplete(body []byte, request Request) (bool, error)
 		return false, nil
 	}
 	return false, nil
+}
+
+// openCodeSnapshotPart is the part of a persisted message part pfm reads.
+type openCodeSnapshotPart struct {
+	Type  string `json:"type"`
+	Tool  string `json:"tool"`
+	State struct {
+		Status string `json:"status"`
+	} `json:"state"`
 }
 
 func openCodeMessagesAsJSONL(body []byte, userMessageID string, request Request) (string, bool, error) {
@@ -222,14 +238,12 @@ func openCodeMessagesAsJSONL(body []byte, userMessageID string, request Request)
 		hasStepFinish := false
 		structuredComplete := false
 		for _, rawPart := range message.Parts {
-			var part struct {
-				Type   string          `json:"type"`
-				Tool   string          `json:"tool"`
-				State  json.RawMessage `json:"state"`
-				Reason string          `json:"reason"`
-			}
+			var part openCodeSnapshotPart
 			if err := json.Unmarshal(rawPart, &part); err != nil {
-				return "", false, fmt.Errorf("decode OpenCode run message part: %w", err)
+				if err := appendOpenCodeUnreadable(&output, "an OpenCode run message part", err); err != nil {
+					return "", false, err
+				}
+				continue
 			}
 			switch part.Type {
 			case jsonEventText:
@@ -238,13 +252,7 @@ func openCodeMessagesAsJSONL(body []byte, userMessageID string, request Request)
 				}
 			case openCodePartTool:
 				if part.Tool == openCodeStructuredTool {
-					var state struct {
-						Status string `json:"status"`
-					}
-					if err := json.Unmarshal(part.State, &state); err != nil {
-						return "", false, fmt.Errorf("decode OpenCode structured-output state: %w", err)
-					}
-					structuredComplete = state.Status == openCodeStateCompleted
+					structuredComplete = part.State.Status == openCodeStateCompleted
 				}
 				if err := appendOpenCodeEvent(&output, "tool_use", rawPart); err != nil {
 					return "", false, err
@@ -329,6 +337,20 @@ func appendOpenCodeEvent(output *bytes.Buffer, eventType string, part any) error
 	return nil
 }
 
+// appendOpenCodeUnreadable carries a part the converter could not decode into the normalized
+// stream as its diagnostic, so parseOpenCodeJSONL reports the loss instead of the run aborting.
+func appendOpenCodeUnreadable(output *bytes.Buffer, what string, cause error) error {
+	encoded, err := json.Marshal(
+		map[string]any{jsonKeyType: openCodeEventUnreadable, "message": unreadableItem(what, cause)},
+	)
+	if err != nil {
+		return fmt.Errorf("encode OpenCode normalized diagnostic event: %w", err)
+	}
+	output.Write(encoded)
+	output.WriteByte('\n')
+	return nil
+}
+
 func appendOpenCodeErrorEvent(output *bytes.Buffer, errorValue json.RawMessage) error {
 	event := map[string]any{jsonKeyType: jsonEventError, jsonEventError: errorValue}
 	encoded, err := json.Marshal(event)
@@ -340,14 +362,26 @@ func appendOpenCodeErrorEvent(output *bytes.Buffer, errorValue json.RawMessage) 
 	return nil
 }
 
+type openCodeTextTime struct {
+	End int64 `json:"end"`
+}
+
+// openCodeTextPart is the part of an OpenCode text event pfm reads.
+type openCodeTextPart struct {
+	ID        string           `json:"id"`
+	MessageID string           `json:"messageID"`
+	Text      string           `json:"text"`
+	Time      openCodeTextTime `json:"time"`
+}
+
 func parseOpenCodeJSONL(result *Result, request Request) error {
 	var text string
 	var terminalReason string
 	var fatalError bool
 	usage := &TokenUsage{}
-	usageKnown := false
+	usageKnown, usageUnreadable := false, false
 	var cost float64
-	costKnown := false
+	costKnown, costUnreadable := false, false
 	var structured json.RawMessage
 	texts := map[string]string{}
 	textParts := map[string]bool{}
@@ -364,12 +398,17 @@ func parseOpenCodeJSONL(result *Result, request Request) error {
 			SessionID string          `json:"sessionID"`
 		}
 		if err := json.Unmarshal([]byte(line), &event); err != nil {
-			return fmt.Errorf("parse OpenCode JSONL event %d: %w", lineNo+1, err)
+			result.noteUnreadable(fmt.Sprintf("OpenCode JSONL event %d", lineNo+1), err)
+			continue
 		}
 		if event.Type == "" {
-			return fmt.Errorf("OpenCode event %d has no type", lineNo+1)
+			result.noteUnreadable(
+				fmt.Sprintf("OpenCode JSONL event %d", lineNo+1), errors.New("the event has no type"))
+			continue
 		}
 		switch event.Type {
+		case openCodeEventUnreadable:
+			result.Diagnostics = append(result.Diagnostics, event.Message)
 		case jsonEventError, "session.error":
 			fatalError = true
 			message := openCodeErrorMessage(event.Message, event.Error)
@@ -378,16 +417,20 @@ func parseOpenCodeJSONL(result *Result, request Request) error {
 			}
 			result.Diagnostics = append(result.Diagnostics, message)
 		case jsonEventText:
-			var part struct {
-				ID        string `json:"id"`
-				MessageID string `json:"messageID"`
-				Text      string `json:"text"`
-				Time      struct {
-					End int64 `json:"end"`
-				} `json:"time"`
-			}
+			var part openCodeTextPart
 			if err := json.Unmarshal(event.Part, &part); err != nil {
-				return fmt.Errorf("parse OpenCode text event %d: %w", lineNo+1, err)
+				var fields map[string]json.RawMessage
+				if json.Unmarshal(event.Part, &fields) != nil {
+					result.noteUnreadable(fmt.Sprintf("OpenCode text event %d", lineNo+1), err)
+					continue
+				}
+				// one mistyped field costs that field: the model's text is read on its own
+				result.noteUnreadable(
+					fmt.Sprintf("OpenCode text event %d, whole; its readable fields were kept", lineNo+1), err)
+				part = openCodeTextPart{
+					ID: lenientField[string](fields, "id"), MessageID: lenientField[string](fields, "messageID"),
+					Text: lenientText(fields, "text"), Time: lenientField[openCodeTextTime](fields, "time"),
+				}
 			}
 			if part.Time.End != 0 || part.Text != "" {
 				messageID := part.MessageID
@@ -411,7 +454,8 @@ func parseOpenCodeJSONL(result *Result, request Request) error {
 				} `json:"state"`
 			}
 			if err := json.Unmarshal(event.Part, &part); err != nil {
-				return fmt.Errorf("parse OpenCode tool event %d: %w", lineNo+1, err)
+				result.noteUnreadable(fmt.Sprintf("OpenCode tool event %d", lineNo+1), err)
+				continue
 			}
 			if part.State.Status == "error" {
 				if part.State.Error != "" {
@@ -440,32 +484,38 @@ func parseOpenCodeJSONL(result *Result, request Request) error {
 				} `json:"cache"`
 			}
 			if err := json.Unmarshal(event.Part, &part); err != nil {
-				return fmt.Errorf("parse OpenCode step_finish event %d: %w", lineNo+1, err)
+				result.noteUnreadable(
+					fmt.Sprintf("OpenCode step_finish event %d", lineNo+1), err)
+				continue
 			}
+			// One unreadable step leaves the run's usage or cost unknown: a sum short a step is a fiction.
 			if len(part.Tokens) != 0 && string(part.Tokens) != jsonNull {
-				if err := json.Unmarshal(part.Tokens, &tokens); err != nil {
-					return fmt.Errorf("parse OpenCode step_finish event %d tokens: %w", lineNo+1, err)
+				err := json.Unmarshal(part.Tokens, &tokens)
+				if err == nil && (tokens.Input < 0 || tokens.Output < 0 || tokens.Reasoning < 0 ||
+					tokens.Cache.Read < 0 || tokens.Cache.Write < 0) {
+					err = errors.New("negative token count")
 				}
-				if tokens.Input < 0 || tokens.Output < 0 || tokens.Reasoning < 0 || tokens.Cache.Read < 0 ||
-					tokens.Cache.Write < 0 {
-					return fmt.Errorf("OpenCode step_finish event %d contains negative token counts", lineNo+1)
+				if err != nil {
+					usageUnreadable = true
+					result.noteUnreadable(
+						fmt.Sprintf("OpenCode step_finish event %d tokens", lineNo+1), err)
+				} else {
+					usage.Input += tokens.Input
+					usage.Output += tokens.Output + tokens.Reasoning
+					usage.CachedInput += tokens.Cache.Read
+					usage.CacheCreation += tokens.Cache.Write
+					usageKnown = true
 				}
-				usage.Input += tokens.Input
-				usage.Output += tokens.Output + tokens.Reasoning
-				usage.CachedInput += tokens.Cache.Read
-				usage.CacheCreation += tokens.Cache.Write
-				usageKnown = true
 			}
 			if len(part.Cost) != 0 && string(part.Cost) != jsonNull {
-				var value float64
-				if err := json.Unmarshal(part.Cost, &value); err != nil {
-					return fmt.Errorf("OpenCode step_finish event %d cost: %w", lineNo+1, err)
+				if value, err := parseCost(part.Cost); err != nil {
+					costUnreadable = true
+					result.noteUnreadable(
+						fmt.Sprintf("OpenCode step_finish event %d cost", lineNo+1), err)
+				} else {
+					costKnown = true
+					cost += *value
 				}
-				if value < 0 {
-					return fmt.Errorf("OpenCode step_finish event %d contains negative cost", lineNo+1)
-				}
-				costKnown = true
-				cost += value
 			}
 			terminalReason = part.Reason
 			if part.MessageID != "" {
@@ -473,6 +523,18 @@ func parseOpenCodeJSONL(result *Result, request Request) error {
 			}
 		}
 	}
+	// The model's text, usage and cost stay on the result beside any failure below, as Claude's
+	// and Codex's do: a run that ended badly still answered and still billed.
+	if usageKnown && !usageUnreadable {
+		result.Usage = usage
+	}
+	if costKnown && !costUnreadable {
+		result.TotalCostUSD = &cost
+	}
+	if lastMessageID != "" {
+		text = texts[lastMessageID]
+	}
+	result.Answer = text
 	if fatalError {
 		return fmt.Errorf("OpenCode headless output reported an error")
 	}
@@ -488,23 +550,11 @@ func parseOpenCodeJSONL(result *Result, request Request) error {
 		}
 		result.StructuredOutput = structured
 		result.Answer = string(structured)
-	} else {
-		if terminalReason != "stop" {
-			return fmt.Errorf(
-				"OpenCode headless output ended with %q and contains no structured result",
-				terminalReason,
-			)
-		}
-		if lastMessageID != "" {
-			text = texts[lastMessageID]
-		}
-		result.Answer = text
-	}
-	if usageKnown {
-		result.Usage = usage
-	}
-	if costKnown {
-		result.TotalCostUSD = &cost
+	} else if terminalReason != "stop" {
+		return fmt.Errorf(
+			"OpenCode headless output ended with %q and contains no structured result",
+			terminalReason,
+		)
 	}
 	return nil
 }

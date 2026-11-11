@@ -123,7 +123,7 @@ func runConfigInit(args []string, stdout, stderr io.Writer, runtime commandRunti
 	fmt.Fprintf(stdout, "config initialized: %s\n", runtime.Config.Path)
 	fmt.Fprintln(stdout, "field documentation:")
 	fmt.Fprintln(stdout, "  accounts: configured Claude account roster, configDir, and emoji badge")
-	fmt.Fprintln(stdout, "  claude.permissionMode: bypass or prompted; account values override this default")
+	fmt.Fprintln(stdout, "  claude.permissionMode: bypass, prompted or auto; account values override this default")
 	fmt.Fprintln(
 		stdout,
 		"  codex.yolo: whether Codex launches with approval bypass; account values override this default",
@@ -245,5 +245,4 @@ func printResolvedConfig(stdout io.Writer, runtime commandRuntime) {
 		fmt.Fprintf(stdout, "config ask.%s.model=%s (%s)\n", name, prefs.Model, config.Source("ask."+name+".model"))
 		fmt.Fprintf(stdout, "config ask.%s.effort=%s (%s)\n", name, prefs.Effort, config.Source("ask."+name+".effort"))
 	}
-	config.ReportExtensions(stdout)
 }

@@ -102,33 +102,6 @@ func TestDoctorConfigFileRows(t *testing.T) {
 	if !strings.Contains(output.String(), "config: missing "+path+" — run pfm install") {
 		t.Fatalf("missing file row absent: %s", output.String())
 	}
-	// A legacy config waits behind the host gate, which refuses pfm install
-	// until it moves: the row names the host check's fix, never pfm install.
-	// Under an explicit --config the host check skips it, and so does the row.
-	home := filepath.Join(root, "home")
-	legacy := filepath.Join(config.LegacyConfigDir(paths.OSEnv{}, home), config.FileName)
-	if err := os.MkdirAll(filepath.Dir(legacy), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(legacy, []byte("{}"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	output.Reset()
-	PrintConfig(&output, config.Runtime{Config: config.Config{Path: path}, Paths: paths.Values{Home: home}})
-	if !strings.Contains(
-		output.String(),
-		"config: legacy file "+legacy+" is not read — apply the host-check legacy-config fix\n",
-	) {
-		t.Fatalf("legacy file row: %s", output.String())
-	}
-	output.Reset()
-	PrintConfig(
-		&output,
-		config.Runtime{Config: config.Config{Path: path}, Paths: paths.Values{Home: home}, ConfigExplicit: true},
-	)
-	if strings.Contains(output.String(), "legacy file") {
-		t.Fatalf("explicit config legacy row: %s", output.String())
-	}
 	if err := os.Mkdir(path, 0o700); err != nil {
 		t.Fatal(err)
 	}

@@ -6,8 +6,11 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
@@ -178,9 +181,6 @@ func TestRegisterHookTrustPicksOnlyItsOwnHandlerAmongPersonalOnes(t *testing.T) 
 	if !HookTrustRecorded(account) {
 		t.Fatal("HookTrustRecorded=false after a registration")
 	}
-	if TrustRecorded(account) {
-		t.Fatal("the hook receipt answered the retired appendix's question")
-	}
 }
 
 func TestRegisterHookTrustErrorsWithTheCountWhenTheHandlerIsNotListed(t *testing.T) {
@@ -243,10 +243,6 @@ func TestUnregisterHookTrustRemovesOnlyItsOwnTablesAndReceipt(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeReceiptFile(t, account, `{"owned:key":"sha256:owned"}`)
-	appendixReceipt := filepath.Join(account, ".professor-appendix-trust.json")
-	if err := os.WriteFile(appendixReceipt, []byte(`{"foreign:key":"sha256:foreign"}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	if err := UnregisterHookTrust(account); err != nil {
 		t.Fatal(err)
 	}
@@ -260,9 +256,6 @@ func TestUnregisterHookTrustRemovesOnlyItsOwnTablesAndReceipt(t *testing.T) {
 	}
 	if HookTrustRecorded(account) {
 		t.Fatal("hook receipt survived")
-	}
-	if _, err := os.Stat(appendixReceipt); err != nil {
-		t.Fatalf("the appendix receipt was touched: %v", err)
 	}
 	if err := UnregisterHookTrust(account); err != nil {
 		t.Fatalf("repeated cleanup: %v", err)
@@ -541,6 +534,70 @@ func TestNativeHookTrustStatesNameAReceiptThatRecordsNoOwnedHandler(t *testing.T
 	for _, state := range NativeHookTrustStates(t.Context(), binary, account, []Handler{ownHandler, promptHandler}) {
 		if state.Trusted || state.Err == nil || !strings.Contains(state.Err.Error(), "no valid handler fingerprint") {
 			t.Fatalf("state=%+v, want the receipt named unreadable for every handler", state)
+		}
+	}
+}
+
+// A cancelled exchange kills the helper's whole process group: the app-server
+// and a descendant it started are both gone once rpc returns, within the
+// 250 ms pipe bound plus a second of polling.
+func TestRPCCancelKillsTheHelpersProcessGroup(t *testing.T) {
+	root := t.TempDir()
+	pidFile := filepath.Join(root, "pids")
+	binary := filepath.Join(root, "fake-codex")
+	script := "#!/bin/sh\nsleep 60 &\necho \"$$ $!\" > '" + pidFile + ".tmp' && mv '" + pidFile + ".tmp' '" + pidFile + "'\n" +
+		"while IFS= read -r line; do :; done\n"
+	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	var pids []int
+	t.Cleanup(func() {
+		for _, pid := range pids {
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+		}
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	returned := make(chan error, 1)
+	go func() {
+		_, err := rpc(ctx, binary, root, "hooks/list", map[string]any{})
+		returned <- err
+	}()
+	deadline := time.Now().Add(10 * time.Second)
+	for len(pids) == 0 {
+		if raw, err := os.ReadFile(pidFile); err == nil {
+			for _, field := range strings.Fields(string(raw)) {
+				pid, convErr := strconv.Atoi(field)
+				if convErr != nil {
+					t.Fatalf("parse pid %q from %s: %v", field, pidFile, convErr)
+				}
+				pids = append(pids, pid)
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the fake app-server never wrote %s", pidFile)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if len(pids) != 2 {
+		t.Fatalf("%s holds pids %v, want the app-server and its descendant", pidFile, pids)
+	}
+	cancel()
+	select {
+	case err := <-returned:
+		if want := "native hook API: context canceled"; err == nil || err.Error() != want {
+			t.Fatalf("rpc after cancel = %v, want %q", err, want)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("rpc did not return within 10s of its cancellation")
+	}
+	deadline = time.Now().Add(250*time.Millisecond + time.Second)
+	for _, pid := range pids {
+		for !errors.Is(syscall.Kill(pid, 0), syscall.ESRCH) {
+			if time.Now().After(deadline) {
+				t.Fatalf("pid %d of the helper's group survived the cancelled exchange", pid)
+			}
+			time.Sleep(20 * time.Millisecond)
 		}
 	}
 }

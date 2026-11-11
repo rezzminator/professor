@@ -9,7 +9,15 @@ import (
 	"testing"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/retired"
 )
+
+// fixtureRetiredCommands are the retired commands the retirement is tested
+// on; the shipped lists are empty.
+var fixtureRetiredCommands = retired.Lists{Commands: retired.Commands{
+	HomeBin:    []string{"cc-fleet", "cc-ls", "cc-open"},
+	AccountBin: []string{"cc-launch.sh", "cc-open.sh", "cc-fleet.zsh"},
+}}
 
 func TestApplyRetiresLegacyCCCommandsAcrossConfiguredAccounts(t *testing.T) {
 	t.Parallel()
@@ -19,28 +27,17 @@ func TestApplyRetiresLegacyCCCommandsAcrossConfiguredAccounts(t *testing.T) {
 		filepath.Join(home, ".cc", "4"),
 		filepath.Join(home, ".cc", "7"),
 	}
-	publicCommands := []string{
-		"cc-fleet", "cc-ls", "cc-open", "cc-swap", "cc-revive", "cc-clean",
-	}
-	accountScripts := []string{
-		"cc-launch.sh", "cc-lib.sh", "cc-reseed.sh", "cc-account-swap.sh",
-		"cc-account-swap-all.sh", "cc-ls.sh", "cc-open.sh", "cc-revive.sh",
-		"cc-clean.sh", "cc-usage-hook.sh", "cc-fleet.zsh", "cc-kill.sh",
-		"cc-archive.sh", "cc-reap.sh", "cc-name-sync.sh", "cc-portable.sh",
-		"cc-db.sh", "cc-agent-open.sh", "cc-swap-chat.sh",
-	}
-
-	var retired []string
-	for _, name := range publicCommands {
+	var retiredPaths []string
+	for _, name := range fixtureRetiredCommands.Commands.HomeBin {
 		path := filepath.Join(home, ".local", "bin", name)
 		writeFixture(t, path, "legacy command\n")
-		retired = append(retired, path)
+		retiredPaths = append(retiredPaths, path)
 	}
 	for _, configDir := range configDirs {
-		for _, name := range accountScripts {
+		for _, name := range fixtureRetiredCommands.Commands.AccountBin {
 			path := filepath.Join(configDir, "bin", name)
 			writeFixture(t, path, "legacy script\n")
-			retired = append(retired, path)
+			retiredPaths = append(retiredPaths, path)
 		}
 	}
 	operatorCommand := filepath.Join(configDirs[1], "bin", "cc-operator-owned.sh")
@@ -54,10 +51,11 @@ func TestApplyRetiresLegacyCCCommandsAcrossConfiguredAccounts(t *testing.T) {
 		Home:           home,
 		ClaudeAccounts: []pfmconfig.Account{{ID: 4, ConfigDir: configDirs[1]}, {ID: 7, ConfigDir: configDirs[2]}},
 		Runner:         &fakeRunner{},
+		retired:        &fixtureRetiredCommands,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range retired {
+	for _, path := range retiredPaths {
 		if _, err := os.Lstat(path); !os.IsNotExist(err) {
 			t.Errorf("retired command remains at %s: %v", path, err)
 		}
@@ -97,6 +95,7 @@ func TestApplyQuarantinesExactNamedOperatorFilesBeforeRetirement(t *testing.T) {
 		Home:           home,
 		ClaudeAccounts: []pfmconfig.Account{{ID: 4, ConfigDir: config}},
 		Runner:         &fakeRunner{},
+		retired:        &fixtureRetiredCommands,
 	}); err != nil {
 		t.Fatal(err)
 	}

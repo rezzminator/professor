@@ -115,6 +115,7 @@ func (fakeProcess) StdinPipe() (io.WriteCloser, error) { return nil, errors.New(
 func (fakeProcess) StdoutPipe() (io.ReadCloser, error) { return nil, errors.New("no stdout") }
 func (fakeProcess) Kill() error                        { return nil }
 func (fakeProcess) KillGroup() error                   { return nil }
+func (fakeProcess) SignalGroup(syscall.Signal) error   { return nil }
 func answer(stdout string) (deps.RunResult, error) {
 	return deps.RunResult{Stdout: []byte(stdout)}, nil
 }

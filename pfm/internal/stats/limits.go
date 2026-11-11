@@ -385,14 +385,13 @@ func (sampler *LimitsSampler) refresh(
 	applyFetchedLimits(&entry.limits, fetched)
 	completionNow := sampler.now()
 	if !entry.limits.ConfirmedAt.IsZero() && entry.limits.ConfirmedAt.After(completionNow) {
-		entry.limits.ConfirmedAt = time.Time{}
-		entry.limits.Windows = nil
-		entry.limits.Status = fmt.Sprintf("account %d limits unavailable: future confirmation timestamp", account.ID)
-		entry.warnings = append(entry.warnings, entry.limits.Status)
-		if ctx.Err() == nil {
-			sampler.storeIfActive(ctx, key, entry)
-		}
-		return entry
+		// A forward-dated stamp (clock skew, a corrupt record) has no honest
+		// age, but the windows beside it are still the provider's answer:
+		// the stamp is clamped to now and the windows stay, with a warning.
+		entry.limits.ConfirmedAt = completionNow
+		entry.warnings = append(entry.warnings, fmt.Sprintf(
+			"account %d limits: future confirmation timestamp, treated as now", account.ID,
+		))
 	}
 	if fetchErr != nil {
 		if entry.limits.Status == "" {
@@ -625,11 +624,14 @@ func usageWindows(usage usagehook.Usage, now time.Time) []Window {
 	windows := make([]Window, 0, len(named))
 	for _, entry := range named {
 		source := entry.Window
-		if source.Utilization == nil {
-			continue
-		}
 		resetAt, resetNote := parseReset(source.ResetsAt)
-		usedPct := *source.Utilization
+		// A window the provider named without a utilization keeps its row:
+		// UnknownUsedPct says "no number", where skipping it would hide the
+		// window (and its reset) altogether.
+		usedPct := float64(UnknownUsedPct)
+		if source.Utilization != nil {
+			usedPct = *source.Utilization
+		}
 		if codexResetPassed(resetAt, now) {
 			// The reading belongs to a window that has already rolled over;
 			// show the row so the account keeps its shape, but no bar and no
@@ -966,7 +968,7 @@ func (sampler *LimitsSampler) fetchCodexCached(
 		cacheErr := writeCodexCacheRecord(path, codexCacheRecord{
 			codexUsage: previousUsage, SourceVersion: codexUsageSourceVersion,
 			CodexAuthPath: account.CodexAuthPath, FetchedAt: previousFetchedAt,
-			Backoff: &usagehook.CacheBackoff{Message: message, RetryAfter: retryAfter, RecordedAt: now},
+			Backoff: &usagehook.CacheBackoff{Message: message, RetryAfter: retryAfter},
 		})
 		var rateLimit *usagehook.RateLimitError
 		if errors.As(err, &rateLimit) {

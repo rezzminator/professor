@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/codexprompt"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // Each broken state of the Codex fleet-prompt channel names ITSELF: absent,
@@ -20,13 +21,14 @@ func TestCodexDeveloperInstructionsNameEveryBrokenState(t *testing.T) {
 		t.Fatal(err)
 	}
 	cases := []struct {
-		name      string
-		config    string
-		absent    bool
-		directory bool
-		want      string
-		wantAlso  string
-		failures  int
+		name         string
+		config       string
+		absent       bool
+		directory    bool
+		uncomposable bool
+		want         string
+		wantAlso     string
+		failures     int
 	}{
 		{
 			name:     "installed",
@@ -77,6 +79,26 @@ func TestCodexDeveloperInstructionsNameEveryBrokenState(t *testing.T) {
 			wantAlso:  "UNKNOWN, not clean",
 			failures:  1,
 		},
+		{
+			// A prompt that cannot be composed leaves the comparison unknown,
+			// never the accounts unread: a value there is UNVERIFIED.
+			name:         "a value while the prompt cannot be composed",
+			uncomposable: true,
+			config:       "developer_instructions = 'Keep my rules.'\n",
+			want: "doctor: codex developer_instructions=UNVERIFIED file={file} bytes=14 — the Codex prompt could " +
+				"not be composed, so whether this value is the fleet prompt is UNKNOWN\n",
+			wantAlso: "developer_instructions=CHECK FAILED error=",
+			failures: 1,
+		},
+		{
+			name:         "key absent while the prompt cannot be composed",
+			uncomposable: true,
+			config:       "model = 'personal'\n",
+			want: "doctor: codex developer_instructions=MISSING file={file} — every Codex session from this " +
+				"account starts with no fleet prompt; run pfm install --yes\n",
+			wantAlso: "developer_instructions=CHECK FAILED error=",
+			failures: 2,
+		},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -90,15 +112,23 @@ func TestCodexDeveloperInstructionsNameEveryBrokenState(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+			pfmHome := t.TempDir()
+			if testCase.uncomposable {
+				// A directory where the source-repo marker belongs: the clone is unreadable.
+				if err := os.MkdirAll(paths.SourceRepoPath(pfmHome), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
 			var out bytes.Buffer
 			if failures := PrintCodexDeveloperInstructions(
 				&out,
-				t.TempDir(),
+				pfmHome,
 				[]string{home},
 			); failures != testCase.failures {
 				t.Fatalf("failures=%d want=%d: %s", failures, testCase.failures, out.String())
 			}
-			for _, want := range []string{testCase.want, testCase.wantAlso} {
+			want := strings.ReplaceAll(testCase.want, "{file}", filepath.Join(home, "config.toml"))
+			for _, want := range []string{want, testCase.wantAlso} {
 				if !strings.Contains(out.String(), want) {
 					t.Fatalf("line does not name %q: %s", want, out.String())
 				}

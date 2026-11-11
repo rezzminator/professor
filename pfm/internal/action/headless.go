@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -15,6 +16,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/launchnotice"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
@@ -108,7 +110,7 @@ func CodexEffortArg(effort string) []string {
 // codexModelArgs renders a Codex seat's `--model` pair, a bare roster tier (astra) resolved to its
 // full Codex id through pfmengine.CodexModel; no model renders no flag.
 func codexModelArgs(model, home string) ([]string, error) {
-	resolved, err := pfmengine.CodexModel(model, home)
+	resolved, err := pfmengine.CodexModel(model, home, paths.CodexHome(home))
 	if err != nil || resolved == "" {
 		return nil, err
 	}
@@ -362,11 +364,8 @@ func codexSeatRun(machine pfmconfig.Config, account int, cwd string, args ...str
 	return &fleetdb.SeatRun{
 		Binary: codexBinaryWord(machine, account),
 		Args:   arguments,
-		Env: machine.ExtensionEnvironment(
-			pfmengine.MustLookup(pfmengine.Codex).LongName,
-			launchEnvironment(os.Environ(), launch),
-		),
-		CWD: cwd,
+		Env:    launchEnvironment(os.Environ(), launch),
+		CWD:    cwd,
 	}
 }
 
@@ -408,11 +407,11 @@ func PlanOpenCode(request HeadlessRequest) (HeadlessPlan, error) {
 		Config:         machine,
 		Prompt:         request.Prompt,
 	}
-	if err := applyWorkbench(&launch); err != nil {
+	personaWarnings, err := applyWorkbench(&launch)
+	if err != nil {
 		return HeadlessPlan{}, err
 	}
 	launch.Persona.Model = launch.Persona.ModelOr(request.Model)
-	var err error
 	launch.Persona.Effort, err = OpenCodeEffort(launch.Persona.EffortOr(request.Effort))
 	if err != nil {
 		return HeadlessPlan{}, err
@@ -441,5 +440,6 @@ func PlanOpenCode(request HeadlessRequest) (HeadlessPlan, error) {
 		Run:                 plan.Run,
 		Binary:              plan.SeatRun.Binary,
 		PromptOnCommandLine: true,
+		Warnings:            slices.Concat(personaWarnings, plan.Warnings),
 	}, nil
 }

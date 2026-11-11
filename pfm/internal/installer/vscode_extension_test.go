@@ -100,6 +100,35 @@ func TestVSCodeExtensionLinksIntoEveryPresentProductRootNeverAnAbsentOne(t *test
 // same roots changes nothing: no new "change" is reported and the ledger
 // bytes are byte-for-byte the same, the same law ensureLink already gives
 // every other managed link.
+// One product whose extension cannot link fails alone: every other product
+// still links, and the ledger records the links that landed.
+func TestVSCodeExtensionFailingProductCostsOnlyThatProduct(t *testing.T) {
+	t.Setenv("VSCODE_PORTABLE", "")
+	home := t.TempDir()
+	rootA := filepath.Join(home, "product-a")
+	rootB := filepath.Join(home, "product-b")
+	writeFixture(t, filepath.Join(rootA, "extensions"), "a file where the extensions directory belongs\n")
+	if err := os.MkdirAll(rootB, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	installer := newVSCodeExtensionEngine(t, home, []string{rootA, rootB}, true)
+	broken := filepath.Join(rootA, "extensions", vscodeExtensionLinkName)
+	err := installer.wireVSCode()
+	if err == nil || !strings.Contains(err.Error(), "link VS Code extension "+broken+": ") {
+		t.Fatalf("wireVSCode = %v, want the failure of %s", err, broken)
+	}
+	linked := filepath.Join(rootB, "extensions", vscodeExtensionLinkName)
+	source := filepath.Join(installer.managedRoot, filepath.FromSlash(vscodeExtensionSource))
+	if resolved, ok := resolvedLink(linked); !ok || resolved != filepath.Clean(source) {
+		t.Fatalf("%s -> %q,%v, want the extension source %s", linked, resolved, ok, source)
+	}
+	ledger := readVSCodeLedgerFixture(t, installer.managedRoot)
+	if len(ledger.Extensions) != 1 || ledger.Extensions[0] != linked {
+		t.Fatalf("ledger extensions = %v, want [%s]", ledger.Extensions, linked)
+	}
+}
+
 func TestVSCodeExtensionReinstallIsIdempotent(t *testing.T) {
 	t.Setenv("VSCODE_PORTABLE", "")
 	home := t.TempDir()
@@ -370,7 +399,17 @@ func TestVSCodeExtensionDropsARecordedTargetWhoseProductRootVanished(t *testing.
 	}
 	stillTarget := filepath.Join(stillRoot, "extensions", vscodeExtensionLinkName)
 
-	ledger := vscodeOwnershipDocument{Version: vscodeOwnershipVersion, Extensions: []string{goneTarget, stillTarget}}
+	// A path under a regular file stats as ENOTDIR (even as root), so the
+	// root is unreadable rather than gone: its record must be kept.
+	blocker := filepath.Join(home, "blocker")
+	writeFixture(t, blocker, "not a directory")
+	blockedRoot := filepath.Join(blocker, "product")
+	blockedTarget := filepath.Join(blockedRoot, "extensions", vscodeExtensionLinkName)
+
+	ledger := vscodeOwnershipDocument{
+		Version:    vscodeOwnershipVersion,
+		Extensions: []string{goneTarget, stillTarget, blockedTarget},
+	}
 	encoded, err := json.Marshal(ledger)
 	if err != nil {
 		t.Fatal(err)
@@ -386,8 +425,14 @@ func TestVSCodeExtensionDropsARecordedTargetWhoseProductRootVanished(t *testing.
 		t.Fatalf("a vanished product root was recreated: %v", err)
 	}
 	result := readVSCodeLedgerFixture(t, managed)
-	if len(result.Extensions) != 1 || result.Extensions[0] != stillTarget {
-		t.Fatalf("ledger extensions = %v, want only %s", result.Extensions, stillTarget)
+	if want := []string{blockedTarget, stillTarget}; !slices.Equal(result.Extensions, want) {
+		t.Fatalf("ledger extensions = %v, want %v", result.Extensions, want)
+	}
+	output := installer.options.Stdout.(*bytes.Buffer).String()
+	wantSkip := "  skip    " + blockedTarget + " VS Code product " + blockedRoot +
+		" could not be checked: stat " + blockedRoot + ": not a directory; extension link record kept\n"
+	if !strings.Contains(output, wantSkip) {
+		t.Fatalf("missing %q in install output:\n%s", wantSkip, output)
 	}
 	if _, linked := resolvedLink(stillTarget); !linked {
 		t.Fatal("the still-present recorded target was not (re)linked")
@@ -509,7 +554,7 @@ func TestVSCodeExtensionPackageJSONContractMatchesTheInstalledConstantsAndStages
 		t.Fatalf("package.json main %q does not name an embedded file: %v", manifest.Main, err)
 	}
 
-	files, err := assetFiles()
+	files, err := assetFiles(nativeScheduler())
 	if err != nil {
 		t.Fatal(err)
 	}

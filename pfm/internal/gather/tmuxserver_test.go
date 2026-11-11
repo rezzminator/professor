@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
@@ -78,9 +79,29 @@ func TestProbeServerNeverReadsAFailureAsDead(t *testing.T) {
 		})
 	}
 	t.Run("hung", func(t *testing.T) {
-		state, _, err := ProbeServer(context.Background(), testjail.HungTmux(t, 1), "/tmp/x")
-		if state != ServerUnresponsive || !errors.Is(err, ErrServerUnresponsive) {
-			t.Fatalf("ProbeServer() over a hung server = %v %v, want unresponsive", state, err)
+		// exec, so the killed client is the process holding its pipes: the
+		// probe returns at its bound, not after the door's pipe wait.
+		binary := filepath.Join(t.TempDir(), "tmux")
+		if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexec sleep 5\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		var state ServerState
+		err := within(t, stoppedBound, map[string]func() error{"ProbeServer": func() error {
+			var err error
+			state, _, err = ProbeServer(stoppedProbe(context.Background()), binary, "/tmp/x")
+			return err
+		}})["ProbeServer"]
+		want := "tmux server did not answer within 200ms: /tmp/x"
+		if state != ServerUnresponsive || !errors.Is(err, ErrServerUnresponsive) || err.Error() != want {
+			t.Fatalf("ProbeServer() over a hung server = %v %v, want unresponsive %q", state, err, want)
+		}
+	})
+	t.Run("production bound", func(t *testing.T) {
+		expired, cancel := context.WithDeadline(context.Background(), time.Unix(0, 0))
+		defer cancel()
+		err := Unresponsive(context.Background(), expired, "/tmp/x")
+		if want := "tmux server did not answer within 2s: /tmp/x"; err == nil || err.Error() != want {
+			t.Fatalf("Unresponsive() under a context carrying no bound = %v, want %q", err, want)
 		}
 	})
 }

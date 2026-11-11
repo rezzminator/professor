@@ -274,7 +274,10 @@ func (jail *attachJail) proveAttach(
 	var output synchronizedBuffer
 	driverSocket := ""
 	if mode == "plain" {
-		command = testjail.PTYCommand(scriptPath)
+		command, err = testjail.PTYCommand(scriptPath)
+		if err != nil {
+			t.Fatal(err)
+		}
 		command.Env = jail.env
 		input, err = command.StdinPipe()
 		if err != nil {

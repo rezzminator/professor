@@ -7,6 +7,9 @@ import (
 	"strings"
 )
 
+// protocolVersionUnknown is the Version of a ping that names no release.
+const protocolVersionUnknown = "unknown"
+
 // ProtocolStatus is the measured ping identity of one server.
 type ProtocolStatus struct {
 	Version  string
@@ -34,20 +37,27 @@ func ProbeProtocol(ctx context.Context, socket string) (ProtocolStatus, error) {
 		return ProtocolStatus{}, err
 	}
 	var pong struct {
-		Type     string  `json:"type"`
-		Version  string  `json:"version"`
-		Protocol *uint32 `json:"protocol"`
+		Type     string          `json:"type"`
+		Version  json.RawMessage `json:"version"`
+		Protocol *uint32         `json:"protocol"`
 	}
 	if err := json.Unmarshal(result, &pong); err != nil {
 		return ProtocolStatus{}, fmt.Errorf("malformed ping result: herdr socket %s: %w", socket, err)
 	}
-	if pong.Type != "pong" || strings.TrimSpace(pong.Version) == "" || pong.Protocol == nil {
+	if pong.Type != "pong" || pong.Protocol == nil {
 		return ProtocolStatus{}, fmt.Errorf(
-			"malformed ping result: herdr socket %s: type=pong, version and uint32 protocol are required",
+			"malformed ping result: herdr socket %s: type=pong and uint32 protocol are required",
 			socket,
 		)
 	}
-	status := ProtocolStatus{Version: pong.Version, Protocol: *pong.Protocol}
+	// The version is only shown (doctor); the protocol alone decides, so a
+	// version that is absent, empty or not a string reads as unknown.
+	version := protocolVersionUnknown
+	var shown string
+	if json.Unmarshal(pong.Version, &shown) == nil && strings.TrimSpace(shown) != "" {
+		version = shown
+	}
+	status := ProtocolStatus{Version: version, Protocol: *pong.Protocol}
 	if status.Protocol != SupportedProtocol {
 		return status, &ProtocolMismatch{Protocol: status.Protocol}
 	}

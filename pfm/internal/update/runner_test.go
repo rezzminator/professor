@@ -5,10 +5,12 @@ import (
 	"context"
 	"errors"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
@@ -28,8 +30,9 @@ func (process scriptedUpdateProcess) StdinPipe() (io.WriteCloser, error) {
 func (process scriptedUpdateProcess) StdoutPipe() (io.ReadCloser, error) {
 	return nil, errors.New("stdout pipe not scripted")
 }
-func (process scriptedUpdateProcess) Kill() error      { return nil }
-func (process scriptedUpdateProcess) KillGroup() error { return nil }
+func (process scriptedUpdateProcess) Kill() error                      { return nil }
+func (process scriptedUpdateProcess) KillGroup() error                 { return nil }
+func (process scriptedUpdateProcess) SignalGroup(syscall.Signal) error { return nil }
 
 type scriptedUpdateRunner struct {
 	stdout    string
@@ -418,5 +421,24 @@ func TestUpdateDoctorChildGetsHostOnlyMarker(t *testing.T) {
 				t.Fatalf("%s child marker=%q, want %q", row.command, got, row.want)
 			}
 		})
+	}
+}
+
+// TestParseDoctorTallyKeepsAnOverflowingCountNonzero: a tier count past
+// MaxInt is still a nonzero tier, never read as zero (clean).
+func TestParseDoctorTallyKeepsAnOverflowingCountNonzero(t *testing.T) {
+	for _, row := range []struct {
+		output             string
+		warnings, failures int
+	}{
+		{"doctor: warnings=3\ndoctor: failures=1\n", 3, 1},
+		{"doctor: warnings=2\n", 2, 0},
+		{"doctor: failures=99999999999999999999\n", 0, math.MaxInt},
+	} {
+		warnings, failures := parseDoctorTally(row.output)
+		if warnings != row.warnings || failures != row.failures {
+			t.Errorf("parseDoctorTally(%q) = %d, %d, want %d, %d",
+				row.output, warnings, failures, row.warnings, row.failures)
+		}
 	}
 }

@@ -9,6 +9,7 @@ import (
 )
 
 type orchestratorWaitHookInput struct {
+	AgentType string `json:"agent_type"`
 	ToolName  string `json:"tool_name"`
 	ToolInput struct {
 		Command string `json:"command"`
@@ -18,6 +19,13 @@ type orchestratorWaitHookInput struct {
 const orchestratorWaitReason = "Waiting needs no command. End your message with one line and no tool call: while an agent you spawned is still running you do not return, and its return wakes you."
 
 const orchestratorWaitReturnWatchReason = "A sub-agent's return needs no watcher. End your message with one line and no tool call: its completion notice wakes you."
+
+// orchestratorWaitAgents is the one set of loops the hook judges, by the
+// payload's exact agent_type: every other loop, the main chat (no
+// agent_type) included, exits 0 silently. The hook rides every launch
+// (claudelaunch.HookTemplates) because a plugin agent's frontmatter hooks
+// never load.
+var orchestratorWaitAgents = map[string]bool{"flights:speccer": true}
 
 var (
 	// orchestratorWaitFileLoop matches a polling loop on a file's existence:
@@ -31,7 +39,8 @@ var (
 	orchestratorWaitSleep      = regexp.MustCompile(`^sleep\s+\d+(\.\d+)?[smh]?$`)
 )
 
-// OrchestratorWait is the fail-open PreToolUse hook. It denies a Bash call
+// OrchestratorWait is the fail-open PreToolUse hook. For an agent in
+// orchestratorWaitAgents it denies a Bash call
 // whose whole command only waits (a no-op: echo/printf with plain literal
 // arguments, "true", ":", or "sleep N"), so an orchestrator agent ends its
 // message instead of burning a call on a command that changes nothing. It
@@ -52,7 +61,7 @@ func OrchestratorWait(input io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "pfm internal orchestrator-wait: decode hook payload (fail-open): %v\n", err)
 		return 0
 	}
-	if hook.ToolName != bashTool {
+	if hook.ToolName != bashTool || !orchestratorWaitAgents[hook.AgentType] {
 		return 0
 	}
 	reason := orchestratorWaitReason

@@ -58,7 +58,7 @@ func systemdEnvironment(name, value string) string {
 func systemdPath(path string) string { return strings.ReplaceAll(path, "%", "%%") }
 
 func (s *session) followerUnitDir() string {
-	return filepath.Join(s.env.Home, ".config", "systemd", "user")
+	return paths.SystemdUserDir(s.env.Home)
 }
 
 // systemdFollowerPath is the follower row's file outside macOS: the path unit.

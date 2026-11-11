@@ -1,6 +1,7 @@
 package transcript
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,7 +11,13 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/codexmeta"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
+
+// historyUnparsedRole marks the HistoryMessage standing in for a row that is not JSON.
+const historyUnparsedRole = "unparsed"
 
 // HistoryMessage is one surviving user/assistant turn from a transcript tail,
 // ready to print — the native port of history.sh's jq pipeline.
@@ -61,11 +68,51 @@ func newestHistoryMatch(pool, slug, sid string) (string, error) {
 	return newest, nil
 }
 
-// ReadHistory is the native port of history.sh's jq pipeline: tail
-// generously, drop the (possibly partial) first line, keep only user/
-// assistant records with non-empty rendered text, drop synthetic reminder and
-// caveat preambles, then take the last count survivors.
-func ReadHistory(path string, count int) (messages []HistoryMessage, returnErr error) {
+// ReadHistory returns the last count user/assistant turns of the transcript at
+// path. A Codex rollout is read through its own parser; any other file is a
+// Claude transcript read by readClaudeHistory.
+func ReadHistory(path string, count int) ([]HistoryMessage, error) {
+	read := readClaudeHistory
+	if codexmeta.IsRolloutName(filepath.Base(path)) {
+		read = readCodexHistory
+	}
+	messages, err := read(path)
+	if err != nil {
+		return nil, err
+	}
+	if len(messages) > count {
+		messages = messages[len(messages)-count:]
+	}
+	return messages, nil
+}
+
+// readCodexHistory keeps a rollout's user and assistant entries as From reads
+// them: harness instructions and tool calls are already left out.
+func readCodexHistory(path string) ([]HistoryMessage, error) {
+	entries, _, err := From(context.Background(), path, string(pfmengine.Codex), 0)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	var messages []HistoryMessage
+	for _, entry := range entries {
+		if entry.Role != RoleUser && entry.Role != RoleAssistant {
+			continue
+		}
+		timestamp := entry.Timestamp
+		if timestamp == "" {
+			timestamp = "?"
+		}
+		messages = append(messages, HistoryMessage{Timestamp: timestamp, Role: entry.Role, Text: entry.Text})
+	}
+	return messages, nil
+}
+
+// readClaudeHistory is the native port of history.sh's jq pipeline: tail
+// generously, keep only user/assistant records with non-empty rendered text,
+// drop synthetic reminder and caveat preambles. The file is read whole, so
+// every line of its tail is complete; a row that is not JSON stays in the list
+// as an "unparsed" marker.
+func readClaudeHistory(path string) (messages []HistoryMessage, returnErr error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", path, err)
@@ -80,9 +127,6 @@ func ReadHistory(path string, count int) (messages []HistoryMessage, returnErr e
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
 	lines := tailLines(string(content), 800)
-	if len(lines) > 0 {
-		lines = lines[1:]
-	}
 	for _, line := range lines {
 		line = strings.TrimRight(line, "\r")
 		if strings.TrimSpace(line) == "" {
@@ -95,16 +139,20 @@ func ReadHistory(path string, count int) (messages []HistoryMessage, returnErr e
 				Content json.RawMessage `json:"content"`
 			} `json:"message"`
 		}
-		if err := json.Unmarshal([]byte(line), &record); err != nil {
-			// Match history.sh: a malformed transcript row is skipped, not fatal.
+		if err := DecodeTolerant([]byte(line), &record); err != nil {
+			// One bad row is not fatal and not silent: it costs itself, a marker stands in.
+			messages = append(messages, HistoryMessage{
+				Timestamp: "?",
+				Role:      historyUnparsedRole,
+				Text:      fmt.Sprintf("row skipped: not JSON (%d bytes)", len(line)),
+			})
 			continue
 		}
 		if record.Type != RoleUser && record.Type != RoleAssistant {
 			continue
 		}
 		text := historyMessageText(record.Message.Content)
-		if text == "" || strings.HasPrefix(text, "<system-reminder") ||
-			strings.HasPrefix(text, "Caveat: The messages below") {
+		if text == "" || isHistoryPreamble(text) {
 			continue
 		}
 		timestamp := record.Timestamp
@@ -113,22 +161,20 @@ func ReadHistory(path string, count int) (messages []HistoryMessage, returnErr e
 		}
 		messages = append(messages, HistoryMessage{Timestamp: timestamp, Role: record.Type, Text: text})
 	}
-	if len(messages) > count {
-		messages = messages[len(messages)-count:]
-	}
 	return messages, nil
 }
 
 // historyMessageText extracts message.content the way history.sh's jq does:
-// a string is itself; an array joins the .text of every type=="text" element
-// with "\n"; anything else renders as "".
+// a string is itself, less its leading reminders; an array joins the .text of
+// every type=="text" element that is no reminder or caveat with "\n"; anything
+// else renders as "".
 func historyMessageText(raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return ""
 	}
 	var asString string
 	if err := json.Unmarshal(raw, &asString); err == nil {
-		return asString
+		return stripLeadingReminders(asString)
 	}
 	var parts []struct {
 		Type string `json:"type"`
@@ -137,7 +183,7 @@ func historyMessageText(raw json.RawMessage) string {
 	if err := json.Unmarshal(raw, &parts); err == nil {
 		texts := make([]string, 0, len(parts))
 		for _, part := range parts {
-			if part.Type == "text" {
+			if part.Type == "text" && !isHistoryPreamble(part.Text) {
 				texts = append(texts, part.Text)
 			}
 		}
@@ -163,4 +209,10 @@ func tailLines(content string, count int) []string {
 		lines = lines[len(lines)-count:]
 	}
 	return lines
+}
+
+// isHistoryPreamble is a harness-written reminder or caveat, no turn of the
+// person's.
+func isHistoryPreamble(text string) bool {
+	return strings.HasPrefix(text, "<system-reminder") || strings.HasPrefix(text, "Caveat: The messages below")
 }

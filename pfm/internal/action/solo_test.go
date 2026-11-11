@@ -1,6 +1,7 @@
 package action
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -249,6 +250,71 @@ func TestSoloStrayKillGoesThroughTheDoor(t *testing.T) {
 			}
 			if test.wantOutcome != "" && outcome != test.wantOutcome {
 				t.Fatalf("skipped outcome = %v, want %q: %s", outcome, test.wantOutcome, recorder.Raw())
+			}
+		})
+	}
+}
+
+// A failed pane probe is not an empty server. The socket may still be live
+// but temporarily unreadable; removing its crumb here makes the next sweep
+// treat a working chat as unowned. Cleanup is safe only after a successful
+// probe that returned no panes.
+func TestSoloPreservesCrumbWhenPaneProbeFails(t *testing.T) {
+	id := "55555555-5555-4555-8555-555555555555"
+	socket := "cc-900-1-1"
+	for _, test := range []struct {
+		name string
+		// unreadable makes the crumb a directory: its read fails, so whether
+		// it names this chat is unknown and it stays for a later pass.
+		unreadable bool
+		wantStderr func(crumb string) string
+	}{
+		{
+			// L1-F14: the pane probe failure has a sibling below (the
+			// keep-socket probe) that already logs; this one was silent.
+			name: "pane probe fails",
+			wantStderr: func(string) string {
+				return "cc: solo — pane probe on " + socket + " failed; leaving its crumb: dead socket\n"
+			},
+		},
+		{
+			name:       "crumb cannot be read",
+			unreadable: true,
+			wantStderr: func(crumb string) string {
+				return "cc: solo — read crumb " + crumb + " failed; leaving it: read " + crumb + ": is a directory\n"
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			jailAction(t)
+			crumb := filepath.Join(os.Getenv("PFM_SID_DIR"), socket)
+			if test.unreadable {
+				if err := os.MkdirAll(crumb, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				writeActionFile(t, crumb, "/tx/"+id+".jsonl", 0o600)
+			}
+			tmux := &fakeActionTmux{alive: map[string]bool{socket: false}}
+			var stderr bytes.Buffer
+			executor, err := New(Dependencies{
+				Tmux:      tmux,
+				Processes: &fakeProcesses{},
+				Gate:      fixedGate(false),
+				Runner:    &captureRunner{},
+				Stderr:    &stderr,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := executor.Solo(context.Background(), id, "", true); err != nil {
+				t.Fatalf("Solo() error = %v", err)
+			}
+			if _, err := os.Stat(crumb); err != nil {
+				t.Fatalf("Solo() removed crumb %s: %v", crumb, err)
+			}
+			if want := test.wantStderr(crumb); stderr.String() != want {
+				t.Fatalf("Solo() stderr = %q, want %q", stderr.String(), want)
 			}
 		})
 	}

@@ -53,3 +53,13 @@
 	url = https://github.com/rezzminator/rule-control.git
 	branch = develop
 	ignore = dirty
+[submodule "herdr-shield"]
+	path = plugins/herdr-shield
+	url = https://github.com/rezzminator/herdr-shield.git
+	branch = develop
+	ignore = dirty
+[submodule "flights"]
+	path = plugins/flights
+	url = https://github.com/rezzminator/flights.git
+	branch = develop
+	ignore = dirty

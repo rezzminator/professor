@@ -127,7 +127,7 @@ func stageResumeUnkillAccount(t *testing.T, home string) (account, binary, reque
 	if err != nil {
 		t.Fatal(err)
 	}
-	installed, _, _, err := updateCodexHooks([]byte(personalStopHook), home, false, nil)
+	installed, _, _, err := updateCodexHooks(fixtureRetiredHooks, []byte(personalStopHook), home, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -302,6 +302,38 @@ func TestCodexResumeUnkillHookAndTrustAreRemovedOnUninstall(t *testing.T) {
 	}
 	if !strings.Contains(transcript.String(), "change  remove Codex hook trust "+account) {
 		t.Fatalf("trust removal not reported:\n%s", transcript.String())
+	}
+}
+
+// An unreadable hook trust receipt never skips the hook trust cleanup of the
+// same account; the failure is named.
+func TestCodexHookTrustCleanupRunsPastAnUnreadableReceipt(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	account, binary, _ := stageResumeUnkillAccount(t, home)
+	key := account + "/hooks.json:session_start:0:0"
+	apply := resumeUnkillEngine(home, account, binary, ModeApply, &bytes.Buffer{})
+	if err := apply.wireCodexHooks(); err != nil {
+		t.Fatal(err)
+	}
+	writeFixture(t, filepath.Join(account, "config.toml"),
+		"[hooks.state.\""+key+"\"]\nenabled = true\ntrusted_hash = 'sha256:deadbeef'\n")
+	hookReceipt := filepath.Join(account, ".professor-hook-trust.json")
+	writeFixture(t, hookReceipt, "{")
+	want := "Codex hook trust for " + account + ": parse trust receipt " + hookReceipt +
+		": unexpected end of JSON input"
+
+	var transcript bytes.Buffer
+	installer := resumeUnkillEngine(home, account, binary, ModeUninstall, &transcript)
+	if err := installer.wireCodexHooks(); err != nil {
+		t.Fatalf("%v\n%s", err, transcript.String())
+	}
+	got := errors.Join(installer.deferred...)
+	if got == nil || got.Error() != want {
+		t.Fatalf("deferred error:\n%v\nwant:\n%s", got, want)
+	}
+	if !strings.Contains(transcript.String(), "change  remove Codex hook trust "+account) {
+		t.Fatalf("the hook trust cleanup did not run:\n%s", transcript.String())
 	}
 }
 
@@ -485,7 +517,10 @@ func TestCodexHookLedgerRecordsNoOwnershipForAFailedWrite(t *testing.T) {
 	if err := os.Symlink(physical, filepath.Join(account, "hooks.json")); err != nil {
 		t.Fatal(err)
 	}
+	// The failed home costs itself alone: a later home is still wired.
+	later := filepath.Join(home, ".codex-later")
 	installer := resumeUnkillEngine(home, account, "", ModeApply, &bytes.Buffer{})
+	installer.options.CodexHomes = []string{account, later}
 	if err := installer.wireCodexHooks(); err == nil {
 		t.Fatal("a failed hooks.json write returned success")
 	}
@@ -495,6 +530,15 @@ func TestCodexHookLedgerRecordsNoOwnershipForAFailedWrite(t *testing.T) {
 	}
 	if owned := ledger[physicalSettingsPath(physical)]; len(owned) != 0 {
 		t.Fatalf("ledger owns %v in a hooks.json the failed write never reached", owned)
+	}
+	laterPath := filepath.Join(later, "hooks.json")
+	command := resumeUnkillCommand(home)
+	if got := hookCommandCount(t, readFixture(t, laterPath), "SessionStart", command); got != 1 {
+		t.Fatalf("later home %s carries %d resume-unkill hooks, want 1", laterPath, got)
+	}
+	key := settingsHookKey{Event: "SessionStart", Matcher: "resume", Command: command}
+	if owned := ledger[physicalSettingsPath(laterPath)][key]; owned != 1 {
+		t.Fatalf("ledger owns %d resume-unkill hooks in %s, want 1", owned, laterPath)
 	}
 }
 

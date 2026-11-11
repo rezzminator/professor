@@ -49,7 +49,7 @@ func TestChatBranchWorkbench(t *testing.T) {
 			scribe, duo := newWorkbenchRunFixture(t, jail)
 			engine, dir, socket, argvFile := "claude", scribe, "cc-workbench-branch", "cc-argv"
 			parentID := "a1000000-1111-4111-8111-111111111111"
-			var wantError, mirrorRecord string
+			var wantWarning, mirrorRecord string
 			wantArgs := []string{
 				"--resume " + parentID,
 				"--fork-session",
@@ -93,7 +93,8 @@ func TestChatBranchWorkbench(t *testing.T) {
 					if err == nil {
 						t.Fatal("mirror fixture did not fail")
 					}
-					wantError = "pfm chat branch: " + err.Error() + "\n"
+					// The persona stays: the chat branches on the mirror as it stands.
+					wantWarning = "pfm chat branch: " + err.Error() + "; launching on the mirror as it stands\n"
 				}
 			case "invalid":
 				if err := atomicfile.Write(
@@ -103,7 +104,9 @@ func TestChatBranchWorkbench(t *testing.T) {
 				); err != nil {
 					t.Fatal(err)
 				}
-				wantError = "pfm chat branch: " + paths.WorkbenchManifest(scribe) + `: "prompt" is required` + "\n"
+				wantWarning = "pfm chat branch: workbench persona not applied (" + paths.WorkbenchManifest(scribe) +
+					`: "prompt" is required); launching without it` + "\n"
+				wantArgs = []string{"--resume " + parentID, "--fork-session", "--name workbench-branch"}
 			case "outside":
 				dir = filepath.Join(jail.root, "work", "acme", "src")
 				if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -131,26 +134,19 @@ func TestChatBranchWorkbench(t *testing.T) {
 				&stdout,
 				&stderr,
 			)
-			if wantError != "" {
-				if code != 1 || stderr.String() != wantError {
-					t.Fatalf("branch code=%d stderr=%q; want 1 and %q", code, stderr.String(), wantError)
-				}
-				if _, err := os.Stat(filepath.Join(jail.tmuxDir, socket)); !os.IsNotExist(err) {
-					t.Fatalf("refused branch socket: %v", err)
-				}
-				if stdout.Len() != 0 {
-					t.Fatalf("refused branch stdout=%q", stdout.String())
-				}
-				return
-			}
-			if code != 0 {
-				t.Fatalf("branch code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+			if code != 0 || stderr.String() != wantWarning {
+				t.Fatalf("branch code=%d stdout=%q stderr=%q; want 0 and stderr %q",
+					code, stdout.String(), stderr.String(), wantWarning)
 			}
 			argv := jail.await(t, argvFile, "--")
 			for _, want := range wantArgs {
 				if !strings.Contains(argv, want) {
 					t.Errorf("branch argv=%q lacks %q", argv, want)
 				}
+			}
+			if name == "invalid" && (strings.Contains(argv, "--system-prompt-file") ||
+				strings.Contains(argv, "developer_instructions")) {
+				t.Errorf("branch argv=%q carries a workbench persona the warning dropped", argv)
 			}
 			if name == "Codex" {
 				if !testjail.MirrorBuilt(t, mirrorRecord, "codex", duo) {
@@ -725,13 +721,13 @@ func TestChatBranchUnknownForkIDLeavesNoLaunchRecord(t *testing.T) {
 	}
 }
 
-// TestChatBranchReportsAFailedParentScanInsteadOfForkingBlind is the
+// TestChatBranchFallsToTheAccountRefusalWhenTheParentScanFails is the
 // absence-vs-error proof: when the parent-row scan itself cannot run (the
 // store fails to open), that must surface as a reported failure, never
 // silently fold into "parent not found, fork on primary". ENOTDIR is used
 // instead of a permission bit so the injection is honest for a root-run
 // suite (a chmod-based block is a silent no-op for uid 0).
-func TestChatBranchReportsAFailedParentScanInsteadOfForkingBlind(t *testing.T) {
+func TestChatBranchFallsToTheAccountRefusalWhenTheParentScanFails(t *testing.T) {
 	jail := newBranchInheritJail(t)
 	blocker := filepath.Join(jail.root, "not-a-directory")
 	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
@@ -744,28 +740,24 @@ func TestChatBranchReportsAFailedParentScanInsteadOfForkingBlind(t *testing.T) {
 		"--engine", "claude", "--session-id", someID,
 		"--cwd", jail.root, "--name", "scan-failure-branch",
 	)
-	if code != 1 {
-		t.Fatalf(
-			"chat branch rc=%d, want 1 (a scan failure must be reported, not silently forked): stdout=%q stderr=%q",
-			code,
-			stdout,
-			stderr,
-		)
-	}
-	if !strings.Contains(stderr, "resolve parent session:") {
-		t.Fatalf("stderr=%q, want it to name the failed parent-session resolve, not silence", stderr)
-	}
-	if strings.Contains(stderr, "could not be resolved") {
-		t.Fatalf("stderr=%q, a scan failure must not be reported as a resolved-but-unknown parent", stderr)
-	}
-	if strings.Contains(stdout, "Branched") {
-		t.Fatalf("stdout=%q, a scan failure must not still fork the chat", stdout)
+	refusal := "pfm chat branch: the account of session " + someID +
+		" could not be resolved (no launch record, no live seat naming it); pass --account N\n"
+	if code != 1 || stdout != "" || !strings.HasPrefix(stderr, "pfm chat branch: resolve parent session: ") ||
+		!strings.HasSuffix(stderr, refusal) {
+		t.Fatalf("chat branch rc=%d stdout=%q stderr=%q, want rc=1, the scan failure named, then %q",
+			code, stdout, stderr, refusal)
 	}
 }
 
-func TestChatBranchUnreadableParentLaunchRefuses(t *testing.T) {
+func TestChatBranchUnreadableParentLaunchForksOnTheGivenAccount(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
 	jail := newBranchInheritJail(t)
 	const parentID = "b4000000-4444-4444-8444-444444444444"
+	const branchSocket = "probe-branch-record-unreadable"
+	t.Setenv("PFM_TEST_FRESH_SOCKET", branchSocket)
+	cleanupBranchSocket(t, jail, branchSocket)
 	registerParentTranscript(t, jail.parentDir, parentID)
 	recordBranchParent(t, jail, parentID, 7, false)
 	db, err := sqlitedb.OpenReadWrite(filepath.Join(jail.root, "shared.db"), sqlitedb.StoreBusyTimeout)
@@ -779,10 +771,16 @@ func TestChatBranchUnreadableParentLaunchRefuses(t *testing.T) {
 		t.Fatal(err)
 	}
 	stdout, stderr, code := runBranchForked(t, jail, "--engine", "claude", "--session-id", parentID,
-		"--cwd", jail.root, "--name", "corrupt-record-fork")
-	if code != 1 || !strings.Contains(stderr, "pfm chat branch: read launch record for "+parentID+":") ||
-		strings.Contains(stdout, "Branched") {
-		t.Fatalf("chat branch rc=%d stdout=%q stderr=%q", code, stdout, stderr)
+		"--account", "7", "--cwd", jail.root, "--name", "corrupt-record-fork")
+	// The torn launch table also refuses the fork's own launch record, warned on the second line.
+	warned := strings.SplitN(stderr, "\n", 2)
+	if code != 0 || !strings.HasPrefix(warned[0], "pfm chat branch: read launch record for "+parentID+": ") ||
+		!strings.HasSuffix(warned[0], "; continuing without it") || !strings.Contains(stdout, "Branched") {
+		t.Fatalf("chat branch rc=%d stdout=%q stderr=%q, want the record failure warned and the fork made",
+			code, stdout, stderr)
+	}
+	if got := forkedEnvironment(t, jail)["CLAUDE_CONFIG_DIR"]; got != jail.parentDir {
+		t.Fatalf("CLAUDE_CONFIG_DIR=%q, want account 7's dir %q", got, jail.parentDir)
 	}
 }
 

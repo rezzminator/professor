@@ -10,7 +10,7 @@
 - [(f) Ordered steps for the executor](#f-ordered-steps-for-the-executor)
 - [(g) Open decisions](#g-open-decisions)
 
-**Status:** DESIGN, brownfield, executable. Measured on `wave/reliability-gates @ c28b072d` (2026-09-17), `pfm/`-relative paths (module `github.com/rezzminator/professor/pfm`). Method: `/quality:llm-codebase` (brownfield: measure, then migrate incrementally — under a tenth of the tree moves, so no rebuild). Companion: `docs/dev/pfm-architecture.md` (the target package map and C1–C21); this document is its layout slice and changes where files live, never what pfm does.
+**Status:** DESIGN, brownfield, executable. Measured on `wave/reliability-gates @ c28b072d` (2026-09-17), `pfm/`-relative paths (module `github.com/rezzminator/professor/pfm`). Method: `/llm-codebase:use` (brownfield: measure, then migrate incrementally — under a tenth of the tree moves, so no rebuild). Companion: `docs/dev/pfm-architecture.md` (the target package map and C1–C21); this document is its layout slice and changes where files live, never what pfm does.
 
 **Precondition (P2b done first):** `pfm/internal/dream/**`, `pfm/prompts/**` and `cmd/pfm/dream_command.go` + `dream_command_test.go` are gone. `pfm/prompts/embed.go` embeds only `dreamer` and its only importers are `internal/dream/resources/resources.go` and `internal/dream/live_contract_test.go`, so P2b must delete the whole `pfm/prompts/` package — a surviving `//go:embed dreamer` with no files is a compile error. Step 0 below checks this.
 
@@ -62,7 +62,7 @@ pfm/
     index call kill mcpserv naming nudge professor reap recovery reload resolve sky spawn stale stats
     statusline testjail theme transcript ui update updatecheck usagehook     # unchanged
 
-`plugins/harvester/` is a separate Go module outside `pfm/`; it owns Harvester source, conversion, its persistent daemon, native Claude Code/Codex/OpenCode plugin manifests, and the stdio proxy exposed to MCP clients. PFM has no active Harvester integration; its installer only removes exact legacy registrations written by earlier Professor installs.
+`plugins/harvester/` is a separate Go module outside `pfm/`; it owns Harvester source, conversion, its persistent daemon, native Claude Code/Codex/OpenCode plugin manifests, and the stdio proxy exposed to MCP clients. PFM has no Harvester integration.
 ```
 
 Gone after P2c: `pfm/shim/`, `pfm/internal/shared/`, `pfm/internal/tmuxfmt/`, `pfm/internal/engine/matchutil/`, `pfm/internal/chatkeys/`, `pfm/HARVESTER.md`, `pfm/HEADLESS.md` (and, from P2b, `pfm/prompts/`, `pfm/internal/dream/`).

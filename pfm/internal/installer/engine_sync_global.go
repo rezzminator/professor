@@ -214,32 +214,6 @@ func (installer *engine) leaveEngineSyncOwned(cause error) error {
 	return nil
 }
 
-func (installer *engine) ownsEngineSyncPolicy(target, sourceRepo string) (bool, error) {
-	info, err := os.Lstat(target)
-	if errors.Is(err, fs.ErrNotExist) {
-		return false, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("inspect engine-sync policy %s: %w", target, err)
-	}
-	if info.Mode()&os.ModeSymlink == 0 {
-		return false, nil
-	}
-	found, err := os.Readlink(target)
-	if err != nil {
-		return false, fmt.Errorf("read engine-sync policy link %s: %w", target, err)
-	}
-	if !filepath.IsAbs(found) {
-		found = filepath.Join(filepath.Dir(target), found)
-	}
-	repos, err := installer.engineSyncPolicySourceRepos()
-	if err != nil {
-		return false, err
-	}
-	repos = append(repos, sourceRepo, filepath.Join(installer.options.Home, ".professor"))
-	return ownedGlobalLink(repos, "engine-sync", "config.json", filepath.Clean(found)), nil
-}
-
 // A retired clone still identifies its policy link; other registries retain
 // their live-source validation before deciding what can be removed.
 func (installer *engine) engineSyncPolicySourceRepos() ([]string, error) {

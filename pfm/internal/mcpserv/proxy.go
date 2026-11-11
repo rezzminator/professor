@@ -163,7 +163,18 @@ func (proxy *stdioProxy) read(ctx context.Context, input io.Reader, output io.Wr
 				}
 				switch {
 				case decodeErr != nil:
+					// No id is readable, so JSON-RPC answers with a null one; a client never waits on silence.
 					proxy.warn("decode validated client frame: %v", decodeErr)
+					code := proxyInvalidRequest
+					if !json.Valid(frame) {
+						code = proxyParseError
+					}
+					proxy.answerError(
+						output,
+						json.RawMessage("null"),
+						code,
+						"invalid JSON-RPC frame: "+decodeErr.Error(),
+					)
 				case isProxyHandshake(envelope.Method):
 					// Handshake stays ordered; later traffic may overlap.
 					proxy.forward(requestCtx, frame, output)
@@ -325,7 +336,6 @@ func (proxy *stdioProxy) forward(ctx context.Context, raw []byte, output io.Writ
 			Pane:           resolved.Pane,
 			Engine:         resolved.Engine,
 			ID:             resolved.ID,
-			Source:         resolved.Source,
 		}
 		if identifyErr != nil {
 			kind := proxyErrorKind(identifyErr)
@@ -343,18 +353,15 @@ func (proxy *stdioProxy) forward(ctx context.Context, raw []byte, output io.Writ
 		engine, engineErr := pfmengine.Parse(identity.Engine)
 		if identifyErr == nil && !explicitThreadID && proxy.isChatToolCall(frame) && engineErr == nil &&
 			engine == pfmengine.Claude {
-			if !filepath.IsAbs(proxy.sidDir) {
-				proxy.answerFailure(
-					output,
-					frame.ID,
-					fmt.Errorf("refresh Claude caller transcript: breadcrumb directory is not absolute"),
-				)
-				return
+			// The launch-time id goes stale on /clear: an unreadable crumb sends none, as a missing one
+			// does, so the daemon binds from its own live row and a split pane's self refuses.
+			refreshErr := fmt.Errorf("breadcrumb directory %q is not absolute", proxy.sidDir)
+			identity.ID = ""
+			if filepath.IsAbs(proxy.sidDir) {
+				identity.ID, _, refreshErr = reload.SessionFromCrumb(proxy.sidDir, identity.SocketName, identity.Pane)
 			}
-			identity.ID, _, err = reload.SessionFromCrumb(proxy.sidDir, identity.SocketName, identity.Pane)
-			if err != nil {
-				proxy.answerFailure(output, frame.ID, fmt.Errorf("refresh Claude caller transcript: %w", err))
-				return
+			if refreshErr != nil {
+				proxy.warn("refresh Claude caller transcript: %v; forwarding without a transcript id", refreshErr)
 			}
 		}
 		withIdentity, err := addProxyIdentity(raw, identity)

@@ -1,6 +1,7 @@
 package doctor
 
 import (
+	"context"
 	"flag"
 	"io"
 
@@ -14,9 +15,9 @@ const doctorUsage = "usage: pfm doctor [--verbose] (exit 0 machine checks clean,
 
 // projectUpdatesFlags are doctor's --project-updates mode: the project-template
 // report alone, through professor.RunProjectUpdates with the retired-name
-// scan of the project's files (update.ScanRetiredNames; a CURRENT pin's file
-// included, a non-CURRENT pin's file left to its row's diff), never the
-// health pass.
+// scan of the project's files (update.RetiredNameScanner over the clone's
+// retired list; a CURRENT pin's file included, a non-CURRENT pin's file left
+// to its row's diff), never the health pass.
 type projectUpdatesFlags struct {
 	enabled, json *bool
 	root          *string
@@ -44,7 +45,9 @@ func (p projectUpdatesFlags) dispatch(
 		flags.Usage()
 		return 2, true
 	case *p.enabled:
-		return professor.RunProjectUpdates(*p.root, home, *p.json, stdout, update.ScanRetiredNames), true
+		return professor.RunProjectUpdates(
+			*p.root, home, *p.json, stdout, update.RetiredNameScanner(context.Background(), home),
+		), true
 	}
 	return 0, false
 }

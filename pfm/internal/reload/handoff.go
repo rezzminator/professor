@@ -62,6 +62,12 @@ func continueFromHandoff(
 	stderr io.Writer,
 ) (Request, string, string, bool, error) {
 	record, exists, err := readHandoff(lock)
+	if errors.Is(err, errHandoffUnusable) {
+		// The record only tells this reload what the last one booted; a bad one
+		// costs that hint, never the reload.
+		fmt.Fprintf(stderr, "pfm chat reload: ignoring reload handoff %s: %v\n", lockPath, err)
+		exists, err = false, nil
+	}
 	if err != nil {
 		return request, "", "", false, fmt.Errorf(
 			"reload handoff %s unreadable: %w — remove it, then reload again",
@@ -90,10 +96,13 @@ func continueFromHandoff(
 		stderr,
 		"pfm chat reload: the reload before this one rebooted this pane — continuing from session %s on account %d\n",
 		continuedID,
-		record.Account,
+		updated.Account,
 	)
 	return updated, run, continuedID, wasNew, nil
 }
+
+// errHandoffUnusable marks a handoff record that was read but cannot be used.
+var errHandoffUnusable = errors.New("reload handoff record unusable")
 
 func readHandoff(lock *os.File) (handoffRecord, bool, error) {
 	if _, err := lock.Seek(0, io.SeekStart); err != nil {
@@ -108,13 +117,14 @@ func readHandoff(lock *os.File) (handoffRecord, bool, error) {
 	}
 	var record handoffRecord
 	if err := json.Unmarshal(content, &record); err != nil {
-		return handoffRecord{}, false, err
+		return handoffRecord{}, false, fmt.Errorf("%w: %w", errHandoffUnusable, err)
 	}
-	if record.Engine == "" || record.Account <= 0 || record.CWD == "" || record.WrittenAt.IsZero() {
-		return handoffRecord{}, false, errors.New("reload handoff is missing required fields")
+	// Engine and WrittenAt decide adoption; Account and CWD have fallbacks.
+	if record.WrittenAt.IsZero() {
+		return handoffRecord{}, false, fmt.Errorf("%w: no written_at", errHandoffUnusable)
 	}
 	if _, err := pfmengine.Lookup(record.Engine); err != nil {
-		return handoffRecord{}, false, fmt.Errorf("reload handoff engine: %w", err)
+		return handoffRecord{}, false, fmt.Errorf("%w: engine: %w", errHandoffUnusable, err)
 	}
 	// The record stays until the next respawn overwrites it: a holder that
 	// adopts it and fails before respawn leaves the pane on that reboot.
@@ -192,7 +202,7 @@ func adoptHandoff(
 			request.fresh = transcript == ""
 		}
 	}
-	if !request.AccountGiven {
+	if !request.AccountGiven && record.Account > 0 {
 		selection, err := ValidateAccount(request.Machine, request.Engine, record.Account)
 		if err != nil {
 			return request, "", false, fmt.Errorf("validate reload handoff account: %w", err)

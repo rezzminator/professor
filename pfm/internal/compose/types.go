@@ -95,6 +95,12 @@ func (kind Kind) String() string {
 	}
 }
 
+// IsResumable reports whether kind is a chat with no live seat, one Enter
+// resumes.
+func (kind Kind) IsResumable() bool {
+	return kind == ResumeClaude || kind == ResumeCodex || kind == ResumeOpenCode
+}
+
 // IsLiveSeat reports whether kind is a running primary chat seat.
 func (kind Kind) IsLiveSeat() bool {
 	return kind == LiveClaude || kind == LiveCodex || kind == LiveSplit ||

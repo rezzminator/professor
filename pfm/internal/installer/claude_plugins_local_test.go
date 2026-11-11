@@ -108,6 +108,7 @@ func TestClaudePluginTargets(t *testing.T) {
 	writePluginCheckout(t, partial, table[2].Name)
 	writePluginCheckout(t, partial, table[3].Name)
 	writePluginCheckout(t, partial, table[4].Name)
+	writePluginCheckout(t, partial, table[5].Name)
 	// github is a release target; with a fallback, an -alpha one with no
 	// checkout, which has no source: one professor marketplace has one source.
 	github := func(p testPlugin, fallback string) ClaudePluginTarget {
@@ -150,7 +151,7 @@ func TestClaudePluginTargets(t *testing.T) {
 		writePluginCheckout(t, cloneRoot, p.Name)
 	}
 	partialClone := t.TempDir()
-	for _, index := range []int{0, 2, 3, 4} {
+	for _, index := range []int{0, 2, 3, 4, 5} {
 		writePluginCheckout(t, filepath.Join(partialClone, "plugins"), table[index].Name)
 	}
 	cloneMissing := filepath.Join(
@@ -166,9 +167,11 @@ func TestClaudePluginTargets(t *testing.T) {
 			Version: "0.80.0", Home: home, CheckoutRoot: root, SourceRepo: clone, Plugins: defaults,
 		}, pro(
 			github(table[0], ""), github(table[1], ""), github(table[2], ""), github(table[3], ""), github(table[4], ""),
+			github(table[5], ""),
 		)},
 		{"unstamped dev build", ClaudePluginBuild{Version: "dev", Home: home, CheckoutRoot: root, Plugins: defaults}, pro(
 			github(table[0], ""), github(table[1], ""), github(table[2], ""), github(table[3], ""), github(table[4], ""),
+			github(table[5], ""),
 		)},
 		{"alpha without the key or a source clone", ClaudePluginBuild{
 			Version: alphaVersion, Home: home, Plugins: defaults,
@@ -178,18 +181,21 @@ func TestClaudePluginTargets(t *testing.T) {
 			github(table[2], "claude.pluginCheckoutRoot unset and no source clone"),
 			github(table[3], "claude.pluginCheckoutRoot unset and no source clone"),
 			github(table[4], "claude.pluginCheckoutRoot unset and no source clone"),
+			github(table[5], "claude.pluginCheckoutRoot unset and no source clone"),
 		)},
 		{"alpha without the key installs from the source clone", ClaudePluginBuild{
 			Version: alphaVersion, Home: home, SourceRepo: clone, Plugins: defaults,
 		}, pro(
 			local(table[0], cloneRoot), local(table[1], cloneRoot), local(table[2], cloneRoot), local(table[3], cloneRoot),
 			local(table[4], cloneRoot),
+			local(table[5], cloneRoot),
 		)},
 		{"the key wins over the source clone", ClaudePluginBuild{
 			Version: alphaVersion, Home: home, CheckoutRoot: root, SourceRepo: clone, Plugins: defaults,
 		}, pro(
 			local(table[0], root), local(table[1], root), local(table[2], root), local(table[3], root),
 			local(table[4], root),
+			local(table[5], root),
 		)},
 		{"a source clone missing a checkout", ClaudePluginBuild{
 			Version: alphaVersion, Home: home, SourceRepo: partialClone, Plugins: defaults,
@@ -200,6 +206,7 @@ func TestClaudePluginTargets(t *testing.T) {
 			local(table[2], filepath.Join(partialClone, "plugins")),
 			local(table[3], filepath.Join(partialClone, "plugins")),
 			local(table[4], filepath.Join(partialClone, "plugins")),
+			local(table[5], filepath.Join(partialClone, "plugins")),
 		)},
 		{"an unresolved source clone leaves the copy undecided", ClaudePluginBuild{
 			Version: alphaVersion, Home: home, SourceRepoErr: unresolved, Plugins: defaults[:1],
@@ -212,10 +219,12 @@ func TestClaudePluginTargets(t *testing.T) {
 			local(table[2], partial),
 			local(table[3], partial),
 			local(table[4], partial),
+			local(table[5], partial),
 		)},
 		{"alpha with every checkout", ClaudePluginBuild{Version: alphaVersion, Home: home, CheckoutRoot: root, Plugins: defaults}, pro(
 			local(table[0], root), local(table[1], root), local(table[2], root), local(table[3], root),
 			local(table[4], root),
+			local(table[5], root),
 		)},
 		{"the list decides which bare names", ClaudePluginBuild{
 			Version: "0.80.0", Home: home, CheckoutRoot: root, Plugins: []pfmconfig.ClaudePlugin{{ID: extra.Name}, {ID: table[2].Name}},
@@ -352,6 +361,13 @@ func TestEnsureClaudePluginsAlphaInstallsTheLocalCopy(t *testing.T) {
 	// Finder drops .DS_Store into a copy it shows; the copy still matches.
 	writeFixture(t, filepath.Join(mirror(zero), ".DS_Store"), "finder")
 	writeFixture(t, filepath.Join(mirror(zero), "hooks", ".DS_Store"), "finder")
+	// Claude Code writes typings and a tsconfig.json into a plugin folder it loads.
+	writeFixture(
+		t,
+		filepath.Join(mirror(zero), ".claude-plugin", "types", "claude-code", "index.d.ts"),
+		"declare module 'claude-code' {}\n",
+	)
+	writeFixture(t, filepath.Join(mirror(zero), "tsconfig.json"), `{"extends": "./.claude-plugin/types/tsconfig.json"}`)
 	runner.calls = nil
 	out.Reset()
 	if err := inst.ensureClaudePlugins(context.Background()); err != nil {
@@ -372,115 +388,31 @@ func TestEnsureClaudePluginsAlphaInstallsTheLocalCopy(t *testing.T) {
 	}
 }
 
-// TestEnsureClaudePluginsRetiresTheLegacyIDs: on every build an installed
-// {name}@professor takes over each legacy id enabled in settings.json: the
-// legacy ids disabled with the options of the enabled one carried, then every
-// legacy key dropped, through the store's settings link, every number and
-// string kept exactly. An -alpha build with no checkout touches nothing and
-// fails naming why. A dry run writes nothing.
-func TestEnsureClaudePluginsRetiresTheLegacyIDs(t *testing.T) {
-	github := func(p testPlugin) string { return p.Name + "@" + p.Name }
-	dev := func(p testPlugin) string { return p.Name + "@" + p.Name + "-dev" }
-	for _, test := range []struct {
-		name      string
-		version   string
-		checkouts bool
-	}{
-		{"alpha", alphaVersion, true},
-		{"release", "0.80.0", true},
-		{"alpha without a checkout", alphaVersion, false},
-	} {
-		for _, apply := range []bool{true, false} {
-			t.Run(fmt.Sprint(test.name, " apply=", apply), func(t *testing.T) {
-				root := t.TempDir()
-				inst, runner, out, home, first := alphaPluginEngine(t, root)
-				inst.options.Version = test.version
-				inst.apply = apply
-				enabled := map[string]any{}
-				ids := []string{}
-				for _, p := range testPlugins {
-					if test.checkouts {
-						writePluginCheckout(t, root, p.Name)
-					}
-					enabled[ownID(p.Name)] = true
-					enabled[github(p)] = false
-					enabled[dev(p)] = true
-					ids = append(ids, ownID(p.Name))
-				}
-				zero, one := testPlugins[0], testPlugins[1]
-				document := map[string]any{
-					"enabledPlugins": enabled,
-					"pluginConfigs": map[string]any{
-						github(zero):    map[string]any{"options": map[string]any{"logFile": "/tmp/old"}},
-						dev(zero):       map[string]any{"options": map[string]any{"logFile": "/tmp/x <&>"}},
-						github(one):     map[string]any{"options": map[string]any{"a": 1}},
-						ownID(one.Name): map[string]any{"options": map[string]any{"b": 2}},
-					},
-				}
-				raw, _ := json.Marshal(document)
-				// settings.json is the store's file, linked from the account dir.
-				store := filepath.Join(home, ".claude", "settings.json")
-				before := strings.Replace(string(raw), "{", `{"counter":9007199254740993,`, 1)
-				writeFixture(t, store, before)
-				if err := os.Symlink(store, filepath.Join(first, "settings.json")); err != nil {
-					t.Fatal(err)
-				}
-				writeInstalledPlugins(t, first, ids...)
-				err := inst.ensureClaudePlugins(context.Background())
-				fallback := !test.checkouts && test.version == alphaVersion
-				if fallback != (err != nil) ||
-					fallback && !strings.Contains(err.Error(), "is not installed on this alpha build") {
-					t.Fatalf("ensureClaudePlugins: %v\n%s", err, out.String())
-				}
-				if len(runner.calls) != 0 {
-					t.Fatalf("calls=%v, want none: every id is installed\n%s", runner.calls, out.String())
-				}
-				path := filepath.Join(first, "settings.json")
-				for _, p := range testPlugins {
-					line := "  change  disable " + dev(p) + " in " + path + ": " + ownID(p.Name) + " replaces it"
-					if p.Name == zero.Name {
-						line += "; copy its pluginConfigs to " + ownID(p.Name)
-					}
-					if fallback == strings.Contains(out.String(), line+"\n") {
-						t.Fatalf("fallback=%v, line %q:\n%s", fallback, line, out.String())
-					}
-				}
-				if info, err := os.Lstat(path); err != nil || info.Mode()&fs.ModeSymlink == 0 {
-					t.Fatalf("the account's settings link was replaced: %v %v", info, err)
-				}
-				after := readFixture(t, store)
-				if !apply || fallback {
-					if after != before {
-						t.Fatalf("settings written: %s", after)
-					}
-					return
-				}
-				if !strings.Contains(after, "9007199254740993") || !strings.Contains(after, "/tmp/x <&>") {
-					t.Fatalf("settings lost a value: %s", after)
-				}
-				var got map[string]any
-				if err := json.Unmarshal([]byte(after), &got); err != nil {
-					t.Fatal(err)
-				}
-				wantEnabled := map[string]any{}
-				for _, p := range testPlugins {
-					wantEnabled[ownID(p.Name)] = true
-				}
-				wantConfigs := map[string]any{
-					ownID(zero.Name): map[string]any{"options": map[string]any{"logFile": "/tmp/x <&>"}},
-					ownID(one.Name):  map[string]any{"options": map[string]any{"b": float64(2)}},
-				}
-				if !reflect.DeepEqual(got["enabledPlugins"], wantEnabled) ||
-					!reflect.DeepEqual(got["pluginConfigs"], wantConfigs) {
-					t.Fatalf("settings = %v\n%s", got, out.String())
-				}
-				out.Reset()
-				if err := inst.ensureClaudePlugins(context.Background()); err != nil ||
-					strings.Contains(out.String(), "  change  ") {
-					t.Fatalf("second run err=%v:\n%s", err, out.String())
-				}
-			})
-		}
+// TestEnsureClaudePluginsKeepsAnUnparsableLocalManifest: a local professor
+// manifest that does not parse is rewritten whole, its bytes kept as a backup
+// the change line names.
+func TestEnsureClaudePluginsKeepsAnUnparsableLocalManifest(t *testing.T) {
+	root := t.TempDir()
+	inst, runner, out, home, _ := alphaPluginEngine(t, root)
+	inst.stamp = "fixture"
+	simulateClaude(t, runner)
+	for _, p := range testPlugins {
+		writePluginCheckout(t, root, p.Name)
+	}
+	manifestPath := filepath.Join(home, ".local", "share", "professor-dev", ".claude-plugin", "marketplace.json")
+	broken := `{"name":"professor","description":"hand note",`
+	writeFixture(t, manifestPath, broken)
+	if err := inst.ensureClaudePlugins(context.Background()); err != nil {
+		t.Fatalf("ensureClaudePlugins: %v\n%s", err, out.String())
+	}
+	backup := manifestPath + ".pre-professor-fixture"
+	if got := readFixture(t, backup); got != broken {
+		t.Fatalf("backup %s = %q, want %q\n%s", backup, got, broken, out.String())
+	}
+	line := "  change  add " + testPlugins[0].Name + " to " + manifestPath +
+		"; the manifest it replaces kept as " + backup + "\n"
+	if !strings.Contains(out.String(), line) {
+		t.Fatalf("missing %q:\n%s", line, out.String())
 	}
 }
 
@@ -504,7 +436,7 @@ func TestEnsureClaudePluginsAlphaWithoutACheckout(t *testing.T) {
 	}{
 		{
 			"alpha without the key or a clone at the default path", alphaVersion, false, false, nil,
-			[]bool{false, false, false, false, false},
+			[]bool{false, false, false, false, false, false},
 			func(_, home string, p testPlugin) string {
 				return "no checkout at " + filepath.Join(home, ".professor", "plugins", p.Name, "plugins", p.Name,
 					".claude-plugin", "plugin.json") + " (the source clone's plugins/; claude.pluginCheckoutRoot unset)"
@@ -512,20 +444,20 @@ func TestEnsureClaudePluginsAlphaWithoutACheckout(t *testing.T) {
 		},
 		{
 			"alpha without the key installs from the source clone", alphaVersion, false, true,
-			[]int{0, 1, 2, 3, 4},
-			[]bool{true, true, true, true, true},
+			[]int{0, 1, 2, 3, 4, 5},
+			[]bool{true, true, true, true, true, true},
 			nil,
 		},
 		{
 			"alpha with a checkout missing", alphaVersion, true, false,
-			[]int{0, 2, 3, 4},
-			[]bool{true, false, true, true, true},
+			[]int{0, 2, 3, 4, 5},
+			[]bool{true, false, true, true, true, true},
 			func(root, _ string, p testPlugin) string {
 				return "no checkout at " + filepath.Join(root, p.Name, "plugins", p.Name, ".claude-plugin", "plugin.json") +
 					" (claude.pluginCheckoutRoot)"
 			},
 		},
-		{"release", "0.80.0", true, false, []int{0, 1, 2, 3, 4}, []bool{false, false, false, false, false}, nil},
+		{"release", "0.80.0", true, false, []int{0, 1, 2, 3, 4, 5}, []bool{false, false, false, false, false, false}, nil},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			root := t.TempDir()
@@ -592,8 +524,8 @@ func TestEnsureClaudePluginsAlphaWithoutACheckout(t *testing.T) {
 
 // TestEnsureClaudePluginsUndecidedLeavesEveryID: an -alpha build that cannot
 // tell where a plugin's checkout is — its source clone moved away, or its
-// checkout cannot be read — decides nothing. It leaves the enabled legacy -dev
-// id and the disabled legacy GitHub id as they are, runs no plugin command,
+// checkout cannot be read — decides nothing. It leaves the plugin's enabled
+// and disabled ids from other marketplaces as they are, runs no plugin command,
 // and fails the step naming the error, never acting as if no checkout existed.
 func TestEnsureClaudePluginsUndecidedLeavesEveryID(t *testing.T) {
 	for _, test := range []struct {
@@ -676,18 +608,23 @@ func TestEnsureClaudePluginsUndecidedLeavesEveryID(t *testing.T) {
 func TestSettingsEditKeepsAWriteMadeAfterItsRead(t *testing.T) {
 	const name = "auto-effort"
 	target := &ClaudePluginTarget{Name: name, ID: ownID(name), Own: true}
+	installOnly := &ClaudePluginTarget{Name: name, ID: ownID(name), Own: true, InstallOnly: true}
 	for _, test := range []struct {
 		name     string
-		plan     func(string, *ClaudePluginTarget) (string, func() error, error)
+		plan     func(string) (string, func() error, error)
 		disabled string
 	}{
-		{"legacy copy retirement", planLegacyCopyRetirement, name + "@" + name},
-		{"retired plugin disable", planRetiredPluginDisable, "agent-effort@agent-effort"},
+		{"install-only disable", func(path string) (string, func() error, error) {
+			return planInstallOnlyDisable(path, installOnly)
+		}, ownID(name)},
+		{"retired plugin disable", func(path string) (string, func() error, error) {
+			return planRetiredPluginDisable(path, target, testRetiredPlugins[name])
+		}, "old-effort@old-effort"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "settings.json")
 			writeFixture(t, path, `{"enabledPlugins":{"`+test.disabled+`":true}}`)
-			message, edit, err := test.plan(path, target)
+			message, edit, err := test.plan(path)
 			if err != nil || message == "" {
 				t.Fatalf("plan = %q, %v; want an edit", message, err)
 			}

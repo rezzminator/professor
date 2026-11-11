@@ -89,7 +89,13 @@ func (executor *Executor) Solo(
 		}
 		crumbPath := filepath.Join(executor.sidDir, entry.Name())
 		content, err := os.ReadFile(crumbPath)
+		if errors.Is(err, fs.ErrNotExist) {
+			// Removed since the listing: nothing left to judge.
+			continue
+		}
 		if err != nil {
+			// Unread is not "another chat's": its crumb stays for a later pass.
+			fmt.Fprintf(executor.stderr, "cc: solo — read crumb %s failed; leaving it: %v\n", crumbPath, err)
 			continue
 		}
 		if !strings.HasSuffix(

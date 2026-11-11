@@ -8,9 +8,9 @@ import (
 	"io/fs"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -82,9 +82,10 @@ func TestProbeHerdrSeatsReusesSocketFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The peer hangs up on every connection: a socket failure that costs no
+	// I/O timeout, so the count alone tells a reused failure from a re-dial.
 	var accepts atomic.Int32
-	var peers sync.WaitGroup
-	release, done := make(chan struct{}), make(chan struct{})
+	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		for {
@@ -93,11 +94,10 @@ func TestProbeHerdrSeatsReusesSocketFailure(t *testing.T) {
 				return
 			}
 			accepts.Add(1)
-			peers.Add(1)
-			go func() { defer peers.Done(); defer func() { _ = conn.Close() }(); <-release }()
+			_ = conn.Close()
 		}
 	}()
-	defer func() { _ = listener.Close(); <-done; close(release); peers.Wait() }()
+	defer func() { _ = listener.Close(); <-done }()
 	rows := probeHerdrSeatRows(context.Background(), []fleetdb.Seat{
 		{SeatID: "one", Backend: "herdr", State: "live", HerdrSocket: socket, HerdrPane: "w1:p1"},
 		{SeatID: "two", Backend: "herdr", State: "live", HerdrSocket: socket, HerdrPane: "w1:p2"},
@@ -284,6 +284,9 @@ func TestProveHerdrSeatSupervisorIdentity(t *testing.T) {
 		{"dead", "terminal-one", false, 9, false, true},
 		{"reused-pid", "terminal-one", true, 10, false, true},
 		{"recycled-during-proof", "terminal-one", true, 9, false, false},
+		// The kernel's own reader (sysctl on macOS, /proc on Linux) proves an
+		// exited supervisor dead before its recycled pane is asked (forecast C30).
+		{"dead-native-reader", "terminal-recycled", false, 9, false, true},
 		{"legacy-exact-host", "", true, 0, true, false},
 		{"legacy-launch", "", true, 0, true, false},
 		{"ambiguous-legacy-launch", "", true, 0, false, false},
@@ -323,6 +326,13 @@ func TestProveHerdrSeatSupervisorIdentity(t *testing.T) {
 			if test.stamp > 0 {
 				seat.SeatHostPID = 20
 				seat.SeatHostStart = 9
+			}
+			if test.name == "dead-native-reader" {
+				exited := exec.Command("true")
+				if err := exited.Run(); err != nil {
+					t.Fatalf("run an exiting supervisor: %v", err)
+				}
+				seat.SeatHostPID = exited.ProcessState.Pid()
 			}
 			if err := db.PutSeat(context.Background(), seat); err != nil {
 				t.Fatal(err)
@@ -374,6 +384,9 @@ func TestProveHerdrSeatSupervisorIdentity(t *testing.T) {
 			if test.name == "recycled-during-proof" {
 				reader = &recyclingHerdrProofProc{ProcFS: proc}
 			}
+			if test.name == "dead-native-reader" {
+				reader = nativeProcFS()
+			}
 			got, owned, err := ProveHerdrSeat(context.Background(), db, reader, seat)
 			if owned != test.owned || (err == nil) != (test.owned || test.dead) {
 				t.Fatalf("proof owned=%v err=%v; want owned=%v dead=%v", owned, err, test.owned, test.dead)
@@ -402,6 +415,18 @@ func herdrOwnershipSocketShell(
 	t *testing.T,
 	list, pane string,
 	shell int,
+	beforeInfo ...func(),
+) (string, *atomic.Int32) {
+	t.Helper()
+	return herdrOwnershipSocketInfo(t, list, map[string]any{"pane_id": pane, "shell_pid": shell}, beforeInfo...)
+}
+
+// herdrOwnershipSocketInfo answers pane.list with list and pane.process_info
+// with info.
+func herdrOwnershipSocketInfo(
+	t *testing.T,
+	list string,
+	info map[string]any,
 	beforeInfo ...func(),
 ) (string, *atomic.Int32) {
 	t.Helper()
@@ -439,7 +464,7 @@ func herdrOwnershipSocketShell(
 					body = map[string]any{
 						"result": map[string]any{
 							"type":         "pane_process_info",
-							"process_info": map[string]any{"pane_id": pane, "shell_pid": shell},
+							"process_info": info,
 						},
 					}
 				}
@@ -500,7 +525,14 @@ func TestProvedListingKeepsMovedSupervisor(t *testing.T) {
 					}
 				}()
 			}
-			rows := proveHerdrSeats(ctx, proofDB, proc, probeHerdrSeatRows(ctx, []fleetdb.Seat{seat}), readOnly)
+			rows := proveHerdrSeats(
+				ctx,
+				proofDB,
+				proc,
+				HerdrShield(proc),
+				probeHerdrSeatRows(ctx, []fleetdb.Seat{seat}),
+				readOnly,
+			)
 			if len(rows) != 1 || rows[0].Err != nil || rows[0].Seat.HerdrPane != "w8:p4" ||
 				rows[0].CWD != "/jail/project" {
 				t.Fatalf("moved listing=%+v", rows)
@@ -706,7 +738,15 @@ func TestProveHerdrSeatClosure(t *testing.T) {
 				if err := db.UpdateSeat(ctx, seat, current); err != nil {
 					t.Fatal(err)
 				}
-				got, owned, err = proveHerdrSeatSnapshot(ctx, db, proc, seat, json.RawMessage(list), false)
+				got, owned, err = proveHerdrSeatSnapshot(
+					ctx,
+					db,
+					proc,
+					HerdrShield(proc),
+					seat,
+					json.RawMessage(list),
+					false,
+				)
 			} else {
 				got, owned, err = ProveHerdrSeat(ctx, db, proc, seat)
 			}
@@ -848,7 +888,7 @@ func TestProvedListingRetiresDeadSeatOnly(t *testing.T) {
 					}
 				}()
 			}
-			rows := proveHerdrSeats(ctx, proofDB, proc, probeHerdrSeatRows(ctx, seats), readOnly)
+			rows := proveHerdrSeats(ctx, proofDB, proc, HerdrShield(proc), probeHerdrSeatRows(ctx, seats), readOnly)
 			if len(rows) != 3 {
 				t.Fatalf("listing dropped a seat: %+v", rows)
 			}
@@ -899,7 +939,19 @@ func TestHerdrChatSeat(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(proc, "50", "cmdline"), 0o700); err != nil {
 		t.Fatal(err)
 	}
+	stat := "20 (pfm) S 10 " + strings.Repeat("0 ", 17) + "9 0\n"
+	if err := os.WriteFile(filepath.Join(proc, "20", "stat"), []byte(stat), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	moved := fleetdb.Seat{SeatID: "moved", Backend: "herdr", HerdrSocket: "/s", HerdrPane: "w9:p2", SeatHostPID: 20}
+	// stale sorts before born: an ended chat's seat whose supervisor pid the
+	// live chat's supervisor (started at 9) reuses.
+	stale := fleetdb.Seat{
+		SeatID: "a-stale", Backend: "herdr", HerdrSocket: "/s", HerdrPane: "w1:p1", SeatHostPID: 20, SeatHostStart: 5,
+	}
+	born := fleetdb.Seat{
+		SeatID: "b-born", Backend: "herdr", HerdrSocket: "/s", HerdrPane: "w9:p2", SeatHostPID: 20, SeatHostStart: 9,
+	}
 	legacy := fleetdb.Seat{SeatID: "legacy", Backend: "herdr", HerdrSocket: "/s", HerdrPane: "w6:p3"}
 	for _, tc := range []struct {
 		name, socket, env string
@@ -913,6 +965,7 @@ func TestHerdrChatSeat(t *testing.T) {
 		{name: "no ancestor", socket: "/s", env: "w6:p3", seats: []fleetdb.Seat{moved}, chain: []int{40, 30}},
 		{name: "legacy by env pane", socket: "/s", env: "w6:p3", seats: []fleetdb.Seat{legacy}, chain: []int{40, 20}, want: "legacy"},
 		{name: "legacy other pane", socket: "/s", env: "w1:p1", seats: []fleetdb.Seat{legacy}, chain: []int{40, 20}},
+		{name: "stale seat sharing the supervisor's reused pid", socket: "/s", env: "w6:p3", seats: []fleetdb.Seat{stale, born}, chain: []int{40, 20}, want: "b-born"},
 		{name: "legacy unreadable", socket: "/s", env: "w6:p3", seats: []fleetdb.Seat{legacy}, chain: []int{50, 20}, fails: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

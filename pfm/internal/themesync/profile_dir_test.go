@@ -324,7 +324,6 @@ func TestReadProfileDirNamesInvalidPart(t *testing.T) {
 	cases := []struct {
 		name, file, content string
 	}{
-		{"missing name", "theme.json", `{"base":"dark"}`},
 		{"invalid base", "theme.json", `{"name":"Broken","base":"no-such-base"}`},
 		{"unknown Claude token", "claude.json", `{"noSuchToken":"#123456"}`},
 		{"invalid Claude colour", "claude.json", `{"claude":"not-a-colour"}`},
@@ -351,6 +350,37 @@ func TestReadProfileDirNamesInvalidPart(t *testing.T) {
 				t.Fatalf("ReadProfileDir = %v, want an error naming %s", err, tc.file)
 			}
 		})
+	}
+}
+
+// The name is a title only: a theme.json without one reads, and the profile it
+// assembles is unnamed (its stem titles it), where it once was refused whole.
+func TestReadProfileDirAcceptsAThemeWithoutAName(t *testing.T) {
+	dir := copyShippedTheme(t, "tokyo-night")
+	themeFile := filepath.Join(dir, "theme.json")
+	original, err := os.ReadFile(themeFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var meta map[string]any
+	if err := json.Unmarshal(original, &meta); err != nil {
+		t.Fatal(err)
+	}
+	delete(meta, "name")
+	body, err := json.Marshal(meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(themeFile, []byte(canonicalOrFail(t, string(body))), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	document, err := ReadProfileDir(dir)
+	if err != nil {
+		t.Fatalf("ReadProfileDir of an unnamed theme = %v, want it read", err)
+	}
+	profile, err := ParseProfile(document)
+	if err != nil || profile.Name != "" || profile.Base != "dark" {
+		t.Fatalf("unnamed theme = %+v, %v; want no name and base dark", profile, err)
 	}
 }
 

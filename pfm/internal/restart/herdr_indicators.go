@@ -25,8 +25,10 @@ type staleIndicator struct {
 }
 
 // StaleHerdrIndicators reports this user's painters executing an image other than the installed pfm.
+// A painter whose identity could not be read is never counted stale: its pid is
+// left out and the error names it, returned beside the pids of every painter that was read.
 func StaleHerdrIndicators(dependencies Deps) ([]int, error) {
-	stale, err := (&discoverer{deps: dependencies}).staleHerdrIndicators()
+	stale, unreadable, err := (&discoverer{deps: dependencies}).staleHerdrIndicators()
 	if err != nil {
 		return nil, err
 	}
@@ -34,71 +36,101 @@ func StaleHerdrIndicators(dependencies Deps) ([]int, error) {
 	for _, painter := range stale {
 		pids = append(pids, painter.PID)
 	}
-	return pids, nil
+	return pids, errors.Join(unreadable...)
 }
 
-func (finder *discoverer) staleHerdrIndicators() ([]staleIndicator, error) {
+// staleHerdrIndicators scans every painter of this user. A painter that cannot be judged is one
+// entry of unreadable and costs only itself; err is a failure that stops the whole scan.
+func (finder *discoverer) staleHerdrIndicators() (stale []staleIndicator, unreadable []error, err error) {
 	table, err := finder.readTable()
 	if err != nil {
-		return nil, fmt.Errorf("herdr indicator process check: %w", err)
+		return nil, nil, fmt.Errorf("herdr indicator process check: %w", err)
 	}
 	if err := table.unreadableErr(); err != nil {
-		return nil, fmt.Errorf("herdr indicator process check: %w", err)
+		return nil, nil, fmt.Errorf("herdr indicator process check: %w", err)
 	}
-	var stale []staleIndicator
+	var installed gather.FileID
+	haveInstalled := false
 	for _, proc := range table.Processes {
 		args, ok := finder.pfmArgs(proc.Argv)
 		if !ok || !slices.Equal(args, []string{internalCommand, herdr.IndicatorVerb}) {
 			continue
 		}
-		state, err := finder.daemonIdentityState(proc)
+		image, counted, err := finder.indicatorImage(proc)
 		if err != nil {
-			return nil, fmt.Errorf("herdr indicator pid %d: %w", proc.PID, err)
-		}
-		if state != daemonOwned {
+			unreadable = append(unreadable, err)
 			continue
 		}
-		owned, err := finder.ownedByInstall(proc)
-		if err != nil {
-			return nil, fmt.Errorf("herdr indicator: %w", err)
+		if !counted {
+			continue
 		}
-		if !owned {
-			continue // another install's painter: never this install's to replace
-		}
-		images, ok := finder.deps.Procs.(gather.ProcImage)
-		if !ok {
-			return nil, fmt.Errorf("herdr indicator pid %d: executable identity reader unavailable", proc.PID)
-		}
-		image, err := images.Image(proc.PID)
-		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ESRCH) {
-			state, proofErr := finder.daemonIdentityState(proc)
-			if proofErr == nil && state == daemonGone {
-				continue
+		if !haveInstalled {
+			if installed, err = gather.FileIDOf(finder.deps.Executable); err != nil {
+				return nil, nil, fmt.Errorf("herdr indicator installed binary %s: %w", finder.deps.Executable, err)
 			}
-			err = errors.Join(err, proofErr)
-		}
-		if err != nil {
-			return nil, fmt.Errorf("herdr indicator pid %d executable identity: %w", proc.PID, err)
-		}
-		installed, err := gather.FileIDOf(finder.deps.Executable)
-		if err != nil {
-			return nil, fmt.Errorf("herdr indicator installed binary %s: %w", finder.deps.Executable, err)
+			haveInstalled = true
 		}
 		if image != installed {
 			stale = append(stale, staleIndicator{process: proc, image: image})
 		}
 	}
-	return stale, nil
+	return stale, unreadable, nil
+}
+
+// indicatorImage is the executable identity of one painter this install owns. counted is false for
+// a painter that is another user's, another install's, or gone: never this install's to judge.
+func (finder *discoverer) indicatorImage(proc process) (image gather.FileID, counted bool, err error) {
+	state, err := finder.daemonIdentityState(proc)
+	if err != nil {
+		return gather.FileID{}, false, fmt.Errorf("herdr indicator pid %d: %w", proc.PID, err)
+	}
+	if state != daemonOwned {
+		return gather.FileID{}, false, nil
+	}
+	owned, _, err := finder.ownedByInstall(proc)
+	if err != nil {
+		return gather.FileID{}, false, fmt.Errorf("herdr indicator: %w", err)
+	}
+	if !owned {
+		return gather.FileID{}, false, nil // another install's painter, or gone: never this install's to replace
+	}
+	images, ok := finder.deps.Procs.(gather.ProcImage)
+	if !ok {
+		return gather.FileID{}, false, fmt.Errorf(
+			"herdr indicator pid %d: executable identity reader unavailable", proc.PID)
+	}
+	image, err = images.Image(proc.PID)
+	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ESRCH) {
+		state, proofErr := finder.daemonIdentityState(proc)
+		if proofErr == nil && state == daemonGone {
+			return gather.FileID{}, false, nil
+		}
+		err = errors.Join(err, proofErr)
+	}
+	if err != nil {
+		return gather.FileID{}, false, fmt.Errorf("herdr indicator pid %d executable identity: %w", proc.PID, err)
+	}
+	return image, true, nil
 }
 
 // ConvergeHerdrIndicators replaces stale painters, never their Herdr server or an absent painter;
 // the bool reports whether it stopped and restarted any.
 func ConvergeHerdrIndicators(ctx context.Context, dependencies Deps) (string, bool, error) {
-	stale, err := (&discoverer{deps: dependencies}).staleHerdrIndicators()
+	stale, unreadable, err := (&discoverer{deps: dependencies}).staleHerdrIndicators()
 	if err != nil {
 		return "", false, err
 	}
+	// An unreadable painter is left running and named, never read as current.
+	note := ""
+	if len(unreadable) > 0 {
+		note = fmt.Sprintf("; could not read %d painter(s), left running: %s",
+			len(unreadable), stepLine(errors.Join(unreadable...).Error()))
+	}
 	if len(stale) == 0 {
+		if note != "" {
+			return "Herdr indicator process enumeration found no stale painter among those it could read" + note,
+				false, nil
+		}
 		return "Herdr indicator process enumeration confirms no stale painter", false, nil
 	}
 	stopper := dependencies.stopper(&dependencies.Install)
@@ -175,8 +207,9 @@ func ConvergeHerdrIndicators(ctx context.Context, dependencies Deps) (string, bo
 		}
 	}
 	return fmt.Sprintf(
-		"replaced %d stale Herdr indicator painter(s) on %d socket(s)",
+		"replaced %d stale Herdr indicator painter(s) on %d socket(s)%s",
 		len(stale),
 		len(sockets),
+		note,
 	), true, nil
 }

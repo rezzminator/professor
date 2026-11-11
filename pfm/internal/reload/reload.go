@@ -9,7 +9,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -24,7 +23,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/obs"
-	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // Usage leads with the flags because a caller who guesses is guessing
@@ -386,18 +384,7 @@ func Run(
 		return Result{}, exitIncomplete(ctx, pane, tries+grace)
 	}
 	trail.Reach("dead", "pane exited")
-	if request.Engine == pfmengine.Claude && request.SessionID != "" {
-		values, recordErr := pfmconfig.ResolvePaths()
-		if recordErr == nil {
-			recordErr = fleetdb.RecordLaunch(ctx, values, fleetdb.Launch{
-				SessionID: request.SessionID, Engine: pfmengine.Claude,
-				Account: request.Account, Cache1H: request.Cache1H,
-			}, clock.Real.Now().Unix())
-		}
-		if recordErr != nil {
-			fmt.Fprintf(stderr, "pfm: record launch %s: %v\n", request.SessionID, recordErr)
-		}
-	}
+	recordReloadLaunch(ctx, request, stderr)
 	promptWarning := warnPromptMissing(request, stderr)
 	if err := respawnClaimedPane(ctx, tmux, request, run); err != nil {
 		return Result{}, fmt.Errorf("respawn pane: %w", err)
@@ -559,11 +546,6 @@ func codexRun(request Request) (string, error) {
 	parts := []string{"env"}
 	for _, name := range claudelaunch.Hygiene() {
 		parts = append(parts, "-u", name)
-	}
-	if extensionEnv := strings.TrimSpace(
-		action.ExtensionShellEnv(request.Machine, pfmengine.MustLookup(pfmengine.Codex).LongName),
-	); extensionEnv != "" {
-		parts = append(parts, extensionEnv)
 	}
 	if request.CodexHome != "" {
 		parts = append(parts, "CODEX_HOME="+cmdparse.Quote(request.CodexHome))
@@ -864,11 +846,20 @@ func readSessionCrumb(path string) (id, transcript string, found bool, err error
 	return id, transcript, true, nil
 }
 
-// ParseIntEnv reads name through env and returns fallback when it is unset
-// or not a positive integer.
-func ParseIntEnv(env paths.Env, name string, fallback int) int {
-	if value, err := strconv.Atoi(env.Get(name)); err == nil && value > 0 {
-		return value
+// recordReloadLaunch writes the launch record of a reloaded Claude session, so
+// the picker row and every later resume read the account and cache it runs on.
+func recordReloadLaunch(ctx context.Context, request Request, stderr io.Writer) {
+	if request.Engine != pfmengine.Claude || request.SessionID == "" {
+		return
 	}
-	return fallback
+	values, err := pfmconfig.ResolvePaths()
+	if err == nil {
+		err = fleetdb.RecordLaunch(ctx, values, fleetdb.Launch{
+			SessionID: request.SessionID, Engine: pfmengine.Claude,
+			Account: request.Account, Cache1H: request.Cache1H,
+		}, clock.Real.Now().Unix())
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm: record launch %s: %v\n", request.SessionID, err)
+	}
 }

@@ -1,12 +1,14 @@
 package gather
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/codexmeta"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 var errHeldSubagents = errors.New("held rollouts identify only subagents")
@@ -17,6 +19,8 @@ func heldCodexRoot(links []FDLink, roots []string) (string, error) {
 	seen := map[string]bool{}
 	selected := ""
 	observed := false
+	unwritten := ""
+	var unreadable error
 	for _, link := range links {
 		path := filepath.Clean(link.Target)
 		if seen[path] {
@@ -35,8 +39,20 @@ func heldCodexRoot(links []FDLink, roots []string) (string, error) {
 		observed = true
 		seen[path] = true
 		header, err := codexmeta.ReadHeader(path)
+		if errors.Is(err, codexmeta.ErrNoSessionMeta) {
+			// Opened and not yet headed — a child the parent just spawned. It
+			// refuses only when no other held rollout verifies as the root.
+			unwritten = path
+			continue
+		}
 		if err != nil {
-			return "", fmt.Errorf("read held rollout %s: %w", path, err)
+			// A child rollout whose header cannot be read costs that rollout
+			// only: it refuses the pane only when no other held rollout
+			// verifies as the root, and the skip is logged.
+			unreadable = fmt.Errorf("read held rollout %s: %w", path, err)
+			obs.Logger(context.Background()).
+				Warn("gather.codex.held_rollout_unreadable", "path", path, obs.FieldErr, err.Error())
+			continue
 		}
 		if header.Kind == codexmeta.Subagent {
 			continue
@@ -48,6 +64,12 @@ func heldCodexRoot(links []FDLink, roots []string) (string, error) {
 			return "", fmt.Errorf("conflicting held root rollouts %s and %s", selected, path)
 		}
 		selected = path
+	}
+	if selected == "" && unreadable != nil {
+		return "", unreadable
+	}
+	if selected == "" && unwritten != "" {
+		return "", fmt.Errorf("read held rollout %s: %w", unwritten, codexmeta.ErrNoSessionMeta)
 	}
 	if observed && selected == "" {
 		return "", errHeldSubagents

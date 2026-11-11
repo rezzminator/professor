@@ -1,6 +1,7 @@
 package statusline
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -34,10 +35,10 @@ func TestMissingMainWindowsUseUsageCacheWithoutReconfirmingIt(t *testing.T) {
 		{"stale legacy mtime", `,"rate_limits":{"seven_day_fable":{"used_percentage":0}}`, "legacy-stale", "—", "—", "0%"},
 		{"backoff", "", "backoff", "ERR", "ERR", "ERR"},
 		{"malformed JSON", "", "broken", "ERR", "ERR", "ERR"},
-		{"future legacy mtime", "", "legacy-future", "ERR", "ERR", "ERR"},
-		{"future stamp recent mtime", "", "future-recent", "ERR", "ERR", "ERR"},
+		{"future legacy mtime reads as now", "", "legacy-future", "10%", "78%", "0%"},
+		{"future stamp recent mtime reads as now", "", "future-recent", "10%", "78%", "0%"},
 		{"malformed fable reset", mainRates(now), "fable-invalid", "11%", "31%", "ERR"},
-		{"future stamp and mtime", "", "future", "ERR", "ERR", "ERR"},
+		{"future stamp and mtime read as now", "", "future", "10%", "78%", "0%"},
 		{"exact one-hour age", "", "boundary", "10%", "78%", "0%"},
 		{"past one-hour age", `,"rate_limits":{"seven_day_fable":{"used_percentage":0}}`, "past-boundary", "—", "—", "0%"},
 		{"expired main reset", "", "expired", "—", "78%", "0%"},
@@ -51,7 +52,7 @@ func TestMissingMainWindowsUseUsageCacheWithoutReconfirmingIt(t *testing.T) {
 		{"fable expired", mainRates(now), "fable-expired", "11%", "31%", "—"},
 		{"fable other seat", mainRates(now), "other", "11%", "31%", "—"},
 		{"fable blank identity", mainRates(now), "blank", "11%", "31%", "—"},
-		{"invalid main reset", "", "invalid", "ERR", "78%", "0%"},
+		{"invalid main reset keeps the reading", "", "invalid", "10%", "78%", "0%"},
 		{"empty resets keep readings", "", "empty-resets", "0%", "78%", "0%"},
 		{"null resets keep readings", "", "null-resets", "0%", "78%", "0%"},
 		{"padded resets", "", "padded-resets", "10%", "78%", "0%"},
@@ -112,7 +113,6 @@ func TestMissingMainWindowsUseUsageCacheWithoutReconfirmingIt(t *testing.T) {
 				record.Backoff = &usagehook.CacheBackoff{
 					Message:    "429",
 					RetryAfter: now.Add(time.Minute),
-					RecordedAt: now,
 				}
 			case "invalid":
 				record.FiveHour.ResetsAt = "not-a-time"
@@ -190,6 +190,23 @@ func TestMissingMainWindowsUseUsageCacheWithoutReconfirmingIt(t *testing.T) {
 				}
 				if value != "" && !strings.Contains(plain, label+"-used:"+value) {
 					t.Fatalf("missing %s-used:%s in %q", label, value, plain)
+				}
+			}
+			// A future stamp and an unreadable reset keep the reading and say so.
+			switch tc.state {
+			case "legacy-future", "future-recent", "future":
+				if !strings.Contains(warnings.String(), "in the future (read as now)") {
+					t.Fatalf("missing future-stamp diagnostic: %q", warnings.String())
+				}
+			case "invalid":
+				if !strings.Contains(warnings.String(), `decode five_hour reset "not-a-time"`) ||
+					!strings.Contains(warnings.String(), "(reading kept, no countdown)") ||
+					strings.Contains(plain, "5h-used:10% ↻") {
+					t.Fatalf(
+						"invalid reset: warn %q plain %q, want its diagnostic and no countdown",
+						warnings.String(),
+						plain,
+					)
 				}
 			}
 			if (tc.five == "ERR" || tc.fable == "ERR") && !strings.Contains(warnings.String(), "usage cache") {
@@ -388,5 +405,43 @@ func TestARedrawOfAnUnchangedPayloadKeepsItsConfirmationTime(t *testing.T) {
 	replied := strings.Replace(frozen, `"used_percentage":20`, `"used_percentage":25`, 1)
 	if at := later.Add(2 * time.Minute); draw(at, replied) != at.Unix() {
 		t.Fatalf("a changed reading kept its old confirmation time")
+	}
+}
+
+// One sibling snapshot that cannot be read costs only itself: the readable
+// sibling's newer 7d reading still corrects the payload's, and the unreadable
+// one is named in the warning.
+func TestSiblingSnapshotReadingsSurviveAnUnreadableSibling(t *testing.T) {
+	runtime := fableRuntime(t.TempDir(), 2, quotaNow)
+	weeklyCache(t, runtime, quotaCodexCache, time.Minute)
+	var warn bytes.Buffer
+	runtime.Warn = &warn
+	if err := os.MkdirAll(runtime.RateLimitDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	week := quotaNow.Add(3*24*time.Hour + 3*time.Hour + 5*time.Minute)
+	sibling, err := json.Marshal(map[string]any{
+		"acct": 2, "config_dir": runtime.ConfigDir, "ts": quotaNow.Add(-time.Minute).Unix(),
+		"windows": map[string]any{
+			"seven_day": map[string]any{"used_percentage": 89, "resets_at": week.Unix()},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runtime.RateLimitDir, "acct-2.live.json"), sibling, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runtime.RateLimitDir, "acct-2.torn.json"), []byte(`{`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lines := renderQuotaLines(t, runtime, quotaPayload())
+	if got := stripANSICodes(lines[2]); !strings.Contains(got, "7d-used:89%") {
+		t.Fatalf("quota row = %q, want the readable sibling's 7d-used:89%% beside the unreadable one", got)
+	}
+	wantWarn := "statusline: sibling quota snapshots " + runtime.RateLimitDir +
+		": skipped statusline quota acct-2.torn.json: decode: unexpected end of JSON input\n"
+	if !strings.Contains(warn.String(), wantWarn) {
+		t.Fatalf("warn = %q, want it to hold %q", warn.String(), wantWarn)
 	}
 }

@@ -32,9 +32,14 @@ var (
 // published standard text-token tables feed it (Claude's "Model pricing",
 // OpenAI's Standard tables); batch, fast, regional, audio and tool tariffs
 // never price a row. A model whose rows disagree, or that lacks an input or
-// output price, is left out; a provider that yields no row is an error.
-func Derive(catalogs []Catalog, fetchedAt string) (pricing.Table, error) {
+// output price, is not derived afresh: the row of the same key in published
+// (the table served before this one) stays, and kept names each such key, so a
+// page the parser cannot fold costs no model its last known price. A model the
+// catalog no longer lists, or never priced, keeps nothing. A provider that
+// yields no row is an error.
+func Derive(catalogs []Catalog, fetchedAt string, published []pricing.Row) (pricing.Table, []string, error) {
 	table := pricing.Table{Version: pricing.Version, FetchedAt: fetchedAt, Rows: []pricing.Row{}}
+	var kept []string
 	for _, provider := range []string{providerAnthropic, providerOpenAI} {
 		var catalog *Catalog
 		for i := range catalogs {
@@ -42,33 +47,41 @@ func Derive(catalogs []Catalog, fetchedAt string) (pricing.Table, error) {
 				continue
 			}
 			if catalog != nil {
-				return pricing.Table{}, fmt.Errorf("derive prices: two %s catalogs", provider)
+				return pricing.Table{}, nil, fmt.Errorf("derive prices: two %s catalogs", provider)
 			}
 			catalog = &catalogs[i]
 		}
 		if catalog == nil {
-			return pricing.Table{}, fmt.Errorf("derive prices: no %s catalog", provider)
+			return pricing.Table{}, nil, fmt.Errorf("derive prices: no %s catalog", provider)
 		}
 		table.Sources = append(table.Sources, pricing.Source{Provider: provider, URL: catalog.Source.URL})
 		var rows []pricing.Row
+		var unresolved []string
 		if provider == providerAnthropic {
-			rows = deriveClaude(catalog)
+			rows, unresolved = deriveClaude(catalog)
 		} else {
-			rows = deriveOpenAI(catalog)
+			rows, unresolved = deriveOpenAI(catalog)
 		}
 		if len(rows) == 0 {
-			return pricing.Table{}, fmt.Errorf(
+			return pricing.Table{}, nil, fmt.Errorf(
 				"derive prices: the %s page %s yields no standard text-token rows; publisher layout changed",
 				provider,
 				catalog.Source.URL,
 			)
 		}
 		table.Rows = append(table.Rows, rows...)
+		for _, key := range unresolved {
+			named := func(row pricing.Row) bool { return row.Key == key }
+			if at := slices.IndexFunc(published, named); at >= 0 && !slices.ContainsFunc(table.Rows, named) {
+				table.Rows = append(table.Rows, published[at])
+				kept = append(kept, key)
+			}
+		}
 	}
 	if _, err := pricing.Encode(table); err != nil {
-		return pricing.Table{}, fmt.Errorf("derive prices: %w", err)
+		return pricing.Table{}, nil, fmt.Errorf("derive prices: %w", err)
 	}
-	return table, nil
+	return table, kept, nil
 }
 
 func plain(text string) string {
@@ -139,8 +152,9 @@ type claudeVariant struct {
 	threshold int64
 }
 
-func deriveClaude(catalog *Catalog) []pricing.Row {
-	var rows []pricing.Row
+// deriveClaude is the catalog's folded rows and the ids of the models whose
+// price table it read but could not fold into one row.
+func deriveClaude(catalog *Catalog) (rows []pricing.Row, unresolved []string) {
 	for _, model := range catalog.Models {
 		var variants []claudeVariant
 		for _, table := range model.Tables {
@@ -176,11 +190,15 @@ func deriveClaude(catalog *Catalog) []pricing.Row {
 				variants = append(variants, variant)
 			}
 		}
-		if row, ok := claudeRow(model.ID, variants); ok {
+		row, ok := claudeRow(model.ID, variants)
+		switch {
+		case ok:
 			rows = append(rows, row)
+		case len(variants) > 0:
+			unresolved = append(unresolved, model.ID)
 		}
 	}
-	return rows
+	return rows, unresolved
 }
 
 // claudeRow folds a model's variants into one row: every base row (plain or
@@ -241,15 +259,15 @@ type openAIVariant struct {
 	long  *pricing.Long
 }
 
-func deriveOpenAI(catalog *Catalog) []pricing.Row {
+// deriveOpenAI is deriveClaude's twin for OpenAI's Standard tables.
+func deriveOpenAI(catalog *Catalog) (rows []pricing.Row, unresolved []string) {
 	if !perMillion.MatchString(catalog.PageContext) {
-		return nil
+		return nil, nil
 	}
 	boundary, hasBoundary := int64(0), false
 	if match := longBoundary.FindStringSubmatch(catalog.PageContext); match != nil {
 		boundary, hasBoundary = threshold(match[1])
 	}
-	var rows []pricing.Row
 	for _, model := range catalog.Models {
 		var variants []openAIVariant
 		for _, table := range model.Tables {
@@ -287,11 +305,15 @@ func deriveOpenAI(catalog *Catalog) []pricing.Row {
 				variants = append(variants, variant)
 			}
 		}
-		if row, ok := openAIRow(model.ID, variants); ok {
+		row, ok := openAIRow(model.ID, variants)
+		switch {
+		case ok:
 			rows = append(rows, row)
+		case len(variants) > 0:
+			unresolved = append(unresolved, model.ID)
 		}
 	}
-	return rows
+	return rows, unresolved
 }
 
 // standardTable is OpenAI's Standard text-token table: the "Standard pricing

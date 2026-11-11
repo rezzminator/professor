@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/agentlauncher"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/servicemanager"
 	"github.com/rezzminator/professor/pfm/internal/themesync"
 )
@@ -110,7 +111,7 @@ func launcherFix(home, label, path string) string {
 func LaunchAgentLauncherDrift(home string) (agents int, findings []LauncherFinding) {
 	want := agentlauncher.Program(home)
 	for _, label := range pfmLaunchAgentLabels {
-		path := filepath.Join(home, "Library", "LaunchAgents", label+".plist")
+		path := filepath.Join(paths.LaunchAgentsDir(home), label+".plist")
 		fix := launcherFix(home, label, path)
 		info, err := os.Lstat(path)
 		if errors.Is(err, fs.ErrNotExist) {

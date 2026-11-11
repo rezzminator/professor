@@ -40,25 +40,34 @@ func TestReadHistoryKeepsTheLastRealTurns(t *testing.T) {
 	writeHistory(
 		t,
 		path,
-		`{"type":"user","message":{"content":"dropped as the possibly-partial first line"}}`,
+		`{"type":"user","timestamp":"t0","message":{"content":"the first line of a short file"}}`,
 		`{"type":"user","timestamp":"t1","message":{"content":"first"}}`,
 		`not json`,
 		`{"type":"system","timestamp":"t2","message":{"content":"not a turn"}}`,
 		`{"type":"user","timestamp":"t3","message":{"content":"<system-reminder>synthetic</system-reminder>"}}`,
+		`{"type":"user","timestamp":"t3b","message":{"content":[{"type":"text","text":"<system-reminder>block</system-reminder>"},{"type":"text","text":"typed after the reminder block"}]}}`,
+		`{"type":"user","timestamp":"t3c","message":{"content":"<system-reminder>lead</system-reminder>\ntyped after the reminder string"}}`,
 		`{"type":"user","timestamp":"t4","message":{"content":"Caveat: The messages below were generated"}}`,
 		`{"type":"assistant","message":{"content":[{"type":"text","text":"a"},{"type":"tool_use"},{"type":"text","text":"b"}]}}`,
+		`{"type":"user","timestamp":1730000000,"message":{"content":"numeric stamp"}}`,
 		`{"type":"user","timestamp":"t6","message":{"content":"last"}}`,
 	)
-	got, err := ReadHistory(path, 2)
+	got, err := ReadHistory(path, 20)
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := []HistoryMessage{
+		{Timestamp: "t0", Role: RoleUser, Text: "the first line of a short file"},
+		{Timestamp: "t1", Role: RoleUser, Text: "first"},
+		{Timestamp: "?", Role: historyUnparsedRole, Text: "row skipped: not JSON (8 bytes)"},
+		{Timestamp: "t3b", Role: RoleUser, Text: "typed after the reminder block"},
+		{Timestamp: "t3c", Role: RoleUser, Text: "typed after the reminder string"},
 		{Timestamp: "?", Role: RoleAssistant, Text: "a\nb"},
+		{Timestamp: "?", Role: RoleUser, Text: "numeric stamp"},
 		{Timestamp: "t6", Role: RoleUser, Text: "last"},
 	}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("ReadHistory = %#v, want %#v", got, want)
+		t.Fatalf("ReadHistory(%s) = %#v, want %#v", path, got, want)
 	}
 	if _, err := ReadHistory(filepath.Join(t.TempDir(), "missing.jsonl"), 2); err == nil {
 		t.Fatal("ReadHistory of a missing file returned no error")

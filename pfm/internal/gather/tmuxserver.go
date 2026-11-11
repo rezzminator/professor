@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"time"
 
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
@@ -48,11 +49,9 @@ func (state ServerState) String() string {
 // here"; any other failure, an unreadable answer included, is ServerUnknown
 // and its error. binary "" is the registered tmux.
 func ProbeServer(ctx context.Context, binary, socketPath string) (ServerState, []ProbePane, error) {
-	probeCtx, cancel := context.WithTimeout(ctx, ProbeTimeout)
+	probeCtx, cancel := context.WithTimeout(ctx, probeTimeout(ctx))
 	defer cancel()
-	command := pfmtmux.Exec(probeCtx, binary, socketPath, "list-panes", "-a", "-F", paneFormat)
-	command.WaitDelay = probeWaitDelay
-	output, err := command.Output()
+	output, err := pfmtmux.Exec(probeCtx, binary, socketPath, "list-panes", "-a", "-F", paneFormat).Output()
 	if err != nil {
 		state, classified := classifyProbe(ctx, probeCtx, err, socketPath)
 		switch state {
@@ -84,13 +83,39 @@ func ProbePanes(ctx context.Context, binary, socketPath string) ([]ProbePane, er
 	return nil, err
 }
 
+// Unresponsive names a probe of socket that ran past its own deadline — the
+// ProbeTimeout bound ctx gives it (probeTimeout) — while its caller's ctx was
+// still live, nil for any other probe.
+func Unresponsive(ctx, probeCtx context.Context, socket string) error {
+	if ctx.Err() == nil && errors.Is(probeCtx.Err(), context.DeadlineExceeded) {
+		return fmt.Errorf("%w within %s: %s", ErrServerUnresponsive, probeTimeout(ctx), socket)
+	}
+	return nil
+}
+
+// probeTimeoutKey is the context key of a probe bound other than
+// ProbeTimeout. Nothing in production sets it; the package's own tests carry
+// a short one on the context of a probe they point at a stopped server, so
+// each call runs the same code without waiting out two seconds.
+type probeTimeoutKey struct{}
+
+// probeTimeout is the bound one tmux probe made under ctx runs within:
+// ProbeTimeout, unless ctx carries a positive bound under probeTimeoutKey.
+// Every probe deadline and every "did not answer within" message reads it.
+func probeTimeout(ctx context.Context) time.Duration {
+	if bound, carried := ctx.Value(probeTimeoutKey{}).(time.Duration); carried && bound > 0 {
+		return bound
+	}
+	return ProbeTimeout
+}
+
 // classifyProbe reads one failed list-panes: past its own deadline the server
 // is unresponsive, tmux's words name a dead or an empty (alive) server, and
 // everything else is a probe that could not tell.
 func classifyProbe(ctx, probeCtx context.Context, err error, socket string) (ServerState, error) {
 	switch {
-	case ctx.Err() == nil && errors.Is(probeCtx.Err(), context.DeadlineExceeded):
-		return ServerUnresponsive, fmt.Errorf("%w within %s: %s", ErrServerUnresponsive, ProbeTimeout, socket)
+	case Unresponsive(ctx, probeCtx, socket) != nil:
+		return ServerUnresponsive, Unresponsive(ctx, probeCtx, socket)
 	case pfmtmux.CouldNotRun(err):
 		return ServerUnknown, fmt.Errorf("could not run tmux to probe %s: %w", socket, err)
 	case TmuxServerGone(err):

@@ -25,6 +25,9 @@ const (
 // storeGuardGet reads the hook process's own environment through the paths seam.
 var storeGuardGet = paths.OSEnv{}.Get
 
+// guardHomeEnv is the variable the guards read home from and seed each parse with.
+const guardHomeEnv = "HOME"
+
 // bashTool is the tool_name of the Bash PreToolUse matcher every guard hook answers.
 const bashTool = "Bash"
 
@@ -42,9 +45,10 @@ type storeGuardHookInput struct {
 // env or sudo wrapper, a bash -c string. It is fail-open, with one stderr line
 // per cause, for an unreadable payload, an unknown HOME, a part that does not
 // parse, a value it cannot resolve (an expansion, a path relative to a cd),
-// a claude word inside a command it cannot read (eval, a shell fed from a pipe
-// or heredoc, env -S) and a program other than claude run on the store (a
-// function, a script). An override on a chat whose own CLAUDE_CONFIG_DIR
+// a claude word inside a command it cannot read (an eval or -c string holding
+// an unknown expansion, a shell fed from a pipe or heredoc, env -S) and a
+// program other than claude run on the store (a function, a script). An
+// override on a chat whose own CLAUDE_CONFIG_DIR
 // already is the store changes nothing and passes in silence.
 func StoreGuard(input io.Reader, stdout, stderr io.Writer) int {
 	raw, err := io.ReadAll(input)
@@ -64,7 +68,7 @@ func StoreGuard(input io.Reader, stdout, stderr io.Writer) int {
 	if hook.ToolName != bashTool || !strings.Contains(command, storeGuardEnv) {
 		return 0
 	}
-	home := storeGuardGet("HOME")
+	home := storeGuardGet(guardHomeEnv)
 	if home == "" {
 		fmt.Fprintln(stderr, "pfm internal store-guard: HOME is empty (fail-open)")
 		return 0
@@ -73,12 +77,8 @@ func StoreGuard(input io.Reader, stdout, stderr io.Writer) int {
 	if dir, ok := storeGuardResolve(storeGuardGet(storeGuardEnv), home, ""); ok && storeGuardInStore(store, dir) {
 		return 0
 	}
-	cwd := hook.Cwd
-	if !filepath.IsAbs(cwd) {
-		cwd = string(filepath.Separator)
-	}
 	parsed, err := cmdparse.ParseBatch([]cmdparse.Call{{
-		ID: "store-guard", Command: command, Cwd: cwd, Vars: map[string]string{"HOME": home},
+		ID: "store-guard", Command: command, Vars: map[string]string{guardHomeEnv: home},
 	}})
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm internal store-guard: parse command (fail-open): %v\n", err)
@@ -97,9 +97,9 @@ func StoreGuard(input io.Reader, stdout, stderr io.Writer) int {
 // a path element such as ~/.claude.
 var storeGuardClaudeWord = regexp.MustCompile(`(^|[^A-Za-z0-9_.-])claude([^A-Za-z0-9_.-]|$)`)
 
-// storeGuardOpaque runs a command string the parse cannot read: eval, a shell
-// with no -c string (fed from a pipe or heredoc), source, and an env the
-// parse could not unwrap (env -S).
+// storeGuardOpaque runs a command string the parse may not read: eval (read
+// unless Unread), a shell with no -c string (fed from a pipe or heredoc),
+// source, and an env the parse could not unwrap (env -S).
 var storeGuardOpaque = map[string]bool{
 	"eval": true, "source": true, ".": true, "env": true,
 	"bash": true, "sh": true, "zsh": true, "dash": true, "ksh": true,
@@ -166,10 +166,14 @@ func storeGuardFailOpen(stderr io.Writer, format string, args ...any) {
 	fmt.Fprintf(stderr, "pfm internal store-guard: "+format+" (fail-open)\n", args...)
 }
 
-// storeGuardRunsString reports a shell given a -c string, whose parts the
-// parse already walked unless it marked the shell's part Unread.
+// storeGuardRunsString reports an eval given words or a shell given a -c
+// string, whose parts the parse already walked unless it marked the part
+// Unread.
 func storeGuardRunsString(base string, args []string) bool {
-	if !storeGuardOpaque[base] || base == "eval" || base == "source" || base == "." || base == "env" {
+	if base == "eval" {
+		return len(args) > 0
+	}
+	if !storeGuardOpaque[base] || base == "source" || base == "." || base == "env" {
 		return false
 	}
 	for _, a := range args {

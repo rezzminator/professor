@@ -4,11 +4,13 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
@@ -114,5 +116,42 @@ func TestArmRefusesWhatItCannotServe(t *testing.T) {
 		if _, err := Arm(tc.opts); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: Arm error = %v, want it to contain %q", tc.name, err, tc.want)
 		}
+	}
+}
+
+// Arm starts the sink through its runner: detached, the listening socket as
+// its one extra file, its stderr on the sink log and the environment given.
+func TestArmStartsTheSinkDetachedThroughTheRunner(t *testing.T) {
+	home := t.TempDir()
+	self := os.Getpid()
+	stat, err := gather.NewProcFS("").Stat(self)
+	if err != nil {
+		t.Fatalf("read our own start time: %v", err)
+	}
+	runner := &deps.FakeRunner{}
+	environ := []string{"PATH=/usr/bin:/bin", "FAKE_MARKER=kept"}
+	if _, err := Arm(ArmOptions{Self: "/x/pfm", PID: self, Home: home, Environ: environ, Runner: runner}); err != nil {
+		t.Fatalf("Arm: %v", err)
+	}
+	starts := runner.Starts()
+	if len(starts) != 1 {
+		t.Fatalf("starts = %+v, want exactly one", starts)
+	}
+	want := []string{
+		"/x/pfm", "internal", "cost-sink",
+		"--pid", strconv.Itoa(self), "--start", strconv.FormatUint(stat.StartTime, 10),
+	}
+	if !slices.Equal(starts[0].Argv, want) {
+		t.Fatalf("sink argv = %q, want %q", starts[0].Argv, want)
+	}
+	opts := starts[0].Opts
+	stderr, ok := opts.Stderr.(*os.File)
+	if !opts.Detach || !ok || stderr.Name() != paths.CostSinkLog(home) || len(opts.ExtraFiles) != 1 ||
+		opts.Stdout != nil || !slices.Equal(opts.Env, environ) {
+		t.Fatalf("start options = %+v, want Detach, stderr on %s, one extra file and env %q",
+			opts, paths.CostSinkLog(home), environ)
+	}
+	if got := runner.LifecycleCalls(); !slices.Equal(got, []deps.LifecycleCall{{Pid: 4242, Action: "release"}}) {
+		t.Fatalf("lifecycle = %+v, want the sink released", got)
 	}
 }

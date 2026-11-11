@@ -1,7 +1,6 @@
 package call
 
 import (
-	"context"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -12,16 +11,16 @@ import (
 
 // TestCommandThenSpawnerDefaultRunnerRecordsTheWaiterLaunch proves the nil
 // Runner default is the observed one: the detached waiter's launch writes
-// comp=runner records with the launcher's shape, and the steer text — a
+// comp=runner records with the waiter's shape, and the steer text — a
 // prompt body — never reaches the file.
 func TestCommandThenSpawnerDefaultRunnerRecordsTheWaiterLaunch(t *testing.T) {
 	ctx, recorder := obs.Test(t)
 	scratch := t.TempDir()
-	stub := filepath.Join(scratch, "setsid-stub")
-	if err := testjail.WriteExecutable(stub, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+	waiter := filepath.Join(scratch, "pfm")
+	if err := testjail.WriteExecutable(waiter, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	spawner := CommandThenSpawner{Executable: filepath.Join(scratch, "pfm"), Setsid: stub}
+	spawner := CommandThenSpawner{Executable: waiter}
 	err := spawner.Spawn(ctx, SteerSpawn{
 		SocketPath: filepath.Join(scratch, "cx-1-2-3"), Target: "%3",
 		Steers: []string{"resume the wave PLANTED-STEER"}, LogPath: filepath.Join(scratch, "steer.log"),
@@ -30,17 +29,16 @@ func TestCommandThenSpawnerDefaultRunnerRecordsTheWaiterLaunch(t *testing.T) {
 		t.Fatal(err)
 	}
 	records := recorder.Records()
-	if len(records) != 2 || records[0].Message != "runner.start" || records[1].Message != "runner.exit" {
-		t.Fatalf("want runner.start then runner.exit from the default runner, got %s", recorder.Raw())
+	if len(records) != 2 || records[0].Message != "runner.start" || records[1].Message != "runner.release" {
+		t.Fatalf("want runner.start then runner.release from the default runner, got %s", recorder.Raw())
 	}
 	if comp, _ := records[0].Field(obs.FieldComp); comp != "runner" {
 		t.Fatalf("comp = %v, want runner", comp)
 	}
-	if argv, _ := records[0].Field("argv"); argv != "setsid-stub" {
-		t.Fatalf("argv shape = %v, want the launcher's base name", argv)
+	if argv, _ := records[0].Field("argv"); argv != "pfm" {
+		t.Fatalf("argv shape = %v, want the waiter's base name", argv)
 	}
 	if strings.Contains(recorder.Raw(), "PLANTED-STEER") {
 		t.Fatalf("the steer text reached the file: %s", recorder.Raw())
 	}
-	_ = context.Background
 }

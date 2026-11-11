@@ -46,6 +46,7 @@ func TestStoreGuardDeniesClaudeRunOnTheStore(t *testing.T) {
 		`CLAUDE_CONFIG_DIR=$HOME/.cc/../.claude claude plugin list`,
 		`CLAUDE_CONFIG_DIR=$HOME/.claude /usr/local/bin/claude plugin list`,
 		`CLAUDE_CONFIG_DIR=$HOME/.CLAUDE claude plugin list`,
+		`eval "CLAUDE_CONFIG_DIR=~/.claude claude plugin list"`,
 	} {
 		t.Run(command, func(t *testing.T) {
 			code, stdout, stderr := runStoreGuard(gitGuardPayload(t, "Bash", command, "/tmp", ""))
@@ -100,7 +101,7 @@ func TestStoreGuardFailsOpenAndSaysWhy(t *testing.T) {
 		{"command substitution", payload(`CLAUDE_CONFIG_DIR=$(echo ~/.claude) claude plugin list`), "cannot resolve CLAUDE_CONFIG_DIR="},
 		{"default expansion", payload(`CLAUDE_CONFIG_DIR=${HOME:-/x}/.claude claude plugin list`), "cannot resolve CLAUDE_CONFIG_DIR="},
 		{"relative after cd", payload(`cd ~ && CLAUDE_CONFIG_DIR=.claude claude plugin list`), "cannot resolve CLAUDE_CONFIG_DIR=.claude (fail-open)"},
-		{"eval", payload(`eval "CLAUDE_CONFIG_DIR=~/.claude claude plugin list"`), "cannot read the command eval runs (fail-open)"},
+		{"unread eval", payload(`eval "CLAUDE_CONFIG_DIR=~/.claude claude $X"`), "cannot read the command eval runs (fail-open)"},
 		{"piped shell", payload(`echo 'CLAUDE_CONFIG_DIR=~/.claude claude plugin list' | bash`), "cannot read the command bash runs (fail-open)"},
 		{"heredoc shell", payload("bash <<'EOF'\nCLAUDE_CONFIG_DIR=~/.claude claude plugin list\nEOF"), "cannot read the command bash runs (fail-open)"},
 		{"env -S", payload(`env -S 'CLAUDE_CONFIG_DIR=~/.claude claude plugin list'`), "cannot read the command env runs (fail-open)"},

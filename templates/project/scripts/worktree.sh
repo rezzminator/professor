@@ -1,8 +1,14 @@
 #!/usr/bin/env bash
 # worktree.sh — Create and manage git worktrees for parallel pipeline work
 #
-# Usage:
+# Interface, fixed: pfm's git-guard keys on this path (.claude/scripts/worktree.sh) and leaves the script,
+# every verb below, to the Claude main chat alone while git tracks this file (and a worktree/ helper
+# directory beside it, where one exists) unchanged from HEAD; sub-agents but gitter are denied. Every
+# refusal exits non-zero with one stderr line and goes to gitter. The verb lines below stay in sync with
+# .claude/rules/git-writes-through-gitter.md; customize everything behind the verbs.
+#
 #   ./.claude/scripts/worktree.sh create <pipeline>
+#   ./.claude/scripts/worktree.sh land <pipeline> [-m <msg>]   # fast-forward BASE_BRANCH, then remove
 #   ./.claude/scripts/worktree.sh remove <pipeline> [--delete-branch] [--discard]
 #   ./.claude/scripts/worktree.sh list [pipeline]
 #   ./.claude/scripts/worktree.sh prune          # remove orphaned worktree dirs
@@ -12,11 +18,19 @@
 # Each pipeline gets a SINGLE worktree of the entire repo at .worktrees/<pipeline>/.
 # One branch, one checkout, every project in the roster included. At roster size 1
 # the worktree IS the repo root (no per-project subdir).
+#
+# create prints `Worktree ready: <dir>`, `Branch: <branch>` and the port lines, then one line per
+# submodule its remote could not serve, also on stderr when it happens; the exit stays 0, so the
+# caller greps `^WARN submodule `:
+#   WARN submodule <path>: pinned <sha12> not fetchable from remote — initialised from local clone <main clone> (push it)
+#   WARN submodule <path>: not initialised (<git's last error line>) — worktree created without it
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 ALLOC="${ROOT}/.claude/scripts/alloc-ports.sh"
+# The branch every pipeline starts from and lands on.
+BASE_BRANCH="main"
 
 # The roster entry whose Makefile owns the docker test stack, and its per-pipeline
 # teardown target. SETUP pins the directory; "-" when no roster entry owns infra.
@@ -86,14 +100,10 @@ provision_marker() {
   echo "${gitdir}/provisioning-incomplete"
 }
 
-# Snapshot final provisioned bytes in the private Git directory, not the checkout.
-# Git's read-only object hash needs no extra tool and --no-filters hashes the actual bytes.
-# On success PROVISIONED_ENV_FILES is the list whose snapshots were recorded or verified.
-provisioned_env_hashes() {
-  local mode="$1" tree="$2" marker hashes action=inspect entry dir kind install env_files ef path key digest saved
-  [ "$mode" != record ] || action=record
-  marker="$(provision_marker "$tree")" || return 1
-  hashes="${marker%/*}/provisioned-env-hashes"
+# Set PROVISIONED_ENV_FILES to every env file create provisions, relative to the worktree root:
+# .env.ports, then each roster entry's env_files.
+provisioned_env_paths() {
+  local entry dir kind install env_files ef
   PROVISIONED_ENV_FILES=(.env.ports)
   for entry in "${PROJECTS[@]+"${PROJECTS[@]}"}"; do
     IFS='|' read -r dir kind install env_files <<< "$entry"
@@ -102,6 +112,17 @@ provisioned_env_hashes() {
       if [ "$dir" = '.' ]; then PROVISIONED_ENV_FILES+=("$ef"); else PROVISIONED_ENV_FILES+=("$dir/$ef"); fi
     done
   done
+}
+
+# Snapshot final provisioned bytes in the private Git directory, not the checkout.
+# Git's read-only object hash needs no extra tool and --no-filters hashes the actual bytes.
+# On success PROVISIONED_ENV_FILES is the list whose snapshots were recorded or verified.
+provisioned_env_hashes() {
+  local mode="$1" tree="$2" marker hashes action=inspect path key digest saved
+  [ "$mode" != record ] || action=record
+  marker="$(provision_marker "$tree")" || return 1
+  hashes="${marker%/*}/provisioned-env-hashes"
+  provisioned_env_paths
   local error="Error: could not $action provisioned env hashes for $tree"
   if [[ -L "$hashes" || ( -e "$hashes" && ! -d "$hashes" ) ]]; then
     echo "$error: invalid metadata directory $hashes" >&2; return 1
@@ -163,6 +184,51 @@ provisioned_env_hashes() {
   return 0
 }
 
+# init_submodules <worktree>: populate every submodule .gitmodules lists, recursively, and never fail
+# the create. A gitlink its remote cannot serve inits from the main checkout's clone instead
+# (init_from_main_clone); one neither serves stays empty and joins UNINITIALISED_SUBMODULES. Either
+# fallback adds one WARN line to SUBMODULE_WARNINGS, printed on stderr at once and after the summary.
+SUBMODULE_WARNINGS=()
+UNINITIALISED_SUBMODULES=()
+submodule_warn() { SUBMODULE_WARNINGS+=("$1"); echo "$1" >&2; }
+init_submodules() {
+  local wt="$1" entries key path name pin err
+  [ -f "$wt/.gitmodules" ] || return 0
+  if ! entries="$(git -C "$wt" config -f .gitmodules --get-regexp '^submodule\..*\.path$')"; then
+    submodule_warn "WARN submodule .gitmodules: not initialised (unreadable) — worktree created without any submodule"
+    return 0
+  fi
+  while read -r key path <&3; do
+    name="${key#submodule.}"; name="${name%.path}"
+    err="$(git -C "$wt" submodule update --init --recursive -- "$path" 2>&1 >/dev/null)" && continue
+    printf '%s\n' "$err" >&2
+    pin="$(git -C "$wt" rev-parse --short=12 "HEAD:$path" 2>/dev/null || echo unknown)"
+    if [ ! -e "$ROOT/$path/.git" ]; then
+      err="no local clone at $ROOT/$path; ${err##*$'\n'}"
+    elif err="$(init_from_main_clone "$wt" "$name" "$path" 2>&1 >/dev/null)"; then
+      submodule_warn "WARN submodule $path: pinned $pin not fetchable from remote — initialised from local clone $ROOT/$path (push it)"
+      continue
+    else
+      printf '%s\n' "$err" >&2
+    fi
+    err="${err##*$'\n'}"
+    UNINITIALISED_SUBMODULES+=("$path")
+    submodule_warn "WARN submodule $path: not initialised (${err:-git gave no reason}) — worktree created without it"
+  done 3<<< "$entries"
+}
+
+# init_from_main_clone <worktree> <name> <path>: populate one submodule from the main checkout's clone.
+# A remote clone that landed without the gitlink keeps its remote and fetches the clone's HEAD and
+# branches; with no clone, the submodule clones from the main checkout's, which hands over every object.
+init_from_main_clone() {
+  if [ -e "$1/$3/.git" ]; then
+    git -C "$1/$3" fetch -q "$ROOT/$3" HEAD 'refs/heads/*:refs/remotes/main-checkout/*' &&
+      git -C "$1" submodule update --recursive -- "$3"
+  else
+    git -C "$1" -c protocol.file.allow=always -c "submodule.$2.url=$ROOT/$3" submodule update --init --recursive -- "$3"
+  fi
+}
+
 cmd_create() {
   local pipeline="$1"
   local branch="pipeline/${pipeline}"
@@ -181,13 +247,15 @@ cmd_create() {
     # failed or interrupted create resumes here and reports readiness only on success.
     echo "Resuming incomplete provisioning: $worktree_dir"
   else
-    # Create branch from main if it doesn't exist
+    # Create branch from BASE_BRANCH if it doesn't exist
     if ! git rev-parse --verify "$branch" >/dev/null 2>&1; then
-      git branch "$branch" main
+      git branch "$branch" "$BASE_BRANCH"
     fi
 
-    # Create worktree — full repo checkout
-    git worktree add "$worktree_dir" "$branch"
+    # Create worktree — full repo checkout, umask 022 in this subshell only: a 077 caller's 600/700
+    # tree is unreadable to a container running as another uid that bind-mounts its files; the env
+    # files written below keep the caller's umask, so a 077 caller's stay 600.
+    (umask 022 && git worktree add "$worktree_dir" "$branch")
     marker="$(provision_marker "$worktree_dir")" || return 1
     if ! : > "$marker"; then
       echo "Error: could not mark provisioning incomplete; partial worktree: $worktree_dir" >&2
@@ -195,14 +263,9 @@ cmd_create() {
     fi
   fi
 
-  # A roster entry backed by a git submodule is left EMPTY by `git worktree add`.
-  # Its install would then run against an empty directory and silently produce a
-  # worktree with no dependencies, so populate submodules before installing. No-op
-  # in a repo that has none.
-  if ! git -C "$worktree_dir" submodule update --init --recursive; then
-    echo "Error: submodule initialization failed; partial worktree: $worktree_dir" >&2
-    return 1
-  fi
+  # A roster entry backed by a git submodule is left EMPTY by `git worktree add`,
+  # so populate submodules before installing. No-op in a repo that has none.
+  init_submodules "$worktree_dir"
 
   # Install dependencies for each project in the roster — a REAL install per
   # worktree, per the NO-SYMLINK LAW above.
@@ -211,6 +274,8 @@ cmd_create() {
     IFS='|' read -r dir install_kind install_cmd env_files <<< "$entry"
     src_path="$(proj_path "$ROOT" "$dir")"
     dst_path="$(proj_path "$worktree_dir" "$dir")"
+    # A submodule init_submodules left empty has nothing to install; its WARN line names it.
+    [[ " ${UNINITIALISED_SUBMODULES[*]-} " != *" $dir "* ]] || install_kind=none
     case "$install_kind" in
       install)
         # Propagate this project's gitignored env files BEFORE the install —
@@ -299,6 +364,7 @@ cmd_create() {
   echo "Worktree ready: $worktree_dir"
   echo "Branch: $branch"
   echo "$ports"
+  (( ${#SUBMODULE_WARNINGS[@]} == 0 )) || printf '%s\n' "${SUBMODULE_WARNINGS[@]}"
 }
 
 cmd_remove() {
@@ -391,6 +457,98 @@ cmd_remove() {
     return "$rc"
   fi
   echo "Pipeline cleaned up: $pipeline"
+}
+
+# A worktree's uncommitted changes, submodule content included; extra arguments are pathspecs to exclude.
+land_status() {
+  git -C "$1" status --porcelain --untracked-files=all --ignore-submodules=none -- . "${@:2}"
+}
+
+# Land a pipeline: commit its leftover work when -m names a message, fast-forward BASE_BRANCH in the
+# main checkout to its branch, then remove the worktree and delete the branch. Anything but a
+# fast-forward is refused, the branch keeping its commits: gitter syncs it (Phase MERGE).
+cmd_land() {
+  local pipeline="$1"
+  shift
+  local msg=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -m)
+        if [[ $# -lt 2 ]]; then echo "Error: -m needs a message; nothing landed" >&2; return 2; fi
+        msg="$2"; shift ;;
+      *) echo "Error: unknown land option: $1; nothing landed" >&2; return 2 ;;
+    esac
+    shift
+  done
+  local branch="pipeline/${pipeline}"
+  local worktree_dir="${ROOT}/.worktrees/${pipeline}"
+  local top head status cur gitdir path rc=0
+  if [ ! -d "$worktree_dir" ] || ! top="$(git -C "$worktree_dir" rev-parse --show-toplevel 2>/dev/null)" \
+    || [ "$top" != "$(cd "$worktree_dir" && pwd -P)" ]; then
+    echo "Error: no worktree at $worktree_dir; nothing landed" >&2; return 1
+  fi
+  if ! head="$(git -C "$worktree_dir" symbolic-ref -q --short HEAD)" || [ "$head" != "$branch" ]; then
+    echo "Error: $worktree_dir is on ${head:-a detached HEAD}, not its own branch $branch; nothing landed" >&2; return 1
+  fi
+  if git -C "$worktree_dir" rev-parse -q --verify MERGE_HEAD >/dev/null; then
+    echo "Error: a merge is in progress in $worktree_dir (MERGE_HEAD); gitter concludes it (Phase MERGE); nothing landed" >&2
+    return 1
+  fi
+  # The env files create provisioned hold this worktree's ports: never committed, never dirt.
+  provisioned_env_paths
+  local -a provisioned=()
+  for path in "${PROVISIONED_ENV_FILES[@]}"; do
+    provisioned+=(":(exclude,literal)$path")
+  done
+  if ! status="$(land_status "$worktree_dir" "${provisioned[@]}")"; then
+    echo "Error: could not inspect $worktree_dir; nothing landed" >&2; return 1
+  fi
+  if [[ -n "$status" ]]; then
+    if [[ -z "$msg" ]]; then
+      echo "Error: $worktree_dir has uncommitted changes; pass -m <message> to commit them; nothing landed" >&2; return 1
+    fi
+    if ! git -C "$worktree_dir" add -A -- . "${provisioned[@]}"; then
+      echo "Error: could not stage the changes in $worktree_dir; nothing landed" >&2; return 1
+    fi
+    if ! git -C "$worktree_dir" diff --cached --quiet && ! git -C "$worktree_dir" commit -q -m "$msg"; then
+      echo "Error: commit failed in $worktree_dir (its changes stay staged); nothing landed" >&2; return 1
+    fi
+    # git add stages no edit inside a submodule: what is left is work the commit could not take.
+    if ! status="$(land_status "$worktree_dir" "${provisioned[@]}")"; then
+      echo "Error: could not inspect $worktree_dir after the commit; nothing landed" >&2; return 1
+    fi
+    if [[ -n "$status" ]]; then
+      echo "Error: $worktree_dir is still dirty after the commit (work inside a submodule?): ${status//$'\n'/, }; nothing landed" >&2
+      return 1
+    fi
+  fi
+  if ! cur="$(git -C "$ROOT" symbolic-ref -q --short HEAD)" || [ "$cur" != "$BASE_BRANCH" ]; then
+    echo "Error: the main checkout is on ${cur:-a detached HEAD}, not $BASE_BRANCH; gitter syncs it (Phase MERGE); nothing landed" >&2
+    return 1
+  fi
+  git -C "$ROOT" merge-base --is-ancestor "$BASE_BRANCH" "$branch" || rc=$?
+  case "$rc" in
+    0) ;;
+    1) echo "Error: $BASE_BRANCH has commits $branch lacks; gitter syncs it (Phase MERGE); $branch keeps its commits; nothing landed" >&2
+       return 1 ;;
+    *) echo "Error: could not compare $BASE_BRANCH with $branch; nothing landed" >&2; return 1 ;;
+  esac
+  if ! git -C "$ROOT" merge --ff-only -q "$branch"; then
+    echo "Error: fast-forward of $BASE_BRANCH to $branch refused (see git above); nothing landed" >&2; return 1
+  fi
+  echo "Landed: $branch on $BASE_BRANCH"
+  if ! gitdir="$(git -C "$worktree_dir" rev-parse --absolute-git-dir)"; then
+    echo "Error: $branch landed on $BASE_BRANCH, but its worktree's Git directory is unreadable; worktree kept: $worktree_dir" >&2
+    return 1
+  fi
+  if [ -e "$gitdir/locked" ]; then
+    echo "Worktree kept (locked): $worktree_dir — $(cat "$gitdir/locked")"
+    echo "Branch kept: $branch"
+    return 0
+  fi
+  if ! cmd_remove "$pipeline" --delete-branch; then
+    echo "Error: $branch landed on $BASE_BRANCH, but closing its worktree failed (see above)" >&2; return 1
+  fi
 }
 
 cmd_prune() {
@@ -527,11 +685,12 @@ cmd_list() {
 
 case "${1:-help}" in
   create)  cmd_create "${2:?pipeline required}" ;;
+  land)    shift; cmd_land "${1:?pipeline required}" "${@:2}" ;;
   remove)  shift; cmd_remove "${1:?pipeline required}" "${@:2}" ;;
   list)    cmd_list   "${2:-}" ;;
   prune)   cmd_prune ;;
   *)
-    echo "Usage: $0 {create|remove|list|prune} <pipeline>" >&2
+    echo "Usage: $0 {create|land|remove|list|prune} <pipeline>" >&2
     exit 1
     ;;
 esac

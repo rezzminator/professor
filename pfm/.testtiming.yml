@@ -27,6 +27,7 @@ suites:
       github.com/rezzminator/professor/pfm/internal/cmdparse: 4
       github.com/rezzminator/professor/pfm/internal/chat: 18
       github.com/rezzminator/professor/pfm/internal/claudelaunch: 14
+      github.com/rezzminator/professor/pfm/internal/claudeplugin: 2
       github.com/rezzminator/professor/pfm/internal/cli: 2
       github.com/rezzminator/professor/pfm/internal/clock: 2
       github.com/rezzminator/professor/pfm/internal/codexappendix: 2
@@ -82,6 +83,7 @@ suites:
       github.com/rezzminator/professor/pfm/internal/schedule: 2
       github.com/rezzminator/professor/pfm/internal/resolve: 16
       github.com/rezzminator/professor/pfm/internal/restart: 4
+      github.com/rezzminator/professor/pfm/internal/retired: 2
       github.com/rezzminator/professor/pfm/internal/rowfacts: 2
       github.com/rezzminator/professor/pfm/internal/semver: 2
       github.com/rezzminator/professor/pfm/internal/servicemanager: 2

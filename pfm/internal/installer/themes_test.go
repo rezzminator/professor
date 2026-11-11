@@ -271,7 +271,9 @@ func TestOfflineThemesWithoutCloneProfilesNameSkip(t *testing.T) {
 	}
 }
 
-func TestThemeDiscoveryFailsClosedByName(t *testing.T) {
+// Each entry that is no theme is refused by name and costs itself alone: the
+// good theme beside it still loads; with no theme left the load fails by name.
+func TestThemeDiscoveryRefusesEachBadEntryByName(t *testing.T) {
 	t.Parallel()
 	const profile = `{"name":"X","base":"dark","overrides":{"claude":"#ffd60a"}}`
 	for _, tc := range []struct {
@@ -281,10 +283,10 @@ func TestThemeDiscoveryFailsClosedByName(t *testing.T) {
 		symlink string
 		want    string
 	}{
-		{"name leaves the bare-name law", []string{"a:b"}, nil, "", `theme a:b: name must be a bare profile name`},
-		{"ledger key collision", []string{"profile:x"}, nil, "", `theme profile:x: name must be a bare profile name`},
-		{"symlinked theme", nil, nil, "linked", `linked in `},
-		{"single-file profile", []string{"x"}, []string{"y.json"}, "", `y.json in `},
+		{"name leaves the bare-name law", []string{"a:b", "good"}, nil, "", `theme a:b: name must be a bare profile name`},
+		{"ledger key collision", []string{"profile:x", "good"}, nil, "", `theme profile:x: name must be a bare profile name`},
+		{"symlinked theme", []string{"good"}, nil, "linked", `linked in `},
+		{"single-file profile", []string{"good"}, []string{"y.json"}, "", `y.json in `},
 		{"nothing to install", nil, []string{"README.md"}, "", `no theme in `},
 	} {
 		sourceRepo := t.TempDir()
@@ -304,9 +306,18 @@ func TestThemeDiscoveryFailsClosedByName(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		_, err := loadThemeProfiles(context.Background(), Options{SourceRepo: sourceRepo})
-		if err == nil || !strings.Contains(err.Error(), tc.want) {
-			t.Errorf("%s: err=%v, want it to contain %q", tc.name, err, tc.want)
+		profiles, refused, err := loadThemeProfiles(context.Background(), Options{SourceRepo: sourceRepo})
+		if len(tc.themes) == 0 {
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("%s: err=%v, want it to contain %q", tc.name, err, tc.want)
+			}
+			continue
+		}
+		if err != nil || strings.Join(profileKeys(profiles), ",") != "good" {
+			t.Errorf("%s: profiles=%v err=%v, want the good theme alone", tc.name, profileKeys(profiles), err)
+		}
+		if len(refused) != 1 || !strings.Contains(refused[0].Error(), tc.want) {
+			t.Errorf("%s: refused=%v, want one refusal containing %q", tc.name, refused, tc.want)
 		}
 	}
 
@@ -344,7 +355,7 @@ func TestThemeDiscoveryFailsClosedByName(t *testing.T) {
 // the named refusal.
 func TestThemeReleaseUnpublishedAlphaReturnsNamedRefusal(t *testing.T) {
 	t.Parallel()
-	_, err := loadThemeProfiles(context.Background(), Options{
+	_, _, err := loadThemeProfiles(context.Background(), Options{
 		ThemeReleaseURL: "https://raw.githubusercontent.com/example/professor/0.78.0-alpha/templates/themes/",
 	})
 	if err == nil {
@@ -367,7 +378,7 @@ func TestThemeSourceRepoWithoutProfilesRefusesUnpublishedAlpha(t *testing.T) {
 		t.Errorf("fetched the unpublished -alpha release %s", request.URL)
 		return nil, fmt.Errorf("fixture transport refuses %s", request.URL)
 	})}
-	_, err := loadThemeProfiles(context.Background(), Options{
+	_, _, err := loadThemeProfiles(context.Background(), Options{
 		SourceRepo:      t.TempDir(),
 		ThemeReleaseURL: "https://raw.githubusercontent.com/example/professor/0.78.0-alpha/templates/themes/",
 		ThemeHTTPClient: client,

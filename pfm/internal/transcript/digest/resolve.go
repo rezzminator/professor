@@ -218,7 +218,9 @@ func (finder *resolver) searched() string {
 // byName is the Claude session transcript whose last title is target, over
 // every directory below the Claude roots and the extra roots, or the OpenCode
 // session titled target. A place that
-// could not be read makes the lookup INCOMPLETE, never NOT FOUND; idFailed,
+// could not be read makes the lookup INCOMPLETE, never NOT FOUND, unless one
+// chat answered anyway, which then comes with a warning naming the places; a
+// place that vanished since it was listed is nothing to read. idFailed,
 // the places the id search before it could not read (a Codex home among
 // them), is a warning beside a found chat and named in a NOT FOUND. A done
 // context stops the walk between directories and files and is returned as it
@@ -254,6 +256,9 @@ func (finder *resolver) byName(target string, idFailed []error) (string, error) 
 		}
 		visited[folder] = true
 		entries, err := os.ReadDir(folder)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
 		if err != nil {
 			unreadable = append(unreadable, fmt.Sprintf("%s (%v)", folder, err))
 			continue
@@ -262,6 +267,8 @@ func (finder *resolver) byName(target string, idFailed []error) (string, error) 
 			path := filepath.Join(folder, entry.Name())
 			info, err := os.Stat(path)
 			switch {
+			case errors.Is(err, fs.ErrNotExist) && !isLink(path):
+				// Deleted since the listing: there is nothing to read there.
 			case err != nil:
 				unreadable = append(unreadable, fmt.Sprintf("%s (%v)", path, err))
 			case info.IsDir():
@@ -283,6 +290,9 @@ func (finder *resolver) byName(target string, idFailed []error) (string, error) 
 			return "", err
 		}
 		tail, _, err := transcript.ReadTailLines(path, nameTail)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
 		if err != nil {
 			unreadable = append(unreadable, fmt.Sprintf("%s (%v)", path, err))
 			continue
@@ -301,13 +311,19 @@ func (finder *resolver) byName(target string, idFailed []error) (string, error) 
 			named = append(named, sessions[at])
 		}
 	}
-	if len(unreadable) != 0 {
+	found := len(hits) + len(named)
+	if len(unreadable) != 0 && found != 1 {
 		return "", runtimeFailure("INCOMPLETE name lookup for %s — %d discovery/read errors: %s",
 			pyvalue.ReprString(target), len(unreadable), strings.Join(unreadable, " "))
 	}
-	switch len(hits) + len(named) {
+	switch found {
 	case 1:
 		finder.warnUnreadable(target, idFailed)
+		if len(unreadable) != 0 {
+			finder.out.Warnings = append(finder.out.Warnings, fmt.Sprintf(
+				"%s%d places unreadable while resolving %s, which names one chat: %s",
+				warningPrefix, len(unreadable), target, strings.Join(unreadable, " ")))
+		}
 		if len(named) == 1 {
 			return named[0].locator(), nil
 		}
@@ -347,6 +363,12 @@ func (finder *resolver) byName(target string, idFailed []error) (string, error) 
 	}
 	return "", runtimeFailure("AMBIGUOUS %s — %d transcripts named %s: %s", target, len(rows),
 		pyvalue.ReprString(target), strings.Join(rows, " "))
+}
+
+// isLink reports whether path is a symbolic link, dangling or not.
+func isLink(path string) bool {
+	info, err := os.Lstat(path)
+	return err == nil && info.Mode()&fs.ModeSymlink != 0
 }
 
 // resolvedPath is path absolute with every symlink resolved, or absolute as

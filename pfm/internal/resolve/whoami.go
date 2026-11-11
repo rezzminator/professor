@@ -33,11 +33,6 @@ var (
 	)
 	ErrNotRegistered = errors.New("resolve: caller not registered")
 	ErrAmbiguous     = errors.New("resolve: caller ambiguous")
-	// ErrForeignProcess marks a process whose environment the kernel withholds from the caller:
-	// a different user's process, one that made itself non-dumpable (sshd's session), or one
-	// holding capabilities the caller lacks (the systemd user manager).
-	// It can never be a pane the caller owns, so ancestry recovery passes over it.
-	ErrForeignProcess = errors.New("resolve: process environment withheld: another uid's, non-dumpable or privileged")
 )
 
 // Identity is who the CALLING process is: the tmux handle another chat calls
@@ -84,7 +79,8 @@ type PaneOwner struct {
 
 // PaneOwnerLister asks a tmux server which pids own its panes. It is the
 // portable half of cc_pane_of: it asks tmux who it owns rather than asking the
-// kernel what a process was told.
+// kernel what a process was told. Owners it did parse come back beside an
+// error naming the lines it could not.
 type PaneOwnerLister interface {
 	PaneOwners(ctx context.Context, socketPath string) ([]PaneOwner, error)
 }
@@ -156,7 +152,7 @@ func NewWhoami(dependencies WhoamiDependencies) (*Whoami, error) {
 		identifier.owners = CommandPaneOwners{TmuxDir: tmuxDir}
 	}
 	if identifier.processes == nil {
-		identifier.processes = ProcTree{Root: procRoot, ProcFS: newNativeProcFS(procRoot)}
+		identifier.processes = ProcTree{Root: procRoot}
 	}
 	if identifier.selfPID == 0 {
 		identifier.selfPID = os.Getpid()
@@ -346,7 +342,7 @@ func (identifier *Whoami) recoverFromAncestry(
 		environment, err := identifier.processes.Environ(pid)
 		if err != nil {
 			if !errors.Is(err, os.ErrNotExist) && !errors.Is(err, syscall.ESRCH) &&
-				!errors.Is(err, ErrForeignProcess) && readErr == nil {
+				!errors.Is(err, gather.ErrForeignProcess) && readErr == nil {
 				readErr = fmt.Errorf("look up the caller: read environment of pid %d: %w", pid, err)
 			}
 			continue
@@ -364,10 +360,10 @@ func (identifier *Whoami) recoverFromAncestry(
 			return found, true, nil
 		}
 	}
-	owners, err := identifier.paneOwners(ctx)
-	if err != nil {
-		return identity, false, err
-	}
+	// Servers that could not be read cost only their own panes: their reasons
+	// answer the lookup only when no other server proves the caller.
+	owners, ownersErr := identifier.paneOwners(ctx)
+	readErr = errors.Join(readErr, ownersErr)
 	for _, pid := range chain {
 		for _, owner := range owners {
 			if owner.PanePID != pid {
@@ -418,10 +414,15 @@ func (identifier *Whoami) paneOwners(ctx context.Context) ([]PaneOwner, error) {
 		return nil, fmt.Errorf("look up the caller: list tmux sockets: %w", err)
 	}
 	owners := make([]PaneOwner, 0)
+	var failures []error
 	for _, entry := range entries {
 		info, err := entry.Info()
+		if errors.Is(err, os.ErrNotExist) {
+			continue // the server ended between the listing and the stat
+		}
 		if err != nil {
-			return nil, fmt.Errorf("look up the caller: stat tmux socket %s: %w", entry.Name(), err)
+			failures = append(failures, fmt.Errorf("look up the caller: stat tmux socket %s: %w", entry.Name(), err))
+			continue
 		}
 		if info.Mode()&os.ModeSocket == 0 {
 			continue
@@ -432,11 +433,11 @@ func (identifier *Whoami) paneOwners(ctx context.Context) ([]PaneOwner, error) {
 			continue
 		}
 		if err != nil {
-			return nil, fmt.Errorf("look up the caller: read tmux panes on %s: %w", socketPath, err)
+			failures = append(failures, fmt.Errorf("look up the caller: read tmux panes on %s: %w", socketPath, err))
 		}
 		owners = append(owners, rows...)
 	}
-	return owners, nil
+	return owners, errors.Join(failures...)
 }
 
 func engineForSocket(socketName string) string {
@@ -506,20 +507,35 @@ func (lister CommandPaneOwners) PaneOwners(
 	// Dir stays empty: socketPath is already the full pathname (lister.TmuxDir
 	// addresses a directory to SCAN for sockets, in paneOwners above — never a
 	// join prefix here), and filepath.Join("", full) returns full unchanged.
+	// A stopped server never answers: the probe is bounded, or one frozen server
+	// hangs every caller lookup on the box (claude-launch outside a pane).
+	probeCtx, cancel := context.WithTimeout(ctx, gather.ProbeTimeout)
+	defer cancel()
 	output, err := pfmtmux.Socket{Binary: lister.Binary}.
-		Command(ctx, socketPath, "list-panes", "-a", "-F", "#{pane_pid} #{pane_id}").
+		Command(probeCtx, socketPath, "list-panes", "-a", "-F", "#{pane_pid} #{pane_id}").
 		Output()
 	if err != nil {
+		if unresponsive := gather.Unresponsive(ctx, probeCtx, socketPath); unresponsive != nil {
+			return nil, unresponsive
+		}
 		return nil, err
 	}
 	owners := make([]PaneOwner, 0)
+	unparsed, first := 0, ""
 	for _, line := range strings.Split(string(output), "\n") {
 		fields := strings.Fields(strings.TrimSpace(line))
-		if len(fields) != 2 {
+		if len(fields) == 0 {
 			continue
 		}
-		pid, err := strconv.Atoi(fields[0])
-		if err != nil || pid <= 0 {
+		pid := 0
+		if len(fields) == 2 {
+			pid, _ = strconv.Atoi(fields[0]) // a pid that does not parse stays 0: named below
+		}
+		if pid <= 0 {
+			if unparsed == 0 {
+				first = line
+			}
+			unparsed++
 			continue
 		}
 		owners = append(owners, PaneOwner{
@@ -528,24 +544,24 @@ func (lister CommandPaneOwners) PaneOwners(
 			PanePID:    pid,
 		})
 	}
+	if unparsed > 0 {
+		// The parsed panes stay usable beside the named loss.
+		return owners, fmt.Errorf("tmux returned %d unparsable pane owner line(s), first %q", unparsed, first)
+	}
 	return owners, nil
 }
 
-// ProcFS is the small process-table seam ancestry recovery needs. Platform
-// implementations provide Linux procfs or Darwin sysctl without making the
-// resolver know which kernel it is running on.
+// ProcFS is the small process-table seam ancestry recovery needs; every
+// gather.ProcFS is one, so the kernel split stays inside gather. A process
+// whose environment the kernel withholds (gather.ErrForeignProcess) is no pane
+// of the caller's, and ancestry recovery passes over it.
 type ProcFS interface {
 	Environ(int) (map[string]string, error)
-	Stat(int) (ProcStat, error)
+	Stat(int) (gather.ProcStat, error)
 }
 
-// ProcStat contains the process relationship needed by ancestry recovery.
-type ProcStat struct {
-	ParentPID int
-}
-
-// ProcTree reads through ProcFS. Root defaults to the platform's native
-// process table and is overridden by a jail on Linux.
+// ProcTree reads through ProcFS. Without one it opens gather's table at Root:
+// "" is the kernel's own, a missing jail root holds no process.
 type ProcTree struct {
 	Root   string
 	ProcFS ProcFS
@@ -553,21 +569,29 @@ type ProcTree struct {
 
 // Environ returns one process's environment, keyed before the first equals.
 func (tree ProcTree) Environ(pid int) (map[string]string, error) {
-	return tree.procfs().Environ(pid)
+	table, err := tree.procfs()
+	if err != nil {
+		return nil, err
+	}
+	return table.Environ(pid)
 }
 
 // Parent returns the parent pid through the platform process abstraction.
 func (tree ProcTree) Parent(pid int) (int, error) {
-	stat, err := tree.procfs().Stat(pid)
+	table, err := tree.procfs()
+	if err != nil {
+		return 0, err
+	}
+	stat, err := table.Stat(pid)
 	if err != nil {
 		return 0, err
 	}
 	return stat.ParentPID, nil
 }
 
-func (tree ProcTree) procfs() ProcFS {
+func (tree ProcTree) procfs() (ProcFS, error) {
 	if tree.ProcFS != nil {
-		return tree.ProcFS
+		return tree.ProcFS, nil
 	}
-	return newNativeProcFS(tree.Root)
+	return gather.OpenProcFS(tree.Root)
 }

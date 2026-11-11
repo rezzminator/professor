@@ -127,9 +127,6 @@ func LoadBench(dir, root string) Bench {
 		seen[id] = true
 		bench.Engines = append(bench.Engines, id)
 	}
-	if config.Title != nil && *config.Title == "" {
-		return fault(errors.New(`"title" is empty`))
-	}
 	bench.Prefix = naming.WorkbenchPrefix(bench.Title)
 	if config.Name != nil {
 		if *config.Name == "" || strings.ContainsRune(*config.Name, ':') ||

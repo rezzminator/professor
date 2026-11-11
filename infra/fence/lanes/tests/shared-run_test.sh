@@ -86,11 +86,11 @@ if cap_error=$(dd if=/dev/zero of=/var/tmp/over-cap bs=1M count=17 status=none 2
 fi
 grep -q "No space left on device" <<<"$cap_error" || { echo "/var/tmp cap did not report ENOSPC: $cap_error"; exit 1; }
 rm -f /var/tmp/over-cap
-[ "$PFM_FENCE_DISK_DIR" = /pfm-disk ] && [ "$(findmnt -n -o TARGET -T /pfm-disk | tail -n 1)" = /pfm-disk ] && echo disk > /pfm-disk/probe
+[ "$PFM_FENCE_DISK_DIR" = /pfm-disk ] && [ "$GOTMPDIR" = /pfm-disk ] && [ "$(findmnt -n -o TARGET -T /pfm-disk | tail -n 1)" = /pfm-disk ] && echo disk > /pfm-disk/probe
 ')"; rc=$?
 # This suite's STATE is on tmpfs itself; the explicit disk escape must bind the run's directory,
 # not silently claim that its backing device is always disk in nested harnesses.
-if [ "$rc" = 0 ]; then ok "all six scratch mounts are capped tmpfs, noswap, with private modes and a writable disk escape"
+if [ "$rc" = 0 ]; then ok "all six scratch mounts are capped tmpfs, noswap, with private modes and a writable disk escape that holds Go's build scratch"
 else bad "scratch mount type, cap, noswap, mode or disk escape" "rc=$rc" "$out"; fi
 
 # Overrides change both the mounted cap and the admission sum (all six caps plus headroom).

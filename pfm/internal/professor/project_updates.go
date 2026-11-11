@@ -41,7 +41,7 @@ func renderProjectReport(
 	} else {
 		writeProjectHuman(stdout, report)
 	}
-	return report.reviewRequired() != 0, diffFailed || scanFailed
+	return report.reviewRequired() != 0, diffFailed || scanFailed || report.Counts[projectUnreadable] != 0
 }
 
 // RetiredNameHit is one retired command, agent, skill, phase, tool or path
@@ -76,7 +76,7 @@ type RetiredNameScan struct {
 
 // RetiredNameScanner scans root's files for retired names, skipping every
 // slash-separated root-relative path in pinned. The registry and the scan
-// live in internal/update (update.ScanRetiredNames), which imports this
+// live in internal/update (update.RetiredNameScanner), which imports this
 // package, so the caller passes it in.
 type RetiredNameScanner func(root string, pinned map[string]bool) RetiredNameScan
 
@@ -157,36 +157,38 @@ func captureProjectDiffs(report *projectReport) (anyFailed bool) {
 			item.Pin.PinnedSHA,
 			item.Template,
 		)
+		// The diff read: a pin history that cannot be read costs only the
+		// history, never the diff.
 		if pinErr != nil {
-			item.DiffError = pinErr.Error()
-			anyFailed = true
+			item.Diff = diff
+			item.HistoryError = "pinned template unreadable, so this diff is unverified against the pin: " +
+				pinErr.Error()
 			continue
 		}
 		if missing || fmt.Sprintf("sha256:%x", sha256.Sum256(raw)) != item.Pin.TemplateHash {
 			item.DiffSkipped = "pin was taken from uncommitted or untracked template bytes; committed history cannot show its exact change"
 			continue
 		}
+		item.Diff = diff
 		commits, err := commitsSincePin(report.Store, *item)
 		if err != nil {
-			item.DiffError = err.Error()
-			anyFailed = true
+			item.HistoryError = "commit log unreadable: " + err.Error()
 			continue
 		}
-		item.Diff = diff
 		item.Commits = commits
 	}
 	return anyFailed
 }
 
 // projectTerminal is the report's one JSON terminal, first match wins: any
-// UPDATED item whose diff could not be read, or any file the retired-name
+// UPDATED item whose diff could not be read, any UNREADABLE item, or any file the retired-name
 // scan could not read, makes it FAILED (never counted as review), else
 // REVIEW REQUIRED (retired-name hits included), else clean.
 // writeProjectHuman appends "; nothing was written." to the first two.
 func projectTerminal(report projectReport) string {
 	unreadable := 0
 	for index := range report.Items {
-		if report.Items[index].DiffError != "" {
+		if report.Items[index].DiffError != "" || report.Items[index].Status == projectUnreadable {
 			unreadable++
 		}
 	}
@@ -355,7 +357,7 @@ func projectReportExit(reviewRequired, failed bool) int {
 // clean, 1 at least one review item, 3 failure (baseline not found, baseline
 // or store unreadable, any UPDATED diff unreadable, any file scan could not
 // read). It resolves the root itself and shares its report writing with
-// renderProjectCheck; scan (update.ScanRetiredNames from doctor) adds the
+// renderProjectCheck; scan (update.RetiredNameScanner from doctor) adds the
 // retired-name hits in the project's files.
 func RunProjectUpdates(rootFlag, home string, jsonOutput bool, stdout io.Writer, scan RetiredNameScanner) int {
 	root, found, err := ResolveProjectRoot(rootFlag)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -318,6 +319,40 @@ func TestNewSessionFailedLaunchKeepsOnlyUnresolvedClaims(t *testing.T) {
 	}
 }
 
+// TestNewSessionAsksForTheLaunchPanePidAgain: a freshly born pane that answers
+// the pid query once with nothing is asked again; the launch is recorded under
+// the pid the second answer names and the server is kept.
+func TestNewSessionAsksForTheLaunchPanePidAgain(t *testing.T) {
+	account, dir := t.TempDir(), t.TempDir()
+	binary := filepath.Join(dir, "tmux")
+	asked := filepath.Join(dir, "asked")
+	script := "#!/bin/sh\nfor a in \"$@\"; do\n case \"$a\" in\n new-session) exit 0;;\n" +
+		" display-message) if [ -e " + asked + " ]; then echo $PPID; else : > " + asked + "; fi; exit 0;;\n esac\ndone\nexit 0\n"
+	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	err := (TmuxSpawner{Binary: binary, TmuxDir: dir}).NewSession(context.Background(), SessionSpec{
+		Socket: "retry", Session: "retry", Window: "w", CWD: dir,
+		Run: "env CLAUDE_CONFIG_DIR=" + account + " claude --resume example",
+	})
+	if err != nil {
+		t.Fatalf("NewSession ended a server whose pane answered the second pid query: %v", err)
+	}
+	guard, err := gather.AcquireAccountGuard(account, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := guard.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	live, err := guard.Active(gather.NewProcFS(""))
+	if err != nil || len(live) != 1 || live[0] != os.Getpid() {
+		t.Fatalf("recorded launch = %v, %v; want the pid the second answer named, %d", live, err, os.Getpid())
+	}
+}
+
 // themeBirthCase is one birth of a chat server with the theme door observed.
 type themeBirthCase struct {
 	name       string
@@ -405,5 +440,52 @@ func TestNewSessionLeavesTheThemeOffWithoutState(t *testing.T) {
 	}
 	if strings.Contains(recorder.Raw(), "@pfm-theme") {
 		t.Fatalf("a theme option was set with the sync off: %s", recorder.Raw())
+	}
+}
+
+// TestNewSessionBirthEnvironmentDropsTheCallersPane: `pfm chat new` from a Codex tool shell in
+// Herdr pane wK:p29 bore a tmux chat carrying HERDR_PANE_ID=wK:p29, so the probe that matches
+// processes by that variable attributed it to the caller's pane, and NO_COLOR, so it rendered
+// monochrome. The chat server is born without the caller's Herdr identity or the tool shell's
+// injections; every other variable passes.
+func TestNewSessionBirthEnvironmentDropsTheCallersPane(t *testing.T) {
+	dir := t.TempDir()
+	dump := filepath.Join(t.TempDir(), "birth.env")
+	binary := filepath.Join(t.TempDir(), "tmux")
+	script := fmt.Sprintf("#!/bin/sh\ncase \"$*\" in *\" new-session \"*) env > %q ;; esac\nexit 0\n", dump)
+	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	caller := map[string]string{
+		"HERDR_ENV": "1", "HERDR_PANE_ID": "wK:p29", "HERDR_WORKSPACE_ID": "wK", "HERDR_TAB_ID": "wK:t3",
+		"HERDR_SOCKET_PATH": "/srv/tester/herdr.sock", "HERDR_BIN_PATH": "/srv/tester/bin/herdr",
+		"CODEX_TOOL_CALL_ID": "exec-0a1b", "NO_COLOR": "1", "PAGER": "cat", "CODEX_HOME": "/srv/tester/.codex",
+		"PFM_BIRTH_PROBE": "kept",
+	}
+	for name, value := range caller {
+		t.Setenv(name, value)
+	}
+	tmux := TmuxSpawner{
+		Binary: binary, TmuxDir: dir,
+		Env: &paths.MapEnv{Values: map[string]string{paths.EnvHome: t.TempDir()}},
+	}
+	if err := tmux.NewSession(context.Background(), SessionSpec{
+		Socket: "cc-1800000097-1-1", Session: "s", Window: "w", CWD: dir, Run: "claude", Width: 80, Height: 24,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(dump)
+	if err != nil {
+		t.Fatalf("the fake tmux recorded no new-session environment at %s: %v", dump, err)
+	}
+	got := map[string]string{}
+	for _, line := range strings.Split(string(raw), "\n") {
+		if name, value, _ := strings.Cut(line, "="); caller[name] != "" || name == "TMUX" {
+			got[name] = value
+		}
+	}
+	want := map[string]string{"CODEX_HOME": "/srv/tester/.codex", "PFM_BIRTH_PROBE": "kept", "TMUX": ""}
+	if !maps.Equal(got, want) {
+		t.Fatalf("caller names in the birth environment (%s) = %v, want %v", dump, got, want)
 	}
 }

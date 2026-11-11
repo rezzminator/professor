@@ -9,14 +9,22 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
-// DetectAppearance reads macOS's appearance; other platforms and failed reads
-// return an error, never a guessed side. Env.GOOS selects the served platform.
-// `defaults read -g AppleInterfaceStyle` prints Dark in dark mode and exits 1
-// with "does not exist" when the key is absent (light mode).
+// DetectAppearance reads the system appearance through the served platform's
+// probe; a platform without one and a failed read return an error, never a
+// guessed side.
 func DetectAppearance(ctx context.Context, env Env) (Appearance, error) {
-	if !env.darwin() {
-		return "", errors.New("themesync: auto appearance detection unsupported; choose an explicit theme/appearance")
-	}
+	return env.platform().detectAppearance(ctx, env)
+}
+
+// unsupportedAppearance is the probe of a platform with no system appearance to read.
+func unsupportedAppearance(context.Context, Env) (Appearance, error) {
+	return "", errors.New("themesync: auto appearance detection unsupported; choose an explicit theme/appearance")
+}
+
+// detectMacAppearance reads macOS's appearance: `defaults read -g
+// AppleInterfaceStyle` prints Dark in dark mode and exits 1 with "does not
+// exist" when the key is absent (light mode).
+func detectMacAppearance(ctx context.Context, env Env) (Appearance, error) {
 	// Resolved through the Runner seam, as herdr is here: a test serving
 	// darwin on another host scripts the lookup where deps.Resolve would
 	// refuse the darwin-only row for the host's own GOOS.

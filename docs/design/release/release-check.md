@@ -47,7 +47,7 @@ Tier 1 is the adopter contract; its paths are the only ones a release reviews in
 | Area | Paths |
 | --- | --- |
 | `templates` | `templates/`, `pfm/harness-prompts/` |
-| `pfm-update` | `pfm/internal/{update,updatecheck,installer,enginesync,globallink,codexappendix,claudelaunch,doctor,config,professor,codexprompt,picker,mcpserv,herdr,themesync,themetmux,agentlauncher,workbench,servicemanager}/`; files under `pfm/cmd/pfm/` whose name starts with `install`, `uninstall`, `update`, `init`, `doctor`, `config` or `mcp_serve` |
+| `pfm-update` | `pfm/internal/{update,updatecheck,installer,enginesync,globallink,codexappendix,claudelaunch,doctor,config,professor,codexprompt,picker,mcpserv,herdr,themesync,themetmux,agentlauncher,workbench,servicemanager,retired,claudeplugin}/`; files under `pfm/cmd/pfm/` whose name starts with `install`, `uninstall`, `update`, `init`, `doctor`, `config` or `mcp_serve` |
 | `public` | `README.md`, `INSTALL.md`, `CHANGELOG.md`, `docs/SETUP.md`, `docs/RELEASE.md`, `docs/PLACEHOLDERS.md` |
 | `gates` | `.github/`, `.githooks/`, `scripts/` |
 
@@ -102,7 +102,7 @@ PLUGINS {n} checked, {m} unlistable
 
 | Rule | Fails when |
 | --- | --- |
-| S1 | a file at `--head` names a path the range removed (`git grep -F`) or a role it removed (`git grep -F -w`, the `REMOVED-ROLE` names of `scope`), one `FAIL` per file line and name; a hyphen continues a role name (`flights-lander-sonnet` is not `flights-lander`), and a further segment or extension continues a path (`scripts/old.sh.bak` is not `scripts/old.sh`); the only exclusions are history and the retired-name registry: `releases/`, `CHANGELOG.md`, `.professor/RR/`, `pfm/internal/update/retired_names.go` and its test. A design doc's history section is no exclusion: it describes the removal on `develop` or drops the name |
+| S1 | a file at `--head` names a path the range removed (`git grep -F`) or a role it removed (`git grep -F -w`, the `REMOVED-ROLE` names of `scope`), one `FAIL` per file line and name; a hyphen continues a role name (`flights-lander-sonnet` is not `flights-lander`), and a further segment or extension continues a path (`scripts/old.sh.bak` is not `scripts/old.sh`); the only exclusions are history and the retired lists: `releases/`, `CHANGELOG.md`, `.professor/RR/`, `templates/global/retired.json`. A design doc's history section is no exclusion: it describes the removal on `develop` or drops the name |
 | D1 | a code span in `README.md` opening with a command — `` `/{name}` `` or `` `/{ns}:{name}` `` — names nothing shipped: a command under `templates/global/commands/`, `templates/project/commands/` or `.claude/commands/`, a skill under `templates/global/skills/`, `templates/project/skills/` or `.claude/skills/`, an installer asset `pfm/internal/installer/assets/{name}.{command,skill}.md`, or one of the script's short list of Claude Code and plugin commands (`/reload-plugins`, `/buddy`, `/cache`, `/keepwarm`), which a new README command of that kind joins in the same change |
 | T1 | a plugin `.claude-plugin/marketplace.json` lists has no `source.path` and `source.url`, no submodule gitlink at that path, or a gitlink no tag of `git ls-remote --tags {source.url}` points at; gpt-gateway is not listed, so it is never checked |
 

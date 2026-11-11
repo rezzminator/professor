@@ -54,6 +54,11 @@ func TestLastRecordTimeParsesBothTimestampShapes(t *testing.T) {
 			line: `{"type":"event","ts":1798765432}`,
 			want: time.Unix(1798765432, 0),
 		},
+		{
+			name: "ts field rescues a record whose timestamp does not parse",
+			line: `{"type":"event","timestamp":"yesterday","ts":"2026-08-27T01:57:41.845Z"}`,
+			want: time.Date(2026, 8, 27, 1, 57, 41, 845_000_000, time.UTC),
+		},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {

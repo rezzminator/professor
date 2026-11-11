@@ -257,6 +257,24 @@ func TestHerdrShellUserOwnedAndAbsent(t *testing.T) {
 		if !strings.Contains(output.String(), want) {
 			t.Fatalf("missing skip %q: %s", want, output)
 		}
+		// A user-owned default_shell (herdr-shield) may exec pfm's wrapper as its inner shell, so the
+		// wrapper is staged even though the config stays the user's; with Herdr absent nothing is.
+		wrapper := filepath.Join(installer.managedRoot, "bin", "pfm-herdr-shell")
+		staged, err := os.ReadFile(wrapper)
+		if !present {
+			if !os.IsNotExist(err) {
+				t.Fatalf("Herdr absent staged %s: %v", wrapper, err)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("user-owned default_shell left no wrapper at %s: %v", wrapper, err)
+		}
+		for _, line := range []string{"pfm_wrapper='" + wrapper + "'\n", "pfm_real_shell='/bin/zsh'\n"} {
+			if !strings.Contains(string(staged), line) {
+				t.Fatalf("wrapper %s lacks %q:\n%s", wrapper, line, staged)
+			}
+		}
 	}
 }
 
@@ -292,7 +310,10 @@ func TestHerdrShellPickerReturnsToShell(t *testing.T) {
 		t.Fatal(err)
 	}
 	wrapper := paths.HerdrShellWrapper(home)
-	command := testjail.PTYCommand("env", "SHELL="+wrapper, wrapper)
+	command, err := testjail.PTYCommand("env", "SHELL="+wrapper, wrapper)
+	if err != nil {
+		t.Fatal(err)
+	}
 	command.Env = append(
 		os.Environ(),
 		"HOME="+home,
@@ -639,7 +660,11 @@ func TestHerdrShellWrapper(t *testing.T) {
 			}
 			cmd := exec.Command("env", append([]string{"SHELL=" + realShell, wrapper}, tc.args...)...)
 			if tc.tty {
-				cmd = testjail.PTYCommand(append([]string{"env", "SHELL=" + realShell, wrapper}, tc.args...)...)
+				var err error
+				cmd, err = testjail.PTYCommand(append([]string{"env", "SHELL=" + realShell, wrapper}, tc.args...)...)
+				if err != nil {
+					t.Fatal(err)
+				}
 			}
 			cmd.Env = append(
 				os.Environ(),

@@ -4,14 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
-	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/installer"
-	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 func appendProbeError(rows *[]Row, check, path string, err error) {
@@ -25,13 +22,16 @@ func appendProbeError(rows *[]Row, check, path string, err error) {
 }
 
 func pfmSettings(env Env) ([]Row, error) {
+	if row, unread := retiredUnread(env, "pfm-settings"); unread {
+		return []Row{row}, nil
+	}
 	var rows []Row
 	var candidates []string
 	for _, dir := range claudeDirs(env) {
 		candidates = append(candidates, filepath.Join(dir, "settings.json"))
 	}
 	for _, path := range uniquePaths(candidates) {
-		keys, err := installer.PFMSettingsLeftovers(env.Home, path)
+		keys, err := installer.PFMSettingsLeftovers(env.Retired, env.Home, path)
 		if err != nil {
 			appendProbeError(&rows, "pfm-settings", path, err)
 			continue
@@ -53,113 +53,6 @@ func pfmSettings(env Env) ([]Row, error) {
 	return rows, nil
 }
 
-func pfmMCP(env Env) ([]Row, error) {
-	var rows []Row
-	var candidates []string
-	for _, registry := range installer.ClaudeUserRegistries(env.Home, sortedAccounts(env), "") {
-		candidates = append(candidates, registry.Path)
-	}
-	homePath := filepath.Join(env.Home, ".mcp.json")
-	homeNames, clients, homeErr := installer.PFMHomeMCPLeftovers(env.Home, env.MCPPort)
-	candidates = append(candidates, filepath.Join(env.Home, ".claude.json"), homePath)
-	for _, path := range uniquePaths(candidates) {
-		names, err := installer.PFMMCPLeftovers(env.Home, env.MCPPort, path)
-		if err != nil {
-			appendProbeError(&rows, checkPFMMCP, path, err)
-			continue
-		}
-		if paths.PhysicalPath(path) == paths.PhysicalPath(homePath) {
-			if homeErr != nil {
-				appendProbeError(&rows, checkPFMMCP, homePath, homeErr)
-				continue
-			}
-			seen := map[string]bool{}
-			for _, name := range append(names, homeNames...) {
-				seen[name] = true
-			}
-			names = nil
-			for name := range seen {
-				names = append(names, name)
-			}
-			sort.Strings(names)
-		}
-
-		current := map[string]bool{}
-		for _, family := range []string{config.MCPServerChat} {
-			name := config.MCPRegistrationName(family)
-			for _, report := range installer.InspectClaudeServers(path, env.Home, env.MCPPort, name) {
-				if report.State == installer.MCPClientPFM {
-					current["mcpServers."+name] = true
-				}
-				if report.State == installer.MCPClientUnreadable {
-					appendProbeError(&rows, checkPFMMCP, path, report.Error)
-				}
-			}
-		}
-		legacy := names[:0]
-		for _, name := range names {
-			if !current[name] {
-				legacy = append(legacy, name)
-			}
-		}
-		before := len(rows)
-		rows = appendMCPRow(rows, path, legacy)
-		canCutOver := true
-		for _, name := range legacy {
-			for _, report := range installer.InspectClaudeServers(path, env.Home, env.MCPPort, strings.TrimPrefix(name, "mcpServers.")) {
-				if report.State != installer.MCPClientLegacyPFM {
-					canCutOver = false
-				}
-			}
-		}
-		if len(rows) > before && canCutOver && paths.PhysicalPath(path) != paths.PhysicalPath(homePath) {
-			rows[len(rows)-1].Severity = Warn
-			rows[len(rows)-1].Fix = "run pfm install --yes to cut over owned account registrations"
-		}
-	}
-	if len(clients) > 0 {
-		severity := Warn
-		for _, client := range clients {
-			if !slices.Contains(installer.LegacyMCPNames(), client) {
-				severity = Block
-			}
-		}
-		ledger := filepath.Join(env.ManagedRoot, "mcp-ownership.json")
-		rows = append(
-			rows,
-			Row{
-				severity,
-				checkPFMMCP,
-				ledger,
-				"mcp-ownership.json still records pfm clients",
-				"remove \"clients\" from " + ledger,
-			},
-		)
-	}
-	return rows, nil
-}
-
-func appendMCPRow(rows []Row, path string, names []string) []Row {
-	if len(names) == 0 {
-		return rows
-	}
-	plain := make([]string, len(names))
-	for i, name := range names {
-		plain[i] = strings.TrimPrefix(name, "mcpServers.")
-	}
-	text := strings.Join(plain, ",")
-	return append(
-		rows,
-		Row{
-			Block,
-			checkPFMMCP,
-			path,
-			"carries pfm mcpServers." + text,
-			"remove mcpServers." + text + " from " + path + "; pfm's server rides " + claudelaunch.MCPConfigFlag + " at launch",
-		},
-	)
-}
-
 func thirdPartyMCP(env Env) ([]Row, error) {
 	var rows []Row
 	var candidates []string
@@ -179,41 +72,26 @@ func thirdPartyMCP(env Env) ([]Row, error) {
 			rows = append(rows, unreadable(checkThirdPartyMCP, path, err))
 			continue
 		}
-		owned, err := installer.PFMMCPLeftovers(env.Home, env.MCPPort, path)
-		if err != nil {
-			appendProbeError(&rows, checkThirdPartyMCP, path, err)
-			continue
-		}
-		excluded := map[string]bool{}
-		for _, name := range owned {
-			excluded[strings.TrimPrefix(name, "mcpServers.")] = true
-		}
 		var names []string
 		for name := range document.Servers {
-			if !excluded[name] {
-				names = append(names, name)
-			}
+			names = append(names, name)
 		}
 		sort.Strings(names)
 		for _, name := range names {
-			reason := ""
+			reason, accepted := "", false
 			for _, item := range env.AcceptedMCP {
 				if item.Path == path && item.Server == name {
-					reason = item.Reason
+					reason, accepted = item.Reason, true
 					break
 				}
 			}
-			if reason != "" {
-				rows = append(
-					rows,
-					Row{
-						Accepted,
-						checkThirdPartyMCP,
-						path,
-						"mcpServers." + name + " retained by doctor.acceptedMCP: " + reason,
-						"",
-					},
-				)
+			if accepted {
+				// The reason is optional: an acceptance without one is still an acceptance.
+				detail := "mcpServers." + name + " retained by doctor.acceptedMCP"
+				if reason != "" {
+					detail += ": " + reason
+				}
+				rows = append(rows, Row{Accepted, checkThirdPartyMCP, path, detail, ""})
 				continue
 			}
 			rows = append(

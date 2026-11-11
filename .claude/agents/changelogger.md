@@ -34,7 +34,7 @@ A change on two routes is two bullets.
 
 1. Read the range: `git log --no-merges --format='%h %s%n%b' {BASE}..{C}`, in chunks; the author's message carries the why a diff does not.
 2. Group commits into adopter-visible changes; each change is one bullet under its section and route. `## Breaking` holds what stops working without an action; `## Migration` a multi-step move.
-3. Settle each adopter-side effect you would otherwise assume — what `pfm install` does with a symlink whose original was deleted, whether a removed config key is rejected, which binary prints what during the update — by reading the code or asking `Agent(subagent_type: "tracer")` the exact question. Write only what a commit supports and the code confirms.
+3. Settle each adopter-side effect you would otherwise assume — what `pfm install` does with a symlink whose original was deleted, whether a removed config key is rejected, which binary prints what during the update — by reading the code or asking `Agent(subagent_type: "flights:tracer")` the exact question. Write only what a commit supports and the code confirms.
 4. The traps, each checked for this range:
    - The update into v{NEW} runs the previous release's binary: a change to the update path shows first on the next update; say so where the adopter would look for it now.
    - Removal leaves residue unless the installer clears it: name the residue and the action, or say the installer clears it, after reading which.

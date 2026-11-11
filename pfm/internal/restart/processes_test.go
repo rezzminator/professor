@@ -128,6 +128,31 @@ func TestFindMCPDaemonKeepsAnotherInstallsDaemon(t *testing.T) {
 	}
 }
 
+// TestFindMCPDaemonCountsAnExitingDaemonAsNoInstalls pins a daemon that exits
+// between the table read and its ownership read: its environment reads torn,
+// the install mark gone with the rest, and its executable is gone. It is
+// neither this install's daemon nor another install's kept one.
+func TestFindMCPDaemonCountsAnExitingDaemonAsNoInstalls(t *testing.T) {
+	kernel := newKernel(process{PID: 30, Argv: []string{"/opt/pfm/bin/pfm", "mcp", "serve"}})
+	kernel.marks[30] = map[string]string{"HOME": "/srv/operator"}
+	deps := testDeps(t, &hostRunner{}, kernel, &fakeFleet{})
+	deps.Procs = &executableKernel{fakeKernel: kernel, executables: map[int]string{}}
+	finder := &discoverer{deps: deps, claimed: map[int]bool{}}
+	table, err := finder.readTable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	finder.findMCPDaemon(table, false, nil)
+	if got := unitNames(finder.plan.Units); len(got) != 0 {
+		t.Fatalf("units = %q, want none for an exiting daemon", got)
+	}
+	want := "0 unsupervised pfm mcp serve process(es) of 1 listed — process table"
+	if len(finder.plan.Findings) != 1 || finder.plan.Findings[0].Err != nil ||
+		finder.plan.Findings[0].Detail != want {
+		t.Fatalf("findings = %+v, want one %q", finder.plan.Findings, want)
+	}
+}
+
 // executableKernel is a fakeKernel that also reads executables, ESRCH for a
 // pid it has none for.
 type executableKernel struct {

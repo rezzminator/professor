@@ -16,7 +16,7 @@ import (
 
 // ConvergeHerdrNames carries in-engine /rename (which fires no title hook)
 // from the index to proved native seats: a Claude seat follows its
-// transcript's custom title, a Codex seat its thread's indexed name. name-sync
+// transcript's custom title, an unnamed Codex seat its thread's indexed name. name-sync
 // calls this only on --apply, through the very same naming path as DeliverName.
 func ConvergeHerdrNames(ctx context.Context, db *store.Store, values paths.Values, stderr io.Writer) (ok bool) {
 	ok = true
@@ -55,7 +55,11 @@ func ConvergeHerdrNames(ctx context.Context, db *store.Store, values paths.Value
 				name = indexed.CustomTitle
 			}
 		case string(engine.Codex):
-			name = naming.CxName(seat.SessionID, "", "", cxNames, "")
+			// Codex's ledger also holds its automatic titles, indistinguishable
+			// from a /rename: it names only an unnamed seat (compose/herdr.go's rule).
+			if seat.Name == "" {
+				name = naming.CxName(seat.SessionID, "", "", cxNames, "")
+			}
 		}
 		if name == "" || name == seat.Name {
 			continue

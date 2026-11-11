@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/action"
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	"github.com/rezzminator/professor/pfm/internal/config"
@@ -32,11 +33,12 @@ func TestOpenRestoredIDRejectsMissingSession(t *testing.T) {
 }
 
 func TestOpenRestoredIDRebindsRecipeWithoutKeys(t *testing.T) {
-	for _, history := range []string{"never-bound absent", "unanswered", "answered", "malformed", "protocol mismatch", "unsafe live owner", "unsafe old probe", "agent missing", "agent denied", "pane agent missing", "unknown legacy", "same address legacy", "same address never-bound", "same address live legacy", "unlearned restore", "unrelated caller"} {
+	for _, history := range []string{"never-bound absent", "unanswered", "answered", "malformed", "protocol mismatch", "unsafe live owner", "unsafe old probe", "agent missing", "agent denied", "pane agent missing", "unknown legacy", "same address legacy", "same address never-bound", "same address live legacy", "unlearned restore", "unrelated caller", "unnamed"} {
 		t.Run(history, func(t *testing.T) {
 			testjail.Fleet(t)
 			notices := make(chan string, 4)
 			labels := make(chan string, 4)
+			tabLabels := make(chan string, 4)
 			socket := nativeChatSocket(t, func(req nativeChatRequest) (any, string) {
 				switch req.Method {
 				case "pane.list":
@@ -85,6 +87,9 @@ func TestOpenRestoredIDRebindsRecipeWithoutKeys(t *testing.T) {
 						"tab":  map[string]any{"tab_id": "w9:t1", "label": "INTEGRATION", "pane_count": 1},
 					}, ""
 				case "tab.rename":
+					var label string
+					_ = json.Unmarshal(req.Params["label"], &label)
+					tabLabels <- label
 					return map[string]any{"type": "ok"}, ""
 				case "pane.rename":
 					var label string
@@ -116,6 +121,12 @@ func TestOpenRestoredIDRebindsRecipeWithoutKeys(t *testing.T) {
 				!strings.HasPrefix(history, "same address") &&
 				history != "unlearned restore" {
 				seat = nativeChatHost(t, db, seat, history == "unsafe live owner" || history == "unsafe old probe")
+			}
+			if history == "unnamed" {
+				seat.Name = ""
+				if err := db.PutSeat(context.Background(), seat); err != nil {
+					t.Fatal(err)
+				}
 			}
 			if strings.HasPrefix(history, "same address") || history == "unlearned restore" {
 				if history == "same address never-bound" {
@@ -245,7 +256,18 @@ func TestOpenRestoredIDRebindsRecipeWithoutKeys(t *testing.T) {
 				}
 				return
 			}
-			if len(labels) != 1 || <-labels != seat.Name {
+			// A named chat's pane takes its name; an unnamed one's tab is named
+			// as a born tab is, after its project folder, its pane left unnamed.
+			if history == "unnamed" {
+				want := filepath.Base(runtime.Paths.Home)
+				if len(labels) != 0 || len(tabLabels) != 1 {
+					t.Fatalf("pane renames %d, tab renames %d, want only the tab named %q; stderr=%q",
+						len(labels), len(tabLabels), want, stderr.String())
+				}
+				if label := <-tabLabels; label != want {
+					t.Fatalf("restored tab label = %q, want %q", label, want)
+				}
+			} else if len(labels) != 1 || <-labels != seat.Name {
 				t.Fatal("restored pane label did not match durable name")
 			}
 			if code != 0 {
@@ -379,6 +401,77 @@ func TestResumeNativeRecipePreservesEachRegisteredEngine(t *testing.T) {
 	}
 }
 
+// A recorded recipe pfm cannot read costs only the unreadable words, never the
+// resume: the chat restores on its session with a warning naming the loss.
+func TestRestoredRecipeKeepsTheResumeOnABadRecord(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		engine     pfmengine.ID
+		args, want []string
+		warn       string
+		themeSync  bool
+	}{
+		{
+			"an unparsable Claude recipe resumes with default args", pfmengine.Claude,
+			[]string{"--model", "opus", "--settings"},
+			[]string{"--resume", "same-session"},
+			`pfm WARN: chat "keeper": restored recipe unparsable (--settings requires a value); resuming with default launch args` + "\n",
+			false,
+		},
+		{
+			"an unrefreshable theme pin resumes as recorded", pfmengine.Claude,
+			[]string{"--settings", "{"},
+			[]string{"--settings", "{", "--resume", "same-session"},
+			`pfm WARN: chat "keeper": restored recipe --settings: unexpected end of JSON input; ` +
+				"left to Claude as written\n" + `pfm WARN: chat "keeper": restored theme pin not refreshed ` +
+				`(refresh theme pin: parse settings: unexpected end of JSON input); ` +
+				"resuming with the recorded settings\n",
+			true,
+		},
+		{
+			"an ambiguous unregistered flag is dropped with its value", pfmengine.Codex,
+			[]string{"--mystery", "value", "--model", "custom", "resume", "old"},
+			[]string{"--model", "custom", "resume", "same-session"},
+			`pfm WARN: chat "keeper": restored recipe flag --mystery has an ambiguous value; dropped` + "\n",
+			false,
+		},
+		{
+			"a stripped flag missing its value strips alone", pfmengine.OpenCode,
+			[]string{"--model", "custom", "--session"},
+			[]string{"--model", "custom", "--session", "same-session", "/work/project"},
+			"",
+			false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.themeSync {
+				home := t.TempDir()
+				t.Setenv(paths.EnvHome, home)
+				statePath := filepath.Join(home, ".local", "state", "pfm", "theme", "state.json")
+				if err := atomicfile.Write(statePath, []byte(`{"enabled":true}`), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var stderr strings.Builder
+			run, err := resumeNativeRun(
+				fleetdb.SeatRun{Binary: "fixture", CWD: "/work/project", Args: tc.args},
+				fleetdb.Seat{Name: "keeper", Engine: string(tc.engine), SessionID: "same-session"},
+				config.Config{}, &stderr,
+			)
+			if err != nil || !slices.Equal(run.Args, tc.want) || stderr.String() != tc.warn {
+				t.Fatalf(
+					"args=%q err=%v stderr=%q; want args=%q stderr=%q",
+					run.Args,
+					err,
+					stderr.String(),
+					tc.want,
+					tc.warn,
+				)
+			}
+		})
+	}
+}
+
 func TestRestoredRecipeRechecksThemeSync(t *testing.T) {
 	for _, tc := range []struct {
 		name, state string
@@ -449,11 +542,41 @@ func TestRestoredRecipeNeverResendsPromptAfterBooleanFlags(t *testing.T) {
 	}
 }
 
+// A restored auto-mode chat keeps --permission-mode and its value.
+func TestRestoredRecipeKeepsAutoPermissionMode(t *testing.T) {
+	run, err := resumeNativeRun(
+		fleetdb.SeatRun{
+			Binary: "fixture",
+			Args: []string{
+				"--allow-dangerously-skip-permissions",
+				"--permission-mode",
+				"auto",
+				"PRIVATE PROMPT",
+				"--settings",
+				"{}",
+			},
+		},
+		fleetdb.Seat{Engine: string(pfmengine.Claude), SessionID: "same-session"}, config.Config{}, io.Discard,
+	)
+	want := []string{
+		"--allow-dangerously-skip-permissions",
+		"--permission-mode",
+		"auto",
+		"--settings",
+		"{}",
+		"--resume",
+		"same-session",
+	}
+	if err != nil || !slices.Equal(run.Args, want) {
+		t.Fatalf("restored argv=%q err=%v want=%q", run.Args, err, want)
+	}
+}
+
 func TestOpenRestoredIDWithoutSeatUsesCurrentHerdrPane(t *testing.T) {
-	// Under herdr-keep Herdr sees its attach client; the caller's shell is the holder's child.
-	for _, holder := range []string{"herdr", "herdr-keep"} {
+	// Under herdr-shield Herdr sees its attach client; the caller's shell is the holder's child.
+	for _, holder := range []string{"herdr", "herdr-shield"} {
 		t.Run(holder, func(t *testing.T) {
-			kept := holder == "herdr-keep"
+			kept := holder == "herdr-shield"
 			root := testjail.Fleet(t)
 			const id = "1b67f24e-bbe9-491f-8390-86f50b45a598"
 			seedClaudeChat(t, root, id, assistantSaid("done"))
@@ -471,7 +594,7 @@ func TestOpenRestoredIDWithoutSeatUsesCurrentHerdrPane(t *testing.T) {
 					}
 					if kept {
 						info["shell_pid"] = 700009
-						info["foreground_processes"] = []any{map[string]any{"pid": 700009, "name": "herdr-keep"}}
+						info["foreground_processes"] = []any{map[string]any{"pid": 700009, "name": "herdr-shield"}}
 					}
 					return map[string]any{"type": "pane_process_info", "process_info": info}, ""
 				case "tab.get":
@@ -506,7 +629,7 @@ func TestOpenRestoredIDWithoutSeatUsesCurrentHerdrPane(t *testing.T) {
 				}
 				zeros := strings.Repeat("0 ", 13)
 				for pid, stat := range map[int]string{
-					700005:      "700005 (herdr-keep) S 1 700005 700005 0 -1 " + zeros + "100 0\n",
+					700005:      "700005 (herdr-shield) S 1 700005 700005 0 -1 " + zeros + "100 0\n",
 					700001:      "700001 (zsh) S 700005 700001 700001 0 700003 " + zeros + "100 0\n",
 					os.Getpid(): fmt.Sprintf("%d (pfm) S 700001 700003 700001 0 700003 %s100 0\n", os.Getpid(), zeros),
 				} {
@@ -525,7 +648,7 @@ func TestOpenRestoredIDWithoutSeatUsesCurrentHerdrPane(t *testing.T) {
 				); err != nil {
 					t.Fatal(err)
 				}
-				testjail.StageHerdrKeep(t, testjail.HerdrKeepListing(700005, 100, 700001, 100, "w9:p2", socket), 0)
+				testjail.StageHerdrShield(t, testjail.HerdrShieldListing(700005, 100, 700001, 100, "w9:p2", socket), 0)
 			}
 			runtime, err := config.LoadRuntime("")
 			if err != nil {
@@ -747,22 +870,33 @@ func TestResumeTailRefusesAChatAnotherLiveProcessHolds(t *testing.T) {
 		Kind: compose.LiveClaude, Backend: "herdr", SeatID: "seat-1", ID: launch, Path: "/jail/" + continued + ".jsonl",
 	}
 	job := compose.Row{Kind: compose.Agent, ID: continued, Name: "moved"}
+	unreadable := t.TempDir()
 	for _, test := range []struct {
-		name   string
-		id     string
-		seatID string
-		rows   []compose.Row
-		want   string
+		name    string
+		id      string
+		seatID  string
+		rows    []compose.Row
+		want    string
+		cacheDB string
+		warn    string
 	}{
-		{"nothing holds it", launch, "seat-1", []compose.Row{}, continued},
-		{"only the resuming seat holds it", launch, "seat-1", []compose.Row{own}, continued},
-		{"a daemon job holds it", launch, "seat-1", []compose.Row{own, job}, ""},
-		{"another seat holds it", launch, "", []compose.Row{own}, ""},
-		{"an unmoved chat needs no scan", continued, "", nil, continued},
-		{"an unmoved chat a held scan shows live is refused", continued, "", []compose.Row{job}, ""},
+		{"nothing holds it", launch, "seat-1", []compose.Row{}, continued, "", ""},
+		{"only the resuming seat holds it", launch, "seat-1", []compose.Row{own}, continued, "", ""},
+		{"a daemon job holds it", launch, "seat-1", []compose.Row{own, job}, "", "", ""},
+		{"another seat holds it", launch, "", []compose.Row{own}, "", "", ""},
+		{"an unmoved chat needs no scan", continued, "", nil, continued, "", ""},
+		{"an unmoved chat a held scan shows live is refused", continued, "", []compose.Row{job}, "", "", ""},
+		{
+			"an unreadable index resumes the launch id", launch, "", nil, launch, unreadable,
+			"pfm WARN: chat " + launch + ": newest segment unknown (",
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			got, err := resumeTail(ctx, config.Runtime{}, test.id, test.seatID, test.rows, io.Discard)
+			if test.cacheDB != "" {
+				t.Setenv(paths.EnvCacheDB, test.cacheDB)
+			}
+			var stderr strings.Builder
+			got, err := resumeTail(ctx, config.Runtime{}, test.id, test.seatID, test.rows, &stderr)
 			if test.want == "" {
 				if err == nil || !strings.Contains(err.Error(), "open that chat instead") {
 					t.Fatalf("resumeTail() = %q, %v; want a refusal naming the live chat", got, err)
@@ -771,6 +905,11 @@ func TestResumeTailRefusesAChatAnotherLiveProcessHolds(t *testing.T) {
 			}
 			if err != nil || got != test.want {
 				t.Fatalf("resumeTail() = %q, %v; want %q", got, err, test.want)
+			}
+			const tail = "); resuming it, which may be an older segment\n"
+			if warned := stderr.String(); test.warn == "" && warned != "" ||
+				test.warn != "" && (!strings.HasPrefix(warned, test.warn) || !strings.HasSuffix(warned, tail)) {
+				t.Fatalf("resumeTail() stderr = %q, want %q…%q", warned, test.warn, tail)
 			}
 		})
 	}

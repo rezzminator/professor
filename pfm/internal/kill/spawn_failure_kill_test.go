@@ -12,7 +12,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/store"
-	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // failingSpawner prepares cleanly, then runs spawn as its launch: the seam
@@ -34,7 +33,7 @@ func (spawner failingSpawner) Spawn(context.Context, ExitArgs) error { return sp
 // chat is hidden with its pane open.
 func TestKillWhoseFinisherCannotStartLeavesTheChatAsItWas(t *testing.T) {
 	const id = "71717171-7171-4171-8171-717171717171"
-	launchFailed := errors.New("setsid: launch failed")
+	launchFailed := errors.New("launch failed")
 	tests := []struct {
 		name       string
 		priorKill  bool
@@ -52,24 +51,24 @@ func TestKillWhoseFinisherCannotStartLeavesTheChatAsItWas(t *testing.T) {
 				if err := os.WriteFile(blocker, nil, 0o600); err != nil {
 					t.Fatal(err)
 				}
-				return CommandSpawner{Executable: "/jail/pfm", Setsid: stubLauncher(t, root, 0), LogDir: blocker}
+				return CommandSpawner{Executable: "/jail/pfm", LogDir: blocker, Runner: &deps.FakeRunner{}}
 			},
 			wantErr: []string{"create kill finisher log directory"},
 		},
 		{
 			name: "the finisher launch fails",
-			spawner: func(t *testing.T, root string, _ *store.Store, _ context.CancelFunc) ExitSpawner {
-				return CommandSpawner{Executable: "/jail/pfm", Setsid: stubLauncher(t, root, 1), LogDir: root}
+			spawner: func(_ *testing.T, root string, _ *store.Store, _ context.CancelFunc) ExitSpawner {
+				return CommandSpawner{Executable: "/jail/pfm", LogDir: root, Runner: failingStartRunner()}
 			},
-			wantErr: []string{"start detached kill finisher with setsid"},
+			wantErr: []string{"start detached kill finisher: boom"},
 		},
 		{
 			name:      "the launch fails over a kill that was already there",
 			priorKill: true,
-			spawner: func(t *testing.T, root string, _ *store.Store, _ context.CancelFunc) ExitSpawner {
-				return CommandSpawner{Executable: "/jail/pfm", Setsid: stubLauncher(t, root, 1), LogDir: root}
+			spawner: func(_ *testing.T, root string, _ *store.Store, _ context.CancelFunc) ExitSpawner {
+				return CommandSpawner{Executable: "/jail/pfm", LogDir: root, Runner: failingStartRunner()}
 			},
-			wantErr:    []string{"start detached kill finisher with setsid"},
+			wantErr:    []string{"start detached kill finisher: boom"},
 			wantHidden: true,
 		},
 		{
@@ -83,7 +82,7 @@ func TestKillWhoseFinisherCannotStartLeavesTheChatAsItWas(t *testing.T) {
 			closed:  true,
 		},
 		{
-			// The MCP client cancels the call while Spawn waits on setsid:
+			// The MCP client cancels the call while Spawn launches the finisher:
 			// the launch fails on the cancelled request, and the rollback
 			// must still land.
 			name: "the request is cancelled during the launch",
@@ -188,15 +187,11 @@ func TestFailedLaunchRollbackPreservesConcurrentSuccessfulKill(t *testing.T) {
 	}
 }
 
-// stubLauncher is a setsid stand-in exiting with code.
-func stubLauncher(t *testing.T, root string, code int) string {
-	t.Helper()
-	path := filepath.Join(root, "setsid")
-	script := "#!/bin/sh\nexit " + string(rune('0'+code)) + "\n"
-	if err := testjail.WriteExecutable(path, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	return path
+// failingStartRunner is a runner whose every start fails with "boom".
+func failingStartRunner() *deps.FakeRunner {
+	runner := &deps.FakeRunner{}
+	runner.ScriptStart(nil, 0, nil, errors.New("boom"))
+	return runner
 }
 
 // gateSpawner records what the finisher launch saw: whether its context was

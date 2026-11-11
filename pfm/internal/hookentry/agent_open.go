@@ -38,10 +38,14 @@ func AgentOpen(args []string, stderr io.Writer, runtime config.Runtime) int {
 		return 2
 	}
 	resolved := runtime.Paths
-	primary, primaryErr := fleet.PrimaryAccount(resolved, runtime.Config)
+	primary, primaryErr := fleet.PrimaryAccountOrImplicit(resolved, runtime.Config)
 	if primaryErr != nil {
-		fmt.Fprintf(stderr, "pfm internal agent-open: read primary account: %v\n", primaryErr)
-		return 1
+		fmt.Fprintf(
+			stderr,
+			"pfm internal agent-open: read primary account: %v; account %d stands in\n",
+			primaryErr,
+			primary,
+		)
 	}
 	accounts := make([]agentopen.Account, 0, len(runtime.Config.Accounts))
 	for _, account := range runtime.Config.Accounts {

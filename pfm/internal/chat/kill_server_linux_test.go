@@ -144,7 +144,10 @@ func TestNativeSelfEndWorkerSurvivesPTYSessionDeath(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			command := testjail.PTYCommand(os.Args[0], "--self-end-fixture")
+			command, err := testjail.PTYCommand(os.Args[0], "--self-end-fixture")
+			if err != nil {
+				t.Fatal(err)
+			}
 			command.Env = append(os.Environ(), "PFM_END_FIXTURE=1", "PFM_END_CALLER="+caller, "PATH="+shadow)
 			var output bytes.Buffer
 			command.Stdout = &output

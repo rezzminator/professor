@@ -16,7 +16,6 @@ import (
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	"github.com/rezzminator/professor/pfm/internal/clock"
-	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
@@ -117,19 +116,14 @@ func runRun(
 		fmt.Fprintf(stderr, "pfm chat new: %v\n", agentrole.ValidateSeatPromptPolicy(requestedEngine, ""))
 		return 2
 	}
-	fleetPrimary, err := fleet.PrimaryAccount(resolved, runtime.Config)
+	fleetPrimary, err := fleet.PrimaryAccountOrImplicit(resolved, runtime.Config)
 	if err != nil {
-		fmt.Fprintf(stderr, "pfm chat new: read primary account: %v\n", err)
-		return 1
+		fmt.Fprintf(stderr, "pfm chat new: %v; account %d stands in\n", err, fleetPrimary)
 	}
 	engineName, selectedAccount, err := resolveRunEngineAccount(*engine, *account, runtime.Config, fleetPrimary, env)
 	if *engine == "" {
 		bench, found, lookupErr := workbench.Nearest(directory)
-		if lookupErr != nil {
-			fmt.Fprintf(stderr, "pfm chat new: %v\n", lookupErr)
-			return 2
-		}
-		if found && bench.Err == nil {
+		if lookupErr == nil && found && bench.Err == nil { // a failed lookup is reported by ForLaunch below
 			// Prefer a configured planner, retaining the unplanned engine's own refusal.
 			var unplanned pfmengine.ID
 			unplannedAccount := 0
@@ -193,10 +187,13 @@ func runRun(
 		ctx = pfmchat.WithWorkbenchNameReservation(ctx, auto)
 	}
 	defer pfmchat.ReleaseUnusedWorkbenchName(ctx, *name, stderr)
-	persona, err := workbench.ForLaunch(directory, engineName, workbench.New)
+	persona, personaWarnings, err := action.LaunchPersona(directory, engineName, workbench.New)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
 		return 2
+	}
+	if engineName != pfmengine.OpenCode { // OpenCode's plan reads the persona again and reports it
+		launchnotice.Print(stderr, "pfm chat new", personaWarnings)
 	}
 	harnessPath, harnessBody, err := agentrole.LoadHarnessPromptFor(engineName, *harnessPrompt)
 	if err != nil {
@@ -260,11 +257,8 @@ func runRun(
 		fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
 		return 2
 	}
-	if engineName == pfmengine.Codex && persona.Applies() {
-		if err := workbench.EnsureMirror(persona.Bench, engineName, resolved.Home); err != nil {
-			fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
-			return 2
-		}
+	if engineName == pfmengine.Codex {
+		launchnotice.Print(stderr, "pfm chat new", action.PersonaMirror(persona, engineName, resolved.Home))
 	}
 	plan, err := action.HeadlessRun(action.HeadlessRequest{
 		Engine:         engineName,
@@ -359,17 +353,17 @@ func runRun(
 		summary = stderr
 	}
 	printRunResult(summary, engineName, result)
-	if !result.Named {
+	seatStateWritten = false // the live chat keeps its seat prompt state
+	unnamed := !result.Named
+	if unnamed {
 		pfmchat.RecordVerb(context.Background(), "new", 1)
 		if result.TrustHeld {
-			seatStateWritten = false // the live chat keeps its seat prompt state
 			fmt.Fprintf(stderr, "pfm chat new: %s\n", result.TrustRefusal(*name, directory))
 			return codeUndelivered
 		}
-		return 1
+	} else {
+		pfmchat.RecordVerb(context.Background(), "new", 0)
 	}
-	seatStateWritten = false
-	pfmchat.RecordVerb(context.Background(), "new", 0)
 	spawnedAt := clk.Now()
 	parent := parentChatID(ctx, env)
 	state := fleetdb.OpenSharedState(context.Background(), resolved)
@@ -394,24 +388,17 @@ func runRun(
 	if err := state.Close(); err != nil {
 		fmt.Fprintf(stderr, "pfm: comms ledger: close shared state: %v\n", err)
 	}
-	if prompt == "" {
-		return attachRunResult(*attach, plan.Warnings, result, stdout, stderr)
+	code := 0
+	if prompt != "" {
+		code = awaitLaunch(ctx, *name, *await, awaitOptions, result, stdout, stderr, clk, runtime)
 	}
-	code := awaitLaunch(
-		ctx,
-		*name,
-		*await,
-		awaitOptions,
-		result,
-		stdout,
-		stderr,
-		clk,
-		runtime,
-	)
-	if code != 0 {
-		return code
+	if code == 0 {
+		code = attachRunResult(*attach, plan.Warnings, result, stdout, stderr)
 	}
-	return attachRunResult(*attach, plan.Warnings, result, stdout, stderr)
+	if code == 0 && unnamed {
+		return 1 // the unconfirmed name, signalled once the chat is registered and answered
+	}
+	return code
 }
 
 func resolveRunEngineAccount(
@@ -502,9 +489,7 @@ func attachRunResult(attach bool, warnings []string, result spawn.Result, stdout
 		return 0
 	}
 	launchnotice.Pause(stderr, "pfm chat new", warnings)
-	line := "TMUX= tmux -L " + cmdparse.Quote(result.Socket) +
-		" attach -t " + cmdparse.Quote(result.Session)
-	if err := action.Dispatch(stdout, line); err != nil {
+	if err := action.Dispatch(stdout, action.AttachLine(result.Socket, result.Session, false)); err != nil {
 		fmt.Fprintf(stderr, "pfm chat new: attach: %v\n", err)
 		return 1
 	}

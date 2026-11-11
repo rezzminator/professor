@@ -6,7 +6,6 @@
 package recovery
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -20,6 +19,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/codexmeta"
+	pfmtranscript "github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 var threadIDPattern = regexp.MustCompile(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`)
@@ -144,19 +144,21 @@ func parse(ctx context.Context, path string) (turns, carried []turn, malformed i
 			returnErr = errors.Join(returnErr, fmt.Errorf("close rollout %q: %w", path, err))
 		}
 	}()
-	malformed = 0
-	scanner := bufio.NewScanner(file)
-	// A message can contain a large tool result. Scanner's default 64 KiB cap
-	// would silently turn a valid rollout into a malformed one.
-	scanner.Buffer(make([]byte, 64*1024), 32*1024*1024)
-	for scanner.Scan() {
-		if err := ctx.Err(); err != nil {
-			return nil, nil, malformed, err
+	// transcript.ScanLines reads a line of any length: a message can carry a
+	// large tool result, and one over-long line must cost that line at most,
+	// never every turn after it.
+	var ctxErr error
+	handle := func(line []byte, _ bool) {
+		if ctxErr != nil {
+			return
+		}
+		if ctxErr = ctx.Err(); ctxErr != nil {
+			return
 		}
 		var record map[string]any
-		if err := json.Unmarshal(scanner.Bytes(), &record); err != nil {
+		if err := json.Unmarshal(line, &record); err != nil {
 			malformed++
-			continue
+			return
 		}
 		kind, _ := record["type"].(string)
 		stamp, _ := record["timestamp"].(string)
@@ -183,8 +185,11 @@ func parse(ctx context.Context, path string) (turns, carried []turn, malformed i
 			}
 		}
 	}
-	if err := scanner.Err(); err != nil {
+	if _, _, err := pfmtranscript.ScanLines(file, 0, handle); err != nil {
 		return nil, nil, malformed, fmt.Errorf("read rollout %q: %w", path, err)
+	}
+	if ctxErr != nil {
+		return nil, nil, malformed, ctxErr
 	}
 	return turns, carried, malformed, nil
 }

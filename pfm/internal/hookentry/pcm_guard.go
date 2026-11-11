@@ -53,7 +53,6 @@ const (
 	pcmGuardUnknownName = "__pcm-guard-unknown-name__"
 	pcmGuardPushd       = "pushd"
 	pcmGuardPopd        = "popd"
-	pcmGuardDash        = "dash"
 	pcmGuardTemplates   = "templates"
 )
 
@@ -94,6 +93,7 @@ type pcmGuardScope struct {
 	configs     []string
 	engine      bool
 	roots       []string
+	warn        io.Writer
 }
 
 // pcmGuardJudge collects one call's verdict: the paths only pcm writes, the
@@ -105,8 +105,20 @@ type pcmGuardJudge struct {
 	pcmOnly, themeOnly []string
 	unreadable         bool
 	blind, read        []string
+	// heredocs holds, by absolute path, the text a heredoc earlier in the
+	// call left in a file (engineHeredoc); readFile reads it before the disk.
+	heredocs map[string]string
 	// scripts counts the script files the code being judged is read from.
 	scripts int
+	// trusting counts the trusted scripts (engine run) being read; what an
+	// untrusted script run inside one leaves escapes its reset.
+	trusting          int
+	escapedUnreadable bool
+	escapedBlind      []string
+	// trusted memoises trusts' git reads by script path.
+	trusted map[string]bool
+	// grants memoises each grant file's directories for agent, by path.
+	grants map[string][]string
 }
 
 // PcmGuard is the PreToolUse hook on the edit tools and Bash that denies a
@@ -114,7 +126,9 @@ type pcmGuardJudge struct {
 // (in a Claude config dir only agents/, commands/, rules/ and skills/), the
 // Professor clone's templates/ — to every caller but the pcm agent, and a
 // write under templates/themes/ to every caller but themer. It keeps no
-// state: the payload's exact agent_type is the exemption. A read or decode
+// state: the payload's exact agent_type is the exemption, and a project's
+// .claude/pcm-guard.json may grant an agent directories under that .claude/
+// (pcmGuardJudge.granted). A read or decode
 // failure and a parser error are fail-open to stderr; a write target or a
 // part it cannot read is denied when the command names a prompt file.
 func PcmGuard(input io.Reader, stdout, stderr io.Writer) int {
@@ -171,8 +185,8 @@ func PcmGuard(input io.Reader, stdout, stderr io.Writer) int {
 // CLAUDE_CONFIG_DIR; engine adds engineGuardRoots. What it cannot read
 // leaves that root unguarded, with one stderr line.
 func pcmGuardNewScope(stderr io.Writer, engine bool) pcmGuardScope {
-	home := storeGuardGet("HOME")
-	scope := pcmGuardScope{home: home, engine: engine}
+	home := storeGuardGet(guardHomeEnv)
+	scope := pcmGuardScope{home: home, engine: engine, warn: stderr}
 	if engine {
 		scope.roots = engineGuardRoots(home)
 	}
@@ -281,7 +295,7 @@ func (judge *pcmGuardJudge) path(abs string) {
 		if !slices.Contains(judge.themeOnly, abs) {
 			judge.themeOnly = append(judge.themeOnly, abs)
 		}
-	case !theme && judge.agent != pcmGuardWriter:
+	case !theme && judge.agent != pcmGuardWriter && !judge.granted(abs):
 		if !slices.Contains(judge.pcmOnly, abs) {
 			judge.pcmOnly = append(judge.pcmOnly, abs)
 		}
@@ -359,8 +373,8 @@ func (judge *pcmGuardJudge) bash(command, cwd string, script cmdparse.Script, de
 		defer func() { judge.scripts-- }()
 	}
 	parsed, err := cmdparse.ParseBatch([]cmdparse.Call{{
-		ID: "pcm-guard", Command: command, Cwd: cmp.Or(cwd, string(filepath.Separator)),
-		Vars: map[string]string{"HOME": judge.scope.home}, Script: script,
+		ID: "pcm-guard", Command: command,
+		Vars: map[string]string{guardHomeEnv: judge.scope.home}, Script: script,
 	}})
 	if err != nil {
 		return err
@@ -381,6 +395,7 @@ func (judge *pcmGuardJudge) bash(command, cwd string, script cmdparse.Script, de
 			}
 			judge.program(&part, base, dir, depth)
 			if judge.scope.engine {
+				judge.engineHeredoc(&part, base, words, dir)
 				judge.enginePart(&part, base, dir, depth)
 			}
 			if copying {
@@ -436,7 +451,7 @@ func pcmGuardWords(part *cmdparse.Part, base string) []string {
 	}
 	var operands []string
 	switch base {
-	case "tee", "rm", pcmGuardUnlink:
+	case pcmGuardTee, "rm", pcmGuardUnlink:
 		operands, _ = pcmGuardSplit(part.Args)
 	case "touch":
 		operands, _ = pcmGuardSplit(part.Args, "-r", "--reference", "-d", "--date", "-t")
@@ -526,17 +541,14 @@ func (judge *pcmGuardJudge) copies(base string, args []string, dir string) {
 
 // pcmGuardCodeFlags are the short flags whose value is inline code, per
 // interpreter; python names every python* program.
-// dash and ksh are here because cmdparse parses only a bash, sh or zsh -c
-// string (cmdparse.shellScript), so pcmGuardJudge.program parses theirs.
 var pcmGuardCodeFlags = map[string]string{
 	pcmGuardPython: "c", pcmGuardNode: "ep", "nodejs": "ep", pcmGuardPerl: "eE", pcmGuardRuby: "e",
-	pcmGuardDash: "c", "ksh": "c",
 }
 
 // pcmGuardCode returns the inline code an interpreter runs: the value of a
 // code flag (alone or in a short cluster: -c, -e, -pe, the code the next
-// word or joined to it: -c'code'), --eval and --print. A bash, sh or zsh -c
-// string is no code here: cmdparse parses it into parts of its own, or marks
+// word or joined to it: -c'code'), --eval and --print. A shell's -c string
+// (bash, sh, zsh, dash, ksh) is no code here: cmdparse parses it into parts of its own, or marks
 // its part Unread when it cannot know the string (PcmGuard's bash). Its
 // heredocs and here-strings are pcmGuardStdin's.
 func pcmGuardCode(part *cmdparse.Part, base string) []string {

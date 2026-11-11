@@ -197,31 +197,23 @@ func TestRenderSubagentsNestedAgents(t *testing.T) {
 
 // A real cycle (a → b → a) must not hang the walk or count an agent twice.
 func TestRenderSubagentsNestedCycleTerminates(t *testing.T) {
-	// Each turn of the cycle is ended, or silent 20 minutes on a sub-agent call
-	// (so its liveness asks the agents below it, around the cycle).
-	staleAgentCall := `{"type":"assistant","timestamp":"2026-09-24T09:40:00Z","message":{"stop_reason":"tool_use",` +
-		`"content":[{"type":"tool_use","id":"x7","name":"Agent"}]}}`
-	for name, last := range map[string]string{"ended turns": turnEnded, "stale sub-agent calls": staleAgentCall} {
-		t.Run(name, func(t *testing.T) {
-			session := nestedSession(t, map[string][]string{
-				"p": agentTranscriptLines, "a": {last}, "b": {last},
-			}, map[string]string{"p": "", "a": "p", "b": "a"})
-			dir := filepath.Join(strings.TrimSuffix(session, ".jsonl"), "subagents")
-			// Rewrite a's parent to b after the fact: a → b → a, and p lists no child.
-			if err := os.WriteFile(filepath.Join(dir, "agent-a.meta.json"),
-				[]byte(`{"agentType":"x","parentAgentId":"b"}`), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			got, _ := renderOneSubagent(t, session, parentTask)
-			if !strings.HasPrefix(got, "▱") {
-				t.Fatalf("p lost its only child to the cycle, yet its row = %q", got)
-			}
-			aRow, _ := renderRowOf(t, session, "a", subagentNow,
-				`{"id":"a","type":"local_agent","status":"running","tokenCount":10}`, agentTask("b", "running"))
-			if !strings.HasPrefix(aRow, "0/1│") {
-				t.Fatalf("cycle row = %q, want 0/1", aRow)
-			}
-		})
+	session := nestedSession(t, map[string][]string{
+		"p": agentTranscriptLines, "a": {turnEnded}, "b": {turnEnded},
+	}, map[string]string{"p": "", "a": "p", "b": "a"})
+	dir := filepath.Join(strings.TrimSuffix(session, ".jsonl"), "subagents")
+	// Rewrite a's parent to b after the fact: a → b → a, and p lists no child.
+	if err := os.WriteFile(filepath.Join(dir, "agent-a.meta.json"),
+		[]byte(`{"agentType":"x","parentAgentId":"b"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := renderOneSubagent(t, session, parentTask)
+	if !strings.HasPrefix(got, "▱") {
+		t.Fatalf("p lost its only child to the cycle, yet its row = %q", got)
+	}
+	aRow, _ := renderRowOf(t, session, "a", subagentNow,
+		`{"id":"a","type":"local_agent","status":"running","tokenCount":10}`, agentTask("b", "running"))
+	if !strings.HasPrefix(aRow, "0/1│") {
+		t.Fatalf("cycle row = %q, want 0/1", aRow)
 	}
 }
 
@@ -238,19 +230,36 @@ func TestRenderSubagentsNestedLongTail(t *testing.T) {
 	}
 }
 
-// A meta file that cannot be parsed hides which agent spawned it: every row
-// says "?/?", never "none".
-func TestRenderSubagentsNestedTornMetaIsNotAbsence(t *testing.T) {
-	session := nestedSession(t, map[string][]string{"p": agentTranscriptLines},
-		map[string]string{"p": ""})
-	dir := filepath.Join(strings.TrimSuffix(session, ".jsonl"), "subagents")
-	if err := os.WriteFile(filepath.Join(dir, "agent-c1.meta.json"), []byte(`{"agentTy`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	got, warned := renderOneSubagent(t, session, parentTask)
-	if !strings.HasPrefix(got, "?/?│▱") ||
-		!strings.Contains(warned, "row p: nested agents: parse sub-agent meta") {
-		t.Fatalf("content = %q warn = %q, want ?/? and the cause", got, warned)
+// A meta file that cannot be parsed hides which agent spawned that one agent
+// only: every other edge stands, the row counts the unreadable agent as unread
+// (it may sit below the task), and the cause goes to warn, never "none".
+func TestRenderSubagentsNestedTornMetaCostsOnlyItsOwnParent(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		transcripts map[string][]string
+		parents     map[string]string
+		want        string
+	}{
+		{"alone", map[string][]string{"p": agentTranscriptLines}, map[string]string{"p": ""}, "0/0 (1 unread)│▱"},
+		{
+			"beside a readable child",
+			map[string][]string{"p": agentTranscriptLines, "c2": {turnEnded}},
+			map[string]string{"p": "", "c2": "p"},
+			"0/1 (1 unread)│▱",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			session := nestedSession(t, tc.transcripts, tc.parents)
+			dir := filepath.Join(strings.TrimSuffix(session, ".jsonl"), "subagents")
+			if err := os.WriteFile(filepath.Join(dir, "agent-c1.meta.json"), []byte(`{"agentTy`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			got, warned := renderOneSubagent(t, session, parentTask)
+			if !strings.HasPrefix(got, tc.want) ||
+				!strings.Contains(warned, "row p: nested agents: parse sub-agent meta") {
+				t.Fatalf("content = %q warn = %q, want prefix %q and the cause", got, warned, tc.want)
+			}
+		})
 	}
 }
 
@@ -379,7 +388,7 @@ func renderPayload(
 	list := strings.Join(tasks, ",")
 	payload := `{"transcript_path":` + jsonText(session) + `,"cwd":"/work/repo","tasks":[` + list + `]}`
 	var warn bytes.Buffer
-	got, err := RenderSubagents([]byte(payload), now, t.TempDir(), testPrices(t), "", noEnv, "", &warn)
+	got, err := RenderSubagents([]byte(payload), now, t.TempDir(), testPrices(t), "", noEnv, &warn)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -430,13 +439,13 @@ func agentTask(id, status string) string {
 }
 
 // The count a row shows is the agents below it that work right now, at every
-// depth. A transcript whose turn never closed is not enough: an agent killed
-// mid-stream, or stopped by its parent, leaves a last line no later line ever
-// answers (the live session that showed this had agents silent for hours with
-// a streaming tail), and Claude Code's own task list says which tasks are
-// over. Finished, working, killed, long-silent and nested agents sit below one
-// parent here; only the two that work count, and a parent whose only open
-// agents are dead is completed, not delegating.
+// depth: Claude Code still lists them as running and their own turn is open.
+// Claude Code's task list says which agents run, the transcript only whether a
+// listed agent's turn is still open; a long silence is no verdict (a live
+// session showed haiku workers half an hour quiet on an unanswered request,
+// still running, under an orchestrator rendered 0/16 and one rendered
+// completed). Finished, working, killed, long-silent and nested agents sit
+// below one parent here; only the four Claude Code runs with an open turn count.
 func TestRenderSubagentsNestedCountsOnlyAgentsThatWork(t *testing.T) {
 	const (
 		longSilent = `{"type":"assistant","timestamp":"2026-09-24T09:30:00Z","message":{"stop_reason":null,` +
@@ -449,85 +458,42 @@ func TestRenderSubagentsNestedCountsOnlyAgentsThatWork(t *testing.T) {
 		session := nestedSession(t, map[string][]string{
 			"p":  agentTranscriptLines,
 			"c1": {turnToolCall},             // working
-			"c2": {longSilent},               // streaming tail, silent for 32 minutes: dead
+			"c2": {longSilent},               // streaming tail, silent for 32 minutes, still run: working
 			"c3": {turnEnded},                // finished; its grandchild works
 			"c4": {turnToolCall},             // open turn, but Claude Code lists it killed
 			"g1": {turnToolResult},           // working, nested under c3
-			"g2": {longSilent, silentResult}, // nested under the dead c2
+			"g2": {longSilent, silentResult}, // nested under c2, silent 32 minutes on a tool result: working
 			"c5": {turnToolResult},           // killed before its first reply: a row Claude Code lists with no counts
 		}, map[string]string{"p": "", "c1": "p", "c2": "p", "c3": "p", "c4": "p", "g1": "c3", "g2": "c2", "c5": "p"})
 		killedAtSpawn := `{"id":"c5","type":"local_agent","status":"killed","startTime":1790244000000,"label":"c5"}`
 		rows := renderTasks(t, session, subagentNow,
 			parentTask, agentTask("c1", "running"), agentTask("c4", "killed"), killedAtSpawn,
-			// Listed as running, as a hung agent stays: the 15 minutes judge them.
 			agentTask("c2", "running"), agentTask("g1", "running"), agentTask("g2", "running"))
 		got := rows["p"]
-		if !strings.HasPrefix(got, "2/7│") || !strings.Contains(got, "│delegating 2m:0s│") {
-			t.Fatalf("parent row = %q, want 2/7 (c1 and g1 work; c2, c3, c4, c5, g2 do not) and delegating", got)
+		if !strings.HasPrefix(got, "4/7│") || !strings.Contains(got, "│delegating 2m:0s│") {
+			t.Fatalf("parent row = %q, want 4/7 (c1, c2, g1 and g2 work; c3, c4, c5 do not) and delegating", got)
 		}
 	})
-	t.Run("only dead agents left below: the parent is finished, not delegating", func(t *testing.T) {
-		session := nestedSession(t, map[string][]string{
-			"p": agentTranscriptLines, "c1": {longSilent}, "g1": {longSilent, silentResult},
-		}, map[string]string{"p": "", "c1": "p", "g1": "c1"})
-		got := renderTasks(t, session, subagentNow, parentTask, agentTask("c1", "running"), agentTask("g1", "running"))["p"]
-		if !strings.HasPrefix(got, "0/2│") || !strings.Contains(got, "│completed 1m:30s│") {
-			t.Fatalf("parent row = %q, want 0/2 and completed", got)
-		}
-	})
-	t.Run("a parent silent 20 minutes on a sub-agent call that still works is working", func(t *testing.T) {
-		waiting := `{"type":"assistant","timestamp":"2026-09-24T09:40:00Z","message":{"stop_reason":"tool_use",` +
-			`"content":[{"type":"tool_use","id":"x8","name":"Agent"}]}}`
+	// The orchestrator ended its turn after launching background workers, so
+	// Claude Code calls it completed; its workers, quiet for half an hour on an
+	// unanswered request, are still run, and it waits on them.
+	t.Run("a completed parent whose long-silent workers still run is delegating, not finished", func(t *testing.T) {
 		parents := map[string]string{"p": "", "c1": "p", "g1": "c1"}
 		session := nestedSession(t, map[string][]string{
-			"p": agentTranscriptLines, "c1": {waiting}, "g1": {turnToolCall},
+			"p": agentTranscriptLines, "c1": {longSilent}, "g1": {longSilent, silentResult},
 		}, parents)
-		running := []string{parentTask, agentTask("c1", "running"), agentTask("g1", "running")}
-		got := renderTasks(t, session, subagentNow, running...)["p"]
-		if !strings.HasPrefix(got, "2/2│") {
-			t.Fatalf("parent row = %q, want 2/2 (the waiting c1 and its working child g1)", got)
+		got := renderTasks(t, session, subagentNow, parentTask, agentTask("c1", "running"), agentTask("g1", "running"))["p"]
+		if !strings.HasPrefix(got, "2/2│") || !strings.Contains(got, "│delegating 2m:0s│") {
+			t.Fatalf("parent row = %q, want 2/2 and delegating: Claude Code still runs c1 and g1", got)
 		}
-		ended := nestedSession(t, map[string][]string{
-			"p": agentTranscriptLines, "c1": {waiting}, "g1": {turnEnded},
+		done := nestedSession(t, map[string][]string{
+			"p": agentTranscriptLines, "c1": {longSilent, turnEnded}, "g1": {longSilent, silentResult},
 		}, parents)
-		if got := renderTasks(t, ended, subagentNow, running...)["p"]; !strings.HasPrefix(got, "0/2│") {
-			t.Fatalf("parent row = %q, want 0/2 (the child is done, so the silent parent is dead)", got)
-		}
-		// The call's line as the stream left it, no stop_reason written.
-		unstopped := strings.Replace(waiting, `"stop_reason":"tool_use"`, `"stop_reason":null`, 1)
-		streamed := nestedSession(t, map[string][]string{
-			"p": agentTranscriptLines, "c1": {unstopped}, "g1": {turnToolCall},
-		}, parents)
-		if got := renderTasks(t, streamed, subagentNow, running...)["p"]; !strings.HasPrefix(got, "2/2│") {
-			t.Fatalf("parent row = %q, want 2/2 (a sub-agent call without stop_reason still waits on g1)", got)
+		got = renderTasks(t, done, subagentNow, parentTask, agentTask("c1", "running"))["p"]
+		if !strings.HasPrefix(got, "0/2│") || !strings.Contains(got, "│completed 1m:30s│") {
+			t.Fatalf("parent row = %q, want 0/2 and completed: c1 ended its turn, g1 is no longer run", got)
 		}
 	})
-	t.Run(
-		"a parent silent 20 minutes after one of its parallel sub-agents returned waits on the other",
-		func(t *testing.T) {
-			parallel := `{"type":"assistant","timestamp":"2026-09-24T09:38:00Z","message":{"stop_reason":"tool_use",` +
-				`"content":[{"type":"tool_use","id":"x8","name":"Agent"},{"type":"tool_use","id":"x7","name":"Agent"}]}}`
-			firstBack := `{"type":"user","timestamp":"2026-09-24T09:40:00Z","message":{"content":[{"type":"tool_result",` +
-				`"tool_use_id":"x8","content":"g1 done"}]}}`
-			parents := map[string]string{"p": "", "c1": "p", "g1": "c1", "g2": "c1"}
-			session := nestedSession(t, map[string][]string{
-				"p": agentTranscriptLines, "c1": {parallel, firstBack}, "g1": {turnEnded}, "g2": {turnToolCall},
-			}, parents)
-			running := []string{
-				parentTask, agentTask("c1", "running"), agentTask("g1", "running"), agentTask("g2", "running"),
-			}
-			got := renderTasks(t, session, subagentNow, running...)["p"]
-			if !strings.HasPrefix(got, "2/3│") {
-				t.Fatalf("parent row = %q, want 2/3 (c1 still waits on its working child g2)", got)
-			}
-			allBack := nestedSession(t, map[string][]string{
-				"p": agentTranscriptLines, "c1": {parallel, firstBack}, "g1": {turnEnded}, "g2": {turnEnded},
-			}, parents)
-			if got := renderTasks(t, allBack, subagentNow, running...)["p"]; !strings.HasPrefix(got, "0/3│") {
-				t.Fatalf("parent row = %q, want 0/3 (no child works, so the silent parent is dead)", got)
-			}
-		},
-	)
 	// The live shape: a finished sub-agent's last line is its final text block
 	// as the stream wrote it (no stop_reason), and Claude Code drops a finished
 	// task from its list within a minute, so the payload never calls it over.
@@ -550,16 +516,6 @@ func TestRenderSubagentsNestedCountsOnlyAgentsThatWork(t *testing.T) {
 		listed := renderTasks(t, session, subagentNow, parentTask, agentTask("g1", "running"))["p"]
 		if !strings.HasPrefix(listed, "1/4│") || !strings.Contains(listed, "│delegating 2m:0s│") {
 			t.Fatalf("parent row = %q, want 1/4 and delegating: Claude Code still runs g1", listed)
-		}
-	})
-	t.Run("a silence shorter than any tool call is still working", func(t *testing.T) {
-		quiet := `{"type":"assistant","timestamp":"2026-09-24T09:55:00Z","message":{"stop_reason":"tool_use",` +
-			`"content":[{"type":"tool_use","id":"x9","name":"Bash"}]}}` // a Bash call 7 minutes in
-		session := nestedSession(t, map[string][]string{"p": agentTranscriptLines, "c1": {quiet}},
-			map[string]string{"p": "", "c1": "p"})
-		got := renderTasks(t, session, subagentNow, parentTask, agentTask("c1", "running"))["p"]
-		if !strings.HasPrefix(got, "1/1│") || !strings.Contains(got, "│delegating ") {
-			t.Fatalf("parent row = %q, want 1/1 and delegating", got)
 		}
 	})
 }

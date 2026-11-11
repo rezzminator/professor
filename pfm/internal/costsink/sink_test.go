@@ -208,13 +208,37 @@ func TestSinkAcceptsRequestScopedBackgroundWithoutSession(t *testing.T) {
 	}
 }
 
+func TestSinkWritesARowWhoseTokenCountIsUnreadableAndNamesTheLoss(t *testing.T) {
+	sink, _, dir, logs := newTestSink(t)
+	attrs := apiRequest(testSession, "req_1", "repl_main_thread", 75)
+	for i, a := range attrs {
+		if a["key"] == "output_tokens" {
+			attrs[i] = str("output_tokens", "many")
+		}
+	}
+	if code := post(t, sink, http.MethodPost, "/v1/logs", logBody(attrs), nil).Code; code != http.StatusOK {
+		t.Fatalf("POST = %d, want 200", code)
+	}
+	sink.Drain()
+	ledger, err := costledger.ForSession(dir, testSession)
+	if err != nil || len(ledger.Rows) != 1 || ledger.Rows[0].OutputTokens != 0 || ledger.Rows[0].InputTokens != 2 {
+		t.Fatalf("ledger = %+v, %v; want the row written", ledger, err)
+	}
+	want := `/v1/logs: request "req_1": token attribute(s) output_tokens unreadable, counted as 0`
+	if sink.Faults() != 1 || !strings.Contains(logs.String(), want) {
+		t.Fatalf("faults = %d, log = %q, want one fault logging %q", sink.Faults(), logs.String(), want)
+	}
+}
+
 func TestSinkAnswers400ForABrokenBodyAndLogsWhy(t *testing.T) {
 	sink, _, _, logs := newTestSink(t)
 	if code := post(t, sink, http.MethodPost, "/v1/logs", []byte("{broken"), nil).Code; code != http.StatusBadRequest {
 		t.Fatalf("broken POST = %d, want 400", code)
 	}
-	if !strings.Contains(logs.String(), "/v1/logs") {
-		t.Fatalf("sink log = %q, want a line naming the failed path", logs.String())
+	want := `/v1/logs: decode OTLP logs: invalid character 'b' looking for beginning of object key string ` +
+		`(body of 7 bytes starts "{broken")`
+	if !strings.Contains(logs.String(), want) {
+		t.Fatalf("sink log = %q, want a line holding %q", logs.String(), want)
 	}
 }
 
@@ -223,19 +247,36 @@ func TestSinkAnswers400ForABrokenBodyAndLogsWhy(t *testing.T) {
 // refused record counts once.
 func TestSinkAnswers200ForAPartiallyRefusedBatchAndCountsTheRefusal(t *testing.T) {
 	cases := []struct {
-		name, path, rejectedField string
-		body                      []byte
-		faults                    int
+		name, path, rejectedField, reason string
+		body                              []byte
+		faults                            int
 	}{
-		{"logs", "/v1/logs", "rejectedLogRecords", logBody(
+		{"logs", "/v1/logs", "rejectedLogRecords", "2 records refused: unsafe session id", logBody(
 			apiRequest(testSession, "req_good", "repl_main_thread", 100),
 			apiRequest("../bad", "req_bad", "repl_main_thread", 5),
 			apiRequest("bad/path", "req_unsafe", "repl_main_thread", 5),
 		), 2},
-		{"traces", "/v1/traces", "rejectedSpans", spanBody(
+		{"traces", "/v1/traces", "rejectedSpans", "1 records refused: unsafe session id", spanBody(
 			llmSpan(testSession, "req_good", "", "", "repl_main_thread"),
 			llmSpan("../bad", "req_bad", "", "", "repl_main_thread"),
 		), 1},
+		// A trace id that is a number, not hex text, is a record the decoder cannot read.
+		{
+			"logs of a shape the decoder cannot read", "/v1/logs", "rejectedLogRecords", "1 records undecodable",
+			mustJSON(map[string]any{"resourceLogs": []any{map[string]any{"scopeLogs": []any{map[string]any{
+				"logRecords": []any{
+					map[string]any{"attributes": apiRequest(testSession, "req_good", "repl_main_thread", 100)},
+					map[string]any{"traceId": 7, "attributes": []any{}},
+				},
+			}}}}}), 1,
+		},
+		{
+			"traces of a shape the decoder cannot read", "/v1/traces", "rejectedSpans", "1 records undecodable",
+			spanBody(
+				llmSpan(testSession, "req_good", "", "", "repl_main_thread"),
+				map[string]any{"name": "claude_code.llm_request", "traceId": 7},
+			), 1,
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -249,13 +290,13 @@ func TestSinkAnswers200ForAPartiallyRefusedBatchAndCountsTheRefusal(t *testing.T
 			}
 			if err := json.Unmarshal(response.Body.Bytes(), &answer); err != nil ||
 				answer.PartialSuccess[c.rejectedField] != strconv.Itoa(c.faults) ||
-				!strings.Contains(answer.PartialSuccess["errorMessage"], "refused") {
-				t.Fatalf("body = %q (%v); want partialSuccess.%s = %d with the reason",
-					response.Body.String(), err, c.rejectedField, c.faults)
+				answer.PartialSuccess["errorMessage"] != c.reason {
+				t.Fatalf("body = %q (%v); want partialSuccess.%s = %d, errorMessage %q",
+					response.Body.String(), err, c.rejectedField, c.faults, c.reason)
 			}
-			if sink.Faults() != c.faults || !strings.Contains(logs.String(), "refused") {
-				t.Fatalf("faults = %d, log = %q; want %d refused records counted and logged",
-					sink.Faults(), logs.String(), c.faults)
+			if sink.Faults() != c.faults || !strings.Contains(logs.String(), c.path+": "+c.reason) {
+				t.Fatalf("faults = %d, log = %q; want %d refused records counted and %q logged",
+					sink.Faults(), logs.String(), c.faults, c.path+": "+c.reason)
 			}
 			sink.Drain()
 			ledger, err := costledger.ForSession(sink.dir, testSession)

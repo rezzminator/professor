@@ -219,7 +219,7 @@ func (f pcmGuardFixture) bashWrites() []string {
 
 func TestPcmGuardDeniesEveryEditToolToTheMainChatAndOtherAgents(t *testing.T) {
 	f := pcmGuardHome(t)
-	for _, agent := range []string{"", "general-purpose", "flights-foreman", "PCM", "pcm2", "themer"} {
+	for _, agent := range []string{"", "general-purpose", "flights:foreman", "PCM", "pcm2", "themer"} {
 		for _, tool := range []string{"Edit", "Write", "MultiEdit", "NotebookEdit"} {
 			for _, target := range f.editTargets() {
 				t.Run(agent+"/"+tool+"/"+target, func(t *testing.T) {
@@ -421,4 +421,38 @@ func TestPcmGuardWithoutHomeJudgesByNameAndSaysSo(t *testing.T) {
 	}
 	// The chat's CLAUDE_CONFIG_DIR needs no HOME to be placed.
 	pcmGuardRequireDeny(t, pcmGuardEdit(t, "Write", filepath.Join(f.seat, "agents", "new.md"), ""), pcmGuardOnlyPcm)
+}
+
+// A project's .claude/pcm-guard.json grants the documenter its design-runbook
+// references: it writes there, by edit tool and Bash, and is refused the
+// skill's SKILL.md and every other prompt file, as every other caller stays
+// refused the references.
+func TestPcmGuardAdmitsAGrantedAgentToItsDirectoryAlone(t *testing.T) {
+	f := pcmGuardHome(t)
+	pcmGuardWriteGrant(t, f.project, `{"writers": {"documenter": [".claude/skills/design-runbook/references"]}}`)
+	skill := filepath.Join(f.project, ".claude", "skills", "design-runbook")
+	refs := filepath.Join(skill, "references")
+	for _, target := range []string{filepath.Join(refs, "fe.md"), filepath.Join(refs, "new", "x.md")} {
+		pcmGuardRequireAllow(t, pcmGuardEdit(t, "Edit", target, "documenter"))
+	}
+	pcmGuardRequireAllow(
+		t, pcmGuardBash(t, `sed -i s/a/b/ .claude/skills/design-runbook/references/fe.md`, f.project, "documenter"),
+	)
+	for _, target := range []string{
+		filepath.Join(skill, "SKILL.md"),
+		filepath.Join(skill, "references-old", "x.md"),
+		filepath.Join(refs, "CLAUDE.md"),
+		filepath.Join(f.project, ".claude", pcmGuardGrantFile),
+		filepath.Join(f.project, ".claude", "agents", "a.md"),
+		filepath.Join(f.project, "CLAUDE.md"),
+	} {
+		pcmGuardRequireDeny(t, pcmGuardEdit(t, "Write", target, "documenter"), pcmGuardOnlyPcm)
+	}
+	pcmGuardRequireDeny(
+		t, pcmGuardBash(t, `echo x > .claude/skills/design-runbook/SKILL.md`, f.project, "documenter"), pcmGuardOnlyPcm,
+	)
+	for _, agent := range []string{"", "general-purpose", "Documenter", "themer"} {
+		pcmGuardRequireDeny(t, pcmGuardEdit(t, "Write", filepath.Join(refs, "fe.md"), agent), pcmGuardOnlyPcm)
+	}
+	pcmGuardRequireAllow(t, pcmGuardEdit(t, "Write", filepath.Join(skill, "SKILL.md"), pcmGuardWriter))
 }

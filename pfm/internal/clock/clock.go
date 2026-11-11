@@ -10,6 +10,10 @@
 // statusline.Runtime.Now) stay as they are in this batch — additive only,
 // no caller migrates yet — but they name the shape a thin adapter over
 // Clock takes when a later wave folds them in: one clock, never five.
+//
+// This file holds the Clock, Timer and Ticker interfaces; the other files:
+//   - real.go: Real, the wall clock every production caller gets by default.
+//   - fake.go: Fake, the deterministic clock a test advances by hand.
 package clock
 
 import (

@@ -135,7 +135,8 @@ func printModelHarnessPromptDoctorWithDeps(
 	if decodeErr != nil {
 		return printHarnessBaselineUnavailable(stdout, model, dir, baselinePath, "baseline digest malformed", decodeErr)
 	}
-	baselineModel, baseline, unavailable := readHarnessBaseline(baselinePath, model.Stem, fields[0], fields[1])
+	baselineModel, modelErr := readHarnessBaselineModel(dir, model.Stem)
+	baseline, unavailable := readHarnessBaseline(baselinePath, fields[0], fields[1])
 	if unavailable != nil {
 		return printHarnessBaselineUnavailable(
 			stdout,
@@ -166,6 +167,16 @@ func printModelHarnessPromptDoctorWithDeps(
 	canonicalBaseline := sha256.Sum256([]byte(normalizeHarnessPrompt(string(baseline))))
 	line, warn := harnessPromptVerdict(hex.EncodeToString(canonicalBaseline[:]), fields[1], captured.Prompt, captureErr)
 	fmt.Fprintln(stdout, line)
+	if modelErr != nil {
+		warn = true
+		fmt.Fprintf(
+			stdout,
+			"doctor: harness-prompt: baseline_model unknown (%v) — the prompt was still compared; "+
+				"update or restore the clone at %s\n",
+			modelErr,
+			dir,
+		)
+	}
 	for _, detail := range harnessPromptDetail(
 		model.Alias,
 		baselineModel,
@@ -202,29 +213,34 @@ func printHarnessBaselineUnavailable(
 	return 1
 }
 
-// readHarnessBaseline reads the pinned model name and the pinned body beside
-// baselinePath and returns the model and the body with nil, or the cause the baseline is
-// unusable: the .model read error, an empty .model, the body's read error, or
-// the digest the body no longer matches. The cause is what the BASELINE
-// UNAVAILABLE row prints, so each of them names itself.
-func readHarnessBaseline(baselinePath, stem, pinnedDigest, bodyName string) (string, []byte, error) {
-	directory := filepath.Dir(baselinePath)
-	modelPath := filepath.Join(directory, stem+".model")
+// readHarnessBaselineModel reads the model name pinned beside the baseline,
+// or StateUnknown with the cause: the name is provenance only, so a missing
+// or empty .model never makes the baseline unusable.
+func readHarnessBaselineModel(dir, stem string) (string, error) {
+	modelPath := filepath.Join(dir, stem+".model")
 	modelRaw, err := os.ReadFile(modelPath)
 	if err != nil {
-		return "", nil, err
+		return StateUnknown, err
 	}
 	baselineModel := strings.TrimSpace(string(modelRaw))
 	if baselineModel == "" {
-		return "", nil, fmt.Errorf("%s is empty", modelPath)
+		return StateUnknown, fmt.Errorf("%s is empty", modelPath)
 	}
-	body, err := os.ReadFile(filepath.Join(directory, bodyName))
+	return baselineModel, nil
+}
+
+// readHarnessBaseline reads the pinned body beside baselinePath and returns it
+// with nil, or the cause the baseline is unusable: the body's read error, or
+// the digest the body no longer matches. The cause is what the BASELINE
+// UNAVAILABLE row prints, so each of them names itself.
+func readHarnessBaseline(baselinePath, pinnedDigest, bodyName string) ([]byte, error) {
+	body, err := os.ReadFile(filepath.Join(filepath.Dir(baselinePath), bodyName))
 	if err != nil {
-		return baselineModel, nil, err
+		return nil, err
 	}
 	sum := sha256.Sum256(body)
 	if digest := hex.EncodeToString(sum[:]); digest != pinnedDigest {
-		return baselineModel, nil, fmt.Errorf("digest %s of %s does not match %s", digest, bodyName, pinnedDigest)
+		return nil, fmt.Errorf("digest %s of %s does not match %s", digest, bodyName, pinnedDigest)
 	}
-	return baselineModel, body, nil
+	return body, nil
 }

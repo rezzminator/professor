@@ -10,7 +10,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 	"uuid"
@@ -26,6 +25,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/reload"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
 // agentsCommand is `claude agents`, the registry read the resume probe runs.
@@ -56,7 +56,7 @@ func resolveResumeTarget(target string, runtimes ...commandRuntime) (resumeTarge
 		return resumeTarget{}, false, fmt.Errorf("stat transcript target %q: %w", target, err)
 	}
 
-	files, err := pfmchat.ClaudeTranscripts(firstRuntime(runtimes))
+	files, skipped, err := pfmchat.ClaudeTranscripts(firstRuntime(runtimes))
 	if err != nil {
 		return resumeTarget{}, false, err
 	}
@@ -76,11 +76,13 @@ func resolveResumeTarget(target string, runtimes ...commandRuntime) (resumeTarge
 		if len(matches) == 0 {
 			matches = prefix
 		}
-		switch len(matches) {
-		case 1:
+		switch {
+		case len(matches) == 1 && len(exact) == 0 && skipped > 0:
+			return resumeTarget{}, false, fmt.Errorf("session id prefix %q: %d transcript project director(ies) "+
+				"could not be read, so the match may not be unique; give the full session id", target, skipped)
+		case len(matches) == 1:
 			return matches[0], true, nil
-		case 0:
-		default:
+		case len(matches) > 1:
 			return resumeTarget{}, false, fmt.Errorf(
 				"session id %q is ambiguous across %d transcripts",
 				target,
@@ -95,7 +97,7 @@ func resolveResumeTarget(target string, runtimes ...commandRuntime) (resumeTarge
 	matches, err := pfmchat.Find(
 		context.Background(),
 		firstRuntime(runtimes),
-		pfmchat.FindRequest{Excerpt: target, Self: pfmchat.AskingSession()},
+		pfmchat.FindRequest{Excerpt: target, Self: pfmchat.AskingSession(), Complete: true},
 	)
 	if err != nil {
 		if errors.Is(err, pfmchat.ErrNoExcerptMatch) || errors.Is(err, pfmchat.ErrNoTranscriptRegistry) {
@@ -155,27 +157,27 @@ func composeTranscriptIDFromPath(path string) string {
 }
 
 func runningClaudeSession(procRoot, id string) (bool, error) {
-	entries, err := os.ReadDir(procRoot)
-	if errors.Is(err, fs.ErrNotExist) {
+	// A missing jail root holds no processes; the system root is the native table (sysctl on macOS).
+	procfs, err := gather.OpenProcFS(procRoot)
+	if errors.Is(err, gather.ErrNoProcRoot) {
 		return false, nil
 	}
 	if err != nil {
-		return false, fmt.Errorf("read process jail %q: %w", procRoot, err)
+		return false, fmt.Errorf("list processes under %q: %w", procRoot, err)
 	}
-	needle := []byte("CLAUDE_CODE_SESSION_ID=" + id + "\x00")
-	for _, entry := range entries {
-		if _, err := strconv.Atoi(entry.Name()); err != nil || !entry.IsDir() {
-			continue
-		}
-		path := filepath.Join(procRoot, entry.Name(), "environ")
-		raw, err := os.ReadFile(path)
+	pids, err := procfs.PIDs()
+	if err != nil {
+		return false, fmt.Errorf("list processes under %q: %w", procRoot, err)
+	}
+	for _, pid := range pids {
+		environment, err := procfs.Environ(pid)
 		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission) {
 			continue
 		}
 		if err != nil {
-			return false, fmt.Errorf("read process environment %q: %w", path, err)
+			return false, fmt.Errorf("read process environment pid=%d under %q: %w", pid, procRoot, err)
 		}
-		if bytes.Contains(raw, needle) {
+		if resolve.ProcessEnvironment(environment).ClaudeSessionID == id {
 			return true, nil
 		}
 	}
@@ -334,6 +336,9 @@ func appendResumeCall(
 	}
 	parent, _ := tail["uuid"].(string)
 	sessionID, _ := tail["sessionId"].(string)
+	if sessionID == "" {
+		sessionID = target.ID // Claude names a transcript after its session id
+	}
 	if parent == "" || sessionID == "" {
 		return resumeReceipt{}, fmt.Errorf("transcript %q has no uuid-bearing session tail", target.Path)
 	}
@@ -379,8 +384,8 @@ func lastUUIDEvent(raw []byte) (map[string]any, error) {
 	scanner.Buffer(make([]byte, 64<<10), 32<<20)
 	for scanner.Scan() {
 		var event map[string]any
-		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
-			return nil, fmt.Errorf("decode JSONL line: %w", err)
+		if json.Unmarshal(scanner.Bytes(), &event) != nil {
+			continue // one torn line costs that line; Append separates a torn tail
 		}
 		if id, _ := event["uuid"].(string); id != "" {
 			tail = event

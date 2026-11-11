@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -128,9 +127,11 @@ type Report struct {
 	FreedKB     int64
 	AvailBefore int64
 	AvailAfter  int64
-	// Warnings are non-fatal apply-time failures that never affect the exit
-	// code — today, only a role-seat prompt that could not be removed.
-	// Reported so the failure is visible; never swallowed, never destructive.
+	// Warnings are non-fatal failures that never affect the exit code: a
+	// breadcrumb the probe could not read (its socket held as busy-unknown)
+	// and, when applying, a role-seat prompt that could not be removed or an
+	// unreadable memory counter. Reported so the failure is visible; never
+	// swallowed, never destructive.
 	Warnings []string
 }
 
@@ -219,10 +220,13 @@ func (runner *Runner) Run(
 		return Report{}, err
 	}
 
-	sockets, err := runner.probeSockets(ctx, tree, options.onlySocket)
+	sockets, probeWarnings, err := runner.probeSockets(ctx, tree, options.onlySocket)
 	if err != nil {
 		return Report{}, err
 	}
+	// An unreadable crumb is named whether or not the run applies: its socket
+	// is held as busy-unknown, never read as a chat without a breadcrumb.
+	report.Warnings = append(report.Warnings, probeWarnings...)
 	state := fleetdb.OpenSharedState(ctx, runner.paths)
 	branchSeats, branchErr := state.BranchSeats(ctx)
 	closeErr := state.Close()
@@ -264,7 +268,7 @@ func (runner *Runner) Run(
 		} else {
 			report.AvailAfter = avail
 		}
-		report.Warnings = warnings
+		report.Warnings = append(report.Warnings, warnings...)
 		trail.Reach("applied", "decisions applied")
 	}
 	report.Decisions = decisions
@@ -304,13 +308,13 @@ func (runner *Runner) probeSockets(
 	ctx context.Context,
 	tree *ProcessTree,
 	only string,
-) ([]Socket, error) {
+) (sockets []Socket, warnings []string, err error) {
 	entries, err := os.ReadDir(runner.paths.TmuxDir)
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
+		return nil, nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("read tmux socket directory: %w", err)
+		return nil, nil, fmt.Errorf("read tmux socket directory: %w", err)
 	}
 
 	type socketFile struct {
@@ -333,7 +337,7 @@ func (runner *Runner) probeSockets(
 	})
 
 	allPanes := make([]gather.ProbePane, 0)
-	sockets := make([]Socket, 0, len(files))
+	sockets = make([]Socket, 0, len(files))
 	for _, file := range files {
 		socket := Socket{Name: file.name, Age: runner.now().Sub(file.modTime)}
 		panes, err := runner.listPanes(ctx, file.name)
@@ -370,11 +374,16 @@ func (runner *Runner) probeSockets(
 	// meaningful beside the pane list that says whether that pane still exists.
 	crumbs, err := gather.ReadCrumbsReadOnly(runner.paths.SIDDir, allPanes)
 	if err != nil {
-		return nil, fmt.Errorf("read session crumbs: %w", err)
+		return nil, nil, fmt.Errorf("read session crumbs: %w", err)
 	}
 	byName := make(map[string]int, len(sockets))
 	for index := range sockets {
 		byName[sockets[index].Name] = index
+	}
+	for _, crumb := range crumbs.Unread {
+		if index, found := byName[crumb.Socket]; found {
+			sockets[index].CrumbUnread = true
+		}
 	}
 	for _, crumb := range crumbs.Crumbs {
 		index, found := byName[crumb.Socket]
@@ -422,7 +431,7 @@ func (runner *Runner) probeSockets(
 			}
 		}
 	}
-	return sockets, nil
+	return sockets, crumbs.Warnings, nil
 }
 
 // isReapSocketName is the reaper's selection seam. Keeping the delegation
@@ -672,36 +681,24 @@ func removeRoleSeatPrompt(sidDir, socket string) error {
 
 // availableKB reads the machine's own available memory, which is the only
 // honest measure of what a reap reclaimed — summed RSS double-counts the
-// runtime pages several node processes share. meminfo not existing at all —
-// no /proc on this platform, or a jail fixture that never staged one — is a
-// genuine absence: (0, nil). Any other read or parse failure is returned,
-// never folded into that same 0: a probe that could not run must not render
-// identically to "0 KB available", the one number here that would itself be
-// alarming.
+// runtime pages several node processes share. A memory source not existing at
+// all — no /proc on this platform, or a jail fixture that never staged one —
+// is a genuine absence: (0, nil). Any other read or parse failure is
+// returned, never folded into that same 0: a probe that could not run must
+// not render identically to "0 KB available", the one number here that would
+// itself be alarming.
 func (runner *Runner) availableKB() (int64, error) {
-	path := filepath.Join(runner.paths.ProcRoot, "meminfo")
-	content, err := os.ReadFile(path)
+	memory, err := gather.HostMemory(runner.paths.ProcRoot)
 	if errors.Is(err, fs.ErrNotExist) {
 		return 0, nil
 	}
 	if err != nil {
-		return 0, fmt.Errorf("read %s: %w", path, err)
+		return 0, err
 	}
-	for _, line := range strings.Split(string(content), "\n") {
-		if !strings.HasPrefix(line, "MemAvailable:") {
-			continue
-		}
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			return 0, fmt.Errorf("parse MemAvailable line %q in %s", line, path)
-		}
-		value, err := strconv.ParseInt(fields[1], 10, 64)
-		if err != nil {
-			return 0, fmt.Errorf("parse MemAvailable value in %s: %w", path, err)
-		}
-		return value, nil
+	if memory.AvailableErr != nil {
+		return 0, memory.AvailableErr
 	}
-	return 0, fmt.Errorf("no MemAvailable line in %s", path)
+	return int64(memory.AvailableKB), nil
 }
 
 // sessionIDFromPath reads the session id out of a transcript pathname.

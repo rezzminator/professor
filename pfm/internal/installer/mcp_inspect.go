@@ -1,7 +1,6 @@
 package installer
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -18,14 +17,13 @@ import (
 const (
 	MCPClientAbsent              = "absent"
 	MCPClientPFM                 = "pfm"
-	MCPClientLegacyPFM           = "legacy-pfm"
 	MCPClientForeignRegistration = "foreign-registration"
 	MCPClientUnreadable          = "unreadable"
 )
 
 // MCPClientCutover is one consumer's visible route for one server. Unreadable
 // is a first-class state so doctor cannot mistake a failed inspection for
-// cutover. Name is the server this report classifies ("professor", "chat");
+// cutover. Name is the server this report classifies ("chat-professor");
 // callers that only ever inspect one server may ignore it.
 type MCPClientCutover struct {
 	Client string
@@ -46,7 +44,7 @@ type mcpClientRegistration struct {
 
 // InspectOpenCodeServers classifies machine-scope OpenCode MCP registrations.
 // Malformed JSONC is unreadable rather than absent.
-func InspectOpenCodeServers(path, home string, port int, names ...string) []MCPClientCutover {
+func InspectOpenCodeServers(path, home string, names ...string) []MCPClientCutover {
 	base := func(name string) MCPClientCutover {
 		return MCPClientCutover{
 			Client: pfmengine.MustLookup(pfmengine.OpenCode).LongName,
@@ -78,7 +76,7 @@ func InspectOpenCodeServers(path, home string, port int, names ...string) []MCPC
 				report.State = MCPClientUnreadable
 				report.Error = fmt.Errorf("parse %s %s registration: expected object", path, name)
 			} else {
-				report.State = classifyOpenCodeRegistration(name, shape, home, port)
+				report.State = classifyOpenCodeRegistration(name, shape, home)
 			}
 		}
 		reports = append(reports, report)
@@ -150,137 +148,40 @@ func OpenCodeUnownedEntries(home, path string, names ...string) ([]string, error
 	return unowned, nil
 }
 
-// classifyOpenCodeRegistration names one OpenCode entry's state: `professor`
-// is pfm only in the exact local stdio shape install writes; pfm's legacy
-// `chat` entries are legacy-pfm; anything else is foreign.
-func classifyOpenCodeRegistration(name string, registration map[string]any, home string, port int) string {
-	if len(registration) != 3 || registration["enabled"] != true {
+// classifyOpenCodeRegistration names one OpenCode entry's state: a family
+// registration is pfm only in the exact local stdio shape install writes;
+// anything else is foreign.
+func classifyOpenCodeRegistration(name string, registration map[string]any, home string) string {
+	if len(registration) != 3 || registration["enabled"] != true || registration[configTypeKey] != openCodeLocal {
 		return MCPClientForeignRegistration
 	}
-	bin := filepath.Join(home, ".local", "bin", "pfm")
 	command, _ := registration["command"].([]any)
-	switch {
-	case isFamilyRegistration(name):
-		if registration[configTypeKey] == openCodeLocal && len(command) != 0 {
-			argv := make([]string, len(command))
-			for index, value := range command {
-				text, ok := value.(string)
-				if !ok {
-					return MCPClientForeignRegistration
-				}
-				argv[index] = text
-			}
-			state := classifyRegistration(name, mcpClientRegistration{
-				Type: stdioProtocol, Command: argv[0], Args: argv[1:],
-			}, port)
-			wantedBinary := bin
-			if state == MCPClientPFM {
-				wantedBinary = mcpFamilyBinary(home)
-			}
-			if (state == MCPClientPFM || state == MCPClientLegacyPFM) && argv[0] == wantedBinary {
-				return state
-			}
+	if len(command) == 0 {
+		return MCPClientForeignRegistration
+	}
+	argv := make([]string, len(command))
+	for index, value := range command {
+		text, ok := value.(string)
+		if !ok {
+			return MCPClientForeignRegistration
 		}
-	case name == professorName && registration[configTypeKey] == openCodeLocal:
-		if sameStrings(command, append([]string{bin}, mcpStdioArgs...)) {
-			return MCPClientLegacyPFM
-		}
-	case name == chatName && registration[configTypeKey] == openCodeLocal:
-		if sameStrings(command, []string{bin, mcpCommand, chatName, mcpServeCommand}) {
-			return MCPClientLegacyPFM
-		}
-	case name == chatName:
-		if registration[configTypeKey] == "remote" && registration["url"] == legacyMCPURL(port, name) {
-			return MCPClientLegacyPFM
-		}
+		argv[index] = text
+	}
+	state := classifyRegistration(name, mcpClientRegistration{Type: stdioProtocol, Command: argv[0], Args: argv[1:]})
+	if state == MCPClientPFM && argv[0] == mcpFamilyBinary(home) {
+		return MCPClientPFM
 	}
 	return MCPClientForeignRegistration
-}
-
-// legacyMCPURL is the loopback URL pfm registered under a legacy key.
-func legacyMCPURL(port int, key string) string {
-	return fmt.Sprintf("http://127.0.0.1:%d/mcp/%s", port, key)
-}
-
-// inspectProjectMCPServers classifies every name's registration in the project
-// mcpServers object, one report per name (in the order given). A missing or
-// unreadable file/document reports every name Absent/Unreadable identically —
-// there is only one file to blame, not one per server.
-func inspectProjectMCPServers(path, home string, port int, names ...string) []MCPClientCutover {
-	client := pfmengine.MustLookup(pfmengine.Claude).LongName
-	base := func(name string) MCPClientCutover {
-		return MCPClientCutover{Client: client, Name: name, State: MCPClientAbsent, Path: path}
-	}
-	uniform := func(state string, err error) []MCPClientCutover {
-		reports := make([]MCPClientCutover, len(names))
-		for index, name := range names {
-			report := base(name)
-			report.State, report.Error = state, err
-			reports[index] = report
-		}
-		return reports
-	}
-	raw, err := os.ReadFile(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		return uniform(MCPClientAbsent, nil)
-	}
-	if err != nil {
-		return uniform(MCPClientUnreadable, fmt.Errorf("read %s: %w", path, err))
-	}
-	var document struct {
-		Servers map[string]json.RawMessage `json:"mcpServers"`
-	}
-	if err := json.Unmarshal(raw, &document); err != nil {
-		return uniform(MCPClientUnreadable, fmt.Errorf("parse %s: %w", path, err))
-	}
-	reports := make([]MCPClientCutover, 0, len(names))
-	for _, name := range names {
-		report := base(name)
-		encoded, present := document.Servers[name]
-		if present {
-			var registration mcpClientRegistration
-			if err := json.Unmarshal(encoded, &registration); err != nil {
-				report.State, report.Error = MCPClientUnreadable, fmt.Errorf(
-					"parse %s %s registration: %w",
-					path,
-					name,
-					err,
-				)
-			} else {
-				report.State = classifyRegistration(name, registration, port)
-			}
-			// pfm and legacy-pfm each prescribe `pfm install --yes`, so they
-			// name only the exact shapes install writes or removes; a near miss
-			// stays someone else's.
-			var shape map[string]any
-			decodeErr := json.Unmarshal(encoded, &shape)
-			bin := filepath.Join(home, ".local", "bin", "pfm")
-			if decodeErr == nil && isPFMLegacyClaudeShape(name, shape, bin, port) {
-				report.State = MCPClientLegacyPFM
-			}
-			if report.State == MCPClientPFM &&
-				(decodeErr != nil || !isExactStdioShape(shape, mcpFamilyBinary(home), mcpFamilyStdioArgs(name))) {
-				report.State = MCPClientForeignRegistration
-			}
-			if report.State == MCPClientLegacyPFM && (decodeErr != nil ||
-				!isPFMLegacyClaudeShape(name, shape, bin, port)) {
-				report.State = MCPClientForeignRegistration
-			}
-		}
-		reports = append(reports, report)
-	}
-	return reports
 }
 
 // InspectCodexServers classifies every name's table in one Codex config.toml
 // `mcp_servers`, one report per name (in the order given). A missing file
 // reports every name absent; a read or parse failure reports every name
-// unreadable with the error. `professor` is pfm only in the exact table pfm
-// writes (`command = "<home>/.local/bin/pfm"`, `args = mcpStdioArgs`, nothing
-// else); legacy keys go through classifyRegistration. pfm and
-// legacy-pfm each prescribe `pfm install --yes`, so a table install's own
+// unreadable with the error. A family table is pfm only in the exact table
+// install writes (`command = "<home>/.local/bin/pfm"`, its family stdio args,
+// nothing else). pfm prescribes `pfm install --yes`, so a table install's own
 // strip keeps (stripPFMCodexLines) is not pfm's to reinstall away: foreign.
-func InspectCodexServers(path, home string, port int, names ...string) []MCPClientCutover {
+func InspectCodexServers(path, home string, names ...string) []MCPClientCutover {
 	base := func(name string) MCPClientCutover {
 		return MCPClientCutover{
 			Client: pfmengine.MustLookup(pfmengine.Codex).LongName,
@@ -311,31 +212,26 @@ func InspectCodexServers(path, home string, port int, names ...string) []MCPClie
 	if _, err := toml.Decode(string(raw), &document); err != nil {
 		return uniform(MCPClientUnreadable, fmt.Errorf("parse %s: %w", path, err))
 	}
-	bin := filepath.Join(home, ".local", "bin", "pfm")
-	body, err := codexStdioBody(bin)
+	lines := strings.Split(strings.TrimSuffix(string(raw), "\n"), "\n")
+	kept, err := stripPFMCodexLines(lines, home)
 	if err != nil {
-		return uniform(MCPClientUnreadable, fmt.Errorf("encode pfm's Codex MCP table for %s: %w", path, err))
+		return uniform(MCPClientUnreadable, fmt.Errorf("strip pfm's Codex MCP table for %s: %w", path, err))
 	}
 	var stripped struct {
 		Servers map[string]any `toml:"mcp_servers"`
 	}
-	lines := strings.Split(strings.TrimSuffix(string(raw), "\n"), "\n")
-	_, strippedErr := toml.Decode(strings.Join(stripPFMCodexLines(lines, port, body), "\n"), &stripped)
+	_, strippedErr := toml.Decode(strings.Join(kept, "\n"), &stripped)
 	reports := make([]MCPClientCutover, 0, len(names))
 	for _, name := range names {
 		report := base(name)
 		registration, present := document.Servers[name]
 		if present {
-			report.State = classifyRegistration(name, registration, port)
-			wantedBinary := bin
-			if report.State == MCPClientPFM && isFamilyRegistration(name) {
-				wantedBinary = mcpFamilyBinary(home)
-			}
-			if (name == professorName || isFamilyRegistration(name)) && registration.Command != wantedBinary {
+			report.State = classifyRegistration(name, registration)
+			if report.State == MCPClientPFM && registration.Command != mcpFamilyBinary(home) {
 				report.State = MCPClientForeignRegistration
 			}
 		}
-		if report.State == MCPClientPFM || report.State == MCPClientLegacyPFM {
+		if report.State == MCPClientPFM {
 			if strippedErr != nil {
 				report.State, report.Error = MCPClientUnreadable, fmt.Errorf(
 					"parse %s without pfm's lines: %w", path, strippedErr)
@@ -348,13 +244,10 @@ func InspectCodexServers(path, home string, port int, names ...string) []MCPClie
 	return reports
 }
 
-// classifyRegistration is shared by Claude, Codex and OpenCode family inspection. The transport law: every engine registers the
-// stdio `professor` (`<bin> mcp serve --stdio`), so `professor` is pfm only in
-// that shape and any HTTP `professor` is foreign; retired names are
-// legacy keys, legacy-pfm only in pfm's own old shapes (the loopback
-// `/mcp/<key>` URL, bare or with the retired 64-hex bearer, and the stdio
-// chat argvs in mcpLegacyChatArgs).
-func classifyRegistration(name string, registration mcpClientRegistration, port int) string {
+// classifyRegistration is shared by Codex and OpenCode family inspection: a
+// family registration is pfm only in its stdio `pfm mcp serve --stdio
+// --family <family>` shape; anything else is foreign.
+func classifyRegistration(name string, registration mcpClientRegistration) string {
 	typeName := strings.ToLower(strings.TrimSpace(registration.Type))
 	command := strings.TrimSpace(registration.Command)
 	if command != "" {
@@ -362,52 +255,9 @@ func classifyRegistration(name string, registration mcpClientRegistration, port 
 	}
 	command = strings.ToLower(command)
 	noExtras := len(registration.Headers) == 0 && len(registration.Env) == 0
-	stdioArgs := func(want ...string) bool {
-		return command == MCPClientPFM && registration.URL == "" && noExtras &&
-			(typeName == "" || typeName == stdioProtocol) && slices.Equal(registration.Args, want)
-	}
-	switch name {
-	case "chat-professor":
-		if stdioArgs(mcpFamilyStdioArgs(name)...) {
-			return MCPClientPFM
-		}
-		return MCPClientForeignRegistration
-	case professorName:
-		if stdioArgs(mcpStdioArgs...) {
-			return MCPClientLegacyPFM
-		}
-		return MCPClientForeignRegistration
-	case chatName:
-		if registration.URL == legacyMCPURL(port, name) && (typeName == "" || typeName == httpProtocol) &&
-			command == "" && len(registration.Args) == 0 && len(registration.Env) == 0 &&
-			isRetiredPFMHeaders(registration.Headers) {
-			return MCPClientLegacyPFM
-		}
-		for _, args := range mcpLegacyChatArgs {
-			if name == chatName && stdioArgs(args...) {
-				return MCPClientLegacyPFM
-			}
-		}
+	if isFamilyRegistration(name) && command == MCPClientPFM && registration.URL == "" && noExtras &&
+		(typeName == "" || typeName == stdioProtocol) && slices.Equal(registration.Args, mcpFamilyStdioArgs(name)) {
+		return MCPClientPFM
 	}
 	return MCPClientForeignRegistration
-}
-
-// isRetiredPFMHeaders is true for no headers, or exactly pfm's retired
-// `Authorization: Bearer <64 hex>` (isPFMHTTPShape's shape).
-func isRetiredPFMHeaders(headers map[string]string) bool {
-	if len(headers) == 0 {
-		return true
-	}
-	authorization, ok := headers["Authorization"]
-	if !ok || len(headers) != 1 || !strings.HasPrefix(authorization, "Bearer ") {
-		return false
-	}
-	token := strings.TrimPrefix(authorization, "Bearer ")
-	return len(token) == 64 && isHex(token)
-}
-
-// InspectClaudeServers applies the same exact ownership checks to a user
-// registry as to the historical project registry.
-func InspectClaudeServers(path, home string, port int, names ...string) []MCPClientCutover {
-	return inspectProjectMCPServers(path, home, port, names...)
 }

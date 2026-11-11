@@ -8,11 +8,13 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/herdr"
 )
 
 func TestHerdrCallNative(t *testing.T) {
@@ -32,7 +34,9 @@ func TestHerdrCallNative(t *testing.T) {
 		{name: "blocked", state: "blocked", status: "refused", code: CodeUndelivered, detail: "blocked"},
 		{name: "blocked-force", state: "blocked", force: true, status: "refused", code: CodeUndelivered, detail: "blocked"},
 		{name: "unknown", state: "unknown", status: "refused", code: CodeUndelivered, detail: "unknown"},
-		{name: "missing-state", status: "refused", code: CodeUndelivered, detail: "status"},
+		// A status pfm cannot read leaves the raw composer guard to decide.
+		{name: "missing-state", status: "delivered", detail: "Herdr raw composer confirmed"},
+		{name: "unrecognized-state", state: "thinking", status: "delivered", detail: "Herdr raw composer confirmed"},
 		{name: "not-ready", state: "idle", refusal: "agent_not_ready", status: "undelivered", code: CodeUndelivered, detail: "agent_not_ready"},
 		{name: "blocked-after-idle", state: "idle", refusal: "agent_blocked", status: "undelivered", code: CodeUndelivered, detail: "agent_blocked"},
 		{name: "lookup-refusal", state: "idle", refusal: "agent_not_found", status: "undelivered", code: CodeUndelivered, detail: "agent_not_found"},
@@ -40,7 +44,8 @@ func TestHerdrCallNative(t *testing.T) {
 		{name: "submit-failed", state: "idle", refusal: "agent_prompt_failed", status: "typed_unconfirmed", code: CodeUndelivered, detail: "agent_prompt_failed"},
 		{name: "stalled", state: "idle", refusal: "agent_prompt_stalled", status: "typed_unconfirmed", code: CodeUndelivered, detail: "agent_prompt_stalled"},
 		{name: "unknown-result", state: "idle", response: "surprise", status: "typed_unconfirmed", code: CodeUndelivered, detail: "surprise"},
-		{name: "unsupported", state: "idle", engine: "invalid-engine", status: "refused", code: CodeUndelivered, detail: "unsupported"},
+		// An engine this binary cannot name takes the raw guard, never agent.prompt.
+		{name: "unsupported", state: "idle", engine: "invalid-engine", status: "delivered", detail: "Herdr raw composer confirmed"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			socket := newNativeSocket(t, func(request nativeRequest) (any, string) {
@@ -56,6 +61,9 @@ func TestHerdrCallNative(t *testing.T) {
 				}
 				if request.Method == "agent.get" {
 					return nativeAgent("agent_info", test.state), ""
+				}
+				if request.Method == "pane.send_input" || request.Method == "pane.send_keys" {
+					return map[string]any{"type": "ok"}, ""
 				}
 				kind := "agent_prompted"
 				if test.response != "" {
@@ -197,11 +205,24 @@ func TestHerdrCallRaw(t *testing.T) {
 			name: "native-untracked", id: pfmengine.Claude, body: "a\nb", wantPayload: "a\nb", wantTyped: true,
 			before: "────────\n❯ \n────────", after: "a\nb\n────────\n❯ \n────────",
 		},
+		// Herdr refuses agent.prompt when herdr-shield's attach client, not Claude, is
+		// the pane's foreground: the raw path's composer guard still protects it.
+		{
+			name: "native-shield-foreground", id: pfmengine.Claude, body: "a\nb", wantPayload: "a\nb", wantTyped: true,
+			before: "────────\n❯ \n────────", after: "a\nb\n────────\n❯ \n────────",
+			promptRefusal: "agent_not_ready", shieldForeground: true,
+		},
+		// A ready-check refusal with Claude itself in the foreground still refuses.
+		{
+			name: "native-not-ready", id: pfmengine.Claude, body: "a\nb", before: "────────\n❯ \n────────",
+			promptRefusal: "agent_not_ready", wantCode: CodeUndelivered,
+		},
 	}, append(herdrRawStyleCases(), herdrOpenCodeCases()...)...) {
 		t.Run(test.name, func(t *testing.T) {
 			entered := false
 			var payload string
-			socket := newNativeSocket(t, func(request nativeRequest) (any, string) {
+			var shieldForeground atomic.Bool
+			socket := newNativeSocketForeground(t, func(request nativeRequest) (any, string) {
 				if request.Method == test.refusal {
 					return nil, "pane_send_failed"
 				}
@@ -213,7 +234,16 @@ func TestHerdrCallRaw(t *testing.T) {
 					if test.id != pfmengine.Claude {
 						t.Errorf("raw engine read the native agent: %+v", request)
 					}
+					if test.promptRefusal != "" {
+						return nativeAgent("agent_info", "idle"), ""
+					}
 					return nil, "agent_not_found"
+				case "agent.prompt":
+					if test.promptRefusal == "" {
+						t.Errorf("raw engine prompted the native agent: %+v", request)
+					}
+					shieldForeground.Store(test.shieldForeground)
+					return nil, test.promptRefusal
 				case "pane.read":
 					if request.Params["format"] == "ansi" {
 						if request.Params["strip_ansi"] != false {
@@ -256,6 +286,11 @@ func TestHerdrCallRaw(t *testing.T) {
 					t.Errorf("raw engine used unexpected API %s", request.Method)
 				}
 				return map[string]any{"type": "ok"}, ""
+			}, func() []any {
+				if shieldForeground.Swap(false) {
+					return []any{map[string]any{"pid": 41, "name": herdr.ShieldBinary}}
+				}
+				return nil
 			})
 			target := Target{Backend: "herdr", SocketPath: socket.path, Pane: "w1:p2", Engine: string(test.id)}
 			engine := nativeEngine(t, target)
@@ -292,6 +327,13 @@ func TestHerdrCallRaw(t *testing.T) {
 				}
 				if test.id == pfmengine.Claude {
 					wantCalls, first = wantCalls+1, 1
+					if test.promptRefusal != "" {
+						// The composer hold's agent.get + pane.read pairs, then the refused prompt.
+						wantCalls, first = wantCalls+2*ComposerHoldReads, 2*ComposerHoldReads+1
+						if len(calls) <= first || calls[first-1].Method != "agent.prompt" {
+							t.Fatalf("native engine skipped the refused prompt: %+v", calls)
+						}
+					}
 					if calls[0].Method != "agent.get" {
 						t.Fatalf("native engine skipped the agent read: %+v", calls)
 					}
@@ -380,7 +422,10 @@ func TestHerdrOversizedBodyNotTyped(t *testing.T) {
 }
 
 func TestHerdrTurnSubmissionAnchor(t *testing.T) {
-	for _, identity := range []string{"valid-session", "absent-session", "null-session", "missing-terminal", "null-terminal", "empty-terminal"} {
+	for _, identity := range []string{
+		"valid-session", "absent-session", "null-session", "missing-terminal", "null-terminal", "empty-terminal",
+		"unrecognized-status",
+	} {
 		t.Run(identity, func(t *testing.T) {
 			socket := newNativeSocket(t, func(req nativeRequest) (any, string) {
 				if req.Method == "pane.read" {
@@ -413,6 +458,8 @@ func TestHerdrTurnSubmissionAnchor(t *testing.T) {
 						a["terminal_id"], a["agent_session"] = nil, nil
 					case "empty-terminal":
 						a["terminal_id"], a["agent_session"] = "", nil
+					case "unrecognized-status":
+						a["agent_status"], a["agent_session"] = "thinking", nil
 					}
 				}
 				return response, ""
@@ -424,16 +471,6 @@ func TestHerdrTurnSubmissionAnchor(t *testing.T) {
 				target,
 				Request{Message: "hello", Then: []string{"follow up"}},
 			)
-			if strings.HasSuffix(identity, "terminal") {
-				if err != nil || got.Code != CodeUndelivered || !got.Typed || got.Status != "typed_unconfirmed" ||
-					!strings.Contains(
-						got.Message,
-						"terminal identity",
-					) || len(engine.spawner.(*fakeSpawner).spawned()) != 0 {
-					t.Fatalf("malformed prompt identity accepted: primary=%+v err=%v", got, err)
-				}
-				return
-			}
 			if err != nil || got.Code != 0 {
 				t.Fatalf("primary=%+v err=%v", got, err)
 			}

@@ -220,12 +220,54 @@ func TestLoadServedServesTheEmbeddedTableOfflineWithoutAClone(t *testing.T) {
 		Fetch: (&countingFetch{err: errors.New("offline must not fetch")}).fetch,
 	})
 	if err != nil {
-		t.Fatalf("loadServed = %v", err)
+		t.Fatalf("loadServed error = %v, want the embedded table", err)
 	}
 	if book.saved != "" || *book.servedFrom != pricing.FromEmbedded || book.refresh.Status != modelcost.StatusOffline ||
 		len(book.table.Rows) == 0 {
 		t.Errorf("served book = saved %q from %q refresh %q, %d rows; want the embedded table, offline",
 			book.saved, *book.servedFrom, book.refresh.Status, len(book.table.Rows))
+	}
+}
+
+// A published table that cannot be loaded prices nothing and loses nothing
+// else: every token still counts, every dollar reads "n/a", and the data gaps
+// name the table failure.
+func TestAnUnloadablePublishedTablePricesNothingAndStillCountsTokens(t *testing.T) {
+	broken := errors.New("embedded prices.json: unexpected end of JSON input")
+	saved := refreshPrices
+	refreshPrices = func(context.Context, modelcost.Options) (pricing.Prices, modelcost.Result, error) {
+		return pricing.Prices{}, modelcost.Result{}, broken
+	}
+	t.Cleanup(func() { refreshPrices = saved })
+	root := fixture(t, "claude/projects")
+	out := filepath.Join(t.TempDir(), "report.json")
+	code, stdout, stderr := auditWith(t, Options{Served: modelcost.Options{Home: t.TempDir()}},
+		"--since", "99999d", "--root", root, "--out", out)
+	if code != 0 || stderr != "" {
+		t.Fatalf("exit %d, stderr %q; want 0 and nothing", code, stderr)
+	}
+	raw, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document struct {
+		Pricing struct {
+			TableFailure string `json:"table_failure"`
+		} `json:"pricing"`
+	}
+	wantFailure := "load the price table: " + broken.Error()
+	if err := json.Unmarshal(raw, &document); err != nil || document.Pricing.TableFailure != wantFailure {
+		t.Errorf("%s pricing.table_failure = %q, %v; want %q", out, document.Pricing.TableFailure, err, wantFailure)
+	}
+	for _, want := range []string{
+		"pricing: none, no price table loaded; not historical billing\n",
+		"data gaps: price table unusable (load the price table: embedded prices.json: unexpected end of JSON " +
+			`input) — tokens counted, every dollar "n/a" · `,
+		" UNPRICED calls ",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("stdout lacks %q:\n%s", want, stdout)
+		}
 	}
 }
 
@@ -259,7 +301,9 @@ func TestAFailedRefreshServesTheCloneTableOnceAndLeadsTheGapsLine(t *testing.T) 
 	}
 }
 
-func TestAnInvalidOverrideFailsBeforeAnyTranscriptIsRead(t *testing.T) {
+// An invalid pfm.prices.json loses only itself: the run counts every token, prices by the
+// published table without the override, and names the override's failure in its data gaps.
+func TestAnInvalidOverridePricesByThePublishedTableAndNamesTheFailure(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), config.FileName)
 	override := config.PricesPath(configPath)
 	if err := os.WriteFile(override, []byte(`{"version":1,"rows":[]}`), 0o600); err != nil {
@@ -271,13 +315,14 @@ func TestAnInvalidOverrideFailsBeforeAnyTranscriptIsRead(t *testing.T) {
 		Offline:    true,
 		Clock:      clock.NewFake(goldenNow),
 	}
-	missingRoot := filepath.Join(t.TempDir(), "no-such-root")
-	code, stdout, stderr := auditWith(t, Options{Served: served}, "--root", missingRoot)
-	if code != 1 || stdout != "" {
-		t.Errorf("exit %d, stdout %q; want 1 and nothing", code, stdout)
+	root := fixture(t, "claude/projects")
+	code, stdout, stderr := auditWith(t, Options{Served: served}, "--since", "99999d", "--root", root)
+	if code != 0 || stderr != "" {
+		t.Fatalf("exit %d, stderr %q; want 0 and nothing", code, stderr)
 	}
-	if !strings.HasPrefix(stderr, "pfm tokens: the price table cannot load (pfm model-cost): ") ||
-		!strings.Contains(stderr, override) || strings.Contains(stderr, missingRoot) {
-		t.Errorf("stderr = %q; want the override named and the root never reached", stderr)
+	want := "data gaps: price override unusable (prices " + override + ": version must be 2, got 1) — " +
+		"dollars use the published table without it"
+	if !strings.Contains(stdout, want) {
+		t.Errorf("stdout lacks %q:\n%s", want, stdout)
 	}
 }

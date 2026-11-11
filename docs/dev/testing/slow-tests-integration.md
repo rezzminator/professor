@@ -336,14 +336,6 @@ newRunJail; real run chat new/end; agentrole.WriteSeatPrompt; tmux socket and pe
 
 A — lifecycle and crumb cleanup are asserted after a real jailed chat kill.
 
-### TestCommandSpawnerUsesNohupWhenSetsidIsAbsent
-
-**Source:** [pfm/internal/kill/spawn_nohup_test.go](../../../pfm/internal/kill/spawn_nohup_test.go) line 23 · **Observed:** 1.06s · **Class:** subprocess/timeout
-
-writes executable nohup fixture; CommandSpawner.Spawn; helper sleeps 1 s and writes done/argv; parent context cancellation.
-
-A — nohup branch intentionally launches a detached child; sleep is child-process cost, not CPU.
-
 ### TestChatKeysDrivesALiveChat
 
 **Source:** [pfm/cmd/pfm/chat_keys_jail_test.go](../../../pfm/cmd/pfm/chat_keys_jail_test.go) line 54 · **Observed:** 0.64s · **Class:** process/tmux

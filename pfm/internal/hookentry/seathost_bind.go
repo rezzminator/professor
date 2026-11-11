@@ -52,9 +52,9 @@ func bindNativeHost(
 		}
 	}
 	identity := resolve.CallerEnvironment()
-	// A pane herdr-keep holds names its relay and birth pane; the seat records Herdr's own.
-	keep := gather.HerdrKeep(proc)
-	socket, pane, err := keep.Upstream(ctx, identity.HerdrSocket, identity.HerdrPane)
+	// A pane herdr-shield holds names its relay and birth pane; the seat records Herdr's own.
+	shield := gather.HerdrShield(proc)
+	socket, pane, err := shield.Upstream(ctx, identity.HerdrSocket, identity.HerdrPane)
 	if err != nil {
 		return seat, fmt.Errorf("resolve caller socket: %w", err)
 	}
@@ -69,7 +69,7 @@ func bindNativeHost(
 	if err != nil {
 		return seat, err
 	}
-	info, found, err := herdr.LocatePane(ctx, keep, socket, asked, chain)
+	info, found, err := herdr.LocatePane(ctx, shield, socket, asked, chain)
 	if err == nil && !found {
 		err = fmt.Errorf("no pane of %s holds the supervisor", socket)
 	}
@@ -99,7 +99,7 @@ func bindNativeHost(
 		args[2] != seat.SeatID {
 		return seat, errors.New("supervisor must exec exact seat-host role")
 	}
-	process, err := keep.Read(ctx, socket, info.ID)
+	process, err := shield.Read(ctx, socket, info.ID)
 	if err != nil {
 		return seat, fmt.Errorf("read caller shell: %w", err)
 	}
@@ -132,7 +132,17 @@ func bindNativeHost(
 		return seat, err
 	}
 	if err := db.UpdateSeat(ctx, seat, next); err != nil {
-		return seat, fmt.Errorf("persist supervisor binding: %w", err)
+		// A gather proof publishes this same binding without the seat lock: adopt it, refuse any other.
+		stored, found, readErr := db.Seat(ctx, seat.SeatID)
+		adopted := stored
+		adopted.HerdrSocket, adopted.HerdrPane = next.HerdrSocket, next.HerdrPane
+		adopted.HerdrWorkspace, adopted.HerdrTerminalID = next.HerdrWorkspace, next.HerdrTerminalID
+		adopted.SeatHostPID, adopted.SeatHostStart, adopted.SeatHostBirth = next.SeatHostPID, next.SeatHostStart,
+			next.SeatHostBirth
+		if readErr != nil || !found || adopted != stored {
+			return seat, fmt.Errorf("persist supervisor binding: %w", errors.Join(err, readErr))
+		}
+		next = stored
 	}
 	proved, owned, err := gather.ProveHerdrSeat(ctx, db, proc, next)
 	if err != nil || !owned {

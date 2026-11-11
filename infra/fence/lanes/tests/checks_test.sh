@@ -191,7 +191,7 @@ graph_order() {
 }
 static_names() { sed -n '/^BARRIER$/,$p' "$T/registered" | sed '1d' | sort | paste -sd, -; }
 pfm_static='pfm.lint-new,pfm.fmt-check,pfm.vet,pfm.vet-darwin,pfm.arch,pfm.testplan'
-templates_static='templates.check-map,templates.clone,templates.leak,templates.plugin-logs,templates.plugin-lab,templates.placeholders,templates.scratch-paths,templates.descriptions,templates.mirrors,templates.generated-agents,templates.release-check,templates.refresh-scope,templates.worktree-script,templates.dev-report,templates.format-md,templates.flight-templates,templates.theme-glyphs,templates.test-tests,templates.unit-path-tests,templates.engine-sync-action-tests,templates.skill-tests'
+templates_static='templates.check-map,templates.clone,templates.leak,templates.plugin-logs,templates.plugin-lab,templates.placeholders,templates.scratch-paths,templates.descriptions,templates.mirrors,templates.generated-agents,templates.release-check,templates.refresh-scope,templates.plugin-workflows,templates.worktree-script,templates.dev-report,templates.format-md,templates.theme-glyphs,templates.test-tests,templates.unit-path-tests,templates.engine-sync-action-tests,templates.skill-tests'
 heavy_names='pfm.e2e,pfm.fmt-check,pfm.lint-new,pfm.race,pfm.unit,pfm.vet,pfm.vet-darwin,templates.check-map'
 if gate_run all >"$T/all.out" &&
   [ "$(grep -c '^templates\.leak$' "$T/registered")" -eq 1 ] &&
@@ -802,7 +802,7 @@ case "$1" in
   check) [ "${STUB_ES_CHECK_RC:-0}" -eq 0 ] || echo "STALE AGENTS.md"; exit "${STUB_ES_CHECK_RC:-0}" ;;
   build) exit "${STUB_ES_BUILD_RC:-0}" ;;
   global) # renders each name in STUB_ES_RENDER into the --home it is given, as the real binary does
-    while [ $# -gt 0 ]; do [ "$1" = --home ] && home="$2"; shift; done
+    while [ $# -gt 0 ]; do [ "$1" = --home ] && home="$2"; [ "$1" = --source-repo ] && srcrepo="$2"; shift; done
     printf 'HOME=%s XDG_CONFIG_HOME=%s XDG_STATE_HOME=%s XDG_DATA_HOME=%s ENGINE_SYNC_HOME=%s ENGINE_SYNC_STATE=%s CODEX_HOME=%s\n' \
       "$HOME" "${XDG_CONFIG_HOME-unset}" "${XDG_STATE_HOME-unset}" "${XDG_DATA_HOME-unset}" \
       "${ENGINE_SYNC_HOME-unset}" "${ENGINE_SYNC_STATE-unset}" "${CODEX_HOME-unset}" > "$MIRROR_CALLS.env"
@@ -825,6 +825,12 @@ case "$1" in
     if [ "${STUB_ES_UNMAPPED:-0}" -ne 0 ]; then # exit 0 with the OpenCode renderer's warning for a model alias its modelMap lacks
       echo "warn    unmapped OpenCode model alias \"claude-sonnet-5-5\" in $home/agents/beta.md — model omitted"
     fi
+    for f in "$srcrepo"/templates/global/agents/*.md; do # a source naming a server no policy serves warns, as the real renderer does
+      [ -f "$f" ] || continue
+      for tool in $(grep -o 'mcp__nosuch__[a-z_]*' "$f"); do
+        echo "skip    unknown MCP server in tool $tool in $f — no configured or project .mcp.json server serves it; it stays denied"
+      done
+    done
     for n in $STUB_ES_RENDER; do
       printf 'x\n' > "$home/gen-$n.md"; printf 'x\n' > "$home/.codex/agents/$n.toml"; ln -s "$home/gen-$n.md" "$home/.claude/agents/$n.md"
     done
@@ -841,6 +847,7 @@ es_case() { # es_case <function> [VAR=value…]: run it with engine_sync_build s
   : > "$MIRROR_CALLS"; : > "$T/es-build.calls"; : > "$T/es-stage.calls"; : > "$MIRROR_CALLS.policy"; FAILURES=0
   rm -rf "$TMP_BASE/engine-sync/mirror-tree" "$TMP_BASE/engine-sync/mirror-tree.built" "$es_bin" "$es_bin.ok"
   (
+    unset PFM_DEV_REPO_GIT_DIR PFM_DEV_REPO_WORK_TREE # the fence's own tree must never answer for the fixture's git
     [ $# -eq 0 ] || export "$@"
     engine_sync_build() {
       printf 'engine_sync_build %s\n' "$*" >> "$T/es-build.calls"
@@ -965,6 +972,7 @@ mv "$T/saved-roster-policy.json" "$REPO_ROOT/templates/global/engine-sync.json"
 # checks_templates_generated_agents: every machine agent-file declaration is rendered by the
 # engine-sync it built into a jail home; a render error, a short count and an unbuilt binary are each one red step.
 mkdir -p "$REPO_ROOT/templates/global/agents"
+git -C "$REPO_ROOT" init -q # the step asks git which files are ignored; untracked fixture files are ones git would track
 ga_sources() {
   mkdir -p "$REPO_ROOT/templates/global/agents"
   for n in alpha-pro beta-max gamma-lite; do
@@ -1325,6 +1333,32 @@ else
   bad "generated agents, tracked generated drift" "$(cat "$T/es.out")"
 fi
 rm -rf "$REPO_ROOT/templates/generated"
+# A gitignored local-only agent is never judged: its declaration, its unknown MCP tool and its
+# generated twin reach neither the render, the warnings nor the stale comparison.
+printf 'templates/global/agents/local-*.md\ntemplates/generated/agents/local-*.md\n' > "$REPO_ROOT/.gitignore"
+printf -- '---\nname: local-pro\nfrom: local\ntools: Read, mcp__nosuch__x\n---\n' > "$REPO_ROOT/templates/global/agents/local-pro.md"
+mkdir -p "$REPO_ROOT/templates/generated/agents"
+printf -- '---\nname: local-pro\n---\n' > "$REPO_ROOT/templates/generated/agents/local-pro.md"
+es_case checks_templates_generated_agents "STUB_ES_RENDER=$ga_names local-pro"
+if grep -Fq "all $ga_count generated agent(s) render through engine-sync into a jail home" "$T/es.out" &&
+  ! grep -Fq 'local-pro' "$T/es.out" && ! grep -Fq 'unknown MCP server' "$T/es.out" && grep -Fxq 'FAILURES=0' "$T/es.out" && ga_jailed; then
+  ok 'generated agents: a gitignored local-only agent and its generated twin are never declared, rendered or compared'
+else bad 'generated agents, gitignored local agent' "$(cat "$T/es.out")"; fi
+# The same filter keeps every file git would track in the comparison.
+printf -- '---\nname: ghost\n---\n' > "$REPO_ROOT/templates/generated/agents/ghost.md"
+es_case checks_templates_generated_agents "STUB_ES_RENDER=$ga_names"
+if grep -Fq "Only in $REPO_ROOT/templates/generated/agents: ghost.md" "$T/es.out" && ! grep -Fq 'local-pro' "$T/es.out" &&
+  grep -Fq 'FAILSTEP generated agents: tracked templates/generated/agents differs from a fresh render' "$T/es.out" &&
+  grep -Fxq 'FAILURES=1' "$T/es.out" && ga_jailed; then
+  ok 'generated agents: beside an ignored twin, an unignored orphan is still red and named at its repository path'
+else bad 'generated agents, orphan beside an ignored twin' "$(cat "$T/es.out")"; fi
+# A git that cannot list the ignored files is red: never a judgment of everything or of nothing.
+es_case checks_templates_generated_agents "STUB_ES_RENDER=$ga_names" PFM_DEV_REPO_GIT_DIR="$T/no-such-git" PFM_DEV_REPO_WORK_TREE="$REPO_ROOT"
+if [ ! -s "$MIRROR_CALLS" ] && grep -Fq 'FAILSTEP generated agents NOT RENDERED — git could not list the ignored files under templates/' "$T/es.out" &&
+  grep -Fxq 'FAILURES=1' "$T/es.out" && ga_jailed; then
+  ok 'generated agents: a failed git listing of ignored files is NOT RENDERED, red, with engine-sync never run'
+else bad 'generated agents, git listing failure' "$(cat "$MIRROR_CALLS")" "$(cat "$T/es.out")"; fi
+rm -rf "$REPO_ROOT/templates/generated" "$REPO_ROOT/.git" && rm -f "$REPO_ROOT/.gitignore" "$REPO_ROOT/templates/global/agents/local-pro.md"
 
 # skill_unittest_sharded: the skill suites run in parallel shards; any red shard, a skip or no test stays visible.
 mkdir -p "$T/shard/pkg"

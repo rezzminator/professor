@@ -24,7 +24,6 @@ type launchLiteralAllowance struct {
 }
 
 var launchLiteralReaders = map[string]launchLiteralAllowance{
-	"cmd/pfm/chat_call_resume.go": {"reads process identity", []string{"CLAUDE_CODE_SESSION_ID="}},
 	"cmd/pfm/chat_satellite_command.go": {"parses branch input", []string{
 		"usage: pfm chat branch [--engine claude|codex] [--session-id ID] [--cwd DIR] ",
 		"pfm chat branch: no ambient session id; pass --engine and --session-id",

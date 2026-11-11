@@ -94,6 +94,8 @@ func From(
 	reader := bufio.NewReaderSize(file, 64<<10)
 	entries = make([]Entry, 0, 8)
 	consumed = offset
+	malformed := 0
+	defer func() { warnMalformedLines(path, malformed) }()
 	for {
 		if err := ctx.Err(); err != nil {
 			return entries, consumed, err
@@ -101,7 +103,11 @@ func From(
 		line, readErr := reader.ReadBytes('\n')
 		if readErr == nil {
 			consumed += int64(len(line))
-			if entry, ok := Parse(line, engine); ok {
+			entry, ok, bad := parseLine(line, engine)
+			if bad {
+				malformed++
+			}
+			if ok {
 				entries = append(entries, entry)
 			}
 			continue

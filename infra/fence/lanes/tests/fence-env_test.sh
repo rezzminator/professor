@@ -3,7 +3,9 @@
 # fence mounts $ENGINE_SYNC_SRC, else the worktree's own plugins/engine-sync, else the main checkout's,
 # read-only at /engine-sync; an absent source mounts the common Git directory in
 # its place and names the absence in PFM_DEV_ENGINE_SYNC_MISSING, and a relative
-# ENGINE_SYNC_SRC is refused. A real main checkout and a linked worktree, no docker.
+# ENGINE_SYNC_SRC is refused. The harvester and herdr-shield sources resolve the
+# same way; an absent herdr-shield source leaves PFM_DEV_HERDR_SHIELD_SRC empty and
+# names itself. A real main checkout and a linked worktree, no docker.
 #
 #   bash infra/fence/lanes/tests/fence-env_test.sh
 #   FENCE_ENV_SUT=/tmp/old/fence-env.sh bash …/fence-env_test.sh   # red-first
@@ -28,7 +30,7 @@ COMMON="$MAIN/.git"
 resolve() { # resolve <worktree> [VAR=value…]: the engine-sync exports, one per line, or the resolver's error and exit
   local root="$1"; shift
   (
-    unset ENGINE_SYNC_SRC HARVESTER_SRC
+    unset ENGINE_SYNC_SRC HARVESTER_SRC HERDR_SHIELD_SRC
     [ $# -eq 0 ] || export "$@"
     ROOT="$root" FENCE_CALLER=fence-env-test . "$SUT"
     printf 'SRC=%s\nMISSING=%s\n' "$PFM_DEV_ENGINE_SYNC_SRC" "$PFM_DEV_ENGINE_SYNC_MISSING"
@@ -91,7 +93,7 @@ else bad 'relative ENGINE_SYNC_SRC' "rc=$rc" "got: $out"; fi
 harvester_resolve() {
   local root="$1"; shift
   (
-    unset HARVESTER_SRC
+    unset HARVESTER_SRC HERDR_SHIELD_SRC
     [ $# -eq 0 ] || export "$@"
     ROOT="$root" FENCE_CALLER=fence-env-test . "$SUT"
     printf 'SRC=%s\nMISSING=%s\n' "$PFM_DEV_HARVESTER_SRC" "$PFM_DEV_HARVESTER_MISSING"
@@ -116,4 +118,63 @@ out="$(harvester_resolve "$T/linked" HARVESTER_SRC=plugins/harvester)"; rc=$?
 if [ "$rc" -eq 1 ] && [[ "$out" == *'HARVESTER_SRC must be an absolute path: plugins/harvester' ]]; then
   ok 'relative harvester source is refused by name'
 else bad 'relative harvester source' "rc=$rc" "$out"; fi
+
+herdr_shield_resolve() { # herdr_shield_resolve <worktree> [VAR=value…]: the herdr-shield exports, or the resolver's error and exit
+  local root="$1"; shift
+  (
+    unset ENGINE_SYNC_SRC HARVESTER_SRC HERDR_SHIELD_SRC
+    [ $# -eq 0 ] || export "$@"
+    ROOT="$root" FENCE_CALLER=fence-env-test . "$SUT"
+    printf 'SRC=%s\nMISSING=%s\n' "$PFM_DEV_HERDR_SHIELD_SRC" "$PFM_DEV_HERDR_SHIELD_MISSING"
+  ) 2>&1
+}
+missing_shield="herdr-shield source missing at $MAIN/plugins/herdr-shield (check out plugins/herdr-shield, or set HERDR_SHIELD_SRC)"
+while IFS='|' read -r name setup override want_src want_missing want_rc; do
+  [ -n "$name" ] || continue
+  eval "$setup"
+  out="$(herdr_shield_resolve "$T/linked" $override)"; rc=$?
+  if [ "$want_rc" = 1 ]; then want="$want_missing"; else want="$(printf 'SRC=%s\nMISSING=%s' "$want_src" "$want_missing")"; fi
+  if [ "$rc" -eq "$want_rc" ] && [ "$out" = "$want" ]; then ok "herdr-shield: $name"
+  else bad "herdr-shield: $name" "rc=$rc want rc=$want_rc" "got: $out" "want: $want"; fi
+done <<EOF
+an absent source leaves the source empty and names the missing path|:|||$missing_shield|0
+a linked worktree resolves the main checkout's herdr-shield|mkdir -p "$MAIN/plugins/herdr-shield"; : >"$MAIN/plugins/herdr-shield/Cargo.toml"||$MAIN/plugins/herdr-shield||0
+the worktree's own herdr-shield wins over the main checkout's|mkdir -p "$T/linked/plugins/herdr-shield"; : >"$T/linked/plugins/herdr-shield/Cargo.toml"||$T/linked/plugins/herdr-shield||0
+an absolute HERDR_SHIELD_SRC is the source|mkdir -p "$T/shield-elsewhere"; : >"$T/shield-elsewhere/Cargo.toml"|HERDR_SHIELD_SRC=$T/shield-elsewhere|$T/shield-elsewhere||0
+a relative HERDR_SHIELD_SRC exits 1 naming it|:|HERDR_SHIELD_SRC=plugins/herdr-shield||fence-env-test: HERDR_SHIELD_SRC must be an absolute path: plugins/herdr-shield|1
+EOF
+# The main checkout's gitignored infra/fence/.env (local-env.sh) reaches a linked
+# worktree; a set variable wins; a broken line or an unknown key is refused by name.
+local_env() { # local_env <worktree> [VAR=value…]: the two overrides, or the resolver's error and exit
+  local root="$1"; shift
+  (
+    unset PFM_GOPROXY PFM_NPM_REGISTRY ENGINE_SYNC_SRC HARVESTER_SRC HERDR_SHIELD_SRC
+    [ $# -eq 0 ] || export "$@"
+    ROOT="$root" FENCE_CALLER=fence-env-test . "$SUT"
+    printf 'GOPROXY=%s\nNPM=%s\n' "${PFM_GOPROXY-unset}" "${PFM_NPM_REGISTRY-unset}"
+  ) 2>&1
+}
+out="$(local_env "$T/linked")"; rc=$?
+if [ "$rc" -eq 0 ] && [ "$out" = "$(printf 'GOPROXY=unset\nNPM=unset')" ]; then ok 'no infra/fence/.env exports nothing'
+else bad 'absent local env' "rc=$rc" "$out"; fi
+mkdir -p "$MAIN/infra/fence"
+printf '# this machine\n\nPFM_GOPROXY=https://go.example.invalid/api/go,direct\nPFM_NPM_REGISTRY=https://npm.example.invalid/\n' >"$MAIN/infra/fence/.env"
+out="$(local_env "$T/linked")"; rc=$?
+if [ "$rc" -eq 0 ] && [ "$out" = "$(printf 'GOPROXY=https://go.example.invalid/api/go,direct\nNPM=https://npm.example.invalid/')" ]; then
+  ok "a linked worktree loads the main checkout's infra/fence/.env"
+else bad 'local env from a linked worktree' "rc=$rc" "$out"; fi
+out="$(local_env "$T/linked" PFM_GOPROXY=)"; rc=$?
+if [ "$rc" -eq 0 ] && [ "$out" = "$(printf 'GOPROXY=\nNPM=https://npm.example.invalid/')" ]; then ok 'a set variable wins over infra/fence/.env'
+else bad 'environment wins' "rc=$rc" "$out"; fi
+printf 'PFM_GOPROX=https://go.example.invalid\n' >"$MAIN/infra/fence/.env"
+out="$(local_env "$T/linked")"; rc=$?
+if [ "$rc" -eq 1 ] && [ "$out" = "fence-env-test: infra/fence/.env line 1: unknown key PFM_GOPROX (known: PFM_GOPROXY, PFM_NPM_REGISTRY): $MAIN/infra/fence/.env" ]; then
+  ok 'an unknown infra/fence/.env key is refused by name'
+else bad 'unknown local env key' "rc=$rc" "$out"; fi
+printf 'export PFM_GOPROXY\n' >"$MAIN/infra/fence/.env"
+out="$(local_env "$T/linked")"; rc=$?
+if [ "$rc" -eq 1 ] && [ "$out" = "fence-env-test: infra/fence/.env line 1 is not KEY=value: $MAIN/infra/fence/.env" ]; then
+  ok 'a malformed infra/fence/.env line is refused by name'
+else bad 'malformed local env line' "rc=$rc" "$out"; fi
+rm -f "$MAIN/infra/fence/.env"
 shtest_end

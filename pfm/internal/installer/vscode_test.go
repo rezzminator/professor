@@ -139,34 +139,6 @@ func TestVSCodeTerminalProfileRefusesAnOperatorProfileWithTheSameName(t *testing
 	}
 }
 
-func TestVSCodeProfileConflictRefusesApplyBeforeInstallerWrites(t *testing.T) {
-	t.Parallel()
-	home := t.TempDir()
-	settings := filepath.Join(home, "settings.json")
-	original := `{"terminal.integrated.profiles.linux":{"PFM":{"path":"/operator/shell"}}}`
-	writeFixture(t, settings, original)
-
-	_, err := Run(context.Background(), Options{
-		MCPConfigPath: testConfigPath(t),
-		Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, VSCode: true,
-		vscodePlatform: "linux", vscodeSettingsPaths: []string{settings},
-	})
-	if err == nil || !strings.Contains(err.Error(), `profile "PFM" already exists and is not PFM-owned`) {
-		t.Fatalf("apply error=%v, want preflight profile conflict", err)
-	}
-	if got := readFixture(t, settings); got != original {
-		t.Fatalf("conflicting apply changed settings.json: %q", got)
-	}
-	for _, path := range []string{
-		filepath.Join(home, ".zshrc"),
-		filepath.Join(home, ".local", "share", "pfm", "install"),
-	} {
-		if _, statErr := os.Lstat(path); !os.IsNotExist(statErr) {
-			t.Fatalf("preflight conflict wrote %s: %v", path, statErr)
-		}
-	}
-}
-
 func TestVSCodeUninstallPreservesAnOperatorOverrideAfterInstall(t *testing.T) {
 	t.Parallel()
 	home := vscodeLawHome(t)
@@ -289,14 +261,14 @@ func TestVSCodeDarwinUsesTheOSXTerminalKeysAndUserSettingsPath(t *testing.T) {
 	t.Parallel()
 	home := vscodeLawHome(t)
 	settings := filepath.Join(home, "Library", "Application Support", "Code", "User", "settings.json")
-	paths := (&engine{options: Options{Home: home, vscodePlatform: "darwin"}}).vscodeSettingsPaths()
+	paths := (&engine{options: Options{Home: home, vscodePlatform: vscodePlatformOSX}}).vscodeSettingsPaths()
 	if len(paths) != 1 || paths[0] != settings {
 		t.Fatalf("darwin settings paths=%q, want %q", paths, settings)
 	}
 	if _, err := Run(context.Background(), Options{
 		MCPConfigPath: testConfigPath(t),
 		Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, VSCode: true,
-		vscodePlatform: "darwin", vscodeSettingsPaths: []string{settings},
+		vscodePlatform: vscodePlatformOSX, vscodeSettingsPaths: []string{settings},
 	}); err != nil {
 		t.Fatal(err)
 	}

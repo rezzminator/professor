@@ -59,7 +59,7 @@ grep '^cmd/pfm/' "$L/src.list" > "$L/cmd.list"
 # A package's front door is the file named for its package clause, {package}.go
 # (main.go for package main): front.list holds "<dir> <front door>" per package
 # directory, front.files the front doors that exist. C1 and C31 read them.
-awk '/^package / { d = FILENAME; f = $2 ".go"; if (sub(/\/[^/]*$/, "", d)) f = d "/" f; else d = "."; print d " " f; nextfile }' \
+awk '/^package / { d = FILENAME; f = $2 ".go"; if (sub(/\/[^\/]*$/, "", d)) f = d "/" f; else d = "."; print d " " f; nextfile }' \
   $(cat "$L/src.list") | sort -u -k1,1 > "$L/front.list" || { say setup ERROR "awk could not read the package clauses"; exit 2; }
 [ -s "$L/front.list" ] || { say setup ERROR "no package clause parsed under $PFM — the enumerator did not run"; exit 2; }
 awk '{print $2}' "$L/front.list" | sort -u | comm -12 - "$L/src.list" > "$L/front.files"
@@ -647,7 +647,7 @@ chk_C31() {
       FILENAME == ARGV[1] { front[$1] = $2; isfront[$2]; next }
       FILENAME == ARGV[2] {
         if ($0 in isfront) next
-        d = $0; b = $0; if (!sub(/\/[^/]*$/, "", d)) d = "."; sub(/.*\//, "", b)
+        d = $0; b = $0; if (!sub(/\/[^\/]*$/, "", d)) d = "."; sub(/.*\//, "", b)
         others[d] = others[d] SUBSEP b; next
       }
       FNR == 1 { block = "" }

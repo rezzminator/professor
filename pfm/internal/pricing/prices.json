@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "fetched_at": "2026-11-10T18:21:13Z",
+  "fetched_at": "2026-11-11T13:15:11Z",
   "sources": [
     {"provider":"anthropic","url":"https://platform.claude.com/docs/en/about-claude/pricing.md"},
     {"provider":"openai","url":"https://developers.openai.com/api/docs/pricing.md"}

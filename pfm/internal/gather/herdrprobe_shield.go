@@ -103,7 +103,7 @@ func herdrShieldMovedPane(
 ) (*herdr.Pane, error) {
 	holders, err := shield.Running(ctx, seat.HerdrSocket)
 	if err != nil {
-		return nil, fmt.Errorf("terminal not present in pane.list; follow a moved herdr-shield holder: %w", err)
+		return nil, fmt.Errorf("%w; follow a moved herdr-shield holder: %w", errHerdrPaneAbsent, err)
 	}
 	if len(holders) == 0 {
 		return nil, nil
@@ -117,7 +117,8 @@ func herdrShieldMovedPane(
 		}
 		if err != nil {
 			return nil, fmt.Errorf(
-				"terminal not present in pane.list; follow a moved herdr-shield holder: read supervisor ancestry %d: %w",
+				"%w; follow a moved herdr-shield holder: read supervisor ancestry %d: %w",
+				errHerdrPaneAbsent,
 				pid,
 				err,
 			)

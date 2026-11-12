@@ -41,7 +41,7 @@ RUN if [ -n "$PFM_NPM_REGISTRY" ]; then export NPM_CONFIG_REGISTRY="$PFM_NPM_REG
  && TOOLS_BIN=/usr/local/bin bash /opt/pfm-tools/tools.sh
 WORKDIR /worktree
 # Every image built from this file, by any builder (compose, a plain
-# `docker build`, a lane root committed from a container of it), carries
+# `docker build`), carries
 # the fence label; fence housekeeping prunes dangling images by it
 # (infra/fence/housekeeping.sh).
 LABEL pfm.fence=1
@@ -65,6 +65,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
  && rm -rf /var/lib/apt/lists/* \
  && google-chrome-stable --version
 
-# pfm-dev carries the real headless Herdr used by the native-seat lane.
+# pfm-dev carries the pinned real headless Herdr.
 FROM pfm-base AS pfm-dev
 RUN bash /opt/pfm-tools/pinned-tools.sh /usr/local herdr

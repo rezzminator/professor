@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
@@ -23,6 +25,9 @@ func bindNativeHost(
 	seat fleetdb.Seat,
 	values paths.Values,
 ) (result fleetdb.Seat, returnErr error) {
+	if err := awaitReservedPane(ctx, db, seat); err != nil {
+		return seat, err
+	}
 	key := fleetdb.ConversationIdentity(seat.SessionID, seat.SeatID)
 	unlock, err := fleetdb.LockSeat(ctx, values, key)
 	if err != nil {
@@ -156,4 +161,36 @@ func bindNativeHost(
 		)
 	}
 	return proved, nil
+}
+
+// reservedPaneWait bounds a new tab's supervisor waiting for its pane address:
+// SpawnHerdr reserves the seat before layout.apply and records the pane Herdr
+// names in its answer, and the supervisor that answer started can run first.
+var reservedPaneWait = 5 * time.Second
+
+const reservedPanePoll = 20 * time.Millisecond
+
+// awaitReservedPane returns once seat's durable row names a pane or terminal,
+// so the bind compares the caller with the reserved pane, never with none.
+func awaitReservedPane(ctx context.Context, db *fleetdb.Store, seat fleetdb.Seat) error {
+	deadline := clock.Real.Now().Add(reservedPaneWait)
+	for seat.HerdrPane == "" && seat.HerdrTerminalID == "" {
+		if !clock.Real.Now().Before(deadline) {
+			return fmt.Errorf("reservation %s names no Herdr pane after %s", seat.SeatID, reservedPaneWait)
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("await reserved pane of %s: %w", seat.SeatID, ctx.Err())
+		case <-clock.Real.After(reservedPanePoll):
+		}
+		current, found, err := db.Seat(ctx, seat.SeatID)
+		if err != nil {
+			return fmt.Errorf("read reservation %s: %w", seat.SeatID, err)
+		}
+		if !found || current.EndPending {
+			return errors.New("seat absent or pending end")
+		}
+		seat = current
+	}
+	return nil
 }

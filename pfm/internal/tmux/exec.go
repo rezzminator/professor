@@ -152,7 +152,8 @@ func (command *Cmd) begin() {
 }
 
 // finish writes the one record with the exit code: a non-zero exit is tmux
-// answering (INFO, err carried), exit -1 is a tmux that never started (ERROR),
+// answering (INFO, err carried), exit -1 is a tmux that never started (ERROR,
+// or INFO when the caller cancelled it: obs.CancelLevel),
 // and a clean exit is DEBUG unless it took obs.SlowCall or longer (INFO) —
 // obs.RoutineLevel, the rule db.statement follows too. A second completion of
 // the same Cmd writes nothing.
@@ -171,7 +172,7 @@ func (command *Cmd) finish(err error) {
 	case errors.As(err, &exitErr):
 		exit = exitErr.ExitCode()
 	default:
-		exit, failure = -1, slog.LevelError
+		exit, failure = -1, obs.CancelLevel(err)
 	}
 	elapsed := command.clock.Now().Sub(command.started)
 	attrs := []slog.Attr{

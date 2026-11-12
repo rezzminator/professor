@@ -103,7 +103,8 @@ func onSocket(sock string) string {
 // seatsWhere is the seats matching a SQL condition: session id -> seat id, Herdr pane.
 func seatsWhere(c *harness.Ctx, condition string) map[string][2]string {
 	seats := map[string][2]string{}
-	out := read(c, "sqlite3", "-separator", "\t", stateDB(),
+	// pfm writes the database while a branch reads it: wait out its lock, as pfm's own readers do.
+	out := read(c, "sqlite3", "-cmd", ".timeout 5000", "-separator", "\t", stateDB(),
 		"select session_id, seat_id, coalesce(herdr_pane, '') from seat where "+condition)
 	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
 		if f := strings.Split(line, "\t"); len(f) == 3 {

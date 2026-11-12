@@ -8,15 +8,13 @@ import (
 	"sort"
 	"time"
 
-	modernsqlite "modernc.org/sqlite"
-
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 )
 
 const (
-	sqliteBusyCode = 5
 	busyRetryDelay = 25 * time.Millisecond
 
 	// effectiveKilled is a per-connection mirror of the shared store's killed
@@ -103,7 +101,7 @@ func (s *Store) killedWrite(
 	// table, and this record adds the retry count around the whole attempt.
 	op := obs.SQL(ctx, storeKind, "UPDATE hidden")
 	err := write()
-	if !isSQLiteBusy(err) {
+	if !sqlitedb.Busy(err) {
 		op.End(1, err)
 		return err
 	}
@@ -119,7 +117,7 @@ func (s *Store) killedWrite(
 
 	op.Retries++
 	err = write()
-	if !isSQLiteBusy(err) {
+	if !sqlitedb.Busy(err) {
 		op.End(1, err)
 		return err
 	}
@@ -144,12 +142,6 @@ func (s *Store) killedWrite(
 		)
 	}
 	return err
-}
-
-func isSQLiteBusy(err error) bool {
-	var sqliteError *modernsqlite.Error
-	return errors.As(err, &sqliteError) &&
-		sqliteError.Code()&0xff == sqliteBusyCode
 }
 
 // UpsertKilled inserts or replaces a row in the RETIRED local killed table.
@@ -263,7 +255,7 @@ func (s *Store) activeKilledRecords(
 				return deleteErr
 			})
 			if err != nil {
-				if !isSQLiteBusy(err) { // killedWrite already warned a busy store
+				if !sqlitedb.Busy(err) { // killedWrite already warned a busy store
 					s.warningf("WARNING: pfm could not lift the expired clear-kill of %q in %s; it stays killed: %v\n",
 						id, s.state.Path(), err)
 				}

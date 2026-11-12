@@ -855,3 +855,22 @@ func TestClaudeStatuslineInputRendersThroughPfmsOwnDecoder(t *testing.T) {
 		t.Fatalf("statusline input = %s", raw)
 	}
 }
+
+func TestParseClaudeArgsRemoteControlName(t *testing.T) {
+	for _, row := range []struct {
+		name           string
+		args           []string
+		prompt, resume string
+	}{
+		{"a name before the resume", []string{"--remote-control", "my chat: [1,2]", "--resume", fixtureSession}, "", fixtureSession},
+		{"no name, then a flag", []string{"--remote-control", "--settings", "{}", "hello"}, "hello", ""},
+		{"the equals form", []string{"--remote-control=-dash", "hello"}, "hello", ""},
+		{"the terminator", []string{"--remote-control", "--", "hello"}, "hello", ""},
+	} {
+		call := parseClaudeArgs(row.args)
+		if call.prompt != row.prompt || call.resumeID != row.resume {
+			t.Errorf("%s: parseClaudeArgs(%q) prompt %q resume %q, want prompt %q resume %q",
+				row.name, row.args, call.prompt, call.resumeID, row.prompt, row.resume)
+		}
+	}
+}

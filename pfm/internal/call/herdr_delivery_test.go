@@ -608,12 +608,16 @@ func TestHerdrRawOwnershipRevokedBeforePaste(t *testing.T) {
 
 // agent.prompt may acknowledge input before Claude's hooks publish a turn.
 // Only a new, same-agent working/completion event may upgrade that receipt.
+// slowReadSettle is the proof-settle budget of the slow-read case, whose one proof read takes twice it.
+const slowReadSettle = 200 * time.Millisecond
+
 func TestHerdrNativeDeliveryWaitsForTurnEvidence(t *testing.T) {
 	for _, test := range []struct {
 		name, status, detail string
 	}{
 		{"delayed-working", statusDelivered, "turn confirmed"},
 		{"delayed-completion", statusDelivered, "turn confirmed"},
+		{"slow-read", statusDelivered, "turn confirmed"},
 		{"unchanged", statusDeliveredUnproven, "no started turn within"},
 		{"idle-sequence-only", statusDeliveredUnproven, "no started turn within"},
 		{"stale-working", statusDeliveredUnproven, "no started turn within"},
@@ -665,6 +669,11 @@ func TestHerdrNativeDeliveryWaitsForTurnEvidence(t *testing.T) {
 					case "replaced-session":
 						agent["agent_session"].(map[string]string)["value"] = "two"
 						agent["agent_status"], agent["state_change_seq"] = "working", 9
+					case "slow-read": // a loaded machine: the read outlives the settle budget, then sees the turn
+						if req.Method == "agent.get" {
+							time.Sleep(2 * slowReadSettle)
+							agent["agent_status"], agent["state_change_seq"] = "working", 9
+						}
 					case "read-refused":
 						return nil, "proof_read_failed"
 					case "malformed":
@@ -678,6 +687,9 @@ func TestHerdrNativeDeliveryWaitsForTurnEvidence(t *testing.T) {
 			target := Target{Backend: "herdr", SocketPath: socket.path, Pane: "w1:p2", Engine: "cc"}
 			engine := nativeEngine(t, target)
 			engine.options.ProofSettle, engine.options.Poll = time.Second, 250*time.Millisecond
+			if test.name == "slow-read" {
+				engine.options.ProofSettle = slowReadSettle
+			}
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			clk := &birthPublishClock{Clock: clock.Real, now: clock.Real.Now()}

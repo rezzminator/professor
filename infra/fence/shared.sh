@@ -128,30 +128,7 @@ PFM_FENCE_SCRATCH_DAYS|7|int|=
 PFM_FENCE_GOCACHE_MB|15000|int|=
 PFM_FENCE_GOMOD_MB|4000|int|=
 PFM_FENCE_LINTCACHE_MB|2000|int|=
-PFM_FENCE_CARGO_MB|2000|int|=
-PFM_FENCE_HERDR_SHIELD_TARGET_MB|6000|int|=
 PFM_FENCE_DF_TIMEOUT_S|120|int|=
-LANE_EGRESS_READY_SECS|10|uint|=
-LANE_EGRESS_VERDICT_SECS|30|uint|=
-LANE_STORM_WAIT_SECS|60|int|=
-LANE_STORM_EVERY_SECS|0.5|number|=
-LANE_ALIVE_RETRY_SECS|1|number|=
-LANE_WAIT_LAST_EVERY_SECS|0.5|number|=
-LANE_WAIT_FOR_EVERY_SECS|0.2|number|=
-LANE_HELD_BOOT_SECS|30|uint|=
-PFM_FENCE_LANE_ROOT_LOCK_TICKS|18000|int|=
-PFM_FENCE_LANE_TOLERANCE|1.25|number|=
-PFM_FENCE_LANE_SEQUENCE_S|763|int|=
-PFM_FENCE_LANE_O1_S|70|int|=
-PFM_FENCE_LANE_E1_S|194|int|=
-PFM_FENCE_LANE_E2_S|39|int|=
-PFM_FENCE_LANE_E3_S|14|int|=
-PFM_FENCE_LANE_F_S|134|int|=
-PFM_FENCE_LANE_M_S|156|int|=
-PFM_FENCE_LANE_A_S|49|int|=
-PFM_FENCE_LANE_H_S|unpinned|budget|=
-PFM_FENCE_LANE_HELD_S|unpinned|budget|=
-PFM_FENCE_LANE_O2_S|86|int|=
 CONFIG
 }
 
@@ -167,7 +144,7 @@ _fence_config_default() {
 }
 
 fence_config_resolve() {
-  case "$1" in PFM_FENCE_*|LANE_*) [[ -n "${!1+x}" ]] || { echo "iso: undeclared budget variable $1" >&2; return 1; }; printf '%s\n' "${!1}" ;; *) printf '%s\n' "$1" ;; esac
+  case "$1" in PFM_FENCE_*) [[ -n "${!1+x}" ]] || { echo "iso: undeclared budget variable $1" >&2; return 1; }; printf '%s\n' "${!1}" ;; *) printf '%s\n' "$1" ;; esac
 }
 
 fence_config_values() { # defaults/validation only: safe inside a run and for standalone consumers
@@ -190,7 +167,6 @@ fence_config_values() { # defaults/validation only: safe inside a run and for st
       duration) [[ "$value" =~ ^[1-9][0-9]{0,8}(ms|s|m|h)$ ]] && valid=1 ;;
       network) [[ "$value" == private || "$value" == shared ]] && valid=1 ;;
       trace) [[ "$value" == err || "$value" == x || "$value" == off ]] && valid=1 ;;
-      budget) [[ "$value" == unpinned || "$value" =~ ^[1-9][0-9]{0,8}$ ]] && valid=1 ;;
     esac
     if [[ $valid != 1 ]]; then echo "iso: $name must be $kind (got '$value')" >&2; return 1; fi
     export "$name"
@@ -631,7 +607,7 @@ fence_shared_exec() {
     # GOPROXY rides each run, not the long-lived container's start: a container started under
     # another infra/fence/.env (local-env.sh) still hands this run the caller's proxy; empty is Go's default.
     # Gate knobs: a suite the gate nests starts from none of them (scripts/shtest.sh
-    # shtest_unset_gate_env; infra/fence/lanes/tests/steps_test.sh derives this block's names).
+    # shtest_unset_gate_env; infra/fence/tests/steps_test.sh derives this block's names).
     # Only generated timing artifacts are writable: /pfm-timing is the worktree's timing base.
     envs+=(-e "PFM_FENCE_CPUS=$FENCE_SH_CPUS" -e "PFM_FENCE_HEARTBEAT_S=$PFM_FENCE_HEARTBEAT_S"
       -e "PFM_TEST_TIMING_HOST=$FENCE_SH_HOST/$FENCE_SH_WT/timing")

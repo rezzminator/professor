@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"path/filepath"
 	"strings"
 	"sync"
 
@@ -327,38 +326,6 @@ func (reporter *herdrReporter) resumeArgv(sessionID string) ([]string, error) {
 	}
 	argv[len(argv)-1] = sessionID
 	return append(argv[:3:3], "--restored", sessionID), nil
-}
-
-// tmuxSeatLifecycle updates only this launcher's durable row; it does not
-// change tmux bridge state, hooks, target selection or attach choreography.
-func (reporter *herdrReporter) tmuxSeatLifecycle(ctx context.Context, payload herdrPayload) (returnErr error) {
-	if payload.SessionID == "" ||
-		(reporter.options.event != herdr.EventStart && reporter.options.event != herdr.EventEnd) {
-		return nil
-	}
-	socket := reporter.deps.identity().TmuxSocket()
-	db := fleetdb.OpenSharedState(ctx, *reporter.deps.seatPaths)
-	defer func() {
-		if err := db.Close(); err != nil {
-			returnErr = errors.Join(returnErr, fmt.Errorf("close tmux seat state: %w", err))
-		}
-	}()
-	seat, found, err := db.Seat(ctx, filepath.Base(socket))
-	if err != nil {
-		return fmt.Errorf("read tmux seat: %w", err)
-	}
-	if !found || seat.Backend != "tmux" {
-		return nil
-	}
-	if reporter.options.event == herdr.EventEnd {
-		if payload.Reason == herdrReasonClear || payload.Reason == herdrReasonResume || seat.ReloadPending {
-			return nil
-		}
-		return db.DeleteSeat(ctx, seat.SeatID)
-	}
-	before := seat
-	seat.SessionID = payload.SessionID
-	return db.UpdateSeat(ctx, before, seat)
 }
 
 // herdrPayload is the part of an engine's hook payload the reporter reads.

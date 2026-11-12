@@ -14,11 +14,19 @@ import (
 const stepBound = 10 * time.Second
 
 // herdr: the owner starts Herdr, its default session, in a plain terminal; its first pane opens on
-// pfm's picker and Herdr lists that one pane.
+// pfm's picker and Herdr lists that one pane. When the branch's subtree ends, failed or not, every chat
+// seated on the default session is ended; the session itself stays, as the owner's default does.
 func herdr(c *harness.Ctx, s State) State {
 	s.Term, s.Project = "herdr", s.Home
 	term := c.Terminal(s.Term)
 	term.WaitFor(prompt)
+	c.Cleanup(func() {
+		endSeated(c, herdrSocket(s), func(argv ...string) {
+			if r := c.Read(argv...); r.Code != 0 {
+				c.Logf("teardown of the default Herdr session: %q exited %d: %s%s", argv, r.Code, r.Stderr, r.Stdout)
+			}
+		})
+	})
 	term.Type("herdr\r")
 	return firstPane(c, s)
 }

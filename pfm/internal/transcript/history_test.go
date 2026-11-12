@@ -1,6 +1,7 @@
 package transcript
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -32,6 +33,41 @@ func TestFindHistoryTakesTheNewestMatchOfTheFirstPoolThatHasOne(t *testing.T) {
 	_, err = FindHistory([]string{empty}, slug, sid)
 	if err == nil || !strings.Contains(err.Error(), "no transcript matching sid 'abc'") {
 		t.Fatalf("FindHistory with no match error = %v", err)
+	}
+}
+
+func TestFindCodexHistoryTakesTheNewestRolloutOfTheThread(t *testing.T) {
+	const thread = "71717171-7171-4171-8171-717171717171"
+	first, second := t.TempDir(), t.TempDir()
+	older := filepath.Join(first, "sessions", "2026", "01", "02", "rollout-2026-01-02T03-04-05-"+thread+".jsonl")
+	newer := filepath.Join(second, "archived_sessions", "rollout-2026-01-03T03-04-05-"+thread+".jsonl")
+	other := filepath.Join(first, "sessions", "2026", "01", "02",
+		"rollout-2026-01-04T03-04-05-72727272-7272-4272-8272-727272727272.jsonl")
+	for _, path := range []string{older, newer, other} {
+		writeHistory(t, path, "{}")
+	}
+	base := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	for path, at := range map[string]time.Time{older: base, newer: base.Add(time.Hour), other: base.Add(2 * time.Hour)} {
+		if err := os.Chtimes(path, at, at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, row := range []struct {
+		name, sid string
+		homes     []string
+		want      string
+	}{
+		{"the newest rollout across homes", thread, []string{first, second}, newer},
+		{"a thread id prefix", "7171", []string{first, second}, newer},
+		{"only the home that holds it", thread, []string{first}, older},
+		{"no rollout of the thread", "73737373", []string{first, second}, ""},
+		{"no Codex home", thread, nil, ""},
+		{"an empty sid matches nothing", "", []string{first}, ""},
+	} {
+		got, err := FindCodexHistory(context.Background(), row.homes, row.sid)
+		if err != nil || got != row.want {
+			t.Errorf("%s: FindCodexHistory(%v, %q) = %q, %v; want %q", row.name, row.homes, row.sid, got, err, row.want)
+		}
 	}
 }
 

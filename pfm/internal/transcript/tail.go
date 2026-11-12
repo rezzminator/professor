@@ -1,7 +1,10 @@
 package transcript
 
 import (
+	"bufio"
 	"bytes"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -94,4 +97,33 @@ func lastLineStart(file *os.File, path string, before, size int64) (int64, error
 		return 0, fmt.Errorf("last line of %s is longer than %d bytes", path, int64(maxTailLine))
 	}
 	return lastStart, nil
+}
+
+// ErrNoUUIDEvent is LastUUIDEvent's answer for a Claude transcript holding no
+// turn to continue from, such as one a chat named at birth and ended before its
+// first prompt wrote with only its title.
+var ErrNoUUIDEvent = errors.New("no uuid-bearing event")
+
+// LastUUIDEvent is the last event of a Claude transcript that carries a uuid,
+// the one a resumed turn continues from. A torn line costs that line alone.
+func LastUUIDEvent(raw []byte) (map[string]any, error) {
+	var tail map[string]any
+	scanner := bufio.NewScanner(bytes.NewReader(raw))
+	scanner.Buffer(make([]byte, tailChunk), maxTailLine)
+	for scanner.Scan() {
+		var event map[string]any
+		if json.Unmarshal(scanner.Bytes(), &event) != nil {
+			continue // one torn line costs that line; Append separates a torn tail
+		}
+		if id, _ := event["uuid"].(string); id != "" {
+			tail = event
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("scan transcript for its last uuid-bearing event: %w", err)
+	}
+	if tail == nil {
+		return nil, ErrNoUUIDEvent
+	}
+	return tail, nil
 }

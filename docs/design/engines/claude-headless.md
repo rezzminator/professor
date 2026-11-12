@@ -53,7 +53,7 @@ For Codex, which cannot honour these controls, the run is refused before launch 
 
 ### pfm headless exec
 
-`pfm/cmd/pfm/headless_exec_command.go:29`. `--output-format` defaults to `text`, and only `native` sets Native, so text and json both add `--output-format json` (`:77-81`, `:134`). `--pfm-settings` reads and validates a Claude settings file (`:149-167`). `--tools` and `--setting-sources` pass only when present (`:228-233`); `--system`/`--system-file` set the system prompt (`:207-220`); `--schema`/`--json-schema` the schema (`:211-227`); `--engine-arg` and anything after `--` become `Args` (`:136`); any `--env K=V` makes the environment explicit (`:234-253`). The fence lanes drive it this way (`infra/fence/lanes/O2.sh:433-449`).
+`pfm/cmd/pfm/headless_exec_command.go:29`. `--output-format` defaults to `text`, and only `native` sets Native, so text and json both add `--output-format json` (`:77-81`, `:134`). `--pfm-settings` reads and validates a Claude settings file (`:149-167`). `--tools` and `--setting-sources` pass only when present (`:228-233`); `--system`/`--system-file` set the system prompt (`:207-220`); `--schema`/`--json-schema` the schema (`:211-227`); `--engine-arg` and anything after `--` become `Args` (`:136`); any `--env K=V` makes the environment explicit (`:234-253`).
 
 ### ask
 

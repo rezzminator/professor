@@ -75,19 +75,27 @@ func TestExecOutputRecordsSubcommandTargetExitOnce(t *testing.T) {
 // started is ERROR.
 func TestExecRecordsAtTheLevelOfItsOutcome(t *testing.T) {
 	for _, tc := range []struct {
-		name    string
-		binary  func(t *testing.T) string
-		elapsed time.Duration
-		want    string
+		name      string
+		binary    func(t *testing.T) string
+		elapsed   time.Duration
+		cancelled bool
+		want      string
 	}{
-		{"fast success", func(t *testing.T) string { return fakeTmux(t, 0) }, time.Millisecond, "DEBUG"},
-		{"slow success", func(t *testing.T) string { return fakeTmux(t, 0) }, obs.SlowCall, "INFO"},
-		{"tmux answers non-zero", func(t *testing.T) string { return fakeTmux(t, 1) }, time.Millisecond, "INFO"},
-		{"never started", func(t *testing.T) string { return filepath.Join(t.TempDir(), "no-tmux") }, time.Millisecond, "ERROR"},
+		{"fast success", func(t *testing.T) string { return fakeTmux(t, 0) }, time.Millisecond, false, "DEBUG"},
+		{"slow success", func(t *testing.T) string { return fakeTmux(t, 0) }, obs.SlowCall, false, "INFO"},
+		{"tmux answers non-zero", func(t *testing.T) string { return fakeTmux(t, 1) }, time.Millisecond, false, "INFO"},
+		{"never started", func(t *testing.T) string { return filepath.Join(t.TempDir(), "no-tmux") }, time.Millisecond, false, "ERROR"},
+		// The caller ended the call on purpose, as a closing picker cancels its refresh.
+		{"caller cancelled", func(t *testing.T) string { return fakeTmux(t, 0) }, time.Millisecond, true, "INFO"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fake := clock.NewFake(time.Unix(1700000000, 0))
 			ctx, recorder := obs.Test(t, obs.WithTestClock(fake))
+			if tc.cancelled {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithCancel(ctx)
+				cancel()
+			}
 			command := Exec(ctx, tc.binary(t), "/sockets/cc-1", "list-panes", "-a")
 			if err := command.Start(); err == nil {
 				fake.Advance(tc.elapsed)

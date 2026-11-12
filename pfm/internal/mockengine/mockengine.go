@@ -6,6 +6,24 @@
 // session store, and the MCP-over-HTTP handshake. Behaviour comes from a JSON
 // scenario (MOCK_ENGINE_SCENARIO); a shape pfm has not pinned is refused by
 // name (ExitUnpinned), never invented.
+//
+// Entry point: Main. The other files:
+//
+//   - scenario.go: the scenario, its steps, the inline `mock-engine: ` directive and the step cursor.
+//   - pane.go: the TUI every engine shares — the screen, the idle loop, a turn and its steps, /exit.
+//   - agents.go: the background agents behind an idle composer — their rows, Claude's wait row, a
+//     gated agent's end and the turn that reports it.
+//   - tty.go: the raw terminal and the key decoder.
+//   - claude.go: Claude Code — its pane, hooks fired per beat, transcript, statusline, headless -p.
+//   - claude_resume.go: a resumed Claude transcript's title and a fork's seeded copy.
+//   - claude_tooluse.go: Claude's PostToolUse beat and the tool response it carries.
+//   - hooks.go: the settings hook documents, running a hook command and reading its answer.
+//   - codex.go: Codex — its pane, rollout, app-server and MCP handshake.
+//   - codex_hooks.go: Codex's hook trust and its hooks.json state.
+//   - opencode.go: OpenCode — `opencode run`, its TUI and session store.
+//   - opencode_serve.go: OpenCode's `serve` HTTP API.
+//   - cli.go: the engines' non-chat verbs (plugin marketplace and install records).
+//   - jail.go: the mock's presence on a jailed host — its /proc entry and sid crumb.
 package mockengine
 
 import (

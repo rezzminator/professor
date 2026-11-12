@@ -24,7 +24,13 @@ func InstallConfig(
 ) (config pfmconfig.Config, seeded string, err error) {
 	values, target := runtime.Paths, runtime.Config.Path
 	if target == "" {
-		return runtime.Config, "", nil
+		// A first install has no clone marker yet, so the runtime knows no config path; the
+		// clone it installs from names the one the marker will point at.
+		clone, err := installCloneDir(values.Home, installClone)
+		if err != nil || clone == "" {
+			return runtime.Config, "", err
+		}
+		target = filepath.Join(clone, pfmconfig.FileName)
 	}
 	load := func() (pfmconfig.Config, error) {
 		loaded, loadErr := pfmconfig.Load(
@@ -47,23 +53,9 @@ func InstallConfig(
 	if runtime.ConfigExplicit {
 		return runtime.Config, "", nil
 	}
-	clone, markerErr := paths.ReadSourceRepoMarker(values.Home)
-	if markerErr != nil && !errors.Is(markerErr, paths.ErrNoSourceRepoMarker) {
-		return config, "", fmt.Errorf("read source repo marker: %w", markerErr)
-	}
-	if errors.Is(markerErr, paths.ErrNoSourceRepoMarker) && installClone != "" {
-		absolute, absErr := filepath.Abs(installClone)
-		if absErr != nil {
-			return config, "", fmt.Errorf("resolve install clone %q: %w", installClone, absErr)
-		}
-		info, statErr := os.Stat(absolute)
-		if statErr != nil {
-			return config, "", fmt.Errorf("resolve install clone %q: %w", installClone, statErr)
-		}
-		if !info.IsDir() {
-			return config, "", fmt.Errorf("resolve install clone %q: %w", installClone, errors.New("not a directory"))
-		}
-		clone = paths.PhysicalPath(absolute)
+	clone, err := installCloneDir(values.Home, installClone)
+	if err != nil {
+		return config, "", err
 	}
 	if clone == "" {
 		return runtime.Config, "", nil
@@ -88,6 +80,30 @@ func InstallConfig(
 	}
 	config.SeedContent, err = seedWithoutDefaultNewKeys(config)
 	return config, example, err
+}
+
+// installCloneDir is the clone a config seeds from: the source-repo marker's, else, before the
+// first install writes the marker, the clone the install runs from; empty when neither is known.
+func installCloneDir(home, installClone string) (string, error) {
+	clone, markerErr := paths.ReadSourceRepoMarker(home)
+	if markerErr != nil && !errors.Is(markerErr, paths.ErrNoSourceRepoMarker) {
+		return "", fmt.Errorf("read source repo marker: %w", markerErr)
+	}
+	if !errors.Is(markerErr, paths.ErrNoSourceRepoMarker) || installClone == "" {
+		return clone, nil
+	}
+	absolute, err := filepath.Abs(installClone)
+	if err != nil {
+		return "", fmt.Errorf("resolve install clone %q: %w", installClone, err)
+	}
+	info, err := os.Stat(absolute)
+	if err != nil {
+		return "", fmt.Errorf("resolve install clone %q: %w", installClone, err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("resolve install clone %q: %w", installClone, errors.New("not a directory"))
+	}
+	return paths.PhysicalPath(absolute), nil
 }
 
 // seedNewClaudeKeys are the claude keys added since v0.79.0, which a pfm of

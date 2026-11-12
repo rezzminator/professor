@@ -16,9 +16,10 @@ import (
 	"github.com/rezzminator/professor/pfm/journey/harness"
 )
 
-// budget bounds the whole tree, first step start to last step end: phase 2's cap, until the whole
-// phase-2 tree is measured.
-const budget = 600 * time.Second
+// budget bounds the whole tree, first step start to last step end. Its rule: the slowest of three
+// consecutive green local trees (94.4 s, at load 8) times 3.5, CI's Linux leg against local time
+// in phase 1, times 1.5 headroom, rounded up to the next 100 s. Remeasure when the tree grows.
+const budget = 500 * time.Second
 
 // ownerVars is everything a fresh login of the owner has; no multiplexer, engine or test variable.
 var ownerVars = []string{

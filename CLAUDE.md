@@ -61,7 +61,7 @@ Where Vocabulary, Runtime or On demand disagrees with the code on a path, comman
 
 - On the host, `.claude/scripts/dev.sh {status|install|build|typecheck} {templates|pfm}` run in place; `verify`, `test`, `cover`, `all` and `gate` re-run as `dev.sh iso …`, and a host `go test` of a pfm package re-runs it in the fence or, with no fence reachable, refuses · `pfm/internal/testjail/fence.go`
 - Scratch lives in `/tmp/{project}/{purpose}/`: `{project}` is this repo's directory name minus any leading dot (`.professor` → `professor`), derived, never hardcoded.
-- One scratch subdirectory per purpose, owned by its protocol (`/tmp/{project}/{test|fence|lanes}/`); a run never dirties the checkout; a scratch path named to a human or a model is absolute.
+- One scratch subdirectory per purpose, owned by its protocol (`/tmp/{project}/{test|fence}/`); a run never dirties the checkout; a scratch path named to a human or a model is absolute.
 
 ## Fence
 

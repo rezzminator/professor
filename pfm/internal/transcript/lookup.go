@@ -1,12 +1,15 @@
 package transcript
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/rezzminator/professor/pfm/internal/codexmeta"
 )
 
 // FindSessions lists the session transcripts {root}/{project}/{prefix}*.jsonl
@@ -131,4 +134,48 @@ func directories(dir string) (found []string, errs []error) {
 		}
 	}
 	return found, errs
+}
+
+// ResolveHistory is chat history's lookup of sid: FindHistory over the Claude pools, then, when no pool
+// holds it, FindCodexHistory over the Codex homes, since a Codex thread id names a rollout, never a pool
+// file. Found nowhere, the error is FindHistory's.
+func ResolveHistory(ctx context.Context, pools, codexHomes []string, slug, sid string) (string, error) {
+	path, err := FindHistory(pools, slug, sid)
+	if !errors.Is(err, ErrNoHistory) {
+		return path, err
+	}
+	rollout, codexErr := FindCodexHistory(ctx, codexHomes, sid)
+	if codexErr != nil {
+		return "", codexErr
+	}
+	if rollout == "" {
+		return "", err
+	}
+	return rollout, nil
+}
+
+// ErrNoHistory marks FindHistory's miss: no pool holds the sid.
+var ErrNoHistory = errors.New("no Claude transcript")
+
+// FindCodexHistory is the newest-mtime Codex rollout, across each Codex home's sessions and
+// archived_sessions trees, whose thread id starts with sid; "" when none does. A place the walk could
+// not look is an error, never a miss.
+func FindCodexHistory(ctx context.Context, codexHomes []string, sid string) (string, error) {
+	if sid == "" {
+		return "", nil
+	}
+	var newest codexmeta.Rollout
+	for _, home := range codexHomes {
+		rollouts, errs := codexmeta.WalkRollouts(ctx, home, "sessions", "archived_sessions")
+		if len(errs) != 0 {
+			return "", fmt.Errorf("search Codex rollouts under %s: %w", home, errors.Join(errs...))
+		}
+		for _, rollout := range rollouts {
+			if strings.HasPrefix(codexmeta.RolloutID(filepath.Base(rollout.Path)), sid) &&
+				(newest.Path == "" || rollout.ModTime.After(newest.ModTime)) {
+				newest = rollout
+			}
+		}
+	}
+	return newest.Path, nil
 }

@@ -12,11 +12,11 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/theme"
 )
 
-// The fence's lane scripts (infra/fence/lanes: tui_open, tui_selected, tui_cache,
-// tui_account, F.08) and the attach jail drive the real picker through a
-// terminal and read its frame as text. These are the strings they scrape; a
-// redesign that moves one breaks them silently, far from this package — so each
-// is pinned here, at the widths the lanes use and at a width with the dossier.
+// The journey suite's picker steps (pfm/journey) and the attach jail drive the
+// real picker through a terminal and read its frame as text. These are the
+// strings they scrape; a redesign that moves one breaks them silently, far from
+// this package — so each is pinned here, at two terminal widths and at a width
+// with the dossier.
 
 func frameLines(model Model) []string {
 	return strings.Split(ansi.Strip(model.View().Content), "\n")
@@ -38,7 +38,7 @@ func scrapedSelection(model Model) string {
 	return ""
 }
 
-func TestFrameKeepsTheStringsTheLaneScriptsScrape(t *testing.T) {
+func TestFrameKeepsTheStringsTerminalReadersScrape(t *testing.T) {
 	for _, size := range [][2]int{{100, 30}, {160, 38}} {
 		model := selectChat(t, deckModel(size[0], size[1]), "P:BUILDER")
 		model.nowNS = fixtureNowNS
@@ -72,14 +72,14 @@ func TestCarouselWalksOnTheSelectedRowAtEveryWidth(t *testing.T) {
 	}
 }
 
-func TestHeaderAccountAndCacheAreReadableByTheLaneRegexes(t *testing.T) {
+func TestHeaderAccountAndCacheAreReadableByRegex(t *testing.T) {
 	model := deckModel(100, 30)
 	line := strings.Join(frameLines(model), "\n")
 	if got := regexp.MustCompile(`account (\d+) ·`).FindStringSubmatch(line); len(got) != 2 || got[1] != "2" {
-		t.Errorf("tui_account reads %v from the frame", got)
+		t.Errorf("the account regex reads %v from the frame", got)
 	}
 	if got := regexp.MustCompile(`⚡ 1h|🪫 5m`).FindString(line); got != "⚡ 1h" {
-		t.Errorf("tui_cache reads %q from the frame", got)
+		t.Errorf("the cache regex reads %q from the frame", got)
 	}
 }
 
@@ -90,9 +90,9 @@ func TestGroupedCursorRowKeepsItsIndentedChevron(t *testing.T) {
 	}
 }
 
-// F.09 holds the live pane to the golden's shape: a masthead, the Chats context
-// line with the three counts, both footers, and exactly the pane's lines.
-func TestFrameKeepsTheShapeLaneF09Pins(t *testing.T) {
+// The live pane keeps the golden's shape: a masthead, the Chats context line
+// with the three counts, both footers, and exactly the pane's lines.
+func TestFrameKeepsTheGoldensShape(t *testing.T) {
 	model := deckModel(80, 24)
 	model.nowNS = fixtureNowNS
 	lines := frameLines(model)

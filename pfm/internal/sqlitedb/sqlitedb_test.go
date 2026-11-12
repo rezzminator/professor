@@ -3,6 +3,8 @@ package sqlitedb
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -122,5 +124,49 @@ func TestOpenersReachAPathWithURICharacters(t *testing.T) {
 			t.Fatalf("%s handle does not see the store's table: %v", name, err)
 		}
 		_ = database.Close()
+	}
+}
+
+// TestBusyNamesOnlySQLiteBusy pins the one busy door: a write refused by another connection's write
+// lock is busy, wrapped or not; a missing table, a plain error and no error are not.
+func TestBusyNamesOnlySQLiteBusy(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "busy.db")
+	holder, err := OpenReadWrite(path, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = holder.Close() }()
+	if _, err := holder.Exec("CREATE TABLE rows (id TEXT)"); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := holder.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.Exec("INSERT INTO rows VALUES ('held')"); err != nil {
+		t.Fatal(err)
+	}
+	other, err := OpenReadWrite(path, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = other.Close() }()
+	_, busy := other.Exec("INSERT INTO rows VALUES ('refused')")
+	_, missing := other.Exec("SELECT * FROM no_such_table")
+	for _, row := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"a write under another's lock", busy, true},
+		{"the same, wrapped", fmt.Errorf("record: %w", busy), true},
+		{"a missing table", missing, false},
+		{"a plain error", errors.New("busy"), false},
+		{"no error", nil, false},
+	} {
+		if got := Busy(row.err); got != row.want {
+			t.Errorf("Busy(%s: %v) = %v, want %v", row.name, row.err, got, row.want)
+		}
 	}
 }

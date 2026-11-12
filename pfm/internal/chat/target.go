@@ -22,6 +22,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 var (
@@ -81,8 +82,8 @@ func TargetIn(
 // DormantCallTarget decides whether a call every live namespace missed runs
 // the dormant ladder, and on what. A CodeUnknown result that names no
 // ambiguity is answered from the registry first: a dead Claude chat it knows
-// resumes through its own transcript, the returned ladder target; any other
-// dead chat becomes a CodeDead result naming its engine, session and how to
+// resumes through its own transcript, the returned ladder target, once that
+// transcript holds a turn to continue from; any other dead chat becomes a CodeDead result naming its engine, session and how to
 // revive it, and a registry that could not be read a CodeUndelivered one. A
 // target the registry does not know, or a live row the call engine missed,
 // reaches the ladder as typed. dormant is false when the result stands.
@@ -109,7 +110,21 @@ func DormantCallTarget(
 	if chat.Engine == pfmengine.Claude && chat.Path != "" {
 		info, statErr := os.Stat(chat.Path)
 		if statErr == nil && info.Mode().IsRegular() {
-			return result, chat.Path, true
+			raw, readErr := os.ReadFile(chat.Path)
+			if readErr != nil {
+				result.Code = pfmcall.CodeUndelivered
+				result.Message = fmt.Sprintf("read transcript of %q: %v", name, readErr)
+				return result, name, false
+			}
+			_, tailErr := transcript.LastUUIDEvent(raw)
+			if tailErr == nil {
+				return result, chat.Path, true
+			}
+			if !errors.Is(tailErr, transcript.ErrNoUUIDEvent) {
+				result.Code = pfmcall.CodeUndelivered
+				result.Message = fmt.Sprintf("read transcript of %q: %v", name, tailErr)
+				return result, name, false
+			}
 		}
 		if statErr != nil && !errors.Is(statErr, fs.ErrNotExist) {
 			result.Code = pfmcall.CodeUndelivered

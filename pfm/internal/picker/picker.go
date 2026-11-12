@@ -224,6 +224,10 @@ func Run(
 			scan.Snapshot,
 		)
 		refreshCancel()
+		// The stream closes updates when it ends: wait for it, so no pass in
+		// flight reads the databases the deferred closes are about to shut.
+		for range updates {
+		}
 		warnings.flush(stderr)
 	}
 	if err != nil {

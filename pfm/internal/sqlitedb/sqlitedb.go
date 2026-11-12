@@ -14,8 +14,10 @@ import (
 	"strings"
 	"time"
 
-	_ "modernc.org/sqlite"
+	"modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
@@ -63,8 +65,8 @@ func storePragmas(ctx context.Context, database *sql.DB) error {
 	if _, err := database.ExecContext(ctx, "PRAGMA foreign_keys=ON"); err != nil {
 		return fmt.Errorf("enable foreign keys: %w", err)
 	}
-	var journalMode string
-	if err := database.QueryRowContext(ctx, "PRAGMA journal_mode=WAL").Scan(&journalMode); err != nil {
+	journalMode, err := enableWAL(ctx, database)
+	if err != nil {
 		return fmt.Errorf("enable WAL: %w", err)
 	}
 	if !strings.EqualFold(journalMode, "wal") {
@@ -74,6 +76,34 @@ func storePragmas(ctx context.Context, database *sql.DB) error {
 		return fmt.Errorf("set synchronous mode: %w", err)
 	}
 	return nil
+}
+
+// walRetryDelay spaces enableWAL's attempts.
+const walRetryDelay = 25 * time.Millisecond
+
+// enableWAL switches the file to WAL and returns the journal mode SQLite reports. The switch needs the
+// file to itself, and SQLite answers it SQLITE_BUSY at once, never through the busy handler, while another
+// connection holds the file: the first commands of a fresh machine open a new store together, so a busy
+// switch is retried until StoreBusyTimeout.
+func enableWAL(ctx context.Context, database *sql.DB) (string, error) {
+	deadline := clock.Real.Now().Add(StoreBusyTimeout)
+	for {
+		var mode string
+		err := database.QueryRowContext(ctx, "PRAGMA journal_mode=WAL").Scan(&mode)
+		if err == nil || !Busy(err) || clock.Real.Now().After(deadline) {
+			return mode, err
+		}
+		if sleepErr := clock.Real.Sleep(ctx, walRetryDelay); sleepErr != nil {
+			return "", errors.Join(err, sleepErr)
+		}
+	}
+}
+
+// Busy reports whether err is SQLite's SQLITE_BUSY, extended codes included: the one door every
+// package asks, so a busy store reads the same everywhere.
+func Busy(err error) bool {
+	var sqliteError *sqlite.Error
+	return errors.As(err, &sqliteError) && sqliteError.Code()&0xff == sqlite3.SQLITE_BUSY
 }
 
 // OpenReadOnly opens a database another program is writing, read-only, on one

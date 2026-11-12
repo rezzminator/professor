@@ -1,4 +1,4 @@
-UNPINNED — captured by Tier B E2.09/lanes/capture-shapes.sh (not yet written)
+UNPINNED — no capture of a real Codex screen exists yet
 # Codex's working footer as the TUI paints it. No pfm reader pins this
 # spelling (internal/call/guards.go:13 is engine-agnostic and documents the
 # Codex compaction receipt as a NAMED GAP), so mockengine refuses to render a

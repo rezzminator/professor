@@ -9,7 +9,7 @@
 #   engine_sync_link_stable <bin>   # the plugin wrapper's stable link onto <bin>
 #
 # The source is $ENGINE_SYNC_FENCE_SRC, default /engine-sync: fence-env.sh
-# resolves it on the host and docker-compose.yml and lanes/container.sh mount it
+# resolves it on the host and docker-compose.yml mounts it
 # read-only there; go writes nothing beside it. The binary lands under a
 # temporary name in <out>'s directory and is renamed onto <out>, so a gate step
 # never execs a half-written file another step is still building. A caller

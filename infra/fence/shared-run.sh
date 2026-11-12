@@ -31,7 +31,7 @@
 # kill: SIGKILL to the run's namespaces (the pid namespace's init and all it holds die with it).
 # BROKEN STATE: a bad argument exits 2 naming it; a mount, unshare or module download that fails is a
 # `shared-run: …` line on stderr and exit 1 — never a run outside its namespaces.
-# Seams for infra/fence/lanes/tests/shared-run_test.sh: FENCE_STATE_DIR (default /var/fence) and
+# Seams for infra/fence/tests/shared-run_test.sh: FENCE_STATE_DIR (default /var/fence) and
 # FENCE_HOST_DIR (default /pfm-fence), each outside /root, /tmp and /var/tmp (the run binds over those
 # before it hides the two). PFM_FENCE_CGROUP_ROOT overrides /sys/fs/cgroup for admission tests.
 set -uo pipefail

@@ -32,13 +32,14 @@ func TestHistoryPoolsUsesOnlySharedClaudeRoot(t *testing.T) {
 	if err := os.MkdirAll(account, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	got, err := historyPools()
+	t.Setenv(pfmengine.MustLookup(pfmengine.Codex).RootEnv, "")
+	got, codex, err := historyPools()
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := filepath.Join(home, ".claude", "projects")
-	if len(got) != 1 || got[0] != want {
-		t.Fatalf("history roots = %q, want [%q]", got, want)
+	want, wantCodex := filepath.Join(home, ".claude", "projects"), filepath.Join(home, ".codex")
+	if len(got) != 1 || got[0] != want || len(codex) != 1 || codex[0] != wantCodex {
+		t.Fatalf("history roots = %q and Codex homes %q, want [%q] and [%q]", got, codex, want, wantCodex)
 	}
 }
 
@@ -282,7 +283,12 @@ func TestChatHistoryUsesConfiguredRootsToResolveTheTranscript(t *testing.T) {
 // TestChatHistoryRendersACodexRollout: a rollout path is read as Codex, its
 // harness instructions and tool calls left out, never as an empty Claude file.
 func TestChatHistoryRendersACodexRollout(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "rollout-2026-01-02T03-04-05-71717171-7171-4171-8171-717171717171.jsonl")
+	codexHome := t.TempDir()
+	path := filepath.Join(codexHome, "sessions", "2026", "01", "02",
+		"rollout-2026-01-02T03-04-05-71717171-7171-4171-8171-717171717171.jsonl")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	lines := strings.Join([]string{
 		`{"timestamp":"2026-01-02T03:04:05Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"# AGENTS.md instructions\n\n<INSTRUCTIONS>\nbe brief\n</INSTRUCTIONS>"}]}}`,
 		`{"timestamp":"2026-01-02T03:04:06Z","type":"event_msg","payload":{"type":"user_message","message":"reply with OK"}}`,
@@ -292,14 +298,21 @@ func TestChatHistoryRendersACodexRollout(t *testing.T) {
 	if err := os.WriteFile(path, []byte(lines), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	var stdout, stderr bytes.Buffer
-	code := runChatSatellite("history", []string{path, "5"}, strings.NewReader(""), &stdout, &stderr, nil, nil,
-		commandRuntime{})
 	want := "== " + path + " · last 5 messages ==\n" +
 		"\n───── 2026-01-02T03:04:06Z · user ─────\nreply with OK\n" +
 		"\n───── 2026-01-02T03:04:08Z · assistant ─────\nOK\n"
-	if code != 0 || stdout.String() != want {
-		t.Fatalf("history code=%d stdout=%q, want 0 and %q; stderr=%q", code, stdout.String(), want, stderr.String())
+	runtime := commandRuntime{Paths: paths.Values{Roots: map[pfmengine.ID][]string{
+		pfmengine.Claude: {t.TempDir()}, pfmengine.Codex: {codexHome},
+	}}}
+	// By its path, and by the Codex thread id alone: no Claude pool holds it, the Codex homes do.
+	for _, sid := range []string{path, "71717171-7171-4171-8171-717171717171"} {
+		var stdout, stderr bytes.Buffer
+		code := runChatSatellite("history", []string{sid, "5", "-fixture-project"}, strings.NewReader(""), &stdout,
+			&stderr, nil, nil, runtime)
+		if code != 0 || stdout.String() != want {
+			t.Fatalf("history %s code=%d stdout=%q, want 0 and %q; stderr=%q", sid, code, stdout.String(), want,
+				stderr.String())
+		}
 	}
 }
 

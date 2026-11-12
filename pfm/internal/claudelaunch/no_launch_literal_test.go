@@ -62,7 +62,7 @@ var launchLiteralReaders = map[string]launchLiteralAllowance{
 		"mock argv",
 		[]string{
 			"--settings", "--system-prompt-file", "--session-id", "--mcp-config",
-			"--resume", "--fork-session", "CLAUDE_CODE_SESSION_ID=",
+			"--resume", "--fork-session", "--remote-control", "CLAUDE_CODE_SESSION_ID=",
 		},
 	},
 	"internal/resolve/whoami.go": {"reads caller session identity", []string{"CLAUDE_CODE_SESSION_ID"}},

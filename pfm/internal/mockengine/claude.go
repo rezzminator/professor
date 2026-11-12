@@ -62,7 +62,9 @@ var (
 		"--json-schema": true, "--tools": true, "--setting-sources": true, "--permission-mode": true,
 		"--add-dir": true, flagMCPConfig: true, "--agent": true, "--input-format": true,
 	}
-	claudeResumeFlags = map[string]bool{"--resume": true, "-r": true}
+	// The flags whose value is optional, taken only when the next word is no flag: --resume's id and
+	// --remote-control's chat name (internal/claudelaunch/remote_control.go), never a launch prompt.
+	claudeOptionalValueFlags = map[string]bool{"--resume": true, "-r": true, "--remote-control": true}
 )
 
 func parseClaudeArgs(args []string) claudeInvocation {
@@ -86,7 +88,7 @@ func parseClaudeArgs(args []string) claudeInvocation {
 				value = args[next]
 				next++
 			}
-		} else if claudeResumeFlags[name] && !hasInline {
+		} else if claudeOptionalValueFlags[name] && !hasInline {
 			if next < len(args) && !strings.HasPrefix(args[next], "-") {
 				value = args[next]
 				next++
@@ -286,47 +288,6 @@ func (session *claudeSession) recordUser(text string) error {
 func (session *claudeSession) recordAssistant(reply string, usage Tokens) error {
 	session.turnUsage = usage
 	return session.write(session.assistantRecord([]contentPart{{Type: blockText, Text: reply}}, usage, false))
-}
-
-func (session *claudeSession) tool(step Step) (string, error) {
-	input := step.Input
-	if len(input) == 0 {
-		input = json.RawMessage(`{}`)
-	}
-	payload := session.payload(hookPreToolUse)
-	payload.ToolName, payload.ToolInput = step.Tool, input
-	use := contentPart{Type: "tool_use", ID: "toolu_" + uuid.NewV4().String()[:8], Name: step.Tool, Input: input}
-	payload.ToolUseID = use.ID
-	answers, err := session.fire(hookPreToolUse, step.Tool, payload)
-	if err != nil {
-		return "", err
-	}
-	preReturned := time.Now()
-	if err := session.write(
-		session.assistantRecord([]contentPart{use}, session.proc.script.Tokens, false),
-	); err != nil {
-		return "", err
-	}
-	result := contentPart{Type: "tool_result", ToolUseID: use.ID, Content: "done"}
-	denied := ""
-	deniedFound := false
-	for index := range answers {
-		if refused, reason := answers[index].denies(); refused && !deniedFound {
-			deniedFound = true
-			denied = reason
-			result.Content, result.IsError = reason, true
-		}
-	}
-	if !deniedFound {
-		if err := session.postToolUse(step.Tool, input, use.ID, time.Since(preReturned)); err != nil {
-			return "", err
-		}
-	}
-	record := claudeRecord{
-		Type: roleUser, SessionID: session.sessionID, Timestamp: stamp(time.Now()), CWD: session.proc.cwd,
-		Message: &claudeMessage{Role: roleUser, Content: []contentPart{result}},
-	}
-	return denied, session.write(record)
 }
 
 // compact writes what Claude Code leaves after /compact: the boundary record

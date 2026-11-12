@@ -33,7 +33,7 @@ func SQL(ctx context.Context, kind, query string) *SQLOp {
 
 // End writes db.statement with rows (omitted when the layer does not know
 // them, rows < 0) and retries when any happened: ERROR with err (INFO when
-// its caller cancelled it, cancelLevel), INFO when the statement was retried
+// its caller cancelled it, CancelLevel), INFO when the statement was retried
 // or took SlowCall or longer, else DEBUG —
 // a routine success is the bulk of a busy fleet's lines and not evidence.
 func (op *SQLOp) End(rows int64, err error) {
@@ -48,20 +48,20 @@ func (op *SQLOp) End(rows int64, err error) {
 		attrs = append(attrs, slog.Int("retries", op.Retries))
 	}
 	elapsed := current(op.ctx).timing.Now().Sub(op.started)
-	level := RoutineLevel(err, cancelLevel(err), op.Retries, elapsed)
+	level := RoutineLevel(err, CancelLevel(err), op.Retries, elapsed)
 	record(op.ctx, compDB, "db.statement", level, op.started, err, attrs...)
 }
 
 // SQLOpen is the record of one sqlitedb open: call it before the open with
 // the database kind (store, readonly, readwrite) and the path, and the
 // returned function once with the open's error. db.open is ERROR with err
-// (INFO when its caller cancelled it, cancelLevel), INFO when it took SlowCall
+// (INFO when its caller cancelled it, CancelLevel), INFO when it took SlowCall
 // or longer, else DEBUG.
 func SQLOpen(ctx context.Context, kind, path string) func(err error) {
 	started := current(ctx).timing.Now()
 	return func(err error) {
 		elapsed := current(ctx).timing.Now().Sub(started)
-		record(ctx, compDB, "db.open", RoutineLevel(err, cancelLevel(err), 0, elapsed), started, err,
+		record(ctx, compDB, "db.open", RoutineLevel(err, CancelLevel(err), 0, elapsed), started, err,
 			slog.String("kind", kind), slog.String("path", path))
 	}
 }

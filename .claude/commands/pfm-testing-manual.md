@@ -1,6 +1,6 @@
 ---
 name: pfm-testing-manual
-description: Governs how pfm (the Go fleet engine) is tested — tiers, test homes, lanes, mocks, run commands, gates and floors, bug classes, traps. Read by the flights foremen for the affected tests, the flights lander whole for the full gate; `/pfm-testing-manual` opens it for a human. Keep it true in the same change that alters how pfm is tested.
+description: Governs how pfm (the Go fleet engine) is tested — tiers, test homes, the journey, mocks, run commands, gates and floors, bug classes, traps. Read by the flights foremen for the affected tests, the flights lander whole for the full gate; `/pfm-testing-manual` opens it for a human. Keep it true in the same change that alters how pfm is tested.
 ---
 
 # pfm testing manual
@@ -11,8 +11,9 @@ Fixed headings, fixed order. Detail lives in `pfm/CLAUDE.md` § Testing Rules, `
 
 - Unit: a package test beside its package, no real tmux server, no real engine process, no network: it injects its resolver and HTTP client.
 - `JAIL`, `JAIL+tmux`, `JAIL+sh`, `LIVE-READ`, `UNPLAYED`: `pfm/TESTPLAN.md` § Legend. The boundary that decides: whether the test needs a real tmux server (a scratch socket inside the jail's `TMUX_TMPDIR`); a flow the fake engine cannot play is `UNPLAYED`, named in `TESTPLAN.md` § "Flows the fake engine does not yet play".
-- e2e: the tagged suite under `pfm/e2e/` (build tag `e2e`, `PFM_DEV_FENCE=1`) and the fence lanes (hermetic: mock engine, fixture seats, `--network none`); both run only inside the fence.
-- CI: `.github/workflows/ci.yml` runs on a pull request into `main` and by hand on any branch (`gh workflow run ci.yml --ref {branch} -f exclude='{jobs}'`). Its Linux jobs `gate ({unit|e2e|race|mirrors|rest})` run the fence gate's own step list (`infra/fence/checks.sh` `gate_run`) natively on ubuntu-latest through `dev.sh gate all`, each a slice by `PFM_GATE_ONLY` / `PFM_GATE_SKIP` (extended regexes matched against whole step names); `PFM_GATE_ONLY='pfm\.unit' .claude/scripts/dev.sh iso gate` runs that slice in the fence. `macos ({unit|e2e})` (macos-15, `.github/actions/macos-suite/`: `go -C pfm test ./...`, then the tagged `pfm/e2e/` suite with the Darwin installer and release-upgrade e2e) and `fresh-install ({ubuntu-latest|macos-15})` (`scripts/fresh-install-test.sh`, system Bash 3.2 on macOS) run what the fence cannot; `-f exclude='gate fresh-install build scan release'` runs the macOS parts alone. Nothing local proves a macOS job.
+- e2e: the tagged suite under `pfm/e2e/` (build tag `e2e`, `PFM_DEV_FENCE=1`), run only inside the fence.
+- Journey, the live tier: the tagged suite under `pfm/journey/` (build tag `journey`), one tree of owner steps (`pfm/journey/tree_test.go`, a `step_{name}_test.go` file per step) typed through a real terminal on a disposable machine; design `docs/design/integration-suite/journey-tree.md`.
+- CI: `.github/workflows/ci.yml` runs on a pull request into `main` and by hand on any branch (`gh workflow run ci.yml --ref {branch} -f exclude='{jobs}'`). Its Linux jobs `gate ({unit|e2e|race|mirrors|rest})` run the fence gate's own step list (`infra/fence/checks.sh` `gate_run`) natively on ubuntu-latest through `dev.sh gate all`, each a slice by `PFM_GATE_ONLY` / `PFM_GATE_SKIP` (extended regexes matched against whole step names); `PFM_GATE_ONLY='pfm\.unit' .claude/scripts/dev.sh iso gate` runs that slice in the fence. `macos ({unit|e2e})` (macos-15, `.github/actions/macos-suite/`: `go -C pfm test ./...`, then the tagged `pfm/e2e/` suite with the Darwin installer and release-upgrade e2e) and `fresh-install ({ubuntu-latest|macos-15})` (`scripts/fresh-install-test.sh`, system Bash 3.2 on macOS) run what the fence cannot; `journey ({linux|macos})` runs the whole journey tree, on Linux through `infra/fence/journey/run.sh`, on macos-15 as the runner's owner after `infra/fence/journey/prepare.sh`; `-f exclude='gate journey fresh-install build scan release'` runs the `macos` jobs alone. Nothing local proves a macOS job.
 
 ## Where a test lives
 
@@ -20,11 +21,12 @@ Fixed headings, fixed order. Detail lives in `pfm/CLAUDE.md` § Testing Rules, `
 - A single-implementation rule (naming precedence, the kill ratchet, row classification, run-string synthesis) gets a table-driven test; an emitted shell line gets a golden file.
 - The plugin lab's hermetic self-tests live in `infra/plugin-lab/tests/` (fence step `templates.plugin-lab`); its live, metered runs of a plugin checkout run on the host through `infra/plugin-lab/lab run`: `docs/dev/testing/plugin-lab.md`.
 
-## Lanes and registries
+## Suite duties
 
-- A new command or MCP tool lands with its beat (`infra/fence/lanes/beats.md` and `infra/fence/lanes/<lane>.sh`) and its map row (`infra/fence/lanes/map.tsv`, `name · lane · beat`) in the same commit, and a removed one takes them with it; a fleet capability lands with its beat; the recipe is `docs/dev/testing/lanes.md` § Extend it.
-- One editor per flight: `infra/fence/lanes/lib.sh`, `run.sh`, `map.tsv`, `beats.md`, `known-gaps.yml`, `pfm/scripts/known-skips.tsv`.
-- A change touching `pfm/internal/herdr/**`, `pfm/internal/resolve/**`, `pfm/internal/{call,kill,reload,chat,gather,spawn}/*herdr*`, `pfm/internal/chat/restored*`, `pfm/internal/hookentry/{herdr*,seathost*,launch_native*}`, `pfm/internal/installer/herdr*`, `pfm/internal/installer/assets/shim/pfm-herdr-shell.sh` or `infra/fence/lanes/{HELD.sh,herdr.sh,herdr.py}` runs `infra/fence/lanes/run.sh --lanes HELD` before its landing; the lander runs it once more in its gate.
+- A new or changed owner-visible command or flow lands in one commit with the journey step that walks it, watched red: a `pfm/journey/step_{name}_test.go` hung in the tree `pfm/journey/tree_test.go`; a removed one takes its step with it.
+- CI's `journey ({linux|macos})` jobs run the whole tree on every pull request into `main`; while fixing, the touched branch alone: `bash infra/fence/journey/run.sh -run 'Journey/{path}$'`.
+- An escaped bug's fix lands with its assertion on the step or test that walked past it, watched red on the unfixed code, the step's comment naming the escape (`escape {area}/{entry}`).
+- Shared-core files with one editor per flight: `pfm/journey/tree_test.go`, `pfm/journey/harness/`, `pfm/scripts/known-skips.tsv`.
 
 ## Mock boundary
 
@@ -47,10 +49,9 @@ Fixed headings, fixed order. Detail lives in `pfm/CLAUDE.md` § Testing Rules, `
 - A plugin's own suite (npm, vitest) has no `test.sh` route: `PFM_FENCE_NET=shared .claude/scripts/dev.sh iso run 'D=$(mktemp -d) && tar -C {plugin dir} --exclude=node_modules -cf - . | tar -C "$D" -xf - && cd "$D" && npm ci --no-audit --no-fund && npm test'`, through the `dev.sh` of the checkout holding the plugin, `{plugin dir}` relative to its root (`plugins/{plugin}` or `plugins/{plugin}/.worktrees/{flight}`).
 - Formatting (`make -C pfm fmt`, `gofmt -w`, `golangci-lint fmt`) lands as a patch: `mkdir -p /tmp/{project}/fmt && .claude/scripts/dev.sh iso run 'D=$(mktemp -d) && cp -a pfm "$D/a" && cp -a pfm "$D/b" && make -C "$D/b" fmt >&2 && cd "$D" && { diff -ruN a b || [ $? = 1 ]; }' > /tmp/{project}/fmt/pfm.patch`, then on the host `patch -p1 -d pfm < /tmp/{project}/fmt/pfm.patch`; a patch with no `@@` line has nothing to apply.
 - The test scripts' own suites: `scripts/test-test.sh` tests `.claude/scripts/test.sh`, `scripts/test-unit-path.sh` tests `.claude/scripts/unit-path.sh`; each is the templates-gate step `templates.{test|unit-path}-tests`, which CI's `gate (rest)` slice runs; a change to either script runs its suite through `test.sh`.
-- Full: `.claude/scripts/test.sh --full` (`dev.sh iso gate`) — pfm, templates, e2e and the lane self-tests as concurrent steps in one run, a `step · verdict · seconds` table in the run's `gate.tsv` (verdicts PASS, FAIL, NOT-RUN, TIMEOUT; rows `STEPS` and `BUDGET`), a `PROFILE` block pointing at each red step's diagnosis in the run dir, the run dir itself named by the output's last line `RUN DIR: <absolute host path>` (read it there, never the newest `run.*`), the wall judged against `infra/fence/gate-budget.yml`; one run closes the pfm and templates gates both; timeout 600 s, background past that.
+- Full: `.claude/scripts/test.sh --full` (`dev.sh iso gate`) — pfm, templates, e2e and the fence self-tests (`infra/fence/tests/`) as concurrent steps in one run, a `step · verdict · seconds` table in the run's `gate.tsv` (verdicts PASS, FAIL, NOT-RUN, TIMEOUT; rows `STEPS` and `BUDGET`), a `PROFILE` block pointing at each red step's diagnosis in the run dir, the run dir itself named by the output's last line `RUN DIR: <absolute host path>` (read it there, never the newest `run.*`), the wall judged against `infra/fence/gate-budget.yml`; one run closes the pfm and templates gates both; timeout 600 s, background past that.
 - Fresh-machine install: `.claude/scripts/dev.sh iso run 'bash scripts/fresh-install-test.sh'` runs the CI script in the fence on Linux: it snapshots the working tree into a scratch repository tagged as `VERSION` names, runs every `INSTALL.md` bash block marked `<!-- fresh-install` as written in a fresh HOME (only `https://github.com/${REPO}.git` swapped for that repository), requires `pfm doctor` to exit 0 or 1 with no FAIL row, then runs the release-upgrade e2e tests (`pfm/e2e/release_upgrade_e2e_test.go`) against the repository's real tags; it ends `fresh-install: PASS` or `fresh-install: FAIL {step}: {cause}`. Tags come from env: `PFM_E2E_PREVIOUS_TAG` (default the newest tag), `PFM_E2E_OLD_TAG` (default the fifth-newest, never older than `e2eOldestUpdatable` in `pfm/e2e/release_upgrade_e2e_test.go`, the oldest release this tree updates from), `PFM_E2E_CURRENT_TAG` (the candidate; default the newest tag's next minor). A change to a marked `INSTALL.md` block or to the install or update path runs it.
 - Journey: `bash infra/fence/journey/run.sh [--keep] [-run 'Journey/{path}$']`, from the host, boots its own disposable machine (systemd in a container, no network), runs `pfm/journey` (tag `journey`) in it as the owner and removes the machine; it prints a step timeline (`PASS N · FAIL N · BLOCKED N`) and ends `RUN DIR: {path}`, kept on a failure or with `--keep`, holding `timeline.tsv` and each failed step's evidence (every terminal's screen, its log slice, the processes); a failed step BLOCKS only its descendants. The suite refuses to run where `testjail.Disposable` is false; `.claude/scripts/test.sh` only vets it under its tag, for Linux and `GOOS=darwin`.
-- Lanes: `infra/fence/lanes/run.sh`; the map gate `infra/fence/lanes/check-map.sh --pfm <a pfm built from this tree>`. `LANE_PROFILE=1 infra/fence/lanes/run.sh --lanes <L>` writes `waits.tsv` (`lane · beat · helper · condition · elapsed_s · outcome`) and prints the top waits; a lane timing change is measured with it, before and after.
 
 ## Concurrency
 
@@ -69,7 +70,7 @@ Fixed headings, fixed order. Detail lives in `pfm/CLAUDE.md` § Testing Rules, `
 - Coverage `pfm/.testcoverage.yml`: total 77, package 52, in the fence: `.claude/scripts/dev.sh iso cover pfm`; the full gate does not run it.
 - Wall-time budget per suite and per package: `pfm/.testtiming.yml`, per gate target `infra/fence/gate-budget.yml`, derived and judged per `docs/dev/testing/timing.md`; an unbudgeted package fails. A suite over budget has its slowest tests measured (its timing TSV, the gate's `gate.tsv`) before any test joins it.
 - Every skip is a row in `pfm/scripts/known-skips.tsv` (`pfm/scripts/skip-check.sh`); an unlisted skip fails.
-- `iso gate` runs under `infra/fence/egress.sh` inside its run's own network namespace, so its verdict covers that run alone, and every non-dry lanes run ends with the verdict of a capture inside its lane container: `EGRESS PASS`, or red as `EGRESS FAIL` (each DNS name and destination listed) or NOT RECORDED; that verdict is the only network check.
+- `iso gate` runs under `infra/fence/egress.sh` inside its run's own network namespace, so its verdict covers that run alone: `EGRESS PASS`, or red as `EGRESS FAIL` (each DNS name and destination listed) or NOT RECORDED; that verdict is the only network check.
 - Every gate run is appended to the host ledger `$HOME/.local/state/pfm/gate-history/<project>/ledger.tsv`, and the count of runs live in the shared fence container when it started (`concurrent_runs`) to `concurrent.tsv` beside it, and its effective caps (`profile`, `cpus`, `mem`, `cpuset`, `gomaxprocs`) to `caps.tsv` beside it; `bash infra/fence/gate-history.sh report` shows per-step medians, regressions and verdict flips.
 
 ## Bug classes
@@ -85,7 +86,7 @@ Fixed headings, fixed order. Detail lives in `pfm/CLAUDE.md` § Testing Rules, `
 - A probe that launches an engine closes stdin (`</dev/null`) or it hangs.
 - The e2e harness refuses to run without `PFM_DEV_FENCE=1`: that red on a host is the fence law, not a defect; suites and provisioning scripts gate on `scripts/platform.sh` `platform_in_fence` (the variable AND `/.dockerenv`), never the variable alone.
 - `internal/hookentry` (socket path length) is red on a macOS host and green in the fence.
-- A shell poll counts its bound in 0.1 s ticks or from `$EPOCHREALTIME`, never whole `date +%s` seconds (a 1 s bound then waits up to 2 s); a fixed grace is a parameter a self-test can shorten (`MCP_STDIO_GRACE_SECS`).
+- A shell poll counts its bound in 0.1 s ticks or from `$EPOCHREALTIME`, never whole `date +%s` seconds (a 1 s bound then waits up to 2 s); a fixed grace is a parameter a self-test can shorten.
 - A closed listener keeps accepting while a parallel test's fork holds its fd until exec: a test expecting a refused dial on a closed port stays serial.
 - A closed `gather.AcquireAccountGuard` keeps its flock while a parallel test's fork holds the open file description until exec: `AcquireAccountGuard(dir, false)` retries a busy lock for `accountBusyGrace` before it refuses, and a test that expects the busy refusal calls `acquireAccountGuardWithin(dir, false, 0)` (in `gather`) or holds the guard for longer than the grace.
 - A file a test writes then runs goes through `testjail.WriteExecutable` (`C26-exec-write` fails a bare exec-mode `os.WriteFile`: a parallel test's fork mid-write makes it ETXTBSY); `internal/deps` and `internal/config`, which testjail imports, use their local `writeExecutableUnderForkLock`.
@@ -95,6 +96,6 @@ Fixed headings, fixed order. Detail lives in `pfm/CLAUDE.md` § Testing Rules, `
 
 ## What not to test
 
-- A model's words: a beat asserts from pfm's own report or the pane.
+- A model's words: a step asserts from pfm's own report or the pane.
 - A value one run printed about its data (a count, an id).
 - That an event did not happen (a network call, a DNS query, a sleep, a fork): the egress verdict and the fenced measurements prove those, never a test.

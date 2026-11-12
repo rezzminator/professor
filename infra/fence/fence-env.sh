@@ -10,13 +10,10 @@
 # source without go.mod mounts the common Git directory (already read-only at
 # /pfm-git-common) in its place, so the fence still starts and touches nothing
 # on the host, and PFM_DEV_ENGINE_SYNC_MISSING names the absence for the build.
-# The harvester source resolves the same way. The herdr-shield source the held
-# lane machine builds from (lanes/root.sh --machine held) resolves the same way
-# with Cargo.toml as its marker; an absent one leaves PFM_DEV_HERDR_SHIELD_SRC
-# empty and PFM_DEV_HERDR_SHIELD_MISSING naming it, refused by the held build.
+# The harvester source resolves the same way.
 # BROKEN STATE: an unset ROOT prints `fence-env: ROOT unset` and exits 2; a Git
-# directory outside the common directory, a relative ENGINE_SYNC_SRC,
-# HARVESTER_SRC or HERDR_SHIELD_SRC, or a broken infra/fence/.env (local-env.sh)
+# directory outside the common directory, a relative ENGINE_SYNC_SRC or
+# HARVESTER_SRC, or a broken infra/fence/.env (local-env.sh)
 # prints the caller-prefixed error and exits 1.
 [[ -n "${ROOT:-}" ]] || { echo "fence-env: ROOT unset" >&2; exit 2; }
 
@@ -61,12 +58,4 @@ if [[ -f "$harvester_src/go.mod" ]]; then
 else
   export PFM_DEV_HARVESTER_SRC="$git_common" \
     PFM_DEV_HARVESTER_MISSING="$harvester_src: no go.mod (check out plugins/harvester, or set HARVESTER_SRC)"
-fi
-
-herdr_shield_src="$(fence_plugin_src herdr-shield Cargo.toml HERDR_SHIELD_SRC)" || exit 1
-if [[ -f "$herdr_shield_src/Cargo.toml" ]]; then
-  export PFM_DEV_HERDR_SHIELD_SRC="$herdr_shield_src" PFM_DEV_HERDR_SHIELD_MISSING=""
-else
-  export PFM_DEV_HERDR_SHIELD_SRC="" \
-    PFM_DEV_HERDR_SHIELD_MISSING="herdr-shield source missing at $herdr_shield_src (check out plugins/herdr-shield, or set HERDR_SHIELD_SRC)"
 fi

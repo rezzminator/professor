@@ -38,7 +38,7 @@ func FindHistory(pools []string, slug, sid string) (string, error) {
 			return match, nil
 		}
 	}
-	return "", fmt.Errorf("no transcript matching sid '%s' under %s in any account pool", sid, slug)
+	return "", fmt.Errorf("no transcript matching sid '%s' under %s in any account pool: %w", sid, slug, ErrNoHistory)
 }
 
 // newestHistoryMatch returns the newest-mtime file under pool/slug matching

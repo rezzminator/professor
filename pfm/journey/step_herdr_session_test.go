@@ -54,16 +54,7 @@ func stopHerdrSession(c *harness.Ctx, s State) {
 		run("herdr", "session", "delete", s.Session)
 		return // stopped already, or never started: nothing on it to end
 	}
-	for session := range liveSeats(c, sock) {
-		run("pfm", "chat", "end", session)
-	}
-	// `pfm chat end` only schedules the end: wait for it, or past its bound.
-	phase(c, func() {
-		c.Poll("no live seat on "+sock, 20*time.Second, func() (bool, string) {
-			seats := liveSeats(c, sock)
-			return len(seats) == 0, fmt.Sprintf("%v", seats)
-		})
-	})
+	endSeated(c, sock, run)
 	ever := seatsWhere(c, "session_id is not null"+onSocket(sock))
 	branch := map[int]bool{}
 	table := processes(c)
@@ -84,6 +75,20 @@ func stopHerdrSession(c *harness.Ctx, s State) {
 				}
 			}
 			return len(left) == 0, fmt.Sprintf("%v", left)
+		})
+	})
+}
+
+// endSeated ends every chat with a live seat on sock with `pfm chat end`, then waits for no live seat
+// on it: `pfm chat end` only schedules the end.
+func endSeated(c *harness.Ctx, sock string, run func(argv ...string)) {
+	for session := range liveSeats(c, sock) {
+		run("pfm", "chat", "end", session)
+	}
+	phase(c, func() {
+		c.Poll("no live seat on "+sock, 20*time.Second, func() (bool, string) {
+			seats := liveSeats(c, sock)
+			return len(seats) == 0, fmt.Sprintf("%v", seats)
 		})
 	})
 }

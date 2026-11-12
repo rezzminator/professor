@@ -24,17 +24,16 @@
 #                             the proof; x.py brings x_test.py
 #   scripts/test-*.py         python3, no selector; scripts/x.{sh,py} brings scripts/test-x.{sh,py}
 #   *_test.sh, scripts/test-*.sh  bash, no selector; .claude/scripts/x.sh brings scripts/test-x.sh
-#                             (dev.sh: scripts/test-dev-report.sh and infra/fence/lanes/tests/
+#                             (dev.sh: scripts/test-dev-report.sh and infra/fence/tests/
 #                             iso-housekeeping_test.sh, format-md.sh: scripts/test-format-md.sh on that
 #                             copy, worktree.sh and .claude/rules/git-writes-through-gitter.md:
 #                             scripts/test-worktree-local.sh, templates/project/scripts/worktree.sh and
 #                             templates/project/rules/git-writes-through-gitter.md:
 #                             scripts/test-worktree.sh);
-#                             infra/fence/x.sh, infra/fence/lanes/x.sh bring
-#                             infra/fence/lanes/tests/x_test.sh;
+#                             infra/fence/x.sh brings infra/fence/tests/x_test.sh;
 #                             a sourced helper brings its users' tests: scripts/shtest.sh,
 #                             scripts/stub-root.sh and scripts/worktree-verbs.sh every tracked test naming
-#                             it, infra/fence/mkdir-lock.sh its own and the shared, root and gate-history
+#                             it, infra/fence/mkdir-lock.sh its own and the shared and gate-history
 #                             tests, infra/fence/local-env.sh the fence-env and iso-housekeeping tests
 # The rules hold under pfm/ as everywhere. Any other file brings no test, only checks, and is named on
 # its own `TEST UNCOVERED <file>` line, a gap that does not fail the run. The checks, every one run
@@ -61,7 +60,7 @@
 # other lines, `VERDICT PASS|FAIL`, and last `log: <path>` — /tmp/{project}/test/{UTC}-{pid}.log holds
 # the whole run, every runner's own output indented `  | ` so only this run's summary lines sit at
 # column 0. Exit 0 PASS, 1 FAIL, 2 usage.
-# --full is the full gate (dev.sh iso gate): pfm, templates, e2e and the lane self-tests as concurrent
+# --full is the full gate (dev.sh iso gate): pfm, templates, e2e and the fence self-tests as concurrent
 # steps in one run, the STEPS line, RUN DIR, gate.tsv, the budget and the ledger row, streamed as it runs
 # and kept in the log; then its `VERDICT PASS|FAIL` from the gate's closing line (`all steps passed.` or
 # `N step(s) failed or could not run.`) and `log: <path>`, exit 0 PASS, else the gate's code (1 when it
@@ -485,18 +484,18 @@ derive() { # derive <repository-relative path> <has selector 0|1> <selector>
         .claude/scripts/test.sh) shell_test scripts/test-test.sh ;;
         .claude/scripts/dev.sh)
           shell_test scripts/test-dev-report.sh .claude/scripts/dev.sh
-          [ ! -f "$ROOT/infra/fence/lanes/tests/iso-housekeeping_test.sh" ] || shell_test infra/fence/lanes/tests/iso-housekeeping_test.sh ;;
+          [ ! -f "$ROOT/infra/fence/tests/iso-housekeeping_test.sh" ] || shell_test infra/fence/tests/iso-housekeeping_test.sh ;;
         scripts/shtest.sh | scripts/stub-root.sh | scripts/worktree-verbs.sh)
           while IFS= read -r sib; do
             [ -z "$sib" ] || [ "$sib" = "$f" ] || [ ! -f "$ROOT/$sib" ] || ! grep -qF -- "$f" "$ROOT/$sib" || shell_test "$sib"
           done < <(git -C "$ROOT" ls-files -- '*_test.sh' 'scripts/test-*.sh') ;;
         infra/fence/local-env.sh)
-          for sib in infra/fence/lanes/tests/fence-env_test.sh infra/fence/lanes/tests/iso-housekeeping_test.sh; do
+          for sib in infra/fence/tests/fence-env_test.sh infra/fence/tests/iso-housekeeping_test.sh; do
             [ ! -f "$ROOT/$sib" ] || shell_test "$sib"
           done ;;
         infra/fence/mkdir-lock.sh)
-          for sib in infra/fence/lanes/tests/mkdir-lock_test.sh infra/fence/lanes/tests/shared_test.sh \
-            infra/fence/lanes/tests/root_test.sh infra/fence/lanes/tests/gate-history_test.sh; do
+          for sib in infra/fence/tests/mkdir-lock_test.sh infra/fence/tests/shared_test.sh \
+            infra/fence/tests/gate-history_test.sh; do
             [ ! -f "$ROOT/$sib" ] || shell_test "$sib"
           done ;;
         .claude/scripts/format-md.sh | templates/project/scripts/format-md.sh) shell_test scripts/test-format-md.sh "$f" ;;
@@ -507,8 +506,8 @@ derive() { # derive <repository-relative path> <has selector 0|1> <selector>
             [ -f "$ROOT/$sib" ] || continue
             case "$sib" in *.py) add_inv t_proof "$sib" unittest python3 "$sib" ;; *) shell_test "$sib" ;; esac
           done ;;
-        infra/fence/*.sh | infra/fence/lanes/*.sh)
-          sib="infra/fence/lanes/tests/${base%.sh}_test.sh"; [ ! -f "$ROOT/$sib" ] || shell_test "$sib" ;;
+        infra/fence/*.sh)
+          sib="infra/fence/tests/${base%.sh}_test.sh"; [ ! -f "$ROOT/$sib" ] || shell_test "$sib" ;;
         *.mjs) sib="${f%.mjs}.test.mjs"; [ ! -f "$ROOT/$sib" ] || add_inv t_proof "$sib" tap node --test --test-reporter=tap "$sib" ;;
         *.py) sib="${f%.py}_test.py"; [ ! -f "$ROOT/$sib" ] || py_inv "$sib" 0 '' ;;
       esac ;;

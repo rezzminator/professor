@@ -106,7 +106,7 @@ func TestSessionClosesEveryRowWithRecordedDecisions(t *testing.T) {
 		t.Errorf("opening report flags the URL or the project's own /km:\n%s", report)
 	}
 	// An indented line whose first field is a status word reads as a row to a
-	// report parser (infra/fence/lanes/adopt.sh takes NEW's rows that way).
+	// report parser (an adopter session takes NEW's rows that way).
 	statusWords := map[string]bool{
 		"UPDATED": true, "NEW": true, "GONE-UPSTREAM": true, "MOVED": true, "LOCAL-DELETED": true, "RETIRED-NAME": true,
 	}

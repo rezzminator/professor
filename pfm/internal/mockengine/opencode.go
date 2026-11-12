@@ -267,7 +267,9 @@ func (session *openCodeSession) start(bool) (returnErr error) {
 		}
 	}()
 	ctx := proc.ctx
-	if _, err := database.ExecContext(ctx, openCodeSchema); err != nil {
+	// OpenCode's migrator creates its tables in one transaction, so no reader meets a part of them; a failed
+	// statement leaves the transaction open and closing the store rolls it back.
+	if _, err := database.ExecContext(ctx, "BEGIN IMMEDIATE;"+openCodeSchema+"\nCOMMIT;"); err != nil {
 		return fmt.Errorf("create opencode schema: %w", err)
 	}
 	now := time.Now().UnixMilli()

@@ -115,6 +115,7 @@ func TestLoadScenarioRefusesUnknownFieldsAndBrokenSteps(t *testing.T) {
 		"menu no options":   `{"steps":[{"type":"menu"}]}`,
 		"menu selected":     `{"steps":[{"type":"menu","options":["a"],"selected":4}]}`,
 		"tool no name":      `{"steps":[{"type":"tool_call"}]}`,
+		"perform a read":    `{"steps":[{"type":"tool_call","tool":"Read","perform":true}]}`,
 	} {
 		path := filepath.Join(dir, strings.ReplaceAll(name, " ", "-")+".json")
 		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
@@ -185,24 +186,6 @@ func TestScenarioRateLimitsRoundTripsAndRejectsNonObjects(t *testing.T) {
 		); err == nil ||
 			!strings.Contains(err.Error(), "rate_limits") {
 			t.Fatalf("rate_limits %v: %v", bad, err)
-		}
-	}
-}
-
-func TestLaneDefaultScenarioLoadsForEveryEngine(t *testing.T) {
-	path := filepath.Join("..", "..", "..", "infra", "fence", "lanes", "scenarios", "default.json")
-	for _, engine := range []string{engineClaude, engineCodex, engineOpenCode} {
-		scenario, err := LoadScenario(path, engine)
-		if err != nil {
-			t.Fatalf("%s default scenario: %v", engine, err)
-		}
-		var fields map[string]json.RawMessage
-		if err := json.Unmarshal(mustJSON(t, scenario), &fields); err != nil {
-			t.Fatal(err)
-		}
-		if len(fields["rate_limits"]) == 0 || scenario.Pane.Composer == "" || scenario.Pane.Busy == "" ||
-			scenario.Pane.Compacted == "" {
-			t.Fatalf("%s default scenario lacks lane shapes: %+v", engine, scenario)
 		}
 	}
 }

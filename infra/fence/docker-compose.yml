@@ -92,8 +92,8 @@ services:
 # shared, and a volume compose did not create draws a warning on every run):
 # they are external, and dev.sh iso creates them first
 # (fence_volumes_ensure, infra/fence/housekeeping.sh). Bare-name mounters:
-#   pfm-dev-gocache    lanes/container.sh
-#   pfm-dev-gomod      lanes/container.sh
+#   pfm-dev-gocache    shared.sh (the shared fence container)
+#   pfm-dev-gomod      shared.sh (the shared fence container)
 #   pfm-dev-lintcache  docker-compose.yml (pfm-dev, pfm-sim by extends)
 volumes:
   pfm-dev-gocache:

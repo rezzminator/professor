@@ -812,3 +812,41 @@ func TestRunStdioFallsBackWhenDaemonLacksSelectedFamilyRoute(t *testing.T) {
 		})
 	}
 }
+
+// A family the daemon does not mount runs in process, and its chat tools still learn who called:
+// a tools/call carries the caller identity the forwarder would have added, so a chat that calls
+// `new` from its own pane is placed beside itself rather than as a caller outside any chat.
+func TestRunStdioAttachesCallerIdentityInProcess(t *testing.T) {
+	previous := proxyWhoami
+	proxyWhoami = resolve.WhoamiDependencies{
+		Environment: &resolve.WhoamiEnvironment{
+			TMUX: "/tmp/tmux-1000/cc-seat,1,0", TMUXPane: "%7", ClaudeSessionID: "session-claude",
+		},
+		Namer: stdioTestNamer("cc-seat"), SelfPID: 4100, Processes: stdioTestProcessTree{},
+	}
+	t.Cleanup(func() { proxyWhoami = previous })
+	probe := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	address := proxyTestAddress(probe)
+	probe.Close()
+
+	var warnings proxyTestBuffer
+	local := stdioTestService("local", &warnings)
+	testjail.Fleet(t)
+	resolved, err := paths.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := stdioTestSession(t, stdioTestProfessor(t, local), StdioOptions{
+		DaemonAddress: address, Home: resolved.Home, SIDDir: "relative-sid", Warnings: &warnings,
+	})
+	// The stub service lists no chats, so the caller the frame carried is named in the lookup's error.
+	whoami := callToolWithMeta[WhoamiOutput](t, session, "whoami", nil, WhoamiInput{})
+	want := WhoamiOutput{
+		Status:  "error",
+		Message: `resolve MCP proxy session "cc-seat": list live chats: ls verb is not configured`,
+	}
+	if whoami != want {
+		t.Fatalf("in-process whoami = %+v, want %+v (the caller cc-seat reached the server); warnings: %s",
+			whoami, want, warnings.String())
+	}
+}

@@ -16,6 +16,7 @@
 //   - last.go reads a chat's last answer; read.go its transcript entries; find.go searches transcripts.
 //   - names.go resolves a chat's name; workbench_name.go reserves workbench names.
 //   - open.go, open_herdr.go, restored.go, native_reboot.go and kill_server.go open, exit, kill and reboot chats.
+//   - end_tmux.go ends a tmux chat's server, only while its pane is the server's sole pane, and clears its handles.
 //   - killoutcome.go words a kill's outcome; keys.go types the keys-send failures.
 //   - birth.go carries the caller's identity; state.go records a verb's outcome.
 //   - call_engine.go and call_types.go build the call engine.

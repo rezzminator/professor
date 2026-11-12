@@ -126,13 +126,9 @@ func proveHerdrSeatSnapshot(
 	snapshot json.RawMessage,
 	observe bool,
 ) (fleetdb.Seat, bool, error) {
-	current, found, readErr := db.Seat(ctx, seat.SeatID)
+	current, readErr := currentHerdrSeat(ctx, db, seat)
 	if readErr != nil {
-		return seat, false, fmt.Errorf("read current ownership: %w", readErr)
-	}
-	if !found || current.Backend != nativeHerdrBackend ||
-		current.Engine != seat.Engine {
-		return seat, false, fmt.Errorf("seat %s ownership changed or disappeared", seat.SeatID)
+		return seat, false, readErr
 	}
 	if snapshot != nil && current.HerdrSocket != seat.HerdrSocket {
 		return seat, false, fmt.Errorf("seat %s snapshot socket changed during proof", seat.SeatID)
@@ -168,6 +164,9 @@ func proveHerdrSeatSnapshot(
 	}
 	if candidate == nil {
 		if seat.SeatHostPID == 0 {
+			if herdrBirthPending(seat) {
+				return seat, false, fmt.Errorf("seat %s %w", seat.SeatID, errHerdrSeatUnbound)
+			}
 			retired, err := HerdrSeatRetired(ctx, proc, seat)
 			if err != nil {
 				return seat, false, err
@@ -176,7 +175,7 @@ func proveHerdrSeatSnapshot(
 				return seat, false, nil
 			}
 		}
-		return seat, false, fmt.Errorf("seat %s ownership unproved: terminal not present in pane.list", seat.SeatID)
+		return seat, false, fmt.Errorf("seat %s ownership unproved: %w", seat.SeatID, errHerdrPaneAbsent)
 	}
 	body, err = herdr.SeatRequest(
 		ctx,
@@ -224,7 +223,7 @@ func proveHerdrSeatSnapshot(
 		}
 	}
 	if pid == 0 {
-		return seat, false, fmt.Errorf("seat %s supervisor ownership unproved", seat.SeatID)
+		return seat, false, fmt.Errorf("seat %s %w", seat.SeatID, errHerdrSeatUnbound)
 	}
 
 	argvRole, roleErr := proc.Cmdline(pid)
@@ -305,7 +304,10 @@ func proveHerdrSeatSnapshot(
 	if observe {
 		expected = seat
 	}
-	if !found || latest.SeatID != expected.SeatID ||
+	if !found {
+		return seat, false, fmt.Errorf("seat %s %w", seat.SeatID, errHerdrSeatGone)
+	}
+	if latest.SeatID != expected.SeatID ||
 		latest.Engine != expected.Engine ||
 		latest.Backend != expected.Backend ||
 		latest.HerdrSocket != expected.HerdrSocket ||
@@ -458,37 +460,50 @@ func proveHerdrSeats(
 	readOnly bool,
 ) []HerdrSeat {
 	defer shield.Hold()() // one herdr-shield listing per socket serves the whole listing
+	kept := rows[:0]
 	for i := range rows {
-		row := &rows[i]
+		row := rows[i]
 		if row.snapshot == nil {
-			continue
-		}
-		canonical, owned, err := proveHerdrSeatSnapshot(ctx, db, proc, shield, row.Seat, row.snapshot, readOnly)
-		row.CWD = ""
-		if err != nil {
-			row.Err = fmt.Errorf("HERDR ERROR %s: %w", row.Seat.HerdrSocket, err)
-			continue
-		}
-		if !owned {
-			// Positive death only: the row stays visible as a lost seat, never
-			// live and never the recycled pane's occupant. A writable listing
-			// retires the durable row once, so later scans never probe it again.
-			row.Err = fmt.Errorf("HERDR DEAD %s: saved supervisor exited", row.Seat.SeatID)
-			if !readOnly {
-				retired, retireErr := retireDeadHerdrSeat(ctx, db, canonical)
-				row.Err = errors.Join(row.Err, retireErr)
-				if retireErr == nil {
-					row.Seat = retired
-				}
+			// The socket did not answer (row.Err says how): the row stays that
+			// failure unless the seat is gone or its supervisor positively dead.
+			canonical, gone, err := unansweredHerdrSeat(ctx, db, proc, row.Seat)
+			switch {
+			case errors.Is(err, errHerdrSeatGone):
+				continue
+			case err != nil:
+				row.Err = errors.Join(row.Err, err)
+			case gone:
+				listDeadHerdrSeat(ctx, db, &row, canonical, readOnly)
 			}
-			row.Seat.State = "lost"
+			kept = append(kept, row)
 			continue
 		}
-		row.Seat = canonical
-		row.CWD = row.directories[canonical.HerdrPane]
-		row.Err = nil
+		prove := func(seat fleetdb.Seat) (fleetdb.Seat, bool, error) {
+			return proveHerdrSeatSnapshot(ctx, db, proc, shield, seat, row.snapshot, readOnly)
+		}
+		canonical, owned, err := settleHerdrRow(ctx, db, &row, prove)
+		row.CWD = ""
+		switch {
+		case errors.Is(err, errHerdrSeatGone):
+			continue // ended or replaced while this listing read it: not listed
+		case errors.Is(err, errHerdrSeatUnbound):
+			continue // a reservation with no pane or no supervisor yet: not a chat yet
+		case err != nil && canonical.EndPending && (herdr.PaneGone(err) || errors.Is(err, errHerdrPaneAbsent)):
+			continue // its end worker closed the pane during this listing: the end is landing
+		case errors.Is(err, errHerdrPaneAbsent) && canonical.SeatHostPID > 0:
+			listClosedHerdrSeat(&row, canonical)
+		case err != nil:
+			row.Err = fmt.Errorf("HERDR ERROR %s: %w", row.Seat.HerdrSocket, err)
+		case !owned:
+			listDeadHerdrSeat(ctx, db, &row, canonical, readOnly)
+		default:
+			row.Seat = canonical
+			row.CWD = row.directories[canonical.HerdrPane]
+			row.Err = nil
+		}
+		kept = append(kept, row)
 	}
-	return rows
+	return kept
 }
 
 // Older native launches supervised in-process; their generated seat id is not argv.
@@ -532,8 +547,7 @@ func HerdrSeatRetired(ctx context.Context, proc ProcFS, seat fleetdb.Seat) (bool
 		}
 	}
 	_, err = herdr.SeatRequest(ctx, seat.HerdrSocket, "pane.get", map[string]string{"pane_id": seat.HerdrPane})
-	var refusal *herdr.Refusal
-	if !errors.As(err, &refusal) || (refusal.Code != "pane_not_found" && refusal.Code != "not_found") {
+	if !herdr.PaneGone(err) {
 		return fail(errors.Join(err, errors.New("old pane absence not explicitly acknowledged")))
 	}
 	return HerdrSupervisorAbsent(proc, seat)

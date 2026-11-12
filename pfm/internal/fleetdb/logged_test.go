@@ -3,6 +3,8 @@ package fleetdb
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -75,12 +77,20 @@ func TestStoreOperationsRecordUnderTheDBComponent(t *testing.T) {
 }
 
 func TestPrimaryAccountAbsenceIsNotAnErrorRecord(t *testing.T) {
-	for _, broken := range []bool{false, true} {
-		t.Run(map[bool]string{false: "absent", true: "query failure"}[broken], func(t *testing.T) {
+	for _, mode := range []string{"absent", "uncreated", "query failure"} {
+		broken := mode == "query failure"
+		t.Run(mode, func(t *testing.T) {
 			ctx, recorder := obs.Test(t)
 			state, values := openTestStore(t)
 			if broken {
 				if _, err := state.db.ExecContext(ctx, "DROP TABLE meta"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if mode == "uncreated" {
+				// Another process has created the file and not yet its schema.
+				values.StateDB = filepath.Join(t.TempDir(), "pfm.db")
+				if err := os.WriteFile(values.StateDB, nil, 0o600); err != nil {
 					t.Fatal(err)
 				}
 			}

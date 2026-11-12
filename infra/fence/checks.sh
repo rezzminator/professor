@@ -16,15 +16,8 @@ checks_templates_clone() {
   run "templates: clone ratchet (jscpd)" -- bash "$REPO_ROOT/scripts/clone-check.sh"
 }
 
-checks_templates_check_map_serial() {
-  # The lane↔command map gate (infra/fence/lanes/check-map.sh). --no-derive
-  # skips the command/tool surface derive, which needs a built pfm; its own
-  # broken state is a named red line and rc 1/2, never a silent pass.
-  run "templates: lane↔command map (check-map)" -- bash "$REPO_ROOT/infra/fence/lanes/check-map.sh" --no-derive
-}
-
-checks_templates_lanes_serial() {
-  run "templates: lane library self-tests" -- bash -c 'for t in "$1"/infra/fence/lanes/tests/*_test.sh; do echo "== $t"; bash "$t" || exit 1; done' _ "$REPO_ROOT"
+checks_templates_fence_serial() {
+  run "templates: fence script self-tests" -- bash -c 'for t in "$1"/infra/fence/tests/*_test.sh; do echo "== $t"; bash "$t" || exit 1; done' _ "$REPO_ROOT"
 }
 
 checks_templates_plugin_logs() {
@@ -201,7 +194,7 @@ checks_templates_scratch_paths() {
     # `/tmp/<name>` a host run shares with every other checkout. Allowed: the
     # derived `/tmp/$PROJECT/…` forms, anonymous `mktemp` templates (XXXXXX),
     # and tmux's own `/tmp/tmux-<uid>` socket dir. Container-only code (the
-    # fence lanes, the e2e docker run) and test fixtures are excluded
+    # fence, the e2e docker run) and test fixtures are excluded
     # BY NAME and counted, never filtered in silence; zero code files scanned
     # is a broken scan, not a clean tree. A comment line names a path, it does
     # not write one, so hits whose text opens with #, // or * are dropped.
@@ -218,7 +211,7 @@ checks_templates_scratch_paths() {
         /dev/null < "$code_z" 2>/dev/null | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(#|//|\*)' || true)
       bare=$(xargs -0 grep -nE '(^|[^A-Za-z0-9_}.-])/tmp/[A-Za-z0-9_.-]' /dev/null < "$code_z" 2>/dev/null \
         | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(#|//|\*)' | grep -vE 'XXXXXX|/tmp/tmux-' || true)
-      info "scratch-path policy: $code_n code file(s) scanned; $code_skipped excluded by name (container-only lanes, the e2e docker run, test fixtures)"
+      info "scratch-path policy: $code_n code file(s) scanned; $code_skipped excluded by name (container-only fence code, the e2e docker run, test fixtures)"
       if [[ -z "$repo_local$bare" ]]; then
         ok "no tracked code writes a repo-local tmp/ or a fixed-name bare /tmp path"
       else
@@ -753,8 +746,8 @@ checks_templates_output_styles() {
   [[ "$found" == 1 ]] || ok "no output style is tracked, on disk, or set in a settings file"
 }
 
-# One catalogue for the serial runner and the parallel gate. Scheduling-only
-# lane aggregates and the gate's heavy check-map stay at their boundaries.
+# One catalogue for the serial runner and the parallel gate. The serial fence
+# self-test aggregate stays at its boundary: the gate registers each suite.
 checks_named_template_steps() { # <callback> <name>...: register the matching checks_templates_<name> command
   local add="$1" name
   shift
@@ -777,8 +770,7 @@ checks_templates_steps() { # <callback>: callback <step name> <command> [args...
 checks_templates_step_serial() { shift; "$@"; }
 
 checks_templates() {
-  checks_templates_check_map_serial
-  checks_templates_lanes_serial
+  checks_templates_fence_serial
   checks_templates_steps checks_templates_step_serial
 }
 
@@ -872,8 +864,7 @@ checks_pfm_unit() { # pfm dir, run dir, optional already-read TESTFLAGS
   [[ -z "$history" ]] || shard_args=(--history "$history")
   # Positional arguments keep flags and output paths out of shell code.
   # The JSON is retained even on failure; timing is a separate verdict.
-  # --bin-dir keeps the prebuilt pfm in the run dir for the templates.check-map step.
-  run "pfm: go test" -- bash "$d/scripts/test-shard.sh" run --out "$run_dir/unit.json" --bin-dir "$run_dir/bin" "${shard_args[@]}" -- "${testflags[@]}"
+  run "pfm: go test" -- bash "$d/scripts/test-shard.sh" run --out "$run_dir/unit.json" "${shard_args[@]}" -- "${testflags[@]}"
   go_test_report "$run_dir/unit.json"
   checks_pfm_profile_pointers "$run_dir/unit.json" "$run_dir/profile" "$before"
   skip_gate "pfm: skipped tests are all listed (unit)" "$run_dir/unit.json"
@@ -1146,19 +1137,6 @@ checks_templates_mirrors() {
   checks_templates_output_styles
 }
 
-checks_gate_check_map() { # run dir
-  local run_dir="$1" check_map_pfm="$1/bin/pfm"
-  # The pfm pfm.unit prebuilt (test-shard.sh --bin-dir) when this gate ran it and it built; else build one.
-  if [[ ! -x "$check_map_pfm" ]]; then
-    check_map_pfm="$run_dir/check-map-pfm"
-    if ! go -C pfm build -o "$check_map_pfm" ./cmd/pfm; then
-      fail_step "templates: check-map pfm build FAILED"
-      return
-    fi
-  fi
-  run "templates: lane↔command map (check-map)" -- bash infra/fence/lanes/check-map.sh --pfm "$check_map_pfm"
-}
-
 # gate_resources_stop <sampler pid> <run dir>: stops the gate's resource sampler and says when its
 # record is missing — the judge then reads "not measured", never a quiet pass.
 gate_resources_stop() {
@@ -1235,10 +1213,10 @@ gate_run() { # pfm, templates, or all
     done
   fi
   if [[ "$target" == templates || "$target" == all ]]; then
-    for f in "$REPO_ROOT"/infra/fence/lanes/tests/*_test.sh; do
-      [[ -f "$f" ]] || { fail_step 'templates: lane self-tests NOT RUN — no fixture suites found'; return 1; }
+    for f in "$REPO_ROOT"/infra/fence/tests/*_test.sh; do
+      [[ -f "$f" ]] || { fail_step 'templates: fence self-tests NOT RUN — no fixture suites found'; return 1; }
       stem="${f##*/}"; stem="${stem%_test.sh}"
-      steps_add "templates.lanes.${stem,,}" bash "$f" || return 1
+      steps_add "templates.fence.${stem,,}" bash "$f" || return 1
     done
   fi
   if [[ "${PFM_GATE_FIXTURES:-}" == 1 ]]; then
@@ -1258,7 +1236,6 @@ gate_run() { # pfm, templates, or all
     steps_add pfm.testplan run 'pfm: flow-matrix citations' -- bash "$d/scripts/testplan-check.sh" || return 1
   fi
   if [[ "$target" == templates || "$target" == all ]]; then
-    steps_add_heavy templates.check-map checks_gate_check_map "$run_dir" || return 1
     checks_templates_steps steps_add || return 1
   fi
   if [[ -n "$filter" ]] && (( ${#STEPS_NAMES[@]} == 0 )); then

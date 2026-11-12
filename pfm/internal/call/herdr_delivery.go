@@ -204,12 +204,13 @@ func (engine *Engine) callHerdr(
 
 // confirmHerdrTurn observes the acknowledged agent without submitting again.
 // Hook publication can lag agent.prompt's snapshot; idle sequence changes alone
-// still cannot prove a turn. The existing proof-settle budget bounds all reads.
+// still cannot prove a turn. The existing proof-settle budget bounds the poll:
+// no read starts past it, and each read keeps its own bound (Herdr's I/O
+// timeout, the store's busy timeout), so a loaded machine's slow read finishes
+// and is judged instead of being cut off mid-open.
 func (engine *Engine) confirmHerdrTurn(
 	ctx context.Context, target Target, prompted herdrAgentResult, boundary uint64, lock *targetLock,
 ) error {
-	ctx, cancel := context.WithTimeout(ctx, engine.options.ProofSettle)
-	defer cancel()
 	deadline := engine.options.Clock.Now().Add(engine.options.ProofSettle)
 	for {
 		if !engine.options.Clock.Now().Before(deadline) {

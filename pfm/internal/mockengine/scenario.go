@@ -86,11 +86,13 @@ type Step struct {
 	Tokens *Tokens `json:"tokens,omitempty"`
 	// Structured is the structured_output a headless -p --json-schema run prints.
 	Structured json.RawMessage `json:"structured,omitempty"`
-	// hold: stay busy until this file no longer exists.
+	// hold: stay busy until this file no longer exists; background_agent: the agent runs until it is gone.
 	UntilGone string `json:"until_gone,omitempty"`
 	// tool_call: the tool name PreToolUse matchers see and its input.
 	Tool  string          `json:"tool,omitempty"`
 	Input json.RawMessage `json:"input,omitempty"`
+	// tool_call: carry an allowed Bash or Write out (claude_tooluse.go perform); unset, its result is "done".
+	Perform bool `json:"perform,omitempty"`
 	// background_agent: the sidechain row's name and status text.
 	Name   string `json:"name,omitempty"`
 	Status string `json:"status,omitempty"`
@@ -257,6 +259,11 @@ func (running *script) forPrompt(prompt string) *script {
 	} else if steps == nil {
 		return running
 	}
+	return running.only(steps)
+}
+
+// only is the script with steps in place of its own, from their start, remembering no cursor.
+func (running *script) only(steps []Step) *script {
 	local := *running
 	local.Steps, local.position, local.cursor = steps, 0, ""
 	return &local
@@ -286,9 +293,7 @@ func (step Step) validate() error {
 			return errors.New("hold needs until_gone")
 		}
 	case StepToolCall:
-		if step.Tool == "" {
-			return errors.New("tool_call needs tool")
-		}
+		return step.validateToolCall()
 	case StepMenu:
 		if len(step.Options) == 0 {
 			return errors.New("menu needs options")

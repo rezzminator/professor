@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
 const pacedTestInput = `{"session_id":"paced-chat","model":{"display_name":"Opus"}}`
@@ -38,7 +39,7 @@ func newPacedRig(t *testing.T) *pacedRig {
 	rig := &pacedRig{t: t, now: time.Now(), output: "\x1b[1mrendered\x1b[0m line\n"}
 	rig.paced = Paced{
 		CacheDir: t.TempDir(),
-		Key:      PacedKey([]byte(pacedTestInput), "", ""),
+		Key:      PacedKey([]byte(pacedTestInput), "", "", resolve.WhoamiEnvironment{}),
 		Render: func(raw []byte) (string, error) {
 			rig.renders = append(rig.renders, string(raw))
 			rig.renderAt = append(rig.renderAt, rig.now)
@@ -258,7 +259,7 @@ func TestPacedFrontFallsBackInlineWhenThePacerBreaks(t *testing.T) {
 func TestPacedFrontWithNoChatKeyRendersInlineAndKeepsNoFile(t *testing.T) {
 	rig := newPacedRig(t)
 	raw := `{"model":{"display_name":"Opus"}}`
-	rig.paced.Key = PacedKey([]byte(raw), "120", "")
+	rig.paced.Key = PacedKey([]byte(raw), "120", "", resolve.WhoamiEnvironment{})
 	var stdout strings.Builder
 	rig.paced.Front([]byte(raw), &stdout)
 	if rig.paced.Key != "" || stdout.String() != rig.output || len(rig.spawned) != 0 {
@@ -270,10 +271,22 @@ func TestPacedFrontWithNoChatKeyRendersInlineAndKeepsNoFile(t *testing.T) {
 	}
 }
 
-func TestPacedKeyNamesTheChatItsWidthAndItsAccount(t *testing.T) {
-	bySession := PacedKey([]byte(`{"session_id":"s","transcript_path":"/t"}`), "", "")
-	byTranscript := PacedKey([]byte(`{"transcript_path":"/t"}`), "", "")
-	onAccount := func(dir string) string { return PacedKey([]byte(`{"session_id":"s"}`), "", dir) }
+func TestPacedKeyNamesTheChatItsWidthItsAccountAndItsPane(t *testing.T) {
+	bySession := PacedKey([]byte(`{"session_id":"s","transcript_path":"/t"}`), "", "", resolve.WhoamiEnvironment{})
+	byTranscript := PacedKey([]byte(`{"transcript_path":"/t"}`), "", "", resolve.WhoamiEnvironment{})
+	onAccount := func(dir string) string {
+		return PacedKey([]byte(`{"session_id":"s"}`), "", dir, resolve.WhoamiEnvironment{})
+	}
+	inPane := func(place resolve.WhoamiEnvironment) string {
+		return PacedKey([]byte(`{"session_id":"s"}`), "", "", place)
+	}
+	tmuxAt := func(tmux, pane string) resolve.WhoamiEnvironment {
+		return resolve.WhoamiEnvironment{TMUX: tmux, TMUXPane: pane}
+	}
+	herdrAt := func(socket, pane string) resolve.WhoamiEnvironment {
+		return resolve.WhoamiEnvironment{HerdrSocket: socket, HerdrPane: pane}
+	}
+	paneA, herdrA := inPane(tmuxAt("/tmp/tmux-1/cc-a,1,0", "%0")), inPane(herdrAt("/h/s.sock", "p1"))
 	for _, tc := range []struct {
 		name string
 		got  string
@@ -282,11 +295,15 @@ func TestPacedKeyNamesTheChatItsWidthAndItsAccount(t *testing.T) {
 		{"session id", bySession, true},
 		{"transcript path", byTranscript, true},
 		{"session wins over transcript", bySession, bySession != byTranscript},
-		{"width is part of the key", PacedKey([]byte(`{"session_id":"s"}`), "80", ""), bySession != PacedKey(
-			[]byte(`{"session_id":"s"}`), "80", "")},
+		{"width is part of the key", PacedKey([]byte(`{"session_id":"s"}`), "80", "", resolve.WhoamiEnvironment{}), bySession != PacedKey(
+			[]byte(`{"session_id":"s"}`), "80", "", resolve.WhoamiEnvironment{})},
 		{"config dir is part of the key", onAccount("/a/1"), onAccount("/a/1") != onAccount("/a/2")},
-		{"neither", PacedKey([]byte(`{"model":{}}`), "", ""), false},
-		{"not json", PacedKey([]byte(`{`), "", ""), false},
+		{"tmux server is part of the key", paneA, paneA != inPane(tmuxAt("/tmp/tmux-1/cc-b,1,0", "%0"))},
+		{"tmux pane is part of the key", paneA, paneA != inPane(tmuxAt("/tmp/tmux-1/cc-a,1,0", "%1"))},
+		{"herdr socket is part of the key", herdrA, herdrA != inPane(herdrAt("/h/t.sock", "p1"))},
+		{"herdr pane is part of the key", herdrA, herdrA != inPane(herdrAt("/h/s.sock", "p2"))},
+		{"neither", PacedKey([]byte(`{"model":{}}`), "", "", resolve.WhoamiEnvironment{}), false},
+		{"not json", PacedKey([]byte(`{`), "", "", resolve.WhoamiEnvironment{}), false},
 	} {
 		if (tc.got != "") != tc.want || (tc.got != "" && len(tc.got) != 32) {
 			t.Fatalf("%s: key %q", tc.name, tc.got)

@@ -19,7 +19,11 @@ ROOT="$(cd -- "$HERE/../../.." && pwd -P)"
 KEEP=0
 if [ "${1:-}" = --keep ]; then KEEP=1; shift; fi
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"
-RUN_DIR="/tmp/professor/journey/$RUN_ID"
+# The tree's git directory: a worktree shares the main checkout's, and the scratch root carries that checkout's name.
+common="$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir)" ||
+  { echo "journey: FAIL setup: $ROOT is not a git checkout" >&2; exit 1; }
+PROJECT="$(basename "$(dirname "$common")")"
+RUN_DIR="/tmp/${PROJECT#.}/journey/$RUN_ID"
 NAME="pfm-journey-$RUN_ID"
 BOOT_SECS=90
 fail() { echo "journey: FAIL $*" >&2; exit 1; }
@@ -75,7 +79,6 @@ stage "image $IMAGE"
 
 # The tree under test, mounted read-only at its own path, with its git directory when it is a worktree.
 mounts=(-v "$ROOT:$ROOT:ro" -v pfm-journey-gomod:/home/tester/go/pkg/mod -v pfm-journey-gocache:/home/tester/.cache/go-build)
-common="$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir)" || fail "setup: $ROOT is not a git checkout"
 case "$common" in "$ROOT"/*) ;; *) mounts+=(-v "$common:$common:ro") ;; esac
 owner=(-u 1000:1000 -e HOME=/home/tester -e USER=tester -e LOGNAME=tester -e SHELL=/usr/bin/zsh -e LANG=C.UTF-8
   -e PATH=/home/tester/.local/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin -e GOTOOLCHAIN=local)

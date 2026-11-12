@@ -49,7 +49,7 @@ type pane struct {
 	footer      string
 	menu        *Step
 	selected    int
-	agentRows   []string
+	agents      agentPanel
 	draft       composer
 	queued      []string
 	status      string
@@ -121,6 +121,7 @@ func (screen *pane) render() string {
 				text = "\x1b[2m" + screen.placeholder + "\x1b[0m"
 			}
 		}
+		out.WriteString(screen.agentWaitLine())
 		out.WriteString("\r\n" + screen.rule + screen.glyph + " " + text + "\r\n" + screen.rule)
 		if screen.placeholder != "" && draft != "" && strings.HasPrefix(codexRenameCommand, draft) {
 			out.WriteString(codexRenameOffer + "\r\n")
@@ -129,9 +130,7 @@ func (screen *pane) render() string {
 			out.WriteString("  Press up to edit queued messages\r\n")
 		}
 	}
-	for _, row := range screen.agentRows {
-		out.WriteString(row + "\r\n")
-	}
+	out.WriteString(screen.agents.render())
 	if screen.status != "" {
 		out.WriteString(screen.status + "\r\n")
 	}
@@ -281,6 +280,10 @@ func (loop *paneLoop) run() int {
 				return loop.finish("other", 0)
 			}
 			if code, exited := loop.idleKey(event); exited {
+				return code
+			}
+		case <-loop.agentsDue():
+			if code, exited := loop.agentsEnded(); exited {
 				return code
 			}
 		}
@@ -498,10 +501,8 @@ func (loop *paneLoop) turn(running *script) (int, bool) {
 				warn(proc.stderr, "tool %s: %v", step.Tool, err)
 				return ExitUnpinned, true
 			}
-			if denied != "" {
-				screen.say("⏺ " + step.Tool + " — denied by hook: " + denied)
-			} else {
-				screen.say("⏺ " + step.Tool + "(…)")
+			for _, row := range toolRows(step.Tool, denied) {
+				screen.say(row)
 			}
 			loop.paint()
 		case StepBackgroundAgent:
@@ -510,7 +511,8 @@ func (loop *paneLoop) turn(running *script) (int, bool) {
 				warn(proc.stderr, "background agent: %v", err)
 			}
 			if row != "" {
-				screen.agentRows = append(screen.agentRows, row)
+				agent := agentRow{line: row, name: step.Name, gate: step.UntilGone, busyMS: step.BusyMS}
+				screen.agents.rows = append(screen.agents.rows, agent)
 			}
 			loop.paint()
 		case StepCompact:
@@ -606,7 +608,7 @@ func (loop *paneLoop) busy(started time.Time, duration time.Duration, gate strin
 // live a confirmation menu opens whose Enter ends the process.
 func (loop *paneLoop) exit() (int, bool) {
 	screen := loop.screen
-	if len(screen.agentRows) > 0 {
+	if len(screen.agents.rows) > 0 {
 		screen.menu = &Step{
 			Type: StepMenu, Name: exitMenuName, Options: []string{"Exit and stop tasks", "Stay"}, Selected: 1,
 		}

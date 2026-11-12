@@ -37,7 +37,7 @@ func TestPaneRendersWhatCallMatches(t *testing.T) {
 		t.Fatalf("queued hint (inject/guards.go:26 queueProofPattern) missing:\n%s", frame)
 	}
 	screen.queued = nil
-	screen.agentRows = []string{"❯ ● tracer  mapping (background)"}
+	screen.agents.rows = []agentRow{{line: "❯ ● tracer  mapping (background)"}}
 	frame = screen.render()
 	if pfmcall.SelectorLine(frame) != "" || pfmcall.IsBusy(frame) {
 		t.Fatalf("agent row read as a menu or a busy turn:\n%s", frame)

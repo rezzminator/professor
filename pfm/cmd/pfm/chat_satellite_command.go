@@ -678,10 +678,10 @@ func runChatHistory(args []string, stdout, stderr io.Writer, runtimes ...command
 	}
 	path := sid
 	if info, statErr := os.Stat(sid); statErr != nil || !info.Mode().IsRegular() {
-		pools, err := historyPools(runtimes...)
+		pools, codexHomes, err := historyPools(runtimes...)
 		resolvedPath := ""
 		if err == nil {
-			resolvedPath, err = transcript.FindHistory(pools, slug, sid)
+			resolvedPath, err = transcript.ResolveHistory(context.Background(), pools, codexHomes, slug, sid)
 		}
 		if err != nil {
 			fmt.Fprintln(stderr, err.Error())
@@ -701,19 +701,17 @@ func runChatHistory(args []string, stdout, stderr io.Writer, runtimes ...command
 	return 0
 }
 
-// historyPools mirrors runChatScript's former PFM_HISTORY_ROOTS_JSON
-// marshalling exactly: a supplied runtime's configured Claude roots are used
-// as-is (even an empty list, never widened), and only the ENTIRE absence of a
-// runtime falls back to the unconfigured defaults history.sh assumed.
-func historyPools(runtimes ...commandRuntime) ([]string, error) {
+// historyPools is the Claude pools and Codex homes history searches: a supplied runtime's configured
+// roots as-is (even an empty list, never widened); only no runtime at all falls back to the defaults.
+func historyPools(runtimes ...commandRuntime) (claude, codex []string, err error) {
 	if len(runtimes) != 0 {
-		return runtimes[0].Paths.Roots[pfmengine.Claude], nil
+		return runtimes[0].Paths.Roots[pfmengine.Claude], runtimes[0].Paths.Roots[pfmengine.Codex], nil
 	}
 	resolved, err := paths.Resolve()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return []string{filepath.Join(resolved.Home, ".claude", "projects")}, nil
+	return []string{filepath.Join(resolved.Home, ".claude", "projects")}, []string{paths.CodexHome(resolved.Home)}, nil
 }
 
 func runChatModal(args []string, stdout, stderr io.Writer, clk clock.Clock, runtimes ...commandRuntime) int {

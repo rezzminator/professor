@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Split slow Go packages across processes and present one go test JSON stream.
-#   test-shard.sh run  --out F [--history H] [--bin-dir D] -- GO-TEST-FLAGS   run, merge, record the CPU load beside F (F.load);
-#       the pfm and mock-engine binaries the tests drive are built first, both at once, into D (kept) or a temp dir
-#       (removed); the history H also orders the unsharded packages, longest first
+#   test-shard.sh run  --out F [--history H] -- GO-TEST-FLAGS   run, merge, record the CPU load beside F (F.load);
+#       the pfm and mock-engine binaries the tests drive are built first, both at once, into a temp dir the run
+#       removes; the history H also orders the unsharded packages, longest first
 #   test-shard.sh plan --out F [--history H]                    print the shard plan
 #   test-shard.sh merge --out F STREAM...                       merge shard streams
 #   test-shard.sh sample --out F.load                           record the CPU load alone (what `run` records
@@ -52,17 +52,6 @@ def output_ready(path):
             pass
     except OSError as exc:
         error(f'--out {path} is not writable: {exc}')
-
-
-def bin_dir_ready(path):
-    # Absolute: the builds run in the module directory and the tests in their own.
-    try:
-        os.makedirs(path, exist_ok=True)
-        with tempfile.NamedTemporaryFile(dir=path):
-            pass
-    except OSError as exc:
-        error(f'--bin-dir {path}: {exc}')
-    return Path(os.path.abspath(path))
 
 
 def history_tests(path):
@@ -398,9 +387,7 @@ def command_args():
         cmd.add_argument('--out', required=True)
         if mode in ('run', 'plan'):
             cmd.add_argument('--history')
-        if mode == 'run':
-            cmd.add_argument('--bin-dir')
-        elif mode == 'merge':
+        if mode == 'merge':
             cmd.add_argument('streams', nargs='+')
     args, flags = parser.parse_known_args()
     if args.mode == 'run':
@@ -421,7 +408,6 @@ def main():
     if args.mode == 'merge':
         return merged_streams([(path, None) for path in args.streams], args.out)
 
-    prebuilt_dir = bin_dir_ready(args.bin_dir) if args.mode == 'run' and args.bin_dir else None
     packages = package_list()
     history = history_tests(args.history)
     counts = shard_counts(packages)
@@ -434,10 +420,10 @@ def main():
                 old.unlink()
 
     with tempfile.TemporaryDirectory(prefix='test-shard-') as binary_dir:
-        return run_packages(args, packages, selected, counts, history, raw_dir, Path(binary_dir), prebuilt_dir or Path(binary_dir))
+        return run_packages(args, packages, selected, counts, history, raw_dir, Path(binary_dir))
 
 
-def run_packages(args, packages, selected, counts, history, raw_dir, binary_dir, prebuilt_dir):
+def run_packages(args, packages, selected, counts, history, raw_dir, binary_dir):
     processes = []
     streams = []
     exits = []
@@ -454,9 +440,7 @@ def run_packages(args, packages, selected, counts, history, raw_dir, binary_dir,
         builds = []
         for name, variable in (('pfm', 'PFM_TEST_PFM_BINARY'),
                                ('mock-engine', 'PFM_TEST_MOCK_ENGINE_BINARY')):
-            prebuilt = prebuilt_dir / name
-            # A failed build leaves no output: a binary kept from an earlier run must not pass for this one.
-            prebuilt.unlink(missing_ok=True)
+            prebuilt = binary_dir / name
             target = './cmd/' + name
             proc = subprocess.Popen(['go', 'build', '-trimpath', '-buildvcs=false', '-o', str(prebuilt), target],
                                     cwd=MODULE, env=build_env, text=True, stdout=subprocess.PIPE,

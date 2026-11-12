@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -342,4 +343,109 @@ func TestClaudeInlineAsyncFailureNeitherEndsTheTurnNorSkipsLaterHandlers(t *test
 	if got := readFile(t, marker); got != "ran\n" {
 		t.Fatalf("handler after the failed async one ran %q, want once", got)
 	}
+}
+
+// TestClaudePerformedToolCall: a tool_call with perform carries an allowed Bash or Write out as Claude
+// does and records its result; a denied one runs nothing, its reason the result and each line of it a
+// row of the pane; without perform the call runs nothing and its result is "done".
+func TestClaudePerformedToolCall(t *testing.T) {
+	deny := `printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny",` +
+		`"permissionDecisionReason":"first line\nsecond line"}}'`
+	for _, test := range []struct {
+		name, tool, input, pre string
+		perform                bool
+		want                   toolResult // the tool_result's content and is_error
+		file, fileText         string     // a file under the work directory and its text, "" for absent
+		rows                   []string   // pane rows that must show
+	}{
+		{
+			name: "bash-allowed", tool: "Bash", perform: true,
+			input: `{"command":"printf 'hello\\n' > made.txt; printf 'out\\n'"}`,
+			want:  toolResult{Content: "out\n"}, file: "made.txt", fileText: "hello\n", rows: []string{"⏺ Bash(…)"},
+		},
+		{
+			name: "bash-failed", tool: "Bash", perform: true, input: `{"command":"printf 'boom\\n'; exit 3"}`,
+			want: toolResult{Content: "Exit code 3\nboom\n", IsError: true}, file: "made.txt",
+		},
+		{
+			name: "bash-denied", tool: "Bash", perform: true, pre: deny,
+			input: `{"command":"printf 'hello\\n' > made.txt"}`,
+			want:  toolResult{Content: "first line\nsecond line", IsError: true}, file: "made.txt",
+			rows: []string{"⏺ Bash — denied by hook: first line", "  second line"},
+		},
+		{
+			name: "write-allowed", tool: "Write", perform: true,
+			input: `{"file_path":"sub/notes.md","content":"written\n"}`,
+			want:  toolResult{Content: "File created successfully at: {work}/sub/notes.md"},
+			file:  "sub/notes.md", fileText: "written\n",
+		},
+		{
+			name: "write-denied", tool: "Write", perform: true, pre: deny,
+			input: `{"file_path":"sub/notes.md","content":"written\n"}`,
+			want:  toolResult{Content: "first line\nsecond line", IsError: true}, file: "sub/notes.md",
+		},
+		{
+			name: "unperformed", tool: "Bash", input: `{"command":"printf 'hello\\n' > made.txt"}`,
+			want: toolResult{Content: "done"}, file: "made.txt",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fix := newFixture(t)
+			t.Chdir(fix.work)
+			if test.pre != "" {
+				writeHookSettings(t, filepath.Join(fix.work, ".claude", "settings.json"), map[string]any{
+					hookPreToolUse: commandHook(test.pre),
+				})
+			}
+			fix.write(Scenario{SessionID: fixtureSession, BusyMS: intPtr(0), Steps: []Step{
+				{Type: StepToolCall, Tool: test.tool, Input: json.RawMessage(test.input), Perform: test.perform},
+				{Type: StepTurn, Reply: "finished"},
+			}})
+			s := fix.startTUI("claude", claudeArgs(), nil)
+			s.waitFrame("composer", func(frame string) bool { return strings.Contains(frame, "❯") })
+			s.typeLine("go")
+			frame := s.waitFrame("reply", func(frame string) bool { return strings.Contains(frame, "⏺ finished") })
+			rows := strings.Split(frame, "\n")
+			for _, row := range test.rows {
+				if !slices.ContainsFunc(rows, func(got string) bool { return strings.TrimRight(got, " \r") == row }) {
+					t.Errorf("pane lacks the row %q:\n%s", row, frame)
+				}
+			}
+			var got *toolResult
+			transcript := fix.claudeTranscript(fixtureSession)
+			for _, line := range strings.Split(readFile(t, transcript), "\n") {
+				var record struct {
+					Message struct {
+						Content []contentPart `json:"content"`
+					} `json:"message"`
+				}
+				if json.Unmarshal([]byte(line), &record) != nil {
+					continue // a record whose content is a string carries no tool result
+				}
+				for _, part := range record.Message.Content {
+					if part.Type == "tool_result" {
+						got = &toolResult{part.Content, part.IsError}
+					}
+				}
+			}
+			want := test.want
+			want.Content = strings.ReplaceAll(want.Content, "{work}", fix.work)
+			if got == nil || *got != want {
+				t.Errorf("tool_result in %s = %+v, want %+v", transcript, got, want)
+			}
+			data, err := os.ReadFile(filepath.Join(fix.work, test.file))
+			if test.fileText == "" && !os.IsNotExist(err) {
+				t.Errorf("%s exists (%q, %v), want it never written", test.file, data, err)
+			}
+			if test.fileText != "" && (err != nil || string(data) != test.fileText) {
+				t.Errorf("%s = %q (%v), want %q", test.file, data, err, test.fileText)
+			}
+		})
+	}
+}
+
+// toolResult is what a tool_result record says: its content and whether it is an error.
+type toolResult struct {
+	Content string
+	IsError bool
 }

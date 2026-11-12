@@ -478,6 +478,7 @@ func TestChatCallAnswersARegisteredDeadChatFromItsRow(t *testing.T) {
 	const codexID = "33333333-2222-4333-8444-555555555555"
 	for _, testCase := range []struct {
 		name, engine, session string
+		transcript            string
 		wantCode              int
 		wantSession           string
 		wantStderr            string
@@ -491,9 +492,21 @@ func TestChatCallAnswersARegisteredDeadChatFromItsRow(t *testing.T) {
 			name: "walk-dead-cc", engine: "cc", session: claudeID,
 			wantSession: claudeID,
 		},
+		{
+			// a chat born named and ended before its first prompt: Claude wrote its title, no turn
+			name: "walk-dead-cc-titled", engine: "cc", session: claudeID, wantCode: codeDeadChat,
+			transcript: `{"type":"custom-title","customTitle":"walk-dead-cc-titled","sessionId":"` + claudeID + `"}` + "\n",
+			wantStderr: `"walk-dead-cc-titled" is dead (engine cc, session ` + claudeID +
+				"); revive it with: pfm chat open walk-dead-cc-titled\n",
+		},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			_, transcript := resumeLadderJail(t, claudeID)
+			if testCase.transcript != "" {
+				if err := os.WriteFile(transcript, []byte(testCase.transcript), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
 			before, err := os.ReadFile(transcript)
 			if err != nil {
 				t.Fatal(err)

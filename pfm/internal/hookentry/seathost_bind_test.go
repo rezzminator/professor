@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
@@ -20,7 +21,7 @@ import (
 )
 
 func TestBindNativeHostRequiresKernelRoleAndCanonicalOwnership(t *testing.T) {
-	for _, mode := range []string{"legacy", "moved", "recycled", "old-live", "old-dead-live", "cold-lost", "cold-moved-caller", "unknown-old", "wrong-shell", "shell-negative", "shell-zero", "shell-one", "wrong-argv", "malformed", "malformed-list", "kept", "raced", "raced-other"} {
+	for _, mode := range []string{"legacy", "moved", "recycled", "old-live", "old-dead-live", "cold-lost", "cold-moved-caller", "unknown-old", "wrong-shell", "shell-negative", "shell-zero", "shell-one", "wrong-argv", "malformed", "malformed-list", "kept", "raced", "raced-other", "pane-pending", "pane-never"} {
 		t.Run(mode, func(t *testing.T) {
 			root := testjail.ShortRoot(t)
 			proc := filepath.Join(root, "proc")
@@ -214,6 +215,14 @@ func TestBindNativeHostRequiresKernelRoleAndCanonicalOwnership(t *testing.T) {
 				caller = "w1:p1"
 			case "recycled":
 				seat.HerdrTerminalID = "old-terminal"
+			case "pane-pending", "pane-never":
+				// A new tab's reservation: Herdr names the pane only once layout.apply answers.
+				seat.HerdrPane = ""
+				if mode == "pane-never" {
+					saved := reservedPaneWait
+					reservedPaneWait = 100 * time.Millisecond
+					t.Cleanup(func() { reservedPaneWait = saved })
+				}
 			case "old-live", "old-dead-live", "cold-lost", "cold-moved-caller", "unknown-old":
 				seat.SeatHostPID = 900001
 				seat.SeatHostStart = 100
@@ -254,9 +263,31 @@ func TestBindNativeHostRequiresKernelRoleAndCanonicalOwnership(t *testing.T) {
 				t.Setenv(herdr.EnvShieldInner, "h1")
 				testjail.StageHerdrShield(t, testjail.HerdrShieldListing(900005, 100, 900002, 100, pane, socket), 0)
 			}
+			addressed := make(chan error, 1)
+			if mode == "pane-pending" {
+				// The birth records the pane after its supervisor has already started.
+				go func() {
+					<-time.After(50 * time.Millisecond)
+					reserved, _, err := db.Seat(context.Background(), seat.SeatID)
+					if err == nil {
+						next := reserved
+						next.HerdrPane = pane
+						err = db.UpdateSeat(context.Background(), reserved, next)
+					}
+					addressed <- err
+				}()
+			} else {
+				addressed <- nil
+			}
 			got, bindErr := bindNativeHost(context.Background(), db, before, values)
+			if err := <-addressed; err != nil {
+				t.Fatalf("record the reserved pane: %v", err)
+			}
+			if mode == "pane-pending" {
+				before.HerdrPane = pane
+			}
 			allowed := mode == "legacy" || mode == "moved" || mode == "cold-lost" || mode == "cold-moved-caller" ||
-				mode == "kept" || mode == "raced"
+				mode == "kept" || mode == "raced" || mode == "pane-pending"
 			current, found, readErr := db.Seat(context.Background(), seat.SeatID)
 			if allowed {
 				if bindErr != nil || !found || readErr != nil || got.SeatHostPID != os.Getpid() ||

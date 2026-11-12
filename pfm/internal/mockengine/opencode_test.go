@@ -2,16 +2,20 @@ package mockengine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/index"
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 )
 
 const fixtureOpenCodeSession = "ses_fixture0001"
@@ -187,5 +191,51 @@ func TestOpenCodeRunWritesTheSessionStorePfmReads(t *testing.T) {
 	if len(sessions) != 1 || sessions[0].PromptCount != 2 || sessions[0].AssistantCount != 2 ||
 		sessions[0].FirstPrompt != "prove the bound" {
 		t.Fatalf("after a continued run sessions = %+v, want one session with two exchanges", sessions)
+	}
+}
+
+// TestOpenCodeStoreSchemaAppearsWhole: OpenCode's migrator creates its tables in one transaction, so pfm's
+// reader never meets a store holding some of them; the fake's schema is whole or absent the same way. An
+// index named part makes the part table fail after the three before it.
+func TestOpenCodeStoreSchemaAppearsWhole(t *testing.T) {
+	fix := newFixture(t)
+	t.Chdir(fix.work)
+	fix.write(Scenario{SessionID: fixtureOpenCodeSession, BusyMS: intPtr(0), Steps: []Step{
+		{Type: StepTurn, Reply: "bounded"},
+	}})
+	path := filepath.Join(fix.home, ".local", "share", "opencode", "opencode.db")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	seed, err := sqlitedb.OpenReadWrite(path, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := seed.Exec("CREATE TABLE seed (x); CREATE INDEX part ON seed (x)"); err != nil {
+		t.Fatal(errors.Join(err, seed.Close()))
+	}
+	code, _, stderr := runOnce(fix, "opencode", []string{"run", "prove the schema"}, "")
+	const refused = "mock-engine: create opencode schema: SQL logic error: there is already an index named part (1)\n"
+	if code != ExitUsage || stderr != refused {
+		t.Fatalf("opencode run over a store whose part name is taken: exit %d, stderr %q; want exit %d, %q",
+			code, stderr, ExitUsage, refused)
+	}
+	var tables []string
+	rows, err := seed.Query("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
+	if err != nil {
+		t.Fatal(errors.Join(err, seed.Close()))
+	}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			t.Fatal(err)
+		}
+		tables = append(tables, name)
+	}
+	if err := errors.Join(rows.Err(), rows.Close(), seed.Close()); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(tables, []string{"seed"}) {
+		t.Fatalf("tables in %s after the refused schema = %v, want [seed]", path, tables)
 	}
 }

@@ -16,6 +16,7 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/statusline"
 )
 
@@ -364,6 +365,10 @@ func TestStatuslineFrontStartsTheWorkerThenServesItsLine(t *testing.T) {
 	t.Setenv("PFM_TMUX_DIR", filepath.Join(root, "tmux"))
 	t.Setenv("PFM_SID_DIR", filepath.Join(root, "sid"))
 	t.Setenv("COLUMNS", "")
+	t.Setenv("TMUX", "/tmp/tmux-1/cc-front,1,0")
+	t.Setenv("TMUX_PANE", "%3")
+	t.Setenv("HERDR_SOCKET_PATH", "")
+	t.Setenv("HERDR_PANE_ID", "")
 	var spawned []string
 	original := statuslinePacedSpawn
 	t.Cleanup(func() { statuslinePacedSpawn = original })
@@ -372,7 +377,8 @@ func TestStatuslineFrontStartsTheWorkerThenServesItsLine(t *testing.T) {
 		return nil
 	}
 	input := `{"session_id":"paced-front","model":{"display_name":"Opus 4"}}`
-	key := statusline.PacedKey([]byte(input), "", filepath.Join(root, ".cc", "1"))
+	pane := resolve.WhoamiEnvironment{TMUX: "/tmp/tmux-1/cc-front,1,0", TMUXPane: "%3"}
+	key := statusline.PacedKey([]byte(input), "", filepath.Join(root, ".cc", "1"), pane)
 	dir := filepath.Join(root, "tmp", "cc-sl-paced-"+strconv.Itoa(os.Getuid()))
 	runtime := statuslineTestRuntime(t)
 	front := func() string {
@@ -415,7 +421,7 @@ func TestStatuslineFrontStartsTheWorkerThenServesItsLine(t *testing.T) {
 	// The chat resumed on account 2: the account-1 worker still holds its lock,
 	// and the tick goes to a new worker rather than serving account 1's line.
 	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(root, ".cc", "2"))
-	moved := statusline.PacedKey([]byte(input), "", filepath.Join(root, ".cc", "2"))
+	moved := statusline.PacedKey([]byte(input), "", filepath.Join(root, ".cc", "2"), pane)
 	if third := front(); third != statusline.PacedPending || len(spawned) != 2 || spawned[1] != moved ||
 		moved == key {
 		t.Fatalf("tick after the account move stdout=%q spawned=%v key=%s; want the pending line and worker %s",

@@ -12,6 +12,8 @@ type State struct {
 	Name    string // the chat's pfm name, once a step named it
 	Pane    string // the Herdr pane the branch's Herdr step opened
 	Chat    Chat   // the chat the branch started
+	Mesh    Mesh   // herdr-mesh's other chats: the child and its tmux peer
+	Chats   []Chat // every chat of a branch that holds more than one, in the order it started them
 }
 
 // Chat is one live chat as its seat and the process table hold it.
@@ -19,4 +21,6 @@ type Chat struct {
 	Session string // the engine's session id
 	Seat    string // the seat's id in the state database
 	Engine  int    // the engine's pid
+	Pane    string // the Herdr pane it runs in, for a branch that holds more than one chat
+	Name    string // its pfm name, for a branch that holds more than one chat
 }

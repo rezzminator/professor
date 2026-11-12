@@ -193,7 +193,7 @@ func writeAcceptedHuman(stdout io.Writer, scan *RetiredNameScan) {
 // whenever rows are open, so a session that starts from any prompt still
 // reads what ends each row. Each line leads with "·", never a bare status
 // word: a reader that takes an indented first field after a status header as
-// a row (infra/fence/lanes/adopt.sh) must not read the guide as rows.
+// a row (an adopter session reading the report) must not read the guide as rows.
 func writeSessionGuide(stdout io.Writer) {
 	fmt.Fprintln(
 		stdout,

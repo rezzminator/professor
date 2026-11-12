@@ -11,31 +11,20 @@ import (
 )
 
 // claudeFromPicker: in the first pane of the branch's Herdr session the owner picks a new Claude chat
-// and walks the wizard with Enter; the fake Claude draws in the pane, pfm lists exactly one live Claude
+// and walks the wizard with Enter, the engine chip on Claude; the fake Claude draws in the pane, pfm lists exactly one live Claude
 // chat on that session's socket, its seat is live on that pane and its engine runs under the session's
 // Herdr server.
 func claudeFromPicker(c *harness.Ctx, s State) State {
 	term := c.Terminal(s.Term)
 	term.Press(harness.Enter)
+	// Codex and OpenCode are logged in too, so the wizard asks the engine first, opening on the last
+	// launch's: another branch's may be Codex's.
+	pickEngine(term, "Claude")
+	term.Press(harness.Enter)
 	term.WaitFor("choose the cache")
 	term.Press(harness.Enter)
 	term.WaitFor("❯", 20*time.Second)
-	c.Poll("one live Claude chat with a live seat on "+s.Pane, 20*time.Second, func() (bool, string) {
-		rows, _ := liveChats(c, herdrSocket(s))
-		seats := liveSeats(c, herdrSocket(s))
-		seen := fmt.Sprintf("chats %v, seats %v", rows, seats)
-		if len(rows) != 1 || len(seats) != 1 {
-			return false, seen
-		}
-		for session, row := range rows {
-			seat, ok := seats[session]
-			if !ok || row != [2]string{"live-claude", herdrSocket(s)} || seat[1] != s.Pane {
-				return false, seen
-			}
-			s.Chat = Chat{Session: session, Seat: seat[0]}
-		}
-		return true, seen
-	})
+	s.Chat = oneLiveChat(c, s, "live-claude")
 	s.Chat.Engine = engineOf(c, s)
 	fleetConsistent(c, s)
 	return s

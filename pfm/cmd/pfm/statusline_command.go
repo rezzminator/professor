@@ -15,6 +15,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/reload"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/statusline"
 	"github.com/rezzminator/professor/pfm/internal/usagehook"
 )
@@ -85,7 +86,8 @@ func runStatuslineWithRuntime(
 		return 0
 	}
 	statusline.RecordSession(raw, machine.Paths.SIDDir, stderr)
-	paced.Key = statusline.PacedKey(raw, env.Get("COLUMNS"), env.Get(pfmengine.MustLookup(pfmengine.Claude).HomeEnv))
+	paced.Key = statusline.PacedKey(raw, env.Get("COLUMNS"), env.Get(pfmengine.MustLookup(pfmengine.Claude).HomeEnv),
+		resolve.EnvironmentOf(env.Get))
 	paced.Front(raw, stdout)
 	return 0
 }

@@ -45,8 +45,8 @@ cp "$HERE/scripts/platform.sh" "$R/scripts/platform.sh" # the fence half's door:
 chmod +x "$R/.claude/scripts/test.sh" 2>/dev/null || true
 
 # --- fixture repository ---------------------------------------------------------------------------
-mkdir -p "$R/pfm/internal/a" "$R/pfm/internal/b" "$R/pfm/e2e" "$R/pfm/scripts" "$R/pfm/docs" "$R/docs" \
-  "$R/scripts" "$R/infra/fence/lanes/tests" "$R/tools" "$R/templates/global/commands"
+mkdir -p "$R/pfm/internal/a" "$R/pfm/internal/b" "$R/pfm/e2e" "$R/pfm/journey" "$R/pfm/scripts" "$R/pfm/docs" "$R/docs" \
+  "$R/scripts" "$R/infra/fence/tests" "$R/tools" "$R/templates/global/commands"
 printf 'package a\n\nfunc TestOne(t *testing.T) {}\nfunc TestTwo(t *testing.T) {}\nfunc FuzzSeed(f *testing.F) {}\nfunc helperTest(t *testing.T) {}\nfunc helperFuzz(f *testing.F) {}\n// func TestCommented(t *testing.T) {}\n' >"$R/pfm/internal/a/a_test.go"
 printf 'package a\n\nfunc FuzzOnly(f *testing.F) {}\n' >"$R/pfm/internal/a/fuzz_test.go"
 printf 'package a\n\nfunc TestMain(m *testing.M) {}\n' >"$R/pfm/internal/a/helper_test.go"
@@ -54,22 +54,23 @@ printf 'package a\n\nfunc TestGone(t *testing.T) {}\n' >"$R/pfm/internal/a/gone_
 printf 'package a\n' >"$R/pfm/internal/a/a.go"
 printf 'package b\n' >"$R/pfm/internal/b/b.go"
 printf 'package e2e\n\nfunc TestE2E(t *testing.T) {}\n' >"$R/pfm/e2e/x_test.go"
+printf 'package journey\n\nfunc TestTree(t *testing.T) {}\n' >"$R/pfm/journey/tree_test.go"
 printf 'module example.test/pfm\n\ngo 1.22\n' >"$R/pfm/go.mod"
 printf '# header\nexample.test/pfm/internal/a\tTestListed\thelper\tre-exec fixture\n' >"$R/pfm/scripts/known-skips.tsv"
 # Every fixture script records its own run: "ran <path> <args>".
 # shellcheck disable=SC2016 # the fixture body is literal: $0, $* and $REC expand when it runs
 REC_BODY='#!/usr/bin/env bash\nprintf "ran %%s%%s\\n" "${0#./}" "${*:+ $*}" >>"$REC"\n'
 for f in pfm/scripts/s_test.sh pfm/scripts/s.sh scripts/test-w.sh scripts/w.sh scripts/test-dev-report.sh \
-  infra/fence/f.sh infra/fence/lanes/tests/f_test.sh; do
+  infra/fence/f.sh infra/fence/tests/f_test.sh; do
   # shellcheck disable=SC2059 # the format is the fixture body
   printf "$REC_BODY" >"$R/$f"
 done
 # A sourced harness brings every tracked test naming it; the iso doors' suite comes with dev.sh.
-printf '# sources scripts/shtest.sh\n' >>"$R/infra/fence/lanes/tests/f_test.sh"
+printf '# sources scripts/shtest.sh\n' >>"$R/infra/fence/tests/f_test.sh"
 printf '# sources scripts/shtest.sh\n' >>"$R/scripts/test-w.sh"
 echo '# the harness' >"$R/scripts/shtest.sh"
 # shellcheck disable=SC2059 # the format is the fixture body
-printf "$REC_BODY" >"$R/infra/fence/lanes/tests/iso-housekeeping_test.sh"
+printf "$REC_BODY" >"$R/infra/fence/tests/iso-housekeeping_test.sh"
 echo 'print(1)' >"$R/scripts/z.py"
 echo 'print(1)' >"$R/scripts/test-z.py"
 echo 'print(1)' >"$R/tools/y.py"
@@ -208,6 +209,13 @@ rec_lacks "a deletion-only templates selection runs no pfm check" "go -C pfm vet
 # --- derivation: each path's affected tests ----------------------------------------------------------
 run "$R" pfm/e2e/x_test.go
 rec_has "an e2e file runs with the e2e tag in its own package" "${GO_E[@]}"
+run "$R" pfm/journey/tree_test.go
+if [ "$(grep -cxF 'go -C pfm vet -tags journey ./journey/...' "$REC")" = 2 ]; then ok "a journey file is vetted under its tag twice (Linux, then macOS)"
+else bad "a journey file is vetted under its tag twice (Linux, then macOS)" "$(cat "$REC")"; fi
+rec_lacks "a journey file is never run as a go test" "go -C pfm test .*journey"
+run "$R" pfm/journey/tree_test.go::TestTree
+expect "the journey suite takes no selector, exit 2" 2 "$U"
+out_has "the journey selector refusal names the file" "test.sh: pfm/journey/tree_test.go::TestTree: the journey suite takes no selector (it is only vetted)"
 # shellcheck disable=SC2016 # the $( ) is the point: a selector no shell may evaluate
 run "$R" "$A"'::TestOne/sub case$(touch PWNED)|x$'
 # shellcheck disable=SC2016 # literal, as above
@@ -252,12 +260,12 @@ no_dev "a shell test with a selector never reaches dev.sh"
 run "$R" scripts/w.sh
 ran_has "scripts/x.sh brings scripts/test-x.sh" scripts/test-w.sh
 run "$R" infra/fence/f.sh
-ran_has "infra/fence/x.sh brings infra/fence/lanes/tests/x_test.sh" infra/fence/lanes/tests/f_test.sh
+ran_has "infra/fence/x.sh brings infra/fence/tests/x_test.sh" infra/fence/tests/f_test.sh
 run "$R" .claude/scripts/dev.sh
 ran_has "dev.sh brings scripts/test-dev-report.sh run against the tree's dev.sh" "scripts/test-dev-report.sh $R/.claude/scripts/dev.sh"
-ran_has "dev.sh brings the suite of its iso doors" infra/fence/lanes/tests/iso-housekeeping_test.sh
+ran_has "dev.sh brings the suite of its iso doors" infra/fence/tests/iso-housekeeping_test.sh
 run "$R" scripts/shtest.sh
-ran_has "scripts/shtest.sh brings a lane test that names it" infra/fence/lanes/tests/f_test.sh
+ran_has "scripts/shtest.sh brings a fence test that names it" infra/fence/tests/f_test.sh
 ran_has "scripts/shtest.sh brings a scripts test that names it" scripts/test-w.sh
 if grep -q '^ran pfm/scripts/s_test.sh' "$REC"; then bad "scripts/shtest.sh brings no test that does not name it" "$(cat "$REC")"
 else ok "scripts/shtest.sh brings no test that does not name it"; fi

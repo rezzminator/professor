@@ -394,6 +394,8 @@ func TestNativeDeadSeatDoesNotFailListing(t *testing.T) {
 					"10/stat":    "10 (sh) S 1" + ticks + "3 0\n",
 					"20/stat":    "20 (pfm) S 10" + ticks + "9 0\n",
 					"20/cmdline": "pfm\x00internal\x00seat-host\x00healthy\x00",
+					"50/stat":    "50 (pfm) S 1" + ticks + "9 0\n",
+					"50/cmdline": "pfm\x00internal\x00seat-host\x00ending\x00",
 				} {
 					path := filepath.Join(proc, name)
 					if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
@@ -403,7 +405,9 @@ func TestNativeDeadSeatDoesNotFailListing(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				socket := nativePaneServer(t, map[string]string{"w6:p3": "healthy", "w6:p4": "recycled"})
+				socket := nativePaneServer(t, map[string]string{
+					"w6:p3": "healthy", "w6:p4": "recycled", "w6:p5": "birthing",
+				})
 				values, err := config.ResolvePaths()
 				if err != nil {
 					t.Fatal(err)
@@ -415,14 +419,25 @@ func TestNativeDeadSeatDoesNotFailListing(t *testing.T) {
 						t.Error(err)
 					}
 				})
+				// "stopped" lived on a Herdr server that is gone, its supervisor with it.
+				stopped := filepath.Join(testjail.ShortRoot(t), "stopped.sock")
 				for _, item := range []struct {
-					id, pane string
-					pid      int
-				}{{"healthy", "w6:p3", 20}, {"dead", "w6:p4", 30}} {
+					id, pane, socket string
+					pid              int
+				}{
+					{"healthy", "w6:p3", socket, 20},
+					{"dead", "w6:p4", socket, 30},
+					{"stopped", "w1:p1", stopped, 40},
+					// "birthing" is reserved, its supervisor not yet started under the pane shell.
+					{"birthing", "w6:p5", socket, 0},
+					// "ending" is ended: its end worker closed the pane, its supervisor still exiting.
+					{"ending", "w6:p6", socket, 50},
+				} {
 					if err := state.PutSeat(ctx, fleetdb.Seat{
 						SeatID: item.id, SessionID: item.id, Engine: "cc", Backend: "herdr", State: "live",
-						Name: strings.ToUpper(item.id), HerdrSocket: socket, HerdrPane: item.pane,
+						Name: strings.ToUpper(item.id), HerdrSocket: item.socket, HerdrPane: item.pane,
 						HerdrWorkspace: "w6", HerdrTerminalID: item.id, SeatHostPID: item.pid, SeatHostStart: 9,
+						EndPending: item.id == "ending",
 					}); err != nil {
 						t.Fatal(err)
 					}
@@ -456,6 +471,11 @@ func TestNativeDeadSeatDoesNotFailListing(t *testing.T) {
 					}
 				}
 				healthy, dead := got["healthy"], got["dead"]
+				if want := "HERDR DEAD stopped: saved supervisor exited"; got["stopped"].Kind != compose.ResumeClaude ||
+					got["stopped"].BackendError != want {
+					t.Fatalf("seat of a stopped Herdr server = %+v, want resumable with %q", got["stopped"], want)
+				}
+				delete(got, "stopped")
 				if len(got) != 2 || healthy.Kind != compose.LiveClaude || healthy.BackendError != "" ||
 					healthy.CWD != "/jail/healthy" {
 					t.Fatalf("healthy seat lost beside a dead one: %+v", got)

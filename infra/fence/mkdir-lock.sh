@@ -1,7 +1,7 @@
 # shellcheck shell=bash
 # infra/fence/mkdir-lock.sh — one try at a mkdir lock directory holding its owner's pid (mkdir is
 # atomic; flock is not on the macOS host). Sourced by infra/fence/shared.sh (the shared container's
-# start lock), infra/fence/lanes/root.sh (the root build lock) and infra/fence/gate-history.sh (the
+# start lock) and infra/fence/gate-history.sh (the
 # ledger lock); each loops over it with its own wait and its own named timeout. Portable to bash 3.2.
 #
 #   mkdir_lock_try <lock dir> <owner pid>   # 0 taken; 1 held, MKDIR_LOCK_HOLDER its pid (or empty)

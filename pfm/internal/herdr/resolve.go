@@ -3,7 +3,6 @@ package herdr
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -203,8 +202,7 @@ type PaneIdentity struct {
 // Herdr answered and no pane holds pids; every failed read is an error.
 func LocatePane(ctx context.Context, shield *Shield, socket, pane string, pids []int) (PaneIdentity, bool, error) {
 	identity, err := paneIdentity(ctx, socket, pane)
-	var refusal *Refusal
-	if !errors.As(err, &refusal) || refusal.Code != paneNotFound && refusal.Code != "not_found" {
+	if !PaneGone(err) {
 		return identity, err == nil, err
 	}
 	panes, listErr := ListPanes(ctx, socket)

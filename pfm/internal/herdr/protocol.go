@@ -3,9 +3,17 @@ package herdr
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 )
+
+// PaneGone reports whether err is Herdr refusing a pane id it does not know
+// (pane_not_found, or not_found from an older Herdr).
+func PaneGone(err error) bool {
+	var refusal *Refusal
+	return errors.As(err, &refusal) && (refusal.Code == paneNotFound || refusal.Code == "not_found")
+}
 
 // protocolVersionUnknown is the Version of a ping that names no release.
 const protocolVersionUnknown = "unknown"

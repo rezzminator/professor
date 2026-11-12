@@ -1,8 +1,6 @@
 package main
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -26,6 +24,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/reload"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
+	pfmtranscript "github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 // agentsCommand is `claude agents`, the registry read the resume probe runs.
@@ -330,7 +329,7 @@ func appendResumeCall(
 			returnErr = errors.Join(returnErr, err)
 		}
 	}()
-	tail, err := lastUUIDEvent(transcript.Raw())
+	tail, err := pfmtranscript.LastUUIDEvent(transcript.Raw())
 	if err != nil {
 		return resumeReceipt{}, fmt.Errorf("read transcript tail %q: %w", target.Path, err)
 	}
@@ -376,26 +375,4 @@ func appendResumeCall(
 		return resumeReceipt{}, err
 	}
 	return resumeReceipt{SessionID: sessionID, EventID: eventID, ParentID: parent, Backup: backup}, nil
-}
-
-func lastUUIDEvent(raw []byte) (map[string]any, error) {
-	var tail map[string]any
-	scanner := bufio.NewScanner(bytes.NewReader(raw))
-	scanner.Buffer(make([]byte, 64<<10), 32<<20)
-	for scanner.Scan() {
-		var event map[string]any
-		if json.Unmarshal(scanner.Bytes(), &event) != nil {
-			continue // one torn line costs that line; Append separates a torn tail
-		}
-		if id, _ := event["uuid"].(string); id != "" {
-			tail = event
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
-	if tail == nil {
-		return nil, errors.New("no uuid-bearing event")
-	}
-	return tail, nil
 }

@@ -463,9 +463,8 @@ cmd_iso() { # cmd_iso <action> [project | command…]
   . "$REPO_ROOT/infra/fence/housekeeping.sh"
 
   # The fence mount contract (PFM_DEV_WORKTREE / PFM_DEV_GIT_COMMON /
-  # PFM_DEV_GIT_DIR_REL) is resolved once, in infra/fence/fence-env.sh — the
-  # lanes (root.sh and run.sh, through infra/fence/lanes/container.sh) source the
-  # same file, so they never drift.
+  # PFM_DEV_GIT_DIR_REL) is resolved once, in infra/fence/fence-env.sh; shared.sh
+  # and docker-compose.yml read its exports, so they never drift.
   local git_common
   ROOT="$REPO_ROOT" FENCE_CALLER="iso" . "$REPO_ROOT/infra/fence/fence-env.sh"
   git_common="$PFM_DEV_GIT_COMMON"
@@ -641,7 +640,7 @@ TARGET="${2:-all}"
 
 # A suite never runs on the host: its tests spawn tmux sessions, git repos and
 # processes against whatever machine they run on. The fence sets
-# PFM_DEV_FENCE=1 (infra/fence/docker-compose.yml, lanes/container.sh) inside a
+# PFM_DEV_FENCE=1 (infra/fence/docker-compose.yml, infra/fence/shared.sh) inside a
 # container (/.dockerenv): an exported variable alone never passes. A
 # GitHub-hosted runner (GITHUB_ACTIONS=true, RUNNER_ENVIRONMENT=github-hosted)
 # passes too: it is a throwaway machine, so ci.yml runs the gate on it natively.

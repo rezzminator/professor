@@ -38,13 +38,15 @@ const (
 // pausedServices is services while pausedService is booted out: no longer listed.
 var pausedServices = strings.Replace(installedServices, "com.professor.pfm.name-sync\n", "", 1)
 
-// pauseService boots pausedService out the way the owner does; resumeService bootstraps it again.
+// pauseService boots pausedService out the way the owner does; resumeService bootstraps it again, and
+// leaves an agent that is already loaded as it is (launchctl refuses a second bootstrap).
 func pauseService(c *harness.Ctx) {
 	read(c, "sh", "-c", `launchctl bootout "gui/$(id -u)/com.professor.pfm.name-sync"`)
 }
 
 func resumeService(c *harness.Ctx) {
-	read(c, "sh", "-c", `launchctl bootstrap "gui/$(id -u)" "$1"`, "sh",
+	read(c, "sh", "-c", `launchctl print "gui/$(id -u)/com.professor.pfm.name-sync" >/dev/null 2>&1 ||
+launchctl bootstrap "gui/$(id -u)" "$1"`, "sh",
 		filepath.Join(ownerHome, "Library", "LaunchAgents", "com.professor.pfm.name-sync.plist"))
 }
 

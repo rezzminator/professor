@@ -98,7 +98,25 @@ func installAgain(c *harness.Ctx, s State) State {
 	dir := filepath.Join(s.Home, ".claude", "rules")
 	link, target := filepath.Join(dir, "rm-rf-literal-path.md"),
 		filepath.Join(professorClone(s), "templates", "global", "rules", "rm-rf-literal-path.md")
-	if got, dead := read(c, "readlink", link), read(c, "find", dir, "-xtype", "l"); got != target+"\n" || dead != "" {
+	if got, dead := read(
+		c,
+		"readlink",
+		link,
+	), read(
+		c,
+		"find",
+		dir,
+		"-type",
+		"l",
+		"!",
+		"-exec",
+		"test",
+		"-e",
+		"{}",
+		";",
+		"-print",
+	); got != target+"\n" ||
+		dead != "" {
 		c.Failf("after the installs %s links to %q and %s holds dead links %q; want %s and none",
 			link, got, dir, dead, target)
 	}

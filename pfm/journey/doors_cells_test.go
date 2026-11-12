@@ -179,7 +179,7 @@ func aloneDoors(c *harness.Ctx, term *harness.Terminal, s *State) {
 	// Each door's save names the size it wrote; the file holds exactly that.
 	for at, path := range map[int]string{13: savedCLI, 14: savedMCP} {
 		size := regexp.MustCompile(`\((\d+) bytes total\)`).FindStringSubmatch(answers[at].Text)
-		if got := strings.TrimSpace(read(c, "stat", "-c", "%s", path)); len(size) != 2 || got != size[1] {
+		if got := strings.TrimSpace(read(c, "sh", "-c", `wc -c <"$1"`, "sh", path)); len(size) != 2 || got != size[1] {
 			c.Failf("%s holds %s bytes, its save answered %q", path, got, answers[at].Text)
 		}
 	}

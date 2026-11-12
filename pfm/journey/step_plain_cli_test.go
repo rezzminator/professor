@@ -41,7 +41,8 @@ func plainChatNew(c *harness.Ctx, s State) State {
 		c,
 		term,
 		"no-engine",
-		"mkdir -p "+project+" && cd "+project+" && PATH=/usr/bin:/bin ~/.local/bin/pfm chat new --engine cc --name "+lost,
+		"mkdir -p "+project+" && cd "+project+` && PATH="$(dirname "$(command -v tmux)"):/usr/bin:/bin" `+
+			"~/.local/bin/pfm chat new --engine cc --name "+lost,
 	)
 	if want := `engine binary "claude" is not reachable from this process's PATH`; code == 0 ||
 		!strings.Contains(errs, want) {

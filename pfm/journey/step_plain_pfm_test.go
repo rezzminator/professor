@@ -75,9 +75,14 @@ func pickerChat(c *harness.Ctx, s State) State {
 	term.WaitFor(prompt)
 	c.Cleanup(func() { stopPlainChat(c, &s, term) })
 	account := s.Home + "/.cc/1"
-	out, errs, code := typedRun(c, term, "login-default", "printenv CLAUDE_CONFIG_DIR PFM_CLAUDE_CONFIG_DIR_DEFAULT")
+	out, errs, code := typedRun(
+		c,
+		term,
+		"login-default",
+		"printenv CLAUDE_CONFIG_DIR && printenv PFM_CLAUDE_CONFIG_DIR_DEFAULT",
+	)
 	if want := account + "\n" + account + "\n"; code != 0 || out != want || errs != "" {
-		c.Failf("a fresh terminal's printenv CLAUDE_CONFIG_DIR PFM_CLAUDE_CONFIG_DIR_DEFAULT: exit %d, stdout %q,"+
+		c.Failf("a fresh terminal's CLAUDE_CONFIG_DIR and PFM_CLAUDE_CONFIG_DIR_DEFAULT: exit %d, stdout %q,"+
 			" stderr %q; want exit 0, stdout %q", code, out, errs, want)
 	}
 	term.Type("clear && mkdir -p ~/work/" + project + " && cd ~/work/" + project + " && pfm\r")

@@ -274,9 +274,14 @@ func TestHerdrIntegrationDoctor(t *testing.T) {
 // TestHerdrIntegrationDoctorExit runs the whole doctor against a stub herdr
 // the HERDR_BIN_PATH names: an installed bundled integration or a Claude store
 // without Herdr's Claude hook raises doctor's failure exit and summary, and the
-// stub's healthy status beside the hook leaves it clean.
+// stub's healthy status beside the hook leaves it clean, but for the one warning a macOS doctor adds to
+// every reachable Herdr: its lifetime fix is unverified there.
 func TestHerdrIntegrationDoctorExit(t *testing.T) {
 	healthy := herdrStatus(notInstalledClaude, notInstalledCodex, notInstalledOpenCode)
+	healthyCode, healthySummary := 0, "doctor: clean\n"
+	if herdrLifetimeUnverified {
+		healthyCode, healthySummary = 1, "doctor: warnings=1\n"
+	}
 	for _, scenario := range []struct {
 		name      string
 		status    string
@@ -286,7 +291,8 @@ func TestHerdrIntegrationDoctorExit(t *testing.T) {
 		summary   string
 	}{
 		{
-			name: "healthy", status: healthy, code: 0, rows: []string{herdrOKRow, "{claude ok}"}, summary: "doctor: clean\n",
+			name: "healthy", status: healthy, code: healthyCode, rows: []string{herdrOKRow, "{claude ok}"},
+			summary: healthySummary,
 		},
 		{
 			name:    "codex installed",

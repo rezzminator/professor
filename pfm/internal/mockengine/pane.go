@@ -342,21 +342,23 @@ func (loop *paneLoop) submit(line string) (int, bool) {
 		loop.paint()
 		return 0, false
 	}
+	// The engines draw a submitted prompt at once and run its hooks behind it; a hook that blocks the
+	// prompt erases it. pfm's delivery proof reads the pane half a second after Enter.
+	screen.say("> " + line)
+	loop.paint()
 	blocked, err := loop.engine.prompt(line)
 	if err != nil {
 		warn(proc.stderr, "prompt hooks: %v", err)
 		return ExitUnpinned, true
 	}
 	if blocked != "" {
-		screen.say("⎿ Blocked by hook: " + blocked)
+		screen.history[len(screen.history)-1] = "⎿ Blocked by hook: " + blocked
 		loop.paint()
 		return 0, false
 	}
-	screen.say("> " + line)
 	if err := loop.engine.recordUser(line); err != nil {
 		warn(proc.stderr, "record prompt: %v", err)
 	}
-	loop.paint()
 	code, exited := loop.turn(proc.script.forPrompt(line))
 	if exited {
 		return code, true

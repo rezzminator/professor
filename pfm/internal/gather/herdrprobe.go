@@ -220,7 +220,7 @@ func proveHerdrSeatSnapshot(
 		}
 	}
 	if pid == 0 {
-		return seat, false, fmt.Errorf("seat %s %w", seat.SeatID, errHerdrSeatUnbound)
+		return seat, false, herdrSupervisorUnproved(seat)
 	}
 
 	argvRole, roleErr := proc.Cmdline(pid)

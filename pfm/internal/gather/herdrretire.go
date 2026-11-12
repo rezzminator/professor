@@ -46,6 +46,17 @@ func herdrBirthPending(seat fleetdb.Seat) bool {
 	return seat.HerdrPane == "" && clock.Real.Now().Sub(time.Unix(seat.UpdatedAt, 0)) < herdrBirthGrace
 }
 
+// herdrSupervisorUnproved is a seat whose pane runs no seat-host of it: errHerdrSeatUnbound, a birth whose
+// seat-host has not started yet, while the row changed inside the birth window; past it, a listing failure,
+// since a chat whose supervisor is gone from its pane is never hidden as "not a chat yet".
+func herdrSupervisorUnproved(seat fleetdb.Seat) error {
+	if clock.Real.Now().Sub(time.Unix(seat.UpdatedAt, 0)) < herdrBirthGrace {
+		return fmt.Errorf("seat %s %w", seat.SeatID, errHerdrSeatUnbound)
+	}
+	return fmt.Errorf("seat %s supervisor ownership unproved: its pane runs no seat-host past the %s birth window",
+		seat.SeatID, herdrBirthGrace)
+}
+
 // errHerdrSeatGone marks a seat ended, replaced or moved off Herdr while it
 // was read: no longer a live native seat of that read, and never its failure.
 var errHerdrSeatGone = errors.New("ownership changed or disappeared")

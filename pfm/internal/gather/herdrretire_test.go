@@ -319,6 +319,14 @@ func TestProvedListingRetiresDeadSeatOnly(t *testing.T) {
 				s.SeatHostStart, s.UpdatedAt = 0, updated.Unix()
 				return s
 			}
+			// Each on a server of its own, whose one pane runs shell 10 and no seat-host of the seat.
+			unbound := func(id string, updated time.Time) fleetdb.Seat {
+				own, _ := herdrOwnershipSocket(t, `{"result":{"type":"pane_list","panes":[`+
+					`{"pane_id":"w1:p1","workspace_id":"w1","terminal_id":"`+id+`","cwd":"/jail/`+id+`"}]}}`, "w1:p1")
+				s := seat(id, "w1:p1", id, 0)
+				s.HerdrSocket, s.SeatHostStart, s.UpdatedAt = own, 0, updated.Unix()
+				return s
+			}
 			seats := []fleetdb.Seat{
 				seat("healthy", "w1:p1", "healthy", 20),
 				seat("dead", "w1:p2", "dead-terminal", 30),
@@ -329,6 +337,10 @@ func TestProvedListingRetiresDeadSeatOnly(t *testing.T) {
 				reservation("stale-reserved", time.Now().Add(-herdrBirthGrace-time.Minute)),
 				// Its pane is closed and its supervisor has not exited yet.
 				seat("closed", "w1:p6", "closed", 70),
+				// Two seats whose listed pane runs no seat-host of theirs: one bound inside its birth window, its
+				// seat-host not started yet; one long past it, its supervisor gone from a pane that still runs.
+				unbound("starting", time.Now()),
+				unbound("orphaned", time.Now().Add(-herdrBirthGrace-time.Minute)),
 			}
 			for _, item := range append([]fleetdb.Seat{gone}, seats...) {
 				if err := db.PutSeat(ctx, item); err != nil {
@@ -370,7 +382,7 @@ func TestProvedListingRetiresDeadSeatOnly(t *testing.T) {
 			for _, row := range rows {
 				listed = append(listed, row.Seat.SeatID)
 			}
-			want := "healthy dead unknown stopped-dead stopped-alive stale-reserved closed"
+			want := "healthy dead unknown stopped-dead stopped-alive stale-reserved closed orphaned"
 			if strings.Join(listed, " ") != want {
 				t.Fatalf("listed seats %q, want %q", listed, want)
 			}
@@ -382,6 +394,15 @@ func TestProvedListingRetiresDeadSeatOnly(t *testing.T) {
 			want = "HERDR DEAD closed: pane closed; saved supervisor 70 has not exited"
 			if rows[6].Err == nil || rows[6].Err.Error() != want || rows[6].Seat.State != "lost" {
 				t.Fatalf("seat whose pane is closed under a running supervisor = %+v, want lost with %q", rows[6], want)
+			}
+			want = "HERDR ERROR " + seats[len(seats)-1].HerdrSocket + ": seat orphaned supervisor ownership unproved: " +
+				"its pane runs no seat-host past the 2m0s birth window"
+			if rows[7].Err == nil || rows[7].Err.Error() != want || rows[7].Seat.State != "live" {
+				t.Fatalf(
+					"seat whose pane runs no seat-host past its birth window = %+v,\nwant live with %q",
+					rows[7],
+					want,
+				)
 			}
 			healthy, dead, unknown := rows[0], rows[1], rows[2]
 			stoppedDead, stoppedAlive := rows[3], rows[4]

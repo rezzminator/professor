@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	"github.com/rezzminator/professor/pfm/internal/config"
@@ -421,6 +422,8 @@ func TestNativeDeadSeatDoesNotFailListing(t *testing.T) {
 				})
 				// "stopped" lived on a Herdr server that is gone, its supervisor with it.
 				stopped := filepath.Join(testjail.ShortRoot(t), "stopped.sock")
+				// Every row is written now, as spawn and the seat-host stamp it: "birthing" is inside its birth window.
+				written := time.Now().Unix()
 				for _, item := range []struct {
 					id, pane, socket string
 					pid              int
@@ -437,7 +440,7 @@ func TestNativeDeadSeatDoesNotFailListing(t *testing.T) {
 						SeatID: item.id, SessionID: item.id, Engine: "cc", Backend: "herdr", State: "live",
 						Name: strings.ToUpper(item.id), HerdrSocket: item.socket, HerdrPane: item.pane,
 						HerdrWorkspace: "w6", HerdrTerminalID: item.id, SeatHostPID: item.pid, SeatHostStart: 9,
-						EndPending: item.id == "ending",
+						EndPending: item.id == "ending", UpdatedAt: written,
 					}); err != nil {
 						t.Fatal(err)
 					}

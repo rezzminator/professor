@@ -5,7 +5,6 @@ package journey
 import (
 	"encoding/json"
 	"fmt"
-	"maps"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -225,6 +224,30 @@ func engines(table map[int]process) map[int]string {
 	return found
 }
 
+// underHerdr reports whether pid runs under a Herdr process, the owner of every Herdr pane.
+func underHerdr(table map[int]process, pid int) bool {
+	for seen := 0; pid > 1 && seen < 64; seen++ {
+		pid = table[pid].Ppid
+		if f := strings.Fields(table[pid].Args); len(f) > 0 && filepath.Base(f[0]) == "herdr" {
+			return true
+		}
+	}
+	return false
+}
+
+// herdrServer is the pid of the branch's Herdr server in table, 0 when none runs: the `herdr server`
+// process the owner's own `herdr` command for the session started, which every pane of it runs under.
+func herdrServer(table map[int]process, s State) int {
+	client := strings.Join(herdrCLI(s), " ")
+	for pid, p := range table {
+		f := strings.Fields(p.Args)
+		if len(f) == 2 && filepath.Base(f[0]) == "herdr" && f[1] == "server" && table[p.Ppid].Args == client {
+			return pid
+		}
+	}
+	return 0
+}
+
 // under reports whether pid descends from ancestor in table.
 func under(table map[int]process, pid, ancestor int) bool {
 	for seen := 0; pid > 1 && seen < 64; seen++ {
@@ -238,22 +261,21 @@ func under(table map[int]process, pid, ancestor int) bool {
 
 // fleetConsistent fails the step unless the branch's own Herdr session is consistent: every live chat
 // on its socket has exactly one row, one live seat and a pane the session still has; every engine of
-// the branch (under one of its holders, or of a seat ever on its socket) belongs to a live chat on it;
-// every live holder bound to its socket holds a pane the session still has. Other branches' chats are
-// not read: they change while this one is judged.
+// the branch (under its Herdr server, or of a seat ever on its socket) belongs to a live chat on it.
+// Other branches' chats are not read: they change while this one is judged.
 func fleetConsistent(c *harness.Ctx, s State) {
 	sock := herdrSocket(s)
 	rows, listed := liveChats(c, sock)
 	seats := liveSeats(c, sock)
 	panes := herdrPanes(c, s)
-	holders := liveHolders(c, sock)
 	ever := seatsWhere(c, "session_id is not null"+onSocket(sock))
 	table := processes(c)
 	faults := chatFaults(rows, listed, seats)
-	faults = append(faults, paneFaults(sock, seats, holders, panes)...)
-	faults = append(faults, engineFaults(table, rows, seats, holders, func(p process) bool {
+	server := herdrServer(table, s)
+	faults = append(faults, paneFaults(sock, seats, panes)...)
+	faults = append(faults, engineFaults(table, rows, seats, func(p process) bool {
 		_, seated := ever[p.Session]
-		return seated || slices.ContainsFunc(holders, func(h holder) bool { return under(table, p.Pid, h.Pid) })
+		return seated || server != 0 && under(table, p.Pid, server)
 	})...)
 	failFleet(c, "the branch's fleet ("+sock+")", faults)
 }
@@ -281,33 +303,24 @@ func chatFaults(rows map[string][2]string, listed []string, seats map[string][2]
 	return faults
 }
 
-// paneFaults: every live seat and every live holder on the Herdr socket sock on a pane it still has.
-func paneFaults(sock string, seats map[string][2]string, holders []holder, panes map[string]string) []string {
+// paneFaults: every live seat on the Herdr socket sock on a pane it still has.
+func paneFaults(sock string, seats map[string][2]string, panes map[string]string) []string {
 	var faults []string
 	for session, seat := range seats {
 		if _, ok := panes[seat[1]]; !ok {
 			faults = append(faults, fmt.Sprintf("chat %s's pane %s is not in %s's pane list", session, seat[1], sock))
 		}
 	}
-	for _, h := range holders {
-		if _, ok := panes[h.Pane]; !ok {
-			faults = append(faults, fmt.Sprintf("holder %s holds pane %s, which %s no longer has", h.ID, h.Pane, sock))
-		}
-	}
 	return faults
 }
 
 // engineFaults: every engine process judged (in scope) belongs to a live chat: its session is a live
-// row, or, when it names none (a fresh OpenCode), it runs under a holder whose pane a live seat has.
-func engineFaults(
-	table map[int]process,
-	rows, seats map[string][2]string,
-	holders []holder,
-	inScope func(process) bool,
-) []string {
-	seated := map[string]bool{}
-	for _, seat := range seats {
-		seated[seat[1]] = true
+// row, or, when it names none (a fresh OpenCode), it runs under Herdr while a live chat of its engine
+// has a live seat.
+func engineFaults(table map[int]process, rows, seats map[string][2]string, inScope func(process) bool) []string {
+	seatedKind := map[string]bool{}
+	for session := range seats {
+		seatedKind[rows[session][0]] = true
 	}
 	var faults []string
 	for _, p := range table {
@@ -317,9 +330,7 @@ func engineFaults(
 		if _, ok := rows[p.Session]; ok && p.Session != "" {
 			continue
 		}
-		if p.Session == "" && slices.ContainsFunc(holders, func(h holder) bool {
-			return seated[h.Pane] && under(table, p.Pid, h.Pid)
-		}) {
+		if p.Session == "" && seatedKind["live-"+p.Engine] && underHerdr(table, p.Pid) {
 			continue
 		}
 		faults = append(faults, fmt.Sprintf("%s engine pid %d (session %q) belongs to no live chat: %s",
@@ -403,7 +414,7 @@ func activity(c *harness.Ctx, from, to time.Time) []string {
 }
 
 // evidence saves what a failed step's owner would look at: every terminal its path opened, its log
-// slice, the chat list, Herdr's panes, herdr-shield's holders and the engine processes.
+// slice, the chat list, Herdr's panes and the engine processes.
 func evidence(c *harness.Ctx, records []string) {
 	for _, term := range c.Terminals() {
 		c.Logf("terminal %s at the failure:\n%s", term.Name(), term.Screen())
@@ -416,7 +427,6 @@ func evidence(c *harness.Ctx, records []string) {
 		"sessions.json": {"herdr", "session", "list", "--json"},
 		"panes.json":    {"herdr", "pane", "list"},
 	}
-	maps.Copy(reads, holderEvidence())
 	for name, argv := range reads {
 		r := c.Read(argv...)
 		c.Artifact(name, []byte(fmt.Sprintf("exit %d\n%s%s", r.Code, r.Stdout, r.Stderr)))

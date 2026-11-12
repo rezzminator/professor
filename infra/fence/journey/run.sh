@@ -27,11 +27,21 @@ fail() { echo "journey: FAIL $*" >&2; exit 1; }
 mark=$SECONDS
 stage() { echo "journey: $1 $((SECONDS - mark))s"; mark=$SECONDS; }
 
+# cleanup hands the artifacts the machine's owner wrote back to whoever runs this script, from inside the
+# machine as root (the owner's uid need not be the caller's, as on CI's runner), then removes what this
+# run made. A cleanup step that fails prints its own line; the suite's status stays the exit status.
 cleanup() {
   local rc=$?
-  docker rm -f "$NAME" "$NAME-fetch" >/dev/null 2>&1 || true
-  rm -rf "$RUN_DIR/image"
-  if [ "$rc" -eq 0 ] && [ "$KEEP" -eq 0 ]; then rm -rf "$RUN_DIR"; fi
+  set +e
+  if docker container inspect "$NAME" >/dev/null 2>&1 &&
+    ! docker exec -u 0 "$NAME" chown -R "$(id -u):$(id -g)" /artifacts; then
+    echo "journey: warning: cleanup: cannot hand $RUN_DIR/artifacts back to uid $(id -u) (above)" >&2
+  fi
+  docker rm -f "$NAME" "$NAME-fetch" >/dev/null 2>&1
+  rm -rf "$RUN_DIR/image" || echo "journey: warning: cleanup: cannot remove $RUN_DIR/image (above)" >&2
+  if [ "$rc" -eq 0 ] && [ "$KEEP" -eq 0 ] && ! rm -rf "$RUN_DIR"; then
+    echo "journey: warning: cleanup: cannot remove $RUN_DIR (above)" >&2
+  fi
   echo "RUN DIR: $RUN_DIR"
   exit "$rc"
 }
@@ -41,27 +51,20 @@ trap cleanup EXIT
 chmod 0777 "$RUN_DIR/artifacts"
 
 # 1. The machine image, tagged by a hash of everything it is built from.
-RUST_IMAGE="$(sed -n 's/^HELD_RUST_IMAGE=//p' "$ROOT/infra/fence/lanes/root.sh")"
 GO_VERSION="$(sed -n 's/^go //p' "$ROOT/pfm/go.mod")"
 GO_ARCH="$(platform_arch)"
-[ -n "$RUST_IMAGE" ] && [ -n "$GO_VERSION" ] && [ "$GO_ARCH" != unknown ] ||
-  fail "image: rust image '$RUST_IMAGE', go version '$GO_VERSION' or architecture '$GO_ARCH' unreadable"
-shield="$ROOT/plugins/herdr-shield"
-[ -f "$shield/Cargo.toml" ] || fail "image: herdr-shield source missing at $shield (check out the submodule)"
+[ -n "$GO_VERSION" ] && [ "$GO_ARCH" != unknown ] ||
+  fail "image: go version '$GO_VERSION' or architecture '$GO_ARCH' unreadable"
 cp "$HERE/machine.Dockerfile" "$ROOT/infra/fence/pinned-tools.sh" "$RUN_DIR/image/"
-mkdir "$RUN_DIR/image/herdr-shield"
-git -C "$shield" ls-files -z -co --exclude-standard -- . ':(exclude)target/**' ':(exclude)bin/**' |
-  (cd "$shield" && tar -cf - --null -T -) | (cd "$RUN_DIR/image/herdr-shield" && tar -xf -) ||
-  fail "image: cannot copy the herdr-shield source"
 hash="$(
   cd "$RUN_DIR/image" &&
-    { printf '%s\n' "$RUST_IMAGE" "$GO_VERSION" "$GO_ARCH"; find . -type f | LC_ALL=C sort | while IFS= read -r f; do platform_sha256 "$f"; done; } |
+    { printf '%s\n' "$GO_VERSION" "$GO_ARCH"; find . -type f | LC_ALL=C sort | while IFS= read -r f; do platform_sha256 "$f"; done; } |
     platform_sha256 | cut -c1-16
 )" || fail "image: cannot hash the inputs"
 IMAGE="pfm-journey-machine:$hash"
 if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
   echo "journey: building $IMAGE"
-  docker build -q -f "$RUN_DIR/image/machine.Dockerfile" --build-arg "RUST_IMAGE=$RUST_IMAGE" \
+  docker build -q -f "$RUN_DIR/image/machine.Dockerfile" \
     --build-arg "GO_VERSION=$GO_VERSION" --build-arg "GO_ARCH=$GO_ARCH" -t "$IMAGE" "$RUN_DIR/image" >/dev/null ||
     fail "image: docker build of $IMAGE failed (above)"
   docker images --format '{{.Repository}}:{{.Tag}}' pfm-journey-machine | { grep -vxF "$IMAGE" || true; } |
@@ -104,8 +107,8 @@ stage boot
 session=("${owner[@]}" -e XDG_RUNTIME_DIR=/run/user/1000 -e DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
   -e PFM_DEV_FENCE=1 -e GOPROXY=off -w "$ROOT")
 
-# 4. The owner's machine: fake engines, Herdr and herdr-shield, the snapshot INSTALL.md clones.
-docker exec "${session[@]}" -e HERDR_SHIELD_BIN=/usr/local/libexec/journey/herdr-shield "$NAME" \
+# 4. The owner's machine: fake engines, Herdr, the snapshot INSTALL.md clones.
+docker exec "${session[@]}" "$NAME" \
   bash "$HERE/prepare.sh" "$ROOT" || fail "prepare: prepare.sh failed (above)"
 stage prepare
 

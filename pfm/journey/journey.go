@@ -11,6 +11,5 @@
 //   - fleet_test.go: reads of pfm's state the steps share, the fleet-consistency check and the log gate.
 //   - fleet_whole_test.go: the whole machine's check at the joins (fleetWhole): zombies and spinning pfm processes.
 //   - services_{linux,darwin}_test.go: pfm's services as the OS's service manager lists them.
-//   - shield_{linux,darwin}_test.go: the holder door, herdr-shield's holders (Linux only; a Mac has none).
 //   - step_*_test.go: one owner step each.
 package journey

@@ -463,16 +463,20 @@ func (n *nativeReload) ready(ctx context.Context, stash bool) error {
 			} else if state.Type != "agent_info" || state.Agent == nil {
 				agentUnread = errors.New("native reload malformed agent_info")
 			}
-			// Herdr vetoes only a chat waiting on its user or one it cannot
-			// classify; idleness is the screen's call, as on the tmux path.
+			// Herdr vetoes only a chat waiting on its user; one it has not
+			// classified yet waits; idleness is the screen's call, as on the tmux path.
 			// Claude stays working while background shells or sub-agents run
 			// behind an idle composer, and only the footer shows a live turn.
 			// An unread or unrecognized state polls without reading the screen.
 			settled := false
 			if agentUnread == nil {
 				switch status := state.Agent.Status; status {
-				case "blocked", "unknown":
+				case "blocked":
 					return fmt.Errorf("native reload target is %s", status)
+				case "unknown":
+					// Herdr holds a Claude it has just found in "unknown" through its
+					// startup grace (3 s); a reload typed then waits it out.
+					agentUnread = errors.New("native reload target is unknown")
 				case "idle", "done", "working":
 					settled = true
 				default:

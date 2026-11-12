@@ -23,46 +23,24 @@ var treeStarted time.Time
 
 // fleetWhole fails the step unless the whole machine is consistent, every branch's chats at once: the
 // join's check, run only when no branch is mid-change (the steps after `day`). Every live chat has one
-// row and one live seat; every live seat on a running Herdr session sits on a pane it has; every live
-// holder is bound to a running session and a pane it has; no branch's own Herdr session still runs; every
+// row and one live seat; every live seat on a running Herdr session sits on a pane it has; no branch's
+// own Herdr session still runs; every
 // engine process belongs to a live chat; no pfm process leaves a zombie child; no pfm process has burnt
 // more than cpuShare of the tree's time.
 func fleetWhole(c *harness.Ctx) {
 	rows, listed := liveChats(c, "")
 	seats := liveSeats(c, "")
 	faults := chatFaults(rows, listed, seats)
-	var holders []holder
 	sessions := herdrSessions(c)
 	for i := range sessions {
 		sock := herdrSocket(sessions[i])
-		if i == 0 {
-			holders = shieldHolders(c, sock)
-		}
-		var bound []holder
-		for _, h := range holders {
-			if h.Socket == sock {
-				bound = append(bound, h)
-			}
-		}
-		faults = append(faults, paneFaults(sock, liveSeats(c, sock), bound, herdrPanes(c, sessions[i]))...)
-	}
-	if len(sessions) == 0 {
-		c.Logf("no Herdr session runs: herdr-shield's holders were not read (it lists only through a server)")
-	}
-	running := map[string]bool{}
-	for i := range sessions {
-		running[herdrSocket(sessions[i])] = true
+		faults = append(faults, paneFaults(sock, liveSeats(c, sock), herdrPanes(c, sessions[i]))...)
 		if name := sessions[i].Session; name != "" { // a branch's own session: its teardown stops it
 			faults = append(faults, fmt.Sprintf("Herdr session %s still runs after its branch ended", name))
 		}
 	}
-	for _, h := range holders {
-		if !running[h.Socket] {
-			faults = append(faults, fmt.Sprintf("holder %s is bound to %s, where no Herdr runs", h.ID, h.Socket))
-		}
-	}
 	table := processes(c)
-	faults = append(faults, engineFaults(table, rows, seats, holders, func(process) bool { return true })...)
+	faults = append(faults, engineFaults(table, rows, seats, func(process) bool { return true })...)
 	faults = append(faults, zombies(c, table)...)
 	faults = append(faults, spinning(c, table)...)
 	failFleet(c, "the machine's fleet", faults)

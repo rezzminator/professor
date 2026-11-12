@@ -11,7 +11,6 @@ type State struct {
 	Project string // the directory the branch works in
 	Name    string // the chat's pfm name, once a step named it
 	Pane    string // the Herdr pane the branch's Herdr step opened
-	Holder  string // the herdr-shield holder of that pane
 	Chat    Chat   // the chat the branch started
 }
 

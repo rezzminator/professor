@@ -33,7 +33,7 @@ const (
 	Backspace Key = "\x7f"
 )
 
-// Ctrl is Ctrl held with a letter: Ctrl('c') is the interrupt.
+// Ctrl is Ctrl pressed with a letter: Ctrl('c') is the interrupt.
 func Ctrl(letter rune) Key { return Key(string(letter & 0x1f)) }
 
 // Terminal is a terminal as one step drives it: a failed wait fails that step.

@@ -4,6 +4,7 @@ package journey
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/journey/harness"
@@ -11,7 +12,8 @@ import (
 
 // claudeFromPicker: in the first pane of the branch's Herdr session the owner picks a new Claude chat
 // and walks the wizard with Enter; the fake Claude draws in the pane, pfm lists exactly one live Claude
-// chat on that session's socket, its seat is live on that pane and its engine runs under the pane's holder.
+// chat on that session's socket, its seat is live on that pane and its engine runs under the session's
+// Herdr server.
 func claudeFromPicker(c *harness.Ctx, s State) State {
 	term := c.Terminal(s.Term)
 	term.Press(harness.Enter)
@@ -39,10 +41,10 @@ func claudeFromPicker(c *harness.Ctx, s State) State {
 	return s
 }
 
-// engineOf waits for the one engine process of s.Chat and requires it under the pane's holder.
+// engineOf waits for the one engine process of s.Chat and requires it under the branch's Herdr server.
 func engineOf(c *harness.Ctx, s State) int {
 	pid := 0
-	what := "one engine of session " + s.Chat.Session + " under the pane's holder " + s.Holder
+	what := "one engine of session " + s.Chat.Session + " under the Herdr server of " + herdrSocket(s)
 	c.Poll(what, stepBound, func() (bool, string) {
 		table := processes(c)
 		var found []int
@@ -54,8 +56,9 @@ func engineOf(c *harness.Ctx, s State) int {
 		if len(found) != 1 {
 			return false, fmt.Sprintf("engines %v", found)
 		}
-		if held, seen := heldByPane(c, s, table, found[0]); !held {
-			return false, fmt.Sprintf("engine %d not under the pane's holder: %s", found[0], seen)
+		if server := herdrServer(table, s); server == 0 || !under(table, found[0], server) {
+			return false, fmt.Sprintf("engine %d not under the Herdr server (pid %d) of `%s`",
+				found[0], server, strings.Join(herdrCLI(s), " "))
 		}
 		pid = found[0]
 		return true, ""

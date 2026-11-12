@@ -1,14 +1,8 @@
 # The journey machine: Ubuntu 24.04 booting systemd as PID 1, a lingering owner (uid 1000, zsh) whose
 # user manager runs pfm's services, tmux, git, the Go toolchain at pfm/go.mod's version, Herdr from
-# infra/fence/pinned-tools.sh and herdr-shield built --locked from plugins/herdr-shield. It holds nothing
-# of pfm/: a pfm edit never rebuilds it. infra/fence/journey/run.sh builds it from a context holding
-# this file, pinned-tools.sh and the herdr-shield source, and tags it with a hash of those inputs.
-ARG RUST_IMAGE
-FROM ${RUST_IMAGE} AS shield
-COPY herdr-shield /herdr-shield
-WORKDIR /herdr-shield
-RUN RUSTUP_TOOLCHAIN=1.99.0 cargo build --release --locked && cp target/release/herdr-shield /herdr-shield.bin
-
+# infra/fence/pinned-tools.sh. It holds nothing of pfm/: a pfm edit never rebuilds it.
+# infra/fence/journey/run.sh builds it from a context holding this file and pinned-tools.sh, and tags
+# it with a hash of those inputs.
 FROM ubuntu:24.04
 ARG GO_VERSION
 ARG GO_ARCH
@@ -21,7 +15,6 @@ RUN curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${GO_ARCH}.tar.gz" | tar
  && /usr/local/go/bin/go version
 COPY pinned-tools.sh /tmp/pinned-tools.sh
 RUN bash /tmp/pinned-tools.sh /usr/local herdr && rm /tmp/pinned-tools.sh
-COPY --from=shield /herdr-shield.bin /usr/local/libexec/journey/herdr-shield
 # Ubuntu's image user holds uid 1000; the owner lingers so the user manager runs from boot.
 # The Go caches exist owned by the owner, so a fresh cache volume mounted there is the owner's.
 RUN userdel -r ubuntu \

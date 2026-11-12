@@ -357,6 +357,8 @@ func (f *reloadHerdrFixture) respond(method string, p map[string]json.RawMessage
 			status = "thinking"
 		case f.mode == "undecodable-agent-once" && f.agentReads == 1:
 			status = 7
+		case f.mode == "unknown-agent" || f.mode == "unknown-agent-once" && f.agentReads == 1:
+			status = "unknown" // Herdr's state for a Claude it has not classified yet
 		}
 		return map[string]any{
 			"type":  "agent_info",
@@ -478,6 +480,13 @@ func TestRunHerdrLifecycle(t *testing.T) {
 		},
 		{name: "unrecognized-agent-state-waits", mode: "unrecognized-agent-once"},
 		{name: "undecodable-agent-state-waits", mode: "undecodable-agent-once"},
+		// Herdr holds a Claude it just found in "unknown" for its startup grace
+		// (3 s): a reload typed then waits it out.
+		{name: "unknown-agent-state-waits", mode: "unknown-agent-once"},
+		{
+			name: "unknown-agent-state-never-clears", mode: "unknown-agent",
+			want: "native reload: Herdr never reported the chat's state (native reload target is unknown); /exit was not typed",
+		},
 		{
 			name: "unrecognized-agent-state-never-clears", mode: "unrecognized-agent",
 			want: `native reload: Herdr never reported the chat's state (native reload unknown agent state "thinking"); /exit was not typed`,

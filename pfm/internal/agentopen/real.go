@@ -95,7 +95,7 @@ func (commands ExecCommands) Resume(ctx context.Context, configName, cwd, id str
 	if stderr == nil {
 		stderr = os.Stderr
 	}
-	persona, warnings, err := action.LaunchPersona(cwd, pfmengine.Claude, workbench.Resume)
+	persona, warnings, err := action.LaunchPersona(cwd, commands.Home, pfmengine.Claude, workbench.Resume)
 	if err != nil {
 		return fmt.Errorf("resume agent session: %w", err)
 	}
@@ -110,7 +110,7 @@ func (commands ExecCommands) Resume(ctx context.Context, configName, cwd, id str
 		Purpose: claudelaunch.PurposeResume,
 		Account: account, Cache1H: &cache1H, Resume: id,
 		Home: commands.Home, Machine: commands.Machine,
-		PromptFile: persona.Prompt, Effort: persona.Effort, Model: persona.Model,
+		PromptFile: persona.Prompt, Effort: persona.Effort, Model: persona.Model, Envs: persona.Envs,
 	}
 	command, err := spawn.Command(ctx)
 	if err != nil {

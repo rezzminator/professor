@@ -178,7 +178,7 @@ They are listed because the template token gate (`dev.sh verify templates`) FAIL
 | `{SHA}` | `epics/TEMPLATE.md` | a commit sha |
 | `{MB}` | `docs-commands/git/references/gitter-history.md` | a file size in megabytes |
 | `{SCOPE}` | `global/agents/pcm.md` | the audit scope being run |
-| `{CALLER}` | `global/commands/description/use.md` and every description carrying a `{CALLER}-ONLY` token | the name of the only entity allowed to invoke the entry |
+| `{CALLER}` | `global/commands/law/description.md` and every description carrying a `{CALLER}-ONLY` token | the name of the only entity allowed to invoke the entry |
 | `{STATUS_LITERAL}` | `commands/audit/code-hygiene.md` | an example status string literal in the code being audited |
 | `{HHMMSS}` | `global/agents/agent-investigator.md` | the UTC time of the report's write, hours, minutes and seconds |
 | `{WORKTREE}` / `{BASE}` / `{TARGET}` / `{TIP}` / `{REPORT_PATH}` / `{INV}` / `{FILES}` | `plugins/flights/plugins/flights/agents/lander.md`, `plugins/flights/plugins/flights/skills/lander-inventory/SKILL.md` | the brief's worktree, base ref and target branch; the target's tip the worktree syncs to; the brief's report path; the inventory file beside it; the spec files the inventory reads |

@@ -102,7 +102,7 @@ The root image build. Its steps build the shared `pfm-lane-root:<hash>` image ev
 
 ## Lane A — adopter
 
-- `A.01-scaffold` · the scaffold roster lands from `pfm init` (settings, commands, agents, scripts, skills, epics, codex + docs mirrors; its next line names `/claude-md:use write`); `pfm init --render` fills a second scratch project's install-time tokens from its manifest · spends none
+- `A.01-scaffold` · the scaffold roster lands from `pfm init` (settings, commands, agents, scripts, skills, epics, codex + docs mirrors; its next line names `/law:claude-md write`); `pfm init --render` fills a second scratch project's install-time tokens from its manifest · spends none
 - `A.02-phase2-never-deployed` · Phase-2-only scaffold is confirmed never auto-deployed by `pfm` · spends none
 - `A.03-baseline-pin` · `.professor/baseline.json` pins the install · spends none
 - `A.04-project-updates` · `pfm doctor --project-updates` is clean; every status class is exercised · spends none

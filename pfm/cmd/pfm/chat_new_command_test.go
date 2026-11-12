@@ -163,7 +163,7 @@ func TestChatNewWorkbench(t *testing.T) {
 			case "disabled explicit":
 				engine = "cx"
 				extra = []string{"--name", "x"}
-				_, err := workbench.ForLaunch(dir, pfmengine.Codex, workbench.New)
+				_, err := workbench.ForLaunch(dir, "", pfmengine.Codex, workbench.New)
 				if err == nil {
 					t.Fatal("fixture ForLaunch did not fail")
 				}
@@ -173,7 +173,7 @@ func TestChatNewWorkbench(t *testing.T) {
 					t.Fatal(err)
 				}
 				extra = []string{"--name", "x"}
-				_, err := workbench.ForLaunch(dir, pfmengine.Claude, workbench.New)
+				_, err := workbench.ForLaunch(dir, "", pfmengine.Claude, workbench.New)
 				if err == nil {
 					t.Fatal("fixture ForLaunch did not fail")
 				}
@@ -221,7 +221,7 @@ func TestChatNewWorkbench(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					persona, err := workbench.ForLaunch(duo, pfmengine.Codex, workbench.New)
+					persona, err := workbench.ForLaunch(duo, "", pfmengine.Codex, workbench.New)
 					if err != nil {
 						t.Fatal(err)
 					}

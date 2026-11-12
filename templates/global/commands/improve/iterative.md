@@ -1,7 +1,7 @@
 ---
 # professor: SOURCE TEMPLATE — edit here for a framework change (routes through the `pcm` agent); project-scaffold customization belongs in its installed local source; engine mirrors are never hand-edited.
-name: iterative-improvement:use
-description: 'Raises anything run by run — `/iterative-improvement:use [target] [angle…]`, or asks like "iteratively improve X", "optimize X again and again". Returns the before/after ledger and the version history. Not for an agent → /agent:use.'
+name: improve:iterative
+description: 'Raises anything run by run — `/improve:iterative [target] [angle…]`, or asks like "iteratively improve X", "optimize X again and again". Returns the before/after ledger and the version history. Not for an agent → /law:agent.'
 argument-hint: '[target] [angle…]'
 ---
 

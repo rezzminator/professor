@@ -1,9 +1,85 @@
 {
   "names": [
     {
+      "name": "/agent:use",
+      "kind": "command",
+      "successor": "/law:agent",
+      "match": "exact"
+    },
+    {
+      "name": "/claude-md:use",
+      "kind": "command",
+      "successor": "/law:claude-md",
+      "match": "exact"
+    },
+    {
+      "name": "/claude-selector:use",
+      "kind": "command",
+      "match": "exact"
+    },
+    {
+      "name": "/description:use",
+      "kind": "command",
+      "successor": "/law:description",
+      "match": "exact"
+    },
+    {
+      "name": "/doc:use",
+      "kind": "command",
+      "successor": "/law:doc",
+      "match": "exact"
+    },
+    {
+      "name": "/flights:tracer-use",
+      "kind": "command",
+      "successor": "/flights:trace-guide",
+      "match": "exact"
+    },
+    {
+      "name": "/integration-suite:use",
+      "kind": "command",
+      "successor": "/design:test-suite",
+      "match": "exact"
+    },
+    {
+      "name": "/iterative-improvement:use",
+      "kind": "command",
+      "successor": "/improve:iterative",
+      "match": "exact"
+    },
+    {
+      "name": "/llm-codebase:use",
+      "kind": "command",
+      "successor": "/design:codebase",
+      "match": "exact"
+    },
+    {
+      "name": "/md-forlint:use",
+      "kind": "command",
+      "successor": "/law:markdown",
+      "match": "exact"
+    },
+    {
+      "name": "/prompt:use",
+      "kind": "command",
+      "successor": "/law:prompt",
+      "match": "exact"
+    },
+    {
+      "name": "/rules:use",
+      "kind": "command",
+      "successor": "/law:rules",
+      "match": "exact"
+    },
+    {
       "name": "/tracer:use",
       "kind": "command",
-      "successor": "/flights:tracer-use",
+      "successor": "/flights:trace-guide",
+      "match": "exact"
+    },
+    {
+      "name": "/use:mods-builder",
+      "kind": "command",
       "match": "exact"
     },
     {

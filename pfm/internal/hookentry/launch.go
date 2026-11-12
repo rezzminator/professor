@@ -263,7 +263,7 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 	if resuming || continuing {
 		mode = workbench.Resume
 	}
-	persona, personaWarnings, err := action.LaunchPersona(workingDir, pfmengine.Claude, mode)
+	persona, personaWarnings, err := action.LaunchPersona(workingDir, runtime.Paths.Home, pfmengine.Claude, mode)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm internal launch: %v\n", err)
 		return 1
@@ -312,6 +312,7 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 				PromptFile: persona.Prompt,
 				Effort:     persona.Effort,
 				Model:      persona.Model,
+				Envs:       persona.Envs,
 			},
 			workingDir,
 			stdout,

@@ -39,6 +39,8 @@ type Request struct {
 	Cache1H                              *bool
 	Model, Effort, PromptFile            string
 	Args                                 []string
+	// Envs are the adopter settings' envs (workbench.Persona.Envs).
+	Envs map[string]string
 }
 
 type Launch struct {
@@ -191,6 +193,7 @@ func Render(request Request, machine pfmconfig.Config) (Launch, error) {
 		prefs.RemoteControl && request.Purpose != PurposeQuery,
 		cmp.Or(request.RemoteControlName, request.Name),
 	)
+	result.Env = WithEnvs(request.Envs, result.Env)
 	return result, nil
 }
 

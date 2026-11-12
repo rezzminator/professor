@@ -30,7 +30,7 @@ Every rule about how a reply reads survives only when evidence rows or a hard co
 
 Goal: draft a replacement for SECTION in REPO from evidence of how the user reacts to replies, and return the draft with the evidence ledger it rests on.
 
-Load the `ultimate` skill as the law for this work, and `prompt:use` before writing the draft.
+Load the `ultimate` skill as the law for this work, and `law:prompt` before writing the draft.
 
 Read SECTION, the live section, and the rest of the prompt — `pfm/harness-prompts/share/head.md`, each `pfm/harness-prompts/{claude,codex,opencode}/professor.md` and `tail.md` above SECTION — so the draft neither repeats nor contradicts it.
 

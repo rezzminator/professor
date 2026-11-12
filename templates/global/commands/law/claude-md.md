@@ -1,12 +1,12 @@
 ---
-name: claude-md:use
-description: MANDATORY — load before writing or editing a project's CLAUDE.md, AGENTS.md or other engine orientation file; `check [path…]` certifies each (APPROVED/REJECTED), `write <path>` drafts or restructures one. Prose → /prompt:use; reference docs → /doc:use.
+name: law:claude-md
+description: MANDATORY — load before writing or editing a project's CLAUDE.md, AGENTS.md or other engine orientation file; `check [path…]` certifies each (APPROVED/REJECTED), `write <path>` drafts or restructures one. Prose → /law:prompt; reference docs → /law:doc.
 argument-hint: "[check [path…] | write <path>]"
 ---
 
 # Orientation File Law
 
-Every session and sub-agent reads the orientation file whole before its first tool call. Each line serves one of two metrics: bytes per load (`wc -c`), or round-trips from a spoken term to its source — target one: the reader finds the term here and its next call opens the source. `/prompt:use` governs each line's prose; this law governs the file's shape and admission.
+Every session and sub-agent reads the orientation file whole before its first tool call. Each line serves one of two metrics: bytes per load (`wc -c`), or round-trips from a spoken term to its source — target one: the reader finds the term here and its next call opens the source. `/law:prompt` governs each line's prose; this law governs the file's shape and admission.
 
 ## The spine
 
@@ -55,7 +55,7 @@ The project's nouns, each mapped to its source: one lookup from the word people 
 - Admission: people or prompts in the project use the term, and at least one holds — its home is not found by one `ls` or grep of the term; it means something here other than its everyday meaning; it is a top-level component.
 - Closed world: every top-level directory git tracks (a child file: every directory under its own) is covered by an entry whose path is that directory or one inside it.
 - Closed world outranks admission: a top-level directory whose name explains itself keeps its entry, and its gloss says only what the name does not.
-- One term per concept: the entry's spelling is the only spelling — in this file, every prompt, doc, commit subject and identifier. A second name found elsewhere is renamed to the entry's term, or the entry is renamed end to end. Where `/llm-codebase:use` wrote a glossary, its canonical terms and homes are these entries; its rejected variants stay in the glossary for the spelling census.
+- One term per concept: the entry's spelling is the only spelling — in this file, every prompt, doc, commit subject and identifier. A second name found elsewhere is renamed to the entry's term, or the entry is renamed end to end. Where `/design:codebase` wrote a glossary, its canonical terms and homes are these entries; its rejected variants stay in the glossary for the spelling census.
 - `## Path vars` exists only when the project's prompts substitute `$VAR` tokens.
 
 ## Runtime
@@ -178,7 +178,7 @@ Checks:
 8. Rules: enforced by a mechanism and neither a route line nor sacred ground; `NEVER`/`MUST` outside sacred ground; unverifiable; a generic directive — "follow best practices", "write clean code", "be careful", "be thorough", "use good judgment", "keep quality high" and any other naming no tool, path, command or threshold; rationale past one cost clause; scoped narrower than the file; a `PATH-RULE` the mirror generator does not carry to every engine; restating a co-loaded file.
 9. Current state: a date, an incident, "now / no longer / recently", a history.
 10. Citers: a heading another prompt cites is missing.
-11. Prose: the `/prompt:use` pre-commit self-check fails.
+11. Prose: the `/law:prompt` pre-commit self-check fails.
 12. Contradiction: a fact or rule here that contradicts a co-loaded layer — a parent or child orientation file, a user-level file, the harness's system or persona layer, a mirror's engine adapter.
 
 Write steps:
@@ -187,6 +187,6 @@ Write steps:
 2. Gather candidate terms: top-level directories (`git ls-files | cut -d/ -f1 -s | sort -u`), commit scopes (`git log --format=%s -n 500 | sed -n 's/^[a-z]*(\([^)]*\)).*/\1/p' | tr ',' '\n' | sort | uniq -c | sort -rn`), the terms the existing file and prompts use, design-doc names.
 3. Admit each by the admission bullet of § Vocabulary; locate each home by grep.
 4. Runtime: find the engines (which orientation files and engine directories exist) and the environments (build files, dev scripts, CI workflows, container files); run each command once — only a command that ran is written as working; one that cannot run goes in the report as unverified.
-5. Carry every existing rule over: kept, moved (child file, path rule, trigger line, command, doc), merged, or cut with a named reason — the `/prompt:use` cut discipline.
+5. Carry every existing rule over: kept, moved (child file, path rule, trigger line, command, doc), merged, or cut with a named reason — the `/law:prompt` cut discipline.
 6. Retarget the citers of every renamed heading in the same pass.
 7. Run `check`; report the byte change against `HEAD` (`git show HEAD:{path} | wc -c` beside `wc -c`), naming what any growth bought; each move and cut in one line; then the admitted term list for the owner to strike.

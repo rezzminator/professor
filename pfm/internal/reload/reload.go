@@ -104,6 +104,7 @@ type Request struct {
 	// system-prompt file path for Claude, or the complete developer
 	// instructions value for Codex. Empty preserves an ordinary reload.
 	PromptChannel string
+	Envs          map[string]string // the adopter settings' envs (workbench.Persona.Envs)
 	// Home and Machine are the Claude respawn's whole policy: the account's
 	// config dir, its autonomy posture and its system-prompt choice all come
 	// from them through action.ClaudeSpawn. A reload used to synthesize its
@@ -229,7 +230,7 @@ func Run(
 	defer func() { trail.End(err) }()
 	options.defaults()
 	entry := options.Clock.Now()
-	if request, err = applyReloadWorkbench(request); err != nil {
+	if request, err = applyReloadWorkbench(request, stderr); err != nil {
 		return Result{}, err
 	}
 	request, run, wasNew, err := prepareReload(request)
@@ -547,8 +548,9 @@ func codexRun(request Request) (string, error) {
 	for _, name := range claudelaunch.Hygiene() {
 		parts = append(parts, "-u", name)
 	}
-	if request.CodexHome != "" {
-		parts = append(parts, "CODEX_HOME="+cmdparse.Quote(request.CodexHome))
+	for _, assignment := range claudelaunch.WithEnvs(request.Envs, codexHomeEnv(request.CodexHome)) {
+		name, value, _ := strings.Cut(assignment, "=")
+		parts = append(parts, name+"="+cmdparse.Quote(value))
 	}
 	binary := request.CodexBinary
 	if binary == "" {

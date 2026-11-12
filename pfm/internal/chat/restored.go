@@ -486,56 +486,9 @@ func prepareRestoredSeat(
 	if account == 0 {
 		account = runtime.Config.PrimaryAccountFor(engineID, 1)
 	}
-	var recipe *fleetdb.SeatRun
-	switch engineID {
-	case pfmengine.Claude:
-		spawnPlan := action.ClaudeSpawn{
-			Purpose: action.PurposeResume,
-			Home:    runtime.Paths.Home,
-			Account: account,
-			Cache1H: &row.C1H,
-			Resume:  id,
-			Machine: runtime.Config,
-		}
-		run, err := spawnPlan.SeatRun(row.CWD)
-		if err != nil {
-			return fleetdb.Seat{}, err
-		}
-		recipe = &run
-	case pfmengine.Codex:
-		plan, err := action.PlanCodex(
-			action.HeadlessRequest{
-				Engine:          engineID,
-				ResumeSessionID: id,
-				Name:            row.Name,
-				CWD:             row.CWD,
-				Home:            runtime.Paths.Home,
-				PrimaryAccount:  account,
-				Config:          runtime.Config,
-			},
-		)
-		if err != nil {
-			return fleetdb.Seat{}, err
-		}
-		recipe = plan.SeatRun
-	case pfmengine.OpenCode:
-		row.Kind = compose.ResumeKindFor(row.Kind)
-		plan, err := action.Synthesize(
-			action.Request{
-				Row:            row,
-				Home:           runtime.Paths.Home,
-				PrimaryAccount: account,
-				Config:         runtime.Config,
-				FreshSocket:    "restored",
-			},
-		)
-		if err != nil {
-			return fleetdb.Seat{}, err
-		}
-		recipe = plan.SeatRun
-	}
-	if recipe == nil {
-		return fleetdb.Seat{}, errors.New("restored engine has no structured resume recipe")
+	recipe, err := restoredRecipe(row, id, account, runtime, stderr)
+	if err != nil {
+		return fleetdb.Seat{}, err
 	}
 	prepared, err := spawn.PrepareHerdr(
 		ctx,

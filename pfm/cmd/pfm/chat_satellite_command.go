@@ -363,7 +363,7 @@ func runChatBranch(
 			return 1
 		}
 	}
-	persona, warnings, err := action.LaunchPersona(cwd, engine, workbench.Resume)
+	persona, warnings, err := action.LaunchPersona(cwd, runtime.Paths.Home, engine, workbench.Resume)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat branch: %v\n", err)
 		return 1

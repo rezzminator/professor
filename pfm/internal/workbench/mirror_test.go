@@ -26,30 +26,39 @@ const cleanMirrorReply = `{"ok":true,"problems":[],"rebuildable":[],"warnings":[
 
 func TestEnsureMirror(t *testing.T) {
 	for _, testCase := range []struct {
-		engine pfmengine.ID
-		argv   string
+		engine   pfmengine.ID
+		argv     string
+		settings bool
 	}{
 		{engine: pfmengine.Codex, argv: "codex build"},
 		{engine: pfmengine.OpenCode, argv: "opencode build"},
 		{engine: pfmengine.Claude},
+		{engine: pfmengine.Codex, settings: true},
+		{engine: pfmengine.OpenCode, settings: true},
 	} {
-		t.Run(string(testCase.engine), func(t *testing.T) {
-			root, dir := benchFixture(t)
-			bench, home := LoadBench(dir, root), t.TempDir()
-			record := testjail.FakeEngineSync(t, cleanMirrorReply, 0)
-			if err := EnsureMirror(bench, testCase.engine, home); err != nil {
-				t.Fatal(err)
-			}
-			if testCase.argv == "" {
-				if _, err := os.Stat(record); !errors.Is(err, fs.ErrNotExist) {
-					t.Fatalf("a Claude launch ran engine-sync: %v", err)
+		t.Run(
+			string(testCase.engine)+map[bool]string{true: "/settings persona"}[testCase.settings],
+			func(t *testing.T) {
+				root, dir := benchFixture(t)
+				bench, home := LoadBench(dir, root), t.TempDir()
+				if testCase.settings {
+					bench = Persona{Prompt: "team.md"}.Bench // a settings persona carries no bench
 				}
-				return
-			}
-			if got, want := readArgv(t, record), testCase.argv+" "+dir+" --home "+home+" --json"; got != want {
-				t.Fatalf("engine-sync argv = %q, want %q", got, want)
-			}
-		})
+				record := testjail.FakeEngineSync(t, cleanMirrorReply, 0)
+				if err := EnsureMirror(bench, testCase.engine, home); err != nil {
+					t.Fatal(err)
+				}
+				if testCase.argv == "" {
+					if _, err := os.Stat(record); !errors.Is(err, fs.ErrNotExist) {
+						t.Fatalf("%s launch without a bench mirror ran engine-sync: %v", testCase.engine, err)
+					}
+					return
+				}
+				if got, want := readArgv(t, record), testCase.argv+" "+dir+" --home "+home+" --json"; got != want {
+					t.Fatalf("engine-sync argv = %q, want %q", got, want)
+				}
+			},
+		)
 	}
 }
 

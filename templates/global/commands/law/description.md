@@ -1,12 +1,12 @@
 ---
-name: description:use
-description: MANDATORY — load before writing or certifying any `description:` (command, skill, agent, MCP tool or server); the four components and their order, the caps, the cut order, naming, family-chain and invocation-class law, the MCP self-containment rules, and the Approval gate. General prompt law → /prompt:use.
+name: law:description
+description: MANDATORY — load before writing or certifying any `description:` (command, skill, agent, MCP tool or server); the four components and their order, the caps, the cut order, naming, family-chain and invocation-class law, the MCP self-containment rules, and the Approval gate. General prompt law → /law:prompt.
 argument-hint: [path…]
 ---
 
 # Description Law
 
-A `description:` is the routing surface. The harness injects every one of them into every session and every sub-agent spawn and loads a body only on a match, so it is both the most re-read text in a fleet and the only text that decides whether an entity is ever reached. `/prompt:use` governs every prompt line; this file adds what a description needs beyond it. With `[path…]`, run § Approval over each path — a `.md` frontmatter, or an MCP tool's description string in source — and emit one verdict per entry.
+A `description:` is the routing surface. The harness injects every one of them into every session and every sub-agent spawn and loads a body only on a match, so it is both the most re-read text in a fleet and the only text that decides whether an entity is ever reached. `/law:prompt` governs every prompt line; this file adds what a description needs beyond it. With `[path…]`, run § Approval over each path — a `.md` frontmatter, or an MCP tool's description string in source — and emit one verdict per entry.
 
 ## The four components, in one order
 
@@ -37,11 +37,19 @@ Count the PARSED value, not the source line — a folded value joins to one line
 
 ## Naming
 
-The name is read beside the description and is the first routing signal, so spend it: `family:verb-noun`, a pairing whose meaning needs no gloss. The description then never respends the name's words — an entry named for prompt quality that opens "Prompt quality —" pays twice for one fact.
+The name of a command or skill is read beside the description and is the first routing signal, so spend it:
+
+- Namespace: the family, first, so typing it lists its members together — `law:` a rule set loaded before writing something (`/law:prompt`, `/law:agent`); `design:` a command returning a design document (`/design:test-suite`, `/design:codebase`); a product or plugin namespace groups that product's verbs (`/pfm:update`, `/flights:spec`).
+- Leaf: the subject as a noun, or a verb for an action — `/law:prompt`, `/design:codebase`, `/pfm:update`, `/improve:iterative`.
+- Bare name: only a one-of-a-kind command — `/imagine`, `/dude`, `/housekeeping`.
+- Plugin command: lives in that plugin under its own namespace (`/flights:trace-guide`), never in Professor's templates.
+- `use` names nothing: no command or skill is named `{x}:use` or `use:{x}`.
+
+The description then never respends the name's words — an entry named for prompt quality that opens "Prompt quality —" pays twice for one fact.
 
 ## Family
 
-A `family:*` set is one pipeline, and its ORDER must be legible from the descriptions alone, without opening a body. The entry member carries the whole chain once, as arrows. Every other member names only its predecessor and its successor, plus its `{CALLER}-ONLY` class when no person invokes it. Cross-family hand-offs use the same arrow. The chain lives in exactly one member; a second copy rots at the next insert.
+A namespace whose members form one pipeline keeps its ORDER legible from the descriptions alone, without opening a body. The entry member carries the whole chain once, as arrows. Every other member names only its predecessor and its successor, plus its `{CALLER}-ONLY` class when no person invokes it. Cross-family hand-offs use the same arrow. The chain lives in exactly one member; a second copy rots at the next insert.
 
 ## Invocation class — who may call it
 
@@ -85,7 +93,7 @@ Run over every entry, at write-time and on demand. An entry is APPROVED only whe
 - 4 Mechanism: a library, engine, model tier or internal stage the caller never selects is named.
 - 5 Entry point: a subcommand, mode, flag or alias the body handles is missing from `when`.
 - 6 Class: an obligation some law states lacks its token; a user-only entity that could carry `disable-model-invocation: true` does not; or a flagged entry still spends prose banning the model that cannot read it, or advertises a spoken trigger the flag makes unreachable.
-- 7 Family: a member lacks its predecessor or successor, or the chain is missing from the entry member or duplicated in a second one.
+- 7 Family: a pipeline member lacks its predecessor or successor, or the chain is missing from the entry member or duplicated in a second one.
 - 8 Redirect: a `Not for` clause names no home, or restates a ban a harness mechanism already enforces.
 - 9 MCP: a tool lacks its example call with real field names, a confusable sibling is uncontrasted, empty and error results share one shape, or the description narrates schema fields.
 - 10 Body echo: the body's opening restates the description.

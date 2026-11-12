@@ -136,28 +136,14 @@ func Owner(benches []Bench, cwd string) (Bench, bool) {
 // runs in: a linked worktree finds its managed root through the main checkout,
 // then reads its own bench, whose files its engines load.
 func Nearest(cwd string) (Bench, bool, error) {
-	dirs, err := launchDirectories(cwd)
-	if err != nil {
+	start, root, found, err := launchRoot(cwd)
+	if err != nil || !found {
 		return Bench{}, false, err
 	}
-	root, found, err := professor.ResolveProjectRoot(dirs.mapped)
-	if err != nil {
-		obs.Logger(context.Background()).Error("workbench managed root", "path", dirs.mapped, obs.FieldErr, err)
-		return Bench{}, false, err
-	}
-	if !found {
-		return Bench{}, false, nil
-	}
-	start := dirs.mapped
-	if dirs.top != "" && insideDirectory(dirs.main, root) {
-		relative, err := filepath.Rel(dirs.main, root)
-		if err != nil {
-			wrapped := fmt.Errorf("place managed root %s in worktree %s: %w", root, dirs.top, err)
-			obs.Logger(context.Background()).Error("workbench nearest", "path", dirs.own, obs.FieldErr, wrapped)
-			return Bench{}, false, wrapped
-		}
-		start, root = dirs.own, filepath.Join(dirs.top, relative)
-	}
+	return nearestFrom(start, root)
+}
+
+func nearestFrom(start, root string) (Bench, bool, error) {
 	for dir := start; dir != root; dir = filepath.Dir(dir) {
 		if !eligibleBench(root, dir) {
 			continue

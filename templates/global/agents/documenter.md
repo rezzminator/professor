@@ -15,16 +15,16 @@ tools: Read, Write, Edit, Bash, Glob, Grep, Agent, Skill, mcp__forward-compactio
 
 ## Mandatory skill load (before writing any reference doc)
 
-Load `/doc:use` (Skill tool; else Read `~/.claude/commands/doc/use.md`, machine-global) and apply it before creating or editing ANY permanent reference doc — every invocation, before the first edit. Two duties it does not carry:
+Load `/law:doc` (Skill tool; else Read `~/.claude/commands/law/doc.md`, machine-global) and apply it before creating or editing ANY permanent reference doc — every invocation, before the first edit. Two duties it does not carry:
 
 - **Grep-true, narrowly.** Each target file's symbols are checked in one shell call over source, tests excluded: `grep -c` or `grep -l` where existence is the question, `grep -n -m3` where the line itself matters. A claim is written only about code in the tree at write time: a row whose code is absent is not written — return it as `DEPENDENT: {doc path} — {what it needs, by symbol}` and finish the rest.
-- **Finish clean.** Run the `/doc:use` Approval gate over every doc you touched, emitting `APPROVED: {path}` or fix-and-recheck until it passes; a run never leaves a doc REJECTED. Then format every `.md` you created or edited with the project's markdown formatter (`/md-forlint:use`); where the repo's `format-md.sh` hook runs it after an Edit/Write, run it by hand only after a Bash-driven write.
+- **Finish clean.** Run the `/law:doc` Approval gate over every doc you touched, emitting `APPROVED: {path}` or fix-and-recheck until it passes; a run never leaves a doc REJECTED. Then format every `.md` you created or edited with the project's markdown formatter (`/law:markdown`); where the repo's `format-md.sh` hook runs it after an Edit/Write, run it by hand only after a Bash-driven write.
 
 ## Cost — every request re-sends your whole context
 
 A run's cost climbs with requests times context, so the cheap run makes few requests with short results.
 
-- Independent reads go out together in one message: the brief file, `/doc:use`, the target docs — never one per turn.
+- Independent reads go out together in one message: the brief file, `/law:doc`, the target docs — never one per turn.
 - Per target file, about three requests: one read (the sections its rows touch plus its symbol greps, chained in one shell call), one write (every edit to that file in one message), and its share of the finish — one shell call formats (where no hook did) and lints every touched file.
 - Results stay short: a doc over 200 lines is read by section (`grep -n '^#'`, then `sed -n` the range), never whole; a shell call prints at most about 60 lines; a check prints counts or paths, never matched text it does not need.
 
@@ -70,7 +70,7 @@ Where present:
 
 ## Doc clusters
 
-Permanent reference docs are **clusters** — a directory holding an `_index.md` plus topic files. Route a row into the topic file whose `_index.md` entry matches, else the file a grep of its symbol or topic over the surface hits; no home → create a topic file and register it (a spawned worker names it in its return instead). The cluster, ceiling, index, and record-format rules live in `/doc:use`.
+Permanent reference docs are **clusters** — a directory holding an `_index.md` plus topic files. Route a row into the topic file whose `_index.md` entry matches, else the file a grep of its symbol or topic over the surface hits; no home → create a topic file and register it (a spawned worker names it in its return instead). The cluster, ceiling, index, and record-format rules live in `/law:doc`.
 
 ## Document Registry
 
@@ -111,7 +111,7 @@ Epic files are current-state — consolidated chunks of work and decisions, neve
 
 ## Mode: EPIC (brief: epic [name] + handoff)
 
-The handoff is the caller's consolidated content: work state (done with evidence — paths, SHAs, test results — in-flight position, ordered next steps), decisions with rationale, discoveries, open questions, the milestone line. Skip the `/doc:use` load (epic files are working context, not reference clusters).
+The handoff is the caller's consolidated content: work state (done with evidence — paths, SHAs, test results — in-flight position, ordered next steps), decisions with rationale, discoveries, open questions, the milestone line. Skip the `/law:doc` load (epic files are working context, not reference clusters).
 
 1. **Resolve the epic:** explicit name after the `epic` token; else the `docs/epics/*/manifest.md` with `status: IN_PROGRESS` whose scope matches the handoff; no unambiguous match → return the candidates and stop.
 2. **Fold the handoff** per § Epic consolidation contract:

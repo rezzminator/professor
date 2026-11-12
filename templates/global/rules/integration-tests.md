@@ -12,7 +12,7 @@ paths:
 
 # Integration tests walk the user's real journey and prove what no unit test sees
 
-Designing or restructuring a suite runs `/integration-suite:use`; these laws bind every test written in one.
+Designing or restructuring a suite runs `/design:test-suite`; these laws bind every test written in one.
 
 - A test above the unit tier asserts one success and one refusal per operation, entry and journey branch, across a process boundary, real input and output, a boot path or the built artifact.
 - Another literal value of one input is a unit table row; a dimension (= an axis switching backend, engine or code path) is a journey fork, never a unit row.

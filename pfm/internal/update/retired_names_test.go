@@ -45,13 +45,13 @@ var fixtureRetiredNames = []retired.Name{
 	{Name: "JC-COMMIT", Kind: retired.KindPhase, Successor: "COMMIT", Match: retired.MatchExact},
 	{Name: "JC-UPDATE", Kind: retired.KindPhase, Match: retired.MatchExact},
 	{Name: "/pfm:refresh", Kind: retired.KindCommand, Successor: "the pcm agent", Match: retired.MatchExact},
-	{Name: "/quality:forlint", Kind: retired.KindCommand, Successor: "/md-forlint:use", Match: retired.MatchExact},
+	{Name: "/quality:forlint", Kind: retired.KindCommand, Successor: "/law:markdown", Match: retired.MatchExact},
 	{Name: ".claude/commands/pfm.md", Kind: retired.KindPath, Successor: "the pcm agent", Match: retired.MatchExact},
 	{Name: "/pcm", Kind: retired.KindCommand, Successor: "the pcm agent", Match: retired.MatchExact},
 	{Name: "mcp__chat__", Kind: retired.KindTool, Successor: "mcp__chat-professor__*", Match: retired.MatchPrefix},
 	{Name: "chat_inject", Kind: retired.KindTool, Successor: "mcp__chat-professor__call", Match: retired.MatchExact},
 	{Name: "/chat:", Kind: retired.KindCommand, Successor: "mcp__chat-professor__*", Match: retired.MatchPrefix},
-	{Name: "/documenter", Kind: retired.KindCommand, Successor: "/doc:use", Match: retired.MatchFamily},
+	{Name: "/documenter", Kind: retired.KindCommand, Successor: "/law:doc", Match: retired.MatchFamily},
 	{Name: "/km", Kind: retired.KindCommand, Match: retired.MatchExact},
 	{Name: "/rnd", Kind: retired.KindCommand, Match: retired.MatchFamily},
 	{Name: "mono-architect", Kind: retired.KindAgent, Match: retired.MatchExact},
@@ -173,8 +173,8 @@ func TestRetiredNamesNeverHitALiveNameSharingAPrefix(t *testing.T) {
 		"the /pfm CLI guide",
 		"see ~/.claude/commands/pfm.md and $HOME/.claude/commands/pfm.md",
 		".claude/commands/pcm.md",
-		"/md-forlint:use check",
-		"/iterative-improvement:use target",
+		"/law:markdown check",
+		"/improve:iterative target",
 		"mcp__chat-professor__call",
 		"tools: Read, mcp__forward-compaction__forward_compaction, mcp__forward-compaction__look_back",
 		"spawn super-rr",
@@ -774,12 +774,12 @@ func TestScanRetiredNamesStreamsTrackedTextToClean(t *testing.T) {
 	want := []professor.RetiredNameHit{
 		{Path: "large.txt", Line: 1, Name: "/wave", Kind: "command", Successor: fixtureFlightsSuccessor},
 		{Path: "large.txt", Line: 4, Name: "/jc", Kind: "command"},
-		{Path: "large.txt", Line: 5, Name: "/quality:forlint", Kind: "command", Successor: "/md-forlint:use"},
+		{Path: "large.txt", Line: 5, Name: "/quality:forlint", Kind: "command", Successor: "/law:markdown"},
 	}
 	if len(scan.Failures) != 0 || len(scan.Incomplete) != 0 || !reflect.DeepEqual(scan.Hits, want) {
 		t.Errorf("large tracked scan = %+v, want complete hits %+v", scan, want)
 	}
-	clean := strings.NewReplacer("/wave", "/flights:doctor", "/jc", "/prompt:use", "/quality:forlint", "/md-forlint:use").
+	clean := strings.NewReplacer("/wave", "/flights:doctor", "/jc", "/law:prompt", "/quality:forlint", "/law:markdown").
 		Replace(content)
 	writeRetiredFixture(t, root, map[string]string{"large.txt": clean})
 	scan = scanFixture(root, nil, nil)

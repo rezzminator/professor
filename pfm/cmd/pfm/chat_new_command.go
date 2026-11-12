@@ -187,7 +187,7 @@ func runRun(
 		ctx = pfmchat.WithWorkbenchNameReservation(ctx, auto)
 	}
 	defer pfmchat.ReleaseUnusedWorkbenchName(ctx, *name, stderr)
-	persona, personaWarnings, err := action.LaunchPersona(directory, engineName, workbench.New)
+	persona, personaWarnings, err := action.LaunchPersona(directory, resolved.Home, engineName, workbench.New)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
 		return 2
@@ -261,13 +261,13 @@ func runRun(
 		launchnotice.Print(stderr, "pfm chat new", action.PersonaMirror(persona, engineName, resolved.Home))
 	}
 	plan, err := action.HeadlessRun(action.HeadlessRequest{
-		Engine:         engineName,
-		Name:           *name,
-		CWD:            directory,
-		Prompt:         prompt,
-		PromptChannel:  promptChannel,
-		Model:          persona.ModelOr(*model),
-		Effort:         persona.EffortOr(*effort),
+		Engine:        engineName,
+		Name:          *name,
+		CWD:           directory,
+		Prompt:        prompt,
+		PromptChannel: promptChannel,
+		Model:         persona.ModelOr(*model),
+		Effort:        persona.EffortOr(*effort), Envs: persona.Envs,
 		Home:           resolved.Home,
 		PrimaryAccount: selectedAccount,
 		Cache1H:        cache1H,

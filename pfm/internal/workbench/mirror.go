@@ -18,10 +18,12 @@ var mirrorEngines = map[pfmengine.ID]string{
 }
 
 // EnsureMirror builds the enabled engine's mirror before a workbench launch
-// through `engine-sync {engine} build {bench} --home {home}`.
+// through `engine-sync {engine} build {bench} --home {home}`; a bench without
+// a directory builds nothing.
 func EnsureMirror(bench Bench, engine pfmengine.ID, home string) error {
 	name, mirrored := mirrorEngines[engine]
-	if !mirrored {
+	// A persona from the managed root's settings file has no bench to mirror.
+	if !mirrored || bench.Dir == "" {
 		return nil
 	}
 	result, err := enginesync.Runner{Home: home}.Mirror(context.Background(), name, enginesync.ActionBuild, bench.Dir)
@@ -51,7 +53,8 @@ type MirrorCheck struct {
 // it, from `engine-sync {engine} check {bench} --home {home}`.
 func CheckMirror(bench Bench, engine pfmengine.ID, home string) (check MirrorCheck, err error) {
 	name, mirrored := mirrorEngines[engine]
-	if !mirrored {
+	// A persona from the managed root's settings file has no bench to mirror.
+	if !mirrored || bench.Dir == "" {
 		return MirrorCheck{}, nil
 	}
 	result, err := enginesync.Runner{Home: home}.Mirror(context.Background(), name, enginesync.ActionCheck, bench.Dir)

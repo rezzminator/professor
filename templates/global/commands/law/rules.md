@@ -1,12 +1,12 @@
 ---
-name: rules:use
-description: MANDATORY — load before writing or editing a rule file (`.claude/rules/**`, `~/.claude/rules/**`); `check [path…]` certifies each (APPROVED/REJECTED), `write <path>` drafts or restructures one. Prose → /prompt:use; CLAUDE.md → /claude-md:use.
+name: law:rules
+description: MANDATORY — load before writing or editing a rule file (`.claude/rules/**`, `~/.claude/rules/**`); `check [path…]` certifies each (APPROVED/REJECTED), `write <path>` drafts or restructures one. Prose → /law:prompt; CLAUDE.md → /law:claude-md.
 argument-hint: "[check [path…] | write <path>]"
 ---
 
 # Rule File Law
 
-A rule file is a prompt the harness injects unasked. Always-on (no `paths:`) reaches every agent, sub-agents included, every turn, so the whole fleet pays each word; path-scoped (`paths:`) loads once per agent on a Read, Write or Edit of a matching file. `visible-to:`, read by the rule-control plugin, narrows either class to the loops it names: `main` = the main chat, any other name an agent type, `*` globs; `include` keeps, `exclude` drops; with `paths:`, a loop gets the rule only when both admit it. Without rule-control installed the key is inert and the rule reaches every loop; Codex and OpenCode ignore it. `paths` and `visible-to` are the only frontmatter keys read, and YAML that does not parse loads the rule always-on, silently. `/prompt:use` governs each line; this law governs the file's concern, class and shape. Engine delivery and probe evidence: `docs/design/rules/rules.md` in the Professor clone (`readlink -f ~/.claude/commands/rules/use.md`, four directories up).
+A rule file is a prompt the harness injects unasked. Always-on (no `paths:`) reaches every agent, sub-agents included, every turn, so the whole fleet pays each word; path-scoped (`paths:`) loads once per agent on a Read, Write or Edit of a matching file. `visible-to:`, read by the rule-control plugin, narrows either class to the loops it names: `main` = the main chat, any other name an agent type, `*` globs; `include` keeps, `exclude` drops; with `paths:`, a loop gets the rule only when both admit it. Without rule-control installed the key is inert and the rule reaches every loop; Codex and OpenCode ignore it. `paths` and `visible-to` are the only frontmatter keys read, and YAML that does not parse loads the rule always-on, silently. `/law:prompt` governs each line; this law governs the file's concern, class and shape. Engine delivery and probe evidence: `docs/design/rules/rules.md` in the Professor clone (`readlink -f ~/.claude/commands/law/rules.md`, four directories up).
 
 ## The spine
 
@@ -44,7 +44,7 @@ visible-to:
 
 ## Words
 
-- Aggressively compact: one law per bullet, one step per numbered item, the fewest words that keep it, a precise word over a phrase (`/prompt:use` § Compact aggressively).
+- Aggressively compact: one law per bullet, one step per numbered item, the fewest words that keep it, a precise word over a phrase (`/law:prompt` § Compact aggressively).
 - Impact by naming: the agent, tool, command, path or flag to use; a definition inline as `{term} = {meaning}`; an example only where it pins behavior (`no rm -rf "$DIR"`).
 - Engine-neutral: a Claude mechanism is named with what holds on an engine without it.
 - The always-on global set stays under 8,192 bytes (`engine-sync doctor --machine` reports `GLOBAL-BUDGET`).
@@ -64,12 +64,12 @@ Checks:
 5. Words: a bullet holding two laws or a numbered item two steps; a phrase where one word carries it; rationale past one cost clause; a directive naming no tool, path, command or threshold; a date, an incident, "now / no longer".
 6. Truth: an agent, command, hook or path it names that does not exist where it binds.
 7. Budget: the always-on global set over 8,192 bytes.
-8. Prose: the `/prompt:use` pre-commit self-check fails.
+8. Prose: the `/law:prompt` pre-commit self-check fails.
 
 Write steps:
 
 1. Name the concern: its trigger and whom it binds; grep both rule directories and every `CLAUDE.md` for its key nouns; an existing home takes the edit, and rules sharing its trigger or owner merge in.
 2. Pick the class; for path-scoped, write the globs project-relative and quoted.
 3. Draft the spine, items in workflow order.
-4. Compact until neither `/prompt:use` pass fires.
+4. Compact until neither `/law:prompt` pass fires.
 5. Run `check`; report the byte change, each merge and each cut in one line.

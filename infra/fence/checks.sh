@@ -1271,6 +1271,13 @@ gate_run() { # pfm, templates, or all
   # gate's verdict stays the steps' and the budget's.
   if bash "$REPO_ROOT/infra/fence/profile-report.sh" summary "$run_dir"; then summary_rc=0; else summary_rc=$?; fi
   (( summary_rc == 0 )) || bad "PROFILE summary FAILED — profile-report.sh summary exit $summary_rc; no PROFILE block, profile.tsv or profile/INDEX.txt for $run_dir"
+  # The unit-isolation measure under the PROFILE block: the unit-bundle tests counted by the worst thing each
+  # touches (pfm/scripts/test-kinds.sh); a count that cannot be read is named, the verdict unchanged.
+  if [[ "$target" == pfm || "$target" == all ]]; then
+    if bash "$d/scripts/test-kinds.sh" "$d"; then :; else
+      printf 'PROFILE kinds NOT RECORDED — test-kinds.sh exit %s (its line above)\n' "$?"
+    fi
+  fi
   if ! gate_write_meta "$run_dir" "$target" "$started" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"; then
     fail_step "gate: cannot rewrite $run_dir/gate.meta"; budget_rc=1
   fi

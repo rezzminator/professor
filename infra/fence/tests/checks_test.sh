@@ -415,6 +415,11 @@ case "$1" in
   failures) [ -z "${STUB_FAILURES_OUT:-}" ] || printf '%s\n' "$STUB_FAILURES_OUT"; exit "${STUB_FAILURES_RC:-0}" ;;
 esac
 SH
+cat > "$T/fx/pfm/scripts/test-kinds.sh" <<'SH'
+printf 'kinds %s\n' "$*" >> "$STUB_EVENTS"
+[ "${STUB_KINDS_RC:-0}" = 0 ] || { echo 'KINDS ERROR stub cannot look'; exit "$STUB_KINDS_RC"; }
+echo 'KINDS unit 2 (nothing 1 · temp-dir 1) · move 3 (home-sqlite 1 · process 1 · tmux 1) · total 5'
+SH
 cat > "$T/fx/pfm/scripts/test-shard.sh" <<'SH'
 if [ "${STUB_LOAD_FAIL:-0}" = 1 ]; then
   trap '' TERM
@@ -541,12 +546,14 @@ else bad 'gate.meta without git' "$(cat "$RUN/gate.meta")"; fi
 fx_budget
 : > "$STUB_EVENTS"
 fx_case order all
-if [ "$GATE_RC" -eq 0 ] && [ "$(event_words)" = 'sampler-start steps sampler-stop judge report summary-saw' ] &&
+if [ "$GATE_RC" -eq 0 ] && [ "$(event_words)" = 'sampler-start steps sampler-stop judge report summary-saw kinds' ] &&
+  grep -Fxq "kinds $T/fx/pfm" "$STUB_EVENTS" &&
+  [ "$(tail -n 1 "$GATE_OUT")" = 'KINDS unit 2 (nothing 1 · temp-dir 1) · move 3 (home-sqlite 1 · process 1 · tmux 1) · total 5' ] &&
   grep -Fxq "sampler-start run --out $RUN/resources.tsv --parent $$" "$STUB_EVENTS" &&
   grep -Fxq "judge window --resources $RUN/resources.tsv" "$STUB_EVENTS" &&
   grep -Fxq "report summary $RUN" "$STUB_EVENTS" && grep -Fxq 'summary-saw BUDGET' "$STUB_EVENTS" &&
   grep -Fxq "PROFILE index $RUN/profile/INDEX.txt" "$GATE_OUT"; then
-  ok 'gate_run: sampler started before the steps and stopped right after; judge, BUDGET, then the PROFILE summary'
+  ok 'gate_run: sampler started before the steps and stopped right after; judge, BUDGET, the PROFILE summary, then the KINDS line'
 else bad 'gate_run sampler/judge/summary order' "rc $GATE_RC, this shell $$" "$(cat "$STUB_EVENTS")" "$(cat "$GATE_OUT")"; fi
 if grep -Fxq 'budget: ✓ gate(all) — 1s within 247s (budget 198s ×1.25)' "$GATE_OUT"; then
   ok 'a wall within its limit keeps the budget line as it was, no attribution'
@@ -586,6 +593,18 @@ if (
   ); then
   ok 'a summary that fails is one red line naming its exit, the gate verdict unchanged'
 else bad 'summary failure' "$(cat "$T/case-summary-fail.out")"; fi
+
+export STUB_KINDS_RC=2
+fx_case kinds-fail pfm
+unset STUB_KINDS_RC
+if [ "$GATE_RC" -eq 0 ] && [ "$(tail -n 2 "$GATE_OUT")" = "$(printf 'KINDS ERROR stub cannot look\nPROFILE kinds NOT RECORDED — test-kinds.sh exit 2 (its line above)')" ]; then
+  ok 'a count that cannot be read is named under its ERROR line, the gate verdict unchanged'
+else bad 'kinds failure' "$(cat "$GATE_OUT")"; fi
+: > "$STUB_EVENTS"
+fx_case kinds-templates templates
+if ! grep -q '^kinds' "$STUB_EVENTS" && grep -q '^report summary' "$STUB_EVENTS"; then
+  ok 'a templates-only gate counts no pfm tests, its summary still printed'
+else bad 'kinds on a templates gate' "$(cat "$STUB_EVENTS")"; fi
 
 gate_budget_verdict() { printf 'budget: forced red\n'; return 1; }
 PFM_TEST_TIMING_DIR="$T/case-forced"

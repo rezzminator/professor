@@ -309,16 +309,28 @@ func killFromPicker(c *harness.Ctx, s State) State {
 	return s
 }
 
-// unkill: from the second terminal the owner types `pfm chat unkill {session}`; it confirms, the chat is
-// no longer killed, `pfm ls --tsv` lists it resumable again under its name, and the picker, reopened in
-// the pane, draws its row.
+// unkill: from the second terminal the owner types `pfm chat unkill {name}`; it confirms with the
+// chat's session, and a second unkill says the chat is not killed and exits 1. The chat is no longer
+// killed, `pfm ls --tsv` lists it resumable again under its name, and the picker, reopened in the pane,
+// draws its row.
 func unkill(c *harness.Ctx, s State) State {
 	cli := c.Terminal(s.Term + "-cli")
-	if code := shellRun(cli, "unkill", "pfm chat unkill "+s.Chat.Session, 20*time.Second); code != 0 {
-		c.Failf("pfm chat unkill %s exited %d", s.Chat.Session, code)
-	}
-	if want := "unkilled " + s.Chat.Session + "\n"; !strings.Contains(cli.Screen(), want) {
-		c.Failf("pfm chat unkill printed no %q", want)
+	c.Expect(`"err":"chat unkill exited 1"`) // the second unkill, of a chat no longer killed
+	for _, run := range []struct {
+		label, command, stdout, stderr string
+		code                           int
+	}{
+		{"unkill-name", "pfm chat unkill " + s.Name, "unkilled " + s.Chat.Session + "\n", "", 0},
+		{
+			"unkill-again", "pfm chat unkill " + s.Chat.Session, "",
+			"pfm chat unkill: " + s.Chat.Session + " is not killed; nothing was unkilled\n", 1,
+		},
+	} {
+		out, errs, code := typedRunWithin(c, cli, run.label, run.command, 20*time.Second)
+		if code != run.code || out != run.stdout || errs != run.stderr {
+			c.Failf("%s: exit %d, stdout %q, stderr %q; want exit %d, stdout %q, stderr %q",
+				run.command, code, out, errs, run.code, run.stdout, run.stderr)
+		}
 	}
 	if got := strings.TrimSpace(
 		stateSQL(c, "select count(*) from hidden where uuid = '"+s.Chat.Session+"'"),

@@ -47,7 +47,7 @@ func ChatServer(args []string, stdout, stderr io.Writer, runtime config.Runtime,
 	choice, err := chat.BirthBackend(ctx, "shim.cx", runtime.Config.Chat.Backend)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm internal chat-server: %v\n", err)
-		return 1
+		return spawn.FailureCode(err)
 	}
 	if choice.Backend == spawn.BackendHerdr {
 		return chatServerNative(chat.WithPlacement(ctx, choice), args, stdout, stderr, newChat)

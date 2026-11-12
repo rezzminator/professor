@@ -298,6 +298,7 @@ func TestShimAutoOpenDefersDisarmsAndMapsLegacyValuesToPicker(t *testing.T) {
 	writeShimFile(t, filepath.Join(home, ".local", "bin", "pfm"), `#!/bin/sh
 if [ "$#" -eq 0 ]; then printf 'picker\n' >> "$SHIM_AUTO_LOG"; fi
 if [ "$1" = internal ] && [ "$2" = chat-server ]; then shift 2; printf 'create %s\n' "$*" >> "$SHIM_AUTO_LOG"; fi
+if [ "$1" = internal ] && [ "$2" = herdr-shell ]; then printf 'ask %s %s\n' "$3" "$HERDR_PANE_ID" >> "$SHIM_AUTO_LOG"; printf '%s\n' "$SHIM_RESUME_PENDING"; fi
 `)
 	writeShimFile(t, filepath.Join(fakeBin, "tmux"), `#!/bin/sh
 printf 'launch %s\n' "$*" >> "$SHIM_AUTO_LOG"
@@ -312,7 +313,29 @@ printf 'EVALUATED %s\n' "$*" >> "$SHIM_AUTO_LOG"
 		want    []string
 		absent  []string
 	}{
-		{name: "managed profile", environ: []string{"PFM_AUTO_OPEN=pfm"}, want: []string{"picker"}},
+		{
+			name:    "managed profile",
+			environ: []string{"PFM_AUTO_OPEN=pfm"},
+			want:    []string{"picker"},
+			absent:  []string{"ask "},
+		},
+		{
+			name:    "Herdr restored pane yields to Herdr's resume",
+			environ: []string{"PFM_AUTO_OPEN=pfm", "HERDR_PANE_ID=w1:p1", "SHIM_RESUME_PENDING=pending"},
+			want:    []string{"ask resume-pending w1:p1"},
+			absent:  []string{"picker"},
+		},
+		{
+			name:    "Herdr fresh pane opens the picker",
+			environ: []string{"PFM_AUTO_OPEN=pfm", "HERDR_PANE_ID=w1:p2", "SHIM_RESUME_PENDING=no"},
+			want:    []string{"ask resume-pending w1:p2", "picker"},
+		},
+		{
+			name:    "Herdr restored pane yields a Codex auto-open too",
+			environ: []string{"PFM_AUTO_OPEN=cx", "HERDR_PANE_ID=w1:p3", "SHIM_RESUME_PENDING=pending"},
+			want:    []string{"ask resume-pending w1:p3"},
+			absent:  []string{"create ", "launch "},
+		},
 		{name: "legacy managed profile", environ: []string{"CC_AUTO_OPEN=pfm"}, want: []string{"picker"}},
 		{name: "legacy truthy", environ: []string{"CC_AUTO_OPEN=1"}, want: []string{"picker"}},
 		{

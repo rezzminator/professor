@@ -16,7 +16,8 @@ import (
 // pfm for a Codex chat on a model Codex does not offer: the refusal is printed, the exit is non-zero and
 // nothing is launched. Then the owner opens the picker again, moves the engine chip to Codex and walks the
 // wizard with Enter; the fake Codex draws in the pane and pfm lists exactly one live Codex chat on the
-// session's socket, its seat live on that pane, its engine under the session's Herdr server.
+// session's socket, its seat live on that pane, its engine under the session's Herdr server. He names the
+// chat with Codex's own /rename: pfm's row, the Herdr tab and the seat all take the name.
 func codexFromPicker(c *harness.Ctx, s State) State {
 	term := c.Terminal(s.Term)
 	term.Press(harness.Esc)
@@ -34,13 +35,16 @@ func codexFromPicker(c *harness.Ctx, s State) State {
 		c.Failf("live seats %v on %s after the refused launch, want none", seats, herdrSocket(s))
 	}
 	term.Type("pfm\r")
-	term.WaitFor("New chat", 20*time.Second)
+	newChatSelected(term)
 	term.Press(harness.Enter)
 	pickEngine(term, "Codex")
 	term.Press(harness.Enter)
 	term.WaitFor("Ask Codex to do anything", 20*time.Second)
 	s.Chat = oneLiveChat(c, s, "live-codex")
 	s.Chat.Engine = engineOf(c, s)
+	s.Name = c.Unique("codex-title")
+	term.Type("/rename " + s.Name + "\r")
+	namesAgree(c, s, "codex /rename")
 	fleetConsistent(c, s)
 	return s
 }

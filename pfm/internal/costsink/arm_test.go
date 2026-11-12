@@ -94,7 +94,7 @@ func TestArmHandsTheBoundSocketToADetachedSinkAndReturnsItsPort(t *testing.T) {
 	if err := conn.Close(); err != nil {
 		t.Fatalf("close the dial to the armed port: %v", err)
 	}
-	logBody := waitForFile(t, paths.CostSinkLog(home))
+	logBody := waitForFile(t, paths.LogRoot(paths.OSEnv{}, home).CostSink())
 	if !strings.Contains(logBody, "fake sink started") {
 		t.Errorf("the sink log %q lacks the child's stderr line", logBody)
 	}
@@ -146,10 +146,10 @@ func TestArmStartsTheSinkDetachedThroughTheRunner(t *testing.T) {
 	}
 	opts := starts[0].Opts
 	stderr, ok := opts.Stderr.(*os.File)
-	if !opts.Detach || !ok || stderr.Name() != paths.CostSinkLog(home) || len(opts.ExtraFiles) != 1 ||
+	sinkLog := paths.LogRoot(paths.OSEnv{}, home).CostSink()
+	if !opts.Detach || !ok || stderr.Name() != sinkLog || len(opts.ExtraFiles) != 1 ||
 		opts.Stdout != nil || !slices.Equal(opts.Env, environ) {
-		t.Fatalf("start options = %+v, want Detach, stderr on %s, one extra file and env %q",
-			opts, paths.CostSinkLog(home), environ)
+		t.Fatalf("start options = %+v, want Detach, stderr on %s, one extra file and env %q", opts, sinkLog, environ)
 	}
 	if got := runner.LifecycleCalls(); !slices.Equal(got, []deps.LifecycleCall{{Pid: 4242, Action: "release"}}) {
 		t.Fatalf("lifecycle = %+v, want the sink released", got)

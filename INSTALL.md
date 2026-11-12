@@ -301,6 +301,6 @@ No update regenerates scaffolded project files, replays the interview, or perfor
 
 ## Uninstall
 
-**`pfm`:** `pfm uninstall` removes installer-owned links and theme files, the source-fetched skill store `~/.local/share/pfm/install/skills/` and its links in `~/.claude/skills/` and `~/.agents/skills/`, and restores pre-install backups. Locally modified themes are preserved and reported. See `pfm uninstall --help`.
+**`pfm`:** `pfm uninstall` removes installer-owned links and theme files, the source-fetched skill store `~/.local/share/pfm/install/skills/` and its links in `~/.claude/skills/` and `~/.agents/skills/`, and restores pre-install backups. It also takes back what install wrote into Claude's settings and plugin records: every `{plugin}@professor` entry in `enabledPlugins` and `plugins/installed_plugins.json`, the `professor` record in `plugins/known_marketplaces.json` with Claude's copies under `plugins/cache` and `plugins/marketplaces`, and the pfm-owned directory marketplace `~/.local/share/professor-dev`; plugins and marketplaces you named yourself stay. Locally modified themes are preserved and reported. See `pfm uninstall --help`.
 
 **The discipline layer:** no uninstall command exists anywhere in `templates/` or the shipped commands. Removing it is a manual `git` operation on your side — revert the install commit, or delete the written paths from the ownership table above.

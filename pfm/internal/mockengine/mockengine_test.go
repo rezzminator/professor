@@ -43,6 +43,9 @@ type fixture struct {
 	recordDir string
 	scenario  string
 	work      string
+	// statusRefresh is the statusLine.refreshInterval installHooks writes, in
+	// seconds: pfm's own 2 unless a test waits on the interval itself.
+	statusRefresh float64
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -60,6 +63,8 @@ func newFixture(t *testing.T) *fixture {
 		recordDir: filepath.Join(root, "record"),
 		scenario:  filepath.Join(root, "scenario.json"),
 		work:      filepath.Join(root, "work", "repo"),
+
+		statusRefresh: 2,
 	}
 	for _, directory := range []string{
 		fix.bin, fix.home, fix.configDir, fix.codexHome, fix.procRoot, fix.sidDir, fix.recordDir, fix.work,

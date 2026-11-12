@@ -1,4 +1,8 @@
 // Package reload reboots one Claude seat in its existing tmux pane.
+//
+// owner_exit.go: the pane mutex, the exit mark and the yield to an owner's /exit.
+// after_reboot.go: what a reload does once the reborn chat is up: the native --then turn and
+// the left-behind conversation's "(before --new)" label, tmux and native alike.
 package reload
 
 import (
@@ -58,6 +62,7 @@ type Tmux interface {
 	ListPanes(context.Context, string) ([]Pane, error)
 	SetRemain(context.Context, string, string, bool) error
 	Respawn(context.Context, string, string, string, string) error
+	KillPane(context.Context, string, string) error
 	Display(context.Context, string, string, string) error
 }
 
@@ -142,6 +147,8 @@ type Result struct {
 	// New reports whether the reborn seat started a brand-new session id
 	// (--new was requested, or no transcript existed yet to resume).
 	New bool
+	// Ended: the chat ended before the reload's own /exit; nothing respawned.
+	Ended bool
 }
 
 // target is the tmux pane this request reboots, as call's Screen door
@@ -176,41 +183,6 @@ func (o *Options) defaults() {
 	if o.Clock == nil {
 		o.Clock = clock.Real
 	}
-}
-
-// LockPath is the persistent pane mutex; its flock spans the whole reboot.
-func LockPath(sidDir, socketName, pane string) string {
-	return filepath.Join(sidDir, "."+socketName+"."+pane+".reloadlock")
-}
-
-// InFlight reports whether a reload currently holds the pane mutex, so a
-// SessionEnd hook can tell a reload's /exit (the pane is being rebooted —
-// leave its terminal alone) from a human's. A missing lock file is a plain
-// "no"; a lock that cannot be probed is an error, never a "no".
-func InFlight(sidDir, socketName, pane string) (inFlight bool, returnErr error) {
-	lock, err := os.OpenFile(LockPath(sidDir, socketName, pane), os.O_RDWR, 0o600)
-	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("open reload lock: %w", err)
-	}
-	defer func() {
-		if err := lock.Close(); err != nil {
-			returnErr = errors.Join(
-				returnErr,
-				fmt.Errorf("close reload lock %s: %w", LockPath(sidDir, socketName, pane), err),
-			)
-		}
-	}()
-	// A shared probe conflicts with Run's exclusive lock, never with another probe.
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_SH|syscall.LOCK_NB); err != nil {
-		if errors.Is(err, syscall.EWOULDBLOCK) {
-			return true, nil
-		}
-		return false, fmt.Errorf("probe reload lock: %w", err)
-	}
-	return false, nil
 }
 
 // Run performs the graceful in-place reboot. The caller has already resolved
@@ -287,10 +259,7 @@ func Run(
 			return Result{}, err
 		}
 	}
-	if err := tmux.SetRemain(ctx, request.SocketPath, request.Pane, true); err != nil {
-		return Result{}, fmt.Errorf("set pane remain-on-exit: %w", err)
-	}
-	clearRemain := true
+	clearRemain := false
 	defer func() {
 		if clearRemain {
 			if err := tmux.SetRemain(context.Background(), request.SocketPath, request.Pane, false); err != nil {
@@ -298,12 +267,29 @@ func Run(
 			}
 		}
 	}()
+	// Before its own /exit the chat is still its owner's: one ended meanwhile is left ended.
+	yield := func(stepErr error) (Result, error) {
+		ended, probeErr := yieldToOwner(context.WithoutCancel(ctx), tmux, request)
+		if !ended && probeErr == nil {
+			return Result{}, stepErr
+		}
+		if !ended {
+			return Result{}, errors.Join(stepErr, probeErr)
+		}
+		clearRemain = false
+		trail.Reach("ended", "the chat ended before the reload's /exit: nothing respawned")
+		return Result{Ended: true}, probeErr
+	}
+	if err := tmux.SetRemain(ctx, request.SocketPath, request.Pane, true); err != nil {
+		return yield(fmt.Errorf("set pane remain-on-exit: %w", err))
+	}
+	clearRemain = true
 	if _, err := tmux.LeaveCopyMode(ctx, request.target()); err != nil {
-		return Result{}, err
+		return yield(err)
 	}
 	capture, err := waitCallerIdle(ctx, request, options, tmux, stderr)
 	if err != nil {
-		return Result{}, err
+		return yield(err)
 	}
 	trail.Reach("idle", "caller turn ended")
 	pane := tmuxPane(request, tmux)
@@ -311,10 +297,18 @@ func Run(
 		return Result{}, err
 	}
 	if err := stashDraft(ctx, pane, options.Clock, capture, stderr); err != nil {
+		return yield(err)
+	}
+	if result, err := yield(nil); result.Ended || err != nil {
+		return result, err
+	}
+	unmark, err := markExit(ExitMarkPath(options.SIDDir, filepath.Base(request.SocketPath), request.Pane))
+	if err != nil {
 		return Result{}, err
 	}
+	defer unmark(stderr)
 	if _, err := typeExit(ctx, pane, options.Clock, stderr); err != nil {
-		return Result{}, err
+		return yield(err)
 	}
 	trail.Reach("exit-typed", "/exit submitted")
 
@@ -389,6 +383,7 @@ func Run(
 	if err := respawnClaimedPane(ctx, tmux, request, run); err != nil {
 		return Result{}, fmt.Errorf("respawn pane: %w", err)
 	}
+	unmark(stderr)
 	if promptWarning != "" {
 		announcePane(ctx, request, tmux, stderr, "pfm chat reload: "+promptWarning)
 	}

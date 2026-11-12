@@ -60,7 +60,7 @@ func OpenRestoredID(ctx context.Context, id string, stdout, stderr io.Writer, ru
 	choice, err := placeChat(ctx, "restored", spawn.BackendAuto, "", false, &effective)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat open: restored backend: %v\n", err)
-		return 1
+		return spawn.FailureCode(err)
 	}
 	if choice.Backend != spawn.BackendHerdr {
 		// The open births where this placement said, without asking again.

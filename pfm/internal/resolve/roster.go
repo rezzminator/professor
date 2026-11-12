@@ -11,6 +11,15 @@ import (
 // SeatPrefix reserves exact durable-seat references, never names or raw panes.
 const SeatPrefix = naming.SeatPrefix
 
+// SeatHandle is a Herdr seat's handle at every door: its name, or for a seat with none the durable `seat:{id}`
+// that call and status resolve (a bare seat id or session id is no handle).
+func SeatHandle(name, seatID string) string {
+	if name != "" {
+		return name
+	}
+	return SeatPrefix + seatID
+}
+
 // RosterCandidate is one composed fleet row projected onto the fields needed
 // to resolve a human target name. Callers keep composition in their own layer;
 // this package owns the matching judgment shared by CLI and MCP.

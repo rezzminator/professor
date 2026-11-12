@@ -205,11 +205,7 @@ func (identifier *Whoami) identifyHerdr(ctx context.Context, claim herdrClaim) (
 		proved.HerdrWorkspace != identity.HerdrWorkspace {
 		return identity, fmt.Errorf("look up the caller: herdr caller pane changed during supervisor proof")
 	}
-	identity.SeatID, identity.Session = proved.SeatID, proved.Name
-	if identity.Session == "" {
-		// The durable handle call and status resolve; a bare seat id is no address.
-		identity.Session = SeatPrefix + proved.SeatID
-	}
+	identity.SeatID, identity.Session = proved.SeatID, SeatHandle(proved.Name, proved.SeatID)
 	identity.Engine, identity.ID = proved.Engine, proved.SessionID
 	return identity, nil
 }

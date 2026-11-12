@@ -108,14 +108,7 @@ func launchCache(runtime Runtime, sessionID string) (launch fleetdb.Launch, foun
 	if runtime.ConfigError != nil {
 		return fleetdb.Launch{}, false, sep + cBad + "💾⚠config" + reset
 	}
-	stateDB := runtime.getenv(paths.EnvStateDB)
-	if stateDB == "" {
-		stateDB = runtime.StateDB
-	}
-	if stateDB == "" {
-		stateDB = paths.DefaultStateDB(runtime.Home)
-	}
-	launches, err := fleetdb.OpenLaunches(context.Background(), paths.Values{StateDB: stateDB})
+	launches, err := fleetdb.OpenLaunches(context.Background(), paths.Values{StateDB: runtime.stateDB()})
 	if err == nil {
 		defer func() {
 			if closeErr := launches.Close(); closeErr != nil {

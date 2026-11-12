@@ -89,6 +89,7 @@ func (current *composer) herdrRows() []Row {
 			row.Project = current.projects.of(native.CWD)
 		}
 		row.Kind = SeatKindFor(row.Kind, seat.State)
+		row.Blocked = native.Blocked()
 		if native.Err != nil {
 			row.BackendError = native.Err.Error()
 		} else if seat.State == "live" && seat.SeatHostPID > 0 {

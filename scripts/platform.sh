@@ -60,6 +60,16 @@ platform_cpus() {
   fi
 }
 
+# platform_service_env NAME VALUE: NAME=VALUE in the environment of every service the owner's service
+# manager starts from now on (systemctl --user set-environment, else launchctl setenv). 127, silent,
+# with neither tool.
+platform_service_env() {
+  if command -v systemctl >/dev/null 2>&1; then systemctl --user set-environment "$1=$2"
+  elif command -v launchctl >/dev/null 2>&1; then launchctl setenv "$1" "$2"
+  else return 127
+  fi
+}
+
 # platform_in_fence [MARKER]: rc 0 on a machine a suite may run on and provisioning may write:
 # the development fence (PFM_DEV_FENCE=1 inside a container, MARKER, default /.dockerenv, present)
 # or a GitHub-hosted runner (GITHUB_ACTIONS=true, RUNNER_ENVIRONMENT=github-hosted), a throwaway

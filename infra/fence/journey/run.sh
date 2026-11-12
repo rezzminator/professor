@@ -4,6 +4,10 @@
 # systemd and no network, prepares the owner (prepare.sh) and runs the suite inside it as the owner.
 #   bash infra/fence/journey/run.sh [--keep] [go test flags…]     e.g. -run 'Journey/install/day/plain-pfm$'
 # Prints the go test output as it comes and ends with `RUN DIR: {path}`; exits with the suite's status.
+# Every run, green or red, is profiled and its coverage of pfm's source measured (pfm/journey's TestMain
+# writes steps.tsv, waits.tsv, summary.md and the coverage-* files into the artifacts, the raw counters in
+# covdata/): the artifacts land in {tree}/tmp/journey/{run id}, `latest` linking the newest; the last
+# KEEP_PROFILES runs stay there.
 # Every container, directory and artifact is named for this run, so two runs never collide. The
 # container goes on exit; the run dir goes on a pass, and stays on a failure or with --keep.
 # Kept across runs: the machine image (one: an older tag is removed when a new one is built) and the
@@ -26,10 +30,33 @@ PROJECT="$(basename "$(dirname "$common")")"
 RUN_DIR="/tmp/${PROJECT#.}/journey/$RUN_ID"
 NAME="pfm-journey-$RUN_ID"
 BOOT_SECS=90
+PROFILES="$ROOT/tmp/journey"
+KEEP_PROFILES=10
 fail() { echo "journey: FAIL $*" >&2; exit 1; }
 # stage prints how long the stage just finished took, from the previous mark.
 mark=$SECONDS
 stage() { echo "journey: $1 $((SECONDS - mark))s"; mark=$SECONDS; }
+
+# publish copies the run's artifacts into the tree's ignored tmp folder, links them as latest and
+# removes the profiles past the newest KEEP_PROFILES (run ids start with their UTC time, so they sort
+# by age). A step that fails prints its own line and leaves the run's status alone.
+publish() {
+  [ -n "$(ls -A "$RUN_DIR/artifacts" 2>/dev/null)" ] || return 0
+  if ! { mkdir -p "$PROFILES" && cp -R "$RUN_DIR/artifacts" "$PROFILES/$RUN_ID" && ln -sfn "$RUN_ID" "$PROFILES/latest"; }; then
+    echo "journey: warning: cleanup: cannot publish the artifacts into $PROFILES/$RUN_ID (above)" >&2
+    return 0
+  fi
+  if [ -f "$PROFILES/$RUN_ID/summary.md" ]; then
+    echo "journey: profile $PROFILES/$RUN_ID/summary.md"
+  else
+    echo "journey: profile $PROFILES/$RUN_ID holds no summary.md: the suite ended before its TestMain wrote one (above)"
+  fi
+  find "$PROFILES" -mindepth 1 -maxdepth 1 -type d -name '[0-9]*' | LC_ALL=C sort |
+    awk -v keep="$KEEP_PROFILES" '{ old[NR] = $0 } END { for (i = 1; i <= NR - keep; i++) print old[i] }' |
+    while IFS= read -r old; do
+      rm -rf "$old" || echo "journey: warning: cleanup: cannot remove the old profile $old (above)" >&2
+    done
+}
 
 # cleanup hands the artifacts the machine's owner wrote back to whoever runs this script, from inside the
 # machine as root (the owner's uid need not be the caller's, as on CI's runner), then removes what this
@@ -37,10 +64,24 @@ stage() { echo "journey: $1 $((SECONDS - mark))s"; mark=$SECONDS; }
 cleanup() {
   local rc=$?
   set +e
+  # The machine's pfm logs travel with its results: each home's log roots (pfm's paths.LogRoot: the clone
+  # its install recorded, the default clone once the uninstall took the record, and the state fallback)
+  # into logs/{user}/{clone|state}/.
+  if docker container inspect "$NAME" >/dev/null 2>&1 && ! docker exec -u 0 "$NAME" bash -c '
+    for home in /home/*; do
+      repo=$(cat "$home/.local/share/pfm/install/source-repo" 2>/dev/null) || repo="$home/.professor"
+      for pair in "clone:$repo/tmp/logs/pfm" "state:$home/.local/state/pfm/log"; do
+        to="/artifacts/logs/${home##*/}/${pair%%:*}"
+        [ ! -d "${pair#*:}" ] || { mkdir -p "$to" && cp -R "${pair#*:}/." "$to/"; } || exit 1
+      done
+    done'; then
+    echo "journey: warning: cleanup: cannot copy the machine's pfm logs into $RUN_DIR/artifacts/logs (above)" >&2
+  fi
   if docker container inspect "$NAME" >/dev/null 2>&1 &&
     ! docker exec -u 0 "$NAME" chown -R "$(id -u):$(id -g)" /artifacts; then
     echo "journey: warning: cleanup: cannot hand $RUN_DIR/artifacts back to uid $(id -u) (above)" >&2
   fi
+  publish
   docker rm -f "$NAME" "$NAME-fetch" >/dev/null 2>&1
   rm -rf "$RUN_DIR/image" || echo "journey: warning: cleanup: cannot remove $RUN_DIR/image (above)" >&2
   if [ "$rc" -eq 0 ] && [ "$KEEP" -eq 0 ] && ! rm -rf "$RUN_DIR"; then
@@ -108,7 +149,7 @@ done
 stage boot
 
 session=("${owner[@]}" -e XDG_RUNTIME_DIR=/run/user/1000 -e DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
-  -e PFM_DEV_FENCE=1 -e GOPROXY=off -w "$ROOT")
+  -e PFM_DEV_FENCE=1 -e GOPROXY=off -e GOCOVERDIR=/artifacts/covdata -w "$ROOT")
 
 # 4. The owner's machine: fake engines, Herdr, the snapshot INSTALL.md clones.
 docker exec "${session[@]}" "$NAME" \

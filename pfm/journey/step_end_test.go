@@ -9,8 +9,8 @@ import (
 	"github.com/rezzminator/professor/pfm/journey/harness"
 )
 
-// end: the owner types /exit in the branch's chat; Herdr shows pfm's picker again, and no live chat, seat,
-// or engine process of that chat is left.
+// end: the owner types /exit in the branch's chat; Herdr shows pfm's picker again in a fresh tab, no mark
+// of the chat on it, and no live chat, seat, or engine process of that chat is left.
 func end(c *harness.Ctx, s State) State {
 	term := c.Terminal(s.Term)
 	term.Type("/exit\r")
@@ -26,6 +26,7 @@ func end(c *harness.Ctx, s State) State {
 			seen := fmt.Sprintf("chats %v, seats %v, engine %q", rows, seats, engine)
 			return len(rows) == 0 && len(seats) == 0 && engine == "", seen
 		})
+	chatTabGone(c, s)
 	fleetConsistent(c, s)
 	return s
 }

@@ -30,22 +30,14 @@ type codexNativeHook struct {
 // codexHookRPC models native trust using the account's real hook source and
 // persisted config. A handler edit invalidates its fingerprint across processes.
 func codexHookRPC(proc *process, method string, params json.RawMessage) (any, error) {
-	home := proc.env("CODEX_HOME")
-	if home == "" {
-		home = filepath.Join(proc.env("HOME"), ".codex")
-	}
-	home, err := filepath.EvalSymlinks(home)
+	home, err := filepath.EvalSymlinks(codexHomeDir(proc))
 	if err != nil {
 		return nil, fmt.Errorf("resolve Codex home: %w", err)
 	}
 	configPath := filepath.Join(home, "config.toml")
-	raw, err := os.ReadFile(configPath)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("read native hook state: %w", err)
-	}
-	config := map[string]any{}
-	if _, err := toml.Decode(string(raw), &config); err != nil {
-		return nil, fmt.Errorf("parse native hook state: %w", err)
+	raw, config, err := readCodexHookState(home)
+	if err != nil {
+		return nil, err
 	}
 	hooks, err := codexNativeHooks(home, config)
 	if err != nil {

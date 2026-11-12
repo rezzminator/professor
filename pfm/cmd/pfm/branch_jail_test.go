@@ -245,21 +245,37 @@ func waitForFile(t *testing.T, path string, within time.Duration) ([]byte, error
 	}
 }
 
-// A fork is born detached on its own tmux server whatever chat.backend says,
-// never placed: its lineage, launch record and session-id wait all bind to
-// that socket, and a Herdr birth has no fork session id to record.
+// With no Herdr server running a fork is born detached on its own tmux
+// server, whoever asks; Herdr asked for in config is refused, never tmux.
 func TestChatBranchBirthsDetachedTmux(t *testing.T) {
-	for _, tc := range []struct{ name, backend string }{
-		{name: "default"},
-		{name: "configured Herdr outside Herdr", backend: "herdr"},
+	for _, tc := range []struct {
+		name, backend, herdrPane string
+		code                     int
+		placed, stderr           string
+	}{
+		{name: "default", placed: "cli.branch=tmux"},
+		{
+			name: "configured Herdr, Herdr down", backend: "herdr", code: 10, placed: "cli.branch=",
+			stderr: "pfm chat branch: host refused at cli.branch: herdr backend asked for, but no Herdr server " +
+				"runs at SOCKET: stat SOCKET: no such file or directory\n",
+		},
+		{name: "configured tmux", backend: "tmux", placed: "cli.branch=tmux"},
+		// A Herdr pane claim no live pane proves is no Herdr caller: the server read decides.
+		{name: "Herdr claim no pane proves", herdrPane: "w6:p3", placed: "cli.branch=tmux"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := exec.LookPath("tmux"); err != nil {
 				t.Skip("tmux is not installed")
 			}
-			for _, name := range []string{"HERDR_ENV", "HERDR_SOCKET_PATH", "HERDR_PANE_ID", "TMUX"} {
+			for _, name := range []string{
+				"HERDR_ENV", "HERDR_SOCKET_PATH", "HERDR_PANE_ID", "TMUX",
+				"CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID",
+			} {
 				t.Setenv(name, "")
 			}
+			t.Setenv("HERDR_PANE_ID", tc.herdrPane)
+			herdrSocket := filepath.Join(testjail.ShortRoot(t), "absent.sock")
+			t.Setenv("HERDR_SOCKET_PATH", herdrSocket)
 			jail := newBranchInheritJail(t)
 			const parentID = "a1000000-1111-4111-8111-111111111112"
 			const branchSocket = "probe-branch-placement"
@@ -304,9 +320,10 @@ func TestChatBranchBirthsDetachedTmux(t *testing.T) {
 					placed = append(placed, fmt.Sprint(door, "=", chosen))
 				}
 			}
-			if code != 0 || len(placed) != 0 {
-				t.Fatalf("rc=%d placements=%v stdout=%q stderr=%q; want rc 0 and no placement",
-					code, placed, stdout, stderr)
+			wantStderr := strings.ReplaceAll(tc.stderr, "SOCKET", herdrSocket)
+			if code != tc.code || strings.Join(placed, " ") != tc.placed || tc.code != 0 && stderr != wantStderr {
+				t.Fatalf("rc=%d placements=%v stdout=%q stderr=%q; want rc %d, placement %q, stderr %q",
+					code, placed, stdout, stderr, tc.code, tc.placed, wantStderr)
 			}
 		})
 	}

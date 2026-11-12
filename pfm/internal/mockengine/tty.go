@@ -20,7 +20,8 @@ const (
 	keyBackspace
 	// keyStash is C-s, which pfm's reload sends to park a real draft before
 	// typing /exit (internal/reload/exit_render.go stashDraft). Like Claude
-	// Code's, it toggles: an empty composer gets the pending stash back.
+	// Code's, it toggles: an empty composer gets the pending stash back, and so
+	// does the next submit.
 	keyStash
 )
 
@@ -121,10 +122,14 @@ func (draft *composer) apply(event keyEvent) {
 
 func (draft *composer) text() string { return string(draft.draft) }
 
-// take returns the draft and clears it; an empty draft returns "".
+// take returns the draft and clears it; an empty draft returns "". Like Claude Code's, a submit
+// gives the composer the pending stash back.
 func (draft *composer) take() string {
 	line := strings.TrimSpace(string(draft.draft))
 	draft.draft = nil
+	if line != "" && draft.stashed != "" {
+		draft.draft, draft.stashed = []rune(draft.stashed), ""
+	}
 	return line
 }
 

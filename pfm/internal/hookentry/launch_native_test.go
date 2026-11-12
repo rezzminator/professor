@@ -41,8 +41,11 @@ func TestLaunchNativeBackendRefusal(t *testing.T) {
 		config.Runtime{},
 		env,
 	)
-	if rc != 1 || !strings.Contains(stderr.String(), "herdr backend needs a caller in a Herdr pane") {
-		t.Fatalf("explicit native backend = %d %q", rc, &stderr)
+	dead := filepath.Join(root, "dead.sock")
+	want := "pfm internal launch: host refused at hook.launch: herdr backend asked for, but no Herdr server runs at " +
+		dead + ": stat " + dead + ": no such file or directory\n"
+	if rc != 10 || stderr.String() != want {
+		t.Fatalf("explicit native backend = %d %q, want 10 %q", rc, &stderr, want)
 	}
 	if stdout.Len() != 0 {
 		t.Fatalf("refusal emitted a birth: %s", &stdout)

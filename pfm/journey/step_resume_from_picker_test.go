@@ -24,11 +24,11 @@ func resumeFromPicker(c *harness.Ctx, s State) State {
 	term.WaitScreen("the picker narrowed to "+token, stepBound, func(screen string) bool {
 		return strings.Contains(screen, "find › "+token)
 	})
-	if !strings.HasPrefix(selectedRow(term.Screen()), "↻ "+token) {
+	if !rowIs(selectedRow(term.Screen()), "↻ ", token) {
 		term.Press(harness.Down)
 	}
 	term.WaitScreen("the ended chat "+token+" selected", stepBound, func(screen string) bool {
-		return strings.HasPrefix(selectedRow(screen), "↻ "+token)
+		return rowIs(selectedRow(screen), "↻ ", token)
 	})
 	term.Press(harness.Enter)
 	// The resume wizard opens in the row on the chat's last cache, its one account taking no step.
@@ -73,6 +73,21 @@ func selectedRow(screen string) string {
 		}
 	}
 	return ""
+}
+
+// rowIs reports whether a picker row is the chat's: after its mark the row prints the chat's name whole or,
+// where the pane leaves the name fewer cells than it has, its start closed by "…" (a selected row gives part
+// of its name's cells to the open badge, and the engines listed that day set how many are left).
+func rowIs(row, mark, name string) bool {
+	rest, marked := strings.CutPrefix(row, mark)
+	if !marked {
+		return false
+	}
+	shown, _, _ := strings.Cut(rest, " ")
+	if stem, cut := strings.CutSuffix(shown, "…"); cut {
+		return len(stem) >= len(name)/2 && strings.HasPrefix(name, stem)
+	}
+	return shown == name
 }
 
 // rowName is the name `pfm ls --tsv` gives session's row, "" when it lists none.

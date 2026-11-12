@@ -14,7 +14,7 @@ import (
 
 func readSubagentTrace(t *testing.T, home string) ([]subagentTraceRecord, string) {
 	t.Helper()
-	raw, err := os.ReadFile(paths.SubagentStatuslineTrace(home))
+	raw, err := os.ReadFile(paths.LogRoot(paths.OSEnv{}, home).SubagentStatuslineTrace())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,8 @@ func TestSubagentTraceIsOptInAndDoesNotChangeRows(t *testing.T) {
 	if code := ServeSubagents(strings.NewReader(payload), &baseline, &bytes.Buffer{}, machine, noEnv, ""); code != 0 {
 		t.Fatalf("disabled trace exit = %d", code)
 	}
-	if _, err := os.Stat(filepath.Dir(paths.SubagentStatuslineTrace(machine.Home))); !os.IsNotExist(err) {
+	trace := paths.LogRoot(paths.OSEnv{}, machine.Home).SubagentStatuslineTrace()
+	if _, err := os.Stat(filepath.Dir(trace)); !os.IsNotExist(err) {
 		t.Fatalf("disabled trace touched the log directory: %v", err)
 	}
 	for range 2 {
@@ -103,7 +104,7 @@ func TestSubagentTraceRecordsFaultsWithoutCopyingInput(t *testing.T) {
 
 func TestSubagentTraceRotatesAndBoundsEachRecord(t *testing.T) {
 	machine := paths.Values{Home: t.TempDir(), SIDDir: t.TempDir()}
-	path := paths.SubagentStatuslineTrace(machine.Home)
+	path := paths.LogRoot(paths.OSEnv{}, machine.Home).SubagentStatuslineTrace()
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -114,13 +115,27 @@ func TestSubagentTraceRotatesAndBoundsEachRecord(t *testing.T) {
 	env := &paths.MapEnv{Values: map[string]string{claudelaunch.EnvSubagentStatuslineTrace: "1"}}
 	payload := `{"tasks":[{"id":"a","model":"` + strings.Repeat("m", capBytes+1) + `"}]}`
 	ServeSubagents(strings.NewReader(payload), &bytes.Buffer{}, &bytes.Buffer{}, machine, env, "")
-	for _, generation := range []string{path, path + ".1"} {
+	// The record that carried the full segment past its size closes it: the
+	// closed segment holds the planted bytes plus that record, the rest is current.
+	segments, err := filepath.Glob(filepath.Join(strings.TrimSuffix(path, ".jsonl")+".segments", "*.jsonl"))
+	if err != nil || len(segments) != 1 {
+		t.Fatalf("closed trace segments = %v (err %v), want one", segments, err)
+	}
+	for _, generation := range append(segments, path) {
 		info, err := os.Stat(generation)
-		if err != nil || info.Size() > capBytes || info.Mode().Perm() != 0o600 {
+		if err != nil || info.Size() > capBytes+4096 || info.Mode().Perm() != 0o600 {
 			t.Fatalf("trace generation escaped its size/privacy cap: %s info=%v err=%v", generation, info, err)
 		}
 	}
-	_, raw := readSubagentTrace(t, machine.Home)
+	closed, err := os.ReadFile(segments[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := string(closed[capBytes:]) + string(current)
 	if len(raw) > 4096 || !strings.Contains(raw, strings.Repeat("m", 128)+"...") {
 		t.Fatalf("one input field escaped its record bound: trace bytes=%d", len(raw))
 	}

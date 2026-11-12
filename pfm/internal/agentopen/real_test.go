@@ -338,3 +338,17 @@ func TestSocketForPIDErrorsWhenTmuxCouldNotRun(t *testing.T) {
 		t.Fatalf("SocketForPID() socket = %q, want empty on a tmux-could-not-run error", socket)
 	}
 }
+
+// A tmux-resident chat is never attached inside a Herdr pane: the refusal
+// comes before tmux runs at all.
+func TestRealTmuxAttachRefusesInHerdr(t *testing.T) {
+	ctx, recorder := obs.Test(t)
+	t.Setenv("HERDR_PANE_ID", "w1:p2")
+	tmux := RealTmux{Binary: fakeAgentopenTmuxBinary(t, 4242), Dir: t.TempDir()}
+	err := tmux.Attach(ctx, "cc-1-1-1")
+	want := "host refused at agent open: this terminal is Herdr pane w1:p2, where a tmux client is never attached; " +
+		"open the chat from a plain terminal"
+	if err == nil || err.Error() != want || len(recorder.Records()) != 0 {
+		t.Fatalf("attach = %v, tmux records %s; want %q and no tmux run", err, recorder.Raw(), want)
+	}
+}

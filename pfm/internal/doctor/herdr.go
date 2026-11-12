@@ -6,18 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
-
-	"github.com/BurntSushi/toml"
 
 	"github.com/rezzminator/professor/pfm/internal/chat"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
-	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 )
@@ -42,19 +37,20 @@ func printSelectedHerdrBackendDoctor(
 		if err == nil {
 			caller, err = identifier.Identify(ctx)
 		}
-		choice, placeErr := spawn.Place(ctx, "doctor", spawn.BackendAuto, "", false, caller, err)
+		server := spawn.HerdrServerFrom(dependencies.Env)
+		choice, placeErr := spawn.Place(ctx, "doctor", spawn.BackendAuto, "", false, caller, err, server)
 		if placeErr != nil {
 			fmt.Fprintf(stdout, "doctor: herdr backend UNRESOLVED — %v\n", placeErr)
 			return 0, 1
 		}
 		backend = choice.Backend
-		backendReason = "resolves to tmux here: no proven Herdr caller"
+		backendReason = "resolves to tmux here: no Herdr server runs at " + server.Socket
 		if backend == spawn.BackendHerdr {
 			fmt.Fprintf(
 				stdout,
-				"doctor: herdr backend CHECKING — chat.backend=auto (%s) resolved to Herdr from the proven caller; "+
+				"doctor: herdr backend CHECKING — chat.backend=auto (%s) resolved to Herdr at %s; "+
 					"a new chat is born in its place's workspace\n",
-				cfg.Source("chat.backend"),
+				cfg.Source("chat.backend"), choice.HerdrSocket,
 			)
 		}
 	}
@@ -108,7 +104,7 @@ func printHerdrBackendDoctor(
 			pong.Version,
 		)
 	}
-	resume, err := herdrDoctorRestoreConfig(dependencies.Env)
+	resume, err := herdr.ResumeOnRestore(dependencies.Env)
 	switch {
 	case err != nil:
 		warnings++
@@ -166,47 +162,4 @@ func herdrDoctorSocket(ctx context.Context, dependencies Dependencies) (string, 
 		return "", fmt.Errorf("herdr status --json: no running server endpoint reported")
 	}
 	return status.Server.Socket, nil
-}
-
-// herdrDoctorRestoreConfig reads the on-disk Herdr config: whether native
-// agent resume is on.
-func herdrDoctorRestoreConfig(env paths.Env) (resume bool, err error) {
-	path := env.Get("HERDR_CONFIG_PATH")
-	if path == "" {
-		directory := env.Get("XDG_CONFIG_HOME")
-		if directory == "" {
-			home, err := paths.HomeFrom(env)
-			if err != nil {
-				return false, fmt.Errorf("resolve Herdr config home: %w", err)
-			}
-			directory = filepath.Join(home, ".config")
-		}
-		debugPath := filepath.Join(directory, "herdr-dev", "config.toml")
-		if _, err := os.Stat(debugPath); err == nil {
-			return false, fmt.Errorf(
-				"debug Herdr config exists at %s; set HERDR_CONFIG_PATH to identify the server's config",
-				debugPath,
-			)
-		} else if !errors.Is(err, os.ErrNotExist) {
-			return false, fmt.Errorf("inspect debug Herdr config %s: %w", debugPath, err)
-		}
-		path = filepath.Join(directory, "herdr", "config.toml")
-	}
-	content, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return true, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("read %s: %w", path, err)
-	}
-	var config struct {
-		Session struct {
-			ResumeAgentsOnRestore *bool `toml:"resume_agents_on_restore"`
-		} `toml:"session"`
-	}
-	if _, err := toml.Decode(strings.TrimPrefix(string(content), "\uFEFF"), &config); err != nil {
-		return false, fmt.Errorf("parse %s: %w", path, err)
-	}
-	resume = config.Session.ResumeAgentsOnRestore == nil || *config.Session.ResumeAgentsOnRestore
-	return resume, nil
 }

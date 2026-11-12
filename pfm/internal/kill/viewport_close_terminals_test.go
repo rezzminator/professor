@@ -2,31 +2,57 @@ package kill
 
 import (
 	"context"
-	"os"
-	"os/exec"
+	"errors"
+	"fmt"
 	"reflect"
 	"strconv"
+	"strings"
 	"syscall"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/gather/gathertest"
 )
 
-// This file pins CloseTerminals — the second viewport shape (viewport.go) —
-// plus the real tmux seam it reads its clients through.
+// This file pins CloseTerminals — the second viewport shape (viewport.go);
+// its real tmux seam is pinned in tmux_test.go.
 
 const viewportUID = 501
 
-type fakeClientLister struct {
-	pids    []int
-	skipped []string
-	err     error
+// fakeViewportTmux lists a client per pid, named /dev/pts/{pid}, and records
+// each detach in events. A detached client exits (leaves table) unless stays
+// is set; detachErr refuses the detach.
+type fakeViewportTmux struct {
+	pids      []int
+	skipped   []string
+	err       error
+	table     *gathertest.Table
+	events    *[]string
+	stays     bool
+	detachErr error
 }
 
-func (lister fakeClientLister) ClientPIDs(context.Context, string) ([]int, []string, error) {
-	return lister.pids, lister.skipped, lister.err
+func (tmux fakeViewportTmux) Clients(context.Context, string) ([]Client, []string, error) {
+	var clients []Client
+	for _, pid := range tmux.pids {
+		clients = append(clients, Client{PID: pid, Name: fmt.Sprintf("/dev/pts/%d", pid)})
+	}
+	return clients, tmux.skipped, tmux.err
+}
+
+func (tmux fakeViewportTmux) DetachClient(_ context.Context, _, name string) error {
+	*tmux.events = append(*tmux.events, "detach "+name)
+	if tmux.detachErr != nil {
+		return tmux.detachErr
+	}
+	if !tmux.stays {
+		pid, err := strconv.Atoi(strings.TrimPrefix(name, "/dev/pts/"))
+		if err != nil {
+			return err
+		}
+		delete(tmux.table.Processes, pid)
+	}
+	return nil
 }
 
 // rereadTable runs onReread when a pid's Stat is read a second time: the
@@ -66,6 +92,9 @@ func TestCloseTerminals(t *testing.T) {
 		onReread    func(table *gathertest.Table, pid int)
 		onOpen      func(table *gathertest.Table, pid int)
 		signalErr   error
+		stays       bool
+		detachErr   error
+		wantEvents  []string
 		wantClosed  []int
 		wantSent    []gathertest.Sent
 		wantSkipped []string
@@ -82,6 +111,7 @@ func TestCloseTerminals(t *testing.T) {
 			},
 			wantClosed: []int{200},
 			wantSent:   []gathertest.Sent{{PID: 200, Sig: syscall.SIGHUP}},
+			wantEvents: []string{"detach /dev/pts/100", "hang up 200"},
 		},
 		{
 			name:    "skips a parent at pid 1 or below — no terminal shell to close",
@@ -145,6 +175,7 @@ func TestCloseTerminals(t *testing.T) {
 			},
 			wantClosed: []int{500},
 			wantSent:   []gathertest.Sent{{PID: 500, Sig: syscall.SIGHUP}},
+			wantEvents: []string{"detach /dev/pts/104", "detach /dev/pts/105", "hang up 500"},
 		},
 		{
 			name:        "a client the process table cannot read is named, not silent",
@@ -186,6 +217,7 @@ func TestCloseTerminals(t *testing.T) {
 				table.Processes[pid].Start = 2999
 			},
 			wantSkipped: []string{"client 100: shell 200 ended before the hang-up"},
+			wantEvents:  []string{"detach /dev/pts/100"},
 		},
 		{
 			name:    "a shell that became another program before the hang-up is never signalled",
@@ -199,6 +231,7 @@ func TestCloseTerminals(t *testing.T) {
 				table.Processes[pid].Exe = "/usr/bin/vim"
 			},
 			wantSkipped: []string{"client 100: shell 200 changed before the hang-up; left alone"},
+			wantEvents:  []string{"detach /dev/pts/100"},
 		},
 		{
 			name:    "another user's shell is never signalled",
@@ -208,6 +241,7 @@ func TestCloseTerminals(t *testing.T) {
 				200: {Start: 2000, UID: 0, ParentPID: 1, Argv: []string{"-zsh"}, Exe: "/bin/zsh"},
 			},
 			wantSkipped: []string{"client 100: hang up shell 200: pid 200: signal refused: runs as uid 0, not 501"},
+			wantEvents:  []string{"detach /dev/pts/100"},
 		},
 		{
 			name:    "a signal error is named, not silent, and never counted as closed",
@@ -218,6 +252,39 @@ func TestCloseTerminals(t *testing.T) {
 			},
 			signalErr:   syscall.EPERM,
 			wantSkipped: []string{"client 108: hang up shell 700: send hangup to pid 700: operation not permitted"},
+			wantEvents:  []string{"detach /dev/pts/108", "hang up 700"},
+		},
+		{
+			// The client restores the screen it drew on only while its tty
+			// lives: it is detached and waited out before its shell hangs up.
+			name:    "a client still running at the bound is named, and its shell still hung up",
+			clients: []int{100},
+			processes: map[int]*gathertest.Process{
+				100: tmuxClient(200),
+				200: shellProcess("/bin/zsh", "-zsh"),
+			},
+			stays:      true,
+			wantEvents: []string{"detach /dev/pts/100", "hang up 200"},
+			wantClosed: []int{200},
+			wantSent:   []gathertest.Sent{{PID: 200, Sig: syscall.SIGHUP}},
+			wantSkipped: []string{
+				"client 100's screen: still running 2s after its detach; its shell was hung up without it restored",
+			},
+		},
+		{
+			name:    "a client tmux will not detach is named, and its shell still hung up",
+			clients: []int{100},
+			processes: map[int]*gathertest.Process{
+				100: tmuxClient(200),
+				200: shellProcess("/bin/zsh", "-zsh"),
+			},
+			detachErr:  errors.New("can't find client"),
+			wantEvents: []string{"detach /dev/pts/100", "hang up 200"},
+			wantClosed: []int{200},
+			wantSent:   []gathertest.Sent{{PID: 200, Sig: syscall.SIGHUP}},
+			wantSkipped: []string{
+				"client 100's screen: can't find client; its shell was hung up without it restored",
+			},
 		},
 		{
 			name:        "no attached client skips with a named reason",
@@ -235,6 +302,7 @@ func TestCloseTerminals(t *testing.T) {
 			if table.Processes == nil {
 				table.Processes = map[int]*gathertest.Process{}
 			}
+			var events []string
 			kernel := &gathertest.Kernel{
 				OnOpen: func(pid int) error {
 					if test.onOpen != nil {
@@ -242,7 +310,10 @@ func TestCloseTerminals(t *testing.T) {
 					}
 					return nil
 				},
-				OnSignal: func(int, syscall.Signal) error { return test.signalErr },
+				OnSignal: func(pid int, _ syscall.Signal) error {
+					events = append(events, fmt.Sprintf("hang up %d", pid))
+					return test.signalErr
+				},
 			}
 			self := test.self
 			if self == 0 {
@@ -250,11 +321,17 @@ func TestCloseTerminals(t *testing.T) {
 			}
 			procs := rereadTable{Table: table, reads: map[int]int{}, onReread: test.onReread}
 			closed, skipped, err := CloseTerminals(context.Background(), "socket", ViewportDeps{
-				Tmux: fakeClientLister{pids: test.clients, skipped: test.unread},
+				Tmux: fakeViewportTmux{
+					pids: test.clients, skipped: test.unread, table: table, events: &events,
+					stays: test.stays, detachErr: test.detachErr,
+				},
 				Door: gathertest.Door(procs, kernel, viewportUID, self),
 			})
 			if err != nil {
 				t.Fatalf("CloseTerminals error = %v", err)
+			}
+			if !reflect.DeepEqual(events, test.wantEvents) {
+				t.Fatalf("detaches and hang-ups in order = %q, want %q", events, test.wantEvents)
 			}
 			if !reflect.DeepEqual(closed, test.wantClosed) {
 				t.Fatalf("closed = %v, want %v", closed, test.wantClosed)
@@ -271,7 +348,7 @@ func TestCloseTerminals(t *testing.T) {
 
 func TestCloseTerminalsRequiresAllThreeSeams(t *testing.T) {
 	full := ViewportDeps{
-		Tmux: fakeClientLister{},
+		Tmux: fakeViewportTmux{},
 		Door: gathertest.Door(&gathertest.Table{}, &gathertest.Kernel{}, viewportUID, 99999),
 	}
 	noProcs, noKernel := full.Door, full.Door
@@ -294,78 +371,5 @@ func TestCloseTerminalsRequiresAllThreeSeams(t *testing.T) {
 				t.Fatalf("closed=%v skipped=%v, want both nil alongside the error", closed, skipped)
 			}
 		})
-	}
-}
-
-func TestParseClientPIDsSkipsOnlyTheUnreadableLine(t *testing.T) {
-	pids, skipped := parseClientPIDs("101\nnot-a-pid\n\n102\n")
-	if !reflect.DeepEqual(pids, []int{101, 102}) {
-		t.Fatalf("pids = %v, want [101 102]", pids)
-	}
-	want := []string{`client pid "not-a-pid" unreadable: strconv.Atoi: parsing "not-a-pid": invalid syntax`}
-	if !reflect.DeepEqual(skipped, want) {
-		t.Fatalf("skipped = %#v, want %#v", skipped, want)
-	}
-}
-
-// TestCommandTmuxClientPIDsRealServer pins the real `tmux list-clients`
-// parse: no client attached reports an empty slice with no error, and a real
-// attached client reports its own live pid.
-func TestCommandTmuxClientPIDsRealServer(t *testing.T) {
-	jail := newKillTmuxJail(t)
-	ctx := context.Background()
-	socket := "cc-viewport-clients"
-	if output, err := jail.command(
-		"-f", "/dev/null", "-L", socket, "new-session", "-d", "-s", "s1", "sleep 30",
-	).CombinedOutput(); err != nil {
-		t.Fatalf("new-session: %v: %s", err, output)
-	}
-	jail.sockets = append(jail.sockets, socket)
-	socketPath := jail.tmuxDir + "/" + socket
-
-	pids, _, err := (TmuxKiller{}).ClientPIDs(ctx, socketPath)
-	if err != nil {
-		t.Fatalf("ClientPIDs before attach: %v", err)
-	}
-	if len(pids) != 0 {
-		t.Fatalf("ClientPIDs before attach = %v, want empty", pids)
-	}
-
-	// A control-mode client (`tmux -C attach-session`) counts as an
-	// attached client without needing a real pty. Its stdin is a pipe this
-	// test holds open for the process's whole life — closing the write end
-	// is what lets it see EOF and exit during cleanup.
-	stdinRead, stdinWrite, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	attach := jail.command("-L", socket, "-C", "attach-session", "-t", "s1")
-	attach.Stdin = stdinRead
-	if err := attach.Start(); err != nil {
-		t.Fatalf("start control client: %v", err)
-	}
-	_ = stdinRead.Close()
-	t.Cleanup(func() {
-		_ = stdinWrite.Close()
-		_ = attach.Process.Kill()
-		_, _ = attach.Process.Wait()
-	})
-
-	var pidsAfter []int
-	for attempt := 0; attempt < 50; attempt++ {
-		pidsAfter, _, err = (TmuxKiller{}).ClientPIDs(ctx, socketPath)
-		if err != nil {
-			t.Fatalf("ClientPIDs after attach: %v", err)
-		}
-		if len(pidsAfter) == 1 {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	if len(pidsAfter) != 1 {
-		t.Fatalf("ClientPIDs after attach = %v, want exactly one client pid", pidsAfter)
-	}
-	if err := exec.Command("kill", "-0", strconv.Itoa(pidsAfter[0])).Run(); err != nil {
-		t.Fatalf("reported client pid %d is not a live process: %v", pidsAfter[0], err)
 	}
 }

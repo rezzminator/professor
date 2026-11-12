@@ -9,6 +9,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // herdrBirthGrace bounds a native birth between its reservation and the pane
@@ -46,6 +47,38 @@ func herdrBirthPending(seat fleetdb.Seat) bool {
 	return seat.HerdrPane == "" && clock.Real.Now().Sub(time.Unix(seat.UpdatedAt, 0)) < herdrBirthGrace
 }
 
+// herdrReservationErr judges a seat with no saved supervisor that Herdr lists no pane for: a reservation that
+// names no pane yet is mid-birth inside its birth window (errHerdrSeatUnbound) and a failed birth past it
+// (errHerdrBirthFailed); nil for a seat that once named a pane, which its pane's absence judges.
+func herdrReservationErr(seat fleetdb.Seat) error {
+	switch {
+	case seat.HerdrPane != "":
+		return nil
+	case herdrBirthPending(seat):
+		return fmt.Errorf("seat %s %w", seat.SeatID, errHerdrSeatUnbound)
+	}
+	return fmt.Errorf("seat %s %w", seat.SeatID, errHerdrBirthFailed)
+}
+
+// retireFailedHerdrBirth retires a reservation that named no pane within its birth window as the failed birth
+// it is, the state a seat-host writes for its own failed birth, through UpdateSeat's compare-and-set on the
+// row the proof read, and logs one WARN naming the seat. A read-only listing, or a seat whose end or reload is
+// in flight, leaves the row as it is; a refused write is the listing's error.
+func retireFailedHerdrBirth(ctx context.Context, db *fleetdb.Store, seat fleetdb.Seat, readOnly bool) error {
+	if readOnly || seat.State != herdrSeatLive || seat.EndPending || seat.ReloadPending {
+		return nil
+	}
+	before := seat
+	seat.State = "failed"
+	seat.LostNote = "retired by pfm scan: birth failed: no pane within the " + herdrBirthGrace.String() + " birth window"
+	if err := db.UpdateSeat(ctx, before, seat); err != nil {
+		return fmt.Errorf("HERDR ERROR %s: retire failed birth of seat %s: %w", seat.HerdrSocket, seat.SeatID, err)
+	}
+	obs.Logger(ctx).Warn("gather.herdr.birth_failed", obs.FieldSeat, seat.SeatID, "socket", seat.HerdrSocket,
+		"note", seat.LostNote)
+	return nil
+}
+
 // herdrSupervisorUnproved is a seat whose pane runs no seat-host of it: errHerdrSeatUnbound, a birth whose
 // seat-host has not started yet, while the row changed inside the birth window; past it, a listing failure,
 // since a chat whose supervisor is gone from its pane is never hidden as "not a chat yet".
@@ -64,6 +97,9 @@ var errHerdrSeatGone = errors.New("ownership changed or disappeared")
 // errHerdrSeatUnbound: a Herdr chat mid-birth — a reservation that names no pane
 // yet, or whose pane shell runs no `pfm internal seat-host` yet.
 var errHerdrSeatUnbound = errors.New("supervisor ownership unproved")
+
+// errHerdrBirthFailed: a reservation that named no pane within its birth window, a birth that never finished.
+var errHerdrBirthFailed = errors.New("birth failed: no pane within the birth window")
 
 // errHerdrPaneAbsent: Herdr lists no pane holding the seat's pane or terminal.
 var errHerdrPaneAbsent = errors.New("terminal not present in pane.list")

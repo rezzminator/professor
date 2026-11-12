@@ -32,7 +32,7 @@ var (
 	// herdrNotRunning matches the texts `herdr server reload-config` prints when no server is up.
 	herdrNotRunning = []string{
 		"not running", "no server", "no running", "connection refused", "no such file", "could not connect",
-		"couldn't connect", "failed to connect",
+		"couldn't connect", "failed to connect", "server_not_running",
 	}
 )
 

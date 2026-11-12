@@ -3,8 +3,11 @@
 package journey
 
 import (
+	"encoding/json"
 	"fmt"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,8 +17,22 @@ import (
 // meshPeer is herdr-mesh's second plain terminal, where the owner starts a chat outside Herdr.
 const meshPeer = "mesh-peer"
 
-// callAcross: in a second plain terminal the owner starts a Claude chat with `pfm chat new --engine cc`, outside Herdr,
-// and attaches the tmux session it prints. From the branch's Herdr chat he has the chat call it
+// peerNew: in a second plain terminal the owner starts a Claude chat with `pfm chat new --engine cc`,
+// outside Herdr; callAcross reads what it printed.
+func peerNew(c *harness.Ctx, s *State) {
+	peerTerm := c.Terminal(meshPeer)
+	peerTerm.WaitFor(prompt)
+	s.Mesh.PeerName = c.Unique("peer")
+	peerTerm.Type("cd $HOME/work/demo && pfm chat new --engine cc --name " + s.Mesh.PeerName + "\r")
+	c.Cleanup(func() {
+		if r := c.Read("pfm", "chat", "end", s.Mesh.PeerName); r.Code != 0 {
+			c.Logf("teardown: pfm chat end %s exited %d: %s%s", s.Mesh.PeerName, r.Code, r.Stderr, r.Stdout)
+		}
+	})
+}
+
+// callAcross: the owner reads the lines `pfm chat new` printed in his second plain terminal (peerNew)
+// and attaches the tmux session they name. From the branch's Herdr chat he has the chat call it
 // through pfm's MCP with a message that makes it, once a file he holds is gone, call back and answer.
 // pfm types the call into the peer's own tmux pane on its own socket (escape chat-mesh/call-from-cli,
 // to-tmux, delivered once to its actual pane), signed with the caller's session and its reply address
@@ -23,9 +40,6 @@ const meshPeer = "mesh-peer"
 // own Herdr pane, both replies paint, and each transcript grows by exactly those records.
 func callAcross(c *harness.Ctx, s State) State {
 	term, owner, peerTerm := c.Terminal(s.Term), c.Terminal(meshOwner), c.Terminal(meshPeer)
-	peerTerm.WaitFor(prompt)
-	s.Mesh.PeerName = c.Unique("peer")
-	peerTerm.Type("cd $HOME/work/demo && pfm chat new --engine cc --name " + s.Mesh.PeerName + "\r")
 	var attach string
 	peerTerm.WaitScreen("pfm chat new's lines for "+s.Mesh.PeerName, 30*time.Second, func(screen string) bool {
 		lines := strings.Split(screen, "\n")
@@ -37,11 +51,6 @@ func callAcross(c *harness.Ctx, s State) State {
 			}
 		}
 		return false
-	})
-	c.Cleanup(func() {
-		if r := c.Read("pfm", "chat", "end", s.Mesh.PeerName); r.Code != 0 {
-			c.Logf("teardown: pfm chat end %s exited %d: %s%s", s.Mesh.PeerName, r.Code, r.Stderr, r.Stdout)
-		}
 	})
 	if want := "attach: tmux -L " + s.Mesh.PeerSock + " attach -t " + s.Mesh.PeerSock; attach != want {
 		c.Failf("pfm chat new %s printed %q under its row, want %q", s.Mesh.PeerName, attach, want)
@@ -85,7 +94,7 @@ func callAcross(c *harness.Ctx, s State) State {
 	})
 	term.Press(harness.Ctrl('b'), harness.Key("n"))
 	term.WaitScreen("the chat's tab", 20*time.Second, func(screen string) bool {
-		return strings.Contains(screen, "spawn a child")
+		return strings.Contains(screen, "⏺ "+s.Mesh.Mark)
 	})
 	parentBefore := entries(c, s.Name)
 	term.Type(callAsk + "\r")
@@ -116,6 +125,7 @@ func callAcross(c *harness.Ctx, s State) State {
 		c.Failf("rm %s exited %d: %s", hold, r.Code, r.Stderr)
 	}
 	term.WaitFor("⏺ "+back, 30*time.Second)
+	s.Mesh.Mark = back
 	peerTerm.WaitFor("⏺ "+across, 30*time.Second)
 	peerWant := []entry{{"user", signedByParent}, {"tool", ""}, {"assistant", across}}
 	parentWant := append(
@@ -153,4 +163,106 @@ func callAcross(c *harness.Ctx, s State) State {
 			s.Mesh.PeerName, s.Name, receipt, status, delivered)
 	}
 	return s
+}
+
+// peerRows: from his plain terminal the owner leaves a draft in the composer of the tmux-hosted peer,
+// idle and unattached, and calls it: the call is delivered, the draft is back in the composer
+// afterwards, and the transcript grows by the call and its answer alone (escape
+// chat-mesh/call-keeps-draft). He calls it with a message over 720 runes: pfm pastes it whole and the
+// peer's transcript holds it as sent, never a path to a file it was spilled to (escape
+// chat-mesh/call-long-inline). He calls the
+// peer with a turn that holds until a file he holds is gone and calls again mid-turn: the second call
+// queues behind the turn (escape chat-mesh/call-busy-queues), and once he removes the file the peer
+// answers both, in order.
+func peerRows(c *harness.Ctx, s *State) {
+	owner, peer := c.Terminal(meshOwner), s.Mesh.PeerName
+	panes := strings.Fields(read(c, "tmux", "-L", s.Mesh.PeerSock, "list-panes", "-a", "-F", "#{pane_id}"))
+	if len(panes) != 1 {
+		c.Failf("tmux -L %s holds panes %q, want the peer's one", s.Mesh.PeerSock, panes)
+	}
+	pane := panes[0]
+	calls := func(label string, want *regexp.Regexp, steps ...map[string]any) entry {
+		message := directive(steps...)
+		out, errs, code := typedRun(c, owner, label, "pfm chat call --allow-unsigned "+peer+" "+shellQuote(message))
+		if code != 0 || !want.MatchString(out) || errs != unsignedFromOwner {
+			c.Failf("pfm chat call %s (%s): exit %d, stdout %q, stderr %q; want exit 0, stdout matching %s, stderr %q",
+				peer, label, code, out, errs, want, unsignedFromOwner)
+		}
+		return entry{"user", message + unsignedFooter}
+	}
+	live := func(receipt string) *regexp.Regexp {
+		return regexp.MustCompile("^" + regexp.QuoteMeta(fmt.Sprintf(receipt, pane)) + "\n" + proofOf(`(?s:.*)`) + "$")
+	}
+	inline := "called LIVE into %q — typed inline and submitted (Enter confirmed, input cleared)"
+	settled := func(what string, want []entry) {
+		c.Poll(peer+"'s transcript "+what, stepBound, func() (bool, string) {
+			got := entries(c, peer)
+			return slices.Equal(got, want), fmt.Sprintf("%+v\nwant %+v", got, want)
+		})
+	}
+	composer := func(want string) {
+		c.Poll(peer+"'s composer "+strconv.Quote(want), stepBound, func() (bool, string) {
+			screen := read(c, "tmux", "-L", s.Mesh.PeerSock, "capture-pane", "-p", "-t", pane)
+			return composerLine(screen) == want, screen
+		})
+	}
+	want := entries(c, peer)
+
+	// A key typed while the peer still paints its answer is the agent's to drop: the draft waits for it idle.
+	c.Poll(peer+" idle", stepBound, func() (bool, string) {
+		r := c.Read("pfm", "chat", "status", peer, "--json")
+		var status struct {
+			State string `json:"state"`
+		}
+		return json.Unmarshal([]byte(r.Stdout), &status) == nil && status.State == "idle", r.Stdout + r.Stderr
+	})
+	draft := c.Unique("draft")
+	if r := c.Read("tmux", "-L", s.Mesh.PeerSock, "send-keys", "-t", pane, "-l", draft); r.Code != 0 {
+		c.Failf("tmux send-keys %s exited %d: %s", draft, r.Code, r.Stderr)
+	}
+	composer("❯ " + draft)
+	kept := c.Unique("kept")
+	want = append(want, calls("draft-call", live(inline), turnStep(kept)), entry{"assistant", kept})
+	settled("holding the call over the draft and no draft", want)
+	composer("❯ " + draft)
+	erase := append([]string{"tmux", "-L", s.Mesh.PeerSock, "send-keys", "-t", pane}, slices.Repeat([]string{"BSpace"},
+		len(draft))...)
+	if r := c.Read(erase...); r.Code != 0 {
+		c.Failf("tmux send-keys BSpace exited %d: %s", r.Code, r.Stderr)
+	}
+	composer("❯")
+
+	long := c.Unique("long") + " " + strings.Repeat("ж", 740)
+	want = append(want, calls("long-call",
+		live("called LIVE PASTE into %q — bracketed-paste body submitted (Enter confirmed, input cleared)"),
+		turnStep(long)), entry{"assistant", long})
+	settled("holding the long call whole", want)
+
+	hold := s.Home + "/" + c.Unique("hold")
+	if r := c.Read("touch", hold); r.Code != 0 {
+		c.Failf("touch %s exited %d: %s", hold, r.Code, r.Stderr)
+	}
+	c.Cleanup(func() {
+		if r := c.Read("rm", "-f", hold); r.Code != 0 {
+			c.Logf("teardown: rm %s exited %d: %s", hold, r.Code, r.Stderr)
+		}
+	})
+	held, behind := c.Unique("held"), c.Unique("behind")
+	first := calls("hold-call", live(inline), map[string]any{"type": "hold", "until_gone": hold}, turnStep(held))
+	settled("holding the held call", append(slices.Clone(want), first))
+	queued := live(
+		"queued into %q — busy Claude accepted the turn without interruption (Enter confirmed, input cleared)",
+	)
+	second := calls("queued-call", queued, turnStep(behind))
+	if r := c.Read("rm", hold); r.Code != 0 {
+		c.Failf("rm %s exited %d: %s", hold, r.Code, r.Stderr)
+	}
+	settled("answering the held call, then the one queued behind it",
+		append(want, first, entry{"assistant", held}, second, entry{"assistant", behind}))
+}
+
+// proofOf is the pattern of the delivery proof pfm prints under a live call's receipt: the target
+// pane's tail, its lines matching tail.
+func proofOf(tail string) string {
+	return "--- delivery proof: target pane tail ---\n" + tail + "--- end delivery proof ---\n"
 }

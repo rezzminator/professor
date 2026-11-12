@@ -23,4 +23,5 @@ type Chat struct {
 	Engine  int    // the engine's pid
 	Pane    string // the Herdr pane it runs in, for a branch that holds more than one chat
 	Name    string // its pfm name, for a branch that holds more than one chat
+	Account string // the CLAUDE_CONFIG_DIR its engine ran on, once a step read it
 }

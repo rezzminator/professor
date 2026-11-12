@@ -346,7 +346,7 @@ func TestClaudeInlineAsyncFailureNeitherEndsTheTurnNorSkipsLaterHandlers(t *test
 }
 
 // TestClaudePerformedToolCall: a tool_call with perform carries an allowed Bash or Write out as Claude
-// does and records its result; a denied one runs nothing, its reason the result and each line of it a
+// does and records its result, a Bash command seeing the chat's session in CLAUDE_CODE_SESSION_ID; a denied one runs nothing, its reason the result and each line of it a
 // row of the pane; without perform the call runs nothing and its result is "done".
 func TestClaudePerformedToolCall(t *testing.T) {
 	deny := `printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny",` +
@@ -360,8 +360,9 @@ func TestClaudePerformedToolCall(t *testing.T) {
 	}{
 		{
 			name: "bash-allowed", tool: "Bash", perform: true,
-			input: `{"command":"printf 'hello\\n' > made.txt; printf 'out\\n'"}`,
-			want:  toolResult{Content: "out\n"}, file: "made.txt", fileText: "hello\n", rows: []string{"⏺ Bash(…)"},
+			input: `{"command":"printf 'hello\\n' > made.txt; printf 'out %s\\n' \"$CLAUDE_CODE_SESSION_ID\""}`,
+			want:  toolResult{Content: "out " + fixtureSession + "\n"}, file: "made.txt", fileText: "hello\n",
+			rows: []string{"⏺ Bash(…)"},
 		},
 		{
 			name: "bash-failed", tool: "Bash", perform: true, input: `{"command":"printf 'boom\\n'; exit 3"}`,

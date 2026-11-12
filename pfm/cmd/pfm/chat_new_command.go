@@ -90,7 +90,7 @@ func runRun(
 	birth, birthErr := pfmchat.BirthBackend(ctx, "cli.new", requestedBackend)
 	if birthErr != nil {
 		fmt.Fprintf(stderr, "pfm chat new: %v\n", birthErr)
-		return 1
+		return spawn.FailureCode(birthErr)
 	}
 	if *timeout < 0 || *settle < 0 || (*attach && *await) {
 		flags.Usage()
@@ -491,7 +491,7 @@ func attachRunResult(attach bool, warnings []string, result spawn.Result, stdout
 	launchnotice.Pause(stderr, "pfm chat new", warnings)
 	if err := action.Dispatch(stdout, action.AttachLine(result.Socket, result.Session, false)); err != nil {
 		fmt.Fprintf(stderr, "pfm chat new: attach: %v\n", err)
-		return 1
+		return spawn.FailureCode(err) // a tmux client refused in a Herdr pane answers 10
 	}
 	return 0
 }

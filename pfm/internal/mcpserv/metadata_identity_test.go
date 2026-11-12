@@ -110,7 +110,7 @@ func metadataIdentityService(t *testing.T) *Service {
 	}
 	service, err := NewConfigured("test", io.Discard, Runtime{
 		Paths: resolved,
-		Chat:  &fakeChatVerbs{listed: chat.ListResult{Rows: rows, Matched: len(rows)}},
+		Chat:  &fakeChatVerbs{listed: chat.ListResult{Rows: rows, Matched: len(rows)}, seats: true},
 	})
 	if err != nil {
 		t.Fatal(err)

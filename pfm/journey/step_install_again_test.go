@@ -21,8 +21,7 @@ var installRow = regexp.MustCompile(`^\s+(change|warn|skip|fail|FAIL|block|BLOCK
 // nothing at all and refreshes no marketplace; the account's stats file is kept, and the live chat
 // still answers a turn.
 func installAgain(c *harness.Ctx, s State) State {
-	c.Expect(`"step":"managed-cleanup /etc/claude-code/managed-settings.d/pfm.json not written"`)
-	c.Expect(`"host":"platform.claude.com"`)
+	expectInstallErrors(c)
 	chat := State{Home: s.Home, Term: "again-chat"}
 	chatTerm := c.Terminal(chat.Term)
 	chatTerm.WaitFor(prompt)
@@ -46,9 +45,17 @@ func installAgain(c *harness.Ctx, s State) State {
 
 	term := c.Terminal("again")
 	term.WaitFor(prompt)
+	launcher := filepath.Join(s.Home, ".local", "bin", "claude")
+	if got := read(c, "sh", "-c", "command -v claude"); got != launcher+"\n" ||
+		!strings.Contains(read(c, "cat", launcher), "internal claude-launch") {
+		c.Failf("claude on the owner's PATH is %q, want pfm's launcher %s, which the plugin step meets", got, launcher)
+	}
+	starts, definitions := serviceStarts(c), serviceDefinitions(c)
+	renamed := renameRule(c, s, term)
 	var second time.Time
 	for i, label := range []string{"install-1", "install-2"} {
 		if i == 1 {
+			swapBinary(c, s)
 			second = time.Now()
 		}
 		out := filepath.Join(s.Home, label+".out")
@@ -74,13 +81,26 @@ func installAgain(c *harness.Ctx, s State) State {
 			c.Failf("the second install changed %q (%s), want nothing (%s)", changes, summary, out)
 		}
 		for _, change := range changes {
-			if i == 0 && !strings.Contains(change, "stats-cache.json") {
-				c.Failf("the first install changed %q beyond the stats-cache repair (%s)", change, out)
+			if i == 0 && !strings.Contains(change, "stats-cache.json") && !renamed.MatchString(change) {
+				c.Failf("the first install changed %q beyond the stats-cache repair and the renamed rule (%s)",
+					change, out)
+			}
+		}
+		for pid, p := range processes(c) {
+			if strings.Contains(p.Args, "claude-launch") {
+				c.Failf("after %s process %d still runs pfm's claude launcher: %s", label, pid, p.Args)
 			}
 		}
 		if n := strings.Count(text, "has live chats"); n > 1 {
 			c.Failf("%s printed the live-chat deferral %d times, want at most once (%s)", label, n, out)
 		}
+	}
+	dir := filepath.Join(s.Home, ".claude", "rules")
+	link, target := filepath.Join(dir, "rm-rf-literal-path.md"),
+		filepath.Join(professorClone(s), "templates", "global", "rules", "rm-rf-literal-path.md")
+	if got, dead := read(c, "readlink", link), read(c, "find", dir, "-xtype", "l"); got != target+"\n" || dead != "" {
+		c.Failf("after the installs %s links to %q and %s holds dead links %q; want %s and none",
+			link, got, dir, dead, target)
 	}
 	var refreshes, installRecords []string
 	for _, record := range activity(c, second, time.Time{}) {
@@ -98,6 +118,14 @@ func installAgain(c *harness.Ctx, s State) State {
 			refreshes,
 		)
 	}
+	if got := serviceStarts(c); got != starts {
+		c.Failf("pfm's services were restarted by installs that changed none of them:\n%s\nwant as before:\n%s",
+			got, starts)
+	}
+	if got := serviceDefinitions(c); got != definitions {
+		c.Failf("pfm's service definitions after the installs and the binary swap:\n%s\nwant as before:\n%s",
+			got, definitions)
+	}
 	if got := read(c, "cat", stats); got != statsBody+"\n" {
 		c.Failf("%s after the installs = %q, want the account's own %q", stats, got, statsBody+"\n")
 	}
@@ -109,6 +137,43 @@ func installAgain(c *harness.Ctx, s State) State {
 		c.Failf("the chat's engine changed from %d to %d across the installs", chat.Chat.Engine, live.Chat.Engine)
 	}
 	return s
+}
+
+// expectInstallErrors declares the ERROR records every pfm install --yes writes on the journey machine:
+// no sudo for the managed settings, no network for the price list.
+func expectInstallErrors(c *harness.Ctx) {
+	c.Expect(`"step":"managed-cleanup /etc/claude-code/managed-settings.d/pfm.json not written"`)
+	c.Expect(`"host":"platform.claude.com"`)
+}
+
+// renameRule: upstream renames a global rule in the clone, as a pull lands it (one commit), and the
+// owner previews `pfm install` (no --yes: a dry run), which passes with no FAIL row although the old rule's
+// link in ~/.claude/rules is dead. It returns the pattern of the install rows the rename may cause: the
+// two links and the global rules each engine reads.
+func renameRule(c *harness.Ctx, s State, term *harness.Terminal) *regexp.Regexp {
+	from, to := "rm-rf-absolute-path.md", "rm-rf-literal-path.md"
+	if r := c.Read("sh", "-c", `cd "$1" && git mv "templates/global/rules/$2" "templates/global/rules/$3" &&
+git -c user.name=upstream -c user.email=upstream@example.invalid commit -q -m "rename $2 to $3"`,
+		"sh", professorClone(s), from, to); r.Code != 0 {
+		c.Failf("renaming the rule %s to %s in the clone exited %d: %s%s", from, to, r.Code, r.Stdout, r.Stderr)
+	}
+	out, errs, code := typedRun(c, term, "install-dry", "(cd ~/.professor && pfm install)")
+	_, failed, summary := installPlan(out)
+	if code != 0 || len(failed) > 0 || summary == "" {
+		c.Failf("pfm install (a dry run) after the rule's rename exited %d, FAIL rows %q, summary %q; stderr %q",
+			code, failed, summary, errs)
+	}
+	return regexp.MustCompile(regexp.QuoteMeta(from) + "|" + regexp.QuoteMeta(to) +
+		`|^write \S+/\.codex/AGENTS\.md \(global rules block\)$|^write \S+/global-always-on\.md \(global rules for OpenCode\)$`)
+}
+
+// swapBinary replaces the installed pfm with a byte-identical copy at a new inode, as a rebuild's
+// install does (a copy beside it, moved over it).
+func swapBinary(c *harness.Ctx, s State) {
+	bin := filepath.Join(s.Home, ".local", "bin", "pfm")
+	if r := c.Read("sh", "-c", `cp -p "$1" "$1.swap" && mv -f "$1.swap" "$1"`, "sh", bin); r.Code != 0 {
+		c.Failf("swapping %s for a copy exited %d: %s%s", bin, r.Code, r.Stdout, r.Stderr)
+	}
 }
 
 // installPlan reads pfm install's output: its change rows, its fail rows, its summary line.

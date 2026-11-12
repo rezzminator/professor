@@ -4,6 +4,8 @@ import (
 	"context"
 	"io"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
@@ -45,6 +47,26 @@ func (verbs Verbs) Read(ctx context.Context, target string, tail int) (headless.
 // Exit is chat.ExitResolved over the bound runtime.
 func (verbs Verbs) Exit(ctx context.Context, self headless.Chat) (string, error) {
 	return ExitResolved(ctx, verbs.Runtime, self)
+}
+
+// Capture is chat.Capture over the bound runtime.
+func (verbs Verbs) Capture(ctx context.Context, target string, tail int) (Captured, error) {
+	return Capture(ctx, verbs.Runtime, target, tail)
+}
+
+// Keys is chat.PressKeys over the bound runtime.
+func (verbs Verbs) Keys(ctx context.Context, target string, request KeysRequest) (Keyed, error) {
+	return PressKeys(ctx, verbs.Runtime, target, request)
+}
+
+// CallAnswer is chat.CallAnswer over the bound runtime.
+func (verbs Verbs) CallAnswer(ctx context.Context, result CallResult, name string) (CallResult, string, bool) {
+	return CallAnswer(ctx, result, name, verbs.Runtime)
+}
+
+// Inspect is chat.InspectSeat of a listed row over the bound runtime, now.
+func (verbs Verbs) Inspect(ctx context.Context, row compose.Row) (headless.Status, error) {
+	return InspectSeat(ctx, verbs.Runtime, FromRow(row), clock.Real.Now(), nil)
 }
 
 func (verbs Verbs) warnings() io.Writer {

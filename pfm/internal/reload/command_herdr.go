@@ -246,6 +246,7 @@ func RunHerdr(
 			return Result{}, err
 		}
 	}
+	n.labelLeftBehind(request.LeftBehind, stderr)
 	return Result{
 		Account:    n.request.Account,
 		Cache1H:    n.request.Cache1H,
@@ -579,8 +580,12 @@ func (n *nativeReload) wait(ctx context.Context, id string, oldPID int, run flee
 		if err != nil {
 			return err
 		}
+		// The seat host reapplies Remote Control under the seat's current name
+		// at every start (RefreshRecipeRemoteControl): the new engine runs the
+		// published recipe up to that one knob.
 		if !seat.ReloadPending && seat.State == nativeSeatLive && pid > 0 && pid != oldPID &&
-			slices.Equal(argv[1:], run.Args) {
+			slices.Equal(claudelaunch.RefreshRemoteControl(argv[1:], false, ""),
+				claudelaunch.RefreshRemoteControl(run.Args, false, "")) {
 			return nil
 		}
 		if pid == oldPID && oldPID != 0 {
@@ -640,23 +645,6 @@ func (n *nativeReload) rollback(
 	}
 	if err := n.db.UpdateSeat(ctx, pending, old); err != nil {
 		return fmt.Errorf("restore native reload pending: %w", err)
-	}
-	return nil
-}
-
-func (n *nativeReload) then(ctx context.Context) error {
-	if err := n.ready(ctx, false); err != nil {
-		return fmt.Errorf("native reload --then: %w", err)
-	}
-	if err := n.refreshTarget(ctx); err != nil {
-		return err
-	}
-	result, err := n.door.CallTarget(ctx, n.target, pfmcall.Request{Message: n.request.Then})
-	if err != nil {
-		return fmt.Errorf("native reload --then: %w", err)
-	}
-	if result.Code != 0 {
-		return fmt.Errorf("native reload --then unconfirmed: %s", result.Message)
 	}
 	return nil
 }

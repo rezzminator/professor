@@ -104,9 +104,7 @@ func TestChatCallCarriesTheThenArgument(t *testing.T) {
 		Message: "hold: read /tmp/hold.md",
 		Then:    []string{"resume the port"},
 	})
-	if unresolved.Code != 4 ||
-		unresolved.Typed ||
-		!strings.Contains(unresolved.Message, "matched no live chat") {
+	if unresolved.Code != 4 || unresolved.Typed || unresolved.Message != `no chat named "no-such-chat"` {
 		t.Fatalf("legal steer chain = %+v", unresolved)
 	}
 }

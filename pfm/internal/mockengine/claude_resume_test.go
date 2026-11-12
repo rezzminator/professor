@@ -161,6 +161,27 @@ func TestClaudeForkOfAbsentParentStartsEmpty(t *testing.T) {
 	}
 }
 
+// A fixed session id rides a resume only with --fork-session, as Claude Code
+// itself refuses it otherwise; with it the fork owns that id.
+func TestClaudeSessionIDOnAResumeNeedsAFork(t *testing.T) {
+	fix := newFixture(t)
+	t.Chdir(fix.work)
+	fix.write(Scenario{BusyMS: intPtr(0)})
+	const forkID = "f4444444-4444-4444-8444-444444444444"
+	refused := fix.startTUI("claude", claudeArgs("--resume", fixtureSession, "--session-id", forkID), nil)
+	if code := refused.waitExit(); code != 1 || refused.stderr.String() != claudeSessionIDRefusal+"\n" {
+		t.Fatalf("resume with a session id: exit %d stderr %q, want 1 %q", code, refused.stderr.String(),
+			claudeSessionIDRefusal+"\n")
+	}
+	forkArgs := claudeArgs("--resume", fixtureSession, "--session-id", forkID, "--fork-session")
+	forked := fix.startTUI("claude", forkArgs, nil)
+	forked.waitFrame("composer", func(frame string) bool { return strings.Contains(frame, "❯") })
+	forked.typeLine("/exit")
+	if code := forked.waitExit(); code != 0 {
+		t.Fatalf("fork with a session id: exit %d stderr %q", code, forked.stderr.String())
+	}
+}
+
 func TestClaudeResumeRecoversTitle(t *testing.T) {
 	fix := newFixture(t)
 	t.Chdir(fix.work)

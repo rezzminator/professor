@@ -9,7 +9,9 @@
 //   - tree_test.go: the tree, the one file that says what runs after what.
 //   - state_test.go: State, the value handed down the tree.
 //   - fleet_test.go: reads of pfm's state the steps share, the fleet-consistency check and the log gate.
-//   - fleet_whole_test.go: the whole machine's check at the joins (fleetWhole): zombies and spinning pfm processes.
+//   - fleet_whole_test.go: the whole machine's check at the joins (fleetWhole): zombies,
+//     spinning pfm processes and busy pickers.
 //   - services_{linux,darwin}_test.go: pfm's services as the OS's service manager lists them.
+//   - proc_{linux,darwin}_test.go: what the OS tells of one process: its working directory.
 //   - step_*_test.go: one owner step each.
 package journey

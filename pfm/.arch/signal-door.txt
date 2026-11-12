@@ -1,3 +1,4 @@
+internal/coverflush/init_pfmcover.go 1
 internal/deps/runner.go 3
 internal/hookentry/launch.go 2
 internal/statusline/process.go 3

@@ -147,6 +147,10 @@ func renameNativeOwned(ctx context.Context, state *fleetdb.Store, seat fleetdb.S
 	if err := state.UpdateSeat(ctx, before, seat); err != nil {
 		return fmt.Errorf("persist name after Herdr pane, agent and tab rename: %w", err)
 	}
+	if err := herdr.NudgeIndicators(seat.HerdrSocket); err != nil {
+		obs.Logger(ctx).Warn("herdr rename: the tab follows at the blinker's idle refresh",
+			obs.FieldSeat, seat.SeatID, obs.FieldErr, err)
+	}
 	return nil
 }
 

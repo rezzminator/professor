@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -107,10 +106,12 @@ func captureInt(value int) *int { return &value }
 
 type resolveGateCaller struct {
 	target pfmcall.Target
+	code   int    // the call engine's resolve code, 0 for one target
+	detail string // its candidate detail
 }
 
 func (fake resolveGateCaller) Resolve(context.Context, string) (pfmcall.Target, int, string, error) {
-	return fake.target, 0, "", nil
+	return fake.target, fake.code, fake.detail, nil
 }
 
 func (fake resolveGateCaller) ResolveEngine(_ context.Context, _, engine string) (pfmcall.Target, int, string, error) {
@@ -149,6 +150,17 @@ func TestChatResolveEveryKindUsesTheCallResolutionGate(t *testing.T) {
 			resolved.SocketPath != want.SocketPath || resolved.Pane != want.Pane {
 			t.Fatalf("resolve kind %s=%+v, want call gate target %+v", kind, resolved, want)
 		}
+	}
+	// Several chats answering the name are chat.ResolveRefusal's ambiguous refusal, the CLI's exit and wording.
+	ambiguous := newService("test", &backend{
+		resolver:   *raw,
+		callEngine: resolveGateCaller{code: pfmcall.CodeAmbiguous, detail: "twin-a twin-b"},
+	})
+	resolved := callTool[ResolveOutput](t, connectInMemory(t, ambiguous.Server()).clientSession, "resolve",
+		ResolveInput{Kind: "label", Name: "twin"})
+	wantOut := ResolveOutput{Status: "ambiguous", Code: 2, Message: "twin-a twin-b", Candidates: "twin-a twin-b"}
+	if resolved != wantOut {
+		t.Fatalf("resolve of an ambiguous name = %+v, want %+v", resolved, wantOut)
 	}
 }
 
@@ -289,7 +301,7 @@ func TestMCPHandshakeAndAllToolsOverJailedStdio(t *testing.T) {
 		Session: "fixture-session",
 		ID:      "fixture",
 		Engine:  "cc",
-		State:   "idle",
+		State:   "working",
 		Dir:     "/work/fixture",
 		Project: "fixture",
 		Name:    "Fixture Chat",
@@ -841,114 +853,6 @@ func writeEnabledMCPConfig(t *testing.T, root string) string {
 		t.Fatal(err)
 	}
 	return path
-}
-
-func TestNativeKeysAdapterUsesResolvedBackend(t *testing.T) {
-	for _, test := range []struct {
-		name             string
-		literal, refused bool
-		keys             []string
-	}{
-		{name: "named", keys: []string{"Enter"}},
-		{name: "literal", literal: true, keys: []string{"Home"}},
-		{name: "unsupported second key", refused: true, keys: []string{"Enter", "Home"}},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			root := testjail.ShortRoot(t)
-			socket := filepath.Join(root, "native.sock")
-			listener, err := net.Listen("unix", socket)
-			if err != nil {
-				t.Fatal(err)
-			}
-			done := make(chan struct{})
-			t.Cleanup(func() {
-				if err := listener.Close(); err != nil {
-					t.Error(err)
-				}
-				<-done
-			})
-			got := make(chan map[string]any, 1)
-			go func() {
-				defer close(done)
-				for {
-					conn, err := listener.Accept()
-					if err != nil {
-						return
-					}
-					func() {
-						defer func() {
-							if err := conn.Close(); err != nil {
-								t.Error(err)
-							}
-						}()
-						var request map[string]any
-						if err := json.NewDecoder(conn).Decode(&request); err != nil {
-							t.Error(err)
-							return
-						}
-						var result any
-						switch request["method"] {
-						case "pane.list":
-							result = map[string]any{
-								"type":  "pane_list",
-								"panes": []any{testjail.HerdrPaneInfo("w6:p3")["pane"]},
-							}
-						case "pane.process_info":
-							result = map[string]any{
-								"type":         "pane_process_info",
-								"process_info": map[string]any{"pane_id": "w6:p3", "shell_pid": 41},
-							}
-						default:
-							got <- request
-							result = map[string]any{"type": "ok"}
-						}
-						if err := json.NewEncoder(conn).
-							Encode(map[string]any{"id": request["id"], "result": result}); err != nil {
-							t.Error(err)
-						}
-					}()
-				}
-			}()
-			service := newFixtureService(t)
-			seedKeysHerdrOwner(t, socket)
-			service.backend.callEngine = resolveGateCaller{
-				target: pfmcall.Target{Backend: "herdr", SocketPath: socket, Pane: "w6:p3"},
-			}
-			_, output, err := service.chatKeys(
-				context.Background(),
-				nil,
-				KeysInput{Target: "NATIVE", Keys: test.keys, Literal: test.literal},
-			)
-			if test.refused {
-				if err == nil || !strings.Contains(err.Error(), "Herdr") || output.Status != statusError ||
-					output.Code != 10 ||
-					output.Count != 0 {
-					t.Fatalf("capability refusal output=%+v err=%v", output, err)
-				}
-				select {
-				case request := <-got:
-					t.Fatalf("refused sequence sent input: %v", request)
-				default:
-				}
-				return
-			}
-			if err != nil || output.Count != 1 {
-				t.Fatalf("native keys output=%+v err=%v", output, err)
-			}
-			select {
-			case request := <-got:
-				want := "pane.send_keys"
-				if test.literal {
-					want = "pane.send_text"
-				}
-				if request["method"] != want {
-					t.Fatalf("native method=%v", request)
-				}
-			case <-time.After(time.Second):
-				t.Fatal("native keys never reached resolved socket")
-			}
-		})
-	}
 }
 
 // The chat server's routing text, byte for byte: every clause names a tool it registers.

@@ -392,3 +392,59 @@ func TestNativeTitleSyncNamesAPaneWithoutAnAgentOnce(t *testing.T) {
 		t.Errorf("seat name=%q err=%v, want the pane's new title kept", current.Name, err)
 	}
 }
+
+// OpenCode reports a retitle as its own title event: the native seat, its
+// pane and its tab take the title at once, never waiting for a turn.
+func TestOpenCodeTitleNamesItsNativeSeat(t *testing.T) {
+	reserved := "seat:child"
+	reservedWarn := "pfm internal herdr-state title: engine title not used: " +
+		naming.ValidateLabel(reserved).Error() + "\n"
+	for _, row := range []struct {
+		name, title, wantName, wantStderr string
+		wantLabels                        []string
+	}{
+		{"retitled", "Fix login", "Fix login", "", []string{"pane.rename Fix login", "tab.rename Fix login"}},
+		{"trimmed", "  Fix login\n", "Fix login", "", []string{"pane.rename Fix login", "tab.rename Fix login"}},
+		{"unchanged", "Desk", "Desk", "", nil},
+		{"reserved", reserved, "Desk", reservedWarn, nil},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			rig := newNativeTitleRig(t, "unused")
+			opencode := rig.seat
+			opencode.Engine = string(engine.OpenCode)
+			if err := rig.db.UpdateSeat(context.Background(), rig.seat, opencode); err != nil {
+				t.Fatal(err)
+			}
+			payload, _ := json.Marshal(map[string]string{"session_id": rig.seat.SessionID, "title": row.title})
+			var stderr bytes.Buffer
+			deps := realHerdrDeps()
+			deps.spawn = nil
+			rc := reportToHerdr([]string{"--engine", "opencode", "title"}, bytes.NewReader(payload), &stderr, deps)
+			if rc != 0 || stderr.String() != row.wantStderr {
+				t.Fatalf("rc=%d stderr=%q, want 0 and %q", rc, stderr.String(), row.wantStderr)
+			}
+			var labels []string
+			for _, line := range rig.server.requests() {
+				var req struct {
+					Method string `json:"method"`
+					Params struct {
+						Label string `json:"label"`
+					} `json:"params"`
+				}
+				if err := json.Unmarshal([]byte(line), &req); err != nil {
+					t.Fatal(err)
+				}
+				if req.Method == "pane.rename" || req.Method == "tab.rename" {
+					labels = append(labels, req.Method+" "+req.Params.Label)
+				}
+			}
+			if !reflect.DeepEqual(labels, row.wantLabels) {
+				t.Errorf("Herdr renames %q, want %q; requests=%v", labels, row.wantLabels, rig.server.requests())
+			}
+			current, _, err := rig.db.Seat(context.Background(), rig.seat.SeatID)
+			if err != nil || current.Name != row.wantName {
+				t.Errorf("seat name=%q err=%v, want %q", current.Name, err, row.wantName)
+			}
+		})
+	}
+}

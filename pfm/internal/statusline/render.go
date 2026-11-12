@@ -234,7 +234,7 @@ func Render(ctx context.Context, raw []byte, runtime Runtime) (string, error) {
 	data.RateLimits.Windows = resolvedLimits
 	data.RateLimits.Scoped = nil
 	writeBreadcrumb(runtime, data.TranscriptPath)
-	convergeWindowName(ctx, runtime, data)
+	convergeChatName(ctx, runtime, data)
 
 	recordRateLimits(runtime, now, account, data.SessionID, reported)
 

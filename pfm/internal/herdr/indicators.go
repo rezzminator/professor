@@ -234,8 +234,7 @@ func (painter *indicatorPainter) run(ctx context.Context) error {
 		defer release()
 		blocked, _, err := painter.paint(ctx)
 		if err != nil {
-			painter.logf("%v", err)
-			return err
+			return painter.failed(err)
 		}
 		if !blocked && !painter.hasDone && !painter.hasTabs {
 			return nil
@@ -255,8 +254,7 @@ func (painter *indicatorPainter) run(ctx context.Context) error {
 	for {
 		blocked, wrote, err := painter.paint(ctx)
 		if err != nil {
-			painter.logf("%v", err)
-			return err
+			return painter.failed(err)
 		}
 		if !blocked && !painter.hasDone && !painter.hasTabs {
 			if !wrote || settles >= maxSettleRounds {

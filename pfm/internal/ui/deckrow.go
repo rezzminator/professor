@@ -140,10 +140,10 @@ func deckPlan(width int, grouped, chip bool) deckLayout {
 
 // liveMarker is rowMarker for the deck: a live chat that is mid-turn, itself or
 // through its agents (the picker read that from its transcript), pulses its
-// dot. The clock only ticks while the picker is being watched, which is exactly
-// when the pulse should move.
+// dot; one that waits on its owner holds still. The clock only ticks while the
+// picker is being watched, which is exactly when the pulse should move.
 func liveMarker(row compose.Row, nowNS int64) string {
-	if workActive(row) && (nowNS/deckPulseNS)%2 == 1 {
+	if workActive(row) && !row.Blocked && (nowNS/deckPulseNS)%2 == 1 {
 		return "◉"
 	}
 	return rowMarker(row.Kind)

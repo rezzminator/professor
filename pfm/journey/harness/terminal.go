@@ -99,12 +99,16 @@ func (t *Terminal) WaitScreen(what string, within time.Duration, cond func(scree
 	deadline := t.s.clock.Now().Add(within)
 	ticker := t.s.clock.NewTicker(PollTick)
 	defer ticker.Stop()
+	from := t.c.clock.Now()
+	label := "terminal " + t.s.name + ": " + what
 	for {
 		screen := t.s.screen()
 		if cond(screen) {
+			t.c.noteWait(label, from, true)
 			return
 		}
 		if !t.s.clock.Now().Before(deadline) {
+			t.c.noteWait(label, from, false)
 			t.c.Failf("terminal %s: waited %s for %s; the screen:\n%s", t.s.name, within, what, framed(screen))
 		}
 		<-ticker.C()

@@ -16,6 +16,8 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/launchnotice"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/spawn"
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
@@ -221,6 +223,9 @@ func (tmux RealTmux) SocketForPID(ctx context.Context, pid int) (string, error) 
 }
 
 func (tmux RealTmux) Attach(ctx context.Context, socket string) error {
+	if err := spawn.RefuseTmuxClient("agent open", resolve.CallerEnvironment()); err != nil {
+		return err
+	}
 	if err := tmux.command(ctx, socket, "set-option", "-g", "window-size", "latest").Run(); err != nil {
 		return fmt.Errorf("set tmux window size: %w", err)
 	}

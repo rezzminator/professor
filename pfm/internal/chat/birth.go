@@ -15,6 +15,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/launchnotice"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/store"
@@ -29,28 +30,12 @@ type birthCaller struct {
 	door     string
 	identity resolve.Identity
 	err      error
+	local    bool // identify the process running the door at placement (WithLocalCaller)
 }
 
 // WithCaller carries a request's caller, including a failed lookup, to its birth.
 func WithCaller(ctx context.Context, door string, identity resolve.Identity, err error) context.Context {
 	return context.WithValue(ctx, callerKey{}, birthCaller{door: door, identity: identity, err: err})
-}
-
-// withoutCaller marks a door that opens for no terminal (a schedule's wake,
-// an MCP open): unless the request carries its caller, the chat is placed by
-// its own recorded host, never by the process that runs the door.
-func withoutCaller(ctx context.Context, door string) context.Context {
-	if _, carried := ctx.Value(callerKey{}).(birthCaller); carried {
-		return ctx
-	}
-	return WithCaller(ctx, door, resolve.Identity{}, spawn.ErrNoCaller)
-}
-
-// WithPlacement carries a placement already made to the rest of its request
-// (a door that hands its birth to another, like shim.cx to chat new), so no
-// later step of the same request asks again.
-func WithPlacement(ctx context.Context, choice spawn.BackendChoice) context.Context {
-	return context.WithValue(ctx, placedKey{}, choice)
 }
 
 // BirthBackend places a birth that has no recorded host (placeChat).
@@ -61,7 +46,9 @@ func BirthBackend(ctx context.Context, door, requested string) (spawn.BackendCho
 // placeChat is the one placement of every birth and revive: a placement the
 // request already made is reused; otherwise the carried caller (with its door)
 // or the local process, identified once with Codex seats, the chat's recorded
-// Herdr host and whether it revives a stored chat decide through spawn.Place.
+// Herdr host, whether it revives a stored chat and the Herdr server the
+// door's environment names (WithHerdrServer, else this process's) decide
+// through spawn.Place.
 // A Herdr choice carries the scan of the fleet a new tab is filed under, run
 // only when one is born.
 func placeChat(
@@ -74,17 +61,17 @@ func placeChat(
 		return choice, nil
 	}
 	caller, carried := ctx.Value(callerKey{}).(birthCaller)
-	if !carried {
-		identifier, err := resolve.NewWhoami(resolve.WhoamiDependencies{CodexSeats: CodexSeats(runtime)})
-		if err != nil {
-			caller.err = err
-		} else {
-			caller.identity, caller.err = identifier.Identify(ctx)
-		}
-	} else if caller.door != "" {
+	if !carried || caller.local {
+		caller.identity, caller.err = localCaller(ctx, runtime)
+	}
+	if caller.door != "" {
 		door = caller.door
 	}
-	choice, err := spawn.Place(ctx, door, requested, recorded, revive, caller.identity, caller.err)
+	server, carried := ctx.Value(serverKey{}).(spawn.HerdrServer)
+	if !carried {
+		server = spawn.HerdrServerFrom(paths.OSEnv{})
+	}
+	choice, err := spawn.Place(ctx, door, requested, recorded, revive, caller.identity, caller.err, server)
 	if choice.Backend == spawn.BackendHerdr {
 		choice.Places = herdrPlacesFor(runtime)
 	}

@@ -421,7 +421,7 @@ func runChatReloadWorkerWithRuntime(
 			fmt.Fprintln(stdout, "pfm chat reload: no transcript yet — rebooted FRESH")
 		}
 	} else {
-		fmt.Fprintf(stdout, "pfm chat reload: respawned in place: %s %s\n", filepath.Base(socketPath), pane)
+		fmt.Fprintf(stdout, "pfm chat reload: %s: %s %s\n", result.Receipt(), filepath.Base(socketPath), pane)
 	}
 	if newSeat && hide {
 		// Hide the session Run says this pane left behind.

@@ -13,8 +13,17 @@ import (
 // herdrStops: from a second terminal the owner stops the restart chain's Herdr server; Herdr leaves
 // the first terminal at its prompt, every pane process of the session dies with both engines, no Herdr
 // indicator daemon outlives its server, `pfm chat ls --all` answers and lists both chats dead, and no
-// pfm process spins or is left a zombie.
+// pfm process spins or is left a zombie. Each chat's account (its engine's CLAUDE_CONFIG_DIR) is read
+// before the stop, for herdrReturns to hold the resumed engine to.
 func herdrStops(c *harness.Ctx, s State) State {
+	for i, chat := range s.Chats {
+		env, err := procTable(c).Environ(chat.Engine)
+		if err != nil || env["CLAUDE_CONFIG_DIR"] == "" {
+			c.Failf("read engine %d of %s's CLAUDE_CONFIG_DIR before the Herdr stop: %q, %v", chat.Engine, chat.Name,
+				env["CLAUDE_CONFIG_DIR"], err)
+		}
+		s.Chats[i].Account = env["CLAUDE_CONFIG_DIR"]
+	}
 	ctl := c.Terminal("restart-ctl")
 	ctl.WaitFor(prompt)
 	command := strings.Join(herdrCLI(s, "server", "stop"), " ")

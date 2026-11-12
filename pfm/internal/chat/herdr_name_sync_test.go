@@ -5,9 +5,13 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
+	"sync"
 	"testing"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/herdr"
+	"github.com/rezzminator/professor/pfm/internal/naming"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
@@ -135,6 +139,113 @@ func TestConvergeHerdrNamesFromCodexTitle(t *testing.T) {
 					&stderr,
 					testCase.want,
 				)
+			}
+		})
+	}
+}
+
+// Claude fires no hook on /rename: its statusline carries the new session_name,
+// and ConvergeHerdrSessionName names the chat's native seat from it at once,
+// with the hooks' own rules (EngineTitle) over pfm's clear name.
+func TestConvergeHerdrSessionName(t *testing.T) {
+	cleared := naming.ClearName{Inherited: "INTEGRATION", Name: "INTEGRATION #2"}
+	confirmed := cleared
+	confirmed.Confirmed = true
+	for _, testCase := range []struct {
+		name      string
+		session   string
+		title     string
+		clear     *naming.ClearName
+		refuse    bool
+		want      string
+		attempted bool
+		decision  naming.ClearName
+	}{
+		{name: "fresh title", title: "Fresh name", want: "Fresh name", attempted: true},
+		{
+			name: "inherited title keeps the clear name", title: "INTEGRATION", clear: &cleared,
+			want: "INTEGRATION #2", attempted: true, decision: cleared,
+		},
+		{
+			name: "fresh title over a clear name confirms it", title: "Fresh name", clear: &cleared,
+			want: "Fresh name", attempted: true, decision: confirmed,
+		},
+		{name: "reserved title", title: "seat:other", want: "INTEGRATION"},
+		{
+			name: "reserved title over a clear name", title: "seat:other", clear: &cleared,
+			want: "INTEGRATION #2", attempted: true, decision: cleared,
+		},
+		{name: "the seat's own name", title: "INTEGRATION", want: "INTEGRATION"},
+		{
+			name: "no native seat", session: "0d0c3b55-1e1f-4a4b-8c8d-9e9fa0a1a2a3", title: "Fresh name",
+			want: "INTEGRATION",
+		},
+		{name: "refused", title: "Fresh name", refuse: true, want: "INTEGRATION", attempted: true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			testjail.Fleet(t)
+			var mu sync.Mutex
+			attempted := false
+			socket := nativeChatSocket(t, func(req nativeChatRequest) (any, string) {
+				if value, code, ok := nativeChatProof(req, "w6:p3"); ok {
+					return value, code
+				}
+				var label, name string
+				_ = json.Unmarshal(req.Params["label"], &label)
+				_ = json.Unmarshal(req.Params["name"], &name)
+				switch req.Method {
+				case "pane.rename":
+					mu.Lock()
+					attempted = true
+					mu.Unlock()
+					if testCase.refuse {
+						return nil, "invalid_params"
+					}
+					return map[string]any{"pane": map[string]any{"pane_id": "w6:p3", "label": label}}, ""
+				case "agent.rename":
+					return map[string]any{"agent": map[string]any{"pane_id": "w6:p3", "name": name}}, ""
+				case "pane.get":
+					return testjail.HerdrPaneInfo("w6:p3"), ""
+				case "tab.get", "tab.rename":
+					return map[string]any{
+						"type": "tab_info",
+						"tab":  map[string]any{"tab_id": "w6:t1", "label": label, "pane_count": 1},
+					}, ""
+				default:
+					return nil, "unexpected_method"
+				}
+			})
+			runtime, state, seat := nativeChatSeat(t, socket, "live")
+			seat = nativeChatHost(t, state, seat, true)
+			ctx := context.Background()
+			if testCase.clear != nil {
+				if err := state.PutClearName(ctx, seat.SessionID, *testCase.clear, 1); err != nil {
+					t.Fatal(err)
+				}
+			}
+			session := cmp.Or(testCase.session, seat.SessionID)
+			err := ConvergeHerdrSessionName(ctx, runtime.Paths, session, testCase.title)
+			var refusal *herdr.Refusal
+			if testCase.refuse != (errors.As(err, &refusal) && refusal.Code == "invalid_params") ||
+				(!testCase.refuse && err != nil) {
+				t.Fatalf(
+					"ConvergeHerdrSessionName(%q) = %v, want a refusal only when Herdr refuses",
+					testCase.title,
+					err,
+				)
+			}
+			got, _, err := state.Seat(ctx, seat.SeatID)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil || got.Name != testCase.want || attempted != testCase.attempted {
+				t.Fatalf("seat name %q, pane.rename sent %v (err %v); want %q, sent %v",
+					got.Name, attempted, err, testCase.want, testCase.attempted)
+			}
+			if testCase.clear != nil {
+				decision, _, err := state.ClearName(ctx, seat.SessionID)
+				if err != nil || decision != testCase.decision {
+					t.Fatalf("clear name = %+v (err %v), want %+v", decision, err, testCase.decision)
+				}
 			}
 		})
 	}

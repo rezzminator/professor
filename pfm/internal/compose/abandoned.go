@@ -36,3 +36,17 @@ func (current *composer) abandonedLaunch(
 	}
 	return !indexed || transcript.PromptCount == 0
 }
+
+// bootingLaunch reports whether agent is the Claude process of a booting pane, and claims its session
+// live. A Claude pfm launched carries its session in argv from birth, so until its statusline first
+// renders (held at the folder-trust dialog, say) gather finds it crumbless-live too: the pane's booting
+// row is the chat, and an agent row beside it would leave its name matching two live chats.
+func (current *composer) bootingLaunch(agent gather.Agent) bool {
+	for _, entry := range current.input.Snapshot.CrumblessLive {
+		if agent.PID != 0 && entry.PID == agent.PID {
+			current.liveTranscripts[agent.SessionID] = struct{}{}
+			return true
+		}
+	}
+	return false
+}

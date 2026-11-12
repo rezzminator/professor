@@ -28,7 +28,7 @@ func plainClaude(c *harness.Ctx, s State) State {
 
 // plainReloadTyped: the owner types /reload in the plain chat; the chat comes back in the same
 // terminal, on the same socket, seat and session, under a new engine, and draws its status line. The
-// step ends once pfm's reload run has exited: an /exit typed while it still runs is swallowed.
+// step ends once pfm's reload run has exited, so the next step's /exit meets the reborn chat.
 func plainReloadTyped(c *harness.Ctx, s State) State {
 	term := c.Terminal(s.Term)
 	before, socket := s.Chat, plainSocket(c, s)
@@ -42,12 +42,8 @@ func plainReloadTyped(c *harness.Ctx, s State) State {
 		return false, fmt.Sprintf("engines %v", engines(processes(c)))
 	})
 	c.Poll("pfm's reload run on "+socket+" done", 20*time.Second, func() (bool, string) {
-		for _, p := range processes(c) {
-			if strings.Contains(p.Args, " internal reload-run ") && strings.Contains(p.Args, "/"+socket) {
-				return false, fmt.Sprintf("pid %d: %s", p.Pid, p.Args)
-			}
-		}
-		return true, ""
+		run := reloadRun(c, socket)
+		return run == "", run
 	})
 	term.WaitGone("/reload", 20*time.Second)
 	plainStatusRow(c, s)
@@ -59,13 +55,15 @@ func plainReloadTyped(c *harness.Ctx, s State) State {
 	return s
 }
 
-// plainEnd: the owner types /exit in the plain chat; the terminal, which the chat owned, closes. No
-// live row, live seat, engine or tmux process of the chat is left. The closing terminal's last frame
-// is not read: macOS revokes a terminal when its shell ends, before tmux can restore the screen.
+// plainEnd: the owner types /exit in the plain chat; the box leaves the screen and the terminal, which
+// the chat owned, closes. No live row, live seat, engine or tmux process of the chat is left. pfm
+// detaches the terminal's tmux client before it hangs up the shell, so the client restores the screen
+// on every OS: macOS revokes the terminal once its shell ends.
 func plainEnd(c *harness.Ctx, s State) State {
 	term := c.Terminal(s.Term)
 	socket := plainSocket(c, s)
 	term.Type("/exit\r")
+	term.WaitGone("❯", 20*time.Second)
 	plainGone(c, s, term, socket)
 	return s
 }
@@ -107,6 +105,33 @@ func plainResumeFromCLI(c *harness.Ctx, s State) State {
 			asked[1:], answered[1:])
 	}
 	return s
+}
+
+// plainExitDuringReload: in the resumed chat the owner types /reload, then /exit while pfm's reload
+// run still waits for the chat's turn to end; the owner's exit wins. The box leaves the screen and the
+// terminal closes; no reload run, live row, live seat, engine or tmux process of the chat is left, so
+// nothing was respawned.
+func plainExitDuringReload(c *harness.Ctx, s State) State {
+	term := c.Terminal(s.Term)
+	socket := plainSocket(c, s)
+	term.Type("/reload\r")
+	c.Poll("pfm's reload run on "+socket+" started", 20*time.Second, func() (bool, string) {
+		return reloadRun(c, socket) != "", "no reload run"
+	})
+	term.Type("/exit\r")
+	term.WaitGone("❯", 20*time.Second)
+	plainGone(c, s, term, socket)
+	return s
+}
+
+// reloadRun names pfm's reload run on socket, "" when none runs.
+func reloadRun(c *harness.Ctx, socket string) string {
+	for _, p := range processes(c) {
+		if strings.Contains(p.Args, " internal reload-run ") && strings.Contains(p.Args, "/"+socket) {
+			return fmt.Sprintf("pid %d: %s", p.Pid, p.Args)
+		}
+	}
+	return ""
 }
 
 // plainStatusRow waits for the chat's status line under its box: the account's medal, the model,

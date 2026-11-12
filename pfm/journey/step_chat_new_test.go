@@ -20,7 +20,8 @@ import (
 // config, never the bypass flag (escape chat-birth/new-from-cli, permission mode). The owner then puts
 // his config back as it was.
 func chatNew(c *harness.Ctx, s State) State {
-	term, owner := c.Terminal(s.Term), c.Terminal(meshOwner)
+	owner := c.Terminal(meshOwner)
+	owner.WaitFor(prompt)
 	config := strings.TrimPrefix(strings.TrimSpace(read(c, "pfm", "config", "validate")), "config valid: ")
 	c.Cleanup(func() { restoreConfig(c, config) })
 	// Written aside and moved in: a pfm another branch runs meanwhile reads the old config or the new one,
@@ -29,11 +30,35 @@ func chatNew(c *harness.Ctx, s State) State {
 		config+`.mesh >`+config+`.auto && mv `+config+`.auto `+config, stepBound); code != 0 {
 		c.Failf("setting claude.permissionMode to auto in %s exited %d:\n%s", config, code, owner.Screen())
 	}
+	s = meshCaller(c, s, "mesh", "demo")
+	argv := strings.Fields(processes(c)[s.Chat.Engine].Args)
+	at := slices.Index(argv, "--permission-mode")
+	if at < 0 || at+1 >= len(argv) || argv[at+1] != "auto" || slices.Contains(argv, "--dangerously-skip-permissions") {
+		c.Failf("engine %d of %s started without `--permission-mode auto` from the config: %s",
+			s.Chat.Engine, s.Name, strings.Join(argv, " "))
+	}
+	if code := shellRun(owner, "restore", "mv "+config+".mesh "+config, stepBound); code != 0 {
+		c.Failf("restoring %s exited %d:\n%s", config, code, owner.Screen())
+	}
+	fleetConsistent(c, s)
+	return s
+}
+
+// meshCaller: in the first pane of s's Herdr session the owner leaves the picker for the pane's shell
+// and types `pfm chat new --engine cc --name {label}-…` in his project ~/work/{dir}; pfm prints the new chat's line
+// (engine, name, backend, socket, pane) and Herdr opens a tab named for it. Underneath: one live
+// Claude chat of that name on the session's socket, its seat on the printed pane, its engine under the
+// session's Herdr server. It returns s naming that chat, its project, session, seat and engine.
+func meshCaller(c *harness.Ctx, s State, label, dir string) State {
+	term := c.Terminal(s.Term)
+	if r := c.Read("mkdir", "-p", s.Home+"/work/"+dir); r.Code != 0 {
+		c.Failf("mkdir -p %s/work/%s exited %d: %s", s.Home, dir, r.Code, r.Stderr)
+	}
 	term.Press(harness.Esc)
 	term.WaitFor(prompt)
-	s.Name, s.Project = c.Unique("mesh"), s.Home+"/work/demo"
+	s.Name, s.Project = c.Unique(label), s.Home+"/work/"+dir
 	sock := herdrSocket(s)
-	term.Type("cd $HOME/work/demo && pfm chat new --engine cc --name " + s.Name + "\r")
+	term.Type("cd $HOME/work/" + dir + " && pfm chat new --engine cc --name " + s.Name + "\r")
 	var pane string
 	term.WaitScreen("pfm chat new's line for "+s.Name, 20*time.Second, func(screen string) bool {
 		for _, line := range strings.Split(screen, "\n") {
@@ -47,10 +72,7 @@ func chatNew(c *harness.Ctx, s State) State {
 		}
 		return false
 	})
-	term.WaitScreen("a Herdr tab named "+s.Name, stepBound, func(screen string) bool {
-		top, _, _ := strings.Cut(screen, "\n")
-		return slices.Contains(strings.Fields(top), s.Name)
-	})
+	awaitTopTab(term, "idle", s.Name)
 	c.Poll("one live Claude chat named "+s.Name+" with a live seat on "+pane, 20*time.Second, func() (bool, string) {
 		rows := namedChats(c, sock)
 		seats := liveSeats(c, sock)
@@ -67,16 +89,6 @@ func chatNew(c *harness.Ctx, s State) State {
 		return true, seen
 	})
 	s.Chat.Engine = engineOf(c, s)
-	argv := strings.Fields(processes(c)[s.Chat.Engine].Args)
-	at := slices.Index(argv, "--permission-mode")
-	if at < 0 || at+1 >= len(argv) || argv[at+1] != "auto" || slices.Contains(argv, "--dangerously-skip-permissions") {
-		c.Failf("engine %d of %s started without `--permission-mode auto` from the config: %s",
-			s.Chat.Engine, s.Name, strings.Join(argv, " "))
-	}
-	if code := shellRun(owner, "restore", "mv "+config+".mesh "+config, stepBound); code != 0 {
-		c.Failf("restoring %s exited %d:\n%s", config, code, owner.Screen())
-	}
-	fleetConsistent(c, s)
 	return s
 }
 

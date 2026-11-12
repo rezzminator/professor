@@ -131,6 +131,10 @@ type scanRequest struct {
 	// transcript tail; nil — every non-interactive caller, so --plain and --tsv
 	// stay byte-identical — leaves the rows as composed.
 	Facts *rowfacts.Reader
+	// HerdrBlocked reads which panes of one Herdr socket wait on their owner
+	// (gather.HerdrBlockedPanes); the parked re-read refreshes a native seat's
+	// blocked mark with it. Nil leaves the mark as composed.
+	HerdrBlocked func(ctx context.Context, socket string) (map[string]bool, error)
 }
 
 // resolveCosmosSafe decides whether the cosmos tab renders in vscode-safe
@@ -518,7 +522,7 @@ func streamFleetRefreshesWith(
 		}
 		reread := environment
 		reread.NowNS = refreshClock.Now().UnixNano()
-		snapshot := rereadFacts(reread, request, lastSent)
+		snapshot := rereadFacts(ctx, reread, request, lastSent)
 		if !rowFactsMoved(lastSent.snapshot, snapshot) {
 			return true
 		}

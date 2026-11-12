@@ -13,7 +13,8 @@ import (
 // twoTabs: in the restart chain's own Herdr session the owner starts a Claude chat from the first
 // pane's picker, opens a second tab with Herdr's new-tab key (prefix c, its name left at Herdr's
 // default) and starts a second Claude chat from its picker, then names each chat from a second
-// terminal; pfm lists both live on that session's socket, each on its own pane, its tab under its name.
+// terminal; pfm lists both live on that session's socket, each on its own pane, its tab under its name
+// and the idle mark.
 func twoTabs(c *harness.Ctx, s State) State {
 	s = claudeFromPicker(c, s)
 	first := s.Chat
@@ -33,6 +34,7 @@ func twoTabs(c *harness.Ctx, s State) State {
 		}
 		return len(panes) == 2 && pane != "", fmt.Sprintf("panes %v", panes)
 	})
+	newChatSelected(term)
 	term.Press(harness.Enter)
 	pickEngine(term, "Claude")
 	term.Press(harness.Enter)
@@ -64,7 +66,7 @@ func twoTabs(c *harness.Ctx, s State) State {
 	for i, chat := range s.Chats {
 		s.Chat, s.Name = chat, c.Unique(fmt.Sprintf("tab%d", i+1))
 		nameFromCLI(c, cli, s, chat.Session)
-		want[chat.Pane] = s.Name
+		want[chat.Pane] = markedLabel("idle", s.Name)
 		s.Chats[i].Name = s.Name
 	}
 	c.Poll("each tab under its chat's name", stepBound, func() (bool, string) {

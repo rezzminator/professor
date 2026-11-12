@@ -89,3 +89,41 @@ func herdrSeatPane(seat fleetdb.Seat, panes []herdr.Pane) (*herdr.Pane, error) {
 	}
 	return candidate, nil
 }
+
+// Blocked reports that Herdr reads the seat's agent as waiting on its owner (a
+// question or a permission prompt open), from the same pane.list the probe read.
+// A seat whose probe failed carries that error (Err) and reads false: its row
+// shows the error, never a state.
+func (row HerdrSeat) Blocked() bool {
+	if row.Err != nil {
+		return false
+	}
+	panes, err := herdr.ParsePanes(row.snapshot)
+	for index := 0; err == nil && index < len(panes); index++ {
+		if panes[index].PaneID == row.Seat.HerdrPane {
+			return paneBlocked(panes[index])
+		}
+	}
+	return false
+}
+
+// HerdrBlockedPanes reads one Herdr socket's pane.list and names every pane
+// whose agent Herdr reads as waiting on its owner, the read Blocked makes from
+// a pass's snapshot: a parked picker re-reads it without a full pass.
+func HerdrBlockedPanes(ctx context.Context, socket string) (map[string]bool, error) {
+	_, body, err := probeHerdrPanes(ctx, socket)
+	if err != nil {
+		return nil, err
+	}
+	panes, err := herdr.ParsePanes(body)
+	if err != nil {
+		return nil, err
+	}
+	blocked := make(map[string]bool, len(panes))
+	for index := range panes {
+		blocked[panes[index].PaneID] = paneBlocked(panes[index])
+	}
+	return blocked, nil
+}
+
+func paneBlocked(pane herdr.Pane) bool { return pane.AgentStatus == string(herdr.StateBlocked) }

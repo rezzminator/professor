@@ -356,13 +356,17 @@ func (s *Store) enumerateSeats(ctx context.Context, columns string) (seats []Sea
 	return seats, nil
 }
 
-// DeleteSeat removes a seat's address; its private run file is removed separately.
+// DeleteSeat removes a seat's address and the branch lineage keyed by its id
+// (a Herdr fork's, RecordBranchSeat); its private run file is removed separately.
 func (s *Store) DeleteSeat(ctx context.Context, id string) error {
 	if s.db == nil {
 		return fmt.Errorf("delete seat %q: %w", id, s.degraded)
 	}
 	if _, err := s.exec(ctx, "DELETE FROM seat WHERE seat_id=?", id); err != nil {
 		return fmt.Errorf("delete seat %q: %w", id, err)
+	}
+	if _, err := s.exec(ctx, "DELETE FROM meta WHERE key=?", branchSeatPrefix+id); err != nil {
+		return fmt.Errorf("delete seat %q: its branch lineage stays: %w", id, err)
 	}
 	return nil
 }

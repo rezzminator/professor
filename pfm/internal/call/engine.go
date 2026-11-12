@@ -395,7 +395,7 @@ func (engine *Engine) callRequest(
 ) (result Result, err error) {
 	states := trail(ctx, "call")
 	defer func() { outcome(states, result, err) }()
-	ctx = withSender(ctx, engine.sender(ctx))
+	ctx = engine.ShareSender(ctx, request.Message)
 	if isCompactCommand(request.Message) {
 		return refused(
 			CodeUndelivered,
@@ -683,8 +683,8 @@ func (engine *Engine) callResolved(
 	// C-s on a non-empty composer parks the draft in Claude Code's single
 	// stash slot; a later stash overwrites it. C-s on an empty composer pops
 	// it back. The next confirmed submit of any kind restores it. Claude Code
-	// does not document these semantics; pfm/TESTPLAN.md item 28c names them
-	// as an UNPLAYED flow the fake engine does not yet play.
+	// does not document them; the fake engine's composer (mockengine/tty.go)
+	// plays them, a parked draft restored included; TESTPLAN.md 28c keeps Claude Code's side unproven.
 	needsStashGuard := !queueing
 	if queueing && hasDraft(composerLastLine(capture)) {
 		styled, _ := engine.tmux.Capture(
@@ -1398,11 +1398,11 @@ func statedSender(env paths.Env) (Sender, bool) {
 func (engine *Engine) detectSender(ctx context.Context) (Sender, resolve.Identity, bool) {
 	identity, err := engine.whoami.Identify(ctx)
 	if err != nil {
-		engine.warnf("pfm: identify message sender: %v\n", err)
+		engine.senderWarnf(ctx, "pfm: identify message sender: %v\n", err)
 		return Sender{}, resolve.Identity{}, false
 	}
 	if identity.Session == "" {
-		engine.warnf("pfm: identify message sender: resolved caller has no session\n")
+		engine.senderWarnf(ctx, "pfm: identify message sender: resolved caller has no session\n")
 		return Sender{}, resolve.Identity{}, false
 	}
 	return Sender{Session: identity.Session, UUID: identity.ID}, identity, true

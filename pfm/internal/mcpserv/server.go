@@ -15,6 +15,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/headless"
@@ -30,7 +31,6 @@ const (
 	defaultCaptureBytes = 256 << 10
 	maxCaptureBytes     = 4 << 20
 	statusNotFound      = "not_found"
-	statusAmbiguous     = "ambiguous"
 	statusNotRegistered = "not_registered"
 	// statusDead is the answer for a target that RESOLVED and then could not
 	// be driven or read — chat.CodeDead. It is deliberately not
@@ -106,6 +106,10 @@ type ChatVerbs interface {
 	Status(context.Context, chat.StatusRequest) (headless.Status, error)
 	List(context.Context, chat.ListRequest) (chat.ListResult, error)
 	Exit(ctx context.Context, self headless.Chat) (string, error)
+	Capture(ctx context.Context, target string, tail int) (chat.Captured, error)
+	Keys(ctx context.Context, target string, request chat.KeysRequest) (chat.Keyed, error)
+	Inspect(ctx context.Context, row compose.Row) (headless.Status, error)
+	CallAnswer(ctx context.Context, result chat.CallResult, name string) (chat.CallResult, string, bool)
 }
 
 // Dispatch is the in-process command dispatcher used by stateful chat tools.
@@ -159,22 +163,22 @@ func (service *Service) registerTools(server *mcp.Server) {
 	}, obs.Tool("ls", service.chatLS))
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "resolve",
-		Description: "Resolves one exact name to its tmux socket and pane — \"where does chat X live\", checking a target before call or keys. Call resolve{kind:\"label\", name:\"my-chat\"}. Returns status ok (code 0) with socket_path and pane; not_found (1) = no such chat; ambiguous (2) = several match, listed in candidates; a tool error = the resolver itself failed.",
+		Description: "Resolves one exact name to its tmux socket and pane — \"where does chat X live\", checking a target before call or keys. Call resolve{kind:\"label\", name:\"my-chat\"}. Returns status ok (code 0) with socket_path and pane; not_found (4) = no such chat, message says so; ambiguous (2) = several match, listed in candidates; a tool error = the resolver itself failed.",
 		Annotations: readOnly,
 	}, obs.Tool("resolve", service.chatResolve))
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "call",
-		Description: "Types and submits a message into another live chat — every \"send / tell / message / reply to / call into chat X\" ask. Call call{target:\"my-chat\", message:\"…\"}; a broadcast passes targets:[\"a\",\"b\"], delivered in parallel; follow-up steers go in then. Cross-chat only — one independent chat addressing another; a sub-agent reports to its parent by returning its result and never calls this. Returns status delivered with proof; queued = target mid-turn, submits after; refused or undelivered = not sent, message says why; not_found = no such chat; a tool error = delivery itself broke. A broadcast returns results, one per target, and status delivered only when all took it, else partial or undelivered; a target whose delivery itself broke reports status error in results, never a tool error.",
+		Description: "Types and submits a message into another live chat — every \"send / tell / message / reply to / call into chat X\" ask. Call call{target:\"my-chat\", message:\"…\"}; a broadcast passes targets:[\"a\",\"b\"], delivered in parallel; follow-up steers go in then. Cross-chat only — one independent chat addressing another; a sub-agent reports to its parent by returning its result and never calls this. Returns status delivered with proof; queued = target mid-turn, submits after; refused or undelivered = not sent, message says why; not_found (4) = no such chat; dead (3) = the chat is not running, message says how to revive it; a tool error = delivery itself broke. A broadcast returns results, one per target, and status delivered only when all took it, else partial or undelivered; a target whose delivery itself broke reports status error in results, never a tool error.",
 		Annotations: mutating,
 	}, obs.Tool("call", service.chatCall))
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "keys",
-		Description: "Presses tmux keys in a live chat — \"press Escape / Enter in chat X\", accept a modal, interrupt a turn. Call keys{target:\"my-chat\", keys:[\"Escape\"]}; raw text is keys:[\"y\"] with literal:true. For a whole message use call; a sub-agent never drives its parent's pane. Returns status ok with count sent; not_found = no such chat; dead = the pane vanished mid-sequence, count says how many landed; a tool error = an unknown key name, the valid ones listed.",
+		Description: "Presses tmux keys in a live chat — \"press Escape / Enter in chat X\", accept a modal, interrupt a turn. Call keys{target:\"my-chat\", keys:[\"Escape\"]}; raw text is keys:[\"y\"] with literal:true. For a whole message use call; a sub-agent never drives its parent's pane. Returns status ok with count sent; not_found (4) = no such chat; dead (3) = the chat is not running, or its pane vanished mid-sequence, count says how many landed; refused (2) = this host cannot press that key; a tool error = an unknown key name, the valid ones listed. Same answers as pfm chat keys.",
 		Annotations: mutating,
 	}, obs.Tool("keys", service.chatKeys))
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "capture",
-		Description: "Captures a live chat's screen text — \"what is on chat X's screen\", \"show me its scrollback\". Call capture{target:\"my-chat\"} or capture{target:\"my-chat\", tail_lines:200}. Returns status ok with text (truncated flags a cut, most recent kept); not_found = no such chat; ambiguous = several match; dead = the chat resolved but its pane could not be read; error = the capture failed some other way, message says how. For the last answer only, last; for a killed or old chat, use /chatlog.",
+		Description: "Captures a live chat's screen text — \"what is on chat X's screen\", \"show me its scrollback\". Call capture{target:\"my-chat\"} or capture{target:\"my-chat\", tail_lines:200}. Returns status ok with text, the screen's last tail_lines rows after its trailing blank rows (truncated flags a cut, most recent kept); not_found (4) = no such chat; ambiguous (2) = several match; dead (3) = the chat is not running or its pane could not be read; a tool error = the capture could not run. Same text as pfm chat capture. For the last answer only, last; for a killed or old chat, use /chatlog.",
 		Annotations: readOnly,
 	}, obs.Tool("capture", service.chatCapture))
 	mcp.AddTool(server, &mcp.Tool{
@@ -184,12 +188,12 @@ func (service *Service) registerTools(server *mcp.Server) {
 	}, obs.Tool("whoami", service.chatWhoami))
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        lastToolName,
-		Description: "Returns the newest assistant answer of a chat — \"what did chat X just say\", \"read its last reply\". Call last{target:\"my-chat\"}. Returns text; a chat that has not answered yet and an unknown target are both tool errors whose message names which (\"returned no answer\" versus a resolve failure); on Codex a turn still in progress is a tool error that says so; Claude and OpenCode return the newest answer written so far. For screen text, capture; for older turns, use /chatlog.",
+		Description: "Returns the newest assistant answer of a chat — \"what did chat X just say\", \"read its last reply\". Call last{target:\"my-chat\"}. Returns text; else a status with code and message, as pfm chat last answers: not_found (4) = no such chat; not_answered (3) = no answer or no transcript yet; in_progress (1) = a Codex turn still running; unsupported (1) = OpenCode content; Claude and OpenCode return the newest answer written so far. For screen text, capture; for older turns, use /chatlog.",
 		Annotations: readOnly,
 	}, obs.Tool(lastToolName, service.chatLast))
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "status",
-		Description: "Inspects one chat — \"is chat X idle / busy / dead\", \"what is it doing\". Call status{target:\"my-chat\"}; summary:true adds a digest of its last exchange, ask:true a live-screen answer. Returns name, state, idle_seconds (nonzero only while state is idle or error), context_pct and last; state error is a turn the model server ended (error names its kind, e.g. server_overloaded) and the chat waits at its prompt; state blocked is a chat held by a permission dialog, question or modal on its screen, waiting for its human to answer it; state dead is a result, not an error; a tool error = the target did not resolve or the status command failed.",
+		Description: "Inspects one chat — \"is chat X idle / busy / dead\", \"what is it doing\". Call status{target:\"my-chat\"}; summary:true adds a digest of its last exchange, ask:true a live-screen answer. Returns name, state, idle_seconds (nonzero only while state is idle or error), context_pct and last; state error is a turn the model server ended (error names its kind, e.g. server_overloaded) and the chat waits at its prompt; state blocked is a chat held by a permission dialog, question or modal on its screen, waiting for its human to answer it; state dead is a result, not an error, with code 3 as pfm chat status exits; an unknown target answers state not-found with code 4 and message; a tool error = the status command failed.",
 		Annotations: readOnly,
 	}, obs.Tool("status", service.chatStatus))
 	newInputSchema, err := jsonschema.For[NewInput](nil)
@@ -315,76 +319,6 @@ func (service *Service) callEngineForRequest(
 	return scoped.WithIdentity(caller.identity, caller.row.Name), caller, nil
 }
 
-func (service *Service) chatKeys(
-	ctx context.Context,
-	request *mcp.CallToolRequest,
-	input KeysInput,
-) (*mcp.CallToolResult, KeysOutput, error) {
-	if strings.TrimSpace(input.Target) == "" {
-		return nil, KeysOutput{}, fmt.Errorf("target is required")
-	}
-	keys := chat.KeysRequest{
-		Keys: input.Keys, Literal: input.Literal, Delay: chat.KeysDefaultDelay,
-		Capture: input.Capture, Clock: service.backend.clock,
-	}
-	if err := keys.Validate(); err != nil {
-		return nil, KeysOutput{}, err
-	}
-	if input.DelayMS != 0 {
-		if input.DelayMS < 0 {
-			return nil, KeysOutput{}, fmt.Errorf("delay_ms must not be negative")
-		}
-		keys.Delay = time.Duration(input.DelayMS) * time.Millisecond
-	}
-	callEngine, caller, err := service.callEngineForRequest(ctx, request)
-	if err != nil {
-		return nil, KeysOutput{}, err
-	}
-	if refusal, detail := service.selfCallerRefusal(caller); selfTarget(input.Target) && refusal != "" {
-		return nil, KeysOutput{
-			Status:  refusal,
-			Message: detail,
-			Code:    chat.CodeUnknown,
-			Keys:    append([]string(nil), input.Keys...),
-		}, nil
-	}
-	target, code, detail, err := callEngine.Resolve(ctx, input.Target)
-	if err != nil {
-		return nil, KeysOutput{}, err
-	}
-	if code != 0 {
-		output := KeysOutput{
-			Status: statusNotFound,
-			Code:   code,
-			Keys:   append([]string(nil), input.Keys...),
-		}
-		return nil, output, fmt.Errorf("resolve %q: %s", input.Target, detail)
-	}
-	door, err := chat.NewCallEngineWith(chat.CallDependencies{})
-	if err != nil {
-		return nil, KeysOutput{}, fmt.Errorf("keys transport: %w", err)
-	}
-	sent, err := chat.SendKeys(ctx, door, target, keys)
-	output := KeysOutput{
-		Status: "ok", Code: 0, SocketPath: target.SocketPath, Pane: target.Pane,
-		Count: sent.Count, Keys: append([]string(nil), input.Keys...), Text: sent.Screen,
-	}
-	switch {
-	case err == nil:
-		return nil, output, nil
-	case errors.Is(err, chat.ErrKeyCapability):
-		output.Status, output.Code = statusError, codeCapability
-		return nil, output, fmt.Errorf("keys: %w", err)
-	case errors.Is(err, chat.ErrKeySend):
-		output.Status, output.Code = statusDead, chat.CodeDead
-		return nil, output, fmt.Errorf("send %q: %w", input.Keys[sent.Count], err)
-	case errors.Is(err, chat.ErrKeyCapture):
-		return nil, output, fmt.Errorf("capture: %w", err)
-	default:
-		return nil, KeysOutput{}, err
-	}
-}
-
 func (service *Service) chatLS(
 	ctx context.Context,
 	request *mcp.CallToolRequest,
@@ -394,7 +328,7 @@ func (service *Service) chatLS(
 	if err != nil {
 		return nil, LSOutput{}, err
 	}
-	output, err := service.backend.listProjected(ctx, input, true, repo)
+	output, err := service.backend.listProjected(ctx, input, true, repo, true)
 	output.Scope = scope
 	return nil, output, err
 }
@@ -439,24 +373,18 @@ func (service *Service) chatResolve(
 	} else {
 		target, code, detail, err = callEngine.Resolve(ctx, name)
 	}
-	if err != nil {
-		return nil, ResolveOutput{}, err
+	if err == nil {
+		err = chat.ResolveRefusal(code, detail, name)
 	}
-	status := "ok"
-	switch code {
-	case 0:
-	case chat.CodeUnknown:
-		status, code = statusNotFound, 1
-	case chat.CodeAmbiguous:
-		status, code = statusAmbiguous, 2
-	default:
-		return nil, ResolveOutput{}, fmt.Errorf(
-			"resolve target %q failed with code %d: %s", input.Name, code, detail,
-		)
+	status, message := "ok", ""
+	if refusal, ok := asRefusal(err); ok {
+		status, code, message = refusal.Status, refusal.Code, refusal.Message
+	} else if err != nil {
+		return nil, ResolveOutput{}, err
 	}
 	return nil, ResolveOutput{
 		Status: status, Code: code, SocketPath: target.SocketPath,
-		Pane: target.Pane, Candidates: detail,
+		Pane: target.Pane, Candidates: detail, Message: message,
 	}, nil
 }
 
@@ -516,106 +444,12 @@ func (service *Service) chatWhoami(
 	}, nil
 }
 
-func (service *Service) chatCapture(
-	ctx context.Context,
-	request *mcp.CallToolRequest,
-	input CaptureInput,
-) (*mcp.CallToolResult, CaptureOutput, error) {
-	lines := 40
-	if input.TailLines != nil {
-		lines = *input.TailLines
-	}
-	if lines < 1 || lines > 1000 {
-		return nil, CaptureOutput{}, fmt.Errorf(
-			"tail_lines must be between 1 and 1000",
-		)
-	}
-	maxBytes := defaultCaptureBytes
-	if input.MaxBytes != nil {
-		maxBytes = *input.MaxBytes
-	}
-	if maxBytes < 1 || maxBytes > maxCaptureBytes {
-		return nil, CaptureOutput{}, fmt.Errorf(
-			"max_bytes must be between 1 and %d",
-			maxCaptureBytes,
-		)
-	}
-	callEngine, caller, err := service.callEngineForRequest(ctx, request)
-	if err != nil {
-		return nil, CaptureOutput{}, err
-	}
-	if refusal, detail := service.selfCallerRefusal(caller); selfTarget(input.Target) && refusal != "" {
-		return nil, CaptureOutput{Status: refusal, Code: chat.CodeUnknown, Message: detail}, nil
-	}
-	target, text, code, detail, err := callEngine.Capture(
-		ctx,
-		input.Target,
-		lines,
-	)
-	// One status per engine code, never a catch-all: chat.CallEngine.Capture
-	// answers CodeDead for a pane it resolved and could not read, and folding
-	// that into not_found reported a live chat as one that does not exist.
-	// An unregistered code is a capture that FAILED for a reason this surface
-	// has not been taught yet (statusError) — still never an absence.
-	status := "ok"
-	switch code {
-	case 0:
-	case chat.CodeAmbiguous:
-		status = statusAmbiguous
-	case chat.CodeUnknown:
-		status = statusNotFound
-	case chat.CodeDead:
-		status = statusDead
-	case chat.CodeCaptureFailed:
-		// Every other case above describes the TARGET pane and stays a
-		// legitimate soft answer (err untouched, nil). CodeCaptureFailed
-		// means Engine.Capture's tmux call never ran at all
-		// (pfmtmux.CouldNotRun) — this tool's OWN execution failed, so it
-		// surfaces as a real Go error the way chatOpenDetached and
-		// cliAction (actions.go) already return one for their statusError
-		// outcomes, instead of asking the caller to notice a JSON field.
-		status = statusError
-		err = fmt.Errorf("capture: %s", detail)
-	default:
-		status = statusError
-	}
-	// The engine captures the WHOLE scrollback; the byte bound is applied here,
-	// after the capture, keeping the most recent screen when it has to cut.
-	truncated := false
-	if len(text) > maxBytes {
-		text = tailBytes(text, maxBytes)
-		truncated = true
-	}
-	return nil, CaptureOutput{
-		Status:     status,
-		Code:       code,
-		SocketPath: target.SocketPath,
-		Pane:       target.Pane,
-		Text:       text,
-		Message:    detail,
-		Bytes:      len(text),
-		Truncated:  truncated,
-	}, err
-}
-
-// tailBytes keeps the last budget bytes of text without splitting a rune.
-func tailBytes(text string, budget int) string {
-	if len(text) <= budget {
-		return text
-	}
-	cut := len(text) - budget
-	for cut < len(text) && !utf8.RuneStart(text[cut]) {
-		cut++
-	}
-	return text[cut:]
-}
-
 func identityFailureStatus(err error) string {
 	switch {
 	case errors.Is(err, resolve.ErrNotRegistered):
 		return statusNotRegistered
 	case errors.Is(err, resolve.ErrAmbiguous):
-		return statusAmbiguous
+		return chat.StatusAmbiguous
 	case err == nil || errors.Is(err, resolve.ErrNotInChat):
 		return statusNotFound
 	default:
@@ -636,7 +470,9 @@ func whoamiFailure(identity resolve.Identity, err error, message string) WhoamiO
 	}
 }
 
-type callerRefusal struct{ status, message string }
+// callerRefusal refuses a target this request's caller could not bind: message names the step, detail is the
+// caller's own failure alone.
+type callerRefusal struct{ status, message, detail string }
 
 func (refusal callerRefusal) Error() string { return refusal.message }
 
@@ -647,4 +483,165 @@ func callerActionFailure(err error) ActionOutput {
 		status = refusal.status
 	}
 	return ActionOutput{Status: status, Code: 1, Message: err.Error()}
+}
+
+// asRefusal is the chat function's refusal err carries, when it carries one.
+func asRefusal(err error) (chat.Refusal, bool) {
+	var refusal chat.Refusal
+	ok := errors.As(err, &refusal)
+	return refusal, ok
+}
+
+// selfRefusalOf is the refusal of a self or raw-pane target this request's caller could not bind
+// (cliTargetForRequest's callerRefusal), as the receipt keys and capture answer it.
+func selfRefusalOf(err error) (chat.Refusal, bool) {
+	var refused callerRefusal
+	if !errors.As(err, &refused) {
+		return chat.Refusal{}, false
+	}
+	return chat.Refusal{Status: refused.status, Code: chat.CodeUnknown, Message: refused.detail}, true
+}
+
+func (service *Service) chatKeys(
+	ctx context.Context,
+	request *mcp.CallToolRequest,
+	input KeysInput,
+) (*mcp.CallToolResult, KeysOutput, error) {
+	if strings.TrimSpace(input.Target) == "" {
+		return nil, KeysOutput{}, fmt.Errorf("target is required")
+	}
+	keys := chat.KeysRequest{
+		Keys: input.Keys, Literal: input.Literal, Delay: chat.KeysDefaultDelay,
+		Capture: input.Capture, Clock: service.backend.clock,
+	}
+	if err := keys.Validate(); err != nil {
+		return nil, KeysOutput{}, err
+	}
+	if input.DelayMS != 0 {
+		if input.DelayMS < 0 {
+			return nil, KeysOutput{}, fmt.Errorf("delay_ms must not be negative")
+		}
+		keys.Delay = time.Duration(input.DelayMS) * time.Millisecond
+	}
+	output := KeysOutput{Status: "ok", Keys: append([]string(nil), input.Keys...)}
+	ctx, target, err := service.cliTargetForRequest(ctx, request, input.Target)
+	if refusal, ok := selfRefusalOf(err); ok {
+		output.Status, output.Code, output.Message = refusal.Status, refusal.Code, refusal.Message
+		return nil, output, nil
+	}
+	if err != nil {
+		return nil, KeysOutput{}, err
+	}
+	if service.backend.chat == nil {
+		return nil, KeysOutput{}, fmt.Errorf("keys verb is not configured")
+	}
+	keyed, err := service.backend.chat.Keys(ctx, target, keys)
+	output.SocketPath, output.Pane = keyed.Seat.SocketPath, keyed.Seat.Pane
+	output.Count, output.Text = keyed.Sent.Count, keyed.Sent.Screen
+	if refusal, ok := asRefusal(err); ok {
+		output.Status, output.Code, output.Message = refusal.Status, refusal.Code, refusal.Message
+		return nil, output, nil
+	}
+	if err != nil {
+		return nil, KeysOutput{}, fmt.Errorf("keys: %w", err)
+	}
+	return nil, output, nil
+}
+
+func (service *Service) chatCapture(
+	ctx context.Context,
+	request *mcp.CallToolRequest,
+	input CaptureInput,
+) (*mcp.CallToolResult, CaptureOutput, error) {
+	lines := 40
+	if input.TailLines != nil {
+		lines = *input.TailLines
+	}
+	if lines < 1 || lines > 1000 {
+		return nil, CaptureOutput{}, fmt.Errorf("tail_lines must be between 1 and 1000")
+	}
+	maxBytes := defaultCaptureBytes
+	if input.MaxBytes != nil {
+		maxBytes = *input.MaxBytes
+	}
+	if maxBytes < 1 || maxBytes > maxCaptureBytes {
+		return nil, CaptureOutput{}, fmt.Errorf("max_bytes must be between 1 and %d", maxCaptureBytes)
+	}
+	ctx, target, err := service.cliTargetForRequest(ctx, request, input.Target)
+	if refusal, ok := selfRefusalOf(err); ok {
+		return nil, CaptureOutput{Status: refusal.Status, Code: refusal.Code, Message: refusal.Message}, nil
+	}
+	if err != nil {
+		return nil, CaptureOutput{}, err
+	}
+	if service.backend.chat == nil {
+		return nil, CaptureOutput{}, fmt.Errorf("capture verb is not configured")
+	}
+	captured, err := service.backend.chat.Capture(ctx, target, lines)
+	output := CaptureOutput{Status: "ok", SocketPath: captured.Seat.SocketPath, Pane: captured.Seat.Pane}
+	if refusal, ok := asRefusal(err); ok {
+		output.Status, output.Code, output.Message = refusal.Status, refusal.Code, refusal.Message
+		return nil, output, nil
+	}
+	if err != nil {
+		return nil, CaptureOutput{}, fmt.Errorf("capture: %w", err)
+	}
+	// The byte bound is this door's payload limit, applied after the tail, keeping the most recent screen.
+	output.Text, output.Truncated = captured.Text, captured.Truncated
+	if len(output.Text) > maxBytes {
+		output.Text, output.Truncated = tailBytes(output.Text, maxBytes), true
+	}
+	output.Bytes = len(output.Text)
+	return nil, output, nil
+}
+
+// tailBytes keeps the last budget bytes of text without splitting a rune.
+func tailBytes(text string, budget int) string {
+	if len(text) <= budget {
+		return text
+	}
+	cut := len(text) - budget
+	for cut < len(text) && !utf8.RuneStart(text[cut]) {
+		cut++
+	}
+	return text[cut:]
+}
+
+// lastReceipt is the last tool's receipt of the refusal a failed last answer stands for (chat.LastRefusal); typed
+// is the target as the request spelled it.
+func lastReceipt(err error, result chat.LastResult, target, typed string) (LastOutput, bool) {
+	refusal, ok := asRefusal(chat.LastRefusal(err, result, target))
+	return LastOutput{Target: typed, Status: refusal.Status, Code: refusal.Code, Message: refusal.Message}, ok
+}
+
+// statusAnswer is the status tool's receipt of what chat status returned: a refusal (chat.TargetRefusal) with its
+// code and message, else the status with chat.StatusCode; a status that could not be read is the tool error.
+func statusAnswer(status headless.Status, err error, target string) (StatusOutput, error) {
+	if refusal, ok := asRefusal(chat.TargetRefusal(err, target)); ok {
+		output := StatusOutput{Name: target, State: refusal.Status}
+		if refusal.Code == chat.CodeUnknown {
+			output = statusOutput(headless.Missing(target))
+		}
+		output.Code, output.Message = refusal.Code, refusal.Message
+		return output, nil
+	}
+	if err != nil {
+		return StatusOutput{}, fmt.Errorf("status: %w", err)
+	}
+	output := statusOutput(status)
+	output.Code = chat.StatusCode(status)
+	return output, nil
+}
+
+// cliRefusalMessage is a refusal `pfm chat {verb}` printed, without its door's prefix: the last stderr line less
+// "pfm chat: " or "pfm chat {verb}: ".
+func cliRefusalMessage(stderr string) string {
+	lines := strings.Split(strings.TrimSpace(stderr), "\n")
+	line := lines[len(lines)-1]
+	if rest, ok := strings.CutPrefix(line, "pfm chat"); ok {
+		if _, message, found := strings.Cut(rest, ": "); found {
+			return message
+		}
+	}
+	return line
 }

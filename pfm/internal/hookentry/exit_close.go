@@ -25,7 +25,7 @@ var (
 		}
 		return identifier.Identify(ctx)
 	}
-	exitCloseInFlight = reload.InFlight
+	exitCloseInFlight = reload.ExitTyped
 )
 
 // ExitClose closes the terminal viewport after a human-requested Claude exit.

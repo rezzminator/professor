@@ -8,7 +8,7 @@
 //   - incremental.go: which files a pass parses, skips or continues.
 //   - opencode.go: ReadOpenCodeSessions, the OpenCode session mirror.
 //   - opencode_rows.go: OpenCode's message and part rows, and the read-only store open.
-//   - opencode_schema.go: whether an OpenCode store's tables exist yet.
+//   - opencode_schema.go: whether an OpenCode store's tables exist yet; ProbeOpenCodeStore, doctor's read of it.
 //   - source.go: the per-engine Source registry.
 //   - sync_sources.go: each engine's complete sync pass.
 //   - walk.go: walks the engines' transcript roots for files.

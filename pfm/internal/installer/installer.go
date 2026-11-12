@@ -2,6 +2,8 @@
 // wiring. Its assets are embedded so one pfm binary is a complete installer.
 //
 // herdr_claude.go: Herdr's own Claude integration, once per Claude settings store.
+// claude_plugins_unwire.go: uninstall takes back what install wrote into the Claude settings and plugin records.
+// log_root.go: install moves the logs pfm wrote before the log root into it, once.
 package installer
 
 import (
@@ -293,7 +295,7 @@ func (installer *engine) install(ctx context.Context) error {
 	installer.deferFailure(installer.wireHerdrClaudeIntegration(ctx))
 	installer.deferFailure(installer.convergeHerdrIndicators(ctx))
 	installer.deferFailure(installer.wireVSCode())
-	installer.deferFailure(installer.writeUpdateMetadata())
+	installer.deferFailure(errors.Join(installer.writeUpdateMetadata(), installer.moveLogsToRoot()))
 	// Like a failed plugin install, a refused login default is reported at
 	// once and fails the run after every other step has landed.
 	installer.deferFailure(installer.wireLoginDefault(false))
@@ -583,6 +585,7 @@ func (installer *engine) uninstall(ctx context.Context) error {
 	if err := installer.ensureClaudeEnv(true); err != nil {
 		return err
 	}
+	installer.deferFailure(installer.unwireClaudeSettings(ctx))
 	if err := installer.unwireHostOverlays(); err != nil {
 		return err
 	}
@@ -592,9 +595,8 @@ func (installer *engine) uninstall(ctx context.Context) error {
 	if err := installer.unwireSkills(assets); err != nil {
 		return err
 	}
-	// Before engine-sync retires the Codex mirror: unwiring the Claude
-	// registries first means no global is recompiled for an install that is
-	// going away.
+	// Before engine-sync retires the Codex mirror: unwiring the Claude registries first means no
+	// global is recompiled for an install that is going away.
 	if err := installer.unwireGlobalRegistries(); err != nil {
 		return err
 	}
@@ -616,10 +618,9 @@ func (installer *engine) uninstall(ctx context.Context) error {
 	}
 	managerAvailable := installer.options.jobScheduler().managerAvailable(ctx, installer)
 	if managerAvailable && installer.apply {
-		// systemctl disables none of the units it is named when one has no unit file, and the chat
-		// MCP unit exists only where the chat server is enabled. The units stop before they are
-		// disabled: disabling a linked timer reloads the manager while it still runs, it loses its
-		// service and stays failed.
+		// systemctl disables none of the units it is named when one has no unit file, and the chat MCP unit
+		// exists only where the chat server is enabled. The units stop before they are disabled: disabling
+		// a linked timer reloads the manager while it still runs, it loses its service and stays failed.
 		units := []string{nameSyncPathUnit, nameSyncTimerUnit, scheduleTimerUnit}
 		mcpUnit := filepath.Join(paths.SystemdUserDir(installer.options.Home), mcpUnitName)
 		if _, err := os.Lstat(mcpUnit); err == nil {

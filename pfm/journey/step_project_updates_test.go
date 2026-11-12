@@ -80,6 +80,7 @@ func adopterReport(c *harness.Ctx, dir string) (string, int) {
 type reportRows struct {
 	current, ignored      int
 	updated, new, retired []string
+	kept                  string // the KEPT block, empty when no file is kept
 }
 
 // reportHead is the report's head through its RETIRED-NAME rows.
@@ -98,6 +99,7 @@ func reportHead(root, from, to string, r reportRows) string {
 	for _, status := range []string{"GONE-UPSTREAM", "MOVED", "LOCAL-DELETED"} {
 		count(status, 0)
 	}
+	b.WriteString(r.kept)
 	rows("RETIRED-NAME", r.retired)
 	return b.String()
 }

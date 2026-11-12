@@ -81,11 +81,22 @@ func TestSeatCRUD(t *testing.T) {
 			t.Fatalf("PutSeat(%+v) accepted invalid seat", bad)
 		}
 	}
+	// A Herdr fork's lineage is keyed by its seat: the seat's end takes it, another fork's stays.
+	for _, id := range []string{seat.SeatID, "other-fork"} {
+		if err := state.RecordBranchSeat(ctx, id, "parent-id", 123); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := state.DeleteSeat(ctx, seat.SeatID); err != nil {
 		t.Fatal(err)
 	}
 	if _, found, err := state.Seat(ctx, seat.SeatID); err != nil || found {
 		t.Fatalf("deleted lookup = %v,%v", found, err)
+	}
+	if forks, err := state.BranchSeats(ctx); err != nil || !reflect.DeepEqual(forks, map[string]BranchSeat{
+		"other-fork": {Socket: "other-fork", Parent: "parent-id", CreatedAt: 123},
+	}) {
+		t.Fatalf("branch seats after the seat's delete = %#v, %v; want other-fork's alone", forks, err)
 	}
 	if err := state.Close(); err != nil {
 		t.Fatal(err)

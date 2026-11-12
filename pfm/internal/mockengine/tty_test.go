@@ -90,7 +90,12 @@ func TestComposerEditsADraft(t *testing.T) {
 	if draft.text() != "" || draft.stashed != "ac" {
 		t.Fatalf("stash left draft=%q stashed=%q", draft.text(), draft.stashed)
 	}
-	if line := draft.take(); line != "" {
-		t.Fatalf("take on an empty draft = %q", line)
+	if line := draft.take(); line != "" || draft.stashed != "ac" {
+		t.Fatalf("take on an empty draft = %q, stashed %q", line, draft.stashed)
+	}
+	draft.apply(keyEvent{kind: keyRune, r: 'x'})
+	if line := draft.take(); line != "x" || draft.text() != "ac" || draft.stashed != "" {
+		t.Fatalf("a submit over a stash took %q, left draft=%q stashed=%q; want x, the stash back and none parked",
+			line, draft.text(), draft.stashed)
 	}
 }

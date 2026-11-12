@@ -201,10 +201,10 @@ func launchFront(ctx context.Context, stdout, stderr io.Writer, runtime config.R
 	return launcher.Follow(ctx, pid, logPath, stdout, stderr)
 }
 
-// restartLogDir is where restart logs and the logs of what it starts go:
-// beside the state database, so a jail, a fence and the host keep their own.
+// restartLogDir is where restart logs and the logs of what it starts go: the
+// home's log root (paths.LogRoot), so a jail, a fence and the host keep their own.
 func restartLogDir(values paths.Values) string {
-	return filepath.Join(filepath.Dir(values.StateDB), "restart")
+	return paths.LogRoot(paths.OSEnv{}, values.Home).Restart()
 }
 
 // Launcher spawns the worker outside every chat and follows its log.

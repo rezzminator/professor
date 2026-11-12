@@ -13,7 +13,11 @@ import (
 	"uuid"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
+
+// claudeSessionEnv is the variable Claude Code hands its tool shells the chat's session in.
+var claudeSessionEnv = pfmengine.MustLookup(pfmengine.Claude).SessionEnv
 
 // tool plays a tool_call: PreToolUse, the tool_use record, the call performed when the step says so and
 // no hook denied it, PostToolUse, then the tool_result; it returns the deny reason, "" when allowed.
@@ -53,7 +57,10 @@ func (session *claudeSession) tool(step Step) (string, error) {
 			return "", err
 		}
 		if step.Perform {
-			if result.Content, result.IsError, err = session.perform(step.Tool, input); err != nil {
+			if result.Content, result.IsError, err = performTool(
+				session.proc, step.Tool, input,
+				append(append([]string(nil), session.environ...), claudeSessionEnv+"="+session.sessionID),
+			); err != nil {
 				return "", err
 			}
 		}
@@ -80,10 +87,14 @@ func (session *claudeSession) postToolUse(
 	return err
 }
 
-// perform carries out an allowed Bash or Write call (Step.Perform) the way Claude Code does: Bash runs
-// the command with sh in the engine's directory, its combined output the result, and a failed exit is
-// an error result headed by its code; Write creates the file's directory and writes the content.
-func (session *claudeSession) perform(tool string, input json.RawMessage) (content string, failed bool, err error) {
+// performTool carries out an allowed Bash or Write call (Step.Perform) the way Claude Code and Codex do:
+// Bash runs the command with sh in the engine's directory, its combined output the result, and a failed
+// exit is an error result headed by its code; Write creates the file's directory and writes the content.
+// env is the Bash command's environment, the engine's own when nil: Claude Code hands its tool shells the
+// chat's session in CLAUDE_CODE_SESSION_ID.
+func performTool(
+	proc *process, tool string, input json.RawMessage, env []string,
+) (content string, failed bool, err error) {
 	var fields struct {
 		Command  string `json:"command"`
 		FilePath string `json:"file_path"`
@@ -97,23 +108,23 @@ func (session *claudeSession) perform(tool string, input json.RawMessage) (conte
 		if err != nil {
 			return "", false, fmt.Errorf("perform Bash: sh not found: %w", err)
 		}
-		bounded, cancel := context.WithTimeout(session.proc.ctx, time.Minute)
+		bounded, cancel := context.WithTimeout(proc.ctx, time.Minute)
 		defer cancel()
 		cmd := exec.CommandContext(bounded, shell, "-c", fields.Command)
-		cmd.Dir = session.proc.cwd
+		cmd.Dir, cmd.Env = proc.cwd, env
 		output, err := cmd.CombinedOutput()
 		var exit *exec.ExitError
 		if errors.As(err, &exit) {
 			return fmt.Sprintf("Exit code %d\n%s", exit.ExitCode(), output), true, nil
 		}
 		if err != nil {
-			return "", false, fmt.Errorf("perform Bash %q in %s: %w", fields.Command, session.proc.cwd, err)
+			return "", false, fmt.Errorf("perform Bash %q in %s: %w", fields.Command, proc.cwd, err)
 		}
 		return string(output), false, nil
 	}
 	path := fields.FilePath
 	if !filepath.IsAbs(path) {
-		path = filepath.Join(session.proc.cwd, path)
+		path = filepath.Join(proc.cwd, path)
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return "", false, fmt.Errorf("perform Write: create the directory of %s: %w", path, err)

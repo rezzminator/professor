@@ -5,8 +5,6 @@ package journey
 import (
 	"encoding/json"
 	"fmt"
-	"slices"
-	"strings"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/journey/harness"
@@ -17,12 +15,15 @@ import (
 // holds is gone. The chat's reply paints within 10 s while the child still works (escape chat-mesh/
 // mcp-new-returns-before-child-ready); the receipt names the child on the chat's own Herdr socket;
 // Herdr opens the child's tab; the child is one live Claude chat with its own seat and pane in the
-// chat's workspace, its engine under the session's Herdr server, carrying its own pane variable and
-// no tmux pane or colour-off variable inherited from the chat that spawned it (escape chat-mesh/
-// spawn-child-from-mcp, the Claude-parent form). The owner then lets the child finish.
+// chat's workspace, its engine under the session's Herdr server, carrying its own pane variable, the
+// chat's TERM, and no tmux pane, colour-off or project-directory variable inherited from the chat that
+// spawned it (escape chat-mesh/spawn-child-from-mcp, the Claude-parent form). While it works the chat
+// calls it, and the call queues behind its turn; the owner then lets the child finish. Meanwhile, in
+// his second plain terminal, he starts the chat call-across calls (peerNew).
 func childNew(c *harness.Ctx, s State) State {
 	term, owner := c.Terminal(s.Term), c.Terminal(meshOwner)
 	sock := herdrSocket(s)
+	peerNew(c, &s)
 	s.Mesh.ChildName = c.Unique("child")
 	hold := s.Home + "/" + c.Unique("hold")
 	if code := shellRun(owner, "hold", "touch "+hold, stepBound); code != 0 {
@@ -41,15 +42,13 @@ func childNew(c *harness.Ctx, s State) State {
 		`","prompt":"` + childPrompt + `"}},{"type":"turn","reply":"` + reply + `"}]` + "\r")
 	start := time.Now()
 	term.WaitFor("⏺ "+reply, 10*time.Second)
+	s.Mesh.Mark = reply
 	c.Logf("the chat's reply painted %s after the ask", time.Since(start).Round(time.Millisecond))
 	if r := c.Read("test", "-e", hold); r.Code != 0 {
 		c.Failf("the hold file %s is gone before the step released it", hold)
 	}
 	receipt := mcpReceipt(c, s.Name, s.Chat.Session)
-	term.WaitScreen("a Herdr tab named "+s.Mesh.ChildName, stepBound, func(screen string) bool {
-		top, _, _ := strings.Cut(screen, "\n")
-		return slices.Contains(strings.Fields(top), s.Mesh.ChildName)
-	})
+	awaitTopTab(term, "working", s.Mesh.ChildName)
 	child := s
 	c.Poll("one live Claude chat named "+s.Mesh.ChildName+" with its own live seat on "+sock, 20*time.Second,
 		func() (bool, string) {
@@ -78,14 +77,6 @@ func childNew(c *harness.Ctx, s State) State {
 	}
 	child.Chat.Engine = engineOf(c, child)
 	s.Mesh.Child = child.Chat
-	status := read(c, "pfm", "chat", "status", s.Mesh.ChildName, "--json")
-	var state struct {
-		State string `json:"state"`
-	}
-	if err := json.Unmarshal([]byte(status), &state); err != nil || state.State != "working" {
-		c.Failf("pfm chat status %s while its first turn holds = %q (%v), want state working:\n%s",
-			s.Mesh.ChildName, state.State, err, status)
-	}
 	proc := procTable(c)
 	parentEnv, perr := proc.Environ(s.Chat.Engine)
 	childEnv, cerr := proc.Environ(child.Chat.Engine)
@@ -100,76 +91,51 @@ func childNew(c *harness.Ctx, s State) State {
 	}
 	_, tmuxPane := childEnv["TMUX_PANE"]
 	_, noColor := childEnv["NO_COLOR"]
+	projectDir, inherited := childEnv["CLAUDE_PROJECT_DIR"]
 	if childEnv["HERDR_PANE_ID"] != s.Mesh.ChildPane ||
 		childEnv["HERDR_WORKSPACE_ID"] != parentEnv["HERDR_WORKSPACE_ID"] ||
 		childEnv["HERDR_SOCKET_PATH"] != sock ||
 		tmuxPane ||
-		noColor {
+		noColor ||
+		inherited ||
+		childEnv["TERM"] == "" || childEnv["TERM"] != parentEnv["TERM"] {
 		c.Failf(
 			"child engine %d environment: HERDR_PANE_ID=%q HERDR_WORKSPACE_ID=%q HERDR_SOCKET_PATH=%q TMUX_PANE set %v "+
-				"NO_COLOR set %v; want its own pane %s in the chat's workspace %q on %s, neither TMUX_PANE nor NO_COLOR",
+				"NO_COLOR set %v CLAUDE_PROJECT_DIR set %v (%q) TERM=%q; want its own pane %s in the chat's workspace "+
+				"%q on %s, neither TMUX_PANE, NO_COLOR nor CLAUDE_PROJECT_DIR, and the chat's TERM %q",
 			child.Chat.Engine,
 			childEnv["HERDR_PANE_ID"],
 			childEnv["HERDR_WORKSPACE_ID"],
 			childEnv["HERDR_SOCKET_PATH"],
 			tmuxPane,
 			noColor,
+			inherited,
+			projectDir,
+			childEnv["TERM"],
 			s.Mesh.ChildPane,
 			parentEnv["HERDR_WORKSPACE_ID"],
 			sock,
+			parentEnv["TERM"],
 		)
 	}
+	queued := c.Unique("queued")
+	busyDoors(c, term, &s, hold, queued)
 	if r := c.Read("rm", hold); r.Code != 0 {
 		c.Failf("rm %s exited %d: %s", hold, r.Code, r.Stderr)
 	}
-	c.Poll(s.Mesh.ChildName+" idle once its first turn is released", stepBound, func() (bool, string) {
-		out := read(c, "pfm", "chat", "status", s.Mesh.ChildName, "--json")
-		if json.Unmarshal([]byte(out), &state) != nil {
-			return false, out
-		}
-		return state.State == "idle", out
-	})
+	var state struct {
+		State string `json:"state"`
+	}
+	c.Poll(s.Mesh.ChildName+" idle once its first turn and the call queued behind it answered", stepBound,
+		func() (bool, string) {
+			out := read(c, "pfm", "chat", "status", s.Mesh.ChildName, "--json")
+			if json.Unmarshal([]byte(out), &state) != nil {
+				return false, out
+			}
+			last := c.Read("pfm", "chat", "last", s.Mesh.ChildName)
+			return state.State == "idle" && last.Stdout == queued+"\n", out + last.Stdout + last.Stderr
+		})
+	idleDoors(c, term, &s, hold, queued)
 	fleetConsistent(c, s)
 	return s
-}
-
-// mcpReceipt is the receipt of the latest MCP tool call of the chat name, read from its Claude
-// transcript, session's file.
-func mcpReceipt(c *harness.Ctx, name, session string) (receipt struct {
-	Status  string `json:"status"`
-	Code    int    `json:"code"`
-	Message string `json:"message"`
-},
-) {
-	transcript := read(c, "sh", "-c", "cat ~/.claude/projects/*/"+session+".jsonl")
-	var last string
-	for _, line := range strings.Split(transcript, "\n") {
-		var record struct {
-			Message struct {
-				Content json.RawMessage `json:"content"`
-			} `json:"message"`
-		}
-		var blocks []struct {
-			Type    string `json:"type"`
-			Content string `json:"content"`
-		}
-		if json.Unmarshal([]byte(line), &record) != nil || json.Unmarshal(record.Message.Content, &blocks) != nil {
-			continue
-		}
-		for _, block := range blocks {
-			if block.Type == "tool_result" {
-				last = block.Content
-			}
-		}
-	}
-	var result struct {
-		Content []struct {
-			Text string `json:"text"`
-		} `json:"content"`
-	}
-	if err := json.Unmarshal([]byte(last), &result); err != nil || len(result.Content) != 1 ||
-		json.Unmarshal([]byte(result.Content[0].Text), &receipt) != nil {
-		c.Failf("no MCP tool receipt readable in %s's transcript %s (last tool result %q)", name, session, last)
-	}
-	return receipt
 }

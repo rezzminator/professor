@@ -18,6 +18,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/place"
@@ -37,17 +38,16 @@ func TestBirthBackendHonorsRequestBoundary(t *testing.T) {
 		{name: "outside", err: resolve.ErrNotInChat, backend: "tmux"},
 		{name: "tmux", identity: resolve.Identity{Backend: "tmux"}, backend: "tmux"},
 		{name: "native", identity: resolve.Identity{Backend: "herdr", SocketPath: "/h/herdr.sock", Pane: "wC:p24", HerdrWorkspace: "wC"}, backend: "herdr"},
-		{name: "failed read", err: failure},
+		{name: "failed read", err: failure, backend: "tmux"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, recorder := obs.Test(t)
 			ctx = WithCaller(ctx, "mcp.new", tc.identity, tc.err)
+			// No Herdr server answers: a caller outside Herdr is hosted in tmux.
+			down := func(context.Context, string) error { return herdr.ErrServerDown }
+			ctx = WithHerdrServer(ctx, spawn.HerdrServer{Socket: "/env/herdr.sock", Up: down})
 			choice, err := BirthBackend(ctx, "cli.new", "auto")
-			if tc.backend == "" {
-				if !errors.Is(err, failure) {
-					t.Fatalf("choice=%+v error=%v", choice, err)
-				}
-			} else if err != nil || choice.Backend != tc.backend {
+			if err != nil || choice.Backend != tc.backend {
 				t.Fatalf("choice=%+v error=%v", choice, err)
 			}
 			records := recorder.Records()

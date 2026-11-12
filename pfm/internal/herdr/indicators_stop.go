@@ -15,12 +15,27 @@ import (
 
 // The theme-off stop marker and the lock that orders its write against the
 // painters' writes: pfm's Herdr theme off always wins. A painter never removes
-// the marker; only the theme on retires it (RetireIndicatorStops).
+// the marker; only the theme on retires it (RetireIndicatorStops). And the
+// painter's own stand-down when its Herdr server shuts down (failed).
 
 // errThemeOff says pfm's Herdr theme is off: the socket's stop marker is there,
 // so the paint that met it writes nothing more, and the theme off's clear leaves
 // the sidebar and tabs as it finds them.
 var errThemeOff = errors.New("herdr indicators: pfm's Herdr theme was turned off")
+
+// failed handles a paint's err: its Herdr server shutting down (ServerStopping)
+// takes every pane the painter would paint, so the painter stands down with a
+// note and no diagnostic, returning nil; any other err is logged with its
+// context and returned.
+func (painter *indicatorPainter) failed(err error) error {
+	if ServerStopping(err) {
+		_, _ = fmt.Fprintf(painter.stderr,
+			"herdr indicators: socket %s stands down: its Herdr server is shutting down\n", painter.socket)
+		return nil
+	}
+	painter.logf("%v", err)
+	return err
+}
 
 // stopPath is the socket's stop marker: ClearIndicators writes it before it
 // clears, so a running blinker stops at its next tick even while a failed

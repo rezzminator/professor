@@ -329,8 +329,8 @@ func TestLiveDepsReadsTheDaemonFromConfig(t *testing.T) {
 		!slices.Equal(plain.Spare, []int{9}) {
 		t.Fatalf("plain deps = %+v", plain)
 	}
-	if plain.LogDir != "/jail/state/restart" {
-		t.Fatalf("log dir = %q, want beside the state database", plain.LogDir)
+	if plain.LogDir != "/jail/.local/state/pfm/log/restart" {
+		t.Fatalf("log dir = %q, want the jailed home's log root", plain.LogDir)
 	}
 	runtime.Config.MCPServers = map[string]config.MCPServer{"chat": {Enabled: true}}
 	configured := LiveDeps(runtime, &bytes.Buffer{}, nil, chatAddress{})

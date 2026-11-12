@@ -16,6 +16,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gitroot"
+	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/naming"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -154,7 +155,7 @@ const (
 // list is ls: chat.List under the tool's payload contract, projected
 // onto the wire row.
 func (current *backend) list(ctx context.Context, input LSInput) (LSOutput, error) {
-	return current.listProjected(ctx, input, true, "")
+	return current.listProjected(ctx, input, true, "", false)
 }
 
 // lsScope is public ls's repository scope: the repository of the caller
@@ -186,7 +187,7 @@ func (current *backend) lsScope(
 // ls keeps its payload cap; resolving a caller must not turn a row beyond
 // that presentation boundary into an absence.
 func (current *backend) listUnbounded(ctx context.Context, input LSInput) (LSOutput, error) {
-	return current.listProjected(ctx, input, false, "")
+	return current.listProjected(ctx, input, false, "", false)
 }
 
 func (current *backend) listProjected(
@@ -194,6 +195,7 @@ func (current *backend) listProjected(
 	input LSInput,
 	defaultLimit bool,
 	repo string,
+	inspect bool,
 ) (LSOutput, error) {
 	if current.chat == nil {
 		return LSOutput{}, fmt.Errorf("ls verb is not configured")
@@ -241,7 +243,7 @@ func (current *backend) listProjected(
 			Session:        session,
 			ID:             row.ID,
 			Engine:         compose.EngineForKind(row.Kind),
-			State:          chatRowState(*row),
+			State:          projectedState(ctx, current.chat, *row, inspect),
 			Dir:            row.CWD,
 			Project:        row.Project,
 			Name:           row.Name,
@@ -266,33 +268,13 @@ func (current *backend) listProjected(
 	}, nil
 }
 
-// chatRowState is the one place a ls row's state is decided.
-//
-// The killed-but-live arm is the honesty half of the kill fix: a kill that
-// closed nothing still wrote its tombstone, so a row came back asserting BOTH
-// things at once — killed:true beside state "idle" and kind "live-claude" —
-// and no caller could tell a real kill from a de-listing. A contradiction is
-// reported as a contradiction, never smoothed into one of its two halves.
-func chatRowState(row compose.Row) string {
-	if row.BackendError != "" {
-		return "error"
+// projectedState is a projected row's state: with inspect, what the chat listing shows its reader at both ls doors
+// (chat.ListedState); without, the row's liveness word alone (chat.RowState), what caller matching reads.
+func projectedState(ctx context.Context, verbs ChatVerbs, row compose.Row, inspect bool) string {
+	if !inspect {
+		return chat.RowState(row)
 	}
-	if row.Backend == "herdr" && row.LostNote != "" && !row.Kind.IsAddressable() {
-		return "lost"
-	}
-	switch {
-	case row.Killed && row.Kind.IsAddressable():
-		return "killed-but-live"
-	case row.Kind == compose.Booting:
-		// A booting chat HAS a socket and already answers call by
-		// name. Excluding it made ls report a chat that exists as
-		// simply absent for its first minute.
-		return "booting"
-	case row.Kind.IsAddressable():
-		return "idle"
-	default:
-		return "resumable"
-	}
+	return chat.ListedState(row, func() (headless.Status, error) { return verbs.Inspect(ctx, row) })
 }
 
 type callerIdentity struct {
@@ -699,7 +681,12 @@ func (current *backend) identityFromRow(row ChatRow) (resolve.Identity, error) {
 		backend = spawn.BackendTmux
 	}
 	session := row.Session
-	if session == "" {
+	if backend == spawn.BackendHerdr && row.SeatID != "" {
+		if session == row.ID {
+			session = "" // listProjected's id for a row with no name: the seat's handle stands instead
+		}
+		session = resolve.SeatHandle(session, row.SeatID)
+	} else if session == "" {
 		session = row.SeatID
 	}
 	return resolve.Identity{

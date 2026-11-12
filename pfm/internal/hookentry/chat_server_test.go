@@ -184,7 +184,8 @@ func TestChatServerDoorPlacesOnce(t *testing.T) {
 		want          string
 	}{
 		{name: "default", code: 0, want: "shim.cx=tmux"},
-		{name: "configured Herdr outside Herdr", backend: "herdr", code: 1, want: "shim.cx="},
+		// Herdr asked for in config while no Herdr server runs: refused, never tmux.
+		{name: "configured Herdr, Herdr down", backend: "herdr", code: 10, want: "shim.cx="},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := exec.LookPath("tmux"); err != nil && tc.code == 0 {

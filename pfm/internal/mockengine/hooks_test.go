@@ -122,7 +122,7 @@ printf 'SL-FIXTURE\n'
 			"type":                 "command",
 			"command":              statusScript,
 			"padding":              0,
-			"refreshInterval":      2,
+			"refreshInterval":      fix.statusRefresh,
 			"hideVimModeIndicator": true,
 		},
 	}
@@ -153,7 +153,7 @@ func inlineHookSettings(t *testing.T, hooks map[string]any, status string) strin
 	t.Helper()
 	document := map[string]any{"hooks": hooks}
 	if status != "" {
-		document["statusLine"] = map[string]any{"type": "command", "command": status}
+		document["statusLine"] = map[string]any{"type": "command", "command": status, "refreshInterval": 2}
 	}
 	return string(mustJSON(t, document))
 }
@@ -195,6 +195,36 @@ func TestClaudeSettingsLayersFireAllPlayedEventsInOrder(t *testing.T) {
 	got := strings.Split(strings.TrimSpace(readFile(t, order)), "\n")
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("order=%q, want %q", got, want)
+	}
+}
+
+// TestClaudeSessionStartMatchesItsSource: a SessionStart matcher reads the session's source, as Claude's
+// does, so pfm's clear-name-start ("clear") and resume-unkill (resume) handlers run only at their start.
+func TestClaudeSessionStartMatchesItsSource(t *testing.T) {
+	fix := newFixture(t)
+	t.Chdir(fix.work)
+	order := filepath.Join(fix.recordDir, "sources")
+	hooks := map[string]any{hookSessionStart: []any{}}
+	for _, source := range []string{sourceStartup, sourceResume, sourceClear} {
+		hooks[hookSessionStart] = append(hooks[hookSessionStart].([]any), map[string]any{
+			"matcher": source,
+			"hooks": []any{map[string]any{
+				"type": "command", "command": `printf '%s\n' '` + source + `' >> "` + order + `"`,
+			}},
+		})
+	}
+	writeHookSettings(t, filepath.Join(fix.configDir, "settings.json"), hooks)
+	fix.write(Scenario{SessionID: fixtureSession, BusyMS: intPtr(0)})
+	session := fix.startTUI("claude", nil, nil)
+	session.waitFrame("the composer", func(frame string) bool { return strings.Contains(frame, "❯") })
+	session.typeLine("/clear")
+	session.typeLine("/exit")
+	if code := session.waitExit(); code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, session.stderr.String())
+	}
+	want := []string{sourceStartup, sourceClear}
+	if got := strings.Split(strings.TrimSpace(readFile(t, order)), "\n"); !reflect.DeepEqual(got, want) {
+		t.Fatalf("SessionStart handlers run = %q, want %q (%s)", got, want, order)
 	}
 }
 
@@ -292,8 +322,8 @@ func TestClaudeSettingsPathStatusPrecedenceMatchersAndDedup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status != mark("status-inline") {
-		t.Fatalf("status=%q", status)
+	if want := (statusLineSetting{command: mark("status-inline"), refresh: 2 * time.Second}); status != want {
+		t.Fatalf("status=%+v want %+v", status, want)
 	}
 	for _, tool := range []string{"Bash", "Write"} {
 		if _, err := set.fire(
@@ -312,14 +342,16 @@ func TestClaudeSettingsPathStatusPrecedenceMatchersAndDedup(t *testing.T) {
 	if got := strings.Split(strings.TrimSpace(readFile(t, order)), "\n"); !reflect.DeepEqual(got, want) {
 		t.Fatalf("matching/dedup=%q want %q", got, want)
 	}
-	if _, status, err := loadClaudeHooks(fix.configDir, fix.work, ""); err != nil || status != mark("status-project") {
-		t.Fatalf("project status=%q err=%v", status, err)
+	if _, status, err := loadClaudeHooks(fix.configDir, fix.work, ""); err != nil ||
+		status.command != mark("status-project") {
+		t.Fatalf("project status=%+v err=%v", status, err)
 	}
 	if err := os.Remove(project); err != nil {
 		t.Fatal(err)
 	}
-	if _, status, err := loadClaudeHooks(fix.configDir, fix.work, ""); err != nil || status != mark("status-account") {
-		t.Fatalf("account status=%q err=%v", status, err)
+	if _, status, err := loadClaudeHooks(fix.configDir, fix.work, ""); err != nil ||
+		status.command != mark("status-account") {
+		t.Fatalf("account status=%+v err=%v", status, err)
 	}
 }
 

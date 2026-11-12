@@ -76,6 +76,7 @@ type ResolveOutput struct {
 	SocketPath string `json:"socket_path,omitempty"`
 	Pane       string `json:"pane,omitempty"`
 	Candidates string `json:"candidates,omitempty"`
+	Message    string `json:"message,omitempty"`
 }
 
 // CallInput requests guarded live delivery.
@@ -121,51 +122,6 @@ type CallDelivery struct {
 	LiteralChunks int    `json:"literal_chunks,omitempty"`
 }
 
-// KeysInput requests tmux keypresses for one resolved live chat. Keys are
-// key names unless Literal is explicitly true; this mirrors `pfm chat keys`.
-type KeysInput struct {
-	Target  string   `json:"target" jsonschema:"live session, Claude label, Codex thread name, self, or tmux pane"`
-	Keys    []string `json:"keys" jsonschema:"tmux key names to press"`
-	Literal bool     `json:"literal,omitempty" jsonschema:"type each key as literal text instead of pressing it"`
-	DelayMS int      `json:"delay_ms,omitempty" jsonschema:"pause between keys in milliseconds; default 120"`
-	Capture bool     `json:"capture,omitempty" jsonschema:"return the pane after the keys land"`
-}
-
-// codeCapability marks a pre-send backend refusal, not a dead target.
-const codeCapability = 10
-
-// KeysOutput is the structured receipt for keys.
-type KeysOutput struct {
-	Status     string   `json:"status"`
-	Message    string   `json:"message,omitempty"`
-	Code       int      `json:"code"`
-	SocketPath string   `json:"socket_path,omitempty"`
-	Pane       string   `json:"pane,omitempty"`
-	Count      int      `json:"count"`
-	Keys       []string `json:"keys"`
-	Text       string   `json:"text,omitempty"`
-}
-
-// CaptureInput requests a pane snapshot of the whole retained scrollback,
-// bounded by the caller after the capture.
-type CaptureInput struct {
-	Target    string `json:"target" jsonschema:"live session, Claude label, Codex thread name, self, or tmux pane"`
-	TailLines *int   `json:"tail_lines,omitempty" jsonschema:"return at most this many non-empty lines of the scrollback; default 40"`
-	MaxBytes  *int   `json:"max_bytes,omitempty" jsonschema:"maximum returned text bytes, default 262144 and maximum 4194304"`
-}
-
-// CaptureOutput is capture's structured response.
-type CaptureOutput struct {
-	Status     string `json:"status"`
-	Code       int    `json:"code"`
-	SocketPath string `json:"socket_path,omitempty"`
-	Pane       string `json:"pane,omitempty"`
-	Text       string `json:"text,omitempty"`
-	Message    string `json:"message,omitempty"`
-	Bytes      int    `json:"bytes,omitempty"`
-	Truncated  bool   `json:"truncated,omitempty"`
-}
-
 // WhoamiInput takes no arguments: Codex identity arrives in the reserved MCP
 // request metadata, while stdio callers retain environment/ancestry recovery.
 type WhoamiInput struct{}
@@ -189,9 +145,13 @@ type LastInput struct {
 	Target string `json:"target" jsonschema:"chat id, name, session, or tmux target"`
 }
 
+// LastOutput is last's answer: Text, or a refusal's Status, Code and Message as pfm chat last answers it.
 type LastOutput struct {
-	Target string `json:"target"`
-	Text   string `json:"text"`
+	Target  string `json:"target"`
+	Text    string `json:"text,omitempty"`
+	Status  string `json:"status,omitempty"`
+	Code    int    `json:"code,omitempty"`
+	Message string `json:"message,omitempty"`
 }
 
 // StatusInput selects one chat for headless status inspection.
@@ -220,6 +180,9 @@ type StatusOutput struct {
 	Summary       string       `json:"summary,omitempty"`
 	SummaryCached bool         `json:"summary_cached,omitempty"`
 	Ask           string       `json:"ask,omitempty"`
+	// Code is pfm chat status's exit code (chat.StatusCode, 4 for no such chat); Message a refusal's wording.
+	Code    int    `json:"code,omitempty"`
+	Message string `json:"message,omitempty"`
 }
 
 // TargetInput is shared by chat actions whose CLI form takes one target.
@@ -271,4 +234,46 @@ type KillInput struct {
 type SaveInput struct {
 	Target     string `json:"target" jsonschema:"FILE PATH to append the snapshot to (not a chat) — must contain a directory separator, e.g. ./notes/session.md"`
 	Transcript string `json:"transcript,omitempty" jsonschema:"path of the transcript .jsonl to dump; defaults to the calling chat's own transcript"`
+}
+
+// KeysInput requests tmux keypresses for one resolved live chat. Keys are
+// key names unless Literal is explicitly true; this mirrors `pfm chat keys`.
+type KeysInput struct {
+	Target  string   `json:"target" jsonschema:"live session, Claude label, Codex thread name, self, or tmux pane"`
+	Keys    []string `json:"keys" jsonschema:"tmux key names to press"`
+	Literal bool     `json:"literal,omitempty" jsonschema:"type each key as literal text instead of pressing it"`
+	DelayMS int      `json:"delay_ms,omitempty" jsonschema:"pause between keys in milliseconds; default 120"`
+	Capture bool     `json:"capture,omitempty" jsonschema:"return the pane after the keys land"`
+}
+
+// KeysOutput is the structured receipt for keys.
+type KeysOutput struct {
+	Status     string   `json:"status"`
+	Message    string   `json:"message,omitempty"`
+	Code       int      `json:"code"`
+	SocketPath string   `json:"socket_path,omitempty"`
+	Pane       string   `json:"pane,omitempty"`
+	Count      int      `json:"count"`
+	Keys       []string `json:"keys"`
+	Text       string   `json:"text,omitempty"`
+}
+
+// CaptureInput requests a pane snapshot of the whole retained scrollback,
+// bounded by the caller after the capture.
+type CaptureInput struct {
+	Target    string `json:"target" jsonschema:"live session, Claude label, Codex thread name, self, or tmux pane"`
+	TailLines *int   `json:"tail_lines,omitempty" jsonschema:"return the last this many lines of the scrollback, trailing blank rows dropped first; default 40"`
+	MaxBytes  *int   `json:"max_bytes,omitempty" jsonschema:"maximum returned text bytes, default 262144 and maximum 4194304"`
+}
+
+// CaptureOutput is capture's structured response.
+type CaptureOutput struct {
+	Status     string `json:"status"`
+	Code       int    `json:"code"`
+	SocketPath string `json:"socket_path,omitempty"`
+	Pane       string `json:"pane,omitempty"`
+	Text       string `json:"text,omitempty"`
+	Message    string `json:"message,omitempty"`
+	Bytes      int    `json:"bytes,omitempty"`
+	Truncated  bool   `json:"truncated,omitempty"`
 }

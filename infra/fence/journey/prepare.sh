@@ -7,6 +7,7 @@
 # clones (~/.local/share/journey/mirror) with the script that clones it (~/.local/share/journey/install.sh),
 # leaves a file of the owner's own in ~/.claude, a project at $HOME/work/demo and a second Claude account's
 # directory at ~/.cc/2, and Codex and OpenCode logged in. It installs nothing of pfm: the suite's first step does.
+# With GOCOVERDIR set, every login and service also carries it and the instrumented build's GOFLAGS (3b).
 # Bash 3.2 and BSD-tool safe; every OS difference goes through scripts/platform.sh.
 # BROKEN STATE: `prepare: FAIL {step}: {cause}` and exit 1; refuses outright off a disposable machine.
 set -euo pipefail
@@ -56,6 +57,17 @@ cat >"$HOME/.zshrc" <<'ZSH'
 PROMPT='owner %# '
 unsetopt BEEP
 ZSH
+
+# 3b. Coverage, when the caller names GOCOVERDIR (run.sh and CI's journey job always do): the pfm the
+# install builds is instrumented, with the counter flush on a terminating signal (GOFLAGS, which
+# INSTALL.md's go build reads; internal/coverflush), and every pfm on the machine writes its
+# counters into GOCOVERDIR: each login through ~/.zshenv, each service through the service manager.
+if [ -n "${GOCOVERDIR:-}" ]; then
+  install -d -m 0777 "$GOCOVERDIR" || fail "coverage: cannot create $GOCOVERDIR"
+  printf 'export GOCOVERDIR="%s" GOFLAGS="-cover -covermode=atomic -tags=pfmcover"\n' "$GOCOVERDIR" >>"$HOME/.zshenv"
+  platform_service_env GOCOVERDIR "$GOCOVERDIR" ||
+    fail "coverage: cannot set GOCOVERDIR for the owner's services (rc $?)"
+fi
 
 # 4. Herdr: its config names no shell, so pfm's install wires its own wrapper, as on any owner's machine.
 install -d -m 0700 "$HOME/.config/herdr" || fail "herdr: cannot create $HOME/.config/herdr"

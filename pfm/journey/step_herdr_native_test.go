@@ -52,7 +52,7 @@ func claudeTyped(c *harness.Ctx, s State) State {
 }
 
 // rename: the owner names the chat from a second terminal (`pfm chat name {session} {name}`), then
-// inside the engine (`/rename {name}`, followed by a turn), then clears the conversation (`/clear`) and
+// inside the engine (`/rename {name}`, named before any turn, then a turn), then clears the conversation (`/clear`) and
 // names the successor by the chat's name. After each door pfm's row name, Herdr's tab label and the
 // seat's name are the new name; the cleared chat keeps its seat, pane and engine under a new session.
 func rename(c *harness.Ctx, s State) State {
@@ -65,7 +65,9 @@ func rename(c *harness.Ctx, s State) State {
 
 	s.Name = c.Unique("typed")
 	term.Type("/rename " + s.Name + "\r")
-	// Claude fires no hook on /rename: the seat and the tab follow at the next hook, the turn's.
+	// Claude fires no hook on /rename: its statusline's next paced render names the seat and the tab,
+	// before any turn; the turn's hooks after it keep the name.
+	namesAgree(c, s, "/rename")
 	term.Type(`after the rename mock-engine: {"type":"turn","reply":"renamed-reply"}` + "\r")
 	term.WaitFor("⏺ renamed-reply", 20*time.Second)
 	namesAgree(c, s, "/rename and a turn")
@@ -85,10 +87,15 @@ func rename(c *harness.Ctx, s State) State {
 		}
 		return false, fmt.Sprintf("live seats %v", seats)
 	})
+	// The successor carries its own name, the cleared one's numbered; the cleared conversation, named or
+	// not, is listed nowhere.
+	s.Name += " #2"
 	namesAgree(c, s, "/clear")
-	cleared := s.Name
+	if rows := listRows(c, before.Session); len(rows) != 0 {
+		c.Failf("the cleared named conversation %s is still listed:\n%s", before.Session, strings.Join(rows, "\n"))
+	}
 	s.Name = c.Unique("cleared")
-	nameFromCLI(c, cli, s, cleared)
+	nameFromCLI(c, cli, s, s.Chat.Session)
 	namesAgree(c, s, "/clear and pfm chat name")
 	if p, ok := processes(c)[before.Engine]; !ok || p.Engine != "claude" {
 		c.Failf("the engine %d is gone after /clear, want it kept", before.Engine)
@@ -96,18 +103,18 @@ func rename(c *harness.Ctx, s State) State {
 	return s
 }
 
-// nameFromCLI types `pfm chat name {target} {s.Name}` in cli and requires its confirm line.
+// nameFromCLI types `pfm chat name {target} {s.Name}` in cli and requires its confirm line alone: a plain
+// terminal is no chat, and a name is a harness command pfm never signs, so there is no sender to report.
 func nameFromCLI(c *harness.Ctx, cli *harness.Terminal, s State, target string) {
-	label := "name-" + s.Name
-	if code := shellRun(cli, label, "pfm chat name "+target+" "+s.Name, 20*time.Second); code != 0 {
-		c.Failf("pfm chat name %s %s exited %d", target, s.Name, code)
-	}
-	if want := "named " + s.Chat.Session + " -> " + s.Name; !strings.Contains(cli.Screen(), want+"\n") {
-		c.Failf("pfm chat name printed no %q", want)
+	out, errs, code := typedRun(c, cli, "name-"+s.Name, "pfm chat name "+target+" "+s.Name)
+	if want := "named " + s.Chat.Session + " -> " + s.Name + "\n"; code != 0 || out != want || errs != "" {
+		c.Failf("pfm chat name %s %s: exit %d, stdout %q, stderr %q; want exit 0, stdout %q, no stderr",
+			target, s.Name, code, out, errs, want)
 	}
 }
 
-// namesAgree waits for pfm's row name, the Herdr tab label and the live seat's name to read s.Name.
+// namesAgree waits for pfm's row name and the live seat's name to read s.Name, and the Herdr tab label
+// to read s.Name under the idle mark: every door to it leaves the chat at rest.
 func namesAgree(c *harness.Ctx, s State, after string) {
 	c.Poll("row, tab and seat named "+s.Name+" after "+after, stepBound, func() (bool, string) {
 		seat := strings.TrimSpace(
@@ -115,17 +122,25 @@ func namesAgree(c *harness.Ctx, s State, after string) {
 				" and session_id = '"+s.Chat.Session+"'"),
 		)
 		got := [3]string{lsName(c, s), tabLabel(c, s), seat}
-		return got == [3]string{s.Name, s.Name, s.Name}, fmt.Sprintf("row, tab, seat = %q", got)
+		return got == [3]string{s.Name, markedLabel("idle", s.Name), s.Name}, fmt.Sprintf("row, tab, seat = %q", got)
 	})
 }
 
-// reloadCLI: from a second terminal the owner aims `pfm chat reload` at the chat's Herdr socket and
-// pane; the chat comes back in the same pane with the same seat, session and name under a new engine.
+// reloadCLI: with a draft left in the chat's composer, the owner aims `pfm chat reload` at the chat's Herdr
+// socket and pane from a second terminal, with a follow-up prompt (--then); the chat comes back in the same
+// pane with the same seat, session and name under a new engine, the follow-up submitted once and answered,
+// and the draft, parked before the reload's /exit, never reaches the chat as a prompt.
 func reloadCLI(c *harness.Ctx, s State) State {
 	cli := c.Terminal(s.Term + "-cli")
+	term := c.Terminal(s.Term)
 	before := s.Chat.Engine
-	command := "pfm chat reload --sock " + herdrSocket(s) + " --pane " + s.Pane
-	if code := shellRun(cli, "reload", command, 20*time.Second); code != 0 {
+	draft := c.Unique("draft")
+	term.Type(draft)
+	term.WaitFor("❯ " + draft)
+	reply := c.Unique("then-pong")
+	then := "the reborn chat answers this follow-up at once " + directive(turnStep(reply))
+	command := "pfm chat reload --sock " + herdrSocket(s) + " --pane " + s.Pane + " --then '" + then + "'"
+	if code := shellRun(cli, "reload", command, 30*time.Second); code != 0 {
 		c.Failf("%s exited %d, want 0", command, code)
 	}
 	c.Poll("a new engine for session "+s.Chat.Session, 20*time.Second, func() (bool, string) {
@@ -137,8 +152,19 @@ func reloadCLI(c *harness.Ctx, s State) State {
 		return false, fmt.Sprintf("engines %v", engines(processes(c)))
 	})
 	reloadRunDone(c, s)
-	c.Terminal(s.Term).WaitFor("❯", 20*time.Second)
+	term.WaitFor("⏺ "+reply, 20*time.Second)
 	s.Chat.Engine = engineOf(c, s)
+	path := transcriptOf(c, s)
+	var got []string
+	for _, text := range userTexts(c, path) {
+		if text == then || strings.Contains(text, draft) {
+			got = append(got, text)
+		}
+	}
+	if !slices.Equal(got, []string{then}) {
+		c.Failf("prompts in %s holding the --then text or the draft = %q, want the --then text once: %q",
+			path, got, then)
+	}
 	seats := liveSeats(c, herdrSocket(s))
 	if got, want := seats[s.Chat.Session], [2]string{s.Chat.Seat, s.Pane}; len(seats) != 1 || got != want {
 		c.Failf("live seats after the reload = %v, want only %s on seat %v", seats, s.Chat.Session, want)
@@ -151,7 +177,8 @@ func reloadCLI(c *harness.Ctx, s State) State {
 // paneLost: the owner closes the chat's pane with Herdr's close key (prefix, x) and confirms; Herdr
 // closes the workspace and opens a fresh one on the picker. The engine dies with the pane; pfm still
 // answers: `pfm chat ls --all` exits 0 and lists the chat dead on a lost Herdr seat, `pfm ls --tsv`
-// lists it resumable with no cwd, the seat reads lost, and the picker in the new pane draws its row.
+// lists it resumable in its project, the seat reads lost, the picker in the new pane draws its row, and
+// that pane's tab is Herdr's fresh one, no mark of the chat on it.
 func paneLost(c *harness.Ctx, s State) State {
 	term := c.Terminal(s.Term)
 	term.Press(harness.Ctrl('b'))
@@ -182,8 +209,8 @@ func paneLost(c *harness.Ctx, s State) State {
 	if want := []string{
 		"resume-claude",
 		s.Chat.Session,
-		"?",
-		"",
+		"demo",
+		s.Project,
 		s.Name,
 	}; len(row) < 11 || !slices.Equal(row[:5], want) ||
 		row[10] != sock {
@@ -199,6 +226,7 @@ func paneLost(c *harness.Ctx, s State) State {
 		c.Failf("lost seats on %s = %v, want %s on %v", sock, seats, s.Chat.Session, [2]string{s.Chat.Seat, s.Pane})
 	}
 	term.WaitFor("↻ "+s.Name, 20*time.Second)
+	chatTabGone(c, s)
 	return s
 }
 
@@ -229,7 +257,8 @@ var killedFooter = regexp.MustCompile(`\n {2}\(\+[1-9]\d* killed — pfm ls --ki
 // killFromPicker: in the picker the new pane opened, the owner types the lost chat's name to find its
 // row among every branch's chats, selects it and presses Ctrl-X; the row leaves the picker with no tmux
 // error naming its Herdr socket on the screen, the chat is killed in state (`pfm chat ls --all` counts
-// it killed, `pfm ls --tsv` lists it no more) and its seat is left lost.
+// it killed, `pfm ls --tsv` lists it no more), its seat is left lost and the pane's tab stays Herdr's
+// fresh one.
 func killFromPicker(c *harness.Ctx, s State) State {
 	term := c.Terminal(s.Term)
 	term.WaitFor("↻ " + s.Name)
@@ -276,6 +305,7 @@ func killFromPicker(c *harness.Ctx, s State) State {
 			[2]string{s.Chat.Seat, s.Pane},
 		)
 	}
+	chatTabGone(c, s)
 	return s
 }
 
@@ -298,8 +328,8 @@ func unkill(c *harness.Ctx, s State) State {
 	if want, row := []string{
 		"resume-claude",
 		s.Chat.Session,
-		"?",
-		"",
+		"demo",
+		s.Project,
 		s.Name,
 	}, tsvRow(
 		c,
@@ -371,6 +401,19 @@ func tabLabel(c *harness.Ctx, s State) string {
 	return list.Result.Tabs[0].Label
 }
 
+// freshTabLabel is the label Herdr gives the first tab of a workspace it opens: its number.
+const freshTabLabel = "1"
+
+// chatTabGone requires the branch's one Herdr tab to be the fresh tab Herdr opened on pfm's picker once
+// the chat's pane went (after its end, its lost pane, its kill): no mark of the chat, nor its name, is
+// left on it.
+func chatTabGone(c *harness.Ctx, s State) {
+	if got := tabLabel(c, s); got != freshTabLabel {
+		c.Failf("the Herdr tab after chat %s left its pane is labelled %q, want Herdr's fresh tab %q",
+			s.Chat.Session, got, freshTabLabel)
+	}
+}
+
 // lsName is `pfm ls --tsv`'s name of the branch's chat.
 func lsName(c *harness.Ctx, s State) string {
 	for _, line := range strings.Split(read(c, "pfm", "ls", "--tsv"), "\n") {
@@ -379,4 +422,29 @@ func lsName(c *harness.Ctx, s State) string {
 		}
 	}
 	return "(no row " + s.Chat.Session + ")"
+}
+
+// userTexts is the text of every prompt the owner's side put in the transcript at path, meta records left out.
+func userTexts(c *harness.Ctx, path string) []string {
+	var texts []string
+	for _, line := range strings.Split(read(c, "cat", path), "\n") {
+		var record struct {
+			Type    string `json:"type"`
+			IsMeta  bool   `json:"isMeta"`
+			Message struct {
+				Content json.RawMessage `json:"content"`
+			} `json:"message"`
+		}
+		if json.Unmarshal([]byte(line), &record) != nil || record.Type != "user" || record.IsMeta {
+			continue
+		}
+		var text string
+		if json.Unmarshal(record.Message.Content, &text) == nil {
+			texts = append(texts, text)
+		}
+	}
+	if len(texts) == 0 {
+		c.Failf("the transcript %s holds no prompt", path)
+	}
+	return texts
 }

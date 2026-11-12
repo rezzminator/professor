@@ -12,6 +12,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -36,6 +37,7 @@ func TestChatLSAdaptTheTypedVerbs(t *testing.T) {
 			Herdr:   []string{"w6:p2 .professor idle pfm-1", "not in herdr"},
 			Matched: 5, Truncated: true, KilledCount: 1,
 		},
+		inspected: headless.Status{State: headless.StateWorking},
 	}
 	service := newService("test", &backend{chat: verbs})
 	ctx := context.Background()
@@ -56,7 +58,7 @@ func TestChatLSAdaptTheTypedVerbs(t *testing.T) {
 		t.Fatalf("ls counts = %+v", ls)
 	}
 	live, killed := ls.Rows[0], ls.Rows[1]
-	if live.Session != "cx-a" || live.Engine != pfmengine.Codex || live.State != "idle" ||
+	if live.Session != "cx-a" || live.Engine != pfmengine.Codex || live.State != "working" ||
 		live.Account != 2 || live.Pane != "%1" || live.Kind != compose.LiveCodex.String() {
 		t.Fatalf("live row = %+v", live)
 	}

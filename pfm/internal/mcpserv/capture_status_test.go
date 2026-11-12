@@ -2,15 +2,17 @@ package mcpserv
 
 import (
 	"context"
+	"io"
+	"reflect"
+	"strings"
 	"testing"
 
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
+	"github.com/rezzminator/professor/pfm/internal/chat"
 )
 
-// captureCodeCaller answers Capture with one pinned engine code and detail,
-// the way pfmcall.Engine.Capture does for a resolved-but-unreadable pane
-// (CodeDead), a target that matched nothing (CodeUnknown), several matches
-// (CodeAmbiguous), or any other failure the engine grows later.
+// captureCodeCaller answers the call engine's resolve and capture with one pinned code and detail, for a tool
+// whose request is refused before any chat verb runs.
 type captureCodeCaller struct {
 	code   int
 	detail string
@@ -36,92 +38,163 @@ func (captureCodeCaller) Call(context.Context, pfmcall.Request) (pfmcall.Result,
 	return pfmcall.Result{}, nil
 }
 
-// TestChatCaptureAnswersADeadPaneDistinctlyFromNotFound pins the honesty
-// split chatOpenDetached already makes in this package: "no such chat"
-// (statusNotFound) is reserved for a target that matched nothing. A pane that
-// resolved and then could not be READ — pfmcall.CodeDead, which
-// pfmcall.Engine.Capture returns for every tmux capture I/O error — and any
-// other failed capture must answer something else, or a live chat reads as
-// absent during one transient tmux read.
-func TestChatCaptureAnswersADeadPaneDistinctlyFromNotFound(t *testing.T) {
+// TestChatCaptureAndKeysAnswerTheChatVerbsRefusalsAsReceipts pins this door's half of capture and keys: every
+// refusal the chat verb answers (the one `pfm chat capture` and `pfm chat keys` print) comes back as a receipt of
+// its exact status, code and message, never a tool error; an ok capture keeps the verb's tail and its truncation,
+// cut further only by max_bytes.
+func TestChatCaptureAndKeysAnswerTheChatVerbsRefusalsAsReceipts(t *testing.T) {
 	t.Parallel()
-	for _, test := range []struct {
-		name   string
-		code   int
-		detail string
-		want   string
+	seat := chat.CallTarget{Backend: "tmux", SocketPath: "/sock/cc-a", Pane: "%3"}
+	maxBytes := 4
+	cases := []struct {
+		name     string
+		verbs    *fakeChatVerbs
+		capture  *CaptureInput
+		keys     *KeysInput
+		want     any
+		wantTail int
 	}{
-		{"resolved pane could not be read", pfmcall.CodeDead, "target pane is dead or unreadable", statusDead},
-		{"target matched no live chat", pfmcall.CodeUnknown, `target "gone" matched no live chat`, statusNotFound},
-		{"several targets matched", pfmcall.CodeAmbiguous, "two rows match", statusAmbiguous},
-		{"any other capture failure", 99, "capture failed for a new reason", statusError},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			service := newService("test", &backend{
-				callEngine:           captureCodeCaller{code: test.code, detail: test.detail},
-				allowAmbientIdentity: true,
-			})
-			_, output, err := service.chatCapture(context.Background(), nil, CaptureInput{Target: "some-chat"})
-			if err != nil {
-				t.Fatalf("capture: %v", err)
-			}
-			if output.Status != test.want {
-				t.Fatalf(
-					"capture status for engine code %d = %q, want %q — %q must never read as %q",
-					test.code, output.Status, test.want, test.detail, statusNotFound,
-				)
-			}
-			if output.Code != test.code {
-				t.Fatalf("capture code = %d, want the engine's own %d", output.Code, test.code)
-			}
-			if output.Message != test.detail {
-				t.Fatalf("capture message = %q, want the engine's detail %q", output.Message, test.detail)
-			}
-		})
-	}
-}
-
-// TestChatCaptureSurfacesCodeCaptureFailedAsAToolError pins
-// pfmcall.CodeCaptureFailed's own arm: unlike CodeDead/CodeAmbiguous/
-// CodeUnknown, which describe the TARGET pane and stay legitimate soft
-// answers (err stays nil so a caller reads them off Status), CodeCaptureFailed
-// means the probe itself never ran (pfmtmux.CouldNotRun) — this tool's own
-// execution failed, so it must surface as a real Go error the way
-// chatOpenDetached and cliAction (actions.go) already return one for their
-// statusError outcomes, not just a JSON status field a caller can miss.
-func TestChatCaptureSurfacesCodeCaptureFailedAsAToolError(t *testing.T) {
-	t.Parallel()
-	service := newService("test", &backend{
-		callEngine: captureCodeCaller{
-			code:   pfmcall.CodeCaptureFailed,
-			detail: "could not run tmux to capture %0: exec: \"tmux\": executable file not found in $PATH",
+		{
+			name: "capture unknown", verbs: &fakeChatVerbs{err: pfmcall.UnknownChat("gone")},
+			capture: &CaptureInput{Target: "gone"}, wantTail: 40,
+			want: CaptureOutput{Status: "not_found", Code: 4, Message: `no chat named "gone"`},
 		},
-		allowAmbientIdentity: true,
-	})
-	_, output, err := service.chatCapture(context.Background(), nil, CaptureInput{Target: "some-chat"})
-	if err == nil {
-		t.Fatalf(
-			"capture on pfmcall.CodeCaptureFailed returned a nil error — a probe that could not run must surface as a real tool error, not silently as a status field",
-		)
+		{
+			name: "capture not running", verbs: &fakeChatVerbs{err: pfmcall.NotRunning("child")},
+			capture: &CaptureInput{Target: "child", TailLines: captureInt(3)}, wantTail: 3,
+			want: CaptureOutput{Status: "dead", Code: 3, Message: `"child" is not running`},
+		},
+		{
+			name:    "capture ambiguous",
+			verbs:   &fakeChatVerbs{err: pfmcall.Refusal{Status: "ambiguous", Code: 2, Message: "a1 a2"}},
+			capture: &CaptureInput{Target: "a"}, wantTail: 40,
+			want: CaptureOutput{Status: "ambiguous", Code: 2, Message: "a1 a2"},
+		},
+		{
+			name: "capture unreadable seat",
+			verbs: &fakeChatVerbs{
+				captured: chat.Captured{Seat: seat},
+				err:      pfmcall.Refusal{Status: "dead", Code: 3, Message: "pane gone"},
+			},
+			capture: &CaptureInput{Target: "a"}, wantTail: 40,
+			want: CaptureOutput{Status: "dead", Code: 3, SocketPath: "/sock/cc-a", Pane: "%3", Message: "pane gone"},
+		},
+		{
+			name:    "capture tail kept",
+			verbs:   &fakeChatVerbs{captured: chat.Captured{Seat: seat, Text: "b\nc\n", Truncated: true}},
+			capture: &CaptureInput{Target: "a", TailLines: captureInt(2)}, wantTail: 2,
+			want: CaptureOutput{
+				Status: "ok", SocketPath: "/sock/cc-a", Pane: "%3", Text: "b\nc\n", Bytes: 4, Truncated: true,
+			},
+		},
+		{
+			name:    "capture at the byte bound",
+			verbs:   &fakeChatVerbs{captured: chat.Captured{Seat: seat, Text: "b\nc\n"}},
+			capture: &CaptureInput{Target: "a", MaxBytes: &maxBytes}, wantTail: 40,
+			want: CaptureOutput{Status: "ok", SocketPath: "/sock/cc-a", Pane: "%3", Text: "b\nc\n", Bytes: 4},
+		},
+		{
+			name:    "capture one byte past the bound",
+			verbs:   &fakeChatVerbs{captured: chat.Captured{Seat: seat, Text: "ab\nc\n"}},
+			capture: &CaptureInput{Target: "a", MaxBytes: &maxBytes}, wantTail: 40,
+			want: CaptureOutput{
+				Status: "ok", SocketPath: "/sock/cc-a", Pane: "%3", Text: "b\nc\n", Bytes: 4, Truncated: true,
+			},
+		},
+		{
+			name: "keys unknown", verbs: &fakeChatVerbs{err: pfmcall.UnknownChat("gone")},
+			keys: &KeysInput{Target: "gone", Keys: []string{"Escape"}},
+			want: KeysOutput{Status: "not_found", Code: 4, Message: `no chat named "gone"`, Keys: []string{"Escape"}},
+		},
+		{
+			name: "keys pane vanished mid-sequence",
+			verbs: &fakeChatVerbs{
+				keyed: chat.Keyed{Seat: seat, Sent: chat.KeysSent{Count: 1}},
+				err:   pfmcall.Refusal{Status: "dead", Code: 3, Message: "Enter: pane gone"},
+			},
+			keys: &KeysInput{Target: "a", Keys: []string{"Escape", "Enter"}},
+			want: KeysOutput{
+				Status: "dead", Code: 3, Message: "Enter: pane gone", SocketPath: "/sock/cc-a", Pane: "%3",
+				Count: 1, Keys: []string{"Escape", "Enter"},
+			},
+		},
+		{
+			name: "keys refused by the host",
+			verbs: &fakeChatVerbs{
+				keyed: chat.Keyed{Seat: seat},
+				err:   pfmcall.Refusal{Status: "refused", Code: 2, Message: "Herdr cannot press Home"},
+			},
+			keys: &KeysInput{Target: "a", Keys: []string{"Home"}},
+			want: KeysOutput{
+				Status: "refused", Code: 2, Message: "Herdr cannot press Home", SocketPath: "/sock/cc-a", Pane: "%3",
+				Keys: []string{"Home"},
+			},
+		},
+		{
+			name:  "keys landed",
+			verbs: &fakeChatVerbs{keyed: chat.Keyed{Seat: seat, Sent: chat.KeysSent{Count: 1, Screen: "screen\n"}}},
+			keys:  &KeysInput{Target: "a", Keys: []string{"Enter"}, Capture: true},
+			want: KeysOutput{
+				Status: "ok", SocketPath: "/sock/cc-a", Pane: "%3", Count: 1, Keys: []string{"Enter"}, Text: "screen\n",
+			},
+		},
 	}
-	if output.Status != statusError || output.Code != pfmcall.CodeCaptureFailed {
-		t.Fatalf("capture output = %+v, want Status=%q Code=%d", output, statusError, pfmcall.CodeCaptureFailed)
+	for _, testCase := range cases {
+		service := newService("test", &backend{chat: testCase.verbs, allowAmbientIdentity: true})
+		var got any
+		var err error
+		if testCase.capture != nil {
+			_, got, err = service.chatCapture(context.Background(), nil, *testCase.capture)
+		} else {
+			_, got, err = service.chatKeys(context.Background(), nil, *testCase.keys)
+		}
+		if err != nil || !reflect.DeepEqual(got, testCase.want) {
+			t.Errorf("%s: %+v, %v; want %+v, nil", testCase.name, got, err, testCase.want)
+		}
+		if testCase.capture != nil && !reflect.DeepEqual(testCase.verbs.captureTails, []int{testCase.wantTail}) {
+			t.Errorf("%s: capture tails = %v, want [%d]", testCase.name, testCase.verbs.captureTails, testCase.wantTail)
+		}
 	}
 }
 
-// TestChatCaptureKeepsOKForASuccessfulCapture is the control arm: the split
-// above must not turn a healthy capture into a failure status.
-func TestChatCaptureKeepsOKForASuccessfulCapture(t *testing.T) {
+// TestCLIRefusalIsAReceiptInTheVerbsWords pins the argv actions (kill, unkill, name): an exit code that is a
+// refusal answers a receipt carrying the CLI's own message without its prefix; any other failure stays a tool
+// error.
+func TestCLIRefusalIsAReceiptInTheVerbsWords(t *testing.T) {
 	t.Parallel()
-	service := newService("test", &backend{
-		callEngine:           captureCodeCaller{code: 0},
-		allowAmbientIdentity: true,
-	})
-	_, output, err := service.chatCapture(context.Background(), nil, CaptureInput{Target: "some-chat"})
-	if err != nil {
-		t.Fatalf("capture: %v", err)
+	cases := []struct {
+		name, stderr string
+		code         int
+		want         ActionOutput
+		wantErr      string
+	}{
+		{"unknown", "pfm chat: no chat named \"n\"\n", 4, ActionOutput{
+			Status: "not_found", Code: 4,
+			Message: `no chat named "n"`,
+		}, ""},
+		{"dead", "warning\npfm chat kill: \"c\" is not running: try again\n", 3, ActionOutput{
+			Status: "dead", Code: 3,
+			Message: `"c" is not running: try again`,
+		}, ""},
+		{"unprefixed", "boom\n", 3, ActionOutput{Status: "dead", Code: 3, Message: "boom"}, ""},
+		{"undelivered", "pfm chat kill: stuck\n", 5, ActionOutput{
+			Status: "error", Code: 5,
+			Message: "pfm chat kill: stuck",
+		}, "pfm chat kill n exited 5: pfm chat kill: stuck"},
 	}
-	if output.Status != "ok" || output.Code != 0 {
-		t.Fatalf("capture on a healthy pane = %+v, want ok/0", output)
+	for _, testCase := range cases {
+		service := newService("test", &backend{dispatch: func(_ context.Context, _ []string, _, stderr io.Writer) int {
+			_, _ = io.WriteString(stderr, testCase.stderr)
+			return testCase.code
+		}})
+		_, got, err := service.cliAction(context.Background(), "chat", "kill", "n")
+		gotErr := ""
+		if err != nil {
+			gotErr = err.Error()
+		}
+		if got != testCase.want || !strings.HasPrefix(gotErr, testCase.wantErr) ||
+			(testCase.wantErr == "") != (err == nil) {
+			t.Errorf("%s: %+v, %q; want %+v, %q", testCase.name, got, gotErr, testCase.want, testCase.wantErr)
+		}
 	}
 }

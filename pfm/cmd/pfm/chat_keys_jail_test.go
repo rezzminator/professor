@@ -182,54 +182,8 @@ func TestRunRescuesAPromptStrandedByAnOverlay(t *testing.T) {
 }
 
 func TestChatNativeKeysAndCaptureAdapters(t *testing.T) {
-	jailTest(t)
-	values := jailPaths(t)
-	socket := filepath.Join(t.TempDir(), "h.sock")
 	keys := make(chan string, 32)
-	serveNativeAdapter(t, socket, map[string]string{
-		"pane.get":  `{"type":"pane_info","pane":{"pane_id":"w6:p3","workspace_id":"w6","terminal_id":"fixture-w6:p3","tab_id":"w6:t1","focused":true}}`,
-		"pane.list": `{"type":"pane_list","panes":[{"pane_id":"w6:p3","workspace_id":"w6","terminal_id":"fixture-w6:p3","tab_id":"w6:t1","focused":true}]}`,
-		"agent.get": `{"type":"agent_info","agent":{"pane_id":"w6:p3","terminal_id":"fixture-w6:p3","workspace_id":"w6","tab_id":"w6:t1","focused":true,"agent":"claude","agent_status":"idle","state_change_seq":0,"revision":1}}`,
-		"pane.process_info": fmt.Sprintf(
-			`{"type":"pane_process_info","process_info":{"pane_id":"w6:p3","shell_pid":900001,"foreground_processes":[{"pid":%d,"argv0":"claude"}]}}`,
-			os.Getpid(),
-		),
-		"pane.read":      `{"type":"pane_read","read":{"pane_id":"p3","workspace_id":"w6","text":"native screen\n🔖 🥇 Captured Label │ project","truncated":false}}`,
-		"pane.send_keys": `{"type":"ok"}`,
-		"pane.send_text": `{"type":"ok"}`,
-	}, keys)
-	state := fleetdb.OpenSharedState(context.Background(), values)
-	defer func() {
-		if err := state.Close(); err != nil {
-			t.Error(err)
-		}
-	}()
-	seat := fleetdb.Seat{
-		SeatID:          "native-adapter",
-		SessionID:       "native-session",
-		Engine:          "cc",
-		Backend:         "herdr",
-		State:           "live",
-		Name:            "NATIVE",
-		HerdrSocket:     socket,
-		HerdrPane:       "w6:p3",
-		HerdrWorkspace:  "w6",
-		HerdrTerminalID: "fixture-w6:p3",
-	}
-	values.ProcRoot = t.TempDir()
-	t.Setenv(paths.EnvProcRoot, values.ProcRoot)
-	stageNativeCallerProc(t, values.ProcRoot, seat.SeatID)
-	if err := gather.StampHerdrHost(gather.NewProcFS(values.ProcRoot), &seat, 900001); err != nil {
-		t.Fatal(err)
-	}
-	if err := state.PutSeat(context.Background(), seat); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("TMUX", "")
-	t.Setenv("TMUX_PANE", "")
-	t.Setenv("HERDR_ENV", "1")
-	t.Setenv("HERDR_SOCKET_PATH", socket)
-	t.Setenv("HERDR_PANE_ID", "w6:p3")
+	serveNativeSeat(t, nil, keys)
 	for _, args := range [][]string{{"chat", "keys", "--delay", "0s", "NATIVE", "Enter", "Escape", "C-c", "Down", "Tab"}, {"chat", "keys", "--literal", "--capture", "NATIVE", "native text"}, {"chat", "capture", "NATIVE"}, {"chat", "whoami", "--label"}, {"chat", "modal", "NATIVE", "deny", "1"}} {
 		var stdout, stderr bytes.Buffer
 		if code := run(args, &stdout, &stderr); code != 0 {
@@ -266,6 +220,71 @@ func TestChatNativeKeysAndCaptureAdapters(t *testing.T) {
 	}
 }
 
+// serveNativeSeat stages one live Claude seat, NATIVE, in a Herdr pane w6:p3 served by a fake Herdr socket from
+// the caller's own pane, and returns that socket. overrides replaces a method's answer (serveNativeAdapter);
+// recorded receives every key pressed.
+func serveNativeSeat(t *testing.T, overrides map[string]string, recorded chan string) string {
+	t.Helper()
+	jailTest(t)
+	values := jailPaths(t)
+	socket := filepath.Join(t.TempDir(), "h.sock")
+	table := map[string]string{
+		"pane.get":  `{"type":"pane_info","pane":{"pane_id":"w6:p3","workspace_id":"w6","terminal_id":"fixture-w6:p3","tab_id":"w6:t1","focused":true}}`,
+		"pane.list": `{"type":"pane_list","panes":[{"pane_id":"w6:p3","workspace_id":"w6","terminal_id":"fixture-w6:p3","tab_id":"w6:t1","focused":true}]}`,
+		"agent.get": `{"type":"agent_info","agent":{"pane_id":"w6:p3","terminal_id":"fixture-w6:p3","workspace_id":"w6","tab_id":"w6:t1","focused":true,"agent":"claude","agent_status":"idle","state_change_seq":0,"revision":1}}`,
+		"pane.process_info": fmt.Sprintf(
+			`{"type":"pane_process_info","process_info":{"pane_id":"w6:p3","shell_pid":900001,"foreground_processes":[{"pid":%d,"argv0":"claude"}]}}`,
+			os.Getpid(),
+		),
+		"pane.read":      `{"type":"pane_read","read":{"pane_id":"p3","workspace_id":"w6","text":"native screen\n🔖 🥇 Captured Label │ project","truncated":false}}`,
+		"pane.send_keys": `{"type":"ok"}`,
+		"pane.send_text": `{"type":"ok"}`,
+	}
+	for method, answer := range overrides {
+		table[method] = answer
+	}
+	if recorded != nil {
+		serveNativeAdapter(t, socket, table, recorded)
+	} else {
+		serveNativeAdapter(t, socket, table)
+	}
+	state := fleetdb.OpenSharedState(context.Background(), values)
+	defer func() {
+		if err := state.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	seat := fleetdb.Seat{
+		SeatID:          "native-adapter",
+		SessionID:       "native-session",
+		Engine:          "cc",
+		Backend:         "herdr",
+		State:           "live",
+		Name:            "NATIVE",
+		HerdrSocket:     socket,
+		HerdrPane:       "w6:p3",
+		HerdrWorkspace:  "w6",
+		HerdrTerminalID: "fixture-w6:p3",
+	}
+	values.ProcRoot = t.TempDir()
+	t.Setenv(paths.EnvProcRoot, values.ProcRoot)
+	stageNativeCallerProc(t, values.ProcRoot, seat.SeatID)
+	if err := gather.StampHerdrHost(gather.NewProcFS(values.ProcRoot), &seat, 900001); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.PutSeat(context.Background(), seat); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TMUX", "")
+	t.Setenv("TMUX_PANE", "")
+	t.Setenv("HERDR_ENV", "1")
+	t.Setenv("HERDR_SOCKET_PATH", socket)
+	t.Setenv("HERDR_PANE_ID", "w6:p3")
+	return socket
+}
+
+// serveNativeAdapter answers each Herdr request on path with table's result for its method; an answer
+// "error:{message}" is Herdr refusing it (code pane_not_found) with that message.
 func serveNativeAdapter(t *testing.T, path string, table map[string]string, recorded ...chan string) {
 	t.Helper()
 	listener, err := net.Listen("unix", path)
@@ -300,8 +319,14 @@ func serveNativeAdapter(t *testing.T, path string, table map[string]string, reco
 						recorded[0] <- fmt.Sprint(key)
 					}
 				}
-				_ = json.NewEncoder(conn).
-					Encode(map[string]any{"id": request["id"], "result": json.RawMessage(table[fmt.Sprint(request["method"])])})
+				answer := table[fmt.Sprint(request["method"])]
+				if message, refused := strings.CutPrefix(answer, "error:"); refused {
+					_ = json.NewEncoder(conn).Encode(map[string]any{
+						"id": request["id"], "error": map[string]string{"code": "pane_not_found", "message": message},
+					})
+					return
+				}
+				_ = json.NewEncoder(conn).Encode(map[string]any{"id": request["id"], "result": json.RawMessage(answer)})
 			}()
 		}
 	}()

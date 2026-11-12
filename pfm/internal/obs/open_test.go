@@ -27,25 +27,26 @@ func readLog(t *testing.T, path string) []Record {
 	return recorder.Records()
 }
 
-// openIn opens the activity log of the home at dir and returns its file path.
+// openIn opens the activity log of the jailed home at dir and returns its file path.
 func openIn(t *testing.T, dir string, settings Settings) (func(int), string) {
 	t.Helper()
 	t.Setenv(paths.EnvHome, dir)
-	resolved, err := paths.Resolve()
-	if err != nil {
-		t.Fatal(err)
-	}
 	if settings.Stderr == nil {
 		settings.Stderr = &bytes.Buffer{}
 	}
 	_, finish := OpenLog(context.Background(), settings)
-	return finish, resolved.LogFile
+	return finish, filepath.Join(dir, ".local", "state", "pfm", "log", "pfm.jsonl")
 }
 
 // TestOpenLogWritesOneFilePerHome pins the environment separation: the home
 // jail IS the separation, so two homes never mix one record.
 func TestOpenLogWritesOneFilePerHome(t *testing.T) {
 	first, second := t.TempDir(), t.TempDir()
+	// A jailed home whose install recorded a writable clone still never writes into it.
+	clone := t.TempDir()
+	if err := paths.WriteSourceRepoMarker(first, clone); err != nil {
+		t.Fatal(err)
+	}
 	finishFirst, firstPath := openIn(t, first, Settings{Cmd: "reload", Version: "9.9.9"})
 	Logger(context.Background()).Info("first.home")
 	finishFirst(0)
@@ -67,6 +68,44 @@ func TestOpenLogWritesOneFilePerHome(t *testing.T) {
 	}
 	if got, _ := firstRaw[0].Field(FieldCmd); got != "reload" {
 		t.Fatalf("first home cmd = %v, want reload", got)
+	}
+	if entries, err := os.ReadDir(clone); err != nil || len(entries) != 0 {
+		t.Fatalf("the jail wrote into its recorded clone %s: %v (err %v)", clone, entries, err)
+	}
+}
+
+// TestOpenLogWritesUnderTheRecordedClone: an unjailed home logs in its
+// recorded clone's tmp/logs/pfm, silently; a recorded clone that is gone
+// logs under the home's state folder and says so once on stderr.
+func TestOpenLogWritesUnderTheRecordedClone(t *testing.T) {
+	for _, gone := range []bool{false, true} {
+		home, clone := t.TempDir(), filepath.Join(t.TempDir(), "professor")
+		if err := os.Mkdir(clone, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := paths.WriteSourceRepoMarker(home, clone); err != nil {
+			t.Fatal(err)
+		}
+		want, wantStderr := filepath.Join(clone, "tmp", "logs", "pfm", "pfm.jsonl"), ""
+		if gone {
+			if err := os.Remove(clone); err != nil {
+				t.Fatal(err)
+			}
+			want = filepath.Join(home, ".local", "state", "pfm", "log", "pfm.jsonl")
+			wantStderr = "pfm: activity log: log root: inspect recorded source repository " + clone +
+				": recorded source repository is unusable: stat " + clone + ": no such file or directory; " +
+				"logging under " + filepath.Dir(want) + "\n"
+		}
+		stderr := &bytes.Buffer{}
+		env := &paths.MapEnv{HomeDir: home, Values: map[string]string{paths.EnvRealHome: "1"}}
+		_, finish := OpenLog(context.Background(), Settings{Cmd: "doctor", Version: "1.2.3", Env: env, Stderr: stderr})
+		finish(0)
+		if got := recordsText(readLog(t, want)); !strings.Contains(got, "cmd.exit") {
+			t.Fatalf("gone=%v: %s holds %q, want the run's records", gone, want, got)
+		}
+		if stderr.String() != wantStderr {
+			t.Fatalf("gone=%v: stderr = %q, want %q", gone, stderr.String(), wantStderr)
+		}
 	}
 }
 

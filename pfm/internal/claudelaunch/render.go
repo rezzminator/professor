@@ -142,13 +142,11 @@ func Render(request Request, machine pfmconfig.Config) (Launch, error) {
 	if name := naming.LaunchName(request.Name); name != "" && !argsName(request.Args) && !resumesInPlace(request) {
 		result.Argv = append(result.Argv, flagName, name)
 	}
-	result.Argv = append(result.Argv, request.Args...)
-	settings := settingsFor(request, prefs, noFlicker(request, settingsDir))
-	payload, err := json.Marshal(settings)
+	args, payload, err := settingsArgv(request.Args, settingsFor(request, prefs, noFlicker(request, settingsDir)))
 	if err != nil {
-		return Launch{}, fmt.Errorf("render --settings: %w", err)
+		return Launch{}, err
 	}
-	result.Argv = append(result.Argv, flagSettings, string(payload))
+	result.Argv = append(append(result.Argv, args...), flagSettings, payload)
 	if request.Purpose != PurposeQuery {
 		mcp := mcpConfig(request.Home, machine)
 		if len(mcp) != 0 {

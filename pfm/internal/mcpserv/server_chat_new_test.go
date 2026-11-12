@@ -3,6 +3,8 @@ package mcpserv
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -788,15 +790,23 @@ func TestBirthNewHerdrCallerPlacement(t *testing.T) {
 	}
 }
 
-func TestBirthNewWithoutMetaPlacesInTmux(t *testing.T) {
-	var choice spawn.BackendChoice
+func TestBirthNewWithoutMetaIsRefused(t *testing.T) {
 	var placeErr error
-	service := newService("test", &backend{dispatch: func(ctx context.Context, _ []string, _, _ io.Writer) int {
-		choice, placeErr = chat.BirthBackend(ctx, "new-test", "auto")
-		return 0
+	service := newService("test", &backend{dispatch: func(ctx context.Context, _ []string, _, stderr io.Writer) int {
+		_, placeErr = chat.BirthBackend(ctx, "new-test", "auto")
+		fmt.Fprintf(stderr, "pfm chat new: %v\n", placeErr)
+		return spawn.FailureCode(placeErr)
 	}})
-	_, output, err := service.chatNew(context.Background(), nil, NewInput{Name: "probe-a"})
-	if err != nil || placeErr != nil || output.Status != "ok" || choice.Backend != "tmux" {
-		t.Fatalf("new=%+v choice=%+v err=%v placeErr=%v", output, choice, err, placeErr)
+	// A request with no caller is placed by the Herdr server; one pfm cannot read is refused.
+	mute := errors.New("read the Herdr server at /env/herdr.sock: malformed ping result")
+	ctx := chat.WithHerdrServer(context.Background(), spawn.HerdrServer{
+		Socket: "/env/herdr.sock", Up: func(context.Context, string) error { return mute },
+	})
+	_, output, err := service.chatNew(ctx, nil, NewInput{Name: "probe-a"})
+	message := "pfm chat new: host refused at mcp.new: cannot tell whether Herdr runs: " + mute.Error()
+	want := ActionOutput{Status: statusError, Code: 10, Message: message}
+	if !errors.Is(placeErr, spawn.ErrHostRefused) || !reflect.DeepEqual(output, want) ||
+		err == nil || err.Error() != "pfm chat new --name probe-a exited 10: "+message {
+		t.Fatalf("new=%+v err=%v placeErr=%v; want %+v", output, err, placeErr, want)
 	}
 }

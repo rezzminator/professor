@@ -117,6 +117,16 @@ expect 'cpus falls back to getconf _NPROCESSORS_ONLN' 0 7 ''
 door "$(stubs no-cpu)" platform_cpus
 expect 'cpus with neither tool is rc 1 and silent' 1 '' ''
 
+# ---- platform_service_env ----------------------------------------------------
+door "$(stubs both-managers systemctl='echo "systemctl $*"' launchctl='echo "launchctl $*"')" platform_service_env GOCOVERDIR '/a b'
+expect 'service_env prefers systemctl --user set-environment' 0 'systemctl --user set-environment GOCOVERDIR=/a b' ''
+door "$(stubs launchd launchctl='echo "launchctl $*"')" platform_service_env GOCOVERDIR '/a b'
+expect 'service_env falls back to launchctl setenv' 0 'launchctl setenv GOCOVERDIR /a b' ''
+door "$(stubs launchd-fails launchctl='echo "launchctl: refused" >&2; exit 5')" platform_service_env GOCOVERDIR /a
+expect 'service_env passes a failing tool through' 5 '' 'launchctl: refused'
+door "$(stubs no-manager)" platform_service_env GOCOVERDIR /a
+expect 'service_env with neither tool is rc 127 and silent' 127 '' ''
+
 # ---- platform_in_fence ------------------------------------------------------
 # fence MARKER [VAR=value]...: platform_in_fence MARKER under /bin/sh with only those variables set.
 fence() {

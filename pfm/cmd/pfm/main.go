@@ -14,6 +14,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/costsink"
+	_ "github.com/rezzminator/professor/pfm/internal/coverflush" // an instrumented build's counter flush
 	"github.com/rezzminator/professor/pfm/internal/doctor"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleet"

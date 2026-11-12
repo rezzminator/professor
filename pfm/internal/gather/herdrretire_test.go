@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
@@ -72,6 +73,7 @@ const (
 	retirePaneGone  = `{"error":{"code":"pane_not_found","message":"pane not found"}}`
 	retireLostNote  = "retired by pfm scan: saved supervisor exited; resume recipe retained"
 	retireDeadLabel = "HERDR DEAD"
+	failedBirthNote = "retired by pfm scan: birth failed: no pane within the 2m0s birth window"
 )
 
 // A writable scan that proves a seat dead retires it once; the next scan
@@ -279,7 +281,7 @@ func (proc unreadableHostProc) Stat(pid int) (ProcStat, error) {
 func TestProvedListingRetiresDeadSeatOnly(t *testing.T) {
 	for _, readOnly := range []bool{false, true} {
 		t.Run(fmt.Sprintf("read-only=%t", readOnly), func(t *testing.T) {
-			ctx := context.Background()
+			ctx, recorder := obs.Test(t)
 			dbPath := filepath.Join(t.TempDir(), "pfm.db")
 			db := fleetdb.OpenSharedState(ctx, paths.Values{StateDB: dbPath})
 			defer func() {
@@ -382,27 +384,36 @@ func TestProvedListingRetiresDeadSeatOnly(t *testing.T) {
 			for _, row := range rows {
 				listed = append(listed, row.Seat.SeatID)
 			}
-			want := "healthy dead unknown stopped-dead stopped-alive stale-reserved closed orphaned"
+			// A reservation past its birth window that never named a pane is a failed birth: never listed.
+			want := "healthy dead unknown stopped-dead stopped-alive closed orphaned"
 			if strings.Join(listed, " ") != want {
 				t.Fatalf("listed seats %q, want %q", listed, want)
 			}
-			want = "HERDR ERROR " + socket + ": seat stale-reserved has no saved supervisor birth; " +
-				"absence unproved: old pane absence not explicitly acknowledged"
-			if rows[5].Err == nil || rows[5].Err.Error() != want || rows[5].Seat.State != "live" {
-				t.Fatalf("reservation past its birth window = %+v, want live with %q", rows[5], want)
-			}
 			want = "HERDR DEAD closed: pane closed; saved supervisor 70 has not exited"
-			if rows[6].Err == nil || rows[6].Err.Error() != want || rows[6].Seat.State != "lost" {
-				t.Fatalf("seat whose pane is closed under a running supervisor = %+v, want lost with %q", rows[6], want)
+			if rows[5].Err == nil || rows[5].Err.Error() != want || rows[5].Seat.State != "lost" {
+				t.Fatalf("seat whose pane is closed under a running supervisor = %+v, want lost with %q", rows[5], want)
 			}
 			want = "HERDR ERROR " + seats[len(seats)-1].HerdrSocket + ": seat orphaned supervisor ownership unproved: " +
 				"its pane runs no seat-host past the 2m0s birth window"
-			if rows[7].Err == nil || rows[7].Err.Error() != want || rows[7].Seat.State != "live" {
+			if rows[6].Err == nil || rows[6].Err.Error() != want || rows[6].Seat.State != "live" {
 				t.Fatalf(
 					"seat whose pane runs no seat-host past its birth window = %+v,\nwant live with %q",
-					rows[7],
+					rows[6],
 					want,
 				)
+			}
+			// A writable listing retires the failed birth and says so once; a read-only one leaves it be.
+			var warned []string
+			for _, record := range recorder.Records() {
+				if record.Message == "gather.herdr.birth_failed" {
+					seat, _ := record.Field(obs.FieldSeat)
+					warned = append(warned, fmt.Sprintf("%s %v", record.Level, seat))
+				}
+			}
+			if want := map[bool]string{false: "WARN stale-reserved", true: ""}[readOnly]; strings.Join(
+				warned, ",",
+			) != want {
+				t.Fatalf("failed-birth records %q, want %q:\n%s", warned, want, recorder.Raw())
 			}
 			healthy, dead, unknown := rows[0], rows[1], rows[2]
 			stoppedDead, stoppedAlive := rows[3], rows[4]
@@ -435,11 +446,18 @@ func TestProvedListingRetiresDeadSeatOnly(t *testing.T) {
 			}
 			for _, want := range seats {
 				stored, found, err := db.Seat(ctx, want.SeatID)
-				retired := (want.SeatID == "dead" || want.SeatID == "stopped-dead") && !readOnly
-				if err != nil || !found || (stored.State == "lost") != retired || (stored.LostNote != "") != retired {
+				state, note := "live", ""
+				switch {
+				case readOnly:
+				case want.SeatID == "dead" || want.SeatID == "stopped-dead":
+					state, note = "lost", retireLostNote
+				case want.SeatID == "stale-reserved":
+					state, note = "failed", failedBirthNote
+				}
+				if err != nil || !found || stored.State != state || stored.LostNote != note {
 					t.Fatalf(
-						"listing retire of %s (want retired=%t): %+v found=%t err=%v",
-						want.SeatID, retired, stored, found, err,
+						"listing retire of %s: %+v found=%t err=%v, want state %q note %q",
+						want.SeatID, stored, found, err, state, note,
 					)
 				}
 			}

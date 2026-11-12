@@ -20,8 +20,7 @@ func TestLogDefaultsToTheBuildLevelAndTheShippedRotation(t *testing.T) {
 	if got.Log.Level != "" {
 		t.Fatalf("Log.Level = %q, want empty — an unset level means the build decides", got.Log.Level)
 	}
-	if got.Log.KeepFiles != obs.DefaultKeepFiles || got.Log.MaxMB != obs.DefaultMaxMB ||
-		got.Log.KeepDays != obs.DefaultKeepDays {
+	if got.Log.KeepFiles != obs.DefaultKeepFiles || got.Log.MaxMB != obs.DefaultMaxMB {
 		t.Fatalf("Log rotation = %+v, want the internal/obs defaults", got.Log)
 	}
 	if len(got.Log.Components) != 0 {
@@ -38,8 +37,11 @@ func TestLogKeysFromFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Log.Level != "warn" || got.Log.KeepFiles != 2 || got.Log.MaxMB != 16 || got.Log.KeepDays != 0 {
-		t.Fatalf("Log = %+v, want warn/2/16/0 — warning is stored as its canonical warn", got.Log)
+	if got.Log.Level != "warn" || got.Log.KeepFiles != 2 || got.Log.MaxMB != 16 {
+		t.Fatalf(
+			"Log = %+v, want warn/2/16, keepDays read and ignored — warning is stored as its canonical warn",
+			got.Log,
+		)
 	}
 	components := got.Log.Components
 	// An unknown component is kept for obs to name, never a refused config.
@@ -47,7 +49,7 @@ func TestLogKeysFromFile(t *testing.T) {
 		components["database"] != "off" {
 		t.Fatalf("Log.Components = %v, want mcp=debug db=off tmux=warn database=off", got.Log.Components)
 	}
-	for _, key := range []string{"log.level", "log.keepFiles", "log.maxMB", "log.keepDays", "log.components"} {
+	for _, key := range []string{"log.level", "log.keepFiles", "log.maxMB", "log.components"} {
 		if source := got.Source(key); source != SourceFile {
 			t.Fatalf("%s reports source %q, want file", key, source)
 		}
@@ -94,35 +96,35 @@ func TestLogLevelsIsTheOneList(t *testing.T) {
 }
 
 // TestInstallLogBlockIsTheSpecDefault pins what `pfm install` writes and what a
-// fresh `pfm config init` pins: {"level": "info", "keepDays": 30}, one source.
+// fresh `pfm config init` pins: {"level": "info"}, one source.
 func TestInstallLogBlockIsTheSpecDefault(t *testing.T) {
 	encoded, err := json.Marshal(InstallLogBlock())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(encoded) != `{"keepDays":30,"level":"info"}` {
+	if string(encoded) != `{"level":"info"}` {
 		t.Fatalf("InstallLogBlock = %s", encoded)
 	}
 	if InstallLogLevel != "info" {
 		t.Fatalf("InstallLogLevel = %q", InstallLogLevel)
 	}
 	block := MarshalLog(Log{
-		Level: InstallLogLevel, KeepFiles: 5, MaxMB: 8, KeepDays: 30, Components: map[string]string{"db": "off"},
+		Level: InstallLogLevel, KeepFiles: 5, MaxMB: 8, Components: map[string]string{"db": "off"},
 	})
 	encoded, err = json.Marshal(block)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(encoded) != `{"components":{"db":"off"},"keepDays":30,"keepFiles":5,"level":"info","maxMB":8}` {
+	if string(encoded) != `{"components":{"db":"off"},"keepFiles":5,"level":"info","maxMB":8}` {
 		t.Fatalf("MarshalLog = %s", encoded)
 	}
 	// An unset level is "the build decides": Marshal leaves the key out
 	// rather than writing an empty string the loader would read as the same.
-	encoded, err = json.Marshal(MarshalLog(Log{KeepFiles: 5, MaxMB: 8, KeepDays: 30}))
+	encoded, err = json.Marshal(MarshalLog(Log{KeepFiles: 5, MaxMB: 8}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(encoded) != `{"keepDays":30,"keepFiles":5,"maxMB":8}` {
+	if string(encoded) != `{"keepFiles":5,"maxMB":8}` {
 		t.Fatalf("MarshalLog(unset level) = %s", encoded)
 	}
 }
@@ -141,7 +143,7 @@ func TestLogDefaultInsertion(t *testing.T) {
 	if err != nil || !changed {
 		t.Fatalf("insertion = changed %t err %v, want a change", changed, err)
 	}
-	if !strings.Contains(string(content), `"level": "info"`) || !strings.Contains(string(content), `"keepDays": 30`) ||
+	if !strings.Contains(string(content), `"level": "info"`) || strings.Contains(string(content), `"keepDays"`) ||
 		!strings.Contains(string(content), `"theme": "dark"`) {
 		t.Fatalf("content = %s", content)
 	}

@@ -32,7 +32,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/store"
-	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
@@ -242,11 +241,7 @@ func runChatSaveContext(
 	return 0
 }
 
-func runChatBranch(
-	args []string,
-	stdout, stderr io.Writer,
-	env paths.Env,
-	clk clock.Clock,
+func runChatBranch(args []string, stdout, stderr io.Writer, env paths.Env, clk clock.Clock,
 	runtimes ...commandRuntime,
 ) int {
 	env = defaultEnv(env)
@@ -350,9 +345,10 @@ func runChatBranch(
 		fmt.Fprintf(stderr, "pfm chat branch: configured %s binary %q is not executable: %v\n", engine, binary, err)
 		return 1
 	}
-	if _, err := obs.Runner(deps.RealRunner{}).LookPath(pfmtmux.Binary); err != nil {
-		fmt.Fprintln(stderr, "pfm chat branch: tmux is not on PATH")
-		return 1
+	choice, forkID, placeErr := pfmchat.BranchPlace(context.Background(), runtime.Config.Chat.Backend, engine)
+	if placeErr != nil {
+		fmt.Fprintf(stderr, "pfm chat branch: %v\n", placeErr)
+		return spawn.FailureCode(placeErr)
 	}
 	resolved := runtime.Paths
 	cwd := strings.TrimSpace(*requestedCWD)
@@ -395,13 +391,21 @@ func runChatBranch(
 		Home: runtime.Paths.Home, PrimaryAccount: selectedAccount,
 		Cache1H: forkCache1H,
 		Persona: persona,
-		Model:   model, Config: runtime.Config,
+		Model:   model, Config: runtime.Config, ForkID: forkID,
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat branch: plan fork: %v\n", err)
 		return 1
 	}
-	// A fork is born detached on its own tmux server, never placed: its
+	if choice.Backend == spawn.BackendHerdr {
+		_, err := pfmchat.BranchHerdr(context.Background(), choice, plan, &runtime, name, *id, stdout, stderr)
+		if err != nil {
+			fmt.Fprintf(stderr, "pfm chat branch: %v\n", err)
+			return 1
+		}
+		return 0
+	}
+	// A fork placed in tmux is born detached on its own tmux server: its
 	// lineage, launch record and session-id wait below bind to that socket.
 	socket := spawn.FreshSocket(engine)
 	if override := env.Get(spawn.TestFreshSocketEnv); override != "" {
@@ -487,16 +491,10 @@ func runChatBranch(
 	if model != "" {
 		fmt.Fprintf(stdout, " on %s", model)
 	}
-	fmt.Fprintf(
-		stdout,
-		" into detached socket %s — waiting in pfm ls; open later with pfm chat open %q.\n",
-		socket,
-		name,
-	)
-	if len(branchWarnings) != 0 {
-		for _, warning := range branchWarnings {
-			fmt.Fprintf(stdout, "warning: %s\n", warning)
-		}
+	fmt.Fprintf(stdout, " into detached socket %s — waiting in pfm ls; open later with pfm chat open %q.\n",
+		socket, name)
+	for _, warning := range branchWarnings {
+		fmt.Fprintf(stdout, "warning: %s\n", warning)
 	}
 	return 0
 }
@@ -734,7 +732,7 @@ func runChatModal(args []string, stdout, stderr io.Writer, clk clock.Clock, runt
 		fmt.Fprintf(stderr, "pfm chat modal: %q is not running\n", chat.Name)
 		return codeDeadChat
 	}
-	seat, err := chatTarget(chat)
+	seat, err := pfmchat.LiveSeatTarget(chat)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat modal: %v\n", err)
 		return 1

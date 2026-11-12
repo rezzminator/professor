@@ -219,9 +219,18 @@ SELECT 1 AS validation_only,
 // checkable answer ("no store exists"), not a silent failure, so it returns
 // zero sessions and a nil error; a PRESENT database that cannot be opened or
 // queried is an error and says so. A session holding malformed message or
-// part rows is kept with what its rows still yield, and warned.
+// part rows is kept with what its rows still yield, and warned. A store holding
+// only some of the mirror's tables is not ready yet, never a listing failure: no
+// sessions, and one WARN record naming the store and the tables it holds and lacks.
 func ReadOpenCodeSessions(ctx context.Context, root string) ([]store.OpenCodeSession, error) {
 	sessions, malformed, err := readOpenCodeStore(ctx, root)
+	var partial *openCodeStorePartialError
+	if errors.As(err, &partial) {
+		obs.Logger(ctx).Warn("opencode store is not ready: it holds some of the mirror's tables",
+			"path", OpenCodeStorePath(root),
+			"reason", fmt.Sprintf("holds tables %v, lacks %v", partial.held, partial.missing))
+		return nil, nil
+	}
 	for _, problem := range malformed {
 		warnUnreadable(ctx, "opencode rows", OpenCodeStorePath(root), problem)
 	}
@@ -341,25 +350,6 @@ func (row *openCodeRow) malformed() error {
 		owner = "rows of no session hold"
 	}
 	return fmt.Errorf("opencode %s malformed rows (%s)", owner, strings.Join(counts, ", "))
-}
-
-// ProbeOpenCodeStore runs the production reader and discards its rows. Doctor
-// therefore proves that both the native schema and the stored JSON are readable;
-// a schema-only prepare could report healthy while every real index pass fails.
-// Malformed rows the index reads past are unhealthy here.
-func ProbeOpenCodeStore(ctx context.Context, root string) error {
-	_, malformed, err := readOpenCodeStore(ctx, root)
-	if err != nil {
-		return err
-	}
-	if len(malformed) != 0 {
-		texts := make([]string, 0, len(malformed))
-		for _, problem := range malformed {
-			texts = append(texts, problem.Error())
-		}
-		return fmt.Errorf("validate opencode rows: %s", strings.Join(texts, "; "))
-	}
-	return nil
 }
 
 func nonEmpty(value sql.NullString) string {

@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
+	"github.com/rezzminator/professor/pfm/internal/theme"
 )
 
 func gaugeText(row compose.Row, nowNS int64) string {
@@ -15,11 +16,13 @@ func gaugeText(row compose.Row, nowNS int64) string {
 
 func TestWorkGaugeIsAlwaysExactlyItsWidth(t *testing.T) {
 	for agents := 0; agents <= 9; agents++ {
-		for _, working := range []bool{false, true} {
-			row := compose.Row{Kind: compose.LiveClaude, Working: working, AgentsWorking: agents}
+		for _, state := range []compose.Row{{Working: true}, {}, {Working: true, Blocked: true}, {Blocked: true}} {
+			row := compose.Row{
+				Kind: compose.LiveClaude, Working: state.Working, Blocked: state.Blocked, AgentsWorking: agents,
+			}
 			for frame := int64(0); frame < 30; frame++ {
 				if got := ansi.StringWidth(gaugeText(row, frame*workFrameNS)); got != deckWorkW {
-					t.Fatalf("working=%v agents=%d frame %d: %d cells, want %d", working, agents, frame, got, deckWorkW)
+					t.Fatalf("%+v frame %d: %d cells, want %d", row, frame, got, deckWorkW)
 				}
 			}
 		}
@@ -31,6 +34,7 @@ func TestWorkGaugeDrawsNothingWhileNothingMoves(t *testing.T) {
 		{Kind: compose.LiveClaude},
 		{Kind: compose.ResumeClaude, Working: true, AgentsWorking: 3},
 		{Kind: compose.NewClaude, Working: true},
+		{Kind: compose.ResumeClaude, Blocked: true},
 	} {
 		if got := gaugeText(row, 0); strings.TrimSpace(got) != "" {
 			t.Errorf("%+v draws %q, want blank", row, got)
@@ -62,6 +66,22 @@ func TestWorkGaugeCoreSaysWhoIsWorking(t *testing.T) {
 	if !strings.HasPrefix(orchestrating, "◌") {
 		t.Errorf("a chat that only waits on its agents has a hollow core: %q", orchestrating)
 	}
+	// Herdr reads it blocked while its transcript still reads mid-turn: the
+	// owner's answer holds it, so the core is the blocked mark on every frame.
+	configureStyles(theme.Load("default"))
+	t.Cleanup(func() { configureStyles(theme.Load("default")) })
+	warn := theme.Load("default").Warn
+	if warn == "" {
+		t.Fatal("the default theme names no blocked colour (Palette.Warn)")
+	}
+	blocked := compose.Row{Kind: compose.LiveClaude, Working: true, Blocked: true}
+	for frame := int64(0); frame < 8; frame++ {
+		spans := workGauge(blocked, frame*workFrameNS, "#ff9e64", "#64748b", "")
+		if got := ansi.Strip(joinSpans(spans)); got != "⚠     " || spans[0].paint.fg != warn {
+			t.Fatalf("a blocked chat at frame %d draws %q in %q, want %q in the blocked colour %q",
+				frame, got, spans[0].paint.fg, "⚠     ", warn)
+		}
+	}
 }
 
 func TestWorkGaugeArcsTurnAndTrailEachOther(t *testing.T) {
@@ -86,7 +106,7 @@ func TestWorkGaugeArcsTurnAndTrailEachOther(t *testing.T) {
 }
 
 func TestWorkGaugeUsesOnlyGlyphsTheTerminalDrawsOnItsOwn(t *testing.T) {
-	for _, glyph := range append([]string{"◉", "●", "◌", "+"}, workArcs[:]...) {
+	for _, glyph := range append([]string{"◉", "●", "◌", "⚠", "+"}, workArcs[:]...) {
 		for _, r := range glyph {
 			if r >= 0x2580 && r <= 0x259F || r >= 0x2800 && r <= 0x28FF {
 				t.Errorf("%q is a Block Element or Braille glyph, which corrupts VS Code's glyph atlas", glyph)
@@ -104,10 +124,16 @@ func TestWorkSummaryNamesWhoIsWorking(t *testing.T) {
 		{compose.Row{Working: true, AgentsWorking: 1}, "mid-turn · 1 agent"},
 		{compose.Row{Working: true, AgentsWorking: 3}, "mid-turn · 3 agents"},
 		{compose.Row{AgentsWorking: 2}, "2 agents working"},
+		{compose.Row{Working: true, Blocked: true}, "waits on your answer"},
+		{compose.Row{Working: true, Blocked: true, AgentsWorking: 2}, "waits on your answer · 2 agents working"},
 		{compose.Row{}, ""},
 	} {
 		if got := workSummary(test.row); got != test.want {
 			t.Errorf("workSummary(%+v) = %q, want %q", test.row, got, test.want)
+		}
+		label := map[bool]string{false: "working", true: "blocked"}[test.row.Blocked]
+		if got := workLabel(test.row); got != label {
+			t.Errorf("workLabel(%+v) = %q, want %q", test.row, got, label)
 		}
 	}
 }
@@ -115,5 +141,9 @@ func TestWorkSummaryNamesWhoIsWorking(t *testing.T) {
 func TestLiveMarkerPulsesForAChatWorkingThroughItsAgents(t *testing.T) {
 	if got := liveMarker(compose.Row{Kind: compose.LiveClaude, AgentsWorking: 2}, deckPulseNS); got != "◉" {
 		t.Errorf("a chat whose agents are working pulses: %q", got)
+	}
+	blocked := compose.Row{Kind: compose.LiveClaude, Working: true, Blocked: true}
+	if got, want := liveMarker(blocked, deckPulseNS), rowMarker(compose.LiveClaude); got != want {
+		t.Errorf("a chat that waits on its owner holds still: %q, want %q", got, want)
 	}
 }

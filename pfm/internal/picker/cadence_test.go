@@ -1,6 +1,10 @@
 package picker
 
 import (
+	"context"
+	"errors"
+	"reflect"
+	"sync"
 	"testing"
 	"time"
 
@@ -107,5 +111,55 @@ func TestFailureBackoffDoublesFromTheIntervalAndCapsAtTheParkThreshold(t *testin
 		if got := failureBackoff(streak); got != want {
 			t.Errorf("failureBackoff(%d) = %v, want %v", streak, got, want)
 		}
+	}
+}
+
+// TestPickThenDrainEndsTheStreamBeforeTheClose pins pfm ls's exit: a refresh
+// pass still in flight when the picker returns finishes before the caller's
+// deferred database closes run, and the picker's outcome passes through.
+func TestPickThenDrainEndsTheStreamBeforeTheClose(t *testing.T) {
+	ctx, stopStream := context.WithCancel(context.Background())
+	updates := make(chan ui.Snapshot)
+	var mu sync.Mutex
+	var trail []string
+	record := func(event string) {
+		mu.Lock()
+		defer mu.Unlock()
+		trail = append(trail, event)
+	}
+	streamEnded := make(chan struct{})
+	go func() {
+		defer close(streamEnded)
+		defer close(updates)
+		<-ctx.Done()
+		// The pass in flight at the cancel publishes once more, then writes.
+		updates <- ui.Snapshot{}
+		record("stream wrote")
+	}()
+	picked := ui.Outcome{Kind: ui.OutcomeCancelled, Query: "demo"}
+	pickErr := errors.New("tty gone")
+	outcome, err := pickThenDrain(func() (ui.Outcome, error) {
+		record("picked")
+		return picked, pickErr
+	}, stopStream, updates)
+	record("databases closed")
+	// A stream the drain left behind is released here so the trail completes.
+	go func() {
+		for range updates {
+		}
+	}()
+	select {
+	case <-streamEnded:
+	case <-time.After(5 * time.Second):
+		t.Fatal("refresh stream still running 5s after the picker returned")
+	}
+	if !reflect.DeepEqual(outcome, picked) || !errors.Is(err, pickErr) {
+		t.Fatalf("pickThenDrain = %+v, %v; want %+v, %v", outcome, err, picked, pickErr)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	want := []string{"picked", "stream wrote", "databases closed"}
+	if !reflect.DeepEqual(trail, want) {
+		t.Fatalf("exit order = %q, want %q", trail, want)
 	}
 }

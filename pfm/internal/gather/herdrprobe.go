@@ -161,8 +161,8 @@ func proveHerdrSeatSnapshot(
 	}
 	if candidate == nil {
 		if seat.SeatHostPID == 0 {
-			if herdrBirthPending(seat) {
-				return seat, false, fmt.Errorf("seat %s %w", seat.SeatID, errHerdrSeatUnbound)
+			if err := herdrReservationErr(seat); err != nil {
+				return seat, false, err
 			}
 			retired, err := HerdrSeatRetired(ctx, proc, seat)
 			if err != nil {
@@ -422,12 +422,7 @@ func belowHerdrShell(proc ProcFS, pid, shell int) (bool, error) {
 // A positively dead seat reads as lost (non-live), and a writable listing
 // retires it durably; unknown evidence stays live with its error, so callers
 // count it as a failure.
-func ProbeHerdrSeats(
-	ctx context.Context,
-	values paths.Values,
-	seats []fleetdb.Seat,
-	readOnly bool,
-) []HerdrSeat {
+func ProbeHerdrSeats(ctx context.Context, values paths.Values, seats []fleetdb.Seat, readOnly bool) []HerdrSeat {
 	open := fleetdb.OpenSharedState
 	if readOnly {
 		open = fleetdb.OpenSharedStateReadOnly
@@ -476,6 +471,10 @@ func proveHerdrSeats(
 		switch {
 		case errors.Is(err, errHerdrSeatGone):
 			continue // ended or replaced while this listing read it: not listed
+		case errors.Is(err, errHerdrBirthFailed):
+			if row.Err = retireFailedHerdrBirth(ctx, db, canonical, readOnly); row.Err == nil {
+				continue // a reservation that never named a pane: a failed birth, never a chat
+			}
 		case errors.Is(err, errHerdrSeatUnbound):
 			continue // a reservation with no pane or no supervisor yet: not a chat yet
 		case err != nil && canonical.EndPending && (herdr.PaneGone(err) || errors.Is(err, errHerdrPaneAbsent)):

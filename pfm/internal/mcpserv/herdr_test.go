@@ -95,6 +95,10 @@ func TestHerdrProxyFindsAnUnnamedSeatBySeatID(t *testing.T) {
 	if err != nil || !caller.valid || caller.row.ID != "sid1" || caller.identity.SeatID != "seat1" {
 		t.Fatalf("caller=%+v err=%v", caller, err)
 	}
+	// whoami's handle is the one `pfm whoami` prints, the session id stays in its own field.
+	if caller.identity.Session != "seat:seat1" || caller.identity.ID != "sid1" {
+		t.Fatalf("identity session %q id %q, want seat:seat1 and sid1", caller.identity.Session, caller.identity.ID)
+	}
 }
 
 func TestHerdrLossNoteIsNotBackendFailure(t *testing.T) {

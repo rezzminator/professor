@@ -9,7 +9,6 @@ import (
 
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
-	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
@@ -19,8 +18,12 @@ import (
 )
 
 // engineName observes Claude's /rename records as well as pfm's pending clear
-// name. A missing newborn transcript has no title; other read errors are errors.
-func (reporter *herdrReporter) engineName(ctx context.Context, payload herdrPayload) (name string, returnErr error) {
+// name, and the title OpenCode's retitle reports as its own title event. A
+// missing newborn transcript has no title; other read errors are errors.
+func (reporter *herdrReporter) engineName(ctx context.Context, payload herdrPayload) (string, error) {
+	if reporter.options.engine == engine.OpenCode && reporter.options.event == herdr.EventTitle {
+		return reporter.usableTitle(strings.TrimSpace(payload.Title)), nil
+	}
 	if reporter.options.engine != engine.Claude || reporter.deps.seatPaths == nil || payload.SessionID == "" {
 		return "", nil
 	}
@@ -31,6 +34,7 @@ func (reporter *herdrReporter) engineName(ctx context.Context, payload herdrPayl
 		payload.HookEventName != claudelaunch.HookEventUserPromptSubmit {
 		return "", nil
 	}
+	var name string
 	if payload.TranscriptPath != "" {
 		var err error
 		name, err = transcript.FileTitle(payload.TranscriptPath)
@@ -38,32 +42,18 @@ func (reporter *herdrReporter) engineName(ctx context.Context, payload herdrPayl
 			return "", err
 		}
 	}
-	if err := naming.ValidateLabel(name); err != nil {
-		// A reserved title never reaches tmux or Herdr; pfm's clear name still does.
+	// A reserved title never reaches tmux or Herdr; pfm's clear name still does.
+	return pfmchat.EngineTitle(ctx, *reporter.deps.seatPaths, payload.SessionID, reporter.usableTitle(name))
+}
+
+// usableTitle is an engine's title as a chat name: a reserved label never
+// reaches tmux or Herdr, it is warned about and read as no title.
+func (reporter *herdrReporter) usableTitle(title string) string {
+	if err := naming.ValidateLabel(title); err != nil {
 		reporter.warn("pfm internal herdr-state %s: engine title not used: %v", reporter.options.event, err)
-		name = ""
+		return ""
 	}
-	state := fleetdb.OpenSharedStateReadOnly(ctx, *reporter.deps.seatPaths)
-	defer func() { returnErr = errors.Join(returnErr, state.Close()) }()
-	if errors.Is(state.Degraded(), fleetdb.ErrAbsent) {
-		return name, nil
-	}
-	decision, found, err := state.ClearName(ctx, payload.SessionID)
-	if err != nil {
-		return "", err
-	}
-	if found {
-		if observed := decision.ObserveTitle(name); observed != decision {
-			writable := fleetdb.OpenSharedState(ctx, *reporter.deps.seatPaths)
-			err := writable.PutClearName(ctx, payload.SessionID, observed, clock.Real.Now().Unix())
-			if err = errors.Join(err, writable.Close()); err != nil {
-				return "", fmt.Errorf("confirm engine title: %w", err)
-			}
-			decision = observed
-		}
-		name = decision.Title(name)
-	}
-	return name, nil
+	return title
 }
 
 func (reporter *herdrReporter) syncTmuxEngineName(ctx context.Context, payload herdrPayload) error {
@@ -101,4 +91,20 @@ func (reporter *herdrReporter) syncNativeEngineName(
 	state := fleetdb.OpenSharedState(ctx, *reporter.deps.seatPaths)
 	defer func() { returnErr = errors.Join(returnErr, state.Close()) }()
 	return pfmchat.RenameHerdrOwned(ctx, state, seat, name)
+}
+
+// syncNativeTitle names a native seat after the title OpenCode's retitle
+// reports, outside the host-wide bridge lock (no pane state is written); any
+// other event that plans no state report sends Herdr nothing.
+func (reporter *herdrReporter) syncNativeTitle(
+	ctx context.Context,
+	seat fleetdb.Seat,
+	payload herdrPayload,
+	unlockBridge func(),
+) error {
+	if reporter.options.event != herdr.EventTitle {
+		return nil
+	}
+	unlockBridge()
+	return reporter.syncNativeEngineName(ctx, seat, payload)
 }

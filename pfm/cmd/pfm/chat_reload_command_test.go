@@ -269,6 +269,7 @@ func (reloadTargetTmux) Respawn(context.Context, string, string, string, string)
 	return nil
 }
 func (reloadTargetTmux) Display(context.Context, string, string, string) error { return nil }
+func (reloadTargetTmux) KillPane(context.Context, string, string) error        { return nil }
 
 func TestReloadTargetWarnsAndPreservesTmuxWhenNativeSeatsUnreadable(t *testing.T) {
 	for _, testCase := range []struct {

@@ -312,7 +312,7 @@ A chat with no ledger keeps today's output and one line, `side calls not measure
 
 ```text
 doctor: cost ledger state=on source=default dir=~/.local/state/pfm/cost-ledger
-doctor: cost sink log path=~/.local/state/pfm/log/cost-sink.log bytes=412
+doctor: cost sink log path={log root}/cost-sink.log bytes=412
 doctor: cost sink log: 2026-10-09T18:27:28.025Z cost-launch: armed a sink on 127.0.0.1:54321 for pid 4242
 ```
 

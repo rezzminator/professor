@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -32,9 +33,10 @@ type logFilter struct {
 	comp  string
 }
 
-// ReadActivity is `pfm log`: a filter over the home's activity file that
-// prints the matching records as they were written, one JSON object per line,
-// so the output pipes into jq unchanged.
+// ReadActivity is `pfm log`: a filter over the home's whole activity log
+// (path is its current segment; readLogFiles reads the rest) that prints the
+// matching records as they were written, one JSON object per line, so the
+// output pipes into jq unchanged.
 func ReadActivity(
 	ctx context.Context,
 	args []string,
@@ -75,6 +77,60 @@ func ReadActivity(
 		fmt.Fprintf(stderr, "pfm log: --comp %q is not one of %s\n", *comp, strings.Join(Components, ", "))
 		return 2
 	}
+	return readLogFiles(ctx, path, stdout, stderr, filter, *follow, timing)
+}
+
+// readLogFiles prints the matching records of path's whole log in time order:
+// the kept warnings and errors by day, the closed segments, then the current
+// segment, which --follow keeps reading. A file whose last write is older than
+// --since holds no record it would print and is not opened.
+func readLogFiles(
+	ctx context.Context,
+	path string,
+	stdout, stderr io.Writer,
+	filter logFilter,
+	follow bool,
+	timing clock.Clock,
+) int {
+	var older []string
+	for _, dir := range []string{keptDir(path), segmentsDir(path)} {
+		entries, err := os.ReadDir(dir)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			fmt.Fprintf(stderr, "pfm log: list %s: %v\n", dir, err)
+			return 1
+		}
+		for _, entry := range entries {
+			info, err := entry.Info()
+			if err != nil {
+				fmt.Fprintf(stderr, "pfm log: inspect %s: %v\n", filepath.Join(dir, entry.Name()), err)
+				return 1
+			}
+			if !entry.IsDir() && (filter.after.IsZero() || !info.ModTime().Before(filter.after)) {
+				older = append(older, filepath.Join(dir, entry.Name()))
+			}
+		}
+	}
+	for _, name := range older {
+		if code := streamLogFile(ctx, name, stdout, stderr, filter, false, timing); code != 0 {
+			return code
+		}
+	}
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) && len(older) == 0 && !follow {
+		fmt.Fprintf(stderr, "pfm log: no activity log at %s yet\n", path)
+		return 0
+	}
+	return streamLogFile(ctx, path, stdout, stderr, filter, follow, timing)
+}
+
+// streamLogFile opens one file of the log and streams it.
+func streamLogFile(
+	ctx context.Context,
+	path string,
+	stdout, stderr io.Writer,
+	filter logFilter,
+	follow bool,
+	timing clock.Clock,
+) int {
 	file, err := os.Open(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -85,7 +141,7 @@ func ReadActivity(
 		return 1
 	}
 	defer func() { cli.CloseResource(file, "pfm log: close "+path, stderr, new(int)) }()
-	return streamLog(ctx, file, stdout, stderr, filter, *follow, timing)
+	return streamLog(ctx, file, stdout, stderr, filter, follow, timing)
 }
 
 // streamLog prints every matching record, then — with follow — keeps reading

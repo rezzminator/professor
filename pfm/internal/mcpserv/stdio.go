@@ -8,11 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"path/filepath"
 	"sync"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/reload"
 )
 
@@ -52,7 +52,7 @@ func (professor *FamilyServers) RunStdio(
 		defer close(done)
 		defer func() {
 			if err := writer.Close(); err != nil {
-				log.Printf("mcp stdio: close request pipe: %v", err)
+				obs.Logger(ctx).Error("mcp.stdio_pipe_close_failed", obs.FieldErr, err.Error())
 			}
 		}()
 		buffered := bufio.NewReaderSize(input, 64<<10)

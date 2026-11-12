@@ -482,10 +482,11 @@ func TestOpenNativeDeadEndpointUsesBirthRule(t *testing.T) {
 					}
 				}
 				// A terminal outside Herdr resumes by its own birth rule; a door
-				// with no terminal revives on the chat's recorded host, and a
-				// host it cannot reach is an error, never a silent tmux birth.
+				// with no terminal revives on the chat's recorded host, and in
+				// tmux once no Herdr server runs; a server pfm cannot read is
+				// an error, never a silent tmux birth.
 				want := 0
-				if mode == "malformed" || mode == "permission" || door == "detached" {
+				if mode == "malformed" || mode == "permission" {
 					want = 1
 				}
 				if code != want || (want == 0 && len(fake.created) != 1) || (want == 1 && len(fake.created) != 0) {

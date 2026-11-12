@@ -658,7 +658,8 @@ func TestMachineConfigChangesTheActualLaunchCommands(t *testing.T) {
 }
 
 type chatNewCallerVerbs struct {
-	row compose.Row
+	mcpserv.ChatVerbs // the verbs chat new never calls: a call panics
+	row               compose.Row
 }
 
 func (verbs chatNewCallerVerbs) Last(context.Context, pfmchat.LastRequest) (pfmchat.LastResult, error) {

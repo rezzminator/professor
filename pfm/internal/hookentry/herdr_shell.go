@@ -18,6 +18,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // The plain-shell reporter: the shim's Herdr hook hands it a long command a
@@ -52,7 +53,8 @@ func (missing errNoShellPane) Error() string {
 }
 
 // HerdrShell is `pfm internal herdr-shell done --pid P [--at T] --command C
-// --exit RC --seconds S | release --pid P [--at T]`. done reports working, then
+// --exit RC --seconds S | release --pid P [--at T] | resume-pending`
+// (herdr_shell_resume.go). done reports working, then
 // idle with "{command} exit {RC} · {S}s", and sets the same text as the pane's
 // title (Herdr drops the agent report within a second on a bare shell and keeps
 // the title); release releases the agent and clears the title, and a done whose
@@ -64,6 +66,9 @@ func (missing errNoShellPane) Error() string {
 // every failure is a line in the pfm-shell error log `pfm doctor` reads; a
 // release that finds no pane running the shell has nothing left to release.
 func HerdrShell(args []string, stderr io.Writer) int {
+	if len(args) != 0 && args[0] == herdrShellResumePending {
+		return herdrShellResume(context.Background(), args[1:], os.Stdout, stderr, paths.OSEnv{})
+	}
 	return reportShellRun(args, stderr, realHerdrDeps())
 }
 

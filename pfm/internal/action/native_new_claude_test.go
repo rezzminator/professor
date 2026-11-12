@@ -314,7 +314,7 @@ func TestHerdrPickerOpensInItsOwnPane(t *testing.T) {
 						Pane:           "w6:p3",
 						HerdrWorkspace: "w6",
 						Fronted:        test.refuse != "stale",
-					}, resolve.ErrNotRegistered)
+					}, resolve.ErrNotRegistered, seatspawn.HerdrServer{})
 					choice.Places = func(context.Context) (*place.Fleet, error) { return &place.Fleet{}, nil }
 					return choice, err
 				},
@@ -556,13 +556,17 @@ func newPickerHerdr(t *testing.T) *pickerHerdr {
 	return fake
 }
 
-func TestPickerRejectsCallerReadFailure(t *testing.T) {
+// A picker whose caller read failed is no terminal proven outside Herdr: it
+// asks the Herdr server, and one pfm cannot read is refused with no birth.
+func TestPickerRefusesAnUnreadableHerdrServer(t *testing.T) {
 	home, failure := t.TempDir(), errors.New("caller pane read failed")
+	mute := errors.New("read the Herdr server at /env/herdr.sock: malformed ping result")
+	server := seatspawn.HerdrServer{Socket: "/env/herdr.sock", Up: func(context.Context, string) error { return mute }}
 	tmux := &fakeActionTmux{alive: map[string]bool{}, panes: map[string][]ActionPane{}}
 	executor, err := New(Dependencies{
 		Tmux: tmux, Processes: &fakeProcesses{}, Stderr: io.Discard,
 		Place: func(ctx context.Context, door, requested string) (seatspawn.BackendChoice, error) {
-			return seatspawn.Place(ctx, door, requested, "", false, resolve.Identity{}, failure)
+			return seatspawn.Place(ctx, door, requested, "", false, resolve.Identity{}, failure, server)
 		},
 	})
 	if err != nil {
@@ -573,7 +577,8 @@ func TestPickerRejectsCallerReadFailure(t *testing.T) {
 		Home: home, PrimaryAccount: 1, FreshSocket: "cc-caller-failure",
 	}
 	_, err = executor.Open(context.Background(), request)
-	if !errors.Is(err, failure) || len(tmux.created) != 0 {
-		t.Fatalf("caller failure = %v, births = %d; want caller error and no birth", err, len(tmux.created))
+	want := "host refused at picker: cannot tell whether Herdr runs: " + mute.Error()
+	if err == nil || err.Error() != want || len(tmux.created) != 0 {
+		t.Fatalf("unreadable Herdr = %v, births = %d; want %q and no birth", err, len(tmux.created), want)
 	}
 }

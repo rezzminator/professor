@@ -75,6 +75,11 @@ func (tmux CommandTmux) Respawn(ctx context.Context, socket, pane, cwd, command 
 	return nil
 }
 
+// KillPane closes a pane, its server with it when it was the last.
+func (tmux CommandTmux) KillPane(ctx context.Context, socket, pane string) error {
+	return tmux.command(ctx, socket, "kill-pane", "-t", pane).Run()
+}
+
 func (tmux CommandTmux) Display(ctx context.Context, socket, pane, message string) error {
 	return tmux.command(ctx, socket, "display-message", "-t", pane, message).Run()
 }

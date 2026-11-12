@@ -56,7 +56,7 @@ func startSubagentTrace(home string, env paths.Env, stderr io.Writer) *subagentT
 	if env.Get(claudelaunch.EnvSubagentStatuslineTrace) != "1" {
 		return nil
 	}
-	path := paths.SubagentStatuslineTrace(home)
+	path := paths.LogRoot(env, home).SubagentStatuslineTrace()
 	writer, err := obs.OpenRotatingLog(path, 2, 4, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm statusline --subagents: open trace %s: %v\n", path, err)

@@ -433,13 +433,13 @@ func openRowReplacing(
 	executor, request, claim, err := prepareOpen(ctx, row, primary, cache1H, prompt, stderr, effective)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat open: %v\n", err)
-		return 1
+		return spawn.FailureCode(err)
 	}
 	result, err := executor.Open(ctx, request)
 	line := result.Line
 	if err := claim.settle(err == nil, err); err != nil {
 		fmt.Fprintf(stderr, "pfm chat open: %v\n", err)
-		return 1
+		return spawn.FailureCode(err)
 	}
 	if replaced != nil {
 		warning, err := spawn.RetireHerdrSeat(ctx, effective.Paths, *replaced)
@@ -464,7 +464,7 @@ func openRowReplacing(
 		retireOtherHerdrViews(ctx, row, effective, stderr)
 		if err := action.Dispatch(stdout, line); err != nil {
 			fmt.Fprintf(stderr, "pfm chat open: execute action: %v\n", err)
-			return 1
+			return spawn.FailureCode(err)
 		}
 	}
 	return 0

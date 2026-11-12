@@ -38,6 +38,7 @@ func (tmux *fakeReloadTmux) ListPanes(context.Context, string) ([]Pane, error) {
 	return []Pane{{ID: "%7", Dead: tmux.dead, PID: 700}}, nil
 }
 func (*fakeReloadTmux) SetRemain(context.Context, string, string, bool) error { return nil }
+func (*fakeReloadTmux) KillPane(context.Context, string, string) error        { return nil }
 func (tmux *fakeReloadTmux) LeaveCopyMode(context.Context, pfmcall.Target) (bool, error) {
 	return false, tmux.leaveErr
 }

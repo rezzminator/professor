@@ -69,7 +69,6 @@ func TestResolveOverrides(t *testing.T) {
 		ProcRoot:           procRoot,
 		CgroupRoot:         cgroupRoot,
 		ManagedSettingsDir: managedSettingsDir,
-		LogFile:            filepath.Join(home, ".local", "state", "pfm", "log", "pfm.jsonl"),
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Resolve() = %#v, want %#v", got, want)
@@ -248,30 +247,6 @@ func TestSocketUnderKeepsTheSocketInsideTheTmuxDir(t *testing.T) {
 	}
 }
 
-// The activity log hangs off the same pfm state directory as the fleet cache,
-// so a jail, a fence and the live host each keep their own and never mix.
-func TestResolveLogFileHangsOffTheHomesStateDirectory(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv(EnvHome, home)
-	resolved, err := Resolve()
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := filepath.Join(home, ".local", "state", "pfm", "log", "pfm.jsonl")
-	if resolved.LogFile != want {
-		t.Fatalf("LogFile = %q, want %q", resolved.LogFile, want)
-	}
-	other := t.TempDir()
-	t.Setenv(EnvHome, other)
-	second, err := Resolve()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if second.LogFile == resolved.LogFile {
-		t.Fatalf("two homes resolved to one activity log: %s", second.LogFile)
-	}
-}
-
 func TestResolveIgnoresRetiredDatabaseEnvironment(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv(EnvHome, home)
@@ -421,17 +396,6 @@ func TestCostLedgerDirHonoursItsOverrideAndFallsBackToTheStateDirectory(t *testi
 		if got := CostLedgerDir(tc.env, home); got != tc.want {
 			t.Errorf("%s: CostLedgerDir = %q, want %q", tc.name, got, tc.want)
 		}
-	}
-	if got, want := CostSinkLog(home), "/jail/home/.local/state/pfm/log/cost-sink.log"; got != want {
-		t.Errorf("CostSinkLog = %q, want %q", got, want)
-	}
-}
-
-func TestSubagentStatuslineTraceStaysInTheHomesLogDirectory(t *testing.T) {
-	got := SubagentStatuslineTrace("/jail/home")
-	want := "/jail/home/.local/state/pfm/log/subagent-statusline.jsonl"
-	if got != want {
-		t.Fatalf("SubagentStatuslineTrace = %q, want %q", got, want)
 	}
 }
 

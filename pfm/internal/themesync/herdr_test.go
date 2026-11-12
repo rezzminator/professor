@@ -313,21 +313,28 @@ func TestHerdrReloadAcknowledgementAndRetry(t *testing.T) {
 	for _, tc := range []struct {
 		name, reply, want string
 		bad               bool
+		exit              int
 	}{
-		{"applied", `{"id":"cli:request","result":{"type":"config_reload","status":"applied","diagnostics":[]}}`, "", false},
-		{"warnings", `{"result":{"type":"config_reload","status":"applied","diagnostics":["unknown key: colour"]}}`, "unknown key: colour", false},
-		{"partial", `{"result":{"type":"config_reload","status":"partial","diagnostics":["some settings retained"]}}`, "partial", true},
-		{"failed", `{"result":{"type":"config_reload","status":"failed","diagnostics":["bad config"]}}`, "failed", true},
-		{"wrong type", `{"result":{"type":"ok","status":"applied","diagnostics":[]}}`, "acknowledgement", true},
-		{"unknown status", `{"result":{"type":"config_reload","status":"future","diagnostics":[]}}`, "future", true},
-		{"missing diagnostics", `{"result":{"type":"config_reload","status":"applied"}}`, "", false},
-		{"null diagnostics", `{"result":{"type":"config_reload","status":"applied","diagnostics":null}}`, "", false},
-		{"malformed", `not json`, "reload applied (exit 0); reply unreadable (invalid character 'o' in literal null (expecting 'u')): not json", false},
-		{"refusal", `{"error":{"code":"invalid_config","message":"bad config"}}`, "invalid_config", true},
+		{"applied", `{"id":"cli:request","result":{"type":"config_reload","status":"applied","diagnostics":[]}}`, "", false, 0},
+		{"warnings", `{"result":{"type":"config_reload","status":"applied","diagnostics":["unknown key: colour"]}}`, "unknown key: colour", false, 0},
+		{"partial", `{"result":{"type":"config_reload","status":"partial","diagnostics":["some settings retained"]}}`, "partial", true, 0},
+		{"failed", `{"result":{"type":"config_reload","status":"failed","diagnostics":["bad config"]}}`, "failed", true, 0},
+		{"wrong type", `{"result":{"type":"ok","status":"applied","diagnostics":[]}}`, "acknowledgement", true, 0},
+		{"unknown status", `{"result":{"type":"config_reload","status":"future","diagnostics":[]}}`, "future", true, 0},
+		{"missing diagnostics", `{"result":{"type":"config_reload","status":"applied"}}`, "", false, 0},
+		{"null diagnostics", `{"result":{"type":"config_reload","status":"applied","diagnostics":null}}`, "", false, 0},
+		{"malformed", `not json`, "reload applied (exit 0); reply unreadable (invalid character 'o' in literal null (expecting 'u')): not json", false, 0},
+		{"refusal", `{"error":{"code":"invalid_config","message":"bad config"}}`, "invalid_config", true, 0},
+		// Herdr's own refusal when no server is up: the reload waits for the server's start.
+		{
+			"server not running", `{"error":{"code":"server_not_running","message":"no herdr server is running at` +
+				` /run/herdr/herdr.sock; run ` + "`herdr`" + ` to start or attach it"}}`,
+			herdrDeferred, false, 1,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newHarness(t)
-			h.herdrReload = deps.RunResult{Stdout: []byte(tc.reply)}
+			h.herdrReload = deps.RunResult{Stdout: []byte(tc.reply), ExitCode: tc.exit}
 			h.rearm()
 			report := h.on()
 			got := row(t, report, surfaceHerdr)

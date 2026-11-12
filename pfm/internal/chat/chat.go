@@ -9,15 +9,19 @@
 // Files, one line each:
 //   - target.go resolves a target to a chat, and scans the fleet's rows.
 //   - verbs.go is the Verbs bundle the surfaces call.
+//   - doors.go decides each outcome the CLI and the MCP door of a chat function both answer.
+//   - liststate.go names the state word a listed chat shows at both ls doors.
 //   - status.go and status_pane.go inspect a seat, or every row of a listing, reading its pane when its transcript cannot say.
 //   - seat_inspector.go is the watch's inspector, carrying each transcript read from one poll to the next.
 //   - list.go selects and presents the rows of `chat ls`.
 //   - last.go reads a chat's last answer; read.go its transcript entries; find.go searches transcripts.
 //   - names.go resolves a chat's name; workbench_name.go reserves workbench names.
 //   - open.go, open_herdr.go, restored.go, native_reboot.go and kill_server.go open, exit, kill and reboot chats.
+//   - restored_resume.go rebinds a dead native seat to the Herdr pane whose `claude --resume` resumes it.
 //   - end_tmux.go ends a tmux chat's server, only while its pane is the server's sole pane, and clears its handles.
 //   - killoutcome.go words a kill's outcome; keys.go types the keys-send failures.
-//   - birth.go carries the caller's identity; state.go records a verb's outcome.
+//   - birth.go and birth_caller.go carry the caller's identity; state.go records a verb's outcome.
+//   - branch_herdr.go births `pfm chat branch`'s fork as a native Herdr seat.
 //   - call_engine.go and call_types.go build the call engine.
 //   - loss_note.go reads a seat's durable loss note from its transcript.
 //   - fleetshare.go shares one fleet scan between watches; seatprint.go fingerprints a seat for a watch.

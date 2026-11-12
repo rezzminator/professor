@@ -7,6 +7,8 @@ How [`/integration-suite:use`](../../../templates/global/commands/integration-su
 - [The shape](#the-shape)
 - [Reading the product](#reading-the-product)
 - [The harness](#the-harness)
+- [Profile and coverage](#profile-and-coverage)
+- [The chat-function cells](#the-chat-function-cells)
 - [Speed](#speed)
 - [Retiring an old suite](#retiring-an-old-suite)
 - [What it replaced](#what-it-replaced)
@@ -42,6 +44,16 @@ The language's own test runner already walks a tree: nested subtests are the nes
 The terminal is a kernel pseudo-terminal running the owner's login shell, read through a screen emulator, because multiplexers and full-screen programs query the terminal and draw with cursor movement: a pipe sees neither. Its environment is a fresh login's, so no test variable reaches the product through it, and the product meets the terminal the owner has. Evidence is kept only on a failure: every screen as text and raw bytes, the log slice, the product's listing and the process table, enough to read the failure without rerunning it.
 
 The machine is disposable so nothing needs jailing: the suite runs as the owner against the owner's real paths and service manager, which is where the escapes happened. Because it writes those paths, it refuses to start anywhere it cannot see it may spend.
+
+## Profile and coverage
+
+Every run, green or red, is profiled and measures its coverage of pfm's own source. pfm is built instrumented, the suite winds every pfm process down so each writes its counters (`windDown` in `pfm/journey/profile_test.go`), and `harness.Cover` merges them with `summary.md`, `steps.tsv` and `waits.tsv` into the run's artifacts. `infra/fence/journey/run.sh` copies the artifacts to `{checkout}/tmp/journey/{run id}/`, links `latest` to the newest and keeps the last ten runs; the folder is git-ignored. Coverage is a lower bound: a process killed by SIGKILL writes no counters. CI's journey job uploads the artifacts every time, raw counters (`covdata/`) included, so both operating systems' runs can be merged. A run without `GOCOVERDIR` writes a summary whose coverage line says so.
+
+## The chat-function cells
+
+The functions a chat has are played at both doors, the CLI and the MCP server, from inside a live Claude chat of the run (`pfm/journey/doors_cells_test.go`): the chat alone, a child working and then idle, a child ended and reopened, a chat ended before its first prompt, and the chats a chat starts, a Codex one among them. Each function present at both doors runs against the same chat so the two answers are read side by side. The `herdr-mesh` node (`pfm/journey/tree_test.go`) runs five forks side by side, each in a Herdr session of its own: `alone`, `host`, `started`, `unnamed` and `chat-new` (steps in `pfm/journey/step_herdr_mesh_test.go`).
+
+Host-placement edges are played with the owner's own hands: with a tmux server stopped (`kill -STOP`) and no Herdr server running, `claude` typed in a plain terminal launches in tmux, and its `chat.placement` record names the server that did not answer in `caller_err` (step `tmuxStopped`, `pfm/journey/step_tmux_stopped_test.go`); exit 10 stays the answer when pfm cannot tell whether Herdr runs or a placement fails.
 
 ## Speed
 

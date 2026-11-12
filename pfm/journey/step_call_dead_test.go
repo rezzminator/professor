@@ -15,10 +15,9 @@ import (
 
 // callDead: from his plain terminal the owner ends the child with `pfm chat end` and calls it: a
 // Claude chat that ended with turns in its transcript is dormant, so pfm resumes the call into its own
-// session and its transcript grows by that one user record, its footer a block below the text. Then he starts a Claude chat by name and ends it
-// before its first prompt, so its transcript holds its title alone, and calls it: pfm answers it is
-// dead with exit 3, names how to revive it, and its transcript stays as it was (escape
-// chat-mesh/call-dead-refused, never another transcript matched instead).
+// session and its transcript grows by that one user record, its footer a block below the text. The
+// chat then inspects the ended child at both doors and reopens it (deadChildDoors), ends it, reopens
+// and ends it again (reopenedDoors).
 func callDead(c *harness.Ctx, s State) State {
 	owner := c.Terminal(meshOwner)
 	child := s.Mesh.ChildName
@@ -31,10 +30,9 @@ func callDead(c *harness.Ctx, s State) State {
 	out, errs, code = typedRun(c, owner, "call-ended", "pfm chat call --allow-unsigned "+child+" ping")
 	resumed := regexp.MustCompile(`^called RESUME user turn \S+ \(parent \S+\) into session ` +
 		regexp.QuoteMeta(s.Mesh.Child.Session) + ` — answered on next reopen; backup: \S+\n$`)
-	// pfm identifies the sender once for the live attempt and again to sign the resumed turn, and says
-	// each time that a plain terminal is no chat: the line comes twice (a reported defect).
-	noSender, _, _ := strings.Cut(unsignedFromOwner, "\n")
-	if want := noSender + "\n" + unsignedFromOwner; code != 0 || !resumed.MatchString(out) || errs != want {
+	// pfm identifies the sender once for the live attempt and the resumed turn it signs, and says once that a
+	// plain terminal is no chat.
+	if want := unsignedFromOwner; code != 0 || !resumed.MatchString(out) || errs != want {
 		c.Failf("pfm chat call %s once it ended: exit %d, stdout %q, stderr %q; want exit 0, stdout matching %s, "+
 			"stderr %q", child, code, out, errs, resumed, want)
 	}
@@ -51,8 +49,21 @@ func callDead(c *harness.Ctx, s State) State {
 		c.Failf("%s's transcript after the resumed call = %+v, want %+v", child, got, want)
 	}
 
+	term := c.Terminal(s.Term)
+	deadChildDoors(c, term, &s)
+	reopenedDoors(c, term, &s)
+	return s
+}
+
+// deadChat: from his plain terminal the owner starts a Claude chat by name and ends it before its
+// first prompt, so its transcript holds its title alone, and calls it: pfm answers it is dead with
+// exit 3, names how to revive it, and its transcript stays as it was (escape chat-mesh/call-dead-refused,
+// never another transcript matched instead). The chat then plays the dead chat at both doors.
+func deadChat(c *harness.Ctx, s *State) {
+	owner := c.Terminal(meshOwner)
+	owner.WaitFor(prompt)
 	dead := c.Unique("dead")
-	out, errs, code = typedRun(c, owner, "dead-new", "cd $HOME/work/demo && pfm chat new --engine cc --name "+dead)
+	out, errs, code := typedRun(c, owner, "dead-new", "cd $HOME/work/demo && pfm chat new --engine cc --name "+dead)
 	f := strings.Fields(out)
 	if code != 0 || errs != "" || len(f) < 3 ||
 		out != fmt.Sprintf("cc\t%s\t%s\tnamed\tlisted\nattach: tmux -L %[2]s attach -t %[2]s\n", dead, f[2]) {
@@ -101,7 +112,7 @@ func callDead(c *harness.Ctx, s State) State {
 	if got := read(c, "sh", "-c", "cat "+transcript); got != title {
 		c.Failf("%s's transcript %s after the refused call = %q, want it unchanged: %q", dead, transcript, got, title)
 	}
-	return s
+	deadChatDoors(c, c.Terminal(s.Term), s, dead, session)
 }
 
 // notLive waits until `pfm chat status` answers that name is dead, its exit 3.

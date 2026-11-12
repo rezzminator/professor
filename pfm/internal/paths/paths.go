@@ -1,4 +1,6 @@
 // Package paths centralizes filesystem defaults and their test-jail overrides.
+//
+// logroot.go: LogRoot, the one folder every pfm log is written to and read from.
 package paths
 
 import (
@@ -301,11 +303,6 @@ type Values struct {
 	ProcRoot           string
 	ManagedSettingsDir string
 	CgroupRoot         string
-	// LogFile is the home's activity log, the JSON-lines file internal/obs
-	// writes and `pfm log` reads. It hangs off the same pfm state directory
-	// as the fleet cache, so a jail, a fence and the live host each keep
-	// their own and can never mix.
-	LogFile string
 }
 
 // EnvOr returns a non-empty environment override, or fallback otherwise.
@@ -524,7 +521,6 @@ func Resolve() (Values, error) {
 		TmuxDir:            EnvOr(EnvTmuxDir, TmuxDirUnder((OSEnv{}).Get(EnvTmuxTmpDir))),
 		Home:               home,
 		ArchiveDir:         filepath.Join(home, ".claude-archive"),
-		LogFile:            filepath.Join(home, ".local", "state", "pfm", "log", "pfm.jsonl"),
 		ProcRoot:           EnvOr(EnvProcRoot, systemProcRoot),
 		ManagedSettingsDir: managed,
 		CgroupRoot:         EnvOr(EnvCgroupRoot, "/sys/fs/cgroup"),
@@ -603,18 +599,6 @@ func AutoEffortStateFile(env Env, home, sessionID string) (string, error) {
 		return dir + name + "." + safe.String(), nil
 	}
 	return dir + name[:dot] + "." + safe.String() + name[dot:], nil
-}
-
-// CostSinkLog is the file the detached cost sink logs its failures to, beside
-// the activity log, so `pfm doctor` can show the cause of a sink that stopped.
-func CostSinkLog(home string) string {
-	return filepath.Join(home, ".local", "state", "pfm", "log", "cost-sink.log")
-}
-
-// SubagentStatuslineTrace is the opt-in structural trace beside the cost sink
-// and activity logs. It never holds prompts, labels or transcript bodies.
-func SubagentStatuslineTrace(home string) string {
-	return filepath.Join(home, ".local", "state", "pfm", "log", "subagent-statusline.jsonl")
 }
 
 // HarnessBaselineDir resolves Claude's captured baselines in the recorded clone.

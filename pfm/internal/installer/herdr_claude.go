@@ -22,7 +22,10 @@ const herdrClaudeInstallBound = 30 * time.Second
 // is herdr-shield's guarded form (RetireHerdrShieldHook); a store with more is
 // left alone and warned.
 // Once every store holds the hook, pfm's own native Claude reports are
-// released (Options.ReleaseNativeClaudeReports).
+// released (Options.ReleaseNativeClaudeReports). Uninstall takes back only
+// pfm's wrapping: a guarded hook unwraps even while Herdr still runs
+// herdr-shield, whose guard handed its panes to the pfm now leaving; Herdr's
+// own hooks, none or many, stay as they are and nothing is released.
 func (installer *engine) wireHerdrClaudeIntegration(ctx context.Context) error {
 	runner := installer.processRunner()
 	env := installer.env()
@@ -38,7 +41,8 @@ func (installer *engine) wireHerdrClaudeIntegration(ctx context.Context) error {
 	for _, store := range herdr.ClaudeStores(dirs) {
 		failed = errors.Join(failed, installer.wireHerdrClaudeStore(ctx, runner, store))
 	}
-	if failed != nil || !installer.apply || installer.options.ReleaseNativeClaudeReports == nil {
+	if failed != nil || !installer.apply || installer.options.ReleaseNativeClaudeReports == nil ||
+		installer.options.Mode == ModeUninstall {
 		return failed
 	}
 	if err := installer.options.ReleaseNativeClaudeReports(ctx, installer.options.Home); err != nil {
@@ -50,6 +54,10 @@ func (installer *engine) wireHerdrClaudeIntegration(ctx context.Context) error {
 func (installer *engine) wireHerdrClaudeStore(ctx context.Context, runner deps.Runner, store herdr.ClaudeStore) error {
 	if store.Err != nil {
 		return installer.fail(fmt.Errorf("herdr claude integration: %w", store.Err))
+	}
+	uninstall := installer.options.Mode == ModeUninstall
+	if uninstall && len(store.Hooks) != 1 {
+		return nil
 	}
 	switch len(store.Hooks) {
 	case 0:
@@ -64,6 +72,9 @@ func (installer *engine) wireHerdrClaudeStore(ctx context.Context, runner deps.R
 		return nil
 	case 1:
 		retirement := RetireHerdrShieldHook(store, installer.options.Home, installer.env())
+		if uninstall {
+			retirement.Skip = ""
+		}
 		switch {
 		case retirement.Err != nil:
 			return installer.fail(retirement.Err)

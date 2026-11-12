@@ -5,7 +5,9 @@
 // detects is Herdr's own: its screen detection reads the state and its bundled
 // Claude integration (integration.go) reports the session. Outside Herdr
 // nothing here runs. A pane's processes are what Herdr's pane.process_info
-// names (foreground.go).
+// names (foreground.go). Whether Herdr resumes a restored pane's agent itself
+// is restore.go's. Whether a server runs at a socket is server.go's. The nudge
+// that makes a socket's blinker re-read its tabs is nudge.go's.
 package herdr
 
 import (

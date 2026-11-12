@@ -4,6 +4,7 @@ package journey
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 // Herdr server.
 func claudeFromPicker(c *harness.Ctx, s State) State {
 	term := c.Terminal(s.Term)
+	newChatSelected(term)
 	term.Press(harness.Enter)
 	// Codex and OpenCode are logged in too, so the wizard asks the engine first, opening on the last
 	// launch's: another branch's may be Codex's.
@@ -26,8 +28,21 @@ func claudeFromPicker(c *harness.Ctx, s State) State {
 	term.WaitFor("❯", 20*time.Second)
 	s.Chat = oneLiveChat(c, s, "live-claude")
 	s.Chat.Engine = engineOf(c, s)
+	// A fresh chat is reachable from the owner's phone: Remote Control is on for every launch.
+	if argv := engineArgv(c, s.Chat.Engine); !slices.Contains(argv, "--remote-control") {
+		c.Failf("the new chat's engine %d runs %q, want it launched with --remote-control", s.Chat.Engine, argv)
+	}
 	fleetConsistent(c, s)
 	return s
+}
+
+// engineArgv is the argv of the engine process pid.
+func engineArgv(c *harness.Ctx, pid int) []string {
+	argv, err := procTable(c).Cmdline(pid)
+	if err != nil {
+		c.Failf("read the argv of engine %d: %v", pid, err)
+	}
+	return argv
 }
 
 // engineOf waits for the one engine process of s.Chat and requires it under the branch's Herdr server.

@@ -12,6 +12,8 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/spawn"
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
@@ -30,6 +32,12 @@ var Exec = syscall.Exec
 // Dispatch preserves the K1 one-line protocol for captured stdout. With a
 // human-facing terminal, pfm becomes the selected action instead.
 func Dispatch(stdout io.Writer, line string) error {
+	if _, tmuxAction, _ := directTmuxArguments(line); tmuxAction {
+		// A tmux client, run here or by the shell evaluating the line, never starts in a Herdr pane.
+		if err := spawn.RefuseTmuxClient("tmux attach", resolve.CallerEnvironment()); err != nil {
+			return err
+		}
+	}
 	if !OutputIsTerminal(stdout) {
 		_, err := fmt.Fprintln(stdout, line)
 		return err

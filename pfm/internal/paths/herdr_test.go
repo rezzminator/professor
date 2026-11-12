@@ -1,6 +1,7 @@
 package paths
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -55,5 +56,34 @@ func TestHerdrConfig(t *testing.T) {
 		"pfm-herdr-shell",
 	) {
 		t.Fatalf("wrapper=%s", got)
+	}
+}
+
+func TestHerdrServerSocket(t *testing.T) {
+	failure := errors.New("no home")
+	for _, tc := range []struct {
+		name      string
+		values    map[string]string
+		homeErr   error
+		want, err string
+	}{
+		{name: "default session", want: "/u/.config/herdr/herdr.sock"},
+		{name: "empty xdg", values: map[string]string{"XDG_CONFIG_HOME": ""}, want: "/u/.config/herdr/herdr.sock"},
+		{name: "xdg", values: map[string]string{"XDG_CONFIG_HOME": "/x"}, want: "/x/herdr/herdr.sock"},
+		{name: "named session", values: map[string]string{"HERDR_SESSION": "journey"}, want: "/u/.config/herdr/sessions/journey/herdr.sock"},
+		{name: "explicit socket wins", values: map[string]string{"HERDR_SOCKET_PATH": "/s/h.sock", "HERDR_SESSION": "journey"}, want: "/s/h.sock"},
+		{name: "explicit socket needs no home", values: map[string]string{"HERDR_SOCKET_PATH": "/s/h.sock"}, homeErr: failure, want: "/s/h.sock"},
+		{name: "no home", homeErr: failure, err: "resolve the Herdr socket: home directory: no home"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := HerdrServerSocket(&MapEnv{Values: tc.values, HomeDir: "/u", HomeErr: tc.homeErr})
+			gotErr := ""
+			if err != nil {
+				gotErr = err.Error()
+			}
+			if got != tc.want || gotErr != tc.err {
+				t.Fatalf("HerdrServerSocket = %q, %q; want %q, %q", got, gotErr, tc.want, tc.err)
+			}
+		})
 	}
 }

@@ -237,6 +237,14 @@ if [[ -o interactive && -n "${PFM_AUTO_OPEN:-}${CC_AUTO_OPEN:-}${VSCODE_AUTO_CC:
     # moment is a terminal that reopens whatever you just closed, forever.
     add-zsh-hook -d precmd _pfm_auto_open
     unfunction _pfm_auto_open
+    # A pane Herdr restored with its agent's session is Herdr's: Herdr types that agent's resume
+    # into this shell as it starts, and a picker opened here would read those keys as its find
+    # text. pfm answers whether this pane is one; a pane it cannot ask about opens the picker.
+    if [[ -n "${HERDR_PANE_ID:-}" &&
+      "$("$HOME/.local/bin/pfm" internal herdr-shell resume-pending 2>/dev/null)" == pending ]]; then
+      unset _pfm_auto_what
+      return
+    fi
     # The value chooses, from a WHITELIST — never `eval`, and never run as-is. It arrives from
     # the environment, which a terminal profile, a parent process or an ssh client can set.
     local cmd

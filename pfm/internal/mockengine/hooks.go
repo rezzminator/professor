@@ -83,9 +83,8 @@ func (session *claudeSession) fire(event, subject string, payload hookPayload) (
 	if session.proc.script.Quiet {
 		return nil, nil
 	}
-	return session.hooks.fire(
-		session.proc.ctx, event, subject, payload, session.proc.cwd, session.environ, session.proc.stderr,
-	)
+	proc, ctx := session.proc, hookContext(session.proc.ctx, event)
+	return session.hooks.fire(ctx, event, subject, payload, proc.cwd, session.environ, proc.stderr)
 }
 
 // foldContext writes a meta user record every pfm transcript reader skips.
@@ -173,28 +172,29 @@ type hookDocument struct {
 		} `json:"hooks"`
 	} `json:"hooks"`
 	StatusLine struct {
-		Type    string `json:"type"`
-		Command string `json:"command"`
+		Type            string  `json:"type"`
+		Command         string  `json:"command"`
+		RefreshInterval float64 `json:"refreshInterval"`
 	} `json:"statusLine"`
 }
 
 // loadHookDocument reads a settings.json. A missing file is an
 // empty registration; a present file that does not parse is an error.
-func loadHookDocument(path string) (hookSet, string, error) {
+func loadHookDocument(path string) (hookSet, statusLineSetting, error) {
 	content, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return hookSet{}, "", nil
+		return hookSet{}, statusLineSetting{}, nil
 	}
 	if err != nil {
-		return nil, "", fmt.Errorf("read %s: %w", path, err)
+		return nil, statusLineSetting{}, fmt.Errorf("read %s: %w", path, err)
 	}
 	return decodeHookDocument(content, path)
 }
 
-func decodeHookDocument(content []byte, source string) (hookSet, string, error) {
+func decodeHookDocument(content []byte, source string) (hookSet, statusLineSetting, error) {
 	var document hookDocument
 	if err := json.Unmarshal(content, &document); err != nil {
-		return nil, "", fmt.Errorf("decode %s: %w", source, err)
+		return nil, statusLineSetting{}, fmt.Errorf("decode %s: %w", source, err)
 	}
 	set := hookSet{}
 	for event, entries := range document.Hooks {
@@ -203,7 +203,9 @@ func decodeHookDocument(content []byte, source string) (hookSet, string, error) 
 			if raw.Matcher != "" && raw.Matcher != "*" {
 				pattern, err := regexp.Compile(raw.Matcher)
 				if err != nil {
-					return nil, "", fmt.Errorf("%s: %s matcher %q: %w", source, event, raw.Matcher, err)
+					return nil, statusLineSetting{}, fmt.Errorf(
+						"%s: %s matcher %q: %w", source, event, raw.Matcher, err,
+					)
 				}
 				entry.matcher = pattern
 			}
@@ -221,25 +223,28 @@ func decodeHookDocument(content []byte, source string) (hookSet, string, error) 
 			}
 		}
 	}
-	statusCommand := ""
-	if document.StatusLine.Type == "command" {
-		statusCommand = document.StatusLine.Command
+	var status statusLineSetting
+	if document.StatusLine.Type == "command" && document.StatusLine.Command != "" {
+		status = statusLineSetting{
+			command: document.StatusLine.Command,
+			refresh: time.Duration(document.StatusLine.RefreshInterval * float64(time.Second)),
+		}
 	}
-	return set, statusCommand, nil
+	return set, status, nil
 }
 
 // loadClaudeHooks applies Claude's account, project and launch settings layers.
-func loadClaudeHooks(configDir, cwd, settings string) (hookSet, string, error) {
+func loadClaudeHooks(configDir, cwd, settings string) (hookSet, statusLineSetting, error) {
 	hooks, status, err := loadHookDocument(filepath.Join(configDir, "settings.json"))
 	if err != nil {
-		return nil, "", err
+		return nil, statusLineSetting{}, err
 	}
 	project, projectStatus, err := loadHookDocument(filepath.Join(cwd, ".claude", "settings.json"))
 	if err != nil {
-		return nil, "", err
+		return nil, statusLineSetting{}, err
 	}
 	hooks.merge(project)
-	if projectStatus != "" {
+	if projectStatus.command != "" {
 		status = projectStatus
 	}
 	if settings == "" {
@@ -247,21 +252,21 @@ func loadClaudeHooks(configDir, cwd, settings string) (hookSet, string, error) {
 	}
 	value := strings.TrimSpace(settings)
 	var inline hookSet
-	var inlineStatus string
+	var inlineStatus statusLineSetting
 	if strings.HasPrefix(value, "{") {
 		inline, inlineStatus, err = decodeHookDocument([]byte(settings), flagSettings)
 	} else {
 		content, readErr := os.ReadFile(settings)
 		if readErr != nil {
-			return nil, "", fmt.Errorf("read %s %s: %w", flagSettings, settings, readErr)
+			return nil, statusLineSetting{}, fmt.Errorf("read %s %s: %w", flagSettings, settings, readErr)
 		}
 		inline, inlineStatus, err = decodeHookDocument(content, flagSettings+" "+settings)
 	}
 	if err != nil {
-		return nil, "", err
+		return nil, statusLineSetting{}, err
 	}
 	hooks.merge(inline)
-	if inlineStatus != "" {
+	if inlineStatus.command != "" {
 		status = inlineStatus
 	}
 	return hooks, status, nil
@@ -386,36 +391,6 @@ func (answer hookAnswer) denies() (bool, string) {
 		return true, answer.stderr
 	}
 	return false, ""
-}
-
-// invokeStatusLine feeds the statusLine command its input and returns the first
-// line it printed — the line the pane shows under the composer.
-func invokeStatusLine(ctx context.Context, command string, input any, cwd string, environ []string) (string, error) {
-	if command == "" {
-		return "", nil
-	}
-	encoded, err := json.Marshal(input)
-	if err != nil {
-		return "", fmt.Errorf("encode statusline input: %w", err)
-	}
-	shell, err := deps.Resolve("sh")
-	if err != nil {
-		return "", fmt.Errorf("statusline: sh not found: %w", err)
-	}
-	bounded, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(bounded, shell, "-c", command)
-	cmd.Dir = cwd
-	cmd.Env = environ
-	cmd.Stdin = bytes.NewReader(encoded)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("statusline %q: %w: %s", command, err, strings.TrimSpace(stderr.String()))
-	}
-	line, _, _ := strings.Cut(stdout.String(), "\n")
-	return line, nil
 }
 
 // warn writes a non-fatal complaint to the engine's stderr.

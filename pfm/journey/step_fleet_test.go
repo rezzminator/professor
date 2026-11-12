@@ -3,16 +3,19 @@
 package journey
 
 import (
+	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/journey/harness"
 )
 
-// fleet: after the day, every branch done, the owner starts a named chat in a scratch project, ends
-// it and deletes the project's directory; pfm ls still carries the ended chat under its id, name and
-// project, once, as every row is listed once; the picker draws its name; pfm chat ls --all prints its
-// header; underneath, the whole machine is consistent (fleetWhole).
+// fleet: after the day, every branch done, the owner starts a named Claude chat in a scratch project,
+// ends it (its engine still runs its SessionEnd hooks through the hangup) and deletes the project's
+// directory; pfm ls still carries the ended chat under its id, name and project, once, as every row is
+// listed once; the picker draws its name; pfm chat ls --all prints its header; underneath, the whole
+// machine is consistent (fleetWhole).
 func fleet(c *harness.Ctx, s State) State {
 	project := c.Unique("gone")
 	reply := c.Unique("reply")
@@ -21,7 +24,7 @@ func fleet(c *harness.Ctx, s State) State {
 	if code := shellRun(
 		term,
 		"new",
-		"mkdir -p ~/work/"+project+" && cd ~/work/"+project+" && pfm chat new --name "+project+
+		"mkdir -p ~/work/"+project+" && cd ~/work/"+project+" && pfm chat new --engine cc --name "+project+
 			` 'a turn mock-engine: {"type":"turn","reply":"`+reply+`"}'`,
 		30*time.Second,
 	); code != 0 {
@@ -34,6 +37,7 @@ func fleet(c *harness.Ctx, s State) State {
 	if code := shellRun(term, "end", "clear && pfm chat end "+project, 30*time.Second); code != 0 {
 		c.Failf("pfm chat end %s exited %d:\n%s", project, code, term.Screen())
 	}
+	sessionEndRan(c)
 	var before []string
 	c.Poll("pfm ls carries the ended chat "+project, 20*time.Second, func() (bool, string) {
 		table := read(c, "pfm", "ls", "--tsv")
@@ -73,6 +77,27 @@ func fleet(c *harness.Ctx, s State) State {
 	term.WaitFor("live chats everywhere (name · session · state · herdr · dir · last activity):")
 	fleetWhole(c)
 	return s
+}
+
+// sessionEndRan waits for pfm's activity log to hold, since the step began, the hooks.run records of the
+// SessionEnd hooks every pfm Claude launch registers: `pfm chat end` hangs the chat's tmux server up, and
+// the engine still runs them before it exits. The step ends no other chat.
+func sessionEndRan(c *harness.Ctx) {
+	from, _ := c.Window()
+	c.Poll("the ended chat's SessionEnd hooks in pfm's activity log", stepBound, func() (bool, string) {
+		seen := map[string]string{}
+		for _, line := range activity(c, from, time.Time{}) {
+			var record struct {
+				Msg      string `json:"msg"`
+				Hook     string `json:"hook"`
+				Decision string `json:"decision"`
+			}
+			if json.Unmarshal([]byte(line), &record) == nil && record.Msg == "hooks.run" {
+				seen[record.Hook] = record.Decision
+			}
+		}
+		return seen["clear-kill"] == "allow" && seen["exit-close"] == "allow", fmt.Sprintf("hook decisions %v", seen)
+	})
 }
 
 // carried is the pfm ls --tsv row whose name is name, split into its fields; nil when none is.

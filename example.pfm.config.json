@@ -82,9 +82,8 @@
   "log": {
     "level": null,
     "components": {},
-    "keepFiles": 5,
-    "maxMB": 8,
-    "keepDays": 30
+    "keepFiles": 10,
+    "maxMB": 8
   },
   "doctor": {
     "ignoreWarnings": [],

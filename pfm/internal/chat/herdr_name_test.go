@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -254,6 +256,13 @@ func TestRenameHerdrLabelsTheSeatsSoleTab(t *testing.T) {
 					readErr,
 					wantName,
 				)
+			}
+			// A stored name nudges the socket's blinker, whose last read of the tabs may predate it.
+			nudge := herdr.NudgePath(paths.HerdrLockDir(runtime.Paths.Home), socket)
+			if _, err := os.Stat(nudge); (err == nil) != (test.wantErr == "") ||
+				err != nil && !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("nudge %s: %v; want it left only by a rename that stored the name (error %q)",
+					nudge, err, test.wantErr)
 			}
 		})
 	}

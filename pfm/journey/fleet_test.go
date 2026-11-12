@@ -274,6 +274,7 @@ func fleetConsistent(c *harness.Ctx, s State) {
 	faults := chatFaults(rows, listed, seats)
 	server := herdrServer(table, s)
 	faults = append(faults, paneFaults(sock, seats, panes)...)
+	faults = append(faults, hostFaults(c, table, server, sock)...)
 	faults = append(faults, engineFaults(table, rows, seats, func(p process) bool {
 		_, seated := ever[p.Session]
 		return seated || server != 0 && under(table, p.Pid, server)
@@ -299,6 +300,35 @@ func chatFaults(rows map[string][2]string, listed []string, seats map[string][2]
 	for session := range seats {
 		if _, ok := rows[session]; !ok {
 			faults = append(faults, fmt.Sprintf("live seat of %s has no chat row", session))
+		}
+	}
+	return faults
+}
+
+// hostFaults: no chat hosted in tmux for a caller in the branch's Herdr session unless it asked for
+// tmux in words, read from pfm's own placement records of the step (the caller's socket, the host
+// asked for and the host chosen), and no tmux client attached
+// inside one of its panes, read from the process table under its Herdr server.
+func hostFaults(c *harness.Ctx, table map[int]process, server int, sock string) []string {
+	var faults []string
+	from, to := c.Window()
+	for _, record := range activity(c, from, to) {
+		var placement struct {
+			Msg, Door, Chosen, Requested string
+			Socket                       string `json:"caller_socket"`
+			Pane                         string `json:"caller_pane"`
+		}
+		if json.Unmarshal([]byte(record), &placement) == nil && placement.Msg == "chat.placement" &&
+			placement.Socket == sock && placement.Chosen == "tmux" && placement.Requested != "tmux" {
+			faults = append(faults, fmt.Sprintf("pfm hosted a chat in tmux for a caller in Herdr pane %s (door %s)",
+				placement.Pane, placement.Door))
+		}
+	}
+	for _, p := range table {
+		argv := strings.Fields(p.Args)
+		if server != 0 && len(argv) > 1 && filepath.Base(argv[0]) == "tmux" && under(table, p.Pid, server) &&
+			(slices.Contains(argv, "attach") || slices.Contains(argv, "attach-session")) {
+			faults = append(faults, fmt.Sprintf("tmux client pid %d runs inside a Herdr pane: %s", p.Pid, p.Args))
 		}
 	}
 	return faults
@@ -393,9 +423,16 @@ func logGate(c *harness.Ctx, failed bool) {
 	}
 }
 
-// activity is every activity-log record written within [from, to], as written.
+// logRoot is where pfm logs on the owner's machine: his clone's tmp/logs/pfm, the clone the install
+// recorded (paths.LogRoot).
+func logRoot(home string) string { return filepath.Join(home, ".professor", "tmp", "logs", "pfm") }
+
+// activity is every activity-log record written within [from, to], as written: the closed segments
+// last written since from, then the current one.
 func activity(c *harness.Ctx, from, to time.Time) []string {
-	r := c.Read("cat", filepath.Join(ownerHome, ".local", "state", "pfm", "log", "pfm.jsonl"))
+	r := c.Read("sh", "-c",
+		`cd "$1" && cat $(find pfm.segments -name '*.jsonl' -newermt "@$2" 2>/dev/null | sort) pfm.jsonl`,
+		"sh", logRoot(ownerHome), strconv.FormatInt(from.Unix()-1, 10))
 	if r.Code != 0 {
 		return nil // no log yet: nothing of pfm has run
 	}

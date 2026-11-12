@@ -404,9 +404,22 @@ func TestChatNewBackendFlag(t *testing.T) {
 	for _, tc := range []struct {
 		name, backend, want string
 		code                int
+		attach              bool
 	}{
-		{name: "invalid", backend: "other", want: "--backend must be auto, tmux or herdr", code: 2},
-		{name: "forced unreachable", backend: "herdr", want: "herdr backend needs a caller in a Herdr pane", code: 1},
+		{name: "invalid", backend: "other", want: "pfm chat new: --backend must be auto, tmux or herdr\n", code: 2},
+		// Herdr asked for while no Herdr server runs: refused, never tmux.
+		{
+			name: "forced unreachable", backend: "herdr", code: 10,
+			want: "pfm chat new: host refused at cli.new: herdr backend asked for, but no Herdr server runs at " +
+				"SOCKET: stat SOCKET: no such file or directory\n",
+		},
+		// tmux asked for in words from a Herdr pane: born detached, and the
+		// tmux client --attach would draw in that pane is refused.
+		{
+			name: "attached tmux from a Herdr pane", backend: "tmux", code: 10, attach: true,
+			want: "pfm chat new: attach: host refused at tmux attach: this terminal is Herdr pane w6:p3, where a " +
+				"tmux client is never attached; open the chat from a plain terminal\n",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			jail := newRunJail(t)
@@ -414,35 +427,28 @@ func TestChatNewBackendFlag(t *testing.T) {
 			t.Setenv("TMUX", "")
 			t.Setenv("HERDR_ENV", "1")
 			t.Setenv("HERDR_PANE_ID", "w6:p3")
-			t.Setenv("HERDR_SOCKET_PATH", filepath.Join(t.TempDir(), "missing.sock"))
+			socket := filepath.Join(testjail.ShortRoot(t), "missing.sock")
+			t.Setenv("HERDR_SOCKET_PATH", socket)
 			var stdout, stderr bytes.Buffer
-			code := run(
-				[]string{
-					"chat",
-					"new",
-					"--name",
-					"BACKEND",
-					"--engine",
-					"cc",
-					"--cwd",
-					jail.root,
-					"--backend",
-					tc.backend,
-				},
-				&stdout,
-				&stderr,
-			)
-			if code != tc.code || !strings.Contains(stderr.String(), tc.want) {
+			args := []string{
+				"chat", "new", "--name", "BACKEND", "--engine", "cc", "--cwd", jail.root, "--backend", tc.backend,
+			}
+			if tc.attach {
+				args = append(args, "--attach")
+			}
+			code := run(args, &stdout, &stderr)
+			want := strings.ReplaceAll(tc.want, "SOCKET", socket)
+			if code != tc.code || !strings.HasSuffix(stderr.String(), want) {
 				t.Fatalf(
 					"code=%d stdout=%q stderr=%q, want code=%d %q",
 					code,
 					stdout.String(),
 					stderr.String(),
 					tc.code,
-					tc.want,
+					want,
 				)
 			}
-			if stdout.Len() != 0 {
+			if !tc.attach && stdout.Len() != 0 {
 				t.Fatalf("failed birth printed success: %q", stdout.String())
 			}
 		})
@@ -760,7 +766,9 @@ func TestReservedSeatLabel(t *testing.T) {
 	}
 }
 
-func TestChatNewRejectsCallerReadFailure(t *testing.T) {
+// A Herdr socket that answers with no usable ping is "cannot tell", refused
+// with code 10, never read as Herdr down.
+func TestChatNewRefusesAnUnreadableHerdr(t *testing.T) {
 	jail := newRunJail(t)
 	defer jail.killSockets(t)
 	t.Setenv("TMUX", "")
@@ -794,14 +802,10 @@ func TestChatNewRejectsCallerReadFailure(t *testing.T) {
 		&stdout,
 		&stderr,
 	)
-	if code != 1 || !strings.Contains(stderr.String(), "pfm chat new: place chat: caller unresolved:") ||
-		stdout.Len() != 0 {
-		t.Fatalf(
-			"code=%d stdout=%q stderr=%q; want caller failure without birth",
-			code,
-			stdout.String(),
-			stderr.String(),
-		)
+	want := "pfm chat new: host refused at cli.new: cannot tell whether Herdr runs: read the Herdr server at " +
+		socket + ": malformed ping result: herdr socket " + socket + ": type=pong and uint32 protocol are required\n"
+	if code != 10 || stderr.String() != want || stdout.Len() != 0 {
+		t.Fatalf("code=%d stdout=%q stderr=%q; want 10 %q without birth", code, stdout.String(), stderr.String(), want)
 	}
 }
 

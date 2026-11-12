@@ -38,103 +38,9 @@ type paneEngine interface {
 	finish(reason string) error
 	// statusLine refreshes the line shown under the composer.
 	statusLine(usage Tokens) (string, error)
-}
-
-// pane is the screen: the last lines of conversation, an optional busy
-// footer or open menu, the background-agent rows, the composer and the
-// statusline. Every change repaints the whole thing, so a capture sees only
-// what is true now.
-type pane struct {
-	history     []string
-	footer      string
-	menu        *Step
-	selected    int
-	agents      agentPanel
-	draft       composer
-	queued      []string
-	status      string
-	glyph       string
-	placeholder string
-	rule        string
-	renameDraft *composer
-	renameError string
-}
-
-const historyKeep = 12
-
-// claudeComposerRule is a horizontal rule of Claude Code's input box, drawn
-// above and below its composer row; the kill-exit finisher reads the box down
-// to the closing one (pfmcall.ComposerBoxEmpty). Codex draws no box.
-const claudeComposerRule = "────────────────────────────────────────\r\n"
-
-// These dialog strings are read by internal/spawn/spawn.go's Codex birth.
-const (
-	codexRenameCommand = "/rename"
-	codexRenameOffer   = "rename the current thread"
-	codexRenameTitle   = "Rename thread"
-	codexRenameHint    = "Type a name and press Enter"
-	codexRenameEmpty   = "Thread name cannot be empty."
-	codexRenameFooter  = "Press enter to confirm or esc to go back"
-)
-
-func (screen *pane) say(line string) {
-	screen.history = append(screen.history, line)
-	if len(screen.history) > historyKeep {
-		screen.history = screen.history[len(screen.history)-historyKeep:]
-	}
-}
-
-func (screen *pane) render() string {
-	var out strings.Builder
-	out.WriteString("\x1b[2J\x1b[H")
-	for _, line := range screen.history {
-		out.WriteString(line)
-		out.WriteString("\r\n")
-	}
-	if screen.footer != "" {
-		out.WriteString("\r\n" + screen.footer + "\r\n")
-	}
-	if screen.renameDraft != nil {
-		out.WriteString("\r\n" + codexRenameTitle + "\r\n" + codexRenameHint + "\r\n")
-		out.WriteString(screen.glyph + " " + screen.renameDraft.text() + "\r\n")
-		if screen.renameError != "" {
-			out.WriteString(screen.renameError + "\r\n")
-		}
-		out.WriteString(codexRenameFooter + "\r\n")
-		return out.String()
-	}
-	if screen.menu != nil {
-		out.WriteString("\r\n")
-		for index, option := range screen.menu.Options {
-			marker := "  "
-			if index+1 == screen.selected {
-				marker = screen.glyph + " "
-			}
-			fmt.Fprintf(&out, "%s%d. %s\r\n", marker, index+1, option)
-		}
-		out.WriteString("Enter to confirm · Esc to cancel\r\n")
-	} else {
-		draft := screen.draft.text()
-		text := draft
-		if text == "" {
-			if screen.placeholder != "" {
-				text = "\x1b[2m" + screen.placeholder + "\x1b[0m"
-			}
-		}
-		out.WriteString(screen.agentWaitLine())
-		out.WriteString("\r\n" + screen.rule + screen.glyph + " " + text + "\r\n" + screen.rule)
-		if screen.placeholder != "" && draft != "" && strings.HasPrefix(codexRenameCommand, draft) {
-			out.WriteString(codexRenameOffer + "\r\n")
-		}
-		if len(screen.queued) > 0 {
-			out.WriteString("  Press up to edit queued messages\r\n")
-		}
-	}
-	out.WriteString(screen.agents.render())
-	if screen.status != "" {
-		out.WriteString(screen.status + "\r\n")
-	}
-	return out.String()
+	// statusRefresh is how often the engine re-runs its statusline besides its
+	// own events (Claude's statusLine.refreshInterval); 0 never.
+	statusRefresh() time.Duration
 }
 
 // runPane drives an engine's TUI until it exits and returns the exit code.
@@ -158,6 +64,11 @@ func runPane(proc *process, engine paneEngine, launchPrompt string, resumed bool
 		return ExitUsage
 	}
 	loop := &paneLoop{proc: proc, engine: engine, screen: &pane{glyph: engine.composerGlyph()}}
+	if every := engine.statusRefresh(); every > 0 {
+		ticker := time.NewTicker(every)
+		defer ticker.Stop()
+		loop.statusDue = ticker.C
+	}
 	if codex, ok := engine.(interface{ composerPlaceholder() string }); ok {
 		loop.screen.placeholder = codex.composerPlaceholder()
 	}
@@ -243,13 +154,15 @@ func (loop *paneLoop) trustDialog() (int, bool) {
 
 // paneLoop owns the key loop and the turn machine over one pane.
 type paneLoop struct {
-	proc     *process
-	engine   paneEngine
-	screen   *pane
-	keys     <-chan keyEvent
-	usage    Tokens
-	exiting  bool
-	exitCode int
+	proc   *process
+	engine paneEngine
+	screen *pane
+	keys   <-chan keyEvent
+	// statusDue ticks every paneEngine.statusRefresh; nil never.
+	statusDue <-chan time.Time
+	usage     Tokens
+	exiting   bool
+	exitCode  int
 }
 
 func (loop *paneLoop) paint() {
@@ -258,13 +171,16 @@ func (loop *paneLoop) paint() {
 	}
 }
 
-func (loop *paneLoop) refreshStatus(usage Tokens) {
+// refreshStatus re-runs the statusline and returns the line now shown; a run
+// that fails is named and keeps the line it had.
+func (loop *paneLoop) refreshStatus(usage Tokens) string {
 	line, err := loop.engine.statusLine(usage)
 	if err != nil {
 		warn(loop.proc.stderr, "%v", err)
-		return
+		return loop.screen.status
 	}
 	loop.screen.status = line
+	return line
 }
 
 // run is the idle loop: keys edit the composer, Enter submits, a menu takes
@@ -285,6 +201,11 @@ func (loop *paneLoop) run() int {
 		case <-loop.agentsDue():
 			if code, exited := loop.agentsEnded(); exited {
 				return code
+			}
+		case <-loop.statusDue:
+			// Repaint only a line that changed: an idle pane stays still.
+			if shown := loop.screen.status; loop.refreshStatus(loop.usage) != shown {
+				loop.paint()
 			}
 		}
 	}
@@ -409,9 +330,8 @@ func (loop *paneLoop) submit(line string) (int, bool) {
 		if err := loop.engine.rename(strings.TrimSpace(rest)); err != nil {
 			warn(proc.stderr, "rename: %v", err)
 		}
-		if screen.placeholder != "" {
-			loop.refreshStatus(loop.usage)
-		}
+		// Codex repaints at once, Claude Code within its refreshInterval: either line carries the new name.
+		loop.refreshStatus(loop.usage)
 		loop.paint()
 		return 0, false
 	case "/clear":
@@ -599,6 +519,8 @@ func (loop *paneLoop) busy(started time.Time, duration time.Duration, gate strin
 			default:
 				screen.draft.apply(event)
 			}
+		case <-loop.statusDue:
+			loop.refreshStatus(loop.usage)
 		case <-ticker.C:
 		}
 	}

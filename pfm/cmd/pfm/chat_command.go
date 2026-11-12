@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -14,7 +15,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/compose"
-	"github.com/rezzminator/professor/pfm/internal/doctor"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/gather"
@@ -36,7 +36,7 @@ func renderNoSuchChat(name string, stdout, stderr io.Writer, asJSON bool) int {
 	} else {
 		fmt.Fprintf(stdout, "%s\t%s\n", name, headless.StateMissing)
 	}
-	fmt.Fprintf(stderr, "pfm chat: no chat named %q\n", name)
+	fmt.Fprintf(stderr, "pfm chat: %s\n", pfmcall.UnknownChat(name).Message)
 	return codeUnknownChat
 }
 
@@ -260,26 +260,22 @@ func runChatResolve(args []string, stdout, stderr io.Writer, runtimes ...command
 		return codeUndelivered
 	}
 	target, code, detail, err := engine.Resolve(context.Background(), name)
+	if err == nil {
+		err = pfmchat.ResolveRefusal(code, detail, name)
+	}
+	var refusal pfmchat.Refusal
+	if errors.As(err, &refusal) {
+		return reportChatRefusal("resolve", err, name, stdout, stderr)
+	}
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat resolve: %v\n", err)
 		return codeUndelivered
 	}
-	if code != 0 {
-		if code == pfmcall.CodeUnknown {
-			return renderNoSuchChat(name, stdout, stderr, false)
-		}
-		if detail != "" {
-			fmt.Fprintln(stderr, detail)
-		}
-		if code == pfmcall.CodeAmbiguous {
-			return 2
-		}
-		return codeUndelivered
+	socket := filepath.Base(target.SocketPath) // a tmux socket's -L name; a Herdr socket is addressed by path
+	if target.Backend == pfmcall.HerdrBackend {
+		socket = target.SocketPath
 	}
-	fmt.Fprintf(
-		stdout, "%s\t%s\t%s\n",
-		filepath.Base(target.SocketPath), target.Session, target.ID,
-	)
+	fmt.Fprintf(stdout, "%s\t%s\t%s\n", socket, target.Session, target.ID)
 	return 0
 }
 
@@ -292,25 +288,11 @@ func runChatCapture(args []string, stdout, stderr io.Writer, runtimes ...command
 		flags.Usage()
 		return 2
 	}
-	chat, code := headlessTarget(context.Background(), flags.Arg(0), stdout, stderr, false, runtimes...)
-	if code != 0 {
-		return code
-	}
-	if !chat.Live {
-		fmt.Fprintf(stderr, "pfm chat capture: %q is not running\n", chat.Name)
-		return codeDeadChat
-	}
-	door, seat, err := chatSeat(chat)
+	captured, err := pfmchat.Capture(context.Background(), firstRuntime(runtimes), flags.Arg(0), 0)
 	if err != nil {
-		fmt.Fprintf(stderr, "pfm chat capture: %v\n", err)
-		return 1
+		return reportChatRefusal("capture", err, flags.Arg(0), stdout, stderr)
 	}
-	capture, err := pfmchat.CaptureSeat(context.Background(), door, seat, pfmcall.FullScrollback)
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm chat capture: %v\n", err)
-		return codeDeadChat
-	}
-	fmt.Fprint(stdout, capture)
+	fmt.Fprint(stdout, captured.Text)
 	return 0
 }
 
@@ -574,12 +556,12 @@ func runChatLS(args []string, stdout, stderr io.Writer, clk clock.Clock, runtime
 	}
 	for index := range listed.Rows {
 		row := &listed.Rows[index]
-		state := doctor.StateUnknown
 		if inspectErrs[index] != nil {
 			fmt.Fprintf(stderr, "pfm chat ls: inspect %s: %v\n", row.Name, inspectErrs[index])
-		} else {
-			state = statuses[index].State
 		}
+		state := pfmchat.ListedState(*row, func() (headless.Status, error) {
+			return statuses[index], inspectErrs[index]
+		})
 		// Name is the actionable identity; retain the raw tmux session second
 		// so parsers lose no information.
 		handle := row.Socket

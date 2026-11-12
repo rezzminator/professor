@@ -141,7 +141,6 @@ func tabObservation(state string) TabDecoration {
 		Name:        "Chat",
 		State:       state,
 		Mode:        "emoji",
-		Revision:    7,
 		AgentStatus: "blocked",
 		Session:     json.RawMessage(`{"source":"pfm","agent":"claude","kind":"id","value":"s1"}`),
 	}
@@ -622,7 +621,7 @@ func TestTabRestorePastItsBudgetIsRepaintedByTheReplacement(t *testing.T) {
 	f.state = "idle"
 	f.revision++
 	idle := tabObservation("idle")
-	idle.AgentStatus, idle.Revision = "idle", f.revision
+	idle.AgentStatus = "idle"
 	replacement, stderr := newTabPainter(t, f.call)
 	replacement.lockDir = stale.lockDir
 	if _, err := replacement.paintTabs(context.Background(), []TabDecoration{idle}, 0); err != nil {

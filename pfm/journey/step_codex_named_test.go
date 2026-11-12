@@ -4,7 +4,6 @@ package journey
 
 import (
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 
@@ -23,16 +22,7 @@ func codexNamed(c *harness.Ctx, s State) State {
 	since := time.Now()
 	term.Type("/rename " + title + "\r")
 	term.WaitFor(title+" · ", 20*time.Second)
-	// The title's session_index row fires pfm's name sync (pfm-name-sync.path, launchd's WatchPaths): the
-	// name is judged once a sync that started after the title has finished.
-	c.Poll("a pfm name-sync run finished after the thread title "+title, 20*time.Second, func() (bool, string) {
-		for _, record := range activity(c, since, time.Time{}) {
-			if strings.Contains(record, `"msg":"cmd.exit","cmd":"name-sync"`) {
-				return true, record
-			}
-		}
-		return false, "no name-sync exit in pfm's activity log since " + since.Format(time.RFC3339Nano)
-	})
+	nameSynced(c, since, title)
 	if name := lsName(c, s); name != s.Name {
 		c.Failf("pfm ls names chat %s %q after the thread title %q arrived, want the --name %q",
 			s.Chat.Session, name, title, s.Name)
@@ -63,10 +53,7 @@ func chatNewInPane(c *harness.Ctx, s State, engine, kind string) State {
 		}
 		return false
 	})
-	term.WaitScreen("a Herdr tab named "+s.Name, stepBound, func(screen string) bool {
-		top, _, _ := strings.Cut(screen, "\n")
-		return slices.Contains(strings.Fields(top), s.Name)
-	})
+	awaitTopTab(term, "idle", s.Name)
 	c.Poll("one live "+kind+" chat named "+s.Name+" with a live seat on "+pane, 20*time.Second,
 		func() (bool, string) {
 			rows := namedChats(c, sock)
@@ -128,4 +115,18 @@ func freshOpenCode(c *harness.Ctx, s State) int {
 		return len(found) == 1, fmt.Sprintf("server %d, OpenCode engines %v", server, found)
 	})
 	return pid
+}
+
+// nameSynced waits for a pfm name-sync run that started after since to finish: the thread title a
+// /rename writes (Codex's session_index row) fires pfm's name sync (pfm-name-sync.path, launchd's
+// WatchPaths), so the name is judged once such a run is over.
+func nameSynced(c *harness.Ctx, since time.Time, title string) {
+	c.Poll("a pfm name-sync run finished after the thread title "+title, 20*time.Second, func() (bool, string) {
+		for _, record := range activity(c, since, time.Time{}) {
+			if strings.Contains(record, `"msg":"cmd.exit","cmd":"name-sync"`) {
+				return true, record
+			}
+		}
+		return false, "no name-sync exit in pfm's activity log since " + since.Format(time.RFC3339Nano)
+	})
 }

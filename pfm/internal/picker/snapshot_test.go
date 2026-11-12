@@ -276,7 +276,7 @@ func TestRereadFactsRefreshesWorkingStateWithoutAStoreRead(t *testing.T) {
 		)
 	}
 
-	if again := rereadFacts(environment, request, last); rowFactsMoved(last.snapshot, again) {
+	if again := rereadFacts(context.Background(), environment, request, last); rowFactsMoved(last.snapshot, again) {
 		t.Fatalf("an unchanged re-read must not look like a change: %+v", again.Rows[0])
 	}
 
@@ -292,7 +292,7 @@ func TestRereadFactsRefreshesWorkingStateWithoutAStoreRead(t *testing.T) {
 		t.Fatalf("close transcript: %v", err)
 	}
 	environment.NowNS = statNowNS(t, transcript)
-	idle := rereadFacts(environment, request, last)
+	idle := rereadFacts(context.Background(), environment, request, last)
 	if idle.Rows[0].Working || !rowFactsMoved(last.snapshot, idle) {
 		t.Fatalf("a chat that finished its turn must re-read idle and count as a change: %+v", idle.Rows[0])
 	}
@@ -718,7 +718,7 @@ func TestPickerThemeRefreshAndOff(t *testing.T) {
 		t.Fatal("disabled theme state changed the exact original picker")
 	}
 	path := writePickerTheme(t, home, themesync.Applied{Primary: v}, themesync.Light, true)
-	refresh := rereadFacts(env, request, sentRefresh{snapshot: initial})
+	refresh := rereadFacts(context.Background(), env, request, sentRefresh{snapshot: initial})
 	if !rowFactsMoved(initial, refresh) {
 		t.Fatal("parked refresh did not notice the theme change")
 	}
@@ -729,7 +729,7 @@ func TestPickerThemeRefreshAndOff(t *testing.T) {
 	if err := os.Remove(path); err != nil {
 		t.Fatal(err)
 	}
-	off := rereadFacts(env, request, sentRefresh{snapshot: refresh})
+	off := rereadFacts(context.Background(), env, request, sentRefresh{snapshot: refresh})
 	updated, _ = updated.Update(ui.RefreshMsg{Snapshot: off})
 	if !reflect.DeepEqual(updated.View(), baseline) {
 		t.Fatal("theme off did not restore the exact original picker")
@@ -768,7 +768,7 @@ func TestPickerThemeUnreadableReportsAndFallsBack(t *testing.T) {
 			if !reflect.DeepEqual(ui.NewModel(snapshot).View(), baseline) {
 				t.Fatal("unreadable state changed the legacy palette")
 			}
-			broken := rereadFacts(env, request, sentRefresh{snapshot: snapshot})
+			broken := rereadFacts(context.Background(), env, request, sentRefresh{snapshot: snapshot})
 			if !rowFactsMoved(snapshot, broken) || broken.ThemeError == "" {
 				t.Fatal("parked refresh did not publish the theme error")
 			}
@@ -780,7 +780,7 @@ func TestPickerThemeUnreadableReportsAndFallsBack(t *testing.T) {
 			if err := os.Remove(path); err != nil {
 				t.Fatal(err)
 			}
-			recovered := rereadFacts(env, request, sentRefresh{snapshot: broken})
+			recovered := rereadFacts(context.Background(), env, request, sentRefresh{snapshot: broken})
 			updated, _ = updated.Update(ui.RefreshMsg{Snapshot: recovered})
 			if !rowFactsMoved(broken, recovered) || !reflect.DeepEqual(updated.View(), baseline) {
 				t.Fatal("theme recovery did not clear the visible error")

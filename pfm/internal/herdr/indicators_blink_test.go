@@ -98,28 +98,6 @@ func TestBlockedTabAnimatesFromTheObservationsAlreadyRead(t *testing.T) {
 	}
 }
 
-// TestHookFiredPainterNudgesTheRunningBlinker pins the other half of the
-// nudge: a tab painter that finds the blinker lock held leaves the nudge and
-// does no work of its own.
-func TestHookFiredPainterNudgesTheRunningBlinker(t *testing.T) {
-	painter, _, _ := newTestPainter(t, &fakeIndicatorHerdr{}, phaseOn)
-	painter.tabs = func(context.Context, string) ([]TabDecoration, error) {
-		t.Fatal("a painter that lost the lock scanned the fleet")
-		return nil, nil
-	}
-	release, held, err := painter.takeBlinkerLock()
-	if err != nil || !held {
-		t.Fatalf("take lock: %t %v", held, err)
-	}
-	defer release()
-	if err := painter.run(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(painter.nudgePath()); err != nil {
-		t.Fatalf("nudge = %v, want it left for the blinker", err)
-	}
-}
-
 // TestBlinkerStopsWhenItsHerdrServerIsGone pins the owner check: a blinker
 // whose socket vanished, or was taken by a newly started Herdr server, stops
 // at that tick without further writes or a failure; one whose server refuses
@@ -128,8 +106,12 @@ func TestBlinkerStopsWhenItsHerdrServerIsGone(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		owner  func(tick int) (int64, error)
-		refuse bool
+		refuse error
 		want   string
+		// only says stderr is want alone: the stop is no failure, so no diagnostic is written.
+		only bool
+		// stop writes the theme off's stop marker ahead of the second tick, whose clear meets refuse.
+		stop bool
 	}{
 		{
 			name: "socket removed",
@@ -154,16 +136,31 @@ func TestBlinkerStopsWhenItsHerdrServerIsGone(t *testing.T) {
 		{
 			name:   "server refuses connections",
 			owner:  func(int) (int64, error) { return 1, nil },
-			refuse: true,
+			refuse: fmt.Errorf("dial: %w", syscall.ECONNREFUSED),
 			want:   "refuses connections",
+		},
+		{
+			name:   "server shutting down",
+			owner:  func(int) (int64, error) { return 1, nil },
+			refuse: &Refusal{Request: "pane.list", Code: "server_unavailable", Message: "server is shutting down"},
+			want:   "herdr indicators: socket /fake/herdr.sock stands down: its Herdr server is shutting down\n",
+			only:   true,
+		},
+		{
+			name:   "theme off clears as the server shuts down",
+			owner:  func(int) (int64, error) { return 1, nil },
+			refuse: &Refusal{Request: "pane.list", Code: "server_unavailable", Message: "server is shutting down"},
+			want:   "herdr indicators: socket /fake/herdr.sock stands down: its Herdr server is shutting down\n",
+			only:   true,
+			stop:   true,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			server := blockedHerdr()
-			if tc.refuse {
+			if tc.refuse != nil {
 				server.failList = func(listNo int) error {
 					if listNo >= 3 {
-						return fmt.Errorf("dial: %w", syscall.ECONNREFUSED)
+						return tc.refuse
 					}
 					return nil
 				}
@@ -174,15 +171,20 @@ func TestBlinkerStopsWhenItsHerdrServerIsGone(t *testing.T) {
 				if len(stepping.sleeps) > 10 {
 					return context.Canceled
 				}
+				if tc.stop && len(stepping.sleeps) == 2 {
+					if err := os.WriteFile(painter.stopPath(), nil, 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
 				return nil
 			}
 			if err := painter.run(context.Background()); err != nil {
 				t.Fatalf("run = %v, want a clean stop; stderr %q", err, stderr)
 			}
-			if len(stepping.sleeps) != 2 || server.lists != 3-boolInt(!tc.refuse) {
+			if len(stepping.sleeps) != 2 || server.lists != 3-boolInt(tc.refuse == nil) {
 				t.Fatalf("sleeps %d lists %d: want the stop at the second tick", len(stepping.sleeps), server.lists)
 			}
-			if !strings.Contains(stderr.String(), tc.want) {
+			if got := stderr.String(); !strings.Contains(got, tc.want) || tc.only && got != tc.want {
 				t.Fatalf("stderr %q lacks %q", stderr, tc.want)
 			}
 		})
@@ -282,5 +284,33 @@ func TestIdleTabBlinkerRereadsWhenItsProbeSeesAChange(t *testing.T) {
 	if got := strings.Count(stderr.String(), "probe the tabs of socket"); got != 1 ||
 		!strings.Contains(stderr.String(), "pane.list refused") {
 		t.Fatalf("stderr %q: want the failing probe named once with its cause", stderr)
+	}
+}
+
+// A blocked tab keeps playing every frame on the ticks that reuse the last
+// tab read, while its pane's revision moves under the same agent: the
+// painter's own sidebar reports bump it each tick, so a tab write gated on the
+// revision read at the scan drew only the scanned tick's frame.
+func TestTabPainterAnimatesBlockedWhileItsPaneRevisionMoves(t *testing.T) {
+	f := newTabStatusFixture()
+	painter, stepping := tabPainterFixture(t, f)
+	painter.tabs = func(context.Context, string) ([]TabDecoration, error) {
+		d := tabObservation("blocked")
+		d.Glyphs.Blocked = blockedFrames
+		return []TabDecoration{d}, nil
+	}
+	stepping.onSleep = func(context.Context) error {
+		if len(stepping.sleeps) > 4 {
+			return context.Canceled
+		}
+		f.revision++ // a sidebar report between the ticks
+		return nil
+	}
+	if err := painter.run(context.Background()); err != nil {
+		t.Fatalf("run = %v", err)
+	}
+	want := []string{"🔴 Chat", "⭕ Chat", "🔴 Chat", "⭕ Chat", "🔴 Chat"}
+	if !slices.Equal(f.renames, want) {
+		t.Fatalf("renames = %q, want a frame per tick %q", f.renames, want)
 	}
 }

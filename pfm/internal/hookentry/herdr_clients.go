@@ -606,7 +606,7 @@ func clientTargets(clients map[string]herdrClient) []herdrTarget {
 // OpenCode dispose). Under set-titles off the string is inert. Only a server
 // that ends with its chat is blanked: an engine in the user's own tmux leaves
 // that live server's titles alone, and so does a reload's /exit, whose engine
-// respawns on the same server (reload.InFlight), and an engine whose server
+// respawns on the same server (reload.ExitTyped), and an engine whose server
 // keeps another pane. A reload or a pane that cannot be ruled out leaves the
 // title as it is.
 func (reporter *herdrReporter) blankTitle(ctx context.Context, action *herdrAction) error {
@@ -621,7 +621,7 @@ func (reporter *herdrReporter) blankTitle(ctx context.Context, action *herdrActi
 			pane, reporter.deps.sidDir,
 		)
 	}
-	inFlight, err := reload.InFlight(reporter.deps.sidDir, socketName, pane)
+	inFlight, err := reload.ExitTyped(reporter.deps.sidDir, socketName, pane)
 	if err != nil {
 		return fmt.Errorf("outer terminal title left as is at session end: probe the reload of %s %s: %w",
 			socketName, pane, err)

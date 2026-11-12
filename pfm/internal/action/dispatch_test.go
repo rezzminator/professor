@@ -66,6 +66,7 @@ func TestDispatchPipeGoldenAndTTYExec(t *testing.T) {
 	})
 
 	const attachLine = "TMUX= tmux -L 'cc-1-2-3' attach -t 'live-session'"
+	t.Setenv("HERDR_PANE_ID", "")
 	var stdout bytes.Buffer
 	OutputIsTerminal = func(io.Writer) bool { return false }
 	if err := Dispatch(&stdout, attachLine); err != nil {
@@ -156,4 +157,32 @@ func environmentValue(environment []string, key string) string {
 		}
 	}
 	return "\x00missing"
+}
+
+// A tmux client never starts in a Herdr pane: not exec'd here, not printed for
+// a shell to eval; a shell line still runs there.
+func TestDispatchRefusesTmuxClientInHerdr(t *testing.T) {
+	originalTerminal, originalLookPath, originalExec := OutputIsTerminal, LookPath, Exec
+	t.Cleanup(func() { OutputIsTerminal, LookPath, Exec = originalTerminal, originalLookPath, originalExec })
+	t.Setenv("HERDR_PANE_ID", "w1:p2")
+	var calls [][]string
+	LookPath = func(file string) (string, error) { return "/jail/bin/" + file, nil }
+	Exec = func(_ string, args, _ []string) error {
+		calls = append(calls, args)
+		return nil
+	}
+	const want = "host refused at tmux attach: this terminal is Herdr pane w1:p2, where a tmux client is never " +
+		"attached; open the chat from a plain terminal"
+	for _, terminal := range []bool{false, true} {
+		OutputIsTerminal = func(io.Writer) bool { return terminal }
+		var stdout bytes.Buffer
+		err := Dispatch(&stdout, AttachLine("cc-1-2-3", "live-session", false))
+		if err == nil || err.Error() != want || stdout.Len() != 0 || len(calls) != 0 {
+			t.Fatalf("terminal=%v: err=%v stdout=%q execs=%v; want %q, nothing printed or run",
+				terminal, err, stdout.String(), calls, want)
+		}
+	}
+	if err := Dispatch(io.Discard, "exec pfm internal seat-host 87caf6bf"); err != nil || len(calls) != 1 {
+		t.Fatalf("shell line in Herdr: err=%v execs=%v; want it run", err, calls)
+	}
 }

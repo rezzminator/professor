@@ -19,7 +19,7 @@ func costLedgerRuntime(t *testing.T) (config.Runtime, string) {
 	machine := config.Defaults(home, nil)
 	runtime := config.Runtime{Config: machine}
 	runtime.Paths.Home = home
-	return runtime, paths.CostSinkLog(home)
+	return runtime, paths.LogRoot(paths.OSEnv{}, home).CostSink()
 }
 
 func writeSinkLog(t *testing.T, path string, lines []string) {
@@ -162,7 +162,7 @@ func TestPrintCostLedgerDoctorSeparatesAnAbsentLogFromAFailedLook(t *testing.T) 
 func TestDoctorRunPrintsTheCostLedgerRows(t *testing.T) {
 	runtime := buildCleanDoctorHome(t)
 	armed := "2026-01-02T03:04:05.000Z cost-launch: armed a sink for pid 7"
-	writeSinkLog(t, paths.CostSinkLog(runtime.Paths.Home), []string{armed})
+	writeSinkLog(t, paths.LogRoot(paths.OSEnv{}, runtime.Paths.Home).CostSink(), []string{armed})
 	var stdout, stderr bytes.Buffer
 	runDoctor(nil, &stdout, &stderr, runtime)
 	for _, want := range []string{

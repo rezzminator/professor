@@ -1,6 +1,8 @@
 package compose
 
 import (
+	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/gather"
@@ -55,5 +57,36 @@ func TestAbandonedLaunch(t *testing.T) {
 				t.Fatalf("abandonedLaunch = %v, want %v", got, test.want)
 			}
 		})
+	}
+}
+
+// TestBootingPaneHoldsItsLaunchedClaudeOnce: a Claude pfm launched carries its session in argv from birth,
+// so until its statusline first renders (held at the folder-trust dialog, say) gather finds its process
+// both crumbless-live and as an agent. The pane is one chat, its booting row; its session makes no second
+// live row, which would leave its name matching two chats.
+func TestBootingPaneHoldsItsLaunchedClaudeOnce(t *testing.T) {
+	const session = "6f0c2a8e-0000-4000-8000-000000000001"
+	input := Input{
+		Snapshot: gather.Snapshot{
+			CrumblessLive: []gather.CrumblessLive{{
+				Socket: "cc-100-1-1", SessionName: "cc-100-1-1", WindowName: "trust-held",
+				PaneID: "%0", PID: 900, CWD: "/work/fresh",
+			}},
+			Agents: []gather.Agent{{
+				PID: 900, PanePID: 800, Socket: "cc-100-1-1", PaneID: "%0", SessionID: session,
+				ConfigDir: "/accounts/1",
+			}},
+		},
+		Options: Options{View: AllView, CurrentDir: "/work/projd"},
+	}
+	output := Compose(input)
+	var onPane []string
+	for index := range output.Rows {
+		if row := output.Rows[index]; row.Socket == "cc-100-1-1" || row.ID == session {
+			onPane = append(onPane, fmt.Sprintf("%v %s", row.Kind, row.ID))
+		}
+	}
+	if want := []string{fmt.Sprintf("%v cc-100-1-1", Booting)}; !slices.Equal(onPane, want) {
+		t.Fatalf("rows of the booting pane = %q, want %q", onPane, want)
 	}
 }

@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
@@ -298,6 +299,9 @@ func (f *reloadHerdrFixture) respond(method string, p map[string]json.RawMessage
 				if err != nil {
 					return nil, err.Error()
 				}
+				if f.mode == "seat-host-names-remote-control" {
+					run.Args = claudelaunch.RefreshRemoteControl(run.Args, true, "tab1")
+				}
 				pid = 202
 			}
 			if f.mode == "wrong-model" {
@@ -455,6 +459,9 @@ func TestRunHerdrLifecycle(t *testing.T) {
 		{name: "failed-start", mode: "failed-start", want: "permission denied"},
 		{name: "old-process-is-not-success", mode: "old-process", want: "new engine"},
 		{name: "new-process-wrong-model", mode: "wrong-model", want: "new engine"},
+		// The seat host names Remote Control after the seat at every start; a
+		// recipe published with a bare --remote-control is still the one running.
+		{name: "seat-host-names-remote-control", mode: "seat-host-names-remote-control"},
 		{name: "process-error", mode: "process-error", want: "process unavailable"},
 		{name: "malformed-process", mode: "malformed-process", want: "shell identity"},
 		{name: "wrong-pane", mode: "wrong-pane", want: "shell identity"},

@@ -36,12 +36,51 @@ func guardsProject(c *harness.Ctx, s State) State {
 		"printf '# guards\\n' > README.md && git add README.md && " +
 		"git -c user.name=owner -c user.email=owner@journey.invalid commit -q -m 'the guards project' && " +
 		"printf 'draft\\n' > draft.md && pfm\r")
-	// The pane is narrow: the row cuts the project's name short, its group's header holds it whole.
+	newChatSelectedIn(term, name)
+	return s
+}
+
+// newChatSelected moves the picker's cursor to its new-chat row, as the owner does before Enter: the picker
+// opens on it unless a chat is pinned above it (one whose schedule fired unseen, from any branch of the day),
+// and then he steps down to it. A row is told from the next by its mark and name, the cells before its
+// first gap: its age cell ticks every second.
+func newChatSelected(term *harness.Terminal) {
+	const row = "✦ New chat → "
+	term.WaitFor(row, 20*time.Second)
+	selected := func(screen string) string {
+		cells, _, _ := strings.Cut(selectedRow(screen), "  ")
+		return cells
+	}
+	var walked []string
+	for range 8 {
+		// Two polls reading the same row: a frame caught while the pane redraws shows a row half drawn.
+		var on, last string
+		term.WaitScreen("the picker's cursor resting on a row", stepBound, func(screen string) bool {
+			last, on = on, selected(screen)
+			return on != "" && on == last
+		})
+		if strings.HasPrefix(on, row) {
+			return
+		}
+		walked = append(walked, on)
+		term.Press(harness.Down)
+		term.WaitScreen("the picker's cursor off "+on, stepBound, func(screen string) bool {
+			now := selected(screen)
+			return now != "" && now != on
+		})
+	}
+	term.WaitScreen(fmt.Sprintf("the picker's new chat selected (the cursor walked %q)", walked), stepBound,
+		func(screen string) bool { return strings.HasPrefix(selectedRow(screen), row) })
+}
+
+// newChatSelectedIn waits for the picker to select the new chat of the group of project name. The pane
+// is narrow: the row cuts the project's name short, its group's header holds it whole.
+func newChatSelectedIn(term *harness.Terminal, name string) {
+	newChatSelected(term)
 	term.WaitScreen("the picker's new chat, selected, in the group of "+name, 20*time.Second,
 		func(screen string) bool {
 			return strings.Contains(screen, "╭─ "+name+" ─") && strings.Contains(screen, "› ✦ New chat → ")
 		})
-	return s
 }
 
 // gitWriteRefused: the owner's turn has the chat run `git commit` in the project; git-guard refuses it

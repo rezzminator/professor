@@ -646,7 +646,6 @@ func tabView(pane herdr.TabPane, identity string) herdr.TabDecoration {
 		Terminal:    pane.Terminal,
 		Tab:         pane.Tab,
 		Identity:    identity,
-		Revision:    pane.Revision,
 		Session:     pane.Session,
 		AgentStatus: pane.State,
 	}

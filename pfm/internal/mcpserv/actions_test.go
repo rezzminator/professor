@@ -43,6 +43,13 @@ type fakeChatVerbs struct {
 	exits             []headless.Chat
 	exitMessage       string
 	exitErr           error
+	captured          chat.Captured
+	captureTails      []int
+	keyed             chat.Keyed
+	inspected         headless.Status
+	inspectErr        error
+	// seats drives capture and keys through the real chat verbs over the jailed fleet's seats.
+	seats bool
 }
 
 func (fake *fakeChatVerbs) Last(ctx context.Context, request chat.LastRequest) (chat.LastResult, error) {
@@ -82,6 +89,36 @@ func (fake *fakeChatVerbs) Exit(_ context.Context, self headless.Chat) (string, 
 	return fake.exitMessage, fake.exitErr
 }
 
+// Capture records the tail asked for and answers from the fake's fields, or with seats the real chat.Capture of
+// the jailed fleet's seat.
+func (fake *fakeChatVerbs) Capture(ctx context.Context, target string, tail int) (chat.Captured, error) {
+	fake.captureTails = append(fake.captureTails, tail)
+	if fake.seats {
+		return chat.Capture(ctx, nil, target, tail)
+	}
+	return fake.captured, fake.err
+}
+
+// Keys answers from the fake's fields, or with seats the real chat.PressKeys of the jailed fleet's seat.
+func (fake *fakeChatVerbs) Keys(ctx context.Context, target string, request chat.KeysRequest) (chat.Keyed, error) {
+	if fake.seats {
+		return chat.PressKeys(ctx, nil, target, request)
+	}
+	return fake.keyed, fake.err
+}
+
+// Inspect answers every listed row with the fake's inspected status.
+func (fake *fakeChatVerbs) Inspect(context.Context, compose.Row) (headless.Status, error) {
+	return fake.inspected, fake.inspectErr
+}
+
+// CallAnswer lets the call engine's result stand, as the registry does for a live chat.
+func (fake *fakeChatVerbs) CallAnswer(
+	_ context.Context, result chat.CallResult, name string,
+) (chat.CallResult, string, bool) {
+	return result, name, false
+}
+
 // TestChatLastAndStatusReachTheTypedVerbs pins the seam: last and
 // status call the chat verb layer with the target as given — no argv, no
 // JSON round trip — and a dead chat comes back as a status, not an error.
@@ -119,6 +156,12 @@ func TestChatLastAndStatusReachTheTypedVerbs(t *testing.T) {
 	}
 	if want := []chat.LastRequest{{Target: "MCP_HAMMER_A"}}; !reflect.DeepEqual(verbs.lasts, want) {
 		t.Fatalf("Last calls = %+v, want %+v", verbs.lasts, want)
+	}
+	// An answer with no text is the chat's answer, as `pfm chat last` prints it: never a tool error.
+	verbs.last = chat.LastResult{Text: "\n"}
+	if _, empty, err := service.chatLast(context.Background(), nil, LastInput{Target: "MCP_HAMMER_A"}); err != nil ||
+		empty != (LastOutput{Target: "MCP_HAMMER_A"}) {
+		t.Fatalf("last of an empty answer = %+v, err=%v; want the target with no text", empty, err)
 	}
 	if want := []chat.StatusRequest{{Target: "MCP_HAMMER_A"}}; !reflect.DeepEqual(verbs.statuses, want) {
 		t.Fatalf("Status calls = %+v, want %+v", verbs.statuses, want)
@@ -713,12 +756,10 @@ func TestChatLastAndStatusRefuseWithoutAVerbLayer(t *testing.T) {
 	}
 }
 
-// TestChatOpenUnindexedTargetIsATooErrorNeverEmptySuccess pins open's
-// failure shape now that it opens through action.Executor.Open's detached mode instead of the
-// argv Dispatch seam: a target that is not indexed comes back as a tool
-// error naming the target, never an "ok" ActionOutput with nothing behind
-// it.
-func TestChatOpenUnindexedTargetIsATooErrorNeverEmptySuccess(t *testing.T) {
+// TestChatOpenUnindexedTargetIsNotFoundNeverEmptySuccess pins open's failure shape: a target that is not indexed
+// comes back as the not_found receipt pfm chat open's refusal words, never an "ok" ActionOutput with nothing
+// behind it.
+func TestChatOpenUnindexedTargetIsNotFoundNeverEmptySuccess(t *testing.T) {
 	setupBackendFixture(t)
 	service := newFixtureService(t)
 	defer func() {
@@ -727,11 +768,9 @@ func TestChatOpenUnindexedTargetIsATooErrorNeverEmptySuccess(t *testing.T) {
 		}
 	}()
 	_, output, err := service.chatOpen(context.Background(), nil, TargetInput{Target: "no-such-chat"})
-	if err == nil || !strings.Contains(err.Error(), "no-such-chat") {
-		t.Fatalf("open unindexed target error = %v, want it to name the target", err)
-	}
-	if output.Status == "ok" {
-		t.Fatalf("open unindexed target reported ok: %+v", output)
+	want := ActionOutput{Status: "not_found", Code: 4, Message: `no chat named "no-such-chat"`}
+	if err != nil || output != want {
+		t.Fatalf("open unindexed target = %+v, %v; want %+v, nil", output, err, want)
 	}
 }
 
@@ -782,7 +821,7 @@ func TestListProjectedScopeNamesTheRepoItWasGiven(t *testing.T) {
 	t.Parallel()
 	current := &backend{chat: &fakeChatVerbs{}}
 	for repo, want := range map[string]string{"/work/one": "/work/one", "": "all repos"} {
-		output, err := current.listProjected(context.Background(), LSInput{}, true, repo)
+		output, err := current.listProjected(context.Background(), LSInput{}, true, repo, false)
 		if err != nil {
 			t.Fatalf("listProjected(%q): %v", repo, err)
 		}

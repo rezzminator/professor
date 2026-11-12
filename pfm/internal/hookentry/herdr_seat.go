@@ -142,7 +142,7 @@ func (reporter *herdrReporter) nativeSeat(ctx context.Context, payload herdrPayl
 		action = &herdrAction{}
 	}
 	if action == nil {
-		return true, nil
+		return true, reporter.syncNativeTitle(ctx, seat, payload, unlockBridge)
 	}
 	if reporter.options.engine == pfmengine.Claude {
 		owner, err := reporter.paneOwner(

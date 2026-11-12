@@ -9,6 +9,8 @@
 //     emulator — Type, Press, Screen, WaitFor, WaitGone, WaitScreen, Resize.
 //   - session.go: the open terminal under a Terminal — the PTY, its login shell's session, the
 //     emulator's pumps and the hang-up.
+//   - profile.go: the run's profile — steps.tsv and waits.tsv from the walk, WriteSummary's summary.md.
+//   - cover.go: Cover, the line coverage of an instrumented binary's counters through Go's own tools.
 package harness
 
 import (
@@ -48,7 +50,7 @@ type Hooks struct {
 	Env []string
 	// Shell is the argv of a terminal's login shell, e.g. {"/usr/bin/zsh", "-l", "-i"}.
 	Shell []string
-	// Artifacts is the directory evidence and timeline.tsv land in; empty keeps none.
+	// Artifacts is the directory evidence, timeline.tsv, steps.tsv and waits.tsv land in; empty keeps none.
 	Artifacts string
 	// Budget bounds the whole tree's wall time, first step start to last step end; zero: none.
 	Budget time.Duration
@@ -67,6 +69,8 @@ type record struct {
 	verdict string // PASS, FAIL, BLOCKED
 	start   time.Duration
 	seconds float64
+	own     float64 // the step alone, never widened
+	wall    float64 // the step and its whole subtree
 }
 
 // walker holds one Run's shared state.
@@ -77,6 +81,7 @@ type walker[S any] struct {
 	started time.Time
 	mu      sync.Mutex
 	records []record
+	waits   []WaitTime
 	uniques map[string]int
 }
 
@@ -125,7 +130,11 @@ func (w *walker[S]) node(t *testing.T, parent *Ctx, node Node[S], in S, path str
 		if parallel {
 			t.Parallel()
 		}
+		// Once the whole subtree, parallel branches included, has run and closed its terminals: t.Run
+		// returns before a parallel subtest has even started its step.
+		t.Cleanup(func() { w.ended(path, w.clock.Now()) })
 		c = newCtx(t, w.hooks, parent, path, parallel || parent != nil && parent.concurrent, w.clock, w.unique)
+		c.waited = w.waited
 		t.Cleanup(c.closeTerminals) // after the whole subtree, parallel branches included
 		out, failed := in, false
 		if node.Step != nil {
@@ -197,7 +206,26 @@ func (w *walker[S]) unique(label string) string {
 func (w *walker[S]) record(path, verdict string, from, to time.Time) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	w.records = append(w.records, record{path, verdict, from.Sub(w.started), to.Sub(from).Seconds()})
+	seconds := to.Sub(from).Seconds()
+	w.records = append(w.records, record{path, verdict, from.Sub(w.started), seconds, seconds, 0})
+}
+
+// ended sets the wall time of path's step: from its start to the end of its whole subtree.
+func (w *walker[S]) ended(path string, to time.Time) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for i := range w.records {
+		if w.records[i].path == path && w.records[i].verdict != "BLOCKED" {
+			w.records[i].wall = to.Sub(w.started.Add(w.records[i].start)).Seconds()
+		}
+	}
+}
+
+// waited records one named wait a step made.
+func (w *walker[S]) waited(wait WaitTime) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.waits = append(w.waits, wait)
 }
 
 // widen stretches a together node's record over every branch it ran, failing it when its window's
@@ -215,10 +243,12 @@ func (w *walker[S]) widen(path string, to time.Time, failed bool) {
 	}
 }
 
-// report prints the timeline in start order and the count line, and writes timeline.tsv.
+// report prints the timeline in start order and the count line, and writes timeline.tsv, steps.tsv
+// and waits.tsv.
 func (w *walker[S]) report(t *testing.T) {
 	w.mu.Lock()
 	records := append([]record(nil), w.records...)
+	waits := append([]WaitTime(nil), w.waits...)
 	w.mu.Unlock()
 	sortRecords(records)
 	counts := map[string]int{}
@@ -239,6 +269,9 @@ func (w *walker[S]) report(t *testing.T) {
 		t.Errorf("timeline: %v", err)
 	} else if err := os.WriteFile(file, []byte(tsv.String()), 0o644); err != nil {
 		t.Errorf("timeline: write %s: %v", file, err)
+	}
+	if err := writeTimes(w.hooks.Artifacts, records, waits); err != nil {
+		t.Errorf("%v", err)
 	}
 }
 

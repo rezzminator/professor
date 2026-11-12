@@ -22,8 +22,10 @@ import (
 const budget = 500 * time.Second
 
 // ownerVars is everything a fresh login of the owner has; no multiplexer, engine or test variable.
+// GOCOVERDIR is the owner's too: prepare.sh exports it in every login, so each pfm writes its counters.
 var ownerVars = []string{
 	"HOME", "USER", "LOGNAME", "SHELL", "PATH", "LANG", "TMPDIR", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS",
+	"GOCOVERDIR",
 }
 
 func TestMain(m *testing.M) {
@@ -32,7 +34,25 @@ func TestMain(m *testing.M) {
 			"(the machine infra/fence/journey/run.sh boots, or a GitHub-hosted runner)")
 		os.Exit(2)
 	}
-	os.Exit(m.Run())
+	env := paths.OSEnv{}
+	artifacts := env.Get("JOURNEY_ARTIFACTS")
+	meter, err := startMeter()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "journey: profile: FAIL %v\n", err)
+		os.Exit(2)
+	}
+	started := clock.Real.Now()
+	code := m.Run()
+	// The profile, green run or red: steps.tsv and waits.tsv from the walk, the coverage, summary.md.
+	if artifacts == "" {
+		fmt.Println("journey: profile: none written: JOURNEY_ARTIFACTS is unset")
+	} else if err := profile(artifacts, env.Get("GOCOVERDIR"), clock.Real.Now().Sub(started), meter); err != nil {
+		fmt.Fprintf(os.Stderr, "journey: profile: FAIL %v\n", err)
+		code = max(code, 1)
+	} else {
+		fmt.Printf("journey: profile: %s\n", filepath.Join(artifacts, "summary.md"))
+	}
+	os.Exit(code)
 }
 
 func TestJourney(t *testing.T) {

@@ -31,6 +31,7 @@ type Ctx struct {
 	unique     func(string) string
 	window     [2]time.Time
 	failed     bool
+	waited     func(WaitTime) // the walker's record of every named wait; nil keeps none
 
 	mu        sync.Mutex
 	terminals map[string]*session
@@ -63,6 +64,7 @@ func (c *Ctx) over(t *testing.T) *Ctx {
 	group := newCtx(t, c.hooks, c.parent, c.path, false, c.clock, c.unique)
 	group.window = [2]time.Time{c.window[0], c.clock.Now()}
 	group.expected = c.Expected()
+	group.waited = c.waited
 	return group
 }
 
@@ -129,15 +131,25 @@ func (c *Ctx) Poll(what string, within time.Duration, cond func() (ok bool, seen
 	deadline := c.clock.Now().Add(within)
 	ticker := c.clock.NewTicker(PollTick)
 	defer ticker.Stop()
+	from := c.clock.Now()
 	for {
 		ok, seen := cond()
 		if ok {
+			c.noteWait(what, from, true)
 			return
 		}
 		if !c.clock.Now().Before(deadline) {
+			c.noteWait(what, from, false)
 			c.Failf("waited %s for %s; last seen:\n%s", within, what, seen)
 		}
 		<-ticker.C()
+	}
+}
+
+// noteWait records a wait this step made, from its start until now, and whether its condition held.
+func (c *Ctx) noteWait(what string, from time.Time, met bool) {
+	if c.waited != nil {
+		c.waited(WaitTime{Path: c.path, What: what, Took: c.clock.Now().Sub(from), Met: met})
 	}
 }
 

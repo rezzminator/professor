@@ -47,7 +47,7 @@ type TargetError struct {
 
 func (failure *TargetError) Error() string {
 	if errors.Is(failure.Err, ErrUnknownChat) {
-		return fmt.Sprintf("no chat named %q", failure.Name)
+		return pfmcall.UnknownChat(failure.Name).Message
 	}
 	return failure.Err.Error()
 }
@@ -131,10 +131,8 @@ func DormantCallTarget(
 			return result, name, false
 		}
 	}
-	result.Code = pfmcall.CodeDead
-	result.Message = fmt.Sprintf(
-		"%q is dead (engine %s, session %s); revive it with: pfm chat open %s", name, chat.Engine, chat.ID, name,
-	)
+	dead := pfmcall.DeadChat(name, string(chat.Engine), chat.ID)
+	result.Status, result.Code, result.Message = dead.Status, dead.Code, dead.Message
 	return result, name, false
 }
 

@@ -219,60 +219,6 @@ func TestHerdrBackendDoctorDiscoveryErrors(t *testing.T) {
 	}
 }
 
-func TestHerdrRestoreConfigPaths(t *testing.T) {
-	for _, scenario := range []struct {
-		name                 string
-		xdg, override, debug bool
-	}{
-		{name: "home"},
-		{name: "XDG", xdg: true},
-		{name: "explicit wins", xdg: true, override: true, debug: true},
-		{name: "debug ambiguous", debug: true},
-	} {
-		t.Run(scenario.name, func(t *testing.T) {
-			home := t.TempDir()
-			env := &paths.MapEnv{Values: map[string]string{paths.EnvHome: home}}
-			root := filepath.Join(home, ".config")
-			if scenario.xdg {
-				root = filepath.Join(home, "xdg")
-				env.Values["XDG_CONFIG_HOME"] = root
-			}
-			config := filepath.Join(root, "herdr", "config.toml")
-			if scenario.override {
-				config = filepath.Join(home, "custom.toml")
-				env.Values["HERDR_CONFIG_PATH"] = config
-			}
-			if err := os.MkdirAll(filepath.Dir(config), 0o700); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(config, []byte("[session]\nresume_agents_on_restore = false\n"), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			if scenario.debug {
-				debugPath := filepath.Join(root, "herdr-dev", "config.toml")
-				if err := os.MkdirAll(filepath.Dir(debugPath), 0o700); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.WriteFile(
-					debugPath,
-					[]byte("[session]\nresume_agents_on_restore = true\n"),
-					0o600,
-				); err != nil {
-					t.Fatal(err)
-				}
-			}
-			resume, err := herdrDoctorRestoreConfig(env)
-			if scenario.debug && !scenario.override {
-				if err == nil || !strings.Contains(err.Error(), "set HERDR_CONFIG_PATH") {
-					t.Fatalf("resume=%v err=%v, want visible ambiguous config", resume, err)
-				}
-			} else if err != nil || resume {
-				t.Fatalf("resume=%v err=%v, want false,nil", resume, err)
-			}
-		})
-	}
-}
-
 func TestHerdrBackendDoctorFollowsConfiguredBackend(t *testing.T) {
 	for _, scenario := range []struct {
 		name, backend, marker, pane, tmux string
@@ -280,13 +226,13 @@ func TestHerdrBackendDoctorFollowsConfiguredBackend(t *testing.T) {
 		code                              int
 		want, resolution                  string
 	}{
-		{name: "default auto outside", backend: pfmconfig.DefaultChatBackend, source: pfmconfig.SourceDefault, want: "doctor: herdr backend NOT CHECKED — chat.backend=auto (default) resolves to tmux here: no proven Herdr caller"},
-		{name: "explicit auto outside", backend: "auto", source: pfmconfig.SourceFile, want: "doctor: herdr backend NOT CHECKED — chat.backend=auto (file) resolves to tmux here: no proven Herdr caller"},
-		{name: "default auto inside unreachable", backend: "auto", marker: "1", pane: "w1:p1", source: pfmconfig.SourceDefault, want: "doctor: herdr backend NOT CHECKED — chat.backend=auto (default) resolves to tmux here: no proven Herdr caller"},
-		{name: "explicit auto inside unreachable", backend: "auto", marker: "1", pane: "w1:p1", source: pfmconfig.SourceFile, want: "doctor: herdr backend NOT CHECKED — chat.backend=auto (file) resolves to tmux here: no proven Herdr caller"},
-		{name: "auto cannot read tmux", backend: "auto", marker: "1", pane: "w1:p1", tmux: "/tmp/tmux-1/dead,1,0", source: pfmconfig.SourceDefault, code: 3, want: "doctor: herdr backend UNRESOLVED — place chat: caller unresolved:"},
-		{name: "auto missing pane", backend: "auto", marker: "1", source: pfmconfig.SourceDefault, want: "chat.backend=auto (default) resolves to tmux here: no proven Herdr caller"},
-		{name: "auto missing marker", backend: "auto", pane: "w1:p1", source: pfmconfig.SourceDefault, want: "chat.backend=auto (default) resolves to tmux here: no proven Herdr caller"},
+		{name: "default auto outside", backend: pfmconfig.DefaultChatBackend, source: pfmconfig.SourceDefault, want: "doctor: herdr backend NOT CHECKED — chat.backend=auto (default) resolves to tmux here: no Herdr server runs at SOCKET"},
+		{name: "explicit auto outside", backend: "auto", source: pfmconfig.SourceFile, want: "doctor: herdr backend NOT CHECKED — chat.backend=auto (file) resolves to tmux here: no Herdr server runs at SOCKET"},
+		{name: "default auto inside unreachable", backend: "auto", marker: "1", pane: "w1:p1", source: pfmconfig.SourceDefault, want: "doctor: herdr backend NOT CHECKED — chat.backend=auto (default) resolves to tmux here: no Herdr server runs at SOCKET"},
+		{name: "explicit auto inside unreachable", backend: "auto", marker: "1", pane: "w1:p1", source: pfmconfig.SourceFile, want: "doctor: herdr backend NOT CHECKED — chat.backend=auto (file) resolves to tmux here: no Herdr server runs at SOCKET"},
+		{name: "auto cannot read tmux", backend: "auto", marker: "1", pane: "w1:p1", tmux: "/tmp/tmux-1/dead,1,0", source: pfmconfig.SourceDefault, want: "doctor: herdr backend NOT CHECKED — chat.backend=auto (default) resolves to tmux here: no Herdr server runs at SOCKET"},
+		{name: "auto missing pane", backend: "auto", marker: "1", source: pfmconfig.SourceDefault, want: "chat.backend=auto (default) resolves to tmux here: no Herdr server runs at SOCKET"},
+		{name: "auto missing marker", backend: "auto", pane: "w1:p1", source: pfmconfig.SourceDefault, want: "chat.backend=auto (default) resolves to tmux here: no Herdr server runs at SOCKET"},
 		{name: "explicit tmux inside", backend: "tmux", marker: "1", pane: "w1:p1", source: pfmconfig.SourceFile, want: "doctor: herdr backend NOT CHECKED — chat.backend=tmux (file) selects tmux"},
 		{name: "configured unreachable", backend: "herdr", source: pfmconfig.SourceFile, code: 3, want: "doctor: herdr backend UNREACHABLE —"},
 	} {
@@ -296,19 +242,21 @@ func TestHerdrBackendDoctorFollowsConfiguredBackend(t *testing.T) {
 			runtime.Config.Sources["chat.backend"] = scenario.source
 			// Every probe is jailed. The dead endpoint makes accidentally checking
 			// an optional backend observably fail, never contact a live Herdr.
-			t.Setenv(herdr.EnvSocket, filepath.Join(testjail.ShortRoot(t), "absent.sock"))
+			socket := filepath.Join(testjail.ShortRoot(t), "absent.sock")
+			t.Setenv(herdr.EnvSocket, socket)
 			t.Setenv(herdr.EnvBin, "")
 			t.Setenv(herdr.EnvMarker, scenario.marker)
 			t.Setenv(herdr.EnvPane, scenario.pane)
 			t.Setenv("TMUX", scenario.tmux)
 			var stdout, stderr bytes.Buffer
 			code := Run(nil, &stdout, &stderr, runtime, testDependencies())
-			if code != scenario.code || !strings.Contains(stdout.String(), scenario.want) {
+			want := strings.ReplaceAll(scenario.want, "SOCKET", socket)
+			if code != scenario.code || !strings.Contains(stdout.String(), want) {
 				t.Fatalf(
 					"code=%d, want %d and %q; stdout=%s stderr=%s",
 					code,
 					scenario.code,
-					scenario.want,
+					want,
 					stdout.String(),
 					stderr.String(),
 				)

@@ -201,8 +201,13 @@ func reportTargetError(err error, name string, stdout, stderr io.Writer, asJSON 
 	if errors.Is(err, pfmchat.ErrUnknownChat) {
 		return renderNoSuchChat(name, stdout, stderr, asJSON)
 	}
-	fmt.Fprintf(stderr, "pfm chat: %v\n", err)
-	return 2
+	failure := pfmcall.LookupFailed(err)
+	var refusal pfmchat.Refusal
+	if errors.As(pfmchat.TargetRefusal(err, name), &refusal) {
+		failure = refusal
+	}
+	fmt.Fprintf(stderr, "pfm chat: %s\n", failure.Message)
+	return failure.Code
 }
 
 func runHeadlessStatus(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
@@ -267,10 +272,7 @@ func runHeadlessStatus(args []string, stdout, stderr io.Writer, runtimes ...comm
 			fmt.Fprintln(stdout, status.AskLine())
 		}
 	}
-	if !status.Alive() {
-		return codeDeadChat
-	}
-	return 0
+	return pfmchat.StatusCode(status)
 }
 
 func runHeadlessTranscript(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
@@ -296,20 +298,8 @@ func runHeadlessTranscript(args []string, stdout, stderr io.Writer, runtimes ...
 		if errors.Is(err, pfmchat.ErrUnknownChat) {
 			return renderNoSuchChat(names[0], stdout, stderr, *asJSON)
 		}
-		if errors.Is(err, pfmchat.ErrNoTranscript) {
-			if chat.Engine == pfmengine.OpenCode {
-				fmt.Fprintf(
-					stderr,
-					"pfm chat read: reading OpenCode session content is not supported (%q)\n",
-					chat.Name,
-				)
-				return 1
-			}
-			fmt.Fprintf(stderr, "pfm chat read: %q has not written a transcript yet\n", chat.Name)
-			return codeDeadChat
-		}
-		fmt.Fprintf(stderr, "pfm chat read: %v\n", err)
-		return 1
+		refusal := pfmchat.LastRefusal(err, pfmchat.LastResult{Chat: chat}, names[0])
+		return reportChatRefusal("read", refusal, names[0], stdout, stderr)
 	}
 	switch {
 	case *asJSON:
@@ -350,27 +340,8 @@ func runHeadlessLast(args []string, stdout, stderr io.Writer, runtimes ...comman
 		firstRuntime(runtimes),
 		pfmchat.LastRequest{Target: names[0]},
 	)
-	var targetErr *pfmchat.TargetError
-	switch {
-	case errors.As(err, &targetErr):
-		return reportTargetError(err, names[0], stdout, stderr, false)
-	case errors.Is(err, pfmchat.ErrNoTranscript):
-		if result.Chat.Engine == pfmengine.OpenCode {
-			fmt.Fprintf(
-				stderr,
-				"pfm chat last: reading OpenCode session content is not supported (%q)\n",
-				result.Chat.Name,
-			)
-			return 1
-		}
-		fmt.Fprintf(stderr, "pfm chat last: %q has not written a transcript yet\n", result.Chat.Name)
-		return codeDeadChat
-	case errors.Is(err, pfmchat.ErrNoAnswer):
-		fmt.Fprintf(stderr, "pfm chat last: %q has not answered yet\n", result.Chat.Name)
-		return codeDeadChat
-	case err != nil:
-		fmt.Fprintf(stderr, "pfm chat last: %v\n", err)
-		return 1
+	if err != nil {
+		return reportChatRefusal("last", pfmchat.LastRefusal(err, result, names[0]), names[0], stdout, stderr)
 	}
 	fmt.Fprintln(stdout, result.Text)
 	return 0
@@ -590,12 +561,12 @@ type headlessCall struct {
 
 func callOneHeadless(call headlessCall, targetName string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
 	message, force, steers := call.message, call.force, call.steers
-	ctx := context.Background()
 	engine, err := pfmchat.NewCallEngine(call.allowUnsigned, firstRuntime(runtimes))
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat call: %v\n", err)
 		return codeUndelivered
 	}
+	ctx := engine.ShareSender(context.Background(), message) // the live try and a resume body sign as one sender
 	result, err := engine.Call(ctx, pfmcall.Request{
 		Target:     targetName,
 		Message:    message,
@@ -607,7 +578,7 @@ func callOneHeadless(call headlessCall, targetName string, stdout, stderr io.Wri
 		fmt.Fprintf(stderr, "pfm chat call: %v\n", err)
 		return codeUndelivered
 	}
-	result, ladderTarget, dormant := pfmchat.DormantCallTarget(ctx, result, targetName, firstRuntime(runtimes))
+	result, ladderTarget, dormant := pfmchat.CallAnswer(ctx, result, targetName, firstRuntime(runtimes))
 	if dormant {
 		target, found, resolveErr := resolveResumeTarget(ladderTarget, runtimes...)
 		if resolveErr != nil {

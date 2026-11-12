@@ -1,6 +1,9 @@
 // Package picker is the pfm ls loop: cached first frame, streamed refreshes
 // with idle backoff, the cosmos sampler, and key to action over fleet.Scan,
 // with every row action delegated to chat.
+//
+// reread.go: the parked picker's row-facts re-read (working state, Herdr's
+// blocked marks) over the last pass, without a full pass.
 package picker
 
 import (
@@ -19,6 +22,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/kill"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -158,6 +162,7 @@ func Run(
 		// The Reader caches each file by size and modification time: a refresh
 		// re-stats each row's files and reads again only a file that changed.
 		request.Facts = rowfacts.NewReader(runtime.Paths.SIDDir)
+		request.HerdrBlocked = gather.HerdrBlockedPanes
 		scan, err = scanFleetCached(ctx, database, request)
 		if err != nil {
 			fmt.Fprintf(stderr, "pfm ls: %v\n", err)
@@ -219,15 +224,9 @@ func Run(
 			updates,
 			activity,
 		)
-		outcome, err = (ui.BubblePicker{Updates: updates}).Pick(
-			ctx,
-			scan.Snapshot,
-		)
-		refreshCancel()
-		// The stream closes updates when it ends: wait for it, so no pass in
-		// flight reads the databases the deferred closes are about to shut.
-		for range updates {
-		}
+		outcome, err = pickThenDrain(func() (ui.Outcome, error) {
+			return (ui.BubblePicker{Updates: updates}).Pick(ctx, scan.Snapshot)
+		}, refreshCancel, updates)
 		warnings.flush(stderr)
 	}
 	if err != nil {

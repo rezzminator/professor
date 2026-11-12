@@ -164,7 +164,8 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 		} else {
 			caller, callerErr = identifier.Identify(ctx)
 		}
-		ctx = chat.WithCaller(ctx, "hook.launch", caller, callerErr)
+		ctx = chat.WithCaller(ctx, "hook.launch", caller, spawn.ProvenCaller(environment, caller, callerErr))
+		ctx = chat.WithHerdrServer(ctx, spawn.HerdrServerFrom(env))
 	}
 	if launchPassThrough(arguments, caller, forcedPassThrough) {
 		environment := os.Environ()
@@ -254,7 +255,7 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 	choice, err := launchBackend(ctx, *backend)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm internal launch: %v\n", err)
-		return 1
+		return spawn.FailureCode(err)
 	}
 	primary := launchPrimaryAccount(runtime, stderr)
 	configDir, accountID := launcherSeatAccount(runtime, primary, paths.OSEnv{})

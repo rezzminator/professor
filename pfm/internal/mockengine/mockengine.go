@@ -10,7 +10,8 @@
 // Entry point: Main. The other files:
 //
 //   - scenario.go: the scenario, its steps, the inline `mock-engine: ` directive and the step cursor.
-//   - pane.go: the TUI every engine shares — the screen, the idle loop, a turn and its steps, /exit.
+//   - pane.go: the TUI every engine shares — the idle loop, a turn and its steps, /exit.
+//   - pane_screen.go: the screen the TUI repaints — history, footer or menu, composer, statusline.
 //   - agents.go: the background agents behind an idle composer — their rows, Claude's wait row, a
 //     gated agent's end and the turn that reports it.
 //   - tty.go: the raw terminal and the key decoder.
@@ -18,10 +19,14 @@
 //   - claude_resume.go: a resumed Claude transcript's title and a fork's seeded copy.
 //   - claude_tooluse.go: Claude's PostToolUse beat and the tool response it carries.
 //   - hooks.go: the settings hook documents, running a hook command and reading its answer.
+//   - statusline.go: a settings layer's statusLine and one run of its command.
+//   - session_end.go: SessionEnd hooks that outlive a hangup on every engine, and Claude's session end.
 //   - codex.go: Codex — its pane, rollout, app-server and MCP handshake.
 //   - codex_hooks.go: Codex's hook trust and its hooks.json state.
+//   - codex_fire.go: the trusted hooks.json handlers a Codex session fires, at each beat it plays.
 //   - opencode.go: OpenCode — `opencode run`, its TUI and session store.
 //   - opencode_serve.go: OpenCode's `serve` HTTP API.
+//   - opencode_plugin.go: pfm's Herdr reporter plugin as OpenCode loads it — start, working, title, idle and end.
 //   - cli.go: the engines' non-chat verbs (plugin marketplace and install records).
 //   - jail.go: the mock's presence on a jailed host — its /proc entry and sid crumb.
 package mockengine

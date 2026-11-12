@@ -70,27 +70,118 @@ func chatAttention(c *harness.Ctx, s State) string {
 }
 
 // awaitAttention waits for Herdr's status of the branch's pane and pfm's state of its chat to both
-// read want.
+// read want, and for the pane's tab to carry want's mark ahead of the chat's name; a blinking mark
+// (blocked) must then show each of its frames within blinkBound, so a mark that never blinks fails.
 func awaitAttention(c *harness.Ctx, s State, want string, within time.Duration) {
-	c.Poll("Herdr and pfm read pane "+s.Pane+" "+want, within, func() (bool, string) {
-		herdr, pfm := paneAttention(c, s), chatAttention(c, s)
-		return herdr == want && pfm == want, fmt.Sprintf("Herdr %q, pfm %q", herdr, pfm)
-	})
+	name := ""
+	c.Poll("Herdr and pfm read pane "+s.Pane+" "+want+", its tab marked "+strings.Join(tabMarks[want], "/"), within,
+		func() (bool, string) {
+			herdr, pfm, label := paneAttention(c, s), chatAttention(c, s), paneTabLabel(c, s)
+			name = tabName(c, s)
+			return herdr == want && pfm == want && labelFrame(label, want, name) != "",
+				fmt.Sprintf("Herdr %q, pfm %q, tab %q", herdr, pfm, label)
+		})
+	seen := map[string]bool{}
+	c.Poll("the tab of pane "+s.Pane+" shows each frame of "+strings.Join(tabMarks[want], "/"), blinkBound,
+		func() (bool, string) {
+			label := paneTabLabel(c, s)
+			if frame := labelFrame(label, want, name); frame != "" {
+				seen[frame] = true
+			}
+			return len(seen) == len(tabMarks[want]), fmt.Sprintf("tab %q, frames seen %v", label, seen)
+		})
 }
 
-// holdAttention requires Herdr and pfm to keep reading want over reads reads in a row, the first
-// included: a read of anything else fails the step at once.
+// blinkBound is how long a blinking mark gets to show each of its frames: a few of its half-second
+// frames.
+const blinkBound = 3 * time.Second
+
+// holdAttention requires Herdr and pfm to keep reading want, and the pane's tab to keep a frame of
+// want's mark ahead of the chat's name, over reads reads in a row, the first included: a read of
+// anything else fails the step at once.
 func holdAttention(c *harness.Ctx, s State, want string, reads int) {
 	held := 0
 	c.Poll(fmt.Sprintf("Herdr and pfm keep reading pane %s %s over %d reads", s.Pane, want, reads), stepBound,
 		func() (bool, string) {
-			herdr, pfm := paneAttention(c, s), chatAttention(c, s)
-			if herdr != want || pfm != want {
-				c.Failf("pane %s left %s after %d reads: Herdr %q, pfm %q", s.Pane, want, held, herdr, pfm)
+			herdr, pfm, label := paneAttention(c, s), chatAttention(c, s), paneTabLabel(c, s)
+			if herdr != want || pfm != want || labelFrame(label, want, tabName(c, s)) == "" {
+				c.Failf(
+					"pane %s left %s after %d reads: Herdr %q, pfm %q, tab %q",
+					s.Pane,
+					want,
+					held,
+					herdr,
+					pfm,
+					label,
+				)
 			}
 			held++
 			return held >= reads, fmt.Sprintf("%d reads", held)
 		})
+}
+
+// tabMarks are the marks pfm's Herdr painter draws ahead of a chat's tab name, by the chat's state: the
+// default glyphs (pfm/internal/herdr/tab_glyphs.go defaultTabGlyphs) of the default
+// chat.herdrTabStatus, emoji. Blocked and error blink between two frames, half a second each; every
+// other state is one still frame.
+var tabMarks = map[string][]string{
+	"working": {"🔵"}, "idle": {"⚪"}, "blocked": {"🔴", "⭕"}, "done": {"🟡"},
+	"error": {"🟥", "❌"}, "dead": {"⬛"}, "unknown": {"❔"},
+}
+
+// markedLabel is the tab label pfm paints for a chat named name in a still state: its mark, a space,
+// the name.
+func markedLabel(state, name string) string { return tabMarks[state][0] + " " + name }
+
+// labelFrame is the frame of state's mark that label shows ahead of a space and name, "" when label is
+// no frame of state's mark ahead of name.
+func labelFrame(label, state, name string) string {
+	for _, frame := range tabMarks[state] {
+		if label == frame+" "+name {
+			return frame
+		}
+	}
+	return ""
+}
+
+// namedLabel says label is name, bare or under a frame of any state's mark.
+func namedLabel(label, name string) bool {
+	if label == name {
+		return true
+	}
+	for state := range tabMarks {
+		if labelFrame(label, state, name) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// tabNameRunes is the most of a chat's name a marked tab label shows: Herdr's 80-rune title less the
+// mark and its space (pfm/internal/herdr DecoratedTabLabel).
+const tabNameRunes = 78
+
+// tabName is the name the branch's chat's tab carries: the name a step gave it, else pfm's row name (an
+// unnamed chat's first prompt), cut to tabNameRunes.
+func tabName(c *harness.Ctx, s State) string {
+	name := s.Name
+	if name == "" {
+		name = lsName(c, s)
+	}
+	if runes := []rune(name); len(runes) > tabNameRunes {
+		name = strings.TrimRight(string(runes[:tabNameRunes]), " ")
+	}
+	return name
+}
+
+// awaitTopTab waits for Herdr's tab bar, the screen's top line, to draw a tab labelled state's mark and
+// name.
+func awaitTopTab(term *harness.Terminal, state, name string) {
+	label := markedLabel(state, name)
+	term.WaitScreen("a Herdr tab labelled "+label, stepBound, func(screen string) bool {
+		top, _, _ := strings.Cut(screen, "\n")
+		return strings.Contains(" "+strings.Join(strings.Fields(top), " ")+" ", " "+label+" ")
+	})
 }
 
 // boxRule is the fake Claude's input-box rule (pfm/internal/mockengine/pane.go claudeComposerRule).
@@ -114,9 +205,9 @@ func statusRow(screen string) (row string, found bool) {
 	return "", false
 }
 
-// fleetCounts is the status line's closing fleet counts: every branch's chats move them, so a step
-// pins only their shape.
-const fleetCounts = ` ·\d* ·\d*$`
+// fleetCounts is the status line's closing fleet counts: every branch's chats move them, and the
+// glyph steps · ✦ ✹ with the count (sky.SnapshotCounts), so a step pins only their shape.
+const fleetCounts = ` [·✦✹]\d* [·✦✹]\d*$`
 
 // requireStatusRow waits for the branch's chat to draw its status line under the box: the account's
 // medal, the model and the project exactly, then the fleet's counts by shape; an ERR segment or a blank

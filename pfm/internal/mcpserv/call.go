@@ -84,6 +84,13 @@ func (service *Service) callOne(
 		ForceNow: input.ForceNow,
 		Then:     input.Then,
 	})
+	if err == nil && service.backend.chat != nil && !selfTarget(target) {
+		answer, ladderTarget, dormant := service.backend.chat.CallAnswer(ctx, result, target)
+		if dormant && ladderTarget != target {
+			answer = chat.ResumableRefusal(answer, target)
+		}
+		result = answer
+	}
 	output := outputFromCall(result)
 	if caller.present && !caller.valid && caller.detail != "" &&
 		strings.Contains(output.Message, chat.ErrUnsigned.Error()) {

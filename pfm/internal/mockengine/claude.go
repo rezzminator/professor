@@ -2,7 +2,6 @@ package mockengine
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -53,6 +52,9 @@ const (
 	flagMCPConfig   = "--mcp-config"
 	flagSettings    = "--settings"
 	flagForkSession = "--fork-session"
+	flagSessionID   = "--session-id"
+	flagResume      = "--resume"
+	flagContinue    = "--continue"
 )
 
 var (
@@ -111,9 +113,9 @@ func parseClaudeArgs(args []string) claudeInvocation {
 			call.systemPrompt = value
 		case "--system-prompt-file":
 			call.systemPromptFile = value
-		case "--session-id":
+		case flagSessionID:
 			call.sessionID = value
-		case "--resume", "-r":
+		case flagResume, "-r":
 			call.resumed = true
 			if value != "" {
 				call.resumeID = strings.TrimSuffix(filepath.Base(value), ".jsonl")
@@ -143,7 +145,7 @@ type claudeSession struct {
 	model      string
 	title      string
 	hooks      hookSet
-	statusCmd  string
+	status     statusLineSetting
 	environ    []string
 	seat       *seat
 	turnUsage  Tokens
@@ -151,12 +153,12 @@ type claudeSession struct {
 
 func newClaudeSession(proc *process, call claudeInvocation) (*claudeSession, error) {
 	configDir := claudeConfigDir(proc)
-	hooks, statusCmd, err := loadClaudeHooks(configDir, proc.cwd, call.settings)
+	hooks, status, err := loadClaudeHooks(configDir, proc.cwd, call.settings)
 	if err != nil {
 		return nil, err
 	}
 	session := &claudeSession{
-		proc: proc, call: call, configDir: configDir, hooks: hooks, statusCmd: statusCmd,
+		proc: proc, call: call, configDir: configDir, hooks: hooks, status: status,
 		model: proc.script.Model, title: call.name, environ: append(os.Environ(), "CLAUDE_PROJECT_DIR="+proc.cwd),
 	}
 	if call.resumed {
@@ -207,6 +209,11 @@ func newClaudeSession(proc *process, call claudeInvocation) (*claudeSession, err
 	return session, nil
 }
 
+// claudeSessionIDRefusal is the installed Claude Code's (2.1.322) line for
+// --session-id with --resume and no --fork-session, read from its own run.
+const claudeSessionIDRefusal = "Error: " + flagSessionID + " can only be used with " + flagContinue + " or " +
+	flagResume + " if " + flagForkSession + " is also specified."
+
 func serveClaude(proc *process) int {
 	call := parseClaudeArgs(proc.args)
 	if call.subcommand == "agents" {
@@ -214,6 +221,11 @@ func serveClaude(proc *process) int {
 		// background agents a chat runs; the mock has none.
 		fmt.Fprintln(proc.stdout, "[]")
 		return 0
+	}
+	if call.sessionID != "" && call.resumed && !call.fork {
+		// Claude Code's own refusal: a resume keeps its session id unless it forks.
+		fmt.Fprintln(proc.stderr, claudeSessionIDRefusal)
+		return 1
 	}
 	session, err := newClaudeSession(proc, call)
 	if err != nil {
@@ -269,7 +281,8 @@ func (session *claudeSession) begin(source string) error {
 	}
 	payload := session.payload(hookSessionStart)
 	payload.Source = source
-	answers, err := session.fire(hookSessionStart, "", payload)
+	// Claude matches a SessionStart hook against its source: startup, resume, clear or compact.
+	answers, err := session.fire(hookSessionStart, source, payload)
 	if err != nil {
 		return err
 	}
@@ -458,17 +471,6 @@ func (session *claudeSession) clear() error {
 	return session.begin(sourceClear)
 }
 
-func (session *claudeSession) finish(reason string) error {
-	payload := session.payload(hookSessionEnd)
-	payload.Reason = reason
-	_, err := session.fire(hookSessionEnd, "", payload)
-	if session.seat != nil {
-		err = errors.Join(err, session.seat.release())
-		session.seat = nil
-	}
-	return err
-}
-
 // statusLine feeds the statusLine command the struct
 // internal/statusline/render.go:41-84 decodes.
 func (session *claudeSession) statusLine(usage Tokens) (string, error) {
@@ -499,8 +501,10 @@ func (session *claudeSession) statusLine(usage Tokens) (string, error) {
 	input.ContextWindow.CurrentUsage.CacheCreationInputTokens = usage.CacheCreation
 	input.Cost.TotalCostUSD = usageCost(usage)
 	input.Effort.Level = session.call.effort
-	return invokeStatusLine(session.proc.ctx, session.statusCmd, input, session.proc.cwd, session.environ)
+	return invokeStatusLine(session.proc.ctx, session.status.command, input, session.proc.cwd, session.environ)
 }
+
+func (session *claudeSession) statusRefresh() time.Duration { return session.status.refresh }
 
 // claudeDisplayName is the family word Claude Code shows for a model id.
 func claudeDisplayName(model string) string {

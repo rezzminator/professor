@@ -30,10 +30,10 @@ const StderrMirror = "stderr"
 
 // Settings is what a process entry tells the activity log: which verb is
 // running, which build, and the machine's log policy from pfm.config.json
-// (Level and Components as § Control spells them; KeepDays 0 disables the
-// time limit). Everything else has a default: Path falls back to the resolved
-// home's pfm.jsonl, Env to the real process, Timing to the wall clock, Stderr
-// to os.Stderr.
+// (Level and Components as § Control spells them; MaxMB the segment size and
+// KeepFiles how many segments stay whole). Everything else has a default: Path
+// falls back to the home's log root (paths.LogRoot), Env to the real process,
+// Timing to the wall clock, Stderr to os.Stderr.
 type Settings struct {
 	Cmd        string
 	Version    string
@@ -41,7 +41,6 @@ type Settings struct {
 	Components map[string]string
 	KeepFiles  int
 	MaxMB      int
-	KeepDays   int
 	Path       string
 	Env        paths.Env
 	Timing     clock.Clock
@@ -146,16 +145,23 @@ func openDestination(
 	mirror := env.Get(paths.EnvLogMirror) == StderrMirror
 	path := settings.Path
 	if path == "" {
-		resolved, err := paths.Resolve()
+		home, err := paths.HomeFrom(env)
 		if err != nil {
 			return mirrorOnly(mirror, stderr, options), nil, fmt.Errorf("resolve log path: %w", err)
 		}
-		path = resolved.LogFile
+		place := paths.LogRoot(env, home)
+		if place.Fallback != nil {
+			fmt.Fprintf(stderr, "pfm: activity log: %v; logging under %s\n", place.Fallback, place.Dir)
+		}
+		path = place.Activity()
 	}
-	writer, err := newRotator(path, settings.KeepFiles, settings.MaxMB, settings.KeepDays, timing, stderr)
+	writer, err := newRotator(path, settings.KeepFiles, settings.MaxMB, true, timing, stderr)
 	if err != nil {
 		return mirrorOnly(mirror, stderr, options), nil, err
 	}
+	processMutex.Lock()
+	processWriter = writer
+	processMutex.Unlock()
 	handler := slog.Handler(slog.NewJSONHandler(writer, options))
 	if mirror {
 		handler = fanout{handler, slog.NewJSONHandler(stderr, options)}

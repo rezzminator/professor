@@ -42,7 +42,6 @@ type TabDecoration struct {
 	// Glyphs are the theme's tab status glyphs this tick (themesync
 	// HerdrTabGlyphs); the zero value draws the defaults.
 	Glyphs   TabGlyphs
-	Revision uint64
 	Session  json.RawMessage
 	Validate func(context.Context) (bool, error)
 	// Retained marks a view whose live owner is gone (a bridge tab whose tmux
@@ -230,7 +229,7 @@ func sameTabObservation(pane TabPane, d TabDecoration) bool {
 			return false
 		}
 	}
-	return pane.Pane == d.Pane && pane.Terminal == d.Terminal && pane.Tab == d.Tab && pane.Revision == d.Revision &&
+	return pane.Pane == d.Pane && pane.Terminal == d.Terminal && pane.Tab == d.Tab &&
 		pane.State == d.AgentStatus &&
 		reflect.DeepEqual(a, b)
 }
@@ -435,7 +434,6 @@ func (painter *indicatorPainter) restoreTabs(ctx context.Context) error {
 			}
 			continue
 		}
-		d.Revision = pane.Revision
 		d.AgentStatus = pane.State
 		d.Mode = TabStatusOff
 		if _, err := reconcileTab(ctx, painter.socket, painter.lockDir, d, 0, painter.call); err != nil &&

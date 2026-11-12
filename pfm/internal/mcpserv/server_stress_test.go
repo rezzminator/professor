@@ -176,8 +176,7 @@ func TestMCPAdversarialUnknownAndHugeArguments(t *testing.T) {
 		Target:  "missing",
 		Message: strings.Repeat("x", 1<<20),
 	})
-	if huge.Code != 4 || huge.Typed || huge.Status != "refused" ||
-		!strings.Contains(huge.Message, "matched no live chat") {
+	if huge.Code != 4 || huge.Typed || huge.Status != "not_found" || huge.Message != `no chat named "missing"` {
 		t.Fatalf("huge call = %+v", huge)
 	}
 }

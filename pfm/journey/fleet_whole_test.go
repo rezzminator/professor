@@ -26,7 +26,7 @@ var treeStarted time.Time
 // row and one live seat; every live seat on a running Herdr session sits on a pane it has; no branch's
 // own Herdr session still runs; every
 // engine process belongs to a live chat; no pfm process leaves a zombie child; no pfm process has burnt
-// more than cpuShare of the tree's time.
+// more than cpuShare of the tree's time; every settled picker is idle (idleFaults).
 func fleetWhole(c *harness.Ctx) {
 	rows, listed := liveChats(c, "")
 	seats := liveSeats(c, "")
@@ -43,6 +43,7 @@ func fleetWhole(c *harness.Ctx) {
 	faults = append(faults, engineFaults(table, rows, seats, func(process) bool { return true })...)
 	faults = append(faults, zombies(c, table)...)
 	faults = append(faults, spinning(c, table)...)
+	faults = append(faults, idleFaults(c, table)...)
 	if len(faults) > 0 { // every live seat's whole row, so a fault names its socket, pane and owner
 		c.Artifact("seats.txt", []byte(read(c, "sqlite3", "-cmd", ".timeout 5000", "-header", stateDB(),
 			"select * from seat where state = 'live'")))
@@ -131,5 +132,53 @@ func spinning(c *harness.Ctx, table map[int]process) []string {
 				pid, used.Seconds(), elapsed.Seconds(), cpuShare*100, p.Args))
 		}
 	}
+	return faults
+}
+
+// pickerShare is the most CPU time an open picker may use of its own life: one left open in an unwatched
+// pane refreshes on demand, never on a fixed fast cadence.
+const pickerShare = 0.10
+
+// pickerSettled is how long a picker must have lived before its share is judged: its first paint costs.
+const pickerSettled = 30 * time.Second
+
+// idleFaults is a fault for every pfm picker (`pfm` or `pfm ls`) settled past pickerSettled whose CPU
+// time exceeds pickerShare of its own elapsed time.
+func idleFaults(c *harness.Ctx, table map[int]process) []string {
+	counters, _, err := gather.ProcessCounters("")
+	if err != nil {
+		c.Failf("read the processes' CPU time: %v", err)
+	}
+	birth, ok := procTable(c).(gather.ProcBirth)
+	if !ok {
+		c.Failf("the process table reader names no process birth")
+	}
+	now := clock.Real.Now()
+	var faults []string
+	pickers := 0
+	for pid, p := range table {
+		if !pfmProcess(p) {
+			continue
+		}
+		_, args, _ := strings.Cut(p.Args, " ")
+		counter, counted := counters[pid]
+		if args != "" && args != "ls" || !counted || counter.CPUUnknown {
+			continue
+		}
+		born, err := birth.Birth(pid)
+		if err != nil {
+			continue // gone since the listing
+		}
+		lived := now.Sub(time.Unix(born, 0))
+		used := time.Duration(counter.CPUTicks) * 10 * time.Millisecond
+		if lived >= pickerSettled {
+			pickers++
+		}
+		if lived >= pickerSettled && used.Seconds() > pickerShare*lived.Seconds() {
+			faults = append(faults, fmt.Sprintf("picker pid %d used %.1fs of CPU in its %.1fs (over %.0f%%): %s",
+				pid, used.Seconds(), lived.Seconds(), pickerShare*100, p.Args))
+		}
+	}
+	c.Logf("idle check read %d settled picker(s)", pickers)
 	return faults
 }

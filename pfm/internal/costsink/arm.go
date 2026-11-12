@@ -90,7 +90,7 @@ func Arm(opts ArmOptions) (Armed, error) {
 
 // openSinkLog opens (creating it and its directory) the file the sink and the launcher log to.
 func openSinkLog(home string) (*os.File, error) {
-	path := paths.CostSinkLog(home)
+	path := paths.LogRoot(paths.OSEnv{}, home).CostSink()
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("cost sink: create %s: %w", filepath.Dir(path), err)
 	}

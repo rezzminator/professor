@@ -838,7 +838,7 @@ func (current *composer) agentRows() []Row {
 		}
 		agent := agents[id]
 		transcript, found := current.transcriptByID[id]
-		if current.abandonedLaunch(agent, transcript, found) {
+		if current.abandonedLaunch(agent, transcript, found) || current.bootingLaunch(agent) {
 			continue
 		}
 		if !found {

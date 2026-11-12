@@ -36,9 +36,10 @@ func (reporter *herdrReporter) tmuxSeatLifecycle(ctx context.Context, payload he
 		if payload.Reason == herdrReasonClear || payload.Reason == herdrReasonResume || seat.ReloadPending {
 			return nil
 		}
-		// A reload's own /exit ends the engine it respawns on this seat: while it holds the pane the
-		// seat stays, else the reloaded chat runs with no seat.
-		inFlight, err := reload.InFlight(reporter.deps.sidDir, filepath.Base(socket), reporter.tmuxPane)
+		// A reload's own /exit ends the engine it respawns on this seat: from that /exit to the respawn
+		// the seat stays, else the reloaded chat runs with no seat. The owner's /exit while the reload
+		// still waits ends the chat, and its seat goes.
+		inFlight, err := reload.ExitTyped(reporter.deps.sidDir, filepath.Base(socket), reporter.tmuxPane)
 		if err != nil {
 			return fmt.Errorf("keep tmux seat %s through a reload: %w", seat.SeatID, err)
 		}

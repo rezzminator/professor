@@ -194,6 +194,42 @@ func TestInstallHerdrClaudeIntegration(t *testing.T) {
 			}},
 		},
 		{
+			name:        "uninstall unwraps herdr-shield's guarded hook even while Herdr still runs herdr-shield",
+			shared:      shieldGuardedSettings("{cc2}"),
+			herdrConfig: "[terminal]\ndefault_shell = \"herdr-shield\"\n",
+			mode:        ModeUninstall,
+			passes: []pass{
+				{
+					rows: []string{
+						"  change  herdr claude integration in {store}: unwrap " + shieldGuardedHook("{cc2}") +
+							" to Herdr's plain hook",
+					},
+					wantHooks: []string{testjail.HerdrClaudeHook("{cc2}")},
+					wantStore: testjail.HerdrClaudeSettings("{cc2}"),
+				},
+				{
+					rows:      []string{"  ok      herdr claude integration in {store}: " + testjail.HerdrClaudeHook("{cc2}")},
+					wantHooks: []string{testjail.HerdrClaudeHook("{cc2}")},
+					wantStore: testjail.HerdrClaudeSettings("{cc2}"),
+				},
+			},
+		},
+		{
+			name:   "uninstall installs no hook where there is none",
+			shared: `{"theme":"dark"}`,
+			mode:   ModeUninstall,
+			passes: []pass{{wantStore: `{"theme":"dark"}`}},
+		},
+		{
+			name:   "uninstall leaves two Herdr hooks as they are, unwarned",
+			shared: testjail.HerdrClaudeSettings("{cc1}", "{cc2}"),
+			mode:   ModeUninstall,
+			passes: []pass{{
+				wantHooks: []string{testjail.HerdrClaudeHook("{cc1}"), testjail.HerdrClaudeHook("{cc2}")},
+				wantStore: testjail.HerdrClaudeSettings("{cc1}", "{cc2}"),
+			}},
+		},
+		{
 			name:   "two hooks run nothing and warn",
 			shared: testjail.HerdrClaudeSettings("{cc1}", "{cc2}"),
 			mode:   ModeApply,

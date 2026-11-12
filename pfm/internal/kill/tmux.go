@@ -142,3 +142,64 @@ func (tmux TmuxKiller) command(
 ) *pfmtmux.Cmd {
 	return tmux.socket().Command(ctx, socketPath, arguments...)
 }
+
+// Client is one `tmux attach` process on the server: its pid, and the name
+// tmux addresses it by (its tty, or client-{pid} for a client with none).
+type Client struct {
+	PID  int
+	Name string
+}
+
+// ViewportTmux names the two tmux calls the closer makes: list the attached
+// clients, and detach one.
+type ViewportTmux interface {
+	Clients(ctx context.Context, socketPath string) (clients []Client, skipped []string, err error)
+	DetachClient(ctx context.Context, socketPath, name string) error
+}
+
+// Clients lists the `tmux attach` processes currently attached to this
+// server — one per terminal the chat is being watched through.
+func (tmux TmuxKiller) Clients(
+	ctx context.Context,
+	socketPath string,
+) (clients []Client, skipped []string, err error) {
+	output, err := tmux.command(
+		ctx, socketPath, "list-clients", "-F", "#{client_pid} #{client_name}",
+	).Output()
+	if err != nil {
+		return nil, nil, fmt.Errorf("list clients on %s: %w", socketPath, err)
+	}
+	clients, skipped = parseClients(string(output))
+	return clients, skipped, nil
+}
+
+// DetachClient detaches the client tmux names name: the client restores the
+// screen it drew on and exits.
+func (tmux TmuxKiller) DetachClient(ctx context.Context, socketPath, name string) error {
+	if _, err := tmux.command(ctx, socketPath, "detach-client", "-t", name).Output(); err != nil {
+		return fmt.Errorf("detach client %s on %s: %w: %s", name, socketPath, err, exitStderr(err))
+	}
+	return nil
+}
+
+// parseClients reads one `{pid} {name}` client per line; a line that is not
+// one is named in skipped and costs only that client, never its siblings.
+func parseClients(output string) (clients []Client, skipped []string) {
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		pidText, name, _ := strings.Cut(line, " ")
+		pid, convErr := strconv.Atoi(pidText)
+		switch {
+		case convErr != nil:
+			skipped = append(skipped, fmt.Sprintf("client pid %q unreadable: %v", pidText, convErr))
+		case name == "":
+			skipped = append(skipped, fmt.Sprintf("client %d: tmux listed it with no name to detach it by", pid))
+		default:
+			clients = append(clients, Client{PID: pid, Name: name})
+		}
+	}
+	return clients, skipped
+}

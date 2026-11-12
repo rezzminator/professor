@@ -102,7 +102,6 @@ func Keys() []KeyDefault {
 		{"log.components", map[string]string{}},
 		{"log.keepFiles", DefaultLog().KeepFiles},
 		{"log.maxMB", DefaultLog().MaxMB},
-		{"log.keepDays", DefaultLog().KeepDays},
 		{keyDoctorIgnoreWarnings, []string{}},
 		{keyDoctorAcceptedMCP, []AcceptedMCP{}},
 	}

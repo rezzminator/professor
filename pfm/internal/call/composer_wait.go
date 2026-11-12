@@ -159,3 +159,22 @@ func composerEcho(capture string) string {
 	}
 	return capture
 }
+
+// proofComposer is the composer row the delivery proof judges, with the
+// capture it was read from. A capture taken while the pane repaints holds no
+// composer row; that frame is read once more before the scrollback is asked,
+// whose older frames still show the composer holding the message just
+// submitted.
+func (engine *Engine) proofComposer(ctx context.Context, target Target, proof string) (string, string) {
+	if line := composerLastLine(proof); line != "" {
+		return line, proof
+	}
+	engine.sleepContext(ctx, engine.options.Poll)
+	if again, err := engine.capturePane(ctx, target, 0); err == nil {
+		if line := composerLastLine(again); line != "" {
+			return line, again
+		}
+	}
+	scrollback, _ := engine.capturePane(ctx, target, engine.options.Scrollback)
+	return composerLastLine(scrollback), proof
+}

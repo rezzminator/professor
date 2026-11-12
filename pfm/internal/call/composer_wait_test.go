@@ -262,3 +262,47 @@ func TestRenderSettleReadsTheComposerNotTheTranscript(t *testing.T) {
 		t.Fatalf("keys = %q, want the draft guard then one Enter; screen before the message: %q", keys, transcript)
 	}
 }
+
+// repaintTmux plays a pane read while it repaints: the visible screen is whole
+// on every read, and the scrollback still holds an older frame.
+type repaintTmux struct {
+	*fakeTmux
+	whole, older string
+	visible      int
+}
+
+func (fake *repaintTmux) Capture(_ context.Context, _, _ string, _ bool, scrollback int) (string, error) {
+	if scrollback > 0 {
+		return fake.older, nil
+	}
+	fake.visible++
+	return fake.whole, nil
+}
+
+// TestProofComposerReadsARepaintingFrameAgain pins the held call a repainting
+// pane failed: the proof capture ended inside a transcript row, above the
+// composer, and the scrollback's older frame still showed the composer holding
+// the message, so a delivered call was reported as PROOF-CONTRADICTION.
+func TestProofComposerReadsARepaintingFrameAgain(t *testing.T) {
+	const cut = "> first call\n⏺ answer\n> a long row the read cut he"
+	for _, row := range []struct {
+		name, proof, whole, line, from string
+		visible                        int
+	}{
+		{"composer in the proof", "⏺ answer\n❯ ", "", "❯ ", "⏺ answer\n❯ ", 0},
+		{"cut frame, whole on the next read", cut, "⏺ held\n❯ ", "❯ ", "⏺ held\n❯ ", 1},
+		{"no composer on either read", cut, cut, "❯ second call", cut, 1},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			fake := &repaintTmux{fakeTmux: &fakeTmux{}, whole: row.whole, older: "❯ second call\n" + cut}
+			engine := newTestEngine(t, "repaint", fake.fakeTmux)
+			engine.tmux = fake
+			engine.options.Poll = time.Millisecond
+			line, from := engine.proofComposer(context.Background(), Target{Pane: "%1"}, row.proof)
+			if line != row.line || from != row.from || fake.visible != row.visible {
+				t.Fatalf("proofComposer(%q) = %q from %q after %d visible read(s); want %q from %q after %d",
+					row.proof, line, from, fake.visible, row.line, row.from, row.visible)
+			}
+		})
+	}
+}

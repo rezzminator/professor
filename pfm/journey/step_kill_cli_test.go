@@ -32,6 +32,9 @@ func openElsewhere(c *harness.Ctx, s State) State {
 		return true, ""
 	})
 	s.Chat.Engine = engineOf(c, s)
+	// The composer is painted once the resumed engine's SessionStart hooks have run: the owner kills a chat
+	// he sees, never one whose resume is still lifting its earlier kill.
+	term.WaitFor("❯", 20*time.Second)
 	c.Poll("the one Herdr workspace labelled demo", stepBound, func() (bool, string) {
 		label := workspaceLabel(c, s)
 		return label == "demo", "workspace " + label

@@ -930,11 +930,7 @@ func (engine *Engine) callResolved(
 		}
 		return base, nil
 	}
-	proofInput := composerLastLine(proof)
-	if proofInput == "" {
-		scrollback, _ := engine.capturePane(ctx, target, engine.options.Scrollback)
-		proofInput = composerLastLine(scrollback)
-	}
+	proofInput, proof := engine.proofComposer(ctx, target, proof)
 	blindProof := proofInput == ""
 	if HasPastePlaceholder(proofInput) ||
 		(proofInput != "" && strings.Contains(normalizeSpace(proofInput), prefix)) {

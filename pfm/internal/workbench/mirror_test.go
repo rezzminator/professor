@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -24,17 +25,29 @@ func readArgv(t *testing.T, record string) string {
 const cleanMirrorReply = `{"ok":true,"problems":[],"rebuildable":[],"warnings":[],` +
 	`"wrote":1,"unchanged":0,"deleted":0,"error":""}`
 
+// skippedMirrorReply is engine-sync's --json answer for an engine
+// ENGINE_SYNC_DISABLE switches off.
+func skippedMirrorReply(engine pfmengine.ID) string {
+	return `{"ok":true,"problems":[],"rebuildable":[],"warnings":[],"wrote":0,"unchanged":0,"deleted":0,` +
+		`"error":"","skipped":["` + pfmengine.MustLookup(engine).LongName + `"]}`
+}
+
 func TestEnsureMirror(t *testing.T) {
 	for _, testCase := range []struct {
 		engine   pfmengine.ID
 		argv     string
 		settings bool
+		// disable is the managed root's settings ENGINE_SYNC_DISABLE; the
+		// mirror replies with engine-sync's skip.
+		disable string
 	}{
 		{engine: pfmengine.Codex, argv: "codex build"},
 		{engine: pfmengine.OpenCode, argv: "opencode build"},
 		{engine: pfmengine.Claude},
 		{engine: pfmengine.Codex, settings: true},
 		{engine: pfmengine.OpenCode, settings: true},
+		{engine: pfmengine.Codex, argv: "codex build", disable: "codex"},
+		{engine: pfmengine.OpenCode, argv: "opencode build", disable: "codex,opencode"},
 	} {
 		t.Run(
 			string(testCase.engine)+map[bool]string{true: "/settings persona"}[testCase.settings],
@@ -44,7 +57,12 @@ func TestEnsureMirror(t *testing.T) {
 				if testCase.settings {
 					bench = Persona{Prompt: "team.md"}.Bench // a settings persona carries no bench
 				}
-				record := testjail.FakeEngineSync(t, cleanMirrorReply, 0)
+				reply := cleanMirrorReply
+				if testCase.disable != "" {
+					writeBenchFile(t, paths.Settings(root), `{"envs":{"ENGINE_SYNC_DISABLE":"`+testCase.disable+`"}}`)
+					reply = skippedMirrorReply(testCase.engine)
+				}
+				record := testjail.FakeEngineSync(t, reply, 0)
 				if err := EnsureMirror(bench, testCase.engine, home); err != nil {
 					t.Fatal(err)
 				}
@@ -56,6 +74,9 @@ func TestEnsureMirror(t *testing.T) {
 				}
 				if got, want := readArgv(t, record), testCase.argv+" "+dir+" --home "+home+" --json"; got != want {
 					t.Fatalf("engine-sync argv = %q, want %q", got, want)
+				}
+				if got, err := os.ReadFile(record + ".disable"); err != nil || string(got) != testCase.disable+"\n" {
+					t.Fatalf("ENGINE_SYNC_DISABLE = %q (%v) in %s.disable, want %q", got, err, record, testCase.disable)
 				}
 			},
 		)
@@ -119,6 +140,7 @@ func TestCheckMirrorProblemSplit(t *testing.T) {
 			want:  MirrorCheck{Rebuildable: []string{"ORPHAN o"}},
 		},
 		{name: "a check that could not run", engine: pfmengine.Codex, code: 2, wantErr: "exit 2"},
+		{name: "an engine the project disables", engine: pfmengine.OpenCode, reply: skippedMirrorReply(pfmengine.OpenCode)},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			root, dir := benchFixture(t)

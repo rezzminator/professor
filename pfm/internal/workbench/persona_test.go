@@ -50,7 +50,7 @@ func TestForLaunch(t *testing.T) {
 			"settings envs only",
 			[]pfmengine.ID{pfmengine.Claude, pfmengine.Codex},
 			[]Mode{New},
-			`{"envs":{"TEAM_MODE":"strict","API_REGION":"eu"}}`,
+			`{"envs":{"TEAM_MODE":"strict","ENGINE_SYNC_DISABLE":"codex"}}`,
 		},
 		{
 			"settings both keys",
@@ -116,7 +116,7 @@ func TestForLaunch(t *testing.T) {
 				want = Persona{Prompt: filepath.Join(root, "team.md"), Body: "Team rules.\n"}
 			case "settings envs only":
 				cwd = filepath.Join(root, "src")
-				want = Persona{Envs: map[string]string{"TEAM_MODE": "strict", "API_REGION": "eu"}}
+				want = Persona{Envs: map[string]string{"TEAM_MODE": "strict", "ENGINE_SYNC_DISABLE": "codex"}}
 			case "settings both keys":
 				cwd = filepath.Join(root, "src")
 				want = Persona{Warnings: []string{

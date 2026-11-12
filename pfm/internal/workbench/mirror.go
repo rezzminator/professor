@@ -17,6 +17,13 @@ var mirrorEngines = map[pfmengine.ID]string{
 	pfmengine.OpenCode: enginesync.EngineOpenCode,
 }
 
+// mirrorRunner runs engine-sync with the managed root's settings envs, so a
+// project's ENGINE_SYNC_DISABLE holds when pfm runs its mirror; a faulty
+// settings file is logged and the mirror runs without it.
+func mirrorRunner(bench Bench, engine pfmengine.ID, home string) enginesync.Runner {
+	return enginesync.Runner{Home: home, Envs: settingsPersona(bench.Root, home, engine, false).Envs}
+}
+
 // EnsureMirror builds the enabled engine's mirror before a workbench launch
 // through `engine-sync {engine} build {bench} --home {home}`; a bench without
 // a directory builds nothing.
@@ -26,7 +33,8 @@ func EnsureMirror(bench Bench, engine pfmengine.ID, home string) error {
 	if !mirrored || bench.Dir == "" {
 		return nil
 	}
-	result, err := enginesync.Runner{Home: home}.Mirror(context.Background(), name, enginesync.ActionBuild, bench.Dir)
+	runner := mirrorRunner(bench, engine, home)
+	result, err := runner.Mirror(context.Background(), name, enginesync.ActionBuild, bench.Dir)
 	if err == nil && !result.OK {
 		err = fmt.Errorf("%s", strings.Join(result.Problems, "; "))
 	}
@@ -57,7 +65,8 @@ func CheckMirror(bench Bench, engine pfmengine.ID, home string) (check MirrorChe
 	if !mirrored || bench.Dir == "" {
 		return MirrorCheck{}, nil
 	}
-	result, err := enginesync.Runner{Home: home}.Mirror(context.Background(), name, enginesync.ActionCheck, bench.Dir)
+	runner := mirrorRunner(bench, engine, home)
+	result, err := runner.Mirror(context.Background(), name, enginesync.ActionCheck, bench.Dir)
 	problems := result.Problems
 	if len(result.Rebuildable) != 0 {
 		check.Rebuildable = result.Rebuildable

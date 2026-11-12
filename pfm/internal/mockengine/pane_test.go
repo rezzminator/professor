@@ -168,10 +168,18 @@ func TestPaneClaudeTrustDialog(t *testing.T) {
 				session.waitFrame("composer after trusting", func(frame string) bool {
 					return strings.Contains(frame, "❯") && !pfmengine.ClaudeTrustDialog(frame)
 				})
+				// A stashed draft comes back to the composer on the /exit submit; the
+				// frame the engine leaves behind draws no composer at all.
+				session.typeRaw("parked")
+				session.waitFrame("the draft", func(frame string) bool { return strings.Contains(frame, "❯ parked") })
+				session.typeRaw("\x13")
 				session.typeLine("/exit")
 			}
 			if code := session.waitExit(); code != test.wantExit {
 				t.Fatalf("exit = %d, want %d; frame:\n%s", code, test.wantExit, session.out.frame())
+			}
+			if frame := session.out.frame(); test.boots && strings.Contains(frame, "❯") {
+				t.Fatalf("the frame left after /exit still draws a composer:\n%s", frame)
 			}
 		})
 	}

@@ -104,4 +104,17 @@ func TestPaintWritesAFrameOnlyWhenItChanged(t *testing.T) {
 	if got := out.String(); got != first+second {
 		t.Fatalf("a changed frame painted twice wrote %q, want %q", got, first+second)
 	}
+	// A typed burst is drawn once, after its last key.
+	keys := make(chan keyEvent, 2)
+	loop.keys = keys
+	keys <- keyEvent{kind: keyRune, r: 'b'}
+	loop.idleKey(keyEvent{kind: keyRune, r: 'a'})
+	if got := out.String(); got != first+second {
+		t.Fatalf("a typed key with another waiting wrote %q, want nothing past %q", got, first+second)
+	}
+	loop.idleKey(<-keys)
+	if got, want := out.String(), first+second+screen.render(); screen.draft.text() != "ab" || got != want {
+		t.Fatalf("the burst's last key left draft %q and wrote %q, want draft \"ab\" and %q",
+			screen.draft.text(), got, want)
+	}
 }

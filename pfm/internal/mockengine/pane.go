@@ -183,6 +183,15 @@ func (loop *paneLoop) paint() {
 	loop.painted = frame
 }
 
+// paintTyped draws after a typed key once no further key waits: like the
+// engines' own TUIs, a burst of typed text is drawn once, never a whole frame
+// per rune, so the Enter that ends the burst is read as soon as it arrives.
+func (loop *paneLoop) paintTyped() {
+	if len(loop.keys) == 0 {
+		loop.paint()
+	}
+}
+
 // refreshStatus re-runs the statusline and returns the line now shown; a run
 // that fails is named and keeps the line it had.
 func (loop *paneLoop) refreshStatus(usage Tokens) string {
@@ -244,7 +253,7 @@ func (loop *paneLoop) idleKey(event keyEvent) (int, bool) {
 	}
 	if event.kind != keyEnter {
 		screen.draft.apply(event)
-		loop.paint()
+		loop.paintTyped()
 		return 0, false
 	}
 	line := screen.draft.take()
@@ -295,6 +304,9 @@ func (loop *paneLoop) closeMenu(confirmed bool) {
 // work (pfmcall.ExitDialogOpen matches its ❯ row; reload and the kill-exit
 // finisher press Enter on it).
 const exitMenuName = "exit-dialog"
+
+// exitByPrompt is the SessionEnd reason of an engine its user ended with /exit.
+const exitByPrompt = "prompt_input_exit"
 
 // submit handles one submitted line: a slash command or a prompt.
 func (loop *paneLoop) submit(line string) (int, bool) {
@@ -498,7 +510,7 @@ func (loop *paneLoop) busy(started time.Time, duration time.Duration, gate strin
 	defer ticker.Stop()
 	for {
 		screen.footer = loop.engine.busyLine(time.Since(started), loop.proc.script.Tokens)
-		loop.paint()
+		loop.paintTyped()
 		done := false
 		if gate != "" {
 			_, err := os.Stat(gate)
@@ -552,7 +564,7 @@ func (loop *paneLoop) exit() (int, bool) {
 		loop.paint()
 		return loop.awaitExitMenu()
 	}
-	return loop.finish("prompt_input_exit", 0), true
+	return loop.finish(exitByPrompt, 0), true
 }
 
 // awaitExitMenu keeps the loop running until the exit menu is confirmed or
@@ -568,7 +580,7 @@ func (loop *paneLoop) awaitExitMenu() (int, bool) {
 			}
 			loop.idleKey(event)
 			if loop.exiting {
-				return loop.finish("prompt_input_exit", loop.exitCode), true
+				return loop.finish(exitByPrompt, loop.exitCode), true
 			}
 		}
 	}
@@ -576,6 +588,10 @@ func (loop *paneLoop) awaitExitMenu() (int, bool) {
 }
 
 func (loop *paneLoop) finish(reason string, code int) int {
+	if reason == exitByPrompt {
+		loop.screen.left = true
+		loop.paint()
+	}
 	if err := loop.engine.finish(reason); err != nil {
 		warn(loop.proc.stderr, "finish: %v", err)
 	}

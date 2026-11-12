@@ -23,6 +23,10 @@ type pane struct {
 	rule        string
 	renameDraft *composer
 	renameError string
+	// left is set once the engine exits by /exit: like Claude Code and Codex
+	// unmounting their input box, the last frame draws no composer, so a
+	// reader of the pane never takes the ended engine's box for the next one's.
+	left bool
 }
 
 const historyKeep = 12
@@ -58,6 +62,9 @@ func (screen *pane) render() string {
 	}
 	if screen.footer != "" {
 		out.WriteString("\r\n" + screen.footer + "\r\n")
+	}
+	if screen.left {
+		return out.String()
 	}
 	if screen.renameDraft != nil {
 		out.WriteString("\r\n" + codexRenameTitle + "\r\n" + codexRenameHint + "\r\n")

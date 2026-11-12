@@ -160,7 +160,7 @@ The `auto-effort` plugin gives an agent whose frontmatter carries `effortControl
 | Agent | `effortControl` |
 | --- | --- |
 | `flights:foreman`, `flights:foreman-sonnet` | floor medium, ceiling xhigh; `flights:foreman` starts at medium, `flights:foreman-sonnet` at high |
-| `flights:reviewer`, `flights:reviewer-pro`, `documenter` | `on` |
+| `documenter` | `on` |
 
 `pcm` does not carry `effortControl`. `flights:lander` and its children carry no `effortControl` and no buttons. Every steered agent but the two foremen lists the three tools in its own `tools:` line under the `mcp__auto-effort__` prefix; the two foremen carry no effort buttons and a `tools:` line without them. The plugin steers a foreman: one step up at a failing test run, home at the next green ([flights-foreman.md](flights-foreman.md#effort)).
 
@@ -185,7 +185,7 @@ The `auto-effort` plugin gives an agent whose frontmatter carries `effortControl
 
 ## Harness settings
 
-The deepest chain is main → `flights:reviewer-pro` → `flights:tracer` → `flights:sub-tracer` → its child `flights:sub-tracer`: four levels below the main chat; a foreman spawns nothing and sits at one. pfm writes `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` and `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` onto every Claude Code launch line (`pfm/internal/claudelaunch/knobs.go`). A spawn refused at the concurrency limit never started, and goes out again once a slot frees.
+The deepest chain is main → `flights:speccer` → `flights:tracer` → `flights:sub-tracer` → its child `flights:sub-tracer`: four levels below the main chat; a foreman spawns nothing and sits at one. pfm writes `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` and `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` onto every Claude Code launch line (`pfm/internal/claudelaunch/knobs.go`). A spawn refused at the concurrency limit never started, and goes out again once a slot frees.
 
 ## Surfaces that stay in sync
 

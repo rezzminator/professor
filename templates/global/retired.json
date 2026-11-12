@@ -100,7 +100,7 @@
     {
       "name": "reviewer-pro",
       "kind": "agent",
-      "successor": "flights:reviewer-pro",
+      "successor": "flights:reviewer",
       "match": "exact"
     },
     {

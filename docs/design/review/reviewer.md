@@ -1,63 +1,67 @@
-# reviewer and reviewer-pro
+# reviewer
 
-`flights:reviewer` (`plugins/flights/plugins/flights/agents/reviewer.md`) reviews one diff range and proves the change safe on both sides of every thread it touches: its own lines, the callers feeding it, the readers of what it writes, the artifacts it installs and the claims it makes. The lead accepts only a BASE..HEAD range — any other job (comparing two diffs, an A/B or blind grade, scoring against requirements with no range) returns `BLOCKED: not a diff review` before any read or spawn. It reads the diff, cuts threads, puts every question that leaves its own reading into one `flights:tracer` run and hunts the changed bodies itself while that run walks. Nothing in the run executes code: the lead and the tracer read and grep, and tests are judged by reading.
-
-`flights:reviewer-pro` (`plugins/flights/plugins/flights/agents/reviewer-pro.md`) is the tier for diffs of 10,000+ code lines: the same manual, with the questions spread over at most three `flights:tracer` runs, one per area (a package or subsystem, so a run's reads overlap), all in one message, each on `BUDGET 16` where `reviewer`'s one run has `BUDGET 24`. Both tiers read an uncommitted tree (HEAD `WORKTREE`) and carry no fixed lenses or security seats: every thread kind below applies to every review.
+`flights:reviewer` (`plugins/flights/plugins/flights/agents/reviewer.md`) reviews one diff of any size and writes its report. It is the lander's review without the landing: the same inventory script plans the work from the diff's size, the same three checker agents read it, and the reviewer verifies every candidate and judges. It fixes nothing and runs nothing: no edit, no git write, no build, test or program run; its only writes are the report and the inventory file beside it. A brief with no diff to review (compare two patches, grade work, review a plan) returns `BLOCKED: not a diff review` before any call. There is one tier: the script scales the spawn, so the 10,000+ code-line tier is gone.
 
 ## Contents
 
 - [The run](#the-run)
-- [Thread kinds](#thread-kinds)
+- [What each seat checks](#what-each-seat-checks)
 - [Report contract](#report-contract)
-- [Benchmark](#benchmark)
+- [Rules and the runs they rest on](#rules-and-the-runs-they-rest-on)
+- [Model and effort](#model-and-effort)
 - [Open items](#open-items)
 
 ## The run
 
 | Seat | Type, model | Takes | Returns | Cap |
 | --- | --- | --- | --- | --- |
-| lead | `flights:reviewer` or `flights:reviewer-pro`, opus, effort high | the brief: TREE, BASE..HEAD, PATHSPECS, MODE, SANDBOX, claims, `RECALL: {run}` lines; HEAD `WORKTREE` with UNTRACKED | `review.md`, one line | 70 calls |
-| tracer | `flights:tracer` | the thread questions one lead grep did not close, and the body questions past the lead's share | facts with quoted `path:line`, no verdicts | `BUDGET 24` sub-tracers; `flights:reviewer-pro`: up to three runs at `BUDGET 16` |
+| lead | `flights:reviewer`, Opus, effort medium | TREE, BASE, optional HEAD (a sha, or absent for the working tree), PATHSPECS, MODE, INTENT, REPORT_PATH, BUDGET | the report file, one line | 40 calls |
+| diff-checker | `flights:diff-checker`, Opus | one cluster of changed production files with their tests | candidates, each tied to a verbatim line | one per `PLAN DIFF-CHECKER` row, 12 at most |
+| usage-checker | `flights:usage-checker`, Haiku | a range of inventory rows | three-line flags | one per `PLAN USAGE-CHECKER` row, 6 at most |
+| spec-checker | `flights:spec-checker`, Sonnet | a range of a spec's numbered rows | candidates, rows held or not found | one per `PLAN SPEC-CHECKER` row, 4 at most |
 
-- Phase 0 (≤10 calls): the stat, the claims and the production diff (a new file by its surface only — declarations and I/O lines), `threads.md`, and L, the changed production lines plus each UNTRACKED file's line count. The lead hunts the changed functions of up to about 2500 L itself, the files carrying the most CONTRACT, CONCURRENT and HOT PATH threads first; every changed file past that becomes a body question. Every in-diff CONTRACT and multi-field result is the lead's.
-- Phase 1: the thread and body questions go into the tracer run (`flights:reviewer-pro`: the runs, one per area, in one message), each brief carrying the READ-ONLY line, the numbered questions with exact files, symbols and diff lines, a `RECALL: {run}` line per tracer run the brief names (the store answers every question whose cited files are unchanged), and the order to skip CHECK, TESTS and lines to paste; no open thread and no body question means no tracer. The lead runs the § Diff-checker procedure over its share while the run walks and ends its turn when its hunt is done and a run is still out; each return re-invokes it.
-- Phase 2 (≤25 calls): reconcile runs dispatched against returns and questions against answers, by number; close every thread SAFE, UNSAFE or OPEN; break its own SAFEs by re-reading each in-diff CONTRACT, HOT PATH and CONCURRENT thread aimed at what would break it — a fact that contradicts a SAFE reopens it, never a re-argued SAFE; verify every candidate with about 15 lines around it in one `tt show {RUN} {path}:{A}-{B} …` call; rank CRITICAL, HIGH, MEDIUM, LOW.
-- `WORKTREE`: every diff drops HEAD, so tracked edits are read against BASE in the working tree; the claims come from the brief, since there is no commit message; each UNTRACKED file the brief lists is reviewed as a new file, and its line count joins L.
+1. Plan, one call: `lander-inventory.py {TREE} {BASE} {HEAD} --own --cluster-lines 750 --max-diff-checkers 12 --paths … --spec …` writes the inventory (LEFT, LITERAL and GONE rows: what the diff left behind) and the PLAN. A production diff of 400 lines or fewer plans no diff-checker and the whole diff is the lead's; above it, k = min(12, ceil(production lines / 750)) clusters in path order. `PLAN OWN` names the changed files no diff-checker reads: prose, prompts, tests no cluster took.
+2. Spawn, one message: exactly the PLAN rows, all in the background; the lead never adds, drops, merges or re-cuts a row.
+3. The lead's share, while the checkers work: the `PLAN OWN` files and every INTENT claim. Code and tests are read as their diff; a doc or prompt file as its added lines alone (`git diff -U0 … | grep -E '^(\+|@@)'`), each call's output under 28 KB.
+4. Fold and judge: every candidate and flag is verified against its line ±15 on disk before it enters the report; one that does not hold is RULED OUT with the line it falls on; two candidates on one defect are one finding.
+5. The report, then one return line: `{VERDICT} · {n} findings, {k} CRITICAL or HIGH · {COMPLETE|PARTIAL} · REPORT {path}`.
 
-## Thread kinds
+A sha HEAD reviews the commits BASE..HEAD and requires TREE to sit on it (else `BLOCKED: TREE is not at HEAD`); no HEAD reviews everything in TREE that BASE lacks, uncommitted and untracked work included.
 
-| Kind | The question | Caught on the benchmark |
-| --- | --- | --- |
-| CALLERS | every caller outside the diff of a changed signature, return, error or meaning | installer wrapper passing a zero window |
-| READERS | every reader, scanner, cleaner and strict decoder of what the change writes into shared space | a new per-session file every `pfm doctor` run counts as invalid |
-| PARITY | the check that proves an installed or derived value present AND equal to its source | no probe compares the compact window env to its thresholds |
-| CONTRACT | producer ↔ consumer across packages and between two functions of the diff, every return path × field × unset handling | an early return leaves the role empty, rendering `name·` instead of `role ?`; a self-hosted item reported with no diff, no error and no reason |
-| HOT PATH | who invokes an entry point, how often, and what one call costs | a 1–3 s settle wait paid on every model request past the window |
-| EXTERNAL | the payload fields the code assumes vs what the source provides, labelled when unprovable | a zero-usage transcript line resetting the estimate |
-| CONCURRENT | every actor pair, two of the same kind included | the newest-writer guess naming the wrong sub-agent; a link removed by path after the updater renamed a real file onto it |
-| REMOVED | the invariant a deleted line held and where it is re-established | — |
-| CLAIM | each claim sentence and each doc, comment or test name vs the code | a command-line budget raised while the measured count fell |
+## What each seat checks
+
+The lead and each diff-checker read changed functions whole and tie a defect to a verbatim line with its concrete failure. The lead's nine checks: LINES (inverted condition, off-by-one, dropped error), PATHS (each return of a multi-field result against each field its consumer reads), GUARDS (fail open or closed), REMOVED (the invariant a deleted line held), CONCURRENCY and HOT PATH, INPUTS (absent, null, zero, empty), TESTS (drives the production path and would fail without the change), CLAIMS (each INTENT sentence and each doc line stating the changed behaviour, against the code), TWIN DOORS (another implementation of the operation the change leaves unfixed). The usage-checkers follow the inventory rows to their far side; the spec-checkers hold numbered spec rows against the code.
 
 ## Report contract
 
-- The report is `SANDBOX/review.md`: Claude Code refuses a sub-agent's write to any `.md` whose name matches `^(REPORT|SUMMARY|FINDINGS|ANALYSIS).*\.md$` and answers "Subagents should return findings as text".
-- Sections: VERDICT, FINDINGS (`F{n} · severity · path:line · IN-BODY | BETWEEN-HOPS | MISSING · source · CHECKED | UNCHECKED`, a LOW finding one line), THREADS, RULED OUT, TESTS (by reading), COVERAGE and TELEMETRY.
-- Merge-gating: the brief names REPORT_PATH; findings carry `status: open`, a re-review flips a verified fix to `status: resolved @{sha}` and appends new ones; `waived — {ruling}` is the orchestrator's mark.
-- Readers: `gitter` Phase MERGE (project tier) refuses while the file is absent or a finding is open; `/pfm:release` dispatches one `flights:reviewer-pro` over the `pfm-update` area's PATHSPECS with a REPORT_PATH when the cut changes that area. `flights:lander` dispatches no reviewer: it reviews the worktree itself and writes its own report in the gated shape, each finding `status: open` until its fix marks it `status: resolved in {file:line}` ([flights-lander.md](../flights/flights-lander.md)).
+- The report is REPORT_PATH, default `/tmp/{project}/review/{BASE7}-{HEAD7|WORKTREE}.md`. Claude Code refuses a sub-agent's write to a `.md` named `REPORT*`, `SUMMARY*`, `FINDINGS*` or `ANALYSIS*`; such a path returns `BLOCKED: REPORT_PATH refused`.
+- The layout is a literal skeleton the prompt carries: `# Review {range} · {MODE}`, then `## VERDICT`, `## FINDINGS`, `## RULED OUT`, `## TESTS`, `## COVERAGE`, with no numbering or bold on a heading or a finding line.
+- A finding line: `F{n} · severity · path:line · IN-BODY | BETWEEN-HOPS | MISSING · source · CHECKED | UNCHECKED · status: open`, then the quoted line, `Fails:`, `Far side:` when there is one, and `Fix:`; a LOW finding is its line and `Fails:` alone.
+- Verdict by MODE: pre-merge gives MERGE or DO NOT MERGE; post-merge gives KEEP, FIX-FORWARD or REVERT. Any CRITICAL or HIGH finding decides it.
+- Merge-gating: findings carry `status: open`; a re-review of a REPORT_PATH that holds findings keeps every `F{n}`, marks a fixed one `status: resolved @{sha}` and numbers new ones on; `waived — {ruling}` is the caller's mark alone.
+- Readers: `gitter` Phase MERGE refuses while the file is absent or a finding is neither `resolved` nor `waived`; `/pfm:release` dispatches one `flights:reviewer` over the `pfm-update` area's PATHSPECS when the cut changes that area. `flights:lander` dispatches no reviewer: it reviews its worktree itself ([flights-lander.md](../flights/flights-lander.md)).
 
-## Benchmark
+## Rules and the runs they rest on
 
-Each rung is a past commit whose shipped defects later fix commits proved; a blind `opus` grader with hidden labels scores a review against the rung's key (FULL 1, PARTIAL 0.5) and checks every finding against the tree. Score = (0.6 × keys/K + 0.4 × min(1, valid/10)) ÷ USD per run, USD being the whole run, tracers included, from `pfm tokens`. Run-to-run spread of one version reaches 0.11 on a rung; a gain under it counts as a tie, and context tokens vary about ±30% between runs of one prompt.
+Every row cites [reviewer-bench.md](reviewer-bench.md).
 
-- R1: a 40-file Go commit (+2820/−177: per-party auto-compact thresholds, a PreCompact gate, a sub-agent statusline), reviewed pre-merge. Key: D1 the gate judges the wrong party, D2 no check proves the window env equals its thresholds, D3 a settle wait paid per request, D4 an empty role on an early return, D5 doctor warning on a new per-session file. A version replacing `flights:reviewer` must keep an R1 mean of at least 4/5.
-- R2: a 503-line installer change that re-clones source-fetched skill stores; ten defects, three of them hostile input (a symlinked commit record in the clone, a `Stat` that follows a symlinked `SKILL.md`, git discovering a repo past the store).
-- R3: a 42-file commit that made project files track upstream (render plus an upstream-diff report); five defects — three hostile input (a render through a symlinked path, an inherited `GIT_DIR` steering the diff, the user's textconv drivers), one early return (an item reported with no diff, no error and no reason), one other.
-- R4: a 78-file commit (account links surviving Claude's updater, a login default) with distractor hunks; seven defects — two hostile input (a write through a symlinked startup file, a remove by path racing the updater), one early return, four others.
-- WT: R3's change applied uncommitted, six of its 42 files untracked, reviewed with HEAD `WORKTREE`.
+| Rule | Why | Bench row |
+| --- | --- | --- |
+| A script computes the spawn; the lead spawns exactly its rows | two runs on one diff spawn alike, and the cut costs no model call | version 1, all rungs |
+| The lead reads `PLAN OWN` only, never the whole diff | a cluster's files are its checker's; a lead that also read them paid twice | version 1, the 2,200- and 5,480-line rungs |
+| No tracer | the tracer-led reviewer took 4 to 8 times longer and deadlocked on the 5,480-line rung without a report | the old reviewer, the 5,480-line rung |
+| Diff-checkers explore their cluster themselves, on Opus | checkers fed a prepared pack found the planted defects and little else, and cost more | versions 2 and 3 |
+| Clusters of 750 lines, 12 at most | the lander's 600 and 4 fit a landing; 12 covers the range the removed pro tier served | version 1; a diff past 9,000 production lines is unbenched |
+| Doc and prompt files are read as added lines alone | a doc diff prints the old and the new long line; the lead's share fell from $1.46 to $0.92 on the 2,200-line rung | version 4 |
+| The report is a literal skeleton | version 1 wrote finding lines in three forms and headings in two; version 4 held the skeleton in 3 of 3 reports | version 4 |
+| Every candidate is verified on disk before it is a finding | 0 false findings in the 2 graded version 4 reports | version 4 |
+
+## Model and effort
+
+The lead is Opus at effort medium, as benched; the checkers keep the lander's pins (Opus, Sonnet, Haiku). Sonnet diff readers lost on the lander's bench (9.5 to 12 of 14 planted defects, never the blocking one), so Opus reads. The lead on Sonnet and the lead at another effort are unbenched.
 
 ## Open items
 
-- D4 — a contract broken by an early return that leaves a field empty — is the key the lead most often clears: it reads the empty value and judges it harmless.
-- A Haiku sub-tracer once created an empty `.hops-tmp-none` inside TREE (`cat > {TREE}/.hops-tmp-none; rm -f …` before its `tracetree write`), a write the tracer brief forbids; in a lander's worktree it surfaces as an untracked stray in the change. The fix belongs to `flights:tracer`'s sub-tracer, not to the reviewer prompt.
-- The lead is about 60% of a run's cost; every cheaper lead tried (Sonnet, effort medium) lost R1 recall.
-- `flights:tracer` carries test homes and the check command by default; a review brief asks it to skip them.
+- Unbenched: a diff past 10,000 lines; a second repository; a commit range (a sha HEAD) and PATHSPECS, which the script's tests cover but no paid run did; the re-review of a report that holds findings; cluster sizes other than 750; the lead on Sonnet.
+- The defects every version misses are seam defects whose proof is a line on the far side of a call (a wrong field read by a consumer in another package): the old reviewer, the lander's review and every version here missed the same one on the 648-line rung.
+- Planted defects are saturated on the largest rung (12 to 14 of 14 in every shape); the unplanted real defects are not: nine graded runs of that rung found 16 distinct ones, half of them reported by one run alone, so a single review finds 2 to 5 of an estimated 21 to 26.

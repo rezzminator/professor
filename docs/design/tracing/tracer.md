@@ -95,7 +95,7 @@ Each rule holds in the prompts or the kit today; the clause after it is why.
 
 ### The caller
 
-`/flights:tracer-use` is the caller's manual, `plugins/flights/plugins/flights/skills/tracer-use/SKILL.md`: agent frontmatter `skills: [flights:tracer-use]` preloads it into `flights:reviewer`, `flights:reviewer-pro` and `clone-distiller`, none of which needs the `Skill` tool for it, and its `MANDATORY` description routes the main chat to it. It has the caller:
+`/flights:tracer-use` is the caller's manual, `plugins/flights/plugins/flights/skills/tracer-use/SKILL.md`: agent frontmatter `skills: [flights:tracer-use]` preloads it into `clone-distiller`, which needs no `Skill` tool for it, and its `MANDATORY` description routes the main chat to it. It has the caller:
 
 - trace code it will change, judge or brief on and has not read: a quick overview of file and symbol names, then one spawn of numbered fact questions in the terms of its next move, never a survey and never a closed-world door list; a run its brief hands it is drilled before it traces more;
 - add a `RECALL: {run}` line per tracer run it holds: tracer reads those runs first, and a question whose cited files are unchanged since they were walked comes back from the store with no walk;
@@ -107,7 +107,7 @@ Each rule holds in the prompts or the kit today; the clause after it is why.
 - send a question the run does not settle back to tracer before calling it unsettled, and never re-ask a fact the final cites;
 - cite the repository's `path:line` in a tracked file, never the run, which is scratch.
 
-A flights foreman calls no tracer and spawns no child: its definitions list no `Agent` tool, and a tracer reading first cost it +85% and +39% dollars in the bench ([flights-foreman-bench.md](../flights/flights-foreman-bench.md#versions)); the main chat may pass a tracer run path in a foreman's brief. `flights:reviewer` puts every question that leaves its own reading into one tracer run, `flights:reviewer-pro` into at most three, one per area, each brief carrying the `RECALL` lines and told to skip CHECK, TESTS and lines to paste. `clone-distiller` sends the code part of every question about an external clone to one tracer, its prompt naming the clone read-only, runs the history commands itself and drops CHECK and TESTS.
+A flights foreman calls no tracer and spawns no child: its definitions list no `Agent` tool, and a tracer reading first cost it +85% and +39% dollars in the bench ([flights-foreman-bench.md](../flights/flights-foreman-bench.md#versions)); the main chat may pass a tracer run path in a foreman's brief. `flights:reviewer` calls no tracer: its tracer-led version deadlocked on a 5,480-line diff and took 4 to 8 times longer ([reviewer-bench.md](../review/reviewer-bench.md#negative-results)). `clone-distiller` sends the code part of every question about an external clone to one tracer, its prompt naming the clone read-only, runs the history commands itself and drops CHECK and TESTS.
 
 ## Harness behaviour
 

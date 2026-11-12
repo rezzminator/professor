@@ -61,3 +61,16 @@ func serviceStarts(c *harness.Ctx) string {
 func serviceDefinitions(c *harness.Ctx) string {
 	return read(c, "sh", "-c", `for f in "$HOME"/.config/systemd/user/pfm-*; do printf '== %s\n' "$f"; cat "$f"; done`)
 }
+
+// jobsRunning is the name-sync and schedule jobs that are mid-run, "" when both are at rest: an install
+// started beside a running one is refused, so a step that installs waits for "" first.
+func jobsRunning(c *harness.Ctx) string {
+	var running []string
+	for _, unit := range []string{"pfm-name-sync.service", "pfm-schedule.service"} {
+		state := strings.TrimSpace(read(c, "systemctl", "--user", "show", "--property=ActiveState", "--value", unit))
+		if state != "inactive" && state != "failed" {
+			running = append(running, unit+" "+state)
+		}
+	}
+	return strings.Join(running, "\n")
+}

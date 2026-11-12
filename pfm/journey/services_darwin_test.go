@@ -78,3 +78,16 @@ func serviceDefinitions(c *harness.Ctx) string {
 	return read(c, "sh", "-c", `for f in "$HOME"/Library/LaunchAgents/com.professor.pfm.*.plist; do
 printf '== %s\n' "$f"; cat "$f"; done; shasum -a 256 "$1"`, "sh", agent)
 }
+
+// jobsRunning is the name-sync and schedule jobs that are mid-run, "" when both are at rest: an install
+// started beside a running one is refused, so a step that installs waits for "" first.
+func jobsRunning(c *harness.Ctx) string {
+	var running []string
+	for _, label := range []string{"com.professor.pfm.name-sync", "com.professor.pfm.schedule"} {
+		out := read(c, "sh", "-c", `launchctl print "gui/$(id -u)/$1" 2>/dev/null || true`, "sh", label)
+		if strings.Contains(out, "state = running") {
+			running = append(running, label+" running")
+		}
+	}
+	return strings.Join(running, "\n")
+}

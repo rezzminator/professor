@@ -58,6 +58,10 @@ func installAgain(c *harness.Ctx, s State) State {
 			swapBinary(c, s)
 			second = time.Now()
 		}
+		c.Poll("pfm's name-sync and schedule jobs at rest before "+label, 20*time.Second, func() (bool, string) {
+			running := jobsRunning(c)
+			return running == "", running
+		})
 		out := filepath.Join(s.Home, label+".out")
 		code := shellRun(
 			term,

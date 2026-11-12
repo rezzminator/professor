@@ -1,6 +1,7 @@
 package mockengine
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 	"time"
@@ -82,5 +83,25 @@ func TestPaneCodexPlaceholderStyling(t *testing.T) {
 		if strings.Contains(other, "\x1b[2m") {
 			t.Fatalf("%s composer gained SGR: %q", glyph, other)
 		}
+	}
+}
+
+func TestPaintWritesAFrameOnlyWhenItChanged(t *testing.T) {
+	var out bytes.Buffer
+	screen := &pane{glyph: "❯"}
+	loop := &paneLoop{proc: &process{stdout: &out, stderr: &bytes.Buffer{}}, screen: screen}
+	screen.say("> hello")
+	first := screen.render()
+	loop.paint()
+	loop.paint()
+	if got := out.String(); got != first {
+		t.Fatalf("two paints of one frame wrote %q, want the frame once %q", got, first)
+	}
+	screen.footer = claudeBusyLine(time.Second, Tokens{})
+	second := screen.render()
+	loop.paint()
+	loop.paint()
+	if got := out.String(); got != first+second {
+		t.Fatalf("a changed frame painted twice wrote %q, want %q", got, first+second)
 	}
 }

@@ -495,6 +495,34 @@ func TestProvedListingReadsAgainWhenItsSnapshotIsStale(t *testing.T) {
 			},
 			want: "lost HERDR DEAD chat: pane closed; saved supervisor 20 has not exited cwd= terminal= supervisor=20",
 		},
+		{
+			name: "a pane answering with no shell while its supervisor runs is asked again", snapshot: paneListed, host: 20,
+			socket: func(t *testing.T) string {
+				info, asked := map[string]any{"pane_id": "w1:p1", "shell_pid": 0}, 0
+				socket, _ := herdrOwnershipSocketInfo(t, `{"result":`+paneListed+`}`, info, func() {
+					asked++
+					if asked > 1 {
+						info["shell_pid"] = 10
+					}
+				})
+				return socket
+			},
+			want: "live <nil> cwd=/jail/chat terminal=its-terminal supervisor=20",
+		},
+		{
+			name: "a pane answering for another pane while its supervisor runs is asked again", snapshot: paneListed, host: 20,
+			socket: func(t *testing.T) string {
+				info, asked := map[string]any{"pane_id": "w2:p1", "shell_pid": 10}, 0
+				socket, _ := herdrOwnershipSocketInfo(t, `{"result":`+paneListed+`}`, info, func() {
+					asked++
+					if asked > 1 {
+						info["pane_id"] = "w1:p1"
+					}
+				})
+				return socket
+			},
+			want: "live <nil> cwd=/jail/chat terminal=its-terminal supervisor=20",
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			ctx := context.Background()

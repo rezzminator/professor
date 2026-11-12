@@ -102,23 +102,32 @@ var errHerdrSeatUnbound = errors.New("supervisor ownership unproved")
 var errHerdrBirthFailed = errors.New("birth failed: no pane within the birth window")
 
 // herdrShellGone settles a proof whose pane answered with no shell: nil once
-// the seat's saved supervisor is positively dead (the chat exited during this
-// proof and Herdr still lists its closing pane), else the refusal. answered
-// says the answer was for the seat's own pane.
+// the seat's saved supervisor is positively dead and the answer was for the
+// seat's own pane (the chat exited during this proof and Herdr still lists its
+// closing pane), else the refusal. answered says the answer was for the seat's
+// own pane.
 func herdrShellGone(proc ProcFS, seat fleetdb.Seat, answered bool) error {
 	unavailable := fmt.Errorf("seat %s ownership shell identity unavailable", seat.SeatID)
-	if !answered || seat.SeatHostPID <= 0 || seat.SeatHostStart == 0 {
+	if seat.SeatHostPID <= 0 || seat.SeatHostStart == 0 {
 		return unavailable
 	}
 	dead, err := HerdrHostDead(proc, seat)
 	if err != nil {
 		return errors.Join(unavailable, err)
 	}
-	if dead {
+	if !dead {
+		return fmt.Errorf("%w: %w", unavailable, errHerdrShellUnread)
+	}
+	if answered {
 		return nil
 	}
 	return unavailable
 }
+
+// errHerdrShellUnread: Herdr answered with no shell, or for another pane, while
+// the seat's saved supervisor runs: an answer taken between two of the pane's
+// processes, or for a pane id a move replaced; the listing asks once more.
+var errHerdrShellUnread = errors.New("its supervisor still runs")
 
 // errHerdrPaneAbsent: Herdr lists no pane holding the seat's pane or terminal.
 var errHerdrPaneAbsent = errors.New("terminal not present in pane.list")
@@ -218,7 +227,7 @@ func settleHerdrRow(
 	prove func(fleetdb.Seat) (fleetdb.Seat, bool, error),
 ) (fleetdb.Seat, bool, error) {
 	canonical, owned, err := settleHerdrProof(ctx, db, row.Seat, prove)
-	if !errors.Is(err, errHerdrPaneAbsent) && !herdr.PaneGone(err) {
+	if !errors.Is(err, errHerdrPaneAbsent) && !errors.Is(err, errHerdrShellUnread) && !herdr.PaneGone(err) {
 		return canonical, owned, err
 	}
 	directories, snapshot, probeErr := probeHerdrPanes(ctx, row.Seat.HerdrSocket)

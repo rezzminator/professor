@@ -163,12 +163,24 @@ type paneLoop struct {
 	usage     Tokens
 	exiting   bool
 	exitCode  int
+	// painted is the frame on the screen now.
+	painted string
 }
 
+// paint draws the screen when it changed: a frame equal to the one showing is
+// not written again, so a busy turn's 50 ms tick clears and redraws the pane
+// once a second, with its counter, and a capture between two ticks reads a
+// whole frame.
 func (loop *paneLoop) paint() {
-	if _, err := loop.proc.stdout.Write([]byte(loop.screen.render())); err != nil {
-		warn(loop.proc.stderr, "paint: %v", err)
+	frame := loop.screen.render()
+	if frame == loop.painted {
+		return
 	}
+	if _, err := loop.proc.stdout.Write([]byte(frame)); err != nil {
+		warn(loop.proc.stderr, "paint: %v", err)
+		return
+	}
+	loop.painted = frame
 }
 
 // refreshStatus re-runs the statusline and returns the line now shown; a run

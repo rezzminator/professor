@@ -26,12 +26,9 @@ func OpenStateFile(dir, name string, flag int, what string) (*os.File, error) {
 	if err := stateFileOwner(directory, true, what); err != nil {
 		return nil, errors.Join(err, directory.Close())
 	}
-	fd, openErr := unix.Openat(
-		int(directory.Fd()),
-		name,
-		flag|unix.O_NOFOLLOW|unix.O_CLOEXEC|unix.O_NONBLOCK,
-		0o600,
-	)
+	fd, openErr := openCreating(flag, func() (int, error) {
+		return unix.Openat(int(directory.Fd()), name, flag|unix.O_NOFOLLOW|unix.O_CLOEXEC|unix.O_NONBLOCK, 0o600)
+	})
 	closeErr := directory.Close()
 	if openErr != nil {
 		return nil, errors.Join(fmt.Errorf("open %s: %w", what, openErr), closeErr)
@@ -44,6 +41,27 @@ func OpenStateFile(dir, name string, flag int, what string) (*os.File, error) {
 		return nil, errors.Join(err, file.Close())
 	}
 	return file, nil
+}
+
+// createAttempts bounds openCreating: the creating open is asked this often.
+const createAttempts = 3
+
+// openCreating runs open, a creating open when flag holds O_CREATE, and asks
+// again while it answers "no such file": two processes creating one file at
+// the same moment can leave the loser with that answer on macOS, though the
+// file is there an instant later. A directory that is really gone answers it
+// on every attempt, and an open that creates nothing is asked once.
+func openCreating(flag int, open func() (int, error)) (fd int, err error) {
+	attempts := 1
+	if flag&os.O_CREATE != 0 {
+		attempts = createAttempts
+	}
+	for range attempts {
+		if fd, err = open(); !errors.Is(err, unix.ENOENT) {
+			break
+		}
+	}
+	return fd, err
 }
 
 func stateFileOwner(file *os.File, directory bool, what string) error {

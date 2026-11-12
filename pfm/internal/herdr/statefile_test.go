@@ -95,6 +95,49 @@ func TestOpenStateFile(t *testing.T) {
 	}
 }
 
+// A creating open that loses a same-moment create to another process answers
+// "no such file" once and is asked again; an open that creates nothing, a
+// directory that stays gone and any other error end where they stand.
+func TestOpenCreating(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		flag      int
+		answers   []error
+		wantCalls int
+		wantErr   error
+	}{
+		{"a first answer is kept", os.O_CREATE | os.O_RDWR, []error{nil}, 1, nil},
+		{"a lost create is asked again", os.O_CREATE | os.O_RDWR, []error{syscall.ENOENT, syscall.ENOENT, nil}, 3, nil},
+		{
+			"a directory that stays gone ends absent", os.O_CREATE | os.O_RDWR,
+			[]error{syscall.ENOENT, syscall.ENOENT, syscall.ENOENT, nil},
+			3, syscall.ENOENT,
+		},
+		{"an open that creates nothing is asked once", os.O_RDONLY, []error{syscall.ENOENT, nil}, 1, syscall.ENOENT},
+		{"another error is not asked again", os.O_CREATE | os.O_RDWR, []error{syscall.ELOOP, nil}, 1, syscall.ELOOP},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			calls := 0
+			fd, err := openCreating(test.flag, func() (int, error) {
+				answer := test.answers[calls]
+				calls++
+				if answer != nil {
+					return -1, answer
+				}
+				return 7, nil
+			})
+			wantFD := 7
+			if test.wantErr != nil {
+				wantFD = -1
+			}
+			if calls != test.wantCalls || err != test.wantErr || fd != wantFD {
+				t.Fatalf("openCreating = fd %d, err %v after %d call(s), want fd %d, err %v after %d",
+					fd, err, calls, wantFD, test.wantErr, test.wantCalls)
+			}
+		})
+	}
+}
+
 // protected makes dir (created when missing) a directory only its owner can write.
 func protected(t *testing.T, dir string) string {
 	t.Helper()

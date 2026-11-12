@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Frontmatter + description-budget gate over every tracked markdown file.
 #
-# Why a gate and not a rule: `/description:use` states the law, but a prompt
+# Why a gate and not a rule: `/law:description` states the law, but a prompt
 # rule cannot detect a `description:` whose unquoted `: ` breaks the YAML — the
 # Claude Code parser is lenient and registers the command anyway, while a
 # stricter runtime silently drops it. `rumdl check` does not look at frontmatter
@@ -16,7 +16,7 @@ set -euo pipefail
 #   exit 1  at least one frontmatter does not parse (the failure it exists for)
 #   exit 0  every frontmatter parses; the budget ledger is INFO only
 #
-# The char budget is reported, never enforced: `/description:use` § Budget
+# The char budget is reported, never enforced: `/law:description` § Budget
 # allows a justified 400-char tier, and a justification is not machine-readable.
 
 usage() {

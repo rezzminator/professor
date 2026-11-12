@@ -3,6 +3,12 @@ package action
 import (
 	"errors"
 	"fmt"
+	"os"
+
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 )
 
 // The two thread verbs a Codex launch can carry after the override words.
@@ -56,4 +62,33 @@ func hasUnsafeCodexID(id string) bool {
 		}
 	}
 	return false
+}
+
+// codexSeatRun retains argv and account environment without a shell or the cx launcher.
+func codexSeatRun(
+	machine pfmconfig.Config, account int, envs map[string]string, cwd string, args ...string,
+) *fleetdb.SeatRun {
+	env := []string{}
+	if selected, found := machine.CodexAccountByID(account); found {
+		env = append(env, "CODEX_HOME="+selected.Home)
+	}
+	launch := claudelaunch.Launch{
+		Env:   claudelaunch.WithEnvs(envs, env),
+		Unset: append(append([]string{}, hygieneNames...), "CODEX_HOME"),
+	}
+	arguments := append(codexAutonomyArgs(machine.EffectiveCodex(account).Yolo), args...)
+	return &fleetdb.SeatRun{
+		Binary: codexBinaryWord(machine, account),
+		Args:   arguments,
+		Env:    claudelaunch.RunEnvironment(os.Environ(), launch),
+		CWD:    cwd,
+	}
+}
+
+func codexAutonomyArgs(yolo bool) []string {
+	args := []string{pfmengine.CodexNoDaemon}
+	if yolo {
+		return append(args, "--dangerously-bypass-approvals-and-sandbox")
+	}
+	return append(args, "--sandbox", "workspace-write")
 }

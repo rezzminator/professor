@@ -1,6 +1,6 @@
 # The live tier as a journey tree
 
-How [`/integration-suite:use`](../../../templates/global/commands/integration-suite/use.md) designs the live tier, and why: one tree of small owner steps, typed or clicked into the installed product on a disposable machine, branches running together, a failed step blocking only what grows from it. The unit and hermetic tiers and the validity law are unchanged; [laws.md](laws.md) and [validity.md](validity.md) hold their reasoning, read with the vocabulary of § What it replaced.
+How [`/design:test-suite`](../../../templates/global/commands/design/test-suite.md) designs the live tier, and why: one tree of small owner steps, typed or clicked into the installed product on a disposable machine, branches running together, a failed step blocking only what grows from it. The unit and hermetic tiers and the validity law are unchanged; [laws.md](laws.md) and [validity.md](validity.md) hold their reasoning, read with the vocabulary of § What it replaced.
 
 ## Contents
 

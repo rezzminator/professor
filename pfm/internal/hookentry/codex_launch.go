@@ -145,7 +145,7 @@ func CodexLaunch(args []string, stderr io.Writer, runtime config.Runtime) int {
 	if policy.Yolo {
 		argv = append(argv, "--dangerously-bypass-approvals-and-sandbox")
 	}
-	personaArgs, err := codexWorkbenchArgs(args, runtime.Paths.Home, stderr)
+	personaArgs, envs, err := codexWorkbenchArgs(args, runtime.Paths.Home, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "launch Codex: %v\n", err)
 		return 1
@@ -156,6 +156,9 @@ func CodexLaunch(args []string, stderr io.Writer, runtime config.Runtime) int {
 	for _, name := range claudelaunch.Hygiene() {
 		unset[name] = true
 	}
+	for name := range envs {
+		unset[name] = true
+	}
 	env := make([]string, 0, len(os.Environ()))
 	for _, entry := range os.Environ() {
 		name, _, _ := strings.Cut(entry, "=")
@@ -163,6 +166,7 @@ func CodexLaunch(args []string, stderr io.Writer, runtime config.Runtime) int {
 			env = append(env, entry)
 		}
 	}
+	env = claudelaunch.WithEnvs(envs, env)
 	if !codexRunsAsInteractiveChat(args) {
 		// A subcommand or a non-interactive turn is never the chat bound to the pane: its hooks must
 		// not find the parent's Herdr pane, by Herdr name or by tmux pane.
@@ -175,21 +179,21 @@ func CodexLaunch(args []string, stderr io.Writer, runtime config.Runtime) int {
 	return 0
 }
 
-// codexWorkbenchArgs is the persona's Codex arguments. A part that cannot be
-// resolved is left out with a warning and the launch goes on; only a workbench
-// that does not enable Codex refuses it.
-func codexWorkbenchArgs(args []string, home string, stderr io.Writer) ([]string, error) {
+// codexWorkbenchArgs is the persona's Codex arguments and the adopter
+// settings' envs. A part that cannot be resolved is left out with a warning
+// and the launch goes on; only a workbench that does not enable Codex refuses it.
+func codexWorkbenchArgs(args []string, home string, stderr io.Writer) ([]string, map[string]string, error) {
 	const prefix = "launch Codex"
 	cwd, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintf(stderr, "%s: resolve cwd (%v); launching without a workbench persona\n", prefix, err)
-		return nil, nil
+		return nil, nil, nil
 	}
 	mode := workbench.New
 	var model, effort, prompt bool
 	for _, arg := range args {
 		if codexPassthrough[arg] {
-			return nil, nil
+			return nil, nil, nil
 		}
 		if codexSessionSubcommands[arg] {
 			mode = workbench.Resume
@@ -198,13 +202,13 @@ func codexWorkbenchArgs(args []string, home string, stderr io.Writer) ([]string,
 		effort = effort || strings.Contains(arg, "model_reasoning_effort=")
 		prompt = prompt || strings.Contains(arg, "developer_instructions=")
 	}
-	persona, warnings, err := action.LaunchPersona(cwd, pfmengine.Codex, mode)
+	persona, warnings, err := action.LaunchPersona(cwd, home, pfmengine.Codex, mode)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	launchnotice.Print(stderr, prefix, append(warnings, action.PersonaMirror(persona, pfmengine.Codex, home)...))
 	if !persona.Applies() {
-		return nil, nil
+		return nil, persona.Envs, nil
 	}
 	var inserted []string
 	if persona.Model != "" && !model {
@@ -221,5 +225,5 @@ func codexWorkbenchArgs(args []string, home string, stderr io.Writer) ([]string,
 	if !prompt {
 		inserted = append(inserted, action.CodexDeveloperInstructionsArg(persona.Body)...)
 	}
-	return inserted, nil
+	return inserted, persona.Envs, nil
 }

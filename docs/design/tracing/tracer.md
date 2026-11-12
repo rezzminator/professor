@@ -1,6 +1,6 @@
 # tracer
 
-`flights:tracer` answers a caller's numbered questions about a repository from its code, in prose: each fact a `path:line` with the line quoted, plus test homes, the check command and NOT READ. A `sonnet` lead looks wide once and cuts the questions into threads; `haiku` `flights:sub-tracer` agents walk each thread hop by hop and split where it forks; the `tracetree` kit stores each node's hops once, re-reads every quoted line from disk and maps the components; the caller sends its questions and works the finished run by `/flights:tracer-use`. Exact text without a question goes to `collector`.
+`flights:tracer` answers a caller's numbered questions about a repository from its code, in prose: each fact a `path:line` with the line quoted, plus test homes, the check command and NOT READ. A `sonnet` lead looks wide once and cuts the questions into threads; `haiku` `flights:sub-tracer` agents walk each thread hop by hop and split where it forks; the `tracetree` kit stores each node's hops once, re-reads every quoted line from disk and maps the components; the caller sends its questions and works the finished run by `/flights:trace-guide`. Exact text without a question goes to `collector`.
 
 The kit's commands, check states and run directory are in [tracetree.md](tracetree.md); every measurement a rule below cites is in [tracer-bench.md](tracer-bench.md).
 
@@ -22,7 +22,7 @@ The kit's commands, check states and run directory are in [tracetree.md](tracetr
 | Lead | `plugins/flights/plugins/flights/agents/tracer.md` | `sonnet`, `high` |
 | Reader | `plugins/flights/plugins/flights/agents/sub-tracer.md` | `haiku`, `low` |
 | Kit | `plugins/flights/plugins/flights/skills/tracetree/` (the internal skill `flights:tracetree`): `tracetree.py`, `tracemap.py`, `tracemap_html.py`, `loom.py`, the `loom*.html` and `book*.html` page parts with `loom.css`, `SKILL.md`; its tests are `tests/test_tracetree.py` in the flights repo, run by its `make test` | — |
-| Caller's manual | `plugins/flights/plugins/flights/skills/tracer-use/SKILL.md` (the skill `/flights:tracer-use`), preloaded by agent frontmatter `skills: [flights:tracer-use]` | — |
+| Caller's manual | `plugins/flights/plugins/flights/skills/trace-guide/SKILL.md` (the skill `/flights:trace-guide`), preloaded by agent frontmatter `skills: [flights:trace-guide]` | — |
 
 `flights:sub-tracer` (`visible-to: include: [flights:tracer, flights:sub-tracer]`) and the `flights:tracetree` skill are visible only to `flights:tracer` and `flights:sub-tracer`. In the prompts, `tt` stands for `python3 ${CLAUDE_PLUGIN_ROOT}/skills/tracetree/tracetree.py`; `${CLAUDE_PLUGIN_ROOT}` is the flights plugin's own folder, which engine-sync writes as an absolute path in the Codex and OpenCode twins.
 
@@ -41,7 +41,7 @@ The tree pays where a brief makes one agent carry much code: on B4 it cost 29% l
 5. `tt wait` returns once every named and every started node has written and the run has been quiet 15 s. It prints the WARNINGS block, the answers view of the named nodes and their children, COUNTS, the `MAP` line and the OPEN block.
 6. After each wait the lead drills at most twice (`tt check --hops {ID}`, a node once), runs at most one gap round, reads what stays open through `tt read`, and writes the final.
 7. The final: the WARNINGS lines, if any; the answers by the brief's question numbers; `CHECK`, `TESTS`, `NOT READ`; the last wait's `MAP` line; `RUN {RUN} · {COUNTS}` with a runnable `check --hops | grep` command.
-8. While the tree walks, the caller works on what no question covers. The final is its answer: it relays the WARNINGS lines and, by `/flights:tracer-use`, asks the run before it asks tracer again or writes a NOT READ item as unsettled.
+8. While the tree walks, the caller works on what no question covers. The final is its answer: it relays the WARNINGS lines and, by `/flights:trace-guide`, asks the run before it asks tracer again or writes a NOT READ item as unsettled.
 
 ## Host check
 
@@ -90,12 +90,12 @@ Each rule holds in the prompts or the kit today; the clause after it is why.
 - Facts come from unflagged answer lines, hops and the lead's own reads; a list claim names each item, or counts them and names the exceptions. The single-agent body wrote "all 12 catches give X" when 5 did not.
 - It always carries test homes, the check command and anchors. Fenced lines come only when the brief asks for quotes or writes task files, copied from `--full` with `path:A-B` above: probe 1's 2,903 fenced characters went unused.
 - NOT READ copies the last wait's unsettled OPEN lines with their suffix, and gives each sub-ask of the lead's own a next step: `run: node {ID}` only for what a drill left open or a node past the two drills of a wait, else `ask: {question}`. Probe 2's caller called 4 of 8 open items unsettled while the run held parts of 2; in probe 3, 12 of 34 items carried no next step.
-- The last two lines are the `MAP` line and `RUN {RUN} · {COUNTS} — before another tracer question or writing a NOT READ item as unsettled: … check {RUN} --hops | grep -n '{symbol}' shows what this run verified, and the same check with `--hops {ID}` drills a marked node; /flights:tracer-use has the rest`. The callers of probes 2 and 3 never loaded the skill a pointer named; a runnable command needs no skill.
+- The last two lines are the `MAP` line and `RUN {RUN} · {COUNTS} — before another tracer question or writing a NOT READ item as unsettled: … check {RUN} --hops | grep -n '{symbol}' shows what this run verified, and the same check with `--hops {ID}` drills a marked node; /flights:trace-guide has the rest`. The callers of probes 2 and 3 never loaded the skill a pointer named; a runnable command needs no skill.
 - A wake after the final is answered with the final again, unchanged: a late wake's reply replaces the final, and on v4 the lead rewrote it at 18K output tokens.
 
 ### The caller
 
-`/flights:tracer-use` is the caller's manual, `plugins/flights/plugins/flights/skills/tracer-use/SKILL.md`: agent frontmatter `skills: [flights:tracer-use]` preloads it into `flights:reviewer`, `flights:reviewer-pro` and `clone-distiller`, none of which needs the `Skill` tool for it, and its `MANDATORY` description routes the main chat to it. It has the caller:
+`/flights:trace-guide` is the caller's manual, `plugins/flights/plugins/flights/skills/trace-guide/SKILL.md`: agent frontmatter `skills: [flights:trace-guide]` preloads it into `clone-distiller`, which needs no `Skill` tool for it, and its `MANDATORY` description routes the main chat to it. It has the caller:
 
 - trace code it will change, judge or brief on and has not read: a quick overview of file and symbol names, then one spawn of numbered fact questions in the terms of its next move, never a survey and never a closed-world door list; a run its brief hands it is drilled before it traces more;
 - add a `RECALL: {run}` line per tracer run it holds: tracer reads those runs first, and a question whose cited files are unchanged since they were walked comes back from the store with no walk;
@@ -107,7 +107,7 @@ Each rule holds in the prompts or the kit today; the clause after it is why.
 - send a question the run does not settle back to tracer before calling it unsettled, and never re-ask a fact the final cites;
 - cite the repository's `path:line` in a tracked file, never the run, which is scratch.
 
-A flights foreman calls no tracer and spawns no child: its definitions list no `Agent` tool, and a tracer reading first cost it +85% and +39% dollars in the bench ([flights-foreman-bench.md](../flights/flights-foreman-bench.md#versions)); the main chat may pass a tracer run path in a foreman's brief. `flights:reviewer` puts every question that leaves its own reading into one tracer run, `flights:reviewer-pro` into at most three, one per area, each brief carrying the `RECALL` lines and told to skip CHECK, TESTS and lines to paste. `clone-distiller` sends the code part of every question about an external clone to one tracer, its prompt naming the clone read-only, runs the history commands itself and drops CHECK and TESTS.
+A flights foreman calls no tracer and spawns no child: its definitions list no `Agent` tool, and a tracer reading first cost it +85% and +39% dollars in the bench ([flights-foreman-bench.md](../flights/flights-foreman-bench.md#versions)); the main chat may pass a tracer run path in a foreman's brief. `flights:reviewer` calls no tracer: its tracer-led version deadlocked on a 5,480-line diff and took 4 to 8 times longer ([reviewer-bench.md](../review/reviewer-bench.md#negative-results)). `clone-distiller` sends the code part of every question about an external clone to one tracer, its prompt naming the clone read-only, runs the history commands itself and drops CHECK and TESTS.
 
 ## Harness behaviour
 

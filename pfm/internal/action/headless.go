@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"slices"
 	"strings"
 	"unicode/utf8"
@@ -51,6 +50,8 @@ type HeadlessRequest struct {
 	// quality nobody chose.
 	Model  string
 	Effort string
+	// Envs are the adopter settings' envs the persona read carried.
+	Envs map[string]string
 }
 
 // claudeEfforts is the roster claude's own --help states. An unknown value is
@@ -203,7 +204,7 @@ func PlanClaude(request HeadlessRequest) (HeadlessPlan, error) {
 		Purpose: PurposeInteractive, Account: request.PrimaryAccount,
 		Cache1H: request.Cache1H, SessionID: id, Name: request.Name,
 		Model: request.Model, Effort: effort, Args: arguments, Home: request.Home,
-		Machine: machine, PromptFile: request.PromptChannel,
+		Machine: machine, PromptFile: request.PromptChannel, Envs: request.Envs,
 	}
 	run, err := spawn.ShellCommand()
 	if err != nil {
@@ -256,35 +257,17 @@ func PlanCodex(request HeadlessRequest) (HeadlessPlan, error) {
 		return HeadlessPlan{}, err
 	}
 	return HeadlessPlan{
-		Engine: pfmengine.Codex, SeatRun: codexSeatRun(machine, request.PrimaryAccount, request.CWD, arguments...),
-		Run:       codexCommandWithAccount(headlessHygiene, machine, request.PrimaryAccount, arguments...),
+		Engine:  pfmengine.Codex,
+		SeatRun: codexSeatRun(machine, request.PrimaryAccount, request.Envs, request.CWD, arguments...),
+		Run: codexCommandWithAccount(
+			headlessHygiene,
+			machine,
+			request.PrimaryAccount,
+			request.Envs,
+			arguments...),
 		Binary:    codexBinaryWord(machine, request.PrimaryAccount),
 		CodexHome: account.Home,
 	}, nil
-}
-
-// codexSeatRun retains argv and account environment without a shell or the cx launcher.
-func codexSeatRun(machine pfmconfig.Config, account int, cwd string, args ...string) *fleetdb.SeatRun {
-	env := []string{}
-	if selected, found := machine.CodexAccountByID(account); found {
-		env = append(env, "CODEX_HOME="+selected.Home)
-	}
-	launch := claudelaunch.Launch{Env: env, Unset: append(append([]string{}, hygieneNames...), "CODEX_HOME")}
-	arguments := append(codexAutonomyArgs(machine.EffectiveCodex(account).Yolo), args...)
-	return &fleetdb.SeatRun{
-		Binary: codexBinaryWord(machine, account),
-		Args:   arguments,
-		Env:    launchEnvironment(os.Environ(), launch),
-		CWD:    cwd,
-	}
-}
-
-func codexAutonomyArgs(yolo bool) []string {
-	args := []string{pfmengine.CodexNoDaemon}
-	if yolo {
-		return append(args, "--dangerously-bypass-approvals-and-sandbox")
-	}
-	return append(args, "--sandbox", "workspace-write")
 }
 
 // OpenCodeEffort shares the reasoning-effort vocabulary with Codex. The native

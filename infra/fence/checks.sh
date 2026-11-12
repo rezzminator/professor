@@ -225,7 +225,7 @@ checks_templates_scratch_paths() {
 
 checks_templates_descriptions() {
   head_ "templates — description registry"
-  # A `description:` is the routing registry (/description:use). An
+  # A `description:` is the routing registry (/law:description). An
   # unquoted `: ` in one breaks the YAML: Claude Code's lenient parser still
   # registers the entry, a stricter runtime silently drops it, and no prompt
   # rule can see it. The script distinguishes its own broken state from a
@@ -686,11 +686,11 @@ PY
 
 checks_templates_skill_tests() {
   local skill cp_out
-  for skill in codeprobe chatlog; do
+  for skill in codeprobe chatlog interaction-faults; do
     head_ "templates — $skill skill tests"
     cp_out="$TMP_BASE/templates/$skill.txt"
-    if [[ ! -f templates/global/skills/$skill/${skill}_test.py ]]; then
-      fail_step "$skill tests NOT RUN — templates/global/skills/$skill/${skill}_test.py is missing"
+    if ! compgen -G "templates/global/skills/$skill/*_test.py" >/dev/null; then
+      fail_step "$skill tests NOT RUN — templates/global/skills/$skill/ holds no *_test.py"
     elif ! skill_unittest_sharded "$cp_out" "templates/global/skills/$skill/"*_test.py; then
       cat "$cp_out"
       if grep -Eq '^Ran 0 tests?' "$cp_out"; then

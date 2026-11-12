@@ -44,6 +44,7 @@ func claudeSpawn(request Request) (action.ClaudeSpawn, error) {
 		Model:      request.Model,
 		Effort:     effort,
 		PromptFile: request.PromptChannel,
+		Envs:       request.Envs,
 		Name:       request.Name,
 	}
 	if request.fresh {

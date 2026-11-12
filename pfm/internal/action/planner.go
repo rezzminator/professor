@@ -88,7 +88,7 @@ func HeadlessFork(request HeadlessForkRequest) (HeadlessPlan, error) {
 			Purpose: PurposeResume, Home: request.Home, Account: request.PrimaryAccount,
 			Cache1H: &request.Cache1H, SessionID: request.ForkID, Resume: request.SessionID, Fork: true,
 			Name: request.Name, Model: request.Persona.ModelOr(request.Model), Machine: machine,
-			PromptFile: request.Persona.Prompt, Effort: request.Persona.Effort,
+			PromptFile: request.Persona.Prompt, Effort: request.Persona.Effort, Envs: request.Persona.Envs,
 		}
 		run, err := spawn.ShellCommand()
 		if err != nil {
@@ -133,11 +133,15 @@ func HeadlessFork(request HeadlessForkRequest) (HeadlessPlan, error) {
 			return HeadlessPlan{}, err
 		}
 		return HeadlessPlan{
-			Engine: pfmengine.Codex, SeatRun: codexSeatRun(machine, request.PrimaryAccount, request.CWD, arguments...),
+			Engine: pfmengine.Codex,
+			SeatRun: codexSeatRun(
+				machine, request.PrimaryAccount, request.Persona.Envs, request.CWD, arguments...,
+			),
 			Run: codexCommandWithAccount(
 				headlessHygiene,
 				machine,
 				request.PrimaryAccount,
+				request.Persona.Envs,
 				arguments...),
 			CodexHome:           account.Home,
 			Binary:              codexBinaryWord(machine, request.PrimaryAccount),

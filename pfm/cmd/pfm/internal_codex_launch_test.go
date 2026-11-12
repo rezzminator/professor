@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/action"
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -65,7 +66,7 @@ func TestCodexLaunchPolicyAndHygiene(t *testing.T) {
 }
 
 func TestCodexLaunchWorkbench(t *testing.T) {
-	for _, scenario := range []string{"new", "resume", "fork", "explicit", "long model", "equals model", "explicit effort", "disabled", "disabled resume", "invalid", "mirror failure", "outside", "login", "logout", "mcp", "mcp-server", "app-server", "completion", "sandbox", "debug", "apply", "cloud", "features", "help", "--version", "-V", "--help", "-h"} {
+	for _, scenario := range []string{"new", "resume", "fork", "explicit", "long model", "equals model", "explicit effort", "disabled", "disabled resume", "invalid", "mirror failure", "outside", "settings extend", "settings envs in a workbench", "settings both keys", "login", "logout", "mcp", "mcp-server", "app-server", "completion", "sandbox", "debug", "apply", "cloud", "features", "help", "--version", "-V", "--help", "-h"} {
 		t.Run(scenario, func(t *testing.T) {
 			root := jailTest(t)
 			scribe, duo := newWorkbenchRunFixture(t, &runJail{root: root})
@@ -92,6 +93,29 @@ func TestCodexLaunchWorkbench(t *testing.T) {
 			wantError, wantWarning := "", ""
 			mirror := true
 			mirrorRecord := testjail.FakeEngineSync(t, testjail.CleanMirrorReply, 0)
+			project := filepath.Dir(filepath.Dir(duo))
+			var wantEnv []string
+			if strings.HasPrefix(scenario, "settings ") {
+				clone := filepath.Join(root, "clone")
+				settings := map[string]string{
+					"settings extend":              `{"harnessPrompt":{"extend":"team.md"},"envs":{"TEAM_MODE":"strict"}}`,
+					"settings envs in a workbench": `{"envs":{"TEAM_MODE":"strict"}}`,
+					"settings both keys":           `{"harnessPrompt":{"extend":"team.md","replace":"team.md"}}`,
+				}[scenario]
+				for path, body := range map[string]string{
+					paths.GeneratedHarnessPromptIn(clone, pfmengine.Codex): "Codex fleet.\n",
+					paths.Settings(project):                                settings,
+					filepath.Join(project, "team.md"):                      "Team rules.\n",
+					filepath.Join(project, "src", "main.go"):               "package main\n",
+				} {
+					if err := atomicfile.Write(path, []byte(body), 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if err := paths.WriteSourceRepoMarker(runtime.Paths.Home, clone); err != nil {
+					t.Fatal(err)
+				}
+			}
 			switch scenario {
 			case "resume":
 				args = []string{"resume", "--last"}
@@ -133,7 +157,7 @@ func TestCodexLaunchWorkbench(t *testing.T) {
 					`: "prompt" is required); launching without it` + "\n"
 			case "mirror failure":
 				mirrorRecord = testjail.FakeEngineSync(t, testjail.FailedMirrorReply, 1)
-				persona, err := workbench.ForLaunch(duo, pfmengine.Codex, workbench.New)
+				persona, err := workbench.ForLaunch(duo, "", pfmengine.Codex, workbench.New)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -142,6 +166,19 @@ func TestCodexLaunchWorkbench(t *testing.T) {
 					t.Fatal("mirror fixture must fail")
 				}
 				wantWarning = "launch Codex: " + err.Error() + "; launching on the mirror as it stands\n"
+			case "settings extend":
+				dir = filepath.Join(project, "src")
+				personaArgs = action.CodexDeveloperInstructionsArg("Codex fleet.\n\nTeam rules.\n")
+				mirror = false
+				wantEnv = []string{"TEAM_MODE=strict"}
+			case "settings envs in a workbench":
+				wantEnv = []string{"TEAM_MODE=strict"}
+			case "settings both keys":
+				dir = filepath.Join(project, "src")
+				personaArgs = nil
+				mirror = false
+				wantWarning = "launch Codex: " + paths.Settings(project) +
+					`: harnessPrompt sets both "extend" and "replace": keep one; launching without the settings` + "\n"
 			case "outside":
 				dir = root
 				personaArgs = nil
@@ -172,7 +209,16 @@ func TestCodexLaunchWorkbench(t *testing.T) {
 			previous := hookentry.LaunchExec
 			t.Cleanup(func() { hookentry.LaunchExec = previous })
 			called := false
-			hookentry.LaunchExec = func(path string, argv, _ []string) error {
+			hookentry.LaunchExec = func(path string, argv, env []string) error {
+				var adopted []string
+				for _, entry := range env {
+					if strings.HasPrefix(entry, "TEAM_MODE=") {
+						adopted = append(adopted, entry)
+					}
+				}
+				if !reflect.DeepEqual(adopted, wantEnv) {
+					t.Fatalf("settings env = %q, want %q", adopted, wantEnv)
+				}
 				called = true
 				if wantError != "" {
 					t.Fatal("refusal reached exec")

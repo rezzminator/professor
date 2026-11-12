@@ -145,6 +145,17 @@ func TestRenderFreshInteractive(t *testing.T) {
 	}) {
 		t.Errorf("env=%q", launch.Env)
 	}
+	// The adopter settings' envs go first in name order; a name pfm sets stays pfm's.
+	adopted, _ := renderParsed(t, Request{
+		Purpose: PurposeInteractive, Home: home, Account: 2, SessionID: "S",
+		Envs: map[string]string{"TEAM_MODE": "strict", "API_REGION": "eu", "CLAUDE_CONFIG_DIR": "/adopter/store"},
+	}, machine)
+	if want := []string{
+		"API_REGION=eu", "TEAM_MODE=strict",
+		"CLAUDE_CONFIG_DIR=" + machine.Accounts[1].ConfigDir, "CACHE_LIVE_CONTROL_MAIN_TTL=1h",
+	}; !reflect.DeepEqual(adopted.Env, want) {
+		t.Errorf("settings env=%q, want %q", adopted.Env, want)
+	}
 	if parsed.SessionID != "S" || !parsed.Autonomy {
 		t.Errorf("verbs=%#v", parsed)
 	}

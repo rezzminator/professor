@@ -10,8 +10,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
@@ -45,6 +47,9 @@ type Runner struct {
 	// that renders or checks agents; one that leaves them unset (the workbench
 	// mirror) leaves engine-sync to the capabilities in the global file's targets.
 	Capabilities []string
+	// Envs join the child's environment, overriding any inherited value: a
+	// project's settings envs (the workbench mirror); machine calls leave it nil.
+	Envs map[string]string
 }
 
 // UnavailableError is the binary not executable at $ENGINE_SYNC_BIN when it is
@@ -163,7 +168,11 @@ func (runner Runner) run(ctx context.Context, args []string) (deps.RunResult, er
 		obs.Logger(ctx).Error("engine-sync resolve", obs.FieldCmd, strings.Join(args, " "), obs.FieldErr, err)
 		return deps.RunResult{ExitCode: -1}, err
 	}
-	result, err := runner.exec().Run(ctx, append([]string{binary}, args...), deps.RunOptions{Env: os.Environ()})
+	env := os.Environ()
+	for _, name := range slices.Sorted(maps.Keys(runner.Envs)) {
+		env = append(env, name+"="+runner.Envs[name])
+	}
+	result, err := runner.exec().Run(ctx, append([]string{binary}, args...), deps.RunOptions{Env: env})
 	if err != nil {
 		wrapped := fmt.Errorf("run %s %s: %w", binary, strings.Join(args, " "), err)
 		obs.Logger(ctx).Error("engine-sync run", obs.FieldCmd, strings.Join(args, " "), obs.FieldErr, wrapped)

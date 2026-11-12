@@ -113,7 +113,7 @@ func TestProfessorFileIsNotAWorkbench(t *testing.T) {
 	if bench, found, err := Nearest(cwd); err != nil || found {
 		t.Fatalf("Nearest = %#v, %v, %v; want not found, nil", bench, found, err)
 	}
-	if persona, err := ForLaunch(cwd, pfmengine.Claude, New); err != nil || persona.Applies() {
+	if persona, err := ForLaunch(cwd, "", pfmengine.Claude, New); err != nil || persona.Applies() {
 		t.Fatalf("ForLaunch = %#v, %v; want the fleet persona", persona, err)
 	}
 	benches, walkErrors := Discover([]string{root})

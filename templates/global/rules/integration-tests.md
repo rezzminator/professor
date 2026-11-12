@@ -13,7 +13,7 @@ paths:
 
 # Integration tests walk the owner's real day and prove what no unit test sees
 
-Designing or restructuring a suite runs `/integration-suite:use`; these laws bind every test written in one, beside the `testing` rule.
+Designing or restructuring a suite runs `/design:test-suite`; these laws bind every test written in one, beside the `testing` rule.
 
 - Above the unit tier, a test holds only what a unit call cannot see: a process boundary, real input and output, a boot path, the built artifact, the owner's path reaching a decision.
 - Boot the production entry point from the build output as a separate process with production's configuration path; the live tier installs the product the way the owner does.

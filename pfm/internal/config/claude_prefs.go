@@ -174,7 +174,7 @@ func applyClaudeMachinePrefs(
 		sources[KeyClaudePlugins] = SourceFile
 	}
 	if claudeEnvSet(raw.Env) {
-		env, err := decodeClaudeEnv(raw.Env)
+		env, err := DecodeEnv(KeyClaudeEnv, raw.Env)
 		if err != nil {
 			return fmt.Errorf("config %s: %w", path, err)
 		}

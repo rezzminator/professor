@@ -48,7 +48,7 @@ func TestQuoteRoundTripsHostileWords(t *testing.T) {
 
 func TestLauncherRunAsWorkbench(t *testing.T) {
 	request, dir := actionWorkbenchFixture(t, `{"prompt":"scribe.md","effort":"xhigh","model":"sonnet"}`)
-	persona, err := workbench.ForLaunch(dir, pfmengine.Claude, workbench.New)
+	persona, err := workbench.ForLaunch(dir, "", pfmengine.Claude, workbench.New)
 	if err != nil {
 		t.Fatal(err)
 	}

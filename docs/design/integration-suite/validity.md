@@ -2,7 +2,7 @@
 
 The live tier this file describes in part was replaced by one tree of owner steps: [journey-tree.md](journey-tree.md) § What it replaced names the sections that still hold; where any other differs from the command, the command governs.
 
-This file covers Laws 19–31 and 35 of [`/integration-suite:use`](../../../templates/global/commands/integration-suite/use.md), one section each: how the ledgers, the budgets and the gates stay true after the designers have left, the shapes that look like tests and test nothing, and how a beat's assertions grow after an escape. [laws.md](laws.md) covers Laws 1–18 and 32–34 and holds the [Sources](laws.md#sources) table both files cite. Every section gives the rule, the failure it prevents, why it takes this shape and not a nearby one, and how it is checked. The laws hold for any project in any language.
+This file covers Laws 19–31 and 35 of [`/design:test-suite`](../../../templates/global/commands/design/test-suite.md), one section each: how the ledgers, the budgets and the gates stay true after the designers have left, the shapes that look like tests and test nothing, and how a beat's assertions grow after an escape. [laws.md](laws.md) covers Laws 1–18 and 32–34 and holds the [Sources](laws.md#sources) table both files cite. Every section gives the rule, the failure it prevents, why it takes this shape and not a nearby one, and how it is checked. The laws hold for any project in any language.
 
 ## Contents
 

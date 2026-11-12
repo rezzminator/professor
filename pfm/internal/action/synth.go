@@ -129,6 +129,7 @@ func LauncherLaunchAs(
 		SessionID:         id,
 		Name:              name,
 		PromptFile:        persona.Prompt,
+		Envs:              persona.Envs,
 		Effort:            persona.Effort,
 		Model:             persona.Model,
 		Machine:           pfmconfig.Config{Claude: claude, MCPServers: machine.MCPServers, MCP: machine.MCP},
@@ -286,7 +287,7 @@ func Synthesize(request Request) (Plan, error) {
 			Purpose: PurposeInteractive, Home: request.Home,
 			Account: request.PrimaryAccount, Cache1H: &request.Cache1H,
 			SessionID: id, Args: arguments, Machine: machine,
-			PromptFile: request.Persona.Prompt, Effort: request.Persona.Effort,
+			PromptFile: request.Persona.Prompt, Effort: request.Persona.Effort, Envs: request.Persona.Envs,
 			Model: request.Persona.Model, Name: request.LaunchName,
 		}
 		run, err := spawn.ShellCommand()
@@ -323,7 +324,7 @@ func Synthesize(request Request) (Plan, error) {
 		if request.Prompt != "" {
 			args = append(args, request.Prompt)
 		}
-		plan.SeatRun = codexSeatRun(machine, request.PrimaryAccount, request.Row.CWD, args...)
+		plan.SeatRun = codexSeatRun(machine, request.PrimaryAccount, request.Persona.Envs, request.Row.CWD, args...)
 		plan.Line = "(cd -- " + cmdparse.Quote(request.Row.CWD) + " && CODEX_HOME=" +
 			cmdparse.Quote(account.Home) + " cx"
 		if request.Prompt != "" {
@@ -504,8 +505,11 @@ func Synthesize(request Request) (Plan, error) {
 		if err != nil {
 			return Plan{}, err
 		}
-		plan.SeatRun = codexSeatRun(machine, request.PrimaryAccount, request.Row.CWD, arguments...)
-		plan.Run = continuityBanner(request.Row) + codexCommandFor(machine, request.PrimaryAccount, arguments...)
+		plan.SeatRun = codexSeatRun(
+			machine, request.PrimaryAccount, request.Persona.Envs, request.Row.CWD, arguments...,
+		)
+		plan.Run = continuityBanner(request.Row) +
+			codexCommandWithAccount(hygiene, machine, request.PrimaryAccount, request.Persona.Envs, arguments...)
 		plan = onChatServer(plan, request, machine, pfmengine.Codex)
 	}
 	return plan, nil
@@ -646,23 +650,21 @@ func opencodeContinuityBanner(row compose.Row) string {
 	return banner.String()
 }
 
-func codexCommandFor(machine pfmconfig.Config, account int, args ...string) string {
-	return codexCommandWithAccount(hygiene, machine, account, args...)
-}
-
 func codexCommandWithAccount(
 	environmentStrip string,
 	machine pfmconfig.Config,
 	account int,
+	envs map[string]string,
 	args ...string,
 ) string {
 	var command strings.Builder
 	policy := machine.EffectiveCodex(account)
 	command.WriteString(environmentStrip)
+	var own []string
 	if selected, found := machine.CodexAccountByID(account); found {
-		command.WriteString(" CODEX_HOME=")
-		command.WriteString(cmdparse.Quote(selected.Home))
+		own = append(own, "CODEX_HOME="+selected.Home)
 	}
+	writeAssignments(&command, claudelaunch.WithEnvs(envs, own))
 	command.WriteByte(' ')
 	command.WriteString(binaryWord(
 		policy.Binary,

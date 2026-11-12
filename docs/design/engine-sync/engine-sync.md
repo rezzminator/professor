@@ -9,6 +9,7 @@ engine-sync carries a project's Claude Code configuration to Codex and OpenCode.
 - [Layout](#layout)
 - [Doors](#doors)
 - [Config](#config)
+- [ENGINE_SYNC_DISABLE](#engine_sync_disable)
 - [Ownership](#ownership)
 - [Vocabulary](#vocabulary)
 
@@ -26,6 +27,12 @@ Packages and their responsibilities: `plugins/engine-sync/docs/architecture.md` 
 ## Config
 
 Two files hold engine-sync's policy: `~/.claude/engine-sync.json` (the global file, machine keys included) and `{project}/.claude/engine-sync.json` (project keys only). Precedence: built-in defaults < global file < project file < environment < flags. No environment variable moves the global path, `CLAUDE_CONFIG_DIR` included. `pfm install` writes the global file from `templates/global/engine-sync.json` plus the host's `targets` roster. Keys: `plugins/engine-sync/docs/interface.md`.
+
+## ENGINE_SYNC_DISABLE
+
+The variable `ENGINE_SYNC_DISABLE` (comma-separated `codex`, `opencode`; an unknown name exits 2; `paths.DisabledEngines`, `target.Select`) switches those engines off at project scope: project commands and hooks write, check and fail nothing for a disabled engine and print `{ENGINE} {ACTION} SKIP disabled by ENGINE_SYNC_DISABLE`. Machine scope (`global`, `doctor --machine`) ignores it. A disabled engine's existing `AGENTS.md`, `.codex/**` and `.opencode/**` stay as they are.
+
+A project sets it in the `envs` of its `pfm.settings.json` (design: `docs/design/engines/workbench.md` § pfm.settings.json). pfm passes the project's settings envs to its one project-level engine-sync call, the workbench mirror build and check (`workbench.EnsureMirror`, `workbench.CheckMirror`; `mirrorRunner` sets `enginesync.Runner.Envs`), and reads a skipped engine as success. `Global` and `MachineDoctor` get no settings envs.
 
 ## Ownership
 

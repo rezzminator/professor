@@ -35,9 +35,40 @@ func TestSynthesizeWorkbenchPersona(t *testing.T) {
 			name += "/without-fleet"
 		}
 		t.Run(name, func(t *testing.T) {
+			// The adopter's settings envs ride ahead of pfm's own, which win a shared name.
+			owned := map[compose.Kind]string{
+				compose.NewClaude: "CLAUDE_CONFIG_DIR", compose.ResumeClaude: "CLAUDE_CONFIG_DIR",
+				compose.Agent: "CLAUDE_CONFIG_DIR", compose.ResumeCodex: "CODEX_HOME",
+				compose.NewOpenCode: "OPENCODE_CONFIG_CONTENT", compose.ResumeOpenCode: "OPENCODE_CONFIG_CONTENT",
+				compose.NewCodex: "CODEX_HOME",
+			}[request.Row.Kind]
+			request.Persona.Envs = map[string]string{"TEAM_MODE": "strict", owned: "/adopter/value"}
 			plan, err := Synthesize(request)
 			if err != nil {
 				t.Fatal(err)
+			}
+			seatEnv := []string{"TEAM_MODE=strict"} // the agent router's plan is a run line alone
+			switch {
+			case plan.SeatRun != nil:
+				seatEnv = plan.SeatRun.Env
+			case request.Row.Kind != compose.Agent:
+				t.Fatalf("plan carries no seat recipe: %#v", plan)
+			}
+			var adopted []string
+			for _, entry := range seatEnv {
+				if strings.HasPrefix(entry, "TEAM_MODE=") || strings.Contains(entry, "/adopter/value") {
+					adopted = append(adopted, entry)
+				}
+			}
+			if !reflect.DeepEqual(adopted, []string{"TEAM_MODE=strict"}) {
+				t.Errorf("seat env adopter entries = %q, want [TEAM_MODE=strict]", adopted)
+			}
+			envWord := " TEAM_MODE='strict' " + owned + "="
+			if request.Row.Kind == compose.NewCodex {
+				envWord = "" // cx's own launcher applies the settings (hookentry.CodexLaunch)
+			}
+			if !strings.Contains(plan.Run, envWord) || strings.Contains(plan.Run, "/adopter/value") {
+				t.Errorf("run lacks %q or carries the adopter's %s: %s", envWord, owned, plan.Run)
 			}
 			var words []string
 			switch request.Row.Kind {
@@ -168,9 +199,9 @@ func TestWorkbenchPersonaEffort(t *testing.T) {
 			_, dir := actionWorkbenchFixture(t, test.manifest)
 			for _, engine := range test.engines {
 				t.Run(string(engine), func(t *testing.T) {
-					persona, err := WorkbenchPersona(dir, engine, test.mode)
+					persona, err := WorkbenchPersona(dir, "", engine, test.mode)
 					if test.passThrough {
-						_, wantErr := workbench.ForLaunch(dir, engine, test.mode)
+						_, wantErr := workbench.ForLaunch(dir, "", engine, test.mode)
 						if wantErr == nil || err == nil || err.Error() != wantErr.Error() {
 							t.Fatalf("WorkbenchPersona = %v; want ForLaunch error %v", err, wantErr)
 						}
@@ -208,6 +239,8 @@ func TestExecutorWorkbenchDoors(t *testing.T) {
 		{"allowed", `{"prompt":"scribe.md","effort":"xhigh","engines":["claude","codex","opencode"]}`, compose.ResumeClaude, true},
 		{"disabled resume", `{"prompt":"scribe.md"}`, compose.ResumeCodex, false},
 		{"booting row ignores the manifest", `{"prompt":""}`, compose.Booting, false},
+		{"settings envs beside a broken persona", `{"prompt":""}`, compose.ResumeClaude, true},
+		{"faulty settings beside a persona", `{"prompt":"scribe.md","effort":"xhigh"}`, compose.ResumeClaude, true},
 	} {
 		doors := []bool{false}
 		if test.both {
@@ -219,7 +252,21 @@ func TestExecutorWorkbenchDoors(t *testing.T) {
 				request.Row.Kind = test.kind
 				processes := &fakeProcesses{}
 				var wantError, wantRun, wantWarning string
+				var wantWarnings []string
+				settings := paths.Settings(filepath.Dir(filepath.Dir(dir)))
 				switch test.name {
+				case "settings envs beside a broken persona":
+					if err := atomicfile.Write(settings, []byte(`{"envs":{"TEAM_MODE":"strict"}}`), 0o600); err != nil {
+						t.Fatal(err)
+					}
+					wantWarning = "workbench persona not applied (" + paths.WorkbenchManifest(dir) +
+						`: "prompt" is required); launching without it`
+				case "faulty settings beside a persona":
+					if err := atomicfile.Write(settings, []byte(`{"envs":{"team_mode":"strict"}}`), 0o600); err != nil {
+						t.Fatal(err)
+					}
+					wantWarning = settings + `: envs name "team_mode" must be upper snake: A-Z, 0-9 and _, ` +
+						"starting with a letter; launching without the settings"
 				case "broken persona opens without it":
 					wantWarning = "workbench persona not applied (" + paths.WorkbenchManifest(dir) +
 						`: "prompt" is required); launching without it`
@@ -278,7 +325,7 @@ func TestExecutorWorkbenchDoors(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				var want []string
+				want := wantWarnings
 				if wantWarning != "" {
 					want = []string{wantWarning}
 					if !detached {
@@ -304,7 +351,12 @@ func TestExecutorWorkbenchDoors(t *testing.T) {
 					}
 					return
 				}
-				if test.name == "broken persona opens without it" {
+				if test.name == "settings envs beside a broken persona" &&
+					!strings.Contains(run, " TEAM_MODE='strict' CLAUDE_CONFIG_DIR=") {
+					t.Fatalf("settings envs missing beside the broken persona: %s", run)
+				}
+				if test.name == "broken persona opens without it" ||
+					test.name == "settings envs beside a broken persona" {
 					prompt := filepath.Join(dir, ".professor", "scribe.md")
 					if !stringsContainsAll(run, "'--resume' '"+request.Row.ID+"'") || strings.Contains(run, prompt) {
 						t.Fatalf("broken persona run=%s; want the resume without %s", run, prompt)
@@ -390,7 +442,7 @@ func TestExecutorWorkbenchPrep(t *testing.T) {
 					}
 				case test.fail:
 					// A mirror that will not build opens the chat on the mirror as it stands, said.
-					persona, personaErr := workbench.ForLaunch(dir, pfmengine.Codex, workbench.Resume)
+					persona, personaErr := workbench.ForLaunch(dir, "", pfmengine.Codex, workbench.Resume)
 					if personaErr != nil {
 						t.Fatal(personaErr)
 					}

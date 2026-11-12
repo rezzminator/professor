@@ -37,7 +37,7 @@ func applyWorkbench(request *Request) ([]string, error) {
 	case compose.NewClaude, compose.NewCodex, compose.NewOpenCode:
 		mode = workbench.New
 	}
-	persona, warnings, err := LaunchPersona(request.Row.CWD, engine, mode)
+	persona, warnings, err := LaunchPersona(request.Row.CWD, request.Home, engine, mode)
 	if err != nil {
 		return nil, err
 	}
@@ -89,25 +89,27 @@ func applyWorkbench(request *Request) ([]string, error) {
 // LaunchPersona is every launch door's workbench persona read. A persona that
 // cannot resolve never refuses the launch: an unknown effort word launches the
 // persona on the engine's default effort, any other fault launches without the
-// persona, each named in the returned warnings. A workbench that does not
-// enable the engine stays the refusal of a new launch, naming its fix.
-func LaunchPersona(cwd string, engine pfmengine.ID, mode workbench.Mode) (workbench.Persona, []string, error) {
-	persona, err := WorkbenchPersona(cwd, engine, mode)
+// persona, each named in the returned warnings after the settings file's own
+// (workbench.Persona.Warnings); the settings envs ride every outcome. A
+// workbench that does not enable the engine stays the refusal of a new
+// launch, naming its fix.
+func LaunchPersona(cwd, home string, engine pfmengine.ID, mode workbench.Mode) (workbench.Persona, []string, error) {
+	raw, err := workbench.ForLaunch(cwd, home, engine, mode)
 	if err == nil {
-		return persona, nil, nil
-	}
-	if raw, rawErr := workbench.ForLaunch(cwd, engine, mode); rawErr == nil {
-		// Only the effort word failed validation.
+		persona, effortErr := personaEffort(raw, engine)
+		if effortErr == nil {
+			return persona, persona.Warnings, nil
+		}
 		raw.Effort = ""
-		return raw, []string{err.Error() + "; launching the persona on the default effort"}, nil
+		return raw, append(raw.Warnings, effortErr.Error()+"; launching the persona on the default effort"), nil
 	}
 	if bench, found, benchErr := workbench.Nearest(cwd); benchErr == nil && found && bench.Err == nil &&
 		!bench.Enables(engine) {
 		return workbench.Persona{}, nil, err
 	}
-	return workbench.Persona{}, []string{
-		"workbench persona not applied (" + err.Error() + "); launching without it",
-	}, nil
+	return workbench.Persona{Envs: raw.Envs}, append(raw.Warnings,
+		"workbench persona not applied ("+err.Error()+"); launching without it",
+	), nil
 }
 
 // PersonaMirror builds the persona's engine mirror before a launch. A build
@@ -125,11 +127,18 @@ func PersonaMirror(persona workbench.Persona, engine pfmengine.ID, home string) 
 // WorkbenchPersona is workbench.ForLaunch with the persona's effort validated
 // through engine's one effort roster and carried lower-cased, so every launch
 // door accepts what chat new and reload accept.
-func WorkbenchPersona(cwd string, engine pfmengine.ID, mode workbench.Mode) (workbench.Persona, error) {
-	persona, err := workbench.ForLaunch(cwd, engine, mode)
+func WorkbenchPersona(cwd, home string, engine pfmengine.ID, mode workbench.Mode) (workbench.Persona, error) {
+	persona, err := workbench.ForLaunch(cwd, home, engine, mode)
 	if err != nil {
 		return workbench.Persona{}, err
 	}
+	return personaEffort(persona, engine)
+}
+
+// personaEffort is persona with its effort word validated through engine's
+// one effort roster and carried lower-cased.
+func personaEffort(persona workbench.Persona, engine pfmengine.ID) (workbench.Persona, error) {
+	var err error
 	switch engine {
 	case pfmengine.Claude:
 		persona.Effort, err = ClaudeEffort(persona.Effort)
@@ -144,17 +153,6 @@ func WorkbenchPersona(cwd string, engine pfmengine.ID, mode workbench.Mode) (wor
 		return workbench.Persona{}, wrapped
 	}
 	return persona, nil
-}
-
-func claudePersonaSpawn(
-	purpose Purpose, home string, account int, cache1H bool,
-	machine pfmconfig.Config, persona workbench.Persona, name string, args ...string,
-) ClaudeSpawn {
-	return ClaudeSpawn{
-		Purpose: purpose, Home: home, Account: account, Cache1H: &cache1H,
-		Machine: machine, Name: name, Args: args,
-		PromptFile: persona.Prompt, Effort: persona.Effort, Model: persona.Model,
-	}
 }
 
 // openCodePersonaEnv is the environment an OpenCode launch adds: the plugin
@@ -180,6 +178,8 @@ func attachOpenCodeSeatPlugin(request *Request) error {
 	return nil
 }
 
+// openCodePersonaAssignments is openCodePersonaEnv's assignments behind the
+// adopter settings' envs (claudelaunch.WithEnvs).
 func openCodePersonaAssignments(request Request) ([]string, error) {
 	hasPersona := request.Persona.Prompt != ""
 	var plugins []string
@@ -201,7 +201,7 @@ func openCodePersonaAssignments(request Request) ([]string, error) {
 		}
 	}
 	if len(plugins) == 0 && model == "" && effort == "" && request.OpenCodePromptChannel == "" {
-		return nil, nil
+		return claudelaunch.WithEnvs(request.Persona.Envs, nil), nil
 	}
 	if (model != "" || effort != "" || request.OpenCodePromptChannel != "") && request.OpenCodePlugin == "" {
 		return nil, errors.New("OpenCode model, effort and prompt channel require the native seat plugin")
@@ -226,12 +226,13 @@ func openCodePersonaAssignments(request Request) ([]string, error) {
 		}
 	}
 	if !hasPersona {
-		return env, nil
+		return claudelaunch.WithEnvs(request.Persona.Envs, env), nil
 	}
 	if request.OpenCodeFleetPrompt != "" {
 		env = append(env, "PFM_OPENCODE_FLEET_FILE="+request.OpenCodeFleetPrompt)
 	}
-	return append(env, "PFM_OPENCODE_SYSTEM_FILE="+request.Persona.Prompt), nil
+	env = append(env, "PFM_OPENCODE_SYSTEM_FILE="+request.Persona.Prompt)
+	return claudelaunch.WithEnvs(request.Persona.Envs, env), nil
 }
 
 func openCodeSeatRun(request Request, machine pfmconfig.Config, resume bool) (*fleetdb.SeatRun, error) {
@@ -251,7 +252,7 @@ func openCodeSeatRun(request Request, machine pfmconfig.Config, resume bool) (*f
 	return &fleetdb.SeatRun{
 		Binary: binaryWord(machine.OpenCode.Binary, pfmengine.MustLookup(pfmengine.OpenCode).Binary, false),
 		Args:   args,
-		Env:    launchEnvironment(os.Environ(), launch),
+		Env:    claudelaunch.RunEnvironment(os.Environ(), launch),
 		CWD:    request.Row.CWD,
 	}, nil
 }

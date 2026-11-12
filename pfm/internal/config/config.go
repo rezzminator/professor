@@ -327,7 +327,7 @@ type rawClaude struct {
 	SubagentStatuslineTrace *bool   `json:"subagentStatuslineTrace,omitempty"`
 	// Plugins is claude.plugins; each entry is decoded by decodeClaudePlugins.
 	Plugins *[]json.RawMessage `json:"plugins,omitempty"`
-	// Env is claude.env; decodeClaudeEnv validates each name and value.
+	// Env is claude.env; DecodeEnv validates each name and value.
 	Env json.RawMessage `json:"env,omitempty"`
 }
 
@@ -397,7 +397,7 @@ func (raw *rawAsk) UnmarshalJSON(content []byte) error {
 			return fmt.Errorf("ask.%s: %w", key, err)
 		}
 		var prefs rawEngine
-		if err := decodeStrict(value, &prefs); err != nil {
+		if err := DecodeStrict(value, &prefs, multipleJSONValues); err != nil {
 			return fmt.Errorf("ask.%s: %w", key, err)
 		}
 		raw.Prefs[id] = prefs
@@ -903,7 +903,7 @@ func loadWithMCPServers(
 				continue
 			}
 			var server rawMCPServer
-			if err := decodeStrict(rawServer, &server); err != nil {
+			if err := DecodeStrict(rawServer, &server, multipleJSONValues); err != nil {
 				return Config{}, fmt.Errorf("config %s: mcp.servers.%s: %w", result.Path, name, err)
 			}
 			if server.Enabled == nil {
@@ -961,7 +961,12 @@ func parseNameSyncInterval(value, path string) (time.Duration, error) {
 	return interval, nil
 }
 
-func decodeStrict(content []byte, target any) error {
+// multipleJSONValues is the machine config's refusal of a second value.
+const multipleJSONValues = "multiple JSON values"
+
+// DecodeStrict decodes one JSON value into target, refusing an unknown field
+// and, under the trailing message, anything after the value.
+func DecodeStrict(content []byte, target any, trailing string) error {
 	decoder := json.NewDecoder(bytes.NewReader(content))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {
@@ -970,7 +975,7 @@ func decodeStrict(content []byte, target any) error {
 	var extra any
 	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
 		if err == nil {
-			return errors.New("multiple JSON values")
+			return errors.New(trailing)
 		}
 		return err
 	}

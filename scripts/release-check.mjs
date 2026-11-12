@@ -966,7 +966,7 @@ function seamRule(cwd, base, head, info) {
     const hits = grepAt(cwd, head, [...(words ? ["-w"] : []), "-F", ...tokens.flatMap((t) => ["-e", t])]);
     for (const hit of hits)
       for (const t of tokens) {
-        // A hyphen joins a longer name (reviewer-pro is not reviewer),
+        // A hyphen joins a longer name (foreman-sonnet is not foreman),
         // and so does a colon before a name character
         // (/x:use is not /x); a path continues through a further segment or
         // extension (scripts/old.sh.bak, scripts/old.shell are not scripts/old.sh).

@@ -82,37 +82,34 @@
     "global/commands/token-saving-mode.md": {
       "curated": true
     },
-    "global/commands/claude-md/use.md": {
+    "global/commands/law/claude-md.md": {
       "curated": true
     },
-    "global/commands/description/use.md": {
+    "global/commands/law/description.md": {
       "curated": true
     },
-    "global/commands/doc/use.md": {
+    "global/commands/law/doc.md": {
       "curated": true
     },
-    "global/commands/integration-suite/use.md": {
+    "global/commands/design/test-suite.md": {
       "curated": true
     },
-    "global/commands/llm-codebase/use.md": {
+    "global/commands/design/codebase.md": {
       "curated": true
     },
-    "global/commands/md-forlint/use.md": {
+    "global/commands/law/markdown.md": {
       "curated": true
     },
-    "global/commands/prompt/use.md": {
+    "global/commands/law/prompt.md": {
       "curated": true
     },
-    "global/commands/rules/use.md": {
+    "global/commands/law/rules.md": {
       "curated": true
     },
-    "global/commands/agent/use.md": {
+    "global/commands/law/agent.md": {
       "curated": true
     },
-    "global/commands/iterative-improvement/use.md": {
-      "curated": true
-    },
-    "global/commands/use/mods-builder.md": {
+    "global/commands/improve/iterative.md": {
       "curated": true
     },
     "global/skills/ultimate/SKILL.md": {

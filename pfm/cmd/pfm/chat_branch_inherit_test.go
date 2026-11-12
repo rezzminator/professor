@@ -85,7 +85,7 @@ func TestChatBranchWorkbench(t *testing.T) {
 				}
 				mirrorRecord = testjail.FakeEngineSync(t, reply, code)
 				if name == "mirror failure" {
-					persona, err := workbench.ForLaunch(duo, pfmengine.Codex, workbench.Resume)
+					persona, err := workbench.ForLaunch(duo, "", pfmengine.Codex, workbench.Resume)
 					if err != nil {
 						t.Fatal(err)
 					}

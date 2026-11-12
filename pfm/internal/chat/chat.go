@@ -18,6 +18,7 @@
 //   - names.go resolves a chat's name; workbench_name.go reserves workbench names.
 //   - open.go, open_herdr.go, restored.go, native_reboot.go and kill_server.go open, exit, kill and reboot chats.
 //   - restored_resume.go rebinds a dead native seat to the Herdr pane whose `claude --resume` resumes it.
+//   - restored_recipe.go builds the resume recipe of a chat no seat holds.
 //   - end_tmux.go ends a tmux chat's server, only while its pane is the server's sole pane, and clears its handles.
 //   - killoutcome.go words a kill's outcome; keys.go types the keys-send failures.
 //   - birth.go and birth_caller.go carry the caller's identity; state.go records a verb's outcome.

@@ -2,18 +2,17 @@
 package workbench
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"unicode"
 
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gitroot"
 	"github.com/rezzminator/professor/pfm/internal/naming"
@@ -58,16 +57,7 @@ func LoadBench(dir, root string) Bench {
 		return fault(fmt.Errorf("read: %w", err))
 	}
 	var config manifest
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&config); err != nil {
-		return fault(fmt.Errorf("not valid: %w", err))
-	}
-	var trailing json.RawMessage
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		if err == nil {
-			err = errors.New("trailing JSON value")
-		}
+	if err := pfmconfig.DecodeStrict(raw, &config, "trailing JSON value"); err != nil {
 		return fault(fmt.Errorf("not valid: %w", err))
 	}
 	if config.Title != nil && *config.Title != "" {
@@ -147,6 +137,63 @@ func (bench Bench) Enables(engine pfmengine.ID) bool {
 		}
 	}
 	return false
+}
+
+// settingsPromptFile is the adopter's prompt file: relative to root, inside
+// it with links resolved, a non-empty regular file.
+func settingsPromptFile(root, relative string) (path, body string, err error) {
+	path = filepath.Join(root, relative)
+	if filepath.IsAbs(relative) || !insideDirectory(root, path) {
+		return "", "", fmt.Errorf("%q must be a path inside %s, relative to it", relative, root)
+	}
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", "", fmt.Errorf("resolve %s: %w", root, err)
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", "", fmt.Errorf("resolve %s: %w", path, err)
+	}
+	if !insideDirectory(resolvedRoot, resolved) {
+		return "", "", fmt.Errorf("%s resolves to %s, outside %s", path, resolved, root)
+	}
+	info, err := os.Stat(resolved)
+	if err != nil {
+		return "", "", fmt.Errorf("inspect %s: %w", path, err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", "", fmt.Errorf("%s is not a regular file", path)
+	}
+	raw, err := os.ReadFile(resolved)
+	if err != nil {
+		return "", "", fmt.Errorf("read %s: %w", path, err)
+	}
+	if len(raw) == 0 {
+		return "", "", fmt.Errorf("%s is empty", path)
+	}
+	return path, string(raw), nil
+}
+
+// composeExtend writes engine's fleet prompt, one blank line, then the
+// adopter's body to paths.SettingsPrompt, rewritten only when it differs.
+func composeExtend(root, home string, engine pfmengine.ID, body string) (path, composed string, err error) {
+	fleetPath, err := paths.GeneratedHarnessPrompt(home, engine)
+	if err != nil {
+		return "", "", err
+	}
+	fleet, err := os.ReadFile(fleetPath)
+	if err != nil {
+		return "", "", fmt.Errorf("read the fleet prompt: %w", err)
+	}
+	composed = strings.TrimRight(string(fleet), "\n") + "\n\n" + body
+	path = paths.SettingsPrompt(home, root, engine)
+	if current, err := os.ReadFile(path); err == nil && string(current) == composed {
+		return path, composed, nil
+	}
+	if err := atomicfile.Write(path, []byte(composed), 0o600); err != nil {
+		return "", "", fmt.Errorf("write %s: %w", path, err)
+	}
+	return path, composed, nil
 }
 
 func insideDirectory(root, dir string) bool {

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"syscall"
 	"testing"
 
@@ -37,7 +38,7 @@ func reloadWorkbenchFixture(t *testing.T) (string, string, string) {
 }
 
 func TestReloadWorkbench(t *testing.T) {
-	for _, name := range []string{"effort", "explicit", "bad effort", "Codex", "disabled", "outside", "mirror failure"} {
+	for _, name := range []string{"effort", "explicit", "bad effort", "Codex", "disabled", "outside", "mirror failure", "settings envs", "settings reserved name"} {
 		t.Run(name, func(t *testing.T) {
 			root, scribe, duo := reloadWorkbenchFixture(t)
 			request := Request{
@@ -48,7 +49,7 @@ func TestReloadWorkbench(t *testing.T) {
 			}
 			want := request
 			want.Effort = "xhigh"
-			var wantError, mirrorRecord string
+			var wantError, mirrorRecord, wantStderr string
 			switch name {
 			case "explicit":
 				request.Effort, want.Effort = "low", "low"
@@ -73,7 +74,7 @@ func TestReloadWorkbench(t *testing.T) {
 				}
 				mirrorRecord = testjail.FakeEngineSync(t, reply, code)
 				if name == "mirror failure" {
-					persona, err := workbench.ForLaunch(duo, pfmengine.Codex, workbench.Resume)
+					persona, err := workbench.ForLaunch(duo, "", pfmengine.Codex, workbench.Resume)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -89,8 +90,28 @@ func TestReloadWorkbench(t *testing.T) {
 			case "outside":
 				request.CWD = filepath.Join(root, "src")
 				want = request
+			case "settings envs", "settings reserved name":
+				settings := `{"envs":{"TEAM_MODE":"strict","API_REGION":"eu"}}`
+				if name == "settings reserved name" {
+					settings = `{"envs":{"TEAM_MODE":"strict","CODEX_HOME":"/adopter/codex"}}`
+					wantStderr = "pfm chat reload: " + paths.Settings(root) +
+						": envs.CODEX_HOME is set by pfm itself on launch; launching without the settings\n"
+				}
+				if err := atomicfile.Write(paths.Settings(root), []byte(settings), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				request.Engine, request.CWD = pfmengine.Codex, filepath.Join(root, "src")
+				request.CodexHome = "/fixture/codex"
+				want = request
+				if name == "settings envs" {
+					want.Envs = map[string]string{"TEAM_MODE": "strict", "API_REGION": "eu"}
+				}
 			}
-			got, err := applyReloadWorkbench(request)
+			var stderr strings.Builder
+			got, err := applyReloadWorkbench(request, &stderr)
+			if stderr.String() != wantStderr {
+				t.Fatalf("stderr = %q, want %q", stderr.String(), wantStderr)
+			}
 			if wantError != "" {
 				if err == nil || err.Error() != wantError {
 					t.Fatalf("error = %v, want %q", err, wantError)
@@ -99,6 +120,16 @@ func TestReloadWorkbench(t *testing.T) {
 			}
 			if err != nil || !reflect.DeepEqual(got, want) {
 				t.Fatalf("request = %#v, err = %v; want %#v", got, err, want)
+			}
+			if name == "settings envs" {
+				run, err := codexRun(got)
+				if err != nil ||
+					!strings.Contains(run, " API_REGION='eu' TEAM_MODE='strict' CODEX_HOME='/fixture/codex' ") {
+					t.Fatalf("codex respawn = %q, %v; want the settings envs ahead of pfm's CODEX_HOME", run, err)
+				}
+				if spawn, err := claudeSpawn(got); err != nil || !reflect.DeepEqual(spawn.Envs, want.Envs) {
+					t.Fatalf("claude respawn envs = %#v, %v; want %#v", spawn.Envs, err, want.Envs)
+				}
 			}
 			if name == "Codex" && !testjail.MirrorBuilt(t, mirrorRecord, "codex", duo) {
 				t.Fatalf("the reload built no codex mirror of %s", duo)

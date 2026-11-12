@@ -45,7 +45,7 @@ The note grammar that serves this reader is public, because adopters read it: `d
 | --- | --- | --- | --- |
 | `/pfm:release` | command | The one pass: pull, cut, checks, the release commit, publication, close; the run ledger | the main chat |
 | `changelogger` | agent | Writes the draft note, the `CHANGELOG.md` line and the coverage ledger into the release directory; revises on the check's failure lines | smart (`opus`), effort `high` |
-| `flights:reviewer-pro` | agent (existing) | One round over the `pfm-update` area, only when the cut changes it | its own pin |
+| `flights:reviewer` | agent (existing) | One round over the `pfm-update` area, only when the cut changes it | its own pin |
 | `gitter` | agent (existing) | Every git write: the pull, the push, the release worktree, the release commit, Phase RELEASE, the close | its own pin |
 | `scripts/release-check.mjs` | script | Everything computable: the scope and its tiers, the note grammar and coverage, the version floor, the preflight | — |
 | `.github/workflows/ci.yml` | workflow | Gates the release PR: every layer on Linux and macOS in parallel; its aggregate `ci` job is `main`'s only required check | GitHub Actions |
@@ -72,7 +72,7 @@ A STOP before step 5 removes the release worktree and its unpushed branch and ke
 | Leak | `scripts/leak-check.sh --range origin/main {C}` | exit 0 |
 | Preflight | `release-check preflight --base origin/main --head {C}` | exit 0: no removed name still live (S1), every README command shipped (D1), every listed plugin at a published tag (T1) |
 | Notes | `changelogger`, then `release-check notes` with coverage, the title's version and `--pfm-help` | exit 0, within two `SendMessage` revision rounds |
-| Review | one `flights:reviewer-pro`, only when `release-check scope` prints a `pfm-update` area | no CRITICAL or HIGH finding on the update, install or doctor path; every other finding is listed in `## Verification` as not fixed in this release |
+| Review | one `flights:reviewer`, only when `release-check scope` prints a `pfm-update` area | no CRITICAL or HIGH finding on the update, install or doctor path; every other finding is listed in `## Verification` as not fixed in this release |
 
 The review's premise is the reader's first fact: an adopter reaches this release by running the previous release's binary. It runs once, with no delta round, because nothing is fixed inside the release. No pre-release update run is made: the update path is proven by the gate's tests, `ci.yml`'s fresh installs and the review, never by a model following the note.
 
@@ -90,7 +90,7 @@ $HOME/.local/state/pfm/releases/{project}/v{NEW}/
   v{NEW}.md       the draft note                                                            written by changelogger
   changelog.line  the `CHANGELOG.md` index line                                             written by changelogger
   coverage.tsv    one row per commit in the range                                           written by changelogger
-  review.md       the pfm-update review, when one ran                                       written by flights:reviewer-pro
+  review.md       the pfm-update review, when one ran                                       written by flights:reviewer    
 ```
 
 - `{project}` is the repo directory's basename with any leading dot stripped. The directory outlives the release branch, so an audit reads it after the tag; each cut opens `run.md` with a `CUT @{C7}` line.

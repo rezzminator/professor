@@ -6,6 +6,7 @@
 - [Discovery and ownership](#discovery-and-ownership)
 - [Persona precedence](#persona-precedence)
 - [Launch doors](#launch-doors)
+- [pfm.settings.json](#pfmsettingsjson)
 - [Mirrors](#mirrors)
 - [Picker rows](#picker-rows)
 - [Cache](#cache)
@@ -69,6 +70,16 @@ An omitted engine in `chat new` / MCP `new` keeps the current engine when enable
 | `pfm chat branch` | `Resume` | `pfm/cmd/pfm/chat_satellite_command.go`, `pfm/internal/action/headless.go`: `HeadlessFork`. |
 
 Attaching to an already live seat does not relaunch it. Bare non-session administrative commands pass through. `pfm headless exec`, `PurposeQuery` probes (`reap/busy.go`, agent-open queries, `chat_call_resume.go`) and `internal/ask` one-shot runs are outside this rule. OpenCode `chat new` and registered MCP `new` support native Herdr seats only; `--agent-role`, reload and branch remain refused.
+
+## pfm.settings.json
+
+A `pfm.settings.json` at a project's managed root (the directory holding `.professor/baseline.json`; a linked git worktree reads its own copy) applies to every Claude, Codex and OpenCode chat pfm opens in the project (`pfm/internal/workbench/persona.go`: `ForLaunch`, `settingsPersona`, `readRootSettings`).
+
+- **`harnessPrompt`:** optional. `{"harnessPrompt": {"extend": "path"}}` sends the fleet prompt, a blank line, then the project's file; `{"harnessPrompt": {"replace": "path"}}` sends the file alone.
+- **`envs`:** `{NAME: value}` set on each such chat. A file holding only `envs` is valid.
+- **Precedence:** a nested workbench's prompt wins over the root file's `harnessPrompt`; the `envs` still apply. A restored chat (`pfm chat open`, `pfm/internal/chat/restored_recipe.go`) and a reload carry the `envs`.
+- **Refused names:** `PFM_*`, `CODEX_HOME` and `CLAUDE_CONFIG_DIR` (`settingsEnvReserved`).
+- **Faults:** a faulty file never blocks a launch; the chat opens without the whole file and a warning names the fault.
 
 ## Mirrors
 

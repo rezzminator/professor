@@ -18,6 +18,25 @@ func TestWorkbenchManifest(t *testing.T) {
 	}
 }
 
+func TestSettingsPaths(t *testing.T) {
+	if got := Settings("/work/acme"); got != "/work/acme/pfm.settings.json" {
+		t.Errorf("Settings = %q", got)
+	}
+	for _, test := range []struct {
+		root   string
+		engine pfmengine.ID
+		want   string
+	}{
+		{"/work/acme", pfmengine.Claude, "/fixture/home/.local/state/pfm/settings-prompts/e3b8fe59972bb48f/claude.md"},
+		{"/work/acme", pfmengine.Codex, "/fixture/home/.local/state/pfm/settings-prompts/e3b8fe59972bb48f/codex.md"},
+		{"/work/beta", pfmengine.OpenCode, "/fixture/home/.local/state/pfm/settings-prompts/b4e242277325fc7c/opencode.md"},
+	} {
+		if got := SettingsPrompt("/fixture/home", test.root, test.engine); got != test.want {
+			t.Errorf("SettingsPrompt(%s, %s) = %q, want %q", test.root, test.engine, got, test.want)
+		}
+	}
+}
+
 func TestResolveOverrides(t *testing.T) {
 	testRoot := t.TempDir()
 	t.Setenv("TMUX_TMPDIR", filepath.Join(testRoot, "t"))

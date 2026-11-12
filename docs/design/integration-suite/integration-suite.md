@@ -1,10 +1,10 @@
-# /integration-suite:use
+# /design:test-suite
 
 The live tier this file describes in part was replaced by one tree of owner steps: [journey-tree.md](journey-tree.md) § What it replaced names the sections that still hold; where any other differs from the command, the command governs.
 
-`/integration-suite:use <project|subsystem>` designs a project's whole test suite: its tiers, what every test at every tier may and may not be, the ledgers and checks that keep the suite honest, and — where the product has a live tier — its integration tests as lanes over one shared state. Every capability of the product is inventoried from code and mapped to a test that asserts it, the live beats walk the owner's journey as one tree — from a root that replicates the owner's machine, through the owner's own entries, forking wherever the product takes another path — so features meet each other the way they do in production, and coverage is proven by what a run observed, never by what a file declares. The command returns a design document plus its skeleton files and edits no code. It is stack-agnostic: the same procedure designs the suite for a CLI, a web service, a UI, a daemon, a library with a unit tier only, or a product with LLM-driven steps.
+`/design:test-suite <project|subsystem>` designs a project's whole test suite: its tiers, what every test at every tier may and may not be, the ledgers and checks that keep the suite honest, and — where the product has a live tier — its integration tests as lanes over one shared state. Every capability of the product is inventoried from code and mapped to a test that asserts it, the live beats walk the owner's journey as one tree — from a root that replicates the owner's machine, through the owner's own entries, forking wherever the product takes another path — so features meet each other the way they do in production, and coverage is proven by what a run observed, never by what a file declares. The command returns a design document plus its skeleton files and edits no code. It is stack-agnostic: the same procedure designs the suite for a CLI, a web service, a UI, a daemon, a library with a unit tier only, or a product with LLM-driven steps.
 
-This file covers how the command works and why each part of it exists. [laws.md](laws.md) covers Laws 1–18 and 32–34 (tiers, shape, verdict, the owner's journey) and [validity.md](validity.md) covers Laws 19–31 and 35 (honesty over time, what a test may not be, the escape law), each with the reasoning and the sources it rests on. The command itself lives in [`templates/global/commands/integration-suite/use.md`](../../../templates/global/commands/integration-suite/use.md).
+This file covers how the command works and why each part of it exists. [laws.md](laws.md) covers Laws 1–18 and 32–34 (tiers, shape, verdict, the owner's journey) and [validity.md](validity.md) covers Laws 19–31 and 35 (honesty over time, what a test may not be, the escape law), each with the reasoning and the sources it rests on. The command itself lives in [`templates/global/commands/design/test-suite.md`](../../../templates/global/commands/design/test-suite.md).
 
 ## Contents
 
@@ -330,7 +330,7 @@ With no live tier, steps 6–8 are replaced by the unit and hermetic conversions
 
 ## The checks
 
-The command ships `scripts/suite-checks.sh`, a POSIX shell skeleton with its per-language spelling sets and planted-violation corpora, `third-party-rules.txt` (one relied-on third-party rule per line, with its law) and `name-allowlist.txt` under `scripts/suite-checks/`, that the design adapts to the tree: the id patterns, the derivation commands, the test-name and lane-file patterns, the ledger paths. It runs in two modes, a plain check and `--close`. Each check prints one line, `CHECK <name> PASS|FAIL|ERROR <detail>`. The script exits `0` when everything is clean, `1` on a finding, and `2` when a check could not run. This is the three-state protocol of `/llm-codebase:use` § Protocol. Every ratchet reads its baseline — a multiset of signatures, never a count — as § The threat model reads every ruling-bearing input: a signature found more often than the baseline holds it is red even when the total fell, so a move keeps its count and a copy raises it; the baseline only shrinks; and its header carries the owner's burn-down ceiling, a signature count per date, so a baseline above today's ceiling fails and a header without one is the ratchet's `ERROR`. A design value a check reads — a Speed target, the headroom, the schedule window — missing is that check's `ERROR`. Every scope skips the `scope`-tagged paths of `exclusions.txt`.
+The command ships `scripts/suite-checks.sh`, a POSIX shell skeleton with its per-language spelling sets and planted-violation corpora, `third-party-rules.txt` (one relied-on third-party rule per line, with its law) and `name-allowlist.txt` under `scripts/suite-checks/`, that the design adapts to the tree: the id patterns, the derivation commands, the test-name and lane-file patterns, the ledger paths. It runs in two modes, a plain check and `--close`. Each check prints one line, `CHECK <name> PASS|FAIL|ERROR <detail>`. The script exits `0` when everything is clean, `1` on a finding, and `2` when a check could not run. This is the three-state protocol of `/design:codebase` § Protocol. Every ratchet reads its baseline — a multiset of signatures, never a count — as § The threat model reads every ruling-bearing input: a signature found more often than the baseline holds it is red even when the total fell, so a move keeps its count and a copy raises it; the baseline only shrinks; and its header carries the owner's burn-down ceiling, a signature count per date, so a baseline above today's ceiling fails and a header without one is the ratchet's `ERROR`. A design value a check reads — a Speed target, the headroom, the schedule window — missing is that check's `ERROR`. Every scope skips the `scope`-tagged paths of `exclusions.txt`.
 
 | Check | Mode | Fails on | Errors on |
 | --- | --- | --- | --- |
@@ -416,15 +416,15 @@ Outside this blueprint, the owner assigns the review, the build and the runs. La
 
 | Neighbour | Owns | Shares with this command |
 | --- | --- | --- |
-| `/llm-codebase:use` | the source-tree layout and its mechanical gates | the three-state protocol as it stands; this suite's `size`, `clones` and budget rows run in its own script |
+| `/design:codebase` | the source-tree layout and its mechanical gates | the three-state protocol as it stands; this suite's `size`, `clones` and budget rows run in its own script |
 | the project's testing manual | one project's test mechanics — where a test lives, run commands, environments, cleanup, concurrency, the local traps — and the per-change duty | this command carries the design law for every tier; the manual's § Suite duties carries the per-change duty and § What not to test the refused shapes, in the manual's own words for its stack |
 
 ## Surfaces that stay in sync
 
 | Surface | File | Holds |
 | --- | --- | --- |
-| The command | `templates/global/commands/integration-suite/use.md` | Inputs, terms, names, the tier names unit / hermetic / live, laws, procedure, output, hand-off, seed evidence, checks, the threat model |
-| Its neighbour | `templates/global/commands/llm-codebase/use.md` | § Protocol, cited as it stands |
+| The command | `templates/global/commands/design/test-suite.md` | Inputs, terms, names, the tier names unit / hermetic / live, laws, procedure, output, hand-off, seed evidence, checks, the threat model |
+| Its neighbour | `templates/global/commands/design/codebase.md` | § Protocol, cited as it stands |
 | The testing-manual template | `templates/project/commands/per-project/testing-manual.md` | § Tiers in the tier names unit / hermetic / live, § Suite duties, § What not to test |
 | The test-writing rules | `templates/global/rules/testing.md`, `templates/global/rules/integration-tests.md` | The laws every agent writing a test carries, in the rules' own words: `testing` for every tier, `integration-tests` path-scoped to suites above the unit tier and pointing to the command for the design |
 | Registries | `templates/refresh-map.json`, `docs/SETUP.md`, `docs/README.md` | The command's entry |

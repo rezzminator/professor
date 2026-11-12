@@ -59,7 +59,7 @@ func RefreshSeatPrompt(engine pfmengine.ID, sidDir, socket, pane, cwd, home stri
 		if harnessFound {
 			return harnessPath, nil
 		}
-		persona, err := workbench.ForLaunch(cwd, engine, workbench.Resume)
+		persona, err := workbench.ForLaunch(cwd, home, engine, workbench.Resume)
 		if err != nil {
 			return "", err
 		}

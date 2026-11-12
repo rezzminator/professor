@@ -622,6 +622,15 @@ func TestOpenRestoredIDWithoutSeatUsesCurrentHerdrPane(t *testing.T) {
 		t.Fatal(err)
 	}
 	runtime.Config.Claude.Binary = binary
+	// The restore lands in the fleet home; as a managed root its settings envs ride the seat.
+	for path, body := range map[string]string{
+		filepath.Join(runtime.Paths.Home, ".professor", "baseline.json"): "{}",
+		paths.Settings(runtime.Paths.Home):                               `{"envs":{"TEAM_MODE":"strict"}}`,
+	} {
+		if err := atomicfile.Write(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	fake := &fakeOpenTmux{alive: map[string]bool{}}
 	stubOpenExecutor(t, fake)
 	var stdout, stderr bytes.Buffer
@@ -650,6 +659,13 @@ func TestOpenRestoredIDWithoutSeatUsesCurrentHerdrPane(t *testing.T) {
 			err,
 			stderr.String(),
 			want,
+		)
+	}
+	if !slices.Contains(run.Env, "TEAM_MODE=strict") {
+		t.Fatalf(
+			"restored seat env = %q, want TEAM_MODE=strict from %s",
+			run.Env,
+			paths.Settings(runtime.Paths.Home),
 		)
 	}
 }

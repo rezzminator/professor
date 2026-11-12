@@ -312,7 +312,7 @@ func ResolvePaths() (paths.Values, error) {
 // validation every reader of the file shares.
 func decodeVersioned(path string, content []byte) (rawConfig, error) {
 	var raw rawConfig
-	if err := decodeStrict(content, &raw); err != nil {
+	if err := DecodeStrict(content, &raw, multipleJSONValues); err != nil {
 		return rawConfig{}, configJSONError(path, err, int64(len(content)))
 	}
 	if raw.Version != nil && *raw.Version != 1 && *raw.Version != Version {

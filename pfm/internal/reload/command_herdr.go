@@ -325,7 +325,7 @@ func nativeReloadRecipe(
 			request.SessionID = id
 		}
 	}
-	request, err = applyReloadWorkbench(request)
+	request, err = applyReloadWorkbench(request, stderr)
 	if err != nil {
 		return request, fleetdb.SeatRun{}, err
 	}
@@ -414,7 +414,7 @@ func nativeReloadRun(request Request, name string) (fleetdb.SeatRun, error) {
 	plan, err := action.PlanCodex(action.HeadlessRequest{
 		Engine: request.Engine, Name: name, CWD: request.CWD, Home: request.Home,
 		PrimaryAccount: request.Account, Config: request.Machine, Model: request.Model, Effort: request.Effort,
-		PromptChannel: request.PromptChannel, ResumeSessionID: request.SessionID,
+		PromptChannel: request.PromptChannel, ResumeSessionID: request.SessionID, Envs: request.Envs,
 	})
 	if err != nil {
 		return fleetdb.SeatRun{}, err

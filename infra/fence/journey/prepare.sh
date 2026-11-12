@@ -19,6 +19,13 @@ shield_bin="${HERDR_SHIELD_BIN:?HERDR_SHIELD_BIN names the built herdr-shield}"
 for tool in git go tar zsh tmux herdr sqlite3; do
   command -v "$tool" >/dev/null 2>&1 || fail "setup: $tool is not on PATH"
 done
+case "${SHELL:-}" in
+  */zsh) ;;
+  *) fail "setup: the owner's login shell is '${SHELL:-}', not zsh, the shell this script configures" ;;
+esac
+# The tree may belong to another user (CI's runner mounts its checkout into the machine), and git
+# refuses to read a repository someone else owns: the two fixtures built here carry no VCS stamp.
+export GOFLAGS="${GOFLAGS:+$GOFLAGS }-buildvcs=false"
 
 j="$HOME/.local/share/journey"
 rm -rf "$HOME/.local/share/journey"

@@ -204,6 +204,8 @@ jobs:
         if: matrix.os == 'macos'
         run: |
           set -euo pipefail
+          # A Mac's owner logs in to zsh; the hosted runner's account logs in to bash.
+          sudo chsh -s /bin/zsh "$USER"
           brew install tmux
           bash infra/fence/pinned-tools.sh "$RUNNER_TEMP/pinned" herdr
           echo "$RUNNER_TEMP/pinned/bin" >> "$GITHUB_PATH"
@@ -217,6 +219,7 @@ jobs:
           JOURNEY_ARTIFACTS: ${{ runner.temp }}/journey
         run: |
           set -euo pipefail
+          export SHELL=/bin/zsh
           /bin/bash infra/fence/journey/prepare.sh "$GITHUB_WORKSPACE"
           export PATH="$HOME/.local/bin:$PATH"
           go -C pfm test -tags journey -count=1 -v -timeout 20m ./journey/

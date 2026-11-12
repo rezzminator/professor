@@ -321,7 +321,7 @@ type liveFleet struct {
 }
 
 func (fleet liveFleet) Live(ctx context.Context) ([]headless.Chat, map[string]string, error) {
-	scan, err := pfmchat.ScanRows(ctx, fleet.warn, &fleet.runtime, nil)
+	scan, err := pfmchat.ScanRows(ctx, fleet.warn, &fleet.runtime)
 	if err != nil {
 		return nil, nil, err
 	}

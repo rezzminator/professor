@@ -13,14 +13,26 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
+// shieldGuardedHook is Herdr's hook for dir as a pfm that ran herdr-shield left it.
+func shieldGuardedHook(dir string) string {
+	return `[ -n "${HERDR_SHIELD_INNER:-}" ] || ` + testjail.HerdrClaudeHook(dir)
+}
+
+// shieldGuardedSettings is testjail.HerdrClaudeSettings with dir's hook guarded.
+func shieldGuardedSettings(dir string) string {
+	return strings.Replace(testjail.HerdrClaudeSettings(dir),
+		fmt.Sprintf("%q", testjail.HerdrClaudeHook(dir)), fmt.Sprintf("%q", shieldGuardedHook(dir)), 1)
+}
+
 // TestHerdrClaudeStoresDoctor is the Claude rows' table: two config dirs share
 // one settings.json through symlinks; {first}, {second}, {settings} and
 // {herdr} in a scenario stand for the dirs, the shared file and the herdr the
-// host found.
+// host found, {config} for Herdr's config.
 func TestHerdrClaudeStoresDoctor(t *testing.T) {
 	for _, scenario := range []struct {
 		name         string
 		settings     string
+		herdrConfig  string // Herdr's config.toml; empty leaves none
 		binEnv       string // HERDR_BIN_PATH; empty finds herdr on PATH
 		noHerdr      bool
 		wantRows     []string
@@ -48,41 +60,52 @@ func TestHerdrClaudeStoresDoctor(t *testing.T) {
 			wantFailures: 1,
 		},
 		{
-			name:     "store with one guarded herdr hook from the second dir",
-			settings: testjail.GuardedHerdrClaudeSettings("{second}"),
-			wantRows: []string{
-				herdrIntegrationRow + " ok claude: herdr integration hook in {settings}: " + testjail.GuardedHerdrClaudeHook("{second}"),
-			},
-		},
-		{
-			name:     "store with one unguarded herdr hook",
+			name:     "store with one herdr hook from the second dir",
 			settings: testjail.HerdrClaudeSettings("{second}"),
 			wantRows: []string{
-				herdrIntegrationRow + " FAIL need=guarded herdr claude integration hook checked={settings} hook=" +
-					fmt.Sprintf("%q", testjail.HerdrClaudeHook("{second}")) + " — fix: pfm install --yes",
+				herdrIntegrationRow + " ok claude: herdr integration hook in {settings}: " + testjail.HerdrClaudeHook("{second}"),
 			},
-			wantFailures: 1,
 		},
 		{
-			name:     "store with two guarded herdr hooks",
-			settings: testjail.GuardedHerdrClaudeSettings("{first}", "{second}"),
+			name:        "store with herdr-shield's guarded hook while Herdr still runs herdr-shield",
+			settings:    shieldGuardedSettings("{second}"),
+			herdrConfig: "[terminal]\ndefault_shell = \"/opt/fixture/herdr-shield\"\n",
 			wantRows: []string{
-				herdrIntegrationRow + " WARN need=one herdr claude integration hook checked={settings} hooks=" +
-					fmt.Sprintf("%q, %q", testjail.GuardedHerdrClaudeHook("{first}"), testjail.GuardedHerdrClaudeHook("{second}")) +
-					" — fix: delete all but one from {settings}, then rerun pfm doctor",
+				herdrIntegrationRow + " WARN herdr claude integration in {settings}: Herdr's default_shell in {config}" +
+					" still names herdr-shield, so its guarded hook stays — end the chats in Herdr," +
+					` remove default_shell = "/opt/fixture/herdr-shield" from {config}, restart Herdr,` +
+					" then run pfm install --yes again",
 			},
 			wantWarnings: 1,
 		},
 		{
-			name: "store with a guarded and an unguarded herdr hook",
-			settings: strings.Replace(testjail.HerdrClaudeSettings("{first}", "{second}"),
-				fmt.Sprintf("%q", testjail.HerdrClaudeHook("{first}")), fmt.Sprintf("%q", testjail.GuardedHerdrClaudeHook("{first}")), 1),
+			name:     "store with herdr-shield's guarded hook once Herdr no longer runs it",
+			settings: shieldGuardedSettings("{second}"),
 			wantRows: []string{
-				herdrIntegrationRow + " FAIL need=one guarded herdr claude integration hook checked={settings} hooks=" +
-					fmt.Sprintf("%q, %q", testjail.GuardedHerdrClaudeHook("{first}"), testjail.HerdrClaudeHook("{second}")) +
-					" — fix: delete all but one from {settings}, then pfm install --yes",
+				herdrIntegrationRow + " WARN need=plain herdr claude integration hook checked={settings} hook=" +
+					fmt.Sprintf("%q", shieldGuardedHook("{second}")) + " — fix: pfm install --yes",
+			},
+			wantWarnings: 1,
+		},
+		{
+			name:        "store with herdr-shield's guarded hook and an unreadable Herdr config",
+			settings:    shieldGuardedSettings("{second}"),
+			herdrConfig: "[terminal\n",
+			wantRows: []string{
+				herdrIntegrationRow + " FAIL herdr claude integration in {settings}: read Herdr's default_shell: " +
+					"parse Herdr config {config}: toml: line 2: expected '.' or ']' to end table name, but got '\\n' instead",
 			},
 			wantFailures: 1,
+		},
+		{
+			name:     "store with two herdr hooks",
+			settings: testjail.HerdrClaudeSettings("{first}", "{second}"),
+			wantRows: []string{
+				herdrIntegrationRow + " WARN need=one herdr claude integration hook checked={settings} hooks=" +
+					fmt.Sprintf("%q, %q", testjail.HerdrClaudeHook("{first}"), testjail.HerdrClaudeHook("{second}")) +
+					" — fix: delete all but one from {settings}, then rerun pfm doctor",
+			},
+			wantWarnings: 1,
 		},
 		{
 			name:     "store unreadable",
@@ -104,10 +127,12 @@ func TestHerdrClaudeStoresDoctor(t *testing.T) {
 			first, second := filepath.Join(root, "cc1"), filepath.Join(root, "cc2")
 			settings := filepath.Join(root, "store", "settings.json")
 			binary := filepath.Join(root, "bin", "my herdr")
+			herdrConfig := filepath.Join(root, "herdr", "config.toml")
 			placeholders := strings.NewReplacer(
 				"{first}", first, "{second}", second, "{settings}", settings, "{herdr}", binary,
+				"{config}", herdrConfig,
 			)
-			for _, dir := range []string{first, second, filepath.Dir(settings)} {
+			for _, dir := range []string{first, second, filepath.Dir(settings), filepath.Dir(herdrConfig)} {
 				if err := os.MkdirAll(dir, 0o700); err != nil {
 					t.Fatal(err)
 				}
@@ -124,13 +149,18 @@ func TestHerdrClaudeStoresDoctor(t *testing.T) {
 			if !scenario.noHerdr {
 				runner.ScriptLookPath("herdr", "/opt/herdr/bin/herdr", nil)
 			}
-			env := &paths.MapEnv{Values: map[string]string{}}
+			if scenario.herdrConfig != "" {
+				if err := os.WriteFile(herdrConfig, []byte(scenario.herdrConfig), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			env := &paths.MapEnv{Values: map[string]string{"HERDR_CONFIG_PATH": herdrConfig}}
 			if scenario.binEnv != "" {
 				env.Values["HERDR_BIN_PATH"] = placeholders.Replace(scenario.binEnv)
 			}
 			var stdout bytes.Buffer
 			warnings, failures := printHerdrClaudeStores(
-				&stdout, Dependencies{Runner: runner, Env: env}, []string{first, second},
+				&stdout, Dependencies{Runner: runner, Env: env}, root, []string{first, second},
 			)
 
 			got := strings.TrimRight(stdout.String(), "\n")

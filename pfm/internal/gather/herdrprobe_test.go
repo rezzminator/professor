@@ -528,7 +528,6 @@ func TestProvedListingKeepsMovedSupervisor(t *testing.T) {
 				ctx,
 				proofDB,
 				proc,
-				HerdrShield(proc),
 				probeHerdrSeatRows(ctx, []fleetdb.Seat{seat}),
 				readOnly,
 			)
@@ -741,7 +740,6 @@ func TestProveHerdrSeatClosure(t *testing.T) {
 					ctx,
 					db,
 					proc,
-					HerdrShield(proc),
 					seat,
 					json.RawMessage(list),
 					false,

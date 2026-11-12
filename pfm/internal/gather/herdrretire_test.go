@@ -110,7 +110,7 @@ func TestProvedListingRetiresDeadSeatOnce(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		rows := proveHerdrSeats(ctx, db, proc, HerdrShield(proc), probeHerdrSeatRows(ctx, seats), false)
+		rows := proveHerdrSeats(ctx, db, proc, probeHerdrSeatRows(ctx, seats), false)
 		if scan == 2 {
 			if len(rows) != 0 {
 				t.Fatalf("second scan probed retired seats again: %+v", rows)
@@ -197,7 +197,6 @@ func TestProvedListingNeverRetiresUnprovedDeath(t *testing.T) {
 				ctx,
 				db,
 				tc.proc,
-				HerdrShield(tc.proc),
 				probeHerdrSeatRows(ctx, []fleetdb.Seat{seat}),
 				false,
 			)
@@ -366,7 +365,7 @@ func TestProvedListingRetiresDeadSeatOnly(t *testing.T) {
 					}
 				}()
 			}
-			rows := proveHerdrSeats(ctx, proofDB, proc, HerdrShield(proc), probed, readOnly)
+			rows := proveHerdrSeats(ctx, proofDB, proc, probed, readOnly)
 			var listed []string
 			for _, row := range rows {
 				listed = append(listed, row.Seat.SeatID)
@@ -485,7 +484,7 @@ func TestProvedListingReadsAgainWhenItsSnapshotIsStale(t *testing.T) {
 			}}
 			probed := probeHerdrSeatRows(ctx, []fleetdb.Seat{seat})
 			probed[0].snapshot = json.RawMessage(test.snapshot)
-			rows := proveHerdrSeats(ctx, db, proc, HerdrShield(proc), probed, false)
+			rows := proveHerdrSeats(ctx, db, proc, probed, false)
 			if len(rows) != 1 {
 				t.Fatalf("listed %d rows, want the one seat: %+v", len(rows), rows)
 			}

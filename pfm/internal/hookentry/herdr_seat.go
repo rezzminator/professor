@@ -122,19 +122,19 @@ func (reporter *herdrReporter) nativeSeat(ctx context.Context, payload herdrPayl
 	action := reporter.plan(payload)
 	// Herdr detects a native Claude from the pane's foreground and owns it: its
 	// screen detection reads the state and its own Claude integration reports the
-	// session, so pfm sends nothing. Where Herdr's foreground is herdr-shield's
-	// attach client instead, Herdr sees no agent, so pfm reports there under its
-	// own source. An event that changes nothing skips the read; a start still needs it.
+	// session, so pfm sends nothing. Where the foreground Herdr lists holds no
+	// Claude, or cannot be read, Herdr sees no agent, so pfm reports there under
+	// its own source. An event that changes nothing skips the read; a start still needs it.
 	detected := false
 	if reporter.options.engine == pfmengine.Claude && (action != nil || reporter.options.event == herdr.EventStart) {
-		processes, err := reporter.deps.shield.Read(ctx, seat.HerdrSocket, seat.HerdrPane)
+		processes, err := herdr.ReadPaneProcesses(ctx, seat.HerdrSocket, seat.HerdrPane)
+		detected = err == nil
+		if err == nil && len(processes.Foreground) > 0 {
+			detected, err = herdr.EngineForeground(processes, seat.HerdrPane, pfmengine.Claude)
+		}
 		if err != nil {
-			// Only a held pane's read needs herdr-shield, so an unread pane is taken as held:
-			// it still gets the state, under pfm's own source.
 			reporter.warn("pfm internal herdr-state %s: native Claude seat %s: read pane %s foreground "+
 				"(any report goes under pfm's own source): %v", reporter.options.event, seat.SeatID, seat.HerdrPane, err)
-		} else {
-			detected = processes.Holder == nil
 		}
 	}
 	if detected && reporter.options.event == herdr.EventStart && action == nil {

@@ -408,7 +408,6 @@ func TestHerdrConfirmDistinguishesAbsenceFromProbeFailure(t *testing.T) {
 		processes            any
 		gone                 bool
 		probeError           string
-		held                 bool
 		wantError, wantClose bool
 	}{
 		{name: "pane gone", gone: true, wantError: true},
@@ -418,8 +417,6 @@ func TestHerdrConfirmDistinguishesAbsenceFromProbeFailure(t *testing.T) {
 		{name: "omitted list", wantClose: true, omitProcesses: true, wantError: true},
 		{name: "engine argv0", processes: []any{map[string]any{"pid": 7, "argv0": "/opt/bin/" + pfmengine.MustLookup(pfmengine.Claude).Binary}}, wantClose: true},
 		{name: "engine name", processes: []any{map[string]any{"pid": 7, "name": pfmengine.MustLookup(pfmengine.Claude).Binary}}, wantClose: true},
-		// Herdr sees herdr-shield's attach client; the engine runs in its holder's shell.
-		{name: "held engine", processes: []any{map[string]any{"pid": 77, "name": "herdr-shield"}}, held: true, wantClose: true},
 		{name: "missing process type", missingType: true, processes: []any{}, wantError: true},
 		{name: "null list", wantClose: true, wantError: true},
 		{name: "unknown process", wantClose: true, processes: []any{map[string]any{"pid": 7}}, wantError: true},
@@ -432,9 +429,6 @@ func TestHerdrConfirmDistinguishesAbsenceFromProbeFailure(t *testing.T) {
 			server := newKillHerdr(t)
 			server.processes, server.gone, server.probeError = test.processes, test.gone, test.probeError
 			server.omitProcesses = test.omitProcesses
-			if test.held {
-				stageHeldEngine(t, server)
-			}
 			if test.missingType {
 				server.processType = ""
 			}
@@ -446,13 +440,6 @@ func TestHerdrConfirmDistinguishesAbsenceFromProbeFailure(t *testing.T) {
 				seat.SeatID, fleetdb.SeatRun{Binary: "/fixture/claude", CWD: jail.root},
 			); err != nil {
 				t.Fatal(err)
-			}
-			if test.held {
-				// Escalation closes either way: the held engine must read as present, never unproved.
-				client := herdrKiller{engine: pfmengine.Claude, database: database, seat: seat, sidDir: jail.sidDir}
-				if present, err := client.PaneExists(context.Background(), "", ""); err != nil || !present {
-					t.Fatalf("held engine PaneExists = %t, %v; want true, no error", present, err)
-				}
 			}
 			tmux := &fakeTmux{}
 			manager, err := New(database, Dependencies{Tmux: tmux, ConfirmEvery: time.Nanosecond, ConfirmAttempts: 1})

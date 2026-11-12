@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // decodeHerdrPanes reads a Herdr pane.list answer through its one parser
@@ -54,4 +56,36 @@ func HerdrTerminalListed(ctx context.Context, socket, terminal string) (bool, er
 		}
 	}
 	return false, nil
+}
+
+// ResolveHerdrSeat proves and persists the current address using the jail-aware
+// process reader. Callers must refuse mutation on either an error or !owned.
+func ResolveHerdrSeat(
+	ctx context.Context,
+	values paths.Values,
+	seat fleetdb.Seat,
+) (result fleetdb.Seat, owned bool, returnErr error) {
+	db := fleetdb.OpenSharedState(ctx, values)
+	defer func() { returnErr = errors.Join(returnErr, db.Close()) }()
+	return proveHerdrSeatSnapshot(ctx, db, NewProcFS(values.ProcRoot), seat, nil, false)
+}
+
+// herdrSeatPane is the pane of panes seat lives in: the one holding its saved
+// terminal (its saved pane when it has none); nil when none is listed.
+func herdrSeatPane(seat fleetdb.Seat, panes []herdr.Pane) (*herdr.Pane, error) {
+	var candidate *herdr.Pane
+	for i := range panes {
+		pane := &panes[i]
+		matches := pane.PaneID == seat.HerdrPane
+		if seat.HerdrTerminalID != "" {
+			matches = pane.TerminalID == seat.HerdrTerminalID
+		}
+		if matches {
+			if candidate != nil {
+				return nil, fmt.Errorf("ownership pane.list: duplicate terminal identity")
+			}
+			candidate = pane
+		}
+	}
+	return candidate, nil
 }

@@ -6,7 +6,6 @@ import (
 	"io"
 	"time"
 
-	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -50,20 +49,27 @@ func InspectSeat(
 	now time.Time,
 	capture PaneCapture,
 ) (headless.Status, error) {
-	return InspectSeatWith(ctx, runtime, target, now, capture, pfmcall.HerdrProofs{})
+	return inspectTarget(ctx, runtime, target, now, capture, nil)
 }
 
-// InspectSeatWith is InspectSeat proving a native seat's pane through proofs,
-// so the seats of one pass (a `chat ls` listing) share one herdr-shield listing.
-func InspectSeatWith(
+// ListInspected is List followed by every listed row's inspection
+// (InspectSeat). The statuses and errors run parallel to the result's Rows.
+func ListInspected(
 	ctx context.Context,
 	runtime *pfmconfig.Runtime,
-	target headless.Chat,
+	request ListRequest,
 	now time.Time,
-	capture PaneCapture,
-	proofs pfmcall.HerdrProofs,
-) (headless.Status, error) {
-	return inspectTarget(ctx, runtime, target, now, capture, nil, proofs)
+	warn io.Writer,
+) (ListResult, []headless.Status, []error, error) {
+	listed, err := List(ctx, runtime, request, warn)
+	if err != nil {
+		return ListResult{}, nil, nil, err
+	}
+	statuses, errs := make([]headless.Status, len(listed.Rows)), make([]error, len(listed.Rows))
+	for index := range listed.Rows {
+		statuses[index], errs[index] = InspectSeat(ctx, runtime, FromRow(listed.Rows[index]), now, nil)
+	}
+	return listed, statuses, errs, nil
 }
 
 func inspectTarget(
@@ -73,7 +79,6 @@ func inspectTarget(
 	now time.Time,
 	capture PaneCapture,
 	transcripts *transcript.Reader,
-	proofs pfmcall.HerdrProofs,
 	observations ...*nativeStatusObservation,
 ) (headless.Status, error) {
 	status, err := headless.InspectWith(ctx, target, now, transcripts)
@@ -86,7 +91,7 @@ func inspectTarget(
 	}
 	switch {
 	case target.Backend == spawn.BackendHerdr && target.Live:
-		status, err = statusFromHerdr(ctx, proofs, target, status, observations...)
+		status, err = statusFromHerdr(ctx, target, status, observations...)
 	case pane:
 		status, err = statusFromPane(ctx, target, status, capture, runtime)
 	case awaitsPane(target, status):

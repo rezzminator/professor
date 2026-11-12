@@ -217,15 +217,14 @@ type nativeStatusObservation struct {
 const herdrAgentUntracked = "transcript (Herdr agent untracked)"
 
 // statusFromHerdr reconciles live native activity with transcript turn
-// evidence, proving the seat's pane through proofs.
+// evidence, proving the seat's pane first.
 func statusFromHerdr(
 	ctx context.Context,
-	proofs pfmcall.HerdrProofs,
 	chat headless.Chat,
 	status headless.Status,
 	observations ...*nativeStatusObservation,
 ) (headless.Status, error) {
-	target, err := proofs.Target(ctx, pfmcall.Target{
+	target, err := pfmcall.ProveHerdrTarget(ctx, pfmcall.Target{
 		Backend:    chat.Backend,
 		SeatID:     chat.SeatID,
 		SocketPath: chat.Socket,
@@ -239,7 +238,7 @@ func statusFromHerdr(
 	body, err := herdr.SeatRequest(ctx, chat.Socket, "agent.get", map[string]string{"target": chat.Pane})
 	if refusal := (*herdr.Refusal)(nil); errors.As(err, &refusal) && refusal.Code == herdr.AgentNotFound {
 		// Herdr tracks no agent on the pane: an answer, settled by the pane's foreground.
-		alive, foregroundErr := proofs.Engine(
+		alive, foregroundErr := pfmcall.HerdrEngine(
 			ctx,
 			fleetdb.Seat{HerdrSocket: chat.Socket, HerdrPane: chat.Pane, Engine: string(chat.Engine)},
 		)

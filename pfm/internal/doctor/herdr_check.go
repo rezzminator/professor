@@ -58,11 +58,11 @@ func herdrJudgedEngines() []string {
 // printing one `{engine}: {state} ({path})` line per integration is read
 // line by line, by the engine word before the first colon; a command that
 // fails, or output without a line for a judged engine, is a WARN naming what
-// was seen, never read as "not installed".
+// was seen, never read as "not installed"; home locates Herdr's config.
 func printHerdrDoctor(
 	ctx context.Context,
 	stdout io.Writer,
-	dependencies Dependencies,
+	dependencies Dependencies, home string,
 	machines ...config.Config,
 ) (warnings, failures int) {
 	warnings, failures = printHerdrIntegrationHome(ctx, stdout, dependencies, nil, herdrJudgedEngines(), "", "")
@@ -74,7 +74,7 @@ func printHerdrDoctor(
 			}
 		}
 	}
-	w, f := printHerdrClaudeStores(stdout, dependencies, claudeDirs)
+	w, f := printHerdrClaudeStores(stdout, dependencies, home, claudeDirs)
 	warnings += w
 	failures += f
 	codex := herdr.Label(pfmengine.Codex)

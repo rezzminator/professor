@@ -11,8 +11,6 @@ import (
 	"syscall"
 	"testing"
 	"time"
-
-	"github.com/rezzminator/professor/pfm/internal/clock"
 )
 
 // countPaneLists wraps the painter's call to count the pane.list requests it
@@ -35,24 +33,13 @@ func countPaneLists(painter *indicatorPainter) *int {
 // with every tab decorated but nothing blocked, done or animated, a tick does
 // no list and no fleet scan; a hook-fired painter's nudge makes the next tick
 // re-read, and idleRefresh after the last read one tick re-reads unprompted.
-// A scan's proofs share one herdr-shield listing however long the scan takes.
 func TestIdleTabBlinkerRereadsTheFleetOnlyWhenNudgedOrDue(t *testing.T) {
 	f := newTabStatusFixture()
 	painter, stepping := tabPainterFixture(t, f)
 	lists := countPaneLists(painter)
-	shieldRuns := shieldRunner(t, shieldListing("running", true, false, "PROTECTED"), 0)
-	listedAt := clock.NewFake(phaseOn)
-	painter.shield = &Shield{Runner: shieldRuns, Clock: listedAt}
 	scans := 0
-	painter.tabs = func(ctx context.Context, _ string) ([]TabDecoration, error) {
+	painter.tabs = func(context.Context, string) ([]TabDecoration, error) {
 		scans++
-		// Two seats' proofs read herdr-shield, each outlasting a listing's freshness.
-		for range 2 {
-			if _, err := painter.shield.Running(ctx, shieldSocket); err != nil {
-				return nil, err
-			}
-			listedAt.Advance(shieldListFresh + time.Second)
-		}
 		return []TabDecoration{tabObservation("idle")}, nil
 	}
 	const ticks = 24
@@ -75,9 +62,6 @@ func TestIdleTabBlinkerRereadsTheFleetOnlyWhenNudgedOrDue(t *testing.T) {
 	if scans != 3 || *lists != 3 {
 		t.Fatalf("scans %d, lists %d over %d ticks; want 3 each: the first paint, the nudged tick, the due tick",
 			scans, *lists, ticks)
-	}
-	if runs := len(shieldRuns.Calls()); runs != 3 {
-		t.Fatalf("herdr-shield ran %d times over %d scans of two proofs each; want 3, one per scan", runs, scans)
 	}
 	if scansAt[3] != 2 || scansAt[22] != 2 || scansAt[23] != 3 {
 		t.Fatalf("scans before each sleep = %v; want the nudge read at tick 3 and the refresh at tick 23", scansAt)

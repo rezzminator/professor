@@ -36,7 +36,7 @@ func herdrClaudeOKRow(t *testing.T, dir string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	hook := testjail.GuardedHerdrClaudeHook(dir)
+	hook := testjail.HerdrClaudeHook(dir)
 	return herdrIntegrationRow + " ok claude: herdr integration hook in " + settings + ": " + hook
 }
 
@@ -247,7 +247,7 @@ func TestHerdrIntegrationDoctor(t *testing.T) {
 			}
 			dependencies := Dependencies{Runner: runner, Env: env}
 			var stdout bytes.Buffer
-			warnings, failures := printHerdrDoctor(context.Background(), &stdout, dependencies)
+			warnings, failures := printHerdrDoctor(context.Background(), &stdout, dependencies, "")
 
 			got := strings.TrimRight(stdout.String(), "\n")
 			if want := strings.Join(scenario.wantRows, "\n"); got != want {
@@ -316,7 +316,7 @@ func TestHerdrIntegrationDoctorExit(t *testing.T) {
 				t.Fatal(err)
 			}
 			if !scenario.claudeOff {
-				testjail.StageInstalledHerdrClaudeHook(t, dir)
+				testjail.StageHerdrClaudeHook(t, dir)
 			}
 			// The fix runs the herdr this host found: the stub HERDR_BIN_PATH names.
 			stub := filepath.Join(t.TempDir(), "herdr")
@@ -628,7 +628,7 @@ func TestHerdrDoctorChecksEveryManagedHome(t *testing.T) {
 	for _, engine := range []string{"claude", "codex"} {
 		t.Run(engine, func(t *testing.T) {
 			runtime := buildCleanDoctorHome(t)
-			testjail.StageInstalledHerdrClaudeHook(t, runtime.Config.ClaudeConfigDirs()[0])
+			testjail.StageHerdrClaudeHook(t, runtime.Config.ClaudeConfigDirs()[0])
 			root, err := filepath.EvalSymlinks(t.TempDir())
 			if err != nil {
 				t.Fatal(err)
@@ -675,7 +675,7 @@ func TestHerdrDoctorLabelsScopedErrorsAndRepair(t *testing.T) {
 	for _, bad := range []string{"installed", "command failed", "unreadable output"} {
 		t.Run(bad, func(t *testing.T) {
 			runtime := buildCleanDoctorHome(t)
-			testjail.StageInstalledHerdrClaudeHook(t, runtime.Config.ClaudeConfigDirs()[0])
+			testjail.StageHerdrClaudeHook(t, runtime.Config.ClaudeConfigDirs()[0])
 			second := filepath.Join(t.TempDir(), "second home")
 			runtime.Config.CodexAccounts = append(
 				runtime.Config.CodexAccounts,
@@ -698,7 +698,9 @@ func TestHerdrDoctorLabelsScopedErrorsAndRepair(t *testing.T) {
 			dependencies := normalizeDependencies(testDependencies())
 			var stdout bytes.Buffer
 			// Exercise the production config handoff without involving backend probing.
-			warnings, failures := printHerdrDoctor(t.Context(), &stdout, dependencies, runtime.Config)
+			warnings, failures := printHerdrDoctor(
+				t.Context(), &stdout, dependencies, runtime.Paths.Home, runtime.Config,
+			)
 			if bad == "installed" && failures != 1 {
 				t.Fatalf("failures=%d stdout=%s", failures, stdout.String())
 			}

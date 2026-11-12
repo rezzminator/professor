@@ -1,12 +1,11 @@
 // Package herdr integrates pfm chats with the Herdr terminal multiplexer
-// (https://herdr.dev). Tmux chats, native Codex/OpenCode and a native Claude
-// behind herdr-shield's attach client report lifecycle state, session metadata
-// and resume commands under the stable pfm source; end releases the report and
-// clears pfm's title. A native Claude pane Herdr detects is Herdr's own: its
-// screen detection reads the state and its bundled Claude integration
-// (integration.go) reports the session. Outside Herdr nothing here runs.
-// A holder `herdr-shield attach` moved to another pane is followed there
-// (shield_move.go); one `herdr-shield list` serves a whole pass (shield_list.go).
+// (https://herdr.dev). Tmux chats and native Codex/OpenCode report lifecycle
+// state, session metadata and resume commands under the stable pfm source; end
+// releases the report and clears pfm's title. A native Claude pane Herdr
+// detects is Herdr's own: its screen detection reads the state and its bundled
+// Claude integration (integration.go) reports the session. Outside Herdr
+// nothing here runs. A pane's processes are what Herdr's pane.process_info
+// names (foreground.go).
 package herdr
 
 import (

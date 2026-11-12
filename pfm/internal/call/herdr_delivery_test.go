@@ -8,13 +8,11 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
-	"github.com/rezzminator/professor/pfm/internal/herdr"
 )
 
 func TestHerdrCallNative(t *testing.T) {
@@ -205,13 +203,6 @@ func TestHerdrCallRaw(t *testing.T) {
 			name: "native-untracked", id: pfmengine.Claude, body: "a\nb", wantPayload: "a\nb", wantTyped: true,
 			before: "────────\n❯ \n────────", after: "a\nb\n────────\n❯ \n────────",
 		},
-		// Herdr refuses agent.prompt when herdr-shield's attach client, not Claude, is
-		// the pane's foreground: the raw path's composer guard still protects it.
-		{
-			name: "native-shield-foreground", id: pfmengine.Claude, body: "a\nb", wantPayload: "a\nb", wantTyped: true,
-			before: "────────\n❯ \n────────", after: "a\nb\n────────\n❯ \n────────",
-			promptRefusal: "agent_not_ready", shieldForeground: true,
-		},
 		// A ready-check refusal with Claude itself in the foreground still refuses.
 		{
 			name: "native-not-ready", id: pfmengine.Claude, body: "a\nb", before: "────────\n❯ \n────────",
@@ -221,8 +212,7 @@ func TestHerdrCallRaw(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			entered := false
 			var payload string
-			var shieldForeground atomic.Bool
-			socket := newNativeSocketForeground(t, func(request nativeRequest) (any, string) {
+			socket := newNativeSocket(t, func(request nativeRequest) (any, string) {
 				if request.Method == test.refusal {
 					return nil, "pane_send_failed"
 				}
@@ -242,7 +232,6 @@ func TestHerdrCallRaw(t *testing.T) {
 					if test.promptRefusal == "" {
 						t.Errorf("raw engine prompted the native agent: %+v", request)
 					}
-					shieldForeground.Store(test.shieldForeground)
 					return nil, test.promptRefusal
 				case "pane.read":
 					if request.Params["format"] == "ansi" {
@@ -286,11 +275,6 @@ func TestHerdrCallRaw(t *testing.T) {
 					t.Errorf("raw engine used unexpected API %s", request.Method)
 				}
 				return map[string]any{"type": "ok"}, ""
-			}, func() []any {
-				if shieldForeground.Swap(false) {
-					return []any{map[string]any{"pid": 41, "name": herdr.ShieldBinary}}
-				}
-				return nil
 			})
 			target := Target{Backend: "herdr", SocketPath: socket.path, Pane: "w1:p2", Engine: string(test.id)}
 			engine := nativeEngine(t, target)

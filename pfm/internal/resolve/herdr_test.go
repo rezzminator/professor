@@ -27,7 +27,7 @@ func TestWhoamiHerdrRequiresPersistedSeatAndEngineAncestor(t *testing.T) {
 		pid   int
 		want  bool
 	}{
-		{"malformed-pid", false, 0, false}, {"direct-terminal-ambiguous", true, 40, false}, {"own-lost", true, 40, false}, {"stale-tmux", true, 40, true}, {"history-failed", true, 40, true}, {"history-lost", true, 40, true}, {"history-dead-host", true, 40, true}, {"history-live-host", true, 40, false}, {"live-terminal-ambiguous", true, 40, false}, {"verified", true, 40, true}, {"kept", true, 40, true}, {"legacy-live", true, 40, true}, {"legacy-recycled", true, 40, false}, {"saved-host-dead", true, 40, false}, {"saved-host-argv", true, 40, false}, {"saved-host-reused", true, 40, false}, {"moved", true, 40, true}, {"canonical-env", true, 40, true}, {"stale-alias-row", true, 40, true}, {"recycled", true, 40, false}, {"unnamed", true, 40, true}, {"unrelated", true, 88, false}, {"unrecorded", false, 40, false}, {"seatless-unreachable", false, 40, false}, {"seatless-gone", false, 40, false}, {"recorded-probe-failed", true, 40, false}, {"omitted", true, 0, false}, {"empty", true, 0, false},
+		{"malformed-pid", false, 0, false}, {"direct-terminal-ambiguous", true, 40, false}, {"own-lost", true, 40, false}, {"stale-tmux", true, 40, true}, {"history-failed", true, 40, true}, {"history-lost", true, 40, true}, {"history-dead-host", true, 40, true}, {"history-live-host", true, 40, false}, {"live-terminal-ambiguous", true, 40, false}, {"verified", true, 40, true}, {"legacy-live", true, 40, true}, {"legacy-recycled", true, 40, false}, {"saved-host-dead", true, 40, false}, {"saved-host-argv", true, 40, false}, {"saved-host-reused", true, 40, false}, {"moved", true, 40, true}, {"canonical-env", true, 40, true}, {"stale-alias-row", true, 40, true}, {"recycled", true, 40, false}, {"unnamed", true, 40, true}, {"unrelated", true, 88, false}, {"unrecorded", false, 40, false}, {"seatless-unreachable", false, 40, false}, {"seatless-gone", false, 40, false}, {"recorded-probe-failed", true, 40, false}, {"omitted", true, 0, false}, {"empty", true, 0, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			testjail.Fleet(t)
@@ -46,12 +46,6 @@ func TestWhoamiHerdrRequiresPersistedSeatAndEngineAncestor(t *testing.T) {
 				"10/stat":    "10 (sh) S 1 " + strings.Repeat("0 ", 17) + "3 0\n",
 				"20/stat":    "20 (pfm) S 10 " + strings.Repeat("0 ", 17) + start + " 0\n",
 				"20/cmdline": argv,
-			}
-			if tc.name == "kept" {
-				// herdr-shield's holder 5 runs shell 10, whose terminal's foreground group is 20.
-				files["5/stat"] = "5 (herdr-shield) S 1 5 5 0 0 " + strings.Repeat("0 ", 13) + "2 0\n"
-				files["10/stat"] = "10 (zsh) S 5 10 10 0 20 " + strings.Repeat("0 ", 13) + "3 0\n"
-				files["20/stat"] = "20 (pfm) S 10 20 10 0 20 " + strings.Repeat("0 ", 13) + start + " 0\n"
 			}
 			for name, body := range files {
 				path := filepath.Join(proc, name)
@@ -130,15 +124,6 @@ func TestWhoamiHerdrRequiresPersistedSeatAndEngineAncestor(t *testing.T) {
 							)
 							return
 						}
-						if tc.name == "kept" {
-							// Herdr sees only herdr-shield's attach client.
-							_, _ = fmt.Fprintf(
-								conn,
-								`{"id":%q,"ok":true,"result":{"type":"pane_process_info","process_info":{"pane_id":"w6:p3","shell_pid":77,"foreground_processes":[{"pid":77,"name":"herdr-shield","argv0":"herdr-shield"}]}}}`+"\n",
-								req.ID,
-							)
-							return
-						}
 						_, _ = fmt.Fprintf(
 							conn,
 							`{"id":%q,"ok":true,"result":{"type":"pane_process_info","process_info":{"pane_id":%q,"shell_pid":10,"foreground_processes":[{"pid":%d,"argv0":"claude"}]}}}`+"\n",
@@ -164,16 +149,6 @@ func TestWhoamiHerdrRequiresPersistedSeatAndEngineAncestor(t *testing.T) {
 				t.Setenv(ClaudeSessionEnv, "not-yet-registered")
 			}
 			t.Setenv("HERDR_PANE_ID", "w6:p3")
-			if tc.name == "kept" {
-				// The shell names its holder's relay and the pane it was born in.
-				t.Setenv(
-					"HERDR_SOCKET_PATH",
-					filepath.Join(filepath.Dir(socket), "herdr-shield", "h1", "herdr-api.sock"),
-				)
-				t.Setenv("HERDR_PANE_ID", "w1:p1")
-				t.Setenv("HERDR_SHIELD_INNER", "h1")
-				testjail.StageHerdrShield(t, testjail.HerdrShieldListing(5, 2, 10, 3, "w6:p3", socket), 0)
-			}
 			if tc.name == "canonical-env" || strings.HasPrefix(tc.name, "history-") ||
 				tc.name == "live-terminal-ambiguous" {
 				t.Setenv("HERDR_PANE_ID", "w9:p2")

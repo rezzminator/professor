@@ -69,8 +69,6 @@ type Probe struct {
 	// Environ reads another process's environment (gather's ProcFS.Environ):
 	// how a tmux client no hook registered is found to run in Herdr.
 	Environ func(pid int) (map[string]string, error)
-	// Shield reads the panes herdr-shield holds.
-	Shield *Shield
 	// Hookless says whether the chat of a seat was launched without the Herdr
 	// reporter hooks; known is false when its launch cannot be read, and the
 	// detail is then left out, never guessed.
@@ -338,10 +336,9 @@ func (probe Probe) resolver(sockets map[string]*socketView) Resolver {
 		sequence++
 		return sequence
 	}
-	wire := WireResolver(probe.Environ, probe.Call, next, probe.Shield)
+	wire := WireResolver(probe.Environ, probe.Call, next)
 	return Resolver{
 		Environ: probe.Environ,
-		Shield:  probe.Shield,
 		Panes: func(ctx context.Context, socket string) ([]Pane, error) {
 			view := probe.socketViewOf(ctx, socket, sockets)
 			if view.err != nil {

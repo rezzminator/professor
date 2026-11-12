@@ -9,10 +9,9 @@
 // Files, one line each:
 //   - target.go resolves a target to a chat, and scans the fleet's rows.
 //   - verbs.go is the Verbs bundle the surfaces call.
-//   - status.go and status_pane.go inspect a seat, reading its pane when its transcript cannot say.
-//   - seat_inspector.go is the watch's inspector, holding one herdr-shield reader for each poll.
+//   - status.go and status_pane.go inspect a seat, or every row of a listing, reading its pane when its transcript cannot say.
+//   - seat_inspector.go is the watch's inspector, carrying each transcript read from one poll to the next.
 //   - list.go selects and presents the rows of `chat ls`.
-//   - list_shield.go shares one herdr-shield reader between a listing's scan, Herdr presence probe and row inspections.
 //   - last.go reads a chat's last answer; read.go its transcript entries; find.go searches transcripts.
 //   - names.go resolves a chat's name; workbench_name.go reserves workbench names.
 //   - open.go, open_herdr.go, restored.go, native_reboot.go and kill_server.go open, exit, kill and reboot chats.

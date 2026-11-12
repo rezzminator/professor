@@ -39,7 +39,7 @@ func printHerdrSeatOwnership(ctx context.Context, out io.Writer, values paths.Va
 		native = append(native, seat)
 	}
 	warnings := 0
-	rows := gather.ProbeHerdrSeats(ctx, values, native, true, nil)
+	rows := gather.ProbeHerdrSeats(ctx, values, native, true)
 	for index := range rows {
 		row := &rows[index]
 		if row.Err != nil {

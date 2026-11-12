@@ -37,7 +37,7 @@ func TestReleaseNativeClaudeReports(t *testing.T) {
 			name: "reported under no recorded source",
 			want: []string{"pane.release_agent pane=w1:p1 source=pfm agent=claude seq=12"},
 		},
-		{name: "held by herdr-shield under pfm's own source", source: "pfm", kept: true},
+		{name: "reported under pfm's own source", source: "pfm", kept: true},
 		{
 			// No pfm build reports under herdr:claude now: the stale state goes, the
 			// old session is not republished over the new owner's.

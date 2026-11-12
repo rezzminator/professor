@@ -25,9 +25,6 @@ type FDLink struct {
 type ProcStat struct {
 	ParentPID int
 	StartTime uint64
-	// Group is the process group; TerminalGroup the foreground group of its
-	// controlling terminal (-1 without one). Darwin leaves both 0.
-	Group, TerminalGroup int
 }
 
 // ProcFS abstracts all /proc access used by gather.
@@ -293,15 +290,7 @@ func (proc RealProcFS) Stat(pid int) (ProcStat, error) {
 	if err != nil {
 		return ProcStat{}, fmt.Errorf("parse start time for %d: %w", pid, err)
 	}
-	group, err := strconv.Atoi(fields[2])
-	if err != nil {
-		return ProcStat{}, fmt.Errorf("parse process group for %d: %w", pid, err)
-	}
-	terminalGroup, err := strconv.Atoi(fields[5])
-	if err != nil {
-		return ProcStat{}, fmt.Errorf("parse terminal foreground group for %d: %w", pid, err)
-	}
-	return ProcStat{ParentPID: parentPID, StartTime: startTime, Group: group, TerminalGroup: terminalGroup}, nil
+	return ProcStat{ParentPID: parentPID, StartTime: startTime}, nil
 }
 
 // statFields are /proc/<pid>/stat's fields after the command name, state first.
@@ -319,8 +308,8 @@ func (proc RealProcFS) statFields(pid int) ([]string, error) {
 
 // withheld tags a refused environment read of a process that can never be a
 // pane of the caller's: another uid's or a non-dumpable one, or one with no
-// terminal holding capabilities this process lacks (the systemd user manager a
-// herdr-shield holder runs under). Any other refusal stays a read failure.
+// terminal holding capabilities this process lacks (a systemd user manager).
+// Any other refusal stays a read failure.
 func (proc RealProcFS) withheld(pid int, err error) error {
 	if !errors.Is(err, os.ErrPermission) {
 		return err

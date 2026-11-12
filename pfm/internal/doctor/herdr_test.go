@@ -63,8 +63,6 @@ func TestHerdrBackendDoctor(t *testing.T) {
 	const healthy = `{"type":"pong","version":"0.9.5","protocol":22}`
 	for _, scenario := range []struct {
 		name, pong, config, platform, status string
-		shield, shieldErr                    string
-		shieldExit                           int
 		dead, discover, directory            bool
 		warnings, failures                   int
 		want                                 string
@@ -80,19 +78,6 @@ func TestHerdrBackendDoctor(t *testing.T) {
 		{name: "empty version", pong: `{"type":"pong","version":"","protocol":22}`, want: "doctor: herdr backend ok (protocol 22, SOCKET)"},
 		{name: "numeric version", pong: `{"type":"pong","version":95,"protocol":22}`, want: "doctor: herdr backend ok (protocol 22, SOCKET)"},
 		{name: "restore disabled", pong: healthy, config: "[session]\nresume_agents_on_restore = false\n", warnings: 1, want: "doctor: herdr resume_agents_on_restore=false — Herdr chats will not come back after a restart"},
-		{
-			name: "restore disabled, herdr-shield healthy", pong: healthy, shield: "OK: Linux/systemd user manager",
-			config: "[session]\nresume_agents_on_restore = false\n[terminal]\ndefault_shell = \"/opt/herdr-shield\"\n",
-			want:   "doctor: herdr resume_agents_on_restore=false by design: herdr-shield keeps panes alive (herdr-shield doctor OK)",
-		},
-		{
-			name: "restore disabled, herdr-shield refusing", pong: healthy, shieldExit: 1,
-			shieldErr: "herdr-shield: upstream observation requires an owned private parent",
-			config:    "[session]\nresume_agents_on_restore = false\n[terminal]\ndefault_shell = \"/opt/herdr-shield\"\n",
-			warnings:  1,
-			want: "doctor: herdr resume_agents_on_restore=false and herdr-shield doctor FAILED — " +
-				"herdr-shield: upstream observation requires an owned private parent;",
-		},
 		{name: "restore explicit true", pong: healthy, config: "[session]\nresume_agents_on_restore = true\n", want: "doctor: herdr resume_agents_on_restore=true (on-disk config)"},
 		{name: "restore default", pong: healthy, want: "doctor: herdr resume_agents_on_restore=true (on-disk config)"},
 		{name: "BOM config", pong: healthy, config: "\ufeff[session]\nresume_agents_on_restore = false\n", warnings: 1, want: "doctor: herdr resume_agents_on_restore=false — Herdr chats will not come back after a restart"},
@@ -131,15 +116,6 @@ func TestHerdrBackendDoctor(t *testing.T) {
 			t.Setenv(herdr.EnvSocket, socket)
 			t.Setenv(herdr.EnvBin, "")
 			runner := &deps.FakeRunner{}
-			if scenario.shield != "" || scenario.shieldErr != "" {
-				// A doctor run inside a held pane carries the shield's marks; the
-				// shield's own doctor must run without them.
-				t.Setenv(herdr.EnvShieldInner, "1")
-				t.Setenv("PFM_HERDR_SHELL", "w1:p1")
-				runner.Script([]string{"/opt/herdr-shield", "doctor"}, deps.RunResult{
-					Stdout: []byte(scenario.shield), Stderr: []byte(scenario.shieldErr), ExitCode: scenario.shieldExit,
-				}, nil)
-			}
 			if scenario.discover {
 				t.Setenv(herdr.EnvSocket, "")
 				runner.ScriptLookPath("herdr", "/opt/herdr", nil)
@@ -160,20 +136,6 @@ func TestHerdrBackendDoctor(t *testing.T) {
 				Dependencies{Env: paths.OSEnv{}, Runner: runner},
 				platform == "darwin",
 			)
-			for _, call := range runner.Calls() {
-				if len(call.Argv) == 0 || call.Argv[0] != "/opt/herdr-shield" {
-					continue
-				}
-				if call.Opts.Env == nil {
-					t.Fatalf("herdr-shield doctor env = inherited, want the shield marks stripped")
-				}
-				for _, entry := range call.Opts.Env {
-					if strings.HasPrefix(entry, herdr.EnvShieldInner+"=") ||
-						strings.HasPrefix(entry, "PFM_HERDR_SHELL=") {
-						t.Fatalf("herdr-shield doctor env carries %q", entry)
-					}
-				}
-			}
 			want := strings.ReplaceAll(scenario.want, "SOCKET", socket)
 			if !strings.Contains(stdout.String(), want+"\n") && !strings.Contains(stdout.String(), want) {
 				t.Fatalf("backend output=%q, want %q", stdout.String(), want)
@@ -299,7 +261,7 @@ func TestHerdrRestoreConfigPaths(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			resume, _, err := herdrDoctorRestoreConfig(env)
+			resume, err := herdrDoctorRestoreConfig(env)
 			if scenario.debug && !scenario.override {
 				if err == nil || !strings.Contains(err.Error(), "set HERDR_CONFIG_PATH") {
 					t.Fatalf("resume=%v err=%v, want visible ambiguous config", resume, err)

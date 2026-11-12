@@ -279,7 +279,6 @@ func TestSeatHostPTY(t *testing.T) {
 		"exit", "ordinary-stdio", "redirected-stdin", "hup", "int", "launch", "failed-missing-recipe", "failed-malformed-recipe", "failed-missing-executable",
 		"ledger-on", "ledger-off", "launch-ledger-on", "launch-ledger-off",
 		"reload-failure-locked", "reload-success", "reload-retry", "reload-close", "reload-move-retry", "move-start", "raw-codex", "raw-opencode", "hangup-exit-one",
-		"relay",
 	} {
 		t.Run(mode, func(t *testing.T) {
 			root, environment := testjail.FleetEnv(t)
@@ -308,15 +307,6 @@ func TestSeatHostPTY(t *testing.T) {
 				"CLAUDE_CONFIG_DIR=",
 				paths.EnvStateDB+"="+filepath.Join(root, "pfm.db"),
 			)
-			if mode == "relay" {
-				// herdr-shield holds the pane: the supervisor's shell names its holder's relay.
-				testjail.StageHerdrShield(t, testjail.HerdrShieldListing(5, 2, 10, 3, "w6:p3", server.path), 0)
-				environment = append(
-					environment,
-					"PATH="+paths.OSEnv{}.Get("PATH"),
-					"HERDR_SOCKET_PATH="+filepath.Join(root, "herdr-shield", "h1", "herdr-api.sock"),
-				)
-			}
 			values := paths.Values{StateDB: filepath.Join(root, "pfm.db")}
 			db := fleetdb.OpenSharedState(context.Background(), values)
 			defer func() { _ = db.Close() }()

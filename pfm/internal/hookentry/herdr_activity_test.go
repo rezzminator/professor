@@ -399,12 +399,12 @@ func TestHerdrAgentPayloadRequiresIdentity(t *testing.T) {
 	}
 }
 
-// A native Claude seat in a pane herdr-shield holds reports its lifecycle under
-// pfm's own source, with the same sub-agent hold as a tmux seat.
+// A native Claude seat in a pane where Herdr lists no Claude in front reports
+// its lifecycle under pfm's own source, with the same sub-agent hold as a tmux seat.
 func TestHerdrNativeBackgroundAgents(t *testing.T) {
 	root := t.TempDir()
 	server := newNativeReporterHerdr(t, "native-seat", "w6:p3", "native-terminal")
-	holdNativeReporterPane(t, server, "w6:p3")
+	shellFrontNativeReporterPane(t, server, "w6:p3")
 	t.Setenv(paths.EnvHome, root)
 	t.Setenv(paths.EnvStateDB, filepath.Join(root, "pfm.db"))
 	t.Setenv("TMUX", "")

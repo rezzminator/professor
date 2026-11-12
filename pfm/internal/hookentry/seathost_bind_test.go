@@ -21,7 +21,7 @@ import (
 )
 
 func TestBindNativeHostRequiresKernelRoleAndCanonicalOwnership(t *testing.T) {
-	for _, mode := range []string{"legacy", "moved", "recycled", "old-live", "old-dead-live", "cold-lost", "cold-moved-caller", "unknown-old", "wrong-shell", "shell-negative", "shell-zero", "shell-one", "wrong-argv", "malformed", "malformed-list", "kept", "raced", "raced-other", "pane-pending", "pane-never"} {
+	for _, mode := range []string{"legacy", "moved", "recycled", "old-live", "old-dead-live", "cold-lost", "cold-moved-caller", "unknown-old", "wrong-shell", "shell-negative", "shell-zero", "shell-one", "wrong-argv", "malformed", "malformed-list", "raced", "raced-other", "pane-pending", "pane-never"} {
 		t.Run(mode, func(t *testing.T) {
 			root := testjail.ShortRoot(t)
 			proc := filepath.Join(root, "proc")
@@ -30,12 +30,6 @@ func TestBindNativeHostRequiresKernelRoleAndCanonicalOwnership(t *testing.T) {
 			}
 			if err := os.WriteFile(filepath.Join(proc, "stat"), []byte("btime 1000\n"), 0o600); err != nil {
 				t.Fatal(err)
-			}
-			// groups is each pid's process group and its terminal's foreground group.
-			groups := map[int][2]int{}
-			if mode == "kept" {
-				// herdr-shield's holder 900005 runs the shell 900002, whose terminal's foreground group is the supervisor's.
-				groups = map[int][2]int{900002: {900002, 900004}, os.Getpid(): {900004, 900004}}
 			}
 			writeProc := func(pid, parent int, argv string) {
 				dir := filepath.Join(proc, strconv.Itoa(pid))
@@ -49,9 +43,6 @@ func TestBindNativeHostRequiresKernelRoleAndCanonicalOwnership(t *testing.T) {
 				fields[0] = "S"
 				fields[1] = strconv.Itoa(parent)
 				fields[19] = "100"
-				if group, found := groups[pid]; found {
-					fields[2], fields[5] = strconv.Itoa(group[0]), strconv.Itoa(group[1])
-				}
 				if err := os.WriteFile(
 					filepath.Join(dir, "stat"),
 					[]byte(fmt.Sprintf("%d (pfm) %s", pid, strings.Join(fields, " "))),
@@ -68,12 +59,7 @@ func TestBindNativeHostRequiresKernelRoleAndCanonicalOwnership(t *testing.T) {
 				argv = "/fixture/pfm\x00internal\x00launch\x00host-seat\x00"
 			}
 			writeProc(os.Getpid(), 900002, argv)
-			if mode == "kept" {
-				writeProc(900002, 900005, "sh\x00")
-				writeProc(900005, 1, "herdr-shield\x00holder\x00")
-			} else {
-				writeProc(900002, 1, "sh\x00")
-			}
+			writeProc(900002, 1, "sh\x00")
 			pane, terminal := "w6:p3", "stable"
 			socket := filepath.Join(root, "h.sock")
 			listener, err := net.Listen("unix", socket)
@@ -173,11 +159,6 @@ func TestBindNativeHostRequiresKernelRoleAndCanonicalOwnership(t *testing.T) {
 								shell = 1
 							}
 							foreground := map[string]any{"pid": os.Getpid(), "argv0": "pfm"}
-							if mode == "kept" {
-								// Herdr sees only herdr-shield's attach client.
-								shell = 900007
-								foreground = map[string]any{"pid": 900007, "name": "herdr-shield"}
-							}
 							result = map[string]any{
 								"type": "pane_process_info",
 								"process_info": map[string]any{
@@ -256,13 +237,6 @@ func TestBindNativeHostRequiresKernelRoleAndCanonicalOwnership(t *testing.T) {
 			}
 			t.Setenv(herdr.EnvSocket, socket)
 			t.Setenv(herdr.EnvPane, caller)
-			if mode == "kept" {
-				// The shell names its holder's relay and the pane it was born in.
-				t.Setenv(herdr.EnvSocket, filepath.Join(root, "herdr-shield", "h1", "herdr-api.sock"))
-				t.Setenv(herdr.EnvPane, "w1:p1")
-				t.Setenv(herdr.EnvShieldInner, "h1")
-				testjail.StageHerdrShield(t, testjail.HerdrShieldListing(900005, 100, 900002, 100, pane, socket), 0)
-			}
 			addressed := make(chan error, 1)
 			if mode == "pane-pending" {
 				// The birth records the pane after its supervisor has already started.
@@ -287,7 +261,7 @@ func TestBindNativeHostRequiresKernelRoleAndCanonicalOwnership(t *testing.T) {
 				before.HerdrPane = pane
 			}
 			allowed := mode == "legacy" || mode == "moved" || mode == "cold-lost" || mode == "cold-moved-caller" ||
-				mode == "kept" || mode == "raced" || mode == "pane-pending"
+				mode == "raced" || mode == "pane-pending"
 			current, found, readErr := db.Seat(context.Background(), seat.SeatID)
 			if allowed {
 				if bindErr != nil || !found || readErr != nil || got.SeatHostPID != os.Getpid() ||

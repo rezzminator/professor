@@ -40,7 +40,6 @@ func (fake *resolveFake) resolver() Resolver {
 			}
 			return fake.foreground[pane], nil
 		},
-		Shield: &Shield{},
 	}
 }
 
@@ -56,19 +55,11 @@ func TestResolveFindsTheClientsOwnPane(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		environ map[string]string
-		shield  *Shield
 		want    Location
 	}{
 		{
-			name: "unheld pane", environ: inHerdr("w1:p3"), shield: &Shield{},
+			name: "env pane", environ: inHerdr("w1:p3"),
 			want: Location{Socket: resolveSocket, Pane: "w1:p3", Terminal: "t3"},
-		},
-		// A shell herdr-shield holds names its holder's relay and birth pane.
-		{
-			name:    "herdr-shield relay",
-			environ: map[string]string{EnvMarker: "1", EnvSocket: shieldRelay, EnvPane: "w9:p1"},
-			shield:  &Shield{Runner: shieldRunner(t, shieldListing("running", true, false, "PROTECTED"), 0)},
-			want:    Location{Socket: shieldSocket, Pane: "w1:p4", Terminal: "t4"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -80,7 +71,6 @@ func TestResolveFindsTheClientsOwnPane(t *testing.T) {
 				},
 			}
 			resolver := fake.resolver()
-			resolver.Shield = tc.shield
 			location, found, err := resolver.Resolve(context.Background(), 4101)
 			if err != nil || !found {
 				t.Fatalf("Resolve = %+v, %v, %v; want found, no error", location, found, err)
@@ -232,7 +222,6 @@ func TestWireResolverReadsTheHerdrSocket(t *testing.T) {
 		},
 		Call,
 		func() uint64 { seq++; return seq },
-		&Shield{},
 	)
 	location, found, err := resolver.Resolve(context.Background(), 4101)
 	if err != nil || !found {

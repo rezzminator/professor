@@ -53,19 +53,19 @@ func TestHerdrNativeClaudeDefersLifecycle(t *testing.T) {
 func TestHerdrNativeSeatReporter(t *testing.T) {
 	events := []string{
 		"start", "working", "idle", "attach", "detach", "sync",
-		"held start", "held idle", "held invalid resume", "held delayed working", "unread idle",
+		"shell start", "shell idle", "shell invalid resume", "shell delayed working", "unread idle",
 	}
 	for _, event := range events {
 		t.Run(event, func(t *testing.T) {
 			root := t.TempDir()
 			server := newNativeReporterHerdr(t, "native-seat", "w6:p3", "native-terminal")
-			reportEvent, held := strings.CutPrefix(event, "held ")
+			reportEvent, shellFront := strings.CutPrefix(event, "shell ")
 			reportEvent, unread := strings.CutPrefix(reportEvent, "unread ")
-			held = held || unread
+			shellFront = shellFront || unread
 			// name is the row's hook without its pane's fate.
 			name := reportEvent
-			if held {
-				holdNativeReporterPane(t, server, "w6:p3")
+			if shellFront {
+				shellFrontNativeReporterPane(t, server, "w6:p3")
 				if unread {
 					// The foreground read after the seat's proof fails: the state still
 					// reaches the pane, under pfm's source.
@@ -144,7 +144,7 @@ func TestHerdrNativeSeatReporter(t *testing.T) {
 			if got.SessionID != reportedSession {
 				t.Fatalf("native seat binding = %q, want %s", got.SessionID, reportedSession)
 			}
-			if !held {
+			if !shellFront {
 				// Herdr detects Claude in the pane and owns it: its screen detection reads
 				// the state and its own integration reports the session.
 				if calls := server.calls(); len(calls) != 0 {
@@ -152,7 +152,7 @@ func TestHerdrNativeSeatReporter(t *testing.T) {
 				}
 				return
 			}
-			// Herdr cannot see Claude behind herdr-shield's attach client: pfm reports
+			// Herdr lists no Claude in the pane's foreground: pfm reports
 			// the state, or the pane reads unknown.
 			want := map[string]any{
 				"pane_id": "w6:p3", "source": "pfm", "agent": "claude", "state": "idle",
@@ -168,7 +168,7 @@ func TestHerdrNativeSeatReporter(t *testing.T) {
 			}
 			lines := server.requests()
 			if len(lines) != 1 {
-				t.Fatalf("held pane requests=%q, want one pane.report_agent %v", lines, want)
+				t.Fatalf("shell pane requests=%q, want one pane.report_agent %v", lines, want)
 			}
 			var request struct {
 				Method string         `json:"method"`
@@ -179,13 +179,13 @@ func TestHerdrNativeSeatReporter(t *testing.T) {
 			}
 			// A delayed hook reports at its ingress, never at the later clock.
 			if seq := request.Params["seq"]; name == "delayed working" && seq != float64(100) {
-				t.Fatalf("held pane report seq=%v, want the hook's ingress 100", seq)
+				t.Fatalf("shell pane report seq=%v, want the hook's ingress 100", seq)
 			}
 			delete(request.Params, "seq")
 			wantJSON, _ := json.Marshal(want)
 			gotJSON, _ := json.Marshal(request.Params)
 			if request.Method != "pane.report_agent" || !bytes.Equal(gotJSON, wantJSON) {
-				t.Fatalf("held pane report = %s %s, want pane.report_agent %s", request.Method, gotJSON, wantJSON)
+				t.Fatalf("shell pane report = %s %s, want pane.report_agent %s", request.Method, gotJSON, wantJSON)
 			}
 		})
 	}
@@ -276,8 +276,8 @@ func TestHerdrTmuxSeatFailurePreservesBridge(t *testing.T) {
 	}
 }
 
-// heldClaudeCall is what Herdr receives from a native Claude in a pane
-// herdr-shield holds, as fakeHerdr.calls records it (sorted keys, no seq): the
+// heldClaudeCall is what Herdr receives from a native Claude in a pane where
+// Herdr lists no Claude in front, as fakeHerdr.calls records it (sorted keys, no seq): the
 // state under pfm's own source, with the session and its restore command.
 func heldClaudeCall(session, state, message string) string {
 	if message != "" {
@@ -293,8 +293,8 @@ func TestHerdrNativeSeatReadOnlyReports(t *testing.T) {
 		t.Run(event, func(t *testing.T) {
 			root := t.TempDir()
 			server := newNativeReporterHerdr(t, "native-seat", "w6:p3", "native-terminal")
-			// A held pane is the one pfm reports to, so the report proves the hook ran.
-			holdNativeReporterPane(t, server, "w6:p3")
+			// A shell pane is the one pfm reports to, so the report proves the hook ran.
+			shellFrontNativeReporterPane(t, server, "w6:p3")
 			values := paths.Values{StateDB: filepath.Join(root, "pfm.db")}
 			seat := fleetdb.Seat{
 				SeatID: "native-seat", SessionID: "bound", Backend: "herdr", State: "live", Engine: "cc",
@@ -343,7 +343,6 @@ func TestHerdrNativeSeatReadOnlyReports(t *testing.T) {
 				}
 				return environment[key]
 			}
-			deps.shield = realHerdrDeps().shield
 			var stderr bytes.Buffer
 			rc := reportToHerdr(
 				[]string{reportEvent},
@@ -433,8 +432,8 @@ func TestNativeLossNoteClearsOnlyOnActualPrompt(t *testing.T) {
 			engine := tc.engine
 			if engine == "" {
 				engine = pfmengine.Claude
-				// A held pane is the one pfm reports a Claude to, so the report proves the hook ran.
-				holdNativeReporterPane(t, server, "w6:p3")
+				// A shell pane is the one pfm reports a Claude to, so the report proves the hook ran.
+				shellFrontNativeReporterPane(t, server, "w6:p3")
 			} else {
 				server.addPane("w6:p3", "native")
 			}

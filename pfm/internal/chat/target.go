@@ -16,7 +16,6 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/headless"
-	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/naming"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
@@ -428,7 +427,7 @@ func targetPaths(runtime *pfmconfig.Runtime) (paths.Values, error) {
 
 // Rows is one read-only scan of the whole fleet (the all view).
 func Rows(ctx context.Context, warn io.Writer, runtime *pfmconfig.Runtime) ([]compose.Row, error) {
-	scan, err := ScanRows(ctx, warn, runtime, nil)
+	scan, err := ScanRows(ctx, warn, runtime)
 	if err != nil {
 		return nil, err
 	}
@@ -444,8 +443,8 @@ type FleetScan struct {
 	Unreadable map[string]string
 }
 
-// ScanRows is Rows, its seat proofs through shield (nil: the scan's own), with the sockets the scan could not read.
-func ScanRows(ctx context.Context, warn io.Writer, runtime *pfmconfig.Runtime, shield *herdr.Shield) (
+// ScanRows is Rows with the sockets the scan could not read.
+func ScanRows(ctx context.Context, warn io.Writer, runtime *pfmconfig.Runtime) (
 	result FleetScan, returnErr error,
 ) {
 	database, err := store.Open(store.WithWarningWriter(warn))
@@ -458,7 +457,7 @@ func ScanRows(ctx context.Context, warn io.Writer, runtime *pfmconfig.Runtime, s
 		}
 	}()
 	scan, err := fleet.Scan(ctx, database, fleet.Request{
-		View: compose.AllView, ReadOnly: true, Runtime: runtime, Shield: shield,
+		View: compose.AllView, ReadOnly: true, Runtime: runtime,
 	}, warn)
 	if err != nil {
 		return FleetScan{}, err

@@ -105,7 +105,7 @@ func watchCommand(
 		if pollClock != nil {
 			now = pollClock.Now
 		}
-		first = &watchRound{runtime: runtime, inspector: inspector, share: share, since: now()}
+		first = &watchRound{runtime: runtime, share: share, since: now()}
 	}
 	for _, target := range precheck {
 		if _, err := pfmchat.TargetIn(ctx, target, first.rows, runtime); err != nil {
@@ -130,7 +130,7 @@ func watchCommand(
 			inspector.Sweep() // one poll per discovery: the seats not inspected since the last
 			round := first
 			if first = nil; round == nil {
-				round = &watchRound{runtime: runtime, inspector: inspector, share: share, since: since}
+				round = &watchRound{runtime: runtime, share: share, since: since}
 			}
 			return round.discovery()
 		},
@@ -186,19 +186,18 @@ func watchCommand(
 // share, the scan is the one another watch took at this poll's tick, when one
 // did (pfmchat.ScanShare).
 type watchRound struct {
-	runtime   *commandRuntime
-	inspector *pfmchat.SeatInspector // its herdr-shield reader proves the scan's native seats
-	share     *pfmchat.ScanShare
-	since     time.Time
-	scanned   bool
-	scan      pfmchat.FleetScan
-	err       error
+	runtime *commandRuntime
+	share   *pfmchat.ScanShare
+	since   time.Time
+	scanned bool
+	scan    pfmchat.FleetScan
+	err     error
 }
 
 func (round *watchRound) load(ctx context.Context) (pfmchat.FleetScan, error) {
 	if !round.scanned {
 		scan := func(ctx context.Context) (pfmchat.FleetScan, error) {
-			return pfmchat.ScanRows(ctx, io.Discard, round.runtime, round.inspector.Shield())
+			return pfmchat.ScanRows(ctx, io.Discard, round.runtime)
 		}
 		if round.share != nil {
 			round.scan, round.err = round.share.Scan(ctx, round.since, scan)

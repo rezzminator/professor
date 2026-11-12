@@ -54,9 +54,8 @@ func isUndelivered(err error) bool {
 }
 
 // undeliveredUnderLoad marks err undelivered when the host's load caused it
-// rather than an answer: the hook's deadline passed (a herdr-shield list or a
-// state database read it cut short), a Herdr socket took no dial, or a call
-// timed out. A native seat proof failing so says nothing about the seat, so
+// rather than an answer: the hook's deadline passed (a state database read it
+// cut short), a Herdr socket took no dial, or a call timed out. A native seat proof failing so says nothing about the seat, so
 // the settle process re-sends the recorded state to the panes the session's
 // state last reached; a proof that answered no stands.
 func undeliveredUnderLoad(ctx context.Context, err error) error {

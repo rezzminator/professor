@@ -5,11 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
-	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/headless"
-	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
@@ -21,36 +18,11 @@ type SeatInspector struct {
 	runtime     *pfmconfig.Runtime
 	transcripts *transcript.Reader
 	nativeIdle  map[string]nativeIdleObservation
-	// proofs proves the native seats it inspects (zero: a herdr-shield reader per proof).
-	proofs pfmcall.HerdrProofs
-	// shield is the herdr-shield reader this inspector owns and Sweep holds for
-	// each poll; nil when its proofs belong to a caller that holds its own passes.
-	shield  *herdr.Shield
-	release func()
 }
 
-// NewSeatInspector returns a watch's inspector: its native seats are proved
-// through one herdr-shield reader that Sweep holds for each poll, so a poll
-// lists each Herdr socket once however many seats it inspects.
+// NewSeatInspector returns a watch's inspector.
 func NewSeatInspector(runtime *pfmconfig.Runtime) *SeatInspector {
-	inspector := &SeatInspector{runtime: runtime, transcripts: new(transcript.Reader), release: func() {}}
-	if runtime != nil {
-		inspector.shield = gather.HerdrShield(gather.NewProcFS(runtime.Paths.ProcRoot))
-		inspector.proofs = pfmcall.HerdrProofs{Shield: inspector.shield}
-	}
-	return inspector
-}
-
-// shareProofs makes the inspector prove through proofs, whose owner holds its
-// passes: Sweep then holds nothing.
-func (inspector *SeatInspector) shareProofs(proofs pfmcall.HerdrProofs) {
-	inspector.shield, inspector.proofs = nil, proofs
-}
-
-// Shield is the herdr-shield reader the inspector proves through, for a scan
-// of the same poll to share (nil: a reader per proof).
-func (inspector *SeatInspector) Shield() *herdr.Shield {
-	return inspector.proofs.Shield
+	return &SeatInspector{runtime: runtime, transcripts: new(transcript.Reader)}
 }
 
 // Inspect is InspectSeat with the real pane capture.
@@ -60,7 +32,7 @@ func (inspector *SeatInspector) Inspect(
 	now time.Time,
 ) (headless.Status, error) {
 	reads, native := inspector.transcripts, nativeStatusObservation{}
-	status, err := inspectTarget(ctx, inspector.runtime, target, now, nil, reads, inspector.proofs, &native)
+	status, err := inspectTarget(ctx, inspector.runtime, target, now, nil, reads, &native)
 	if target.Backend == spawn.BackendHerdr {
 		inspector.observeNativeIdle(target, now, native, &status, err)
 	}
@@ -81,10 +53,6 @@ func (inspector *SeatInspector) Rest(
 // Sweep lets go of the transcripts not inspected since the last Sweep: a
 // watch sweeps once per poll, so it holds only the seats it still watches.
 func (inspector *SeatInspector) Sweep() {
-	if inspector.shield != nil {
-		inspector.release()
-		inspector.release = inspector.shield.Hold()
-	}
 	inspector.transcripts.Sweep()
 	for key, entry := range inspector.nativeIdle {
 		if !entry.seen {

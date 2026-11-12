@@ -31,11 +31,10 @@ type bridgeProver struct {
 }
 
 // bridgeForeground reads one pane's foreground pids through pane.process_info
-// and shield, refusing a reply that does not name that very pane.
+// and refuses a reply that does not name that very pane.
 func bridgeForeground(
 	call func(ctx context.Context, socket string, lines ...[]byte) ([]json.RawMessage, error),
 	seq func() uint64,
-	shield *herdr.Shield,
 ) func(ctx context.Context, socket, pane string) ([]int, error) {
 	return func(ctx context.Context, socket, pane string) ([]int, error) {
 		line, err := herdr.ProcessInfo{Pane: pane, Seq: seq()}.Line()
@@ -49,7 +48,7 @@ func bridgeForeground(
 		if len(results) != 1 {
 			return nil, fmt.Errorf("pane.process_info of %s answered %d results, want 1", pane, len(results))
 		}
-		processes, err := shield.Processes(ctx, socket, results[0])
+		processes, err := herdr.ParsePaneProcesses(results[0])
 		if err != nil {
 			return nil, fmt.Errorf("decode pane.process_info of %s: %w", pane, err)
 		}

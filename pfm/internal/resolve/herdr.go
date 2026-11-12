@@ -23,20 +23,15 @@ type herdrClaim struct {
 	terminal string
 }
 
-// proveHerdr proves the process location before consulting any seat rows. A
-// shell herdr-shield holds names its holder's relay socket and birth pane; the
-// claim carries Herdr's own socket and the current pane, as an unheld pane's.
+// proveHerdr proves the process location before consulting any seat rows; the
+// claim carries the current pane.
 func (identifier *Whoami) proveHerdr(ctx context.Context, chain []int) (herdrClaim, int, string, error) {
 	env := identifier.environment
 	claim := herdrClaim{}
 	if env.HerdrSocket == "" || env.HerdrPane == "" {
 		return claim, -1, "", nil
 	}
-	shield := gather.HerdrShield(gather.NewProcFS(identifier.procRoot))
-	socket, inherited, err := shield.Upstream(ctx, env.HerdrSocket, env.HerdrPane)
-	if err != nil {
-		return claim, -1, "", fmt.Errorf("look up the caller: %w", err)
-	}
+	socket, inherited := env.HerdrSocket, env.HerdrPane
 	failure := func(err error) (herdrClaim, int, string, error) {
 		var refusal *herdr.Refusal
 		if errors.Is(err, syscall.ENOENT) || errors.Is(err, syscall.ECONNREFUSED) ||
@@ -49,14 +44,14 @@ func (identifier *Whoami) proveHerdr(ctx context.Context, chain []int) (herdrCla
 	if err != nil {
 		return claim, -1, "", fmt.Errorf("look up the caller: %w", err)
 	}
-	pane, found, err := herdr.LocatePane(ctx, shield, socket, asked, chain)
+	pane, found, err := herdr.LocatePane(ctx, socket, asked, chain)
 	if err != nil {
 		return failure(err)
 	}
 	if !found {
 		return claim, -1, fmt.Sprintf("herdr %s %s: no pane holds the caller", socket, asked), nil
 	}
-	processes, err := shield.Read(ctx, socket, pane.ID)
+	processes, err := herdr.ReadPaneProcesses(ctx, socket, pane.ID)
 	if err != nil {
 		return failure(err)
 	}

@@ -100,7 +100,6 @@ The step's `steps/<name>.xtrace` (see [Per step](#per-step)). For a red shell st
 | `steps/<name>.hang/tree.txt` | `stepprof_run` | process tree, only when the bound ended the step |
 | `resources.tsv`, `resources.err` | `infra/fence/sampler.sh` | [Gate-wide resources](#gate-wide-resources) |
 | `e2e.load` | `pfm/scripts/test-shard.sh sample` | same header and rows as `unit.load` |
-| `bin/` | `pfm/scripts/test-shard.sh run --bin-dir` | the `pfm` and `mock-engine` the unit run built |
 | `profile/<label>.<pid>/summary.json` | `internal/testjail` | [Per Go package process](#per-go-package-process) |
 | `profile/<label>.<pid>/<reason>/` | `internal/testjail` | [Go bundles](#go-bundles) |
 | `profile/fixture-<kind>/<label>.<pid>/`, `profile/race/<label>.<pid>/` | `internal/testjail` | the same summary and bundles, one root per Go fixture step and one for the race step, listed in `INDEX.txt` |

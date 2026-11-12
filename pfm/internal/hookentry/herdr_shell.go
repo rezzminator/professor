@@ -171,7 +171,7 @@ func reportShell(ctx context.Context, deps herdrDeps, options herdrShellOptions,
 		return seq
 	}
 	record := filepath.Join(deps.lockDir, fmt.Sprintf("%s-%d.pane", herdrShellSource, options.pid))
-	pane, nested, err := shellPane(ctx, deps.shield, socket, options.pid, identity.HerdrPane, next)
+	pane, nested, err := shellPane(ctx, socket, options.pid, identity.HerdrPane, next)
 	if options.verb == herdrShellRelease {
 		var missing errNoShellPane
 		if errors.As(err, &missing) {
@@ -449,13 +449,13 @@ func shellTitlePath(lockDir, pane string) string {
 // pane that closed between the listing and its question is skipped.
 func shellPane(
 	ctx context.Context,
-	shield *herdr.Shield, socket string,
+	socket string,
 	pid int,
 	born string,
 	next func() uint64,
 ) (string, bool, error) {
 	if born != "" {
-		canonical, nested, err := paneRunsShell(ctx, shield, socket, born, pid, next())
+		canonical, nested, err := paneRunsShell(ctx, socket, born, pid, next())
 		if err != nil && !isHerdrNotFound(err) {
 			return "", false, err
 		}
@@ -471,7 +471,7 @@ func shellPane(
 		if pane.PaneID == born {
 			continue
 		}
-		canonical, nested, err := paneRunsShell(ctx, shield, socket, pane.PaneID, pid, next())
+		canonical, nested, err := paneRunsShell(ctx, socket, pane.PaneID, pid, next())
 		if err != nil && !isHerdrNotFound(err) {
 			return "", false, err
 		}
@@ -483,12 +483,11 @@ func shellPane(
 }
 
 // paneRunsShell returns the producer's canonical pane id when its own shell,
-// or one of its foreground processes (nested true), is pid; a pane herdr-shield
-// holds runs its holder's shell (shield). A moved pane's inherited id may be an
-// alias that pane.list never emits.
+// or one of its foreground processes (nested true), is pid. A moved pane's
+// inherited id may be an alias that pane.list never emits.
 func paneRunsShell(
 	ctx context.Context,
-	shield *herdr.Shield, socket, pane string,
+	socket, pane string,
 	pid int,
 	seq uint64,
 ) (string, bool, error) {
@@ -500,7 +499,7 @@ func paneRunsShell(
 	if err != nil {
 		return "", false, err
 	}
-	processes, err := shield.Processes(ctx, socket, results[0])
+	processes, err := herdr.ParsePaneProcesses(results[0])
 	if err != nil {
 		return "", false, err
 	}

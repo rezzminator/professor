@@ -402,7 +402,7 @@ The command points to [laws.md § Sources](laws.md#sources), the short list of p
 
 ## The hand-off
 
-The design document is reviewed before anything is built. The laws reach every tier's tests through three carriers the design writes, never through a pointer to a file the project may not hold: the checks script, the skeleton ledgers, and the rows the project's testing manual must carry — under § Lanes and registries the per-change duty (the landscape row, the map row, the mapped row and its bite in the same commit; an escape's assertion and `escapes.tsv` row with its fix; the sequence at every landing where a live tier exists) and under § What not to test the refused shapes. A rule that only lives in a neighbour document is not in force.
+The design document is reviewed before anything is built. The laws reach every tier's tests through three carriers the design writes, never through a pointer to a file the project may not hold: the checks script, the skeleton ledgers, and the rows the project's testing manual must carry — under § Suite duties the per-change duty (the journey step with each owner-visible change, watched red; an escape's assertion with its fix; the shared-core files with one editor per flight) and under § What not to test the refused shapes. A rule that only lives in a neighbour document is not in force.
 
 In a project installed from this blueprint, the flights cast builds and keeps the suite:
 
@@ -417,7 +417,7 @@ Outside this blueprint, the owner assigns the review, the build and the runs. La
 | Neighbour | Owns | Shares with this command |
 | --- | --- | --- |
 | `/llm-codebase:use` | the source-tree layout and its mechanical gates | the three-state protocol as it stands; this suite's `size`, `clones` and budget rows run in its own script |
-| the project's testing manual | one project's test mechanics — where a test lives, run commands, environments, cleanup, concurrency, the local traps — and the per-change duty | this command carries the design law for every tier; the manual's § Lanes and registries carries the per-change duty and § What not to test the refused shapes, in the manual's own words for its stack |
+| the project's testing manual | one project's test mechanics — where a test lives, run commands, environments, cleanup, concurrency, the local traps — and the per-change duty | this command carries the design law for every tier; the manual's § Suite duties carries the per-change duty and § What not to test the refused shapes, in the manual's own words for its stack |
 
 ## Surfaces that stay in sync
 
@@ -425,11 +425,11 @@ Outside this blueprint, the owner assigns the review, the build and the runs. La
 | --- | --- | --- |
 | The command | `templates/global/commands/integration-suite/use.md` | Inputs, terms, names, the tier names unit / hermetic / live, laws, procedure, output, hand-off, seed evidence, checks, the threat model |
 | Its neighbour | `templates/global/commands/llm-codebase/use.md` | § Protocol, cited as it stands |
-| The testing-manual template | `templates/project/commands/per-project/testing-manual.md` | § Tiers in the tier names unit / hermetic / live, § Lanes and registries, § What not to test |
+| The testing-manual template | `templates/project/commands/per-project/testing-manual.md` | § Tiers in the tier names unit / hermetic / live, § Suite duties, § What not to test |
 | The test-writing rules | `templates/global/rules/testing.md`, `templates/global/rules/integration-tests.md` | The laws every agent writing a test carries, in the rules' own words: `testing` for every tier, `integration-tests` path-scoped to suites above the unit tier and pointing to the command for the design |
 | Registries | `templates/refresh-map.json`, `docs/SETUP.md`, `docs/README.md` | The command's entry |
 | This directory | `docs/design/integration-suite/` | How the command works and why its laws are shaped as they are |
 
 ## Open items
 
-- **The testing-manual template's § Tiers** names its tiers Unit and Integration; § Surfaces that stay in sync holds it to the tier names unit / hermetic / live, which its § Lanes and registries and § What not to test already use.
+- **The testing-manual template's § Tiers** names its tiers Unit and Integration; § Surfaces that stay in sync holds it to the tier names unit / hermetic / live, which its § Suite duties and § What not to test already use.

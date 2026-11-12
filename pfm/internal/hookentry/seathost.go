@@ -153,7 +153,7 @@ func SeatHost(args []string, stdout, stderr io.Writer, runtime config.Runtime) i
 		}
 		status, started := 1, false
 		if runErr == nil {
-			// The bound seat's Herdr socket and pane, never a herdr-shield relay's.
+			// The bound seat's Herdr socket and pane.
 			options.Env = seatEnvironment(
 				options.Env,
 				[]string{

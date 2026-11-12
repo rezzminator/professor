@@ -2,16 +2,13 @@ package testjail
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/cmdparse"
-	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -52,12 +49,6 @@ func HerdrClaudeHook(dir string) string {
 	return "bash '" + dir + "/hooks/herdr-agent-state.sh' session"
 }
 
-// GuardedHerdrClaudeHook is HerdrClaudeHook as pfm install leaves it: guarded
-// against herdr-shield panes.
-func GuardedHerdrClaudeHook(dir string) string {
-	return herdr.GuardClaudeHook(HerdrClaudeHook(dir))
-}
-
 // HerdrClaudeSettings renders a Claude settings.json holding one Herdr
 // SessionStart entry per dir, with Herdr's matcher and timeout.
 func HerdrClaudeSettings(dirs ...string) string {
@@ -69,36 +60,11 @@ func HerdrClaudeSettings(dirs ...string) string {
 	return `{"theme":"dark","hooks":{"SessionStart":[` + strings.Join(entries, ",") + `]}}`
 }
 
-// GuardedHerdrClaudeSettings is HerdrClaudeSettings with every hook guarded.
-func GuardedHerdrClaudeSettings(dirs ...string) string {
-	text := HerdrClaudeSettings(dirs...)
-	for _, dir := range dirs {
-		text = strings.ReplaceAll(
-			text,
-			fmt.Sprintf("%q", HerdrClaudeHook(dir)),
-			fmt.Sprintf("%q", GuardedHerdrClaudeHook(dir)),
-		)
-	}
-	return text
-}
-
 // StageHerdrClaudeHook adds Herdr's Claude hook for dir to dir's settings.json
 // through its link, keeping every other key and adding nothing when the hook
 // is there, the way Herdr's installer does: an installed home on a Herdr host
 // holds it.
 func StageHerdrClaudeHook(t *testing.T, dir string) {
-	t.Helper()
-	addHerdrClaudeHook(t, dir, false)
-}
-
-// StageInstalledHerdrClaudeHook is StageHerdrClaudeHook with the hook guarded
-// as pfm install leaves it: an installed home on a Herdr host holds this one.
-func StageInstalledHerdrClaudeHook(t *testing.T, dir string) {
-	t.Helper()
-	addHerdrClaudeHook(t, dir, true)
-}
-
-func addHerdrClaudeHook(t *testing.T, dir string, guarded bool) {
 	t.Helper()
 	path := filepath.Join(dir, "settings.json")
 	raw, err := os.ReadFile(path)
@@ -124,10 +90,6 @@ func addHerdrClaudeHook(t *testing.T, dir string, guarded bool) {
 		}
 	}
 	added := entry["hooks"].(map[string]any)["SessionStart"].([]any)
-	if guarded {
-		command := added[0].(map[string]any)["hooks"].([]any)[0].(map[string]any)
-		command["command"] = GuardedHerdrClaudeHook(dir)
-	}
 	hooks["SessionStart"] = append(sessionStart, added...)
 	encoded, err := json.Marshal(settings)
 	if err != nil {
@@ -172,57 +134,4 @@ func HerdrWorkspaceReply(method, label, workspace string) (map[string]any, bool)
 		}, true
 	}
 	return nil, false
-}
-
-// HerdrShieldListing is `herdr-shield list --json` holding one running holder h1
-// (pid holderPID, started at holderStart) whose child (pid childPID, started
-// at childStart) runs the shell of pane on socket, which it lists PROTECTED.
-func HerdrShieldListing(holderPID, holderStart, childPID, childStart int, pane, socket string) string {
-	return fmt.Sprintf(
-		`{"enumeration":"OK","error":null,"holders":[{"id":"h1","holder_live":true,"state":"running",`+
-			`"orphan":false,"holder":{"pid":%d,"start":%d},"child":{"pid":%d,"start":%d},`+
-			`"binding":{"pane":%q,"socket":%q}}],"panes":[{"pane_id":%q,"status":"PROTECTED"}]}`,
-		holderPID, holderStart, childPID, childStart, pane, socket, pane,
-	)
-}
-
-// StageHerdrShield puts a fake herdr-shield first on PATH for the rest of t: its
-// `list --json` prints listing to stdout and exits 0, or with exit nonzero
-// prints listing to stderr and exits exit. Any other argv exits 2. Like
-// herdr-shield's endpoint, it refuses with enumeration ERROR and exit 1 when
-// HERDR_SOCKET_PATH is no absolute path or HERDR_SHIELD_INNER is set. runs
-// counts its invocations so far, whatever their argv.
-func StageHerdrShield(t *testing.T, listing string, exit int) (runs func() int) {
-	t.Helper()
-	dir := t.TempDir()
-	stream := ""
-	if exit != 0 {
-		stream = " >&2"
-	}
-	counter := filepath.Join(dir, "runs")
-	script := fmt.Sprintf(
-		"#!/bin/sh\necho >> '%s'\n"+
-			"[ \"$*\" = \"list --json\" ] || { echo \"unexpected argv: $*\" >&2; exit 2; }\n"+
-			"case \"$HERDR_SOCKET_PATH\" in /*) refusal= ;; *) refusal=\"HERDR_SOCKET_PATH required\" ;; esac\n"+
-			"[ -z \"${HERDR_SHIELD_INNER+set}\" ] || refusal=\"recursive shield invocation refused\"\n"+
-			"[ -z \"$refusal\" ] || { printf '{\"enumeration\":\"ERROR\",\"error\":\"%%s\",\"holders\":[],\"panes\":[]}\\n' \"$refusal\"; "+
-			"echo \"herdr-shield: ERROR: pane enumeration failed; holder list retained\" >&2; exit 1; }\n"+
-			"cat%s <<'PFM_SHIELD_LISTING'\n%s\nPFM_SHIELD_LISTING\nexit %d\n",
-		counter, stream, listing, exit,
-	)
-	if err := WriteExecutable(filepath.Join(dir, "herdr-shield"), []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+paths.OSEnv{}.Get("PATH"))
-	return func() int {
-		t.Helper()
-		raw, err := os.ReadFile(counter)
-		if errors.Is(err, fs.ErrNotExist) {
-			return 0
-		}
-		if err != nil {
-			t.Fatalf("read herdr-shield run count %s: %v", counter, err)
-		}
-		return strings.Count(string(raw), "\n")
-	}
 }

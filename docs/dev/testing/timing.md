@@ -77,7 +77,7 @@ Event span excludes build work before the first event. The sweep records externa
 
 The script compiles a sharded package's test binary once, lists its tests from that binary, and starts all of its shards as `go tool test2json` runs of the same binary. It starts the unsharded process first and runs it alongside the sharded package. Sharded packages run one at a time, so at most one unsharded process plus the largest shard count are direct children of the script. With `--history` (the gate passes the newest earlier `unit.json` with test events), the unsharded process lists its packages longest first by their history `Elapsed`, packages with no history first in their given order, so the slowest packages start at once instead of last.
 
-A unit run first builds pfm and mock-engine, both at once, and starts no test before both have finished; it hands them to the tests through `PFM_TEST_PFM_BINARY` and `PFM_TEST_MOCK_ENGINE_BINARY`. A failed build leaves no binary and fails the run. With `--bin-dir D` the binaries are built into `D` and kept; the gate passes `$run/bin`, and `templates.mirrors` reuses `$run/bin/pfm` instead of building its own; it builds one when the unit run left none (a `templates` gate, a failed build). Without `--bin-dir` they go to a temporary directory that is removed.
+A unit run first builds pfm and mock-engine, both at once, and starts no test before both have finished; it hands them to the tests through `PFM_TEST_PFM_BINARY` and `PFM_TEST_MOCK_ENGINE_BINARY`. A failed build leaves no binary and fails the run. They are built into a temporary directory the run removes.
 
 The merged stream has one terminal event per package. A sharded package's `wall_s` is its slowest shard's elapsed time; its existing `pfm/.testtiming.yml` budget is judged the same way as before. `SHARD-LOST <test>` means a listed test did not run and fails the package. Each process's raw JSON stream is kept in `unit-shards/` beside `unit.json` for diagnosis.
 
@@ -139,7 +139,6 @@ Each change was measured before and after in the fence, on the quantity it targe
 | e2e `t.Parallel`, concurrent `TestMain` builds, previous-release prefetch | kept | e2e package `Elapsed` 18.184 → 12.507 s (n=3, −31.2 %) | `8-b/` |
 | concurrent pfm + mock-engine prebuild | kept | test-shard start to first unit test event 2.397 → 1.990 s (n=3, −17.0 %) | `8-c/` |
 | longest-first unsharded package order (`--history`) | kept | unsharded stream end 23.193 → 20.657 s (n=6, −10.9 %) | `8-c/` |
-| prebuilt pfm reused by mirrors (`--bin-dir`) | kept (no keep rule) | one warm pfm build, median 0.652 s (n=5), saved in each of two steps | `8-c/` |
 | `arch-check.sh` checks run concurrently, one-pass C25 | kept | script wall 2.517 → 0.853 s (n=7 / n=4, −66.1 %) | `8-e/` |
 | attach picker plain mode waits on the live row marker, not a 5 s sleep | kept (behaviour fix) | three plain subtests' summed `Elapsed` 15.36 → 0.78 s (n=3, −94.9 %) | `8-g/` |
 | `go_test_report` single pass over `unit.json` | kept | 0.104 → 0.054 s (n=5, −48 %) | `8-h/` |

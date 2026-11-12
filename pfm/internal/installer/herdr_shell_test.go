@@ -257,7 +257,7 @@ func TestHerdrShellUserOwnedAndAbsent(t *testing.T) {
 		if !strings.Contains(output.String(), want) {
 			t.Fatalf("missing skip %q: %s", want, output)
 		}
-		// A user-owned default_shell (herdr-shield) may exec pfm's wrapper as its inner shell, so the
+		// A user-owned default_shell may exec pfm's wrapper as its own inner shell, so the
 		// wrapper is staged even though the config stays the user's; with Herdr absent nothing is.
 		wrapper := filepath.Join(installer.managedRoot, "bin", "pfm-herdr-shell")
 		staged, err := os.ReadFile(wrapper)

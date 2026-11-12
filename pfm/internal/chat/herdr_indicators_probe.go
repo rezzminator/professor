@@ -33,7 +33,7 @@ import (
 type tabProbe struct {
 	// panes reads the endpoint's panes (nil: herdr.ReadTabPanes); foreground
 	// says whether a seat's engine is its pane's foreground (nil:
-	// call.HerdrProofs{}.Engine).
+	// call.HerdrEngine).
 	panes      func(context.Context, string) ([]herdr.TabPane, error)
 	foreground func(context.Context, fleetdb.Seat) (bool, error)
 	// openCodeRoots are the OpenCode stores a tabbed OpenCode chat's title is
@@ -191,7 +191,7 @@ func (probe *tabProbe) surface(ctx context.Context, socket, mode, glyphs string,
 	}
 	foreground := probe.foreground
 	if foreground == nil {
-		foreground = call.HerdrProofs{}.Engine
+		foreground = call.HerdrEngine
 	}
 	panes, err := readPanes(ctx, socket)
 	if err != nil {

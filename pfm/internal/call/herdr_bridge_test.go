@@ -233,7 +233,7 @@ func TestHerdrPaneProofDistinguishesNonFleet(t *testing.T) {
 					return "", errors.New("fleet server refused")
 				},
 			}
-			err := proveHerdrPaneOrBridge(context.Background(), HerdrProofs{}, socket, pane, prover.prove)
+			err := proveHerdrPaneOrBridge(context.Background(), socket, pane, prover.prove)
 			if err == nil || errors.Is(err, herdr.ErrNotFleetPane) != tc.notFleet {
 				t.Fatalf("proof = %v; non-fleet=%t, want %t", err, errors.Is(err, herdr.ErrNotFleetPane), tc.notFleet)
 			}
@@ -261,7 +261,6 @@ func TestHerdrPaneProofAcceptsBridge(t *testing.T) {
 			var asked string
 			err := proveHerdrPaneOrBridge(
 				context.Background(),
-				HerdrProofs{},
 				"/fixture/herdr.sock",
 				"w6:p3",
 				func(_ context.Context, socket, pane string) (HerdrBridge, error) {
@@ -293,15 +292,7 @@ func TestHerdrBridgeForegroundIsThatPanes(t *testing.T) {
 	for _, tc := range []struct {
 		name, reply, wantErr string
 		want                 []int
-		held                 bool
 	}{
-		// Herdr sees herdr-shield's attach client; the proof seeds from its holder's shell.
-		{
-			name:  "held-pane",
-			reply: `{"type":"pane_process_info","process_info":{"pane_id":"w6:p3","foreground_processes":[{"pid":77,"name":"herdr-shield"}]}}`,
-			want:  []int{20},
-			held:  true,
-		},
 		{
 			name:  "same-pane",
 			reply: `{"type":"pane_process_info","process_info":{"pane_id":"w6:p3","foreground_processes":[{"pid":10730}]}}`,
@@ -321,33 +312,7 @@ func TestHerdrBridgeForegroundIsThatPanes(t *testing.T) {
 				}
 				return []json.RawMessage{json.RawMessage(tc.reply)}, nil
 			}
-			shield := &herdr.Shield{}
-			if tc.held {
-				// Holder 5 runs shell 10, whose terminal's foreground group is 20.
-				proc := t.TempDir()
-				for name, body := range map[string]string{
-					"stat":       "btime 1000000000\n",
-					"5/stat":     "5 (herdr-shield) S 1 5 5 0 0 " + strings.Repeat("0 ", 13) + "2 0\n",
-					"10/stat":    "10 (zsh) S 5 10 10 0 20 " + strings.Repeat("0 ", 13) + "3 0\n",
-					"20/stat":    "20 (claude) S 10 20 10 0 20 " + strings.Repeat("0 ", 13) + "4 0\n",
-					"20/cmdline": "claude\x00",
-				} {
-					path := filepath.Join(proc, name)
-					if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-						t.Fatal(err)
-					}
-					if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-						t.Fatal(err)
-					}
-				}
-				testjail.StageHerdrShield(
-					t,
-					testjail.HerdrShieldListing(5, 2, 10, 3, "w6:p3", "/fixture/herdr.sock"),
-					0,
-				)
-				shield = gather.HerdrShield(gather.NewProcFS(proc))
-			}
-			got, err := bridgeForeground(call, func() uint64 { return 1 }, shield)(
+			got, err := bridgeForeground(call, func() uint64 { return 1 })(
 				context.Background(), "/fixture/herdr.sock", "w6:p3")
 			if tc.wantErr == "" {
 				if err != nil || !slices.Equal(got, tc.want) {

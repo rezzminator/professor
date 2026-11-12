@@ -1,5 +1,4 @@
 internal/archive/archive.go 1
-internal/fleetdb/fleetdb.go 1
 internal/heal/heal.go 1
 internal/mcpserv/daemon_status.go 1
 internal/mcpserv/stdio.go 1

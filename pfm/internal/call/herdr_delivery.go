@@ -35,9 +35,8 @@ func (engine *Engine) callHerdr(
 	target, agent, screen, err := engine.awaitHerdrNative(ctx, target, &base, lock)
 	var untracked *herdr.Refusal
 	if errors.As(err, &untracked) && untracked.Code == "agent_not_found" {
-		// Herdr tracks no agent in this pane (its agent authority is held by a
-		// source that never reports, as in a herdr-shield pane): the raw path's
-		// composer guard still protects it.
+		// Herdr tracks no agent in this pane: the raw path's composer guard
+		// still protects it.
 		return engine.callHerdrRaw(ctx, request, target, base, lock, id)
 	}
 	if errors.Is(err, errHerdrStatusUnrecognized) {
@@ -100,7 +99,6 @@ func (engine *Engine) callHerdr(
 		}
 		return base, nil
 	}
-	raw := base
 	prepared, err := engine.prepareLiveMessage(ctx, target, request.Message, false)
 	if err != nil {
 		base.Code = CodeUndelivered
@@ -123,19 +121,6 @@ func (engine *Engine) callHerdr(
 	// Once prompt was attempted, neither a timeout nor a malformed response may
 	// authorize a retry: the producer may already have submitted the message.
 	base.Typed = true
-	var notReady *herdr.Refusal
-	if errors.As(err, &notReady) && notReady.Code == "agent_not_ready" {
-		// Herdr also refuses an agent that is not the pane's foreground process,
-		// as in a herdr-shield pane, where its attach client is: the raw path's
-		// composer guard still protects that pane. A busy agent still refuses.
-		kept, shieldErr := herdr.ShieldForeground(ctx, target.SocketPath, target.Pane)
-		if shieldErr == nil && kept {
-			return engine.callHerdrRaw(ctx, request, target, raw, lock, id)
-		}
-		if shieldErr != nil {
-			err = errors.Join(err, fmt.Errorf("read pane %s foreground: %w", target.Pane, shieldErr))
-		}
-	}
 	if err != nil {
 		base.Typed = !herdrInputUnsent(err)
 		base.Status = statusTypedUnconfirmed

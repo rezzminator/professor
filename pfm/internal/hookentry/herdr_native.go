@@ -47,8 +47,8 @@ type herdrRetirementPending struct{ error }
 func (reporter *herdrReporter) retireNativeTargets(ctx context.Context, path string, state *herdrActivity) error {
 	var kept []herdrActivityTarget
 	for _, saved := range state.Targets {
-		// A native target under pfm's own source is a herdr-shield-held pane this
-		// build reports to. One under herdr:claude is a pane Herdr detects, which
+		// A native target under pfm's own source is a pane of an engine Herdr does
+		// not detect, which this build reports to. One under herdr:claude is a pane Herdr detects, which
 		// its own screen detection owns now; one without a source predates native
 		// state reporting. Both are retired.
 		if state.tmuxTarget(saved) || (saved.Native && saved.Source == herdr.Source) {
@@ -160,8 +160,8 @@ func (reporter *herdrReporter) releaseNativeTarget(
 }
 
 // releaseSeenPane releases each report pfm left under its own source on the
-// seat's pane while Herdr did not see Claude there (a hook whose foreground read
-// failed, or herdr-shield's attach client in front): Herdr sees Claude now, and a
+// seat's pane while Herdr did not see Claude there (left by a build that found
+// another process in front of Claude): Herdr sees Claude now, and a
 // reported state outranks its screen detection until released. A release that
 // fails keeps its target for the next hook, never for the settle process.
 func (reporter *herdrReporter) releaseSeenPane(ctx context.Context, seat fleetdb.Seat) error {

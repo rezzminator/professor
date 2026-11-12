@@ -8,10 +8,8 @@ import (
 	"io"
 	"path/filepath"
 	"strconv"
-	"time"
 
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
-	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
@@ -25,10 +23,6 @@ const (
 	herdrPaneKey  = "pane_id"
 	herdrBackend  = "herdr"
 	liveSeatState = "live"
-	// defaultHeldShellWait bounds how long a held pane's close waits for
-	// herdr-shield to end the holder's shell, polled every heldShellPoll.
-	defaultHeldShellWait = 5 * time.Second
-	heldShellPoll        = 100 * time.Millisecond
 )
 
 // herdrTarget resolves ownership before the index fallback: a new native engine
@@ -293,9 +287,6 @@ type herdrKiller struct {
 	sidDir string
 	// log receives the warnings of a close that succeeded around a failure.
 	log io.Writer
-	// heldShellWait bounds the wait for a held pane's shell to end after its
-	// close; zero is defaultHeldShellWait.
-	heldShellWait time.Duration
 }
 
 // prove re-reads by stable seat identity; stale wire addresses never confer ownership.
@@ -385,13 +376,11 @@ func (client herdrKiller) PaneExists(ctx context.Context, _, _ string) (bool, er
 	return client.enginePresent(ctx, socket, pane)
 }
 
-// enginePresent reads the pane's foreground through herdr-shield: a pane it holds
-// shows its holder's shell, so the engine is found where it runs, never in the
-// attach client alone.
+// enginePresent reads the pane's foreground from Herdr's pane.process_info.
 func (client herdrKiller) enginePresent(ctx context.Context, socket, pane string) (bool, error) {
-	_, processes, err := paneProcesses(ctx, socket, pane)
+	processes, err := herdr.ReadPaneProcesses(ctx, socket, pane)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("read Herdr processes in %s: %w", pane, err)
 	}
 	present, err := herdr.EngineForeground(processes, pane, client.engine)
 	if err != nil || present {
@@ -401,54 +390,6 @@ func (client herdrKiller) enginePresent(ctx context.Context, socket, pane string
 	return false, fmt.Errorf(
 		"herdr foreground evidence unavailable in %s; live supervisor engine exit is unproved", pane,
 	)
-}
-
-// paneProcesses reads pane's processes through herdr-shield, returning the shield
-// door that read them.
-func paneProcesses(ctx context.Context, socket, pane string) (*herdr.Shield, herdr.PaneProcesses, error) {
-	values, err := paths.Resolve()
-	if err != nil {
-		return nil, herdr.PaneProcesses{}, fmt.Errorf("read Herdr processes in %s: resolve paths: %w", pane, err)
-	}
-	shield := gather.HerdrShield(gather.NewProcFS(values.ProcRoot))
-	processes, err := shield.Read(ctx, socket, pane)
-	if err != nil {
-		return nil, herdr.PaneProcesses{}, fmt.Errorf("read Herdr processes in %s: %w", pane, err)
-	}
-	return shield, processes, nil
-}
-
-// awaitHeldShell waits, bounded, for herdr-shield to end holder's shell once its
-// pane closed: Herdr's close ends only the attach client, so a shell that
-// outlives it keeps the seat and names herdr-shield's own cleanup.
-func (client herdrKiller) awaitHeldShell(
-	ctx context.Context, shield *herdr.Shield, holder herdr.ShieldHolder, pane string,
-) error {
-	wait := client.heldShellWait
-	if wait <= 0 {
-		wait = defaultHeldShellWait
-	}
-	deadline := clock.Real.Now().Add(wait)
-	for {
-		ended, err := shield.ShellEnded(holder)
-		if err != nil {
-			return fmt.Errorf("closed Herdr pane %s; seat %s retained: %w", pane, client.seat.SeatID, err)
-		}
-		if ended {
-			return nil
-		}
-		if !clock.Real.Now().Before(deadline) {
-			return fmt.Errorf(
-				"closed Herdr pane %s, but herdr-shield holder %s still runs its shell (pid %d): "+
-					"end it with `%s kill %s`; seat %s retained",
-				pane, holder.ID, holder.Child.PID, herdr.ShieldBinary, holder.ID, client.seat.SeatID,
-			)
-		}
-		if err := waitContext(ctx, heldShellPoll); err != nil {
-			return fmt.Errorf("closed Herdr pane %s; seat %s retained: await its herdr-shield shell: %w",
-				pane, client.seat.SeatID, err)
-		}
-	}
 }
 
 func herdrPaneMatches(target, pane, workspace string) bool {
@@ -528,18 +469,8 @@ func (client herdrKiller) KillPane(ctx context.Context, socket, pane string) err
 		return fmt.Errorf("native seat %s supervisor is dead; pane not closed, seat retained", client.seat.SeatID)
 	}
 
-	// The proved owner's address, never the caller's stale one, as ack uses.
-	shield, processes, err := paneProcesses(ctx, owner.HerdrSocket, owner.HerdrPane)
-	if err != nil {
-		return fmt.Errorf("refuse Herdr close: %w", err)
-	}
 	if err := client.ack(ctx, socket, pane, "pane.close", map[string]string{herdrPaneKey: pane}); err != nil {
 		return err
-	}
-	if processes.Holder != nil {
-		if err := client.awaitHeldShell(ctx, shield, *processes.Holder, owner.HerdrPane); err != nil {
-			return err
-		}
 	}
 	// A forced pane close also kills its supervisor, so it cannot retire the
 	// durable address itself. Keep the independent kill ledger untouched.

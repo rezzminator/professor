@@ -177,7 +177,7 @@ func (installer *engine) wireHerdrShell(uninstall bool) (result error) {
 	}
 	if status.Present {
 		// A user-owned default_shell stays the user's; the wrapper is still kept current, since a
-		// user-chosen outer shell (herdr-shield's inner shell) may exec it.
+		// user-chosen outer shell may exec it.
 		return nil
 	}
 	raw, existed, err := readCodexConfig(status.Path)

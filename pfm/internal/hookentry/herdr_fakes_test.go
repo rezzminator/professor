@@ -27,13 +27,13 @@ import (
 
 // fakePane is a pane in the fake Herdr's table: its id, the terminal that
 // outlives a move, the foreground process pids pane.process_info reports, and
-// the pane's own shell (0: none reported); kept names every process
-// herdr-shield, the attach client of a pane herdr-shield holds.
+// the pane's own shell (0: none reported); shellFront makes Herdr list a
+// shell, not Claude, as the pane's foreground.
 type fakePane struct {
 	id, terminal string
 	pids         []int
 	shell        int
-	kept         bool
+	shellFront   bool
 }
 
 type fakeAgent struct{ name, pane string }
@@ -125,14 +125,14 @@ func (server *fakeHerdr) addShellPane(id, terminal string, shell int, pids ...in
 	server.panes = append(server.panes, fakePane{id: id, terminal: terminal, pids: pids, shell: shell})
 }
 
-// addKeptPane adds a pane herdr-shield holds: Herdr sees its attach client
-// (pid client) as both shell and foreground.
-func (server *fakeHerdr) addKeptPane(id, terminal string, client int) {
+// addShellFrontPane adds a pane whose foreground Herdr lists as shell pid
+// client, not Claude.
+func (server *fakeHerdr) addShellFrontPane(id, terminal string, client int) {
 	server.mu.Lock()
 	defer server.mu.Unlock()
 	server.panes = append(
 		server.panes,
-		fakePane{id: id, terminal: terminal, pids: []int{client}, shell: client, kept: true},
+		fakePane{id: id, terminal: terminal, pids: []int{client}, shellFront: true},
 	)
 }
 
@@ -279,8 +279,8 @@ func (server *fakeHerdr) answer(method, pane, target, name string) (code, result
 			}
 			foreground := make([]map[string]any, 0, len(candidate.pids))
 			name := "proc"
-			if candidate.kept {
-				name = herdr.ShieldBinary
+			if candidate.shellFront {
+				name = "sh"
 			}
 			for _, pid := range candidate.pids {
 				foreground = append(foreground, map[string]any{"pid": pid, "name": name})
@@ -796,14 +796,11 @@ func newNativeReporterHerdrCount(
 					}
 					info := map[string]any{"pane_id": pane, "shell_pid": 900001}
 					server.mu.Lock()
-					for _, held := range server.panes {
-						if held.kept && held.id == pane {
-							// Herdr sees only herdr-shield's attach client in a held pane.
-							info["shell_pid"] = held.shell
+					for _, candidate := range server.panes {
+						if candidate.shellFront && candidate.id == pane {
+							// Herdr lists a shell, not Claude, in the pane's foreground.
 							info["foreground_processes"] = []any{
-								map[string]any{
-									"pid": held.shell, "name": herdr.ShieldBinary, "argv": []string{herdr.ShieldBinary},
-								},
+								map[string]any{"pid": candidate.pids[0], "name": "sh", "argv": []string{"sh"}},
 							}
 						}
 					}
@@ -853,34 +850,11 @@ func newNativeReporterHerdrCount(
 	return server
 }
 
-// holdNativeReporterPane makes pane one herdr-shield holds: holder 900020 runs
-// the shell 900021 the seat host 900001 runs under, whose terminal's
-// foreground group is the seat host's, and Herdr sees attach client 900030.
-func holdNativeReporterPane(t *testing.T, server *fakeHerdr, pane string) {
+// shellFrontNativeReporterPane makes pane one where Herdr lists a shell, not
+// Claude, in the foreground: Herdr sees no agent there, so pfm reports.
+func shellFrontNativeReporterPane(t *testing.T, server *fakeHerdr, pane string) {
 	t.Helper()
-	proc := os.Getenv(paths.EnvProcRoot)
-	for _, process := range []struct{ pid, parent, group, terminalGroup int }{
-		{900020, 1, 900020, -1}, {900021, 900020, 900021, 900001}, {900001, 900021, 900001, 900001},
-	} {
-		fields := strings.Fields(strings.Repeat("0 ", 24))
-		fields[0], fields[1], fields[2] = "S", strconv.Itoa(process.parent), strconv.Itoa(process.group)
-		fields[5], fields[19] = strconv.Itoa(process.terminalGroup), "100"
-		stat := fmt.Sprintf("%d (pfm) %s", process.pid, strings.Join(fields, " "))
-		dir := filepath.Join(proc, strconv.Itoa(process.pid))
-		if err := os.MkdirAll(dir, 0o700); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, "stat"), []byte(stat), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if process.pid != 900001 {
-			if err := os.WriteFile(filepath.Join(dir, "cmdline"), []byte("/fixture/sh\x00"), 0o600); err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
-	testjail.StageHerdrShield(t, testjail.HerdrShieldListing(900020, 100, 900021, 100, pane, server.path), 0)
-	server.addKeptPane(pane, "native", 900030)
+	server.addShellFrontPane(pane, "native", 900030)
 }
 
 func stampNativeReporterSeat(t *testing.T, seat *fleetdb.Seat) {

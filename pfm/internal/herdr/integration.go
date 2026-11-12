@@ -1,7 +1,6 @@
 package herdr
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,11 +21,7 @@ import (
 // SessionStart hook running it to {CLAUDE_CONFIG_DIR}/settings.json, through a
 // symlinked settings.json. Config dirs sharing one settings.json each add their
 // own entry, so the hook would fire once per dir: the store, never the dir, is
-// the unit that holds exactly one. The hook stores a `herdr:claude` agent session
-// on the pane, which in a herdr-shield pane (Herdr sees only the attach client)
-// makes Herdr ignore every pfm report for good, so pfm runs it guarded
-// (GuardClaudeHook): a Claude carrying EnvShieldInner skips it. Herdr's install
-// is not idempotent over a guarded hook, it adds an unguarded duplicate.
+// the unit that holds exactly one.
 const (
 	// Binary is the herdr executable's name on PATH.
 	Binary                  = "herdr"
@@ -57,52 +52,6 @@ func ClaudeIntegrationCommand(binary, dir string) string {
 		binary = cmdparse.Quote(binary)
 	}
 	return ClaudeConfigDirEnv + "=" + cmdparse.Quote(dir) + " " + strings.Join(ClaudeIntegrationArgv(binary), " ")
-}
-
-// claudeHookGuard prefixes Herdr's hook command: the hook runs only in a Claude
-// outside a herdr-shield pane, none of which carries EnvShieldInner.
-const claudeHookGuard = `[ -n "${` + EnvShieldInner + `:-}" ] || `
-
-// GuardClaudeHook is command run only outside a herdr-shield pane; a command
-// already guarded comes back as it is.
-func GuardClaudeHook(command string) string {
-	if ClaudeHookGuarded(command) {
-		return command
-	}
-	return claudeHookGuard + command
-}
-
-// ClaudeHookGuarded reports whether the hook command carries the shield guard.
-func ClaudeHookGuarded(command string) bool {
-	return strings.HasPrefix(command, claudeHookGuard)
-}
-
-// GuardClaudeSettings is the Claude settings.json bytes raw with the hook
-// command rewritten to its guarded form, every other byte kept. A command that
-// is not exactly one JSON string literal in raw is an error: the file is never
-// rewritten from a guess.
-func GuardClaudeSettings(raw []byte, command string) ([]byte, error) {
-	literal := func(value string) ([]byte, error) {
-		var out bytes.Buffer
-		encoder := json.NewEncoder(&out)
-		encoder.SetEscapeHTML(false)
-		if err := encoder.Encode(value); err != nil {
-			return nil, fmt.Errorf("encode Claude hook command %q: %w", value, err)
-		}
-		return bytes.TrimRight(out.Bytes(), "\n"), nil
-	}
-	old, err := literal(command)
-	if err != nil {
-		return nil, err
-	}
-	guarded, err := literal(GuardClaudeHook(command))
-	if err != nil {
-		return nil, err
-	}
-	if found := bytes.Count(raw, old); found != 1 {
-		return nil, fmt.Errorf("guard Claude hook %q: found %d times in settings, want exactly 1", command, found)
-	}
-	return bytes.Replace(raw, old, guarded, 1), nil
 }
 
 // ClaudeStore is one physical Claude settings.json and the config dirs sharing it.
@@ -190,7 +139,7 @@ func ClaudeIntegrationHooks(path string) ([]string, error) {
 // command runs (Herdr writes `bash '{dir}/hooks/herdr-agent-state.sh' session`),
 // or "" when no word of it is that script. A guarded command is read past its guard.
 func claudeIntegrationDir(command string) string {
-	words, err := cmdparse.SplitShellWords(strings.TrimPrefix(command, claudeHookGuard))
+	words, err := cmdparse.SplitShellWords(command)
 	if err != nil {
 		return ""
 	}

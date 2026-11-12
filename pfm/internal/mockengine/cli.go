@@ -14,8 +14,7 @@ func answerCLI(proc *process) (int, bool) {
 		return 0, false
 	}
 	if (proc.engine == engineClaude || proc.engine == engineCodex) && args[0] == "doctor" {
-		fmt.Fprintf(proc.stdout, "mock-engine: %s doctor — fixture engine, nothing checked\n", proc.engine)
-		return 0, true
+		return answerDoctor(proc), true
 	}
 	if proc.engine != engineClaude || args[0] != "plugin" {
 		return 0, false

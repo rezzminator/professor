@@ -65,6 +65,10 @@ var launchLiteralReaders = map[string]launchLiteralAllowance{
 			"--resume", "--fork-session", "--remote-control", "CLAUDE_CODE_SESSION_ID=",
 		},
 	},
+	"internal/mockengine/claude_api.go": {
+		"mock reads the env the real CLI reads",
+		[]string{"ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"},
+	},
 	"internal/resolve/whoami.go": {"reads caller session identity", []string{"CLAUDE_CODE_SESSION_ID"}},
 	"internal/statusline/render.go": {"reads engine telemetry", []string{
 		"ANTHROPIC_MODEL",

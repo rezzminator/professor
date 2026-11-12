@@ -15,6 +15,8 @@ import (
 type agentPanel struct {
 	rows     []agentRow
 	finished []agentRow
+	// focused is set while the panel holds the keyboard (agentPanelKey).
+	focused bool
 }
 
 // agentRow is one background agent: its row as the engine draws it, and, when its step named
@@ -29,10 +31,43 @@ const agentTick = 50 * time.Millisecond
 
 func (panel *agentPanel) render() string {
 	var out strings.Builder
+	const indent = "  "
+	if panel.focused {
+		// Claude Code 2.1.280's focused panel: its footer hint, then the cursor on the bare main row
+		// (internal/call/agentpanel.go reads both).
+		out.WriteString(agentPanelHint + "\r\n❯ ⏺ main\r\n")
+	}
 	for _, row := range panel.rows {
-		out.WriteString(row.line + "\r\n")
+		line := row.line
+		if panel.focused {
+			// The cursor is the panel's, on main: an agent row draws none.
+			line = indent + strings.TrimPrefix(line, "❯ ")
+		}
+		out.WriteString(line + "\r\n")
 	}
 	return out.String()
+}
+
+// agentPanelHint is the footer Claude Code's agents panel draws while it holds the keyboard.
+const agentPanelHint = "  ↑/↓ to select · Enter to view"
+
+// agentPanelKey plays the agents panel's hold on the keyboard and reports whether it took the key: the
+// left arrow on an empty Claude composer over running agents focuses the panel; while focused,
+// Escape hands the keyboard back to the composer and every other key is the panel's.
+func (loop *paneLoop) agentPanelKey(event keyEvent) bool {
+	screen := loop.screen
+	panel := &screen.agents
+	if panel.focused {
+		if event.kind == keyEscape {
+			panel.focused = false
+		}
+		return true
+	}
+	if event.kind == keyLeft && screen.rule != "" && len(panel.rows) > 0 && len(screen.draft.draft) == 0 {
+		panel.focused = true
+		return true
+	}
+	return false
 }
 
 // agentWaitLine is the row Claude Code draws above its input box while background agents run
@@ -91,11 +126,17 @@ func (loop *paneLoop) agentsEnded() (int, bool) {
 	}
 	if len(kept) != len(panel.rows) {
 		panel.rows = kept
+		panel.focused = panel.focused && len(kept) > 0
 		loop.paint()
 	}
 	for screen.menu == nil && len(panel.finished) > 0 {
 		row := panel.finished[0]
 		panel.finished = panel.finished[1:]
+		if notifier, ok := loop.engine.(interface{ taskNotification(string) error }); ok {
+			if err := notifier.taskNotification(row.name); err != nil {
+				loop.warn("task notification for %s: %v", row.name, err)
+			}
+		}
 		report := Step{Type: StepTurn, Reply: `Agent "` + row.name + `" finished`, BusyMS: row.busyMS}
 		if code, exited := loop.turn(loop.proc.script.only([]Step{report})); exited {
 			return code, true

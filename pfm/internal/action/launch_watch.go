@@ -18,8 +18,8 @@ import (
 // launchPoll, launchQuiet and launchDeadline pace the launch watch: how often
 // it reads the pane it just created, how long a screen with no engine running
 // on it (a launcher still starting one) must hold still to count as up, and
-// how long it watches one that never settles before it
-// reports the open as done anyway.
+// how long it watches one that never settles before it reports the open as
+// done anyway.
 var (
 	launchPoll     = 250 * time.Millisecond
 	launchQuiet    = 5 * time.Second
@@ -33,20 +33,19 @@ const launchWordsLines = 6
 // watchLaunch reads the pane a chat server was just created around until the
 // chat proves it is up, so an open never reports a chat that is not there.
 //
-// While it watches, the pane keeps its process's last screen when that
-// process exits (remain-on-exit), so a chat that dies at launch is a failed
-// open carrying the pane's own words, its dead server killed rather than left
-// for a lister to count; a server already gone is a failed open too. A pane
-// met by Claude Code's folder-trust dialog stays up untouched — the dialog is
-// the human's decision, and the key that clears it is never pressed here —
-// and comes back as a warning carrying the attach command. A pane showing the
-// same non-empty screen twice with an engine running on it (engineOnPane) is
-// up, as is one whose screen held still for launchQuiet with none — a
-// launcher that prints and then waits on the engine it starts must not read
-// as up the moment it prints; one that never settles is reported as opened
-// once launchDeadline passes. Every pane left alive gets
-// remain-on-exit back off, so a chat that ends later takes its server with it
-// as it always did.
+// While it watches, the pane keeps its process's last screen when that process
+// exits (remain-on-exit), so a chat that dies at launch is a failed open
+// carrying the pane's own words, its dead server killed rather than left for a
+// lister to count; a server already gone is a failed open too. A pane met by
+// Claude Code's folder-trust dialog stays up untouched — the dialog is the
+// human's decision, and the key that clears it is never pressed here — and
+// comes back as a warning carrying the attach command. A pane showing the same
+// non-empty screen twice with an engine running on it (engineOnPane) is up, as
+// is one whose screen held still for launchQuiet with none — a launcher that
+// prints and then waits on the engine it starts must not read as up the moment
+// it prints; one that never settles is reported as opened once launchDeadline
+// passes. Every pane left alive gets remain-on-exit back off, so a chat that
+// ends later takes its server with it as it always did.
 func (executor *Executor) watchLaunch(
 	ctx context.Context,
 	server ChatServer,
@@ -99,10 +98,10 @@ func (executor *Executor) watchLaunch(
 			if previous != "" {
 				printed = "its pane last read: " + paneWords(previous)
 			}
-			return nil, fmt.Errorf(
+			return nil, retiredLaunch(ctx, socket, fmt.Errorf(
 				"the chat %s died at launch: its server on socket %s is gone (%w) — %s",
 				name, socket, err, printed,
-			)
+			))
 		}
 		screen := pane.Screen
 		if pane.Dead {
@@ -166,8 +165,7 @@ func unwatched(name, socket string, cause error) string {
 	)
 }
 
-// deadLaunch is the failure of a pane whose process exited at launch: the
-// pane's last words, its dead server killed so nothing lists it as a chat.
+// deadLaunch fails a launch whose pane's process exited: its last words, its server killed, its seat retired.
 func (executor *Executor) deadLaunch(ctx context.Context, name, socket, screen string) error {
 	words := paneWords(screen)
 	if err := executor.tmux.KillServer(context.WithoutCancel(ctx), socket); err != nil {
@@ -183,7 +181,18 @@ func (executor *Executor) deadLaunch(ctx context.Context, name, socket, screen s
 			err,
 		)
 	}
-	return fmt.Errorf("the chat %s exited at launch — its pane said: %s", name, words)
+	return retiredLaunch(ctx, socket, fmt.Errorf("the chat %s exited at launch — its pane said: %s", name, words))
+}
+
+// retireLaunchSeat retires a dead launch's seat, which no SessionEnd retires; tests replace it.
+var retireLaunchSeat = spawn.RetireTmuxSeat
+
+// retiredLaunch retires a dead launch's seat and returns died, naming a seat the retire left.
+func retiredLaunch(ctx context.Context, socket string, died error) error {
+	if err := retireLaunchSeat(context.WithoutCancel(ctx), socket); err != nil {
+		return fmt.Errorf("%w (its seat stays: %w)", died, err)
+	}
+	return died
 }
 
 // keepLaunch turns remain-on-exit back off on a pane the watch leaves alive; a

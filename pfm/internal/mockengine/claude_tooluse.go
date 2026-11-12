@@ -12,7 +12,6 @@ import (
 	"time"
 	"uuid"
 
-	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
@@ -22,35 +21,58 @@ var claudeSessionEnv = pfmengine.MustLookup(pfmengine.Claude).SessionEnv
 // tool plays a tool_call: PreToolUse, the tool_use record, the call performed when the step says so and
 // no hook denied it, PostToolUse, then the tool_result; it returns the deny reason, "" when allowed.
 func (session *claudeSession) tool(step Step) (string, error) {
+	use, err := session.useTool(step)
+	if err != nil {
+		return "", err
+	}
+	return session.finishTool(step, use)
+}
+
+// toolUse is a tool call between its tool_use record and its result: the record's part, the PreToolUse
+// answers and when that hook returned.
+type toolUse struct {
+	part        contentPart
+	answers     []hookAnswer
+	preReturned time.Time
+}
+
+// denied is the reason the first PreToolUse answer that denies the call gives; found is false when none does.
+func (use toolUse) denied() (reason string, found bool) {
+	for index := range use.answers {
+		if refused, reason := use.answers[index].denies(); refused {
+			return reason, true
+		}
+	}
+	return "", false
+}
+
+// useTool fires PreToolUse and writes the tool_use record.
+func (session *claudeSession) useTool(step Step) (toolUse, error) {
 	input := step.Input
 	if len(input) == 0 {
 		input = json.RawMessage(`{}`)
 	}
 	payload := session.payload(hookPreToolUse)
 	payload.ToolName, payload.ToolInput = step.Tool, input
-	use := contentPart{Type: "tool_use", ID: "toolu_" + uuid.NewV4().String()[:8], Name: step.Tool, Input: input}
-	payload.ToolUseID = use.ID
+	part := contentPart{Type: "tool_use", ID: "toolu_" + uuid.NewV4().String()[:8], Name: step.Tool, Input: input}
+	payload.ToolUseID = part.ID
 	answers, err := session.fire(hookPreToolUse, step.Tool, payload)
 	if err != nil {
-		return "", err
+		return toolUse{}, err
 	}
-	preReturned := time.Now()
-	if err := session.write(
-		session.assistantRecord([]contentPart{use}, session.proc.script.Tokens, false),
-	); err != nil {
-		return "", err
-	}
-	result := contentPart{Type: "tool_result", ToolUseID: use.ID, Content: "done"}
-	denied := ""
-	deniedFound := false
-	for index := range answers {
-		if refused, reason := answers[index].denies(); refused && !deniedFound {
-			deniedFound = true
-			denied = reason
-			result.Content, result.IsError = reason, true
-		}
-	}
-	if !deniedFound {
+	use := toolUse{part: part, answers: answers, preReturned: time.Now()}
+	return use, session.write(session.assistantRecord([]contentPart{part}, session.proc.script.Tokens, false))
+}
+
+// finishTool performs a used tool no hook denied, fires PostToolUse and writes the tool_result; it returns
+// the deny reason, "" when allowed.
+func (session *claudeSession) finishTool(step Step, use toolUse) (string, error) {
+	input := use.part.Input
+	result := contentPart{Type: blockToolResult, ToolUseID: use.part.ID, Content: "done"}
+	denied, deniedFound := use.denied()
+	if deniedFound {
+		result.Content, result.IsError = denied, true
+	} else {
 		// The response reads the file a Write replaces, so it is taken before the call is performed.
 		response, err := session.toolResponse(step.Tool, input)
 		if err != nil {
@@ -60,40 +82,44 @@ func (session *claudeSession) tool(step Step) (string, error) {
 			if result.Content, result.IsError, err = performTool(
 				session.proc, step.Tool, input,
 				append(append([]string(nil), session.environ...), claudeSessionEnv+"="+session.sessionID),
+				session.toolShell,
 			); err != nil {
 				return "", err
 			}
 		}
-		if err := session.postToolUse(step.Tool, input, response, use.ID, time.Since(preReturned)); err != nil {
+		if err := session.postToolUse(step.Tool, input, response, use); err != nil {
 			return "", err
 		}
 	}
-	record := claudeRecord{
-		Type: roleUser, SessionID: session.sessionID, Timestamp: stamp(time.Now()), CWD: session.proc.cwd,
-		Message: &claudeMessage{Role: roleUser, Content: []contentPart{result}},
-	}
-	return denied, session.write(record)
+	return denied, session.toolResult(result)
 }
 
-func (session *claudeSession) postToolUse(
-	tool string, input, response json.RawMessage, useID string, duration time.Duration,
-) error {
+// toolResult writes the user record carrying a tool's result.
+func (session *claudeSession) toolResult(result contentPart) error {
+	return session.write(claudeRecord{
+		Type: roleUser, SessionID: session.sessionID, Timestamp: stamp(time.Now()), CWD: session.proc.cwd,
+		Message: &claudeMessage{Role: roleUser, Content: []contentPart{result}},
+	})
+}
+
+// postToolUse fires PostToolUse for a performed call, its duration counted from PreToolUse's return.
+func (session *claudeSession) postToolUse(tool string, input, response json.RawMessage, use toolUse) error {
 	payload := session.payload(hookPostToolUse)
-	payload.ToolName, payload.ToolInput, payload.ToolUseID = tool, input, useID
+	payload.ToolName, payload.ToolInput, payload.ToolUseID = tool, input, use.part.ID
 	payload.ToolResponse = response
-	ms := duration.Milliseconds()
+	ms := time.Since(use.preReturned).Milliseconds()
 	payload.DurationMS = &ms
 	_, err := session.fire(hookPostToolUse, tool, payload)
 	return err
 }
 
 // performTool carries out an allowed Bash or Write call (Step.Perform) the way Claude Code and Codex do:
-// Bash runs the command with sh in the engine's directory, its combined output the result, and a failed
-// exit is an error result headed by its code; Write creates the file's directory and writes the content.
-// env is the Bash command's environment, the engine's own when nil: Claude Code hands its tool shells the
-// chat's session in CLAUDE_CODE_SESSION_ID.
+// Bash runs the command in the engine's directory with the argv shell gives (sh -c when nil), its
+// combined output the result, and a failed exit is an error result headed by its code; Write creates the
+// file's directory and writes the content. env is the Bash command's environment, the engine's own when
+// nil: Claude Code hands its tool shells the chat's session in CLAUDE_CODE_SESSION_ID.
 func performTool(
-	proc *process, tool string, input json.RawMessage, env []string,
+	proc *process, tool string, input json.RawMessage, env []string, shell func(string) ([]string, error),
 ) (content string, failed bool, err error) {
 	var fields struct {
 		Command  string `json:"command"`
@@ -104,13 +130,16 @@ func performTool(
 		return "", false, fmt.Errorf("decode %s input to perform: %w", tool, err)
 	}
 	if tool == "Bash" {
-		shell, err := deps.Resolve("sh")
+		if shell == nil {
+			shell = shellArgv
+		}
+		argv, err := shell(fields.Command)
 		if err != nil {
-			return "", false, fmt.Errorf("perform Bash: sh not found: %w", err)
+			return "", false, err
 		}
 		bounded, cancel := context.WithTimeout(proc.ctx, time.Minute)
 		defer cancel()
-		cmd := exec.CommandContext(bounded, shell, "-c", fields.Command)
+		cmd := exec.CommandContext(bounded, argv[0], argv[1:]...)
 		cmd.Dir, cmd.Env = proc.cwd, env
 		output, err := cmd.CombinedOutput()
 		var exit *exec.ExitError

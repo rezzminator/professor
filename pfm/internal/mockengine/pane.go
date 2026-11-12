@@ -244,6 +244,9 @@ func (loop *paneLoop) idleKey(event keyEvent) (int, bool) {
 		loop.paint()
 		return 0, false
 	}
+	if screen.menu != nil && screen.menu.Type == StepPermission && (event.kind == keyEnter || event.kind == keyEscape) {
+		return loop.closePermission(event.kind == keyEnter && screen.selected == 1)
+	}
 	if screen.menu != nil {
 		switch {
 		case event.kind == keyEnter:
@@ -253,6 +256,10 @@ func (loop *paneLoop) idleKey(event keyEvent) (int, bool) {
 		case event.kind == keyRune && event.r >= '1' && event.r <= '9' && int(event.r-'0') <= len(screen.menu.Options):
 			screen.selected = int(event.r - '0')
 		}
+		loop.paint()
+		return 0, false
+	}
+	if loop.agentPanelKey(event) {
 		loop.paint()
 		return 0, false
 	}
@@ -363,6 +370,10 @@ func (loop *paneLoop) submit(line string) (int, bool) {
 		loop.refreshStatus(loop.usage)
 		loop.paint()
 		return 0, false
+	case "/resume":
+		if loop.resumeInApp(strings.TrimSpace(rest)) {
+			return 0, false
+		}
 	case "/clear":
 		if err := loop.engine.clear(); err != nil {
 			warn(proc.stderr, "clear: %v", err)
@@ -491,11 +502,30 @@ func (loop *paneLoop) turn(running *script) (int, bool) {
 			return step.ExitCode, true
 		case StepExit:
 			return loop.finish("other", step.ExitCode), true
+		case StepAPIError:
+			return loop.failTurn(running, step, started)
+		case StepAITitle:
+			if code, exited := loop.titleTurn(step); exited {
+				return code, true
+			}
+		case StepPermission:
+			return loop.openPermission(running, step)
+		case StepBackgroundJob:
+			if code, exited := loop.backgroundJob(); exited {
+				return code, true
+			}
 		}
 	}
 }
 
+// interrupted ends a turn Escape cut short; Claude Code records the interrupt
+// in its transcript and fires no hook.
 func (loop *paneLoop) interrupted() (int, bool) {
+	if interrupter, ok := loop.engine.(interface{ interrupt() error }); ok && loop.proc.ctx.Err() == nil {
+		if err := interrupter.interrupt(); err != nil {
+			warn(loop.proc.stderr, "record interrupt: %v", err)
+		}
+	}
 	loop.screen.footer = ""
 	loop.screen.say("⎿ Interrupted")
 	loop.paint()

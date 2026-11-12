@@ -47,6 +47,33 @@ func claudeTyped(c *harness.Ctx, s State) State {
 	if want := []string{"idle", "working", "idle"}; strings.Join(trail, " ") != strings.Join(want, " ") {
 		c.Failf("Herdr status of the native pane through a turn = %v, want %v", trail, want)
 	}
+	// escape herdr/failed-turn-paints-idle: a turn the model server refuses leaves the chat in state error,
+	// and the native pane's tab shows the error mark, not idle.
+	launch := tabName(c, s)
+	term.Type(`a refused turn mock-engine: {"type":"api_error","reply":"API Error: 500 refused"}` + "\r")
+	term.WaitFor("⎿ API Error: 500 refused", 20*time.Second)
+	c.Poll("pfm reads the refused chat error, its tab marked "+strings.Join(tabMarks["error"], "/"), stepBound,
+		func() (bool, string) {
+			state, label := chatAttention(c, s), tabLabel(c, s)
+			return state == "error" &&
+					labelFrame(label, "error", launch) != "", fmt.Sprintf(
+					"state %q, tab %q",
+					state,
+					label,
+				)
+		})
+	// escape herdr/ai-title-before-paint: the automatic title Claude writes after a turn names the chat in
+	// pfm's row and on its tab, and the turn after the refused one settles it idle again.
+	title := c.Unique("ai-title")
+	term.Type(
+		`a titled turn mock-engine: [{"type":"ai_title","name":"` + title + `"},{"type":"turn","reply":"titled"}]` +
+			"\r",
+	)
+	term.WaitFor("⏺ titled", 20*time.Second)
+	c.Poll("row and tab named by the AI title "+title, stepBound, func() (bool, string) {
+		got := [2]string{lsName(c, s), tabLabel(c, s)}
+		return got == [2]string{title, markedLabel("idle", title)}, fmt.Sprintf("row, tab = %q", got)
+	})
 	fleetConsistent(c, s)
 	return s
 }
@@ -129,11 +156,24 @@ func namesAgree(c *harness.Ctx, s State, after string) {
 // reloadCLI: with a draft left in the chat's composer, the owner aims `pfm chat reload` at the chat's Herdr
 // socket and pane from a second terminal, with a follow-up prompt (--then); the chat comes back in the same
 // pane with the same seat, session and name under a new engine, the follow-up submitted once and answered,
-// and the draft, parked before the reload's /exit, never reaches the chat as a prompt.
+// and the draft, parked before the reload's /exit, never reaches the chat as a prompt. Version retention
+// has pruned the Claude build the seat recorded before the reload: the chat comes back on the build that
+// is now the newest (escape herdr/pruned-claude-build).
 func reloadCLI(c *harness.Ctx, s State) State {
 	cli := c.Terminal(s.Term + "-cli")
 	term := c.Terminal(s.Term)
 	before := s.Chat.Engine
+	builds := filepath.Join(s.Home, ".local", "share", "claude", "versions")
+	recorded, successor := filepath.Join(builds, "2.1.270"), filepath.Join(builds, "2.1.269")
+	if got := engineBuild(c, before); got != recorded {
+		c.Failf("engine %d of %s runs %q, want the newest Claude build %q", before, s.Chat.Session, got, recorded)
+	}
+	read(c, "rm", recorded)
+	c.Cleanup(func() {
+		if r := c.Read("ln", "-f", successor, recorded); r.Code != 0 {
+			c.Logf("teardown: ln %s %s exited %d: %s", successor, recorded, r.Code, r.Stderr)
+		}
+	})
 	draft := c.Unique("draft")
 	term.Type(draft)
 	term.WaitFor("❯ " + draft)
@@ -154,6 +194,11 @@ func reloadCLI(c *harness.Ctx, s State) State {
 	reloadRunDone(c, s)
 	term.WaitFor("⏺ "+reply, 20*time.Second)
 	s.Chat.Engine = engineOf(c, s)
+	if got := engineBuild(c, s.Chat.Engine); got != successor {
+		c.Failf("engine %d of %s after the reload runs %q, want the build left newest %q", s.Chat.Engine,
+			s.Chat.Session, got, successor)
+	}
+	read(c, "ln", "-f", successor, recorded)
 	path := transcriptOf(c, s)
 	var got []string
 	for _, text := range userTexts(c, path) {
@@ -459,4 +504,9 @@ func userTexts(c *harness.Ctx, path string) []string {
 		c.Failf("the transcript %s holds no prompt", path)
 	}
 	return texts
+}
+
+// engineBuild is the executable engine pid runs, as /proc names it.
+func engineBuild(c *harness.Ctx, pid int) string {
+	return strings.TrimSpace(read(c, "readlink", fmt.Sprintf("/proc/%d/exe", pid)))
 }

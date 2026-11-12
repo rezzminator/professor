@@ -116,7 +116,9 @@ type ClaudeProcess struct {
 
 // Agent is one non-primary live Claude session identity.
 type Agent struct {
-	PID       int
+	PID int
+	// ParentPID is the process that started it: a native Herdr seat's host for that seat's own engine.
+	ParentPID int
 	PanePID   int
 	Socket    string
 	PaneID    string

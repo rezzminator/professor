@@ -12,7 +12,8 @@ import (
 // question: with the picker open in a terminal of its own and left untouched, the owner types a prompt
 // that makes the engine ask, sees the question with its options, and answers it with Enter; Herdr and pfm
 // read the chat blocked while it is open and idle after, and the idle picker, no key pressed in it, marks
-// the chat's row blocked while the question is open and drops the mark once it is answered.
+// the chat's row blocked while the question is open and drops the mark once it is answered. Then he
+// rejects a tool at its permission dialog (rejectTool).
 func question(c *harness.Ctx, s State) State {
 	term := c.Terminal(s.Term)
 	picker := c.Terminal("question-picker")
@@ -30,7 +31,25 @@ func question(c *harness.Ctx, s State) State {
 	})
 	picker.Press(harness.Esc)
 	picker.WaitGone("New chat", 20*time.Second)
+	rejectTool(c, s)
 	return s
+}
+
+// rejectTool: the owner types a prompt whose turn asks to run a tool, sees Claude's permission dialog and
+// presses Esc. Claude writes the rejection and fires no hook for it; Herdr and pfm read the chat blocked
+// while the dialog is open and idle once it is rejected, and pfm reads the turn aborted.
+func rejectTool(c *harness.Ctx, s State) {
+	term := c.Terminal(s.Term)
+	term.Type(`a tool mock-engine: {"type":"permission","tool":"Bash","input":{"command":"true"}}` + "\r")
+	term.WaitFor("❯ 1. Yes", 20*time.Second)
+	awaitAttention(c, s, "blocked", stepBound)
+	term.Press(harness.Esc)
+	term.WaitFor("Interrupted · What should Claude do instead?", 20*time.Second)
+	awaitAttention(c, s, "idle", stepBound)
+	aborted := entry{Role: "assistant", Text: "[turn aborted: interrupted]"}
+	if got := entries(c, s.Chat.Session); len(got) == 0 || got[len(got)-1] != aborted {
+		c.Failf("pfm chat read %s after the rejected tool: last entry of %v, want %v", s.Chat.Session, got, aborted)
+	}
 }
 
 // askingRow is the asking chat's picker row, its work column before the model's ◇ whatever it shows.

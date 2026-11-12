@@ -92,7 +92,7 @@ func TestDetectAgentsFindsClaudeDaemonJobs(t *testing.T) {
 	if len(agents) != 2 {
 		t.Fatalf("DetectAgents() = %#v, want exactly the two live daemon jobs", agents)
 	}
-	if agents[0].SessionID != jobSession || agents[0].PID != 800 ||
+	if agents[0].SessionID != jobSession || agents[0].PID != 800 || agents[0].ParentPID != 1 ||
 		agents[0].ConfigDir != configDir || agents[0].Socket != "" {
 		t.Fatalf("DetectAgents()[0] = %#v, want pid 800 on %s with no pane", agents[0], configDir)
 	}

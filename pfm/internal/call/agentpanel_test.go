@@ -46,6 +46,11 @@ func TestAgentPanelFocused(t *testing.T) {
 	}{
 		{"the panel holds the keyboard", agentPanelFocusedCapture, true},
 		{"the composer holds the keyboard", agentPanelReleasedCapture, false},
+		{
+			"a pane drawn at its top holds the panel above its blank rows",
+			agentPanelFocusedCapture + strings.Repeat("\n", 30),
+			true,
+		},
 		{"an agent row with no panel hint is older activity, not focus", "❯ \n❯ ● qa-cortex  Verifying results", false},
 		{
 			"the hint quoted far up the scrollback is not the footer",

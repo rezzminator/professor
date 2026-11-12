@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -82,6 +83,19 @@ func shellQuoteValue(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
 }
 
+// recordRetires replaces retireLaunchSeat for one test and returns the sockets it was asked to retire.
+func recordRetires(t *testing.T) *[]string {
+	t.Helper()
+	var retired []string
+	previous := retireLaunchSeat
+	retireLaunchSeat = func(_ context.Context, socket string) error {
+		retired = append(retired, socket)
+		return nil
+	}
+	t.Cleanup(func() { retireLaunchSeat = previous })
+	return &retired
+}
+
 // TestWatchLaunchOnARealPane plays the launch watch's three verdicts on a real
 // jailed tmux server: the fake engine held at Claude Code's folder-trust
 // dialog stays up with the dialog untouched and comes back as the refusal
@@ -118,9 +132,13 @@ func TestWatchLaunchOnARealPane(t *testing.T) {
 	t.Run("a chat that boots", func(t *testing.T) {
 		const socket = "cc-909-1-1"
 		executor, server, read := launchWatchServer(t, socket, mockClaudeRun(t, `{"busy_ms":0}`))
+		retired := recordRetires(t)
 		warnings, err := executor.watchLaunch(context.Background(), server, "boot probe", "claude")
 		if err != nil || len(warnings) != 0 {
 			t.Fatalf("watch of a booted chat = %q, %v; want no warning", warnings, err)
+		}
+		if len(*retired) != 0 {
+			t.Fatalf("a booted chat's seat was retired: %q", *retired)
 		}
 		remain, err := read("display-message", "-p", "-t", socket+":", "#{remain-on-exit}")
 		if err != nil {
@@ -154,7 +172,11 @@ func TestWatchLaunchOnARealPane(t *testing.T) {
 			// tmux has read can be quoted.
 			t, socket, "sleep 0.5; echo 'pfm internal agent-open: refusing the double-resume' >&2; sleep 0.3; exit 1",
 		)
+		retired := recordRetires(t)
 		warnings, err := executor.watchLaunch(context.Background(), server, "exit probe", "claude")
+		if want := []string{socket}; !slices.Equal(*retired, want) {
+			t.Fatalf("seats retired after a dead launch = %q, want %q", *retired, want)
+		}
 		if err == nil {
 			t.Fatalf("watch reported a dead launch as up; warnings %q", warnings)
 		}

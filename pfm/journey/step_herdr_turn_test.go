@@ -25,6 +25,19 @@ func herdrTurn(c *harness.Ctx, s State) State {
 	term.WaitFor("⏺ "+reply, 20*time.Second)
 	awaitAttention(c, s, "idle", stepBound)
 	requireStatusRow(c, s)
+	// escape herdr/interrupt-stays-working: Claude fires no hook on an Esc mid-turn; the interrupt record its
+	// transcript gets is the only sign, and Herdr and pfm settle idle on it.
+	term.Type(
+		`an interrupted turn mock-engine: {"type":"turn","busy_ms":60000,"reply":"` + c.Unique("never") + `"}` + "\r",
+	)
+	awaitAttention(c, s, "working", 5*time.Second)
+	term.Press(harness.Esc)
+	term.WaitFor("⎿ Interrupted", 20*time.Second)
+	awaitAttention(c, s, "idle", stepBound)
+	aborted := entry{Role: "assistant", Text: "[turn aborted: interrupted]"}
+	if got := entries(c, s.Chat.Session); len(got) == 0 || got[len(got)-1] != aborted {
+		c.Failf("pfm chat read %s after the Esc: last entry of %v, want %v", s.Chat.Session, got, aborted)
+	}
 	return s
 }
 

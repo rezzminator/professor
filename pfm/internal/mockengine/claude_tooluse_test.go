@@ -3,6 +3,7 @@ package mockengine
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -357,6 +358,7 @@ func TestClaudePerformedToolCall(t *testing.T) {
 		want                   toolResult // the tool_result's content and is_error
 		file, fileText         string     // a file under the work directory and its text, "" for absent
 		rows                   []string   // pane rows that must show
+		zshrc                  string     // the owner's ~/.zshrc under a zsh login shell; "" runs sh
 	}{
 		{
 			name: "bash-allowed", tool: "Bash", perform: true,
@@ -386,6 +388,15 @@ func TestClaudePerformedToolCall(t *testing.T) {
 			want:  toolResult{Content: "first line\nsecond line", IsError: true}, file: "sub/notes.md",
 		},
 		{
+			name: "bash-zsh-snapshot", tool: "Bash", perform: true,
+			zshrc: "greet() { print hi }\n_helper() { print helper }\nshown() { _helper }\nalias hello='print aliased'\n",
+			input: `{"command":"greet; hello; [[ -o interactive ]] || print plain; shown"}`,
+			want: toolResult{
+				Content: "Exit code 127\nhi\naliased\nplain\nshown:1: command not found: _helper\n", IsError: true,
+			},
+			file: "made.txt",
+		},
+		{
 			name: "unperformed", tool: "Bash", input: `{"command":"printf 'hello\\n' > made.txt"}`,
 			want: toolResult{Content: "done"}, file: "made.txt",
 		},
@@ -402,6 +413,21 @@ func TestClaudePerformedToolCall(t *testing.T) {
 				{Type: StepToolCall, Tool: test.tool, Input: json.RawMessage(test.input), Perform: test.perform},
 				{Type: StepTurn, Reply: "finished"},
 			}})
+			// The tool shell reads the owner's login shell and its startup files from the process
+			// environment, as Claude Code does.
+			t.Setenv("SHELL", "/bin/sh")
+			if test.zshrc != "" {
+				zsh, err := exec.LookPath("zsh")
+				if err != nil {
+					t.Fatalf("the zsh snapshot row needs zsh: %v", err)
+				}
+				dotdir := t.TempDir()
+				if err := os.WriteFile(filepath.Join(dotdir, ".zshrc"), []byte(test.zshrc), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				t.Setenv("SHELL", zsh)
+				t.Setenv("ZDOTDIR", dotdir)
+			}
 			s := fix.startTUI("claude", claudeArgs(), nil)
 			s.waitFrame("composer", func(frame string) bool { return strings.Contains(frame, "❯") })
 			s.typeLine("go")

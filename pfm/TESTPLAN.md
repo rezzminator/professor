@@ -1077,6 +1077,30 @@ The Go action policy owns fresh Claude launches. The binary executes selected ac
 
 ---
 
+## Real-Claude behaviours the fake Claude plays
+
+Each row is a Claude Code behaviour a past fix depended on, played by the fake Claude (`internal/mockengine/`), held by its unit test and asserted by the journey step named; every journey assertion was watched red once against a broken product statement, except where its row says otherwise.
+
+| Behaviour | Fake Claude | Unit test | Journey step |
+| --- | --- | --- | --- |
+| A refused first turn: `api_error` turn end, headless exit 1 with the error text | `claude_turn_end.go` | `TestClaudeTurnEndsShortOfAReply`, `TestClaudeHeadlessAPIErrorExitsOneWithTheErrorText` | plain-pfm/chat-new; herdr-native/claude-typed (native seat paints error) |
+| The automatic AI title written after a turn | `claude_turn_end.go` | `TestClaudeAITitleStepNamesTheChatInPfmsIndex` | herdr-native/claude-typed (red against the index read of the title; the title arriving before the tab's first paint is not reproduced: the tab has painted by then, and the step stays green with that fix reverted) |
+| Esc while working writes the interrupt record and fires no Stop | `claude_record.go` | `TestClaudeRecordKeysAreClaudeCodes` | herdr/…/turn (read entry) |
+| The permission dialog: Esc or No denies with no hook; a hook denial opens no dialog | `claude_permission.go` | `TestClaudePermissionDialog`, `TestClaudePermissionDeniedByAHookOpensNoDialog` | herdr-attention/question |
+| The agents panel holds the keyboard while background agents run: ← focuses, Esc releases | `agents.go` | `TestClaudeAgentsPanelHoldsTheKeyboard` | herdr-mesh/host (call into a chat with its panel open) |
+| A Claude that dies at launch, and one held at the folder-trust dialog | `claude.go` | `TestClaudeLaunchCrashExitsBeforeAnyPrompt` | plain-pfm/chat-new |
+| A promptless fork leaves no transcript until its first prompt | `claude_resume.go` | `TestClaudeForkOwnsTranscriptAndTitle` | herdr-mesh/host (fork listed and resolvable by name) |
+| The `server/discover` probe before `initialize` on a stdio MCP server | `claude_mcp_discover.go` | `TestDiscoveringTransportProbesBeforeInitialize` | MCP steps (red unwatchable: go-sdk answers the probe itself) |
+| The agent tool shell runs from Claude's zsh snapshot, not an interactive zsh | `claude_shell_snapshot.go` | `TestToolShellArgv` | guards/shims-in-tool-shell |
+| `claude doctor` creates its config (`~/.claude/backups`) when probed logged out | `claude_config.go` | `TestClaudeDoctorStartsItsConfig` | install/…/doctor (state before and after) |
+| Headless `-p` posts its system prompt to `ANTHROPIC_BASE_URL`, honouring the cwd's settings env; remote flags vary the prompt per config dir unless nonessential traffic is off | `claude_api.go` | `TestClaudeHeadlessAsksItsBaseURL`, `TestClaudeRemoteFlagsBucketPerConfigDir` | install/…/doctor (harness-prompt rows, both models one live hash) |
+| A statusline run is aborted by the next tick and bounded at 5 s | `statusline.go` | `TestStatusRunBound` | plain-claude reload (red unwatchable: the inline render lands inside one tick in the fence) |
+| Versioned builds under `~/.local/share/claude/versions/{build}` | `argv_engine.go` | `TestArgvEngine` | herdr-native reload-cli (recorded build pruned) |
+| In-app `/resume {id}` switches the pane's session | `claude_resume.go` | `TestClaudeInAppResumeSwitchesThePane` | herdr/…/reload-new/resume-in-app |
+| A background job: the conversation continues under a new session in a detached `claude bg-spare` daemon; the old transcript ends on `continued-in` | `claude_background_job.go` | `TestClaudeBackgroundJobContinuesUnderANewSession`, `TestServeBackgroundJobHoldsItsRecordWhileTheHostLives` | …/resume-in-app/background-job/{one-chat, schedule-follows, open-finds-seat} |
+
+**UNPLAYED by the fake Claude:** an automatic title that lands before the native tab's first status paint (herdr-native/claude-typed writes its title after the tab's first paint); `/reload` in a chat served by a 2026-09 `bg-spare` with tmux ancestry (today's daemon is detached; one fake cannot be both); a launch whose fast child closes the last tmux pane before the waiter attaches (needs a pfm seam); Herdr's blocked state for a plugin's `AskUserQuestion` and a sub-agent's permission prompt (pfm sends no state on a pane Herdr sees Claude in, so the reporter path is unreachable); a task-notification turn is played by the fake (`TestClaudeGatedAgentsEndWithTheirOwnTurn`) but no journey step restores a chat with a loss note and then runs one.
+
 ## Flows the fake engine does not yet play
 
 `UNPLAYED` names a gap, never a real-engine test tier. The fixture engine plays the journey suite (`pfm/journey/`, run by `infra/fence/journey/run.sh`); the flows below still lack the stated behavior or host condition. No suite and no CI job runs a real model.
@@ -1161,7 +1185,7 @@ The walk found three regressions, each watched red before its fix: an engine han
 28. Selector and permission modals in actual Claude.
 
 - **28b.** `pfm reap` busy probe against actual `claude agents --json` output.
-- **28b2.** Actual `continued-in` transcript record and daemon-job session file shape.
+- **28b2.** Actual `continued-in` transcript record and daemon-job session file shape: the fake Claude plays the shape pfm reads (`claude_background_job.go`); the real shape is not re-checked.
 - **28c. UNPLAYED** — Claude Code's Ctrl+S composer-stash semantics that pfm's stash guard assumes: one slot, so a later stash overwrites the earlier draft; Ctrl+S on an empty composer pops the draft; any confirmed submit restores it. Fake-tmux unit tests cover pfm's side, and the fake composer (`internal/mockengine/tty.go`) plays the parked-draft restore; Claude Code's side is unproven.
 - **29. UNPLAYED** — the `--settings` value reaching the Claude process and hook children: the retired lane E1.03 covered it on two fixture seats; no journey step plays it yet.
 - **30. UNPLAYED** — cross-account `/reload` resuming the same transcript on a wired seat: the retired lane E1.03 covered it on two fixture seats; no journey step plays it yet.

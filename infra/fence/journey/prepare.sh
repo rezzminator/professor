@@ -35,6 +35,10 @@ mkdir -p "$j/bin" "$j/mirror" "$HOME/.local/bin" "$HOME/.claude" || fail "setup:
 GOTOOLCHAIN=local go -C "$root/pfm" build -o "$j/bin/mock-engine" ./cmd/mock-engine ||
   fail "engines: cannot build the fake engine"
 for engine in claude codex opencode; do ln -sfn "$j/bin/mock-engine" "$j/bin/$engine"; done
+# Claude's native install keeps its builds as regular files named by their version; pfm runs the newest.
+claude_builds="$HOME/.local/share/claude/versions"
+mkdir -p "$claude_builds" && ln -f "$j/bin/mock-engine" "$claude_builds/2.1.269" &&
+  ln -f "$j/bin/mock-engine" "$claude_builds/2.1.270" || fail "engines: cannot install the Claude builds"
 
 # 2. engine-sync at its stable path: INSTALL.md has a Claude session produce it, and none runs here.
 # shellcheck source=infra/fence/engine-sync.sh

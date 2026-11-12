@@ -349,6 +349,8 @@ func TestOpenWatchesTheLaunch(t *testing.T) {
 		wantErr     []string
 		wantWarning []string
 		wantKilled  []string
+		// wantRetired: the sockets whose recorded seat a launch that died had retired.
+		wantRetired []string
 		// cancelled: the caller has stopped waiting before the watch reads
 		// the pane, so every context-bound read fails.
 		cancelled bool
@@ -372,13 +374,15 @@ func TestOpenWatchesTheLaunch(t *testing.T) {
 					"66666666-6666-4666-8666-666666666666\n\n[exited]\n",
 				dead: true,
 			},
-			wantErr:    []string{"resumable chat exited at launch", "refusing the double-resume"},
-			wantKilled: []string{socket},
+			wantErr:     []string{"resumable chat exited at launch", "refusing the double-resume"},
+			wantKilled:  []string{socket},
+			wantRetired: []string{socket},
 		},
 		{
-			name:    "the server is gone before the watch reads it",
-			launch:  fakeLaunch{gone: true},
-			wantErr: []string{"resumable chat died at launch", socket, "what it printed was lost"},
+			name:        "the server is gone before the watch reads it",
+			launch:      fakeLaunch{gone: true},
+			wantErr:     []string{"resumable chat died at launch", socket, "what it printed was lost"},
+			wantRetired: []string{socket},
 		},
 		{
 			name:   "the server is gone after its pane printed",
@@ -387,6 +391,7 @@ func TestOpenWatchesTheLaunch(t *testing.T) {
 				"the chat resumable chat died at launch: its server on socket " + socket +
 					" is gone (no server running on " + socket + ") — its pane last read: zsh: command not found: claude",
 			},
+			wantRetired: []string{socket},
 		},
 		{
 			// A resume row's pane runs its compound line under a shell that
@@ -438,6 +443,7 @@ func TestOpenWatchesTheLaunch(t *testing.T) {
 				stageProfessorPrompt(t, home)
 				jailAction(t)
 				t.Cleanup(launchnotice.Replace(strings.NewReader(""), false))
+				retired := recordRetires(t)
 				var stderr bytes.Buffer
 				tmux := &fakeActionTmux{
 					alive:    map[string]bool{},
@@ -503,6 +509,9 @@ func TestOpenWatchesTheLaunch(t *testing.T) {
 				}
 				if !reflect.DeepEqual(tmux.killedServer, test.wantKilled) {
 					t.Fatalf("killed servers = %q, want %q", tmux.killedServer, test.wantKilled)
+				}
+				if !reflect.DeepEqual(*retired, test.wantRetired) {
+					t.Fatalf("retired seats = %q, want %q", *retired, test.wantRetired)
 				}
 				if test.maxReads > 0 && tmux.launchReads > test.maxReads {
 					t.Fatalf("the watch read the pane %d times, want it up by read %d", tmux.launchReads, test.maxReads)

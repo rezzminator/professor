@@ -27,6 +27,8 @@ const (
 	hookPostToolUse      = "PostToolUse"
 	hookSessionEnd       = "SessionEnd"
 	hookStop             = "Stop"
+	// hookPermissionRequest fires as Claude Code opens a tool's permission dialog.
+	hookPermissionRequest = "PermissionRequest"
 )
 
 // hookTimeout bounds a handler that never answers; a real engine's default is
@@ -80,7 +82,7 @@ func (session *claudeSession) payload(event string) hookPayload {
 }
 
 func (session *claudeSession) fire(event, subject string, payload hookPayload) ([]hookAnswer, error) {
-	if session.proc.script.Quiet {
+	if session.proc.script.Quiet || session.job != nil {
 		return nil, nil
 	}
 	proc, ctx := session.proc, hookContext(session.proc.ctx, event)

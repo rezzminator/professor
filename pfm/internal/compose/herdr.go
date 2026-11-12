@@ -25,6 +25,9 @@ func ContinuedSegment(row *Row) string {
 	return ""
 }
 
+// seatLive is the state of a native seat an engine runs in.
+const seatLive = "live"
+
 // herdrRows joins native seats before the shared kill and view eligibility pass.
 // Seats are distinct addresses even when they share one transcript; they must
 // not participate in tmux's newest-server collapse.
@@ -92,7 +95,7 @@ func (current *composer) herdrRows() []Row {
 		row.Blocked = native.Blocked()
 		if native.Err != nil {
 			row.BackendError = native.Err.Error()
-		} else if seat.State == "live" && seat.SeatHostPID > 0 {
+		} else if seat.State == seatLive && seat.SeatHostPID > 0 {
 			// The probe proved this supervisor alive inside the pane; the
 			// engine runs beneath it. The shared Herdr server is no seat's.
 			row.PanePIDs = []int{seat.SeatHostPID}

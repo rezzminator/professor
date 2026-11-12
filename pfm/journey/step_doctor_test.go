@@ -24,12 +24,9 @@ var doctorRows = []string{
 }
 
 // doctorMachineFails are the failures the journey machine itself causes, the only ones doctor may
-// print: the fake engine sends no API request for the harness-prompt check to capture, and with no
-// network the professor marketplace's plugins (a release build's GitHub source) are recorded with no
-// files, so the flights plugin holds no tracetree kit. {home} is the owner's home.
+// print: with no network the professor marketplace's plugins (a release build's GitHub source) are
+// recorded with no files, so the flights plugin holds no tracetree kit. {home} is the owner's home.
 var doctorMachineFails = []string{
-	"doctor: harness-prompt: CHECK FAILED to run (no API request reached the capture sink) — drift unknown",
-	"doctor: harness-prompt: CHECK FAILED to run (no API request reached the capture sink) — drift unknown",
 	`doctor: tracetree-kit: FAIL need=kit checked={home}/.cc/1/plugins/cache/flights@professor/skills/tracetree/tracetree.py ` +
 		`error="stat {home}/.cc/1/plugins/cache/flights@professor/skills/tracetree/tracetree.py: no such file or directory" ` +
 		`— fix: run pfm install --yes to refresh the flights plugin copy`,
@@ -49,11 +46,29 @@ func doctor(c *harness.Ctx, s State) State {
 	term.WaitFor(prompt)
 	emptyTmuxReaped(c, term)
 	out := filepath.Join(s.Home, "doctor.out")
+	// The clone's local settings send Claude's API traffic to a gateway that is down, as an owner's may:
+	// the harness-prompt capture must still reach its own sink.
+	local := filepath.Join(s.Home, ".professor", ".claude", "settings.local.json")
+	read(c, "sh", "-c", `test ! -e "$1" && printf '%s' '{"env":{"ANTHROPIC_BASE_URL":"http://127.0.0.1:9"}}' >"$1"`,
+		"sh", local)
+	c.Cleanup(func() {
+		if r := c.Read("rm", "-f", local); r.Code != 0 {
+			c.Logf("teardown: rm %s exited %d: %s", local, r.Code, r.Stderr)
+		}
+	})
+	before := read(c, "sh", "-c", claudeStartState)
 	code := shellRun(term, "doctor", "clear && (cd ~/.professor && pfm doctor) > ~/doctor.out 2>&1", 120*time.Second)
+	read(c, "rm", local)
+	// Its Claude probes ran in a throwaway config dir: no start of theirs wrote the owner's.
+	if after := read(c, "sh", "-c", claudeStartState); after != before {
+		c.Failf("pfm doctor changed Claude's global config or backups:\nbefore:\n%s\nafter:\n%s", before, after)
+	}
 	lines := strings.Split(read(c, "cat", out), "\n")
-	var failed, unclassified, crumbs, bindings []string
+	var failed, unclassified, crumbs, bindings, harnessRows []string
 	for _, line := range lines {
 		switch {
+		case strings.HasPrefix(line, "doctor: harness-prompt: ") && !strings.HasPrefix(line, "doctor: harness-prompt:  "):
+			harnessRows = append(harnessRows, line)
 		case strings.HasPrefix(line, "doctor: codex_pane_bindings "), strings.Contains(line, "codex_pane_binding="):
 			bindings = append(bindings, line)
 		case strings.Contains(line, " FAIL"):
@@ -73,6 +88,14 @@ func doctor(c *harness.Ctx, s State) State {
 		return strings.HasPrefix(line, "doctor: log path="+row+" bytes=")
 	}) || slices.ContainsFunc(lines, func(line string) bool { return strings.HasPrefix(line, "doctor: log WARN ") }) {
 		c.Failf("pfm doctor names no log row for %s, or a log WARN row (%s)", row, out)
+	}
+	// The fake Claude's harness prompt differs from both pinned baselines, and both captures, each from
+	// a fresh config dir, hash alike: the remote flags that once switched the prompt run to run are off.
+	c.Logf("harness-prompt rows: %q", harnessRows)
+	if len(harnessRows) != 2 || !harnessDrift.MatchString(harnessRows[0]) ||
+		!harnessDrift.MatchString(harnessRows[1]) ||
+		harnessRows[0][:len(harnessDriftHead)] != harnessRows[1][:len(harnessDriftHead)] {
+		c.Failf("pfm doctor harness-prompt rows %q, want two matching %s (%s)", harnessRows, harnessDrift, out)
 	}
 	herdr := strings.TrimSpace(read(c, "sh", "-c", "command -v herdr"))
 	for _, row := range append(doctorRows, "doctor: failures=2") {
@@ -99,6 +122,20 @@ func doctor(c *harness.Ctx, s State) State {
 	}
 	return s
 }
+
+// claudeStartState lists every global config and backup a Claude start writes, in the home and in each
+// account's config dir, with each file's checksum.
+const claudeStartState = `for p in ~/.claude.json ~/.claude/backups ~/.cc/*/.claude.json ~/.cc/*/backups; do ` +
+	`test -e "$p" && find "$p" -type f -exec cksum {} +; done | sort; true`
+
+// harnessDriftHead is a harness-prompt verdict's head carrying the hash of the fake Claude's prompt
+// (mockengine claudeHarnessInstructions) as doctor masks it.
+const harnessDriftHead = "doctor: harness-prompt: DRIFT live=7c8faf54e65c79a9 "
+
+// harnessDrift is the harness-prompt verdict on the fake Claude's prompt against a pinned baseline.
+var harnessDrift = regexp.MustCompile(`^` + regexp.QuoteMeta(harnessDriftHead) +
+	`baseline=[0-9a-f]{16} \(harness-(?:opus|original)-v[0-9.]+\.md\) — harness instructions changed; ` +
+	`review before re-pinning$`)
 
 // codexBindingsClean is the Codex pane-binding audit's row with nothing contested.
 var codexBindingsClean = regexp.MustCompile(

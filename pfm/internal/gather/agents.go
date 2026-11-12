@@ -95,6 +95,7 @@ func detectAgentsFrom(
 			seenSessions[sessionID] = struct{}{}
 			agent := Agent{
 				PID:       pid,
+				ParentPID: stat.ParentPID,
 				SessionID: sessionID,
 				ConfigDir: configDir,
 				StartTime: stat.StartTime,

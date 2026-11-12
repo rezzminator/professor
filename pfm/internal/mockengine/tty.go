@@ -23,6 +23,9 @@ const (
 	// Code's, it toggles: an empty composer gets the pending stash back, and so
 	// does the next submit.
 	keyStash
+	// keyLeft is the left arrow, which on an empty Claude composer over
+	// running background agents hands the keyboard to the agents panel.
+	keyLeft
 )
 
 type keyEvent struct {
@@ -36,6 +39,8 @@ type keyEvent struct {
 type keyDecoder struct {
 	pending []byte
 	inCSI   bool
+	// csiParams counts the bytes between a CSI's introducer and its final byte.
+	csiParams int
 }
 
 func (decoder *keyDecoder) feed(input []byte) []keyEvent {
@@ -48,7 +53,12 @@ func (decoder *keyDecoder) feed(input []byte) []keyEvent {
 			index++
 			if final >= 0x40 && final <= 0x7e {
 				decoder.inCSI = false
+				if final == 'D' && decoder.csiParams == 0 {
+					events = append(events, keyEvent{kind: keyLeft})
+				}
+				continue
 			}
+			decoder.csiParams++
 			continue
 		}
 		b := buffer[index]
@@ -69,7 +79,7 @@ func (decoder *keyDecoder) feed(input []byte) []keyEvent {
 				continue
 			}
 			if buffer[index+1] == '[' || buffer[index+1] == 'O' {
-				decoder.inCSI = true
+				decoder.inCSI, decoder.csiParams = true, 0
 				index += 2
 				continue
 			}

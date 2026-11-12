@@ -14,6 +14,10 @@ type State struct {
 	Chat    Chat   // the chat the branch started
 	Mesh    Mesh   // herdr-mesh's other chats: the child and its tmux peer
 	Chats   []Chat // every chat of a branch that holds more than one, in the order it started them
+	// Left is the segment the chat left when Claude Code continued it under a new session (a background job).
+	Left string
+	// Schedule is the id of the schedule a step armed on the chat.
+	Schedule string
 }
 
 // Chat is one live chat as its seat and the process table hold it.

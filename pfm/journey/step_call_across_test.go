@@ -237,6 +237,8 @@ func peerRows(c *harness.Ctx, s *State) {
 	composer("❯")
 
 	idle()
+	want = panelCall(c, s, pane, want, calls, live(inline), settled)
+	idle()
 	long := c.Unique("long") + " " + strings.Repeat("ж", 740)
 	want = append(want, calls("long-call",
 		live("called LIVE PASTE into %q — bracketed-paste body submitted (Enter confirmed, input cleared)"),
@@ -265,6 +267,54 @@ func peerRows(c *harness.Ctx, s *State) {
 	}
 	settled("answering the held call, then the one queued behind it",
 		append(want, first, entry{"assistant", held}, second, entry{"assistant", behind}))
+}
+
+// panelCall: the owner calls the peer with a turn that starts a background agent, focuses its agents panel
+// with the left arrow and calls again: pfm hands the keyboard back with one Escape and the call lands
+// (escape chat-mesh/call-over-agents-panel); the agent's end reports in its own turn. It returns the
+// peer's entries after.
+func panelCall(
+	c *harness.Ctx, s *State, pane string, want []entry, calls func(string, *regexp.Regexp, ...map[string]any) entry,
+	inline *regexp.Regexp, settled func(string, []entry),
+) []entry {
+	peer := s.Mesh.PeerName
+	gate, agent, started, over := s.Home+"/"+c.Unique("agent-gate"), c.Unique("agent"), c.Unique("started"),
+		c.Unique("over")
+	if r := c.Read("touch", gate); r.Code != 0 {
+		c.Failf("touch %s exited %d: %s", gate, r.Code, r.Stderr)
+	}
+	c.Cleanup(func() {
+		if r := c.Read("rm", "-f", gate); r.Code != 0 {
+			c.Logf("teardown: rm %s exited %d: %s", gate, r.Code, r.Stderr)
+		}
+	})
+	capture := func() string { return read(c, "tmux", "-L", s.Mesh.PeerSock, "capture-pane", "-p", "-t", pane) }
+	want = append(want, calls("agent-call", inline,
+		map[string]any{"type": "background_agent", "name": agent, "until_gone": gate}, turnStep(started)),
+		entry{"assistant", started})
+	settled("holding the call that started an agent", want)
+	c.Poll(peer+" waiting on its agent", stepBound, func() (bool, string) {
+		screen := capture()
+		return strings.Contains(screen, "✻ Waiting for 1 background agent to finish"), screen
+	})
+	if r := c.Read("tmux", "-L", s.Mesh.PeerSock, "send-keys", "-t", pane, "Left"); r.Code != 0 {
+		c.Failf("tmux send-keys Left exited %d: %s", r.Code, r.Stderr)
+	}
+	c.Poll(peer+"'s agents panel focused", stepBound, func() (bool, string) {
+		screen := capture()
+		return strings.Contains(screen, "↑/↓ to select · Enter to view") && strings.Contains(screen, "❯ ⏺ main"), screen
+	})
+	want = append(want, calls("panel-call", inline, turnStep(over)), entry{"assistant", over})
+	settled("holding the call over the focused agents panel", want)
+	if screen := capture(); strings.Contains(screen, "↑/↓ to select") {
+		c.Failf("%s's agents panel still holds the keyboard after the call:\n%s", peer, screen)
+	}
+	if r := c.Read("rm", gate); r.Code != 0 {
+		c.Failf("rm %s exited %d: %s", gate, r.Code, r.Stderr)
+	}
+	want = append(want, entry{"assistant", `Agent "` + agent + `" finished`})
+	settled("holding the agent's result", want)
+	return want
 }
 
 // proofOf is the pattern of the delivery proof pfm prints under a live call's receipt: the target

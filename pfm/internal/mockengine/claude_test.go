@@ -326,6 +326,28 @@ func TestClaudeCrashStepExitsMidTurnWithItsCode(t *testing.T) {
 	}
 }
 
+// TestClaudeLaunchCrashExitsBeforeAnyPrompt pins launch_crash: the pane prints its last words and exits 1
+// before any record, the prompt it was launched with never read.
+func TestClaudeLaunchCrashExitsBeforeAnyPrompt(t *testing.T) {
+	fix := newFixture(t)
+	t.Chdir(fix.work)
+	fix.write(Scenario{SessionID: fixtureSession, LaunchCrash: "Error: the engine died at launch"})
+	started := time.Now()
+	session := fix.startTUI("claude", claudeArgs("hello"), nil)
+	if code := session.waitExit(); code != 1 {
+		t.Fatalf("exit code = %d, want 1", code)
+	}
+	if ran := time.Since(started); ran < launchCrashBoot {
+		t.Fatalf("the crashed launch exited after %v, want at least its %v boot", ran, launchCrashBoot)
+	}
+	if got := session.stderr.String(); got != "Error: the engine died at launch\n" {
+		t.Fatalf("stderr = %q, want the last words alone", got)
+	}
+	if _, err := os.Stat(fix.claudeTranscript(fixtureSession)); !os.IsNotExist(err) {
+		t.Fatalf("a crashed launch left a transcript (stat: %v)", err)
+	}
+}
+
 func TestClaudeHoldStaysBusyUntilTheGateFileIsGone(t *testing.T) {
 	fix := newFixture(t)
 	t.Chdir(fix.work)

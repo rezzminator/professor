@@ -104,27 +104,13 @@ func clearServerHandles(ctx context.Context, resolved paths.Values, socket strin
 	shared := fleetdb.OpenSharedState(ctx, resolved)
 	clearErr := shared.ClearBranchSeat(ctx, socket)
 	if clearErr == nil {
-		clearErr = deleteTmuxSeat(ctx, shared, socket)
+		clearErr = spawn.DeleteTmuxSeat(ctx, shared, socket)
 	}
 	closeErr := shared.Close()
 	if clearErr != nil || closeErr != nil {
 		return fmt.Errorf("clear handles after ending %s: %w", socket, errors.Join(clearErr, closeErr))
 	}
 	return nil
-}
-
-// deleteTmuxSeat removes the tmux seat a server's socket names, as the
-// engine's SessionEnd hook does (hookentry tmuxSeatLifecycle); a seat of
-// another backend under that id stays.
-func deleteTmuxSeat(ctx context.Context, shared *fleetdb.Store, socket string) error {
-	seat, found, err := shared.Seat(ctx, socket)
-	if err != nil {
-		return fmt.Errorf("read tmux seat %s: %w", socket, err)
-	}
-	if !found || seat.Backend != spawn.BackendTmux {
-		return nil
-	}
-	return shared.DeleteSeat(ctx, socket)
 }
 
 // endTmux is the one tmux end: KillServer on the chat's pane, which returns nil

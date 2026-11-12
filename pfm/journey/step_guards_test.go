@@ -158,6 +158,20 @@ func proseWritePasses(c *harness.Ctx, s State) State {
 	return s
 }
 
+// shimsInToolShell: the owner's turn has the chat run `claude --version; cx` in its tool shell, which
+// Claude Code runs as a non-interactive zsh replaying a snapshot of the owner's shell that keeps the
+// shim's `claude` and `cx` and drops every `_`-prefixed helper; `claude` runs and prints its version,
+// `cx` refuses by name, and neither fails on a missing helper (escape shim/snapshot-helpers).
+func shimsInToolShell(c *harness.Ctx, s State) State {
+	command := "claude --version; cx"
+	rows := guardTurn(c, s, "shims", "Bash", map[string]string{"command": command})
+	wantRow(c, rows, "⏺ Bash(…)")
+	noDeny(c, rows)
+	toolOutcome(c, s, "command", command, "Exit code 1\n2.1.270 (Claude Code)\n"+
+		"cx: needs an interactive terminal; from a script use: pfm chat new {name} --engine codex\n", true)
+	return s
+}
+
 // guardTurn types one turn whose scripted step is the tool call, performed by the fake engine as
 // Claude would unless a hook denies it, then a reply; it returns the pane's rows from the typed
 // prompt on, so a row of an earlier turn is never read as this one's.

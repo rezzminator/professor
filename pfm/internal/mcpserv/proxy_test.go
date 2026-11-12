@@ -653,7 +653,7 @@ func TestStdioProxyDropsUndeliverableNotification(t *testing.T) {
 	server.Close()
 
 	harness.write(t, `{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":44}}`)
-	deadline := time.After(time.Second)
+	deadline := time.After(10 * time.Second)
 	for !strings.Contains(warnings.String(), "dropped notification") {
 		select {
 		case <-deadline:

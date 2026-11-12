@@ -5,6 +5,7 @@ package journey
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -135,6 +136,50 @@ func plainChatNew(c *harness.Ctx, s State) State {
 	}
 	if session != "" {
 		chatEnded(c, session, 20*time.Second)
+	}
+
+	// An open whose chat dies at launch fails with the pane's own words and leaves no live seat.
+	crashed := c.Unique("crashed")
+	crashScenario, crashDot := ownerHome+"/"+crashed+".json", ownerHome+"/"+crashed+".zdot"
+	out, errs, code = typedRun(c, term, "launch-crash", `sed 's/^{/{"launch_crash":"Error: crashed at launch",/' `+
+		`"$MOCK_ENGINE_SCENARIO" >`+crashScenario+" && mkdir -p "+crashDot+` && printf '. ~/.zshenv\nexport `+
+		`MOCK_ENGINE_SCENARIO=%s\n' `+crashScenario+" >"+crashDot+"/.zshenv && cd "+project+" && ZDOTDIR="+crashDot+
+		" pfm chat open "+long)
+	said := "pfm chat open: the chat " + long + " exited at launch — its pane said: "
+	if code == 0 || !strings.HasPrefix(errs, said) || !strings.Contains(errs, " | Error: crashed at launch | ") {
+		c.Failf("pfm chat open of a chat whose Claude dies at launch: exit %d, stdout %q, stderr %q;"+
+			" want a failure starting %q and quoting Claude's last line", code, out, errs, said)
+	}
+	c.Expect(`"next":"failed","cause":"run aborted","dur_ms":`)
+	c.Logf("pfm chat open of a chat whose Claude dies at launch: exit %d, stderr %q", code, errs)
+	if seats := seatsWhere(c, "state = 'live' and name = '"+long+"'"); len(seats) != 0 {
+		c.Failf("live seats named %s = %v after its relaunch crashed, want none", long, seats)
+	}
+
+	// escape chat-birth/silent-refused-first-turn: a first turn the model server refuses fails the launch by
+	// name with the attach command, and pfm reads the chat in state error.
+	refused := c.Unique("refused")
+	names = append(names, refused)
+	out, errs, code = typedRunWithin(c, term, "refused", "cd "+project+" && pfm chat new --engine cc --name "+refused+
+		` 'a refused turn mock-engine: {"type":"api_error","reply":"API Error: 400 refused","error":"invalid_request"}'`,
+		60*time.Second)
+	refusal := regexp.MustCompile(
+		`^pfm chat new: ` + regexp.QuoteMeta(refused) + `'s first turn ended on an API error ` +
+			`\(invalid_request\): API Error: 400 refused — the model server refused the prompt; attach it and look: ` +
+			`tmux -L \S+ attach -t \S+\n$`,
+	)
+	if code != 8 || !refusal.MatchString(errs) {
+		c.Failf("pfm chat new on a refused first turn: exit %d, stdout %q, stderr %q; want exit 8 and stderr %s",
+			code, out, errs, refusal)
+	}
+	c.Expect(`"cause":"pfm chat new"`)
+	r := c.Read("pfm", "chat", "status", refused, "--json")
+	var status struct {
+		State string `json:"state"`
+	}
+	if r.Code != 0 || json.Unmarshal([]byte(r.Stdout), &status) != nil || status.State != "error" {
+		c.Failf("pfm chat status %s after the refused turn: exit %d, %s%s; want state error", refused, r.Code,
+			r.Stdout, r.Stderr)
 	}
 	return s
 }

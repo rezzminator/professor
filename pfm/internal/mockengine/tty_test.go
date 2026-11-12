@@ -61,6 +61,16 @@ func TestKeyDecoderSeparatesTextEnterEscapeAndControlKeys(t *testing.T) {
 	if got := decoder.feed([]byte("Ax")); !reflect.DeepEqual(got, []keyEvent{{kind: keyRune, r: 'x'}}) {
 		t.Fatalf("CSI tail = %+v", got)
 	}
+	// The bare left arrow is a key of its own, split or whole; one with parameters (Ctrl-Left) is swallowed.
+	if got := decoder.feed([]byte("\x1b[")); len(got) != 0 {
+		t.Fatalf("a half left arrow produced %+v", got)
+	}
+	if got := decoder.feed([]byte("D")); !reflect.DeepEqual(got, []keyEvent{{kind: keyLeft}}) {
+		t.Fatalf("left arrow = %+v", got)
+	}
+	if got := decoder.feed([]byte("\x1b[1;5Dy")); !reflect.DeepEqual(got, []keyEvent{{kind: keyRune, r: 'y'}}) {
+		t.Fatalf("Ctrl-Left = %+v, want it swallowed", got)
+	}
 	// A lone Escape at the end of a read is the key itself.
 	if got := decoder.feed([]byte("\x1b")); !reflect.DeepEqual(got, []keyEvent{{kind: keyEscape}}) {
 		t.Fatalf("lone ESC = %+v", got)

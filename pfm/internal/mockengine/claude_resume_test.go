@@ -89,6 +89,11 @@ func TestClaudeForkOwnsTranscriptAndTitle(t *testing.T) {
 	forkArgs := claudeArgs("--resume", fixtureSession, "--fork-session", "--session-id", forkID, "--name", "fork")
 	fork := fix.startTUI("claude", forkArgs, nil)
 	fork.waitFrame("composer", func(s string) bool { return strings.Contains(s, "❯") })
+	if _, err := os.Stat(fix.claudeTranscript(forkID)); !os.IsNotExist(err) {
+		t.Fatalf("a promptless fork has a transcript (stat: %v); Claude Code writes it at the first prompt", err)
+	}
+	fork.typeLine("two")
+	fork.waitFrame("the fork's reply", func(s string) bool { return strings.Count(s, DefaultReply) == 1 })
 	fork.typeLine("/exit")
 	if code := fork.waitExit(); code != 0 {
 		t.Fatalf("fork exit %d stderr=%s", code, fork.stderr.String())
@@ -105,7 +110,8 @@ func TestClaudeForkOwnsTranscriptAndTitle(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(data), `"customTitle":"fork"`) ||
-		!strings.Contains(string(data), `"sessionId":"`+forkID+`"`) || !strings.Contains(string(data), "one") {
+		!strings.Contains(string(data), `"sessionId":"`+forkID+`"`) || !strings.Contains(string(data), "one") ||
+		!strings.Contains(string(data), "two") {
 		t.Fatalf("fork transcript %s", data)
 	}
 }
@@ -136,6 +142,11 @@ func TestClaudeForkRecoversParentTitleAndAnnouncesNewIdentity(t *testing.T) {
 	if err != nil || id != start.SessionID || transcript != start.TranscriptPath {
 		t.Fatalf("crumb %q %q %v", id, transcript, err)
 	}
+	if _, err := os.Stat(transcript); !os.IsNotExist(err) {
+		t.Fatalf("the fork's transcript exists before its first prompt (stat: %v)", err)
+	}
+	s.typeLine("first")
+	s.waitFrame("the reply", func(frame string) bool { return strings.Contains(frame, DefaultReply) })
 	if got := readFile(t, transcript); !strings.Contains(got, `"customTitle":"P-NAME"`) {
 		t.Fatalf("fork title: %s", got)
 	}
@@ -152,8 +163,8 @@ func TestClaudeForkOfAbsentParentStartsEmpty(t *testing.T) {
 	const forkID = "f3333333-3333-4333-8333-333333333333"
 	s := fix.startTUI("claude", claudeArgs("--resume", fixtureSession, "--fork-session", "--session-id", forkID), nil)
 	s.waitFrame("composer", func(frame string) bool { return strings.Contains(frame, "❯") })
-	if got := readFile(t, fix.claudeTranscript(forkID)); got != "" {
-		t.Fatalf("fork of absent parent: %s", got)
+	if _, err := os.Stat(fix.claudeTranscript(forkID)); !os.IsNotExist(err) {
+		t.Fatalf("a promptless fork of an absent parent has a transcript (stat: %v)", err)
 	}
 	s.typeLine("/exit")
 	if code := s.waitExit(); code != 0 {
@@ -276,5 +287,46 @@ func TestClaudeResumeUnreadableTranscriptExitsUsage(t *testing.T) {
 	s := fix.startTUI("claude", claudeArgs("--resume", fixtureSession), nil)
 	if code := s.waitExit(); code != ExitUsage || !strings.Contains(s.stderr.String(), path) {
 		t.Fatalf("exit %d stderr=%s", code, s.stderr.String())
+	}
+}
+
+// TestClaudeInAppResumeSwitchesThePane: a typed `/resume {session}` moves the running process to that
+// conversation (statusline session and name, the next prompt's record), an unknown id is refused on screen.
+func TestClaudeInAppResumeSwitchesThePane(t *testing.T) {
+	const absent = "c2222222-2222-4222-8222-222222222222"
+	fix := newFixture(t)
+	t.Chdir(fix.work)
+	fix.installHooks()
+	fix.write(Scenario{BusyMS: intPtr(0)})
+	first := fix.startTUI("claude", claudeArgs("--session-id", fixtureSession, "--name", "worker 7"), nil)
+	first.waitFrame("composer", func(s string) bool { return strings.Contains(s, "❯") })
+	first.typeLine("/exit")
+	if code := first.waitExit(); code != 0 {
+		t.Fatal(code)
+	}
+	second := fix.startTUI("claude", nil, nil)
+	second.waitFrame("composer", func(s string) bool { return strings.Contains(s, "❯") })
+	second.typeLine("/resume " + absent)
+	second.waitFrame("the refusal", func(s string) bool {
+		return strings.Contains(s, "No conversation found with session ID: "+absent)
+	})
+	second.typeLine("/resume " + fixtureSession)
+	second.typeLine("after the resume")
+	second.waitFrame("reply", func(s string) bool { return strings.Contains(s, DefaultReply) })
+	lines := fix.waitRecorded("statusline", 2)
+	var input map[string]any
+	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &input); err != nil {
+		t.Fatal(err)
+	}
+	if got := [2]any{input["session_id"], input["session_name"]}; got != [2]any{fixtureSession, "worker 7"} {
+		t.Fatalf("statusline (session_id, session_name) after /resume = %v, want (%s, worker 7)", got, fixtureSession)
+	}
+	launch := fix.claudeTranscript(fixtureSession)
+	got := [2]int{
+		strings.Count(readFile(t, launch), `"after the resume"`),
+		strings.Count(readFile(t, launch), `"custom-title"`),
+	}
+	if got != [2]int{1, 1} {
+		t.Fatalf("(prompt records, title records) in %s = %v, want [1 1]", launch, got)
 	}
 }

@@ -9,17 +9,27 @@
 //
 // Entry point: Main. The other files:
 //
-//   - scenario.go: the scenario, its steps, the inline `mock-engine: ` directive and the step cursor.
+//   - argv_engine.go: the engine a run plays — argv[0], the override, or a Claude native build's version name.
+//   - scenario.go: the scenario, the inline `mock-engine: ` directive and the step cursor.
+//   - scenario_step.go: one scripted step — its kinds, fields and validation.
 //   - pane.go: the TUI every engine shares — the idle loop, a turn and its steps, /exit.
 //   - pane_screen.go: the screen the TUI repaints — history, footer or menu, composer, statusline.
 //   - agents.go: the background agents behind an idle composer — their rows, Claude's wait row, a
 //     gated agent's end and the turn that reports it.
 //   - tty.go: the raw terminal and the key decoder.
 //   - claude.go: Claude Code — its pane, hooks fired per beat, transcript, statusline, headless -p.
-//   - claude_resume.go: a resumed Claude transcript's title and a fork's seeded copy.
+//   - claude_record.go: the Claude transcript records and their writer.
+//   - claude_turn_end.go: how a Claude turn ends short of a reply — an interrupt, an API error — and its AI title.
+//   - claude_permission.go: Claude's tool permission dialog — the call it holds, Yes going on, No or Escape rejecting.
+//   - claude_mcp_discover.go: the server/discover probe Claude's MCP client sends before initialize.
+//   - claude_config.go: an engine's self-doctor, and the global config backup and write a Claude start makes.
+//   - claude_api.go: the Messages request a headless Claude sends ANTHROPIC_BASE_URL, settings env applied.
+//   - claude_background_job.go: a chat sent to a background job — continued-in record, successor, bg-spare daemon.
+//   - claude_resume.go: a resumed Claude transcript's title and a fork's seeded copy, written at its first prompt.
 //   - claude_tooluse.go: Claude's PostToolUse beat and the tool response it carries.
+//   - claude_shell_snapshot.go: the tool shell — Claude's zsh snapshot of the owner's shell, sh otherwise.
 //   - hooks.go: the settings hook documents, running a hook command and reading its answer.
-//   - statusline.go: a settings layer's statusLine and one run of its command.
+//   - statusline.go: a settings layer's statusLine and one run of its command, aborted as Claude aborts it.
 //   - session_end.go: SessionEnd hooks that outlive a hangup on every engine, and Claude's session end.
 //   - codex.go: Codex — its pane, rollout, app-server and MCP handshake.
 //   - codex_hooks.go: Codex's hook trust and its hooks.json state.
@@ -61,6 +71,7 @@ const (
 	sourceResume    = "resume"
 	flagModel       = "--model"
 	blockText       = "text"
+	blockToolResult = "tool_result"
 	blockInputText  = "input_text"
 	blockOutputText = "output_text"
 	keyType         = "type"
@@ -93,22 +104,10 @@ func Main(
 	stdout, stderr io.Writer,
 	env func(string) string,
 ) int {
-	engine := filepath.Base(argv0)
-	switch engine {
-	case engineClaude, engineCodex, engineOpenCode:
-	default:
-		override := env(EnvEngine)
-		switch override {
-		case engineClaude, engineCodex, engineOpenCode:
-			engine = override
-		default:
-			fmt.Fprintf(
-				stderr,
-				"mock-engine: argv[0] %q names no engine (claude|codex|opencode) and %s=%q selects none\n",
-				engine, EnvEngine, override,
-			)
-			return ExitUsage
-		}
+	engine, err := argvEngine(argv0, env(EnvEngine))
+	if err != nil {
+		fmt.Fprintf(stderr, "mock-engine: %v\n", err)
+		return ExitUsage
 	}
 	scenario, err := LoadScenario(env(EnvScenario), engine)
 	if err != nil {

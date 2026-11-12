@@ -132,7 +132,7 @@ func ResumeKindFor(kind Kind) Kind {
 // kind while the seat is live, its resumable kind once it is not (lost,
 // failed, ended), so no reader attaches a seat nothing runs in.
 func SeatKindFor(kind Kind, state string) Kind {
-	if state != "live" {
+	if state != seatLive {
 		return ResumeKindFor(kind)
 	}
 	return kind

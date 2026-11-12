@@ -181,7 +181,7 @@ func (session *codexSession) tool(step Step) (string, error) {
 	}
 	if denied == "" {
 		if step.Perform {
-			if output, _, err = performTool(session.proc, step.Tool, input, nil); err != nil {
+			if output, _, err = performTool(session.proc, step.Tool, input, nil, nil); err != nil {
 				return "", err
 			}
 		}

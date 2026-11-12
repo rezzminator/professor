@@ -1,10 +1,12 @@
 package compose
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
@@ -14,7 +16,46 @@ import (
 func TestAbandonedLaunch(t *testing.T) {
 	current := &composer{livePaneThreads: map[string]string{
 		targetKey("cc-1-1-1", "%0"): "resumed",
-	}}
+	}, input: Input{HerdrSeats: []gather.HerdrSeat{
+		{
+			Seat: fleetdb.Seat{
+				Backend:     herdrBackend,
+				State:       "live",
+				Engine:      "cc",
+				SeatHostPID: 50,
+				SessionID:   "resumed",
+			},
+		},
+		{
+			Seat: fleetdb.Seat{
+				Backend:     herdrBackend,
+				State:       "live",
+				Engine:      "cc",
+				SeatHostPID: 60,
+				SessionID:   "first",
+			},
+			Continued: "next",
+		},
+		{
+			Seat: fleetdb.Seat{
+				Backend:     herdrBackend,
+				State:       "lost",
+				Engine:      "cc",
+				SeatHostPID: 70,
+				SessionID:   "resumed",
+			},
+		},
+		{
+			Seat: fleetdb.Seat{
+				Backend:     herdrBackend,
+				State:       "live",
+				Engine:      "cc",
+				SeatHostPID: 80,
+				SessionID:   "resumed",
+			},
+			Err: errors.New("herdr socket unreachable"),
+		},
+	}}}
 	launch := gather.Agent{Socket: "cc-1-1-1", PaneID: "%0", SessionID: "launch"}
 	for _, test := range []struct {
 		name       string
@@ -51,6 +92,25 @@ func TestAbandonedLaunch(t *testing.T) {
 			agent: gather.Agent{Socket: "cc-2-1-1", PaneID: "%0", SessionID: "launch"},
 		},
 		{name: "no pane", agent: gather.Agent{SessionID: "launch"}},
+		{
+			// An in-app /resume in a Herdr pane: the seat names the resumed thread, the engine's argv the launch.
+			name:    "a native seat's engine moved on from its launch thread",
+			agent:   gather.Agent{PID: 9, ParentPID: 50, SessionID: "launch"},
+			indexed: true, transcript: store.Transcript{PromptCount: 3}, want: true,
+		},
+		{name: "a native seat's engine runs the seat's thread", agent: gather.Agent{PID: 9, ParentPID: 50, SessionID: "resumed"}},
+		{
+			name:  "a native seat's engine runs the segment its chat continued in",
+			agent: gather.Agent{PID: 9, ParentPID: 60, SessionID: "next"},
+		},
+		{
+			name:  "a native seat's engine still on the segment its chat left",
+			agent: gather.Agent{PID: 9, ParentPID: 60, SessionID: "first"}, want: true,
+		},
+		{name: "a lost seat's host", agent: gather.Agent{PID: 9, ParentPID: 70, SessionID: "launch"}},
+		// A seat whose probe failed proves no host alive: its recorded pid may be reused.
+		{name: "an unproven seat's host", agent: gather.Agent{PID: 9, ParentPID: 80, SessionID: "launch"}},
+		{name: "beneath no seat host", agent: gather.Agent{PID: 9, ParentPID: 51, SessionID: "launch"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if got := current.abandonedLaunch(test.agent, test.transcript, test.indexed); got != test.want {

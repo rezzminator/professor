@@ -126,3 +126,16 @@ func notLive(c *harness.Ctx, name string) {
 			fmt.Sprintf("exit %d: %s%s", r.Code, r.Stdout, r.Stderr)
 	})
 }
+
+// vanished waits until `pfm chat status` names no chat called name, its exit 4: a fork that ended before
+// its first prompt, as Claude writes a fork's transcript only then, leaves nothing to resume.
+func vanished(c *harness.Ctx, name string) {
+	c.Poll(name+" gone", 20*time.Second, func() (bool, string) {
+		r := c.Read("pfm", "chat", "status", name, "--json")
+		var status struct {
+			State string `json:"state"`
+		}
+		return r.Code == 4 && json.Unmarshal([]byte(r.Stdout), &status) == nil && status.State == "not-found",
+			fmt.Sprintf("exit %d: %s%s", r.Code, r.Stdout, r.Stderr)
+	})
+}

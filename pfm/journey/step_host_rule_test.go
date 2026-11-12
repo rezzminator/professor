@@ -73,13 +73,17 @@ func hostRule(c *harness.Ctx, s *State) {
 		if r := c.Read("pfm", "chat", "end", name); r.Code != 0 {
 			c.Failf("pfm chat end %s exited %d: %s%s", name, r.Code, r.Stderr, r.Stdout)
 		}
-		notLive(c, name)
+		if name == fork {
+			vanished(c, name)
+		} else {
+			notLive(c, name)
+		}
 	}
 	seat := branchAgain(c, s, term, again, pane) // once its first fork ended
 	if r := c.Read("pfm", "chat", "end", again); r.Code != 0 {
 		c.Failf("pfm chat end %s exited %d: %s%s", again, r.Code, r.Stderr, r.Stdout)
 	}
-	notLive(c, again)
+	vanished(c, again)
 	c.Poll("the ended fork "+again+"'s lineage under seat "+seat+" gone", stepBound, func() (bool, string) {
 		lineage := forkLineage(c, seat)
 		return lineage == "", fmt.Sprintf("lineage %q", lineage)

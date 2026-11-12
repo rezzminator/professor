@@ -49,7 +49,8 @@ func TestHookShellNamesAMissingShell(t *testing.T) {
 	if hookErr == nil || hookErr.Error() != notFound {
 		t.Fatalf("runHookCommand error = %v, want %q", hookErr, notFound)
 	}
-	_, lineErr := invokeStatusLine(context.Background(), "true", map[string]string{}, t.TempDir(), os.Environ())
+	_, _, lineErr := invokeStatusLine(context.Background(), "true", map[string]string{}, t.TempDir(), os.Environ(),
+		time.Second)
 	if want := "statusline: " + notFound; lineErr == nil || lineErr.Error() != want {
 		t.Fatalf("invokeStatusLine error = %v, want %q", lineErr, want)
 	}
@@ -218,11 +219,12 @@ func TestClaudeSessionStartMatchesItsSource(t *testing.T) {
 	session := fix.startTUI("claude", nil, nil)
 	session.waitFrame("the composer", func(frame string) bool { return strings.Contains(frame, "❯") })
 	session.typeLine("/clear")
+	session.typeLine("/resume " + fixtureSession)
 	session.typeLine("/exit")
 	if code := session.waitExit(); code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, session.stderr.String())
 	}
-	want := []string{sourceStartup, sourceClear}
+	want := []string{sourceStartup, sourceClear, sourceResume}
 	if got := strings.Split(strings.TrimSpace(readFile(t, order)), "\n"); !reflect.DeepEqual(got, want) {
 		t.Fatalf("SessionStart handlers run = %q, want %q (%s)", got, want, order)
 	}

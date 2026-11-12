@@ -47,7 +47,7 @@ visible-to:
 - Aggressively compact: one law per bullet, one step per numbered item, the fewest words that keep it, a precise word over a phrase (`/prompt:use` § Compact aggressively).
 - Impact by naming: the agent, tool, command, path or flag to use; a definition inline as `{term} = {meaning}`; an example only where it pins behavior (`no rm -rf "$DIR"`).
 - Engine-neutral: a Claude mechanism is named with what holds on an engine without it.
-- The always-on global set stays under 8,192 bytes (`engine-sync doctor --machine` reports `GLOBAL-BUDGET`).
+- The always-on global set stays within 9,216 bytes (`engine-sync doctor --machine` reports `GLOBAL-BUDGET`).
 
 ## Modes
 
@@ -63,7 +63,7 @@ Checks:
 4. Spine: an H1 naming a topic; a multi-law rule missing its H1 or binding sentence, or a single-law rule carrying either; a core not one list; ordered items bulleted or unordered items numbered; a `##` or text after the list.
 5. Words: a bullet holding two laws or a numbered item two steps; a phrase where one word carries it; rationale past one cost clause; a directive naming no tool, path, command or threshold; a date, an incident, "now / no longer".
 6. Truth: an agent, command, hook or path it names that does not exist where it binds.
-7. Budget: the always-on global set over 8,192 bytes.
+7. Budget: the always-on global set over 9,216 bytes.
 8. Prose: the `/prompt:use` pre-commit self-check fails.
 
 Write steps:

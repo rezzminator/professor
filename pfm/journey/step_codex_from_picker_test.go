@@ -49,18 +49,36 @@ func codexFromPicker(c *harness.Ctx, s State) State {
 	return s
 }
 
+// engineChip is a boxed chip on the screen: ◖ {short} ◗.
+var engineChip = regexp.MustCompile(`◖ (\S+) ◗`)
+
 // pickEngine waits for the wizard's engine step and moves its chip to the engine named short, as the
-// owner does with the arrow keys, reading the boxed chip (◖ {short} ◗) on the screen.
+// owner does with the arrow keys, reading the boxed chip (◖ {short} ◗) on the screen. Each press waits
+// for the boxed chip itself to move before the next read: a pane caught while it redraws differs from
+// the screen before the press with the chip row still undrawn, and a press sent on that reading lands
+// after the chip was read as right and moves it on.
 func pickEngine(term *harness.Terminal, short string) {
 	term.WaitFor("choose the engine", 20*time.Second)
+	boxed := func(screen string) string {
+		return strings.Join(engineChip.FindAllString(screen, -1), " ")
+	}
 	chip := "◖ " + short + " ◗"
+	var on string
+	rest := func(what, was string) {
+		var last string
+		term.WaitScreen(what, stepBound, func(screen string) bool {
+			last, on = on, boxed(screen)
+			return on != "" && on != was && on == last
+		})
+	}
+	rest("the engine step's boxed chip", "")
 	for range 4 {
-		if strings.Contains(term.Screen(), chip) {
+		if strings.Contains(on, chip) {
 			return
 		}
-		before := term.Screen()
+		was := on
 		term.Press(harness.Right)
-		term.WaitScreen("the engine chip to move", stepBound, func(screen string) bool { return screen != before })
+		rest("the boxed chip to leave "+was, was)
 	}
 	term.WaitFor(chip)
 }

@@ -42,7 +42,7 @@ func killLiveFromPicker(c *harness.Ctx, s State) State {
 	c.Poll(s.Name+" killed in state and gone from pfm chat ls --all", stepBound, func() (bool, string) {
 		out := read(c, "pfm", "chat", "ls", "--all")
 		hidden := strings.TrimSpace(
-			read(c, "sqlite3", stateDB(), "select count(*) from hidden where uuid = '"+s.Chat.Session+"'"),
+			stateSQL(c, "select count(*) from hidden where uuid = '"+s.Chat.Session+"'"),
 		)
 		return hidden == "1" && chatLsRow(out, s.Name) == nil, "killed rows " + hidden + ", listed:\n" + out
 	})

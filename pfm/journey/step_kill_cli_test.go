@@ -63,7 +63,7 @@ func killCLI(c *harness.Ctx, s State) State {
 	c.Poll(s.Name+" killed in state and gone from pfm chat ls --all", stepBound, func() (bool, string) {
 		listed := read(c, "pfm", "chat", "ls", "--all")
 		hidden := strings.TrimSpace(
-			read(c, "sqlite3", stateDB(), "select count(*) from hidden where uuid = '"+s.Chat.Session+"'"),
+			stateSQL(c, "select count(*) from hidden where uuid = '"+s.Chat.Session+"'"),
 		)
 		return hidden == "1" && chatLsRow(listed, s.Name) == nil,
 			"killed rows " + hidden + ", listed:\n" + listed
@@ -76,7 +76,7 @@ func killCLI(c *harness.Ctx, s State) State {
 	term.WaitFor("❯", 20*time.Second)
 	c.Poll("the resumed chat live and no longer killed", stepBound, func() (bool, string) {
 		hidden := strings.TrimSpace(
-			read(c, "sqlite3", stateDB(), "select count(*) from hidden where uuid = '"+s.Chat.Session+"'"),
+			stateSQL(c, "select count(*) from hidden where uuid = '"+s.Chat.Session+"'"),
 		)
 		rows := listRows(c, s.Chat.Session)
 		return hidden == "0" && len(rows) == 1 && strings.HasPrefix(rows[0], "live-claude\t"),

@@ -191,7 +191,7 @@ func plainClaudeLive(c *harness.Ctx, s State, socket string) State {
 					pids = append(pids, pid)
 				}
 			}
-			all := c.Read("sqlite3", stateDB(), "select seat_id, session_id, state, backend, tmux_socket, tmux_pane"+
+			all := tryStateSQL(c, "select seat_id, session_id, state, backend, tmux_socket, tmux_pane"+
 				" from seat where tmux_socket like '%"+socket+"' or session_id = '"+session+"'")
 			var tsv []string
 			for _, line := range strings.Split(c.Read("pfm", "ls", "--tsv").Stdout, "\n") {
@@ -214,7 +214,7 @@ func plainClaudeLive(c *harness.Ctx, s State, socket string) State {
 
 // plainSocket is the tmux socket name of the branch's chat's live seat.
 func plainSocket(c *harness.Ctx, s State) string {
-	r := read(c, "sqlite3", stateDB(), "select tmux_socket from seat where state = 'live' and session_id = '"+
+	r := stateSQL(c, "select tmux_socket from seat where state = 'live' and session_id = '"+
 		s.Chat.Session+"'")
 	if lines := strings.Fields(r); len(lines) == 1 {
 		return filepath.Base(lines[0])

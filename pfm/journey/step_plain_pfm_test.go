@@ -176,7 +176,7 @@ func engineLaunch(c *harness.Ctx, s State, account string) {
 
 // seatServer is the tmux socket path of the branch's chat's live seat.
 func seatServer(c *harness.Ctx, s State) string {
-	r := read(c, "sqlite3", "-cmd", ".timeout 5000", stateDB(),
+	r := stateSQL(c,
 		"select tmux_socket from seat where state = 'live' and session_id = '"+
 			s.Chat.Session+"'")
 	if lines := strings.Fields(r); len(lines) == 1 {

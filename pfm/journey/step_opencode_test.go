@@ -47,7 +47,7 @@ func opencodeRename(c *harness.Ctx, s State) State {
 	s.Name = c.Unique("retitled")
 	c.Terminal(s.Term).Type("/rename " + s.Name + "\r")
 	c.Poll("OpenCode chat "+s.Chat.Session+": row, tab and seat named "+s.Name, stepBound, func() (bool, string) {
-		seat := strings.TrimSpace(read(c, "sqlite3", stateDB(),
+		seat := strings.TrimSpace(stateSQL(c,
 			"select coalesce(name, '') from seat where state = 'live' and session_id = '"+s.Chat.Session+"'"))
 		got := [3]string{lsName(c, s), paneTabLabel(c, s), seat}
 		return got == [3]string{s.Name, markedLabel("idle", s.Name), s.Name}, fmt.Sprintf("row, tab, seat = %q", got)

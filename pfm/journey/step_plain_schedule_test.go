@@ -43,13 +43,13 @@ func scheduleDelivered(c *harness.Ctx, s State) {
 			s.Chat.Session, set.Code, set.Stdout, set.Stderr)
 	}
 	// The shortest delay is a minute: the step makes the schedule due now rather than wait it out.
-	read(c, "sqlite3", stateDB(), fmt.Sprintf("update schedules set next_fire_ns = %d where id = %s",
+	stateSQL(c, fmt.Sprintf("update schedules set next_fire_ns = %d where id = %s",
 		time.Now().UnixNano(), id))
 	var tick string
 	c.Poll("schedule "+id+" fired by pfm internal schedule-fire", 90*time.Second, func() (bool, string) {
 		fire := c.Read("pfm", "internal", "schedule-fire")
 		tick = fmt.Sprintf("exit %d: %s%s", fire.Code, fire.Stdout, fire.Stderr)
-		fired := strings.TrimSpace(c.Read("sqlite3", stateDB(),
+		fired := strings.TrimSpace(tryStateSQL(c,
 			"select count(*) from schedules where id = "+id+" and last_fired_ns <> 0").Stdout)
 		return fired == "1", fmt.Sprintf(
 			"fired %s; the tick exited %d: %s%s",
@@ -88,7 +88,7 @@ func scheduleDelivered(c *harness.Ctx, s State) {
 
 // hiddenRows counts the killed rows of session.
 func hiddenRows(c *harness.Ctx, session string) string {
-	return strings.TrimSpace(read(c, "sqlite3", stateDB(), "select count(*) from hidden where uuid = '"+session+"'"))
+	return strings.TrimSpace(stateSQL(c, "select count(*) from hidden where uuid = '"+session+"'"))
 }
 
 // liveEngine is the pid of session's one engine, 0 when none or several run.

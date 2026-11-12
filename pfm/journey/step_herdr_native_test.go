@@ -118,7 +118,7 @@ func nameFromCLI(c *harness.Ctx, cli *harness.Terminal, s State, target string) 
 func namesAgree(c *harness.Ctx, s State, after string) {
 	c.Poll("row, tab and seat named "+s.Name+" after "+after, stepBound, func() (bool, string) {
 		seat := strings.TrimSpace(
-			read(c, "sqlite3", stateDB(), "select coalesce(name, '') from seat where state = 'live'"+
+			stateSQL(c, "select coalesce(name, '') from seat where state = 'live'"+
 				" and session_id = '"+s.Chat.Session+"'"),
 		)
 		got := [3]string{lsName(c, s), tabLabel(c, s), seat}
@@ -280,7 +280,7 @@ func killFromPicker(c *harness.Ctx, s State) State {
 		c.Failf("Ctrl-X on the lost chat put its Herdr socket %s on the screen:\n%s", herdrSocket(s), screen)
 	}
 	if got := strings.TrimSpace(
-		read(c, "sqlite3", stateDB(), "select count(*) from hidden where uuid = '"+s.Chat.Session+"'"),
+		stateSQL(c, "select count(*) from hidden where uuid = '"+s.Chat.Session+"'"),
 	); got != "1" {
 		c.Failf("killed rows for %s = %s, want 1", s.Chat.Session, got)
 	}
@@ -321,7 +321,7 @@ func unkill(c *harness.Ctx, s State) State {
 		c.Failf("pfm chat unkill printed no %q", want)
 	}
 	if got := strings.TrimSpace(
-		read(c, "sqlite3", stateDB(), "select count(*) from hidden where uuid = '"+s.Chat.Session+"'"),
+		stateSQL(c, "select count(*) from hidden where uuid = '"+s.Chat.Session+"'"),
 	); got != "0" {
 		c.Failf("killed rows for %s after the unkill = %s, want 0", s.Chat.Session, got)
 	}

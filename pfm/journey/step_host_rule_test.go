@@ -128,13 +128,13 @@ func branched(c *harness.Ctx, s *State, got answer, fork, pane string) string {
 
 // forkLineage is the parent session recorded under a fork's seat, "" when none is.
 func forkLineage(c *harness.Ctx, seat string) string {
-	return strings.TrimSpace(read(c, "sqlite3", "-cmd", ".timeout 5000", stateDB(),
+	return strings.TrimSpace(stateSQL(c,
 		"select val from meta where key = 'branch-seat:"+seat+"'"))
 }
 
 // seatsBackend is the host socket of the live seat named name on backend, failing unless exactly one.
 func seatsBackend(c *harness.Ctx, name, backend string) string {
-	out := strings.TrimSpace(read(c, "sqlite3", "-cmd", ".timeout 5000", stateDB(),
+	out := strings.TrimSpace(stateSQL(c,
 		"select coalesce(tmux_socket, herdr_socket) from seat where state = 'live' and backend = '"+backend+
 			"' and name = '"+strings.ReplaceAll(name, "'", "''")+"'"))
 	if out == "" || strings.Contains(out, "\n") {

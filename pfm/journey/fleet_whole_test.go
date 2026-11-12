@@ -45,7 +45,7 @@ func fleetWhole(c *harness.Ctx) {
 	faults = append(faults, spinning(c, table)...)
 	faults = append(faults, idleFaults(c, table)...)
 	if len(faults) > 0 { // every live seat's whole row, so a fault names its socket, pane and owner
-		c.Artifact("seats.txt", []byte(read(c, "sqlite3", "-cmd", ".timeout 5000", "-header", stateDB(),
+		c.Artifact("seats.txt", []byte(stateSQL(c, "-header",
 			"select * from seat where state = 'live'")))
 	}
 	failFleet(c, "the machine's fleet", faults)

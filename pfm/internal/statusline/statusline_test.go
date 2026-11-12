@@ -382,6 +382,21 @@ func TestRenderCarriesNativeIdentityMetricsAndSky(t *testing.T) {
 }
 
 func TestRenderUsesPostCompactFloorEstimateInsteadOfStaleSelfReport(t *testing.T) {
+	// The harness reports an empty window right after a compaction; a model
+	// switched there (/model after /compact) must not hand the gauge to it.
+	for name, model := range map[string]string{
+		"same model":              "claude-opus-4-1",
+		"model switched after it": "claude-sonnet-4-5",
+		"1M variant of the model": "claude-opus-4-1[1m]",
+	} {
+		t.Run(name, func(t *testing.T) {
+			renderPostCompactEstimate(t, model)
+		})
+	}
+}
+
+func renderPostCompactEstimate(t *testing.T, model string) {
+	t.Helper()
 	root := t.TempDir()
 	transcriptPath := filepath.Join(root, "session.jsonl")
 	transcriptBody := strings.Join([]string{
@@ -407,9 +422,10 @@ func TestRenderUsesPostCompactFloorEstimateInsteadOfStaleSelfReport(t *testing.T
 		t.Fatal(err)
 	}
 	input := []byte(`{
-  "model":{"id":"claude-opus-4-1","display_name":"Opus 4"},
+  "model":{"id":"` + model + `","display_name":"Opus 4"},
   "cwd":"/work/sample",
-  "context_window":{"context_window_size":1000000,"used_percentage":77},
+  "context_window":{"context_window_size":1000000,"used_percentage":0,
+    "current_usage":{"input_tokens":0,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}},
   "transcript_path":` + string(encodedTranscriptPath) + `
 }`)
 	got, err := Render(context.Background(), input, Runtime{
@@ -426,9 +442,9 @@ func TestRenderUsesPostCompactFloorEstimateInsteadOfStaleSelfReport(t *testing.T
 		t.Fatal(err)
 	}
 	plain := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(got, "")
-	if !strings.Contains(plain, "▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱ ~20%") || strings.Contains(plain, "77%") {
+	if !strings.Contains(plain, "▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱ ~20% 200.0K") {
 		t.Fatalf(
-			"post-compact gauge did not use floor + postTokens estimate, or retained stale self-report:\n%q",
+			"post-compact gauge is not the floor + postTokens estimate, want ~20%% 200.0K:\n%q",
 			plain,
 		)
 	}

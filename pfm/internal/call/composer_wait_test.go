@@ -177,3 +177,88 @@ func TestAwaitComposerRowTellsAFailedReadFromTheSplash(t *testing.T) {
 		t.Fatalf("endless splash: capture=%q err=%v, want ErrStartupSplash with the last screen", capture, err)
 	}
 }
+
+// slowEchoTmux plays a pane still drawing its last turn: a typed message
+// reaches the screen only after hold more captures, and an Enter pressed
+// before it shows is swallowed — the TUI has not read the text it would
+// submit.
+type slowEchoTmux struct {
+	*fakeTmux
+	mu     sync.Mutex
+	hold   int
+	unseen int
+	before string
+}
+
+func (fake *slowEchoTmux) Capture(
+	ctx context.Context,
+	socket, target string,
+	styled bool,
+	scrollback int,
+) (string, error) {
+	fake.mu.Lock()
+	if fake.unseen > 0 {
+		fake.unseen--
+		before := fake.before
+		fake.mu.Unlock()
+		return before, nil
+	}
+	fake.mu.Unlock()
+	return fake.fakeTmux.Capture(ctx, socket, target, styled, scrollback)
+}
+
+func (fake *slowEchoTmux) SendLiteral(ctx context.Context, socket, target, text string) error {
+	before, err := fake.fakeTmux.Capture(ctx, socket, target, false, 0)
+	if err != nil {
+		return err
+	}
+	fake.mu.Lock()
+	fake.before, fake.unseen = before, fake.hold
+	fake.mu.Unlock()
+	return fake.fakeTmux.SendLiteral(ctx, socket, target, text)
+}
+
+func (fake *slowEchoTmux) SendKey(ctx context.Context, socket, target, key string) error {
+	fake.mu.Lock()
+	swallowed := key == "Enter" && fake.unseen > 0
+	fake.mu.Unlock()
+	if !swallowed {
+		return fake.fakeTmux.SendKey(ctx, socket, target, key)
+	}
+	fake.fakeTmux.mu.Lock()
+	defer fake.fakeTmux.mu.Unlock()
+	fake.keys = append(fake.keys, key)
+	return nil
+}
+
+// TestRenderSettleReadsTheComposerNotTheTranscript pins the held call that a
+// pane still drawing lost: every call from one sender ends in the same
+// signature, so the previous call's transcript row read as this message's
+// echo, Enter went out before the pane showed the text, and the delivery
+// proof found the message still in the composer. The settle reads the
+// composer row and below, so the one Enter waits for the echo.
+func TestRenderSettleReadsTheComposerNotTheTranscript(t *testing.T) {
+	fake := &slowEchoTmux{fakeTmux: &fakeTmux{capture: "❯ ", submitOnEnter: true}}
+	engine := newTestEngine(t, "slow-echo", fake.fakeTmux)
+	engine.tmux = fake
+	first, err := engine.Call(context.Background(), Request{Target: "chat", Message: "first call"})
+	if err != nil || first.Code != 0 {
+		t.Fatalf("first call: result=%+v err=%v", first, err)
+	}
+	fake.fakeTmux.mu.Lock()
+	transcript := fake.capture
+	fake.keys = nil
+	fake.fakeTmux.mu.Unlock()
+	fake.hold = 2
+	engine.options.SettleTries = 4
+	second, err := engine.Call(context.Background(), Request{Target: "chat", Message: "second call"})
+	if err != nil || second.Code != 0 || second.Status != "delivered" {
+		t.Fatalf("second call: result=%+v err=%v", second, err)
+	}
+	fake.fakeTmux.mu.Lock()
+	keys := strings.Join(fake.keys, ",")
+	fake.fakeTmux.mu.Unlock()
+	if keys != "C-s,Enter" {
+		t.Fatalf("keys = %q, want the draft guard then one Enter; screen before the message: %q", keys, transcript)
+	}
+}

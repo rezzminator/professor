@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
@@ -144,4 +145,17 @@ func (engine *Engine) awaitInputScreen(
 		*base = refused
 	}
 	return ready, nil
+}
+
+// composerEcho is the part of a capture a typed message can be echoed in: the
+// composer row and every row beneath it. Rows above are transcript, where an
+// earlier message's text (every call from one sender ends in the same
+// signature) would read as this one's echo. A capture with no composer row is
+// returned whole.
+func composerEcho(capture string) string {
+	lines := strings.Split(capture, "\n")
+	if row := lastComposerRow(lines); row >= 0 {
+		return strings.Join(lines[row:], "\n")
+	}
+	return capture
 }

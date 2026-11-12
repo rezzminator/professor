@@ -827,8 +827,8 @@ func (engine *Engine) callResolved(
 			return lockLost(base, target.Pane, beatErr), nil
 		}
 		capture, err = engine.capturePane(ctx, target, 0)
-		if err == nil && (strings.Contains(normalizeSpace(capture), needle) ||
-			(pasteTransport && HasPastePlaceholder(capture))) {
+		if echo := composerEcho(capture); err == nil && (strings.Contains(normalizeSpace(echo), needle) ||
+			(pasteTransport && HasPastePlaceholder(echo))) {
 			break
 		}
 		engine.sleepContext(ctx, engine.options.Poll)

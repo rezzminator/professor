@@ -201,7 +201,7 @@ func (painter *indicatorPainter) nextSeq() uint64 {
 // or done agent appeared meanwhile. With a tab provider it takes the lock
 // first and keeps ticking while any tab is decorated, so an animated frame
 // advances on every tick, and stops once no tab is decorated and nothing is
-// blocked or done.
+// blocked or done (runTabs).
 func (painter *indicatorPainter) run(ctx context.Context) error {
 	if painter.socket == "" {
 		err := fmt.Errorf("herdr indicators: no Herdr socket: %s is not set", EnvSocket)
@@ -222,33 +222,7 @@ func (painter *indicatorPainter) run(ctx context.Context) error {
 		return err
 	}
 	if painter.tabs != nil {
-		release, held, err := painter.takeBlinkerLock()
-		if err != nil {
-			painter.logf("%v", err)
-			return err
-		}
-		if !held {
-			painter.nudge() // the blinker re-reads the tabs at its next tick
-			return nil
-		}
-		defer release()
-		blocked, _, err := painter.paint(ctx)
-		if err != nil {
-			return painter.failed(err)
-		}
-		if !blocked && !painter.hasDone && !painter.hasTabs {
-			return nil
-		}
-		_, err = painter.blink(ctx)
-		if ctx.Err() != nil {
-			restoreCtx, cancel := painter.restoreContext(ctx)
-			defer cancel()
-			if restoreErr := painter.restoreTabs(restoreCtx); restoreErr != nil {
-				painter.logf("%v", restoreErr)
-				return errors.Join(err, restoreErr)
-			}
-		}
-		return err
+		return painter.runTabs(ctx)
 	}
 	settles := 0
 	for {

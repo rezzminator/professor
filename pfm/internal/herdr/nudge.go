@@ -1,6 +1,7 @@
 package herdr
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -64,4 +65,59 @@ func (painter *indicatorPainter) takeNudge() bool {
 		painter.logf("herdr indicators: take the nudge %s: %v", path, err)
 	}
 	return false
+}
+
+// runTabs is run with a tab provider: it paints and blinks while it holds the
+// socket's blinker lock. A painter that finds the lock held leaves the nudge,
+// then tries the lock once more, and the holder takes any nudge after it lets
+// go: a tab change announced while a blinker stops (a chat born as its last
+// tick read no tab) is never lost between the two, whichever lets go first. A
+// nudge it cannot take reads as none (takeNudge), so it never spins.
+func (painter *indicatorPainter) runTabs(ctx context.Context) error {
+	for {
+		release, held, err := painter.takeBlinkerLock()
+		if err == nil && !held {
+			painter.nudge() // the blinker re-reads the tabs at its next tick
+			// The holder may have let go before the nudge landed, and found none.
+			release, held, err = painter.takeBlinkerLock()
+		}
+		if err != nil {
+			painter.logf("%v", err)
+			return err
+		}
+		if !held {
+			return nil
+		}
+		painter.takeNudge() // the paint below reads the tabs; a later nudge survives it
+		again, err := painter.blinkTabs(ctx)
+		release()
+		if err != nil || !again || !painter.takeNudge() {
+			return err
+		}
+	}
+}
+
+// blinkTabs is one hold of the blinker lock: a paint, then the blink while any
+// tab is decorated or anything is blocked or done. again says it stopped only
+// because nothing was left to paint, so a nudge left meanwhile takes the lock
+// again; a cancelled painter restores its tabs before it lets go.
+func (painter *indicatorPainter) blinkTabs(ctx context.Context) (again bool, err error) {
+	blocked, _, err := painter.paint(ctx)
+	if err != nil {
+		return false, painter.failed(err)
+	}
+	if !blocked && !painter.hasDone && !painter.hasTabs {
+		return true, nil
+	}
+	stopped, err := painter.blink(ctx)
+	if ctx.Err() != nil {
+		restoreCtx, cancel := painter.restoreContext(ctx)
+		defer cancel()
+		if restoreErr := painter.restoreTabs(restoreCtx); restoreErr != nil {
+			painter.logf("%v", restoreErr)
+			return false, errors.Join(err, restoreErr)
+		}
+		return false, err
+	}
+	return !stopped && err == nil, err
 }

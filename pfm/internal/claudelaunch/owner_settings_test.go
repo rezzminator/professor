@@ -84,6 +84,8 @@ func TestSettingsArgvRefusesUnreadableSettings(t *testing.T) {
 			": no such file or directory"},
 		{[]string{"--settings", "{not json"}, "--settings inline JSON: not a JSON object (invalid character 'n'" +
 			" looking for beginning of object key string)"},
+		{[]string{"--settings", `{"hooks":[]}`}, `--settings inline JSON: "hooks" is not a JSON object`},
+		{[]string{"--settings", `{"env":"X=1"}`}, `--settings inline JSON: "env" is not a JSON object`},
 	} {
 		_, _, err := settingsArgv(tc.args, map[string]any{})
 		if err == nil || err.Error() != tc.want {

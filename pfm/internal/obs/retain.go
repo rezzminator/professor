@@ -18,8 +18,9 @@ import (
 )
 
 // retain is the size limit, run only at a roll, by the process that rolled:
-// the current segment and the newest closed segments are kept whole while
-// their sum stays within keepBytes; every older segment is reduced, oldest
+// the current segment and every newest closed segment that starts within
+// keepBytes of the newest byte are kept whole, so the newest keepBytes always
+// are; every older segment is reduced, oldest
 // first — its WARN and ERROR records appended, byte for byte, to {name}.kept/
 // (reduce) — and deleted. A segment that cannot be read, kept or removed is an
 // error, never a silent skip; the kept archive has no ceiling.
@@ -41,10 +42,12 @@ func (writer *rotator) retain() error {
 		if err != nil {
 			return fmt.Errorf("inspect activity log segment %s: %w", filepath.Join(dir, entry.Name()), err)
 		}
-		total += info.Size()
-		if total > writer.keepBytes {
+		// A segment starting within keepBytes stays whole: a roll closes a
+		// segment just past segmentBytes, so the newest keepBytes are always kept.
+		if total >= writer.keepBytes {
 			past = append(past, filepath.Join(dir, entry.Name()))
 		}
+		total += info.Size()
 	}
 	var failures []error
 	for _, segment := range slices.Backward(past) {

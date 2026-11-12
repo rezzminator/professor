@@ -53,7 +53,7 @@ func TestHerdrNativeClaudeDefersLifecycle(t *testing.T) {
 func TestHerdrNativeSeatReporter(t *testing.T) {
 	events := []string{
 		"start", "working", "idle", "attach", "detach", "sync",
-		"shell start", "shell idle", "shell invalid resume", "shell delayed working", "unread idle",
+		"shell start", "shell idle", "shell invalid resume", "shell delayed working", "unread idle", "empty idle",
 	}
 	for _, event := range events {
 		t.Run(event, func(t *testing.T) {
@@ -61,17 +61,22 @@ func TestHerdrNativeSeatReporter(t *testing.T) {
 			server := newNativeReporterHerdr(t, "native-seat", "w6:p3", "native-terminal")
 			reportEvent, shellFront := strings.CutPrefix(event, "shell ")
 			reportEvent, unread := strings.CutPrefix(reportEvent, "unread ")
-			shellFront = shellFront || unread
+			reportEvent, empty := strings.CutPrefix(reportEvent, "empty ")
+			shellFront = shellFront || unread || empty
 			// name is the row's hook without its pane's fate.
 			name := reportEvent
-			if shellFront {
+			switch {
+			case empty:
+				// Herdr lists no foreground: it cannot say Claude runs there, so pfm reports.
+				noFrontNativeReporterPane(server, "w6:p3")
+			case shellFront:
 				shellFrontNativeReporterPane(t, server, "w6:p3")
 				if unread {
 					// The foreground read after the seat's proof fails: the state still
 					// reaches the pane, under pfm's source.
 					server.processInfoAnswers = 1
 				}
-			} else {
+			default:
 				server.addPane("w6:p3", "native")
 			}
 			t.Setenv(paths.EnvHome, root)
@@ -122,6 +127,11 @@ func TestHerdrNativeSeatReporter(t *testing.T) {
 				wantStderr = "pfm internal herdr-state idle: native Claude seat native-seat: read pane w6:p3 " +
 					"foreground (any report goes under pfm's own source): herdr refused pane.process_info pfm-seat pane w6:p3: " +
 					"server_error: refused by fake herdr\n"
+			}
+			if empty {
+				wantStderr = "pfm internal herdr-state idle: native Claude seat native-seat: read pane w6:p3 " +
+					"foreground (any report goes under pfm's own source): herdr foreground evidence unavailable in " +
+					"w6:p3; engine exit is unproved\n"
 			}
 			if name == "invalid resume" {
 				wantStderr = `pfm internal herdr-state start: no resume command for session "bad'session" ` +

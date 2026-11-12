@@ -81,6 +81,7 @@ cleanup() {
   for line in "${pushed[@]}"; do
     IFS=$'\t' read -r opt dir ref <<<"$line"
     if git "$opt" "$dir" push -q origin --delete "$ref" >/dev/null 2>&1; then say "deleted origin $ref ($dir)"
+    elif git "$opt" "$dir" ls-remote --exit-code origin "$ref" >/dev/null 2>&1; [ $? = 2 ]; then :
     else say "could not delete origin $ref: git $opt $(printf '%q' "$dir") push origin --delete $ref" >&2; rc=1; fi
   done
   rm -rf "$SCRATCH"
@@ -144,15 +145,16 @@ for p in "${plugin_push[@]}"; do
 done
 
 # 4. The pushes: the parent first, through .githooks/pre-push.
+# Each branch is recorded before its push: a signal after origin took the ref still deletes it.
+pushed+=("-C"$'\t'"$ROOT"$'\t'"refs/heads/$BRANCH")
 git -C "$ROOT" push origin "$snap:refs/heads/$BRANCH" ||
   refuse "the push of $snap to origin $BRANCH was refused (above: the leak gate or origin)"
-pushed+=("-C"$'\t'"$ROOT"$'\t'"refs/heads/$BRANCH")
 say "pushed origin refs/heads/$BRANCH ($url)"
 for p in "${plugin_push[@]}"; do
   IFS=$'\t' read -r opt dir sha path <<<"$p"
+  pushed+=("$opt"$'\t'"$dir"$'\t'"refs/heads/$BRANCH")
   git "$opt" "$dir" push origin "$sha:refs/heads/$BRANCH" ||
     refuse "the push of plugin $path's $sha to its origin $BRANCH was refused (above)"
-  pushed+=("$opt"$'\t'"$dir"$'\t'"refs/heads/$BRANCH")
   say "pushed $path origin refs/heads/$BRANCH ($(git "$opt" "$dir" config --get remote.origin.url))"
 done
 

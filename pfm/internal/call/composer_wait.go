@@ -151,11 +151,15 @@ func (engine *Engine) awaitInputScreen(
 // composer row and every row beneath it. Rows above are transcript, where an
 // earlier message's text (every call from one sender ends in the same
 // signature) would read as this one's echo. A capture with no composer row is
-// returned whole.
-func composerEcho(capture string) string {
+// returned whole only for a pane that draws none (composerPane false); on a
+// pane that does, it is a frame caught mid-repaint and holds no echo.
+func composerEcho(capture string, composerPane bool) string {
 	lines := strings.Split(capture, "\n")
 	if row := lastComposerRow(lines); row >= 0 {
 		return strings.Join(lines[row:], "\n")
+	}
+	if composerPane {
+		return ""
 	}
 	return capture
 }

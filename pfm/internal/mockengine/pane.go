@@ -130,7 +130,7 @@ const trustDialogDeclined = 1
 // input or context gone.
 func (loop *paneLoop) trustDialog() (int, bool) {
 	if _, err := loop.proc.stdout.Write([]byte(claudeTrustFrame(loop.proc.cwd))); err != nil {
-		warn(loop.proc.stderr, "paint the folder-trust dialog: %v", err)
+		loop.warn("paint the folder-trust dialog: %v", err)
 		return ExitUsage, true
 	}
 	for {
@@ -183,6 +183,13 @@ func (loop *paneLoop) paint() {
 	loop.painted = frame
 }
 
+// warn names a fault on the pane's terminal, which the engine's next frame
+// must cover: the frame showing is forgotten, so it is drawn again.
+func (loop *paneLoop) warn(format string, values ...any) {
+	warn(loop.proc.stderr, format, values...)
+	loop.painted = ""
+}
+
 // paintTyped draws after a typed key once no further key waits: like the
 // engines' own TUIs, a burst of typed text is drawn once, never a whole frame
 // per rune, so the Enter that ends the burst is read as soon as it arrives.
@@ -192,16 +199,15 @@ func (loop *paneLoop) paintTyped() {
 	}
 }
 
-// refreshStatus re-runs the statusline and returns the line now shown; a run
+// refreshStatus re-runs the statusline into the screen's status line; a run
 // that fails is named and keeps the line it had.
-func (loop *paneLoop) refreshStatus(usage Tokens) string {
+func (loop *paneLoop) refreshStatus(usage Tokens) {
 	line, err := loop.engine.statusLine(usage)
 	if err != nil {
-		warn(loop.proc.stderr, "%v", err)
-		return loop.screen.status
+		loop.warn("%v", err)
+		return
 	}
 	loop.screen.status = line
-	return line
 }
 
 // run is the idle loop: keys edit the composer, Enter submits, a menu takes
@@ -224,10 +230,9 @@ func (loop *paneLoop) run() int {
 				return code
 			}
 		case <-loop.statusDue:
-			// Repaint only a line that changed: an idle pane stays still.
-			if shown := loop.screen.status; loop.refreshStatus(loop.usage) != shown {
-				loop.paint()
-			}
+			// Repaint only a line that changed, or over a warning the run wrote: an idle pane stays still.
+			loop.refreshStatus(loop.usage)
+			loop.paint()
 		}
 	}
 }
@@ -276,7 +281,7 @@ func (loop *paneLoop) renameKey(event keyEvent) {
 			return
 		}
 		if err := loop.engine.rename(name); err != nil {
-			warn(loop.proc.stderr, "rename: %v", err)
+			loop.warn("rename: %v", err)
 			screen.renameError = "Rename failed: " + err.Error()
 			return
 		}
@@ -593,7 +598,7 @@ func (loop *paneLoop) finish(reason string, code int) int {
 		loop.paint()
 	}
 	if err := loop.engine.finish(reason); err != nil {
-		warn(loop.proc.stderr, "finish: %v", err)
+		loop.warn("finish: %v", err)
 	}
 	return code
 }

@@ -26,16 +26,17 @@ func plantSegment(t *testing.T, path, name, content string) string {
 }
 
 // TestRetentionKeepsTheNewestKeepBytesWhole: with two segments of one
-// mebibyte kept, the newest segments whose sum reaches exactly 2 MiB stay
-// whole and the older one is reduced; a byte more reduces the one that
-// carried the sum past it too.
+// mebibyte kept, a segment that starts within the newest 2 MiB stays whole,
+// though it carries the sum past them (a roll closes a segment just past its
+// size); one starting at 2 MiB or older is reduced.
 func TestRetentionKeepsTheNewestKeepBytesWhole(t *testing.T) {
 	for _, tc := range []struct {
 		newest int
 		kept   []string
 	}{
 		{newest: mebibyte, kept: []string{"b.jsonl", "c.jsonl"}},
-		{newest: mebibyte + 1, kept: []string{"c.jsonl"}},
+		{newest: mebibyte + 1, kept: []string{"b.jsonl", "c.jsonl"}},
+		{newest: 2 * mebibyte, kept: []string{"c.jsonl"}},
 	} {
 		path := filepath.Join(t.TempDir(), "log", "pfm.jsonl")
 		writer := openLogAt(t, path, 2, true, clock.NewFake(segmentStart), io.Discard)

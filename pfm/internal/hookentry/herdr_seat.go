@@ -128,8 +128,9 @@ func (reporter *herdrReporter) nativeSeat(ctx context.Context, payload herdrPayl
 	detected := false
 	if reporter.options.engine == pfmengine.Claude && (action != nil || reporter.options.event == herdr.EventStart) {
 		processes, err := herdr.ReadPaneProcesses(ctx, seat.HerdrSocket, seat.HerdrPane)
-		detected = err == nil
-		if err == nil && len(processes.Foreground) > 0 {
+		if err == nil {
+			// An empty or undecodable foreground, or an answer for another pane, is a read
+			// that could not say: EngineForeground refuses it and pfm reports.
 			detected, err = herdr.EngineForeground(processes, seat.HerdrPane, pfmengine.Claude)
 		}
 		if err != nil {

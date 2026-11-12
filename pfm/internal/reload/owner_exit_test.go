@@ -29,6 +29,16 @@ type ownerExitTmux struct {
 	killed     []string
 	markPath   string
 	markAtExit bool
+	enterErr   error
+}
+
+// SendKey presses the key, then answers enterErr: tmux delivered the key and
+// still reported a failure.
+func (tmux *ownerExitTmux) SendKey(ctx context.Context, target pfmcall.Target, key string) error {
+	if err := tmux.fakeReloadTmux.SendKey(ctx, target, key); err != nil {
+		return err
+	}
+	return tmux.enterErr
 }
 
 func (tmux *ownerExitTmux) ListPanes(context.Context, string) ([]Pane, error) {
@@ -104,6 +114,15 @@ func TestRunYieldsToTheOwnersExit(t *testing.T) {
 			wantErr: "set pane remain-on-exit: exit status 1\n" +
 				"check whether the chat ended before the reload's /exit: list panes: server unresponsive",
 			wantRemains: []bool{true},
+		},
+		{
+			name:        "an Enter that went out with an error still reboots",
+			tmux:        ownerExitTmux{enterErr: errors.New("send-keys: exit status 1")},
+			wantResult:  Result{Account: 2},
+			wantRemains: []bool{true, false},
+			wantLiteral: "/exit",
+			wantRespawn: true,
+			wantMark:    true,
 		},
 		{
 			name:        "a live chat reboots",

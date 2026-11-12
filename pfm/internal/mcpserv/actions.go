@@ -23,7 +23,7 @@ import (
 const chatCommand = "chat"
 
 // statusError is an ActionOutput's failure status, beside server.go's
-// statusNotFound and statusAmbiguous: the verb did not run. A chat that is
+// statusNotFound and chat.StatusAmbiguous: the verb did not run. A chat that is
 // simply not there is statusNotFound — absence and a step that could not run
 // are never the same answer.
 const statusError = chat.StatusError

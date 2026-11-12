@@ -104,8 +104,9 @@ func writeJailConfig(t *testing.T, root, body string) {
 // machine's log.components, log.maxMB and log.keepFiles reach obs.OpenLog, not
 // just the level — a component the config lifts to debug is enabled after
 // run(), and a current segment one record from 1 MiB rolls at the run's first
-// record and, past the one segment kept, keeps none of its INFO records. A
-// config still carrying the retired log.keepDays loads.
+// record and stays whole, holding the newest MiB, while an older segment past
+// the one segment kept keeps none of its INFO records. A config still carrying
+// the retired log.keepDays loads.
 func TestRunHandsTheWholeLogPolicyToTheActivityLog(t *testing.T) {
 	root := jailTest(t)
 	writeJailConfig(t, root,
@@ -119,6 +120,14 @@ func TestRunHandsTheWholeLogPolicyToTheActivityLog(t *testing.T) {
 	if err := os.WriteFile(current, []byte(planted), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	segmentsDir := filepath.Join(filepath.Dir(current), "pfm.segments")
+	const older = "2026-11-12T08-00-00.000Z.jsonl"
+	if err := os.MkdirAll(segmentsDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(segmentsDir, older), []byte(head+`older"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"version"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("run(version) = %d; stderr = %q", code, stderr.String())
@@ -130,9 +139,14 @@ func TestRunHandsTheWholeLogPolicyToTheActivityLog(t *testing.T) {
 	if obs.Enabled(ctx, "mcp", slog.LevelDebug) {
 		t.Fatal("log.level=info did not reach the process logger for an unlisted component")
 	}
-	segments, err := os.ReadDir(filepath.Join(filepath.Dir(current), "pfm.segments"))
-	if err != nil || len(segments) != 0 {
-		t.Fatalf("pfm.segments = %v (err %v), want the rolled segment reduced away", segments, err)
+	segments, err := os.ReadDir(segmentsDir)
+	if err != nil || len(segments) != 1 || segments[0].Name() == older {
+		t.Fatalf("pfm.segments = %v (err %v), want the rolled segment alone, %s reduced away", segments, err, older)
+	}
+	rolled, err := os.ReadFile(filepath.Join(segmentsDir, segments[0].Name()))
+	if err != nil || len(rolled) < len(planted) || string(rolled[:len(planted)]) != planted {
+		t.Fatalf("rolled segment %s: %d bytes (err %v), want the planted %d bytes whole first",
+			segments[0].Name(), len(rolled), err, len(planted))
 	}
 	if _, err := os.Stat(filepath.Join(filepath.Dir(current), "pfm.kept")); !os.IsNotExist(err) {
 		t.Fatalf("pfm.kept exists (err %v), want nothing kept of INFO records", err)

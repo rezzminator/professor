@@ -83,7 +83,7 @@ func (loop *paneLoop) agentsEnded() (int, bool) {
 		case errors.Is(err, fs.ErrNotExist):
 			panel.finished = append(panel.finished, row)
 		case err != nil:
-			warn(loop.proc.stderr, "stat background agent %s gate %s: %v", row.name, row.gate, err)
+			loop.warn("stat background agent %s gate %s: %v", row.name, row.gate, err)
 			kept = append(kept, row)
 		default:
 			kept = append(kept, row)

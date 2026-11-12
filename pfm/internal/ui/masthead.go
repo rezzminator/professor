@@ -318,7 +318,7 @@ func (model Model) renderTabs(width int) string {
 		return paint
 	}
 	names := []string{" Chats ", " Stats ", " Limits ", " cosmos "}
-	// " tabs " is the readiness marker the lane scripts wait on (tui_open).
+	// " tabs " opens the tab row a reader of the screen waits on.
 	spans := []span{{text: " tabs ", paint: strip(tone{fg: palette.Dim})}, {text: " ", paint: strip(tone{})}}
 	for index, name := range names {
 		if Tab(index) == model.tab {

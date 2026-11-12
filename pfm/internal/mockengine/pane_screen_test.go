@@ -87,9 +87,9 @@ func TestPaneCodexPlaceholderStyling(t *testing.T) {
 }
 
 func TestPaintWritesAFrameOnlyWhenItChanged(t *testing.T) {
-	var out bytes.Buffer
+	var out, errs bytes.Buffer
 	screen := &pane{glyph: "❯"}
-	loop := &paneLoop{proc: &process{stdout: &out, stderr: &bytes.Buffer{}}, screen: screen}
+	loop := &paneLoop{proc: &process{stdout: &out, stderr: &errs}, screen: screen}
 	screen.say("> hello")
 	first := screen.render()
 	loop.paint()
@@ -116,5 +116,14 @@ func TestPaintWritesAFrameOnlyWhenItChanged(t *testing.T) {
 	if got, want := out.String(), first+second+screen.render(); screen.draft.text() != "ab" || got != want {
 		t.Fatalf("the burst's last key left draft %q and wrote %q, want draft \"ab\" and %q",
 			screen.draft.text(), got, want)
+	}
+	// A warning written on the pane's terminal is covered by the next paint of the same frame.
+	before := out.String()
+	loop.warn("statusline: %s", "exit status 1")
+	loop.paint()
+	if got, want := out.String(), before+screen.render(); got != want ||
+		errs.String() != "mock-engine: statusline: exit status 1\n" {
+		t.Fatalf("a paint after a warning wrote %q and warned %q, want %q and the warning",
+			got, errs.String(), want)
 	}
 }

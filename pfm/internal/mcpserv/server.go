@@ -32,11 +32,6 @@ const (
 	maxCaptureBytes     = 4 << 20
 	statusNotFound      = "not_found"
 	statusNotRegistered = "not_registered"
-	// statusDead is the answer for a target that RESOLVED and then could not
-	// be driven or read — chat.CodeDead. It is deliberately not
-	// statusNotFound: a chat that exists and whose pane vanished mid-call is
-	// not a chat nobody has ever heard of.
-	statusDead = "dead"
 )
 
 const (

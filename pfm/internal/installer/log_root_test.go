@@ -34,6 +34,8 @@ func TestMoveLogsToRootMovesTheStateFolderOnce(t *testing.T) {
 		for name, body := range map[string]string{
 			"pfm.jsonl": "current\n", "pfm.jsonl.1": "older\n", "pfm.jsonl.lock": "",
 			"cost-sink.log": "old sink\n",
+			// A segmented build that logged in the state folder left a segments folder the root also gets.
+			filepath.Join("pfm.segments", "2026-11-01T00-00-00.000Z.jsonl"): "segmented\n",
 		} {
 			writeFixture(t, filepath.Join(old, name), body)
 		}
@@ -57,7 +59,7 @@ func TestMoveLogsToRootMovesTheStateFolderOnce(t *testing.T) {
 			}
 			continue
 		}
-		want := "  change  move 4 log files from " + old + " to " + root + "\n" +
+		want := "  change  move 5 log files from " + old + " to " + root + "\n" +
 			"  change  move 1 log files from " + restart + " to " + filepath.Join(root, "restart") + "\n"
 		if output.String() != want {
 			t.Fatalf("output = %q, want %q", output.String(), want)
@@ -68,12 +70,14 @@ func TestMoveLogsToRootMovesTheStateFolderOnce(t *testing.T) {
 			}
 		}
 		segments, err := os.ReadDir(filepath.Join(root, "pfm.segments"))
-		if err != nil || len(segments) != 2 || segments[0].Name() != "2026-11-12T11-41-16.217Z.jsonl" {
-			t.Fatalf("pfm.segments = %v (err %v), want .1 first under its last write, then the current", segments, err)
+		if err != nil || len(segments) != 3 || segments[1].Name() != "2026-11-12T11-41-16.217Z.jsonl" {
+			t.Fatalf("pfm.segments = %v (err %v), want the old segment, .1 under its last write, then the current",
+				segments, err)
 		}
 		for path, body := range map[string]string{
-			filepath.Join(root, "pfm.segments", segments[0].Name()):          "older\n",
-			filepath.Join(root, "pfm.segments", segments[1].Name()):          "current\n",
+			filepath.Join(root, "pfm.segments", segments[0].Name()):          "segmented\n",
+			filepath.Join(root, "pfm.segments", segments[1].Name()):          "older\n",
+			filepath.Join(root, "pfm.segments", segments[2].Name()):          "current\n",
 			filepath.Join(root, "cost-sink.log"):                             "new sink\nold sink\n",
 			filepath.Join(root, "restart", "restart-20261102T183630Z-1.log"): "restarted\n",
 		} {

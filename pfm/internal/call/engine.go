@@ -822,12 +822,13 @@ func (engine *Engine) callResolved(
 	base.Typed = true
 	normalized := normalizeSpace(message)
 	needle := tailRunes(normalized, 40)
+	composerPane := ComposerRowShown(preSubmitCapture)
 	for attempt := 0; attempt < engine.options.SettleTries; attempt++ {
 		if beatErr := lock.beat(); beatErr != nil {
 			return lockLost(base, target.Pane, beatErr), nil
 		}
 		capture, err = engine.capturePane(ctx, target, 0)
-		if echo := composerEcho(capture); err == nil && (strings.Contains(normalizeSpace(echo), needle) ||
+		if echo := composerEcho(capture, composerPane); err == nil && (strings.Contains(normalizeSpace(echo), needle) ||
 			(pasteTransport && HasPastePlaceholder(echo))) {
 			break
 		}

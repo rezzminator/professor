@@ -2,6 +2,7 @@ package transcript
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -52,21 +53,37 @@ func TestFindCodexHistoryTakesTheNewestRolloutOfTheThread(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// A home whose sessions tree cannot be resolved: a place the search could not look.
+	broken := t.TempDir()
+	loop := filepath.Join(broken, "sessions")
+	if err := os.Symlink(loop, loop); err != nil {
+		t.Fatal(err)
+	}
+	unread := fmt.Sprintf("search Codex rollouts under %s: resolve Codex rollout root %q: EvalSymlinks: too many links",
+		broken, loop)
 	for _, row := range []struct {
 		name, sid string
 		homes     []string
 		want      string
+		wantErr   string
 	}{
-		{"the newest rollout across homes", thread, []string{first, second}, newer},
-		{"a thread id prefix", "7171", []string{first, second}, newer},
-		{"only the home that holds it", thread, []string{first}, older},
-		{"no rollout of the thread", "73737373", []string{first, second}, ""},
-		{"no Codex home", thread, nil, ""},
-		{"an empty sid matches nothing", "", []string{first}, ""},
+		{"the newest rollout across homes", thread, []string{first, second}, newer, ""},
+		{"a thread id prefix", "7171", []string{first, second}, newer, ""},
+		{"only the home that holds it", thread, []string{first}, older, ""},
+		{"no rollout of the thread", "73737373", []string{first, second}, "", ""},
+		{"no Codex home", thread, nil, "", ""},
+		{"an empty sid matches nothing", "", []string{first}, "", ""},
+		{"a found rollout stands beside an unread home", thread, []string{first, broken}, older, ""},
+		{"no match with an unread home is an error", "73737373", []string{first, broken}, "", unread},
 	} {
 		got, err := FindCodexHistory(context.Background(), row.homes, row.sid)
-		if err != nil || got != row.want {
-			t.Errorf("%s: FindCodexHistory(%v, %q) = %q, %v; want %q", row.name, row.homes, row.sid, got, err, row.want)
+		gotErr := ""
+		if err != nil {
+			gotErr = err.Error()
+		}
+		if gotErr != row.wantErr || got != row.want {
+			t.Errorf("%s: FindCodexHistory(%v, %q) = %q, %q; want %q, %q",
+				row.name, row.homes, row.sid, got, gotErr, row.want, row.wantErr)
 		}
 	}
 }

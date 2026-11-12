@@ -34,6 +34,7 @@ type fakePane struct {
 	pids         []int
 	shell        int
 	shellFront   bool
+	noFront      bool // Herdr lists no foreground process in the pane
 }
 
 type fakeAgent struct{ name, pane string }
@@ -794,14 +795,21 @@ func newNativeReporterHerdrCount(
 						fmt.Fprintf(conn, refusal+"\n", req.ID)
 						return
 					}
-					info := map[string]any{"pane_id": pane, "shell_pid": 900001}
+					// Herdr lists Claude in the pane's foreground unless the pane says otherwise.
+					info := map[string]any{"pane_id": pane, "shell_pid": 900001, "foreground_processes": []any{
+						map[string]any{"pid": 900002, "name": "claude", "argv": []string{"claude"}},
+					}}
 					server.mu.Lock()
 					for _, candidate := range server.panes {
-						if candidate.shellFront && candidate.id == pane {
+						switch {
+						case candidate.id != pane:
+						case candidate.shellFront:
 							// Herdr lists a shell, not Claude, in the pane's foreground.
 							info["foreground_processes"] = []any{
 								map[string]any{"pid": candidate.pids[0], "name": "sh", "argv": []string{"sh"}},
 							}
+						case candidate.noFront:
+							delete(info, "foreground_processes")
 						}
 					}
 					server.mu.Unlock()
@@ -855,6 +863,14 @@ func newNativeReporterHerdrCount(
 func shellFrontNativeReporterPane(t *testing.T, server *fakeHerdr, pane string) {
 	t.Helper()
 	server.addShellFrontPane(pane, "native", 900030)
+}
+
+// noFrontNativeReporterPane makes pane one where Herdr lists no foreground
+// process at all: a read that cannot say, so pfm reports.
+func noFrontNativeReporterPane(server *fakeHerdr, pane string) {
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	server.panes = append(server.panes, fakePane{id: pane, terminal: "native", noFront: true})
 }
 
 func stampNativeReporterSeat(t *testing.T, seat *fleetdb.Seat) {

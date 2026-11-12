@@ -104,7 +104,7 @@ func TestOpenRotatingLogKeepsDiagnosticAppendsBounded(t *testing.T) {
 		t.Fatal(err)
 	}
 	record := strings.Repeat("r", 600*1024-1) + "\n"
-	for range 5 { // rolls after the 2nd and the 4th; the 1st segment falls behind 2 MiB
+	for range 7 { // rolls after the 2nd, 4th and 6th; at the last, the 1st segment starts past 2 MiB
 		mustWrite(t, writer, record)
 	}
 	if err := writer.Close(); err != nil {
@@ -115,8 +115,13 @@ func TestOpenRotatingLogKeepsDiagnosticAppendsBounded(t *testing.T) {
 		t.Fatalf("diagnostic folder = %v, want the current segment, its lock and its segments, nothing kept", got)
 	}
 	segments := listDir(t, filepath.Join(dir, "diagnostic.segments"))
-	if len(segments) != 1 || len(readFile(t, filepath.Join(dir, "diagnostic.segments", segments[0]))) != 2*len(record) {
-		t.Fatalf("diagnostic.segments = %v, want the one newest segment of two records", segments)
+	if len(segments) != 2 {
+		t.Fatalf("diagnostic.segments = %v, want the two newest segments", segments)
+	}
+	for _, segment := range segments {
+		if got := len(readFile(t, filepath.Join(dir, "diagnostic.segments", segment))); got != 2*len(record) {
+			t.Fatalf("segment %s = %d bytes, want two records (%d)", segment, got, 2*len(record))
+		}
 	}
 	if got := len(readFile(t, path)); got != len(record) {
 		t.Fatalf("current segment = %d bytes, want one record", got)

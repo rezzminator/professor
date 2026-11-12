@@ -53,7 +53,7 @@ func (installer *engine) moveLogsToRoot() error {
 		}
 		message := fmt.Sprintf("move %d log files from %s to %s", len(entries), move.from, move.to)
 		failures = append(failures, installer.change(message, func() error {
-			return moveLogFolder(move.from, move.to, entries)
+			return moveLogFolder(move.from, move.to, entries, true)
 		}))
 	}
 	if installer.apply {
@@ -63,7 +63,9 @@ func (installer *engine) moveLogsToRoot() error {
 }
 
 // moveLogFolder moves each of entries out of from into to, then removes from.
-func moveLogFolder(from, to string, entries []fs.DirEntry) error {
+// With generations, a log of the old rotation becomes a closed segment; a
+// folder's files keep their names (a segments folder already holds segments).
+func moveLogFolder(from, to string, entries []fs.DirEntry, generations bool) error {
 	if err := os.MkdirAll(to, 0o700); err != nil {
 		return fmt.Errorf("create log root %s: %w", to, err)
 	}
@@ -76,7 +78,18 @@ func moveLogFolder(from, to string, entries []fs.DirEntry) error {
 			continue
 		}
 		target := filepath.Join(to, entry.Name())
-		if match := generationName.FindStringSubmatch(entry.Name()); match != nil {
+		if entry.IsDir() {
+			// A folder of logs (restart/) merges into the root's own, file by file.
+			inner, err := os.ReadDir(source)
+			if err != nil {
+				return fmt.Errorf("list log folder %s: %w", source, err)
+			}
+			if err := moveLogFolder(source, target, inner, false); err != nil {
+				return err
+			}
+			continue
+		}
+		if match := generationName.FindStringSubmatch(entry.Name()); generations && match != nil {
 			info, err := entry.Info()
 			if err != nil {
 				return fmt.Errorf("inspect log %s: %w", source, err)

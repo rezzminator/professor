@@ -165,10 +165,11 @@ func FindCodexHistory(ctx context.Context, codexHomes []string, sid string) (str
 		return "", nil
 	}
 	var newest codexmeta.Rollout
+	var unread []error
 	for _, home := range codexHomes {
 		rollouts, errs := codexmeta.WalkRollouts(ctx, home, "sessions", "archived_sessions")
 		if len(errs) != 0 {
-			return "", fmt.Errorf("search Codex rollouts under %s: %w", home, errors.Join(errs...))
+			unread = append(unread, fmt.Errorf("search Codex rollouts under %s: %w", home, errors.Join(errs...)))
 		}
 		for _, rollout := range rollouts {
 			if strings.HasPrefix(codexmeta.RolloutID(filepath.Base(rollout.Path)), sid) &&
@@ -176,6 +177,11 @@ func FindCodexHistory(ctx context.Context, codexHomes []string, sid string) (str
 				newest = rollout
 			}
 		}
+	}
+	// A match stands although a place went unread: the sid names that rollout. With no match, the
+	// unread place is the answer, never a miss.
+	if newest.Path == "" && len(unread) != 0 {
+		return "", errors.Join(unread...)
 	}
 	return newest.Path, nil
 }

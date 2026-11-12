@@ -308,8 +308,12 @@ func Run(
 		return Result{}, err
 	}
 	defer unmark(stderr)
-	if _, err := typeExit(ctx, pane, options.Clock, stderr); err != nil {
+	if entered, err := typeExit(ctx, pane, options.Clock, stderr); err != nil && !entered {
 		return yield(err)
+	} else if err != nil {
+		// Enter may have gone out: from here the pane's end is the reload's own,
+		// read by the exit wait below, never yielded to its owner.
+		fmt.Fprintf(stderr, "pfm chat reload: %v; waiting for the chat to exit\n", err)
 	}
 	trail.Reach("exit-typed", "/exit submitted")
 

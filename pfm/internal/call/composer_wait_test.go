@@ -181,13 +181,15 @@ func TestAwaitComposerRowTellsAFailedReadFromTheSplash(t *testing.T) {
 // slowEchoTmux plays a pane still drawing its last turn: a typed message
 // reaches the screen only after hold more captures, and an Enter pressed
 // before it shows is swallowed — the TUI has not read the text it would
-// submit.
+// submit. With cut, each held frame is caught mid-repaint: the transcript
+// without the composer row.
 type slowEchoTmux struct {
 	*fakeTmux
 	mu     sync.Mutex
 	hold   int
 	unseen int
 	before string
+	cut    bool
 }
 
 func (fake *slowEchoTmux) Capture(
@@ -200,7 +202,11 @@ func (fake *slowEchoTmux) Capture(
 	if fake.unseen > 0 {
 		fake.unseen--
 		before := fake.before
+		cut := fake.cut
 		fake.mu.Unlock()
+		if lines := strings.Split(before, "\n"); cut && lastComposerRow(lines) >= 0 {
+			before = strings.Join(lines[:lastComposerRow(lines)], "\n")
+		}
 		return before, nil
 	}
 	fake.mu.Unlock()
@@ -236,30 +242,47 @@ func (fake *slowEchoTmux) SendKey(ctx context.Context, socket, target, key strin
 // signature, so the previous call's transcript row read as this message's
 // echo, Enter went out before the pane showed the text, and the delivery
 // proof found the message still in the composer. The settle reads the
-// composer row and below, so the one Enter waits for the echo.
+// composer row and below, so the one Enter waits for the echo; a frame caught
+// mid-repaint, with no composer row, holds no echo either.
 func TestRenderSettleReadsTheComposerNotTheTranscript(t *testing.T) {
-	fake := &slowEchoTmux{fakeTmux: &fakeTmux{capture: "❯ ", submitOnEnter: true}}
-	engine := newTestEngine(t, "slow-echo", fake.fakeTmux)
-	engine.tmux = fake
-	first, err := engine.Call(context.Background(), Request{Target: "chat", Message: "first call"})
-	if err != nil || first.Code != 0 {
-		t.Fatalf("first call: result=%+v err=%v", first, err)
-	}
-	fake.fakeTmux.mu.Lock()
-	transcript := fake.capture
-	fake.keys = nil
-	fake.fakeTmux.mu.Unlock()
-	fake.hold = 2
-	engine.options.SettleTries = 4
-	second, err := engine.Call(context.Background(), Request{Target: "chat", Message: "second call"})
-	if err != nil || second.Code != 0 || second.Status != "delivered" {
-		t.Fatalf("second call: result=%+v err=%v", second, err)
-	}
-	fake.fakeTmux.mu.Lock()
-	keys := strings.Join(fake.keys, ",")
-	fake.fakeTmux.mu.Unlock()
-	if keys != "C-s,Enter" {
-		t.Fatalf("keys = %q, want the draft guard then one Enter; screen before the message: %q", keys, transcript)
+	for _, row := range []struct {
+		name string
+		cut  bool
+	}{
+		{"held frames show the composer", false},
+		{"held frames are cut above the composer", true},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			fake := &slowEchoTmux{fakeTmux: &fakeTmux{capture: "❯ ", submitOnEnter: true}}
+			engine := newTestEngine(t, "slow-echo", fake.fakeTmux)
+			engine.tmux = fake
+			first, err := engine.Call(context.Background(), Request{Target: "chat", Message: "first call"})
+			if err != nil || first.Code != 0 {
+				t.Fatalf("first call: result=%+v err=%v", first, err)
+			}
+			fake.fakeTmux.mu.Lock()
+			transcript := fake.capture
+			fake.keys = nil
+			fake.fakeTmux.mu.Unlock()
+			fake.mu.Lock()
+			fake.hold, fake.cut = 2, row.cut
+			fake.mu.Unlock()
+			engine.options.SettleTries = 4
+			second, err := engine.Call(context.Background(), Request{Target: "chat", Message: "second call"})
+			if err != nil || second.Code != 0 || second.Status != "delivered" {
+				t.Fatalf("second call: result=%+v err=%v", second, err)
+			}
+			fake.fakeTmux.mu.Lock()
+			keys := strings.Join(fake.keys, ",")
+			fake.fakeTmux.mu.Unlock()
+			if keys != "C-s,Enter" {
+				t.Fatalf(
+					"keys = %q, want the draft guard then one Enter; screen before the message: %q",
+					keys,
+					transcript,
+				)
+			}
+		})
 	}
 }
 

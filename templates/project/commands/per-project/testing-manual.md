@@ -1,6 +1,6 @@
 ---
 name: {project}-testing-manual
-description: Governs how {project} ({PROJECT_ROLE}) is tested — tiers, test homes, lanes, mocks, run commands, gates and floors, bug classes, traps. Read by the flights foremen for the affected tests, the flights lander whole for the full gate; `/{project}-testing-manual` opens it for a human. Keep it true in the same change that alters how {project} is tested.
+description: Governs how {project} ({PROJECT_ROLE}) is tested — tiers, test homes, suite duties, mocks, run commands, gates and floors, bug classes, traps. Read by the flights foremen for the affected tests, the flights lander whole for the full gate; `/{project}-testing-manual` opens it for a human. Keep it true in the same change that alters how {project} is tested.
 ---
 
 # {project} testing manual
@@ -17,11 +17,11 @@ Fixed headings, fixed order; a section that does not apply says `none`. State th
 
 - A test lives in the module that owns its contract; the path convention: {source path → test path}.
 
-## Lanes and registries
+## Suite duties
 
-- A new or changed capability lands in one commit with its landscape row, its map row, and the unit, hermetic or live row mapping it together with that row's bite: {the landscape, map and ledger paths}.
-- Where a live tier exists, every landing runs the full lane sequence, in CI on every operating system the suite design lists: {the sequence command}.
-- An escaped bug's fix lands with the assertion the `testing` rule owes and its escape-ledger row: {the escape ledger path}.
+- A new or changed capability lands in one commit with the step or test that walks it, watched red: {the tree file and the test homes}.
+- Where a live tier exists, every pull request runs the whole tree on every operating system the suite design lists: {the tree command}; while fixing, the touched branch alone: {the filtered command}.
+- An escaped bug's fix lands with its assertion on the step or test that walked past it and its `escapes.tsv` line: {the escapes path}.
 - Shared-core files with one editor per flight: {paths}.
 
 ## Mock boundary

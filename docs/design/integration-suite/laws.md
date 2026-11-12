@@ -1,5 +1,7 @@
 # The laws — tiers, shape, verdict
 
+The live tier this file describes in part was replaced by one tree of owner steps: [journey-tree.md](journey-tree.md) § What it replaced names the sections that still hold; where any other differs from the command, the command governs.
+
 This file covers Laws 1–18 and 32–34 of [`/integration-suite:use`](../../../templates/global/commands/integration-suite/use.md), one section each: where each tier gates, the shape of the live suite, what a verdict means, and the walk of the owner's journey. [validity.md](validity.md) covers Laws 19–31 and 35: how the suite stays honest over time, the shapes a test may never take, and how a beat's assertions grow after an escape. Every section gives the rule, the failure it prevents, why it takes this shape and not a nearby one, and how it is checked; a section with published evidence names it. The laws hold for any project in any language; the examples are the kinds of systems the command designs for, not any one codebase.
 
 ## Contents

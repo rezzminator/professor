@@ -1,501 +1,266 @@
 ---
 name: integration-suite:use
-description: Designs every test tier — its validity law, and the live tier's lanes over shared state; `/integration-suite:use <project|subsystem>`, "design our test suite", "refactor the e2e suite", before building any test harness. Returns a design document with its ledgers and checks script; edits no code. Source-tree layout → /llm-codebase:use.
+description: Designs every test tier — its validity law, and the live tier as one tree of owner steps; `/integration-suite:use <project|subsystem>`, "design our test suite", "refactor the e2e suite", before building any test harness. Returns a design document; edits no code. Source-tree layout → /llm-codebase:use.
 argument-hint: <project|subsystem>
 ---
 
 # Integration Suite
 
-One procedure for any stack: a CLI, a web service, a UI, a daemon, a library with a unit tier only, a product with LLM-driven steps. Each rule below is one executable line; its reasoning, the failure it prevents and its evidence live in the design, read from disk at each decision point:
+One procedure for any stack: a CLI, a web service, a UI, a daemon, a library with a unit tier only, a product with LLM-driven steps. The reasoning behind each rule lives in the design record, read from disk:
 
 ```bash
 DESIGN="$(cd "$(dirname "$(readlink -f "$HOME/.claude/commands/integration-suite/use.md")")/../../../../docs/design/integration-suite" && pwd)"
 ```
 
-Run it first. When it fails, or `$DESIGN` lacks `integration-suite.md`, `laws.md` or `validity.md`, stop and report `DESIGN-UNREACHABLE <the directory the cd tried>`; never proceed from memory. A pointer `$DESIGN/<file> § <heading>` is an order: read that section before the decision it governs. Law N's section is `$DESIGN/laws.md § Law N` for 1–18 and 32–34, and `$DESIGN/validity.md § Law N` for 19–31 and 35 (the heading `Law N — …`); read it wherever a step names Law N, and before any judgement its line leaves open. Where this command and a section differ, the section governs and the reply names the difference. Before step 1, read `$DESIGN/integration-suite.md § The six ideas` and `$DESIGN/integration-suite.md § The shape`.
-
-Sections: Inputs · Terms · Names and ids · Laws · Refused shapes · Files · Procedure · Output and build order · Checks · Where enforcement ends · Hand-off.
+Run it first. When it fails, or `$DESIGN` lacks `journey-tree.md`, `laws.md` or `validity.md`, stop and report `DESIGN-UNREACHABLE <the directory the cd tried>`. A pointer `$DESIGN/<file> § <heading>` ending a line holds that line's reasoning: read it before a judgement the line leaves open. Where a design section and this command differ, this command governs; `$DESIGN/journey-tree.md § What it replaced` lists the sections it supersedes. Before step 1, read `$DESIGN/journey-tree.md` whole.
 
 ## Inputs
 
-Read `$DESIGN/integration-suite.md § Inputs`.
-
-- target: a project's test suite, or one subsystem of it (the same procedure over a narrower landscape). A project with no live tier (a library, a tool with no shared state, an owner who asks for none) runs every step; the live-tier parts answer `none — <reason>`.
-- live tree: the product's entry-point registries, build configuration, settings schema (none: the key set the environment-reader seam's call sites name) and existing tests, read from code, never recalled.
+- target: a project's test suite, or one subsystem of it (the same procedure over a narrower product). A project with no live tier (a library, a tool with no running state, an owner who asks for none) runs every step; the live-tier parts answer `none — <reason>`.
+- live tree: the product's entry registries (router, command tree, job registry, tool list; a library's exported interface), build configuration, settings schema and existing tests, read from code, never from docs or memory.
+- fix history: the version-control log and the issue tracker, the source of the escapes.
 - orientation file: the project's test tiers, isolation rules and what a test run may never touch; absent, each of the three is an Open ruling.
-- ratified references: facts, specs, contracts and rulings, indexed in `references.tsv`; none, and every ruled row's source is an Open ruling.
-- own identifiers: repository names, issue-tracker hosts and internal domains, listed in the checks script for `gaps`.
-- owner: the step 12 rulings, and the review of the owner-owned paths (Where enforcement ends).
+- owner: the step 9 rulings.
 
 ## Terms
 
-Read `$DESIGN/integration-suite.md § Terms, and why each exists` before applying a term to an unclear case.
+- unit tier: every door behind a seam, parallel, seconds; hermetic tier: the real binary or server as a separate process against scripted mocks, no network beyond loopback; live tier: the installed product on a machine, driven through the owner's entries.
+- door: a contact with the outside world (clock, process, filesystem, network, environment); seam: the one interface in front of a door, its fake in the fakes directory, the one test-tree directory holding every fake.
+- entry: one way the owner starts an action (keys typed into a real terminal, a click in a real browser, the public command line, an integration's own call); internal entry: one the owner never uses (a hidden subcommand, a direct call into product code).
+- machine: the disposable host the live tier runs on (a container booting the real service manager, a virtual machine, a CI runner), set up as the owner's own.
+- step: one owner action through an entry, what the owner sees after it, and the reads of the state underneath; one small file.
+- tree: the one file saying which step runs after which; node: one place in it, named by its path from the root, its id and its run filter.
+- chain: children run in order, each from the state the one before left; together node: a node whose children run concurrently; branch: one child of a together node with its whole subtree; join: the node after a together node, started once every branch finished; trunk: the chain of the owner's commonest day, root to leaf.
+- escape: a defect a user met while the suite passed; the step that walked its path passed blind.
+- watched red: the product statement a test guards, broken in a scratch copy, and the test seen failing on it with readable evidence; never committed.
+- log gate: the product's activity-log records written while a step ran, read after it; an error record the step did not declare fails it.
 
-- unit tier: every door behind a seam, parallel, seconds; hermetic tier: the real binary or server as a separate process against scripted mocks, no network beyond loopback; live tier: the real system against its real dependencies.
-- door: a contact with the outside world, as the door spelling set spells it; seam: the one interface in front of a door, with a fake. The project's own data layer (database, cache, queue broker, run locally) is part of the system at the hermetic and live tiers; the unit tier reaches it only in the packages that own persistence.
-- landscape: the closed list of product capabilities in `landscape.md`, the coverage denominator.
-- lane: one actor pursuing one kind of goal, depth-first; its files match the lane-file pattern the checks script declares.
-- beat: one action plus the assertion of its result, the unit of verdict (✓, ✗, `known`, `blocked`, `skip-because`); a beat with several arms is several beats.
-- mapped row: a beat, or a unit or hermetic test the map names (`tier-unit:<test>`, `tier-hermetic:<test>`); every mapped row has a `beats.md` row.
-- crossing: shared state two lanes touch from different sides.
-- entry: one way the owner starts an action (keys into a screen or menu, a command typed where the product's hook receives it, the public command line, an integration's own call); internal entry: one the owner never uses (a hidden or internal subcommand, a direct call into product code).
-- dimension: an axis whose value changes which backend, engine or code path runs after a beat, never an entry; fork: where the sequence runs the beats that follow once per value of a dimension; branch: one value's run after a fork, keyed by its branch key; journey tree: the sequence from the root through every fork to every leaf.
-- escape: a defect a user met while the suite passed; a beat that ran its path and passed ran it blind.
-- root: the installed, configured, seeded environment every run starts from, built to the owner's topology (Law 34), snapshotted and keyed by a hash of its inputs; checkpoint: the environment after one lane of a sequence run, snapshotted and keyed like the root.
-- carry: the ids and credentials a beat created or was handed.
-- run ledger: the runner's record of one run (step 11); runs store: `runs/` beside the ledgers for a local run (`hash`-tagged, landed with the change), the CI artifact store keyed by subject for a CI job. A run a check reads after its landing (one a ledger file names, a lane's latest green `solo`) lives under `runs/`; any other landed ledger may be pruned.
-- coverage context: the product lines executed under one test's id, as the coverage tool attributes them per test.
-- canonical ledger: the ledger of a full sequence run (`mode: sequence`, every lane) on the merge subject; with no live tier, the blocking commands' ledgers on the merge subject.
-- landing: one change's merge into the main branch, identified by its merge subject.
-- hash subject: every tracked path minus the `hash`-tagged globs of `exclusions.txt`; merge subject: the version-control system's staged-tree hash over the hash subject for the change being merged; dirty hash: the tracked diff plus every untracked, non-ignored file under the subject.
-- signature: the enclosing symbol plus the normalised statement, independent of the file; every exemption anchor is a signature, every ratchet baseline a multiset of them.
-- path façade: the one product module that resolves every environment path (home, configuration, data, log) from the environment root.
-- spelling set: one file per language under `scripts/suite-checks/` listing the call and pattern spellings one check searches for over its scope: the assertion, door, refused-shape, refused-name, violating-action, exclusion and locator sets. Locator position is an argument the locator set names (a selector, a key, an id), never the value asserted.
-- rendered-from set: the non-code assets the build loads (message and translation files, templates).
-- bite: the product change that turns a test red, named in `breaks-if:`, watched once, recorded in `bites.tsv`; source: the independent origin of an expected value.
-- fakes directory: the one test-tree directory, named in the seam plan, holding every fake.
-- schedule window: the longest period between two runs of the scheduled leg, and between two close runs, declared in the Tiers section and counted from the landing that installed the suite (the first landing whose tree holds `scripts/suite-checks.sh`); no check fails on it before one window has passed.
+## Names
 
-## Names and ids
-
-Read `$DESIGN/integration-suite.md § Names and ids` before naming anything.
-
-Every id is kebab-case domain words, the same string on every surface (file stem, runner argument, ledger column, log field, map cell), with no single letter, prime, date, bug id, wave or team name. A rename is one mapping applied everywhere, accepted when the old name greps empty repo-wide and one run is green.
-
-| Id | Pattern | Example |
-| --- | --- | --- |
-| landscape id | `<area>.<capability>`, at line start | `invoice.export-pdf` |
-| lane key | `<domain-words>`, three characters or more, never starting `tier-` | `billing-cycle` |
-| beat id | `<lane>/<slug>`, the slug stating the action; after a fork `<lane>/<slug>@<branch key>`, the dimension values on its path in fork order joined by `+` | `billing-cycle/export-invoice`, `billing-cycle/export-invoice@card+mobile` |
-| tier row | `tier-unit:<test name>` or `tier-hermetic:<test name>` | `tier-unit:cursor-rejects-foreign-sort` |
-| test file stem, title | domain words clear of the refused-name spellings | `cursor-paging.test`, "a foreign-sort cursor is refused" |
-| run id | `<lane or sequence>-<subject short hash>-<start time>` | assigned by the runner; `names` does not read it |
-
-The refused-name spellings, which `names` fails: a bug id, a date, a wave or team word, `line N`, a code segment of one or two letters plus digits outside `name-allowlist.txt` (`s3`, `v2`), a numeric segment in an id, a key or a stem, and in a title an ordinal (`#N`, a leading `N.`, `case N`, `scenario N`). Beats carry no ordinal: the lane file's order is the run order. A property word in a slug or title (durable, recovers, idempotent, exclusive, retries) needs a violating action in the test body: restart, kill, replay, concurrent, expire, revoke, repeat, or a scripted fault (fail, error, drop, disconnect, timeout, 5xx).
+Every name is kebab-case domain words, the same string on every surface (file stem, node name, run filter, log field), with no single letter, date, bug id, ordinal, wave or team word. A node name is unique among its siblings. A name stating a property (durable, recovers, idempotent, exclusive, retries) needs a body that creates the violating condition: restart, kill, replay, concurrent, expire, revoke, or a scripted fault. A resource a step creates (an account, a session, a workspace, a record) takes a run-unique name from the harness.
 
 ## Laws
 
-Each line is the rule; the section it ends with holds why.
+Each line is the rule; the pointer it ends with holds why.
 
 ### Where each tier gates
 
-1. The unit and hermetic tiers gate every commit. The live tier's full sequence (Law 32) gates every landing and runs in CI on every operating system `live-os:` lists, each paid or credentialed dependency there through its recorded mock (Law 2); with every dependency real it gates each release. No gate below the release holds a credential or calls a paid or live dependency, and each runs with outbound network denied where the platform allows. A gate that reads the map or a coverage table without running the sequence gates nothing. `$DESIGN/laws.md § Law 1`
-2. Each external dependency family gets one scripted mock speaking the real protocol from a scenario file in both directions (its replies, and the events, hooks and callbacks it sends into the product), its shapes goldens recorded from the real dependency in the release run (a differing capture is a red beat) and re-recorded when a defect traces to a shape the mock lacked; an unscripted request fails the test by name. Every internal fake (a store, a queue, a registry, a renderer) lives in the fakes directory and passes the real implementation's contract cases, run against both, producing every state a test needs and none the real one cannot. No test replaces a product module in place with an inline stand-in. `$DESIGN/laws.md § Law 2`
-3. A live row names a twin at the lowest tier that observes the product-side decision it exists for (`twin:<row>`), or is `live-only`; a twin never removes an assertion from the beat (Law 11). A hermetic row exists only for what a unit test cannot observe: a process boundary, real input and output, a boot path, the assembled artifact. Above the unit tier, one success and one refusal row per operation, entry and branch besides `crossing:` rows; a literal input variation is a table-driven unit case, a dimension never is (Law 32). Every hermetic and live row states `live-because:`. `$DESIGN/laws.md § Law 3`
-4. The hermetic and live tiers boot the production entry point from the build output as a separate process, with production's module resolution and configuration path (`boot: process`). An in-process boot (`boot: in-process`) is admitted only with a self-test asserting single instances of every stateful library the product loads and a behaviour probe identical in both modes, both passing on the merge subject. `$DESIGN/laws.md § Law 4`
-5. Where the product has LLM-driven steps, an end-to-end run of them executes at release on a weaker, non-frontier LLM at its highest reasoning setting and passes on the asserted end state, never the model's claim; its ledger's `command:` names the model and the setting, an Open ruling until the owner rules both. `$DESIGN/laws.md § Law 5`
+- Gates: the unit and hermetic tiers gate every commit; the live tree runs on every pull request, on every operating system the Tiers section lists, each paid or credentialed dependency through its recorded mock or fake; with every dependency real it runs at each release. No gate below the release holds a credential or calls a paid or live dependency, and each runs with outbound network denied where the platform allows. `$DESIGN/laws.md § Law 1`
+- Mocks: each external dependency family gets one scripted mock speaking its real protocol both ways (its replies, and the events and callbacks it sends into the product) from a scenario file, its shapes recorded from the real dependency at release and re-recorded when a defect traces to a shape it lacked; an unscripted request fails the test by name. Every internal fake lives in the fakes directory and passes the real implementation's contract cases, run against both. No test replaces a product module in place with an inline stand-in. `$DESIGN/laws.md § Law 2`
+- Tier spend: each tier holds only what the tier below cannot observe: a hermetic test a process boundary, real input and output, a boot path or the assembled artifact; a live step the owner's path reaching a decision. A decision a unit test pins is not re-proved by a step; another literal input is a table-driven unit case. `$DESIGN/laws.md § Law 3`
+- Boot: the hermetic tier boots the production entry point from the build output as a separate process, with production's module resolution and configuration path; the live tier installs the product the way the owner does. An in-process boot needs a self-test proving one instance of every stateful library and identical behaviour in both modes. `$DESIGN/laws.md § Law 4`
+- LLM steps: where the product has LLM-driven steps, one end-to-end run at release uses a weaker, non-frontier model at its highest reasoning setting and passes on the asserted end state, never the model's claim; the model and the setting are owner rulings. `$DESIGN/laws.md § Law 5`
 
-### The shape of the live suite
+### The live tree
 
-6. The live tier runs one environment per run, lanes in sequence, each inheriting the state earlier lanes built; concurrency is a scripted beat (a storm, two writers), never a scheduling mode. A parallel mode exists only when the design declares it, and then admits only lane files whose crossings share no store, derives from the lane key a per-child namespace for every shared resource (database, schema, queues, captured mail, carry, logs, scratch names, identities, addresses, environment keys), carries a collision self-test (two children, identical inputs, zero cross-reads), asserts no delta across children on a store without a correlation column, and labels its ledgers `mode: parallel:<n>`, never canonical. `$DESIGN/laws.md § Law 6`
-7. Every lane opens with a `need` prelude that creates its preconditions when absent and is a no-op when they exist. A sequence run checkpoints after each lane (step 11), and a lane's working loop restores its checkpoint. A lane is done when green from its checkpoint, green alone from a fresh root and green in the next full sequence; it joins the sequence the day it is written, and a solo run is owed again only when its files change. The runner keeps going: after a red beat the rest of that lane reports `blocked-by`, and the next lane's prelude runs in create mode and reports that lane's own first fault. `$DESIGN/laws.md § Law 7`
-8. Lanes run state builders, then readers over the richest state, then destroyers; a lane with a destructive tail (uninstall, offboarding, purge) splits into an early half and a final half. The lane table gives each position its reason; a lane without one is an Open ruling. `$DESIGN/laws.md § Law 8`
-9. Two lanes assert every crossing. Every heavy beat (one that loads, restarts, migrates or bulk-mutates shared state) is followed by an after-effect beat: after `<lane X's heaviest beat>`, `<what lane W built>` still `<does its job>`. A probe becomes a beat only when the landscape carries the capability it probes, and a landscape row exists only when the built product reports its operation or its `evidence:` names the code that writes the output. `$DESIGN/laws.md § Law 9`
-10. Every read of a store another test writes carries a predicate on an id the test created or carries (no count, first row, "the only" row or unchanged-table assertion over such a store), at every tier whose tests share a store. Shared identities (an administrative account, a tenant, a default role) are provisioned once by the root build and read from the carry, never asserted as the test's own. `$DESIGN/laws.md § Law 10`
+- Shape: the live tier is one tree file and one small file per step (20 to 60 lines). Read, the tree is the plan; run, it is the report, every node's verdict on one timeline. `$DESIGN/journey-tree.md § The shape`
+- Fork or chain: steps that only share a starting point fork, as siblings or as branches; a step chains under another only when it needs what that one left. A failed step blocks its own descendants and nothing else: every other branch runs and reports.
+- Ownership: branches of a together node run at once. Each owns what it creates under a run-unique name (its own session, server, account, workspace), its reads filter on what it created, and it stops what it started when its subtree ends, failed or not. Machine-wide checks, and steps that change the whole machine (install, restart, upgrade, uninstall), run only at the joins, alone. `$DESIGN/laws.md § Law 10`
+- Entries: every action is the owner's own: typed into a real terminal running the owner's login shell with the multiplexer inside, clicked in a real browser, or run as the public command. A command run directly, or an internal entry, only reads state, seeds the machine or tears down; it never stands in for an action. `$DESIGN/laws.md § Law 33`
+- Step: the owner's hands first, then the reads underneath. Act through the entry; wait for what the owner sees, a short literal the owner would recognise, never a pattern over layout; then read the state behind the screen (the product's own machine-readable listing, its database, the multiplexer's or browser's own state, the process table, the files it wrote) and assert exact values. The read is the second check, never a substitute for the first. Side effects are caught once, globally: the log gate after every step, and the consistency check (every live entity listed once, no orphan process, names equal across surfaces) at the end of each branch over what it owns and machine-wide at each join.
+- Breadth: the tree grows from evidence only. An escape becomes an assertion on the step that walked past it, watched red on the unfixed code; where no step walked its path, the tree gains the step that does. A new feature adds a step. Combinations are never multiplied out. `$DESIGN/validity.md § Law 35`
+- Not covered: a step the product or its fakes cannot play, and a defect this repository cannot fix (an upstream defect, absent hardware), are left out and named under Not covered with what each needs or its external reference: never skipped, never a placeholder node, never a known-gap list.
+- Machine: the live tree runs on a machine it may spend, set up as the owner's own (login shell, multiplexer or browser, projects and nested projects, configuration, the launcher), with no network beyond what the design declares. The suite's entry point refuses to run anywhere else, exiting non-zero with one line, never a skip. Every container, directory and artifact is named for its run, so two runs never collide; the machine goes on a pass and stays on a failure. `$DESIGN/laws.md § Law 34`
+- Speed: the whole tree, one branch, and the unit and hermetic tiers each carry a wall-time budget, measured on green runs (the tree's on the first green trunk, before another branch is written); the runner fails a run over its budget, printing measured and allowed seconds. `$DESIGN/journey-tree.md § Speed`
 
 ### What a verdict means
 
-11. A beat passes on its asserted result plus a clean activity log; an expected error is declared per beat (`expect-log <pattern>`). A beat asserts every effect of its action it can observe, not only the one it was written for: what the user sees (the screen's text, the names, labels, badges and placement the product shows) and the system's own reports and stored state behind it, each assertion naming the landscape id it reads; a beat with no assertion on a mapped id cannot pass for that id. No expected value comes from an LLM's own claim; a beat that fails on LLM variance alone is asserting the wrong thing. `$DESIGN/laws.md § Law 11`
-12. The expected side holds a literal, a fixture or golden path, a registry key, or a name the test bound from a fixture, a seed or the carry; never a name or call resolving to a product module (a product type's constructor over literals alone is a literal) or a value read from the rendered-from set; a product name appears only in locator position. Every mapped row names `source:`; a ruled row's is a `references.tsv` row, and when test and product disagree the product is wrong: production under a ruled row changes only with a cited reference and an owner ruling in the same commit. Assert the specific value that differs between correct and broken behaviour (the code, the actor, the destination, the persisted row), never existence, truthiness, a literal on the actual side, "any value", a length alone, a disjunction of accepted values, an exception's class without its code, or a status or exit code as the row's only assertion; an assertion that cannot read such a value carries `weak-oracle:<class>` with a class from `unobservable.txt` (any other class is ratcheted by signature), and never on a ruled row. A count derives from what the test seeded. Two product artifacts that must agree (a store's schema and the code's definitions, two mirrors of one registry) make a `source:drift:<artifact>` row with a bite on each side. LLM output is asserted by its parsed structure, its recorded response replayed at the hermetic tier, and the values of its deterministic post-processing. `$DESIGN/laws.md § Law 12`
-13. Every mapped row, project-authored lint rule, rule in `third-party-rules.txt`, check and refused-shape spelling set carries a bite: `breaks-if:` names the product change, and the build applies it once, watches the red and records it in `bites.tsv`. The mutation is one statement inside the guarded code (no inserted unconditional exit or throw, no more than one statement removed), and for a mapped row it lies in the capability's file or the op's handler. Every other test is watched failing when written. A guard with an allow and a deny outcome is tested in both directions, a bound at the boundary and one step either side; negative fixtures differ from positive ones only in the guarded property; a name states a property only when the body creates the condition that would violate it. `$DESIGN/laws.md § Law 13`
-14. A capability is covered only when the canonical run observed a mapped row invoking it under the row's own injected id and asserting on it. The runner writes per row the operations recorded with that id (the log's `op` and `beat`), the goldens compared and the assertions per landscape id, and the close gate reads that ledger, never the map. A tier row is proven through its tier's ledger (the buffer handler's records or the coverage context reaching the capability's file at unit, the log slice at hermetic), and its test is collected by the blocking command, passed on the merge subject and bitten inside the capability's file or the op's handler. A time-driven job is covered by a beat triggering it through an operator entry point carrying the id, or by a unit row. The journey tree's coverage is its edges: each beat on each branch is its own mapped row, so an edge the canonical run did not walk is `CLAIMED-NOT-INVOKED`. `$DESIGN/laws.md § Law 14`
-15. Every check, scanner, lint rule, registry reader, output filter, runner and CI step has three outcomes (pass, fail, could-not-look), and could-not-look exits non-zero under its own name: `blocked-by <beat>` behind a failed precondition, `DERIVE-FAILED` for an enumerator that could not run, `LOG-ABSENT` for a beat whose log slice is missing, `ERROR` for an unreachable dependency, a failed run for a killed or crashed one, `PASS none:<section>` or `ERROR NONE-AMBIGUOUS` (Output and build order), and `PASS not-due` between scheduled legs, `ERROR` once the last leg is older than its window. The one skip is `skip-because:<reason>` with a reason from `skip-reasons.txt`, for a condition the environment makes physically unobservable, reported by name and counted apart from passes; an unreachable dependency, a missing credential, a slow or a flaky test is an `ERROR` or a defect. A CI gating job that `needs:` another runs `if: always()` and checks each needed job's `result` explicitly: GitHub counts a skipped required check as passed. Every check, scanner, filter, project-authored lint rule, the runner and the beat library ship one self-test per could-not-look input (file absent, empty, unparseable, process killed, zero items scanned, a node the rule cannot read) expecting the error, and one planted-violation self-test expecting the failure, both watched before the code exists. A failed beat stores raw evidence: the exact response or screen bytes and the log slice. `$DESIGN/laws.md § Law 15`
-16. A probe reads, never consumes: a queue's attributes and stored state, never the message or the work item. Every observation goes through the beat library, scoped by beat id, entity id and log offset; the library reads a child process's output only after the child exited or flushed, and keys every reply by beat id. Every wait is a bounded poll on a named, observable product condition, never on the clock or a time-derived value; the harness never sleeps or waits a literal delay, fakes only the clock, never every timer, and takes a time-derived credential only from the clock-seam or tolerance-window helper. A lane file never re-implements a shared helper. `$DESIGN/laws.md § Law 16`
-17. A product with a runtime writes one structured activity log per environment root, levelled per environment, test and pre-release defaulting to debug. Every record carries `op` and the ids of the entities in play; the harness injects the beat id and run id into every request and process environment it starts, and the product carries them through its queues and jobs. At the unit tier a buffer handler captures each test's records and the runner writes its `op` set to the ledger. A redaction test covers credentials, tokens, prompt bodies and personal or regulated data. Lane fixtures are synthetic. `$DESIGN/laws.md § Law 17`
-18. Output whose bytes are the interface (an emitted command, a generated file, a rendered screen's structure) is pinned by goldens, changed in the output's commit. Meaning-bearing copy (legal, compliance, safety, an AI disclosure, an attribution, any owner-ruled wording) is pinned per locale by a literal in `ruled-copy.tsv`, in exactly one test per key and locale; the registry holds keys or the single line `none`. Ordinary copy is asserted structurally (the element, its key, its presence and position), never by wording. A golden is never generated from the rendered-from set nor written by the test comparing it: `golden` compares against the tracked blob, a snapshot store sits under the goldens directory with snapshot writing disabled in the blocking command, and a first capture is reviewed before it pins anything. `$DESIGN/laws.md § Law 18`
-
-### Keeping it honest over time
-
-19. `gaps.tsv` holds only what this repository cannot fix (an upstream defect or absent hardware), each entry with an external reference in `why` (an upstream issue link or `hardware:<identifier>`, never a repository file or an own identifier), an owner from `roster.txt` and an expiry. The healthy ledger is empty, and a listed row that passes is red. A fix flips its row to a real assertion and deletes the entry in the same commit. A `known` mark excuses one arm's verdict. Every exemption or allow list anchors on a signature, never a line number. `$DESIGN/validity.md § Law 19`
-20. Before the build, the design states the target wall for the full sequence, each lane and each tier, the scheduling, and the per-change policy (the lanes touching the changed files from their checkpoints, then the touched lane alone; the full sequence at every landing and at release); every beat and hermetic row carries `cost_ms:`. The runner prints a wall breakdown per row and per lane with the idle gaps between rows. Speed is measured against the target after the first two lanes, before a third is written. At close each lane, the sequence and each tier is pinned in `budgets.tsv` at the maximum of at least three named green canonical runs on one root hash (a tier key's on one subject) plus the headroom the Speed section declares, the sequence's pin within its target; a budget ratchets down only, save that a commit adding rows to a key may raise it by at most the added rows' own maximum `wall_ms` in the named runs. A per-row number is a hang guard and never fails a passing run. `$DESIGN/validity.md § Law 20`
-21. A flaky test is a defect with an owner, never a quarantine: the runner records every flake (a row that failed and passed on one merge subject, dirty hash and root hash) in `flakes.tsv`, and close fails while the run ledgers show one. A retry or rerun setting covers only tests named in `flakes.tsv`, every attempt is its own ledger row, and flakiness is tracked per configuration. The unit and hermetic tiers run in shuffled order in one scheduled leg; a shuffle-only failure is a shared-state defect. The live tier is never shuffled. `$DESIGN/validity.md § Law 21`
-22. Every run ledger records the subject hash and the dirty hash, both at start and at end; a gate or a merge accepts only a ledger the `tree` row passes; a bite's red run is verified against its own diff hash; a report older than the tree's latest change is not evidence. `$DESIGN/validity.md § Law 22`
-23. The design names the exact blocking command per tier, and every ledger header records the `command:` that produced it. Every file matching a test-name pattern anywhere in the repository, outside the `scope` exclusions, is collected by the blocking run exactly once; the blocking run's log shows every `CHECK` line; every CI step running a check blocks. A lint rule's wiring is proven only by a bite whose red run's `command:` is the blocking command. `$DESIGN/validity.md § Law 23`
-24. A test is deleted only in the commit that installs its verified `retired.tsv` rows, one per assertion, derived by the assertion spelling set from its text at the merge base. A disposition is `successor:<file:line | row id>` (existing, passed in the named run on the merge subject, with the same actual-side subject and the same expected literal or code), `dropped:<refused shape>` (matching that shape's spelling) or `ruling:<ref_id>` (in `references.tsv`). Kept tests get no row. The old suite is a list of claims to verify, never a source of fixtures or expected values. `$DESIGN/validity.md § Law 24`
+- Verdict: a test or step passes on its assertions plus a clean log slice; an error it causes on purpose is declared by the step. No expected value comes from an LLM's own claim. `$DESIGN/laws.md § Law 11`
+- Oracle: the expected side holds a literal, a fixture, a golden, or a value the test created; never a call into product code or a value read from the product's rendered assets (message, translation and template files). Assert the value that differs between correct and broken behaviour (the code, the actor, the destination, the stored row), never existence, truthiness, any value, a length alone, a disjunction of accepted values, an exception's class without its code, or an exit status as the only assertion. A count derives from what the test created. Where a test and a ratified spec disagree, the product is wrong. Two product artifacts that must agree (a store's schema and the code's definitions) get one drift test. LLM output is asserted by its parsed structure, its recorded response replayed at the hermetic tier, and its deterministic post-processing. `$DESIGN/laws.md § Law 12`
+- Watched red: every test and every step is watched red once, when written, on a one-statement break of the product code it guards (no inserted exit or throw); a guard with an allow and a deny outcome both ways, a bound at the boundary and one step either side. The change adding the test names the break. `$DESIGN/laws.md § Law 13`
+- Three outcomes: every check, runner, filter and CI step has pass, fail and could-not-look, and could-not-look exits non-zero under its own name: an enumerator that read nothing, a missing log slice, an unreachable dependency, a killed run. No test skips itself; an unreachable dependency, a missing credential, or a slow or flaky test is an error or a defect. A CI job that `needs:` another runs `if: always()` and checks each needed job's result, since a skipped required check counts as passed. `$DESIGN/laws.md § Law 15`
+- Evidence: a failed step keeps what the owner would need to see the failure: every terminal's screen as text and as raw bytes (a browser's screenshot and page), the log slice, the product's own listing and the process table, the screen also printed in the test log; a passing step keeps nothing.
+- Observation: a probe reads, never consumes (a queue's attributes, never its message). Every wait is a bounded poll on a named, observable condition, its failure printing what it waited for, the bound and the last value seen; no fixed sleep anywhere in the harness or a step; a test fakes only the clock, never every timer. `$DESIGN/laws.md § Law 16`
+- Scoped reads: every read of a store another test or branch writes filters on an id it created (no count, first row or "the only" row over shared state); shared identities are provisioned by the machine setup and read, never asserted as a test's own. `$DESIGN/laws.md § Law 10`
+- Activity log: a product with a runtime writes one structured log per environment root, at debug under test; every record carries its operation and the ids in play, and the harness injects the run id and the node path into every process and request it starts, the product carrying them through its queues and jobs. One redaction test covers credentials, tokens, prompt bodies and personal data. `$DESIGN/laws.md § Law 17`
+- Goldens: output whose bytes are the interface (an emitted command, a generated file, a rendered structure) is pinned by a golden, changed in the output's commit, never generated from the rendered assets nor written by the test comparing it, its first capture reviewed before it pins. Meaning-bearing copy (legal, safety, an AI disclosure, an attribution, owner-ruled wording) is pinned per locale by a literal in exactly one test. Other copy is asserted structurally (element, key, position), save on a terminal screen, where the text is the structure. `$DESIGN/laws.md § Law 18`
+- Flakes: a flaky test is a defect with an owner, fixed, never quarantined or retried. The unit and hermetic tiers run shuffled in one scheduled leg; a failure seen only shuffled, or only while branches overlap, is a shared-state defect. `$DESIGN/validity.md § Law 21`
+- Bound to the tree: a verdict counts only for the tree it ran on; a gate accepts only a run on the change it gates. `$DESIGN/validity.md § Law 22`
 
 ### What a test may not be
 
-25. The landscape holds only behaviour a user, an operator or an integration invokes on the running or installed product. Package-manager scripts that build, lint, type-check, format, test, generate or export, CI structure and step names, container build order, lockfiles, toolchain and dependency versions and the developer's own gates are excluded by rule; developer tooling runs as its own CI step. A configuration invariant that matters lives in one policy lint over the configuration files, each rule citing a `references.tsv` row, asserting a property (a key present or absent, a pattern absent) rather than a line's text, and carrying a planted violation. A version pin lives in the lockfile and a dependency policy. Operation names come from the built product's registries, never a package manifest, compared in both directions. `$DESIGN/validity.md § Law 25`
-26. Beats and tests exercise the migration runner (ledger, checksum, ordering, a half-applied step, a rollback, the second run that changes nothing) with fabricated migrations in the scratch-migration directory only. The resulting schema is asserted by introspecting a freshly migrated store against the code's own definitions, as a `source:drift:` row. The upgrade row runs the previous release. A data backfill is proven once at authoring against a synthetic, production-shaped fixture and not kept; one needing production data is the owner's data-handling decision. No test names a shipped migration directory or file, parses migration text, migrates to a named version, seeds rows between two migration runs, or restores a store dump or snapshot outside the root build and the scratch-migration directory. `$DESIGN/validity.md § Law 26`
-27. A test never opens a product-tree file (source, configuration, prompt, build output, or any text form of product code) as its subject; a behaviour test imports and runs the code. A source invariant is a lint rule with one planted violation per rule, run by the blocking command. An absence is asserted only by such a rule tagged security or privacy with a `references.tsv` row behind the tag; every other absence goes untested. A file the product wrote into the run root is output, not source, and a product whose output is configuration or prompt text pins that output under Law 18. Lint-rule fixtures and the planted corpora are `scope`-tagged. `$DESIGN/validity.md § Law 27`
-28. A landscape id maps to at most one row per tier and branch, except `crossing:` rows (Law 9's two sides, spanning two lanes or more) and a `twin:<row>` naming a row at another tier (Law 3). Every (row, id) pair in `beats.md` is a map row. Tests differing only in a literal are one table-driven test. `clones` runs a token-based clone detector over the test tree in this suite's own checks script, under the test tree's own baseline; test files are not exempt from it. `$DESIGN/validity.md § Law 28`
-29. The suite assembles its configuration from the run root and yields the same result under any ambient configuration. In one scheduled leg, and on every commit whose diff against the merge base touches the settings or test-configuration paths the Tiers section declares, the unit tier runs twice, under the base configuration and under one derived from the settings schema (none: the environment-reader seam's key set) with every key perturbed to a valid alternative and every flag toggled, with identical results. A test file resolves no settings at import or collection time. Every runner builds the product's environment only from the run root and the `need` values; a run-root key set in the ambient configuration is an error. `$DESIGN/validity.md § Law 29`
-30. Fakes, stubs and no-op implementations live only in the fakes directory. Production code never selects a double from a configuration value (a test flag, a test store name, a mock switch) and never substitutes a no-op for a missing configuration key: it refuses to boot. One hermetic boot with every required key blank asserts a non-zero exit whose refusal names every key; the per-key cases are unit tests over the configuration loader. Production source, contracts, schema comments and CI files never name a test file, a beat id or a test-tree path, except as an argument of a declared blocking command in a CI file. `$DESIGN/validity.md § Law 30`
-31. Lane and test files obey the size ceiling the design declares (`size-ceiling`) at authoring, checked by `size` in this suite's own checks script under the test tree's own baseline and never warned; a lane file splits by journey segment. Fixture files carry no absolute host path, no captured process id and no personal or regulated data. A log-record shape lives only in the synthetic-log fixture directory, its records carrying the reserved run id `synthetic`; a captured run log is never a fixture. `$DESIGN/validity.md § Law 31`
-
-### Walking the owner's journey
-
-32. The live tier's sequence walks one journey tree from the root. `dimensions.tsv` lists, from code, every dimension with its values and the `file:line` that branches on it; at each the sequence forks and runs the beats that follow once per value in the same environment, each branch carrying its own state to its leaves, and a dimension relating two actors (a caller and a callee) forks over every ordered pair of the branches it joins. Each beat on each branch is a mapped row. A combination left unwalked is a `cuts.tsv` row with its paper cost and the owner's ruling, never an omission. `$DESIGN/laws.md § Law 32`
-33. Every action beat acts through an owner's entry. An action with several entries is one landscape row per entry (`entry:<key>`), each run inside the same branch, never as branches nor as alternatives where one suffices. An internal entry may seed the root or observe, never stand in for an action. `$DESIGN/laws.md § Law 33`
-34. The root replicates the owner's topology, read from the owner's machine into the root inventory: the shells and the folders they start in, the projects and nested projects, the workspaces or sessions open at once, the launcher the owner starts the product with. Every dependency it runs is the real one or its recorded mock (Law 2). `$DESIGN/laws.md § Law 34`
-35. A beat's assertions only grow. An escape's fix lands with the assertion that would have caught it, added to the beat that ran its path blind and watched failing on the unfixed code; where no beat ran its path, the tree gains the branch or beat that does. Each escape is an `escapes.tsv` row; an assertion leaves a kept lane file only through a `retired.tsv` row (Law 24). `$DESIGN/validity.md § Law 35`
+- Blocking command: the design names the exact blocking command per tier; every test file is collected by it exactly once, and every CI step running a check blocks. `$DESIGN/validity.md § Law 23`
+- Retirement: an old suite is a list of claims to check, never a source of fixtures or expected values. Each claim guarding an escape lands as an assertion on the step or test that walks its path; the retiring change names every other claim it drops, and why. `$DESIGN/journey-tree.md § Retiring an old suite`
+- Product only: tests cover behaviour a user, operator or integration invokes on the running or installed product. Build, lint, format and generate scripts, CI structure, the toolchain and dependency versions are not product: a configuration invariant lives in one policy lint, a version pin in the lockfile. `$DESIGN/validity.md § Law 25`
+- Migrations: the migration mechanism is tested with fabricated migrations in the scratch-migration directory (ordering, a half-applied step, a rollback, the second run that changes nothing); the schema by introspecting a freshly migrated store against the code's own definitions; the upgrade from the previous release is a live step. No test names a shipped migration, parses migration text, migrates to a named version or restores a dump outside the machine setup. `$DESIGN/validity.md § Law 26`
+- Source is no subject: a test never opens product source, configuration, prompts or build output as its subject; a source invariant is a lint rule with one planted violation; an absence is asserted only by such a rule, tagged security or privacy. A file the product wrote at run time is output (Goldens). `$DESIGN/validity.md § Law 27`
+- One contract: one test per contract per tier; tests differing only in a literal are one table-driven test; a token-based clone detector runs over the test tree under its own baseline. `$DESIGN/validity.md § Law 28`
+- Environment: the suite assembles its configuration from its own run root and gives one result under any ambient configuration. In one scheduled leg, and on every change touching the settings paths, the unit tier runs twice, under the base configuration and with every settings key perturbed to a valid alternative, with identical results. A test resolves no setting at import time. `$DESIGN/validity.md § Law 29`
+- Doubles: fakes and stubs live only in the fakes directory. Production never selects a double from configuration and never substitutes a no-op for a missing key: it refuses to boot, one hermetic boot with every required key blank asserting a refusal that names each. Production source, contracts and CI files never name a test file or test path, save a CI file's blocking command. `$DESIGN/validity.md § Law 30`
+- Fixtures: test, step and harness files stay under the size ceiling the design declares; fixtures carry no absolute host path, captured process id or personal data, and a captured run log is never a fixture. `$DESIGN/validity.md § Law 31`
 
 ## Refused shapes
 
-Read `$DESIGN/validity.md § The refused shapes` before writing any refused-shape spelling set; its table holds what each set searches for. Each shape is one spelling set per language, written in step 3 with a planted-violation corpus of three syntactic forms per language, and ratcheted by `refused-shapes` over its scope as a signature-multiset baseline.
+Each shape is a rule in the project's own linter, or in one small script where the linter cannot express it, carrying one planted violation and run by the blocking command; violations already in the tree sit in a baseline that only shrinks, anchored on signatures (the enclosing symbol plus the normalised statement), never a line number. `$DESIGN/validity.md § The refused shapes` holds what each searches for.
 
 | Shape | Law | Scope |
 | --- | --- | --- |
-| Fail-open verdict | 15, 21 | checks, scanners, lint rules, filters, runner configurations, CI files |
-| Weak oracle | 12 | every test tree |
-| Tautological oracle | 12, 18 | every test tree |
-| Unscoped read | 10 | every test tree of a tier that shares a store |
-| Wall-clock wait | 16 | every test tree and the harness |
-| Consuming probe | 16 | lane files and the harness |
-| Toolchain as product | 25 | lane files, every test tree |
-| Shipped migration content | 26 | every test tree outside the scratch-migration directory |
-| Lint-as-test | 27 | every test tree |
-| Tombstone | 27 | every test tree |
-| Self-skip | 15, 29 | every test tree |
-| Double in production | 30 | production source, every test tree |
-| Test cited by production | 30 | production source, contracts, CI files |
-| Second logging path | 17 | production source of a product with a runtime |
-| Line-anchored exemption | 19 | exemption and allow lists |
-| Machine in a fixture | 31 | fixture directories |
-| Internal entry as action | 33 | lane files |
+| Fail-open verdict | Three outcomes, Flakes | checks, scanners, lint rules, filters, runner configurations, CI files |
+| Weak oracle | Oracle | every test tree |
+| Tautological oracle | Oracle, Goldens | every test tree |
+| Unscoped read | Scoped reads, Ownership | test trees of a tier sharing a store; branch steps |
+| Wall-clock wait | Observation | every test tree and the harness |
+| Consuming probe | Observation | step files and the harness |
+| Toolchain as product | Product only | every test tree |
+| Shipped migration content | Migrations | every test tree outside the scratch-migration directory |
+| Lint-as-test, tombstone | Source is no subject | every test tree |
+| Self-skip | Three outcomes, Not covered | every test tree |
+| Double in production, test cited by production | Doubles | production source, contracts, CI files |
+| Second logging path | Activity log | production source of a product with a runtime |
+| Line-anchored exemption | Refused shapes | baselines and allow lists |
+| Machine in a fixture | Fixtures | fixture directories |
+| Internal entry as action | Entries | step files |
 
-## Files
+## Layout
 
-Every file is tab-separated (`⇥` is a tab) or one entry per line, and machine-read by the checks.
+The live tier's files, named for the stack in the design; nothing else is written for it:
 
-| File | Shape |
-| --- | --- |
-| `landscape.md` | one row per capability, step 1 |
-| `dimensions.tsv` | `dimension⇥values⇥file_line`, the values comma-separated domain words; or the single line `none` |
-| `cuts.tsv` | `branch⇥cost_ms⇥ruling`, the ruling a `references.tsv` ref_id; written empty |
-| `escapes.tsv` | `defect⇥row⇥assertion_signature⇥diff_hash⇥red_run_id`, the defect as the user met it in domain words, the diff reverting its fix kept under `runs/` by its hash; written empty |
-| `retired.tsv` | `file⇥assertion_signature⇥disposition⇥run_id`, the disposition empty until the build fills it |
-| `beats.md` | one row per mapped row, step 6 |
-| `map.tsv` | header `landscape_id⇥row⇥reason`, step 8 |
-| `pending.txt` | one mapped row id per line; empty at close |
-| `references.tsv` | `ref_id⇥path⇥locator`, one row per ratified fact, spec line, contract line or ruling; the locator a heading, key or anchor inside `path` |
-| `roster.txt` | one owner identifier per line |
-| `skip-reasons.txt` | the owner's closed list of skip reasons, one per line |
-| `unobservable.txt` | one class of value no test can know before the run per line (a generated id, a timestamp, an empty body) |
-| `self-tests.txt` | `subject⇥case⇥test`: the subject a check, scanner, filter, lint rule, `runner`, `beat-library` or the component a law's self-test covers; the case an input class, `planted` or `law`; the test as the census names it |
-| `exclusions.txt` | `glob⇥tag`: `hash` for paths the subject omits (the ledgers, the documentation), `scope` for paths no check collects or scans (the planted-violation corpora, lint-rule fixtures, the scratch-migration directory, the synthetic-log fixture directory, vendored code) |
-| `ruled-copy.tsv` | `key⇥locale⇥literal⇥ruling`, the ruling a `references.tsv` ref_id; or the single line `none` |
-| `gaps.tsv` | `row⇥landscape_id⇥why⇥owner⇥expires`, written empty |
-| `flakes.tsv` | `row⇥tree⇥dirty⇥root⇥first_seen⇥owner⇥expires`, written empty |
-| `bites.tsv` | `row⇥file_line⇥diff_hash⇥red_run_id`, the diff kept under `runs/` by its hash, two rows for a `drift:` row; written empty |
-| `budgets.tsv` | `key⇥budget_ms⇥run_ids⇥load`, the key a lane, `tier-unit` or `tier-hermetic`; written empty |
-| `runs/` | run ledgers, one file per run id (step 11), and the bite diffs |
-| `scripts/suite-checks/` | the spelling sets as `<set>.<language>`, each refused shape's planted-violation corpus, the signature baselines as `<check>.baseline`, `third-party-rules.txt` (`rule⇥law`, one relied-on third-party rule per line), `name-allowlist.txt` (one admitted code segment per line) |
+```text
+harness/       product-agnostic: the tree walker, the step context, the terminal or browser driver; tested in the normal gate
+<suite>/
+  tree         the one tree file
+  state        the value handed down the tree
+  step_<name>  one step each
+  reads        the state reads the steps share, the consistency check, the log gate
+machine/       the machine definition and the script that builds it, boots it, runs the suite inside and collects the evidence
+```
+
+`escapes.tsv`, beside the design document, holds one escape per line: the defect as the user met it ⇥ the node path or test asserting it, empty while open.
 
 ## Procedure
 
-Steps 1–3 run in order with step 4 beside them, then steps 5–12 in order. Each step opens with its section; read it before starting the step.
+Steps 1–3 run together, then 4–9 in order.
 
-### 1. Landscape
+### 1. Read the product
 
-Read `$DESIGN/integration-suite.md § 1. Landscape` and `$DESIGN/validity.md § Law 25`.
+Read `$DESIGN/journey-tree.md § Reading the product`.
 
-Enumerate every capability closed-world into `landscape.md` from the built product's registries (router, CLI tree, job registry, tool list; for a library, its exported interface), never from docs. The surfaces: entry points a user, operator or integration invokes (routes, UI actions, a CLI product's commands, webhooks, scheduled jobs, queue consumers), integrations, lifecycle (install, the migration mechanism as one row, configuration, flags, upgrade from the previous release, uninstall), identity, money, consent, safety, the data lifecycle per core entity, operations, and the existing tests per tier.
+- Entries: from the built product's registries, never docs, list every capability with the owner's entries into it, one collection pass per surface, each naming what it could not read; an empty pass is `DERIVE-FAILED` until its enumerator provably ran.
+- Escapes: from the fix history, list into `escapes.tsv` every fixed defect a user met that no test caught, grouped by area and entry; the areas that break again are where the trunk goes first.
+- Existing tests: per tier, what each holds and its blocking command; which are kept and which retire (Retirement).
 
-- Run one collection pass per surface; each pass names what it could not read, and an empty pass is `DERIVE-FAILED` until its enumerator is proven to have run.
-- A guard is two rows, `kind:success` and `kind:refusal`; the product's error-code registry, where one exists, lists the refusals.
-- An action the owner starts through several entries is one row per entry, each carrying `entry:<key>` after `kind:` (Law 33).
-- `op:` is the operation name the registry dump reports and the activity log records (for a library, the exported name). A capability that leaves no operation record (a rendered screen, a generated file) declares `evidence:<golden path>`, its `file:line` naming the code that writes the output. A time-driven job maps to a beat triggering it through an operator entry point carrying the injected id, or to a unit row.
-- `surface:` joins the row's surfaces with `+`. A row whose surfaces include identity, money, consent, safety or data-lifecycle is `ruled:yes`; `ruled:no` on one carries `ruling:<ref_id>`; the owner marks others in step 12.
-- `needs:` names what the environment must provide (a dependency, a credential, a platform); `today:` names the tiers testing it, or `NONE`. Report the `NONE` count as the baseline.
+### 2. Doors and seams
 
-Row: `<id> · <what is asked for> · surface:<…> · kind:<success|refusal>[ · entry:<key>] · op:<name> | evidence:<golden path> · ruled:<yes|no|no ruling:<ref_id>> · needs:<…|none> · today:<unit|hermetic|live joined by +, or NONE> · <file:line>`
+Read `$DESIGN/integration-suite.md § 3. Doors` and `$DESIGN/laws.md § Law 2`.
 
-### 2. Existing tests
+- Trace every door; the seam plan gives each mechanism one seam (one clock, one process runner, one environment reader, one client interface per external service), each with its fake in the fakes directory; the harness's own waits use the clock seam.
+- The mocks per dependency family (Mocks); the rendered-from set (message, translation and template files) from the build configuration.
+- Up to ten environment edge-case fixtures that bite this project (a read-only home, a symlinked configuration directory, a case-folding filesystem, a webhook delivered twice, clock skew, an expired credential, two concurrent writers), none for a behaviour the product lacks.
 
-Read `$DESIGN/integration-suite.md § 2. Existing tests` and `$DESIGN/validity.md § Law 24`.
+### 3. Research
 
-Write the assertion spelling set first, one file per language. For every existing test the design retires, write one `retired.tsv` row per assertion, derived by that set from the test's text at the merge base, never from file names or titles; the signature is the assertion's signature with its expected literal or code and its actual-side subject, the disposition empty. Tests the design keeps get no row; an assertion whose signature reappears in a file the same commit adds is a move. An assertion a refused shape covers takes `dropped:<shape>`.
+Read `$DESIGN/integration-suite.md § 4. Research`.
 
-### 3. Doors
+Run two cited passes beside steps 1–2: the nearest neighbour projects (their CI configurations, testing docs and regression post-mortems) and the literature. Every adopted finding becomes a decision with its source under Prior art; a source that could not be fetched is named unverified; a question only this machine can answer (the concurrency sweet spot, the boot cost) is marked `measure here`. Without a fetch tool, report `RESEARCH-NOT-RUN — no fetch tool`.
 
-Read `$DESIGN/integration-suite.md § 3. Doors` and `$DESIGN/laws.md § Law 2`; before writing any refused-shape set, `$DESIGN/validity.md § The refused shapes`.
+### 4. The machine
 
-- Write the door spelling set and trace every door with it. The seam plan gives each mechanism one seam (one clock, one process runner, one environment reader, one client interface per external service), each with a fake in the fakes directory (Laws 2, 30); the harness's own actors use the clock seam (Law 16).
-- The doors left bare form the `bare-doors` signature-multiset baseline, each door with its reason, its header carrying the owner's burn-down ceiling (Checks).
-- Write the refused-shape, refused-name, violating-action, exclusion and locator spelling sets in the same form, and each refused shape's planted-violation corpus; `scope`-tag the corpora, the lint-rule fixtures, the scratch-migration directory, the synthetic-log fixture directory and vendored code in `exclusions.txt`.
-- Read the rendered-from set from the build configuration; with no build manifest, list its paths as an owner ruling.
-- Choose up to ten environment edge-case fixtures that bite this project, from menus such as a host tool's read-only home, symlinked configuration directory or case-folding filesystem; a service's webhook delivered twice, clock skew, half-applied migration or suspended tenant; either's expired credential or two concurrent writers. Never choose one for a behaviour the product lacks (Law 9).
-- A fixture for a condition the environment makes physically unobservable (a permission denial under a superuser, a case-folding check on a case-sensitive filesystem) carries `skip-because:<reason>` (Law 15).
+Read `$DESIGN/laws.md § Law 34`. With no live tier, sections 5–7 read `none — <reason>`.
 
-### 4. Research
+Define it per Machine: the owner's setup read from the owner's own machine, the dependencies (real, recorded mock or fake), the service manager when the product installs services, the network policy, the admission check, how an image is built once per hash of its inputs and never rebuilt by a product edit, and what is kept across runs (an image, a module cache) and what is removed after each.
 
-Read `$DESIGN/integration-suite.md § 4. Research` and `$DESIGN/integration-suite.md § Seed evidence`.
+### 5. The tree
 
-Run two cited passes in parallel with steps 1–3: the 8–12 nearest neighbour projects (their CI configurations, testing docs and regression post-mortems), and the literature, including diff-based mutation testing and production probers as audits of the suite itself. Every adopted finding becomes a decision with its source in the Prior art section, per tier. A source that could not be fetched is named unverified. A question the sources cannot answer for this machine or codebase (always the parallelism sweet spot and the suite-time ratchet) is marked `measure here`, a measurement task, never a gate on the machine's load. The seed evidence is `$DESIGN/laws.md § Sources`: re-fetch each finding before citing it. Without a fetch tool, report `RESEARCH-NOT-RUN — no fetch tool`, and mark every pattern adopted from the seed evidence unverified.
+Read `$DESIGN/journey-tree.md § The shape`.
 
-### 5. Shared state
+- Draw the trunk first: the owner's commonest day from install to uninstall, through the entries the escapes cluster on.
+- Fork and chain per Fork or chain; put concurrent work under together nodes, each branch owning its resources (Ownership); machine-wide steps and the machine-wide consistency check go at the joins.
+- One row per step: `<node path> · types or clicks:<the exact keys or command> · sees:<the literal> · underneath:<each state read and its exact value> · escapes:<the escapes.tsv lines it asserts>`. A step played by several branches is one function working from the state handed down, never from names written into it.
+- Define the consistency check over what the product shows at once: every live entity listed once, its process and its window present, no orphan process, no stale indicator, its name equal on every surface.
 
-Read `$DESIGN/integration-suite.md § 5. Shared state` and `$DESIGN/laws.md § Law 10`. With no live tier, section 6 reads `none — <reason>`; the store-sharing tiers still go in the Tiers section.
+Drawn for an invented editor product, `═` marking branches that run together:
 
-List every store features meet in (tables, caches, queues, filesystem layout, daemons, per-tenant configuration, sessions), with its writers, its readers, what can corrupt it, and its correlation column or `none` (Law 6). Third-party state (a payment sandbox, an identity tenant, a bucket) is on the list, stamped with the run id and cleaned by the run. The Tiers section names which tiers' tests share a store (Law 10).
+```text
+install
+├─ day                     together
+│  ├═ cli ─ list ─ export
+│  ├═ editor ─ open-project ─ edit ─ reload ─ close ─ reopen-from-history
+│  ╚═ second-account ─ sign-in ─ switch ─ sign-out
+├─ consistency             the whole machine after the day
+├─ restart ─ sessions-return
+└─ uninstall               the owner's own files untouched
+```
 
-### 6. Lanes
+### 6. Harness
 
-Read `$DESIGN/integration-suite.md § 6. Lanes`, `$DESIGN/laws.md § Law 7`, `§ Law 8`, `§ Law 32` and `§ Law 33` before cutting; `$DESIGN/laws.md § Law 12` before writing any `source:`, `$DESIGN/laws.md § Law 13` before any `breaks-if:`, `$DESIGN/laws.md § Law 3` before any `live-because:`, and `$DESIGN/laws.md § Law 18` before any golden or copy pin. With no live tier, section 7 reads `none — <reason>`, and `beats.md` still holds a row for every unit and hermetic mapped row.
+Read `$DESIGN/journey-tree.md § The harness`. Write it in the product's own test language; this contract holds in any.
 
-- Before cutting, write `dimensions.tsv`: every dimension, traced from the dispatch points where the product picks a backend, an engine or a code path (Law 32).
-- Cut lanes by actor journey along the owner's path from the root: one per primary role's core journey, one per integration or protocol surface, one for tenant or admin operations, one for onboarding and upgrade, one for operations and the destructive tail. Five to nine lanes on any root-to-leaf path; a fork multiplies the beats after it, never the lanes; past nine, the thinnest integration lane folds into the journey that uses it.
-- Fork at each dimension where the journey first reaches it, and run every later beat once per branch; a branch the Speed target cannot afford is a `cuts.tsv` row (step 10).
-- Each action beat acts through the owner's entry, once per entry inside its branch; only a `need` prelude or an observation uses an internal entry (Law 33).
-- Every destructive operation gets a refusal or no-op beat (the foreign file it must keep, the second run that changes nothing) beside its success path.
-- Lanes go depth-first and carry state forward, each branch its own carry: one entity created, edited and exported across beats. Every read is scoped to the carry (Law 10).
-- Each lane position carries its reason (Law 8); each lane has its `need` prelude (Law 7).
-- Every mapped row has a `beats.md` row. A row whose bite cannot be named is cut; a row whose `live-because:` is another literal input is a unit case (Law 3).
+- Runner: the language's own test runner walks the tree: one node is one named subtest, a together node's children are parallel subtests, the runner's name filter runs one path with its ancestors and nothing beside, its parallelism flag is the concurrency knob, its machine-readable output the record. No scheduler and no ledger of its own.
+- Tree: `do(name, step, children…)` and `together(name, step, children…)`; a step is `step(ctx, state) → state`, state passed by value, so a child gets its parent's output and a branch never sees a sibling's. The walker validates the tree before running (name shape, duplicate siblings); on a failed step it starts none of its children and prints `BLOCKED <n> steps under <path>: <names>`; at the end it prints the timeline (path, PASS, FAIL or BLOCKED, start offset, seconds) and `PASS <a> · FAIL <b> · BLOCKED <c>`, writes the timeline file and fails the run over its budget.
+- Context: `terminal(name)` opened for the node's subtree and closed when it ends; `read(argv…)`, a command run as the owner to read state; `poll(what, within, condition)`; `unique(label)`; `expect(pattern)`, declaring an error the step causes; `artifact(name, bytes)`; `cleanup(fn)`, run when the subtree ends, failed or not, after its evidence is read. The suite fills an after-step hook with the log gate and the evidence; the harness knows nothing of the product.
+- Terminal: a kernel pseudo-terminal running the owner's login shell as a session leader at a fixed size, read through a screen emulator that also answers the terminal's queries (device attributes, cursor reports); `type`, `press(keys…)`, `screen()`, `waitFor(text)`, `waitGone(text)`, `waitScreen(what, condition)`, `resize`. Its environment is a fresh login's, from an allowlist, so no test variable or multiplexer ancestry reaches it; its last raw output is kept; closing hangs up, waits bounded, then kills its process group. A browser entry: one real browser page per node, under the same contract.
+- Self-tests in the normal gate, each property once with its exact value: serial order; a child gets its parent's state and a branch not its sibling's; together children overlap, proven by a latch both must reach, never a sleep; a join starts after every branch; a failed step blocks exactly its descendants and the count line is exact; a bad name and a duplicate sibling refused; the terminal against a plain shell (typed text, keys, the screen after cursor movement and a clear, a resize the child sees, a close leaving no child, a failed wait's message carrying the screen); the budget over, under and at the boundary.
 
-Beat or hermetic row: `<beat id | tier-hermetic:<test>> · do:<the action through its entry> · assert:<each literal result and the screen, report or store it is read from> · source:<ref_id | drift:<artifact> | fixture | golden | literal> · breaks-if:<the product change> · live-because:<the observation> · cost_ms:<estimate> · spends:<quota, paid calls, licensed accounts | none> · <landscape ids>`
+### 7. Activity log
 
-Unit row: `tier-unit:<test> · source:<…> · breaks-if:<the product change> · <landscape ids>`
+Read `$DESIGN/laws.md § Law 17`. With no runtime (a library, a UI component suite), section 8 reads `none — <reason>`.
 
-### 7. Crossings
+Design the log of Activity log: one JSON-lines stream per environment root, one record shape and one destination for a product of several processes; the record `ts level msg op pid version`, the ids in play, `dur_ms`, `err`, the injected run id and node path. Wrap the seams of step 2, never the call sites. Name the level per environment, the redaction test, the rotation and the reader the log gate uses (a filter by time window, level, run and node).
 
-Read `$DESIGN/integration-suite.md § 7. Crossings` and `$DESIGN/laws.md § Law 9`. With no live tier, section 8 reads `none — <reason>`.
+### 8. Speed
 
-For each store of step 5, every writer–reader pair living in different lanes is a candidate; keep the pairs where a regression would otherwise hide in one lane's blind spot. The probe list: one entity touched by two roles; an operation landing while another actor is mid-flow; an expired or absent credential seen at two surfaces (absence versus error); a configuration change under live sessions; two writers under two load shapes; a dependency restart with work in flight; a delete while something still references the target. A probe becomes a beat only under Law 9. Record each as `crossing · lanes · why twice`; a crossing whose second side cannot be named is dropped. The after-effect beats of Law 9 come from this table, and each crossing's landscape ids map to both beats with `crossing:`.
+Read `$DESIGN/journey-tree.md § Speed`.
 
-### 8. Map and observed coverage
+Set the targets per Speed: the whole tree, one branch through the run filter, and each lower tier. Write the per-change policy: while working, the affected unit and hermetic tests and the touched branch through the run filter; the whole tree on every pull request. Price nothing on paper: the trunk's measured time sets the tree's budget, and a trunk over its target re-cuts the tree before another branch is written.
 
-Read `$DESIGN/integration-suite.md § 8. Map and observed coverage` and `$DESIGN/laws.md § Law 14`.
+### 9. Owner review
 
-Write `map.tsv`: every landscape id to a mapped row, the row column holding a beat id or a `tier-unit:` / `tier-hermetic:` row, the reason column empty, `crossing:`, `twin:<row>` or `live-only`, a `crossing:` live row carrying its `twin:<row>` or `live-only` after a space. List the not-yet-defined rows in `pending.txt`. Write into the design the derivation commands that dump the operation names from the built product (its router, job registry, tool list, a CLI product's help tree), never from a package manifest. The plan half (`map-ids`, `map-beats`, `map-names`, `map-dup`, `landscape-scope`) runs from the first commit; the proof half (`observed`) runs at close over the canonical ledger. The harness injects each row's id into every request and process environment it starts; the build makes the product carry it through its queues and jobs as a correlation field (this command edits no code); only records carrying that id credit the row. A capability lands with its landscape row, its map row and its mapped row in one commit.
-
-### 9. Activity log
-
-Read `$DESIGN/integration-suite.md § 9. Activity log` and `$DESIGN/laws.md § Law 17`. With no runtime (a library, a UI component suite), section 10 reads `none — <reason>`, and unit rows prove invocation by coverage context.
-
-Design the log of Law 17: one JSON-lines stream per environment root, resolved through the path façade; a product of several processes writes one record shape to one destination the harness reads (a shared file, or an aggregator queried by the injected run id). The record: `ts level msg op pid version`, the ids of the entities in play, `dur_ms`, `err`, and the injected `beat` and `run`. Wrap the seams of step 3 (the real runner, client and clock, one wrapper each), not the call sites. The Second logging path ratchet holds direct prints and ad-hoc loggers. Name the buffer handler, the redaction test, the level per environment, the rotation rule and the reader (a filter by time, level, entity, operation and beat).
-
-### 10. Speed
-
-Read `$DESIGN/integration-suite.md § 10. Speed` and `$DESIGN/validity.md § Law 20`; before declaring a parallel mode, `$DESIGN/laws.md § Law 6`.
-
-Price the suite on paper, writing each item Law 20 lists; `cost_ms:` covers actor provisioning, process boots, waits and third-party round trips, summed per lane and branch and along the critical path. A branch cut to meet the target is a `cuts.tsv` row with its cost and the owner's ruling (Law 32). A declared parallel mode carries its isolation table (Law 6). A sequence whose paper cost exceeds its target is re-cut here, before a lane exists.
-
-### 11. Harness contract
-
-Read `$DESIGN/integration-suite.md § 11. Harness contract`. Write the harness in whatever drives the real system best; this contract holds in any language.
-
-- Beat library, sourced by every lane, demo (a subset view) and smoke script, with the verbs `beat <id> <landscape-ids…>` · `assert <landscape-id> <what> <expected> <source>` · `golden <path under the reviewed goldens directory>` · `pass` · `fail <why>` · `known <landscape-id>` · `blocked <by>` · `skip-because <reason from skip-reasons.txt>` · `need <name> <check> <make>` · `spends <resource>` · `expect-log <pattern>` · `poll <name> <condition> <timeout>`. `golden` refuses bytes that differ from the tracked blob; a snapshot matcher is a golden (Law 18). The library is the only log reader: it records the log position before each beat and scans the slice after it (Law 16).
-- Runner: `run [--lanes …] [--from checkpoint:<lane>] [--root reuse|rebuild] [--dry-run]`: one environment, canonical lane order whatever order is given, keep-going (Law 7), streamed lines `✓` · `✗` · `known` · `blocked-by <beat>` · `skip-because <reason>` with the lane prefix; `--dry-run` prints the lanes and beats in run order and exits 0. A concurrency option, where the design declares a parallel mode, labels the ledger `mode: parallel:<n>`. Exit 1 on a failure outside `gaps.tsv`, an unmapped id or a budget breach, each named; exit 2 when the runner could not run.
-- Run ledger, one file per run id in the runs store: `key: value` header lines, then tab-separated rows. The header: `command:` (the exact invocation), `mode: sequence | checkpoint:<lane> | solo | parallel:<n> | tier`, the lanes that ran before, `boot: process | in-process | none`, `runner_pid`, `order: canonical | shuffled:<seed>`, `config: base | perturbed`, the root hash, the `tree` and `dirty` hashes at start and at end, the start time and the load (the load average and core count at start). The rows: one per mapped row and attempt, `row⇥verdict⇥assertions-by-id⇥expected⇥ops⇥goldens⇥wall_ms⇥t+s` (`expected` holding the row's expected literals), and per lane `lane⇥wall_s⇥beats⇥failed⇥known⇥blocked⇥skipped`.
-- Every tier's runner (through its reporter or plugin interface), the lint step and the checks script write the same header, with `mode: tier` below the live tier whatever the worker count and `boot: none` outside the hermetic and live tiers. Unit and hermetic rows are per test (the ops from the buffer handler's records and the coverage context at unit, from the test's log slice at hermetic); the lint step's and the script's rows are per rule, check or refused shape.
-- Failure block, before the verdict line, one per failed row: the row id, the file and line, the assertion's expected and actual values with its source, the first error record in the row's window, and the absolute paths of the run directory, the ledger and the log. An output filter takes its verdict from the exit code and the ledger, never from a keyword or a tail; its fixture tests (a green run, a red run, a long red run, a killed run) assert that the failure block's fields survive byte-for-byte.
-- Checkpoints: after each lane of a sequence run, snapshot the environment (a container image, a database template, a VM snapshot) keyed by the root hash and the lane files up to that lane; `--from checkpoint:<lane>` restores it. Third-party state is not in a checkpoint; the prelude recreates it. The root is built to its root inventory (Law 34) and snapshotted the same way, keyed by a hash of everything that shapes it (source, migrations, seeds, templates, the inventory); an equal hash reuses it, and a root holding secrets is never pushed to a shared registry.
-- Isolation: each run gets its own home, configuration root, database or schema, and ports, derived from the run root (Law 29). Third-party state is stamped with the run id, so the final lane deletes exactly what the run created.
-- Credentials are injected at run time from a keychain or secret store scoped to the live-tier job, never committed and never present in a commit-gate job (Law 1).
-- Self-tests, each watched failing before its code exists and listed in `self-tests.txt`: the commit-gate job refusing an outbound socket (Law 1); each mock failing an unscripted request by name, and each fake's contract suite run against fake and real (Law 2); the single-instance and two-mode tests of an in-process boot (Law 4); the collision test of a parallel mode or of a store-sharing tier run concurrently (Law 6); the keep-going run, a planted red in the first lane with the second lane's own verdicts in the ledger and exit 1 (Law 7); the redaction test (Law 17); the all-keys-blank boot (Law 30); the beat library refusing a live child's output and a mismatched reply (Law 16); the failure block of a planted red carrying `file:line`, expected, actual and absolute paths; for every check, scanner, filter and project-authored lint rule, one could-not-look self-test per input class and one planted-violation self-test (Law 15).
-
-### 12. Owner review
-
-Read `$DESIGN/integration-suite.md § 12. Owner review`.
-
-The owner rules: a real dependency versus a mock, per tier; shared versus isolated state, and whether a parallel mode exists; the known-gap policy and the owner roster; the ruled ids, the ruled-copy keys (or `none`), the skip reasons and the unobservable-value classes; the ratified references in `references.tsv`, and the rendered-from paths where the build has no manifest; the burn-down pace of every ratchet baseline; the logging framework; which LLM and which reasoning setting run the LLM-driven steps at release; the speed targets and which numbers get measured here; the root inventory against the owner's machine (Law 34), every `cuts.tsv` cut, and the operating systems of `live-os:`. Present each research finding and draft decision in one plain line; each ruling moves from Open rulings into the law or section it changes. With no owner present, every item stays under Open rulings, recommendation first, and the document is marked `DRAFT — unruled`.
+The owner rules: a real dependency versus a mock or fake, per tier; the machine's setup against the owner's own machine; the operating systems the tree runs on; the trunk, and which escapes go first; the speed targets; the logging framework; which LLM and setting run the LLM-driven steps at release; the size ceiling. Present each research finding and draft decision in one plain line; each ruling moves from Open rulings into the section it changes. With no owner present, every item stays under Open rulings, recommendation first, and the document is marked `DRAFT — unruled`.
 
 ## Output and build order
 
-Read `$DESIGN/integration-suite.md § The output` before writing a section.
+Write the design document to the path the request names, else `<the project's design-doc directory, else docs/design>/<target>-integration-suite/design.md`, and state the path in the reply; beside it write `escapes.tsv`. Edit no product code and no test. Each section is a `## <n>. <name>` heading:
 
-Write the design document to the path the request names, else `<the project's design-doc directory, else docs/design>/<target>-integration-suite/design.md`, and state the path in the reply. Beside it write every file of Files except the checks directory; at the target project's root write `scripts/suite-checks.sh` (Checks) and `scripts/suite-checks/`. Edit no product code and no test. Each section is a `## <n>. <name>` heading. Each value a check reads sits on its own line as `<name>: <value>` in its section, numbers as integers: in Tiers, the blocking command and boot mode per tier, `live-os:` (the operating systems CI runs the live tier on), the store-sharing tiers, the double-run trigger paths, the schedule window and where each blocking run's log is kept; in Doors and seams, the fakes directory, the scratch-migration directory and the synthetic-log fixture directory; in Speed, the targets and the budget headroom; in Harness contract, the goldens directory, `size-ceiling` and the clone detector's threshold.
+1. Tiers: per tier what it asserts, what it fakes, the gate it guards, its exact blocking command and boot; the operating systems the tree runs on; the settings paths that trigger the double run; the scheduled leg and the longest gap allowed between its runs
+2. The product read: entries, the escapes by area, the existing tests kept and retiring
+3. Doors and seams: the seam plan, the fakes directory, the mocks, the fixtures, the rendered-from set
+4. Prior art: adopted, avoided, `measure here`, each with its source
+5. The machine
+6. The tree: the drawing, the step rows, the consistency check
+7. Harness: the contract adapted to the stack, the layout, the self-tests
+8. Activity log
+9. Speed: the targets, the per-change policy
+10. Build order: below
+11. Not covered: every step and surface left out, with what it needs or its external reference
+12. Open rulings
 
-The fifteen sections, in order:
+A section with nothing to design has the single line `none — <reason>` as its whole body; a tier with no tests is its Tiers line `<tier>: none — <reason>`.
 
-1. Tiers: per tier what it asserts, what it fakes, the gate it guards, the exact blocking command (Law 23) and the boot mode (Law 4); the operating systems CI runs the live tier on (Law 1); the tiers that share a store (Law 10); the settings and test-configuration paths that trigger the double-run (Law 29); the scheduled leg and the schedule window, which also bounds the close cadence (Laws 21, 23, 29)
-2. Landscape summary: counts per area, the `NONE` count, the exclusions applied, the ruled rows
-3. Existing tests: `retired.tsv`'s row count and the dispositions expected
-4. Doors and seams: the seam plan and the fakes directory, the fixtures, the bare-door baseline, the spelling sets, the rendered-from set, `exclusions.txt`
-5. Prior art: adopted, avoided, `measure here`, each with its source
-6. Shared state: stores, writers, readers, correlation columns
-7. Lanes: the dimension inventory, the journey tree and its cuts, the order with reasons, `beats.md`, the `need` preludes
-8. Crossings: the table and the after-effect beats
-9. Map and observed coverage: `map.tsv`, the derivation commands, `pending.txt`
-10. Activity log: destinations, levels per environment, record fields, the buffer handler, the redaction test
-11. Speed: targets per tier and, with a live tier, per sequence and lane; the budget headroom, the paper cost, the critical path, the per-change policy, any parallel mode
-12. Harness contract: library, runner, ledger, checkpoints, the root inventory and root hash inputs, the ledger files, `self-tests.txt`
-13. Build order: below
-14. Not covered: every surface no tier reaches (a platform with no live tier, a flow needing absent hardware), each with its reason
-15. Open rulings: every number or trade-off the owner decides
+Build order, by risk and dependency; on a live tier each phase ends on a run the owner can watch:
 
-A section with nothing to design has the single line `none — <reason>` as its whole body; a tier with no tests is its Tiers line `<tier>: none — <reason>`. With no live tier, sections 6–8 read `none` and section 11 holds only the tier targets and the headroom; section 10 reads `none` only for a product with no runtime; every other section is produced in full. Before a check errors on an absent input, it reads the `none` marker of that input's section or tier, as a list that excuses (Where enforcement ends): with the marker and no artifact of that section in the tree (no lane runner declared and no file matching the lane-file pattern, no hermetic ledger) it prints `PASS none:<section>`; with the marker and an artifact, `ERROR NONE-AMBIGUOUS`.
+1. Run isolation, the blocking commands and the unit and hermetic budgets.
+2. Seams, fakes with their contract suites, and fixtures; then the packages converted in batches with disjoint file sets.
+3. The activity log, then the mocks.
+4. The harness with its self-tests, then the machine.
+5. The trunk, green end to end on every listed operating system and within its budget, then watched red three times: a break in two of its paths and the revert of a real past fix, each failing exactly the expected step with a readable screen, only its descendants blocked, the other branches passing.
+6. The fork: the remaining branches, several builders at once, each owning one branch (its step files and its own lines of the tree file; the shared state and reads files changed only by adding). The builder of a step lands the assertions for the escapes it walks past. A branch joins when it is green alone three times through the run filter, every step watched red; the whole tree is done when green twice within its budget, its timeline showing the branches overlapping.
+7. The tree wired into CI on every pull request and every listed operating system; the old suite retired in that change (Retirement).
 
-Build order, by risk and dependency:
-
-1. Run isolation and the ledger's tree binding.
-2. The collected census and the check self-tests.
-3. Wall-time budgets for the unit and hermetic tiers, before any conversion.
-4. Seams, fakes with their contract suites, and fixtures; then the packages converted in batches with disjoint file sets.
-5. The activity log, then the mocks.
-6. The harness, proven with the first lane in sequence and alone before another lane is written.
-7. The second lane, then speed measured against the target before a third.
-8. Each remaining lane joining the sequence the day it is written, with its after-effect beats, its bites recorded and its budget pinned from three runs.
-9. The retirement ledger verified, then the old suite deleted in that commit (Law 24).
-10. Close: three green sequences on the merge subject, budgets pinned from them, no flake on the merge subject, `pending.txt` empty, the sequence wired into the landing gate, into CI on every operating system of `live-os:` and into the release procedure.
-
-With no live tier, steps 6–8 become the unit and hermetic conversions of step 4 with their bites recorded, and close is one green run of the blocking commands on the merge subject, three only in the landing that pins a tier budget.
+With no live tier, steps 4–7 drop, and done is one green run of the blocking commands on the change.
 
 ## Checks
 
-Read `$DESIGN/integration-suite.md § The checks` before adapting a row.
+The refused-shape rules, plus these rows, run by the blocking command in the project's linter or one checks script, each with the three-state protocol of `/llm-codebase:use` § Protocol and each proving its inputs non-empty before comparing:
 
-`scripts/suite-checks.sh` runs plain (every commit) or with `--close`. Each check prints one line, `CHECK <name> PASS|FAIL|ERROR <detail>`; the script exits 0 when clean, 1 on a finding, 2 when a check could not run: the three-state protocol of `/llm-codebase:use` § Protocol. Each check proves both of its sets non-empty before comparing them. Every scope skips the `scope`-tagged paths of `exclusions.txt`. A design value a check reads (a Speed target, the headroom, the schedule window, `size-ceiling`) missing is that check's `ERROR`. Every ruling-bearing input is read as Where enforcement ends says.
-
-Every ratchet baseline is a multiset of signatures, read as a list that excuses: a signature found more often than the baseline holds it fails even when the total fell, so a move keeps its count and a copy raises it; the baseline only shrinks. Its header carries the owner's burn-down ceiling as `# ceiling <YYYY-MM-DD> <count>` lines; the entry in force is the latest dated today or earlier, and the tighter of the two readings applies. A baseline above it fails, and a header with no entry in force is the ratchet's `ERROR`.
-
-| Check | Mode | FAIL on | ERROR on |
-| --- | --- | --- | --- |
-| `map-ids` | both | a landscape id with no map row; a map row whose id is not in the landscape | `DERIVE-FAILED`: no ids read from the landscape or the map |
-| `map-beats` | both | a mapped row no lane file, no test file and no `pending.txt` line defines; a `beats.md` row with no map row; at `--close`, a row still in `pending.txt` | `DERIVE-FAILED`: no rows read; `pending.txt` missing |
-| `map-names` | both | an operation the built product reports that no landscape `op:` carries; a landscape `op:` the built product does not report; an `evidence:` row whose `file:line` does not exist | `DERIVE-FAILED`: the registry dump or the `op:` fields came back empty |
-| `map-dup` | both | an id mapped twice at one tier and branch without `crossing:`; above the unit tier, more than one success row or one refusal row per operation, entry and branch besides `crossing:` rows; an id whose `crossing:` rows all lie in one lane; a `twin:` naming a row at the same tier or no row; a live row with neither `twin:` nor `live-only`. It prints `DUPLICATE-CANDIDATES` (tests at one tier with equal operation sets and equal expected literals, read from the tier ledgers) without failing on them | `DERIVE-FAILED`: no map rows |
-| `branches` | both | a combination of `dimensions.tsv` values a forked beat spans with neither a `beats.md` row nor a `cuts.tsv` row; a branch key naming a value `dimensions.tsv` lacks; a dimension no beat forks on and no cut names; a `cuts.tsv` row without `cost_ms` or whose ruling is not a `references.tsv` row | `DERIVE-FAILED`: `dimensions.tsv` unreadable, or empty without the line `none` |
-| `landscape-scope` | both | a landscape row whose `op:` matches the exclusion spellings; a row without `surface:`, `kind:` or `ruled:`; `ruled:no` on a default-ruled surface without `ruling:<ref_id>` | the exclusion spellings empty |
-| `names` | both | beyond its baseline, an id, a lane key, a test file stem or a test title matching the refused-name spellings, or a property word in a slug or title whose test body carries no violating action; a lane key starting `tier-` | no ids or no test files read; the refused-name or violating-action spellings empty; `name-allowlist.txt` unreadable |
-| `oracle` | both | a mapped row without `source:`; a ruled row whose `source:` is not a `references.tsv` row; a hermetic or live row without `live-because:`; in a mapped row's test (every other test is `refused-shapes`'), an expected side holding a name or call that resolves to a product module outside locator position, or a local name whose binding does (a constructor over literals alone is a literal), a literal actual side, a refused oracle spelling without `weak-oracle:` or with it on a ruled row, an expected-side string of three words or more equal to a rendered-from value that is not a `ruled-copy.tsv` key, or a literal count not derived from the seeded fixture; a policy-lint rule citing no `references.tsv` row | the refused-shape or locator spellings, `references.tsv` or the rendered-from set unreadable |
-| `copy` | both | a `ruled-copy.tsv` key not pinned in exactly one test per locale | the registry unreadable, or empty without the line `none` |
-| `refused-shapes` | both | a signature found more often than its baseline holds it, in the scope each shape's row names | a spelling set empty; the tree, `skip-reasons.txt` or `unobservable.txt` unreadable; zero files scanned; a shape with no planted-violation corpus |
-| `gaps` | both | an entry expired, without `expires`, with a `why` lacking an external reference, naming an own identifier or a repository file, or with an owner off the roster | `gaps.tsv`, `roster.txt` or the own-identifier list unreadable |
-| `budgets` | both | plain: the paper cost (`cost_ms` summed per lane and along the critical path) above the Speed target, with unpinned keys listed; `--close`: `BUDGET-UNPINNED`; `run_ids` naming fewer than three green canonical runs on one root hash, or for a tier key on one subject; the recomputed maximum plus headroom above the pin; the slowest run over twice the median; the pinned sequence budget above the Speed target; a pin raised by more than the added rows' own maximum `wall_ms` in the named runs | `budgets.tsv` or a named run unreadable |
-| `collected` | both | a file matching a test-name pattern anywhere in the repository, outside `exclusions.txt`, that the blocking run's log does not show collected, or shows twice; a `CHECK` line of this table absent from the blocking run's log (the plain checks in the commit job; in plain mode, no close-job log within the schedule window carrying every `--close` line); a fake in the fakes directory with no contract suite collected against both implementations; an operating system of `live-os:` with no CI job running the live tier's blocking command on it | the CI configuration or the blocking run's log unreadable; no CI job invokes `--close`; no test-name patterns; `live-os:` not declared |
-| `self-tests` | both | a check, scanner, filter, project-authored lint rule, the runner or the beat library with no input-class line or no `planted` line in `self-tests.txt`; a `self-tests.txt` line absent from the census or not passing on the merge subject; a declared parallel mode, or a store-sharing tier run with a concurrency option, without a passing collision test; a filter fixture (green, red, long red, killed) misjudged or not preserving the failure block byte-for-byte | the census or `self-tests.txt` unreadable |
-| `retired` | both | test files deleted since the merge base whose re-derived assertion signatures, minus those reappearing in files the same commit adds, are not set-equal to the ledger rows added since the merge base; an assertion signature removed since the merge base from a kept lane file, found in no lane file, without a ledger row; a `successor:` that does not exist, did not pass in the named run on this subject, or whose signature differs in subject or in expected literal from the retired one; a `dropped:` whose shape spelling the retired assertion does not match; a `ruling:` not in `references.tsv` | the merge base unreadable; deletions with an empty ledger; the assertion spelling set empty |
-| `escapes` | both | an `escapes.tsv` row whose row has no `beats.md` row, whose assertion signature is absent from that row's test, or whose red run does not exist, does not show the row ✗ or carries a dirty hash other than `diff_hash` | `escapes.tsv` or a named run unreadable; the assertion spelling set empty |
-| `env-twice` | both; `PASS not-due <run id>` between scheduled legs | the unit tier's results differ between the base configuration and the perturbed one of Law 29 | a leg missing; the last scheduled leg older than the schedule window; the key set or the trigger paths unreadable |
-| `bare-doors` | both | a door signature found more often than its baseline holds it | the door spellings empty; the tree unreadable; zero files scanned |
-| `clones` | both | a clone in the test tree beyond the test tree's baseline, found by the token-based clone detector this script runs | the detector absent, or it matched no files |
-| `size` | both | a test or lane file above `size-ceiling` beyond the test tree's baseline | `size-ceiling` not declared |
-| `tree` | `--close` | the canonical ledger's subject hash differs from the merge subject; its dirty hash is non-empty; its start and end hashes differ; `mode: parallel:<n>` offered as canonical, or a `sequence` ledger whose rows' `t+s` intervals overlap across lanes; `boot: in-process` without the single-instance and two-mode tests passing on the merge subject, or `boot: process` with product records carrying its `runner_pid`; a lane without a green `sequence` ledger, or without a green `solo` ledger since its lane files last changed | no ledger for this subject |
-| `observed` | `--close` | `CLAIMED-NOT-INVOKED`: a row mapped to an id with no operation record carrying that row's injected id, and for a unit row no coverage context reaching the capability's file; `UNOBSERVED`: an id no row invoked; `NO-ASSERTION`: a mapped id with no `assert` naming it in that row; for a tier row also `TIER-UNCOLLECTED`, `TIER-NOT-RUN`, `TIER-NO-BITE` | no canonical ledger; the `op:` fields empty; a tier ledger missing for a tier the design declares |
-| `bite` | `--close` | a mapped row, a project-authored lint rule, a rule in `third-party-rules.txt`, a check or a refused shape with no bite row, or a `drift:` row with fewer than two; a bite row whose red run does not exist, does not show the row ✗, or whose dirty hash differs from `diff_hash`; a mutation inserting an unconditional exit or removing more than one statement; a mapped row's mutation outside the capability's file or the op's handler; a lint rule's red run whose `command:` is not the blocking command | `bites.tsv` or `third-party-rules.txt` unreadable; a named run or its diff unreadable |
-| `flakes` | `--close` | a row the run ledgers show failing and passing on the merge subject with one dirty hash and root, recomputed, never read from `flakes.tsv`; no shuffled-order ledger for the unit or hermetic tier within the schedule window; a retry or rerun setting in a runner configuration outside tests named in `flakes.tsv` | the ledgers unreadable |
-
-The `--close` rows read the run ledger, not the map: during the build, pending rows and unproven bites are the expected state. A listed `gaps.tsv` row that passes is the runner's red, not this script's. A check that cannot be expressed as a script goes under Open rulings.
-
-Copy the skeleton below to `scripts/suite-checks.sh` and adapt it; it carries the protocol, the merge-base readings, the ratchet, the `none` gate and the subject hashes, with one worked set check and one worked ratchet check:
-
-```sh
-#!/bin/sh
-# suite-checks.sh [--close]: one CHECK line per row; exit 0 clean, 1 on a finding, 2 when a check could not run
-set -u; export LC_ALL=C
-MODE=${1:-plain}; case $MODE in plain|--close) ;; *) echo "usage: $0 [--close]" >&2; exit 2;; esac
-# SLOT lines: set each to this tree's value; a slot left unset keeps its rows at ERROR, never PASS
-S='SLOT: the design directory, holding design.md and the ledgers'
-MAIN='SLOT: the main branch'
-LNG='SLOT: the language suffix of the spelling sets'
-SRC='SLOT: an extended regex matching the product source paths'
-OWN_IDS='SLOT: repository names|issue-tracker hosts|internal domains'
-DOC="$S/design.md"; K=scripts/suite-checks; rc=0; TAB=$(printf '\t')
-say() { printf 'CHECK %s %s %s\n' "$1" "$2" "$3"; case $2 in FAIL) [ "$rc" -ge 1 ] || rc=1;; ERROR) rc=2;; esac; }
-cd "$(git rev-parse --show-toplevel 2>/dev/null)" || { say setup ERROR "not inside a repository"; exit 2; }
-T=$(mktemp -d) || { say setup ERROR "mktemp failed"; exit 2; }; trap 'rm -rf "$T"' EXIT
-MB=$(git merge-base HEAD "$MAIN" 2>/dev/null) || { say setup ERROR "merge base unreadable"; exit 2; }
-
-# at <path>: the merge-base copy; a path the merge base lacks is being installed, so the working tree
-at() { if git cat-file -e "$MB:$1" 2>/dev/null; then git show "$MB:$1"; else cat "$1"; fi; }
-# excuse <path>: a list that excuses, read as the multiset intersection of both readings ('#' lines dropped)
-excuse() { [ -r "$1" ] || return 1; at "$1" | grep -v '^#' | sort > "$T/e1"; grep -v '^#' "$1" | sort > "$T/e2"; comm -12 "$T/e1" "$T/e2"; }
-# oblige <path>: a list that obliges, read as the union of both readings
-oblige() { git cat-file -e "$MB:$1" 2>/dev/null || [ -r "$1" ] || return 1; { at "$1"; cat "$1"; } 2>/dev/null | grep -v '^#' | sort -u; }
-# lower <a> <b>: the tighter of two numbers
-lower() { if [ "$1" -le "$2" ]; then echo "$1"; else echo "$2"; fi; }
-# ceiling <baseline>: per reading, the '# ceiling <YYYY-MM-DD> <count>' line with the latest date not after today;
-# the lower of the two readings (a merge base without one: the working tree's); returns 1 when none is in force
-ceil_in() { awk -v d="$(date +%Y-%m-%d)" '$1=="#" && $2=="ceiling" && $3<=d && $3>=m {m=$3; c=$4} END {if (c=="") exit 1; print c+0}'; }
-ceiling() { w=$(ceil_in < "$1") || return 1; a=$(at "$1" | ceil_in) || a=$w; lower "$a" "$w"; }
-# value <name>: a '<name>: <integer>' line of design.md, the lower of both readings; returns 1 when missing
-val_in() { awk -F': ' -v k="$1" '$1==k {print $2+0; f=1; exit} END {if (!f) exit 1}'; }
-value() { w=$(val_in "$1" < "$DOC") || return 1; a=$(at "$DOC" | val_in "$1") || a=$w; lower "$a" "$w"; }
-# ratchet <row> <baseline> <current signatures, one line per occurrence> <items scanned>
-ratchet() { [ "$4" -gt 0 ] || { say "$1" ERROR "zero items scanned"; return; }
-  c=$(ceiling "$2") || { say "$1" ERROR "baseline $2 unreadable or no ceiling in force"; return; }
-  excuse "$2" > "$T/base" || { say "$1" ERROR "baseline $2 unreadable"; return; }
-  sort "$3" > "$T/cur"; over=$(comm -13 "$T/base" "$T/cur" | tr '\n' ';'); nb=$(( $(wc -l < "$T/base") ))
-  if [ -n "$over" ]; then say "$1" FAIL "beyond baseline: $over"
-  elif [ "$nb" -gt "$c" ]; then say "$1" FAIL "baseline holds $nb, above ceiling $c"
-  else say "$1" PASS "$4 scanned, $(( $(wc -l < "$T/cur") )) signatures, none beyond baseline"; fi; }
-
-excuse "$S/exclusions.txt" > "$T/excl" || { say setup ERROR "exclusions.txt unreadable"; exit 2; }
-# tagged <tag> / untagged <tag>: the paths on stdin inside / outside every glob exclusions.txt gives that tag
-tagged() { while IFS= read -r f; do while IFS="$TAB" read -r g t; do [ "$t" = "$1" ] && case $f in $g) printf '%s\n' "$f"; break;; esac; done < "$T/excl"; done; }
-untagged() { while IFS= read -r f; do hit=; while IFS="$TAB" read -r g t; do [ "$t" = "$1" ] && case $f in $g) hit=1; break;; esac; done < "$T/excl"; [ -n "$hit" ] || printf '%s\n' "$f"; done; }
-# scoped: the tracked or addable files every scan reads, outside the scope-tagged globs
-scoped() { git ls-files -co --exclude-standard | untagged scope | while IFS= read -r f; do [ ! -f "$f" ] || printf '%s\n' "$f"; done; }
-# subject_tree: the staged-tree hash over the hash subject; subject_dirty: a hash of the unstaged diff and the
-# untracked, non-ignored files under the subject, empty when there are none (the runner writes both at start and end)
-subject_tree() { cp "$(git rev-parse --git-path index)" "$T/idx" && git ls-files | tagged hash | GIT_INDEX_FILE="$T/idx" git update-index --force-remove --stdin && GIT_INDEX_FILE="$T/idx" git write-tree; }
-subject_dirty() { { git diff --name-only; git ls-files -o --exclude-standard; } | untagged hash | sort -u | while IFS= read -r f; do
-  if [ -f "$f" ]; then printf '%s %s\n' "$(git hash-object -- "$f")" "$f"; else printf 'deleted %s\n' "$f"; fi; done > "$T/dirty"
-  [ ! -s "$T/dirty" ] || git hash-object "$T/dirty"; }
-# none_gate <row> <section or tier> '<artifact test>': call before a row errors on an absent input. The marker is a
-# '## <n>. <section>' heading whose first body line starts 'none — ', or a '<tier>: none — ' line, present at the
-# merge base and in the working tree. Marked: prints PASS none:<name> or ERROR NONE-AMBIGUOUS, returns 0. Unmarked: 1.
-marked() { awk -v h="$1" 'f && NF {print; exit} $0 ~ "^## [0-9]+\\. " h "$" {f=1} index($0, h ": none — ") == 1 {print "none — "; exit}' | grep -q '^none — '; }
-none_gate() { { at "$DOC" | marked "$2"; } && marked "$2" < "$DOC" || return 1
-  if eval "$3"; then say "$1" ERROR "NONE-AMBIGUOUS: $2 marked none, an artifact exists"; else say "$1" PASS "none:$2"; fi; }
-
-# every set check has this shape: derive both sets, ERROR when either is empty, then compare
-chk_map_ids() { grep -oE '^[a-z][a-z0-9-]*\.[a-z][a-z0-9-]*' "$S/landscape.md" 2>/dev/null | sort -u > "$T/L"
-  sed 1d "$S/map.tsv" 2>/dev/null | cut -f1 | sort -u > "$T/M"
-  if [ ! -s "$T/L" ] || [ ! -s "$T/M" ]; then say map-ids ERROR "DERIVE-FAILED: no ids read from the landscape or the map"; return; fi
-  d=$(comm -3 "$T/L" "$T/M" | tr -d '\t' | tr '\n' ' ')
-  if [ -n "$d" ]; then say map-ids FAIL "unmatched: $d"; else say map-ids PASS "$(( $(wc -l < "$T/L") )) ids, each mapped"; fi; }
-# every ratchet check has this shape: the spellings as obliged, the files scanned counted, signatures ratcheted
-chk_bare_doors() { oblige "$K/doors.$LNG" > "$T/spell" && [ -s "$T/spell" ] || { say bare-doors ERROR "door spellings empty or unreadable"; return; }
-  scoped | grep -E "$SRC" > "$T/src"; n=$(( $(wc -l < "$T/src") ))
-  extract_doors < "$T/src" > "$T/doors" || { say bare-doors ERROR "the extractor could not read the tree"; return; }
-  ratchet bare-doors "$K/bare-doors.baseline" "$T/doors" "$n"; }
-# SLOT extract_doors: file names on stdin, the spellings in $T/spell; prints one signature (the enclosing symbol and
-# the normalised statement) per match; exits 0 with no output when nothing matches, non-zero only when it could not read
-extract_doors() { return 2; }
-
-# run <row…>: each row runs its chk_<row> function; a row with none is an ERROR, never a silent pass
-run() { for r; do f=chk_$(printf '%s' "$r" | tr - _); case $(command -v "$f") in "$f") "$f";; *) say "$r" ERROR "not adapted: no $f";; esac; done; }
-run map-ids map-beats map-names map-dup branches landscape-scope names oracle copy refused-shapes gaps budgets collected self-tests retired escapes env-twice bare-doors clones size
-[ "$MODE" = plain ] || run tree observed bite flakes
-exit "$rc"
-```
-
-- Set every `SLOT` line. A slot left as written keeps its rows at `ERROR`, and the unadapted skeleton exits 2.
-- Write one `chk_<row>` function per row of the table, dashes as underscores; `run` reports a row with no function as `ERROR`, so the script never reads clean with a row missing.
-- A set check follows `chk_map_ids`: derive both sets, report `ERROR` when either is empty, then compare. A ratchet check follows `chk_bare_doors`: read its spellings with `oblige`, count the files it scans, extract one signature per match, and call `ratchet`, which reports `ERROR` on zero items scanned and on a baseline with no ceiling in force.
-- Read every ruling-bearing input through `excuse`, `oblige`, `ceiling` or `value`, as Where enforcement ends classes it.
-- Before a row errors on an absent input, it calls `none_gate` with the section or tier that input belongs to and the test for that section's artifact, and stops when `none_gate` printed the verdict.
-- The runner writes `subject_tree` and `subject_dirty` into each run ledger's header at the start and the end of the run; `tree` compares them with the merge subject.
+| Check | FAIL on | ERROR on |
+| --- | --- | --- |
+| `collected` | a test file the blocking command does not collect, or collects twice; a listed operating system with no CI job running the tree | the CI configuration or the blocking run's log unreadable |
+| `names` | beyond its baseline, a name breaking Names, or a property word whose test body creates no violating condition | no names read |
+| `clones` | a clone in the test tree beyond its baseline | the detector absent, or it matched no files |
+| `size` | a test, step or harness file above the size ceiling beyond its baseline | the ceiling not declared |
+| `escapes` | an `escapes.tsv` line naming a node path the tree lacks or a test that does not exist | `escapes.tsv` unreadable |
+| `env-twice` | the unit tier's results differ between the base and the perturbed configuration | no scheduled leg within the gap the Tiers section allows |
 
 ## Where enforcement ends
 
-Read `$DESIGN/integration-suite.md § The threat model` before any edit to a ruling-bearing input and before writing a check that reads one.
+Read `$DESIGN/integration-suite.md § The threat model`.
 
-The checks defend against accident, laziness and the pull toward green by an author who does not forge: a field left empty, a value guessed, an assertion written to pass, a check that could not look, a list grown in the commit that needs it. A ruling, a reference or a run ledger forged and landed is out of scope.
-
-A ruling-bearing input is a file or a design-document value a check trusts instead of verifying. Two lines hold them:
-
-- Owner-owned paths: the design document, the checks script with its directory, and the ruling-bearing ledgers change only with the owner's review (a code-owners rule, or the version-control system's equivalent). This line is never the only one, since it is void where the author commits as the owner.
-- The merge base: every check reads each ruling-bearing input at the merge base and in the working tree and applies the stricter reading: the intersection of a list that excuses, the union of a list that obliges, the tighter of two numbers; an unreadable merge base is the check's `ERROR`. A loosening therefore takes effect from the next landing and a tightening at once; an added obligation lands after the baseline entries that excuse what already violates it. The landing that installs an input reads it from the working tree.
-
-| Read as | The ruling-bearing inputs |
-| --- | --- |
-| lists that excuse | `references.tsv`, `roster.txt`, `skip-reasons.txt`, `unobservable.txt`, `gaps.tsv`, `flakes.tsv` (its retry exemption), `exclusions.txt`, every signature baseline, `name-allowlist.txt`, the locator spellings, `cuts.tsv`, the design's `none` markers |
-| lists that oblige | `self-tests.txt`, `ruled-copy.tsv`, `third-party-rules.txt`, `dimensions.tsv`, `escapes.tsv`, the landscape's `ruled:yes` marks, every other spelling set and its planted-violation corpus, the test-name and lane-file patterns, the own-identifier list, and the design's blocking command per tier (a replaced one runs beside its successor for one landing), store-sharing tiers, rendered-from paths, double-run trigger paths and `live-os:` |
-| numbers | the design's Speed targets, budget headroom and schedule window, every baseline's burn-down ceiling, `size-ceiling` and the clone detector's threshold |
-
-`budgets.tsv` and the flakes are recomputed from the run ledgers, so neither is ruling-bearing.
-
-At every landing the suite reviewer (in a project installed from this blueprint, the flights lander; elsewhere, whoever the owner names) reads what no check can judge, and a landing without that reading is unreviewed:
-
-- every loosening of a ruling-bearing input;
-- a sample of the recorded bite mutations, re-run, and for each guard both directions and the boundary plus and minus one;
-- every ruled-row oracle against its cited `references.tsv` row, and every product change under a ruled row's `file:line` against the same;
-- the landscape for every guard's refusal row (the error-code registry as the list, where one exists), every added row's `surface:`, and every `evidence:` row's `file:line` for the code that writes the output;
-- every policy-lint rule, for a property asserted rather than a line's text pinned;
-- every `twin:` and `live-only` reason, every added `weak-oracle:` and `skip-because:` against its class or reason, each subject's input-class lines in `self-tests.txt` against the inputs it reads, and the `DUPLICATE-CANDIDATES` list;
-- `dimensions.tsv` against the product's dispatch points, the root inventory against the owner's machine, and every live row's `assert:` for what the user sees and every other effect its action leaves;
-- every `escapes.tsv` row's beat against the defect's path: the beat that ran it blind, or the branch added because none did.
+The checks defend against accident, laziness and the pull toward green by an author who does not forge. Every baseline, the size ceiling and the budgets are read at the merge base and in the working tree, the stricter reading applying, so a loosening takes effect only from the next landing. At every landing the suite reviewer (in a project installed from this blueprint, the flights lander; elsewhere whoever the owner names) reads what no check judges: every loosening; a sample of the named watched reds, re-run; each added step's screen literal and reads against what the owner sees and what lies underneath; each escape's step against the defect's path; a chain whose steps only share a starting point, which forks.
 
 ## Hand-off
 
-Read `$DESIGN/integration-suite.md § The hand-off` and `$DESIGN/integration-suite.md § Where it sits`.
+The design is reviewed before anything is built: a trunk not on the owner's commonest day, a chain that should fork, a branch reading what it does not own, a step acting through an internal entry, an escape with no step, a check whose broken state would read as PASS. The project's testing manual carries the per-change duty under its Suite duties section (a feature lands with its watched-red step or test; an escape's fix lands with its assertion on the step that walked past it and its `escapes.tsv` line; the whole tree on every pull request where a live tier exists) and the refused shapes under What not to test; a rule only this command holds is not in force.
 
-The design is reviewed before anything is built: unmapped capabilities, crossings asserted from one side only, rows with no nameable bite, oracles with no source, checks whose broken state would read as PASS. The laws reach every tier's tests through three carriers the design writes: the checks script, the skeleton ledgers, and the rows the project's testing manual must carry: under its Lanes and registries section the per-change duty (the landscape row, the map row, the mapped row and its bite in one commit; an escape's assertion and `escapes.tsv` row with its fix; the sequence at every landing where a live tier exists), under its What not to test section the refused shapes. A rule that lives only in a file the project may not hold is not in force. The `clones` and `size` rows run in this suite's own checks script on the test tree's own baselines, so no neighbour command's gate needs to change for them.
+In a project installed from this blueprint, a flights foreman builds the suite in Build order, one per branch on the fork; the flights lander runs the blocking commands, the touched branch while it fixes and the whole tree in its full gate, and performs the reviewer's reading. Elsewhere the owner assigns the build, the runs and the review.
 
-In a project installed from this blueprint, the flights cast builds and keeps the suite: the build goes through a flights foreman, which builds the harness, the mocks and the lanes in Build order, recording each row's bite; the flights lander runs the blocking commands of the unit and hermetic tiers, sweeps the refused shapes and performs the reviewer's reading of Where enforcement ends on every landing, and where a live tier exists runs the touched lanes from their checkpoints while it fixes, the touched lane alone, and the whole sequence in its one full gate. A defect a test or a lane exposes is the lander's to fix. Elsewhere the owner assigns the review, the build and the runs: Law 7 is the run policy, Law 20 the per-change policy, and Laws 11–15 the verdict rules at every tier.
-
-Decide nothing this command governs before reading its `$DESIGN` section.
+The suite's weight is part of its verdict: one tree of small owner steps, typed through the owner's own entries, running together and growing only from escapes.

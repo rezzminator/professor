@@ -115,3 +115,20 @@ func TestDarwinProcFSStartedPlacesTheSpawnOnTheWallClock(t *testing.T) {
 			started.Format(time.RFC3339Nano), before.Format(time.RFC3339Nano), after.Format(time.RFC3339Nano))
 	}
 }
+
+func TestDarwinDeadReadsAZombieAndAnExitingProcess(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		state int8
+		flags int32
+		want  bool
+	}{
+		{"running", 2, 0x4004, false},
+		{"zombie", 5, 0x4004, true},
+		{"exiting, not yet a zombie", 2, 0x6004, true},
+	} {
+		if got := darwinDead(tc.state, tc.flags); got != tc.want {
+			t.Errorf("%s: darwinDead(%d, %#x) = %t, want %t", tc.name, tc.state, tc.flags, got, tc.want)
+		}
+	}
+}

@@ -121,3 +121,33 @@ func TestCleanupRunsWhenTheSubtreeEndsBeforeItsTerminalsClose(t *testing.T) {
 			failed, bad, torn, after, out)
 	}
 }
+
+// A terminal's controller end stays with the harness: a shell opened later inherits no descriptor of
+// an earlier terminal, so closing that one hangs it up.
+func TestALaterTerminalInheritsNoDescriptorOfAnEarlierOne(t *testing.T) {
+	held := map[string]string{}
+	list := func(c *Ctx, name string) {
+		term := c.Terminal(name)
+		term.Type(`echo "HELD:$(ls /dev/fd | tr '\n' ' ')"` + "\r")
+		term.WaitScreen("the descriptors a child of "+name+" holds", 5*time.Second, func(screen string) bool {
+			for _, line := range strings.Split(screen, "\n") {
+				if rest, found := strings.CutPrefix(line, "HELD:"); found {
+					held[name] = strings.TrimSpace(rest)
+					return true
+				}
+			}
+			return false
+		})
+	}
+	Run(t, Do("root", func(c *Ctx, in int) int {
+		list(c, "first")
+		list(c, "second")
+		return in
+	}), 0, bashHooks(t))
+	if !strings.HasPrefix(held["first"], "0 1 2") || held["second"] != held["first"] {
+		t.Fatalf(
+			"a child of the second terminal holds descriptors %q, want those a child of the first holds, %q (0 1 2 …)",
+			held["second"], held["first"],
+		)
+	}
+}

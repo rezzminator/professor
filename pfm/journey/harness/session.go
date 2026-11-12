@@ -13,6 +13,7 @@ import (
 
 	"github.com/charmbracelet/x/vt"
 	"github.com/creack/pty"
+	"golang.org/x/sys/unix"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/deps"
@@ -70,7 +71,10 @@ func openSession(name string, shell, env []string, clk clock.Clock) (*session, e
 // wakes the blocked reader and releases the descriptor, which is the hang-up. creack/pty hands back a
 // blocking file, whose Close waits behind a Read that never returns while the shell holds the terminal.
 func pollable(master *os.File) (*os.File, error) {
-	fd, err := syscall.Dup(int(master.Fd()))
+	// The copy is close-on-exec, as the original was: a plain dup would hand the controller end to
+	// every child started later, so a Close would hang nothing up and, on macOS, the shell would stay
+	// stuck exiting behind output nobody reads.
+	fd, err := unix.FcntlInt(master.Fd(), unix.F_DUPFD_CLOEXEC, 0)
 	if closeErr := master.Close(); err != nil || closeErr != nil {
 		return nil, fmt.Errorf("reopen the pty: %w", errors.Join(err, closeErr))
 	}

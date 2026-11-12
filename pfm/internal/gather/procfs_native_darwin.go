@@ -56,3 +56,15 @@ func nativeProcessCounters() (map[int]ProcessCounter, []string, error) {
 func nativeUnixSockets() ([]string, error) {
 	return nil, fmt.Errorf("list unix sockets: %w", errors.ErrUnsupported)
 }
+
+// Darwin's sys/proc.h: SZOMB is a process that has exited and waits to be reaped, P_WEXIT one
+// still working on its exit (ps prints it E), which the kernel no longer reads arguments from.
+const (
+	darwinZombieState = 5
+	darwinExitingFlag = 0x00002000
+)
+
+// darwinDead reports a process that can do no more work: a zombie, or one already exiting.
+func darwinDead(state int8, flags int32) bool {
+	return state == darwinZombieState || flags&darwinExitingFlag != 0
+}

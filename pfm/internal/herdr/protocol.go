@@ -15,6 +15,13 @@ func PaneGone(err error) bool {
 	return errors.As(err, &refusal) && (refusal.Code == paneNotFound || refusal.Code == "not_found")
 }
 
+// ServerStopping reports whether err is Herdr refusing a request because its
+// server is shutting down (server_unavailable): its panes are about to go.
+func ServerStopping(err error) bool {
+	var refusal *Refusal
+	return errors.As(err, &refusal) && refusal.Code == "server_unavailable"
+}
+
 // protocolVersionUnknown is the Version of a ping that names no release.
 const protocolVersionUnknown = "unknown"
 

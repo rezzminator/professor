@@ -98,7 +98,7 @@ func (proc *DarwinProcFS) ProcessIdentity(pid int) (ProcessIdentity, error) {
 	}
 	return ProcessIdentity{
 		EffectiveUID: process.Eproc.Ucred.Uid,
-		Zombie:       process.Proc.P_stat == 5, // SZOMB in Darwin sys/proc.h.
+		Zombie:       darwinDead(process.Proc.P_stat, process.Proc.P_flag),
 		Command:      string(command),
 	}, nil
 }

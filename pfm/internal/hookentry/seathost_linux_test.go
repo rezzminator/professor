@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -792,32 +793,78 @@ func TestSeatHostDoesNotCloseAnAbsentSeat(t *testing.T) {
 	}
 }
 
+// A seat whose end cannot be scheduled keeps its owner row and its resume recipe. A Herdr that
+// refuses because it is shutting down is a hangup (129, restoration, nothing printed): macOS ends
+// the engine before the terminal hangs up. Any other failure is the hook's error.
 func TestSeatHostCloseFailureKeepsOwnerAndRecipe(t *testing.T) {
-	values := paths.Values{StateDB: filepath.Join(t.TempDir(), "pfm.db")}
-	db := fleetdb.OpenSharedState(context.Background(), values)
-	defer func() { _ = db.Close() }()
-	seat := fleetdb.Seat{
-		SeatID:      "pending-close",
-		SessionID:   "session",
-		Backend:     "herdr",
-		State:       "live",
-		HerdrSocket: "/fixture/missing.sock",
-		HerdrPane:   "w1:p1",
-	}
-	if err := db.PutSeat(context.Background(), seat); err != nil {
+	stopping := filepath.Join(t.TempDir(), "stopping.sock")
+	listener, err := net.Listen("unix", stopping)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.WriteSeatRun(seat.SeatID, fleetdb.SeatRun{Binary: "/fixture/engine"}); err != nil {
-		t.Fatal(err)
-	}
-	var stderr bytes.Buffer
-	code := closeSeat(context.Background(), db, seat, 0, &stderr, config.Runtime{Paths: values})
-	_, found, err := db.Seat(context.Background(), seat.SeatID)
-	_, recipeErr := db.ReadSeatRun(seat.SeatID)
-	if code != 1 || !found || err != nil || recipeErr != nil ||
-		!strings.Contains(stderr.String(), "prove native end") ||
-		!strings.Contains(stderr.String(), "missing.sock") {
-		t.Fatalf("failed close lost durable recovery: code=%d found=%v err=%v recipe=%v", code, found, err, recipeErr)
+	served := make(chan struct{})
+	t.Cleanup(func() { _ = listener.Close(); <-served })
+	go func() {
+		defer close(served)
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			var request struct {
+				ID string `json:"id"`
+			}
+			if err := json.NewDecoder(conn).Decode(&request); err != nil {
+				t.Error(err)
+			}
+			const refusal = `{"id":%q,"error":{"code":"server_unavailable","message":"server is shutting down"}}`
+			fmt.Fprintf(conn, refusal+"\n", request.ID)
+			_ = conn.Close()
+		}
+	}()
+	for _, tc := range []struct {
+		name       string
+		socket     string
+		wantCode   int
+		wantStderr string
+	}{
+		{
+			"no Herdr server", "/fixture/missing.sock", 1,
+			"pfm internal seat-host: schedule ended seat: prove native end: prove seat pending-close pane.list: " +
+				"herdr socket /fixture/missing.sock: dial for pane.list pfm-seat: " +
+				"dial unix /fixture/missing.sock: connect: no such file or directory\n",
+		},
+		{"Herdr shutting down", stopping, 129, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			values := paths.Values{StateDB: filepath.Join(t.TempDir(), "pfm.db")}
+			db := fleetdb.OpenSharedState(context.Background(), values)
+			defer func() { _ = db.Close() }()
+			seat := fleetdb.Seat{
+				SeatID:      "pending-close",
+				SessionID:   "session",
+				Backend:     "herdr",
+				State:       "live",
+				HerdrSocket: tc.socket,
+				HerdrPane:   "w1:p1",
+			}
+			if err := db.PutSeat(context.Background(), seat); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.WriteSeatRun(seat.SeatID, fleetdb.SeatRun{Binary: "/fixture/engine"}); err != nil {
+				t.Fatal(err)
+			}
+			var stderr bytes.Buffer
+			code := closeSeat(context.Background(), db, seat, 0, &stderr, config.Runtime{Paths: values})
+			_, found, err := db.Seat(context.Background(), seat.SeatID)
+			_, recipeErr := db.ReadSeatRun(seat.SeatID)
+			if code != tc.wantCode || stderr.String() != tc.wantStderr || !found || err != nil || recipeErr != nil {
+				t.Fatalf(
+					"closeSeat = %d, stderr %q, seat found=%t err=%v, recipe err=%v; want %d, stderr %q, both kept",
+					code, stderr.String(), found, err, recipeErr, tc.wantCode, tc.wantStderr,
+				)
+			}
+		})
 	}
 }
 

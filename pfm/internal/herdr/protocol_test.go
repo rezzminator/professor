@@ -67,3 +67,24 @@ func TestCheckProtocol(t *testing.T) {
 		})
 	}
 }
+
+func TestServerStoppingReadsOnlyAShutdownRefusal(t *testing.T) {
+	refusing := func(code string) string {
+		return serve(t, func(string) string { return `{"id":"x","error":{"code":"` + code + `","message":"no"}}` })
+	}
+	for _, tc := range []struct {
+		name   string
+		socket string
+		want   bool
+	}{
+		{"a server shutting down", refusing("server_unavailable"), true},
+		{"another refusal", refusing("pane_not_found"), false},
+		{"no server at all", filepath.Join(t.TempDir(), "absent.sock"), false},
+	} {
+		err := Send(context.Background(), tc.socket, []byte("x"))
+		if err == nil || ServerStopping(err) != tc.want {
+			t.Errorf("%s: Send = %v, ServerStopping = %t, want an error and %t",
+				tc.name, err, ServerStopping(err), tc.want)
+		}
+	}
+}

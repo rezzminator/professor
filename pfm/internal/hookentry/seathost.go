@@ -304,6 +304,11 @@ func closeSeat(
 			headless.Chat{Backend: current.Backend, SeatID: current.SeatID, ID: current.SessionID},
 			runtime,
 		); err != nil {
+			if herdr.ServerStopping(err) {
+				// Herdr is stopping and takes this pane with it; macOS ends the engine before
+				// the terminal hangs up. That is restoration, as the hangup is.
+				return 128 + int(syscall.SIGHUP)
+			}
 			fmt.Fprintf(stderr, "pfm internal seat-host: schedule ended seat: %v\n", err)
 			return 1
 		}

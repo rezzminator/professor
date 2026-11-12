@@ -59,13 +59,13 @@ func plainReloadTyped(c *harness.Ctx, s State) State {
 	return s
 }
 
-// plainEnd: the owner types /exit in the plain chat; the box leaves the screen and the terminal, which
-// the chat owned, closes. No live row, live seat, engine or tmux process of the chat is left.
+// plainEnd: the owner types /exit in the plain chat; the terminal, which the chat owned, closes. No
+// live row, live seat, engine or tmux process of the chat is left. The closing terminal's last frame
+// is not read: macOS revokes a terminal when its shell ends, before tmux can restore the screen.
 func plainEnd(c *harness.Ctx, s State) State {
 	term := c.Terminal(s.Term)
 	socket := plainSocket(c, s)
 	term.Type("/exit\r")
-	term.WaitGone("❯", 20*time.Second)
 	plainGone(c, s, term, socket)
 	return s
 }

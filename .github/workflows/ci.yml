@@ -222,6 +222,17 @@ jobs:
           export PATH="$HOME/.local/bin:$PATH"
           go -C pfm test -tags journey -count=1 -v -timeout 20m ./journey/
 
+      # A failed run's per-step evidence (activity log, process table, chats, panes): run.sh keeps
+      # its run directory under /tmp/professor/journey on a failure; macOS writes JOURNEY_ARTIFACTS.
+      - name: Upload the journey evidence
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: journey-${{ matrix.os }}
+          path: ${{ matrix.os == 'linux' && '/tmp/professor/journey/' || format('{0}/journey', runner.temp) }}
+          if-no-files-found: warn
+          retention-days: 7
+
   fresh-install:
     name: fresh-install (${{ matrix.os }})
     needs: plan

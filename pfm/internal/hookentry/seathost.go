@@ -458,12 +458,11 @@ func runSeatEngine(
 		// An engine may handle terminal loss by exiting 1 rather than by signal.
 		// Judge the actual PTY hangup, not its exit code or an unreachable API:
 		// ordinary engine failures must remain errors even if Herdr is offline.
-		terminal := []unix.PollFd{{Fd: int32(options.Ctty)}}
-		_, pollErr := unix.Poll(terminal, 0)
-		if pollErr != nil {
-			returnErr = errors.Join(returnErr, fmt.Errorf("probe ended terminal: %w", pollErr))
+		hungUp, probeErr := seatTerminalHungUp(options.Ctty)
+		if probeErr != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("probe ended terminal: %w", probeErr))
 		}
-		if pollErr == nil && terminal[0].Revents&unix.POLLHUP != 0 {
+		if hungUp {
 			status = 128 + int(syscall.SIGHUP)
 			return
 		}

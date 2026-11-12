@@ -24,3 +24,12 @@ func seatTerminalPath(tty int) (string, error) {
 	}
 	return path, nil
 }
+
+// seatTerminalHungUp reads a PTY hangup without blocking: poll reports POLLHUP.
+func seatTerminalHungUp(tty int) (bool, error) {
+	terminal := []unix.PollFd{{Fd: int32(tty)}}
+	if _, err := unix.Poll(terminal, 0); err != nil {
+		return false, err
+	}
+	return terminal[0].Revents&unix.POLLHUP != 0, nil
+}

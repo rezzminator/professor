@@ -12,7 +12,11 @@ import (
 func bashHooks(t *testing.T) Hooks {
 	return Hooks{
 		Shell: []string{"bash", "--norc", "--noprofile", "-i"},
-		Env:   []string{"HOME=" + t.TempDir(), "PATH=" + os.Getenv("PATH"), "PS1=READY$ "},
+		Env: []string{
+			"HOME=" + t.TempDir(), "PATH=" + os.Getenv("PATH"), "PS1=READY$ ",
+			// macOS's bash 3.2 otherwise prints its zsh notice above the first prompt.
+			"BASH_SILENCE_DEPRECATION_WARNING=1",
+		},
 	}
 }
 

@@ -1,4 +1,17 @@
 // Package index incrementally indexes every registered engine's sessions.
+//
+//   - claude.go: parses a Claude transcript file into session rows.
+//   - codex.go: parses a Codex rollout file into session rows.
+//   - codex_refresh.go: RefreshCodexLineage, the catch-up of one Codex lineage.
+//   - codexstate.go: reconciles the index with Codex's own state store.
+//   - cxindex.go: Codex session-name renames and file stamps.
+//   - incremental.go: which files a pass parses, skips or continues.
+//   - opencode.go: ReadOpenCodeSessions, the OpenCode session mirror.
+//   - opencode_rows.go: OpenCode's message and part rows, and the read-only store open.
+//   - opencode_schema.go: whether an OpenCode store's tables exist yet.
+//   - source.go: the per-engine Source registry.
+//   - sync_sources.go: each engine's complete sync pass.
+//   - walk.go: walks the engines' transcript roots for files.
 package index
 
 import (

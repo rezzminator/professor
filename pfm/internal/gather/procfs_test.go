@@ -2,6 +2,7 @@ package gather
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -347,40 +348,70 @@ func TestProcExecutablePathUsesKernelPathNotArgv(t *testing.T) {
 	}
 }
 
-// A refused kern.procargs2 read is told apart by the independent probe: a
-// vanished process is absent, and an environment read of another uid's
-// process (kill 0 answers EPERM) is withheld, foreign as on Linux, so the
-// caller lookup and the chat-call guard pass over it instead of failing.
+// A refused kern.procargs2 read is told apart by the independent probe and
+// the kernel's identity of the process: a vanished process or a zombie is
+// absent, another uid's (kill 0 answers EPERM) or a setuid one the owner
+// started (another effective uid) is withheld, foreign as on Linux, so the
+// caller lookup and the chat-call guard pass over it; a live process of the
+// owner's own stays a failed look naming what it runs.
 func TestProcessReadErrorUsesIndependentExistence(t *testing.T) {
+	euid := uint32(os.Geteuid())
 	for _, tc := range []struct {
 		name          string
 		probe         error
+		identity      ProcessIdentity
+		identityErr   error
 		gone, foreign bool
+		want          string
 	}{
-		{"same uid EINVAL", nil, false, false},
-		{"other uid EINVAL", syscall.EPERM, false, true},
-		{"vanished EINVAL", syscall.ESRCH, true, false},
-		{"unknown probe", syscall.EIO, false, false},
+		{
+			"same uid EINVAL", nil,
+			ProcessIdentity{EffectiveUID: euid, Command: "sleep"},
+			nil, false, false,
+			fmt.Sprintf(`invalid argument (command "sleep", effective uid %d)`, euid),
+		},
+		{
+			"other uid EINVAL", syscall.EPERM,
+			ProcessIdentity{},
+			nil, false, true,
+			"gather: process environment withheld: another uid's, non-dumpable or privileged: invalid argument " +
+				"(probe: operation not permitted)",
+		},
+		{
+			"setuid EINVAL", nil,
+			ProcessIdentity{EffectiveUID: euid + 1, Command: "sudo"},
+			nil, false, true,
+			fmt.Sprintf("gather: process environment withheld: another uid's, non-dumpable or privileged: "+
+				"invalid argument (effective uid %d: permission denied)", euid+1),
+		},
+		{
+			"zombie EINVAL", nil,
+			ProcessIdentity{EffectiveUID: euid, Zombie: true},
+			nil, true, false,
+			"invalid argument (a zombie: file does not exist)",
+		},
+		{"identity unread", nil, ProcessIdentity{}, syscall.EIO, false, false, "invalid argument\ninput/output error"},
+		{
+			"vanished EINVAL", syscall.ESRCH,
+			ProcessIdentity{},
+			nil, true, false,
+			"process 42 disappeared after invalid argument: no such process: file does not exist",
+		},
+		{
+			"unknown probe", syscall.EIO,
+			ProcessIdentity{},
+			nil, false, false,
+			"invalid argument\nprobe process 42 existence: input/output error",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := processReadError(42, syscall.EINVAL, tc.probe)
-			if errors.Is(err, fs.ErrNotExist) != tc.gone || errors.Is(err, syscall.ESRCH) != tc.gone ||
-				!tc.gone && !errors.Is(err, syscall.EINVAL) {
-				t.Fatalf(
-					"process read error=%v gone=%t want gone=%t with unreadability preserved",
-					err,
-					errors.Is(err, fs.ErrNotExist),
-					tc.gone,
-				)
-			}
-			environ := environWithheld(err, tc.probe)
-			if errors.Is(environ, ErrForeignProcess) != tc.foreign ||
-				errors.Is(environ, fs.ErrPermission) != tc.foreign || !tc.gone && !errors.Is(environ, syscall.EINVAL) {
-				t.Fatalf(
-					"environment read error=%v, want foreign and permission %t with EINVAL kept",
-					environ,
-					tc.foreign,
-				)
+			environ := environWithheld(err, tc.probe, tc.identity, tc.identityErr)
+			if errors.Is(environ, fs.ErrNotExist) != tc.gone || errors.Is(environ, ErrForeignProcess) != tc.foreign ||
+				errors.Is(environ, fs.ErrPermission) != tc.foreign || !tc.gone && !errors.Is(environ, syscall.EINVAL) ||
+				environ.Error() != tc.want {
+				t.Fatalf("environment read error=%q, want %q (gone %t, foreign and permission %t, EINVAL kept)",
+					environ, tc.want, tc.gone, tc.foreign)
 			}
 		})
 	}

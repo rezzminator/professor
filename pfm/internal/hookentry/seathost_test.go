@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/creack/pty"
+
 	"github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
@@ -248,5 +250,28 @@ func TestCurrentClaudeBinaryReplacesOnlyAPrunedBuild(t *testing.T) {
 		if err != nil || got != test.want {
 			t.Fatalf("currentClaudeBinary(%q) = %q, %v; want %q", test.recorded, got, err, test.want)
 		}
+	}
+}
+
+// The hangup probe must see a PTY's master close on every kernel: Darwin's poll never
+// reported POLLHUP unasked, so a seat whose Herdr stopped waited out its retirement.
+func TestSeatTerminalHungUpSeesMasterClose(t *testing.T) {
+	master, terminal, err := pty.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := terminal.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	if hungUp, err := seatTerminalHungUp(int(terminal.Fd())); err != nil || hungUp {
+		t.Fatalf("open PTY: hungUp=%v err=%v, want false <nil>", hungUp, err)
+	}
+	if err := master.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if hungUp, err := seatTerminalHungUp(int(terminal.Fd())); err != nil || !hungUp {
+		t.Fatalf("closed master: hungUp=%v err=%v, want true <nil>", hungUp, err)
 	}
 }

@@ -14,19 +14,41 @@ import (
 )
 
 func TestParityIdentityAndFailuresVisible(t *testing.T) {
-	r := parityRuntime(t)
-	r.Engine = pfmengine.Codex
-	r.Command = failedStatusCommand{}
-	r.TmuxDir = filepath.Join(r.Home, "absent")
-	got, err := Render(context.Background(), []byte(`{"model":{"id":"gpt-6.1-sol"},"cwd":"/work"}`), r)
-	if err != nil {
-		t.Fatal(err)
-	}
-	plain := stripANSICodes(got)
-	for _, want := range []string{"sol-6.1", "fleet!", "git!", "quota missing"} {
-		if !strings.Contains(plain, want) {
-			t.Errorf("missing %q in %q", want, plain)
-		}
+	for _, tc := range []struct {
+		name      string
+		tmuxDir   func(home string) string
+		wantFleet bool
+	}{
+		// A socket path that is a file cannot be listed: the fleet is unknown.
+		{name: "unreadable socket directory", wantFleet: true, tmuxDir: func(home string) string {
+			path := filepath.Join(home, "not-a-directory")
+			if err := os.WriteFile(path, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			return path
+		}},
+		// No socket directory means no tmux server ever ran: an empty fleet.
+		{name: "absent socket directory", tmuxDir: func(home string) string { return filepath.Join(home, "absent") }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := parityRuntime(t)
+			r.Engine = pfmengine.Codex
+			r.Command = failedStatusCommand{}
+			r.TmuxDir = tc.tmuxDir(r.Home)
+			got, err := Render(context.Background(), []byte(`{"model":{"id":"gpt-6.1-sol"},"cwd":"/work"}`), r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			plain := stripANSICodes(got)
+			for _, want := range []string{"sol-6.1", "git!", "quota missing"} {
+				if !strings.Contains(plain, want) {
+					t.Errorf("missing %q in %q", want, plain)
+				}
+			}
+			if gotFleet := strings.Contains(plain, "fleet!"); gotFleet != tc.wantFleet {
+				t.Errorf("fleet! shown = %v, want %v in %q", gotFleet, tc.wantFleet, plain)
+			}
+		})
 	}
 }
 

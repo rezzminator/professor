@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"maps"
 	"os"
 	"path/filepath"
@@ -527,8 +528,9 @@ func fleetCountsWithError(runtime Runtime) (map[pfmengine.ID]int, error) {
 		}
 		return counts, nil
 	}
+	// No socket directory yet means no tmux server ever ran: an empty fleet.
 	entries, err := os.ReadDir(runtime.TmuxDir)
-	if err != nil {
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, fmt.Errorf("read fleet sockets %s: %w", runtime.TmuxDir, err)
 	}
 	for _, entry := range entries {

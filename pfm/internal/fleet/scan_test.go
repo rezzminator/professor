@@ -119,7 +119,7 @@ func TestScanWarnsOnAPartialIndexAndLists(t *testing.T) {
 	); err != nil {
 		t.Fatalf("Scan() = %v, want the partial index warned and the scan listed", err)
 	}
-	want := "pfm: index warning: index engine ox: read opencode sessions: query opencode sessions: " +
+	want := "pfm: index warning: index engine ox: read opencode sessions: read opencode store tables: " +
 		"file is not a database (26)\n"
 	if got := stderr.String(); got != want {
 		t.Fatalf("stderr = %q, want %q", got, want)

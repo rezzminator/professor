@@ -99,6 +99,7 @@ func TestInstallLeavesClaudeAccountFilesUnchanged(t *testing.T) {
 		Stdout:        &second,
 		Runner:        &fakeRunner{},
 		ProcessRunner: noHerdrRunner{obs.Runner(deps.RealRunner{})},
+		scheduler:     schedulerFor(servicemanager.KindSystemd),
 	})
 	if err != nil || report.Changed != 0 {
 		t.Fatalf("second apply report=%#v err=%v\n%s", report, err, second.String())
@@ -111,6 +112,7 @@ func TestInstallLeavesClaudeAccountFilesUnchanged(t *testing.T) {
 		CodexHomes:    []string{},
 		Runner:        &fakeRunner{},
 		Now:           now,
+		scheduler:     schedulerFor(servicemanager.KindSystemd),
 	}); err != nil {
 		t.Fatal(err)
 	}

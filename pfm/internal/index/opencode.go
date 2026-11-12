@@ -251,6 +251,9 @@ func readOpenCodeStore(ctx context.Context, root string) (
 			)
 		}
 	}()
+	if ready, err := openCodeSchemaReady(ctx, db); !ready {
+		return nil, nil, err
+	}
 	read := obs.SQL(ctx, pfmengine.MustLookup(pfmengine.OpenCode).LongName, openCodeSessionsQuery)
 	rows, err := db.QueryContext(ctx, openCodeSessionsQuery)
 	read.End(-1, err)

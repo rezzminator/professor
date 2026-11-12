@@ -485,12 +485,12 @@ func TestSyncOpenCodeMirrorsChangedStoresOnly(t *testing.T) {
 		t.Fatalf("open the live WAL: %v", err)
 	}
 
-	pass("first pass", 1, 3, "ses_child", "ses_gone", "ses_root")
-	pass("unchanged store", 1, 0, "ses_child", "ses_gone", "ses_root")
+	pass("first pass", 2, 3, "ses_child", "ses_gone", "ses_root")
+	pass("unchanged store", 2, 0, "ses_child", "ses_gone", "ses_root")
 	if _, err := live.Exec("DELETE FROM session WHERE id = 'ses_child'"); err != nil {
 		t.Fatalf("delete child: %v", err)
 	}
-	pass("a commit only the WAL holds", 2, 2, "ses_gone", "ses_root")
+	pass("a commit only the WAL holds", 4, 2, "ses_gone", "ses_root")
 
 	// A second OpenCode data home (PFM_OPENCODE_ROOT lists several) adds its
 	// sessions to the mirror beside the first root's, never replacing them.
@@ -499,5 +499,5 @@ func TestSyncOpenCodeMirrorsChangedStoresOnly(t *testing.T) {
 	mutateOpenCodeStore(t, second, "DELETE FROM session WHERE id <> 'ses_root'")
 	mutateOpenCodeStore(t, second, "UPDATE session SET id = 'ses_second' WHERE id = 'ses_root'")
 	roots = append(roots, second)
-	pass("a second root", 4, 3, "ses_gone", "ses_root", "ses_second")
+	pass("a second root", 8, 3, "ses_gone", "ses_root", "ses_second")
 }

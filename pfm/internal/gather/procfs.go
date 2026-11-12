@@ -518,14 +518,19 @@ func processReadError(pid int, readErr, probeErr error) error {
 	return readErr
 }
 
-// environWithheld tags a failed environment read on a kernel without /proc,
-// where kern.procargs2 answers EINVAL alike for every refusal: a live process
-// this one may not signal (the probe's EPERM) is another uid's, whose
-// environment the kernel withholds, as RealProcFS.withheld tags it on Linux.
-// Any other failure stays its read error.
-func environWithheld(readErr, probeErr error) error {
-	if errors.Is(probeErr, syscall.EPERM) {
+// environWithheld tags a failed kern.procargs2 read (EINVAL for any refusal): unsignalable (EPERM) or
+// another effective uid's (setuid) is foreign, as RealProcFS.withheld on Linux; a zombie is gone.
+func environWithheld(readErr, probeErr error, identity ProcessIdentity, identityErr error) error {
+	switch {
+	case errors.Is(probeErr, syscall.EPERM):
 		return fmt.Errorf("%w: %w (probe: %w)", ErrForeignProcess, readErr, probeErr)
+	case probeErr != nil || identityErr != nil:
+		return errors.Join(readErr, identityErr)
+	case identity.EffectiveUID != uint32(os.Geteuid()):
+		return fmt.Errorf("%w: %w (effective uid %d: %w)",
+			ErrForeignProcess, readErr, identity.EffectiveUID, fs.ErrPermission)
+	case identity.Zombie:
+		return fmt.Errorf("%w (a zombie: %w)", readErr, fs.ErrNotExist)
 	}
-	return readErr
+	return fmt.Errorf("%w (command %q, effective uid %d)", readErr, identity.Command, identity.EffectiveUID)
 }

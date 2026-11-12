@@ -438,7 +438,7 @@ func runUnkill(args []string, stdout, stderr io.Writer, runtimes ...commandRunti
 }
 
 func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime) (exitCode int) {
-	stdout, finishHook := obs.Hook(context.Background(), obs.Verb(args), stdout)
+	stdout, stderr, finishHook := obs.Hook(context.Background(), obs.Verb(args), stdout, stderr)
 	defer func() { finishHook(exitCode) }()
 	if len(args) != 0 && (args[0] == "clear-kill" || args[0] == "clear-name" || args[0] == "resume-unkill") {
 		return hookentry.ClearHook(args, os.Stdin, stdout, stderr, runtime)

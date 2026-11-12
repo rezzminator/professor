@@ -34,7 +34,7 @@ func TestIndexPrintsCountersAndFailsOnAPartialIndex(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := run([]string{"index"}, &stdout, &stderr)
 	wantStdout := "files=1 skipped=0 delta=0 full=1 deleted=0 touched=2 bytes=75 cx_names=true\n"
-	wantStderr := "pfm index: index engine ox: read opencode sessions: query opencode sessions: file is not a database (26)\n"
+	wantStderr := "pfm index: index engine ox: read opencode sessions: read opencode store tables: file is not a database (26)\n"
 	if code != 1 || stdout.String() != wantStdout || stderr.String() != wantStderr {
 		t.Fatalf(
 			"code %d stdout %q stderr %q; want 1, %q, %q",

@@ -12,11 +12,12 @@ import (
 )
 
 // doctorRows are the rows pfm doctor prints on this machine after the day's chats ended and were
-// killed: the plugins it installed read OK, Herdr's ping reads OK, the indicator painter is not
-// stale and the crumb audit finds no invalid entry.
+// killed: the plugins it installed read OK, Herdr's ping reads OK at the path the owner's PATH finds
+// ({herdr}: /usr/local/bin/herdr on the Linux machine, the pinned bin directory on a CI runner), the
+// indicator painter is not stale and the crumb audit finds no invalid entry.
 var doctorRows = []string{
 	"doctor: claude_plugins ok",
-	"doctor: dep herdr path=/usr/local/bin/herdr ok",
+	"doctor: dep herdr path={herdr} ok",
 	"doctor: herdr-indicators: ok process enumeration confirms no stale painter",
 }
 
@@ -60,7 +61,9 @@ func doctor(c *harness.Ctx, s State) State {
 	if got := strings.Join(failed, "\n"); got != want {
 		c.Failf("pfm doctor failure rows (%s):\n%s\nwant only the machine's own:\n%s", out, got, want)
 	}
+	herdr := strings.TrimSpace(read(c, "sh", "-c", "command -v herdr"))
 	for _, row := range append(doctorRows, "doctor: failures=2") {
+		row = strings.ReplaceAll(row, "{herdr}", herdr)
 		if !slices.Contains(lines, row) {
 			c.Failf("pfm doctor printed no row %q (%s)", row, out)
 		}

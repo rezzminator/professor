@@ -67,7 +67,8 @@ func (proc *DarwinProcFS) Cmdline(pid int) ([]string, error) {
 func (proc *DarwinProcFS) Environ(pid int) (map[string]string, error) {
 	_, env, err := procArgs(pid)
 	if err != nil {
-		return nil, environWithheld(err, ProbeProcess(pid))
+		identity, identityErr := proc.ProcessIdentity(pid)
+		return nil, environWithheld(err, ProbeProcess(pid), identity, identityErr)
 	}
 	environment := make(map[string]string, len(env))
 	for _, entry := range env {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"strings"
 )
 
 // compHooks is the component every `pfm internal` dispatch records under.
@@ -24,12 +25,14 @@ const hookCaptureBytes = 4096
 // returned function is called once with the exit code and writes one record:
 // hook, decision, reason, exit, dur_ms. Without a JSON answer the exit code
 // decides — 0 allow, 2 block (Claude Code's blocking code), anything else an
-// error, at ERROR. Stdin — the hook's payload, a prompt or a transcript —
+// error, at ERROR, its reason the last line the hook wrote to stderr (the
+// second returned writer, a pass-through keeping a tail). Stdin — the hook's payload, a prompt or a transcript —
 // is never read here.
-func Hook(ctx context.Context, name string, stdout io.Writer) (io.Writer, func(exitCode int)) {
+func Hook(ctx context.Context, name string, stdout, stderr io.Writer) (io.Writer, io.Writer, func(exitCode int)) {
 	started := current(ctx).timing.Now()
 	capture := &headCapture{next: stdout}
-	return capture, func(exitCode int) {
+	complaint := &tailCapture{next: stderr}
+	return capture, complaint, func(exitCode int) {
 		decision, reason := hookAnswer(capture.head.Bytes())
 		level := slog.LevelInfo
 		if decision == "" {
@@ -45,6 +48,9 @@ func Hook(ctx context.Context, name string, stdout io.Writer) (io.Writer, func(e
 			// an interruption (Herdr may restore it), not a failed hook decision.
 			if exitCode == 129 && (name == "seat-host" || name == "claude-launch" || name == "launch") {
 				decision, level = "interrupted", slog.LevelInfo
+			}
+			if decision == "error" {
+				reason = complaint.lastLine()
 			}
 		}
 		attrs := []slog.Attr{
@@ -92,4 +98,25 @@ func (capture *headCapture) Write(data []byte) (int, error) {
 		capture.head.Write(data[:min(room, len(data))])
 	}
 	return capture.next.Write(data)
+}
+
+// tailCapture passes every write through and keeps the last hookCaptureBytes
+// of them: a failing hook's own last complaint is the reason its record names.
+type tailCapture struct {
+	next io.Writer
+	tail []byte
+}
+
+func (capture *tailCapture) Write(data []byte) (int, error) {
+	capture.tail = append(capture.tail, data...)
+	if over := len(capture.tail) - hookCaptureBytes; over > 0 {
+		capture.tail = capture.tail[over:]
+	}
+	return capture.next.Write(data)
+}
+
+// lastLine is the last non-blank line kept, bounded like every logged value.
+func (capture *tailCapture) lastLine() string {
+	lines := strings.Split(strings.TrimSpace(string(capture.tail)), "\n")
+	return TruncateValue(strings.TrimSpace(lines[len(lines)-1]))
 }

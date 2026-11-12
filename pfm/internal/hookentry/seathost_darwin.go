@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"syscall"
 
 	"golang.org/x/sys/unix"
 )
@@ -45,4 +46,28 @@ func seatTerminalPath(tty int) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("no concrete PTY for controlling device %d", process.Eproc.Tdev)
+}
+
+// seatTerminalHungUp reads a PTY hangup without blocking. Darwin's poll reports
+// POLLHUP only through a read filter (Linux reports it unasked), so a one-shot
+// kqueue read filter asks directly: EV_EOF on it is the hangup.
+func seatTerminalHungUp(tty int) (bool, error) {
+	queue, err := unix.Kqueue()
+	if err != nil {
+		return false, fmt.Errorf("open kqueue: %w", err)
+	}
+	defer unix.Close(queue)
+	changes := []unix.Kevent_t{{Ident: uint64(tty), Filter: unix.EVFILT_READ, Flags: unix.EV_ADD | unix.EV_ONESHOT}}
+	events := make([]unix.Kevent_t, 1)
+	count, err := unix.Kevent(queue, changes, events, &unix.Timespec{})
+	if err != nil {
+		return false, fmt.Errorf("watch terminal %d: %w", tty, err)
+	}
+	if count == 0 {
+		return false, nil
+	}
+	if events[0].Flags&unix.EV_ERROR != 0 {
+		return false, fmt.Errorf("watch terminal %d: %w", tty, syscall.Errno(events[0].Data))
+	}
+	return events[0].Flags&unix.EV_EOF != 0, nil
 }

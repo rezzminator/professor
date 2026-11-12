@@ -15,7 +15,7 @@ import (
 func TestHookRecordsNameDecisionReasonAndDuration(t *testing.T) {
 	ctx, recorder := Test(t)
 	var stdout bytes.Buffer
-	tee, finish := Hook(ctx, "exit-intercept", &stdout)
+	tee, _, finish := Hook(ctx, "exit-intercept", &stdout, &bytes.Buffer{})
 	if _, err := tee.Write([]byte(`{"decision":"block","reason":"another reload is in flight"}` + "\n")); err != nil {
 		t.Fatal(err)
 	}
@@ -44,13 +44,14 @@ func TestHookRecordsNameDecisionReasonAndDuration(t *testing.T) {
 // PreToolUse permission shape is read too.
 func TestHookDecisionFromExitCodeAndPermissionShape(t *testing.T) {
 	ctx, recorder := Test(t)
-	_, finish := Hook(ctx, "launch", &bytes.Buffer{})
+	_, _, finish := Hook(ctx, "launch", &bytes.Buffer{}, &bytes.Buffer{})
 	finish(0)
-	_, finish = Hook(ctx, "clear-kill", &bytes.Buffer{})
+	_, _, finish = Hook(ctx, "clear-kill", &bytes.Buffer{}, &bytes.Buffer{})
 	finish(2)
-	_, finish = Hook(ctx, "then", &bytes.Buffer{})
+	_, complaint, finish := Hook(ctx, "then", &bytes.Buffer{}, &bytes.Buffer{})
+	_, _ = complaint.Write([]byte("probe ended terminal\n  then: retirement unconfirmed  \n\n"))
 	finish(1)
-	tee, finish := Hook(ctx, "store-guard", &bytes.Buffer{})
+	tee, _, finish := Hook(ctx, "store-guard", &bytes.Buffer{}, &bytes.Buffer{})
 	_, _ = tee.Write(
 		[]byte(
 			`{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"denied by policy"}}`,
@@ -64,6 +65,7 @@ func TestHookDecisionFromExitCodeAndPermissionShape(t *testing.T) {
 	requireField(t, records[0], "decision", "allow")
 	requireField(t, records[1], "decision", "block")
 	requireField(t, records[2], "decision", "error")
+	requireField(t, records[2], "reason", "then: retirement unconfirmed")
 	if records[2].Level != slog.LevelError.String() || records[1].Level != slog.LevelInfo.String() {
 		t.Fatalf("levels: exit 1 at %s (want ERROR), exit 2 at %s (want INFO)", records[2].Level, records[1].Level)
 	}
@@ -78,7 +80,7 @@ func TestHookNativeHangupIsInterruptedNotFailure(t *testing.T) {
 	for _, name := range []string{"seat-host", "claude-launch", "launch", "then"} {
 		t.Run(name, func(t *testing.T) {
 			ctx, recorder := Test(t)
-			_, finish := Hook(ctx, name, &bytes.Buffer{})
+			_, _, finish := Hook(ctx, name, &bytes.Buffer{}, &bytes.Buffer{})
 			finish(129)
 			record := recorder.Records()[0]
 			requireField(t, record, FieldExit, float64(129))
@@ -104,7 +106,7 @@ func TestHookNativeHangupIsInterruptedNotFailure(t *testing.T) {
 func TestHookCapturesOnlyAHeadOfStdout(t *testing.T) {
 	ctx, recorder := Test(t)
 	var stdout bytes.Buffer
-	tee, finish := Hook(ctx, "statusline", &stdout)
+	tee, _, finish := Hook(ctx, "statusline", &stdout, &bytes.Buffer{})
 	big := strings.Repeat("render PLANTED-LINE\n", 1000)
 	if _, err := tee.Write([]byte(big)); err != nil {
 		t.Fatal(err)

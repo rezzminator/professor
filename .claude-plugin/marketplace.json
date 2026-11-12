@@ -79,7 +79,7 @@
         "path": "./plugins/flights",
         "ref": "main"
       },
-      "description": "Claude Code plugin for the flights agents that build and land work — three foremen (foreman-pro designs before it builds), a lander with its three reviewers, a tracer that answers questions from code, two diff reviewers, /flights:spec and /flights:doctor — and a codebase map, ponytail's symbol map ported: one line per source folder naming its exported functions, classes and types, within 2,000 characters, given to the main chat and the flights builder agents at their start, cached per commit",
+      "description": "Claude Code plugin for the flights agents that build and land work — three foremen (foreman-pro designs before it builds), a lander with its three reviewers, a speccer, a tracer that answers questions from code, two diff reviewers, /flights:spec and /flights:doctor — and a codebase map, ponytail's symbol map ported: one line per source folder naming its exported functions, classes and types, within 2,000 characters, given to the main chat and the flights builder agents at their start, cached per commit",
       "homepage": "https://github.com/rezzminator/flights",
       "license": "MIT",
       "keywords": ["claude-code", "codebase-map", "subagents", "context-engineering", "hooks", "professor"]

@@ -25,7 +25,7 @@ const orchestratorWaitReturnWatchReason = "A sub-agent's return needs no watcher
 // agent_type) included, exits 0 silently. The hook rides every launch
 // (claudelaunch.HookTemplates) because a plugin agent's frontmatter hooks
 // never load.
-var orchestratorWaitAgents = map[string]bool{"flights:foreman-pro": true}
+var orchestratorWaitAgents = map[string]bool{"flights:foreman-pro": true, "flights:speccer": true}
 
 var (
 	// orchestratorWaitFileLoop matches a polling loop on a file's existence:

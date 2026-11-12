@@ -29,6 +29,7 @@ func TestOrchestratorWaitDeniesABashNoOpWait(t *testing.T) {
 		{name: "background watch on a child return file", payload: `{"agent_type":"flights:foreman-pro","tool_name":"Bash","tool_input":{"command":"timeout 14400 bash -c 'until [ -s \"$1\" ]; do sleep 20; done; cat \"$1\"' _ /flights/f/returns/unit-r1.md","run_in_background":true}}`, want: denyReturnWatch},
 		{name: "while-not loop on a returns path", payload: `{"agent_type":"flights:foreman-pro","tool_name":"Bash","tool_input":{"command":"while [ ! -f /flights/f/returns/gate-r1.md ]; do sleep 5; done"}}`, want: denyReturnWatch},
 		{name: "test-form loop on a returns path", payload: `{"agent_type":"flights:foreman-pro","tool_name":"Bash","tool_input":{"command":"until test -e flights/f/returns/gate-r1.md; do sleep 5; done"}}`, want: denyReturnWatch},
+		{name: "the speccer sleeping", payload: `{"agent_type":"flights:speccer","tool_name":"Bash","tool_input":{"command":"sleep 30"}}`, want: denyWait},
 
 		// Pass: each exception.
 		{name: "the same file loop on a command output file", payload: `{"agent_type":"flights:foreman-pro","tool_name":"Bash","tool_input":{"command":"timeout 600 bash -c 'until [ -s \"$1\" ]; do sleep 20; done; cat \"$1\"' _ /tmp/professor/gate/out.log"}}`},

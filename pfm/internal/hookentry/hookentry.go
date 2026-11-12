@@ -7,4 +7,5 @@
 // bounded, backing-off retry of a Herdr state the host's load left undelivered.
 // herdr_tmux_seat.go binds and ends a tmux chat's seat on its engine's session start and end.
 // seathost_image.go re-execs a seat-host from the installed pfm when an install replaced its binary.
+// seathost_retry.go asks the pane, after a failed engine start, whether to retry or close.
 package hookentry

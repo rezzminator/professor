@@ -279,7 +279,7 @@ func TestSeatHostPTY(t *testing.T) {
 	for _, mode := range []string{
 		"exit", "ordinary-stdio", "redirected-stdin", "hup", "int", "launch", "failed-missing-recipe", "failed-malformed-recipe", "failed-missing-executable",
 		"ledger-on", "ledger-off", "launch-ledger-on", "launch-ledger-off",
-		"reload-failure-locked", "reload-success", "reload-retry", "reload-close", "reload-move-retry", "move-start", "raw-codex", "raw-opencode", "hangup-exit-one",
+		"reload-failure-locked", "reload-success", "reload-retry", "reload-close", "reload-move-retry", "move-start", "raw-codex", "raw-opencode", "hangup-exit-one", "failed-hangup",
 	} {
 		t.Run(mode, func(t *testing.T) {
 			root, environment := testjail.FleetEnv(t)
@@ -347,7 +347,7 @@ func TestSeatHostPTY(t *testing.T) {
 				if mode == "failed-malformed-recipe" {
 					run.Binary = "relative-engine"
 				}
-				if mode == "failed-missing-executable" {
+				if mode == "failed-missing-executable" || mode == "failed-hangup" {
 					run.Binary = filepath.Join(root, "missing-engine")
 				}
 				if mode != "failed-missing-recipe" {
@@ -373,6 +373,11 @@ func TestSeatHostPTY(t *testing.T) {
 				args = []string{"-test.run=^TestSeatHostPTY$"}
 			}
 			command := exec.CommandContext(ctx, hostBinary, args...)
+			if mode == "failed-hangup" {
+				// A pane's shell is its session leader, so a seat-host under it outlives the hangup signal.
+				command = exec.CommandContext(ctx, "/bin/sh",
+					append([]string{"-c", `trap "" HUP; exec "$0" "$@"`, hostBinary}, args...)...)
+			}
 			command.Env = environment
 			command.Stdin = slave
 			command.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Setctty: true, Ctty: 0}
@@ -399,6 +404,28 @@ func TestSeatHostPTY(t *testing.T) {
 				); err != nil {
 					t.Fatal(err)
 				}
+			}
+			if mode == "failed-hangup" {
+				// The pane closes while the failed start waits at its retry prompt.
+				waitSeatFixture(t, done, func() bool {
+					current, found, err := db.Seat(context.Background(), "native-seat")
+					return err == nil && found && current.State == "failed"
+				})
+				if err := master.Close(); err != nil {
+					t.Fatal(err)
+				}
+				<-done
+				if got := command.ProcessState.ExitCode(); got != 129 ||
+					strings.Contains(output.String(), "read retry choice") {
+					t.Fatalf(
+						"pane closed at the retry prompt: status=%d, want 129 and no read fault; output=%s",
+						got, &output,
+					)
+				}
+				if _, err := db.ReadSeatRun("native-seat"); err != nil {
+					t.Fatalf("pane closed at the retry prompt discarded the recipe: %v", err)
+				}
+				return
 			}
 			if strings.HasPrefix(mode, "failed-") {
 				if _, err := master.Write([]byte{4}); err != nil {

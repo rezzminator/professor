@@ -196,20 +196,12 @@ func SeatHost(args []string, stdout, stderr io.Writer, runtime config.Runtime) i
 		}
 		if !started {
 			failedSeatStart(ctx, db, seat, runErr, stderr)
-			for {
-				fmt.Fprintln(stderr, "press Enter to retry, q to close")
-				line, err := input.ReadString('\n')
-				if err != nil {
-					fmt.Fprintf(stderr, "pfm internal seat-host: read retry choice: %v\n", err)
-					return 1
-				}
-				choice := strings.TrimSpace(line)
-				if choice == "q" {
-					return closeSeat(ctx, db, seat, 0, stderr, runtime)
-				}
-				if choice == "" {
-					break
-				}
+			quit, code, asked := seatRetryChoice(input, int(tty.Fd()), stderr)
+			if !asked {
+				return code
+			}
+			if quit {
+				return closeSeat(ctx, db, seat, 0, stderr, runtime)
 			}
 			refreshSeatHostImage(gather.NewProcFS(runtime.Paths.ProcRoot), os.Executable, syscall.Exec, stderr)
 			current, found, err := db.Seat(ctx, seat.SeatID)

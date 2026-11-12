@@ -256,7 +256,8 @@ func RenderSubagents(
 			read.nest = tree.nesting(task.ID)
 			read.spend.add(tree.nestedSpend(task.ID))
 			if ledger != nil {
-				if booked, ok := ledger.spend(task.ID, tree.children); ok {
+				if booked, ok := ledger.spend(task.ID, tree.children); ok && (booked.priced > 0 || read.err != nil) {
+					// a ledger that prices nothing still counts the tokens of a row whose transcript did not read
 					read.spend = read.spend.withLedger(booked)
 				}
 			}

@@ -100,6 +100,18 @@ func TestLedgerSpendKeepsTranscriptToolsAndAdvisor(t *testing.T) {
 	}
 }
 
+// priced counts the rows that carry a cost: rows that all lack one price nothing.
+func TestLedgerSpendPricedCountsRowsWithACost(t *testing.T) {
+	bare := ledgerRow("r2", "top", "", 0)
+	bare.CostUSDMicros, bare.Join = nil, costledger.JoinSpan
+	if got := ledgerSpend([]costledger.Row{bare, bare}); got.priced != 0 || !got.partial || got.usd != 0 {
+		t.Errorf("ledger spend of cost-less rows = %+v, want priced 0, partial, $0", got)
+	}
+	if got := ledgerSpend([]costledger.Row{ledgerRow("r1", "top", "", 2_000_000), bare}); got.priced != 1 {
+		t.Errorf("ledger spend of one costed row of two = %+v, want priced 1", got)
+	}
+}
+
 // The ledger total is the main thread's own rows plus every top-level agent with everything below
 // it: nothing is counted twice and nothing is left out.
 func TestLedgerSpendsAddUpToTheSessionTotal(t *testing.T) {

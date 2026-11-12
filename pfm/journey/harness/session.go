@@ -15,6 +15,7 @@ import (
 	"github.com/creack/pty"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
 // session is one open terminal: the PTY's controller end, the login shell leading its session, and
@@ -105,7 +106,8 @@ func (s *session) close() error {
 	if s.ended(closeGrace) {
 		return errors.Join(hangup, s.emu.Close())
 	}
-	if err := syscall.Kill(-s.cmd.Process.Pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
+	err := syscall.Kill(-s.cmd.Process.Pid, syscall.SIGKILL)
+	if err != nil && !deps.GroupGone(s.cmd.Process.Pid, err) {
 		return fmt.Errorf("kill the session of %s: %w", s.name, err)
 	}
 	if !s.ended(closeGrace) {

@@ -1,4 +1,3 @@
-// Package deps owns the external-command contract for pfm.
 package deps
 
 import (

@@ -22,6 +22,7 @@ internal/claudelaunch/doc.go
 internal/compose/doc.go
 internal/compose/order.go
 internal/compose/types.go
+internal/deps/deps.go
 internal/doctor/harness_prompt_baselines.go
 internal/engine/builtin.go
 internal/engine/claude/capabilities.go

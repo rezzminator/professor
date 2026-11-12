@@ -105,6 +105,13 @@ func callAcross(c *harness.Ctx, s State) State {
 		return slices.Equal(got, []entry{{"user", signedByParent}}), fmt.Sprintf("%+v", got)
 	})
 
+	// The peer's call back must meet an idle agent: Herdr marks the caller's turn over once its hook
+	// lands, later than the paint on a loaded machine, and a call meeting a working agent takes Herdr's
+	// raw path, whose receipt is worded differently.
+	c.Poll("Herdr status idle for "+parentPane, 20*time.Second, func() (bool, string) {
+		got := herdrStatus(c, s, parentPane)
+		return got == "idle", "status " + got
+	})
 	if r := c.Read("rm", hold); r.Code != 0 {
 		c.Failf("rm %s exited %d: %s", hold, r.Code, r.Stderr)
 	}

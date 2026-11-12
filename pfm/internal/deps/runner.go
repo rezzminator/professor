@@ -143,7 +143,7 @@ func (RealRunner) Run(ctx context.Context, argv []string, opts RunOptions) (RunR
 		command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 		command.Cancel = func() error {
 			if err := syscall.Kill(-command.Process.Pid, syscall.SIGKILL); err != nil {
-				if errors.Is(err, syscall.ESRCH) {
+				if GroupGone(command.Process.Pid, err) {
 					return os.ErrProcessDone
 				}
 				return err
@@ -333,7 +333,7 @@ func (p *realProcess) SignalGroup(sig syscall.Signal) error {
 		return errors.New("deps: process has not started")
 	}
 	err := syscall.Kill(-p.command.Process.Pid, sig)
-	if errors.Is(err, syscall.ESRCH) {
+	if GroupGone(p.command.Process.Pid, err) {
 		return nil
 	}
 	return err

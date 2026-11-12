@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+# run.sh — pfm's journey suite on a disposable Linux machine: builds the machine image once per input
+# hash (machine.Dockerfile), fetches Go modules into the kept cache volumes, boots the machine with
+# systemd and no network, prepares the owner (prepare.sh) and runs the suite inside it as the owner.
+#   bash infra/fence/journey/run.sh [--keep] [go test flags…]     e.g. -run 'Journey/install/day/plain-pfm$'
+# Prints the go test output as it comes and ends with `RUN DIR: {path}`; exits with the suite's status.
+# Every container, directory and artifact is named for this run, so two runs never collide. The
+# container goes on exit; the run dir goes on a pass, and stays on a failure or with --keep.
+# Kept across runs: the machine image (one: an older tag is removed when a new one is built) and the
+# volumes pfm-journey-gomod and pfm-journey-gocache.
+# BROKEN STATE: `journey: FAIL {stage}: {cause}` and a non-zero exit before the suite runs; a machine
+# that does not boot prints systemd's state and its failed units.
+set -euo pipefail
+HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+ROOT="$(cd -- "$HERE/../../.." && pwd -P)"
+# shellcheck source=scripts/platform.sh
+. "$ROOT/scripts/platform.sh"
+
+KEEP=0
+if [ "${1:-}" = --keep ]; then KEEP=1; shift; fi
+RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"
+RUN_DIR="/tmp/professor/journey/$RUN_ID"
+NAME="pfm-journey-$RUN_ID"
+BOOT_SECS=90
+fail() { echo "journey: FAIL $*" >&2; exit 1; }
+# stage prints how long the stage just finished took, from the previous mark.
+mark=$SECONDS
+stage() { echo "journey: $1 $((SECONDS - mark))s"; mark=$SECONDS; }
+
+cleanup() {
+  local rc=$?
+  docker rm -f "$NAME" "$NAME-fetch" >/dev/null 2>&1 || true
+  rm -rf "$RUN_DIR/image"
+  if [ "$rc" -eq 0 ] && [ "$KEEP" -eq 0 ]; then rm -rf "$RUN_DIR"; fi
+  echo "RUN DIR: $RUN_DIR"
+  exit "$rc"
+}
+mkdir -p "$RUN_DIR/image" "$RUN_DIR/artifacts" || fail "setup: cannot create $RUN_DIR"
+trap cleanup EXIT
+# The suite writes its artifacts as the owner (uid 1000), whoever runs this script.
+chmod 0777 "$RUN_DIR/artifacts"
+
+# 1. The machine image, tagged by a hash of everything it is built from.
+RUST_IMAGE="$(sed -n 's/^HELD_RUST_IMAGE=//p' "$ROOT/infra/fence/lanes/root.sh")"
+GO_VERSION="$(sed -n 's/^go //p' "$ROOT/pfm/go.mod")"
+GO_ARCH="$(platform_arch)"
+[ -n "$RUST_IMAGE" ] && [ -n "$GO_VERSION" ] && [ "$GO_ARCH" != unknown ] ||
+  fail "image: rust image '$RUST_IMAGE', go version '$GO_VERSION' or architecture '$GO_ARCH' unreadable"
+shield="$ROOT/plugins/herdr-shield"
+[ -f "$shield/Cargo.toml" ] || fail "image: herdr-shield source missing at $shield (check out the submodule)"
+cp "$HERE/machine.Dockerfile" "$ROOT/infra/fence/pinned-tools.sh" "$RUN_DIR/image/"
+mkdir "$RUN_DIR/image/herdr-shield"
+git -C "$shield" ls-files -z -co --exclude-standard -- . ':(exclude)target/**' ':(exclude)bin/**' |
+  (cd "$shield" && tar -cf - --null -T -) | (cd "$RUN_DIR/image/herdr-shield" && tar -xf -) ||
+  fail "image: cannot copy the herdr-shield source"
+hash="$(
+  cd "$RUN_DIR/image" &&
+    { printf '%s\n' "$RUST_IMAGE" "$GO_VERSION" "$GO_ARCH"; find . -type f | LC_ALL=C sort | while IFS= read -r f; do platform_sha256 "$f"; done; } |
+    platform_sha256 | cut -c1-16
+)" || fail "image: cannot hash the inputs"
+IMAGE="pfm-journey-machine:$hash"
+if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
+  echo "journey: building $IMAGE"
+  docker build -q -f "$RUN_DIR/image/machine.Dockerfile" --build-arg "RUST_IMAGE=$RUST_IMAGE" \
+    --build-arg "GO_VERSION=$GO_VERSION" --build-arg "GO_ARCH=$GO_ARCH" -t "$IMAGE" "$RUN_DIR/image" >/dev/null ||
+    fail "image: docker build of $IMAGE failed (above)"
+  docker images --format '{{.Repository}}:{{.Tag}}' pfm-journey-machine | { grep -vxF "$IMAGE" || true; } |
+    xargs -r docker rmi >/dev/null ||
+    echo "journey: warning: an older pfm-journey-machine image could not be removed (above); remove it once nothing uses it" >&2
+fi
+stage "image $IMAGE"
+
+# The tree under test, mounted read-only at its own path, with its git directory when it is a worktree.
+mounts=(-v "$ROOT:$ROOT:ro" -v pfm-journey-gomod:/home/tester/go/pkg/mod -v pfm-journey-gocache:/home/tester/.cache/go-build)
+common="$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir)" || fail "setup: $ROOT is not a git checkout"
+case "$common" in "$ROOT"/*) ;; *) mounts+=(-v "$common:$common:ro") ;; esac
+owner=(-u 1000:1000 -e HOME=/home/tester -e USER=tester -e LOGNAME=tester -e SHELL=/usr/bin/zsh -e LANG=C.UTF-8
+  -e PATH=/home/tester/.local/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin -e GOTOOLCHAIN=local)
+
+# 2. Go modules, with the network, into the kept module cache.
+docker run --rm --name "$NAME-fetch" "${mounts[@]}" "${owner[@]}" "$IMAGE" bash -c \
+  'go -C "$1/pfm" mod download && go -C "$1/plugins/engine-sync" mod download' _ "$ROOT" ||
+  fail "modules: go mod download failed (above)"
+stage modules
+
+# 3. The machine: systemd as PID 1, no network.
+docker run -d --name "$NAME" --hostname journey --network none \
+  --cgroupns=private --security-opt writable-cgroups=true --tmpfs /run --tmpfs /run/lock -e container=docker \
+  "${mounts[@]}" -v "$RUN_DIR/artifacts:/artifacts" "$IMAGE" >/dev/null || fail "boot: docker run failed (above)"
+deadline=$((SECONDS + BOOT_SECS))
+while :; do
+  read -r state user < <(docker exec "$NAME" bash -c \
+    's="$(systemctl is-system-running 2>/dev/null)" u="$(systemctl is-active user@1000.service 2>/dev/null)"
+    printf "%s %s\n" "${s:-unreachable}" "${u:-unknown}"' 2>/dev/null || echo "unreachable unknown")
+  [ "$state" = running ] && [ "$user" = active ] && break
+  if [ "$state" = degraded ] || [ "$SECONDS" -ge "$deadline" ]; then
+    docker exec "$NAME" systemctl --failed --no-legend 2>&1 | head -n 20 >&2 || true
+    fail "boot: systemd '$state', user@1000.service '$user' (bound ${BOOT_SECS}s)"
+  fi
+  sleep 0.5 # POLL-STEP: systemd's own state, bounded by BOOT_SECS
+done
+stage boot
+
+session=("${owner[@]}" -e XDG_RUNTIME_DIR=/run/user/1000 -e DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
+  -e PFM_DEV_FENCE=1 -e GOPROXY=off -w "$ROOT")
+
+# 4. The owner's machine: fake engines, Herdr and herdr-shield, the snapshot INSTALL.md clones.
+docker exec "${session[@]}" -e HERDR_SHIELD_BIN=/usr/local/libexec/journey/herdr-shield "$NAME" \
+  bash "$HERE/prepare.sh" "$ROOT" || fail "prepare: prepare.sh failed (above)"
+stage prepare
+
+# 5. The suite, as the owner.
+rc=0
+docker exec "${session[@]}" -e JOURNEY_ARTIFACTS=/artifacts "$NAME" \
+  go -C "$ROOT/pfm" test -tags journey -count=1 -v -timeout 20m ./journey/ "$@" || rc=$?
+stage suite
+exit "$rc"

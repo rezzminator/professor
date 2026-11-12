@@ -616,9 +616,17 @@ func (installer *engine) uninstall(ctx context.Context) error {
 	}
 	managerAvailable := installer.options.jobScheduler().managerAvailable(ctx, installer)
 	if managerAvailable && installer.apply {
-		installer.runSystemctl(
-			ctx, "disable", "--now", nameSyncPathUnit, nameSyncTimerUnit, scheduleTimerUnit, mcpUnitName,
-		)
+		// systemctl disables none of the units it is named when one has no unit file, and the chat
+		// MCP unit exists only where the chat server is enabled. The units stop before they are
+		// disabled: disabling a linked timer reloads the manager while it still runs, it loses its
+		// service and stays failed.
+		units := []string{nameSyncPathUnit, nameSyncTimerUnit, scheduleTimerUnit}
+		mcpUnit := filepath.Join(paths.SystemdUserDir(installer.options.Home), mcpUnitName)
+		if _, err := os.Lstat(mcpUnit); err == nil {
+			units = append(units, mcpUnitName)
+		}
+		installer.runSystemctl(ctx, append([]string{"stop"}, units...)...)
+		installer.runSystemctl(ctx, append([]string{"disable"}, units...)...)
 	}
 	if _, err := installer.retireUnitEnablements(
 		paths.SystemdUserDir(installer.options.Home),

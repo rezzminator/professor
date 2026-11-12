@@ -1,4 +1,5 @@
 http:internal/usagehook/hook.go 1
 proc:internal/deps/registry.go 1
 proc:internal/statusline/process.go 1
+proc:journey/harness/session.go 1
 sql:internal/heal/heal.go 1

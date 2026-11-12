@@ -30,6 +30,11 @@ func admitted(env paths.Env, marker string) bool {
 	return inFence || onHostedRunner
 }
 
+// Disposable reports whether this process runs on a machine a suite may treat as throwaway, by
+// admitted's rule. The journey suite drives the owner's real paths with no jail: it starts only where
+// this holds and refuses everywhere else.
+func Disposable() bool { return admitted(paths.OSEnv{}, fenceMarker) }
+
 // hostPathFlags name files on the starting machine, which the fence cannot see.
 var hostPathFlags = []string{
 	"-test.testlogfile", "-test.gocoverdir", "-test.coverprofile", "-test.outputdir",

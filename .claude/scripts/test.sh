@@ -13,6 +13,9 @@
 #                             ::selector byte for byte, else every Test and Fuzz func of the file
 #                             (TestMain excluded); a test file with none runs its whole package
 #   pfm/**/*.go               go test -v of its whole package
+#   pfm/journey/*.go          go vet -tags journey of pfm/journey/... for Linux and GOOS=darwin, no
+#                             selector, never a go test: the suite runs only on its own disposable
+#                             machine (infra/fence/journey/run.sh); pfm/journey/harness/ tests as any package
 #   pfm/scripts/*_test.sh     bash; pfm/scripts/x.sh brings pfm/scripts/x_test.sh when it exists
 #   *.test.mjs                node --test (TAP); ::selector is --test-name-pattern; x.mjs brings x.test.mjs
 #   *_test.py                 importing unittest: python3 -m unittest, its own directory as PYTHONPATH
@@ -289,6 +292,10 @@ go_affected() { # go_affected <go test arg>...: go test -v of pfm under the fenc
   [ -z "${PFM_FENCE_AFFECTED_PARALLEL:-}" ] || flags+=(-parallel "$PFM_FENCE_AFFECTED_PARALLEL")
   go -C pfm test -v "${flags[@]}" "$@"
 }
+go_journey_vet() { # the journey suite compiled under its tag for Linux and macOS; the fence has no
+  # systemd, so it never runs here
+  go -C pfm vet -tags journey ./journey/... && GOOS=darwin go -C pfm vet -tags journey ./journey/...
+}
 
 fence_half() {
   local units="$1" n="$2" inv i files f has_md=0 has_go=0 missing="" tool inst_out inst_rc=0 knob
@@ -408,7 +415,12 @@ go_pkg_inv() { # go_pkg_inv <label> <pfm-relative dir> [-run selector]: one go t
   [ -n "$pfm_module" ] || { echo "test.sh: pfm/go.mod names no module" >&2; exit 2; }
   pkg="./"; [ -z "$dir" ] || pkg="./$dir/"
   pkgpath="$pfm_module"; [ -z "$dir" ] || pkgpath="$pfm_module/$dir"
-  case "$dir" in e2e | e2e/*) tags=(-tags e2e) ;; esac
+  case "$dir" in
+    e2e | e2e/*) tags=(-tags e2e) ;;
+    journey)
+      case "$label" in *::*) echo "test.sh: $label: the journey suite takes no selector (it is only vetted)" >&2; usage ;; esac
+      add_inv t_sh "$label" go_journey_vet; return ;;
+  esac
   add_inv t_go "$label" "$pkgpath" go_affected ${tags[@]+"${tags[@]}"} "$pkg" "$@"
 }
 sut_rows() { # sut_rows <test file>: the scripts a SUT-taking test runs against, one per line

@@ -70,9 +70,9 @@ Where Vocabulary, Runtime or On demand disagrees with the code on a path, comman
 
 ## CI
 
-- `.github/workflows/ci.yml` runs on a pull request into `main` and on `workflow_dispatch` (below): `gate ({unit|e2e|race|mirrors|rest})`, the fence gate's step list sliced by `PFM_GATE_ONLY`/`PFM_GATE_SKIP` and run natively on the runner; `macos ({unit|e2e})`; `fresh-install ({ubuntu-latest|macos-15})`; `build`; `scan` (the HOL plugin scan, then every plugin's workflow shape, `scripts/check-plugin-workflows.py`); `release` (`make release`).
+- `.github/workflows/ci.yml` runs on a pull request into `main` and on `workflow_dispatch` (below): `gate ({unit|e2e|race|mirrors|rest})`, the fence gate's step list sliced by `PFM_GATE_ONLY`/`PFM_GATE_SKIP` and run natively on the runner; `macos ({unit|e2e})`; `journey ({linux|macos})`, pfm's end-to-end suite; `fresh-install ({ubuntu-latest|macos-15})`; `build`; `scan` (the HOL plugin scan, then every plugin's workflow shape, `scripts/check-plugin-workflows.py`); `release` (`make release`).
 - Its `ci` job fails unless every other job succeeded and is `main`'s only required status check: no release merges or publishes until it is green.
-- `ci.yml` also runs on `workflow_dispatch` from any branch: `gh workflow run ci.yml --ref {branch} -f exclude='{jobs}'` skips the named jobs (macOS alone: `gate fresh-install build scan release`); no workflow runs on a push.
+- `ci.yml` also runs on `workflow_dispatch` from any branch: `gh workflow run ci.yml --ref {branch} -f exclude='{jobs}'` skips the named jobs (macOS alone: `gate journey fresh-install build scan release`); no workflow runs on a push.
 - `.github/workflows/publish.yml` runs only when a pull request into `main` closes: on a merge, `publish` tags `v{VERSION}` on the merge commit and creates the GitHub release, and `verify` checks the published assets against `SHA256SUMS`, the binary's version and the note.
 
 ## Host

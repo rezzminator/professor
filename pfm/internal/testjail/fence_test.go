@@ -26,7 +26,7 @@ func TestFenceArgsDropHostPathFlags(t *testing.T) {
 // fence and the exported store is never opened here.
 func TestGateAdmitsOnlyTheFence(t *testing.T) {
 	// This binary only runs where the gate let it in.
-	if !admitted(paths.OSEnv{}, fenceMarker) {
+	if !Disposable() {
 		t.Fatal("a test ran outside the fence and off a hosted runner: the gate failed")
 	}
 	present := filepath.Join(t.TempDir(), "dockerenv")

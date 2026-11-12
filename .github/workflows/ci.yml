@@ -6,7 +6,7 @@ name: ci
 # jobs run the local gate's own step list (infra/fence/checks.sh gate_run),
 # one slice per job, directly on the runner; publish.yml runs on the merge.
 # Started by hand on any branch, it skips the jobs `exclude` names:
-#   gh workflow run ci.yml --ref develop -f exclude='gate fresh-install build scan release'
+#   gh workflow run ci.yml --ref develop -f exclude='gate journey fresh-install build scan release'
 # The rule: .claude/rules/ci-workflows.md.
 on:
   pull_request:
@@ -14,7 +14,7 @@ on:
   workflow_dispatch:
     inputs:
       exclude:
-        description: "Jobs to skip, space- or comma-separated: gate, macos, fresh-install, build, scan, release"
+        description: "Jobs to skip, space- or comma-separated: gate, macos, journey, fresh-install, build, scan, release"
         required: false
         default: ""
 
@@ -166,6 +166,61 @@ jobs:
         with:
           part: ${{ matrix.part }}
 
+  # pfm's journey suite (pfm/journey): the owner's path through a real terminal, on a machine it may
+  # spend. Linux boots the journey machine (infra/fence/journey/run.sh, systemd in a container, no
+  # network); macOS has no such machine, so the runner itself is the machine.
+  journey:
+    name: journey (${{ matrix.os }})
+    needs: plan
+    if: ${{ !contains(fromJSON(needs.plan.outputs.exclude), 'journey') }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: linux
+            runner: ubuntu-latest
+          - os: macos
+            runner: macos-15
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          submodules: true
+
+      - name: Run the suite on the journey machine
+        if: matrix.os == 'linux'
+        run: bash infra/fence/journey/run.sh
+
+      - name: Set up Go
+        if: matrix.os == 'macos'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: pfm/go.mod
+          cache-dependency-path: pfm/go.sum
+
+      - name: Install tmux, Herdr and herdr-shield
+        if: matrix.os == 'macos'
+        run: |
+          set -euo pipefail
+          brew install tmux
+          bash infra/fence/pinned-tools.sh "$RUNNER_TEMP/pinned" herdr
+          echo "$RUNNER_TEMP/pinned/bin" >> "$GITHUB_PATH"
+          cargo build --release --locked --manifest-path plugins/herdr-shield/Cargo.toml
+
+      # /bin/bash is the system Bash 3.2 on macOS, as on a user's Mac.
+      - name: Prepare the owner and run the suite
+        if: matrix.os == 'macos'
+        env:
+          HERDR_SHIELD_BIN: ${{ github.workspace }}/plugins/herdr-shield/target/release/herdr-shield
+          JOURNEY_ARTIFACTS: ${{ runner.temp }}/journey
+        run: |
+          set -euo pipefail
+          /bin/bash infra/fence/journey/prepare.sh "$GITHUB_WORKSPACE"
+          export PATH="$HOME/.local/bin:$PATH"
+          go -C pfm test -tags journey -count=1 -v -timeout 20m ./journey/
+
   fresh-install:
     name: fresh-install (${{ matrix.os }})
     needs: plan
@@ -316,7 +371,7 @@ jobs:
   # job it needs succeeded.
   ci:
     name: ci
-    needs: [plan, gate, macos, fresh-install, build, scan, release]
+    needs: [plan, gate, macos, journey, fresh-install, build, scan, release]
     if: always()
     runs-on: ubuntu-latest
     steps:

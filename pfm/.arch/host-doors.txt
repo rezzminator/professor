@@ -14,3 +14,4 @@ internal/statusline/runtime.go 2
 internal/testjail/profile.go 3
 internal/testjail/testjail.go 2
 internal/ui/model.go 2
+journey/harness/session.go 1

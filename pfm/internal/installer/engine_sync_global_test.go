@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -476,13 +475,19 @@ func TestWireEngineSyncGlobalUninstallFaultPreviewSkipsAndApplyDefers(t *testing
 	}
 }
 
+// unitTeardown is the systemd scheduler's uninstall: its units stop, then are disabled.
+const unitTeardown = "systemctl --user stop pfm-name-sync.path " + nameSyncTimerUnit + " " + scheduleTimerUnit +
+	"\nsystemctl --user disable pfm-name-sync.path " + nameSyncTimerUnit + " " + scheduleTimerUnit
+
 // A faulty engine-sync on a whole uninstall run: the preflight lets it
 // through, every unwire step runs, and the run's error names the fault. The
-// scheduler teardown is its kind's: systemd disables the units, launchd boots
-// the agents out and drives no systemctl at all.
+// scheduler teardown is its kind's: systemd stops the units, then disables
+// them, launchd boots the agents out and drives no systemctl at all. The chat
+// MCP unit, never installed here, is not named: systemctl disables nothing when
+// one named unit has no file, which left an uninstalled host's timers running;
+// a timer disabled while it runs loses its service and stays failed.
 func TestUninstallEngineSyncFaultIsNotAPreflightRefusal(t *testing.T) {
-	disable := "systemctl --user disable --now pfm-name-sync.path " + nameSyncTimerUnit + " " +
-		scheduleTimerUnit + " " + mcpUnitName
+	disable := unitTeardown
 	bootout := "launchctl bootout gui/" + strconv.Itoa(os.Getuid()) + "/" + launchdLabel
 	for _, test := range []struct {
 		kind     servicemanager.Kind
@@ -520,7 +525,7 @@ func TestUninstallEngineSyncFaultIsNotAPreflightRefusal(t *testing.T) {
 				t.Fatalf("uninstall left %s after the engine-sync fault: %v", globalFile, statErr)
 			}
 			joined := strings.Join(runner.calls, "\n")
-			if !slices.Contains(runner.calls, test.teardown) {
+			if !strings.Contains(joined, test.teardown) {
 				t.Fatalf(
 					"the %s teardown %q did not run after the engine-sync fault:\n%s",
 					test.kind,
@@ -615,7 +620,7 @@ func TestUninstallWithoutEngineSyncStillTearsDownEverythingPfmOwns(t *testing.T)
 	if _, statErr := os.Lstat(globalFile); statErr != nil {
 		t.Fatalf("uninstall removed %s though engine-sync was absent: %v", globalFile, statErr)
 	}
-	teardown := "systemctl --user disable --now"
+	teardown := unitTeardown
 	if joined := strings.Join(runner.calls, "\n"); !strings.Contains(joined, teardown) {
 		t.Fatalf(
 			"the unit teardown (%q) did not run after the engine-sync step:\n%s\n%s",
@@ -670,7 +675,7 @@ func TestUninstallEngineSyncFailureStillUnwiresTheSchedulerAndTargets(t *testing
 	if _, statErr := os.Lstat(globalFile); !errors.Is(statErr, fs.ErrNotExist) {
 		t.Fatalf("uninstall left %s after the engine-sync failure: %v", globalFile, statErr)
 	}
-	teardown := "systemctl --user disable --now"
+	teardown := unitTeardown
 	if joined := strings.Join(runner.calls, "\n"); !strings.Contains(joined, teardown) {
 		t.Fatalf("the unit teardown (%q) did not run after the engine-sync failure:\n%s\n%s",
 			teardown, joined, output.String())

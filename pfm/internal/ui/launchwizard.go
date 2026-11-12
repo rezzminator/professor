@@ -12,7 +12,6 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
-	"github.com/rezzminator/professor/pfm/internal/spawn"
 )
 
 // The new-chat wizard. ⏎ on a ✦ row walks the choices of a new chat inside that
@@ -296,10 +295,11 @@ func (model Model) beginWizard(row compose.Row) (tea.Model, tea.Cmd) {
 }
 
 // selectRow is ⏎ on a chat row's open action. A resumable chat opens its
-// resume steps when they ask anything; every other row is selected as it is.
-// A native seat's row revives its own recipe in place, so it asks nothing.
+// resume steps when they ask anything, a native seat whose seat is gone
+// (lost, failed, ended: compose.SeatKindFor) as a tmux chat does; every other
+// row, a live native seat among them, is selected as it is.
 func (model Model) selectRow(row compose.Row) (tea.Model, tea.Cmd) {
-	if row.Kind.IsResumable() && row.Backend != spawn.BackendHerdr {
+	if row.Kind.IsResumable() {
 		engine := compose.EngineForKind(row.Kind)
 		if _, asks := model.wizardNext(row, 0, engine); asks {
 			return model.beginResumeWizard(row, engine)

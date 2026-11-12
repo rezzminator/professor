@@ -2,6 +2,7 @@ package kill
 
 import (
 	"context"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +16,7 @@ func TestHerdrGhostKillRequiresDeadSavedHost(t *testing.T) {
 		"missing", "reused", "session", "unbound", "unreadable", "mismatch", "live-unowned",
 		"unbound-retired", "unbound-retired-session", "unbound-retired-nopane",
 		"unbound-supervisor-nopane", "unbound-probe-error-nopane", "unbound-live-nopane",
+		"vanished-unbound", "vanished-unbound-supervisor", "vanished-live-host", "refused-unbound",
 	} {
 		t.Run(mode, func(t *testing.T) {
 			jail := newKillJail(t)
@@ -28,8 +30,36 @@ func TestHerdrGhostKillRequiresDeadSavedHost(t *testing.T) {
 				PaneID:     "w9:p9",
 			}
 			wantHide := mode == "missing" || mode == "reused" || mode == "session" ||
-				mode == "unbound-retired" || mode == "unbound-retired-session" || mode == "unbound-retired-nopane"
+				mode == "unbound-retired" || mode == "unbound-retired-session" || mode == "unbound-retired-nopane" ||
+				mode == "vanished-unbound"
 			switch mode {
+			case "vanished-unbound", "vanished-unbound-supervisor", "vanished-live-host", "refused-unbound":
+				// Herdr restarted: the seat's socket file is gone (or, refused-unbound, still
+				// there with nothing listening). The CLI door: `pfm chat kill seat:{id}`.
+				seat.HerdrSocket = filepath.Join(filepath.Dir(server.socket), "gone", "herdr-api.sock")
+				if mode == "refused-unbound" {
+					seat.HerdrSocket = filepath.Join(filepath.Dir(server.socket), "stale.sock")
+					listener, err := net.Listen("unix", seat.HerdrSocket)
+					if err != nil {
+						t.Fatal(err)
+					}
+					listener.(*net.UnixListener).SetUnlinkOnClose(false)
+					if err := listener.Close(); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if mode != "vanished-live-host" {
+					seat.SeatHostPID, seat.SeatHostStart = 0, 0
+				}
+				if mode != "vanished-unbound-supervisor" && mode != "vanished-live-host" {
+					if err := os.RemoveAll(filepath.Join(server.proc, "90")); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if err := database.Shared().PutSeat(context.Background(), seat); err != nil {
+					t.Fatal(err)
+				}
+				request = Request{ID: seat.SeatID, Engine: pfmengine.ID(seat.Engine), SocketName: seat.HerdrSocket}
 			case "missing", "session", "mismatch":
 				if err := os.RemoveAll(filepath.Join(server.proc, "90")); err != nil {
 					t.Fatal(err)

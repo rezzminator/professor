@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -254,6 +255,16 @@ func TestPickerNativeDiscoveryFailures(t *testing.T) {
 						t.Error(err)
 					}
 				})
+				// A socket file nothing listens on: Herdr cannot be read, never proved gone.
+				dead := filepath.Join(values.Home, "dead.sock")
+				listener, err := net.Listen("unix", dead)
+				if err != nil {
+					t.Fatal(err)
+				}
+				listener.(*net.UnixListener).SetUnlinkOnClose(false)
+				if err := listener.Close(); err != nil {
+					t.Fatal(err)
+				}
 				if err := state.PutSeat(ctx, fleetdb.Seat{
 					SeatID:      "native-failure",
 					SessionID:   "native-sid",
@@ -262,7 +273,7 @@ func TestPickerNativeDiscoveryFailures(t *testing.T) {
 					State:       stateName,
 					Name:        "NATIVE",
 					HerdrPane:   "w1:p1",
-					HerdrSocket: filepath.Join(values.Home, "dead.sock"),
+					HerdrSocket: dead,
 				}); err != nil {
 					t.Fatal(err)
 				}

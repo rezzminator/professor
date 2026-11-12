@@ -20,12 +20,21 @@ const herdrBirthGrace = 2 * time.Minute
 // herdrSeatLive is the one durable state a scan may retire.
 const herdrSeatLive = "live"
 
+// herdrSeatLost is the state of a seat whose chat died with no end: its resume recipe is kept.
+const herdrSeatLost = "lost"
+
 // retireDeadHerdrSeat writes the lost state pfm's restart retire writes, through
 // UpdateSeat's compare-and-set on the row the proof read: a concurrent bind,
 // restore or end changes that row and refuses this write. Only a live row
 // retires; a seat with an end or reload in flight belongs to that lifecycle,
 // and a reservation still inside its birth window has not yet had a pane to die in.
-func retireDeadHerdrSeat(ctx context.Context, db *fleetdb.Store, seat fleetdb.Seat) (fleetdb.Seat, error) {
+// reason says how the death was proved (herdrHostExited, herdrSocketGone).
+func retireDeadHerdrSeat(
+	ctx context.Context,
+	db *fleetdb.Store,
+	seat fleetdb.Seat,
+	reason string,
+) (fleetdb.Seat, error) {
 	if seat.State != herdrSeatLive || seat.EndPending || seat.ReloadPending {
 		return seat, nil
 	}
@@ -33,8 +42,8 @@ func retireDeadHerdrSeat(ctx context.Context, db *fleetdb.Store, seat fleetdb.Se
 		return seat, nil
 	}
 	before := seat
-	seat.State = "lost"
-	seat.LostNote = "retired by pfm scan: saved supervisor exited; resume recipe retained"
+	seat.State = herdrSeatLost
+	seat.LostNote = "retired by pfm scan: " + reason + "; resume recipe retained"
 	if err := db.UpdateSeat(ctx, before, seat); err != nil {
 		return before, fmt.Errorf("retire dead seat %s: %w", seat.SeatID, err)
 	}
@@ -145,41 +154,6 @@ func currentHerdrSeat(ctx context.Context, db *fleetdb.Store, seat fleetdb.Seat)
 	return current, nil
 }
 
-// unansweredHerdrSeat judges a live seat whose Herdr socket did not answer
-// from what needs no socket: its current row and its saved supervisor. Dead is
-// that supervisor's positive death; a seat with no saved birth is never dead.
-func unansweredHerdrSeat(
-	ctx context.Context,
-	db *fleetdb.Store,
-	proc ProcFS,
-	seat fleetdb.Seat,
-) (fleetdb.Seat, bool, error) {
-	current, err := currentHerdrSeat(ctx, db, seat)
-	if err != nil {
-		return seat, false, err
-	}
-	if current.SeatHostPID <= 0 || current.SeatHostStart == 0 {
-		return current, false, nil
-	}
-	dead, err := HerdrHostDead(proc, current)
-	return current, dead, err
-}
-
-// listDeadHerdrSeat lists a positively dead seat as lost, never live and never
-// the recycled pane's occupant. A writable listing retires the durable row
-// once, so later scans never probe it again.
-func listDeadHerdrSeat(ctx context.Context, db *fleetdb.Store, row *HerdrSeat, canonical fleetdb.Seat, readOnly bool) {
-	row.Err = fmt.Errorf("HERDR DEAD %s: saved supervisor exited", row.Seat.SeatID)
-	if !readOnly {
-		retired, retireErr := retireDeadHerdrSeat(ctx, db, canonical)
-		row.Err = errors.Join(row.Err, retireErr)
-		if retireErr == nil {
-			row.Seat = retired
-		}
-	}
-	row.Seat.State = "lost"
-}
-
 // settleHerdrProof proves seat and judges a failed proof against the seat's row as it stands after it: a
 // row deleted or taken by another engine is errHerdrSeatGone, never the listing's failure; a row a
 // concurrent writer changed (a birth stamping its supervisor, an end recording its intent) made the proof
@@ -213,7 +187,7 @@ func listClosedHerdrSeat(row *HerdrSeat, canonical fleetdb.Seat) {
 	row.Err = fmt.Errorf(
 		"HERDR DEAD %s: pane closed; saved supervisor %d has not exited", canonical.SeatID, canonical.SeatHostPID,
 	)
-	row.Seat.State = "lost"
+	row.Seat.State = herdrSeatLost
 }
 
 // settleHerdrRow settles row's proof against its snapshot and, when the two disagree on the seat's pane,

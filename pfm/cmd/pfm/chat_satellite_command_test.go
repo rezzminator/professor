@@ -779,6 +779,16 @@ func TestChatLSNativeUnreachableIsVisibleAndNonzero(t *testing.T) {
 			t.Error(err)
 		}
 	}()
+	// A socket file nothing listens on: Herdr cannot be read, never proved gone.
+	dead := filepath.Join(t.TempDir(), "dead.sock")
+	listener, err := net.Listen("unix", dead)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener.(*net.UnixListener).SetUnlinkOnClose(false)
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
 	if err := state.PutSeat(
 		context.Background(),
 		fleetdb.Seat{
@@ -789,7 +799,7 @@ func TestChatLSNativeUnreachableIsVisibleAndNonzero(t *testing.T) {
 			State:          "live",
 			Name:           "OFFLINE",
 			LostNote:       "your last message was not answered — re-send it",
-			HerdrSocket:    filepath.Join(t.TempDir(), "dead.sock"),
+			HerdrSocket:    dead,
 			HerdrPane:      "w6:p3",
 			HerdrWorkspace: "w6",
 		},

@@ -279,6 +279,9 @@ func openNativeRow(
 			// On a terminal an in-place revive and a tmux attach exec and never
 			// return, so the unseen flag clears before the revive.
 			markSchedulesSeen(ctx, runtime.Paths, &row, stderr)
+			if resumeChosen(ctx) {
+				return true, resumeNativeUnder(ctx, runtime, seat, row.Account, primary, cache1H, stdout, stderr)
+			}
 			result, err := reviveNative(ctx, runtime, seat, false, stdout, stderr)
 			launchnotice.Print(stderr, "pfm chat open", result.Warnings)
 			if err != nil {

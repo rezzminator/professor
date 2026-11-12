@@ -849,6 +849,16 @@ func TestSeatHostCloseFailureKeepsOwnerAndRecipe(t *testing.T) {
 			_ = conn.Close()
 		}
 	}()
+	// A crashed Herdr server's socket file, nothing listening: the end cannot be proved.
+	crashed := filepath.Join(t.TempDir(), "crashed.sock")
+	crashedListener, err := net.Listen("unix", crashed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	crashedListener.(*net.UnixListener).SetUnlinkOnClose(false)
+	if err := crashedListener.Close(); err != nil {
+		t.Fatal(err)
+	}
 	for _, tc := range []struct {
 		name       string
 		socket     string
@@ -856,10 +866,10 @@ func TestSeatHostCloseFailureKeepsOwnerAndRecipe(t *testing.T) {
 		wantStderr string
 	}{
 		{
-			"no Herdr server", "/fixture/missing.sock", 1,
+			"no Herdr server", crashed, 1,
 			"pfm internal seat-host: schedule ended seat: prove native end: prove seat pending-close pane.list: " +
-				"herdr socket /fixture/missing.sock: dial for pane.list pfm-seat: " +
-				"dial unix /fixture/missing.sock: connect: no such file or directory\n",
+				"herdr socket " + crashed + ": dial for pane.list pfm-seat: " +
+				"dial unix " + crashed + ": connect: connection refused\n",
 		},
 		{"Herdr shutting down", stopping, 129, ""},
 	} {

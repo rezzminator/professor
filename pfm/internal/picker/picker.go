@@ -295,6 +295,7 @@ func Run(
 		}
 		var primary int
 		selectedRow, primary, cache1H = resumeUnder(selectedRow, outcome, cache1H)
+		ctx = pfmchat.WithResumeChoice(ctx, outcome.Resume != nil)
 		return openAndRemember(ctx, sharedState, outcome, stderr, func() int {
 			return pfmchat.OpenRow(
 				ctx,

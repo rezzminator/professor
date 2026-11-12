@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -85,6 +86,40 @@ func TestServerStoppingReadsOnlyAShutdownRefusal(t *testing.T) {
 		if err == nil || ServerStopping(err) != tc.want {
 			t.Errorf("%s: Send = %v, ServerStopping = %t, want an error and %t",
 				tc.name, err, ServerStopping(err), tc.want)
+		}
+	}
+}
+
+func TestSocketFileGoneReadsOnlyAMissingSocketFile(t *testing.T) {
+	stale := filepath.Join(t.TempDir(), "stale.sock")
+	listener, err := net.Listen("unix", stale)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener.(*net.UnixListener).SetUnlinkOnClose(false)
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	refusing := serve(t, func(string) string { return `{"id":"x","error":{"code":"pane_not_found","message":"no"}}` })
+	for _, tc := range []struct {
+		name   string
+		socket string
+		want   bool
+	}{
+		{"no socket file", filepath.Join(t.TempDir(), "absent.sock"), true},
+		{"no socket directory", filepath.Join(t.TempDir(), "gone", "herdr-api.sock"), true},
+		{"a socket file nothing listens on", stale, false},
+		{"a server that refuses the request", refusing, false},
+	} {
+		err := Send(context.Background(), tc.socket, []byte("x"))
+		if err == nil || SocketFileGone(err) != tc.want {
+			t.Errorf(
+				"%s: Send = %v, SocketFileGone = %t, want an error and %t",
+				tc.name,
+				err,
+				SocketFileGone(err),
+				tc.want,
+			)
 		}
 	}
 }

@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"strings"
+	"syscall"
 )
 
 // PaneGone reports whether err is Herdr refusing a pane id it does not know
@@ -13,6 +15,15 @@ import (
 func PaneGone(err error) bool {
 	var refusal *Refusal
 	return errors.As(err, &refusal) && (refusal.Code == paneNotFound || refusal.Code == "not_found")
+}
+
+// SocketFileGone is the narrower SocketGone: a dial that found no socket file
+// at its path (ENOENT), so no Herdr server can listen there any more. A
+// refused connection, a timeout or any answer may be a server that still runs.
+func SocketFileGone(err error) bool {
+	var notSent *InputNotSentError
+	var dial *net.OpError
+	return errors.As(err, &notSent) && errors.As(err, &dial) && dial.Op == "dial" && errors.Is(err, syscall.ENOENT)
 }
 
 // ServerStopping reports whether err is Herdr refusing a request because its

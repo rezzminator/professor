@@ -382,8 +382,10 @@ func TestResumeWalkPaths(t *testing.T) {
 	codex := compose.Row{Kind: compose.ResumeCodex, ID: "resume-codex", Name: "port", Project: "p", CWD: "/p"}
 	live := claude
 	live.Kind = compose.LiveClaude
-	native := claude
+	native := live
 	native.Backend = spawn.BackendHerdr
+	nativeGone := claude
+	nativeGone.Backend = spawn.BackendHerdr
 	for _, test := range []struct {
 		name  string
 		row   compose.Row
@@ -425,8 +427,13 @@ func TestResumeWalkPaths(t *testing.T) {
 			row:  live, keys: []string{"enter"},
 		},
 		{
-			name: "a native seat's row revives its own recipe at once",
+			name: "a live native seat's row opens at once",
 			row:  native, keys: []string{"enter"},
+		},
+		{
+			name: "a native seat that is gone walks the resume steps",
+			row:  nativeGone, keys: []string{"enter", "right", "enter", "right", "enter"},
+			want: &ResumeChoice{Account: 1, Cache1H: false},
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {

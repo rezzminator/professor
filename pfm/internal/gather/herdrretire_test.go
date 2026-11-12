@@ -248,7 +248,7 @@ func TestRetireDeadHerdrSeatWindowAndState(t *testing.T) {
 			if err := db.PutSeat(ctx, seat); err != nil {
 				t.Fatal(err)
 			}
-			got, err := retireDeadHerdrSeat(ctx, db, seat)
+			got, err := retireDeadHerdrSeat(ctx, db, seat, herdrHostExited)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -417,7 +417,8 @@ func TestProvedListingRetiresDeadSeatOnly(t *testing.T) {
 			}
 			healthy, dead, unknown := rows[0], rows[1], rows[2]
 			stoppedDead, stoppedAlive := rows[3], rows[4]
-			if want := "HERDR DEAD stopped-dead: saved supervisor exited"; stoppedDead.Err == nil ||
+			goneNote := "Herdr socket " + stopped + " is gone and the seat's supervisor with it"
+			if want := "HERDR DEAD stopped-dead: " + goneNote; stoppedDead.Err == nil ||
 				stoppedDead.Err.Error() != want || stoppedDead.Seat.State != "lost" {
 				t.Fatalf("seat whose Herdr server and supervisor are gone = %+v, want lost with %q", stoppedDead, want)
 			}
@@ -449,8 +450,10 @@ func TestProvedListingRetiresDeadSeatOnly(t *testing.T) {
 				state, note := "live", ""
 				switch {
 				case readOnly:
-				case want.SeatID == "dead" || want.SeatID == "stopped-dead":
+				case want.SeatID == "dead":
 					state, note = "lost", retireLostNote
+				case want.SeatID == "stopped-dead":
+					state, note = "lost", "retired by pfm scan: "+goneNote+"; resume recipe retained"
 				case want.SeatID == "stale-reserved":
 					state, note = "failed", failedBirthNote
 				}

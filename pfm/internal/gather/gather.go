@@ -1,5 +1,6 @@
 // Package gather probes live tmux and process state without indexing files.
 // A native Herdr seat's pane is the one holding its saved terminal (herdrpanes.go).
+// A seat is judged dead, its supervisor exited or its Herdr socket file gone, in herdrgone.go.
 package gather
 
 import (

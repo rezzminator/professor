@@ -45,6 +45,16 @@ func TestNativeSeatsAcrossFleetViews(t *testing.T) {
 						t.Error(err)
 					}
 				})
+				// A socket file nothing listens on: Herdr cannot be read, never proved gone.
+				dead := filepath.Join(values.Home, "dead.sock")
+				listener, err := net.Listen("unix", dead)
+				if err != nil {
+					t.Fatal(err)
+				}
+				listener.(*net.UnixListener).SetUnlinkOnClose(false)
+				if err := listener.Close(); err != nil {
+					t.Fatal(err)
+				}
 				for _, item := range []struct{ id, name, state string }{
 					{"live", "REVIEW", "live"},
 					{"hidden", "_KILL_hidden", "live"},
@@ -60,7 +70,7 @@ func TestNativeSeatsAcrossFleetViews(t *testing.T) {
 							Backend:     "herdr",
 							State:       item.state,
 							Name:        item.name,
-							HerdrSocket: filepath.Join(values.Home, "dead.sock"),
+							HerdrSocket: dead,
 							HerdrPane:   "w6:" + item.id,
 							LostNote:    "engine exited",
 						},
@@ -474,7 +484,7 @@ func TestNativeDeadSeatDoesNotFailListing(t *testing.T) {
 					}
 				}
 				healthy, dead := got["healthy"], got["dead"]
-				if want := "HERDR DEAD stopped: saved supervisor exited"; got["stopped"].Kind != compose.ResumeClaude ||
+				if want := "HERDR DEAD stopped: Herdr socket " + stopped + " is gone and the seat's supervisor with it"; got["stopped"].Kind != compose.ResumeClaude ||
 					got["stopped"].BackendError != want {
 					t.Fatalf("seat of a stopped Herdr server = %+v, want resumable with %q", got["stopped"], want)
 				}

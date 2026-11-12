@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -87,5 +88,32 @@ func TestAFailedWaitPrintsTheWholeScreen(t *testing.T) {
 	i := strings.Index(out, "root: terminal sh:")
 	if !failed || i < 0 || !strings.HasPrefix(out[i:], want) {
 		t.Fatalf("failed=%v, want the miss with its whole screen:\n%s\ngot:\n%s", failed, want, out)
+	}
+}
+
+func TestCleanupRunsWhenTheSubtreeEndsBeforeItsTerminalsClose(t *testing.T) {
+	out, failed, parent := inChild(t, func(t *testing.T) {
+		Run(t, Do("root", nil,
+			Do("owner", func(c *Ctx, in int) int {
+				term := c.Terminal("sh")
+				term.WaitFor("READY$")
+				c.Cleanup(func() {
+					term.Type("echo torn-$((40+2))\r")
+					term.WaitFor("torn-42")
+					fmt.Println("TEARDOWN with its terminal open")
+				})
+				return in
+			}, Do("bad", func(c *Ctx, in int) int { fmt.Println("STEP bad"); c.Failf("broken"); return in })),
+			Do("after", func(_ *Ctx, in int) int { fmt.Println("STEP after"); return in }),
+		), 0, bashHooks(t))
+	})
+	if !parent {
+		return
+	}
+	bad, torn, after := strings.Index(out, "STEP bad"), strings.Index(out, "TEARDOWN with its terminal open"),
+		strings.Index(out, "STEP after")
+	if !failed || bad < 0 || torn < bad || after < torn || strings.Count(out, "TEARDOWN") != 1 {
+		t.Fatalf("failed=%v, STEP bad at %d, TEARDOWN at %d (want once, after it), STEP after at %d (want last):\n%s",
+			failed, bad, torn, after, out)
 	}
 }

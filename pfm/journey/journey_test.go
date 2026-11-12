@@ -10,13 +10,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 	"github.com/rezzminator/professor/pfm/journey/harness"
 )
 
-// budget bounds the whole tree, first step start to last step end.
-const budget = 180 * time.Second
+// budget bounds the whole tree, first step start to last step end: phase 2's cap, until the whole
+// phase-2 tree is measured.
+const budget = 600 * time.Second
 
 // ownerVars is everything a fresh login of the owner has; no multiplexer, engine or test variable.
 var ownerVars = []string{
@@ -66,6 +68,7 @@ func TestJourney(t *testing.T) {
 			vars = append(vars, name+"="+value)
 		}
 	}
+	treeStarted = clock.Real.Now()
 	harness.Run(t, tree(), State{Home: home, Release: "v" + release}, harness.Hooks{
 		Env:       vars,
 		Shell:     []string{shell, "-l", "-i"},

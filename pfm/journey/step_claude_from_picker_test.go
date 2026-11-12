@@ -9,18 +9,18 @@ import (
 	"github.com/rezzminator/professor/pfm/journey/harness"
 )
 
-// claudeFromPicker: in Herdr's first pane the owner picks a new Claude chat and walks the wizard with
-// Enter; the fake Claude draws in the pane, pfm lists exactly one live Claude chat hosted by Herdr, its
-// seat is live on that pane and its engine runs under the pane's holder.
+// claudeFromPicker: in the first pane of the branch's Herdr session the owner picks a new Claude chat
+// and walks the wizard with Enter; the fake Claude draws in the pane, pfm lists exactly one live Claude
+// chat on that session's socket, its seat is live on that pane and its engine runs under the pane's holder.
 func claudeFromPicker(c *harness.Ctx, s State) State {
-	term := c.Terminal("herdr")
+	term := c.Terminal(s.Term)
 	term.Press(harness.Enter)
 	term.WaitFor("choose the cache")
 	term.Press(harness.Enter)
 	term.WaitFor("❯", 20*time.Second)
 	c.Poll("one live Claude chat with a live seat on "+s.Pane, 20*time.Second, func() (bool, string) {
-		rows, _ := liveChats(c)
-		seats := liveSeats(c, s)
+		rows, _ := liveChats(c, herdrSocket(s))
+		seats := liveSeats(c, herdrSocket(s))
 		seen := fmt.Sprintf("chats %v, seats %v", rows, seats)
 		if len(rows) != 1 || len(seats) != 1 {
 			return false, seen
@@ -42,7 +42,8 @@ func claudeFromPicker(c *harness.Ctx, s State) State {
 // engineOf waits for the one engine process of s.Chat and requires it under the pane's holder.
 func engineOf(c *harness.Ctx, s State) int {
 	pid := 0
-	c.Poll("one engine of session "+s.Chat.Session+" under holder "+s.Holder, stepBound, func() (bool, string) {
+	what := "one engine of session " + s.Chat.Session + " under the pane's holder " + s.Holder
+	c.Poll(what, stepBound, func() (bool, string) {
 		table := processes(c)
 		var found []int
 		for p, session := range engines(table) {
@@ -50,14 +51,11 @@ func engineOf(c *harness.Ctx, s State) int {
 				found = append(found, p)
 			}
 		}
-		holderPid := 0
-		for _, h := range liveHolders(c, s) {
-			if h.ID == s.Holder {
-				holderPid = h.Pid
-			}
+		if len(found) != 1 {
+			return false, fmt.Sprintf("engines %v", found)
 		}
-		if len(found) != 1 || holderPid == 0 || !under(table, found[0], holderPid) {
-			return false, fmt.Sprintf("engines %v, holder pid %d", found, holderPid)
+		if held, seen := heldByPane(c, s, table, found[0]); !held {
+			return false, fmt.Sprintf("engine %d not under the pane's holder: %s", found[0], seen)
 		}
 		pid = found[0]
 		return true, ""

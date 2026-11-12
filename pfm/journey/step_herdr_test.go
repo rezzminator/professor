@@ -3,7 +3,6 @@
 package journey
 
 import (
-	"fmt"
 	"maps"
 	"slices"
 	"time"
@@ -14,27 +13,25 @@ import (
 // stepBound bounds a step's poll for the state its action leaves.
 const stepBound = 10 * time.Second
 
-// herdr: the owner starts Herdr in a plain terminal; its first pane opens on pfm's picker, Herdr lists
-// that one pane, and herdr-shield holds it.
+// herdr: the owner starts Herdr, its default session, in a plain terminal; its first pane opens on
+// pfm's picker, Herdr lists that one pane, and herdr-shield holds it.
 func herdr(c *harness.Ctx, s State) State {
-	term := c.Terminal("herdr")
+	s.Term, s.Project = "herdr", s.Home
+	term := c.Terminal(s.Term)
 	term.WaitFor(prompt)
 	term.Type("herdr\r")
-	term.WaitFor("New chat", 20*time.Second)
-	panes := slices.Sorted(maps.Keys(herdrPanes(c)))
+	return firstPane(c, s)
+}
+
+// firstPane waits for the picker in the first pane of the branch's Herdr session, then records that
+// pane, the only one Herdr lists, and the herdr-shield holder that holds it (none on a Mac).
+func firstPane(c *harness.Ctx, s State) State {
+	c.Terminal(s.Term).WaitFor("New chat", 20*time.Second)
+	panes := slices.Sorted(maps.Keys(herdrPanes(c, s)))
 	if len(panes) != 1 {
 		c.Failf("Herdr lists panes %q, want exactly one", panes)
 	}
 	s.Pane = panes[0]
-	c.Poll("a live herdr-shield holder on pane "+s.Pane, stepBound, func() (bool, string) {
-		holders := liveHolders(c, s)
-		for _, h := range holders {
-			if h.Pane == s.Pane {
-				s.Holder = h.ID
-				return true, ""
-			}
-		}
-		return false, fmt.Sprintf("%+v", holders)
-	})
+	s.Holder = paneHolder(c, s)
 	return s
 }

@@ -19,7 +19,8 @@ const PollTick = 25 * time.Millisecond
 // readBound bounds one Read: a read of state that has not answered by then is a failure, never a hang.
 const readBound = 2 * time.Minute
 
-// Ctx is a step's handle on its node: it fails the step, reads state, waits and keeps evidence.
+// Ctx is a step's handle on its node: it fails the step, reads state, waits, keeps evidence and tears
+// down what the step started.
 type Ctx struct {
 	t          *testing.T
 	hooks      Hooks
@@ -172,6 +173,11 @@ func (c *Ctx) Artifact(name string, data []byte) {
 		c.t.Errorf("%s: artifact %s: %v", c.path, name, err)
 	}
 }
+
+// Cleanup registers teardown to run once this node's whole subtree has ended, failed or not: after
+// every step under it kept its evidence and before its terminals close (t.Cleanup runs last in, first
+// out, and the terminals' close was registered first). A failure inside it is reported, never a verdict.
+func (c *Ctx) Cleanup(teardown func()) { c.t.Cleanup(func() { c.guard(teardown) }) }
 
 // Terminal is the terminal named name: the one this node or an ancestor opened, or a new one owned by
 // this node and closed when its subtree ends.

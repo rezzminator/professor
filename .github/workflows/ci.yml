@@ -200,7 +200,7 @@ jobs:
           go-version-file: pfm/go.mod
           cache-dependency-path: pfm/go.sum
 
-      - name: Install tmux, Herdr and herdr-shield
+      - name: Install tmux and Herdr
         if: matrix.os == 'macos'
         run: |
           set -euo pipefail
@@ -209,13 +209,11 @@ jobs:
           brew install tmux
           bash infra/fence/pinned-tools.sh "$RUNNER_TEMP/pinned" herdr
           echo "$RUNNER_TEMP/pinned/bin" >> "$GITHUB_PATH"
-          cargo build --release --locked --manifest-path plugins/herdr-shield/Cargo.toml
 
       # /bin/bash is the system Bash 3.2 on macOS, as on a user's Mac.
       - name: Prepare the owner and run the suite
         if: matrix.os == 'macos'
         env:
-          HERDR_SHIELD_BIN: ${{ github.workspace }}/plugins/herdr-shield/target/release/herdr-shield
           JOURNEY_ARTIFACTS: ${{ runner.temp }}/journey
         run: |
           set -euo pipefail

@@ -4,7 +4,7 @@
 //
 // Entry points: Do, Together and Run. The other files:
 //
-//   - ctx.go: Ctx, the step's handle on its node — Read, Poll, Unique, Expect, Artifact, Failf.
+//   - ctx.go: Ctx, the step's handle on its node — Read, Poll, Unique, Expect, Artifact, Failf, Cleanup.
 //   - terminal.go: Terminal, a kernel PTY running the owner's login shell read through a screen
 //     emulator — Type, Press, Screen, WaitFor, WaitGone, WaitScreen, Resize.
 //   - session.go: the open terminal under a Terminal — the PTY, its login shell's session, the

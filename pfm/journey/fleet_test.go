@@ -5,6 +5,7 @@ package journey
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -45,12 +46,30 @@ func read(c *harness.Ctx, argv ...string) string {
 	return r.Stdout
 }
 
-func stateDB(s State) string     { return filepath.Join(s.Home, ".local", "state", "pfm", "pfm.db") }
-func herdrSocket(s State) string { return filepath.Join(s.Home, ".config", "herdr", "herdr.sock") }
+func stateDB() string { return filepath.Join(ownerHome, ".local", "state", "pfm", "pfm.db") }
 
-// liveChats is `pfm ls --tsv`'s live rows: session id -> engine kind and host socket, plus every
-// session id as many times as it was listed.
-func liveChats(c *harness.Ctx) (rows map[string][2]string, listed []string) {
+// herdrSocket is the socket of the branch's Herdr session: the default session's for the bare `herdr`.
+func herdrSocket(s State) string {
+	if s.Session == "" {
+		return filepath.Join(s.Home, ".config", "herdr", "herdr.sock")
+	}
+	return filepath.Join(s.Home, ".config", "herdr", "sessions", s.Session, "herdr.sock")
+}
+
+// herdrCLI is the argv of a herdr command aimed at the branch's Herdr session.
+func herdrCLI(s State, args ...string) []string {
+	if s.Session == "" {
+		return append([]string{"herdr"}, args...)
+	}
+	return append([]string{"herdr", "--session", s.Session}, args...)
+}
+
+// The readers below take a scope: the host socket a branch's chats live on (herdrSocket(s) for a
+// Herdr branch), or "" for the whole machine, which only the joins read (fleetWhole).
+
+// liveChats is `pfm ls --tsv`'s live rows on sock: session id -> engine kind and host socket, plus
+// every session id as many times as it was listed.
+func liveChats(c *harness.Ctx, sock string) (rows map[string][2]string, listed []string) {
 	rows = map[string][2]string{}
 	out := read(c, "pfm", "ls", "--tsv")
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
@@ -59,7 +78,7 @@ func liveChats(c *harness.Ctx) (rows map[string][2]string, listed []string) {
 	}
 	for _, line := range lines[1:] {
 		f := strings.Split(line, "\t")
-		if len(f) < 11 || !strings.HasPrefix(f[0], "live-") {
+		if len(f) < 11 || !strings.HasPrefix(f[0], "live-") || sock != "" && f[10] != sock {
 			continue
 		}
 		rows[f[1]] = [2]string{f[0], f[10]}
@@ -68,11 +87,25 @@ func liveChats(c *harness.Ctx) (rows map[string][2]string, listed []string) {
 	return rows, listed
 }
 
-// liveSeats is the state database's live seats: session id -> seat id, Herdr pane.
-func liveSeats(c *harness.Ctx, s State) map[string][2]string {
+// liveSeats is the state database's live seats on sock: session id -> seat id, Herdr pane.
+func liveSeats(c *harness.Ctx, sock string) map[string][2]string {
+	return seatsWhere(c, "state = 'live'"+onSocket(sock))
+}
+
+// onSocket is the seat query's filter for sock, empty for the whole machine.
+func onSocket(sock string) string {
+	if sock == "" {
+		return ""
+	}
+	return " and (herdr_socket = '" + strings.ReplaceAll(sock, "'", "''") + "' or tmux_socket = '" +
+		strings.ReplaceAll(sock, "'", "''") + "')"
+}
+
+// seatsWhere is the seats matching a SQL condition: session id -> seat id, Herdr pane.
+func seatsWhere(c *harness.Ctx, condition string) map[string][2]string {
 	seats := map[string][2]string{}
-	out := read(c, "sqlite3", "-separator", "\t", stateDB(s),
-		"select session_id, seat_id, herdr_pane from seat where state = 'live'")
+	out := read(c, "sqlite3", "-separator", "\t", stateDB(),
+		"select session_id, seat_id, coalesce(herdr_pane, '') from seat where "+condition)
 	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
 		if f := strings.Split(line, "\t"); len(f) == 3 {
 			seats[f[0]] = [2]string{f[1], f[2]}
@@ -81,8 +114,8 @@ func liveSeats(c *harness.Ctx, s State) map[string][2]string {
 	return seats
 }
 
-// herdrPanes is Herdr's own pane list: pane id -> the agent Herdr sees in it.
-func herdrPanes(c *harness.Ctx) map[string]string {
+// herdrPanes is the pane list of the branch's Herdr session: pane id -> the agent Herdr sees in it.
+func herdrPanes(c *harness.Ctx, s State) map[string]string {
 	var list struct {
 		Result struct {
 			Panes []struct {
@@ -91,7 +124,7 @@ func herdrPanes(c *harness.Ctx) map[string]string {
 			} `json:"panes"`
 		} `json:"result"`
 	}
-	out := read(c, "herdr", "pane", "list")
+	out := read(c, herdrCLI(s, "pane", "list")...)
 	if err := json.Unmarshal([]byte(out), &list); err != nil {
 		c.Failf("herdr pane list: %v:\n%s", err, out)
 	}
@@ -102,54 +135,19 @@ func herdrPanes(c *harness.Ctx) map[string]string {
 	return panes
 }
 
-// holder is one live herdr-shield holder.
-type holder struct {
-	ID   string
-	Pane string
-	Pid  int
-}
-
-// liveHolders is herdr-shield's list of live holders on this Herdr socket.
-func liveHolders(c *harness.Ctx, s State) []holder {
-	var list struct {
-		Holders []struct {
-			ID      string `json:"id"`
-			Live    bool   `json:"holder_live"`
-			Binding struct {
-				Pane   string `json:"pane"`
-				Socket string `json:"socket"`
-			} `json:"binding"`
-			Holder struct {
-				Pid int `json:"pid"`
-			} `json:"holder"`
-		} `json:"holders"`
-	}
-	out := read(c, "env", "HERDR_SOCKET_PATH="+herdrSocket(s), "herdr-shield", "list", "--json")
-	if err := json.Unmarshal([]byte(out), &list); err != nil {
-		c.Failf("herdr-shield list --json: %v:\n%s", err, out)
-	}
-	var live []holder
-	for _, h := range list.Holders {
-		if h.Live && h.Binding.Socket == herdrSocket(s) {
-			live = append(live, holder{ID: h.ID, Pane: h.Binding.Pane, Pid: h.Holder.Pid})
-		}
-	}
-	return live
-}
-
 // process is one row of the process table.
 type process struct {
 	Pid, Ppid int
 	Args      string
+	Engine    string // claude, codex or opencode for an engine's process; empty for any other
+	Session   string // an engine's session id, when its argv or its open rollout names it
 }
 
 // processes reads the process table through pfm's own reader (/proc on Linux, sysctl on macOS); a
-// process that exits between the listing and its read is left out.
+// process that exits between the listing and its read is left out, and so is a zombie, whose argv is
+// gone (zombies reads those).
 func processes(c *harness.Ctx) map[int]process {
-	proc, err := gather.OpenProcFS("")
-	if err != nil {
-		c.Failf("open the process table: %v", err)
-	}
+	proc := procTable(c)
 	pids, err := proc.PIDs()
 	if err != nil {
 		c.Failf("list the process table: %v", err)
@@ -164,24 +162,65 @@ func processes(c *harness.Ctx) map[int]process {
 		if err != nil {
 			continue
 		}
-		table[pid] = process{Pid: pid, Ppid: stat.ParentPID, Args: strings.Join(argv, " ")}
+		p := process{Pid: pid, Ppid: stat.ParentPID, Args: strings.Join(argv, " ")}
+		p.Engine, p.Session = engineIdentity(proc, pid, argv)
+		table[pid] = p
 	}
 	return table
 }
 
-// engines is every fake Claude process: pid -> its session id (from --session-id or --resume).
+func procTable(c *harness.Ctx) gather.ProcFS {
+	proc, err := gather.OpenProcFS("")
+	if err != nil {
+		c.Failf("open the process table: %v", err)
+	}
+	return proc
+}
+
+var (
+	claudeSession   = regexp.MustCompile(`--(?:session-id|resume) ([0-9a-f-]{36})`)
+	codexSession    = regexp.MustCompile(` resume ([0-9a-f-]{36})`)
+	openCodeSession = regexp.MustCompile(` (?:--session|-s)[ =](\S+)`)
+)
+
+// engineIdentity names an engine process by pfm's own spelling of each engine's argv, and the session
+// it runs: Claude's and OpenCode's from their flags, Codex's from its resume argument or the rollout
+// it holds open. A fresh OpenCode names its session nowhere a process shows: it reads "".
+func engineIdentity(proc gather.ProcFS, pid int, argv []string) (engine, session string) {
+	args := strings.Join(argv, " ")
+	pick := func(re *regexp.Regexp) string {
+		if m := re.FindStringSubmatch(args); m != nil {
+			return m[1]
+		}
+		return ""
+	}
+	switch {
+	case gather.IsClaudeCommand(argv):
+		return "claude", pick(claudeSession)
+	case gather.IsCodexCommand(argv):
+		if session = pick(codexSession); session != "" {
+			return "codex", session
+		}
+		links, _ := proc.FDLinks(pid) // unreadable: the session stays unknown, judged as such
+		for _, link := range links {
+			if id := gather.CodexRolloutID(link.Target); id != "" {
+				return "codex", id
+			}
+		}
+		return "codex", ""
+	case gather.IsOpenCodeCommand(argv):
+		return "opencode", pick(openCodeSession)
+	}
+	return "", ""
+}
+
+// engines is every engine process in table: pid -> its session id.
 func engines(table map[int]process) map[int]string {
-	sessionFlag := regexp.MustCompile(`--(?:session-id|resume) ([0-9a-f-]{36})`)
 	found := map[int]string{}
 	for pid, p := range table {
-		if !strings.HasPrefix(p.Args, "claude ") {
-			continue
+		if p.Engine != "" {
+			found[pid] = p.Session
 		}
-		session := ""
-		if m := sessionFlag.FindStringSubmatch(p.Args); m != nil {
-			session = m[1]
-		}
-		found[pid] = session
 	}
 	return found
 }
@@ -197,25 +236,41 @@ func under(table map[int]process, pid, ancestor int) bool {
 	return false
 }
 
-// fleetConsistent fails the step unless every live chat has exactly one row, one live seat and a pane
-// Herdr still has; every engine process belongs to a live chat; every live holder holds a pane Herdr
-// still has.
+// fleetConsistent fails the step unless the branch's own Herdr session is consistent: every live chat
+// on its socket has exactly one row, one live seat and a pane the session still has; every engine of
+// the branch (under one of its holders, or of a seat ever on its socket) belongs to a live chat on it;
+// every live holder bound to its socket holds a pane the session still has. Other branches' chats are
+// not read: they change while this one is judged.
 func fleetConsistent(c *harness.Ctx, s State) {
-	rows, listed := liveChats(c)
-	seats := liveSeats(c, s)
-	panes := herdrPanes(c)
+	sock := herdrSocket(s)
+	rows, listed := liveChats(c, sock)
+	seats := liveSeats(c, sock)
+	panes := herdrPanes(c, s)
+	holders := liveHolders(c, sock)
+	ever := seatsWhere(c, "session_id is not null"+onSocket(sock))
+	table := processes(c)
+	faults := chatFaults(rows, listed, seats)
+	faults = append(faults, paneFaults(sock, seats, holders, panes)...)
+	faults = append(faults, engineFaults(table, rows, seats, holders, func(p process) bool {
+		_, seated := ever[p.Session]
+		return seated || slices.ContainsFunc(holders, func(h holder) bool { return under(table, p.Pid, h.Pid) })
+	})...)
+	failFleet(c, "the branch's fleet ("+sock+")", faults)
+}
+
+// chatFaults: every live row listed once and on a live seat, every live seat on a live row.
+func chatFaults(rows map[string][2]string, listed []string, seats map[string][2]string) []string {
 	var faults []string
+	times := map[string]int{}
 	for _, session := range listed {
-		if n := strings.Count(" "+strings.Join(listed, " ")+" ", " "+session+" "); n != 1 {
+		times[session]++
+	}
+	for session, n := range times {
+		if n != 1 {
 			faults = append(faults, fmt.Sprintf("chat %s listed %d times", session, n))
 		}
-		seat, ok := seats[session]
-		if !ok {
+		if _, ok := seats[session]; !ok {
 			faults = append(faults, fmt.Sprintf("chat %s (%s) has no live seat", session, rows[session][0]))
-			continue
-		}
-		if _, ok := panes[seat[1]]; !ok {
-			faults = append(faults, fmt.Sprintf("chat %s's pane %s is not in Herdr's pane list", session, seat[1]))
 		}
 	}
 	for session := range seats {
@@ -223,19 +278,61 @@ func fleetConsistent(c *harness.Ctx, s State) {
 			faults = append(faults, fmt.Sprintf("live seat of %s has no chat row", session))
 		}
 	}
-	for pid, session := range engines(processes(c)) {
-		if _, ok := rows[session]; !ok {
-			faults = append(faults, fmt.Sprintf("engine pid %d (session %q) belongs to no live chat", pid, session))
+	return faults
+}
+
+// paneFaults: every live seat and every live holder on the Herdr socket sock on a pane it still has.
+func paneFaults(sock string, seats map[string][2]string, holders []holder, panes map[string]string) []string {
+	var faults []string
+	for session, seat := range seats {
+		if _, ok := panes[seat[1]]; !ok {
+			faults = append(faults, fmt.Sprintf("chat %s's pane %s is not in %s's pane list", session, seat[1], sock))
 		}
 	}
-	for _, h := range liveHolders(c, s) {
+	for _, h := range holders {
 		if _, ok := panes[h.Pane]; !ok {
-			faults = append(faults, fmt.Sprintf("holder %s holds pane %s, which Herdr no longer has", h.ID, h.Pane))
+			faults = append(faults, fmt.Sprintf("holder %s holds pane %s, which %s no longer has", h.ID, h.Pane, sock))
 		}
 	}
+	return faults
+}
+
+// engineFaults: every engine process judged (in scope) belongs to a live chat: its session is a live
+// row, or, when it names none (a fresh OpenCode), it runs under a holder whose pane a live seat has.
+func engineFaults(
+	table map[int]process,
+	rows, seats map[string][2]string,
+	holders []holder,
+	inScope func(process) bool,
+) []string {
+	seated := map[string]bool{}
+	for _, seat := range seats {
+		seated[seat[1]] = true
+	}
+	var faults []string
+	for _, p := range table {
+		if p.Engine == "" || !inScope(p) {
+			continue
+		}
+		if _, ok := rows[p.Session]; ok && p.Session != "" {
+			continue
+		}
+		if p.Session == "" && slices.ContainsFunc(holders, func(h holder) bool {
+			return seated[h.Pane] && under(table, p.Pid, h.Pid)
+		}) {
+			continue
+		}
+		faults = append(faults, fmt.Sprintf("%s engine pid %d (session %q) belongs to no live chat: %s",
+			p.Engine, p.Pid, p.Session, p.Args))
+	}
+	return faults
+}
+
+// failFleet fails the step with every fault, sorted, under what was judged.
+func failFleet(c *harness.Ctx, what string, faults []string) {
 	slices.Sort(faults)
 	if len(faults) > 0 {
-		c.Failf("the fleet is inconsistent:\n%s", strings.Join(faults, "\n"))
+		c.Failf("%s is inconsistent:\n%s", what, strings.Join(faults, "\n"))
 	}
 }
 
@@ -314,11 +411,13 @@ func evidence(c *harness.Ctx, records []string) {
 		c.Artifact("terminal-"+term.Name()+".raw", term.Raw())
 	}
 	c.Artifact("activity.jsonl", []byte(strings.Join(records, "\n")))
-	for name, argv := range map[string][]string{
-		"chats.txt":   {"pfm", "chat", "ls", "--all"},
-		"panes.json":  {"herdr", "pane", "list"},
-		"holders.txt": {"env", "HERDR_SOCKET_PATH=" + herdrSocket(State{Home: ownerHome}), "herdr-shield", "list", "--json"},
-	} {
+	reads := map[string][]string{
+		"chats.txt":     {"pfm", "chat", "ls", "--all"},
+		"sessions.json": {"herdr", "session", "list", "--json"},
+		"panes.json":    {"herdr", "pane", "list"},
+	}
+	maps.Copy(reads, holderEvidence())
+	for name, argv := range reads {
 		r := c.Read(argv...)
 		c.Artifact(name, []byte(fmt.Sprintf("exit %d\n%s%s", r.Code, r.Stdout, r.Stderr)))
 	}

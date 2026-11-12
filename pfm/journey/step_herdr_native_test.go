@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -221,6 +222,10 @@ func tsvRow(c *harness.Ctx, session string) []string {
 	return nil
 }
 
+// killedFooter is the line `pfm chat ls --all` ends on once a chat is killed. Its count spans every
+// branch of the tree, and a sibling branch kills chats of its own, so a step reads only that it is there.
+var killedFooter = regexp.MustCompile(`\n {2}\(\+[1-9]\d* killed — pfm ls --killed to manage\)\n`)
+
 // killFromPicker: in the picker the new pane opened, the owner types the lost chat's name to find its
 // row among every branch's chats, selects it and presses Ctrl-X; the row leaves the picker with no tmux
 // error naming its Herdr socket on the screen, the chat is killed in state (`pfm chat ls --all` counts
@@ -251,7 +256,7 @@ func killFromPicker(c *harness.Ctx, s State) State {
 		c.Failf("killed rows for %s = %s, want 1", s.Chat.Session, got)
 	}
 	out := read(c, "pfm", "chat", "ls", "--all")
-	if !strings.Contains(out, "\n  (+1 killed — pfm ls --killed to manage)\n") || chatLsRow(out, s.Name) != nil {
+	if !killedFooter.MatchString(out) || chatLsRow(out, s.Name) != nil {
 		c.Failf("pfm chat ls --all after the kill lists %s or counts no killed chat:\n%s", s.Name, out)
 	}
 	if row := tsvRow(c, s.Chat.Session); row != nil {

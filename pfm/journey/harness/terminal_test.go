@@ -128,7 +128,8 @@ func TestALaterTerminalInheritsNoDescriptorOfAnEarlierOne(t *testing.T) {
 	held := map[string]string{}
 	list := func(c *Ctx, name string) {
 		term := c.Terminal(name)
-		term.Type(`echo "HELD:$(ls /dev/fd | tr '\n' ' ')"` + "\r")
+		// Sorted as numbers: a runner that leaves descriptors past 9 open would sort them before 2 as text.
+		term.Type(`echo "HELD:$(ls /dev/fd | sort -n | tr '\n' ' ')"` + "\r")
 		term.WaitScreen("the descriptors a child of "+name+" holds", 5*time.Second, func(screen string) bool {
 			for _, line := range strings.Split(screen, "\n") {
 				if rest, found := strings.CutPrefix(line, "HELD:"); found {

@@ -30,7 +30,7 @@ Where Vocabulary, Runtime or On demand disagrees with the code on a path, comman
 - Codex keeper: the one hand-written, tracked file under `.codex/` · `.codex/config.toml`
 - marketplace: the plugin listing · `.claude-plugin/marketplace.json`
 - plugins: the plugins professor tracks, each a git submodule of its own repo on `develop`, all but gpt-gateway listed in the marketplace; edits inside one leave this repo's status clean (`ignore = dirty`); an alpha `pfm install` installs every listed one as `{plugin}@professor` from a copy of its checkout in the pfm-owned `professor` directory marketplace `~/.local/share/professor-dev` (`claude.pluginCheckoutRoot` overriding), enabling those `claude.plugins` names · `plugins/{plugin}/`, `.gitmodules`
-- CI: GitHub Actions — `ci.yml`, the one check, runs every layer on each pull request into `main`, and by hand on any branch with an `exclude` list of jobs to skip; `publish.yml` publishes the release merge and verifies the published assets; `make release-check` runs the release checks locally · `.github/workflows/`, `.claude/rules/ci-workflows.md`, `Makefile`
+- CI: GitHub Actions — `ci.yml`, the one check, runs every layer on each pull request into `main`, and by hand on any branch; `publish.yml` publishes the release merge and verifies the published assets; `make release-check` runs the release checks locally · `.github/workflows/`, `.claude/rules/ci-workflows.md`, `Makefile`
 
 ## Path vars
 
@@ -67,12 +67,13 @@ Where Vocabulary, Runtime or On demand disagrees with the code on a path, comman
 
 - `.claude/scripts/dev.sh iso {install|build|typecheck|verify|test|cover|all|status|e2e|shell} [project]`, `iso gate` or `iso {run|sim} {command…}` runs in the fence against the checkout it is invoked from (the main checkout or a `.worktrees/{flight}/` worktree), mounted read-only; it needs a reachable docker daemon.
 - Narrowest test: `.claude/scripts/test.sh <path>[::<selector>]…`, the affected tests and static checks of the paths named; full gate, what done requires: `.claude/scripts/test.sh --full`.
+- `bash infra/fence/journey/run.sh --ci-linux|--ci-mac` (or both) boots no machine: `infra/fence/journey/ci-run.sh` pushes the on-disk checkout as a snapshot commit (plugins included) to a temporary `ci-tmp/{branch}-{stamp}-{id}` branch on origin, runs that OS's journey and installer e2e jobs on CI, keeps failed-step logs and journey artifacts in `{checkout}/tmp/journey/ci/{run id}/`, and deletes every temporary branch or names its delete command; a push, so only on the owner's ask in that turn.
 
 ## CI
 
 - `.github/workflows/ci.yml` runs on a pull request into `main` and on `workflow_dispatch` (below): `gate ({unit|e2e|race|mirrors|rest})`, the fence gate's step list sliced by `PFM_GATE_ONLY`/`PFM_GATE_SKIP` and run natively on the runner; `macos ({unit|e2e})`; `journey ({linux|macos})`, pfm's end-to-end suite; `fresh-install ({ubuntu-latest|macos-15})`; `build`; `scan` (the HOL plugin scan, then every plugin's workflow shape, `scripts/check-plugin-workflows.py`); `release` (`make release`).
 - Its `ci` job fails unless every other job succeeded and is `main`'s only required status check: no release merges or publishes until it is green.
-- `ci.yml` also runs on `workflow_dispatch` from any branch: `gh workflow run ci.yml --ref {branch} -f exclude='{jobs}'` skips the named jobs (macOS alone: `gate journey fresh-install build scan release`); no workflow runs on a push.
+- `ci.yml` also runs on `workflow_dispatch` from any branch: `gh workflow run ci.yml --ref {branch} -f exclude='{jobs}'` skips the named jobs (macOS alone: `gate journey fresh-install build scan release`), and `-f only='{job or entry},…'` runs just the jobs and matrix entries it names (`journey (linux),gate (e2e)`); no workflow runs on a push.
 - `.github/workflows/publish.yml` runs only when a pull request into `main` closes: on a merge, `publish` tags `v{VERSION}` on the merge commit and creates the GitHub release, and `verify` checks the published assets against `SHA256SUMS`, the binary's version and the note.
 
 ## Host

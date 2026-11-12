@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"os"
 	"os/exec"
@@ -283,6 +284,9 @@ func TestProveHerdrSeatSupervisorIdentity(t *testing.T) {
 		{"dead", "terminal-one", false, 9, false, true},
 		{"reused-pid", "terminal-one", true, 10, false, true},
 		{"recycled-during-proof", "terminal-one", true, 9, false, false},
+		// The chat exits during the proof: its supervisor is gone by the time its
+		// still-listed pane answers with no shell, which proves the seat dead.
+		{"shell-gone-supervisor-exited", "terminal-one", true, 9, false, true},
 		// The kernel's own reader (sysctl on macOS, /proc on Linux) proves an
 		// exited supervisor dead before its recycled pane is asked (forecast C30).
 		{"dead-native-reader", "terminal-recycled", false, 9, false, true},
@@ -312,7 +316,11 @@ func TestProveHerdrSeatSupervisorIdentity(t *testing.T) {
 				canonical,
 				strings.Split(canonical, ":")[0],
 			)
-			socket, _ := herdrOwnershipSocket(t, response, canonical)
+			shell := 10
+			if test.name == "shell-gone-supervisor-exited" {
+				shell = 0
+			}
+			socket, _ := herdrOwnershipSocketShell(t, response, canonical, shell)
 			seat := fleetdb.Seat{
 				SeatID:          "owner",
 				Backend:         "herdr",
@@ -382,6 +390,9 @@ func TestProveHerdrSeatSupervisorIdentity(t *testing.T) {
 			var reader ProcFS = proc
 			if test.name == "recycled-during-proof" {
 				reader = &recyclingHerdrProofProc{ProcFS: proc}
+			}
+			if test.name == "shell-gone-supervisor-exited" {
+				reader = &exitingHerdrProofProc{ProcFS: proc}
 			}
 			if test.name == "dead-native-reader" {
 				reader = nativeProcFS()
@@ -680,6 +691,23 @@ func (proc *recyclingHerdrProofProc) Stat(pid int) (ProcStat, error) {
 		}
 	}
 	return stat, err
+}
+
+// exitingHerdrProofProc: the supervisor is alive at the proof's first read and
+// gone at every later one.
+type exitingHerdrProofProc struct {
+	ProcFS
+	hostReads int
+}
+
+func (proc *exitingHerdrProofProc) Stat(pid int) (ProcStat, error) {
+	if pid == 20 {
+		proc.hostReads++
+		if proc.hostReads >= 2 {
+			return ProcStat{}, fs.ErrNotExist
+		}
+	}
+	return proc.ProcFS.Stat(pid)
 }
 
 func TestProveHerdrSeatClosure(t *testing.T) {

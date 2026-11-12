@@ -80,9 +80,10 @@ func stopHerdrSession(c *harness.Ctx, s State) {
 }
 
 // endSeated ends every chat with a live seat on sock with `pfm chat end`, then waits for no live seat
-// on it: `pfm chat end` only schedules the end.
+// on it: `pfm chat end` only schedules the end. A chat the branch killed is left alone: its pane is
+// closing and pfm refuses to end a seat that no longer matches it.
 func endSeated(c *harness.Ctx, sock string, run func(argv ...string)) {
-	for session := range liveSeats(c, sock) {
+	for session := range seatsWhere(c, "state = 'live' and session_id not in (select uuid from hidden)"+onSocket(sock)) {
 		run("pfm", "chat", "end", session)
 	}
 	phase(c, func() {

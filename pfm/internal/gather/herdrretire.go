@@ -101,6 +101,25 @@ var errHerdrSeatUnbound = errors.New("supervisor ownership unproved")
 // errHerdrBirthFailed: a reservation that named no pane within its birth window, a birth that never finished.
 var errHerdrBirthFailed = errors.New("birth failed: no pane within the birth window")
 
+// herdrShellGone settles a proof whose pane answered with no shell: nil once
+// the seat's saved supervisor is positively dead (the chat exited during this
+// proof and Herdr still lists its closing pane), else the refusal. answered
+// says the answer was for the seat's own pane.
+func herdrShellGone(proc ProcFS, seat fleetdb.Seat, answered bool) error {
+	unavailable := fmt.Errorf("seat %s ownership shell identity unavailable", seat.SeatID)
+	if !answered || seat.SeatHostPID <= 0 || seat.SeatHostStart == 0 {
+		return unavailable
+	}
+	dead, err := HerdrHostDead(proc, seat)
+	if err != nil {
+		return errors.Join(unavailable, err)
+	}
+	if dead {
+		return nil
+	}
+	return unavailable
+}
+
 // errHerdrPaneAbsent: Herdr lists no pane holding the seat's pane or terminal.
 var errHerdrPaneAbsent = errors.New("terminal not present in pane.list")
 

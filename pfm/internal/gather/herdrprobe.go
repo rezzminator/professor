@@ -188,7 +188,7 @@ func proveHerdrSeatSnapshot(
 		return seat, false, fmt.Errorf("seat %s ownership shell identity unavailable: %w", seat.SeatID, err)
 	}
 	if processes.Pane != candidate.PaneID || processes.Shell <= 1 {
-		return seat, false, fmt.Errorf("seat %s ownership shell identity unavailable", seat.SeatID)
+		return seat, false, herdrShellGone(proc, seat, processes.Pane == candidate.PaneID)
 	}
 	pid := seat.SeatHostPID
 	if pid == 0 {

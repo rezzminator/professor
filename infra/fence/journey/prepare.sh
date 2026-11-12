@@ -58,7 +58,7 @@ PROMPT='owner %# '
 unsetopt BEEP
 ZSH
 
-# 3b. Coverage, when the caller names GOCOVERDIR (run.sh and CI's journey job always do): the pfm the
+# 3b. Coverage, when the caller names GOCOVERDIR (run.sh and CI's Linux journey job do): the pfm the
 # install builds is instrumented, with the counter flush on a terminating signal (GOFLAGS, which
 # INSTALL.md's go build reads; internal/coverflush), and every pfm on the machine writes its
 # counters into GOCOVERDIR: each login through ~/.zshenv, each service through the service manager.

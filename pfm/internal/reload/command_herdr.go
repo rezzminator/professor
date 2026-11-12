@@ -522,6 +522,8 @@ func (n *nativeReload) ready(ctx context.Context, stash bool) error {
 	return errors.New("native reload: chat still busy or input box not ready; /exit was not typed")
 }
 
+var errEngineUnprovable = errors.New("native reload engine process lacks a valid pid/argv; startup cannot be proved")
+
 func (n *nativeReload) process(ctx context.Context) (int, []string, error) {
 	if err := n.refreshTarget(ctx); err != nil {
 		return 0, nil, err
@@ -548,7 +550,7 @@ func (n *nativeReload) process(ctx context.Context) (int, []string, error) {
 			continue
 		}
 		if process.PID <= 0 || len(process.Argv) == 0 {
-			return 0, nil, errors.New("native reload engine process lacks a valid pid/argv; startup cannot be proved")
+			return 0, nil, errEngineUnprovable
 		}
 		return process.PID, process.Argv, nil
 	}
@@ -556,6 +558,7 @@ func (n *nativeReload) process(ctx context.Context) (int, []string, error) {
 }
 
 func (n *nativeReload) wait(ctx context.Context, id string, oldPID int, run fleetdb.SeatRun) error {
+	var unprovable error
 	for attempt := 0; attempt < n.options.ExitTries+n.options.ExitGraceTries; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -577,6 +580,10 @@ func (n *nativeReload) wait(ctx context.Context, id string, oldPID int, run flee
 			return fmt.Errorf("native reload new engine failed: %s", seat.LostNote)
 		}
 		pid, argv, err := n.process(ctx)
+		// The old engine dying after /exit has no argv for a moment: read again.
+		if unprovable = nil; errors.Is(err, errEngineUnprovable) {
+			unprovable, err = err, nil
+		}
 		if err != nil {
 			return err
 		}
@@ -602,6 +609,9 @@ func (n *nativeReload) wait(ctx context.Context, id string, oldPID int, run flee
 		if err := n.options.Clock.Sleep(ctx, n.options.Poll); err != nil {
 			return err
 		}
+	}
+	if unprovable != nil {
+		return unprovable
 	}
 	return errors.New("native reload new engine startup was not confirmed; seat-host retains the pending recipe")
 }

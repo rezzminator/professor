@@ -31,7 +31,7 @@ func profile(artifacts, coverDir string, wall time.Duration, meter *machineMeter
 	}
 	summary := harness.Summary{Wall: wall, Machine: machine}
 	if coverDir == "" {
-		summary.Coverage.Missing = "GOCOVERDIR is unset: run the suite through infra/fence/journey/run.sh or CI's journey job"
+		summary.Coverage.Missing = "GOCOVERDIR is unset: run the suite through infra/fence/journey/run.sh or CI's Linux journey job"
 		return harness.WriteSummary(artifacts, summary)
 	}
 	if err := windDown(); err != nil {

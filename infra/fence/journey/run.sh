@@ -3,6 +3,9 @@
 # hash (machine.Dockerfile), fetches Go modules into the kept cache volumes, boots the machine with
 # systemd and no network, prepares the owner (prepare.sh) and runs the suite inside it as the owner.
 #   bash infra/fence/journey/run.sh [--keep] [go test flags…]     e.g. -run 'Journey/install/day/plain-pfm$'
+#   bash infra/fence/journey/run.sh --ci-linux|--ci-mac [--ci-linux|--ci-mac]
+# --ci-linux and --ci-mac boot no machine here: ci-run.sh runs the suite of that OS on GitHub Actions over the
+# checkout as it is on disk, from a temporary branch it pushes and deletes.
 # Prints the go test output as it comes and ends with `RUN DIR: {path}`; exits with the suite's status.
 # Every run, green or red, is profiled and its coverage of pfm's source measured (pfm/journey's TestMain
 # writes steps.tsv, waits.tsv, summary.md and the coverage-* files into the artifacts, the raw counters in
@@ -17,6 +20,7 @@
 set -euo pipefail
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 ROOT="$(cd -- "$HERE/../../.." && pwd -P)"
+for arg in "$@"; do case "$arg" in --ci-linux | --ci-mac) exec bash "$HERE/ci-run.sh" "$@" ;; esac; done
 # shellcheck source=scripts/platform.sh
 . "$ROOT/scripts/platform.sh"
 

@@ -264,7 +264,13 @@ func (f *reloadHerdrFixture) respond(method string, p map[string]json.RawMessage
 				"process_info": map[string]any{"pane_id": f.canonical, "shell_pid": 90},
 			}, ""
 		}
-		if f.mode == "null-argv" {
+		// One startup poll reads the pane's processes three times (two target
+		// refreshes, then the engine read): the first whole poll sees it dying.
+		dying := f.submitted && (f.mode == "argv-gone" || f.mode == "argv-gone-once" && f.processes < 3)
+		if dying {
+			f.processes++
+		}
+		if f.mode == "null-argv" || dying {
 			return f.processResult(
 				[]any{
 					map[string]any{
@@ -468,6 +474,13 @@ func TestRunHerdrLifecycle(t *testing.T) {
 		{name: "empty-process", mode: "empty-process", want: "engine"},
 		{name: "omitted-process", mode: "omitted-process", want: "engine"},
 		{name: "null-argv", mode: "null-argv", want: "argv"},
+		// After /exit the old engine dies: a dying process has no argv for a
+		// moment, so the wait reads again; one that never clears is the refusal.
+		{name: "dying-old-engine-read-again", mode: "argv-gone-once"},
+		{
+			name: "engine-argv-never-returns", mode: "argv-gone",
+			want: "native reload engine process lacks a valid pid/argv; startup cannot be proved",
+		},
 		{name: "snapshot-error", mode: "read-error", want: "snapshot unavailable"},
 		{name: "blocked", mode: "blocked", want: "blocked"},
 		// Claude reports working while background shells or sub-agents run behind
@@ -582,6 +595,9 @@ func TestRunHerdrLifecycle(t *testing.T) {
 			}
 			if tc.then && !strings.Contains(f.prompted, f.request.Then) {
 				t.Fatalf("then=%q", f.prompted)
+			}
+			if tc.mode == "argv-gone-once" && f.processes < 4 {
+				t.Fatalf("returned after %d process reads, want the dying engine read again", f.processes)
 			}
 			if tc.mode == "pending-race" && f.processes < 3 {
 				t.Fatalf("returned on old process after %d probes", f.processes)

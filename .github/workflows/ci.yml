@@ -5,8 +5,10 @@ name: ci
 # merges, releases or publishes until every job here is green. The Linux gate
 # jobs run the local gate's own step list (infra/fence/checks.sh gate_run),
 # one slice per job, directly on the runner; publish.yml runs on the merge.
-# Started by hand on any branch, it skips the jobs `exclude` names:
+# Started by hand on any branch, it skips the jobs `exclude` names, and with
+# `only` runs just the jobs and matrix entries it names (infra/fence/journey/ci-run.sh):
 #   gh workflow run ci.yml --ref develop -f exclude='gate journey fresh-install build scan release'
+#   gh workflow run ci.yml --ref develop -f only='journey (linux),gate (e2e)'
 # The rule: .claude/rules/ci-workflows.md.
 on:
   pull_request:
@@ -15,6 +17,10 @@ on:
     inputs:
       exclude:
         description: "Jobs to skip, space- or comma-separated: gate, macos, journey, fresh-install, build, scan, release"
+        required: false
+        default: ""
+      only:
+        description: "Jobs or matrix entries to run, comma-separated, as CI names them: journey (linux), gate (e2e), macos; empty runs every job not excluded"
         required: false
         default: ""
 
@@ -27,22 +33,60 @@ permissions:
 
 jobs:
   # The dispatch's `exclude` as a JSON array; empty on a pull request. A name no
-  # job carries fails the `ci` job, which checks it against `needs`.
+  # job carries fails the `ci` job, which checks it against `needs`. The matrix
+  # jobs read their entries from here: every entry, unless the dispatch's `only`
+  # names some, when each job it names no entry of joins `exclude`. An `only`
+  # name no job or entry carries fails this job.
   plan:
     name: plan
     runs-on: ubuntu-latest
     outputs:
       exclude: ${{ steps.exclude.outputs.json }}
+      gate: ${{ steps.exclude.outputs.gate }}
+      macos: ${{ steps.exclude.outputs.macos }}
+      journey: ${{ steps.exclude.outputs.journey }}
     steps:
       - name: Read the jobs to exclude
         id: exclude
         env:
           EXCLUDE: ${{ inputs.exclude }}
+          ONLY: ${{ inputs.only }}
+          # Each `only` slice runs alone; `rest` skips exactly those, so a step
+          # added to the gate lands in CI with no edit here. A new slice adds its
+          # pattern to `rest`'s skip too.
+          GATE: >-
+            [{"slice": "unit", "only": "pfm\\.unit"},
+            {"slice": "e2e", "only": "pfm\\.e2e"},
+            {"slice": "race", "only": "pfm\\.race"},
+            {"slice": "mirrors", "only": "templates\\.mirrors"},
+            {"slice": "rest", "skip": "pfm\\.(unit|e2e|race)|templates\\.mirrors"}]
+          MACOS: '[{"part": "unit"}, {"part": "e2e"}]'
+          JOURNEY: '[{"os": "linux", "runner": "ubuntu-latest"}, {"os": "macos", "runner": "macos-15"}]'
         run: |
           set -euo pipefail
           json="$(jq -cn --arg s "${EXCLUDE:-}" '$s | [splits("[ ,]+")] | map(select(. != ""))')"
+          only="$(jq -cn --arg s "${ONLY:-}" '$s | [splits(" *, *")] | map(sub("^ +| +$"; "")) | map(select(. != ""))')"
+          # Each matrix job's entries, `{job} ({first key})` naming each as CI does.
+          tables="$(jq -cn --argjson gate "$GATE" --argjson macos "$MACOS" --argjson journey "$JOURNEY" \
+            '{gate: $gate, macos: $macos, journey: $journey}
+             | with_entries(.key as $j | .value |= map({name: "\($j) (\(to_entries[0].value))", entry: .}))')"
+          jobs='["gate","macos","journey","fresh-install","build","scan","release"]'
+          unknown="$(jq -rn --argjson only "$only" --argjson t "$tables" --argjson jobs "$jobs" \
+            '$only - $jobs - [$t[][].name] | join(", ")')"
+          if [ -n "$unknown" ]; then
+            echo "::error::only names no job or matrix entry: $unknown"
+            exit 1
+          fi
+          plan="$(jq -cn --argjson only "$only" --argjson t "$tables" --argjson jobs "$jobs" --argjson ex "$json" '
+            ($t | with_entries(.key as $j | .value |= map(.name as $n | select(($only | length) == 0 or ($only | index($j)) or ($only | index($n)))))) as $sel
+            | {exclude: (if ($only | length) == 0 then $ex else
+                $ex + [$jobs[] as $j | select(if $t[$j] then ($sel[$j] | length) == 0 else ($only | index($j)) == null end) | $j] | unique end),
+               matrix: ($t | with_entries(.key as $j | .value = [(if ($sel[$j] | length) == 0 then .value else $sel[$j] end)[].entry]))}')"
+          json="$(jq -c .exclude <<<"$plan")"
           echo "json=$json" >> "$GITHUB_OUTPUT"
+          for job in gate macos journey; do echo "$job=$(jq -c --arg j "$job" '.matrix[$j]' <<<"$plan")" >> "$GITHUB_OUTPUT"; done
           echo "excluded jobs: $json"
+          echo "matrix entries: $(jq -c .matrix <<<"$plan")"
 
   gate:
     name: gate (${{ matrix.slice }})
@@ -52,20 +96,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Each `only` slice runs alone; `rest` skips exactly those, so a step
-        # added to the gate lands in CI with no edit here. A new slice adds its
-        # pattern to `rest`'s skip too.
-        include:
-          - slice: unit
-            only: 'pfm\.unit'
-          - slice: e2e
-            only: 'pfm\.e2e'
-          - slice: race
-            only: 'pfm\.race'
-          - slice: mirrors
-            only: 'templates\.mirrors'
-          - slice: rest
-            skip: 'pfm\.(unit|e2e|race)|templates\.mirrors'
+        # The slices: the plan job's GATE.
+        include: ${{ fromJSON(needs.plan.outputs.gate) }}
     steps:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -148,7 +180,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        part: [unit, e2e]
+        include: ${{ fromJSON(needs.plan.outputs.macos) }}
     steps:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -177,11 +209,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: linux
-            runner: ubuntu-latest
-          - os: macos
-            runner: macos-15
+        include: ${{ fromJSON(needs.plan.outputs.journey) }}
     steps:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -215,8 +243,9 @@ jobs:
         if: matrix.os == 'macos'
         env:
           JOURNEY_ARTIFACTS: ${{ runner.temp }}/journey
-          # The run's coverage of pfm's source: prepare.sh hands it to every login and launchd agent.
-          GOCOVERDIR: ${{ runner.temp }}/journey/covdata
+        # No GOCOVERDIR here: Go's coverage runtime names its temporary meta file by the clock's nanoseconds,
+        # macOS's clock ticks in microseconds, and two pfm starting in the same tick fail the emit into a
+        # step's output. The Linux run measures the coverage.
         run: |
           set -euo pipefail
           export SHELL=/bin/zsh
@@ -224,9 +253,9 @@ jobs:
           export PATH="$HOME/.local/bin:$PATH"
           go -C pfm test -tags journey -count=1 -v -timeout 20m ./journey/
 
-      # Every run's profile (steps.tsv, waits.tsv, summary.md), its coverage of pfm's source (coverage.html,
-      # coverage-packages.tsv, coverage-funcs.txt, the raw counters in covdata/, for a merge of both OS's)
-      # and a failed step's evidence (activity log, process table, chats, panes): run.sh copies the run's
+      # Every run's profile (steps.tsv, waits.tsv, summary.md), the Linux run's coverage of pfm's source
+      # (coverage.html, coverage-packages.tsv, coverage-funcs.txt, the raw counters in covdata/) and a
+      # failed step's evidence (activity log, process table, chats, panes): run.sh copies the run's
       # artifacts into the checkout's tmp/journey/{run id}; macOS writes JOURNEY_ARTIFACTS.
       - name: Upload the journey profile, coverage and evidence
         if: always()

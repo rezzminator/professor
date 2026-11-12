@@ -208,14 +208,18 @@ func peerRows(c *harness.Ctx, s *State) {
 	}
 	want := entries(c, peer)
 
-	// A key typed while the peer still paints its answer is the agent's to drop: the draft waits for it idle.
-	c.Poll(peer+" idle", stepBound, func() (bool, string) {
-		r := c.Read("pfm", "chat", "status", peer, "--json")
-		var status struct {
-			State string `json:"state"`
-		}
-		return json.Unmarshal([]byte(r.Stdout), &status) == nil && status.State == "idle", r.Stdout + r.Stderr
-	})
+	// A key typed while the peer still ends its turn is the agent's to drop: the draft and every call
+	// that is not meant to queue wait for it idle, as the owner waits for the answer to stop.
+	idle := func() {
+		c.Poll(peer+" idle", stepBound, func() (bool, string) {
+			r := c.Read("pfm", "chat", "status", peer, "--json")
+			var status struct {
+				State string `json:"state"`
+			}
+			return json.Unmarshal([]byte(r.Stdout), &status) == nil && status.State == "idle", r.Stdout + r.Stderr
+		})
+	}
+	idle()
 	draft := c.Unique("draft")
 	if r := c.Read("tmux", "-L", s.Mesh.PeerSock, "send-keys", "-t", pane, "-l", draft); r.Code != 0 {
 		c.Failf("tmux send-keys %s exited %d: %s", draft, r.Code, r.Stderr)
@@ -232,6 +236,7 @@ func peerRows(c *harness.Ctx, s *State) {
 	}
 	composer("❯")
 
+	idle()
 	long := c.Unique("long") + " " + strings.Repeat("ж", 740)
 	want = append(want, calls("long-call",
 		live("called LIVE PASTE into %q — bracketed-paste body submitted (Enter confirmed, input cleared)"),
@@ -248,6 +253,7 @@ func peerRows(c *harness.Ctx, s *State) {
 		}
 	})
 	held, behind := c.Unique("held"), c.Unique("behind")
+	idle()
 	first := calls("hold-call", live(inline), map[string]any{"type": "hold", "until_gone": hold}, turnStep(held))
 	settled("holding the held call", append(slices.Clone(want), first))
 	queued := live(

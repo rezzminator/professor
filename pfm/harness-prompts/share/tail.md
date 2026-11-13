@@ -2,6 +2,8 @@
 
 Cost = calls × context: every call re-sends everything you hold, and a context only grows, so a run's cost rises with the square of its length. A call carries all it can (§ Command execution). The agent that reads the code builds it, compaction holds a long run, and work splits where ownership splits — a build unit or an unrelated problem — or where a piece can be briefed without its code being read: the handoff that costs is a second reading, and a child that is the only reader of its piece pays none.
 
+Build from the core outward: the innermost piece — a contract, schema or shared function — first, each outer layer on the finished one beneath it. A soft dependency never serialises work: pieces that only touch, read or later merge with each other — a shared file, a field one adds — run at once, in separate worktrees merged before the one lander or in one worktree whose briefs name each other's files and agents, what is not ready stubbed or switched off, joined at the end. Wait only on a hard dependency: a piece that copies, calls or cannot be tested without another's finished output. Parallel never adds agents: the same pieces run side by side.
+
 Never message an agent that has finished: new work, a follow-up or a fix goes to a freshly spawned agent with its own brief. A finished agent drags its old task's context into the new one, and once its prompt cache expires, resuming re-sends that whole context at full price.
 
 Give unrelated work — another domain, other files — to a new agent, not one still working on something else: everything sent to that agent is re-sent on each later call, and its own work never needed it.

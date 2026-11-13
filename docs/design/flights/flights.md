@@ -99,7 +99,7 @@ The main chat chooses at dispatch; a foreman spawns nothing.
 
 | Choice | Decided by | Rule |
 | --- | --- | --- |
-| Foreman tier | difficulty and ambiguity, never size | `flights:foreman-sonnet`: the rest, edits a pattern fixes (existing code, a rule, the finished core), its brief naming that pattern, a large rest split by area · `flights:foreman`: the core, what the rest depends on or copies and all judgment left (design choices, ambiguity, unfamiliar code, an unknown cause, several modules) · all judgment or all pattern: one foreman |
+| Foreman tier | difficulty and ambiguity, never size | `flights:foreman-sonnet`: the rest, kept maximal — edits a pattern fixes (existing code, a rule, the finished core), its brief naming that pattern, a large rest split by area · `flights:foreman`: the core, built first — what the rest depends on or copies, each pattern's first instance and every open decision (design choices, ambiguity, unfamiliar code, an unknown cause, several modules) · all judgment or all pattern: one foreman |
 | Lander children | the lander's inventory PLAN, computed from the diff and the spec files | diff-checkers k = min(4, ceil(production diff lines / 600)) · spec-checkers per spec with 10+ numbered rows · usage-checkers by inventory row ranges |
 
 The lander itself has no tiers: `flights:lander` lands every worktree.

@@ -4,6 +4,6 @@ internal/compose/compose_test.go 1088
 internal/index/codexstate_test.go 1073
 internal/index/index_test.go 1004
 internal/installer/installer_test.go 1484
-internal/kill/kill_test.go 1186
+internal/kill/kill_test.go 1139
 internal/stats/limits_test.go 1870
 internal/ui/chronoscope_test.go 1444

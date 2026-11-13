@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -26,7 +25,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
-	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 type runJail struct {
@@ -655,39 +653,6 @@ func TestMachineConfigChangesTheActualLaunchCommands(t *testing.T) {
 			}
 		})
 	}
-}
-
-type chatNewCallerVerbs struct {
-	mcpserv.ChatVerbs // the verbs chat new never calls: a call panics
-	row               compose.Row
-}
-
-func (verbs chatNewCallerVerbs) Last(context.Context, pfmchat.LastRequest) (pfmchat.LastResult, error) {
-	return pfmchat.LastResult{}, errors.New("unexpected chat last")
-}
-
-func (verbs chatNewCallerVerbs) Status(context.Context, pfmchat.StatusRequest) (headless.Status, error) {
-	return headless.Status{}, errors.New("unexpected chat status")
-}
-
-func (verbs chatNewCallerVerbs) List(context.Context, pfmchat.ListRequest) (pfmchat.ListResult, error) {
-	return pfmchat.ListResult{Rows: []compose.Row{verbs.row}, Matched: 1}, nil
-}
-
-func (verbs chatNewCallerVerbs) Find(context.Context, pfmchat.FindRequest) ([]pfmchat.TranscriptMatch, error) {
-	return nil, errors.New("unexpected chat find")
-}
-
-func (verbs chatNewCallerVerbs) Read(
-	context.Context,
-	string,
-	int,
-) (headless.Chat, []transcript.Entry, bool, error) {
-	return headless.Chat{}, nil, false, errors.New("unexpected chat read")
-}
-
-func (verbs chatNewCallerVerbs) Exit(context.Context, headless.Chat) (string, error) {
-	return "", errors.New("unexpected chat exit")
 }
 
 func callJailedChatNew(

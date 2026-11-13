@@ -217,3 +217,50 @@ func TestInteractiveRefreshFirstPassRegathersAfterAMovedBinding(t *testing.T) {
 	}
 	assertNoStaleCodexRow(t, final.Rows, oldID, newID, "streamFleetRefreshesWith first pass")
 }
+
+type fakeProcessSpec struct {
+	pid, parentPID int
+	comm           string
+	cmdline        []string
+	environ        map[string]string
+	withFD         bool
+}
+
+func writeFakeProcess(t *testing.T, procRoot string, spec fakeProcessSpec) {
+	t.Helper()
+	dir := filepath.Join(procRoot, strconv.Itoa(spec.pid))
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(dir, "cmdline"),
+		[]byte(strings.Join(spec.cmdline, "\x00")+"\x00"),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	pairs := make([]string, 0, len(spec.environ))
+	for key, value := range spec.environ {
+		pairs = append(pairs, key+"="+value)
+	}
+	if err := os.WriteFile(
+		filepath.Join(dir, "environ"),
+		[]byte(strings.Join(pairs, "\x00")+"\x00"),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	stat := strconv.Itoa(
+		spec.pid,
+	) + " (" + spec.comm + ") S " + strconv.Itoa(
+		spec.parentPID,
+	) + " 1 1 0 -1 0 0 0 0 0 0 0 0 0 0 0 20 0 100\n"
+	if err := os.WriteFile(filepath.Join(dir, "stat"), []byte(stat), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if spec.withFD {
+		if err := os.MkdirAll(filepath.Join(dir, "fd"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+}

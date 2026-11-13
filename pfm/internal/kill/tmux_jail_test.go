@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -364,4 +365,75 @@ func TestStressTenSimultaneousKillExits(t *testing.T) {
 		count,
 		elapsed,
 	)
+}
+
+// TestCommandTmuxClientsRealServer pins the real `tmux list-clients` parse
+// and detach: no client attached reports an empty slice with no error, a real
+// attached client reports its own live pid and name, and its detach ends it.
+func TestCommandTmuxClientsRealServer(t *testing.T) {
+	jail := newKillTmuxJail(t)
+	ctx := context.Background()
+	socket := "cc-viewport-clients"
+	if output, err := jail.command(
+		"-f", "/dev/null", "-L", socket, "new-session", "-d", "-s", "s1", "sleep 30",
+	).CombinedOutput(); err != nil {
+		t.Fatalf("new-session: %v: %s", err, output)
+	}
+	jail.sockets = append(jail.sockets, socket)
+	socketPath := jail.tmuxDir + "/" + socket
+
+	clients, _, err := (TmuxKiller{}).Clients(ctx, socketPath)
+	if err != nil {
+		t.Fatalf("Clients before attach: %v", err)
+	}
+	if len(clients) != 0 {
+		t.Fatalf("Clients before attach = %v, want empty", clients)
+	}
+
+	// A control-mode client (`tmux -C attach-session`) counts as an
+	// attached client without needing a real pty. Its stdin is a pipe this
+	// test holds open for the process's whole life — closing the write end
+	// is what lets it see EOF and exit during cleanup.
+	stdinRead, stdinWrite, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	attach := jail.command("-L", socket, "-C", "attach-session", "-t", "s1")
+	attach.Stdin = stdinRead
+	if err := attach.Start(); err != nil {
+		t.Fatalf("start control client: %v", err)
+	}
+	_ = stdinRead.Close()
+	exited := make(chan error, 1)
+	go func() { exited <- attach.Wait() }()
+	t.Cleanup(func() {
+		_ = stdinWrite.Close()
+		_ = attach.Process.Kill()
+		<-exited
+	})
+
+	var after []Client
+	for attempt := 0; attempt < 50; attempt++ {
+		after, _, err = (TmuxKiller{}).Clients(ctx, socketPath)
+		if err != nil {
+			t.Fatalf("Clients after attach: %v", err)
+		}
+		if len(after) == 1 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	want := []Client{{PID: attach.Process.Pid, Name: "client-" + strconv.Itoa(attach.Process.Pid)}}
+	if !reflect.DeepEqual(after, want) {
+		t.Fatalf("Clients after attach = %v, want %v", after, want)
+	}
+	if err := (TmuxKiller{}).DetachClient(ctx, socketPath, after[0].Name); err != nil {
+		t.Fatalf("DetachClient(%q): %v", after[0].Name, err)
+	}
+	select {
+	case err := <-exited:
+		exited <- err
+	case <-time.After(5 * time.Second):
+		t.Fatalf("client %d still running 5s after its detach", attach.Process.Pid)
+	}
 }

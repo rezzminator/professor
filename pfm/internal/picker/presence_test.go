@@ -149,36 +149,6 @@ func TestParkedPickerPublishesThemeWithoutLiveRowsOrFacts(t *testing.T) {
 	}
 }
 
-// TestParkedPickerPublishesAChatThatLaunchesWithoutAKeystroke pins root cause
-// B for a launch: a picker that parked while nobody touched it did no pass
-// until a key arrived, so a chat that started under it never reached the rows,
-// the header counts or the cosmos. The parked poll now sees the new tmux socket
-// without forking anything and runs a full pass for it.
-func TestParkedPickerPublishesAChatThatLaunchesWithoutAKeystroke(t *testing.T) {
-	root, _ := presenceJail(t)
-	updates := parkedPresenceStream(t)
-	startCodexStatusPane(t, root, "cx-1800000021-1-1", `  NEW_CHAT · /work/example · Full Access\n`)
-	awaitFullPass(t, updates, 5*time.Second, "a new chat's socket appeared")
-}
-
-// TestParkedPickerPublishesAChatThatDiesWithoutAKeystroke is the same law for a
-// death: a chat whose server is killed (or whose host rebooted) must leave the
-// rows, not stay on them as a live star until somebody presses a key.
-func TestParkedPickerPublishesAChatThatDiesWithoutAKeystroke(t *testing.T) {
-	root, tmuxBinary := presenceJail(t)
-	// The chat exists before the picker opens, so the picker parks WITH it.
-	const socket = "cx-1800000022-1-1"
-	startCodexStatusPane(t, root, socket, `  DOOMED · /work/example · Full Access\n`)
-	updates := parkedPresenceStream(t)
-
-	kill := exec.Command(tmuxBinary, "-L", socket, "kill-server")
-	kill.Env = append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+root)
-	if output, err := kill.CombinedOutput(); err != nil {
-		t.Fatalf("kill chat server: %v: %s", err, output)
-	}
-	awaitFullPass(t, updates, 5*time.Second, "a chat's server died")
-}
-
 // presenceEnv is a fleet whose socket and crumb directories are empty scratch
 // directories and whose processes are the kernel's own (an absent proc root
 // falls back to the native reader).

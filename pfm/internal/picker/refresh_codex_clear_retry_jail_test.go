@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -263,16 +262,6 @@ func TestParkedPickerRetriesWarnedBindingFailureWithUnchangedHeldRollout(t *test
 	}
 }
 
-type clearRetryIndexRunner struct{ calls int }
-
-func (runner *clearRetryIndexRunner) Run(context.Context, fleetindex.Options) (fleetindex.Counters, error) {
-	runner.calls++
-	if runner.calls == 3 {
-		return fleetindex.Counters{}, fmt.Errorf("injected post-clear index failure")
-	}
-	return fleetindex.Counters{}, nil
-}
-
 func runParkedCodexClear(t *testing.T, failRefresh bool) {
 	t.Helper()
 	shortenRefreshIntervals(t)
@@ -376,5 +365,43 @@ func appendCodexClearPrompt(t *testing.T, path string) {
 	}
 	if closeErr != nil {
 		t.Fatal(closeErr)
+	}
+}
+
+func codexJailRollout(t *testing.T, database *store.Store, root, id string, promptCount int64) string {
+	t.Helper()
+	rolloutPath := filepath.Join(
+		root,
+		"codex",
+		"sessions",
+		"2030",
+		"01",
+		"02",
+		"rollout-2030-01-02T03-04-05-"+id+".jsonl",
+	)
+	if err := os.MkdirAll(filepath.Dir(rolloutPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"type":"session_meta","payload":{"id":"` + id + `","thread_source":"user","cwd":"/work/example"}}` + "\n" +
+		`{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"first"}]}}` + "\n"
+	if err := os.WriteFile(rolloutPath, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.UpsertRollout(
+		context.Background(),
+		store.Rollout{ID: id, Path: rolloutPath, CWD: "/work/example", UserThread: true, PromptCount: promptCount},
+	); err != nil {
+		t.Fatal(err)
+	}
+	return rolloutPath
+}
+
+func codexPane(socket, paneID string) gather.ProbePane {
+	return gather.ProbePane{
+		Socket:         socket,
+		SessionName:    socket,
+		WindowID:       "@1",
+		PaneID:         paneID,
+		CurrentCommand: "codex",
 	}
 }

@@ -1,9 +1,5 @@
 package main
 
-// The watch ladder's discovery rungs: the scan snapshot watches share, the
-// fingerprint that spares a followed seat its scan, and the precheck's scan
-// serving the first poll. They run on the ladder in chat_watch_ladder_test.go.
-
 import (
 	"bytes"
 	"encoding/json"

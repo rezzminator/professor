@@ -16,21 +16,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
-// countingRunner is the real command runner with a call counter around it: the
-// statusline's own runner must never be handed tmux, since every tmux call goes
-// through internal/tmux, whose tmux.exec records tmuxExecs counts.
-type countingRunner struct {
-	inner commandRunner
-	tmux  int
-}
-
-func (runner *countingRunner) Output(ctx context.Context, name string, args ...string) ([]byte, error) {
-	if name == "tmux" {
-		runner.tmux++
-	}
-	return runner.inner.Output(ctx, name, args...)
-}
-
 // tmuxExecs counts the internal/tmux invocations a render recorded, keyed by
 // subcommand and "" for the total, so a fixture can assert the render forked
 // NOTHING once the window is converged, and reached tmux only through the façade.

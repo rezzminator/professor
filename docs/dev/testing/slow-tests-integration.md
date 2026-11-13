@@ -10,7 +10,7 @@ Observed durations come from the 2026-09-27 fenced `iso test pfm` capture (`-p 4
 
 ### TestInternalLaunchPrintExecsDirectlyWithoutTmux
 
-**Source:** [pfm/cmd/pfm/internal_launch_test.go](../../../pfm/cmd/pfm/internal_launch_test.go) line 189 · **Observed:** 3.54s · **Class:** process/subprocess
+**Source:** [pfm/cmd/pfm/internal_launch_test.go](../../../pfm/cmd/pfm/internal_launch_test.go) line 37 · **Observed:** 3.54s · **Class:** process/subprocess
 
 jailTest; exec.Command(os.Args[0], -test.run=...); helper launch uses PFM_TEST_LAUNCH_REAL; reads PFM_TMUX_DIR.
 
@@ -50,7 +50,7 @@ A — resolution is measured against real tmux servers and pane output.
 
 ### TestMCPHandshakeAndAllToolsOverJailedStdio
 
-**Source:** [pfm/internal/mcpserv/server_test.go](../../../pfm/internal/mcpserv/server_test.go) line 224 · **Observed:** 23.11s · **Class:** process/tmux/stdio
+**Source:** [pfm/internal/mcpserv/server_jail_test.go](../../../pfm/internal/mcpserv/server_jail_test.go) line 22 · **Observed:** 23.11s · **Class:** process/tmux/stdio
 
 newStdioJail starts tmux/Python fixtures; buildFleetBinary runs go build; mcp.CommandTransport runs binary and tools.
 
@@ -138,7 +138,7 @@ A — live chat and failed rename are proven through the jailed process path.
 
 ### TestMCPMalformedFrameReturnsJSONRPCError
 
-**Source:** [pfm/internal/mcpserv/server_stress_test.go](../../../pfm/internal/mcpserv/server_stress_test.go) line 184 · **Observed:** 3.64s · **Class:** process/stdio
+**Source:** [pfm/internal/mcpserv/server_stress_jail_test.go](../../../pfm/internal/mcpserv/server_stress_jail_test.go) line 14 · **Observed:** 3.64s · **Class:** process/stdio
 
 setupBackendPaths; buildFleetBinary; exec.Command(binary, ..., mcp); StdinPipe/StdoutPipe JSON-RPC.
 
@@ -154,7 +154,7 @@ A — critical busy-to-idle delivery contract uses a real pane.
 
 ### TestMCPMetadataThreadIdentityRoutesDistinctCodexSeats
 
-**Source:** [pfm/internal/mcpserv/metadata_identity_test.go](../../../pfm/internal/mcpserv/metadata_identity_test.go) line 273 · **Observed:** 3.02s · **Class:** process/tmux plus MCP
+**Source:** [pfm/internal/mcpserv/metadata_identity_jail_test.go](../../../pfm/internal/mcpserv/metadata_identity_jail_test.go) line 175 · **Observed:** 3.02s · **Class:** process/tmux plus MCP
 
 metadataIdentityService -> newStdioJail starts tmux/Python rows; in-memory MCP clients call capture/keys/call.
 
@@ -258,7 +258,7 @@ A — await behavior is exercised over a real jailed chat.
 
 ### TestMCPMetadataSignsExplicitTargetWithoutRedirectingIt
 
-**Source:** [pfm/internal/mcpserv/metadata_identity_test.go](../../../pfm/internal/mcpserv/metadata_identity_test.go) line 483 · **Observed:** 1.41s · **Class:** process/tmux plus MCP
+**Source:** [pfm/internal/mcpserv/metadata_identity_jail_test.go](../../../pfm/internal/mcpserv/metadata_identity_jail_test.go) line 473 · **Observed:** 1.41s · **Class:** process/tmux plus MCP
 
 metadataIdentityService -> real newStdioJail tmux/Python seats; in-memory MCP call; call capture.
 
@@ -314,7 +314,7 @@ A — current process status line is supplied by real tmux.
 
 ### TestChatEndWarnsButSucceedsWhenRolePromptRemovalFails
 
-**Source:** [pfm/cmd/pfm/chat_reload_command_test.go](../../../pfm/cmd/pfm/chat_reload_command_test.go) line 166 · **Observed:** 0.42s · **Class:** process/tmux/filesystem
+**Source:** [pfm/cmd/pfm/chat_reload_command_jail_test.go](../../../pfm/cmd/pfm/chat_reload_command_jail_test.go) line 84 · **Observed:** 0.42s · **Class:** process/tmux/filesystem
 
 newRunJail; real run chat new/end; sabotaged non-empty per-seat prompt path; tmux kill and warning check.
 
@@ -330,7 +330,7 @@ A — duplicate-name handling is driven by a live tmux status pane.
 
 ### TestChatEndRemovesTheRoleSeatPrompt
 
-**Source:** [pfm/cmd/pfm/chat_reload_command_test.go](../../../pfm/cmd/pfm/chat_reload_command_test.go) line 122 · **Observed:** 0.48s · **Class:** process/tmux/filesystem
+**Source:** [pfm/cmd/pfm/chat_reload_command_jail_test.go](../../../pfm/cmd/pfm/chat_reload_command_jail_test.go) line 29 · **Observed:** 0.48s · **Class:** process/tmux/filesystem
 
 newRunJail; real run chat new/end; agentrole.WriteSeatPrompt; tmux socket and per-seat prompt removal.
 

@@ -1,5 +1,3 @@
-// Package shim is a TEST HOME, not a source directory: it holds no shim of its
-// own. Tests always read the installer asset embedded into the pfm binary.
 package shim
 
 import (

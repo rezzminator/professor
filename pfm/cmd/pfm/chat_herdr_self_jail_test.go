@@ -151,18 +151,6 @@ func TestUnnamedHerdrSeatFindsItself(t *testing.T) {
 	}
 }
 
-// exitRecordingVerbs keeps every real chat verb but records exit's target
-// instead of running the detached exit choreography on the test process.
-type exitRecordingVerbs struct {
-	mcpserv.ChatVerbs
-	exits chan headless.Chat
-}
-
-func (verbs exitRecordingVerbs) Exit(_ context.Context, self headless.Chat) (string, error) {
-	verbs.exits <- self
-	return "recorded", nil
-}
-
 // stageNativeCallerProc writes a jailed /proc in which this test process runs
 // under seatID's seat host (pid 900001), the ancestry the Herdr caller proof
 // demands of a native seat's own process.

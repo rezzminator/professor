@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sync"
 	"syscall"
@@ -210,40 +209,5 @@ func TestAcquireAccountGuardRefusesAnAccountHeldPastTheGrace(t *testing.T) {
 	}
 	if waited := time.Since(started); waited < 60*time.Millisecond {
 		t.Fatalf("refused after %s, before the 60ms grace", waited)
-	}
-}
-
-// Acquire-and-close loops running beside goroutines that start processes never
-// see a busy account: a fork between open and exec must not fail the guard.
-func TestAcquireAccountGuardSurvivesConcurrentProcessStarts(t *testing.T) {
-	dir := t.TempDir()
-	stop := make(chan struct{})
-	var starters sync.WaitGroup
-	for range 4 {
-		starters.Add(1)
-		go func() {
-			defer starters.Done()
-			for {
-				select {
-				case <-stop:
-					return
-				default:
-					_ = exec.Command("true").Run()
-				}
-			}
-		}()
-	}
-	defer func() {
-		close(stop)
-		starters.Wait()
-	}()
-	for attempt := range 400 {
-		guard, err := AcquireAccountGuard(dir, false)
-		if err != nil {
-			t.Fatalf("acquire %d beside process starts: %v", attempt, err)
-		}
-		if err := guard.Close(); err != nil {
-			t.Fatal(err)
-		}
 	}
 }

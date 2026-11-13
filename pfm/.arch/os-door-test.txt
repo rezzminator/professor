@@ -1,10 +1,10 @@
 cmd/pfm/chat_name_jail_test.go 1
-cmd/pfm/chat_reload_command_test.go 1
+cmd/pfm/chat_reload_command_jail_test.go 1
 cmd/pfm/chat_reload_worker_jail_test.go 2
 cmd/pfm/chat_watch_ladder_test.go 1
 cmd/pfm/install_check_test.go 2
 cmd/pfm/install_command_test.go 2
-cmd/pfm/internal_launch_test.go 1
+cmd/pfm/internal_launch_jail_test.go 1
 cmd/pfm/reap_jail_test.go 1
 cmd/pfm/testmain_test.go 1
 e2e/doctor_expectations_e2e_test.go 2

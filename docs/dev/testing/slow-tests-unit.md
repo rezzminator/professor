@@ -138,7 +138,7 @@ U — “real fetch” means production fetch path, while HTTP transport is mock
 
 ### TestV4MigrationAddsCxNameProvenanceIdempotently
 
-**Source:** [pfm/internal/store/queries_test.go](../../../pfm/internal/store/queries_test.go) line 377 · **Observed:** 0.21s · **Class:** SQLite/migrations
+**Source:** [pfm/internal/store/queries_jail_test.go](../../../pfm/internal/store/queries_jail_test.go) line 16 · **Observed:** 0.21s · **Class:** SQLite/migrations
 
 setStoreTestJail; temp SQLite schema v1-v3 and row; openTestStore migration/reopen; query checks.
 
@@ -146,7 +146,7 @@ U — local temp database and SQL migration path, with no external process.
 
 ### TestEnsureOpenCodeSessionsAssistantCountAddsColumnIdempotently
 
-**Source:** [pfm/internal/store/queries_test.go](../../../pfm/internal/store/queries_test.go) line 500 · **Observed:** 0.54s · **Class:** SQLite/migrations
+**Source:** [pfm/internal/store/queries_jail_test.go](../../../pfm/internal/store/queries_jail_test.go) line 87 · **Observed:** 0.54s · **Class:** SQLite/migrations
 
 setStoreTestJail; temp SQLite schema v8; openTestStore ALTER/reopen; row round-trip.
 

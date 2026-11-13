@@ -1,11 +1,11 @@
 ---
 visible-to:
-  include: ["main"]
+  include: ["main", "flights:speccer"]
 ---
 
 # Flights: one worktree, one lander
 
-Binds the main chat, owner of the place, the landing and git; a sub-agent follows its brief.
+Binds the main chat, owner of the place, the landing and git; `flights:speccer` shapes its `## Phases` by rules 2, 4, 6 and 7 and places, dispatches and lands nothing; any other sub-agent follows its brief.
 
 1. Settle open requirements with the user before any dispatch.
 2. A flight builds code: program source and its tests. Docs and framework files (prompts, rules, commands, agents, config, scripts) never make one, whatever judgment they hold. Size = judgment left in the code edits, never file count; small = every edit fixed in advance (rename, move, known fix, a spec fixing every line), no other agent writing its files. Outside rule 6, make non-code and small work on the current branch, no worktree or lander, by hand or by the agent a guard reserves its files to (`pcm`; for code, one foreman), small code in a worktree only where the project's CLAUDE.md demands an isolated build; run its affected tests, the full gate when it spans layers or the project's done-gate requires it, and hand `gitter` the passing check. Judgment left: `.claude/scripts/worktree.sh create {flight}` (the script); refused or absent, `gitter` SETUP; each brief carries the worktree's absolute path.

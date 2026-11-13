@@ -307,7 +307,7 @@ func Run(
 		enginesync.HostCapabilities(runtime.Config.Claude.GptAgents),
 		runtime.Config.ClaudeConfigDirs(),
 		update.RetiredRegistryNames(retiredLists.Names),
-		runtime.Config.CodexHomes(),
+		runtime.Config.CodexHomes(), nil,
 	)
 	tally.warnings += globalAgentsWarnings
 	tally.failures += globalAgentsFailures
@@ -362,7 +362,7 @@ func Run(
 	)
 	tally.warnings += professor.PrintDoctor(stdout, ".", resolved.Home)
 	projectWarnings := printOpenProjectsDoctor(ctx, stdout, database, databaseErr, resolved.Home, dependencies.Env)
-	workbenchWarnings, workbenchFailures := printWorkbenchDoctor(stdout, ".", resolved.Home)
+	workbenchWarnings, workbenchFailures := printWorkbenchDoctor(stdout, ".", resolved.Home, dependencies.Runner)
 	tally.warnings += workbenchWarnings
 	tally.failures += workbenchFailures
 

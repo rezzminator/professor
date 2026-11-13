@@ -396,7 +396,7 @@ func TestExecutorWorkbenchPrep(t *testing.T) {
 				if test.fail && test.kind == compose.ResumeCodex {
 					reply, code = testjail.FailedMirrorReply, 1
 				}
-				record := testjail.FakeEngineSync(t, reply, code)
+				record, engineSync := testjail.FakeEngineSyncRunner(t, reply, code)
 				if test.fail && test.kind == compose.NewOpenCode {
 					if err := atomicfile.Write(
 						filepath.Join(request.Home, ".local", "state", "pfm"),
@@ -420,7 +420,9 @@ func TestExecutorWorkbenchPrep(t *testing.T) {
 					}
 				}
 				var stderr bytes.Buffer
-				executor, err := New(Dependencies{Tmux: tmux, Processes: &fakeProcesses{}, Stderr: &stderr})
+				executor, err := New(Dependencies{
+					Tmux: tmux, Processes: &fakeProcesses{}, Stderr: &stderr, EngineSyncRunner: engineSync,
+				})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -446,7 +448,7 @@ func TestExecutorWorkbenchPrep(t *testing.T) {
 					if personaErr != nil {
 						t.Fatal(personaErr)
 					}
-					mirrorErr := workbench.EnsureMirror(persona.Bench, pfmengine.Codex, request.Home)
+					mirrorErr := workbench.EnsureMirror(persona.Bench, pfmengine.Codex, request.Home, engineSync)
 					if mirrorErr == nil {
 						t.Fatal("mirror fixture did not fail")
 					}

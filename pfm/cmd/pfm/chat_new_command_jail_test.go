@@ -186,7 +186,7 @@ func TestChatNewWorkbench(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					err = workbench.EnsureMirror(persona.Bench, pfmengine.Codex, runtime.Paths.Home)
+					err = workbench.EnsureMirror(persona.Bench, pfmengine.Codex, runtime.Paths.Home, nil)
 					if err == nil {
 						t.Fatal("mirror fixture must fail")
 					}

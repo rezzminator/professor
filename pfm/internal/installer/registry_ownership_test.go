@@ -368,7 +368,7 @@ func reportRegistries(h ownershipHome) (rows []string, warnings, failures int) {
 	warnings, failures = ReportGlobalRegistries(
 		&output, h.home, true,
 		&paths.MapEnv{Values: map[string]string{enginesync.EnvBin: testjail.EngineSyncBin()}},
-		nil, nil, ownershipRetired, nil,
+		nil, nil, ownershipRetired, nil, nil,
 	)
 	return registryRows(output.String()), warnings, failures
 }
@@ -509,7 +509,7 @@ func TestRulesDoctorRows(t *testing.T) {
 		warnings, failures = ReportGlobalRegistries(
 			&output, h.home, true,
 			&paths.MapEnv{Values: map[string]string{enginesync.EnvBin: testjail.EngineSyncBin()}},
-			nil, nil, ownershipRetired, nil,
+			nil, nil, ownershipRetired, nil, nil,
 		)
 		return rulesRows(output.String()), warnings, failures
 	}

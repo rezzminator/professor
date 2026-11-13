@@ -5,32 +5,49 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
-// fakeBinary writes an engine-sync stand-in at path that records its argv,
-// one argument per line, at path+".argv", prints stdout and stderr and exits
-// with code.
-func fakeBinary(t *testing.T, path, stdout, stderr string, code int) {
+// fakeBinary writes an engine-sync stand-in at path that Resolve stats and
+// nothing runs: a Runner reaches it through fakeExec.
+func fakeBinary(t *testing.T, path string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	quote := func(text string) string { return "'" + strings.ReplaceAll(text, "'", `'\''`) + "'" }
-	script := "#!/bin/sh\n" +
-		"for arg; do printf '%s\\n' \"$arg\"; done > " + quote(path+".argv") + "\n" +
-		"printf '%s' " + quote(stdout) + "\n" +
-		"printf '%s' " + quote(stderr) + " >&2\n" +
-		"printf '%s\n' \"$ENGINE_SYNC_WORKBENCH_MARKER\" > " + quote(path+".marker") + "\n" +
-		"exit " + strconv.Itoa(code) + "\n"
-	if err := testjail.WriteExecutable(path, []byte(script), 0o755); err != nil {
+	if err := testjail.WriteExecutableNeverRun(path, []byte("#!/bin/sh\nexit 97\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// fakeExec plays the engine-sync binary: each Run records the argv after the
+// binary, one argument per line, at {binary}.argv and the child's
+// ENGINE_SYNC_WORKBENCH_MARKER at {binary}.marker, then answers as scripted.
+type fakeExec struct{ *deps.FakeRunner }
+
+func (fake fakeExec) Run(ctx context.Context, argv []string, opts deps.RunOptions) (deps.RunResult, error) {
+	var lines strings.Builder
+	for _, arg := range argv[1:] {
+		lines.WriteString(arg + "\n")
+	}
+	marker := ""
+	for _, entry := range opts.Env {
+		if value, ok := strings.CutPrefix(entry, "ENGINE_SYNC_WORKBENCH_MARKER="); ok {
+			marker = value
+		}
+	}
+	if err := os.WriteFile(argv[0]+".argv", []byte(lines.String()), 0o600); err != nil {
+		return deps.RunResult{ExitCode: -1}, err
+	}
+	if err := os.WriteFile(argv[0]+".marker", []byte(marker+"\n"), 0o600); err != nil {
+		return deps.RunResult{ExitCode: -1}, err
+	}
+	return fake.FakeRunner.Run(ctx, argv, opts)
 }
 
 func recordedArgv(t *testing.T, path string) []string {
@@ -49,10 +66,10 @@ func TestResolveOrder(t *testing.T) {
 	stableUnderHome := filepath.Join(home, ".local", "share", "engine-sync", "bin", "engine-sync")
 	stableUnderXDG := filepath.Join(root, "xdg", "engine-sync", "bin", "engine-sync")
 	stableUnderOwnHome := filepath.Join(root, "own", "bin", "engine-sync")
-	fakeBinary(t, override, "", "", 0)
-	fakeBinary(t, stableUnderHome, "", "", 0)
-	fakeBinary(t, stableUnderXDG, "", "", 0)
-	fakeBinary(t, stableUnderOwnHome, "", "", 0)
+	fakeBinary(t, override)
+	fakeBinary(t, stableUnderHome)
+	fakeBinary(t, stableUnderXDG)
+	fakeBinary(t, stableUnderOwnHome)
 	cases := []struct {
 		name string
 		env  map[string]string
@@ -94,7 +111,7 @@ func TestResolveRefusesANonExecutableOverrideNamingIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	stable := filepath.Join(root, ".local", "share", "engine-sync", "bin", "engine-sync")
-	fakeBinary(t, stable, "", "", 0)
+	fakeBinary(t, stable)
 	runner := Runner{Env: &paths.MapEnv{Values: map[string]string{EnvBin: notExecutable}}, Home: root}
 	got, err := runner.Resolve()
 	var unavailable *UnavailableError

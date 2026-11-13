@@ -78,7 +78,7 @@ func goneProbe(int) error { return syscall.ESRCH }
 
 func writeExecutable(t *testing.T, path string) {
 	t.Helper()
-	if err := testjail.WriteExecutable(path, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutableNeverRun(path, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 }

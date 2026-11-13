@@ -144,7 +144,7 @@ func TestInstallSkipsPrePushGateWhenGitIsUnavailable(t *testing.T) {
 	if err := os.MkdirAll(hooks, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := testjail.WriteExecutable(
+	if err := testjail.WriteExecutableNeverRun(
 		filepath.Join(hooks, "pre-push"),
 		[]byte("#!/bin/sh\nexit 0\n"),
 		0o700,

@@ -15,7 +15,6 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
-	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 const (
@@ -475,7 +474,7 @@ func rpc(parent context.Context, binary, account, method string, params any) (js
 		}
 	}
 	env = append(env, "CODEX_HOME="+account)
-	process, err := obs.Runner(deps.RealRunner{}).Start(ctx, []string{binary, "app-server"}, deps.StartOptions{
+	process, err := appServerRunner(parent).Start(ctx, []string{binary, "app-server"}, deps.StartOptions{
 		Dir: account, Env: env, ProcessGroup: true, StdinPipe: true, StdoutPipe: true,
 		WaitDelay: 250 * time.Millisecond,
 	})

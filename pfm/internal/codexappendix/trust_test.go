@@ -1,18 +1,20 @@
 package codexappendix
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
-	"strconv"
+	"reflect"
 	"strings"
-	"syscall"
+	"sync"
 	"testing"
-	"time"
 
-	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
 const (
@@ -20,20 +22,85 @@ const (
 	trustHash    = "sha256:deadbeef"
 )
 
-// fakeAppServer answers `codex app-server` over stdio: initialize, then
-// hooks/list with the given status, then config/value/write; every request line
-// is appended to the log.
-const fakeAppServer = `#!/bin/sh
-LOG='@LOG@'
-while IFS= read -r line; do
-  printf '%s\n' "$line" >> "$LOG"
-  case "$line" in
-    *'"method":"initialize"'*) printf '%s\n' '{"id":0,"result":{}}' ;;
-    *'"method":"hooks/list"'*) printf '%s\n' '@LIST@' ;;
-    *'"method":"config/value/write"'*) printf '%s\n' '{"id":1,"result":{}}' ;;
-  esac
-done
-`
+// fakeAppServer plays `codex app-server` over stdio for every start: initialize,
+// then hooks/list with the staged list, then config/value/write; every request
+// line is appended to the log. Each start is scripted on its own FakeRunner, so
+// every exchange gets fresh pipes, and is kept on Starts.
+type fakeAppServer struct {
+	*deps.FakeRunner
+	list, requestLog string
+	// writeReply answers config/value/write; exits makes the app-server exit
+	// at start, reading and answering nothing.
+	writeReply string
+	exits      bool
+	mu         sync.Mutex
+	starts     []deps.StartCall
+}
+
+func (fake *fakeAppServer) Start(ctx context.Context, argv []string, opts deps.StartOptions) (deps.Process, error) {
+	stdinReader, stdinWriter := io.Pipe()
+	stdoutReader, stdoutWriter := io.Pipe()
+	if fake.exits {
+		_ = stdinReader.Close()
+		_ = stdoutWriter.Close()
+	} else {
+		go fake.serve(stdinReader, stdoutWriter)
+	}
+	child := &deps.FakeRunner{}
+	child.ScriptInteractive(
+		[]string{argv[0], "app-server"},
+		deps.InteractiveScript{Pid: 4242, Stdin: stdinWriter, Stdout: stdoutReader},
+	)
+	process, err := child.Start(ctx, argv, opts)
+	fake.mu.Lock()
+	fake.starts = append(fake.starts, child.Starts()...)
+	fake.mu.Unlock()
+	return process, err
+}
+
+// Starts returns every app-server start, in order.
+func (fake *fakeAppServer) Starts() []deps.StartCall {
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	return append([]deps.StartCall(nil), fake.starts...)
+}
+
+func (fake *fakeAppServer) serve(stdin *io.PipeReader, stdout *io.PipeWriter) {
+	// Replies queue apart from the reads: rpc sends every request before it
+	// reads a reply, as a real pipe's buffer lets it.
+	replies := make(chan string, 8)
+	var serveErr error
+	go func() {
+		for reply := range replies {
+			_, _ = stdout.Write([]byte(reply + "\n"))
+		}
+		_ = stdout.CloseWithError(serveErr)
+	}()
+	defer close(replies)
+	scanner := bufio.NewScanner(stdin)
+	scanner.Buffer(make([]byte, 65536), 1<<20)
+	for scanner.Scan() {
+		line := scanner.Text()
+		log, err := os.OpenFile(fake.requestLog, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+		if err == nil {
+			_, err = log.WriteString(line + "\n")
+			err = errors.Join(err, log.Close())
+		}
+		if err != nil {
+			serveErr = fmt.Errorf("log the app-server request in %s: %w", fake.requestLog, err)
+			return
+		}
+		switch {
+		case strings.Contains(line, `"method":"initialize"`):
+			replies <- `{"id":0,"result":{}}`
+		case strings.Contains(line, `"method":"hooks/list"`):
+			replies <- fake.list
+		case strings.Contains(line, `"method":"config/value/write"`):
+			replies <- fake.writeReply
+		}
+	}
+	serveErr = scanner.Err()
+}
 
 type listedHook struct {
 	Key         string `json:"key"`
@@ -62,8 +129,9 @@ func ownHook(account, status string) listedHook {
 	}
 }
 
-// stageTrustAccount writes the account's hooks.json and a fake codex binary that
-// lists the given hooks; it returns the physical account, the binary and the log.
+// stageTrustAccount writes the account's hooks.json and points the app-server
+// start at a fakeAppServer listing the given hooks; it returns the physical
+// account, the codex binary it is started as and the log.
 func stageTrustAccount(t *testing.T, build func(account string) []listedHook) (account, binary, requestLog string) {
 	t.Helper()
 	root := t.TempDir()
@@ -86,10 +154,11 @@ func stageTrustAccount(t *testing.T, build func(account string) []listedHook) (a
 	}
 	requestLog = filepath.Join(root, "requests.log")
 	binary = filepath.Join(root, "fake-codex")
-	script := strings.NewReplacer("@LOG@", requestLog, "@LIST@", string(list)).Replace(fakeAppServer)
-	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
+	processRunner = &fakeAppServer{
+		FakeRunner: &deps.FakeRunner{}, list: string(list), requestLog: requestLog,
+		writeReply: `{"id":1,"result":{}}`,
 	}
+	t.Cleanup(func() { processRunner = nil })
 	return account, binary, requestLog
 }
 
@@ -120,22 +189,19 @@ func TestRegisterHookTrustAppServerDropsTheHerdrPane(t *testing.T) {
 	account, binary, _ := stageTrustAccount(t, func(account string) []listedHook {
 		return []listedHook{ownHook(account, "untrusted")}
 	})
-	envLog := filepath.Join(t.TempDir(), "env.log")
-	raw, err := os.ReadFile(binary)
-	if err != nil {
-		t.Fatal(err)
-	}
-	wrapped := strings.Replace(string(raw), "#!/bin/sh\n", "#!/bin/sh\n/usr/bin/env > '"+envLog+"'\n", 1)
-	if err := testjail.WriteExecutable(binary, []byte(wrapped), 0o700); err != nil {
-		t.Fatal(err)
-	}
 	if err := registerOwn(binary, account); err != nil {
 		t.Fatalf("RegisterHookTrust: %v", err)
 	}
-	seen, err := os.ReadFile(envLog)
-	if err != nil {
-		t.Fatal(err)
+	starts := processRunner.(*fakeAppServer).Starts()
+	for _, start := range starts {
+		if want := []string{binary, "app-server"}; !reflect.DeepEqual(start.Argv, want) {
+			t.Fatalf("app-server start argv = %q, want %q", start.Argv, want)
+		}
 	}
+	if len(starts) == 0 {
+		t.Fatal("RegisterHookTrust started no app-server")
+	}
+	seen := []byte(strings.Join(starts[len(starts)-1].Opts.Env, "\n") + "\n")
 	if !strings.Contains(string(seen), "CODEX_HOME="+account+"\n") {
 		t.Errorf("CODEX_HOME not pointed at %s: %s", account, seen)
 	}
@@ -273,16 +339,8 @@ func TestRegisterHookTrustRecordsReceiptOnlyAfterAcceptedWrite(t *testing.T) {
 	account, binary, requestLog := stageTrustAccount(t, func(account string) []listedHook {
 		return []listedHook{ownHook(account, "untrusted")}
 	})
-	script, err := os.ReadFile(binary)
-	if err != nil {
-		t.Fatal(err)
-	}
-	script = []byte(strings.ReplaceAll(string(script), `{"id":1,"result":{}}`,
-		`{"id":1,"error":{"code":-1,"message":"denied"}}`))
-	if err := testjail.WriteExecutable(binary, script, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	err = registerOwn(binary, account)
+	processRunner.(*fakeAppServer).writeReply = `{"id":1,"error":{"code":-1,"message":"denied"}}`
+	err := registerOwn(binary, account)
 	if err == nil || !strings.HasPrefix(err.Error(), "write hook trust ") || !strings.Contains(err.Error(), "denied") {
 		t.Fatalf("registration error=%v, want write hook trust denial", err)
 	}
@@ -365,14 +423,11 @@ func TestNativeHookTrustState(t *testing.T) {
 			}
 			key := account + "/hooks.json:session_start:0:0"
 			writeReceiptFile(t, account, `{"`+key+`":"`+trustHash+`"}`)
-			if variant == "malformed" || variant == "failed" {
-				script := "#!/bin/sh\nexit 1\n"
-				if variant == "malformed" {
-					script = "#!/bin/sh\nwhile IFS= read -r line; do\ncase \"$line\" in\n*'\"method\":\"initialize\"'*) echo '{\"id\":0,\"result\":{}}';;\n*'\"method\":\"hooks/list\"'*) echo '{\"id\":1,\"result\":{\"data\":null}}';;\nesac\ndone\n"
-				}
-				if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
-					t.Fatal(err)
-				}
+			switch variant {
+			case "malformed":
+				processRunner.(*fakeAppServer).list = `{"id":1,"result":{"data":null}}`
+			case "failed":
+				processRunner.(*fakeAppServer).exits = true
 			}
 			trusted, err := NativeHookTrustState(t.Context(), binary, account, ownHandler)
 			if variant == "disabled" && !errors.Is(err, ErrNativeHookDisabled) {
@@ -541,63 +596,3 @@ func TestNativeHookTrustStatesNameAReceiptThatRecordsNoOwnedHandler(t *testing.T
 // A cancelled exchange kills the helper's whole process group: the app-server
 // and a descendant it started are both gone once rpc returns, within the
 // 250 ms pipe bound plus a second of polling.
-func TestRPCCancelKillsTheHelpersProcessGroup(t *testing.T) {
-	root := t.TempDir()
-	pidFile := filepath.Join(root, "pids")
-	binary := filepath.Join(root, "fake-codex")
-	script := "#!/bin/sh\nsleep 60 &\necho \"$$ $!\" > '" + pidFile + ".tmp' && mv '" + pidFile + ".tmp' '" + pidFile + "'\n" +
-		"while IFS= read -r line; do :; done\n"
-	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	var pids []int
-	t.Cleanup(func() {
-		for _, pid := range pids {
-			_ = syscall.Kill(pid, syscall.SIGKILL)
-		}
-	})
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	returned := make(chan error, 1)
-	go func() {
-		_, err := rpc(ctx, binary, root, "hooks/list", map[string]any{})
-		returned <- err
-	}()
-	deadline := time.Now().Add(10 * time.Second)
-	for len(pids) == 0 {
-		if raw, err := os.ReadFile(pidFile); err == nil {
-			for _, field := range strings.Fields(string(raw)) {
-				pid, convErr := strconv.Atoi(field)
-				if convErr != nil {
-					t.Fatalf("parse pid %q from %s: %v", field, pidFile, convErr)
-				}
-				pids = append(pids, pid)
-			}
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("the fake app-server never wrote %s", pidFile)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	if len(pids) != 2 {
-		t.Fatalf("%s holds pids %v, want the app-server and its descendant", pidFile, pids)
-	}
-	cancel()
-	select {
-	case err := <-returned:
-		if want := "native hook API: context canceled"; err == nil || err.Error() != want {
-			t.Fatalf("rpc after cancel = %v, want %q", err, want)
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("rpc did not return within 10s of its cancellation")
-	}
-	deadline = time.Now().Add(250*time.Millisecond + time.Second)
-	for _, pid := range pids {
-		for !errors.Is(syscall.Kill(pid, 0), syscall.ESRCH) {
-			if time.Now().After(deadline) {
-				t.Fatalf("pid %d of the helper's group survived the cancelled exchange", pid)
-			}
-			time.Sleep(20 * time.Millisecond)
-		}
-	}
-}

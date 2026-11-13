@@ -66,6 +66,7 @@ internal/chat/end_tmux_jail_test.go 2
 internal/chat/kill_server_jail_test.go 1
 internal/chat/kill_server_linux_jail_test.go 1
 internal/chat/tmux_jail_test.go 3
+internal/codexappendix/trust_jail_test.go 1
 internal/config/tmux_titles_render_jail_test.go 1
 internal/deps/probe_home_jail_test.go 3
 internal/doctor/engine_roster_jail_test.go 1
@@ -112,11 +113,17 @@ internal/hookentry/herdr_state_tmux_jail_test.go 2
 internal/hookentry/launch_jail_test.go 1
 internal/hookentry/seathost_remote_control_linux_jail_test.go 2
 internal/index/opencode_jail_test.go 1
-internal/installer/herdr_shell_jail_test.go 2
+internal/installer/claude_plugins_jail_test.go 1
+internal/installer/herdr_shell_jail_test.go 3
+internal/installer/launcher_jail_test.go 1
+internal/installer/login_default_jail_test.go 1
 internal/installer/managed_cleanup_jail_test.go 1
-internal/installer/managed_install_jail_test.go 1
+internal/installer/managed_install_jail_test.go 2
+internal/installer/mcp_recovery_jail_test.go 1
+internal/installer/mcp_wiring_jail_test.go 1
 internal/installer/shim/chat_server_shim_jail_test.go 3
 internal/installer/shim/shim_jail_test.go 11
+internal/installer/skill_sources_jail_test.go 1
 internal/installer/vscode_choose_jail_test.go 4
 internal/installer/vscode_extension_jail_test.go 2
 internal/installer/vscode_native_jail_test.go 10

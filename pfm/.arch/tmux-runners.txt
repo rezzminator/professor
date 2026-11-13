@@ -1,4 +1,3 @@
-cmd/pfm/chat_satellite_command.go
 internal/action/dispatch.go
 internal/doctor/herdr_check.go
 internal/hookentry/launch.go

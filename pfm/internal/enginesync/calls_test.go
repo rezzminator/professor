@@ -7,14 +7,21 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 func fakeRunner(t *testing.T, stdout, stderr string, code int) (Runner, string) {
 	t.Helper()
 	binary := filepath.Join(t.TempDir(), "engine-sync")
-	fakeBinary(t, binary, stdout, stderr, code)
-	return Runner{Env: &paths.MapEnv{Values: map[string]string{EnvBin: binary}}, Home: "/h"}, binary
+	fakeBinary(t, binary)
+	fake := &deps.FakeRunner{}
+	fake.Script([]string{binary}, deps.RunResult{Stdout: []byte(stdout), Stderr: []byte(stderr), ExitCode: code}, nil)
+	return Runner{
+		Env:  &paths.MapEnv{Values: map[string]string{EnvBin: binary}},
+		Home: "/h",
+		Exec: fakeExec{fake},
+	}, binary
 }
 
 func TestMirror(t *testing.T) {

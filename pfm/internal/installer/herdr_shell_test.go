@@ -116,7 +116,7 @@ func TestHerdrShellInspectionDetectsAndRepairsExecutableDrift(t *testing.T) {
 			case "replace":
 				broken = strings.Replace(string(raw), "unset PFM_AUTO_OPEN", "#unset PFM_AUTO_OPEN", 1)
 			}
-			if err := testjail.WriteExecutable(wrapper, []byte(broken), 0o755); err != nil {
+			if err := testjail.WriteExecutableNeverRun(wrapper, []byte(broken), 0o755); err != nil {
 				t.Fatal(err)
 			}
 			status, err := InspectHerdrShell(installer.options.Home, installer.env())
@@ -156,7 +156,7 @@ func TestHerdrShellRefreshesOwnedWrapper(t *testing.T) {
 	if stale == string(raw) {
 		t.Fatal("fixture has no captured shell to replace")
 	}
-	if err := testjail.WriteExecutable(wrapper, []byte(stale), 0o755); err != nil {
+	if err := testjail.WriteExecutableNeverRun(wrapper, []byte(stale), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	installer.options.Env = &paths.MapEnv{Values: map[string]string{"SHELL": "/bin/sh"}}
@@ -410,29 +410,6 @@ func TestHerdrShellHoldsThemeLockWhileWriting(t *testing.T) {
 	}
 }
 
-func TestHerdrShellMissingCapturedShellFallsBack(t *testing.T) {
-	installer, _, _ := herdrShellInstaller(t, "", true)
-	shell := writeScript(t, t.TempDir(), "zsh", "#!/bin/sh\nexit 0\n")
-	runner := &deps.FakeRunner{}
-	runner.ScriptLookPath("herdr", "/fixture/herdr", nil)
-	scriptLoginShell(runner, shell, nil)
-	installer.options.ProcessRunner = runner
-	if err := installer.wireHerdrShell(false); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Remove(shell); err != nil {
-		t.Fatal(err)
-	}
-	wrapper := paths.HerdrShellWrapper(installer.options.Home)
-	cmd := exec.Command(wrapper, "-c", "printf 'shell=%s auto=%s' \"$SHELL\" \"${PFM_AUTO_OPEN-unset}\"")
-	cmd.Env = append(os.Environ(), "SHELL="+wrapper, "PFM_AUTO_OPEN=pfm")
-	out, err := cmd.CombinedOutput()
-	if err != nil || !strings.Contains(string(out), "not executable; using /bin/sh") ||
-		!strings.Contains(string(out), "shell=/bin/sh auto=unset") {
-		t.Fatalf("missing shell did not leave a usable fallback: %s err=%v", out, err)
-	}
-}
-
 func TestHerdrShellLoginLookupFallback(t *testing.T) {
 	for _, name := range []string{
 		"executable", "unset", "missing", "nonexecutable", "directory", "relative", "wrapper", "wrapper symlink", "invalid login",
@@ -445,7 +422,8 @@ func TestHerdrShellLoginLookupFallback(t *testing.T) {
 			login, lookupErr := "/bin/zsh", errors.New("account database unavailable")
 			switch name {
 			case "executable":
-				fallback = writeScript(t, t.TempDir(), "bash", "#!/bin/sh\nexit 0\n")
+				fallback = filepath.Join(t.TempDir(), "bash")
+				writeExecutable(t, fallback)
 				want = fallback
 			case "missing":
 				fallback = filepath.Join(t.TempDir(), "gone")
@@ -462,7 +440,7 @@ func TestHerdrShellLoginLookupFallback(t *testing.T) {
 				if err := os.MkdirAll(filepath.Dir(wrapper), 0o700); err != nil {
 					t.Fatal(err)
 				}
-				if err := testjail.WriteExecutable(wrapper, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+				if err := testjail.WriteExecutableNeverRun(wrapper, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 					t.Fatal(err)
 				}
 				fallback = wrapper

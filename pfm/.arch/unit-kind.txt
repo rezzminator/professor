@@ -1,5 +1,5 @@
-cmd/pfm 32
-internal/action 17
+cmd/pfm 30
+internal/action 16
 internal/agentlauncher 2
 internal/agentopen 8
 internal/ask 5
@@ -7,21 +7,18 @@ internal/binwatch 3
 internal/call 5
 internal/chat 16
 internal/cmdparse 1
-internal/codexappendix 12
 internal/costsink 2
-internal/doctor 3
-internal/enginesync 7
 internal/herdr 2
 internal/hookentry 21
 internal/hostcheck 9
 internal/index 2
-internal/installer 110
+internal/installer 13
 internal/kill 5
 internal/mcpserv 1
 internal/picker 2
 internal/professor 16
 internal/reap 9
-internal/reload 6
+internal/reload 5
 internal/resolve 5
 internal/restart 2
 internal/servicemanager 1
@@ -33,4 +30,4 @@ internal/tmux 11
 internal/ui 1
 internal/update 57
 internal/usagehook 6
-internal/workbench 4
+internal/workbench 1

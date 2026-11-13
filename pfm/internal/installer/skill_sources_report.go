@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/globallink"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -241,8 +242,9 @@ func ReportGlobalRegistries(
 	accountDirs []string,
 	retired RetiredRegistryNames,
 	codexHomes []string,
+	runner deps.Runner,
 ) (warnings, failures int) {
-	warnings, failures = ReportGlobalAgents(w, home, claudeAbsent, env, capabilities, accountDirs, codexHomes)
+	warnings, failures = ReportGlobalAgents(w, home, claudeAbsent, env, capabilities, accountDirs, codexHomes, runner)
 	skillWarnings, skillFailures := ReportSkillSources(w, home, paths.SkillSourcesOfflineIn(env))
 	warnings += skillWarnings
 	failures += skillFailures

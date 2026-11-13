@@ -17,6 +17,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/action"
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
@@ -136,7 +137,7 @@ func RunHerdr(
 			return Result{}, err
 		}
 	}
-	updated, run, err := nativeReloadRecipe(request, resumed, old, stderr)
+	updated, run, err := nativeReloadRecipe(request, resumed, old, options.EngineSyncRunner, stderr)
 	if err != nil {
 		return Result{}, err
 	}
@@ -287,6 +288,7 @@ func nativeReloadRecipe(
 	request Request,
 	seat fleetdb.Seat,
 	old fleetdb.SeatRun,
+	engineSync deps.Runner,
 	stderr io.Writer,
 ) (Request, fleetdb.SeatRun, error) {
 	for _, word := range append(append([]string{old.Binary, old.CWD}, old.Args...), old.Env...) {
@@ -325,7 +327,7 @@ func nativeReloadRecipe(
 			request.SessionID = id
 		}
 	}
-	request, err = applyReloadWorkbench(request, stderr)
+	request, err = applyReloadWorkbench(request, engineSync, stderr)
 	if err != nil {
 		return request, fleetdb.SeatRun{}, err
 	}

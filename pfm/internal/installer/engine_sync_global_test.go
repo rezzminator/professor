@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -53,7 +54,8 @@ const everyEventReply = `{"ok":true,"events":[` +
 
 func TestWireEngineSyncGlobalRendersEveryEvent(t *testing.T) {
 	installer, output, home := engineSyncGlobalEngine(t, ModeApply, nil)
-	record := testjail.FakeEngineSync(t, everyEventReply, 0)
+	record, engineSync := testjail.FakeEngineSyncRunner(t, everyEventReply, 0)
+	installer.options.EngineSyncRunner = engineSync
 	if err := installer.wireEngineSyncGlobal(nil); err != nil {
 		t.Fatalf("wireEngineSyncGlobal: %v\n%s", err, output.String())
 	}
@@ -118,7 +120,8 @@ func TestWireEngineSyncGlobalArgv(t *testing.T) {
 			if testCase.name == "an uninstall preview" {
 				installer.apply = false
 			}
-			record := testjail.FakeEngineSync(t, `{"ok":true,"events":[],"error":""}`, 0)
+			record, engineSync := testjail.FakeEngineSyncRunner(t, `{"ok":true,"events":[],"error":""}`, 0)
+			installer.options.EngineSyncRunner = engineSync
 			if err := installer.wireEngineSyncGlobal(nil); err != nil {
 				t.Fatalf("wireEngineSyncGlobal: %v\n%s", err, output.String())
 			}
@@ -150,7 +153,8 @@ func TestWireEngineSyncGlobalConflictBlocksTheApplyAndIsAPlanError(t *testing.T)
 	reply := `{"ok":false,"events":[{"verb":"conflict","message":"CONFLICT /h/.codex/prompts/a.md"}],"error":""}`
 	for _, mode := range []Mode{ModeApply, ModeDryRun} {
 		installer, output, _ := engineSyncGlobalEngine(t, mode, nil)
-		testjail.FakeEngineSync(t, reply, 1)
+		_, engineSync := testjail.FakeEngineSyncRunner(t, reply, 1)
+		installer.options.EngineSyncRunner = engineSync
 		err := installer.wireEngineSyncGlobal(nil)
 		if !strings.Contains(output.String(), "  conflict CONFLICT /h/.codex/prompts/a.md\n") {
 			t.Fatalf("mode %d transcript lacks the conflict:\n%s", mode, output.String())
@@ -258,12 +262,13 @@ func TestBinaryOnlyInstallWithoutEngineSync(t *testing.T) {
 // the apply applies, and its events land in the install's own transcript.
 func TestInstallAndUninstallRunEngineSyncGlobal(t *testing.T) {
 	home := t.TempDir()
-	record := testjail.FakeEngineSync(t, everyEventReply, 0)
+	record, engineSync := testjail.FakeEngineSyncRunner(t, everyEventReply, 0)
 	for _, mode := range []Mode{ModeApply, ModeUninstall} {
 		var output bytes.Buffer
 		if _, err := Run(context.Background(), Options{
-			MCPConfigPath: testConfigPath(t),
-			Mode:          mode, Home: home, Stdout: &output, Runner: &fakeRunner{},
+			EngineSyncRunner: engineSync,
+			MCPConfigPath:    testConfigPath(t),
+			Mode:             mode, Home: home, Stdout: &output, Runner: &fakeRunner{},
 		}); err != nil {
 			t.Fatalf("mode %d: %v\n%s", mode, err, output.String())
 		}
@@ -310,10 +315,11 @@ func installRunsAgainstTheCapabilitiesItWrites(t *testing.T, mode Mode) {
 		enginesync.GlobalConfigPath(home),
 		`{"version":1,"machine":{"managedBy":"professor"},"targets":{"codexHomes":[],"capabilities":["gpt-agents"]}}`+"\n",
 	)
-	record := testjail.FakeEngineSync(t, everyEventReply, 0)
+	record, engineSync := testjail.FakeEngineSyncRunner(t, everyEventReply, 0)
 	var output bytes.Buffer
 	if _, err := Run(context.Background(), Options{
-		MCPConfigPath: testConfigPath(t), SourceRepo: clone,
+		EngineSyncRunner: engineSync,
+		MCPConfigPath:    testConfigPath(t), SourceRepo: clone,
 		Mode: mode, Home: home, Stdout: &output, Runner: &fakeRunner{},
 	}); err != nil {
 		t.Fatalf("install: %v\n%s", err, output.String())
@@ -349,21 +355,17 @@ func TestInstallRefreshesPluginCopiesBeforeEngineSyncGlobal(t *testing.T) {
 	name := testPlugins[0].Name
 	writePluginCheckout(t, root, name)
 	mirror := filepath.Join(home, ".local", "share", "professor-dev", "plugins", name)
-	fake := testjail.FakeEngineSync(t, everyEventReply, 0)
+	fake, engineSync := testjail.FakeEngineSyncRunner(t, everyEventReply, 0)
 	seen := fake + ".copy"
-	wrapper := filepath.Join(t.TempDir(), "engine-sync")
-	script := "#!/bin/sh\ncase \" $* \" in *' global '*) if [ -f '" +
-		filepath.Join(mirror, ".claude-plugin", "plugin.json") + "' ]; then echo present; else echo absent; fi >> '" +
-		seen + "';; esac\nexec '" + os.Getenv("ENGINE_SYNC_BIN") + "' \"$@\"\n"
-	if err := testjail.WriteExecutable(wrapper, []byte(script), 0o755); err != nil {
-		t.Fatalf("write the engine-sync wrapper %s: %v", wrapper, err)
+	probe := pluginCopyProbe{
+		EngineSyncRunner: engineSync, plugin: filepath.Join(mirror, ".claude-plugin", "plugin.json"), seen: seen,
 	}
-	t.Setenv("ENGINE_SYNC_BIN", wrapper)
 	var output bytes.Buffer
 	// No claude binary resolves, so the plugin install itself fails the run;
 	// the copy refresh and engine-sync global both land before it is reported.
 	_, err := Run(context.Background(), Options{
-		MCPConfigPath: testConfigPath(t), SourceRepo: clone, Mode: ModeApply, Home: home,
+		EngineSyncRunner: probe,
+		MCPConfigPath:    testConfigPath(t), SourceRepo: clone, Mode: ModeApply, Home: home,
 		ConfigDir: filepath.Join(home, "account"), Version: alphaVersion,
 		ClaudePluginCheckoutRoot: root, ClaudePlugins: bareList(name),
 		Stdout: &output, Runner: &fakeRunner{},
@@ -379,6 +381,31 @@ func TestInstallRefreshesPluginCopiesBeforeEngineSyncGlobal(t *testing.T) {
 		t.Fatalf("plugin copy %s when engine-sync global ran: got %q, want %q\n%s",
 			mirror, got, "present\n", output.String())
 	}
+}
+
+// pluginCopyProbe appends to seen, at each `engine-sync global` call, whether
+// the plugin copy is present, then answers as the engine-sync runner.
+type pluginCopyProbe struct {
+	*testjail.EngineSyncRunner
+	plugin, seen string
+}
+
+func (probe pluginCopyProbe) Run(ctx context.Context, argv []string, opts deps.RunOptions) (deps.RunResult, error) {
+	if slices.Contains(argv, "global") {
+		state := "absent\n"
+		if _, err := os.Stat(probe.plugin); err == nil {
+			state = "present\n"
+		}
+		file, err := os.OpenFile(probe.seen, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+		if err != nil {
+			return deps.RunResult{ExitCode: -1}, fmt.Errorf("open the plugin copy probe %s: %w", probe.seen, err)
+		}
+		_, writeErr := file.WriteString(state)
+		if err := errors.Join(writeErr, file.Close()); err != nil {
+			return deps.RunResult{ExitCode: -1}, fmt.Errorf("write the plugin copy probe %s: %w", probe.seen, err)
+		}
+	}
+	return probe.EngineSyncRunner.Run(ctx, argv, opts)
 }
 
 func withoutEngineSync(t *testing.T) {
@@ -414,23 +441,30 @@ func TestWireEngineSyncGlobalUninstallPreviewWithoutTheBinarySkips(t *testing.T)
 }
 
 // engineSyncFault points ENGINE_SYNC_BIN at an engine-sync that fails the
-// named way (not one that is absent) and returns the text the fault carries.
-func engineSyncFault(t *testing.T, fault string) string {
+// named way (not one that is absent) and returns the text the fault carries
+// and the runner that plays it.
+func engineSyncFault(t *testing.T, fault string) (string, deps.Runner) {
 	t.Helper()
 	switch fault {
 	case "too old":
-		t.Setenv("ENGINE_SYNC_BIN", writeScript(t, t.TempDir(), "engine-sync", "#!/bin/sh\necho 'engine-sync 0.0.1'\n"))
-		return "older than required"
+		binary := filepath.Join(t.TempDir(), "engine-sync")
+		if err := testjail.WriteExecutableNeverRun(binary, []byte("#!/bin/sh\nexit 97\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("ENGINE_SYNC_BIN", binary)
+		old := &deps.FakeRunner{}
+		old.Script([]string{binary}, deps.RunResult{Stdout: []byte("engine-sync 0.0.1\n")}, nil)
+		return "older than required", old
 	case "run error":
-		testjail.FakeEngineSync(t, `{"ok":false,"events":[],"error":"boom"}`, 1)
-		return "boom"
+		_, runner := testjail.FakeEngineSyncRunner(t, `{"ok":false,"events":[],"error":"boom"}`, 1)
+		return "boom", runner
 	case "conflict":
-		testjail.FakeEngineSync(t,
+		_, runner := testjail.FakeEngineSyncRunner(t,
 			`{"ok":false,"events":[{"verb":"conflict","message":"CONFLICT /h/.codex/prompts/a.md"}],"error":""}`, 1)
-		return "CONFLICT /h/.codex/prompts/a.md"
+		return "CONFLICT /h/.codex/prompts/a.md", runner
 	}
 	t.Fatalf("unknown engine-sync fault %q", fault)
-	return ""
+	return "", nil
 }
 
 // An uninstall whose engine-sync is present but faulty (too old, a failing
@@ -448,7 +482,8 @@ func TestWireEngineSyncGlobalUninstallFaultPreviewSkipsAndApplyDefers(t *testing
 					engineSyncPolicySource(installer.options.SourceRepo),
 					`{"version":1}`,
 				)
-				want := engineSyncFault(t, fault)
+				want, engineSync := engineSyncFault(t, fault)
+				installer.options.EngineSyncRunner = engineSync
 				if err := installer.wireEngineSyncGlobal(nil); err != nil {
 					t.Fatalf("wireEngineSyncGlobal: %v\n%s", err, output.String())
 				}
@@ -501,9 +536,10 @@ func TestUninstallEngineSyncFaultIsNotAPreflightRefusal(t *testing.T) {
 			home := t.TempDir()
 			runner := &fakeRunner{manager: true}
 			writeFixture(t, engineSyncPolicySource(filepath.Join(home, ".professor")), engineSyncTemplate)
-			testjail.FakeEngineSync(t, `{"ok":true,"events":[],"error":""}`, 0)
+			_, engineSync := testjail.FakeEngineSyncRunner(t, `{"ok":true,"events":[],"error":""}`, 0)
 			if _, err := Run(context.Background(), Options{
-				MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home, Runner: runner,
+				EngineSyncRunner: engineSync,
+				MCPConfigPath:    testConfigPath(t), Mode: ModeApply, Home: home, Runner: runner,
 				scheduler: schedulerFor(test.kind),
 			}); err != nil {
 				t.Fatal(err)
@@ -512,10 +548,11 @@ func TestUninstallEngineSyncFaultIsNotAPreflightRefusal(t *testing.T) {
 			if _, err := os.Lstat(globalFile); err != nil {
 				t.Fatalf("install wrote no %s: %v", globalFile, err)
 			}
-			want := engineSyncFault(t, "run error")
+			want, faultSync := engineSyncFault(t, "run error")
 			runner.calls = nil
 			_, err := Run(context.Background(), Options{
-				MCPConfigPath: testConfigPath(t), Mode: ModeUninstall, Home: home, Runner: runner,
+				EngineSyncRunner: faultSync,
+				MCPConfigPath:    testConfigPath(t), Mode: ModeUninstall, Home: home, Runner: runner,
 				scheduler: schedulerFor(test.kind),
 			})
 			if err == nil || !strings.Contains(err.Error(), want) || strings.Contains(err.Error(), "preflight") {
@@ -558,11 +595,11 @@ func (hungEngineSync) Run(ctx context.Context, argv []string, _ deps.RunOptions)
 // naming engine-sync and that deadline, never a silent hang. The deadline is
 // injected, so the test does not wait the real five minutes.
 func TestWireEngineSyncGlobalHasADeadline(t *testing.T) {
-	testjail.FakeEngineSync(t, `{"ok":true,"events":[],"error":""}`, 0)
+	testjail.FakeEngineSyncRunner(t, `{"ok":true,"events":[],"error":""}`, 0)
 	for _, mode := range []Mode{ModeApply, ModeDryRun} {
 		t.Run(fmt.Sprintf("mode-%d", mode), func(t *testing.T) {
 			installer, output, _ := engineSyncGlobalEngine(t, mode, nil)
-			installer.engineSyncExec = hungEngineSync{}
+			installer.options.EngineSyncRunner = hungEngineSync{}
 			installer.engineSyncDeadline = 50 * time.Millisecond
 			err := installer.wireEngineSyncGlobal(nil)
 			if err == nil || !strings.Contains(err.Error(), "engine-sync global") ||
@@ -587,10 +624,11 @@ func TestUninstallWithoutEngineSyncStillTearsDownEverythingPfmOwns(t *testing.T)
 	home := t.TempDir()
 	runner := &fakeRunner{manager: true}
 	writeFixture(t, engineSyncPolicySource(filepath.Join(home, ".professor")), engineSyncTemplate)
-	testjail.FakeEngineSync(t, `{"ok":true,"events":[],"error":""}`, 0)
+	_, engineSync := testjail.FakeEngineSyncRunner(t, `{"ok":true,"events":[],"error":""}`, 0)
 	if _, err := Run(context.Background(), Options{
-		scheduler:     schedulerFor(servicemanager.KindSystemd),
-		MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home, Runner: runner,
+		EngineSyncRunner: engineSync,
+		scheduler:        schedulerFor(servicemanager.KindSystemd),
+		MCPConfigPath:    testConfigPath(t), Mode: ModeApply, Home: home, Runner: runner,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -643,10 +681,11 @@ func TestUninstallEngineSyncFailureStillUnwiresTheSchedulerAndTargets(t *testing
 	home := t.TempDir()
 	runner := &fakeRunner{manager: true}
 	writeFixture(t, engineSyncPolicySource(filepath.Join(home, ".professor")), engineSyncTemplate)
-	testjail.FakeEngineSync(t, `{"ok":true,"events":[],"error":""}`, 0)
+	_, engineSync := testjail.FakeEngineSyncRunner(t, `{"ok":true,"events":[],"error":""}`, 0)
 	if _, err := Run(context.Background(), Options{
-		scheduler:     schedulerFor(servicemanager.KindSystemd),
-		MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home, Runner: runner,
+		EngineSyncRunner: engineSync,
+		scheduler:        schedulerFor(servicemanager.KindSystemd),
+		MCPConfigPath:    testConfigPath(t), Mode: ModeApply, Home: home, Runner: runner,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -654,10 +693,11 @@ func TestUninstallEngineSyncFailureStillUnwiresTheSchedulerAndTargets(t *testing
 	if _, err := os.Lstat(globalFile); err != nil {
 		t.Fatalf("install wrote no %s: %v", globalFile, err)
 	}
-	testjail.FakeEngineSync(t, `{"ok":false,"events":[],"error":"fixture global refused"}`, 1)
+	_, engineSync = testjail.FakeEngineSyncRunner(t, `{"ok":false,"events":[],"error":"fixture global refused"}`, 1)
 	options, err := normalizeInstallerOptions(Options{
-		scheduler:     schedulerFor(servicemanager.KindSystemd),
-		MCPConfigPath: testConfigPath(t), Mode: ModeUninstall, Home: home, Runner: runner,
+		EngineSyncRunner: engineSync,
+		scheduler:        schedulerFor(servicemanager.KindSystemd),
+		MCPConfigPath:    testConfigPath(t), Mode: ModeUninstall, Home: home, Runner: runner,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -688,12 +728,20 @@ func TestEngineSyncGlobalRequiresCompatibleVersion(t *testing.T) {
 		t.Run(version, func(t *testing.T) {
 			installer, _, _ := engineSyncGlobalEngine(t, ModeApply, nil)
 			binary := filepath.Join(t.TempDir(), "engine-sync")
-			script := "#!/bin/sh\nif [ \"$1\" = version ]; then echo 'engine-sync " + version + "'; else echo '{\"ok\":true,\"events\":[]}'; fi\n"
-			if err := testjail.WriteExecutable(binary, []byte(script), 0o755); err != nil {
+			if err := testjail.WriteExecutableNeverRun(binary, []byte("#!/bin/sh\nexit 97\n"), 0o755); err != nil {
 				t.Fatal(err)
 			}
 			t.Setenv(enginesync.EnvBin, binary)
+			runner := &deps.FakeRunner{}
+			runner.Script(
+				[]string{binary, "version"}, deps.RunResult{Stdout: []byte("engine-sync " + version + "\n")}, nil,
+			)
+			runner.Script([]string{binary}, deps.RunResult{Stdout: []byte(`{"ok":true,"events":[]}` + "\n")}, nil)
+			installer.options.EngineSyncRunner = runner
 			err := installer.wireEngineSyncGlobal(nil)
+			if calls := runner.Calls(); len(calls) == 0 || !slices.Equal(calls[0].Argv, []string{binary, "version"}) {
+				t.Fatalf("engine-sync calls = %v, want the version probe first", calls)
+			}
 			if strings.HasPrefix(version, "0.4.") {
 				if err != nil {
 					t.Fatalf("compatible binary: %v", err)

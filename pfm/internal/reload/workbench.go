@@ -4,6 +4,7 @@ import (
 	"io"
 
 	"github.com/rezzminator/professor/pfm/internal/action"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/launchnotice"
 	"github.com/rezzminator/professor/pfm/internal/workbench"
@@ -22,7 +23,7 @@ func codexHomeEnv(home string) []string {
 // validation. Unlike a new launch it refuses a persona it cannot apply: the
 // refusal comes before the pane is touched, so the live chat stays as it is.
 // A settings file the respawn goes on without is named on stderr.
-func applyReloadWorkbench(request Request, stderr io.Writer) (Request, error) {
+func applyReloadWorkbench(request Request, engineSync deps.Runner, stderr io.Writer) (Request, error) {
 	persona, err := action.WorkbenchPersona(request.CWD, request.Home, request.Engine, workbench.Resume)
 	if err != nil {
 		return request, err
@@ -34,7 +35,7 @@ func applyReloadWorkbench(request Request, stderr io.Writer) (Request, error) {
 	request.Model = persona.ModelOr(request.Model)
 	request.Envs = persona.Envs
 	if request.Engine == pfmengine.Codex && persona.Applies() {
-		if err := workbench.EnsureMirror(persona.Bench, pfmengine.Codex, request.Home); err != nil {
+		if err := workbench.EnsureMirror(persona.Bench, pfmengine.Codex, request.Home, engineSync); err != nil {
 			return request, err
 		}
 	}

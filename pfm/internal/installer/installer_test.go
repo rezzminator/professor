@@ -38,7 +38,7 @@ func TestInstallPreviewListsPrunableVersionsAndApplyRemovesOnlyThem(t *testing.T
 	live := filepath.Join(versions, "2.1.260")
 	prunable := filepath.Join(versions, "2.1.250")
 	for _, path := range []string{newest, second, live, prunable} {
-		if err := testjail.WriteExecutable(path, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		if err := testjail.WriteExecutableNeverRun(path, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -549,12 +549,12 @@ func TestEmptyCodexRosterSkipsCommandAndAgentMirrors(t *testing.T) {
 		"no Codex accounts configured — command mirror has nothing to write",
 		"no Codex accounts configured — agent mirror has nothing to write",
 	}
-	record := testjail.FakeEngineSync(t, `{"ok":true,"events":[{"verb":"skip","message":"`+skips[0]+`"},`+
-		`{"verb":"skip","message":"`+skips[1]+`"}],"error":""}`, 0)
+	record, engineSync := testjail.FakeEngineSyncRunner(t, `{"ok":true,"events":[{"verb":"skip","message":"`+
+		skips[0]+`"},{"verb":"skip","message":"`+skips[1]+`"}],"error":""}`, 0)
 	var output bytes.Buffer
 	_, err := Run(context.Background(), Options{
-		MCPConfigPath: testConfigPath(t),
-		Mode:          ModeDryRun, Home: home, Stdout: &output, Runner: &fakeRunner{}, CodexHomes: []string{},
+		MCPConfigPath: testConfigPath(t), EngineSyncRunner: engineSync,
+		Mode: ModeDryRun, Home: home, Stdout: &output, Runner: &fakeRunner{}, CodexHomes: []string{},
 	})
 	if err != nil {
 		t.Fatalf("zero-Codex preview: %v\n%s", err, output.String())
@@ -630,7 +630,9 @@ func TestMCPDisableRemovesEveryStagedSchedulerAsset(t *testing.T) {
 // exits non-zero naming it.
 func TestUninstallCodexConflictFailsTheRunAfterEveryUnwireStep(t *testing.T) {
 	home := t.TempDir()
+	_, install := testjail.FakeEngineSyncRunner(t, `{"ok":true,"events":[],"error":""}`, 0)
 	options := Options{MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home, Runner: &fakeRunner{}}
+	options.EngineSyncRunner = install
 	if _, err := Run(context.Background(), options); err != nil {
 		t.Fatal(err)
 	}
@@ -639,13 +641,14 @@ func TestUninstallCodexConflictFailsTheRunAfterEveryUnwireStep(t *testing.T) {
 		t.Fatalf("install did not wire command fixture: %v", err)
 	}
 	conflict := "CONFLICT " + filepath.Join(home, ".codex", "prompts", "audit-fixture.md")
-	record := testjail.FakeEngineSync(
+	record, engineSync := testjail.FakeEngineSyncRunner(
 		t,
 		`{"ok":false,"events":[{"verb":"conflict","message":"`+conflict+`"}],"error":""}`,
 		1,
 	)
 
 	options.Mode = ModeUninstall
+	options.EngineSyncRunner = engineSync
 	_, err := Run(context.Background(), options)
 	if err == nil || !strings.Contains(err.Error(), conflict) || strings.Contains(err.Error(), "preflight") {
 		t.Fatalf("uninstall error=%v, want the engine-sync conflict and no preflight refusal", err)
@@ -995,7 +998,7 @@ func TestGlobalSourceRepoRootFallsBackToTheRecordedMarker(t *testing.T) {
 func TestEngineSyncGlobalConflictRefusesTheApplyBeforeAnyWrite(t *testing.T) {
 	home := t.TempDir()
 	conflict := "CONFLICT " + filepath.Join(home, ".codex", "prompts", "reload.md")
-	record := testjail.FakeEngineSync(
+	record, engineSync := testjail.FakeEngineSyncRunner(
 		t,
 		`{"ok":false,"events":[{"verb":"conflict","message":"`+conflict+`"}],"error":""}`,
 		1,
@@ -1003,8 +1006,8 @@ func TestEngineSyncGlobalConflictRefusesTheApplyBeforeAnyWrite(t *testing.T) {
 
 	var output bytes.Buffer
 	_, err := Run(context.Background(), Options{
-		MCPConfigPath: testConfigPath(t),
-		Mode:          ModeDryRun, Home: home, Stdout: &output, Runner: &fakeRunner{},
+		MCPConfigPath: testConfigPath(t), EngineSyncRunner: engineSync,
+		Mode: ModeDryRun, Home: home, Stdout: &output, Runner: &fakeRunner{},
 	})
 	if err == nil || !strings.Contains(err.Error(), conflict) {
 		t.Fatalf("dry-run error=%v, want the engine-sync conflict; output:\n%s", err, output.String())
@@ -1015,8 +1018,8 @@ func TestEngineSyncGlobalConflictRefusesTheApplyBeforeAnyWrite(t *testing.T) {
 
 	output.Reset()
 	_, err = Run(context.Background(), Options{
-		MCPConfigPath: testConfigPath(t),
-		Mode:          ModeApply, Home: home, Stdout: &output, Runner: &fakeRunner{},
+		MCPConfigPath: testConfigPath(t), EngineSyncRunner: engineSync,
+		Mode: ModeApply, Home: home, Stdout: &output, Runner: &fakeRunner{},
 	})
 	if err == nil || !strings.Contains(err.Error(), "preflight apply plan") ||
 		!strings.Contains(err.Error(), conflict) {
@@ -1433,7 +1436,7 @@ func TestCopyCommandPlanTreeSkipsAnInterruptedLinkStage(t *testing.T) {
 // unlinks each, as the install that retires them does.
 func TestLinuxUninstallRetiresTheRenamedReminderUnits(t *testing.T) {
 	home := t.TempDir()
-	testjail.FakeEngineSync(t, `{"ok":true,"events":[],"error":""}`, 0)
+	_, engineSync := testjail.FakeEngineSyncRunner(t, `{"ok":true,"events":[],"error":""}`, 0)
 	unitDir := filepath.Join(home, ".config", "systemd", "user")
 	units := []string{
 		filepath.Join(unitDir, "pfm-reminder.service"),
@@ -1445,7 +1448,7 @@ func TestLinuxUninstallRetiresTheRenamedReminderUnits(t *testing.T) {
 	runner := &fakeRunner{manager: true, nameSyncIdle: true}
 	var removed bytes.Buffer
 	if _, err := Run(context.Background(), Options{
-		scheduler:     schedulerFor(servicemanager.KindSystemd),
+		scheduler: schedulerFor(servicemanager.KindSystemd), EngineSyncRunner: engineSync,
 		MCPConfigPath: testConfigPath(t), Mode: ModeUninstall, Home: home, Stdout: &removed, Runner: runner,
 		retired: &retired.Lists{Units: []string{"pfm-reminder.service", "pfm-reminder.timer"}},
 	}); err != nil {

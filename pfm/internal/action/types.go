@@ -6,6 +6,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
@@ -207,17 +208,17 @@ type Dependencies struct {
 	// Place is the request's one placement of a birth (chat's placeChat):
 	// door names the asking door, requested the configured chat.backend. A
 	// nil Place births every chat in tmux.
-	Place     func(ctx context.Context, door, requested string) (spawn.BackendChoice, error)
-	Tmux      TmuxClient
-	Processes ProcessTable
-	Gate      Gate
-	Runner    CommandRunner
-	Stderr    io.Writer
+	Place            func(ctx context.Context, door, requested string) (spawn.BackendChoice, error)
+	Tmux             TmuxClient
+	Processes        ProcessTable
+	Gate             Gate
+	Runner           CommandRunner
+	Stderr           io.Writer
+	EngineSyncRunner deps.Runner // runs PersonaMirror's engine-sync child; nil is the real one
 	// Heal repairs a Codex thread's history projection before it is resumed,
-	// reporting in one line what it repaired and saying nothing when there
-	// was nothing to repair. It is injected rather than imported because the
-	// repair reads Codex's own SQLite stores, and action must stay free of
-	// the store layer. A nil Heal simply skips the check.
+	// reporting in one line what it repaired and nothing when there was nothing
+	// to repair. It is injected, not imported: the repair reads Codex's own
+	// SQLite stores, and action must stay free of the store layer. Nil skips it.
 	Heal HealFunc
 }
 
@@ -227,12 +228,13 @@ type HealFunc func(ctx context.Context, threadID string) string
 // Executor performs preparations and returns the only line the caller may
 // write to stdout.
 type Executor struct {
-	place     func(ctx context.Context, door, requested string) (spawn.BackendChoice, error)
-	tmux      TmuxClient
-	processes ProcessTable
-	gate      Gate
-	runner    CommandRunner
-	stderr    io.Writer
-	sidDir    string
-	heal      HealFunc
+	place      func(ctx context.Context, door, requested string) (spawn.BackendChoice, error)
+	tmux       TmuxClient
+	processes  ProcessTable
+	gate       Gate
+	runner     CommandRunner
+	stderr     io.Writer
+	sidDir     string
+	heal       HealFunc
+	engineSync deps.Runner
 }

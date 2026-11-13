@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
@@ -203,5 +204,29 @@ func TestHerdrShellWrapper(t *testing.T) {
 				t.Fatalf("argv lost: %s", out)
 			}
 		})
+	}
+}
+
+// The wrapper runs for real: its fallback to /bin/sh for a vanished captured shell is the subject.
+func TestHerdrShellMissingCapturedShellFallsBack(t *testing.T) {
+	installer, _, _ := herdrShellInstaller(t, "", true)
+	shell := writeScript(t, t.TempDir(), "zsh", "#!/bin/sh\nexit 0\n")
+	runner := &deps.FakeRunner{}
+	runner.ScriptLookPath("herdr", "/fixture/herdr", nil)
+	scriptLoginShell(runner, shell, nil)
+	installer.options.ProcessRunner = runner
+	if err := installer.wireHerdrShell(false); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(shell); err != nil {
+		t.Fatal(err)
+	}
+	wrapper := paths.HerdrShellWrapper(installer.options.Home)
+	cmd := exec.Command(wrapper, "-c", "printf 'shell=%s auto=%s' \"$SHELL\" \"${PFM_AUTO_OPEN-unset}\"")
+	cmd.Env = append(os.Environ(), "SHELL="+wrapper, "PFM_AUTO_OPEN=pfm")
+	out, err := cmd.CombinedOutput()
+	if err != nil || !strings.Contains(string(out), "not executable; using /bin/sh") ||
+		!strings.Contains(string(out), "shell=/bin/sh auto=unset") {
+		t.Fatalf("missing shell did not leave a usable fallback: %s err=%v", out, err)
 	}
 }

@@ -30,12 +30,12 @@ const engineSyncMissingRepair = "install the engine-sync plugin: run `claude plu
 	"then rerun pfm update (or pfm install --yes)"
 
 // engineSync is the engine-sync runner this install drives: its environment
-// and home.
+// and home, run through Options.EngineSyncRunner.
 func (installer *engine) engineSync() enginesync.Runner {
 	return enginesync.Runner{
 		Env:          installer.env(),
 		Home:         installer.options.Home,
-		Exec:         installer.engineSyncExec,
+		Exec:         installer.options.EngineSyncRunner,
 		Capabilities: enginesync.HostCapabilities(installer.options.GptAgents),
 	}
 }

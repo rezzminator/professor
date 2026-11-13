@@ -300,7 +300,7 @@ func PlanOpenCode(request HeadlessRequest) (HeadlessPlan, error) {
 		Config:         machine,
 		Prompt:         request.Prompt,
 	}
-	personaWarnings, err := applyWorkbench(&launch)
+	personaWarnings, err := applyWorkbench(&launch, nil)
 	if err != nil {
 		return HeadlessPlan{}, err
 	}

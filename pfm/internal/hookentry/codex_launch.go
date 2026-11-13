@@ -130,6 +130,11 @@ func codexSubcommand(args []string) (subcommand string, help bool) {
 
 // CodexLaunch applies the current primary account's Codex policy at launch time.
 func CodexLaunch(args []string, stderr io.Writer, runtime config.Runtime) int {
+	return CodexLaunchWith(args, stderr, runtime, nil)
+}
+
+// CodexLaunchWith is CodexLaunch with the runner of the mirror's engine-sync child; nil is the real one.
+func CodexLaunchWith(args []string, stderr io.Writer, runtime config.Runtime, engineSync deps.Runner) int {
 	primary := launchPrimaryAccount(runtime, stderr)
 	policy := runtime.Config.EffectiveCodex(primary)
 	binaryName := policy.Binary
@@ -145,7 +150,7 @@ func CodexLaunch(args []string, stderr io.Writer, runtime config.Runtime) int {
 	if policy.Yolo {
 		argv = append(argv, "--dangerously-bypass-approvals-and-sandbox")
 	}
-	personaArgs, envs, err := codexWorkbenchArgs(args, runtime.Paths.Home, stderr)
+	personaArgs, envs, err := codexWorkbenchArgs(args, runtime.Paths.Home, engineSync, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "launch Codex: %v\n", err)
 		return 1
@@ -182,7 +187,9 @@ func CodexLaunch(args []string, stderr io.Writer, runtime config.Runtime) int {
 // codexWorkbenchArgs is the persona's Codex arguments and the adopter
 // settings' envs. A part that cannot be resolved is left out with a warning
 // and the launch goes on; only a workbench that does not enable Codex refuses it.
-func codexWorkbenchArgs(args []string, home string, stderr io.Writer) ([]string, map[string]string, error) {
+func codexWorkbenchArgs(
+	args []string, home string, engineSync deps.Runner, stderr io.Writer,
+) ([]string, map[string]string, error) {
 	const prefix = "launch Codex"
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -206,7 +213,8 @@ func codexWorkbenchArgs(args []string, home string, stderr io.Writer) ([]string,
 	if err != nil {
 		return nil, nil, err
 	}
-	launchnotice.Print(stderr, prefix, append(warnings, action.PersonaMirror(persona, pfmengine.Codex, home)...))
+	warnings = append(warnings, action.PersonaMirror(persona, pfmengine.Codex, home, engineSync)...)
+	launchnotice.Print(stderr, prefix, warnings)
 	if !persona.Applies() {
 		return nil, persona.Envs, nil
 	}

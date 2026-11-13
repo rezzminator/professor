@@ -7,44 +7,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"testing"
 
-	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 )
-
-// fakeCodexAppServer answers `codex app-server` over stdio: initialize, hooks/list
-// from the listing file (one JSON hook object per line, "@STATUS@" in each
-// standing for untrusted until a config/value/write named the hook's key, then
-// trusted), and config/value/write. Every request line is appended to the log.
-const fakeCodexAppServer = `#!/bin/sh
-LOG='@LOG@'
-LISTING='@LISTING@'
-while IFS= read -r line; do
-  printf '%s\n' "$line" >> "$LOG"
-  case "$line" in
-    *'"method":"initialize"'*) printf '%s\n' '{"id":0,"result":{}}' ;;
-    *'"method":"hooks/list"'*)
-      printf '{"id":1,"result":{"data":[{"hooks":['
-      first=1
-      exec 3< "$LISTING"
-      while IFS= read -r entry <&3; do
-        key=${entry#*\"key\":\"}
-        key=${key%%\"*}
-        status=untrusted
-        if grep -F 'config/value/write' "$LOG" | grep -qF "$key\\\""; then status=trusted; fi
-        if [ "$first" = 0 ]; then printf ','; fi
-        first=0
-        printf '%s' "$entry" | sed "s/@STATUS@/$status/"
-      done
-      exec 3<&-
-      printf ']}]}}\n' ;;
-    *'"method":"config/value/write"'*) printf '%s\n' '{"id":1,"result":{}}' ;;
-  esac
-done
-`
 
 const personalStopHook = `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo personal"}]}]}}`
 
@@ -114,12 +84,12 @@ func nativeListing(t *testing.T, account string, hooksJSON []byte) string {
 	return listing.String()
 }
 
-// stageResumeUnkillAccount lays down a Codex account whose hooks.json holds one
-// personal Stop hook, and the fake `codex app-server` that answers hook
-// discovery with the real key shape of every handler the install writes beside
-// it (resume-unkill and the Herdr reporter's). It returns the physical account,
-// the fake binary and the request log it appends to.
-func stageResumeUnkillAccount(t *testing.T, home string) (account, binary, requestLog string) {
+// stageCodexAccount lays down a Codex account whose hooks.json holds one
+// personal Stop hook, and the hooks/list answer of every handler the install
+// writes beside it (resume-unkill and the Herdr reporter's), in the real key
+// shape. It returns the physical account, that listing file and the request log
+// a fake `codex app-server` appends to.
+func stageCodexAccount(t *testing.T, home string) (account, listing, requestLog string) {
 	t.Helper()
 	account = filepath.Join(home, ".codex")
 	writeFixture(t, filepath.Join(account, "hooks.json"), personalStopHook)
@@ -131,15 +101,22 @@ func stageResumeUnkillAccount(t *testing.T, home string) (account, binary, reque
 	if err != nil {
 		t.Fatal(err)
 	}
-	listing := filepath.Join(home, "hooks-listing.jsonl")
+	listing = filepath.Join(home, "hooks-listing.jsonl")
 	writeFixture(t, listing, nativeListing(t, physical, installed))
-	requestLog = filepath.Join(home, "app-server.log")
-	script := strings.NewReplacer("@LOG@", requestLog, "@LISTING@", listing).Replace(fakeCodexAppServer)
+	return physical, listing, filepath.Join(home, "app-server.log")
+}
+
+// stageResumeUnkillAccount is stageCodexAccount plus the fake `codex app-server`
+// that answers hook discovery from the listing; it returns the physical account,
+// the Codex binary path the install is configured with, the request log the fake
+// appends to and the fake, which the install's ProcessRunner must be.
+func stageResumeUnkillAccount(t *testing.T, home string) (account, binary, requestLog string, runner deps.Runner) {
+	t.Helper()
+	account, listing, requestLog := stageCodexAccount(t, home)
 	binary = filepath.Join(home, "fake-codex")
-	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
+	return account, binary, requestLog, &codexAppServer{
+		FakeRunner: &deps.FakeRunner{}, listing: listing, requestLog: requestLog,
 	}
-	return physical, binary, requestLog
 }
 
 func resumeUnkillCommand(home string) string {
@@ -159,7 +136,7 @@ func resumeUnkillEngine(home, account, binary string, mode Mode, stdout *bytes.B
 func TestCodexResumeUnkillHookIsWrittenOnceKeepsPersonalHooksAndIsOwned(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
-	account, _, _ := stageResumeUnkillAccount(t, home)
+	account, _, _ := stageCodexAccount(t, home)
 	command := resumeUnkillCommand(home)
 	path := filepath.Join(account, "hooks.json")
 
@@ -227,11 +204,13 @@ func TestCodexResumeUnkillHookIsWrittenOnceKeepsPersonalHooksAndIsOwned(t *testi
 func TestCodexResumeUnkillHookTrustIsRecordedThroughTheNativeAPI(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
-	account, binary, requestLog := stageResumeUnkillAccount(t, home)
+	account, binary, requestLog, appServer := stageResumeUnkillAccount(t, home)
 	key := account + "/hooks.json:session_start:0:0"
 
 	var transcript bytes.Buffer
-	if err := resumeUnkillEngine(home, account, binary, ModeApply, &transcript).wireCodexHooks(); err != nil {
+	first := resumeUnkillEngine(home, account, binary, ModeApply, &transcript)
+	first.options.ProcessRunner = appServer
+	if err := first.wireCodexHooks(); err != nil {
 		t.Fatalf("%v\n%s", err, transcript.String())
 	}
 	var receipt map[string]string
@@ -252,9 +231,24 @@ func TestCodexResumeUnkillHookTrustIsRecordedThroughTheNativeAPI(t *testing.T) {
 	if !strings.Contains(transcript.String(), "change  trust Codex hooks "+account) {
 		t.Fatalf("trust step not reported:\n%s", transcript.String())
 	}
+	starts := appServer.(*codexAppServer).Starts()
+	if len(starts) == 0 {
+		t.Fatal("the install started no codex app-server")
+	}
+	for _, start := range starts {
+		if want := []string{binary, "app-server"}; !slices.Equal(start.Argv, want) ||
+			!slices.Contains(start.Opts.Env, "CODEX_HOME="+account) {
+			t.Fatalf(
+				"app-server start argv=%q env=%q, want %q with CODEX_HOME=%s",
+				start.Argv, start.Opts.Env, want, account,
+			)
+		}
+	}
 
 	var again bytes.Buffer
-	if err := resumeUnkillEngine(home, account, binary, ModeApply, &again).wireCodexHooks(); err != nil {
+	repeat := resumeUnkillEngine(home, account, binary, ModeApply, &again)
+	repeat.options.ProcessRunner = appServer
+	if err := repeat.wireCodexHooks(); err != nil {
 		t.Fatal(err)
 	}
 	if got := strings.Count(readFixture(t, requestLog), `"method":"config/value/write"`); got != 9 {
@@ -271,9 +265,11 @@ func TestCodexResumeUnkillHookTrustIsRecordedThroughTheNativeAPI(t *testing.T) {
 func TestCodexResumeUnkillHookAndTrustAreRemovedOnUninstall(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
-	account, binary, _ := stageResumeUnkillAccount(t, home)
+	account, binary, _, appServer := stageResumeUnkillAccount(t, home)
 	key := account + "/hooks.json:session_start:0:0"
-	if err := resumeUnkillEngine(home, account, binary, ModeApply, &bytes.Buffer{}).wireCodexHooks(); err != nil {
+	install := resumeUnkillEngine(home, account, binary, ModeApply, &bytes.Buffer{})
+	install.options.ProcessRunner = appServer
+	if err := install.wireCodexHooks(); err != nil {
 		t.Fatal(err)
 	}
 	// Codex wrote the trust table on the install's behalf; a personal one sits beside it.
@@ -310,9 +306,10 @@ func TestCodexResumeUnkillHookAndTrustAreRemovedOnUninstall(t *testing.T) {
 func TestCodexHookTrustCleanupRunsPastAnUnreadableReceipt(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
-	account, binary, _ := stageResumeUnkillAccount(t, home)
+	account, binary, _, appServer := stageResumeUnkillAccount(t, home)
 	key := account + "/hooks.json:session_start:0:0"
 	apply := resumeUnkillEngine(home, account, binary, ModeApply, &bytes.Buffer{})
+	apply.options.ProcessRunner = appServer
 	if err := apply.wireCodexHooks(); err != nil {
 		t.Fatal(err)
 	}
@@ -339,11 +336,12 @@ func TestCodexHookTrustCleanupRunsPastAnUnreadableReceipt(t *testing.T) {
 
 func TestCodexResumeUnkillTrustContinuesAfterAccountFailure(t *testing.T) {
 	home := t.TempDir()
-	second, binary, requestLog := stageResumeUnkillAccount(t, home)
+	second, binary, requestLog, appServer := stageResumeUnkillAccount(t, home)
 	first := filepath.Join(home, ".codex-first")
 	writeFixture(t, filepath.Join(first, "hooks.json"), `{"hooks":{}}`)
 	var output bytes.Buffer
 	installer := resumeUnkillEngine(home, first, binary, ModeApply, &output)
+	installer.options.ProcessRunner = appServer
 	installer.options.CodexHomes = []string{first, second}
 	if err := installer.wireCodexHooks(); err != nil {
 		t.Fatalf("trust failure stopped wiring: %v", err)
@@ -371,7 +369,7 @@ func TestCodexResumeUnkillTrustContinuesAfterAccountFailure(t *testing.T) {
 
 func TestCodexHookLedgerDryRunCountsOneWriteForTwoHomes(t *testing.T) {
 	home := t.TempDir()
-	first, _, _ := stageResumeUnkillAccount(t, home)
+	first, _, _ := stageCodexAccount(t, home)
 	second := filepath.Join(home, ".codex-second")
 	writeFixture(t, filepath.Join(second, "hooks.json"), `{"hooks":{}}`)
 	var output bytes.Buffer

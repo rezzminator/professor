@@ -5,6 +5,7 @@ package codexappendix
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,7 +17,32 @@ import (
 	"github.com/BurntSushi/toml"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
+
+// processRunner starts the app-server child (trust.go) when the context
+// carries no runner (WithAppServerRunner); nil is the real process table.
+var processRunner deps.Runner
+
+type runnerKey struct{}
+
+// WithAppServerRunner returns ctx carrying the runner that starts the app-server child
+// of every trust call made with it; the installer hands its process runner
+// through here.
+func WithAppServerRunner(ctx context.Context, runner deps.Runner) context.Context {
+	return context.WithValue(ctx, runnerKey{}, runner)
+}
+
+func appServerRunner(ctx context.Context) deps.Runner {
+	if runner, ok := ctx.Value(runnerKey{}).(deps.Runner); ok && runner != nil {
+		return runner
+	}
+	if processRunner != nil {
+		return processRunner
+	}
+	return obs.Runner(deps.RealRunner{})
+}
 
 func receiptRecorded(receipt string) bool {
 	_, err := os.Stat(receipt)

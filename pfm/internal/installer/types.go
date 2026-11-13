@@ -143,6 +143,9 @@ type Options struct {
 	// are part of the result (for example rumdl and uv). Runner remains the
 	// compatibility seam for simple command/status probes.
 	ProcessRunner deps.Runner
+	// EngineSyncRunner runs every engine-sync child (engine_sync_global.go);
+	// nil is the real process table.
+	EngineSyncRunner deps.Runner
 	// ReleaseNativeClaudeReports hands a Claude pane's Herdr state to Herdr's own
 	// Claude integration once the install step made it present (herdr_claude.go):
 	// called once per apply on a Herdr host with Home; nil skips it.
@@ -242,8 +245,16 @@ type Report struct {
 	Failed int
 }
 
-// execCommandRunner runs a command through the observed real runner.
-type execCommandRunner struct{}
+// execCommandRunner runs a command through runner, the installer's process
+// seam; the zero value runs through the observed real runner.
+type execCommandRunner struct{ runner deps.Runner }
+
+func (runner execCommandRunner) process() deps.Runner {
+	if runner.runner != nil {
+		return runner.runner
+	}
+	return obs.Runner(deps.RealRunner{})
+}
 
 type commandExitError struct {
 	name string
@@ -282,26 +293,15 @@ func (installer *engine) processRunner() deps.Runner {
 }
 
 func (runner execCommandRunner) Run(ctx context.Context, name string, args ...string) error {
-	if _, lookErr := obs.Runner(deps.RealRunner{}).LookPath(name); lookErr != nil {
-		return fmt.Errorf("run %q: %w", name, lookErr)
-	}
-	result, err := obs.Runner(deps.RealRunner{}).Run(
-		ctx, append([]string{name}, args...), deps.RunOptions{},
-	)
-	if err != nil {
-		return err
-	}
-	if result.ExitCode != 0 {
-		return commandExitError{name: name, code: result.ExitCode, text: string(result.Stderr)}
-	}
-	return nil
+	_, err := runner.Output(ctx, name, args...)
+	return err
 }
 
 func (runner execCommandRunner) Output(ctx context.Context, name string, args ...string) ([]byte, error) {
-	if _, lookErr := obs.Runner(deps.RealRunner{}).LookPath(name); lookErr != nil {
+	if _, lookErr := runner.process().LookPath(name); lookErr != nil {
 		return nil, fmt.Errorf("run %q: %w", name, lookErr)
 	}
-	result, err := obs.Runner(deps.RealRunner{}).Run(
+	result, err := runner.process().Run(
 		ctx, append([]string{name}, args...), deps.RunOptions{},
 	)
 	if err != nil {
@@ -366,11 +366,11 @@ func normalizeInstallerOptions(options Options) (Options, error) {
 	if options.Stdout == nil {
 		options.Stdout = io.Discard
 	}
-	if options.Runner == nil {
-		options.Runner = execCommandRunner{}
-	}
 	if options.ProcessRunner == nil {
 		options.ProcessRunner = obs.Runner(deps.RealRunner{})
+	}
+	if options.Runner == nil {
+		options.Runner = execCommandRunner{runner: options.ProcessRunner}
 	}
 	return options, nil
 }

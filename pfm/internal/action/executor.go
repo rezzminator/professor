@@ -60,14 +60,15 @@ func New(dependencies Dependencies) (*Executor, error) {
 		}
 	}
 	return &Executor{
-		place:     place,
-		tmux:      tmux,
-		processes: processes,
-		gate:      gate,
-		runner:    runner,
-		stderr:    stderr,
-		sidDir:    resolved.SIDDir,
-		heal:      dependencies.Heal,
+		place:      place,
+		tmux:       tmux,
+		processes:  processes,
+		gate:       gate,
+		runner:     runner,
+		stderr:     stderr,
+		sidDir:     resolved.SIDDir,
+		heal:       dependencies.Heal,
+		engineSync: dependencies.EngineSyncRunner,
 	}, nil
 }
 
@@ -153,7 +154,7 @@ func (executor *Executor) Open(
 	}
 
 	// A workbench refusal comes before Solo closes any seat holding the chat.
-	personaWarnings, err := applyWorkbench(&request)
+	personaWarnings, err := applyWorkbench(&request, executor.engineSync)
 	if err != nil {
 		return result, err
 	}

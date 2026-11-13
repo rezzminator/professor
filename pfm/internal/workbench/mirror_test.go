@@ -62,8 +62,8 @@ func TestEnsureMirror(t *testing.T) {
 					writeBenchFile(t, paths.Settings(root), `{"envs":{"ENGINE_SYNC_DISABLE":"`+testCase.disable+`"}}`)
 					reply = skippedMirrorReply(testCase.engine)
 				}
-				record := testjail.FakeEngineSync(t, reply, 0)
-				if err := EnsureMirror(bench, testCase.engine, home); err != nil {
+				record, runner := testjail.FakeEngineSyncRunner(t, reply, 0)
+				if err := EnsureMirror(bench, testCase.engine, home, runner); err != nil {
 					t.Fatal(err)
 				}
 				if testCase.argv == "" {
@@ -106,11 +106,11 @@ func TestEnsureMirrorFails(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			root, dir := benchFixture(t)
 			bench, home := LoadBench(dir, root), t.TempDir()
-			testjail.FakeEngineSync(t, testCase.reply, testCase.code)
+			_, runner := testjail.FakeEngineSyncRunner(t, testCase.reply, testCase.code)
 			prefix := "build the " + pfmengine.MustLookup(
 				testCase.engine,
 			).LongName + " mirror of workbench " + dir + ": "
-			err := EnsureMirror(bench, testCase.engine, home)
+			err := EnsureMirror(bench, testCase.engine, home, runner)
 			if err == nil || !strings.HasPrefix(err.Error(), prefix) || !strings.Contains(err.Error(), testCase.want) {
 				t.Fatalf("EnsureMirror = %v, want %q then %q", err, prefix, testCase.want)
 			}
@@ -145,8 +145,8 @@ func TestCheckMirrorProblemSplit(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			root, dir := benchFixture(t)
 			bench, home := LoadBench(dir, root), t.TempDir()
-			record := testjail.FakeEngineSync(t, testCase.reply, testCase.code)
-			got, err := CheckMirror(bench, testCase.engine, home)
+			record, runner := testjail.FakeEngineSyncRunner(t, testCase.reply, testCase.code)
+			got, err := CheckMirror(bench, testCase.engine, home, runner)
 			if testCase.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), testCase.wantErr) {
 					t.Fatalf("CheckMirror error = %v, want %q", err, testCase.wantErr)

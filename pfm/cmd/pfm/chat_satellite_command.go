@@ -364,7 +364,7 @@ func runChatBranch(args []string, stdout, stderr io.Writer, env paths.Env, clk c
 		fmt.Fprintf(stderr, "pfm chat branch: %v\n", err)
 		return 1
 	}
-	warnings = append(warnings, action.PersonaMirror(persona, engine, runtime.Paths.Home)...)
+	warnings = append(warnings, action.PersonaMirror(persona, engine, runtime.Paths.Home, nil)...)
 	launchnotice.Print(stderr, "pfm chat branch", warnings)
 	nameInput := *requestedName
 	if flags.NArg() != 0 {

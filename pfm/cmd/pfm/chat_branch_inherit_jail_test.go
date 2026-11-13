@@ -88,7 +88,7 @@ func TestChatBranchWorkbench(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					err = workbench.EnsureMirror(persona.Bench, pfmengine.Codex, filepath.Join(jail.root, "home"))
+					err = workbench.EnsureMirror(persona.Bench, pfmengine.Codex, filepath.Join(jail.root, "home"), nil)
 					if err == nil {
 						t.Fatal("mirror fixture did not fail")
 					}

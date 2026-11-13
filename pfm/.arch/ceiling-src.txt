@@ -5,7 +5,7 @@ cmd/pfm/chat_command.go 614
 cmd/pfm/chat_dispatch.go 790
 cmd/pfm/chat_new_command.go 777
 cmd/pfm/chat_reload_command.go 800
-cmd/pfm/chat_satellite_command.go 748
+cmd/pfm/chat_satellite_command.go 746
 cmd/pfm/chat_watch.go 279
 cmd/pfm/config_command.go 248
 cmd/pfm/headless_exec_command.go 402
@@ -14,7 +14,7 @@ cmd/pfm/main.go 668
 cmd/pfm/reap_command.go 265
 internal/action/claude_spawn.go 268
 internal/action/executor.go 579
-internal/action/headless.go 445
+internal/action/headless.go 338
 internal/action/persona.go 257
 internal/action/solo.go 312
 internal/action/synth.go 783
@@ -52,7 +52,7 @@ internal/claudelaunch/parse.go 309
 internal/claudelaunch/render.go 422
 internal/cmdparse/cmdparse.go 523
 internal/cmdparse/words.go 461
-internal/codexappendix/trust.go 551
+internal/codexappendix/trust.go 550
 internal/codexmeta/header.go 252
 internal/codexmeta/rollouts.go 321
 internal/compose/compose.go 1270
@@ -145,12 +145,12 @@ internal/installer/claude_plugins_gaps.go 299
 internal/installer/claude_plugins_local.go 706
 internal/installer/claude_store.go 385
 internal/installer/codex_defaults.go 465
-internal/installer/codex_hooks.go 627
+internal/installer/codex_hooks.go 623
 internal/installer/engine_sync_config.go 255
 internal/installer/global_fanout.go 278
 internal/installer/herdr_shell.go 325
 internal/installer/hook_probe.go 428
-internal/installer/installer.go 1591
+internal/installer/installer.go 1589
 internal/installer/launchd.go 401
 internal/installer/launcher.go 252
 internal/installer/login_default.go 312

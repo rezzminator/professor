@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/rezzminator/professor/pfm/internal/deps"
-	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/themesync"
 	"github.com/rezzminator/professor/pfm/internal/themetmux"
@@ -30,7 +28,7 @@ func (installer *engine) themeSyncOff(ctx context.Context) error {
 	}
 	off := installer.options.themeOff
 	if off == nil {
-		off = themeSyncOffReal
+		off = installer.themeSyncOffReal
 	}
 	if err := off(ctx, home); err != nil {
 		return fmt.Errorf("uninstall: pfm theme off: %w", err)
@@ -61,9 +59,9 @@ func (installer *engine) themeSyncOff(ctx context.Context) error {
 	return nil
 }
 
-// themeSyncOffReal is themesync.Off over the real runner and pfm's tmux
+// themeSyncOffReal is themesync.Off over the installer's process runner and pfm's tmux
 // servers; a surface it could not restore is its error.
-func themeSyncOffReal(ctx context.Context, home string) error {
+func (installer *engine) themeSyncOffReal(ctx context.Context, home string) error {
 	values, err := paths.Resolve()
 	if err != nil {
 		return fmt.Errorf("resolve the tmux directory: %w", err)
@@ -72,7 +70,7 @@ func themeSyncOffReal(ctx context.Context, home string) error {
 		Home:      home,
 		StateDir:  themesync.DefaultStateDir(home),
 		PfmBinary: filepath.Join(home, ".local", "bin", "pfm"),
-		Runner:    obs.Runner(deps.RealRunner{}),
+		Runner:    installer.processRunner(),
 		Tmux:      themetmux.AtDir(values.TmuxDir),
 	})
 	if err != nil {
@@ -112,7 +110,7 @@ func (installer *engine) refreshThemeFollower(ctx context.Context) error {
 	}
 	refresh := installer.options.themeFollowerRefresh
 	if refresh == nil {
-		refresh = themeFollowerRefreshReal
+		refresh = installer.themeFollowerRefreshReal
 	}
 	err := refresh(ctx, home)
 	if errors.Is(err, errThemeSyncInert) {
@@ -155,9 +153,9 @@ func themeFollowerOutcome(report themesync.Report) error {
 	return errors.New("the sync report carries no follower row")
 }
 
-// themeFollowerRefreshReal is themesync.Sync over the real runner and pfm's
+// themeFollowerRefreshReal is themesync.Sync over the installer's process runner and pfm's
 // tmux servers, judged by themeFollowerOutcome.
-func themeFollowerRefreshReal(ctx context.Context, home string) error {
+func (installer *engine) themeFollowerRefreshReal(ctx context.Context, home string) error {
 	values, err := paths.Resolve()
 	if err != nil {
 		return fmt.Errorf("resolve the tmux directory: %w", err)
@@ -166,7 +164,7 @@ func themeFollowerRefreshReal(ctx context.Context, home string) error {
 		Home:      home,
 		StateDir:  themesync.DefaultStateDir(home),
 		PfmBinary: filepath.Join(home, ".local", "bin", "pfm"),
-		Runner:    obs.Runner(deps.RealRunner{}),
+		Runner:    installer.processRunner(),
 		Tmux:      themetmux.AtDir(values.TmuxDir),
 	}, false)
 	if err != nil {

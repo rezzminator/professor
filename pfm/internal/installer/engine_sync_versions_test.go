@@ -8,6 +8,7 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
@@ -36,7 +37,6 @@ func TestReportEngineSyncCompatibilityAndVersionSeats(t *testing.T) {
 				stableVersion = "0.1.0"
 			}
 			binary := filepath.Join(esHome, "bin", "engine-sync")
-			script := "#!/bin/sh\nif [ \"$1\" = version ]; then echo 'engine-sync " + stableVersion + "'; else echo '{\"ok\":true,\"rows\":[]}'; fi\n"
 			// The plugin wrapper links the stable path at a cached version; the
 			// pinned case keeps that shape so its resolved target counts too.
 			stableTarget := binary
@@ -48,8 +48,21 @@ func TestReportEngineSyncCompatibilityAndVersionSeats(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if err := testjail.WriteExecutable(stableTarget, []byte(script), 0o755); err != nil {
+			if err := testjail.WriteExecutableNeverRun(
+				stableTarget,
+				[]byte("#!/bin/sh\nexit 97\n"),
+				0o755,
+			); err != nil {
 				t.Fatal(err)
+			}
+			engineSync := &deps.FakeRunner{}
+			for _, path := range []string{binary, stableTarget} {
+				engineSync.Script(
+					[]string{path, "version"},
+					deps.RunResult{Stdout: []byte("engine-sync " + stableVersion + "\n")},
+					nil,
+				)
+				engineSync.Script([]string{path}, deps.RunResult{Stdout: []byte(`{"ok":true,"rows":[]}` + "\n")}, nil)
 			}
 			if stableTarget != binary {
 				relative := filepath.Join("..", "versions", stableVersion, "engine-sync")
@@ -128,16 +141,26 @@ func TestReportEngineSyncCompatibilityAndVersionSeats(t *testing.T) {
 				if err := os.MkdirAll(filepath.Dir(cached), 0o755); err != nil {
 					t.Fatal(err)
 				}
-				if err := testjail.WriteExecutable(
-					cached,
-					[]byte("#!/bin/sh\necho 'engine-sync "+version+"'\n"),
-					0o755,
-				); err != nil {
+				if err := testjail.WriteExecutableNeverRun(cached, []byte("#!/bin/sh\nexit 97\n"), 0o755); err != nil {
 					t.Fatal(err)
 				}
+				engineSync.Script(
+					[]string{cached, "version"},
+					deps.RunResult{Stdout: []byte("engine-sync " + version + "\n")},
+					nil,
+				)
 			}
 			var output bytes.Buffer
-			warnings, failures := ReportGlobalAgents(&output, home, false, paths.OSEnv{}, nil, []string{account}, nil)
+			warnings, failures := ReportGlobalAgents(
+				&output,
+				home,
+				false,
+				paths.OSEnv{},
+				nil,
+				[]string{account},
+				nil,
+				engineSync,
+			)
 			text := output.String()
 			switch name {
 			case "older required":

@@ -402,13 +402,14 @@ func TestAlphaInstallSatisfiesPluginLogsDoctor(t *testing.T) {
 	for _, dir := range []string{fixture.store, fixture.own} {
 		writePluginLogsFile(t, filepath.Join(dir, "settings.json"), `{"env":{"OTHER":"keep"}}`)
 	}
-	testjail.FakeEngineSync(t, `{"ok":true,"events":[],"error":""}`, 0)
+	_, engineSync := testjail.FakeEngineSyncRunner(t, `{"ok":true,"events":[],"error":""}`, 0)
 	// The ambient table holds another suite's painter, as the fence's /proc does
 	// under a parallel gate; the install reads only the empty table it is given.
 	t.Setenv(paths.EnvProcRoot, ambientHerdrIndicatorTable(t))
 	if _, err := installer.Run(
 		context.Background(),
 		installer.Options{
+			EngineSyncRunner: engineSync,
 			Home:             fixture.home,
 			ConfigDir:        fixture.store,
 			RosterConfigDirs: []string{fixture.linked, fixture.own},

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/enginesync"
 	"github.com/rezzminator/professor/pfm/internal/globallink"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -24,7 +25,7 @@ import (
 // never an absent one. codexHomes resolves through ResolveCodexHomes, as
 // install's do, so doctor checks the Codex homes the config's roster names;
 // an install run with --skip-engine codex wrote none of them, and doctor
-// still checks the roster's.
+// still checks the roster's. runner runs engine-sync; nil is the real one.
 func ReportGlobalAgents(
 	w io.Writer,
 	home string,
@@ -33,6 +34,7 @@ func ReportGlobalAgents(
 	capabilities []string,
 	accountDirs []string,
 	codexHomes []string,
+	runner deps.Runner,
 ) (warnings, failures int) {
 	options := enginesync.MachineDoctorOptions{
 		ClaudeConfigDir: ClaudeStore(home),
@@ -56,18 +58,18 @@ func ReportGlobalAgents(
 			options.SourceRepo = repo
 		}
 	}
-	runner := enginesync.Runner{Env: env, Home: home, Capabilities: capabilities}
-	if err := runner.RequireMinimumVersion(context.Background()); err != nil {
+	engineSync := enginesync.Runner{Env: env, Home: home, Exec: runner, Capabilities: capabilities}
+	if err := engineSync.RequireMinimumVersion(context.Background()); err != nil {
 		fmt.Fprintf(w, "doctor: global-agents state=FAIL %v\n", err)
 		return warnings, 1
 	}
-	versionWarnings, versionFailures := ReportEngineSyncVersions(w, home, env, accountDirs)
+	versionWarnings, versionFailures := ReportEngineSyncVersions(w, home, env, accountDirs, runner)
 	warnings += versionWarnings
 	failures += versionFailures
 	if !resolved {
 		return warnings, failures
 	}
-	rows, err := runner.MachineDoctor(context.Background(), options)
+	rows, err := engineSync.MachineDoctor(context.Background(), options)
 	if err != nil {
 		fmt.Fprintf(w, "doctor: global-agents state=FAIL %v\n", err)
 		return warnings, failures + 1

@@ -13,9 +13,10 @@ import (
 
 func TestInstallFromAliasUsesPhysicalCloneForShellAndGlobalLinks(t *testing.T) {
 	home, clone, alias := aliasInstallFixture(t)
-	record := testjail.FakeEngineSync(t, `{"ok":true,"events":[],"error":""}`, 0)
+	record, engineSync := testjail.FakeEngineSyncRunner(t, `{"ok":true,"events":[],"error":""}`, 0)
 	if _, err := Run(context.Background(), Options{
-		MCPConfigPath: testConfigPath(t), SourceRepo: alias,
+		EngineSyncRunner: engineSync,
+		MCPConfigPath:    testConfigPath(t), SourceRepo: alias,
 		Mode: ModeApply, Home: home, Runner: &fakeRunner{},
 	}); err != nil {
 		t.Fatal(err)

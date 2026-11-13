@@ -12,6 +12,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/action"
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
@@ -50,6 +51,7 @@ func TestReloadWorkbench(t *testing.T) {
 			want := request
 			want.Effort = "xhigh"
 			var wantError, mirrorRecord, wantStderr string
+			var engineSync deps.Runner
 			switch name {
 			case "explicit":
 				request.Effort, want.Effort = "low", "low"
@@ -72,13 +74,15 @@ func TestReloadWorkbench(t *testing.T) {
 				if name == "mirror failure" {
 					reply, code = testjail.FailedMirrorReply, 1
 				}
-				mirrorRecord = testjail.FakeEngineSync(t, reply, code)
+				var fake *testjail.EngineSyncRunner
+				mirrorRecord, fake = testjail.FakeEngineSyncRunner(t, reply, code)
+				engineSync = fake
 				if name == "mirror failure" {
 					persona, err := workbench.ForLaunch(duo, "", pfmengine.Codex, workbench.Resume)
 					if err != nil {
 						t.Fatal(err)
 					}
-					err = workbench.EnsureMirror(persona.Bench, pfmengine.Codex, request.Home)
+					err = workbench.EnsureMirror(persona.Bench, pfmengine.Codex, request.Home, engineSync)
 					if err == nil {
 						t.Fatal("mirror fixture did not fail")
 					}
@@ -108,7 +112,7 @@ func TestReloadWorkbench(t *testing.T) {
 				}
 			}
 			var stderr strings.Builder
-			got, err := applyReloadWorkbench(request, &stderr)
+			got, err := applyReloadWorkbench(request, engineSync, &stderr)
 			if stderr.String() != wantStderr {
 				t.Fatalf("stderr = %q, want %q", stderr.String(), wantStderr)
 			}

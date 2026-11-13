@@ -63,7 +63,7 @@ func TestRetiredCommandsExitTwoNamingTheirSuccessor(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			root := jailTest(t)
 			stageRetiredClone(t, filepath.Join(root, "home"), testCase.lists)
-			record := testjail.FakeEngineSync(t, "", 0)
+			record, _ := testjail.FakeEngineSyncRunner(t, "", 0)
 			args := testCase.args
 			if testCase.brokenConfig {
 				path := filepath.Join(t.TempDir(), "machine.json")

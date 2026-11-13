@@ -527,12 +527,8 @@ func (installer *engine) wireHandlerTrust(account string, carriesHook map[string
 	for _, hook := range carried {
 		handlers = append(handlers, codexHandler(hook))
 	}
-	states := codexappendix.NativeHookTrustStates(
-		context.Background(),
-		installer.options.CodexBinary,
-		account,
-		handlers,
-	)
+	ctx := codexappendix.WithAppServerRunner(context.Background(), installer.processRunner())
+	states := codexappendix.NativeHookTrustStates(ctx, installer.options.CodexBinary, account, handlers)
 	var untrusted []codexappendix.Handler
 	for index, state := range states {
 		name := carried[index].Name
@@ -550,7 +546,7 @@ func (installer *engine) wireHandlerTrust(account string, carriesHook map[string
 	}
 	return installer.change("trust Codex hooks "+account, func() error {
 		if err := codexappendix.RegisterHookTrusts(
-			context.Background(), installer.options.CodexBinary, account, untrusted,
+			ctx, installer.options.CodexBinary, account, untrusted,
 		); err != nil {
 			return fmt.Errorf("record Codex hook trust for %s: %w", account, err)
 		}

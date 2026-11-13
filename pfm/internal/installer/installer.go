@@ -20,7 +20,6 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/claudeplugin"
-	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/globallink"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -43,10 +42,8 @@ type engine struct {
 	// engineSyncAbsent is set when an uninstall found no engine-sync binary:
 	// the global file then stays with the Codex roles, holding their targets.
 	engineSyncAbsent bool
-	// engineSyncExec and engineSyncDeadline are the test seams of the
-	// engine-sync runner: its process runner and the deadline of `global`;
-	// nil and zero are the real process table and engineSyncGlobalTimeout.
-	engineSyncExec     deps.Runner
+	// engineSyncDeadline is the test seam of the deadline of `engine-sync
+	// global`; zero is engineSyncGlobalTimeout.
 	engineSyncDeadline time.Duration
 	// removedPaths are the paths this pass removed, or — in a dry run, where
 	// nothing is removed at all — planned to remove. retireEmptyDir discounts

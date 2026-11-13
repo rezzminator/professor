@@ -373,7 +373,7 @@ func TestGlobalAgentsDoctorUnreadableMarkerIsUnresolvedNotNoClone(t *testing.T) 
 	writeFixture(t, paths.SourceRepoPath(home), "\n")
 
 	var output bytes.Buffer
-	warnings, failures := ReportGlobalAgents(&output, home, false, paths.OSEnv{}, nil, nil, nil)
+	warnings, failures := ReportGlobalAgents(&output, home, false, paths.OSEnv{}, nil, nil, nil, nil)
 	if warnings != 1 || failures != 1 {
 		t.Fatalf("warnings=%d failures=%d, want 1/1\n%s", warnings, failures, output.String())
 	}
@@ -449,7 +449,7 @@ func TestReportGlobalAgentsRendersEngineSyncRows(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			record := testjail.FakeEngineSync(t, reply, 1)
+			record, engineSync := testjail.FakeEngineSyncRunner(t, reply, 1)
 			var output bytes.Buffer
 			warnings, failures := ReportGlobalAgents(
 				&output,
@@ -458,7 +458,8 @@ func TestReportGlobalAgentsRendersEngineSyncRows(t *testing.T) {
 				paths.OSEnv{},
 				testCase.capabilities,
 				nil,
-				testCase.codexHomes)
+				testCase.codexHomes,
+				engineSync)
 			if warnings != 1 || failures != 1 {
 				t.Fatalf("warnings=%d failures=%d, want 1/1\n%s", warnings, failures, output.String())
 			}
@@ -483,7 +484,7 @@ func TestReportGlobalAgentsWithoutEngineSyncIsAFailingRow(t *testing.T) {
 	t.Setenv("ENGINE_SYNC_HOME", "")
 	t.Setenv("XDG_DATA_HOME", "")
 	var output bytes.Buffer
-	warnings, failures := ReportGlobalAgents(&output, home, false, paths.OSEnv{}, nil, nil, nil)
+	warnings, failures := ReportGlobalAgents(&output, home, false, paths.OSEnv{}, nil, nil, nil, nil)
 	if warnings != 0 || failures != 1 {
 		t.Fatalf("warnings=%d failures=%d, want 0/1\n%s", warnings, failures, output.String())
 	}

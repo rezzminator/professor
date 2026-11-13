@@ -13,6 +13,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/obs"
@@ -23,7 +24,7 @@ import (
 // applyWorkbench prepares the persona before either executor door synthesizes
 // a launch, and returns what the launch dropped of it (LaunchPersona,
 // PersonaMirror): the chat opens anyway.
-func applyWorkbench(request *Request) ([]string, error) {
+func applyWorkbench(request *Request, engineSync deps.Runner) ([]string, error) {
 	// A booting row attaches to a seat already launched: nothing relaunches.
 	if request.Row.Kind.IsLiveSeat() || request.Row.Kind == compose.Booting {
 		return nil, nil
@@ -66,7 +67,7 @@ func applyWorkbench(request *Request) ([]string, error) {
 	}
 	// A new Codex chat runs the user's own cx, whose launcher builds the mirror.
 	if request.Row.Kind == compose.ResumeCodex || engine == pfmengine.OpenCode {
-		warnings = append(warnings, PersonaMirror(persona, engine, request.Home)...)
+		warnings = append(warnings, PersonaMirror(persona, engine, request.Home, engineSync)...)
 	}
 	if engine == pfmengine.OpenCode {
 		if err := attachOpenCodeSeatPlugin(request); err != nil {
@@ -114,11 +115,12 @@ func LaunchPersona(cwd, home string, engine pfmengine.ID, mode workbench.Mode) (
 
 // PersonaMirror builds the persona's engine mirror before a launch. A build
 // that fails launches on the mirror as it stands, named in the returned warning.
-func PersonaMirror(persona workbench.Persona, engine pfmengine.ID, home string) []string {
+// engineSync runs the engine-sync child; nil is the real process table.
+func PersonaMirror(persona workbench.Persona, engine pfmengine.ID, home string, engineSync deps.Runner) []string {
 	if !persona.Applies() {
 		return nil
 	}
-	if err := workbench.EnsureMirror(persona.Bench, engine, home); err != nil {
+	if err := workbench.EnsureMirror(persona.Bench, engine, home, engineSync); err != nil {
 		return []string{err.Error() + "; launching on the mirror as it stands"}
 	}
 	return nil

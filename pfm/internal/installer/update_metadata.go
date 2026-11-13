@@ -83,7 +83,7 @@ func (installer *engine) armSourceRepoPrePushGate(repo string) error {
 
 	runner := installer.options.Runner
 	if runner == nil {
-		runner = execCommandRunner{}
+		runner = execCommandRunner{runner: installer.processRunner()}
 	}
 	reader, ok := runner.(OutputRunner)
 	if !ok {

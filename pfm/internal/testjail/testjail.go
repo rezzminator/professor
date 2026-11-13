@@ -6,6 +6,7 @@
 // executable.go: WriteExecutable, the one writer of a file a test runs;
 // WriteExecutableNeverRun, of one the code under test only resolves or reads;
 // the fake logged-out engines.
+// enginesync.go, enginesync_runner.go: the engine-sync fakes, run and in process.
 package testjail
 
 import (

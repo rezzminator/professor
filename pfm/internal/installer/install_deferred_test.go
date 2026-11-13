@@ -19,14 +19,14 @@ import (
 
 func TestInstallDeferredTrustFailureLandsLaterSteps(t *testing.T) {
 	home := t.TempDir()
-	account, binary, _ := stageResumeUnkillAccount(t, home)
+	account, binary, _, appServer := stageResumeUnkillAccount(t, home)
 	writeFixture(t, filepath.Join(account, "hooks.json"), `{"hooks":{}}`)
 	// The discovery answers no handler; initialization and the write reply
 	// retain the same native API exchange as the successful account fixture.
 	writeFixture(t, filepath.Join(home, "hooks-listing.jsonl"), "")
 	var output bytes.Buffer
 	_, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{}, Stdout: &output,
+		Mode: ModeApply, Home: home, Runner: &fakeRunner{}, ProcessRunner: appServer, Stdout: &output,
 		CodexHomes: []string{account}, CodexBinary: binary, MCPConfigPath: testConfigPath(t),
 	})
 	if err == nil || !strings.Contains(err.Error(), "(found 0)") {
@@ -371,7 +371,7 @@ func TestInstallDeferredUnprobedGateUsesSharedNote(t *testing.T) {
 
 func TestUninstallDeferredPrunesClaudeAndRemovesCodexHookLedger(t *testing.T) {
 	home := t.TempDir()
-	account, _, _ := stageResumeUnkillAccount(t, home)
+	account, _, _ := stageCodexAccount(t, home)
 	options := Options{
 		Mode:          ModeApply,
 		Home:          home,

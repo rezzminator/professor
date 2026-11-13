@@ -258,7 +258,7 @@ func runRun(
 		return 2
 	}
 	if engineName == pfmengine.Codex {
-		launchnotice.Print(stderr, "pfm chat new", action.PersonaMirror(persona, engineName, resolved.Home))
+		launchnotice.Print(stderr, "pfm chat new", action.PersonaMirror(persona, engineName, resolved.Home, nil))
 	}
 	plan, err := action.HeadlessRun(action.HeadlessRequest{
 		Engine:        engineName,

@@ -210,7 +210,7 @@ func TestUninstallRetiresTheGlobalFile(t *testing.T) {
 			home := t.TempDir()
 			clone := filepath.Join(home, ".professor")
 			writeFixture(t, engineSyncPolicySource(clone), engineSyncTemplate)
-			testjail.FakeEngineSync(t, `{"ok":true,"events":[],"error":""}`, 0)
+			_, engineSync := testjail.FakeEngineSyncRunner(t, `{"ok":true,"events":[],"error":""}`, 0)
 			path := enginesync.GlobalConfigPath(home)
 			if owned {
 				writeFixture(t, path, wantEngineSyncFile(nil, filepath.Join(home, ".claude"), clone, nil))
@@ -219,7 +219,8 @@ func TestUninstallRetiresTheGlobalFile(t *testing.T) {
 			}
 			var output bytes.Buffer
 			if _, err := Run(context.Background(), Options{
-				MCPConfigPath: testConfigPath(t), SourceRepo: clone,
+				EngineSyncRunner: engineSync,
+				MCPConfigPath:    testConfigPath(t), SourceRepo: clone,
 				Mode: ModeUninstall, Home: home, Stdout: &output, Runner: &fakeRunner{},
 			}); err != nil {
 				t.Fatalf("uninstall: %v\n%s", err, output.String())
@@ -271,7 +272,8 @@ func TestEngineSyncPreviewIsSkippedByNameWhenTheInstallChangesTheConfig(t *testi
 			installer, output, home := engineSyncConfigEngine(t, testCase.mode, nil)
 			installer.apply = false
 			testCase.setup(t, installer, home)
-			record := testjail.FakeEngineSync(t, `{"ok":true,"events":[],"error":""}`, 0)
+			record, engineSync := testjail.FakeEngineSyncRunner(t, `{"ok":true,"events":[],"error":""}`, 0)
+			installer.options.EngineSyncRunner = engineSync
 			if err := installer.wireEngineSyncGlobal(nil); err != nil {
 				t.Fatal(err)
 			}
@@ -319,7 +321,8 @@ func TestEngineSyncPreviewWithoutAChangeUsesTheRealHome(t *testing.T) {
 			} else {
 				writeFixture(t, enginesync.GlobalConfigPath(home), content)
 			}
-			record := testjail.FakeEngineSync(t, `{"ok":true,"events":[],"error":""}`, 0)
+			record, engineSync := testjail.FakeEngineSyncRunner(t, `{"ok":true,"events":[],"error":""}`, 0)
+			installer.options.EngineSyncRunner = engineSync
 			if err := installer.wireEngineSyncGlobal(nil); err != nil {
 				t.Fatalf("%v\n%s", err, output.String())
 			}

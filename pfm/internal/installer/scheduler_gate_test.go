@@ -6,14 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/servicemanager"
-	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // fakeRunner is the package tests' systemd/launchd runner: Run answers the
@@ -305,46 +304,56 @@ func TestNameSyncServiceRunningClassifiesProbeAnswers(t *testing.T) {
 }
 
 // TestNameSyncServiceRunningProductionShape runs schedulerServiceRunning
-// through the real execCommandRunner against a systemctl script on PATH (none
-// when script is empty). The scripts answer `show` with a state and exit 3 for
-// `is-active`, as real systemd does for a oneshot mid-run: a gate that trusts
-// the is-active exit reads a running job as idle.
+// through the real execCommandRunner over a scripted process runner: systemctl
+// answers `show` with a state, or fails, or is not found at all. The runner's
+// ledger proves the gate asked `show` alone — a gate that trusted the
+// `is-active` exit (3 for a oneshot mid-run, as real systemd answers) would read
+// a running job as idle.
 func TestNameSyncServiceRunningProductionShape(t *testing.T) {
+	t.Parallel()
 	if servicemanager.Native() != servicemanager.KindSystemd {
 		t.Skip("the dependency registry refuses systemctl off a systemd host; the fake-runner rows cover the gate")
 	}
-	answer := func(state string) string {
-		return "#!/bin/sh\ncase \"$*\" in *show*) echo " + state + "; exit 0;; esac\nexit 3\n"
-	}
+	show := "systemctl --user show --property=ActiveState --value pfm-name-sync.service"
 	for _, testCase := range []struct {
-		name, script            string
+		name                    string
+		found                   bool
+		result                  deps.RunResult
+		wantCalls               []string
 		wantRunning, wantProbed bool
 	}{
-		{"oneshot mid-run reports activating", answer("activating"), true, true},
-		{"systemctl reports inactive", answer("inactive"), false, true},
-		{"systemctl could not reach the user bus", "#!/bin/sh\necho 'Failed to connect to bus' >&2\nexit 1\n", false, false},
-		{"systemctl cannot be found", "", false, false},
+		{"oneshot mid-run reports activating", true, deps.RunResult{Stdout: []byte("activating\n")}, []string{show}, true, true},
+		{"systemctl reports inactive", true, deps.RunResult{Stdout: []byte("inactive\n")}, []string{show}, false, true},
+		{
+			"systemctl could not reach the user bus", true,
+			deps.RunResult{ExitCode: 1, Stderr: []byte("Failed to connect to bus\n")},
+			[]string{show},
+			false, false,
+		},
+		{"systemctl cannot be found", false, deps.RunResult{}, nil, false, false},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
-			dir := t.TempDir()
-			if testCase.script != "" {
-				if err := testjail.WriteExecutable(
-					filepath.Join(dir, "systemctl"),
-					[]byte(testCase.script),
-					0o755,
-				); err != nil {
-					t.Fatal(err)
-				}
+			t.Parallel()
+			processes := &deps.FakeRunner{}
+			if testCase.found {
+				processes.ScriptLookPath("systemctl", "/fixture/systemctl", nil)
+				processes.Script([]string{"systemctl", "--user", "show"}, testCase.result, nil)
 			}
-			t.Setenv("PATH", dir)
 			running, probed := schedulerServiceRunning(
-				context.Background(), execCommandRunner{}, "pfm-name-sync.service",
+				context.Background(), execCommandRunner{runner: processes}, "pfm-name-sync.service",
 			)
 			if running != testCase.wantRunning || probed != testCase.wantProbed {
 				t.Fatalf(
 					"schedulerServiceRunning() = (%v, %v), want (%v, %v)",
 					running, probed, testCase.wantRunning, testCase.wantProbed,
 				)
+			}
+			var calls []string
+			for _, call := range processes.Calls() {
+				calls = append(calls, strings.Join(call.Argv, " "))
+			}
+			if !reflect.DeepEqual(calls, testCase.wantCalls) {
+				t.Fatalf("process calls = %q, want %q", calls, testCase.wantCalls)
 			}
 		})
 	}

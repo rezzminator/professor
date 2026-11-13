@@ -92,7 +92,7 @@ func TestCodexLaunchWorkbench(t *testing.T) {
 			transport := []string{"--no-daemon"}
 			wantError, wantWarning := "", ""
 			mirror := true
-			mirrorRecord := testjail.FakeEngineSync(t, testjail.CleanMirrorReply, 0)
+			mirrorRecord, engineSync := testjail.FakeEngineSyncRunner(t, testjail.CleanMirrorReply, 0)
 			project := filepath.Dir(filepath.Dir(duo))
 			var wantEnv []string
 			if strings.HasPrefix(scenario, "settings ") {
@@ -156,12 +156,12 @@ func TestCodexLaunchWorkbench(t *testing.T) {
 				wantWarning = "launch Codex: workbench persona not applied (" + paths.WorkbenchManifest(duo) +
 					`: "prompt" is required); launching without it` + "\n"
 			case "mirror failure":
-				mirrorRecord = testjail.FakeEngineSync(t, testjail.FailedMirrorReply, 1)
+				mirrorRecord, engineSync = testjail.FakeEngineSyncRunner(t, testjail.FailedMirrorReply, 1)
 				persona, err := workbench.ForLaunch(duo, "", pfmengine.Codex, workbench.New)
 				if err != nil {
 					t.Fatal(err)
 				}
-				err = workbench.EnsureMirror(persona.Bench, pfmengine.Codex, runtime.Paths.Home)
+				err = workbench.EnsureMirror(persona.Bench, pfmengine.Codex, runtime.Paths.Home, engineSync)
 				if err == nil {
 					t.Fatal("mirror fixture must fail")
 				}
@@ -237,7 +237,7 @@ func TestCodexLaunchWorkbench(t *testing.T) {
 				return nil
 			}
 			var stderr bytes.Buffer
-			code := hookentry.CodexLaunch(args, &stderr, runtime)
+			code := hookentry.CodexLaunchWith(args, &stderr, runtime, engineSync)
 			if wantError != "" {
 				if code != 1 || called || stderr.String() != wantError {
 					t.Fatalf("refusal = %d, called %v, %q; want %q", code, called, stderr.String(), wantError)

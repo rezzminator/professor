@@ -23,6 +23,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
@@ -139,6 +140,9 @@ type Options struct {
 	ThenTries      int
 	// Clock is the time seam every wait crosses; nil defaults to clock.Real.
 	Clock clock.Clock
+	// EngineSyncRunner runs the engine-sync child that builds a Codex
+	// persona's mirror (applyReloadWorkbench); nil is the real process table.
+	EngineSyncRunner deps.Runner
 }
 
 type Result struct {
@@ -202,7 +206,7 @@ func Run(
 	defer func() { trail.End(err) }()
 	options.defaults()
 	entry := options.Clock.Now()
-	if request, err = applyReloadWorkbench(request, stderr); err != nil {
+	if request, err = applyReloadWorkbench(request, options.EngineSyncRunner, stderr); err != nil {
 		return Result{}, err
 	}
 	request, run, wasNew, err := prepareReload(request)

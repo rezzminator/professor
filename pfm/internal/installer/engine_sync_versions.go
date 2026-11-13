@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/claudeplugin"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/enginesync"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -19,7 +20,14 @@ import (
 // ReportEngineSyncVersions diagnoses competing plugin and stable-link writers without changing them. The
 // two-versions row names the Claude seats (the store and accountDirs) that run the plugin unpinned; with every
 // such seat pinned to the stable binary the plugin's cached version writes nothing, and the row stays silent.
-func ReportEngineSyncVersions(w io.Writer, home string, env paths.Env, accountDirs []string) (warnings, failures int) {
+// runner runs each engine-sync binary it probes; nil is the real one.
+func ReportEngineSyncVersions(
+	w io.Writer,
+	home string,
+	env paths.Env,
+	accountDirs []string,
+	runner deps.Runner,
+) (warnings, failures int) {
 	stable := enginesync.StablePath(env, home)
 	if _, err := os.Stat(stable); errors.Is(err, fs.ErrNotExist) {
 		return 0, 0
@@ -29,7 +37,7 @@ func ReportEngineSyncVersions(w io.Writer, home string, env paths.Env, accountDi
 	}
 	probe := func(binary string) (string, error) {
 		selected := &paths.MapEnv{HomeDir: home, Values: map[string]string{enginesync.EnvBin: binary}}
-		return (enginesync.Runner{Env: selected, Home: home}).Version(context.Background())
+		return (enginesync.Runner{Env: selected, Home: home, Exec: runner}).Version(context.Background())
 	}
 	stableVersion, err := probe(stable)
 	if err != nil {

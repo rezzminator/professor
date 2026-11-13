@@ -2,7 +2,6 @@ package index
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"os"
@@ -15,6 +14,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
@@ -26,7 +26,7 @@ func seedOpenCodeStress(t *testing.T, root string, count int) {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	db, err := sql.Open("sqlite", filepath.Join(root, "opencode.db"))
+	db, err := sqlitedb.OpenReadWrite(filepath.Join(root, "opencode.db"), 5*time.Second)
 	if err != nil {
 		t.Fatalf("open stress store: %v", err)
 	}
@@ -293,7 +293,7 @@ func TestStressOpenCodeReadWhileWriterActive(t *testing.T) {
 		// recovery even though the reader never blocks a write transaction. Give
 		// the writer one bounded lock wait, matching the production reader's
 		// contract: persistent contention still fails after five seconds.
-		live, err := sql.Open("sqlite", "file:"+dbPath+"?_pragma=busy_timeout(5000)")
+		live, err := sqlitedb.OpenReadWrite(dbPath, 5*time.Second)
 		if err != nil {
 			writerDone <- err
 			return

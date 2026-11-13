@@ -1,5 +1,8 @@
 // Package testjail holds the platform setup the suite needs before any test
 // runs. It is imported only by _test.go files, so it never reaches the binary.
+//
+// database.go: DatabaseFiles, the allowance a test that needs SQLite's own
+// file calls; Run turns the SQLite door's memory mode on for every test.
 package testjail
 
 import (
@@ -10,7 +13,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -22,6 +24,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 )
 
 // KeepAmbientIdentity, set by a TestMain before Run, leaves the ambient
@@ -62,6 +65,9 @@ func Run(m *testing.M) int {
 			warnSetup("set %s: %v", jailMarkerEnv, err)
 			return 1
 		}
+		// Every SQLite path this process opens is served from memory, its file a
+		// marker (database.go); a re-exec'd helper opens files, as pfm itself does.
+		sqlitedb.ServeTestMemory()
 	}
 	// The operator's ~/.local/bin and pfm's managed install bin hold pfm's own
 	// `claude` launcher shim; a jailed test resolving a binary through PATH must
@@ -312,6 +318,7 @@ func ShortRoot(t *testing.T) string {
 			t.Errorf("remove short jail root %s: %v", directory, err)
 		}
 	})
+	releaseDatabases(t, directory)
 	return directory
 }
 
@@ -579,6 +586,7 @@ func StageHarnessPromptBaseline(t *testing.T, home, alias, stem, captured, name 
 func CleanHome(t *testing.T, dirs []string, files map[string]string) config.Runtime {
 	t.Helper()
 	home := t.TempDir()
+	releaseDatabases(t, home)
 	claudeBinary := pfmengine.MustLookup(pfmengine.Claude).Binary
 	canonicalDir := filepath.Join(home, ".local", "bin")
 	hostShimDir := filepath.Join(t.TempDir(), "bin")
@@ -770,16 +778,4 @@ func StageClaudePlugins(t *testing.T, store string, ids []string) {
 			t.Fatal(err)
 		}
 	}
-}
-
-// PTYCommand builds a command that runs argv on a REAL pty via script(1), for
-// behaviour that only happens on a terminal. A script(1) that cannot be
-// resolved is the deps.Resolve error, never a bare name left to fail later.
-func PTYCommand(argv ...string) (*exec.Cmd, error) {
-	scriptBinary, err := deps.Resolve("script")
-	if err != nil {
-		return nil, err
-	}
-	scriptArgv := ptyScriptArgv(scriptBinary, argv)
-	return exec.Command(scriptArgv[0], scriptArgv[1:]...), nil
 }

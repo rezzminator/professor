@@ -2,18 +2,20 @@ package index
 
 import (
 	"context"
-	"database/sql"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	_ "modernc.org/sqlite"
 
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // seedOpenCodeStore builds the OpenCode v1.14.30 store shape from its published
@@ -24,7 +26,7 @@ func seedOpenCodeStore(t *testing.T, root string) {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatalf("mkdir opencode root: %v", err)
 	}
-	db, err := sql.Open("sqlite", filepath.Join(root, "opencode.db"))
+	db, err := sqlitedb.OpenReadWrite(filepath.Join(root, "opencode.db"), 5*time.Second)
 	if err != nil {
 		t.Fatalf("open fixture store: %v", err)
 	}
@@ -238,7 +240,7 @@ func TestReadOpenCodeSessionsCompactsNativeModelID(t *testing.T) {
 	root := t.TempDir()
 	seedOpenCodeStore(t, root)
 
-	db, err := sql.Open("sqlite", filepath.Join(root, "opencode.db"))
+	db, err := sqlitedb.OpenReadWrite(filepath.Join(root, "opencode.db"), 5*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,7 +291,7 @@ func TestReadOpenCodeSessionsMissingStoreIsQuietlyEmpty(t *testing.T) {
 // mutateOpenCodeStore runs statement against root's fixture store.
 func mutateOpenCodeStore(t *testing.T, root, statement string) {
 	t.Helper()
-	db, err := sql.Open("sqlite", filepath.Join(root, "opencode.db"))
+	db, err := sqlitedb.OpenReadWrite(filepath.Join(root, "opencode.db"), 5*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -391,7 +393,7 @@ UPDATE part SET data = 'not-json' WHERE id = 'i1';`,
 func TestReadOpenCodeSessionsAcceptsACompletelyEmptyNativeStore(t *testing.T) {
 	root := t.TempDir()
 	seedOpenCodeStore(t, root)
-	db, err := sql.Open("sqlite", filepath.Join(root, "opencode.db"))
+	db, err := sqlitedb.OpenReadWrite(filepath.Join(root, "opencode.db"), 5*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -434,6 +436,7 @@ func TestSyncOpenCodeMirrorsChangedStoresOnly(t *testing.T) {
 	database := openMirrorStore(t)
 	ctx, recorder := obs.Test(t)
 	root := t.TempDir()
+	testjail.DatabaseFiles(t, root) // the stamp reads the store file's size, mtime and -wal sibling
 	seedOpenCodeStore(t, root)
 	reads := func() int {
 		count := 0
@@ -468,7 +471,7 @@ func TestSyncOpenCodeMirrorsChangedStoresOnly(t *testing.T) {
 	}
 	// A live OpenCode holds its store open in WAL mode, its WAL created by its
 	// first transaction, so its commits stay in the WAL until a checkpoint.
-	live, err := sql.Open("sqlite", filepath.Join(root, "opencode.db"))
+	live, err := sqlitedb.OpenReadWrite(filepath.Join(root, "opencode.db"), 5*time.Second)
 	if err != nil {
 		t.Fatalf("open the live store: %v", err)
 	}

@@ -20,7 +20,7 @@ func TestHerdrGhostKillRequiresDeadSavedHost(t *testing.T) {
 	} {
 		t.Run(mode, func(t *testing.T) {
 			jail := newKillJail(t)
-			database := jail.openFile(t)
+			database := jail.open(t)
 			server := newKillHerdr(t)
 			seat := seedKillHerdr(t, database, server)
 			request := Request{
@@ -170,7 +170,7 @@ func TestHerdrGhostKillRequiresDeadSavedHost(t *testing.T) {
 func TestHerdrProveVanishedUnboundSeat(t *testing.T) {
 	for _, listed := range []bool{false, true} {
 		jail := newKillJail(t)
-		database := jail.openFile(t)
+		database := jail.open(t)
 		server := newKillHerdr(t)
 		seat := seedKillHerdr(t, database, server)
 		seat.SeatHostPID, seat.SeatHostStart = 0, 0

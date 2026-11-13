@@ -8,15 +8,17 @@
 # Scope: every `func Test…(… *testing.T)` and `func Fuzz…(… *testing.F)` in a *_test.go file under
 # pfm-dir, outside journey/, e2e/, testdata/ and dot directories. TestMain is not a test.
 # A test's kind is the worst marker its own body or any test-file function of its directory it
-# names (by identifier, transitively) carries, comment lines skipped; a whole `_jail_test.go` file is tmux:
-#   tmux         exec of "tmux", a "new-session" argument, or a `_jail_test.go` file
+# names (by identifier, transitively) carries, comment lines skipped. A test in a jail file,
+# `{name}_jail_test.go` or `{name}_jail_{os}_test.go`, is real: a test kept on a real resource until a
+# fake or the journey can play it, its file's count ratcheted by arch-check C33; any other function of
+# a jail file marks the tests naming it tmux:
+#   tmux         exec of "tmux", a "new-session" argument, or a function of a jail file
 #   process      exec.Command, os.StartProcess, syscall exec, an executable written to run
 #                (testjail.WriteExecutable and its fakes), a built binary, a PTY, mockengine
-#   home-sqlite  a private pfm home (testjail.Fleet, FleetEnv, InstalledHome, CleanHome,
-#                StageAccountLinks, PFM_HOME / PFM_STATE_DB / PFM_CACHE_DB) or a SQLite file
-#                (sqlitedb., sql.Open, store.Open…, index.New…, a ".db" literal); store.OpenMemory, the
-#                store's in-memory door, is memory
-#   temp-dir     t.TempDir(), os.MkdirTemp, os.CreateTemp, testjail.ShortRoot / CreateShortRoot
+#   home-sqlite  SQLite's own file: testjail.DatabaseFiles, or a database built with sql.Open; any
+#                other open goes through the SQLite door, which serves it from memory in a test process
+#   temp-dir     t.TempDir(), os.MkdirTemp, os.CreateTemp, testjail.ShortRoot / CreateShortRoot, or a
+#                testjail home built in one (Fleet, FleetEnv, InstalledHome, CleanHome)
 #   nothing      none of the above: memory only
 # A method is reached only through a selector (`x.Name`), a func by its bare name or a selector; a name
 # inside a string literal reaches nothing. Markers are read from source, so the kind is what the test
@@ -25,7 +27,7 @@
 # receiver is (too high).
 #
 # Output (rc 0), one line:
-#   KINDS unit {n} (nothing {n} · temp-dir {n}) · move {n} (home-sqlite {n} · process {n} · tmux {n}) · total {n}
+#   KINDS unit {n} (nothing {n} · temp-dir {n}) · real {n} · move {n} (home-sqlite {n} · process {n} · tmux {n}) · total {n}
 # --list: one row per test instead, `{kind}\t{dir}\t{file}\t{func}`, dir relative to pfm-dir.
 # BROKEN STATE: an unreadable pfm-dir, no go.mod there, an unreadable test file, or no test
 # function found at all prints `KINDS ERROR {why}` and exits 2 — "could not look" never reads as zero.
@@ -41,16 +43,17 @@ import re
 import sys
 
 root, as_list = sys.argv[1], sys.argv[2] == '1'
-KINDS = ['nothing', 'temp-dir', 'home-sqlite', 'process', 'tmux']
+KINDS = ['nothing', 'temp-dir', 'home-sqlite', 'process', 'tmux', 'real']
 MARKERS = [
     (4, re.compile(r'exec\.Command(?:Context)?\((?:[^,()]*,\s*)?"tmux"|"new-session"')),
     (3, re.compile(r'exec\.Command(?:Context)?\(|os\.StartProcess\(|syscall\.(?:Exec|ForkExec)\('
                    r'|testjail\.(?:WriteExecutable|PFMBinary|MockEngineBinary|GoBuild|PTYCommand|HungTmux'
                    r'|FakeEngineSync|WriteLoggedOut\w*)\b|\bmockengine\.')),
-    (2, re.compile(r'testjail\.(?:Fleet|FleetEnv|InstalledHome|CleanHome|StageAccountLinks)\b|\bsqlitedb\.'
-                   r'|\bsql\.Open\(|\bstore\.Open(?!Memory\()\w*\(|\bindex\.New\w*\(|PFM_(?:HOME|STATE_DB|CACHE_DB)\b|\.db"')),
-    (1, re.compile(r'\.TempDir\(\)|os\.(?:MkdirTemp|CreateTemp)\(|testjail\.(?:ShortRoot|CreateShortRoot)\b')),
+    (2, re.compile(r'testjail\.DatabaseFiles\b|\bsql\.Open\(')),
+    (1, re.compile(r'\.TempDir\(\)|os\.(?:MkdirTemp|CreateTemp)\(|testjail\.(?:ShortRoot|CreateShortRoot|Fleet|FleetEnv|InstalledHome|CleanHome)\b')),
 ]
+# A test in a jail file, `{name}_jail_test.go` or `{name}_jail_{os}_test.go`, is real.
+JAIL = re.compile(r'_jail(?:_(?:linux|darwin))?_test\.go$')
 # A top-level func or method (its key `.{name}`, reached only through a selector), or a package-level
 # `var {name} = func(` closure, read as a function.
 FUNC = re.compile(r'^(?:func (\([^)]*\)\s*)?([A-Za-z_]\w*)|var ([A-Za-z_]\w*) = func\b)')
@@ -115,7 +118,7 @@ for directory, dirs, files in os.walk(root, onerror=lambda exc: die(f'cannot lis
                 text = handle.read()
         except (OSError, UnicodeError) as exc:
             die(f'cannot read {path}: {exc}')
-        jail = file.endswith('_jail_test.go')
+        jail = bool(JAIL.search(file))
         for name, signature, body in split_funcs(text):
             joined = '\n'.join(body)
             value = 4 if jail else rank(joined)
@@ -123,10 +126,10 @@ for directory, dirs, files in os.walk(root, onerror=lambda exc: die(f'cannot lis
             # A name inside a string literal calls nothing; `x.Name` may be a method or another file's func.
             refs.setdefault(name, set()).update(dot + word for dot, word in WORD.findall(STRING.sub('""', joined)))
             if TEST.match(signature):
-                found.append((file, name))
+                found.append((file, name, jail))
     names = set(own)
     worst = {}
-    for file, name in found:
+    for file, name, _ in found:
         seen, stack, value = {name}, [name], 0
         while stack and value < 4:
             current = stack.pop()
@@ -138,8 +141,8 @@ for directory, dirs, files in os.walk(root, onerror=lambda exc: die(f'cannot lis
                         stack.append(key)
         worst[(file, name)] = value
     rel = os.path.relpath(directory, root)
-    for file, name in found:
-        rows.append((KINDS[worst[(file, name)]], rel, file, name))
+    for file, name, jail in found:
+        rows.append(('real' if jail else KINDS[worst[(file, name)]], rel, file, name))
 
 if not rows:
     die(f'no test function found under {root}')
@@ -151,7 +154,7 @@ count = {kind: 0 for kind in KINDS}
 for row in rows:
     count[row[0]] += 1
 unit = count['nothing'] + count['temp-dir']
-print(f"KINDS unit {unit} (nothing {count['nothing']} · temp-dir {count['temp-dir']})"
-      f" · move {len(rows) - unit} (home-sqlite {count['home-sqlite']} · process {count['process']}"
+print(f"KINDS unit {unit} (nothing {count['nothing']} · temp-dir {count['temp-dir']}) · real {count['real']}"
+      f" · move {len(rows) - unit - count['real']} (home-sqlite {count['home-sqlite']} · process {count['process']}"
       f" · tmux {count['tmux']}) · total {len(rows)}")
 PY

@@ -56,6 +56,7 @@ func TestSeatHostRemoteControlUnreadableConfigDoesNotBlock(t *testing.T) {
 func runRemoteControlSeatHost(t *testing.T, enabled, corrupt bool) {
 	t.Helper()
 	root, environment := testjail.FleetEnv(t)
+	testjail.DatabaseFiles(t, root)
 	binary := filepath.Join(root, "fixture-engine")
 	argsFile := filepath.Join(root, "engine-args")
 	if err := testjail.WriteExecutable(

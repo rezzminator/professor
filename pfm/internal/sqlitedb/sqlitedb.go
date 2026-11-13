@@ -3,6 +3,10 @@
 // for unit tests; a database another program owns — Codex's state and history
 // stores, OpenCode's store — opens through OpenReadOnly or OpenReadWrite, which
 // never change its settings.
+//
+// memory.go: the test-process memory mode — ServeTestMemory (testjail.Run's
+// switch), AllowDatabaseFiles, ReleaseTestMemory and AttachName: in a test
+// process every path is served from a memory database its marker file names.
 package sqlitedb
 
 import (
@@ -37,7 +41,11 @@ const StoreBusyTimeout = 10 * time.Second
 // another's writes — synchronous=NORMAL and foreign keys on.
 func OpenStore(ctx context.Context, path string) (*sql.DB, error) {
 	finish := obs.SQLOpen(ctx, "store", path)
-	database, err := openStoreFile(ctx, path)
+	open := openStoreFile
+	if served(path) {
+		open = openStoreServed
+	}
+	database, err := open(ctx, path)
 	finish(err)
 	return database, err
 }
@@ -175,6 +183,13 @@ func OpenReadWrite(path string, busy time.Duration) (*sql.DB, error) {
 // the destination.
 func openForeign(path, kind, mode string, busy time.Duration) (*sql.DB, error) {
 	finish := obs.SQLOpen(context.Background(), kind, path)
+	if served(path) {
+		database, found, err := openForeignServed(path, mode, busy)
+		if err != nil || found {
+			finish(err)
+			return database, err
+		}
+	}
 	database, err := sql.Open(
 		driverName,
 		fileURI(path, fmt.Sprintf("%s_pragma=busy_timeout(%d)", mode, busy.Milliseconds())),

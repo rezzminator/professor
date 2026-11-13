@@ -2,14 +2,15 @@ package main
 
 import (
 	"bytes"
-	"database/sql"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -23,7 +24,7 @@ func TestDoctorRejectsAnUnreadableOpenCodeSchema(t *testing.T) {
 	if err := os.MkdirAll(openCodeRoot, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	db, err := sql.Open("sqlite", filepath.Join(openCodeRoot, "opencode.db"))
+	db, err := sqlitedb.OpenReadWrite(filepath.Join(openCodeRoot, "opencode.db"), 5*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}

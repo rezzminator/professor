@@ -1,14 +1,16 @@
 package tokens
 
 import (
-	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	_ "modernc.org/sqlite"
+
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 )
 
 // openCodeT0 is 2026-09-21T04:00:00Z, two hours before goldenNow.
@@ -46,7 +48,7 @@ func seedOpenCodeUsage(t *testing.T, root string) {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	db, err := sql.Open("sqlite", filepath.Join(root, "opencode.db"))
+	db, err := sqlitedb.OpenReadWrite(filepath.Join(root, "opencode.db"), 5*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}

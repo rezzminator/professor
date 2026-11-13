@@ -12,6 +12,8 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestSeatSchema(t *testing.T) {
@@ -280,6 +282,52 @@ func TestReadSeatsPreservesLegacyDatabase(t *testing.T) {
 	var version int
 	if err := state.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 5 {
 		t.Fatalf("read-only seat lookup migrated durable state: version=%d err=%v", version, err)
+	}
+}
+
+// A testjail home's shared state is served from memory through the marker the
+// SQLite door leaves at its path, so a reader that stats the path first finds
+// the seat, and a second spelling of the directory (macOS reaches its temp
+// directory through /private) reaches the same database.
+func TestReadSeatsFindsTheSeatTheDoorServesFromMemory(t *testing.T) {
+	testjail.Fleet(t)
+	values, err := paths.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	state := OpenSharedState(ctx, values)
+	if err := state.Degraded(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = state.Close() })
+	if err := state.PutSeat(ctx, Seat{
+		SeatID: "seat-memory", SessionID: "session-memory", Engine: "claude",
+		Backend: "tmux", TmuxSocket: "tmux-fixture", TmuxPane: "%1", State: "live",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := ReadSeats(ctx, values)
+	if err != nil || len(rows) != 1 || rows[0].SeatID != "seat-memory" {
+		t.Fatalf("ReadSeats(%s) = %+v, %v; want the one seat seat-memory", values.StateDB, rows, err)
+	}
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(filepath.Dir(values.StateDB), link); err != nil {
+		t.Fatal(err)
+	}
+	linked, err := sqlitedb.OpenStore(ctx, filepath.Join(link, "pfm.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = linked.Close() })
+	var seatID, mode string
+	if err := linked.QueryRowContext(ctx, "SELECT seat_id FROM seat").
+		Scan(&seatID); err != nil ||
+		seatID != "seat-memory" {
+		t.Fatalf("seat through %s = %q, %v; want seat-memory", link, seatID, err)
+	}
+	if err := linked.QueryRowContext(ctx, "PRAGMA journal_mode").Scan(&mode); err != nil || mode != "memory" {
+		t.Fatalf("journal_mode through %s = %q, %v; want memory", link, mode, err)
 	}
 }
 

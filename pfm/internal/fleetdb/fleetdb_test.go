@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // The schema is a compatibility surface for existing fleet databases, so its
@@ -316,6 +317,7 @@ func openFileTestStore(t *testing.T) (*Store, paths.Values) {
 	t.Helper()
 
 	root := t.TempDir()
+	testjail.DatabaseFiles(t, root)
 	values := paths.Values{
 		StateDB: filepath.Join(root, "cc", "pfm.db"),
 		Home:    filepath.Join(root, "home"),

@@ -11,6 +11,7 @@ import (
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestRecordLaunchFirst(t *testing.T) {
@@ -175,6 +176,7 @@ func TestLaunchForAbsentFileDoesNotCreate(t *testing.T) {
 func TestLaunchForV1DoesNotMigrate(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
+	testjail.DatabaseFiles(t, root)
 	values := paths.Values{StateDB: filepath.Join(root, "pfm.db")}
 	db, err := sql.Open("sqlite", values.StateDB)
 	if err != nil {
@@ -226,6 +228,7 @@ func TestLaunchForV1DoesNotMigrate(t *testing.T) {
 func TestLaunchForBrokenFileReturnsError(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
+	testjail.DatabaseFiles(t, root)
 	values := paths.Values{StateDB: filepath.Join(root, "pfm.db")}
 	if err := os.WriteFile(values.StateDB, []byte("not sqlite"), 0o600); err != nil {
 		t.Fatal(err)

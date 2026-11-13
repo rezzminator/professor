@@ -3,7 +3,6 @@ package digest
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,8 +14,11 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	_ "modernc.org/sqlite"
+
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 )
 
 // goldenCase is one captured run of the Python reader this package replaced,
@@ -178,7 +180,7 @@ func seedOpenCodeStore(t *testing.T, root, seed string) {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatalf("create the OpenCode root: %v", err)
 	}
-	db, err := sql.Open("sqlite", filepath.Join(root, "opencode.db"))
+	db, err := sqlitedb.OpenReadWrite(filepath.Join(root, "opencode.db"), 5*time.Second)
 	if err != nil {
 		t.Fatalf("open the OpenCode fixture store: %v", err)
 	}

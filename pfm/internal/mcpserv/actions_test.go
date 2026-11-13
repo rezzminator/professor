@@ -760,7 +760,7 @@ func TestChatLastAndStatusRefuseWithoutAVerbLayer(t *testing.T) {
 // comes back as the not_found receipt pfm chat open's refusal words, never an "ok" ActionOutput with nothing
 // behind it.
 func TestChatOpenUnindexedTargetIsNotFoundNeverEmptySuccess(t *testing.T) {
-	setupBackendFixture(t)
+	setupBackendPaths(t)
 	service := newFixtureService(t)
 	defer func() {
 		if err := service.Close(); err != nil {
@@ -780,7 +780,7 @@ func TestChatOpenUnindexedTargetIsNotFoundNeverEmptySuccess(t *testing.T) {
 // case. A door matching row.ID == target answers a name with "is not
 // indexed" — an absence for a chat that is right there.
 func TestChatOpenResolvesATargetByName(t *testing.T) {
-	root := setupBackendFixture(t)
+	root := setupBackendPaths(t)
 	// The fixture's own Claude chat, addressed the way a caller does.
 	rows, err := chat.Rows(context.Background(), io.Discard, nil)
 	if err != nil {

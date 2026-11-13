@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -27,6 +26,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/reload"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -287,7 +287,7 @@ func TestReloadTargetWarnsAndPreservesTmuxWhenNativeSeatsUnreadable(t *testing.T
 			statePath := filepath.Join(t.TempDir(), "state.sqlite")
 			switch testCase.name {
 			case "newer-schema":
-				db, err := sql.Open("sqlite", statePath)
+				db, err := sqlitedb.OpenReadWrite(statePath, 5*time.Second)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -300,6 +300,7 @@ func TestReloadTargetWarnsAndPreservesTmuxWhenNativeSeatsUnreadable(t *testing.T
 					t.Fatal(err)
 				}
 			case "corrupt", "stat-error":
+				testjail.DatabaseFiles(t, filepath.Dir(statePath))
 				if err := os.WriteFile(statePath, []byte("not a SQLite database"), 0o600); err != nil {
 					t.Fatal(err)
 				}
@@ -800,6 +801,7 @@ func TestChatEndWorkerUsesExactDurableSeatWithoutRoster(t *testing.T) {
 
 func TestChatEndRetryPendingIntentRunsRealDetachedCLIWorker(t *testing.T) {
 	jail := newRunJail(t)
+	testjail.DatabaseFiles(t, jail.root)
 	defer jail.killSockets(t)
 	runtime, err := pfmconfig.LoadRuntime("")
 	if err != nil {

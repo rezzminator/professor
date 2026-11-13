@@ -47,16 +47,8 @@ func newKillJail(t *testing.T) killJail {
 	t.Setenv("PFM_CODEX_ROOT", jail.codexHome)
 	t.Setenv("PFM_TMUX_DIR", jail.tmuxDir)
 	t.Setenv(paths.EnvHome, jail.home)
-	// The databases sit under a regular file until openFile names the jail's own,
-	// so a code path that opens the shared state or cache by its resolved path
-	// (the Herdr ownership proof) fails over the in-memory store instead of
-	// reading a database the test never seeded.
-	noDatabase := filepath.Join(root, "no-database")
-	if err := os.WriteFile(noDatabase, nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv(paths.EnvStateDB, filepath.Join(noDatabase, "state"))
-	t.Setenv(paths.EnvCacheDB, filepath.Join(noDatabase, "cache"))
+	t.Setenv(paths.EnvCacheDB, filepath.Join(root, "pfm-cache.db"))
+	t.Setenv(paths.EnvStateDB, paths.DefaultStateDB(jail.home))
 	return jail
 }
 
@@ -71,26 +63,14 @@ func (jail killJail) resolved() paths.Values {
 	}
 }
 
-// open is the jail's store: both databases in memory (store.OpenMemory).
-func (jail killJail) open(t *testing.T) *store.Store {
+// open is the jail's store, opened by the paths newKillJail set: the SQLite
+// door serves both from memory, so code under test that opens the shared state
+// again by its path (the Herdr ownership proof in internal/gather) reads the
+// same database; a test handing it to another process keeps the files
+// (testjail.DatabaseFiles).
+func (killJail) open(t *testing.T) *store.Store {
 	t.Helper()
-	database, err := store.OpenMemory()
-	return jail.opened(t, database, err)
-}
-
-// openFile is the jail's store on disk under its private PFM_HOME, for the
-// tests whose code under test opens the shared state again by its path (the
-// Herdr ownership proof in internal/gather) or from another process.
-func (jail killJail) openFile(t *testing.T) *store.Store {
-	t.Helper()
-	t.Setenv(paths.EnvCacheDB, filepath.Join(jail.root, "pfm-cache.db"))
-	t.Setenv(paths.EnvStateDB, paths.DefaultStateDB(jail.home))
 	database, err := store.Open()
-	return jail.opened(t, database, err)
-}
-
-func (killJail) opened(t *testing.T, database *store.Store, err error) *store.Store {
-	t.Helper()
 	if err != nil {
 		t.Fatal(err)
 	}

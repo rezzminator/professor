@@ -1,4 +1,4 @@
-package sqlitedb
+package sqlitedb_test
 
 import (
 	"os"

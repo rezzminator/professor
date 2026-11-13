@@ -22,6 +22,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestHerdrNativeClaudeDefersLifecycle(t *testing.T) {
@@ -302,6 +303,7 @@ func TestHerdrNativeSeatReadOnlyReports(t *testing.T) {
 	for _, event := range []string{"working", "idle", "blocked", "notification", "legacy", "older start", "newer", "corrupt"} {
 		t.Run(event, func(t *testing.T) {
 			root := t.TempDir()
+			testjail.DatabaseFiles(t, root)
 			server := newNativeReporterHerdr(t, "native-seat", "w6:p3", "native-terminal")
 			// A shell pane is the one pfm reports to, so the report proves the hook ran.
 			shellFrontNativeReporterPane(t, server, "w6:p3")

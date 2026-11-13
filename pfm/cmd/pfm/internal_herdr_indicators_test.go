@@ -38,6 +38,7 @@ func TestHerdrIndicatorsIsTheVerbThePluginExecs(t *testing.T) {
 // It starts in a directory removed under it, as a hook's worktree is.
 func TestHerdrIndicatorsCompiledCLIShowsAndStopsTabPulse(t *testing.T) {
 	root := testjail.Fleet(t)
+	testjail.DatabaseFiles(t, root)
 	values, err := paths.Resolve()
 	if err != nil {
 		t.Fatal(err)

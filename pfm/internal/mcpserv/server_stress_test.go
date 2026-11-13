@@ -23,7 +23,7 @@ import (
 )
 
 func TestMCPStressSequentialCallsNoLeaks(t *testing.T) {
-	setupBackendFixture(t)
+	setupBackendPaths(t)
 	service := newFixtureService(t)
 	defer func() {
 		if err := service.Close(); err != nil {
@@ -81,7 +81,7 @@ func TestMCPStressSequentialCallsNoLeaks(t *testing.T) {
 }
 
 func TestMCPStressConcurrentEightClientsNoCrossTalk(t *testing.T) {
-	setupBackendFixture(t)
+	setupBackendPaths(t)
 	service := newFixtureService(t)
 	defer func() {
 		if err := service.Close(); err != nil {
@@ -155,7 +155,7 @@ func TestMCPStressConcurrentEightClientsNoCrossTalk(t *testing.T) {
 }
 
 func TestMCPAdversarialUnknownAndHugeArguments(t *testing.T) {
-	setupBackendFixture(t)
+	setupBackendPaths(t)
 	service := newFixtureService(t)
 	defer func() {
 		if err := service.Close(); err != nil {

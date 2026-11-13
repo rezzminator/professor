@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 const (
@@ -26,7 +27,8 @@ const (
 
 func TestStressTwentyKillUnkillProcesses(t *testing.T) {
 	jail := newKillJail(t)
-	database := jail.openFile(t)
+	testjail.DatabaseFiles(t, jail.root) // the helper processes open the same files
+	database := jail.open(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	if err := database.Batch(
@@ -107,7 +109,7 @@ func TestStressTwentyKillUnkillProcesses(t *testing.T) {
 	}
 	elapsed := time.Since(started)
 
-	database = jail.openFile(t)
+	database = jail.open(t)
 	defer func() {
 		if err := database.Close(); err != nil {
 			t.Errorf("close database: %v", err)

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Fixture-driven tests for scripts/test-kinds.sh: each kind is read from its marker, a helper's
-# marker reaches every test naming it (transitively), a `_jail_test.go` file is tmux whole,
+# marker reaches every test naming it (transitively), a jail file's test is real and its helpers tmux,
 # commented markers and the suites outside the unit bundle are not counted, and every way the
 # script can fail to look is KINDS ERROR rc 2, never a zero count.
 #   bash pfm/scripts/test-kinds_test.sh
@@ -58,11 +58,17 @@ func TestTmuxServer(t *testing.T) {
 	_ = exec.Command("tmux", "-S", "x", "new-session", "-d")
 }
 
-func TestSQLite(t *testing.T) { _ = sqlitedb.Open("x") }
+func TestSQLite(t *testing.T) { _ = sqlitedb.OpenStore(ctx, "x") }
 
 func TestMemoryStore(t *testing.T) { _, _ = store.OpenMemory() }
 
 func TestFileStore(t *testing.T) { _, _ = store.OpenContext(ctx) }
+
+func TestDatabaseFiles(t *testing.T) { testjail.DatabaseFiles(t, t.TempDir()) }
+
+func TestForeignBuiltBySQLOpen(t *testing.T) { _, _ = sql.Open("sqlite", "x") }
+
+func TestReachesAJailHelper(t *testing.T) { startServer(t) }
 
 func FuzzParse(f *testing.F) { f.Fuzz(func(t *testing.T, s string) {}) }
 
@@ -92,31 +98,68 @@ import "testing"
 
 func TestInAJailFile(t *testing.T) {}
 GO
+cat > "$M/a/server_jail_test.go" <<'GO'
+package a
+
+import "testing"
+
+func startServer(t *testing.T) {}
+
+func TestInAJailFileOfA(t *testing.T) { startServer(t) }
+GO
+cat > "$M/b/seat_jail_linux_test.go" <<'GO'
+package b
+
+import "testing"
+
+func TestInAnOSSelectedJailFile(t *testing.T) {}
+GO
+cat > "$M/b/killjail_test.go" <<'GO'
+package b
+
+import "testing"
+
+func TestJailIsNotItsOwnWord(t *testing.T) {}
+GO
+cat > "$M/b/new_jail_stubs_test.go" <<'GO'
+package b
+
+import "testing"
+
+func TestJailStubsIsNoOS(t *testing.T) {}
+GO
 for skip in journey e2e a/testdata .hidden; do
   printf 'package x\n\nimport "testing"\n\nfunc TestNotCounted(t *testing.T) {}\n' > "$M/$skip/x_test.go"
 done
 
 out=$(bash "$SUT" "$M" 2>&1); rc=$?
-eq "the count line: unit = nothing + temp-dir, the in-memory store door memory, move = the bottom three, every Test and Fuzz once" \
-  "0|KINDS unit 6 (nothing 5 · temp-dir 1) · move 8 (home-sqlite 3 · process 3 · tmux 2) · total 14" "$rc|$out"
+eq "the count line: unit = nothing + temp-dir, a door open memory, real = the jail files, move = the bottom three, every Test and Fuzz once" \
+  "0|KINDS unit 11 (nothing 9 · temp-dir 2) · real 3 · move 7 (home-sqlite 2 · process 3 · tmux 2) · total 21" "$rc|$out"
 
 out=$(bash "$SUT" --list "$M" 2>&1); rc=$?
 want=$(printf '%s\n' \
   $'nothing\ta\ta_test.go\tTestMemory' \
   $'temp-dir\ta\ta_test.go\tTestTemp' \
   $'nothing\ta\ta_test.go\tTestCommentedMarkerIsIgnored' \
-  $'home-sqlite\ta\ta_test.go\tTestHome' \
+  $'temp-dir\ta\ta_test.go\tTestHome' \
   $'process\ta\ta_test.go\tTestThroughHelper' \
   $'tmux\ta\ta_test.go\tTestTmuxServer' \
-  $'home-sqlite\ta\ta_test.go\tTestSQLite' \
+  $'nothing\ta\ta_test.go\tTestSQLite' \
   $'nothing\ta\ta_test.go\tTestMemoryStore' \
-  $'home-sqlite\ta\ta_test.go\tTestFileStore' \
+  $'nothing\ta\ta_test.go\tTestFileStore' \
+  $'home-sqlite\ta\ta_test.go\tTestDatabaseFiles' \
+  $'home-sqlite\ta\ta_test.go\tTestForeignBuiltBySQLOpen' \
+  $'tmux\ta\ta_test.go\tTestReachesAJailHelper' \
   $'nothing\ta\ta_test.go\tFuzzParse' \
   $'nothing\ta\ta_test.go\tTestNamesTheMethodOnlyInAStringOrLocal' \
   $'process\ta\ta_test.go\tTestCallsTheMethod' \
   $'process\ta\ta_test.go\tTestThroughAClosureVar' \
-  $'tmux\tb\tb_jail_test.go\tTestInAJailFile')
-eq "--list: one row per test with its kind, a helper two calls deep or a closure var reaching its test, a method only through a selector, a jail file tmux whole" "0|$want" "$rc|$out"
+  $'real\ta\tserver_jail_test.go\tTestInAJailFileOfA' \
+  $'real\tb\tb_jail_test.go\tTestInAJailFile' \
+  $'nothing\tb\tkilljail_test.go\tTestJailIsNotItsOwnWord' \
+  $'nothing\tb\tnew_jail_stubs_test.go\tTestJailStubsIsNoOS' \
+  $'real\tb\tseat_jail_linux_test.go\tTestInAnOSSelectedJailFile')
+eq "--list: one row per test with its kind, a helper two calls deep or a closure var reaching its test, a method only through a selector, a jail file's test real and its helper tmux to a test outside it" "0|$want" "$rc|$out"
 
 mkdir -p "$T/notests"; printf 'module p\n' > "$T/notests/go.mod"
 out=$(bash "$SUT" "$T/notests" 2>&1); rc=$?

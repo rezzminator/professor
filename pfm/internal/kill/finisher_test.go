@@ -3,7 +3,6 @@ package kill
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"os"
@@ -17,6 +16,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 )
 
 // CaptureScreen, CaptureStyled, CaptureTarget, SendKey, SendLiteral,
@@ -533,7 +533,7 @@ func TestIndexRefresherWarnsOnAPartialIndexAndRefreshes(t *testing.T) {
 	jail := newKillJail(t)
 	database := jail.open(t)
 	ctx, recorder := obs.Test(t)
-	raw, err := sql.Open("sqlite", database.Path())
+	raw, err := sqlitedb.OpenReadWrite(database.Path(), 5*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}

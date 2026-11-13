@@ -408,6 +408,7 @@ func runInternalHookPayload(t *testing.T, entry, payload string) (int, string, s
 func TestClearHidesTheNamedConversationAndListsItsNumberedSuccessor(t *testing.T) {
 	const name = "CLAUDE_RULES"
 	ladder := newWatchLadder(t)
+	testjail.DatabaseFiles(t, ladder.jail.root) // the hooks run the built pfm on the same files
 	entry := func(command string) []any {
 		return []any{map[string]any{
 			"matcher": "", "hooks": []any{map[string]any{"type": "command", "command": command}},

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # test-coverdiff.sh — the unit-isolation driver: per package, the statements only the non-unit tests
-# hold. A move test (kind home-sqlite, process or tmux in scripts/test-kinds.sh) whose statements the
+# hold. A move test (kind home-sqlite, process, tmux or real in scripts/test-kinds.sh) whose statements the
 # journey or a unit test also covers is folded into an assertion and deleted; the statements only it
 # holds need a journey step or a unit test first.
 #

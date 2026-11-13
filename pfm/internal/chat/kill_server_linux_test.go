@@ -83,7 +83,7 @@ func init() {
 func TestNativeSelfEndWorkerSurvivesPTYSessionDeath(t *testing.T) {
 	for _, unbound := range []bool{false, true} {
 		t.Run(fmt.Sprintf("unbound-%t", unbound), func(t *testing.T) {
-			testjail.Fleet(t)
+			testjail.DatabaseFiles(t, testjail.Fleet(t))
 			caller := filepath.Join(t.TempDir(), "caller.json")
 			shadow := t.TempDir()
 			if err := testjail.WriteExecutable(

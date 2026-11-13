@@ -3,12 +3,9 @@ package chat
 import (
 	"context"
 	"io"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/headless"
-	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
@@ -31,21 +28,16 @@ func TestResolvedSelfIsRequestLocalAndExact(t *testing.T) {
 	}
 }
 
-// memoryFleet is testjail.Fleet's scratch fleet whose store is memory: the
-// verbs' store handed in as store.OpenMemory (fleetIndex), and the cache path
-// under a regular file, so a code path that still opens the store by path
-// fails instead of creating one. The shared state path names no file, so a
-// reader by path (the native seats, the launch rows) reads an empty fleet, as
-// in a new jail. It returns the root.
+// memoryFleet is testjail.Fleet's scratch fleet with the verbs' store handed
+// in (fleetIndex), opened by the fleet's paths: the SQLite door serves them
+// from memory, so a code path that opens the store again by path reads the
+// same database. The shared state starts empty, so a reader by path (the
+// native seats, the launch rows) reads an empty fleet, as in a new jail. It
+// returns the root.
 func memoryFleet(t *testing.T) string {
 	t.Helper()
 	root := testjail.Fleet(t)
-	noDatabase := filepath.Join(root, "no-database")
-	if err := os.WriteFile(noDatabase, nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv(paths.EnvCacheDB, filepath.Join(noDatabase, "cache"))
-	database, err := store.OpenMemory()
+	database, err := store.Open()
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -11,6 +11,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/naming"
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 )
 
 const clearNamePrefix = "clear-name:"
@@ -96,7 +97,11 @@ func (s *Store) ReserveClearName(
 		return name, fmt.Errorf("acquire clear name connection: %w", err)
 	}
 	defer func() { returnErr = errors.Join(returnErr, conn.Close()) }()
-	if err := clearNameExec(ctx, conn, "ATTACH DATABASE ? AS clear_cache", cachePath); err != nil {
+	attach, err := sqlitedb.AttachName(cachePath)
+	if err == nil {
+		err = clearNameExec(ctx, conn, "ATTACH DATABASE ? AS clear_cache", attach)
+	}
+	if err != nil {
 		return name, fmt.Errorf("attach clear name cache: %w", err)
 	}
 	defer func() {

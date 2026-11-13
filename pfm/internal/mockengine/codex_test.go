@@ -25,6 +25,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/statusline"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
@@ -481,6 +482,7 @@ func TestCodexMCPStepHandshakesWithPfmsOwnServer(t *testing.T) {
 
 func TestCodexMCPStepCallsPfmsOwnServerWithPaneIdentity(t *testing.T) {
 	fix := newFixture(t)
+	testjail.DatabaseFiles(t, fix.root)
 	t.Chdir(fix.work)
 	executable, err := os.Executable()
 	if err != nil {

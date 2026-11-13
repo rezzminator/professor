@@ -11,7 +11,7 @@ import (
 
 // newFixtureService is the package's protocol-test service over the real
 // verb layer: chat.Verbs on the default runtime, which reads the jailed paths
-// and opens the on-disk cache setupBackendFixture laid down.
+// and opens the cache database setupBackendPaths names.
 func newFixtureService(t *testing.T) *Service {
 	t.Helper()
 	resolved, err := paths.Resolve()

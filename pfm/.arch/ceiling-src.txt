@@ -250,7 +250,7 @@ internal/store/lineage.go 371
 internal/store/queries.go 781
 internal/store/store.go 421
 internal/testjail/profile.go 488
-internal/testjail/testjail.go 785
+internal/testjail/testjail.go 782
 internal/themecmd/themecmd.go 468
 internal/themesync/choose.go 341
 internal/themesync/claude.go 326

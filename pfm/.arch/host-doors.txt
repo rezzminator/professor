@@ -12,6 +12,7 @@ internal/stats/docker_identity.go 1
 internal/statusline/process.go 1
 internal/statusline/runtime.go 2
 internal/testjail/profile.go 3
-internal/testjail/testjail.go 2
+internal/testjail/pty.go 1
+internal/testjail/testjail.go 1
 internal/ui/model.go 2
 journey/harness/session.go 1

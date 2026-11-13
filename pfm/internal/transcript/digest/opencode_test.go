@@ -3,12 +3,14 @@ package digest
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 )
 
 // invokeOpenCode runs args over an env whose only root is OpenCode's root.
@@ -114,7 +116,7 @@ func TestSplitOpenCodeLocator(t *testing.T) {
 func TestOpenCodePartOfAnUnreadableMessageStillShows(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "opencode")
 	seedOpenCodeStore(t, root, "garden")
-	db, err := sql.Open("sqlite", filepath.Join(root, "opencode.db"))
+	db, err := sqlitedb.OpenReadWrite(filepath.Join(root, "opencode.db"), 5*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}

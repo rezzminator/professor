@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func newTestSchedule(session string, created time.Time, interval time.Duration) Schedule {
@@ -179,6 +180,7 @@ func TestScheduleOperationsReportADegradedStore(t *testing.T) {
 func TestSharedMigrationFromV2AddsSchedulesAndBacksUp(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
+	testjail.DatabaseFiles(t, root)
 	path := filepath.Join(root, "pfm.db")
 	ctx := context.Background()
 	db, err := sql.Open("sqlite", path)

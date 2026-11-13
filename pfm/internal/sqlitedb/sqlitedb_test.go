@@ -1,4 +1,4 @@
-package sqlitedb
+package sqlitedb_test
 
 import (
 	"context"
@@ -9,6 +9,9 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func pragma(t *testing.T, database *sql.DB, name string) string {
@@ -24,8 +27,10 @@ func pragma(t *testing.T, database *sql.DB, name string) string {
 // store runs on: its directory created, WAL, synchronous=NORMAL (1), foreign
 // keys on, and the store busy timeout.
 func TestOpenStoreAppliesTheStorePragmaSet(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "nested", "store.db")
-	database, err := OpenStore(context.Background(), path)
+	dir := t.TempDir()
+	testjail.DatabaseFiles(t, dir)
+	path := filepath.Join(dir, "nested", "store.db")
+	database, err := sqlitedb.OpenStore(context.Background(), path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +63,7 @@ func TestOpenStoreMemoryKeepsItsDatabaseInMemory(t *testing.T) {
 			}
 		}
 	}
-	database, name, err := OpenStoreMemory(ctx)
+	database, name, err := sqlitedb.OpenStoreMemory(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +79,7 @@ func TestOpenStoreMemoryKeepsItsDatabaseInMemory(t *testing.T) {
 	if _, err := database.ExecContext(ctx, "CREATE TABLE kept(v INTEGER); INSERT INTO kept VALUES(7)"); err != nil {
 		t.Fatal(err)
 	}
-	second, err := sql.Open(driverName, name)
+	second, err := sql.Open("sqlite", name)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +88,7 @@ func TestOpenStoreMemoryKeepsItsDatabaseInMemory(t *testing.T) {
 	if err := second.QueryRowContext(ctx, "SELECT v FROM kept").Scan(&kept); err != nil || kept != 7 {
 		t.Fatalf("second handle on %s read %d, %v; want 7", name, kept, err)
 	}
-	other, otherName, err := OpenStoreMemory(ctx)
+	other, otherName, err := sqlitedb.OpenStoreMemory(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +106,7 @@ func TestOpenStoreMemoryKeepsItsDatabaseInMemory(t *testing.T) {
 		"file:/pfm-memory-0?vfs=memdb": false,
 		filepath.Join(dir, "pfm.db"):   false,
 	} {
-		if got := InMemory(path); got != want {
+		if got := sqlitedb.InMemory(path); got != want {
 			t.Errorf("InMemory(%q) = %v, want %v", path, got, want)
 		}
 	}
@@ -114,8 +119,10 @@ func TestOpenStoreMemoryKeepsItsDatabaseInMemory(t *testing.T) {
 // read-only refuses a write, read-write can write, both carry the caller's
 // busy timeout, and neither switches the owner's rollback journal to WAL.
 func TestForeignOpenersKeepTheOwnersSettings(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "owner.db")
-	owner, err := sql.Open(driverName, path)
+	dir := t.TempDir()
+	testjail.DatabaseFiles(t, dir)
+	path := filepath.Join(dir, "owner.db")
+	owner, err := sql.Open("sqlite", path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +132,7 @@ func TestForeignOpenersKeepTheOwnersSettings(t *testing.T) {
 	if err := owner.Close(); err != nil {
 		t.Fatal(err)
 	}
-	readOnly, err := OpenReadOnly(path, 2*time.Second)
+	readOnly, err := sqlitedb.OpenReadOnly(path, 2*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +147,7 @@ func TestForeignOpenersKeepTheOwnersSettings(t *testing.T) {
 	if got := pragma(t, readOnly, "busy_timeout"); got != "2000" {
 		t.Fatalf("read-only busy_timeout = %q, want 2000", got)
 	}
-	readWrite, err := OpenReadWrite(path, 5*time.Second)
+	readWrite, err := sqlitedb.OpenReadWrite(path, 5*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,8 +172,10 @@ func TestForeignOpenersKeepTheOwnersSettings(t *testing.T) {
 // that very file — never a truncated or percent-decoded neighbor, which would
 // read as an empty database.
 func TestOpenersReachAPathWithURICharacters(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "odd?dir#%41", "store.db")
-	store, err := OpenStore(context.Background(), path)
+	dir := t.TempDir()
+	testjail.DatabaseFiles(t, dir)
+	path := filepath.Join(dir, "odd?dir#%41", "store.db")
+	store, err := sqlitedb.OpenStore(context.Background(), path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +189,7 @@ func TestOpenersReachAPathWithURICharacters(t *testing.T) {
 		t.Fatalf("OpenStore did not create the named file: %v", err)
 	}
 	for name, open := range map[string]func(string, time.Duration) (*sql.DB, error){
-		"read-only": OpenReadOnly, "read-write": OpenReadWrite,
+		"read-only": sqlitedb.OpenReadOnly, "read-write": sqlitedb.OpenReadWrite,
 	} {
 		database, err := open(path, time.Second)
 		if err != nil {
@@ -197,8 +206,10 @@ func TestOpenersReachAPathWithURICharacters(t *testing.T) {
 // TestBusyNamesOnlySQLiteBusy pins the one busy door: a write refused by another connection's write
 // lock is busy, wrapped or not; a missing table, a plain error and no error are not.
 func TestBusyNamesOnlySQLiteBusy(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "busy.db")
-	holder, err := OpenReadWrite(path, 0)
+	dir := t.TempDir()
+	testjail.DatabaseFiles(t, dir)
+	path := filepath.Join(dir, "busy.db")
+	holder, err := sqlitedb.OpenReadWrite(path, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +225,7 @@ func TestBusyNamesOnlySQLiteBusy(t *testing.T) {
 	if _, err := tx.Exec("INSERT INTO rows VALUES ('held')"); err != nil {
 		t.Fatal(err)
 	}
-	other, err := OpenReadWrite(path, 0)
+	other, err := sqlitedb.OpenReadWrite(path, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,7 +243,7 @@ func TestBusyNamesOnlySQLiteBusy(t *testing.T) {
 		{"a plain error", errors.New("busy"), false},
 		{"no error", nil, false},
 	} {
-		if got := Busy(row.err); got != row.want {
+		if got := sqlitedb.Busy(row.err); got != row.want {
 			t.Errorf("Busy(%s: %v) = %v, want %v", row.name, row.err, got, row.want)
 		}
 	}

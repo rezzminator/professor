@@ -283,6 +283,7 @@ func TestSeatHostPTY(t *testing.T) {
 	} {
 		t.Run(mode, func(t *testing.T) {
 			root, environment := testjail.FleetEnv(t)
+			testjail.DatabaseFiles(t, root)
 			binary := filepath.Join(root, "2.1.302")
 			if err := os.Symlink(os.Args[0], binary); err != nil {
 				t.Fatal(err)

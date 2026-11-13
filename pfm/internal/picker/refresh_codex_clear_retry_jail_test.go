@@ -18,6 +18,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	fleetindex "github.com/rezzminator/professor/pfm/internal/index"
 	"github.com/rezzminator/professor/pfm/internal/kill"
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/ui"
 )
@@ -64,7 +65,7 @@ func TestCodexClearRefreshesBaselineAndRetainsFailedRetirement(t *testing.T) {
 			}
 			var faultDB *sql.DB
 			if scenario == "write-failed" {
-				faultDB, err = sql.Open("sqlite", database.SharedPath())
+				faultDB, err = sqlitedb.OpenReadWrite(database.SharedPath(), 5*time.Second)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -227,7 +228,7 @@ func TestParkedPickerRetriesWarnedBindingFailureWithUnchangedHeldRollout(t *test
 		t.Fatalf("hold current rollout in fake Codex process: %v", err)
 	}
 
-	faultDB, err := sql.Open("sqlite", "file:"+database.SharedPath()+"?_pragma=busy_timeout(5000)")
+	faultDB, err := sqlitedb.OpenReadWrite(database.SharedPath(), 5*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}

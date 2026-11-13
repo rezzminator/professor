@@ -23,6 +23,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/mcpserv"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
@@ -647,6 +648,7 @@ func TestClaudeMCPStepCallsPfmsOwnServer(t *testing.T) {
 	for _, fileConfig := range []bool{false, true} {
 		t.Run(fmt.Sprint(fileConfig), func(t *testing.T) {
 			fix := newFixture(t)
+			testjail.DatabaseFiles(t, fix.root)
 			t.Chdir(fix.work)
 			executable, err := os.Executable()
 			if err != nil {

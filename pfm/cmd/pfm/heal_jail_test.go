@@ -2,13 +2,15 @@ package main
 
 import (
 	"bytes"
-	"database/sql"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	_ "modernc.org/sqlite"
+
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 )
 
 // A wedged Codex projection in a SCRATCH codex home — never the real one: a
@@ -37,7 +39,7 @@ func healJail(t *testing.T) string {
 	offset := len(`{"ordinal":0,"type":"event_msg"}`+"\n") +
 		len(`{"ordinal":1,"type":"event_msg"}`+"\n")
 
-	state, err := sql.Open("sqlite", "file:"+filepath.Join(codexHome, "state_1.sqlite"))
+	state, err := sqlitedb.OpenReadWrite(filepath.Join(codexHome, "state_1.sqlite"), 5*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,10 +59,7 @@ func healJail(t *testing.T) string {
 		t.Fatal(err)
 	}
 
-	history, err := sql.Open(
-		"sqlite",
-		"file:"+filepath.Join(codexHome, "thread_history_1.sqlite"),
-	)
+	history, err := sqlitedb.OpenReadWrite(filepath.Join(codexHome, "thread_history_1.sqlite"), 5*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,10 +94,7 @@ func healJail(t *testing.T) string {
 
 func healProjectionRows(t *testing.T, codexHome, id string) int {
 	t.Helper()
-	history, err := sql.Open(
-		"sqlite",
-		"file:"+filepath.Join(codexHome, "thread_history_1.sqlite")+"?mode=ro",
-	)
+	history, err := sqlitedb.OpenReadOnly(filepath.Join(codexHome, "thread_history_1.sqlite"), 5*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +170,7 @@ func TestHealCommandShowsCommittedRepairsWhenALaterDeleteFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"state_1.sqlite", "thread_history_1.sqlite"} {
-		database, err := sql.Open("sqlite", "file:"+filepath.Join(codexHome, name))
+		database, err := sqlitedb.OpenReadWrite(filepath.Join(codexHome, name), 5*time.Second)
 		if err != nil {
 			t.Fatal(err)
 		}

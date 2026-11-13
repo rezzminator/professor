@@ -2,13 +2,15 @@ package main
 
 import (
 	"bytes"
-	"database/sql"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	_ "modernc.org/sqlite"
+
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 )
 
 // A duplicate resume-boundary rollout (openai/codex#38792) in a SCRATCH codex
@@ -45,7 +47,7 @@ func healNoncanonicalJail(t *testing.T) string {
 	// desync this package was originally built for.
 	offset := len(lines[0]+"\n") + len(lines[1]+"\n") + len(lines[2]+"\n")
 
-	state, err := sql.Open("sqlite", "file:"+filepath.Join(codexHome, "state_1.sqlite"))
+	state, err := sqlitedb.OpenReadWrite(filepath.Join(codexHome, "state_1.sqlite"), 5*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,10 +67,7 @@ func healNoncanonicalJail(t *testing.T) string {
 		t.Fatal(err)
 	}
 
-	history, err := sql.Open(
-		"sqlite",
-		"file:"+filepath.Join(codexHome, "thread_history_1.sqlite"),
-	)
+	history, err := sqlitedb.OpenReadWrite(filepath.Join(codexHome, "thread_history_1.sqlite"), 5*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}

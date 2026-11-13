@@ -418,7 +418,7 @@ SH
 cat > "$T/fx/pfm/scripts/test-kinds.sh" <<'SH'
 printf 'kinds %s\n' "$*" >> "$STUB_EVENTS"
 [ "${STUB_KINDS_RC:-0}" = 0 ] || { echo 'KINDS ERROR stub cannot look'; exit "$STUB_KINDS_RC"; }
-echo 'KINDS unit 2 (nothing 1 · temp-dir 1) · move 3 (home-sqlite 1 · process 1 · tmux 1) · total 5'
+echo 'KINDS unit 2 (nothing 1 · temp-dir 1) · real 1 · move 3 (home-sqlite 1 · process 1 · tmux 1) · total 6'
 SH
 cat > "$T/fx/pfm/scripts/test-shard.sh" <<'SH'
 if [ "${STUB_LOAD_FAIL:-0}" = 1 ]; then
@@ -548,7 +548,7 @@ fx_budget
 fx_case order all
 if [ "$GATE_RC" -eq 0 ] && [ "$(event_words)" = 'sampler-start steps sampler-stop judge report summary-saw kinds' ] &&
   grep -Fxq "kinds $T/fx/pfm" "$STUB_EVENTS" &&
-  [ "$(tail -n 1 "$GATE_OUT")" = 'KINDS unit 2 (nothing 1 · temp-dir 1) · move 3 (home-sqlite 1 · process 1 · tmux 1) · total 5' ] &&
+  [ "$(tail -n 1 "$GATE_OUT")" = 'KINDS unit 2 (nothing 1 · temp-dir 1) · real 1 · move 3 (home-sqlite 1 · process 1 · tmux 1) · total 6' ] &&
   grep -Fxq "sampler-start run --out $RUN/resources.tsv --parent $$" "$STUB_EVENTS" &&
   grep -Fxq "judge window --resources $RUN/resources.tsv" "$STUB_EVENTS" &&
   grep -Fxq "report summary $RUN" "$STUB_EVENTS" && grep -Fxq 'summary-saw BUDGET' "$STUB_EVENTS" &&

@@ -164,18 +164,9 @@ func TestChatResolveEveryKindUsesTheCallResolutionGate(t *testing.T) {
 	}
 }
 
-// setupBackendFixture is setupBackendPaths plus the on-disk cache database
-// under the temp root, for tests whose code under test opens it by path.
-func setupBackendFixture(t *testing.T) string {
-	t.Helper()
-	root := setupBackendPaths(t)
-	t.Setenv(paths.EnvCacheDB, filepath.Join(root, "state", "pfm-cache.db"))
-	return root
-}
-
 // setupBackendPaths lays the temp-dir paths a backend test reads (home, roots,
-// session ids, tmux, proc) and points the environment at them. It names no
-// usable database: a test hands its store in (store.OpenMemory).
+// session ids, tmux, proc, the cache database the SQLite door serves from
+// memory) and points the environment at them.
 func setupBackendPaths(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -225,14 +216,7 @@ func setupBackendPaths(t *testing.T) string {
 	t.Setenv(paths.EnvCodexHome, codex)
 	t.Setenv(paths.EnvTmuxDir, tmux)
 	t.Setenv(paths.EnvProcRoot, proc)
-	// The cache path sits under a regular file until setupBackendFixture names a
-	// real one, so a test whose code still opens the store by path fails instead
-	// of creating it unseen.
-	noDatabase := filepath.Join(root, "no-database")
-	if err := os.WriteFile(noDatabase, nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv(paths.EnvCacheDB, filepath.Join(noDatabase, "cache"))
+	t.Setenv(paths.EnvCacheDB, filepath.Join(root, "state", "pfm-cache.db"))
 	return root
 }
 

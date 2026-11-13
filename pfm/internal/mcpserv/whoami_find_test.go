@@ -18,7 +18,7 @@ import (
 // MCP: inside tmux the answer is this chat's own session name; outside it, the
 // absence is stated rather than guessed.
 func TestChatWhoamiReportsIdentityOrStatesItsAbsence(t *testing.T) {
-	setupBackendFixture(t)
+	setupBackendPaths(t)
 	t.Setenv("TMUX", "")
 	t.Setenv(resolve.ClaudeSessionEnv, "")
 	t.Setenv(resolve.CodexThreadEnv, "")
@@ -53,7 +53,7 @@ func TestChatWhoamiReportsIdentityOrStatesItsAbsence(t *testing.T) {
 // steer, which no longer distinguishes anything once call bans every
 // /compact primary outright — see engine.go's Call().
 func TestChatCallCarriesTheThenArgument(t *testing.T) {
-	setupBackendFixture(t)
+	setupBackendPaths(t)
 	service := newFixtureService(t)
 	defer func() {
 		if err := service.Close(); err != nil {
@@ -115,7 +115,7 @@ func TestChatCaptureBoundsAreAppliedAfterTheCapture(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(paths.SystemProcRoot(), "self")); err != nil {
 		t.Skip("no /proc")
 	}
-	setupBackendFixture(t)
+	setupBackendPaths(t)
 	service := newFixtureService(t)
 	defer func() {
 		if err := service.Close(); err != nil {

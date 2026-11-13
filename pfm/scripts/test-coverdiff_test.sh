@@ -41,7 +41,7 @@ func TestUnit(t *testing.T) {
 }
 
 func TestMove(t *testing.T) {
-	_ = "state.db"
+	_ = "sql.Open(" // the measure's home-sqlite marker, read as text
 	$2
 }
 GO
@@ -75,7 +75,7 @@ mkdir -p "$T/two/g"
 printf 'module fx\n\ngo 1.22\n' > "$T/two/go.mod"
 printf 'package g\n\nfunc D() int { return 4 }\n' > "$T/two/g/d.go"
 printf 'package g\n\nfunc E() int { return 5 }\n' > "$T/two/g/e.go"
-printf 'package g\n\nimport "testing"\n\nfunc TestMove(t *testing.T) {\n\t_ = "state.db"\n\t_, _ = D(), E()\n}\n' \
+printf 'package g\n\nimport "testing"\n\nfunc TestMove(t *testing.T) {\n\t_ = "sql.Open("\n\t_, _ = D(), E()\n}\n' \
   > "$T/two/g/g_test.go"
 out=$(bash "$SUT" "$J" "$T/out-two" "$T/two" 2>&1); rc=$?
 eq "move-only lines are counted per file: line 3 of d.go and of e.go are two lines" \

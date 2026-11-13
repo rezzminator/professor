@@ -13,6 +13,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestOpenMigratesAndReopensIdempotently(t *testing.T) {
@@ -356,6 +357,7 @@ func setStoreTestJail(t *testing.T) string {
 	t.Helper()
 
 	root := t.TempDir()
+	testjail.DatabaseFiles(t, root)
 	dbPath := filepath.Join(root, "state", "pfm-cache.db")
 	t.Setenv("TMUX_TMPDIR", filepath.Join(root, "t"))
 	t.Setenv(paths.EnvCacheDB, dbPath)

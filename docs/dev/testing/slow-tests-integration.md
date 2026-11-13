@@ -138,9 +138,9 @@ A — live chat and failed rename are proven through the jailed process path.
 
 ### TestMCPMalformedFrameReturnsJSONRPCError
 
-**Source:** [pfm/internal/mcpserv/server_stress_test.go](../../../pfm/internal/mcpserv/server_stress_test.go) line 183 · **Observed:** 3.64s · **Class:** process/stdio
+**Source:** [pfm/internal/mcpserv/server_stress_test.go](../../../pfm/internal/mcpserv/server_stress_test.go) line 184 · **Observed:** 3.64s · **Class:** process/stdio
 
-setupBackendFixture; buildFleetBinary; exec.Command(binary, ..., mcp); StdinPipe/StdoutPipe JSON-RPC.
+setupBackendPaths; buildFleetBinary; exec.Command(binary, ..., mcp); StdinPipe/StdoutPipe JSON-RPC.
 
 A — direct real MCP daemon process and pipes are under test.
 

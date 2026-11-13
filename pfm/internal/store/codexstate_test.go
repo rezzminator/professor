@@ -16,6 +16,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 type codexStateThread struct {
@@ -39,6 +40,7 @@ type codexStateThread struct {
 // captured from a live 0.146.1 store.
 func buildCodexState(t *testing.T, path string, threads ...codexStateThread) {
 	t.Helper()
+	testjail.DatabaseFiles(t, filepath.Dir(path))
 
 	schema, err := os.ReadFile(
 		filepath.Join("..", "..", "testdata", "codex-state-schema.sql"),

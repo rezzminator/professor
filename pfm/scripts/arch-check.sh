@@ -19,7 +19,7 @@
 # record the ruling in .arch/exceptions.md.
 #
 # The checks are independent, so they run as concurrent background jobs and print
-# in the order they always have: C1 … C8, C10 … C23, C25 … C31, then C24 (its own script). A job
+# in the order they always have: C1 … C8, C10 … C23, C25 … C33, then C24 (its own script). A job
 # that ends without leaving its CHECK line is reported as ERROR for that check,
 # never read as PASS.
 set -uo pipefail
@@ -318,9 +318,9 @@ chk_C12() {
   fi
 }
 
-# C13 tests mirror sources: every x.go has x_test.go.
+# C13 tests mirror sources: every x.go has x_test.go, or x_jail_test.go when every test of it is real.
 chk_C13() {
-  while read -r s; do [ -e "${s%.go}_test.go" ] || echo "$s"; done < "$L/src.list" > "$T/c13"
+  while read -r s; do [ -e "${s%.go}_test.go" ] || [ -e "${s%.go}_jail_test.go" ] || echo "$s"; done < "$L/src.list" > "$T/c13"
   ratchet C13-test-mirror untested-sources "$T/c13"
 }
 
@@ -645,6 +645,60 @@ chk_C32() {
   else say C32-os-door-test ERROR "grep could not read test files"; fi
 }
 
+# C33 unit kind (seed ruling 9): scripts/test-kinds.sh classes every unit-bundle test. Outside a jail
+# file a directory's move count (home-sqlite, process, tmux) may only fall from .arch/unit-kind.txt,
+# so no directory gains a test that opens SQLite's own file, starts a process or a tmux server. A jail
+# file's real-test count may only fall from .arch/jail-tests.txt, and every jail file is named in a
+# `- C33` line of .arch/exceptions.md as `{file}` ({count}) with a count at least its baseline row's:
+# raising a row takes its reason's count with it. A real test is kept until a fake or the journey can
+# play it. FAIL names the directory or the file and its count over the baseline, or the jail file
+# whose reason is missing.
+chk_C33() {
+  if ! bash "$SCRIPTS/test-kinds.sh" --list "$PFM" > "$T/kinds"; then
+    say C33-unit-kind ERROR "test-kinds.sh could not look: $(head -n 1 "$T/kinds")"; return
+  fi
+  awk -F '\t' '$1 == "home-sqlite" || $1 == "process" || $1 == "tmux" {n[$2]++} END {for (d in n) print d " " n[d]}' \
+    "$T/kinds" > "$T/c33-dirs"
+  awk -F '\t' '$1 == "real" {n[($2 == "." ? "" : $2 "/") $3]++} END {for (f in n) print f " " n[f]}' "$T/kinds" > "$T/c33-files"
+  local dirs files
+  dirs=$( (T="$T/d"; mkdir -p "$T" && ratchet_counts C33-unit-kind unit-kind "$T/../c33-dirs") )
+  files=$( (T="$T/f"; mkdir -p "$T" && ratchet_counts C33-unit-kind jail-tests "$T/../c33-files") )
+  local verdict="" line word
+  for line in "$dirs" "$files"; do
+    word=$(awk '{print $3}' <<<"$line")
+    case $word in
+      ERROR) say C33-unit-kind ERROR "$(c33_detail "$line")"; return ;;
+      FAIL) verdict="${verdict:+$verdict; }$(c33_detail "$line")" ;;
+    esac
+  done
+  if [ "$MODE" = --measure ]; then
+    say C33-unit-kind MEASURE "$(c33_detail "$dirs") · $(c33_detail "$files")"; return
+  fi
+  local unreasoned
+  # shellcheck disable=SC2016 # the awk program is single-quoted on purpose
+  unreasoned=$(awk 'FILENAME == ARGV[1] {
+      if ($0 !~ /^- C33 /) next
+      line = $0
+      while (match(line, /`[^`]+` \([0-9]+\)/)) {
+        item = substr(line, RSTART, RLENGTH); line = substr(line, RSTART + RLENGTH)
+        file = item; sub(/^`/, "", file); sub(/`.*/, "", file)
+        count = item; sub(/.*\(/, "", count); sub(/\)$/, "", count)
+        reason[file] = count + 0
+      }
+      next
+    }
+    !($1 in reason) || reason[$1] < $2 + 0 {print $1}' "$BASE/exceptions.md" "$BASE/jail-tests.txt") ||
+    { say C33-unit-kind ERROR "awk could not read .arch/exceptions.md or .arch/jail-tests.txt"; return; }
+  if [ -n "$unreasoned" ]; then
+    verdict="${verdict:+$verdict; }no C33 reason in .arch/exceptions.md for $(echo "$unreasoned" | tr '\n' ' ' | sed 's/ $//')"
+  fi
+  if [ -n "$verdict" ]; then say C33-unit-kind FAIL "$verdict"; return; fi
+  say C33-unit-kind PASS "$(c33_detail "$dirs") · $(c33_detail "$files")"
+}
+
+# c33_detail <CHECK line>: the line's detail, its id and verdict cut.
+c33_detail() { sed -E 's/^CHECK +[^ ]+ +[A-Z]+ +//; s/ +$//' <<<"$1"; }
+
 # C30 one shell door per OS operation: scripts/platform.sh is the door, and a
 # non-comment line elsewhere in scripts/, .claude/scripts/, pfm/scripts/ or
 # pfm/Makefile that branches on the OS name or names a one-OS or GNU/BSD-split
@@ -725,7 +779,7 @@ for id in C1-ceiling-src C2-ceiling-test C3-cmd-budget C4-cmd-primitives C5-tmux
   C12-claude-pointers C13-test-mirror C14-usage-parity C15-internal-usage \
   C16-env-outside-paths C17-dup-functions C18-engine-spellings C19-env-namespace \
   C20-codex-home C21-test-jail C22-host-doors C23-bare-log C25-testmain-jail C26-exec-write C27-identity-env \
-  C28-signal-door C29-os-door C30-shell-platform C31-front-door C32-os-door-test C24-unwrapped-door; do
+  C28-signal-door C29-os-door C30-shell-platform C31-front-door C32-os-door-test C33-unit-kind C24-unwrapped-door; do
   job "$id"
 done
 

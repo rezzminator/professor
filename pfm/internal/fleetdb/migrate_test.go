@@ -17,6 +17,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // v3Schema is the schema a version-3 pfm leaves: hidden has no revision.
@@ -301,6 +302,7 @@ func TestSharedOpenMigratesAtOpenUnderTheMigrationLock(t *testing.T) {
 func TestSharedMigrationFromV1PreservesRowsAndBacksUp(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
+	testjail.DatabaseFiles(t, root)
 	path := filepath.Join(root, "pfm.db")
 	ctx := context.Background()
 	db, err := sql.Open("sqlite", path)
@@ -394,7 +396,9 @@ func TestSharedOpenDropsTheRetiredIssuesTable(t *testing.T) {
 		t.Run(fmt.Sprintf("rows=%d", rows), func(t *testing.T) {
 			t.Parallel()
 			ctx := context.Background()
-			path := filepath.Join(t.TempDir(), "pfm.db")
+			dir := t.TempDir()
+			testjail.DatabaseFiles(t, dir)
+			path := filepath.Join(dir, "pfm.db")
 			seedSharedState(t, path, retiredIssuesSeed(rows))
 			state := OpenSharedState(ctx, paths.Values{StateDB: path})
 			if err := state.Degraded(); err != nil {
@@ -523,6 +527,7 @@ func TestSharedReadOnlyOpenLeavesTheIssuesTable(t *testing.T) {
 func TestSharedMigrationBackupFailureLeavesV1(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
+	testjail.DatabaseFiles(t, root)
 	path := filepath.Join(root, "pfm.db")
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
@@ -639,7 +644,9 @@ func TestSharedMigrationRenamesStoredCalls(t *testing.T) {
 	for _, version := range []int{3, 4, 5} {
 		t.Run(strconv.Itoa(version), func(t *testing.T) {
 			ctx := context.Background()
-			path := filepath.Join(t.TempDir(), "pfm.db")
+			dir := t.TempDir()
+			testjail.DatabaseFiles(t, dir)
+			path := filepath.Join(dir, "pfm.db")
 			seed := v3Schema + fmt.Sprintf("PRAGMA user_version=%d;", version) + `
 INSERT INTO comms(id,at_ns,kind,sender_session,sender_label,sender_uuid,target,receiver_socket,receiver_pane,group_name,members,message)
 VALUES(7,100,'inject','sender','Sender','uuid','target','socket','%1','group','members','full body');

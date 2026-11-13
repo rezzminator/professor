@@ -9,5 +9,5 @@ Binds every agent writing a `pfm/**/*_test.go` except `pfm/journey/**`, `pfm/e2e
 
 - Touch: process memory and the test's own temporary directory (`t.TempDir()`, or a `testjail` home built in one).
 - Fake at the seam production code calls: a child process through `deps.Runner` (`deps.FakeRunner`); the clock and every sleep, timer or ticker through `clock.Clock` (`clock.Fake`); `$HOME`, `~/.config` and `~/.local/state/pfm` through `paths.Env` (`paths.MapEnv`) or the `PFM_*` overrides pointed into the temp directory.
-- Fake tmux and every unix or network socket at the interface the package's code calls (e.g. `kill.TmuxClient`); SQLite runs in memory through `store.OpenMemory`.
+- Fake tmux and every unix or network socket at the interface the package's code calls (e.g. `kill.TmuxClient`); SQLite runs in memory: in a test process the SQLite door serves every path from a memory database (`testjail.Run` turns it on), and a test of the file itself (WAL, an older on-disk version, a backup's bytes, a corrupt file, another process) calls `testjail.DatabaseFiles` on its directory.
 - A test needing the real thing is a `{name}_jail_test.go`, run in the fence, or a journey step.

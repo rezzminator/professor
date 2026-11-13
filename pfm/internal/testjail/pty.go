@@ -2,9 +2,11 @@ package testjail
 
 import (
 	"os"
+	"os/exec"
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/cmdparse"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
 // The two script(1) implementations disagree about their own argv. util-linux
@@ -30,4 +32,16 @@ func utilLinuxScriptArgv(script string, argv []string) []string {
 // command and its arguments as they are.
 func bsdScriptArgv(script string, argv []string) []string {
 	return append([]string{script, "-qe", os.DevNull}, argv...)
+}
+
+// PTYCommand builds a command that runs argv on a REAL pty via script(1), for
+// behaviour that only happens on a terminal. A script(1) that cannot be
+// resolved is the deps.Resolve error, never a bare name left to fail later.
+func PTYCommand(argv ...string) (*exec.Cmd, error) {
+	scriptBinary, err := deps.Resolve("script")
+	if err != nil {
+		return nil, err
+	}
+	scriptArgv := ptyScriptArgv(scriptBinary, argv)
+	return exec.Command(scriptArgv[0], scriptArgv[1:]...), nil
 }

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // One engine's pass failing leaves the others indexed: pfm index names the
@@ -26,6 +27,7 @@ func TestIndexPrintsCountersAndFailsOnAPartialIndex(t *testing.T) {
 	if err := os.MkdirAll(openCodeRoot, 0o700); err != nil {
 		t.Fatal(err)
 	}
+	testjail.DatabaseFiles(t, openCodeRoot)
 	if err := os.WriteFile(filepath.Join(openCodeRoot, "opencode.db"), []byte("not a database"), 0o600); err != nil {
 		t.Fatal(err)
 	}

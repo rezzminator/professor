@@ -3,20 +3,21 @@ package doctor
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	_ "modernc.org/sqlite"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 )
 
 func TestDoctorRejectsMalformedOpenCodeRowsInsteadOfReportingHealthy(t *testing.T) {
 	t.Setenv("TMUX_TMPDIR", t.TempDir())
 	root := t.TempDir()
-	db, err := sql.Open("sqlite", filepath.Join(root, "opencode.db"))
+	db, err := sqlitedb.OpenReadWrite(filepath.Join(root, "opencode.db"), 5*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -15,6 +15,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func cacheLaunch(t *testing.T, home, session string, oneHour bool) {
@@ -85,6 +86,7 @@ func TestStatuslineNoLaunchHidesCacheWindow(t *testing.T) {
 
 func TestStatuslineLaunchReadErrorShowsWarning(t *testing.T) {
 	home := t.TempDir()
+	testjail.DatabaseFiles(t, home)
 	path := paths.DefaultStateDB(home)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)

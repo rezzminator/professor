@@ -2,16 +2,17 @@ package main
 
 import (
 	"bytes"
-	"database/sql"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	_ "modernc.org/sqlite"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 )
 
 // seedOpenCodeSessionWithAReply builds the smallest OpenCode v1.14.30 store
@@ -23,7 +24,7 @@ func seedOpenCodeSessionWithAReply(t *testing.T, root string) {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatalf("mkdir opencode root: %v", err)
 	}
-	db, err := sql.Open("sqlite", filepath.Join(root, "opencode.db"))
+	db, err := sqlitedb.OpenReadWrite(filepath.Join(root, "opencode.db"), 5*time.Second)
 	if err != nil {
 		t.Fatalf("open fixture store: %v", err)
 	}

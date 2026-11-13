@@ -3,7 +3,6 @@ package kill
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -12,6 +11,7 @@ import (
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 )
 
 // TestManagerConfirmExitFailsWhenPaneOutlivesEscalation reproduces the live
@@ -177,7 +177,7 @@ func TestConfirmExitMovedSeatLookupFailureKeepsExplicitTmux(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	raw, err := sql.Open("sqlite", database.SharedPath())
+	raw, err := sqlitedb.OpenReadWrite(database.SharedPath(), 5*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}

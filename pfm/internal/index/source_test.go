@@ -2,16 +2,17 @@ package index
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
@@ -108,7 +109,7 @@ func TestRunIndexesPastAFailedSource(t *testing.T) {
 	t.Setenv(paths.EnvCacheDB, filepath.Join(root, "pfm-cache.db")) // its table is dropped below
 	database := openIndexStore(t)
 	t.Cleanup(func() { _ = database.Close() })
-	raw, err := sql.Open("sqlite", database.Path())
+	raw, err := sqlitedb.OpenReadWrite(database.Path(), 5*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}

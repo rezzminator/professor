@@ -63,7 +63,7 @@ func bridgeForeground(
 	}
 }
 
-// bridgeTmux runs one tmux read within gather.ProbeTimeout, as chat's runTmux
+// bridgeTmux runs one tmux read within gather.ProbeTimeout, as gather.TmuxRead
 // does: a stopped or wedged pfm server is this proof's named failure, never a
 // painter stalled on it.
 func bridgeTmux(ctx context.Context, socketPath string, args ...string) (string, error) {

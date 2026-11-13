@@ -246,7 +246,7 @@ func statusFromHerdr(
 		case foregroundErr != nil:
 			return status, fmt.Errorf("read %s Herdr state: %w", chat.Name, errors.Join(err, foregroundErr))
 		case !alive:
-			status.State, status.IdleSeconds, status.Error = headless.StateDead, 0, ""
+			status = deadStatus(status)
 		default:
 			status.StateSource = herdrAgentUntracked
 		}

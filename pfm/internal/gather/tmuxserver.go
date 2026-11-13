@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
@@ -81,6 +82,32 @@ func ProbePanes(ctx context.Context, binary, socketPath string) ([]ProbePane, er
 		return nil, fmt.Errorf("%w: %s", ErrServerGone, socketPath)
 	}
 	return nil, err
+}
+
+// TmuxRead runs one read-only tmux command against the server at socketPath
+// within ProbeTimeout, as ProbeServer does: a stopped or wedged server is this
+// read's error, never a hang of its caller. A failure reads as every probe's
+// does (tmuxReadFailure).
+func TmuxRead(ctx context.Context, socketPath string, arguments ...string) (string, error) {
+	probeCtx, cancel := context.WithTimeout(ctx, probeTimeout(ctx))
+	defer cancel()
+	output, err := pfmtmux.ExecWithin(probeCtx, probeTimeout(ctx), "", socketPath, arguments...).Output()
+	if err != nil {
+		return "", tmuxReadFailure(ctx, probeCtx, err, socketPath, arguments)
+	}
+	return string(output), nil
+}
+
+// tmuxReadFailure is a failed TmuxRead named by its command, in classifyProbe's
+// words: a socket with no server behind it wraps ErrServerGone (its chat
+// ended), one past the bound ErrServerUnresponsive; any other failure keeps
+// tmux's reason.
+func tmuxReadFailure(ctx, probeCtx context.Context, err error, socketPath string, arguments []string) error {
+	if state, classified := classifyProbe(ctx, probeCtx, err, socketPath); state == ServerDead ||
+		state == ServerUnresponsive {
+		err = classified
+	}
+	return fmt.Errorf("tmux %s: %w", strings.Join(arguments, " "), withStderr(err))
 }
 
 // Unresponsive names a probe of socket that ran past its own deadline — the

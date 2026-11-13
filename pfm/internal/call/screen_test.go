@@ -3,10 +3,12 @@ package call
 import (
 	"context"
 	"errors"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -50,6 +52,50 @@ func TestCaptureScreenReadsOnlyTheScreen(t *testing.T) {
 	}
 	if _, err := door(warns).CaptureScreen(ctx, Target{Backend: "screen-x", SocketPath: "/s", Pane: "%1"}); err == nil {
 		t.Fatal("CaptureScreen() of an unknown backend succeeded")
+	}
+}
+
+// exitCaptureTmux fails every capture the way tmux's client exits, its reason on stderr.
+type exitCaptureTmux struct {
+	Tmux
+	stderr string
+}
+
+func (fake exitCaptureTmux) Capture(context.Context, string, string, bool, int) (string, error) {
+	return "", &exec.ExitError{Stderr: []byte(fake.stderr)}
+}
+
+// TestCaptureScreenNamesAGoneServer: a capture of a pane whose tmux server is
+// gone wraps gather.ErrServerGone, the chat ended; any other failure keeps
+// tmux's complaint and is not gone.
+func TestCaptureScreenNamesAGoneServer(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		stderr string
+		gone   bool
+		want   string
+	}{
+		{
+			"socket file gone", "error connecting to /sockets/cc-1 (No such file or directory)\n", true,
+			"capture pane %4: no tmux server on socket: <nil>: error connecting to /sockets/cc-1 (No such file or directory)",
+		},
+		{
+			"no server running", "no server running on /sockets/cc-1\n", true,
+			"capture pane %4: no tmux server on socket: <nil>: no server running on /sockets/cc-1",
+		},
+		{"pane missing", "can't find pane: %4\n", false, "capture pane %4: <nil>: can't find pane: %4"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			engine, err := New(Dependencies{Tmux: exitCaptureTmux{stderr: tc.stderr}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = engine.CaptureScreen(context.Background(), Target{SocketPath: "/sockets/cc-1", Pane: "%4"})
+			if err == nil || err.Error() != tc.want || errors.Is(err, gather.ErrServerGone) != tc.gone {
+				t.Fatalf("CaptureScreen() = %v (gone %v), want %q (gone %v)",
+					err, errors.Is(err, gather.ErrServerGone), tc.want, tc.gone)
+			}
+		})
 	}
 }
 

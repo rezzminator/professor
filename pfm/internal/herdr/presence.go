@@ -73,7 +73,9 @@ type Probe struct {
 	// reporter hooks; known is false when its launch cannot be read, and the
 	// detail is then left out, never guessed.
 	Hookless func(seat Seat) (hookless, known bool)
-	Warn     io.Writer
+	// ServerGone says a failed Tmux read found no server behind the socket (gather.ErrServerGone): the chat ended.
+	ServerGone func(err error) bool
+	Warn       io.Writer
 }
 
 // HostHasHerdr is the one rule for a Herdr on this host: HERDR_BIN_PATH set
@@ -98,8 +100,8 @@ func HostHasHerdr(getenv func(string) string, lookPath func(string) (string, err
 // Herdr lists no agent on; an `unknown` agent of a chat launched without the
 // reporter hooks gains the reload hint; a live client Herdr cannot place is
 // named after the panes shown as its failure text); else PresenceAttachedOutside when its
-// clients run outside Herdr, PresenceNotInHerdr when no client sits in a pane,
-// or its failure. Each Herdr socket is asked once for all seats.
+// clients run outside Herdr, PresenceNotInHerdr when no client sits in a pane
+// or its tmux server ended (ServerGone, never warned), or its failure. Each Herdr socket is asked once for all seats.
 func (probe Probe) Presence(ctx context.Context, seats []Seat) []string {
 	presence := make([]string, len(seats))
 	if !HostHasHerdr(probe.Getenv, probe.LookPath) {
@@ -111,7 +113,9 @@ func (probe Probe) Presence(ctx context.Context, seats []Seat) []string {
 	sockets := make(map[string]*socketView)
 	for index, seat := range seats {
 		text, err := probe.seatPresence(ctx, seat, sockets)
-		if err != nil {
+		if ended := err != nil && probe.ServerGone != nil && probe.ServerGone(err); ended {
+			text = PresenceNotInHerdr // its tmux server ended after the listing found it
+		} else if err != nil {
 			probe.warn("pfm chat ls: herdr presence of %+v: %v", seat, err)
 			text = presenceFailure(err)
 		}

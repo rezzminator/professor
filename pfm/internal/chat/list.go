@@ -7,7 +7,6 @@ import (
 	"io"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/compose"
@@ -19,7 +18,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
-	"github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
 // ListRequest selects fleet rows: one compose view, an optional Project filter
@@ -105,13 +103,14 @@ func List(
 func realHerdrProbe(warn io.Writer, values paths.Values, claudeBinary string) herdr.Probe {
 	proc := gather.NewProcFS(values.ProcRoot)
 	return herdr.Probe{
-		Getenv:   paths.OSEnv{}.Get,
-		LookPath: deps.RealRunner{}.LookPath,
-		Tmux:     runTmux,
-		Call:     herdr.Call,
-		Environ:  proc.Environ,
-		Hookless: hooklessLaunch(warn, proc, claudeBinary),
-		Warn:     warn,
+		Getenv:     paths.OSEnv{}.Get,
+		LookPath:   deps.RealRunner{}.LookPath,
+		Tmux:       gather.TmuxRead,
+		ServerGone: func(err error) bool { return errors.Is(err, gather.ErrServerGone) },
+		Call:       herdr.Call,
+		Environ:    proc.Environ,
+		Hookless:   hooklessLaunch(warn, proc, claudeBinary),
+		Warn:       warn,
 	}
 }
 
@@ -171,29 +170,6 @@ func hooklessLaunch(warn io.Writer, proc gather.ProcFS, claudeBinary string) fun
 		}
 		return false, false
 	}
-}
-
-// runTmux runs one read against a chat's tmux server within
-// gather.ProbeTimeout, as the fleet scan's probe does: a stopped or wedged
-// server is this row's error, never a hang of the whole listing.
-func runTmux(ctx context.Context, socketPath string, args ...string) (string, error) {
-	readCtx, cancel := context.WithTimeout(ctx, gather.ProbeTimeout)
-	defer cancel()
-	var stderr strings.Builder
-	command := tmux.Exec(readCtx, "", socketPath, args...)
-	command.Stderr = &stderr
-	command.WaitDelay = time.Second
-	output, err := command.Output()
-	if err != nil && ctx.Err() == nil && errors.Is(readCtx.Err(), context.DeadlineExceeded) {
-		return "", fmt.Errorf(
-			"tmux %s: %w within %s: %s", strings.Join(args, " "), gather.ErrServerUnresponsive, gather.ProbeTimeout,
-			socketPath,
-		)
-	}
-	if err != nil {
-		return "", fmt.Errorf("tmux %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
-	}
-	return string(output), nil
 }
 
 // rowsPresence is the Herdr presence of each row's chat: the row's tmux server

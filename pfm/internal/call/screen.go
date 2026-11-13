@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+
+	"github.com/rezzminator/professor/pfm/internal/gather"
 )
 
 // Screen is the one door through which code outside this package presses keys
@@ -85,6 +87,9 @@ func (engine *Engine) captureVisible(ctx context.Context, target Target, styled 
 	case "", backendTmux:
 		screen, err := engine.tmux.Capture(ctx, target.SocketPath, target.Pane, styled, 0)
 		if err != nil {
+			if gather.TmuxServerGone(err) {
+				err = fmt.Errorf("%w: %w", gather.ErrServerGone, err) // the pane's chat ended
+			}
 			var exit *exec.ExitError
 			if errors.As(err, &exit) && strings.TrimSpace(string(exit.Stderr)) != "" {
 				return "", fmt.Errorf(

@@ -580,7 +580,7 @@ func retireOtherHerdrViews(ctx context.Context, row compose.Row, runtime config.
 	retireHerdrViews(ctx, tmuxSocket, socket, pane, herdrViewRetirer{
 		session: row.SessionName,
 		stored: func(ctx context.Context) (string, error) {
-			return runTmux(ctx, tmuxSocket, "show-options", "-qv", "-t", row.PaneID, herdr.StoredOption)
+			return gather.TmuxRead(ctx, tmuxSocket, "show-options", "-qv", "-t", row.PaneID, herdr.StoredOption)
 		},
 		prove: call.ProveHerdrBridge,
 		close: func(ctx context.Context, socket, pane string) error {

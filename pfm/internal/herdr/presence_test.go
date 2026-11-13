@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"path/filepath"
 	"strings"
@@ -138,13 +139,18 @@ func storedWith(clients map[string]Client) string {
 	return string(encoded)
 }
 
+// errServerGone is the error a Tmux read of a socket with no server behind it wraps.
+var errServerGone = errors.New("no tmux server on socket")
+
 func probeFor(tmux *fakeTmux, withHerdr bool, warn *strings.Builder) Probe {
 	probe := Probe{
 		Getenv:   func(string) string { return "" },
 		LookPath: func(string) (string, error) { return "", errors.New("not found") },
 		Tmux:     tmux.run,
 		Call:     Call,
-		Warn:     warn,
+		// errServerGone stands in for gather.ErrServerGone, which imports this package.
+		ServerGone: func(err error) bool { return errors.Is(err, errServerGone) },
+		Warn:       warn,
 	}
 	if withHerdr {
 		probe.Getenv = func(name string) string {
@@ -320,6 +326,11 @@ func TestPresenceNotInHerdrWhenNoServerNoOptionNoClientOrNoLivePane(t *testing.T
 		"/t/cc-3|s3": storedWith(nil),
 		// the only registered client's terminal is gone from Herdr
 		"/t/cc-4|s4": storedWith(map[string]Client{"4": {Pane: "w9:p9", Terminal: "term_gone", Socket: fake.path}}),
+		"/t/cc-6|s6": "",
+	}, errs: map[string]error{
+		// the chat's tmux server ended between the listing and its option read, or its client read
+		"s5":         fmt.Errorf("tmux show-options -qv -t s5 @pfm_herdr: %w: /t/cc-5", errServerGone),
+		"clients:s6": fmt.Errorf("tmux list-clients -t s6 -F #{client_pid}: %w: /t/cc-6", errServerGone),
 	}}
 	seats := []Seat{
 		{}, // a resumable row: no live tmux server
@@ -329,11 +340,17 @@ func TestPresenceNotInHerdrWhenNoServerNoOptionNoClientOrNoLivePane(t *testing.T
 		},
 		{SocketPath: "/t/cc-3", Session: "s3"},
 		{SocketPath: "/t/cc-4", Session: "s4"},
+		{SocketPath: "/t/cc-5", Session: "s5"},
+		{SocketPath: "/t/cc-6", Session: "s6"},
 	}
-	for index, got := range probeFor(tmux, true, nil).Presence(context.Background(), seats) {
+	var warn strings.Builder
+	for index, got := range probeFor(tmux, true, &warn).Presence(context.Background(), seats) {
 		if got != PresenceNotInHerdr {
 			t.Errorf("seat %d Presence = %q, want %q", index, got, PresenceNotInHerdr)
 		}
+	}
+	if warn.String() != "" {
+		t.Errorf("warnings = %q, want none: an ended chat is no failed lookup", warn.String())
 	}
 }
 

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
@@ -259,14 +260,46 @@ func TestInspectSeatCapturesOnlyAPendingToolCallQuietPastTheThreshold(t *testing
 }
 
 // "We failed to look" is an error, never a state: a pane that could not be
-// read must not render a silent pending tool call as blocked or working.
-func TestInspectSeatReturnsACaptureFailureOnASilentPendingToolCall(t *testing.T) {
+// read must not render a silent pending tool call, or a seat with no
+// transcript, as blocked or working. A pane whose tmux server is gone is no
+// failure to look: the chat ended after the listing found it, and it is dead.
+func TestInspectSeatReadsAGoneServerAsDeadAndEveryOtherCaptureFailureAsAnError(t *testing.T) {
 	testjail.Fleet(t)
-	chat := pendingToolChat(t, claudeToolCall, 90*time.Second)
-	_, err := InspectSeat(context.Background(), nil, chat, time.Now(),
-		func(context.Context, string, string) (string, error) { return "", errors.New("tmux could not run") })
-	if err == nil || !strings.Contains(err.Error(), "tmux could not run") {
-		t.Fatalf("InspectSeat error = %v, want the capture failure named", err)
+	gone := fmt.Errorf(
+		"capture pane %%0: %w: exit status 1: error connecting to /t/ox-1-2-3 (No such file or directory)",
+		gather.ErrServerGone,
+	)
+	transcriptless := headless.Chat{Name: "seat", Engine: pfmengine.Claude, Live: true, Socket: "ox-1-2-3", Pane: "%0"}
+	for _, tc := range []struct {
+		name    string
+		chat    headless.Chat
+		failure error
+		wantErr string
+	}{
+		{"a silent pending tool call on a gone server", pendingToolChat(t, claudeToolCall, 90*time.Second), gone, ""},
+		{"a transcriptless seat on a gone server", transcriptless, gone, ""},
+		{
+			"a silent pending tool call whose capture failed", pendingToolChat(t, claudeToolCall, 90*time.Second),
+			errors.New("tmux could not run"), "tmux could not run",
+		},
+		{
+			"a transcriptless seat whose capture failed", transcriptless,
+			errors.New("tmux could not run"), "tmux could not run",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			status, err := InspectSeat(context.Background(), nil, tc.chat, time.Now(),
+				func(context.Context, string, string) (string, error) { return "", tc.failure })
+			if tc.wantErr != "" {
+				if err == nil || !strings.HasSuffix(err.Error(), ": "+tc.wantErr) {
+					t.Fatalf("InspectSeat() = %#v, %v; want the capture failure %q named", status, err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil || status.State != headless.StateDead || status.IdleSeconds != 0 || status.Error != "" {
+				t.Fatalf("InspectSeat() = %#v, %v; want dead with zero idle seconds and no error", status, err)
+			}
+		})
 	}
 }
 

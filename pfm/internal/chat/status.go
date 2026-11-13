@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
@@ -71,6 +73,12 @@ func ListInspected(
 	return listed, statuses, errs, nil
 }
 
+// deadStatus is status for a chat found ended: dead, idle for no time, no error.
+func deadStatus(status headless.Status) headless.Status {
+	status.State, status.IdleSeconds, status.Error = headless.StateDead, 0, ""
+	return status
+}
+
 func inspectTarget(
 	ctx context.Context,
 	runtime *pfmconfig.Runtime,
@@ -95,6 +103,10 @@ func inspectTarget(
 		status, err = statusFromPane(ctx, target, status, capture, runtime)
 	case awaitsPane(target, status):
 		status, err = blockedFromPane(ctx, target, status, capture, runtime)
+	}
+	if errors.Is(err, gather.ErrServerGone) {
+		// Its tmux server ended after the listing found it: a dead chat is a status, never an error.
+		status, err = deadStatus(status), nil
 	}
 	if err != nil {
 		if target.Backend == spawn.BackendHerdr {

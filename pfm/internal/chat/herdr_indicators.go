@@ -299,7 +299,7 @@ func PaintHerdrIndicators(ctx context.Context, socket, lockDir string, stderr io
 	addresses := tabViewReader{
 		runtime: &runtime,
 		warn:    warnings,
-		tmux:    runTmux,
+		tmux:    gather.TmuxRead,
 		resolve: herdr.WireResolver(
 			proc.Environ,
 			herdr.Call,

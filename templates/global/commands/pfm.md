@@ -8,7 +8,7 @@ argument-hint: [verb|question]
 
 $ARGUMENTS
 
-`pfm` is the host binary Professor ships: it manages the chat fleet, the memory organs, the host integration, and this project's template baseline. This file is the map; the flags of any verb are `pfm <verb> --help` — never invent one. Template store `{clone}`: the Professor clone `pfm install` links from, `readlink -f ~/.claude/commands/pfm.md` minus `/templates/global/commands/pfm.md` (`~/.professor` unless installed from elsewhere).
+`pfm` is the host binary Professor ships: it manages the chat fleet, the host integration, and this project's template baseline. This file is the map; the flags of any verb are `pfm <verb> --help` — never invent one. Template store `{clone}`: the Professor clone `pfm install` links from, `readlink -f ~/.claude/commands/pfm.md` minus `/templates/global/commands/pfm.md` (`~/.professor` unless installed from elsewhere).
 
 For creating, adopting, modifying or checking a workbench, load `/pfm:workbench`.
 

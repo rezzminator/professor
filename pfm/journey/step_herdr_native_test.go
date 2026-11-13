@@ -157,24 +157,57 @@ func namesAgree(c *harness.Ctx, s State, after string) {
 // reloadCLI: with a draft left in the chat's composer, the owner aims `pfm chat reload` at the chat's Herdr
 // socket and pane from a second terminal, with a follow-up prompt (--then); the chat comes back in the same
 // pane with the same seat, session and name under a new engine, the follow-up submitted once and answered,
-// and the draft, parked before the reload's /exit, never reaches the chat as a prompt. Version retention
-// has pruned the Claude build the seat recorded before the reload: the chat comes back on the build that
-// is now the newest (escape herdr/pruned-claude-build).
+// and the draft, parked before the reload's /exit, never reaches the chat as a prompt. Before the reload
+// Claude's updater has installed a newer build and version retention has pruned the one the seat
+// recorded: the chat comes back on the newer build (escape herdr/pruned-claude-build). Every lane under
+// this HOME launches claude from the same versions directory, so no build a launch may resolve is ever
+// removed: the newer build lands first, the recorded one goes only once no launch that resolved it
+// before is still on its way to exec it, and the newer one stays, as after a real update; the recorded
+// build comes back for the paths later lanes recorded, and retention's keep-two drops the oldest, which
+// no launch resolves while a newer build is on disk. prepare.sh resets the directory for the next run.
 func reloadCLI(c *harness.Ctx, s State) State {
 	cli := c.Terminal(s.Term + "-cli")
 	term := c.Terminal(s.Term)
 	before := s.Chat.Engine
 	builds := filepath.Join(s.Home, ".local", "share", "claude", "versions")
-	recorded, successor := filepath.Join(builds, "2.1.270"), filepath.Join(builds, "2.1.269")
+	// prepare.sh links 2.1.269 and 2.1.270 to the fake engine; this step alone stages 2.1.271 from it.
+	engine := filepath.Join(s.Home, ".local", "share", "journey", "bin", "mock-engine")
+	oldest, recorded, newer := filepath.Join(builds, "2.1.269"), filepath.Join(builds, "2.1.270"),
+		filepath.Join(builds, "2.1.271")
 	if got := engineBuild(c, before); got != recorded {
 		c.Failf("engine %d of %s runs %q, want the newest Claude build %q", before, s.Chat.Session, got, recorded)
 	}
-	read(c, "rm", recorded)
+	// restore links the recorded build back only when it is gone (ln -f unlinks first, and the recorded
+	// build is the newest until the newer one lands), then drops the oldest, never the newest.
+	restore := func() []string {
+		var failed []string
+		for _, argv := range [][]string{
+			{"sh", "-c", `[ -e "$2" ] || ln "$1" "$2"`, "sh", engine, recorded},
+			{"rm", "-f", oldest},
+		} {
+			if r := c.Read(argv...); r.Code != 0 {
+				failed = append(failed, fmt.Sprintf("%s exited %d: %s", strings.Join(argv, " "), r.Code, r.Stderr))
+			}
+		}
+		return failed
+	}
 	c.Cleanup(func() {
-		if r := c.Read("ln", "-f", successor, recorded); r.Code != 0 {
-			c.Logf("teardown: ln %s %s exited %d: %s", successor, recorded, r.Code, r.Stderr)
+		for _, failure := range restore() {
+			c.Logf("teardown: %s", failure)
 		}
 	})
+	read(c, "ln", engine, newer)
+	c.Poll("no Claude launch still on its way to exec "+recorded, 20*time.Second, func() (bool, string) {
+		var launching []string
+		for pid, p := range processes(c) {
+			if strings.Contains(p.Args, "internal claude-launch") ||
+				strings.Contains(p.Args, recorded) && p.Args != recorded && !strings.HasPrefix(p.Args, recorded+" ") {
+				launching = append(launching, fmt.Sprintf("%d %s", pid, p.Args))
+			}
+		}
+		return len(launching) == 0, strings.Join(launching, "\n")
+	})
+	read(c, "rm", recorded)
 	draft := c.Unique("draft")
 	term.Type(draft)
 	term.WaitFor("❯ " + draft)
@@ -195,11 +228,13 @@ func reloadCLI(c *harness.Ctx, s State) State {
 	reloadRunDone(c, s)
 	term.WaitFor("⏺ "+reply, 20*time.Second)
 	s.Chat.Engine = engineOf(c, s)
-	if got := engineBuild(c, s.Chat.Engine); got != successor {
-		c.Failf("engine %d of %s after the reload runs %q, want the build left newest %q", s.Chat.Engine,
-			s.Chat.Session, got, successor)
+	if got := engineBuild(c, s.Chat.Engine); got != newer {
+		c.Failf("engine %d of %s after the reload runs %q, want the newer build the updater installed %q",
+			s.Chat.Engine, s.Chat.Session, got, newer)
 	}
-	read(c, "ln", "-f", successor, recorded)
+	if failed := restore(); len(failed) != 0 {
+		c.Failf("restoring the Claude builds in %s: %s", builds, strings.Join(failed, "; "))
+	}
 	path := transcriptOf(c, s)
 	var got []string
 	for _, text := range userTexts(c, path) {

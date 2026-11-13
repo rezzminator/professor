@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"fmt"
 	"strings"
 	"testing"
 
@@ -85,14 +84,11 @@ func TestEmptyListLineNamesWhyNothingIsShown(t *testing.T) {
 
 func TestTempoAxisNeedsRoomUnderTheRows(t *testing.T) {
 	model := deckModel(120, 30)
-	roomy := ansi.Strip(model.renderListPanel(100, 9))
-	if !strings.Contains(roomy, "┴1h") {
-		t.Errorf("a panel with seven inner lines carries the tempo ruler:\n%s", roomy)
-	}
-	cramped := ansi.Strip(model.renderListPanel(100, 8))
-	if strings.Contains(cramped, "┴") {
-		t.Errorf("a panel with six inner lines keeps every line for the rows:\n%s", cramped)
-	}
+	golden(
+		t,
+		"ui_list_tempo_axis.txt",
+		ansi.Strip(model.renderListPanel(100, 9))+"\n"+ansi.Strip(model.renderListPanel(100, 8)),
+	)
 }
 
 func TestSelectedRowStaysInViewWhileTheCursorWalksTheFleet(t *testing.T) {
@@ -113,12 +109,7 @@ func TestSelectedRowStaysInViewWhileTheCursorWalksTheFleet(t *testing.T) {
 }
 
 func TestProjectBannerIsNotRepeatedWithinOneProject(t *testing.T) {
-	panel := ansi.Strip(deckModel(120, 40).renderListPanel(100, 34))
-	for _, project := range []string{"atlas", "harbor", "lumen", "quartz"} {
-		if got := strings.Count(panel, fmt.Sprintf("╭─ %s ", project)); got != 1 {
-			t.Errorf("project %q has %d banners, want one:\n%s", project, got, panel)
-		}
-	}
+	golden(t, "ui_list_project_banners.txt", ansi.Strip(deckModel(120, 40).renderListPanel(100, 34)))
 }
 
 func TestNameGroupsSharingAPrefixKeepTheirOwnBanners(t *testing.T) {

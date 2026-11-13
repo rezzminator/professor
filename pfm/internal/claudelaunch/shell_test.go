@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
@@ -58,19 +57,6 @@ func renderShellEnv(t *testing.T, runner deps.Runner) []string {
 	return shell
 }
 
-func TestRenderShellUnsetTakesBashFromPATH(t *testing.T) {
-	bash := "/scripted/bin/bash"
-	unsetShell(t)
-	got, want := renderShellEnv(t, bashRunner(bash)), []string{"CLAUDE_CODE_SHELL=" + bash}
-	if !slices.Equal(got, want) {
-		t.Fatalf("shell env = %q, want %q", got, want)
-	}
-	bash = shellPATH(t)
-	if got := SessionEnv(pfmconfig.ClaudePrefs{}); !slices.Contains(got, "CLAUDE_CODE_SHELL="+bash) {
-		t.Fatalf("SessionEnv = %q, want CLAUDE_CODE_SHELL=%s", got, bash)
-	}
-}
-
 func TestRenderShellPresetIsKept(t *testing.T) {
 	preset := filepath.Join(t.TempDir(), "zsh")
 	if err := testjail.WriteExecutableNeverRun(preset, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
@@ -81,8 +67,8 @@ func TestRenderShellPresetIsKept(t *testing.T) {
 	if got := renderShellEnv(t, bashRunner("/scripted/bin/bash")); len(got) != 0 {
 		t.Fatalf("shell env = %q, want the inherited %s left untouched", got, preset)
 	}
-	if strings.Contains(recorder.Raw(), "CLAUDE_CODE_SHELL") {
-		t.Fatalf("a valid preset was warned about: %s", recorder.Raw())
+	if got, want := recordMessages(recorder.Records()), ""; got != want {
+		t.Fatalf("records = %q, want %q", got, want)
 	}
 }
 
@@ -110,13 +96,27 @@ func TestRenderShellNoBashWarnsAndLaunches(t *testing.T) {
 	if got := renderShellEnv(t, &deps.FakeRunner{}); len(got) != 0 {
 		t.Fatalf("shell env = %q, want none without a bash", got)
 	}
-	if raw := recorder.Raw(); !strings.Contains(raw, "no bash on PATH") {
-		t.Fatalf("missing bash not warned: %s", raw)
-	}
+	value := ""
 	_, machine := renderMachine(t)
 	for _, row := range Resolve(machine, 0) {
-		if row.Knob.Name == "shell" && !strings.Contains(row.Value, "no bash on PATH") {
-			t.Fatalf("pfm config shell value = %q, want the reason", row.Value)
+		if row.Knob.Name == "shell" {
+			value = row.Value
 		}
 	}
+	if got, want := recordMessages(
+		recorder.Records(),
+	)+" | "+value, "claudelaunch: launch shell runner.lookpath | no bash on PATH ("+testjail.NotOnPath(
+		"bash",
+	)+"): CLAUDE_CODE_SHELL left unset, Claude Code's Bash tool runs under the login shell"; got != want {
+		t.Fatalf("records | shell value = %q, want %q", got, want)
+	}
+}
+
+// recordMessages is each record's message in log order.
+func recordMessages(records []obs.Record) string {
+	messages := make([]string, 0, len(records))
+	for _, record := range records {
+		messages = append(messages, record.Message)
+	}
+	return strings.Join(messages, " ")
 }

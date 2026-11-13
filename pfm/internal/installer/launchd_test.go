@@ -1,13 +1,11 @@
 package installer
 
 import (
+	"bytes"
 	"context"
-	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -16,73 +14,172 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-var plistEnvironmentPath = regexp.MustCompile(
-	`<key>EnvironmentVariables</key>\s*<dict>\s*<key>PATH</key>\s*<string>([^<]*)</string>`,
-)
-
-// TestMCPLaunchAgentGivesTheDaemonAPathThatFindsTmux is the regression for
-// the deaf shared daemon: the plist carried no EnvironmentVariables, so launchd
-// ran `pfm mcp serve` on /usr/bin:/bin:/usr/sbin:/sbin. tmux (Homebrew:
-// /opt/homebrew/bin, or /usr/local/bin on Intel) was off that PATH, every
-// socket probe failed to start, and every chat tool a Codex chat called over
-// the daemon answered as if no chat were live. The systemd unit had pinned its
-// PATH all along; the launchd twin never did.
-//
-// It drives the real install path and reads the plist launchd will load.
-func TestMCPLaunchAgentGivesTheDaemonAPathThatFindsTmux(t *testing.T) {
-	t.Parallel()
-	home := t.TempDir()
-	installer := &engine{
-		options: Options{
-			Home:       home,
-			Stdout:     io.Discard,
-			MCPEnabled: map[string]bool{"chat": true},
-			Runner:     &loadedRunner{},
-			Sleep:      func(time.Duration) {},
-		},
-		apply: true,
-		stamp: "test",
+// serviceUnitBody is a unit as its service manager reads it: the plist after
+// its comment block, or the systemd unit without its # lines, with this
+// test's home and install mark spelled {home} and {mark}.
+func serviceUnitBody(content []byte, home string) string {
+	text := string(content)
+	if end := strings.Index(text, "-->"); end >= 0 {
+		text = text[end+len("-->"):]
 	}
-	if err := installer.wireMCPLaunchAgent(context.Background()); err != nil {
-		t.Fatalf("wireMCPLaunchAgent() error = %v", err)
-	}
-	written, err := os.ReadFile(installer.mcpLaunchAgentPath())
-	if err != nil {
-		t.Fatalf("read installed MCP launch agent: %v", err)
-	}
-	match := plistEnvironmentPath.FindSubmatch(written)
-	if match == nil {
-		t.Fatalf(
-			"installed MCP launch agent declares no EnvironmentVariables PATH; launchd will run the daemon on its bare default PATH:\n%s",
-			written,
-		)
-	}
-	daemonPath := strings.Split(string(match[1]), ":")
-	for _, want := range []string{
-		filepath.Join(home, ".local", "bin"),
-		"/opt/homebrew/bin",
-		"/usr/local/bin",
-		"/usr/bin",
-		"/bin",
-	} {
-		if !slices.Contains(daemonPath, want) {
-			t.Errorf("daemon PATH %q is missing %s", match[1], want)
+	var lines []string
+	for _, line := range strings.Split(strings.TrimSpace(text), "\n") {
+		if !strings.HasPrefix(line, "#") {
+			lines = append(lines, line)
 		}
 	}
-	if strings.Contains(string(written), "__PFM_HOME__") {
-		t.Fatalf("installed MCP launch agent still holds an unrendered __PFM_HOME__:\n%s", written)
+	return strings.NewReplacer(home, "{home}", paths.InstallMark(home), "{mark}").Replace(strings.Join(lines, "\n"))
+}
+
+// TestLaunchAgentWritesTheRenderedPlist drives the real install path of both
+// launchd agents and reads the plist launchd will load: the regression for
+// the deaf shared daemon and the name-sync job that ran on launchd's bare
+// PATH (/usr/bin:/bin:/usr/sbin:/sbin, no Homebrew tmux), answered as if no
+// chat were live and renamed nothing; and for the silent agent whose
+// stdout/stderr launchd dropped for want of StandardOutPath/StandardErrorPath.
+func TestLaunchAgentWritesTheRenderedPlist(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		wire func(*engine) error
+		path func(*engine) string
+		want string
+	}{
+		{
+			name: "mcp",
+			wire: func(e *engine) error { return e.wireMCPLaunchAgent(context.Background()) },
+			path: (*engine).mcpLaunchAgentPath,
+			want: `<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.professor.pfm.mcp</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>{home}/.local/libexec/pfm/pfm-agent</string>
+		<string>mcp</string>
+		<string>serve</string>
+	</array>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key>
+		<string>{home}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+		<key>PFM_INSTALL_MARK</key>
+		<string>{mark}</string>
+	</dict>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
+	<key>StandardOutPath</key>
+	<string>{home}/Library/Logs/pfm/mcp.log</string>
+	<key>StandardErrorPath</key>
+	<string>{home}/Library/Logs/pfm/mcp.log</string>
+</dict>
+</plist>`,
+		},
+		{
+			name: "name-sync",
+			wire: func(e *engine) error { return e.wireLaunchAgent(context.Background()) },
+			path: (*engine).launchAgentPath,
+			want: `<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.professor.pfm.name-sync</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>{home}/.local/libexec/pfm/pfm-agent</string>
+		<string>name-sync</string>
+		<string>--apply</string>
+	</array>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key>
+		<string>{home}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+		<key>PFM_INSTALL_MARK</key>
+		<string>{mark}</string>
+	</dict>
+	<key>WatchPaths</key>
+	<array>
+		<string>{home}/.codex/session_index.jsonl</string>
+	</array>
+	<key>StartInterval</key>
+	<integer>900</integer>
+	<key>RunAtLoad</key>
+	<false/>
+	<key>ProcessType</key>
+	<string>Background</string>
+	<key>LowPriorityIO</key>
+	<true/>
+	<key>StandardOutPath</key>
+	<string>{home}/Library/Logs/pfm/name-sync.log</string>
+	<key>StandardErrorPath</key>
+	<string>{home}/Library/Logs/pfm/name-sync.log</string>
+</dict>
+</plist>`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			home := t.TempDir()
+			installer := &engine{
+				options: Options{
+					Home: home, Stdout: &bytes.Buffer{}, MCPEnabled: map[string]bool{"chat": true},
+					Runner: &loadedRunner{}, Sleep: func(time.Duration) {},
+				},
+				apply: true,
+				stamp: "test",
+			}
+			if err := tc.wire(installer); err != nil {
+				t.Fatalf("wire %s: %v", tc.name, err)
+			}
+			written, err := os.ReadFile(tc.path(installer))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := serviceUnitBody(written, home); got != tc.want {
+				t.Errorf("%s =\n%s\nwant\n%s", tc.path(installer), got, tc.want)
+			}
+		})
 	}
 }
 
-// TestEveryServiceUnitTakesTheOneServicePath keeps the search path ONE
-// implementation: every launchd agent and systemd unit that starts pfm takes
-// its PATH from the servicePathMarker — never a PATH spelled by hand, which
-// is how the systemd unit had one and its launchd twins had none — and the
-// rendered unit carries paths.ServicePath and this install's mark exactly.
+// TestEveryServiceUnitTakesTheOneServicePath renders every launchd and systemd
+// unit that starts pfm: each carries paths.ServicePath and this install's
+// mark exactly once, so a stop of pfm-launched processes can prove the unit's
+// daemon is its own; each launchd agent logs to its own file, each systemd
+// service starts the pfm verb that applies, and the MCP daemon returns after
+// login (WantedBy=default.target).
 func TestEveryServiceUnitTakesTheOneServicePath(t *testing.T) {
 	t.Parallel()
+	const (
+		plistPath = "\t\t<string>{home}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>"
+		plistMark = "\t\t<string>{mark}</string>"
+		unitPath  = "Environment=PATH={home}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+		unitMark  = "Environment=PFM_INSTALL_MARK={mark}"
+	)
+	plistLog := func(name string) string { return "\t<string>__PFM_HOME__/Library/Logs/pfm/" + name + "</string>" }
+	want := map[string][]string{
+		"launchd/com.professor.pfm.mcp.plist": {plistPath, plistMark, plistLog("mcp.log"), plistLog("mcp.log")},
+		"launchd/com.professor.pfm.name-sync.plist": {
+			plistPath,
+			plistMark,
+			plistLog("name-sync.log"),
+			plistLog("name-sync.log"),
+		},
+		"launchd/com.professor.pfm.schedule.plist": {
+			plistPath,
+			plistMark,
+			plistLog("schedule.log"),
+			plistLog("schedule.log"),
+		},
+		"systemd/pfm-mcp.service": {
+			unitPath, unitMark, "ExecStart=%h/.local/bin/pfm mcp serve", "WantedBy=default.target",
+		},
+		"systemd/pfm-name-sync.service": {unitPath, unitMark, "ExecStart=%h/.local/bin/pfm name-sync --apply"},
+		"systemd/pfm-schedule.service":  {unitPath, unitMark, "ExecStart=%h/.local/bin/pfm internal schedule-fire"},
+	}
 	home := t.TempDir()
-	units := 0
+	got := map[string][]string{}
 	err := fs.WalkDir(embeddedAssets, "assets", func(name string, entry fs.DirEntry, err error) error {
 		if err != nil || entry.IsDir() {
 			return err
@@ -100,189 +197,97 @@ func TestEveryServiceUnitTakesTheOneServicePath(t *testing.T) {
 			!strings.Contains(string(content), agentLauncherMarker) {
 			return nil
 		}
-		units++
-		if got := strings.Count(string(content), servicePathMarker); got != 1 {
-			t.Errorf("%s holds the service PATH marker %d times, want exactly once", relative, got)
-			return nil
-		}
 		rendered, err := renderServiceEnv(content, home)
 		if err != nil {
-			return fmt.Errorf("render %s: %w", relative, err)
+			return err
 		}
-		if got := strings.Count(string(rendered), paths.ServicePath(home)); got != 1 {
-			t.Errorf("%s renders paths.ServicePath %d times, want once:\n%s", relative, got, rendered)
-		}
-		// The pfm a unit starts carries this install's mark, or a stop of
-		// pfm-launched processes cannot prove the unit's daemon is its own.
-		if got := strings.Count(string(rendered), paths.EnvInstallMark); got != 1 {
-			t.Errorf("%s names %s %d times, want once:\n%s", relative, paths.EnvInstallMark, got, rendered)
-		}
-		if got := strings.Count(string(rendered), paths.InstallMark(home)); got != 1 {
-			t.Errorf("%s renders paths.InstallMark %d times, want once:\n%s", relative, got, rendered)
-		}
+		got[relative] = outputLines(
+			serviceUnitBody(rendered, home),
+			"{home}/.local/bin:",
+			"{mark}",
+			"/Library/Logs/pfm/",
+			"ExecStart=",
+			"WantedBy=",
+		)
 		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 2 launchd agents + 2 systemd services start pfm; fewer means the walk
-	// did not look.
-	if units < 4 {
-		t.Fatalf("found %d pfm service units, want at least 4 — the asset walk did not look", units)
-	}
-}
-
-// TestNameSyncLaunchAgentGivesTheJobAPathThatFindsTmux is the same regression
-// on the other launchd agent: `pfm name-sync` converges every chat's tmux
-// window name — the name a VS Code tab shows through set-titles — and under
-// launchd's bare PATH it could not exec tmux. It ran 159 times on a live Mac,
-// planned "0 windows" each time, and exited 0, so no Codex rename ever reached
-// a window or a tab.
-func TestNameSyncLaunchAgentGivesTheJobAPathThatFindsTmux(t *testing.T) {
-	t.Parallel()
-	home := t.TempDir()
-	installer := &engine{
-		options: Options{Home: home, Stdout: io.Discard, Runner: &loadedRunner{}, Sleep: func(time.Duration) {}},
-		apply:   true,
-		stamp:   "test",
-	}
-	if err := installer.wireLaunchAgent(context.Background()); err != nil {
-		t.Fatalf("wireLaunchAgent() error = %v", err)
-	}
-	written, err := os.ReadFile(installer.launchAgentPath())
-	if err != nil {
-		t.Fatalf("read installed name-sync launch agent: %v", err)
-	}
-	match := plistEnvironmentPath.FindSubmatch(written)
-	if match == nil {
-		t.Fatalf(
-			"installed name-sync launch agent declares no EnvironmentVariables PATH; launchd will run it on its bare default PATH:\n%s",
-			written,
-		)
-	}
-	if want := paths.ServicePath(home); string(match[1]) != want {
-		t.Fatalf("name-sync PATH = %q, want the one service path %q", match[1], want)
-	}
-}
-
-// TestLaunchAgentPlistsCarryLogPaths is the regression for a daemon whose
-// crash or logged error was silent: launchd drops a background agent's
-// stdout/stderr unless StandardOutPath/StandardErrorPath are set, and neither
-// embedded plist carried them.
-func TestLaunchAgentPlistsCarryLogPaths(t *testing.T) {
-	t.Parallel()
-	for _, tc := range []struct {
-		asset   string
-		logFile string
-	}{
-		{mcpLaunchdAsset, "mcp.log"},
-		{launchdAsset, "name-sync.log"},
-	} {
-		content, err := readAsset(tc.asset)
-		if err != nil {
-			t.Fatalf("read embedded asset %s: %v", tc.asset, err)
-		}
-		want := "<string>__PFM_HOME__/Library/Logs/pfm/" + tc.logFile + "</string>"
-		if got := strings.Count(string(content), want); got != 2 {
-			t.Errorf(
-				"%s: StandardOutPath/StandardErrorPath = %d occurrence(s) of %q, want 2 (one each)",
-				tc.asset,
-				got,
-				want,
-			)
-		}
-		for _, key := range []string{"<key>StandardOutPath</key>", "<key>StandardErrorPath</key>"} {
-			if !strings.Contains(string(content), key) {
-				t.Errorf("%s is missing %s", tc.asset, key)
+	for _, name := range slices.Sorted(func(yield func(string) bool) {
+		for name := range want {
+			if !yield(name) {
+				return
 			}
 		}
+	}) {
+		if !slices.Equal(got[name], want[name]) {
+			t.Errorf("%s service lines =\n%q\nwant\n%q", name, got[name], want[name])
+		}
+		delete(got, name)
+	}
+	if len(got) != 0 {
+		t.Errorf("pfm service units with no expected lines: %q", got)
 	}
 }
 
-// TestWireLaunchAgentCreatesLogDirInApplyMode is the regression for a plist
-// pointing StandardOutPath/StandardErrorPath at a directory that never
-// existed — launchd never creates one for a log path, so every line the
-// daemon wrote before this fix vanished silently.
-func TestWireLaunchAgentCreatesLogDirInApplyMode(t *testing.T) {
+// TestLaunchdLogDir pins ensureLaunchdLogDir both ways: launchd never creates
+// a log path's directory, so apply creates it, and a dry run reports the same
+// planned step without touching the filesystem.
+func TestLaunchdLogDir(t *testing.T) {
 	t.Parallel()
-	home := t.TempDir()
-	installer := &engine{
-		options: Options{Home: home, Stdout: io.Discard, Runner: &loadedRunner{}, Sleep: func(time.Duration) {}},
-		apply:   true,
-		stamp:   "test",
-	}
-	if err := installer.ensureLaunchdLogDir(); err != nil {
-		t.Fatalf("ensureLaunchdLogDir() error = %v", err)
-	}
-	info, err := os.Stat(filepath.Join(home, "Library", "Logs", "pfm"))
-	if err != nil {
-		t.Fatalf("stat launchd log dir after apply: %v", err)
-	}
-	if !info.IsDir() {
-		t.Fatalf("launchd log dir %s is not a directory", info.Name())
-	}
-}
-
-// TestWireLaunchAgentPlansLogDirInDryRun mirrors CreatesLogDirInApplyMode: a
-// dry run must report the same planned step without touching the filesystem.
-func TestWireLaunchAgentPlansLogDirInDryRun(t *testing.T) {
-	t.Parallel()
-	home := t.TempDir()
-	var stdout strings.Builder
-	installer := &engine{
-		options: Options{Home: home, Stdout: &stdout, Runner: &loadedRunner{}, Sleep: func(time.Duration) {}},
-		apply:   false,
-		stamp:   "test",
-	}
-	if err := installer.ensureLaunchdLogDir(); err != nil {
-		t.Fatalf("ensureLaunchdLogDir() error = %v", err)
-	}
-	logDir := filepath.Join(home, "Library", "Logs", "pfm")
-	if !strings.Contains(stdout.String(), "change  create "+logDir) {
-		t.Fatalf("dry run did not plan the launchd log dir; output:\n%s", stdout.String())
-	}
-	if _, err := os.Stat(logDir); !os.IsNotExist(err) {
-		t.Fatalf("dry run created %s; a preview must not touch the filesystem", logDir)
+	for _, tc := range []struct {
+		apply   bool
+		wantOut string
+		wantDir bool
+	}{
+		{apply: true, wantOut: "  change  create {home}/Library/Logs/pfm\n", wantDir: true},
+		{apply: false, wantOut: "  change  create {home}/Library/Logs/pfm\n", wantDir: false},
+	} {
+		home := t.TempDir()
+		var stdout strings.Builder
+		installer := &engine{
+			options: Options{Home: home, Stdout: &stdout, Runner: &loadedRunner{}, Sleep: func(time.Duration) {}},
+			apply:   tc.apply,
+			stamp:   "test",
+		}
+		if err := installer.ensureLaunchdLogDir(); err != nil {
+			t.Fatalf("apply=%v: ensureLaunchdLogDir() error = %v", tc.apply, err)
+		}
+		if got := strings.ReplaceAll(stdout.String(), home, "{home}"); got != tc.wantOut {
+			t.Errorf("apply=%v: output = %q, want %q", tc.apply, got, tc.wantOut)
+		}
+		info, err := os.Stat(filepath.Join(home, "Library", "Logs", "pfm"))
+		if gotDir := err == nil && info.IsDir(); gotDir != tc.wantDir {
+			t.Errorf("apply=%v: log dir exists = %v (%v), want %v", tc.apply, gotDir, err, tc.wantDir)
+		}
 	}
 }
 
-// TestMCPLaunchAgentRemovalNamesTheConfigItReadEnabledFrom is a REGRESSION
-// test for issue #24 finding 3/4 (M3 change E): a rollback (or any install
-// run over a config with every MCP server disabled) removes the MCP launch
-// agent with a bare "remove <path>" — indistinguishable from a deliberate
-// opt-out. The removal must name the config it read the disabled state from,
-// so "enabled=false because that file is gone after a migration" reads
-// differently from "the operator turned it off". Unfixed: the change line is
-// "remove <path>" with no config named.
+// TestMCPLaunchAgentRemovalNamesTheConfigItReadEnabledFrom: a launch agent
+// removed because no MCP server is enabled names the config that said so.
 func TestMCPLaunchAgentRemovalNamesTheConfigItReadEnabledFrom(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
-	configPath := filepath.Join(home, "pfm.config.json")
+	var stdout strings.Builder
 	installer := &engine{
 		options: Options{
 			Home:          home,
-			Stdout:        io.Discard,
+			Stdout:        &stdout,
 			MCPEnabled:    map[string]bool{"chat": false},
-			MCPConfigPath: configPath,
+			MCPConfigPath: filepath.Join(home, "pfm.config.json"),
 			Runner:        &loadedRunner{},
 			Sleep:         func(time.Duration) {},
 		},
-		apply: false,
 		stamp: "test",
 	}
-	if err := os.MkdirAll(filepath.Dir(installer.mcpLaunchAgentPath()), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(installer.mcpLaunchAgentPath(), []byte("<plist/>"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	var stdout strings.Builder
-	installer.options.Stdout = &stdout
+	writeFixture(t, installer.mcpLaunchAgentPath(), "<plist/>")
 	if err := installer.wireMCPLaunchAgent(context.Background()); err != nil {
 		t.Fatalf("wireMCPLaunchAgent() error = %v", err)
 	}
-	want := "(no MCP server is enabled in " + configPath + ")"
-	if !strings.Contains(stdout.String(), want) {
-		t.Fatalf("wireMCPLaunchAgent() output=%q, want the removal to name %q", stdout.String(), want)
+	want := "  change  remove {home}/Library/LaunchAgents/com.professor.pfm.mcp.plist" +
+		" (no MCP server is enabled in {home}/pfm.config.json)\n"
+	if got := strings.ReplaceAll(stdout.String(), home, "{home}"); got != want {
+		t.Fatalf("wireMCPLaunchAgent() output = %q, want %q", got, want)
 	}
 }

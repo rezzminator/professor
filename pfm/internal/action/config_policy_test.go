@@ -105,13 +105,6 @@ func TestHeadlessRunUsesConfiguredClaudeAndCodexPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HeadlessRun(Claude) error = %v", err)
 	}
-	if !claude.PromptOnCommandLine || !strings.Contains(claude.Run, cmdparse.Quote(machine.Claude.Binary)) {
-		t.Fatalf("headless Claude plan = %#v", claude)
-	}
-	if strings.Contains(claude.Run, "skip-permissions") {
-		t.Fatalf("headless Claude prompt policy still armed bypass flags: %q", claude.Run)
-	}
-
 	codex, err := HeadlessRun(HeadlessRequest{
 		Engine:         pfmengine.Codex,
 		Name:           "configured codex",
@@ -123,12 +116,10 @@ func TestHeadlessRunUsesConfiguredClaudeAndCodexPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HeadlessRun(Codex) error = %v", err)
 	}
-	if !strings.Contains(codex.Run, cmdparse.Quote(machine.Codex.Binary)+" --no-daemon --sandbox workspace-write") {
-		t.Fatalf("headless Codex plan = %q", codex.Run)
+	if !claude.PromptOnCommandLine {
+		t.Error("headless Claude plan does not prompt on its command line")
 	}
-	if strings.Contains(codex.Run, "dangerously-bypass-approvals-and-sandbox") {
-		t.Fatalf("headless Codex yolo=false still armed bypass: %q", codex.Run)
-	}
+	actionGolden(t, "action_headless_configured_policy.txt", rooted(t, claude.Run+"\n"+codex.Run+"\n"))
 }
 
 func TestSynthesizePickerNewRowsUseNativeClaudeAndShellCodexLaunches(t *testing.T) {

@@ -3,7 +3,6 @@ package tmux
 import (
 	"context"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -19,7 +18,7 @@ func TestSocketCommandJoinsDirAndSocket(t *testing.T) {
 		t.Fatalf("Command().Output() = %v", err)
 	}
 	want := filepath.Join(dir, "cc-1-2-3")
-	if !strings.Contains(string(output), want) {
+	if string(output) != "-S /run/user/1000/pfm-tmux/cc-1-2-3 list-panes -a " {
 		t.Fatalf("argv = %q, want it to address %q", output, want)
 	}
 }
@@ -35,7 +34,7 @@ func TestSocketCommandLeavesAFullPathUnchanged(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Command().Output() = %v", err)
 	}
-	if !strings.Contains(string(output), full) {
+	if string(output) != "-S /run/user/1000/pfm-tmux/cc-9-9-9 list-panes -a " {
 		t.Fatalf("argv = %q, want it to address %q unchanged", output, full)
 	}
 }

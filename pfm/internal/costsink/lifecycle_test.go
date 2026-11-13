@@ -168,7 +168,8 @@ func TestRunKeepsServingThroughAnUnreadableProcessTableThenGivesUpLoudly(t *test
 	go func() { done <- Meter(context.Background(), cfg) }()
 	select {
 	case err := <-done:
-		if err == nil || !strings.Contains(err.Error(), "operation not permitted") {
+		if err == nil ||
+			err.Error() != "cost sink: read process 4242 5 times in a row: sysctl: operation not permitted" {
 			t.Fatalf("Run = %v, want the stat failure named", err)
 		}
 	case <-time.After(5 * time.Second):

@@ -198,8 +198,8 @@ func TestInstallRefusesABrokenHook(t *testing.T) {
 	if err == nil {
 		t.Fatalf("writeUpdateMetadata() error = nil, want an error naming the broken hook %s", hook)
 	}
-	if !strings.Contains(err.Error(), hook) {
-		t.Fatalf("writeUpdateMetadata() error = %v, want it to name the broken hook path %s", err, hook)
+	if want := hook + " is not an executable regular file — refusing to arm a broken pre-push hook"; err.Error() != want {
+		t.Fatalf("writeUpdateMetadata() error = %v, want %q", err, want)
 	}
 }
 

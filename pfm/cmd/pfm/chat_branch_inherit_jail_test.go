@@ -715,9 +715,11 @@ func TestChatBranchCodexRequiresLogin(t *testing.T) {
 		"--session-id", "a1000000-1111-4111-8111-111111111111", "--account", "1",
 		"--cwd", filepath.Join(jail.root, "work"), "--name", "logged-out-branch",
 	}, &stdout, &stderr)
-	if code != 1 || !strings.HasPrefix(stderr.String(), "pfm chat branch: create detached seat:") ||
-		!strings.Contains(stderr.String(), "run codex login") {
-		t.Fatalf("chat branch code=%d stderr=%q", code, stderr.String())
+	// The rollback tail names the host's tmux, which the jail and non-jail runs differ on.
+	got, _, _ := strings.Cut(rooted(stderr.String(), jail.root), "; rollback:")
+	if want := "pfm chat branch: create detached seat: {root}/codex/auth.json must contain tokens.access_token with tokens.account_id, or OPENAI_API_KEY — run codex login"; code != 1 ||
+		strings.TrimSuffix(got, "\n") != want {
+		t.Fatalf("chat branch code=%d stderr = %q, want %q", code, got, want)
 	}
 }
 

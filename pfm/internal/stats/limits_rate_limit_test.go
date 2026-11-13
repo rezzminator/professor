@@ -77,7 +77,7 @@ func TestLimitsSampler429StatusSaysUnavailableOnceWithTheRetryTimeFirst(t *testi
 	if count := strings.Count(status, "limits unavailable"); count > 1 {
 		t.Fatalf("status %q says %q %d times, want at most once", status, "limits unavailable", count)
 	}
-	if !strings.HasPrefix(status, "account 6 "+retry) {
+	if status != "account 6 rate-limited — retry 08:10; limits unavailable" {
 		t.Fatalf("status %q, want it to open with %q so a narrow pane keeps the retry time", status, "account 6 "+retry)
 	}
 }

@@ -17,6 +17,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func renderMachine(t *testing.T) (string, pfmconfig.Config) {
@@ -817,8 +818,8 @@ func TestPromptWarning(t *testing.T) {
 		{"seat file present", "professor", "", Request{PromptFile: seat}, "", true},
 		{
 			"seat file missing", "production", "",
-			Request{PromptFile: "/nonexistent/seat.md"},
-			"/nonexistent/seat.md", false,
+			Request{PromptFile: testjail.Place("/nonexistent/seat.md")},
+			testjail.Place("/nonexistent/seat.md"), false,
 		},
 		{"seat file is a directory", "production", "", Request{PromptFile: filepath.Dir(seat)}, "is a directory", false},
 		{

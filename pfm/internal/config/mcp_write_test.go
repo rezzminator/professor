@@ -26,7 +26,7 @@ func TestMCPEnableRefusesUnresolvedConfigPath(t *testing.T) {
 			server,
 			true,
 		); err == nil ||
-			!strings.Contains(err.Error(), "no config path") {
+			err.Error() != "no config path: no source repo recorded — run pfm install from the clone, or set PFM_CONFIG" {
 			t.Fatalf("enable %s without a path = %v", server, err)
 		}
 	}

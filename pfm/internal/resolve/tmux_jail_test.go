@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -489,13 +490,12 @@ func TestPaneOwnersSurvivesAStrippedEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(owners) == 0 {
-		t.Fatal("PaneOwners() returned no rows for a live server")
-	}
+	var rows []string
 	for _, owner := range owners {
-		if owner.PanePID <= 0 || !strings.HasPrefix(owner.PaneID, "%") {
-			t.Fatalf("PaneOwners() row = %#v", owner)
-		}
+		rows = append(rows, fmt.Sprintf("%s pid>0=%t", owner.PaneID, owner.PanePID > 0))
+	}
+	if got, want := strings.Join(rows, "\n"), "%0 pid>0=true"; got != want {
+		t.Fatalf("PaneOwners() = %q, want %q", got, want)
 	}
 
 	stripped := exec.Command(
@@ -515,11 +515,10 @@ func TestPaneOwnersSurvivesAStrippedEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(tabbed), "\t") {
-		t.Fatalf(
-			"a tab survived a stripped caller (%q) — this test no longer guards anything",
-			string(tabbed),
-		)
+	if got, want := regexp.MustCompile(`(?m)^\d+`).
+		ReplaceAllString(string(tabbed), "{pid}"),
+		"{pid}_%0\n"; got != want {
+		t.Fatalf("stripped list-panes = %q, want %q", got, want)
 	}
 }
 

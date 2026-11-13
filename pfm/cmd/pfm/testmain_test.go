@@ -50,8 +50,9 @@ func TestMain(m *testing.M) {
 	binaryDir := ""
 	// This daemon test exercises its in-process handler and never starts the
 	// shared CLI binary. Its one-test run need not pay for a Go build.
+	// An armed unit binary starts no go build: only the jail tier's tests run the shared binary.
 	if flag.Lookup("test.list").Value.String() == "" && os.Getenv(attachHelperEnv) != "1" &&
-		!runningOnlyMCPDaemonMountedTest() {
+		!runningOnlyMCPDaemonMountedTest() && !testjail.UnitNetArmed() {
 		var err error
 		binaryDir, err = os.MkdirTemp(paths.TempRoot(), "pfm-cmd-test-binary-")
 		if err != nil {

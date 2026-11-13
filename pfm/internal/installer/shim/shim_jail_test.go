@@ -139,7 +139,7 @@ func TestClaudeCodexCxSkipTerminalOwnershipWithoutHelpers(t *testing.T) {
 			t.Fatalf("output=%q, want %q", got, want)
 		}
 	}
-	if strings.Contains(got, "not found") || strings.Contains(got, "command not found") {
+	if got != "claude=7\ncodex=0\ncx: needs an interactive terminal; from a script use: pfm chat new {name} --engine codex\ncx=1\npfm=0\n" {
 		t.Fatalf("a terminal-ownership helper was called although undefined: %q", got)
 	}
 }
@@ -258,7 +258,7 @@ func TestPfmOwnTerminalClosesOwnedAndPreservesOthers(t *testing.T) {
 		if err != nil {
 			t.Fatalf("owned terminal: %v: %s", err, output)
 		}
-		if strings.Contains(string(output), "UNREACHABLE") {
+		if len(output) != 0 {
 			t.Fatalf("an owned terminal kept running past _pfm_own_terminal: %q", output)
 		}
 	})
@@ -276,7 +276,7 @@ func TestPfmOwnTerminalClosesOwnedAndPreservesOthers(t *testing.T) {
 		if err != nil {
 			t.Fatalf("non-owning shell: %v: %s", err, output)
 		}
-		if !strings.Contains(string(output), "after=3") {
+		if string(output) != "after=3\n" {
 			t.Fatalf("a non-owning shell was not preserved: %q", output)
 		}
 	})
@@ -404,7 +404,7 @@ printf 'EVALUATED %s\n' "$*" >> "$SHIM_AUTO_LOG"
 	inherited := runAutoOpenShell(t, zsh, shimPath, home, fakeBin, log,
 		[]string{"PFM_AUTO_OPEN=pfm", "CC_AUTO_OPEN=1", "VSCODE_AUTO_CC=1"},
 		`print -r -- "leaked=${PFM_AUTO_OPEN-no}${CC_AUTO_OPEN-no}${VSCODE_AUTO_CC-no}" >> "$SHIM_AUTO_LOG"`+"\n")
-	if !strings.Contains(inherited, "leaked=nonono") {
+	if inherited != "picker\nleaked=nonono\n" {
 		t.Fatalf("auto-open left its variables in the environment: %q", inherited)
 	}
 
@@ -429,7 +429,7 @@ printf 'EVALUATED %s\n' "$*" >> "$SHIM_AUTO_LOG"
 		},
 		`print -r -- "chat=${CLAUDECODE-no}${CLAUDE_CODE_SESSION_ID-no}${CLAUDE_CODE_CHILD_SESSION-no}${TMUX-no}${TMUX_PANE-no}" >> "$SHIM_AUTO_LOG"`+"\n",
 	)
-	if !strings.Contains(cleared, "chat=nonononono") {
+	if cleared != "picker\nchat=nonononono\n" {
 		t.Fatalf("auto-open kept the chat environment its app inherited: %q", cleared)
 	}
 }
@@ -478,9 +478,11 @@ printf 'PICKER-LAUNCHED\n'
 		t.Fatalf("run auto-open shell on a pty: %v: %s", err, output)
 	}
 	got := string(output)
-	want := "pfm: cleared a chat environment (CLAUDECODE=1) this terminal inherited from its app — relaunch the app outside any chat to stop it"
-	if !strings.Contains(got, want) {
-		t.Fatalf("interactive tty with inherited CLAUDECODE did not report the clear:\n%q", got)
+	// The pty turns the shim's newline into CR LF.
+	want := "pfm: cleared a chat environment (CLAUDECODE=1) this terminal inherited from its app —" +
+		" relaunch the app outside any chat to stop it\r\n"
+	if got != want {
+		t.Fatalf("interactive tty with inherited CLAUDECODE = %q, want %q", got, want)
 	}
 }
 
@@ -548,7 +550,7 @@ func TestPickerTypedIntoABareTerminalHandsItToTheChat(t *testing.T) {
 		name      string
 		pfm       string
 		wantShell bool
-		wantTmux  bool
+		wantTmux  string
 	}{
 		{
 			name: "a chosen chat ends the shell when the attach returns",
@@ -557,7 +559,7 @@ if [ "$#" -ne 0 ]; then exit 64; fi
 if [ -t 1 ]; then TMUX= exec tmux -L cc-1-2-3 attach -t cc-1-2-3; fi
 printf '%s\n' 'TMUX= tmux -L cc-1-2-3 attach -t cc-1-2-3'
 `,
-			wantShell: false, wantTmux: true,
+			wantShell: false, wantTmux: "tmux -L cc-1-2-3 attach -t cc-1-2-3 TMUX=[]\n",
 		},
 		{name: "Esc returns to the prompt", pfm: "#!/bin/sh\nexit 0\n", wantShell: true},
 		{name: "a failed picker returns to the prompt", pfm: "#!/bin/sh\nexit 1\n", wantShell: true},
@@ -602,12 +604,8 @@ printf 'tmux %s TMUX=[%s]\n' "$*" "$TMUX" >> "$SHIM_TMUX_LOG"
 			if readErr != nil && !os.IsNotExist(readErr) {
 				t.Fatalf("read tmux log: %v", readErr)
 			}
-			attach := "tmux -L cc-1-2-3 attach -t cc-1-2-3 TMUX=[]"
-			if got := strings.Contains(string(tmuxCalls), attach); got != testCase.wantTmux {
-				t.Fatalf(
-					"attach ran=%v, want %v: tmux log %q, output %q",
-					got, testCase.wantTmux, tmuxCalls, output,
-				)
+			if got := string(tmuxCalls); got != testCase.wantTmux {
+				t.Fatalf("tmux log = %q, want %q (output %q)", got, testCase.wantTmux, output)
 			}
 			if got := strings.Contains(string(output), "SHELL-CAME-BACK"); got != testCase.wantShell {
 				t.Fatalf(

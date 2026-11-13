@@ -357,7 +357,7 @@ func TestRenderMarksASpendFloorWhileTheFoldCatchesUp(t *testing.T) {
 	if gauge.transcript || gauge.transcriptErr {
 		t.Fatalf("gauge %+v; want the harness's gauge, the transcript neither read nor failed", gauge)
 	}
-	if got := stripANSICodes(line); !strings.Contains(got, "💰$?/0/0/0+?") {
+	if got := stripANSICodes(line); got != "🟢 ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ ?% ? ctx unknown │ 💰$?/0/0/0+? │ 💾1h?" {
 		t.Fatalf("line %q; want the spend shown as a floor not yet priced, +?", got)
 	}
 }

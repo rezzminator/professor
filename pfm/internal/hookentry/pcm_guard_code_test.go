@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -87,7 +86,7 @@ func TestPcmGuardMentionsArePathElements(t *testing.T) {
 		`echo x > "$F" # see Templates`,
 		`echo x > "$F" # docs/claude.md`,
 	} {
-		pcmGuardRequireDeny(t, pcmGuardBash(t, command, f.project, ""), "could not read this command")
+		pcmGuardRequireDeny(t, pcmGuardBash(t, command, f.project, ""), pcmGuardCannotRead)
 	}
 	pcmGuardRequireAllow(t, pcmGuardBash(t, `echo x > "$F" # templates/themes_old`, f.clone, pcmGuardWriter))
 }
@@ -167,8 +166,10 @@ func TestPcmGuardBoundsNestedShellPrograms(t *testing.T) {
 	f := pcmGuardHome(t)
 	pcmGuardRequireDeny(t, pcmGuardBash(t, pcmGuardNestHeredoc("rm CLAUDE.md", 3), f.project, ""), pcmGuardOnlyPcm)
 	payload := pcmGuardBash(t, pcmGuardNestHeredoc("echo x > notes.md # CLAUDE.md", 10), f.project, "")
-	pcmGuardRequireDeny(t, payload, "could not read this command")
-	if _, stdout, _ := runPcmGuard(payload); strings.Contains(stdout, pcmGuardOnlyPcm) {
+	pcmGuardRequireDeny(t, payload, pcmGuardCannotRead)
+	if _, stdout, _ := runPcmGuard(
+		payload,
+	); stdout != "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"pcm-guard could not read this command, and it names a prompt file (CLAUDE.md, .claude, templates): split it into simple commands with literal paths; a prompt-file write goes to pcm: spawn Agent(subagent_type: \\\"pcm\\\") with the exact change.\"}}\n" {
 		t.Fatalf("stdout=%q, want only the unreadable line: notes.md is no prompt file", stdout)
 	}
 }

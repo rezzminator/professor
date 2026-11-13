@@ -201,7 +201,7 @@ func TestProbeTmuxFailsWholeWhenTmuxCannotRun(t *testing.T) {
 			if !pfmtmux.CouldNotRun(err) {
 				t.Fatalf("probe error %v does not carry the could-not-run cause", err)
 			}
-			if !strings.Contains(err.Error(), "pfm-test-missing-tmux") {
+			if err.Error() != "tmux could not run to probe socket cc-7-8-9: list-panes: exec: \"pfm-test-missing-tmux\": executable file not found in $PATH" {
 				t.Fatalf("probe error %q does not name the binary it could not run", err)
 			}
 			// A probe that could not read a socket must never sweep it.

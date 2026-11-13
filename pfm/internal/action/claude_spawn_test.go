@@ -162,14 +162,22 @@ func TestClaudeSeatRunRetainsCanonicalArgsEnvironmentAndLedgerPolicy(t *testing.
 					t.Fatalf("native argv lost exact quoted word %q: %q", word, run.Args)
 				}
 			}
+			// The runner finds the engine as the host would: a bare name on PATH is the managed launcher.
+			resolved := launch.Binary
+			if !filepath.IsAbs(resolved) {
+				resolved = managed
+			}
+			lookup := &deps.FakeRunner{}
+			lookup.ScriptLookPath(launch.Binary, resolved, nil)
+			spawn.Runner = lookup
 			command, err := spawn.Command(context.Background())
 			if err != nil {
 				t.Fatal(err)
 			}
 			wantArgs := append(
-				append(append([]string{}, launch.Wrapper...), deps.Executable(launch.Binary)),
+				append(append([]string{}, launch.Wrapper...), resolved),
 				launch.Argv...)
-			wantPath := deps.Executable(launch.Binary)
+			wantPath := resolved
 			if len(launch.Wrapper) > 0 {
 				wantPath = pfm
 			}

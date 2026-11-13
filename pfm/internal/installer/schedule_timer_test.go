@@ -14,48 +14,15 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/agentlauncher"
-	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/servicemanager"
 )
 
-// The schedule tick is fixed at five minutes: the systemd timer and the launchd
-// StartInterval must name the same cadence, and neither carries an install-time
-// marker.
-func TestScheduleTimerAssetCarriesTheFiveMinuteTick(t *testing.T) {
+// TestScheduleUnitsStageRendered: install stages the schedule timer — the
+// fixed 5-minute wall-clock tick, persistent across sleep — and its oneshot
+// service, which fires the due schedules on the one service PATH, with no
+// install-time marker left in either.
+func TestScheduleUnitsStageRendered(t *testing.T) {
 	t.Parallel()
-	timer, err := readAsset("systemd/" + scheduleTimerUnit)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{
-		"OnCalendar=*:0/5",
-		"Persistent=true",
-		"Unit=pfm-schedule.service",
-		"WantedBy=timers.target",
-	} {
-		if !strings.Contains(string(timer), want) {
-			t.Errorf("schedule timer asset is missing %q:\n%s", want, timer)
-		}
-	}
-	if strings.Contains(string(timer), "__PFM_") {
-		t.Errorf("schedule timer asset carries an install-time marker:\n%s", timer)
-	}
-}
-
-func TestScheduleServiceAssetFiresAndStagesWithoutMarkers(t *testing.T) {
-	t.Parallel()
-	service, err := readAsset("systemd/" + scheduleServiceUnit)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{
-		"Type=oneshot",
-		"ExecStart=%h/.local/bin/pfm internal schedule-fire",
-	} {
-		if !strings.Contains(string(service), want) {
-			t.Errorf("schedule service asset is missing %q:\n%s", want, service)
-		}
-	}
 	home := t.TempDir()
 	if _, err := Run(context.Background(), Options{
 		scheduler:     schedulerFor(servicemanager.KindSystemd),
@@ -64,16 +31,21 @@ func TestScheduleServiceAssetFiresAndStagesWithoutMarkers(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	staged := filepath.Join(home, ".local", "share", "pfm", "install", "systemd", scheduleServiceUnit)
-	content, err := os.ReadFile(staged)
-	if err != nil {
-		t.Fatalf("read staged schedule service: %v", err)
-	}
-	if strings.Contains(string(content), "__PFM_") {
-		t.Fatalf("staged schedule service keeps an unrendered marker:\n%s", content)
-	}
-	if !strings.Contains(string(content), "Environment=PATH="+paths.ServicePath(home)) {
-		t.Fatalf("staged schedule service does not carry the service PATH:\n%s", content)
+	for unit, want := range map[string]string{
+		"pfm-schedule.timer": "[Unit]\nDescription=Fire due pfm schedules every 5 minutes\n\n[Timer]\nOnCalendar=*:0/5\n" +
+			"Persistent=true\nUnit=pfm-schedule.service\n\n[Install]\nWantedBy=timers.target",
+		scheduleServiceUnit: "[Unit]\nDescription=Fire every due pfm schedule (pfm internal schedule-fire)\n\n[Service]\n" +
+			"Type=oneshot\nEnvironment=PATH={home}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin\n" +
+			"Environment=PFM_INSTALL_MARK={mark}\nExecStart=%h/.local/bin/pfm internal schedule-fire",
+	} {
+		staged := filepath.Join(home, ".local", "share", "pfm", "install", "systemd", unit)
+		content, err := os.ReadFile(staged)
+		if err != nil {
+			t.Fatalf("read staged %s: %v", unit, err)
+		}
+		if got := serviceUnitBody(content, home); got != want {
+			t.Errorf("%s =\n%s\nwant\n%s", staged, got, want)
+		}
 	}
 }
 

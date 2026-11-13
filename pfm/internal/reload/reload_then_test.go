@@ -3,6 +3,7 @@ package reload
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -238,14 +239,14 @@ func TestDeliverThenPreservesResumedDraft(t *testing.T) {
 			styleErr error
 			want     string
 		}{
-			{name: "draft", plain: "human draft", styled: "human draft", want: "human draft"},
-			{name: "bounded-draft", plain: strings.Repeat("x", 80) + "TAIL_NOT_LOGGED", styled: strings.Repeat("x", 80) + "TAIL_NOT_LOGGED", want: strings.Repeat("x", 80)},
+			{name: "draft", plain: "human draft", styled: "human draft", want: "reload --then: composer holds a draft: \"human draft\"; nothing was typed and the draft is preserved (dim placeholder text is exempt)"},
+			{name: "bounded-draft", plain: strings.Repeat("x", 80) + "TAIL_NOT_LOGGED", styled: strings.Repeat("x", 80) + "TAIL_NOT_LOGGED", want: "reload --then: composer holds a draft: \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"; nothing was typed and the draft is preserved (dim placeholder text is exempt)"},
 			{name: "dim-hint", plain: "Try running tests", styled: "\x1b[2mTry running tests\x1b[0m"},
-			{name: "same-text-user-draft", plain: "Try running tests", styled: "Try running tests", want: "Try running tests"},
-			{name: "wrapped-draft", plain: "\n  human draft", styled: "\n  human draft", want: "human draft"},
-			{name: "marker-in-draft", plain: "\n  human draft\n" + "❯ ", styled: "\n  human draft\n" + "❯ ", want: "human draft"},
+			{name: "same-text-user-draft", plain: "Try running tests", styled: "Try running tests", want: "reload --then: composer holds a draft: \"Try running tests\"; nothing was typed and the draft is preserved (dim placeholder text is exempt)"},
+			{name: "wrapped-draft", plain: "\n  human draft", styled: "\n  human draft", want: "reload --then: composer holds a draft: \"human draft\"; nothing was typed and the draft is preserved (dim placeholder text is exempt)"},
+			{name: "marker-in-draft", plain: "\n  human draft\n" + "❯ ", styled: "\n  human draft\n" + "❯ ", want: "reload --then: composer holds a draft: \"human draft ❯\"; nothing was typed and the draft is preserved (dim placeholder text is exempt)"},
 			{name: "wrapped-dim-hint", plain: "\n  Try running tests", styled: "\n  \x1b[2mTry running tests\x1b[0m"},
-			{name: "style-error", plain: "human draft", styleErr: errors.New("styling lost"), want: "styling lost"},
+			{name: "style-error", plain: "human draft", styleErr: errors.New("styling lost"), want: "reload --then: read composer styling (draft \"human draft\"): styling lost"},
 		} {
 			t.Run(string(engine)+"/"+tc.name, func(t *testing.T) {
 				marker, binary := "❯", "claude"
@@ -276,9 +277,8 @@ func TestDeliverThenPreservesResumedDraft(t *testing.T) {
 					}
 					return
 				}
-				if err == nil || !strings.Contains(err.Error(), tc.want) ||
-					strings.Contains(err.Error(), "TAIL_NOT_LOGGED") {
-					t.Fatalf("deliverThen error = %v; want %q and bounded evidence", err, tc.want)
+				if got := fmt.Sprint(err); got != tc.want {
+					t.Fatalf("deliverThen error = %q, want %q", got, tc.want)
 				}
 				if tmux.literal != "" || tmux.submitted {
 					t.Fatalf("follow-up mashed into draft: literal=%q submitted=%t", tmux.literal, tmux.submitted)

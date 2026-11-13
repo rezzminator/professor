@@ -198,9 +198,12 @@ func TestWorkbenchDoctorRunWiring(t *testing.T) {
 	t.Chdir(root)
 	var stdout, stderr bytes.Buffer
 	code := runDoctor(nil, &stdout, &stderr, runtime)
-	want := fmt.Sprintf("doctor: workbench %s FAILED: %s: \"prompt\" is required\n", dir, paths.WorkbenchManifest(dir))
-	if code != 3 || !strings.Contains(stdout.String(), want) {
-		t.Fatalf("doctor code=%d missing %q: stdout=%s stderr=%s", code, want, stdout.String(), stderr.String())
+	if got, want := rooted(
+		doctorRows(stdout.String(), "doctor: workbench"),
+		root,
+	), "doctor: workbench {root}/docs/scribe FAILED: {root}/docs/scribe/.professor/workbench.json: \"prompt\" is required\n"; code != 3 ||
+		got != want {
+		t.Errorf("doctor code=%d workbench rows = %q, want %q; stderr=%s", code, got, want, stderr.String())
 	}
 }
 

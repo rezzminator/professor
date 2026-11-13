@@ -195,7 +195,7 @@ func TestRunOpenCodeFailsClosedWhenPluginDoesNotLoad(t *testing.T) {
 		TempDir: t.TempDir(), Prompt: "hello", Timeout: 5 * time.Second,
 		Env: testEnv(t.TempDir(), "PFM_TEST_SERVER_LOAD_PLUGIN=0"),
 	})
-	if err == nil || !strings.Contains(err.Error(), "plugin") {
+	if err == nil || err.Error() != "OpenCode headless required plugin did not load" {
 		t.Fatalf("Run() error = %v, want fail-closed plugin-load error", err)
 	}
 	if !result.IsError {

@@ -218,6 +218,7 @@ func testExecCommands(t *testing.T) (ExecCommands, *deps.FakeRunner, paths.Value
 		t.Fatal(err)
 	}
 	runner := &deps.FakeRunner{}
+	runner.ScriptLookPath(binary, binary, nil)
 	runner.ScriptStartOutput(nil, deps.StartOutput{Stdout: "[]\n"})
 	t.Setenv(paths.EnvHome, root)
 	t.Setenv(paths.EnvStateDB, filepath.Join(root, "state", "pfm.db"))

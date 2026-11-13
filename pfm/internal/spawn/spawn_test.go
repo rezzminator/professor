@@ -496,7 +496,7 @@ func TestCodexRefusingAnEmptyNameIsReportedAsSuch(t *testing.T) {
 		t.Fatal("an empty name was reported as landed")
 	}
 	if len(result.Warnings) != 1 ||
-		!strings.Contains(result.Warnings[0], "refused the name as empty") {
+		result.Warnings[0] != "Codex refused the name as empty — the chat is running unnamed" {
 		t.Fatalf("warnings = %#v", result.Warnings)
 	}
 }
@@ -662,7 +662,7 @@ func TestChatThatDiesAtBirthIsReportedAsSuch(t *testing.T) {
 	if err == nil {
 		t.Fatal("Run() reported a dead chat as healthy")
 	}
-	if !strings.Contains(err.Error(), "died at birth") {
+	if err.Error() != "the chat died at birth on socket cx-1-2-3: no server running on socket" {
 		t.Fatalf("error = %v", err)
 	}
 }
@@ -771,7 +771,7 @@ func TestCodexPromptThatNeverSubmitsIsReportedUndelivered(t *testing.T) {
 		t.Fatal("Prompted = true for a prompt the composer never released")
 	}
 	if len(result.Warnings) != 1 ||
-		!strings.Contains(result.Warnings[0], "not delivered") {
+		result.Warnings[0] != "the first prompt was not delivered: the composer still holds it after 4 attempts to submit" {
 		t.Fatalf("warnings = %q, want one naming the undelivered prompt", result.Warnings)
 	}
 }
@@ -938,10 +938,14 @@ func TestSpawnCodexRequiresLogin(t *testing.T) {
 	_, err := Run(context.Background(), fake, Request{
 		Engine: "cx", Socket: "cx-a", Run: "cx", CWD: t.TempDir(), CodexHome: home,
 	})
-	want := filepath.Join(home, "auth.json") + " "
-	if !errors.Is(err, pfmconfig.ErrCodexLoggedOut) || !strings.HasPrefix(err.Error(), want) ||
+	if got, want := strings.ReplaceAll(
+		fmt.Sprint(err),
+		home,
+		"{home}",
+	), "{home}/auth.json must contain tokens.access_token with tokens.account_id, or OPENAI_API_KEY — run codex login"; !errors.Is(err, pfmconfig.ErrCodexLoggedOut) ||
+		got != want ||
 		len(fake.sessions) != 0 {
-		t.Fatalf("spawn error=%v sessions=%d; want %q", err, len(fake.sessions), want)
+		t.Fatalf("spawn error = %q, want %q (sessions %d)", got, want, len(fake.sessions))
 	}
 }
 

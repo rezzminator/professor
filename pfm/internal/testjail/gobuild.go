@@ -63,6 +63,13 @@ func prebuiltOrBuild(moduleDir, dir, env, binary string, set bool, command strin
 		}
 		return binary, nil
 	}
+	if moduleDir == "" {
+		return "", fmt.Errorf(
+			"build ./cmd/%s: no go.mod above the directory the test started in, and %s is unset",
+			command,
+			env,
+		)
+	}
 	built := filepath.Join(dir, command)
 	if err := GoBuild(moduleDir, built, "./cmd/"+command); err != nil {
 		return "", err

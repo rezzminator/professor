@@ -228,17 +228,11 @@ func TestLoginDefaultFreshHomeWithoutRoster(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv(paths.EnvHome, home)
 	output := runSkillInstall(t, home, ModeApply)
-	if want := "  skip    login default: no Claude account roster\n"; !strings.Contains(output, want) {
-		t.Fatalf("missing %q:\n%s", want, output)
-	}
 	profile, zshenv, environment := loginDefaultFiles(home)
+	wantOutputLines(t, output, []string{"  skip    login default: no Claude account roster"},
+		"login default", profile, zshenv, environment)
 	for _, path := range []string{profile, zshenv, environment} {
 		requireNoPath(t, path, "no roster creates no login default")
-		for _, line := range strings.Split(output, "\n") {
-			if strings.HasPrefix(line, "  change  ") && strings.Contains(line, path) {
-				t.Errorf("no default was written, but output reports %q", line)
-			}
-		}
 	}
 }
 

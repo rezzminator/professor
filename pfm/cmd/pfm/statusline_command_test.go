@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -83,9 +84,13 @@ func TestStatuslineOnABrokenConfigRendersTheConfigWarning(t *testing.T) {
 		_ = reader.Close()
 	}()
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"--config", configPath, "statusline"}, &stdout, &stderr); code != 0 ||
-		!strings.Contains(stdout.String(), "Opus 4") || !strings.Contains(stdout.String(), "💾⚠config") {
-		t.Fatalf("broken config statusline code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	code := run([]string{"--config", configPath, "statusline"}, &stdout, &stderr)
+	if got, want := rooted(
+		stdout.String(),
+		root,
+	), "\x1b[0m\x1b[38;5;51m◆ Opus 4\x1b[0m\x1b[38;5;245m·\x1b[0m\x1b[38;5;220meffort unknown\x1b[0m \x1b[2m│\x1b[0m \x1b[1;34m~\x1b[0m \x1b[2m│\x1b[0m \x1b[2;90m·\x1b[m \x1b[2;90m·\x1b[m\n\x1b[0m🟢 \x1b[1;32m\x1b[2m▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱\x1b[0m \x1b[1;32m?% ?\x1b[0m \x1b[38;5;226mctx unknown\x1b[0m \x1b[2m│\x1b[0m \x1b[38;5;226m💰$?\x1b[0m\x1b[38;5;245m/\x1b[0m\x1b[38;5;226m?/?/?\x1b[0m \x1b[2m│\x1b[0m \x1b[1;38;5;203m💾⚠config\x1b[0m \x1b[2m│\x1b[0m \x1b[38;5;215m⏳ 0s\x1b[0m\n\x1b[0m\x1b[2m▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱\x1b[0m \x1b[2mcodex-7d: no data\x1b[0m\n"; code != 0 ||
+		got != want {
+		t.Fatalf("broken config statusline code=%d stderr=%q stdout = %q, want %q", code, stderr.String(), got, want)
 	}
 }
 
@@ -184,10 +189,23 @@ func TestStatuslineAndUsageHookCommandsFailOpen(t *testing.T) {
 	jailTest(t)
 	root := t.TempDir()
 	var stdout, stderr bytes.Buffer
-	if code := runStatuslineWithRuntime(nil, strings.NewReader("{"), &stdout, &stderr,
-		statuslineTestRuntime(t), paths.OSEnv{}); code != 0 ||
-		!strings.Contains(stderr.String(), "fail-open") {
-		t.Fatalf("malformed statusline: code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	if code := runStatuslineWithRuntime(
+		nil,
+		strings.NewReader("{"),
+		&stdout,
+		&stderr,
+		statuslineTestRuntime(
+			t,
+		),
+		paths.OSEnv{},
+	); code != 0 || stderr.String() != "pfm statusline: render (fail-open): decode statusline input: unexpected end of JSON input\n" {
+		t.Fatalf(
+			"malformed statusline: code=%d stdout=%q stderr = %q, want %q",
+			code,
+			stdout.String(),
+			stderr.String(),
+			"pfm statusline: render (fail-open): decode statusline input: unexpected end of JSON input\n",
+		)
 	}
 
 	configDir := filepath.Join(root, ".claude")
@@ -222,10 +240,14 @@ func TestStatuslineAndUsageHookCommandsFailOpen(t *testing.T) {
 		&stderr,
 		statuslineTestRuntime(t),
 		paths.OSEnv{},
-	); code != 0 ||
-		stdout.Len() != 0 ||
-		!strings.Contains(stderr.String(), "fail-open") {
-		t.Fatalf("usage hook: code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	); code != 0 || stdout.Len() != 0 || rooted(stderr.String(), root) != "pfm usage-hook: evaluate (fail-open): usage cache directory {root}/tmp/"+filepath.Base(cacheLink)+" is not a real directory\n" {
+		t.Fatalf(
+			"usage hook: code=%d stdout=%q stderr = %q, want %q",
+			code,
+			stdout.String(),
+			rooted(stderr.String(), root),
+			"pfm usage-hook: evaluate (fail-open): usage cache directory {root}/tmp/cc-usage-0 is not a real directory\n",
+		)
 	}
 }
 
@@ -389,15 +411,23 @@ func TestStatuslineWarningsReachTheActivityLog(t *testing.T) {
 		statuslineTestRuntime(t),
 		paths.OSEnv{},
 	)
-	if code != 0 || !strings.Contains(stdout.String(), "ERR") {
-		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	if got, want := rooted(
+		stdout.String(),
+		root,
+	), "\x1b[0m\x1b[38;5;51m◆ Opus 4\x1b[0m\x1b[38;5;245m·\x1b[0m\x1b[1;38;5;203meffort unknown · ERR\x1b[0m \x1b[2m│\x1b[0m \x1b[1;34m~\x1b[0m \x1b[2m│\x1b[0m \x1b[2;90m·\x1b[m \x1b[2;90m·\x1b[m\n\x1b[0m🟢 \x1b[1;32m\x1b[2m▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱\x1b[0m \x1b[1;32m?% ?\x1b[0m \x1b[38;5;226mctx unknown\x1b[0m \x1b[2m│\x1b[0m \x1b[38;5;226m💰$?\x1b[0m\x1b[38;5;245m/\x1b[0m\x1b[38;5;226m?/?/?\x1b[0m \x1b[2m│\x1b[0m \x1b[38;5;215m⏳ 0s\x1b[0m\n\x1b[0m\x1b[2m▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱\x1b[0m \x1b[2mcodex-7d: no data\x1b[0m\n"; code != 0 ||
+		got != want {
+		t.Fatalf("code=%d stderr=%q stdout = %q, want %q", code, stderr.String(), got, want)
 	}
+	var causes []string
 	for _, record := range recorder.Records() {
-		cause, _ := record.Field(obs.FieldErr)
-		if text, ok := cause.(string); ok && record.Message == "statusline.warn" && record.Level == "WARN" &&
-			strings.Contains(text, "effort shows ERR") {
-			return
+		if cause, _ := record.Field(obs.FieldErr); record.Message == "statusline.warn" && record.Level == "WARN" {
+			causes = append(causes, scrub(fmt.Sprint(cause), root))
 		}
 	}
-	t.Fatalf("no statusline.warn record names the ERR cause: %s", recorder.Raw())
+	if got, want := fmt.Sprintf(
+		"%q",
+		causes,
+	), "[\"pfm statusline: paced render (rendering inline): spawn paced worker {hash}: no worker in this test\" \"statusline: auto-effort state {root}/auto-effort/state.sess-w.json (effort shows ERR): parse \\\"not json\\\": invalid character 'o' in literal null (expecting 'u')\"]"; got != want {
+		t.Fatalf("statusline.warn causes = %q, want %q", got, want)
+	}
 }

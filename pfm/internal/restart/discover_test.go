@@ -135,17 +135,11 @@ func TestDryRunChangesNothing(t *testing.T) {
 		t.Fatalf("the dry run changed something: steps %v, signals %v, starts %v, ended %v",
 			order, kernel.sent(), runner.starts, fleet.ended)
 	}
+	ran := make([]string, 0, len(runner.ran()))
 	for _, argv := range runner.ran() {
-		verb := strings.Join(argv[1:], " ")
-		if verb != "status --json" && !strings.HasPrefix(verb, "ps ") && !strings.HasPrefix(verb, "inspect ") {
-			t.Fatalf("the dry run ran a command that is not a read: %v", argv)
-		}
+		ran = append(ran, strings.Join(argv, " "))
 	}
-	for _, line := range []string{"stop   8  pfm", "start  1  mcp-daemon", "start  3  herdr"} {
-		if !strings.Contains(out.String(), line) {
-			t.Fatalf("plan lacks %q:\n%s", line, out.String())
-		}
-	}
+	golden(t, "dry_run_plan.txt", out.String()+"--- ran\n"+strings.Join(ran, "\n")+"\n")
 }
 
 func TestDryRunNamesTheWorkerARealRunStarts(t *testing.T) {
@@ -153,12 +147,12 @@ func TestDryRunNamesTheWorkerARealRunStarts(t *testing.T) {
 	dependencies, _, _, _ := fullHost(t, &order)
 	dependencies.DryRun = true
 	plan := BuildPlan(context.Background(), dependencies)
-	if !strings.HasPrefix(plan.Last, "the restart worker a plain pfm restart detaches (pfm internal restart-run)") ||
-		strings.Contains(plan.Last, "this restart worker") {
+	if plan.Last != "the restart worker a plain pfm restart detaches (pfm internal restart-run) — exits after the start phase, the last pfm process" {
 		t.Fatalf("dry-run last = %q, want the worker a real run would start, not this process", plan.Last)
 	}
 	for _, finding := range plan.Findings {
-		if finding.Family == FamilyPFM && !strings.HasSuffix(finding.Detail, "the restart worker is last") {
+		if finding.Family == FamilyPFM &&
+			finding.Detail != "1 other pfm process(es) of 5 listed — process table, argv[0] named pfm; the restart worker is last" {
 			t.Fatalf("dry-run pfm finding = %q", finding.Detail)
 		}
 	}
@@ -248,7 +242,7 @@ func TestFindChatsAFailedScanAndAnUnreadableSocketAreNamed(t *testing.T) {
 	}
 	finder.findChats(context.Background())
 	if len(finder.plan.Findings) != 1 || finder.plan.Findings[0].Err == nil ||
-		!strings.Contains(finder.plan.Findings[0].Err.Error(), "fleet scan: tmux missing") {
+		finder.plan.Findings[0].Err.Error() != "fleet scan: tmux missing" {
 		t.Fatalf("failed scan = %+v", finder.plan.Findings)
 	}
 	finder = &discoverer{deps: testDeps(t, &hostRunner{}, newKernel(), &fakeFleet{
@@ -256,7 +250,7 @@ func TestFindChatsAFailedScanAndAnUnreadableSocketAreNamed(t *testing.T) {
 	})}
 	finder.findChats(context.Background())
 	if len(finder.plan.Findings) != 2 || finder.plan.Findings[1].Err == nil ||
-		!strings.Contains(finder.plan.Findings[1].Err.Error(), "tmux socket pfm-cc-x could not be read") {
+		finder.plan.Findings[1].Err.Error() != "tmux socket pfm-cc-x could not be read, its chats are unknown: permission denied" {
 		t.Fatalf("unreadable socket = %+v", finder.plan.Findings)
 	}
 	finder = &discoverer{deps: Deps{}}
@@ -294,7 +288,7 @@ func TestASupervisedDaemonBelongsToItsServiceUnit(t *testing.T) {
 	}
 	for index := range plan.Units {
 		unit := &plan.Units[index]
-		if unit.Name == "systemd pfm-mcp.service" && !strings.HasSuffix(unit.StartHow, "+ probe") {
+		if unit.Name == "systemd pfm-mcp.service" && unit.StartHow != "start + probe" {
 			t.Fatalf("the supervised daemon starts without its status probe: %q", unit.StartHow)
 		}
 	}
@@ -388,7 +382,8 @@ func TestAnUnknownSupervisorLeavesTheDaemonRunning(t *testing.T) {
 			daemonErr = finding.Err
 		}
 	}
-	if daemonErr == nil || !strings.Contains(daemonErr.Error(), "1 pfm mcp serve process(es) left running") {
+	if daemonErr == nil ||
+		daemonErr.Error() != "the services find failed, so whether a service unit supervises the daemon is unknown — 1 pfm mcp serve process(es) left running: systemctl --user: no bus" {
 		t.Fatalf("mcp-daemon find with its supervisor unknown = %v, want a failed find naming the daemon", daemonErr)
 	}
 }

@@ -203,9 +203,10 @@ func TestUnprobedNameSyncGateProceedsButSaysSo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("an unprobed gate refused the install: %v\n%s", err, output.String())
 	}
-	if !strings.Contains(output.String(), "name-sync gate NOT probed") {
-		t.Fatalf("an unprobed name-sync gate was silent:\n%s", output.String())
-	}
+	wantOutputLines(t, output.String(), []string{
+		"  skip    name-sync gate NOT probed (systemctl show could not read the unit state);" +
+			" an apply during a name-sync or schedule run is not refused",
+	}, "gate NOT probed")
 }
 
 func TestRunningNameSyncRefusesMutatingModesBeforeWriting(t *testing.T) {

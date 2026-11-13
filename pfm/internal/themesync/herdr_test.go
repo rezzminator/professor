@@ -11,59 +11,13 @@ import (
 )
 
 func TestHerdrRenderAutoForcedDarkAndLightSide(t *testing.T) {
-	tokyoNight := tokyoNightApplied(t)
-	dark := herdrRender(tokyoNight, 7)
-	for _, want := range []string{
-		"# >>> pfm theme · custom:tokyo-night · gen 7 >>>\n[theme]\n",
-		"name = \"tokyo-night\"\nauto_switch = false\n\n[theme.custom]\naccent = \"#c95cff\"\npanel_bg = \"#0f0f1a\"\n",
-	} {
-		if !strings.Contains(dark, want) {
-			t.Errorf("dark block lacks %q:\n%s", want, dark)
+	golden(t, "herdr_dark.toml", herdrRender(tokyoNightApplied(t), 7))
+	for _, side := range []string{"light", "auto"} {
+		resolved, err := resolveValue(side, t.TempDir())
+		if err != nil {
+			t.Fatal(err)
 		}
-	}
-	if !strings.HasSuffix(dark, "# <<< pfm theme <<<\n") || strings.Contains(dark, "[theme.custom.light]") {
-		t.Errorf("dark block wrong:\n%s", dark)
-	}
-	light, err := resolveValue("light", t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	lightBlock := herdrRender(light.Applied, 7)
-	if !strings.Contains(lightBlock, "name = \"tokyo-night-day\"\nauto_switch = false\n") ||
-		!strings.Contains(lightBlock, "[theme.custom]\naccent = \"#d77757\"\npanel_bg = \"#ffffff\"") ||
-		strings.Contains(lightBlock, "[theme.custom.light]") {
-		t.Errorf("light block wrong:\n%s", lightBlock)
-	}
-	auto, err := resolveValue("auto", t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	autoBlock := herdrRender(auto.Applied, 7)
-	for _, want := range []string{
-		"# >>> pfm theme · auto · gen 7 >>>\n[theme]\n",
-		"name = \"tokyo-night\"\nauto_switch = true\ndark_name = \"tokyo-night\"\nlight_name = \"tokyo-night-day\"\n",
-		"[theme.custom]\naccent = \"#d77757\"\npanel_bg = \"#000000\"\n",
-		"[theme.custom.light]\naccent = \"#d77757\"\npanel_bg = \"#ffffff\"\n",
-	} {
-		if !strings.Contains(autoBlock, want) {
-			t.Errorf("auto block lacks %q:\n%s", want, autoBlock)
-		}
-	}
-}
-
-func TestHerdrRenderCoversEveryDocumentedCustomToken(t *testing.T) {
-	auto, err := resolveValue("auto", t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	block := herdrRender(auto.Applied, 1)
-	for _, token := range []string{
-		"accent", "panel_bg", "sidebar_bg", "active_row_bg", "selection_bg", "surface0", "surface1", "surface_dim",
-		"overlay0", "overlay1", "text", "subtext0", "mauve", "green", "yellow", "red", "blue", "teal", "peach",
-	} {
-		if strings.Count(block, "\n"+token+" = \"#") != 2 {
-			t.Errorf("token %s should appear once per side (2):\n%s", token, block)
-		}
+		golden(t, "herdr_"+side+".toml", herdrRender(resolved.Applied, 7))
 	}
 }
 
@@ -208,7 +162,7 @@ func TestHerdrApplyStylesTheSidebarRowsAndOffRestoresThemBare(t *testing.T) {
 	wantVerdict(t, h.status(), "herdr", VerdictInSync, "")
 
 	h.write(".config/herdr/config.toml", strings.Replace(got, `fg = "#ffd23f"`, `fg = "#111111"`, 1))
-	wantVerdict(t, h.status(), "herdr", VerdictDrift, "sidebar row pfm token styles differ")
+	wantVerdict(t, h.status(), "herdr", VerdictDrift, "sidebar row pfm token styles differ from the theme's hues")
 	wantVerdict(t, h.sync(false), "herdr", VerdictInSync, "")
 	if !strings.Contains(h.read(".config/herdr/config.toml"), tokyoNightStyled(t)) {
 		t.Fatalf("drifted fg not rewritten:\n%s", h.read(".config/herdr/config.toml"))
@@ -368,7 +322,13 @@ func TestHerdrOffRetriesRefusedReload(t *testing.T) {
 		Stdout: []byte(`{"result":{"type":"config_reload","status":"failed","diagnostics":["retry me"]}}`),
 	}
 	h.rearm()
-	wantVerdict(t, offReport(t, h), surfaceHerdr, VerdictError, "retry me")
+	wantVerdict(
+		t,
+		offReport(t, h),
+		surfaceHerdr,
+		VerdictError,
+		"themesync: Herdr config reload status \"failed\": retry me",
+	)
 	if h.state().Herdr == nil {
 		t.Fatal("failed off lost its restore/reload obligation")
 	}
@@ -376,7 +336,7 @@ func TestHerdrOffRetriesRefusedReload(t *testing.T) {
 		Stdout: []byte(`{"result":{"type":"config_reload","status":"applied","diagnostics":[]}}`),
 	}
 	h.rearm()
-	wantVerdict(t, offReport(t, h), surfaceHerdr, VerdictRestored, "")
+	wantVerdict(t, offReport(t, h), surfaceHerdr, VerdictRestored, "pfm block already gone")
 	if reloadCalls(h) != 1 || h.state().Herdr != nil {
 		t.Fatalf("retry calls=%d snapshot=%+v", reloadCalls(h), h.state().Herdr)
 	}
@@ -390,7 +350,13 @@ func TestHerdrDebugConfigRequiresExplicitPath(t *testing.T) {
 	}
 	t.Setenv("XDG_CONFIG_HOME", h.path(".config"))
 	h.write(".config/herdr-dev/config.toml", fixtureHerdr)
-	wantVerdict(t, h.on(), surfaceHerdr, VerdictError, "HERDR_CONFIG_PATH")
+	wantVerdict(
+		t,
+		h.on(),
+		surfaceHerdr,
+		VerdictError,
+		"debug Herdr config exists at {tmp}/.config/herdr-dev/config.toml; set HERDR_CONFIG_PATH to identify the server's config",
+	)
 	if got := h.read(".config/herdr/config.toml"); got != fixtureHerdr {
 		t.Fatalf("ambiguous config changed: %s", got)
 	}

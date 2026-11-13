@@ -72,7 +72,8 @@ func TestApplyEngineSelectorReportsAnUnknownSelectorAndAnEmptyRoster(t *testing.
 	}
 	empty := Request{}
 	err := ApplyEngineSelector(&empty, "")
-	if err == nil || !strings.Contains(err.Error(), "no engines configured") {
+	if err == nil ||
+		err.Error() != "no engines configured: Claude roster empty; Codex roster empty; OpenCode store absent" {
 		t.Fatalf("empty roster default error = %v, want the configured-engines refusal", err)
 	}
 }

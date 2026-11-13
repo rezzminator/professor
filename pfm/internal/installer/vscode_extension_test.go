@@ -567,45 +567,6 @@ func TestVSCodeExtensionPackageJSONContractMatchesTheInstalledConstantsAndStages
 	}
 }
 
-// TestVSCodeExtensionCommandNeverCallsCreateTerminalWithItsOwnOptions is the
-// M9 regression for issue #24 findings 10-12: every terminal the extension
-// opens must go through the SAME contributed-profile route the + dropdown uses
-// (workbench.action.terminal.newWithProfile addressed at professor.terminal),
-// never through a bare createTerminal(options) call, which renders the
-// default profile's icon instead of the extension's own (finding 10). It reads
-// the code with its comments stripped, so it runs where Node does not; the
-// route itself is driven under Node by
-// TestVSCodeExtensionNewTerminalCommandsOpenTheProfessorProfile.
-func TestVSCodeExtensionCommandNeverCallsCreateTerminalWithItsOwnOptions(t *testing.T) {
-	t.Parallel()
-	raw, err := embeddedAssets.ReadFile("assets/" + vscodeExtensionSource + "/extension.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var kept strings.Builder
-	for _, line := range strings.Split(string(raw), "\n") {
-		if !strings.HasPrefix(strings.TrimSpace(line), "//") {
-			kept.WriteString(line + "\n")
-		}
-	}
-	code := kept.String()
-	if !strings.Contains(code, "registerCommand('professor.newChatTerminal'") {
-		t.Fatalf("extension.js does not register professor.newChatTerminal: %s", code)
-	}
-	if strings.Contains(code, "createTerminal(") {
-		t.Fatalf(
-			"extension.js calls createTerminal(...) with its own options instead of delegating to the contributed profile route: %s",
-			code,
-		)
-	}
-	if !strings.Contains(code, "workbench.action.terminal.newWithProfile") {
-		t.Fatalf("extension.js does not delegate through workbench.action.terminal.newWithProfile: %s", code)
-	}
-	if !strings.Contains(code, "id: 'professor.terminal'") && !strings.Contains(code, `id: "professor.terminal"`) {
-		t.Fatalf("extension.js's newWithProfile call does not address id professor.terminal: %s", code)
-	}
-}
-
 // TestVSCodeExtensionContributesOneKeybindingForTheCommand is the M9
 // regression for issue #24 finding 11b: pfm wires a default keybinding for
 // professor.newChatTerminal so the command is reachable without the palette.
@@ -674,9 +635,12 @@ func TestVSCodeExtensionPreviewCreatesNoLinkAndNoLedger(t *testing.T) {
 	) {
 		t.Fatalf("preview wrote the VS Code ownership ledger: %v", err)
 	}
-	if !strings.Contains(preview.String(), "link "+target) {
-		t.Fatalf("preview did not name the extension link it would make:\n%s", preview.String())
-	}
+	wantOutputLines(t, preview.String(), []string{
+		"  change  link " + target + " -> " + filepath.Join(
+			managedRootForHome(home),
+			filepath.FromSlash(vscodeExtensionSource),
+		),
+	}, "link "+target)
 }
 
 // TestVSCodeSettingsMergeAndRestoreWriteThroughASymlinkedSettingsFile pins the

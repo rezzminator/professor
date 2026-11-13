@@ -4,24 +4,31 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func openCodeFixture() []store.OpenCodeSession {
 	return []store.OpenCodeSession{
-		{ID: "ses_live", Title: "live one", Directory: "/work/a", ProjectDir: "/work/a", TimeUpdatedMS: 9_000},
+		{
+			ID:            "ses_live",
+			Title:         "live one",
+			Directory:     testjail.Place("/work/a"),
+			ProjectDir:    testjail.Place("/work/a"),
+			TimeUpdatedMS: 9_000,
+		},
 		{
 			ID:            "ses_titled",
 			Title:         "titled",
-			Directory:     "/work/b",
-			ProjectDir:    "/work/b",
+			Directory:     testjail.Place("/work/b"),
+			ProjectDir:    testjail.Place("/work/b"),
 			FirstPrompt:   "fallback text",
 			TimeUpdatedMS: 8_000,
 		},
 		{
 			ID:            "ses_untitled",
 			Title:         "",
-			Directory:     "/work/c",
-			ProjectDir:    "/work/c",
+			Directory:     testjail.Place("/work/c"),
+			ProjectDir:    testjail.Place("/work/c"),
 			FirstPrompt:   "untitled prompt body",
 			TimeUpdatedMS: 7_000,
 		},
@@ -29,15 +36,15 @@ func openCodeFixture() []store.OpenCodeSession {
 			ID:            "ses_child",
 			ParentID:      "ses_titled",
 			Title:         "child",
-			Directory:     "/work/b",
-			ProjectDir:    "/work/b",
+			Directory:     testjail.Place("/work/b"),
+			ProjectDir:    testjail.Place("/work/b"),
 			TimeUpdatedMS: 6_000,
 		},
 		{
 			ID:             "ses_archived",
 			Title:          "archived",
-			Directory:      "/work/d",
-			ProjectDir:     "/work/d",
+			Directory:      testjail.Place("/work/d"),
+			ProjectDir:     testjail.Place("/work/d"),
 			TimeUpdatedMS:  5_000,
 			TimeArchivedMS: 4_000,
 		},
@@ -59,7 +66,7 @@ func TestOpenCodeSessionsBecomeResumeRows(t *testing.T) {
 		t.Fatalf("resume-opencode rows = %d (%v), want 3", len(rows), rows)
 	}
 	live := rows["ses_live"]
-	if live.CWD != "/work/a" || live.Name != "live one" {
+	if live.CWD != testjail.Place("/work/a") || live.Name != "live one" {
 		t.Errorf("ses_live = %+v", live)
 	}
 	if got := rows["ses_live"].ActivityNS; got != 9_000*1_000_000 {
@@ -89,8 +96,13 @@ func TestOpenCodeSessionWithNoAssistantReplyIsSuppressed(t *testing.T) {
 	output := Compose(Input{
 		OpenCodeSessions: []store.OpenCodeSession{
 			{
-				ID: "ses_unanswered", Title: "unanswered", Directory: "/work/a", ProjectDir: "/work/a",
-				TimeUpdatedMS: 1, PromptCount: 1, AssistantCount: 0,
+				ID:             "ses_unanswered",
+				Title:          "unanswered",
+				Directory:      testjail.Place("/work/a"),
+				ProjectDir:     testjail.Place("/work/a"),
+				TimeUpdatedMS:  1,
+				PromptCount:    1,
+				AssistantCount: 0,
 			},
 		},
 		Options: Options{View: DefaultView},
@@ -111,8 +123,13 @@ func TestOpenCodeSessionWithAssistantReplyIsShown(t *testing.T) {
 	output := Compose(Input{
 		OpenCodeSessions: []store.OpenCodeSession{
 			{
-				ID: "ses_answered", Title: "answered", Directory: "/work/a", ProjectDir: "/work/a",
-				TimeUpdatedMS: 1, PromptCount: 1, AssistantCount: 1,
+				ID:             "ses_answered",
+				Title:          "answered",
+				Directory:      testjail.Place("/work/a"),
+				ProjectDir:     testjail.Place("/work/a"),
+				TimeUpdatedMS:  1,
+				PromptCount:    1,
+				AssistantCount: 1,
 			},
 		},
 		Options: Options{View: DefaultView},
@@ -138,8 +155,20 @@ func TestOpenCodeKilledSessionsAreOmittedAndCounted(t *testing.T) {
 	killedAt := int64(12345)
 	output := Compose(Input{
 		OpenCodeSessions: []store.OpenCodeSession{
-			{ID: "ses_dead", Title: "dead", Directory: "/work/x", ProjectDir: "/work/x", TimeUpdatedMS: 1},
-			{ID: "ses_alive", Title: "alive", Directory: "/work/y", ProjectDir: "/work/y", TimeUpdatedMS: 2},
+			{
+				ID:            "ses_dead",
+				Title:         "dead",
+				Directory:     testjail.Place("/work/x"),
+				ProjectDir:    testjail.Place("/work/x"),
+				TimeUpdatedMS: 1,
+			},
+			{
+				ID:            "ses_alive",
+				Title:         "alive",
+				Directory:     testjail.Place("/work/y"),
+				ProjectDir:    testjail.Place("/work/y"),
+				TimeUpdatedMS: 2,
+			},
 		},
 		Killed:  []store.Killed{{ID: "ses_dead", KilledAt: killedAt}},
 		Options: Options{View: AllView},

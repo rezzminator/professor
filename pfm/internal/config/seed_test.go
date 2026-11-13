@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -47,8 +48,12 @@ func TestLoadSeedMatchesLoadOfSeededTarget(t *testing.T) {
 func TestLoadSeedNamesAMissingExample(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "example.pfm.config.json")
 	_, err := LoadSeed(missing, filepath.Join(t.TempDir(), FileName), t.TempDir(), nil)
-	if err == nil || !strings.Contains(err.Error(), missing) {
-		t.Fatalf("missing example err=%v, want it named", err)
+	if got, want := strings.ReplaceAll(
+		fmt.Sprint(err),
+		filepath.Dir(missing),
+		"{dir}",
+	), "read seed config {dir}/example.pfm.config.json: open {dir}/example.pfm.config.json: no such file or directory"; got != want {
+		t.Fatalf("missing example err = %q, want %q", got, want)
 	}
 }
 

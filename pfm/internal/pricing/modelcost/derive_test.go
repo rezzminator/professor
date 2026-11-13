@@ -226,12 +226,12 @@ func TestDeriveKeepsThePublishedRowOfAModelItCannotFold(t *testing.T) {
 
 func TestDeriveRefusesAProviderWithoutRows(t *testing.T) {
 	for _, tc := range []struct{ name, claude, openai, want string }{
-		{"no prices-per-1M statement", claudePage, strings.ReplaceAll(openAIPage, "Prices per 1M tokens.", ""), "openai"},
-		{"no model pricing table", strings.Replace(claudePage, "## Model pricing", "## Model rates", 1), openAIPage, "anthropic"},
+		{"no prices-per-1M statement", claudePage, strings.ReplaceAll(openAIPage, "Prices per 1M tokens.", ""), "derive prices: the openai page https://developers.openai.com/api/docs/pricing.md yields no standard text-token rows; publisher layout changed"},
+		{"no model pricing table", strings.Replace(claudePage, "## Model pricing", "## Model rates", 1), openAIPage, "derive prices: the anthropic page https://platform.claude.com/docs/en/about-claude/pricing.md yields no standard text-token rows; publisher layout changed"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, _, err := Derive(catalogsOf(t, tc.claude, tc.openai), "2026-10-08T09:00:00Z", nil)
-			if err == nil || !strings.Contains(err.Error(), tc.want) {
+			if err == nil || err.Error() != tc.want {
 				t.Fatalf("Derive error = %v, want one naming %s", err, tc.want)
 			}
 		})

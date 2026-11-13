@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -666,12 +667,16 @@ func TestHerdrStateReportsOnlyForThePanesOwnEngine(t *testing.T) {
 func TestPayloadHookRoutesEachVerbToItsEntry(t *testing.T) {
 	var stderr bytes.Buffer
 	if rc := PayloadHook([]string{"herdr-state", "bogus"}, strings.NewReader(""), &stderr); rc != 1 ||
-		!strings.Contains(stderr.String(), "herdr-state") {
+		stderr.String() != `pfm internal herdr-state: unknown event "bogus"
+usage: pfm internal herdr-state [--engine claude|codex|opencode] start|working|blocked|idle|end|notification|title|agent-start|agent-stop < hook-payload.json
+       pfm internal herdr-state attach|sync|detach --socket {tmux socket} --session {tmux session} [--client {tmux client pid}]
+       pfm internal herdr-state name --socket {tmux socket} --session {tmux session}
+` {
 		t.Fatalf("herdr-state: rc=%d stderr=%q, want its usage error", rc, stderr.String())
 	}
 	stderr.Reset()
 	if rc := PayloadHook([]string{"herdr-shell", "bogus"}, strings.NewReader(""), &stderr); rc != 2 ||
-		!strings.Contains(stderr.String(), "herdr-shell") {
+		stderr.String() != "pfm internal herdr-shell: verb \"bogus\", want done or release\n" {
 		t.Fatalf("herdr-shell: rc=%d stderr=%q, want its usage error", rc, stderr.String())
 	}
 }
@@ -910,18 +915,22 @@ func TestHerdrStateEndAfterTmuxServerGone(t *testing.T) {
 				getenv: func(k string) string {
 					return map[string]string{"TMUX": socket + ",1,0", "TMUX_PANE": "%0", "HERDR_BIN_PATH": "herdr"}[k]
 				},
-				tmux:      runTmuxForHerdr,
+				// the error runTmuxForHerdr returns once the chat's tmux server is gone
+				tmux: func(_ context.Context, socket string, args ...string) (string, error) {
+					return "", fmt.Errorf(
+						"tmux %s: exit status 1: no server running on %s",
+						strings.Join(args, " "),
+						socket,
+					)
+				},
 				listPanes: listTmuxPanesForHerdr,
 				now:       time.Now,
 				logError:  func(_ string, _ time.Time, message string) error { logged = append(logged, message); return nil },
 			}
 			rc := reportToHerdr([]string{event}, strings.NewReader(`{"session_id":"s1"}`), &stderr, deps)
-			if event == "end" {
-				if rc != 0 || len(logged) != 0 || !strings.Contains(stderr.String(), "INFO") {
-					t.Fatalf("ended server: rc=%d errors=%v stderr=%s", rc, logged, &stderr)
-				}
-			} else if len(logged) != 1 {
-				t.Fatalf("live event lost its fault: %v stderr=%s", logged, &stderr)
+			got := strings.ReplaceAll(fmt.Sprintf("%d %q %s", rc, logged, &stderr), socket, "{socket}")
+			if want := map[string]string{"end": "0 [] INFO pfm internal herdr-state end: tmux server {socket} already gone; foreground client exited: read tmux session of %0: tmux display-message -p -t %0 #{session_name}\t#{pane_pid}: exit status 1: no server running on {socket}\n", "working": "0 [\"pfm internal herdr-state working: read tmux session of %0: tmux display-message -p -t %0 #{session_name}\\t#{pane_pid}: exit status 1: no server running on {socket} (fail-open)\"] pfm internal herdr-state working: read tmux session of %0: tmux display-message -p -t %0 #{session_name}\t#{pane_pid}: exit status 1: no server running on {socket} (fail-open)\n"}[event]; got != want {
+				t.Errorf("rc errors stderr = %q, want %q", got, want)
 			}
 		})
 	}

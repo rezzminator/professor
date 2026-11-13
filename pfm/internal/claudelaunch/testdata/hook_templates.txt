@@ -1,0 +1,25 @@
+{Event:SessionStart Matcher: Command:{home}/.local/bin/pfm internal launcher-repair Name:launcher-repair Async:false}
+{Event:SessionStart Matcher:resume Command:{home}/.local/bin/pfm internal resume-unkill Name:resume-unkill Async:false}
+{Event:UserPromptSubmit Matcher: Command:{home}/.local/bin/pfm usage-hook Name:usage Async:false}
+{Event:SessionEnd Matcher: Command:{home}/.local/bin/pfm internal clear-kill Name:clear-kill Async:false}
+{Event:SessionStart Matcher:clear Command:{home}/.local/bin/pfm internal clear-name Name:clear-name-start Async:false}
+{Event:UserPromptSubmit Matcher: Command:{home}/.local/bin/pfm internal clear-name Name:clear-name-prompt Async:false}
+{Event:SessionEnd Matcher: Command:{home}/.local/bin/pfm internal exit-close Name:exit-close Async:false}
+{Event:PreToolUse Matcher:Bash Command:{home}/.local/bin/pfm internal git-guard Name:git-guard Async:false}
+{Event:PreToolUse Matcher:Bash Command:{home}/.local/bin/pfm internal store-guard Name:store-guard Async:false}
+{Event:PreToolUse Matcher:Bash Command:{home}/.local/bin/pfm internal orchestrator-wait Name:orchestrator-wait Async:false}
+{Event:PreToolUse Matcher:Edit|Write|MultiEdit|NotebookEdit|Bash Command:{home}/.local/bin/pfm internal pcm-guard Name:pcm-guard Async:false}
+{Event:SubagentStart Matcher:rr|rr-pro|rr-pro-max Command:{home}/.local/bin/pfm internal rr-dir Name:rr-dir Async:false}
+{Event:UserPromptSubmit Matcher: Command:{home}/.local/bin/pfm internal epic-inject Name:epic-inject Async:false}
+{Event:UserPromptSubmit Matcher: Command:{home}/.local/bin/pfm internal reload-intercept Name:reload-intercept Async:false}
+{Event:UserPromptSubmit Matcher: Command:{home}/.local/bin/pfm internal exit-intercept Name:exit-intercept Async:false}
+{Event:SessionStart Matcher: Command:{home}/.local/bin/pfm internal herdr-state --engine claude start Name:herdr-start Async:false}
+{Event:UserPromptSubmit Matcher: Command:{home}/.local/bin/pfm internal herdr-state --engine claude working Name:herdr-working-prompt Async:true}
+{Event:PostToolUse Matcher: Command:{home}/.local/bin/pfm internal herdr-state --engine claude working Name:herdr-working-tool Async:true}
+{Event:PostToolUseFailure Matcher: Command:{home}/.local/bin/pfm internal herdr-state --engine claude working Name:herdr-working-tool-failure Async:true}
+{Event:PermissionRequest Matcher: Command:{home}/.local/bin/pfm internal herdr-state --engine claude blocked Name:herdr-blocked Async:true}
+{Event:Notification Matcher:permission_prompt|elicitation_dialog|idle_prompt|plugin_notification Command:{home}/.local/bin/pfm internal herdr-state --engine claude notification Name:herdr-notification Async:true}
+{Event:Stop Matcher: Command:{home}/.local/bin/pfm internal herdr-state --engine claude idle Name:herdr-idle Async:false}
+{Event:SubagentStart Matcher: Command:{home}/.local/bin/pfm internal herdr-state --engine claude agent-start Name:herdr-agent-start Async:false}
+{Event:SubagentStop Matcher: Command:{home}/.local/bin/pfm internal herdr-state --engine claude agent-stop Name:herdr-agent-stop Async:false}
+{Event:SessionEnd Matcher: Command:{home}/.local/bin/pfm internal herdr-state --engine claude end Name:herdr-end Async:false}

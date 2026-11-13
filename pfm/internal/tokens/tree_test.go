@@ -317,20 +317,41 @@ func TestTreeFlagsGoTogether(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"--tree", "s", "--worktree", "/w"}, "--worktree and --base go together"},
-		{[]string{"--tree", "s", "--base", "abc"}, "--worktree and --base go together"},
-		{[]string{"--tree", "s", "--worktree", "", "--base", "abc"}, "--worktree and --base go together"},
-		{[]string{"--json"}, "--json measures a spawn tree: pass --tree with it"},
-		{[]string{"--worktree", "/w", "--base", "abc"}, "--worktree measures a spawn tree: pass --tree with it"},
-		{[]string{"--tree", "s", "--codex"}, "--tree is its own mode"},
-		{[]string{"--tree", "s", "--since", "3d"}, "--tree is its own mode"},
-		{[]string{"--tree", "agent-"}, "--tree wants a session id or an agent id"},
-		{[]string{"--opencode", "--tree", "s"}, "--opencode is its own mode: it takes no --codex, --tree,"},
+		{
+			[]string{"--tree", "s", "--worktree", "/w"},
+			"pfm tokens: --worktree and --base go together: pass both, each with a value, or neither\n",
+		},
+		{
+			[]string{"--tree", "s", "--base", "abc"},
+			"pfm tokens: --worktree and --base go together: pass both, each with a value, or neither\n",
+		},
+		{
+			[]string{"--tree", "s", "--worktree", "", "--base", "abc"},
+			"pfm tokens: --worktree and --base go together: pass both, each with a value, or neither\n",
+		},
+		{[]string{"--json"}, "pfm tokens: --json measures a spawn tree: pass --tree with it\n"},
+		{
+			[]string{"--worktree", "/w", "--base", "abc"},
+			"pfm tokens: --worktree measures a spawn tree: pass --tree with it\n",
+		},
+		{
+			[]string{"--tree", "s", "--codex"},
+			"pfm tokens: --tree is its own mode: it takes no --codex, --opencode, --since, --project, --family, --family-rx, --session, --top, --view, --briefs, --host-label, --codex-root or --opencode-root\n",
+		},
+		{
+			[]string{"--tree", "s", "--since", "3d"},
+			"pfm tokens: --tree is its own mode: it takes no --codex, --opencode, --since, --project, --family, --family-rx, --session, --top, --view, --briefs, --host-label, --codex-root or --opencode-root\n",
+		},
+		{[]string{"--tree", "agent-"}, "pfm tokens: --tree wants a session id or an agent id\n"},
+		{
+			[]string{"--opencode", "--tree", "s"},
+			"pfm tokens: --opencode is its own mode: it takes no --codex, --tree, --root, --family, --family-rx, --session, --out, --view or --briefs\n",
+		},
 	}
 	for _, c := range cases {
 		code, stdout, stderr := auditWith(t, Options{}, append(c.args, "--prices", fixture(t, "model-cost.json"))...)
-		if code != 2 || stdout != "" || !strings.HasPrefix(stderr, "pfm tokens: "+c.want) {
-			t.Errorf("%v: exit %d stdout %q stderr %q, want 2 and %q", c.args, code, stdout, stderr, c.want)
+		if code != 2 || stdout != "" || stderr != c.want {
+			t.Errorf("%v: exit %d stdout %q stderr = %q, want %q", c.args, code, stdout, stderr, c.want)
 		}
 	}
 }

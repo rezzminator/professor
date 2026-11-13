@@ -3,9 +3,11 @@ package testjail
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"syscall"
 	"testing"
@@ -38,28 +40,6 @@ func TestRunKeepsTestScratchUnderTMPDIR(t *testing.T) {
 	}
 }
 
-func TestRunPinsGoCacheOutsideTheJail(t *testing.T) {
-	root := Fleet(t)
-	values, err := paths.Resolve()
-	if err != nil {
-		t.Fatalf("resolve the jail's paths: %v", err)
-	}
-	home := values.Home
-	for _, name := range []string{"GOCACHE", "GOPATH", "GOMODCACHE"} {
-		value := os.Getenv(name)
-		if value == "" {
-			t.Fatalf("%s is unset after Run — a go child would write under the jailed home %s", name, home)
-		}
-		if !filepath.IsAbs(value) {
-			t.Fatalf("%s %q is not absolute", name, value)
-		}
-		if strings.HasPrefix(value, root+string(filepath.Separator)) ||
-			strings.HasPrefix(value, home+string(filepath.Separator)) {
-			t.Fatalf("%s %q sits under the jail (root %s, home %s)", name, value, root, home)
-		}
-	}
-}
-
 // The operator's ~/.local/bin holds pfm's own `claude` launcher shim; a jailed
 // test that resolves a binary through PATH must never reach it. Run strips it
 // before the first test, so the live process PATH carries no such entry.
@@ -86,7 +66,7 @@ func TestPinGoDirsPreservesConfiguredGoCacheDirectories(t *testing.T) {
 		t.Setenv(name, value)
 	}
 	t.Setenv("TEST_TELEMETRY_DIR", filepath.Join(string(filepath.Separator), "configured", "telemetry"))
-	if code := pinGoDirs(); code != 0 {
+	if code := pinGoDirs(false); code != 0 {
 		t.Fatalf("pin Go directories code=%d", code)
 	}
 	for name, want := range configured {
@@ -102,15 +82,8 @@ func TestRunPinsXDGConfigHomeInsideTheJail(t *testing.T) {
 	if home == "" {
 		t.Fatal("PFM_HOME is unset — Run's own jail did not pin it")
 	}
-	xdg := os.Getenv("XDG_CONFIG_HOME")
-	if xdg == "" {
-		t.Fatal("XDG_CONFIG_HOME is unset after Run")
-	}
-	if !filepath.IsAbs(xdg) {
-		t.Fatalf("XDG_CONFIG_HOME %q is not absolute", xdg)
-	}
-	if !strings.HasPrefix(xdg, home+string(filepath.Separator)) {
-		t.Fatalf("XDG_CONFIG_HOME %q does not sit under the jailed PFM_HOME %q", xdg, home)
+	if xdg, want := os.Getenv("XDG_CONFIG_HOME"), filepath.Join(home, ".config"); xdg != want {
+		t.Fatalf("XDG_CONFIG_HOME = %q, want %q under the jailed PFM_HOME", xdg, want)
 	}
 }
 
@@ -322,8 +295,12 @@ func TestInstalledHomeStagesCloneSourceLine(t *testing.T) {
 	root := InstalledHome(t)
 	path := filepath.Join(root, "home", ".zshrc")
 	raw, err := os.ReadFile(path)
-	if err != nil || !strings.Contains(string(raw), checkoutRoot()+"/pfm/internal/installer/assets/shim/pfm.zsh") {
-		t.Fatalf("installed source line=%q error=%v", raw, err)
+	if got, want := strings.ReplaceAll(
+		fmt.Sprint(err, " ", string(raw)),
+		checkoutRoot(),
+		"{checkout}",
+	), "<nil> [[ -r \"{checkout}/pfm/internal/installer/assets/shim/pfm.zsh\" ]] && source \"{checkout}/pfm/internal/installer/assets/shim/pfm.zsh\"\n"; got != want {
+		t.Fatalf(".zshrc = %q, want %q", got, want)
 	}
 }
 
@@ -345,8 +322,10 @@ func TestJailHomeSetupFailure(t *testing.T) {
 	}
 	cleanup, err := jailHome(base)
 	defer cleanup()
-	if !errors.Is(err, syscall.ENOTDIR) || !strings.HasPrefix(err.Error(), "create jailed home under "+base+": ") {
-		t.Fatalf("jail setup error = %v, want contextual not-a-directory error", err)
+	got := regexp.MustCompile(`pfm-jail-home-\d+`).ReplaceAllString(rooted(t, fmt.Sprint(err)), "pfm-jail-home-{n}")
+	want := "create jailed home under {root}/001/blocked: mkdir {root}/001/blocked/pfm-jail-home-{n}: not a directory"
+	if got != want || !errors.Is(err, syscall.ENOTDIR) {
+		t.Fatalf("jail setup error = %q, want %q (ENOTDIR)", got, want)
 	}
 }
 

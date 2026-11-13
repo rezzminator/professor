@@ -436,7 +436,9 @@ func TestSiblingSnapshotReadingsSurviveAnUnreadableSibling(t *testing.T) {
 		t.Fatal(err)
 	}
 	lines := renderQuotaLines(t, runtime, quotaPayload())
-	if got := stripANSICodes(lines[2]); !strings.Contains(got, "7d-used:89%") {
+	if got := stripANSICodes(
+		lines[2],
+	); got != "▰▱▱▱▱ 5h-used:29% ↻0h39m │ ▱▱▱▱▱ 7d-fable-used:0% ↻3d3h │ ▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▱▱▱ 7d-used:89% ↻3d3h" {
 		t.Fatalf("quota row = %q, want the readable sibling's 7d-used:89%% beside the unreadable one", got)
 	}
 	wantWarn := "statusline: sibling quota snapshots " + runtime.RateLimitDir +

@@ -624,8 +624,8 @@ func TestMCPStdioStartsWhenTheSoleFamilyFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newStdioFamilies error = %v, want a started server whose chat tools answer the error", err)
 	}
-	if !strings.Contains(stderr.String(), "configure chat: ") {
-		t.Fatalf("stderr = %q, want the line naming the failed chat family", stderr.String())
+	if want := "pfm mcp serve --stdio: configure chat: configure chat MCP backend: tmux directory is empty\n"; stderr.String() != want {
+		t.Fatalf("stderr = %q, want %q", stderr.String(), want)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -653,9 +653,12 @@ func TestMCPStdioStartsWhenTheSoleFamilyFails(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s protocol error = %v, want an MCP error result", name, err)
 		}
-		if text := toolResultText(result); !result.IsError ||
-			!strings.Contains(text, "configure chat MCP backend: tmux directory is empty") {
-			t.Fatalf("%s = IsError %t %q, want the configuration error", name, result.IsError, text)
+		if text, want := rooted(
+			toolResultText(result),
+			root,
+		), "pfm mcp: the chat family failed to configure: configure chat MCP backend: tmux directory is empty. Fix: correct the config key this error names in {root}/config.json, then reconnect the MCP server (Claude Code: /mcp; Codex and OpenCode: start a new chat)."; !result.IsError ||
+			text != want {
+			t.Fatalf("%s IsError %t = %q, want %q", name, result.IsError, text, want)
 		}
 	}
 }

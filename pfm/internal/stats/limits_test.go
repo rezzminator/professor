@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -19,6 +20,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	pfmstatusline "github.com/rezzminator/professor/pfm/internal/statusline"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 	"github.com/rezzminator/professor/pfm/internal/usagehook"
 )
 
@@ -91,14 +93,10 @@ func TestLimitsSamplerRejectsStatuslineQuotaFromPreviousAccountIdentity(t *testi
 	// holding none, so it does get the credential probe. What must survive the
 	// probe is the refusal itself: a snapshot belonging to a previous account
 	// identity is never adopted, however the account is repaired afterwards.
-	if acks != 1 || len(warnings) != 1 || len(limits) != 1 || len(limits[0].Windows) != 0 ||
-		!strings.Contains(limits[0].Status, ".credentials.json") {
-		t.Fatalf(
-			"acks=%d warnings=%v limits=%#v, want old identity refused and missing credentials surfaced",
-			acks,
-			warnings,
-			limits,
-		)
+	want := "acks 1 · windows 0 · account 2 limits unavailable: read usage credentials: no {home}/403/.cc/2/.credentials.json and no keychain item \"Claude Code-credentials-{hash}\": file does not exist · [\"account 2 limits unavailable: read usage credentials: no {home}/403/.cc/2/.credentials.json and no keychain item \\\"Claude Code-credentials-{hash}\\\": file does not exist\"]"
+	got := fmt.Sprintf("acks %d · %s", acks, sampleText(t, limits, warnings, home))
+	if got = regexp.MustCompile(`credentials-[0-9a-f]+`).ReplaceAllString(got, "credentials-{hash}"); got != want {
+		t.Fatalf("sample = %q, want %q", got, want)
 	}
 }
 
@@ -186,7 +184,7 @@ func TestDefaultLimitsTTLMatchesSharedUsageCacheCadence(t *testing.T) {
 }
 
 func TestLimitsSamplerTurnsPersistentCredentialRejectionIntoNamedSkip(t *testing.T) {
-	home := "/home/test"
+	home := testjail.Place("/home/test")
 	configDir := pfmconfig.DefaultAccountDir(home, 3)
 	label := pfmconfig.DisplayAccountDir(home, 3, configDir)
 	var fetches, acks int
@@ -502,11 +500,9 @@ func TestLimitsSamplerKeepsRealFetchFailureVisible(t *testing.T) {
 		return usagehook.Usage{}, fmt.Errorf("network route unavailable")
 	}
 	limits, warnings := sampler.Sample(context.Background())
-	if len(limits) != 1 || !strings.Contains(limits[0].Status, "network route unavailable") {
-		t.Fatalf("limits=%#v, want visible real-account error", limits)
-	}
-	if len(warnings) != 1 || !strings.Contains(warnings[0], "network route unavailable") {
-		t.Fatalf("warnings=%v, want real-account diagnostic", warnings)
+	want := "windows 0 · account 2 limits unavailable: network route unavailable · [\"account 2 limits unavailable: network route unavailable\"]"
+	if got := sampleText(t, limits, warnings, t.TempDir()); got != want {
+		t.Fatalf("sample = %q, want %q", got, want)
 	}
 }
 
@@ -1277,12 +1273,13 @@ func TestLimitsSamplerSuccessfulFetchReportsClaudeCacheWriteFailure(t *testing.T
 	sampler.Endpoint = server.URL
 	sampler.Client = server.Client()
 	limits, warnings := sampler.Sample(context.Background())
-	if len(limits) != 1 || len(limits[0].Windows) != 2 ||
-		!strings.HasPrefix(limits[0].Status, "write Claude limits cache:") {
-		t.Fatalf("successful provider fetch hid cache write error: limits=%#v", limits)
-	}
-	if len(warnings) != 1 || !strings.Contains(warnings[0], "write Claude limits cache:") {
-		t.Fatalf("cache write warnings=%v, want concrete write failure", warnings)
+	want := strings.ReplaceAll(
+		"windows 2 · write Claude limits cache: create usage cache directory {home}/tmp/cc-usage-{uid}: mkdir {home}/tmp: not a directory\ncreate usage cache directory {home}/tmp/cc-usage-{uid}: mkdir {home}/tmp: not a directory\nstatusline snapshot: read statusline quota directory: open {home}/tmp/cc-rate-limits: not a directory\nusage cache treated as empty: lstat {home}/tmp/cc-usage-{uid}: not a directory · [\"account 10 limits refresh failed; showing cache confirmed 2027-01-15T08:00:00Z: write Claude limits cache: create usage cache directory {home}/tmp/cc-usage-{uid}: mkdir {home}/tmp: not a directory\\ncreate usage cache directory {home}/tmp/cc-usage-{uid}: mkdir {home}/tmp: not a directory\\nstatusline snapshot: read statusline quota directory: open {home}/tmp/cc-rate-limits: not a directory\\nusage cache treated as empty: lstat {home}/tmp/cc-usage-{uid}: not a directory\"]",
+		"{uid}",
+		strconv.Itoa(os.Getuid()),
+	)
+	if got := sampleText(t, limits, warnings, home); got != want {
+		t.Fatalf("sample = %q, want %q", got, want)
 	}
 }
 
@@ -1747,15 +1744,10 @@ func TestLimitsSamplerTellsASignedOutAccountToLogIn(t *testing.T) {
 		t.Fatal("a signed-out account was probed")
 		return nil
 	}
-	limits, _ := sampler.Sample(context.Background())
-	if len(limits) != 1 {
-		t.Fatalf("limits=%#v, want one row", limits)
-	}
-	if !strings.Contains(limits[0].Status, "claude /login") {
-		t.Fatalf("status=%q, want the card to name the interactive repair", limits[0].Status)
-	}
-	if strings.Contains(limits[0].Status, "no such file or directory") {
-		t.Fatalf("status=%q, must not blame a missing file on a keychain host", limits[0].Status)
+	limits, warnings := sampler.Sample(context.Background())
+	want := "windows 0 · account 2 limits unavailable: keychain item holds no access token: account is signed out; run `claude /login` for it · [\"account 2 limits unavailable: keychain item holds no access token: account is signed out; run `claude /login` for it\"]"
+	if got := sampleText(t, limits, warnings, home); got != want {
+		t.Fatalf("sample = %q, want %q", got, want)
 	}
 }
 
@@ -1867,4 +1859,14 @@ func TestLimitsRefetchesCacheWhoseWindowsAllExpiredUnlessBackedOff(t *testing.T)
 			}
 		})
 	}
+}
+
+// sampleText renders the one sampled account as "windows N · status · warnings", home as {home}.
+func sampleText(t *testing.T, limits []AccountLimits, warnings []string, home string) string {
+	t.Helper()
+	if len(limits) != 1 {
+		t.Fatalf("limits = %#v, want one row", limits)
+	}
+	text := fmt.Sprintf("windows %d · %s · %q", len(limits[0].Windows), limits[0].Status, warnings)
+	return strings.ReplaceAll(text, home, "{home}")
 }

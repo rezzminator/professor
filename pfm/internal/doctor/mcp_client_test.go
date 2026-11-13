@@ -70,23 +70,23 @@ func TestDoctorMCPClientReportsOpenCodeStates(t *testing.T) {
 func TestDoctorMCPClientReportsFamilyOwnership(t *testing.T) {
 	for _, family := range []string{pfmconfig.MCPServerChat} {
 		for _, tc := range []struct {
-			name, ledger, remediation string
-			enabled                   bool
-			warnings                  int
+			name, ledger, want string
+			enabled            bool
+			warnings           int
 		}{
-			{name: "enabled", enabled: true},
+			{name: "enabled", enabled: true, want: "doctor: mcp client=opencode config={root}/.config/opencode/opencode.jsonc chat-professor=pfm\n"},
 			{
 				name: "disabled owned", ledger: "opencodeRegistrations", warnings: 1,
-				remediation: "remediation=run pfm install --yes",
+				want: "doctor: mcp client=opencode config={root}/.config/opencode/opencode.jsonc chat-professor=pfm remediation=run pfm install --yes\n",
 			},
 			{
 				name: "disabled pending", ledger: "opencodePending", warnings: 1,
-				remediation: "remediation=run pfm install --yes",
+				want: "doctor: mcp client=opencode config={root}/.config/opencode/opencode.jsonc chat-professor=pfm remediation=run pfm install --yes\n",
 			},
-			{name: "disabled unowned", warnings: 1, remediation: "user-owned entry pfm install will not replace"},
+			{name: "disabled unowned", warnings: 1, want: "doctor: mcp client=opencode config={root}/.config/opencode/opencode.jsonc chat-professor=pfm remediation=chat-professor in {root}/.config/opencode/opencode.jsonc is a user-owned entry pfm install will not replace — remove or rename it, then run pfm install --yes\n"},
 			{
 				name: "disabled unreadable ownership", ledger: "unreadable", warnings: 1,
-				remediation: "ownership=unreadable error=",
+				want: "doctor: mcp client=opencode config={root}/.config/opencode/opencode.jsonc chat-professor=pfm ownership=unreadable error=decode MCP ownership {root}/.local/share/pfm/install/mcp-ownership.json: unexpected end of JSON input remediation=run pfm install --yes\n",
 			},
 		} {
 			t.Run(family+"/"+tc.name, func(t *testing.T) {
@@ -126,14 +126,8 @@ func TestDoctorMCPClientReportsFamilyOwnership(t *testing.T) {
 				runtime.Config.CodexAccounts = []pfmconfig.CodexAccount{}
 				var output bytes.Buffer
 				warnings := printOpenCodeRows(&output, runtime)
-				want := "client=opencode config=" + path + " " + name + "=pfm"
-				if tc.enabled {
-					want += "\n"
-				}
-				if warnings != tc.warnings || !strings.Contains(output.String(), want) ||
-					(tc.remediation != "" && !strings.Contains(output.String(), tc.remediation)) {
-					t.Fatalf("warnings=%d output=%s; want %d warnings, %q and %q",
-						warnings, output.String(), tc.warnings, want, tc.remediation)
+				if got := rooted(output.String(), home); warnings != tc.warnings || got != tc.want {
+					t.Errorf("warnings=%d output = %q, want %q", warnings, got, tc.want)
 				}
 			})
 		}
@@ -234,26 +228,19 @@ func TestDoctorMCPClientReportsCodexProfessorStates(t *testing.T) {
 	professor := "[mcp_servers.chat-professor]\ncommand = \"" + bin + "\"\nargs = [\"mcp\", \"serve\", \"--stdio\", \"--family\", \"chat\"]\n"
 	fenced := "# BEGIN pfm mcp_servers — installer-owned\n" + professor +
 		"# END pfm mcp_servers — installer-owned\n"
-	row := "doctor: mcp client=codex config=" + path + " chat-professor="
-	reinstall := " remediation=run pfm install --yes"
 	for _, fixture := range []struct {
 		name, config string
 		enabled      bool
-		wantRow      string
+		want         string
 		warnings     int
 	}{
-		{"present", fenced, true, row + "pfm\n", 0},
-		{"present while disabled", fenced, false, row + "pfm" + reinstall + "\n", 1},
-		{"absent while enabled", "", true, row + "absent" + reinstall + "\n", 1},
-		{"absent while disabled", "", false, row + "absent\n", 0},
-		{
-			"foreign", "[mcp_servers.chat-professor]\ncommand = \"/opt/professor/bin/serve\"\n", true,
-			row + "foreign-registration remediation=chat-professor in " + path +
-				" is a user-owned entry pfm install will not replace — remove or rename it, then run pfm install --yes\n",
-			1,
-		},
+		{"present", fenced, true, "doctor: mcp client=codex config={root}/.codex/config.toml chat-professor=pfm\ndoctor: mcp client=opencode config={root}/.config/opencode/opencode.jsonc chat-professor=pfm\ndoctor: mcp client-cutover=complete\n", 0},
+		{"present while disabled", fenced, false, "doctor: mcp client=codex config={root}/.codex/config.toml chat-professor=pfm remediation=run pfm install --yes\ndoctor: mcp client=opencode config={root}/.config/opencode/opencode.jsonc chat-professor=absent\n", 1},
+		{"absent while enabled", "", true, "doctor: mcp client=codex config={root}/.codex/config.toml chat-professor=absent remediation=run pfm install --yes\ndoctor: mcp client=opencode config={root}/.config/opencode/opencode.jsonc chat-professor=pfm\n", 1},
+		{"absent while disabled", "", false, "doctor: mcp client=codex config={root}/.codex/config.toml chat-professor=absent\ndoctor: mcp client=opencode config={root}/.config/opencode/opencode.jsonc chat-professor=absent\ndoctor: mcp client-cutover=complete\n", 0},
+		{"foreign", "[mcp_servers.chat-professor]\ncommand = \"/opt/professor/bin/serve\"\n", true, "doctor: mcp client=codex config={root}/.codex/config.toml chat-professor=foreign-registration remediation=chat-professor in {root}/.codex/config.toml is a user-owned entry pfm install will not replace — remove or rename it, then run pfm install --yes\ndoctor: mcp client=opencode config={root}/.config/opencode/opencode.jsonc chat-professor=pfm\n", 1},
 		// An unparseable file must report an error, never absence.
-		{"unreadable", "[mcp_servers.chat-professor\n", true, row + "unreadable error=", 1},
+		{"unreadable", "[mcp_servers.chat-professor\n", true, "doctor: mcp client=codex config={root}/.codex/config.toml chat-professor=unreadable error=parse {root}/.codex/config.toml: toml: line 2: expected '.' or ']' to end table name, but got '\\n' instead\ndoctor: mcp client=opencode config={root}/.config/opencode/opencode.jsonc chat-professor=pfm\n", 1},
 	} {
 		t.Run(fixture.name, func(t *testing.T) {
 			if err := os.WriteFile(path, []byte(fixture.config), 0o600); err != nil {
@@ -293,16 +280,8 @@ func TestDoctorMCPClientReportsCodexProfessorStates(t *testing.T) {
 			}
 			var stdout bytes.Buffer
 			warnings := PrintMCPClientCutover(&stdout, runtime)
-			out := stdout.String()
-			if warnings != fixture.warnings || !strings.Contains(out, fixture.wantRow) {
-				t.Fatalf("warnings=%d output:\n%s\nwant %d warnings and the row %q", warnings, out, fixture.warnings,
-					fixture.wantRow)
-			}
-			if strings.Count(out, "client=codex config=") != 1 {
-				t.Fatalf("want exactly one Codex professor row:\n%s", out)
-			}
-			if complete := strings.Contains(out, "client-cutover=complete"); complete != (fixture.warnings == 0) {
-				t.Fatalf("client-cutover=complete printed=%v with %d warnings:\n%s", complete, fixture.warnings, out)
+			if got := rooted(stdout.String(), home); warnings != fixture.warnings || got != fixture.want {
+				t.Errorf("warnings=%d output = %q, want %q", warnings, got, fixture.want)
 			}
 		})
 	}

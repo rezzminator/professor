@@ -10,7 +10,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	harnessprompts "github.com/rezzminator/professor/pfm/harness-prompts"
@@ -159,14 +158,13 @@ func TestInstallNamesHarnessGenerationFailure(t *testing.T) {
 		Mode: ModeApply, Home: home, SourceRepo: clone, MCPConfigPath: configPath,
 		Runner: &fakeRunner{}, Stdout: &output,
 	})
-	failure := "generate harness prompts: read generated harness prompt " + blocked + ": "
-	if err == nil || !strings.Contains(err.Error(), failure) || strings.Contains(err.Error(), "preflight") {
-		t.Fatalf("generation failure was not named as %q: %v", failure, err)
+	failure := "generate harness prompts: read generated harness prompt " + blocked + ": read " + blocked + ": is a directory"
+	if err == nil || err.Error() != failure {
+		t.Fatalf("generation failure = %v, want %q", err, failure)
 	}
-	skip := "  skip    Codex config defaults and fleet prompt skipped: the codex harness prompt failed to generate above\n"
-	if !strings.Contains(output.String(), skip) {
-		t.Fatalf("output lacks %q:\n%s", skip, output.String())
-	}
+	wantOutputLines(t, output.String(), []string{
+		"  skip    Codex config defaults and fleet prompt skipped: the codex harness prompt failed to generate above",
+	}, "Codex config defaults")
 	if _, err := os.Stat(filepath.Join(home, ".codex", "config.toml")); !os.IsNotExist(err) {
 		t.Fatalf("consumer ran after generation failure: %v", err)
 	}
@@ -222,7 +220,5 @@ func TestInstallComposesFromTheCloneTreeNotTheEmbed(t *testing.T) {
 		t.Fatal(err)
 	}
 	generated := readFixture(t, filepath.Join(clone, "pfm", "harness-prompts", "generated", "claude.md"))
-	if !strings.Contains(generated, cloneHeadLine) {
-		t.Fatalf("install composed generated/claude.md without the clone's edited head:\n%.300s", generated)
-	}
+	wantOutputLines(t, generated, []string{cloneHeadLine}, "clone-only head line")
 }

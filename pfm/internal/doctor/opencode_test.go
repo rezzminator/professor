@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -80,7 +79,8 @@ INSERT INTO part VALUES ('part', 'message', 'session', 1, 1, '{"type":"text","te
 	warnings := printOpenCodeStoreDoctor(context.Background(), &stdout, pfmconfig.Config{
 		OpenCodeAccounts: []pfmconfig.OpenCodeAccount{{ID: 1, Home: root}},
 	})
-	if warnings == 0 || !strings.Contains(stdout.String(), "doctor: opencode store=unhealthy") {
+	if warnings == 0 ||
+		stdout.String() != "doctor: opencode store=unhealthy account=1 error=validate opencode rows: opencode session session kept with malformed rows (message JSON 1)\n" {
 		t.Fatalf("doctor warnings=%d output=%q, want malformed row reported unhealthy", warnings, stdout.String())
 	}
 }

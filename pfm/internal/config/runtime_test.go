@@ -430,11 +430,12 @@ func TestLoadRuntimeUnusableMarker(t *testing.T) {
 	for _, tc := range []struct {
 		name               string
 		load               func(string) (Runtime, error)
+		want               string
 		refuse, diagnostic bool
 	}{
-		{name: "ordinary", load: LoadRuntime, refuse: true},
+		{name: "ordinary", load: LoadRuntime, refuse: true, want: "no config path: inspect recorded source repository {home}/missing-clone: recorded source repository is unusable: stat {home}/missing-clone: no such file or directory — run pfm install from the clone, or set PFM_CONFIG"},
 		{name: "install", load: LoadInstallRuntime},
-		{name: "diagnostic", load: LoadDiagnosticRuntime, diagnostic: true},
+		{name: "diagnostic", load: LoadDiagnosticRuntime, diagnostic: true, want: "no config path: inspect recorded source repository {home}/missing-clone: recorded source repository is unusable: stat {home}/missing-clone: no such file or directory — run pfm install from the clone, or set PFM_CONFIG"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home := t.TempDir()
@@ -450,18 +451,26 @@ func TestLoadRuntimeUnusableMarker(t *testing.T) {
 			}
 			got, err := tc.load("")
 			if tc.refuse {
-				if !errors.Is(err, paths.ErrSourceRepoUnusable) || !strings.Contains(err.Error(), missing) ||
-					!strings.Contains(err.Error(), "run pfm install from the clone") {
-					t.Fatalf("ordinary marker load = %v, want the recorded clone and remedy", err)
+				if got := strings.ReplaceAll(
+					fmt.Sprint(err),
+					home,
+					"{home}",
+				); !errors.Is(err, paths.ErrSourceRepoUnusable) ||
+					got != tc.want {
+					t.Fatalf("ordinary marker load = %q, want %q", got, tc.want)
 				}
 				return
 			}
 			if err != nil || got.Config.Path != "" || got.Config.Exists {
 				t.Fatalf("runtime marker load: path=%q exists=%v err=%v", got.Config.Path, got.Config.Exists, err)
 			}
-			if tc.diagnostic && (!errors.Is(got.ConfigError, paths.ErrSourceRepoUnusable) ||
-				!strings.Contains(got.ConfigError.Error(), missing)) {
-				t.Fatalf("diagnostic marker error = %v, want the recorded clone", got.ConfigError)
+			if diag := strings.ReplaceAll(
+				fmt.Sprint(got.ConfigError),
+				home,
+				"{home}",
+			); tc.diagnostic &&
+				(!errors.Is(got.ConfigError, paths.ErrSourceRepoUnusable) || diag != tc.want) {
+				t.Fatalf("diagnostic marker error = %q, want %q", diag, tc.want)
 			}
 		})
 	}

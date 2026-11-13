@@ -44,7 +44,7 @@ func TestManagerConfirmExitFailsWhenPaneOutlivesEscalation(t *testing.T) {
 	if err == nil {
 		t.Fatal("ConfirmExit = nil, want an error: the pane never left tmux's pane list")
 	}
-	if !strings.Contains(err.Error(), "still alive") {
+	if err.Error() != "pane %9 still alive after kill" {
 		t.Fatalf("ConfirmExit error = %q, want it to name the pane as still alive", err.Error())
 	}
 	if len(tmux.killedPanes) == 0 {

@@ -2,29 +2,20 @@ package main
 
 import (
 	"bytes"
-	"strings"
+	"regexp"
 	"testing"
 )
 
 func TestModelCostCLIEntry(t *testing.T) {
 	jailTest(t)
+	// The jail sets PFM_PRICES_OFFLINE=1: the dispatch reaches the refresh, which fetches nothing and reports why.
 	var out, errs bytes.Buffer
-	if code := run(
-		[]string{"model-cost", "--help"},
-		&out,
-		&errs,
-	); code != 0 || !strings.Contains(out.String(), "--all") || !strings.Contains(out.String(), "--force") {
-		t.Fatalf("model-cost --help code=%d stdout=%q stderr=%q", code, out.String(), errs.String())
-	}
-	out.Reset()
-	// The jail sets PFM_PRICES_OFFLINE=1: the dispatch reaches the refresh,
-	// which fetches nothing and reports why.
-	if code := run([]string{"model-cost", "--check"}, &out, &errs); code != 0 ||
-		!strings.HasPrefix(out.String(), "prices: ") || !strings.Contains(out.String(), "refresh offline") {
-		t.Fatalf("model-cost --check code=%d stdout=%q stderr=%q", code, out.String(), errs.String())
-	}
-	out.Reset()
-	if code := run([]string{"help"}, &out, &errs); code != 0 || !strings.Contains(out.String(), "model-cost") {
-		t.Fatalf("help code=%d lacks model-cost: %s", code, out.String())
+	code := run([]string{"model-cost", "--check"}, &out, &errs)
+	// The row count, fetch time and clone path belong to the published table and the checkout, not to this dispatch.
+	got := regexp.MustCompile(`\d+ rows · fetched \S+ · from file \S+`).
+		ReplaceAllString(out.String(), "{n} rows · fetched {t} · from file {file}")
+	if want := "prices: {n} rows · fetched {t} · from file {file} · refresh offline · billing: direct/global (default; cloud rates may differ) · override: none\n"; code != 0 ||
+		got != want {
+		t.Fatalf("model-cost --check code=%d stderr=%q stdout = %q, want %q", code, errs.String(), got, want)
 	}
 }

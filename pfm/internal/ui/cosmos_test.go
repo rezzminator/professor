@@ -52,51 +52,38 @@ func TestCosmosCanvasQuantizesEveryColorWithoutCursorAddressing(t *testing.T) {
 	canvas := NewCanvas(2, 1)
 	canvas.SetCell(0, 0, 'X', RGB{101, 102, 103}, true)
 	frame := canvas.render()
-	if strings.Contains(frame, "\x1b[1;1H") {
+	if frame != "\x1b[1;38;2;104;104;104mX \x1b[0m" {
 		t.Fatalf("canvas frame used cursor addressing: %q", frame)
-	}
-	if !strings.Contains(frame, "\x1b[1;38;2;104;104;104mX") {
-		t.Fatalf("canvas color was not step-8 quantized: %q", frame)
-	}
-	if !strings.HasSuffix(frame, " \x1b[0m") {
-		t.Fatalf("canvas did not return one complete row: %q", frame)
 	}
 }
 
 func TestCosmosBrokenStatesRemainDistinct(t *testing.T) {
 	snapshot := fixtureSnapshot(80)
 	snapshot.NoSky = true
-
-	empty := NewModel(snapshot)
-	empty.tab = TabCosmos
-	emptyText := ansi.Strip(empty.renderCosmosPanel(80, 9))
-	if !strings.Contains(emptyText, "no chat traffic recorded yet") || strings.Contains(emptyText, "unreachable") {
-		t.Fatalf("healthy empty cosmos was not distinct:\n%s", emptyText)
+	var panels []string
+	for _, state := range []compose.CosmosGraph{
+		{},
+		{Err: "sqlite: database is locked"},
+		{Warnings: []string{compose.CosmosTruncationWarning}},
+	} {
+		snapshot.Cosmos = state
+		model := NewModel(snapshot)
+		model.tab = TabCosmos
+		panels = append(panels, ansi.Strip(model.renderCosmosPanel(80, 9)))
 	}
-
-	snapshot.Cosmos.Err = "sqlite: database is locked"
-	broken := NewModel(snapshot)
-	broken.tab = TabCosmos
-	brokenText := ansi.Strip(broken.renderCosmosPanel(80, 9))
-	if !strings.Contains(brokenText, "⚠ comms ledger unreachable: sqlite: database is locked") ||
-		strings.Contains(brokenText, "no chat traffic recorded yet") {
-		t.Fatalf("ledger failure was not distinct:\n%s", brokenText)
-	}
-
-	snapshot.Cosmos.Err = ""
-	snapshot.Cosmos.Warnings = []string{compose.CosmosTruncationWarning}
-	warned := NewModel(snapshot)
-	warned.tab = TabCosmos
-	warnedText := ansi.Strip(warned.renderCosmosPanel(80, 9))
-	if !strings.Contains(warnedText, compose.CosmosTruncationWarning) || strings.Contains(warnedText, "unreachable") {
-		t.Fatalf("truncated cosmos was not distinct:\n%s", warnedText)
-	}
+	golden(t, "ui_cosmos_broken_states.txt", strings.Join(panels, "\n"))
 }
 
 func TestCosmosTinyPaneFallsBackToNewestEdges(t *testing.T) {
 	model := cosmosTestModel(19, true)
 	plain := ansi.Strip(model.renderCosmosPanel(19, 7))
-	if !strings.Contains(plain, "RR") || !strings.Contains(plain, "hello cosmos") {
+	if plain != `╭─ cosmos ────────╮
+│123456… → RR     │
+│hello cosmos     │
+│                 │
+│                 │
+│                 │
+╰─────────────────╯` {
 		t.Fatalf("tiny pane dropped truthful edge detail:\n%s", plain)
 	}
 }
@@ -114,21 +101,8 @@ func TestCosmosParentlessSpawnIsNotEmptyInEitherLayout(t *testing.T) {
 	model := NewModel(snapshot)
 	model.tab = TabCosmos
 
-	tests := []struct {
-		name          string
-		width, height int
-	}{
-		{name: "full", width: 80, height: 9},
-		{name: "compact", width: 19, height: 7},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			plain := ansi.Strip(model.renderCosmosPanel(test.width, test.height))
-			if strings.Contains(plain, "no chat traffic") {
-				t.Fatalf("parentless spawn rendered as empty universe:\n%s", plain)
-			}
-		})
-	}
+	golden(t, "ui_cosmos_parentless_spawn.txt",
+		ansi.Strip(model.renderCosmosPanel(80, 9))+"\n"+ansi.Strip(model.renderCosmosPanel(19, 7)))
 }
 
 func TestCosmosSamplerIsLazyAndRetainsGraphOnFailure(t *testing.T) {

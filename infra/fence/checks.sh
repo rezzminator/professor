@@ -345,7 +345,7 @@ checks_templates_mirrors_generate() {
 checks_templates_generated_agents() {
   local es_bin="$TMP_BASE/engine-sync/engine-sync" sources="$REPO_ROOT/templates/global/agents"
   local jail home src names declared name rendered=0 missing="" out rc=0 named="" stale unknown="" unmapped="" path
-  local tracked="$REPO_ROOT/templates/generated/agents" kept
+  local tracked="$REPO_ROOT/templates/generated/agents" kept fixture inventory
   head_ "templates — generated agents render"
   # A machine agent .md file carrying from: is a declaration: engine-sync renders
   # it as a generated agent, the source agent with swapped body text; a shared file
@@ -423,6 +423,14 @@ checks_templates_generated_agents() {
     fi
     rm -rf "$jail"
     return
+  fi
+  # pfm's unit tests read the agent inventory from a tracked fixture (testjail's registry.go) and
+  # start no interpreter: the fixture equals the inventory of the tree under test, or is stale.
+  fixture="$REPO_ROOT/pfm/internal/testjail/testdata/global-agents.json"
+  if ! inventory="$(cd "$src" && python3 -I "$REPO_ROOT/scripts/agent-source-inventory.py" templates/global/agents 2>&1)"; then
+    fail_step "agent inventory fixture NOT CHECKED — the inventory failed: $inventory"
+  elif [[ "$inventory" != "$(cat "$fixture" 2>&1)" ]]; then
+    fail_step "agent inventory fixture is stale: python3 -I scripts/agent-source-inventory.py templates/global/agents > pfm/internal/testjail/testdata/global-agents.json"
   fi
   declared=$(grep -c . <<<"$names" || true)
   if (( declared == 0 )); then
@@ -899,6 +907,24 @@ internal/installer TestMCPWritePreservesAnEditDuringBackup
 internal/pricing/modelcost TestRefreshDuringAnUpdateHoldsOwnershipThroughPersistence
 internal/store TestClearNameReservationsAreUniqueAcrossCaches'
 
+# checks_pfm_unit_proof <pfm dir> <run dir>: the unit tier in place, as on any host, under
+# scripts/unit-proof.sh's hostile ambient and syscall trace, its out directory {run dir}/unit-proof.
+# Its FAIL (a failing test, a reach row, a missing-tool skip) or ERROR (it could not look) fails the
+# step with the verdict line and the first 40 reach rows.
+checks_pfm_unit_proof() {
+  local d="$1" run_dir="$2" out="$2/unit-proof" rc=0 verdict
+  head_ "pfm — unit proof (scripts/unit-proof.sh)"
+  bash "$d/scripts/unit-proof.sh" --out "$out" >"$run_dir/unit-proof.log" 2>&1 || rc=$?
+  verdict="$(tail -n 1 "$run_dir/unit-proof.log" 2>&1)"
+  if (( rc == 0 )); then
+    ok "pfm: unit proof — $verdict"
+    return
+  fi
+  info "first 40 reach rows of $out/reach.tsv (package, kind, target, count):"
+  head -n 40 "$out/reach.tsv" 2>&1 | cut -f1-4
+  fail_step "pfm: unit proof exit $rc — $verdict (log $run_dir/unit-proof.log)"
+}
+
 checks_pfm_race() {
   checks_module_race "$1" "$2" pfm github.com/rezzminator/professor/pfm "$CHECKS_PFM_RACE_TESTS"
 }
@@ -1211,6 +1237,7 @@ gate_run() { # pfm, templates, or all
     steps_add_heavy pfm.unit checks_pfm_unit "$d" "$run_dir" || return 1
     steps_add_heavy pfm.e2e checks_pfm_e2e "$d" "$run_dir" || return 1
     steps_add_heavy pfm.race checks_pfm_race "$d" "$run_dir" || return 1
+    steps_add_heavy pfm.unit-proof checks_pfm_unit_proof "$d" "$run_dir" || return 1
     for f in "$d"/scripts/*_test.sh; do
       [[ -f "$f" ]] || { fail_step 'pfm: gate-script self-tests NOT RUN — no fixture suites found'; return 1; }
       stem="${f##*/}"; stem="${stem%_test.sh}"

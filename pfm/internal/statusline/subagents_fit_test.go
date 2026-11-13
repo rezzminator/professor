@@ -1,7 +1,6 @@
 package statusline
 
 import (
-	"strings"
 	"testing"
 )
 
@@ -54,7 +53,7 @@ func TestRenderAgentRowsFitsColumns(t *testing.T) {
 		`"model":"claude-opus-5-5","effort":"high","contextWindowSize":1000000,"startTime":` +
 		jsonText(subagentStart.UnixMilli()) + `}`
 	got, _ := renderOneSubagentColumns(t, session, task, 100)
-	if strings.Contains(got, "💾") || strings.Contains(got, "│pfm│") || !strings.HasSuffix(got, "│map") {
+	if got != "▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/2.0K/35/2│tracer│opus·▰▰▰ high│running 2m:0s│1 error│⟲1│map" {
 		t.Fatalf("content = %q, want cache and cwd dropped, the label kept", got)
 	}
 }

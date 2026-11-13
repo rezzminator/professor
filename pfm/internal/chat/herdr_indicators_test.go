@@ -125,7 +125,7 @@ func TestHerdrTabProviderReadFailureIsVisible(t *testing.T) {
 	}
 	got, err := provider.tabs(context.Background(), "endpoint")
 	if err != nil || len(got) != 1 || got[0].State != "unknown" ||
-		!strings.Contains(warnings.String(), "transcript denied") {
+		warnings.String() != "Herdr tab status of s1: transcript denied\n" {
 		t.Fatalf("tabs=%+v err=%v warnings=%s", got, err, warnings)
 	}
 	provider.scan = func(context.Context) (FleetScan, error) { return FleetScan{}, fmt.Errorf("fleet denied") }
@@ -133,7 +133,7 @@ func TestHerdrTabProviderReadFailureIsVisible(t *testing.T) {
 		context.Background(),
 		"endpoint",
 	); err == nil ||
-		!strings.Contains(err.Error(), "fleet denied") {
+		err.Error() != "scan tab chats: fleet denied" {
 		t.Fatalf("fleet failure=%v", err)
 	}
 }
@@ -146,8 +146,12 @@ func TestHerdrTabStartupFailureIsVisible(t *testing.T) {
 	t.Setenv("PFM_CONFIG", path)
 	warnings := &bytes.Buffer{}
 	err := PaintHerdrIndicators(context.Background(), "endpoint", t.TempDir(), warnings)
-	if err == nil || !strings.Contains(warnings.String(), "herdrTabStatus must be") {
-		t.Fatalf("startup failure err=%v diagnostic=%q", err, warnings.String())
+	if got, want := strings.ReplaceAll(
+		fmt.Sprintf("%v\n%s", err, warnings),
+		path,
+		"{config}",
+	), "load tab indicator runtime: config {config}: chat.herdrTabStatus must be emoji, text or off\nload tab indicator runtime: config {config}: chat.herdrTabStatus must be emoji, text or off\n"; got != want {
+		t.Fatalf("startup failure = %q, want %q", got, want)
 	}
 }
 
@@ -646,7 +650,8 @@ func TestHerdrTabProviderOneChatFailureKeepsOthers(t *testing.T) {
 		mode: func() (string, error) { return "emoji", nil }, warn: warnings,
 	}
 	got, err := provider.tabs(context.Background(), "endpoint")
-	if err != nil || len(got) != 1 || got[0].Identity != "s2" || !strings.Contains(warnings.String(), "server gone") {
+	if err != nil || len(got) != 1 || got[0].Identity != "s2" ||
+		warnings.String() != "Herdr tab status of s1: list tab tmux clients: server gone\n" {
 		t.Fatalf("tabs=%+v err=%v warnings=%s", got, err, warnings)
 	}
 	// A chat failing tick after tick is named once while it lasts, and afresh
@@ -672,7 +677,7 @@ func TestHerdrTabProviderOneChatFailureKeepsOthers(t *testing.T) {
 	}
 	listErr = fmt.Errorf("%w: socket refused", errTabPaneList)
 	_, err = provider.tabs(context.Background(), "endpoint")
-	if err == nil || !strings.Contains(err.Error(), "socket refused") {
+	if err == nil || err.Error() != "locate tab views of s1: list Herdr tab panes: socket refused" {
 		t.Fatalf("pane listing failure=%v", err)
 	}
 }

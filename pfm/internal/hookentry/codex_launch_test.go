@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
@@ -29,10 +30,11 @@ func TestCodexLaunchDropsThePaneOfAChildThatIsNoInteractiveChat(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Chdir(root)
-	t.Setenv("PATH", binDir)
+	codex := &deps.FakeRunner{}
+	codex.ScriptLookPath("codex", binary, nil)
 	t.Setenv("HERDR_ENV", "1")
 	t.Setenv("HERDR_PANE_ID", "w1:p1")
-	t.Setenv("HERDR_SOCKET_PATH", "/tmp/h.sock")
+	t.Setenv("HERDR_SOCKET_PATH", testjail.Place("/tmp/h.sock"))
 	t.Setenv("HERDR_BIN_PATH", "/usr/local/bin/herdr")
 	t.Setenv("TMUX", "/tmp/tmux-1000/default,1,0")
 	t.Setenv("TMUX_PANE", "%3")
@@ -74,7 +76,7 @@ func TestCodexLaunchDropsThePaneOfAChildThatIsNoInteractiveChat(t *testing.T) {
 				TmuxDir: filepath.Join(root, "tmux"),
 			}}
 			var stderr bytes.Buffer
-			if code := CodexLaunch(test.args, &stderr, runtime); code != 0 {
+			if code := CodexLaunchWith(test.args, &stderr, runtime, codex); code != 0 {
 				t.Fatalf("CodexLaunch code=%d stderr=%q", code, stderr.String())
 			}
 			if gotEnv == nil {
@@ -156,7 +158,8 @@ func TestCodexLaunchRunsTheChatInProcess(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Chdir(root)
-	t.Setenv("PATH", binDir)
+	codex := &deps.FakeRunner{}
+	codex.ScriptLookPath("codex", binary, nil)
 	previous := LaunchExec
 	t.Cleanup(func() { LaunchExec = previous })
 	for _, test := range []struct {
@@ -198,7 +201,7 @@ func TestCodexLaunchRunsTheChatInProcess(t *testing.T) {
 				TmuxDir: filepath.Join(root, "tmux"),
 			}}
 			var stderr bytes.Buffer
-			if code := CodexLaunch(test.args, &stderr, runtime); code != 0 {
+			if code := CodexLaunchWith(test.args, &stderr, runtime, codex); code != 0 {
 				t.Fatalf("CodexLaunch code=%d stderr=%q", code, stderr.String())
 			}
 			if !slices.Equal(gotArgv, test.want) {

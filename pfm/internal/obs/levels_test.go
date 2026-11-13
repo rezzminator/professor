@@ -2,6 +2,7 @@ package obs
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -40,18 +41,10 @@ func TestParseLevelAcceptsEveryNameAndTheWarningAlias(t *testing.T) {
 	}
 }
 
-// TestParseLevelNamesTheAcceptedValues: an invalid value is refused with every
-// accepted spelling in the message, never silently mapped.
 func TestParseLevelNamesTheAcceptedValues(t *testing.T) {
-	for _, text := range []string{"", "chatty", "warn ing", "trace"} {
-		_, err := ParseLevel(text)
-		if err == nil {
-			t.Fatalf("ParseLevel(%q) accepted", text)
-		}
-		for _, name := range LevelNames {
-			if !strings.Contains(err.Error(), name) {
-				t.Fatalf("ParseLevel(%q) error %q does not name accepted level %q", text, err, name)
-			}
+	for text, want := range map[string]string{"": "level \"\" is not one of debug, info, warn, warning, error, off", "chatty": "level \"chatty\" is not one of debug, info, warn, warning, error, off", "warn ing": "level \"warn ing\" is not one of debug, info, warn, warning, error, off", "trace": "level \"trace\" is not one of debug, info, warn, warning, error, off"} {
+		if _, err := ParseLevel(text); fmt.Sprint(err) != want {
+			t.Errorf("ParseLevel(%q) error = %q, want %q", text, fmt.Sprint(err), want)
 		}
 	}
 }

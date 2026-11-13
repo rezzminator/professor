@@ -158,7 +158,10 @@ func TestResolveLabelAmbiguityAndSameChatNewestTieBreak(t *testing.T) {
 	}
 	if outcome.Code != 2 ||
 		outcome.Stdout != "" ||
-		!strings.Contains(outcome.Stderr, "ambiguous 🔖 label 'Same'") {
+		outcome.Stderr != `ambiguous 🔖 label 'Same' — matches panes:
+  pane %1  (socket /jail/cc-100-1-1)
+  pane %2  (socket /jail/cc-200-1-1)
+` {
 		t.Fatalf("different-chat ambiguity = %+v", outcome)
 	}
 
@@ -170,7 +173,7 @@ func TestResolveLabelAmbiguityAndSameChatNewestTieBreak(t *testing.T) {
 	}
 	if outcome.Code != 0 ||
 		outcome.Stdout != newSocket+"\t%2\n" ||
-		!strings.Contains(outcome.Stderr, "⚠2srv") {
+		outcome.Stderr != "note: 🔖 'Same' is hosted by 2 servers for ONE chat (shared) — resolving to the newest (pfm shows it ⚠2srv; open it there to reap the elders)\n" {
 		t.Fatalf("same-chat tie break = %+v", outcome)
 	}
 }

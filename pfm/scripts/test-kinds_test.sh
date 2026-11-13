@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-# Fixture-driven tests for scripts/test-kinds.sh: each kind is read from its marker, a helper's
-# marker reaches every test naming it (transitively), a jail file's test is real and its helpers tmux,
-# commented markers and the suites outside the unit bundle are not counted, and every way the
-# script can fail to look is KINDS ERROR rc 2, never a zero count.
+# Fixture-driven tests for scripts/test-kinds.sh: a test is real when its file is a jail file and unit
+# otherwise, whatever its body touches; the suites outside the unit bundle and commented functions are
+# not counted, and every way the script can fail to look is KINDS ERROR rc 2, never a zero count.
 #   bash pfm/scripts/test-kinds_test.sh
 set -uo pipefail
 
@@ -14,108 +13,51 @@ source "$ROOT/../scripts/shtest.sh"
 eq() { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1" "expected: $2" "actual:   $3"; fi; }
 
 M=$T/mod
-mkdir -p "$M/a" "$M/b" "$M/journey" "$M/e2e" "$M/a/testdata" "$M/.hidden"
+mkdir -p "$M/a" "$M/b" "$M/journey" "$M/e2e" "$M/a/testdata" "$M/.hidden" "$M/tmp"
 printf 'module p\n' > "$M/go.mod"
 cat > "$M/a/a_test.go" <<'GO'
 package a
 
-import "testing"
+import (
+	"os/exec"
+	"testing"
+)
 
 func TestMain(m *testing.M) { m.Run() }
 
-func TestMemory(t *testing.T) {
-	if 1+1 != 2 {
-		t.Fatal("sum")
-	}
+// func TestCommentedOut(t *testing.T) {}
+
+func TestMemory(t *testing.T) {}
+
+func TestStartsAProcess(t *testing.T) {
+	_ = exec.Command("tmux", "new-session").Run()
 }
 
-func TestTemp(t *testing.T) { _ = t.TempDir() }
+func FuzzParse(f *testing.F) {}
 
-func TestCommentedMarkerIsIgnored(t *testing.T) {
-	// exec.Command("tmux") would be tmux, but this is a comment
-	_ = 1
-}
+func helperIsNoTest(t *testing.T) {}
+GO
+cat > "$M/a/server_jail_test.go" <<'GO'
+//go:build jail
 
-func TestHome(t *testing.T) {
-	home := testjail.Fleet(t)
-	_ = home
-}
+package a
 
-func TestThroughHelper(t *testing.T) {
-	startFake(t)
-}
+import "testing"
 
-func startFake(t *testing.T) {
-	deeper(t)
-}
-
-func deeper(t *testing.T) {
-	cmd := exec.Command("sh", "-c", "true")
-	_ = cmd
-}
-
-func TestTmuxServer(t *testing.T) {
-	_ = exec.Command("tmux", "-S", "x", "new-session", "-d")
-}
-
-func TestAsksForATmuxServer(t *testing.T) { testjail.TmuxServer(t) }
-
-func TestNamesNewSessionInAFakeArgv(t *testing.T) { _ = []string{"tmux", "-S", "x", "new-session"} }
-
-func TestSQLite(t *testing.T) { _ = sqlitedb.OpenStore(ctx, "x") }
-
-func TestMemoryStore(t *testing.T) { _, _ = store.OpenMemory() }
-
-func TestFileStore(t *testing.T) { _, _ = store.OpenContext(ctx) }
-
-func TestDatabaseFiles(t *testing.T) { testjail.DatabaseFiles(t, t.TempDir()) }
-
-func TestForeignBuiltBySQLOpen(t *testing.T) { _, _ = sql.Open("sqlite", "x") }
-
-func TestReachesAJailHelper(t *testing.T) { startServer(t) }
-
-func FuzzParse(f *testing.F) { f.Fuzz(func(t *testing.T, s string) {}) }
-
-func helperNotATest(t *testing.T) { _ = exec.Command("tmux") }
-
-type fakeRunner struct{}
-
-func (fakeRunner) Run() { _ = exec.Command("sh") }
-
-func TestNamesTheMethodOnlyInAStringOrLocal(t *testing.T) {
-	Run := "Run"
-	_ = Run
-}
-
-func TestCallsTheMethod(t *testing.T) { fakeRunner{}.Run() }
-
-var spawn = func(t *testing.T) {
-	_ = exec.Command("sh")
-}
-
-func TestThroughAClosureVar(t *testing.T) { spawn(t) }
-
-func TestWritesAnExecutableToRun(t *testing.T) { _ = testjail.WriteExecutable("x", nil, 0o700) }
-
-func TestWritesAnExecutableNeverRun(t *testing.T) { _ = testjail.WriteExecutableNeverRun("x", nil, 0o700) }
+func TestInAJailFileOfA(t *testing.T) {}
 GO
 cat > "$M/b/b_jail_test.go" <<'GO'
+//go:build jail
+
 package b
 
 import "testing"
 
 func TestInAJailFile(t *testing.T) {}
 GO
-cat > "$M/a/server_jail_test.go" <<'GO'
-package a
-
-import "testing"
-
-func startServer(t *testing.T) {}
-
-func TestInAJailFileOfA(t *testing.T) { startServer(t) }
-GO
 cat > "$M/b/seat_jail_linux_test.go" <<'GO'
+//go:build jail
+
 package b
 
 import "testing"
@@ -136,42 +78,25 @@ import "testing"
 
 func TestJailStubsIsNoOS(t *testing.T) {}
 GO
-for skip in journey e2e a/testdata .hidden; do
+for skip in journey e2e a/testdata .hidden tmp; do
   printf 'package x\n\nimport "testing"\n\nfunc TestNotCounted(t *testing.T) {}\n' > "$M/$skip/x_test.go"
 done
 
 out=$(bash "$SUT" "$M" 2>&1); rc=$?
-eq "the count line: unit = nothing + temp-dir, a door open memory, real = the jail files, move = the bottom three, every Test and Fuzz once" \
-  "0|KINDS unit 13 (nothing 10 · temp-dir 3) · real 3 · move 9 (home-sqlite 2 · process 4 · tmux 3) · total 25" "$rc|$out"
+eq "the count line: real = the jail files' tests, unit = every other Test and Fuzz, each once" \
+  "0|KINDS unit 5 · real 3 · total 8" "$rc|$out"
 
 out=$(bash "$SUT" --list "$M" 2>&1); rc=$?
 want=$(printf '%s\n' \
-  $'nothing\ta\ta_test.go\tTestMemory' \
-  $'temp-dir\ta\ta_test.go\tTestTemp' \
-  $'nothing\ta\ta_test.go\tTestCommentedMarkerIsIgnored' \
-  $'temp-dir\ta\ta_test.go\tTestHome' \
-  $'process\ta\ta_test.go\tTestThroughHelper' \
-  $'tmux\ta\ta_test.go\tTestTmuxServer' \
-  $'tmux\ta\ta_test.go\tTestAsksForATmuxServer' \
-  $'nothing\ta\ta_test.go\tTestNamesNewSessionInAFakeArgv' \
-  $'nothing\ta\ta_test.go\tTestSQLite' \
-  $'nothing\ta\ta_test.go\tTestMemoryStore' \
-  $'nothing\ta\ta_test.go\tTestFileStore' \
-  $'home-sqlite\ta\ta_test.go\tTestDatabaseFiles' \
-  $'home-sqlite\ta\ta_test.go\tTestForeignBuiltBySQLOpen' \
-  $'tmux\ta\ta_test.go\tTestReachesAJailHelper' \
-  $'nothing\ta\ta_test.go\tFuzzParse' \
-  $'nothing\ta\ta_test.go\tTestNamesTheMethodOnlyInAStringOrLocal' \
-  $'process\ta\ta_test.go\tTestCallsTheMethod' \
-  $'process\ta\ta_test.go\tTestThroughAClosureVar' \
-  $'process\ta\ta_test.go\tTestWritesAnExecutableToRun' \
-  $'temp-dir\ta\ta_test.go\tTestWritesAnExecutableNeverRun' \
+  $'unit\ta\ta_test.go\tTestMemory' \
+  $'unit\ta\ta_test.go\tTestStartsAProcess' \
+  $'unit\ta\ta_test.go\tFuzzParse' \
   $'real\ta\tserver_jail_test.go\tTestInAJailFileOfA' \
   $'real\tb\tb_jail_test.go\tTestInAJailFile' \
-  $'nothing\tb\tkilljail_test.go\tTestJailIsNotItsOwnWord' \
-  $'nothing\tb\tnew_jail_stubs_test.go\tTestJailStubsIsNoOS' \
+  $'unit\tb\tkilljail_test.go\tTestJailIsNotItsOwnWord' \
+  $'unit\tb\tnew_jail_stubs_test.go\tTestJailStubsIsNoOS' \
   $'real\tb\tseat_jail_linux_test.go\tTestInAnOSSelectedJailFile')
-eq "--list: one row per test with its kind, a helper two calls deep or a closure var reaching its test, a method only through a selector, an executable written to run process and one never run temp-dir, a jail file's test real and its helper tmux to a test outside it, a TmuxServer allowance tmux and a bare \"new-session\" argument nothing" "0|$want" "$rc|$out"
+eq "--list: one row per test, real only in a jail file (an OS-selected one included), a body that starts a process still unit, TestMain, helpers and commented functions not tests" "0|$want" "$rc|$out"
 
 mkdir -p "$T/notests"; printf 'module p\n' > "$T/notests/go.mod"
 out=$(bash "$SUT" "$T/notests" 2>&1); rc=$?

@@ -98,14 +98,16 @@ func TestUnusableMarkerIsALoadError(t *testing.T) {
 		t.Fatal(err)
 	}
 	loaded, err := Load("", home, nil)
-	if loaded.Path != "" || loaded.Exists || !errors.Is(err, paths.ErrSourceRepoUnusable) ||
-		!strings.Contains(err.Error(), missing) ||
-		!strings.Contains(err.Error(), "run pfm install from the clone, or set PFM_CONFIG") {
-		t.Fatalf("unusable marker Load = path %q exists %t error %v", loaded.Path, loaded.Exists, err)
+	got := strings.ReplaceAll(fmt.Sprint(err), home, "{home}")
+	if want := "no config path: inspect recorded source repository {home}/missing-clone: recorded source repository is unusable: stat {home}/missing-clone: no such file or directory — run pfm install from the clone, or set PFM_CONFIG"; loaded.Path != "" ||
+		loaded.Exists ||
+		!errors.Is(err, paths.ErrSourceRepoUnusable) ||
+		got != want {
+		t.Fatalf("unusable marker Load = %q, want %q (path %q exists %t)", got, want, loaded.Path, loaded.Exists)
 	}
-	if err := WriteDefault("", home, nil, false); err == nil || !strings.Contains(err.Error(), missing) ||
-		!strings.Contains(err.Error(), paths.EnvConfig) {
-		t.Fatalf("unusable marker writer error = %v", err)
+	written := strings.ReplaceAll(fmt.Sprint(WriteDefault("", home, nil, false)), home, "{home}")
+	if want := "no config path: inspect recorded source repository {home}/missing-clone: recorded source repository is unusable: stat {home}/missing-clone: no such file or directory — run pfm install from the clone, or set PFM_CONFIG"; written != want {
+		t.Fatalf("unusable marker writer error = %q, want %q", written, want)
 	}
 }
 
@@ -415,48 +417,120 @@ func TestLoadUsesResolvePathWhenPathIsEmpty(t *testing.T) {
 	}
 }
 
-func TestLoadRejectsUnknownKeysAtEveryConfigLevel(t *testing.T) {
+func TestLoadRefusesAnUnusableConfig(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
-	cases := []struct {
-		name string
-		json string
-		want string
-	}{
-		{name: "top level", json: `{"version":1,"mystery":true}`, want: "mystery"},
-		{name: "claude", json: `{"version":1,"claude":{"mystery":true}}`, want: "mystery"},
-		{name: "codex", json: `{"version":1,"codex":{"mystery":true}}`, want: "mystery"},
-		{
-			name: "account",
-			json: `{"version":1,"accounts":[{"id":1,"configDir":"/opt/fixture/cc","projectDir":"/opt/fixture/projects"}]}`,
-			want: "projectDir",
-		},
-		{name: "mcp object", json: `{"version":1,"mcp":{"mystery":true}}`, want: "mystery"},
-		{
-			name: "server object",
-			json: `{"version":1,"mcp":{"servers":{"chat":{"enabled":false,"mystery":true}}}}`,
-			want: "mystery",
-		},
-		{
-			name: "ask engine key",
-			json: `{"version":1,"ask":{"bogus":{"model":"m"}}}`,
-			want: `unknown engine "bogus" (want cc/claude, cx/codex, ox/opencode)`,
-		},
-		{name: "ask engine prefs", json: `{"version":1,"ask":{"claude":{"mystery":true}}}`, want: "mystery"},
+	for _, tc := range []struct{ name, json, want string }{
+		{"unknown top level", `{"version":1,"mystery":true}`, "parse config {path}: json: unknown field \"mystery\""},
+		{"unknown claude key", `{"version":1,"claude":{"mystery":true}}`, "parse config {path}: json: unknown field \"mystery\""},
+		{"unknown codex key", `{"version":1,"codex":{"mystery":true}}`, "parse config {path}: json: unknown field \"mystery\""},
+		{"unknown account key", `{"version":1,"accounts":[{"id":1,"configDir":"/opt/fixture/cc","projectDir":"/opt/fixture/projects"}]}`, "parse config {path}: json: unknown field \"projectDir\""},
+		{"unknown mcp key", `{"version":1,"mcp":{"mystery":true}}`, "parse config {path}: json: unknown field \"mystery\""},
+		{"unknown server key", `{"version":1,"mcp":{"servers":{"chat":{"enabled":false,"mystery":true}}}}`, "config {path}: mcp.servers.chat: json: unknown field \"mystery\""},
+		{"unknown ask engine", `{"version":1,"ask":{"bogus":{"model":"m"}}}`, "parse config {path}: ask.bogus: unknown engine \"bogus\" (want cc/claude, cx/codex, ox/opencode)"},
+		{"unknown ask engine prefs key", `{"version":1,"ask":{"claude":{"mystery":true}}}`, "parse config {path}: ask.claude: json: unknown field \"mystery\""},
+		{"syntax", `{"version":1`, "parse config {path} at byte 12: unexpected EOF"},
+		{"wrong type", `{"version":"one"}`, "parse config {path} at byte 16: json: cannot unmarshal string into Go struct field rawConfig.version of type int"},
+		{"non-positive account id", `{"version":1,"accounts":[{"id":0,"configDir":"/tmp/cc"}]}`, "config {path}: accounts: entry 1 id must be positive"},
+		{"duplicate account id", `{"version":1,"accounts":[{"id":2,"configDir":"/tmp/a"},{"id":2,"configDir":"/tmp/b"}]}`, "config {path}: accounts: duplicate id 2"},
+		{"relative account path", `{"version":1,"accounts":[{"id":1,"configDir":"relative"}]}`, "config {path}: accounts: entry 1 configDir: must be absolute or start with ~/ or $HOME/, got \"relative\""},
+		{"nul account path", "{\"version\":1,\"accounts\":[{\"id\":1,\"configDir\":\"/tmp/a\\u0000b\"}]}", "config {path}: accounts: entry 1 configDir: must not contain NUL"},
+		{"state db number", `{"version":2,"state":{"db":12}}`, "parse config {path} at byte 29: json: cannot unmarshal number into Go struct field rawConfig.state.db of type string"},
+		{"state db empty", `{"version":2,"state":{"db":""}}`, "config {path}: state.db must be non-empty"},
+		{"state db relative", `{"version":2,"state":{"db":"relative.db"}}`, "config {path}: state.db: must be absolute or start with ~/ or $HOME/, got \"relative.db\""},
+		{"remoteControl string", `{"version":2,"claude":{"remoteControl":"on"}}`, "parse config {path} at byte 43: json: cannot unmarshal string into Go struct field rawConfig.claude.remoteControl of type bool"},
+		{"account remoteControl number", `{"version":2,"accounts":[{"id":1,"configDir":"~/one","claude":{"remoteControl":1}}]}`, "parse config {path} at byte 80: json: cannot unmarshal number into Go struct field rawConfig.accounts.0.claude.remoteControl of type bool"},
+		{"zero spawn depth", `{"version": 2, "claude": {"maxSubagentSpawnDepth": 0}}`, "config {path}: claude.maxSubagentSpawnDepth must be a positive integer, got 0"},
+		{"negative spawn depth", `{"version": 2, "claude": {"maxSubagentSpawnDepth": -3}}`, "config {path}: claude.maxSubagentSpawnDepth must be a positive integer, got -3"},
+		{"zero concurrency", `{"version": 2, "claude": {"maxConcurrentSubagents": 0}}`, "config {path}: claude.maxConcurrentSubagents must be a positive integer, got 0"},
+		{"string spawn depth", `{"version": 2, "claude": {"maxSubagentSpawnDepth": "5"}}`, "parse config {path} at byte 54: json: cannot unmarshal string into Go struct field rawConfig.claude.maxSubagentSpawnDepth of type int"},
+		{"fractional spawn depth", `{"version": 2, "claude": {"maxSubagentSpawnDepth": 5.5}}`, "parse config {path} at byte 54: json: cannot unmarshal number 5.5 into Go struct field rawConfig.claude.maxSubagentSpawnDepth of type int"},
+		{"negative account concurrency", `{"version": 2, "accounts": [{"id": 1, "configDir": "~/one", "claude": {"maxConcurrentSubagents": -1}}]}`, "config {path}: accounts[0].maxConcurrentSubagents must be a positive integer, got -1"},
+		{"empty theme", `{"version": 2, "claude": {"theme": ""}}`, "config {path}: claude.theme must be a non-empty string"},
+		{"blank theme", `{"version": 2, "claude": {"theme": "   "}}`, "config {path}: claude.theme must be a non-empty string"},
+		{"blank account theme", `{"version": 2, "accounts": [{"id": 3, "configDir": "~/three", "claude": {"theme": "  "}}]}`, "config {path}: accounts[0].theme must be a non-empty string"},
+		{"unknown herdrTabStatus", `{"version":2,"chat":{"herdrTabStatus":"invalid"}}`, "config {path}: chat.herdrTabStatus must be emoji, text or off"},
+		{"unknown systemPrompt", `{"version":1,"claude":{"systemPrompt":"vibes"}}`, "config {path}: claude.systemPrompt must be \"production\", \"lean\" or \"professor\", got \"vibes\""},
+		{"log: {level: chatty}", `{"version": 2, "log": {"level": "chatty"}}`, "config {path}: log.level must be one of debug, info, warn, warning, error, off, got \"chatty\""},
+		{"log: {components: {mcp: loud}}", `{"version": 2, "log": {"components": {"mcp": "loud"}}}`, "config {path}: log.components.mcp must be one of debug, info, warn, warning, error, off, got \"loud\""},
+		{"log: {keepDays: -1}", `{"version": 2, "log": {"keepDays": -1}}`, "config {path}: log.keepDays must be 0..3650 (retired, no effect), got -1"},
+		{"log: {keepDays: 4000}", `{"version": 2, "log": {"keepDays": 4000}}`, "config {path}: log.keepDays must be 0..3650 (retired, no effect), got 4000"},
+		{"log: {keepFiles: 0}", `{"version": 2, "log": {"keepFiles": 0}}`, "config {path}: log.keepFiles must be 1..64 (segments kept whole per pfm home), got 0"},
+		{"log: {keepFiles: 65}", `{"version": 2, "log": {"keepFiles": 65}}`, "config {path}: log.keepFiles must be 1..64 (segments kept whole per pfm home), got 65"},
+		{"log: {maxMB: 0}", `{"version": 2, "log": {"maxMB": 0}}`, "config {path}: log.maxMB must be 1..1024 (megabytes per segment), got 0"},
+		{"log: {maxMB: 4096}", `{"version": 2, "log": {"maxMB": 4096}}`, "config {path}: log.maxMB must be 1..1024 (megabytes per segment), got 4096"},
+		{"log: {keep_files: 2}", `{"version": 2, "log": {"keep_files": 2}}`, "parse config {path}: json: unknown field \"keep_files\""},
+		{"nameSync: {interval: 30s}", `{"version": 2, "nameSync": {"interval": "30s"}}`, "config {path}: nameSync.interval must be at least 1m0s, got 30s"},
+		{"nameSync: {interval: 0s}", `{"version": 2, "nameSync": {"interval": "0s"}}`, "config {path}: nameSync.interval must be at least 1m0s, got 0s"},
+		{"nameSync: {interval: -5m}", `{"version": 2, "nameSync": {"interval": "-5m"}}`, "config {path}: nameSync.interval must be at least 1m0s, got -5m0s"},
+		{"nameSync: {interval: 15}", `{"version": 2, "nameSync": {"interval": "15"}}`, "config {path}: nameSync.interval must be a Go duration such as \"15m0s\", got \"15\""},
+		{"nameSync: {interval: quarter hour}", `{"version": 2, "nameSync": {"interval": "quarter hour"}}`, "config {path}: nameSync.interval must be a Go duration such as \"15m0s\", got \"quarter hour\""},
+	} {
+		path := filepath.Join(t.TempDir(), "config.json")
+		if err := os.WriteFile(path, []byte(tc.json), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, err := Load(path, home, nil)
+		if got := strings.ReplaceAll(fmt.Sprint(err), path, "{path}"); got != tc.want {
+			t.Errorf("%s: Load error = %q, want %q", tc.name, got, tc.want)
+		}
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "config.json")
-			if err := os.WriteFile(path, []byte(tc.json), 0o600); err != nil {
-				t.Fatal(err)
+}
+
+// TestMarshalKeepsWhatLoadRead compares the named top-level keys of the re-marshalled config.
+func TestMarshalKeepsWhatLoadRead(t *testing.T) {
+	for _, tc := range []struct{ name, json, keys, want string }{
+		{"retired herdrTabPriority dropped", `{"version":2,"chat":{"herdrTabPriority":true}}`, "chat", "{\"chat\":null}"},
+		{"herdrTabStatus emoji", `{"version":2,"chat":{"herdrTabStatus":"emoji"}}`, "chat", "{\"chat\":{\"herdrTabStatus\":\"emoji\"}}"},
+		{"herdrTabStatus text", `{"version":2,"chat":{"herdrTabStatus":"text"}}`, "chat", "{\"chat\":{\"herdrTabStatus\":\"text\"}}"},
+		{"herdrTabStatus off", `{"version":2,"chat":{"herdrTabStatus":"off"}}`, "chat", "{\"chat\":{\"herdrTabStatus\":\"off\"}}"},
+		{"nameSync interval", `{"version": 2, "nameSync": {"interval": "5m"}}`, "nameSync", "{\"nameSync\":{\"interval\":\"5m0s\"}}"},
+		{"tmux titles", `{"version": 2, "tmux": {"titles": {"enabled": false}}}`, "tmux", "{\"tmux\":{\"titles\":{\"enabled\":false}}}"},
+		{
+			"claude theme top and per account",
+			`{"version": 2, "accounts": [{"id": 3, "configDir": "~/three", "claude": {"theme": "light"}}], "claude": {"theme": "dark"}}`,
+			"claude.theme accounts.0.claude.theme", "{\"accounts.0.claude.theme\":\"light\",\"claude.theme\":\"dark\"}",
+		},
+	} {
+		path := filepath.Join(t.TempDir(), "config.json")
+		if err := os.WriteFile(path, []byte(tc.json), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		loaded, err := Load(path, filepath.Join(t.TempDir(), "home"), nil)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		body, err := Marshal(loaded, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var all any
+		if err := json.Unmarshal(body, &all); err != nil {
+			t.Fatal(err)
+		}
+		picked := map[string]any{}
+		for _, key := range strings.Fields(tc.keys) {
+			node := all
+			for _, part := range strings.Split(key, ".") {
+				switch typed := node.(type) {
+				case map[string]any:
+					node = typed[part]
+				case []any:
+					index, err := strconv.Atoi(part)
+					if err != nil || index >= len(typed) {
+						t.Fatalf("%s: no %s in %s", tc.name, key, body)
+					}
+					node = typed[index]
+				}
 			}
-			_, err := Load(path, home, nil)
-			if err == nil {
-				t.Fatalf("Load(%s) succeeded, want unknown-key error", tc.json)
-			}
-			if !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("error = %q, want it to name %q", err, tc.want)
-			}
-		})
+			picked[key] = node
+		}
+		got, err := json.Marshal(picked)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != tc.want {
+			t.Errorf("%s: marshalled = %q, want %q", tc.name, got, tc.want)
+		}
 	}
 }
 
@@ -500,74 +574,6 @@ func TestLoadAcceptsRetiredKeysWithoutChangingOtherPreferences(t *testing.T) {
 				t.Fatalf("serializer wrote retired key %s: %s", key, encoded)
 			}
 		}
-	}
-}
-
-func TestLoadMalformedJSONNamesPathAndByte(t *testing.T) {
-	home := filepath.Join(t.TempDir(), "home")
-	cases := []struct {
-		name    string
-		content string
-	}{
-		{name: "syntax", content: `{"version":1`},
-		{name: "wrong type", content: `{"version":"one"}`},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "machine.json")
-			if err := os.WriteFile(path, []byte(tc.content), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			_, err := Load(path, home, nil)
-			if err == nil {
-				t.Fatal("Load malformed config succeeded")
-			}
-			message := err.Error()
-			if !strings.Contains(message, "parse config "+path) {
-				t.Errorf("error = %q, want path %q", message, path)
-			}
-			if !strings.Contains(message, "byte ") {
-				t.Errorf("error = %q, want byte offset", message)
-			}
-		})
-	}
-}
-
-func TestLoadRejectsInvalidAccountRoster(t *testing.T) {
-	home := filepath.Join(t.TempDir(), "home")
-	cases := []struct {
-		name string
-		json string
-		want string
-	}{
-		{name: "non-positive id", json: `{"version":1,"accounts":[{"id":0,"configDir":"/tmp/cc"}]}`, want: "positive"},
-		{
-			name: "duplicate id",
-			json: `{"version":1,"accounts":[{"id":2,"configDir":"/tmp/a"},{"id":2,"configDir":"/tmp/b"}]}`,
-			want: "duplicate",
-		},
-		{
-			name: "relative path",
-			json: `{"version":1,"accounts":[{"id":1,"configDir":"relative"}]}`,
-			want: "must be absolute",
-		},
-		{
-			name: "nul path",
-			json: "{\"version\":1,\"accounts\":[{\"id\":1,\"configDir\":\"/tmp/a\\u0000b\"}]}",
-			want: "must not contain NUL",
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "config.json")
-			if err := os.WriteFile(path, []byte(tc.json), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			_, err := Load(path, home, nil)
-			if err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("Load error = %v, want substring %q", err, tc.want)
-			}
-		})
 	}
 }
 
@@ -782,23 +788,6 @@ func TestConfigInitJSONRoundTripsAndRedactsSecrets(t *testing.T) {
 	secretContent := []byte(`{"version":2,"mcp":{"authToken":"neutral-secret"}}`)
 	if !strings.Contains(string(RedactSecrets(secretContent)), "<redacted>") {
 		t.Fatal("RedactSecrets did not redact a secret-looking field")
-	}
-}
-
-func TestLoadRejectsInvalidStateDB(t *testing.T) {
-	home := t.TempDir()
-	for _, raw := range []string{`12`, `""`, `"relative.db"`} {
-		t.Run(raw, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "pfm.config.json")
-			content := `{"version":2,"state":{"db":` + raw + `}}`
-			if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			_, err := Load(path, home, nil)
-			if err == nil || !strings.Contains(err.Error(), "state.db") || !strings.Contains(err.Error(), path) {
-				t.Fatalf("Load error = %v", err)
-			}
-		})
 	}
 }
 

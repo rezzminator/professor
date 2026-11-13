@@ -32,8 +32,10 @@ func TestVerifyFleetUnitsActiveNamesUnreadableState(t *testing.T) {
 		stateRunner{err: errors.New("unreadable state")},
 		[]string{mcpUnitName},
 	)
-	if err == nil || !strings.Contains(err.Error(), "fleet unit pfm-mcp.service state unreadable after start: ") {
-		t.Fatalf("verify error = %v", err)
+	want := "fleet unit pfm-mcp.service state unreadable after start:" +
+		" systemctl --user show --property=ActiveState --value pfm-mcp.service: unreadable state"
+	if err == nil || err.Error() != want {
+		t.Fatalf("verify error = %v, want %q", err, want)
 	}
 }
 

@@ -397,9 +397,11 @@ func TestReloadWorkerReportsSuppressedNativeNotification(t *testing.T) {
 		func(context.Context, string, string, string) error { return io.ErrUnexpectedEOF },
 		&stderr,
 	)
-	if got := stderr.String(); !strings.Contains(got, "native failure notification:") ||
-		!strings.Contains(got, "not shown (disabled)") {
-		t.Fatalf("notification suppression was hidden: %q", got)
+	if got, want := rooted(
+		stderr.String(),
+		filepath.Dir(socket),
+	), "pfm chat reload: native failure notification: native reload failure notification: herdr notification not shown (disabled)\n"; got != want {
+		t.Fatalf("stderr = %q, want %q", got, want)
 	}
 }
 

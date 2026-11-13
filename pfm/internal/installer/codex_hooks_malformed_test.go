@@ -95,7 +95,8 @@ func TestMalformedCodexHooksStillRefusesToStrandOwnedHooksOnUninstall(t *testing
 	if err == nil {
 		t.Fatal("uninstall silently stranded pfm-owned hooks in an unparseable Codex hooks file")
 	}
-	if !strings.Contains(err.Error(), "refuse to strand owned hooks") || !strings.Contains(err.Error(), hooks) {
+	if err.Error() != "preflight uninstall plan: refuse to strand owned hooks in invalid Codex hooks JSON at "+hooks+
+		": invalid character 'b' looking for beginning of object key string" {
 		t.Fatalf("uninstall error did not name the stranded ownership at %s: %v", hooks, err)
 	}
 }

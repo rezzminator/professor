@@ -9,7 +9,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -263,8 +262,10 @@ func TestUninstallRefusesToStrandOwnedHookInInvalidCodexJSON(t *testing.T) {
 	writeFixture(t, settingsHookOwnershipPath(managed), string(encoded))
 	installer := engine{options: Options{Mode: ModeUninstall, Home: home, Stdout: io.Discard}, managedRoot: managed}
 	err = installer.wireCodexHooks()
-	if err == nil || !strings.Contains(err.Error(), "refuse to strand owned hooks in invalid Codex hooks JSON") {
-		t.Fatalf("wireCodexHooks error=%v", err)
+	want := "refuse to strand owned hooks in invalid Codex hooks JSON at " + hooksPath +
+		": invalid character 'b' looking for beginning of object key string"
+	if err == nil || err.Error() != want {
+		t.Fatalf("wireCodexHooks error=%v, want %q", err, want)
 	}
 }
 

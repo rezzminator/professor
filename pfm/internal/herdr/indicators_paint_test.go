@@ -209,8 +209,8 @@ func TestARefusedTargetIsLoggedAndThePaintGoesOn(t *testing.T) {
 			if _, _, err := painter.paint(context.Background()); err != nil {
 				t.Fatalf("paint = %v, want a missing target to be logged only", err)
 			}
-			if !strings.Contains(stderr.String(), id) || !strings.Contains(stderr.String(), kind+"_not_found") {
-				t.Fatalf("stderr = %q, want the missing target and Herdr's code", stderr)
+			if got, want := stderr.String(), map[string]string{targetPane: "herdr indicators: socket /fake/herdr.sock: pane w1:p1: herdr refused pane.report_metadata: pane_not_found: gone\n", targetWorkspace: "herdr indicators: socket /fake/herdr.sock: workspace w1: herdr refused workspace.report_metadata: workspace_not_found: gone\n"}[kind]; got != want {
+				t.Fatalf("stderr = %q, want %q", got, want)
 			}
 			if len(herdr.panes[1].Tokens) != 1 || len(herdr.spaces[1].Tokens) != 1 {
 				t.Fatalf("p2 %v and w2 %v must still be painted", herdr.panes[1].Tokens, herdr.spaces[1].Tokens)
@@ -220,6 +220,22 @@ func TestARefusedTargetIsLoggedAndThePaintGoesOn(t *testing.T) {
 }
 
 func TestMetadataRefusalsFailPaint(t *testing.T) {
+	wants := map[string]string{
+		targetPane + "/metadata_token_limit":                "herdr indicators: paint pane w1:p1: herdr refused pane.report_metadata: metadata_token_limit: refused",
+		targetPane + "/metadata_sequence_source_limit":      "herdr indicators: paint pane w1:p1: herdr refused pane.report_metadata: metadata_sequence_source_limit: refused",
+		targetPane + "/invalid_metadata_source":             "herdr indicators: paint pane w1:p1: herdr refused pane.report_metadata: invalid_metadata_source: refused",
+		targetPane + "/invalid_metadata_token":              "herdr indicators: paint pane w1:p1: herdr refused pane.report_metadata: invalid_metadata_token: refused",
+		targetPane + "/invalid_metadata_ttl":                "herdr indicators: paint pane w1:p1: herdr refused pane.report_metadata: invalid_metadata_ttl: refused",
+		targetPane + "/invalid_metadata_request":            "herdr indicators: paint pane w1:p1: herdr refused pane.report_metadata: invalid_metadata_request: refused",
+		targetPane + "/workspace_not_found":                 "herdr indicators: paint pane w1:p1: herdr refused pane.report_metadata: workspace_not_found: refused",
+		targetWorkspace + "/metadata_token_limit":           "herdr indicators: paint workspace w1: herdr refused workspace.report_metadata: metadata_token_limit: refused",
+		targetWorkspace + "/metadata_sequence_source_limit": "herdr indicators: paint workspace w1: herdr refused workspace.report_metadata: metadata_sequence_source_limit: refused",
+		targetWorkspace + "/invalid_metadata_source":        "herdr indicators: paint workspace w1: herdr refused workspace.report_metadata: invalid_metadata_source: refused",
+		targetWorkspace + "/invalid_metadata_token":         "herdr indicators: paint workspace w1: herdr refused workspace.report_metadata: invalid_metadata_token: refused",
+		targetWorkspace + "/invalid_metadata_ttl":           "herdr indicators: paint workspace w1: herdr refused workspace.report_metadata: invalid_metadata_ttl: refused",
+		targetWorkspace + "/invalid_metadata_request":       "herdr indicators: paint workspace w1: herdr refused workspace.report_metadata: invalid_metadata_request: refused",
+		targetWorkspace + "/pane_not_found":                 "herdr indicators: paint workspace w1: herdr refused workspace.report_metadata: pane_not_found: refused",
+	}
 	for _, kind := range []string{targetPane, targetWorkspace} {
 		codes := []string{
 			"metadata_token_limit", "metadata_sequence_source_limit", "invalid_metadata_source",
@@ -245,8 +261,11 @@ func TestMetadataRefusalsFailPaint(t *testing.T) {
 				painter, _, _ := newTestPainter(t, herdr, phaseOn)
 				_, _, err := painter.paint(context.Background())
 				var refusal *Refusal
-				if !errors.As(err, &refusal) || refusal.Code != code || !strings.Contains(err.Error(), kind+" "+id) {
-					t.Fatalf("paint = %v, want %s refusal with %s %s context", err, code, kind, id)
+				if got := fmt.Sprint(
+					err,
+				); !errors.As(err, &refusal) || refusal.Code != code ||
+					got != wants[kind+"/"+code] {
+					t.Fatalf("paint = %q, want %q", got, wants[kind+"/"+code])
 				}
 			})
 		}
@@ -260,20 +279,20 @@ func TestAWriteThatCannotReachHerdrFailsThePaintWithItsContext(t *testing.T) {
 	}
 	painter, _, _ := newTestPainter(t, herdr, phaseOn)
 	_, _, err := painter.paint(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "w1:p1") || !strings.Contains(err.Error(), "broken pipe") {
+	if err == nil || err.Error() != "herdr indicators: paint pane w1:p1: write: broken pipe" {
 		t.Fatalf("paint = %v, want the pane and the cause", err)
 	}
 }
 
 func TestMalformedListsAreErrors(t *testing.T) {
 	for name, tc := range map[string]struct{ panes, spaces, want string }{
-		"pane type":      {`{"type":"nope","panes":[]}`, `{"type":"workspace_list","workspaces":[]}`, "pane_list"},
-		"workspace type": {`{"type":"pane_list","panes":[]}`, `{"type":"x","workspaces":[]}`, "workspace_list"},
-		"pane not json":  {`[1`, `{"type":"workspace_list","workspaces":[]}`, "pane.list"},
+		"pane type":      {`{"type":"nope","panes":[]}`, `{"type":"workspace_list","workspaces":[]}`, "herdr pane.list: result type \"nope\", want pane_list"},
+		"workspace type": {`{"type":"pane_list","panes":[]}`, `{"type":"x","workspaces":[]}`, "herdr workspace.list: result type \"x\", want workspace_list"},
+		"pane not json":  {`[1`, `{"type":"workspace_list","workspaces":[]}`, "herdr pane.list: decode result \"[1\": unexpected end of JSON input"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			targets, _, err := decodeIndicatorTargets(json.RawMessage(tc.panes), json.RawMessage(tc.spaces))
-			if err == nil || !strings.Contains(err.Error(), tc.want) {
+			if err == nil || err.Error() != tc.want {
 				t.Fatalf("decode = %v, %v, want an error naming %q", targets, err, tc.want)
 			}
 		})
@@ -429,8 +448,9 @@ func TestNonFleetClassificationRetainsPriorWarningWithoutSuppressingRetry(t *tes
 	paint()
 	proofErr = errors.New("probe failed again")
 	paint() // Positive absence must not defer a newly started chat's proof.
-	if proofs != 3 || strings.Count(stderr.String(), "ownership unproved") != 1 {
-		t.Fatalf("alternating absence relogged or suppressed proof: proofs=%d stderr=%s", proofs, stderr)
+	if got, want := stderr.String(), "herdr indicators: socket /fake/herdr.sock: pane w1:p1 ownership unproved: probe failed\n"; proofs != 3 ||
+		got != want {
+		t.Fatalf("proofs %d, stderr = %q, want %q", proofs, got, want)
 	}
 	stepping.now = stepping.now.Add(unprovedReprove)
 	proofErr = nil
@@ -465,13 +485,15 @@ func TestIndicatorsWithoutOwnershipLeavePanesUntouched(t *testing.T) {
 				_, _, err = painter.paint(context.Background())
 			}
 			if clearing {
-				if err == nil || !strings.Contains(err.Error(), "ownership unproved") {
+				if err == nil ||
+					err.Error() != "pane ownership unproved: pane w1:p1: ownership unproved: no pane proof configured" {
 					t.Fatalf("clear must return its unproved state: %v", err)
 				}
 			} else if err != nil {
 				t.Fatal(err)
 			}
-			if len(server.paneWrites("w1:p1")) != 0 || !strings.Contains(stderr.String(), "ownership unproved") {
+			if len(server.paneWrites("w1:p1")) != 0 ||
+				stderr.String() != "herdr indicators: socket /fake/herdr.sock: pane w1:p1 ownership unproved: ownership unproved: no pane proof configured\n" {
 				t.Fatalf("unproved pane was acted on or unnamed: writes=%v stderr=%s", server.writes, stderr)
 			}
 			if _, ok := server.spaces[0].Tokens[IndicatorDone]; ok {

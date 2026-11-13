@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -49,10 +50,10 @@ func TestRunInternalRetiredHookIsASilentNoOp(t *testing.T) {
 		stderr                  string
 	}{
 		{name: "retired", lists: lists, subcommand: "sketch-nudge"},
-		{name: "not retired", lists: lists, subcommand: "doodle-nudge", code: 1, stderr: `unknown subcommand "doodle-nudge"`},
+		{name: "not retired", lists: lists, subcommand: "doodle-nudge", code: 1, stderr: "pfm internal: unknown subcommand \"doodle-nudge\" — registered by a different pfm version than this binary (dev); run `pfm install --yes` with the binary you intend to keep\n"},
 		{
 			name: "unreadable lists", lists: `{"hookCommands":`, subcommand: "sketch-nudge", code: 1,
-			stderr: "pfm internal: retired hooks unread: retired lists ",
+			stderr: "pfm internal: unknown subcommand \"sketch-nudge\" — registered by a different pfm version than this binary (dev); run `pfm install --yes` with the binary you intend to keep\npfm internal: retired hooks unread: retired lists {root}/002/templates/global/retired.json: decode: unexpected EOF\n",
 		},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -61,10 +62,10 @@ func TestRunInternalRetiredHookIsASilentNoOp(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 			runtime := commandRuntime{Paths: paths.Values{Home: home}}
 			code := runInternal([]string{testCase.subcommand}, &stdout, &stderr, runtime)
-			if code != testCase.code || stdout.Len() != 0 ||
-				testCase.stderr == "" && stderr.Len() != 0 || !strings.Contains(stderr.String(), testCase.stderr) {
-				t.Fatalf("runInternal(%q): exit %d stdout=%q stderr=%q; want %d and stderr holding %q",
-					testCase.subcommand, code, stdout.String(), stderr.String(), testCase.code, testCase.stderr)
+			if got := rooted(stderr.String(), filepath.Dir(home)); code != testCase.code || stdout.Len() != 0 ||
+				got != testCase.stderr {
+				t.Fatalf("runInternal(%q): exit %d (want %d) stdout=%q stderr = %q, want %q",
+					testCase.subcommand, code, testCase.code, stdout.String(), got, testCase.stderr)
 			}
 		})
 	}

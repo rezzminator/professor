@@ -113,13 +113,23 @@ func TestPrintLogLevelDoctorNamesEveryComponentAndItsSource(t *testing.T) {
 			t.Fatalf("rows lack %q:\n%s", want, stdout.String())
 		}
 	}
-	if !strings.HasPrefix(rows[0], "doctor: log comp=cli ") {
+	if rows[0] != "doctor: log comp=cli level=warn source=config" {
 		t.Fatalf("first row = %q, want the registry order", rows[0])
 	}
 
 	stdout.Reset()
 	printLogLevelDoctor(&stdout, config.Log{}, "1.2.3-alpha", &paths.MapEnv{})
-	if !strings.Contains(stdout.String(), "doctor: log comp=cli level=debug source=build") {
+	if stdout.String() != `doctor: log comp=cli level=debug source=build
+doctor: log comp=mcp level=debug source=build
+doctor: log comp=http.in level=debug source=build
+doctor: log comp=http.out level=debug source=build
+doctor: log comp=runner level=debug source=build
+doctor: log comp=tmux level=debug source=build
+doctor: log comp=hooks level=debug source=build
+doctor: log comp=db level=debug source=build
+doctor: log comp=installer level=debug source=build
+doctor: log comp=state level=debug source=build
+` {
 		t.Fatalf("an alpha build with no config level must report debug from build:\n%s", stdout.String())
 	}
 
@@ -138,15 +148,16 @@ func TestPrintLogLevelDoctorNamesEveryComponentAndItsSource(t *testing.T) {
 // the path and size, and the per-component rows follow it.
 func TestPrintActivityLogDoctorIncludesTheComponentRows(t *testing.T) {
 	var stdout bytes.Buffer
-	runtime := runtimeWithLog(t.TempDir())
+	dir := t.TempDir()
+	runtime := runtimeWithLog(dir)
 	runtime.Config.Log.Level = "error"
 	runtime.Config.Log.KeepFiles = 3
 	printActivityLogDoctor(&stdout, runtime, &paths.MapEnv{})
-	if !strings.Contains(stdout.String(), "segment_mb=8 keep_mb=24\n") {
-		t.Fatalf("row lacks the retention:\n%s", stdout.String())
-	}
-	if !strings.Contains(stdout.String(), "doctor: log comp=installer level=error source=config") {
-		t.Fatalf("component rows missing:\n%s", stdout.String())
+	if got, want := rooted(
+		stdout.String(),
+		dir,
+	), "doctor: log path={root}/.local/state/pfm/log/pfm.jsonl bytes=0 state=absent level=error segment_mb=8 keep_mb=24\ndoctor: log comp=cli level=error source=config\ndoctor: log comp=mcp level=error source=config\ndoctor: log comp=http.in level=error source=config\ndoctor: log comp=http.out level=error source=config\ndoctor: log comp=runner level=error source=config\ndoctor: log comp=tmux level=error source=config\ndoctor: log comp=hooks level=error source=config\ndoctor: log comp=db level=error source=config\ndoctor: log comp=installer level=error source=config\ndoctor: log comp=state level=error source=config\n"; got != want {
+		t.Errorf("activity log rows = %q, want %q", got, want)
 	}
 }
 

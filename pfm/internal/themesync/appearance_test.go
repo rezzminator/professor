@@ -39,8 +39,13 @@ func TestAutoAppearanceUnsupportedPlatformsDrawsDarkAndNamesWhy(t *testing.T) {
 				if err != nil {
 					t.Fatalf("%s: %v", op.name, err)
 				}
-				wantVerdict(t, report, "claude", VerdictSource, "system appearance unreadable, drawing dark: "+
-					"themesync: auto appearance detection unsupported; choose an explicit theme/appearance")
+				wantVerdict(
+					t,
+					report,
+					"claude",
+					VerdictSource,
+					"~/.claude · auto · auto · system appearance unreadable, drawing dark: themesync: auto appearance detection unsupported; choose an explicit theme/appearance",
+				)
 				if report.Appearance != Dark || !report.Enabled || h.tmux.servers["cc-a"]["@pfm-c-bg"] != "#000000" {
 					t.Errorf("%s = appearance %s enabled %v tmux bg %q, want the theme drawn dark #000000",
 						op.name, report.Appearance, report.Enabled, h.tmux.servers["cc-a"]["@pfm-c-bg"])
@@ -74,7 +79,7 @@ func TestReadBackKeepsTheMatrixWhenTheAppearanceCannotBeRead(t *testing.T) {
 		report,
 		"claude",
 		VerdictError,
-		"themesync: auto appearance detection unsupported; choose an explicit theme/appearance",
+		"~/.claude · auto · auto · themesync: auto appearance detection unsupported; choose an explicit theme/appearance",
 	)
 	if got := h.read(".local/state/pfm/theme/state.json"); got != stateBefore {
 		t.Error("a read-back changed the theme state")

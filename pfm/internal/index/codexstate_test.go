@@ -678,7 +678,7 @@ func setupMachineSpawnedFixture(t *testing.T) string {
 		},
 		{
 			ID:               "agent-worktree",
-			CWD:              "/tmp/cross-workflow-agent-vhxIa3",
+			CWD:              "/work/cross-workflow-agent-vhxIa3",
 			Source:           "exec",
 			Title:            "Return the fixed portable-effect plan",
 			FirstUserMessage: "Return the fixed portable-effect plan",

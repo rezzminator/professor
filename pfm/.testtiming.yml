@@ -112,6 +112,7 @@ suites:
       github.com/rezzminator/professor/pfm/internal/workbench: 2
       github.com/rezzminator/professor/pfm/journey: 2
       github.com/rezzminator/professor/pfm/journey/harness: 10
+      github.com/rezzminator/professor/pfm/scripts/testassert: 2
   e2e:
     wall_s: 150
     packages:

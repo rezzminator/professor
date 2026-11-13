@@ -4,6 +4,7 @@ package deps_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -100,8 +101,9 @@ func TestClaudeProbeThatCannotCreateItsHomeDoesNotRun(t *testing.T) {
 	}
 	t.Setenv(paths.EnvSIDDir, filepath.Join(blocker, "sid"))
 	result := deps.Probe(context.Background(), []deps.Entry{entry}, deps.ProbeOptions{GOOS: runtime.GOOS})[0]
-	if result.State != deps.StateBroken || !strings.Contains(result.Error, "could not look") {
-		t.Fatalf("result = %#v, want broken with could not look", result)
+	if got, want := strings.ReplaceAll(fmt.Sprintf("%v · %s", result.State, result.Error), blocker, "{blocker}"),
+		"broken · could not look: create the probe home base {blocker}/sid: mkdir {blocker}: not a directory"; got != want {
+		t.Fatalf("result = %q, want %q", got, want)
 	}
 	if _, err := os.Lstat(record); !os.IsNotExist(err) {
 		t.Fatalf("the fake ran although its home could not be created (lstat err=%v)", err)

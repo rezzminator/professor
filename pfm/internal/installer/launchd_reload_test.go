@@ -253,11 +253,10 @@ func TestReloadLaunchAgentNeverLoadedBootstrapFailureStaysPlain(t *testing.T) {
 	if err == nil {
 		t.Fatal("want an error, got nil")
 	}
-	if !strings.Contains(err.Error(), "service is not loaded") {
-		t.Fatalf("error=%q, want the plain \"not loaded\" wording", err.Error())
-	}
-	if strings.Contains(err.Error(), "DOWN") {
-		t.Fatalf("error=%q, must not claim the service is DOWN — nothing was running to stop", err.Error())
+	want := "launchctl bootstrap com.professor.pfm.mcp failed; agent file is installed but service is not loaded:" +
+		" launchctl exited 5: Bootstrap failed: 5: Input/output error"
+	if err.Error() != want {
+		t.Fatalf("error=%q, want the plain not-loaded wording %q — nothing was running to stop", err.Error(), want)
 	}
 	if callKind(runner.calls, "bootout") {
 		t.Fatalf("calls=%q, want no bootout — nothing was loaded", runner.calls)

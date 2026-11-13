@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -23,7 +22,8 @@ func TestKillServerRefusesNativeSocket(t *testing.T) {
 		"%0",
 	)
 	body, readErr := os.ReadFile(socket)
-	if err == nil || !strings.Contains(err.Error(), "use EndResolved for a native Herdr seat") || readErr != nil ||
+	if err == nil || err.Error() != "KillServer requires a tmux socket name; use EndResolved for a native Herdr seat" ||
+		readErr != nil ||
 		string(body) != "preserve" {
 		t.Fatalf("native end err=%v body=%q read=%v", err, body, readErr)
 	}

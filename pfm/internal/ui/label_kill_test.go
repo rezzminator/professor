@@ -1,10 +1,10 @@
 package ui
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // TestKillKeyRefusesALabelKilledRow pins the one place the two kill kinds must
@@ -60,7 +60,7 @@ func TestKillKeyRefusesTheUpdateCheckFailureRow(t *testing.T) {
 			ID:      "pfm-update-check-failed-2026-01-02T03:04:05Z",
 			Name:    "failing since 2026-01-02 03:04 (network): 503",
 			Project: ".professor",
-			CWD:     "/home/test/.professor",
+			CWD:     testjail.Place("/home/test/.professor"),
 		}},
 	}
 
@@ -69,7 +69,7 @@ func TestKillKeyRefusesTheUpdateCheckFailureRow(t *testing.T) {
 	if changes := model.Result().KillChanges; len(changes) != 0 {
 		t.Fatalf("kill key wrote a change for the update-check failure row: %#v", changes)
 	}
-	if !strings.Contains(model.killStatus, "notice, not a chat") {
-		t.Fatalf("killStatus = %q, want the refusal to name the row a notice", model.killStatus)
+	if want := "⌃X refused — the update-check failure row is a notice, not a chat"; model.killStatus != want {
+		t.Fatalf("killStatus = %q, want %q", model.killStatus, want)
 	}
 }

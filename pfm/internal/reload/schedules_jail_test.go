@@ -121,8 +121,9 @@ func TestRunNewTellsWhenTheSchedulesCannotMove(t *testing.T) {
 		t.Fatalf("run: %v stderr=%q", err, stderr.String())
 	}
 	reborn := parsedReloadShell(t, tmux.respawn).SessionID
-	want := "schedules of session " + scheduleOldID + " did NOT move to " + reborn + ":"
-	if !strings.Contains(stderr.String(), want) {
-		t.Fatalf("stderr %q lacks %q", stderr.String(), want)
+	if got, want := strings.NewReplacer(reborn, "{reborn}", notDir, "{file}").
+		Replace(stderr.String()),
+		"pfm: record launch {reborn}: record launch {reborn}: inspect shared state database {file}/pfm.db: stat {file}/pfm.db: not a directory\npfm chat reload: the schedules of session 11111111-1111-4111-8111-111111111111 did NOT move to {reborn}: inspect shared state database {file}/pfm.db: stat {file}/pfm.db: not a directory — check pfm chat schedule ls and set them again on this chat\n"; got != want {
+		t.Fatalf("stderr = %q, want %q", got, want)
 	}
 }

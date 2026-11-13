@@ -98,7 +98,7 @@ func TestArmHandsTheBoundSocketToADetachedSinkAndReturnsItsPort(t *testing.T) {
 		t.Fatalf("close the dial to the armed port: %v", err)
 	}
 	logBody := waitForFile(t, paths.LogRoot(paths.OSEnv{}, home).CostSink())
-	if !strings.Contains(logBody, "fake sink started") {
+	if logBody != "fake sink started\n" {
 		t.Errorf("the sink log %q lacks the child's stderr line", logBody)
 	}
 }

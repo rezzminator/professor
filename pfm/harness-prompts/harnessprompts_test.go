@@ -2,6 +2,7 @@ package harnessprompts
 
 import (
 	"bytes"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -78,7 +79,7 @@ func TestReadPartNamesTheMissingPart(t *testing.T) {
 	if err == nil {
 		t.Fatalf("read of an absent part returned %d bytes and no error", len(content))
 	}
-	if !strings.Contains(err.Error(), "share/nothing-here.md") {
+	if err.Error() != "read embedded harness prompt share/nothing-here.md: open share/nothing-here.md: file does not exist" {
 		t.Fatalf("error does not name the part: %v", err)
 	}
 }
@@ -116,7 +117,7 @@ func TestComposeMatchesSourceParts(t *testing.T) {
 	if _, err := Composed(
 		t.TempDir(), "no-such-engine",
 	); err == nil ||
-		!strings.Contains(err.Error(), "no-such-engine/professor.md") {
+		err.Error() != "read embedded harness prompt no-such-engine/professor.md: open no-such-engine/professor.md: file does not exist" {
 		t.Fatalf("assembly did not name missing engine part: %v", err)
 	}
 }
@@ -163,9 +164,12 @@ func TestComposedNamesAPartMissingFromTheCloneTree(t *testing.T) {
 		"claude/professor.md": "clone middle\n",
 	})
 	_, err := Composed(clone, "claude")
-	dir := filepath.Join(clone, "pfm", DirName)
-	if err == nil || !strings.Contains(err.Error(), "share/tail.md") || !strings.Contains(err.Error(), dir) {
-		t.Fatalf("Composed with a missing tail = %v, want an error naming share/tail.md in %s", err, dir)
+	if got, want := strings.ReplaceAll(
+		fmt.Sprint(err),
+		clone,
+		"{clone}",
+	), "read {clone}/pfm/harness-prompts harness prompt share/tail.md: open share/tail.md: no such file or directory"; got != want {
+		t.Fatalf("Composed with a missing tail = %q, want %q", got, want)
 	}
 }
 

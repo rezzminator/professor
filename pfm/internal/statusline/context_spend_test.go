@@ -385,15 +385,14 @@ func TestMainLineRendersOneDollarAmountInEveryState(t *testing.T) {
 			}
 			_, line, _ := renderContextLine(runtime, data, "", time.Unix(1_790_000_000, 0))
 			got := stripANSICodes(line)
-			if count := strings.Count(got, "$"); count != 1 {
-				t.Fatalf("line %q holds %d dollar signs, want exactly 1", got, count)
+			// the line up to its cache segment, the cache tests' subject
+			head, _, _ := strings.Cut(got, " │ 💾")
+			want := "🟢 ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ ?% 1.0M ctx unknown │ " + tc.want
+			if tc.noSession {
+				want = "🟢 ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ ?% ? ctx unknown │ " + tc.want
 			}
-			at := strings.Index(got, "💰")
-			if at < 0 {
-				t.Fatalf("line %q has no spend segment", got)
-			}
-			if segment, _, _ := strings.Cut(got[at:], " │"); segment != tc.want {
-				t.Fatalf("spend segment %q, want %q (line %q)", segment, tc.want, got)
+			if head != want {
+				t.Errorf("line = %q, want %q", head, want)
 			}
 		})
 	}
@@ -590,7 +589,7 @@ func TestGatewayRestoredTotalDoesNotCountTwice(t *testing.T) {
 		sessionSpendSegment(input{TranscriptPath: path}, testPrices(t), books, &spend, transcriptScans{}),
 		"",
 	)
-	if !strings.HasPrefix(got, "💰$1.31/") || !strings.Contains(got, "+?") {
+	if got != "💰$1.31/150.0K/10.0K/0+? API-eq" {
 		t.Fatalf("ambiguous restored gateway dollars must remain a labeled floor: %q", got)
 	}
 	var data input
@@ -601,7 +600,7 @@ func TestGatewayRestoredTotalDoesNotCountTwice(t *testing.T) {
 		sessionSpendSegment(data, testPrices(t), ledgerBooks{}, &spend, transcriptScans{}),
 		"",
 	)
-	if !strings.HasPrefix(got, "💰$0.31/") {
+	if got != "💰$0.31/150.0K/10.0K/0 API-eq" {
 		t.Fatalf("harness side-call erased gateway price: %q", got)
 	}
 }
@@ -626,8 +625,7 @@ func TestGatewayPostSnapshotSpendKeepsNativePreLedger(t *testing.T) {
 	data.TranscriptPath = path
 	data.Cost.TotalCostUSD = 6
 	got := styleANSI.ReplaceAllString(sessionSpendSegment(data, testPrices(t), books, &spend, transcriptScans{}), "")
-	if !strings.HasPrefix(got, "💰$6.31/") || strings.Contains(got, "+?") ||
-		!strings.Contains(got, "pre-ledger API-eq") {
+	if got != "💰$6.31/150.0K/10.0K/0 pre-ledger API-eq" {
 		t.Fatalf("new gateway call must add to known native history: %q", got)
 	}
 }

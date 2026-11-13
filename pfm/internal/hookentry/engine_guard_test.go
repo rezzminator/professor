@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -293,17 +294,14 @@ func TestEngineGuardFrameworkFiles(t *testing.T) {
 }
 
 func TestEngineGuardEngineFlag(t *testing.T) {
-	for _, args := range [][]string{nil, {"--engine"}, {"--engine", "claude"}, {"--engine", "bogus"}} {
+	for _, row := range []struct {
+		args []string
+		want string
+	}{{nil, "2 \"\" pfm internal engine-guard: want --engine codex|opencode, got []\nusage: pfm internal engine-guard --engine codex|opencode\n"}, {[]string{"--engine"}, "2 \"\" pfm internal engine-guard: want --engine codex|opencode, got [\"--engine\"]\nusage: pfm internal engine-guard --engine codex|opencode\n"}, {[]string{"--engine", "claude"}, "2 \"\" pfm internal engine-guard: engine \"claude\" has no engine guard (codex or opencode)\nusage: pfm internal engine-guard --engine codex|opencode\n"}, {[]string{"--engine", "bogus"}, "2 \"\" pfm internal engine-guard: unknown engine \"bogus\" (want cc/claude, cx/codex, ox/opencode)\nusage: pfm internal engine-guard --engine codex|opencode\n"}} {
 		var stdout, stderr bytes.Buffer
-		if code := EngineGuard(args, strings.NewReader(`{}`), &stdout, &stderr); code != 2 || stdout.Len() != 0 ||
-			!strings.Contains(stderr.String(), "usage: pfm internal engine-guard --engine codex|opencode") {
-			t.Fatalf(
-				"args=%q: code=%d stdout=%q stderr=%q, want usage exit 2",
-				args,
-				code,
-				stdout.String(),
-				stderr.String(),
-			)
+		code := EngineGuard(row.args, strings.NewReader(`{}`), &stdout, &stderr)
+		if got := fmt.Sprintf("%d %q %s", code, stdout.String(), stderr.String()); got != row.want {
+			t.Errorf("args=%q: code stdout stderr = %q, want %q", row.args, got, row.want)
 		}
 	}
 }

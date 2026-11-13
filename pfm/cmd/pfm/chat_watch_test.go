@@ -26,6 +26,7 @@ func TestHookRunnerEmptyCommandBuildsNoHook(t *testing.T) {
 func TestHookRunnerRunsThroughTheRunnerSeam(t *testing.T) {
 	t.Parallel()
 	fake := &deps.FakeRunner{}
+	fake.ScriptLookPath("sh", "/scripted/sh", nil)
 	var stderr bytes.Buffer
 	hook := hookRunner("echo hi", fake, &stderr)
 	if hook == nil {
@@ -43,8 +44,8 @@ func TestHookRunnerRunsThroughTheRunnerSeam(t *testing.T) {
 		t.Fatalf("Starts() returned %d entries, want 1", len(starts))
 	}
 	argv := starts[0].Argv
-	if len(argv) != 3 || argv[1] != "-c" || argv[2] != "echo hi" {
-		t.Fatalf("argv = %q, want a 3-element sh -c argv ending in the command", argv)
+	if len(argv) != 3 || argv[0] != "/scripted/sh" || argv[1] != "-c" || argv[2] != "echo hi" {
+		t.Fatalf("argv = %q, want [/scripted/sh -c echo hi]", argv)
 	}
 	env := strings.Join(starts[0].Opts.Env, "\x00")
 	for _, want := range []string{
@@ -66,7 +67,6 @@ func TestHookRunnerRunsThroughTheRunnerSeam(t *testing.T) {
 
 // TestHookRunnerReportsAFailedHookOnStderr proves a hook that cannot resolve
 // sh, fails to start or exits non-nil is reported, never swallowed silently.
-// Not parallel: the missing-sh row empties PATH with t.Setenv.
 func TestHookRunnerReportsAFailedHookOnStderr(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
@@ -84,10 +84,10 @@ func TestHookRunnerReportsAFailedHookOnStderr(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fake := &deps.FakeRunner{}
-			fake.ScriptStart([]string{deps.Executable("sh")}, 0, errors.New("boom"), nil)
-			if tc.shMissing {
-				t.Setenv("PATH", t.TempDir())
+			if !tc.shMissing {
+				fake.ScriptLookPath("sh", "/scripted/sh", nil)
 			}
+			fake.ScriptStart([]string{"/scripted/sh"}, 0, errors.New("boom"), nil)
 			var stderr bytes.Buffer
 			hook := hookRunner("false", fake, &stderr)
 			if err := hook(headless.Status{Name: "chat-1"}); err != nil {
@@ -138,31 +138,37 @@ func TestRunHeadlessWatchRefusesBadTargetsAsUsage(t *testing.T) {
 	}
 }
 
-// TestWatchTransitionsAnswersAnUnknownSeatWithSeen: under --transitions there
-// is no pre-check, so first sight of a name nothing answers to is the SEEN
-// snapshot; the target ends and the exit code says it was not alive.
+// TestWatchNoWorkingRequiresTransitionsAndAppearsInHelp: --no-working without
+// --transitions is a usage error, and --help lists every flag with its own line,
+// the --poll line stating the floor and the ten-second default a caller sizes
+// its wait by.
 func TestWatchNoWorkingRequiresTransitionsAndAppearsInHelp(t *testing.T) {
+	const usage = "usage: pfm chat watch <target|glob>... [--transitions [--no-working] [--quiet-after SECS]] " +
+		"[--idle-after SECS] [--on-idle CMD] [--on-exit CMD] [--once] [--poll SECS]"
 	var stdout, stderr bytes.Buffer
-	if code := runHeadlessWatch([]string{"ghost", "--no-working"}, &stdout, &stderr, &deps.FakeRunner{}); code != 2 ||
-		!strings.Contains(stderr.String(), "usage: pfm chat watch") {
-		t.Fatalf("without transitions: rc=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	code := runHeadlessWatch([]string{"ghost", "--no-working"}, &stdout, &stderr, &deps.FakeRunner{})
+	if first := strings.SplitN(stderr.String(), "\n", 2)[0]; code != 2 || first != usage {
+		t.Fatalf(
+			"without transitions: rc=%d stdout=%q stderr line 1 = %q, want %q",
+			code,
+			stdout.String(),
+			first,
+			usage,
+		)
 	}
 	stdout.Reset()
 	stderr.Reset()
-	if code := runHeadlessWatch([]string{"--help"}, &stdout, &stderr, &deps.FakeRunner{}); code != 0 ||
-		!strings.Contains(stderr.String(), "--no-working") {
-		t.Fatalf("help: rc=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
-	}
-}
-
-// TestWatchHelpStatesTheTenSecondDefault: the flag's own help carries the
-// default and the floor, so a caller reading --help learns both.
-func TestWatchHelpStatesTheTenSecondDefault(t *testing.T) {
-	t.Parallel()
-	var stdout, stderr bytes.Buffer
-	runHeadlessWatch([]string{"--help"}, &stdout, &stderr, &deps.FakeRunner{})
-	help := stdout.String() + stderr.String()
-	if !strings.Contains(help, "seconds between samples (minimum 10; a smaller value runs as 10) (default 10)") {
-		t.Fatalf("help = %q, want the --poll line naming the minimum and the default 10", help)
+	code = runHeadlessWatch([]string{"--help"}, &stdout, &stderr, &deps.FakeRunner{})
+	want := usage + "\n" +
+		"  -idle-after int\n    \tseconds of idle before IDLE is emitted\n" +
+		"  -no-working\n    \twith --transitions: omit WORKING lines and include the last answer on idle lines\n" +
+		"  -on-exit string\n    \tshell command to run on EXIT or DEAD\n" +
+		"  -on-idle string\n    \tshell command to run on IDLE\n" +
+		"  -once\n    \tstop each target after its first IDLE\n" +
+		"  -poll int\n    \tseconds between samples (minimum 10; a smaller value runs as 10) (default 10)\n" +
+		"  -quiet-after int\n    \twith --transitions: seconds of unchanged transcript before QUIET\n" +
+		"  -transitions\n    \tannounce every state change, after one SEEN snapshot per target\n"
+	if got := stdout.String() + stderr.String(); code != 0 || got != want {
+		t.Fatalf("help: rc=%d output=%q, want rc 0 and %q", code, got, want)
 	}
 }

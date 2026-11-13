@@ -3,6 +3,7 @@ package fleetdb
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,14 +41,13 @@ func TestRecordLaunchWriteErrorIncludesSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	values.StateDB = filepath.Join(blocker, "pfm.db")
-	if err := RecordLaunch(
-		ctx,
-		values,
-		Launch{SessionID: "failure"},
-		11,
-	); err == nil ||
-		!strings.Contains(err.Error(), "failure") {
-		t.Fatalf("RecordLaunch error=%v, want session ID", err)
+	err := RecordLaunch(ctx, values, Launch{SessionID: "failure"}, 11)
+	if got, want := strings.ReplaceAll(
+		fmt.Sprint(err),
+		blocker,
+		"{blocker}",
+	), "record launch failure: inspect shared state database {blocker}/pfm.db: stat {blocker}/pfm.db: not a directory"; got != want {
+		t.Fatalf("RecordLaunch error = %q, want %q", got, want)
 	}
 }
 

@@ -3,7 +3,6 @@ package agentlauncher
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -22,9 +21,12 @@ func TestContentExecsThePfmThroughOneSingleQuotedWord(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			content := string(Content(test.pfm))
-			if !strings.HasPrefix(content, "#!/bin/sh\n") || !strings.HasSuffix(content, test.want+"\n") {
-				t.Fatalf("launcher = %q, want a /bin/sh script ending in %q", content, test.want)
+			want := "#!/bin/sh\n" +
+				"# Stable launchd entry for pfm's LaunchAgents (written by pfm install, never edited).\n" +
+				"# It execs pfm so launchd keeps one pid, while Background Task Management sees\n" +
+				"# this unchanging file instead of a pfm binary that is a new identity per build.\n" + test.want + "\n"
+			if content := string(Content(test.pfm)); content != want {
+				t.Fatalf("launcher = %q, want %q", content, want)
 			}
 		})
 	}

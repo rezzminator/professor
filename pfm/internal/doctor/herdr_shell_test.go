@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
@@ -26,16 +25,16 @@ func TestHerdrShellDoctor(t *testing.T) {
 		warnings           int
 		nonExecutable      bool
 	}{
-		{name: "absent", absent: true, want: "ok herdr absent"},
-		{name: "user", config: "[terminal]\ndefault_shell = '/bin/fish'\n", want: `ok user-owned default_shell="/bin/fish"`},
-		{name: "unwired", want: "WARN picker wiring missing", warnings: 1},
-		{name: "broken config", config: "[terminal", want: "WARN parse Herdr config", warnings: 1},
-		{name: "wired", config: "owned", wrapper: true, want: "ok wired"},
-		{name: "missing wrapper", config: "owned", want: "WARN picker wiring missing", warnings: 1},
-		{name: "non-executable wrapper", config: "owned", wrapper: true, nonExecutable: true, want: "WARN picker wiring missing", warnings: 1},
-		{name: "unmarked missing wrapper", config: "unmarked", want: "WARN user-owned default_shell points to a missing", warnings: 1},
-		{name: "unmarked non-executable wrapper", config: "unmarked", wrapper: true, nonExecutable: true, want: "WARN user-owned default_shell points to a missing", warnings: 1},
-		{name: "unmarked executable wrapper", config: "unmarked", wrapper: true, want: "ok user-owned default_shell="},
+		{name: "absent", absent: true, want: "doctor: herdr-shell: ok herdr absent\n"},
+		{name: "user", config: "[terminal]\ndefault_shell = '/bin/fish'\n", want: "doctor: herdr-shell: ok user-owned default_shell=\"/bin/fish\" in {root}/.config/herdr/config.toml (picker wiring skipped)\n"},
+		{name: "unwired", want: "doctor: herdr-shell: WARN picker wiring missing or wrapper not executable in {root}/.config/herdr/config.toml — run pfm install --yes\n", warnings: 1},
+		{name: "broken config", config: "[terminal", want: "doctor: herdr-shell: WARN parse Herdr config {root}/.config/herdr/config.toml: toml: line 1: expected '.' or ']' to end table name, but got '\\x00' instead\n", warnings: 1},
+		{name: "wired", config: "owned", wrapper: true, want: "doctor: herdr-shell: ok wired {root}/.config/herdr/config.toml\n"},
+		{name: "missing wrapper", config: "owned", want: "doctor: herdr-shell: WARN picker wiring missing or wrapper not executable in {root}/.config/herdr/config.toml — run pfm install --yes\n", warnings: 1},
+		{name: "non-executable wrapper", config: "owned", wrapper: true, nonExecutable: true, want: "doctor: herdr-shell: WARN picker wiring missing or wrapper not executable in {root}/.config/herdr/config.toml — run pfm install --yes\n", warnings: 1},
+		{name: "unmarked missing wrapper", config: "unmarked", want: "doctor: herdr-shell: WARN user-owned default_shell points to a missing or non-executable pfm wrapper in {root}/.config/herdr/config.toml — restore pfm's marker block or choose an executable shell\n", warnings: 1},
+		{name: "unmarked non-executable wrapper", config: "unmarked", wrapper: true, nonExecutable: true, want: "doctor: herdr-shell: WARN user-owned default_shell points to a missing or non-executable pfm wrapper in {root}/.config/herdr/config.toml — restore pfm's marker block or choose an executable shell\n", warnings: 1},
+		{name: "unmarked executable wrapper", config: "unmarked", wrapper: true, want: "doctor: herdr-shell: ok user-owned default_shell=\"{root}/.local/share/pfm/install/bin/pfm-herdr-shell\" in {root}/.config/herdr/config.toml (picker wiring skipped)\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home := t.TempDir()
@@ -72,8 +71,8 @@ func TestHerdrShellDoctor(t *testing.T) {
 			}
 			var out bytes.Buffer
 			warnings := printHerdrShellDoctor(&out, home, Dependencies{Runner: runner, Env: &paths.MapEnv{}})
-			if warnings != tc.warnings || !strings.Contains(out.String(), "doctor: herdr-shell: "+tc.want) {
-				t.Fatalf("warnings=%d output=%s", warnings, &out)
+			if got := rooted(out.String(), home); warnings != tc.warnings || got != tc.want {
+				t.Errorf("warnings=%d output = %q, want %q", warnings, got, tc.want)
 			}
 		})
 	}

@@ -118,37 +118,20 @@ func TestGitGuardMainChatWorktreeAddNamesTheRightWay(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(without, ".git"), []byte("gitdir: /elsewhere\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	for _, test := range []struct{ name, cwd, want, absent string }{
-		{
-			name: "repo ships worktree.sh, cwd is a subdirectory", cwd: filepath.Join(withScript, "pfm"),
-			want: "worktrees go through " + script + " — the main chat's alone, run while git tracks it (and its" +
-				" worktree/ helpers) unchanged from HEAD; every other caller goes to gitter.",
-			absent: "Phase SETUP",
-		},
-		{
-			name: "repo without worktree.sh", cwd: without,
-			want: "gitter creates and removes worktrees (Phase SETUP)", absent: "worktree.sh create",
-		},
+	for _, test := range []struct{ name, cwd, want string }{
+		{"repo ships worktree.sh, cwd is a subdirectory", filepath.Join(withScript, "pfm"), "git-guard blocked `git worktree add -b b .worktrees/b HEAD`.\nOnly gitter writes this: spawn Agent(subagent_type: \"gitter\") with the repo path and the exact change. Never retry, rephrase, split or wrap the denied command to get past the guard.\nworktrees go through {repo}/.claude/scripts/worktree.sh — the main chat's alone, run while git tracks it (and its worktree/ helpers) unchanged from HEAD; every other caller goes to gitter."},
+		{"repo without worktree.sh", without, "git-guard blocked `git worktree add -b b .worktrees/b HEAD`.\nOnly gitter writes this: spawn Agent(subagent_type: \"gitter\") with the repo path and the exact change. Never retry, rephrase, split or wrap the denied command to get past the guard.\ngitter creates and removes worktrees (Phase SETUP)."},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			payload := gitGuardPayload(t, "Bash", "git worktree add -b b .worktrees/b HEAD", test.cwd, "")
-			code, stdout, stderr := runGitGuard(t, payload)
-			if code != 0 || !strings.Contains(stdout, gitGuardDenied) {
+			code, stdout, stderr := runGitGuard(
+				t,
+				gitGuardPayload(t, "Bash", "git worktree add -b b .worktrees/b HEAD", test.cwd, ""),
+			)
+			if code != 0 || gitGuardDecision(t, stdout) != "deny" {
 				t.Fatalf("code=%d stdout=%q stderr=%q, want a deny", code, stdout, stderr)
 			}
-			reason := gitGuardDenyReason(t, stdout)
-			for _, want := range []string{
-				"git worktree add -b b .worktrees/b HEAD",
-				`Only gitter writes this: spawn Agent(subagent_type: "gitter") with the repo path and the exact change.` +
-					" Never retry, rephrase, split or wrap the denied command to get past the guard.",
-				test.want,
-			} {
-				if !strings.Contains(reason, want) {
-					t.Fatalf("reason=%q, want it to contain %q", reason, want)
-				}
-			}
-			if strings.Contains(reason, test.absent) {
-				t.Fatalf("reason=%q, want it without %q", reason, test.absent)
+			if got := strings.ReplaceAll(gitGuardDenyReason(t, stdout), withScript, "{repo}"); got != test.want {
+				t.Errorf("reason = %q, want %q", got, test.want)
 			}
 		})
 	}
@@ -246,7 +229,7 @@ func TestGitGuardBlocksSharedStateWritesForAnExecutor(t *testing.T) {
 	} {
 		t.Run(command, func(t *testing.T) {
 			code, stdout, stderr := runGitGuard(t, gitGuardPayload(t, "Bash", command, cwd, gitGuardExecutor))
-			if code != 0 || !strings.Contains(stdout, gitGuardDenied) {
+			if code != 0 || gitGuardDecision(t, stdout) != "deny" {
 				t.Fatalf("code=%d stdout=%q stderr=%q, want a deny", code, stdout, stderr)
 			}
 		})
@@ -359,7 +342,8 @@ func TestGitGuardNamesEveryBlockedPartOfOneCall(t *testing.T) {
 		t,
 		gitGuardPayload(t, "Bash", command, t.TempDir(), "flights:foreman-sonnet"),
 	)
-	if code != 0 || !strings.Contains(stdout, gitGuardDenied) {
+	if code != 0 ||
+		stdout != "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"git-guard blocked `git add f`, `git commit -m x`, `git push`.\\nOnly gitter writes this: spawn Agent(subagent_type: \\\"gitter\\\") with the repo path and the exact change. Never retry, rephrase, split or wrap the denied command to get past the guard.\"}}\n" {
 		t.Fatalf("code=%d stdout=%q stderr=%q, want a deny", code, stdout, stderr)
 	}
 	reason := gitGuardDenyReason(t, stdout)
@@ -368,7 +352,7 @@ func TestGitGuardNamesEveryBlockedPartOfOneCall(t *testing.T) {
 			t.Fatalf("reason=%q, want it to name %q", reason, want)
 		}
 	}
-	if strings.Contains(reason, "git status") {
+	if reason != "git-guard blocked `git add f`, `git commit -m x`, `git push`.\nOnly gitter writes this: spawn Agent(subagent_type: \"gitter\") with the repo path and the exact change. Never retry, rephrase, split or wrap the denied command to get past the guard." {
 		t.Fatalf("reason=%q names the allowed git status", reason)
 	}
 }
@@ -433,7 +417,8 @@ func gitGuardNestShell(command string, levels int) string {
 func gitGuardRequireBounded(t *testing.T, command, cwd string) {
 	t.Helper()
 	code, stdout, stderr := runGitGuard(t, gitGuardPayload(t, "Bash", command, cwd, gitGuardExecutor))
-	if code != 0 || !strings.Contains(stdout, gitGuardDenied) {
+	if code != 0 ||
+		stdout != "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"git-guard could not read this command in full: it passes a parse bound (over 64 KiB, or a `-c` string nested past 8 levels). Shorten the command; write long content to a file with the Write tool.\"}}\n" {
 		t.Fatalf("code=%d stdout=%q stderr=%q, want a deny", code, stdout, stderr)
 	}
 	reason := gitGuardDenyReason(t, stdout)
@@ -442,7 +427,7 @@ func gitGuardRequireBounded(t *testing.T, command, cwd string) {
 			t.Fatalf("reason=%q, want the parse-bound message naming %q", reason, want)
 		}
 	}
-	if strings.Contains(reason, "split") {
+	if reason != "git-guard could not read this command in full: it passes a parse bound (over 64 KiB, or a `-c` string nested past 8 levels). Shorten the command; write long content to a file with the Write tool." {
 		t.Fatalf("reason=%q tells the agent to split its git calls", reason)
 	}
 }
@@ -463,10 +448,14 @@ func TestGitGuardDeniesShellNestingOverTheDepthBound(t *testing.T) {
 		t,
 		gitGuardPayload(t, "Bash", gitGuardNestShell("git worktree add x", 8), cwd, "flights:foreman-sonnet"),
 	)
-	if code != 0 || !strings.Contains(stdout, gitGuardDenied) {
+	if code != 0 ||
+		stdout != "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"git-guard blocked `git worktree add x`.\\nOnly gitter writes this: spawn Agent(subagent_type: \\\"gitter\\\") with the repo path and the exact change. Never retry, rephrase, split or wrap the denied command to get past the guard.\\ngitter creates and removes worktrees (Phase SETUP).\"}}\n" {
 		t.Fatalf("code=%d stdout=%q stderr=%q, want a deny", code, stdout, stderr)
 	}
-	if reason := gitGuardDenyReason(t, stdout); !strings.Contains(reason, "git worktree add x") {
+	if reason := gitGuardDenyReason(
+		t,
+		stdout,
+	); reason != "git-guard blocked `git worktree add x`.\nOnly gitter writes this: spawn Agent(subagent_type: \"gitter\") with the repo path and the exact change. Never retry, rephrase, split or wrap the denied command to get past the guard.\ngitter creates and removes worktrees (Phase SETUP)." {
 		t.Fatalf("reason=%q, want the worktree add read at depth 8", reason)
 	}
 }
@@ -522,55 +511,43 @@ func gitGuardRequireAllowed(t *testing.T, command, cwd string) {
 	}
 }
 
-// gitGuardRequireBlocked fails unless the guard denied command by name.
-func gitGuardRequireBlocked(t *testing.T, command, cwd string) {
-	t.Helper()
-	gitGuardRequireBlockedAs(t, command, command, cwd)
-}
+// gitGuardRemedy is the remedy every git-guard deny reason carries.
+const gitGuardRemedy = "Only gitter writes this: spawn Agent(subagent_type: \"gitter\") with the repo path and the" +
+	" exact change. Never retry, rephrase, split or wrap the denied command to get past the guard."
 
-// gitGuardRequireBlockedAs fails unless the guard denied command, naming it
-// as its words read (written: quotes removed).
-func gitGuardRequireBlockedAs(t *testing.T, command, written, cwd string) {
-	t.Helper()
-	code, stdout, stderr := runGitGuard(t, gitGuardPayload(t, "Bash", command, cwd, gitGuardExecutor))
-	if code != 0 || !strings.Contains(stdout, gitGuardDenied) {
-		t.Fatalf("%s: code=%d stdout=%q stderr=%q, want a deny", command, code, stdout, stderr)
-	}
-	if reason := gitGuardDenyReason(t, stdout); !strings.Contains(reason, "git-guard blocked `"+written+"`") {
-		t.Fatalf("reason=%q, want it to name %q as blocked", reason, written)
-	}
-}
+// gitGuardStashTail follows the remedy on a whole-tree stash deny.
+const gitGuardStashTail = "\nTo park only your own files, `git stash push -- <path>...` is allowed (restore with" +
+	" `git stash pop`); a whole-tree stash moves every other agent's uncommitted work."
 
-// An unquoted `*` reaches the guard as written, a whole-tree pathspec, never
-// as the file names a shell would expand it to.
-func TestGitGuardDeniesCheckoutOfAnUnquotedStar(t *testing.T) {
-	gitGuardRequireBlocked(t, "git checkout -- *", gitGuardTwoFiles(t))
-}
-
-func TestGitGuardDeniesStashPushOfAnUnquotedStar(t *testing.T) {
-	gitGuardRequireBlocked(t, "git stash push -- *", gitGuardTwoFiles(t))
-}
-
-// One checkout operand that is not an existing path is a revision, whatever
-// glob characters it carries: a commit expression may hold `*`, `?` or `[`.
-func TestGitGuardDeniesCheckoutOfARevisionCarryingGlobCharacters(t *testing.T) {
+// A whole-tree pathspec reaches the guard as written (an unquoted `*`, never
+// the file names a shell would expand it to; `?*`, `**`, `./*`, `:(glob)**`,
+// `**/*` likewise), and one checkout operand that is not an existing path is a
+// revision whatever glob characters it carries: each is denied by its words,
+// quotes removed.
+func TestGitGuardDeniesWholeTreeAndRevisionCheckouts(t *testing.T) {
 	cwd := gitGuardTwoFiles(t)
-	gitGuardRequireBlockedAs(t, `git checkout 'HEAD^{/fi.*}'`, "git checkout HEAD^{/fi.*}", cwd)
-	gitGuardRequireBlockedAs(t, `git checkout ':/fi.*'`, "git checkout :/fi.*", cwd)
-}
-
-// One all-star checkout operand covers the whole tree.
-func TestGitGuardDeniesCheckoutOfAnAllStarOperand(t *testing.T) {
-	gitGuardRequireBlockedAs(t, `git checkout '?*'`, "git checkout ?*", gitGuardTwoFiles(t))
-}
-
-// A glob that covers the whole tree is wide wherever a bare `*` is.
-func TestGitGuardDeniesWholeTreeGlobsAfterTheSeparator(t *testing.T) {
-	cwd := gitGuardTwoFiles(t)
-	for _, glob := range []string{"?*", "**", "./*", ":(glob)**", "**/*"} {
-		gitGuardRequireBlockedAs(t, "git checkout -- '"+glob+"'", "git checkout -- "+glob, cwd)
+	for _, tc := range []struct{ command, written, tail string }{
+		{"git checkout -- *", "git checkout -- *", ""},
+		{"git stash push -- *", "git stash push -- *", gitGuardStashTail},
+		{`git checkout 'HEAD^{/fi.*}'`, "git checkout HEAD^{/fi.*}", ""},
+		{`git checkout ':/fi.*'`, "git checkout :/fi.*", ""},
+		{`git checkout '?*'`, "git checkout ?*", ""},
+		{"git checkout -- '?*'", "git checkout -- ?*", ""},
+		{"git checkout -- '**'", "git checkout -- **", ""},
+		{"git checkout -- './*'", "git checkout -- ./*", ""},
+		{"git checkout -- ':(glob)**'", "git checkout -- :(glob)**", ""},
+		{"git checkout -- '**/*'", "git checkout -- **/*", ""},
+		{"git stash push -- '?*'", "git stash push -- ?*", gitGuardStashTail},
+	} {
+		code, stdout, stderr := runGitGuard(t, gitGuardPayload(t, "Bash", tc.command, cwd, gitGuardExecutor))
+		if code != 0 {
+			t.Fatalf("%s: code=%d stderr=%q, want 0", tc.command, code, stderr)
+		}
+		want := "git-guard blocked `" + tc.written + "`.\n" + gitGuardRemedy + tc.tail
+		if reason := gitGuardDenyReason(t, stdout); reason != want {
+			t.Errorf("%s: reason =\n%q\nwant\n%q", tc.command, reason, want)
+		}
 	}
-	gitGuardRequireBlockedAs(t, "git stash push -- '?*'", "git stash push -- ?*", cwd)
 }
 
 // A narrow glob after the separator restores only the files it names.
@@ -765,4 +742,21 @@ func TestGitGuardMainChatRunsTheCommittedWorktreeScript(t *testing.T) {
 			}
 		})
 	}
+}
+
+// gitGuardDecision is the permissionDecision a guard's stdout carries, "" for a silent allow.
+func gitGuardDecision(t *testing.T, stdout string) string {
+	t.Helper()
+	if stdout == "" {
+		return ""
+	}
+	var response struct {
+		HookSpecificOutput struct {
+			PermissionDecision string `json:"permissionDecision"`
+		} `json:"hookSpecificOutput"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &response); err != nil {
+		t.Fatalf("decode decision %q: %v", stdout, err)
+	}
+	return response.HookSpecificOutput.PermissionDecision
 }

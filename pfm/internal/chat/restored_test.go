@@ -724,19 +724,15 @@ func TestOpenRestoredTitlelessCodexWithoutSeat(t *testing.T) {
 	t.Setenv("HERDR_PANE_ID", "w9:p2")
 	t.Setenv("TMUX", "")
 	nativeChatRestoredCaller(t, true)
-	bin := t.TempDir()
-	if err := testjail.WriteExecutableNeverRun(
-		filepath.Join(bin, "codex"),
-		[]byte("#!/bin/sh\nexit 0\n"),
-		0o700,
-	); err != nil {
+	codex := filepath.Join(t.TempDir(), "codex")
+	if err := testjail.WriteExecutableNeverRun(codex, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	runtime, err := config.LoadRuntime("")
 	if err != nil {
 		t.Fatal(err)
 	}
+	runtime.Config.Codex.Binary = codex
 	rows, err := Rows(context.Background(), io.Discard, &runtime)
 	if err != nil {
 		t.Fatal(err)

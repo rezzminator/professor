@@ -49,7 +49,7 @@ func TestProfessorDoctorProjectLine(t *testing.T) {
 
 	var output bytes.Buffer
 	if warnings := PrintDoctor(&output, project, t.TempDir()); warnings != 0 ||
-		!strings.Contains(output.String(), "professor: current 1 · review-required 0") {
+		output.String() != "professor: current 1 · review-required 0\n" {
 		t.Fatalf("PrintDoctor() warnings=%d output=%q", warnings, output.String())
 	}
 	if err := os.WriteFile(BaselinePath(project), []byte("{"), 0o600); err != nil {
@@ -62,19 +62,43 @@ func TestProfessorDoctorProjectLine(t *testing.T) {
 	}
 }
 
-func TestGoneUpstreamReportRecommendsDeletingRetiredFile(t *testing.T) {
-	var output bytes.Buffer
-	writeProjectHuman(&output, projectReport{
-		Counts: map[projectStatus]int{projectGoneUpstream: 1},
-		Items: []projectReportItem{{
-			Status:   projectGoneUpstream,
-			Local:    "legacy.md",
-			Template: "project/legacy.md",
-		}},
-	})
-	want := "retired upstream — delete it and pfm update drop legacy.md; keep it and drop only its pin if the project still uses it"
-	if !strings.Contains(output.String(), want) {
-		t.Fatalf("GONE-UPSTREAM advice = %q, want %q", output.String(), want)
+func TestWriteProjectHumanRendersEachRowKind(t *testing.T) {
+	store := Store{Root: "/work/blueprint", Templates: "/work/blueprint/templates/project", SHA: "def5678"}
+	updated := func(pin, diff, diffError string) projectReportItem {
+		return projectReportItem{
+			Status: projectUpdated, Local: ".claude/settings.json", Template: "settings.json",
+			Pin: FilePin{Template: "settings.json", PinnedSHA: pin}, Diff: diff, DiffError: diffError,
+		}
+	}
+	one := func(item projectReportItem) projectReport {
+		return projectReport{
+			Root: "/work/project", Store: store, Counts: map[projectStatus]int{item.Status: 1},
+			Items: []projectReportItem{item},
+		}
+	}
+	withNew := one(updated("abc1234", "", "bad revision"))
+	withNew.Counts[projectNew] = 1
+	withNew.Items = append(withNew.Items, projectReportItem{Status: projectNew, Template: "project/NEW.md"})
+	for _, tc := range []struct {
+		name   string
+		report projectReport
+		want   string
+	}{
+		{"gone upstream", projectReport{
+			Counts: map[projectStatus]int{projectGoneUpstream: 1},
+			Items:  []projectReportItem{{Status: projectGoneUpstream, Local: "legacy.md", Template: "project/legacy.md"}},
+		}, "professor:   blueprint  → \n  current       0\n  ignored       0\n  UPDATED       0\n  NEW           0\n  GONE-UPSTREAM 1\n    legacy.md   project/legacy.md — retired upstream — delete it and pfm update drop legacy.md; keep it and drop only its pin if the project still uses it\n  MOVED         0\n  LOCAL-DELETED 0\n  every row ends in a verb; re-run this report until it ends `clean` — a row left open is not a decision:\n    · UPDATED         port the intent of each upstream commit, then pfm update pin <local>; keeping your version on purpose: pfm update pin <local> --keep \"<what you did not take, and why>\"\n    · NEW             adopt, then pfm update pin --template <template> <local>; not for this project: pfm update ignore <template>\n    · GONE-UPSTREAM   pfm update drop <local>\n    · LOCAL-DELETED   restore the file, or pfm update drop <local> then pfm update ignore <template> (a dropped pin's template reads NEW); MOVED: the verbs on the row\n    · RETIRED-NAME    edit the line to its successor; a mention that must stay: pfm update accept <path> --reason \"<why>\" [--name <name>]\n    · INCOMPLETE      inspect the unscanned text; accept reviewed coverage: pfm update accept <path> --coverage --reason \"<why>\"; read failures must be fixed\n  run the verbs one at a time: each rewrites .professor/baseline.json\nREVIEW REQUIRED — 1 items; nothing was written.\n"},
+		{"self-hosted pin", one(updated(UnknownSelfHostedSHA, "", "")), "professor: /work/project  blueprint  → def5678\n  current       0\n  ignored       0\n  UPDATED       1\n    .claude/settings.json   settings.json  pinned @self-hosted@unknown\n      review: self-hosted pin or store — no git history, so an exact self-hosted@unknown..def5678 diff cannot run; comparing the current template against your local file instead:\n      review: diff /work/project/.claude/settings.json /work/blueprint/templates/project/settings.json\n      port what applies into .claude/settings.json, keep the project's own edits, then: pfm update pin .claude/settings.json\n      or keep your version on purpose, on record: pfm update pin .claude/settings.json --keep \"<what you did not take, and why>\"\n  NEW           0\n  GONE-UPSTREAM 0\n  MOVED         0\n  LOCAL-DELETED 0\n  every row ends in a verb; re-run this report until it ends `clean` — a row left open is not a decision:\n    · UPDATED         port the intent of each upstream commit, then pfm update pin <local>; keeping your version on purpose: pfm update pin <local> --keep \"<what you did not take, and why>\"\n    · NEW             adopt, then pfm update pin --template <template> <local>; not for this project: pfm update ignore <template>\n    · GONE-UPSTREAM   pfm update drop <local>\n    · LOCAL-DELETED   restore the file, or pfm update drop <local> then pfm update ignore <template> (a dropped pin's template reads NEW); MOVED: the verbs on the row\n    · RETIRED-NAME    edit the line to its successor; a mention that must stay: pfm update accept <path> --reason \"<why>\" [--name <name>]\n    · INCOMPLETE      inspect the unscanned text; accept reviewed coverage: pfm update accept <path> --coverage --reason \"<why>\"; read failures must be fixed\n  run the verbs one at a time: each rewrites .professor/baseline.json\nREVIEW REQUIRED — 1 items; nothing was written.\n"},
+		{"upstream diff", one(updated("abc1234", "-old line\n+new line\n", "")), "professor: /work/project  blueprint  → def5678\n  current       0\n  ignored       0\n  UPDATED       1\n    .claude/settings.json   settings.json  pinned @abc1234\n      upstream change: git -C /work/blueprint diff abc1234 -- templates/settings.json\n      -old line\n      +new line\n      port what applies into .claude/settings.json, keep the project's own edits, then: pfm update pin .claude/settings.json\n      or keep your version on purpose, on record: pfm update pin .claude/settings.json --keep \"<what you did not take, and why>\"\n  NEW           0\n  GONE-UPSTREAM 0\n  MOVED         0\n  LOCAL-DELETED 0\n  every row ends in a verb; re-run this report until it ends `clean` — a row left open is not a decision:\n    · UPDATED         port the intent of each upstream commit, then pfm update pin <local>; keeping your version on purpose: pfm update pin <local> --keep \"<what you did not take, and why>\"\n    · NEW             adopt, then pfm update pin --template <template> <local>; not for this project: pfm update ignore <template>\n    · GONE-UPSTREAM   pfm update drop <local>\n    · LOCAL-DELETED   restore the file, or pfm update drop <local> then pfm update ignore <template> (a dropped pin's template reads NEW); MOVED: the verbs on the row\n    · RETIRED-NAME    edit the line to its successor; a mention that must stay: pfm update accept <path> --reason \"<why>\" [--name <name>]\n    · INCOMPLETE      inspect the unscanned text; accept reviewed coverage: pfm update accept <path> --coverage --reason \"<why>\"; read failures must be fixed\n  run the verbs one at a time: each rewrites .professor/baseline.json\nREVIEW REQUIRED — 1 items; nothing was written.\n"},
+		{"unreadable diff", one(updated("abc1234", "", "git diff: git exited with status 128: fatal: bad revision 'abc1234'")), "professor: /work/project  blueprint  → def5678\n  current       0\n  ignored       0\n  UPDATED       1\n    .claude/settings.json   settings.json  pinned @abc1234\n      upstream change UNREADABLE — git diff: git exited with status 128: fatal: bad revision 'abc1234'\n      port what applies into .claude/settings.json, keep the project's own edits, then: pfm update pin .claude/settings.json\n      or keep your version on purpose, on record: pfm update pin .claude/settings.json --keep \"<what you did not take, and why>\"\n  NEW           0\n  GONE-UPSTREAM 0\n  MOVED         0\n  LOCAL-DELETED 0\n  every row ends in a verb; re-run this report until it ends `clean` — a row left open is not a decision:\n    · UPDATED         port the intent of each upstream commit, then pfm update pin <local>; keeping your version on purpose: pfm update pin <local> --keep \"<what you did not take, and why>\"\n    · NEW             adopt, then pfm update pin --template <template> <local>; not for this project: pfm update ignore <template>\n    · GONE-UPSTREAM   pfm update drop <local>\n    · LOCAL-DELETED   restore the file, or pfm update drop <local> then pfm update ignore <template> (a dropped pin's template reads NEW); MOVED: the verbs on the row\n    · RETIRED-NAME    edit the line to its successor; a mention that must stay: pfm update accept <path> --reason \"<why>\" [--name <name>]\n    · INCOMPLETE      inspect the unscanned text; accept reviewed coverage: pfm update accept <path> --coverage --reason \"<why>\"; read failures must be fixed\n  run the verbs one at a time: each rewrites .professor/baseline.json\nFAILED — 1 item(s) could not be read; nothing was written.\n"},
+		{"unreadable diff beside a NEW row", withNew, "professor: /work/project  blueprint  → def5678\n  current       0\n  ignored       0\n  UPDATED       1\n    .claude/settings.json   settings.json  pinned @abc1234\n      upstream change UNREADABLE — bad revision\n      port what applies into .claude/settings.json, keep the project's own edits, then: pfm update pin .claude/settings.json\n      or keep your version on purpose, on record: pfm update pin .claude/settings.json --keep \"<what you did not take, and why>\"\n  NEW           1\n    project/NEW.md — adopt: copy/adapt it locally, then pfm update pin --template project/NEW.md <local> — or ignore\n  GONE-UPSTREAM 0\n  MOVED         0\n  LOCAL-DELETED 0\n  every row ends in a verb; re-run this report until it ends `clean` — a row left open is not a decision:\n    · UPDATED         port the intent of each upstream commit, then pfm update pin <local>; keeping your version on purpose: pfm update pin <local> --keep \"<what you did not take, and why>\"\n    · NEW             adopt, then pfm update pin --template <template> <local>; not for this project: pfm update ignore <template>\n    · GONE-UPSTREAM   pfm update drop <local>\n    · LOCAL-DELETED   restore the file, or pfm update drop <local> then pfm update ignore <template> (a dropped pin's template reads NEW); MOVED: the verbs on the row\n    · RETIRED-NAME    edit the line to its successor; a mention that must stay: pfm update accept <path> --reason \"<why>\" [--name <name>]\n    · INCOMPLETE      inspect the unscanned text; accept reviewed coverage: pfm update accept <path> --coverage --reason \"<why>\"; read failures must be fixed\n  run the verbs one at a time: each rewrites .professor/baseline.json\nFAILED — 1 item(s) could not be read; nothing was written.\n"},
+		{"empty diff", one(updated("abc1234", "", "")), "professor: /work/project  blueprint  → def5678\n  current       0\n  ignored       0\n  UPDATED       1\n    .claude/settings.json   settings.json  pinned @abc1234\n      upstream change EMPTY — the pin was taken from an uncommitted or untracked store file, so git cannot show the change; compare by hand: diff /work/project/.claude/settings.json /work/blueprint/templates/project/settings.json\n      port what applies into .claude/settings.json, keep the project's own edits, then: pfm update pin .claude/settings.json\n      or keep your version on purpose, on record: pfm update pin .claude/settings.json --keep \"<what you did not take, and why>\"\n  NEW           0\n  GONE-UPSTREAM 0\n  MOVED         0\n  LOCAL-DELETED 0\n  every row ends in a verb; re-run this report until it ends `clean` — a row left open is not a decision:\n    · UPDATED         port the intent of each upstream commit, then pfm update pin <local>; keeping your version on purpose: pfm update pin <local> --keep \"<what you did not take, and why>\"\n    · NEW             adopt, then pfm update pin --template <template> <local>; not for this project: pfm update ignore <template>\n    · GONE-UPSTREAM   pfm update drop <local>\n    · LOCAL-DELETED   restore the file, or pfm update drop <local> then pfm update ignore <template> (a dropped pin's template reads NEW); MOVED: the verbs on the row\n    · RETIRED-NAME    edit the line to its successor; a mention that must stay: pfm update accept <path> --reason \"<why>\" [--name <name>]\n    · INCOMPLETE      inspect the unscanned text; accept reviewed coverage: pfm update accept <path> --coverage --reason \"<why>\"; read failures must be fixed\n  run the verbs one at a time: each rewrites .professor/baseline.json\nREVIEW REQUIRED — 1 items; nothing was written.\n"},
+	} {
+		var output bytes.Buffer
+		writeProjectHuman(&output, tc.report)
+		if got := output.String(); got != tc.want {
+			t.Errorf("%s: report = %q, want %q", tc.name, got, tc.want)
+		}
 	}
 }
 
@@ -201,144 +225,10 @@ func TestSelfHostedReviewLinePrintsARunnableDiffCommand(t *testing.T) {
 	}
 }
 
-// TestSelfHostedPinReviewLineAgainstAGitStorePrintsTheLocalFileDiff: a file
-// pinned while the store was self-hosted carries PinnedSHA
-// self-hosted@unknown; once the store is a git clone the exact-diff line
-// would be `git diff self-hosted@unknown..<sha>`, a range git cannot resolve.
-func TestSelfHostedPinReviewLineAgainstAGitStorePrintsTheLocalFileDiff(t *testing.T) {
-	report := projectReport{
-		Root:   "/work/project",
-		Store:  Store{Root: "/work/blueprint", Templates: "/work/blueprint/templates/project", SHA: "abc1234"},
-		Counts: map[projectStatus]int{projectUpdated: 1},
-		Items: []projectReportItem{{
-			Status:   projectUpdated,
-			Local:    ".claude/settings.json",
-			Template: "settings.json",
-			Pin:      FilePin{Template: "settings.json", PinnedSHA: UnknownSelfHostedSHA},
-		}},
-	}
-	var output bytes.Buffer
-	writeProjectHuman(&output, report)
-	text := output.String()
-	if strings.Contains(text, "diff "+UnknownSelfHostedSHA+"..") {
-		t.Fatalf("review line prints an unresolvable self-hosted@unknown range:\n%s", text)
-	}
-	want := "review: diff /work/project/.claude/settings.json /work/blueprint/templates/project/settings.json"
-	if !strings.Contains(text, want) {
-		t.Fatalf("review line missing the runnable local-file diff %q:\n%s", want, text)
-	}
-}
-
-// TestUpdatedRowPrintsUpstreamDiffHeadingIndentedLinesAndGuidance pins the
-// 0-contracts § A `UPDATED` row body: the git heading, every diff line
-// indented six spaces, then the port-and-pin guidance line.
-func TestUpdatedRowPrintsUpstreamDiffHeadingIndentedLinesAndGuidance(t *testing.T) {
-	report := projectReport{
-		Root:   "/work/project",
-		Store:  Store{Root: "/work/blueprint", Templates: "/work/blueprint/templates/project", SHA: "def5678"},
-		Counts: map[projectStatus]int{projectUpdated: 1},
-		Items: []projectReportItem{{
-			Status:   projectUpdated,
-			Local:    ".claude/settings.json",
-			Template: "settings.json",
-			Pin:      FilePin{Template: "settings.json", PinnedSHA: "abc1234"},
-			Diff:     "-old line\n+new line\n",
-		}},
-	}
-	var output bytes.Buffer
-	writeProjectHuman(&output, report)
-	text := output.String()
-	for _, want := range []string{
-		"upstream change: git -C /work/blueprint diff abc1234 -- templates/settings.json",
-		"      -old line",
-		"      +new line",
-		"port what applies into .claude/settings.json, keep the project's own edits, then: pfm update pin .claude/settings.json",
-	} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("UPDATED row missing %q:\n%s", want, text)
-		}
-	}
-}
-
-// TestUpdatedRowPrintsUnreadableAndEmptyDiffVariants pins the two diff
-// failure/empty variants: an unreadable diff replaces the heading and body
-// with one UNREADABLE line, and an empty diff replaces it with one EMPTY
-// line naming a runnable hand comparison — both keep the guidance line.
-func TestUpdatedRowPrintsUnreadableAndEmptyDiffVariants(t *testing.T) {
-	base := func(item projectReportItem) projectReport {
-		return projectReport{
-			Root:   "/work/project",
-			Store:  Store{Root: "/work/blueprint", Templates: "/work/blueprint/templates/project", SHA: "def5678"},
-			Counts: map[projectStatus]int{projectUpdated: 1},
-			Items:  []projectReportItem{item},
-		}
-	}
-
-	var unreadable bytes.Buffer
-	writeProjectHuman(&unreadable, base(projectReportItem{
-		Status:    projectUpdated,
-		Local:     ".claude/settings.json",
-		Template:  "settings.json",
-		Pin:       FilePin{Template: "settings.json", PinnedSHA: "abc1234"},
-		DiffError: "git diff: git exited with status 128: fatal: bad revision 'abc1234'",
-	}))
-	unreadableText := unreadable.String()
-	if !strings.Contains(
-		unreadableText,
-		"upstream change UNREADABLE — git diff: git exited with status 128: fatal: bad revision 'abc1234'",
-	) {
-		t.Fatalf("UPDATED row missing the UNREADABLE line:\n%s", unreadableText)
-	}
-	if !strings.Contains(
-		unreadableText,
-		"port what applies into .claude/settings.json, keep the project's own edits, then: pfm update pin .claude/settings.json",
-	) {
-		t.Fatalf("UNREADABLE row missing the guidance line:\n%s", unreadableText)
-	}
-	withNew := base(projectReportItem{
-		Status: projectUpdated, Local: ".claude/settings.json", Template: "settings.json",
-		Pin: FilePin{Template: "settings.json", PinnedSHA: "abc1234"}, DiffError: "bad revision",
-	})
-	withNew.Counts[projectNew] = 1
-	withNew.Items = append(withNew.Items, projectReportItem{Status: projectNew, Template: "project/NEW.md"})
-	var precedence bytes.Buffer
-	writeProjectHuman(&precedence, withNew)
-	wantFailed := "FAILED — 1 item(s) could not be read; nothing was written."
-	if got := strings.TrimSpace(precedence.String()); !strings.HasSuffix(got, wantFailed) {
-		t.Fatalf("unreadable diff plus NEW terminal = %q", got)
-	}
-
-	var empty bytes.Buffer
-	writeProjectHuman(&empty, base(projectReportItem{
-		Status:   projectUpdated,
-		Local:    ".claude/settings.json",
-		Template: "settings.json",
-		Pin:      FilePin{Template: "settings.json", PinnedSHA: "abc1234"},
-		Diff:     "",
-	}))
-	emptyText := empty.String()
-	want := "upstream change EMPTY — the pin was taken from an uncommitted or untracked store file, " +
-		"so git cannot show the change; compare by hand: diff " +
-		"/work/project/.claude/settings.json /work/blueprint/templates/project/settings.json"
-	if !strings.Contains(emptyText, want) {
-		t.Fatalf("UPDATED row missing the EMPTY line %q:\n%s", want, emptyText)
-	}
-	if !strings.Contains(
-		emptyText,
-		"port what applies into .claude/settings.json, keep the project's own edits, then: pfm update pin .claude/settings.json",
-	) {
-		t.Fatalf("EMPTY row missing the guidance line:\n%s", emptyText)
-	}
-	if got := strings.TrimSpace(emptyText); !strings.HasSuffix(got, "REVIEW REQUIRED — 1 items; nothing was written.") {
-		t.Fatalf("EMPTY diff terminal = %q", got)
-	}
-}
-
 func TestWriteProjectUnmanagedHumanAndJSON(t *testing.T) {
 	var human bytes.Buffer
 	writeProjectUnmanaged(&human, false)
-	if got := human.String(); !strings.HasPrefix(got, "NOT-MANAGED — ") ||
-		!strings.Contains(got, "pfm doctor --project-updates") || strings.Contains(got, "pfm init") {
+	if got := human.String(); got != "NOT-MANAGED — no .professor/baseline.json at or above this directory (expected in the Professor source clone); run `pfm doctor --project-updates` inside each adopted project\n" {
 		t.Fatalf("WriteProjectUnmanaged(human) = %q", got)
 	}
 
@@ -349,7 +239,8 @@ func TestWriteProjectUnmanagedHumanAndJSON(t *testing.T) {
 		t.Fatalf("JSON output is not one object: %v", err)
 	}
 	terminal, ok := object["terminal"].(string)
-	if !ok || !strings.HasPrefix(terminal, "NOT-MANAGED — ") {
+	if !ok ||
+		terminal != "NOT-MANAGED — no .professor/baseline.json at or above this directory (expected in the Professor source clone); run `pfm doctor --project-updates` inside each adopted project" {
 		t.Fatalf("JSON terminal=%#v", object["terminal"])
 	}
 }
@@ -365,12 +256,12 @@ func TestRunPostUpdateUnreadableRoot(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 	code := RunProjectUpdate("", []string{"--root", root}, &stdout, &stderr, config.Runtime{}, nil)
-	if code != 3 || !strings.HasPrefix(stdout.String(), "FAILED — UNREADABLE ") {
-		t.Fatalf(
-			"RunProjectUpdate() code=%d stdout=%q stderr=%q, want 3 and FAILED — UNREADABLE",
-			code,
-			stdout.String(),
-			stderr.String(),
-		)
+	if got, want := strings.ReplaceAll(
+		stdout.String(),
+		root,
+		"{root}",
+	), "FAILED — UNREADABLE {root}/.professor/baseline.json: stat {root}/.professor/baseline.json: too many levels of symbolic links\n"; code != 3 ||
+		got != want {
+		t.Fatalf("RunProjectUpdate() code %d stdout = %q, want %q (stderr %q)", code, got, want, stderr.String())
 	}
 }

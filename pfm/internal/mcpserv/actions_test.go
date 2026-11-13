@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -23,6 +24,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // fakeChatVerbs is the MCP tests' stand-in for chat.Verbs: it records every
@@ -363,7 +365,7 @@ func TestReviewScopedSelfKeepsUnindexedTranscript(t *testing.T) {
 		t.Fatal(err)
 	}
 	row := compose.Row{
-		Kind: compose.LiveClaude, ID: "unindexed", Path: transcriptPath, CWD: "/work/alpha",
+		Kind: compose.LiveClaude, ID: "unindexed", Path: transcriptPath, CWD: testjail.Place("/work/alpha"),
 		SessionName: "cc-unindexed", Socket: "cc-unindexed", PaneID: "%1",
 	}
 	verbs := &fakeChatVerbs{
@@ -428,12 +430,12 @@ func TestChatNewDefaultsEngineFromValidatedCaller(t *testing.T) {
 				},
 			}}}
 			if _, _, err := service.chatNew(
-				context.Background(), request, NewInput{Name: "child", CWD: "/explicit"},
+				context.Background(), request, NewInput{Name: "child", CWD: testjail.Place("/explicit")},
 			); err != nil {
 				t.Fatal(err)
 			}
 			want := [][]string{{
-				"chat", "new", "--name", "child", "--engine", test.engine, "--cwd", "/explicit",
+				"chat", "new", "--name", "child", "--engine", test.engine, "--cwd", testjail.Place("/explicit"),
 			}}
 			if !reflect.DeepEqual(calls, want) {
 				t.Fatalf("new calls = %q, want %q", calls, want)
@@ -563,12 +565,12 @@ func TestResolvedSelfPathFallbacksAndIndexedPrecedence(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = database.Close() })
 	if err := database.UpsertTranscript(context.Background(), store.Transcript{
-		UUID: "indexed", Path: "/indexed.jsonl", CWD: "/work/indexed",
+		UUID: "indexed", Path: "/indexed.jsonl", CWD: testjail.Place("/work/indexed"),
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.UpsertTranscript(context.Background(), store.Transcript{
-		UUID: "indexed-empty", CWD: "/work/indexed-empty",
+		UUID: "indexed-empty", CWD: testjail.Place("/work/indexed-empty"),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -726,33 +728,24 @@ func TestChatLastAndStatusReportTheVerbsFailureWithItsKind(t *testing.T) {
 	_, _, lastErr := service.chatLast(context.Background(), nil, LastInput{Target: "duplicate"})
 	for name, err := range map[string]error{"status": statusErr, "last": lastErr} {
 		var target *chat.TargetError
-		if !errors.As(err, &target) || !strings.Contains(err.Error(), "matches 2 chats") ||
-			strings.Contains(err.Error(), "decode") {
-			t.Fatalf("%s error = %v, want the verb's *TargetError verbatim", name, err)
+		if got, want := fmt.Sprint(err), name+`: "duplicate" matches 2 chats`; got != want || !errors.As(err, &target) {
+			t.Errorf("%s error (a *TargetError: %t) = %q, want %q", name, errors.As(err, &target), got, want)
 		}
 	}
 }
 
-// TestChatLastAndStatusRefuseWithoutAVerbLayer pins the broken wiring's own
-// answer: a server built without its verb layer says so, and an engine name
-// the registry does not know is refused before any verb runs.
 func TestChatLastAndStatusRefuseWithoutAVerbLayer(t *testing.T) {
 	t.Parallel()
 	unwired := newService("test", &backend{})
-	if _, _, err := unwired.chatLast(context.Background(), nil, LastInput{Target: "seat"}); err == nil ||
-		!strings.Contains(err.Error(), "last verb is not configured") {
-		t.Fatalf("last without verbs error = %v", err)
-	}
-	if _, _, err := unwired.chatStatus(context.Background(), nil, StatusInput{Target: "seat"}); err == nil ||
-		!strings.Contains(err.Error(), "status verb is not configured") {
-		t.Fatalf("status without verbs error = %v", err)
-	}
+	_, _, lastErr := unwired.chatLast(context.Background(), nil, LastInput{Target: "seat"})
+	_, _, statusErr := unwired.chatStatus(context.Background(), nil, StatusInput{Target: "seat"})
 	verbs := &fakeChatVerbs{}
-	_, _, err := newService("test", &backend{chat: verbs}).chatStatus(context.Background(), nil, StatusInput{
+	_, _, engineErr := newService("test", &backend{chat: verbs}).chatStatus(context.Background(), nil, StatusInput{
 		Target: "seat", Summary: true, Engine: "gpt",
 	})
-	if err == nil || !strings.Contains(err.Error(), `unknown engine "gpt"`) || len(verbs.statuses) != 0 {
-		t.Fatalf("status engine=gpt error = %v, calls = %+v; want a refusal before the verb", err, verbs.statuses)
+	got := fmt.Sprintf("%v\n%v\n%v\nverb calls %d", lastErr, statusErr, engineErr, len(verbs.statuses))
+	if want := "last verb is not configured\nstatus verb is not configured\nstatus: unknown engine \"gpt\" (want cc/claude, cx/codex, ox/opencode)\nverb calls 0"; got != want {
+		t.Fatalf("refusals = %q, want %q", got, want)
 	}
 }
 
@@ -820,7 +813,7 @@ func TestChatOpenResolvesATargetByName(t *testing.T) {
 func TestListProjectedScopeNamesTheRepoItWasGiven(t *testing.T) {
 	t.Parallel()
 	current := &backend{chat: &fakeChatVerbs{}}
-	for repo, want := range map[string]string{"/work/one": "/work/one", "": "all repos"} {
+	for repo, want := range map[string]string{testjail.Place("/work/one"): testjail.Place("/work/one"), "": "all repos"} {
 		output, err := current.listProjected(context.Background(), LSInput{}, true, repo, false)
 		if err != nil {
 			t.Fatalf("listProjected(%q): %v", repo, err)
@@ -841,7 +834,7 @@ func TestListProjectedScopeNamesTheRepoItWasGiven(t *testing.T) {
 func TestChatExitEndsOnlyTheRequestScopedCaller(t *testing.T) {
 	t.Parallel()
 	row := compose.Row{
-		SessionName: "cc-seat", ID: "session-id", CWD: "/work/exit", Project: "exit",
+		SessionName: "cc-seat", ID: "session-id", CWD: testjail.Place("/work/exit"), Project: "exit",
 		Name: "Exit Claude", Kind: compose.LiveClaude, Socket: "cc-seat", PaneID: "%7",
 	}
 	proxy := mcp.Meta{"pfmProxy": map[string]any{
@@ -850,7 +843,7 @@ func TestChatExitEndsOnlyTheRequestScopedCaller(t *testing.T) {
 	}}
 	seat := headless.Chat{
 		Backend: "tmux",
-		Name:    "Exit Claude", ID: "session-id", Engine: pfmengine.Claude, CWD: "/work/exit",
+		Name:    "Exit Claude", ID: "session-id", Engine: pfmengine.Claude, CWD: testjail.Place("/work/exit"),
 		Socket: "cc-seat", Session: "cc-seat", Pane: "%7", Live: true,
 	}
 	tests := []struct {
@@ -981,13 +974,13 @@ func TestReservedSeatLabel(t *testing.T) {
 		chat:     &fakeChatVerbs{},
 		dispatch: func(context.Context, []string, io.Writer, io.Writer) int { return 0 },
 	})
+	got := ""
 	for _, label := range []string{"seat:child", "SeAt:child"} {
 		_, _, newErr := service.chatNew(context.Background(), nil, NewInput{Name: label})
 		_, _, nameErr := service.chatName(context.Background(), nil, NameInput{Target: "fixture", Name: label})
-		for _, err := range []error{newErr, nameErr} {
-			if err == nil || !strings.Contains(err.Error(), "reserved for durable seat handles") {
-				t.Errorf("label %q: error=%v", label, err)
-			}
-		}
+		got += fmt.Sprintf("%v\n%v\n", newErr, nameErr)
+	}
+	if want := "label \"seat:child\" is reserved for durable seat handles\nlabel \"seat:child\" is reserved for durable seat handles\nlabel \"SeAt:child\" is reserved for durable seat handles\nlabel \"SeAt:child\" is reserved for durable seat handles\n"; got != want {
+		t.Fatalf("reserved labels = %q, want %q", got, want)
 	}
 }

@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 const (
@@ -185,7 +186,7 @@ func TestRegisterHookTrustAppServerDropsTheHerdrPane(t *testing.T) {
 	t.Setenv("HERDR_PANE_ID", "w1:p1")
 	t.Setenv("HERDR_SOCKET_PATH", "/tmp/h.sock")
 	t.Setenv("HERDR_BIN_PATH", "/usr/local/bin/herdr")
-	t.Setenv("CODEX_HOME", "/elsewhere")
+	t.Setenv("CODEX_HOME", testjail.Place("/elsewhere"))
 	account, binary, _ := stageTrustAccount(t, func(account string) []listedHook {
 		return []listedHook{ownHook(account, "untrusted")}
 	})
@@ -220,7 +221,11 @@ func TestRegisterHookTrustPicksOnlyItsOwnHandlerAmongPersonalOnes(t *testing.T) 
 		otherMatcher := ownHook(account, "untrusted")
 		otherMatcher.Key, otherMatcher.Matcher = account+"/hooks.json:session_start:1:0", "startup"
 		foreignFile := ownHook(account, "untrusted")
-		foreignFile.Key, foreignFile.SourcePath = "/elsewhere/hooks.json:session_start:0:0", "/elsewhere/hooks.json"
+		foreignFile.Key, foreignFile.SourcePath = testjail.Place(
+			"/elsewhere/hooks.json:session_start:0:0",
+		), testjail.Place(
+			"/elsewhere/hooks.json",
+		)
 		return []listedHook{personal, otherMatcher, foreignFile, ownHook(account, "untrusted")}
 	})
 	if err := registerOwn(binary, account); err != nil {
@@ -256,8 +261,12 @@ func TestRegisterHookTrustErrorsWithTheCountWhenTheHandlerIsNotListed(t *testing
 		return []listedHook{personal}
 	})
 	err := registerOwn(binary, account)
-	if err == nil || !strings.Contains(err.Error(), "found 0") {
-		t.Fatalf("err=%v, want one naming found 0", err)
+	if got, want := strings.ReplaceAll(
+		fmt.Sprint(err),
+		account,
+		"{account}",
+	), "hook \"/home/x/.local/bin/pfm internal resume-unkill\" (sessionStart/resume) unavailable in {account}/hooks.json (found 0): check hooks feature, managed policy and hooks.json"; got != want {
+		t.Fatalf("err = %q, want %q", got, want)
 	}
 	if HookTrustRecorded(account) {
 		t.Fatal("a failed registration left a receipt")
@@ -268,11 +277,11 @@ func TestRegisterHookTrustIsANoopWhenTrustedAndReceiptMatches(t *testing.T) {
 	for _, test := range []struct {
 		name             string
 		enabled, receipt bool
-		writes           int
+		writes           string
 	}{
-		{"trusted enabled recorded", true, true, 0},
-		{"trusted disabled recorded", false, true, 0},
-		{"trusted enabled unrecorded", true, false, 1},
+		{"trusted enabled recorded", true, true, ""},
+		{"trusted disabled recorded", false, true, ""},
+		{"trusted enabled unrecorded", true, false, "{\"id\":1,\"method\":\"config/value/write\",\"params\":{\"keyPath\":\"hooks.state.\\\"{account}/hooks.json:session_start:0:0\\\"\",\"mergeStrategy\":\"replace\",\"value\":{\"enabled\":true,\"trusted_hash\":\"sha256:deadbeef\"}}}"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			account, binary, requestLog := stageTrustAccount(t, func(account string) []listedHook {
@@ -287,12 +296,12 @@ func TestRegisterHookTrustIsANoopWhenTrustedAndReceiptMatches(t *testing.T) {
 			if err := registerOwn(binary, account); err != nil {
 				t.Fatal(err)
 			}
-			writes := writeRequests(t, requestLog)
-			if len(writes) != test.writes {
-				t.Fatalf("writes=%v, want %d", writes, test.writes)
-			}
-			if test.writes != 0 && !strings.Contains(writes[0], `"enabled":true`) {
-				t.Fatalf("owned handler not enabled by registration: %v", writes)
+			if got := strings.ReplaceAll(
+				strings.Join(writeRequests(t, requestLog), "\n"),
+				account,
+				"{account}",
+			); got != test.writes {
+				t.Fatalf("writes = %q, want %q", got, test.writes)
 			}
 			if !HookTrustRecorded(account) {
 				t.Fatal("registration did not preserve hook receipt")
@@ -316,9 +325,10 @@ func TestUnregisterHookTrustRemovesOnlyItsOwnTablesAndReceipt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(got), "sha256:owned") || !strings.Contains(string(got), "sha256:foreign") ||
-		!strings.Contains(string(got), "model='personal'") {
-		t.Fatalf("config.toml after cleanup:\n%s", got)
+	if want := "model='personal'\n[hooks.state.\"foreign:key\"]\nenabled=true\ntrusted_hash='sha256:foreign'\n"; string(
+		got,
+	) != want {
+		t.Fatalf("config.toml after cleanup = %q, want %q", got, want)
 	}
 	if HookTrustRecorded(account) {
 		t.Fatal("hook receipt survived")
@@ -341,8 +351,12 @@ func TestRegisterHookTrustRecordsReceiptOnlyAfterAcceptedWrite(t *testing.T) {
 	})
 	processRunner.(*fakeAppServer).writeReply = `{"id":1,"error":{"code":-1,"message":"denied"}}`
 	err := registerOwn(binary, account)
-	if err == nil || !strings.HasPrefix(err.Error(), "write hook trust ") || !strings.Contains(err.Error(), "denied") {
-		t.Fatalf("registration error=%v, want write hook trust denial", err)
+	if got, want := strings.ReplaceAll(
+		fmt.Sprint(err),
+		account,
+		"{account}",
+	), "write hook trust {account}/hooks.json:session_start:0:0 for Codex account {account}: native hook API: {\"code\":-1,\"message\":\"denied\"}"; got != want {
+		t.Fatalf("registration error = %q, want %q", got, want)
 	}
 	if len(writeRequests(t, requestLog)) != 1 || HookTrustRecorded(account) {
 		t.Fatal("a denied write was recorded as trusted")
@@ -543,8 +557,12 @@ func TestRegisterHookTrustsTrustsTheRestWhenOneHandlerIsNotListed(t *testing.T) 
 	})
 	writeOwnedHooksFile(t, account)
 	err := RegisterHookTrusts(t.Context(), binary, account, []Handler{ownHandler, promptHandler, permitHandler})
-	if err == nil || !strings.Contains(err.Error(), promptHandler.Command) {
-		t.Fatalf("err=%v, want one naming the unlisted prompt handler", err)
+	if got, want := strings.ReplaceAll(
+		fmt.Sprint(err),
+		account,
+		"{account}",
+	), "hook \"/home/x/.local/bin/pfm internal herdr-state --engine codex working\" (userPromptSubmit/) unavailable in {account}/hooks.json (found 0): check hooks feature, managed policy and hooks.json"; got != want {
+		t.Fatalf("err = %q, want %q", got, want)
 	}
 	if writes := writeRequests(t, requestLog); len(writes) != 2 {
 		t.Fatalf("writes=%v, want the two listed handlers trusted", writes)
@@ -586,10 +604,16 @@ func TestNativeHookTrustStatesNameAReceiptThatRecordsNoOwnedHandler(t *testing.T
 	account, binary, _ := stageTrustAccount(t, func(string) []listedHook { return nil })
 	writeOwnedHooksFile(t, account)
 	writeReceiptFile(t, account, `{"`+account+`/hooks.json:stop:0:0":"sha256:stop"}`)
+	var states []string
 	for _, state := range NativeHookTrustStates(t.Context(), binary, account, []Handler{ownHandler, promptHandler}) {
-		if state.Trusted || state.Err == nil || !strings.Contains(state.Err.Error(), "no valid handler fingerprint") {
-			t.Fatalf("state=%+v, want the receipt named unreadable for every handler", state)
-		}
+		states = append(states, fmt.Sprintf("trusted %t: %v", state.Trusted, state.Err))
+	}
+	if got, want := strings.ReplaceAll(
+		strings.Join(states, "\n"),
+		account,
+		"{account}",
+	), "trusted false: hook trust receipt {account}/.professor-hook-trust.json has no valid handler fingerprint\ntrusted false: hook trust receipt {account}/.professor-hook-trust.json has no valid handler fingerprint"; got != want {
+		t.Fatalf("states = %q, want %q", got, want)
 	}
 }
 

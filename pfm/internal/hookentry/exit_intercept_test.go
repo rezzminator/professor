@@ -86,7 +86,7 @@ func TestRunExitInterceptFailureStaysLoud(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 	code := ExitIntercept(strings.NewReader(`{"prompt":"e"}`), &stdout, &stderr, config.Runtime{}, front)
-	if code != 2 || stdout.Len() != 0 || !strings.HasPrefix(stderr.String(), "exit: pfm chat kill: no live pane") {
+	if code != 2 || stdout.Len() != 0 || stderr.String() != "exit: pfm chat kill: no live pane\n" {
 		t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 }

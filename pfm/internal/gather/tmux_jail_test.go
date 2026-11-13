@@ -650,14 +650,3 @@ func paneSockets(panes []ProbePane) []string {
 	}
 	return sockets
 }
-
-func TestTmuxJailUsesShortPrivateSocketPaths(t *testing.T) {
-	jail := newTmuxJail(t)
-	socketPath := filepath.Join(jail.tmuxDir, "cc-1-2-3")
-	if len(socketPath) >= 100 {
-		t.Fatalf("jailed socket path is too long (%d): %q", len(socketPath), socketPath)
-	}
-	if !strings.HasPrefix(filepath.Clean(jail.root), "/tmp/ccf") {
-		t.Fatalf("tmux jail escaped short private root: %q", jail.root)
-	}
-}

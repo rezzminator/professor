@@ -141,7 +141,7 @@ func TestProbeServiceManagerSystemdTimeoutCouldNotAsk(t *testing.T) {
 	if report.Unit.Err == nil {
 		t.Fatalf("an expired probe must be could-not-ask, got %+v", report.Unit)
 	}
-	if !strings.Contains(report.Unit.Err.Error(), deps.ProbeTimeout.String()) {
+	if report.Unit.Err.Error() != "systemctl --user show --property=LoadState,UnitFileState,ActiveState pfm-mcp.service did not answer within the 5s deadline: context deadline exceeded" {
 		t.Fatalf("error %q does not name the %s deadline", report.Unit.Err, deps.ProbeTimeout)
 	}
 }

@@ -3,6 +3,7 @@
 package gather
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,7 +11,9 @@ import (
 )
 
 func TestLinuxProcFSProcessIdentity(t *testing.T) {
-	for _, state := range []string{"", "Z (zombie)", "X (dead)", "S (sleeping)", "? (unknown)"} {
+	for state, zombie := range map[string]bool{
+		"": false, "Z (zombie)": true, "X (dead)": true, "S (sleeping)": false, "? (unknown)": false,
+	} {
 		t.Run(state, func(t *testing.T) {
 			root := t.TempDir()
 			statusPath := filepath.Join(root, "42", "status")
@@ -28,52 +31,37 @@ func TestLinuxProcFSProcessIdentity(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if identity.Command != "pfm" || identity.EffectiveUID != 1200 ||
-				identity.Zombie != (strings.HasPrefix(state, "Z ") || strings.HasPrefix(state, "X ")) {
-				t.Fatalf("ProcessIdentity(42)=%#v for state %q", identity, state)
+			if identity.Command != "pfm" || identity.EffectiveUID != 1200 || identity.Zombie != zombie {
+				t.Fatalf("ProcessIdentity(42)=%#v for state %q, want zombie %v", identity, state, zombie)
 			}
 		})
 	}
 }
 
 func TestLinuxProcFSProcessIdentityErrorsNameTheirField(t *testing.T) {
-	tests := []struct {
-		name    string
-		status  string
-		wantErr string
-	}{
-		{name: "missing name", status: "Uid:\t1000\t1200\t1300\t1400\n", wantErr: "missing Name field"},
-		{name: "missing uid", status: "Name:\tpfm\n", wantErr: "missing Uid field"},
-		{name: "short uid", status: "Name:\tpfm\nUid:\t1000\n", wantErr: "malformed Uid field"},
-		{name: "invalid uid", status: "Name:\tpfm\nUid:\t1000\tnope\n", wantErr: "parse effective uid"},
-	}
-	for _, test := range tests {
+	for _, test := range []struct{ name, status, want string }{
+		{"missing name", "Uid:\t1000\t1200\t1300\t1400\n", "read process identity for pid 43 from {status}: missing Name field"},
+		{"missing uid", "Name:\tpfm\n", "read process identity for pid 43 from {status}: missing Uid field"},
+		{"short uid", "Name:\tpfm\nUid:\t1000\n", "parse effective uid for pid 43 from {status}: malformed Uid field"},
+		{"invalid uid", "Name:\tpfm\nUid:\t1000\tnope\n", "parse effective uid for pid 43 from {status}: strconv.ParseUint: parsing \"nope\": invalid syntax"},
+		{"unreadable status", "", "read process identity for pid 43 from {status}: open {status}: no such file or directory"},
+	} {
 		t.Run(test.name, func(t *testing.T) {
 			root := t.TempDir()
 			statusPath := filepath.Join(root, "43", "status")
-			if err := os.MkdirAll(filepath.Dir(statusPath), 0o700); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(statusPath, []byte(test.status), 0o600); err != nil {
-				t.Fatal(err)
+			if test.status != "" {
+				if err := os.MkdirAll(filepath.Dir(statusPath), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(statusPath, []byte(test.status), 0o600); err != nil {
+					t.Fatal(err)
+				}
 			}
 			_, err := (linuxProcFS{RealProcFS: RealProcFS{Root: root}}).ProcessIdentity(43)
-			if err == nil || !strings.Contains(err.Error(), test.wantErr) {
-				t.Fatalf("ProcessIdentity(43) error = %v, want %q", err, test.wantErr)
-			}
-			if !strings.Contains(err.Error(), statusPath) {
-				t.Fatalf("ProcessIdentity(43) error does not name status path: %v", err)
+			if got := strings.ReplaceAll(fmt.Sprint(err), statusPath, "{status}"); got != test.want {
+				t.Fatalf("ProcessIdentity(43) error = %q, want %q", got, test.want)
 			}
 		})
-	}
-}
-
-func TestLinuxProcFSProcessIdentityReportsStatusReadFailure(t *testing.T) {
-	root := t.TempDir()
-	statusPath := filepath.Join(root, "44", "status")
-	_, err := (linuxProcFS{RealProcFS: RealProcFS{Root: root}}).ProcessIdentity(44)
-	if err == nil || !strings.Contains(err.Error(), "read process identity for pid 44 from "+statusPath) {
-		t.Fatalf("ProcessIdentity(44) error = %v, want contextual status read failure", err)
 	}
 }
 

@@ -29,7 +29,7 @@ func TestSeatHostRejectsMissingSeat(t *testing.T) {
 		&stderr,
 		config.Runtime{},
 	); rc != 1 ||
-		!strings.Contains(stderr.String(), "expected one seat id") {
+		stderr.String() != "pfm internal seat-host: expected one seat id\n" {
 		t.Fatalf("SeatHost = %d, %q", rc, stderr.String())
 	}
 }

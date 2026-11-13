@@ -56,29 +56,30 @@ func TestDoctorBaselineUnavailableNamesCloneDirectoryAndMissingMarker(t *testing
 	check := func(home, want string) {
 		t.Helper()
 		var out bytes.Buffer
-		if warnings := printModelHarnessPromptDoctor(
-			context.Background(),
-			&out,
-			home,
-			model,
-		); warnings != 1 ||
-			!strings.Contains(out.String(), want) {
-			t.Fatalf("warnings=%d output=%q; want %q", warnings, out.String(), want)
+		warnings := printModelHarnessPromptDoctor(context.Background(), &out, home, model)
+		if got := fmt.Sprintf("%d %s", warnings, rooted(out.String(), filepath.Dir(home))); got != want {
+			t.Errorf("warnings and output = %q, want %q", got, want)
 		}
 	}
 	home, clone := t.TempDir(), t.TempDir()
 	if err := paths.WriteSourceRepoMarker(home, clone); err != nil {
 		t.Fatal(err)
 	}
-	dir := filepath.Join(clone, "pfm", "harness-prompts", "claude", "baselines")
-	check(home, "BASELINE UNAVAILABLE identity=harness-original model=\"sonnet\" dir="+dir)
-	check(t.TempDir(), "no source repo recorded, run pfm install from the clone")
+	check(
+		home,
+		"1 doctor: harness-prompt requested=sonnet\ndoctor: harness-prompt: BASELINE UNAVAILABLE identity=harness-original model=\"sonnet\" dir={root}/002/pfm/harness-prompts/claude/baselines path={root}/002/pfm/harness-prompts/claude/baselines/harness-original.sha256 error=open {root}/002/pfm/harness-prompts/claude/baselines/harness-original.sha256: no such file or directory — baseline file missing; update or restore the clone at {root}/002/pfm/harness-prompts/claude/baselines\n",
+	)
+	check(
+		t.TempDir(),
+		"1 doctor: harness-prompt requested=sonnet\ndoctor: harness-prompt: BASELINE UNAVAILABLE identity=harness-original model=\"sonnet\" dir=(unresolved) — no source repo recorded, run pfm install from the clone\n",
+	)
 	if err := os.RemoveAll(clone); err != nil {
 		t.Fatal(err)
 	}
-	check(home, "dir=(unresolved) error=resolve harness baseline directory: inspect recorded source repository")
-	check(home, "recorded source repository is unusable")
-	check(home, "— the recorded clone is unusable: restore it, or run pfm install from a working clone")
+	check(
+		home,
+		"1 doctor: harness-prompt requested=sonnet\ndoctor: harness-prompt: BASELINE UNAVAILABLE identity=harness-original model=\"sonnet\" dir=(unresolved) error=resolve harness baseline directory: inspect recorded source repository {root}/002: recorded source repository is unusable: stat {root}/002: no such file or directory — the recorded clone is unusable: restore it, or run pfm install from a working clone\n",
+	)
 }
 
 func TestHarnessPromptVerdictMasksBuildStamp(t *testing.T) {
@@ -93,12 +94,18 @@ func TestHarnessPromptVerdictMasksBuildStamp(t *testing.T) {
 		released,
 		nil,
 	); warn ||
-		!strings.Contains(line, "matches baseline") {
+		line != "doctor: harness-prompt: matches baseline b.md" {
 		t.Fatalf("a new build stamp alone = (%q, %v), want a match", line, warn)
 	}
 
 	reworded := "x-anthropic-billing-header: cc_version=2.1.257.9c3; cc_entrypoint=sdk-cli;\n\n=== SYSTEM BLOCK ===\n\nreworded prose\n"
-	if line, warn := harnessPromptVerdict(pin, "b.md", reworded, nil); !warn || !strings.Contains(line, "DRIFT") {
+	if line, warn := harnessPromptVerdict(
+		pin,
+		"b.md",
+		reworded,
+		nil,
+	); !warn ||
+		line != "doctor: harness-prompt: DRIFT live=325e1e20d1f097e6 baseline=061f987c192ed3b7 (b.md) — harness instructions changed; review before re-pinning" {
 		t.Fatalf("changed prose behind a new stamp = (%q, %v), want DRIFT", line, warn)
 	}
 }
@@ -324,7 +331,7 @@ func TestHarnessPromptVerdictIgnoresOptionalEnvironmentMetadata(t *testing.T) {
 			changed,
 			nil,
 		); !warn ||
-			!strings.Contains(line, "DRIFT") {
+			line != "doctor: harness-prompt: DRIFT live=5d140a429eb694e9 baseline=a14a058f5069d506 (fixture.md) — harness instructions changed; review before re-pinning" {
 			t.Fatalf("behavioral change was hidden: %s", line)
 		}
 	}
@@ -616,8 +623,10 @@ func TestHarnessDoctorSonnetBaselineCatalogOnlyChangeIsSilent(t *testing.T) {
 	}
 	var stdout bytes.Buffer
 	code := printModelHarnessPromptDoctor(context.Background(), &stdout, home, sonnet)
-	if code != 0 || !strings.Contains(stdout.String(), "doctor: harness-prompt: matches baseline "+fields[1]) ||
-		strings.Contains(stdout.String(), "DRIFT") {
+	if code != 0 || stdout.String() != `doctor: harness-prompt requested=sonnet
+doctor: harness-prompt scope=claude-model-baseline runtime=claude-code requested=sonnet resolved=claude-sonnet-5 cli="2.1.280" baseline=harness-original-v2.1.316.md baseline_model=claude-sonnet-5 unchecked=active-chat,fable,codex
+doctor: harness-prompt: matches baseline harness-original-v2.1.316.md
+` {
 		t.Fatalf("catalog-only change warned: code=%d\n%s", code, &stdout)
 	}
 }
@@ -629,24 +638,24 @@ func TestHarnessDoctorSonnetBaselineCatalogOnlyChangeIsSilent(t *testing.T) {
 func TestHarnessDottedVersionMaskKeepsOtherDottedNumbers(t *testing.T) {
 	for _, testCase := range []struct {
 		name, first, second string
-		drift               bool
+		want                string
 	}{
-		{"loopback address", "# Rules\n - Bind to 127.0.0.1 only.\n", "# Rules\n - Bind to 127.0.0.2 only.\n", true},
-		{"schema number", "# Rules\n - Write schema 1.2.3 exports.\n", "# Rules\n - Write schema 1.2.4 exports.\n", true},
+		{"loopback address", "# Rules\n - Bind to 127.0.0.1 only.\n", "# Rules\n - Bind to 127.0.0.2 only.\n", "true doctor: harness-prompt: DRIFT live=a5c981879e77bf66 baseline=285ac87f358a4cdf (fixture.md) — harness instructions changed; review before re-pinning"},
+		{"schema number", "# Rules\n - Write schema 1.2.3 exports.\n", "# Rules\n - Write schema 1.2.4 exports.\n", "true doctor: harness-prompt: DRIFT live=4164e596ea6f0fa8 baseline=e9789b23c68e7f2d (fixture.md) — harness instructions changed; review before re-pinning"},
 		{
 			"CLI version phrase",
 			"# Environment\n - This build is Claude Code version 2.1.280.\n",
 			"# Environment\n - This build is Claude Code version 2.1.281.\n",
-			false,
+			"false doctor: harness-prompt: matches baseline fixture.md",
 		},
-		{"v-prefixed version", "# Rules\n - Needs Version v2.1.280-beta.1.\n", "# Rules\n - Needs Version v2.1.281.\n", false},
-		{"cc_version value", "# Rules\n - Header cc_version=2.1.280.a1b; here.\n", "# Rules\n - Header cc_version=2.1.281.c2d; here.\n", false},
+		{"v-prefixed version", "# Rules\n - Needs Version v2.1.280-beta.1.\n", "# Rules\n - Needs Version v2.1.281.\n", "false doctor: harness-prompt: matches baseline fixture.md"},
+		{"cc_version value", "# Rules\n - Header cc_version=2.1.280.a1b; here.\n", "# Rules\n - Header cc_version=2.1.281.c2d; here.\n", "false doctor: harness-prompt: matches baseline fixture.md"},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			sum := sha256.Sum256([]byte(normalizeHarnessPrompt(testCase.first)))
 			line, warn := harnessPromptVerdict(hex.EncodeToString(sum[:]), "fixture.md", testCase.second, nil)
-			if drift := warn && strings.Contains(line, "DRIFT"); drift != testCase.drift {
-				t.Fatalf("verdict = (%q, %v), want drift=%v", line, warn, testCase.drift)
+			if got := fmt.Sprintf("%t %s", warn, line); got != testCase.want {
+				t.Errorf("verdict = %q, want %q", got, testCase.want)
 			}
 		})
 	}

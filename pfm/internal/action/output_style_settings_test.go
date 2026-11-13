@@ -16,7 +16,8 @@ import (
 
 func TestClaudeSpawnCommandUsesRunnerStartBoundary(t *testing.T) {
 	fake := &deps.FakeRunner{}
-	binary := deps.Executable("sh")
+	binary := "/scripted/claude"
+	fake.ScriptLookPath(binary, binary, nil)
 	fake.ScriptStart([]string{binary}, 42, nil, nil)
 	spawn := ClaudeSpawn{
 		Purpose: PurposeQuery,

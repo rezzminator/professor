@@ -6,7 +6,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -126,7 +125,7 @@ func TestNewDoesNotInventAnAccountRoster(t *testing.T) {
 		t.Fatalf("New() accounts=%#v, want an empty config-owned roster", opener.accounts)
 	}
 	err := opener.Open(context.Background(), Request{ID: "fixture", CWD: "/work"})
-	if err == nil || !strings.Contains(err.Error(), "configured account roster is empty") {
+	if err == nil || err.Error() != "agent opener configured account roster is empty" {
 		t.Fatalf("Open() error=%v, want empty-roster failure", err)
 	}
 }
@@ -369,7 +368,8 @@ func TestOpenRefusesFreshResumeWhenEveryRegistryQueryFails(t *testing.T) {
 		CWD:            "/jail/project",
 		PrimaryAccount: 1,
 	})
-	if err == nil || !strings.Contains(err.Error(), "no agent registry answered") {
+	if err == nil ||
+		err.Error() != "no agent registry answered completely for 55555555-5555-4555-8555-555555555555 — refusing to treat an error as absence" {
 		t.Fatalf("registry failure error = %v", err)
 	}
 	if len(commands.resumes) != 0 {
@@ -401,7 +401,9 @@ func TestOpenFollowsAChatClaudeCodeContinuedInANewSession(t *testing.T) {
 		opener := newTestOpener(t, commands, processes, fakeTmux{})
 		opener.continuationTail = tail
 		err := opener.Open(context.Background(), Request{ID: continued, CWD: "/jail", PrimaryAccount: 1})
-		if err == nil || !strings.Contains(err.Error(), "refusing the double-resume") || len(commands.resumes) != 0 {
+		if err == nil ||
+			err.Error() != "no registry row for 66666666-7777-4888-8999-aaaaaaaaaaaa, but a live claude holds it — refusing the double-resume" ||
+			len(commands.resumes) != 0 {
 			t.Fatalf("Open() error=%v resumes=%v, want the double resume refused", err, commands.resumes)
 		}
 	})

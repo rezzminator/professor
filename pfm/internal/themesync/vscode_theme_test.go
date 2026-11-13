@@ -28,22 +28,22 @@ func TestValidateVSCodeThemeRefusesWhatVSCodeWouldIgnore(t *testing.T) {
 		t.Errorf("an empty theme layer = %v, want valid: derive fills it", err)
 	}
 	for name, tc := range map[string]struct{ theme, want string }{
-		"unknown colour id":   {`{"colors":{"editor.backgroundd":"#000000"}}`, `"editor.backgroundd": not a VS Code colour id`},
-		"bad colour value":    {`{"colors":{"editor.background":"black"}}`, `"black" is not #rgb`},
-		"rule without scope":  {`{"tokenColors":[{"name":"x","settings":{"foreground":"#ffffff"}}]}`, "(x): no scope"},
-		"bad scope":           {`{"tokenColors":[{"scope":["comment,,string"],"settings":{"foreground":"#fff"}}]}`, "not a TextMate scope"},
-		"rule without style":  {`{"tokenColors":[{"scope":["comment"],"settings":{}}]}`, "neither foreground nor fontStyle"},
-		"bad rule colour":     {`{"tokenColors":[{"scope":["comment"],"settings":{"foreground":"red"}}]}`, `foreground "red"`},
-		"bad font style":      {`{"tokenColors":[{"scope":["comment"],"settings":{"fontStyle":"oblique"}}]}`, `"oblique"`},
-		"bad selector":        {`{"semanticTokenColors":{"variable..readonly":"#ffffff"}}`, "not a semantic token selector"},
-		"semantic sets none":  {`{"semanticTokenColors":{"variable":{}}}`, "sets no style"},
-		"bad semantic colour": {`{"semanticTokenColors":{"variable":"blue"}}`, `foreground "blue"`},
+		"unknown colour id":   {`{"colors":{"editor.backgroundd":"#000000"}}`, "vscode theme colors \"editor.backgroundd\": not a VS Code colour id (vscode_color_ids.txt)"},
+		"bad colour value":    {`{"colors":{"editor.background":"black"}}`, "vscode theme colors \"editor.background\": \"black\" is not #rgb, #rgba, #rrggbb or #rrggbbaa"},
+		"rule without scope":  {`{"tokenColors":[{"name":"x","settings":{"foreground":"#ffffff"}}]}`, "vscode theme tokenColors[0] (x): no scope"},
+		"bad scope":           {`{"tokenColors":[{"scope":["comment,,string"],"settings":{"foreground":"#fff"}}]}`, "vscode theme tokenColors[0]: scope \"comment,,string\" is not a TextMate scope selector"},
+		"rule without style":  {`{"tokenColors":[{"scope":["comment"],"settings":{}}]}`, "vscode theme tokenColors[0]: settings set neither foreground nor fontStyle"},
+		"bad rule colour":     {`{"tokenColors":[{"scope":["comment"],"settings":{"foreground":"red"}}]}`, "vscode theme tokenColors[0]: foreground \"red\" is not a hex colour"},
+		"bad font style":      {`{"tokenColors":[{"scope":["comment"],"settings":{"fontStyle":"oblique"}}]}`, "vscode theme tokenColors[0]: fontStyle word \"oblique\" is not one of italic, bold, underline, strikethrough"},
+		"bad selector":        {`{"semanticTokenColors":{"variable..readonly":"#ffffff"}}`, "vscode theme semanticTokenColors \"variable..readonly\": not a semantic token selector"},
+		"semantic sets none":  {`{"semanticTokenColors":{"variable":{}}}`, "vscode theme semanticTokenColors \"variable\": sets no style"},
+		"bad semantic colour": {`{"semanticTokenColors":{"variable":"blue"}}`, "vscode theme semanticTokenColors \"variable\": foreground \"blue\" is not a hex colour"},
 	} {
 		var theme VSCodeTheme
 		if err := json.Unmarshal([]byte(tc.theme), &theme); err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
-		if err := validateVSCodeTheme(&theme); err == nil || !strings.Contains(err.Error(), tc.want) {
+		if err := validateVSCodeTheme(&theme); err == nil || err.Error() != tc.want {
 			t.Errorf("%s: err = %v, want one naming %q", name, err, tc.want)
 		}
 	}

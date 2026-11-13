@@ -549,7 +549,7 @@ func TestFleetWatchWriteFailureIsTheReturnedError(t *testing.T) {
 			WatchOptions{Poll: time.Millisecond},
 			failingWriter{},
 		)
-	if err == nil || !strings.Contains(err.Error(), "write event line") {
+	if err == nil || err.Error() != "watch: write event line: pipe closed" {
 		t.Fatalf("Watch() error = %v, want the write failure", err)
 	}
 }

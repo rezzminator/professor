@@ -490,7 +490,7 @@ func TestNativeDeadSeatDoesNotFailListing(t *testing.T) {
 				}
 				delete(got, "stopped")
 				if len(got) != 2 || healthy.Kind != compose.LiveClaude || healthy.BackendError != "" ||
-					healthy.CWD != "/jail/healthy" {
+					healthy.CWD != testjail.Place("/jail/healthy") {
 					t.Fatalf("healthy seat lost beside a dead one: %+v", got)
 				}
 				if dead.Kind != compose.ResumeClaude || !strings.Contains(dead.BackendError, "HERDR DEAD dead") ||
@@ -550,7 +550,10 @@ func nativePaneServer(t *testing.T, panes map[string]string) string {
 					for pane, name := range panes {
 						workspace, _, _ := strings.Cut(pane, ":")
 						list = append(list, map[string]any{
-							"pane_id": pane, "workspace_id": workspace, "terminal_id": name, "cwd": "/jail/" + name,
+							"pane_id":      pane,
+							"workspace_id": workspace,
+							"terminal_id":  name,
+							"cwd":          testjail.Place("/jail/") + name,
 						})
 					}
 					result = map[string]any{"type": "pane_list", "panes": list}

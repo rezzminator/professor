@@ -1,7 +1,6 @@
 package resolve
 
 import (
-	"strings"
 	"testing"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -55,7 +54,8 @@ func TestResolverStillReturnsNoMatchForUnknownConfiguredCommand(t *testing.T) {
 		{SocketPath: "/jail/cc", SessionName: "split", PaneID: "%1", CurrentCommand: "custom-claude"},
 		{SocketPath: "/jail/cc", SessionName: "split", PaneID: "%2", CurrentCommand: "bash"},
 	})
-	if outcome.Code != 2 || !strings.Contains(outcome.Stderr, "0 running claude") {
+	if outcome.Code != 2 ||
+		outcome.Stderr != "ambiguous session 'split' — it holds 2 panes, 0 running claude; a bare session name would target whichever pane is active. Address by 🔖 label or %pane-id instead (run ls).\n" {
 		t.Fatalf("unknown command classification = %+v", outcome)
 	}
 }

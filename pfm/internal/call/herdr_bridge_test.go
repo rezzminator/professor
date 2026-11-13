@@ -14,6 +14,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // bridgeProc is a ProcFS whose Stat answers walk starts[pid] one read at a time.
@@ -52,7 +53,7 @@ func (proc *bridgeProc) Stat(pid int) (gather.ProcStat, error) {
 }
 
 func TestHerdrBridgeProof(t *testing.T) {
-	const tmuxDir = "/fixture/tmux-501"
+	tmuxDir := testjail.Place("/fixture/tmux-501")
 	clientArgv := []string{"tmux", "-L", "cc-1", "attach", "-t", "cc-1"}
 	for _, tc := range []struct {
 		name          string
@@ -138,7 +139,7 @@ func TestHerdrBridgeProof(t *testing.T) {
 				values: paths.Values{TmuxDir: tmuxDir},
 				proc:   proc,
 				foreground: func(_ context.Context, socket, pane string) ([]int, error) {
-					if socket != "/fixture/herdr.sock" || pane != "w6:p3" {
+					if socket != testjail.Place("/fixture/herdr.sock") || pane != "w6:p3" {
 						t.Errorf("foreground of %s %s", socket, pane)
 					}
 					return foreground, tc.foregroundErr
@@ -160,7 +161,7 @@ func TestHerdrBridgeProof(t *testing.T) {
 					return "", fmt.Errorf("unexpected tmux %q", args)
 				},
 			}
-			got, err := prover.prove(context.Background(), "/fixture/herdr.sock", "w6:p3")
+			got, err := prover.prove(context.Background(), testjail.Place("/fixture/herdr.sock"), "w6:p3")
 			if tc.wantErr == "" {
 				if err != nil || got != tc.want {
 					t.Fatalf("bridge = %+v, %v; want %+v", got, err, tc.want)
@@ -188,7 +189,7 @@ func TestHerdrPaneProofDistinguishesNonFleet(t *testing.T) {
 	}{
 		{name: "shell", argv: []string{"-zsh"}, notFleet: true},
 		{name: "shell-helper", argv: []string{"id", "-Gn"}, notFleet: true},
-		{name: "default-shell-wrapper", argv: []string{"/fixture/pfm-herdr-shell"}, notFleet: true},
+		{name: "default-shell-wrapper", argv: []string{testjail.Place("/fixture/pfm-herdr-shell")}, notFleet: true},
 		{name: "picker-before-chat", argv: []string{"pfm"}, notFleet: true},
 		{name: "empty-foreground", notFleet: true},
 		{name: "missing-process", argv: []string{"-zsh"}, missing: true},
@@ -201,8 +202,8 @@ func TestHerdrPaneProofDistinguishesNonFleet(t *testing.T) {
 		{name: "durable-owner-unproved", argv: []string{"-zsh"}, durable: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			const socket = "/fixture/herdr.sock"
-			ownerSocket, pane := "/fixture/other.sock", "w6:p3"
+			socket := testjail.Place("/fixture/herdr.sock")
+			ownerSocket, pane := testjail.Place("/fixture/other.sock"), "w6:p3"
 			if tc.durable {
 				ownerSocket, pane = socket, "w1:p2"
 			}
@@ -215,7 +216,7 @@ func TestHerdrPaneProofDistinguishesNonFleet(t *testing.T) {
 			}
 			proc.argv[8], proc.starts[8] = []string{"-zsh"}, []uint64{2}
 			prover := bridgeProver{
-				values: paths.Values{TmuxDir: "/fixture/tmux"}, proc: proc,
+				values: paths.Values{TmuxDir: testjail.Place("/fixture/tmux")}, proc: proc,
 				foreground: func(context.Context, string, string) ([]int, error) {
 					if tc.argv == nil {
 						return nil, tc.foregroundErr
@@ -241,7 +242,7 @@ func TestHerdrPaneProofDistinguishesNonFleet(t *testing.T) {
 }
 
 func TestHerdrPaneProofAcceptsBridge(t *testing.T) {
-	seedNativeOwner(t, Target{SocketPath: "/fixture/other.sock", Engine: "cc"})
+	seedNativeOwner(t, Target{SocketPath: testjail.Place("/fixture/other.sock"), Engine: "cc"})
 	for _, tc := range []struct {
 		name      string
 		bridgeErr error
@@ -257,14 +258,18 @@ func TestHerdrPaneProofAcceptsBridge(t *testing.T) {
 			var asked string
 			err := proveHerdrPaneOrBridge(
 				context.Background(),
-				"/fixture/herdr.sock",
+				testjail.Place("/fixture/herdr.sock"),
 				"w6:p3",
 				func(_ context.Context, socket, pane string) (HerdrBridge, error) {
 					asked = socket + " " + pane
-					return HerdrBridge{TmuxSocket: "/fixture/tmux/cc-1", Session: "cc-1", ClientPID: 7}, tc.bridgeErr
+					return HerdrBridge{
+						TmuxSocket: testjail.Place("/fixture/tmux/cc-1"),
+						Session:    "cc-1",
+						ClientPID:  7,
+					}, tc.bridgeErr
 				},
 			)
-			if asked != "/fixture/herdr.sock w6:p3" {
+			if asked != testjail.Place("/fixture/herdr.sock w6:p3") {
 				t.Fatalf("bridge asked %q", asked)
 			}
 			if len(tc.wantErr) == 0 {
@@ -302,14 +307,14 @@ func TestHerdrBridgeForegroundIsThatPanes(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			call := func(_ context.Context, socket string, lines ...[]byte) ([]json.RawMessage, error) {
-				if socket != "/fixture/herdr.sock" || len(lines) != 1 ||
+				if socket != testjail.Place("/fixture/herdr.sock") || len(lines) != 1 ||
 					!strings.Contains(string(lines[0]), `"w6:p3"`) {
 					t.Errorf("process_info request %s %q", socket, lines)
 				}
 				return []json.RawMessage{json.RawMessage(tc.reply)}, nil
 			}
 			got, err := bridgeForeground(call, func() uint64 { return 1 })(
-				context.Background(), "/fixture/herdr.sock", "w6:p3")
+				context.Background(), testjail.Place("/fixture/herdr.sock"), "w6:p3")
 			if tc.wantErr == "" {
 				if err != nil || !slices.Equal(got, tc.want) {
 					t.Fatalf("foreground = %v, %v; want %v", got, err, tc.want)

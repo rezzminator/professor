@@ -132,7 +132,7 @@ func (spawn ClaudeSpawn) Command(ctx context.Context) (*ProcessCommand, error) {
 	if err != nil {
 		return nil, err
 	}
-	path, err := deps.Resolve(launch.Binary)
+	path, err := spawn.runner().LookPath(launch.Binary)
 	if err != nil {
 		return nil, fmt.Errorf("resolve Claude binary %q: %w", launch.Binary, err)
 	}

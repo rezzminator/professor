@@ -1,0 +1,26 @@
+# >>> pfm theme · custom:tokyo-night · gen 7 >>>
+[theme]
+name = "tokyo-night"
+auto_switch = false
+
+[theme.custom]
+accent = "#c95cff"
+panel_bg = "#0f0f1a"
+sidebar_bg = "#221634"
+active_row_bg = "#3a2d6b"
+selection_bg = "#3a2d6b"
+surface0 = "#221634"
+surface1 = "#4a3d6b"
+surface_dim = "#221634"
+overlay0 = "#7a6fb0"
+overlay1 = "#9b8fd6"
+text = "#ff9ed6"
+subtext0 = "#9b8fd6"
+mauve = "#c95cff"
+green = "#9b8fd6"
+yellow = "#2d9bff"
+red = "#ffd23f"
+blue = "#00ffa3"
+teal = "#00ffa3"
+peach = "#ff8c42"
+# <<< pfm theme <<<

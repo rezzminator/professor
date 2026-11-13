@@ -1,7 +1,7 @@
 package testjail
 
 import (
-	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,84 +22,26 @@ func TestPFMBinaryUsesExecutablePrebuilt(t *testing.T) {
 	}
 }
 
-func TestPFMBinaryRejectsBrokenPrebuilt(t *testing.T) {
-	nonExecutable := filepath.Join(t.TempDir(), "pfm")
-	if err := os.WriteFile(nonExecutable, []byte("binary"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	for _, path := range []string{filepath.Join(t.TempDir(), "missing"), nonExecutable, t.TempDir()} {
-		t.Run(filepath.Base(path), func(t *testing.T) {
-			t.Setenv(paths.EnvTestPFMBinary, path)
-			got, err := PFMBinary(t.TempDir(), t.TempDir())
-			if got != "" || err == nil ||
-				!strings.Contains(err.Error(), paths.EnvTestPFMBinary) || !strings.Contains(err.Error(), path) {
-				t.Fatalf("PFMBinary() = %q, %v; want named error for %q", got, err, path)
-			}
-		})
-	}
-}
-
-func TestPFMBinaryBuildsWhenUnset(t *testing.T) {
-	previous, hadPrevious := os.LookupEnv(paths.EnvTestPFMBinary)
-	if err := os.Unsetenv(paths.EnvTestPFMBinary); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		var err error
-		if hadPrevious {
-			err = os.Setenv(paths.EnvTestPFMBinary, previous)
-		} else {
-			err = os.Unsetenv(paths.EnvTestPFMBinary)
+// TestPrebuiltBinariesRejectBrokenPaths: a prebuilt pfm or mock engine that is
+// missing, not executable or a directory is a named error, never a binary.
+func TestPrebuiltBinariesRejectBrokenPaths(t *testing.T) {
+	got := ""
+	for _, binary := range []struct {
+		env   string
+		build func(string, string) (string, error)
+	}{{paths.EnvTestPFMBinary, PFMBinary}, {paths.EnvTestMockEngineBinary, MockEngineBinary}} {
+		nonExecutable := filepath.Join(t.TempDir(), "binary")
+		if err := os.WriteFile(nonExecutable, []byte("binary"), 0o600); err != nil {
+			t.Fatal(err)
 		}
-		if err != nil {
-			t.Errorf("restore %s: %v", paths.EnvTestPFMBinary, err)
+		for _, path := range []string{filepath.Join(t.TempDir(), "missing"), nonExecutable, t.TempDir()} {
+			t.Setenv(binary.env, path)
+			built, err := binary.build(t.TempDir(), t.TempDir())
+			got += rooted(t, fmt.Sprintf("%q %v\n", built, err))
 		}
-	})
-	goDir := t.TempDir()
-	log := filepath.Join(t.TempDir(), "go.log")
-	stub := `#!/bin/sh
-printf 'HOME=%s CGO_ENABLED=%s GOFLAGS=%s GOTOOLCHAIN=%s GOTELEMETRY=%s ARGS=%s\n' \
-  "$HOME" "$CGO_ENABLED" "$GOFLAGS" "$GOTOOLCHAIN" "$GOTELEMETRY" "$*" > "$TEST_GO_BUILD_LOG"
-while [ "$1" != -o ]; do shift; done
-shift
-printf '#!/bin/sh\nexit 0\n' > "$1"
-chmod +x "$1"
-`
-	if err := WriteExecutable(filepath.Join(goDir, "go"), []byte(stub), 0o700); err != nil {
-		t.Fatal(err)
 	}
-	t.Setenv("PATH", goDir+":"+os.Getenv("PATH"))
-	t.Setenv("TEST_GO_BUILD_LOG", log)
-	dir := t.TempDir()
-	got, err := PFMBinary(t.TempDir(), dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := filepath.Join(dir, "pfm"); got != want {
-		t.Fatalf("PFMBinary() = %q, want %q", got, want)
-	}
-	info, err := os.Stat(got)
-	if err != nil {
-		t.Fatalf("stat built binary %q: %v", got, err)
-	}
-	if info.Mode().Perm()&0o111 == 0 {
-		t.Fatalf("built binary %q is not executable: %v", got, err)
-	}
-	data, err := os.ReadFile(log)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, part := range []string{
-		"HOME=" + testProcessHome,
-		"CGO_ENABLED=0",
-		"GOFLAGS=",
-		"GOTOOLCHAIN=local",
-		"GOTELEMETRY=off",
-		"ARGS=build -trimpath -buildvcs=false -o " + got + " ./cmd/pfm",
-	} {
-		if !strings.Contains(string(data), part) {
-			t.Fatalf("go build log %q missing %q", data, part)
-		}
+	if want := "\"\" PFM_TEST_PFM_BINARY=\"{root}/002/missing\": stat {root}/002/missing: no such file or directory\n\"\" PFM_TEST_PFM_BINARY=\"{root}/001/binary\": not an executable regular file\n\"\" PFM_TEST_PFM_BINARY=\"{root}/003\": not an executable regular file\n\"\" PFM_TEST_MOCK_ENGINE_BINARY=\"{root}/014/missing\": stat {root}/014/missing: no such file or directory\n\"\" PFM_TEST_MOCK_ENGINE_BINARY=\"{root}/013/binary\": not an executable regular file\n\"\" PFM_TEST_MOCK_ENGINE_BINARY=\"{root}/015\": not an executable regular file\n"; got != want {
+		t.Fatalf("prebuilt binaries = %q, want %q", got, want)
 	}
 }
 
@@ -115,111 +57,48 @@ func TestMockEngineBinaryUsesExecutablePrebuilt(t *testing.T) {
 	}
 }
 
-func TestMockEngineBinaryRejectsBrokenPrebuilt(t *testing.T) {
-	nonExecutable := filepath.Join(t.TempDir(), "mock-engine")
-	if err := os.WriteFile(nonExecutable, []byte("binary"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	for _, path := range []string{filepath.Join(t.TempDir(), "missing"), nonExecutable, t.TempDir()} {
-		t.Run(filepath.Base(path), func(t *testing.T) {
-			t.Setenv(paths.EnvTestMockEngineBinary, path)
-			got, err := MockEngineBinary(t.TempDir(), t.TempDir())
-			if got != "" || err == nil ||
-				!strings.Contains(err.Error(), paths.EnvTestMockEngineBinary) || !strings.Contains(err.Error(), path) {
-				t.Fatalf("MockEngineBinary() = %q, %v; want named error for %q", got, err, path)
-			}
-		})
-	}
-}
-
-func TestMockEngineBinaryBuildsWhenUnset(t *testing.T) {
-	previous, hadPrevious := os.LookupEnv(paths.EnvTestMockEngineBinary)
-	if err := os.Unsetenv(paths.EnvTestMockEngineBinary); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		var err error
-		if hadPrevious {
-			err = os.Setenv(paths.EnvTestMockEngineBinary, previous)
-		} else {
-			err = os.Unsetenv(paths.EnvTestMockEngineBinary)
+// TestBinaryWithoutAModuleOrPrebuiltNamesBoth: a test process that started outside the module
+// (RunInJail's child, launched in the jail) and holds no prebuilt binary gets a named error, never
+// a build in whatever directory it stands in; with a prebuilt binary it needs no module at all.
+func TestBinaryWithoutAModuleOrPrebuiltNamesBoth(t *testing.T) {
+	for _, name := range []string{paths.EnvTestPFMBinary, paths.EnvTestMockEngineBinary} {
+		t.Setenv(name, "") // restored at cleanup; unset now, since a set empty value is a prebuilt path
+		if err := os.Unsetenv(name); err != nil {
+			t.Fatal(err)
 		}
-		if err != nil {
-			t.Errorf("restore %s: %v", paths.EnvTestMockEngineBinary, err)
-		}
-	})
-	goDir := t.TempDir()
-	log := filepath.Join(t.TempDir(), "go.log")
-	stub := `#!/bin/sh
-printf '%s\n' "$*" > "$TEST_GO_BUILD_LOG"
-while [ "$1" != -o ]; do shift; done
-shift
-printf '#!/bin/sh\nexit 0\n' > "$1"
-chmod +x "$1"
-`
-	if err := WriteExecutable(filepath.Join(goDir, "go"), []byte(stub), 0o700); err != nil {
+	}
+	_, pfmErr := PFMBinary("", t.TempDir())
+	_, mockErr := MockEngineBinary("", t.TempDir())
+	if got, want := fmt.Sprintf(
+		"%v\n%v",
+		pfmErr,
+		mockErr,
+	), "build ./cmd/pfm: no go.mod above the directory the test started in, and PFM_TEST_PFM_BINARY is unset\n"+
+		"build ./cmd/mock-engine: no go.mod above the directory the test started in, and PFM_TEST_MOCK_ENGINE_BINARY is unset"; got != want {
+		t.Fatalf("binaries without a module = %q, want %q", got, want)
+	}
+	prebuilt := filepath.Join(t.TempDir(), "pfm")
+	if err := WriteExecutable(prebuilt, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("PATH", goDir+":"+os.Getenv("PATH"))
-	t.Setenv("TEST_GO_BUILD_LOG", log)
-	dir := t.TempDir()
-	got, err := MockEngineBinary(t.TempDir(), dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := filepath.Join(dir, "mock-engine"); got != want {
-		t.Fatalf("MockEngineBinary() = %q, want %q", got, want)
-	}
-	data, err := os.ReadFile(log)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := "build -trimpath -buildvcs=false -o " + got + " ./cmd/mock-engine"
-	if !strings.Contains(string(data), want) {
-		t.Fatalf("go build log %q missing %q", data, want)
-	}
-}
-
-func TestGoBuildReportsCombinedOutput(t *testing.T) {
-	goDir := t.TempDir()
-	if err := WriteExecutable(
-		filepath.Join(
-			goDir,
-			"go",
-		),
-		[]byte("#!/bin/sh\necho 'fixture compile output'\necho 'fixture compile error' >&2\nexit 41\n"),
-		0o700,
-	); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", goDir+":"+os.Getenv("PATH"))
-	err := GoBuild(t.TempDir(), filepath.Join(t.TempDir(), "pfm"), "./cmd/pfm")
-	if err == nil || !strings.Contains(err.Error(), "exit status 41") ||
-		!strings.Contains(err.Error(), "fixture compile error") ||
-		!strings.Contains(err.Error(), "fixture compile output") ||
-		strings.Index(err.Error(), "fixture compile error") > strings.Index(err.Error(), "fixture compile output") {
-		t.Fatalf("GoBuild error = %v, want status 41 with stderr before stdout", err)
-	}
-}
-
-func TestGoBuildReportsStartFailure(t *testing.T) {
-	goDir := t.TempDir()
-	if err := WriteExecutable(filepath.Join(goDir, "go"), []byte("#!/missing-test-interpreter\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", goDir+":"+os.Getenv("PATH"))
-	const target = "./cmd/pfm"
-	err := GoBuild(t.TempDir(), filepath.Join(t.TempDir(), "pfm"), target)
-	var pathErr *os.PathError
-	if err == nil || !strings.Contains(err.Error(), "go build "+target) || !errors.As(err, &pathErr) {
-		t.Fatalf("GoBuild error = %v, want named wrapped start failure", err)
+	t.Setenv(paths.EnvTestPFMBinary, prebuilt)
+	if got, err := PFMBinary("", t.TempDir()); err != nil || got != prebuilt {
+		t.Fatalf("PFMBinary(no module) = %q, %v; want prebuilt %q", got, err, prebuilt)
 	}
 }
 
 func TestGoBuildReportsResolveFailure(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	err := GoBuild(t.TempDir(), filepath.Join(t.TempDir(), "pfm"), "./cmd/pfm")
-	if err == nil || !strings.Contains(err.Error(), "resolve go for test build:") {
-		t.Fatalf("GoBuild error = %v, want named resolution failure", err)
+	if got, want := rooted(
+		t,
+		fmt.Sprint(err),
+	), "resolve go for test build: "+NotOnPath("go"); got != want {
+		t.Fatalf("GoBuild error = %q, want %q", got, want)
 	}
+}
+
+// rooted writes the test's temp root as {root}, so an error naming a t.TempDir() compares exactly.
+func rooted(t *testing.T, s string) string {
+	return strings.ReplaceAll(s, filepath.Dir(t.TempDir()), "{root}")
 }

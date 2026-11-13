@@ -3,6 +3,7 @@ package mcpserv
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"path/filepath"
 	"reflect"
@@ -16,6 +17,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // TestChatSaveRefusesATargetWithNoPathSeparator is the F7 regression:
@@ -36,10 +38,11 @@ func TestChatSaveRefusesATargetWithNoPathSeparator(t *testing.T) {
 		},
 	}}
 
-	if _, _, err := service.chatSave(
-		context.Background(), nil, SaveInput{Target: "mcpaudit-b"},
-	); err == nil || !strings.Contains(err.Error(), "is not a file path") {
-		t.Fatalf("chatSave error = %v, want a not-a-file-path refusal", err)
+	_, _, err := service.chatSave(context.Background(), nil, SaveInput{Target: "mcpaudit-b"})
+	if got, want := fmt.Sprint(
+		err,
+	), "save target \"mcpaudit-b\" is not a file path: this verb appends a transcript to a FILE, not to a chat — pass a path such as ./mcpaudit-b.md"; got != want {
+		t.Fatalf("chatSave error = %q, want %q", got, want)
 	}
 	if dispatched {
 		t.Fatal("chatSave dispatched a bare chat name instead of refusing it")
@@ -249,7 +252,7 @@ func TestChatSaveRefusesCallerDependentPathsWithoutUsableCallerContext(t *testin
 			name:        "invalid caller metadata",
 			request:     &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Meta: mcp.Meta{"threadId": "missing"}}},
 			input:       SaveInput{Target: "./notes/chat.md", Transcript: "/transcripts/chat.jsonl"},
-			wantMessage: "no live Codex seat holds thread",
+			wantMessage: "save: resolve caller: ERROR: this process is not inside a pfm chat: no live tmux pane or Herdr pane holds it: no live Codex seat holds thread missing",
 		},
 		{
 			name: "missing caller cwd",
@@ -259,7 +262,7 @@ func TestChatSaveRefusesCallerDependentPathsWithoutUsableCallerContext(t *testin
 			},
 			request:     saveProxyRequest("cc-caller", "caller-id"),
 			input:       SaveInput{Target: "./notes/chat.md", Transcript: "/transcripts/chat.jsonl"},
-			wantMessage: "working directory is required",
+			wantMessage: "save: caller working directory is required to resolve relative paths",
 		},
 		{
 			name: "nonabsolute caller cwd",
@@ -269,7 +272,7 @@ func TestChatSaveRefusesCallerDependentPathsWithoutUsableCallerContext(t *testin
 			},
 			request:     saveProxyRequest("cc-caller", "caller-id"),
 			input:       SaveInput{Target: "./notes/chat.md", Transcript: "/transcripts/chat.jsonl"},
-			wantMessage: "is not absolute",
+			wantMessage: "save: caller working directory \"relative/caller\" is not absolute",
 		},
 		{
 			name: "missing indexed transcript",
@@ -279,7 +282,7 @@ func TestChatSaveRefusesCallerDependentPathsWithoutUsableCallerContext(t *testin
 			},
 			request:     saveProxyRequest("cc-caller", "caller-id"),
 			input:       SaveInput{Target: "/notes/chat.md"},
-			wantMessage: "transcript path is required",
+			wantMessage: "save: caller transcript path is required when transcript is omitted",
 		},
 	}
 	for _, test := range tests {
@@ -298,8 +301,8 @@ func TestChatSaveRefusesCallerDependentPathsWithoutUsableCallerContext(t *testin
 				},
 			})
 			_, _, err := service.chatSave(context.Background(), test.request, test.input)
-			if err == nil || !strings.Contains(err.Error(), test.wantMessage) {
-				t.Fatalf("chatSave error = %v, want %q", err, test.wantMessage)
+			if got := fmt.Sprint(err); got != test.wantMessage {
+				t.Errorf("chatSave error = %q, want %q", got, test.wantMessage)
 			}
 			if dispatched {
 				t.Fatal("chatSave dispatched an invalid caller-dependent request")
@@ -312,11 +315,11 @@ func TestChatSaveKeepsInterleavedCallerContextsIsolated(t *testing.T) {
 	t.Parallel()
 	rows := []compose.Row{
 		{
-			Kind: compose.LiveClaude, ID: "alpha", CWD: "/work/alpha",
+			Kind: compose.LiveClaude, ID: "alpha", CWD: testjail.Place("/work/alpha"),
 			SessionName: "cc-alpha", Socket: "cc-alpha", PaneID: "%1",
 		},
 		{
-			Kind: compose.LiveClaude, ID: "beta", CWD: "/work/beta",
+			Kind: compose.LiveClaude, ID: "beta", CWD: testjail.Place("/work/beta"),
 			SessionName: "cc-beta", Socket: "cc-beta", PaneID: "%1",
 		},
 	}
@@ -344,14 +347,29 @@ func TestChatSaveKeepsInterleavedCallerContextsIsolated(t *testing.T) {
 		}
 	}
 	wantCalls := [][]string{
-		{"chat", "save", "/work/alpha/notes/chat.md", "/work/alpha/transcripts/chat.jsonl"},
-		{"chat", "save", "/work/beta/notes/chat.md", "/work/beta/transcripts/chat.jsonl"},
-		{"chat", "save", "/work/alpha/notes/chat.md", "/work/alpha/transcripts/chat.jsonl"},
+		{
+			"chat",
+			"save",
+			testjail.Place("/work/alpha/notes/chat.md"),
+			testjail.Place("/work/alpha/transcripts/chat.jsonl"),
+		},
+		{
+			"chat",
+			"save",
+			testjail.Place("/work/beta/notes/chat.md"),
+			testjail.Place("/work/beta/transcripts/chat.jsonl"),
+		},
+		{
+			"chat",
+			"save",
+			testjail.Place("/work/alpha/notes/chat.md"),
+			testjail.Place("/work/alpha/transcripts/chat.jsonl"),
+		},
 	}
 	if !reflect.DeepEqual(calls, wantCalls) {
 		t.Fatalf("dispatch calls = %q, want isolated calls %q", calls, wantCalls)
 	}
-	wantCWDs := []string{"/work/alpha", "/work/beta", "/work/alpha"}
+	wantCWDs := []string{testjail.Place("/work/alpha"), testjail.Place("/work/beta"), testjail.Place("/work/alpha")}
 	if !reflect.DeepEqual(scopedCWDs, wantCWDs) {
 		t.Fatalf("scoped caller CWDs = %q, want %q", scopedCWDs, wantCWDs)
 	}

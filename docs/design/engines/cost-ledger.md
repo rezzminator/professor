@@ -330,7 +330,7 @@ No prompt, message, tool, path or identity field is ever written: the sink copie
 - `TestDecodeResourceIdentityAndResponseID` (`costsink/otlp_test.go`) pins resource-inherited attributes, record overrides, `gen_ai.response.id` and `session_id` as fallbacks.
 - `TestSinkKeepsUnattributedObservationsWithoutFabricatingIDsOrSpamming` and `TestSinkDoesNotTreatLogTraceContextAsCallIdentity` (`costsink/sink_test.go`) pin the unattributed file, the one warning per endpoint, and the identity rule: a span's own pair and a real request id dedupe a repeat, while a request-less log's trace context never dedupes anything.
 - `TestUnattributedKeepsObservationsAndDeduplicatesOnlyRealIdentity` (`costledger`) pins the reader's dedupe and the invalid trace ids.
-- `TestCostLedgerReportsBackgroundWithoutAnyTranscript` and `TestCostLedgerReportsUnattributedWindowSeparatelyInTextAndJSON` (`tokens/costreport_test.go`) pin the transcriptless session and the separate unattributed block in text and `--out`.
+- `TestCostLedgerReportsWhatOnlyTheLedgerHolds` and `TestCostLedgerReportsUnattributedWindowSeparatelyInTextAndJSON` (`tokens/costreport_test.go`) pin the transcriptless session and the separate unattributed block in text and `--out`.
 - No suite runs a live engine; the live check after landing is a chat started on the host.
 
 ## Surfaces that stay in sync

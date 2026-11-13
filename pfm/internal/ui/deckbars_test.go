@@ -62,20 +62,29 @@ func footerText(first, second []span) string {
 
 func TestChatsFooterKeysFollowTheSelectedRow(t *testing.T) {
 	model := deckModel(160, 38)
-	if got := footerText(model.chatsFooterKeys(false)); !strings.Contains(got, "upgrade") {
+	if got := footerText(
+		model.chatsFooterKeys(false),
+	); got != " ↑↓  move   ←→  action   ⏎  upgrade   esc  close  type to find · @ go · ⇧←→ place\n ⌃X  hide   ⌃O  reboot  " {
 		t.Errorf("the update banner arms the upgrade: %q", got)
 	}
 	model = selectChat(t, model, "New Claude chat")
-	if got := footerText(model.chatsFooterKeys(false)); !strings.Contains(got, "choose") {
+	if got := footerText(
+		model.chatsFooterKeys(false),
+	); got != " ↑↓  move   ←→  action   ⏎  choose   esc  close  type to find · @ go · ⇧←→ place\n ⌃X  hide   ⌃O  reboot  " {
 		t.Errorf("a new-chat row that asks something arms choose: %q", got)
 	}
 	single := NewModel(wizardSnapshot(nil, []int{3}, nil))
-	if got := footerText(single.chatsFooterKeys(false)); !strings.Contains(got, "start") {
+	if got := footerText(
+		single.chatsFooterKeys(false),
+	); got != " ↑↓  move   ←→  action   ⏎  start   esc  close  type to find · @ go · ⇧←→ place\n ⌃X  hide   ⌃O  reboot  " {
 		t.Errorf("a new-chat row with nothing to ask arms start: %q", got)
 	}
 	model = selectChat(t, model, "P:BUILDER")
 	first, second := model.chatsFooterKeys(false)
-	if got := footerText(first, second); !strings.Contains(got, "kill") || !strings.Contains(got, "reboot") {
+	if got := footerText(
+		first,
+		second,
+	); got != " ↑↓  move   ←→  action   ⏎  open   esc  close  type to find · @ go · ⇧←→ place\n ⌃X  kill   ⌃O  reboot  " {
 		t.Errorf("a live chat offers kill and reboot: %q", got)
 	}
 	for _, part := range second {
@@ -85,7 +94,7 @@ func TestChatsFooterKeysFollowTheSelectedRow(t *testing.T) {
 	}
 	model = selectChat(t, model, "release notes")
 	_, second = model.chatsFooterKeys(false)
-	if got := footerText(nil, second); !strings.Contains(got, "hide") {
+	if got := footerText(nil, second); got != "\n ⌃X  hide   ⌃O  reboot  " {
 		t.Errorf("a resumable chat offers hide: %q", got)
 	}
 	for _, part := range second {
@@ -94,7 +103,7 @@ func TestChatsFooterKeysFollowTheSelectedRow(t *testing.T) {
 		}
 	}
 	model = selectChat(t, model, "old idea")
-	if _, second = model.chatsFooterKeys(false); !strings.Contains(footerText(nil, second), "unhide") {
+	if _, second = model.chatsFooterKeys(false); footerText(nil, second) != "\n ⌃X  unhide   ⌃O  reboot  " {
 		t.Error("a hidden chat offers unhide")
 	}
 }

@@ -18,10 +18,12 @@ import (
 // chat would have relaunched it as a Claude resume of an id Claude never had.
 func TestRebootRowDemotesToTheSeatsOwnEngine(t *testing.T) {
 	root := t.TempDir()
-	resolved := paths.Values{
-		TmuxDir: filepath.Join(root, "tmux"),
-		SIDDir:  filepath.Join(root, "sid"),
+	resolved, err := paths.Resolve() // the jail's own state paths: no field is left empty for a write to land on ""
+	if err != nil {
+		t.Fatal(err)
 	}
+	resolved.TmuxDir = filepath.Join(root, "tmux")
+	resolved.SIDDir = filepath.Join(root, "sid")
 	for _, test := range []struct {
 		kind   compose.Kind
 		socket string

@@ -55,9 +55,12 @@ func (rig *deliveryRig) unhideSeam(_ context.Context, sessionID string) (bool, e
 func (rig *deliveryRig) deliverer(t *testing.T) *chatDeliverer {
 	t.Helper()
 	return &chatDeliverer{
-		runtime: &pfmconfig.Runtime{Paths: paths.Values{StateDB: filepath.Join(t.TempDir(), "state.db")}},
-		stdout:  &rig.stdout,
-		unhide:  rig.unhideSeam,
+		runtime: &pfmconfig.Runtime{Paths: paths.Values{
+			StateDB:  filepath.Join(t.TempDir(), "state.db"),
+			ProcRoot: t.TempDir(), // an empty process table: a unit test never scans the live one
+		}},
+		stdout: &rig.stdout,
+		unhide: rig.unhideSeam,
 		open: func(context.Context, string) (action.OpenResult, error) {
 			return action.OpenResult{State: rig.state, Socket: "cc-revived"}, rig.openErr
 		},
@@ -114,7 +117,8 @@ func TestScheduleDelivererRefusesAFolderTrustDialog(t *testing.T) {
 	shortenComposerWait(t, time.Millisecond, 5*time.Second)
 	rig := &deliveryRig{state: "opened", captures: []string{"Yes, I trust this folder\nNo, exit\n❯ 1. Yes"}}
 	err := rig.deliverer(t).Deliver(context.Background(), testSchedule, "msg")
-	if err == nil || !strings.Contains(err.Error(), "folder-trust dialog; nothing typed") || len(rig.called) != 0 {
+	if err == nil || err.Error() != "revived chat on cc-revived is held at the folder-trust dialog; nothing typed" ||
+		len(rig.called) != 0 {
 		t.Fatalf("err=%v called=%v, want the trust-dialog refusal and nothing typed", err, rig.called)
 	}
 }
@@ -123,8 +127,9 @@ func TestScheduleDelivererTimesOutWithoutAComposer(t *testing.T) {
 	shortenComposerWait(t, time.Millisecond, 30*time.Millisecond)
 	rig := &deliveryRig{state: "opened", captures: []string{"still booting"}}
 	err := rig.deliverer(t).Deliver(context.Background(), testSchedule, "msg")
-	if err == nil || !strings.Contains(err.Error(), "showed no composer within") ||
-		!strings.Contains(err.Error(), "cc-revived") || len(rig.called) != 0 {
+	if err == nil ||
+		err.Error() != "revived chat on socket cc-revived showed no composer within 30ms; it stays running and the next tick will call it" ||
+		len(rig.called) != 0 {
 		t.Fatalf("err=%v called=%v", err, rig.called)
 	}
 }
@@ -132,7 +137,7 @@ func TestScheduleDelivererTimesOutWithoutAComposer(t *testing.T) {
 func TestScheduleDelivererReportsResolveAndCallFailures(t *testing.T) {
 	rig := &deliveryRig{openErr: errors.New("chat is not indexed")}
 	err := rig.deliverer(t).Deliver(context.Background(), testSchedule, "msg")
-	if err == nil || !strings.Contains(err.Error(), "resolve chat sess-7 (seven)") {
+	if err == nil || err.Error() != "resolve chat sess-7 (seven): chat is not indexed" {
 		t.Fatalf("open failure err=%v", err)
 	}
 	rig = &deliveryRig{state: "live", callErr: errors.New("pane gone")}
@@ -251,7 +256,11 @@ func TestScheduleDelivererRealUnhideLiftsAKillInTheFleetStore(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stderr bytes.Buffer
-	deliverer := newChatDeliverer(&pfmconfig.Runtime{}, &bytes.Buffer{}, &stderr)
+	deliverer := newChatDeliverer(
+		&pfmconfig.Runtime{Paths: paths.Values{ProcRoot: t.TempDir()}},
+		&bytes.Buffer{},
+		&stderr,
+	)
 	for _, want := range []bool{true, false} {
 		removed, err := deliverer.unhide(ctx, id)
 		if err != nil || removed != want {
@@ -362,7 +371,10 @@ func archiveChat(t *testing.T, values paths.Values, id, original string) {
 func (rig *archiveRig) deliverer(t *testing.T) *chatDeliverer {
 	t.Helper()
 	return &chatDeliverer{
-		runtime:    &pfmconfig.Runtime{Paths: paths.Values{StateDB: filepath.Join(t.TempDir(), "state.db")}},
+		runtime: &pfmconfig.Runtime{Paths: paths.Values{
+			StateDB:  filepath.Join(t.TempDir(), "state.db"),
+			ProcRoot: t.TempDir(), // an empty process table: a unit test never scans the live one
+		}},
 		stdout:     &rig.stdout,
 		archiveDir: rig.values.ArchiveDir,
 		unhide: func(_ context.Context, _ string) (bool, error) {

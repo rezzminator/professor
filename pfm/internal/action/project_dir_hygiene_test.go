@@ -27,15 +27,14 @@ const projectDirName = "CLAUDE_PROJECT_DIR"
 func TestClaudeSpawnStripsInheritedProjectDir(t *testing.T) {
 	home := t.TempDir()
 	machine := configuredMachinePolicy(home)
+	var shells strings.Builder
 	for _, purpose := range []Purpose{PurposeInteractive, PurposeResume, PurposeLauncher, PurposeQuery} {
 		spawn := ClaudeSpawn{Purpose: purpose, Account: 42, Home: home, Machine: machine}
 		shell, err := spawn.ShellCommand()
 		if err != nil {
 			t.Fatalf("%v shell spawn: %v", purpose, err)
 		}
-		if want := " -u " + projectDirName + " "; !strings.Contains(shell, want) {
-			t.Fatalf("%v shell spawn %q lacks %q", purpose, shell, want)
-		}
+		fmt.Fprintf(&shells, "%v: %s\n", purpose, shell)
 		environment, err := spawn.Environment([]string{projectDirName + "=/srv/tester/.professor", "PATH=/usr/bin"})
 		if err != nil {
 			t.Fatal(err)
@@ -45,6 +44,7 @@ func TestClaudeSpawnStripsInheritedProjectDir(t *testing.T) {
 				purpose, environment, projectDirName, got)
 		}
 	}
+	actionGolden(t, "action_claude_spawn_purposes.txt", rooted(t, shells.String()))
 }
 
 // A Claude chat started by `pfm chat new` from a Codex tool shell inherited NO_COLOR and the pagers

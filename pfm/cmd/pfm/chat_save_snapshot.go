@@ -20,7 +20,7 @@ func runChatSave(args []string, stdout, stderr io.Writer, env paths.Env, runtime
 // cause per command.
 func writeRepositorySnapshot(ctx context.Context, writer io.Writer, runner deps.Runner) {
 	self, _ := pfmchat.ScopedSelf(ctx)
-	gitPath, err := deps.Resolve("git")
+	gitPath, err := runner.LookPath("git")
 	if err != nil {
 		fmt.Fprintf(writer, "(repository snapshot failed: resolve git: %v)\n", err)
 		return

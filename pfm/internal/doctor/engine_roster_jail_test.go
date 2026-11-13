@@ -4,9 +4,9 @@ package doctor
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"os/exec"
-	"strings"
 	"testing"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -39,8 +39,11 @@ func TestDoctorWarnsWhenANewEngineRegistersOnlySomeCapabilities(t *testing.T) {
 	gather.RegisterMatcher(id, fourthMatcher{})
 	var stdout bytes.Buffer
 	warnings := PrintEngineCapabilities(&stdout, testDependencies())
-	if warnings == 0 || !strings.Contains(stdout.String(), "zz=index,matcher") ||
-		!strings.Contains(strings.ToLower(stdout.String()), "missing") {
-		t.Fatalf("partial engine was silent: warnings=%d output=%q", warnings, stdout.String())
+	if got, want := fmt.Sprintf(
+		"%d %s",
+		warnings,
+		stdout.String(),
+	), "1 doctor: engines cc=index,launcher,matcher,usage,headless,ask cx=index,launcher,matcher,usage,headless,ask ox=index,matcher zz=index,matcher MISSING(launcher,usage,headless,ask)\n"; got != want {
+		t.Fatalf("partial engine report = %q, want %q", got, want)
 	}
 }

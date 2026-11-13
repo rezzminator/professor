@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestGoldenRowScenarios(t *testing.T) {
@@ -27,24 +29,26 @@ func TestGoldenRowScenarios(t *testing.T) {
 		renderScenario(&rendered, scenario.name, Compose(scenario.input))
 	}
 	rendered.Truncate(rendered.Len() - 1)
+	// the fixtures' places are rooted in the jail; the golden names them as the fixtures do
+	shown := bytes.ReplaceAll(rendered.Bytes(), []byte(testjail.Place("/")), []byte("/"))
 
 	goldenPath := filepath.Join("..", "..", "testdata", "golden", "compose.tsv")
 	if os.Getenv("PFM_UPDATE_GOLDENS") == "1" {
-		if err := os.WriteFile(goldenPath, rendered.Bytes(), 0o644); err != nil {
+		if err := os.WriteFile(goldenPath, shown, 0o644); err != nil {
 			t.Fatalf("regenerate compose golden: %v", err)
 		}
 		return
 	}
 	want, err := os.ReadFile(goldenPath)
 	if err != nil {
-		t.Fatalf("read compose golden: %v\nactual:\n%s", err, rendered.String())
+		t.Fatalf("read compose golden: %v\nactual:\n%s", err, shown)
 	}
-	if !bytes.Equal(rendered.Bytes(), want) {
+	if !bytes.Equal(shown, want) {
 		t.Fatalf(
 			"compose golden mismatch (%s)\nwant:\n%s\nactual:\n%s",
-			firstDifference(want, rendered.Bytes()),
+			firstDifference(want, shown),
 			want,
-			rendered.String(),
+			shown,
 		)
 	}
 }

@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"strings"
 	"testing"
 	"time"
 
@@ -78,12 +77,5 @@ func TestOpenCodeRowShowsUnmeasuredSizeNotZeroBytes(t *testing.T) {
 	snapshot.Rows = rows
 	snapshot.MergeNewChat = false
 	model := NewModel(snapshot)
-	view := ansi.Strip(model.View().Content)
-
-	if !strings.Contains(view, "OC session") || !strings.Contains(view, "—") {
-		t.Fatalf("OpenCode row did not show the unmeasured-size dash:\n%s", view)
-	}
-	if !strings.Contains(view, "CC session") || !strings.Contains(view, "0B") {
-		t.Fatalf("a real zero-byte Claude row lost its honest 0B size:\n%s", view)
-	}
+	golden(t, "ui_unmeasured_size.txt", ansi.Strip(model.View().Content))
 }

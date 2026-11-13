@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -178,7 +179,7 @@ func stdioTestRunInspect(t *testing.T, service *Service, address string, inspect
 		t,
 		session,
 		"new",
-		NewInput{Name: "child", CWD: "/work/test"},
+		NewInput{Name: "child", CWD: testjail.Place("/work/test")},
 	)
 	if err := session.Close(); err != nil {
 		t.Errorf("close stdio test session: %v", err)
@@ -300,9 +301,12 @@ func TestRunStdioReturnsMarkerOpenFailureWithoutLocalFallback(t *testing.T) {
 	err := stdioTestProfessor(t, local).RunStdio(
 		context.Background(), io.NopCloser(bytes.NewReader(nil)), io.Discard, stdioTestOptions(local, address),
 	)
-	if err == nil || !strings.Contains(err.Error(), "protect selected daemon stdio proxy") ||
-		!strings.Contains(err.Error(), "mcp-proxy-compatible") {
-		t.Fatalf("err = %v, want contextual marker-open failure", err)
+	if got, want := strings.ReplaceAll(
+		fmt.Sprint(err),
+		root,
+		"{root}",
+	), "protect selected daemon stdio proxy: create compatible proxy marker parent for {root}/not-a-directory/.local/state/pfm/mcp-proxy-compatible: mkdir {root}/not-a-directory: not a directory"; got != want {
+		t.Fatalf("RunStdio error = %q, want %q", got, want)
 	}
 }
 

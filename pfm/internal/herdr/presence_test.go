@@ -654,20 +654,16 @@ func TestPresenceNamesAHerdrReadFailure(t *testing.T) {
 	var warn strings.Builder
 	probe.Warn = &warn
 	got := probe.Presence(context.Background(), seats)
-	wants := []struct{ lead, cause string }{
-		{"herdr unreachable: ", "forbidden"},
-		{"herdr unreachable: ", "dial"},
-		{"herdr error: ", "client 3 runs in no pane of " + healthy.path},
-		{"herdr error: ", "client 4 runs in no pane of " + healthy.path},
-		{"herdr error: ", "list tmux clients of e"},
+	clean := strings.NewReplacer(healthy.path, "{healthy}", refusing.path, "{refusing}", deadSocket, "{dead}")
+	if presence, want := clean.Replace(
+		strings.Join(got, "\n"),
+	), "herdr unreachable: place tmux client 1: list the panes of {refusing}: herdr socket {refusing}: herdr refused pane.list pfm-1: forbidden: no\nherdr unreachable: place tmux client 2: list the panes of {dead}: herdr socket {dead}: herdr socket {dead}: dial for pane.list pfm-1: dial unix {dead}: connect: no such file or directory\nherdr error: place tmux client 3: client 3 runs in no pane of {healthy}; nested tmux is unsupported: Herdr exposes only the outer foreground process group; attach the pfm client directly in Herdr\nherdr error: place tmux client 4: client 4 runs in no pane of {healthy}; nested tmux is unsupported: Herdr exposes only the outer foreground process group; attach the pfm client directly in Herdr\nherdr error: list tmux clients of e: tmux list-clients: no server running"; presence != want {
+		t.Errorf("Presence = %q, want %q", presence, want)
 	}
-	for index, want := range wants {
-		if !strings.HasPrefix(got[index], want.lead) || !strings.Contains(got[index], want.cause) {
-			t.Errorf("seat %d Presence = %q, want %q naming %q", index, got[index], want.lead+"…", want.cause)
-		}
-	}
-	if lines := strings.Count(warn.String(), "\n"); lines != len(seats) {
-		t.Errorf("warn lines = %d, want one per failed seat (%d):\n%s", lines, len(seats), warn.String())
+	if warned, want := clean.Replace(
+		warn.String(),
+	), "pfm chat ls: herdr presence of {SocketPath:/t/cc-a Session:a Pane: Name: PanePIDs:[] Err:<nil>}: place tmux client 1: list the panes of {refusing}: herdr socket {refusing}: herdr refused pane.list pfm-1: forbidden: no\npfm chat ls: herdr presence of {SocketPath:/t/cc-b Session:b Pane: Name: PanePIDs:[] Err:<nil>}: place tmux client 2: list the panes of {dead}: herdr socket {dead}: herdr socket {dead}: dial for pane.list pfm-1: dial unix {dead}: connect: no such file or directory\npfm chat ls: herdr presence of {SocketPath:/t/cc-c Session:c Pane: Name: PanePIDs:[] Err:<nil>}: place tmux client 3: client 3 runs in no pane of {healthy}; nested tmux is unsupported: Herdr exposes only the outer foreground process group; attach the pfm client directly in Herdr\npfm chat ls: herdr presence of {SocketPath:/t/cc-d Session:d Pane: Name: PanePIDs:[] Err:<nil>}: place tmux client 4: client 4 runs in no pane of {healthy}; nested tmux is unsupported: Herdr exposes only the outer foreground process group; attach the pfm client directly in Herdr\npfm chat ls: herdr presence of {SocketPath:/t/cc-e Session:e Pane: Name: PanePIDs:[] Err:<nil>}: list tmux clients of e: tmux list-clients: no server running\n"; warned != want {
+		t.Errorf("warn = %q, want %q", warned, want)
 	}
 }
 

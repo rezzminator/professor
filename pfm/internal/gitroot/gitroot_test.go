@@ -6,10 +6,11 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testjail/fakegit"
 )
 
 func TestRepoRootMapsEveryPlaceInARepositoryToItsMainCheckout(t *testing.T) {
-	fixture := testjail.GitRepoWithWorktrees(t, "acme")
+	fixture := testjail.GitRepoWithWorktrees(t, &fakegit.Runner{}, "acme")
 	base, repo, subdir, inner, outer := fixture.Base, fixture.Repo, fixture.Subdir, fixture.Inner, fixture.Outer
 	plain := filepath.Join(base, "plain")
 	if err := os.MkdirAll(plain, 0o755); err != nil {
@@ -67,7 +68,7 @@ func TestProjectLabelsADirectoryByItsRepository(t *testing.T) {
 	if err := os.MkdirAll(plain, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	fixture := testjail.GitRepoWithWorktrees(t, "acme")
+	fixture := testjail.GitRepoWithWorktrees(t, &fakegit.Runner{}, "acme")
 
 	for _, testCase := range []struct {
 		name, dir, wantRoot, wantName string

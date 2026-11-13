@@ -8,6 +8,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // A Herdr seat's process root is its proven seat-host: with none, the Stats
@@ -16,15 +17,15 @@ func TestHerdrSeatRootsItsProvenSeatHost(t *testing.T) {
 	seat := func(id, pane string, pid int) fleetdb.Seat {
 		return fleetdb.Seat{
 			SeatID: id, SessionID: id, Engine: "cc", Backend: "herdr", State: "live",
-			HerdrSocket: "/jail/herdr.sock", HerdrPane: pane, SeatHostPID: pid,
+			HerdrSocket: testjail.Place("/jail/herdr.sock"), HerdrPane: pane, SeatHostPID: pid,
 		}
 	}
 	output := Compose(Input{
 		Options: Options{View: AllView},
 		Transcripts: []store.Transcript{
-			{UUID: "proven", Path: "/jail/proven.jsonl"},
-			{UUID: "unproven", Path: "/jail/unproven.jsonl"},
-			{UUID: "legacy", Path: "/jail/legacy.jsonl"},
+			{UUID: "proven", Path: testjail.Place("/jail/proven.jsonl")},
+			{UUID: "unproven", Path: testjail.Place("/jail/unproven.jsonl")},
+			{UUID: "legacy", Path: testjail.Place("/jail/legacy.jsonl")},
 		},
 		HerdrSeats: []gather.HerdrSeat{
 			{Seat: seat("proven", "w1:p1", 4100)},
@@ -42,8 +43,8 @@ func TestHerdrSeatRootsItsProvenSeatHost(t *testing.T) {
 }
 
 func TestLiveSeatKeySeparatesHerdrPanesOnOneSocket(t *testing.T) {
-	first := Row{Backend: "herdr", Socket: "/jail/herdr.sock", PaneID: "w1:p1"}
-	second := Row{Backend: "herdr", Socket: "/jail/herdr.sock", PaneID: "w1:p2"}
+	first := Row{Backend: "herdr", Socket: testjail.Place("/jail/herdr.sock"), PaneID: "w1:p1"}
+	second := Row{Backend: "herdr", Socket: testjail.Place("/jail/herdr.sock"), PaneID: "w1:p2"}
 	split := Row{Socket: "cc-1", PaneID: "%3"}
 	if LiveSeatKey(first) == LiveSeatKey(second) || LiveSeatKey(split) != "cc-1" {
 		t.Fatalf("keys=%q %q %q", LiveSeatKey(first), LiveSeatKey(second), LiveSeatKey(split))

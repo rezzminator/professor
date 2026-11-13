@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -266,7 +267,9 @@ func TestPrepareNeverArmsWhenTheSettingsFileCannotBeRead(t *testing.T) {
 // A wrapped command that cannot be found ends the launch with exec's own
 // not-found text and 127, before any ledger is decided.
 func TestRunLaunchNamesACommandItCannotFind(t *testing.T) {
-	t.Setenv("PATH", t.TempDir())
+	previous := launchRunner
+	launchRunner = &deps.FakeRunner{}
+	t.Cleanup(func() { launchRunner = previous })
 	var stderr strings.Builder
 	code := RunLaunch([]string{"--", "nosuchbin"}, &stderr, &paths.MapEnv{})
 	const want = "pfm internal cost-launch: find nosuchbin: exec: \"nosuchbin\": executable file not found in $PATH\n"

@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -156,26 +158,65 @@ func TestVSCodeRemoteWindowServedFromTheClientPaintsNothing(t *testing.T) {
 			)
 		}
 	}
-	last := steps[len(steps)-1]
-	if len(last.Messages) != 1 || last.Messages[0].Kind != "warning" {
-		t.Fatalf("messages = %+v, want one warning", last.Messages)
-	}
-	for _, part := range []string{"ssh-remote", "remote.extensionKind", "pfm install"} {
-		if !strings.Contains(last.Messages[0].Message, part) {
-			t.Errorf("warning %q does not name %q", last.Messages[0].Message, part)
-		}
+	if got, want := nativeMessages(
+		steps[len(steps)-1].Messages,
+	), []string{
+		"warning: " + remoteFrameWarning,
+	}; !slices.Equal(
+		got,
+		want,
+	) {
+		t.Fatalf("messages = %q, want %q", got, want)
 	}
 }
+
+// remoteFrameWarning is the one warning a remote window served from the
+// client's side shows for its frame and terminal.
+const remoteFrameWarning = "Professor: this window's frame and terminal stay unpainted" + remoteServedFromUI
+
+const remoteServedFromUI = " — this ssh-remote window runs Professor on this computer, not on the ssh-remote host its Claude chats live on:" +
+	" run pfm install on the ssh-remote host, update Professor on this computer (pfm install) or drop its" +
+	" remote.extensionKind entry for professor.professor, then reload the window."
+
+// nativeMessages renders a step's messages as "{kind}: {message}".
+func nativeMessages(steps []struct {
+	Kind    string `json:"kind"`
+	Message string `json:"message"`
+},
+) []string {
+	var messages []string
+	for _, message := range steps {
+		messages = append(messages, message.Kind+": "+message.Message)
+	}
+	return messages
+}
+
+// remotePfm matches the pfm path inside the harness's own temporary home.
+var remotePfm = regexp.MustCompile(`\S*/\.local/bin/pfm`)
 
 // A remote window's pick must run the remote host's pfm or say plainly why it
 // did not: the client-side copy and a remote host without pfm both warn in the
 // focused window, and run nothing anywhere.
 func TestNativeColorThemePickInARemoteWindowPfmDoesNotRunInWarns(t *testing.T) {
 	t.Parallel()
-	for name, scenario := range map[string]nativeScenario{
-		"remote host without pfm": {ColorTheme: "Sonar", RemoteName: "ssh-remote", ExtensionKind: 2, NoPfm: true},
-		"served from the UI side": {ColorTheme: "Sonar", RemoteName: "ssh-remote", ExtensionKind: 1},
+	for _, tc := range []struct {
+		name     string
+		scenario nativeScenario
+		want     string
+	}{
+		{
+			"remote host without pfm",
+			nativeScenario{ColorTheme: "Sonar", RemoteName: "ssh-remote", ExtensionKind: 2, NoPfm: true},
+			"warning: Professor: Professor · Ultrafunk changes VS Code alone — the ssh-remote host has no {home}/.local/bin/pfm:" +
+				" run pfm install there, then reload the window.",
+		},
+		{
+			"served from the UI side",
+			nativeScenario{ColorTheme: "Sonar", RemoteName: "ssh-remote", ExtensionKind: 1},
+			"warning: " + remoteFrameWarning + "\x00warning: Professor: Professor · Ultrafunk changes VS Code alone" + remoteServedFromUI,
+		},
 	} {
+		name, scenario := tc.name, tc.scenario
 		scenario.Steps = []nativeStep{
 			{Name: "seed", Contract: nativeContract(1, "custom:lagoon")},
 			{Name: "native-pick", Pick: pick("professor-ultrafunk")},
@@ -185,28 +226,25 @@ func TestNativeColorThemePickInARemoteWindowPfmDoesNotRunInWarns(t *testing.T) {
 		if len(last.Calls) != 0 {
 			t.Errorf("%s: pfm ran %q, want nothing run", name, last.Calls)
 		}
-		var warned []string
-		for _, message := range last.Messages {
-			if message.Kind == "warning" && strings.Contains(message.Message, "Ultrafunk") {
-				warned = append(warned, message.Message)
-			}
-		}
-		if len(warned) != 1 || !strings.Contains(warned[0], "ssh-remote") {
-			t.Errorf(
-				"%s: messages = %+v, want one warning naming the pick and the ssh-remote window",
-				name,
-				last.Messages,
-			)
+		got := strings.Join(nativeMessages(last.Messages), "\x00")
+		if got = remotePfm.ReplaceAllString(got, "{home}/.local/bin/pfm"); got != tc.want {
+			t.Errorf("%s: messages =\n%q\nwant\n%q", name, got, tc.want)
 		}
 	}
 	unfocused := runVSCodeNative(t, nativeScenario{
 		ColorTheme: "Sonar", RemoteName: "ssh-remote", ExtensionKind: 1, Unfocused: true,
 		Steps: []nativeStep{{Name: "native-pick", Pick: pick("professor-ultrafunk")}},
 	}, 0, "")
-	for _, message := range unfocused[len(unfocused)-1].Messages {
-		if strings.Contains(message.Message, "Ultrafunk") {
-			t.Errorf("an unfocused window warned about the pick: %q", message.Message)
-		}
+	// An unfocused window keeps the frame warning and says nothing about the pick.
+	if messages, want := nativeMessages(
+		unfocused[len(unfocused)-1].Messages,
+	), []string{
+		"warning: " + remoteFrameWarning,
+	}; !slices.Equal(
+		messages,
+		want,
+	) {
+		t.Errorf("an unfocused window's messages = %q, want %q (no warning about the pick)", messages, want)
 	}
 }
 

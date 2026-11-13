@@ -2,8 +2,10 @@ package atomicfile
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -80,8 +82,15 @@ func TestWriteFailureReportsAScratchItCouldNotRemove(t *testing.T) {
 	t.Cleanup(func() { removeScratch = restore })
 
 	err := Write(target, []byte("new"), 0o600)
-	if err == nil || !errors.Is(err, denied) || !strings.Contains(err.Error(), ".occupied.tmp-") {
-		t.Fatalf("Write = %v; want the replace failure joined with the unremoved scratch path", err)
+	got := regexp.MustCompile(`\.occupied\.tmp-\w+`).
+		ReplaceAllString(strings.ReplaceAll(fmt.Sprint(err), directory, "{dir}"),
+			".occupied.tmp-{n}")
+	if want := "write {dir}/occupied: replace: rename {dir}/.occupied.tmp-{n} {dir}/occupied: file exists\nwrite {dir}/occupied: remove scratch {dir}/.occupied.tmp-{n}: unlink denied"; !errors.Is(
+		err,
+		denied,
+	) ||
+		got != want {
+		t.Fatalf("Write error = %q, want %q", got, want)
 	}
 }
 

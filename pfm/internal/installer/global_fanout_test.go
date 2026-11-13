@@ -243,15 +243,44 @@ func TestGlobalWiringDryRunPlansTheStore(t *testing.T) {
 	}
 
 	repo := filepath.Join(home, "blueprint")
+	global := filepath.Join(repo, "templates", "global")
+	want := "  change  link " + filepath.Join(
+		first,
+		"commands",
+		"alpha.md",
+	) + " -> " + filepath.Join(
+		global,
+		"commands",
+		"alpha.md",
+	) +
+		"\n  skip    source-fetched skills registry absent at " + filepath.Join(
+		global,
+		"skills",
+		"sources.json",
+	) + " (0 entries)" +
+		"\n  change  link " + filepath.Join(
+		first,
+		"skills",
+		"beta",
+	) + " -> " + filepath.Join(
+		global,
+		"skills",
+		"beta",
+	) +
+		"\n  change  link " + filepath.Join(
+		home,
+		".agents",
+		"skills",
+		"beta",
+	) + " -> " + filepath.Join(
+		global,
+		"skills",
+		"beta",
+	) + "\n"
+	if output.String() != want {
+		t.Fatalf("dry run output =\n%s\nwant\n%s", output.String(), want)
+	}
 	for _, config := range []string{first} {
-		for _, want := range []string{
-			"link " + filepath.Join(config, "commands", "alpha.md") + " -> " + filepath.Join(repo, "templates", "global", "commands", "alpha.md"),
-			"link " + filepath.Join(config, "skills", "beta") + " -> " + filepath.Join(repo, "templates", "global", "skills", "beta"),
-		} {
-			if !strings.Contains(output.String(), want) {
-				t.Fatalf("dry run never planned %q:\n%s", want, output.String())
-			}
-		}
 		if _, err := os.Lstat(filepath.Join(config, "commands", "alpha.md")); !os.IsNotExist(err) {
 			t.Fatalf("dry run wrote into %s: %v", config, err)
 		}

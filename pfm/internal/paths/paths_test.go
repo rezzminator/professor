@@ -345,7 +345,8 @@ func TestResolveManagedSettingsDirUsesJailOverride(t *testing.T) {
 func TestResolveRefusesARelativeManagedSettingsDir(t *testing.T) {
 	t.Setenv(EnvHome, t.TempDir())
 	t.Setenv(EnvManagedSettingsDir, "managed-settings.d")
-	if _, err := Resolve(); err == nil || !strings.Contains(err.Error(), EnvManagedSettingsDir) {
+	if _, err := Resolve(); err == nil ||
+		err.Error() != "PFM_MANAGED_SETTINGS_DIR=\"managed-settings.d\" is not an absolute path" {
 		t.Fatalf("Resolve() err = %v, want the relative %s refused", err, EnvManagedSettingsDir)
 	}
 }

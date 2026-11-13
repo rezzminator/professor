@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -44,7 +43,10 @@ func TestResolveInstallSourceRepoNamesARecordedCloneThatIsGone(t *testing.T) {
 	if got := resolveInstallSourceRepo(home, &stderr); got != "" {
 		t.Fatalf("resolved %q from a marker naming a vanished clone", got)
 	}
-	if !strings.Contains(stderr.String(), gone) || !strings.Contains(stderr.String(), "falling back") {
-		t.Fatalf("a vanished recorded clone must be named before the fallback, got %q", stderr.String())
+	if got, want := rooted(
+		stderr.String(),
+		gone,
+	), "pfm install: inspect recorded source repository {root}: recorded source repository is unusable: stat {root}: no such file or directory; falling back to the release themes\n"; got != want {
+		t.Fatalf("stderr = %q, want %q", got, want)
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -32,10 +33,10 @@ func TestUpdateStopsBeforeSelfUpdate(t *testing.T) {
 		args             []string
 		config           bool
 	}{
-		{"dirty source", "dirty worktree", []string{"--repo", repo}, false},
-		{"missing marker", "pfm update: ", []string{}, false},
-		{"bare config", "pfm update: config: ", []string{}, true},
-		{"project config", "pfm update: config: ", []string{"pin", "CLAUDE.md"}, true},
+		{"dirty source", "pfm update: refuse dirty worktree; commit or stash changes before update\n", []string{"--repo", repo}, false},
+		{"missing marker", "pfm update: read source repository marker {tmp}: no source repository recorded: open {tmp}: no such file or directory\n", []string{}, false},
+		{"bare config", "pfm update: config: parse config {config} at byte 1: unexpected EOF\n", []string{}, true},
+		{"project config", "pfm update: config: parse config {config} at byte 1: unexpected EOF\n", []string{"pin", "CLAUDE.md"}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			runtimes := []pfmconfig.Runtime{runtime}
@@ -43,10 +44,11 @@ func TestUpdateStopsBeforeSelfUpdate(t *testing.T) {
 				runtimes = nil
 			}
 			var stdout, stderr bytes.Buffer
-			if code := Run(tc.args, &stdout, &stderr, runtimes...); code != 5 ||
-				!strings.HasPrefix(stderr.String(), "pfm update: ") ||
-				!strings.Contains(stderr.String(), tc.diagnostic) {
-				t.Fatalf("code = %d, want 5; stderr = %q, want %q", code, stderr.String(), tc.diagnostic)
+			code := Run(tc.args, &stdout, &stderr, runtimes...)
+			got := regexp.MustCompile(`/tmp/[^\s"':]*`).
+				ReplaceAllString(strings.NewReplacer(repo, "{repo}", path, "{config}").Replace(stderr.String()), "{tmp}")
+			if code != 5 || got != tc.diagnostic {
+				t.Fatalf("stderr = %q, want %q (exit %d)", got, tc.diagnostic, code)
 			}
 		})
 	}

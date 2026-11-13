@@ -124,16 +124,12 @@ func TestReadCodexThreadsErrorsWhenEveryGenerationIsUnreadable(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err == nil {
-		t.Fatalf("ReadCodexThreads() with every generation unreadable returned no error; threads=%#v", threads)
-	}
-	if threads != nil {
-		t.Fatalf("ReadCodexThreads() threads = %#v, want nil on the all-failed error", threads)
-	}
-	for _, file := range files {
-		if !strings.Contains(string(logged), file) {
-			t.Fatalf("stderr = %q, want each skipped generation named, missing %s", logged, file)
-		}
+	if got, want := strings.ReplaceAll(
+		fmt.Sprintf("%#v | %v | %s", threads, err, logged),
+		root,
+		"{root}",
+	), "[]store.CodexThread(nil) | read Codex state: all 2 generation(s) were unreadable | store: skip unusable Codex state generation {root}/state_2.sqlite: open Codex state store \"{root}/state_2.sqlite\": sqlite database {root}/state_2.sqlite is a file this test process did not write; a test that needs SQLite's own file calls testjail.DatabaseFiles\nstore: skip unusable Codex state generation {root}/state_1.sqlite: open Codex state store \"{root}/state_1.sqlite\": sqlite database {root}/state_1.sqlite is a file this test process did not write; a test that needs SQLite's own file calls testjail.DatabaseFiles\n"; got != want {
+		t.Fatalf("threads | error | stderr = %q, want %q", got, want)
 	}
 }
 
@@ -250,7 +246,7 @@ func TestReadCodexThreadIdentity(t *testing.T) {
 }
 
 func TestReadCodexThreadIdentityReadFailureIsNotAbsence(t *testing.T) {
-	for _, raw := range []string{"not sqlite", ""} {
+	for raw, want := range map[string]string{"not sqlite": "open Codex thread identity root in {dir}/state_5.sqlite: sqlite database {dir}/state_5.sqlite is a file this test process did not write; a test that needs SQLite's own file calls testjail.DatabaseFiles", "": "read Codex thread identity schema {dir}/state_5.sqlite: unable to open database file (14)"} {
 		file := filepath.Join(t.TempDir(), "state_5.sqlite")
 		if raw != "" {
 			if err := os.WriteFile(file, []byte(raw), 0o600); err != nil {
@@ -258,8 +254,8 @@ func TestReadCodexThreadIdentityReadFailureIsNotAbsence(t *testing.T) {
 			}
 		}
 		_, found, err := ReadCodexThreadIdentity(context.Background(), file, "root")
-		if err == nil || found || !strings.Contains(err.Error(), file) {
-			t.Fatalf("failed read rendered as absence: found=%v err=%v", found, err)
+		if got := strings.ReplaceAll(fmt.Sprint(err), filepath.Dir(file), "{dir}"); found || got != want {
+			t.Fatalf("read error = %q, want %q (found %v)", got, want, found)
 		}
 	}
 }

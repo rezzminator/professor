@@ -1,0 +1,40 @@
+restart plan: stop downstream first, then start upstream first only what was running before; chats are not brought back
+find   chats          ok      3 live chat(s) — fleet scan of every tmux socket and Herdr seat
+find   chat-helpers   ok      1 helper process(es) of 5 listed — process table: pfm internal cost-sink, pfm mcp serve --stdio
+find   herdr          ok      /opt/bin/herdr status --json: server running on /run/herdr.sock
+find   services       ok      fake manager
+find   mcp-daemon     ok      1 unsupervised pfm mcp serve process(es) of 5 listed — process table
+find   pfm            ok      1 other pfm process(es) of 5 listed — process table, argv[0] named pfm; this worker (pid 1) is last
+stop   1  chats          codex builder session sess-build
+          found: fleet scan: tmux socket pfm-cx-builder pane %1
+          stop:  tmux kill-server on pfm-cx-builder; verified: tmux says the server is dead; not brought back
+stop   2  chats          opencode (unnamed) session sess-oc
+          found: fleet scan: Herdr seat seat-3
+          stop:  Herdr pane.close of the proved seat; verified: the seat is retired; not brought back
+stop   3  chats          claude launcher session sess-launch
+          found: fleet scan: tmux socket pfm-cc-launcher pane %0 (the chat that typed pfm restart)
+          stop:  tmux kill-server on pfm-cc-launcher; verified: tmux says the server is dead; not brought back
+stop   4  chat-helpers   cost sink pid 10
+          found: process table: pfm internal cost-sink
+          stop:  SIGTERM, SIGKILL after 5s; verified gone from the process table
+stop   5  herdr          herdr server /run/herdr.sock
+          found: /opt/bin/herdr status --json; process table: 1 process(es), the server and every one under it
+          stop:  /opt/bin/herdr server stop; verified: herdr status reads not running, and every process it ran is gone (one that outlives it: SIGTERM, then SIGKILL)
+stop   6  services       systemd pfm-schedule.timer
+          found: fake
+          stop:  stop
+stop   7  mcp-daemon     pfm mcp serve pid 11
+          found: process table: pfm mcp serve
+          stop:  SIGTERM, SIGKILL after 5s; verified gone from the process table
+stop   8  pfm            pfm process pid 12
+          found: process table: pfm ls --watch
+          stop:  SIGTERM, SIGKILL after 5s; verified gone from the process table
+start  1  mcp-daemon     pfm mcp serve pid 11  restart (was up)
+          start: /opt/pfm/bin/pfm mcp serve, detached; verified: the loopback /status probe answers
+start  2  services       systemd pfm-schedule.timer  restart (was up)
+          start: start
+start  3  herdr          herdr server /run/herdr.sock  restart (was up: server.running=true)
+          start: /opt/bin/herdr server, detached; verified: herdr status reads running
+last      pfm            this restart worker, pid 1, detached from every chat — exits after the start phase, the last pfm process
+--- ran
+/opt/bin/herdr status --json

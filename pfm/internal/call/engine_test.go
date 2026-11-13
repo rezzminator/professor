@@ -617,8 +617,7 @@ func TestCallBodyAboveFormerAbsoluteCapUsesPaste(t *testing.T) {
 		Message: body,
 	})
 	if err != nil || result.Code != 0 || result.AutoFilePath != "" ||
-		strings.Contains(result.Message, "AUTO-FILE") ||
-		!strings.Contains(result.Message, "PASTE") ||
+		result.Message != "called LIVE PASTE into \"%1\" — bracketed-paste body submitted (Enter confirmed, input cleared)" ||
 		!fake.pasted || len(fake.literals) != 1 {
 		t.Fatalf(
 			"former absolute cap result=%+v pasted=%v literals=%d err=%v",
@@ -669,8 +668,7 @@ func TestCallPasteBoundaryAndKillerBody(t *testing.T) {
 				len(underFake.literals) == 0 ||
 				underFake.literals[0] != underBody ||
 				underFake.pasted ||
-				strings.Contains(underResult.Message, "AUTO-FILE") ||
-				strings.Contains(underResult.Message, "PASTE") {
+				underResult.Message != "called LIVE into \"%1\" — typed inline and submitted (Enter confirmed, input cleared)" {
 				t.Fatalf(
 					"one-under delivery result=%+v literals=%q pasted=%v err=%v",
 					underResult,
@@ -689,8 +687,7 @@ func TestCallPasteBoundaryAndKillerBody(t *testing.T) {
 			})
 			if err != nil || overResult.Code != 0 ||
 				overResult.AutoFilePath != "" ||
-				strings.Contains(overResult.Message, "AUTO-FILE") ||
-				!strings.Contains(overResult.Message, "PASTE") ||
+				overResult.Message != "called LIVE PASTE into \"%1\" — bracketed-paste body submitted (Enter confirmed, input cleared)" ||
 				!overFake.pasted ||
 				len(overFake.literals) == 0 ||
 				overFake.literals[0] != overBody {
@@ -715,7 +712,7 @@ func TestCallPasteBoundaryAndKillerBody(t *testing.T) {
 				len(killerFake.literals) == 0 ||
 				killerFake.literals[0] != killerBody ||
 				!killerFake.pasted ||
-				strings.Contains(killerResult.Message, "AUTO-FILE") {
+				killerResult.Message != "called LIVE PASTE into \"%1\" — bracketed-paste body submitted (Enter confirmed, input cleared)" {
 				t.Fatalf(
 					"killer body was not delivered byte-exact via paste: result=%+v literal len=%d err=%v",
 					killerResult,
@@ -862,9 +859,11 @@ func TestPasteRescueFailureIsReportedNotSwallowed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Status != "delivered_unproven" || result.AutoFilePath != "" ||
-		!strings.Contains(result.Message, "AUTO-FILE RESCUE FAILED") {
-		t.Fatalf("rescue failure was not reported: result=%+v", result)
+	got := strings.NewReplacer(body, "{body}", blocked, "{blocked}").Replace(result.Message)
+	if want := "delivered-unproven into \"%1\" — input cleared, but the pane capture below shows neither the message past the input bar nor the expected engine processing state — AUTO-FILE RESCUE FAILED: could not preserve the unproven body to a rescue file: create call body directory \"{blocked}\": mkdir {blocked}: not a directory"; result.Status != "delivered_unproven" ||
+		result.AutoFilePath != "" ||
+		got != want {
+		t.Fatalf("message = %q, want %q (result %+v)", got, want, result)
 	}
 }
 
@@ -1124,7 +1123,7 @@ func TestBlindDeliveryProofStatesMissingComposerLine(t *testing.T) {
 		t.Fatal(err)
 	}
 	if result.Code != 0 || result.Status != "delivered_unproven" ||
-		!strings.Contains(result.Message, "no composer line") {
+		result.Message != "delivered-unproven into \"%1\" — input cleared, but the pane capture below shows neither the message past the input bar nor the expected engine processing state (proof caveat: no composer line was visible in capture or scrollback; submission was confirmed, but the screen proof is blind)" {
 		t.Fatalf("blind proof receipt = %+v", result)
 	}
 }
@@ -1144,7 +1143,7 @@ func TestSuccessReceiptNamesForceAndStashedDraft(t *testing.T) {
 				submitOnEnter: true,
 			},
 			request: Request{Target: "chat", Message: "urgent", ForceNow: true},
-			want:    "FORCE-NOW: interrupted",
+			want:    "called LIVE into \"%1\" — typed inline and submitted (Enter confirmed, input cleared) — FORCE-NOW: interrupted the target's running flow",
 		},
 		{
 			name: "stashed draft",
@@ -1154,7 +1153,7 @@ func TestSuccessReceiptNamesForceAndStashedDraft(t *testing.T) {
 				submitOnEnter: true,
 			},
 			request: Request{Target: "chat", Message: "next"},
-			want:    "stashed and restored",
+			want:    "called LIVE into \"%1\" — typed inline and submitted (Enter confirmed, input cleared) — stashed and restored the target's unsent draft",
 		},
 	}
 	for _, test := range tests {
@@ -1164,7 +1163,7 @@ func TestSuccessReceiptNamesForceAndStashedDraft(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if result.Code != 0 || !strings.Contains(result.Message, test.want) {
+			if result.Code != 0 || result.Message != test.want {
 				t.Fatalf("receipt = %+v, want %q", result, test.want)
 			}
 		})

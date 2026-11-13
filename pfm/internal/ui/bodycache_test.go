@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"strings"
 	"testing"
 	"time"
 
@@ -18,35 +17,28 @@ func applyMessage(t *testing.T, model Model, message tea.Msg) Model {
 	return result
 }
 
-// The body is served from memory only for a sweep tick inside the clock grain
-// it was drawn at. The sentinel plants a body no render could produce, so a
-// frame that still shows it was not laid out again; one that does not was.
 func TestChatsBodyIsRememberedOnlyAcrossSweepTicksInOneClockBucket(t *testing.T) {
 	const sentinel = "REMEMBERED-BODY"
 	model := deckModel(160, 40)
 	model.nowNS = fixtureNowNS
 	_ = model.render()
 	model.deck.agg.bodyText = sentinel
-
 	within := applyMessage(t, model, sweepTickMsg{nowNS: fixtureNowNS + int64(time.Millisecond)})
-	if !strings.Contains(within.render(), sentinel) {
-		t.Fatal("a sweep tick inside the clock bucket drew the body again")
+	_ = within.render()
+	if got := within.deck.agg.bodyText; got != sentinel {
+		t.Fatalf("a sweep tick inside the clock bucket drew the body again: %q", got)
 	}
-
-	later := applyMessage(t, model, sweepTickMsg{nowNS: fixtureNowNS + 2*bodyFrameNS})
-	if strings.Contains(later.render(), sentinel) {
-		t.Fatal("a sweep tick in the next clock bucket served the old body")
-	}
-
-	model.deck.agg.bodyText = sentinel
 	for name, message := range map[string]tea.Msg{
-		"key":    specialKey(tea.KeyDown),
-		"sky":    skyTickMsg{nowNS: fixtureNowNS + int64(time.Millisecond)},
-		"resize": tea.WindowSizeMsg{Width: 120, Height: 40},
+		"next-bucket sweep": sweepTickMsg{nowNS: fixtureNowNS + 2*bodyFrameNS},
+		"key":               specialKey(tea.KeyDown),
+		"sky":               skyTickMsg{nowNS: fixtureNowNS + int64(time.Millisecond)},
+		"resize":            tea.WindowSizeMsg{Width: 120, Height: 40},
 	} {
 		_ = model.render()
 		model.deck.agg.bodyText = sentinel
-		if strings.Contains(applyMessage(t, model, message).render(), sentinel) {
+		next := applyMessage(t, model, message)
+		_ = next.render()
+		if next.deck.agg.bodyText == sentinel {
 			t.Fatalf("a %s message was served the remembered body", name)
 		}
 	}

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -78,8 +79,10 @@ func TestReleaseLineIsExactlyHerdrsRequest(t *testing.T) {
 
 func TestMessageIsCappedAtTwoHundredFortyRunes(t *testing.T) {
 	line, err := Report{Pane: "p", Agent: "a", State: StateBlocked, Message: strings.Repeat("é", 500), Seq: 1}.Line()
-	if err != nil || !strings.Contains(string(line), strings.Repeat("é", 239)+"…") ||
-		strings.Contains(string(line), strings.Repeat("é", 240)) {
+	if err != nil ||
+		string(
+			line,
+		) != "{\"id\":\"pfm-1\",\"method\":\"pane.report_agent\",\"params\":{\"pane_id\":\"p\",\"source\":\"pfm\",\"agent\":\"a\",\"state\":\"blocked\",\"message\":\"ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé…\",\"seq\":1}}" {
 		t.Fatalf("Line = %s, %v, want 239 runes and an ellipsis", line, err)
 	}
 }
@@ -208,22 +211,13 @@ func TestSendNamesAHerdrRefusal(t *testing.T) {
 }
 
 func TestSendReportsEveryTransportFailure(t *testing.T) {
-	if err := Send(
-		context.Background(),
-		filepath.Join(t.TempDir(), "missing.sock"),
-		[]byte("x"),
-	); err == nil ||
-		!strings.Contains(err.Error(), "dial") {
-		t.Errorf("Send to a missing socket = %v, want a dial error naming the socket", err)
-	}
+	missing := filepath.Join(t.TempDir(), "missing.sock")
 	garbage := serve(t, func(string) string { return "not json" })
-	if err := Send(
-		context.Background(),
-		garbage,
-		[]byte("x"),
-	); err == nil ||
-		!strings.Contains(err.Error(), "decode response") {
-		t.Errorf("Send with an unparseable response = %v, want a decode error", err)
+	for socket, want := range map[string]string{missing: "herdr socket {socket}: dial for a request of 1 bytes pfm cannot decode (invalid character 'x' looking for beginning of value): dial unix {socket}: connect: no such file or directory", garbage: "herdr socket {socket}: decode response \"not json\" to a request of 1 bytes pfm cannot decode (invalid character 'x' looking for beginning of value): invalid character 'o' in literal null (expecting 'u')"} {
+		err := Send(context.Background(), socket, []byte("x"))
+		if got := strings.ReplaceAll(fmt.Sprint(err), socket, "{socket}"); got != want {
+			t.Errorf("Send = %q, want %q", got, want)
+		}
 	}
 }
 
@@ -467,8 +461,8 @@ func TestCallReturnsEachResultInRequestOrder(t *testing.T) {
 		func(request string) string { return `{"id":"x","result":{"type":"echo","line":"` + request + `"}}` },
 	)
 	results, err := Call(context.Background(), path, []byte("one"), []byte("two"))
-	if err != nil || len(results) != 2 || !strings.Contains(string(results[0]), `"one"`) ||
-		!strings.Contains(string(results[1]), `"two"`) {
+	if err != nil || len(results) != 2 || string(results[0]) != "{\"type\":\"echo\",\"line\":\"one\"}" ||
+		string(results[1]) != "{\"type\":\"echo\",\"line\":\"two\"}" {
 		t.Fatalf("Call = %s, %v, want the results of one then two", results, err)
 	}
 	big := serve(t, func(string) string { return `{"id":"x","result":{"pad":"` + strings.Repeat("p", 200<<10) + `"}}` })

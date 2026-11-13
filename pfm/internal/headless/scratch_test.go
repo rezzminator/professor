@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -58,52 +59,30 @@ func chdir(t *testing.T, directory string) {
 	})
 }
 
-// TestWritePreparedExchangeEmptyDirectoryResolvesThroughPathsNotCWD is the
-// regression test: an empty directory must resolve through internal/paths
-// (here, the jailed PFM_SID_DIR) rather than CWD-relative
-// filepath.Join("tmp", "chat-status"). It drives the exact branch the dev
-// agent reported as unexercised by the rest of the suite — every other test
-// in this package injects a non-empty TempDir.
-func TestWritePreparedExchangeEmptyDirectoryResolvesThroughPathsNotCWD(t *testing.T) {
-	sidDir := scratchJail(t)
-	cwd := t.TempDir()
-	chdir(t, cwd)
-
+// An empty directory puts a prepared exchange or capture under the jailed SID directory, never a tmp/ in the cwd.
+func TestWritePreparedEmptyDirectoryResolvesThroughPathsNotCWD(t *testing.T) {
 	prompt := []transcript.Entry{{Role: transcript.RoleUser, Text: "what changed?"}}
 	response := []transcript.Entry{{Role: transcript.RoleAssistant, Text: "the cache changed"}}
-	path, err := writePreparedExchange("", prompt, response, true)
-	if err != nil {
-		t.Fatalf("writePreparedExchange(empty directory): %v", err)
-	}
-	t.Cleanup(func() { _ = os.Remove(path) })
-
-	if !strings.HasPrefix(path, sidDir+string(filepath.Separator)) {
-		t.Fatalf("prepared exchange landed at %q, want under the jailed SID directory %q", path, sidDir)
-	}
-	if _, statErr := os.Stat(filepath.Join(cwd, "tmp")); !os.IsNotExist(statErr) {
-		t.Fatalf("a tmp/ directory appeared in the working directory %s: stat err=%v", cwd, statErr)
-	}
-}
-
-// TestWritePreparedCaptureEmptyDirectoryResolvesThroughPathsNotCWD is the
-// same regression pin for statusask.go's writePreparedCapture.
-func TestWritePreparedCaptureEmptyDirectoryResolvesThroughPathsNotCWD(t *testing.T) {
-	sidDir := scratchJail(t)
-	cwd := t.TempDir()
-	chdir(t, cwd)
-
-	chat := Chat{Name: "seat"}
-	path, err := writePreparedCapture("", chat, "live pane content")
-	if err != nil {
-		t.Fatalf("writePreparedCapture(empty directory): %v", err)
-	}
-	t.Cleanup(func() { _ = os.Remove(path) })
-
-	if !strings.HasPrefix(path, sidDir+string(filepath.Separator)) {
-		t.Fatalf("prepared capture landed at %q, want under the jailed SID directory %q", path, sidDir)
-	}
-	if _, statErr := os.Stat(filepath.Join(cwd, "tmp")); !os.IsNotExist(statErr) {
-		t.Fatalf("a tmp/ directory appeared in the working directory %s: stat err=%v", cwd, statErr)
+	for _, row := range []struct {
+		name  string
+		write func() (string, error)
+		want  string
+	}{
+		{"exchange", func() (string, error) { return writePreparedExchange("", prompt, response, true) }, "{sid}/exchange-N.md"},
+		{"capture", func() (string, error) { return writePreparedCapture("", Chat{Name: "seat"}, "live pane content") }, "{sid}/capture-N.md"},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			sidDir := scratchJail(t)
+			cwd := t.TempDir()
+			chdir(t, cwd)
+			path, err := row.write()
+			t.Cleanup(func() { _ = os.Remove(path) })
+			_, statErr := os.Stat(filepath.Join(cwd, "tmp"))
+			got := regexp.MustCompile(`\d+`).ReplaceAllString(strings.ReplaceAll(path, sidDir, "{sid}"), "N")
+			if got != row.want || err != nil || !os.IsNotExist(statErr) {
+				t.Fatalf("prepared path = %q, want %q (err %v, cwd tmp/ stat %v)", got, row.want, err, statErr)
+			}
+		})
 	}
 }
 
@@ -123,7 +102,7 @@ func TestPreparedScratchDirResolutionFailureIsAnErrorNotAGuess(t *testing.T) {
 	if err == nil {
 		t.Fatalf("preparedScratchDir(empty) = (%q, nil), want a resolution error", dir)
 	}
-	if !strings.Contains(err.Error(), "resolve scratch directory") {
+	if err.Error() != "resolve scratch directory: refusing to resolve the operator's real home directory inside a test: point PFM_HOME at a temporary directory (see internal/testjail), or set PFM_TEST_REAL_HOME=1 if this test genuinely must read the host" {
 		t.Fatalf("preparedScratchDir error = %q, want it to name the resolve-scratch-directory step", err.Error())
 	}
 

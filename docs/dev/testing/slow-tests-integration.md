@@ -10,7 +10,7 @@ Observed durations come from the 2026-09-27 fenced `iso test pfm` capture (`-p 4
 
 ### TestInternalLaunchPrintExecsDirectlyWithoutTmux
 
-**Source:** [pfm/cmd/pfm/internal_launch_test.go](../../../pfm/cmd/pfm/internal_launch_test.go) line 37 · **Observed:** 3.54s · **Class:** process/subprocess
+**Source:** [pfm/cmd/pfm/internal_launch_jail_test.go](../../../pfm/cmd/pfm/internal_launch_jail_test.go) · **Observed:** 3.54s · **Class:** process/subprocess
 
 jailTest; exec.Command(os.Args[0], -test.run=...); helper launch uses PFM_TEST_LAUNCH_REAL; reads PFM_TMUX_DIR.
 

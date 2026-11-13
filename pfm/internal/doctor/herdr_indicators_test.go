@@ -2,9 +2,9 @@ package doctor
 
 import (
 	"bytes"
+	"fmt"
 	"io/fs"
 	"os"
-	"strings"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/gather"
@@ -12,6 +12,17 @@ import (
 )
 
 func TestHerdrIndicatorsDoctor(t *testing.T) {
+	wants := map[string]string{
+		"stale":                   "1 0 doctor: herdr-indicators: WARN stale executable pids=[5000001] — fix: pfm install --yes\n",
+		"current":                 "0 0 doctor: herdr-indicators: ok process enumeration confirms no stale painter\n",
+		"absent":                  "0 0 doctor: herdr-indicators: ok process enumeration confirms no stale painter\n",
+		"foreign":                 "0 0 doctor: herdr-indicators: ok process enumeration confirms no stale painter\n",
+		"another install":         "0 0 doctor: herdr-indicators: ok process enumeration confirms no stale painter\n",
+		"unreadable table":        "0 1 doctor: herdr-indicators: ERROR herdr indicator process check: list processes: permission denied — fix: repair process-table access, then rerun pfm doctor\n",
+		"unreadable pid":          "0 1 doctor: herdr-indicators: ERROR herdr indicator process check: 1 process(es) of this user could not be read, so they may run unstopped: pid 5000001: permission denied — fix: repair process-table access, then rerun pfm doctor\n",
+		"unreadable image":        "0 1 doctor: herdr-indicators: ERROR herdr indicator pid 5000001 executable identity: permission denied — fix: repair process-table access, then rerun pfm doctor\n",
+		"stale beside unreadable": "1 1 doctor: herdr-indicators: WARN stale executable pids=[5000001] — fix: pfm install --yes\ndoctor: herdr-indicators: ERROR herdr indicator pid 5000002 executable identity: permission denied — fix: repair process-table access, then rerun pfm doctor\n",
+	}
 	for _, name := range []string{"stale", "current", "absent", "foreign", "another install", "unreadable table", "unreadable pid", "unreadable image", "stale beside unreadable"} {
 		t.Run(name, func(t *testing.T) {
 			runtime, fresh, old := newMCPServeDoctorFixture(t)
@@ -28,11 +39,8 @@ func TestHerdrIndicatorsDoctor(t *testing.T) {
 				identities:   map[int]gather.ProcessIdentity{pid: {EffectiveUID: uint32(os.Geteuid())}},
 				commandReads: map[int]int{},
 			}
-			wantWarnings, wantFailures, want := 0, 0, "ok process enumeration confirms no stale painter"
-			wantAlso := ""
 			switch name {
 			case "stale":
-				wantWarnings, want = 1, "WARN stale executable pids=[5000001] — fix: pfm install --yes"
 			case "current":
 				table.images[pid] = fresh
 			case "absent":
@@ -43,13 +51,10 @@ func TestHerdrIndicatorsDoctor(t *testing.T) {
 				table.environs[pid][paths.EnvInstallMark] = "another-install-mark"
 			case "unreadable table":
 				table.pidsErr = fs.ErrPermission
-				wantFailures, want = 1, "ERROR herdr indicator process check: list processes"
 			case "unreadable pid":
 				table.cmdlineErr = map[int]error{pid: fs.ErrPermission}
-				wantFailures, want = 1, "ERROR herdr indicator process check: 1 process(es)"
 			case "unreadable image":
 				table.imageErr = map[int]error{pid: fs.ErrPermission}
-				wantFailures, want = 1, "ERROR herdr indicator pid 5000001 executable identity"
 			case "stale beside unreadable":
 				const unreadable = 5000002
 				table.pids = append(table.pids, unreadable)
@@ -59,23 +64,11 @@ func TestHerdrIndicatorsDoctor(t *testing.T) {
 				}
 				table.identities[unreadable] = gather.ProcessIdentity{EffectiveUID: uint32(os.Geteuid())}
 				table.imageErr = map[int]error{unreadable: fs.ErrPermission}
-				wantWarnings, wantFailures = 1, 1
-				want = "doctor: herdr-indicators: WARN stale executable pids=[5000001] — fix: pfm install --yes\n"
-				wantAlso = "doctor: herdr-indicators: ERROR herdr indicator pid 5000002 executable identity"
 			}
 			var output bytes.Buffer
 			warnings, failures := printHerdrIndicatorsDoctor(&output, runtime.Paths.Home, table)
-			if warnings != wantWarnings || failures != wantFailures || !strings.Contains(output.String(), want) ||
-				!strings.Contains(output.String(), wantAlso) {
-				t.Fatalf(
-					"counts=%d,%d output=%s; want=%d,%d %s",
-					warnings,
-					failures,
-					output.String(),
-					wantWarnings,
-					wantFailures,
-					want,
-				)
+			if got := fmt.Sprintf("%d %d %s", warnings, failures, output.String()); got != wants[name] {
+				t.Errorf("counts and output = %q, want %q", got, wants[name])
 			}
 		})
 	}

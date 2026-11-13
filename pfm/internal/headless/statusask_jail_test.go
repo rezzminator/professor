@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
@@ -66,15 +67,17 @@ func TestAskCapturesLivePaneAndReportsPaneOnlyWithoutExchange(t *testing.T) {
 	// from the ambient PATH to reach the session started above.
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	tempDir := filepath.Join(root, "tmp")
-	options := AskOptions{Config: summaryMachine(t, "claude"), TempDir: tempDir}
+	machine := summaryMachine(t, "claude")
+	machine.Claude.Binary = filepath.Join(bin, "claude")
+	options := AskOptions{Config: machine, TempDir: tempDir}
 	chat := Chat{
 		Name: "seat", Engine: "cc", Path: "", Live: true,
 		Socket: socketPath, Session: session,
 	}
 
 	result := Ask(context.Background(), chat, options)
-	if !strings.HasPrefix(result.Text, "PANE-ONLY (no human exchange recorded yet): ") {
-		t.Fatalf("pane-only ask=%+v", result)
+	if got, want := result.Text, "PANE-ONLY (no human exchange recorded yet): quietly idling"; got != want {
+		t.Fatalf("pane-only ask = %q, want %q", got, want)
 	}
 	assertNoLeakedTempFiles(t, tempDir)
 }
@@ -90,5 +93,47 @@ func writeSummaryStub(t *testing.T, directory, name, body string) {
 		0o700,
 	); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestAskDistinguishesNotLiveFromCaptureFailure pins the engine's root law
+// (pfm/CLAUDE.md: "a probe that could not run never returns 'nothing
+// found'") as Ask states it: a chat that is not live and a chat whose pane
+// capture ERRORED are two different facts, worded so a reader cannot
+// mistake "we never had a screen" for "we failed to read the screen".
+func TestAskDistinguishesNotLiveFromCaptureFailure(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux binary is not installed")
+	}
+	root := t.TempDir()
+	transcriptPath := filepath.Join(root, "exchange.jsonl")
+	writeSummaryTranscript(t, transcriptPath,
+		`{"type":"user","message":{"role":"user","content":"what is happening"}}`,
+		`{"type":"assistant","message":{"role":"assistant","content":"steady state"}}`,
+	)
+	bin := filepath.Join(root, "bin")
+	writeEngine(t, bin, "claude")
+	// Prepend, not replace: the capture-failure call below still needs the
+	// REAL tmux binary to reach (and be refused by) the empty socket path.
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	options := AskOptions{
+		Config: summaryMachine(t, "claude"), TempDir: filepath.Join(root, "tmp"),
+		Runner: fakeEngine(deps.StartOutput{Stdout: `{"result":"answer"}` + "\n"}),
+	}
+
+	notLive := Ask(context.Background(), Chat{Name: "seat", Engine: "cc", Path: transcriptPath, Live: false}, options)
+	tmuxRoot := t.TempDir()
+	t.Setenv("TMUX_TMPDIR", tmuxRoot)
+	socketPath := filepath.Join(tmuxRoot, "no-server-here")
+	captureFailed := Ask(context.Background(), Chat{
+		Name: "seat", Engine: "cc", Path: transcriptPath, Live: true,
+		Socket: socketPath, Session: "whatever",
+	}, options)
+	if got, want := notLive.Text+" | "+strings.ReplaceAll(
+		captureFailed.Text,
+		tmuxRoot,
+		"{tmux}",
+	), "TRANSCRIPT-ONLY (chat is not live: there is no pane to capture): answer | TRANSCRIPT-ONLY (pane capture failed: capture pane: exec: \"/usr/bin/tmux\": a test process runs no real tmux: script a deps.FakeRunner through tmux.WithClientRunner(ctx, …), or call testjail.TmuxServer(t) for a real server): answer"; got != want {
+		t.Fatalf("not live | capture failed = %q, want %q", got, want)
 	}
 }

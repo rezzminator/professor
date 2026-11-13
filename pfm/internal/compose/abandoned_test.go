@@ -9,6 +9,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // TestAbandonedLaunch pins the one rule that drops an agent's launch session:
@@ -130,14 +131,14 @@ func TestBootingPaneHoldsItsLaunchedClaudeOnce(t *testing.T) {
 		Snapshot: gather.Snapshot{
 			CrumblessLive: []gather.CrumblessLive{{
 				Socket: "cc-100-1-1", SessionName: "cc-100-1-1", WindowName: "trust-held",
-				PaneID: "%0", PID: 900, CWD: "/work/fresh",
+				PaneID: "%0", PID: 900, CWD: testjail.Place("/work/fresh"),
 			}},
 			Agents: []gather.Agent{{
 				PID: 900, PanePID: 800, Socket: "cc-100-1-1", PaneID: "%0", SessionID: session,
-				ConfigDir: "/accounts/1",
+				ConfigDir: testjail.Place("/accounts/1"),
 			}},
 		},
-		Options: Options{View: AllView, CurrentDir: "/work/projd"},
+		Options: Options{View: AllView, CurrentDir: testjail.Place("/work/projd")},
 	}
 	output := Compose(input)
 	var onPane []string

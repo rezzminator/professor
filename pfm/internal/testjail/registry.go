@@ -1,7 +1,6 @@
 package testjail
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,8 +8,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-
-	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
 // StageGlobalAgents links every original agent from the checkout's
@@ -87,58 +84,28 @@ var agentFixtureCache struct {
 	err  error
 }
 
+// globalAgentFixtures reads the agent inventory of templates/global/agents from the tracked
+// testdata/global-agents.json, each row's path joined to this checkout; it starts nothing. The
+// fence gate's fixture step holds the file equal to a fresh run of the inventory script.
 func globalAgentFixtures() ([]globalAgentFixture, error) {
 	agentFixtureCache.Do(func() {
-		python, err := deps.Resolve("python3")
+		fixture := filepath.Join(checkoutRoot(), "pfm", "internal", "testjail", "testdata", "global-agents.json")
+		body, err := os.ReadFile(fixture)
 		if err != nil {
-			agentFixtureCache.err = fmt.Errorf("resolve agent inventory interpreter: %w", err)
+			agentFixtureCache.err = fmt.Errorf("read agent fixture inventory %s: %w", fixture, err)
 			return
 		}
-		root := checkoutRoot()
-		result, err := (deps.RealRunner{}).Run(context.Background(), []string{
-			python,
-			"-I",
-			filepath.Join(root, "scripts", "agent-source-inventory.py"),
-			filepath.Join(root, "templates", "global", "agents"),
-		}, deps.RunOptions{})
-		if err != nil {
-			agentFixtureCache.err = fmt.Errorf(
-				"read agent fixture inventory: %w: %s%s",
-				err,
-				result.Stderr,
-				result.Stdout,
-			)
+		var rows []globalAgentFixture
+		if err := json.Unmarshal(body, &rows); err != nil {
+			agentFixtureCache.err = fmt.Errorf("decode agent fixture inventory %s: %w", fixture, err)
 			return
 		}
-		if result.ExitCode != 0 {
-			agentFixtureCache.err = fmt.Errorf(
-				"read agent fixture inventory: exit status %d: %s%s", result.ExitCode, result.Stderr, result.Stdout,
-			)
-			return
+		for index := range rows {
+			rows[index].Path = filepath.Join(checkoutRoot(), rows[index].Path)
 		}
-		if err := json.Unmarshal(result.Stdout, &agentFixtureCache.rows); err != nil {
-			agentFixtureCache.err = fmt.Errorf("decode agent fixture inventory: %w", err)
-		}
+		agentFixtureCache.rows = rows
 	})
 	return agentFixtureCache.rows, agentFixtureCache.err
-}
-
-// stagePython3 stages the python3 a healthy host has, the interpreter
-// flights:tracer's tracetree kit runs on: a shim in shimDir, the one directory
-// beyond the canonical bin the jail's PATH holds. The shim runs the
-// interpreter the test process resolved; a host without one fails the test
-// here, as the doctor check would fail it later.
-func stagePython3(t *testing.T, shimDir string) {
-	t.Helper()
-	python, err := deps.Resolve("python3")
-	if err != nil {
-		t.Fatalf("the jail's healthy HOME needs python3 for the tracetree kit: %v", err)
-	}
-	if err := WriteExecutable(
-		filepath.Join(shimDir, "python3"), []byte("#!/bin/sh\nexec '"+python+"' \"$@\"\n"), 0o700,
-	); err != nil {
-		t.Fatal(err)
-	}
 }
 
 // tracetreeKitStub prints the usage line the shipped kit prints when it is

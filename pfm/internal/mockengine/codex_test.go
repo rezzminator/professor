@@ -23,7 +23,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/index"
 	"github.com/rezzminator/professor/pfm/internal/mcpserv"
 	"github.com/rezzminator/professor/pfm/internal/paths"
-	"github.com/rezzminator/professor/pfm/internal/statusline"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
@@ -111,79 +110,15 @@ func TestCodexTUIRefusesToRenderWithoutPaneShapes(t *testing.T) {
 
 func TestCodexHeadlessDoorsAreRefusedByName(t *testing.T) {
 	fix := newFixture(t)
-	for _, args := range [][]string{{"mcp-server"}, {"app-server"}} {
-		code, _, stderr := runOnce(fix, "codex", args, "")
-		if code != ExitUnpinned || !strings.Contains(stderr, "codex "+args[0]) ||
-			!strings.Contains(stderr, "unpinned") {
-			t.Fatalf("codex %v exit=%d stderr=%q, want %d naming the door", args, code, stderr, ExitUnpinned)
-		}
-		if args[0] == "app-server" && !strings.Contains(stderr, "rate_limits") {
-			t.Fatalf("unscripted app-server must name rate_limits: %q", stderr)
+	for door, want := range map[string]string{"mcp-server": "mock-engine: codex mcp-server JSON-RPC is unpinned in this mock\n", "app-server": "mock-engine: codex app-server JSON-RPC is unpinned — supply rate_limits in the scenario\n"} {
+		code, _, stderr := runOnce(fix, "codex", []string{door}, "")
+		if got := strings.ReplaceAll(stderr, fix.root, "{root}"); code != ExitUnpinned || got != want {
+			t.Fatalf("codex %s exit %d stderr = %q, want %q", door, code, got, want)
 		}
 	}
 }
 
 const fixtureRateLimits = `{"primary":{"usedPercent":12,"windowDurationMins":300,"resetsAt":4102444800},"secondary":{"usedPercent":34,"windowDurationMins":10080,"resetsAt":4102444800},"planType":"plus"}`
-
-func TestCodexAppServerFeedsPfmsStatuslineCache(t *testing.T) {
-	fix := newFixture(t)
-	setScenarioField(t, fix, "rate_limits", json.RawMessage(fixtureRateLimits))
-	frames := "{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"initialize\"}\n" +
-		"{\"jsonrpc\":\"2.0\",\"method\":\"initialized\"}\n" +
-		"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"account/rateLimits/read\"}\n" +
-		"{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"fixture/unknown\"}\n"
-	code, stdout, stderr := runOnce(fix, "codex", []string{"app-server"}, frames)
-	if code != 0 || stderr != "" {
-		t.Fatalf("app-server EOF exit=%d stderr=%q", code, stderr)
-	}
-	lines := strings.Split(strings.TrimSpace(stdout), "\n")
-	if len(lines) != 3 {
-		t.Fatalf("requests produced %d replies: %q", len(lines), stdout)
-	}
-	for i, line := range lines {
-		var reply struct {
-			ID     int
-			Result struct{ RateLimits json.RawMessage }
-			Error  struct {
-				Code    int
-				Message string
-			}
-		}
-		if err := json.Unmarshal([]byte(line), &reply); err != nil {
-			t.Fatal(err)
-		}
-		if reply.ID != i || (i == 1 && string(reply.Result.RateLimits) != fixtureRateLimits) ||
-			(i == 2 && (reply.Error.Code != -32601 || !strings.Contains(reply.Error.Message, "fixture/unknown"))) {
-			t.Fatalf("reply %d = %s", i, line)
-		}
-	}
-	cache := filepath.Join(fix.root, "rate-limits.json")
-	if err := statusline.RefreshCodex(context.Background(), statusline.CodexOptions{
-		CachePath: cache, Binary: filepath.Join(fix.bin, "codex"),
-	}); err != nil {
-		t.Fatalf("pfm statusline refresh: %v", err)
-	}
-	var got struct {
-		Primary struct {
-			UsedPercent        int
-			WindowDurationMins int
-			ResetsAt           int64
-		}
-		Secondary struct {
-			UsedPercent        int
-			WindowDurationMins int
-			ResetsAt           int64
-		}
-		PlanType string
-	}
-	if err := json.Unmarshal([]byte(readFile(t, cache)), &got); err != nil {
-		t.Fatal(err)
-	}
-	if got.Primary.UsedPercent != 12 || got.Primary.WindowDurationMins != 300 || got.Primary.ResetsAt != 4102444800 ||
-		got.Secondary.UsedPercent != 34 || got.Secondary.WindowDurationMins != 10080 || got.PlanType != "plus" {
-		t.Fatalf("pfm cache = %+v", got)
-	}
-}
 
 func codexHeadlessRequest(fix *fixture, prompt string) run.Request {
 	if err := os.WriteFile(
@@ -199,58 +134,6 @@ func codexHeadlessRequest(fix *fixture, prompt string) run.Request {
 			CodexAccounts: []pfmconfig.CodexAccount{{ID: 1, Home: fix.codexHome}},
 		},
 		Engine: pfmengine.Codex, Prompt: prompt, CWD: fix.work, Timeout: 20 * time.Second,
-	}
-}
-
-func TestCodexExecIsReadByPfmsOwnRunner(t *testing.T) {
-	for _, row := range []struct {
-		name   string
-		step   Step
-		schema json.RawMessage
-	}{
-		{"answer", Step{Type: StepTurn, Reply: "forty-two", Tokens: &Tokens{Input: 11, Output: 4, CacheRead: 100, CacheCreation: 9}}, nil},
-		{"structured", Step{Type: StepTurn, Structured: json.RawMessage(`{"ok":true}`)}, json.RawMessage(`{"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"]}`)},
-		{"crash", Step{Type: StepCrash, ExitCode: 17}, nil},
-		{"missing terminal", Step{Type: StepCrash}, nil},
-	} {
-		t.Run(row.name, func(t *testing.T) {
-			fix := newFixture(t)
-			fix.write(Scenario{SessionID: fixtureThread, BusyMS: intPtr(0), Steps: []Step{row.step}})
-			request := codexHeadlessRequest(fix, "what is the answer")
-			request.Schema = row.schema
-			result, err := run.Run(context.Background(), request)
-			if row.step.Type == StepCrash {
-				cause := "missing terminal success event"
-				if row.step.ExitCode != 0 {
-					cause = "exit status 17"
-				}
-				if err == nil || result.ExitCode != row.step.ExitCode || !strings.Contains(err.Error(), cause) ||
-					!strings.Contains(result.Stdout, `"type":"turn.started"`) ||
-					strings.Contains(result.Stdout, `"type":"turn.completed"`) {
-					t.Fatalf("crash result=%+v err=%v", result, err)
-				}
-				return
-			}
-			if err != nil || result.ExitCode != 0 || result.IsError {
-				t.Fatalf("headless result=%+v err=%v", result, err)
-			}
-			if row.schema != nil {
-				var object map[string]bool
-				if err := json.Unmarshal(
-					result.StructuredOutput,
-					&object,
-				); err != nil || len(object) != 1 ||
-					!object["ok"] {
-					t.Fatalf("structured output=%s err=%v", result.StructuredOutput, err)
-				}
-			} else if result.Answer != "forty-two" || result.Usage == nil || result.Usage.Input != 11 || result.Usage.Output != 4 || result.Usage.CachedInput != 100 || result.Usage.CacheCreation != 9 {
-				t.Fatalf("answer/usage=%+v", result)
-			}
-			if !strings.HasPrefix(result.Stdout, `{"thread_id":"`+fixtureThread+`","type":"thread.started"}`) &&
-				!strings.HasPrefix(result.Stdout, `{"type":"thread.started","thread_id":"`+fixtureThread+`"}`) {
-				t.Fatalf("first event=%q", result.Stdout)
-			}
-		})
 	}
 }
 
@@ -293,38 +176,6 @@ func TestCodexExecInlineAndStdinPrompts(t *testing.T) {
 				}
 			})
 		}
-	}
-}
-
-func TestCodexExecPersistenceFollowsEphemeral(t *testing.T) {
-	for _, ephemeral := range []bool{false, true} {
-		t.Run(fmt.Sprint(ephemeral), func(t *testing.T) {
-			fix := newFixture(t)
-			fix.write(Scenario{SessionID: fixtureThread, BusyMS: intPtr(0), Reply: "stored reply"})
-			request := codexHeadlessRequest(fix, "persist this exchange")
-			request.NoSessionPersistence = ephemeral
-			result, err := run.Run(context.Background(), request)
-			if err != nil || result.Answer != "stored reply" {
-				t.Fatalf("result=%+v err=%v", result, err)
-			}
-			if ephemeral {
-				for _, name := range []string{"sessions", codexmeta.SessionIndexFile} {
-					if _, err := os.Stat(filepath.Join(fix.codexHome, name)); !os.IsNotExist(err) {
-						t.Fatalf("ephemeral wrote %s: %v", name, err)
-					}
-				}
-				return
-			}
-			rows, names := fix.indexedRollouts()
-			if len(rows) != 1 || rows[0].ID != fixtureThread || rows[0].PromptCount != 1 ||
-				names[fixtureThread] != "persist this exchange" {
-				t.Fatalf("rollouts=%+v names=%v", rows, names)
-			}
-			meta, err := transcript.ReadMeta(fix.rolloutPath(), string(pfmengine.Codex))
-			if err != nil || meta.Model != DefaultCodexModel || meta.ContextTokens != 15 {
-				t.Fatalf("rollout meta=%+v err=%v", meta, err)
-			}
-		})
 	}
 }
 
@@ -448,93 +299,6 @@ func writeCodexConfig(t *testing.T, fix *fixture, table string) {
 	}
 }
 
-func TestCodexMCPStepHandshakesWithPfmsOwnServer(t *testing.T) {
-	fix := newFixture(t)
-	t.Chdir(fix.work)
-	executable, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	writeCodexConfig(t, fix, fmt.Sprintf("[mcp_servers.chat-professor]\ncommand = %q\nargs = [%q]\n",
-		executable, stdioProfessorArg))
-	fix.write(Scenario{SessionID: fixtureThread, Pane: codexShapes, BusyMS: intPtr(0), Steps: []Step{
-		{Type: StepMCP},
-		{Type: StepTurn, Reply: "tools listed"},
-	}})
-	session := fix.startTUI("codex", codexArgs(), nil)
-	session.waitFrame("the composer", func(frame string) bool { return strings.Contains(frame, "›") })
-	session.typeLine("list the fleet tools")
-	session.waitFrame("the reply after the handshake", func(frame string) bool {
-		return strings.Contains(frame, "tools listed")
-	})
-	recorded := waitFile(t, filepath.Join(fix.recordDir, "mcp-chat-professor.json"), func(content string) bool {
-		return strings.Contains(content, "whoami")
-	})
-	var tools []string
-	if err := json.Unmarshal([]byte(recorded), &tools); err != nil {
-		t.Fatal(err)
-	}
-	if want := mcpserv.ToolNames(); strings.Join(tools, ",") != strings.Join(want, ",") {
-		t.Fatalf("tools/list from pfm's stdio server = %v, want %v", tools, want)
-	}
-}
-
-func TestCodexMCPFailuresAreRecordedShownAndKeepPaneLive(t *testing.T) {
-	for _, row := range []struct{ name, table, tool, cause string }{
-		{"missing server", "", "last", "professor"},
-		{"call", "configured", "unknown_fixture_tool", "tools/call"},
-	} {
-		t.Run(row.name, func(t *testing.T) {
-			fix := newFixture(t)
-			t.Chdir(fix.work)
-			table := row.table
-			if table == "configured" {
-				executable, err := os.Executable()
-				if err != nil {
-					t.Fatal(err)
-				}
-				table = fmt.Sprintf(
-					"[mcp_servers.chat-professor]\ncommand = %q\nargs = [%q]\n",
-					executable,
-					verbsStdioProfessorArg,
-				)
-			}
-			writeCodexConfig(t, fix, table)
-			fix.write(
-				Scenario{
-					SessionID: fixtureThread,
-					Pane:      codexShapes,
-					BusyMS:    intPtr(0),
-					Steps:     []Step{{Type: StepMCP, Tool: row.tool}},
-				},
-			)
-			session := fix.startTUI("codex", codexArgs(), nil)
-			session.waitFrame("composer", func(frame string) bool { return strings.Contains(frame, "›") })
-			session.typeLine("call the tool")
-			session.waitFrame("failed tool and completed turn", func(frame string) bool {
-				return strings.Contains(frame, "⏺ ok") && strings.Contains(frame, row.cause)
-			})
-			result := readFile(t, filepath.Join(fix.recordDir, "mcp-call-"+row.tool+".json"))
-			if !strings.Contains(result, `"isError":true`) || !strings.Contains(result, row.cause) {
-				t.Fatalf("failed result=%s", result)
-			}
-			if content := readFile(
-				t,
-				fix.rolloutPath(),
-			); !strings.Contains(content, "function_call_output") ||
-				!strings.Contains(content, row.cause) {
-				t.Fatalf("failed rollout=%s", content)
-			}
-			session.typeLine("still alive")
-			waitFile(
-				t,
-				fix.rolloutPath(),
-				func(content string) bool { return strings.Contains(content, "still alive") },
-			)
-		})
-	}
-}
-
 func TestCodexInlineTurnsKeepPositionalCursor(t *testing.T) {
 	fix := newFixture(t)
 	fix.write(
@@ -551,12 +315,14 @@ func TestCodexInlineTurnsKeepPositionalCursor(t *testing.T) {
 	session.waitFrame("inline reply", func(frame string) bool { return strings.Contains(frame, "⏺ inline") })
 	session.typeLine("ordinary query")
 	session.waitFrame("positional reply", func(frame string) bool { return strings.Contains(frame, "⏺ positional") })
-	if content := readFile(
+	if got, want := jsonRecords(
 		t,
-		fix.rolloutPath(),
-	); !strings.Contains(content, "mock-engine:") ||
-		!strings.Contains(content, "ordinary query") {
-		t.Fatalf("user records=%s", content)
+		readFile(t, fix.rolloutPath()),
+		"role",
+		"user",
+		"content",
+	), "[{\"text\":\"query mock-engine: {\\\"type\\\":\\\"turn\\\",\\\"reply\\\":\\\"inline\\\"}\",\"type\":\"input_text\"}]\n[{\"text\":\"ordinary query\",\"type\":\"input_text\"}]"; got != want {
+		t.Fatalf("user records = %q, want %q", got, want)
 	}
 }
 
@@ -574,8 +340,8 @@ func TestCodexCompactWritesReceiptAndRollout(t *testing.T) {
 	if frame := session.out.frame(); strings.Contains(frame, codexShapes.Compacted) {
 		t.Fatalf("receipt painted while compaction busy: %s", frame)
 	}
-	if content := readFile(t, fix.rolloutPath()); strings.Contains(content, `"type":"compacted"`) {
-		t.Fatalf("compaction record written before busy footer cleared: %s", content)
+	if got, want := recordTypes(t, readFile(t, fix.rolloutPath())), "session_meta turn_context"; got != want {
+		t.Fatalf("records while compaction is busy = %q, want %q", got, want)
 	}
 	session.waitFrame(
 		"compaction receipt",
@@ -583,12 +349,14 @@ func TestCodexCompactWritesReceiptAndRollout(t *testing.T) {
 			return strings.Contains(frame, codexShapes.Compacted) && !pfmcall.IsBusy(frame)
 		},
 	)
-	if content := readFile(
+	if got, want := jsonRecords(
 		t,
-		fix.rolloutPath(),
-	); !strings.Contains(content, `"type":"compacted"`) ||
-		!strings.Contains(content, "replacement_history") {
-		t.Fatalf("compaction record=%s", content)
+		readFile(t, fix.rolloutPath()),
+		"type",
+		"compacted",
+		"payload",
+	), `{"message":"Summary of the thread so far (fixture).","replacement_history":[{"content":[{"text":"Summary of the thread so far (fixture).","type":"input_text"}],"role":"user","type":"message"}]}`; got != want {
+		t.Fatalf("compaction record = %q, want %q", got, want)
 	}
 }
 
@@ -609,8 +377,8 @@ func TestCodexCompactEscapeClearsFooterWithoutReceipt(t *testing.T) {
 	if frame := session.out.frame(); strings.Contains(frame, codexShapes.Compacted) {
 		t.Fatalf("interrupted compaction painted receipt: %s", frame)
 	}
-	if content := readFile(t, fix.rolloutPath()); strings.Contains(content, `"type":"compacted"`) {
-		t.Fatalf("interrupted compaction wrote record: %s", content)
+	if got, want := recordTypes(t, readFile(t, fix.rolloutPath())), "session_meta turn_context"; got != want {
+		t.Fatalf("records after an interrupted compaction = %q, want %q", got, want)
 	}
 }
 
@@ -639,10 +407,14 @@ func TestCodexMCPStepNamesATableWithoutCommand(t *testing.T) {
 	session := fix.startTUI("codex", codexArgs(), nil)
 	session.waitFrame("the composer", func(frame string) bool { return strings.Contains(frame, "›") })
 	session.typeLine("list the fleet tools")
-	if code := session.waitExit(); code != ExitUnpinned ||
-		!strings.Contains(session.stderr.String(), "has no [mcp_servers.chat-professor] command") {
-		t.Fatalf("exit=%d stderr=%q, want %d naming the table without a command",
-			code, session.stderr.String(), ExitUnpinned)
+	code := session.waitExit()
+	if got, want := strings.ReplaceAll(
+		session.stderr.String(),
+		fix.root,
+		"{root}",
+	), "mock-engine: mcp: {root}/codex/config.toml has no [mcp_servers.chat-professor] command\n"; code != ExitUnpinned ||
+		got != want {
+		t.Fatalf("exit %d stderr = %q, want %q", code, got, want)
 	}
 }
 

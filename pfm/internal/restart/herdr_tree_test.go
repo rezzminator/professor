@@ -71,7 +71,7 @@ func TestHerdrTreeOfASessionWithNoServerIsUnverified(t *testing.T) {
 	finder.findHerdr(context.Background(), table, err)
 	_, stopErr := finder.plan.Units[0].Stop(context.Background())
 	if want := "no herdr server process of session gone in the process table"; stopErr == nil ||
-		!strings.Contains(stopErr.Error(), want) {
+		stopErr.Error() != "server stopped; herdr status reads not running, but the processes it ran are unverified: no herdr server process of session gone in the process table (1 listed)" {
 		t.Fatalf("stop = %v, want %q", stopErr, want)
 	}
 }

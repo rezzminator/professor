@@ -170,8 +170,10 @@ func TestInspectSkillSourcesRecordedCloneGoneIsAFailure(t *testing.T) {
 	}
 	var report bytes.Buffer
 	warnings, failures := ReportSkillSources(&report, home, false)
-	if failures != 1 || warnings != 0 || !strings.Contains(report.String(), "state=CHECK-FAILED") ||
-		!strings.Contains(report.String(), gone) {
+	want := "doctor: skill-source registry=" + home + " state=CHECK-FAILED error=inspect recorded source repository " +
+		gone + ": recorded source repository is unusable: stat " + gone + ": no such file or directory" +
+		" hint=\"run pfm install --yes\"\n"
+	if failures != 1 || warnings != 0 || report.String() != want {
 		t.Fatalf("a recorded clone that is gone: warnings=%d failures=%d\n%s", warnings, failures, report.String())
 	}
 }
@@ -200,15 +202,21 @@ func TestReportGlobalRegistriesReadsOfflineFromTheInjectedEnv(t *testing.T) {
 	home := t.TempDir()
 	writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"god-speed": "file:///nowhere/god-speed"}))
 
-	for want, env := range map[SkillSourceState]*paths.MapEnv{
-		SkillSourceNotFetched: {},
-		SkillSourceOffline:    {Values: map[string]string{paths.EnvSkillSourcesOffline: "1"}},
+	prefix := "doctor: skill-source name=god-speed store=" + filepath.Join(skillStoreRoot(home), "god-speed")
+	for _, tc := range []struct {
+		env  *paths.MapEnv
+		want string
+	}{
+		{&paths.MapEnv{}, prefix + ` state=NOT-FETCHED hint="run pfm install --yes"`},
+		{
+			&paths.MapEnv{Values: map[string]string{paths.EnvSkillSourcesOffline: "1"}},
+			prefix + ` state=OFFLINE note="not fetched: PFM_SKILL_SOURCES_OFFLINE=1 is set, and pfm install fetches nothing while it is"`,
+		},
 	} {
 		var report bytes.Buffer
-		ReportGlobalRegistries(&report, home, false, env, nil, nil, RetiredRegistryNames{}, nil, nil)
-		if row := skillSourceRow(t, report.String(), "god-speed"); !strings.Contains(row, "state="+string(want)+" ") &&
-			!strings.HasSuffix(row, "state="+string(want)) {
-			t.Fatalf("env %v: row %q, want state=%s", env.Values, row, want)
+		ReportGlobalRegistries(&report, home, false, tc.env, nil, nil, RetiredRegistryNames{}, nil, nil)
+		if row := skillSourceRow(t, report.String(), "god-speed"); row != tc.want {
+			t.Fatalf("env %v: row %q, want %q", tc.env.Values, row, tc.want)
 		}
 	}
 }
@@ -227,8 +235,10 @@ func TestReportGlobalRegistriesChecksStoreLinksWithoutClaude(t *testing.T) {
 
 	var report bytes.Buffer
 	ReportGlobalRegistries(&report, home, true, &paths.MapEnv{}, nil, nil, RetiredRegistryNames{}, nil, nil)
-	if row := skillSourceRow(t, report.String(), "god-speed"); !strings.Contains(row, "state=MISSING missing="+link) {
-		t.Fatalf("a missing account link was not checked with Claude absent: %q", row)
+	want := "doctor: skill-source name=god-speed store=" + filepath.Join(skillStoreRoot(home), "god-speed") +
+		" state=MISSING missing=" + link + ` hint="run pfm install --yes"`
+	if row := skillSourceRow(t, report.String(), "god-speed"); row != want {
+		t.Fatalf("a missing account link was not checked with Claude absent: row %q, want %q", row, want)
 	}
 }
 
@@ -292,14 +302,13 @@ func TestSkillFileStatesReadApartOnBothSurfaces(t *testing.T) {
 
 	output := runSkillInstall(t, home, ModeApply, func(options *Options) { options.SkillSourcesOffline = true })
 
-	if strings.Contains(output, "SKILL-SOURCE-MISSING gs") || !strings.Contains(output, "SKILL-SOURCE-INVALID gs: ") {
-		t.Fatalf("an unusable SKILL.md did not read as SKILL-SOURCE-INVALID on install:\n%s", output)
-	}
+	invalid := skill + " (mode d---------): not a regular file inside its skill tree"
+	wantOutputLines(t, output, []string{"  skip    SKILL-SOURCE-INVALID gs: " + invalid}, "SKILL-SOURCE-")
 
 	var report bytes.Buffer
 	warnings, failures := ReportSkillSources(&report, home, false)
-	if row := skillSourceRow(t, report.String(), "gs"); !strings.Contains(row, "state=SKIPPED ") ||
-		strings.Contains(row, "hint=") || warnings != 1 || failures != 0 {
+	want := "doctor: skill-source name=gs store=" + filepath.Dir(skill) + " state=SKIPPED error=" + invalid
+	if row := skillSourceRow(t, report.String(), "gs"); row != want || warnings != 1 || failures != 0 {
 		t.Fatalf("doctor: warnings=%d failures=%d row %q, want one SKIPPED warning", warnings, failures, row)
 	}
 }

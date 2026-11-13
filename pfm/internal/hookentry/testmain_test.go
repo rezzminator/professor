@@ -18,5 +18,5 @@ func TestMain(m *testing.M) {
 	index.RegisterSource(pfmengine.Claude, claudeengine.Source{})
 	index.RegisterSource(pfmengine.Codex, codexengine.Source{})
 	index.RegisterSource(pfmengine.OpenCode, opencodeengine.Source{})
-	os.Exit(testjail.Run(m))
+	os.Exit(testjail.RunInJail(m))
 }

@@ -4,6 +4,7 @@ package testjail
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -18,16 +19,22 @@ func TestDefaultEngineSyncAnswersEveryShape(t *testing.T) {
 		args []string
 		want string
 	}{
-		{args: []string{"global", "--home", "/h", "--json"}, want: `{"ok":true,"events":[],"error":""}`},
-		{args: []string{"doctor", "--machine", "--json"}, want: `{"ok":true,"rows":[]}`},
-		{args: []string{"codex", "check", "/r", "--json"}, want: `"problems":[]`},
-		{args: []string{"opencode", "build", "/r"}, want: "OPENCODE BUILD PASS"},
-		{args: []string{"version"}, want: "engine-sync 9.0.0-testjail"},
+		{
+			args: []string{"global", "--home", "/h", "--json"},
+			want: "<nil> {\"ok\":true,\"events\":[],\"error\":\"\"}\n",
+		},
+		{args: []string{"doctor", "--machine", "--json"}, want: "<nil> {\"ok\":true,\"rows\":[]}\n"},
+		{
+			args: []string{"codex", "check", "/r", "--json"},
+			want: "<nil> {\"ok\":true,\"problems\":[],\"rebuildable\":[],\"warnings\":[],\"wrote\":0,\"unchanged\":0,\"deleted\":0,\"error\":\"\"}\n",
+		},
+		{args: []string{"opencode", "build", "/r"}, want: "<nil> OPENCODE BUILD PASS wrote=0 unchanged=0 deleted=0\n"},
+		{args: []string{"version"}, want: "<nil> engine-sync 9.0.0-testjail\n"},
 	}
 	for _, testCase := range cases {
 		out, err := exec.Command(binary, testCase.args...).Output()
-		if err != nil || !strings.Contains(string(out), testCase.want) {
-			t.Fatalf("%s %q = %q, %v; want %q", binary, testCase.args, out, err, testCase.want)
+		if got := fmt.Sprint(err, " ", string(out)); got != testCase.want {
+			t.Errorf("%q: error and output = %q, want %q", testCase.args, got, testCase.want)
 		}
 	}
 }

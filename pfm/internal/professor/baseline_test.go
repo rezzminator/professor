@@ -116,7 +116,7 @@ func TestBaselineMalformedAndUnsupportedAreNamed(t *testing.T) {
 		content string
 		want    string
 	}{
-		{name: "malformed", content: "{", want: "BASELINE-MALFORMED"},
+		{name: "malformed", content: "{", want: "BASELINE-MALFORMED {root}/.professor/baseline.json: unexpected end of JSON input"},
 		{name: "unsupported", content: `{"version":4,"blueprint":{},"files":{}}`, want: "BASELINE-VERSION 4: unsupported"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -129,8 +129,8 @@ func TestBaselineMalformedAndUnsupportedAreNamed(t *testing.T) {
 				t.Fatal(err)
 			}
 			_, err := Load(root)
-			if err == nil || !strings.Contains(err.Error(), test.want) {
-				t.Fatalf("Load() error = %v, want %q", err, test.want)
+			if got := strings.ReplaceAll(fmt.Sprint(err), root, "{root}"); got != test.want {
+				t.Fatalf("Load() error = %q, want %q", got, test.want)
 			}
 		})
 	}

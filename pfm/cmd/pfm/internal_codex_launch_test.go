@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -14,6 +13,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/hookentry"
@@ -24,10 +24,7 @@ import (
 
 func TestCodexLaunchPolicyAndHygiene(t *testing.T) {
 	jailTest(t)
-	binary, err := exec.LookPath("sh")
-	if err != nil {
-		t.Fatal(err)
-	}
+	binary := neverRunBinary(t)
 	for _, enabled := range []bool{true, false} {
 		t.Run(map[bool]string{true: "yolo-on", false: "yolo-off"}[enabled], func(t *testing.T) {
 			previous := hookentry.LaunchExec
@@ -78,10 +75,7 @@ func TestCodexLaunchWorkbench(t *testing.T) {
 				t.Fatal(err)
 			}
 			dir := duo
-			binary, err := exec.LookPath("sh")
-			if err != nil {
-				t.Fatal(err)
-			}
+			binary := neverRunBinary(t)
 			runtime := pfmconfig.Runtime{
 				Config: pfmconfig.Config{Codex: pfmconfig.CodexPrefs{Binary: binary, Yolo: true}},
 				Paths:  paths.Values{Home: filepath.Join(root, "home")},
@@ -255,23 +249,19 @@ func TestCodexLaunchWorkbench(t *testing.T) {
 
 func TestCodexLaunchBinaryAndNoArguments(t *testing.T) {
 	jailTest(t)
-	binary, err := exec.LookPath("sh")
-	if err != nil {
-		t.Fatal(err)
-	}
+	binary := neverRunBinary(t)
 	previous := hookentry.LaunchExec
 	t.Cleanup(func() { hookentry.LaunchExec = previous })
 	for _, configured := range []bool{true, false} {
 		runtime := pfmconfig.Runtime{Paths: paths.Values{Home: t.TempDir()}}
+		var lookup deps.Runner
 		if configured {
 			runtime.Config.Codex.Binary = binary
 		} else {
-			pathDir := t.TempDir()
-			if err := os.Symlink(binary, filepath.Join(pathDir, "codex")); err != nil {
-				t.Fatal(err)
-			}
-			t.Setenv("PATH", pathDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-			binary = filepath.Join(pathDir, "codex")
+			// The default name `codex` is found through the launch's runner, not a PATH walk.
+			scripted := &deps.FakeRunner{}
+			scripted.ScriptLookPath("codex", binary, nil)
+			lookup = scripted
 		}
 		hookentry.LaunchExec = func(path string, args, _ []string) error {
 			if path != binary || !reflect.DeepEqual(args, []string{binary, "--no-daemon"}) {
@@ -280,7 +270,7 @@ func TestCodexLaunchBinaryAndNoArguments(t *testing.T) {
 			return errors.New("exec intercepted")
 		}
 		var stderr bytes.Buffer
-		code := hookentry.CodexLaunch(nil, &stderr, runtime)
+		code := hookentry.CodexLaunchWith(nil, &stderr, runtime, lookup)
 		if code != 1 || !strings.Contains(stderr.String(), "exec intercepted") {
 			t.Fatalf("code=%d stderr=%s", code, stderr.String())
 		}
@@ -298,10 +288,7 @@ func TestCodexLaunchBinaryAndNoArguments(t *testing.T) {
 
 func TestCodexLaunchUsesSelectedPrimaryAccount(t *testing.T) {
 	jailTest(t)
-	binary, err := exec.LookPath("sh")
-	if err != nil {
-		t.Fatal(err)
-	}
+	binary := neverRunBinary(t)
 	home := t.TempDir()
 	values := paths.Values{Home: home, StateDB: filepath.Join(home, ".local", "state", "pfm", "pfm.db")}
 	machine := pfmconfig.Defaults(home, nil)
@@ -348,4 +335,15 @@ func TestInternalCodexTransportPrintsTheTransport(t *testing.T) {
 				test.args, code, stdout.String(), stderr.String(), test.want)
 		}
 	}
+}
+
+// neverRunBinary writes an executable the code under test only resolves and
+// hands to the faked exec seam, so no real `sh` is looked up or started.
+func neverRunBinary(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "codex-binary")
+	if err := testjail.WriteExecutableNeverRun(path, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }

@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/cmdparse"
@@ -105,18 +104,7 @@ exit 2
 	if err != nil {
 		t.Fatal(err)
 	}
-	line := string(content)
-	if !strings.HasPrefix(line, "argv=--remote-control --resume "+id+" --settings ") ||
-		!strings.Contains(line, "\nsid=unset\n") || !strings.Contains(line, "\ncode=unset\n") ||
-		!strings.Contains(line, "\ncfg="+pfmconfig.DefaultAccountDir(home, 2)+"\n") ||
-		!strings.Contains(line, "\nenable=unset\n") || !strings.Contains(line, "\nforce=unset\n") ||
-		!strings.Contains(line, "\nbase=unset\n") || !strings.Contains(line, "\ntoken=unset\n") ||
-		!strings.Contains(line, "\ngateway=unset\n") {
-		t.Fatalf("fallback result = %q", content)
-	}
-	if !strings.Contains(line, "\nttl=1h\n") {
-		t.Fatalf("fallback cache: want ttl=1h in the process environment, got %q", content)
-	}
+	actionGolden(t, "action_agent_failure_net.txt", rooted(t, string(content)))
 }
 
 // writeActionScript writes an executable the plan runs, through testjail so a script run at once cannot race a fork.

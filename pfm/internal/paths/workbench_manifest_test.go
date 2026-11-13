@@ -1,7 +1,7 @@
 package paths
 
 import (
-	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,26 +11,24 @@ import (
 
 func TestHasWorkbenchManifest(t *testing.T) {
 	for _, tc := range []struct {
-		name       string
-		setup      func(*testing.T, string) string
-		want       bool
-		wantError  bool
-		nonregular bool
+		name  string
+		setup func(*testing.T, string) string
+		want  string
 	}{
-		{name: "nothing there"},
-		{name: ".professor without manifest", setup: func(t *testing.T, dir string) string {
+		{name: "nothing there", want: "false <nil>"},
+		{name: ".professor without manifest", want: "false <nil>", setup: func(t *testing.T, dir string) string {
 			if err := os.Mkdir(filepath.Join(dir, ".professor"), 0o700); err != nil {
 				t.Fatal(err)
 			}
 			return dir
 		}},
-		{name: ".professor is a file", setup: func(t *testing.T, dir string) string {
+		{name: ".professor is a file", want: "false <nil>", setup: func(t *testing.T, dir string) string {
 			if err := os.WriteFile(filepath.Join(dir, ".professor"), []byte("notes\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			return dir
 		}},
-		{name: ".professor is a symlink", setup: func(t *testing.T, dir string) string {
+		{name: ".professor is a symlink", want: "false <nil>", setup: func(t *testing.T, dir string) string {
 			other := filepath.Join(t.TempDir(), ".professor")
 			if err := os.Mkdir(other, 0o700); err != nil {
 				t.Fatal(err)
@@ -43,7 +41,7 @@ func TestHasWorkbenchManifest(t *testing.T) {
 			}
 			return dir
 		}},
-		{name: "manifest is a symlink", setup: func(t *testing.T, dir string) string {
+		{name: "manifest is a symlink", want: "false <nil>", setup: func(t *testing.T, dir string) string {
 			if err := os.Mkdir(filepath.Join(dir, ".professor"), 0o700); err != nil {
 				t.Fatal(err)
 			}
@@ -56,13 +54,13 @@ func TestHasWorkbenchManifest(t *testing.T) {
 			}
 			return dir
 		}},
-		{name: "directory marker", nonregular: true, setup: func(t *testing.T, dir string) string {
+		{name: "directory marker", want: "false inspect workbench {dir}/.professor/workbench.json: not a regular file", setup: func(t *testing.T, dir string) string {
 			if err := os.MkdirAll(WorkbenchManifest(dir), 0o700); err != nil {
 				t.Fatal(err)
 			}
 			return dir
 		}},
-		{name: "FIFO marker", nonregular: true, setup: func(t *testing.T, dir string) string {
+		{name: "FIFO marker", want: "false inspect workbench {dir}/.professor/workbench.json: not a regular file", setup: func(t *testing.T, dir string) string {
 			if err := os.Mkdir(filepath.Join(dir, ".professor"), 0o700); err != nil {
 				t.Fatal(err)
 			}
@@ -71,7 +69,7 @@ func TestHasWorkbenchManifest(t *testing.T) {
 			}
 			return dir
 		}},
-		{name: "real manifest", want: true, setup: func(t *testing.T, dir string) string {
+		{name: "real manifest", want: "true <nil>", setup: func(t *testing.T, dir string) string {
 			if err := os.Mkdir(filepath.Join(dir, ".professor"), 0o700); err != nil {
 				t.Fatal(err)
 			}
@@ -80,7 +78,7 @@ func TestHasWorkbenchManifest(t *testing.T) {
 			}
 			return dir
 		}},
-		{name: "Lstat fails", wantError: true, setup: func(_ *testing.T, dir string) string {
+		{name: "Lstat fails", want: "false inspect workbench {dir}/.professor: lstat {dir}/.professor: file name too long", setup: func(_ *testing.T, dir string) string {
 			return filepath.Join(dir, strings.Repeat("x", 300))
 		}},
 	} {
@@ -90,18 +88,8 @@ func TestHasWorkbenchManifest(t *testing.T) {
 				dir = tc.setup(t, dir)
 			}
 			got, err := HasWorkbenchManifest(dir)
-			switch {
-			case tc.nonregular:
-				if got || err == nil || !strings.Contains(err.Error(), "not a regular file") {
-					t.Fatalf("marker = %v, %v; want visible nonregular error", got, err)
-				}
-			case tc.wantError:
-				if got || !errors.Is(err, syscall.ENAMETOOLONG) ||
-					!strings.HasPrefix(err.Error(), "inspect workbench "+filepath.Join(dir, ".professor")+": ") {
-					t.Fatalf("HasWorkbenchManifest(%q) = %v, %v, want named ENAMETOOLONG", dir, got, err)
-				}
-			case got != tc.want || err != nil:
-				t.Fatalf("HasWorkbenchManifest(%q) = %v, %v, want %v, nil", dir, got, err, tc.want)
+			if text := strings.ReplaceAll(fmt.Sprintf("%t %v", got, err), dir, "{dir}"); text != tc.want {
+				t.Fatalf("HasWorkbenchManifest = %q, want %q", text, tc.want)
 			}
 		})
 	}

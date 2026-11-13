@@ -6,7 +6,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/config"
@@ -18,22 +17,19 @@ func TestHarnessDoctorDistinguishesModelCoverageAndCaptureFailures(t *testing.T)
 	t.Cleanup(func() { HarnessCaptureOverride = saved })
 	for _, tc := range []struct {
 		name, model, prompt, missing, want string
-		baselineModel                      string
 		err                                error
 		warning                            bool
 	}{
-		{name: "match", model: "claude-sonnet-5", prompt: harnessPromptFixtureCaptured, want: "matches baseline"},
-		{name: "behavior change", model: "claude-sonnet-5", prompt: "different instructions\n", want: "DRIFT", warning: true},
-		{name: "renamed model same bytes", model: "claude-renamed-6", prompt: harnessPromptFixtureCaptured, want: "matches baseline"},
-		{name: "capture failure", want: "CHECK FAILED", err: errors.New("sink unavailable"), warning: true},
+		{name: "match", model: "claude-sonnet-5", prompt: harnessPromptFixtureCaptured, want: "doctor: harness-prompt requested=sonnet\ndoctor: harness-prompt scope=claude-model-baseline runtime=claude-code requested=sonnet resolved=claude-sonnet-5 cli=\"2.1.fixture\" baseline=harness-prompt-fixture.md baseline_model=claude-sonnet-5 unchecked=active-chat,fable,codex\ndoctor: harness-prompt: matches baseline harness-prompt-fixture.md\n"},
+		{name: "behavior change", model: "claude-sonnet-5", prompt: "different instructions\n", want: "doctor: harness-prompt requested=sonnet\ndoctor: harness-prompt scope=claude-model-baseline runtime=claude-code requested=sonnet resolved=claude-sonnet-5 cli=\"2.1.fixture\" baseline=harness-prompt-fixture.md baseline_model=claude-sonnet-5 unchecked=active-chat,fable,codex\ndoctor: harness-prompt: DRIFT live=25e177dae1b9ed5f baseline=1832797f55feeb8f (harness-prompt-fixture.md) — harness instructions changed; review before re-pinning\ndoctor: harness-prompt:   section changed: (preamble)\n", warning: true},
+		{name: "renamed model same bytes", model: "claude-renamed-6", prompt: harnessPromptFixtureCaptured, want: "doctor: harness-prompt requested=sonnet\ndoctor: harness-prompt scope=claude-model-baseline runtime=claude-code requested=sonnet resolved=claude-renamed-6 cli=\"2.1.fixture\" baseline=harness-prompt-fixture.md baseline_model=claude-sonnet-5 unchecked=active-chat,fable,codex\ndoctor: harness-prompt: matches baseline harness-prompt-fixture.md\ndoctor: harness-prompt:   model changed sonnet: claude-sonnet-5 → claude-renamed-6\n"},
+		{name: "capture failure", want: "doctor: harness-prompt requested=sonnet\ndoctor: harness-prompt scope=claude-model-baseline runtime=claude-code requested=sonnet resolved=unknown cli=\"2.1.fixture\" baseline=harness-prompt-fixture.md baseline_model=claude-sonnet-5 unchecked=active-chat,fable,codex\ndoctor: harness-prompt: CHECK FAILED to run (sink unavailable) — drift unknown\n", err: errors.New("sink unavailable"), warning: true},
 		{
 			name: "missing baseline model", model: "claude-sonnet-5", prompt: harnessPromptFixtureCaptured,
-			missing: "harness-original.model", baselineModel: "unknown", warning: true,
-			want: "doctor: harness-prompt: matches baseline harness-prompt-fixture.md\n" +
-				"doctor: harness-prompt: baseline_model unknown (open {dir}/harness-original.model: " +
-				"no such file or directory) — the prompt was still compared; update or restore the clone at {dir}\n",
+			missing: "harness-original.model", warning: true,
+			want: "doctor: harness-prompt requested=sonnet\ndoctor: harness-prompt scope=claude-model-baseline runtime=claude-code requested=sonnet resolved=claude-sonnet-5 cli=\"2.1.fixture\" baseline=harness-prompt-fixture.md baseline_model=unknown unchecked=active-chat,fable,codex\ndoctor: harness-prompt: matches baseline harness-prompt-fixture.md\ndoctor: harness-prompt: baseline_model unknown (open {root}/harness-original.model: no such file or directory) — the prompt was still compared; update or restore the clone at {root}\n",
 		},
-		{name: "missing baseline body", missing: "harness-prompt-fixture.md", want: "BASELINE UNAVAILABLE", warning: true},
+		{name: "missing baseline body", missing: "harness-prompt-fixture.md", want: "doctor: harness-prompt requested=sonnet\ndoctor: harness-prompt: BASELINE UNAVAILABLE identity=harness-original model=\"sonnet\" dir={root} path={root}/harness-original.sha256 error=captured model=\"claude-sonnet-5\" body=\"harness-prompt-fixture.md\": open {root}/harness-prompt-fixture.md: no such file or directory — baseline inconsistent; update or restore the clone at {root}\n", warning: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home := t.TempDir()
@@ -41,11 +37,6 @@ func TestHarnessDoctorDistinguishesModelCoverageAndCaptureFailures(t *testing.T)
 			dir, err := paths.HarnessBaselineDir(home)
 			if err != nil {
 				t.Fatal(err)
-			}
-			want := strings.ReplaceAll(tc.want, "{dir}", dir)
-			baselineModel := tc.baselineModel
-			if baselineModel == "" {
-				baselineModel = "claude-sonnet-5"
 			}
 			if tc.missing != "" {
 				if err := os.Remove(
@@ -66,18 +57,11 @@ func TestHarnessDoctorDistinguishesModelCoverageAndCaptureFailures(t *testing.T)
 				home,
 				harnessPromptModels[0],
 			)
-			if (code != 0) != tc.warning || !strings.Contains(output.String(), want) {
-				t.Fatalf("code=%d output=%s, want %q", code, &output, want)
+			if got := rooted(output.String(), dir); (code != 0) != tc.warning || got != tc.want {
+				t.Errorf("code=%d output = %q, want %q", code, got, tc.want)
 			}
-			if strings.Contains(tc.want, "BASELINE UNAVAILABLE") && called {
-				t.Fatal("capture ran without a complete baseline")
-			}
-			if called {
-				for _, field := range []string{"runtime=claude-code", "scope=claude-model-baseline", "requested=sonnet", "cli=\"2.1.fixture\"", "baseline_model=" + baselineModel, "unchecked=active-chat,fable,codex"} {
-					if !strings.Contains(output.String(), field) {
-						t.Errorf("missing %s: %s", field, &output)
-					}
-				}
+			if tc.missing == "harness-prompt-fixture.md" && called {
+				t.Error("capture ran without a complete baseline")
 			}
 		})
 	}

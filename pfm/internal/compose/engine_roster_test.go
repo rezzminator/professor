@@ -1,6 +1,10 @@
 package compose
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/testjail"
+)
 
 func TestNewRowsFollowEngineRosterMatrix(t *testing.T) {
 	tests := []struct {
@@ -45,7 +49,7 @@ func TestNewRowsFollowEngineRosterMatrix(t *testing.T) {
 			output := Compose(Input{
 				ClaudeSeats: test.claude,
 				Options: Options{
-					CurrentDir:          "/work/project",
+					CurrentDir:          testjail.Place("/work/project"),
 					PrimaryAccount:      4,
 					CodexAccountIDs:     test.codex,
 					PrimaryCodexAccount: 9,

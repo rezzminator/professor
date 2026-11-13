@@ -2,6 +2,7 @@ package workbench
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"reflect"
@@ -94,25 +95,22 @@ func TestEnsureMirrorFails(t *testing.T) {
 		{
 			name: "problems", engine: pfmengine.Codex, code: 1,
 			reply: `{"ok":false,"problems":["INVALID a","CONFLICT b"],"rebuildable":[],"warnings":[],"error":""}`,
-			want:  "INVALID a; CONFLICT b",
+			want:  "build the codex mirror of workbench {dir}: INVALID a; CONFLICT b",
 		},
 		{
 			name: "a run failure", engine: pfmengine.OpenCode, code: 1,
 			reply: `{"ok":false,"problems":[],"rebuildable":[],"warnings":[],"error":"read config: unexpected EOF"}`,
-			want:  "read config: unexpected EOF",
+			want:  "build the opencode mirror of workbench {dir}: engine-sync opencode build {dir}: read config: unexpected EOF",
 		},
-		{name: "a usage error", engine: pfmengine.Codex, code: 2, want: "exit 2: usage: engine-sync"},
+		{name: "a usage error", engine: pfmengine.Codex, code: 2, want: "build the codex mirror of workbench {dir}: engine-sync codex build {dir} --home {home} --json: exit 2: usage: engine-sync"},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			root, dir := benchFixture(t)
 			bench, home := LoadBench(dir, root), t.TempDir()
 			_, runner := testjail.FakeEngineSyncRunner(t, testCase.reply, testCase.code)
-			prefix := "build the " + pfmengine.MustLookup(
-				testCase.engine,
-			).LongName + " mirror of workbench " + dir + ": "
 			err := EnsureMirror(bench, testCase.engine, home, runner)
-			if err == nil || !strings.HasPrefix(err.Error(), prefix) || !strings.Contains(err.Error(), testCase.want) {
-				t.Fatalf("EnsureMirror = %v, want %q then %q", err, prefix, testCase.want)
+			if got := strings.NewReplacer(dir, "{dir}", home, "{home}").Replace(fmt.Sprint(err)); got != testCase.want {
+				t.Fatalf("EnsureMirror = %q, want %q", got, testCase.want)
 			}
 		})
 	}

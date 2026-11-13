@@ -381,10 +381,8 @@ func TestAwaitStreamsProgress(t *testing.T) {
 	if _, err := Await(context.Background(), talk.resolve, options); err != nil {
 		t.Fatalf("Await() error = %v", err)
 	}
-	lines := strings.Split(strings.TrimSpace(progress.String()), "\n")
-	if len(lines) != 3 || !strings.HasPrefix(lines[0], "U ") ||
-		!strings.HasPrefix(lines[1], "T ") || !strings.HasPrefix(lines[2], "A ") {
-		t.Fatalf("progress = %q, want one condensed line per entry", progress.String())
+	if got, want := progress.String(), "U go\nT Read|{}\nA read it\n"; got != want {
+		t.Fatalf("progress = %q, want %q", got, want)
 	}
 }
 

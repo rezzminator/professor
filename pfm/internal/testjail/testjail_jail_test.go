@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -53,7 +54,7 @@ func TestRunKeepsTheStorePathsAJailedTestHandsItsHelper(t *testing.T) {
 func TestPinGoDirsPinsTelemetryOutsideTheJail(t *testing.T) {
 	t.Setenv("TEST_TELEMETRY_DIR", "")
 	t.Setenv("GOMODCACHE", "")
-	if code := pinGoDirs(); code != 0 {
+	if code := pinGoDirs(false); code != 0 {
 		t.Fatalf("pin Go directories code=%d", code)
 	}
 
@@ -81,7 +82,7 @@ func TestPinGoDirsPinsTelemetryOutsideTheJail(t *testing.T) {
 func TestPinGoDirsPreservesConfiguredTelemetryDirectory(t *testing.T) {
 	configured := filepath.Join(os.Getenv("GOCACHE"), "configured-telemetry")
 	t.Setenv("TEST_TELEMETRY_DIR", configured)
-	if code := pinGoDirs(); code != 0 {
+	if code := pinGoDirs(false); code != 0 {
 		t.Fatalf("pin Go directories code=%d", code)
 	}
 
@@ -280,21 +281,38 @@ func TestStageAccountLinksErrors(t *testing.T) {
 		StageAccountLinks(t, home, accountDir, []string{"entry"}, nil)
 		return
 	}
-	for _, failure := range []string{"store", "link"} {
+	for failure, want := range map[string]string{"store": "--- FAIL: TestStageAccountLinksErrors {tmp}\n    testjail_jail_test.go:281: create store directory {tmp}/.claude/entry: mkdir {tmp}/.claude: not a directory\nFAIL\n", "link": "--- FAIL: TestStageAccountLinksErrors {tmp}\n    testjail_jail_test.go:281: link account entry {tmp}/entry: symlink {tmp}/.claude/entry {tmp}/entry: file exists\nFAIL\n"} {
 		t.Run(failure, func(t *testing.T) {
 			command := exec.Command(os.Args[0], "-test.run=^TestStageAccountLinksErrors$")
 			command.Env = envWithout(marker, marker+"="+failure)
 			output, err := command.CombinedOutput()
-			if err == nil {
-				t.Fatal("StageAccountLinks succeeded with a blocked path")
-			}
-			want := "entry"
-			if failure == "store" {
-				want = filepath.Join(".claude", "entry")
-			}
-			if !strings.Contains(string(output), want) {
-				t.Fatalf("error output %q does not name %s", output, want)
+			got := regexp.MustCompile(`/\S*/TestStageAccountLinksErrors\d+/\d+|\(\d+\.\d+s\)`).
+				ReplaceAllString(string(output), "{tmp}")
+			if err == nil || got != want {
+				t.Fatalf("StageAccountLinks output = %q, want %q (err %v)", got, want, err)
 			}
 		})
+	}
+}
+
+func TestRunPinsGoCacheOutsideTheJail(t *testing.T) {
+	root := Fleet(t)
+	values, err := paths.Resolve()
+	if err != nil {
+		t.Fatalf("resolve the jail's paths: %v", err)
+	}
+	home := values.Home
+	for _, name := range []string{"GOCACHE", "GOPATH", "GOMODCACHE"} {
+		value := os.Getenv(name)
+		if value == "" {
+			t.Fatalf("%s is unset after Run — a go child would write under the jailed home %s", name, home)
+		}
+		if !filepath.IsAbs(value) {
+			t.Fatalf("%s %q is not absolute", name, value)
+		}
+		if strings.HasPrefix(value, root+string(filepath.Separator)) ||
+			strings.HasPrefix(value, home+string(filepath.Separator)) {
+			t.Fatalf("%s %q sits under the jail (root %s, home %s)", name, value, root, home)
+		}
 	}
 }

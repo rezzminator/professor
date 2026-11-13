@@ -1,6 +1,7 @@
 package claudelaunch
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -134,10 +135,14 @@ func TestClaudeEnvRefusesLaunchNames(t *testing.T) {
 				if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 					t.Fatal(err)
 				}
-				if _, err := pfmconfig.Load(path, home, nil); err == nil {
-					t.Errorf("claude.env accepts %s, which the launch registry's %s knob owns", knob.Target, knob.Name)
-				} else if !strings.Contains(err.Error(), "claude.env."+knob.Target) {
-					t.Fatalf("Load failed for another reason: %v", err)
+				_, err := pfmconfig.Load(path, home, nil)
+				if got, want := strings.NewReplacer(home, "{home}", knob.Target, "{target}").
+					Replace(fmt.Sprint(err)),
+					map[string]string{
+						"CACHE_LIVE_CONTROL_MAIN_TTL":   "config {home}/pfm.config.json: claude.env.{target} is set on every launch from claude.cache1h: set that key instead",
+						"CACHE_LIVE_CONTROL_AGENTS_TTL": "config {home}/pfm.config.json: claude.env.{target} is discarded on every launch as inherited state: set CACHE_LIVE_CONTROL_SUBAGENT_TTL instead",
+					}[knob.Target]; got != want {
+					t.Errorf("Load error = %q, want %q", got, want)
 				}
 			})
 		}

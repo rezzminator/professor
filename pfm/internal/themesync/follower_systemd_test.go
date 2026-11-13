@@ -111,7 +111,7 @@ func TestLinuxFollowerIsASystemdUnitTrioNeverALaunchAgent(t *testing.T) {
 	}
 	h.unitsInactive = true
 	h.rearm()
-	wantVerdict(t, h.status(), "follower", VerdictDrift, "not active")
+	wantVerdict(t, h.status(), "follower", VerdictDrift, "systemd units not active: pfm-theme.path inactive")
 	calls = len(h.runner.Calls())
 	h.sync(false)
 	if got := strings.Join(
@@ -124,7 +124,7 @@ func TestLinuxFollowerIsASystemdUnitTrioNeverALaunchAgent(t *testing.T) {
 		t.Errorf("a sync over inactive units ran systemctl --user %q, want a restart", got)
 	}
 	h.write(linuxUnitDir+"pfm-theme.path", "[Path]\n")
-	wantVerdict(t, h.status(), "follower", VerdictDrift, "pfm-theme.path differs from the render")
+	wantVerdict(t, h.status(), "follower", VerdictDrift, "systemd unit pfm-theme.path differs from the render")
 }
 
 // A rewritten unit owes the user manager a reload until one succeeds: a
@@ -140,8 +140,20 @@ func TestLinuxFollowerReloadOwedUntilARestartSucceeds(t *testing.T) {
 		nil,
 	)
 	report := h.sync(false)
-	wantVerdict(t, report, "follower", VerdictError, "No medium found")
-	wantVerdict(t, h.status(), "follower", VerdictError, "not reloaded")
+	wantVerdict(
+		t,
+		report,
+		"follower",
+		VerdictError,
+		"themesync: systemctl --user restart pfm-theme.path pfm-theme.timer exited 1: Failed to connect to bus: No medium found",
+	)
+	wantVerdict(
+		t,
+		h.status(),
+		"follower",
+		VerdictError,
+		"themesync: systemd units rewritten but the user manager was not reloaded: run `pfm theme sync` in a shell",
+	)
 	h.rearm()
 	calls := len(h.runner.Calls())
 	h.sync(false)

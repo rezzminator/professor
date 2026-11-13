@@ -72,19 +72,19 @@ func TestRemoteControlDoctorRecipeStates(t *testing.T) {
 		warnings int
 		failures int
 	}{
-		{name: "known account", env: "known", want: "recipes checked=1"},
-		{name: "missing account", want: "recipe[stored] BLOCKED: account missing", warnings: 1},
-		{name: "unknown account", env: "CLAUDE_CONFIG_DIR=/fixture/retired", want: "recipe[stored] BLOCKED", warnings: 1},
-		{name: "ambiguous account", env: "known", mode: "ambiguous", want: "recipe[stored] BLOCKED", warnings: 1},
-		{name: "rosterless", mode: "rosterless", want: "recipes checked=1"},
-		{name: "not native", backend: "tmux", want: "recipes checked=0"},
-		{name: "not Claude", engine: "cx", want: "recipes checked=0"},
-		{name: "missing recipe", mode: "missing", want: "recipe[stored] FAIL stored recipe unreadable", failures: 1},
-		{name: "malformed recipe", mode: "malformed", want: "recipe[stored] FAIL stored recipe unreadable", failures: 1},
-		{name: "unreadable recipe", mode: "unreadable", want: "recipe[stored] FAIL stored recipe unreadable", failures: 1},
-		{name: "empty enumeration", mode: "empty", want: "recipes checked=0"},
-		{name: "absent database", mode: "absent", want: "recipes checked=0 (state database absent)"},
-		{name: "failed enumeration", mode: "corrupt", want: "recipes FAIL enumerate stored seats", failures: 1},
+		{name: "known account", env: "known", want: "doctor: remote_control recipes checked=1 native Claude stored recipes\n"},
+		{name: "missing account", want: "doctor: remote_control recipe[stored] BLOCKED: account missing, ambiguous, or no longer configured; chat=\"\"; Remote Control not requested\ndoctor: remote_control recipes checked=1 native Claude stored recipes\n", warnings: 1},
+		{name: "unknown account", env: "CLAUDE_CONFIG_DIR=/fixture/retired", want: "doctor: remote_control recipe[stored] BLOCKED: account missing, ambiguous, or no longer configured; chat=\"\"; Remote Control not requested\ndoctor: remote_control recipes checked=1 native Claude stored recipes\n", warnings: 1},
+		{name: "ambiguous account", env: "known", mode: "ambiguous", want: "doctor: remote_control recipe[stored] BLOCKED: account missing, ambiguous, or no longer configured; chat=\"\"; Remote Control not requested\ndoctor: remote_control recipes checked=1 native Claude stored recipes\n", warnings: 1},
+		{name: "rosterless", mode: "rosterless", want: "doctor: remote_control recipes checked=1 native Claude stored recipes\n"},
+		{name: "not native", backend: "tmux", want: "doctor: remote_control recipes checked=0 native Claude stored recipes\n"},
+		{name: "not Claude", engine: "cx", want: "doctor: remote_control recipes checked=0 native Claude stored recipes\n"},
+		{name: "missing recipe", mode: "missing", want: "doctor: remote_control recipe[stored] FAIL stored recipe unreadable or malformed; chat=\"\"\ndoctor: remote_control recipes checked=1 native Claude stored recipes\n", failures: 1},
+		{name: "malformed recipe", mode: "malformed", want: "doctor: remote_control recipe[stored] FAIL stored recipe unreadable or malformed; chat=\"\"\ndoctor: remote_control recipes checked=1 native Claude stored recipes\n", failures: 1},
+		{name: "unreadable recipe", mode: "unreadable", want: "doctor: remote_control recipe[stored] FAIL stored recipe unreadable or malformed; chat=\"\"\ndoctor: remote_control recipes checked=1 native Claude stored recipes\n", failures: 1},
+		{name: "empty enumeration", mode: "empty", want: "doctor: remote_control recipes checked=0 native Claude stored recipes\n"},
+		{name: "absent database", mode: "absent", want: "doctor: remote_control recipes checked=0 (state database absent)\n"},
+		{name: "failed enumeration", mode: "corrupt", want: "doctor: remote_control recipes FAIL enumerate stored seats: open state database {root}/.local/state/pfm/pfm.db read-only: sqlite database {root}/.local/state/pfm/pfm.db is a file this test process did not write; a test that needs SQLite's own file calls testjail.DatabaseFiles\n", failures: 1},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			runtime := buildCleanDoctorHome(t)
@@ -150,10 +150,10 @@ func TestRemoteControlDoctorRecipeStates(t *testing.T) {
 			var output bytes.Buffer
 			tally := &doctorTally{}
 			printRemoteControlRecipeDoctor(ctx, &output, runtime.Paths, runtime.Config, tally)
-			if !strings.Contains(output.String(), "doctor: remote_control "+test.want) ||
-				tally.warnings != test.warnings || tally.failures != test.failures || strings.Contains(output.String(), "secret") {
-				t.Fatalf("warnings=%d failures=%d, want %d and %d; output=%s",
-					tally.warnings, tally.failures, test.warnings, test.failures, output.String())
+			if got := rooted(output.String(), runtime.Paths.Home); got != test.want ||
+				tally.warnings != test.warnings || tally.failures != test.failures {
+				t.Errorf("output = %q, want %q; warnings=%d failures=%d, want %d %d",
+					got, test.want, tally.warnings, tally.failures, test.warnings, test.failures)
 			}
 		})
 	}

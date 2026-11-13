@@ -3,6 +3,7 @@
 package testjail
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -36,9 +37,18 @@ func TestPauseFlightRecorderPanicsInAParallelTest(t *testing.T) {
 	t.Parallel()
 	for _, mode := range []string{"pause-parallel-after", "pause-parallel-before"} {
 		res := (&child{mode: mode, artifacts: t.TempDir()}).run(t)
-		out := res.stdout + res.stderr
-		if res.code == 0 || !strings.Contains(out, "can not use t.Parallel") {
-			t.Errorf("%s: child exit %d without Go's t.Setenv/t.Parallel panic:\n%s", mode, res.code, out)
+		panicLine := ""
+		for _, line := range strings.Split(res.stdout+res.stderr, "\n") {
+			if strings.HasPrefix(line, "panic: ") {
+				panicLine = line
+			}
+		}
+		if got, want := fmt.Sprintf(
+			"%d %s",
+			res.code,
+			panicLine,
+		), "2 panic: testing: test using t.Setenv, t.Chdir, or cryptotest.SetGlobalRandom can not use t.Parallel [recovered, repanicked]"; got != want {
+			t.Errorf("%s: child exit and panic = %q, want %q", mode, got, want)
 		}
 	}
 }
@@ -65,15 +75,16 @@ func TestProfileBundleAfterARefusedRestartNamesTheMissingTrace(t *testing.T) {
 	t.Parallel()
 	artifacts := t.TempDir()
 	res := (&child{mode: "pause-refused", artifacts: artifacts}).run(t)
-	if res.code == 0 || !strings.Contains(res.stdout, "deliberate failure after a refused restart") {
+	if res.code != 1 {
 		t.Fatalf("child exit %d, want the deliberate red: %s%s", res.code, res.stdout, res.stderr)
 	}
 	bundle := filepath.Join(processDir(t, artifacts, profileLabel), "exit")
 	errs := readFile(t, filepath.Join(bundle, "errors.txt"))
-	for _, want := range []string{"trace window: flight recorder not running: ", "already enabled", "no trace.out"} {
-		if !strings.Contains(errs, want) {
-			t.Errorf("errors.txt lacks %q:\n%s", want, errs)
-		}
+	if got, want := rooted(
+		t,
+		errs,
+	), "trace window: flight recorder not running: flight recorder already enabled; no trace.out\n"; got != want {
+		t.Errorf("errors.txt = %q, want %q", got, want)
 	}
 	if fileExists(filepath.Join(bundle, "trace.out")) {
 		t.Errorf("exit bundle holds a trace.out though no recorder ran")

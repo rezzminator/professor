@@ -19,6 +19,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 type fakeProc struct {
@@ -532,7 +533,7 @@ func TestKilledCodexLineageMatchesAnyMemberIDUntilUnkill(t *testing.T) {
 		Path:        filepath.Join(jail.codexHome, "sessions", "rollout-"+rootID+".jsonl"),
 		Size:        100,
 		MTimeNS:     100,
-		CWD:         "/work/proja",
+		CWD:         testjail.Place("/work/proja"),
 		UserThread:  true,
 		SessionID:   rootID,
 		PromptCount: 1,
@@ -546,7 +547,7 @@ func TestKilledCodexLineageMatchesAnyMemberIDUntilUnkill(t *testing.T) {
 		Path:        filepath.Join(jail.codexHome, "sessions", "rollout-"+childID+".jsonl"),
 		Size:        200,
 		MTimeNS:     200,
-		CWD:         "/work/proja",
+		CWD:         testjail.Place("/work/proja"),
 		UserThread:  true,
 		SessionID:   rootID,
 		PromptCount: 2,

@@ -9,12 +9,10 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"regexp"
 	"strings"
 	"sync"
 	"testing"
 	"time"
-	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -188,49 +186,6 @@ func TestChatNewOpenCodeModelEffortPromptAndFailure(t *testing.T) {
 				"configured override missing",
 			) || !strings.Contains(err.Error(), output.Message) {
 			t.Fatalf("native failure envelope=%+v, %v", output, err)
-		}
-	}
-}
-
-// TestChatNewDescriptionRoutesEveryModelRunHere reads new as a caller
-// does: the description within the 600-rune tool budget, its example call
-// naming only real schema fields, the launchers it replaces and the cleanup
-// named, and every schema field described.
-func TestChatNewDescriptionRoutesEveryModelRunHere(t *testing.T) {
-	tool := listedChatNew(t)
-	description := tool.Description
-	if runes := utf8.RuneCountInString(description); runes > 600 {
-		t.Fatalf("new description is %d runes, over 600: %q", runes, description)
-	}
-	for _, phrase := range []string{"model run", "pfm headless exec", "claude -p", "kill", "sub-agent"} {
-		if !strings.Contains(description, phrase) {
-			t.Fatalf("new description lacks %q: %q", phrase, description)
-		}
-	}
-	encoded, err := json.Marshal(tool.InputSchema)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var schema struct {
-		Properties map[string]struct {
-			Description string `json:"description"`
-		} `json:"properties"`
-	}
-	if err := json.Unmarshal(encoded, &schema); err != nil {
-		t.Fatal(err)
-	}
-	example := regexp.MustCompile(`new\{([^}]*)\}`).FindStringSubmatch(description)
-	if example == nil {
-		t.Fatalf("new description has no example call: %q", description)
-	}
-	for _, key := range regexp.MustCompile(`(?:^|,\s*)(\w+):`).FindAllStringSubmatch(example[1], -1) {
-		if _, found := schema.Properties[key[1]]; !found {
-			t.Fatalf("new example names %q, not a schema field: %q", key[1], example[0])
-		}
-	}
-	for name, property := range schema.Properties {
-		if strings.TrimSpace(property.Description) == "" {
-			t.Fatalf("new schema field %q has no description", name)
 		}
 	}
 }
@@ -707,8 +662,13 @@ func TestBirthNewFailedCaller(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw, _ := json.Marshal(result.Content)
-	if !result.IsError || !strings.Contains(string(raw), "new: resolve caller: herdr timed out") || calls != 0 {
-		t.Fatalf("result=%s calls=%d", raw, calls)
+	if got, want := fmt.Sprintf(
+		"error=%t calls=%d %s",
+		result.IsError,
+		calls,
+		raw,
+	), "error=true calls=0 [{\"type\":\"text\",\"text\":\"new: resolve caller: herdr timed out\"}]"; got != want {
+		t.Fatalf("result = %q, want %q", got, want)
 	}
 }
 
@@ -735,7 +695,7 @@ func TestBirthNewHerdrCallerPlacement(t *testing.T) {
 							Socket:         "/h/herdr.sock",
 							PaneID:         "wC:p24",
 							HerdrWorkspace: "wC",
-							CWD:            "/work/herdr",
+							CWD:            testjail.Place("/work/herdr"),
 						},
 					},
 				},

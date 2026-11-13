@@ -1,6 +1,7 @@
 package costsink
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -21,17 +22,19 @@ func TestArmRefusesWhatItCannotServe(t *testing.T) {
 		opts ArmOptions
 		want string
 	}{
-		{"no pid", ArmOptions{Self: binary, Home: home}, "arm needs a pid"},
-		{"no binary", ArmOptions{PID: os.Getpid(), Home: home}, "arm needs a pid"},
-		{"a pid that is not running", ArmOptions{Self: binary, PID: 1 << 30, Home: home}, "start time of pid"},
-		{"a binary that cannot start", ArmOptions{Self: filepath.Join(home, "missing"), PID: os.Getpid(), Home: home}, "internal cost-sink"},
+		{"no pid", ArmOptions{Self: binary, Home: home}, "cost sink: arm needs a pid and the pfm binary, got pid 0 self \"/x/pfm\""},
+		{"no binary", ArmOptions{PID: os.Getpid(), Home: home}, "cost sink: arm needs a pid and the pfm binary, got pid {pid} self \"\""},
+		{"a pid that is not running", ArmOptions{Self: binary, PID: 1 << 30, Home: home}, "cost sink: read the start time of pid 1073741824: open /proc/1073741824/stat: no such file or directory"},
+		{"a binary that cannot start", ArmOptions{Self: filepath.Join(home, "missing"), PID: os.Getpid(), Home: home}, "cost sink: start {home}/missing internal cost-sink: file does not exist"},
 	} {
 		// A binary that is not there is refused by the runner's Start; every other row is refused before it.
 		runner := &deps.FakeRunner{}
 		runner.ScriptStart([]string{filepath.Join(home, "missing")}, 0, nil, os.ErrNotExist)
 		tc.opts.Runner = runner
-		if _, err := Arm(tc.opts); err == nil || !strings.Contains(err.Error(), tc.want) {
-			t.Errorf("%s: Arm error = %v, want it to contain %q", tc.name, err, tc.want)
+		_, err := Arm(tc.opts)
+		if got := strings.NewReplacer(home, "{home}", strconv.Itoa(os.Getpid()), "{pid}").
+			Replace(fmt.Sprint(err)); got != tc.want {
+			t.Errorf("%s: Arm error = %q, want %q", tc.name, got, tc.want)
 		}
 	}
 }

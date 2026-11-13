@@ -7,13 +7,17 @@
 # resolver, .claude/scripts/unit-path.sh (cwd-relative, repository-relative, pfm-relative or absolute;
 # a file deleted at HEAD drops silently and still brings its unit's checks). Each path brings its
 # affected tests:
-#   pfm/**/*_test.go          go test -v of its package (pfm/e2e/ with the e2e tag, every other with
-#                             the jail tag), -count, -timeout, -p and -parallel (the last two only
-#                             when set) from the fence config
+#   pfm/**/*_test.go          go test -v of its package (pfm/e2e/ with the e2e tag; a jail file, one
+#                             whose //go:build line names jail unnegated, with the jail tag; any other
+#                             untagged, the unit tier inside testjail's unit net), -count, -timeout, -p
+#                             and -parallel (the last two only when set) from the fence config
 #                             (PFM_FENCE_TEST_COUNT, PFM_FENCE_AFFECTED_*: infra/fence/shared.sh), -run the
 #                             ::selector byte for byte, else every Test and Fuzz func of the file
 #                             (TestMain excluded); a test file with none runs its whole package
-#   pfm/**/*.go               go test -v of its whole package
+#   pfm/**/*.go               its whole package: untagged (label pfm/{dir}/), then with the jail tag
+#                             -run every Test and Fuzz func of its jail files but darwin-only ones
+#                             (label pfm/{dir}/ (jail)) when it has one; the untagged run is left
+#                             out when the package has jail files and no other test file
 #   pfm/journey/*.go          go vet -tags journey of pfm/journey/... for Linux and GOOS=darwin, no
 #                             selector, never a go test: the suite runs only on its own disposable
 #                             machine (infra/fence/journey/run.sh); pfm/journey/harness/ tests as any package
@@ -55,7 +59,10 @@
 # run with `# pass 0`, only the file itself as the passing test, or `# skipped|todo N`; a unittest run
 # with `Ran 0 tests`, `skipped=N`, or exit 5 `NO TESTS RAN`; a script-style Python test with no `ok `
 # line. A shell test is judged by its exit code.
-# Output: one `TEST <PASS|FAIL|NO-TEST-RAN|UNLISTED-SKIP|SKIPPED> …` line per test invocation, one
+# Output: before the first Go test, `PROFILE <host path>`: the run directory under the fence's timing
+# base, outliving the call, that every Go test process profiles into (PFM_TEST_ARTIFACT_DIR: summary.json,
+# failure bundles), the newest 20 kept; `PROFILE NOT KEPT (…)` when it cannot be made. Then one
+# `TEST <PASS|FAIL|NO-TEST-RAN|UNLISTED-SKIP|SKIPPED> …` line per test invocation, one
 # `TEST UNCOVERED …` line per named file no test maps to, one
 # `CHECK <PASS|FAIL|SKIP> …` line per check, then `TESTS …`, `STATIC …`, on red the log's last 40
 # other lines, `VERDICT PASS|FAIL`, and last `log: <path>` — /tmp/{project}/test/{UTC}-{pid}.log holds
@@ -94,8 +101,25 @@ t_out() { # t_out <runner output>: into the log indented, so a nested run's TEST
   # never read as this run's (the host takes only column-0 summary lines)
   [ -z "$1" ] || sed 's/^/  | /' <<<"$1"
 }
+P_ROOT='' P_KEPT=20
+p_root() { # p_root: once, before the run's first Go test — PFM_TEST_ARTIFACT_DIR on a run directory under
+  # the fence's timing base (PFM_TEST_TIMING_DIR, the host's PFM_TEST_TIMING_HOST), which outlives the
+  # call, the newest P_KEPT kept; one column-0 PROFILE line names its host path
+  [ -z "$P_ROOT" ] || return 0
+  P_ROOT=none
+  local base="${PFM_TEST_TIMING_DIR:-}" dir old
+  if [ -z "$base" ]; then
+    echo "PROFILE NOT KEPT (PFM_TEST_TIMING_DIR unset: a red Go test's bundle stays in this call's /tmp)"; return 0
+  fi
+  dir="$base/test-sh/$(date -u +%Y%m%dT%H%M%SZ)-$$"
+  if ! mkdir -p "$dir"; then echo "PROFILE NOT KEPT ($dir could not be created: a red Go test's bundle stays in this call's /tmp)"; return 0; fi
+  while IFS= read -r old; do rm -rf "${base:?}/test-sh/$old"; done < <(ls -1 "$base/test-sh" | sort -r | awk -v k="$P_KEPT" 'NR > k')
+  P_ROOT="$dir"; export PFM_TEST_ARTIFACT_DIR="$dir"
+  echo "PROFILE ${PFM_TEST_TIMING_HOST:-$base}/${dir#"$base"/}"
+}
 t_go() { # t_go <label> <import path> <command>...
   local label=$1 pkg=$2 out c=0 t cls skips=0 unlisted=0; shift 2
+  p_root
   out="$("$@" 2>&1)" || c=$?
   t_out "$out"
   if [ "$c" = 0 ]; then
@@ -409,9 +433,9 @@ add_raw() { # add_raw <invocation string>: sets MAPPED, even for a repeat
   INVS+=("$1")
 }
 pfm_module="$(sed -n 's/^module[[:space:]][[:space:]]*//p' "$ROOT/pfm/go.mod" 2>/dev/null | head -1)"
-go_pkg_inv() { # go_pkg_inv <label> <pfm-relative dir> [-run selector]: one go test of a package
-  local label="$1" dir="$2" pkg pkgpath tags=()
-  shift 2
+go_pkg_inv() { # go_pkg_inv <label> <pfm-relative dir> <unit|jail> [-run selector]: one go test of a package
+  local label="$1" dir="$2" tier="$3" pkg pkgpath tags=()
+  shift 3
   [ -n "$pfm_module" ] || { echo "test.sh: pfm/go.mod names no module" >&2; exit 2; }
   pkg="./"; [ -z "$dir" ] || pkg="./$dir/"
   pkgpath="$pfm_module"; [ -z "$dir" ] || pkgpath="$pfm_module/$dir"
@@ -420,9 +444,29 @@ go_pkg_inv() { # go_pkg_inv <label> <pfm-relative dir> [-run selector]: one go t
     journey)
       case "$label" in *::*) echo "test.sh: $label: the journey suite takes no selector (it is only vetted)" >&2; usage ;; esac
       add_inv t_sh "$label" go_journey_vet; return ;;
-    *) tags=(-tags jail) ;;
+    *) [ "$tier" = unit ] || tags=(-tags jail) ;;
   esac
   add_inv t_go "$label" "$pkgpath" go_affected ${tags[@]+"${tags[@]}"} "$pkg" "$@"
+}
+go_tier() { # go_tier <repository-relative _test.go>: jail when its //go:build line names jail unnegated, else unit
+  if sed -n '/^\/\/go:build /{p;q;}' "$ROOT/$1" | grep -qE '(^|[^!A-Za-z0-9_])jail([^A-Za-z0-9_]|$)'; then echo jail; else echo unit; fi
+}
+go_funcs() { # go_funcs <repository-relative _test.go>: its Test and Fuzz funcs, TestMain excluded, one per line
+  grep -oE '^func ((Test|Fuzz)[A-Za-z0-9_]*)\(' "$ROOT/$1" | sed 's/^func //; s/($//' | grep -vx TestMain || true
+}
+go_whole_pkg() { # go_whole_pkg <pfm-relative dir>: the unit tier untagged, then its jail files' funcs under the jail tag
+  local dir="$1" f fn unit=0 sel='' label="pfm/$1${1:+/}"
+  for f in "$ROOT/pfm/$dir${dir:+/}"*_test.go; do
+    [ -f "$f" ] || continue
+    f="${f#"$ROOT"/}"
+    if [ "$(go_tier "$f")" = unit ]; then unit=1; continue; fi
+    case "$f" in *_darwin_test.go) continue ;; esac
+    sed -n '/^\/\/go:build /{p;q;}' "$ROOT/$f" | grep -q darwin && continue
+    while IFS= read -r fn; do [ -z "$fn" ] || sel+="$fn|"; done < <(go_funcs "$f")
+  done
+  case "$dir" in e2e | e2e/* | journey) go_pkg_inv "$label" "$dir" unit; return ;; esac
+  if [ "$unit" = 1 ] || [ -z "$sel" ]; then go_pkg_inv "$label" "$dir" unit; fi
+  [ -z "$sel" ] || go_pkg_inv "$label (jail)" "$dir" jail -run "^(${sel%|})\$"
 }
 sut_rows() { # sut_rows <test file>: the scripts a SUT-taking test runs against, one per line
   case "$1" in
@@ -454,21 +498,21 @@ py_inv() { # py_inv <test file> <has selector 0|1> <selector>: unittest when the
 }
 no_sel() { [ "$2" = 0 ] || { echo "test.sh: $1: a $3 takes no selector" >&2; usage; }; }
 derive() { # derive <repository-relative path> <has selector 0|1> <selector>
-  local f="$1" has="$2" sel="$3" dir base names fn sib
+  local f="$1" has="$2" sel="$3" dir base names fn sib tier
   case "$f" in
     pfm/*_test.go)
       dir="${f%/*}"; dir="${dir#pfm}"; dir="${dir#/}"
-      if [ "$has" = 1 ]; then go_pkg_inv "$f::$sel" "$dir" -run "$sel"; return; fi
+      tier="$(go_tier "$f")"
+      if [ "$has" = 1 ]; then go_pkg_inv "$f::$sel" "$dir" "$tier" -run "$sel"; return; fi
       names=()
-      while IFS= read -r fn; do [ "$fn" = TestMain ] || names+=("$fn"); done \
-        < <(grep -oE '^func ((Test|Fuzz)[A-Za-z0-9_]*)\(' "$ROOT/$f" | sed 's/^func //; s/($//' || true)
-      if [ "${#names[@]}" = 0 ]; then go_pkg_inv "pfm/$dir${dir:+/}" "$dir"; return; fi
+      while IFS= read -r fn; do [ -z "$fn" ] || names+=("$fn"); done < <(go_funcs "$f")
+      if [ "${#names[@]}" = 0 ]; then go_whole_pkg "$dir"; return; fi
       sel='^('; for fn in "${names[@]}"; do sel+="$fn|"; done; sel="${sel%|})\$"
-      go_pkg_inv "$f" "$dir" -run "$sel" ;;
+      go_pkg_inv "$f" "$dir" "$tier" -run "$sel" ;;
     pfm/*.go)
       no_sel "$f" "$has" "non-test Go file (its whole package runs)"
       dir="${f%/*}"; dir="${dir#pfm}"; dir="${dir#/}"
-      go_pkg_inv "pfm/$dir${dir:+/}" "$dir" ;;
+      go_whole_pkg "$dir" ;;
     pfm/scripts/*_test.sh) no_sel "$f" "$has" "shell test"; add_inv t_sh "$f" bash "$f" ;;
     pfm/scripts/*.sh)
       no_sel "$f" "$has" "script (its test runs)"; sib="${f%.sh}_test.sh"
@@ -534,7 +578,7 @@ rc=0
 PFM_FENCE_NET=private PFM_FENCE_WATCH_PIDS="$$${PFM_FENCE_WATCH_PIDS:+ $PFM_FENCE_WATCH_PIDS}" \
   "$DEV" iso run "$cmd" >"$UNIT_LOG" 2>&1 || rc=$?
 # Only column-0 lines are this run's summary: every runner's own output sits indented (t_out).
-grep -E '^(TEST|CHECK|TESTS|STATIC) ' "$UNIT_LOG" || true
+grep -E '^(TEST|CHECK|TESTS|STATIC|PROFILE) ' "$UNIT_LOG" || true
 verdict="$(grep -E '^VERDICT (PASS|FAIL)$' "$UNIT_LOG" | tail -n 1 || true)"
 if [ -z "$verdict" ]; then
   verdict="$(fence_dead 'dev.sh iso run' "$rc")"
@@ -542,7 +586,7 @@ elif [ "$verdict" = 'VERDICT PASS' ] && [ "$rc" != 0 ]; then
   verdict="VERDICT FAIL (fence: dev.sh iso run exited $rc after its PASS verdict — see the log)"
 fi
 # On red, the log's last 40 lines past the summary lines already printed above.
-if [ "$verdict" != 'VERDICT PASS' ]; then grep -vE '^(TEST|CHECK|TESTS|STATIC|VERDICT) ' "$UNIT_LOG" | tail -n 40 || true; fi
+if [ "$verdict" != 'VERDICT PASS' ]; then grep -vE '^(TEST|CHECK|TESTS|STATIC|PROFILE|VERDICT) ' "$UNIT_LOG" | tail -n 40 || true; fi
 echo "$verdict"
 echo "log: $UNIT_LOG"
 case "$verdict" in

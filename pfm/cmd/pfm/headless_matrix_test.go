@@ -56,9 +56,9 @@ func TestCLIEngineEdgeRejectsUnknownWithAcceptedSet(t *testing.T) {
 	testjail.Fleet(t)
 	var stdout, stderr bytes.Buffer
 	code := run([]string{"chat", "new", "--name", "x", "--engine", "bogus"}, &stdout, &stderr)
-	if code != 2 ||
-		!strings.Contains(stderr.String(), `unknown engine "bogus" (want cc/claude, cx/codex, ox/opencode)`) {
-		t.Fatalf("chat new bogus exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	if want := "pfm chat new: unknown engine \"bogus\" (want cc/claude, cx/codex, ox/opencode)\n"; code != 2 ||
+		stderr.String() != want {
+		t.Fatalf("chat new bogus exit=%d stdout=%q stderr = %q, want %q", code, stdout.String(), stderr.String(), want)
 	}
 }
 
@@ -117,10 +117,6 @@ func TestModelAndEffortReachBothEngines(t *testing.T) {
 	if err != nil {
 		t.Fatalf("claude plan error = %v", err)
 	}
-	if !strings.Contains(claude.Run, "'--model' 'claude-opus-5'") ||
-		!strings.Contains(claude.Run, "'--effort' 'xhigh'") {
-		t.Fatalf("claude run = %s", claude.Run)
-	}
 
 	codex, err := action.HeadlessRun(action.HeadlessRequest{
 		Engine:         "cx",
@@ -135,8 +131,5 @@ func TestModelAndEffortReachBothEngines(t *testing.T) {
 	if err != nil {
 		t.Fatalf("codex plan error = %v", err)
 	}
-	if !strings.Contains(codex.Run, "'--model' 'gpt-5.6-sol'") ||
-		!strings.Contains(codex.Run, `'-c' 'model_reasoning_effort="high"'`) {
-		t.Fatalf("codex run = %s", codex.Run)
-	}
+	golden(t, "headless_runs.txt", scrub(claude.Run+"\n"+codex.Run+"\n", home))
 }

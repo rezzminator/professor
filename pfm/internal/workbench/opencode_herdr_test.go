@@ -3,14 +3,11 @@ package workbench
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/rezzminator/professor/pfm/internal/herdr"
 )
 
 func TestStageOpenCodeHerdrPlugin(t *testing.T) {
@@ -54,15 +51,6 @@ func TestStageOpenCodeHerdrPlugin(t *testing.T) {
 	}
 }
 
-// The plugin kills a reporter at its own timer: the reporter's deadline must
-// end, and its error log land, before that.
-func TestOpenCodeHerdrPluginKillsOnlyAfterTheReporterDeadline(t *testing.T) {
-	want := fmt.Sprintf("const REPORT_TIMEOUT_MS = %d\n", herdr.EngineKillTimeout.Milliseconds())
-	if !strings.Contains(openCodeHerdrPlugin, want) {
-		t.Fatalf("plugin holds no %q: its kill timer is not herdr.EngineKillTimeout", want)
-	}
-}
-
 func TestStageOpenCodeHerdrPluginRefusals(t *testing.T) {
 	blocker := filepath.Join(t.TempDir(), "blocker")
 	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
@@ -73,7 +61,7 @@ func TestStageOpenCodeHerdrPluginRefusals(t *testing.T) {
 		t.Fatalf("write failure = %v", err)
 	}
 	if err := StageOpenCodeHerdrPlugin(filepath.Join(t.TempDir(), "plugin.mjs"), "pfm"); err == nil ||
-		!strings.Contains(err.Error(), "absolute pfm binary path") {
+		err.Error() != "OpenCode Herdr plugin needs an absolute pfm binary path, got \"pfm\"" {
 		t.Fatalf("a bare PATH name was accepted: %v", err)
 	}
 }

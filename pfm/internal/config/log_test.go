@@ -56,31 +56,6 @@ func TestLogKeysFromFile(t *testing.T) {
 	}
 }
 
-// A log nobody can size is a log nobody reads: every bad value is refused
-// loudly, never clamped to a default the operator never sees.
-func TestLogKeysRejectUnusableValues(t *testing.T) {
-	for _, test := range []struct{ body, want string }{
-		{`, "log": {"level": "chatty"}`, "log.level must be one of debug, info, warn, warning, error, off"},
-		{
-			`, "log": {"components": {"mcp": "loud"}}`,
-			"log.components.mcp must be one of debug, info, warn, warning, error, off",
-		},
-		{`, "log": {"keepDays": -1}`, "log.keepDays must be 0..3650"},
-		{`, "log": {"keepDays": 4000}`, "log.keepDays must be 0..3650"},
-		{`, "log": {"keepFiles": 0}`, "log.keepFiles must be 1..64"},
-		{`, "log": {"keepFiles": 65}`, "log.keepFiles must be 1..64"},
-		{`, "log": {"maxMB": 0}`, "log.maxMB must be 1..1024"},
-		{`, "log": {"maxMB": 4096}`, "log.maxMB must be 1..1024"},
-		{`, "log": {"keep_files": 2}`, "unknown field"},
-	} {
-		if _, err := loadTmuxConfig(t, test.body); err == nil {
-			t.Fatalf("%s was accepted", test.body)
-		} else if !strings.Contains(err.Error(), test.want) {
-			t.Fatalf("%s reported %v, want a message containing %q", test.body, err, test.want)
-		}
-	}
-}
-
 // TestLogLevelsIsTheOneList: config accepts exactly what internal/obs parses.
 func TestLogLevelsIsTheOneList(t *testing.T) {
 	if strings.Join(LogLevels, ",") != strings.Join(obs.LevelNames, ",") {

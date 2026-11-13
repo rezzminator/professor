@@ -197,21 +197,10 @@ func TestPerComponentControl(t *testing.T) {
 	Logger(ctx).Debug("unscoped.debug.dropped")
 	finish(0)
 
-	text := recordsText(readLog(t, path))
-	for _, want := range []string{"mcp.dumped", "tmux.error.passes", "runner.info.passes", "cmd.start", "cmd.exit"} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("record %q missing:\n%s", want, text)
-		}
-	}
-	for _, refused := range []string{
-		"db.silenced", "tmux.info.dropped", "runner.debug.dropped", "db.attr.silenced", "unscoped.debug.dropped",
-	} {
-		if strings.Contains(text, refused) {
-			t.Fatalf("record %q was written past its component level:\n%s", refused, text)
-		}
-	}
-	if !strings.Contains(text, `"comp":"mcp"`) {
-		t.Fatalf("the scoped record carries no comp field:\n%s", text)
+	if got, want := messages(
+		readLog(t, path),
+	), "cmd.start mcp.dumped@mcp tmux.error.passes@tmux runner.info.passes@runner cmd.exit"; got != want {
+		t.Fatalf("records = %q, want %q", got, want)
 	}
 }
 

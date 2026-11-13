@@ -32,14 +32,8 @@ func TestResolveRefusesTheOperatorsRealHomeInsideATest(t *testing.T) {
 			EnvHome, values.Home, realHome, values.CacheDB,
 		)
 	}
-	for _, mustName := range []string{EnvHome, EnvRealHome} {
-		if !strings.Contains(err.Error(), mustName) {
-			t.Errorf(
-				"Resolve() error %q does not name %s; the message is the only place the fix appears",
-				err,
-				mustName,
-			)
-		}
+	if got, want := err.Error(), "refusing to resolve the operator's real home directory inside a test: point PFM_HOME at a temporary directory (see internal/testjail), or set PFM_TEST_REAL_HOME=1 if this test genuinely must read the host"; got != want {
+		t.Errorf("Resolve() error = %q, want %q", got, want)
 	}
 }
 

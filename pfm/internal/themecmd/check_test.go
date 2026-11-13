@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -128,18 +129,14 @@ func TestCheckRefusesAThemeWhoseFilesLeaveTheLayout(t *testing.T) {
 	})
 	good := writeTheme(t, dir, "good", pinned, nil)
 
-	code, stdout, _ := runCheck(t, checkDeps(t.TempDir()), missing, extra, wrong, good)
-	if code != 1 || !strings.Contains(stdout, "1 of 4 profiles pass") {
-		t.Fatalf("three broken layouts must FAIL beside one passing theme: code %d\n%s", code, stdout)
-	}
-	for theme, want := range map[string]string{
-		missing: "missing [tmux.json], extra []",
-		extra:   "missing [], extra [vscode/notes.json]",
-		wrong:   `vscode/workbench/editor.json: colour "tab.activeBackground" belongs in vscode/workbench/tabs.json`,
-	} {
-		if !strings.Contains(stdout, "FAIL theme "+theme+": ") || !strings.Contains(stdout, want) {
-			t.Errorf("%s must FAIL naming %q:\n%s", theme, want, stdout)
-		}
+	code, stdout, stderr := runCheck(t, checkDeps(t.TempDir()), missing, extra, wrong, good)
+	if got, want := checkReport(
+		code,
+		stdout,
+		stderr,
+		dir,
+	), "exit 1\nok  Professor · Pinned  vs-dark  391 colours · 41 token rules · 28 semantic  {dir0}/good\nFAIL theme {dir0}/missing: the file set differs from every theme's (ProfileFiles): missing [tmux.json], extra []\nFAIL theme {dir0}/extra: the file set differs from every theme's (ProfileFiles): missing [], extra [vscode/notes.json]\nFAIL theme {dir0}/wrong: vscode/workbench/editor.json: colour \"tab.activeBackground\" belongs in vscode/workbench/tabs.json\n1 of 4 profiles pass\n--- stderr\n"; got != want {
+		t.Errorf("check = %q, want %q", got, want)
 	}
 }
 
@@ -152,12 +149,14 @@ func TestCheckRefusesAFileAPathThatIsNotThereAndAPipe(t *testing.T) {
 	if err := syscall.Mkfifo(pipe, 0o600); err != nil {
 		t.Fatalf("mkfifo %s: %v", pipe, err)
 	}
-	code, stdout, _ := runCheck(t, checkDeps(t.TempDir()), readme, missing, pipe)
-	if code != 1 || !strings.Contains(stdout, "FAIL theme "+readme+": not a directory") ||
-		!strings.Contains(stdout, "FAIL theme "+missing+": lstat "+missing) ||
-		!strings.Contains(stdout, "FAIL theme "+pipe+": not a directory") ||
-		!strings.Contains(stdout, "0 of 3 profiles pass") {
-		t.Fatalf("a file, a missing path and a pipe must each FAIL by path: code %d\n%s", code, stdout)
+	code, stdout, stderr := runCheck(t, checkDeps(t.TempDir()), readme, missing, pipe)
+	if got, want := checkReport(
+		code,
+		stdout,
+		stderr,
+		dir,
+	), "exit 1\nFAIL theme {dir0}/README.md: not a directory: a theme is a directory of theme.json\nFAIL theme {dir0}/gone: lstat {dir0}/gone: no such file or directory\nFAIL theme {dir0}/pipe: not a directory: a theme is a directory of theme.json\n0 of 3 profiles pass\n--- stderr\n"; got != want {
+		t.Errorf("check = %q, want %q", got, want)
 	}
 }
 
@@ -170,13 +169,14 @@ func TestCheckFailsAProfileWhoseThemeCannotBeRead(t *testing.T) {
 		`{"colors":{"input.background":"#2a241f","input.foreground":"#2a241f"}}}}}`, nil)
 	lantern := writeTheme(t, dir, "lantern",
 		`{"name":"Lantern","base":"light","overrides":{"clawd_background":"#2a241f"}}`, nil)
-	code, stdout, _ := runCheck(t, checkDeps(t.TempDir()), ink, lantern)
-	if code != 1 || !strings.Contains(stdout, "FAIL theme "+ink+": readability:") ||
-		!strings.Contains(stdout, `colors "input.foreground" #2a241f on input.background #2a241f: contrast 1.00`) {
-		t.Fatalf("an unreadable theme must FAIL naming the place: code %d\n%s", code, stdout)
-	}
-	if !strings.Contains(stdout, "Professor · Lantern") || !strings.Contains(stdout, "1 of 2 profiles pass") {
-		t.Fatalf("a light palette with a dark Clawd must pass: code %d\n%s", code, stdout)
+	code, stdout, stderr := runCheck(t, checkDeps(t.TempDir()), ink, lantern)
+	if got, want := checkReport(
+		code,
+		stdout,
+		stderr,
+		dir,
+	), "exit 1\nok  Professor · Lantern  vs  391 colours · 41 token rules · 28 semantic  {dir0}/lantern\nFAIL theme {dir0}/ink: readability: 1 places under their contrast floor: colors \"input.foreground\" #2a241f on input.background #2a241f: contrast 1.00 < 4.5\n1 of 2 profiles pass\n--- stderr\n"; got != want {
+		t.Errorf("check = %q, want %q", got, want)
 	}
 }
 
@@ -192,9 +192,8 @@ func TestCheckWithoutFilesScansTheSourceClonesProfiles(t *testing.T) {
 		t.Fatalf("record source clone: %v", err)
 	}
 	code, stdout, stderr := runCheck(t, checkDeps(home))
-	if code != 0 || !strings.Contains(stdout, good) || !strings.Contains(stdout, "1 of 1 profile pass") {
-		t.Fatalf("scan must check exactly the one profile: code %d\n%s%s", code, stdout, stderr)
-	}
+	scanned := checkReport(code, stdout, stderr, repo, home)
+	_ = good
 
 	emptyHome, emptyRepo := t.TempDir(), t.TempDir()
 	writeFile(t, filepath.Join(emptyRepo, "templates", "themes", "README.md"), "not a theme")
@@ -204,12 +203,23 @@ func TestCheckWithoutFilesScansTheSourceClonesProfiles(t *testing.T) {
 	if err := paths.WriteSourceRepoMarker(emptyHome, emptyRepo); err != nil {
 		t.Fatal(err)
 	}
-	if code, _, stderr := runCheck(t, checkDeps(emptyHome)); code != 1 || !strings.Contains(stderr, "no theme in") {
-		t.Fatalf("an empty templates/themes/ must fail, never pass empty: code %d %s", code, stderr)
-	}
-	if code, _, stderr := runCheck(t, checkDeps(t.TempDir())); code != 1 ||
-		!strings.Contains(stderr, "no source clone to scan") {
-		t.Fatalf("no recorded clone must fail by name: code %d %s", code, stderr)
+	emptyCode, emptyOut, emptyErr := runCheck(t, checkDeps(emptyHome))
+	bare := t.TempDir()
+	bareCode, bareOut, bareErr := runCheck(t, checkDeps(bare))
+	got := scanned + "\n" + checkReport(
+		emptyCode,
+		emptyOut,
+		emptyErr,
+		emptyRepo,
+		emptyHome,
+	) + "\n" + checkReport(
+		bareCode,
+		bareOut,
+		bareErr,
+		bare,
+	)
+	if want := "exit 0\nok  Professor · Paper Day  vs  391 colours · 41 token rules · 28 semantic  {dir0}/templates/themes/paper-day\n1 of 1 profile pass\n--- stderr\n\nexit 1\n--- stderr\npfm theme: check: no theme in {dir0}/templates/themes\n\nexit 1\n--- stderr\npfm theme: check: no theme named and no source clone to scan (read source repository marker {dir0}/.local/share/pfm/install/source-repo: no source repository recorded: open {dir0}/.local/share/pfm/install/source-repo: no such file or directory); name the theme directories\n"; got != want {
+		t.Errorf("one profile, an empty themes dir, no clone = %q, want %q", got, want)
 	}
 }
 
@@ -228,9 +238,7 @@ func TestCheckPassesEveryShippedTheme(t *testing.T) {
 		t.Fatal(err)
 	}
 	code, stdout, stderr := runCheck(t, checkDeps(home))
-	if code != 0 || strings.Contains(stdout, "FAIL") || !strings.Contains(stdout, "9 of 9 profiles pass") {
-		t.Fatalf("a shipped theme fails pfm theme check, or not all nine ran: code %d\n%s%s", code, stdout, stderr)
-	}
+	golden(t, "check_shipped.txt", checkReport(code, stdout, stderr, repo, home))
 }
 
 // glyphTheme writes a theme whose herdr.json pins tabGlyphs glyphs, written
@@ -251,14 +259,14 @@ func TestCheckJudgesHerdrTabGlyphs(t *testing.T) {
 	empty := glyphTheme(t, dir, "empty", map[string]string{"blocked": ""})
 	wide := glyphTheme(t, dir, "wide", map[string]string{"error": "🟥🟥🟥🟥🟥🟥🟥🟥🟥"})
 
-	code, stdout, _ := runCheck(t, checkDeps(t.TempDir()), good, empty, wide)
-	if code != 1 || !strings.Contains(stdout, "ok") || !strings.HasSuffix(strings.Split(stdout, "\n")[0], good) {
-		t.Fatalf("a valid glyph must pass and the bad ones exit 1: code %d\n%s", code, stdout)
-	}
-	for theme, want := range map[string]string{empty: `"blocked": frame 0: empty`, wide: `"error": frame 0: glyph`} {
-		if !strings.Contains(stdout, "FAIL theme "+theme) || !strings.Contains(stdout, want) {
-			t.Errorf("%s must FAIL naming %q:\n%s", theme, want, stdout)
-		}
+	code, stdout, stderr := runCheck(t, checkDeps(t.TempDir()), good, empty, wide)
+	if got, want := checkReport(
+		code,
+		stdout,
+		stderr,
+		dir,
+	), "exit 1\nok  Professor · Glyphs  vs-dark  391 colours · 41 token rules · 28 semantic  {dir0}/good\nFAIL theme {dir0}/empty: herdr.json: herdr tabGlyphs pin \"blocked\": frame 0: empty glyph\nFAIL theme {dir0}/wide: herdr.json: herdr tabGlyphs pin \"error\": frame 0: glyph \"🟥🟥🟥🟥🟥🟥🟥🟥🟥\" is 9 runes, over the 8-rune tab prefix budget\n1 of 3 profiles pass\n--- stderr\n"; got != want {
+		t.Errorf("check = %q, want %q", got, want)
 	}
 }
 
@@ -286,5 +294,31 @@ func TestCheckJudgesHerdrTabGlyphFrames(t *testing.T) {
 		if !strings.Contains(stdout, "FAIL theme "+theme) || !strings.Contains(stdout, want) {
 			t.Errorf("%s must FAIL naming %q:\n%s", theme, want, stdout)
 		}
+	}
+}
+
+// checkReport is one check run as compared whole: its exit, stdout and stderr, each dir written {dirN}.
+func checkReport(code int, stdout, stderr string, dirs ...string) string {
+	report := fmt.Sprintf("exit %d\n%s--- stderr\n%s", code, stdout, stderr)
+	for i, dir := range dirs {
+		report = strings.ReplaceAll(report, dir, fmt.Sprintf("{dir%d}", i))
+	}
+	return report
+}
+
+// golden compares got with testdata/{file}; a mismatch prints the GOLDEN line the fill script writes from.
+func golden(t *testing.T, file, got string) {
+	t.Helper()
+	want, err := os.ReadFile(filepath.Join("testdata", file))
+	if err != nil || string(want) != got {
+		t.Errorf(
+			"testdata/%s: %v\nwant:\n%s\nactual:\n%s\nGOLDEN internal/themecmd/testdata/%s = %q",
+			file,
+			err,
+			want,
+			got,
+			file,
+			got,
+		)
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -307,7 +308,7 @@ func TestCodexDiagnosticAfterCompletionIsFailure(t *testing.T) {
 		),
 	}
 	result, err := Run(context.Background(), request)
-	if err == nil || !strings.Contains(err.Error(), "missing terminal") {
+	if err == nil || err.Error() != "missing terminal success event in headless output from Codex" {
 		t.Fatalf("late Codex diagnostic error = %v, want missing terminal failure", err)
 	}
 	if !result.IsError {
@@ -449,11 +450,28 @@ func TestCodexIsolationCapabilityErrorsHappenBeforeLaunch(t *testing.T) {
 	cases := []struct {
 		name   string
 		mutate func(*Request)
+		want   string
 	}{
-		{"tools", func(request *Request) { value := "none"; request.Tools = &value }},
-		{"settings", func(request *Request) { value := ""; request.SettingsSources = &value }},
-		{"strict MCP", func(request *Request) { request.StrictMCP = true }},
-		{"sealed", func(request *Request) { request.Sealed = true; value := "system"; request.SystemPrompt = &value }},
+		{
+			"tools",
+			func(request *Request) { value := "none"; request.Tools = &value },
+			"headless runs with Codex cannot guarantee tools or settings isolation: unsupported --tools; use --allow-unsupported to continue without these controls",
+		},
+		{
+			"settings",
+			func(request *Request) { value := ""; request.SettingsSources = &value },
+			"headless runs with Codex cannot guarantee tools or settings isolation: unsupported --setting-sources; use --allow-unsupported to continue without these controls",
+		},
+		{
+			"strict MCP",
+			func(request *Request) { request.StrictMCP = true },
+			"headless runs with Codex cannot guarantee tools or settings isolation: unsupported --strict-mcp-config; use --allow-unsupported to continue without these controls",
+		},
+		{
+			"sealed",
+			func(request *Request) { request.Sealed = true; value := "system"; request.SystemPrompt = &value },
+			"headless runs with Codex cannot guarantee tools or settings isolation: unsupported --sealed (full isolation), --tools, --setting-sources, --strict-mcp-config; use --allow-unsupported to continue without these controls",
+		},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -464,8 +482,8 @@ func TestCodexIsolationCapabilityErrorsHappenBeforeLaunch(t *testing.T) {
 			}
 			testCase.mutate(&request)
 			_, err := Run(context.Background(), request)
-			if err == nil || !strings.Contains(err.Error(), "headless runs with Codex") {
-				t.Fatalf("error = %v, want an explicit Codex capability error", err)
+			if got := fmt.Sprint(err); got != testCase.want {
+				t.Fatalf("error = %q, want %q", got, testCase.want)
 			}
 			if starts := runner.Starts(); len(starts) != 0 {
 				t.Fatalf("Codex capability refusal launched the engine: %v", starts)
@@ -498,26 +516,13 @@ func TestCodexAllowUnsupportedKeepsSupportedControlsAndReportsDiagnostics(t *tes
 	if err := validateInstance(request.Schema, result.StructuredOutput); err != nil {
 		t.Fatalf("supported schema rejected: %v", err)
 	}
-	for _, want := range []string{
-		"unsupported control not applied for Codex: --tools",
-		"unsupported control not applied for Codex: --setting-sources",
-		"unsupported control not applied for Codex: --strict-mcp-config",
-	} {
-		if !contains(result.Diagnostics, want) {
-			t.Fatalf("diagnostics omitted %q: %#v", want, result.Diagnostics)
-		}
-	}
-	args := onlyStart(t, runner).Argv[1:]
-	for _, forbidden := range []string{"--tools", "--setting-sources", "--strict-mcp-config"} {
-		if contains(args, forbidden) {
-			t.Fatalf("unsupported control reached Codex argv: %q in %#v", forbidden, args)
-		}
-	}
-	if !contains(args, "--ephemeral") {
-		t.Fatalf("supported no-session persistence control missing: %#v", args)
-	}
-	if !contains(args, "-c") || !strings.Contains(strings.Join(args, " "), "model_instructions_file=") {
-		t.Fatalf("supported system prompt mapping missing: %#v", args)
+	args := regexp.MustCompile(`model_instructions_file=\S+|--output-schema \S+`).
+		ReplaceAllString(strings.Join(onlyStart(t, runner).Argv[1:], " "), "{file}")
+	if got, want := strings.Join(
+		result.Diagnostics,
+		"\n",
+	)+"\n"+args, "unsupported control not applied for Codex: --tools\nunsupported control not applied for Codex: --setting-sources\nunsupported control not applied for Codex: --strict-mcp-config\nexec -c {file} --json {file} --ephemeral --skip-git-repo-check --color never"; got != want {
+		t.Fatalf("diagnostics and argv = %q, want %q", got, want)
 	}
 }
 
@@ -612,7 +617,7 @@ func TestArgumentsAllowFutureFlagsAndValidateSchemaBeforeLaunch(t *testing.T) {
 			Schema: json.RawMessage(`not-json`),
 		},
 	); err == nil ||
-		!strings.Contains(err.Error(), "invalid output schema") {
+		err.Error() != "invalid output schema: invalid character 'o' in literal null (expecting 'u')" {
 		t.Fatalf("invalid schema was accepted: %v", err)
 	}
 }

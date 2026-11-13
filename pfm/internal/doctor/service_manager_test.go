@@ -30,52 +30,21 @@ func mcpEnabledRuntime() config.Runtime {
 func TestPrintServiceManagerDoctorReportsThreeStates(t *testing.T) {
 	probeErr := errors.New("dial unix /run/user/1000/bus: connect: no such file or directory")
 	cases := []struct {
-		name    string
-		report  ServiceManagerReport
-		want    []string
-		exclude []string
+		name   string
+		report ServiceManagerReport
+		want   string
 	}{
+		{"present and healthy", ServiceManagerReport{Manager: "systemd", Present: true, Unit: serviceManagerUnitState{
+			Unit: "pfm-mcp.service", Present: true, Enabled: true, Active: true, State: "active",
+		}}, "doctor: service-manager=systemd unit=pfm-mcp.service present=true enabled=true active=active\n"},
 		{
-			name: "present and healthy",
-			report: ServiceManagerReport{
-				Manager: "systemd",
-				Present: true,
-				Unit: serviceManagerUnitState{
-					Unit: "pfm-mcp.service", Present: true, Enabled: true, Active: true, State: "active",
-				},
-			},
-			want: []string{
-				"doctor: service-manager=systemd unit=pfm-mcp.service present=true enabled=true active=active\n",
-			},
-			exclude: []string{"could_not_ask", "state=unavailable"},
+			"no service manager on this host",
+			ServiceManagerReport{Manager: "systemd", Unit: serviceManagerUnitState{Unit: "pfm-mcp.service"}},
+			"doctor: service-manager=none manager=systemd unit=pfm-mcp.service state=unavailable — no systemd user manager on this host (container or unmanaged); the pfm daemon must be started by hand\n",
 		},
-		{
-			name: "no service manager on this host",
-			report: ServiceManagerReport{
-				Manager: "systemd",
-				Present: false,
-				Unit:    serviceManagerUnitState{Unit: "pfm-mcp.service"},
-			},
-			want: []string{
-				"doctor: service-manager=none manager=systemd unit=pfm-mcp.service state=unavailable",
-				"no systemd user manager on this host",
-			},
-			exclude: []string{"could_not_ask", "error="},
-		},
-		{
-			name: "could not ask",
-			report: ServiceManagerReport{
-				Manager: "systemd",
-				Present: true,
-				Unit: serviceManagerUnitState{
-					Unit: "pfm-mcp.service", Err: probeErr,
-				},
-			},
-			want: []string{
-				"doctor: service-manager=systemd unit=pfm-mcp.service could_not_ask",
-				"error=" + probeErr.Error(),
-			},
-		},
+		{"could not ask", ServiceManagerReport{Manager: "systemd", Present: true, Unit: serviceManagerUnitState{
+			Unit: "pfm-mcp.service", Err: probeErr,
+		}}, "doctor: service-manager=systemd unit=pfm-mcp.service could_not_ask error=dial unix /run/user/1000/bus: connect: no such file or directory\n"},
 	}
 
 	for _, testCase := range cases {
@@ -87,16 +56,8 @@ func TestPrintServiceManagerDoctorReportsThreeStates(t *testing.T) {
 
 			var output strings.Builder
 			printServiceManagerDoctor(context.Background(), &output, nil, mcpEnabledRuntime())
-			got := output.String()
-			for _, want := range testCase.want {
-				if !strings.Contains(got, want) {
-					t.Fatalf("output %q missing %q", got, want)
-				}
-			}
-			for _, forbidden := range testCase.exclude {
-				if strings.Contains(got, forbidden) {
-					t.Fatalf("output %q must not contain %q for state %q", got, forbidden, testCase.name)
-				}
+			if got := output.String(); got != testCase.want {
+				t.Errorf("output = %q, want %q", got, testCase.want)
 			}
 		})
 	}

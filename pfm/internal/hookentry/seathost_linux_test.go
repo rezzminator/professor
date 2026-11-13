@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"net"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -212,7 +211,10 @@ func TestFailedSeatStartDoesNotOverwriteAReplacementSupervisor(t *testing.T) {
 	var stderr bytes.Buffer
 	failedSeatStart(context.Background(), db, old, fmt.Errorf("old startup failed"), &stderr)
 	current, found, err := db.Seat(context.Background(), old.SeatID)
-	if err != nil || !found || current != next || !strings.Contains(stderr.String(), "supervisor binding changed") {
+	if err != nil || !found || current != next ||
+		stderr.String() != `pfm internal seat-host: seat rebound: old startup failed
+pfm internal seat-host: failed supervisor binding changed
+` {
 		t.Fatalf(
 			"replacement changed: before=%+v after=%+v found=%v err=%v stderr=%s",
 			next,

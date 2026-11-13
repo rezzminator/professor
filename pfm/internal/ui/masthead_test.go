@@ -111,13 +111,16 @@ func TestChatsHeaderLineKeepsRefreshingInViewBesideALongFactsError(t *testing.T)
 		40,
 	) + ": permission denied"
 	line := ansi.Strip(model.chatsHeaderLine(100))
-	if !strings.Contains(line, "⟳ refreshing") || !strings.Contains(line, "⚠ row facts") {
+	if line != " Chats · 🥈 account 2 · ⚡ 1h · 14 rows · 1 hidden · 3 empty · ⟳ refreshing · ⚠ row facts: 3 unread…" {
 		t.Errorf("both the refresh marker and the facts warning must show: %q", line)
 	}
 	model.deck.factsError = ""
 	model.deck.scanError = "native seat s1 rollout: database is locked"
 	line = ansi.Strip(model.chatsHeaderLine(140))
-	if !strings.HasSuffix(strings.TrimRight(line, " "), "⚠ scan: native seat s1 rollout: database is locked") {
+	if strings.TrimRight(
+		line,
+		" ",
+	) != " Chats · 🥈 account 2 · ⚡ 1h · 14 rows · 1 hidden · 3 empty · ⟳ refreshing · ⚠ scan: native seat s1 rollout: database is locked" {
 		t.Errorf("the scan warning must end the header: %q", line)
 	}
 }
@@ -130,16 +133,18 @@ func TestChatsHeaderLineKeepsItsContextTokens(t *testing.T) {
 			t.Errorf("the context line lacks %q: %q", want, line)
 		}
 	}
-	if strings.Contains(line, "refreshing") {
+	if line != " Chats · 🥈 account 2 · ⚡ 1h · 14 rows · 1 hidden · 3 empty                                        " {
 		t.Errorf("a settled picker is not refreshing: %q", line)
 	}
 	model.refreshing = true
-	if line := ansi.Strip(model.chatsHeaderLine(100)); !strings.Contains(line, "⟳ refreshing") {
+	if line := ansi.Strip(
+		model.chatsHeaderLine(100),
+	); line != " Chats · 🥈 account 2 · ⚡ 1h · 14 rows · 1 hidden · 3 empty · ⟳ refreshing                         " {
 		t.Errorf("a refreshing picker says so: %q", line)
 	}
 	model.scheduleError = "disk on fire"
 	line = ansi.Strip(model.chatsHeaderLine(100))
-	if !strings.Contains(line, "schedule flags unreadable: disk on fire") {
+	if line != " Chats · schedule flags unreadable: disk on fire                                                    " {
 		t.Errorf("an unreadable flag store never reads as no schedules: %q", line)
 	}
 }

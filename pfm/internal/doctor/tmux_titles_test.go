@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/config"
@@ -24,7 +23,9 @@ func TestTmuxTitlesDoctorReportsADisabledPolicy(t *testing.T) {
 		paths.Values{TmuxDir: filepath.Join(t.TempDir(), "tmux-"+strconv.Itoa(os.Getuid()))}, machine,
 	)
 	want := "doctor: tmux titles policy=host-owned (config tmux.titles.enabled=false file)"
-	if !strings.Contains(stdout.String(), want) {
+	if stdout.String() != `doctor: tmux titles policy=host-owned (config tmux.titles.enabled=false file)
+doctor: tmux titles sockets=none live
+` {
 		t.Fatalf("report missing %q:\n%s", want, stdout.String())
 	}
 }

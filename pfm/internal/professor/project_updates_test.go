@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -72,7 +73,16 @@ func TestProjectUpdatesDiffIgnoresAnInheritedForeignRepository(t *testing.T) {
 	}
 	for _, item := range report.Items {
 		if item.Status == projectUpdated {
-			if code != 1 || item.DiffError != "" || !strings.Contains(item.Diff, "\n+upstream line\n") {
+			if code != 1 || item.DiffError != "" ||
+				item.Diff != `diff --git a/templates/project/settings.json b/templates/project/settings.json
+index 0967ef4..7748794 100644
+--- a/templates/project/settings.json
++++ b/templates/project/settings.json
+@@ -1 +1,2 @@
+-{}
++# fixture contract
++upstream line
+` {
 				t.Fatalf("foreign repository report code=%d diff=%q error=%q", code, item.Diff, item.DiffError)
 			}
 			return
@@ -112,9 +122,13 @@ func TestProjectUpdatesDiffReadsAFencedLinkedWorktreeStore(t *testing.T) {
 
 	var stdout bytes.Buffer
 	code := RunProjectUpdates(project, home, false, &stdout, nil)
-	if code != 1 || strings.Contains(stdout.String(), "UNREADABLE") ||
-		!strings.Contains(stdout.String(), "      +upstream line\n") {
-		t.Fatalf("RunProjectUpdates() code=%d, want 1 with the upstream diff printed:\n%s", code, stdout.String())
+	got := gitSHA.ReplaceAllString(
+		strings.NewReplacer(linkedRoot, "{store}", project, "{project}").Replace(stdout.String()),
+		"{sha}",
+	)
+	if want := "professor: {project}  blueprint {sha} → {sha}\n  current       1\n  ignored       0\n  UPDATED       1\n    .claude/settings.json   project/settings.json  pinned @{sha}\n      upstream change: git -C {store} diff {sha} -- templates/project/settings.json\n      diff --git a/templates/project/settings.json b/templates/project/settings.json\n      index {sha}..{sha} 100644\n      --- a/templates/project/settings.json\n      +++ b/templates/project/settings.json\n      @@ -1 +1,2 @@\n      -{}\n      +# fixture contract\n      +upstream line\n      port what applies into .claude/settings.json, keep the project's own edits, then: pfm update pin .claude/settings.json\n      or keep your version on purpose, on record: pfm update pin .claude/settings.json --keep \"<what you did not take, and why>\"\n  NEW           0\n  GONE-UPSTREAM 0\n  MOVED         0\n  LOCAL-DELETED 0\n  every row ends in a verb; re-run this report until it ends `clean` — a row left open is not a decision:\n    · UPDATED         port the intent of each upstream commit, then pfm update pin <local>; keeping your version on purpose: pfm update pin <local> --keep \"<what you did not take, and why>\"\n    · NEW             adopt, then pfm update pin --template <template> <local>; not for this project: pfm update ignore <template>\n    · GONE-UPSTREAM   pfm update drop <local>\n    · LOCAL-DELETED   restore the file, or pfm update drop <local> then pfm update ignore <template> (a dropped pin's template reads NEW); MOVED: the verbs on the row\n    · RETIRED-NAME    edit the line to its successor; a mention that must stay: pfm update accept <path> --reason \"<why>\" [--name <name>]\n    · INCOMPLETE      inspect the unscanned text; accept reviewed coverage: pfm update accept <path> --coverage --reason \"<why>\"; read failures must be fixed\n  run the verbs one at a time: each rewrites .professor/baseline.json\nREVIEW REQUIRED — 1 items; nothing was written.\n"; code != 1 ||
+		got != want {
+		t.Fatalf("RunProjectUpdates() code %d report = %q, want %q", code, got, want)
 	}
 }
 
@@ -558,19 +572,10 @@ func TestRenamedTemplateWithAnUnreadableSuccessorIsAFailureNotGoneUpstream(t *te
 	code := RunProjectUpdates(project, home, false, &stdout, nil)
 
 	report := stdout.String()
-	successor := filepath.Join(hub, "_index.md")
-	row := "    docs/agents/_index.md — UNREADABLE " + successor + ": stat " + successor + ": not a directory\n"
-	if code != 3 || !strings.Contains(report, row) ||
-		!strings.HasSuffix(report, "FAILED — 2 item(s) could not be read; nothing was written.\n") {
-		t.Fatalf(
-			"code=%d, want 3, the UNREADABLE row %q naming the successor and a FAILED terminal:\n%s",
-			code,
-			row,
-			report,
-		)
-	}
-	if strings.Contains(report, "delete it") {
-		t.Fatalf("report advises deleting while the successor is unreadable:\n%s", report)
+	got := gitSHA.ReplaceAllString(strings.NewReplacer(store, "{store}", project, "{project}").Replace(report), "{sha}")
+	if want := "professor: {project}  blueprint  → {sha}\n  current       0\n  ignored       0\n  UPDATED       0\n  NEW           3\n    project/docs-hub — adopt: copy/adapt it locally, then pfm update pin --template project/docs-hub <local> — or ignore\n    project/rumdl-policy.toml — adopt: copy/adapt it locally, then pfm update pin --template project/rumdl-policy.toml <local> — or ignore\n    project/settings.json — adopt: copy/adapt it locally, then pfm update pin --template project/settings.json <local> — or ignore\n  GONE-UPSTREAM 0\n  MOVED         0\n  LOCAL-DELETED 0\n  UNREADABLE    2\n    docs/agents/_index.md — UNREADABLE {store}/templates/project/docs-hub/_index.md: stat {store}/templates/project/docs-hub/_index.md: not a directory\n    docs/agents/standards.md — UNREADABLE {store}/templates/project/docs-hub/standards.md: stat {store}/templates/project/docs-hub/standards.md: not a directory\n  every row ends in a verb; re-run this report until it ends `clean` — a row left open is not a decision:\n    · UPDATED         port the intent of each upstream commit, then pfm update pin <local>; keeping your version on purpose: pfm update pin <local> --keep \"<what you did not take, and why>\"\n    · NEW             adopt, then pfm update pin --template <template> <local>; not for this project: pfm update ignore <template>\n    · GONE-UPSTREAM   pfm update drop <local>\n    · LOCAL-DELETED   restore the file, or pfm update drop <local> then pfm update ignore <template> (a dropped pin's template reads NEW); MOVED: the verbs on the row\n    · RETIRED-NAME    edit the line to its successor; a mention that must stay: pfm update accept <path> --reason \"<why>\" [--name <name>]\n    · INCOMPLETE      inspect the unscanned text; accept reviewed coverage: pfm update accept <path> --coverage --reason \"<why>\"; read failures must be fixed\n  run the verbs one at a time: each rewrites .professor/baseline.json\nFAILED — 2 item(s) could not be read; nothing was written.\n"; code != 3 ||
+		got != want {
+		t.Fatalf("RunProjectUpdates() code %d report = %q, want %q", code, got, want)
 	}
 }
 
@@ -642,7 +647,15 @@ func TestProjectUpdatesKeepsTheDiffWhenPinHistoryIsUnreadable(t *testing.T) {
 				want = fmt.Sprintf(want, item.Pin.PinnedSHA)
 			}
 			if item.Status != projectUpdated || item.HistoryError != want ||
-				!strings.Contains(item.Diff, "\n+upstream line\n") {
+				item.Diff != `diff --git a/templates/project/settings.json b/templates/project/settings.json
+index 0967ef4..7748794 100644
+--- a/templates/project/settings.json
++++ b/templates/project/settings.json
+@@ -1 +1,2 @@
+-{}
++# fixture contract
++upstream line
+` {
 				t.Fatalf("item = %+v, want UPDATED with its diff and historyError %q", item, want)
 			}
 			var stdout bytes.Buffer
@@ -659,3 +672,6 @@ func TestProjectUpdatesKeepsTheDiffWhenPinHistoryIsUnreadable(t *testing.T) {
 		})
 	}
 }
+
+// gitSHA matches the commit names a git store's fixture commits print, which differ per run.
+var gitSHA = regexp.MustCompile(`\b[0-9a-f]{7,40}\b`)

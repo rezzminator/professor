@@ -285,7 +285,7 @@ func TestCacheKeepwarmShieldStatesAndFailures(t *testing.T) {
 				t.Fatalf("cache prefix lost: %q", plain)
 			}
 			if tc.want == "" {
-				if strings.Contains(plain, "🛡") {
+				if plain != " │ 💾5m✓5m:0s 94%" {
 					t.Fatalf("unexpected shield: %q", plain)
 				}
 			} else if !strings.HasSuffix(got, tc.color+tc.want+reset) {
@@ -294,8 +294,8 @@ func TestCacheKeepwarmShieldStatesAndFailures(t *testing.T) {
 			lines := strings.Split(strings.TrimSpace(warn.String()), "\n")
 			switch {
 			case tc.relativeDir:
-				if len(lines) != 1 || !strings.Contains(lines[0], `"relative/state" is not absolute`) ||
-					strings.Contains(lines[0], "state  (") {
+				if len(lines) != 1 ||
+					lines[0] != "statusline: cache-keepwarm state directory \"relative/state\" is not absolute (shield shows ERR)" {
 					t.Fatalf("want one warning naming the unresolved directory, got %q", warn.String())
 				}
 			case tc.want == "🛡 ERR":

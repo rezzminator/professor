@@ -15,7 +15,8 @@ func TestReadTabPanesReadsPaneListThroughItsOneParser(t *testing.T) {
 	t.Setenv("TMUX_TMPDIR", t.TempDir())
 	fake := serveHerdr(t, map[string]string{"pane.list": `{"type":"pane_list"}`})
 	panes, err := ReadTabPanes(context.Background(), fake.path)
-	if err == nil || !strings.Contains(err.Error(), "panes missing or null") {
+	if err == nil ||
+		err.Error() != "list tab panes: herdr pane.list: panes missing or null in result \"{\\\"type\\\":\\\"pane_list\\\"}\"" {
 		t.Fatalf("ReadTabPanes() over a pane_list with no panes = %+v, %v; want ParsePanes' refusal", panes, err)
 	}
 }

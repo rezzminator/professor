@@ -97,7 +97,7 @@ func TestChatLSRefuseBadInputBeforeTheVerb(t *testing.T) {
 	for name, call := range map[string]func() error{
 		"ls": func() error { _, _, err := unwired.chatLS(ctx, nil, LSInput{}); return err },
 	} {
-		if err := call(); err == nil || !strings.Contains(err.Error(), name+" verb is not configured") {
+		if err := call(); err == nil || err.Error() != "ls verb is not configured" {
 			t.Errorf("%s without verbs error = %v", name, err)
 		}
 	}

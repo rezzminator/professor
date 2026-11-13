@@ -128,24 +128,19 @@ func TestLoadReportsAnUnusableCloneRecordOrFile(t *testing.T) {
 	if err := os.WriteFile(paths.SourceRepoPath(staleHome), []byte(gone+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for _, tc := range []struct{ name, home, want string }{
-		{"invalid file", invalidHome, invalidFile},
-		{"missing file", missingHome, missingFile},
-		{"clone gone", staleHome, gone},
+	for _, tc := range []struct{ name, home, file, want string }{
+		{"invalid file", invalidHome, invalidFile, "embedded · prices {file}: version must be 2, got 1"},
+		{"missing file", missingHome, missingFile, "embedded · read clone prices: open {file}: no such file or directory"},
+		{"clone gone", staleHome, gone, "embedded · clone record: inspect recorded source repository {file}: recorded source repository is unusable: stat {file}: no such file or directory"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			prices, err := LoadPrices(tc.home, "")
 			if err != nil {
 				t.Fatalf("LoadPrices: %v", err)
 			}
-			if prices.From != FromEmbedded || prices.FileError == nil ||
-				!strings.Contains(prices.FileError.Error(), tc.want) {
-				t.Fatalf(
-					"LoadPrices = from %q fileErr %v; want embedded and an error naming %s",
-					prices.From,
-					prices.FileError,
-					tc.want,
-				)
+			if got := strings.NewReplacer(tc.file, "{file}", tc.home, "{home}").
+				Replace(fmt.Sprintf("%s · %v", prices.From, prices.FileError)); got != tc.want {
+				t.Fatalf("LoadPrices = %q, want %q", got, tc.want)
 			}
 		})
 	}

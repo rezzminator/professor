@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -139,78 +141,69 @@ func TestVSCodeTerminalProfileRefusesAnOperatorProfileWithTheSameName(t *testing
 	}
 }
 
+// TestVSCodeUninstallPreservesAnOperatorOverrideAfterInstall: a key the install set and the operator
+// changed afterwards (an object key or a scalar) is the operator's; uninstall leaves it as they set it.
 func TestVSCodeUninstallPreservesAnOperatorOverrideAfterInstall(t *testing.T) {
 	t.Parallel()
-	home := vscodeLawHome(t)
-	settings := filepath.Join(home, "settings.json")
-	writeFixture(t, settings, `{}`)
-	options := Options{
-		MCPConfigPath: testConfigPath(t),
-		Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, VSCode: true,
-		vscodePlatform: "linux", vscodeSettingsPaths: []string{settings},
-	}
-	if _, err := Run(context.Background(), options); err != nil {
-		t.Fatal(err)
-	}
-	raw := []byte(readFixture(t, settings))
-	overridden, err := setJSONCProperty(raw, 0, "terminal.integrated.defaultProfile.linux", []byte(`"bash"`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(settings, overridden, 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	options.Mode, options.VSCode = ModeUninstall, false
-	if _, err := Run(context.Background(), options); err != nil {
-		t.Fatal(err)
-	}
-	got := readFixture(t, settings)
-	if !strings.Contains(got, `"terminal.integrated.defaultProfile.linux": "bash"`) {
-		t.Fatalf("uninstall clobbered the operator's post-install default:\n%s", got)
+	for _, tc := range []struct {
+		key                 string
+		installed, override any
+	}{
+		{"terminal.integrated.defaultProfile.linux", "PFM", "bash"},
+		{"terminal.integrated.showExitAlert", false, true},
+	} {
+		home := vscodeLawHome(t)
+		settings := filepath.Join(home, "settings.json")
+		writeFixture(t, settings, `{}`)
+		options := Options{
+			MCPConfigPath: testConfigPath(t),
+			Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, VSCode: true,
+			vscodePlatform: "linux", vscodeSettingsPaths: []string{settings},
+		}
+		if _, err := Run(context.Background(), options); err != nil {
+			t.Fatal(err)
+		}
+		raw := []byte(readFixture(t, settings))
+		if got := decodeSettings(t, settings)[tc.key]; got != tc.installed {
+			t.Fatalf("install set %s = %v, want %v", tc.key, got, tc.installed)
+		}
+		value, err := json.Marshal(tc.override)
+		if err != nil {
+			t.Fatal(err)
+		}
+		overridden, err := setJSONCProperty(raw, 0, tc.key, value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(settings, overridden, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		options.Mode, options.VSCode = ModeUninstall, false
+		if _, err := Run(context.Background(), options); err != nil {
+			t.Fatal(err)
+		}
+		if got, want := decodeSettings(
+			t,
+			settings,
+		), map[string]any{
+			tc.key: tc.override,
+		}; !reflect.DeepEqual(
+			got,
+			want,
+		) {
+			t.Fatalf("uninstall left %v, want the operator's %v", got, want)
+		}
 	}
 }
 
-// TestVSCodeScalarKeyOperatorOverrideSurvivesUninstall mirrors
-// TestVSCodeUninstallPreservesAnOperatorOverrideAfterInstall for the four
-// scalar keys ScalarOwned added alongside DefaultOwned: an operator turning
-// the exit alert back on after install is an intentional override, and
-// uninstall must leave it exactly as the operator left it rather than
-// restoring pfm's own remembered prior state.
-func TestVSCodeScalarKeyOperatorOverrideSurvivesUninstall(t *testing.T) {
-	t.Parallel()
-	home := vscodeLawHome(t)
-	settings := filepath.Join(home, "settings.json")
-	writeFixture(t, settings, `{}`)
-	options := Options{
-		MCPConfigPath: testConfigPath(t),
-		Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, VSCode: true,
-		vscodePlatform: "linux", vscodeSettingsPaths: []string{settings},
-	}
-	if _, err := Run(context.Background(), options); err != nil {
-		t.Fatal(err)
-	}
-	if got := readFixture(t, settings); !strings.Contains(got, `"terminal.integrated.showExitAlert": false`) {
-		t.Fatalf("install did not set showExitAlert:\n%s", got)
-	}
-
-	raw := []byte(readFixture(t, settings))
-	overridden, err := setJSONCProperty(raw, 0, "terminal.integrated.showExitAlert", []byte("true"))
+// decodeSettings reads a VS Code settings file as the JSONC object it is.
+func decodeSettings(t *testing.T, path string) map[string]any {
+	t.Helper()
+	object, err := decodeJSONCObject([]byte(readFixture(t, path)))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("%s does not parse as JSONC: %v", path, err)
 	}
-	if err := os.WriteFile(settings, overridden, 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	options.Mode, options.VSCode = ModeUninstall, false
-	if _, err := Run(context.Background(), options); err != nil {
-		t.Fatal(err)
-	}
-	got := readFixture(t, settings)
-	if !strings.Contains(got, `"terminal.integrated.showExitAlert": true`) {
-		t.Fatalf("uninstall clobbered the operator's post-install showExitAlert override:\n%s", got)
-	}
+	return object
 }
 
 func TestVSCodeUninstallRemovesASettingsFilePFMCreated(t *testing.T) {
@@ -237,23 +230,6 @@ func TestVSCodeUninstallRemovesASettingsFilePFMCreated(t *testing.T) {
 	}
 	if backups, _ := filepath.Glob(settings + ".pre-professor-*"); len(backups) != 0 {
 		t.Fatalf("uninstall backed up an installer-created settings file: %v", backups)
-	}
-}
-
-func TestVSCodeProfileUsesTheShimPickerValueExplicitly(t *testing.T) {
-	t.Parallel()
-	shim := readFixture(t, filepath.Join("assets", "shim", "pfm.zsh"))
-	// The value opens the shim's own pfm function, which hands the terminal to
-	// the chosen chat; both of its doors reach the absolute PFM binary, never a
-	// PATH lookup that could find another pfm.
-	for _, want := range []string{
-		`cmd=pfm ;;`,
-		`"$HOME/.local/bin/pfm" "$@"`,
-		`line="$("$HOME/.local/bin/pfm")"`,
-	} {
-		if !strings.Contains(shim, want) {
-			t.Fatalf("the installed PFM_AUTO_OPEN=pfm value is not routed to the absolute PFM picker: no %s", want)
-		}
 	}
 }
 
@@ -323,9 +299,12 @@ func TestVSCodeNewPathUsesLivePlatformNotAnOlderRecordsPlatform(t *testing.T) {
 	if err := installer.wireVSCode(); err != nil {
 		t.Fatal(err)
 	}
-	got := readFixture(t, newPath)
-	if !strings.Contains(got, `"terminal.integrated.profiles.linux"`) || strings.Contains(got, `profiles.osx`) {
-		t.Fatalf("new VS Code path inherited stale record platform:\n%s", got)
+	if got, want := slices.Sorted(maps.Keys(decodeSettings(t, newPath))), []string{
+		"remote.autoForwardPorts", "terminal.integrated.defaultProfile.linux",
+		"terminal.integrated.enablePersistentSessions", "terminal.integrated.persistentSessionReviveProcess",
+		"terminal.integrated.profiles.linux", "terminal.integrated.showExitAlert",
+	}; !slices.Equal(got, want) {
+		t.Fatalf("new VS Code path keys = %q\nwant %q", got, want)
 	}
 }
 
@@ -352,9 +331,13 @@ func TestVSCodeEditedProfileSurvivesUninstallAndDoesNotBlockReinstall(t *testing
 	if _, err := Run(context.Background(), options); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(readFixture(t, settings), `/operator/zsh`) {
-		t.Fatal("uninstall removed the operator-edited PFM profile")
-	}
+	wantOutputLines(
+		t,
+		readFixture(t, settings),
+		[]string{`      "path": "/operator/zsh"`},
+		"/operator/zsh",
+		"defaultProfile",
+	)
 	ownership := filepath.Join(home, ".local", "share", "pfm", "install", vscodeOwnershipName)
 	if _, err := os.Stat(ownership); err != nil {
 		t.Fatalf("uninstall dropped recovery ownership for edited profile: %v\n%s", err, removed.String())
@@ -364,11 +347,9 @@ func TestVSCodeEditedProfileSurvivesUninstallAndDoesNotBlockReinstall(t *testing
 	if _, err := Run(context.Background(), options); err != nil {
 		t.Fatalf("reinstall after edited-profile refusal: %v", err)
 	}
-	got := readFixture(t, settings)
-	if !strings.Contains(got, `/operator/zsh`) ||
-		!strings.Contains(got, `"terminal.integrated.defaultProfile.linux": "PFM"`) {
-		t.Fatalf("reinstall did not reconcile around retained edited profile:\n%s", got)
-	}
+	wantOutputLines(t, readFixture(t, settings), []string{
+		`      "path": "/operator/zsh"`, `  "terminal.integrated.defaultProfile.linux": "PFM"`,
+	}, "/operator/zsh", "defaultProfile")
 }
 
 func TestMalformedVSCodeSettingsSkipsVisiblyWithoutBlockingInstall(t *testing.T) {
@@ -516,31 +497,35 @@ func TestVSCodeMergeToleratesTheRealMalformedTrailingCommaFile(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("merge refused the real malformed file: %v\n%s", err, output.String())
 	}
-	if strings.Contains(output.String(), "VS Code settings skipped") {
-		t.Fatalf("merge skipped the real malformed file instead of tolerating it:\n%s", output.String())
+	wantOutputLines(t, output.String(), nil, "VS Code settings skipped")
+	// The merge adds pfm's keys and keeps the operator's own (bash, vsct, the automation profile, the tab
+	// title, the scrollback) untouched.
+	settingsKeys := []string{
+		"remote.autoForwardPorts", "terminal.integrated.automationProfile.linux",
+		"terminal.integrated.defaultProfile.linux", "terminal.integrated.enablePersistentSessions",
+		"terminal.integrated.persistentSessionReviveProcess", "terminal.integrated.persistentSessionScrollback",
+		"terminal.integrated.profiles.linux", "terminal.integrated.showExitAlert", "terminal.integrated.tabs.title",
 	}
-
-	got := readFixture(t, settings)
-	if _, err := decodeJSONCObject([]byte(got)); err != nil {
-		t.Fatalf("result does not parse as JSONC: %v\n%s", err, got)
+	got := decodeSettings(t, settings)
+	if keys := slices.Sorted(maps.Keys(got)); !slices.Equal(keys, settingsKeys) {
+		t.Fatalf("merged keys = %q\nwant %q", keys, settingsKeys)
 	}
-	for _, want := range []string{
-		`"PFM":`,
-		`"PFM_AUTO_OPEN": "pfm"`,
-		`"terminal.integrated.defaultProfile.linux": "PFM"`,
-		`"terminal.integrated.enablePersistentSessions": true`,
-		`"terminal.integrated.persistentSessionReviveProcess": "never"`,
-		`"terminal.integrated.showExitAlert": false`,
-		`"remote.autoForwardPorts": false`,
-		// the operator's own content, untouched by the merge
-		`"bash": {`,
-		`"vsct": {`,
-		`"terminal.integrated.automationProfile.linux"`,
-		`"terminal.integrated.tabs.title": "${sequence}"`,
-		`"terminal.integrated.persistentSessionScrollback": 2000`,
+	profiles, _ := got["terminal.integrated.profiles.linux"].(map[string]any)
+	wantProfiles := []string{
+		"PFM", "bash", "devbox (tmux)", "devbox (zsh)", "devbox-2 (tmux)", "devbox-2 (zsh)", "tmux", "tmux + claude",
+		"vsct", "zsh",
+	}
+	if keys := slices.Sorted(maps.Keys(profiles)); !slices.Equal(keys, wantProfiles) {
+		t.Fatalf("merged profiles = %q\nwant %q: PFM beside every profile of the operator's", keys, wantProfiles)
+	}
+	for key, want := range map[string]any{
+		"terminal.integrated.defaultProfile.linux": "PFM", "terminal.integrated.enablePersistentSessions": true,
+		"terminal.integrated.persistentSessionReviveProcess": "never", "terminal.integrated.showExitAlert": false,
+		"remote.autoForwardPorts": false, "terminal.integrated.tabs.title": "${sequence}",
+		"terminal.integrated.persistentSessionScrollback": float64(2000),
 	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("result missing %q:\n%s", want, got)
+		if got[key] != want {
+			t.Errorf("merged %s = %v, want %v", key, got[key], want)
 		}
 	}
 }

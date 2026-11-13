@@ -1,15 +1,18 @@
 // Package testjail holds the platform setup the suite needs before any test
 // runs. It is imported only by _test.go files, so it never reaches the binary.
 //
-// database.go: DatabaseFiles, the allowance a test that needs SQLite's own
-// file calls; Run turns the SQLite door's memory mode on for every test.
-// executable.go: WriteExecutable, the one writer of a file a test runs;
-// WriteExecutableNeverRun, of one the code under test only resolves or reads;
-// the fake logged-out engines.
+// database.go: DatabaseFiles, the allowance a test that needs SQLite's own file calls; Run turns the
+// SQLite door's memory mode on for every test.
+// executable.go: WriteExecutable, the one writer of a file a test runs; WriteExecutableNeverRun, of one
+// the code under test only resolves or reads; the fake logged-out engines.
 // enginesync.go, enginesync_runner.go: the engine-sync fakes, run and in process.
 // fence.go: runsHere, the guard Run asks first; tier_unit.go and tier_machine.go, the build-tag pair
 // telling a unit binary from one built with the jail (or e2e, journey) tag.
 // unitnet.go: the unit net an armed unit binary runs inside, and its one switch.
+// jail_dir.go: RunInJail, Run starting a package's tests in the jail directory.
+// place.go: Place, the root an invented absolute fixture path takes in the jail directory.
+// profile.go: the step profiler of every package process; profile_place.go names the process and holds
+// ModuleRoot; profile_run.go, profile_run_summary.go: the run directory a plain go test records into.
 package testjail
 
 import (
@@ -54,6 +57,11 @@ func Run(m *testing.M) int {
 	if !runsHere(unitBinary, unitNetArmed, paths.OSEnv{}, fenceMarker) {
 		return runInFence() // fence.go: no machine-tier test ever runs on the machine that started it
 	}
+	armed := UnitNetArmed()
+	if err := armUnitProcess(armed); err != nil { // unitnet.go: umask, environment, zone, exec door
+		warnSetup("%v", err)
+		return 1
+	}
 	// A chat exports its live state store's paths and its install's mark; a jailed
 	// test must open the jail's own store, and a process it starts must never carry
 	// the operator's mark, or a stop acting for the operator's install would own it.
@@ -76,17 +84,9 @@ func Run(m *testing.M) int {
 		// marker (database.go); a re-exec'd helper opens files, as pfm itself does.
 		sqlitedb.ServeTestMemory()
 	}
-	// The operator's ~/.local/bin and pfm's managed install bin hold pfm's own
-	// `claude` launcher shim; a jailed test resolving a binary through PATH must
-	// never reach it. Scrub before anything below resolves a binary.
-	hostEnv := paths.OSEnv{}
-	operatorHome, homeErr := hostEnv.Home()
-	if homeErr != nil {
-		warnSetup("user home unknown, stripping only pfm install bin dirs from PATH: %v", homeErr)
-		operatorHome = ""
-	}
-	if err := os.Setenv("PATH", scrubOperatorPATH(hostEnv.Get("PATH"), operatorHome)); err != nil {
-		warnSetup("scrub PATH: %v", err)
+	// Scrub before anything below resolves a binary (path_scrub.go).
+	if err := scrubPATH(armed); err != nil {
+		warnSetup("%v", err)
 		return 1
 	}
 	if err := pinLaunchShell(deps.Resolve); err != nil {
@@ -155,7 +155,7 @@ func Run(m *testing.M) int {
 	// AndInternalCLI, 5/6 red under load). Pin the Go directories outside the
 	// jail here, before HOME/XDG_CONFIG_HOME move. A missing home or cache dir
 	// is reported, never silently left to the jail.
-	if code := pinGoDirs(); code != 0 {
+	if code := pinGoDirs(armed); code != 0 {
 		return code
 	}
 	base, err := filepath.EvalSymlinks(paths.TempRoot())
@@ -187,6 +187,9 @@ func Run(m *testing.M) int {
 		warnSetup("%v", setupErr)
 		return 1
 	}
+	if !enterJailDir() {
+		return 1
+	}
 	return runProfiled(m)
 }
 
@@ -196,7 +199,7 @@ var activeProfiler atomic.Pointer[profiler]
 
 // runProfiled runs the package tests under the always-on profiler (profile.go).
 func runProfiled(m *testing.M) int {
-	p, off := startProfile()
+	p, off := startProfile(testCount(m))
 	activeProfiler.Store(p)
 	code := m.Run()
 	activeProfiler.Store(nil)
@@ -607,7 +610,6 @@ func CleanHome(t *testing.T, dirs []string, files map[string]string) config.Runt
 	if err := WriteExecutable(filepath.Join(hostShimDir, "pfm"), []byte("host-pfm"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	stagePython3(t, hostShimDir)
 	managedClaude := filepath.Join(home, ".local", "share", "pfm", "install", "bin", claudeBinary)
 	if err := os.MkdirAll(filepath.Dir(managedClaude), 0o700); err != nil {
 		t.Fatal(err)
@@ -679,7 +681,10 @@ func CleanHome(t *testing.T, dirs []string, files map[string]string) config.Runt
 // HOME/XDG_CONFIG_HOME never writes into the jail. Returns a non-zero exit code
 // when a required value cannot be chosen or set; a missing user cache/home dir
 // is reported and the variable left as it was.
-func pinGoDirs() int {
+func pinGoDirs(armed bool) int {
+	if armed { // an armed unit binary starts no `go` child and pins no directory derived from the real home
+		return 0
+	}
 	set := func(name, value string) int {
 		if err := os.Setenv(name, value); err != nil {
 			warnSetup("set %s: %v", name, err)

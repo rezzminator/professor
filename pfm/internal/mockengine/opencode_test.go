@@ -111,7 +111,8 @@ func TestOpenCodeInlineMCPKeepsNamedRefusal(t *testing.T) {
 	session := fix.startTUI("opencode", []string{fix.work}, nil)
 	session.waitFrame("composer", func(frame string) bool { return strings.Contains(frame, openCodeShapes.Composer) })
 	session.typeLine(`mock-engine: {"type":"mcp","tool":"last"}`)
-	if code := session.waitExit(); code != ExitUnpinned || !strings.Contains(session.stderr.String(), "opencode MCP") {
+	if code := session.waitExit(); code != ExitUnpinned ||
+		session.stderr.String() != "mock-engine: mcp: opencode MCP wiring is unpinned in this mock; the step is refused, not guessed\n" {
 		t.Fatalf("inline MCP exit=%d stderr=%q", code, session.stderr.String())
 	}
 }
@@ -136,7 +137,8 @@ func TestOpenCodeMCPStepIsRefusedByName(t *testing.T) {
 	t.Chdir(fix.work)
 	fix.write(Scenario{SessionID: fixtureOpenCodeSession, Steps: []Step{{Type: StepMCP, Server: "chat"}}})
 	code, _, stderr := runOnce(fix, "opencode", []string{"run", "hello"}, "")
-	if code != ExitUnpinned || !strings.Contains(stderr, "opencode MCP") || !strings.Contains(stderr, "unpinned") {
+	if code != ExitUnpinned ||
+		stderr != "mock-engine: opencode MCP wiring is unpinned in this mock — pfm has no opencode.json writer or reader (map § 2c UNRESOLVED); the step is refused, not guessed\n" {
 		t.Fatalf("exit=%d stderr=%q, want %d naming the OpenCode MCP gap", code, stderr, ExitUnpinned)
 	}
 }

@@ -1,6 +1,7 @@
 package reload
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -78,8 +79,13 @@ func TestTranscriptAppendNeverOverwritesAnExistingBackup(t *testing.T) {
 }
 
 func TestOpenTranscriptNamesAMissingFile(t *testing.T) {
-	_, err := OpenTranscript(filepath.Join(t.TempDir(), "missing.jsonl"))
-	if err == nil || !strings.Contains(err.Error(), "missing.jsonl") {
-		t.Fatalf("OpenTranscript(missing) = %v, want an error naming the path", err)
+	dir := t.TempDir()
+	_, err := OpenTranscript(filepath.Join(dir, "missing.jsonl"))
+	if got, want := strings.ReplaceAll(
+		fmt.Sprint(err),
+		dir,
+		"{dir}",
+	), "open transcript \"{dir}/missing.jsonl\": open {dir}/missing.jsonl: no such file or directory"; got != want {
+		t.Fatalf("OpenTranscript(missing) = %q, want %q", got, want)
 	}
 }

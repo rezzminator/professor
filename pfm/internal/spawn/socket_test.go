@@ -1,7 +1,7 @@
 package spawn
 
 import (
-	"strings"
+	"regexp"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/engine"
@@ -16,7 +16,9 @@ func TestFreshSocketHonorsTestOverride(t *testing.T) {
 
 func TestFreshSocketUsesEnginePrefix(t *testing.T) {
 	t.Setenv(TestFreshSocketEnv, "")
-	if got := FreshSocket(engine.Codex); !strings.HasPrefix(got, "cx-") {
-		t.Fatalf("FreshSocket() = %q, want cx- prefix", got)
+	if got, want := regexp.MustCompile(`\d+`).
+		ReplaceAllString(FreshSocket(engine.Codex), "N"),
+		"cx-N-N-N"; got != want {
+		t.Fatalf("FreshSocket() = %q, want %q", got, want)
 	}
 }

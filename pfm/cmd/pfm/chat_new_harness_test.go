@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,37 +19,39 @@ func TestChatNewHarnessPromptRefusalsHappenBeforeSpawnAndWriteNothing(t *testing
 	if err := os.WriteFile(harness, []byte("ALT"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for _, testCase := range []struct {
-		name, engine, file, want string
-	}{
-		// The jail rosters no Codex or OpenCode account, so account resolution
-		// refuses those engines first; the engine gate itself is pinned by
-		// TestLoadHarnessPromptForGatesTheEngineAndPassesAnEmptyPath.
-		{name: "codex", engine: "codex", file: harness, want: "pfm chat new: "},
-		{name: "opencode", engine: "opencode", file: harness, want: "pfm chat new: "},
-		{name: "missing file", engine: "claude", file: filepath.Join(root, "gone.md"), want: "no such file"},
+	// The jail rosters no Codex or OpenCode account, so account resolution refuses those engines
+	// first; the engine gate itself is pinned by TestLoadHarnessPromptForGatesTheEngineAndPassesAnEmptyPath.
+	var got strings.Builder
+	for _, test := range []struct{ engine, file string }{
+		{"codex", harness}, {"opencode", harness}, {"claude", filepath.Join(root, "gone.md")},
 	} {
-		t.Run(testCase.name, func(t *testing.T) {
-			var stdout, stderr bytes.Buffer
-			code := run([]string{
-				"chat", "new", "--engine", testCase.engine, "--name", "alt",
-				"--cwd", workDir, "--harness-prompt", testCase.file,
-			}, &stdout, &stderr)
-			if code != 2 || stdout.Len() != 0 || !strings.Contains(stderr.String(), testCase.want) {
-				t.Fatalf("run() exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
-			}
-			for _, directory := range []string{os.Getenv("PFM_SID_DIR"), os.Getenv("PFM_TMUX_DIR")} {
-				entries, err := os.ReadDir(directory)
-				if err != nil {
-					t.Fatal(err)
-				}
-				for _, entry := range entries {
-					if strings.HasPrefix(entry.Name(), "harness-prompt-") || strings.HasPrefix(entry.Name(), "cc-") ||
-						strings.HasPrefix(entry.Name(), "cx-") {
-						t.Fatalf("refused launch left %s in %s", entry.Name(), directory)
-					}
-				}
-			}
-		})
+		var stdout, stderr bytes.Buffer
+		code := run([]string{
+			"chat", "new", "--engine", test.engine, "--name", "alt", "--cwd", workDir, "--harness-prompt", test.file,
+		}, &stdout, &stderr)
+		fmt.Fprintf(&got, "%d %q %s%v\n", code, stdout.String(), stderr.String(),
+			dirNames(t, os.Getenv("PFM_SID_DIR"), os.Getenv("PFM_TMUX_DIR")))
 	}
+	if got, want := rooted(
+		got.String(),
+		root,
+	), "2 \"\" pfm chat new: requested Codex account 0 is not in the configured roster\n[]\n2 \"\" pfm chat new: OpenCode account 0 is not in the configured roster\n[]\n2 \"\" pfm chat new: harness prompt {root}/gone.md: stat {root}/gone.md: no such file or directory\n[]\n"; got != want {
+		t.Fatalf("refusals = %q, want %q", got, want)
+	}
+}
+
+// dirNames lists the entries of each directory, in order.
+func dirNames(t *testing.T, dirs ...string) []string {
+	t.Helper()
+	var names []string
+	for _, dir := range dirs {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, entry := range entries {
+			names = append(names, entry.Name())
+		}
+	}
+	return names
 }

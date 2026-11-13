@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/testjail"
@@ -111,11 +110,11 @@ func TestChatBranchFallsToTheAccountRefusalWhenTheParentScanFails(t *testing.T) 
 		"--engine", "claude", "--session-id", someID,
 		"--cwd", jail.root, "--name", "scan-failure-branch",
 	)
-	refusal := "pfm chat branch: the account of session " + someID +
-		" could not be resolved (no launch record, no live seat naming it); pass --account N\n"
-	if code != 1 || stdout != "" || !strings.HasPrefix(stderr, "pfm chat branch: resolve parent session: ") ||
-		!strings.HasSuffix(stderr, refusal) {
-		t.Fatalf("chat branch rc=%d stdout=%q stderr=%q, want rc=1, the scan failure named, then %q",
-			code, stdout, stderr, refusal)
+	if got, want := rooted(
+		stderr,
+		jail.root,
+	), "pfm chat branch: resolve parent session: inspect cache database {root}/not-a-directory/pfm-cache.db: stat {root}/not-a-directory/pfm-cache.db: not a directory\npfm chat branch: the account of session a7000000-7777-4777-8777-777777777777 could not be resolved (no launch record, no live seat naming it); pass --account N\n"; code != 1 || stdout != "" ||
+		got != want {
+		t.Fatalf("chat branch rc=%d stdout=%q stderr = %q, want %q", code, stdout, got, want)
 	}
 }

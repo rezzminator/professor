@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -164,10 +165,10 @@ func TestUpdateGitFixtureCopiesOwnTheirRemote(t *testing.T) {
 	gitTemp(t, first, "tag", "v0.11.0")
 	gitTemp(t, first, "push", "-q", "origin", "v0.11.0")
 	second := newUpdateGitFixture(t)
-	for repo, want := range map[string]bool{first: true, second: false} {
+	for repo, want := range map[string]string{first: "{sha}\trefs/tags/v0.11.0", second: ""} {
 		output := updateGit.Must(t, repo, "ls-remote", "--tags", "origin", "refs/tags/v0.11.0")
-		if got := strings.Contains(output, "refs/tags/v0.11.0"); got != want {
-			t.Errorf("origin of %s holds v0.11.0 = %v, want %v: %q", repo, got, want, output)
+		if got := regexp.MustCompile(`[0-9a-f]{40}`).ReplaceAllString(output, "{sha}"); got != want {
+			t.Errorf("ls-remote of %s = %q, want %q", repo, got, want)
 		}
 	}
 }

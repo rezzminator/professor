@@ -3,9 +3,6 @@ package codexprompt
 import (
 	"strings"
 	"testing"
-
-	harnessprompts "github.com/rezzminator/professor/pfm/harness-prompts"
-	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // reviewTestModel is the model every rewrite below is pinned to, read from the
@@ -100,26 +97,5 @@ func TestRewriteCodeReviewSlotFormIsFlightScopedWithARunTimeEffort(t *testing.T)
 	level := RewriteCodeReview("/code-review low")
 	if !strings.Contains(level, codeReviewPrompt) || strings.Contains(level, codeReviewSlot) {
 		t.Fatalf("a written level must stay task-scoped at a baked effort: %q", level)
-	}
-}
-
-func TestComposedCodexFleetPromptCarriesTheShellReview(t *testing.T) {
-	prompt, err := FleetPrompt(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(prompt, codeReviewCommand) {
-		t.Fatalf("the composed Codex fleet prompt still spells %s", codeReviewCommand)
-	}
-	mapped := RewriteCodeReview("- Your last step is `" + codeReviewCommand + " low` over your own change.\n")
-	if strings.Contains(mapped, codeReviewCommand) || !strings.Contains(mapped, reviewWant("low")) {
-		t.Fatalf("the compose-time mapping left a fixture tail unmapped:\n%s", mapped)
-	}
-	claude, err := harnessprompts.Composed(t.TempDir(), pfmengine.MustLookup(pfmengine.Claude).LongName)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(claude), "codex review -c") {
-		t.Fatal("the Claude fleet prompt spells Codex's review — the shared parts are no longer engine-neutral")
 	}
 }

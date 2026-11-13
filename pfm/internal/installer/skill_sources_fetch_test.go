@@ -158,9 +158,10 @@ func TestSourceFetchedSkillsCreateTheStoreRootOnlyUnderTheLock(t *testing.T) {
 
 	output := runSkillInstall(t, home, ModeApply)
 
-	if !strings.Contains(output, "SKILL-SOURCES-BUSY ") {
-		t.Fatalf("a held lock was not reported busy:\n%s", output)
-	}
+	wantOutputLines(t, output, []string{
+		"  skip    SKILL-SOURCES-BUSY another pfm install holds " + skillStoreRoot(home) +
+			"; source-fetched skills left as they are",
+	}, "SKILL-SOURCES-")
 	requireNoPath(t, skillStoreRoot(home), "the store root was created outside the lock")
 }
 

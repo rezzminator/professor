@@ -3,10 +3,10 @@ package doctor
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 
@@ -111,13 +111,10 @@ func TestProbeServiceManagerLaunchdOtherFailureCouldNotAsk(t *testing.T) {
 	)
 
 	report := launchdServiceManager.service(context.Background(), fake)
-	if report.Unit.Err == nil {
-		t.Fatalf("a missing domain must be could-not-ask, got %+v", report.Unit)
-	}
-	for _, want := range []string{"exit=112", "Could not find domain"} {
-		if !strings.Contains(report.Unit.Err.Error(), want) {
-			t.Fatalf("error %q missing %q", report.Unit.Err, want)
-		}
+	if got, want := fmt.Sprint(
+		report.Unit.Err,
+	), "launchctl print gui/"+strconv.Itoa(os.Getuid())+"/com.professor.pfm.mcp exit=112 stderr=\"Bad request.\\nCould not find domain for user gui: 501\""; got != want {
+		t.Errorf("could-not-ask error = %q, want %q", got, want)
 	}
 }
 
@@ -135,7 +132,9 @@ func TestProbeServiceManagerLaunchdTimeoutCouldNotAsk(t *testing.T) {
 	if report.Unit.Err == nil {
 		t.Fatalf("an expired probe must be could-not-ask, got %+v", report.Unit)
 	}
-	if !strings.Contains(report.Unit.Err.Error(), deps.ProbeTimeout.String()) {
+	if report.Unit.Err.Error() != "launchctl print gui/"+strconv.Itoa(
+		os.Getuid(),
+	)+"/com.professor.pfm.mcp did not answer within the 5s deadline: context deadline exceeded" {
 		t.Fatalf("error %q does not name the %s deadline", report.Unit.Err, deps.ProbeTimeout)
 	}
 }

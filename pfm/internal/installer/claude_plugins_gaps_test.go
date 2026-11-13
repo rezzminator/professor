@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -149,14 +150,23 @@ func TestEnsureClaudePluginsRefusesAListedRetiredName(t *testing.T) {
 	inst := pluginEngine(home, binary, first, second, runner, &out, true)
 	inst.options.ClaudePlugins = []pfmconfig.ClaudePlugin{{ID: retired}, {ID: successor}}
 	err := inst.ensureClaudePlugins(context.Background())
-	if err == nil || !strings.Contains(err.Error(), problem) {
-		t.Fatalf("err = %v, want one naming %q\n%s", err, problem, out.String())
+	wantErr := "claude plugin " + retired + "@professor in " + first + ": " + problem + " — replace " + retired +
+		" with " + successor + " in " + pfmconfig.KeyClaudePlugins + ", then run pfm install --yes"
+	if err == nil || err.Error() != wantErr {
+		t.Fatalf("err = %v, want %q\n%s", err, wantErr, out.String())
 	}
+	var argvs []string
 	for _, call := range runner.calls {
-		// The successor installs from the retired name's repository; only its ids are the retired copy's.
-		if strings.Contains(call.argv, retired+"@") {
-			t.Fatalf("the retired name was ensured: %q\n%s", call.argv, out.String())
-		}
+		argvs = append(argvs, call.argv)
+	}
+	if want := []string{
+		"plugin marketplace add rezzminator/professor",
+		"plugin install " + successor + "@professor -y",
+	}; !slices.Equal(
+		argvs,
+		want,
+	) {
+		t.Fatalf("plugin commands = %q, want %q (the retired name never ensured)\n%s", argvs, want, out.String())
 	}
 	var document struct {
 		Enabled map[string]any `json:"enabledPlugins"`
@@ -164,10 +174,8 @@ func TestEnsureClaudePluginsRefusesAListedRetiredName(t *testing.T) {
 	if err := json.Unmarshal([]byte(readFixture(t, settings)), &document); err != nil {
 		t.Fatal(err)
 	}
-	for id, on := range document.Enabled {
-		if strings.HasPrefix(id, retired+"@") && on != false {
-			t.Fatalf("%s left enabled: %v\n%s", id, document.Enabled, out.String())
-		}
+	if want := map[string]any{"old-compact@old-compact-dev": false}; !maps.Equal(document.Enabled, want) {
+		t.Fatalf("enabledPlugins = %v, want %v\n%s", document.Enabled, want, out.String())
 	}
 	targets := ClaudePluginTargets(ClaudePluginBuild{Plugins: []pfmconfig.ClaudePlugin{{ID: retired}}})
 	gaps, err := ClaudePluginGaps(settings, targets, testRetiredPlugins)

@@ -3,8 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -132,9 +134,12 @@ func TestRefreshReloadRolePromptTreatsMissingAsRolelessAndRejectsBadOrGoneRoles(
 		"%1",
 		repo,
 		home,
-	); err == nil ||
-		!strings.Contains(err.Error(), "vanished") {
-		t.Fatalf("gone role error = %v, want the role name", err)
+	); rooted(fmt.Sprint(err), filepath.Dir(home)) != "agent role: no cc role \"vanished\" found\n  searched {root}/001/.claude/agents: directory not found\n  searched {root}/002/.claude/agents: directory not found\navailable roles: none found" {
+		t.Fatalf(
+			"gone role error = %q, want %q",
+			rooted(fmt.Sprint(err), filepath.Dir(home)),
+			"agent role: no cc role \"vanished\" found\n  searched {root}/001/.claude/agents: directory not found\n  searched {root}/002/.claude/agents: directory not found\navailable roles: none found",
+		)
 	}
 }
 
@@ -163,7 +168,9 @@ func (reloadTargetTmux) Display(context.Context, string, string, string) error {
 func (reloadTargetTmux) KillPane(context.Context, string, string) error        { return nil }
 
 func TestReloadUsageIsCanonical(t *testing.T) {
-	if !strings.Contains(reload.Usage, "usage: pfm chat reload") {
+	if reload.Usage != `usage: pfm chat reload [--account N] [--model M] [--effort E] [--cache 1h|5m (or --1h, --5m, --cache on|off)] [--new [--hide]] [--then "prompt"] [--sock socket]
+       with no --sock, the calling chat's own pane is detected automatically;
+       --hide (with --new) hides the conversation left behind from the picker` {
 		t.Fatalf("reload usage=%q", reload.Usage)
 	}
 }
@@ -239,7 +246,7 @@ func TestReloadTargetWithPaneRejectsAPaneThatIsNotLive(t *testing.T) {
 		context.Background(), "/jail/tmux/cc-gone", "%9",
 		paths.Values{}, commandRuntime{}, reloadTargetTmux{panes: panes}, &stderr, nil,
 	)
-	if code == 0 || !strings.Contains(stderr.String(), "pane %9 is not live on /jail/tmux/cc-gone") {
+	if code == 0 || stderr.String() != "pfm chat reload: pane %9 is not live on /jail/tmux/cc-gone\n" {
 		t.Fatalf("reload target with a dead pane code=%d stderr=%q", code, stderr.String())
 	}
 }
@@ -384,8 +391,9 @@ func TestNativeChatKillUsesBackendRatchet(t *testing.T) {
 		&stdout,
 		&stderr,
 	)
-	if code != 1 || !strings.Contains(stderr.String(), "pfm chat kill:") || stdout.Len() != 0 {
-		t.Fatalf("native kill code=%d out=%q err=%q", code, stdout.String(), stderr.String())
+	if want := "pfm chat kill: --exit requires a live --self tmux pane\n"; code != 1 || stderr.String() != want ||
+		stdout.Len() != 0 {
+		t.Fatalf("native kill code=%d out=%q stderr = %q, want %q", code, stdout.String(), stderr.String(), want)
 	}
 }
 
@@ -397,8 +405,8 @@ func TestChatOpenRestoredFlag(t *testing.T) {
 	}
 	var out, stderr bytes.Buffer
 	code := runChatOpen([]string{"--restored", ""}, &out, &stderr, runtime)
-	if code != 2 || !strings.Contains(stderr.String(), "restored session ID is required") {
-		t.Fatalf("code=%d out=%q err=%q", code, out.String(), stderr.String())
+	if want := "pfm chat open: restored session ID is required\n"; code != 2 || stderr.String() != want {
+		t.Fatalf("code=%d out=%q stderr = %q, want %q", code, out.String(), stderr.String(), want)
 	}
 }
 
@@ -412,7 +420,9 @@ func TestChatEndWorkerUsesExactDurableSeatWithoutRoster(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 	code := runChatEnd([]string{"--native-end-worker", seat.SeatID}, &stdout, &stderr, commandRuntime{Paths: values})
-	if code != 1 || !strings.Contains(stderr.String(), "no pending end intent") {
-		t.Fatalf("worker scanned names instead of exact durable seat: code=%d out=%s err=%s", code, &stdout, &stderr)
+	line := regexp.MustCompile(`^\S+ `).ReplaceAllString(stderr.String(), "{time} ")
+	if want := "{time} pfm chat end worker: failed: seat end-exact has no pending end intent\n"; code != 1 ||
+		line != want {
+		t.Fatalf("worker code=%d out=%s stderr = %q, want %q", code, &stdout, line, want)
 	}
 }

@@ -123,18 +123,16 @@ func TestPFMSettings(t *testing.T) {
 }
 
 func TestOwnershipLedgerUnreadable(t *testing.T) {
-	for _, test := range []struct{ check, name string }{{"pfm-settings", "settings-hook-ownership.json"}} {
-		t.Run(test.check, func(t *testing.T) {
-			env := fixtureEnv(t)
-			path := filepath.Join(installer.ManagedRoot(env.Home), test.name)
-			writeFile(t, path, "{")
-			rows := detect(t, test.check, env)
-			if len(rows) != 1 || rows[0].Severity != Block || rows[0].Path != path ||
-				!strings.HasPrefix(rows[0].Problem, "UNREADABLE "+path+":") ||
-				rows[0].Fix != "make "+path+" readable to you, then rerun" {
-				t.Fatalf("rows=%+v", rows)
-			}
-		})
+	env := fixtureEnv(t)
+	path := filepath.Join(installer.ManagedRoot(env.Home), "settings-hook-ownership.json")
+	writeFile(t, path, "{")
+	rows := detect(t, "pfm-settings", env)
+	if got, want := strings.ReplaceAll(
+		fmt.Sprintf("%+v", rows),
+		env.Home,
+		"{home}",
+	), "[{Severity:BLOCK Check:pfm-settings Path:{home}/.local/share/pfm/install/settings-hook-ownership.json Problem:UNREADABLE {home}/.local/share/pfm/install/settings-hook-ownership.json: decode ownership ledger: unexpected end of JSON input Fix:make {home}/.local/share/pfm/install/settings-hook-ownership.json readable to you, then rerun}]"; got != want {
+		t.Fatalf("rows = %q, want %q", got, want)
 	}
 }
 

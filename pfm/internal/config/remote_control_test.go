@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -68,17 +67,4 @@ func roundTripRemoteConfig(t *testing.T, cfg Config, path, home string) Config {
 		t.Fatal(err)
 	}
 	return reloaded
-}
-
-func TestRemoteControlConfigRejectsNonBoolean(t *testing.T) {
-	home := t.TempDir()
-	for _, raw := range []string{`{"version":2,"claude":{"remoteControl":"on"}}`, `{"version":2,"accounts":[{"id":1,"configDir":"~/one","claude":{"remoteControl":1}}]}`} {
-		path := filepath.Join(home, "config.json")
-		if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := Load(path, home, nil); err == nil || !strings.Contains(err.Error(), "remoteControl") {
-			t.Fatalf("non-boolean remoteControl error=%v: %s", err, raw)
-		}
-	}
 }

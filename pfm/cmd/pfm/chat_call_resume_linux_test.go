@@ -25,6 +25,13 @@ func withoutDirectoryOverride(t *testing.T, fn func()) {
 			if err := syscall.Setfsuid(0); err != nil {
 				t.Errorf("restore the filesystem uid: %v", err)
 			}
+			// Changing the filesystem uid made the process non-dumpable, which hides its
+			// memory from the unit proof's strace for the rest of the run (every later
+			// path and socket address reads as a bare pointer): restore it.
+			const prSetDumpable = 4
+			if _, _, errno := syscall.RawSyscall(syscall.SYS_PRCTL, prSetDumpable, 1, 0); errno != 0 {
+				t.Errorf("restore the dumpable flag: %v", errno)
+			}
 		}()
 	}
 	fn()
@@ -54,8 +61,22 @@ func TestResolveResumeTargetRefusesAPrefixWhenAProjectDirectoryCannotBeRead(t *t
 			root := t.TempDir()
 			projects := filepath.Join(root, "projects")
 			writeResumeTranscript(t, projects, id, "unrelated words")
-			// The fsuid drop reads the tree as "other": open every level it walks.
-			for _, open := range []string{filepath.Dir(root), root, projects, filepath.Join(projects, "project")} {
+			// The fsuid drop reads the tree as "other": open every level it walks, up
+			// to the first ancestor already traversable (the unit net's own temp
+			// root is private).
+			for dir := filepath.Dir(root); ; dir = filepath.Dir(dir) {
+				info, err := os.Stat(dir)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if info.Mode().Perm()&0o001 != 0 {
+					break
+				}
+				if err := os.Chmod(dir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for _, open := range []string{root, projects, filepath.Join(projects, "project")} {
 				if err := os.Chmod(open, 0o755); err != nil {
 					t.Fatal(err)
 				}

@@ -211,9 +211,11 @@ func TestSharedMigrationRejectsNewerVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 	second := OpenSharedState(context.Background(), values)
-	if err := second.Degraded(); err == nil || !strings.Contains(err.Error(), strconv.Itoa(newer)) ||
-		!strings.Contains(err.Error(), strconv.Itoa(SchemaVersion)) {
-		t.Fatalf("Degraded()=%v, want versions %d and %d", err, newer, SchemaVersion)
+	if got, want := strings.NewReplacer(values.StateDB, "{db}", strconv.Itoa(newer), "{newer}", strconv.Itoa(SchemaVersion),
+		"{version}").
+		Replace(fmt.Sprint(second.Degraded())),
+		"migrate shared state database: shared database {db} schema version {newer} is newer than binary version {version}"; got != want {
+		t.Fatalf("Degraded() = %q, want %q", got, want)
 	}
 	_ = second.Close()
 }

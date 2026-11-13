@@ -222,10 +222,13 @@ func TestInstallWithoutEngineSyncNamesTheRepair(t *testing.T) {
 		MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home, SourceRepo: clone,
 		Runner: &fakeRunner{}, Stdout: &output,
 	})
-	if err == nil || strings.Contains(err.Error(), "preflight apply plan") ||
-		!strings.Contains(err.Error(), "claude plugin install engine-sync@professor") ||
-		!strings.Contains(err.Error(), "start a new Claude session") {
-		t.Fatalf("Run = %v, want the step failure naming the engine-sync repair\n%s", err, output.String())
+	binary := filepath.Join(home, ".local", "share", "engine-sync", "bin", "engine-sync")
+	want := "engine-sync binary unavailable: " + binary + ": stat " + binary + ": no such file or directory" +
+		" — install the engine-sync plugin: run `claude plugin marketplace add rezzminator/professor`," +
+		" then `claude plugin install engine-sync@professor`, start a new Claude session so the plugin wrapper" +
+		" downloads and links the binary, then rerun pfm update (or pfm install --yes)"
+	if err == nil || err.Error() != want {
+		t.Fatalf("Run = %v, want the step failure %q\n%s", err, want, output.String())
 	}
 }
 
@@ -272,26 +275,30 @@ func TestInstallAndUninstallRunEngineSyncGlobal(t *testing.T) {
 		}); err != nil {
 			t.Fatalf("mode %d: %v\n%s", mode, err, output.String())
 		}
-		if !strings.Contains(output.String(), "  ok      Codex global agents compiled=1 linked=1\n") {
-			t.Fatalf("mode %d transcript lacks engine-sync's events:\n%s", mode, output.String())
-		}
+		wantOutputLines(
+			t,
+			output.String(),
+			[]string{"  ok      Codex global agents compiled=1 linked=1"},
+			"Codex global agents",
+		)
 	}
-	var planned, applied, uninstalled bool
+	sourceHome := regexp.MustCompile(`--source-home \S+`)
+	var calls []string
 	for _, call := range testjail.EngineSyncCalls(t, record) {
-		if !strings.HasPrefix(call, "global --home "+home+" ") {
-			t.Fatalf("unexpected engine-sync call %q", call)
-		}
-		switch {
-		case strings.Contains(call, " --uninstall"):
-			uninstalled = true
-		case strings.Contains(call, " --plan"):
-			planned = true
-		default:
-			applied = true
-		}
+		calls = append(
+			calls,
+			sourceHome.ReplaceAllString(strings.ReplaceAll(call, home, "{home}"), "--source-home {plan}"),
+		)
 	}
-	if !planned || !applied || !uninstalled {
-		t.Fatalf("planned=%t applied=%t uninstalled=%t, want all three", planned, applied, uninstalled)
+	const global = "global --home {home} --source-repo {home}/.professor --claude-config-dir {home}/.claude --codex-home {home}/.codex"
+	want := []string{
+		global + " --source-home {plan} --plan --json",
+		global + " --json",
+		global + " --plan --uninstall --json",
+		global + " --uninstall --json",
+	}
+	if !slices.Equal(calls, want) {
+		t.Fatalf("engine-sync calls =\n%q\nwant\n%q", calls, want)
 	}
 }
 

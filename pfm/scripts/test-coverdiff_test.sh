@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Fixture-driven tests for scripts/test-coverdiff.sh over a one-package module: a statement only the
-# move test covers is move-only, one the journey or a unit test also covers is not; a red run is named
+# jail test covers is move-only, one the journey or a unit test also covers is not; a red run is named
 # and exits 1; every way it cannot look is COVERDIFF ERROR rc 2. Runs go test on the fixture (fence).
 #   bash pfm/scripts/test-coverdiff_test.sh
 set -uo pipefail
@@ -39,9 +39,15 @@ func TestUnit(t *testing.T) {
 		t.Fatal("A(1)")
 	}
 }
+GO
+  cat > "$1/f/f_jail_test.go" <<GO
+//go:build jail
+
+package f
+
+import "testing"
 
 func TestMove(t *testing.T) {
-	_ = "sql.Open(" // the measure's home-sqlite marker, read as text
 	$2
 }
 GO
@@ -75,8 +81,8 @@ mkdir -p "$T/two/g"
 printf 'module fx\n\ngo 1.22\n' > "$T/two/go.mod"
 printf 'package g\n\nfunc D() int { return 4 }\n' > "$T/two/g/d.go"
 printf 'package g\n\nfunc E() int { return 5 }\n' > "$T/two/g/e.go"
-printf 'package g\n\nimport "testing"\n\nfunc TestMove(t *testing.T) {\n\t_ = "sql.Open("\n\t_, _ = D(), E()\n}\n' \
-  > "$T/two/g/g_test.go"
+printf '//go:build jail\n\npackage g\n\nimport "testing"\n\nfunc TestMove(t *testing.T) {\n\t_, _ = D(), E()\n}\n' \
+  > "$T/two/g/g_jail_test.go"
 out=$(bash "$SUT" "$J" "$T/out-two" "$T/two" 2>&1); rc=$?
 eq "move-only lines are counted per file: line 3 of d.go and of e.go are two lines" \
   "0|COVERDIFF 2 packages · move-only 2 statements on 2 lines · runs 1 (0 red, 0 unrecorded) · journey $J" "$rc|$out"

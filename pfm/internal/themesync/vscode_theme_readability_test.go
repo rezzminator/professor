@@ -97,12 +97,16 @@ func TestCheckVSCodeReadabilityNamesEveryPlaceUnderItsFloor(t *testing.T) {
 		})
 	}
 
-	if err := CheckVSCodeReadability(readabilityFixture(t, map[string]string{"editor.foreground": "#ffffff"}, nil,
-		nil)); err == nil || !strings.Contains(err.Error(), "nothing to measure text against") {
+	if err := CheckVSCodeReadability(readabilityFixture(
+		t,
+		map[string]string{"editor.foreground": "#ffffff"},
+		nil,
+		nil,
+	)); err == nil || err.Error() != "readability: colors \"editor.background\": themesync: colour \"\" is not rgb(), #rgb, #rrggbb, ansi256() or ansi:name: nothing to measure text against" {
 		t.Fatalf("a theme with no editor background must fail as unmeasurable, got %v", err)
 	}
 	if err := CheckVSCodeReadability([]byte(`{"colors": [`)); err == nil ||
-		!strings.Contains(err.Error(), "does not read back") {
+		err.Error() != "readability: rendered VS Code theme does not read back: unexpected end of JSON input" {
 		t.Fatalf("a theme that does not parse must fail, got %v", err)
 	}
 }

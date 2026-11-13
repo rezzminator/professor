@@ -3,7 +3,6 @@ package kill
 import (
 	"context"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/resolve"
@@ -33,10 +32,7 @@ func TestKillSelfRefusesAnOpenCodeSocketByName(t *testing.T) {
 	if err == nil {
 		t.Fatal("Kill self on an ox- socket succeeded; want a named refusal")
 	}
-	if !strings.Contains(err.Error(), "self-kill is not supported for OpenCode chats") {
+	if err.Error() != "self-kill is not supported for OpenCode chats (socket ox-500-1-1): OpenCode exports no session id, so this pane cannot name itself — kill it by name or id from another chat" {
 		t.Fatalf("Kill self error = %v, want the OpenCode refusal by name", err)
-	}
-	if strings.Contains(err.Error(), "Claude") {
-		t.Fatalf("Kill self error = %v, want no mention of Claude", err)
 	}
 }

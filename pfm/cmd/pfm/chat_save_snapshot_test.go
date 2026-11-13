@@ -43,14 +43,14 @@ func TestWriteRepositorySnapshotReportsWhyNoSnapshotWasTaken(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			runner := &deps.FakeRunner{}
+			if !tc.gitMissing {
+				runner.ScriptLookPath("git", "scripted-git", nil)
+			}
 			runner.Script(
-				[]string{deps.Executable("git"), "rev-parse", "--is-inside-work-tree"},
+				[]string{"scripted-git", "rev-parse", "--is-inside-work-tree"},
 				deps.RunResult{ExitCode: 128},
 				nil,
 			)
-			if tc.gitMissing {
-				t.Setenv("PATH", t.TempDir())
-			}
 			var buf bytes.Buffer
 			writeRepositorySnapshot(context.Background(), &buf, runner)
 			if got := buf.String(); got != tc.want {
@@ -64,7 +64,7 @@ func TestWriteRepositorySnapshotReportsWhyNoSnapshotWasTaken(t *testing.T) {
 }
 
 func TestWriteRepositorySnapshotRendersEachPartItCouldRead(t *testing.T) {
-	git := deps.Executable("git")
+	git := "scripted-git"
 	tests := []struct {
 		name   string
 		status deps.RunResult
@@ -86,6 +86,7 @@ func TestWriteRepositorySnapshotRendersEachPartItCouldRead(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			runner := &deps.FakeRunner{}
+			runner.ScriptLookPath("git", git, nil)
 			runner.Script([]string{git, "rev-parse", "--is-inside-work-tree"}, deps.RunResult{ExitCode: 0}, nil)
 			branch := deps.RunResult{Stdout: []byte("wave/testing\n")}
 			runner.Script([]string{git, branchAction, "--show-current"}, branch, nil)
@@ -102,8 +103,9 @@ func TestWriteRepositorySnapshotRendersEachPartItCouldRead(t *testing.T) {
 }
 
 func TestWriteRepositorySnapshotContextPassesCallerContextAndDirectoryToEveryGitProbe(t *testing.T) {
-	git := deps.Executable("git")
+	git := "scripted-git"
 	runner := &snapshotContextRunner{FakeRunner: &deps.FakeRunner{}}
+	runner.ScriptLookPath("git", git, nil)
 	runner.Script([]string{git, "rev-parse", "--is-inside-work-tree"}, deps.RunResult{ExitCode: 0}, nil)
 	runner.Script([]string{git, branchAction, "--show-current"}, deps.RunResult{ExitCode: 0}, nil)
 	runner.Script([]string{git, "status", "--short"}, deps.RunResult{ExitCode: 0}, nil)
@@ -130,8 +132,9 @@ func TestWriteRepositorySnapshotContextPassesCallerContextAndDirectoryToEveryGit
 }
 
 func TestWriteRepositorySnapshotKeepsAmbientDirectoryEmpty(t *testing.T) {
-	git := deps.Executable("git")
+	git := "scripted-git"
 	runner := &deps.FakeRunner{}
+	runner.ScriptLookPath("git", git, nil)
 	runner.Script([]string{git, "rev-parse", "--is-inside-work-tree"}, deps.RunResult{ExitCode: 128}, nil)
 	var buf bytes.Buffer
 

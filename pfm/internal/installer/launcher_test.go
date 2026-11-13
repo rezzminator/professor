@@ -195,7 +195,7 @@ func TestResolveClaudeBinaryMissingRelativeConfiguredCommandFails(t *testing.T) 
 	writeExecutable(t, filepath.Join(pathDir, "claude"))
 
 	resolved, err := ResolveClaudeBinary(home, "claude-nightly", pathDir)
-	if err == nil || resolved != "" || !strings.Contains(err.Error(), "claude-nightly") {
+	if err == nil || resolved != "" || err.Error() != "configured Claude binary not found: claude-nightly" {
 		t.Fatalf(
 			"missing relative configured resolution=%q err=%v, want an error naming claude-nightly without fallback",
 			resolved,
@@ -309,11 +309,10 @@ func TestInspectClaudeLauncherRejectsBrokenManagedTarget(t *testing.T) {
 	if err := os.Symlink(managedClaudeLauncher(home), canonical); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := InspectClaudeLauncher(
-		home,
-	); err == nil ||
-		!strings.Contains(err.Error(), "inspect managed Claude launcher") {
-		t.Fatalf("InspectClaudeLauncher broken target error=%v", err)
+	target := filepath.Join(managedRootForHome(home), "bin", "claude")
+	want := "inspect managed Claude launcher: stat " + target + ": no such file or directory"
+	if _, err := InspectClaudeLauncher(home); err == nil || err.Error() != want {
+		t.Fatalf("InspectClaudeLauncher broken target error=%v, want %q", err, want)
 	}
 }
 

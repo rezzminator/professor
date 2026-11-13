@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -87,11 +88,11 @@ func TestChatNewAgentRoleRefusalsHappenBeforeResolutionOrSpawn(t *testing.T) {
 	}{
 		{
 			name: "opencode", engine: "opencode",
-			want: "pfm chat new: --agent-role is not supported for opencode: native launch policy does not compose registered agent roles",
+			want: "pfm chat new: --agent-role is not supported for opencode: native launch policy does not compose registered agent roles\n[]",
 		},
 		{
 			name: "Claude wrong policy", engine: "claude",
-			want: "pfm chat new: --agent-role needs claude.systemPrompt=professor (current: production): the role prompt is composed onto the staged fleet prompt, which that policy does not stage",
+			want: "pfm chat new: --agent-role needs claude.systemPrompt=professor (current: production): the role prompt is composed onto the staged fleet prompt, which that policy does not stage\n[]",
 		},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -100,17 +101,15 @@ func TestChatNewAgentRoleRefusalsHappenBeforeResolutionOrSpawn(t *testing.T) {
 				"chat", "new", "--engine", testCase.engine, "--name", "worker",
 				"--cwd", workDir, "--agent-role", "ghost-role", "caller prompt",
 			}, &stdout, &stderr)
-			if code != 2 || stdout.Len() != 0 || !strings.Contains(stderr.String(), testCase.want) {
-				t.Fatalf("run() exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
-			}
-			entries, err := os.ReadDir(os.Getenv("PFM_SID_DIR"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, entry := range entries {
-				if strings.HasPrefix(entry.Name(), "agent-role-") || strings.HasPrefix(entry.Name(), "role-") {
-					t.Fatalf("refused launch wrote role state %s", entry.Name())
-				}
+			got := stderr.String() + fmt.Sprint(dirNames(t, os.Getenv("PFM_SID_DIR")))
+			if code != 2 || stdout.Len() != 0 || got != testCase.want {
+				t.Fatalf(
+					"run() exit=%d stdout=%q stderr+sid dir = %q, want %q",
+					code,
+					stdout.String(),
+					got,
+					testCase.want,
+				)
 			}
 		})
 	}

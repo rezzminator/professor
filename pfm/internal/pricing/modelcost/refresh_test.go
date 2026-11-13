@@ -351,8 +351,9 @@ func TestRefreshInvalidOverrideIsTheError(t *testing.T) {
 	_, result, err := Refresh(context.Background(), Options{
 		Home: home, ConfigPath: configPath, Clock: clock.NewFake(t0.Add(time.Hour)), Fetch: (&fakeFetch{}).fetch(t),
 	})
-	if err == nil || !strings.Contains(err.Error(), config.PricesPath(configPath)) || result.Status != StatusCurrent {
-		t.Fatalf("Refresh = status %q, err %v; want current and the override named", result.Status, err)
+	if got, want := strings.ReplaceAll(fmt.Sprintf("%s · %v", result.Status, err), filepath.Dir(configPath), "{dir}"),
+		"current · prices {dir}/pfm.prices.json: version must be 2, got 1"; got != want {
+		t.Fatalf("Refresh = %q, want %q", got, want)
 	}
 }
 
@@ -699,14 +700,15 @@ func TestRefreshWithAnUnreadableUpdateLockFailsAndWritesNothing(t *testing.T) {
 	fetch := &fakeFetch{}
 	_, result := refreshAt(t, home, t0.Add(48*time.Hour), fetch, true, false)
 
-	if result.Status != StatusFailed || result.Err == nil || !strings.Contains(result.Err.Error(), lockPath) ||
-		readFile(t, file) != before {
-		t.Fatalf(
-			"unreadable lock: status %q err %v, file changed %v; want failed, an error naming %s, unchanged",
-			result.Status,
-			result.Err,
-			readFile(t, file) != before,
-			lockPath,
-		)
+	if got, want := strings.ReplaceAll(fmt.Sprintf(
+		"%s · %v · changed %t",
+		result.Status,
+		result.Err,
+		readFile(
+			t,
+			file,
+		) != before,
+	), lockPath, "{lock}"), "failed · update lock {lock}: open {lock}: too many levels of symbolic links · changed false"; got != want {
+		t.Fatalf("unreadable lock = %q, want %q", got, want)
 	}
 }

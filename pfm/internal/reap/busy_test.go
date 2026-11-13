@@ -2,6 +2,7 @@ package reap
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -29,6 +30,7 @@ func fakeClaudeAgents(t *testing.T, body string, fail bool) ClaudeAgents {
 		output = deps.StartOutput{Stderr: body, ExitCode: 1}
 	}
 	runner := &deps.FakeRunner{}
+	runner.ScriptLookPath(binary, binary, nil)
 	runner.ScriptStartOutput(nil, output)
 	return ClaudeAgents{Binary: binary, ConfigDirs: []string{t.TempDir()}, Runner: runner}
 }
@@ -108,6 +110,7 @@ func TestClaudeAgentsQueriesConfiguredDirsAndUnionsBusyRows(t *testing.T) {
 	}
 	var queries []string
 	runner := &deps.FakeRunner{}
+	runner.ScriptLookPath(binary, binary, nil)
 	runner.ScriptStartOutput(nil, deps.StartOutput{AtStart: func(argv []string, opts deps.StartOptions) {
 		configDir := lastEnv(opts.Env, "CLAUDE_CONFIG_DIR")
 		queries = append(queries, configDir+"|"+strings.Join(argv[1:], " "))
@@ -134,22 +137,13 @@ func TestClaudeAgentsQueriesConfiguredDirsAndUnionsBusyRows(t *testing.T) {
 	}}, machine)
 	agents.Runner = runner
 	busy, err := agents.BusySessions(context.Background())
-	if err != nil || len(busy) != 2 {
-		t.Fatalf("busy=%v err=%v", busy, err)
-	}
-	for _, id := range []string{"second", "third"} {
-		if _, found := busy[id]; !found {
-			t.Fatalf("busy=%v lacks %q", busy, id)
-		}
-	}
-	lines := queries
-	if len(lines) != 3 {
-		t.Fatalf("queries=%q, want one per distinct account config dir", queries)
-	}
-	for index, line := range lines {
-		if !strings.HasPrefix(line, dirs[index]+"|") {
-			t.Fatalf("query[%d]=%q, want dir %q", index, line, dirs[index])
-		}
+	if got, want := strings.ReplaceAll(
+		fmt.Sprintf("%v %v\n%s", busy, err, strings.Join(queries, "\n")),
+		home,
+		"{home}",
+	),
+		"map[second:{} third:{}] <nil>\n{home}/.cc/1|agents --json --settings {\"cleanupPeriodDays\":0,\"env\":{\"ANTHROPIC_SMALL_FAST_MODEL\":\"claude-haiku-5-5\",\"CLAUDE_CODE_AUTO_COMPACT_WINDOW\":\"0\",\"CLAUDE_CODE_ENABLE_FUNCTION_HOOKS\":\"1\",\"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS\":\"0\",\"CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH\":\"8\",\"CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION\":\"0\"},\"outputStyle\":\"default\"}\n{home}/.cc/2|agents --json --settings {\"cleanupPeriodDays\":0,\"env\":{\"ANTHROPIC_SMALL_FAST_MODEL\":\"claude-haiku-5-5\",\"CLAUDE_CODE_AUTO_COMPACT_WINDOW\":\"0\",\"CLAUDE_CODE_ENABLE_FUNCTION_HOOKS\":\"1\",\"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS\":\"0\",\"CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH\":\"8\",\"CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION\":\"0\"},\"outputStyle\":\"default\"}\n{home}/.cc/3|agents --json --settings {\"cleanupPeriodDays\":0,\"env\":{\"ANTHROPIC_SMALL_FAST_MODEL\":\"claude-haiku-5-5\",\"CLAUDE_CODE_AUTO_COMPACT_WINDOW\":\"0\",\"CLAUDE_CODE_ENABLE_FUNCTION_HOOKS\":\"1\",\"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS\":\"0\",\"CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH\":\"8\",\"CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION\":\"0\"},\"outputStyle\":\"default\"}"; got != want {
+		t.Fatalf("busy and queries = %q, want %q", got, want)
 	}
 }
 
@@ -160,6 +154,7 @@ func TestClaudeAgentsQueryUsesRegistryReadShape(t *testing.T) {
 		t.Fatal(err)
 	}
 	runner := &deps.FakeRunner{}
+	runner.ScriptLookPath(binary, binary, nil)
 	runner.ScriptStartOutput(nil, deps.StartOutput{Stdout: "[]"})
 	agents := ClaudeAgents{Binary: binary, ConfigDirs: []string{home}, Runner: runner}
 	if _, err := agents.BusySessions(context.Background()); err != nil {
@@ -169,12 +164,12 @@ func TestClaudeAgentsQueryUsesRegistryReadShape(t *testing.T) {
 	if len(starts) != 1 {
 		t.Fatalf("agent queries = %v, want exactly 1", starts)
 	}
-	query := strings.Join(starts[0].Argv[1:], " ") + "\n"
-	if !strings.Contains(query, "agents --json --settings ") ||
-		strings.Contains(query, "--system-prompt-file") || strings.Contains(query, "--mcp-config") ||
-		strings.Contains(query, "--dangerously-skip-permissions") ||
-		strings.Contains(query, "\"hooks\"") || strings.Contains(query, "\"statusLine\"") {
-		t.Fatalf("agent query argv=%q", query)
+	if got, want := strings.ReplaceAll(
+		strings.Join(starts[0].Argv[1:], " "),
+		home,
+		"{home}",
+	), "agents --json --settings {\"cleanupPeriodDays\":0,\"env\":{\"ANTHROPIC_SMALL_FAST_MODEL\":\"claude-haiku-5-5\",\"CLAUDE_CODE_AUTO_COMPACT_WINDOW\":\"0\",\"CLAUDE_CODE_ENABLE_FUNCTION_HOOKS\":\"1\",\"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS\":\"0\",\"CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH\":\"8\",\"CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION\":\"0\"},\"outputStyle\":\"default\"}"; got != want {
+		t.Fatalf("agent query argv = %q, want %q", got, want)
 	}
 }
 

@@ -18,8 +18,8 @@ func TestUnitNetFailsEveryDoorNamingItsVariable(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("TMUX", "/tmp/tmux-1000/default,1,0")
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "11111111-2222-3333-4444-555555555555")
-	if err := armUnitNet(dir, func(name, value string) error { t.Setenv(name, value); return nil }); err != nil {
-		t.Fatalf("armUnitNet(%s) = %v, want nil", dir, err)
+	if err := pointUnitNetDirs(dir, func(name, value string) error { t.Setenv(name, value); return nil }); err != nil {
+		t.Fatalf("pointUnitNetDirs(%s) = %v, want nil", dir, err)
 	}
 	home, err := paths.OSEnv{}.Home()
 	if err != nil {

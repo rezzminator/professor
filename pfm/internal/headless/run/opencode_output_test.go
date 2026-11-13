@@ -21,16 +21,20 @@ func TestParseOpenCodeJSONLRejectsMalformedAndIncompleteResults(t *testing.T) {
 		body string
 		want string
 	}{
-		{name: "malformed", body: "not-json", want: "missing terminal"},
-		{name: "missing terminal", body: `{"type":"text","part":{"text":"answer"}}`, want: "missing terminal"},
+		{name: "malformed", body: "not-json", want: "OpenCode headless output missing terminal stop event"},
+		{
+			name: "missing terminal",
+			body: `{"type":"text","part":{"text":"answer"}}`,
+			want: "OpenCode headless output missing terminal stop event",
+		},
 		{
 			name: "tool error",
 			body: `{"type":"tool_use","part":{"tool":"bash","state":{"status":"error","error":"denied"}}}
 {"type":"step_finish","part":{"reason":"stop"}}`,
-			want: "StructuredOutput",
+			want: "structured output missing or invalid: OpenCode did not return StructuredOutput",
 		},
 		{name: "schema without structured output", body: `{"type":"text","part":{"text":"answer"}}
-{"type":"step_finish","part":{"reason":"stop"}}`, want: "StructuredOutput"},
+{"type":"step_finish","part":{"reason":"stop"}}`, want: "structured output missing or invalid: OpenCode did not return StructuredOutput"},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -39,8 +43,8 @@ func TestParseOpenCodeJSONLRejectsMalformedAndIncompleteResults(t *testing.T) {
 				&result,
 				Request{Engine: pfmengine.OpenCode, Schema: json.RawMessage(`{"type":"object"}`)},
 			)
-			if err == nil || !strings.Contains(err.Error(), testCase.want) {
-				t.Fatalf("parseOpenCodeJSONL() error = %v, want %q", err, testCase.want)
+			if got := fmt.Sprint(err); got != testCase.want {
+				t.Fatalf("parseOpenCodeJSONL() error = %q, want %q", got, testCase.want)
 			}
 		})
 	}

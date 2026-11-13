@@ -77,11 +77,11 @@ func TestChronoscopeRefusesByNameBeforeTheFirstSample(t *testing.T) {
 	if pressed.cosmosPast != nil {
 		t.Fatalf("scrub before the first sample entered replay anyway: %#v", pressed.cosmosPast)
 	}
-	if !strings.Contains(pressed.cosmosStatus, "has not been sampled") {
+	if pressed.cosmosStatus != "the ledger has not been sampled yet — the first sample lands within 2s of focusing" {
 		t.Fatalf("cosmosStatus = %q, want it to name the unsampled ledger", pressed.cosmosStatus)
 	}
 	query := ansi.Strip(pressed.renderQuery(80))
-	if !strings.Contains(query, "has not been sampled") {
+	if query != " cosmos  the ledger has not been sampled yet — the first sample lands within 2s…" {
 		t.Fatalf("query row = %q, does not carry the refusal", query)
 	}
 }
@@ -265,37 +265,15 @@ func TestChronoscopeReplayRendersADeadChatAsAGhostNotAnAlarm(t *testing.T) {
 // distinct broken/empty states a replay can be in, so an operator never
 // mistakes one for another.
 func TestChronoscopeEmptyPastNamesTheMomentNotTheLedger(t *testing.T) {
-	t.Run("scrubbed before the first event names the moment", func(t *testing.T) {
+	t.Run("an empty past names the moment; ledger health rides over the replay", func(t *testing.T) {
+		utcClock(t)
 		model := cosmosGoldenModel(80)
 		model.cosmosEvents = []fleetdb.CommsEvent{}
 		model.rebuildCosmosTimeline()
 		pressed, _ := applyKey(t, model, printableKey('['))
-		text := ansi.Strip(pressed.renderCosmosPanel(80, 9))
-		at := time.Unix(0, pressed.cosmosViewNS).Format("15:04:05")
-		if !strings.Contains(text, "no chat traffic recorded before "+at) {
-			t.Fatalf("panel = %q, want it to name the moment %q", text, at)
-		}
-		if strings.Contains(text, "no chat traffic recorded yet") {
-			t.Fatal("empty replay read as the never-sampled-ledger message")
-		}
-		if strings.Contains(text, "unreachable") {
-			t.Fatal("a healthy empty replay claimed the ledger was unreachable")
-		}
-	})
-
-	t.Run("ledger health is a now-fact and rides over the replay", func(t *testing.T) {
-		model := cosmosGoldenModel(80)
-		model.cosmosEvents = []fleetdb.CommsEvent{}
-		model.rebuildCosmosTimeline()
-		pressed, _ := applyKey(t, model, printableKey('['))
+		empty := ansi.Strip(pressed.renderCosmosPanel(80, 9))
 		pressed.cosmos.Err = "sqlite: database is locked"
-		text := ansi.Strip(pressed.renderCosmosPanel(80, 9))
-		if !strings.Contains(text, "⚠ comms ledger unreachable: sqlite: database is locked") {
-			t.Fatalf("panel = %q, want the unreachable banner even while replaying", text)
-		}
-		if strings.Contains(text, "no chat traffic recorded before") {
-			t.Fatal("the unreachable banner did not take priority over the empty-past message")
-		}
+		golden(t, "ui_cosmos_replay_empty.txt", empty+"\n"+ansi.Strip(pressed.renderCosmosPanel(80, 9)))
 	})
 
 	t.Run("a truncation warning survives the cut into the replay graph", func(t *testing.T) {
@@ -825,25 +803,10 @@ func TestLabelNudgeStepsAroundTextAndNeverLeavesTheCanvas(t *testing.T) {
 	})
 }
 
-// U13: TestCosmosLegendNamesOnlyWhatTheSkyDraws pins the top-right legend:
-// the orbital sky names the sun glyph, the classic sky (no suns) does not,
-// and a canvas too narrow for the legend plus its margin draws none of it.
 func TestCosmosLegendNamesOnlyWhatTheSkyDraws(t *testing.T) {
-	orbital := ansi.Strip(cosmosGoldenModel(80).renderCosmosPanel(80, 9))
-	if !strings.Contains(orbital, "✹ project") {
-		t.Fatalf("orbital legend missing the sun glyph:\n%s", orbital)
-	}
-	classic := ansi.Strip(cosmosClassicGoldenModel(80).renderCosmosPanel(80, 9))
-	if strings.Contains(classic, "✹ project") {
-		t.Fatalf("classic legend still names the sun glyph:\n%s", classic)
-	}
-	if !strings.Contains(classic, "◆ opencode") {
-		t.Fatalf("classic legend dropped the engine glyphs entirely:\n%s", classic)
-	}
-	narrow := ansi.Strip(cosmosGoldenModel(80).renderCosmosPanel(60, 9))
-	if strings.Contains(narrow, "claude  ▲ codex") {
-		t.Fatalf("a canvas too narrow for the legend drew it anyway:\n%s", narrow)
-	}
+	golden(t, "ui_cosmos_legends.txt", ansi.Strip(cosmosGoldenModel(80).renderCosmosPanel(80, 9))+"\n"+
+		ansi.Strip(cosmosClassicGoldenModel(80).renderCosmosPanel(80, 9))+"\n"+
+		ansi.Strip(cosmosGoldenModel(80).renderCosmosPanel(60, 9)))
 }
 
 // U14: TestCosmosKeysNeverGoSilent pins the no-silent-keystroke contract for
@@ -1003,42 +966,30 @@ func TestCosmosSelectionHUDNamesAllFourLifecycleStates(t *testing.T) {
 		},
 	)
 
-	tests := []struct {
-		name    string
-		key     string
-		want    string
-		exclude []string
-	}{
-		{"ghost", "chat:name:ghost", "· ghost", []string{"· killed", "· not running"}},
-		{"killed", "chat:id:" + rows[3].ID, "· killed", []string{"· ghost", "· not running"}},
+	tests := []struct{ name, key, want string }{
+		{"ghost", "chat:name:ghost", "▸ ghost · unknown engine · ⋆ unknown · in 0 · out 0 · ghost"},
+		{
+			"killed",
+			"chat:id:" + rows[3].ID,
+			"▸ Agent 界面 needle 列对齐测试名字 · unknown engine · ⋆ unknown · in 0 · out 0 · killed",
+		},
 		{
 			"not running: resolved, not killed, no live socket",
 			"chat:id:" + rows[4].ID,
-			"· not running",
-			[]string{"· ghost", "· killed"},
+			"▸ Resume Claude · claude · ⋆ beta · in 0 · out 1 · 08:00:00 \"from a resumable row\" · not running",
 		},
 		{
 			"live and running: no suffix at all",
 			"chat:id:" + rows[1].ID,
-			"",
-			[]string{"· ghost", "· killed", "· not running"},
+			"▸ RR · codex · ⋆ alpha · in 1 · out 0 · 08:00:00 \"live and running\"",
 		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			m := model
 			m.cosmosSelected = test.key
-			hud := m.cosmosSelectionHUD()
-			if hud == "" {
-				t.Fatalf("setup: no HUD rendered for key %q", test.key)
-			}
-			if test.want != "" && !strings.Contains(hud, test.want) {
-				t.Fatalf("cosmosSelectionHUD() = %q, want it to contain %q", hud, test.want)
-			}
-			for _, excluded := range test.exclude {
-				if strings.Contains(hud, excluded) {
-					t.Fatalf("cosmosSelectionHUD() = %q, must not contain %q", hud, excluded)
-				}
+			if hud := m.cosmosSelectionHUD(); hud != test.want {
+				t.Fatalf("cosmosSelectionHUD() = %q, want %q", hud, test.want)
 			}
 		})
 	}
@@ -1170,11 +1121,8 @@ func TestRenderCompactCosmosFocusFiltersEdgesToTheSystem(t *testing.T) {
 	model.cosmosFocus = "alpha"
 
 	panel := ansi.Strip(model.renderCosmosPanel(19, 7))
-	if !strings.Contains(panel, "Aone") || !strings.Contains(panel, "Atwo") {
+	if panel != "╭─ cosmos ────────╮\n│⌖ alpha          │\n│Aone → Atwo      │\n│alpha chatter    │\n│                 │\n│                 │\n╰─────────────────╯" {
 		t.Fatalf("compact panel dropped the focused system's own edge:\n%s", panel)
-	}
-	if strings.Contains(panel, "Bone") || strings.Contains(panel, "Btwo") {
-		t.Fatalf("compact panel listed an edge entirely inside another system while focused on alpha:\n%s", panel)
 	}
 }
 
@@ -1328,7 +1276,7 @@ func TestRenderCompactCosmosEmptyStatesAndHeightBound(t *testing.T) {
 		model.cosmos.Edges = nil
 		model.cosmosFocus = "alpha" // no node lives here; beta does
 		text := ansi.Strip(model.renderCosmosPanel(80, 7))
-		if !strings.Contains(text, "⌖ alpha has no chats at this moment") {
+		if text != "╭─ cosmos ─────────────────────────────────────────────────────────────────────╮\n│⌖ alpha                                                                       │\n│⌖ alpha has no chats at this moment                                           │\n│s cycles systems · n returns to now                                           │\n│                                                                              │\n│                                                                              │\n╰──────────────────────────────────────────────────────────────────────────────╯" {
 			t.Fatalf("compact panel = %q, want the focused-empty message", text)
 		}
 	})

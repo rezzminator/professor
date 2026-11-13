@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -105,11 +106,16 @@ func TestSchedulerFixturesRunWhileOtherGoroutinesFork(t *testing.T) {
 
 func TestWriteSchedulerFixturesNamesTheStubThatFailedToWrite(t *testing.T) {
 	t.Parallel()
-	err := writeSchedulerFixtures(t.TempDir())
-	if err == nil {
-		t.Fatal("writeSchedulerFixtures into a home without .local/bin returned nil")
-	}
-	if got := err.Error(); !strings.HasPrefix(got, "write scheduler fixture ") || !errors.Is(err, fs.ErrNotExist) {
-		t.Fatalf("error %q does not name the fixture and wrap the write error", got)
+	home := t.TempDir()
+	err := writeSchedulerFixtures(home)
+	// The stubs are written from a map, so which one fails first differs per run.
+	got := regexp.MustCompile(`launchctl|systemctl`).
+		ReplaceAllString(strings.ReplaceAll(fmt.Sprint(err), home, "{home}"), "{stub}")
+	if want := "write scheduler fixture {stub}: open {home}/.local/bin/{stub}: no such file or directory"; !errors.Is(
+		err,
+		fs.ErrNotExist,
+	) ||
+		got != want {
+		t.Fatalf("writeSchedulerFixtures error = %q, want %q", got, want)
 	}
 }

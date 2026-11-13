@@ -29,17 +29,33 @@ func TestInstallDeferredTrustFailureLandsLaterSteps(t *testing.T) {
 		Mode: ModeApply, Home: home, Runner: &fakeRunner{}, ProcessRunner: appServer, Stdout: &output,
 		CodexHomes: []string{account}, CodexBinary: binary, MCPConfigPath: testConfigPath(t),
 	})
-	if err == nil || !strings.Contains(err.Error(), "(found 0)") {
-		t.Fatalf("install error=%v, want failed discovery", err)
-	}
-	for _, line := range []string{
-		"  change  trust Codex hooks " + account + "\n",
-		"  FAIL    Codex hook trust for " + account + ": ", "log default:", "zshrc",
+	pfm := filepath.Join(home, ".local", "bin", "pfm")
+	var missing []string
+	for _, hook := range [][2]string{
+		{"resume-unkill", "sessionStart/resume"},
+		{"herdr-state --engine codex start", "sessionStart/"},
+		{"herdr-state --engine codex working", "userPromptSubmit/"},
+		{"herdr-state --engine codex working", "postToolUse/"},
+		{"herdr-state --engine codex blocked", "permissionRequest/"},
+		{"herdr-state --engine codex idle", "stop/"},
+		{"herdr-state --engine codex idle", "interrupt/"},
+		{"herdr-state --engine codex end", "sessionEnd/"},
+		{"engine-guard --engine codex", "preToolUse/Bash|apply_patch"},
 	} {
-		if !strings.Contains(output.String(), line) {
-			t.Errorf("output missing %q:\n%s", line, output.String())
-		}
+		missing = append(missing, "hook \""+pfm+" internal "+hook[0]+"\" ("+hook[1]+") unavailable in "+account+
+			"/hooks.json (found 0): check hooks feature, managed policy and hooks.json")
 	}
+	failure := "Codex hook trust for " + account + ": record Codex hook trust for " + account + ": " +
+		strings.Join(missing, "\n")
+	if err == nil || err.Error() != failure {
+		t.Fatalf("install error=%v\nwant %s", err, failure)
+	}
+	wantOutputLines(t, output.String(), []string{
+		"  change  trust Codex hooks " + account,
+		"  FAIL    " + strings.SplitN(failure, "\n", 2)[0],
+		"  skip    zshrc: no source repo recorded and " + home +
+			"/.professor/pfm/internal/installer/assets/shim/pfm.zsh does not exist",
+	}, "trust Codex hooks", "  FAIL    ", "zshrc:")
 	if _, err := os.Stat(filepath.Join(managedRootForHome(home), binaryOwnershipName)); err != nil {
 		t.Fatalf("later metadata did not land: %v", err)
 	}
@@ -59,34 +75,65 @@ func TestInstallDeferredPluginFailureSurvivesLaterLedgerError(t *testing.T) {
 		MCPConfigPath: testConfigPath(t), MCPEnabled: map[string]bool{"chat": true},
 		ClaudeRosterHost: true, PrimaryConfigDir: store,
 	})
-	failure := "claude plugins in " + store + ": "
-	if err == nil || !strings.Contains(err.Error(), failure) ||
-		!strings.Contains(err.Error(), "read VS Code ownership ") {
+	failure := "claude plugins in " + store + ": " + store + " resolves to the Claude store — run pfm doctor"
+	ledger := "read VS Code ownership " + filepath.Join(managedRootForHome(home), vscodeOwnershipName) +
+		": unexpected end of JSON input"
+	if err == nil || err.Error() != failure+"\n"+ledger {
 		t.Fatalf("install error=%v, want plugin and VS Code ledger failures", err)
 	}
-	if !strings.Contains(output.output.String(), "  FAIL    "+failure) {
-		t.Fatalf("plugin failure was not printed:\n%s", output.output.String())
-	}
+	wantOutputLines(t, output.output.String(), []string{"  FAIL    " + failure}, "  FAIL    ")
 }
 
+// TestInstallDeferredRestartFailureUsesFAILAndLandsLaterSteps: a fleet unit that fails after its
+// restart, an enable that exits non-zero, and a schedule timer still inactive after enable --now each
+// fail the run with a FAIL line (never a lowercase fail), and the steps after them still land.
 func TestInstallDeferredRestartFailureUsesFAILAndLandsLaterSteps(t *testing.T) {
-	home := t.TempDir()
-	_, recorder := obs.Test(t)
-	var output bytes.Buffer
-	_, err := Run(context.Background(), Options{
-		scheduler: schedulerFor(servicemanager.KindSystemd),
-		Mode:      ModeApply, Home: home, Runner: &fakeRunner{manager: true, mcpState: "failed"}, Stdout: &output,
-		MCPConfigPath: testConfigPath(t), MCPEnabled: map[string]bool{"chat": true}, Sleep: func(time.Duration) {},
-	})
-	want := "fleet unit pfm-mcp.service is failed 3s after start — journalctl --user -u pfm-mcp.service -n 20"
-	if err == nil || !strings.Contains(err.Error(), want) {
-		t.Fatalf("install error=%v, want %q", err, want)
+	const (
+		restart = "fleet unit pfm-mcp.service is failed 3s after start — journalctl --user -u pfm-mcp.service -n 20"
+		enable  = "systemctl --user enable --now pfm-name-sync.path pfm-name-sync.timer pfm-schedule.timer: exit 1"
+		timer   = "schedule timer pfm-schedule.timer is inactive after enable --now; due wakes will not run"
+	)
+	for _, tc := range []struct {
+		name   string
+		runner CommandRunner
+		mcp    map[string]bool
+		fails  []string
+	}{
+		{"failed restart", &fakeRunner{manager: true, mcpState: "failed"}, map[string]bool{"chat": true}, []string{restart}},
+		{"failed enable", &installEnableRunner{
+			fakeRunner: &fakeRunner{manager: true}, failEnable: true,
+			timerState: "inactive",
+		}, nil, []string{enable, timer}},
+		{"timer never started", &installEnableRunner{
+			fakeRunner: &fakeRunner{manager: true}, timerState: "inactive",
+			keepTimerStopped: true,
+		}, nil, []string{timer}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			_, recorder := obs.Test(t)
+			var output bytes.Buffer
+			_, err := Run(context.Background(), Options{
+				scheduler: schedulerFor(servicemanager.KindSystemd),
+				Mode:      ModeApply, Home: home, Runner: tc.runner, Stdout: &output,
+				MCPConfigPath: testConfigPath(t), MCPEnabled: tc.mcp, Sleep: func(time.Duration) {},
+			})
+			if want := strings.Join(tc.fails, "\n"); err == nil || err.Error() != want {
+				t.Fatalf("install error=%v, want %q", err, want)
+			}
+			var lines []string
+			for _, fail := range tc.fails {
+				lines = append(lines, "  FAIL    "+fail)
+			}
+			lines = append(lines, "  skip    zshrc: no source repo recorded and "+home+
+				"/.professor/pfm/internal/installer/assets/shim/pfm.zsh does not exist")
+			wantOutputLines(t, output.String(), lines, "  FAIL    ", "  fail    ", "zshrc:")
+			if _, err := os.Stat(filepath.Join(managedRootForHome(home), binaryOwnershipName)); err != nil {
+				t.Fatalf("later metadata did not land: %v", err)
+			}
+			requireInstallerFailureRecord(t, recorder, tc.fails[0])
+		})
 	}
-	if !strings.Contains(output.String(), "  FAIL    "+want+"\n") || strings.Contains(output.String(), "  fail    ") ||
-		!strings.Contains(output.String(), "zshrc") {
-		t.Fatalf("restart failure or later step not reported:\n%s", output.String())
-	}
-	requireInstallerFailureRecord(t, recorder, want)
 }
 
 type installEnableRunner struct {
@@ -122,28 +169,6 @@ func (runner *installEnableRunner) Output(ctx context.Context, name string, args
 		}
 	}
 	return runner.fakeRunner.Output(ctx, name, args...)
-}
-
-func TestInstallDeferredEnableFailureLandsLaterSteps(t *testing.T) {
-	home := t.TempDir()
-	_, recorder := obs.Test(t)
-	var output bytes.Buffer
-	runner := &installEnableRunner{fakeRunner: &fakeRunner{manager: true}, failEnable: true, timerState: "inactive"}
-	_, err := Run(context.Background(), Options{
-		scheduler: schedulerFor(servicemanager.KindSystemd),
-		Mode:      ModeApply, Home: home, Runner: runner, Stdout: &output, MCPConfigPath: testConfigPath(t),
-	})
-	want := "systemctl --user enable --now pfm-name-sync.path pfm-name-sync.timer pfm-schedule.timer: exit 1"
-	if err == nil || !strings.Contains(err.Error(), want) {
-		t.Fatalf("install error=%v, want %q", err, want)
-	}
-	if !strings.Contains(output.String(), "  FAIL    "+want+"\n") || !strings.Contains(output.String(), "zshrc") {
-		t.Fatalf("enable failure or later step not reported:\n%s", output.String())
-	}
-	if _, err := os.Stat(filepath.Join(managedRootForHome(home), binaryOwnershipName)); err != nil {
-		t.Fatalf("later metadata did not land: %v", err)
-	}
-	requireInstallerFailureRecord(t, recorder, want)
 }
 
 func requireInstallerFailureRecord(t *testing.T, recorder *obs.Recorder, want string) {
@@ -196,24 +221,6 @@ func TestInstallDeferredRerunRepairsInactiveTimerAndKeepsHealthyUnits(t *testing
 	}
 }
 
-func TestInstallReportsScheduleTimerThatDidNotStart(t *testing.T) {
-	runner := &installEnableRunner{
-		fakeRunner: &fakeRunner{manager: true}, timerState: "inactive", keepTimerStopped: true,
-	}
-	var output bytes.Buffer
-	_, err := Run(context.Background(), Options{
-		scheduler: schedulerFor(servicemanager.KindSystemd),
-		Mode:      ModeApply, Home: t.TempDir(), Runner: runner, Stdout: &output, MCPConfigPath: testConfigPath(t),
-	})
-	if err == nil || !strings.Contains(err.Error(), "pfm-schedule.timer") ||
-		!strings.Contains(err.Error(), "inactive") {
-		t.Fatalf("install silently accepted an inactive schedule timer: err=%v output=%s", err, output.String())
-	}
-	if !strings.Contains(output.String(), "  FAIL    ") || !strings.Contains(output.String(), "zshrc") {
-		t.Fatalf("timer failure or subsequent steps not reported: %s", output.String())
-	}
-}
-
 func TestUninstallPreflightDamagedLoginFenceKeepsInstallation(t *testing.T) {
 	home := t.TempDir()
 	settings := filepath.Join(home, ".config", "Code", "User", "settings.json")
@@ -231,8 +238,8 @@ func TestUninstallPreflightDamagedLoginFenceKeepsInstallation(t *testing.T) {
 	options.Mode = ModeUninstall
 	output.Reset()
 	_, err := Run(context.Background(), options)
-	if err == nil || !strings.Contains(err.Error(), "two pfm claude-config-dir begin markers") ||
-		!strings.Contains(err.Error(), "preflight uninstall plan") {
+	if err == nil || err.Error() != "preflight uninstall plan: login default: "+filepath.Join(home, ".profile")+
+		": two pfm claude-config-dir begin markers; remove one by hand" {
 		t.Fatalf("uninstall error=%v output=%s, want damaged-fence failure", err, output.String())
 	}
 	for _, name := range []string{"source-repo", binaryOwnershipName} {
@@ -240,8 +247,9 @@ func TestUninstallPreflightDamagedLoginFenceKeepsInstallation(t *testing.T) {
 			t.Errorf("preflight refusal removed installation metadata %s: %v", name, err)
 		}
 	}
-	if got := readFixture(t, settings); !strings.Contains(got, `"PFM"`) {
-		t.Fatalf("preflight refusal changed VS Code installation:\n%s", got)
+	got, err := decodeJSONCObject([]byte(readFixture(t, settings)))
+	if err != nil || got["terminal.integrated.defaultProfile.linux"] != "PFM" {
+		t.Fatalf("preflight refusal changed VS Code installation (%v):\n%v", err, got)
 	}
 }
 

@@ -25,13 +25,8 @@ func TestHeadlessForkCodexUsesRealForkAndSelectedAccount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, fragment := range []string{"-u CODEX_THREAD_ID", "CODEX_HOME=", " 'fork' 'thread-123'"} {
-		if !strings.Contains(plan.Run, fragment) {
-			t.Fatalf("fork command %q lacks %q", plan.Run, fragment)
-		}
-	}
-	if strings.Contains(plan.Run, "resume") {
-		t.Fatalf("Codex fork command used resume: %q", plan.Run)
+	if want := "env -u CLAUDE_CODE_SESSION_ID -u CLAUDECODE -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CONFIG_DIR -u PFM_CLAUDE_CONFIG_DIR_DEFAULT -u CLAUDE_PROJECT_DIR -u ENABLE_PROMPT_CACHING_1H -u FORCE_PROMPT_CACHING_5M -u CLAUDE_CODE_PROMPT_CACHE_TTL -u CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL -u CACHE_LIVE_CONTROL_MAIN_TTL -u CACHE_LIVE_CONTROL_AGENTS_TTL -u CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT -u ANTHROPIC_BASE_URL -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_API_KEY -u ANTHROPIC_MODEL -u ANTHROPIC_SMALL_FAST_MODEL -u CLAUDE_CODE_AUTO_COMPACT_WINDOW -u CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -u CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK -u CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY -u CODEX_THREAD_ID CODEX_HOME='/tmp/fork-home/.codex' codex --no-daemon --dangerously-bypass-approvals-and-sandbox 'fork' 'thread-123'"; plan.Run != want {
+		t.Errorf("fork command = %q, want %q", plan.Run, want)
 	}
 }
 

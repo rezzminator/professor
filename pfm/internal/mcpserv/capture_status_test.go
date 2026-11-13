@@ -4,7 +4,6 @@ import (
 	"context"
 	"io"
 	"reflect"
-	"strings"
 	"testing"
 
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
@@ -192,9 +191,9 @@ func TestCLIRefusalIsAReceiptInTheVerbsWords(t *testing.T) {
 		if err != nil {
 			gotErr = err.Error()
 		}
-		if got != testCase.want || !strings.HasPrefix(gotErr, testCase.wantErr) ||
-			(testCase.wantErr == "") != (err == nil) {
-			t.Errorf("%s: %+v, %q; want %+v, %q", testCase.name, got, gotErr, testCase.want, testCase.wantErr)
+		if got != testCase.want || gotErr != testCase.wantErr {
+			t.Errorf("%s: receipt %+v (want %+v) error = %q, want %q",
+				testCase.name, got, testCase.want, gotErr, testCase.wantErr)
 		}
 	}
 }

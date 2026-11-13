@@ -36,7 +36,7 @@ func TestChatWhoamiReportsIdentityOrStatesItsAbsence(t *testing.T) {
 		WhoamiInput{},
 	)
 	if output.Status != "not_found" ||
-		!strings.Contains(output.Message, "not inside a pfm chat") {
+		output.Message != "ERROR: this process is not inside a pfm chat: no live tmux pane or Herdr pane holds it" {
 		t.Fatalf("whoami outside tmux = %+v", output)
 	}
 	if output.Session != "" {

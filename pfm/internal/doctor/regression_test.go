@@ -7,7 +7,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/config"
@@ -23,7 +22,7 @@ func TestHarnessCaptureUsesInjectedListener(t *testing.T) {
 		"",
 		Dependencies{Listen: func(string, string) (net.Listener, error) { return nil, listenErr }},
 	)
-	if err == nil || !strings.Contains(err.Error(), listenErr.Error()) {
+	if err == nil || err.Error() != "open capture sink: fixture listener refused" {
 		t.Fatalf("captureHarnessPrompt() error = %v, want injected listener error", err)
 	}
 }
@@ -50,9 +49,12 @@ func TestDoctorConfigRenderingShowsEffectiveValuesAndSources(t *testing.T) {
 	}
 	var stdout bytes.Buffer
 	PrintConfig(&stdout, config.Runtime{Config: loaded})
-	for _, want := range []string{"config version=2 effective (input=1 file)", "config accounts=7:" + filepath.Join(home, "account-seven"), "mcp.servers.chat.enabled=true (file)"} {
-		if !strings.Contains(stdout.String(), want) {
-			t.Fatalf("PrintConfig() = %q, missing %q", stdout.String(), want)
-		}
+	got := doctorRows(stdout.String(), "config version=") + doctorRows(stdout.String(), "config accounts=") +
+		doctorRows(stdout.String(), "mcp.servers.chat.enabled=")
+	if got, want := rooted(
+		got,
+		root,
+	), "doctor: config version=2 effective (input=1 file)\ndoctor: config accounts=7:{root}/config-home/account-seven (file)\ndoctor: config mcp.servers.chat.enabled=true (file)\n"; got != want {
+		t.Errorf("config rows = %q, want %q", got, want)
 	}
 }

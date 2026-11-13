@@ -123,7 +123,12 @@ func TestCodexModelFullIDNeedsNoHome(t *testing.T) {
 }
 
 func TestCodexModelRefusesWhatItCannotLookUp(t *testing.T) {
-	if _, err := CodexModel("astra", "", ""); err == nil || !strings.Contains(err.Error(), "no home") {
+	if _, err := CodexModel(
+		"astra",
+		"",
+		"",
+	); err == nil ||
+		err.Error() != "codex model \"astra\": no home directory to resolve its agent persona from" {
 		t.Fatalf("bare tier without home: err=%v, want a no-home error", err)
 	}
 	home := t.TempDir()

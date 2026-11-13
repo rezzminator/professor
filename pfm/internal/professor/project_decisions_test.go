@@ -79,9 +79,9 @@ func TestPartitionRetiredMovesCoveredHitsOutOfReview(t *testing.T) {
 
 func TestKeptReportsGitHistoryOrExplicitManualReview(t *testing.T) {
 	for _, row := range []struct{ name, from, pinned, kept, earlier string }{
-		{"git history", "aaa1111", "bbb2222", "untaken upstream change: git -C /blueprint diff aaa1111 bbb2222 -- templates/project/a.md", "untaken since aaa1111"},
-		{"self hosted", UnknownSelfHostedSHA, UnknownSelfHostedSHA, "untaken upstream change unavailable: no recorded git history; compare the current template and local file by hand\n      review: diff -u /blueprint/templates/project/a.md /project/.claude/a.md", "untaken change has no recorded git history"},
-		{"missing earlier history", UnknownSelfHostedSHA, "bbb2222", "untaken upstream change unavailable: no recorded git history; compare the current template and local file by hand\n      review: diff -u /blueprint/templates/project/a.md /project/.claude/a.md", "untaken change has no recorded git history"},
+		{"git history", "aaa1111", "bbb2222", "  KEPT          1   (deliberate local divergence, recorded; not review)\n    .claude/a.md   project/a.md  kept 2026-10-12: local tool\n      untaken upstream change: git -C /blueprint diff aaa1111 bbb2222 -- templates/project/a.md\n      ported the untaken change after all? pfm update pin .claude/a.md --unkeep\n", "      kept earlier (2026-10-12): local tool — untaken since aaa1111\n"},
+		{"self hosted", UnknownSelfHostedSHA, UnknownSelfHostedSHA, "  KEPT          1   (deliberate local divergence, recorded; not review)\n    .claude/a.md   project/a.md  kept 2026-10-12: local tool\n      untaken upstream change unavailable: no recorded git history; compare the current template and local file by hand\n      review: diff -u /blueprint/templates/project/a.md /project/.claude/a.md\n      ported the untaken change after all? pfm update pin .claude/a.md --unkeep\n", "      kept earlier (2026-10-12): local tool — untaken change has no recorded git history\n"},
+		{"missing earlier history", UnknownSelfHostedSHA, "bbb2222", "  KEPT          1   (deliberate local divergence, recorded; not review)\n    .claude/a.md   project/a.md  kept 2026-10-12: local tool\n      untaken upstream change unavailable: no recorded git history; compare the current template and local file by hand\n      review: diff -u /blueprint/templates/project/a.md /project/.claude/a.md\n      ported the untaken change after all? pfm update pin .claude/a.md --unkeep\n", "      kept earlier (2026-10-12): local tool — untaken change has no recorded git history\n"},
 	} {
 		t.Run(row.name, func(t *testing.T) {
 			item := projectReportItem{
@@ -101,10 +101,10 @@ func TestKeptReportsGitHistoryOrExplicitManualReview(t *testing.T) {
 			var kept, earlier bytes.Buffer
 			writeKeptHuman(&kept, report)
 			writeKeptEarlier(&earlier, item)
-			if !strings.Contains(kept.String(), row.kept) {
+			if kept.String() != row.kept {
 				t.Errorf("kept output = %q, want %q", kept.String(), row.kept)
 			}
-			if !strings.Contains(earlier.String(), row.earlier) {
+			if earlier.String() != row.earlier {
 				t.Errorf("earlier output = %q, want %q", earlier.String(), row.earlier)
 			}
 		})
@@ -301,14 +301,7 @@ func TestCoverageAcceptRenderingNamesItsScope(t *testing.T) {
 	}
 	var out bytes.Buffer
 	writeAcceptedHuman(&out, &RetiredNameScan{Accepted: []RetiredAccepted{{Rule: rule}}})
-	for _, want := range []string{"incomplete coverage", "pfm update accept --undo 'docs/old notes.md' --coverage"} {
-		if !strings.Contains(out.String(), want) {
-			t.Errorf("accepted report = %q, want %q", out.String(), want)
-		}
-	}
-	out.Reset()
-	writeSessionGuide(&out)
-	if !strings.Contains(out.String(), `accept <path> --coverage --reason`) {
-		t.Fatalf("coverage guide = %q", out.String())
+	if got, want := out.String(), "  ACCEPTED      0   (retired-name hits accepted by 1 recorded rule(s); not review)\n    docs/old notes.md   incomplete coverage   0 hit(s) — reviewed — matches nothing now: pfm update accept --undo 'docs/old notes.md' --coverage\n"; got != want {
+		t.Errorf("accepted report = %q, want %q", got, want)
 	}
 }

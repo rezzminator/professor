@@ -22,6 +22,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/place"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testjail/fakegit"
 	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
@@ -610,7 +611,7 @@ func TestReconcileHerdrRenamesAWorkspaceHoldingOnlyItsPlace(t *testing.T) {
 // pane whose supervisor works in the home directory, running in a worktree or
 // workbench of its project, sits in its project's workspace, never in "~".
 func TestReconcileHerdrPlacesAChatByItsOwnDirectory(t *testing.T) {
-	repo := testjail.GitRepoWithWorktrees(t, "lantern")
+	repo := testjail.GitRepoWithWorktrees(t, &fakegit.Runner{}, "lantern")
 	bench := filepath.Join(repo.Repo, ".workbenches", "outreach")
 	if err := os.MkdirAll(bench, 0o755); err != nil {
 		t.Fatal(err)

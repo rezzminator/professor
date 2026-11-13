@@ -41,6 +41,7 @@ func TestClaudeEnvironmentUsesRegistryHygiene(t *testing.T) {
 }
 
 func TestClaudeEnvironmentDropsInheritedLaunchSettings(t *testing.T) {
+	t.Setenv("PATH", t.TempDir()) // no bash to resolve: the launch shell adds nothing in either test binary
 	var got []string
 	setEnvironment([]string{
 		"CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=9",
@@ -49,12 +50,8 @@ func TestClaudeEnvironmentDropsInheritedLaunchSettings(t *testing.T) {
 		"CLAUDE_CODE_TMUX_TRUECOLOR=1",
 		"CLAUDE_CODE_NATIVE_CURSOR=1",
 	}, pfmengine.Claude, "/cfg", false, &got)
-	for _, entry := range got {
-		if strings.HasPrefix(entry, "CLAUDE_CODE_MAX_") ||
-			strings.HasPrefix(entry, "CLAUDE_CODE_TMUX_TRUECOLOR=") ||
-			strings.HasPrefix(entry, "CLAUDE_CODE_NATIVE_CURSOR=") {
-			t.Fatalf("inherited launch setting reached Claude: %q", got)
-		}
+	if got, want := strings.Join(got, "\n"), "CLAUDE_CONFIG_DIR=/cfg"; got != want {
+		t.Fatalf("environment = %q, want %q", got, want)
 	}
 }
 
@@ -94,7 +91,7 @@ func TestClaudeResolveDoesNotUseAskModelOrEffort(t *testing.T) {
 func TestResolveUnknownClaudeAccountNamesRosterError(t *testing.T) {
 	machine := claudeMachine(engineBinary(t), t.TempDir())
 	_, err := Resolve(Request{Config: machine, Engine: pfmengine.Claude, Account: 99})
-	if err == nil || !strings.Contains(err.Error(), "account 99 is not in the configured roster") {
+	if err == nil || err.Error() != "requested Claude account 99 is not in the configured roster" {
 		t.Fatalf("Resolve unknown account error = %v", err)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -158,45 +159,24 @@ func TestOpenLogRecordsCarryEveryDeclaredField(t *testing.T) {
 	}
 }
 
-// TestOpenLogLevelPerEnvironment covers the four level doors: the build's own
-// default, pfm.config.json, PFM_LOG_LEVEL, and which of them wins.
 func TestOpenLogLevelPerEnvironment(t *testing.T) {
-	for _, testCase := range []struct {
-		name       string
-		version    string
-		configured string
-		envLevel   string
-		wantDebug  bool
-		wantInfo   bool
-	}{
-		{name: "alpha build defaults to debug", version: "1.2.3-alpha", wantDebug: true, wantInfo: true},
-		{name: "release build defaults to info", version: "1.2.3", wantDebug: false, wantInfo: true},
-		{name: "config lifts a release build", version: "1.2.3", configured: "debug", wantDebug: true, wantInfo: true},
-		{
-			name: "config quiets an alpha build", version: "1.2.3-alpha", configured: "warn",
-			wantDebug: false, wantInfo: false,
-		},
-		{name: "env overrides the build", version: "1.2.3", envLevel: "debug", wantDebug: true, wantInfo: true},
-		{
-			name: "env overrides the config", version: "1.2.3-alpha", configured: "error", envLevel: "debug",
-			wantDebug: true, wantInfo: true,
-		},
+	for _, row := range []struct{ name, version, configured, envLevel, want string }{
+		{"alpha build defaults to debug", "1.2.3-alpha", "", "", "cmd.start probe.debug cmd.exit"},
+		{"release build defaults to info", "1.2.3", "", "", "cmd.start cmd.exit"},
+		{"config lifts a release build", "1.2.3", "debug", "", "cmd.start probe.debug cmd.exit"},
+		{"config quiets an alpha build", "1.2.3-alpha", "warn", "", ""},
+		{"env overrides the build", "1.2.3", "", "debug", "cmd.start probe.debug cmd.exit"},
+		{"env overrides the config", "1.2.3-alpha", "error", "debug", "cmd.start probe.debug cmd.exit"},
 	} {
-		t.Run(testCase.name, func(t *testing.T) {
-			if testCase.envLevel != "" {
-				t.Setenv(paths.EnvLogLevel, testCase.envLevel)
+		t.Run(row.name, func(t *testing.T) {
+			if row.envLevel != "" {
+				t.Setenv(paths.EnvLogLevel, row.envLevel)
 			}
-			finish, path := openIn(t, t.TempDir(), Settings{
-				Cmd: "doctor", Version: testCase.version, Level: testCase.configured,
-			})
+			finish, path := openIn(t, t.TempDir(), Settings{Cmd: "doctor", Version: row.version, Level: row.configured})
 			Logger(context.Background()).Debug("probe.debug")
 			finish(0)
-			text := recordsText(readLog(t, path))
-			if got := strings.Contains(text, "probe.debug"); got != testCase.wantDebug {
-				t.Fatalf("debug record present = %t, want %t: %s", got, testCase.wantDebug, text)
-			}
-			if got := strings.Contains(text, "cmd.start"); got != testCase.wantInfo {
-				t.Fatalf("info record present = %t, want %t: %s", got, testCase.wantInfo, text)
+			if got := messages(readLog(t, path)); got != row.want {
+				t.Fatalf("records = %q, want %q", got, row.want)
 			}
 		})
 	}
@@ -207,7 +187,7 @@ func TestOpenLogReportsAnUnparsableLevelInsteadOfIgnoringIt(t *testing.T) {
 	t.Setenv(paths.EnvLogLevel, "chatty")
 	finish, path := openIn(t, t.TempDir(), Settings{Cmd: "doctor", Version: "1.2.3", Stderr: stderr})
 	finish(0)
-	if !strings.Contains(stderr.String(), paths.EnvLogLevel) {
+	if stderr.String() != "pfm: activity log: PFM_LOG_LEVEL: level \"chatty\" is not one of debug, info, warn, warning, error, off; keeping info from build\n" {
 		t.Fatalf("stderr = %q, want the rejected level named", stderr.String())
 	}
 	if text := recordsText(readLog(t, path)); !strings.Contains(text, "cmd.start") {
@@ -215,17 +195,21 @@ func TestOpenLogReportsAnUnparsableLevelInsteadOfIgnoringIt(t *testing.T) {
 	}
 }
 
-// TestOpenLogMirrorsToStderr pins PFM_LOG=stderr for a foreground run.
 func TestOpenLogMirrorsToStderr(t *testing.T) {
 	stderr := &bytes.Buffer{}
 	t.Setenv(paths.EnvLogMirror, StderrMirror)
 	finish, path := openIn(t, t.TempDir(), Settings{Cmd: "ls", Version: "1.2.3", Stderr: stderr})
 	finish(0)
-	if !strings.Contains(stderr.String(), "cmd.start") {
-		t.Fatalf("stderr mirror = %q, want the records", stderr.String())
+	mirror := &Recorder{}
+	if _, err := mirror.Write(stderr.Bytes()); err != nil {
+		t.Fatal(err)
 	}
-	if text := recordsText(readLog(t, path)); !strings.Contains(text, "cmd.start") {
-		t.Fatalf("the mirror replaced the file instead of doubling it: %s", text)
+	if got, want := messages(
+		mirror.Records(),
+	)+" | "+messages(
+		readLog(t, path),
+	), "cmd.start cmd.exit | cmd.start cmd.exit"; got != want {
+		t.Fatalf("stderr records | file records = %q, want %q", got, want)
 	}
 }
 
@@ -241,8 +225,12 @@ func TestOpenLogNamesAnUnwritableDestination(t *testing.T) {
 		Cmd: "doctor", Version: "1.2.3", Path: filepath.Join(blocked, "log", "pfm.jsonl"), Stderr: stderr,
 	})
 	finish(1)
-	if !strings.Contains(stderr.String(), "activity log unavailable") {
-		t.Fatalf("stderr = %q, want the failure named", stderr.String())
+	if got, want := strings.ReplaceAll(
+		stderr.String(),
+		blocked,
+		"{blocked}",
+	), "pfm: activity log unavailable: create activity log directory {blocked}/log: mkdir {blocked}: not a directory\n"; got != want {
+		t.Fatalf("stderr = %q, want %q", got, want)
 	}
 }
 
@@ -291,16 +279,10 @@ func TestOpenLogNamesTheSettingThatStaysInForce(t *testing.T) {
 	finish, path := openIn(t, t.TempDir(), Settings{Cmd: "doctor", Version: "1.2.3", Level: "warn", Stderr: stderr})
 	Logger(context.Background()).Warn("still.writing")
 	finish(0)
-	for _, want := range []string{
-		paths.EnvLogLevel, "chatty", "debug, info, warn, warning, error, off", "keeping warn from config",
-		paths.EnvLogComponents, "database", "cli, mcp, http.in",
-	} {
-		if !strings.Contains(stderr.String(), want) {
-			t.Fatalf("stderr = %q, want %q in it", stderr.String(), want)
-		}
-	}
-	if text := recordsText(readLog(t, path)); !strings.Contains(text, "still.writing") {
-		t.Fatalf("a bad override silenced the log: %s", text)
+	if got, want := stderr.String()+" | "+messages(
+		readLog(t, path),
+	), "pfm: activity log: PFM_LOG_LEVEL: level \"chatty\" is not one of debug, info, warn, warning, error, off; keeping warn from config\nPFM_LOG_COMPONENTS: component \"database\" is not one of cli, mcp, http.in, http.out, runner, tmux, hooks, db, installer, state; keeping warn from config\n | still.writing"; got != want {
+		t.Fatalf("stderr | records = %q, want %q", got, want)
 	}
 }
 
@@ -312,4 +294,35 @@ func TestAlphaBuild(t *testing.T) {
 			t.Errorf("AlphaBuild(%q) = %v, want %v", version, got, want)
 		}
 	}
+}
+
+// messages is each record's message, with its comp field when it has one, in log order.
+func messages(records []Record) string {
+	parts := make([]string, 0, len(records))
+	for _, record := range records {
+		if comp, ok := record.Fields[FieldComp]; ok {
+			parts = append(parts, fmt.Sprintf("%s@%v", record.Message, comp))
+			continue
+		}
+		parts = append(parts, record.Message)
+	}
+	return strings.Join(parts, " ")
+}
+
+// runs writes each run of 50 or more of one byte as {N×c}, so a capped value compares whole.
+func runs(text string) string {
+	var out strings.Builder
+	for i := 0; i < len(text); {
+		j := i
+		for j < len(text) && text[j] == text[i] {
+			j++
+		}
+		if j-i >= 50 {
+			fmt.Fprintf(&out, "{%d×%c}", j-i, text[i])
+		} else {
+			out.WriteString(text[i:j])
+		}
+		i = j
+	}
+	return out.String()
 }

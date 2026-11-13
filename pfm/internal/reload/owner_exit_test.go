@@ -196,17 +196,17 @@ func TestResultReceiptNamesWhatTheReloadDid(t *testing.T) {
 // that cannot be probed is an error.
 func TestExitTypedNeedsTheLockAndTheMark(t *testing.T) {
 	for _, testCase := range []struct {
-		name          string
-		held, marked  bool
-		lockIsDir     bool
-		want          bool
-		wantErrSuffix string
+		name         string
+		held, marked bool
+		lockIsDir    bool
+		want         bool
+		wantErr      string
 	}{
-		{name: "no reload"},
-		{name: "a leftover mark, no lock held", marked: true},
-		{name: "the reload waits for the turn", held: true},
-		{name: "the reload typed its /exit", held: true, marked: true, want: true},
-		{name: "a lock that cannot be probed", lockIsDir: true, marked: true, wantErrSuffix: "is a directory"},
+		{name: "no reload", wantErr: "<nil>"},
+		{name: "a leftover mark, no lock held", marked: true, wantErr: "<nil>"},
+		{name: "the reload waits for the turn", held: true, wantErr: "<nil>"},
+		{name: "the reload typed its /exit", held: true, marked: true, want: true, wantErr: "<nil>"},
+		{name: "a lock that cannot be probed", lockIsDir: true, marked: true, wantErr: "open reload lock: open {dir}/.cc-1-1-1.%0.reloadlock: is a directory"},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -236,14 +236,19 @@ func TestExitTypedNeedsTheLockAndTheMark(t *testing.T) {
 				}
 			}
 			got, err := ExitTyped(dir, "cc-1-1-1", "%0")
-			errText := ""
-			if err != nil {
-				errText = err.Error()
-			}
-			if got != testCase.want || (testCase.wantErrSuffix == "") != (err == nil) ||
-				testCase.wantErrSuffix != "" && !strings.HasSuffix(errText, testCase.wantErrSuffix) {
-				t.Fatalf("ExitTyped() = %v, %q; want %v, error ending %q",
-					got, errText, testCase.want, testCase.wantErrSuffix)
+			if errText := strings.ReplaceAll(
+				fmt.Sprint(err),
+				dir,
+				"{dir}",
+			); got != testCase.want ||
+				errText != testCase.wantErr {
+				t.Fatalf(
+					"ExitTyped() error = %q, want %q (typed %v, want %v)",
+					errText,
+					testCase.wantErr,
+					got,
+					testCase.want,
+				)
 			}
 		})
 	}

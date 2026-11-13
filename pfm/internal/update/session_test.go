@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -253,17 +255,12 @@ func TestUpdatedRowListsTheOldestCommitsFirstPastTheCap(t *testing.T) {
 		func(index int) string { return fmt.Sprintf("step %02d", index) },
 	)
 	_, report := fixture.sessionReport()
-	// The fixture's own "new templates" commit is the oldest after the pin.
-	if !strings.Contains(report, " new templates\n") || !strings.Contains(report, " step 01\n") ||
-		!strings.Contains(report, " step 39\n") {
-		t.Errorf("the list lacks the oldest commits (new templates, step 01 … step 39):\n%s", report)
-	}
-	if strings.Contains(report, " step 40\n") || strings.Contains(report, " step 45\n") {
-		t.Errorf("the list holds commits past the cap:\n%s", report)
-	}
-	if !strings.Contains(report, "… and 6 newer commit(s) not listed: git log --reverse ") {
-		t.Errorf("the list does not count the commits it leaves out (46 since the pin, 40 listed):\n%s", report)
-	}
+	golden(
+		t,
+		"updated_row_cap.txt",
+		regexp.MustCompile(`/tmp/[^\s"':]*`).
+			ReplaceAllString(regexp.MustCompile(`\b[0-9a-f]{7,40}\b`).ReplaceAllString(report, "{sha}"), "{tmp}"),
+	)
 }
 
 // TestRecordedReasonsRenderOnOneLine: a keep or accept reason taken from
@@ -444,5 +441,22 @@ func TestSessionAcceptsReviewedIncompleteCoverage(t *testing.T) {
 				t.Fatalf("undo did not reopen coverage:\n%s", report)
 			}
 		})
+	}
+}
+
+// golden compares got with testdata/{file}; a mismatch prints the GOLDEN line the fill script writes from.
+func golden(t *testing.T, file, got string) {
+	t.Helper()
+	want, err := os.ReadFile(filepath.Join("testdata", file))
+	if err != nil || string(want) != got {
+		t.Errorf(
+			"testdata/%s: %v\nwant:\n%s\nactual:\n%s\nGOLDEN internal/update/testdata/%s = %q",
+			file,
+			err,
+			want,
+			got,
+			file,
+			got,
+		)
 	}
 }

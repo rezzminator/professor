@@ -242,7 +242,7 @@ func TestHealHoldsWriterLockThroughBackupAndDelete(t *testing.T) {
 }
 
 func TestThreadWarnsOnRepairFailureWithoutBlockingResume(t *testing.T) {
-	for _, failure := range []string{"missing home", "find stores", "read projection"} {
+	for failure, want := range map[string]string{"missing home": "pfm: warning: cannot check 33333333-3333-4333-8333-333333333333 before resume: no Codex home at {root}/nowhere — continuing resume", "find stores": "pfm: warning: cannot check 33333333-3333-4333-8333-333333333333 before resume: read Codex home \"{root}/invalid-home\": open {root}/invalid-home: not a directory — continuing resume", "read projection": "pfm: warning: cannot heal 33333333-3333-4333-8333-333333333333 before resume: open \"{root}/state_2.sqlite\" read-only: sqlite database {root}/state_2.sqlite is a file this test process did not write; a test that needs SQLite's own file calls testjail.DatabaseFiles — continuing resume"} {
 		t.Run(failure, func(t *testing.T) {
 			jail := newCodexJail(t)
 			const id = "33333333-3333-4333-8333-333333333333"
@@ -260,10 +260,9 @@ func TestThreadWarnsOnRepairFailureWithoutBlockingResume(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			message := Thread(context.Background(), home, id)
-			if !strings.Contains(message, id) || !strings.Contains(message, "warning") ||
-				!strings.Contains(message, "resume") {
-				t.Fatalf("repair failure rendered as nothing to heal: %q", message)
+			message := strings.ReplaceAll(Thread(context.Background(), home, id), jail.root, "{root}")
+			if message != want {
+				t.Fatalf("Thread = %q, want %q", message, want)
 			}
 		})
 	}

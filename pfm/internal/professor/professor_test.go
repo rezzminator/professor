@@ -19,8 +19,9 @@ func TestStubStoreRunnerForTestSwapsAndRestoresTheStoreGit(t *testing.T) {
 		t.Fatal(err)
 	}
 	fake := &deps.FakeRunner{}
+	fake.ScriptLookPath("git", "scripted-git", nil)
 	fake.Script(
-		[]string{deps.Executable("git"), "rev-parse", "--short", "HEAD"},
+		[]string{"scripted-git", "rev-parse", "--short", "HEAD"},
 		deps.RunResult{Stdout: []byte("stubbed\n")},
 		nil,
 	)

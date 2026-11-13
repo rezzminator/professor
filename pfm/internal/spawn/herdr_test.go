@@ -15,6 +15,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/compose"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -319,10 +320,6 @@ func TestHerdrRawBirthResolvesActualEngineBeforeReservation(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				t.Setenv("PATH", filepath.Dir(binary))
-				if mode == "outside-path" {
-					t.Setenv("PATH", t.TempDir())
-				}
 				word := binary
 				if mode != "configured" && mode != "outside-path" {
 					word = pfmengine.MustLookup(engineID).Binary
@@ -341,6 +338,14 @@ func TestHerdrRawBirthResolvesActualEngineBeforeReservation(t *testing.T) {
 					Seat: fleetdb.Seat{SeatID: "raw-seat", SessionID: "provisional", Engine: string(engineID)},
 					Run:  fleetdb.SeatRun{Binary: word, CWD: values.Home, Args: []string{"a b", "a'quote"}},
 				}
+				// The runner finds the engine as the host would: the configured path, the bare name
+				// on PATH and a path outside PATH all resolve to the file; a missing file or a bad
+				// override resolves to nothing.
+				fake := &deps.FakeRunner{}
+				if mode != "missing" && mode != "bad-override" {
+					fake.ScriptLookPath(word, binary, nil)
+				}
+				request.Runner = fake
 				result, err := PrepareHerdr(context.Background(), request)
 				db := fleetdb.OpenSharedState(context.Background(), values)
 				defer func() { _ = db.Close() }()

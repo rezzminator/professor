@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"testing"
 )
 
@@ -294,7 +293,7 @@ func TestDescribeStateNamesDanglingByLinkName(t *testing.T) {
 		"/home/x/.local/share/engine-sync/gone/alpha.toml",
 		"/home/x/.local/share/engine-sync/gone/alpha.toml",
 	)
-	if !strings.Contains(got, "DANGLING") || !strings.Contains(got, "/home/x/.codex/agents/alpha.toml") {
+	if got != "DANGLING /home/x/.codex/agents/alpha.toml -> /home/x/.local/share/engine-sync/gone/alpha.toml (target does not exist — rerun pfm install)" {
 		t.Fatalf("DescribeState(dangling) = %q, want it to name DANGLING and the link path", got)
 	}
 }

@@ -378,16 +378,8 @@ func TestOpenNativeOutsideReportsLocationWhenAttachFails(t *testing.T) {
 	seat = nativeChatHost(t, db, seat, true)
 	t.Setenv("HERDR_SOCKET_PATH", "")
 	t.Setenv("HERDR_ENV", "")
-	bin := t.TempDir()
-	if err := testjail.WriteExecutableNeverRun(
-		filepath.Join(bin, "herdr"),
-		[]byte("#!/bin/sh\nexit 1\n"),
-		0o700,
-	); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", bin)
 	attach := &deps.FakeRunner{}
+	attach.ScriptLookPath("herdr", "/scripted/herdr", nil)
 	attach.ScriptStart(nil, 4242, errors.New("exit status 1"), nil)
 	var stdout, stderr bytes.Buffer
 	code := OpenID(herdr.WithAttachRunner(context.Background(), attach), seat.SessionID, &stdout, &stderr, &runtime)
@@ -809,15 +801,9 @@ func TestOpenNativeOffersAccountChange(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				bin := t.TempDir()
-				if err := testjail.WriteExecutableNeverRun(
-					filepath.Join(bin, "herdr"), []byte("#!/bin/sh\n"), 0o700,
-				); err != nil {
-					t.Fatal(err)
-				}
 				attach := &deps.FakeRunner{}
+				attach.ScriptLookPath("herdr", "/scripted/herdr", nil)
 				attach.ScriptStart(nil, 4242, nil, nil)
-				t.Setenv("PATH", bin)
 				t.Setenv("HERDR_SOCKET_PATH", "")
 				t.Setenv("HERDR_ENV", "")
 

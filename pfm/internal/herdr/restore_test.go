@@ -2,6 +2,7 @@ package herdr
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,11 +15,12 @@ func TestResumeOnRestoreReadsTheServersConfig(t *testing.T) {
 	for _, scenario := range []struct {
 		name                 string
 		xdg, override, debug bool
+		want                 string
 	}{
-		{name: "home"},
-		{name: "XDG", xdg: true},
-		{name: "explicit wins", xdg: true, override: true, debug: true},
-		{name: "debug ambiguous", debug: true},
+		{name: "home", want: "false <nil>"},
+		{name: "XDG", xdg: true, want: "false <nil>"},
+		{name: "explicit wins", xdg: true, override: true, debug: true, want: "false <nil>"},
+		{name: "debug ambiguous", debug: true, want: "false debug Herdr config exists at {home}/.config/herdr-dev/config.toml; set HERDR_CONFIG_PATH to identify the server's config"},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			home := t.TempDir()
@@ -53,12 +55,8 @@ func TestResumeOnRestoreReadsTheServersConfig(t *testing.T) {
 				}
 			}
 			resume, err := ResumeOnRestore(env)
-			if scenario.debug && !scenario.override {
-				if err == nil || !strings.Contains(err.Error(), "set HERDR_CONFIG_PATH") {
-					t.Fatalf("resume=%v err=%v, want visible ambiguous config", resume, err)
-				}
-			} else if err != nil || resume {
-				t.Fatalf("resume=%v err=%v, want false,nil", resume, err)
+			if got := strings.ReplaceAll(fmt.Sprint(resume, " ", err), home, "{home}"); got != scenario.want {
+				t.Fatalf("resume and error = %q, want %q", got, scenario.want)
 			}
 		})
 	}

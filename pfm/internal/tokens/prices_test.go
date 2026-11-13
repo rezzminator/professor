@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -104,12 +105,23 @@ func TestBillingSelectionSurvivesSavedDocumentAndReport(t *testing.T) {
 	}
 	a, _, _ := testAuditor(t)
 	a.prices = book
-	if line := a.gapsLine(); !strings.Contains(line, "; Claude bedrock/geo") || strings.Contains(line, billingGap) {
-		t.Errorf("configured billing must be explicit without a default warning: %s", line)
+	if got, want := strings.ReplaceAll(
+		a.gapsLine(),
+		filepath.Dir(path),
+		"{dir}",
+	), "pricing: saved table {dir}/cloud.json; Standard service, published prompt/context tiers (Codex aggregates use the run peak tier); table fetched 2026-01-01T00:00:00Z from anthropic, openai; not historical billing; Claude bedrock/geo\ndata gaps: transcript totals exclude background API calls (auto_mode, prompt_suggestion, hook_prompt, generate_session_title, agent_summary); captured telemetry is reported separately by pfm tokens (without --tree); missing telemetry and metadata-filtered background sessions cannot be quantified"; got != want {
+		t.Errorf("gaps line = %q, want %q", got, want)
 	}
-	catalog := stringify(book.catalog(), 0)
-	if !strings.Contains(catalog, `"billing":{"route":"bedrock","region":"geo","configured":true,"multiplier":1.1}`) {
-		t.Errorf("billing provenance missing from report JSON: %s", catalog)
+	var report struct {
+		Billing json.RawMessage `json:"billing"`
+	}
+	if err := json.Unmarshal([]byte(stringify(book.catalog(), 0)), &report); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(
+		report.Billing,
+	), `{"route":"bedrock","region":"geo","configured":true,"multiplier":1.1}`; got != want {
+		t.Errorf("billing in the report JSON = %q, want %q", got, want)
 	}
 }
 
@@ -130,18 +142,14 @@ func TestLoadSavedRefusals(t *testing.T) {
 		t.Fatal(err)
 	}
 	missing := filepath.Join(dir, "missing.json")
-	cases := []struct{ path, want string }{
-		{
-			single,
-			"--prices " + single + ": a single-model lookup (claude-sonnet-5); prices come from `pfm model-cost --json --all`",
-		},
-		{missing, "--prices " + missing + ": open " + missing + ": no such file or directory"},
-		{garbled, "--prices " + garbled + ": invalid character"},
-	}
-	for _, c := range cases {
-		_, err := loadSaved(c.path)
-		if err == nil || !strings.HasPrefix(err.Error(), c.want) {
-			t.Errorf("loadSaved(%s) = %v, want an error starting %q", filepath.Base(c.path), err, c.want)
+	for path, want := range map[string]string{single: "--prices {dir}/single.json: a single-model lookup (claude-sonnet-5); prices come from `pfm model-cost --json --all`", missing: "--prices {dir}/missing.json: open {dir}/missing.json: no such file or directory", garbled: "--prices {dir}/garbled.json: invalid character 'n' looking for beginning of object key string"} {
+		if _, err := loadSaved(path); strings.ReplaceAll(fmt.Sprint(err), dir, "{dir}") != want {
+			t.Errorf(
+				"loadSaved(%s) = %q, want %q",
+				filepath.Base(path),
+				strings.ReplaceAll(fmt.Sprint(err), dir, "{dir}"),
+				want,
+			)
 		}
 	}
 }

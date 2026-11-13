@@ -19,7 +19,7 @@
 # record the ruling in .arch/exceptions.md.
 #
 # The checks are independent, so they run as concurrent background jobs and print
-# in the order they always have: C1 … C8, C10 … C23, C25 … C34, then C24 (its own script). A job
+# in the order they always have: C1 … C8, C10 … C23, C25 … C35, then C24 (its own script). A job
 # that ends without leaving its CHECK line is reported as ERROR for that check,
 # never read as PASS.
 set -uo pipefail
@@ -434,7 +434,7 @@ chk_C23() {
 }
 
 # C25 one test jail per test process: a package with tests whose TestMain does
-# not reach testjail.Run runs its tests against the real HOME and the live fleet
+# not reach testjail.Run (or RunInJail) runs its tests against the real HOME and the live fleet
 # database, and its profile row is never written. A package is judged by the
 # directory of its _test.go files (testdata trees are fixtures, not packages);
 # internal/testjail IS the jail, so its TestMain calls Run(m) unqualified.
@@ -454,10 +454,10 @@ chk_C25() {
   g "$T/mains" "$T/judged.list" -l 'func TestMain(' || c25_err=1
   : > "$T/calls"
   if [ -s "$T/other.list" ]; then
-    g "$T/calls" "$T/other.list" -lE 'testjail\.Run\(' || c25_err=1
+    g "$T/calls" "$T/other.list" -lE 'testjail\.Run(InJail)?\(' || c25_err=1
   fi
   if [ -s "$T/self.list" ]; then
-    if g "$T/selfcalls" "$T/self.list" -lE '(^|[^[:alnum:]_.])Run\('; then cat "$T/selfcalls" >> "$T/calls"; else c25_err=1; fi
+    if g "$T/selfcalls" "$T/self.list" -lE '(^|[^[:alnum:]_.])Run(InJail)?\('; then cat "$T/selfcalls" >> "$T/calls"; else c25_err=1; fi
   fi
   if [ "$c25_err" -eq 1 ]; then say C25-testmain-jail ERROR "grep could not read tests"; return; fi
   sort -u "$T/mains" > "$T/mains.sorted"
@@ -645,34 +645,24 @@ chk_C32() {
   else say C32-os-door-test ERROR "grep could not read test files"; fi
 }
 
-# C33 unit kind (seed ruling 9): scripts/test-kinds.sh classes every unit-bundle test. Outside a jail
-# file a directory's move count (home-sqlite, process, tmux) may only fall from .arch/unit-kind.txt,
-# so no directory gains a test that opens SQLite's own file, starts a process or a tmux server. A jail
-# file's real-test count may only fall from .arch/jail-tests.txt, and every jail file is named in a
-# `- C33` line of .arch/exceptions.md as `{file}` ({count}) with a count at least its baseline row's:
-# raising a row takes its reason's count with it. A real test is kept until a fake or the journey can
-# play it. FAIL names the directory or the file and its count over the baseline, or the jail file
-# whose reason is missing.
+# C33 jail tests: scripts/test-kinds.sh names every test of a jail file real. A jail file's real-test
+# count may only fall from .arch/jail-tests.txt, and every jail file is named in a `- C33` line of
+# .arch/exceptions.md as `{file}` ({count}) with a count at least its baseline row's: raising a row
+# takes its reason's count with it. A real test is kept until a fake or the journey can play it. FAIL
+# names the file and its count over the baseline, or the jail file whose reason is missing.
 chk_C33() {
   if ! bash "$SCRIPTS/test-kinds.sh" --list "$PFM" > "$T/kinds"; then
-    say C33-unit-kind ERROR "test-kinds.sh could not look: $(head -n 1 "$T/kinds")"; return
+    say C33-jail-tests ERROR "test-kinds.sh could not look: $(head -n 1 "$T/kinds")"; return
   fi
-  awk -F '\t' '$1 == "home-sqlite" || $1 == "process" || $1 == "tmux" {n[$2]++} END {for (d in n) print d " " n[d]}' \
-    "$T/kinds" > "$T/c33-dirs"
   awk -F '\t' '$1 == "real" {n[($2 == "." ? "" : $2 "/") $3]++} END {for (f in n) print f " " n[f]}' "$T/kinds" > "$T/c33-files"
-  local dirs files
-  dirs=$( (T="$T/d"; mkdir -p "$T" && ratchet_counts C33-unit-kind unit-kind "$T/../c33-dirs") )
-  files=$( (T="$T/f"; mkdir -p "$T" && ratchet_counts C33-unit-kind jail-tests "$T/../c33-files") )
-  local verdict="" line word
-  for line in "$dirs" "$files"; do
-    word=$(awk '{print $3}' <<<"$line")
-    case $word in
-      ERROR) say C33-unit-kind ERROR "$(c33_detail "$line")"; return ;;
-      FAIL) verdict="${verdict:+$verdict; }$(c33_detail "$line")" ;;
-    esac
-  done
+  local files verdict=""
+  files=$( (T="$T/f"; mkdir -p "$T" && ratchet_counts C33-jail-tests jail-tests "$T/../c33-files") )
+  case $(awk '{print $3}' <<<"$files") in
+    ERROR) say C33-jail-tests ERROR "$(c33_detail "$files")"; return ;;
+    FAIL) verdict=$(c33_detail "$files") ;;
+  esac
   if [ "$MODE" = --measure ]; then
-    say C33-unit-kind MEASURE "$(c33_detail "$dirs") · $(c33_detail "$files")"; return
+    say C33-jail-tests MEASURE "$(c33_detail "$files")"; return
   fi
   local unreasoned
   # shellcheck disable=SC2016 # the awk program is single-quoted on purpose
@@ -688,12 +678,12 @@ chk_C33() {
       next
     }
     !($1 in reason) || reason[$1] < $2 + 0 {print $1}' "$BASE/exceptions.md" "$BASE/jail-tests.txt") ||
-    { say C33-unit-kind ERROR "awk could not read .arch/exceptions.md or .arch/jail-tests.txt"; return; }
+    { say C33-jail-tests ERROR "awk could not read .arch/exceptions.md or .arch/jail-tests.txt"; return; }
   if [ -n "$unreasoned" ]; then
     verdict="${verdict:+$verdict; }no C33 reason in .arch/exceptions.md for $(echo "$unreasoned" | tr '\n' ' ' | sed 's/ $//')"
   fi
-  if [ -n "$verdict" ]; then say C33-unit-kind FAIL "$verdict"; return; fi
-  say C33-unit-kind PASS "$(c33_detail "$dirs") · $(c33_detail "$files")"
+  if [ -n "$verdict" ]; then say C33-jail-tests FAIL "$verdict"; return; fi
+  say C33-jail-tests PASS "$(c33_detail "$files")"
 }
 
 # C34 every jail file carries the jail build tag: a `{name}_jail_test.go` or `{name}_jail_{os}_test.go`
@@ -778,6 +768,20 @@ chk_C31() {
   ratchet_counts C31-front-door front-door "$T/c31"
 }
 
+# C35 exact assertions: scripts/testassert reads every test function with go/parser and classes it by
+# its checks, through the helpers it calls; a test whose every value check is a substring or regexp
+# match (strings/bytes Contains, HasPrefix, HasSuffix, Index…, a regexp Match/Find) is substring-only
+# (testing.md: assert the exact value). The set only shrinks: a substring-only test, `{file} {Func}`,
+# that .arch/substring-tests.txt lacks FAILs naming it. ERROR when testassert cannot parse a file or
+# the Go toolchain cannot run it.
+chk_C35() {
+  if ! { grep -v '\(^\|/\)testdata/' "$L/all.list" || [ $? = 1 ]; } |
+    go -C "$SCRIPTS/.." run ./scripts/testassert -root "$PFM" > "$T/c35" 2> "$T/c35.err"; then
+    say C35-substring-tests ERROR "testassert could not look: $(head -n 1 "$T/c35.err")"; return
+  fi
+  ratchet C35-substring-tests substring-tests "$T/c35"
+}
+
 # C24 lives in its own script; its exit status (0 PASS · 1 FAIL · 2 ERROR) joins the
 # maximum below, and the status file is how the job hands it over.
 chk_C24() { bash "$PFM/scripts/arch-c24.sh" "$MODE"; echo $? > "$L/jobs/C24.status"; }
@@ -797,7 +801,8 @@ for id in C1-ceiling-src C2-ceiling-test C3-cmd-budget C4-cmd-primitives C5-tmux
   C12-claude-pointers C13-test-mirror C14-usage-parity C15-internal-usage \
   C16-env-outside-paths C17-dup-functions C18-engine-spellings C19-env-namespace \
   C20-codex-home C21-test-jail C22-host-doors C23-bare-log C25-testmain-jail C26-exec-write C27-identity-env \
-  C28-signal-door C29-os-door C30-shell-platform C31-front-door C32-os-door-test C33-unit-kind C34-jail-tag C24-unwrapped-door; do
+  C28-signal-door C29-os-door C30-shell-platform C31-front-door C32-os-door-test C33-jail-tests C34-jail-tag C35-substring-tests \
+  C24-unwrapped-door; do
   job "$id"
 done
 

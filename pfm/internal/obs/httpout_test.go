@@ -3,6 +3,7 @@ package obs
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -146,9 +147,8 @@ func TestRoundTripperCapsALongErrorAtTheFieldLimit(t *testing.T) {
 		t.Fatal("the wrapped error vanished")
 	}
 	got, _ := onlyRecord(t, recorder).Field(FieldErr)
-	text, _ := got.(string)
-	if !strings.HasSuffix(text, "…(truncated 952 bytes)") || len(text) > MaxValueBytes+len("…(truncated 952 bytes)") {
-		t.Fatalf("err was not cut at the cap: len=%d tail=%q", len(text), text[max(0, len(text)-40):])
+	if text, want := runs(fmt.Sprint(got)), "{2048×x}…(truncated 952 bytes)"; text != want {
+		t.Fatalf("err = %q, want %q", text, want)
 	}
 }
 

@@ -16,39 +16,15 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-func TestFollowerPlistHoldsTheContractedKeys(t *testing.T) {
-	plist, err := followerPlist("/opt/pfm", "/h", "/h/.local/state/pfm/theme")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{
-		"<key>Label</key>\n\t<string>com.professor.pfm.theme</string>",
-		"<string>/opt/pfm</string>\n\t\t<string>theme</string>\n\t\t<string>sync</string>",
-		"<key>WatchPaths</key>\n\t<array>\n\t\t<string>/h/Library/Preferences/.GlobalPreferences.plist</string>",
-		"<key>StartInterval</key>\n\t<integer>60</integer>",
-		"<key>RunAtLoad</key>\n\t<true/>",
-		"<key>StandardOutPath</key>\n\t<string>/h/.local/state/pfm/theme/follow.log</string>",
-		"<key>StandardErrorPath</key>\n\t<string>/h/.local/state/pfm/theme/follow.log</string>",
-		"<key>EnvironmentVariables</key>\n\t<dict>\n\t\t<key>PATH</key>\n" +
-			"\t\t<string>" + paths.ServicePath("/h") + "</string>\n" +
-			"\t\t<key>PFM_INSTALL_MARK</key>\n\t\t<string>" + paths.InstallMark("/h") + "</string>\n\t</dict>",
-	} {
-		if !strings.Contains(plist, want) {
-			t.Errorf("plist lacks %q:\n%s", want, plist)
+func TestFollowerPlistIsTheWholeDocument(t *testing.T) {
+	for bin, escaped := range map[string]string{"/opt/pfm": "/opt/pfm", "/opt/p&fm<x>": "/opt/p&amp;fm&lt;x&gt;"} {
+		plist, err := followerPlist(bin, "/h", "/h/.local/state/pfm/theme")
+		if err != nil {
+			t.Fatal(err)
 		}
-	}
-	if !strings.HasPrefix(plist, "<?xml") || !strings.HasSuffix(plist, "</plist>\n") {
-		t.Errorf("plist is not a whole document:\n%s", plist)
-	}
-}
-
-func TestFollowerPlistEscapesXML(t *testing.T) {
-	plist, err := followerPlist("/opt/p&fm<x>", "/h", "/s")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(plist, "/opt/p&amp;fm&lt;x&gt;") {
-		t.Fatalf("binary path not escaped:\n%s", plist)
+		got := strings.NewReplacer(paths.ServicePath("/h"), "{path}", paths.InstallMark("/h"), "{mark}", escaped, "{bin}").
+			Replace(plist)
+		golden(t, "follower.plist", got)
 	}
 }
 
@@ -67,7 +43,13 @@ func TestFollowerNeverBootsOutItsOwnJob(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantVerdict(t, report, "follower", VerdictError, "cannot reload itself from inside launchd")
+	wantVerdict(
+		t,
+		report,
+		"follower",
+		VerdictError,
+		"themesync: launch agent plist rewritten; the agent cannot reload itself from inside launchd: run `pfm theme sync` in a shell",
+	)
 	want, err := followerPlist(agentlauncher.Program(h.home), h.home, h.stateDir)
 	if err != nil {
 		t.Fatal(err)
@@ -85,7 +67,13 @@ func TestFollowerNeverBootsOutItsOwnJob(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantVerdict(t, status, "follower", VerdictError, "was not reloaded")
+	wantVerdict(
+		t,
+		status,
+		"follower",
+		VerdictError,
+		"themesync: launch agent plist rewritten but the loaded agent was not reloaded: run `pfm theme sync` in a shell",
+	)
 
 	h.env.LaunchdJob = ""
 	calls = len(h.runner.Calls())
@@ -142,7 +130,13 @@ func TestFollowerReloadOwedUntilABootstrapSucceeds(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		wantVerdict(t, status, "follower", VerdictError, "was not reloaded")
+		wantVerdict(
+			t,
+			status,
+			"follower",
+			VerdictError,
+			"themesync: launch agent plist rewritten but the loaded agent was not reloaded: run `pfm theme sync` in a shell",
+		)
 		h.rearm()
 		calls := len(h.runner.Calls())
 		report, err = Sync(context.Background(), h.env, false)
@@ -247,7 +241,13 @@ func TestFollowerRunsThroughTheStableLauncher(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantVerdict(t, status, "follower", VerdictDrift, "launcher")
+	wantVerdict(
+		t,
+		status,
+		"follower",
+		VerdictDrift,
+		"agent launcher {tmp}/.local/libexec/pfm/pfm-agent is missing or differs",
+	)
 }
 
 func TestFollowerDiscoveryFailureKeepsLastValidWatches(t *testing.T) {
@@ -300,3 +300,20 @@ func TestFollowerDiscoveryFailureKeepsLastValidWatches(t *testing.T) {
 type instantSleep struct{ clock.Clock }
 
 func (instantSleep) Sleep(context.Context, time.Duration) error { return nil }
+
+// golden compares got with testdata/{file}; a mismatch prints the GOLDEN line the fill script writes from.
+func golden(t *testing.T, file, got string) {
+	t.Helper()
+	want, err := os.ReadFile(filepath.Join("testdata", file))
+	if err != nil || string(want) != got {
+		t.Errorf(
+			"testdata/%s: %v\nwant:\n%s\nactual:\n%s\nGOLDEN internal/themesync/testdata/%s = %q",
+			file,
+			err,
+			want,
+			got,
+			file,
+			got,
+		)
+	}
+}

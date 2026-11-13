@@ -97,8 +97,8 @@ func TestSubagentRowOnAnotherModelMutesTheSessionEffort(t *testing.T) {
 
 func TestSubagentRowWithoutEffortOrRecordShowsTheModelAlone(t *testing.T) {
 	content, warned := renderEffortRow(t, t.TempDir(), taskWithoutEffort)
-	if !strings.Contains(content, opusAlone) || strings.Contains(content, opusAlone+cMuted+"·") || warned != "" {
-		t.Fatalf("row = %q warn=%q, want the model alone and no warning", content, warned)
+	if got, want := content+"|"+warned, "\x1b[1;97m?\x1b[0m\x1b[38;5;117m/100\x1b[0m \x1b[38;5;245mΣ\x1b[0m\x1b[38;5;222m$0.00\x1b[0m\x1b[38;5;245m/\x1b[0m\x1b[1;97m0\x1b[0m\x1b[38;5;245m/\x1b[0m\x1b[1;97m0\x1b[0m\x1b[38;5;245m/\x1b[0m\x1b[38;5;87m0\x1b[0m\x1b[2m│\x1b[0m\x1b[38;5;213mgeneral-purpose\x1b[0m\x1b[2m│\x1b[0m\x1b[38;5;51mopus\x1b[0m\x1b[2m│\x1b[0m\x1b[38;5;118mrunning\x1b[0m\x1b[2m│\x1b[0m\x1b[38;5;245m💾–\x1b[0m|"; got != want {
+		t.Fatalf("row|warn = %q, want %q", got, want)
 	}
 }
 

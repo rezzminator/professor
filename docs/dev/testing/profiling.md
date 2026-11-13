@@ -17,7 +17,7 @@ Every `iso gate` run records what each Go test process, each gate step and the c
 
 ### Per Go package process
 
-`testjail.Run` starts a profiler in every test binary that runs with `PFM_TEST_ARTIFACT_DIR` set (`checks_pfm_unit` and `checks_pfm_e2e` set it to `$run/profile`, each Go fixture step to `$run/profile/fixture-<kind>` and `checks_pfm_race` to `$run/profile/race`, so a fixture's or the race step's failure pointers name only its own bundles). Each process writes `profile/<label>.<pid>/summary.json`: written at start with `event` `started-no-exit-recorded` and `exit_code` -1, rewritten at exit. A process that execs itself away or is killed keeps the start record.
+`testjail.Run` starts a profiler in every test binary. With `PFM_TEST_ARTIFACT_DIR` set (`checks_pfm_unit` and `checks_pfm_e2e` set it to `$run/profile`, each Go fixture step to `$run/profile/fixture-<kind>` and `checks_pfm_race` to `$run/profile/race`, so a fixture's or the race step's failure pointers name only its own bundles), the process writes there; unset, it writes into the default run of its `go test` ([Plain go test](#plain-go-test)). Each process writes `profile/<label>.<pid>/summary.json`: written at start with `event` `started-no-exit-recorded` and `exit_code` -1, rewritten at exit. A process that execs itself away or is killed keeps the start record.
 
 | Key | Meaning |
 | --- | --- |
@@ -29,8 +29,21 @@ Every `iso gate` run records what each Go test process, each gate step and the c
 | `run_delay_s` | seconds the process waited for a CPU (`/proc/self/schedstat`); null with `run_delay_error` |
 | `psi` | VM pressure stall seconds over the process life, `{cpu,io,memory}_{some,full}`; null with `psi_error` |
 | `bundles` | the `<reason>` of every failure bundle written, never null |
+| `tests` | top-level tests the binary holds (`testing.M`), -1 when unreadable |
 
-The profiler also keeps a runtime flight recorder: the last 10 s (at most 16 MiB) of execution trace, written only into a failure bundle. A test that reads process-wide allocation counters (`testing.AllocsPerRun`, `runtime.MemStats`) calls `testjail.PauseFlightRecorder(t)` first: the recorder's reader goroutine allocates while it drains, and those counters count every goroutine. The pause holds for the rest of the test, its cleanup starts a fresh recorder, and the test stays serial.
+Under `PFM_TEST_ARTIFACT_DIR` the profiler also keeps a runtime flight recorder: the last 10 s (at most 16 MiB) of execution trace, written only into a failure bundle. A test that reads process-wide allocation counters (`testing.AllocsPerRun`, `runtime.MemStats`) calls `testjail.PauseFlightRecorder(t)` first: the recorder's reader goroutine allocates while it drains, and those counters count every goroutine. The pause holds for the rest of the test, its cleanup starts a fresh recorder, and the test stays serial.
+
+### Plain go test
+
+A `go test` with no `PFM_TEST_ARTIFACT_DIR` (`cd pfm && go test ./...` on any machine) records every package process it starts into one run directory, `/tmp/{project}/unit/{start}-{pid}/`: `{start}` the `go` process's start in UTC to the second (`20261113T170236Z`), `{pid}` its pid, `{project}` the name of the directory holding pfm's `go.mod` minus a leading dot, as `pfm/scripts/unit-proof.sh` names it. The first process exports the run as `PFM_TEST_ARTIFACT_DIR`, so a helper it starts lands beside it, adds no row and runs no flight recorder either.
+
+| Path under the run | Content |
+| --- | --- |
+| `<label>.<pid>/summary.json`, `<label>.<pid>/<reason>/` | the process record and failure bundle above, with no `trace.out`: no flight recorder runs here |
+| `packages.tsv` | `package pid event exit_code wall_s cpu_s maxrss_kb tests diagnosis`, a row per start, exit and watchdog firing, appended under an `flock` on the file |
+| `summary.md` | the counts, the red processes with their `DIAGNOSIS.txt`, every process by wall; rewritten at each row, a process's last row standing for it: `PASS`, `FAIL`, `NEAR-TIMEOUT` (watchdog fired), `NO-EXIT` (running, or killed before it recorded an exit) |
+
+`/tmp/{project}/unit/latest` links the newest run; the process creating a run removes every run past the newest 20. Per test binary this run costs about 2.5 ms wall and 3 ms CPU, the largest part the `schedstat` read per thread behind `run_delay_s`; the flight recorder costs 1.5–2 ms wall and 3–3.5 ms CPU more and traces the whole run, so it stays gate-only. Neither shows on the tier: three fenced `go test -count=1 ./...` runs of 96 package processes each took 48.3–50.0 s with the profiler off, 48.8–51.0 s with this run and 48.3–48.9 s under the gate. `PFM_TEST_PROFILE=0` turns the plain run off with the rest of the profiler; a launch directory with no `go.mod` above it leaves nothing, and a red run then says `testjail: profile off — unit run: no go.mod above the launch directory names the project`.
 
 ### Per step
 
@@ -158,7 +171,7 @@ Exit 0 done; 1 a named failure (`LEDGER-NOT-WRITTEN`, `NO LEDGER`, an unreadable
 
 | Name | Meaning |
 | --- | --- |
-| `PFM_TEST_ARTIFACT_DIR` | profile root of Go test processes; unset means profiling off |
+| `PFM_TEST_ARTIFACT_DIR` | profile root of Go test processes, with the flight recorder; unset means the [plain go test](#plain-go-test) run under `/tmp/{project}/unit/` |
 | `PFM_TEST_PROFILE` | `0` turns profiling off; `cpu` adds `cpu.pprof` per process |
 | `PFM_TEST_PROFILE_PARENT` | exported by the first profiled process; a test binary inheriting it is a helper |
 | `PFM_TEST_DEADLINE_EPOCH` | exported by `stepprof_run`: step start + bound, decimal epoch seconds; the watchdog fires before it |

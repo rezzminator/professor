@@ -562,9 +562,13 @@ func TestChatNewRecordFailureReportsAndStillStartsPane(t *testing.T) {
 		"chat", "new", "--engine", "claude", "--name", "record-failure-worker",
 		"--cwd", filepath.Join(jail.root, "work"),
 	}, &stdout, &stderr)
-	if code != 0 || !strings.Contains(stderr.String(), "pfm: record launch ") ||
-		!strings.Contains(jail.await(t, "cc-argv", "--session-id"), "--name record-failure-worker") {
-		t.Fatalf("chat new rc=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	jail.await(t, "cc-argv", "--session-id")
+	if got, want := scrub(
+		stderr.String(),
+		jail.root,
+	), "pfm: record launch {uuid}: record launch {uuid}: inspect shared state database {root}/state-blocker/pfm.db: stat {root}/state-blocker/pfm.db: not a directory\npfm chat new: tmux chat exists; persist seat: write seat \"{socket}\": inspect shared state database {root}/state-blocker/pfm.db: stat {root}/state-blocker/pfm.db: not a directory\npfm: comms ledger: record comms event: inspect shared state database {root}/state-blocker/pfm.db: stat {root}/state-blocker/pfm.db: not a directory\n"; code != 0 ||
+		got != want {
+		t.Fatalf("chat new rc=%d stdout=%q stderr = %q, want %q", code, stdout.String(), got, want)
 	}
 }
 
@@ -845,7 +849,7 @@ func TestChatNewCancellationReachesSpawnAndAwait(t *testing.T) {
 			"new", "--engine", "claude", "--name", "cancelled child",
 			"--cwd", filepath.Join(jail.root, "work"),
 		}, strings.NewReader(""), &stdout, &stderr, runtime, ctx)
-		if code != 1 || !strings.Contains(stderr.String(), context.Canceled.Error()) {
+		if code != 1 || stderr.String() != "pfm chat new: place the chat: context canceled\n" {
 			t.Fatalf("cancelled spawn exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 		}
 		if entries, readErr := os.ReadDir(jail.tmuxDir); readErr != nil || len(entries) != 0 {
@@ -881,8 +885,7 @@ func TestChatNewCancellationReachesSpawnAndAwait(t *testing.T) {
 			"new", "--engine", "claude", "--name", "await child",
 			"--cwd", filepath.Join(jail.root, "work"), "--await", "--timeout", "1", "cancel await",
 		}, strings.NewReader(""), &stdout, &stderr, runtime, ctx)
-		if code != 1 || !strings.Contains(stderr.String(), context.Canceled.Error()) ||
-			strings.Contains(stderr.String(), "died at birth") {
+		if code != 1 || stderr.String() != "pfm chat new: configure chat server: context canceled\n" {
 			t.Fatalf("cancelled await exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 		}
 		content, err := os.ReadFile(jail.transcript)
@@ -961,10 +964,11 @@ func TestMCPChatNewReportsAFirstTurnAPIError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("encode new content: %v", err)
 	}
-	if !result.IsError {
-		t.Fatalf("new answered ok for a refused first turn: %s", content)
-	}
-	if !strings.Contains(string(content), firstTurnAPIError) {
-		t.Fatalf("new content=%s, want it to name the API error", content)
+	if got, want := scrub(
+		string(content),
+		jail.root,
+	), "[{\"type\":\"text\",\"text\":\"pfm chat new --name refused child --engine claude --cwd {root}/work first question exited 8: pfm chat new: refused child's first turn ended on an API error (invalid_request): API Error: 400 unsupported beta header — the model server refused the prompt; attach it and look: tmux -L {socket} attach -t {socket}\"}]"; !result.IsError ||
+		got != want {
+		t.Fatalf("new IsError=%t content = %q, want %q", result.IsError, got, want)
 	}
 }

@@ -51,7 +51,7 @@ func TestPersistBodyPrunesExpiredMarkdownByAge(t *testing.T) {
 	}
 	stored, err := os.ReadFile(path)
 	if err != nil || string(stored) != "exact body" ||
-		!strings.Contains(filepath.Base(path), "cc-1--2") {
+		filepath.Base(path) != "20310203T040506.000000007Z-cc-1--2.md" {
 		t.Fatalf("canonical file path=%q body=%q err=%v", path, stored, err)
 	}
 }
@@ -72,10 +72,20 @@ func TestPrepareForResumeDeliversInlineWhenTheBodyCannotBeSaved(t *testing.T) {
 	)
 	want := `long body not saved to a file (create call body directory "` + engine.options.BodyRoot +
 		`": mkdir ` + blocker + `: not a directory) — delivered inline`
-	if err != nil || prepared.AutoFilePath != "" || !strings.HasPrefix(prepared.Message, body+"\n\n— sid 12345678") ||
-		len(prepared.Warnings) != 1 || prepared.Warnings[0] != want {
-		t.Fatalf("err=%v file=%q warnings=%q\nwant warning %q\nmessage prefix ok=%t", err, prepared.AutoFilePath,
-			prepared.Warnings, want, strings.HasPrefix(prepared.Message, body+"\n\n— sid 12345678"))
+	got := strings.Replace(prepared.Message, body, "{body}", 1)
+	if err != nil || prepared.AutoFilePath != "" ||
+		got != "{body}\n\n— sid 12345678 · to reply: call Operator <message>" ||
+		len(prepared.Warnings) != 1 ||
+		prepared.Warnings[0] != want {
+		t.Fatalf(
+			"message = %q, want %q (err %v file %q warnings %q, want warning %q)",
+			got,
+			"{body}\n\n— sid 12345678 · to reply: call Operator <message>",
+			err,
+			prepared.AutoFilePath,
+			prepared.Warnings,
+			want,
+		)
 	}
 }
 

@@ -22,7 +22,8 @@ func TestCallRefusesByNameAtTheClaudeFolderTrustDialog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Code != CodeUndelivered || !strings.Contains(result.Message, "folder-trust dialog") {
+	if result.Code != CodeUndelivered ||
+		result.Message != "ABORT: \"%1\" is held at Claude Code's folder-trust dialog; nothing was typed or pressed (attach it and choose \"Yes, I trust this folder\" yourself)" {
 		t.Fatalf("the trust dialog must be refused by name: result=%+v", result)
 	}
 	if len(fake.literals) != 0 || len(fake.keys) != 0 {

@@ -180,13 +180,13 @@ func TestPluginLogsDoctor(t *testing.T) {
 			name: "file-derived text prints escaped, never a forged line",
 			mutate: func(t *testing.T, fixture pluginLogsFixture) {
 				t.Helper()
-				forged := "/absent\ndoctor: plugin_logs ok"
+				forged := filepath.Join(fixture.store, "absent") + "\ndoctor: plugin_logs ok"
 				pluginLogSettings(t, filepath.Join(fixture.store, "settings.json"), forged)
 				pluginLogSettings(t, filepath.Join(fixture.own, "settings.json"), forged)
 			},
-			want: func(pluginLogsFixture) string {
-				return `doctor: plugin_logs no log folder at /absent\ndoctor: plugin_logs ok — create it: mkdir -p ` +
-					`/absent\ndoctor: plugin_logs ok` + "\n"
+			want: func(fixture pluginLogsFixture) string {
+				escaped := filepath.Join(fixture.store, "absent") + `\ndoctor: plugin_logs ok`
+				return `doctor: plugin_logs no log folder at ` + escaped + ` — create it: mkdir -p ` + escaped + "\n"
 			},
 			warnings: 1,
 		},
@@ -432,9 +432,12 @@ func TestAlphaInstallSatisfiesPluginLogsDoctor(t *testing.T) {
 		unix.Access,
 		tally,
 	)
-	if tally.failures != 0 || tally.warnings != 0 ||
-		!strings.Contains(out.String(), "plugin_logs ok: PLUGIN_LOG_DIR=") {
-		t.Fatalf("installer leaves doctor unhealthy: %s", out.String())
+	if got, want := rooted(
+		out.String(),
+		fixture.home,
+	), "doctor: plugin_logs ok: PLUGIN_LOG_DIR={root}/.local/state/pfm/plugin-logs in every config dir\n"; tally.failures != 0 || tally.warnings != 0 ||
+		got != want {
+		t.Errorf("failures=%d warnings=%d output = %q, want %q", tally.failures, tally.warnings, got, want)
 	}
 }
 

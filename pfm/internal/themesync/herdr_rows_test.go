@@ -1,6 +1,7 @@
 package themesync
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -138,16 +139,16 @@ func TestHerdrRowsStyledLeavesAHuelessRowBareAndStylesTheRest(t *testing.T) {
 }
 
 func TestHerdrRowsStyledErrorsNameWhatIsWrong(t *testing.T) {
-	for name, in := range map[string]string{
-		"string":         "[ui.sidebar.agents]\nok = 1\nrows = [[\"$pfm_working]]\n",
-		"multi-line":     "[ui.sidebar.agents]\nnote = \"\"\"\nrows\n",
-		"inline table":   "[ui.sidebar.agents]\nrows = [{ token = \"$pfm_working\"\n",
-		"literal string": "[ui.sidebar.agents]\nrows = [['$pfm_working]]\n",
+	for name, tc := range map[string]struct{ in, want string }{
+		"string":         {"[ui.sidebar.agents]\nok = 1\nrows = [[\"$pfm_working]]\n", "themesync: herdr config: string opened at line 3 never closes"},
+		"multi-line":     {"[ui.sidebar.agents]\nnote = \"\"\"\nrows\n", "themesync: herdr config: multi-line string opened at line 2 never closes"},
+		"inline table":   {"[ui.sidebar.agents]\nrows = [{ token = \"$pfm_working\"\n", "themesync: herdr config: inline table opened at line 2 never closes"},
+		"literal string": {"[ui.sidebar.agents]\nrows = [['$pfm_working]]\n", "themesync: herdr config: string opened at line 2 never closes"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, _, err := herdrRowsStyled(in, testHues)
-			if err == nil || !strings.Contains(err.Error(), "line 2") && !strings.Contains(err.Error(), "line 3") {
-				t.Fatalf("err = %v, want it to name the line that never closes", err)
+			_, _, err := herdrRowsStyled(tc.in, testHues)
+			if got := fmt.Sprint(err); got != tc.want {
+				t.Fatalf("err = %q, want %q", got, tc.want)
 			}
 		})
 	}

@@ -190,8 +190,7 @@ func TestBuildSnapshotReportsScheduleReadFailure(t *testing.T) {
 		scanRequest{Schedules: fakeScheduleReader{err: errors.New("database unavailable")}},
 		output,
 	)
-	if !strings.Contains(snapshot.ScheduleError, "read schedule flags") ||
-		!strings.Contains(snapshot.ScheduleError, "database unavailable") {
+	if snapshot.ScheduleError != "read schedule flags: database unavailable" {
 		t.Fatalf("ScheduleError = %q, want the wrapped read failure", snapshot.ScheduleError)
 	}
 	if len(snapshot.Rows) != 2 || snapshot.Rows[0].ScheduleFired || snapshot.Rows[1].ScheduleFired {
@@ -395,8 +394,15 @@ func TestSendRefreshReportsNativeReadFailure(t *testing.T) {
 		t.Fatal("failed native pass must remain retryable without becoming last good state")
 	}
 	snapshot := <-updates
-	if snapshot.RefreshFailure == nil || !strings.Contains(snapshot.RefreshFailure.Err, "durable seats") {
+	if snapshot.RefreshFailure == nil {
 		t.Fatalf("native read failure rendered successful: %+v", snapshot)
+	}
+	if got, want := strings.ReplaceAll(
+		snapshot.RefreshFailure.Err,
+		blocker,
+		"{blocker}",
+	), "read durable seats: stat durable seat database: stat {blocker}/state.db: not a directory"; got != want {
+		t.Fatalf("refresh failure = %q, want %q", got, want)
 	}
 }
 

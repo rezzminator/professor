@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestDossierShowsOnlyOnAWideEnoughTerminal(t *testing.T) {
@@ -37,15 +39,6 @@ func TestDossierPanelFillsItsFrameForEveryRowKind(t *testing.T) {
 				}
 			}
 		}
-	}
-}
-
-func TestDossierSaysNothingSelectedOnAnEmptyList(t *testing.T) {
-	model := deckModel(160, 38)
-	model.rows = nil
-	model.rebuild("", 0)
-	if panel := ansi.Strip(model.renderDossier(12)); !strings.Contains(panel, "nothing selected") {
-		t.Errorf("empty dossier = %q", panel)
 	}
 }
 
@@ -79,25 +72,8 @@ func TestDossierCutsAVeryLongPromptWithAnEllipsis(t *testing.T) {
 	if len(lines) != dossierPromptMax {
 		t.Fatalf("a long prompt takes %d lines, got %d", dossierPromptMax, len(lines))
 	}
-	if last := ansi.Strip(joinSpans(lines[len(lines)-1])); !strings.Contains(last, "…") {
-		t.Errorf("the cut must be visible, last line %q", last)
-	}
-}
-
-func TestDossierDropsDetailBeforeItDropsTheHead(t *testing.T) {
-	model := selectChat(t, deckModel(160, 38), "P:BUILDER")
-	row, _ := model.selectedRow()
-	tall := model.dossierLines(row, 36, 40)
-	short := model.dossierLines(row, 36, 9)
-	if len(short) > 9 {
-		t.Fatalf("a short pane must fit its height, got %d lines", len(short))
-	}
-	if len(tall) <= len(short) {
-		t.Fatalf("a tall pane shows more than a short one: %d vs %d", len(tall), len(short))
-	}
-	head := ansi.Strip(joinSpans(short[0]))
-	if !strings.Contains(head, "LIVE") || !strings.Contains(ansi.Strip(joinSpans(short[1])), "P:BUILDER") {
-		t.Errorf("the status chip and the name survive a short pane: %q", head)
+	if last, want := ansi.Strip(joinSpans(lines[len(lines)-1])), "┃ word word word word word word wor…"; last != want {
+		t.Errorf("the cut's last line = %q, want %q", last, want)
 	}
 }
 
@@ -205,7 +181,7 @@ func TestPathHelpersWriteHomeAsTildeAndKeepTheTail(t *testing.T) {
 	if got := homeShort("/home/tester/atlas/cmd", "/home/tester"); got != "~/atlas/cmd" {
 		t.Errorf("homeShort = %q", got)
 	}
-	if got := homeShort("/home/tester/x", "/home/test"); got != "/home/tester/x" {
+	if got := homeShort("/home/tester/x", testjail.Place("/home/test")); got != "/home/tester/x" {
 		t.Errorf("a sibling directory must not be shortened: %q", got)
 	}
 	if got := homeShort("/srv/x", ""); got != "/srv/x" {
@@ -278,38 +254,47 @@ func TestFleetPeaksIgnoreActionRows(t *testing.T) {
 	}
 }
 
-func TestDossierOfAnActionRowSaysWhatEnterDoes(t *testing.T) {
+func TestDossierRendersEveryRowKind(t *testing.T) {
+	var out strings.Builder
+	section := func(name string, lines []string) {
+		out.WriteString("## " + name + "\n" + strings.Join(lines, "\n") + "\n")
+	}
 	model := deckModel(160, 38)
-	banner := ansi.Strip(model.renderDossier(30))
-	for _, want := range []string{"guided upgrade", "◖ ⏎ upgrade ◗"} {
-		if !strings.Contains(banner, want) {
-			t.Errorf("the update banner's pane lacks %q:\n%s", want, banner)
+	section("update banner", []string{ansi.Strip(model.renderDossier(30))})
+	section("new chat", []string{ansi.Strip(selectChat(t, model, "New Claude chat").renderDossier(30))})
+	section("single engine", []string{ansi.Strip(NewModel(wizardSnapshot(nil, []int{3}, nil)).renderDossier(30))})
+	section(
+		"failed update check",
+		dossierPurposeLinesText(dossierPurpose(compose.Row{Kind: compose.ProfessorUpdateFailed}), 36),
+	)
+	section("live chat purpose", []string{dossierPurpose(compose.Row{Kind: compose.LiveClaude})})
+	builder := selectChat(t, deckModel(160, 38), "P:BUILDER")
+	row, _ := builder.selectedRow()
+	for _, height := range []int{40, 9} {
+		var lines []string
+		for _, line := range builder.dossierLines(row, 36, height) {
+			lines = append(lines, ansi.Strip(joinSpans(line)))
 		}
+		section(fmt.Sprintf("P:BUILDER height %d", height), lines)
 	}
-	for _, banned := range []string{"no prompt recorded", "kill", "reboot", "project"} {
-		if strings.Contains(banner, banned) {
-			t.Errorf("a banner is not a chat; its pane must not say %q:\n%s", banned, banner)
+	for _, test := range []struct{ note, failure string }{
+		{note: "your last message was not answered — re-send it"},
+		{failure: "HERDR UNREACHABLE own socket"},
+	} {
+		var lines []string
+		for _, line := range model.dossierDetails(compose.Row{
+			Kind: compose.LiveClaude, ID: "sid", Name: "NATIVE", Backend: "herdr", Socket: "native.sock",
+			PaneID: "w1:p1", LastPrompt: "a private prompt", LostNote: test.note, BackendError: test.failure,
+		}, 100, 0) {
+			lines = append(lines, ansi.Strip(joinSpans(line)))
 		}
+		section("native "+test.note+test.failure, lines)
 	}
-	fresh := ansi.Strip(selectChat(t, model, "New Claude chat").renderDossier(30))
-	for _, want := range []string{"Enter chooses the engine,", "◖ ⏎ choose ◗"} {
-		if !strings.Contains(fresh, want) {
-			t.Errorf("the new-chat row's pane lacks %q:\n%s", want, fresh)
-		}
-	}
-	single := NewModel(wizardSnapshot(nil, []int{3}, nil))
-	if only := ansi.Strip(single.renderDossier(30)); !strings.Contains(only, "Enter starts a new Codex chat") ||
-		!strings.Contains(only, "◖ ⏎ start ◗") {
-		t.Errorf("a row with nothing to choose says Enter starts the chat:\n%s", only)
-	}
-	failed := compose.Row{Kind: compose.ProfessorUpdateFailed, Name: "update check failed"}
-	notice := strings.Join(dossierPurposeLinesText(dossierPurpose(failed), 36), " ")
-	if !strings.Contains(notice, "notice, not a chat") {
-		t.Errorf("a failed update check says it is a notice: %q", notice)
-	}
-	if dossierPurpose(compose.Row{Kind: compose.LiveClaude}) != "" {
-		t.Error("a chat has no purpose line; it has a prompt")
-	}
+	empty := deckModel(160, 38)
+	empty.rows = nil
+	empty.rebuild("", 0)
+	section("empty list", []string{ansi.Strip(empty.renderDossier(12))})
+	golden(t, "ui_dossier_kinds.txt", out.String())
 }
 
 func dossierPurposeLinesText(purpose string, inner int) []string {
@@ -319,40 +304,4 @@ func dossierPurposeLinesText(purpose string, inner int) []string {
 		text[index] = strings.TrimSpace(ansi.Strip(joinSpans(line)))
 	}
 	return text
-}
-
-func TestDossierKeepsLossNoteSeparateFromPromptAndFailure(t *testing.T) {
-	model := deckModel(160, 38)
-	for _, test := range []struct{ note, failure string }{
-		{note: "your last message was not answered — re-send it"},
-		{failure: "HERDR UNREACHABLE own socket"},
-	} {
-		row := compose.Row{
-			Kind:         compose.LiveClaude,
-			ID:           "sid",
-			Name:         "NATIVE",
-			Backend:      "herdr",
-			Socket:       "native.sock",
-			PaneID:       "w1:p1",
-			LastPrompt:   "a private prompt",
-			LostNote:     test.note,
-			BackendError: test.failure,
-		}
-		lines := model.dossierDetails(row, 100, 0)
-		var text strings.Builder
-		for _, line := range lines {
-			text.WriteString(ansi.Strip(joinSpans(line)))
-			text.WriteByte('\n')
-		}
-		shown := text.String()
-		if test.note != "" && !strings.Contains(shown, test.note) {
-			t.Errorf("loss note not shown: %q", shown)
-		}
-		if test.failure != "" && !strings.Contains(shown, test.failure) {
-			t.Errorf("backend failure not shown: %q", shown)
-		}
-		if !strings.Contains(shown, "herdr") || strings.Contains(shown, row.LastPrompt) {
-			t.Errorf("dossier conflated address/prompt: %q", shown)
-		}
-	}
 }

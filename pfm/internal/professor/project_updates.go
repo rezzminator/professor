@@ -237,7 +237,7 @@ func diffUpdatedTemplate(store Store, item projectReportItem) (string, error) {
 			item.Pin.PinnedSHA,
 		)
 	}
-	git, err := deps.Resolve("git")
+	git, err := store.runner.LookPath("git")
 	if err != nil {
 		return "", fmt.Errorf("git diff: git not found: %w", err)
 	}
@@ -264,7 +264,10 @@ const updatedCommitCap = 40
 // commit, never as one diff applied whole. At most updatedCommitCap are
 // returned plus a final line counting the newer ones when more exist.
 func commitsSincePin(store Store, item projectReportItem) ([]string, error) {
-	git, err := deps.Resolve("git")
+	if store.runner == nil {
+		return nil, errors.New("git log: runner is nil")
+	}
+	git, err := store.runner.LookPath("git")
 	if err != nil {
 		return nil, fmt.Errorf("git log: git not found: %w", err)
 	}

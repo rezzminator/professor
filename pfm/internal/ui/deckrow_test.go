@@ -227,7 +227,7 @@ func TestSelectedRowPaintsItsHighlightUnderEverySegment(t *testing.T) {
 	if !strings.Contains(selected, want) {
 		t.Error("the selected row carries the Selected background")
 	}
-	if strings.Contains(plain, want) {
+	if plain != "\x1b[38;2;96;180;179m│\x1b[m \x1b[1;38;2;58;169;220m●\x1b[m \x1b[38;2;58;169;220mlive codex                                    \x1b[m \x1b[38;2;148;163;184m⬢\x1b[m \x1b[38;2;253;224;71m⚠2srv\x1b[m \x1b[38;2;148;163;184m🥈\x1b[m              \x1b[38;2;148;163;184m1234p\x1b[m \x1b[38;2;148;163;184m 9.0M\x1b[m \x1b[38;2;69;92;115m▰\x1b[m\x1b[38;2;68;100;125m▰\x1b[m\x1b[38;2;67;107;136m▰\x1b[m\x1b[38;2;66;115;146m▰\x1b[m\x1b[38;2;65;122;156m▰\x1b[m\x1b[38;2;100;116;139m▱\x1b[m\x1b[38;2;100;116;139m▱\x1b[m\x1b[38;2;100;116;139m▱\x1b[m \x1b[38;2;58;169;220m  1h\x1b[m" {
 		t.Error("an unselected row paints no highlight")
 	}
 	for _, line := range strings.Split(strings.ReplaceAll(selected, "\x1b[m", "\x1b[m\n"), "\n") {
@@ -267,16 +267,22 @@ func TestSearchMatchesAreLitInTheRowName(t *testing.T) {
 func TestSelectedRowOffersTheCurrentActionAsAChipAtEveryWidth(t *testing.T) {
 	narrow := deckModel(80, 28)
 	row := deckRowKinds()[0]
-	if chip := ansi.Strip(narrow.renderGroupedRow(row, true, 78, false)); !strings.Contains(chip, "◖▶ open◗") {
+	if chip := ansi.Strip(
+		narrow.renderGroupedRow(row, true, 78, false),
+	); chip != "› ● live claude         🥇 ⚡                      7p  2.0K ◖▶ open◗        5s" {
 		t.Errorf("a selected row shows its armed action, got %q", chip)
 	}
-	if chip := ansi.Strip(narrow.renderGroupedRow(row, false, 78, false)); strings.Contains(chip, "◖") {
+	if chip := ansi.Strip(
+		narrow.renderGroupedRow(row, false, 78, false),
+	); chip != "│ ● live claude              🥇 ⚡                      7p  2.0K ▰▰▰▰▰▰▰▰   5s" {
 		t.Errorf("an unselected row shows no chip, got %q", chip)
 	}
 	wide := deckModel(160, 38)
 	// The dossier lists every action beside the list; the row still carries the
 	// armed one, because the lane scripts read the carousel off the selected row.
-	if chip := ansi.Strip(wide.renderGroupedRow(row, true, 118, false)); !strings.Contains(chip, "◖▶ open◗") {
+	if chip := ansi.Strip(
+		wide.renderGroupedRow(row, true, 118, false),
+	); chip != "› ● live claude                                              🥇 ⚡                         7p  2.0K ◖▶ open◗        5s" {
 		t.Errorf("a selected row beside the dossier still shows its armed action: %q", chip)
 	}
 }
@@ -310,7 +316,7 @@ func TestNoticeRowsKeepTheirBanners(t *testing.T) {
 	failed := ansi.Strip(
 		model.renderGroupedRow(compose.Row{Kind: compose.ProfessorUpdateFailed, Name: "x"}, false, 110, false),
 	)
-	if !strings.Contains(failed, "PROFESSOR UPDATE CHECK FAILING") || strings.Contains(failed, "Enter") {
+	if failed != "│ ⚠ PROFESSOR UPDATE CHECK FAILING ⚠  x                                                                       " {
 		t.Errorf("failed banner = %q", failed)
 	}
 }

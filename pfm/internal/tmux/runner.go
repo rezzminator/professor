@@ -86,8 +86,8 @@ func (command *Cmd) refused() error {
 	return refuseInTest(command.Args[0])
 }
 
-// wait is Wait's completion: the runner-run Start's outcome, or exec's.
-func (command *Cmd) wait() error {
+// completion is Wait's outcome: the runner-run Start's outcome, or exec's.
+func (command *Cmd) completion() error {
 	if command.waited != nil {
 		return <-command.waited
 	}

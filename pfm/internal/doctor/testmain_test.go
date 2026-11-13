@@ -25,6 +25,8 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/stats"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testjail/fakegit"
+	"github.com/rezzminator/professor/pfm/internal/update"
 )
 
 const harnessPromptFixtureCaptured = "pfm jail fixture harness prompt\n"
@@ -95,6 +97,29 @@ func stageHarnessPromptBaseline(t *testing.T, home string) {
 	}
 }
 
+// doctorRows returns the lines of out that name needle, each newline-terminated.
+func doctorRows(out, needle string) string {
+	var rows strings.Builder
+	for _, line := range strings.SplitAfter(out, "\n") {
+		if strings.Contains(line, needle) {
+			rows.WriteString(line)
+		}
+	}
+	return rows.String()
+}
+
+// rooted writes each run-unique temp root as {root}, {root2}, … so output naming it compares exactly.
+func rooted(s string, roots ...string) string {
+	for i, root := range roots {
+		token := "{root}"
+		if i > 0 {
+			token = fmt.Sprintf("{root%d}", i+1)
+		}
+		s = strings.ReplaceAll(s, root, token)
+	}
+	return s
+}
+
 func jailTest(t *testing.T) string {
 	t.Helper()
 	root := testjail.InstalledHome(t)
@@ -159,7 +184,11 @@ func TestMain(m *testing.M) {
 			CLIVersion:    "fixture",
 		}, err
 	}
-	os.Exit(testjail.Run(m))
+	// The retired-name scan and the project ledger enumerate a project's files
+	// through update's git seam; the fixture projects are no repositories, which
+	// the git model answers as "not a git repository", the walk's trigger.
+	update.StubRunnerForTest(&fakegit.Runner{})
+	os.Exit(testjail.RunInJail(m))
 }
 
 type fourthSource struct{}

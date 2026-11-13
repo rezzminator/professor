@@ -123,10 +123,10 @@ func TestCodexLineageStress(t *testing.T) {
 			}
 			rollouts = append(rollouts, store.Rollout{
 				ID:           id,
-				Path:         "/codex/" + id + ".jsonl",
+				Path:         testjail.Place("/codex/") + id + ".jsonl",
 				Size:         int64(1000 + member),
 				MTimeNS:      int64(lineageIndex*filesPerRoot + member + 1),
-				CWD:          fmt.Sprintf("/work/project-%02d", lineageIndex%50),
+				CWD:          fmt.Sprintf(testjail.Place("/work/project-%02d"), lineageIndex%50),
 				UserThread:   true,
 				SessionID:    root,
 				ParentThread: root,
@@ -140,7 +140,7 @@ func TestCodexLineageStress(t *testing.T) {
 		Rollouts: rollouts,
 		Options: Options{
 			View:           DefaultView,
-			CurrentDir:     "/work/project-00",
+			CurrentDir:     testjail.Place("/work/project-00"),
 			PrimaryAccount: 1,
 			NowNS:          int64(len(rollouts) + 100),
 		},
@@ -239,10 +239,10 @@ func composeStressInput() Input {
 		project := fmt.Sprintf("project-%02d", index%projectCount)
 		transcripts = append(transcripts, store.Transcript{
 			UUID:        id,
-			Path:        "/accounts/1/projects/" + project + "/" + id + ".jsonl",
+			Path:        testjail.Place("/accounts/1/projects/") + project + "/" + id + ".jsonl",
 			Size:        int64(1000 + index),
 			MTimeNS:     int64(index + 1),
-			CWD:         "/work/" + project,
+			CWD:         testjail.Place("/work/") + project,
 			CustomTitle: "Stress " + id,
 			FirstPrompt: "prompt " + id,
 			LastPrompt:  "last " + id,
@@ -290,11 +290,11 @@ func composeStressInput() Input {
 		Killed:      killed,
 		ClaudeSeats: []ClaudeSeat{{
 			Account:   1,
-			ConfigDir: "/accounts/1",
+			ConfigDir: testjail.Place("/accounts/1"),
 		}},
 		Options: Options{
 			View:           DefaultView,
-			CurrentDir:     "/work/project-00",
+			CurrentDir:     testjail.Place("/work/project-00"),
 			PrimaryAccount: 1,
 			NowNS:          transcriptCount + 1000,
 		},

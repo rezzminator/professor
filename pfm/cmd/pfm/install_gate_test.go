@@ -199,15 +199,19 @@ func TestInstallSeedErrorNamesContext(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			want := "pfm install: seed config: read install example "
 
 			args := []string{"--offline"}
 			if scenario != "preview read" {
 				args = append(args, "--yes")
 			}
 			var out, errOut bytes.Buffer
-			if code := runInstall(args, &out, &errOut, loaded); code != 1 || !strings.HasPrefix(errOut.String(), want) {
-				t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+			code := runInstall(args, &out, &errOut, loaded)
+			if got, want := rooted(
+				errOut.String(),
+				clone,
+			), "pfm install: seed config: read install example {root}/example.pfm.config.json: read {root}/example.pfm.config.json: is a directory\n"; code != 1 ||
+				got != want {
+				t.Fatalf("code=%d stdout=%q stderr = %q, want %q", code, out.String(), got, want)
 			}
 		})
 	}

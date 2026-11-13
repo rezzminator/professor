@@ -13,6 +13,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // THE BUG. A resumed Codex lineage member's rollout file lands on disk the
@@ -65,7 +66,7 @@ func TestSelfKillOnUnindexedLineageMemberResolvesToRoot(t *testing.T) {
 				Path:        rootPath,
 				Size:        100,
 				MTimeNS:     100,
-				CWD:         "/work/proja",
+				CWD:         testjail.Place("/work/proja"),
 				UserThread:  true,
 				FirstPrompt: "start",
 				PromptCount: 1,

@@ -3,6 +3,7 @@ package statusline
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -245,14 +246,14 @@ func TestRunningAgentsReadsItsMetaFile(t *testing.T) {
 func TestRunningAgentsWithoutAnAgentsDirectory(t *testing.T) {
 	dir := t.TempDir()
 	for _, tc := range []struct {
-		name, session, wantErr string
+		name, session, want string
 	}{
-		{name: "no session transcript", session: ""},
-		{name: "no subagents directory", session: filepath.Join(dir, "none.jsonl")},
+		{name: "no session transcript", session: "", want: "[] <nil>"},
+		{name: "no subagents directory", session: filepath.Join(dir, "none.jsonl"), want: "[] <nil>"},
 		{
 			name:    "a subagents path that is no directory is a failure to look",
 			session: filepath.Join(dir, "file.jsonl"),
-			wantErr: "list " + filepath.Join(dir, "file", "subagents") + ": ",
+			want:    "[] list {dir}/file/subagents: open {dir}/file/subagents: not a directory",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -263,14 +264,8 @@ func TestRunningAgentsWithoutAnAgentsDirectory(t *testing.T) {
 				t.Fatal(err)
 			}
 			tasks, err := runningAgents(tc.session, subagentNow, newTranscriptScans("", &bytes.Buffer{}))
-			if tc.wantErr == "" {
-				if err != nil || tasks != nil {
-					t.Fatalf("runningAgents(%q) = %v, %v; want nil, nil", tc.session, tasks, err)
-				}
-				return
-			}
-			if err == nil || !strings.HasPrefix(err.Error(), tc.wantErr) {
-				t.Fatalf("runningAgents(%q) error = %v, want it to open %q", tc.session, err, tc.wantErr)
+			if got := strings.ReplaceAll(fmt.Sprint(tasks, " ", err), dir, "{dir}"); got != tc.want {
+				t.Errorf("runningAgents(%q) = %q, want %q", tc.session, got, tc.want)
 			}
 		})
 	}

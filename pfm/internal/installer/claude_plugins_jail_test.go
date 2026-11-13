@@ -74,8 +74,10 @@ func TestClaudePluginCommandTimeoutKillsTheWholeProcessGroup(t *testing.T) {
 	case <-time.After(15 * time.Second):
 		t.Fatal("ensureClaudePlugins did not return within 15s: the hung command was not stopped")
 	}
-	if err == nil || !strings.Contains(err.Error(), "timed out after 300ms") {
-		t.Fatalf("error=%v, want it to say the command timed out after 300ms", err)
+	want := "claude plugin cache-live-control@professor in " + account +
+		": plugin marketplace add rezzminator/professor: timed out after 300ms: context deadline exceeded"
+	if err == nil || strings.Split(err.Error(), "\n")[0] != want {
+		t.Fatalf("error=%v, want its first line %q", err, want)
 	}
 	pids := append(recordedPIDs(t, filepath.Join(account, "child.pids")),
 		recordedPIDs(t, filepath.Join(account, "main.pids"))...)

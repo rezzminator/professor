@@ -17,14 +17,14 @@ type GitRepo struct {
 	Base, Repo, Subdir, Inner, Outer, Other string
 }
 
-// GitRepoWithWorktrees builds a GitRepo with the git binary, skipping the test
-// when git is not installed.
-func GitRepoWithWorktrees(t *testing.T, name string) GitRepo {
+// GitRepoWithWorktrees builds a GitRepo through runner's git: a fakegit.Runner in a unit test,
+// whose model writes the same .git layout, deps.RealRunner in a jail test. A runner that finds no
+// git fails the test with its lookup error, the unit net's refusal in an armed unit binary.
+func GitRepoWithWorktrees(t testing.TB, runner deps.Runner, name string) GitRepo {
 	t.Helper()
-	runner := deps.RealRunner{}
 	gitBinary, err := runner.LookPath("git")
 	if err != nil {
-		t.Skip("git is not installed")
+		t.Fatalf("git fixture: look up git: %v", err)
 	}
 	base := t.TempDir()
 	repo := GitRepo{

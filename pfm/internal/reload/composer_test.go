@@ -7,7 +7,7 @@ import (
 
 func TestLastComposerLineFindsCodexCommandAbovePopupWhitespace(t *testing.T) {
 	capture := "Codex\n› /exit\n" + strings.Repeat("\n", 30)
-	if got := lastReloadComposerLine(capture); !strings.Contains(got, "/exit") {
+	if got := lastReloadComposerLine(capture); got != "› /exit" {
 		t.Fatalf("lastComposerLine()=%q, want the visible Codex command", got)
 	}
 }
@@ -28,10 +28,14 @@ func TestComposerTextReadsAWrappedDraftAndStopsAtTheBoxRule(t *testing.T) {
 		"  bypass permissions on (shift+tab to cycle)",
 	}, "\n")
 	got := composerText(capture)
-	if !strings.Contains(got, "END OF REPRO PROMPT MARKER.") {
+	if got != `❯  Continue the reload-then reproduction. This prompt is
+  deliberately long enough to wrap across several rendered
+  composer lines. END OF REPRO PROMPT MARKER.` {
 		t.Fatalf("composerText lost the wrapped tail: %q", got)
 	}
-	if strings.Contains(got, "bypass permissions") {
+	if got != `❯  Continue the reload-then reproduction. This prompt is
+  deliberately long enough to wrap across several rendered
+  composer lines. END OF REPRO PROMPT MARKER.` {
 		t.Fatalf("composerText read past the box rule into the status rows: %q", got)
 	}
 }

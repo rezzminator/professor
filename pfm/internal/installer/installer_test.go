@@ -7,6 +7,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -64,19 +66,15 @@ func TestInstallPreviewListsPrunableVersionsAndApplyRemovesOnlyThem(t *testing.T
 	}); err != nil {
 		t.Fatal(err)
 	}
-	previewOutput := preview.String()
-	if !strings.Contains(previewOutput, "remove "+prunable) {
-		t.Fatalf("preview did not list the prunable version:\n%s", previewOutput)
+	// Only the actual newest build is labelled "newest"; the second-newest kept
+	// build carries a distinct, honest label.
+	pruneLines := []string{
+		"  change  remove " + prunable + " (2.1.250, 17B)",
+		"  ok      keep " + live + " (live (pids 4242))",
+		"  ok      keep " + second + " (within keep window)",
+		"  ok      keep " + newest + " (newest)",
 	}
-	if !strings.Contains(previewOutput, "keep "+live+" (live (pids 4242))") {
-		t.Fatalf("preview did not name the live version kept, with its pids:\n%s", previewOutput)
-	}
-	// issue #24 F7: only the actual newest build is labelled "newest" — the
-	// second-newest kept build carries a distinct, honest label.
-	if !strings.Contains(previewOutput, "keep "+newest+" (newest)") ||
-		!strings.Contains(previewOutput, "keep "+second+" (within keep window)") {
-		t.Fatalf("preview did not name the two newest versions kept, one honestly labelled second:\n%s", previewOutput)
-	}
+	wantOutputLines(t, preview.String(), pruneLines, versions+"/")
 	for _, path := range []string{newest, second, live, prunable} {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("preview removed %s: %v", path, err)
@@ -90,13 +88,7 @@ func TestInstallPreviewListsPrunableVersionsAndApplyRemovesOnlyThem(t *testing.T
 	}); err != nil {
 		t.Fatal(err)
 	}
-	applyOutput := apply.String()
-	if !strings.Contains(applyOutput, "remove "+prunable) {
-		t.Fatalf("apply did not report the removal:\n%s", applyOutput)
-	}
-	if !strings.Contains(applyOutput, "keep "+live+" (live (pids 4242))") {
-		t.Fatalf("apply did not name the live version kept:\n%s", applyOutput)
-	}
+	wantOutputLines(t, apply.String(), pruneLines, versions+"/")
 	if _, err := os.Stat(prunable); !os.IsNotExist(err) {
 		t.Fatalf("apply left the prunable version in place: err=%v", err)
 	}
@@ -174,50 +166,32 @@ func TestChangeDescriptionNamesCreateVsBackedUpRewrite(t *testing.T) {
 	}
 }
 
-// TestZshrcWiredOnFirstInstallBeforeAnyMarker is a fresh machine's first
-// `pfm install --yes` from the clone: the marker is recorded by this very run,
-// so the shell line must come from the clone being installed, not from a
-// marker a prior install would have left.
-func TestZshrcWiredOnFirstInstallBeforeAnyMarker(t *testing.T) {
-	home := t.TempDir()
-	clone := t.TempDir()
-	var applied bytes.Buffer
-	if _, err := Run(context.Background(), Options{
-		MCPConfigPath: testConfigPath(t), SourceRepo: clone,
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{}, Stdout: &applied,
-	}); err != nil {
-		t.Fatalf("first install: %v\n%s", err, applied.String())
-	}
-	want := sourceLine(filepath.Join(clone, "pfm", "internal", "installer", "assets", "shim", "pfm.zsh"))
-	if content := readFixture(t, filepath.Join(home, ".zshrc")); !strings.Contains(content, want) {
-		t.Fatalf("first install left .zshrc without %q:\n%s\n%s", want, content, applied.String())
-	}
-}
-
+// TestZshrcCreateOnFreshHomeNamesItselfHonestly: a first install on a home with no .zshrc creates it
+// with the shim's source line, says "create" (never a backed-up rewrite) and writes no backup, whether the
+// clone comes from the SourceRepo option or the recorded marker.
 func TestZshrcCreateOnFreshHomeNamesItselfHonestly(t *testing.T) {
 	t.Parallel()
-	home := t.TempDir()
-	recordFixtureSourceRepo(t, home, t.TempDir())
-	var applied bytes.Buffer
-	if _, err := Run(context.Background(), Options{
-		MCPConfigPath: testConfigPath(t),
-		Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, Stdout: &applied,
-	}); err != nil {
-		t.Fatalf("apply on a fresh home: %v\n%s", err, applied.String())
-	}
-	out := applied.String()
-	zshrc := filepath.Join(home, ".zshrc")
-	if !strings.Contains(out, "create "+zshrc) {
-		t.Fatalf("apply output never says it created %s:\n%s", zshrc, out)
-	}
-	if strings.Contains(out, "rewrite "+zshrc+" (backup preserved)") {
-		t.Fatalf("claimed a backed-up rewrite for an absent zshrc:\n%s", out)
-	}
-	if matches, _ := filepath.Glob(zshrc + ".pre-professor-*"); len(matches) != 0 {
-		t.Fatalf("backup written for a file that did not exist: %v", matches)
-	}
-	if content := readFixture(t, zshrc); !strings.Contains(content, "pfm.zsh") {
-		t.Fatalf("zshrc was not created with the source line:\n%s", content)
+	for _, recorded := range []bool{false, true} {
+		home, clone := t.TempDir(), t.TempDir()
+		options := Options{MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home, Runner: &fakeRunner{}}
+		if recorded {
+			recordFixtureSourceRepo(t, home, clone)
+		} else {
+			options.SourceRepo = clone
+		}
+		var applied bytes.Buffer
+		options.Stdout = &applied
+		if _, err := Run(context.Background(), options); err != nil {
+			t.Fatalf("apply on a fresh home (recorded marker %v): %v\n%s", recorded, err, applied.String())
+		}
+		zshrc := filepath.Join(home, ".zshrc")
+		wantOutputLines(t, applied.String(), []string{"  change  create " + zshrc}, zshrc)
+		if matches, _ := filepath.Glob(zshrc + ".pre-professor-*"); len(matches) != 0 {
+			t.Fatalf("backup written for a file that did not exist: %v", matches)
+		}
+		if got, want := readFixture(t, zshrc), shimBlock(clone); got != want {
+			t.Fatalf("zshrc = %q\nwant %q", got, want)
+		}
 	}
 }
 
@@ -546,15 +520,14 @@ func TestEmptyCodexRosterSkipsCommandAndAgentMirrors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("zero-Codex preview: %v\n%s", err, output.String())
 	}
-	for _, wanted := range skips {
-		if !strings.Contains(output.String(), "  skip    "+wanted+"\n") {
-			t.Errorf("zero-account mirror skip omitted %q:\n%s", wanted, output.String())
-		}
-	}
-	for _, call := range testjail.EngineSyncCalls(t, record) {
-		if !strings.Contains(call, " --no-codex-home") || strings.Contains(call, " --codex-home ") {
-			t.Errorf("engine-sync call %q does not carry the empty roster", call)
-		}
+	wantOutputLines(t, output.String(), []string{
+		"  skip    " + skips[0], "  skip    " + skips[1],
+		"  skip    no Codex accounts configured — hooks.json wiring has nothing to wire",
+	}, "no Codex accounts")
+	wantCalls := []string{"global --home " + home + " --source-repo " + home + "/.professor --claude-config-dir " +
+		home + "/.claude --no-codex-home --plan --json"}
+	if calls := testjail.EngineSyncCalls(t, record); !slices.Equal(calls, wantCalls) {
+		t.Errorf("engine-sync calls = %q\nwant %q", calls, wantCalls)
 	}
 }
 
@@ -807,9 +780,9 @@ func TestWireGlobalSkillsReportsATemplateSkillWithoutSKILLMd(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("apply: %v\n%s", err, output.String())
 	}
-	if !strings.Contains(output.String(), "SKILL-SOURCE-MISSING half-built") {
-		t.Fatalf("apply output omitted the missing-skill-source report:\n%s", output.String())
-	}
+	wantOutputLines(t, output.String(), []string{
+		"  skip    SKILL-SOURCE-MISSING half-built (" + source + "/half-built/SKILL.md absent)",
+	}, "half-built")
 	if _, err := os.Lstat(filepath.Join(home, ".claude", "skills", "half-built")); !os.IsNotExist(err) {
 		t.Fatalf("a skill source without SKILL.md still produced a link: %v", err)
 	}
@@ -996,20 +969,17 @@ func TestEngineSyncGlobalConflictRefusesTheApplyBeforeAnyWrite(t *testing.T) {
 		MCPConfigPath: testConfigPath(t), EngineSyncRunner: engineSync,
 		Mode: ModeDryRun, Home: home, Stdout: &output, Runner: &fakeRunner{},
 	})
-	if err == nil || !strings.Contains(err.Error(), conflict) {
+	if err == nil || err.Error() != "engine-sync global: "+conflict {
 		t.Fatalf("dry-run error=%v, want the engine-sync conflict; output:\n%s", err, output.String())
 	}
-	if !strings.Contains(output.String(), "  conflict "+conflict+"\n") {
-		t.Fatalf("dry-run transcript lacks the conflict:\n%s", output.String())
-	}
+	wantOutputLines(t, output.String(), []string{"  conflict " + conflict}, "CONFLICT")
 
 	output.Reset()
 	_, err = Run(context.Background(), Options{
 		MCPConfigPath: testConfigPath(t), EngineSyncRunner: engineSync,
 		Mode: ModeApply, Home: home, Stdout: &output, Runner: &fakeRunner{},
 	})
-	if err == nil || !strings.Contains(err.Error(), "preflight apply plan") ||
-		!strings.Contains(err.Error(), conflict) {
+	if err == nil || err.Error() != "preflight apply plan: engine-sync global: "+conflict {
 		t.Fatalf("apply error=%v, want the pre-mutation conflict refusal; output:\n%s", err, output.String())
 	}
 	for _, path := range []string{
@@ -1021,10 +991,16 @@ func TestEngineSyncGlobalConflictRefusesTheApplyBeforeAnyWrite(t *testing.T) {
 			t.Errorf("apply preflight wrote %s before refusing the conflict: %v", path, statErr)
 		}
 	}
+	// Both runs only planned: the plan's scratch source home is a fresh temp directory each run.
+	plan := regexp.MustCompile(` --source-home \S+`)
+	var calls []string
 	for _, call := range testjail.EngineSyncCalls(t, record) {
-		if !strings.Contains(call, " --plan") {
-			t.Fatalf("engine-sync ran %q past a planned conflict", call)
-		}
+		calls = append(calls, plan.ReplaceAllString(call, " --source-home PLAN"))
+	}
+	planCall := "global --home " + home + " --source-repo " + home + "/.professor --claude-config-dir " + home +
+		"/.claude --codex-home " + home + "/.codex --source-home PLAN --plan --json"
+	if want := []string{planCall, planCall}; !slices.Equal(calls, want) {
+		t.Fatalf("engine-sync calls = %q\nwant %q", calls, want)
 	}
 }
 
@@ -1113,9 +1089,9 @@ func TestShimSourceUsesRecordedCloneAndKeepsLegacyPosition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := sourceLine(filepath.Join(clone, "pfm", "internal", "installer", "assets", "shim", "pfm.zsh"))
-	if !strings.Contains(string(raw), "before\n# The shell launchers delegate to the pfm engine.\n"+want+"\nafter") {
-		t.Fatalf("zshrc=%q", raw)
+	want := "before\n" + shimBlock(clone) + "after\n"
+	if string(raw) != want {
+		t.Fatalf("zshrc=%q\nwant %q", raw, want)
 	}
 }
 
@@ -1187,7 +1163,8 @@ func TestShimUnwireRemovesLegacyAndCloneLinesWithoutMarker(t *testing.T) {
 func TestEarlyCallScanStopsWhereTheRewriterFindsTheSourceLine(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
-	recordFixtureSourceRepo(t, home, t.TempDir())
+	clone := t.TempDir()
+	recordFixtureSourceRepo(t, home, clone)
 	zshrc := filepath.Join(home, ".zshrc")
 	writeFixture(t, zshrc, "cc\nsource /old/pfm.zsh\ncc-ls\n")
 
@@ -1198,18 +1175,14 @@ func TestEarlyCallScanStopsWhereTheRewriterFindsTheSourceLine(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("apply: %v\n%s", err, output.String())
 	}
-	report := output.String()
 	// Line 1 runs before the launchers exist; line 3 does not.
-	if !strings.Contains(report, "a fleet command runs ABOVE the source line") ||
-		!strings.Contains(report, "line 1: cc\n") {
-		t.Fatalf("installer did not report the early call:\n%s", report)
-	}
-	if strings.Contains(report, "line 3: cc-ls") {
-		t.Fatalf("installer reported a call below the source line:\n%s", report)
-	}
+	wantOutputLines(t, output.String(), []string{
+		"  skip    a fleet command runs ABOVE the source line, where it does not exist yet:",
+		"          line 1: cc",
+	}, "ABOVE the source line", "line 1:", "line 3:")
 	// It reports; it never rewrites a line of the operator's shell that is not ours.
-	if zshrcContent := readFixture(t, zshrc); !strings.HasPrefix(zshrcContent, "cc\n") {
-		t.Fatalf("installer rewrote the operator's own line:\n%s", zshrcContent)
+	if got, want := readFixture(t, zshrc), "cc\n"+shimBlock(clone)+"cc-ls\n"; got != want {
+		t.Fatalf("zshrc = %q\nwant %q", got, want)
 	}
 }
 
@@ -1284,9 +1257,8 @@ func TestLaunchAgentGateAnnouncesWhenItCannotProbe(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), "launch-agent gate NOT probed") {
-		t.Fatalf("an unprobed gate was silent:\n%s", output.String())
-	}
+	wantOutputLines(t, output.String(), []string{"  skip    launch-agent gate NOT probed (launchctl print could not " +
+		"run or its output could not be read); an apply during a name-sync or schedule run is not refused"}, "launch-agent gate")
 }
 
 func recordFixtureSourceRepo(t *testing.T, home, repo string) {
@@ -1303,6 +1275,34 @@ func writeFixture(t *testing.T, path, content string) {
 	}
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// shimBlock is the block an install writes into .zshrc to source the clone's shim.
+func shimBlock(clone string) string {
+	return "# The shell launchers delegate to the pfm engine.\n" +
+		sourceLine(filepath.Join(clone, "pfm", "internal", "installer", "assets", "shim", "pfm.zsh")) + "\n"
+}
+
+// outputLines returns the lines of out that hold any of marks, in order: the slice a test compares whole.
+func outputLines(out string, marks ...string) []string {
+	var lines []string
+	for _, line := range strings.Split(out, "\n") {
+		for _, mark := range marks {
+			if strings.Contains(line, mark) {
+				lines = append(lines, line)
+				break
+			}
+		}
+	}
+	return lines
+}
+
+// wantOutputLines fails unless the lines of out holding any of marks are exactly want, in order.
+func wantOutputLines(t *testing.T, out string, want []string, marks ...string) {
+	t.Helper()
+	if got := outputLines(out, marks...); !slices.Equal(got, want) {
+		t.Fatalf("output lines holding %q:\n got %q\nwant %q\nwhole output:\n%s", marks, got, want, out)
 	}
 }
 

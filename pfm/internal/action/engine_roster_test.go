@@ -41,7 +41,7 @@ func TestCodexLaunchesUseTheSelectedRosterHome(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Synthesize() error = %v", err)
 	}
-	if !strings.Contains(picker.Line, "CODEX_HOME='/codex/one' cx") {
+	if picker.Line != "(cd -- '/work/project' && CODEX_HOME='/codex/one' cx)" {
 		t.Fatalf("picker line = %q", picker.Line)
 	}
 
@@ -49,7 +49,7 @@ func TestCodexLaunchesUseTheSelectedRosterHome(t *testing.T) {
 		Engine: pfmengine.Codex, Name: "worker", CWD: "/work/project",
 		PrimaryAccount: 8, Config: machine,
 	})
-	if err == nil || !strings.Contains(err.Error(), "requested Codex account 8") {
+	if err == nil || err.Error() != "requested Codex account 8 is not in the configured roster" {
 		t.Fatalf("off-roster error = %v", err)
 	}
 }

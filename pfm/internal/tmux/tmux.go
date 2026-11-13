@@ -104,6 +104,11 @@ func Command(ctx context.Context, binary, socketPath string, arguments ...string
 	path, argv, environment := Invocation(binary, socketPath, arguments...)
 	command := exec.CommandContext(ctx, path, argv...)
 	command.Env = environment
+	// An armed unit binary starts no tmux: Start returns the refusal as the failed lookup
+	// CouldNotRun reads as "could not run".
+	if err := deps.RefuseUnitNetStart(append([]string{path}, argv...)); err != nil {
+		command.Err = &exec.Error{Name: path, Err: err}
+	}
 	return command
 }
 

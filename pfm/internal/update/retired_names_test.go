@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -578,9 +579,12 @@ func TestScanRetiredNamesDoesNotWidenToAWalkWhenGitFails(t *testing.T) {
 
 	scan := scanFixture(root, nil, nil)
 
-	if len(scan.Hits) != 0 || len(scan.Failures) != 1 || scan.Failures[0].Path != "." ||
-		!strings.Contains(scan.Failures[0].Error, "git") {
-		t.Fatalf("scan = %+v, want no hits and one failure at \".\" naming git", scan)
+	if got, want := strings.ReplaceAll(
+		fmt.Sprintf("%+v", scan),
+		root,
+		"{root}",
+	), "{Hits:[] Failures:[{Path:. Error:inspect git work tree: git rev-parse exited 128: fatal: bad config line 1 in file {root}/.git/config}] Incomplete:[] Accepted:[] AcceptedHits:0}"; got != want {
+		t.Fatalf("scan = %q, want %q", got, want)
 	}
 }
 
@@ -804,7 +808,7 @@ func (file retiredFailingFile) Close() error { return file.closeErr }
 
 func TestScanRetiredNamesRetainsCompletedHitsOnReadOrCloseFailure(t *testing.T) {
 	t.Parallel()
-	for _, operation := range []string{"read", "close"} {
+	for operation, want := range map[string]string{"read": "{Hits:[{Path:partial.txt Line:1 Name:/wave Kind:command Successor:the flights:foreman agent}] Failures:[{Path:partial.txt Error:read partial.txt: fixture read failed}] Incomplete:[] Accepted:[] AcceptedHits:0}", "close": "{Hits:[{Path:partial.txt Line:1 Name:/wave Kind:command Successor:the flights:foreman agent}] Failures:[{Path:partial.txt Error:close partial.txt: fixture close failed}] Incomplete:[] Accepted:[] AcceptedHits:0}"} {
 		t.Run(operation, func(t *testing.T) {
 			root := t.TempDir()
 			writeRetiredFixture(t, root, map[string]string{"partial.txt": "fixture\n"})
@@ -818,10 +822,8 @@ func TestScanRetiredNamesRetainsCompletedHitsOnReadOrCloseFailure(t *testing.T) 
 				return file, nil
 			}
 			scan := scanFixture(root, nil, open)
-			if len(scan.Hits) != 1 || scan.Hits[0].Line != 1 || scan.Hits[0].Name != "/wave" ||
-				len(scan.Failures) != 1 ||
-				!strings.Contains(scan.Failures[0].Error, "fixture "+operation+" failed") {
-				t.Fatalf("partial scan = %+v, want the completed hit and contextual %s failure", scan, operation)
+			if got := strings.ReplaceAll(fmt.Sprintf("%+v", scan), root, "{root}"); got != want {
+				t.Fatalf("partial scan = %q, want %q", got, want)
 			}
 		})
 	}

@@ -93,7 +93,8 @@ func TestRenderKeepsTheLineOverABadPayloadValue(t *testing.T) {
 			if tc.wantRow != "" && !strings.Contains(stripANSICodes(lines[2]), tc.wantRow) {
 				t.Fatalf("quota row = %q, want it to hold %q", stripANSICodes(lines[2]), tc.wantRow)
 			}
-			if tc.wantRowLacks != "" && strings.Contains(stripANSICodes(lines[2]), tc.wantRowLacks) {
+			if tc.wantRowLacks != "" &&
+				stripANSICodes(lines[2]) != "▰▱▱▱▱ 5h-used:29% ↻0h26m │ ▰▰▰▱▱ 7d-used:62% ↻3d0h" {
 				t.Fatalf("quota row = %q, want no %q", stripANSICodes(lines[2]), tc.wantRowLacks)
 			}
 			if tc.wantContext != "" && !strings.Contains(stripANSICodes(lines[1]), tc.wantContext) {

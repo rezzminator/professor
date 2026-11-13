@@ -5,11 +5,16 @@ package picker
 import (
 	"os"
 	"os/exec"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"charm.land/lipgloss/v2"
+
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/themesync"
+	"github.com/rezzminator/professor/pfm/internal/ui"
 )
 
 // TestParkedPickerPublishesAChatThatLaunchesWithoutAKeystroke pins root cause
@@ -91,4 +96,24 @@ func waitForTmuxPaneText(t *testing.T, socket string, environment []string, want
 		time.Sleep(25 * time.Millisecond)
 	}
 	t.Fatalf("tmux pane did not paint %q within %s; last capture=%q", want, timeout, last)
+}
+
+func TestParkedPickerPublishesThemeWithoutLiveRowsOrFacts(t *testing.T) {
+	presenceJail(t)
+	updates := parkedPresenceStream(t)
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	variant := pickerThemeVariant(true)
+	writePickerTheme(t, home, themesync.Applied{Primary: variant}, themesync.Light, true)
+	snapshot := awaitFullPass(t, updates, 5*time.Second, "the theme changed without live rows or a facts reader")
+	if got := ui.NewModel(snapshot).
+		View().
+		BackgroundColor; !reflect.DeepEqual(
+		got,
+		lipgloss.Color(variant.Background),
+	) {
+		t.Fatalf("parked theme background = %v, want %s", got, variant.Background)
+	}
 }

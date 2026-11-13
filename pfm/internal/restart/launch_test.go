@@ -195,19 +195,15 @@ func TestChatAddressHoldsOnlyItsOwnChat(t *testing.T) {
 	}
 }
 
-// TestThePublicVerbHasNoWorkerFlags: the worker's flags live on
-// `pfm internal restart-run` alone, so no typed pfm restart runs it.
 func TestThePublicVerbHasNoWorkerFlags(t *testing.T) {
-	for _, args := range [][]string{{"--worker"}, {"--front", "5", "--dry-run"}, {"--launched-from", "x"}, {"now"}} {
+	for _, row := range []struct {
+		args []string
+		want string
+	}{{[]string{"--worker"}, "flag provided but not defined: -worker\n{usage}\n"}, {[]string{"--front", "5", "--dry-run"}, "flag provided but not defined: -front\n{usage}\n"}, {[]string{"--launched-from", "x"}, "flag provided but not defined: -launched-from\n{usage}\n"}, {[]string{"now"}, "{usage}\n"}} {
 		var stdout, stderr bytes.Buffer
-		if code := Main(
-			args,
-			&stdout,
-			&stderr,
-			config.Runtime{},
-		); code != 2 ||
-			!strings.Contains(stderr.String(), usage) {
-			t.Fatalf("Main(%v) = %d, stderr %q", args, code, stderr.String())
+		code := Main(row.args, &stdout, &stderr, config.Runtime{})
+		if got := strings.Replace(stderr.String(), usage, "{usage}", 1); code != 2 || got != row.want {
+			t.Errorf("Main(%v) stderr = %q, want %q (exit %d)", row.args, got, row.want, code)
 		}
 	}
 }
@@ -221,13 +217,13 @@ func TestWorkerRunsOnlyAsTheDetachedWorker(t *testing.T) {
 	for _, args := range [][]string{{}, {"--front", "0"}, {"--front", "5", "--launched-pane", "w1:p2"}, {"--front", "5", "x"}} {
 		var stdout, stderr bytes.Buffer
 		if code := Worker(args, &stdout, &stderr, config.Runtime{}); code != 2 ||
-			!strings.Contains(stderr.String(), workerUsage) {
+			stderr.String() != "usage: pfm internal restart-run --front PID [--launched-from SOCKET [--launched-pane PANE]]\n" {
 			t.Fatalf("Worker(%v) = %d, stderr %q", args, code, stderr.String())
 		}
 	}
 	var stdout, stderr bytes.Buffer
 	if code := Worker([]string{"--front", "5"}, &stdout, &stderr, config.Runtime{}); code != 2 ||
-		!strings.Contains(stderr.String(), "runs only as the detached worker") || stdout.Len() != 0 {
+		stderr.String() != "pfm internal restart-run: runs only as the detached worker pfm restart starts in its own session; type pfm restart\n" || stdout.Len() != 0 {
 		t.Fatalf("a foreground worker = %d, stdout %q, stderr %q", code, stdout.String(), stderr.String())
 	}
 }

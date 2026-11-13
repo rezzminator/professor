@@ -3,7 +3,6 @@ package config
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -108,71 +107,5 @@ func TestLoadThemePerAccountUnsetInheritsTopLevel(t *testing.T) {
 			got.Source("accounts[0].claude.theme"),
 			SourceDefault,
 		)
-	}
-}
-
-func TestLoadThemeRejectsWhitespaceOrEmpty(t *testing.T) {
-	home := filepath.Join(t.TempDir(), "home")
-	for _, body := range []string{
-		`{"version": 2, "claude": {"theme": ""}}`,
-		`{"version": 2, "claude": {"theme": "   "}}`,
-	} {
-		path := filepath.Join(t.TempDir(), "config.json")
-		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		_, err := Load(path, home, nil)
-		if err == nil {
-			t.Fatalf("%s: Load() error = nil, want the empty-theme error", body)
-		}
-		if !strings.Contains(err.Error(), "claude.theme must be a non-empty string") {
-			t.Fatalf("%s: Load() error = %v, want it to name claude.theme", body, err)
-		}
-	}
-}
-
-func TestLoadThemeRejectsWhitespaceOrEmptyPerAccount(t *testing.T) {
-	home := filepath.Join(t.TempDir(), "home")
-	path := filepath.Join(t.TempDir(), "config.json")
-	content := `{
-  "version": 2,
-  "accounts": [{"id": 3, "configDir": "~/three", "claude": {"theme": "  "}}]
-}`
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	_, err := Load(path, home, nil)
-	if err == nil {
-		t.Fatal("Load() error = nil, want the empty-theme error")
-	}
-	if !strings.Contains(err.Error(), "accounts[0].theme must be a non-empty string") {
-		t.Fatalf("Load() error = %v, want it to name accounts[0].theme", err)
-	}
-}
-
-func TestMarshalRoundTripsClaudeTheme(t *testing.T) {
-	home := filepath.Join(t.TempDir(), "home")
-	path := filepath.Join(t.TempDir(), "config.json")
-	content := `{
-  "version": 2,
-  "accounts": [{"id": 3, "configDir": "~/three", "claude": {"theme": "light"}}],
-  "claude": {"theme": "dark"}
-}`
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	got, err := Load(path, home, nil)
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
-	encoded, err := Marshal(got, false)
-	if err != nil {
-		t.Fatalf("Marshal() error = %v", err)
-	}
-	if !strings.Contains(string(encoded), `"theme": "dark"`) {
-		t.Fatalf("Marshal dropped top-level claude.theme:\n%s", encoded)
-	}
-	if !strings.Contains(string(encoded), `"theme": "light"`) {
-		t.Fatalf("Marshal dropped per-account claude.theme:\n%s", encoded)
 	}
 }

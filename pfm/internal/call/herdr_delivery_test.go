@@ -530,7 +530,7 @@ func TestHerdrTurnPreservesIdentity(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
 			err = nativeEngine(t, target).waitHerdrTurn(ctx, target, turn)
-			if err == nil || !strings.Contains(err.Error(), "identity") {
+			if err == nil || err.Error() != "herdr turn identity changed for \"w1:p2\"" {
 				t.Fatalf("replacement accepted: %v", err)
 			}
 		})
@@ -538,7 +538,7 @@ func TestHerdrTurnPreservesIdentity(t *testing.T) {
 }
 
 func TestHerdrDialFailureNotTyped(t *testing.T) {
-	for _, id := range []string{"cc", "cx"} {
+	for id, want := range map[string]string{"cc": "ABORT: Herdr ownership could not be proved; nothing was typed: prove native startup owner: herdr seat native-fixture ownership unproved: prove seat native-fixture pane.list: herdr socket {socket}: dial for pane.list pfm-seat: dial unix {socket}: connect: no such file or directory", "cx": "Herdr raw input refused before input; nothing was typed: herdr seat native-fixture ownership unproved: prove seat native-fixture pane.list: herdr socket {socket}: dial for pane.list pfm-seat: dial unix {socket}: connect: no such file or directory"} {
 		t.Run(id, func(t *testing.T) {
 			var socket *nativeSocket
 			socket = newNativeSocket(t, func(req nativeRequest) (any, string) {
@@ -561,9 +561,13 @@ func TestHerdrDialFailureNotTyped(t *testing.T) {
 			})
 			target := Target{Backend: "herdr", SocketPath: socket.path, Pane: "w1:p2", Engine: id}
 			got, err := nativeEngine(t, target).CallTarget(context.Background(), target, Request{Message: "hello"})
-			if err != nil || got.Typed || got.Status != "undelivered" ||
-				!strings.Contains(got.Message, "nothing was typed") {
-				t.Fatalf("known pre-input failure result=%+v err=%v", got, err)
+			if message := strings.ReplaceAll(
+				got.Message,
+				socket.path,
+				"{socket}",
+			); err != nil || got.Typed || got.Status != "undelivered" ||
+				message != want {
+				t.Fatalf("message = %q, want %q (result %+v err %v)", message, want, got, err)
 			}
 		})
 	}
@@ -584,9 +588,13 @@ func TestHerdrRawOwnershipRevokedBeforePaste(t *testing.T) {
 	engine := nativeEngine(t, target)
 	engine.options.DisableSignature = true
 	got, err := engine.CallTarget(context.Background(), target, Request{Message: "hello"})
-	if err != nil || got.Typed || got.Status != statusUndelivered || got.Code != CodeUndelivered ||
-		!strings.Contains(got.Message, "nothing was typed") || !strings.Contains(got.Message, "ownership unproved") {
-		t.Fatalf("pre-input revocation receipt=%+v err=%v", got, err)
+	message := strings.NewReplacer(socket.path, "{socket}", os.Getenv("PFM_PROC_ROOT"), "{proc}").Replace(got.Message)
+	if want := "Herdr raw input refused before input; nothing was typed: herdr seat native-fixture ownership unproved: read supervisor role: open {proc}/42/cmdline: no such file or directory"; err != nil ||
+		got.Typed ||
+		got.Status != statusUndelivered ||
+		got.Code != CodeUndelivered ||
+		message != want {
+		t.Fatalf("message = %q, want %q (receipt %+v err %v)", message, want, got, err)
 	}
 }
 

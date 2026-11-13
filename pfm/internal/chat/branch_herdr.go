@@ -24,14 +24,19 @@ import (
 // unless tmux is asked for (chat.backend) or no Herdr server runs. A fork
 // placed in Herdr gets its Claude session id fixed here, the id its seat is
 // keyed by; only Claude takes one, so a Codex fork placed in Herdr is refused.
-// A fork placed in tmux needs tmux on PATH.
-func BranchPlace(ctx context.Context, requested string, engine pfmengine.ID) (spawn.BackendChoice, string, error) {
+// A fork placed in tmux needs tmux, which runner looks up.
+func BranchPlace(
+	ctx context.Context,
+	requested string,
+	engine pfmengine.ID,
+	runner deps.Runner,
+) (spawn.BackendChoice, string, error) {
 	choice, err := BirthBackend(ctx, "cli.branch", requested)
 	if err != nil {
 		return choice, "", err
 	}
 	if choice.Backend != spawn.BackendHerdr {
-		if _, err := obs.Runner(deps.RealRunner{}).LookPath(tmux.Binary); err != nil {
+		if _, err := obs.Runner(runner).LookPath(tmux.Binary); err != nil {
 			return choice, "", errors.New("tmux is not on PATH")
 		}
 		return choice, "", nil

@@ -3,6 +3,7 @@ package mcpserv
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -21,6 +22,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 type cappedProxyChat struct {
@@ -56,7 +58,7 @@ func TestListProjectedKeepsDistinctPrivateTranscriptPaths(t *testing.T) {
 func TestCallEngineForRequestResolvesProxyIdentity(t *testing.T) {
 	t.Parallel()
 	row := compose.Row{
-		SessionName: "cc-seat", ID: "session-id", CWD: "/work/proxy", Project: "proxy",
+		SessionName: "cc-seat", ID: "session-id", CWD: testjail.Place("/work/proxy"), Project: "proxy",
 		Name: "Proxy Claude", Kind: compose.LiveClaude, Socket: "cc-seat", PaneID: "%7",
 	}
 	current := &backend{
@@ -71,7 +73,8 @@ func TestCallEngineForRequestResolvesProxyIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !caller.present || !caller.valid || caller.row.Session != "cc-seat" || caller.row.Dir != "/work/proxy" {
+	if !caller.present || !caller.valid || caller.row.Session != "cc-seat" ||
+		caller.row.Dir != testjail.Place("/work/proxy") {
 		t.Fatalf("caller = %+v, want the unique live row", caller)
 	}
 	if caller.identity.Session != "cc-seat" || caller.identity.SocketPath != "/tmp/tmux-1000/cc-seat" ||
@@ -82,120 +85,76 @@ func TestCallEngineForRequestResolvesProxyIdentity(t *testing.T) {
 	}
 }
 
-func TestCallEngineForRequestRejectsConflictingSingleProxySeat(t *testing.T) {
+// TestCallerForRequestRefusesConflictingProxies: a proxy payload whose seat,
+// socket, namespace or engine disagrees with the live row, or that names no or
+// several live chats, is a present but invalid caller naming the conflict.
+func TestCallerForRequestRefusesConflictingProxies(t *testing.T) {
 	t.Parallel()
-	row := compose.Row{
-		SessionName: "cc-seat", ID: "session-id", CWD: "/work/proxy",
+	seat := []compose.Row{{
+		SessionName: "cc-seat", ID: "session-id", CWD: testjail.Place("/work/proxy"),
 		Kind: compose.LiveClaude, Socket: "cc-seat", PaneID: "%7",
+	}}
+	split := []compose.Row{{Kind: compose.LiveSplit, Socket: "cc-split"}}
+	shared := []compose.Row{{
+		SessionName: "shared-session", ID: "opencode-id", Kind: compose.LiveOpenCode, Socket: "ox-shared", PaneID: "%2",
+	}}
+	// proxy is base with the pairs' fields replaced
+	proxy := func(base map[string]any, pairs ...string) map[string]any {
+		out := map[string]any{"v": ProxyWireVersion}
+		for key, value := range base {
+			out[key] = value
+		}
+		for i := 0; i < len(pairs); i += 2 {
+			out[pairs[i]] = pairs[i+1]
+		}
+		return out
 	}
-	tests := []struct {
-		name       string
-		field      string
-		value      string
-		wantDetail string
+	seatProxy := map[string]any{
+		"session": "cc-seat", "socketPath": "/tmp/tmux-1000/cc-seat", "socketName": "cc-seat",
+		"pane": "%7", "engine": "claude", "id": "session-id",
+	}
+	splitProxy := map[string]any{
+		"session": "renamed-split", "socketName": "cc-split", "socketPath": "/tmp/tmux-1000/cc-split",
+		"engine": "claude", "id": "second",
+	}
+	missing := map[string]any{"session": "missing-seat"}
+	for _, test := range []struct {
+		name, tmux string
+		rows       []compose.Row
+		proxy      map[string]any
+		want       string
 	}{
-		{name: "pane", field: "pane", value: "%9", wantDetail: "location disagrees"},
-		{name: "socket name", field: "socketName", value: "cc-other", wantDetail: "socketName"},
-		{
-			name: "socket path basename", field: "socketPath", value: "/tmp/tmux-1000/cc-other",
-			wantDetail: "location disagrees",
-		},
-		{name: "engine", field: "engine", value: "codex", wantDetail: "engine"},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			proxy := map[string]any{
-				"v": ProxyWireVersion, "session": "cc-seat", "socketPath": "/tmp/tmux-1000/cc-seat",
-				"socketName": "cc-seat", "pane": "%7", "engine": "claude", "id": "session-id",
-			}
-			proxy[test.field] = test.value
-			current := &backend{paths: paths.Values{TmuxDir: "/tmp/tmux-1000"}, chat: &fakeChatVerbs{
-				listed: chat.ListResult{Rows: []compose.Row{row}, Matched: 1},
-			}}
-			caller, err := current.callerForRequest(context.Background(), mcp.Meta{"pfmProxy": proxy})
-			if err != nil {
-				t.Fatalf("conflicting proxy returned error: %v", err)
-			}
-			if !caller.present || caller.valid || caller.row.ID != "" || caller.identity.ID != "" ||
-				!strings.Contains(caller.detail, test.wantDetail) {
-				t.Fatalf(
-					"conflicting proxy caller = %+v, want present invalid refusal naming %q",
-					caller,
-					test.wantDetail,
-				)
-			}
-		})
-	}
-}
-
-func TestCallEngineForRequestRejectsConflictingProxySocketPair(t *testing.T) {
-	t.Parallel()
-	row := compose.Row{
-		SessionName: "cc-seat", ID: "session-id", Kind: compose.LiveClaude,
-		Socket: "cc-seat", PaneID: "%7",
-	}
-	tests := []struct {
-		name       string
-		socketName string
-		socketPath string
-		wantDetail string
-	}{
-		{
-			name: "name matches but path differs", socketName: "cc-seat",
-			socketPath: "/tmp/tmux-1000/cc-other", wantDetail: "location disagrees",
-		},
-		{
-			name: "path matches but name differs", socketName: "cc-other",
-			socketPath: "/tmp/tmux-1000/cc-seat", wantDetail: "socketName",
-		},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			current := &backend{paths: paths.Values{TmuxDir: "/tmp/tmux-1000"}, chat: &fakeChatVerbs{
-				listed: chat.ListResult{Rows: []compose.Row{row}, Matched: 1},
-			}}
-			caller, err := current.callerForRequest(context.Background(), mcp.Meta{
-				"pfmProxy": map[string]any{
-					"v": ProxyWireVersion, "session": "cc-seat", "socketName": test.socketName,
-					"socketPath": test.socketPath, "pane": "%7", "engine": "claude", "id": "session-id",
-				},
-			})
-			if err != nil {
-				t.Fatalf("conflicting socket pair returned error: %v", err)
-			}
-			if !caller.present || caller.valid || !strings.Contains(caller.detail, test.wantDetail) {
-				t.Fatalf(
-					"conflicting socket caller = %+v, want present invalid refusal naming %q",
-					caller,
-					test.wantDetail,
-				)
-			}
-		})
-	}
-}
-
-func TestReviewProxySocketPathRejectsForeignNamespace(t *testing.T) {
-	t.Parallel()
-	const socket = "ox-shared"
-	row := compose.Row{
-		SessionName: "shared-session", ID: "opencode-id", Kind: compose.LiveOpenCode,
-		Socket: socket, PaneID: "%2",
-	}
-	current := &backend{
-		chat:  &fakeChatVerbs{listed: chat.ListResult{Rows: []compose.Row{row}, Matched: 1}},
-		paths: paths.Values{TmuxDir: "/jail/tmux-a"},
-	}
-	caller, err := current.callerForRequest(context.Background(), mcp.Meta{
-		"pfmProxy": map[string]any{
-			"v": ProxyWireVersion, "session": "shared-session", "socketName": socket,
-			"socketPath": "/jail/tmux-b/" + socket, "pane": "%2", "engine": "opencode",
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !caller.present || caller.valid || !strings.Contains(caller.detail, "location disagrees") {
-		t.Fatalf("foreign namespace caller = %+v, want present invalid socketPath refusal", caller)
+		{"seat pane", "/tmp/tmux-1000", seat, proxy(seatProxy, "pane", "%9"), "<nil> present=true valid=false row=\"\" identity=\"\" MCP caller location disagrees with its live chat: payload  /tmp/tmux-1000/cc-seat %9, row tmux /tmp/tmux-1000/cc-seat %7"},
+		{"seat socket name", "/tmp/tmux-1000", seat, proxy(seatProxy, "socketName", "cc-other"), "<nil> present=true valid=false row=\"\" identity=\"\" MCP _meta.pfmProxy conflicts with live chat: socketName \"cc-other\" does not match live socket \"cc-seat\""},
+		{"seat socket path", "/tmp/tmux-1000", seat, proxy(seatProxy, "socketPath", "/tmp/tmux-1000/cc-other"), "<nil> present=true valid=false row=\"\" identity=\"\" MCP caller location disagrees with its live chat: payload  /tmp/tmux-1000/cc-other %7, row tmux /tmp/tmux-1000/cc-seat %7"},
+		{"seat engine", "/tmp/tmux-1000", seat, proxy(seatProxy, "engine", "codex"), "<nil> present=true valid=false row=\"\" identity=\"\" MCP _meta.pfmProxy conflicts with live chat: engine \"codex\" does not match live engine \"cc\""},
+		{"foreign namespace", "/jail/tmux-a", shared, proxy(map[string]any{
+			"session": "shared-session", "socketName": "ox-shared", "socketPath": "/jail/tmux-b/ox-shared",
+			"pane": "%2", "engine": "opencode",
+		}), "<nil> present=true valid=false row=\"\" identity=\"\" MCP caller location disagrees with its live chat: payload  /jail/tmux-b/ox-shared %2, row tmux /jail/tmux-a/ox-shared %2"},
+		{"split socket", "/tmp/tmux-1000", split, proxy(
+			splitProxy, "socketName", "cc-other", "socketPath", "/tmp/tmux-1000/cc-other",
+		), "<nil> present=true valid=false row=\"\" identity=\"\" MCP _meta.pfmProxy conflicts with live chat: socketName \"cc-other\" does not match live socket \"cc-split\"; socketPath \"/tmp/tmux-1000/cc-other\" does not match live socket path \"/tmp/tmux-1000/cc-split\""},
+		{"split socket pair", "/tmp/tmux-1000", split, proxy(splitProxy, "socketPath", "/tmp/tmux-1000/cc-other"), "<nil> present=true valid=false row=\"\" identity=\"\" MCP _meta.pfmProxy conflicts with live chat: socketPath \"/tmp/tmux-1000/cc-other\" does not match live socket path \"/tmp/tmux-1000/cc-split\""},
+		{"split engine", "/tmp/tmux-1000", split, proxy(splitProxy, "engine", "codex"), "<nil> present=true valid=false row=\"\" identity=\"\" MCP _meta.pfmProxy conflicts with live chat: engine \"codex\" does not match live engine \"cc\""},
+		{"no live match", "/tmp/tmux-1000", []compose.Row{
+			{SessionName: "missing-seat", Kind: compose.ResumeClaude},
+			{SessionName: "missing-seat", Kind: compose.LiveClaude, Killed: true},
+		}, proxy(missing), "<nil> present=true valid=false row=\"\" identity=\"\" MCP _meta.pfmProxy session \"missing-seat\" matched no live chat"},
+		{"several matches", "/tmp/tmux-1000", []compose.Row{
+			{SessionName: "missing-seat", Kind: compose.LiveClaude},
+			{SessionName: "missing-seat", Kind: compose.LiveOpenCode},
+		}, proxy(missing), "<nil> present=true valid=false row=\"\" identity=\"\" MCP _meta.pfmProxy session \"missing-seat\" matched 2 live chats"},
+	} {
+		current := &backend{paths: paths.Values{TmuxDir: test.tmux}, chat: &fakeChatVerbs{
+			listed: chat.ListResult{Rows: test.rows, Matched: len(test.rows)},
+		}}
+		caller, err := current.callerForRequest(context.Background(), mcp.Meta{"pfmProxy": test.proxy})
+		got := fmt.Sprintf("%v present=%t valid=%t row=%q identity=%q %s",
+			err, caller.present, caller.valid, caller.row.ID, caller.identity.ID, caller.detail)
+		if got != test.want {
+			t.Errorf("%s: caller = %q, want %q", test.name, got, test.want)
+		}
 	}
 }
 
@@ -206,7 +165,7 @@ func TestCallEngineForRequestKeepsSessionFallbackAndEngineAliases(t *testing.T) 
 		t.Fatal(err)
 	}
 	row := compose.Row{
-		SessionName: "oc-seat", ID: "opencode-id", CWD: "/work/opencode",
+		SessionName: "oc-seat", ID: "opencode-id", CWD: testjail.Place("/work/opencode"),
 		Kind: compose.LiveOpenCode, Socket: "ox-seat", PaneID: "%7",
 	}
 	tests := []struct {
@@ -290,7 +249,7 @@ func TestCallEngineForRequestSessionFallbackReachesResolvedSelf(t *testing.T) {
 		t.Fatal(err)
 	}
 	row := compose.Row{
-		SessionName: "oc-seat", ID: "opencode-id", CWD: "/work/opencode",
+		SessionName: "oc-seat", ID: "opencode-id", CWD: testjail.Place("/work/opencode"),
 		Kind: compose.LiveOpenCode, Socket: "ox-seat", PaneID: "%7",
 	}
 	current := &backend{
@@ -341,11 +300,11 @@ func TestCallEngineForRequestDisambiguatesSharedSessionByPane(t *testing.T) {
 	rows := []compose.Row{
 		{
 			SessionName: "shared-session", Socket: "ox-seat", PaneID: "%1",
-			ID: "first", CWD: "/work/first", Kind: compose.LiveOpenCode,
+			ID: "first", CWD: testjail.Place("/work/first"), Kind: compose.LiveOpenCode,
 		},
 		{
 			SessionName: "shared-session", Socket: "ox-seat", PaneID: "%2",
-			ID: "second", CWD: "/work/second", Kind: compose.LiveOpenCode,
+			ID: "second", CWD: testjail.Place("/work/second"), Kind: compose.LiveOpenCode,
 		},
 	}
 	current := &backend{
@@ -358,59 +317,8 @@ func TestCallEngineForRequestDisambiguatesSharedSessionByPane(t *testing.T) {
 			"socketPath": "/tmp/tmux-1000/ox-seat", "pane": "%2", "engine": "opencode",
 		},
 	})
-	if err != nil || !caller.valid || caller.row.ID != "second" || caller.row.Dir != "/work/second" {
+	if err != nil || !caller.valid || caller.row.ID != "second" || caller.row.Dir != testjail.Place("/work/second") {
 		t.Fatalf("shared-session caller = %+v err=%v, want only the addressed second pane", caller, err)
-	}
-}
-
-func TestCallEngineForRequestRejectsSplitProxyConflicts(t *testing.T) {
-	t.Parallel()
-	row := compose.Row{Kind: compose.LiveSplit, Socket: "cc-split"}
-	tests := []struct {
-		name       string
-		proxy      map[string]any
-		wantDetail string
-	}{
-		{
-			name: "socket",
-			proxy: map[string]any{
-				"v": ProxyWireVersion, "session": "renamed-split", "socketName": "cc-other",
-				"socketPath": "/tmp/tmux-1000/cc-other", "engine": "claude", "id": "second",
-			},
-			wantDetail: "socketName",
-		},
-		{
-			name: "socket pair",
-			proxy: map[string]any{
-				"v": ProxyWireVersion, "session": "renamed-split", "socketName": "cc-split",
-				"socketPath": "/tmp/tmux-1000/cc-other", "engine": "claude", "id": "second",
-			},
-			wantDetail: "socketPath",
-		},
-		{
-			name: "engine",
-			proxy: map[string]any{
-				"v": ProxyWireVersion, "session": "renamed-split", "socketName": "cc-split",
-				"socketPath": "/tmp/tmux-1000/cc-split", "engine": "codex", "id": "second",
-			},
-			wantDetail: "engine",
-		},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			current := &backend{paths: paths.Values{TmuxDir: "/tmp/tmux-1000"}, chat: &fakeChatVerbs{
-				listed: chat.ListResult{Rows: []compose.Row{row}, Matched: 1},
-			}}
-			caller, err := current.callerForRequest(context.Background(), mcp.Meta{"pfmProxy": test.proxy})
-			if err != nil || !caller.present || caller.valid || !strings.Contains(caller.detail, test.wantDetail) {
-				t.Fatalf(
-					"conflicting split caller = %+v err=%v, want refusal naming %q",
-					caller,
-					err,
-					test.wantDetail,
-				)
-			}
-		})
 	}
 }
 
@@ -430,12 +338,17 @@ func TestCallEngineForRequestNamesSplitTranscriptFailures(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := database.UpsertTranscript(context.Background(), store.Transcript{
-		UUID: "empty-cwd", Path: "/work/empty.jsonl",
+		UUID: "empty-cwd", Path: testjail.Place("/work/empty.jsonl"),
 	}); err != nil {
 		t.Fatal(err)
 	}
 	const socket = "cc-123-456-789"
-	row := compose.Row{Kind: compose.LiveSplit, Socket: socket, CWD: "/work/other-pane", Path: "/work/other-pane.jsonl"}
+	row := compose.Row{
+		Kind:   compose.LiveSplit,
+		Socket: socket,
+		CWD:    testjail.Place("/work/other-pane"),
+		Path:   testjail.Place("/work/other-pane.jsonl"),
+	}
 	current := &backend{
 		chat:     &fakeChatVerbs{listed: chat.ListResult{Rows: []compose.Row{row}, Matched: 1}},
 		database: database,
@@ -445,7 +358,7 @@ func TestCallEngineForRequestNamesSplitTranscriptFailures(t *testing.T) {
 		t.Helper()
 		if err := os.WriteFile(
 			filepath.Join(resolved.SIDDir, socket+".%1"),
-			[]byte("/work/"+transcriptID+".jsonl\n"),
+			[]byte(testjail.Place("/work/")+transcriptID+".jsonl\n"),
 			0o600,
 		); err != nil {
 			t.Fatal(err)
@@ -479,7 +392,7 @@ func TestCallEngineForRequestNamesSplitTranscriptFailures(t *testing.T) {
 		id, wantPath string
 	}{
 		{id: "missing"},
-		{id: "empty-cwd", wantPath: "/work/empty.jsonl"},
+		{id: "empty-cwd", wantPath: testjail.Place("/work/empty.jsonl")},
 	} {
 		t.Run(test.id, func(t *testing.T) {
 			caller := bind(t, test.id)
@@ -529,7 +442,10 @@ func TestCallEngineForRequestDisambiguatesSplitPaneProxyIdentity(t *testing.T) {
 		}
 	})
 	if err := database.UpsertTranscript(context.Background(), store.Transcript{
-		UUID: "second", Path: "/work/second.jsonl", CWD: "/work/second", CustomTitle: "Second pane",
+		UUID:        "second",
+		Path:        testjail.Place("/work/second.jsonl"),
+		CWD:         testjail.Place("/work/second"),
+		CustomTitle: "Second pane",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -543,8 +459,20 @@ func TestCallEngineForRequestDisambiguatesSplitPaneProxyIdentity(t *testing.T) {
 	}
 	composed := compose.Compose(compose.Input{
 		Transcripts: []store.Transcript{
-			{UUID: "first", Path: "/work/first.jsonl", CWD: "/work/first", Size: 100, PromptCount: 1},
-			{UUID: "second", Path: "/work/second.jsonl", CWD: "/work/second", Size: 100, PromptCount: 1},
+			{
+				UUID:        "first",
+				Path:        testjail.Place("/work/first.jsonl"),
+				CWD:         testjail.Place("/work/first"),
+				Size:        100,
+				PromptCount: 1,
+			},
+			{
+				UUID:        "second",
+				Path:        testjail.Place("/work/second.jsonl"),
+				CWD:         testjail.Place("/work/second"),
+				Size:        100,
+				PromptCount: 1,
+			},
 		},
 		Snapshot: gather.Snapshot{
 			Panes: []gather.ProbePane{
@@ -552,8 +480,18 @@ func TestCallEngineForRequestDisambiguatesSplitPaneProxyIdentity(t *testing.T) {
 				{Socket: socket, PaneID: "%2", SessionName: "renamed-split"},
 			},
 			Crumbs: []gather.Crumb{
-				{Filename: socket + ".%1", Socket: socket, PaneID: "%1", TranscriptPath: "/work/first.jsonl"},
-				{Filename: socket + ".%2", Socket: socket, PaneID: "%2", TranscriptPath: "/work/second.jsonl"},
+				{
+					Filename:       socket + ".%1",
+					Socket:         socket,
+					PaneID:         "%1",
+					TranscriptPath: testjail.Place("/work/first.jsonl"),
+				},
+				{
+					Filename:       socket + ".%2",
+					Socket:         socket,
+					PaneID:         "%2",
+					TranscriptPath: testjail.Place("/work/second.jsonl"),
+				},
 			},
 		},
 		Options: compose.Options{View: compose.AllView},
@@ -564,7 +502,7 @@ func TestCallEngineForRequestDisambiguatesSplitPaneProxyIdentity(t *testing.T) {
 	}
 	composed.Rows = append(composed.Rows, compose.Row{
 		SessionName: "renamed-split", Socket: "oc-other", PaneID: "%9",
-		ID: "other", CWD: "/work/other", Kind: compose.LiveOpenCode,
+		ID: "other", CWD: testjail.Place("/work/other"), Kind: compose.LiveOpenCode,
 	})
 	verbs := &fakeChatVerbs{listed: chat.ListResult{Rows: composed.Rows, Matched: len(composed.Rows)}}
 	current := &backend{chat: verbs, database: database, paths: resolved}
@@ -577,7 +515,7 @@ func TestCallEngineForRequestDisambiguatesSplitPaneProxyIdentity(t *testing.T) {
 	})
 	if err != nil || !caller.valid || caller.row.Session != "renamed-split" ||
 		caller.row.Kind != compose.LiveSplit.String() ||
-		caller.row.Dir != "/work/second" || caller.row.Name != "Second pane" ||
+		caller.row.Dir != testjail.Place("/work/second") || caller.row.Name != "Second pane" ||
 		caller.identity.Pane != "%2" || caller.identity.ID != "second" {
 		t.Fatalf("split-pane proxy caller = %+v err=%v, want the supplied pane's exact context", caller, err)
 	}
@@ -601,9 +539,9 @@ func TestReviewSplitCallerRejectsUnrelatedTranscript(t *testing.T) {
 		id  string
 		cwd string
 	}{
-		{id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", cwd: "/work/a"},
-		{id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", cwd: "/work/b"},
-		{id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", cwd: "/work/c"},
+		{id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", cwd: testjail.Place("/work/a")},
+		{id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", cwd: testjail.Place("/work/b")},
+		{id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", cwd: testjail.Place("/work/c")},
 	} {
 		if err := database.UpsertTranscript(context.Background(), store.Transcript{
 			UUID: item.id, Path: filepath.Join(root, item.id+".jsonl"), CWD: item.cwd,
@@ -632,6 +570,7 @@ func TestReviewSplitCallerRejectsUnrelatedTranscript(t *testing.T) {
 			Rows: []compose.Row{{Kind: compose.LiveSplit, Socket: socket}}, Matched: 1,
 		}},
 	}
+	got := ""
 	for _, transcriptID := range []string{
 		"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
 		"cccccccc-cccc-4ccc-8ccc-cccccccccccc",
@@ -645,9 +584,14 @@ func TestReviewSplitCallerRejectsUnrelatedTranscript(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if caller.valid || !caller.present || !strings.Contains(caller.detail, "pane") {
-			t.Fatalf("unrelated split caller = %+v, want present-invalid exact-pane refusal", caller)
-		}
+		got += fmt.Sprintf("present=%t valid=%t %s\n", caller.present, caller.valid, caller.detail)
+	}
+	if got, want := strings.ReplaceAll(
+		got,
+		root,
+		"{root}",
+	), "present=true valid=false MCP _meta.pfmProxy split pane \"%2\" is bound to transcript \"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\", not \"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\"\npresent=true valid=false MCP _meta.pfmProxy split pane \"%2\" is bound to transcript \"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\", not \"cccccccc-cccc-4ccc-8ccc-cccccccccccc\"\n"; got != want {
+		t.Fatalf("unrelated split callers = %q, want %q", got, want)
 	}
 }
 
@@ -707,11 +651,11 @@ func TestCallEngineForRequestRefusesStaleProxySession(t *testing.T) {
 	rows := []compose.Row{
 		{
 			SessionName: "stale-session", Socket: "oc-seat", PaneID: "%1",
-			ID: "first", CWD: "/work/first", Kind: compose.LiveOpenCode,
+			ID: "first", CWD: testjail.Place("/work/first"), Kind: compose.LiveOpenCode,
 		},
 		{
 			SessionName: "stale-session", Socket: "oc-seat", PaneID: "%2",
-			ID: "second", CWD: "/work/second", Kind: compose.LiveOpenCode,
+			ID: "second", CWD: testjail.Place("/work/second"), Kind: compose.LiveOpenCode,
 		},
 	}
 	current := &backend{
@@ -788,46 +732,6 @@ func TestCallEngineForRequestFallsBackToMatchedIDWhenProxyOmitsIt(t *testing.T) 
 	}
 }
 
-func TestCallEngineForRequestNamesProxyNoMatchAndAmbiguity(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name   string
-		rows   []compose.Row
-		detail string
-	}{
-		{
-			name: "no live match",
-			rows: []compose.Row{
-				{SessionName: "missing-seat", Kind: compose.ResumeClaude},
-				{SessionName: "missing-seat", Kind: compose.LiveClaude, Killed: true},
-			},
-			detail: `session "missing-seat" matched no live chat`,
-		},
-		{
-			name: "several matches",
-			rows: []compose.Row{
-				{SessionName: "missing-seat", Kind: compose.LiveClaude},
-				{SessionName: "missing-seat", Kind: compose.LiveOpenCode},
-			},
-			detail: `session "missing-seat" matched 2 live chats`,
-		},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			current := &backend{
-				paths: paths.Values{TmuxDir: "/tmp/tmux-1000"},
-				chat:  &fakeChatVerbs{listed: chat.ListResult{Rows: test.rows, Matched: len(test.rows)}},
-			}
-			caller, err := current.callerForRequest(context.Background(), mcp.Meta{
-				"pfmProxy": map[string]any{"v": ProxyWireVersion, "session": "missing-seat"},
-			})
-			if err != nil || !caller.present || caller.valid || !strings.Contains(caller.detail, test.detail) {
-				t.Fatalf("caller = %+v err=%v, want present invalid detail containing %q", caller, err, test.detail)
-			}
-		})
-	}
-}
-
 // A listing failure is a present caller that did not bind, named and never
 // absent: self targets refuse with it and explicit targets go on. Only an
 // unsupported wire version fails the request.
@@ -880,7 +784,7 @@ func TestCallEngineForRequestMarksMalformedProxyPresent(t *testing.T) {
 func TestProxyIdentityReachesCallerBoundTools(t *testing.T) {
 	t.Parallel()
 	row := compose.Row{
-		SessionName: "cc-seat", ID: "session-id", CWD: "/work/proxy", Project: "proxy",
+		SessionName: "cc-seat", ID: "session-id", CWD: testjail.Place("/work/proxy"), Project: "proxy",
 		Name: "Proxy Claude", Kind: compose.LiveClaude, Socket: "cc-seat", PaneID: "%7",
 	}
 	verbs := &fakeChatVerbs{
@@ -916,7 +820,9 @@ func TestProxyIdentityReachesCallerBoundTools(t *testing.T) {
 		t.Fatalf("proxied last = %+v, verb calls = %+v", last, verbs.lasts)
 	}
 	created := callToolWithMeta[ActionOutput](t, protocol.clientSession, "new", meta, NewInput{Name: "child"})
-	wantCalls := [][]string{{"chat", "new", "--name", "child", "--engine", "cc", "--cwd", "/work/proxy"}}
+	wantCalls := [][]string{
+		{"chat", "new", "--name", "child", "--engine", "cc", "--cwd", testjail.Place("/work/proxy")},
+	}
 	if created.Status != "ok" || !reflect.DeepEqual(calls, wantCalls) {
 		t.Fatalf("proxied new = %+v, dispatch calls = %q", created, calls)
 	}

@@ -11,6 +11,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/professor"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
@@ -39,12 +40,28 @@ func workbenchInput(t *testing.T) Input {
 	}
 	return Input{
 		Workbenches: benches,
-		ClaudeSeats: []ClaudeSeat{{Account: 2, ConfigDir: "/accounts/2"}},
-		Options:     Options{View: AllView, PrimaryAccount: 2, CurrentDir: "/elsewhere"},
+		ClaudeSeats: []ClaudeSeat{{Account: 2, ConfigDir: testjail.Place("/accounts/2")}},
+		Options:     Options{View: AllView, PrimaryAccount: 2, CurrentDir: testjail.Place("/elsewhere")},
 		Transcripts: []store.Transcript{
-			transcript("A", "/accounts/2/projects/A.jsonl", filepath.Join(root, "src"), "A", 10, 1, 900),
-			transcript("L1", "/accounts/2/projects/L1.jsonl", filepath.Join(scribe, "notes"), "L1", 10, 1, 950),
-			transcript("Z", "/accounts/2/projects/Z.jsonl", zeta, "Z", 10, 1, 1000),
+			transcript(
+				"A",
+				testjail.Place("/accounts/2/projects/A.jsonl"),
+				filepath.Join(root, "src"),
+				"A",
+				10,
+				1,
+				900,
+			),
+			transcript(
+				"L1",
+				testjail.Place("/accounts/2/projects/L1.jsonl"),
+				filepath.Join(scribe, "notes"),
+				"L1",
+				10,
+				1,
+				950,
+			),
+			transcript("Z", testjail.Place("/accounts/2/projects/Z.jsonl"), zeta, "Z", 10, 1, 1000),
 		},
 	}
 }
@@ -182,7 +199,11 @@ func TestWorkbenchKilledView(t *testing.T) {
 	input := workbenchInput(t)
 	input.Options.View = KilledView
 	input.WorkbenchErrors = []workbench.WalkError{
-		{Root: input.Workbenches[0].Root, Path: "/work/acme/docs/locked", Err: errors.New("permission denied")},
+		{
+			Root: input.Workbenches[0].Root,
+			Path: testjail.Place("/work/acme/docs/locked"),
+			Err:  errors.New("permission denied"),
+		},
 	}
 	for _, row := range Compose(input).Rows {
 		if isNewChatKind(row.Kind) || row.Kind == WorkbenchInvalid {
@@ -196,7 +217,7 @@ func TestWorkbenchWalkError(t *testing.T) {
 	input.Workbenches = nil
 	fault := workbench.WalkError{
 		Root: filepath.Dir(input.Transcripts[0].CWD),
-		Path: "/work/acme/docs/locked",
+		Path: testjail.Place("/work/acme/docs/locked"),
 		Err:  errors.New("permission denied"),
 	}
 	input.WorkbenchErrors = []workbench.WalkError{fault}
@@ -245,7 +266,7 @@ func TestWorkbenchNestedManagedRootJoinsRepositoryFamily(t *testing.T) {
 	input.Workbenches = benches
 	input.WorkbenchErrors = nil
 	input.Transcripts = []store.Transcript{
-		transcript("A", "/accounts/2/projects/A.jsonl", repo, "A", 10, 1, 900),
+		transcript("A", testjail.Place("/accounts/2/projects/A.jsonl"), repo, "A", 10, 1, 900),
 	}
 	output := Compose(input)
 	wantOrder := []string{"acme", "acme › Scribe"}
@@ -318,8 +339,18 @@ func TestWorkbenchTwoClonesKeepOneGroupPerBench(t *testing.T) {
 			}
 		}
 		roots = append(roots, repo)
-		transcripts = append(transcripts,
-			transcript(parent, "/accounts/2/projects/"+parent+".jsonl", filepath.Join(repo, "src"), parent, 10, 1, 900))
+		transcripts = append(
+			transcripts,
+			transcript(
+				parent,
+				testjail.Place("/accounts/2/projects/")+parent+".jsonl",
+				filepath.Join(repo, "src"),
+				parent,
+				10,
+				1,
+				900,
+			),
+		)
 	}
 	benches, walkErrors := workbench.Discover(roots)
 	if len(walkErrors) != 0 || len(benches) != 2 {

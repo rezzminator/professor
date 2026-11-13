@@ -108,7 +108,7 @@ func TestResolveNoFlickerReportsAccountSettings(t *testing.T) {
 	}{
 		{name: "fullscreen", settings: `{"tui":"fullscreen"}`, want: "true"},
 		{name: "absent file", want: "false"},
-		{name: "invalid json", settings: `{"tui":`, want: "settings.json"},
+		{name: "invalid json", settings: `{"tui":`, want: "parse {config}/settings.json: unexpected end of JSON input"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			_, machine := renderMachine(t)
@@ -117,8 +117,13 @@ func TestResolveNoFlickerReportsAccountSettings(t *testing.T) {
 				if row.Knob.Name != knobNoFlicker {
 					continue
 				}
-				if !strings.Contains(row.Value, test.want) || row.Won != "account" {
-					t.Fatalf("noFlicker row = %q won %q, want %q from account", row.Value, row.Won, test.want)
+				if got := strings.ReplaceAll(
+					row.Value,
+					machine.Accounts[1].ConfigDir,
+					"{config}",
+				); got != test.want ||
+					row.Won != "account" {
+					t.Fatalf("noFlicker row = %q, want %q (won %q)", got, test.want, row.Won)
 				}
 				return
 			}

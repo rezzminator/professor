@@ -217,8 +217,8 @@ func TestBufferedWarningsDeduplicateRepeatedRefreshFailures(t *testing.T) {
 
 	var output bytes.Buffer
 	warnings.flush(&output)
-	if got := strings.Count(output.String(), "same failure"); got != 1 {
-		t.Fatalf("same warning printed %d times, want once: %q", got, output.String())
+	if got, want := output.String(), "pfm: tmux probe warning: same failure\n"; got != want {
+		t.Fatalf("flushed warnings = %q, want %q", got, want)
 	}
 }
 

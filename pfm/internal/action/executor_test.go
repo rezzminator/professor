@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -246,9 +247,13 @@ func TestOpenStartsPaneWhenLaunchRecordFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tmux.created) != 1 ||
-		!strings.Contains(stderr.String(), "pfm: record launch 00000000-0000-4000-8000-000000000004:") {
-		t.Fatalf("pane=%d stderr=%q", len(tmux.created), stderr.String())
+	if got, want := strings.ReplaceAll(
+		stderr.String(),
+		root,
+		"{root}",
+	), "pfm: record launch 00000000-0000-4000-8000-000000000004: record launch 00000000-0000-4000-8000-000000000004: open shared state database: read sqlite database marker {root}: read {root}: is a directory\npfm: tmux picker chat exists; seat registration failed: write seat \"cc-record-error\": open shared state database: read sqlite database marker {root}: read {root}: is a directory\n"; len(tmux.created) != 1 ||
+		got != want {
+		t.Errorf("pane=%d stderr = %q, want %q", len(tmux.created), got, want)
 	}
 }
 
@@ -798,7 +803,7 @@ func TestSelfSwitchLogsAListPanesFailure(t *testing.T) {
 	if !executor.SelfSwitch(ctx, "/tmp/jail/cc-unreadable,1,0", "cc-unreadable") {
 		t.Fatal("SelfSwitch() did not recognize its own socket")
 	}
-	if !strings.Contains(stderr.String(), "refusing to nest") {
+	if stderr.String() != "pfm: already inside this chat's tmux — refusing to nest it inside itself; switch windows yourself (prefix + w)\n" {
 		t.Fatalf("stderr = %q, want the refuse-to-nest message", stderr.String())
 	}
 	found := false
@@ -945,12 +950,11 @@ func TestOpenCodexRequiresLogin(t *testing.T) {
 					t.Fatalf("live self-switch line=%q error=%v selected=%v", line, err, tmux.selected)
 				}
 			} else {
-				// the refusal's own text is CodexLoginError's (TestCodexLoginError); the door owns its prefix and home
-				want := "Codex account 1: " + authPath + " "
-				if !errors.Is(err, pfmconfig.ErrCodexLoggedOut) || !strings.HasPrefix(err.Error(), want) ||
+				want := map[string]string{"new missing auth": "Codex account 1: {root}/002/.codex/auth.json must contain tokens.access_token with tokens.account_id, or OPENAI_API_KEY — run codex login", "resume empty auth": "Codex account 1: {root}/002/.codex/auth.json must contain tokens.access_token with tokens.account_id, or OPENAI_API_KEY — run codex login"}[name]
+				if got := rooted(t, fmt.Sprint(err)); !errors.Is(err, pfmconfig.ErrCodexLoggedOut) || got != want ||
 					line != "" || len(tmux.created) != 0 || heals != 0 {
-					t.Fatalf("Open line=%q error=%v created=%d heals=%d; want %q before effects",
-						line, err, len(tmux.created), heals, want)
+					t.Errorf("Open line=%q created=%d heals=%d error = %q, want %q before effects",
+						line, len(tmux.created), heals, got, want)
 				}
 			}
 		})

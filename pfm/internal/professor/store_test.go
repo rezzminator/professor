@@ -3,6 +3,7 @@ package professor
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,7 +22,8 @@ func TestStoreSHAWithRunnerUsesScriptedGit(t *testing.T) {
 		t.Fatal(err)
 	}
 	fake := &deps.FakeRunner{}
-	binary := deps.Executable("git")
+	binary := "scripted-git"
+	fake.ScriptLookPath("git", binary, nil)
 	fake.Script([]string{binary, "rev-parse", "--short", "HEAD"}, deps.RunResult{Stdout: []byte("scripted-sha\n")}, nil)
 	got, err := storeSHAWithRunner(root, fake)
 	if err != nil {
@@ -46,33 +48,41 @@ func TestStoreSHAWithRunnerReportsGitExitAndStartFailures(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(root, ".git"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	binary := deps.Executable("git")
+	binary := "scripted-git"
 
 	t.Run("nonzero exit", func(t *testing.T) {
 		fake := &deps.FakeRunner{}
+		fake.ScriptLookPath("git", binary, nil)
 		fake.Script(
 			[]string{binary, "rev-parse", "--short", "HEAD"},
 			deps.RunResult{ExitCode: 128, Stderr: []byte("fatal: no HEAD\n")},
 			nil,
 		)
 		_, err := storeSHAWithRunner(root, fake)
-		if err == nil || !strings.Contains(err.Error(), "status 128") ||
-			!strings.Contains(err.Error(), "fatal: no HEAD") {
-			t.Fatalf("storeSHAWithRunner() error = %v, want exit status and stderr", err)
+		if got, want := strings.ReplaceAll(
+			fmt.Sprint(err),
+			root,
+			"{root}",
+		), "UNREADABLE blueprint git state {root}: git exited with status 128: fatal: no HEAD"; got != want {
+			t.Fatalf("storeSHAWithRunner() error = %q, want %q", got, want)
 		}
 	})
 
 	t.Run("start failure", func(t *testing.T) {
 		fake := &deps.FakeRunner{}
+		fake.ScriptLookPath("git", binary, nil)
 		fake.Script(
 			[]string{binary, "rev-parse", "--short", "HEAD"},
 			deps.RunResult{ExitCode: -1},
 			errors.New("git unavailable"),
 		)
 		_, err := storeSHAWithRunner(root, fake)
-		if err == nil || !strings.Contains(err.Error(), "UNREADABLE blueprint git state") ||
-			!strings.Contains(err.Error(), "git unavailable") {
-			t.Fatalf("storeSHAWithRunner() error = %v, want start failure context", err)
+		if got, want := strings.ReplaceAll(
+			fmt.Sprint(err),
+			root,
+			"{root}",
+		), "UNREADABLE blueprint git state {root}: git unavailable: "; got != want {
+			t.Fatalf("storeSHAWithRunner() error = %q, want %q", got, want)
 		}
 	})
 }
@@ -88,7 +98,8 @@ func TestStoreSHAWithRunnerPassesFenceGitEnvironment(t *testing.T) {
 	t.Setenv(pfmpaths.EnvDevRepoGitDir, gitDir)
 
 	fake := &deps.FakeRunner{}
-	binary := deps.Executable("git")
+	binary := "scripted-git"
+	fake.ScriptLookPath("git", binary, nil)
 	fake.Script(
 		[]string{binary, "rev-parse", "--short", "HEAD"},
 		deps.RunResult{Stdout: []byte("fenced-sha\n")},
@@ -128,7 +139,8 @@ func TestStoreSHAWithRunnerPassesFenceGitEnvironment(t *testing.T) {
 func TestAdoptGitFiltersInheritedRepository(t *testing.T) {
 	t.Setenv("GIT_DIR", "/foreign/.git")
 	fake := &deps.FakeRunner{}
-	fake.Script([]string{deps.Executable("git"), "rev-parse", "HEAD"}, deps.RunResult{Stdout: []byte("sha\n")}, nil)
+	fake.ScriptLookPath("git", "scripted-git", nil)
+	fake.Script([]string{"scripted-git", "rev-parse", "HEAD"}, deps.RunResult{Stdout: []byte("sha\n")}, nil)
 	root := t.TempDir()
 	if _, _, err := adoptGit(fake, root, "rev-parse", "HEAD"); err != nil {
 		t.Fatal(err)
@@ -195,9 +207,12 @@ func TestHashTemplateNamesUnreadableFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := HashTemplate(path)
-	if err == nil || !strings.Contains(err.Error(), "UNREADABLE") ||
-		!strings.Contains(err.Error(), "permission denied") {
-		t.Fatalf("HashTemplate() error = %v, want UNREADABLE with OS error", err)
+	if got, want := strings.ReplaceAll(
+		fmt.Sprint(err),
+		filepath.Dir(path),
+		"{dir}",
+	), "UNREADABLE {dir}/template.md: read {dir}/template.md: permission denied"; got != want {
+		t.Fatalf("HashTemplate() error = %q, want %q", got, want)
 	}
 }
 
@@ -319,7 +334,9 @@ func TestStoreSHAWithRunnerBoundsItsGitProbe(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(root, ".git"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	runner := &boundedStoreRunner{}
+	fake := &deps.FakeRunner{}
+	fake.ScriptLookPath("git", "scripted-git", nil)
+	runner := &boundedStoreRunner{Runner: fake}
 	sha, err := storeSHAWithRunner(root, runner)
 	if err != nil || sha != "scripted-sha" || !runner.bounded {
 		t.Fatalf(

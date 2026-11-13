@@ -109,13 +109,12 @@ func TestNoWebGLCustomGlyphsInRenderedOutput(t *testing.T) {
 // Exempt only inbound recognizer literals, never output in the same file.
 func TestWebGLGlyphGuardRecognizersAndOutput(t *testing.T) {
 	for _, test := range []struct {
-		name, path, source string
-		findings           int
+		name, path, source, want string
 	}{
-		{"recognizer", "internal/call/herdr_opencode.go", `package call; func capture(s string) bool { return strings.HasPrefix(s, "╹▀") }`, 0},
-		{"same file output", "internal/call/herdr_opencode.go", `package call; func render() { fmt.Print("╹▀") }`, 1},
-		{"escaped output", "internal/call/herdr_opencode.go", `package call; func render() { fmt.Print("\u2580") }`, 1},
-		{"unclassified recognizer", "other.go", `package call; func capture(s string) bool { return strings.HasPrefix(s, "╹▀") }`, 1},
+		{"recognizer", "internal/call/herdr_opencode.go", `package call; func capture(s string) bool { return strings.HasPrefix(s, "╹▀") }`, "[]"},
+		{"same file output", "internal/call/herdr_opencode.go", `package call; func render() { fmt.Print("╹▀") }`, "[\"internal/call/herdr_opencode.go:1 '▀' U+2580 (Block Elements)\"]"},
+		{"escaped output", "internal/call/herdr_opencode.go", `package call; func render() { fmt.Print("\u2580") }`, "[\"internal/call/herdr_opencode.go:1 '▀' U+2580 (Block Elements)\"]"},
+		{"unclassified recognizer", "other.go", `package call; func capture(s string) bool { return strings.HasPrefix(s, "╹▀") }`, "[\"other.go:1 '▀' U+2580 (Block Elements)\"]"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			root := t.TempDir()
@@ -126,12 +125,8 @@ func TestWebGLGlyphGuardRecognizersAndOutput(t *testing.T) {
 			if err := os.WriteFile(path, []byte(test.source), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			findings := scanGoLiterals(t, root, path)
-			if len(findings) != test.findings {
-				t.Fatalf("findings=%v, want %d", findings, test.findings)
-			}
-			if test.findings != 0 && !strings.Contains(findings[0], "U+2580") {
-				t.Fatalf("output finding lost glyph identity: %v", findings)
+			if got := rooted(fmt.Sprintf("%q", scanGoLiterals(t, root, path)), root); got != test.want {
+				t.Fatalf("findings = %q, want %q", got, test.want)
 			}
 		})
 	}

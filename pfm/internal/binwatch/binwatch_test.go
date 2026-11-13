@@ -120,8 +120,12 @@ func TestWatchExecutableNeverRestartsOntoAMissingBinary(t *testing.T) {
 	}
 	cancel()
 	time.Sleep(2 * watchTick)
-	if got := stderr.String(); strings.Count(got, "cannot stat own executable") != 1 {
-		t.Fatalf("stderr = %q, want the unreadable executable said once", got)
+	if got, want := strings.ReplaceAll(
+		stderr.String(),
+		binary,
+		"{binary}",
+	), "pfm mcp serve: cannot stat own executable {binary} (stat {binary}: no such file or directory); still serving the build it started on\n"; got != want {
+		t.Fatalf("stderr = %q, want %q", got, want)
 	}
 }
 

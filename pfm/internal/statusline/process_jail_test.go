@@ -1,13 +1,12 @@
 //go:build jail
 
-// Subject: the real Codex App Server child (a re-exec of the test binary and shell scripts) over the JSON-RPC pipes.
-
 package statusline
 
 import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -71,11 +70,10 @@ exit 2
 	if err != nil {
 		t.Fatalf("second App Server read: %v", err)
 	}
-	if !strings.Contains(string(first), firstHome) || strings.Contains(string(first), secondHome) {
-		t.Fatalf("first response leaked CODEX_HOME: %s", first)
-	}
-	if !strings.Contains(string(second), secondHome) || strings.Contains(string(second), firstHome) {
-		t.Fatalf("second response leaked CODEX_HOME: %s", second)
+	got := strings.NewReplacer(firstHome, "{first}", secondHome, "{second}").
+		Replace(string(first) + "\n" + string(second))
+	if want := "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"rateLimits\":{\"planType\":\"{first}\",\"primary\":{\"usedPercent\":10}}}}\n\n{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"rateLimits\":{\"planType\":\"{second}\",\"primary\":{\"usedPercent\":10}}}}\n"; got != want {
+		t.Fatalf("responses = %q, want %q", got, want)
 	}
 }
 
@@ -115,13 +113,18 @@ exit 2
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !strings.Contains(string(raw), "PFM_PROBE_KEEP=kept") {
-				t.Fatalf("the App Server lost an unrelated variable: %s", raw)
+			env := map[string]string{}
+			for _, line := range strings.Split(string(raw), "\n") {
+				name, value, _ := strings.Cut(line, "=")
+				env[name] = value
 			}
-			for _, name := range []string{"HERDR_ENV", "HERDR_PANE_ID", "HERDR_SOCKET_PATH", "HERDR_BIN_PATH"} {
-				if strings.Contains("\n"+string(raw), "\n"+name+"=") {
-					t.Errorf("%s reached the App Server: %s", name, raw)
-				}
+			got := ""
+			for _, name := range []string{"PFM_PROBE_KEEP", "HERDR_ENV", "HERDR_PANE_ID", "HERDR_SOCKET_PATH", "HERDR_BIN_PATH"} {
+				value, set := env[name]
+				got += fmt.Sprintf("%s=%q/%t ", name, value, set)
+			}
+			if want := `PFM_PROBE_KEEP="kept"/true HERDR_ENV=""/false HERDR_PANE_ID=""/false HERDR_SOCKET_PATH=""/false HERDR_BIN_PATH=""/false `; got != want {
+				t.Fatalf("App Server environment = %q, want %q", got, want)
 			}
 		})
 	}
@@ -138,8 +141,10 @@ while IFS= read -r line; do
 done
 `)
 	_, err := readCodexRateLimitsCommand(context.Background(), command)
-	if err == nil || !strings.Contains(err.Error(), "no id=1 response") {
-		t.Fatalf("wrong-id App Server response error=%v, want named missing id=1 failure", err)
+	if got, want := fmt.Sprint(
+		err,
+	), "command from App Server returned no id=1 response: wait=<nil> stderr="; got != want {
+		t.Fatalf("wrong-id App Server response error = %q, want %q", got, want)
 	}
 }
 
@@ -183,4 +188,15 @@ func TestCodexAppServerFixture(t *testing.T) {
 	)
 	time.Sleep(10 * time.Second)
 	os.Exit(0)
+}
+
+// TestReadCodexRateLimitsNamesAMissingBinary: a Codex binary absent from
+// PATH fails at resolution with its name, never as a later exec error.
+func TestReadCodexRateLimitsNamesAMissingBinary(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	_, err := ReadCodexRateLimitsWithBinaryAtHome(context.Background(), "codex", "")
+	want := `resolve Codex binary "codex": exec: "codex": executable file not found in $PATH`
+	if err == nil || err.Error() != want {
+		t.Fatalf("ReadCodexRateLimitsWithBinaryAtHome() error = %v, want %q", err, want)
+	}
 }

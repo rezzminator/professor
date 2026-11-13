@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -61,8 +62,8 @@ func TestInternalSeatHostDispatch(t *testing.T) {
 	jailTest(t)
 	var stdout, stderr bytes.Buffer
 	code := run([]string{"internal", "seat-host"}, &stdout, &stderr)
-	if code != 1 || !strings.Contains(stderr.String(), "pfm internal seat-host: expected one seat id") {
-		t.Fatalf("seat-host code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	if want := "pfm internal seat-host: expected one seat id\n"; code != 1 || stderr.String() != want {
+		t.Fatalf("seat-host code=%d stdout=%q stderr = %q, want %q", code, stdout.String(), stderr.String(), want)
 	}
 }
 
@@ -86,17 +87,18 @@ func TestChatNameNativeDeliveryConvergesWithoutTmuxWindow(t *testing.T) {
 }
 
 func TestReservedSeatLabel(t *testing.T) {
+	var got strings.Builder
 	for _, label := range []string{"seat:child", "SeAt:child"} {
 		for _, args := range [][]string{
 			{"chat", "new", "--name", label, "--backend", "invalid"},
 			{"chat", "name", "missing", label},
 		} {
 			var out, stderr bytes.Buffer
-			code := run(args, &out, &stderr)
-			if code != 2 || !strings.Contains(stderr.String(), "reserved for durable seat handles") {
-				t.Errorf("%v: code=%d stderr=%s", args, code, &stderr)
-			}
+			fmt.Fprintf(&got, "%d %s", run(args, &out, &stderr), &stderr)
 		}
+	}
+	if want := "2 pfm chat new: label \"seat:child\" is reserved for durable seat handles\n2 pfm chat name: label \"seat:child\" is reserved for durable seat handles\n2 pfm chat new: label \"SeAt:child\" is reserved for durable seat handles\n2 pfm chat name: label \"SeAt:child\" is reserved for durable seat handles\n"; got.String() != want {
+		t.Errorf("reserved labels = %q, want %q", got.String(), want)
 	}
 }
 

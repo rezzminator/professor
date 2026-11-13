@@ -606,7 +606,7 @@ func claudeCodeVersion(ctx context.Context, binary string) (string, error) {
 	if binary == "" {
 		binary = pfmengine.MustLookup(pfmengine.Claude).Binary
 	}
-	path, err := deps.Resolve(binary)
+	path, err := usageRunner.LookPath(binary)
 	if err != nil {
 		return "", fmt.Errorf("resolve Claude Code binary %q: %w", binary, err)
 	}

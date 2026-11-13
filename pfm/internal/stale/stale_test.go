@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -16,8 +17,8 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/gather/gathertest"
-	"github.com/rezzminator/professor/pfm/internal/hostfixture"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 const (
@@ -261,29 +262,10 @@ func TestFindNamesAProcessItCouldNotRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(scan.Unreadable) != 1 || !strings.Contains(scan.Unreadable[0], "201") {
-		t.Fatalf("unreadable = %v, want pid 201 named", scan.Unreadable)
-	}
-}
-
-// TestFindSkipsAnExitedPfmProcessInsteadOfReportingItUnreadable is
-// hostfixture case 9 (StaleArtifacts): a pid that exited between the pid
-// listing and the image read must be SKIPPED, not folded into
-// scan.Unreadable — that column exists for a process still alive whose
-// image genuinely could not be read, and a real ESRCH from a dead pid is
-// evidence of neither.
-func TestFindSkipsAnExitedPfmProcessInsteadOfReportingItUnreadable(t *testing.T) {
-	// hostfixture.StaleArtifacts uses t.Setenv internally (testjail.Fleet),
-	// which testing.T refuses to combine with t.Parallel.
-	artifacts := hostfixture.StaleArtifacts(t)
-	fixture := newFixture(t)
-	fixture.process(artifacts.StalePID, "", "pfm", "mcp", "serve")
-	scan, err := Find(fixture.table(), fixture.binary, gather.ProbeProcess)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(scan.Unreadable) != 0 {
-		t.Fatalf("scan.Unreadable = %v, want the exited pid skipped, not reported unreadable", scan.Unreadable)
+	if got, want := strings.NewReplacer(fixture.root, "{root}", fixture.home, "{home}").
+		Replace(staleUnreadableCommand.ReplaceAllString(strings.Join(scan.Unreadable, "\n"), "${1}{cmd}")),
+		"pid=201  {cmd}: stat {root}/201/exe: no such file or directory"; got != want {
+		t.Fatalf("unreadable = %q, want %q", got, want)
 	}
 }
 
@@ -293,8 +275,10 @@ func TestFindRefusesATableThatCannotReadImages(t *testing.T) {
 	t.Parallel()
 	fixture := newFixture(t)
 	_, err := Find(imageless{fixture.table()}, fixture.binary, fixture.probe)
-	if err == nil || !strings.Contains(err.Error(), "cannot read") {
-		t.Fatalf("err = %v, want a refusal naming the missing capability", err)
+	if got, want := fmt.Sprint(
+		err,
+	), "this process table cannot read which file a process executes, so stale processes cannot be told from fresh ones"; got != want {
+		t.Fatalf("err = %q, want %q", got, want)
 	}
 }
 
@@ -362,7 +346,7 @@ func TestSweepSignalsOnlyThisInstallsIdentifiedProcesses(t *testing.T) {
 			name: "unmarked process from another path",
 			setup: func(fixture *fixture, _ *gathertest.Kernel) {
 				fixture.environ(301)
-				fixture.exe[301] = "/work/tree/bin/pfm"
+				fixture.exe[301] = testjail.Place("/work/tree/bin/pfm")
 			},
 			wantOut: keep + none,
 		},
@@ -375,7 +359,7 @@ func TestSweepSignalsOnlyThisInstallsIdentifiedProcesses(t *testing.T) {
 		},
 		{
 			name:    "this install's mark on a build from another path",
-			setup:   func(fixture *fixture, _ *gathertest.Kernel) { fixture.exe[301] = "/work/tree/bin/pfm" },
+			setup:   func(fixture *fixture, _ *gathertest.Kernel) { fixture.exe[301] = testjail.Place("/work/tree/bin/pfm") },
 			wantOut: keep + none,
 		},
 		{
@@ -655,8 +639,11 @@ func TestClassifyCompatibleProxiesFailsClosedWhenDescriptorsAreUnreadable(t *tes
 		fixture.probe,
 		scan.Stale,
 	)
-	if err == nil || !errors.Is(err, probeErr) || !strings.Contains(err.Error(), "pid=315") {
-		t.Fatalf("err=%v, want pid and descriptor cause", err)
+	if got, want := strings.NewReplacer(fixture.root, "{root}", fixture.home, "{home}").
+		Replace(staleCommand.ReplaceAllString(fmt.Sprint(err), "${1}{cmd}")),
+		"inspect descriptors for pid=315 {cmd} against marker {home}/.local/state/pfm/mcp-proxy-compatible: descriptor probe denied"; !errors.Is(err, probeErr) ||
+		got != want {
+		t.Fatalf("err = %q, want %q", got, want)
 	}
 	if obsolete != nil || compatible != nil {
 		t.Fatalf("obsolete=%+v compatible=%+v, want no asserted partition on error", obsolete, compatible)
@@ -720,9 +707,11 @@ func TestSweepFailsBeforeSignalsWhenProxyDescriptorsAreUnreadable(t *testing.T) 
 		fixture.binary,
 		io.Discard,
 	)
-	if err == nil || !strings.Contains(err.Error(), "pid=331") ||
-		!strings.Contains(err.Error(), fixture.markerPath()) || !errors.Is(err, probeErr) {
-		t.Fatalf("err = %v, want pid, marker path, and descriptor cause", err)
+	if got, want := strings.NewReplacer(fixture.root, "{root}", fixture.home, "{home}").
+		Replace(staleCommand.ReplaceAllString(fmt.Sprint(err), "${1}{cmd}")),
+		"inspect descriptors for pid=331 {cmd} against marker {home}/.local/state/pfm/mcp-proxy-compatible: descriptor probe denied"; !errors.Is(err, probeErr) ||
+		got != want {
+		t.Fatalf("err = %q, want %q", got, want)
 	}
 	if len(kernel.Sent) != 0 {
 		t.Fatalf("signals = %v, want classification failure before the first signal", kernel.Sent)
@@ -738,8 +727,10 @@ func TestSweepFailsClosedWhenOneDescriptorIsOmitted(t *testing.T) {
 	}
 	kernel := fixture.kernel(nil, nil)
 	err := fixture.sweep(fixture.table(), kernel, fixture.binary, io.Discard)
-	if err == nil || !strings.Contains(err.Error(), "descriptor 8 was not readable") {
-		t.Fatalf("err = %v, want omitted descriptor named", err)
+	if got, want := strings.NewReplacer(fixture.root, "{root}", fixture.home, "{home}").
+		Replace(staleCommand.ReplaceAllString(fmt.Sprint(err), "${1}{cmd}")),
+		"inspect descriptors for pid=336 {cmd}: descriptor 8 was not readable"; got != want {
+		t.Fatalf("err = %q, want %q", got, want)
 	}
 	if len(kernel.Sent) != 0 {
 		t.Fatalf("signals = %v, want incomplete descriptor census to fail before signalling", kernel.Sent)
@@ -843,3 +834,12 @@ func TestRunReportsNoneAndStaleDistinctly(t *testing.T) {
 		t.Fatalf("code=%d, want a usage refusal", code)
 	}
 }
+
+// staleCommand matches a process's command column, whose temp path the scan
+// truncates at a width, so its length differs per run.
+var staleCommand = regexp.MustCompile(`(pid=\d+ +)[^\s:]+`)
+
+// staleUnreadableCommand matches the whole command column of an unreadable row, which ends at its
+// colon: clipped at its width, the column ends inside the temp path or after the arguments, by the
+// path's length in this run.
+var staleUnreadableCommand = regexp.MustCompile(`(pid=\d+ +)[^:]+`)

@@ -59,7 +59,7 @@ func TestTheLaunchingChatsDeathDoesNotCutTheRestartShort(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	body, err := os.ReadFile(filepath.Join(dir, "worker.log"))
-	if err != nil || !strings.Contains(string(body), ExitMarker+"0") {
+	if err != nil || string(body) != "restart: exit 0\n" {
 		t.Fatalf("worker log = %q, %v", body, err)
 	}
 }

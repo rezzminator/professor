@@ -11,6 +11,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testjail/fakegit"
 )
 
 // selectingChatVerbs lists fixture rows through chat.Select, the filter the
@@ -36,7 +37,7 @@ func (verbs *selectingChatVerbs) List(_ context.Context, request chat.ListReques
 // caller, and says it listed every repository when it does not.
 func TestChatLSScopesToTheResolvedCallersRepository(t *testing.T) {
 	t.Parallel()
-	fixture := testjail.GitRepoWithWorktrees(t, "acme")
+	fixture := testjail.GitRepoWithWorktrees(t, &fakegit.Runner{}, "acme")
 	rows := []compose.Row{
 		{
 			Kind:        compose.LiveCodex,

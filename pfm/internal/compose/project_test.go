@@ -7,13 +7,14 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testjail/fakegit"
 	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
 // A chat's project is the repository it works in, not its cwd's basename: a
 // chat in a linked worktree or a repo subdirectory belongs to the repo.
 func TestProjectNameFilesAChatUnderItsRepository(t *testing.T) {
-	fixture := testjail.GitRepoWithWorktrees(t, "acme")
+	fixture := testjail.GitRepoWithWorktrees(t, &fakegit.Runner{}, "acme")
 	plain := filepath.Join(fixture.Base, "plain")
 	if err := os.MkdirAll(plain, 0o755); err != nil {
 		t.Fatal(err)
@@ -38,7 +39,7 @@ func TestProjectNameFilesAChatUnderItsRepository(t *testing.T) {
 // A new chat files where Compose would file its row: under the workbench that
 // owns its directory, else under its repository.
 func TestProjectOfFilesThroughAnOwningWorkbench(t *testing.T) {
-	fixture := testjail.GitRepoWithWorktrees(t, "acme")
+	fixture := testjail.GitRepoWithWorktrees(t, &fakegit.Runner{}, "acme")
 	benches := []workbench.Bench{{Dir: fixture.Subdir, Key: "acme › bench", Project: "acme", Root: fixture.Repo}}
 	if name, root := ProjectOf(fixture.Subdir, benches); name != "acme › bench" || root != fixture.Subdir {
 		t.Errorf("ProjectOf(bench) = %q %q, want the bench", name, root)
@@ -51,7 +52,7 @@ func TestProjectOfFilesThroughAnOwningWorkbench(t *testing.T) {
 // A live seat an orchestrator started in a worktree lists under the repo, and
 // that block leads when the picker opens in the repo root.
 func TestLiveWorktreeChatLeadsUnderTheRepoProject(t *testing.T) {
-	fixture := testjail.GitRepoWithWorktrees(t, "acme")
+	fixture := testjail.GitRepoWithWorktrees(t, &fakegit.Runner{}, "acme")
 	output := Compose(Input{
 		Snapshot: gather.Snapshot{
 			Panes: []gather.ProbePane{{Socket: "cc-7-8-9", PaneID: "%7", CurrentPath: fixture.Inner}},

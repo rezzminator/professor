@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 
@@ -103,7 +102,11 @@ func TestFableWindowFallsBackToUsageCacheWhenHarnessOmitsLimits(t *testing.T) {
 		t.Fatal(err)
 	}
 	plain := stripANSICodes(got)
-	if !strings.Contains(plain, "7d-fable-used:38%") {
+	if plain != `🥈 ◆ Opus 4·effort unknown │ ~ │ · ·
+🟢 ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ ?% ? ctx unknown │ 💰$?/?/?/? │ ⏳ 0s
+▱▱▱▱▱ 5h-used:11% ↻4h0m │ ▰▱▱▱▱ 7d-fable-used:38% ↻7d0h │ ▰▱▱▱▱ 7d-used:31% ↻6d0h
+▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data
+` {
 		t.Fatalf(
 			"fable window did not fall back to pfm's own usage cache when the harness sent no limits array:\n%q",
 			plain,
@@ -138,10 +141,18 @@ func TestFableWindowPrefersHarnessLimitsOverCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	plain := stripANSICodes(got)
-	if !strings.Contains(plain, "7d-fable-used:23%") {
+	if plain != `🥈 ◆ Opus 4·effort unknown │ ~ │ · ·
+🟢 ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ ?% ? ctx unknown │ 💰$?/?/?/? │ ⏳ 0s
+▱▱▱▱▱ 5h-used:11% ↻4h0m │ ▰▱▱▱▱ 7d-fable-used:23% ↻7d0h │ ▰▱▱▱▱ 7d-used:31% ↻6d0h
+▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data
+` {
 		t.Fatalf("harness-reported fable window lost to the cache:\n%q", plain)
 	}
-	if strings.Contains(plain, "90%") {
+	if plain != `🥈 ◆ Opus 4·effort unknown │ ~ │ · ·
+🟢 ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ ?% ? ctx unknown │ 💰$?/?/?/? │ ⏳ 0s
+▱▱▱▱▱ 5h-used:11% ↻4h0m │ ▰▱▱▱▱ 7d-fable-used:23% ↻7d0h │ ▰▱▱▱▱ 7d-used:31% ↻6d0h
+▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data
+` {
 		t.Fatalf("cache value leaked past a harness payload that DID carry limits:\n%q", plain)
 	}
 }
@@ -170,10 +181,18 @@ func TestFableWindowPresentButEmptyLimitsArrayIsNotCacheFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	plain := stripANSICodes(got)
-	if strings.Contains(plain, "7d-fable-used") {
+	if plain != `🥈 ◆ Opus 4·effort unknown │ ~ │ · ·
+🟢 ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ ?% ? ctx unknown │ 💰$?/?/?/? │ ⏳ 0s
+▱▱▱▱▱ 5h-used:11% ↻4h0m │ ▰▱▱▱▱ 7d-used:31% ↻6d0h
+▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data
+` {
 		t.Fatalf("a present-but-empty limits array answered without Fable, so its row must be hidden:\n%q", plain)
 	}
-	if strings.Contains(plain, "77%") {
+	if plain != `🥈 ◆ Opus 4·effort unknown │ ~ │ · ·
+🟢 ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ ?% ? ctx unknown │ 💰$?/?/?/? │ ⏳ 0s
+▱▱▱▱▱ 5h-used:11% ↻4h0m │ ▰▱▱▱▱ 7d-used:31% ↻6d0h
+▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data
+` {
 		t.Fatalf("a present-but-empty limits array consulted the cache anyway:\n%q", plain)
 	}
 }
@@ -206,13 +225,25 @@ func TestHarnessMainWindowsTakePrecedenceOverCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	plain := stripANSICodes(got)
-	if !strings.Contains(plain, "5h-used:11%") || !strings.Contains(plain, "7d-used:31%") {
+	if plain != `🥈 ◆ Opus 4·effort unknown │ ~ │ · ·
+🟢 ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ ?% ? ctx unknown │ 💰$?/?/?/? │ ⏳ 0s
+▱▱▱▱▱ 5h-used:11% ↻4h0m │ ▰▱▱▱▱ 7d-fable-used:38% ↻7d0h │ ▰▱▱▱▱ 7d-used:31% ↻6d0h
+▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data
+` {
 		t.Fatalf("harness five_hour/seven_day values were lost:\n%q", plain)
 	}
-	if strings.Contains(plain, "77%") || strings.Contains(plain, "66%") {
+	if plain != `🥈 ◆ Opus 4·effort unknown │ ~ │ · ·
+🟢 ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ ?% ? ctx unknown │ 💰$?/?/?/? │ ⏳ 0s
+▱▱▱▱▱ 5h-used:11% ↻4h0m │ ▰▱▱▱▱ 7d-fable-used:38% ↻7d0h │ ▰▱▱▱▱ 7d-used:31% ↻6d0h
+▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data
+` {
 		t.Fatalf("five_hour/seven_day were sourced from pfm's own cache instead of the harness payload:\n%q", plain)
 	}
-	if !strings.Contains(plain, "7d-fable-used:38%") {
+	if plain != `🥈 ◆ Opus 4·effort unknown │ ~ │ · ·
+🟢 ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ ?% ? ctx unknown │ 💰$?/?/?/? │ ⏳ 0s
+▱▱▱▱▱ 5h-used:11% ↻4h0m │ ▰▱▱▱▱ 7d-fable-used:38% ↻7d0h │ ▰▱▱▱▱ 7d-used:31% ↻6d0h
+▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data
+` {
 		t.Fatalf("the legitimately-consulted fable window went missing alongside the cache-isolation check:\n%q", plain)
 	}
 }

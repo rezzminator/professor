@@ -17,8 +17,19 @@ import (
 )
 
 func TestKillTargetProjectionUsesTheProvenPane(t *testing.T) {
-	identity := resolve.Identity{Backend: "tmux", SocketPath: "/jail/tmux/cx-seat", SocketName: "cx-seat", Pane: "%2"}
-	row := compose.Row{Kind: compose.LiveCodex, ID: "leaf", Path: "/jail/leaf.jsonl", Socket: "cx-seat", PaneID: "%2"}
+	identity := resolve.Identity{
+		Backend:    "tmux",
+		SocketPath: testjail.Place("/jail/tmux/cx-seat"),
+		SocketName: "cx-seat",
+		Pane:       "%2",
+	}
+	row := compose.Row{
+		Kind:   compose.LiveCodex,
+		ID:     "leaf",
+		Path:   testjail.Place("/jail/leaf.jsonl"),
+		Socket: "cx-seat",
+		PaneID: "%2",
+	}
 	for _, tc := range []struct {
 		name      string
 		rows      []compose.Row
@@ -71,7 +82,7 @@ func TestKillTargetProjectionPreservesAnUnindexedLineagePath(t *testing.T) {
 	}
 	if err := database.UpsertRollout(
 		context.Background(),
-		store.Rollout{ID: root, Path: "/jail/root.jsonl", UserThread: true},
+		store.Rollout{ID: root, Path: testjail.Place("/jail/root.jsonl"), UserThread: true},
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +90,7 @@ func TestKillTargetProjectionPreservesAnUnindexedLineagePath(t *testing.T) {
 		Backend:    "tmux",
 		Engine:     string(pfmengine.Codex),
 		ID:         leaf,
-		SocketPath: "/jail/cx-seat",
+		SocketPath: testjail.Place("/jail/cx-seat"),
 		SocketName: "cx-seat",
 		Pane:       "%2",
 	}
@@ -118,7 +129,7 @@ func TestOpenKillManagerReturnsATargetReadFailure(t *testing.T) {
 					Backend:    "tmux",
 					Engine:     string(pfmengine.Codex),
 					ID:         "leaf",
-					SocketPath: "/jail/cx-seat",
+					SocketPath: testjail.Place("/jail/cx-seat"),
 					SocketName: "cx-seat",
 					Pane:       "%2",
 				},

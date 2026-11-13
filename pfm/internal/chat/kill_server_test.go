@@ -387,7 +387,7 @@ func TestEndHerdrStepsLogEachStepAndTheFailure(t *testing.T) {
 // socket is an error, never a silent "ended".
 func TestEndNowRefusesAChatWithNoAddress(t *testing.T) {
 	err := EndNow(context.Background(), headless.Chat{ID: "sid-x"}, paths.Values{})
-	if err == nil || !strings.Contains(err.Error(), "neither a Herdr seat nor a tmux socket") {
+	if err == nil || err.Error() != "chat sid-x has neither a Herdr seat nor a tmux socket to end" {
 		t.Fatalf("EndNow on an addressless chat = %v", err)
 	}
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
@@ -118,7 +117,7 @@ func TestCosmosSamplerNamesAStampFailureInsteadOfServingTheCache(t *testing.T) {
 	}
 	ledger.stampErr = errors.New("database is locked")
 	events, err := sampler.Sample(ctx, 0)
-	if err == nil || !strings.Contains(err.Error(), "database is locked") || events != nil {
+	if err == nil || err.Error() != "sample comms ledger: database is locked" || events != nil {
 		t.Fatalf("sample = %+v, %v; want the stamp failure named and no events", events, err)
 	}
 }

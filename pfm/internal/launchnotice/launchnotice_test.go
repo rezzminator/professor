@@ -67,7 +67,10 @@ func TestHoldSaysWhenStdinCannotBeRead(t *testing.T) {
 	stage(t, true, failingReader{})
 	var out bytes.Buffer
 	Hold(&out, "pfm", []string{"no prompt"})
-	if !strings.Contains(out.String(), "read the acknowledgement") || !strings.Contains(out.String(), "closed pipe") {
+	if out.String() != `pfm: no prompt
+press Enter to continue
+pfm: read the acknowledgement: io: read/write on closed pipe — continuing
+` {
 		t.Fatalf("a failed read said nothing: %q", out.String())
 	}
 }

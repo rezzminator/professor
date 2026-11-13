@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -95,12 +96,23 @@ func TestChatSaveDispatchUsesScopedCallerRepository(t *testing.T) {
 	if err := os.MkdirAll(callerCWD, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	result, err := (deps.RealRunner{}).Run(context.Background(), []string{
-		deps.Executable("git"), "init", "-b", "caller-snapshot", callerCWD,
-	}, deps.RunOptions{})
-	if err != nil || result.ExitCode != 0 {
-		t.Fatalf("initialize caller repository: result=%+v err=%v", result, err)
-	}
+	git := &deps.FakeRunner{}
+	git.ScriptLookPath("git", "scripted-git", nil)
+	git.Script(
+		[]string{"scripted-git", "rev-parse", "--is-inside-work-tree"},
+		deps.RunResult{Stdout: []byte("true\n")},
+		nil,
+	)
+	git.Script(
+		[]string{"scripted-git", branchAction, "--show-current"},
+		deps.RunResult{Stdout: []byte("caller-snapshot\n")},
+		nil,
+	)
+	git.Script([]string{"scripted-git", "status", "--short"}, deps.RunResult{}, nil)
+	git.Script([]string{"scripted-git", "worktree", "list"}, deps.RunResult{}, nil)
+	previousRunner := commandRunner
+	commandRunner = git
+	t.Cleanup(func() { commandRunner = previousRunner })
 	ctx := pfmchat.WithResolvedSelf(context.Background(), headless.Chat{CWD: callerCWD})
 	var stdout, stderr bytes.Buffer
 	if code := runChatWithRuntime(
@@ -120,6 +132,14 @@ func TestChatSaveDispatchUsesScopedCallerRepository(t *testing.T) {
 	if !strings.Contains(string(saved), "Branch: caller-snapshot\n") {
 		t.Fatalf("saved snapshot = %q, want caller repository branch from %q", saved, callerCWD)
 	}
+	for index, call := range git.Calls() {
+		if call.Opts.Dir != callerCWD {
+			t.Errorf("git call %d ran in %q, want the caller repository %q", index, call.Opts.Dir, callerCWD)
+		}
+	}
+	if len(git.Calls()) != 4 {
+		t.Errorf("git calls = %d, want the four snapshot probes", len(git.Calls()))
+	}
 }
 
 func TestChatSaveContextKeepsExplicitTranscriptReadFailuresVisible(t *testing.T) {
@@ -137,13 +157,12 @@ func TestChatSaveContextKeepsExplicitTranscriptReadFailuresVisible(t *testing.T)
 		nil,
 		commandRuntime{},
 	)
-	if code != 1 || !strings.Contains(stderr.String(), missingTranscript) {
-		t.Fatalf(
-			"save code=%d stdout=%q stderr=%q, want named transcript read failure",
-			code,
-			stdout.String(),
-			stderr.String(),
-		)
+	if got, want := rooted(
+		stderr.String(),
+		root,
+	), "pfm chat save: {root}/missing.jsonl: no recognizable Claude or Codex transcript record\n"; code != 1 ||
+		got != want {
+		t.Fatalf("save code=%d stdout=%q stderr = %q, want %q", code, stdout.String(), got, want)
 	}
 	if _, err := os.Stat(target); !os.IsNotExist(err) {
 		t.Fatalf("target stat error = %v, want no output after transcript read failure", err)
@@ -520,9 +539,10 @@ func TestWaitForBranchSessionIDGivesUpAtThirtySecondsNamingNoLaunchRecord(t *tes
 	if elapsed := clk.Now().Sub(start); elapsed < 30*time.Second || elapsed > 31*time.Second {
 		t.Fatalf("gave up after %s of fake time, want 30s", elapsed)
 	}
-	if err == nil || !strings.Contains(err.Error(), "no launch record written") ||
-		!strings.Contains(err.Error(), "pfm-fork") || !strings.Contains(err.Error(), "30s") {
-		t.Fatalf("err = %v, want a named 30s timeout carrying the socket and the missing launch record", err)
+	if got, want := fmt.Sprint(
+		err,
+	), "did not resolve within 30s on tmux socket pfm-fork; no launch record written for the fork"; got != want {
+		t.Fatalf("err = %q, want %q", got, want)
 	}
 }
 
@@ -588,12 +608,12 @@ func TestChatLSNativeUnreachableIsVisibleAndNonzero(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 	code := run([]string{"chat", "ls", "--all"}, &stdout, &stderr)
-	if code != 1 || !strings.Contains(stdout.String(), "OFFLINE") ||
-		!strings.Contains(
-			stderr.String(),
-			"HERDR UNREACHABLE",
-		) || !strings.Contains(stdout.String(), "loss note: your last message was not answered — re-send it") {
-		t.Fatalf("unreachable list code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	if got, want := rooted(
+		stdout.String()+stderr.String(),
+		filepath.Dir(dead),
+	), "live chats everywhere (name · session · state · herdr · dir · last activity):\n  OFFLINE                      OFFLINE                  unknown HERDR UNREACHABLE {root}/dead.sock: herdr socket {root}/dead.sock: dial for pane.list pfm-seat: dial unix {root}/dead.sock: connect: connection refused    \n    loss note: your last message was not answered — re-send it\nHERDR UNREACHABLE {root}/dead.sock: herdr socket {root}/dead.sock: dial for pane.list pfm-seat: dial unix {root}/dead.sock: connect: connection refused\npfm chat ls: inspect OFFLINE: read Herdr endpoint {root}/dead.sock pane w6:p3: read OFFLINE Herdr state: herdr seat native-offline ownership unproved: prove seat native-offline pane.list: herdr socket {root}/dead.sock: dial for pane.list pfm-seat: dial unix {root}/dead.sock: connect: connection refused\n"; code != 1 ||
+		got != want {
+		t.Fatalf("unreachable list code=%d stdout+stderr = %q, want %q", code, got, want)
 	}
 }
 

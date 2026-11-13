@@ -3,7 +3,6 @@ package mcpserv
 import (
 	"context"
 	"encoding/json"
-	"strings"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -27,7 +26,10 @@ func TestChatKeysMCPRefusesANameInTheChatVerbsWords(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.IsError || !strings.Contains(string(content), `\"Esc\" is not a tmux key — tmux would type it as text`) {
+	if !result.IsError ||
+		string(
+			content,
+		) != "[{\"type\":\"text\",\"text\":\"\\\"Esc\\\" is not a tmux key — tmux would type it as text; send it literal (--literal, MCP literal=true) to mean that, or use one of: BSpace BTab DC Delete Down End Enter Escape Home IC Insert Left NPage PPage PageDown PageUp PgDn PgUp Right Space Tab Up F1-F12, each optionally prefixed C- M- S-\"}]" {
 		t.Fatalf("keys name refusal = %s (isError %v), want the chat verb's refusal", content, result.IsError)
 	}
 }

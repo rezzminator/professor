@@ -104,9 +104,12 @@ func TestKilledBusyPolicyWarnsAndRejectsTheChange(t *testing.T) {
 	if err := writer.Kill(ctx, Killed{ID: "busy-kill", KilledAt: 1}); err == nil {
 		t.Fatal("Kill() under persistent SQLITE_BUSY reported success")
 	}
-	if got := warnings.String(); !strings.Contains(got, "WARNING:") ||
-		!strings.Contains(got, "was NOT") {
-		t.Fatalf("busy warning = %q, want a loud not-written warning", got)
+	if got, want := strings.ReplaceAll(
+		warnings.String(),
+		writer.SharedPath(),
+		"{db}",
+	), "WARNING: pfm could not kill \"busy-kill\" in {db}: SQLite remained busy after retry; the change was NOT written\n"; got != want {
+		t.Fatalf("busy warning = %q, want %q", got, want)
 	}
 	if _, found, err := writer.Killed(ctx, "busy-kill"); err != nil || found {
 		t.Fatalf("Killed() after rejected kill found=%v err=%v", found, err)
@@ -116,9 +119,12 @@ func TestKilledBusyPolicyWarnsAndRejectsTheChange(t *testing.T) {
 	if _, err := writer.Unkill(ctx, "busy-unkill"); err == nil {
 		t.Fatal("Unkill() under persistent SQLITE_BUSY reported success")
 	}
-	if got := warnings.String(); !strings.Contains(got, "WARNING:") ||
-		!strings.Contains(got, "was NOT") {
-		t.Fatalf("busy warning = %q, want a loud not-written warning", got)
+	if got, want := strings.ReplaceAll(
+		warnings.String(),
+		writer.SharedPath(),
+		"{db}",
+	), "WARNING: pfm could not unkill \"busy-unkill\" in {db}: SQLite remained busy after retry; the change was NOT written\n"; got != want {
+		t.Fatalf("busy warning = %q, want %q", got, want)
 	}
 	// The delete never reached the row, so the chat is still killed. Reporting
 	// otherwise would be the drift this store exists to end.
@@ -159,9 +165,12 @@ func TestKilledWriteLogsWhenTheBusyWarningCounterCannotBeWritten(t *testing.T) {
 	if err := writer.Kill(ctx, Killed{ID: "busy-kill", KilledAt: 2}); err == nil {
 		t.Fatal("Kill() under persistent SQLITE_BUSY reported success")
 	}
-	got := warnings.String()
-	if !strings.Contains(got, "WARNING:") || !strings.Contains(got, "busy-warning counter") {
-		t.Fatalf("warnings = %q, want the counter write failure named", got)
+	if got, want := strings.ReplaceAll(
+		warnings.String(),
+		writer.SharedPath(),
+		"{db}",
+	), "WARNING: pfm could not kill \"busy-kill\" in {db}: SQLite remained busy after retry; the change was NOT written\nWARNING: pfm could not record the busy-warning counter for kill \"busy-kill\" in {db}: increment meta \"busy_kill_warnings\": sql: database is closed\n"; got != want {
+		t.Fatalf("warnings = %q, want %q", got, want)
 	}
 }
 

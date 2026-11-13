@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -151,23 +152,26 @@ func TestSynthesizeRoutesAndEnvHygiene(t *testing.T) {
 	}
 }
 
+// The agent route runs pfm's killed-internal agent-open wiring and carries the
+// one-hour cache as its flag and process env, never the legacy cache arm.
 func TestAgentRouteCarriesCacheFlag(t *testing.T) {
 	home := t.TempDir()
-	plan, err := synthesizeWithTestConfig(Request{
-		Row:            compose.Row{Kind: compose.Agent, ID: "22222222-2222-4222-8222-222222222222", CWD: "/work"},
-		PrimaryAccount: 2, Cache1H: true, Home: home, FreshSocket: "cc-agent-cache",
-	})
-	if err != nil {
-		t.Fatal(err)
+	var runs strings.Builder
+	for _, cache := range []bool{false, true} {
+		plan, err := synthesizeWithTestConfig(Request{
+			Row:            compose.Row{Kind: compose.Agent, ID: "22222222-2222-4222-8222-222222222222", CWD: "/work"},
+			PrimaryAccount: 2, Cache1H: cache, Home: home, FreshSocket: "cc-agent-cache",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		runs.WriteString(plan.Run + "\n")
 	}
-	if !strings.Contains(plan.Run, "internal agent-open --id") || !strings.Contains(plan.Run, " --cache 1h") ||
-		strings.Contains(plan.Run, " ENABLE_PROMPT_CACHING_1H=") ||
-		!strings.Contains(plan.Run, " CACHE_LIVE_CONTROL_MAIN_TTL='1h'") {
-		t.Fatalf("agent route = %q", plan.Run)
-	}
+	actionGolden(t, "action_agent_route.txt", rooted(t, runs.String()))
 }
 
 func TestDeadClaudeResumeUsesRecordedAccount(t *testing.T) {
+	var runs strings.Builder
 	for _, scenario := range []struct {
 		name       string
 		kind       compose.Kind
@@ -179,7 +183,7 @@ func TestDeadClaudeResumeUsesRecordedAccount(t *testing.T) {
 		{"retired account", compose.ResumeClaude, 9, 2},
 		{"agent fallback", compose.Agent, 3, 3},
 	} {
-		t.Run(scenario.name, func(t *testing.T) {
+		{
 			home := t.TempDir()
 			machine := testMachineConfig(home)
 			machine.Accounts[2].Claude = &pfmconfig.ClaudePrefs{Binary: "/bin/claude-three"}
@@ -198,26 +202,20 @@ func TestDeadClaudeResumeUsesRecordedAccount(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			wantDir := pfmconfig.DefaultAccountDir(home, scenario.want)
-			if !strings.Contains(plan.Run, "CLAUDE_CONFIG_DIR="+cmdparse.Quote(wantDir)) || plan.Record == nil ||
-				plan.Record.Account != scenario.want {
-				t.Fatalf("run = %q, record = %+v; want account %d", plan.Run, plan.Record, scenario.want)
+			if plan.Record == nil || plan.Record.Account != scenario.want {
+				t.Errorf("%s: record = %+v, want account %d", scenario.name, plan.Record, scenario.want)
 			}
-			if usesThird := strings.Contains(
-				plan.Run,
-				cmdparse.Quote("/bin/claude-three"),
-			); usesThird != (scenario.want == 3) {
-				t.Fatalf("account %d effective binary in run = %t", scenario.want, usesThird)
-			}
-		})
+			fmt.Fprintf(&runs, "%s: %s\n", scenario.name, rooted(t, plan.Run))
+		}
 	}
+	actionGolden(t, "action_dead_claude_resume_accounts.txt", runs.String())
 }
 
 func TestSynthesizeRejectsAccountsOffTheRoster(t *testing.T) {
 	home := t.TempDir()
 	// An account outside the launcher's two-seat roster must never reach a
 	// command line.
-	for _, account := range []int{0, 4, 9} {
+	for account, want := range map[int]string{0: "requested Claude account 0 is not in the configured roster", 4: "requested Claude account 4 is not in the configured roster", 9: "requested Claude account 9 is not in the configured roster"} {
 		_, err := synthesizeWithTestConfig(Request{
 			Row: compose.Row{
 				Kind: compose.NewClaude,
@@ -227,8 +225,8 @@ func TestSynthesizeRejectsAccountsOffTheRoster(t *testing.T) {
 			Home:           home,
 			FreshSocket:    "cc-roster-test",
 		})
-		if err == nil || !strings.Contains(err.Error(), "requested Claude account") {
-			t.Fatalf("account %d error = %v, want a roster rejection", account, err)
+		if got := fmt.Sprint(err); got != want {
+			t.Errorf("account %d error = %q, want %q", account, got, want)
 		}
 	}
 	for account := 1; account <= 3; account++ {
@@ -243,27 +241,6 @@ func TestSynthesizeRejectsAccountsOffTheRoster(t *testing.T) {
 		}); err != nil {
 			t.Fatalf("account %d rejected: %v", account, err)
 		}
-	}
-}
-
-func TestAgentRouteUsesKilledInternalWiring(t *testing.T) {
-	home := t.TempDir()
-	plan, err := synthesizeWithTestConfig(Request{
-		Row: compose.Row{
-			Kind: compose.Agent,
-			ID:   "33333333-3333-4333-8333-333333333333",
-			CWD:  "/work/project",
-		},
-		PrimaryAccount: 1,
-		Home:           home,
-		FreshSocket:    "cc-1700000001-123-456",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(plan.Run, "pfm internal agent-open") ||
-		!strings.Contains(plan.Run, "--id") || !strings.Contains(plan.Run, "--cwd") {
-		t.Fatalf("agent run = %q", plan.Run)
 	}
 }
 
@@ -283,8 +260,7 @@ func TestCodexLiveUsesOnlyVerifiedWindow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(plan.Line, cmdparse.Quote("cx-session")) ||
-		strings.Contains(plan.Line, "cx-session:") {
+	if plan.Line != "TMUX= tmux -L 'cx-1700000000-123-456' attach -t 'cx-session'" {
 		t.Fatalf("unverified Codex attach line = %q", plan.Line)
 	}
 	row.WindowName = "already-converged"
@@ -296,7 +272,7 @@ func TestCodexLiveUsesOnlyVerifiedWindow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(plan.Line, cmdparse.Quote("cx-session:already-converged")) {
+	if plan.Line != "TMUX= tmux -L 'cx-1700000000-123-456' attach -t 'cx-session:already-converged'" {
 		t.Fatalf("Codex converged attach line = %q", plan.Line)
 	}
 }
@@ -369,72 +345,45 @@ func TestSynthesizeRejectsNUL(t *testing.T) {
 		Home:           home,
 		PrimaryAccount: 1,
 	})
-	if err == nil || !strings.Contains(err.Error(), "NUL") {
+	if err == nil || err.Error() != "action values cannot contain NUL" {
 		t.Fatalf("NUL error = %v", err)
 	}
 }
 
 func TestPickerLaunchPromptReachesClaudeCodexAndOpenCode(t *testing.T) {
 	prompt := "Explain v0.61.2, ask for approval, then run pfm update."
-
-	tests := []struct {
-		name string
-		row  compose.Row
-		want []string
-	}{
-		{
-			name: "Claude",
-			row:  compose.Row{Kind: compose.NewClaude, CWD: "/work/.professor"},
-			want: []string{"claude", cmdparse.Quote(prompt), "attach"},
-		},
-		{
-			name: "Codex",
-			row:  compose.Row{Kind: compose.NewCodex, CWD: "/work/.professor"},
-			want: []string{"cx", cmdparse.Quote(prompt)},
-		},
-		{
-			name: "OpenCode",
-			row:  compose.Row{Kind: compose.NewOpenCode, CWD: "/work/.professor"},
-			want: []string{"opencode", "--prompt", cmdparse.Quote(prompt)},
-		},
+	home := t.TempDir()
+	machine := testMachineConfig(home)
+	machine.OpenCodeAccounts = []pfmconfig.OpenCodeAccount{
+		{ID: 1, Home: filepath.Join(home, ".local", "share", "opencode")},
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			home := t.TempDir()
-			machine := testMachineConfig(home)
-			machine.OpenCodeAccounts = []pfmconfig.OpenCodeAccount{
-				{ID: 1, Home: filepath.Join(home, ".local", "share", "opencode")},
-			}
-			plan, err := Synthesize(Request{
-				Row: test.row, PrimaryAccount: 1, Home: home,
-				FreshSocket: "engine-update-fixture", Config: machine,
-				Prompt: prompt,
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			command := plan.Line + " " + plan.Run
-			for _, want := range test.want {
-				if !strings.Contains(command, want) {
-					t.Fatalf("launch command %q lacks %q", command, want)
-				}
-			}
+	var commands strings.Builder
+	for _, kind := range []compose.Kind{compose.NewClaude, compose.NewCodex, compose.NewOpenCode} {
+		plan, err := Synthesize(Request{
+			Row: compose.Row{Kind: kind, CWD: "/work/.professor"}, PrimaryAccount: 1, Home: home,
+			FreshSocket: "engine-update-fixture", Config: machine,
+			Prompt: prompt,
 		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		fmt.Fprintf(&commands, "%s\n%s\n", plan.Line, plan.Run)
 	}
+	actionGolden(t, "action_picker_launch_prompt.txt", rooted(t, commands.String()))
 }
 
 func TestPickerLaunchPromptCannotLeakIntoResumeOrLiveRoutes(t *testing.T) {
 	home := t.TempDir()
-	for _, row := range []compose.Row{
-		{Kind: compose.ResumeClaude, ID: "11111111-1111-4111-8111-111111111111", CWD: "/work/project"},
-		{Kind: compose.LiveClaude, ID: "11111111-1111-4111-8111-111111111111", Socket: "cc-live"},
+	for want, row := range map[string]compose.Row{
+		"initial prompt is not valid for resume-claude route": {Kind: compose.ResumeClaude, ID: "11111111-1111-4111-8111-111111111111", CWD: "/work/project"},
+		"initial prompt is not valid for live-claude route":   {Kind: compose.LiveClaude, ID: "11111111-1111-4111-8111-111111111111", Socket: "cc-live"},
 	} {
 		_, err := synthesizeWithTestConfig(Request{
 			Row: row, PrimaryAccount: 1, Home: home,
 			FreshSocket: "cc-new", Prompt: "must not disappear",
 		})
-		if err == nil || !strings.Contains(err.Error(), "initial prompt is not valid") {
-			t.Fatalf("kind %s prompt error = %v", row.Kind, err)
+		if got := fmt.Sprint(err); got != want {
+			t.Errorf("kind %s prompt error = %q, want %q", row.Kind, got, want)
 		}
 	}
 }
@@ -455,8 +404,13 @@ func TestReaderGateUsesInjectedTerminalChannel(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !reboot ||
-		!strings.Contains(output.String(), "account  2 → 1") ||
-		!strings.Contains(output.String(), "cache") {
+		output.String() != `
+⚠ birth env ≠ picker — Builder is live
+  account  2 → 1
+  cache    🪫 5m → ⚡ 1h
+Enter attaches as-is · s reboots to match
+❯ 
+` {
 		t.Fatalf("gate reboot=%v output=%q", reboot, output.String())
 	}
 }
@@ -709,17 +663,11 @@ func TestCodexDoorsRunInProcess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HeadlessFork: %v", err)
 	}
-	for _, door := range []struct{ name, run string }{
-		{"PlanCodex (chat new)", newPlan.Run},
-		{"ResumeCodex (chat open)", resumePlan.Run},
-		{"HeadlessFork (chat branch)", forkPlan.Run},
-	} {
-		if !strings.Contains(door.run, " codex --no-daemon --sandbox workspace-write") {
-			t.Errorf("%s runs Codex on the shared daemon: %q", door.name, door.run)
-		}
-		if strings.Count(door.run, "--no-daemon") != 1 {
-			t.Errorf("%s carries --no-daemon %d times: %q", door.name, strings.Count(door.run, "--no-daemon"), door.run)
-		}
+	if got, want := rooted(
+		t,
+		newPlan.Run+"\n"+resumePlan.Run+"\n"+forkPlan.Run,
+	), "env -u CLAUDE_CODE_SESSION_ID -u CLAUDECODE -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CONFIG_DIR -u PFM_CLAUDE_CONFIG_DIR_DEFAULT -u CLAUDE_PROJECT_DIR -u ENABLE_PROMPT_CACHING_1H -u FORCE_PROMPT_CACHING_5M -u CLAUDE_CODE_PROMPT_CACHE_TTL -u CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL -u CACHE_LIVE_CONTROL_MAIN_TTL -u CACHE_LIVE_CONTROL_AGENTS_TTL -u CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT -u ANTHROPIC_BASE_URL -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_API_KEY -u ANTHROPIC_MODEL -u ANTHROPIC_SMALL_FAST_MODEL -u CLAUDE_CODE_AUTO_COMPACT_WINDOW -u CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -u CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK -u CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY -u CODEX_THREAD_ID CODEX_HOME='{root}/001/.codex' codex --no-daemon --sandbox workspace-write\nprintf '%s\\n' '═══ RESUME of 44444444-4444-4444-8444-444444444444 — verify before trusting this pane ═══' '    Loaded? Read the status line: no context/token counts means Codex did NOT rehydrate this thread.' '    Scrollback is never restored — the prior tmux server is reaped on kill.' '    Came up empty? The rollout is whole: pfm chat recover 44444444-4444-4444-8444-444444444444'; env -u CLAUDE_CODE_SESSION_ID -u CLAUDECODE -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CONFIG_DIR -u PFM_CLAUDE_CONFIG_DIR_DEFAULT -u CLAUDE_PROJECT_DIR -u ENABLE_PROMPT_CACHING_1H -u FORCE_PROMPT_CACHING_5M -u CLAUDE_CODE_PROMPT_CACHE_TTL -u CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL -u CACHE_LIVE_CONTROL_MAIN_TTL -u CACHE_LIVE_CONTROL_AGENTS_TTL -u CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT -u ANTHROPIC_BASE_URL -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_API_KEY -u ANTHROPIC_MODEL -u ANTHROPIC_SMALL_FAST_MODEL -u CLAUDE_CODE_AUTO_COMPACT_WINDOW -u CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -u CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK -u CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY -u CODEX_THREAD_ID CODEX_HOME='{root}/001/.codex' codex --no-daemon --sandbox workspace-write 'resume' '44444444-4444-4444-8444-444444444444'\nenv -u CLAUDE_CODE_SESSION_ID -u CLAUDECODE -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CONFIG_DIR -u PFM_CLAUDE_CONFIG_DIR_DEFAULT -u CLAUDE_PROJECT_DIR -u ENABLE_PROMPT_CACHING_1H -u FORCE_PROMPT_CACHING_5M -u CLAUDE_CODE_PROMPT_CACHE_TTL -u CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL -u CACHE_LIVE_CONTROL_MAIN_TTL -u CACHE_LIVE_CONTROL_AGENTS_TTL -u CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT -u ANTHROPIC_BASE_URL -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_API_KEY -u ANTHROPIC_MODEL -u ANTHROPIC_SMALL_FAST_MODEL -u CLAUDE_CODE_AUTO_COMPACT_WINDOW -u CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -u CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK -u CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY -u CODEX_THREAD_ID CODEX_HOME='{root}/001/.codex' codex --no-daemon --sandbox workspace-write 'fork' 'thread-123'"; got != want {
+		t.Errorf("chat new, open and branch Codex runs = %q, want %q", got, want)
 	}
 }
 

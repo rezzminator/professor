@@ -6,10 +6,8 @@ import (
 	"context"
 	"os"
 	"os/exec"
-	"strings"
 	"testing"
 
-	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
@@ -44,8 +42,8 @@ func TestTmuxTitlesDoctorReportsStringDriftAsDivergent(t *testing.T) {
 		socket,
 		true,
 	)
-	if state != titlesDivergent || !strings.Contains(detail, "custom-host-title") ||
-		!strings.Contains(detail, config.TmuxTitlesString) {
+	if state != titlesDivergent ||
+		detail != "set-titles on; set-titles-string \"custom-host-title\"; expected set-titles on and set-titles-string \"⬢ #{?#{m:cc-*,#{session_name}},#{s/^[^ ]* //:pane_title},#{window_name}}\"" {
 		t.Fatalf("state=%q detail=%q, want divergent with actual and expected strings", state, detail)
 	}
 }

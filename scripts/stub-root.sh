@@ -2,7 +2,7 @@
 # The stub fake root scripts/test-test.sh builds: sourced after scripts/shtest.sh with NAME set. Builds
 # $R (a fake repository named $NAME, so its logs land under /tmp/$NAME, removed at exit by
 # shtest_clean_also), $BIN (tool stubs that record argv to $REC and exit as $RULES says), and a stub
-# .claude/scripts/dev.sh that records its argv and PFM_FENCE_NET to $REC.env (go its GOFLAGS and GOPROXY,
+# .claude/scripts/dev.sh that records its argv and PFM_FENCE_NET to $REC.env (go its GOFLAGS, GOPROXY and PFM_TEST_ARTIFACT_DIR,
 # python3 its PYTHONPATH, there too) and whose `iso run` executes its command string with
 # PFM_DEV_FENCE=1. A `go test -v` call no rule matched prints one
 # `--- PASS` line, as a real run of a test does; a matching rule prints only its own output. The
@@ -37,7 +37,7 @@ EOF
 source "$STUBLIB"
 n="${0##*/}"
 stub_record "$n" "$@"
-[ "$n" != go ] || printf 'GOFLAGS=%s GOPROXY=%s %s\n' "${GOFLAGS-}" "${GOPROXY-}" "$*" >>"$REC.env"
+[ "$n" != go ] || printf 'GOFLAGS=%s GOPROXY=%s ARTIFACT=%s %s\n' "${GOFLAGS-}" "${GOPROXY-}" "${PFM_TEST_ARTIFACT_DIR-}" "$*" >>"$REC.env"
 [ "$n" != python3 ] || printf 'python3 PYTHONPATH=%s %s\n' "${PYTHONPATH-}" "$*" >>"$REC.env"
 stub_rule "$n" "$@"
 if [ "$n" = go ] && [ "$RULE_MATCHED" = 0 ]; then

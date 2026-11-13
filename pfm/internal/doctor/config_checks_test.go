@@ -16,41 +16,37 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-func TestDoctorReportsMissingCodexLogin(t *testing.T) {
-	home := filepath.Join(t.TempDir(), "codex")
-	runtime := config.Runtime{Config: config.Config{CodexAccounts: []config.CodexAccount{{ID: 2, Home: home}}}}
-	var output bytes.Buffer
-	PrintConfig(&output, runtime)
-	want := "doctor: codex-login codex[2] " + filepath.Join(home, "auth.json") + " missing — run codex login"
-	if !strings.Contains(output.String(), want) {
-		t.Fatalf("PrintConfig() = %q, want %q", output.String(), want)
-	}
-}
-
 func TestDoctorReportsCodexLoginStates(t *testing.T) {
 	for _, tc := range []struct {
 		name, auth, config, want string
 		failures                 int
+		authDir                  bool
 	}{
-		{name: "missing", want: "missing — run codex login", failures: 1},
-		{name: "invalid", auth: `{}`, want: "has no tokens.access_token and tokens.account_id — run codex login", failures: 1},
-		{name: "corrupt", auth: `{`, want: "UNREADABLE error=unexpected end of JSON input — run codex login", failures: 1},
+		{name: "missing", want: "doctor: codex-login codex[2] {root}/auth.json missing — run codex login\n", failures: 1},
+		{name: "invalid", auth: `{}`, want: "doctor: codex-login codex[2] {root}/auth.json has no tokens.access_token and tokens.account_id — run codex login\n", failures: 1},
+		{name: "corrupt", auth: `{`, want: "doctor: codex-login codex[2] {root}/auth.json UNREADABLE error=unexpected end of JSON input — run codex login\n", failures: 1},
 		{
 			name:     "wrong shape",
 			auth:     `{"tokens":"fixture"}`,
-			want:     "UNREADABLE error=json: cannot unmarshal string into Go struct field ",
+			want:     "doctor: codex-login codex[2] {root}/auth.json UNREADABLE error=json: cannot unmarshal string into Go struct field .tokens of type struct { AccessToken string \"json:\\\"access_token\\\"\"; AccountID string \"json:\\\"account_id\\\"\" } — run codex login\n",
 			failures: 1,
 		},
-		{name: "valid", auth: `{"tokens":{"access_token":"fixture-token","account_id":"fixture-account"}}`, want: "ok", failures: 0},
+		{name: "valid", auth: `{"tokens":{"access_token":"fixture-token","account_id":"fixture-account"}}`, want: "doctor: codex-login codex[2] ok\n", failures: 0},
 		{
 			name:     "corrupt config.toml",
 			config:   `cli_auth_credentials_store = `,
-			want:     "UNREADABLE error=parse {home}/config.toml: ",
+			want:     "doctor: codex-login codex[2] {root}/config.toml UNREADABLE error=parse {root}/config.toml: toml: line 1 (last key \"cli_auth_credentials_store\"): unexpected EOF; expected value\n",
 			failures: 1,
 		},
+		{name: "unreadable", authDir: true, want: "doctor: codex-login codex[2] {root}/auth.json UNREADABLE error=is a directory\n", failures: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home := t.TempDir()
+			if tc.authDir {
+				if err := os.Mkdir(filepath.Join(home, "auth.json"), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
 			if tc.auth != "" {
 				if err := os.WriteFile(filepath.Join(home, "auth.json"), []byte(tc.auth), 0o600); err != nil {
 					t.Fatal(err)
@@ -64,33 +60,15 @@ func TestDoctorReportsCodexLoginStates(t *testing.T) {
 			runtime := config.Runtime{Config: config.Config{CodexAccounts: []config.CodexAccount{{ID: 2, Home: home}}}}
 			var output bytes.Buffer
 			_, failures := PrintConfig(&output, runtime)
-			want := "doctor: codex-login codex[2] "
-			if tc.name != "valid" {
-				path := filepath.Join(home, "auth.json")
-				if tc.config != "" {
-					path = filepath.Join(home, "config.toml")
-				}
-				want += path + " "
-			}
-			want += strings.ReplaceAll(tc.want, "{home}", home)
-			if failures != tc.failures || !strings.Contains(output.String(), want) {
-				t.Fatalf("failures=%d output=%q, want failures=%d row=%q", failures, output.String(), tc.failures, want)
+			if got := rooted(
+				doctorRows(output.String(), "doctor: codex-login"),
+				home,
+			); failures != tc.failures ||
+				got != tc.want {
+				t.Errorf("failures=%d rows = %q, want %q", failures, got, tc.want)
 			}
 		})
 	}
-	t.Run("unreadable", func(t *testing.T) {
-		home := t.TempDir()
-		if err := os.Mkdir(filepath.Join(home, "auth.json"), 0o700); err != nil {
-			t.Fatal(err)
-		}
-		runtime := config.Runtime{Config: config.Config{CodexAccounts: []config.CodexAccount{{ID: 2, Home: home}}}}
-		var output bytes.Buffer
-		_, failures := PrintConfig(&output, runtime)
-		want := "doctor: codex-login codex[2] " + filepath.Join(home, "auth.json") + " UNREADABLE error="
-		if failures != 1 || !strings.Contains(output.String(), want) {
-			t.Fatalf("failures=%d output=%q, want failure and row %q", failures, output.String(), want)
-		}
-	})
 }
 
 func TestDoctorConfigFileRows(t *testing.T) {
@@ -183,34 +161,23 @@ func TestDoctorReportsMissingConfigKeysOnlyAfterParse(t *testing.T) {
 	}
 	var output bytes.Buffer
 	warnings, failures := PrintConfig(&output, config.Runtime{Config: config.Config{Path: path}})
-	if !strings.Contains(
+	if got, want := doctorRows(
 		output.String(),
-		"config: missing key claude.webSearchesPerSession (default 9007199254740991)",
-	) {
-		t.Fatalf("missing-key row absent: %s", output.String())
-	}
-	for _, want := range []string{
-		"doctor: config: missing key claude.autoCompactWindow (default 100000) — informational: unset, its default applies\n",
-		"doctor: config: missing key claude.helperModel (default claude-haiku-5-5) — informational: unset, its default applies\n",
-	} {
-		if !strings.Contains(output.String(), want) || warnings != 0 || failures != 0 {
-			t.Fatalf(
-				"missing-key row=%q warnings=%d failures=%d, want %q 0/0",
-				output.String(),
-				warnings,
-				failures,
-				want,
-			)
-		}
+		"doctor: config: ",
+	), "doctor: config: missing key theme (default default) — informational: unset, its default applies\ndoctor: config: missing key chat.backend (default auto) — informational: unset, its default applies\ndoctor: config: missing key chat.herdrTabStatus (default emoji) — informational: unset, its default applies\ndoctor: config: missing key state.db (default ~/.local/state/pfm/pfm.db) — informational: unset, its default applies\ndoctor: config: missing key state.cacheDb (default ~/.local/state/pfm/pfm-cache.db) — informational: unset, its default applies\ndoctor: config: missing key claude.permissionMode (default bypass) — informational: unset, its default applies\ndoctor: config: missing key claude.binary (default claude) — informational: unset, its default applies\ndoctor: config: missing key claude.theme (default <nil>) — informational: unset, its default applies\ndoctor: config: missing key claude.cache1h (default true) — informational: unset, its default applies\ndoctor: config: missing key claude.nativeCursor (default false) — informational: unset, its default applies\ndoctor: config: missing key claude.remoteControl (default true) — informational: unset, its default applies\ndoctor: config: missing key claude.systemPrompt (default <nil>) — informational: unset, its default applies\ndoctor: config: missing key claude.webSearchesPerSession (default 9007199254740991) — informational: unset, its default applies\ndoctor: config: missing key claude.autoCompactWindow (default 100000) — informational: unset, its default applies\ndoctor: config: missing key claude.helperModel (default claude-haiku-5-5) — informational: unset, its default applies\ndoctor: config: missing key claude.tmuxTruecolor (default true) — informational: unset, its default applies\ndoctor: config: missing key claude.cleanupPeriodDays (default 36500) — informational: unset, its default applies\ndoctor: config: missing key claude.requireManagedCleanup (default true) — informational: unset, its default applies\ndoctor: config: missing key claude.maxSubagentSpawnDepth (default 8) — informational: unset, its default applies\ndoctor: config: missing key claude.maxConcurrentSubagents (default <nil>) — informational: unset, its default applies\ndoctor: config: missing key claude.pluginCheckoutRoot (default <nil>) — informational: unset, its default applies\ndoctor: config: missing key claude.plugins (default [cache-live-control forward-compaction auto-effort tool-visibility-controller engine-sync flights]) — informational: unset, its default applies\ndoctor: config: missing key claude.env (default map[]) — informational: unset, its default applies\ndoctor: config: missing key claude.costLedger (default true) — informational: unset, its default applies\ndoctor: config: missing key claude.gptAgents (default false) — informational: unset, its default applies\ndoctor: config: missing key codex.yolo (default true) — informational: unset, its default applies\ndoctor: config: missing key codex.binary (default codex) — informational: unset, its default applies\ndoctor: config: missing key opencode.binary (default opencode) — informational: unset, its default applies\ndoctor: config: missing key tmux.titles.enabled (default true) — informational: unset, its default applies\ndoctor: config: missing key nameSync.interval (default 15m0s) — informational: unset, its default applies\ndoctor: config: missing key mcp.servers.chat.enabled (default false) — informational: unset, its default applies\ndoctor: config: missing key mcp.http.port (default 18377) — informational: unset, its default applies\ndoctor: config: missing key mcp.thirdParty (default map[]) — informational: unset, its default applies\ndoctor: config: missing key ask.engine (default codex) — informational: unset, its default applies\ndoctor: config: missing key ask.claude.model (default claude-haiku-4-5) — informational: unset, its default applies\ndoctor: config: missing key ask.claude.effort (default low) — informational: unset, its default applies\ndoctor: config: missing key ask.codex.model (default gpt-5.6-luna) — informational: unset, its default applies\ndoctor: config: missing key ask.codex.effort (default low) — informational: unset, its default applies\ndoctor: config: missing key ask.opencode.model (default gpt-5.6-luna) — informational: unset, its default applies\ndoctor: config: missing key ask.opencode.effort (default low) — informational: unset, its default applies\ndoctor: config: missing key log.level (default <nil>) — informational: unset, its default applies\ndoctor: config: missing key log.components (default map[]) — informational: unset, its default applies\ndoctor: config: missing key log.keepFiles (default 10) — informational: unset, its default applies\ndoctor: config: missing key log.maxMB (default 8) — informational: unset, its default applies\ndoctor: config: missing key doctor.ignoreWarnings (default []) — informational: unset, its default applies\ndoctor: config: missing key doctor.acceptedMCP (default []) — informational: unset, its default applies\n"; warnings != 0 || failures != 0 ||
+		got != want {
+		t.Errorf("warnings=%d failures=%d config rows = %q, want %q", warnings, failures, got, want)
 	}
 	if err := os.WriteFile(path, []byte("{"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	output.Reset()
 	PrintConfig(&output, config.Runtime{Config: config.Config{Path: path}})
-	if !strings.Contains(output.String(), "config: unreadable "+path) ||
-		strings.Contains(output.String(), "config: missing key") {
-		t.Fatalf("malformed file produced missing keys: %s", output.String())
+	if got, want := rooted(
+		doctorRows(output.String(), "config: "),
+		filepath.Dir(path),
+	), "doctor: config: unreadable {root}/pfm.config.json error=unexpected end of JSON input\n"; got != want {
+		t.Errorf("malformed config rows = %q, want %q", got, want)
 	}
 }
 

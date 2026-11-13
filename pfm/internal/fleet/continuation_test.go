@@ -190,7 +190,7 @@ func TestParkedClaudeChatIsOneChatUnderItsCurrentSession(t *testing.T) {
 		},
 	}
 	daemonJob := gather.Snapshot{
-		Agents: []gather.Agent{{PID: 5151, SessionID: parkedSuccessorID, ConfigDir: "/jail/.cc/3"}},
+		Agents: []gather.Agent{{PID: 5151, SessionID: parkedSuccessorID, ConfigDir: testjail.Place("/jail/.cc/3")}},
 	}
 
 	cases := []struct {
@@ -237,11 +237,11 @@ func TestContinuedHerdrSeatCarriesItsNewestSegment(t *testing.T) {
 	seat := func(state string) gather.HerdrSeat {
 		return gather.HerdrSeat{CWD: parkedCWD, Seat: fleetdb.Seat{
 			SeatID: "seat-1", SessionID: parkedPredecessorID, Engine: "cc", Backend: "herdr", State: state,
-			HerdrSocket: "/jail/herdr.sock", HerdrPane: "w1:p1", SeatHostPID: 4000,
+			HerdrSocket: testjail.Place("/jail/herdr.sock"), HerdrPane: "w1:p1", SeatHostPID: 4000,
 		}}
 	}
-	seatProcess := gather.Agent{PID: 4242, SessionID: parkedPredecessorID, ConfigDir: "/jail/.cc/2"}
-	daemonJob := gather.Agent{PID: 5151, SessionID: parkedSuccessorID, ConfigDir: "/jail/.cc/3"}
+	seatProcess := gather.Agent{PID: 4242, SessionID: parkedPredecessorID, ConfigDir: testjail.Place("/jail/.cc/2")}
+	daemonJob := gather.Agent{PID: 5151, SessionID: parkedSuccessorID, ConfigDir: testjail.Place("/jail/.cc/3")}
 
 	cases := []struct {
 		name     string

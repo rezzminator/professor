@@ -485,9 +485,13 @@ func TestMCPMetadataSignsExplicitTargetWithoutRedirectingIt(t *testing.T) {
 		CallInput{Target: "busy-session", Message: "explicit target provenance"},
 	)
 	if output.Code != 0 || !output.Typed || output.Unsigned ||
-		!strings.Contains(output.SocketPath, "cc-1700000002-1-3") ||
-		!strings.Contains(output.Proof, "sid thread-a") ||
-		!strings.Contains(output.Proof, `to reply: call "Codex A" <message>`) {
+		filepath.Base(output.SocketPath) != "cc-1700000002-1-3" ||
+		output.Proof != `🔖 Busy Label │ 🥇
+                  Working (2s · 9 tokens)
+                                         ❯ explicit target provenance  — sid thread-a · to reply: call "Codex A" <message>
+                                          QUEUED:explicit target provenance  — sid thread-a · to reply: call "Codex A" <message>
+                                                Press up to edit queued messages
+❯` {
 		t.Fatalf("explicit target call lost target or caller provenance: %+v", output)
 	}
 }

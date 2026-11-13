@@ -2,7 +2,6 @@ package tokens
 
 import (
 	"context"
-	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -131,34 +130,6 @@ func landedRepo(t *testing.T) (dir, base string) {
 	return dir, base
 }
 
-func TestMeasureLandedCountsCodeAndExcludesEachClass(t *testing.T) {
-	dir, base := landedRepo(t)
-	landed, err := measureLanded(context.Background(), deps.RealRunner{}, dir, base)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := [6]int64{landed.code, landed.tests, landed.docs, landed.generated, landed.locks, landed.binaryFiles}
-	if want := [6]int64{9, 18, 5, 8, 6, 2}; got != want {
-		t.Errorf("code, tests, docs, generated, locks, binary = %v, want %v", got, want)
-	}
-}
-
-// TestMeasureLandedNamesTheFailedCommand: a git failure is an error naming
-// the command, never 0 lines.
-func TestMeasureLandedNamesTheFailedCommand(t *testing.T) {
-	dir, _ := landedRepo(t)
-	top := runGit(t, dir, "rev-parse", "--show-toplevel")
-	_, err := measureLanded(context.Background(), deps.RealRunner{}, dir, "no-such-base")
-	if err == nil || !strings.Contains(err.Error(), "git -C "+top+" diff --numstat -z no-such-base: exit 128") {
-		t.Errorf("a bad base = %v, want the diff command named with its exit", err)
-	}
-	outside := t.TempDir()
-	_, err = measureLanded(context.Background(), deps.RealRunner{}, outside, "HEAD")
-	if err == nil || !strings.Contains(err.Error(), "git -C "+outside+" rev-parse --show-toplevel: exit 128") {
-		t.Errorf("a directory outside any repository = %v, want rev-parse named with its exit", err)
-	}
-}
-
 // TestMeasureLandedSkipsAnUntrackedFileThatVanished: a build or test temp deleted between
 // `git ls-files --others` and its stat is gone, as readHead reads a deleted tracked file, and
 // neither fails the measure nor counts as a file.
@@ -174,42 +145,5 @@ func TestMeasureLandedSkipsAnUntrackedFileThatVanished(t *testing.T) {
 	if landed.files != 1 || landed.untrackedFiles != 1 || landed.code != 1 {
 		t.Errorf("files %d untracked %d code %d, want only kept.go counted (1, 1, 1)",
 			landed.files, landed.untrackedFiles, landed.code)
-	}
-}
-
-// TestTreeReportsLandedLinesPerMillionInput: with --worktree and --base the
-// tree carries the landed lines, their rate per million input tokens and the
-// excluded counts; a bad base prints the report unmeasured and exits 1 naming the command.
-func TestTreeReportsLandedLinesPerMillionInput(t *testing.T) {
-	dir, base := landedRepo(t)
-	root := fixture(t, "tree/projects")
-	code, document, stderr := treeJSON(t, root, "--tree", treeSession, "--worktree", dir, "--base", base)
-	if code != 0 {
-		t.Fatalf("exit %d stderr %q", code, stderr)
-	}
-	tree := document.Tree
-	if tree.LandedLines == nil || *tree.LandedLines != 9 || tree.LandedNotMeasured != nil ||
-		tree.LandedPerMillionInput == nil || math.Abs(*tree.LandedPerMillionInput-9/(162100/1e6)) > 1e-9 ||
-		tree.LandedExcluded == nil || *tree.LandedExcluded != (landedExcluded{18, 5, 8, 6, 2}) {
-		t.Errorf("landed %+v", tree)
-	}
-	// --worktree is the write scope: the fixture's /work/repo writes fall outside it
-	if tree.WriteScope != dir || tree.WrittenBytes != 0 {
-		t.Errorf("scope %q written %d, want the worktree and 0", tree.WriteScope, tree.WrittenBytes)
-	}
-	code, stdout, _ := treeAudit(t, root, "--tree", treeSession, "--worktree", dir, "--base", base)
-	if code != 0 || !strings.Contains(stdout, "\nlanded code lines          9 ("+dir+" against "+base+"; ") ||
-		!strings.Contains(stdout, "\nlanded lines per M input   55.52\n") {
-		t.Errorf("exit %d stdout:\n%s", code, stdout)
-	}
-	// A landed-lines failure keeps the tokens, dollars and bytes already measured: the report prints
-	// with the lines marked not measured and the failure named, and the run exits 1 for the gap.
-	code, stdout, stderr = treeAudit(t, root, "--tree", treeSession, "--worktree", dir, "--base", "no-such-base")
-	if code != 1 || !strings.Contains(stderr, "landed lines: git -C ") ||
-		!strings.Contains(stderr, " diff --numstat -z no-such-base: exit 128") ||
-		!strings.Contains(stdout, "\ninput tokens               162100 (") ||
-		!strings.Contains(stdout,
-			"\nlanded code lines          NOT MEASURED — --tree "+treeSession+": landed lines: git -C ") {
-		t.Errorf("bad base: exit %d stdout %q stderr %q", code, stdout, stderr)
 	}
 }

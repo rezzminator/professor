@@ -3,6 +3,7 @@ package enginesync
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -115,8 +116,16 @@ func TestResolveRefusesANonExecutableOverrideNamingIt(t *testing.T) {
 	runner := Runner{Env: &paths.MapEnv{Values: map[string]string{EnvBin: notExecutable}}, Home: root}
 	got, err := runner.Resolve()
 	var unavailable *UnavailableError
-	if !errors.As(err, &unavailable) || !strings.Contains(err.Error(), notExecutable) {
-		t.Fatalf("Resolve() = %q, %v; want an *UnavailableError naming %s", got, err, notExecutable)
+	if text, want := strings.ReplaceAll(
+		fmt.Sprintf("%q %v", got, err),
+		root,
+		"{root}",
+	), "\"\" engine-sync binary unavailable: {root}/dev-engine-sync: ENGINE_SYNC_BIN={root}/dev-engine-sync: not executable"; !errors.As(
+		err,
+		&unavailable,
+	) ||
+		text != want {
+		t.Fatalf("Resolve() = %q, want %q", text, want)
 	}
 }
 

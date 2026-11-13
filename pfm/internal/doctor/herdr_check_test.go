@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -615,19 +616,16 @@ func TestHerdrReporterErrorsDoctorExit(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 	code := runDoctor(nil, &stdout, &stderr, runtime)
-	var rows []string
-	for _, line := range strings.Split(stdout.String(), "\n") {
-		if strings.HasPrefix(line, herdrReporterRow) {
-			rows = append(rows, line)
-		}
-	}
-	if len(rows) != 1 || !strings.Contains(rows[0], " WARN ") ||
-		!strings.Contains(rows[0], `newest="agent.rename refused" session=cc-9`) ||
-		!strings.Contains(rows[0], "checked="+dir+" ") {
-		t.Fatalf("reporter error rows = %q; stdout:\n%s", rows, stdout.String())
-	}
-	if code != 1 || !strings.Contains(stdout.String(), "doctor: warnings=1\n") {
-		t.Fatalf("code=%d want 1, stdout:\n%s\nstderr: %s", code, stdout.String(), stderr.String())
+	got := fmt.Sprintf(
+		"%d %s%s",
+		code,
+		doctorRows(stdout.String(), herdrReporterRow),
+		doctorRows(stdout.String(), "doctor: warnings="),
+	)
+	if got, want := regexp.MustCompile(` at=\S+ `).
+		ReplaceAllString(rooted(got, runtime.Paths.Home), " at={time} "),
+		"1 doctor: herdr-reporter-errors: WARN need=no reporter errors in the last 24h checked={root}/.local/state/pfm/herdr count=1 newest=\"agent.rename refused\" session=cc-9 at={time} — fix: read {root}/.local/state/pfm/herdr/cc-9.log and repair what it reports; the row clears 24h after the last error\ndoctor: warnings=1\n"; got != want {
+		t.Errorf("code and reporter rows = %q, want %q", got, want)
 	}
 }
 

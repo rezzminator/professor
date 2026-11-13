@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -48,8 +47,10 @@ func TestReloadCommandLinksIntoTheStore(t *testing.T) {
 			t.Fatalf("seat %s has no /reload: %v", dir, err)
 		}
 	}
-	want := "commands -> " + filepath.Join(primary, "commands") + "\n"
-	if !strings.HasPrefix(output.String(), want) || strings.Count(output.String(), want) != 1 {
-		t.Fatalf("transcript=%q, want one %q header", output.String(), want)
+	want := "commands -> " + filepath.Join(primary, "commands") + "\n  change  link " +
+		filepath.Join(primary, "commands", "reload.md") + " -> " +
+		filepath.Join(installer.managedRoot, "reload.command.md") + "\n\n"
+	if output.String() != want {
+		t.Fatalf("transcript=%q, want %q", output.String(), want)
 	}
 }

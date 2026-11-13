@@ -96,26 +96,25 @@ func TestWorkbenchTopLaunchRowArrowsDoNothing(t *testing.T) {
 
 func TestWorkbenchLaunchRowOffersOnlyItsOwnEngines(t *testing.T) {
 	for _, test := range []struct {
-		remembered pfmengine.ID
-		label      string
+		remembered   pfmengine.ID
+		label, chips string
 	}{
-		{pfmengine.Claude, "New chat → acme › Scribe  Claude"},
-		{pfmengine.Codex, "New chat → acme › Scribe  Codex"},
-		{pfmengine.OpenCode, "New chat → acme › Scribe  Claude"}, // the bench has no OpenCode: the configured default stands in
+		{pfmengine.Claude, "› ✦ New chat → acme › Scribe  Claude · 🥈 · 1h               🥈                                                         ", "› ✦ New chat › ◖ Claude ◗ [ Codex ]                          🥈                                                         "},
+		{pfmengine.Codex, "› ✦ New chat → acme › Scribe  Codex · 🥉                     ⬢ 🥉                                                       ", "› ✦ New chat › ◖ Codex ◗ [ Claude ]                          ⬢ 🥉                                                       "},
+		{pfmengine.OpenCode, "› ✦ New chat → acme › Scribe  Claude · 🥈 · 1h               🥈                                                         ", "› ✦ New chat › ◖ Claude ◗ [ Codex ]                          🥈                                                         "}, // the bench has no OpenCode: the configured default stands in
 	} {
 		t.Run(string(test.remembered), func(t *testing.T) {
 			model := workbenchSelectedModel(4)
 			model.remembered.Engine = string(test.remembered)
 			row, _ := model.selectedRow()
 			plain := ansi.Strip(model.renderGroupedRow(row, true, 120, false))
-			if !strings.Contains(plain, test.label) {
+			if plain != test.label {
 				t.Errorf("workbench launch row = %q, want %q", plain, test.label)
 			}
 			model, _ = applyKey(t, model, specialKey(tea.KeyEnter))
 			chips := ansi.Strip(model.renderGroupedRow(row, true, 120, false))
-			if !strings.Contains(chips, "Codex") || !strings.Contains(chips, "Claude") ||
-				strings.Contains(chips, "OpenCode") {
-				t.Errorf("workbench wizard chips = %q, want only Codex and Claude", chips)
+			if chips != test.chips {
+				t.Errorf("workbench wizard chips = %q, want %q", chips, test.chips)
 			}
 		})
 	}

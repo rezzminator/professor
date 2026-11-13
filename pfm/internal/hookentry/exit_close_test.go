@@ -63,7 +63,7 @@ func TestRunExitCloseFailsOpenOnCloserError(t *testing.T) {
 	exitCloseIdentify = fleetExitCloseIdentity
 	var stderr bytes.Buffer
 	code := ExitClose(strings.NewReader(`{"hook_event_name":"SessionEnd","reason":"prompt_input_exit"}`), &stderr)
-	if code != 0 || !strings.Contains(stderr.String(), "close terminals (fail-open): boom") {
+	if code != 0 || stderr.String() != "pfm internal exit-close: close terminals (fail-open): boom\n" {
 		t.Fatalf("exit=%d stderr=%q", code, stderr.String())
 	}
 }
@@ -79,8 +79,9 @@ func TestRunExitCloseReportsSkippedAndClosed(t *testing.T) {
 	var stderr bytes.Buffer
 	code := ExitClose(strings.NewReader(`{"hook_event_name":"SessionEnd","reason":"prompt_input_exit"}`), &stderr)
 	if code != 0 ||
-		!strings.Contains(stderr.String(), `left open — client 9: parent 10 is "Code Helper", not a terminal shell`) ||
-		!strings.Contains(stderr.String(), "closed 1 terminal(s) [4242]") {
+		stderr.String() != `pfm internal exit-close: left open — client 9: parent 10 is "Code Helper", not a terminal shell
+pfm internal exit-close: closed 1 terminal(s) [4242]
+` {
 		t.Fatalf("exit=%d stderr=%q", code, stderr.String())
 	}
 }

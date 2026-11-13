@@ -340,7 +340,7 @@ func TestRenderAgentRowsIdentityIsTheLaunchedAgentType(t *testing.T) {
 		map[string]string{"a1": "rr-pro"},
 	)
 	got, _ := renderOneSubagent(t, session, `{"id":"a1","model":"claude-opus-5-5"}`)
-	if content := got; !strings.Contains(content, "│rr-pro│") {
+	if content := got; content != "?/? Σ$0.00/0/0/0│rr-pro│opus│running│idle 2m0s│💾–│pfm" {
 		t.Fatalf("content = %q, want the launched type rr-pro", content)
 	}
 }
@@ -366,9 +366,10 @@ func TestRenderAgentRowsMetaWithoutRoleIsNotEmpty(t *testing.T) {
 	session := subagentSession(t, map[string][]string{"m": agentTranscriptLines[:1]}, map[string]string{"m": ""})
 	got, warned := renderOneSubagent(t, session,
 		`{"id":"m","status":"running"}`)
-	if !strings.HasPrefix(got, "?/? Σ$0.00/0/0/0│role ?│running") ||
-		!strings.Contains(warned, "names no agentType") {
-		t.Fatalf("content = %q warn = %q, want role ? and the cause", got, warned)
+	got += "\n" + strings.ReplaceAll(warned, filepath.Dir(session), "{dir}")
+	if want := "?/? Σ$0.00/0/0/0│role ?│running│idle 2m0s│💾–│pfm\n" +
+		"statusline: agent rows: row m: sub-agent meta {dir}/session/subagents/agent-m.meta.json names no agentType\n"; got != want {
+		t.Fatalf("content and warn = %q, want %q", got, want)
 	}
 }
 
@@ -386,10 +387,11 @@ func TestRenderAgentRowsIdleOnlyWhileRunning(t *testing.T) {
 	} {
 		task := `{"id":"a1","status":` + jsonText(tc.status) + `}`
 		got, _ := renderSubagentAt(t, session, task, tc.now)
-		if tc.wantIdle == "" && strings.Contains(got, "idle") {
+		if tc.wantIdle == "" && got != "1.0K/? Σ$0.01/2.0K/35/2│tracer│opus│running│1 error│💾5m✓2m:39s 94%│⟲1│pfm" {
 			t.Fatalf("%s at +%s rendered idle: %q", tc.status, tc.now.Sub(lastEntry), got)
 		}
-		if tc.wantIdle != "" && !strings.Contains(got, tc.wantIdle) {
+		if tc.wantIdle != "" &&
+			got != "1.0K/? Σ$0.01/2.0K/35/2│tracer│opus│running│idle 6m0s│1 error│💾5m✗2m:22s was 94%│⟲1│pfm" {
 			t.Fatalf("%s at +%s = %q, want %q", tc.status, tc.now.Sub(lastEntry), got, tc.wantIdle)
 		}
 	}
@@ -401,9 +403,13 @@ func TestRenderAgentRowsRowDimsOnlyItsSeparators(t *testing.T) {
 	session := subagentSession(t, map[string][]string{"a1": agentTranscriptLines}, map[string]string{"a1": "tracer"})
 	rows, _ := renderPayload(t, session, subagentNow,
 		`{"id":"a1","label":"x","model":"claude-opus-5-5","contextWindowSize":1000}`)
-	withoutSeparators := strings.ReplaceAll(rows["a1"], rowSep, " ")
-	if strings.Count(withoutSeparators, dim) != 1 { // makeBar's empty cells are the one sanctioned dim run
-		t.Fatalf("dim text outside the separators and the gauge's empty cells: %q", withoutSeparators)
+	// dim only on the separators and the gauge's empty cells
+	if got, want := strings.ReplaceAll(
+		rows["a1"],
+		rowSep,
+		"{sep}",
+	), "\x1b[1;31m▰▰▰▰▰▰▰▰\x1b[2m\x1b[0m \x1b[1;31m100%\x1b[0m \x1b[1;97m1.0K\x1b[0m\x1b[38;5;117m/1.0K\x1b[0m \x1b[38;5;245mΣ\x1b[0m\x1b[38;5;222m$0.01\x1b[0m\x1b[38;5;245m/\x1b[0m\x1b[1;97m2.0K\x1b[0m\x1b[38;5;245m/\x1b[0m\x1b[1;97m35\x1b[0m\x1b[38;5;245m/\x1b[0m\x1b[38;5;87m2\x1b[0m{sep}\x1b[38;5;213mtracer\x1b[0m{sep}\x1b[38;5;51mopus\x1b[0m{sep}\x1b[38;5;118mrunning\x1b[0m{sep}\x1b[1;38;5;203m1 error\x1b[0m{sep}\x1b[38;5;118m💾5m✓3m:8s\x1b[0m \x1b[38;5;118m94%\x1b[0m{sep}\x1b[38;5;177m⟲1\x1b[0m{sep}\x1b[38;5;156mpfm\x1b[0m{sep}\x1b[97mx\x1b[0m"; got != want {
+		t.Fatalf("row = %q, want %q", got, want)
 	}
 }
 
@@ -412,8 +418,8 @@ func TestRenderAgentRowsRowDimsOnlyItsSeparators(t *testing.T) {
 func TestRenderAgentRowsNoSessionTranscriptMarksTheRole(t *testing.T) {
 	got, warned := renderOneSubagent(t, "",
 		`{"id":"x","name":"scout","status":"running","contextWindowSize":1000}`)
-	if !strings.Contains(got, "│scout·role ?│") || strings.Count(warned, "names no session transcript") != 1 {
-		t.Fatalf("content = %q warn = %q, want scout·role ? and the cause once", got, warned)
+	if got, want := got+"\n"+warned, "?/?│?/1.0K Σ$?/?/?/?│scout·role ?│running│💾!\nstatusline: agent rows: row x: payload names no session transcript\n"; got != want {
+		t.Fatalf("content and warn = %q, want %q", got, want)
 	}
 }
 
@@ -428,7 +434,7 @@ func TestRenderAgentRowsCacheWindowFromItsOwnTranscript(t *testing.T) {
 	}}, map[string]string{"s1": "gitter"})
 	got, _ := renderOneSubagent(t, session,
 		`{"id":"s1","status":"running","contextWindowSize":1000}`)
-	if !strings.HasSuffix(got, "│💾1h✓59m:0s 48%") {
+	if got != "▰▰▰▰▰▰▰▰ 2030% 20.3K/1.0K Σ$?/20.3K/0/0│gitter│running│💾1h✓59m:0s 48%" {
 		t.Fatalf("content = %q, want the agent's own 1h window from its sidechain records and 48%%", got)
 	}
 }
@@ -455,8 +461,12 @@ func TestLoadServedPricesNamesAnUnusableClonePricesFile(t *testing.T) {
 	if prices := LoadServedPrices(home, "", &stderr, "pfm statusline"); prices == nil {
 		t.Fatalf("LoadServedPrices = nil, want the embedded table; stderr %q", stderr.String())
 	}
-	if !strings.Contains(stderr.String(), file) {
-		t.Fatalf("stderr = %q, want the unusable clone prices file %s named", stderr.String(), file)
+	if got, want := strings.ReplaceAll(
+		stderr.String(),
+		clone,
+		"{clone}",
+	), "pfm statusline: clone prices unusable, pricing from the embedded table: prices {clone}/pfm/internal/pricing/prices.json: version must be 2, got 1\n"; got != want {
+		t.Fatalf("stderr = %q, want %q", got, want)
 	}
 }
 
@@ -552,7 +562,7 @@ func TestRenderAgentRowsOpenAICacheShowsHitWithoutAWindow(t *testing.T) {
 	t.Run("an unreadable transcript is still the failure marker", func(t *testing.T) {
 		session := subagentSession(t, map[string][]string{}, map[string]string{"g2": "tracer"})
 		got, _ := renderOneSubagent(t, session, task("g2"))
-		if !strings.Contains(got, "💾!") || strings.Contains(got, "∅") {
+		if got != "?/? ctx missing Σ$?/?/?/?│tracer│luna-6│running│💾!" {
 			t.Fatalf("content = %q, want 💾! and no unknown-window marker", got)
 		}
 	})
@@ -561,7 +571,7 @@ func TestRenderAgentRowsOpenAICacheShowsHitWithoutAWindow(t *testing.T) {
 			map[string][]string{"g3": gptAgentLines[:6]}, map[string]string{"g3": "tracer"})
 		got, _ := renderOneSubagent(t, session,
 			`{"id":"g3","status":"running","contextWindowSize":1000000}`)
-		if !strings.Contains(got, "│💾∅ 87%") {
+		if got != "13.7K/? ctx missing Σ$?/21.3K/279/1 API-eq│tracer│luna-6│running│idle 1m10s│💾∅ 87%" {
 			t.Fatalf("content = %q, want the unknown window and 87%%", got)
 		}
 	})
@@ -581,7 +591,7 @@ func TestRenderAgentRowsClaudeCacheKeepsItsWindowBesideOpenAI(t *testing.T) {
 	got, _ := renderOneSubagent(t, session,
 		`{"id":"c1","status":"running","model":"claude-opus-5-5[1m]",`+
 			`"contextWindowSize":1000000}`)
-	if !strings.Contains(got, "│💾5m✓3m:0s 90%") {
+	if got != "▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.00/1.0K/1/0│tracer│opus│running│idle 1m0s│💾5m✓3m:0s 90%" {
 		t.Fatalf("content = %q, want the Claude row's 5m window and 90%%", got)
 	}
 }
@@ -603,8 +613,11 @@ func TestLoadServedPricesPricesByThePublishedTableBesideABadOverride(t *testing.
 	if prices == nil || len(prices.Rows) == 0 {
 		t.Fatalf("prices = %+v, want the published table's rows beside the override's error", prices)
 	}
-	want := "pfm statusline: price override unusable, pricing from the published table: "
-	if !strings.HasPrefix(stderr.String(), want) || !strings.Contains(stderr.String(), override) {
-		t.Fatalf("stderr = %q, want it to open %q and name %s", stderr.String(), want, override)
+	if got, want := strings.ReplaceAll(
+		stderr.String(),
+		home,
+		"{home}",
+	), "pfm statusline: price override unusable, pricing from the published table: prices {home}/pfm.prices.json: unexpected EOF\n"; got != want {
+		t.Fatalf("stderr = %q, want %q", got, want)
 	}
 }

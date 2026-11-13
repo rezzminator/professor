@@ -3,6 +3,7 @@ package action
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -61,7 +62,7 @@ func TestSynthesizeNewOpenCodeRequiresSeatAndLaunchContext(t *testing.T) {
 				FreshSocket:    "ox-1",
 				Config:         machine,
 			},
-			want: "account 9 is not in the configured roster",
+			want: "requested OpenCode account 9 is not in the configured roster",
 		},
 		{
 			name: "cwd is required",
@@ -71,7 +72,7 @@ func TestSynthesizeNewOpenCodeRequiresSeatAndLaunchContext(t *testing.T) {
 				FreshSocket:    "ox-1",
 				Config:         machine,
 			},
-			want: "requires cwd and fresh socket",
+			want: "new OpenCode action requires cwd and fresh socket",
 		},
 		{
 			name: "fresh socket is required",
@@ -80,13 +81,12 @@ func TestSynthesizeNewOpenCodeRequiresSeatAndLaunchContext(t *testing.T) {
 				PrimaryAccount: 1,
 				Config:         machine,
 			},
-			want: "requires cwd and fresh socket",
+			want: "new OpenCode action requires cwd and fresh socket",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := Synthesize(test.request)
-			if err == nil || !strings.Contains(err.Error(), test.want) {
-				t.Fatalf("error = %v, want substring %q", err, test.want)
+			if _, err := Synthesize(test.request); fmt.Sprint(err) != test.want {
+				t.Errorf("error = %q, want %q", fmt.Sprint(err), test.want)
 			}
 		})
 	}
@@ -187,7 +187,7 @@ func TestOpenLiveOpenCodeAttachesAndDemotesToItsOwnResume(t *testing.T) {
 			Name: "live one", CWD: "/work/a",
 		},
 		PrimaryAccount: 1,
-		Home:           "/home/test",
+		Home:           t.TempDir(), // the dead fallback stages the OpenCode plugin under this home
 		FreshSocket:    "ox-900-1-1",
 		Config: pfmconfig.Config{
 			Version:          pfmconfig.Version,

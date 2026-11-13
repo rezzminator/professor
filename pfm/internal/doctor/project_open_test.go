@@ -137,20 +137,16 @@ func TestDoctorSaysSoWhenTheChatIndexCannotBeRead(t *testing.T) {
 	t.Chdir(open)
 
 	var stdout bytes.Buffer
-	if warnings := printOpenProjectsDoctor(
+	warnings := printOpenProjectsDoctor(
 		context.Background(), &stdout, nil, errors.New("pfm.db is locked"),
 		stageRetiredLists(t, t.TempDir(), `{}`), &paths.MapEnv{},
-	); warnings < 2 {
-		t.Errorf("warnings=%d, want the unreadable index and the open project counted", warnings)
-	}
-	for _, want := range []string{
-		"doctor: warning project_updates chat index unreadable (pfm.db is locked); ",
-		"doctor: warning project_updates root=" + open + " unresolved=1 — NEW project/commands/added.md",
-		"doctor: project_updates projects=1 unresolved=1 ",
-	} {
-		if !strings.Contains(stdout.String(), want) {
-			t.Errorf("output lacks %q:\n%s", want, stdout.String())
-		}
+	)
+	if got, want := fmt.Sprintf(
+		"%d %s",
+		warnings,
+		rooted(stdout.String(), open),
+	), "2 doctor: warning project_updates chat index unreadable (pfm.db is locked); only the chats it did read are checked, plus the current directory\ndoctor: warning project_updates root={root} unresolved=1 — NEW project/commands/added.md — close each with a pfm update verb: pfm doctor --project-updates --root {root}\ndoctor: project_updates projects=1 unresolved=1 (every project a chat ran in; pfm doctor --project-updates --root DIR lists the rows)\n"; got != want {
+		t.Errorf("warnings and output = %q, want %q", got, want)
 	}
 }
 
@@ -300,14 +296,19 @@ func TestDoctorUpdateHealthSkipsOnlyTheHostLedger(t *testing.T) {
 	indexChatIn(t, project)
 	var health, report bytes.Buffer
 	runDoctor(nil, &health, &bytes.Buffer{}, runtime)
-	skipped := "doctor: project_updates skipped (machine-update health check: PFM_UPDATE_DOCTOR_HOST_ONLY=1)\n"
-	if !strings.Contains(health.String(), skipped) {
-		t.Errorf("update health output lacks explicit ledger skip:\n%s", health.String())
+	if got, want := doctorRows(
+		health.String(),
+		"doctor: project_updates",
+	), "doctor: project_updates skipped (machine-update health check: PFM_UPDATE_DOCTOR_HOST_ONLY=1)\n"; got != want {
+		t.Errorf("update health rows = %q, want %q", got, want)
 	}
 	code := runDoctor([]string{"--project-updates", "--root", project}, &report, &bytes.Buffer{}, runtime)
-	if code != 1 || !strings.Contains(report.String(), "notes.md:1") ||
-		!strings.Contains(report.String(), "RETIRED-NAME") {
-		t.Fatalf("explicit report code=%d output=%q, want the full retired-name report", code, report.String())
+	if got, want := fmt.Sprintf(
+		"%d %s",
+		code,
+		rooted(report.String(), project),
+	), "1 professor: {root}  blueprint self-hosted@unknown → self-hosted@unknown\n  current       2\n  ignored       0\n  UPDATED       0\n  NEW           0\n  GONE-UPSTREAM 0\n  MOVED         0\n  LOCAL-DELETED 0\n  RETIRED-NAME  1\n    notes.md:1   /wave — retired command, now the flights:foreman agent\n  every row ends in a verb; re-run this report until it ends `clean` — a row left open is not a decision:\n    · UPDATED         port the intent of each upstream commit, then pfm update pin <local>; keeping your version on purpose: pfm update pin <local> --keep \"<what you did not take, and why>\"\n    · NEW             adopt, then pfm update pin --template <template> <local>; not for this project: pfm update ignore <template>\n    · GONE-UPSTREAM   pfm update drop <local>\n    · LOCAL-DELETED   restore the file, or pfm update drop <local> then pfm update ignore <template> (a dropped pin's template reads NEW); MOVED: the verbs on the row\n    · RETIRED-NAME    edit the line to its successor; a mention that must stay: pfm update accept <path> --reason \"<why>\" [--name <name>]\n    · INCOMPLETE      inspect the unscanned text; accept reviewed coverage: pfm update accept <path> --coverage --reason \"<why>\"; read failures must be fixed\n  run the verbs one at a time: each rewrites .professor/baseline.json\nREVIEW REQUIRED — 1 items; nothing was written.\n"; got != want {
+		t.Errorf("explicit report = %q, want %q", got, want)
 	}
 }
 

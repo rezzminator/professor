@@ -3,6 +3,7 @@ package fleet
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -90,7 +91,7 @@ func TestScanRecordsATransition(t *testing.T) {
 }
 
 func TestMain(m *testing.M) {
-	os.Exit(testjail.Run(m))
+	os.Exit(testjail.RunInJail(m))
 }
 
 func jailRuntime(t *testing.T) *pfmconfig.Runtime {
@@ -155,8 +156,10 @@ func TestResolveEnvComposesOnTheImplicitAccountPastAnUnreadablePrimary(t *testin
 func TestResolveEnvRefusesAnUnreadableClock(t *testing.T) {
 	t.Setenv(TestNowNSEnv, "yesterday")
 	_, err := ResolveEnv(Request{Runtime: jailRuntime(t)})
-	if err == nil || !strings.Contains(err.Error(), TestNowNSEnv) {
-		t.Fatalf("ResolveEnv() error = %v, want one naming %s", err, TestNowNSEnv)
+	if got, want := fmt.Sprint(
+		err,
+	), "PFM_TEST_NOW_NS: strconv.ParseInt: parsing \"yesterday\": invalid syntax"; got != want {
+		t.Fatalf("ResolveEnv() error = %q, want %q", got, want)
 	}
 }
 

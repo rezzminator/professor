@@ -345,7 +345,7 @@ func TestABlockedChatIsAliveAndKeepsItsState(t *testing.T) {
 	if !status.Alive() {
 		t.Fatalf("Alive() = false for %q", status.State)
 	}
-	if !strings.Contains(status.Line(), "\tblocked\t") {
+	if status.Line() != "seat\tblocked\tidle=0s\tcc" {
 		t.Fatalf("Line() = %q, want the blocked state", status.Line())
 	}
 }

@@ -3,6 +3,7 @@ package restart
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"slices"
 	"strings"
@@ -194,14 +195,30 @@ func TestProcessStopKillsWhatIgnoresSIGTERM(t *testing.T) {
 	}
 }
 
+// A process that outlives SIGKILL, or whose live pid cannot be read, fails its stop by name, never reads as gone.
 func TestProcessStopNamesAProcessThatSurvivesSIGKILL(t *testing.T) {
-	proc := process{PID: 22, Argv: []string{"pfm", "chat", "watch"}, Start: 5}
-	kernel := newKernel(proc)
-	kernel.stubborn[22], kernel.unkillable[22] = true, true
-	finder := &discoverer{deps: testDeps(t, &hostRunner{}, kernel, &fakeFleet{})}
-	_, err := finder.processUnit(FamilyPFM, "pfm process", proc).Stop(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "pid 22 still runs pfm chat watch after SIGKILL") {
-		t.Fatalf("stop error = %v, want the survivor named", err)
+	for _, row := range []struct {
+		name       string
+		proc       process
+		unreadable bool
+		want       string
+	}{
+		{"survives SIGKILL", process{PID: 22, Argv: []string{"pfm", "chat", "watch"}, Start: 5}, false, "pid 22 still runs pfm chat watch after SIGKILL"},
+		{"unreadable live pid", process{PID: 24, Argv: []string{"pfm", "internal", "cost-sink"}, Start: 5}, true, "read pid 24 from the process table: permission denied\npermission denied"},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			kernel := newKernel(row.proc)
+			if row.unreadable {
+				kernel.unreadable[row.proc.PID] = true
+			} else {
+				kernel.stubborn[row.proc.PID], kernel.unkillable[row.proc.PID] = true, true
+			}
+			finder := &discoverer{deps: testDeps(t, &hostRunner{}, kernel, &fakeFleet{})}
+			_, err := finder.processUnit(FamilyPFM, "pfm process", row.proc).Stop(context.Background())
+			if got := fmt.Sprint(err); got != row.want {
+				t.Fatalf("stop error = %q, want %q", got, row.want)
+			}
+		})
 	}
 }
 
@@ -215,17 +232,6 @@ func TestProcessStopNeverSignalsARecycledPid(t *testing.T) {
 	}
 	if len(kernel.sent()) != 0 {
 		t.Fatalf("a recycled pid was signalled: %v", kernel.sent())
-	}
-}
-
-func TestProcessStopAnUnreadableLivePidIsAnErrorNotGone(t *testing.T) {
-	proc := process{PID: 24, Argv: []string{"pfm", "internal", "cost-sink"}, Start: 5}
-	kernel := newKernel(proc)
-	kernel.unreadable[24] = true
-	finder := &discoverer{deps: testDeps(t, &hostRunner{}, kernel, &fakeFleet{})}
-	_, err := finder.processUnit(FamilyHelpers, "cost sink", proc).Stop(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "read pid 24 from the process table") {
-		t.Fatalf("stop error = %v, want the unreadable pid named", err)
 	}
 }
 

@@ -140,8 +140,7 @@ func TestEditSettingsKeepsAKeyAnotherWriterAddedBetweenTheReadAndTheRename(t *te
 		t.Fatalf("EditSettings: %v", err)
 	}
 	content, _ := os.ReadFile(path)
-	if runs != 2 || !strings.Contains(string(content), `"chat": "wrote this"`) ||
-		!strings.Contains(string(content), `"theme": "custom:gold"`) {
+	if runs != 2 || string(content) != "{\n  \"chat\": \"wrote this\",\n  \"theme\": \"custom:gold\"\n}\n" {
 		t.Fatalf("apply ran %d times, file:\n%s\nwant the other writer's key kept and apply re-run once", runs, content)
 	}
 }

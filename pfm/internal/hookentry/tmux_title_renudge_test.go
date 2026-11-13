@@ -116,8 +116,7 @@ func TestTmuxTitleRenudgeAllHostOwnedReturnsThree(t *testing.T) {
 
 	code, stderr := callTmuxTitleRenudge(t, tmuxDir, fake)
 	if code != 3 ||
-		!strings.Contains(stderr, "all 1 live servers") ||
-		!strings.Contains(stderr, "host-owned titles") {
+		stderr != "pfm internal tmux-title-renudge: nothing to nudge — all 1 live servers have set-titles off (host-owned titles)\n" {
 		t.Fatalf("host-owned server: code=%d stderr=%q", code, stderr)
 	}
 }
@@ -144,7 +143,8 @@ func TestTmuxTitleRenudgeReportsRealFailureWithSocketContext(t *testing.T) {
 	fake.readErrs["cx-broken"] = errors.New("permission denied")
 
 	code, stderr := callTmuxTitleRenudge(t, tmuxDir, fake)
-	if code != 1 || !strings.Contains(stderr, "cx-broken") || !strings.Contains(stderr, "permission denied") {
+	if code != 1 ||
+		stderr != "pfm internal tmux-title-renudge: read set-titles on socket cx-broken: permission denied\n" {
 		t.Fatalf("probe failure: code=%d stderr=%q", code, stderr)
 	}
 }
@@ -157,7 +157,7 @@ func TestTmuxTitleRenudgeReportsNudgeFailureWithSocketContext(t *testing.T) {
 	fake.nudgeErr["cc-broken"] = errors.New("write failed")
 
 	code, stderr := callTmuxTitleRenudge(t, tmuxDir, fake)
-	if code != 1 || !strings.Contains(stderr, "cc-broken") || !strings.Contains(stderr, "write failed") {
+	if code != 1 || stderr != "pfm internal tmux-title-renudge: nudge socket cc-broken: write failed\n" {
 		t.Fatalf("nudge failure: code=%d stderr=%q", code, stderr)
 	}
 }
@@ -167,7 +167,7 @@ func TestTmuxTitleRenudgeRejectsArgumentsAndNamesReadDirFailures(t *testing.T) {
 	var stderr bytes.Buffer
 	runtime := config.Runtime{Paths: paths.Values{TmuxDir: t.TempDir()}}
 	if code := tmuxTitleRenudgeWith([]string{"extra"}, &stderr, runtime, fake); code != 2 ||
-		!strings.Contains(stderr.String(), "usage: pfm internal tmux-title-renudge") {
+		stderr.String() != "usage: pfm internal tmux-title-renudge\n" {
 		t.Fatalf("positional argument: code=%d stderr=%q", code, stderr.String())
 	}
 

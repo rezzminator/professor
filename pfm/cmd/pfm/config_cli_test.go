@@ -23,8 +23,12 @@ func TestExplicitConfigFlagWinsOverPFMConfig(t *testing.T) {
 	t.Setenv(paths.EnvConfig, fromEnv)
 	var stdout, stderr bytes.Buffer
 	code := run([]string{"--config", fromFlag, "config", "show"}, &stdout, &stderr)
-	if code != 0 || !strings.Contains(stdout.String(), "config path="+fromFlag) {
-		t.Fatalf("flag precedence code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	if first, want := rooted(
+		strings.SplitN(stdout.String(), "\n", 2)[0],
+		root,
+	), "config path={root}/flag.json exists=true"; code != 0 ||
+		first != want {
+		t.Fatalf("flag precedence code=%d stderr=%q stdout line 1 = %q, want %q", code, stderr.String(), first, want)
 	}
 }
 

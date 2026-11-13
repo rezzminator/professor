@@ -39,13 +39,15 @@ func TestGenerateWritesTheCloneTreeIntoPromptsAndCodexFence(t *testing.T) {
 		t.Fatal(err)
 	}
 	claude := readFixture(t, filepath.Join(clone, "pfm", "harness-prompts", "generated", "claude.md"))
-	if !strings.Contains(claude, cloneHeadLine) {
-		t.Fatalf("generated/claude.md lacks the clone's edited head:\n%.300s", claude)
-	}
+	wantOutputLines(t, claude, []string{cloneHeadLine}, "clone-only head line")
 	config := readFixture(t, filepath.Join(home, ".codex", "config.toml"))
-	if !strings.Contains(config, codexInstructionsFenceBegin) || !strings.Contains(config, cloneHeadLine) {
-		t.Fatalf("the Codex developer_instructions fence lacks the clone's edited head:\n%.500s", config)
-	}
+	wantOutputLines(
+		t,
+		config,
+		[]string{codexInstructionsFenceBegin, cloneHeadLine, codexInstructionsFenceEnd},
+		"developer_instructions —",
+		"clone-only head line",
+	)
 }
 
 // A plan previews every step and writes nothing under the home or the clone.

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -58,10 +57,14 @@ func TestFinisherSurfacesAKillItNeverSawLand(t *testing.T) {
 	if runErr == nil {
 		t.Fatal("Run succeeded even though the pane was never confirmed gone")
 	}
-	if !strings.Contains(runErr.Error(), "never confirmed gone") {
+	if runErr.Error() != `kill-exit for 88888888-8888-4888-8888-888888888888: pane %9 was never confirmed gone: tmux probe failed
+kill-pane: pane still attached
+tmux probe failed` {
 		t.Fatalf("error = %v, want it to name the unconfirmed kill", runErr)
 	}
-	if !strings.Contains(runErr.Error(), killPaneErr.Error()) {
+	if runErr.Error() != `kill-exit for 88888888-8888-4888-8888-888888888888: pane %9 was never confirmed gone: tmux probe failed
+kill-pane: pane still attached
+tmux probe failed` {
 		t.Fatalf("error = %v, want it to surface the discarded KillPane failure %q", runErr, killPaneErr)
 	}
 	if _, found, err := database.Killed(ctx, id); err != nil {

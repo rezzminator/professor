@@ -78,20 +78,6 @@ func TestTmuxTitlesOrDefaultTreatsNilAsPfmOwned(t *testing.T) {
 	}
 }
 
-func TestTmuxTitlesRoundTripsThroughMarshal(t *testing.T) {
-	got, err := loadTmuxConfig(t, `, "tmux": {"titles": {"enabled": false}}`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	content, err := Marshal(got, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(content), `"titles"`) || !strings.Contains(string(content), `"enabled": false`) {
-		t.Fatalf("Marshal dropped tmux.titles.enabled:\n%s", content)
-	}
-}
-
 func TestTmuxRejectsUnknownKeys(t *testing.T) {
 	if _, err := loadTmuxConfig(t, `, "tmux": {"title": {"enabled": false}}`); err == nil {
 		t.Fatal("a misspelled tmux key was accepted")

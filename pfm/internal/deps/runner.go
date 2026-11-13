@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -132,7 +131,10 @@ func (RealRunner) Run(ctx context.Context, argv []string, opts RunOptions) (RunR
 	if len(argv) == 0 {
 		return RunResult{ExitCode: -1}, errors.New("deps: RealRunner.Run: empty argv")
 	}
-	if err := gateArgv0(argv[0]); err != nil {
+	if served, ok := unitNetServedRunner(argv[0]); ok {
+		return served.Run(ctx, argv, opts)
+	}
+	if err := gateArgv0(argv); err != nil {
 		return RunResult{ExitCode: -1}, err
 	}
 	command := exec.CommandContext(ctx, argv[0], argv[1:]...)
@@ -189,7 +191,10 @@ func (RealRunner) Start(ctx context.Context, argv []string, opts StartOptions) (
 	if len(argv) == 0 {
 		return nil, errors.New("deps: RealRunner.Start: empty argv")
 	}
-	if err := gateArgv0(argv[0]); err != nil {
+	if served, ok := unitNetServedRunner(argv[0]); ok {
+		return served.Start(ctx, argv, opts)
+	}
+	if err := gateArgv0(argv); err != nil {
 		return nil, err
 	}
 	if opts.Foreground && (opts.Detach || opts.Ctty < 0) {
@@ -265,16 +270,6 @@ func (RealRunner) Start(ctx context.Context, argv []string, opts StartOptions) (
 		stdout:       stdout,
 		processGroup: opts.ProcessGroup || opts.Foreground,
 	}, nil
-}
-
-// gateArgv0 refuses a bare argv[0] the registry gates to another platform
-// before anything execs, with Resolve's own text. A path (it holds '/') is
-// the caller's explicit choice, a test's stub included, and is not gated.
-func gateArgv0(argv0 string) error {
-	if strings.Contains(argv0, "/") {
-		return nil
-	}
-	return platformGate(argv0)
 }
 
 func startProcessAttributes(opts StartOptions) *syscall.SysProcAttr {

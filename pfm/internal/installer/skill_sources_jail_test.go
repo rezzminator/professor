@@ -43,8 +43,7 @@ func TestRunSkillGitReturnsWithinItsBound(t *testing.T) {
 	if elapsed := time.Since(start); elapsed > 8*time.Second {
 		t.Fatalf("git returned after %s, past its bound (err=%v)", elapsed, err)
 	}
-	if err == nil || !strings.Contains(err.Error(), "timed out") ||
-		!strings.Contains(err.Error(), "fatal: slow remote") {
+	if err == nil || err.Error() != "git clone timed out after 200ms: fatal: slow remote" {
 		t.Fatalf("timeout error does not carry git's stderr tail: %v", err)
 	}
 }

@@ -1,0 +1,154 @@
+## update banner
+  ╭─ dossier ───────────────────────────
+    UPDATE                              
+   v0.63.0 is out                       
+   ───────────────────────────────────  
+   Enter starts the guided upgrade.     
+                                        
+                                        
+   ◖ ⏎ upgrade ◗                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+  ╰─────────────────────────────────────
+## new chat
+  ╭─ dossier ───────────────────────────
+    NEW   Claude  🥈                    
+   New Claude chat                      
+   ───────────────────────────────────  
+   Enter chooses the engine, account    
+   and cache of a new chat, each step   
+   opening on your last choice.         
+                                        
+                                        
+   ◖ ⏎ choose ◗                         
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+  ╰─────────────────────────────────────
+## single engine
+  ╭─ dossier ───────────────────────────
+    NEW   Codex  🥉                     
+   New Codex chat                       
+   ───────────────────────────────────  
+   Enter starts a new Codex chat in     
+   /p.                                  
+                                        
+                                        
+   ◖ ⏎ start ◗                          
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+  ╰─────────────────────────────────────
+## failed update check
+The last update check failed. This
+row is a notice, not a chat.
+## live chat purpose
+
+## P:BUILDER height 40
+ LIVE   Claude  🥇
+P:BUILDER                           
+────────────────────────────────────
+┃ Wire the tempo axis into the list 
+┃ panel and keep the cursor row     
+┃ visible when the viewport scrolls.
+
+project  atlas                      
+model    ◆ opus-4-7  🚄 high        
+working  ◉◐◓     mid-turn · 2 agents
+active   ▰▰▰▰▰▰▰▰  4s ago           
+         today 07:59                
+where    ~/atlas                    
+prompts  ▰▰▰▰▰▰▰▰▰▱  214 prompts
+heft     ▰▰▰▰▰▰▰▰▰▰  2.3M
+tmux     cc-1 %1                    
+session  …000-4000-8000-000000000001
+
+◖ ▶ open                         ⏎ ◗
+  ⚡ reboot                     ⌃O  
+  ✖ kill                        ⌃X  
+  ⏸ deactive                        
+## P:BUILDER height 9
+ LIVE   Claude  🥇
+P:BUILDER                           
+────────────────────────────────────
+┃ Wire the tempo axis into the list 
+┃ panel and keep the cursor row…    
+
+project  atlas                      
+model    ◆ opus-4-7  🚄 high        
+
+## native your last message was not answered — re-send it
+project  ?                                                                                          
+lost noteyour last message was not answered — re-send it                                            
+herdr    native.sock w1:p1                                                                          
+session  sid                                                                                        
+## native HERDR UNREACHABLE own socket
+project  ?                                                                                          
+error    HERDR UNREACHABLE own socket                                                               
+herdr    native.sock w1:p1                                                                          
+session  sid                                                                                        
+## empty list
+  ╭─ dossier ───────────────────────────
+    nothing selected                    
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+  ╰─────────────────────────────────────

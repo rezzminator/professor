@@ -376,7 +376,7 @@ func TestRunStdioCancellationAfterSuccessfulProbe(t *testing.T) {
 		}
 	}()
 	err := professor.runStdioTransport(ctx, io.NopCloser(strings.NewReader("")), w, stdioTestOptions(service, "unused"))
-	if !errors.Is(err, context.Canceled) || strings.Contains(err.Error(), "%!w") {
+	if !errors.Is(err, context.Canceled) || err.Error() != "pfm mcp stdio: daemon probe cancelled: context canceled" {
 		t.Fatalf("stdio error = %v; want actual context cancellation", err)
 	}
 }

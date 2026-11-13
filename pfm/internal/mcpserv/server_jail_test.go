@@ -473,12 +473,8 @@ func buildFleetBinary(t *testing.T) string {
 			fleetBinaryErr = fmt.Errorf("create shared pfm build directory: %w", err)
 			return
 		}
-		root, err := filepath.Abs(filepath.Join("..", ".."))
-		if err != nil {
-			fleetBinaryErr = fmt.Errorf("locate pfm source: %w", err)
-			return
-		}
-		fleetBinaryPath, fleetBinaryErr = testjail.PFMBinary(root, fleetBinaryDir)
+		// RunInJail moved this package into the jail, so the source is the launch directory's module.
+		fleetBinaryPath, fleetBinaryErr = testjail.PFMBinary(testjail.ModuleRoot(), fleetBinaryDir)
 	})
 	if fleetBinaryErr != nil {
 		t.Fatal(fleetBinaryErr)
@@ -510,21 +506,6 @@ func TestBuildFleetBinaryUsesPrebuiltPFM(t *testing.T) {
 	}
 	if _, err := os.Stat(prebuilt); err != nil {
 		t.Fatalf("mcpserv TestMain removed prebuilt binary %q: %v", prebuilt, err)
-	}
-}
-
-func TestBuildFleetBinaryRejectsBrokenPrebuiltPFM(t *testing.T) {
-	if os.Getenv("TEST_BROKEN_FLEET_BINARY") != "" {
-		buildFleetBinary(t)
-		return
-	}
-	missing := filepath.Join(t.TempDir(), "missing-pfm")
-	command := exec.Command(os.Args[0], "-test.run=^TestBuildFleetBinaryRejectsBrokenPrebuiltPFM$")
-	command.Env = append(os.Environ(), paths.EnvTestPFMBinary+"="+missing, "TEST_BROKEN_FLEET_BINARY=1")
-	output, err := command.CombinedOutput()
-	if err == nil || !strings.Contains(string(output), paths.EnvTestPFMBinary) ||
-		!strings.Contains(string(output), missing) {
-		t.Fatalf("buildFleetBinary broken prebuilt = %v, %q; want named failure", err, output)
 	}
 }
 

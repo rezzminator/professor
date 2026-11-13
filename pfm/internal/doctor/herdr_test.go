@@ -177,10 +177,10 @@ func TestHerdrBackendDoctorDiscoveryErrors(t *testing.T) {
 		want        string
 		failures    int
 	}{
-		{name: "configured absent binary", failures: 1, want: "doctor: herdr backend UNREACHABLE — herdr not installed but chat.backend=herdr requires it"},
-		{name: "lookup error", lookup: errors.New("permission denied"), failures: 1, want: "doctor: herdr backend UNREACHABLE — herdr on doctor's PATH: permission denied"},
-		{name: "status execution error", run: errors.New("fork failed"), failures: 1, want: "doctor: herdr backend UNREACHABLE — herdr status --json: fork failed"},
-		{name: "status nonzero exit", exit: 2, failures: 1, want: "doctor: herdr backend UNREACHABLE — herdr status --json: exit 2: stopped"},
+		{name: "configured absent binary", failures: 1, want: "doctor: herdr backend UNREACHABLE — herdr not installed but chat.backend=herdr requires it\ndoctor: herdr backend repair — install or start Herdr, then run herdr status --json; change chat.backend if Herdr is not required\n"},
+		{name: "lookup error", lookup: errors.New("permission denied"), failures: 1, want: "doctor: herdr backend UNREACHABLE — herdr on doctor's PATH: permission denied\ndoctor: herdr backend repair — install or start Herdr, then run herdr status --json; change chat.backend if Herdr is not required\n"},
+		{name: "status execution error", run: errors.New("fork failed"), failures: 1, want: "doctor: herdr backend UNREACHABLE — herdr status --json: fork failed\ndoctor: herdr backend repair — install or start Herdr, then run herdr status --json; change chat.backend if Herdr is not required\n"},
+		{name: "status nonzero exit", exit: 2, failures: 1, want: "doctor: herdr backend UNREACHABLE — herdr status --json: exit 2: stopped\ndoctor: herdr backend repair — install or start Herdr, then run herdr status --json; change chat.backend if Herdr is not required\n"},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			runner := &deps.FakeRunner{}
@@ -201,19 +201,8 @@ func TestHerdrBackendDoctorDiscoveryErrors(t *testing.T) {
 				Dependencies{Runner: runner, Env: &paths.MapEnv{Values: map[string]string{}}},
 				false,
 			)
-			if scenario.failures > 0 && !strings.Contains(stdout.String(), "doctor: herdr backend repair —") {
-				t.Errorf("unreachable backend has no repair line: %s", stdout.String())
-			}
-			if !strings.Contains(stdout.String(), scenario.want+"\n") || warnings != 0 ||
-				failures != scenario.failures {
-				t.Fatalf(
-					"warnings=%d failures=%d output=%q, want %q / failures=%d",
-					warnings,
-					failures,
-					stdout.String(),
-					scenario.want,
-					scenario.failures,
-				)
+			if got := stdout.String(); warnings != 0 || failures != scenario.failures || got != scenario.want {
+				t.Errorf("warnings=%d failures=%d output = %q, want %q", warnings, failures, got, scenario.want)
 			}
 		})
 	}
@@ -226,15 +215,15 @@ func TestHerdrBackendDoctorFollowsConfiguredBackend(t *testing.T) {
 		code                              int
 		want, resolution                  string
 	}{
-		{name: "default auto outside", backend: pfmconfig.DefaultChatBackend, source: pfmconfig.SourceDefault, want: "doctor: herdr backend NOT CHECKED — chat.backend=auto (default) resolves to tmux here: no Herdr server runs at SOCKET"},
-		{name: "explicit auto outside", backend: "auto", source: pfmconfig.SourceFile, want: "doctor: herdr backend NOT CHECKED — chat.backend=auto (file) resolves to tmux here: no Herdr server runs at SOCKET"},
-		{name: "default auto inside unreachable", backend: "auto", marker: "1", pane: "w1:p1", source: pfmconfig.SourceDefault, want: "doctor: herdr backend NOT CHECKED — chat.backend=auto (default) resolves to tmux here: no Herdr server runs at SOCKET"},
-		{name: "explicit auto inside unreachable", backend: "auto", marker: "1", pane: "w1:p1", source: pfmconfig.SourceFile, want: "doctor: herdr backend NOT CHECKED — chat.backend=auto (file) resolves to tmux here: no Herdr server runs at SOCKET"},
-		{name: "auto cannot read tmux", backend: "auto", marker: "1", pane: "w1:p1", tmux: "/tmp/tmux-1/dead,1,0", source: pfmconfig.SourceDefault, want: "doctor: herdr backend NOT CHECKED — chat.backend=auto (default) resolves to tmux here: no Herdr server runs at SOCKET"},
-		{name: "auto missing pane", backend: "auto", marker: "1", source: pfmconfig.SourceDefault, want: "chat.backend=auto (default) resolves to tmux here: no Herdr server runs at SOCKET"},
-		{name: "auto missing marker", backend: "auto", pane: "w1:p1", source: pfmconfig.SourceDefault, want: "chat.backend=auto (default) resolves to tmux here: no Herdr server runs at SOCKET"},
-		{name: "explicit tmux inside", backend: "tmux", marker: "1", pane: "w1:p1", source: pfmconfig.SourceFile, want: "doctor: herdr backend NOT CHECKED — chat.backend=tmux (file) selects tmux"},
-		{name: "configured unreachable", backend: "herdr", source: pfmconfig.SourceFile, code: 3, want: "doctor: herdr backend UNREACHABLE —"},
+		{name: "default auto outside", backend: pfmconfig.DefaultChatBackend, source: pfmconfig.SourceDefault, want: "doctor: herdr backend NOT CHECKED — chat.backend=auto (default) resolves to tmux here: no Herdr server runs at {root}\n"},
+		{name: "explicit auto outside", backend: "auto", source: pfmconfig.SourceFile, want: "doctor: herdr backend NOT CHECKED — chat.backend=auto (file) resolves to tmux here: no Herdr server runs at {root}\n"},
+		{name: "default auto inside unreachable", backend: "auto", marker: "1", pane: "w1:p1", source: pfmconfig.SourceDefault, want: "doctor: herdr backend NOT CHECKED — chat.backend=auto (default) resolves to tmux here: no Herdr server runs at {root}\n"},
+		{name: "explicit auto inside unreachable", backend: "auto", marker: "1", pane: "w1:p1", source: pfmconfig.SourceFile, want: "doctor: herdr backend NOT CHECKED — chat.backend=auto (file) resolves to tmux here: no Herdr server runs at {root}\n"},
+		{name: "auto cannot read tmux", backend: "auto", marker: "1", pane: "w1:p1", tmux: "/tmp/tmux-1/dead,1,0", source: pfmconfig.SourceDefault, want: "doctor: herdr backend NOT CHECKED — chat.backend=auto (default) resolves to tmux here: no Herdr server runs at {root}\n"},
+		{name: "auto missing pane", backend: "auto", marker: "1", source: pfmconfig.SourceDefault, want: "doctor: herdr backend NOT CHECKED — chat.backend=auto (default) resolves to tmux here: no Herdr server runs at {root}\n"},
+		{name: "auto missing marker", backend: "auto", pane: "w1:p1", source: pfmconfig.SourceDefault, want: "doctor: herdr backend NOT CHECKED — chat.backend=auto (default) resolves to tmux here: no Herdr server runs at {root}\n"},
+		{name: "explicit tmux inside", backend: "tmux", marker: "1", pane: "w1:p1", source: pfmconfig.SourceFile, want: "doctor: herdr backend NOT CHECKED — chat.backend=tmux (file) selects tmux\n"},
+		{name: "configured unreachable", backend: "herdr", source: pfmconfig.SourceFile, code: 3, want: "doctor: herdr backend UNREACHABLE — herdr socket {root}: dial for ping pfm-seat: dial unix {root}: connect: no such file or directory\ndoctor: herdr backend repair — install or start Herdr, then run herdr status --json; change chat.backend if Herdr is not required\n"},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			runtime := buildCleanDoctorHome(t)
@@ -250,23 +239,18 @@ func TestHerdrBackendDoctorFollowsConfiguredBackend(t *testing.T) {
 			t.Setenv("TMUX", scenario.tmux)
 			var stdout, stderr bytes.Buffer
 			code := runDoctor(nil, &stdout, &stderr, runtime)
-			want := strings.ReplaceAll(scenario.want, "SOCKET", socket)
-			if code != scenario.code || !strings.Contains(stdout.String(), want) {
-				t.Fatalf(
-					"code=%d, want %d and %q; stdout=%s stderr=%s",
+			if got := rooted(
+				doctorRows(stdout.String(), "doctor: herdr backend"),
+				socket,
+			); code != scenario.code ||
+				got != scenario.want {
+				t.Errorf(
+					"code=%d herdr backend rows = %q, want %q; stderr=%s",
 					code,
-					scenario.code,
-					want,
-					stdout.String(),
+					got,
+					scenario.want,
 					stderr.String(),
 				)
-			}
-			if scenario.code == 3 && scenario.backend == "herdr" &&
-				!strings.Contains(stdout.String(), "doctor: herdr backend repair —") {
-				t.Errorf("unreachable backend has no repair line: %s", stdout.String())
-			}
-			if scenario.resolution != "" && !strings.Contains(stdout.String(), scenario.resolution) {
-				t.Errorf("auto backend has no resolution line %q: %s", scenario.resolution, stdout.String())
 			}
 		})
 	}

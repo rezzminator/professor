@@ -1,0 +1,52 @@
+exit 1
+TOKEN AUDIT · last 24h · host test-host · 2026-10-09T19:00:00.000Z
+scanned {root} · 0 transcripts (0 main, 0 agent runs with priced calls) · 0 API calls
+pricing: saved table testdata/fixtures/model-cost.json; Standard service, published prompt/context tiers (Codex aggregates use the run peak tier); table fetched 2026-01-01T00:00:00Z from anthropic, openai; not historical billing
+data gaps: transcript totals exclude background API calls (auto_mode, prompt_suggestion, hook_prompt, generate_session_title, agent_summary); captured telemetry is reported separately by pfm tokens (without --tree); missing telemetry and metadata-filtered background sessions cannot be quantified · Claude billing route/region not configured; default direct/global list prices may not match cloud billing — set billing in pfm.prices.json or override rates
+
+== 1 · TOTAL $0.00 by billing class
+      $0.00   0.0%  re-reading cached context (per-model read rate) · 0.0M tok
+      $0.00   0.0%  writing context to the 5-minute cache (1.25x) · 0.0M tok
+      $0.00   0.0%  writing context to the 1-hour cache (2x) · 0.0M tok
+      $0.00   0.0%  output tokens · 0.0M tok
+      $0.00   0.0%  uncached input (1x) · 0.0M tok
+  main chat loops $0.00 (0.0%) · sub-agents $0.00 (0.0%) · thinking 0.0M of 0.0M output tok
+
+== 2 · BY PROJECT
+
+== 3 · BY KIND · MODEL · EFFORT
+
+== 4 · WHAT THE MONEY PAID FOR (every dollar traced to the context that caused it)
+
+== 5 · HOW BIG WAS THE CONTEXT WHEN THE MONEY WAS SPENT
+  and how deep into a run it was spent (a run's context only grows, so late calls are the dear ones):
+  calls that moved almost nothing yet re-read the whole context:
+
+== 6 · FULL CACHE REWRITES (the whole context re-billed at write price)
+  $0.00 total (0.0%)
+
+== 7 · TOP 12 CHAT FAMILIES (a chat + the agents it spawned)
+
+== 8 · AGENT GROUPS (project · agent type · model) — same job, different cost?
+      total    n   median      p90      max  calls  peakK  wall m  errs  tests  reread  poll$ small$     ttl  group (calls/peak/wall = median, errs/tests/reread = per run, poll/small = share of group $, ttl = where its cache writes went)
+
+== 9 · TOP 15 SINGLE RUNS
+
+== 10 · TOOLS (results entering context; ~4 chars per token)
+  harness injections by type:
+
+== 11 · LOOPS
+  the same shell command, repeated inside one run:
+  the same file, read again while already in context:
+  single tool results that were then carried the longest (estimate: tokens × later calls × read price):
+
+== 12 · BUSIEST HOURS (UTC)
+
+== CROSS-CHECK (this estimate vs the harness's own cost-state line, chats wholly inside the window)
+  no chat qualifies — the estimate is UNCHECKED on this host
+
+== COST LEDGER (every API call the ledger recorded, side calls included; the chats with a ledger, dearest first)
+cost ledger of 00000000-0000-4000-8000-0000000000b2: 1 malformed records; no calls dated in the selected window
+
+--- stderr
+pfm tokens: 1 read error(s); this report is INCOMPLETE — cost ledger of 00000000-0000-4000-8000-0000000000b2: 1 malformed records; no calls dated in the selected window

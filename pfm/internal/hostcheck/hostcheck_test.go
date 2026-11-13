@@ -354,7 +354,7 @@ func TestRemoveKeepingDoors(t *testing.T) {
 			env := fixtureEnv(t)
 			remove, keep := door.shape(t, env)
 			rows := detect(t, door.check, env)
-			if len(rows) != 1 || rows[0].Fix != oneFile(remove, keep) || strings.Contains(rows[0].Fix, "rm ") {
+			if len(rows) != 1 || rows[0].Fix != oneFile(remove, keep) {
 				t.Fatalf("rows=%+v, want one fix %q", rows, oneFile(remove, keep))
 			}
 		})

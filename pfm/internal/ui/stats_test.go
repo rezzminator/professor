@@ -22,6 +22,7 @@ import (
 	claudeengine "github.com/rezzminator/professor/pfm/internal/engine/claude"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	pfmstats "github.com/rezzminator/professor/pfm/internal/stats"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 	"github.com/rezzminator/professor/pfm/internal/theme"
 )
 
@@ -288,18 +289,81 @@ func TestStatsSamplerIsLazyAndStopsAfterLeaving(t *testing.T) {
 	}
 }
 
-func TestLimitsTabRendersAccountWindows(t *testing.T) {
-	model := NewModel(fixtureSnapshot(120))
-	model.tab = TabLimits
-	model.stats = pfmstats.Snapshot{Limits: []pfmstats.AccountLimits{{
-		Account: 2,
-		Emoji:   "🔹",
-		Windows: []pfmstats.Window{{Name: "7d-fable", UsedPct: 23, ResetAt: time.Unix(1_800_000_000, 0)}},
-	}}}
-	plain := ansi.Strip(model.renderLimitsPanel(120, 8))
-	if !strings.Contains(plain, "7d-fable") || !strings.Contains(plain, "23%") || !strings.Contains(plain, "🔹") {
-		t.Fatalf("limits panel=%q", plain)
+func TestLimitsPanelRendersEveryCardState(t *testing.T) {
+	now := time.Unix(0, fixtureNowNS)
+	home := testjail.Place("/home/test")
+	label := func(id int) string {
+		return pfmconfig.DisplayAccountDir(home, id, pfmconfig.DefaultAccountDir(home, id))
 	}
+	emoji1 := pfmconfig.Defaults(
+		home, []string{filepath.Join(pfmconfig.DefaultAccountDir(home, 1), "projects")},
+	).EmojiFor(1)
+	var out strings.Builder
+	for _, test := range []struct {
+		name          string
+		width, height int
+		limits        []pfmstats.AccountLimits
+	}{
+		{"account windows", 120, 8, []pfmstats.AccountLimits{{
+			Account: 2, Emoji: "🔹",
+			Windows: []pfmstats.Window{{Name: "7d-fable", UsedPct: 23, ResetAt: time.Unix(1_800_000_000, 0)}},
+		}}},
+		{"fancy cards refresh past resets", 120, 10, []pfmstats.AccountLimits{{
+			Account: 1, Emoji: "🥇", Engine: pfmengine.Claude,
+			Windows: []pfmstats.Window{
+				{Name: "5h", UsedPct: 52, ResetAt: now.Add(90 * time.Minute)},
+				{Name: "7d", UsedPct: 100, ResetAt: now.Add(-time.Minute)},
+			},
+		}}},
+		{"cached windows under a refresh warning", 120, 9, []pfmstats.AccountLimits{{
+			Account: 2, Emoji: "🥈", Engine: "claude", ConfirmedAt: now.Add(-7 * time.Minute),
+			Status:  "refresh timed out; showing cached limits",
+			Windows: []pfmstats.Window{{Name: "7d", UsedPct: 73, ResetAt: now.Add(4 * 24 * time.Hour)}},
+		}}},
+		{"unsupported engine omitted", 120, 10, []pfmstats.AccountLimits{
+			{Account: 1, Engine: pfmengine.Claude, Windows: []pfmstats.Window{{Name: "5h", UsedPct: 5}}},
+			{Account: 1, Engine: pfmengine.OpenCode, Unsupported: true, Status: "engine ox: no usage source registered"},
+		}},
+		{"codex shows its first window only", 120, 10, []pfmstats.AccountLimits{{
+			Account: 1, Engine: pfmengine.Codex, Label: "Codex 1",
+			Windows: []pfmstats.Window{
+				{Name: "7d", UsedPct: 2}, {Name: "7d-reserve"}, {Name: "5h-spark"}, {Name: "7d-spark"},
+			},
+		}}},
+		{"no provider max totals", 120, 10, []pfmstats.AccountLimits{
+			{Account: 1, Engine: pfmengine.Claude, Windows: []pfmstats.Window{{Name: "5h", UsedPct: 52}}},
+			{Account: 2, Engine: pfmengine.Claude, Windows: []pfmstats.Window{{Name: "5h", UsedPct: 75}}},
+		}},
+		{"engine absences are two dim lines", 120, 8, []pfmstats.AccountLimits{
+			{Engine: pfmengine.Claude, Label: "no Claude accounts configured", Status: "no Claude accounts configured", Absent: true},
+			{Engine: pfmengine.Codex, Label: "no Codex accounts configured", Status: "no Codex accounts configured", Absent: true},
+		}},
+		{"skips consolidated, unknowns dropped, errors kept", 140, 18, []pfmstats.AccountLimits{
+			{
+				Account: 1, Emoji: emoji1, Engine: pfmengine.Claude, Label: label(1),
+				Windows: []pfmstats.Window{
+					{Name: "7d-fable", ResetNote: "reset unavailable"},
+					{Name: "unknown[seven_day_nimbus_quill]", ResetNote: "reset unavailable"},
+				},
+			},
+			{Account: 3, Engine: pfmengine.Claude, Label: label(3), Status: "skipped " + label(3) + ": credentials rejected"},
+			{Account: 4, Engine: pfmengine.Claude, Label: label(4), Status: "skipped " + label(4) + ": no valid credentials"},
+			{Engine: pfmengine.Codex, Label: "Codex", Status: "Codex credential rejected (HTTP 401)"},
+		}},
+		{"a passed reset shows its note, not a stale bar", 120, 10, []pfmstats.AccountLimits{{
+			Account: 1, Emoji: "🥇", Engine: pfmengine.Claude,
+			Windows: []pfmstats.Window{
+				{Name: "5h", UsedPct: pfmstats.UnknownUsedPct, ResetNote: "reset passed · awaiting refetch"},
+				{Name: "7d", UsedPct: 61, ResetAt: now.Add(3 * 24 * time.Hour)},
+			},
+		}}},
+	} {
+		model := NewModel(fixtureSnapshot(test.width))
+		model.tab = TabLimits
+		model.stats = pfmstats.Snapshot{Limits: test.limits}
+		out.WriteString("## " + test.name + "\n" + ansi.Strip(model.renderLimitsPanel(test.width, test.height)) + "\n")
+	}
+	golden(t, "ui_limits_states.txt", out.String())
 }
 
 func TestLimitsTabScrollsToAccountsBelowTheViewport(t *testing.T) {
@@ -381,62 +445,6 @@ func TestLimitsTabScrollsAcrossClaudeCodexAndOpenCodeCardsAfterResize(t *testing
 	}
 }
 
-func TestLimitsTabRendersFancyCardsAndRefreshesPastResets(t *testing.T) {
-	model := NewModel(fixtureSnapshot(120))
-	model.tab = TabLimits
-	now := time.Unix(0, model.nowNS)
-	model.stats = pfmstats.Snapshot{Limits: []pfmstats.AccountLimits{{
-		Account: 1, Emoji: "🥇", Engine: pfmengine.Claude,
-		Windows: []pfmstats.Window{
-			{Name: "5h", UsedPct: 52, ResetAt: now.Add(90 * time.Minute)},
-			{Name: "7d", UsedPct: 100, ResetAt: now.Add(-time.Minute)},
-		},
-	}}}
-	panel := model.renderLimitsPanel(120, 10)
-	plain := ansi.Strip(panel)
-	for _, want := range []string{"🥇 account 1", "▰", "52%", "FULL", "↻ refreshing…"} {
-		if !strings.Contains(plain, want) {
-			t.Fatalf("fancy Limits panel missing %q:\n%s", want, plain)
-		}
-	}
-	if strings.Contains(plain, "(now)") {
-		t.Fatalf("past reset rendered as now:\n%s", plain)
-	}
-}
-
-func TestLimitsTabRendersCachedWindowsUnderRefreshWarning(t *testing.T) {
-	model := NewModel(fixtureSnapshot(120))
-	model.tab = TabLimits
-	now := time.Unix(0, model.nowNS)
-	model.stats = pfmstats.Snapshot{Limits: []pfmstats.AccountLimits{{
-		Account: 2, Emoji: "🥈", Engine: "claude", ConfirmedAt: now.Add(-7 * time.Minute),
-		Status:  "refresh timed out; showing cached limits",
-		Windows: []pfmstats.Window{{Name: "7d", UsedPct: 73, ResetAt: now.Add(4 * 24 * time.Hour)}},
-	}}}
-	plain := ansi.Strip(model.renderLimitsPanel(120, 9))
-	for _, want := range []string{"provider confirmed 7m ago", "refresh timed out; showing cached limits", "7d", "73%"} {
-		if !strings.Contains(plain, want) {
-			t.Fatalf("cached Limits card missing %q:\n%s", want, plain)
-		}
-	}
-}
-
-func TestLimitsTabOmitsUnsupportedEngines(t *testing.T) {
-	model := NewModel(fixtureSnapshot(120))
-	model.tab = TabLimits
-	model.stats = pfmstats.Snapshot{Limits: []pfmstats.AccountLimits{
-		{Account: 1, Engine: pfmengine.Claude, Windows: []pfmstats.Window{{Name: "5h", UsedPct: 5}}},
-		{Account: 1, Engine: pfmengine.OpenCode, Unsupported: true, Status: "engine ox: no usage source registered"},
-	}}
-	plain := ansi.Strip(model.renderLimitsPanel(120, 10))
-	if strings.Contains(plain, "no usage source") || strings.Contains(plain, "OpenCode") {
-		t.Fatalf("unsupported engine rendered a card:\n%s", plain)
-	}
-	if !strings.Contains(plain, "5h") || !strings.Contains(plain, "5%") {
-		t.Fatalf("supported account lost its rows:\n%s", plain)
-	}
-}
-
 func TestLimitsTabRendersRuleAboveHeader(t *testing.T) {
 	model := NewModel(fixtureSnapshot(120))
 	model.tab = TabLimits
@@ -456,29 +464,6 @@ func TestLimitsTabRendersRuleAboveHeader(t *testing.T) {
 	}
 	if ruleAt == -1 || headerAt == -1 || ruleAt > headerAt {
 		t.Fatalf("rule (line %d) must sit above its header (line %d):\n%s", ruleAt, headerAt, plain)
-	}
-}
-
-func TestLimitsTabShowsOnlyFirstCodexWindow(t *testing.T) {
-	model := NewModel(fixtureSnapshot(120))
-	model.tab = TabLimits
-	model.stats = pfmstats.Snapshot{Limits: []pfmstats.AccountLimits{{
-		Account: 1, Engine: pfmengine.Codex, Label: "Codex 1",
-		Windows: []pfmstats.Window{
-			{Name: "7d", UsedPct: 2},
-			{Name: "7d-reserve", UsedPct: 0},
-			{Name: "5h-spark", UsedPct: 0},
-			{Name: "7d-spark", UsedPct: 0},
-		},
-	}}}
-	plain := ansi.Strip(model.renderLimitsPanel(120, 10))
-	if !strings.Contains(plain, "7d") {
-		t.Fatalf("first Codex window missing:\n%s", plain)
-	}
-	for _, hidden := range []string{"7d-reserve", "5h-spark", "7d-spark"} {
-		if strings.Contains(plain, hidden) {
-			t.Fatalf("Codex rendered %q beyond its first window:\n%s", hidden, plain)
-		}
 	}
 }
 
@@ -580,114 +565,11 @@ func TestRateLimitedLimitCardSaysUnavailableOnceAndKeepsTheRetryTime(t *testing.
 	if len(limits) != 1 {
 		t.Fatalf("limits=%#v, want one card", limits)
 	}
-	retry := "retry " + now.Add(10*time.Minute).Format("15:04")
-	for _, width := range []int{118, 50} {
-		model := NewModel(fixtureSnapshot(120))
-		model.stats = pfmstats.Snapshot{Limits: limits}
-		card := ansi.Strip(strings.Join(model.renderLimitCards(width), "\n"))
-		if count := strings.Count(card, "limits unavailable"); count > 1 {
-			t.Fatalf("width %d: card says limits unavailable %d times, want at most once:\n%s", width, count, card)
-		}
-		if !strings.Contains(card, retry) {
-			t.Fatalf("width %d: card lost %q from status %#v:\n%s", width, retry, limits[0], card)
-		}
-	}
-}
-
-func TestLimitsTabOmitsProviderMaxTotals(t *testing.T) {
+	utcClock(t)
 	model := NewModel(fixtureSnapshot(120))
-	model.tab = TabLimits
-	model.stats = pfmstats.Snapshot{Limits: []pfmstats.AccountLimits{
-		{Account: 1, Engine: pfmengine.Claude, Windows: []pfmstats.Window{{Name: "5h", UsedPct: 52}}},
-		{Account: 2, Engine: pfmengine.Claude, Windows: []pfmstats.Window{{Name: "5h", UsedPct: 75}}},
-	}}
-	plain := ansi.Strip(model.renderLimitsPanel(120, 10))
-	if strings.Contains(plain, "Σ") {
-		t.Fatalf("provider max-totals line still rendered:\n%s", plain)
-	}
-	for _, want := range []string{"5h", "52%", "75%"} {
-		if !strings.Contains(plain, want) {
-			t.Fatalf("Limits panel missing per-account window %q:\n%s", want, plain)
-		}
-	}
-}
-
-func TestLimitsTabRendersEngineAbsencesAsTwoDimLines(t *testing.T) {
-	model := NewModel(fixtureSnapshot(120))
-	model.tab = TabLimits
-	model.stats = pfmstats.Snapshot{Limits: []pfmstats.AccountLimits{
-		{
-			Engine: pfmengine.Claude,
-			Label:  "no Claude accounts configured",
-			Status: "no Claude accounts configured",
-			Absent: true,
-		},
-		{
-			Engine: pfmengine.Codex,
-			Label:  "no Codex accounts configured",
-			Status: "no Codex accounts configured",
-			Absent: true,
-		},
-	}}
-	plain := ansi.Strip(model.renderLimitsPanel(120, 8))
-	for _, want := range []string{"no Claude accounts configured", "no Codex accounts configured"} {
-		if strings.Count(plain, want) != 1 {
-			t.Fatalf("Limits panel did not render exactly one plain absence line for %q:\n%s", want, plain)
-		}
-	}
-	for _, reject := range []string{"provider confirmation unavailable", "⚠ no Claude", "⚠ no Codex"} {
-		if strings.Contains(plain, reject) {
-			t.Fatalf("Limits absence rendered as a card/error %q:\n%s", reject, plain)
-		}
-	}
-}
-
-func TestLimitsTabConsolidatesSkipsDropsUnknownsAndKeepsErrors(t *testing.T) {
-	home := "/home/test"
-	label1 := pfmconfig.DisplayAccountDir(home, 1, pfmconfig.DefaultAccountDir(home, 1))
-	label3 := pfmconfig.DisplayAccountDir(home, 3, pfmconfig.DefaultAccountDir(home, 3))
-	label4 := pfmconfig.DisplayAccountDir(home, 4, pfmconfig.DefaultAccountDir(home, 4))
-	emoji1 := pfmconfig.Defaults(
-		home, []string{filepath.Join(pfmconfig.DefaultAccountDir(home, 1), "projects")},
-	).EmojiFor(1)
-	model := NewModel(fixtureSnapshot(140))
-	model.tab = TabLimits
-	model.stats = pfmstats.Snapshot{Limits: []pfmstats.AccountLimits{
-		{
-			Account: 1, Emoji: emoji1, Engine: pfmengine.Claude, Label: label1,
-			Windows: []pfmstats.Window{
-				{Name: "7d-fable", UsedPct: 0, ResetNote: "reset unavailable"},
-				{Name: "unknown[seven_day_nimbus_quill]", UsedPct: 0, ResetNote: "reset unavailable"},
-			},
-		},
-		{Account: 3, Engine: pfmengine.Claude, Label: label3, Status: "skipped " + label3 + ": credentials rejected"},
-		{Account: 4, Engine: pfmengine.Claude, Label: label4, Status: "skipped " + label4 + ": no valid credentials"},
-		{Engine: pfmengine.Codex, Label: "Codex", Status: "Codex credential rejected (HTTP 401)"},
-	}}
-	plain := ansi.Strip(model.renderLimitsPanel(140, 18))
-	for _, want := range []string{
-		"7d-fable", "0%", "↻ reset unavailable",
-		"skipped " + label3 + ": credentials rejected",
-		"skipped " + label4 + ": no valid credentials",
-		"Codex", "Codex credential rejected (HTTP 401)",
-	} {
-		if !strings.Contains(plain, want) {
-			t.Fatalf("limits panel missing %q:\n%s", want, plain)
-		}
-	}
-	if got := strings.Count(plain, "skipped "); got != 2 {
-		t.Fatalf("Limits footer carried %d skip notes, want both notes on one footer line:\n%s", got, plain)
-	}
-	for _, line := range strings.Split(plain, "\n") {
-		if strings.Contains(line, "skipped ") && strings.Count(line, "skipped ") != 2 {
-			t.Fatalf("skip notes were not consolidated:\n%s", plain)
-		}
-	}
-	for _, reject := range []string{"(?)", "403 Forbidden", "unknown["} {
-		if strings.Contains(plain, reject) {
-			t.Fatalf("limits panel contains unexplained/retired output %q:\n%s", reject, plain)
-		}
-	}
+	model.stats = pfmstats.Snapshot{Limits: limits}
+	golden(t, "ui_limits_rate_limited.txt", ansi.Strip(strings.Join(model.renderLimitCards(118), "\n")+"\n"+
+		strings.Join(model.renderLimitCards(50), "\n")))
 }
 
 func TestUsageSparkScalesToTheBusiestSample(t *testing.T) {
@@ -737,15 +619,14 @@ func TestStatsHeaderRendersSwapSeparate(t *testing.T) {
 		CPUPercent: 12, CPUValid: true, PSIPercent: 34,
 		RAMPercent: 56, SwapPercent: 78,
 	}}
-	line := ansi.Strip(model.renderStatsHeader(120))
-	for _, want := range []string{"CPU 12%", "PSI 34%", "RAM 56%", "SWAP 78%"} {
-		if !strings.Contains(line, want) {
-			t.Fatalf("stats header %q missing %q", line, want)
-		}
+	if line, want := ansi.Strip(
+		model.renderStatsHeader(120),
+	), " CPU 12% · PSI 34% · RAM 56% · SWAP 78%                                                                                 "; line != want {
+		t.Fatalf("stats header = %q, want %q", line, want)
 	}
 }
 
-func TestStatsTablesRenderLabeledColumnsAndUsage(t *testing.T) {
+func TestStatsPanelsRenderEveryColumnInItsColour(t *testing.T) {
 	model := NewModel(fixtureSnapshot(140))
 	model.tab = TabStats
 	model.stats = pfmstats.Snapshot{
@@ -753,7 +634,7 @@ func TestStatsTablesRenderLabeledColumnsAndUsage(t *testing.T) {
 		Chats: []pfmstats.Chat{{
 			Name: "BUILD:one", Engine: "claude", CPUPercent: 12.5, CPUValid: true,
 			RSSBytes: 2 << 20, RAMPercent: 3.5, TokenCount: 1_250_000,
-			TokensKnown: true, TokensPerMinute: 625_000, TokenRateValid: true,
+			TokensKnown: true, TokensPerMinute: 625_000, TokenRateValid: true, GearCount: 2,
 		}},
 		Docker: []pfmstats.Container{{
 			Name: "professor-web", Image: "registry.example/professor:web",
@@ -761,30 +642,10 @@ func TestStatsTablesRenderLabeledColumnsAndUsage(t *testing.T) {
 			LimitBytes: 512 << 20, MemoryPercent: 25,
 		}},
 	}
-
-	chatPanel := ansi.Strip(model.renderStatsPanel(140, 8))
-	for _, want := range []string{"NAME", "ENGINE", "CPU", "RSS", "RAM", "TOKENS", "TOK/MIN", "BUILD:one", "1.2M", "625K"} {
-		if !strings.Contains(chatPanel, want) {
-			t.Fatalf("Chats stats panel missing %q:\n%s", want, chatPanel)
-		}
-	}
-
+	panels := quoteANSI(model.renderStatsPanel(140, 8))
 	model.statsSubtab = StatsDocker
-	dockerPanel := ansi.Strip(model.renderStatsPanel(140, 8))
-	header := strings.Split(dockerPanel, "\n")[1]
-	if !strings.Contains(header, "NAME") || strings.Index(header, "IMAGE") <= strings.Index(header, "NAME") {
-		t.Fatalf("Docker header does not begin NAME then IMAGE: %q", header)
-	}
-	for _, want := range []string{"CPU", "MEMORY", "LIMIT", "MEM", "professor-web", "registry.example/professor:web"} {
-		if !strings.Contains(dockerPanel, want) {
-			t.Fatalf("Docker stats panel missing %q:\n%s", want, dockerPanel)
-		}
-	}
-}
-
-func TestStatsChatLiveTokenRateRendersUnknownActiveAndIdle(t *testing.T) {
-	model := NewModel(fixtureSnapshot(120))
-	model.tab = TabStats
+	panels += quoteANSI(model.renderStatsPanel(140, 8))
+	model.statsSubtab = StatsChats
 	model.stats = pfmstats.Snapshot{Ready: true, Chats: []pfmstats.Chat{
 		{Name: "UNKNOWN", Engine: "claude", CPUValid: true, TokenCount: 100, TokensKnown: true},
 		{
@@ -796,154 +657,10 @@ func TestStatsChatLiveTokenRateRendersUnknownActiveAndIdle(t *testing.T) {
 			TokensPerMinute: 125,
 			TokenRateValid:  true,
 		},
-		{
-			Name:            "IDLE",
-			Engine:          "claude",
-			CPUValid:        true,
-			TokenCount:      300,
-			TokensKnown:     true,
-			TokensPerMinute: 0,
-			TokenRateValid:  true,
-		},
+		{Name: "IDLE", Engine: "claude", CPUValid: true, TokenCount: 300, TokensKnown: true, TokenRateValid: true},
+		{Name: "OPEN", Engine: pfmengine.MustLookup(pfmengine.OpenCode).LongName, CPUValid: true},
 	}}
-	panel := ansi.Strip(model.renderStatsPanel(120, 10))
-	for name, want := range map[string]string{"UNKNOWN": "…", "ACTIVE": "125", "IDLE": "–"} {
-		var line string
-		for _, candidate := range strings.Split(panel, "\n") {
-			if strings.Contains(candidate, name) {
-				line = candidate
-				break
-			}
-		}
-		if line == "" || !strings.Contains(line, want) {
-			t.Fatalf("Stats row %s = %q, want live rate %q\n%s", name, line, want, panel)
-		}
-	}
-}
-
-func TestStatsPropertiesUseSemanticColors(t *testing.T) {
-	model := NewModel(fixtureSnapshot(140))
-	model.tab = TabStats
-	model.stats = pfmstats.Snapshot{
-		Ready: true,
-		Chats: []pfmstats.Chat{{
-			Name: "BUILD:one", Engine: "claude", CPUPercent: 12.5, CPUValid: true,
-			RSSBytes: 2 << 20, RAMPercent: 3.5, TokenCount: 1_250_000,
-			TokensKnown: true, TokensPerMinute: 625_000, TokenRateValid: true,
-			GearCount: 2,
-		}},
-		Docker: []pfmstats.Container{{
-			Name: "professor-web", Image: "registry.example/professor:web",
-			CPUPercent: 4.5, CPUValid: true, MemoryBytes: 128 << 20,
-			LimitBytes: 512 << 20, MemoryPercent: 25,
-		}},
-	}
-	chatPanel := model.renderStatsPanel(140, 8)
-	for name, sequence := range map[string]string{
-		"header": "\x1b[1;38;2;34;211;238m",
-		"CPU":    "\x1b[38;2;74;222;128m",
-		"memory": "\x1b[38;2;96;165;250m",
-		"tokens": "\x1b[38;2;250;204;21m",
-		"gear":   "\x1b[38;2;251;146;60m",
-	} {
-		if !strings.Contains(chatPanel, sequence) {
-			t.Fatalf("Chats stats panel missing %s color %q:\n%s", name, sequence, chatPanel)
-		}
-	}
-	model.statsSubtab = StatsDocker
-	dockerPanel := model.renderStatsPanel(140, 8)
-	for name, sequence := range map[string]string{
-		"container name":  "\x1b[38;2;103;232;249m",
-		"container image": "\x1b[38;2;192;132;252m",
-		"CPU":             "\x1b[38;2;74;222;128m",
-		"memory":          "\x1b[38;2;96;165;250m",
-	} {
-		if !strings.Contains(dockerPanel, sequence) {
-			t.Fatalf("Docker stats panel missing %s color %q:\n%s", name, sequence, dockerPanel)
-		}
-	}
-}
-
-func TestStatsOpenCodeEngineUsesItsOwnColor(t *testing.T) {
-	model := NewModel(fixtureSnapshot(120))
-	model.tab = TabStats
-	model.stats = pfmstats.Snapshot{Ready: true, Chats: []pfmstats.Chat{{
-		Name: "OPEN", Engine: pfmengine.MustLookup(pfmengine.OpenCode).LongName,
-		CPUValid: true,
-	}}}
-	panel := model.renderStatsPanel(120, 8)
-	want := statsEngineStyles[pfmengine.OpenCode].Render("opencode")
-	if !strings.Contains(panel, want) {
-		t.Fatalf("OpenCode stats row lacks its engine color %q:\n%s", want, panel)
-	}
-}
-
-// A name is not an engine. Both stats tables' NAME cells — a chat's and a
-// Docker container's — once borrowed the Claude row colour, which was harmless
-// while those colours were only a pleasant ramp and wrong the moment they
-// became an IDENTITY: a Codex chat whose name renders in Claude's orange beside
-// an engine cell rendering white is a row disagreeing with itself. This asserts
-// the decoupling directly rather than trusting the exact hex above, which a
-// palette edit is free to change.
-func TestStatsNameCellsNeverBorrowAnEngineIdentityColor(t *testing.T) {
-	model := NewModel(fixtureSnapshot(140))
-	model.tab = TabStats
-	model.stats = pfmstats.Snapshot{
-		Ready: true,
-		Chats: []pfmstats.Chat{{
-			Name: "REVIEW:idle", Engine: "codex", CPUPercent: 1, CPUValid: true,
-		}},
-		Docker: []pfmstats.Container{{
-			Name: "professor-web", Image: "registry.example/professor:web",
-			CPUPercent: 4.5, CPUValid: true, MemoryBytes: 128 << 20,
-			LimitBytes: 512 << 20, MemoryPercent: 25,
-		}},
-	}
-
-	model.statsSubtab = StatsChats
-	chatName := nameCellFor(model.renderStatsPanel(140, 8), "REVIEW:idle")
-	model.statsSubtab = StatsDocker
-	dockerName := nameCellFor(model.renderStatsPanel(140, 8), "professor-web")
-
-	loaded := theme.Load("default")
-	for _, id := range pfmengine.All() {
-		sequence := ansiForeground(loaded.StatsEngine[id])
-		if sequence == "" {
-			t.Fatalf("engine %s has an unparseable stats colour %q", id, loaded.StatsEngine[id])
-		}
-		for label, cell := range map[string]string{"chat": chatName, "container": dockerName} {
-			if cell == "" {
-				t.Fatalf("%s name cell was not rendered at all", label)
-			}
-			if strings.Contains(cell, sequence) {
-				t.Errorf("the %s name is rendered in engine %s's identity colour %s:\n%s",
-					label, id, loaded.StatsEngine[id], cell)
-			}
-		}
-	}
-}
-
-// nameCellFor returns just the NAME cell of the row carrying name, cut at the
-// column that follows it. The assertion must read that cell alone: the engine,
-// CPU and memory columns legitimately carry engine and ramp colours, and a
-// whole-panel search would match them and report a collision that is not one.
-func nameCellFor(panel, name string) string {
-	const reset = "\x1b[m"
-	for _, line := range strings.Split(panel, "\n") {
-		at := strings.Index(line, name)
-		if at < 0 {
-			continue
-		}
-		end := strings.Index(line[at:], reset)
-		if end < 0 {
-			return line[:at+len(name)]
-		}
-		// Stop at the cell's own reset. One byte further is the NEXT cell's
-		// opening escape, and including it would report the engine column's
-		// colour as if the name wore it.
-		return line[:at+end+len(reset)]
-	}
-	return ""
+	golden(t, "ui_stats_columns.ansi", panels+quoteANSI(model.renderStatsPanel(140, 10)))
 }
 
 // ansiForeground renders a #rrggbb palette colour as the escape sequence
@@ -957,43 +674,4 @@ func ansiForeground(hex string) string {
 		return ""
 	}
 	return fmt.Sprintf("\x1b[38;2;%d;%d;%dm", red, green, blue)
-}
-
-// TestLimitsTabRendersPassedResetNoteInsteadOfStaleBar is the render half of
-// the 2026-09-11 expiry rule: stats.usageWindows hands the tab a row with no
-// percentage and the "reset passed" note, and the card must say so rather than
-// draw a bar for a window that has already rolled over.
-func TestLimitsTabRendersPassedResetNoteInsteadOfStaleBar(t *testing.T) {
-	model := NewModel(fixtureSnapshot(120))
-	model.tab = TabLimits
-	now := time.Unix(0, model.nowNS)
-	model.stats = pfmstats.Snapshot{Limits: []pfmstats.AccountLimits{{
-		Account: 1, Emoji: "🥇", Engine: pfmengine.Claude,
-		Windows: []pfmstats.Window{
-			{Name: "5h", UsedPct: pfmstats.UnknownUsedPct, ResetNote: "reset passed · awaiting refetch"},
-			{Name: "7d", UsedPct: 61, ResetAt: now.Add(3 * 24 * time.Hour)},
-		},
-	}}}
-	plain := ansi.Strip(model.renderLimitsPanel(120, 10))
-	if !strings.Contains(plain, "↻ reset passed · awaiting refetch") {
-		t.Fatalf("expired 5h row lost its note:\n%s", plain)
-	}
-	// An em dash and no bar — never "0% used", which reads as a real,
-	// freshly-reset measurement, and never a drawn bar.
-	if !strings.Contains(plain, "—") || strings.Contains(plain, "0% used") {
-		t.Fatalf("expired 5h row did not render an em dash without a number:\n%s", plain)
-	}
-	for _, line := range strings.Split(plain, "\n") {
-		if strings.Contains(line, "5h") && (strings.Contains(line, "▰") || strings.Contains(line, "▱")) {
-			t.Fatalf("expired 5h row still drew a bar: %q", line)
-		}
-	}
-	for _, unwanted := range []string{"96%", "FULL"} {
-		if strings.Contains(plain, unwanted) {
-			t.Fatalf("expired window still rendered a stale reading %q:\n%s", unwanted, plain)
-		}
-	}
-	if !strings.Contains(plain, "61%") {
-		t.Fatalf("live 7d row was dropped with the expired one:\n%s", plain)
-	}
 }

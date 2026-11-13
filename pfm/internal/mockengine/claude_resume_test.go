@@ -159,7 +159,11 @@ func TestClaudeResumeUnreadableTranscriptExitsUsage(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := fix.startTUI("claude", claudeArgs("--resume", fixtureSession), nil)
-	if code := s.waitExit(); code != ExitUsage || !strings.Contains(s.stderr.String(), path) {
-		t.Fatalf("exit %d stderr=%s", code, s.stderr.String())
+	code := s.waitExit()
+	if got, want := strings.NewReplacer(fix.root, "{root}", strings.NewReplacer("/", "-", ".", "-").Replace(fix.work), "{work}").
+		Replace(s.stderr.String()),
+		"mock-engine: read transcript {root}/cc/projects/{work}/b1111111-1111-4111-8111-111111111111.jsonl: read {root}/cc/projects/{work}/b1111111-1111-4111-8111-111111111111.jsonl: is a directory\n"; code != ExitUsage ||
+		got != want {
+		t.Fatalf("exit %d stderr = %q, want %q", code, got, want)
 	}
 }

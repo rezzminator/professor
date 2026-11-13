@@ -1,7 +1,7 @@
 package resolve
 
 import (
-	"strings"
+	"fmt"
 	"testing"
 )
 
@@ -35,13 +35,12 @@ func TestResolveRosterNameAmbiguityNamesStableAddresses(t *testing.T) {
 		{Name: "seat", ID: "one", Socket: "cx-1", Pane: "%1", Live: true},
 		{Name: "seat", ID: "two", Socket: "cx-2", Pane: "%2", Live: true},
 	}, "seat")
-	if found || err == nil {
-		t.Fatalf("ResolveRosterName() found=%t err=%v, want ambiguity", found, err)
-	}
-	for _, want := range []string{"thread id", "one", "two", "cx-1", "cx-2"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("ambiguity=%q, want %q", err, want)
-		}
+	if got, want := fmt.Sprintf(
+		"%t %v",
+		found,
+		err,
+	), "false \"seat\" matches 2 chats in the roster; address by thread id:\n  thread id one (socket cx-1, pane %1, name \"seat\")\n  thread id two (socket cx-2, pane %2, name \"seat\")"; got != want {
+		t.Fatalf("ResolveRosterName() = %q, want %q", got, want)
 	}
 }
 

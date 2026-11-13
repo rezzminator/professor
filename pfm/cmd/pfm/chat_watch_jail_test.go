@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -39,20 +38,23 @@ func TestWatchScanFailureIsAnErrorLineNeverAbsence(t *testing.T) {
 	}
 	t.Setenv(paths.EnvCacheDB, filepath.Join(blocker, "index.db"))
 	for _, testCase := range []struct {
-		name       string
-		args       []string
-		wantCode   int
-		wantStderr string
+		name     string
+		args     []string
+		wantCode int
+		want     string
 	}{
-		{"legacy", []string{"chat", "watch", "ghost"}, 2, "pfm chat: "},
-		{"transitions", []string{"chat", "watch", "ghost", "--transitions"}, 1, "pfm chat watch: ghost: "},
+		{"legacy", []string{"chat", "watch", "ghost"}, 2, "ERROR ghost inspect cache database {root}/not-a-directory/index.db: stat {root}/not-a-directory/index.db: not a directory\npfm chat: inspect cache database {root}/not-a-directory/index.db: stat {root}/not-a-directory/index.db: not a directory\n"},
+		{"transitions", []string{"chat", "watch", "ghost", "--transitions"}, 1, "ERROR ghost inspect cache database {root}/not-a-directory/index.db: stat {root}/not-a-directory/index.db: not a directory\npfm chat watch: ghost: inspect cache database {root}/not-a-directory/index.db: stat {root}/not-a-directory/index.db: not a directory\n"},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 			code := run(testCase.args, &stdout, &stderr)
-			if code != testCase.wantCode || !strings.HasPrefix(stdout.String(), "ERROR ghost ") ||
-				strings.Count(stdout.String(), "\n") != 1 || !strings.Contains(stderr.String(), testCase.wantStderr) {
-				t.Fatalf("rc = %d stdout = %q stderr = %q", code, stdout.String(), stderr.String())
+			if got := rooted(
+				stdout.String()+stderr.String(),
+				filepath.Dir(blocker),
+			); code != testCase.wantCode ||
+				got != testCase.want {
+				t.Fatalf("rc = %d stdout+stderr = %q, want %q", code, got, testCase.want)
 			}
 		})
 	}

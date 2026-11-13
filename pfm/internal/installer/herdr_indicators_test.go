@@ -196,7 +196,9 @@ func TestInstallOptionsWithFakeEnvStayInProcessJail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if options.ProcRoot == "/proc" || options.ProcRoot != os.Getenv(paths.EnvProcRoot) {
-		t.Fatalf("ProcRoot = %q, want the package jail %q", options.ProcRoot, os.Getenv(paths.EnvProcRoot))
+	// TestMain sets defaultProcRoot to the package jail; an armed unit run clears PFM_PROC_ROOT from
+	// the environment, so the package variable, not the variable's value, names the jail.
+	if options.ProcRoot == "/proc" || defaultProcRoot == "" || options.ProcRoot != defaultProcRoot {
+		t.Fatalf("ProcRoot = %q, want the package jail %q", options.ProcRoot, defaultProcRoot)
 	}
 }

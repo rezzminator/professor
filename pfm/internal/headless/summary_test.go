@@ -309,11 +309,14 @@ func summaryMachine(t *testing.T, engineName string) pfmconfig.Config {
 	if err != nil {
 		panic(err)
 	}
+	binaries := t.TempDir()
+	writeEngine(t, binaries, "claude")
+	writeEngine(t, binaries, "codex")
 	return pfmconfig.Config{
 		Accounts:      []pfmconfig.Account{{ID: 1, ConfigDir: t.TempDir()}},
 		CodexAccounts: []pfmconfig.CodexAccount{{ID: 1, Home: codexHome}},
-		Claude:        pfmconfig.Claude{Binary: "claude"},
-		Codex:         pfmconfig.Codex{Binary: "codex"},
+		Claude:        pfmconfig.Claude{Binary: filepath.Join(binaries, "claude")},
+		Codex:         pfmconfig.Codex{Binary: filepath.Join(binaries, "codex")},
 		Ask: pfmconfig.AskConfig{Engine: id, Prefs: map[pfmengine.ID]pfmconfig.EnginePrefs{
 			pfmengine.Codex: {Model: "cx-test", Effort: "low"}, pfmengine.Claude: {Model: "cc-test", Effort: "low"},
 		}},

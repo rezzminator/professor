@@ -23,11 +23,11 @@ func TestNoWindowCardIsNeutralAndFailureKeepsWarning(t *testing.T) {
 	for _, line := range strings.Split(plain, "\n") {
 		switch {
 		case strings.Contains(line, "no limit window"):
-			if strings.Contains(line, "⚠") {
+			if line != "│  no limit window on this plan                                                │" {
 				t.Fatalf("no-window line has a warning glyph: %q", line)
 			}
 		case strings.Contains(line, "boom"):
-			if !strings.Contains(line, "⚠") {
+			if line != "│  ⚠ account 2 limits unavailable: boom                                        │" {
 				t.Fatalf("failure line lost its warning glyph: %q", line)
 			}
 		}

@@ -1,0 +1,11 @@
+pfm theme · custom:tokyo-night (Tokyo Night · neon pink) · dark · gen 7
+  claude  SOURCE   g7    /p/SOURCE  d-SOURCE
+  tmux    IN-SYNC  g7    /p/IN-SYNC  d-IN-SYNC
+in sync · 1 of 1 surfaces at gen 7
+last flip 2026-10-16T03:00:00Z /h/.claude/settings.json: tmux +0.25 s · herdr +0.50 s · vscode contract +0.75 s, ack +1.50 s
+--- without an ack
+pfm theme · custom:tokyo-night (Tokyo Night · neon pink) · dark · gen 7
+  claude  SOURCE   g7    /p/SOURCE  d-SOURCE
+  tmux    IN-SYNC  g7    /p/IN-SYNC  d-IN-SYNC
+in sync · 1 of 1 surfaces at gen 7
+last flip 2026-10-16T03:00:00Z /h/.claude/settings.json: tmux +0.25 s · herdr +0.50 s · vscode contract +0.75 s

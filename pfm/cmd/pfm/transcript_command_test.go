@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,36 +10,24 @@ import (
 )
 
 func TestTranscriptCLIEntry(t *testing.T) {
-	jailTest(t)
+	jail := jailTest(t)
 	path := filepath.Join(t.TempDir(), "session.jsonl")
 	record := `{"type":"user","sessionId":"cli-entry","timestamp":"2026-09-29T20:00:00Z",` +
 		`"message":{"content":"cli entry prompt"}}` + "\n"
 	if err := os.WriteFile(path, []byte(record), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	var out, errs bytes.Buffer
-	if code := run([]string{"transcript", "--help"}, &out, &errs); code != 0 ||
-		!strings.Contains(out.String(), "{show,locate,agents}") {
-		t.Fatalf("transcript --help code=%d stdout=%q stderr=%q", code, out.String(), errs.String())
+	var got strings.Builder
+	for _, args := range [][]string{
+		{"transcript", "show", path}, {"transcript", "locate", "no-such-session-anywhere"}, {"transcript", "list", "x"},
+	} {
+		var out, errs bytes.Buffer
+		fmt.Fprintf(&got, "%d %s%s", run(args, &out, &errs), out.String(), errs.String())
 	}
-	out.Reset()
-	if code := run([]string{"transcript", "show", path}, &out, &errs); code != 0 ||
-		!strings.HasPrefix(out.String(), "TRANSCRIPT claude · cli-entry") ||
-		!strings.Contains(out.String(), "PROMPT cli entry prompt") {
-		t.Fatalf("transcript show code=%d stdout=%q stderr=%q", code, out.String(), errs.String())
-	}
-	out.Reset()
-	if code := run([]string{"transcript", "locate", "no-such-session-anywhere"}, &out, &errs); code != 1 ||
-		!strings.Contains(errs.String(), "TRANSCRIPT FAILED — NOT FOUND no-such-session-anywhere") {
-		t.Fatalf("transcript locate of nothing code=%d stderr=%q", code, errs.String())
-	}
-	errs.Reset()
-	if code := run([]string{"transcript", "list", "x"}, &out, &errs); code != 2 ||
-		!strings.Contains(errs.String(), "argument verb: invalid choice: 'list'") {
-		t.Fatalf("transcript list code=%d stderr=%q", code, errs.String())
-	}
-	out.Reset()
-	if code := run([]string{"help"}, &out, &errs); code != 0 || !strings.Contains(out.String(), "  transcript ") {
-		t.Fatalf("help code=%d lacks transcript: %s", code, out.String())
+	if got, want := rooted(
+		rooted(got.String(), filepath.Dir(path)),
+		jail,
+	), "0 TRANSCRIPT claude · cli-entry · model ?\nFILE {root}/session.jsonl · 116 bytes · 1 records · cwd ? (shown as ./)\nSPAN 2026-09-29 20:00:00Z → 20:00:00Z · 0s wall\nCALLS 0, 0 err, 0 without result: none\nFILTER only prompt,reply,call,note,final · results brief · text 500 · shown 1 of 1 events\nL1 20:00:00 PROMPT cli entry prompt\nUNFINISHED — the last turn has no final reply: the run was cut off or is still running\nSKIPPED 0 records\n1 TRANSCRIPT FAILED — NOT FOUND no-such-session-anywhere — searched {root}/claude for an id or prefix; the name lookup over 0 session files (the last 256 KB of each) found no chat whose last title is 'no-such-session-anywhere' (a seat name resolves to its id with `pfm chat resolve no-such-session-anywhere`, third column)\n2 TRANSCRIPT FAILED — argument verb: invalid choice: 'list' (choose from 'show', 'locate', 'agents')\n"; got != want {
+		t.Fatalf("transcript verbs = %q, want %q", got, want)
 	}
 }

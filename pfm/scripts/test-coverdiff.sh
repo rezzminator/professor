@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# test-coverdiff.sh — the unit-isolation driver: per package, the statements only the non-unit tests
-# hold. A move test (kind home-sqlite, process, tmux or real in scripts/test-kinds.sh) whose statements the
-# journey or a unit test also covers is folded into an assertion and deleted; the statements only it
-# holds need a journey step or a unit test first.
+# test-coverdiff.sh — the unit-isolation driver: per package, the statements only the jail tests
+# hold. A move test (a jail test, kind real in scripts/test-kinds.sh) whose statements the journey or a
+# unit test also covers is folded into an assertion and deleted; the statements only it holds need a
+# journey step or a unit test first.
 #
 #   scripts/test-coverdiff.sh <journey-coverage.out> <out-dir> [pfm-dir]
 #
@@ -44,7 +44,7 @@ kinds=$(bash "$HERE/test-kinds.sh" --list "$pfm") || die "test-kinds.sh --list f
 
 # One job row per side and directory: side, dir, label, test count, the anchored -run regex.
 awk -F '\t' '{
-  side = ($1 == "nothing" || $1 == "temp-dir") ? "unit" : "move"; key = side "\t" $2
+  side = ($1 == "unit") ? "unit" : "move"; key = side "\t" $2
   if (!(key in names)) order[++n] = key
   names[key] = (key in names) ? names[key] "|" $4 : $4; count[key]++
 } END { for (i = 1; i <= n; i++) { split(order[i], k, "\t"); label = k[2]; gsub("/", "_", label)

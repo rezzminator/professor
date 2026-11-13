@@ -3,9 +3,11 @@ package spawn
 import (
 	"context"
 	"errors"
+	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -246,7 +248,7 @@ func TestNewSessionReturnsCancellation(t *testing.T) {
 }
 
 func TestNewSessionFailedLaunchKeepsOnlyUnresolvedClaims(t *testing.T) {
-	for _, scenario := range []string{"create cleanup", "create unresolved", "query cleanup", "query unresolved"} {
+	for scenario, want := range map[string]string{"create cleanup": "create chat server: exit status 1:  | created false | live [] <nil>", "create unresolved": "create chat server: exit status 1: \nterminate unrecorded chat server: exit status 1 | created true | live [] unresolved account launch claim {account}/.pfm-launches/{claim}; inspect the failed launch before removing this claim", "query cleanup": "read account launch pane pid: strconv.Atoi: parsing \"invalid-pid\": invalid syntax | created false | live [] <nil>", "query unresolved": "read account launch pane pid: strconv.Atoi: parsing \"invalid-pid\": invalid syntax\nterminate unrecorded chat server: exit status 1 | created true | live [] unresolved account launch claim {account}/.pfm-launches/{claim}; inspect the failed launch before removing this claim"} {
 		t.Run(scenario, func(t *testing.T) {
 			account, dir := t.TempDir(), t.TempDir()
 			createStatus, killStatus := 0, 0
@@ -269,17 +271,10 @@ func TestNewSessionFailedLaunchKeepsOnlyUnresolvedClaims(t *testing.T) {
 				return deps.RunResult{}, nil
 			})
 			ctx := pfmtmux.WithClientRunner(context.Background(), fake)
-			err := (TmuxSpawner{TmuxDir: dir}).NewSession(ctx, SessionSpec{
+			launchErr := (TmuxSpawner{TmuxDir: dir}).NewSession(ctx, SessionSpec{
 				Socket: "failed", Session: "failed", Window: "w", CWD: dir,
 				Run: "env CLAUDE_CONFIG_DIR=" + account + " claude --resume example",
 			})
-			if err == nil {
-				t.Fatal("failed launch reported success")
-			}
-			var partial *SessionCreatedError
-			if errors.As(err, &partial) != strings.HasSuffix(scenario, "unresolved") {
-				t.Fatalf("creation ownership marker does not match cleanup proof: %v", err)
-			}
 			guard, err := gather.AcquireAccountGuard(account, false)
 			if err != nil {
 				t.Fatalf("failed launch held lock: %v", err)
@@ -290,12 +285,14 @@ func TestNewSessionFailedLaunchKeepsOnlyUnresolvedClaims(t *testing.T) {
 				}
 			}()
 			live, claimErr := guard.Active(gather.NewProcFS(""))
-			if strings.HasSuffix(scenario, "unresolved") {
-				if claimErr == nil {
-					t.Fatal("unproven child termination lost its claim")
-				}
-			} else if claimErr != nil || len(live) != 0 {
-				t.Fatalf("terminated launch claim remained: %v %v", live, claimErr)
+			var partial *SessionCreatedError
+			got := regexp.MustCompile(`\.pfm-launches/[0-9a-f-]+`).
+				ReplaceAllString(strings.NewReplacer(account, "{account}", dir, "{dir}").Replace(
+					fmt.Sprintf("%v | created %t | live %v %v", launchErr, errors.As(launchErr, &partial), live, claimErr),
+				),
+					".pfm-launches/{claim}")
+			if got != want {
+				t.Fatalf("launch | ownership | claim = %q, want %q", got, want)
 			}
 		})
 	}

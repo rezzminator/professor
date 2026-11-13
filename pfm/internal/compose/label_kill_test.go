@@ -6,6 +6,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // TestLabelKilledChatLeavesTheDefaultListing pins the rename-to-kill rule: a
@@ -14,8 +15,8 @@ import (
 func TestLabelKilledChatLeavesTheDefaultListing(t *testing.T) {
 	worker := transcript(
 		"labelled",
-		"/accounts/1/projects/alpha/labelled.jsonl",
-		"/work/alpha",
+		testjail.Place("/accounts/1/projects/alpha/labelled.jsonl"),
+		testjail.Place("/work/alpha"),
 		"_KILL headless worker",
 		100,
 		5,
@@ -23,8 +24,8 @@ func TestLabelKilledChatLeavesTheDefaultListing(t *testing.T) {
 	)
 	plain := transcript(
 		"plain",
-		"/accounts/1/projects/alpha/plain.jsonl",
-		"/work/alpha",
+		testjail.Place("/accounts/1/projects/alpha/plain.jsonl"),
+		testjail.Place("/work/alpha"),
 		"Ordinary chat",
 		100,
 		5,
@@ -70,8 +71,8 @@ func TestLabelKilledChatLeavesTheDefaultListing(t *testing.T) {
 func TestLabelKillCoversLiveAndCodexRowsAndFoldsCase(t *testing.T) {
 	live := transcript(
 		"live-worker",
-		"/accounts/1/projects/alpha/live-worker.jsonl",
-		"/work/alpha",
+		testjail.Place("/accounts/1/projects/alpha/live-worker.jsonl"),
+		testjail.Place("/work/alpha"),
 		"_kill live worker",
 		100,
 		5,
@@ -79,10 +80,10 @@ func TestLabelKillCoversLiveAndCodexRowsAndFoldsCase(t *testing.T) {
 	)
 	rollout := store.Rollout{
 		ID:          "019f-worker",
-		Path:        "/codex/rollout-2026-01-01T00-00-00-019f-worker.jsonl",
+		Path:        testjail.Place("/codex/rollout-2026-01-01T00-00-00-019f-worker.jsonl"),
 		Size:        800,
 		MTimeNS:     1300,
-		CWD:         "/work/alpha",
+		CWD:         testjail.Place("/work/alpha"),
 		UserThread:  true,
 		FirstPrompt: "unnamed",
 		PromptCount: 4,
@@ -119,8 +120,8 @@ func TestLabelKillCoversLiveAndCodexRowsAndFoldsCase(t *testing.T) {
 func TestLegacyKillLabelAndKilledTableRowRemainKilled(t *testing.T) {
 	labelled := transcript(
 		"legacy-label",
-		"/accounts/1/projects/alpha/legacy-label.jsonl",
-		"/work/alpha",
+		testjail.Place("/accounts/1/projects/alpha/legacy-label.jsonl"),
+		testjail.Place("/work/alpha"),
 		"_HIDE legacy worker",
 		100,
 		5,
@@ -128,8 +129,8 @@ func TestLegacyKillLabelAndKilledTableRowRemainKilled(t *testing.T) {
 	)
 	stored := transcript(
 		"legacy-store",
-		"/accounts/1/projects/alpha/legacy-store.jsonl",
-		"/work/alpha",
+		testjail.Place("/accounts/1/projects/alpha/legacy-store.jsonl"),
+		testjail.Place("/work/alpha"),
 		"Stored kill",
 		100,
 		5,
@@ -166,8 +167,8 @@ func TestLegacyKillLabelAndKilledTableRowRemainKilled(t *testing.T) {
 func TestSplitRowKeepsItsJoinedName(t *testing.T) {
 	first := transcript(
 		"split-a",
-		"/accounts/1/projects/alpha/split-a.jsonl",
-		"/work/alpha",
+		testjail.Place("/accounts/1/projects/alpha/split-a.jsonl"),
+		testjail.Place("/work/alpha"),
 		"_KILL left pane",
 		100,
 		5,
@@ -175,8 +176,8 @@ func TestSplitRowKeepsItsJoinedName(t *testing.T) {
 	)
 	second := transcript(
 		"split-b",
-		"/accounts/1/projects/alpha/split-b.jsonl",
-		"/work/alpha",
+		testjail.Place("/accounts/1/projects/alpha/split-b.jsonl"),
+		testjail.Place("/work/alpha"),
 		"Right pane",
 		100,
 		5,

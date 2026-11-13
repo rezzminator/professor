@@ -41,14 +41,17 @@ func TestUnconfirmedClaudeName(t *testing.T) {
 		want string
 	}{
 		{"the transcript wears the name", writeConfirmTranscript(t, userTurn, titledFixLogin), ""},
-		{"a later title replaced it", writeConfirmTranscript(t, titledFixLogin, titledOther), "NOT confirmed"},
-		{"no title record at all", writeConfirmTranscript(t, userTurn), "NOT confirmed"},
-		{"the transcript cannot be read", filepath.Join(t.TempDir(), "gone.jsonl"), "could not verify"},
-		{"no transcript is known", "", "could not verify"},
+		{"a later title replaced it", writeConfirmTranscript(t, titledFixLogin, titledOther), "the Claude rename was typed but NOT confirmed — no custom-title record naming it reached {path} within 1ms (a chat mid-turn may still apply it when its turn ends); check it with pfm ls"},
+		{"no title record at all", writeConfirmTranscript(t, userTurn), "the Claude rename was typed but NOT confirmed — no custom-title record naming it reached {path} within 1ms (a chat mid-turn may still apply it when its turn ends); check it with pfm ls"},
+		{"the transcript cannot be read", filepath.Join(t.TempDir(), "gone.jsonl"), "could not verify the Claude rename — read transcript \"{path}\" for its title: open \"{path}\": open {path}: no such file or directory; the chat may be named, check it with pfm ls"},
+		{"no transcript is known", "", "could not verify the Claude rename — the chat's transcript is not known; the chat may be named, check it with pfm ls"},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			got := unconfirmedClaudeName(context.Background(), headless.Chat{Path: scenario.path}, "Fix login")
-			if scenario.want == "" && got != "" || scenario.want != "" && !strings.Contains(got, scenario.want) {
+			if scenario.path != "" {
+				got = strings.ReplaceAll(got, scenario.path, "{path}")
+			}
+			if got != scenario.want {
 				t.Fatalf("unconfirmedClaudeName = %q, want %q", got, scenario.want)
 			}
 		})

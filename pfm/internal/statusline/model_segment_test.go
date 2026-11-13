@@ -138,7 +138,7 @@ func TestKeeperProbeSeparatesFailureFromAbsence(t *testing.T) {
 	failing := keeperProbe(keepwarmProcFixture{argv: []string{keeperMark}}, func(int) (bool, error) {
 		return false, syscall.EIO
 	})
-	if live, err := failing(pid); live || err == nil || !strings.Contains(err.Error(), "4242") {
+	if live, err := failing(pid); live || err == nil || err.Error() != "probe keeper 4242: input/output error" {
 		t.Fatalf("failed probe = %v, %v; want an error naming pid %d", live, err, pid)
 	}
 	zombie := keeperProbe(keepwarmProcFixture{argv: []string{keeperMark}, zombie: true}, func(int) (bool, error) {
@@ -160,8 +160,7 @@ func TestAutoEffortStateQuotesTheKeeperItRefuses(t *testing.T) {
 		t.Fatalf("state = %+v, want an error", got)
 	}
 	text := got.err.Error()
-	if strings.ContainsRune(text, '\u009b') || !strings.Contains(text, "…") || len(text) > 200 ||
-		!strings.Contains(text, "is no pid") {
+	if text != "keeper \"\\\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…\" is no pid" {
 		t.Fatalf("err = %q, want the keeper quoted and clipped", text)
 	}
 }
@@ -176,8 +175,7 @@ func TestAutoEffortWarnNamesAStateFileWithNoHome(t *testing.T) {
 	if got.err == nil {
 		t.Fatalf("state = %+v, want an error for the unknown home", got)
 	}
-	if line := warn.String(); !strings.HasPrefix(line, "statusline: auto-effort state file") ||
-		strings.Contains(line, "  ") || !strings.Contains(line, "the home directory is unknown") {
+	if line := warn.String(); line != "statusline: auto-effort state file ~/.local/state/auto-effort/state.json: the home directory is unknown (effort shows ERR)\n" {
 		t.Fatalf("warn = %q, want one line naming the state file by its cause", line)
 	}
 }

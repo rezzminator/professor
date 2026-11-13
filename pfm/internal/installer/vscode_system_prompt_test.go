@@ -87,8 +87,10 @@ func TestVSCodeSystemPromptMissingLawFailsByPath(t *testing.T) {
 	installer.options.SourceRepo = filepath.Join(home, "empty-clone")
 	err := installer.wireVSCode()
 	law := vscodeLawSource(installer.options.SourceRepo)
-	if err == nil || !strings.Contains(err.Error(), law) {
-		t.Fatalf("wireVSCode error = %v, want one naming %s", err, law)
+	want := "build VS Code " + vscodeSystemPromptName + ": read the prompt law " + law + ": open " + law +
+		": no such file or directory"
+	if err == nil || err.Error() != want {
+		t.Fatalf("wireVSCode error = %v, want %q", err, want)
 	}
 	requireNoPath(t, installer.vscodeSystemPromptPath(), "system prompt built without the law")
 	if _, linked := resolvedLink(filepath.Join(root, "extensions", vscodeExtensionLinkName)); !linked {
@@ -145,15 +147,15 @@ func TestVSCodeSystemPromptMissingLawFailsOnlyItsStep(t *testing.T) {
 		SourceRepo: clone, VSCode: true, vscodePlatform: "linux", vscodeSettingsPaths: []string{settings},
 	})
 	law := vscodeLawSource(clone)
-	if err == nil || strings.Contains(err.Error(), "preflight") || !strings.Contains(err.Error(), law) {
-		t.Fatalf("install error=%v output=%s, want the step failure naming %s", err, output.String(), law)
+	want := "build VS Code " + vscodeSystemPromptName + ": read the prompt law " + law + ": open " + law +
+		": no such file or directory"
+	if err == nil || err.Error() != want {
+		t.Fatalf("install error=%v output=%s, want the step failure %q", err, output.String(), want)
 	}
-	want := "  FAIL    build VS Code " + vscodeSystemPromptName + ": read the prompt law " + law + ": "
-	if !strings.Contains(output.String(), want) {
-		t.Fatalf("output lacks the FAIL row %q:\n%s", want, output.String())
-	}
-	if got := readFixture(t, settings); !strings.Contains(got, `"PFM"`) {
-		t.Fatalf("VS Code settings did not land past the missing law:\n%s", got)
+	wantOutputLines(t, output.String(), []string{"  FAIL    " + want}, "  FAIL    ")
+	profiles, _ := decodeSettings(t, settings)["terminal.integrated.profiles.linux"].(map[string]any)
+	if _, landed := profiles["PFM"]; !landed {
+		t.Fatalf("VS Code settings did not land past the missing law:\n%s", readFixture(t, settings))
 	}
 	requireNoPath(
 		t,

@@ -1,6 +1,7 @@
 package transcript
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -70,7 +71,11 @@ func TestReadTailLinesSaysWhenTheLastLineIsBeyondTheBound(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, _, err := ReadTailLines(path, 1024)
-	if err == nil || !strings.Contains(err.Error(), "last line of "+path+" is longer than") || len(got) != 0 {
-		t.Fatalf("tail = %d bytes, err = %v; want an error naming the bound", len(got), err)
+	if text, want := strings.ReplaceAll(
+		fmt.Sprintf("%d %v", len(got), err),
+		path,
+		"{path}",
+	), "0 last line of {path} is longer than 33554432 bytes"; text != want {
+		t.Fatalf("tail = %q, want %q", text, want)
 	}
 }

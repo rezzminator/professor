@@ -178,6 +178,7 @@ graph_order() {
       if ($0=="pfm.unit") group=1
       else if ($0=="pfm.e2e") group=2
       else if ($0=="pfm.race") group=3
+      else if ($0=="pfm.unit-proof") group=3
       else if ($0 ~ /^pfm\.self\./) group=4
       else if ($0 ~ /^templates\.fence\./) group=5
       else exit 1
@@ -185,21 +186,21 @@ graph_order() {
       previous=group
       next
     }
-    after && ($0 ~ /^pfm\.self\./ || $0 ~ /^templates\.fence\./ || $0=="pfm.unit" || $0=="pfm.e2e" || $0=="pfm.race") {exit 1}
+    after && ($0 ~ /^pfm\.self\./ || $0 ~ /^templates\.fence\./ || $0=="pfm.unit" || $0=="pfm.e2e" || $0=="pfm.race" || $0=="pfm.unit-proof") {exit 1}
     END {if (barriers!=1) exit 1}
   ' "$T/registered"
 }
 static_names() { sed -n '/^BARRIER$/,$p' "$T/registered" | sed '1d' | sort | paste -sd, -; }
 pfm_static='pfm.lint-new,pfm.fmt-check,pfm.vet,pfm.vet-darwin,pfm.arch,pfm.testplan'
 templates_static='templates.clone,templates.leak,templates.plugin-logs,templates.plugin-lab,templates.placeholders,templates.scratch-paths,templates.descriptions,templates.mirrors,templates.generated-agents,templates.release-check,templates.refresh-scope,templates.plugin-workflows,templates.worktree-script,templates.dev-report,templates.format-md,templates.theme-glyphs,templates.test-tests,templates.unit-path-tests,templates.engine-sync-action-tests,templates.skill-tests'
-heavy_names='pfm.e2e,pfm.fmt-check,pfm.lint-new,pfm.race,pfm.unit,pfm.vet,pfm.vet-darwin'
+heavy_names='pfm.e2e,pfm.fmt-check,pfm.lint-new,pfm.race,pfm.unit,pfm.unit-proof,pfm.vet,pfm.vet-darwin'
 if gate_run all >"$T/all.out" &&
   [ "$(grep -c '^templates\.leak$' "$T/registered")" -eq 1 ] &&
   [ "$(grep -c '^templates\.mirrors$' "$T/registered")" -eq 1 ] &&
   [ "$(grep -c '^pfm\.unit$' "$T/registered")" -eq 1 ] &&
   [ "$(grep -c '^pfm\.e2e$' "$T/registered")" -eq 1 ] &&
   [ "$(grep -c '^templates\.fence\.' "$T/registered")" -eq "$(find "$REPO_ROOT/infra/fence/tests" -name '*_test.sh' | wc -l | tr -d ' ')" ] &&
-  [ "$(sed -n '1,3p' "$T/registered" | paste -sd, -)" = 'pfm.unit,pfm.e2e,pfm.race' ] &&
+  [ "$(sed -n '1,4p' "$T/registered" | paste -sd, -)" = 'pfm.unit,pfm.e2e,pfm.race,pfm.unit-proof' ] &&
   [ "$(static_names)" = "$(printf '%s' "$pfm_static,$templates_static" | tr ',' '\n' | sort | paste -sd, -)" ] &&
   [ "$(sort "$T/heavy" | paste -sd, -)" = "$heavy_names" ] &&
   [ -z "$(sort "$T/registered" | uniq -d)" ] && graph_order all; then
@@ -207,9 +208,9 @@ if gate_run all >"$T/all.out" &&
 else bad 'all registration' "$(cat "$T/all.out")" "$(cat "$T/registered")"; fi
 
 if PFM_TEST_TIMING_DIR="$T/real-pfm" gate_run pfm >"$T/pfm.out" &&
-  [ "$(sed -n '1,3p' "$T/registered" | paste -sd, -)" = 'pfm.unit,pfm.e2e,pfm.race' ] &&
+  [ "$(sed -n '1,4p' "$T/registered" | paste -sd, -)" = 'pfm.unit,pfm.e2e,pfm.race,pfm.unit-proof' ] &&
   [ "$(static_names)" = "$(printf '%s' "$pfm_static" | tr ',' '\n' | sort | paste -sd, -)" ] &&
-  [ "$(sort "$T/heavy" | paste -sd, -)" = 'pfm.e2e,pfm.fmt-check,pfm.lint-new,pfm.race,pfm.unit,pfm.vet,pfm.vet-darwin' ] &&
+  [ "$(sort "$T/heavy" | paste -sd, -)" = "$heavy_names" ] &&
   graph_order pfm; then
   ok 'pfm graph runs its tests before static checks'
 else bad 'pfm graph' "$(cat "$T/registered")"; fi
@@ -418,7 +419,7 @@ SH
 cat > "$T/fx/pfm/scripts/test-kinds.sh" <<'SH'
 printf 'kinds %s\n' "$*" >> "$STUB_EVENTS"
 [ "${STUB_KINDS_RC:-0}" = 0 ] || { echo 'KINDS ERROR stub cannot look'; exit "$STUB_KINDS_RC"; }
-echo 'KINDS unit 2 (nothing 1 · temp-dir 1) · real 1 · move 3 (home-sqlite 1 · process 1 · tmux 1) · total 6'
+echo 'KINDS unit 5 · real 1 · total 6'
 SH
 cat > "$T/fx/pfm/scripts/test-shard.sh" <<'SH'
 if [ "${STUB_LOAD_FAIL:-0}" = 1 ]; then
@@ -548,7 +549,7 @@ fx_budget
 fx_case order all
 if [ "$GATE_RC" -eq 0 ] && [ "$(event_words)" = 'sampler-start steps sampler-stop judge report summary-saw kinds' ] &&
   grep -Fxq "kinds $T/fx/pfm" "$STUB_EVENTS" &&
-  [ "$(tail -n 1 "$GATE_OUT")" = 'KINDS unit 2 (nothing 1 · temp-dir 1) · real 1 · move 3 (home-sqlite 1 · process 1 · tmux 1) · total 6' ] &&
+  [ "$(tail -n 1 "$GATE_OUT")" = 'KINDS unit 5 · real 1 · total 6' ] &&
   grep -Fxq "sampler-start run --out $RUN/resources.tsv --parent $$" "$STUB_EVENTS" &&
   grep -Fxq "judge window --resources $RUN/resources.tsv" "$STUB_EVENTS" &&
   grep -Fxq "report summary $RUN" "$STUB_EVENTS" && grep -Fxq 'summary-saw BUDGET' "$STUB_EVENTS" &&
@@ -660,6 +661,30 @@ if grep -Fxq '  PROFILE failures NOT REPORTED — profile-report.sh failures exi
   grep -Fxq "  PROFILE index $cur/profile/" "$T/unit-report-failed.out"; then
   ok 'a failures report that cannot be built is named and still points at the profile root'
 else bad 'failures report error' "$(cat "$T/unit-report-failed.out")"; fi
+
+# checks_pfm_unit_proof: a proof that traced one execve of /usr/bin/git fails the step with its
+# verdict and prints the reach row; a PASS is one ok line.
+mkdir -p "$T/up/pfm/scripts" "$T/up/run"
+cat > "$T/up/pfm/scripts/unit-proof.sh" <<'STUB'
+out="$2"; mkdir -p "$out"
+if [ "${STUB_PROOF_PASS:-0}" = 1 ]; then echo 'UNIT-PROOF PASS · tests 3 pass 0 fail 0 skip · reach 0 rows'; exit 0; fi
+printf 'internal/x\texec\tgit status\t1\texecve("/usr/bin/git", ["git", "status"], 0x0 /* 3 vars */) = 0\n' > "$out/reach.tsv"
+echo 'UNIT-PROOF FAIL · tests 3 pass 0 fail 0 skip · reach 1 rows (1 exec · 0 read · 0 write · 0 socket · 0 tripwire)'
+exit 1
+STUB
+up_case() { (FAILURES=0; head_() { :; }; info() { printf '%s\n' "$*"; }; ok() { printf 'OK %s\n' "$*"; }
+  fail_step() { printf 'FAILSTEP %s\n' "$*"; FAILURES=$((FAILURES + 1)); }
+  checks_pfm_unit_proof "$T/up/pfm" "$T/up/run"; echo "FAILURES=$FAILURES") > "$T/up.out" 2>&1; }
+up_case
+if grep -Fxq "$(printf 'internal/x\texec\tgit status\t1')" "$T/up.out" &&
+  grep -Fxq "FAILSTEP pfm: unit proof exit 1 — UNIT-PROOF FAIL · tests 3 pass 0 fail 0 skip · reach 1 rows (1 exec · 0 read · 0 write · 0 socket · 0 tripwire) (log $T/up/run/unit-proof.log)" "$T/up.out" &&
+  grep -Fxq 'FAILURES=1' "$T/up.out"; then
+  ok 'pfm.unit-proof: a traced exec of git fails the step with the verdict and prints exec git'
+else bad 'pfm.unit-proof, exec git' "$(cat "$T/up.out")"; fi
+STUB_PROOF_PASS=1 up_case
+if grep -Fxq 'OK pfm: unit proof — UNIT-PROOF PASS · tests 3 pass 0 fail 0 skip · reach 0 rows' "$T/up.out" && grep -Fxq 'FAILURES=0' "$T/up.out"; then
+  ok 'pfm.unit-proof: a PASS verdict is one ok line'
+else bad 'pfm.unit-proof, pass' "$(cat "$T/up.out")"; fi
 
 # checks_gate_fixture, Go kinds: the fixture package run through a stubbed go, then the shared report
 # and the failure pointers on the stream it wrote.
@@ -979,6 +1004,13 @@ mkdir -p "$REPO_ROOT/scripts"
 if [ -f "${SUT%/*}/../../scripts/agent-source-inventory.py" ]; then
   cp "${SUT%/*}/../../scripts/agent-source-inventory.py" "$REPO_ROOT/scripts/agent-source-inventory.py"
 fi
+# pfm's agent inventory fixture, as the tree under test would track it.
+ga_fixture() {
+  mkdir -p "$REPO_ROOT/pfm/internal/testjail/testdata"
+  (cd "$REPO_ROOT" && python3 -I scripts/agent-source-inventory.py templates/global/agents) \
+    > "$REPO_ROOT/pfm/internal/testjail/testdata/global-agents.json"
+}
+ga_fixture
 ga_names='alpha-pro beta-max gamma-lite'
 ga_count=3
 ga_jailed() { [ -z "$(ls -A "$TMP_BASE/engine-sync" | grep '^generated-agents\.')" ]; } # no jail left under $TMP_BASE
@@ -992,6 +1024,15 @@ if [ "$(wc -l < "$MIRROR_CALLS" | tr -d ' ')" -eq 1 ] && [ "$(cat "$T/es-build.c
   cmp -s "$MIRROR_CALLS.policy" "$REPO_ROOT/templates/global/engine-sync.json" && ga_jailed; then
   ok "generated agents: every declaration renders into a jail home that no caller's HOME, XDG, engine-sync or Codex variable reaches, the count is named, the jail is removed ($ga_count)"
 else bad 'generated agents, rendered' "$(cat "$MIRROR_CALLS")" "$(cat "$MIRROR_CALLS.env")" "$(cat "$T/es.out")"; fi
+cp "$REPO_ROOT/pfm/internal/testjail/testdata/global-agents.json" "$T/global-agents.json"
+printf '[]\n' > "$REPO_ROOT/pfm/internal/testjail/testdata/global-agents.json"
+es_case checks_templates_generated_agents "STUB_ES_RENDER=$ga_names"
+if grep -Fxq 'FAILSTEP agent inventory fixture is stale: python3 -I scripts/agent-source-inventory.py templates/global/agents > pfm/internal/testjail/testdata/global-agents.json' "$T/es.out" &&
+  grep -Fq "all $ga_count generated agent(s) render through engine-sync into a jail home" "$T/es.out" &&
+  grep -Fxq 'FAILURES=1' "$T/es.out" && ga_jailed; then
+  ok 'an agent inventory fixture that differs from a fresh inventory is one red line naming its regeneration, the render still judged'
+else bad 'generated agents, stale inventory fixture' "$(cat "$T/es.out")"; fi
+cp "$T/global-agents.json" "$REPO_ROOT/pfm/internal/testjail/testdata/global-agents.json"
 es_case checks_templates_generated_agents STUB_ES_GLOBAL_RC=1
 if grep -Fq 'variant "beta-max" from beta.md' "$T/es.out" &&
   grep -Fq 'FAILSTEP generated agents FAILED to render (engine-sync global exit 1; declaration named in the error: beta-max)' "$T/es.out" &&
@@ -1042,7 +1083,7 @@ for ga_state in missing unparseable empty invalid; do
   case "$ga_state" in
     missing) ga_want="FAILSTEP generated agents NOT RENDERED — $ga_dir is missing, so nothing was looked up" ;;
     unparseable) mkdir -p "$ga_dir"; printf -- '---\nfrom: [\n---\n' > "$ga_dir/broken.md"; ga_want='FAILSTEP generated agents NOT RENDERED — agent sources do not parse: ' ;;
-    empty) mkdir -p "$ga_dir"; printf -- '---\nname: solo\n---\n' > "$ga_dir/solo.md"; ga_want='FAILSTEP generated agents NOT RENDERED — agent sources carry no declaration, so nothing could render' ;;
+    empty) mkdir -p "$ga_dir"; printf -- '---\nname: solo\n---\n' > "$ga_dir/solo.md"; ga_fixture; ga_want='FAILSTEP generated agents NOT RENDERED — agent sources carry no declaration, so nothing could render' ;;
     invalid) mkdir -p "$ga_dir"; printf -- '---\nfrom: []\n---\n' > "$ga_dir/broken.md"; ga_want='FAILSTEP generated agents NOT RENDERED — agent sources do not parse: ' ;;
   esac
   es_case checks_templates_generated_agents "STUB_ES_RENDER=$ga_names"
@@ -1050,7 +1091,7 @@ for ga_state in missing unparseable empty invalid; do
     ok "agent sources ($ga_state) are NOT RENDERED, red, with engine-sync never run"
   else bad "generated agents, $ga_state source" "$(cat "$MIRROR_CALLS")" "$(cat "$T/es.out")"; fi
 done
-rm -rf "$ga_dir"; ga_sources
+rm -rf "$ga_dir"; ga_sources; ga_fixture
 # Preserve the inventory producer's exit status and visible error class independently.
 cp "$REPO_ROOT/scripts/agent-source-inventory.py" "$T/generated-inventory.py"
 for ga_failure in \

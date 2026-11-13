@@ -343,10 +343,10 @@ func runChatBranch(args []string, stdout, stderr io.Writer, env paths.Env, clk c
 		fmt.Fprintf(stderr, "pfm chat branch: configured %s binary %q is not executable: %v\n", engine, binary, err)
 		return 1
 	}
-	choice, forkID, placeErr := pfmchat.BranchPlace(context.Background(), runtime.Config.Chat.Backend, engine)
-	if placeErr != nil {
-		fmt.Fprintf(stderr, "pfm chat branch: %v\n", placeErr)
-		return spawn.FailureCode(placeErr)
+	choice, forkID, err := pfmchat.BranchPlace(context.Background(), runtime.Config.Chat.Backend, engine, commandRunner)
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm chat branch: %v\n", err)
+		return spawn.FailureCode(err)
 	}
 	resolved := runtime.Paths
 	cwd := strings.TrimSpace(*requestedCWD)

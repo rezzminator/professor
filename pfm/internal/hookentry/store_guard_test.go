@@ -50,8 +50,9 @@ func TestStoreGuardDeniesClaudeRunOnTheStore(t *testing.T) {
 	} {
 		t.Run(command, func(t *testing.T) {
 			code, stdout, stderr := runStoreGuard(gitGuardPayload(t, "Bash", command, "/tmp", ""))
-			if code != 0 || !strings.Contains(stdout, gitGuardDenied) || !strings.Contains(stdout, storeGuardReason) {
-				t.Fatalf("code=%d stdout=%q stderr=%q, want deny with %q", code, stdout, stderr, storeGuardReason)
+			if code != 0 || gitGuardDecision(t, stdout) != "deny" ||
+				gitGuardDenyReason(t, stdout) != storeGuardDenyText {
+				t.Fatalf("code=%d stdout=%q stderr=%q, want deny with %q", code, stdout, stderr, storeGuardDenyText)
 			}
 		})
 	}
@@ -120,7 +121,7 @@ func TestStoreGuardFailsOpenAndSaysWhy(t *testing.T) {
 	t.Run("no HOME", func(t *testing.T) {
 		t.Setenv("HOME", "")
 		code, stdout, stderr := runStoreGuard(gitGuardPayload(t, "Bash", denied, "/tmp", ""))
-		if code != 0 || stdout != "" || !strings.Contains(stderr, "HOME is empty (fail-open)") {
+		if code != 0 || stdout != "" || stderr != "pfm internal store-guard: HOME is empty (fail-open)\n" {
 			t.Fatalf("code=%d stdout=%q stderr=%q, want allowed with the HOME cause on stderr", code, stdout, stderr)
 		}
 	})
@@ -142,13 +143,19 @@ func TestStoreGuardDeniesTheStoreBehindItsSymlink(t *testing.T) {
 		`CLAUDE_CONFIG_DIR=$HOME/dotfiles/claude claude plugin list`,
 	} {
 		code, stdout, stderr := runStoreGuard(gitGuardPayload(t, "Bash", command, home, ""))
-		if code != 0 || !strings.Contains(stdout, storeGuardReason) {
+		if code != 0 ||
+			stdout != "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"Drop the CLAUDE_CONFIG_DIR override and run `claude` as it is: this chat's own config dir already reaches the shared plugin store (its plugins/ and settings.json link into ~/.claude), and a claude run on the store itself writes .claude.json and backups/ into it.\"}}\n" {
 			t.Errorf("%s: code=%d stdout=%q stderr=%q, want deny on a symlinked store", command, code, stdout, stderr)
 		}
 	}
 	relative := gitGuardPayload(t, "Bash", `CLAUDE_CONFIG_DIR=.claude claude plugin list`, home, "")
 	code, stdout, _ := runStoreGuard(relative)
-	if code != 0 || !strings.Contains(stdout, storeGuardReason) {
+	if code != 0 ||
+		stdout != "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"Drop the CLAUDE_CONFIG_DIR override and run `claude` as it is: this chat's own config dir already reaches the shared plugin store (its plugins/ and settings.json link into ~/.claude), and a claude run on the store itself writes .claude.json and backups/ into it.\"}}\n" {
 		t.Errorf("relative .claude from HOME: code=%d stdout=%q, want deny", code, stdout)
 	}
 }
+
+const storeGuardDenyText = "Drop the CLAUDE_CONFIG_DIR override and run `claude` as it is: this chat's own config dir already reaches the" +
+	" shared plugin store (its plugins/ and settings.json link into ~/.claude), and a claude run on the store" +
+	" itself writes .claude.json and backups/ into it."

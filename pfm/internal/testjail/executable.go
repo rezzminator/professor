@@ -30,9 +30,8 @@ func WriteExecutable(path string, body []byte, mode os.FileMode) error {
 // hashes as an executable and never runs: a configured engine binary, a bash
 // on a jailed PATH, a pfm candidate whose hash is compared. Its mode keeps the
 // exec bit the code under test checks for. Nothing in the test starts it, so a
-// test writing one touches the file system only (scripts/test-kinds.sh reads
-// it as temp-dir, where WriteExecutable is process); a test that runs the file
-// writes it with WriteExecutable instead. It still writes through
+// unit test writing one touches its temp directory only; a test that runs the
+// file writes it with WriteExecutable instead, in a _jail_test.go file. It still writes through
 // WriteExecutable, so a file run by mistake cannot race a fork either.
 func WriteExecutableNeverRun(path string, body []byte, mode os.FileMode) error {
 	return WriteExecutable(path, body, mode)

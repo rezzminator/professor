@@ -2,6 +2,7 @@ package fleetdb
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -68,7 +69,8 @@ func TestCommsRejectsUnknownKind(t *testing.T) {
 	t.Parallel()
 	state := openTestStore(t)
 	err := state.RecordComms(context.Background(), CommsEvent{Kind: "reload", Message: "excluded"})
-	if err == nil || !strings.Contains(err.Error(), "record comms event") {
+	if err == nil ||
+		err.Error() != "record comms event: constraint failed: CHECK constraint failed: kind IN ('call','group','spawn') (275)" {
 		t.Fatalf("RecordComms() error = %v, want wrapped schema rejection", err)
 	}
 }
@@ -83,20 +85,11 @@ func TestDegradedStoreRejectsCommsWritesAndReads(t *testing.T) {
 	state := OpenSharedState(context.Background(), paths.Values{StateDB: filepath.Join(blocker, "pfm.db")})
 	t.Cleanup(func() { _ = state.Close() })
 
-	if err := state.RecordComms(
-		context.Background(),
-		CommsEvent{Kind: KindCall, Message: "x"},
-	); err == nil ||
-		!strings.Contains(err.Error(), "record comms event") {
-		t.Fatalf("degraded RecordComms() error = %v", err)
-	}
-	if events, err := state.CommsSince(
-		context.Background(),
-		0,
-		5,
-	); err == nil || events != nil ||
-		!strings.Contains(err.Error(), "query comms events") {
-		t.Fatalf("degraded CommsSince() = %#v, %v", events, err)
+	recordErr := state.RecordComms(context.Background(), CommsEvent{Kind: KindCall, Message: "x"})
+	events, queryErr := state.CommsSince(context.Background(), 0, 5)
+	if got, want := strings.ReplaceAll(fmt.Sprintf("%v\n%#v %v", recordErr, events, queryErr), blocker, "{blocker}"),
+		"record comms event: inspect shared state database {blocker}/pfm.db: stat {blocker}/pfm.db: not a directory\n[]fleetdb.CommsEvent(nil) query comms events: inspect shared state database {blocker}/pfm.db: stat {blocker}/pfm.db: not a directory"; got != want {
+		t.Fatalf("degraded RecordComms and CommsSince = %q, want %q", got, want)
 	}
 }
 

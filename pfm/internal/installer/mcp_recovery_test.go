@@ -94,12 +94,10 @@ func TestMCPPreservesManualSecondaryCodexClient(t *testing.T) {
 	if err := e.writeMCPCodeConfig([]string{chatRegistrationName}); err != nil {
 		t.Fatal(err)
 	}
-	var document map[string]any
-	if _, err := toml.Decode(readFixture(t, path), &document); err != nil {
-		t.Fatalf("install corrupted manual secondary Codex config: %v", err)
-	}
-	if got := readFixture(t, path); !strings.HasPrefix(got, original) {
-		t.Fatalf("manual chat table was not kept byte-identical:\n%s", got)
+	want := original + mcpFenceBegin + "\n[mcp_servers.chat-professor]\ncommand = \"" + home + "/.local/bin/pfm\"\n" +
+		"args = [\"mcp\", \"serve\", \"--stdio\", \"--family\", \"chat\"]\n" + mcpFenceEnd + "\n"
+	if got := readFixture(t, path); got != want {
+		t.Fatalf("%s =\n%s\nwant the manual chat table kept byte-identical\n%s", path, got, want)
 	}
 }
 

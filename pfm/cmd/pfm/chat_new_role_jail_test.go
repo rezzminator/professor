@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/action"
@@ -54,8 +53,12 @@ func TestChatNewRoleWithoutSourceRepoMarkerNamesCause(t *testing.T) {
 		&stdout,
 		&stderr,
 	)
-	if code != 2 || !strings.Contains(stderr.String(), "no source repository recorded") {
-		t.Fatalf("chat new exit=%d stderr=%q", code, stderr.String())
+	if got, want := rooted(
+		stderr.String(),
+		jail.root,
+	), "pfm chat new: agent role: resolve Claude prompt: resolve generated harness prompt: read source repository marker {root}/home/.local/share/pfm/install/source-repo: no source repository recorded: open {root}/home/.local/share/pfm/install/source-repo: no such file or directory\n"; code != 2 ||
+		got != want {
+		t.Fatalf("chat new exit=%d stderr = %q, want %q", code, got, want)
 	}
 }
 

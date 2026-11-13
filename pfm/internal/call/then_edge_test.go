@@ -545,7 +545,7 @@ func TestDeliverThenReturnsPromptlyWhenCtxIsCancelledMidWait(t *testing.T) {
 				out.err,
 			)
 		}
-		if !strings.Contains(out.result.Message, context.Canceled.Error()) {
+		if out.result.Message != "then steer NOT delivered: could not read pane \"%1\" even once for a baseline (last tmux error: capture pane \"%1\" for a settled-turn baseline: context canceled) — the waiter never had a reference frame for this turn; steer kept in the log: \"resume the wave\"" {
 			t.Fatalf("Message = %q, want it to name the cancelled context", out.result.Message)
 		}
 	case <-time.After(3 * time.Second):

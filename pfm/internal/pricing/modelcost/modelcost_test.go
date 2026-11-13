@@ -142,7 +142,7 @@ func TestFetchErrors(t *testing.T) {
 	}
 	label := strings.Replace(claudePage, "Claude Sonnet 5 |", "Unrecognized publisher label |", 1)
 	if _, err := pagesFetcher(label, openAIPage, 200, nil).Fetch(context.Background()); err == nil ||
-		!strings.Contains(err.Error(), "model label") {
+		err.Error() != "model-cost: parse https://platform.claude.com/docs/en/about-claude/pricing.md: line 10: unsupported model label \"Unrecognized publisher label\"; catalog incomplete" {
 		t.Fatalf("Fetch error = %v, want the unsupported model label", err)
 	}
 }

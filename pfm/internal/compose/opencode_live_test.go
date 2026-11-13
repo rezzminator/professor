@@ -5,6 +5,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func openCodeLiveInput(seats []gather.LiveOpenCode, panes []gather.ProbePane) Input {
@@ -31,10 +32,10 @@ func TestIdentifiedLiveOpenCodeAbsorbsItsResumeRow(t *testing.T) {
 	output := Compose(openCodeLiveInput(
 		[]gather.LiveOpenCode{{
 			Socket: socket, SessionName: "ox-session", PaneID: "%0",
-			PID: 101, PanePID: 100, CWD: "/work/a",
+			PID: 101, PanePID: 100, CWD: testjail.Place("/work/a"),
 			PaneTitle: "OC | live one", SessionID: "ses_live",
 		}},
-		[]gather.ProbePane{openCodePane(socket, "%0", "/work/a", 100)},
+		[]gather.ProbePane{openCodePane(socket, "%0", testjail.Place("/work/a"), 100)},
 	))
 	seen := make([]Row, 0, 2)
 	for _, row := range output.Rows {
@@ -55,7 +56,7 @@ func TestIdentifiedLiveOpenCodeAbsorbsItsResumeRow(t *testing.T) {
 	if len(row.PanePIDs) != 1 || row.PanePIDs[0] != 100 {
 		t.Fatalf("PanePIDs = %v, want the pane's own pid", row.PanePIDs)
 	}
-	if row.Name != "live one" || row.CWD != "/work/a" || row.Project != "a" {
+	if row.Name != "live one" || row.CWD != testjail.Place("/work/a") || row.Project != "a" {
 		t.Fatalf("row = %+v, want the indexed session's name and directory", row)
 	}
 	// The title was read from OpenCode's store: an automatic one, no user's.
@@ -75,10 +76,10 @@ func TestUnidentifiedLiveOpenCodeRowUsesItsPaneTitle(t *testing.T) {
 	output := Compose(openCodeLiveInput(
 		[]gather.LiveOpenCode{{
 			Socket: socket, SessionName: "ox-session", PaneID: "%3",
-			PID: 201, PanePID: 200, CWD: "/work/z",
+			PID: 201, PanePID: 200, CWD: testjail.Place("/work/z"),
 			PaneTitle: "OC | nameless seat",
 		}},
-		[]gather.ProbePane{openCodePane(socket, "%3", "/work/z", 200)},
+		[]gather.ProbePane{openCodePane(socket, "%3", testjail.Place("/work/z"), 200)},
 	))
 	var row Row
 	found := false
@@ -96,7 +97,7 @@ func TestUnidentifiedLiveOpenCodeRowUsesItsPaneTitle(t *testing.T) {
 	if row.Name != "nameless seat" {
 		t.Fatalf("Name = %q, want the pane title minus its OC prefix", row.Name)
 	}
-	if row.CWD != "/work/z" || row.Project != "z" {
+	if row.CWD != testjail.Place("/work/z") || row.Project != "z" {
 		t.Fatalf("row = %+v, want the pane's own directory for project grouping", row)
 	}
 	if row.ActivityNS != 1_700_000_000*1_000_000_000 {
@@ -114,10 +115,10 @@ func TestUnidentifiedLiveOpenCodeRowWithoutTheOCPrefixIsNamedForItsSocket(t *tes
 	output := Compose(openCodeLiveInput(
 		[]gather.LiveOpenCode{{
 			Socket: socket, SessionName: "ox-session", PaneID: "%3",
-			PID: 201, PanePID: 200, CWD: "/work/z",
+			PID: 201, PanePID: 200, CWD: testjail.Place("/work/z"),
 			PaneTitle: "my-host-01",
 		}},
-		[]gather.ProbePane{openCodePane(socket, "%3", "/work/z", 200)},
+		[]gather.ProbePane{openCodePane(socket, "%3", testjail.Place("/work/z"), 200)},
 	))
 	for _, row := range output.Rows {
 		if row.Kind != LiveOpenCode {
@@ -139,9 +140,9 @@ func TestLiveOpenCodeRowsSurviveTheDefaultView(t *testing.T) {
 	input := openCodeLiveInput(
 		[]gather.LiveOpenCode{{
 			Socket: socket, SessionName: "ox-session", PaneID: "%0",
-			PID: 101, PanePID: 100, CWD: "/work/a", PaneTitle: "OC | fresh seat",
+			PID: 101, PanePID: 100, CWD: testjail.Place("/work/a"), PaneTitle: "OC | fresh seat",
 		}},
-		[]gather.ProbePane{openCodePane(socket, "%0", "/work/a", 100)},
+		[]gather.ProbePane{openCodePane(socket, "%0", testjail.Place("/work/a"), 100)},
 	)
 	input.Options = Options{View: DefaultView}
 	output := Compose(input)
@@ -159,7 +160,7 @@ func TestLiveOpenCodeSeatWithNoPaneIsNotARow(t *testing.T) {
 	output := Compose(openCodeLiveInput(
 		[]gather.LiveOpenCode{{
 			Socket: "ox-1700000000-42-9", PaneID: "%0", PID: 301, PanePID: 300,
-			CWD: "/work/a", PaneTitle: "OC | live one", SessionID: "ses_live",
+			CWD: testjail.Place("/work/a"), PaneTitle: "OC | live one", SessionID: "ses_live",
 		}},
 		nil,
 	))
@@ -185,16 +186,16 @@ func TestTwoServersForOneOpenCodeSessionCollapseToTheNewer(t *testing.T) {
 		[]gather.LiveOpenCode{
 			{
 				Socket: older, SessionName: "old", PaneID: "%0", PID: 101, PanePID: 100,
-				CWD: "/work/a", PaneTitle: "OC | live one", SessionID: "ses_live",
+				CWD: testjail.Place("/work/a"), PaneTitle: "OC | live one", SessionID: "ses_live",
 			},
 			{
 				Socket: newer, SessionName: "new", PaneID: "%0", PID: 201, PanePID: 200,
-				CWD: "/work/a", PaneTitle: "OC | live one", SessionID: "ses_live",
+				CWD: testjail.Place("/work/a"), PaneTitle: "OC | live one", SessionID: "ses_live",
 			},
 		},
 		[]gather.ProbePane{
-			openCodePane(older, "%0", "/work/a", 100),
-			openCodePane(newer, "%0", "/work/a", 200),
+			openCodePane(older, "%0", testjail.Place("/work/a"), 100),
+			openCodePane(newer, "%0", testjail.Place("/work/a"), 200),
 		},
 	))
 	seen := make([]Row, 0, 2)
@@ -220,9 +221,9 @@ func TestKillNeverLandsOnASocketKeyedOpenCodeRow(t *testing.T) {
 	input := openCodeLiveInput(
 		[]gather.LiveOpenCode{{
 			Socket: socket, SessionName: "ox-session", PaneID: "%0",
-			PID: 101, PanePID: 100, CWD: "/work/a", PaneTitle: "OC | nameless",
+			PID: 101, PanePID: 100, CWD: testjail.Place("/work/a"), PaneTitle: "OC | nameless",
 		}},
-		[]gather.ProbePane{openCodePane(socket, "%0", "/work/a", 100)},
+		[]gather.ProbePane{openCodePane(socket, "%0", testjail.Place("/work/a"), 100)},
 	)
 	input.Killed = []store.Killed{{ID: socket, Engine: "ox"}}
 	for _, row := range Compose(input).Rows {

@@ -2,6 +2,7 @@ package professor
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -422,72 +423,48 @@ func TestRenderScaffoldRejectsMissingOrEmptyAnswers(t *testing.T) {
 	})
 }
 
-// TestRenderScaffoldRejectsAnUnscaffoldedDir pins the "no baseline" row.
-func TestRenderScaffoldRejectsAnUnscaffoldedDir(t *testing.T) {
-	source := newRenderFixtureStore(t)
-	target := t.TempDir()
-	writeRenderManifest(t, target, `{"PROJECT_NAME":"Acme"}`)
-
-	var stdout bytes.Buffer
-	_, _, err := RenderScaffold(source, target, &stdout)
-	if err == nil {
-		t.Fatal("RenderScaffold() err = nil, want an error")
+func TestRenderScaffoldRefusesWhatItCannotRender(t *testing.T) {
+	registry := func(content string) func(t *testing.T, source string) {
+		return func(t *testing.T, source string) {
+			path := filepath.Join(source, "docs", "PLACEHOLDERS.md")
+			if content == "" {
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+			if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
-	baselinePath := BaselinePath(target)
-	if !strings.Contains(err.Error(), baselinePath) || !strings.Contains(err.Error(), "pfm init") {
-		t.Fatalf("error = %v, want it to name %s and pfm init", err, baselinePath)
+	for _, tc := range []struct {
+		name       string
+		damage     func(t *testing.T, source string)
+		scaffolded bool
+		want       string
+	}{
+		{"an unscaffolded target", func(*testing.T, string) {}, false, "{target}/.professor/baseline.json not found; run pfm init"},
+		{"missing registry", registry(""), true, "registry unreadable: {source}/docs/PLACEHOLDERS.md: open {source}/docs/PLACEHOLDERS.md: no such file or directory"},
+		{"registry without a heading", registry("Install-time tokens: {PROJECT_NAME}.\n"), true, "registry unreadable: {source}/docs/PLACEHOLDERS.md: missing the '## Runtime metavariables' heading"},
+		{
+			"registry without an install-time token",
+			registry("# Placeholders\n\n## Runtime metavariables\n\nFilled at runtime: {SHA}.\n"), true, "registry unreadable: {source}/docs/PLACEHOLDERS.md: no install-time token registered",
+		},
+	} {
+		source := newRenderFixtureStore(t)
+		tc.damage(t, source)
+		target := t.TempDir()
+		if tc.scaffolded {
+			target = scaffoldedRenderTarget(t, source)
+		}
+		writeRenderManifest(t, target, `{"PROJECT_NAME":"Acme"}`)
+		var stdout bytes.Buffer
+		_, _, err := RenderScaffold(source, target, &stdout)
+		if got := strings.NewReplacer(source, "{source}", target, "{target}").Replace(fmt.Sprint(err)); got != tc.want {
+			t.Errorf("%s: RenderScaffold error = %q, want %q", tc.name, got, tc.want)
+		}
 	}
-}
-
-// TestRenderScaffoldRejectsABrokenRegistry pins the "registry broken" row:
-// a missing PLACEHOLDERS.md, one missing the heading, and one with no
-// install-time token.
-func TestRenderScaffoldRejectsABrokenRegistry(t *testing.T) {
-	t.Run("missing", func(t *testing.T) {
-		source := newRenderFixtureStore(t)
-		if err := os.Remove(filepath.Join(source, "docs", "PLACEHOLDERS.md")); err != nil {
-			t.Fatal(err)
-		}
-		target := scaffoldedRenderTarget(t, source)
-		writeRenderManifest(t, target, `{"PROJECT_NAME":"Acme"}`)
-		var stdout bytes.Buffer
-		_, _, err := RenderScaffold(source, target, &stdout)
-		if err == nil || !strings.Contains(err.Error(), "registry unreadable") {
-			t.Fatalf("error = %v, want registry unreadable", err)
-		}
-	})
-
-	t.Run("no heading", func(t *testing.T) {
-		source := newRenderFixtureStore(t)
-		placeholders := filepath.Join(source, "docs", "PLACEHOLDERS.md")
-		if err := os.WriteFile(placeholders, []byte("Install-time tokens: {PROJECT_NAME}.\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		target := scaffoldedRenderTarget(t, source)
-		writeRenderManifest(t, target, `{"PROJECT_NAME":"Acme"}`)
-		var stdout bytes.Buffer
-		_, _, err := RenderScaffold(source, target, &stdout)
-		if err == nil || !strings.Contains(err.Error(), "registry unreadable") {
-			t.Fatalf("error = %v, want registry unreadable", err)
-		}
-	})
-
-	t.Run("no install-time token", func(t *testing.T) {
-		source := newRenderFixtureStore(t)
-		placeholders := filepath.Join(source, "docs", "PLACEHOLDERS.md")
-		if err := os.WriteFile(placeholders, []byte(
-			"# Placeholders\n\n## Runtime metavariables\n\nFilled at runtime: {SHA}.\n",
-		), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		target := scaffoldedRenderTarget(t, source)
-		writeRenderManifest(t, target, `{"PROJECT_NAME":"Acme"}`)
-		var stdout bytes.Buffer
-		_, _, err := RenderScaffold(source, target, &stdout)
-		if err == nil || !strings.Contains(err.Error(), "registry unreadable") {
-			t.Fatalf("error = %v, want registry unreadable", err)
-		}
-	})
 }
 
 // assertUnchanged verifies an error path wrote nothing: .claude/settings.json is still
@@ -522,8 +499,10 @@ func TestRenderScaffoldSkipsATemplateGoneUpstream(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RenderScaffold() err = %v, stdout=%q", err, stdout.String())
 	}
-	if rendered != 1 || !strings.Contains(stdout.String(), "SKIP .rumdl.toml: template changed since pin\n") ||
-		!strings.Contains(stdout.String(), "RENDERED .claude/settings.json (1 substitutions)") {
+	if rendered != 1 || stdout.String() != `RENDERED .claude/settings.json (1 substitutions)
+LEFT .claude/settings.json: {PROJECT_MOTTO}
+SKIP .rumdl.toml: template changed since pin
+` {
 		t.Fatalf("RenderScaffold() rendered=%d stdout=%q", rendered, stdout.String())
 	}
 }

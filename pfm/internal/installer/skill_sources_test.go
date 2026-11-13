@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	goRuntime "runtime"
@@ -305,9 +306,12 @@ func TestSourceFetchedSkillsRefuseATreeWithoutSKILLMd(t *testing.T) {
 
 	output := runSkillInstall(t, home, ModeApply)
 
-	if !strings.Contains(output, "SKILL-SOURCE-MISSING hollow (") {
-		t.Fatalf("a tree without SKILL.md was not reported:\n%s", output)
-	}
+	wantOutputLines(
+		t,
+		output,
+		[]string{"  skip    SKILL-SOURCE-MISSING hollow (file://" + repo + " has no root SKILL.md)"},
+		"SKILL-SOURCE-",
+	)
 	requireNoPath(t, filepath.Join(home, ".agents", "skills", "hollow"), "a tree without SKILL.md was linked")
 }
 
@@ -733,7 +737,7 @@ func TestShippedSkillSourcesRegistryLoads(t *testing.T) {
 		t.Fatalf("load %s: present=%t sources=%d err=%v", skillSourcesRelative, present, len(sources), err)
 	}
 	for _, entry := range sources {
-		if !strings.HasPrefix(entry.Repo, "https://") || entry.Problem != "" {
+		if repoURL, err := url.Parse(entry.Repo); err != nil || repoURL.Scheme != "https" || entry.Problem != "" {
 			t.Fatalf("entry %s: repo=%q problem=%q", entry.Name, entry.Repo, entry.Problem)
 		}
 	}

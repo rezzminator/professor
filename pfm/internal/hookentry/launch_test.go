@@ -3,6 +3,7 @@ package hookentry
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -199,16 +200,17 @@ func countEnvironmentEntry(environment []string, want string) int {
 func TestReadLaunchStatusRejectsMissingAndInvalidFiles(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "status")
-	_, err := readLaunchStatus(path)
-	if err == nil || !strings.Contains(err.Error(), "launcher status file missing") {
-		t.Fatalf("readLaunchStatus missing error=%v", err)
-	}
+	_, missing := readLaunchStatus(path)
 	if err := os.WriteFile(path, []byte("not-a-status\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, err = readLaunchStatus(path)
-	if err == nil || !strings.Contains(err.Error(), "launcher status file invalid") {
-		t.Fatalf("readLaunchStatus invalid error=%v", err)
+	_, invalid := readLaunchStatus(path)
+	if got, want := strings.ReplaceAll(
+		fmt.Sprint(missing, " | ", invalid),
+		path,
+		"{status}",
+	), "launcher status file missing: open {status}: no such file or directory | launcher status file invalid: parse=strconv.Atoi: parsing \"not-a-status\": invalid syntax value=\"not-a-status\""; got != want {
+		t.Errorf("missing | invalid = %q, want %q", got, want)
 	}
 }
 
@@ -349,7 +351,10 @@ func TestLaunchPassthroughDropsTheHerdrPaneOfAHeadlessRunOnly(t *testing.T) {
 	t.Cleanup(func() { LaunchExec, armCostLedger = previousExec, previousArm })
 	armCostLedger = func(environ []string, _ paths.Env, _ bool, _ io.Writer) ([]string, string) { return environ, "off" }
 	herdrEnv := []string{
-		"HERDR_ENV=1", "HERDR_PANE_ID=w1:p1", "HERDR_SOCKET_PATH=/tmp/h.sock", "HERDR_BIN_PATH=/usr/local/bin/herdr",
+		"HERDR_ENV=1",
+		"HERDR_PANE_ID=w1:p1",
+		"HERDR_SOCKET_PATH=" + testjail.Place("/tmp/h.sock"),
+		"HERDR_BIN_PATH=/usr/local/bin/herdr",
 	}
 	for _, test := range []struct {
 		name, tmux, forced string

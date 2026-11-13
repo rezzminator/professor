@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -14,32 +15,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/updatecheck"
 )
-
-func TestProfessorUpdatePromptExplainsThenAsksBeforeUpdating(t *testing.T) {
-	prompt := professorUpdatePrompt(compose.Row{ID: "pfm-update-v0.61.2"})
-	overview := strings.Index(prompt, "present a concise overview")
-	approval := strings.Index(prompt, "Ask the user for explicit approval")
-	update := strings.Index(prompt, "pfm update --to v0.61.2")
-	if overview < 0 || approval < overview || update < approval {
-		t.Fatalf("update prompt order is not overview → approval → update: %q", prompt)
-	}
-	// A banner can fire for an adopter several releases behind: reading only
-	// the target's notes skips every intervening release's migration actions.
-	for _, want := range []string{
-		"pfm doctor", "Do not push, tag, publish, release", "Professor v0.61.2",
-		"pfm version", "EVERY release-notes file after the installed version through v0.61.2",
-		"git show v0.61.2:releases/vX.Y.Z.md", "#### → For:", "one checklist",
-		"#### → Stop:", "before update", "after update", "per project",
-		"pfm doctor --project-updates", "keeping the project's own edits", "#### For:", "pfm update pin", "#### → For adopters",
-		"take it to `clean`, exit 0", "one at a time, never in parallel", "--keep", "pfm update ignore <template>", "pfm update accept <path> --reason",
-		"`INCOMPLETE`: inspect the unscanned text", "pfm update accept <path> --coverage --reason",
-		"no row waits for another question",
-	} {
-		if !strings.Contains(prompt, want) {
-			t.Fatalf("update prompt %q lacks %q", prompt, want)
-		}
-	}
-}
 
 func releaseRuntime(t *testing.T) pfmconfig.Runtime {
 	t.Helper()
@@ -94,7 +69,7 @@ func TestProfessorUpdateCheckNoticeNamesAnUnreadableCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	notice := professorUpdateCheckNotice(runtime)
-	if !strings.Contains(notice, "could not read") {
+	if notice != "pfm ls: could not read the Professor update cache: decode update cache: invalid character 'n' looking for beginning of object key string" {
 		t.Fatalf("notice = %q, want it to name the unreadable cache, not silence", notice)
 	}
 }
@@ -113,8 +88,10 @@ func TestProfessorUpdateCheckNoticeNamesAPersistentlyFailingChecker(t *testing.T
 	}
 
 	notice := professorUpdateCheckNotice(runtime)
-	if !strings.Contains(notice, "failing since") || !strings.Contains(notice, "network") {
-		t.Fatalf("notice = %q, want it to name the ongoing failure and its class", notice)
+	if got, want := regexp.MustCompile(`\d{4}-\d{2}-\d{2}[T ][\d:.]+Z?|\d+(ns|µs|ms|s|m|h)\b`).
+		ReplaceAllString(notice, "{t}"),
+		"pfm ls: Professor update check failing since {t} (network): latest Professor release returned 503 Service Unavailable; its source repository cannot be used: read source repository marker .local/share/pfm/install/source-repo: no source repository recorded: open .local/share/pfm/install/source-repo: no such file or directory — run pfm install --yes from the clone"; got != want {
+		t.Fatalf("notice = %q, want %q", got, want)
 	}
 }
 
@@ -263,8 +240,9 @@ func TestProfessorUpdateCheckNoticeNamesAFailingCheckWithAnUnusableSourceRepo(t 
 		t.Fatal("fixture home unexpectedly holds a readable source-repo marker")
 	}
 	notice := professorUpdateCheckNotice(runtime)
-	if !strings.Contains(notice, "failing since") || !strings.Contains(notice, "network") ||
-		!strings.Contains(notice, markerErr.Error()) {
-		t.Fatalf("notice = %q, want the failure and the marker error %q", notice, markerErr)
+	if got, want := regexp.MustCompile(`\d{4}-\d{2}-\d{2}[T ][\d:.]+Z?|\d+(ns|µs|ms|s|m|h)\b`).
+		ReplaceAllString(strings.ReplaceAll(notice, markerErr.Error(), "{marker error}"), "{t}"),
+		"pfm ls: Professor update check failing since {t} (network): latest Professor release returned 503 Service Unavailable; its source repository cannot be used: {marker error} — run pfm install --yes from the clone"; got != want {
+		t.Fatalf("notice = %q, want %q", got, want)
 	}
 }

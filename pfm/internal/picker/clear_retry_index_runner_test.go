@@ -10,8 +10,8 @@ import (
 )
 
 // clearRetryIndexRunner fails the third index run, the one after a clear; only
-// refresh_codex_clear_retry_jail_test.go drives it. A jail-named file would make
-// test-kinds mark every unit test calling a Run method as tmux.
+// refresh_codex_clear_retry_jail_test.go drives it. It holds no test, so its
+// jail tag needs no _jail_test.go name (test-kinds counts tests by file name).
 type clearRetryIndexRunner struct{ calls int }
 
 func (runner *clearRetryIndexRunner) Run(context.Context, fleetindex.Options) (fleetindex.Counters, error) {

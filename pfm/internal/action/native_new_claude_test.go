@@ -129,9 +129,7 @@ func TestNewClaudeNativeSpawnOmitsMissingSystemPromptFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(plan.Run, "--system-prompt-file") {
-		t.Fatalf("native fresh run carried --system-prompt-file for a missing composed prompt: %q", plan.Run)
-	}
+	actionGolden(t, "action_native_new_claude_missing_prompt.txt", rooted(t, plan.Run)+"\n")
 }
 
 func TestNewClaudeNativeSpawnPreservesBypassLeanAndCachePolicy(t *testing.T) {
@@ -172,7 +170,7 @@ func TestNewClaudeRequiresFreshSocket(t *testing.T) {
 		Home:           home,
 		Config:         testMachineConfig(home),
 	})
-	if err == nil || !strings.Contains(err.Error(), "fresh socket") {
+	if err == nil || err.Error() != "new Claude action requires cwd and fresh socket" {
 		t.Fatalf("missing fresh socket error = %v", err)
 	}
 }
@@ -197,14 +195,9 @@ func TestSynthesizeClaudePlansWarnWhenTheFleetPromptCannotReachTheChat(t *testin
 				if err != nil {
 					t.Fatal(err)
 				}
-				if staged {
-					if len(plan.Warnings) != 0 {
-						t.Fatalf("warnings = %q, want none", plan.Warnings)
-					}
-					return
-				}
-				if len(plan.Warnings) != 1 || !strings.Contains(plan.Warnings[0], "no source repository recorded") {
-					t.Fatalf("warnings = %q, want one naming the missing clone", plan.Warnings)
+				want := map[bool]string{false: "[\"Claude started WITHOUT its system prompt file: the composed fleet prompt cannot be located: resolve generated harness prompt: read source repository marker {root}/001/.local/share/pfm/install/source-repo: no source repository recorded: open {root}/001/.local/share/pfm/install/source-repo: no such file or directory — fix the cause, then reload the chat\"]", true: "[]"}[staged]
+				if got := rooted(t, fmt.Sprintf("%q", plan.Warnings)); got != want {
+					t.Errorf("warnings = %q, want %q", got, want)
 				}
 			})
 		}

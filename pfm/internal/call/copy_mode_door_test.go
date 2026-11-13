@@ -3,7 +3,6 @@ package call
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 )
 
@@ -22,7 +21,8 @@ func TestCallRefusesWhenTheCopyModeReadFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Call() error = %v", err)
 	}
-	if result.Code != CodeUndelivered || !strings.Contains(result.Message, "server not answering") {
+	if result.Code != CodeUndelivered ||
+		result.Message != "ABORT: read whether pane %1 is in copy mode: tmux: server not answering; nothing was typed" {
 		t.Fatalf("Call() over an unreadable copy mode = %+v, want the read failure reported undelivered", result)
 	}
 	if len(fake.literals) != 0 || len(fake.keys) != 0 {

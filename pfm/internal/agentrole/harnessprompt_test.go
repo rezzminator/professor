@@ -1,6 +1,7 @@
 package agentrole
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -46,9 +47,20 @@ func TestHarnessPromptRecordRejectsARelativeOrEmptyPath(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := ReadHarnessPromptRecord(sidDir, "cc-bad", ""); err == nil ||
-		!strings.Contains(err.Error(), "not an absolute path") {
-		t.Fatalf("relative record error = %v", err)
+	if _, _, err := ReadHarnessPromptRecord(
+		sidDir,
+		"cc-bad",
+		"",
+	); strings.ReplaceAll(
+		fmt.Sprint(err),
+		sidDir,
+		"{sid}",
+	) != "harness prompt record {sid}/harness-prompt-cc-bad.path: \"relative.md\" is not an absolute path" {
+		t.Fatalf(
+			"relative record error = %q, want %q",
+			strings.ReplaceAll(fmt.Sprint(err), sidDir, "{sid}"),
+			"harness prompt record {sid}/harness-prompt-cc-bad.path: \"relative.md\" is not an absolute path",
+		)
 	}
 	if err := WriteHarnessPromptRecord(sidDir, "cc-x", "", "relative.md"); err == nil {
 		t.Fatal("WriteHarnessPromptRecord accepted a relative path")

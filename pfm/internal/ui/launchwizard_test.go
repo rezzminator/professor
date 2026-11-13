@@ -343,11 +343,11 @@ func TestUnreadableLaunchMemoryIsNamedOnTheLaunchRow(t *testing.T) {
 	model := NewModel(snapshot)
 	row, _ := model.selectedRow()
 	idle := ansi.Strip(model.renderGroupedRow(row, true, 100, false))
-	if !strings.Contains(idle, "last launch unreadable") {
+	if idle != "› ✦ New chat → p  Claude · last launch unreadable  🥇                                               " {
 		t.Errorf("idle ✦ row = %q, want the unreadable memory named", idle)
 	}
 	dossier := strings.Join(strings.Fields(strings.Join(dossierText(model, row), " ")), " ")
-	if !strings.Contains(dossier, "parse launch memory: bad row") {
+	if dossier != "\x1b[1;38;2;255;255;255;48;2;51;65;85m NEW \x1b[m Claude 🥇 New Claude chat ──────────────────────────────────────── Enter chooses the engine, account and cache of a new chat in /p, each step opening on your last choice. Your last launch could not be read (parse launch memory: bad row): the steps open on the configured values. ◖ ⏎ choose ◗" {
 		t.Errorf("dossier = %q, want the read failure", dossier)
 	}
 }

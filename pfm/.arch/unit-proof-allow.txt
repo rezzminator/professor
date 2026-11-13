@@ -1,0 +1,62 @@
+# unit-proof allow rows: paths outside the built-in zones a unit test may reach, read by pfm/scripts/unit-proof.sh.
+# One row per path: {glob}<TAB>{r|rw|absent}<TAB>{reason}; `*` crosses `/`; an `absent` row allows only a lookup of a
+# path that does not exist where the proof runs, so the same probe reads as a reach on a machine holding it; a row
+# without a reason fails the proof as ERROR.
+/.dockerenv	r	testjail's fence guard (fence.go admitted) stats the container marker before it decides where a binary runs
+{checkout}/pfm/*go.mod	r	testjail's profiler (profile.go moduleRootOf) finds the module root by stat-ing go.mod upward from the package directory
+/etc/terminfo*	r	the TUI library resolves TERM against the system terminfo database at terminal init (internal/ui), read only and reached through no pfm seam
+/lib/terminfo*	r	the same terminfo lookup, its Debian location
+/usr/share/terminfo*	r	the same terminfo lookup, its fallback location
+/root/extra_*	absent	digest resolve stats a target as a file before it reads it as a Codex agent path, so the golden cases that name /root/extra_N reach the host path first
+/root/fix_*	absent	the same file-first stat for the golden agent-path targets /root/fix_*
+/.git	absent	project-root discovery (gitroot, workbench, hookentry's git and epic doors) walks up from a test's temp directory and stats .git in every ancestor, the filesystem root last: the walk has no seam that stops it at the temp directory
+/tmp/.git	absent	the same upward walk, at the system temp directory that holds every run-made directory
+/.professor*	absent	the upward walk for .professor/baseline.json (professor project root, workbench persona) reaching the filesystem root
+/tmp/.professor*	absent	the same upward baseline walk, at the system temp directory
+/fakegit.json	absent	ancestor walk of the fakegit state lookup above the temp dir (no seam bounds it)
+/tmp/fakegit.json	absent	ancestor walk of the fakegit state lookup above the temp dir (no seam bounds it)
+/go.mod	absent	testjail Run starts a package in the jail directory (RunInJail), and the profiler (profile.go moduleRootOf) stats go.mod in every ancestor of it, the filesystem root last
+/tmp/go.mod	absent	the same upward go.mod walk, at the system temp directory
+{checkout}/*.git	r	project-root and git-dir discovery stats .git in every ancestor of the package directory or a checkout-relative cwd; no seam bounds the walk
+{checkout}/*.professor/baseline.json	r	the same upward walk for .professor/baseline.json (professor project root, workbench persona) from the package directory
+*/.git/worktrees/*/commondir	r	git-dir resolution of a flight worktree reads the commondir pointer beside its gitfile
+{checkout}/pfm/internal/*example.pfm.config.json	absent	config discovery probes the example config relative to the package directory and its ancestors
+/work*	absent	invented fixture cwd /work/**: the project-root walk, cwd existence checks and transcript lookups stat a host path that exists on no host; the assertions read the literal
+/jail*	absent	invented fixture root /jail/** (same reason as /work*)
+/fixture*	absent	invented fixture root /fixture/** (same reason as /work*)
+/opt/pfm*	absent	invented install root /opt/pfm/** of the restart tests (same reason as /work*)
+/opt	r	the stat of the invented install root
+/accounts*	absent	invented account root /accounts/** (same reason as /work*)
+/h	absent	invented home /h of the themesync tests
+/h/*	absent	invented home /h/** of the themesync tests
+/elsewhere*	absent	invented foreign path of the installer and codexappendix tests
+/nonexistent*	absent	a path named to not exist, probed by its test
+/missing/*	absent	a path named to not exist, probed by its test
+/home/test/*	absent	invented home /home/test/** of the action and ui tests
+/tmp/fork-home*	absent	invented fork home /tmp/fork-home of the action fork test
+/fake/*	absent	invented herdr socket directory /fake/** (herdr cannot import testjail: import cycle)
+{out}/ambient/bin/*clip*	r	the atotto/clipboard package (a bubbles dependency of the TUI) looks up xclip, clip.exe and termux-clipboard-set on PATH in its package init, before any test runs; no pfm seam reaches a dependency init
+{out}/ambient/bin/xsel	r	the same atotto/clipboard init lookup (xsel)
+{checkout}/pfm/internal/*	absent	a relative path a unit test hands code that resolves it against the package directory (an absent session id, binary, hidden config, fixture or testdata entry): the probe finds nothing there, and tracked files are readable without a row
+{checkout}/pfm/cmd/*	absent	the same relative probe from cmd/pfm tests and the upward walks through pfm/cmd (CLAUDE.md, .git, baseline) above them
+{checkout}/pfm/harness-prompts/generated/claude.md	r	the doctor reads the fleet prompt the checkout generated (gitignored), through the source-repository marker testjail writes
+{checkout}/plugins/*/.claude-plugin/plugin.json	r	the doctor and installer read each plugin manifest of the checkout (a submodule, so untracked in this repository) through the source-repository marker
+{checkout}/templates/global/skills/god-speed*	r	the installer and doctor read the shipped god-speed skill directory through the source-repository marker
+{checkout}/tmp/bin/pfm.dev	r	the dev build binary the checkout stages (gitignored), probed by the launcher tests
+/.claude/*	absent	an upward project walk reaching the filesystem root: agentrole and cmd/pfm stat .claude/agents in every ancestor of a temp directory
+/.codex/*	absent	the same upward walk (.codex/agents)
+/tmp/.claude/*	absent	the same upward walk at the system temp directory
+/tmp/.codex/*	absent	the same upward walk at the system temp directory
+/CLAUDE.md	absent	the upward walk for a CLAUDE.md orientation file reaching the filesystem root
+/tmp/CLAUDE.md	absent	the same upward walk at the system temp directory
+/engine-sync/internal/cli/main.go	r	the engine-sync source the fence mounts at /engine-sync, whose cli.Version the enginesync version test reads (TestMinimumVersionDoesNotExceedEngineSyncSource); off the fence it reads the checkout's plugins/engine-sync, and this path is absent
+/dev/tty	rw	the chat end test's helper owns a pty session the test created and opens its controlling terminal, /dev/tty, to prove the session leader (internal/chat/kill_server_linux_test.go); there it is the test's own pty, never the operator's terminal
+/bin/zsh	r	the installer validates the account login shell by a stat before it wires the Herdr shell (installer/herdr_shell.go validateHerdrShell); the herdr shell tests name the system zsh as the fixture shell, and no runner seam answers a stat
+/bin	r	the hookentry launch tests and the testjail path tests name the system /bin/echo as a fixture real binary; the launcher stats it and no runner seam answers a stat
+/bin/echo	r	the same fixture binary
+/usr/bin	r	the same fixture binary resolved through its /usr/bin directory
+/usr/bin/echo	r	the same fixture binary
+/a	absent	testjail path-scrub tests name /a and /b as invented PATH entries
+/b	absent	the same invented PATH entries
+/checks.sh	absent	the pcm guard resolves the string literal /checks.sh of a python command it scans as a path, whatever the surrounding expression builds
+/r/.git	absent	the git guard stats the invented repository /r named by the commands it classifies

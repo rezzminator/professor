@@ -1,15 +1,13 @@
 package ui
 
 import (
-	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
-
-	"github.com/rezzminator/professor/pfm/internal/theme"
 )
 
 // The journey suite's picker steps (pfm/journey) and the attach jail drive the
@@ -60,26 +58,33 @@ func TestFrameKeepsTheStringsTerminalReadersScrape(t *testing.T) {
 }
 
 func TestCarouselWalksOnTheSelectedRowAtEveryWidth(t *testing.T) {
+	var frames []string
 	for _, width := range []int{100, 160} {
 		model := selectChat(t, deckModel(width, 30), "P:BUILDER")
-		want := []string{"◖▶ open◗", "◖⚡ reboot◗", "◖✖ kill◗"}
-		for step, label := range want {
-			if !strings.Contains(strings.Join(frameLines(model), "\n"), label) {
-				t.Fatalf("width %d step %d: the selected row lacks %q", width, step, label)
-			}
+		for range 3 {
+			frames = append(frames, scrapedSelectionLine(model))
 			model, _ = applyKey(t, model, specialKey(tea.KeyRight))
 		}
 	}
+	golden(t, "ui_carousel.txt", strings.Join(frames, "\n"))
+}
+
+// scrapedSelectionLine is the whole frame line carrying the cursor.
+func scrapedSelectionLine(model Model) string {
+	for _, line := range frameLines(model) {
+		if selectedLine.MatchString(line) {
+			return line
+		}
+	}
+	return ""
 }
 
 func TestHeaderAccountAndCacheAreReadableByRegex(t *testing.T) {
-	model := deckModel(100, 30)
-	line := strings.Join(frameLines(model), "\n")
-	if got := regexp.MustCompile(`account (\d+) ·`).FindStringSubmatch(line); len(got) != 2 || got[1] != "2" {
-		t.Errorf("the account regex reads %v from the frame", got)
-	}
-	if got := regexp.MustCompile(`⚡ 1h|🪫 5m`).FindString(line); got != "⚡ 1h" {
-		t.Errorf("the cache regex reads %q from the frame", got)
+	line := strings.Join(frameLines(deckModel(100, 30)), "\n")
+	account := regexp.MustCompile(`account (\d+) ·`).FindStringSubmatch(line)
+	cache := regexp.MustCompile(`⚡ 1h|🪫 5m`).FindString(line)
+	if want := []string{"account 2 ·", "2"}; !slices.Equal(account, want) || cache != "⚡ 1h" {
+		t.Errorf("the scrapers read account %q and cache %q, want %q and %q", account, cache, want, "⚡ 1h")
 	}
 }
 
@@ -119,33 +124,5 @@ func TestFrameKeepsTheGoldensShape(t *testing.T) {
 		if !strings.HasPrefix(line, "  ") || strings.TrimSpace(line) == "" {
 			t.Errorf("a footer line is blank or unindented: %q", line)
 		}
-	}
-}
-
-// T36 reads the palette's header background out of the live escapes: it must be
-// on the frame in every palette, and the other palette's must not be.
-func TestFrameCarriesThePalettesHeaderBackground(t *testing.T) {
-	t.Cleanup(func() { configureStyles(theme.Load("default")) })
-	sgr := func(hex string) string {
-		colour := rgbFromHex(hex)
-		return fmt.Sprintf("48;2;%d;%d;%d", colour.R, colour.G, colour.B)
-	}
-	frames := map[string]string{}
-	for _, name := range []string{"default", "tokyo-night"} {
-		snapshot := deckFleet(80, 24)
-		snapshot.Theme = name
-		model := NewModel(snapshot)
-		model.nowNS = fixtureNowNS
-		frames[name] = model.View().Content
-	}
-	def, tokyo := theme.Load("default").HeaderBg, theme.Load("tokyo-night").HeaderBg
-	if !strings.Contains(frames["default"], sgr(def)) {
-		t.Errorf("the default frame lacks its header background %s", def)
-	}
-	if !strings.Contains(frames["tokyo-night"], sgr(tokyo)) {
-		t.Errorf("the tokyo-night frame lacks its header background %s", tokyo)
-	}
-	if strings.Contains(frames["tokyo-night"], sgr(def)) {
-		t.Errorf("the tokyo-night frame still paints the default header background %s", def)
 	}
 }

@@ -606,8 +606,10 @@ func TestCodexHooksRefusesRetiredAccountOwnership(t *testing.T) {
 	writeFixture(t, settingsHookOwnershipPath(managedRootForHome(home)), string(raw))
 	e := resumeUnkillEngine(home, filepath.Join(home, "current"), "", ModeUninstall, &bytes.Buffer{})
 	err = e.wireCodexHooks()
-	if err == nil || !strings.Contains(err.Error(), old) {
-		t.Fatalf("retired account ownership error = %v", err)
+	want := "retired Codex account still owns hooks at " + old +
+		"; restore that account to the roster and uninstall its hooks before removing it"
+	if err == nil || err.Error() != want {
+		t.Fatalf("retired account ownership error = %v, want %q", err, want)
 	}
 }
 

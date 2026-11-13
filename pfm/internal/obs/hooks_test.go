@@ -3,6 +3,7 @@ package obs
 import (
 	"bytes"
 	"log/slog"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -115,8 +116,12 @@ func TestHookCapturesOnlyAHeadOfStdout(t *testing.T) {
 	if stdout.Len() != len(big) {
 		t.Fatalf("passed through %d bytes, want %d", stdout.Len(), len(big))
 	}
-	record := recorder.Records()[0]
-	if _, found := record.Field("reason"); found || strings.Contains(recorder.Raw(), "PLANTED") {
-		t.Fatalf("non-JSON stdout leaked into the record: %s", recorder.Raw())
+	keys := make([]string, 0, 8)
+	for key := range recorder.Records()[0].Fields {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	if got, want := strings.Join(keys, " "), "comp decision dur_ms exit hook level msg ts"; got != want {
+		t.Fatalf("record fields = %q, want %q", got, want)
 	}
 }

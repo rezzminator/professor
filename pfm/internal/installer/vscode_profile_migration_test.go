@@ -10,227 +10,123 @@ import (
 	"testing"
 )
 
-func TestVSCodeOwnedLegacyAutoOpenProfileUpgradesToPFM(t *testing.T) {
+// vscodeCanonicalSettings is the settings file an owned PFM profile in any
+// recognized legacy shape is upgraded to: vscodeProfile() with every inherited
+// chat-identity variable spelled as JSON null, the default profile kept.
+const vscodeCanonicalSettings = `{
+  "terminal.integrated.profiles.linux": {
+    "PFM": {
+  "args": [
+    "-l"
+  ],
+  "color": "terminal.ansiMagenta",
+  "env": {
+    "CLAUDECODE": null,
+    "CLAUDE_CODE_CHILD_SESSION": null,
+    "CLAUDE_CODE_SESSION_ID": null,
+    "CLAUDE_CONFIG_DIR": null,
+    "CODEX_THREAD_ID": null,
+    "PFM_AUTO_OPEN": "pfm",
+    "PFM_CLAUDE_CONFIG_DIR_DEFAULT": null,
+    "TMUX": null,
+    "TMUX_PANE": null
+  },
+  "icon": "mortar-board",
+  "path": "/bin/zsh"
+}
+  },
+  "terminal.integrated.defaultProfile.linux": "PFM"
+}`
+
+// TestVSCodeLegacyProfileMigration pins what install and uninstall do to a
+// profile pfm owns in an earlier shape: an exact legacy or previous-canonical
+// shape is upgraded (install) or removed alone (uninstall); a shape an
+// operator edited is left byte-for-byte alone and its ownership given up.
+func TestVSCodeLegacyProfileMigration(t *testing.T) {
 	t.Parallel()
-	home := vscodeLawHome(t)
-	settings := filepath.Join(home, "settings.json")
-	writeFixture(t, settings, `{
+	for _, tc := range []struct {
+		name         string
+		mode         Mode
+		settings     string
+		defaultOwned bool
+		want         string // "" = settings left unchanged
+		wantLedger   string // the ownership ledger, {home} for the home; "" = no ledger
+	}{
+		{
+			name: "owned legacy auto-open upgrades", mode: ModeApply, defaultOwned: true,
+			settings: `{
   "terminal.integrated.profiles.linux": {
     "PFM": {"path":"/bin/zsh","args":["-l"],"env":{"CC_AUTO_OPEN":"pfm"}}
   },
   "terminal.integrated.defaultProfile.linux": "PFM"
-}`)
-	record := vscodeOwnershipDocument{
-		Version: vscodeOwnershipVersion,
-		Files: []vscodeOwnershipRecord{{
-			Path: settings, Platform: "linux", ProfileOwned: true, DefaultOwned: true,
-		}},
-	}
-	ledger, err := json.Marshal(record)
-	if err != nil {
-		t.Fatal(err)
-	}
-	writeFixture(t, filepath.Join(home, ".local", "share", "pfm", "install", vscodeOwnershipName), string(ledger))
-
-	if _, err := Run(context.Background(), Options{
-		MCPConfigPath: testConfigPath(t),
-		Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, Stdout: &bytes.Buffer{},
-		vscodePlatform: "linux", vscodeSettingsPaths: []string{settings},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	got := readFixture(t, settings)
-	if !strings.Contains(got, `"PFM_AUTO_OPEN": "pfm"`) || strings.Contains(got, "CC_AUTO_OPEN") {
-		t.Fatalf("owned legacy PFM profile was not upgraded exactly:\n%s", got)
-	}
-}
-
-func TestVSCodeCustomizedLegacyAutoOpenProfileIsPreserved(t *testing.T) {
-	t.Parallel()
-	home := vscodeLawHome(t)
-	settings := filepath.Join(home, "settings.json")
-	original := `{"terminal.integrated.profiles.linux":{"PFM":{"path":"/bin/zsh","args":["-l"],"env":{"CC_AUTO_OPEN":"operator-choice"}}}}`
-	writeFixture(t, settings, original)
-	record := vscodeOwnershipDocument{
-		Version: vscodeOwnershipVersion,
-		Files:   []vscodeOwnershipRecord{{Path: settings, Platform: "linux", ProfileOwned: true}},
-	}
-	ledger, err := json.Marshal(record)
-	if err != nil {
-		t.Fatal(err)
-	}
-	writeFixture(t, filepath.Join(home, ".local", "share", "pfm", "install", vscodeOwnershipName), string(ledger))
-
-	if _, err := Run(context.Background(), Options{
-		MCPConfigPath: testConfigPath(t),
-		Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, Stdout: &bytes.Buffer{},
-		vscodePlatform: "linux", vscodeSettingsPaths: []string{settings},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	got := readFixture(t, settings)
-	if !strings.Contains(got, `"CC_AUTO_OPEN":"operator-choice"`) || strings.Contains(got, "PFM_AUTO_OPEN") {
-		t.Fatalf("customized profile was overwritten:\n%s", got)
-	}
-	ownershipPath := filepath.Join(home, ".local", "share", "pfm", "install", vscodeOwnershipName)
-	owned, err := os.ReadFile(ownershipPath)
-	if os.IsNotExist(err) {
-		return
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
-	var updated vscodeOwnershipDocument
-	if err := json.Unmarshal(owned, &updated); err != nil {
-		t.Fatal(err)
-	}
-	if len(updated.Files) != 1 || updated.Files[0].ProfileOwned {
-		t.Fatalf("customized profile ownership was not relinquished: %#v", updated)
-	}
-}
-
-func TestVSCodeUninstallRemovesOwnedLegacyProfile(t *testing.T) {
-	t.Parallel()
-	home := t.TempDir()
-	settings := filepath.Join(home, "settings.json")
-	writeFixture(
-		t,
-		settings,
-		`{"terminal.integrated.profiles.linux":{"zsh":{"path":"/bin/zsh"},"PFM":{"path":"/bin/zsh","args":["-l"],"env":{"CC_AUTO_OPEN":"pfm"}}}}`,
-	)
-	writeVSCodeOwnershipFixture(t, home, vscodeOwnershipRecord{
-		Path: settings, Platform: "linux", ProfileOwned: true,
-	})
-
-	if _, err := Run(context.Background(), Options{
-		MCPConfigPath: testConfigPath(t),
-		Mode:          ModeUninstall, Home: home, Runner: &fakeRunner{}, Stdout: &bytes.Buffer{},
-		vscodePlatform: "linux", vscodeSettingsPaths: []string{settings},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	got := readFixture(t, settings)
-	if strings.Contains(got, `"PFM"`) || !strings.Contains(got, `"zsh"`) {
-		t.Fatalf("uninstall did not selectively remove the exact owned legacy profile:\n%s", got)
-	}
-}
-
-func TestVSCodeUninstallPreservesEditedLegacyProfile(t *testing.T) {
-	t.Parallel()
-	home := t.TempDir()
-	settings := filepath.Join(home, "settings.json")
-	original := `{"terminal.integrated.profiles.linux":{"PFM":{"path":"/operator/zsh","args":["-l"],"env":{"CC_AUTO_OPEN":"pfm"}}}}`
-	writeFixture(t, settings, original)
-	writeVSCodeOwnershipFixture(t, home, vscodeOwnershipRecord{
-		Path: settings, Platform: "linux", ProfileOwned: true,
-	})
-
-	if _, err := Run(context.Background(), Options{
-		MCPConfigPath: testConfigPath(t),
-		Mode:          ModeUninstall, Home: home, Runner: &fakeRunner{}, Stdout: &bytes.Buffer{},
-		vscodePlatform: "linux", vscodeSettingsPaths: []string{settings},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if got := readFixture(t, settings); got != original {
-		t.Fatalf("uninstall changed the operator-edited legacy profile:\n%s", got)
-	}
-}
-
-// TestVSCodeCanonicalProfileNullsEveryChatIdentityVariable pins vscodeProfile
-// itself: alongside PFM_AUTO_OPEN, the five chat-identity keys a launcher app
-// could inherit and hand to a fresh VS Code terminal must ride as JSON null
-// (VS Code's documented "delete this inherited var" spelling), never absent
-// and never a non-null placeholder value.
-func TestVSCodeCanonicalProfileNullsEveryChatIdentityVariable(t *testing.T) {
-	t.Parallel()
-	profile := vscodeProfile()
-	env, ok := profile["env"].(map[string]any)
-	if !ok {
-		t.Fatalf("vscodeProfile() env is not a map: %#v", profile["env"])
-	}
-	if env["PFM_AUTO_OPEN"] != "pfm" {
-		t.Fatalf("vscodeProfile() env PFM_AUTO_OPEN = %v, want \"pfm\"", env["PFM_AUTO_OPEN"])
-	}
-	for _, key := range []string{"CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_CHILD_SESSION", "TMUX", "TMUX_PANE"} {
-		value, present := env[key]
-		if !present {
-			t.Fatalf("vscodeProfile() env is missing %s entirely, want JSON null", key)
-		}
-		if value != nil {
-			t.Fatalf("vscodeProfile() env[%s] = %v, want JSON null", key, value)
-		}
-	}
-	encoded, err := json.Marshal(profile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, key := range []string{"CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_CHILD_SESSION", "TMUX", "TMUX_PANE"} {
-		if !strings.Contains(string(encoded), `"`+key+`":null`) {
-			t.Fatalf("vscodeProfile() JSON does not spell %s as null: %s", key, encoded)
-		}
-	}
-}
-
-// TestVSCodeOwnedPreviousCanonicalProfileUpgradesToNullEnvCanonical proves
-// isLegacyVSCodeProfile recognizes the shape vscodeProfile() wrote BEFORE
-// this change — {"path":"/bin/zsh","args":["-l"],"env":{"PFM_AUTO_OPEN":"pfm"}},
-// with no chat-identity keys at all — as pfm's own earlier install, so an
-// owned profile in that exact shape is upgraded rather than refused as an
-// operator edit.
-func TestVSCodeOwnedPreviousCanonicalProfileUpgradesToNullEnvCanonical(t *testing.T) {
-	t.Parallel()
-	home := vscodeLawHome(t)
-	settings := filepath.Join(home, "settings.json")
-	writeFixture(t, settings, `{
+}`,
+			want:       vscodeCanonicalSettings,
+			wantLedger: "{\n  \"version\": 1,\n  \"files\": [\n    {\n      \"path\": \"{home}/settings.json\",\n      \"platform\": \"linux\",\n      \"profileOwned\": true,\n      \"defaultOwned\": true\n    }\n  ]\n}\n",
+		},
+		{
+			name: "owned previous canonical upgrades to null env", mode: ModeApply, defaultOwned: true,
+			settings: `{
   "terminal.integrated.profiles.linux": {
     "PFM": {"path":"/bin/zsh","args":["-l"],"env":{"PFM_AUTO_OPEN":"pfm"}}
   },
   "terminal.integrated.defaultProfile.linux": "PFM"
-}`)
-	writeVSCodeOwnershipFixture(t, home, vscodeOwnershipRecord{
-		Path: settings, Platform: "linux", ProfileOwned: true, DefaultOwned: true,
-	})
-
-	if _, err := Run(context.Background(), Options{
-		MCPConfigPath: testConfigPath(t),
-		Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, Stdout: &bytes.Buffer{},
-		vscodePlatform: "linux", vscodeSettingsPaths: []string{settings},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	got := readFixture(t, settings)
-	for _, key := range []string{"CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_CHILD_SESSION", "TMUX", "TMUX_PANE"} {
-		if !strings.Contains(got, `"`+key+`": null`) {
-			t.Fatalf("owned previous-canonical profile was not upgraded to null %s:\n%s", key, got)
-		}
-	}
-}
-
-// TestVSCodeHandEditedPreviousCanonicalProfileIsPreserved proves the upgrade
-// in TestVSCodeOwnedPreviousCanonicalProfileUpgradesToNullEnvCanonical is
-// exact-shape only: a profile that already diverges from every recognized
-// legacy shape (an operator's own PFM_AUTO_OPEN value) is left byte-for-byte
-// alone, the same law TestVSCodeCustomizedLegacyAutoOpenProfileIsPreserved
-// already pins for the CC_AUTO_OPEN spelling.
-func TestVSCodeHandEditedPreviousCanonicalProfileIsPreserved(t *testing.T) {
-	t.Parallel()
-	home := vscodeLawHome(t)
-	settings := filepath.Join(home, "settings.json")
-	original := `{"terminal.integrated.profiles.linux":{"PFM":{"path":"/bin/zsh","args":["-l"],"env":{"PFM_AUTO_OPEN":"operator-choice"}}}}`
-	writeFixture(t, settings, original)
-	writeVSCodeOwnershipFixture(t, home, vscodeOwnershipRecord{Path: settings, Platform: "linux", ProfileOwned: true})
-
-	if _, err := Run(context.Background(), Options{
-		MCPConfigPath: testConfigPath(t),
-		Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, Stdout: &bytes.Buffer{},
-		vscodePlatform: "linux", vscodeSettingsPaths: []string{settings},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	got := readFixture(t, settings)
-	if !strings.Contains(got, `"PFM_AUTO_OPEN":"operator-choice"`) || strings.Contains(got, "CLAUDECODE") {
-		t.Fatalf("hand-edited previous-canonical profile was overwritten:\n%s", got)
+}`,
+			want:       vscodeCanonicalSettings,
+			wantLedger: "{\n  \"version\": 1,\n  \"files\": [\n    {\n      \"path\": \"{home}/settings.json\",\n      \"platform\": \"linux\",\n      \"profileOwned\": true,\n      \"defaultOwned\": true\n    }\n  ]\n}\n",
+		},
+		{
+			name: "customized legacy auto-open is preserved", mode: ModeApply,
+			settings:   `{"terminal.integrated.profiles.linux":{"PFM":{"path":"/bin/zsh","args":["-l"],"env":{"CC_AUTO_OPEN":"operator-choice"}}}}`,
+			wantLedger: "",
+		},
+		{
+			name: "hand-edited previous canonical is preserved", mode: ModeApply,
+			settings:   `{"terminal.integrated.profiles.linux":{"PFM":{"path":"/bin/zsh","args":["-l"],"env":{"PFM_AUTO_OPEN":"operator-choice"}}}}`,
+			wantLedger: "",
+		},
+		{
+			name: "uninstall removes the owned legacy profile alone", mode: ModeUninstall,
+			settings:   `{"terminal.integrated.profiles.linux":{"zsh":{"path":"/bin/zsh"},"PFM":{"path":"/bin/zsh","args":["-l"],"env":{"CC_AUTO_OPEN":"pfm"}}}}`,
+			want:       `{"terminal.integrated.profiles.linux":{"zsh":{"path":"/bin/zsh"}}}`,
+			wantLedger: "",
+		},
+		{
+			name: "uninstall preserves an edited legacy profile", mode: ModeUninstall,
+			settings:   `{"terminal.integrated.profiles.linux":{"PFM":{"path":"/operator/zsh","args":["-l"],"env":{"CC_AUTO_OPEN":"pfm"}}}}`,
+			wantLedger: "{\n  \"version\": 1,\n  \"files\": [\n    {\n      \"path\": \"{home}/settings.json\",\n      \"platform\": \"linux\",\n      \"profileOwned\": true\n    }\n  ]\n}\n",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			home := vscodeLawHome(t)
+			settings := filepath.Join(home, "settings.json")
+			writeFixture(t, settings, tc.settings)
+			writeVSCodeOwnershipFixture(t, home, vscodeOwnershipRecord{
+				Path: settings, Platform: "linux", ProfileOwned: true, DefaultOwned: tc.defaultOwned,
+			})
+			if _, err := Run(context.Background(), Options{
+				MCPConfigPath: testConfigPath(t),
+				Mode:          tc.mode, Home: home, Runner: &fakeRunner{}, Stdout: &bytes.Buffer{},
+				vscodePlatform: "linux", vscodeSettingsPaths: []string{settings},
+			}); err != nil {
+				t.Fatal(err)
+			}
+			want := tc.want
+			if want == "" {
+				want = tc.settings
+			}
+			if got := readFixture(t, settings); got != want {
+				t.Errorf("%s =\n%s\nwant\n%s", settings, got, want)
+			}
+			ledgerPath := filepath.Join(home, ".local", "share", "pfm", "install", vscodeOwnershipName)
+			ledger, err := os.ReadFile(ledgerPath)
+			if err != nil && !os.IsNotExist(err) {
+				t.Fatal(err)
+			}
+			if got := strings.ReplaceAll(string(ledger), home, "{home}"); got != tc.wantLedger {
+				t.Errorf("%s = %q, want %q", ledgerPath, got, tc.wantLedger)
+			}
+		})
 	}
 }
 

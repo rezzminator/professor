@@ -643,7 +643,7 @@ func TestArchiveFailedMovesRemainKilledAndRecoverable(t *testing.T) {
 }
 
 func TestArchiveUnresolvedRetainsItsCause(t *testing.T) {
-	for _, engine := range []pfmengine.ID{pfmengine.Claude, pfmengine.Codex} {
+	for engine, want := range map[pfmengine.ID]string{pfmengine.Claude: "unresolved [11111111-1111-4111-8111-111111111111] orphans 0 unkilled []", pfmengine.Codex: "unresolved [11111111-1111-4111-8111-111111111111] orphans 0 unkilled []"} {
 		t.Run(string(engine), func(t *testing.T) {
 			values := archiveJail(t)
 			const id = "11111111-1111-4111-8111-111111111111"
@@ -668,12 +668,14 @@ func TestArchiveUnresolvedRetainsItsCause(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(report.Unresolved) != 1 || len(report.Orphans) != 0 || len(kills.unkilled) != 0 {
-				t.Fatalf("unreadable transcript was not kept unresolved: %+v kills=%v", report, kills.unkilled)
-			}
-			if !strings.Contains(fmt.Sprintf("%+v", report), "directory") &&
-				!strings.Contains(fmt.Sprintf("%+v", report), "symbolic links") {
-				t.Fatalf("unresolved cause discarded: %+v", report)
+			got := strings.ReplaceAll(
+				fmt.Sprintf("unresolved %+v orphans %d unkilled %v", report.Unresolved, len(report.Orphans),
+					kills.unkilled),
+				values.Home,
+				"{home}",
+			)
+			if got != want {
+				t.Fatalf("report = %q, want %q", got, want)
 			}
 		})
 	}

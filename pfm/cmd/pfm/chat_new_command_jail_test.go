@@ -744,8 +744,12 @@ func TestChatNewCodexRequiresLogin(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := run([]string{"--config", configPath, "chat", "new", "--engine", "codex", "x"}, &stdout, &stderr)
 	entries, err := os.ReadDir(jail.tmuxDir)
-	if code != 1 || !strings.Contains(stderr.String(), "run codex login") || err != nil || len(entries) != 0 {
-		t.Fatalf("chat new code=%d stderr=%q sockets=%v error=%v", code, stderr.String(), entries, err)
+	if got, want := rooted(
+		stderr.String(),
+		jail.root,
+	), "pfm chat new: {root}/codex/auth.json must contain tokens.access_token with tokens.account_id, or OPENAI_API_KEY — run codex login\n"; code != 1 || got != want || err != nil ||
+		len(entries) != 0 {
+		t.Fatalf("chat new code=%d sockets=%v error=%v stderr = %q, want %q", code, entries, err, got, want)
 	}
 }
 
@@ -772,8 +776,8 @@ func TestChatNewCodexAdmitsAnAPIKeyHome(t *testing.T) {
 		"--config", configPath, "chat", "new", "--engine", "codex",
 		"--cwd", filepath.Join(jail.root, "work"), "x",
 	}, &stdout, &stderr)
-	if code != 0 || strings.Contains(stderr.String(), "run codex login") ||
-		!strings.Contains(stdout.String(), "attach: tmux -L cx-") {
+	if code != 0 || stderr.String() != "" ||
+		stdout.String() != "cx\tx\tcx-api-key-new\tnamed\tlisted\nattach: tmux -L cx-api-key-new attach -t cx-api-key-new\n" {
 		t.Fatalf("chat new code=%d stdout=%q stderr=%q; want API-key home to launch",
 			code, stdout.String(), stderr.String())
 	}

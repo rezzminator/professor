@@ -10,6 +10,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/action"
 	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
@@ -127,7 +128,9 @@ func TestBranchPlace(t *testing.T) {
 			ctx = WithHerdrServer(ctx, spawn.HerdrServer{
 				Socket: "/env/herdr.sock", Up: func(context.Context, string) error { return tc.up },
 			})
-			choice, forkID, err := BranchPlace(ctx, "auto", tc.engine)
+			runner := &deps.FakeRunner{}
+			runner.ScriptLookPath("tmux", "/scripted/tmux", nil)
+			choice, forkID, err := BranchPlace(ctx, "auto", tc.engine, runner)
 			if tc.err != "" {
 				if err == nil || err.Error() != tc.err || spawn.FailureCode(err) != 10 {
 					t.Fatalf("BranchPlace error = %v, want %q with exit 10", err, tc.err)

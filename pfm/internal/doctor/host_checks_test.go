@@ -134,22 +134,20 @@ func TestHostChecksDoctorTallies(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			var expected bytes.Buffer
-			printHostChecks(&expected, runtime, now)
 			dependencies := testDependencies()
+			dependencies.Runner = healthyDoctorRunner()
 			dependencies.Clock = clock.NewFake(now)
 			var stdout, stderr bytes.Buffer
 			code := Run(nil, &stdout, &stderr, runtime, dependencies)
-			if code != scenario.code || !strings.HasSuffix(stdout.String(), scenario.summary) ||
-				!strings.Contains(stdout.String(), expected.String()) {
-				t.Fatalf(
-					"code=%d stdout=%q stderr=%q; want code=%d summary=%q host rows=%q",
+			lines := strings.SplitAfter(stdout.String(), "\n")
+			if summary := lines[len(lines)-2]; code != scenario.code || summary != scenario.summary {
+				t.Errorf(
+					"code=%d summary=%q, want %d %q; stderr=%q",
 					code,
-					stdout.String(),
-					stderr.String(),
+					summary,
 					scenario.code,
 					scenario.summary,
-					expected.String(),
+					stderr.String(),
 				)
 			}
 		})

@@ -121,7 +121,7 @@ func storeSHAWithContext(ctx context.Context, root string, runner deps.Runner) (
 			return "", fmt.Errorf("UNREADABLE %s: %w", gitPath, err)
 		}
 	}
-	git, err := deps.Resolve("git")
+	git, err := runner.LookPath("git")
 	if err != nil {
 		return "", fmt.Errorf("UNREADABLE blueprint git state %s: git not found: %w", root, err)
 	}
@@ -182,7 +182,7 @@ func adoptGit(runner deps.Runner, root string, args ...string) (string, string, 
 	if runner == nil {
 		return "", "", errors.New("adopt Git: runner is nil")
 	}
-	git, err := deps.Resolve("git")
+	git, err := runner.LookPath("git")
 	if err != nil {
 		return "", "", fmt.Errorf("adopt Git: git not found: %w", err)
 	}

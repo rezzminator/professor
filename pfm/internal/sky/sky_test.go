@@ -1,6 +1,7 @@
 package sky
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 	"testing"
@@ -78,8 +79,8 @@ func TestCountsScaleVisualWeight(t *testing.T) {
 	empty := inked(plain(0, 0, tm, nil))
 	small := inked(plain(2, 2, tm, nil))
 	big := inked(plain(8, 8, tm, nil))
-	if empty >= small || small >= big {
-		t.Errorf("inked cells must grow with counts: 0/0=%d, 2/2=%d, 8/8=%d", empty, small, big)
+	if got, want := fmt.Sprintf("%d %d %d", empty, small, big), "3 4 10"; got != want {
+		t.Errorf("inked cells for 0/0, 2/2, 8/8 = %q, want %q", got, want)
 	}
 	if got := joined(plain(0, 0, tm, nil)); strings.ContainsAny(got, "✦+*") {
 		t.Error("an empty fleet must show no star cores or sparkles")
@@ -144,7 +145,9 @@ func TestColorizeEmitsANSI(t *testing.T) {
 		ClaudeCount: 4, CodexCount: 4, Width: 18, Height: 3,
 		TimeNS: 1200 * 1_000_000, Colorize: true,
 	})
-	if !strings.Contains(joined(lines), "\x1b[") {
+	if joined(
+		lines,
+	) != "   \x1b[33m✦\x1b[m\x1b[2;33m·\x1b[m          \x1b[2;90m·\x1b[m  \n                  \n           \x1b[2;90m·\x1b[m  \x1b[94m✦\x1b[m\x1b[34m·\x1b[m  " {
 		t.Error("colorized frame contains no ANSI escape sequences")
 	}
 }
@@ -187,12 +190,11 @@ func TestSnapshotCountsIncludesEveryEngine(t *testing.T) {
 
 func TestFrameRendersOpenCodeOnlyFleet(t *testing.T) {
 	const now = 1200 * 1_000_000
-	empty := joined(Frame(Options{Width: 18, Height: 3, TimeNS: now}))
 	openCode := joined(Frame(Options{
 		Counts: map[pfmengine.ID]int{pfmengine.OpenCode: 5},
 		Width:  18, Height: 3, TimeNS: now,
 	}))
-	if openCode == empty || !strings.ContainsAny(openCode, "✦+*") {
-		t.Fatalf("OpenCode-only fleet rendered as empty:\n%s", openCode)
+	if want := "   ·           ·  \n        ·✦·       \n           ·      "; openCode != want {
+		t.Fatalf("OpenCode-only fleet = %q, want %q", openCode, want)
 	}
 }

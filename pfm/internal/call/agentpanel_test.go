@@ -89,7 +89,8 @@ func TestCallRefusesByNameWhenTheAgentsPanelKeepsFocus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Code != CodeUndelivered || !strings.Contains(result.Message, "agents panel") {
+	if result.Code != CodeUndelivered ||
+		result.Message != "ABORT: \"%1\" has its agents panel focused and Escape did not return focus to the composer; nothing was typed" {
 		t.Fatalf("a panel that keeps focus must be refused by name: result=%+v", result)
 	}
 	if len(fake.literals) != 0 || contains(fake.keys, "Enter") {

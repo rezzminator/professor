@@ -33,12 +33,12 @@ func renderPlain(t *testing.T, runtime Runtime, now time.Time, payload string) s
 // never comes back from the record that predates the change: it stays hidden,
 // draw after draw. The response's Fable entry shows while the answer is fresh.
 func TestAWindowThePlanDroppedStaysHiddenThroughTheDoorsCycle(t *testing.T) {
-	start := time.Now().UTC().Truncate(time.Second)
+	start := time.Unix(1_790_000_000, 0).UTC()
 	week := start.Add(5 * 24 * time.Hour)
-	for _, payload := range []struct{ name, body string }{
+	for _, payload := range []struct{ name, body, want string }{
 		{"harness reports seven_day only", `{"model":{"id":"claude-opus-4"},"rate_limits":{"seven_day":` +
-			`{"used_percentage":11,"resets_at":` + strconv.FormatInt(week.Unix(), 10) + `}}}`},
-		{"harness reports nothing yet", `{"model":{"id":"claude-opus-4"}}`},
+			`{"used_percentage":11,"resets_at":` + strconv.FormatInt(week.Unix(), 10) + `}}}`, "0s: 🥈 ◆ opus·effort unknown │ ~ │ · ·\n🟢 ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ ?% ? ctx unknown │ 💰$?/?/?/? │ ⏳ 0s\n▱▱▱▱▱ 7d-fable-used:3% ↻5d0h │ ▱▱▱▱▱ 7d-used:11% ↻5d0h\n▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data\n\n30s: 🥈 ◆ opus·effort unknown │ ~ │ · ·\n🟢 ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ ?% ? ctx unknown │ 💰$?/?/?/? │ ⏳ 0s\n▱▱▱▱▱ 7d-fable-used:3% ↻4d23h │ ▱▱▱▱▱ 7d-used:11% ↻4d23h\n▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data\n\n2m0s: 🥈 ◆ opus·effort unknown │ ~ │ · ·\n🟢 ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ ?% ? ctx unknown │ 💰$?/?/?/? │ ⏳ 0s\n▱▱▱▱▱ 7d-fable-used:3% ↻4d23h │ ▱▱▱▱▱ 7d-used:11% ↻4d23h\n▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data\n\n2h0m0s: 🥈 ◆ opus·effort unknown │ ~ │ · ·\n🟢 ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ ?% ? ctx unknown │ 💰$?/?/?/? │ ⏳ 0s\n▱▱▱▱▱ 7d-fable-used:— │ ▱▱▱▱▱ 7d-used:11% ↻4d22h\n▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data\n\n"},
+		{"harness reports nothing yet", `{"model":{"id":"claude-opus-4"}}`, "0s: 🥈 ◆ opus·effort unknown │ ~ │ · ·\n🟢 ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ ?% ? ctx unknown │ 💰$?/?/?/? │ ⏳ 0s\n▱▱▱▱▱ 7d-fable-used:3% ↻5d0h │ ▱▱▱▱▱ 7d-used:11% ↻5d0h\n▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data\n\n30s: 🥈 ◆ opus·effort unknown │ ~ │ · ·\n🟢 ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ ?% ? ctx unknown │ 💰$?/?/?/? │ ⏳ 0s\n▱▱▱▱▱ 7d-fable-used:3% ↻4d23h │ ▱▱▱▱▱ 7d-used:11% ↻4d23h\n▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data\n\n2m0s: 🥈 ◆ opus·effort unknown │ ~ │ · ·\n🟢 ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ ?% ? ctx unknown │ 💰$?/?/?/? │ ⏳ 0s\n▱▱▱▱▱ 7d-fable-used:3% ↻4d23h │ ▱▱▱▱▱ 7d-used:11% ↻4d23h\n▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data\n\n2h0m0s: 🥈 ◆ opus·effort unknown │ ~ │ · ·\n🟢 ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ ?% ? ctx unknown │ 💰$?/?/?/? │ ⏳ 0s\n▱▱▱▱▱ 7d-fable-used:— │ ▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 7d-used:—\n▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data\n\n"},
 	} {
 		t.Run(payload.name, func(t *testing.T) {
 			root := t.TempDir()
@@ -78,14 +78,13 @@ func TestAWindowThePlanDroppedStaysHiddenThroughTheDoorsCycle(t *testing.T) {
 				Endpoint:     server.URL,
 				ClaudeBinary: filepath.Join(root, "no-claude"),
 			}, 2)
+			// a window the plan dropped stays hidden at every age of the answer
+			got := ""
 			for _, after := range []time.Duration{0, 30 * time.Second, 2 * time.Minute, 2 * time.Hour} {
-				plain := renderPlain(t, runtime, start.Add(after), payload.body)
-				if strings.Contains(plain, "5h-used") || strings.Contains(plain, "ERR") {
-					t.Fatalf("+%s: a window the plan dropped must stay hidden, got %q", after, plain)
-				}
-				if after <= 2*time.Minute && !strings.Contains(plain, "7d-fable-used:3%") {
-					t.Fatalf("+%s: the fresh answer's Fable reading is missing: %q", after, plain)
-				}
+				got += after.String() + ": " + renderPlain(t, runtime, start.Add(after), payload.body) + "\n"
+			}
+			if got != payload.want {
+				t.Errorf("renders = %q, want %q", got, payload.want)
 			}
 		})
 	}
@@ -111,10 +110,18 @@ func TestAFailureShowsERROnlyForWindowsTheLastAnswerCarried(t *testing.T) {
 	})
 	for _, after := range []time.Duration{0, 20 * time.Minute, 2 * time.Hour} {
 		plain := renderPlain(t, runtime, start.Add(after), `{"model":{"id":"claude-opus-4"}}`)
-		if !strings.Contains(plain, "7d-used:ERR") {
+		if plain != `🥈 ◆ opus·effort unknown │ ~ │ · ·
+🟢 ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ ?% ? ctx unknown │ 💰$?/?/?/? │ ⏳ 0s
+▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 7d-used:ERR
+▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data
+` {
 			t.Fatalf("+%s: the failed window must read ERR, got %q", after, plain)
 		}
-		if strings.Contains(plain, "5h-used") || strings.Contains(plain, "7d-fable-used") {
+		if plain != `🥈 ◆ opus·effort unknown │ ~ │ · ·
+🟢 ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ ?% ? ctx unknown │ 💰$?/?/?/? │ ⏳ 0s
+▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 7d-used:ERR
+▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data
+` {
 			t.Fatalf("+%s: windows the last answer left out must stay hidden, got %q", after, plain)
 		}
 	}
@@ -132,8 +139,9 @@ func TestAnAccountWithNoWindowsShowsNoLimitRow(t *testing.T) {
 	})
 	weeklyCache(t, runtime, `{"credits":"120.5","planType":"pro","primary":null,"secondary":null}`, time.Minute)
 	plain := renderPlain(t, runtime, now, `{"model":{"id":"claude-opus-4"}}`)
-	if strings.Contains(plain, "used") || strings.Contains(plain, "no data") || strings.Contains(plain, "ERR") ||
-		strings.Contains(plain, "error") {
+	if plain != `🥈 ◆ opus·effort unknown │ ~ │ · ·
+🟢 ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ ?% ? ctx unknown │ 💰$?/?/?/? │ ⏳ 0s
+` {
 		t.Fatalf("no window answered, so no limit row may show: %q", plain)
 	}
 	weeklyCache(t, runtime, `{"credits":"1","planType":"pro","primary":{"usedPercent":82,"windowDurationMins":10080,`+
@@ -163,8 +171,7 @@ func TestCodexSegmentWithNoWindowNamesThePlanOnly(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	if got := stripANSICodes(codexQuotaSegment(r, r.now())); strings.Contains(got, "quota") ||
-		!strings.HasSuffix(got, " pro") {
+	if got := stripANSICodes(codexQuotaSegment(r, r.now())); got != "ChatGPT pro" {
 		t.Fatalf("segment %q, want the plan alone", got)
 	}
 }

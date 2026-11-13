@@ -216,11 +216,11 @@ func TestHeadlessExecPFMSettingsErrorsNamePathOrKey(t *testing.T) {
 	headlessCLIJail(t)
 	machine := headlessCLIRuntime(t, headlessEngineBinary(t))
 	for _, test := range []struct{ name, body, want string }{
-		{"unreadable", "", "missing.json"},
-		{"unknown key", `{"mystery":true}`, "mystery"},
-		{"bad type", `{"theme":4}`, "theme"},
-		{"zero window", `{"autoCompactWindow":0}`, "autoCompactWindow"},
-		{"bad window type", `{"autoCompactWindow":"x"}`, "autoCompactWindow"},
+		{"unreadable", "", "pfm headless: read {root}/missing.json: open {root}/missing.json: no such file or directory\n"},
+		{"unknown key", `{"mystery":true}`, "pfm headless: --pfm-settings {root}/s.json: unknown key mystery\n"},
+		{"bad type", `{"theme":4}`, "pfm headless: --pfm-settings {root}/s.json: theme: expected string\n"},
+		{"zero window", `{"autoCompactWindow":0}`, "pfm headless: --pfm-settings {root}/s.json: autoCompactWindow: expected positive int\n"},
+		{"bad window type", `{"autoCompactWindow":"x"}`, "pfm headless: --pfm-settings {root}/s.json: autoCompactWindow: expected positive int\n"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "s.json")
@@ -236,8 +236,8 @@ func TestHeadlessExecPFMSettingsErrorsNamePathOrKey(t *testing.T) {
 				[]string{"--engine", "claude", "--prompt", "x", "--pfm-settings", path},
 				strings.NewReader(""), &stdout, &stderr, machine,
 			)
-			if code != 2 || !strings.Contains(stderr.String(), test.want) {
-				t.Fatalf("exit=%d stderr=%q, want %q", code, stderr.String(), test.want)
+			if got := rooted(stderr.String(), filepath.Dir(path)); code != 2 || got != test.want {
+				t.Fatalf("exit=%d stderr = %q, want %q", code, got, test.want)
 			}
 		})
 	}

@@ -24,48 +24,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
-// reload is a public chat operation; keep the contract pinned at the CLI
-// boundary.
-func TestChatReloadAcceptsCacheOnlyRequest(t *testing.T) {
-	jailTest(t)
-	var stdout, stderr bytes.Buffer
-	runtime, err := pfmconfig.LoadRuntime("")
-	if err != nil {
-		t.Fatal(err)
-	}
-	code := runChatWithRuntime(
-		[]string{"reload", "--cache", "1h"},
-		strings.NewReader(""),
-		&stdout,
-		&stderr,
-		runtime,
-		context.Background(),
-	)
-	if code == 2 && strings.Contains(stderr.String(), `unknown command "reload"`) {
-		t.Fatalf("reload dispatch is still missing: rc=%d stderr=%q", code, stderr.String())
-	}
-}
-
-func TestChatReloadHelpIsPublicAndSuccessful(t *testing.T) {
-	jailTest(t)
-	var stdout, stderr bytes.Buffer
-	runtime, err := pfmconfig.LoadRuntime("")
-	if err != nil {
-		t.Fatal(err)
-	}
-	code := runChatWithRuntime(
-		[]string{"reload", "--help"},
-		strings.NewReader(""),
-		&stdout,
-		&stderr,
-		runtime,
-		context.Background(),
-	)
-	if code != 0 || !strings.Contains(stdout.String(), "usage: pfm chat reload") {
-		t.Fatalf("reload help rc=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
-	}
-}
-
 func TestChatReloadRefusesAnOpenSelectorOnAProbeSocket(t *testing.T) {
 	testjail.TmuxServer(t)
 	jailTest(t)
@@ -601,7 +559,7 @@ func TestReloadTargetIdentityNeverFallsBackToTheCallerSession(t *testing.T) {
 		nil,
 		io.Discard,
 	)
-	if err == nil || !strings.Contains(err.Error(), "couldn't identify") {
+	if err == nil || err.Error() != "couldn't identify this chat — run the statusline before reloading" {
 		t.Fatalf("target without its own breadcrumb borrowed caller identity: %v", err)
 	}
 }

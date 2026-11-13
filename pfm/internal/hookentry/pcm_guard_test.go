@@ -5,15 +5,24 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 const (
-	pcmGuardOnlyPcm    = "Only pcm writes"
-	pcmGuardOnlyThemer = "Only themer writes"
+	pcmGuardOnlyPcm = `pcm-guard: Only pcm writes {paths}: spawn Agent(subagent_type: "pcm") with the exact change;` +
+		" a sub-agent returns the change as a proposal; pcm is machine-global: no pcm registered means this host's install is stale" +
+		" → run pfm install --yes."
+	pcmGuardOnlyThemer = `pcm-guard: Only themer writes {paths}: spawn Agent(subagent_type: "themer") with the exact change;` +
+		" a sub-agent returns the change as a proposal; no themer registered here → ask the user to dispatch themer from the project that owns" +
+		" the file."
+	pcmGuardCannotRead = "pcm-guard could not read this command, and it names a prompt file (CLAUDE.md, .claude," +
+		" templates): split it into simple commands with literal paths; a prompt-file write goes to pcm:" +
+		` spawn Agent(subagent_type: "pcm") with the exact change.`
 )
 
 // pcmGuardFixture is one HOME: the Professor clone at its default place
@@ -66,8 +75,19 @@ func pcmGuardHome(t *testing.T) pcmGuardFixture {
 	return f
 }
 
+// pcmGuardFixtureTmp matches the invented /tmp/{name} paths the guard cases name (the run's own temp
+// directories sit under /tmp/u...).
+var pcmGuardFixtureTmp = regexp.MustCompile(`/tmp/(x|old\.md|copy\.md|scratch|templates|a\.zip|x\.md)\b`)
+
+// pcmGuardFixtureTmpDir matches a bare /tmp word the cases cd into.
+var pcmGuardFixtureTmpDir = regexp.MustCompile(`/tmp([)' ]|$)`)
+
 func pcmGuardPayload(t *testing.T, tool string, input map[string]any, cwd, agentType string) string {
 	t.Helper()
+	if command, ok := input["command"].(string); ok { // the guard stats the paths a command names: root them in the jail
+		input = map[string]any{"command": pcmGuardFixtureTmpDir.ReplaceAllString(
+			pcmGuardFixtureTmp.ReplaceAllString(command, testjail.Place("/tmp")+"/$1"), testjail.Place("/tmp")+"$1")}
+	}
 	payload := map[string]any{"tool_name": tool, "tool_input": input, "cwd": cwd}
 	if agentType != "" {
 		payload["agent_type"] = agentType
@@ -104,10 +124,11 @@ func runPcmGuard(payload string) (int, string, string) {
 func pcmGuardRequireDeny(t *testing.T, payload, want string) {
 	t.Helper()
 	code, stdout, stderr := runPcmGuard(payload)
-	if code != 0 || !strings.Contains(stdout, gitGuardDenied) {
+	if code != 0 || gitGuardDecision(t, stdout) != "deny" {
 		t.Fatalf("code=%d stdout=%q stderr=%q, want a deny\npayload=%s", code, stdout, stderr, payload)
 	}
-	if reason := gitGuardDenyReason(t, stdout); !strings.Contains(reason, want) {
+	reason := pcmGuardPaths.ReplaceAllString(gitGuardDenyReason(t, stdout), "${1}{paths}${2}")
+	if reason != want {
 		t.Fatalf("reason=%q, want %q\npayload=%s", reason, want, payload)
 	}
 }
@@ -258,10 +279,9 @@ func TestPcmGuardAllowsPcmEveryPromptFile(t *testing.T) {
 func TestPcmGuardRoutesEachWriterItsOwnWayOut(t *testing.T) {
 	f := pcmGuardHome(t)
 	payload := pcmGuardEdit(t, "Write", filepath.Join(f.project, "CLAUDE.md"), "")
-	pcmGuardRequireDeny(t, payload, "pcm is machine-global")
-	pcmGuardRequireDeny(t, payload, "pfm install --yes")
+	pcmGuardRequireDeny(t, payload, pcmGuardOnlyPcm)
 	theme := filepath.Join(f.clone, "templates", "themes", "dusk", "theme.json")
-	pcmGuardRequireDeny(t, pcmGuardEdit(t, "Write", theme, ""), "from the project that owns the file")
+	pcmGuardRequireDeny(t, pcmGuardEdit(t, "Write", theme, ""), pcmGuardOnlyThemer)
 }
 
 // A theme is themer's alone: pcm and everyone else are denied it, by path or
@@ -385,7 +405,7 @@ func TestPcmGuardDeniesWhatItCannotReadWhenItNamesAPromptFile(t *testing.T) {
 		`zsh -c "touch CLAUDE.md $Z"`,
 		`bash -c 'sh -lc "rm CLAUDE.md $X"'`,
 	} {
-		pcmGuardRequireDeny(t, pcmGuardBash(t, command, f.project, ""), "could not read this command")
+		pcmGuardRequireDeny(t, pcmGuardBash(t, command, f.project, ""), pcmGuardCannotRead)
 	}
 	for _, command := range []string{`echo "unterminated > notes.md`, `echo x > "$F"`, `bash -c "rm notes.md $X"`} {
 		pcmGuardRequireAllow(t, pcmGuardBash(t, command, f.project, ""))
@@ -393,7 +413,7 @@ func TestPcmGuardDeniesWhatItCannotReadWhenItNamesAPromptFile(t *testing.T) {
 	// pcm is refused only an unreadable command naming a theme.
 	pcmGuardRequireAllow(t, pcmGuardBash(t, `echo "unterminated > CLAUDE.md`, f.project, pcmGuardWriter))
 	pcmGuardRequireDeny(t, pcmGuardBash(t, `echo "unterminated > templates/themes/x`, f.clone, pcmGuardWriter),
-		"could not read this command")
+		pcmGuardCannotRead)
 }
 
 func TestPcmGuardFailsOpenLoudlyOnAMalformedPayload(t *testing.T) {
@@ -416,7 +436,8 @@ func TestPcmGuardWithoutHomeJudgesByNameAndSaysSo(t *testing.T) {
 	f := pcmGuardHome(t)
 	t.Setenv("HOME", "")
 	code, stdout, stderr := runPcmGuard(pcmGuardEdit(t, "Write", filepath.Join(f.project, "CLAUDE.md"), ""))
-	if code != 0 || !strings.Contains(stdout, gitGuardDenied) || !strings.Contains(stderr, "HOME is empty") {
+	if code != 0 || gitGuardDecision(t, stdout) != "deny" ||
+		stderr != "pfm internal pcm-guard: HOME is empty; ~/.claude and the Professor clone are judged by name only (fail-open)\n" {
 		t.Fatalf("code=%d stdout=%q stderr=%q, want a deny and the named HOME gap", code, stdout, stderr)
 	}
 	// The chat's CLAUDE_CONFIG_DIR needs no HOME to be placed.
@@ -456,3 +477,6 @@ func TestPcmGuardAdmitsAGrantedAgentToItsDirectoryAlone(t *testing.T) {
 	}
 	pcmGuardRequireAllow(t, pcmGuardEdit(t, "Write", filepath.Join(skill, "SKILL.md"), pcmGuardWriter))
 }
+
+// pcmGuardPaths finds the written paths a route names, which pcmGuardRequireDeny reads as {paths}.
+var pcmGuardPaths = regexp.MustCompile(`^(pcm-guard: Only \w+ writes ).+?(: spawn Agent)`)

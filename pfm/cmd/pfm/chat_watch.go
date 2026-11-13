@@ -254,7 +254,7 @@ func hookRunner(
 // runHook launches one hook command under sh with the chat's facts in its
 // environment and waits for it.
 func runHook(command string, status headless.Status, runner deps.Runner, stderr io.Writer) error {
-	sh, err := deps.Resolve("sh")
+	sh, err := runner.LookPath("sh")
 	if err != nil {
 		return fmt.Errorf("resolve sh: %w", err)
 	}

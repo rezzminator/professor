@@ -175,7 +175,8 @@ func TestAdoptHandoffRefusesUnknownCodexConversation(t *testing.T) {
 	request := Request{Engine: pfmengine.Codex, SocketPath: "/tmp/cx-1", Pane: "%7"}
 	record := handoffRecord{Engine: pfmengine.Codex, WrittenAt: time.Unix(2, 0)}
 	_, _, _, err := adoptHandoff(request, record, time.Unix(1, 0), t.TempDir())
-	if err == nil || !strings.Contains(err.Error(), "new Codex conversation whose id is not known yet") {
+	if err == nil ||
+		err.Error() != "the reload before this one started a new Codex conversation whose id is not known yet — nothing changed; reload again once that chat has answered" {
 		t.Fatalf("Codex error=%v", err)
 	}
 }
@@ -321,7 +322,8 @@ func TestRunKeepsTheHandoffWhenAQueuedReloadFailsBeforeRespawn(t *testing.T) {
 	for attempt := 1; attempt <= 2; attempt++ {
 		tmux := &fakeReloadTmux{}
 		_, err := Run(context.Background(), request, Options{SIDDir: dir, Delay: -1, Poll: -1}, tmux, nil, nil)
-		if err == nil || !strings.Contains(err.Error(), "new Codex conversation whose id is not known yet") ||
+		if err == nil ||
+			err.Error() != "the reload before this one started a new Codex conversation whose id is not known yet — nothing changed; reload again once that chat has answered" ||
 			tmux.literal != "" {
 			t.Fatalf("queued reload %d err=%v literal=%q", attempt, err, tmux.literal)
 		}

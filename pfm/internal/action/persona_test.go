@@ -3,6 +3,7 @@ package action
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -472,9 +473,15 @@ func TestExecutorWorkbenchPrep(t *testing.T) {
 }
 
 func TestExecutorWorkbenchOpenCodeFleetPrompt(t *testing.T) {
+	wants := map[string]string{
+		"clone recorded":      "env -u CLAUDE_CODE_SESSION_ID -u CLAUDECODE -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CONFIG_DIR -u PFM_CLAUDE_CONFIG_DIR_DEFAULT -u CLAUDE_PROJECT_DIR -u ENABLE_PROMPT_CACHING_1H -u FORCE_PROMPT_CACHING_5M -u CLAUDE_CODE_PROMPT_CACHE_TTL -u CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL -u CACHE_LIVE_CONTROL_MAIN_TTL -u CACHE_LIVE_CONTROL_AGENTS_TTL -u CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT -u ANTHROPIC_BASE_URL -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_API_KEY -u ANTHROPIC_MODEL -u ANTHROPIC_SMALL_FAST_MODEL -u CLAUDE_CODE_AUTO_COMPACT_WINDOW -u CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -u CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK -u CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY -u CODEX_THREAD_ID -u CLAUDE_CODE_SSE_PORT -u PFM_OPENCODE_MODEL -u PFM_OPENCODE_VARIANT -u PFM_OPENCODE_POLICY -u PFM_OPENCODE_SYSTEM_FILE -u PFM_OPENCODE_FLEET_FILE OPENCODE_CONFIG_CONTENT='{\"instructions\":[\"{root}/001/acme/docs/scribe/.professor/scribe.md\"],\"plugin\":[\"file://{root}/001/home/.local/state/pfm/opencode-workbench-plugin.mjs\",\"file://{root}/001/home/.local/state/pfm/opencode-herdr-plugin.mjs\"]}' PFM_OPENCODE_FLEET_FILE='{root}/002/clone/pfm/harness-prompts/generated/opencode.md' PFM_OPENCODE_SYSTEM_FILE='{root}/001/acme/docs/scribe/.professor/scribe.md' opencode '{root}/001/acme/docs/scribe'",
+		"no clone recorded":   "env -u CLAUDE_CODE_SESSION_ID -u CLAUDECODE -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CONFIG_DIR -u PFM_CLAUDE_CONFIG_DIR_DEFAULT -u CLAUDE_PROJECT_DIR -u ENABLE_PROMPT_CACHING_1H -u FORCE_PROMPT_CACHING_5M -u CLAUDE_CODE_PROMPT_CACHE_TTL -u CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL -u CACHE_LIVE_CONTROL_MAIN_TTL -u CACHE_LIVE_CONTROL_AGENTS_TTL -u CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT -u ANTHROPIC_BASE_URL -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_API_KEY -u ANTHROPIC_MODEL -u ANTHROPIC_SMALL_FAST_MODEL -u CLAUDE_CODE_AUTO_COMPACT_WINDOW -u CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -u CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK -u CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY -u CODEX_THREAD_ID -u CLAUDE_CODE_SSE_PORT -u PFM_OPENCODE_MODEL -u PFM_OPENCODE_VARIANT -u PFM_OPENCODE_POLICY -u PFM_OPENCODE_SYSTEM_FILE -u PFM_OPENCODE_FLEET_FILE OPENCODE_CONFIG_CONTENT='{\"instructions\":[\"{root}/001/acme/docs/scribe/.professor/scribe.md\"],\"plugin\":[\"file://{root}/001/home/.local/state/pfm/opencode-workbench-plugin.mjs\",\"file://{root}/001/home/.local/state/pfm/opencode-herdr-plugin.mjs\"]}' PFM_OPENCODE_SYSTEM_FILE='{root}/001/acme/docs/scribe/.professor/scribe.md' opencode '{root}/001/acme/docs/scribe'",
+		"recorded clone gone": "env -u CLAUDE_CODE_SESSION_ID -u CLAUDECODE -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CONFIG_DIR -u PFM_CLAUDE_CONFIG_DIR_DEFAULT -u CLAUDE_PROJECT_DIR -u ENABLE_PROMPT_CACHING_1H -u FORCE_PROMPT_CACHING_5M -u CLAUDE_CODE_PROMPT_CACHE_TTL -u CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL -u CACHE_LIVE_CONTROL_MAIN_TTL -u CACHE_LIVE_CONTROL_AGENTS_TTL -u CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT -u ANTHROPIC_BASE_URL -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_API_KEY -u ANTHROPIC_MODEL -u ANTHROPIC_SMALL_FAST_MODEL -u CLAUDE_CODE_AUTO_COMPACT_WINDOW -u CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -u CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK -u CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY -u CODEX_THREAD_ID -u CLAUDE_CODE_SSE_PORT -u PFM_OPENCODE_MODEL -u PFM_OPENCODE_VARIANT -u PFM_OPENCODE_POLICY -u PFM_OPENCODE_SYSTEM_FILE -u PFM_OPENCODE_FLEET_FILE OPENCODE_CONFIG_CONTENT='{\"instructions\":[\"{root}/001/acme/docs/scribe/.professor/scribe.md\"],\"plugin\":[\"file://{root}/001/home/.local/state/pfm/opencode-workbench-plugin.mjs\",\"file://{root}/001/home/.local/state/pfm/opencode-herdr-plugin.mjs\"]}' PFM_OPENCODE_SYSTEM_FILE='{root}/001/acme/docs/scribe/.professor/scribe.md' opencode '{root}/001/acme/docs/scribe'",
+		"marker unreadable":   "resolve the fleet prompt an OpenCode workbench launch replaces: resolve generated harness prompt: read source repository marker {root}/001/home/.local/share/pfm/install/source-repo: read {root}/001/home/.local/share/pfm/install/source-repo: is a directory",
+	}
 	for _, marker := range []string{"clone recorded", "no clone recorded", "recorded clone gone", "marker unreadable"} {
 		t.Run(marker, func(t *testing.T) {
-			request, dir := actionWorkbenchFixture(t, `{"prompt":"scribe.md","engines":["opencode"]}`)
+			request, _ := actionWorkbenchFixture(t, `{"prompt":"scribe.md","engines":["opencode"]}`)
 			request.Row.Kind = compose.NewOpenCode
 			clone := filepath.Join(t.TempDir(), "clone")
 			switch marker {
@@ -501,36 +508,12 @@ func TestExecutorWorkbenchOpenCodeFleetPrompt(t *testing.T) {
 				t.Fatal(err)
 			}
 			_, err = executor.Open(context.Background(), request)
-			if marker == "marker unreadable" {
-				if err == nil ||
-					!strings.Contains(err.Error(), "resolve the fleet prompt an OpenCode workbench launch replaces") ||
-					!strings.Contains(err.Error(), "read source repository marker") ||
-					len(tmux.created) != 0 {
-					t.Fatalf("marker refusal=%v, created=%d", err, len(tmux.created))
-				}
-				return
+			got := fmt.Sprint(err)
+			if len(tmux.created) == 1 {
+				got = tmux.created[0].Run
 			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(tmux.created) != 1 {
-				t.Fatalf("created=%d", len(tmux.created))
-			}
-			run := tmux.created[0].Run
-			prompt := filepath.Join(dir, ".professor", "scribe.md")
-			want := `OPENCODE_CONFIG_CONTENT='{"instructions":["` + prompt + `"],"plugin":["file://` + paths.OpenCodeWorkbenchPlugin(
-				request.Home,
-			) + `","file://` + paths.OpenCodeHerdrPlugin(
-				request.Home,
-			) + `"]}'`
-			if marker == "clone recorded" {
-				want += " PFM_OPENCODE_FLEET_FILE=" + cmdparse.Quote(
-					paths.GeneratedHarnessPromptIn(clone, pfmengine.OpenCode),
-				)
-			}
-			want += " PFM_OPENCODE_SYSTEM_FILE=" + cmdparse.Quote(prompt) + " opencode"
-			if !strings.Contains(run, want) {
-				t.Fatalf("run lacks %q: %s", want, run)
+			if got := rooted(t, got); len(tmux.created) > 1 || got != wants[marker] {
+				t.Errorf("created=%d run or refusal = %q, want %q", len(tmux.created), got, wants[marker])
 			}
 		})
 	}
@@ -545,18 +528,18 @@ func TestExecutorOpenCodeHerdrPlugin(t *testing.T) {
 		kind           compose.Kind
 		want           string
 	}{
-		{"persona chat", `{"prompt":"scribe.md","engines":["opencode"]}`, compose.NewOpenCode, "persona"},
-		{"no persona, fresh, outside a workbench", `{"prompt":"scribe.md"}`, compose.NewOpenCode, "plain"},
-		{"no persona, resume", `{"prompt":"scribe.md","engines":["claude"]}`, compose.ResumeOpenCode, "plain"},
-		{"claude chat", `{"prompt":"scribe.md","engines":["claude"]}`, compose.ResumeClaude, "none"},
+		{"persona chat", `{"prompt":"scribe.md","engines":["opencode"]}`, compose.NewOpenCode, "env -u CLAUDE_CODE_SESSION_ID -u CLAUDECODE -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CONFIG_DIR -u PFM_CLAUDE_CONFIG_DIR_DEFAULT -u CLAUDE_PROJECT_DIR -u ENABLE_PROMPT_CACHING_1H -u FORCE_PROMPT_CACHING_5M -u CLAUDE_CODE_PROMPT_CACHE_TTL -u CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL -u CACHE_LIVE_CONTROL_MAIN_TTL -u CACHE_LIVE_CONTROL_AGENTS_TTL -u CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT -u ANTHROPIC_BASE_URL -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_API_KEY -u ANTHROPIC_MODEL -u ANTHROPIC_SMALL_FAST_MODEL -u CLAUDE_CODE_AUTO_COMPACT_WINDOW -u CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -u CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK -u CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY -u CODEX_THREAD_ID -u CLAUDE_CODE_SSE_PORT -u PFM_OPENCODE_MODEL -u PFM_OPENCODE_VARIANT -u PFM_OPENCODE_POLICY -u PFM_OPENCODE_SYSTEM_FILE -u PFM_OPENCODE_FLEET_FILE OPENCODE_CONFIG_CONTENT='{\"instructions\":[\"{root}/001/acme/docs/scribe/.professor/scribe.md\"],\"plugin\":[\"file://{root}/001/home/.local/state/pfm/opencode-workbench-plugin.mjs\",\"file://{root}/001/home/.local/state/pfm/opencode-herdr-plugin.mjs\"]}' PFM_OPENCODE_SYSTEM_FILE='{root}/001/acme/docs/scribe/.professor/scribe.md' opencode '{root}/001/acme/docs/scribe'\nconst PFM_BINARY = \"{root}/001/home/.local/bin/pfm\""},
+		{"no persona, fresh, outside a workbench", `{"prompt":"scribe.md"}`, compose.NewOpenCode, "env -u CLAUDE_CODE_SESSION_ID -u CLAUDECODE -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CONFIG_DIR -u PFM_CLAUDE_CONFIG_DIR_DEFAULT -u CLAUDE_PROJECT_DIR -u ENABLE_PROMPT_CACHING_1H -u FORCE_PROMPT_CACHING_5M -u CLAUDE_CODE_PROMPT_CACHE_TTL -u CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL -u CACHE_LIVE_CONTROL_MAIN_TTL -u CACHE_LIVE_CONTROL_AGENTS_TTL -u CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT -u ANTHROPIC_BASE_URL -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_API_KEY -u ANTHROPIC_MODEL -u ANTHROPIC_SMALL_FAST_MODEL -u CLAUDE_CODE_AUTO_COMPACT_WINDOW -u CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -u CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK -u CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY -u CODEX_THREAD_ID -u CLAUDE_CODE_SSE_PORT -u PFM_OPENCODE_MODEL -u PFM_OPENCODE_VARIANT -u PFM_OPENCODE_POLICY -u PFM_OPENCODE_SYSTEM_FILE -u PFM_OPENCODE_FLEET_FILE OPENCODE_CONFIG_CONTENT='{\"plugin\":[\"file://{root}/001/home/.local/state/pfm/opencode-herdr-plugin.mjs\"]}' opencode '{root}/001/acme'\nconst PFM_BINARY = \"{root}/001/home/.local/bin/pfm\""},
+		{"no persona, resume", `{"prompt":"scribe.md","engines":["claude"]}`, compose.ResumeOpenCode, "printf '%s\\n' '═══ RESUME of 44444444-4444-4444-8444-444444444444 — verify before trusting this pane ═══' '    History loaded? Check the session list above the composer before' '    treating this seat as continuing its prior work.'; env -u CLAUDE_CODE_SESSION_ID -u CLAUDECODE -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CONFIG_DIR -u PFM_CLAUDE_CONFIG_DIR_DEFAULT -u CLAUDE_PROJECT_DIR -u ENABLE_PROMPT_CACHING_1H -u FORCE_PROMPT_CACHING_5M -u CLAUDE_CODE_PROMPT_CACHE_TTL -u CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL -u CACHE_LIVE_CONTROL_MAIN_TTL -u CACHE_LIVE_CONTROL_AGENTS_TTL -u CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT -u ANTHROPIC_BASE_URL -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_API_KEY -u ANTHROPIC_MODEL -u ANTHROPIC_SMALL_FAST_MODEL -u CLAUDE_CODE_AUTO_COMPACT_WINDOW -u CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -u CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK -u CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY -u CODEX_THREAD_ID -u CLAUDE_CODE_SSE_PORT -u PFM_OPENCODE_MODEL -u PFM_OPENCODE_VARIANT -u PFM_OPENCODE_POLICY -u PFM_OPENCODE_SYSTEM_FILE -u PFM_OPENCODE_FLEET_FILE OPENCODE_CONFIG_CONTENT='{\"plugin\":[\"file://{root}/001/home/.local/state/pfm/opencode-herdr-plugin.mjs\"]}' opencode --session '44444444-4444-4444-8444-444444444444' '{root}/001/acme/docs/scribe'\nconst PFM_BINARY = \"{root}/001/home/.local/bin/pfm\""},
+		{"claude chat", `{"prompt":"scribe.md","engines":["claude"]}`, compose.ResumeClaude, "env -u CLAUDE_CODE_SESSION_ID -u CLAUDECODE -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CONFIG_DIR -u PFM_CLAUDE_CONFIG_DIR_DEFAULT -u CLAUDE_PROJECT_DIR -u ENABLE_PROMPT_CACHING_1H -u FORCE_PROMPT_CACHING_5M -u CLAUDE_CODE_PROMPT_CACHE_TTL -u CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL -u CACHE_LIVE_CONTROL_MAIN_TTL -u CACHE_LIVE_CONTROL_AGENTS_TTL -u CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT -u ANTHROPIC_BASE_URL -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_API_KEY -u ANTHROPIC_MODEL -u ANTHROPIC_SMALL_FAST_MODEL -u CLAUDE_CODE_AUTO_COMPACT_WINDOW -u CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -u CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK -u CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY -u CODEX_THREAD_ID CLAUDE_CONFIG_DIR='{root}/001/home/.cc/1' CACHE_LIVE_CONTROL_MAIN_TTL='5m' PFM_COST_LEDGER='failed' 'claude' '--remote-control' '--resume' '44444444-4444-4444-8444-444444444444' '--settings' '{\"cleanupPeriodDays\":36500,\"env\":{\"ANTHROPIC_SMALL_FAST_MODEL\":\"claude-haiku-5-5\",\"CLAUDE_CODE_AUTO_COMPACT_WINDOW\":\"100000\",\"CLAUDE_CODE_ENABLE_FUNCTION_HOOKS\":\"1\",\"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS\":\"0\",\"CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH\":\"8\",\"CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION\":\"9007199254740991\",\"CLAUDE_CODE_TMUX_TRUECOLOR\":\"1\"},\"hooks\":{\"Notification\":[{\"hooks\":[{\"async\":true,\"command\":\"{root}/001/home/.local/bin/pfm internal herdr-state --engine claude notification\",\"type\":\"command\"}],\"matcher\":\"permission_prompt|elicitation_dialog|idle_prompt|plugin_notification\"}],\"PermissionRequest\":[{\"hooks\":[{\"async\":true,\"command\":\"{root}/001/home/.local/bin/pfm internal herdr-state --engine claude blocked\",\"type\":\"command\"}]}],\"PostToolUse\":[{\"hooks\":[{\"async\":true,\"command\":\"{root}/001/home/.local/bin/pfm internal herdr-state --engine claude working\",\"type\":\"command\"}]}],\"PostToolUseFailure\":[{\"hooks\":[{\"async\":true,\"command\":\"{root}/001/home/.local/bin/pfm internal herdr-state --engine claude working\",\"type\":\"command\"}]}],\"PreToolUse\":[{\"hooks\":[{\"command\":\"{root}/001/home/.local/bin/pfm internal git-guard\",\"type\":\"command\"},{\"command\":\"{root}/001/home/.local/bin/pfm internal store-guard\",\"type\":\"command\"},{\"command\":\"{root}/001/home/.local/bin/pfm internal orchestrator-wait\",\"type\":\"command\"}],\"matcher\":\"Bash\"},{\"hooks\":[{\"command\":\"{root}/001/home/.local/bin/pfm internal pcm-guard\",\"type\":\"command\"}],\"matcher\":\"Edit|Write|MultiEdit|NotebookEdit|Bash\"}],\"SessionEnd\":[{\"hooks\":[{\"command\":\"{root}/001/home/.local/bin/pfm internal clear-kill\",\"type\":\"command\"},{\"command\":\"{root}/001/home/.local/bin/pfm internal exit-close\",\"type\":\"command\"},{\"command\":\"{root}/001/home/.local/bin/pfm internal herdr-state --engine claude end\",\"type\":\"command\"}]}],\"SessionStart\":[{\"hooks\":[{\"command\":\"{root}/001/home/.local/bin/pfm internal launcher-repair\",\"type\":\"command\"},{\"command\":\"{root}/001/home/.local/bin/pfm internal herdr-state --engine claude start\",\"type\":\"command\"}]},{\"hooks\":[{\"command\":\"{root}/001/home/.local/bin/pfm internal resume-unkill\",\"type\":\"command\"}],\"matcher\":\"resume\"},{\"hooks\":[{\"command\":\"{root}/001/home/.local/bin/pfm internal clear-name\",\"type\":\"command\"}],\"matcher\":\"clear\"}],\"Stop\":[{\"hooks\":[{\"command\":\"{root}/001/home/.local/bin/pfm internal herdr-state --engine claude idle\",\"type\":\"command\"}]}],\"SubagentStart\":[{\"hooks\":[{\"command\":\"{root}/001/home/.local/bin/pfm internal rr-dir\",\"type\":\"command\"}],\"matcher\":\"rr|rr-pro|rr-pro-max\"},{\"hooks\":[{\"command\":\"{root}/001/home/.local/bin/pfm internal herdr-state --engine claude agent-start\",\"type\":\"command\"}]}],\"SubagentStop\":[{\"hooks\":[{\"command\":\"{root}/001/home/.local/bin/pfm internal herdr-state --engine claude agent-stop\",\"type\":\"command\"}]}],\"UserPromptSubmit\":[{\"hooks\":[{\"command\":\"{root}/001/home/.local/bin/pfm usage-hook\",\"type\":\"command\"},{\"command\":\"{root}/001/home/.local/bin/pfm internal clear-name\",\"type\":\"command\"},{\"command\":\"{root}/001/home/.local/bin/pfm internal epic-inject\",\"type\":\"command\"},{\"command\":\"{root}/001/home/.local/bin/pfm internal reload-intercept\",\"type\":\"command\"},{\"command\":\"{root}/001/home/.local/bin/pfm internal exit-intercept\",\"type\":\"command\"},{\"async\":true,\"command\":\"{root}/001/home/.local/bin/pfm internal herdr-state --engine claude working\",\"type\":\"command\"}]}]},\"outputStyle\":\"default\",\"statusLine\":{\"command\":\"{root}/001/home/.local/bin/pfm-statusline\",\"hideVimModeIndicator\":true,\"padding\":0,\"refreshInterval\":2,\"type\":\"command\"}}' '--system-prompt-file' '{root}/001/acme/docs/scribe/.professor/scribe.md' '--allow-dangerously-skip-permissions' '--dangerously-skip-permissions' || { echo; echo 'resume refused — session is live elsewhere:'; env -u CLAUDE_CODE_SESSION_ID -u CLAUDECODE -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CONFIG_DIR -u PFM_CLAUDE_CONFIG_DIR_DEFAULT -u CLAUDE_PROJECT_DIR -u ENABLE_PROMPT_CACHING_1H -u FORCE_PROMPT_CACHING_5M -u CLAUDE_CODE_PROMPT_CACHE_TTL -u CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL -u CACHE_LIVE_CONTROL_MAIN_TTL -u CACHE_LIVE_CONTROL_AGENTS_TTL -u CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT -u ANTHROPIC_BASE_URL -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_API_KEY -u ANTHROPIC_MODEL -u ANTHROPIC_SMALL_FAST_MODEL -u CLAUDE_CODE_AUTO_COMPACT_WINDOW -u CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -u CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK -u CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY -u CODEX_THREAD_ID pfm internal agent-open --id '44444444-4444-4444-8444-444444444444' --cwd '{root}/001/acme/docs/scribe' --cache 5m; }\nopen {root}/001/home/.local/state/pfm/opencode-herdr-plugin.mjs: no such file or directory"},
 		// The reporter is optional: a staging failure launches the chat
 		// without it.
-		{"staging fails", `{"prompt":"scribe.md","engines":["claude"]}`, compose.ResumeOpenCode, "unstaged"},
+		{"staging fails", `{"prompt":"scribe.md","engines":["claude"]}`, compose.ResumeOpenCode, "printf '%s\\n' '═══ RESUME of 44444444-4444-4444-8444-444444444444 — verify before trusting this pane ═══' '    History loaded? Check the session list above the composer before' '    treating this seat as continuing its prior work.'; env -u CLAUDE_CODE_SESSION_ID -u CLAUDECODE -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CONFIG_DIR -u PFM_CLAUDE_CONFIG_DIR_DEFAULT -u CLAUDE_PROJECT_DIR -u ENABLE_PROMPT_CACHING_1H -u FORCE_PROMPT_CACHING_5M -u CLAUDE_CODE_PROMPT_CACHE_TTL -u CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL -u CACHE_LIVE_CONTROL_MAIN_TTL -u CACHE_LIVE_CONTROL_AGENTS_TTL -u CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT -u ANTHROPIC_BASE_URL -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_API_KEY -u ANTHROPIC_MODEL -u ANTHROPIC_SMALL_FAST_MODEL -u CLAUDE_CODE_AUTO_COMPACT_WINDOW -u CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -u CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK -u CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY -u CODEX_THREAD_ID -u CLAUDE_CODE_SSE_PORT -u PFM_OPENCODE_MODEL -u PFM_OPENCODE_VARIANT -u PFM_OPENCODE_POLICY -u PFM_OPENCODE_SYSTEM_FILE -u PFM_OPENCODE_FLEET_FILE opencode --session '44444444-4444-4444-8444-444444444444' '{root}/001/acme/docs/scribe'\nread {root}/001/home/.local/state/pfm/opencode-herdr-plugin.mjs: is a directory"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			request, dir := actionWorkbenchFixture(t, test.manifest)
 			request.Row.Kind = test.kind
-			if test.want == "unstaged" {
+			if test.name == "staging fails" {
 				if err := os.MkdirAll(paths.OpenCodeHerdrPlugin(request.Home), 0o700); err != nil {
 					t.Fatal(err)
 				}
@@ -575,35 +558,15 @@ func TestExecutorOpenCodeHerdrPlugin(t *testing.T) {
 			if len(tmux.created) != 1 {
 				t.Fatalf("created=%d", len(tmux.created))
 			}
-			run := tmux.created[0].Run
-			plugin := paths.OpenCodeHerdrPlugin(request.Home)
-			herdrURL := `"file://` + plugin + `"`
-			staged, stageErr := os.ReadFile(plugin)
-			switch test.want {
-			case "unstaged":
-				if strings.Contains(run, plugin) || strings.Contains(run, "OPENCODE_CONFIG_CONTENT") {
-					t.Fatalf("a chat whose Herdr plugin failed to stage loads it: %s", run)
-				}
-				return
-			case "none":
-				if stageErr == nil || strings.Contains(run, plugin) {
-					t.Fatalf("a Claude chat staged or loaded the OpenCode Herdr plugin: %v\n%s", stageErr, run)
-				}
-				return
-			case "plain":
-				want := `OPENCODE_CONFIG_CONTENT='{"plugin":[` + herdrURL + `]}'`
-				if !strings.Contains(run, want) || strings.Contains(run, "PFM_OPENCODE_SYSTEM_FILE=") {
-					t.Fatalf("run lacks %q or carries a persona env: %s", want, run)
-				}
-			case "persona":
-				want := `"plugin":["file://` + paths.OpenCodeWorkbenchPlugin(request.Home) + `",` + herdrURL + `]}'`
-				if !strings.Contains(run, want) {
-					t.Fatalf("run lacks %q: %s", want, run)
+			staged, stageErr := os.ReadFile(paths.OpenCodeHerdrPlugin(request.Home))
+			binaryLine := fmt.Sprint(stageErr)
+			for _, line := range strings.Split(string(staged), "\n") {
+				if strings.HasPrefix(line, "const PFM_BINARY") {
+					binaryLine = line
 				}
 			}
-			binary := filepath.Join(request.Home, ".local", "bin", "pfm")
-			if stageErr != nil || !strings.Contains(string(staged), `const PFM_BINARY = "`+binary+`"`) {
-				t.Fatalf("staged plugin %s does not carry the pfm binary %s: %v", plugin, binary, stageErr)
+			if got := rooted(t, tmux.created[0].Run+"\n"+binaryLine); got != test.want {
+				t.Errorf("run and staged binary = %q, want %q", got, test.want)
 			}
 		})
 	}

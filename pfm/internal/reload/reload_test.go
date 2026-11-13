@@ -12,7 +12,6 @@ import (
 	"time"
 
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
-	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -356,7 +355,7 @@ func TestRunRefusesAnOverlappingPaneReload(t *testing.T) {
 		nil,
 		nil,
 	)
-	if err == nil || !strings.Contains(err.Error(), "already in flight") {
+	if err == nil || err.Error() != "another reload of this pane is already in flight" {
 		t.Fatalf("overlap error = %v", err)
 	}
 }
@@ -420,32 +419,16 @@ func TestCodexRunUsesTheSelectedHomeAndRosterPolicy(t *testing.T) {
 	escaped := strings.ReplaceAll(prompt, `\`, `\\`)
 	escaped = strings.ReplaceAll(escaped, `"""`, `\"\"\"`)
 	developerInstructions := cmdparse.Quote("developer_instructions=\"\"\"\n" + escaped + "\"\"\"")
-	if !strings.Contains(run, " -c "+developerInstructions+" resume ") {
-		t.Fatalf("Codex role reload does not carry one complete developer-instructions value before resume: %q", run)
-	}
-	for _, want := range []string{
-		"CODEX_HOME='/jail/codex/9'",
-		"'/opt/codex safe' --no-daemon --sandbox workspace-write",
-		"resume '019ff700-0000-7000-8000-000000000001'",
-	} {
-		if !strings.Contains(run, want) {
-			t.Fatalf("run %q lacks %q", run, want)
-		}
-	}
-	if strings.Contains(run, "CLAUDE_CONFIG_DIR=") {
-		t.Fatalf("Codex reload inherited a Claude config assignment: %q", run)
-	}
-	for _, name := range claudelaunch.Hygiene() {
-		if !strings.Contains(run, "-u "+name) {
-			t.Fatalf("Codex reload did not strip %s: %q", name, run)
-		}
-	}
 	roleless, err := codexRun(Request{SessionID: "019ff700-0000-7000-8000-000000000001"})
-	if err != nil || strings.Contains(roleless, "developer_instructions") {
-		t.Fatalf("roleless Codex reload changed: run=%q error=%v", roleless, err)
-	}
-	if !strings.Contains(roleless, " codex --no-daemon --sandbox workspace-write resume ") {
-		t.Fatalf("Codex reload runs the respawned chat on the shared daemon: %q", roleless)
+	if got, want := strings.Replace(
+		run,
+		developerInstructions,
+		"{instructions}",
+		1,
+	)+"\n"+roleless+"\n"+fmt.Sprint(
+		err,
+	), "env -u CLAUDE_CODE_SESSION_ID -u CLAUDECODE -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CONFIG_DIR -u PFM_CLAUDE_CONFIG_DIR_DEFAULT -u CLAUDE_PROJECT_DIR -u ENABLE_PROMPT_CACHING_1H -u FORCE_PROMPT_CACHING_5M -u CLAUDE_CODE_PROMPT_CACHE_TTL -u CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL -u CACHE_LIVE_CONTROL_MAIN_TTL -u CACHE_LIVE_CONTROL_AGENTS_TTL -u CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT -u ANTHROPIC_BASE_URL -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_API_KEY -u ANTHROPIC_MODEL -u ANTHROPIC_SMALL_FAST_MODEL -u CLAUDE_CODE_AUTO_COMPACT_WINDOW -u CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -u CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK -u CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY -u CODEX_THREAD_ID CODEX_HOME='/jail/codex/9' '/opt/codex safe' --no-daemon --sandbox workspace-write -c {instructions} resume '019ff700-0000-7000-8000-000000000001'\nenv -u CLAUDE_CODE_SESSION_ID -u CLAUDECODE -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CONFIG_DIR -u PFM_CLAUDE_CONFIG_DIR_DEFAULT -u CLAUDE_PROJECT_DIR -u ENABLE_PROMPT_CACHING_1H -u FORCE_PROMPT_CACHING_5M -u CLAUDE_CODE_PROMPT_CACHE_TTL -u CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL -u CACHE_LIVE_CONTROL_MAIN_TTL -u CACHE_LIVE_CONTROL_AGENTS_TTL -u CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT -u ANTHROPIC_BASE_URL -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_API_KEY -u ANTHROPIC_MODEL -u ANTHROPIC_SMALL_FAST_MODEL -u CLAUDE_CODE_AUTO_COMPACT_WINDOW -u CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -u CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK -u CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY -u CODEX_THREAD_ID codex --no-daemon --sandbox workspace-write resume '019ff700-0000-7000-8000-000000000001'\n<nil>"; got != want {
+		t.Fatalf("role run, roleless run, error = %q, want %q", got, want)
 	}
 }
 
@@ -470,7 +453,7 @@ func TestRunRefusesOpenCodeBeforeExitingThePane(t *testing.T) {
 		Options{SIDDir: t.TempDir(), Delay: -1, Poll: -1, ExitTries: 1},
 		tmux, nil, nil,
 	)
-	if err == nil || !strings.Contains(err.Error(), "OpenCode") || tmux.literal != "" {
+	if err == nil || err.Error() != "OpenCode does not support in-place reload" || tmux.literal != "" {
 		t.Fatalf("OpenCode reload error=%v literal=%q, want refusal before /exit", err, tmux.literal)
 	}
 }
@@ -641,8 +624,8 @@ func TestRunClearsTheTypedExitWhenTheChatDoesNotDie(t *testing.T) {
 		nil,
 		nil,
 	)
-	if err == nil || !strings.Contains(err.Error(), "did not complete") ||
-		!strings.Contains(err.Error(), "cleared the typed /exit") {
+	if err == nil ||
+		err.Error() != "/exit did not complete after 2 polls; chat left running\ncleared the typed /exit from the composer" {
 		t.Fatalf("stuck /exit error=%v, want 'did not complete' plus 'cleared the typed /exit'", err)
 	}
 	backspaces := 0

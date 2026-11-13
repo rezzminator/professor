@@ -1,6 +1,7 @@
 package herdr
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -17,16 +18,16 @@ func foregroundOf(body, pane string, engine pfmengine.ID) (bool, error) {
 }
 
 func TestEngineForegroundRejectsInvalidEnvelope(t *testing.T) {
-	for _, tc := range []struct{ name, body, engine, reason string }{
-		{"engine", `{"type":"pane_process_info","process_info":{"pane_id":"w1:p2","foreground_processes":[]}}`, "invalid", "engine"},
-		{"json", `{"type":`, "cc", "decode"},
-		{"type", `{"type":"future","process_info":{"pane_id":"w1:p2"}}`, "cc", `result type "future"`},
-		{"identity", `{"type":"pane_process_info","process_info":{"pane_id":"w1:p9","foreground_processes":[]}}`, "cc", "malformed"},
+	for _, tc := range []struct{ name, body, engine, want string }{
+		{"engine", `{"type":"pane_process_info","process_info":{"pane_id":"w1:p2","foreground_processes":[]}}`, "invalid", "herdr foreground engine: unknown engine \"invalid\" (want cc/claude, cx/codex, ox/opencode)"},
+		{"json", `{"type":`, "cc", "herdr pane.process_info: decode result \"{\\\"type\\\":\": unexpected end of JSON input"},
+		{"type", `{"type":"future","process_info":{"pane_id":"w1:p2"}}`, "cc", "herdr pane.process_info: result type \"future\", want pane_process_info"},
+		{"identity", `{"type":"pane_process_info","process_info":{"pane_id":"w1:p9","foreground_processes":[]}}`, "cc", "read Herdr processes in w1:p2: malformed process_info result for pane \"w1:p9\""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := foregroundOf(tc.body, "w1:p2", pfmengine.ID(tc.engine))
-			if err == nil || !strings.Contains(err.Error(), tc.reason) {
-				t.Fatalf("foreground error=%v; want %s", err, tc.reason)
+			if got := fmt.Sprint(err); got != tc.want {
+				t.Fatalf("foreground error = %q, want %q", got, tc.want)
 			}
 		})
 	}

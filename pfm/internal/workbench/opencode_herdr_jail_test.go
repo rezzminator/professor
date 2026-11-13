@@ -5,6 +5,7 @@ package workbench
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -355,7 +356,7 @@ func TestOpenCodeHerdrPluginForwardsAMainSessionTitleChange(t *testing.T) {
 
 func TestOpenCodeHerdrPluginIsInertOutsideHerdrAndTmux(t *testing.T) {
 	run, calls := runHerdrPlugin(t, map[string]string{}, []map[string]any{statusEvent("ses_a", "busy")}, "")
-	if run.HasEvent || len(calls) != 0 {
+	if got := fmt.Sprintf("hasEvent %t calls %+v", run.HasEvent, calls); got != "hasEvent false calls []" {
 		t.Fatalf("hasEvent=%t, pfm calls=%+v; want an empty plugin that spawns nothing", run.HasEvent, calls)
 	}
 }
@@ -366,13 +367,12 @@ func TestOpenCodeHerdrPluginSaysSoWhenThePfmBinaryCannotRun(t *testing.T) {
 		createdEvent("ses_a", ""),
 		statusEvent("ses_a", "busy"),
 	}, missing)
-	if len(calls) != 0 || len(run.Logs) == 0 {
-		t.Fatalf("pfm calls=%+v logs=%+v; want the spawn failure logged and nothing recorded", calls, run.Logs)
-	}
-	for _, entry := range run.Logs {
-		if entry.Service != "pfm-herdr" || entry.Level != "error" || !strings.Contains(entry.Message, missing) {
-			t.Fatalf("log entry %+v does not name service pfm-herdr, level error and the binary %s", entry, missing)
-		}
+	if got, want := strings.ReplaceAll(
+		fmt.Sprintf("calls %+v logs %+v", calls, run.Logs),
+		missing,
+		"{missing}",
+	), "calls [] logs [{Service:pfm-herdr Level:error Message:spawn {missing} start: spawn {missing} ENOENT} {Service:pfm-herdr Level:error Message:spawn {missing} working: spawn {missing} ENOENT}]"; got != want {
+		t.Fatalf("calls and logs = %q, want %q", got, want)
 	}
 }
 

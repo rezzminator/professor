@@ -2,7 +2,6 @@ package resolve
 
 import (
 	"context"
-	"strings"
 	"testing"
 )
 
@@ -27,7 +26,9 @@ func TestResolveRosterNameDeadTieStaysAmbiguousAndListsBoth(t *testing.T) {
 		{Name: "seat", ID: "one", ActivityNS: 7},
 		{Name: "seat", ID: "two", ActivityNS: 7},
 	}, "seat")
-	if found || err == nil || !strings.Contains(err.Error(), "one") || !strings.Contains(err.Error(), "two") {
+	if found || err == nil || err.Error() != `"seat" matches 2 chats in the roster; address by thread id:
+  thread id one (socket , pane , name "seat")
+  thread id two (socket , pane , name "seat")` {
 		t.Fatalf("ResolveRosterName() found=%t err=%v, want a tie listing both", found, err)
 	}
 }
@@ -44,7 +45,9 @@ func TestResolveRosterNameLiveCollisionListsOnlyTheLiveSeats(t *testing.T) {
 	if found || err == nil {
 		t.Fatalf("ResolveRosterName() found=%t err=%v, want the live collision refused", found, err)
 	}
-	if !strings.Contains(err.Error(), "matches 2 chats") || strings.Contains(err.Error(), "gone") {
+	if err.Error() != `"seat" matches 2 chats in the roster; address by thread id:
+  thread id one (socket cx-1, pane %1, name "seat")
+  thread id two (socket cx-2, pane %2, name "seat")` {
 		t.Fatalf("ambiguity=%q, want exactly the two live seats", err)
 	}
 }

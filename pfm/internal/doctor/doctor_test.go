@@ -37,72 +37,58 @@ func TestDoctorCrumbHealthAcceptsEffortMetadataAndRejectsAnEmptyIdentity(t *test
 	}
 }
 
-// TestDoctorVerboseWritesUnderSIDDirNotCWDTmp is 1-c's regression test:
-// unfixed, doctor's --verbose dir is the cwd-relative "tmp/pfm-doctor" — this
-// test's cwd is a fresh temp dir with no PFM_SID_DIR relationship, so the
-// printed line and the dir handed to the dependency probe / harness capture
-// diverge from it, and a stray tmp/ appears in the cwd.
+// Doctor writes its verbose output under the SID dir, never a cwd-relative tmp/,
+// and without --verbose prints no dir line and creates no dir.
 func TestDoctorVerboseWritesUnderSIDDirNotCWDTmp(t *testing.T) {
-	runtime := buildCleanDoctorHome(t)
-	wantDir := filepath.Join(runtime.Paths.SIDDir, "pfm-doctor")
-
-	savedProbe := DependencyProbeOverride
-	savedCapture := HarnessCaptureOverride
-	t.Cleanup(func() {
-		DependencyProbeOverride = savedProbe
-		HarnessCaptureOverride = savedCapture
-	})
-	var gotProbeDir, gotCaptureDir string
-	DependencyProbeOverride = func(_ context.Context, entries []deps.Entry, options deps.ProbeOptions) []deps.Result {
-		gotProbeDir = options.VerboseDir
-		return savedProbe(context.Background(), entries, options)
-	}
-	HarnessCaptureOverride = func(
-		ctx context.Context, home string, machine config.Config, alias, verboseDir string,
-	) (HarnessCapture, error) {
-		gotCaptureDir = verboseDir
-		return savedCapture(ctx, home, machine, alias, verboseDir)
-	}
-
-	cwd := t.TempDir()
-	t.Chdir(cwd)
-
-	var stdout, stderr bytes.Buffer
-	runDoctor([]string{"--verbose"}, &stdout, &stderr, runtime)
-
-	wantLine := fmt.Sprintf("doctor: verbose output dir=%s\n", wantDir)
-	if !strings.Contains(stdout.String(), wantLine) {
-		t.Fatalf("stdout missing %q:\n%s", wantLine, stdout.String())
-	}
-	if gotProbeDir != wantDir {
-		t.Fatalf("dependency probe VerboseDir=%q, want %q", gotProbeDir, wantDir)
-	}
-	if gotCaptureDir != wantDir {
-		t.Fatalf("harness capture verboseDir=%q, want %q", gotCaptureDir, wantDir)
-	}
-	if _, err := os.Stat(filepath.Join(cwd, "tmp")); !os.IsNotExist(err) {
-		t.Fatalf("doctor --verbose left a cwd-relative tmp/: err=%v", err)
-	}
-}
-
-// TestDoctorWithoutVerboseFlagPrintsNoDirLine is 1-c's negative case: no
-// --verbose, no info line, no directory created.
-func TestDoctorWithoutVerboseFlagPrintsNoDirLine(t *testing.T) {
-	runtime := buildCleanDoctorHome(t)
-	cwd := t.TempDir()
-	t.Chdir(cwd)
-
-	var stdout, stderr bytes.Buffer
-	runDoctor(nil, &stdout, &stderr, runtime)
-
-	if strings.Contains(stdout.String(), "doctor: verbose output dir") {
-		t.Fatalf("doctor without --verbose printed a verbose dir line:\n%s", stdout.String())
-	}
-	if _, err := os.Stat(filepath.Join(runtime.Paths.SIDDir, "pfm-doctor")); !os.IsNotExist(err) {
-		t.Fatalf("doctor without --verbose created its verbose dir: err=%v", err)
-	}
-	if _, err := os.Stat(filepath.Join(cwd, "tmp")); !os.IsNotExist(err) {
-		t.Fatalf("doctor without --verbose left a cwd-relative tmp/: err=%v", err)
+	for _, verbose := range []bool{false, true} {
+		t.Run(fmt.Sprint("verbose=", verbose), func(t *testing.T) {
+			runtime := buildCleanDoctorHome(t)
+			wantDir := filepath.Join(runtime.Paths.SIDDir, "pfm-doctor")
+			savedProbe := DependencyProbeOverride
+			savedCapture := HarnessCaptureOverride
+			t.Cleanup(func() {
+				DependencyProbeOverride = savedProbe
+				HarnessCaptureOverride = savedCapture
+			})
+			var gotProbeDir, gotCaptureDir string
+			DependencyProbeOverride = func(_ context.Context, entries []deps.Entry, options deps.ProbeOptions) []deps.Result {
+				gotProbeDir = options.VerboseDir
+				return savedProbe(context.Background(), entries, options)
+			}
+			HarnessCaptureOverride = func(
+				ctx context.Context, home string, machine config.Config, alias, verboseDir string,
+			) (HarnessCapture, error) {
+				gotCaptureDir = verboseDir
+				return savedCapture(ctx, home, machine, alias, verboseDir)
+			}
+			cwd := t.TempDir()
+			t.Chdir(cwd)
+			var args []string
+			wantLine, wantVerboseDir := "", ""
+			if verbose {
+				args = []string{"--verbose"}
+				wantLine, wantVerboseDir = "doctor: verbose output dir="+wantDir+"\n", wantDir
+			}
+			var stdout, stderr bytes.Buffer
+			runDoctor(args, &stdout, &stderr, runtime)
+			if got := doctorRows(stdout.String(), "doctor: verbose"); got != wantLine ||
+				gotProbeDir != wantVerboseDir || gotCaptureDir != wantVerboseDir {
+				t.Errorf(
+					"verbose rows = %q probe dir %q capture dir %q, want %q and %q",
+					got,
+					gotProbeDir,
+					gotCaptureDir,
+					wantLine,
+					wantVerboseDir,
+				)
+			}
+			if _, err := os.Stat(wantDir); !verbose && !os.IsNotExist(err) {
+				t.Errorf("doctor without --verbose created %s: err=%v", wantDir, err)
+			}
+			if _, err := os.Stat(filepath.Join(cwd, "tmp")); !os.IsNotExist(err) {
+				t.Errorf("doctor left a cwd-relative tmp/: err=%v", err)
+			}
+		})
 	}
 }
 
@@ -182,16 +168,13 @@ func TestDoctorCallmeterUsesClaudeEnvHome(t *testing.T) {
 	writePluginLogsFile(t, filepath.Join(home, ".local", "state", "callmeter", "logs", "errors.jsonl"), "{}\n")
 	var stdout, stderr bytes.Buffer
 	runDoctor(nil, &stdout, &stderr, runtime)
-	want := filepath.Join(home, "configured", "bin", "0.4.0", "callmeter") + " missing"
-	if !strings.Contains(stdout.String(), want) {
-		t.Fatalf("doctor did not inspect claude.env home %s:\n%s", want, stdout.String())
-	}
-	// callmeter's logs follow the shared plugin-log fallback, never its home.
-	wantFallback := "1 rows stranded in its fallback " + filepath.Join(home, ".local", "state", "callmeter", "logs")
-	if !strings.Contains(stdout.String(), wantFallback) ||
-		strings.Contains(stdout.String(), filepath.Join(home, "configured", "logs")) ||
-		strings.Contains(stdout.String(), filepath.Join(home, "ambient", "logs")) {
-		t.Fatalf("doctor fallback audit did not read the shared fallback:\n%s", stdout.String())
+	// The binary is looked for in claude.env's home; the logs follow the shared
+	// plugin-log fallback, never that home or the ambient one.
+	if got, want := rooted(
+		doctorRows(stdout.String(), "callmeter"),
+		home,
+	), "doctor: claude_plugins FAIL plugin callmeter@professor copy {root}/.local/share/professor-dev/plugins/callmeter missing — run pfm install --yes\ndoctor: claude_plugins FAIL plugin callmeter@professor cache in {root}/.claude/plugins/installed_plugins.json records no version string (scope user), checkout {root}/clone/plugins/callmeter/plugins/callmeter is 0.4.0 — run pfm install --yes\ndoctor: claude_plugins FAIL plugin callmeter@professor binary {root}/configured/bin/0.4.0/callmeter missing: its wrapper would download a release binary, which an unreleased version fails — run pfm install --yes\ndoctor: plugin_logs plugin callmeter: 1 rows stranded in its fallback {root}/.local/state/callmeter/logs while PLUGIN_LOG_DIR is set — move them to the log folder\n"; got != want {
+		t.Errorf("callmeter rows = %q, want %q", got, want)
 	}
 }
 

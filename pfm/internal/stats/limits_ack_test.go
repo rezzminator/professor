@@ -39,9 +39,14 @@ func TestDefaultAckUsesLeanSettingsAndInheritedEnvironment(t *testing.T) {
 		t.Fatalf("ACK starts = %v, want exactly 1", starts)
 	}
 	argv := strings.Join(starts[0].Argv[1:], "\n") + "\n"
-	want := "-p\n--model\nclaude-haiku-4-5\n--max-turns\n1\n--settings\n"
-	if !strings.HasPrefix(argv, want) ||
-		!strings.Contains(argv, `"CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT":"1"`) {
+	if argv != `-p
+--model
+claude-haiku-4-5
+--max-turns
+1
+--settings
+{"env":{"ANTHROPIC_SMALL_FAST_MODEL":"claude-haiku-5-5","CLAUDE_CODE_AUTO_COMPACT_WINDOW":"100000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1","CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT":"1"},"outputStyle":"default"}
+` {
 		t.Fatalf("ACK argv = %q", argv)
 	}
 	for _, entry := range starts[0].Opts.Env {

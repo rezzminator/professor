@@ -265,7 +265,7 @@ func TestListThemesTurnsASettingsFileItCannotParseIntoAnErrorRow(t *testing.T) {
 func TestListThemesFailsWithoutAnyAccount(t *testing.T) {
 	root := t.TempDir()
 	_, err := themesync.ListThemes(themesync.Env{Home: root, StateDir: themesync.DefaultStateDir(root)})
-	if err == nil || !strings.Contains(err.Error(), "no Claude account settings.json") {
+	if err == nil || err.Error() != "no Claude account settings.json under ~/.claude or ~/.cc" {
 		t.Fatalf("err = %v, want the missing-accounts error", err)
 	}
 }
@@ -390,7 +390,7 @@ func TestUseThemeContinuesPastAnEditFailureAndErrorsWhenNothingWasWritten(t *tes
 	}
 	if !reflect.DeepEqual(result.Written, []string{h.settings(h.cc1)}) ||
 		len(result.Refused) != 1 || result.Refused[0].Path != h.settings(h.claude) ||
-		!strings.Contains(result.Refused[0].Error, "disk full") {
+		result.Refused[0].Error != "disk full" {
 		t.Fatalf("result = %+v, want ~/.cc/1 written and ~/.claude refused with the cause", result)
 	}
 

@@ -3,9 +3,9 @@ package digest
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -48,6 +48,7 @@ func TestOpenCodeMissingStoreIsAFailure(t *testing.T) {
 // A Claude id resolves cleanly beside an unreadable OpenCode store: no
 // OpenCode session id is shaped like it, so the store is no place it could be.
 func TestClaudeIDResolvesBesideAnUnreadableOpenCodeStore(t *testing.T) {
+	t.Chdir(t.TempDir())
 	broken := t.TempDir()
 	if err := os.WriteFile(filepath.Join(broken, "opencode.db"), []byte("not a database\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -72,19 +73,26 @@ func TestClaudeIDResolvesBesideAnUnreadableOpenCodeStore(t *testing.T) {
 // A store that cannot be read makes the lookup INCOMPLETE and names the store:
 // an error, never NOT FOUND and never an empty transcript.
 func TestOpenCodeUnreadableStoreFailsTheLookup(t *testing.T) {
+	t.Chdir(t.TempDir())
 	root := t.TempDir()
 	store := filepath.Join(root, "opencode.db")
 	if err := os.WriteFile(store, []byte("not a database\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	var got strings.Builder
 	for _, verb := range []string{"show", "agents", "locate"} {
 		code, stdout, stderr := invokeOpenCode(t, root, verb, "ses_1a2b3c4d5e6f")
-		if code != 1 || stdout != "" ||
-			!strings.HasPrefix(stderr, "TRANSCRIPT FAILED — INCOMPLETE name lookup for 'ses_1a2b3c4d5e6f' — 1 "+
-				"discovery/read errors: "+store+" (") {
-			t.Errorf("%s: exit %d stdout %q stderr %q, want 1 and an INCOMPLETE lookup naming %s", verb, code, stdout,
-				stderr, store)
-		}
+		fmt.Fprintf(
+			&got,
+			"%s: exit %d stdout %q stderr %s",
+			verb,
+			code,
+			stdout,
+			strings.ReplaceAll(stderr, root, "{root}"),
+		)
+	}
+	if want := "show: exit 1 stdout \"\" stderr TRANSCRIPT FAILED — INCOMPLETE name lookup for 'ses_1a2b3c4d5e6f' — 1 discovery/read errors: {root}/opencode.db (open opencode store read-only: sqlite database {root}/opencode.db is a file this test process did not write; a test that needs SQLite's own file calls testjail.DatabaseFiles)\nagents: exit 1 stdout \"\" stderr TRANSCRIPT FAILED — INCOMPLETE name lookup for 'ses_1a2b3c4d5e6f' — 1 discovery/read errors: {root}/opencode.db (open opencode store read-only: sqlite database {root}/opencode.db is a file this test process did not write; a test that needs SQLite's own file calls testjail.DatabaseFiles)\nlocate: exit 1 stdout \"\" stderr TRANSCRIPT FAILED — INCOMPLETE name lookup for 'ses_1a2b3c4d5e6f' — 1 discovery/read errors: {root}/opencode.db (open opencode store read-only: sqlite database {root}/opencode.db is a file this test process did not write; a test that needs SQLite's own file calls testjail.DatabaseFiles)\n"; got.String() != want {
+		t.Errorf("lookups = %q, want %q", got.String(), want)
 	}
 }
 
@@ -138,10 +146,8 @@ func TestOpenCodePartOfAnUnreadableMessageStillShows(t *testing.T) {
 	}
 	locator := filepath.Join(root, "opencode.db") + "#ses_1a2b3c4d5e6fGarden0001"
 	code, stdout, stderr := invokeOpenCode(t, root, "show", locator)
-	for _, line := range []string{`10:01:40 SAY lost parent reply`, `10:01:40 SAY odd member reply`} {
-		reply := regexp.MustCompile(`(?m)^L\d+ ` + line + `$`)
-		if code != 0 || stderr != "" || !reply.MatchString(stdout) {
-			t.Errorf("exit %d stderr %q stdout %q, want 0, nothing and a line matching %s", code, stderr, stdout, reply)
-		}
+	if got, want := fmt.Sprintf("exit %d stderr %q\n%s", code, stderr, strings.ReplaceAll(stdout, root, "{root}")),
+		"exit 0 stderr \"\"\nTRANSCRIPT opencode · ses_1a2b3c4d5e6fGarden0001 · openai/gpt-5.6-sol high\nSTORE {root}/opencode.db#ses_1a2b3c4d5e6fGarden0001 · 26 records: 6 messages, 20 parts (L = record number in store order; no file lines or bytes) · cwd /work/garden (shown as ./)\nNAME Tidy the garden beds\nSPAN 2026-09-30 10:00:00Z → 10:01:40Z · 100s wall\nCALLS 5, 1 err, 1 without result: bash 1 · read 1 (1 err) · task 1 · edit 1 · webfetch 1\nFILTER only prompt,reply,call,note,final · results brief · text 500 · shown 15 of 15 events\nL2 10:00:00 PROMPT Tidy the beds and list what changed\nL3 10:00:00 PROMPT [file notes.txt]\nL4 10:00:00 NOTE Called the Read tool with the following input: {\"filePath\":\"./notes.txt\"}\nL8 10:00:06 bash ls ./beds → ok 11B ‹tulip›\nL9 10:00:07 read ./missing.txt → ERR 40B\n    | File not found: ./missing.txt\nL10 10:00:08 task explore: Survey the beds → ok 18B · 12s\nL14 10:00:21 SAY Tidying now.\nL15 10:00:22 edit ./beds/rose (-2 +1 lines) → ok 13B\nL16 10:00:23 FINAL\n  Both beds are tidy; rose was edited.\nL19 10:01:00 PROMPT thanks, one more: compact please\nL20 10:01:00 NOTE COMPACTED — the context was compacted here\nL21 10:01:05 NOTE ENGINE ERROR — APIError: rate limited\nL22 10:01:06 webfetch https://example.invalid/guide → NO RESULT\nL25 10:01:40 SAY lost parent reply\nL26 10:01:40 SAY odd member reply\nUNFINISHED — the last turn has no final reply: the run was cut off or is still running\nSKIPPED 7 records: part.step-start 2 · part.step-finish 2 · part.reasoning 1 · part.mystery 1 · message (unparseable) 1 | HEADER 4: message.user 2 · message.assistant 2\n"; got != want {
+		t.Errorf("show = %q, want %q", got, want)
 	}
 }

@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"slices"
-	"strings"
 	"testing"
 
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
@@ -32,7 +31,10 @@ func TestNewChatPickerOffersALauncherRegisteredOnlyInItsOwnPackage(t *testing.T)
 		command := exec.Command(os.Args[0], "-test.run=^"+name+"$", "-test.v")
 		command.Env = append(os.Environ(), ownLauncherHelper+"=1")
 		output, err := command.CombinedOutput()
-		if err != nil || !strings.Contains(string(output), "--- PASS: "+name) {
+		if err != nil || string(output) != `=== RUN   TestNewChatPickerOffersALauncherRegisteredOnlyInItsOwnPackage
+--- PASS: TestNewChatPickerOffersALauncherRegisteredOnlyInItsOwnPackage (0.00s)
+PASS
+` {
 			t.Fatalf("own-launcher proof failed: %v\n%s", err, output)
 		}
 		return

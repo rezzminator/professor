@@ -151,7 +151,8 @@ func TestLaunchNativeNewTabRefusesBirthFailure(t *testing.T) {
 		&stderr,
 		config.Runtime{Paths: values},
 	)
-	if code != 1 || !strings.Contains(stderr.String(), "birth native chat:") {
+	if code != 1 ||
+		stderr.String() != "pfm internal launch: birth native chat: herdr birth has no fleet places to file the chat under\n" {
 		t.Fatalf("new tab failure code=%d stderr=%s", code, &stderr)
 	}
 }

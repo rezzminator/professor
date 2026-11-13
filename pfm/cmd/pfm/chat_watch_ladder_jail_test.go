@@ -4,7 +4,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -416,8 +415,14 @@ func TestWatchLadderAFrozenTmuxServerIsNeverAnExit(t *testing.T) {
 		bystander.turn()
 		watch.poll()
 		got := watch.stdout.String()
-		if !strings.Contains(got, "ERROR lad-a ") || strings.Contains(got, "EXIT lad-a") ||
-			!strings.Contains(got, "IDLE lad-b") {
+		if got != `SEEN lad-a idle idle_seconds=0
+SEEN lad-b idle idle_seconds=0
+WORKING lad-a
+IDLE lad-a idle_seconds=0
+ERROR lad-a tmux server unreadable, so whether the chat lives is unknown: cc-1700000000-1-1: tmux server did not answer within 2s: cc-1700000000-1-1 (3 polls in a row)
+WORKING lad-b
+IDLE lad-b idle_seconds=2
+` {
 			t.Fatalf(
 				"a server unreadable for %d polls: lines %q, want lad-a's ERROR (never EXIT) and lad-b still followed",
 				headless.UnreadablePolls,
@@ -507,7 +512,7 @@ func TestWatchLadderCancelEndsTheWatchWithoutAnEvent(t *testing.T) {
 		t.Fatal("watch did not return within 5s of its context ending")
 	}
 	watch.expect()
-	if watch.code == 0 || !strings.Contains(watch.stderr.String(), context.Canceled.Error()) {
+	if watch.code == 0 || watch.stderr.String() != "pfm chat watch: context canceled\n" {
 		t.Fatalf("cancelled watch rc %d stderr %q, want a non-zero rc naming the cancellation",
 			watch.code, watch.stderr.String())
 	}

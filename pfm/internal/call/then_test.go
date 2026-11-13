@@ -339,25 +339,20 @@ func TestCommandThenSpawnerStatesTheSenderToTheWaiter(t *testing.T) {
 	if len(starts) != 1 {
 		t.Fatalf("starts = %+v, want exactly one", starts)
 	}
-	environment := strings.Join(starts[0].Opts.Env, "\n")
-	for _, want := range []string{
-		SenderSessionEnv + "=cx-1700000000-1-1",
-		SenderIDEnv + "=019ffd1e-300f",
-	} {
-		if !slices.Contains(starts[0].Opts.Env, want) {
-			t.Fatalf("waiter environment lacks %q", want)
+	var sender []string
+	for _, entry := range starts[0].Opts.Env {
+		for _, name := range []string{SenderSessionEnv, SenderIDEnv, SenderLabelEnv} {
+			if strings.HasPrefix(entry, name+"=") {
+				sender = append(sender, entry)
+			}
 		}
 	}
-	// The label was not resolved by this chat, so nothing is stated for it:
-	// an inherited one would sign this message with another chat's name.
-	for _, unwanted := range []string{
-		"cc-STALE-HOP",
-		"STALE_LABEL",
-		SenderLabelEnv + "=",
-	} {
-		if strings.Contains(environment, unwanted) {
-			t.Fatalf("waiter environment still carries %q", unwanted)
-		}
+	slices.Sort(sender)
+	if got, want := strings.Join(
+		sender,
+		"\n",
+	), "CHAT_SENDER_SESSION=cx-1700000000-1-1\nCHAT_SENDER_SID=019ffd1e-300f"; got != want {
+		t.Fatalf("waiter sender environment = %q, want %q", got, want)
 	}
 }
 
@@ -440,7 +435,7 @@ func TestSteerSpawnFailureIsReportedNotSwallowed(t *testing.T) {
 	}
 	if result.Code != 6 ||
 		result.Steers != 0 ||
-		!strings.Contains(result.Message, "could NOT arm") {
+		result.Message != "delivered the primary into \"%1\" but could NOT arm the 1 then steer(s): waiter start failed — deliver them yourself once the pane is idle" {
 		t.Fatalf("call() = %+v", result)
 	}
 }
@@ -623,7 +618,7 @@ func TestCommandThenSpawnerStatesTheEngineAndArmsTheRecord(t *testing.T) {
 }
 
 func TestCommandThenSpawnerCarriesNativeBoundaryEvidence(t *testing.T) {
-	for _, backend := range []string{"", "tmux", "herdr"} {
+	for backend, want := range map[string]string{"": "{root}/pfm internal then --socket /native/socket --target p2 --engine cc --steer continue\n", "tmux": "{root}/pfm internal then --socket /native/socket --target p2 --engine cc --steer continue\n", "herdr": "{root}/pfm internal then --socket /native/socket --target p2 --backend herdr --engine cc --steer continue\n{\"socket_path\":\"/native/socket\",\"pane\":\"p2\",\"state_change_seq\":4,\"completion_seq\":null,\"saw_working\":true}"} {
 		t.Run("backend-"+backend, func(t *testing.T) {
 			t.Setenv(herdrTurnEnv, "inherited-other-target")
 			root := t.TempDir()
@@ -661,18 +656,8 @@ func TestCommandThenSpawnerCarriesNativeBoundaryEvidence(t *testing.T) {
 				}
 			}
 			lines := []string{strings.Join(starts[0].Argv, " "), turn}
-			body := strings.Join(lines, "\n")
-			if !strings.Contains(lines[0], "internal then --socket /native/socket --target p2") {
-				t.Fatalf("detached argv/env=%q", body)
-			}
-			if backend == "herdr" {
-				if !strings.Contains(lines[0], "--backend herdr") ||
-					!strings.Contains(lines[1], `"state_change_seq":4`) ||
-					!strings.Contains(lines[1], `"pane":"p2"`) {
-					t.Fatalf("native handoff=%q", body)
-				}
-			} else if strings.Contains(lines[0], "--backend") || lines[1] != "" {
-				t.Fatalf("legacy tmux handoff=%q", body)
+			if got := strings.ReplaceAll(strings.Join(lines, "\n"), root, "{root}"); got != want {
+				t.Fatalf("detached argv and turn = %q, want %q", got, want)
 			}
 		})
 	}

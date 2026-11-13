@@ -106,11 +106,11 @@ func TestPrintCostLedgerDoctorReadsOnlyTheEndOfALongLog(t *testing.T) {
 	var stdout bytes.Buffer
 	printCostLedgerDoctor(&stdout, runtime, &paths.MapEnv{})
 	out := stdout.String()
-	if !strings.Contains(out, "armed a sink for pid 2000\n") || !strings.Contains(out, "armed a sink for pid 1996\n") {
-		t.Fatalf("tail lacks the last lines:\n%s", out)
-	}
-	if got := strings.Count(out, "doctor: cost sink log: "); got != 5 {
-		t.Fatalf("tail rows = %d, want 5:\n%s", got, out)
+	if got, want := doctorRows(
+		out,
+		"doctor: cost sink log: ",
+	), "doctor: cost sink log: 2026-01-02T03:04:05.000Z cost-launch: armed a sink for pid 1996\ndoctor: cost sink log: 2026-01-02T03:04:05.000Z cost-launch: armed a sink for pid 1997\ndoctor: cost sink log: 2026-01-02T03:04:05.000Z cost-launch: armed a sink for pid 1998\ndoctor: cost sink log: 2026-01-02T03:04:05.000Z cost-launch: armed a sink for pid 1999\ndoctor: cost sink log: 2026-01-02T03:04:05.000Z cost-launch: armed a sink for pid 2000\n"; got != want {
+		t.Errorf("tail rows = %q, want %q", got, want)
 	}
 }
 
@@ -124,9 +124,11 @@ func TestPrintCostLedgerDoctorSaysWhenTheLastLineIsLongerThanTheWindow(t *testin
 	var stdout bytes.Buffer
 	printCostLedgerDoctor(&stdout, runtime, &paths.MapEnv{})
 	out := stdout.String()
-	want := fmt.Sprintf("last line is longer than the %d-byte window", costSinkTailWindow)
-	if !strings.Contains(out, want) {
-		t.Fatalf("output lacks %q:\n%s", want, out)
+	if got, want := rooted(
+		out,
+		runtime.Paths.Home,
+	), "doctor: cost ledger state=on source=default dir={root}/.local/state/pfm/cost-ledger\ndoctor: cost sink log path={root}/.local/state/pfm/log/cost-sink.log bytes=9295\ndoctor: cost sink log: last line is longer than the 8192-byte window, not shown\n"; got != want {
+		t.Errorf("long last line output = %q, want %q", got, want)
 	}
 }
 
@@ -165,12 +167,10 @@ func TestDoctorRunPrintsTheCostLedgerRows(t *testing.T) {
 	writeSinkLog(t, paths.LogRoot(paths.OSEnv{}, runtime.Paths.Home).CostSink(), []string{armed})
 	var stdout, stderr bytes.Buffer
 	runDoctor(nil, &stdout, &stderr, runtime)
-	for _, want := range []string{
-		"doctor: cost ledger state=on",
-		"doctor: cost sink log: " + armed + "\n",
-	} {
-		if !strings.Contains(stdout.String(), want) {
-			t.Fatalf("doctor output lacks %q:\n%s", want, stdout.String())
-		}
+	if got, want := rooted(
+		doctorRows(stdout.String(), "doctor: cost "),
+		runtime.Paths.Home,
+	), "doctor: cost ledger state=on source=default dir={root}/.local/state/pfm/cost-ledger\ndoctor: cost sink log path={root}/.local/state/pfm/log/cost-sink.log bytes=61\ndoctor: cost sink log: 2026-01-02T03:04:05.000Z cost-launch: armed a sink for pid 7\n"; got != want {
+		t.Errorf("cost rows = %q, want %q", got, want)
 	}
 }

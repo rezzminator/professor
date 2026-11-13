@@ -119,21 +119,11 @@ func TestDoctorReportsClaudeVersionCountBytesAndPrunable(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	runDoctor(nil, &stdout, &stderr, runtime)
-	output := stdout.String()
-	if !strings.Contains(output, "doctor: claude-versions dir="+versions) {
-		t.Fatalf("doctor output missing claude-versions row:\n%s", output)
-	}
-	if !strings.Contains(output, "count=3") {
-		t.Fatalf("doctor output missing count=3:\n%s", output)
-	}
-	if !strings.Contains(output, "newest=2.1.270") {
-		t.Fatalf("doctor output missing newest=2.1.270:\n%s", output)
-	}
-	if !strings.Contains(output, "live=2.1.263(1 pids)") {
-		t.Fatalf("doctor output missing live pid count:\n%s", output)
-	}
-	if !strings.Contains(output, "prunable=1") {
-		t.Fatalf("doctor output missing prunable=1:\n%s", output)
+	if got, want := rooted(
+		doctorRows(stdout.String(), "doctor: claude-versions"),
+		home,
+	), "doctor: claude-versions dir={root}/.local/share/claude/versions count=3 bytes=51B newest=2.1.270 live=2.1.263(1 pids) prunable=1 (17B) — run pfm install --yes to prune\n"; got != want {
+		t.Errorf("claude-versions row = %q, want %q", got, want)
 	}
 }
 
@@ -324,8 +314,11 @@ func TestPFMPathWarningsReportHostShimsOutsideHomeWithoutAJail(t *testing.T) {
 		home,
 		canonicalDir+string(os.PathListSeparator)+hostShimDir,
 	)
-	if !strings.Contains(strings.Join(warnings, "\n"), hostShim) {
-		t.Fatalf("PATH warnings=%q, want out-of-home shadow %q reported", warnings, hostShim)
+	if got, want := rooted(
+		strings.Join(warnings, "\n"),
+		filepath.Dir(home),
+	), "pfm_hash_mismatch={root}/002/host-bin/pfm canonical={root}/001/.local/bin/pfm"; got != want {
+		t.Errorf("PATH warnings = %q, want %q", got, want)
 	}
 }
 

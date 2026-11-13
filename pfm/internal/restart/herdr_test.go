@@ -3,6 +3,7 @@ package restart
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -89,12 +90,13 @@ func herdrPlan(t *testing.T, model *herdrModel, extra ...process) (Plan, *hostRu
 func TestFindHerdrNamesAnAbsentBinaryAndAStoppedServer(t *testing.T) {
 	finder := &discoverer{deps: testDeps(t, &hostRunner{}, newKernel(), &fakeFleet{})}
 	finder.findHerdr(context.Background(), processTable{}, nil)
-	if len(finder.plan.Units) != 0 || !strings.Contains(finder.plan.Findings[0].Detail, "herdr is not installed") {
+	if len(finder.plan.Units) != 0 ||
+		finder.plan.Findings[0].Detail != "herdr is not installed (herdr is not on PATH)" {
 		t.Fatalf("absent herdr = %+v", finder.plan)
 	}
 	plan, _, _ := herdrPlan(t, &herdrModel{})
 	if len(plan.Units) != 1 || !plan.Units[0].StaysStopped ||
-		!strings.Contains(plan.Findings[0].Detail, "no server running — it stays stopped") {
+		plan.Findings[0].Detail != "/opt/bin/herdr status --json: no server running — it stays stopped" {
 		t.Fatalf("stopped herdr = %+v", plan)
 	}
 }
@@ -102,7 +104,7 @@ func TestFindHerdrNamesAnAbsentBinaryAndAStoppedServer(t *testing.T) {
 func TestFindHerdrAnUnreadableStatusIsAFailedFind(t *testing.T) {
 	plan, _, _ := herdrPlan(t, &herdrModel{status: `{"server":{}}`})
 	if len(plan.Units) != 0 || plan.Findings[0].Err == nil ||
-		!strings.Contains(plan.Findings[0].Err.Error(), "no server.running") {
+		plan.Findings[0].Err.Error() != "herdr status --json: no server.running in the answer" {
 		t.Fatalf("unreadable status = %+v", plan.Findings)
 	}
 }
@@ -132,7 +134,10 @@ func TestHerdrFailuresAreNamed(t *testing.T) {
 	model := &herdrModel{running: true, stuck: true, dead: true}
 	plan, _, _ := herdrPlan(t, model)
 	ctx := context.Background()
-	if _, err := plan.Units[0].Stop(ctx); err == nil || !strings.Contains(err.Error(), "still running") {
+	if _, err := plan.Units[0].Stop(
+		ctx,
+	); err == nil ||
+		err.Error() != "herdr server still running 5s after herdr server stop (exit 0: )" {
 		t.Fatalf("a stop that did not take = %v", err)
 	}
 	model.running = false
@@ -181,9 +186,10 @@ func TestHerdrStopOutliverUsesNonRootOwner(t *testing.T) {
 		t.Fatalf("units=%v", unitNames(finder.plan.Units))
 	}
 	detail, err := finder.plan.Units[0].Stop(context.Background())
-	if err != nil || !strings.Contains(detail, "each stopped") ||
+	if want := "server stopped; herdr status reads not running; 1 of its 2 process(es) outlived it, each stopped: pid 31 exited on SIGTERM"; err != nil ||
+		detail != want ||
 		!slices.Equal(kernel.sent(), []string{"31 terminated"}) {
-		t.Fatalf("stop=%q error=%v signals=%v", detail, err, kernel.sent())
+		t.Fatalf("stop = %q, want %q (error %v signals %v)", detail, want, err, kernel.sent())
 	}
 }
 
@@ -192,8 +198,10 @@ func TestHerdrStopNamesAProcessItRanThatWillNotDie(t *testing.T) {
 		process{PID: 31, Parent: herdrServerPID, Argv: []string{"-zsh"}})
 	kernel.stubborn[31], kernel.unkillable[31] = true, true
 	_, err := plan.Units[0].Stop(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "may still run") || !strings.Contains(err.Error(), "pid 31") {
-		t.Fatalf("stop = %v, want the survivor named and the step failed", err)
+	if got, want := fmt.Sprint(
+		err,
+	), "server stopped; herdr status reads not running, but 1 of the 2 process(es) it ran may still run: pid 31 still runs -zsh after SIGKILL"; got != want {
+		t.Fatalf("stop = %q, want %q", got, want)
 	}
 }
 
@@ -205,13 +213,14 @@ func TestHerdrStopWithAnUnknownTreeIsUnverified(t *testing.T) {
 	table, err := finder.readTable()
 	finder.findHerdr(context.Background(), table, err)
 	_, stopErr := finder.plan.Units[0].Stop(context.Background())
-	if stopErr == nil || !strings.Contains(stopErr.Error(), "unverified: no herdr server process") {
+	if stopErr == nil ||
+		stopErr.Error() != "server stopped; herdr status reads not running, but the processes it ran are unverified: no herdr server process of the default session in the process table (0 listed)" {
 		t.Fatalf("stop with no server process in the table = %v, want it named unverified", stopErr)
 	}
 	finder, _, _ = herdrHost(t, &herdrModel{running: true})
 	finder.findHerdr(context.Background(), processTable{}, errors.New("list processes: permission denied"))
 	if _, stopErr := finder.plan.Units[0].Stop(context.Background()); stopErr == nil ||
-		!strings.Contains(stopErr.Error(), "unverified: list processes: permission denied") {
+		stopErr.Error() != "server stopped; herdr status reads not running, but the processes it ran are unverified: list processes: permission denied" {
 		t.Fatalf("stop over an unreadable table = %v, want it named unverified", stopErr)
 	}
 }

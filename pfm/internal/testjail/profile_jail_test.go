@@ -9,8 +9,10 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -27,20 +29,6 @@ func processDir(t *testing.T, artifacts, label string) string {
 		t.Fatalf("want one %s.<pid> under %s, found %v (%v); directory holds %v", label, artifacts, found, err, entries)
 	}
 	return found[0]
-}
-
-// entryNames lists dir's entries by name.
-func entryNames(t *testing.T, dir string) []string {
-	t.Helper()
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatalf("list %s: %v", dir, err)
-	}
-	names := []string{}
-	for _, entry := range entries {
-		names = append(names, entry.Name())
-	}
-	return names
 }
 
 func TestProfileGreenExitLeavesASummaryAndNoBundle(t *testing.T) {
@@ -183,8 +171,12 @@ func TestProfileUnusableStepDeadlineLeavesTheTestTimeoutWatchdog(t *testing.T) {
 		mode: "pass", artifacts: artifacts, args: []string{"-test.timeout=100s"},
 		env: []string{paths.EnvTestDeadlineEpoch + "=tomorrow"},
 	}).run(t)
-	if res.code != 0 || !strings.Contains(res.stderr, `"tomorrow"`) {
-		t.Fatalf("child exit %d, stderr %q", res.code, res.stderr)
+	if got, want := fmt.Sprintf(
+		"%d %s",
+		res.code,
+		rooted(t, res.stderr),
+	), "0 testjail: profile: PFM_TEST_DEADLINE_EPOCH=\"tomorrow\" is not decimal epoch seconds (want digits with an optional .fraction): no deadline watchdog\n"; got != want {
+		t.Fatalf("child exit and stderr = %q, want %q", got, want)
 	}
 	summary := readSummary(t, processDir(t, artifacts, profileLabel))
 	if at, _ := summary["watchdog_s"].(float64); at < 85 || at > 91 {
@@ -235,17 +227,115 @@ func TestProfileKilledChildLeavesTheStartSummary(t *testing.T) {
 	})
 }
 
-func TestProfileOffGreenSaysNothing(t *testing.T) {
+// unitRunModules numbers the modules unitRunModule makes in this process.
+var unitRunModules atomic.Int64
+
+// unitRunModule is a module of its own whose project name is unique to this test process, so a child
+// started in it with no PFM_TEST_ARTIFACT_DIR records its default run under {system temp}/{project}/unit,
+// which the test removes; it returns the module directory and that base.
+func unitRunModule(t *testing.T) (moduleDir, base string) {
+	t.Helper()
+	project := fmt.Sprintf("testjail-unit-run-%d-%d", os.Getpid(), unitRunModules.Add(1))
+	moduleDir = filepath.Join(t.TempDir(), "."+project, "m")
+	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(moduleDir, "go.mod"), []byte("module example.com/m\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(filepath.Join(paths.SystemTempDir(), project)); err != nil {
+			t.Errorf("remove the test's unit run root: %v", err)
+		}
+	})
+	return moduleDir, filepath.Join(paths.SystemTempDir(), project, "unit")
+}
+
+// TestProfileDefaultRunCollectsEveryProcess: with no PFM_TEST_ARTIFACT_DIR, every package process one
+// go process starts records into that parent's one run directory — a row per event in packages.tsv,
+// summary.md over them, latest linked at it — with no flight recorder, and a red process names its
+// diagnosis there, as a gate run does.
+func TestProfileDefaultRunCollectsEveryProcess(t *testing.T) {
 	t.Parallel()
-	res := (&child{mode: "pass"}).run(t)
-	if res.code != 0 || strings.Contains(res.stderr, "testjail:") {
-		t.Fatalf("child exit %d, stderr %q, want a green run with no profiler line", res.code, res.stderr)
+	moduleDir, base := unitRunModule(t)
+	listing := (&child{mode: "pass", dir: moduleDir, args: []string{"-test.list=^Test"}}).run(t)
+	if _, err := os.Stat(base); listing.code != 0 || !os.IsNotExist(err) {
+		t.Fatalf("listing child exit %d, %s: %v; want a listing that opens no run", listing.code, base, err)
+	}
+	listed := 0
+	for _, line := range strings.Split(listing.stdout, "\n") {
+		if strings.HasPrefix(line, "Test") {
+			listed++
+		}
+	}
+	tests := strconv.Itoa(listed) // the testing package's own count of the binary's top-level tests
+	green := (&child{mode: "pass", dir: moduleDir}).run(t)
+	if green.code != 0 || strings.Contains(green.stderr, "testjail:") {
+		t.Fatalf("green child exit %d, stderr %q, want a green run with no profiler line", green.code, green.stderr)
+	}
+	red := (&child{mode: "fail", dir: moduleDir}).run(t)
+	runs := entryNames(t, base)
+	if len(runs) != 2 || !regexp.MustCompile(fmt.Sprintf(`^\d{8}T\d{6}Z-%d$`, os.Getpid())).MatchString(runs[0]) ||
+		runs[1] != "latest" {
+		t.Fatalf("entries of %s = %v, want one run {UTC}-%d and latest", base, runs, os.Getpid())
+	}
+	run := filepath.Join(base, runs[0])
+	if got, err := os.Readlink(filepath.Join(base, "latest")); err != nil || got != runs[0] {
+		t.Fatalf("latest -> %q (%v), want %q", got, err, runs[0])
+	}
+	// A helper a run's process starts inherits the run as its PFM_TEST_ARTIFACT_DIR: it records its
+	// summary there, adds no row, and runs no flight recorder either (pause-off fails on tracing).
+	helper := (&child{mode: "pause-off", artifacts: run, env: []string{paths.EnvTestProfileParent + "=1"}}).run(t)
+	if helper.code != 0 {
+		t.Fatalf("helper child exit %d, want a pass with tracing off: %s%s", helper.code, helper.stdout, helper.stderr)
+	}
+	helperDir := fmt.Sprintf("%s.%d", profileLabel, helper.pid)
+	wantSummary(t, readSummary(t, filepath.Join(run, helperDir)), map[string]any{
+		"event": "helper-exit", "exit_code": float64(0), "helper_of": "1", "bundles": []any{},
+	})
+	redDir := fmt.Sprintf("%s.%d", profileLabel, red.pid)
+	diagnosis := filepath.Join(redDir, "exit", "DIAGNOSIS.txt")
+	wantStderr := "testjail: profile bundle (exit) → " + filepath.Join(run, redDir, "exit") + "/DIAGNOSIS.txt"
+	if got := strings.TrimSpace(red.stderr); red.code != 1 || got != wantStderr {
+		t.Fatalf("red child exit %d, stderr %q; want 1, %q", red.code, got, wantStderr)
+	}
+	greenDir := fmt.Sprintf("%s.%d", profileLabel, green.pid)
+	want := []string{greenDir, redDir, helperDir, "packages.tsv", "summary.md"}
+	slices.Sort(want)
+	if got := entryNames(t, run); !reflect.DeepEqual(got, want) {
+		t.Fatalf("entries of %s = %v, want %v", run, got, want)
+	}
+	var rows []string
+	for _, line := range strings.Split(strings.TrimSuffix(readFile(t, filepath.Join(run, "packages.tsv")), "\n"), "\n") {
+		cells := strings.Split(line, "\t")
+		rows = append(rows, strings.Join(append(cells[:4:4], cells[7:]...), " "))
+	}
+	g, r := strconv.Itoa(green.pid), strconv.Itoa(red.pid)
+	wantRows := []string{
+		"package pid event exit_code tests diagnosis",
+		profileLabel + " " + g + " started-no-exit-recorded -1 " + tests + " -",
+		profileLabel + " " + g + " exit 0 " + tests + " -",
+		profileLabel + " " + r + " started-no-exit-recorded -1 " + tests + " -",
+		profileLabel + " " + r + " exit 1 " + tests + " " + diagnosis,
+	}
+	if !reflect.DeepEqual(rows, wantRows) {
+		t.Fatalf("%s/packages.tsv rows %q, want %q", run, rows, wantRows)
+	}
+	summary := readFile(t, filepath.Join(run, "summary.md"))
+	redTable := "## Red\n\n| result | package | exit | diagnosis |\n|---|---|---|---|\n| FAIL | " + profileLabel + " | 1 | " +
+		diagnosis + " |\n\n## Packages by wall"
+	if !strings.Contains(summary, redTable) {
+		t.Fatalf("%s/summary.md:\n%s\nwant its red table exactly\n%s", run, summary, redTable)
+	}
+	wantErrs := "trace window: flight recorder not running: " + errRecorderGateOnly.Error() + "; no trace.out\n"
+	if got := readFile(t, filepath.Join(run, redDir, "exit", "errors.txt")); got != wantErrs {
+		t.Fatalf("%s/%s/exit/errors.txt = %q, want %q", run, redDir, got, wantErrs)
 	}
 }
 
-func TestProfileOffRedSaysSoOnce(t *testing.T) {
+func TestProfileWithoutAModuleRedSaysSoOnce(t *testing.T) {
 	t.Parallel()
-	res := (&child{mode: "fail"}).run(t)
+	res := (&child{mode: "fail", dir: t.TempDir()}).run(t)
 	if res.code != 1 {
 		t.Fatalf("child exit %d, want its deliberate failure: %s%s", res.code, res.stdout, res.stderr)
 	}
@@ -256,17 +346,23 @@ func TestProfileOffRedSaysSoOnce(t *testing.T) {
 
 func TestProfileSwitchedOffIsSilent(t *testing.T) {
 	t.Parallel()
+	moduleDir, base := unitRunModule(t)
 	for name, artifacts := range map[string]string{"with a directory": t.TempDir(), "without one": ""} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			res := (&child{mode: "fail", artifacts: artifacts, env: []string{paths.EnvTestProfile + "=0"}}).run(t)
-			if res.code != 1 || strings.Contains(res.stderr, "testjail:") {
-				t.Fatalf("child exit %d, stderr %q, want a red run with no profiler line", res.code, res.stderr)
+			res := (&child{
+				mode: "fail", artifacts: artifacts, dir: moduleDir, env: []string{paths.EnvTestProfile + "=0"},
+			}).run(t)
+			if got := fmt.Sprintf("%d %s", res.code, res.stderr); got != "1 " {
+				t.Fatalf("child exit and stderr = %q, want a red run with no profiler line", got)
 			}
 			if artifacts != "" {
 				if got := entryNames(t, artifacts); len(got) != 0 {
 					t.Fatalf("switched-off profiler left %v under %s", got, artifacts)
 				}
+			}
+			if _, err := os.Stat(base); !os.IsNotExist(err) {
+				t.Fatalf("switched-off profiler opened the default run root %s (%v)", base, err)
 			}
 		})
 	}
@@ -300,8 +396,13 @@ func TestProfileTestListingWritesNothing(t *testing.T) {
 	t.Parallel()
 	artifacts := t.TempDir()
 	res := (&child{mode: "pass", artifacts: artifacts, args: []string{"-test.list=.*"}}).run(t)
-	if res.code != 0 || !strings.Contains(res.stdout, "TestProfileChild") || strings.Contains(res.stderr, "testjail:") {
-		t.Fatalf("child exit %d, stdout %q, stderr %q, want a plain listing", res.code, res.stdout, res.stderr)
+	if got, want := fmt.Sprintf(
+		"%d %s|%s",
+		res.code,
+		res.stdout,
+		res.stderr,
+	), "0 TestPinClaudeAsk\nTestDatabaseFilesKeepsSQLitesOwnFile\nTestDiagnoseRendersTheBundle\nTestParseGoroutinesKeepsOnlyWhatItCanPlace\nTestUserFrameSkipsTheProfilersOwnFrames\nTestShortFile\nTestDefaultEngineSyncAnswersEveryShape\nTestFakeEngineSyncRecordsEveryCall\nTestMirrorBuilt\nTestFakeEngineSyncRunnerRecordsEveryCallButVersion\nTestDefaultEngineSyncPlayerAnswersEveryShape\nTestWriteExecutableRunsWhileOtherGoroutinesFork\nTestWriteExecutableNeverRunKeepsBodyAndExecMode\nTestFenceArgsDropHostPathFlags\nTestGateAdmitsOnlyTheFence\nTestGuardRunsOnlyAnArmedUnitBinaryOffTheFence\nTestPFMBinaryBuildsWhenUnset\nTestMockEngineBinaryBuildsWhenUnset\nTestGoBuildReportsCombinedOutput\nTestGoBuildReportsStartFailure\nTestPFMBinaryUsesExecutablePrebuilt\nTestPrebuiltBinariesRejectBrokenPaths\nTestMockEngineBinaryUsesExecutablePrebuilt\nTestBinaryWithoutAModuleOrPrebuiltNamesBoth\nTestGoBuildReportsResolveFailure\nTestStageHerdrShell\nTestHerdrPaneInfoIsolatesPerRequestOverrides\nTestHerdrWorkspaceReplyCreatesTheAskedLabel\nTestEnterJailDirMovesOnlyARunInJailPackage\nTestPinLaunchShellPinsResolvedBashOrClears\nTestScrubOperatorPATH\nTestPlaceRootsAnInventedPathInTheJailDirectory\nTestPlaceRefusesWithoutAJailDirectory\nTestProfileGreenExitLeavesASummaryAndNoBundle\nTestProfileTimeoutBundleListsTheBlockedTestBeforeTestingPanics\nTestProfileStepDeadlineFiresBeforeTheTestTimeout\nTestProfileUnusableStepDeadlineArmsNothingAndNamesTheValue\nTestProfileUnusableStepDeadlineLeavesTheTestTimeoutWatchdog\nTestProfileHelperRecordsASummaryAndNeverABundleOrWatchdog\nTestProfileKilledChildLeavesTheStartSummary\nTestProfileDefaultRunCollectsEveryProcess\nTestProfileWithoutAModuleRedSaysSoOnce\nTestProfileSwitchedOffIsSilent\nTestProfileCPUIsOptIn\nTestProfileTestListingWritesNothing\nTestProfileLabelHoldsWhereverTheBinaryRuns\nTestProfileFixture\nTestReadPSIParsesTheStallTotalsInSeconds\nTestReadPSIUnreadableIsAnErrorNeverZero\nTestSummaryPSIUnreadableIsNullWithItsReasonOnLinux\nTestRunDelayReadsThisProcessOnLinux\nTestMaxRSSIsKilobytesOnLinux\nTestParseProcessStart\nTestPackageLabel\nTestModuleRootOfFindsTheNearestGoMod\nTestRenderUnitRun\nTestUnitRunBase\nTestOpenUnitRunKeepsTheNewestRuns\nTestUnitRunRow\nTestRecordUnitRunSerializesProcesses\nTestTestCountWithoutAMainIsUnknown\nTestProcessStartOfThisProcessIsBeforeNow\nTestProfileChild\nTestProfileCPUStartFailureIsInTheSummary\nTestWatchdogMargin\nTestParseEpoch\nTestPickDeadlineTakesTheEarlierAndNamesAnUnusableValue\nTestProfileBundleListsAnArtifactItCouldNotWrite\nTestProfileFinishAfterAFiredWatchdogLeavesTheExitSummaryLast\nTestProfileSummaryNeverRendersAnUnreadablePSIAsZero\nTestPTYScriptArgvForms\nTestPTYCommandRefusesAnUnresolvableScript\nTestPauseFlightRecorderStopsItForTheTestAndRestartsItAfter\nTestPauseFlightRecorderIsANoOpWithProfilingOff\nTestPauseFlightRecorderPanicsInAParallelTest\nTestProfileBundleAfterAPauseHoldsTheTraceWindow\nTestProfileBundleAfterARefusedRestartNamesTheMissingTrace\nTestPauseRecorderWithNoRecorderRunningLeavesItsReason\nTestStageGlobalAgentsLinksTheSources\nTestRunKeepsTheStorePathsAJailedTestHandsItsHelper\nTestPinGoDirsPinsTelemetryOutsideTheJail\nTestPinGoDirsPreservesConfiguredTelemetryDirectory\nTestRunPreservesCallerSIDDir\nTestRunClearsBashEnv\nTestRunPassesProfilerVariablesThrough\nTestJailMarksItsChildrenWithTheJailHomesMark\nTestStageAccountLinksErrors\nTestRunPinsGoCacheOutsideTheJail\nTestRunKeepsTestScratchUnderTMPDIR\nTestRunScrubsTheOperatorLocalBinFromPATH\nTestPinGoDirsPreservesConfiguredGoCacheDirectories\nTestRunPinsXDGConfigHomeInsideTheJail\nTestRunPinsSIDDirInsideTheJail\nTestEveryJailPinsAndSeedsPFMConfig\nTestRunScrubsAmbientIdentity\nTestFleetPinsXDGConfigHomeInsideTheJail\nTestCleanHomePinsXDGConfigHomeInsideTheJail\nTestCleanHomeStagesOneSessionStoreAndManagedCleanup\nTestStageAccountLinks\nTestInstalledHomeStagesCloneSourceLine\nTestRunCreatesDefaultAccountDir\nTestJailHomeSetupFailure\nTestInstalledHomeUsesAnAccountDirectory\nTestStageClaudePlugins\nTestRunClearsTheLoginDefault\nTestMachineBinaryRefusesAHostEvenArmed\nTestHungTmuxRunnerAnswersOnlyKillServer\nTestTmuxRunnerAnswersEveryCallAlike\nTestAbsentTmuxRunnerAnswersNoServer\nTestTmuxServerHoldsTheAllowanceUntilTheTestEnds\nTestUnitNetFailsEveryDoorNamingItsVariable\nTestChdirUnnamableLeavesGetwdNoName\nTestRunUnsetsXDGConfigHome\nTestGitRepoWithWorktreesBuildsLinkedWorktrees\nTestGitRepoWithWorktreesFailsWhenItsRunnerFindsNoGit\n|"; got != want {
+		t.Fatalf("child exit, stdout|stderr = %q, want %q", got, want)
 	}
 	if got := entryNames(t, artifacts); len(got) != 0 {
 		t.Fatalf("listing tests left %v under %s", got, artifacts)

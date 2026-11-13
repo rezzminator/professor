@@ -442,8 +442,14 @@ func TestOpenCodeOwnershipExcludesConcurrentPublisher(t *testing.T) {
 		options: Options{Mode: ModeApply, Home: home, OpenCodeConfigPath: config, SourceRepo: clone, Stdout: writer},
 	}
 	err := e.editOpenCodeInstructions(true)
-	if competingErr == nil || !strings.Contains(competingErr.Error(), "busy") {
-		t.Fatalf("competing publisher crossed ownership boundary: %v; original=%v", competingErr, err)
+	realHome, resolveErr := filepath.EvalSymlinks(home)
+	if resolveErr != nil {
+		t.Fatal(resolveErr)
+	}
+	wantBusy := "OpenCode instruction ownership busy or unreadable: account ownership " + realHome +
+		" is busy: resource temporarily unavailable"
+	if competingErr == nil || competingErr.Error() != wantBusy {
+		t.Fatalf("competing publisher error = %v, want %q; original=%v", competingErr, wantBusy, err)
 	}
 	if err != nil {
 		t.Fatal(err)

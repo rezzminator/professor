@@ -20,5 +20,5 @@ func TestMain(m *testing.M) {
 	index.RegisterSource(pfmengine.OpenCode, opencodeengine.Source{})
 	gather.RegisterMatcher(pfmengine.Claude, claudeengine.Matcher{})
 	gather.RegisterMatcher(pfmengine.Codex, codexengine.Matcher{})
-	os.Exit(testjail.Run(m))
+	os.Exit(testjail.RunInJail(m))
 }

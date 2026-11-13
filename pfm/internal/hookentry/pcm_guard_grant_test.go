@@ -21,12 +21,12 @@ func pcmGuardWriteGrant(t *testing.T, root, body string) {
 
 // pcmGuardRequireDenyWarning fails unless the guard denied the payload to
 // pcm and named warn on stderr ("" for silence).
-func pcmGuardRequireDenyWarning(t *testing.T, payload, warn string) {
+func pcmGuardRequireDenyWarning(t *testing.T, payload, home, warn string) {
 	t.Helper()
 	pcmGuardRequireDeny(t, payload, pcmGuardOnlyPcm)
 	_, _, stderr := runPcmGuard(payload)
-	if (warn == "") != (stderr == "") || !strings.Contains(stderr, warn) {
-		t.Fatalf("stderr=%q, want %q\npayload=%s", stderr, warn, payload)
+	if stderr = strings.ReplaceAll(stderr, home, "{home}"); stderr != warn {
+		t.Fatalf("stderr = %q, want %q\npayload=%s", stderr, warn, payload)
 	}
 }
 
@@ -35,12 +35,12 @@ func pcmGuardRequireDenyWarning(t *testing.T, payload, warn string) {
 func TestPcmGuardGrantRefusesWhatItCannotTrust(t *testing.T) {
 	for _, row := range []struct{ name, body, link, warn string }{
 		{name: "missing"},
-		{name: "malformed", body: `{"writers": [`, warn: "grants nothing"},
-		{name: "symlink", link: `{"writers": {"documenter": [".claude/skills"]}}`, warn: "symlink"},
-		{name: "whole .claude", body: `{"writers": {"documenter": [".claude"]}}`, warn: "no directory under"},
-		{name: "escape", body: `{"writers": {"documenter": [".claude/../.claude"]}}`, warn: "no directory under"},
-		{name: "outside", body: `{"writers": {"documenter": ["src"]}}`, warn: "no directory under"},
-		{name: "absolute", body: `{"writers": {"documenter": ["/tmp/.claude/skills"]}}`, warn: "no directory under"},
+		{name: "malformed", body: `{"writers": [`, warn: "pfm internal pcm-guard: grant file {home}/proj/.claude/pcm-guard.json grants nothing: decode: unexpected end of JSON input\n"},
+		{name: "symlink", link: `{"writers": {"documenter": [".claude/skills"]}}`, warn: "pfm internal pcm-guard: grant file {home}/proj/.claude/pcm-guard.json grants nothing: it is a symlink\n"},
+		{name: "whole .claude", body: `{"writers": {"documenter": [".claude"]}}`, warn: "pfm internal pcm-guard: grant file {home}/proj/.claude/pcm-guard.json: \".claude\" is no directory under .claude/; it grants nothing\n"},
+		{name: "escape", body: `{"writers": {"documenter": [".claude/../.claude"]}}`, warn: "pfm internal pcm-guard: grant file {home}/proj/.claude/pcm-guard.json: \".claude/../.claude\" is no directory under .claude/; it grants nothing\n"},
+		{name: "outside", body: `{"writers": {"documenter": ["src"]}}`, warn: "pfm internal pcm-guard: grant file {home}/proj/.claude/pcm-guard.json: \"src\" is no directory under .claude/; it grants nothing\n"},
+		{name: "absolute", body: `{"writers": {"documenter": ["/tmp/.claude/skills"]}}`, warn: "pfm internal pcm-guard: grant file {home}/proj/.claude/pcm-guard.json: \"/tmp/.claude/skills\" is no directory under .claude/; it grants nothing\n"},
 	} {
 		t.Run(row.name, func(t *testing.T) {
 			f := pcmGuardHome(t)
@@ -57,7 +57,7 @@ func TestPcmGuardGrantRefusesWhatItCannotTrust(t *testing.T) {
 				}
 			}
 			target := filepath.Join(f.project, ".claude", "skills", "s", "SKILL.md")
-			pcmGuardRequireDenyWarning(t, pcmGuardEdit(t, "Write", target, "documenter"), row.warn)
+			pcmGuardRequireDenyWarning(t, pcmGuardEdit(t, "Write", target, "documenter"), f.home, row.warn)
 		})
 	}
 }
@@ -89,7 +89,7 @@ func TestPcmGuardGrantStaysInsideItsProject(t *testing.T) {
 	call := engineGuardShellCall("codex", `echo x > .claude/skills/s/SKILL.md`, f.project)
 	call["agent_type"] = "documenter"
 	code, stdout, _ := runEngineGuard(t, "codex", call)
-	if code != 0 || !strings.Contains(stdout, gitGuardDenied) {
+	if code != 0 || gitGuardDecision(t, stdout) != "deny" {
 		t.Fatalf("code=%d stdout=%q, want the engine guard to deny a granted agent", code, stdout)
 	}
 }

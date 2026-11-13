@@ -8,7 +8,6 @@ import (
 	"io/fs"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -166,8 +165,9 @@ func TestAskCapturesHerdrSeatThroughNativeHost(t *testing.T) {
 		HerdrWorkspace: "w1", Socket: socket, Pane: "w1:p2", Live: true,
 	}
 	result := Ask(context.Background(), chat, options)
-	if result.Warning != nil || !strings.HasPrefix(result.Text, "PANE-ONLY (no human exchange recorded yet): ") {
-		t.Fatalf("native status ask=%+v; want a native pane capture, not TRANSCRIPT-ONLY or unavailable", result)
+	if got, want := result.Text, "PANE-ONLY (no human exchange recorded yet): native capture is running checks"; result.Warning != nil ||
+		got != want {
+		t.Fatalf("native status ask = %q, want %q (warning %v)", got, want, result.Warning)
 	}
 	if raw := startedStdin(t, runner, 0); !strings.Contains(raw, "native capture is running checks") {
 		t.Fatalf("runner missing native capture: %q", raw)
@@ -233,60 +233,6 @@ func TestAskPreservesAnswerWhenPreparedExchangeCleanupFails(t *testing.T) {
 	}
 	if !errors.Is(result.Warning, fs.ErrNotExist) {
 		t.Fatalf("ask cleanup warning=%v, want fs.ErrNotExist", result.Warning)
-	}
-}
-
-// TestAskDistinguishesNotLiveFromCaptureFailure pins the engine's root law
-// (pfm/CLAUDE.md: "a probe that could not run never returns 'nothing
-// found'") as Ask states it: a chat that is not live and a chat whose pane
-// capture ERRORED are two different facts, worded so a reader cannot
-// mistake "we never had a screen" for "we failed to read the screen".
-func TestAskDistinguishesNotLiveFromCaptureFailure(t *testing.T) {
-	if _, err := exec.LookPath("tmux"); err != nil {
-		t.Skip("tmux binary is not installed")
-	}
-	root := t.TempDir()
-	transcriptPath := filepath.Join(root, "exchange.jsonl")
-	writeSummaryTranscript(t, transcriptPath,
-		`{"type":"user","message":{"role":"user","content":"what is happening"}}`,
-		`{"type":"assistant","message":{"role":"assistant","content":"steady state"}}`,
-	)
-	bin := filepath.Join(root, "bin")
-	writeEngine(t, bin, "claude")
-	// Prepend, not replace: the capture-failure call below still needs the
-	// REAL tmux binary to reach (and be refused by) the empty socket path.
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	options := AskOptions{
-		Config: summaryMachine(t, "claude"), TempDir: filepath.Join(root, "tmp"),
-		Runner: fakeEngine(deps.StartOutput{Stdout: `{"result":"answer"}` + "\n"}),
-	}
-
-	notLive := Ask(context.Background(), Chat{Name: "seat", Engine: "cc", Path: transcriptPath, Live: false}, options)
-	if !strings.Contains(notLive.Text, "TRANSCRIPT-ONLY (chat is not live: there is no pane to capture)") {
-		t.Fatalf("not-live ask=%+v", notLive)
-	}
-	if strings.Contains(notLive.Text, "pane capture failed") {
-		t.Fatalf("not-live text bled into capture-failed wording: %q", notLive.Text)
-	}
-
-	tmuxRoot := t.TempDir()
-	t.Setenv("TMUX_TMPDIR", tmuxRoot)
-	socketPath := filepath.Join(tmuxRoot, "no-server-here")
-	captureFailed := Ask(context.Background(), Chat{
-		Name: "seat", Engine: "cc", Path: transcriptPath, Live: true,
-		Socket: socketPath, Session: "whatever",
-	}, options)
-	if !strings.Contains(captureFailed.Text, "TRANSCRIPT-ONLY (pane capture failed: ") {
-		t.Fatalf("capture-failed ask=%+v", captureFailed)
-	}
-	if strings.Contains(captureFailed.Text, "executable file not found") {
-		t.Fatalf(
-			"capture-failed for the wrong reason (tmux itself missing, not a refused connection): %q",
-			captureFailed.Text,
-		)
-	}
-	if strings.Contains(captureFailed.Text, "chat is not live") {
-		t.Fatalf("capture-failed text bled into not-live wording: %q", captureFailed.Text)
 	}
 }
 

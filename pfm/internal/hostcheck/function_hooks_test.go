@@ -148,7 +148,13 @@ func TestFunctionHookModulesDirectoryMarketplaceReadsItsFolderNotTheSnapshot(t *
 	writeFile(t, accountStateFile(env), `{}`)
 	installDirectoryPlugin(t, env.Accounts[0].ConfigDir, "buddy", "professor", true, true)
 	row := onlyRow(t, detect(t, "function-hook-modules", env))
-	assertContains(t, "problem", row.Problem, hookModulesFlag+" is unset", "buddy@professor")
+	if got, want := strings.ReplaceAll(
+		row.Problem,
+		env.Home,
+		"{home}",
+	), "cachedGrowthBookFeatures.tengu_plugin_hooks_modules is unset while function-hook plugins buddy@professor are installed: Claude Code loads none of their modules until a GrowthBook fetch sets it, which never succeeds behind a gateway, and CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 does not override an unset flag"; got != want {
+		t.Fatalf("problem = %q, want %q", got, want)
+	}
 }
 
 func TestFunctionHookModulesDirectoryMarketplaceFolderWithoutModulesIsClean(t *testing.T) {
@@ -169,7 +175,13 @@ func TestFunctionHookModulesGithubMarketplaceStillReadsInstallPath(t *testing.T)
 	writeFile(t, filepath.Join(dir, "plugins", "known_marketplaces.json"),
 		`{"professor":{"source":{"source":"github","repo":"owner/professor"}}}`)
 	row := onlyRow(t, detect(t, "function-hook-modules", env))
-	assertContains(t, "problem", row.Problem, hookModulesFlag+" is unset", "buddy@professor")
+	if got, want := strings.ReplaceAll(
+		row.Problem,
+		env.Home,
+		"{home}",
+	), "cachedGrowthBookFeatures.tengu_plugin_hooks_modules is unset while function-hook plugins buddy@professor are installed: Claude Code loads none of their modules until a GrowthBook fetch sets it, which never succeeds behind a gateway, and CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 does not override an unset flag"; got != want {
+		t.Fatalf("problem = %q, want %q", got, want)
+	}
 }
 
 func TestFunctionHookModulesUnresolvableDirectoryFolderIsReportedNotClean(t *testing.T) {

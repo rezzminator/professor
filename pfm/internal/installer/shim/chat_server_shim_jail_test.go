@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -90,7 +91,7 @@ func TestShimStopsWhenPfmCouldNotCreateTheServer(t *testing.T) {
 	if !failed {
 		t.Fatal("_cx_server succeeded on a pfm that failed")
 	}
-	if !strings.Contains(stderr, "create chat server: boom") {
+	if stderr != "pfm internal chat-server: create chat server: boom\n" {
 		t.Fatalf("the shim swallowed pfm's reason: %q", stderr)
 	}
 }
@@ -102,13 +103,17 @@ func TestCxBornNativelyAttachesNothing(t *testing.T) {
 	pfmCalls, tmuxCalls, stderr, failed := runCxServer(
 		t, "exit 3\n", "cx 'fix the bug'",
 	)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if failed {
 		t.Fatalf("cx failed on a native birth: %s", stderr)
 	}
-	if !strings.HasPrefix(pfmCalls, "internal chat-server cx-") || !strings.HasSuffix(pfmCalls, " fix the bug\n") {
-		t.Fatalf("pfm calls = %q, want the chat-server door handed the typed prompt", pfmCalls)
-	}
-	if tmuxCalls != "" {
-		t.Fatalf("cx attached after a native birth:\n%s", tmuxCalls)
+	if got, want := regexp.MustCompile(`cx-\S+|"\S*/\.local/bin/pfm"`).
+		ReplaceAllString(strings.ReplaceAll(pfmCalls, cwd, "{cwd}"), "{arg}")+
+		"--- tmux\n"+tmuxCalls,
+		"internal chat-server {arg} {cwd} {arg} internal codex-launch fix\\ the\\ bug fix the bug\n--- tmux\n"; got != want {
+		t.Fatalf("pfm and tmux calls = %q, want %q", got, want)
 	}
 }

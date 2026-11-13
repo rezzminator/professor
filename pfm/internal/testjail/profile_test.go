@@ -34,8 +34,9 @@ const (
 	// profileLabel is this package's process-directory label.
 	profileLabel = "internal_testjail"
 	// offLine is what a red run prints when profiling is off for want of a
-	// directory to write.
-	offLine = "testjail: profile off — PFM_TEST_ARTIFACT_DIR unset; no diagnosis bundle for this red run"
+	// directory to write: no PFM_TEST_ARTIFACT_DIR and no module to name its default run.
+	offLine = "testjail: profile off — unit run: no go.mod above the launch directory names the project; " +
+		"no diagnosis bundle for this red run"
 )
 
 // TestProfileChild is the body the profiler tests run in a re-exec'd copy of
@@ -142,6 +143,7 @@ func (c *child) removeJail() {
 type childResult struct {
 	stdout, stderr string
 	code           int
+	pid            int
 }
 
 // run starts the child and waits for it to end.
@@ -149,7 +151,7 @@ func (c *child) run(t *testing.T) childResult {
 	t.Helper()
 	cmd, stdout, stderr := c.command(t)
 	err := cmd.Run()
-	res := childResult{stdout: stdout.String(), stderr: stderr.String()}
+	res := childResult{stdout: stdout.String(), stderr: stderr.String(), pid: cmd.ProcessState.Pid()}
 	var exit *exec.ExitError
 	switch {
 	case err == nil:
@@ -222,83 +224,11 @@ func TestProfileCPUStartFailureIsInTheSummary(t *testing.T) {
 	p.mu.Lock()
 	summary := p.summary(0, "exit")
 	p.mu.Unlock()
-	if got, _ := summary["cpu_profile_error"].(string); !strings.Contains(got, "gone") {
-		t.Fatalf("cpu_profile_error = %q, want the failed create named", got)
-	}
-}
-
-func TestPackageLabel(t *testing.T) {
-	mod := modulePrefix()
-	cases := []struct{ name, wd, root, importPath, arg0, want string }{
-		{
-			"a package directory under the module root",
-			"/work/pfm/internal/pricing",
-			"/work/pfm",
-			"",
-			"x.test",
-			"internal_pricing",
-		},
-		{"a nested package directory", "/work/pfm/cmd/pfm", "/work/pfm", "", "x.test", "cmd_pfm"},
-		{"the module root falls to the import path", "/work/pfm", "/work/pfm", mod + "e2e.test", "x.test", "e2e"},
-		{
-			"no module falls to the import path",
-			"/tmp/x",
-			"",
-			mod + "internal/pricing.test",
-			"x.test",
-			"internal_pricing",
-		},
-		{
-			"a foreign import path falls to the binary name",
-			"/tmp/x",
-			"",
-			"example.com/other.test",
-			"/tmp/go-build/pricing.test",
-			"pricing",
-		},
-		{"no build info falls to the binary name", "/tmp/x", "", "", "/tmp/go-build/pricing.test", "pricing"},
-		{
-			"no working directory falls to the import path",
-			"",
-			"",
-			mod + "internal/pfmdb.test",
-			"x.test",
-			"internal_pfmdb",
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := packageLabel(tc.wd, tc.root, tc.importPath, tc.arg0); got != tc.want {
-				t.Fatalf(
-					"packageLabel(%q, %q, %q, %q) = %q, want %q",
-					tc.wd,
-					tc.root,
-					tc.importPath,
-					tc.arg0,
-					got,
-					tc.want,
-				)
-			}
-		})
-	}
-}
-
-func TestModuleRootOfFindsTheNearestGoMod(t *testing.T) {
-	root := t.TempDir()
-	nested := filepath.Join(root, "internal", "pricing")
-	if err := os.MkdirAll(nested, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if got := moduleRootOf(nested); got != "" {
-		t.Fatalf("moduleRootOf before any go.mod exists = %q, want none", got)
-	}
-	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/m\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	for _, dir := range []string{root, nested} {
-		if got := moduleRootOf(dir); got != root {
-			t.Fatalf("moduleRootOf(%s) = %q, want %q", dir, got, root)
-		}
+	if got, want := rooted(
+		t,
+		fmt.Sprint(summary["cpu_profile_error"]),
+	), "create {root}/001/gone/cpu.pprof: open {root}/001/gone/cpu.pprof: no such file or directory"; got != want {
+		t.Fatalf("cpu_profile_error = %q, want %q", got, want)
 	}
 }
 

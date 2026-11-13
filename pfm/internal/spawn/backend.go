@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -213,4 +215,18 @@ func Place(
 	}
 	// No Herdr server runs: tmux is legal.
 	return BackendChoice{Backend: BackendTmux}, nil
+}
+
+// lookPath resolves the request's non-Claude native engine binary to an absolute
+// path through its Runner; a nil Runner is the real one.
+func (request HerdrRequest) lookPath() (string, error) {
+	runner := request.Runner
+	if runner == nil {
+		runner = deps.RealRunner{}
+	}
+	binary, err := runner.LookPath(request.Run.Binary)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Abs(binary)
 }

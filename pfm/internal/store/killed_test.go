@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 
@@ -74,12 +73,10 @@ func (row killedRowFixture) Scan(dest ...any) error {
 
 func TestDatabaseEngineEdgeRejectsUnknownWithAcceptedSet(t *testing.T) {
 	_, err := scanKilled(killedRowFixture{id: "row-7", engine: "bogus"})
-	if err == nil ||
-		!strings.Contains(
-			err.Error(),
-			`pfm.db row row-7: unknown engine "bogus" (want cc/claude, cx/codex, ox/opencode)`,
-		) {
-		t.Fatalf("scanKilled(bogus) error = %v", err)
+	if got, want := fmt.Sprint(
+		err,
+	), "pfm.db row row-7: unknown engine \"bogus\" (want cc/claude, cx/codex, ox/opencode)"; got != want {
+		t.Fatalf("scanKilled(bogus) error = %q, want %q", got, want)
 	}
 }
 

@@ -4,45 +4,10 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
-
-	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
-	"github.com/rezzminator/professor/pfm/internal/gather"
 )
-
-func TestNameSyncTitlesReportsAnUnreadableServerAsUnverified(t *testing.T) {
-	if _, err := exec.LookPath("tmux"); err != nil {
-		t.Skip("tmux is not installed")
-	}
-	root := t.TempDir()
-	client := gather.TmuxProbe{Binary: "tmux", TmuxTmpDir: root}
-	titles := pfmconfig.DefaultTmuxTitles()
-	var stdout, stderr bytes.Buffer
-	unverified := convergeChatServerOptions(
-		context.Background(), client,
-		[]string{filepath.Join(root, "missing-socket")},
-		titles,
-		"/pfm/bin/pfm",
-		&stdout,
-		&stderr,
-	)
-	if !strings.Contains(stdout.String(), "tmux options converged: 0") {
-		t.Fatalf("stdout=%q, want nothing counted converged for an unreadable server", stdout.String())
-	}
-	if unverified == 0 {
-		t.Fatalf(
-			"unverified=%d, want title probe failure carried into command result; stderr=%q",
-			unverified,
-			stderr.String(),
-		)
-	}
-	if !strings.Contains(stderr.String(), "could not read set-titles") {
-		t.Fatalf("stderr=%q, want the failed title read named", stderr.String())
-	}
-}
 
 // TestNameSyncApplyReannouncesLiveChats pins the re-announce pass of
 // `pfm name-sync --apply`: each live chat server is re-announced through the

@@ -13,7 +13,7 @@ func TestPaneRendersWhatCallMatches(t *testing.T) {
 	screen := &pane{glyph: "❯"}
 	screen.say("> hello")
 	idle := screen.render()
-	if pfmcall.IsBusy(idle) || pfmcall.SelectorLine(idle) != "" || !strings.Contains(idle, "\x1b[2J\x1b[H") {
+	if pfmcall.IsBusy(idle) || pfmcall.SelectorLine(idle) != "" || idle != "\x1b[2J\x1b[H> hello\x0d\n\x0d\n❯ \x0d\n" {
 		t.Fatalf("idle frame reads busy or as a menu:\n%s", idle)
 	}
 	screen.footer = claudeBusyLine(3*time.Second, Tokens{Input: 10, Output: 2})
@@ -24,12 +24,12 @@ func TestPaneRendersWhatCallMatches(t *testing.T) {
 	screen.menu = &Step{Type: StepMenu, Options: []string{"Yes", "No"}}
 	screen.selected = 2
 	frame := screen.render()
-	if selector := pfmcall.SelectorLine(frame); !strings.Contains(selector, "2. No") {
+	if selector := pfmcall.SelectorLine(frame); selector != "❯ 2. No" {
 		t.Fatalf("selector = %q for frame:\n%s", selector, frame)
 	}
 	screen.menu = nil
 	screen.queued = []string{"later"}
-	if frame := screen.render(); !strings.Contains(frame, "Press up to edit queued messages") {
+	if frame := screen.render(); frame != "\x1b[2J\x1b[H> hello\x0d\n\x0d\n❯ \x0d\n  Press up to edit queued messages\x0d\n" {
 		t.Fatalf("queued hint (inject/guards.go:26 queueProofPattern) missing:\n%s", frame)
 	}
 	screen.queued = nil
@@ -67,15 +67,15 @@ func codexComposerFrame(frame string) bool {
 func TestPaneCodexPlaceholderStyling(t *testing.T) {
 	screen := &pane{glyph: "›", placeholder: "Ask Codex to do anything", status: "model · 100%"}
 	idle := screen.render()
-	if !strings.Contains(idle, "› \x1b[2mAsk Codex to do anything\x1b[0m") ||
+	if idle != "\x1b[2J\x1b[H\x0d\n› \x1b[2mAsk Codex to do anything\x1b[0m\x0d\nmodel · 100%\x0d\n" ||
 		!pfmcall.ComposerIsDimPlaceholder(idle) || !codexComposerFrame(idle) ||
 		!codexComposerFrame(ansiEscape.ReplaceAllString(idle, "")) {
 		t.Fatalf("idle Codex frame lacks dim placeholder or spawn proof: %q", idle)
 	}
 	screen.draft.apply(keyEvent{kind: keyRune, r: 'x'})
 	typed := screen.render()
-	if !strings.Contains(typed, "› x\r\n") || pfmcall.ComposerIsDimPlaceholder(typed) ||
-		strings.Contains(typed, "\x1b[2mx") {
+	if typed != "\x1b[2J\x1b[H\x0d\n› x\x0d\nmodel · 100%\x0d\n" || pfmcall.ComposerIsDimPlaceholder(typed) ||
+		typed != "\x1b[2J\x1b[H\x0d\n› x\x0d\nmodel · 100%\x0d\n" {
 		t.Fatalf("typed Codex draft has placeholder styling: %q", typed)
 	}
 	for _, glyph := range []string{"❯", ">"} {

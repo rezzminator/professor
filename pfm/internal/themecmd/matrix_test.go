@@ -29,7 +29,13 @@ func TestStatusColoursVerdictsOnlyOnAColourTerminal(t *testing.T) {
 				t.Errorf("color=%v: verdict %s not named in %q", color, verdict, stdout.String())
 			}
 		}
-		if !color && strings.Contains(stdout.String(), "\x1b[") {
+		if !color && stdout.String() != `pfm theme · custom:tokyo-night (Tokyo Night · neon pink) · dark · gen 7
+  claude  IN-SYNC  g7    /p/IN-SYNC  d-IN-SYNC
+  tmux    PENDING  g7    /p/PENDING  d-PENDING
+  herdr   ABSENT   g7    /p/ABSENT  d-ABSENT
+  vscode  DRIFT    g7    /p/DRIFT  d-DRIFT
+OUT OF SYNC · vscode DRIFT
+` {
 			t.Errorf("an escape reached a plain stream: %q", stdout.String())
 		}
 	}
@@ -80,18 +86,12 @@ func TestStatusEndsOnTheMeasuredLastFlip(t *testing.T) {
 	fake := fakeThemesync{on: true, report: report}
 	var stdout, stderr bytes.Buffer
 	RunVerb(context.Background(), []string{"status"}, fake.deps(false), &stdout, &stderr)
-	want := "last flip 2026-10-16T03:00:00Z /h/.claude/settings.json: tmux +0.25 s · herdr +0.50 s · " +
-		"vscode contract +0.75 s, ack +1.50 s\n"
-	if !strings.HasSuffix(stdout.String(), want) {
-		t.Fatalf("status does not end on %q:\n%s", want, stdout.String())
-	}
+	measured := stdout.String()
 	report.LastFlip.Ack = nil
 	fake = fakeThemesync{on: true, report: report}
 	stdout.Reset()
 	RunVerb(context.Background(), []string{"status"}, fake.deps(false), &stdout, &stderr)
-	if strings.Contains(stdout.String(), "ack") {
-		t.Errorf("a flip without an ack names one:\n%s", stdout.String())
-	}
+	golden(t, "status_last_flip.txt", measured+"--- without an ack\n"+stdout.String())
 }
 
 func TestFlipLineDistinguishesUnmeasuredFromZero(t *testing.T) {
@@ -103,9 +103,9 @@ func TestFlipLineDistinguishesUnmeasuredFromZero(t *testing.T) {
 		if err := json.Unmarshal([]byte(raw), &flip); err != nil {
 			t.Fatal(err)
 		}
-		got := flipLine(flip)
-		want := "tmux unmeasured · herdr +0.00 s · vscode contract +0.25 s"
-		if !strings.Contains(got, want) {
+		if got, want := flipLine(
+			flip,
+		), "last flip 2026-10-16T03:00:00Z settings.json: tmux unmeasured · herdr +0.00 s · vscode contract +0.25 s"; got != want {
 			t.Errorf("flipLine = %q, want %q", got, want)
 		}
 	}

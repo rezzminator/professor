@@ -667,7 +667,7 @@ func TestStdioProxyDropsUndeliverableNotification(t *testing.T) {
 func TestStdioProxyCarriesCallerIdentityEndToEnd(t *testing.T) {
 	t.Parallel()
 	row := compose.Row{
-		SessionName: "cc-seat", ID: "session-id", CWD: "/work/proxy", Project: "proxy",
+		SessionName: "cc-seat", ID: "session-id", CWD: testjail.Place("/work/proxy"), Project: "proxy",
 		Name: "Proxy Claude", Kind: compose.LiveClaude, Socket: "cc-seat", PaneID: "%7",
 	}
 	var calls [][]string
@@ -700,7 +700,9 @@ func TestStdioProxyCarriesCallerIdentityEndToEnd(t *testing.T) {
 	}
 	harness.write(t, proxyTestToolCall(4, "new", `{"name":"child"}`))
 	_ = proxyTestStructured(t, harness.read(t))
-	wantCalls := [][]string{{"chat", "new", "--name", "child", "--engine", "cc", "--cwd", "/work/proxy"}}
+	wantCalls := [][]string{
+		{"chat", "new", "--name", "child", "--engine", "cc", "--cwd", testjail.Place("/work/proxy")},
+	}
 	if !reflect.DeepEqual(calls, wantCalls) {
 		t.Fatalf("proxied new calls = %q, want %q", calls, wantCalls)
 	}
@@ -833,9 +835,12 @@ func TestStdioProxyLeavesUnresolvedIdentityForDaemonToRefuse(t *testing.T) {
 	harness.write(t, `{"jsonrpc":"2.0","method":"notifications/initialized"}`)
 	harness.write(t, proxyTestToolCall(2, "whoami", `{}`))
 	whoami := proxyTestStructured(t, harness.read(t))
-	message, _ := whoami["message"].(string)
-	if whoami["status"] != "not_found" || !strings.Contains(message, "not inside a pfm chat") {
-		t.Fatalf("unresolved proxy identity = %+v, want the daemon's named refusal", whoami)
+	if got, want := fmt.Sprint(
+		whoami["status"],
+		": ",
+		whoami["message"],
+	), "not_found: ERROR: this process is not inside a pfm chat: no live tmux pane or Herdr pane holds it"; got != want {
+		t.Fatalf("unresolved proxy identity = %q, want %q", got, want)
 	}
 }
 

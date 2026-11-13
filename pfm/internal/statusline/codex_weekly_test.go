@@ -387,7 +387,7 @@ func TestClaudeCodexWeeklyLabelFitsShortSiblings(t *testing.T) {
 					weeklyCache(t, runtime, test.body, test.age)
 				}
 				line := weeklyRowAt(runtime, green+"界"+reset, "tiny")
-				if got := ansi.Strip(line); !strings.HasSuffix(got, test.want) {
+				if got := ansi.Strip(line); got != test.want {
 					t.Fatalf("short siblings must not clip weekly text when it fits: got %q, want %q", got, test.want)
 				}
 			})

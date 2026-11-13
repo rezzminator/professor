@@ -10,11 +10,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
-	"runtime/debug"
 	"runtime/pprof"
 	"runtime/trace"
 	"strconv"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -45,13 +43,16 @@ type profiler struct {
 	cpu      *os.File
 	cpuErr   error
 	helperOf string
+	run      string // the default run directory (profile_run.go) this process records into; "" under the gate
+	tests    int    // top-level tests the binary holds (testCount)
+	frOff    error  // set: no flight recorder runs in this process, for this reason
 }
 
 // startProfile begins recording for this process. It returns a nil profiler
 // when profiling is off or has nowhere to write; the second value is then the
 // reason that deserves a line on a red run, and "" when the off was asked for
 // (PFM_TEST_PROFILE=0) or is not a run at all (-test.list).
-func startProfile() (*profiler, string) {
+func startProfile(tests int) (*profiler, string) {
 	if !flag.Parsed() {
 		flag.Parse()
 	}
@@ -61,17 +62,23 @@ func startProfile() (*profiler, string) {
 	if f := flag.Lookup("test.list"); f != nil && f.Value.String() != "" {
 		return nil, ""
 	}
-	root, _ := paths.TestArtifactDir()
-	if root == "" {
-		return nil, paths.EnvTestArtifactDir + " unset"
-	}
 	wd, moduleDir := moduleLocation()
+	root, _ := paths.TestArtifactDir()
+	run, err := defaultUnitRun(root, moduleDir) // profile_run.go: a plain go test's own run directory
+	if err != nil {
+		return nil, err.Error()
+	} else if root == "" {
+		root = run
+	}
 	pkg := packageLabel(wd, moduleDir, buildInfoPath(), os.Args[0])
 	dir := filepath.Join(root, fmt.Sprintf("%s.%d", pkg, os.Getpid()))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Sprintf("mkdir %s: %v", dir, err)
 	}
-	p := &profiler{dir: dir, pkg: pkg, root: moduleDir, start: time.Now(), bundles: []string{}}
+	p := &profiler{dir: dir, pkg: pkg, root: moduleDir, start: time.Now(), bundles: []string{}, run: run, tests: tests}
+	if inUnitRun(root) {
+		p.frOff = errRecorderGateOnly
+	}
 	p.psi0, p.psiErr = readPSI(psiDir)
 	if paths.TestProfileMode() == "cpu" {
 		p.startCPU()
@@ -202,7 +209,7 @@ func (p *profiler) finish(code int) {
 		<-p.watched
 	}
 	p.stopCPU()
-	event := "exit"
+	event := profileEventExit
 	switch {
 	case p.helperOf != "":
 		event = "helper-exit"
@@ -226,6 +233,10 @@ var flightRecorderConfig = trace.FlightRecorderConfig{MinAge: 10 * time.Second, 
 // the reason in p.frErr. Callers hold p.mu: p.fr is read and replaced only
 // under it, so a bundle never writes from a recorder mid-swap.
 func (p *profiler) startRecorder() {
+	if p.frOff != nil {
+		p.fr, p.frErr = nil, p.frOff
+		return
+	}
 	fr := trace.NewFlightRecorder(flightRecorderConfig)
 	if err := fr.Start(); err != nil {
 		p.fr, p.frErr = nil, err
@@ -364,6 +375,11 @@ func (p *profiler) writeSummary(code int, event string) {
 	if err := os.WriteFile(path, append(data, '\n'), 0o644); err != nil {
 		warnSetup("profile summary %s: %v", path, err)
 	}
+	if p.run != "" {
+		if err := recordUnitRun(p.run, unitRunRow(filepath.Base(p.dir), s)); err != nil {
+			warnSetup("profile run index: %v", err)
+		}
+	}
 }
 
 // summary reads this process's counters now. Callers hold p.mu.
@@ -380,6 +396,7 @@ func (p *profiler) summary(code int, event string) map[string]any {
 		"bundles":    p.bundles,
 		"gomaxprocs": runtime.GOMAXPROCS(0),
 		"num_cpu":    runtime.NumCPU(),
+		"tests":      p.tests,
 	}
 	if p.watch != nil {
 		s["watchdog_s"] = p.watchS
@@ -430,59 +447,3 @@ func timevalSeconds(tv syscall.Timeval) float64 {
 }
 
 func round3(v float64) float64 { return float64(int64(v*1000+0.5)) / 1000 }
-
-// moduleLocation is the working directory and the directory of the nearest
-// go.mod at or above it; each is "" when unknown (a go test binary runs in its
-// package directory, so inside this module both are known).
-func moduleLocation() (wd, root string) {
-	wd, err := os.Getwd()
-	if err != nil {
-		return "", ""
-	}
-	return wd, moduleRootOf(wd)
-}
-
-// moduleRootOf is the nearest directory at or above dir holding a go.mod, or
-// "" when there is none.
-func moduleRootOf(dir string) string {
-	for ; ; dir = filepath.Dir(dir) {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir
-		}
-		if filepath.Dir(dir) == dir {
-			return ""
-		}
-	}
-}
-
-// buildInfoPath is the import path the toolchain recorded in this binary
-// ("pkg.test" for a test binary), "" when it recorded none.
-func buildInfoPath() string {
-	if info, ok := debug.ReadBuildInfo(); ok {
-		return info.Path
-	}
-	return ""
-}
-
-// packageLabel names this process by its package directory relative to the
-// module root, slashes flattened: internal/pricing → internal_pricing. With no
-// module above the working directory, or the working directory at the module
-// root, the binary's import path stands in with the ".test" suffix and this
-// module's path dropped; a path outside this module yields the binary's own
-// name minus ".test".
-func packageLabel(wd, root, importPath, arg0 string) string {
-	if root != "" {
-		if rel, err := filepath.Rel(root, wd); err == nil && rel != "." {
-			return strings.ReplaceAll(rel, string(filepath.Separator), "_")
-		}
-	}
-	prefix := modulePrefix()
-	if rest, ok := strings.CutPrefix(
-		strings.TrimSuffix(importPath, ".test"),
-		prefix,
-	); ok && prefix != "" &&
-		rest != "" {
-		return strings.ReplaceAll(rest, "/", "_")
-	}
-	return strings.TrimSuffix(filepath.Base(arg0), ".test")
-}

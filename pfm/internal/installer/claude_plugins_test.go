@@ -184,14 +184,15 @@ func TestClaudePluginStepRefusesTheStoreOnARosterHost(t *testing.T) {
 	inst.options.PrimaryConfigDir = ""
 	store := inst.options.ConfigDir
 	err := inst.ensureClaudePlugins(context.Background())
-	if err == nil || !strings.Contains(err.Error(), store+" resolves to the Claude store") {
-		t.Fatalf("err=%v, want the store refusal\n%s", err, out.String())
+	refusal := "claude plugins in " + store + ": " + store + " resolves to the Claude store — run pfm doctor"
+	if err == nil || err.Error() != refusal {
+		t.Fatalf("err=%v, want %q\n%s", err, refusal, out.String())
 	}
 	if len(runner.calls) != 0 {
 		t.Fatalf("ran %v with the store as config dir\n%s", runner.calls, out.String())
 	}
-	if !strings.Contains(out.String(), "  FAIL    claude plugins in "+store+": ") {
-		t.Fatalf("no FAIL line for the refusal:\n%s", out.String())
+	if want := "  FAIL    " + refusal + "\n"; out.String() != want {
+		t.Fatalf("output = %q, want %q", out.String(), want)
 	}
 }
 
@@ -246,10 +247,16 @@ func TestClaudePluginCommandDropsTheLoginDefaultSentinel(t *testing.T) {
 		t.Fatalf("no plugin command ran\n%s", out.String())
 	}
 	for index, environment := range runner.envs {
+		values := map[string]string{}
 		for _, entry := range environment {
-			if strings.HasPrefix(entry, claudelaunch.ConfigDirDefaultEnv+"=") {
-				t.Fatalf("command %v carries %s", runner.calls[index], entry)
-			}
+			key, value, _ := strings.Cut(entry, "=")
+			values[key] = value
+		}
+		if got, carried := values[claudelaunch.ConfigDirDefaultEnv]; carried ||
+			values["CLAUDE_CONFIG_DIR"] != runner.calls[index].configDir {
+			t.Fatalf("command %v: %s carried=%v (%q), CLAUDE_CONFIG_DIR=%q, want no sentinel and %q",
+				runner.calls[index], claudelaunch.ConfigDirDefaultEnv, carried, got,
+				values["CLAUDE_CONFIG_DIR"], runner.calls[index].configDir)
 		}
 	}
 }
@@ -651,11 +658,13 @@ func TestEnsureClaudePluginsDryRunSaysWhatWouldRun(t *testing.T) {
 	if len(runner.calls) != 0 {
 		t.Fatalf("dry run executed %v", runner.calls)
 	}
-	want := "change  run CLAUDE_CONFIG_DIR=" + first + " " + binary +
-		" plugin marketplace add rezzminator/professor && " + binary +
-		" plugin install forward-compaction@professor -y"
-	if !strings.Contains(out.String(), want) {
-		t.Fatalf("output missing %q:\n%s", want, out.String())
+	var want string
+	for _, plugin := range testPlugins {
+		want += "  change  run CLAUDE_CONFIG_DIR=" + first + " " + binary + " plugin marketplace add " + plugin.Source +
+			" && " + binary + " plugin install " + plugin.ID + " -y\n"
+	}
+	if out.String() != want {
+		t.Fatalf("output =\n%s\nwant\n%s", out.String(), want)
 	}
 }
 
@@ -672,10 +681,13 @@ func TestEnsureClaudePluginsUnresolvedBinaryIsAVisibleSkip(t *testing.T) {
 	if len(runner.calls) != 0 {
 		t.Fatalf("unresolved binary still ran %v", runner.calls)
 	}
-	want := "skip    claude plugin cache-live-control@professor in " + first +
-		": real claude binary not resolved:"
-	if !strings.Contains(out.String(), want) || !strings.Contains(out.String(), "no-such-claude") {
-		t.Fatalf("output missing %q naming the binary:\n%s", want, out.String())
+	var want string
+	for _, plugin := range testPlugins {
+		want += "  skip    claude plugin " + plugin.ID + " in " + first +
+			": real claude binary not resolved: configured Claude binary not found: no-such-claude\n"
+	}
+	if out.String() != want {
+		t.Fatalf("output =\n%s\nwant\n%s", out.String(), want)
 	}
 }
 
@@ -697,23 +709,15 @@ func TestInstallRunsTheClaudePluginStep(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Run: %v\n%s", err, out.String())
 	}
-	installs := map[string]int{}
-	for _, call := range runner.calls {
-		if strings.HasPrefix(call.argv, "plugin install ") {
-			installs[call.configDir]++
-		}
-	}
 	// A host with no roster has only the store as a config dir: the step runs
 	// no claude command there.
-	if len(installs) != 0 || len(runner.calls) != 0 ||
-		!strings.Contains(out.String(), "  skip    claude plugins: not run — no account roster") {
-		t.Fatalf(
-			"plugin installs per dir=%v calls=%v, want the named skip and no command\n%s",
-			installs,
-			runner.calls,
-			out.String(),
-		)
+	if len(runner.calls) != 0 {
+		t.Fatalf("claude calls = %v, want none\n%s", runner.calls, out.String())
 	}
+	wantOutputLines(t, out.String(), []string{
+		"  skip    claude plugins: not run — no account roster, so the only config dir is the Claude store " + store +
+			", where a claude process writes account identity; add an account to pfm.config.json and rerun pfm install --yes",
+	}, "claude plugin")
 }
 
 func TestClaudePluginDoorLeavesSettingsEnvAlone(t *testing.T) {

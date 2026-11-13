@@ -3,9 +3,11 @@
 # every path spelling through the one resolver (the outside, two-file, missing and deleted rules), the
 # derivation of each path's affected tests (a Go test file's Test and Fuzz funcs in -run or its
 # ::selector byte for byte, TestMain excluded, a test file with none or a non-test .go file running its
-# whole package, the e2e tag, the jail tag on every other package, shell, TAP, unittest and
+# whole package, the e2e tag, the jail tag on a jail file and the untagged unit tier on any other, a
+# whole package's untagged run then its jail files' funcs under the jail tag, shell, TAP, unittest and
 # script-style Python runners, under pfm/ as elsewhere, a script bringing its sibling test, a file bringing none named on its UNCOVERED line), the
-# one fence call per run (PFM_FENCE_NET=private, the caller's pid watched), the
+# one fence call per run (PFM_FENCE_NET=private, the caller's pid watched), the Go tests' profile root
+# (PFM_TEST_ARTIFACT_DIR under the timing base, one PROFILE line, the newest 20 kept), the
 # TEST line verdicts (a red runner, a run that proved nothing, an unlisted skip, a skipped TAP or
 # unittest test), every check after one fails (fmt, typecheck's scope, lint-new's scope, arch,
 # launch-literals, rumdl, leak and the templates unit's checks), the install gap, the host's verdict
@@ -53,6 +55,17 @@ printf 'package a\n\nfunc TestMain(m *testing.M) {}\n' >"$R/pfm/internal/a/helpe
 printf 'package a\n\nfunc TestGone(t *testing.T) {}\n' >"$R/pfm/internal/a/gone_test.go"
 printf 'package a\n' >"$R/pfm/internal/a/a.go"
 printf 'package b\n' >"$R/pfm/internal/b/b.go"
+# Package j holds every tier: an untagged unit file, one negating jail, a jail file, a jail-tagged file
+# not named one, a darwin-only jail file; package k holds jail files alone.
+mkdir -p "$R/pfm/internal/j" "$R/pfm/internal/k"
+printf 'package j\n' >"$R/pfm/internal/j/j.go"
+printf 'package j\n\nfunc TestU(t *testing.T) {}\n' >"$R/pfm/internal/j/u_test.go"
+printf '//go:build !jail && !e2e && !journey\n\npackage j\n\nfunc TestNotJail(t *testing.T) {}\n' >"$R/pfm/internal/j/n_test.go"
+printf '//go:build jail\n\npackage j\n\nfunc TestJ(t *testing.T) {}\n' >"$R/pfm/internal/j/x_jail_test.go"
+printf '//go:build jail || e2e || journey\n\npackage j\n\nfunc TestM(t *testing.T) {}\nfunc FuzzM(f *testing.F) {}\n' >"$R/pfm/internal/j/m_test.go"
+printf '//go:build jail && darwin\n\npackage j\n\nfunc TestD(t *testing.T) {}\n' >"$R/pfm/internal/j/d_jail_darwin_test.go"
+printf 'package k\n' >"$R/pfm/internal/k/k.go"
+printf '//go:build jail\n\npackage k\n\nfunc TestK(t *testing.T) {}\n' >"$R/pfm/internal/k/k_jail_test.go"
 printf 'package e2e\n\nfunc TestE2E(t *testing.T) {}\n' >"$R/pfm/e2e/x_test.go"
 printf 'package journey\n\nfunc TestTree(t *testing.T) {}\n' >"$R/pfm/journey/tree_test.go"
 printf 'module example.test/pfm\n\ngo 1.22\n' >"$R/pfm/go.mod"
@@ -150,8 +163,8 @@ no_dev() { if [ "$(dev_calls)" = 0 ]; then ok "$1"; else bad "$1" "dev.sh was ca
 checks() { sed -n 's/^CHECK \([A-Z]*\) \([a-z-]*\).*/\2/p' <<<"$OUT" | tr '\n' ' '; }
 
 U='usage: test.sh <path>[::<selector>]... | test.sh --full'
-GO_A=(go -C pfm test -v -count=1 -timeout 10m -tags jail ./internal/a/ -run '^(TestOne|TestTwo|FuzzSeed)$')
-GO_A_PKG=(go -C pfm test -v -count=1 -timeout 10m -tags jail ./internal/a/)
+GO_A=(go -C pfm test -v -count=1 -timeout 10m ./internal/a/ -run '^(TestOne|TestTwo|FuzzSeed)$')
+GO_A_PKG=(go -C pfm test -v -count=1 -timeout 10m ./internal/a/)
 GO_E=(go -C pfm test -v -count=1 -timeout 10m -tags e2e ./e2e/ -run '^(TestE2E)$')
 A=pfm/internal/a/a_test.go
 docker_off
@@ -220,18 +233,18 @@ out_has "the journey selector refusal names the file" "test.sh: pfm/journey/tree
 # shellcheck disable=SC2016 # the $( ) is the point: a selector no shell may evaluate
 run "$R" "$A"'::TestOne/sub case$(touch PWNED)|x$'
 # shellcheck disable=SC2016 # literal, as above
-rec_has "a selector passes byte for byte into -run, never through a shell" go -C pfm test -v -count=1 -timeout 10m -tags jail ./internal/a/ -run 'TestOne/sub case$(touch PWNED)|x$'
+rec_has "a selector passes byte for byte into -run, never through a shell" go -C pfm test -v -count=1 -timeout 10m ./internal/a/ -run 'TestOne/sub case$(touch PWNED)|x$'
 if [ -e "$R/PWNED" ] || [ -e "$R/pfm/PWNED" ]; then bad "a selector is never evaluated by a shell" "PWNED exists"; else ok "a selector is never evaluated by a shell"; fi
 run "$R" "$A::Test[AB]"
 rec_has "a glob character in the selector is not a pattern" "${GO_A_PKG[@]}" -run 'Test[AB]'
 run "$R" pfm/internal/a/fuzz_test.go
-rec_has "a file with only Fuzz funcs runs its Fuzz func" go -C pfm test -v -count=1 -timeout 10m -tags jail ./internal/a/ -run '^(FuzzOnly)$'
+rec_has "a file with only Fuzz funcs runs its Fuzz func" go -C pfm test -v -count=1 -timeout 10m ./internal/a/ -run '^(FuzzOnly)$'
 # The affected go test flags are the fence config's: -count and -timeout always, -p and -parallel only when set.
 export PFM_FENCE_TEST_COUNT=3 PFM_FENCE_AFFECTED_TIMEOUT=7m PFM_FENCE_AFFECTED_P=2 PFM_FENCE_AFFECTED_PARALLEL=8
 run "$R" "$A"
 unset PFM_FENCE_TEST_COUNT PFM_FENCE_AFFECTED_TIMEOUT PFM_FENCE_AFFECTED_P PFM_FENCE_AFFECTED_PARALLEL
 rec_has "the fence config's count, timeout, -p and -parallel reach an affected go test" \
-  go -C pfm test -v -count=3 -timeout 7m -p 2 -parallel 8 -tags jail ./internal/a/ -run '^(TestOne|TestTwo|FuzzSeed)$'
+  go -C pfm test -v -count=3 -timeout 7m -p 2 -parallel 8 ./internal/a/ -run '^(TestOne|TestTwo|FuzzSeed)$'
 export PFM_FENCE_AFFECTED_TIMEOUT=10
 run "$R" "$A"
 unset PFM_FENCE_AFFECTED_TIMEOUT
@@ -239,6 +252,34 @@ expect "a malformed fence config value is a named config failure, exit 1" 1 \
   'CHECK FAIL config (fence_config_values in infra/fence/shared.sh refused the fence config or could not load — see the log; no test ran)'
 out_has "the malformed value is named" "iso: PFM_FENCE_AFFECTED_TIMEOUT must be duration (got '10')"
 rec_lacks "a malformed fence config runs no go test" 'go -C pfm test -v'
+# The Go tests' profile root outlives the fence call: a run directory under the fence's timing base
+# (PFM_TEST_TIMING_DIR, bound from PFM_TEST_TIMING_HOST), exported as PFM_TEST_ARTIFACT_DIR, its host
+# path on one PROFILE line, the newest 20 kept.
+mkdir -p "$T/timing/test-sh"
+for i in $(seq -w 1 25); do mkdir "$T/timing/test-sh/20000101T0000${i}Z-1"; done
+export PFM_TEST_TIMING_DIR="$T/timing" PFM_TEST_TIMING_HOST=/host/timing
+run "$R" pfm/internal/a/a.go "$A"
+unset PFM_TEST_TIMING_DIR PFM_TEST_TIMING_HOST
+prof="$(sed -n 's/^ARTIFACT=//p' < <(grep -o 'ARTIFACT=[^ ]*' "$REC.env") | sort -u)"
+case "$prof" in
+  "$T/timing/test-sh/"[0-9]*T[0-9]*Z-[0-9]*) ok "every Go test of the run profiles into one run directory under the timing base" ;;
+  *) bad "every Go test of the run profiles into one run directory under the timing base" "ARTIFACT: $prof" "$(cat "$REC.env")" ;;
+esac
+if [ -n "$prof" ] && [ -d "$prof" ]; then ok "the profile run directory exists before the first Go test"; else bad "the profile run directory exists before the first Go test" "$prof"; fi
+if [ "$(grep -c '^PROFILE ' <<<"$OUT")" = 1 ]; then ok "two Go tests print one PROFILE line"; else bad "two Go tests print one PROFILE line" "$OUT"; fi
+out_has "the PROFILE line names the run directory's host path" "PROFILE /host/timing/test-sh/${prof##*/}"
+if [ "$(find "$T/timing/test-sh" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" = 20 ] \
+  && [ ! -e "$T/timing/test-sh/20000101T000006Z-1" ] && [ -e "$T/timing/test-sh/20000101T000007Z-1" ] && [ -d "$prof" ]; then
+  ok "the newest 20 profile runs are kept, this one among them"
+else bad "the newest 20 profile runs are kept, this one among them" "$(ls "$T/timing/test-sh")"; fi
+run "$R" "$A"
+out_has "with no timing base the Go tests' profile stays in the call, named" \
+  "PROFILE NOT KEPT (PFM_TEST_TIMING_DIR unset: a red Go test's bundle stays in this call's /tmp)"
+if grep -q 'ARTIFACT= ' "$REC.env"; then ok "with no timing base no profile root is exported"; else bad "with no timing base no profile root is exported" "$(cat "$REC.env")"; fi
+export PFM_TEST_TIMING_DIR="$T/timing"
+run "$R" docs/x.md
+unset PFM_TEST_TIMING_DIR
+if grep -q '^PROFILE' <<<"$OUT"; then bad "a run with no Go test prints no PROFILE line" "$OUT"; else ok "a run with no Go test prints no PROFILE line"; fi
 run "$R" pfm/internal/a/helper_test.go
 rec_has "a test file with no Test func (TestMain is none) runs its whole package" "${GO_A_PKG[@]}"
 out_has "the whole-package run is labelled by its package" "TEST PASS pfm/internal/a/"
@@ -248,6 +289,26 @@ run "$R" pfm/internal/a/a.go "$A"
 if [ "$(grep -c '^go -C pfm test -v' "$REC")" = 2 ]; then ok "a package and a file of it are two invocations"; else bad "a package and a file of it are two invocations" "$(cat "$REC")"; fi
 run "$R" pfm/internal/a/a.go pfm/internal/a/a.go
 if [ "$(grep -c '^go -C pfm test -v' "$REC")" = 1 ]; then ok "a repeated invocation runs once"; else bad "a repeated invocation runs once" "$(cat "$REC")"; fi
+# The tier: a jail file runs under the jail tag, any other untagged (the unit tier inside the unit net).
+GO_J=(go -C pfm test -v -count=1 -timeout 10m ./internal/j/)
+GO_JJ=(go -C pfm test -v -count=1 -timeout 10m -tags jail ./internal/j/)
+run "$R" pfm/internal/j/u_test.go pfm/internal/j/n_test.go
+rec_has "an untagged unit file runs untagged" "${GO_J[@]}" -run '^(TestU)$'
+rec_has "a file negating jail runs untagged" "${GO_J[@]}" -run '^(TestNotJail)$'
+run "$R" pfm/internal/j/x_jail_test.go pfm/internal/j/m_test.go
+rec_has "a jail file runs under the jail tag" "${GO_JJ[@]}" -run '^(TestJ)$'
+rec_has "a file whose build line names jail runs under the jail tag, whatever its name" "${GO_JJ[@]}" -run '^(TestM|FuzzM)$'
+run "$R" pfm/internal/j/x_jail_test.go::TestJ/sub pfm/internal/j/u_test.go::TestU
+rec_has "a jail file's selector runs under the jail tag" "${GO_JJ[@]}" -run 'TestJ/sub'
+rec_has "a unit file's selector runs untagged" "${GO_J[@]}" -run 'TestU'
+run "$R" pfm/internal/j/j.go
+rec_has "a whole package runs its unit tier untagged" "${GO_J[@]}"
+rec_has "a whole package then runs its jail files' funcs under the jail tag, darwin-only ones left out" "${GO_JJ[@]}" -run '^(TestM|FuzzM|TestJ)$'
+out_has "the whole package's unit run is labelled by its package" "TEST PASS pfm/internal/j/"
+out_has "the whole package's jail run is labelled by its package and tier" "TEST PASS pfm/internal/j/ (jail)"
+run "$R" pfm/internal/k/k.go
+rec_has "a package of jail files alone runs them under the jail tag" go -C pfm test -v -count=1 -timeout 10m -tags jail ./internal/k/ -run '^(TestK)$'
+rec_lacks "a package of jail files alone has no untagged run" 'go -C pfm test -v -count=1 -timeout 10m \./internal/k/'
 run "$R" "pfm/internal/a/a.go::TestOne"
 expect "a non-test Go file takes no selector, exit 2" 2 "$U"
 out_has "the selector refusal names the file" "test.sh: pfm/internal/a/a.go: a non-test Go file (its whole package runs) takes no selector"
@@ -441,7 +502,7 @@ rec_has "launch-literals runs its one test" go -C pfm test ./internal/claudelaun
 rec_has "leak scans the named file" leak-check.sh --files pfm/internal/a/a.go
 out_has "no named .md file skips rumdl" "CHECK SKIP rumdl (no named file it applies to)"
 rec_lacks "a pfm-only selection runs no templates check" clone-check.sh
-if grep -qE 'GOPROXY=off -C pfm mod download$' "$REC.env"; then ok "the install probe runs offline"; else bad "the install probe runs offline" "$(cat "$REC.env")"; fi
+if grep -qE 'GOPROXY=off ARTIFACT=[^ ]* -C pfm mod download$' "$REC.env"; then ok "the install probe runs offline"; else bad "the install probe runs offline" "$(cat "$REC.env")"; fi
 run "$R" pfm/docs/x.md
 rec_has "no named go file vets the whole module" go -C pfm vet ./...
 rec_has "no named go file vets the whole module under the jail tag" go -C pfm vet -tags jail ./...

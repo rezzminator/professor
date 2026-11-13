@@ -11,6 +11,7 @@ import (
 )
 
 func TestResolvePicksOneTranscriptOrSaysWhy(t *testing.T) {
+	t.Chdir(t.TempDir())
 	root := t.TempDir()
 	realFile := filepath.Join(root, "realFile.jsonl")
 	if err := os.WriteFile(realFile, []byte("{}\n"), 0o600); err != nil {
@@ -49,6 +50,7 @@ func TestResolvePicksOneTranscriptOrSaysWhy(t *testing.T) {
 // chat-title source: the name walk reads the tail of every session file under
 // the roots, so a done context ends it, never a found transcript.
 func TestNameLookupStopsOnceTheContextIsDone(t *testing.T) {
+	t.Chdir(t.TempDir())
 	root := t.TempDir()
 	project := filepath.Join(root, "-work-repo")
 	if err := os.MkdirAll(project, 0o755); err != nil {
@@ -78,6 +80,7 @@ func TestNameLookupStopsOnceTheContextIsDone(t *testing.T) {
 // that ends in one very large entry (a big tool result) still resolves by its
 // title, which sits before that entry.
 func TestNameLookupFindsAChatWhoseLastLineIsLargerThanTheTailWindow(t *testing.T) {
+	t.Chdir(t.TempDir())
 	root := t.TempDir()
 	project := filepath.Join(root, "-work-repo")
 	if err := os.MkdirAll(project, 0o755); err != nil {
@@ -101,6 +104,7 @@ func TestNameLookupFindsAChatWhoseLastLineIsLargerThanTheTailWindow(t *testing.T
 // title resolves even when the id search could not walk a Codex home — the
 // name lookup reads no Codex home; the place the id search missed is a warning.
 func TestNameLookupIsNotFailedByAnUnreadableCodexHome(t *testing.T) {
+	t.Chdir(t.TempDir())
 	root := t.TempDir()
 	project := filepath.Join(root, "-work-repo")
 	if err := os.MkdirAll(project, 0o755); err != nil {

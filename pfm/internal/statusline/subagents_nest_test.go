@@ -67,7 +67,7 @@ func TestRenderAgentRowsNestedAgents(t *testing.T) {
 		transcripts map[string][]string
 		parents     map[string]string
 		running     []string // the agents below p Claude Code still runs
-		nested      string   // the row's first segment; "" = none
+		want        string   // the whole row
 		warn        string
 	}{
 		{
@@ -79,7 +79,7 @@ func TestRenderAgentRowsNestedAgents(t *testing.T) {
 			},
 			parents: map[string]string{"p": "", "c1": "p", "c2": "p", "c3": "p", "g1": "c3", "g2": "c1"},
 			running: []string{"c2", "g1"},
-			nested:  "2/5",
+			want:    "2/5│▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/2.0K/35/3│general-purpose│opus│running 2m:0s│1 error│💾5m✓3m:8s 94%│⟲1│pfm│orchestrate",
 		},
 		{
 			name: "only a grandchild works: it counts",
@@ -88,7 +88,7 @@ func TestRenderAgentRowsNestedAgents(t *testing.T) {
 			},
 			parents: map[string]string{"p": "", "c1": "p", "g1": "c1"},
 			running: []string{"g1"},
-			nested:  "1/2",
+			want:    "1/2│▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/2.0K/35/2│general-purpose│opus│running 2m:0s│1 error│💾5m✓3m:8s 94%│⟲1│pfm│orchestrate",
 		},
 		{
 			name: "every agent below finished: none counts",
@@ -98,7 +98,7 @@ func TestRenderAgentRowsNestedAgents(t *testing.T) {
 			},
 			parents: map[string]string{"p": "", "c1": "p", "c2": "p"},
 			running: []string{"c1", "c2"}, // listed a moment longer than their turns: the tails decide
-			nested:  "0/2",
+			want:    "0/2│▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/2.0K/35/3│general-purpose│opus│running 2m:0s│1 error│💾5m✓3m:8s 94%│⟲1│pfm│orchestrate",
 		},
 		{
 			name: "a handback result ends the turn: the agents that handed back are finished",
@@ -108,7 +108,7 @@ func TestRenderAgentRowsNestedAgents(t *testing.T) {
 			},
 			parents: map[string]string{"p": "", "c1": "p", "c2": "p", "g1": "c1"},
 			running: []string{"c1", "c2", "g1"},
-			nested:  "0/3",
+			want:    "0/3│▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/2.0K/35/5│general-purpose│opus│running 2m:0s│1 error│💾5m✓3m:8s 94%│⟲1│pfm│orchestrate",
 		},
 		{
 			name: "a result Claude Code does not mark as ending the turn is still working",
@@ -117,29 +117,29 @@ func TestRenderAgentRowsNestedAgents(t *testing.T) {
 			},
 			parents: map[string]string{"p": "", "c1": "p", "c2": "p"},
 			running: []string{"c1", "c2"},
-			nested:  "1/2",
+			want:    "1/2│▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/2.0K/35/2│general-purpose│opus│running 2m:0s│1 error│💾5m✓3m:8s 94%│⟲1│pfm│orchestrate",
 		},
 		{
 			name:        "a reply still streaming is working",
 			transcripts: map[string][]string{"p": agentTranscriptLines, "c1": {turnStreaming}},
 			parents:     map[string]string{"p": "", "c1": "p"},
 			running:     []string{"c1"},
-			nested:      "1/1",
+			want:        "1/1│▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/2.0K/35/2│general-purpose│opus│running 2m:0s│1 error│💾5m✓3m:8s 94%│⟲1│pfm│orchestrate",
 		},
 		{
 			name:        "a child spawned but not yet writing is working",
 			transcripts: map[string][]string{"p": agentTranscriptLines, "c1": {}},
 			parents:     map[string]string{"p": "", "c1": "p"},
 			running:     []string{"c1"},
-			nested:      "1/1",
+			want:        "1/1│▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/2.0K/35/2│general-purpose│opus│running 2m:0s│1 error│💾5m✓3m:8s 94%│⟲1│pfm│orchestrate",
 		},
 		{
 			name:        "a child whose transcript cannot be read is unread, never finished",
 			transcripts: map[string][]string{"p": agentTranscriptLines},
 			parents:     map[string]string{"p": "", "c1": "p"},
 			running:     []string{"c1"},
-			nested:      "0/1 (1 unread)",
-			warn:        "row p: nested agents: open sub-agent transcript",
+			want:        "0/1 (1 unread)│▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/2.0K/35/2+?│general-purpose│opus│running 2m:0s│1 error│💾5m✓3m:8s 94%│⟲1│pfm│orchestrate",
+			warn:        "statusline: agent rows: row p: nested agents: open sub-agent transcript {dir}/session/subagents/agent-c1.jsonl: open {dir}/session/subagents/agent-c1.jsonl: no such file or directory",
 		},
 		{
 			// Claude Code dropped it from its list: it is over, so its count is
@@ -147,14 +147,14 @@ func TestRenderAgentRowsNestedAgents(t *testing.T) {
 			name:        "a child Claude Code no longer lists is finished, even when its transcript cannot be read",
 			transcripts: map[string][]string{"p": agentTranscriptLines},
 			parents:     map[string]string{"p": "", "c1": "p"},
-			nested:      "0/1",
-			warn:        "row p: nested agents: open sub-agent transcript",
+			want:        "0/1│▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/2.0K/35/2+?│general-purpose│opus│running 2m:0s│1 error│💾5m✓3m:8s 94%│⟲1│pfm│orchestrate",
+			warn:        "statusline: agent rows: row p: nested agents: open sub-agent transcript {dir}/session/subagents/agent-c1.jsonl: open {dir}/session/subagents/agent-c1.jsonl: no such file or directory",
 		},
 		{
 			name:        "an agent that spawned none has no nesting segment, the row opens on the gauge",
 			transcripts: map[string][]string{"p": agentTranscriptLines, "other": {turnToolCall}},
 			parents:     map[string]string{"p": "", "other": ""},
-			nested:      "",
+			want:        "▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/2.0K/35/2│general-purpose│opus│running 2m:0s│1 error│💾5m✓3m:8s 94%│⟲1│pfm│orchestrate",
 		},
 	}
 	for _, tc := range cases {
@@ -165,15 +165,11 @@ func TestRenderAgentRowsNestedAgents(t *testing.T) {
 				tasks = append(tasks, agentTask(id, "running"))
 			}
 			got, warned := renderRowOf(t, session, "p", subagentNow, tasks...)
-			wantStart := "▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/2.0K/35"
-			if tc.nested != "" {
-				wantStart = tc.nested + "│" + wantStart
+			if got != tc.want {
+				t.Errorf("content = %q, want %q", got, tc.want)
 			}
-			if !strings.HasPrefix(got, wantStart) {
-				t.Fatalf("content =\n  %q\nwant it to start with %q", got, wantStart)
-			}
-			if tc.warn == "" && warned != "" || !strings.Contains(warned, tc.warn) {
-				t.Fatalf("warn = %q, want %q", warned, tc.warn)
+			if got := strings.ReplaceAll(warned, filepath.Dir(session), "{dir}"); got != tc.warn {
+				t.Errorf("warn = %q, want %q", got, tc.warn)
 			}
 		})
 	}
@@ -191,12 +187,12 @@ func TestRenderAgentRowsNestedCycleTerminates(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, _ := renderOneSubagent(t, session, parentTask)
-	if !strings.HasPrefix(got, "▱") {
+	if got != "▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/2.0K/35/2│general-purpose│opus│running 2m:0s│1 error│💾5m✓3m:8s 94%│⟲1│pfm│orchestrate" {
 		t.Fatalf("p lost its only child to the cycle, yet its row = %q", got)
 	}
 	aRow, _ := renderRowOf(t, session, "a", subagentNow,
 		`{"id":"a","status":"running"}`, agentTask("b", "running"))
-	if !strings.HasPrefix(aRow, "0/1│") {
+	if aRow != "0/1│?/? Σ$0.00/0/0/0│x│running│idle 1m0s│💾–" {
 		t.Fatalf("cycle row = %q, want 0/1", aRow)
 	}
 }
@@ -209,7 +205,8 @@ func TestRenderAgentRowsNestedLongTail(t *testing.T) {
 		"p": agentTranscriptLines, "c1": {turnToolCall, long, `{"type":"assist`},
 	}, map[string]string{"p": "", "c1": "p"})
 	got, warned := renderRowOf(t, session, "p", subagentNow, parentTask, agentTask("c1", "running"))
-	if !strings.HasPrefix(got, "0/1│") || warned != "" {
+	if got != "0/1│▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/2.0K/35/3│general-purpose│opus│running 2m:0s│1 error│💾5m✓3m:8s 94%│⟲1│pfm│orchestrate" ||
+		warned != "" {
 		t.Fatalf("content = %q warn = %q, want 0/1", got, warned)
 	}
 }
@@ -222,14 +219,15 @@ func TestRenderAgentRowsNestedTornMetaCostsOnlyItsOwnParent(t *testing.T) {
 		name        string
 		transcripts map[string][]string
 		parents     map[string]string
-		want        string
+		want, warn  string
 	}{
-		{"alone", map[string][]string{"p": agentTranscriptLines}, map[string]string{"p": ""}, "0/0 (1 unread)│▱"},
+		{"alone", map[string][]string{"p": agentTranscriptLines}, map[string]string{"p": ""}, "0/0 (1 unread)│▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/2.0K/35/2+?│general-purpose│opus│running 2m:0s│1 error│💾5m✓3m:8s 94%│⟲1│pfm│orchestrate", "statusline: agent rows: row p: nested agents: parse sub-agent meta {dir}/session/subagents/agent-c1.meta.json: unexpected end of JSON input\n"},
 		{
 			"beside a readable child",
 			map[string][]string{"p": agentTranscriptLines, "c2": {turnEnded}},
 			map[string]string{"p": "", "c2": "p"},
-			"0/1 (1 unread)│▱",
+			"0/1 (1 unread)│▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/2.0K/35/2+?│general-purpose│opus│running 2m:0s│1 error│💾5m✓3m:8s 94%│⟲1│pfm│orchestrate",
+			"statusline: agent rows: row p: nested agents: parse sub-agent meta {dir}/session/subagents/agent-c1.meta.json: unexpected end of JSON input\n",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -239,9 +237,11 @@ func TestRenderAgentRowsNestedTornMetaCostsOnlyItsOwnParent(t *testing.T) {
 				t.Fatal(err)
 			}
 			got, warned := renderOneSubagent(t, session, parentTask)
-			if !strings.HasPrefix(got, tc.want) ||
-				!strings.Contains(warned, "row p: nested agents: parse sub-agent meta") {
-				t.Fatalf("content = %q warn = %q, want prefix %q and the cause", got, warned, tc.want)
+			if got != tc.want {
+				t.Errorf("content = %q, want %q", got, tc.want)
+			}
+			if warned = strings.ReplaceAll(warned, filepath.Dir(session), "{dir}"); warned != tc.warn {
+				t.Errorf("warn = %q, want %q", warned, tc.warn)
 			}
 		})
 	}
@@ -271,7 +271,7 @@ func TestRenderAgentRowsNestedCountColours(t *testing.T) {
 	}, map[string]string{"p": "", "c1": "p", "c2": "p"})
 	raw := renderRawSubagent(t, session, parentTask, subagentNow, agentTask("c1", "running"))
 	want := cRunning + "1" + reset + cMuted + "/" + reset + cTools + "2" + reset
-	if !strings.HasPrefix(raw, want) {
+	if raw != "\x1b[38;5;118m1\x1b[0m\x1b[38;5;245m/\x1b[0m\x1b[38;5;87m2\x1b[0m\x1b[2m│\x1b[0m\x1b[1;32m\x1b[2m▱▱▱▱▱▱▱▱\x1b[0m \x1b[1;32m0%\x1b[0m \x1b[1;97m1.0K\x1b[0m\x1b[38;5;117m/1.0M\x1b[0m \x1b[38;5;245mΣ\x1b[0m\x1b[38;5;222m$0.01\x1b[0m\x1b[38;5;245m/\x1b[0m\x1b[1;97m2.0K\x1b[0m\x1b[38;5;245m/\x1b[0m\x1b[1;97m35\x1b[0m\x1b[38;5;245m/\x1b[0m\x1b[38;5;87m3\x1b[0m\x1b[2m│\x1b[0m\x1b[38;5;213mgeneral-purpose\x1b[0m\x1b[2m│\x1b[0m\x1b[38;5;51mopus\x1b[0m\x1b[2m│\x1b[0m\x1b[38;5;118mrunning\x1b[0m \x1b[38;5;215m2m:0s\x1b[0m\x1b[2m│\x1b[0m\x1b[1;38;5;203m1 error\x1b[0m\x1b[2m│\x1b[0m\x1b[38;5;118m💾5m✓3m:8s\x1b[0m \x1b[38;5;118m94%\x1b[0m\x1b[2m│\x1b[0m\x1b[38;5;177m⟲1\x1b[0m\x1b[2m│\x1b[0m\x1b[38;5;156mpfm\x1b[0m\x1b[2m│\x1b[0m\x1b[97morchestrate\x1b[0m" {
 		t.Fatalf("row = %q, want it to open with %q", raw, want)
 	}
 }
@@ -355,7 +355,7 @@ func TestRenderAgentRowsNestedCountsOnlyAgentsThatWork(t *testing.T) {
 			parentTask, agentTask("c1", "running"), agentTask("c4", "killed"), killedAtSpawn,
 			agentTask("c2", "running"), agentTask("g1", "running"), agentTask("g2", "running"))
 		got := rows["p"]
-		if !strings.HasPrefix(got, "4/7│") {
+		if got != "4/7│▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/54.3K/35/4+?│general-purpose│opus│running 2m:0s│1 error│💾5m✓3m:8s 94%│⟲1│pfm│orchestrate" {
 			t.Fatalf("parent row = %q, want 4/7 (c1, c2, g1 and g2 work; c3, c4, c5 do not)", got)
 		}
 	})
@@ -368,14 +368,14 @@ func TestRenderAgentRowsNestedCountsOnlyAgentsThatWork(t *testing.T) {
 			"p": agentTranscriptLines, "c1": {longSilent}, "g1": {longSilent, silentResult},
 		}, parents)
 		got := renderTasks(t, session, subagentNow, parentTask, agentTask("c1", "running"), agentTask("g1", "running"))["p"]
-		if !strings.HasPrefix(got, "2/2│") {
+		if got != "2/2│▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/54.3K/35/2+?│general-purpose│opus│running 2m:0s│1 error│💾5m✓3m:8s 94%│⟲1│pfm│orchestrate" {
 			t.Fatalf("parent row = %q, want 2/2: c1 and g1 still run", got)
 		}
 		done := nestedSession(t, map[string][]string{
 			"p": agentTranscriptLines, "c1": {longSilent, turnEnded}, "g1": {longSilent, silentResult},
 		}, parents)
 		got = renderTasks(t, done, subagentNow, parentTask, agentTask("c1", "running"))["p"]
-		if !strings.HasPrefix(got, "0/2│") {
+		if got != "0/2│▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/54.3K/35/2+?│general-purpose│opus│running 2m:0s│1 error│💾5m✓3m:8s 94%│⟲1│pfm│orchestrate" {
 			t.Fatalf("parent row = %q, want 0/2: c1 ended its turn, g1 no longer runs", got)
 		}
 	})
@@ -395,11 +395,11 @@ func TestRenderAgentRowsNestedCountsOnlyAgentsThatWork(t *testing.T) {
 			"c2": {turnToolCall, turnToolResult}, // killed after a tool result nothing answered
 		}, map[string]string{"p": "", "c1": "p", "g1": "c1", "g2": "c1", "c2": "p"})
 		got := renderTasks(t, session, subagentNow, parentTask)["p"]
-		if !strings.HasPrefix(got, "0/4│") {
+		if got != "0/4│▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/2.2K/45/3+?│general-purpose│opus│running 2m:0s│1 error│💾5m✓3m:8s 94%│⟲1│pfm│orchestrate" {
 			t.Fatalf("parent row = %q, want 0/4: none of the agents below it runs", got)
 		}
 		listed := renderTasks(t, session, subagentNow, parentTask, agentTask("g1", "running"))["p"]
-		if !strings.HasPrefix(listed, "1/4│") {
+		if listed != "1/4│▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/2.2K/45/3+?│general-purpose│opus│running 2m:0s│1 error│💾5m✓3m:8s 94%│⟲1│pfm│orchestrate" {
 			t.Fatalf("parent row = %q, want 1/4: g1 still runs", listed)
 		}
 	})

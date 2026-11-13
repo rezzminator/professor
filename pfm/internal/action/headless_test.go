@@ -1,6 +1,7 @@
 package action
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -140,15 +141,11 @@ func TestHeadlessCodexCarriesWholeRoleAsDeveloperInstructions(t *testing.T) {
 	escaped := strings.ReplaceAll(constitution, `\`, `\\`)
 	escaped = strings.ReplaceAll(escaped, `"""`, `\"\"\"`)
 	want := cmdparse.Quote("developer_instructions=\"\"\"\n" + escaped + "\"\"\"")
-	if !strings.Contains(plan.Run, " '-c' "+want) {
-		t.Fatalf(
-			"Codex command does not carry complete developer instructions (%d bytes): %s",
-			len(constitution),
-			plan.Run,
-		)
-	}
-	if strings.Contains(plan.Run, "caller prompt") {
-		t.Fatalf("Codex caller prompt leaked onto argv: %s", plan.Run)
+	if got, want := rooted(
+		t,
+		strings.ReplaceAll(plan.Run, want, "{instructions}"),
+	), "env -u CLAUDE_CODE_SESSION_ID -u CLAUDECODE -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CONFIG_DIR -u PFM_CLAUDE_CONFIG_DIR_DEFAULT -u CLAUDE_PROJECT_DIR -u ENABLE_PROMPT_CACHING_1H -u FORCE_PROMPT_CACHING_5M -u CLAUDE_CODE_PROMPT_CACHE_TTL -u CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL -u CACHE_LIVE_CONTROL_MAIN_TTL -u CACHE_LIVE_CONTROL_AGENTS_TTL -u CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT -u ANTHROPIC_BASE_URL -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_API_KEY -u ANTHROPIC_MODEL -u ANTHROPIC_SMALL_FAST_MODEL -u CLAUDE_CODE_AUTO_COMPACT_WINDOW -u CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -u CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK -u CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY -u CODEX_THREAD_ID CODEX_HOME='{root}/001/.codex' codex --no-daemon --dangerously-bypass-approvals-and-sandbox '-c' {instructions}"; got != want {
+		t.Errorf("Codex command = %q, want %q", got, want)
 	}
 }
 
@@ -206,18 +203,11 @@ func TestHeadlessCodexTakesNeitherNameNorPrompt(t *testing.T) {
 	if plan.PromptOnCommandLine {
 		t.Fatal("Codex must be prompted through its TUI, not its command line")
 	}
-	if !strings.HasSuffix(
+	if got, want := rooted(
+		t,
 		plan.Run,
-		" codex --no-daemon --dangerously-bypass-approvals-and-sandbox",
-	) {
-		t.Fatalf("unexpected codex command: %s", plan.Run)
-	}
-	if strings.Contains(plan.Run, "read the incident report") ||
-		strings.Contains(plan.Run, "_KILL codex worker") {
-		t.Fatalf("codex command carried a name or prompt: %s", plan.Run)
-	}
-	if !strings.Contains(plan.Run, "-u CODEX_THREAD_ID") {
-		t.Fatalf("codex thread id not stripped: %s", plan.Run)
+	), "env -u CLAUDE_CODE_SESSION_ID -u CLAUDECODE -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CONFIG_DIR -u PFM_CLAUDE_CONFIG_DIR_DEFAULT -u CLAUDE_PROJECT_DIR -u ENABLE_PROMPT_CACHING_1H -u FORCE_PROMPT_CACHING_5M -u CLAUDE_CODE_PROMPT_CACHE_TTL -u CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL -u CACHE_LIVE_CONTROL_MAIN_TTL -u CACHE_LIVE_CONTROL_AGENTS_TTL -u CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT -u ANTHROPIC_BASE_URL -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_API_KEY -u ANTHROPIC_MODEL -u ANTHROPIC_SMALL_FAST_MODEL -u CLAUDE_CODE_AUTO_COMPACT_WINDOW -u CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -u CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK -u CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY -u CODEX_THREAD_ID CODEX_HOME='{root}/001/.codex' codex --no-daemon --dangerously-bypass-approvals-and-sandbox"; got != want {
+		t.Errorf("codex command = %q, want %q", got, want)
 	}
 }
 
@@ -233,11 +223,11 @@ func TestHeadlessRunRefusals(t *testing.T) {
 		mutate  func(*HeadlessRequest)
 		message string
 	}{
-		{"no name", func(r *HeadlessRequest) { r.Name = "" }, "requires a name"},
-		{"newline in name", func(r *HeadlessRequest) { r.Name = "a\nb" }, "newlines"},
-		{"no directory", func(r *HeadlessRequest) { r.CWD = "" }, "project directory"},
-		{"unknown engine", func(r *HeadlessRequest) { r.Engine = "gpt" }, "no headless planner registered"},
-		{"account off roster", func(r *HeadlessRequest) { r.PrimaryAccount = 9 }, "primary account"},
+		{"no name", func(r *HeadlessRequest) { r.Name = "" }, "a headless chat requires a name"},
+		{"newline in name", func(r *HeadlessRequest) { r.Name = "a\nb" }, "a chat name cannot contain newlines"},
+		{"no directory", func(r *HeadlessRequest) { r.CWD = "" }, "a headless chat requires a project directory"},
+		{"unknown engine", func(r *HeadlessRequest) { r.Engine = "gpt" }, "engine gpt: no headless planner registered"},
+		{"account off roster", func(r *HeadlessRequest) { r.PrimaryAccount = 9 }, "primary account 9 is not in the configured roster"},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			request := base
@@ -247,7 +237,7 @@ func TestHeadlessRunRefusals(t *testing.T) {
 			if err == nil {
 				t.Fatal("HeadlessRun() accepted the request")
 			}
-			if !strings.Contains(err.Error(), testCase.message) {
+			if err.Error() != testCase.message {
 				t.Fatalf("error = %v, want it to mention %q", err, testCase.message)
 			}
 		})
@@ -281,8 +271,8 @@ func TestHeadlessClaudePlansWarnWhenTheFleetPromptCannotReachTheChat(t *testing.
 		stage bool
 		want  string
 	}{
-		{"professor, no clone recorded", pfmconfig.SystemPromptProfessor, false, "no source repository recorded"},
-		{"professor, prompt staged", pfmconfig.SystemPromptProfessor, true, ""},
+		{"professor, no clone recorded", pfmconfig.SystemPromptProfessor, false, "[\"Claude started WITHOUT its system prompt file: the composed fleet prompt cannot be located: resolve generated harness prompt: read source repository marker {root}/001/.local/share/pfm/install/source-repo: no source repository recorded: open {root}/001/.local/share/pfm/install/source-repo: no such file or directory — fix the cause, then reload the chat\"]"},
+		{"professor, prompt staged", pfmconfig.SystemPromptProfessor, true, "[]"},
 	} {
 		for _, door := range []string{"new", "fork"} {
 			t.Run(entry.name+"/"+door, func(t *testing.T) {
@@ -308,14 +298,8 @@ func TestHeadlessClaudePlansWarnWhenTheFleetPromptCannotReachTheChat(t *testing.
 				if err != nil {
 					t.Fatal(err)
 				}
-				if entry.want == "" {
-					if len(plan.Warnings) != 0 {
-						t.Fatalf("warnings = %q, want none", plan.Warnings)
-					}
-					return
-				}
-				if len(plan.Warnings) != 1 || !strings.Contains(plan.Warnings[0], entry.want) {
-					t.Fatalf("warnings = %q, want one naming %q", plan.Warnings, entry.want)
+				if got := rooted(t, fmt.Sprintf("%q", plan.Warnings)); got != entry.want {
+					t.Errorf("warnings = %q, want %q", got, entry.want)
 				}
 			})
 		}
@@ -642,7 +626,7 @@ func TestOpenCodeNativePolicyDoesNotDependOnReporter(t *testing.T) {
 	if _, err := openCodePersonaAssignments(
 		request,
 	); err == nil ||
-		!strings.Contains(err.Error(), "require the native seat plugin") {
+		err.Error() != "OpenCode model, effort and prompt channel require the native seat plugin" {
 		t.Fatalf("missing delivery mechanism error=%v", err)
 	}
 }

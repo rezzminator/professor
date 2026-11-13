@@ -77,7 +77,7 @@ func TestCallReceiptPrintsResolverNoteOnStderr(t *testing.T) {
 		Proof:          "USER: next\n❯ ",
 		ResolutionNote: "resolved 🔖 label 'QA' → pane '%1'",
 	}, "QA", &stdout, &stderr)
-	if code != 0 || !strings.Contains(stderr.String(), "resolved 🔖 label") {
+	if code != 0 || stderr.String() != "resolved 🔖 label 'QA' → pane '%1'\n" {
 		t.Fatalf("resolver note exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 }
@@ -762,23 +762,25 @@ func TestChatCallRefusalsNameTheirReason(t *testing.T) {
 	if err := os.WriteFile(path, []byte("body"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	usage := "usage: pfm chat call [--force-now] [--then STEER]... [--file PATH] [--allow-unsigned] <target> <message>\n       pfm chat call [flags] --to TARGET[,TARGET...] [--to TARGET]... <message>\n       several targets are a broadcast: delivered in parallel, one report per target,\n       exit 0 only when every target took it\n       `/compact` is refused here — pfm never types a compaction\n"
+	both, noMessage, noTarget := "pfm chat call: --file and a message argument both given; pass one\n", "pfm chat call: no message given; pass <message> or --file PATH\n", "pfm chat call: no target chat given\n"
 	for _, tc := range []struct {
 		args []string
 		want string
 	}{
-		{[]string{"--file", path, "target", "inline body"}, "--file and a message argument both given"},
-		{[]string{"target", "--file", path, "inline body"}, "--file and a message argument both given"},
-		{[]string{"--file", path, "target", "--file", path}, "--file given twice"},
-		{[]string{"target"}, "no message given"},
-		{[]string{}, "no target chat given"},
-		{[]string{"--to", " , ", "body"}, "no target chat given"},
-		{[]string{"--to", "a,b"}, "no message given"},
-		{[]string{"--to", "a", "--file", path, "inline body"}, "--file and a message argument both given"},
+		{[]string{"--file", path, "target", "inline body"}, both},
+		{[]string{"target", "--file", path, "inline body"}, both},
+		{[]string{"--file", path, "target", "--file", path}, "pfm chat call: --file given twice\n"},
+		{[]string{"target"}, noMessage},
+		{[]string{}, noTarget},
+		{[]string{"--to", " , ", "body"}, noTarget},
+		{[]string{"--to", "a,b"}, noMessage},
+		{[]string{"--to", "a", "--file", path, "inline body"}, both},
 	} {
 		var stdout, stderr bytes.Buffer
 		code := run(append([]string{"chat", "call"}, tc.args...), &stdout, &stderr)
-		if code != 2 || !strings.Contains(stderr.String(), tc.want) {
-			t.Fatalf("%q: exit=%d stderr=%q, want 2 naming %q", tc.args, code, stderr.String(), tc.want)
+		if code != 2 || stderr.String() != tc.want+usage {
+			t.Errorf("%q: exit=%d stderr = %q, want %q", tc.args, code, stderr.String(), tc.want+usage)
 		}
 	}
 }

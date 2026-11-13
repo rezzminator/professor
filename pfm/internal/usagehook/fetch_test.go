@@ -330,7 +330,9 @@ func TestHasCurrentWindowNeedsAReadingAndAResetNotYetPassed(t *testing.T) {
 // TestClaudeCodeVersionNamesAMissingBinary: a Claude binary absent from PATH
 // fails at resolution with its name, never as a stat of the bare name.
 func TestClaudeCodeVersionNamesAMissingBinary(t *testing.T) {
-	t.Setenv("PATH", t.TempDir())
+	previous := usageRunner
+	usageRunner = &deps.FakeRunner{}
+	t.Cleanup(func() { usageRunner = previous })
 	_, err := claudeCodeVersion(context.Background(), "claude")
 	want := `resolve Claude Code binary "claude": exec: "claude": executable file not found in $PATH`
 	if err == nil || err.Error() != want {
@@ -352,6 +354,7 @@ func TestClaudeVersionProbeDropsTheHerdrPane(t *testing.T) {
 		t.Fatal(err)
 	}
 	fake := &deps.FakeRunner{}
+	fake.ScriptLookPath(binary, binary, nil)
 	fake.Script([]string{binary, "--version"}, deps.RunResult{Stdout: []byte("2.1.238 (Claude Code)\n")}, nil)
 	previous := usageRunner
 	usageRunner = fake

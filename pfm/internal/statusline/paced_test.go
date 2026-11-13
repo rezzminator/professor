@@ -142,7 +142,7 @@ func TestPacedFrontShowsACachedRenderErrorOnStderr(t *testing.T) {
 	rig.writeLine(pacedLine{V: pacedVersion, Output: "kept\n", FinishedAt: rig.now.UnixNano(), Error: "boom"})
 	var stdout strings.Builder
 	rig.paced.Front([]byte(pacedTestInput), &stdout)
-	if stdout.String() != "kept\n" || !strings.Contains(rig.warn.String(), "render (fail-open): boom") {
+	if stdout.String() != "kept\n" || rig.warn.String() != "pfm statusline: render (fail-open): boom\n" {
 		t.Fatalf("stdout %q warnings %q; want the kept line and the error told", stdout.String(), rig.warn.String())
 	}
 }
@@ -227,7 +227,8 @@ func TestPacedFrontFallsBackInlineWhenThePacerBreaks(t *testing.T) {
 		rig.spawnErr = errors.New("no setsid")
 		var stdout strings.Builder
 		rig.paced.Front([]byte(pacedTestInput), &stdout)
-		if stdout.String() != rig.output || !strings.Contains(rig.warn.String(), "no setsid") {
+		if stdout.String() != rig.output ||
+			rig.warn.String() != "pfm statusline: paced render (rendering inline): spawn paced worker a9032b31b8c67241aed4d5adf0b30db2: no setsid\n" {
 			t.Fatalf("stdout %q warnings %q; want the inline render and the spawn error told", stdout.String(),
 				rig.warn.String())
 		}
@@ -237,7 +238,8 @@ func TestPacedFrontFallsBackInlineWhenThePacerBreaks(t *testing.T) {
 		rig.spawnErr = errors.New("no setsid")
 		var stdout strings.Builder
 		rig.paced.Front([]byte(pacedTestInput), &stdout)
-		if stdout.String() != rig.output || !strings.Contains(rig.warn.String(), "no setsid") {
+		if stdout.String() != rig.output ||
+			rig.warn.String() != "pfm statusline: paced render (rendering inline): spawn paced worker a9032b31b8c67241aed4d5adf0b30db2: no setsid\n" {
 			t.Fatalf("stdout %q warnings %q; want the inline render and the spawn error told", stdout.String(),
 				rig.warn.String())
 		}
@@ -428,7 +430,7 @@ func TestPacedSecondWorkerExitsWhenTheLockIsHeld(t *testing.T) {
 func TestPacedWorkerRefusesAKeyThatIsNoDigest(t *testing.T) {
 	rig := newPacedRig(t)
 	rig.paced.Key = "../escape"
-	if err := rig.paced.Work(); err == nil || !strings.Contains(err.Error(), "32 hex digits") {
+	if err := rig.paced.Work(); err == nil || err.Error() != "paced key \"../escape\" is not 32 hex digits" {
 		t.Fatalf("err %v; want the key refused", err)
 	}
 }

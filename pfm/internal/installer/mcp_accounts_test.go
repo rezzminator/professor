@@ -58,11 +58,15 @@ func TestWireMCPFailingCodexHomeCostsOnlyItself(t *testing.T) {
 		apply: true, managedRoot: managedRootForHome(home), stamp: "fixture",
 	}
 	err := e.wireMCP()
-	if err == nil || !strings.Contains(err.Error(), filepath.Join(broken, "config.toml")) {
-		t.Fatalf("wireMCP = %v, want the broken Codex home", err)
+	wantErr := "read Codex MCP config " + filepath.Join(broken, "config.toml") +
+		": parse unmanaged Codex MCP config: toml: line 1 (last key \"broken\"): unexpected EOF; expected value"
+	if err == nil || err.Error() != wantErr {
+		t.Fatalf("wireMCP = %v, want %q", err, wantErr)
 	}
-	if got := readFixture(t, filepath.Join(wired, "config.toml")); !strings.Contains(got, "chat-professor") {
-		t.Fatalf("%s was not wired past the failure: %s", wired, got)
+	want := mcpFenceBegin + "\n[mcp_servers.chat-professor]\ncommand = \"" + home + "/.local/bin/pfm\"\n" +
+		"args = [\"mcp\", \"serve\", \"--stdio\", \"--family\", \"chat\"]\n" + mcpFenceEnd + "\n"
+	if got := readFixture(t, filepath.Join(wired, "config.toml")); got != want {
+		t.Fatalf("%s was not wired past the failure:\n%s\nwant\n%s", wired, got, want)
 	}
 }
 

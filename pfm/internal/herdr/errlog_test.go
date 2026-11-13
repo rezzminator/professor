@@ -2,6 +2,7 @@ package herdr
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,8 +31,9 @@ func TestErrorLogRefusesFIFOsWithoutBlocking(t *testing.T) {
 			}()
 			select {
 			case err := <-done:
-				if err == nil || !strings.Contains(err.Error(), "herdr error log") {
-					t.Fatalf("FIFO must be a contextual error, got %v", err)
+				want := map[bool]string{false: "herdr error log: {dir}/fifo.log is not a regular file", true: "herdr error log: open {dir}/fifo.log: herdr error log is not a regular file"}[read]
+				if got := strings.ReplaceAll(fmt.Sprint(err), dir, "{dir}"); got != want {
+					t.Fatalf("FIFO error = %q, want %q", got, want)
 				}
 			case <-time.After(time.Second):
 				// Release an unfixed blocking open so the red regression leaves no
@@ -285,18 +287,12 @@ func TestErrorLogRotatesOnceUnderConcurrentWriters(t *testing.T) {
 			}
 		}
 		rotated, err := os.ReadFile(path + ".1")
-		if err != nil || !strings.HasPrefix(string(rotated), at.Format(time.RFC3339)+"\tkept\n") {
+		if err != nil || string(rotated) != full {
 			t.Fatalf("round %d: rotated log %d bytes, err %v, want the full log kept once", round, len(rotated), err)
 		}
 		current, err := os.ReadFile(path)
-		if err != nil || strings.Count(string(current), "\tline\n") != writers {
-			t.Fatalf(
-				"round %d: current log holds %d of %d lines, err %v",
-				round,
-				strings.Count(string(current), "\tline\n"),
-				writers,
-				err,
-			)
+		if want := strings.Repeat(at.Format(time.RFC3339)+"\tline\n", writers); err != nil || string(current) != want {
+			t.Fatalf("round %d: current log = %q (err %v), want %q", round, current, err, want)
 		}
 	}
 }

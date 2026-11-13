@@ -213,14 +213,14 @@ func TestOpenCodeModeRefusesWhatItCannotRead(t *testing.T) {
 			Options{},
 			[]string{"--opencode", "--opencode-root", missing},
 			1,
-			"pfm tokens: no OpenCode store could be read: " + filepath.Join(missing, "opencode.db") + " is missing\n",
+			"pfm tokens: no OpenCode store could be read: {missing}/opencode.db is missing\n",
 		},
 		{
 			"unreadable store",
 			Options{OpenCodeRoots: []string{broken}},
 			[]string{"--opencode"},
 			1,
-			"pfm tokens: no OpenCode store could be read: " + filepath.Join(broken, "opencode.db") + ": ",
+			"pfm tokens: no OpenCode store could be read: {broken}/opencode.db: open opencode store read-only: sqlite database {broken}/opencode.db is a file this test process did not write; a test that needs SQLite's own file calls testjail.DatabaseFiles\n",
 		},
 		{"two modes", Options{}, []string{"--opencode", "--codex"}, 2, openCodeOwnMode},
 		{"a Claude report flag", Options{}, []string{"--opencode", "--out", "report.json"}, 2, openCodeOwnMode},
@@ -236,8 +236,10 @@ func TestOpenCodeModeRefusesWhatItCannotRead(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			code, stdout, stderr := auditWith(t, c.opts, append(c.args, "--prices", prices)...)
-			if code != c.code || stdout != "" || !strings.HasPrefix(stderr, c.stderr) {
-				t.Errorf("exit %d stdout %q stderr %q, want %d, nothing, %q", code, stdout, stderr, c.code, c.stderr)
+			if stderr = strings.NewReplacer(missing, "{missing}", broken, "{broken}").
+				Replace(stderr); code != c.code || stdout != "" ||
+				stderr != c.stderr {
+				t.Errorf("exit %d stdout %q stderr = %q, want %q (exit %d)", code, stdout, stderr, c.stderr, c.code)
 			}
 		})
 	}

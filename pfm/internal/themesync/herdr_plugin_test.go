@@ -4,7 +4,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -22,29 +21,7 @@ func linkCalls(h *harness) int {
 }
 
 func TestHerdrPluginManifestRender(t *testing.T) {
-	got := herdrPluginRender("/opt/bin/pfm")
-	for _, event := range []string{"pane.created", "tab.created"} {
-		if !strings.Contains(got, "on = "+strconv.Quote(event)) {
-			t.Errorf("manifest lacks topology event %s", event)
-		}
-	}
-	for _, want := range []string{
-		"id = \"professor.indicators\"\n", "min_herdr_version = \"0.9.5\"\n", "platforms = [\"macos\", \"linux\"]\n",
-		"\n[[startup]]\ncommand = [\"/opt/bin/pfm\", \"internal\", \"herdr-indicators\"]\n",
-		"\n[[startup]]\ncommand = [\"/opt/bin/pfm\", \"internal\", \"herdr-places\"]\n",
-		"\n[[events]]\non = \"pane.agent_status_changed\"\ncommand = [\"/opt/bin/pfm\", \"internal\", \"herdr-indicators\"]\n",
-		"\n[[events]]\non = \"workspace.created\"\n",
-		"\n[[events]]\non = \"pane.focused\"\n",
-		"\n[[events]]\non = \"tab.focused\"\n",
-		"\n[[events]]\non = \"workspace.focused\"\n",
-	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("manifest lacks %q:\n%s", want, got)
-		}
-	}
-	if strings.Count(got, "[[startup]]") != 2 || strings.Count(got, "[[events]]") != 13 {
-		t.Errorf("manifest wants two startups and 13 events:\n%s", got)
-	}
+	golden(t, "herdr_plugin.toml", herdrPluginRender("/opt/bin/pfm"))
 }
 
 func TestHerdrApplyWritesTheManifestAndLinksWhenTheRegistryLacksIt(t *testing.T) {
@@ -52,7 +29,7 @@ func TestHerdrApplyWritesTheManifestAndLinksWhenTheRegistryLacksIt(t *testing.T)
 	h.write(herdrRegistryRel, "[]")
 	// the fake herdr links nothing into the registry, so the read-back that
 	// closes the run still sees the plugin unlinked
-	wantVerdict(t, h.on(), "herdr", VerdictDrift, "is not linked in Herdr")
+	wantVerdict(t, h.on(), "herdr", VerdictDrift, "indicator plugin professor.indicators is not linked in Herdr")
 	if got := h.read(herdrManifestRel); got != herdrPluginRender("/opt/bin/pfm") {
 		t.Fatalf("manifest on disk =\n%s", got)
 	}
@@ -105,8 +82,20 @@ func TestHerdrApplyLinkFailureIsAFailedRowNamingIt(t *testing.T) {
 	h.herdrLink = deps.RunResult{ExitCode: 1, Stderr: []byte("plugin_registry_save_failed")}
 	h.rearm()
 	report := h.on()
-	wantVerdict(t, report, "herdr", VerdictError, "plugin link")
-	wantVerdict(t, report, "herdr", VerdictError, "plugin_registry_save_failed")
+	wantVerdict(
+		t,
+		report,
+		"herdr",
+		VerdictError,
+		"themesync: plugin link {tmp}/.config/herdr/pfm-indicators exited 1: plugin_registry_save_failed",
+	)
+	wantVerdict(
+		t,
+		report,
+		"herdr",
+		VerdictError,
+		"themesync: plugin link {tmp}/.config/herdr/pfm-indicators exited 1: plugin_registry_save_failed",
+	)
 	if report.OK() {
 		t.Error("a failed link left the report OK")
 	}
@@ -170,7 +159,13 @@ func TestHerdrOffThatCannotClearTheIndicatorsIsAFailedRow(t *testing.T) {
 	h := newHarness(t)
 	h.on()
 	h.write(".local/state/pfm/herdr/indicators-00000000.socket/blocker", "a record that is a directory")
-	wantVerdict(t, offReport(t, h), "herdr", VerdictError, "clear the herdr indicators")
+	wantVerdict(
+		t,
+		offReport(t, h),
+		"herdr",
+		VerdictError,
+		"themesync: clear the herdr indicators: herdr indicators: read socket record {tmp}/.local/state/pfm/herdr/indicators-00000000.socket: read {tmp}/.local/state/pfm/herdr/indicators-00000000.socket: is a directory",
+	)
 }
 
 func TestHerdrApplyLinkWithNoServerIsDeferredNotFailed(t *testing.T) {
@@ -179,7 +174,7 @@ func TestHerdrApplyLinkWithNoServerIsDeferredNotFailed(t *testing.T) {
 	h.herdrLink = deps.RunResult{ExitCode: 1, Stderr: []byte("herdr: connection refused")}
 	h.rearm()
 	report := h.on()
-	wantVerdict(t, report, "herdr", VerdictDrift, "is not linked in Herdr")
+	wantVerdict(t, report, "herdr", VerdictDrift, "indicator plugin professor.indicators is not linked in Herdr")
 	if got := linkCalls(h); got != 1 {
 		t.Errorf("link calls = %d, want the one attempt", got)
 	}
@@ -189,7 +184,7 @@ func TestHerdrReadReportsAManifestThatDiffers(t *testing.T) {
 	h := newHarness(t)
 	h.on()
 	h.write(herdrManifestRel, "id = \"professor.indicators\"\n")
-	wantVerdict(t, h.status(), "herdr", VerdictDrift, "manifest differs")
+	wantVerdict(t, h.status(), "herdr", VerdictDrift, "indicator plugin manifest differs from its render")
 	h.sync(false)
 	if got := h.read(herdrManifestRel); got != herdrPluginRender("/opt/bin/pfm") {
 		t.Fatalf("manifest not healed:\n%s", got)
@@ -197,7 +192,13 @@ func TestHerdrReadReportsAManifestThatDiffers(t *testing.T) {
 	if err := os.RemoveAll(h.path(".config/herdr/pfm-indicators")); err != nil {
 		t.Fatal(err)
 	}
-	wantVerdict(t, h.status(), "herdr", VerdictDrift, "manifest missing")
+	wantVerdict(
+		t,
+		h.status(),
+		"herdr",
+		VerdictDrift,
+		"indicator plugin manifest missing from {tmp}/.config/herdr/pfm-indicators/herdr-plugin.toml",
+	)
 }
 
 func TestHerdrOffUnlinksThePluginAndRemovesItsDirectory(t *testing.T) {
@@ -223,10 +224,22 @@ func TestHerdrOffUnlinkFailureIsAFailedRowAndDeferredWhenNoServer(t *testing.T) 
 	h.on()
 	h.herdrUnlink = deps.RunResult{ExitCode: 1, Stderr: []byte("no such plugin")}
 	h.rearm()
-	wantVerdict(t, offReport(t, h), "herdr", VerdictError, "plugin unlink")
+	wantVerdict(
+		t,
+		offReport(t, h),
+		"herdr",
+		VerdictError,
+		"themesync: plugin unlink professor.indicators exited 1: no such plugin",
+	)
 	h.herdrUnlink = deps.RunResult{ExitCode: 1, Stderr: []byte("connection refused")}
 	h.rearm()
-	wantVerdict(t, offReport(t, h), "herdr", VerdictRestored, "herdr plugin unlink professor.indicators")
+	wantVerdict(
+		t,
+		offReport(t, h),
+		"herdr",
+		VerdictRestored,
+		"pfm block already gone indicator plugin stays linked until `herdr plugin unlink professor.indicators` runs",
+	)
 	if h.exists(".config/herdr/pfm-indicators") {
 		t.Fatal("a deferred unlink must still remove the plugin directory")
 	}

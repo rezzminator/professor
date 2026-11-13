@@ -38,9 +38,10 @@ runs:
           unit)
             # The refresh-scope fixture under the system Bash 3.2, as on a user's Mac.
             python3 scripts/test-refresh-scope.py
-            # The unit tier as any machine runs it, untagged; then the jail tier (*_jail_test.go),
-            # whose tagged binaries internal/testjail admits on this hosted runner.
-            go -C pfm test -count=1 ./...
+            # The unit tier as any machine runs it, untagged, under the unit-proof's hostile ambient
+            # (tripwires on every PATH name; darwin: syscalls not traced); then the jail tier
+            # (*_jail_test.go), whose tagged binaries internal/testjail admits on this hosted runner.
+            bash pfm/scripts/unit-proof.sh
             go -C pfm test -count=1 -tags jail ./... ;;
           e2e)
             export PFM_E2E_SOURCE_REPO="$GITHUB_WORKSPACE"

@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -47,8 +46,11 @@ func TestTestMainRejectsBrokenPrebuiltPFMBinary(t *testing.T) {
 	command := exec.Command(os.Args[0], "-test.run=^TestTestMainRejectsBrokenPrebuiltPFMBinary$")
 	command.Env = append(os.Environ(), paths.EnvTestPFMBinary+"="+missing)
 	output, err := command.CombinedOutput()
-	if err == nil || !strings.Contains(string(output), paths.EnvTestPFMBinary) ||
-		!strings.Contains(string(output), missing) {
-		t.Fatalf("TestMain broken prebuilt = %v, %q; want named failure", err, output)
+	if got, want := rooted(
+		string(output),
+		filepath.Dir(missing),
+	), "build shared pfm test binary: PFM_TEST_PFM_BINARY=\"{root}/missing-pfm\": stat {root}/missing-pfm: no such file or directory\n"; err == nil ||
+		got != want {
+		t.Fatalf("TestMain broken prebuilt = %v, output = %q, want %q", err, got, want)
 	}
 }

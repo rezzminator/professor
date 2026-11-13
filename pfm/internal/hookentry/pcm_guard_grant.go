@@ -10,8 +10,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-
-	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 const (
@@ -32,7 +30,7 @@ func (judge *pcmGuardJudge) granted(abs string) bool {
 	if judge.scope.engine || judge.agent == "" {
 		return false
 	}
-	for _, form := range []string{abs, paths.PhysicalPath(abs)} {
+	for _, form := range []string{abs, pcmGuardPhysical(abs)} {
 		if protected, _ := judge.scope.classOne(form); protected && !judge.grantedOne(form) {
 			return false
 		}

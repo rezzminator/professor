@@ -175,7 +175,7 @@ func (command *Cmd) Start() error {
 
 // Wait completes a started command and records it.
 func (command *Cmd) Wait() error {
-	err := command.wait()
+	err := command.completion()
 	command.finish(err)
 	return err
 }

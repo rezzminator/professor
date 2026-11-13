@@ -190,7 +190,8 @@ func TestHerdrCodexThreadMetaNamesBackendFailure(t *testing.T) {
 		paths: paths.Values{TmuxDir: "/jail/tmux"},
 	}
 	caller, err := current.callerForRequest(context.Background(), mcp.Meta{"threadId": row.ID})
-	if err != nil || caller.valid || !caller.present || !strings.Contains(caller.detail, row.BackendError) {
+	if err != nil || caller.valid || !caller.present ||
+		caller.detail != "look up the caller: Codex seat : HERDR UNREACHABLE own socket" {
 		t.Fatalf("backend failure caller = %+v err=%v", caller, err)
 	}
 }
@@ -207,7 +208,8 @@ func TestHerdrCodexThreadMetaRejectsRelativeNativeSocket(t *testing.T) {
 		paths: paths.Values{TmuxDir: "/jail/tmux"},
 	}
 	caller, err := current.callerForRequest(context.Background(), mcp.Meta{"threadId": "thread-native"})
-	if err != nil || caller.valid || !caller.present || !strings.Contains(caller.detail, "not absolute") {
+	if err != nil || caller.valid || !caller.present ||
+		caller.detail != "look up the caller: Codex seat :  live chat \"SMOKE_CX\" socket: native Herdr socket is not absolute: \"herdr.sock\"" {
 		t.Fatalf("relative native socket caller = %+v err=%v, want a present invalid binding", caller, err)
 	}
 }

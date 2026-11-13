@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -173,9 +174,12 @@ func TestOpenDetachedCodexRequiresLogin(t *testing.T) {
 		Row:      compose.Row{Kind: compose.ResumeCodex, ID: "t1", CWD: "/work"},
 		Config:   machine, Home: home, PrimaryAccount: 1, FreshSocket: "cx-fresh",
 	})
-	want := "open detached: Codex account 1: " + authPath + " "
-	if !errors.Is(err, pfmconfig.ErrCodexLoggedOut) || !strings.HasPrefix(err.Error(), want) || len(tmux.created) != 0 {
-		t.Fatalf("detached Open error=%v created=%d; want %q", err, len(tmux.created), want)
+	if got, want := rooted(
+		t,
+		fmt.Sprint(err),
+	), "open detached: Codex account 1: {root}/002/.codex/auth.json must contain tokens.access_token with tokens.account_id, or OPENAI_API_KEY — run codex login"; !errors.Is(err, pfmconfig.ErrCodexLoggedOut) || got != want ||
+		len(tmux.created) != 0 {
+		t.Errorf("detached Open created=%d error = %q, want %q", len(tmux.created), got, want)
 	}
 }
 

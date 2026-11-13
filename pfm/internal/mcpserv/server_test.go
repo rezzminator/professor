@@ -4,11 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -19,6 +19,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 var (
@@ -183,7 +184,7 @@ func setupBackendPaths(t *testing.T) string {
 	}
 	writeJSONL(t, filepath.Join(claude, "project-alpha", "alpha.jsonl"), []any{
 		map[string]any{
-			"type": "user", "cwd": "/work/alpha",
+			"type": "user", "cwd": testjail.Place("/work/alpha"),
 			"message": map[string]any{"content": "alpha unique prompt"},
 		},
 		map[string]any{
@@ -195,7 +196,7 @@ func setupBackendPaths(t *testing.T) string {
 	})
 	writeJSONL(t, filepath.Join(claude, "project-beta", "beta.jsonl"), []any{
 		map[string]any{
-			"type": "user", "cwd": "/work/beta",
+			"type": "user", "cwd": testjail.Place("/work/beta"),
 			"message": map[string]any{"content": "beta unique prompt"},
 		},
 		map[string]any{
@@ -253,15 +254,16 @@ func TestChatKeysMCPRejectsUnknownNamesBeforeResolution(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.IsError {
-		t.Fatalf("unknown key result = %#v, want tool error", result)
-	}
 	content, err := json.Marshal(result.Content)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(content), "not a tmux key") {
-		t.Fatalf("unknown key error = %s", content)
+	if got, want := fmt.Sprintf(
+		"error=%t %s",
+		result.IsError,
+		content,
+	), "error=true [{\"type\":\"text\",\"text\":\"\\\"Esc\\\" is not a tmux key — tmux would type it as text; send it literal (--literal, MCP literal=true) to mean that, or use one of: BSpace BTab DC Delete Down End Enter Escape Home IC Insert Left NPage PPage PageDown PageUp PgDn PgUp Right Space Tab Up F1-F12, each optionally prefixed C- M- S-\"}]"; got != want {
+		t.Fatalf("unknown key result = %q, want %q", got, want)
 	}
 }
 

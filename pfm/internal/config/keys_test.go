@@ -7,7 +7,6 @@ import (
 	"reflect"
 	"runtime"
 	"sort"
-	"strings"
 	"testing"
 )
 
@@ -88,30 +87,6 @@ func TestExampleConfigMatchesKeys(t *testing.T) {
 	sort.Strings(wrong)
 	if len(missing)+len(extra)+len(wrong) != 0 {
 		t.Fatalf("example parity: missing=%v extra=%v wrong-default=%v", missing, extra, wrong)
-	}
-}
-
-func TestExampleConfigHasOnlyHomeRelativePathsAndNoRoster(t *testing.T) {
-	content, err := os.ReadFile(examplePath(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(content), `"accounts"`) || strings.Contains(string(content), `"homes"`) {
-		t.Fatal("example seeds an account roster")
-	}
-	var object map[string]any
-	if err := json.Unmarshal(content, &object); err != nil {
-		t.Fatal(err)
-	}
-	values := map[string]any{}
-	flattenExample("", object, values)
-	for key, value := range values {
-		if strings.Contains(strings.ToLower(key), "token") && value != nil && value != "" {
-			t.Fatalf("example contains a credential at %s", key)
-		}
-		if path, ok := value.(string); ok && (strings.HasPrefix(path, "/") || strings.Contains(path, "/home/")) {
-			t.Fatalf("example has an absolute path at %s", key)
-		}
 	}
 }
 

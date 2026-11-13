@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -370,7 +371,7 @@ func TestWatchOnceStopsAtTheFirstIdle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Watch() error = %v", err)
 	}
-	if !strings.HasPrefix(out.String(), "IDLE seat") || !status.Alive() {
+	if out.String() != "IDLE seat idle_seconds=0\n" || !status.Alive() {
 		t.Fatalf("watch output = %q status = %#v", out.String(), status)
 	}
 }
@@ -477,8 +478,12 @@ func TestUnreadableClaudeSidechainDirectoryIsAnInspectError(t *testing.T) {
 	status, err := Inspect(context.Background(), Chat{
 		Name: "seat", ID: sessionID, Engine: "cc", Path: path, Live: true,
 	}, time.Now())
-	if err == nil || !strings.Contains(err.Error(), "read Claude sidechain directory") {
-		t.Fatalf("Inspect() = %#v, %v; want visible sidechain error", status, err)
+	if got, want := strings.ReplaceAll(
+		fmt.Sprint(err),
+		filepath.Dir(path),
+		"{dir}",
+	), "read Claude sidechain directory {dir}/session-with-unreadable-agents/subagents: open {dir}/session-with-unreadable-agents/subagents: not a directory"; got != want {
+		t.Fatalf("Inspect() error = %q, want %q (status %#v)", got, want, status)
 	}
 }
 
@@ -590,9 +595,9 @@ func TestWatchAnnouncesATurnEndedOnAnErrorAsIdleWithItsKind(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Watch() error = %v", err)
 	}
-	if !regexp.MustCompile(`^IDLE seat idle_seconds=\d+ error=server_error\n$`).MatchString(out.String()) ||
-		idleHooks != 1 || status.State != StateError {
-		t.Fatalf("watch output = %q hooks = %d status = %#v", out.String(), idleHooks, status)
+	got := regexp.MustCompile(`idle_seconds=\d+`).ReplaceAllString(out.String(), "idle_seconds={n}")
+	if got != "IDLE seat idle_seconds={n} error=server_error\n" || idleHooks != 1 || status.State != StateError {
+		t.Fatalf("watch output = %q hooks = %d status = %#v", got, idleHooks, status)
 	}
 }
 
@@ -621,7 +626,8 @@ func TestStatusLostNoteRendering(t *testing.T) {
 			t.Fatal(err)
 		}
 		if note != "" {
-			if output["lost_note"] != note || !strings.Contains(status.Line(), note) {
+			if output["lost_note"] != note ||
+				status.Line() != "seat\tlost\tidle=0s\t\tyour last message was not answered — re-send it" {
 				t.Fatalf("lost note missing: json=%s human=%q", data, status.Line())
 			}
 		} else if _, present := output["lost_note"]; present {

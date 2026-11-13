@@ -5,6 +5,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -67,18 +68,15 @@ func TestScanFailureIsRc2NeverUnknownChat(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv(paths.EnvCacheDB, filepath.Join(blocker, "index.db"))
+	var got strings.Builder
 	for _, args := range [][]string{{"chat", "status", "ghost", "--json"}, {"chat", "last", "ghost"}} {
 		var stdout, stderr bytes.Buffer
-		code := run(args, &stdout, &stderr)
-		if code != 2 || strings.Contains(stderr.String(), "no chat named") ||
-			strings.Contains(stdout.String(), "not-found") {
-			t.Fatalf(
-				"%v with a broken index = %d stdout=%q stderr=%q; want rc 2 naming the failure",
-				args,
-				code,
-				stdout.String(),
-				stderr.String(),
-			)
-		}
+		fmt.Fprintf(&got, "%d %q %s", run(args, &stdout, &stderr), stdout.String(), stderr.String())
+	}
+	if got, want := rooted(
+		got.String(),
+		filepath.Dir(blocker),
+	), "2 \"\" pfm chat: inspect cache database {root}/not-a-directory/index.db: stat {root}/not-a-directory/index.db: not a directory\n2 \"\" pfm chat: inspect cache database {root}/not-a-directory/index.db: stat {root}/not-a-directory/index.db: not a directory\n"; got != want {
+		t.Fatalf("a broken index = %q, want %q", got, want)
 	}
 }

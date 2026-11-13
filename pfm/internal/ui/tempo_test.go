@@ -44,7 +44,7 @@ func TestTempoRulerLabelsItsTicksAndMarksTheSelectedChat(t *testing.T) {
 			t.Errorf("ruler %q lacks the tick %q", plain, label)
 		}
 	}
-	if !strings.Contains(plain, "▲3m") {
+	if plain != "╰─────────────┴7d─────────────┴1d─────────┴6h─────────────┴1h────────────┴10m───────▲3m──────┴1m────" {
 		t.Errorf("the selected chat is a triangle with its age beside it, got %q", plain)
 	}
 	// A chat with no place on the timeline leaves the ruler unmarked.
@@ -52,7 +52,9 @@ func TestTempoRulerLabelsItsTicksAndMarksTheSelectedChat(t *testing.T) {
 	if row, _ := first.selectedRow(); hasRecency(row) {
 		t.Fatalf("fixture drift: the first row is %v", row.Kind)
 	}
-	if strings.Contains(ansi.Strip(first.tempoRuler(100)), "▲") {
+	if ansi.Strip(
+		first.tempoRuler(100),
+	) != "╰─────────────┴7d─────────────┴1d─────────┴6h─────────────┴1h────────────┴10m────────────────┴1m────" {
 		t.Error("an action row is not on the timeline and must not be marked")
 	}
 }

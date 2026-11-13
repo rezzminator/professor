@@ -3,7 +3,6 @@ package installer
 import (
 	"fmt"
 	"strconv"
-	"strings"
 	"testing"
 )
 
@@ -13,8 +12,12 @@ const beyondFloat64 = "9007199254740993"
 
 func requireKeepsBeyondFloat64(t *testing.T, door string, rewritten []byte) {
 	t.Helper()
-	if !strings.Contains(string(rewritten), beyondFloat64) {
-		t.Fatalf("%s rewrote a user-owned number %s as something else: %s", door, beyondFloat64, rewritten)
+	var document map[string]any
+	if err := unmarshalKeepingNumbers(rewritten, &document); err != nil {
+		t.Fatalf("%s rewrote invalid JSON: %v\n%s", door, err, rewritten)
+	}
+	if fmt.Sprint(document["counter"]) != beyondFloat64 {
+		t.Fatalf("%s rewrote the user-owned counter %s as %v: %s", door, beyondFloat64, document["counter"], rewritten)
 	}
 }
 

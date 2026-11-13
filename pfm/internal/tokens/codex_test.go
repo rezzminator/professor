@@ -184,7 +184,8 @@ func TestCodexNamesTheReadErrorBehindAnEmptyHome(t *testing.T) {
 // working directory's sessions/.
 func TestCodexRefusesAnEmptyHome(t *testing.T) {
 	code, _, stderr := auditWith(t, Options{}, "--codex", "--prices", fixture(t, "model-cost.json"))
-	if code != 1 || !strings.Contains(stderr, "READ ERRORS: no Codex home is configured; pass --codex-root DIR") {
+	if code != 1 ||
+		stderr != "pfm tokens: no Codex rollouts under ; READ ERRORS: no Codex home is configured; pass --codex-root DIR\n" {
 		t.Fatalf("exit %d stderr %q, want 1 naming the missing home", code, stderr)
 	}
 }
@@ -222,14 +223,13 @@ func TestCodexReadsEveryCodexHome(t *testing.T) {
 		&stderr,
 		runtime,
 	)
-	if code != 0 || !strings.Contains(stdout.String(), homes[1]) ||
-		!strings.Contains(stdout.String(), " · 2 threads of 2 rollouts") ||
-		!strings.Contains(stdout.String(), "cx-thread-9") {
-		t.Fatalf(
-			"exit %d\nstdout:\n%s\nstderr:\n%s\nwant both homes' rollouts read",
-			code,
-			stdout.String(),
-			stderr.String(),
-		)
+	if code != 0 || stderr.Len() != 0 {
+		t.Fatalf("exit %d stderr %q", code, stderr.String())
 	}
+	golden(
+		t,
+		"codex_homes.txt",
+		strings.NewReplacer(homes[0], "{home0}", homes[1], "{home1}", absTestdata(t), "testdata").
+			Replace(stdout.String()),
+	)
 }

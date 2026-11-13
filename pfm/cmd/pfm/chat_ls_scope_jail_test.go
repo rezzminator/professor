@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -24,7 +25,7 @@ func TestChatLSScopesByRepositoryNotByPathPrefix(t *testing.T) {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
-	fixture := testjail.GitRepoWithWorktrees(t, "acme")
+	fixture := testjail.GitRepoWithWorktrees(t, deps.RealRunner{}, "acme")
 	jail := newKillCLIJail(t)
 	socket := "cc-" + strconv.FormatInt(time.Now().Unix(), 10) + "-" + strconv.Itoa(os.Getpid()) + "-7"
 	if output, err := exec.Command(

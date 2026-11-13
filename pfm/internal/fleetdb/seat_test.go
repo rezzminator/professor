@@ -264,7 +264,8 @@ func TestSeatPaneHistoricalDuplicatesRefuse(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, found, err := state.SeatByPane(ctx, owner.HerdrSocket, owner.HerdrPane)
-	if err == nil || !strings.Contains(err.Error(), "multiple live seats") || found || got.SeatID != "" {
+	if err == nil || err.Error() != "herdr pane w6:p3 at /fixture/herdr.sock has multiple live seats" || found ||
+		got.SeatID != "" {
 		t.Fatalf("ambiguous owner=%+v found=%v err=%v", got, found, err)
 	}
 }

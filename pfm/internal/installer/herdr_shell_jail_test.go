@@ -227,8 +227,9 @@ func TestHerdrShellMissingCapturedShellFallsBack(t *testing.T) {
 	cmd := exec.Command(wrapper, "-c", "printf 'shell=%s auto=%s' \"$SHELL\" \"${PFM_AUTO_OPEN-unset}\"")
 	cmd.Env = append(os.Environ(), "SHELL="+wrapper, "PFM_AUTO_OPEN=pfm")
 	out, err := cmd.CombinedOutput()
-	if err != nil || !strings.Contains(string(out), "not executable; using /bin/sh") ||
-		!strings.Contains(string(out), "shell=/bin/sh auto=unset") {
+	want := "pfm herdr shell: shell " + shell + " is not executable; using /bin/sh — check your account login shell" +
+		" and rerun pfm install\nshell=/bin/sh auto=unset"
+	if err != nil || string(out) != want {
 		t.Fatalf("missing shell did not leave a usable fallback: %s err=%v", out, err)
 	}
 }

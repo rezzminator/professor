@@ -1,0 +1,6 @@
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  · account 6 · Claude · provider confirmation unavailable                                                            
+  ⚠ account 6 rate-limited — retry 08:10; limits unavailable                                                          
+  ────────────────────────────────────────────────
+  · account 6 · Claude · provider confirmation un…
+  ⚠ account 6 rate-limited — retry 08:10; limits …

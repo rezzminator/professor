@@ -8,6 +8,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // TestBuildCosmosResolvesParticipantsAndAggregatesEdges pins the current
@@ -910,7 +911,7 @@ func TestRowKeyIsTheOneJoinKeyIDThenSocketPaneThenCWDProject(t *testing.T) {
 	}{
 		{
 			name: "an ID always wins, whatever else the row carries",
-			row:  Row{Kind: LiveClaude, ID: "row-1", Socket: "cc-x", PaneID: "%1", CWD: "/work/x", Project: "x"},
+			row:  Row{Kind: LiveClaude, ID: "row-1", Socket: "cc-x", PaneID: "%1", CWD: testjail.Place("/work/x")},
 			want: "row-1",
 		},
 		{
@@ -920,8 +921,8 @@ func TestRowKeyIsTheOneJoinKeyIDThenSocketPaneThenCWDProject(t *testing.T) {
 		},
 		{
 			name: "no ID, no socket: where it lives",
-			row:  Row{Kind: ResumeClaude, CWD: "/work/beta", Project: "beta"},
-			want: ResumeClaude.String() + "\x00/work/beta\x00beta",
+			row:  Row{Kind: ResumeClaude, CWD: testjail.Place("/work/beta"), Project: "beta"},
+			want: ResumeClaude.String() + "\x00" + testjail.Place("/work/beta") + "\x00beta",
 		},
 	}
 	for _, test := range tests {

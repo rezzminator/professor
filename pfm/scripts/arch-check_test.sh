@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Self-test for scripts/arch-check.sh's C1, C5, C10, C12, C13, C23, C25, C26, C27, C28, C29, C30, C31, C32 and C33 ratchets, the C34 jail tag and
+# Self-test for scripts/arch-check.sh's C1, C5, C10, C12, C13, C23, C25, C26, C27, C28, C29, C30, C31, C32, C33 and C35 ratchets, the C34 jail tag and
 # how it folds its concurrent checks: print order, exit status, and a check job
 # that dies. It runs arch-check.sh against a throwaway git fixture (PFM=<fixture>),
 # never against this repo, and asserts on the relevant CHECK line rather than the
@@ -348,17 +348,19 @@ else
   bad "C25: could not build the unjailed-TestMain fixture"
 fi
 
-REPO_C25_OK="$T/c25-jailed"
-if c25_fixture "$REPO_C25_OK" "$JAILED_MAIN"; then
-  line=$(check_line "$REPO_C25_OK" C25-testmain-jail)
-  if [[ "$line" == *PASS* && "$line" == *"0 baselined, 0 new"* ]]; then
-    ok "C25: a TestMain through testjail.Run passes"
+for door in Run RunInJail; do
+  REPO_C25_OK="$T/c25-jailed-$door"
+  if c25_fixture "$REPO_C25_OK" "${JAILED_MAIN/testjail.Run(m)/testjail.$door(m)}"; then
+    line=$(check_line "$REPO_C25_OK" C25-testmain-jail)
+    if [[ "$line" == *PASS* && "$line" == *"0 baselined, 0 new"* ]]; then
+      ok "C25: a TestMain through testjail.$door passes"
+    else
+      bad "C25: expected PASS for a TestMain through testjail.$door" "$line"
+    fi
   else
-    bad "C25: expected PASS for a jailed TestMain" "$line"
+    bad "C25: could not build the testjail.$door fixture"
   fi
-else
-  bad "C25: could not build the jailed-TestMain fixture"
-fi
+done
 
 REPO_C25_DATA="$T/c25-testdata"
 if c25_fixture "$REPO_C25_DATA" "$JAILED_MAIN"; then
@@ -852,50 +854,45 @@ else
   bad "C10: could not build the git fixture"
 fi
 
-# ---- C33: a directory's move count and a jail file's real count only fall ----
+# ---- C33: a jail file's real count only falls ----
 
 # c33_want <verdict> <detail>: the exact CHECK line arch-check prints for C33.
-c33_want() { printf 'CHECK %-22s %-7s %s' C33-unit-kind "$1" "$2"; }
+c33_want() { printf 'CHECK %-22s %-7s %s' C33-jail-tests "$1" "$2"; }
 
-REPO_C33="$T/unit-kind"
+REPO_C33="$T/jail-tests"
 if fixture "$REPO_C33"; then
   mkdir -p "$REPO_C33/internal/call"
   printf 'module pfm\n' > "$REPO_C33/go.mod"
   printf 'package call\n\nfunc TestEngine(t *testing.T) { _ = t.TempDir() }\n\nfunc TestStarts(t *testing.T) { _ = exec.Command("sh") }\n' \
     > "$REPO_C33/internal/call/engine_test.go"
   printf 'package call\n\nfunc TestServer(t *testing.T) {}\n' > "$REPO_C33/internal/call/tmux_jail_test.go"
-  printf 'internal/call 1\n' > "$REPO_C33/.arch/unit-kind.txt"
   printf 'internal/call/tmux_jail_test.go 1\n' > "$REPO_C33/.arch/jail-tests.txt"
   printf '%s\n' '- C33 `internal/call/tmux_jail_test.go` (1): a real tmux server, kept until a fake or the journey can play it.' \
     > "$REPO_C33/.arch/exceptions.md"
   eq_line() { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1" "want: $2" "got:  $3"; fi; }
-  eq_line "C33: the baselined move and real counts pass" \
-    "$(c33_want PASS "1 in 1 keys, none above baseline · 1 in 1 keys, none above baseline")" "$(check_line "$REPO_C33" C33-unit-kind)"
-  printf '\nfunc TestSleeps(t *testing.T) { _ = exec.Command("sleep", "1") }\n' >> "$REPO_C33/internal/call/engine_test.go"
-  eq_line "C33: a new process test outside a jail file FAILs naming its directory and the count over unit-kind.txt" \
-    "$(c33_want FAIL "internal/call (1->2)")" "$(check_line "$REPO_C33" C33-unit-kind)"
-  sed -i '/TestSleeps/d' "$REPO_C33/internal/call/engine_test.go"
+  eq_line "C33: the baselined real count passes, a process test outside a jail file counting nowhere" \
+    "$(c33_want PASS "1 in 1 keys, none above baseline")" "$(check_line "$REPO_C33" C33-jail-tests)"
   printf '\nfunc TestSleeps(t *testing.T) { _ = exec.Command("sleep", "1") }\n' >> "$REPO_C33/internal/call/tmux_jail_test.go"
   eq_line "C33: the same test in a jail file FAILs naming the file and the count over jail-tests.txt" \
-    "$(c33_want FAIL "internal/call/tmux_jail_test.go (1->2)")" "$(check_line "$REPO_C33" C33-unit-kind)"
+    "$(c33_want FAIL "internal/call/tmux_jail_test.go (1->2)")" "$(check_line "$REPO_C33" C33-jail-tests)"
   printf 'internal/call/tmux_jail_test.go 2\n' > "$REPO_C33/.arch/jail-tests.txt"
   eq_line "C33: a raised jail row whose reason still carries the old count FAILs" \
-    "$(c33_want FAIL "no C33 reason in .arch/exceptions.md for internal/call/tmux_jail_test.go")" "$(check_line "$REPO_C33" C33-unit-kind)"
+    "$(c33_want FAIL "no C33 reason in .arch/exceptions.md for internal/call/tmux_jail_test.go")" "$(check_line "$REPO_C33" C33-jail-tests)"
   sed -i 's/(1)/(2)/' "$REPO_C33/.arch/exceptions.md"
   eq_line "C33: the row and its reason raised together pass" \
-    "$(c33_want PASS "1 in 1 keys, none above baseline · 2 in 1 keys, none above baseline")" "$(check_line "$REPO_C33" C33-unit-kind)"
+    "$(c33_want PASS "2 in 1 keys, none above baseline")" "$(check_line "$REPO_C33" C33-jail-tests)"
   printf 'package loud\n\nfunc TestSeat(t *testing.T) {}\n' > "$REPO_C33/internal/loud/seat_jail_linux_test.go"
   eq_line "C33: an OS-selected jail file is a jail file, and one with no row FAILs" \
     "$(c33_want FAIL "internal/loud/seat_jail_linux_test.go (new 1)")" \
-    "$(check_line "$REPO_C33" C33-unit-kind)"
+    "$(check_line "$REPO_C33" C33-jail-tests)"
   mkdir -p "$REPO_C33/bin"
-  printf '%s\n' '#!/usr/bin/env bash' 'case "${!#}" in' '  */unit-kind.txt) exit 7 ;;' 'esac' "exec $(command -v mv) \"\$@\"" > "$REPO_C33/bin/mv"
+  printf '%s\n' '#!/usr/bin/env bash' 'case "${!#}" in' '  */jail-tests.txt) exit 7 ;;' 'esac' "exec $(command -v mv) \"\$@\"" > "$REPO_C33/bin/mv"
   chmod +x "$REPO_C33/bin/mv"
   # The fixture has no arch-c24.sh, so the run's own exit is 127; the ERROR line
   # is what sets it to 2 on a real tree (the exit: rows below pin that fold).
   PATH="$REPO_C33/bin:$PATH" c23_measure "$REPO_C33" > "$T/c33-measure.log" 2>&1
   eq_line "C33: a baseline write failure under --measure is an ERROR, never MEASURE" \
-    "$(c33_want ERROR "could not update .arch/unit-kind.txt")" "$(grep 'CHECK C33-unit-kind ' "$T/c33-measure.log")"
+    "$(c33_want ERROR "could not update .arch/jail-tests.txt")" "$(grep 'CHECK C33-jail-tests ' "$T/c33-measure.log")"
 else
   bad "C33: could not build the git fixture"
 fi
@@ -930,6 +927,31 @@ else
   bad "C34: could not build the git fixture"
 fi
 
+# ---- C35: a new substring-only test FAILs; the baseline only shrinks --------
+
+REPO_C35="$T/substring-tests"
+if fixture "$REPO_C35"; then
+  : > "$REPO_C35/.arch/substring-tests.txt"
+  printf 'module pfm\n' > "$REPO_C35/go.mod"
+  printf 'package loud\n\nimport (\n\t"strings"\n\t"testing"\n)\n\nfunc TestTalk(t *testing.T) {\n\tif !strings.Contains(Shout(), "hi") {\n\t\tt.Error("quiet")\n\t}\n}\n' \
+    > "$REPO_C35/internal/loud/talk_test.go"
+  expect_line "C35: a substring-only test the baseline lacks FAILs naming it" \
+    "$(check_line "$REPO_C35" C35-substring-tests)" C35-substring-tests FAIL "new: internal/loud/talk_test.go TestTalk "
+  printf 'internal/loud/talk_test.go TestTalk\n' > "$REPO_C35/.arch/substring-tests.txt"
+  mkdir -p "$REPO_C35/internal/loud/testdata" && printf 'package x\nfunc {\n' > "$REPO_C35/internal/loud/testdata/x_test.go"
+  expect_line "C35: a baselined substring-only test passes; testdata is not read" \
+    "$(check_line "$REPO_C35" C35-substring-tests)" C35-substring-tests PASS "1 baselined, 0 new"
+  sed -i 's/!strings.Contains(Shout(), "hi")/Shout() != "hi"/' "$REPO_C35/internal/loud/talk_test.go"
+  expect_line "C35: a test rewritten to an exact check leaves the baseline, asking for --measure" \
+    "$(check_line "$REPO_C35" C35-substring-tests)" C35-substring-tests PASS "0 baselined, 0 new; 1 fixed — run --measure to lock the shrink"
+  printf 'package loud\nfunc {\n' > "$REPO_C35/internal/loud/bad_test.go"
+  expect_line "C35: a test file that does not parse is an ERROR, never a pass" \
+    "$(check_line "$REPO_C35" C35-substring-tests)" C35-substring-tests ERROR \
+    "testassert could not look: testassert: parse internal/loud/bad_test.go: $REPO_C35/internal/loud/bad_test.go:2:6: expected 'IDENT', found '{'"
+else
+  bad "C35: could not build the git fixture"
+fi
+
 # ---- C13: a source whose tests are all real mirrors to its jail file -------
 
 REPO_C13="$T/test-mirror"
@@ -949,7 +971,7 @@ fi
 
 # ---- the concurrent checks: order, exit status, a job that dies ------------
 
-# green_fixture <dir>: a tree on which all 32 checks PASS — the fixture plus what
+# green_fixture <dir>: a tree on which all 34 checks PASS — the fixture plus what
 # C12, C14 and C15 parse, an internal/mcpserv package for C10, a deps registry
 # for C29, a jailed test file for C21 and C25, a module with one test for C33, and the C24 script arch-check.sh
 # runs from $PFM/scripts (which C30 reads, so <dir> is <root>/pfm), with every
@@ -1004,17 +1026,17 @@ run_all() {
 }
 
 # Today's order: C1 … C8, C10 … C23, then C25 … C34, then C24 (its own script, last).
-EXPECTED_ORDER="C1-ceiling-src C2-ceiling-test C3-cmd-budget C4-cmd-primitives C5-tmux-runner C6-atomic-write C7-sql-open C8-negation-dirs C10-mcp-argv C11-db-names C12-claude-pointers C13-test-mirror C14-usage-parity C15-internal-usage C16-env-outside-paths C17-dup-functions C18-engine-spellings C19-env-namespace C20-codex-home C21-test-jail C22-host-doors C23-bare-log C25-testmain-jail C26-exec-write C27-identity-env C28-signal-door C29-os-door C30-shell-platform C31-front-door C32-os-door-test C33-unit-kind C34-jail-tag C24-unwrapped-door"
+EXPECTED_ORDER="C1-ceiling-src C2-ceiling-test C3-cmd-budget C4-cmd-primitives C5-tmux-runner C6-atomic-write C7-sql-open C8-negation-dirs C10-mcp-argv C11-db-names C12-claude-pointers C13-test-mirror C14-usage-parity C15-internal-usage C16-env-outside-paths C17-dup-functions C18-engine-spellings C19-env-namespace C20-codex-home C21-test-jail C22-host-doors C23-bare-log C25-testmain-jail C26-exec-write C27-identity-env C28-signal-door C29-os-door C30-shell-platform C31-front-door C32-os-door-test C33-jail-tests C34-jail-tag C35-substring-tests C24-unwrapped-door"
 
 REPO_GREEN="$T/green/pfm"
 if green_fixture "$REPO_GREEN"; then
   run_all "$REPO_GREEN"
   order=$(printf '%s\n' "$out" | awk '$1 == "CHECK" {printf "%s ", $2}' | sed 's/ $//')
   passes=$(printf '%s\n' "$out" | grep -c '^CHECK [^ ]* *PASS ')
-  if [ "$rc" -eq 0 ] && [ "$passes" -eq 33 ] && [ "$order" = "$EXPECTED_ORDER" ]; then
-    ok "exit: a tree where all 33 checks PASS exits 0, one line per check in today's order"
+  if [ "$rc" -eq 0 ] && [ "$passes" -eq 34 ] && [ "$order" = "$EXPECTED_ORDER" ]; then
+    ok "exit: a tree where all 34 checks PASS exits 0, one line per check in today's order"
   else
-    bad "exit: expected rc 0, 33 PASS lines in order" "rc=$rc passes=$passes" "$order" "$out"
+    bad "exit: expected rc 0, 34 PASS lines in order" "rc=$rc passes=$passes" "$order" "$out"
   fi
 else
   bad "exit: could not build the green fixture"
@@ -1025,7 +1047,7 @@ if green_fixture "$REPO_FAIL"; then
   printf 'func Again() { log.Fatalf("bye") }\n' >> "$REPO_FAIL/internal/loud/loud.go"
   run_all "$REPO_FAIL"
   others=$(printf '%s\n' "$out" | grep '^CHECK ' | grep -vc 'C23-bare-log .*FAIL ')
-  if [ "$rc" -eq 1 ] && [ "$others" -eq 32 ] && [[ "$out" == *"C23-bare-log"*"FAIL"*"internal/loud/loud.go (1->2)"* ]]; then
+  if [ "$rc" -eq 1 ] && [ "$others" -eq 33 ] && [[ "$out" == *"C23-bare-log"*"FAIL"*"internal/loud/loud.go (1->2)"* ]]; then
     ok "exit: one FAIL and no ERROR exits 1"
   else
     bad "exit: expected rc 1 with only C23 failing" "rc=$rc others=$others" "$out"
@@ -1058,8 +1080,8 @@ if green_fixture "$REPO_KILL"; then
   passes=$(printf '%s\n' "$out" | grep -c '^CHECK [^ ]* *PASS ')
   lines=$(printf '%s\n' "$out" | grep -c '^CHECK ')
   line=$(printf '%s\n' "$out" | grep '^CHECK C1-ceiling-src ' || true)
-  if [ "$rc" -eq 2 ] && [ "$lines" -eq 33 ] && [ "$passes" -eq 32 ] && [[ "$line" == *ERROR* && "$line" == *"without leaving its CHECK line"* ]]; then
-    ok "a check job killed before its result is an ERROR line naming it, exit 2, the other 32 checks PASS"
+  if [ "$rc" -eq 2 ] && [ "$lines" -eq 34 ] && [ "$passes" -eq 33 ] && [[ "$line" == *ERROR* && "$line" == *"without leaving its CHECK line"* ]]; then
+    ok "a check job killed before its result is an ERROR line naming it, exit 2, the other 33 checks PASS"
   else
     bad "a killed check job must print ERROR for that check and exit 2" "rc=$rc lines=$lines passes=$passes" "$line"
   fi

@@ -10,6 +10,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -621,9 +622,9 @@ func TestInstallWithMissingNamedConfig(t *testing.T) {
 		want := scenario.prefix + "--config " + missing + " does not exist; refusing to converge host wiring on defaults (a missing explicit config would disable every MCP service it names)\n"
 		output := stderr.String()
 		if scenario.code == 0 {
-			output = stdout.String()
+			output = strings.SplitAfterN(stdout.String(), "\n", 2)[0]
 		}
-		if code != scenario.code || !strings.Contains(output, want) {
+		if code != scenario.code || output != want {
 			t.Fatalf("code=%d want=%d output=%q expected=%q", code, scenario.code, output, want)
 		}
 	}
@@ -666,4 +667,27 @@ func stageStorePlugins(t *testing.T, home string) {
 	}
 	testjail.StageClaudePlugins(t, storeDir, ids)
 	testjail.StageTracetreeKit(t, storeDir, ids)
+}
+
+// rooted writes the run-unique temp root as {root}, so output naming it compares exactly.
+func rooted(s, root string) string { return strings.ReplaceAll(s, root, "{root}") }
+
+// scrub normalises what varies per run: the temp root, session ids, socket names and clock stamps.
+func scrub(s, root string) string {
+	for _, r := range []struct{ pattern, token string }{
+		{`[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`, "{uuid}"},
+		{`\b(cc|cx|oc)-\d+-\d+-\d+\b`, "{socket}"},
+		{`\d{4}-\d\d-\d\d[T ]\d\d:\d\d(:\d\d(\.\d+)?)?Z?`, "{time}"},
+		{`\d{4}-\d\d-\d\dT\d\dh\b`, "{hour}"},
+		{`\b[0-9a-f]{32}\b`, "{hash}"},
+	} {
+		s = regexp.MustCompile(r.pattern).ReplaceAllString(s, r.token)
+	}
+	if host, err := os.Hostname(); err == nil {
+		s = strings.ReplaceAll(s, "host "+host+" ", "host {host} ")
+	}
+	if root == "" {
+		return s
+	}
+	return rooted(s, root)
 }

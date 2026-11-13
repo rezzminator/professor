@@ -136,8 +136,8 @@ func TestProcessEnginesUseRosterHomesConfigAndPrompt(t *testing.T) {
 	machine := pfmconfig.Config{
 		Accounts:      []pfmconfig.Account{{ID: 2, ConfigDir: configDir}},
 		CodexAccounts: []pfmconfig.CodexAccount{{ID: 4, Home: codexHome}},
-		Claude:        pfmconfig.Claude{Binary: "claude"},
-		Codex:         pfmconfig.Codex{Binary: "codex"},
+		Claude:        pfmconfig.Claude{Binary: filepath.Join(directory, "claude")},
+		Codex:         pfmconfig.Codex{Binary: filepath.Join(directory, "codex")},
 	}
 	tests := []struct {
 		name       string
@@ -244,8 +244,12 @@ func TestProcessEngineLeavesDocumentContentOnDisk(t *testing.T) {
 	if _, err := engine.Run(context.Background(), input); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(raw), input.ContentFiles[0]) || strings.Contains(string(raw), "prepared exchange") {
-		t.Fatalf("document ask must reference files without preloading their unbounded contents: %s", raw)
+	if got, want := strings.ReplaceAll(
+		string(raw),
+		filepath.Dir(input.ContentFiles[0]),
+		"{dir}",
+	), "Read the prepared content files listed below. Work ONLY from them; no network access, no other files.\n1. {dir}/exchange.md — source: last exchange\nTASK: summarize\nRules: if a file is truncated or unusable, say so explicitly for that file instead of guessing.\nAfter your answer, append a section titled exactly \"EVIDENCE\" listing one line per load-bearing claim:\n  [file N] <location: line range, turn number, or chunk id> — \"<short verbatim quote>\""; got != want {
+		t.Fatalf("document ask stdin = %q, want %q", got, want)
 	}
 }
 
@@ -313,8 +317,13 @@ func TestProcessEngineDistinguishesMissingCrashAndTimeout(t *testing.T) {
 	machine.Codex.Binary = "missing-codex"
 	_, err := ResolveEngine(pfmengine.Codex, machine)
 	var missing *BinaryMissingError
-	if !errors.As(err, &missing) || !strings.Contains(err.Error(), "codex binary MISSING") {
-		t.Fatalf("missing error = %v", err)
+	if got, want := strings.ReplaceAll(
+		fmt.Sprint(err),
+		directory,
+		"{dir}",
+	), "codex binary MISSING (missing-codex)"; !errors.As(err, &missing) ||
+		got != want {
+		t.Fatalf("missing error = %q, want %q", got, want)
 	}
 
 	writeAskBinary(t, directory, "codex")
@@ -324,9 +333,12 @@ func TestProcessEngineDistinguishesMissingCrashAndTimeout(t *testing.T) {
 	}
 	engine = WithRunner(engine, askChild(deps.StartOutput{Stderr: "first error\nfatal tail\n", ExitCode: 7}))
 	_, err = engine.Run(context.Background(), validAskInput(t, "codex"))
-	if err == nil || !strings.Contains(err.Error(), "exit status 7") ||
-		!strings.Contains(err.Error(), `"first error\nfatal tail"`) {
-		t.Fatalf("crash error = %v", err)
+	if got, want := strings.ReplaceAll(
+		fmt.Sprint(err),
+		directory,
+		"{dir}",
+	), "codex ask failed: cx headless run failed: exit status 7; stderr tail \"first error\\nfatal tail\"; stdout tail \"\""; got != want {
+		t.Fatalf("crash error = %q, want %q", got, want)
 	}
 
 	engine, err = ResolveEngine(pfmengine.Codex, askMachine(t, "codex"))
@@ -339,8 +351,12 @@ func TestProcessEngineDistinguishesMissingCrashAndTimeout(t *testing.T) {
 	defer cancel()
 	started := time.Now()
 	_, err = engine.Run(ctx, validAskInput(t, "codex"))
-	if err == nil || !strings.Contains(err.Error(), "codex ask timed out") {
-		t.Fatalf("timeout error = %v", err)
+	if got, want := strings.ReplaceAll(
+		fmt.Sprint(err),
+		directory,
+		"{dir}",
+	), "codex ask timed out: context deadline exceeded"; got != want {
+		t.Fatalf("timeout error = %q, want %q", got, want)
 	}
 	if elapsed := time.Since(started); elapsed > time.Second {
 		t.Fatalf("timeout returned after %s, want under 1s", elapsed)
@@ -365,11 +381,21 @@ func askMachine(t *testing.T, engineName string) pfmconfig.Config {
 	if err != nil {
 		panic(err)
 	}
+	binaries := t.TempDir()
+	for _, name := range []string{"claude", "codex"} {
+		if err := testjail.WriteExecutableNeverRun(
+			filepath.Join(binaries, name),
+			[]byte("#!/bin/sh\n"),
+			0o700,
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
 	return pfmconfig.Config{
 		Accounts:      []pfmconfig.Account{{ID: 1, ConfigDir: configDir}},
 		CodexAccounts: []pfmconfig.CodexAccount{{ID: 1, Home: codexHome}},
-		Claude:        pfmconfig.Claude{Binary: "claude"},
-		Codex:         pfmconfig.Codex{Binary: "codex"},
+		Claude:        pfmconfig.Claude{Binary: filepath.Join(binaries, "claude")},
+		Codex:         pfmconfig.Codex{Binary: filepath.Join(binaries, "codex")},
 		Ask:           pfmconfig.AskConfig{Engine: id},
 	}
 }

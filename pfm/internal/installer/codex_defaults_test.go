@@ -89,9 +89,7 @@ func TestCodexDefaultsNamesYieldedMCPTables(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := "  change  merge Professor defaults into " + config + "; remove pfm's MCP tables: mcp_servers.chat-professor\n"
-	if !strings.Contains(output.String(), want) {
-		t.Fatalf("defaults report = %q, want %q", output.String(), want)
-	}
+	wantOutputLines(t, output.String(), []string{strings.TrimSuffix(want, "\n")}, "merge Professor defaults")
 }
 
 func TestYieldedCodexMCPTables(t *testing.T) {
@@ -376,14 +374,9 @@ func TestCodexDefaultsRemovesOnlyManagedInstructions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var doc map[string]any
-	if _, err := toml.Decode(got, &doc); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := doc["developer_instructions"]; ok {
-		t.Fatal("managed-only key retained")
-	}
-	if doc["model"] != "personal" || !strings.Contains(got, "# keep note") {
-		t.Fatal("unrelated config changed")
+	want := "background_terminal_max_timeout = 3600000\n # keep note\nmodel = 'personal'\n\n[features.multi_agent_v2]\n" +
+		"wait_agent_enabled = true\n\n[features.code_mode]\ndefault_exec_yield_time_ms = 3600000\n"
+	if got != want {
+		t.Fatalf("merged config = %q, want only the managed key gone: %q", got, want)
 	}
 }

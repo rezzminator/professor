@@ -70,17 +70,12 @@ func TestCodexPaneBindingDoctorNamesContestedAndRetiredBindings(t *testing.T) {
 	var stdout bytes.Buffer
 	warnings := doctor.PrintCodexPaneBinding(ctx, &stdout, database, commandRuntime{Paths: resolved})
 	report := stdout.String()
-	if warnings < 2 {
-		t.Fatalf("warnings = %d, want at least 2 (contested + retired): %s", warnings, report)
-	}
-	for _, want := range []string{
-		"codex_pane_binding=contested",
-		"codex_pane_binding=retired-thread",
-		"codex_pane_bindings total=2 live=2 stale=0 contested=1 retired=1",
-	} {
-		if !strings.Contains(report, want) {
-			t.Errorf("report is missing %q:\n%s", want, report)
-		}
+	if got, want := scrub(
+		report,
+		root,
+	), "doctor: warning codex_pane_binding=contested thread={uuid} panes={socket} %0,{socket} %0\ndoctor: warning codex_pane_binding=retired-thread thread={uuid} panes={socket} %0,{socket} %0\ndoctor: codex_pane_bindings total=2 live=2 stale=0 contested=1 retired=1 undecodable=0\ndoctor: warning codex_pane=unfollowable socket={socket} pane=%0 reason=\"the bound thread was retired by a /clear, so this binding is impossible\"\ndoctor: warning codex_pane=unfollowable socket={socket} pane=%0 reason=\"the bound thread was retired by a /clear, so this binding is impossible\"\ndoctor: codex_panes live=2 unfollowable=2\ndoctor: remediation: an unfollowable pane's next /clear goes unnoticed — name the chat with `pfm chat name`, or wait one index refresh if the chat was renamed moments ago\ndoctor: remediation: a RETIRED binding is dropped automatically on the next gather pass (`pfm ls`), which returns the pane to unbound so its own status line can re-seat it — unless that status line already shows a NAME resolving only to retired threads (\"status line name matches only threads a /clear already retired\"); that pane cannot re-seat on its own, because a name never moves a binding and every thread it names is dead. Its remedy is giving the pane an identity pfm can observe again: rename it onto a live thread, or /clear it, which is the one input Codex renders as a bare thread id; a CONTESTED binding resolves as soon as either pane shows a bare thread id, which happens on its next /clear\n"; warnings != 4 ||
+		got != want {
+		t.Fatalf("warnings = %d, report = %q, want %q", warnings, got, want)
 	}
 }
 
@@ -214,11 +209,12 @@ func TestCodexPaneDoctorStaysQuietOnAFollowablePane(t *testing.T) {
 	var stdout bytes.Buffer
 	warnings := doctor.PrintCodexPaneBinding(ctx, &stdout, database, commandRuntime{Paths: resolved})
 	report := stdout.String()
-	if warnings != 0 || strings.Contains(report, "unfollowable socket") {
-		t.Fatalf("a followable pane was reported unfollowable (%d warnings):\n%s", warnings, report)
-	}
-	if !strings.Contains(report, "codex_panes live=1 unfollowable=0") {
-		t.Fatalf("doctor did not report its own coverage:\n%s", report)
+	if got, want := rooted(
+		report,
+		root,
+	), "doctor: codex_pane_bindings total=0 live=0 stale=0 contested=0 retired=0 undecodable=0\ndoctor: codex_panes live=1 unfollowable=0\n"; warnings != 0 ||
+		got != want {
+		t.Fatalf("warnings = %d, report = %q, want %q", warnings, got, want)
 	}
 }
 
@@ -273,5 +269,55 @@ func TestCodexPaneDoctorUsesHeldRootDespiteModelFirstStatus(t *testing.T) {
 	bound, found, err := manager.CodexPaneBinding(ctx, socket, "%0")
 	if err != nil || !found || bound != id {
 		t.Fatalf("read-only doctor changed binding: %q %v %v", bound, found, err)
+	}
+}
+
+// A binding whose pane is long gone is ordinary history, not a contest. This
+// host held 78 bindings for 19 live panes; counting the dead ones would have
+// reported a fleet-wide emergency made almost entirely of litter, and a check
+// that cries wolf fails the same way as one that stays silent.
+func TestCodexPaneBindingDoctorCountsDeadPaneBindingsAsStale(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	root := jailTest(t)
+	tmuxTmpDir := filepath.Join(root, "tmuxtmp")
+	resolved := jailPaths(t)
+	resolved.TmuxDir = filepath.Join(tmuxTmpDir, "tmux-"+strconv.Itoa(os.Getuid()))
+	database, err := store.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
+	ctx := context.Background()
+	manager, err := kill.New(database, kill.Dependencies{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Two DEAD panes sharing one thread: no tmux server was ever started for
+	// either socket.
+	const shared = "99999999-9999-4999-8999-999999999999"
+	for _, socket := range []string{"cx-1700000090-1-1", "cx-1700000091-1-1"} {
+		if _, _, err := manager.AdvanceCodexPane(ctx, socket, "%0", shared); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var stdout bytes.Buffer
+	warnings := doctor.PrintCodexPaneBinding(ctx, &stdout, database, commandRuntime{Paths: resolved})
+	report := stdout.String()
+	if strings.Contains(report, "contested") && !strings.Contains(report, "contested=0") {
+		t.Fatalf("dead-pane litter was reported as contested:\n%s", report)
+	}
+	if !strings.Contains(report, "codex_pane_bindings total=2 live=0 stale=2 contested=0 retired=0") {
+		t.Fatalf("the totals do not reconcile:\n%s", report)
+	}
+	if warnings != 0 {
+		t.Fatalf("stale bindings raised %d warnings:\n%s", warnings, report)
 	}
 }

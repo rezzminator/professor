@@ -46,7 +46,6 @@ func tmuxStopped(c *harness.Ctx, s State) State {
 			c.Logf("teardown: kill -CONT %d exited %d: %s", server, r.Code, r.Stderr)
 		}
 	})
-	c.Expect(`"msg":"tmux.exec","cmd":"picker"`)
 	if code := shellRun(term, "stop-"+held, fmt.Sprintf("clear && kill -STOP %d", server), 10*time.Second); code != 0 {
 		c.Failf("kill -STOP %d exited %d", server, code)
 	}

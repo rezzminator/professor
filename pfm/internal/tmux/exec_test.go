@@ -27,6 +27,17 @@ func fakeTmux(t *testing.T, exit int) string {
 	return binary
 }
 
+// hangingTmux writes a tmux that never answers, as a client of a stopped
+// server waits: only its caller's deadline ends it.
+func hangingTmux(t *testing.T) string {
+	t.Helper()
+	binary := filepath.Join(t.TempDir(), "tmux-hanging")
+	if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexec sleep 30\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return binary
+}
+
 func oneRecord(t *testing.T, recorder *obs.Recorder) obs.Record {
 	t.Helper()
 	records := recorder.Records()
@@ -72,21 +83,29 @@ func TestExecOutputRecordsSubcommandTargetExitOnce(t *testing.T) {
 // TestExecRecordsAtTheLevelOfItsOutcome: a clean, fast tmux call is DEBUG (it
 // was the bulk of every log line); one that took obs.SlowCall or longer, and
 // a tmux that answered with a non-zero exit, are INFO; a tmux that never
-// started is ERROR.
+// started is ERROR; a call its deadline ended — a stopped or wedged server
+// that never answered, whichever way exec reports it — is WARN, the server's
+// fault its caller classifies (gather.ErrServerUnresponsive), never pfm's.
 func TestExecRecordsAtTheLevelOfItsOutcome(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		binary    func(t *testing.T) string
 		elapsed   time.Duration
 		cancelled bool
-		want      string
+		// deadline bounds the call: 0 none, negative already past at Start.
+		deadline time.Duration
+		want     string
 	}{
-		{"fast success", func(t *testing.T) string { return fakeTmux(t, 0) }, time.Millisecond, false, "DEBUG"},
-		{"slow success", func(t *testing.T) string { return fakeTmux(t, 0) }, obs.SlowCall, false, "INFO"},
-		{"tmux answers non-zero", func(t *testing.T) string { return fakeTmux(t, 1) }, time.Millisecond, false, "INFO"},
-		{"never started", func(t *testing.T) string { return filepath.Join(t.TempDir(), "no-tmux") }, time.Millisecond, false, "ERROR"},
+		{"fast success", func(t *testing.T) string { return fakeTmux(t, 0) }, time.Millisecond, false, 0, "DEBUG"},
+		{"slow success", func(t *testing.T) string { return fakeTmux(t, 0) }, obs.SlowCall, false, 0, "INFO"},
+		{"tmux answers non-zero", func(t *testing.T) string { return fakeTmux(t, 1) }, time.Millisecond, false, 0, "INFO"},
+		{"never started", func(t *testing.T) string { return filepath.Join(t.TempDir(), "no-tmux") }, time.Millisecond, false, 0, "ERROR"},
 		// The caller ended the call on purpose, as a closing picker cancels its refresh.
-		{"caller cancelled", func(t *testing.T) string { return fakeTmux(t, 0) }, time.Millisecond, true, "INFO"},
+		{"caller cancelled", func(t *testing.T) string { return fakeTmux(t, 0) }, time.Millisecond, true, 0, "INFO"},
+		// A stopped server: the deadline passed before the client could start (exec reports
+		// "context deadline exceeded"), or cut off a client left waiting ("signal: killed").
+		{"deadline passed before start", func(t *testing.T) string { return fakeTmux(t, 0) }, time.Millisecond, false, -time.Second, "WARN"},
+		{"deadline cut off a waiting client", hangingTmux, time.Millisecond, false, 50 * time.Millisecond, "WARN"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fake := clock.NewFake(time.Unix(1700000000, 0))
@@ -95,6 +114,11 @@ func TestExecRecordsAtTheLevelOfItsOutcome(t *testing.T) {
 				var cancel context.CancelFunc
 				ctx, cancel = context.WithCancel(ctx)
 				cancel()
+			}
+			if tc.deadline != 0 {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, tc.deadline)
+				defer cancel()
 			}
 			command := Exec(ctx, tc.binary(t), "/sockets/cc-1", "list-panes", "-a")
 			if err := command.Start(); err == nil {

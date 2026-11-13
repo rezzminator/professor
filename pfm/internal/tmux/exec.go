@@ -153,7 +153,10 @@ func (command *Cmd) begin() {
 
 // finish writes the one record with the exit code: a non-zero exit is tmux
 // answering (INFO, err carried), exit -1 is a tmux that never started (ERROR,
-// or INFO when the caller cancelled it: obs.CancelLevel),
+// or INFO when the caller cancelled it: obs.CancelLevel), a call its deadline
+// ended is WARN whichever error exec reports for it (TimedOut: a stopped or
+// wedged server never answered — its caller names that server, as
+// gather.ErrServerUnresponsive does, and pfm itself did not fail),
 // and a clean exit is DEBUG unless it took obs.SlowCall or longer (INFO) —
 // obs.RoutineLevel, the rule db.statement follows too. A second completion of
 // the same Cmd writes nothing.
@@ -173,6 +176,9 @@ func (command *Cmd) finish(err error) {
 		exit = exitErr.ExitCode()
 	default:
 		exit, failure = -1, obs.CancelLevel(err)
+	}
+	if err != nil && command.TimedOut() {
+		failure = slog.LevelWarn
 	}
 	elapsed := command.clock.Now().Sub(command.started)
 	attrs := []slog.Attr{

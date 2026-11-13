@@ -68,7 +68,7 @@ Flight merges over the prior 60 days averaged 1.42 Go test lines per code line, 
 main chat -> worktree.sh create (gitter without the script; or develop) -> foreman tier, worktree path in its brief
 foreman -> reads, writes the whole change, runs the affected tests once -> one return message
 every foreman on the worktree returned -> main chat -> flights:lander -> its own review, children in the background
-lander fixes all findings -> affected tests until green -> full gate once -> lander returns
+lander fixes all findings -> affected tests until green -> full gate until green -> lander returns
 main chat -> worktree.sh land (gitter commits / merges on a refusal or without the script) -> verified teardown (or KEEP lock, gitter's)
 flight abandoned without merge -> writers stopped -> main chat -> worktree.sh remove (gitter on a refusal or without the script)
 ```
@@ -85,7 +85,7 @@ flight abandoned without merge -> writers stopped -> main chat -> worktree.sh re
    2. reviews the whole change itself, spawning the children its inventory's PLAN computes;
    3. fixes every finding;
    4. runs the affected tests until green;
-   5. runs the full gate once;
+   5. runs the full gate, fixing every red until every suite is green;
    6. returns.
 
    One worktree gets one lander: no separate reviewer, no second round, no second lander.
@@ -147,9 +147,9 @@ In the build/land lifecycle:
 
 - **Who runs what:**
   - a foreman runs the new tests red on the unchanged code, then the affected tests and static checks once after the change, then one probe script;
-  - on a flight, only the lander runs the full gate, once per worktree right before its merge, after every review finding is fixed and the affected tests are green;
+  - on a flight, only the lander runs the full gate, once per worktree right before its merge, after every review finding is fixed and the affected tests are green; the gate reruns only after a fixed red;
   - on small code work, the main chat runs the full gate when the change spans layers or the project's done-gate requires it, then hands gitter the passing check.
-- **A red full gate:** the lander fixes it, gets the failing tests green with the affected-test command, never a gate rerun, then runs that gate once more. That is the only repeat.
+- **A red full gate:** a red anywhere, inside the change or outside it, is the lander's: it fixes the cause, gets the failing tests green with the affected-test command, then reruns that gate, until every suite is green, with no repeat cap.
 - **The testing manual:** a project's testing manual, where one exists (this repo's `.claude/commands/pfm-testing-manual.md`), names the affected-test command and the full gate. Without one, agents use the project's documented test commands.
 - **Where tests run:** this repo runs every test in the fence through `.claude/scripts/test.sh`.
 

@@ -1,6 +1,6 @@
 # flights:lander
 
-The lander takes one worktree's whole change after every foreman on it has returned. It reviews the change itself with cheap children it spawns, fixes every finding, proves the fixes with the affected tests and runs the full gate once, right before the merge. One worktree gets one lander: there is no separate reviewer, no second round and no second lander.
+The lander takes one worktree's whole change after every foreman on it has returned. It reviews the change itself with cheap children it spawns, fixes every finding, proves the fixes with the affected tests and runs the full gate right before the merge until every suite of every touched project is green. One worktree gets one lander: there is no separate reviewer, no second round and no second lander.
 
 ## Contents
 
@@ -35,7 +35,7 @@ lander -> sync to TARGET's tip -> inventory (call 1) -> one spawn message (call 
 -> diff-checkers / spec-checkers / usage-checkers in the background
 -> lander hunts the seams -> every candidate verified on disk -> report
 -> fix every finding -> shed the review (forward_compaction) -> affected tests until green
--> full gate once -> return
+-> full gate until green -> return
 ```
 
 The lander never waits on a child: it keeps hunting, verifying and writing the report while they work, and ends its turn only when its own work is done; each child's return re-invokes it.
@@ -95,7 +95,7 @@ With the children out, the lander owns what no cluster owns: the seams between c
 - Every finding inside the change is fixed first, with the review still in context, an unchecked one or an open thread read to its cause first, and marked `status: resolved in {file:line}`; a finding outside the change stays `status: open` and goes to the residuals. Fixes are not reviewed again.
 - The lander then sheds the review with one `forward_compaction` call: `objective` carries WORKTREE, BASE, TARGET, MANUALS and REPORT_PATH, `remaining` the steps left and `load_files` REPORT_PATH, so its next request starts from that frontier and the report. A testing manual is opened only after this call.
 - The affected tests of the change and the fixes run with the testing manual's command until green.
-- The full gate runs once, right before the merge; a red gate is fixed, its failing tests made green with the affected-test command, and that gate runs once more — the only repeat.
+- The full gate runs right before the merge: every suite each touched project's testing manual defines (static checks, full suite, coverage run, floors). A red inside or outside the change is fixed, its failing tests made green with the affected-test command, and that project's gate rerun until every suite is green, with no repeat cap; a red outside the change is named in TESTS and GATE. From the third rerun each round opens with one `forward_compaction`. Only a red with no honest fix, a fix needing the owner's decision, or a suite that cannot run here stops short of green.
 - No test, build or gate runs while a usage-checker is out or a finding inside the change is open.
 - **Waits:** a command runs in the foreground with a timeout of at most 270 s; one that can run longer runs in the background (`{command} > {log} 2>&1; echo $? > {log}.rc`) and is awaited by repeating `timeout 270 bash -c 'until [ -s "$1" ]; do sleep 15; done; cat "$1"' _ {log}.rc` until it prints.
 - A critical decision goes to `SendMessage(to: "main")` with the choice it proceeds with; the lander never asks the user.
@@ -124,7 +124,7 @@ DECISIONS … | none
 REPORT {the report path}
 ```
 
-The verdict is the message's first word. Any finding left unfixed, or a gate not green, makes it `FAIL`, whatever the prose around it says.
+The verdict is the message's first word. Any finding left unfixed, or a suite left red for a reason the lander cannot clear, makes it `FAIL`, whatever the prose around it says. A platform the host lacks (macOS CI) is a named gap in RESIDUALS for the main chat.
 
 `STOP_AT review` returns one line instead: `REVIEWED {WORKTREE} · {n} findings · REPORT {REPORT_PATH}`.
 

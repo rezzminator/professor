@@ -299,20 +299,19 @@ func clipForWarn(text string) string {
 // opus·▰▰▰ high. The level its transcript recorded for its latest request
 // (recorded) wins: it is the effort that request went out at, after any
 // plugin pinned it, so it renders plainly on any model. Without one, the
-// payload's effort shows; one that is not a JSON string is left out. A row
-// with neither shows the session's recorded effort (inherited), exactly as
-// a payload effort on the model it was recorded for and muted on another,
-// where Claude Code may resolve a different level.
-func subagentModel(model, recorded string, effort json.RawMessage, inherited sessionEffortRecord) string {
+// effort it was spawned with (its meta file's) shows. A row with neither
+// shows the session's recorded effort (inherited), exactly as a spawn effort
+// on the model it was recorded for and muted on another, where Claude Code
+// may resolve a different level.
+func subagentModel(model, recorded, effort string, inherited sessionEffortRecord) string {
 	family := modelFamily(model)
 	level := strings.TrimSpace(recorded)
+	if level == "" {
+		level = strings.TrimSpace(effort)
+	}
 	color, painted := cEffort, true
-	if level == "" &&
-		(len(effort) == 0 || json.Unmarshal(effort, &level) != nil || strings.TrimSpace(level) == "") {
-		level = ""
-		if len(effort) == 0 {
-			level = inherited.Level
-		}
+	if level == "" {
+		level = inherited.Level
 		if modelVersion(model) != modelVersion(inherited.Model) {
 			color, painted = cMuted, false
 		}

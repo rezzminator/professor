@@ -267,9 +267,6 @@ func settingsFor(request Request, prefs pfmconfig.ClaudePrefs, fullscreen bool) 
 	if prefs.NativeCursor {
 		env[envNativeCursor] = "1"
 	}
-	if prefs.SubagentStatuslineTrace {
-		env[EnvSubagentStatuslineTrace] = "1"
-	}
 	if fullscreen {
 		env[envNoFlicker] = "1"
 	}
@@ -285,10 +282,6 @@ func settingsFor(request Request, prefs pfmconfig.ClaudePrefs, fullscreen bool) 
 		settings[knobStatusLine] = map[string]any{
 			typeWord: commandWord, commandWord: StatusLineCommand(request.Home), "padding": 0,
 			"refreshInterval": 2, "hideVimModeIndicator": true,
-		}
-		settings[knobSubagentStatusLine] = map[string]any{
-			typeWord:    commandWord,
-			commandWord: SubagentStatusLineCommand(request.Home),
 		}
 	}
 	return settings

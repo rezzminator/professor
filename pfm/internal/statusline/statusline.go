@@ -1,6 +1,6 @@
 // Package statusline renders the lines pfm draws under an engine's composer:
-// Render, Claude Code's and Codex's main status line; ServeSubagents and
-// RenderSubagents, Claude Code's agent-panel rows; Paced, the front that serves
+// Render, Claude Code's and Codex's main status line, a row per running
+// sub-agent below Claude Code's; Paced, the front that serves
 // a chat's cached line and the detached worker that renders it; RefreshCodex
 // and SpawnDetached, the detached cache refreshers a render arms.
 //
@@ -23,12 +23,12 @@
 //   - model_segment.go: the model and effort block.
 //   - session_effort.go: RecordSession and ReadSession, the effort the main line last showed.
 //   - palette.go: the 256-colour palette the main line and the agent rows share.
+//   - agent_ends.go: the agents a transcript's task notifications end, each at the time of its end.
+//   - agent_rows.go: the main line's rows for the running sub-agents, read from the session's subagents directory.
 //   - peripheral.go: the fleet and git segments.
-//   - subagents.go: ServeSubagents and RenderSubagents, the agent-panel rows.
-//   - subagents_fault.go: the row input's cap and the fault shown on every row.
+//   - subagents.go: an agent row's body; the machine's served price table.
 //   - subagents_fit.go: a row's parts dropped by rank to fit its width.
 //   - subagents_gauge.go: a row's context gauge.
 //   - subagents_nest.go: what a row says about the agents below its task.
 //   - subagents_spend.go: what an agent billed over its whole transcript.
-//   - subagents_trace.go: the opt-in, bounded trace of the rows' input and faults.
 package statusline

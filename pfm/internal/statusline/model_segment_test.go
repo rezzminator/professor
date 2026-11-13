@@ -182,7 +182,7 @@ func TestEffortBarWearsItsLevelsColourAndOnlyItsFilledBlocks(t *testing.T) {
 		surfaces := map[string]struct{ got, want string }{
 			"main line": {effortSuffix(data, autoEffortState{}), cMuted + "·" + reset + paint},
 			"sub-agent row": {
-				subagentModel("claude-opus-5-5", want.level, nil, sessionEffortRecord{}),
+				subagentModel("claude-opus-5-5", want.level, "", sessionEffortRecord{}),
 				cModel + "opus" + reset + cMuted + "·" + reset + paint,
 			},
 		}

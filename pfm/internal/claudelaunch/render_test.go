@@ -176,7 +176,7 @@ func TestRenderFreshInteractive(t *testing.T) {
 	if len(parsed.Hooks) != 25 {
 		t.Errorf("hooks=%d, want 25", len(parsed.Hooks))
 	}
-	if parsed.Settings["statusLine"] == nil || parsed.Settings["subagentStatusLine"] == nil {
+	if parsed.Settings["statusLine"] == nil {
 		t.Errorf("status lines=%#v", parsed.Settings)
 	}
 	var mcp map[string]any
@@ -351,30 +351,6 @@ func TestRenderCacheLifetimeMainChatOnly(t *testing.T) {
 	}
 }
 
-func TestRenderSubagentStatuslineTraceFollowsTheConfigSwitch(t *testing.T) {
-	home, machine := renderMachine(t)
-	for _, purpose := range []Purpose{PurposeInteractive, PurposeQuery} {
-		for _, on := range []bool{false, true} {
-			machine.Claude.SubagentStatuslineTrace = on
-			_, parsed := renderParsed(t, Request{Purpose: purpose, Home: home, Args: []string{"hello"}}, machine)
-			got, set := parsed.SettingsEnv[EnvSubagentStatuslineTrace]
-			if set != on || (on && got != "1") {
-				t.Errorf("purpose %v trace=%t: settings env %s = %q (set %t), want %t", purpose, on,
-					EnvSubagentStatuslineTrace, got, set, on)
-			}
-		}
-	}
-	if EnvSubagentStatuslineTrace != "PFM_SUBAGENT_STATUSLINE_TRACE" {
-		t.Errorf("EnvSubagentStatuslineTrace = %q", EnvSubagentStatuslineTrace)
-	}
-	machine.Claude.SubagentStatuslineTrace = true
-	for _, row := range Resolve(machine, 0) {
-		if row.Knob.Name == knobSubagentStatuslineTrace && row.Value != "true" {
-			t.Errorf("Resolve value = %q, want true", row.Value)
-		}
-	}
-}
-
 func TestRenderSystemPromptModes(t *testing.T) {
 	home, machine := renderMachine(t)
 	prompt := filepath.Join(t.TempDir(), "seat.md")
@@ -489,7 +465,7 @@ func TestRenderQuery(t *testing.T) {
 		parsed.Settings["env"] == nil {
 		t.Errorf("query settings=%#v", parsed.Settings)
 	}
-	for _, key := range []string{"hooks", "statusLine", "subagentStatusLine"} {
+	for _, key := range []string{"hooks", "statusLine"} {
 		if _, ok := parsed.Settings[key]; ok {
 			t.Errorf("query carries %s", key)
 		}

@@ -14,7 +14,6 @@ const (
 	knobSystemPrompt               = "systemPrompt"
 	knobNativeCursor               = "nativeCursor"
 	knobRemoteControl              = "remoteControl"
-	knobSubagentStatuslineTrace    = "subagentStatuslineTrace"
 	knobMaxSubagentSpawnDepth      = "maxSubagentSpawnDepth"
 	knobMaxConcurrentSubagents     = "maxConcurrentSubagents"
 	knobWebSearchesPerSession      = "webSearchesPerSession"
@@ -27,7 +26,6 @@ const (
 	knobMCP                        = "mcp"
 	knobHooks                      = "hooks"
 	knobStatusLine                 = "statusLine"
-	knobSubagentStatusLine         = "subagentStatusLine"
 	knobOutputStyle                = "outputStyle"
 	knobConfigDir                  = "configDir"
 	knobModel                      = "model"
@@ -65,34 +63,31 @@ const (
 	envGatewayDiscovery            = "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"
 	envCodexThreadID               = "CODEX_THREAD_ID"
 	envNativeCursor                = "CLAUDE_CODE_NATIVE_CURSOR"
-	// EnvSubagentStatuslineTrace is the settings env variable claude.subagentStatuslineTrace sets
-	// to 1; the sub-agent status line reads it.
-	EnvSubagentStatuslineTrace = "PFM_SUBAGENT_STATUSLINE_TRACE"
-	envSpawnDepth              = "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH"
-	envConcurrentSubagents     = "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS"
-	envWebSearches             = "CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION"
-	envTmuxTruecolor           = "CLAUDE_CODE_TMUX_TRUECOLOR"
-	envAgentTeams              = "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"
-	envFunctionHooks           = "CLAUDE_CODE_ENABLE_FUNCTION_HOOKS"
-	flagSettings               = "--settings"
-	flagMCPConfig              = "--mcp-config"
-	flagModel                  = "--model"
-	flagEffort                 = "--effort"
-	flagSessionID              = "--session-id"
-	flagResume                 = "--resume"
-	flagResumeShort            = "-r"
-	flagContinue               = "--continue"
-	flagContinueShort          = "-c"
-	flagRemoteControl          = "--remote-control"
-	flagName                   = "--name"
-	flagNameShort              = "-n"
-	flagPromptFile             = "--system-prompt-file"
-	flagSystemPrompt           = "--system-prompt"
-	flagForkSession            = "--fork-session"
-	flagAllowBypass            = "--allow-dangerously-skip-permissions"
-	flagBypass                 = "--dangerously-skip-permissions"
-	flagPermissionMode         = "--permission-mode"
-	permissionModeAuto         = "auto"
+	envSpawnDepth                  = "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH"
+	envConcurrentSubagents         = "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS"
+	envWebSearches                 = "CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION"
+	envTmuxTruecolor               = "CLAUDE_CODE_TMUX_TRUECOLOR"
+	envAgentTeams                  = "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"
+	envFunctionHooks               = "CLAUDE_CODE_ENABLE_FUNCTION_HOOKS"
+	flagSettings                   = "--settings"
+	flagMCPConfig                  = "--mcp-config"
+	flagModel                      = "--model"
+	flagEffort                     = "--effort"
+	flagSessionID                  = "--session-id"
+	flagResume                     = "--resume"
+	flagResumeShort                = "-r"
+	flagContinue                   = "--continue"
+	flagContinueShort              = "-c"
+	flagRemoteControl              = "--remote-control"
+	flagName                       = "--name"
+	flagNameShort                  = "-n"
+	flagPromptFile                 = "--system-prompt-file"
+	flagSystemPrompt               = "--system-prompt"
+	flagForkSession                = "--fork-session"
+	flagAllowBypass                = "--allow-dangerously-skip-permissions"
+	flagBypass                     = "--dangerously-skip-permissions"
+	flagPermissionMode             = "--permission-mode"
+	permissionModeAuto             = "auto"
 )
 
 const (
@@ -271,14 +266,6 @@ var Knobs = func() []Knob {
 			"Enable Claude's native cursor when configured.",
 		},
 		Knob{
-			knobSubagentStatuslineTrace,
-			WireSettings,
-			"env." + EnvSubagentStatuslineTrace,
-			SourceConfig,
-			false,
-			"Turn on the sub-agent status line's trace when configured.",
-		},
-		Knob{
 			knobMaxSubagentSpawnDepth,
 			WireSettings,
 			"env." + envSpawnDepth,
@@ -376,14 +363,6 @@ var Knobs = func() []Knob {
 		},
 		Knob{knobHooks, WireSettings, knobHooks, SourceConstant, "25 registrations", "Attach the fleet hook set."},
 		Knob{knobStatusLine, WireSettings, knobStatusLine, SourceConstant, "pfm-statusline", "Show fleet status."},
-		Knob{
-			knobSubagentStatusLine,
-			WireSettings,
-			knobSubagentStatusLine,
-			SourceConstant,
-			"pfm-statusline --subagents",
-			"Show agent status.",
-		},
 		Knob{knobMCP, WireFlag, flagMCPConfig, SourceMachineConfig, nil, "Attach enabled fleet MCP servers."},
 		Knob{
 			knobPermissionMode,

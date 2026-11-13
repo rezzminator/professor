@@ -1,7 +1,6 @@
 package statusline
 
 import (
-	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -41,8 +40,8 @@ var (
 
 // parentTask is completed as far as Claude Code knows: its row says
 // delegating while an agent below it works, completed once none does.
-const parentTask = `{"id":"p","type":"local_agent","status":"completed","startTime":1790244000000,` +
-	`"model":"claude-opus-5-5","contextWindowSize":1000000,"tokenCount":1000,"label":"orchestrate"}`
+const parentTask = `{"id":"p","status":"completed","startTime":1790244000000,` +
+	`"model":"claude-opus-5-5","contextWindowSize":1000000,"label":"orchestrate"}`
 
 // nestedSession writes one transcript per agent and a meta file naming each
 // agent's parent ("" = spawned by the main loop).
@@ -62,22 +61,17 @@ func nestedSession(t *testing.T, transcripts map[string][]string, parents map[st
 	return session
 }
 
-func TestRenderSubagentsNestedAgents(t *testing.T) {
-	const (
-		working  = "delegating 2m:0s" // the clock runs on
-		finished = "completed 1m:30s" // frozen at p's last entry
-	)
+func TestRenderAgentRowsNestedAgents(t *testing.T) {
 	cases := []struct {
 		name        string
 		transcripts map[string][]string
 		parents     map[string]string
 		running     []string // the agents below p Claude Code still runs
 		nested      string   // the row's first segment; "" = none
-		status      string
 		warn        string
 	}{
 		{
-			name: "every layer counts; a working child makes the parent delegating",
+			name: "every layer counts; only the working agents below count as working",
 			transcripts: map[string][]string{
 				"p":  agentTranscriptLines,
 				"c1": {turnEnded}, "c2": {turnToolCall}, "c3": {turnEnded, trailingSystem},
@@ -86,20 +80,18 @@ func TestRenderSubagentsNestedAgents(t *testing.T) {
 			parents: map[string]string{"p": "", "c1": "p", "c2": "p", "c3": "p", "g1": "c3", "g2": "c1"},
 			running: []string{"c2", "g1"},
 			nested:  "2/5",
-			status:  working,
 		},
 		{
-			name: "only a grandchild works: still delegating",
+			name: "only a grandchild works: it counts",
 			transcripts: map[string][]string{
 				"p": agentTranscriptLines, "c1": {turnEnded}, "g1": {turnToolResult},
 			},
 			parents: map[string]string{"p": "", "c1": "p", "g1": "c1"},
 			running: []string{"g1"},
 			nested:  "1/2",
-			status:  working,
 		},
 		{
-			name: "every agent below finished: completed",
+			name: "every agent below finished: none counts",
 			transcripts: map[string][]string{
 				"p": agentTranscriptLines, "c1": {turnToolCall, turnEnded},
 				"c2": {turnEnded, `{"type":"assistant","timest`},
@@ -107,7 +99,6 @@ func TestRenderSubagentsNestedAgents(t *testing.T) {
 			parents: map[string]string{"p": "", "c1": "p", "c2": "p"},
 			running: []string{"c1", "c2"}, // listed a moment longer than their turns: the tails decide
 			nested:  "0/2",
-			status:  finished,
 		},
 		{
 			name: "a handback result ends the turn: the agents that handed back are finished",
@@ -118,7 +109,6 @@ func TestRenderSubagentsNestedAgents(t *testing.T) {
 			parents: map[string]string{"p": "", "c1": "p", "c2": "p", "g1": "c1"},
 			running: []string{"c1", "c2", "g1"},
 			nested:  "0/3",
-			status:  finished,
 		},
 		{
 			name: "a result Claude Code does not mark as ending the turn is still working",
@@ -128,7 +118,6 @@ func TestRenderSubagentsNestedAgents(t *testing.T) {
 			parents: map[string]string{"p": "", "c1": "p", "c2": "p"},
 			running: []string{"c1", "c2"},
 			nested:  "1/2",
-			status:  working,
 		},
 		{
 			name:        "a reply still streaming is working",
@@ -136,7 +125,6 @@ func TestRenderSubagentsNestedAgents(t *testing.T) {
 			parents:     map[string]string{"p": "", "c1": "p"},
 			running:     []string{"c1"},
 			nested:      "1/1",
-			status:      working,
 		},
 		{
 			name:        "a child spawned but not yet writing is working",
@@ -144,7 +132,6 @@ func TestRenderSubagentsNestedAgents(t *testing.T) {
 			parents:     map[string]string{"p": "", "c1": "p"},
 			running:     []string{"c1"},
 			nested:      "1/1",
-			status:      working,
 		},
 		{
 			name:        "a child whose transcript cannot be read is unread, never finished",
@@ -152,7 +139,6 @@ func TestRenderSubagentsNestedAgents(t *testing.T) {
 			parents:     map[string]string{"p": "", "c1": "p"},
 			running:     []string{"c1"},
 			nested:      "0/1 (1 unread)",
-			status:      finished,
 			warn:        "row p: nested agents: open sub-agent transcript",
 		},
 		{
@@ -162,7 +148,6 @@ func TestRenderSubagentsNestedAgents(t *testing.T) {
 			transcripts: map[string][]string{"p": agentTranscriptLines},
 			parents:     map[string]string{"p": "", "c1": "p"},
 			nested:      "0/1",
-			status:      finished,
 			warn:        "row p: nested agents: open sub-agent transcript",
 		},
 		{
@@ -170,7 +155,6 @@ func TestRenderSubagentsNestedAgents(t *testing.T) {
 			transcripts: map[string][]string{"p": agentTranscriptLines, "other": {turnToolCall}},
 			parents:     map[string]string{"p": "", "other": ""},
 			nested:      "",
-			status:      finished,
 		},
 	}
 	for _, tc := range cases {
@@ -185,8 +169,8 @@ func TestRenderSubagentsNestedAgents(t *testing.T) {
 			if tc.nested != "" {
 				wantStart = tc.nested + "│" + wantStart
 			}
-			if !strings.HasPrefix(got, wantStart) || !strings.Contains(got, "│"+tc.status+"│") {
-				t.Fatalf("content =\n  %q\nwant it to start with %q and carry %q", got, wantStart, tc.status)
+			if !strings.HasPrefix(got, wantStart) {
+				t.Fatalf("content =\n  %q\nwant it to start with %q", got, wantStart)
 			}
 			if tc.warn == "" && warned != "" || !strings.Contains(warned, tc.warn) {
 				t.Fatalf("warn = %q, want %q", warned, tc.warn)
@@ -196,7 +180,7 @@ func TestRenderSubagentsNestedAgents(t *testing.T) {
 }
 
 // A real cycle (a → b → a) must not hang the walk or count an agent twice.
-func TestRenderSubagentsNestedCycleTerminates(t *testing.T) {
+func TestRenderAgentRowsNestedCycleTerminates(t *testing.T) {
 	session := nestedSession(t, map[string][]string{
 		"p": agentTranscriptLines, "a": {turnEnded}, "b": {turnEnded},
 	}, map[string]string{"p": "", "a": "p", "b": "a"})
@@ -211,29 +195,29 @@ func TestRenderSubagentsNestedCycleTerminates(t *testing.T) {
 		t.Fatalf("p lost its only child to the cycle, yet its row = %q", got)
 	}
 	aRow, _ := renderRowOf(t, session, "a", subagentNow,
-		`{"id":"a","type":"local_agent","status":"running","tokenCount":10}`, agentTask("b", "running"))
+		`{"id":"a","status":"running"}`, agentTask("b", "running"))
 	if !strings.HasPrefix(aRow, "0/1│") {
 		t.Fatalf("cycle row = %q, want 0/1", aRow)
 	}
 }
 
 // A last message longer than the line reader's buffer is still found.
-func TestRenderSubagentsNestedLongTail(t *testing.T) {
+func TestRenderAgentRowsNestedLongTail(t *testing.T) {
 	long := `{"type":"assistant","timestamp":"2026-09-24T10:01:00Z","message":{"stop_reason":"end_turn",` +
 		`"content":[{"type":"text","text":"` + strings.Repeat("x", 3*(64<<10)) + `"}]}}`
 	session := nestedSession(t, map[string][]string{
 		"p": agentTranscriptLines, "c1": {turnToolCall, long, `{"type":"assist`},
 	}, map[string]string{"p": "", "c1": "p"})
 	got, warned := renderRowOf(t, session, "p", subagentNow, parentTask, agentTask("c1", "running"))
-	if !strings.HasPrefix(got, "0/1│") || !strings.Contains(got, "│completed 1m:30s│") || warned != "" {
-		t.Fatalf("content = %q warn = %q, want 0/1 and completed", got, warned)
+	if !strings.HasPrefix(got, "0/1│") || warned != "" {
+		t.Fatalf("content = %q warn = %q, want 0/1", got, warned)
 	}
 }
 
 // A meta file that cannot be parsed hides which agent spawned that one agent
 // only: every other edge stands, the row counts the unreadable agent as unread
 // (it may sit below the task), and the cause goes to warn, never "none".
-func TestRenderSubagentsNestedTornMetaCostsOnlyItsOwnParent(t *testing.T) {
+func TestRenderAgentRowsNestedTornMetaCostsOnlyItsOwnParent(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
 		transcripts map[string][]string
@@ -267,7 +251,7 @@ func TestRenderSubagentsNestedTornMetaCostsOnlyItsOwnParent(t *testing.T) {
 // a payload that also lists the other tasks Claude Code runs.
 func renderRawSubagent(t *testing.T, session, task string, now time.Time, listed ...string) string {
 	t.Helper()
-	var parsed subagentTask
+	var parsed fixtureTask
 	if err := json.Unmarshal([]byte(task), &parsed); err != nil {
 		t.Fatal(err)
 	}
@@ -279,98 +263,14 @@ func renderRawSubagent(t *testing.T, session, task string, now time.Time, listed
 	return content
 }
 
-// A finished row steps back: muted under Claude Code's faint for its first
-// minute, then collapsed to status, age, identity and label. A failure keeps
-// its colour for that minute, and a completed row with a running child is not
-// finished at all.
-func TestRenderSubagentsFinishedRowsStepBack(t *testing.T) {
-	session := nestedSession(t, map[string][]string{
-		"a1": agentTranscriptLines, "p": agentTranscriptLines, "c1": {turnToolCall},
-	}, map[string]string{"a1": "", "p": "", "c1": "p"})
-	// agentTranscriptLines ends at 10:01:30.
-	ended := subagentStart.Add(90 * time.Second)
-	row := func(id, status string) string {
-		return `{"id":"` + id + `","name":"scout","type":"local_agent","status":"` + status + `",` +
-			`"startTime":` + jsonText(subagentStart.UnixMilli()) + `,"model":"claude-opus-5-5",` +
-			`"contextWindowSize":1000,"tokenCount":10,"label":"map it"}`
-	}
-	const (
-		fullRow    = "▰▰▰▰▰▰▰▰ 100% 1.0K/1.0K Σ$0.01/2.0K/35/2│scout·general-purpose│opus│"
-		fullTail   = " 1m:30s│1 error│💾5m✓3m:8s 94%│⟲1│map it"
-		parentTail = " 3m:30s│1 error│💾5m✓1m:38s 94%│⟲1│map it"
-	)
-	mutedWhole := func(raw string) bool {
-		return strings.HasPrefix(raw, cMuted) && strings.Count(raw, "\x1b[") == 2 && strings.HasSuffix(raw, reset)
-	}
-	bright := func(raw string) bool { return strings.HasPrefix(raw, rowOpen) }
-	mutedCollapsed := func(raw string) bool { return !strings.HasPrefix(raw, rowOpen) && !strings.Contains(raw, cFailed) }
-	redStatus := func(raw string) bool { return strings.HasPrefix(raw, cFailed+"failed") }
-	cases := []struct {
-		name      string
-		task      string
-		now       time.Time
-		listed    []string // the other tasks Claude Code runs
-		wantPlain string
-		check     func(raw string) bool
-	}{
-		{
-			name:      "completed, first minute: the whole line muted, Claude Code's faint left on",
-			task:      row("a1", "completed"),
-			now:       ended.Add(30 * time.Second),
-			wantPlain: fullRow + "completed" + fullTail,
-			check:     mutedWhole,
-		},
-		{
-			name:      "completed, after a minute: collapsed",
-			task:      row("a1", "completed"),
-			now:       ended.Add(2 * time.Minute),
-			wantPlain: "completed 2m0s ago│Σ$0.01/2.0K/35/2│scout·general-purpose│map it",
-			check:     mutedCollapsed,
-		},
-		{
-			name:      "failed, first minute: full colour, it is an alert",
-			task:      row("a1", "failed"),
-			now:       ended.Add(30 * time.Second),
-			wantPlain: fullRow + "failed" + fullTail,
-			check:     bright,
-		},
-		{
-			name:      "failed, after a minute: collapsed, the status still red",
-			task:      row("a1", "failed"),
-			now:       ended.Add(2 * time.Minute),
-			wantPlain: "failed 2m0s ago│Σ$0.01/2.0K/35/2│scout·general-purpose│map it",
-			check:     redStatus,
-		},
-		{
-			name:      "completed with a child still working: delegating, not finished",
-			task:      row("p", "completed"),
-			listed:    []string{agentTask("c1", "running")},
-			now:       ended.Add(2 * time.Minute),
-			wantPlain: "1/1│" + strings.Replace(fullRow, "35/2", "35/3", 1) + "delegating" + parentTail,
-			check:     bright,
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			raw := renderRawSubagent(t, session, tc.task, tc.now, tc.listed...)
-			if plain := stripANSICodes(raw); plain != tc.wantPlain {
-				t.Fatalf("content =\n  %q\nwant\n  %q", plain, tc.wantPlain)
-			}
-			if !tc.check(raw) {
-				t.Fatalf("raw row fails its colour check: %q", raw)
-			}
-		})
-	}
-}
-
 // The working count wears the running colour and the total the tools colour,
 // so the two numbers read apart at a glance.
-func TestRenderSubagentsNestedCountColours(t *testing.T) {
+func TestRenderAgentRowsNestedCountColours(t *testing.T) {
 	session := nestedSession(t, map[string][]string{
 		"p": agentTranscriptLines, "c1": {turnToolCall}, "c2": {turnEnded},
 	}, map[string]string{"p": "", "c1": "p", "c2": "p"})
 	raw := renderRawSubagent(t, session, parentTask, subagentNow, agentTask("c1", "running"))
-	want := rowOpen + cRunning + "1" + reset + cMuted + "/" + reset + cTools + "2" + reset
+	want := cRunning + "1" + reset + cMuted + "/" + reset + cTools + "2" + reset
 	if !strings.HasPrefix(raw, want) {
 		t.Fatalf("row = %q, want it to open with %q", raw, want)
 	}
@@ -385,22 +285,7 @@ func renderPayload(
 	tasks ...string,
 ) (rows map[string]string, warned string) {
 	t.Helper()
-	list := strings.Join(tasks, ",")
-	payload := `{"transcript_path":` + jsonText(session) + `,"cwd":"/work/repo","tasks":[` + list + `]}`
-	var warn bytes.Buffer
-	got, err := RenderSubagents([]byte(payload), now, t.TempDir(), testPrices(t), "", noEnv, &warn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	rows = map[string]string{}
-	for _, line := range strings.Split(strings.TrimSpace(got), "\n") {
-		var row subagentRow
-		if err := json.Unmarshal([]byte(line), &row); err != nil {
-			t.Fatalf("row is not JSON: %v: %q", err, line)
-		}
-		rows[row.ID] = row.Content
-	}
-	return rows, warn.String()
+	return renderFixture(t, rowsFixture{session: session, now: now}, tasks...)
 }
 
 // renderTasks renders one payload of several tasks and returns each row's
@@ -432,10 +317,10 @@ func renderRowOf(t *testing.T, session, id string, now time.Time, tasks ...strin
 	return stripANSICodes(raw), strings.Join(own, "\n")
 }
 
-// agentTask is a local_agent task as Claude Code lists it.
+// agentTask is an agent task on opus with a 1M window.
 func agentTask(id, status string) string {
-	return `{"id":"` + id + `","type":"local_agent","status":"` + status + `","startTime":1790244000000,` +
-		`"model":"claude-opus-5-5","contextWindowSize":1000000,"tokenCount":1000,"label":"` + id + `"}`
+	return `{"id":"` + id + `","status":"` + status + `","startTime":1790244000000,` +
+		`"model":"claude-opus-5-5","contextWindowSize":1000000,"label":"` + id + `"}`
 }
 
 // The count a row shows is the agents below it that work right now, at every
@@ -446,7 +331,7 @@ func agentTask(id, status string) string {
 // still running, under an orchestrator rendered 0/16 and one rendered
 // completed). Finished, working, killed, long-silent and nested agents sit
 // below one parent here; only the four Claude Code runs with an open turn count.
-func TestRenderSubagentsNestedCountsOnlyAgentsThatWork(t *testing.T) {
+func TestRenderAgentRowsNestedCountsOnlyAgentsThatWork(t *testing.T) {
 	const (
 		longSilent = `{"type":"assistant","timestamp":"2026-09-24T09:30:00Z","message":{"stop_reason":null,` +
 			`"content":[{"type":"text","text":"thinking"}],"usage":{"input_tokens":26185,"output_tokens":0}}}`
@@ -465,39 +350,39 @@ func TestRenderSubagentsNestedCountsOnlyAgentsThatWork(t *testing.T) {
 			"g2": {longSilent, silentResult}, // nested under c2, silent 32 minutes on a tool result: working
 			"c5": {turnToolResult},           // killed before its first reply: a row Claude Code lists with no counts
 		}, map[string]string{"p": "", "c1": "p", "c2": "p", "c3": "p", "c4": "p", "g1": "c3", "g2": "c2", "c5": "p"})
-		killedAtSpawn := `{"id":"c5","type":"local_agent","status":"killed","startTime":1790244000000,"label":"c5"}`
+		killedAtSpawn := `{"id":"c5","status":"killed","startTime":1790244000000,"label":"c5"}`
 		rows := renderTasks(t, session, subagentNow,
 			parentTask, agentTask("c1", "running"), agentTask("c4", "killed"), killedAtSpawn,
 			agentTask("c2", "running"), agentTask("g1", "running"), agentTask("g2", "running"))
 		got := rows["p"]
-		if !strings.HasPrefix(got, "4/7│") || !strings.Contains(got, "│delegating 2m:0s│") {
-			t.Fatalf("parent row = %q, want 4/7 (c1, c2, g1 and g2 work; c3, c4, c5 do not) and delegating", got)
+		if !strings.HasPrefix(got, "4/7│") {
+			t.Fatalf("parent row = %q, want 4/7 (c1, c2, g1 and g2 work; c3, c4, c5 do not)", got)
 		}
 	})
 	// The orchestrator ended its turn after launching background workers, so
 	// Claude Code calls it completed; its workers, quiet for half an hour on an
 	// unanswered request, are still run, and it waits on them.
-	t.Run("a completed parent whose long-silent workers still run is delegating, not finished", func(t *testing.T) {
+	t.Run("a parent whose long-silent workers still run counts them", func(t *testing.T) {
 		parents := map[string]string{"p": "", "c1": "p", "g1": "c1"}
 		session := nestedSession(t, map[string][]string{
 			"p": agentTranscriptLines, "c1": {longSilent}, "g1": {longSilent, silentResult},
 		}, parents)
 		got := renderTasks(t, session, subagentNow, parentTask, agentTask("c1", "running"), agentTask("g1", "running"))["p"]
-		if !strings.HasPrefix(got, "2/2│") || !strings.Contains(got, "│delegating 2m:0s│") {
-			t.Fatalf("parent row = %q, want 2/2 and delegating: Claude Code still runs c1 and g1", got)
+		if !strings.HasPrefix(got, "2/2│") {
+			t.Fatalf("parent row = %q, want 2/2: c1 and g1 still run", got)
 		}
 		done := nestedSession(t, map[string][]string{
 			"p": agentTranscriptLines, "c1": {longSilent, turnEnded}, "g1": {longSilent, silentResult},
 		}, parents)
 		got = renderTasks(t, done, subagentNow, parentTask, agentTask("c1", "running"))["p"]
-		if !strings.HasPrefix(got, "0/2│") || !strings.Contains(got, "│completed 1m:30s│") {
-			t.Fatalf("parent row = %q, want 0/2 and completed: c1 ended its turn, g1 is no longer run", got)
+		if !strings.HasPrefix(got, "0/2│") {
+			t.Fatalf("parent row = %q, want 0/2: c1 ended its turn, g1 no longer runs", got)
 		}
 	})
 	// The live shape: a finished sub-agent's last line is its final text block
 	// as the stream wrote it (no stop_reason), and Claude Code drops a finished
 	// task from its list within a minute, so the payload never calls it over.
-	t.Run("an agent Claude Code no longer lists is finished, whatever its transcript's tail", func(t *testing.T) {
+	t.Run("an agent that no longer runs is finished, whatever its transcript's tail", func(t *testing.T) {
 		finalText := func(stamp string) string {
 			return `{"type":"assistant","timestamp":"2026-09-24T` + stamp + `Z","message":{"stop_reason":null,` +
 				`"content":[{"type":"text","text":"4 done"}],"usage":{"input_tokens":120,"output_tokens":5}}}`
@@ -510,12 +395,12 @@ func TestRenderSubagentsNestedCountsOnlyAgentsThatWork(t *testing.T) {
 			"c2": {turnToolCall, turnToolResult}, // killed after a tool result nothing answered
 		}, map[string]string{"p": "", "c1": "p", "g1": "c1", "g2": "c1", "c2": "p"})
 		got := renderTasks(t, session, subagentNow, parentTask)["p"]
-		if !strings.HasPrefix(got, "0/4│") || !strings.Contains(got, "│completed 1m:30s│") {
-			t.Fatalf("parent row = %q, want 0/4 and completed: Claude Code runs none of the agents below it", got)
+		if !strings.HasPrefix(got, "0/4│") {
+			t.Fatalf("parent row = %q, want 0/4: none of the agents below it runs", got)
 		}
 		listed := renderTasks(t, session, subagentNow, parentTask, agentTask("g1", "running"))["p"]
-		if !strings.HasPrefix(listed, "1/4│") || !strings.Contains(listed, "│delegating 2m:0s│") {
-			t.Fatalf("parent row = %q, want 1/4 and delegating: Claude Code still runs g1", listed)
+		if !strings.HasPrefix(listed, "1/4│") {
+			t.Fatalf("parent row = %q, want 1/4: g1 still runs", listed)
 		}
 	})
 }
@@ -542,10 +427,10 @@ func readCounter(t *testing.T) (counts func() map[string]int) {
 	}
 }
 
-// TestRenderSubagentsReadsEachTranscriptOnce pins the read-once law: c1 is a
+// TestRenderAgentRowsReadsEachTranscriptOnce pins the read-once law: c1 is a
 // task row and also a descendant of the row p, g1 a descendant of both, and
 // one render reads each of their transcripts a single time.
-func TestRenderSubagentsReadsEachTranscriptOnce(t *testing.T) {
+func TestRenderAgentRowsReadsEachTranscriptOnce(t *testing.T) {
 	session := nestedSession(t, map[string][]string{
 		"p": agentTranscriptLines, "c1": {turnToolCall}, "g1": {turnToolCall},
 	}, map[string]string{"p": "", "c1": "p", "g1": "c1"})

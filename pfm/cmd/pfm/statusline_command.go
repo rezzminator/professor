@@ -32,15 +32,14 @@ func runStatuslineWithRuntime(
 	env paths.Env,
 ) int {
 	env = defaultEnv(env)
-	flags := cli.NewFlagSet("statusline", "usage: pfm statusline [--refresh-gpt | --subagents]", stderr)
+	flags := cli.NewFlagSet("statusline", "usage: pfm statusline [--refresh-gpt]", stderr)
 	refreshCodex := flags.Bool("refresh-gpt", false, "refresh the GPT usage cache")
-	subagents := flags.Bool("subagents", false, "render agent-panel row bodies from subagentStatusLine JSON")
 	pacedKey := flags.String("paced", "", "internal: run the paced render worker of one chat key")
 	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	modes := 0
-	for _, set := range []bool{*refreshCodex, *subagents, *pacedKey != ""} {
+	for _, set := range []bool{*refreshCodex, *pacedKey != ""} {
 		if set {
 			modes++
 		}
@@ -48,9 +47,6 @@ func runStatuslineWithRuntime(
 	if flags.NArg() != 0 || modes > 1 {
 		flags.Usage()
 		return 2
-	}
-	if *subagents {
-		return statusline.ServeSubagents(stdin, stdout, stderr, machine.Paths, env, machine.Config.Path)
 	}
 
 	ctx := context.Background()

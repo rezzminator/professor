@@ -254,7 +254,7 @@ func loadLedgerView(sessionID, home string, env paths.Env, warn io.Writer) *ledg
 	}
 	ledger, err := costledger.ForSession(paths.CostLedgerDir(env, home), sessionID)
 	if err != nil {
-		fmt.Fprintf(warn, "pfm statusline --subagents: cost ledger (rows price from transcripts): %v\n", err)
+		fmt.Fprintf(warn, "%s: cost ledger (rows price from transcripts): %v\n", agentRowsWho, err)
 		return nil
 	}
 	if !ledger.Present {

@@ -7,10 +7,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/retired"
 )
 
-// subagentStatusLineKey is Claude Code's settings key for the per-row body
-// of its agent panel.
-const subagentStatusLineKey = "subagentStatusLine"
-
 func rewriteCommandFields(value any, rewrite func(string) string) bool {
 	changed := false
 	switch typed := value.(type) {

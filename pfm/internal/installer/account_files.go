@@ -60,10 +60,21 @@ func settingsLeftovers(
 		leftovers = append(leftovers, "statusLine")
 	}
 	if status, ok := document[subagentStatusLineKey].(map[string]any); ok &&
-		status[configCommandKey] == claudelaunch.SubagentStatusLineCommand(home) {
-		leftovers = append(leftovers, "subagentStatusLine")
+		status[configCommandKey] == retiredSubagentStatusLineCommand(home) {
+		leftovers = append(leftovers, subagentStatusLineKey)
 	}
 	return leftovers
+}
+
+// subagentStatusLineKey is the settings key of Claude Code's agent-panel row
+// body, which Claude Code 2.1.323 dropped. pfm no longer sets it, but an
+// earlier install's entry running retiredSubagentStatusLineCommand is still
+// pfm's leftover: on an older Claude Code it fails, the flag being gone.
+const subagentStatusLineKey = "subagentStatusLine"
+
+// retiredSubagentStatusLineCommand is the command that entry ran.
+func retiredSubagentStatusLineCommand(home string) string {
+	return claudelaunch.StatusLineCommand(home) + " --subagents"
 }
 
 func ownedStatusCommand(home string, value any) bool {

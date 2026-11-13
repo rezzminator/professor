@@ -81,28 +81,3 @@ func sanitizeInput(data *input) []string {
 	}
 	return notes
 }
-
-// UnmarshalJSON keeps a task whose fields cannot be read as its id alone with
-// decodeErr set: that row shows the fault and its sibling rows render whole.
-func (task *subagentTask) UnmarshalJSON(raw []byte) error {
-	type plain subagentTask
-	var decoded plain
-	if err := json.Unmarshal(raw, &decoded); err != nil {
-		var ident struct {
-			ID string `json:"id"`
-		}
-		// A wrong-typed id leaves ident.ID empty: the task has no row, and err says why.
-		_ = json.Unmarshal(raw, &ident)
-		*task = subagentTask{ID: ident.ID, decodeErr: err}
-		return nil
-	}
-	var present struct {
-		Tokens *int64 `json:"tokenCount"`
-	}
-	if err := json.Unmarshal(raw, &present); err != nil {
-		return err
-	}
-	decoded.tokenKnown = present.Tokens != nil
-	*task = subagentTask(decoded)
-	return nil
-}

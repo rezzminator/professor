@@ -96,18 +96,12 @@ func TestParityClaudePayloadPercentWithoutCapacity(t *testing.T) {
 
 func TestParitySubagentCatalogOverridesHarnessGuess(t *testing.T) {
 	r := parityRuntime(t)
-	raw := []byte(
-		`{"tasks":[{"id":"a","model":"gpt-6.1-sol-fast[1m]","tokenCount":70300,"contextWindowSize":1000000}]}`,
+	rows, _ := renderFixture(
+		t,
+		rowsFixture{sidDir: r.SIDDir, home: r.Home, noPrices: true, env: &paths.MapEnv{Values: r.Env}, now: r.now()},
+		`{"id":"a","model":"gpt-6.1-sol-fast[1m]","contextWindowSize":1000000}`,
 	)
-	out, err := RenderSubagents(raw, r.now(), r.SIDDir, nil, r.Home, &paths.MapEnv{Values: r.Env}, os.Stderr)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var row subagentRow
-	if err := json.Unmarshal([]byte(out), &row); err != nil {
-		t.Fatal(err)
-	}
-	if got := stripANSICodes(row.Content); !strings.Contains(got, "14% 70.3K/500.0K") {
+	if got := stripANSICodes(rows["a"]); !strings.Contains(got, "/500.0K") {
 		t.Fatalf("wrong provider capacity: %s", got)
 	}
 }

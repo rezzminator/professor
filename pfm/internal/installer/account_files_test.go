@@ -22,7 +22,7 @@ func accountSettingsFixture(home string) ([]byte, settingsHookCounts) {
   ]}]},
   "statusLine":{"type":"command","command":%q},
   "subagentStatusLine":{"type":"command","command":%q}
-}`, owned, template, claudelaunch.StatusLineCommand(home), claudelaunch.SubagentStatusLineCommand(home))),
+}`, owned, template, claudelaunch.StatusLineCommand(home), retiredSubagentStatusLineCommand(home))),
 		settingsHookCounts{{Event: "SessionStart", Matcher: "", Command: owned}: 1}
 }
 

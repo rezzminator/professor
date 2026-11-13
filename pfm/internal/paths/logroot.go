@@ -16,9 +16,6 @@ const (
 	ActivityLogName = "pfm.jsonl"
 	// CostSinkLogName is the detached cost sink's failure log.
 	CostSinkLogName = "cost-sink.log"
-	// SubagentStatuslineTraceName is the opt-in structural trace of the
-	// sub-agent status line; it never holds prompts, labels or bodies.
-	SubagentStatuslineTraceName = "subagent-statusline.jsonl"
 	// RestartLogDirName holds `pfm restart`'s worker logs and the logs of
 	// the servers it starts.
 	RestartLogDirName = "restart"
@@ -38,11 +35,6 @@ func (place LogPlace) Activity() string { return filepath.Join(place.Dir, Activi
 
 // CostSink is the cost sink's log.
 func (place LogPlace) CostSink() string { return filepath.Join(place.Dir, CostSinkLogName) }
-
-// SubagentStatuslineTrace is the sub-agent status line's trace.
-func (place LogPlace) SubagentStatuslineTrace() string {
-	return filepath.Join(place.Dir, SubagentStatuslineTraceName)
-}
 
 // Restart is the folder of `pfm restart`'s logs.
 func (place LogPlace) Restart() string { return filepath.Join(place.Dir, RestartLogDirName) }

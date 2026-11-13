@@ -2,7 +2,6 @@ package statusline
 
 import (
 	"bytes"
-	"encoding/json"
 	"os"
 	"strings"
 	"testing"
@@ -20,34 +19,30 @@ func recordMainLine(t *testing.T, sidDir, model, level string) {
 	}
 }
 
-// renderEffortRow renders one non-agent task row for effortSession and
-// returns its body and whatever went to warn.
+// renderEffortRow renders one task row for effortSession, its agent's
+// transcript recording no effort, and returns its body and whatever went to warn.
 func renderEffortRow(t *testing.T, sidDir, task string) (content, warned string) {
 	t.Helper()
-	return renderEffortAgentRow(t, sidDir, "", task)
+	session := subagentSession(t, map[string][]string{"a": {
+		`{"type":"user","timestamp":"2026-09-24T10:02:00Z","message":{"role":"user","content":"go"}}`,
+	}}, map[string]string{"a": "general-purpose"})
+	return renderEffortAgentRow(t, sidDir, session, task)
 }
 
 // renderEffortAgentRow renders one task row for effortSession whose sub-agent
 // transcripts sit beside the session transcript path.
 func renderEffortAgentRow(t *testing.T, sidDir, session, task string) (content, warned string) {
 	t.Helper()
-	var warn bytes.Buffer
-	payload := `{"session_id":"` + effortSession + `","transcript_path":` + jsonText(session) +
-		`,"tasks":[` + task + `]}`
-	got, err := RenderSubagents([]byte(payload), subagentNow, sidDir, testPrices(t), "", noEnv, &warn)
-	if err != nil {
-		t.Fatalf("RenderSubagents: %v", err)
+	rows, warned := renderFixture(t, rowsFixture{session: session, sessionID: effortSession, sidDir: sidDir}, task)
+	for _, raw := range rows {
+		content = raw
 	}
-	var row subagentRow
-	if err := json.Unmarshal([]byte(strings.TrimSpace(got)), &row); err != nil {
-		t.Fatalf("row %q: %v", got, err)
-	}
-	return row.Content, warn.String()
+	return content, warned
 }
 
 const (
-	taskWithoutEffort = `{"id":"a","status":"running","model":"claude-opus-5-5","tokenCount":10,"contextWindowSize":100}`
-	taskWithEffort    = `{"id":"a","status":"running","model":"claude-opus-5-5","effort":"low","tokenCount":10,"contextWindowSize":100}`
+	taskWithoutEffort = `{"id":"a","status":"running","model":"claude-opus-5-5","contextWindowSize":100}`
+	taskWithEffort    = `{"id":"a","status":"running","model":"claude-opus-5-5","effort":"low","contextWindowSize":100}`
 )
 
 var (
@@ -123,8 +118,8 @@ func TestSubagentRowWithAnUnreadableRecordShowsTheModelAloneAndWarns(t *testing.
 	}
 }
 
-const agentTaskWithoutEffort = `{"id":"a","type":"local_agent","status":"running","model":"claude-opus-5-5",` +
-	`"tokenCount":10,"contextWindowSize":100}`
+const agentTaskWithoutEffort = `{"id":"a","status":"running","model":"claude-opus-5-5",` +
+	`"contextWindowSize":100}`
 
 // The effort a sub-agent's request went out at — after a plugin pinned it —
 // is what its transcript records; its latest recorded level wins over the

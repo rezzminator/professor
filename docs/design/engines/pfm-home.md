@@ -75,7 +75,7 @@ Tracked at the repo root. It holds every key pfm reads, each at its default, wit
 
 ## Other state
 
-Generated assets live under `~/.local/state/pfm/generated/`. Logs live in the log root, `paths.LogRoot`: `{clone}/tmp/logs/pfm/` (the clone `pfm install` recorded), else `~/.local/state/pfm/log/` (no clone on record, the clone gone, its tmp folder unwritable, or a jailed home). Inside it: `pfm.jsonl` (the activity log; `pfm.segments/` holds whole older segments of 8 MB, the newest ten kept with every record, and `pfm.kept/` one file per UTC day of the warnings and errors of the older ones, kept for good), `cost-sink.log`, `subagent-statusline.jsonl` and `restart/`. `log.keepDays` is retired and has no effect.
+Generated assets live under `~/.local/state/pfm/generated/`. Logs live in the log root, `paths.LogRoot`: `{clone}/tmp/logs/pfm/` (the clone `pfm install` recorded), else `~/.local/state/pfm/log/` (no clone on record, the clone gone, its tmp folder unwritable, or a jailed home). Inside it: `pfm.jsonl` (the activity log; `pfm.segments/` holds whole older segments of 8 MB, the newest ten kept with every record, and `pfm.kept/` one file per UTC day of the warnings and errors of the older ones, kept for good), `cost-sink.log` and `restart/`. `log.keepDays` is retired and has no effect.
 
 ## Herdr picker wiring
 

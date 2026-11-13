@@ -15,8 +15,8 @@ import (
 )
 
 // agentNesting is what a row says about the agents below its task, at every
-// depth: how many there are, how many are working right now (Claude Code
-// still lists them as running and their own turn is open), and how many could
+// depth: how many there are, how many are working right now (they still run,
+// runningAgents, and their own turn is open), and how many could
 // not be read, an agent whose meta file could not be read included (its parent
 // is unknown, so it may sit below the task). err is a failure to look (the
 // subagents directory could not be listed) and renders "?/?", never as "none".
@@ -101,40 +101,13 @@ func scanAgentTree(sessionTranscript string, prices *pricing.Prices, scans trans
 }
 
 // judgeLiveness gives the tree what a transcript cannot say about an agent
-// whose turn is open: the tasks Claude Code itself still runs (liveTasks). An
+// whose turn is open: the agents that still run (runningAgents). An
 // agent outside that set is not working, whatever its transcript's last line
 // says; one inside it with an open turn works, however long it has been quiet
 // (a request Claude Code still waits on writes nothing). Without it every open
 // turn counts as work.
 func (tree *agentTree) judgeLiveness(live map[string]bool) {
 	tree.live = live
-}
-
-// terminalStatus is a task status Claude Code gives a task that is over.
-func terminalStatus(status string) bool {
-	switch strings.TrimSpace(status) {
-	case taskCompleted, "failed", "killed", "error":
-		return true
-	}
-	return false
-}
-
-// liveTasks are the ids of every task in the payload Claude Code lists with a
-// status that is not over, rows it shows nothing for included. Claude Code
-// registers every agent of the session in one task list, whatever its depth,
-// keeps a running agent there until it ends, and drops a finished one within
-// a minute; the payload is that list (Claude Code 2.1.296). So an agent it
-// does not list is not running: a finished agent's last line is often its
-// final text block as the stream wrote it, with no stop_reason, which reads
-// as an open turn.
-func liveTasks(tasks []subagentTask) map[string]bool {
-	live := map[string]bool{}
-	for index := range tasks {
-		if tasks[index].ID != "" && !terminalStatus(tasks[index].Status) {
-			live[tasks[index].ID] = true
-		}
-	}
-	return live
 }
 
 // nesting counts every agent below one task, at any depth, and how many of
@@ -250,6 +223,7 @@ type activityFold struct {
 	Context     int64               `json:"context"`
 	Effort      string              `json:"effort,omitempty"`
 	Model       string              `json:"model,omitempty"`
+	Cwd         string              `json:"cwd,omitempty"`
 	Turn        turnFold            `json:"turn"`
 	Spend       *spendScan          `json:"spend"`
 	// ownSpend is the scan Spend must be: a checkpoint decodes into it, and one

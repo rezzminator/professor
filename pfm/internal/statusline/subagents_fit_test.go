@@ -28,9 +28,9 @@ func TestFitRowDropsByRank(t *testing.T) {
 		want    string
 	}{
 		{"no width in the payload keeps the full row", 0, full},
-		{"a row that fits keeps every part", len([]rune(full)) + rowPrefixWidth, full},
+		{"a row that fits keeps every part", len([]rune(full)) + footerPadding, full},
 		{
-			"one column short: the cwd goes first", len([]rune(full)) + rowPrefixWidth - 1,
+			"one column short: the cwd goes first", len([]rune(full)) + footerPadding - 1,
 			"2/5│gauge $1/2/3│scout│opus·high│running│cache│⟲1│label",
 		},
 		{
@@ -48,10 +48,10 @@ func TestFitRowDropsByRank(t *testing.T) {
 }
 
 // The payload's columns reach the row: a narrow panel drops cache and cwd.
-func TestRenderSubagentsFitsColumns(t *testing.T) {
+func TestRenderAgentRowsFitsColumns(t *testing.T) {
 	session := subagentSession(t, map[string][]string{"a1": agentTranscriptLines}, map[string]string{"a1": "tracer"})
-	task := `{"id":"a1","type":"local_agent","status":"running","label":"map","cwd":"/work/repo/pfm",` +
-		`"model":"claude-opus-5-5","effort":"high","contextWindowSize":1000000,"tokenCount":312000,"startTime":` +
+	task := `{"id":"a1","status":"running","label":"map","cwd":"/work/repo/pfm",` +
+		`"model":"claude-opus-5-5","effort":"high","contextWindowSize":1000000,"startTime":` +
 		jsonText(subagentStart.UnixMilli()) + `}`
 	got, _ := renderOneSubagentColumns(t, session, task, 100)
 	if strings.Contains(got, "💾") || strings.Contains(got, "│pfm│") || !strings.HasSuffix(got, "│map") {

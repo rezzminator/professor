@@ -289,9 +289,9 @@ func Render(ctx context.Context, raw []byte, runtime Runtime) (string, error) {
 	}
 
 	if l3 != "" {
-		return reset + l1 + "\n" + reset + l2 + "\n" + reset + l3 + "\n", nil
+		l2 += "\n" + reset + l3
 	}
-	return reset + l1 + "\n" + reset + l2 + "\n", nil
+	return reset + l1 + "\n" + reset + l2 + "\n" + agentRowLines(runtime, data, directory, now), nil
 }
 
 func formatDuration(milliseconds int64) string {

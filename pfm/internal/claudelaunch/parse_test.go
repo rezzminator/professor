@@ -14,7 +14,6 @@ func TestParseRoundTripEveryKnob(t *testing.T) {
 	home, machine := renderMachine(t)
 	machine.Claude.Theme = "dark"
 	machine.Claude.NativeCursor = true
-	machine.Claude.SubagentStatuslineTrace = true
 	machine.Claude.MaxConcurrentSubagents = 3
 	machine.Claude.SystemPrompt = "professor"
 	prompt := filepath.Join(t.TempDir(), "prompt.md")
@@ -99,10 +98,6 @@ func TestParseRoundTripEveryKnob(t *testing.T) {
 				if parsed.SettingsEnv["CLAUDE_CODE_NATIVE_CURSOR"] != "1" {
 					t.Error("cursor missing")
 				}
-			case "subagentStatuslineTrace":
-				if parsed.SettingsEnv["PFM_SUBAGENT_STATUSLINE_TRACE"] != "1" {
-					t.Error("sub-agent status line trace missing")
-				}
 			case "maxSubagentSpawnDepth":
 				if parsed.SettingsEnv["CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH"] != "8" {
 					t.Error("depth missing")
@@ -164,7 +159,7 @@ func TestParseRoundTripEveryKnob(t *testing.T) {
 				if !slices.Equal(got, want) {
 					t.Errorf("parsed hook names %q, want the registry's %q", got, want)
 				}
-			case "statusLine", "subagentStatusLine":
+			case "statusLine":
 				if parsed.Settings[knob.Name] == nil {
 					t.Error("status line missing")
 				}

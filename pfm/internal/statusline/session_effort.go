@@ -17,9 +17,9 @@ import (
 // session, with the model it was resolved for. Claude Code 2.1.281 runs a
 // sub-agent whose definition names no effort at its parent's live session
 // effort (the agent context's effort is its own effort layer, else
-// Il(parent app state, the sub-agent's model)), and its subagentStatusLine
-// row payload then carries no effort (task.effort is the definition's), so
-// the agent-panel row reads this record instead. Il resolves per model — a
+// Il(parent app state, the sub-agent's model)), and its meta file then names
+// no effort (its effort is the definition's), so the agent's row reads this
+// record instead. Il resolves per model — a
 // per-model settings table, max and xhigh clamped where unsupported — so the
 // level is exact only for the model it was recorded with.
 type sessionEffortRecord struct {
@@ -28,7 +28,7 @@ type sessionEffortRecord struct {
 }
 
 // RecordSession persists what the main statusline payload says about its
-// session. Its effort feeds the agent-panel rows of the same session. Fail-open
+// session. Its effort feeds the agent rows of the same session. Fail-open
 // like the rest of the statusline: a record that cannot be written goes to warn
 // and costs one row's effort, never the status line.
 func RecordSession(raw []byte, sidDir string, warn io.Writer) {

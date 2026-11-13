@@ -43,7 +43,7 @@ func TestReadTranscriptSpendBillsAResponseOncePerRequestID(t *testing.T) {
 
 // A row's spend is the agent's own billing plus every agent's below it, at
 // any depth; a floor it cannot vouch for says "+?", never a quiet low number.
-func TestRenderSubagentsSpendCoversTheWholeTree(t *testing.T) {
+func TestRenderAgentRowsSpendCoversTheWholeTree(t *testing.T) {
 	const (
 		// $3000e-6 on sonnet-5-5: 1000 in at $2, 100 out at $10.
 		childResponse = `{"type":"assistant","message":{"id":"c-1","model":"claude-sonnet-5-5",` +
@@ -135,18 +135,10 @@ func TestRenderSubagentsSpendCoversTheWholeTree(t *testing.T) {
 }
 
 // With no price table every row still counts its tokens; the dollars say "$?".
-func TestRenderSubagentsSpendWithoutPrices(t *testing.T) {
+func TestRenderAgentRowsSpendWithoutPrices(t *testing.T) {
 	session := nestedSession(t, map[string][]string{"p": agentTranscriptLines}, map[string]string{"p": ""})
-	payload := `{"transcript_path":` + jsonText(session) + `,"cwd":"/work/repo","tasks":[` + parentTask + `]}`
-	got, err := RenderSubagents([]byte(payload), subagentNow, t.TempDir(), nil, "", noEnv, &strings.Builder{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var row subagentRow
-	if err := json.Unmarshal([]byte(strings.TrimSpace(got)), &row); err != nil {
-		t.Fatalf("row is not JSON: %v: %q", err, got)
-	}
-	if content := stripANSICodes(row.Content); !strings.Contains(content, "1.0K/1.0M Σ$?/2.0K/35/2│") {
+	rows, _ := renderFixture(t, rowsFixture{session: session, noPrices: true}, parentTask)
+	if content := stripANSICodes(rows["p"]); !strings.Contains(content, "1.0K/1.0M Σ$?/2.0K/35/2│") {
 		t.Fatalf("content = %q, want Σ$?/2.0K/35/2 after the gauge", content)
 	}
 }
@@ -366,8 +358,8 @@ func useLedgerSample(t *testing.T) string {
 }
 
 func ledgerTask(id string) string {
-	return `{"id":"` + id + `","type":"local_agent","status":"running","startTime":1790244000000,` +
-		`"model":"claude-opus-5-5","contextWindowSize":1000000,"tokenCount":1000}`
+	return `{"id":"` + id + `","status":"running","startTime":1790244000000,` +
+		`"model":"claude-opus-5-5","contextWindowSize":1000000}`
 }
 
 // renderLedgerRows renders the tasks of one session and returns each row's content, ANSI stripped.
@@ -377,28 +369,12 @@ func renderLedgerRows(t *testing.T, ledgerDir, sessionID, session string, ids ..
 	for _, id := range ids {
 		tasks = append(tasks, ledgerTask(id))
 	}
-	payload := `{"session_id":` + jsonText(sessionID) + `,"transcript_path":` + jsonText(session) +
-		`,"cwd":"/work/repo","tasks":[` + strings.Join(tasks, ",") + `]}`
-	var warn bytes.Buffer
-	got, err := RenderSubagents(
-		[]byte(payload),
-		subagentNow,
-		t.TempDir(),
-		testPrices(t),
-		"",
-		ledgerEnv(ledgerDir),
-		&warn,
-	)
-	if err != nil {
-		t.Fatalf("RenderSubagents: %v", err)
-	}
-	rows := map[string]string{}
-	for _, line := range strings.Split(strings.TrimSuffix(got, "\n"), "\n") {
-		var row subagentRow
-		if err := json.Unmarshal([]byte(line), &row); err != nil {
-			t.Fatalf("row is not JSON: %v: %q (warn %q)", err, line, warn.String())
-		}
-		rows[row.ID] = stripANSICodes(row.Content)
+	rows, _ := renderFixture(
+		t,
+		rowsFixture{session: session, sessionID: sessionID, env: ledgerEnv(ledgerDir)},
+		tasks...)
+	for id, raw := range rows {
+		rows[id] = stripANSICodes(raw)
 	}
 	return rows
 }
@@ -407,7 +383,7 @@ func renderLedgerRows(t *testing.T, ledgerDir, sessionID, session string, ids ..
 // it, side calls included, the tree taken from the rows' parent_agent_id (agent a..03 has no meta
 // file at all) and the meta files. The main line's one dollar amount is the ledger total, and it is
 // the main thread's own rows plus every top-level row.
-func TestRenderSubagentsPricesRowsFromTheLedger(t *testing.T) {
+func TestRenderAgentRowsPricesRowsFromTheLedger(t *testing.T) {
 	ledgerDir := useLedgerSample(t)
 	session := nestedSession(t,
 		map[string][]string{ledgerAgentRoot: agentTranscriptLines, ledgerAgentFirst: agentTranscriptLines},
@@ -422,11 +398,11 @@ func TestRenderSubagentsPricesRowsFromTheLedger(t *testing.T) {
 		ledgerAgentSecond,
 	)
 	for id, want := range map[string]string{
-		ledgerAgentRoot:   "Σ$0.95/740.0K/3.2K/",
-		ledgerAgentFirst:  "Σ$0.08/224.3K/1.2K/2",
-		ledgerAgentSecond: "Σ$0.09/224.5K/1.4K/?",
+		ledgerAgentRoot:   "1.0K/1.0M Σ$0.95/740.0K/3.2K/",
+		ledgerAgentFirst:  "1.0K/1.0M Σ$0.08/224.3K/1.2K/2",
+		ledgerAgentSecond: "?/1.0M Σ$0.09/224.5K/1.4K/?", // no transcript: its context is unknown
 	} {
-		if !strings.Contains(rows[id], "1.0K/1.0M "+want) {
+		if !strings.Contains(rows[id], want) {
 			t.Errorf("row %s = %q, want the gauge followed by %q", id, rows[id], want)
 		}
 	}
@@ -467,7 +443,7 @@ func TestRenderSubagentsPricesRowsFromTheLedger(t *testing.T) {
 
 // An agent the ledger has no row for yet (its calls reach the ledger up to 20 s late) keeps today's
 // transcript pricing; an advisor consulted by a ledger-priced agent stays its own "adv $X".
-func TestRenderSubagentsLedgerRowFallsBackAndKeepsTheAdvisor(t *testing.T) {
+func TestRenderAgentRowsLedgerRowFallsBackAndKeepsTheAdvisor(t *testing.T) {
 	dir := useLedgerSample(t)
 	if err := costledger.Append(dir, costledger.Row{
 		RequestID: "req_adv", TS: "2026-10-09T18:40:00.000Z", SessionID: ledgerSampleSession, AgentID: "adv1",
@@ -492,7 +468,7 @@ func TestRenderSubagentsLedgerRowFallsBackAndKeepsTheAdvisor(t *testing.T) {
 
 // A sub-agent whose ledger rows all lack a cost (a span-only join) keeps its transcript's price,
 // tokens and tool calls: the ledger prices nothing of it, so it must not overwrite them with $0.00.
-func TestRenderSubagentsLedgerRowsWithoutCostKeepTheTranscriptPrice(t *testing.T) {
+func TestRenderAgentRowsLedgerRowsWithoutCostKeepTheTranscriptPrice(t *testing.T) {
 	dir := useLedgerSample(t)
 	if err := costledger.Append(dir, costledger.Row{
 		RequestID: "req_null", TS: "2026-10-09T18:40:00.000Z", SessionID: ledgerSampleSession, AgentID: "fresh",
@@ -509,7 +485,7 @@ func TestRenderSubagentsLedgerRowsWithoutCostKeepTheTranscriptPrice(t *testing.T
 
 // A sub-agent whose transcript did not read and whose ledger rows all lack a cost keeps the
 // ledger's tokens with unknown dollars: neither a manufactured $0.00 nor a row of "?".
-func TestRenderSubagentsCostlessLedgerRowsStandInForAnUnreadTranscript(t *testing.T) {
+func TestRenderAgentRowsCostlessLedgerRowsStandInForAnUnreadTranscript(t *testing.T) {
 	dir := useLedgerSample(t)
 	if err := costledger.Append(dir, costledger.Row{
 		RequestID: "req_ghost", TS: "2026-10-09T18:40:00.000Z", SessionID: ledgerSampleSession, AgentID: "ghost",
@@ -529,14 +505,14 @@ func TestRenderSubagentsCostlessLedgerRowsStandInForAnUnreadTranscript(t *testin
 // (input_tokens = total - cached - written): the row prices it at its Codex
 // row's rates, input and a cache write at in, cache read at cached, output at
 // out (the tiers are pricing's TestResponseRequestsCostParts).
-func TestRenderSubagentsSpendPricesAGatewayGptAtItsCodexRow(t *testing.T) {
+func TestRenderAgentRowsSpendPricesAGatewayGptAtItsCodexRow(t *testing.T) {
 	gpt := func(usage string) []string {
 		return []string{
 			`{"type":"assistant","message":{"id":"g-1","model":"gpt-6-sol","usage":` + usage + `}}`, turnEnded,
 		}
 	}
-	const task = `{"id":"p","type":"local_agent","status":"completed","startTime":1790244000000,` +
-		`"model":"gpt-6-sol","contextWindowSize":1000000,"tokenCount":1000,"label":"orchestrate"}`
+	const task = `{"id":"p","status":"completed","startTime":1790244000000,` +
+		`"model":"gpt-6-sol","contextWindowSize":1000000,"label":"orchestrate"}`
 	for _, tc := range []struct {
 		name   string
 		lines  []string
@@ -585,7 +561,7 @@ func ledgerEnv(dir string) paths.Env {
 // The sub-agent rows resolve the ledger from the env they are handed, never the process's: a decoy
 // ledger in the process environment (the real one a test must not reach) is not read, the injected
 // one is. The same ledger is read by the main line through its Runtime, so the totals add up.
-func TestRenderSubagentsReadsTheLedgerUnderTheInjectedEnv(t *testing.T) {
+func TestRenderAgentRowsReadsTheLedgerUnderTheInjectedEnv(t *testing.T) {
 	decoy := t.TempDir()
 	t.Setenv(paths.EnvCostLedgerDir, decoy)
 	ledgerDir := useLedgerSample(t)

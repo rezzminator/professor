@@ -22,12 +22,19 @@ const (
 
 // SubagentMeta is a sub-agent's meta file: its type, the description it was
 // spawned with, its spawn depth and the agent that spawned it (empty for the
-// session's own).
+// session's own); the name, model and effort it was spawned with, when given;
+// Finished once it ended (Claude Code 2.1.3xx writes it at the end),
+// StoppedByUser once the user stopped it (older builds).
 type SubagentMeta struct {
 	AgentType     string `json:"agentType"`
 	Description   string `json:"description"`
 	SpawnDepth    int    `json:"spawnDepth"`
 	ParentAgentID string `json:"parentAgentId"`
+	Name          string `json:"name"`
+	Model         string `json:"model"`
+	Effort        string `json:"effort"`
+	Finished      bool   `json:"finished"`
+	StoppedByUser bool   `json:"stoppedByUser"`
 }
 
 // SubagentsDir is the directory holding a session's sub-agent transcripts.

@@ -116,9 +116,6 @@ type ClaudePrefs struct {
 	// capability gpt-agents (engine-sync installs only agents that require it). Off by
 	// default; no agent requires it today.
 	GptAgents bool
-	// SubagentStatuslineTrace is claude.subagentStatuslineTrace: the machine-wide switch that
-	// launches Claude with the sub-agent status line's trace on. Off by default.
-	SubagentStatuslineTrace bool
 	// Plugins is claude.plugins: the Claude Code plugins pfm install ensures.
 	// Machine-wide: an account may not set it.
 	Plugins []ClaudePlugin
@@ -316,15 +313,16 @@ type rawClaude struct {
 	NativeCursor          *bool   `json:"nativeCursor,omitempty"`
 	RemoteControl         *bool   `json:"remoteControl,omitempty"`
 	SystemPrompt          *string `json:"systemPrompt,omitempty"`
-	// RetiredCompactNudge accepts old config files; it is never read or written.
-	RetiredCompactNudge json.RawMessage `json:"compactNudge,omitempty"`
+	// RetiredCompactNudge and RetiredSubagentStatuslineTrace accept old config files; they are
+	// never read or written.
+	RetiredCompactNudge            json.RawMessage `json:"compactNudge,omitempty"`
+	RetiredSubagentStatuslineTrace json.RawMessage `json:"subagentStatuslineTrace,omitempty"`
 	// The sub-agent ceilings — see subagents.go.
-	MaxSubagentSpawnDepth   *int    `json:"maxSubagentSpawnDepth,omitempty"`
-	MaxConcurrentSubagents  *int    `json:"maxConcurrentSubagents,omitempty"`
-	PluginCheckoutRoot      *string `json:"pluginCheckoutRoot,omitempty"`
-	CostLedger              *bool   `json:"costLedger,omitempty"`
-	GptAgents               *bool   `json:"gptAgents,omitempty"`
-	SubagentStatuslineTrace *bool   `json:"subagentStatuslineTrace,omitempty"`
+	MaxSubagentSpawnDepth  *int    `json:"maxSubagentSpawnDepth,omitempty"`
+	MaxConcurrentSubagents *int    `json:"maxConcurrentSubagents,omitempty"`
+	PluginCheckoutRoot     *string `json:"pluginCheckoutRoot,omitempty"`
+	CostLedger             *bool   `json:"costLedger,omitempty"`
+	GptAgents              *bool   `json:"gptAgents,omitempty"`
 	// Plugins is claude.plugins; each entry is decoded by decodeClaudePlugins.
 	Plugins *[]json.RawMessage `json:"plugins,omitempty"`
 	// Env is claude.env; DecodeEnv validates each name and value.
@@ -486,7 +484,6 @@ func defaultsWithMCPServers(
 		KeyClaudePlugins:                                     SourceDefault,
 		KeyClaudeCostLedger:                                  SourceDefault,
 		KeyClaudeGptAgents:                                   SourceDefault,
-		KeyClaudeSubagentStatuslineTrace:                     SourceDefault,
 		engineConfigKey(pfmengine.Claude, spawnDepthKey):     SourceDefault,
 		engineConfigKey(pfmengine.Claude, concurrencyKey):    SourceDefault,
 		engineConfigKey(pfmengine.Codex, engineKeyYolo):      SourceDefault,

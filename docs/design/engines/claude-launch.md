@@ -14,7 +14,6 @@ Every Claude Code chat pfm starts in a tmux pane is described by one table, the 
 - [The launch record](#the-launch-record)
 - [Config keys](#config-keys)
 - [The rendered launch](#the-rendered-launch)
-- [Sub-agent status line trace](#sub-agent-status-line-trace)
 - [The system prompt](#the-system-prompt)
 - [Remote control](#remote-control)
 - [Doors](#doors)
@@ -80,7 +79,6 @@ type Knob struct {
 | `systemPrompt` | `professor`: flag `--system-prompt-file`; `lean`: settings `env.CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT=1`; `production`: nothing | config | `production` |
 | `nativeCursor` | settings `env.CLAUDE_CODE_NATIVE_CURSOR=1` | config | `false` |
 | `remoteControl` | flag `--remote-control` (`knobRemoteControl`, `WireFlag`) on an interactive launch; never on `PurposeQuery` or a print-mode run — [Remote control](#remote-control) | config | `true` |
-| `subagentStatuslineTrace` | settings `env.PFM_SUBAGENT_STATUSLINE_TRACE=1` (`EnvSubagentStatuslineTrace`) when `true`; nothing when `false` — [Sub-agent status line trace](#sub-agent-status-line-trace) | config (machine-wide) | `false` |
 | `maxSubagentSpawnDepth` | settings `env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` | config | `8` |
 | `maxConcurrentSubagents` | settings `env.CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` | config | unset (Claude's own default) |
 | `webSearchesPerSession` | settings `env.CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION` | config | `9007199254740991` |
@@ -94,7 +92,7 @@ type Knob struct {
 | `theme` | settings `theme` only with theme sync off; omitted while sync owns it ([theme sync](theme-sync.md#themeforlaunch)) | config; account settings while synced | unset |
 | `cleanupPeriodDays` | settings `cleanupPeriodDays` | config | `36500` |
 | hooks | settings `hooks` — the pfm hook set, `docs/design/hooks/hooks.md` | constant | — |
-| status lines | settings `statusLine`, `subagentStatusLine` — `pfm/internal/statusline/` | constant | — |
+| status lines | settings `statusLine` — `pfm/internal/statusline/` | constant | — |
 | `costLedger` | wrapper `pfm internal cost-launch --` in front of the binary: it binds a loopback sink and execs Claude with the exporter variables below; `false`, or the user's own telemetry settings, launch without and record `PFM_COST_LEDGER=off` or `preempted` — [cost-ledger.md](cost-ledger.md#the-launch) | config (machine-wide) | `true` |
 | cost exporters | wrapper env `CLAUDE_CODE_ENABLE_TELEMETRY=1`, `OTEL_LOGS_EXPORTER=otlp`, `OTEL_TRACES_EXPORTER=otlp`, `CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1`, `OTEL_METRICS_EXPORTER=none`, `OTEL_EXPORTER_OTLP_PROTOCOL=http/json`, `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:{port}`, `OTEL_LOGS_EXPORT_INTERVAL=1000`, `OTEL_BSP_SCHEDULE_DELAY=1000` | constant | — |
 | cost marker | wrapper env `PFM_COST_LEDGER=on\|off\|preempted\|failed`, the decision the status lines read | constant | — |
@@ -156,7 +154,6 @@ The `claude` block of `pfm.config.json`; each key also takes a per-account overr
 | `theme` | unset | `theme` |
 | `nativeCursor` | `false` | native cursor |
 | `remoteControl` | `true` | Remote Control requested at interactive start (`--remote-control`); an account's `claude.remoteControl` overrides it, an absent account value inherits the machine one, as `nativeCursor` does |
-| `subagentStatuslineTrace` | `false` | the sub-agent status line's trace switch; machine-wide, an account-level value is refused |
 | `maxSubagentSpawnDepth` | `8` | sub-agent depth |
 | `maxConcurrentSubagents` | unset | sub-agent concurrency |
 | `webSearchesPerSession` | `9007199254740991` | web-search cap |
@@ -173,25 +170,11 @@ The `claude` block of `pfm.config.json`; each key also takes a per-account overr
 ```text
 env -u {hygiene…} CLAUDE_CONFIG_DIR={config dir} CACHE_LIVE_CONTROL_MAIN_TTL={1h|5m} [PFM_COST_LEDGER=off|failed] \
   [~/.local/bin/pfm internal cost-launch --] {binary} {door verbs} \
-  --settings '{"outputStyle":"default","cleanupPeriodDays":36500,"env":{…},"hooks":{…},"statusLine":{…},"subagentStatusLine":{…}[,"theme":…]}' \
+  --settings '{"outputStyle":"default","cleanupPeriodDays":36500,"env":{…},"hooks":{…},"statusLine":{…}[,"theme":…]}' \
   [--mcp-config ~/.local/state/pfm/mcp-config/claude-mcp-{random}.json] \
   [--model M] [--effort E] [--system-prompt-file F] [--allow-dangerously-skip-permissions --dangerously-skip-permissions | --allow-dangerously-skip-permissions --permission-mode auto] \
   [--remote-control [name]]
 ```
-
-## Sub-agent status line trace
-
-`claude.subagentStatuslineTrace` (machine-wide, default `false`) renders `PFM_SUBAGENT_STATUSLINE_TRACE=1` into the settings `env` block of a Claude launch; the registry source is `EnvSubagentStatuslineTrace` in `pfm/internal/claudelaunch/knobs.go`. Exporting `PFM_SUBAGENT_STATUSLINE_TRACE=1` by hand enables it too. Turn it on by setting `"subagentStatuslineTrace": true` inside the machine config's `claude` object; it takes effect at the next launch.
-
-Claude Code ignores the stderr of a `subagentStatusLine` command that succeeds, so the trace is a file the diagnostics can be read from afterwards:
-
-- **Path and bounds:** `paths.LogRoot(env, home).SubagentStatuslineTrace()` = `subagent-statusline.jsonl` in the log root ([pfm-home.md § Other state](pfm-home.md#other-state)), beside `cost-sink.log`. `obs.OpenRotatingLog` keeps two generations of 4 MiB (8 MiB in all; a closed generation goes to `subagent-statusline.segments/{UTC}.jsonl` and is deleted, never kept) under a cross-process lock, mode 0600. The writer is `pfm/internal/statusline/subagents_trace.go`.
-- **Records:** a `start` record before stdin is read; the input shape plus, per task, `id`, `type`, `status`, `model` and the pointer-typed `tokenCount` and `contextWindowSize`, so an absent value stays distinct from zero; the emitted ids; a final `result` record with stage, `elapsed_ms` and count. Each carries PID and timestamps.
-- **Never recorded:** raw stdin, labels, prompts, descriptions, cwd, transcript paths or bodies, rendered content.
-- **Failure:** a trace that cannot open or write reports the cause on stderr and rendering continues.
-- **Rendering independent of the trace:** the sub-agent renderer emits a `pfm` row for every task id. A task with zero tokens and an unknown window shows context `?/?`, and an unknown token count never prints `0%`.
-
-The trace records what the status line received and emitted; it does not by itself establish the cause of the transient sub-agent row symptom.
 
 ## The system prompt
 

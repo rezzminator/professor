@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -261,95 +260,6 @@ func TestCodexSeatUsageHookNeverTouchesClaudeCredentials(t *testing.T) {
 	}
 }
 
-// A sub-agent launched without an effort runs at its session's effort; the
-// main statusline records that effort per session and the agent-panel row of
-// the same session shows it when Claude Code's row payload carries none.
-func TestStatuslineRecordsTheSessionEffortForTheAgentPanel(t *testing.T) {
-	jailTest(t)
-	root := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(root, "tmp"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PFM_HOME", root)
-	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(root, ".cc", "1"))
-	t.Setenv("PFM_TMUX_DIR", filepath.Join(root, "tmux"))
-	t.Setenv("PFM_SID_DIR", filepath.Join(root, "sid"))
-
-	var stdout, stderr bytes.Buffer
-	runtime := statuslineTestRuntime(t)
-	if code := runStatuslineWithRuntime(
-		nil,
-		strings.NewReader(`{"session_id":"sess-eff","model":{"id":"claude-opus-5-5[1m]",`+
-			`"display_name":"Opus"},"effort":{"level":"xhigh"},"context_window":{"used_percentage":5}}`),
-		&stdout,
-		&stderr,
-		runtime,
-		paths.OSEnv{},
-	); code != 0 ||
-		stderr.Len() != 0 {
-		t.Fatalf("main line: code=%d stderr=%q", code, stderr.String())
-	}
-	stdout.Reset()
-	if code := runStatuslineWithRuntime(
-		[]string{"--subagents"},
-		strings.NewReader(`{"session_id":"sess-eff","tasks":[{"id":"t1",`+
-			`"model":"claude-opus-5-5","contextWindowSize":1000,"tokenCount":10}]}`),
-		&stdout,
-		&stderr,
-		runtime,
-		paths.OSEnv{},
-	); code != 0 ||
-		stderr.Len() != 0 {
-		t.Fatalf("row: code=%d stderr=%q", code, stderr.String())
-	}
-	if !strings.Contains(stdout.String(), "xhigh") {
-		t.Fatalf("row = %q, want the session's effort xhigh", stdout.String())
-	}
-}
-
-func TestStatuslineSubagentsAnswersTheAgentPanel(t *testing.T) {
-	jailTest(t)
-	root := t.TempDir()
-	t.Setenv("PFM_HOME", root)
-	t.Setenv("PFM_SID_DIR", filepath.Join(root, "sid"))
-
-	var stdout, stderr bytes.Buffer
-	runtime := statuslineTestRuntime(t)
-	code := runStatuslineWithRuntime(
-		[]string{"--subagents"},
-		strings.NewReader(`{"columns":100,"tasks":[{"id":"t1","label":"trace it","model":"claude-opus-5-5",`+
-			`"contextWindowSize":1000000,"tokenCount":500000}]}`),
-		&stdout,
-		&stderr,
-		runtime,
-		paths.OSEnv{},
-	)
-	if code != 0 || stderr.Len() != 0 {
-		t.Fatalf("code=%d stderr=%q", code, stderr.String())
-	}
-	var row struct{ ID, Content string }
-	if err := json.Unmarshal(stdout.Bytes(), &row); err != nil || row.ID != "t1" ||
-		!strings.Contains(row.Content, "50%") || !strings.Contains(row.Content, "trace it") {
-		t.Fatalf("stdout=%q (err %v), want one {id:t1} row carrying 50%% and the label", stdout.String(), err)
-	}
-
-	stdout.Reset()
-	stderr.Reset()
-	if code := runStatuslineWithRuntime([]string{"--subagents"}, strings.NewReader(`{"tasks":`), &stdout, &stderr,
-		runtime, paths.OSEnv{}); code != 0 ||
-		stdout.Len() != 0 || !strings.Contains(stderr.String(), "--subagents: render (fail-open)") {
-		t.Fatalf("malformed payload: code=%d stdout=%q stderr=%q, want exit 0, no rows, named error", code,
-			stdout.String(), stderr.String())
-	}
-
-	stdout.Reset()
-	stderr.Reset()
-	if code := runStatuslineWithRuntime([]string{"--subagents", "--refresh-gpt"}, strings.NewReader(""), &stdout,
-		&stderr, runtime, paths.OSEnv{}); code != 2 {
-		t.Fatalf("--subagents with --refresh-gpt: code=%d, want usage error 2", code)
-	}
-}
-
 // The main statusline is a paced front: the first tick of a chat starts the
 // chat's worker and prints the pending line, rendering nothing and caching
 // nothing; a later tick prints the worker's cached line byte for byte, renders
@@ -433,9 +343,9 @@ func TestStatuslinePacedWorkerFlagIsExclusiveAndRefusesABadKey(t *testing.T) {
 	jailTest(t)
 	t.Setenv("PFM_HOME", t.TempDir())
 	var stdout, stderr bytes.Buffer
-	if code := runStatuslineWithRuntime([]string{"--paced", "0123", "--subagents"}, strings.NewReader(""),
+	if code := runStatuslineWithRuntime([]string{"--paced", "0123", "--refresh-gpt"}, strings.NewReader(""),
 		&stdout, &stderr, statuslineTestRuntime(t), paths.OSEnv{}); code != 2 {
-		t.Fatalf("--paced with --subagents code=%d stderr=%q; want usage 2", code, stderr.String())
+		t.Fatalf("--paced with --refresh-gpt code=%d stderr=%q; want usage 2", code, stderr.String())
 	}
 	stderr.Reset()
 	if code := runStatuslineWithRuntime([]string{"--paced", "../escape"}, strings.NewReader(""),

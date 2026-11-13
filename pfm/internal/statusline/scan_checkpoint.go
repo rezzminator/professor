@@ -23,7 +23,7 @@ import (
 
 // scanCheckpointVersion names the checkpoint format; a file of any other
 // version is read as no checkpoint, so the fold starts from the top.
-const scanCheckpointVersion = 1
+const scanCheckpointVersion = 2
 
 // scanBudget is the wall time one render spends folding transcript bytes it
 // has not folded before, every transcript of the render together, checked

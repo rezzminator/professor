@@ -116,5 +116,3 @@ func herdrCommand(binary string, event herdr.Event) string {
 func StatusLineCommand(home string) string {
 	return filepath.Join(home, ".local", "bin", "pfm-statusline")
 }
-
-func SubagentStatusLineCommand(home string) string { return StatusLineCommand(home) + " --subagents" }

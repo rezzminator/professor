@@ -86,12 +86,6 @@ func TestLogRootFollowsTheRecordedClone(t *testing.T) {
 			if got, want := place.CostSink(), filepath.Join(want, "cost-sink.log"); got != want {
 				t.Fatalf("CostSink() = %q, want %q", got, want)
 			}
-			if got, want := place.SubagentStatuslineTrace(), filepath.Join(
-				want,
-				"subagent-statusline.jsonl",
-			); got != want {
-				t.Fatalf("SubagentStatuslineTrace() = %q, want %q", got, want)
-			}
 			if got, want := place.Restart(), filepath.Join(want, "restart"); got != want {
 				t.Fatalf("Restart() = %q, want %q", got, want)
 			}

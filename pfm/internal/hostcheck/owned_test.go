@@ -108,7 +108,7 @@ func TestPFMSettings(t *testing.T) {
 			fmt.Sprintf(
 				`{"hooks":{"SessionStart":[{"hooks":[{"command":%q},{"command":"pfm internal clear-hide"},{"command":"operator-hook"}]}]},"statusLine":{"command":"pfm statusline"},"subagentStatusLine":{"command":%q}}`,
 				command,
-				claudelaunch.SubagentStatusLineCommand(env.Home),
+				claudelaunch.StatusLineCommand(env.Home)+" --subagents",
 			),
 		)
 		items := fmt.Sprintf(`hook %q, hook "pfm internal clear-hide", statusLine, subagentStatusLine`, command)

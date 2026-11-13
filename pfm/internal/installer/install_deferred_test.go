@@ -490,7 +490,7 @@ func TestFailedAssetStageDoesNotWireDependentRegistries(t *testing.T) {
 	if err == nil {
 		t.Fatal("staging failure was hidden")
 	}
-	for _, path := range []string{filepath.Join(home, ".claude", "commands", "reload.md"), filepath.Join(home, ".claude", "skills", "handoff", "SKILL.md")} {
+	for _, path := range []string{filepath.Join(home, ".claude", "commands", "reload.md")} {
 		if target, err := os.Readlink(path); err == nil {
 			t.Errorf("failed asset stage published dependent link %s -> %s", path, target)
 		}

@@ -61,6 +61,9 @@
     "global/commands/h/gh.md": {
       "curated": true
     },
+    "global/commands/handoff.md": {
+      "curated": true
+    },
     "global/commands/housekeeping.md": {
       "curated": true
     },

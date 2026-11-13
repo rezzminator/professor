@@ -138,9 +138,6 @@ func PlanRegistryLinks(home, store, clone, releaseURL string) (RegistryPlan, err
 		if target, found := commandTargetIn(store, asset.path); found {
 			plan.Links[target] = true
 		}
-		if target, found := skillTarget(store, asset.path); found {
-			plan.Links[target] = true
-		}
 	}
 	return plan, nil
 }

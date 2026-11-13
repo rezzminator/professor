@@ -87,7 +87,6 @@ func TestGlobalWiringWritesTheStoreForThreeAccounts(t *testing.T) {
 	}{
 		{"wireGlobalCommands", installer.wireGlobalCommands},
 		{"wireGlobalSkills", installer.wireGlobalSkills},
-		{"wireSkills", func() error { return installer.wireSkills(assets) }},
 	} {
 		if err := step.run(); err != nil {
 			t.Fatalf("%s: %v\n%s", step.name, err, output.String())
@@ -100,12 +99,6 @@ func TestGlobalWiringWritesTheStoreForThreeAccounts(t *testing.T) {
 			filepath.Join(repo, "templates", "global", "commands", "alpha.md"))
 		assertFanoutLink(t, filepath.Join(config, "skills", "beta"),
 			filepath.Join(repo, "templates", "global", "skills", "beta"))
-		assertFanoutLink(t, filepath.Join(config, "skills", "handoff", "SKILL.md"),
-			filepath.Join(installer.managedRoot, "handoff.skill.md"))
-	}
-	header := "skills -> " + filepath.Join(first, "skills") + "\n"
-	if strings.Count(output.String(), header) != 1 {
-		t.Fatalf("header %q: %s", header, output.String())
 	}
 	for _, account := range installer.options.ClaudeAccounts {
 		for _, registry := range []string{"agents", "commands", "skills"} {
@@ -240,14 +233,9 @@ func TestGlobalWiringDryRunPlansTheStore(t *testing.T) {
 	home := t.TempDir()
 	var output bytes.Buffer
 	installer, first, _ := globalFanoutEngine(t, home, false, &output)
-	assets, err := assetFiles(nativeScheduler())
-	if err != nil {
-		t.Fatalf("assetFiles: %v", err)
-	}
 	for _, step := range []func() error{
 		installer.wireGlobalCommands,
 		installer.wireGlobalSkills,
-		func() error { return installer.wireSkills(assets) },
 	} {
 		if err := step(); err != nil {
 			t.Fatalf("dry run: %v\n%s", err, output.String())
@@ -259,7 +247,6 @@ func TestGlobalWiringDryRunPlansTheStore(t *testing.T) {
 		for _, want := range []string{
 			"link " + filepath.Join(config, "commands", "alpha.md") + " -> " + filepath.Join(repo, "templates", "global", "commands", "alpha.md"),
 			"link " + filepath.Join(config, "skills", "beta") + " -> " + filepath.Join(repo, "templates", "global", "skills", "beta"),
-			"link " + filepath.Join(config, "skills", "handoff", "SKILL.md") + " -> " + filepath.Join(installer.managedRoot, "handoff.skill.md"),
 		} {
 			if !strings.Contains(output.String(), want) {
 				t.Fatalf("dry run never planned %q:\n%s", want, output.String())

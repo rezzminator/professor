@@ -346,13 +346,6 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 					wantDescription,
 				)
 			}
-			// T4: /handoff is a global skill, linked the same way /reload is a
-			// global command.
-			assertLink(
-				t,
-				filepath.Join(config, "skills", "handoff", "SKILL.md"),
-				filepath.Join(managed, "handoff.skill.md"),
-			)
 			// One job, two schedulers: assert the one this platform actually installs,
 			// and that it did NOT leave the other platform's files behind.
 			if launchd {
@@ -515,12 +508,6 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 				if _, err := os.Lstat(filepath.Join(home, ".local", "bin", overlay)); !os.IsNotExist(err) {
 					t.Fatalf("uninstall left the %s host overlay link: %v", overlay, err)
 				}
-			}
-			if _, err := os.Lstat(filepath.Join(config, "skills", "handoff", "SKILL.md")); !os.IsNotExist(err) {
-				t.Fatalf("uninstall left the /handoff skill link: %v", err)
-			}
-			if _, err := os.Lstat(filepath.Join(config, "skills", "handoff")); !os.IsNotExist(err) {
-				t.Fatalf("uninstall left the empty handoff skill directory behind: %v", err)
 			}
 			if launchd {
 				agent := filepath.Join(home, "Library", "LaunchAgents", launchdLabel+".plist")

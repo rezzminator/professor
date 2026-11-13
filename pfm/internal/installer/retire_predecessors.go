@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/retired"
 )
 
@@ -15,6 +16,9 @@ import (
 // config dir and their commands. A failed read is deferred once by Run.
 func (installer *engine) retirePredecessors() error {
 	lists, _ := installer.retiredLists()
+	if err := installer.retireHandoffSkill(); err != nil {
+		return err
+	}
 	if err := installer.retireLegacyCommands(lists.Commands); err != nil {
 		return err
 	}
@@ -84,4 +88,39 @@ func (installer *engine) retireLegacyCommand(path string) error {
 		}
 		return nil
 	})
+}
+
+// retireHandoffSkill removes what the embedded /handoff skill left: the link
+// {config}/skills/handoff/SKILL.md into the managed root, the then-empty
+// skills/handoff directory, and the stale managed handoff.skill.md. It walks
+// every Claude config directory the installer fans out to. A skills/handoff
+// entry that is not that link stays. Not gated on live chats: it unlinks, as
+// the installer does when it replaces its own links.
+func (installer *engine) retireHandoffSkill() error {
+	owned := filepath.Join(installer.managedRoot, "handoff.skill.md")
+	configDirs := []string{installer.options.ConfigDir}
+	for _, account := range installer.options.ClaudeAccounts {
+		configDirs = append(configDirs, account.ConfigDir)
+	}
+	seen := map[string]bool{}
+	for _, configDir := range configDirs {
+		if strings.TrimSpace(configDir) == "" {
+			continue
+		}
+		dir := filepath.Join(paths.PhysicalPath(configDir), "skills", "handoff")
+		if seen[dir] {
+			continue
+		}
+		seen[dir] = true
+		link := filepath.Join(dir, "SKILL.md")
+		if target, linked := resolvedLink(link); linked && paths.PhysicalPath(target) == paths.PhysicalPath(owned) {
+			if err := installer.retire(link, "the /handoff skill is a global command now"); err != nil {
+				return err
+			}
+			if err := installer.retireEmptyDirTolerant(dir); err != nil {
+				return err
+			}
+		}
+	}
+	return installer.retire(owned, "embedded /handoff skill retired")
 }

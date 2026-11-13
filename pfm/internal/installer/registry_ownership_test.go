@@ -165,7 +165,6 @@ func TestInspectRegistryOwnershipClasses(t *testing.T) {
 					`{"source_fetched":{"fetched":{"repo":"acme/fetched"}}}`)
 				writeFixture(t, filepath.Join(managed, "skills", "fetched", "SKILL.md"), "fetched")
 				writeFixture(t, filepath.Join(managed, "skills", "stale", "SKILL.md"), "no longer registered")
-				writeFixture(t, filepath.Join(managed, "handoff.skill.md"), "embedded")
 				symlinkFixture(t, filepath.Join(skills, "tpl"), filepath.Join(h.store, "skills", "tpl"))
 				symlinkFixture(t, filepath.Join(skills, "tpl"), filepath.Join(h.home, ".agents", "skills", "tpl"))
 				symlinkFixture(t, filepath.Join(skills, "nomd"), filepath.Join(h.store, "skills", "nomd"))
@@ -175,9 +174,6 @@ func TestInspectRegistryOwnershipClasses(t *testing.T) {
 				)
 				symlinkFixture(
 					t, filepath.Join(managed, "skills", "stale"), filepath.Join(h.home, ".agents", "skills", "stale"),
-				)
-				symlinkFixture(
-					t, filepath.Join(managed, "handoff.skill.md"), filepath.Join(h.store, "skills", "handoff", "SKILL.md"),
 				)
 			},
 			want: []string{"ORPHAN .agents/skills/stale", "ORPHAN .claude/skills/nomd"},

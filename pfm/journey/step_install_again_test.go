@@ -35,7 +35,7 @@ func installAgain(c *harness.Ctx, s State) State {
 	if r := c.Read(
 		"sh",
 		"-c",
-		`rm -f "$1" && printf '%s\n' "$2" > "$1.tmp" && mv "$1.tmp" "$1"`,
+		`printf '%s\n' "$2" > "$1.tmp" && mv "$1.tmp" "$1"`,
 		"sh",
 		stats,
 		statsBody,

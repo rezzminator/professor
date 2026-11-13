@@ -38,8 +38,11 @@ func Discover(roots []string) ([]Bench, []WalkError) {
 		root = filepath.Clean(root)
 		var walk func(string)
 		walk = func(dir string) {
-			entries, err := os.ReadDir(dir)
+			entries, err := readDir(dir)
 			if err != nil {
+				if skippedUnreadable(root, dir, err) {
+					return
+				}
 				walkError := WalkError{Root: root, Path: dir, Err: err}
 				obs.Logger(context.Background()).Error("workbench discovery", "path", dir, obs.FieldErr, walkError)
 				walkErrors = append(walkErrors, walkError)
@@ -47,11 +50,14 @@ func Discover(roots []string) ([]Bench, []WalkError) {
 			}
 			if eligibleBench(root, dir) && !seen[dir] {
 				found, err := paths.HasWorkbenchManifest(dir)
-				if err != nil {
+				switch {
+				case err != nil && skippedUnreadable(root, dir, err):
+					return
+				case err != nil:
 					walkError := WalkError{Root: root, Path: dir, Err: err}
 					obs.Logger(context.Background()).Error("workbench discovery", "path", dir, obs.FieldErr, walkError)
 					walkErrors = append(walkErrors, walkError)
-				} else if found {
+				case found:
 					benches = append(benches, LoadBench(dir, root))
 					seen[dir] = true
 				}

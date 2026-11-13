@@ -200,3 +200,16 @@ func insideDirectory(root, dir string) bool {
 	relative, err := filepath.Rel(root, dir)
 	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
 }
+
+// readDir is swapped by tests to provoke errors a root-run fence cannot.
+var readDir = os.ReadDir
+
+// skippedUnreadable: a permission denial below the root holds no bench of this user, so it is no fault.
+func skippedUnreadable(root, dir string, err error) bool {
+	if dir == root || !errors.Is(err, fs.ErrPermission) {
+		return false
+	}
+	obs.Logger(context.Background()).
+		Info("workbench discovery skipped unreadable directory", "path", dir, obs.FieldErr, err)
+	return true
+}

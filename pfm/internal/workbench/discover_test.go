@@ -2,6 +2,7 @@ package workbench
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -98,6 +99,33 @@ func TestDiscoverUnreadableDirectory(t *testing.T) {
 		": not a directory"
 	if got.Root != unreadable || got.Path != unreadable || !errors.Is(got.Err, syscall.ENOTDIR) || got.Error() != want {
 		t.Fatalf("WalkError = %#v, %q; want %q", got, got.Error(), want)
+	}
+}
+
+// A directory this user cannot read holds no bench of theirs: below the root it is
+// skipped, never a fault; the root itself still reports it.
+func TestDiscoverSkipsPermissionDeniedBelowRoot(t *testing.T) {
+	root, scribe := benchFixture(t)
+	locked := filepath.Join(root, "locked")
+	if err := os.MkdirAll(locked, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	osReadDir := readDir
+	t.Cleanup(func() { readDir = osReadDir })
+	readDir = func(dir string) ([]os.DirEntry, error) {
+		if dir == locked {
+			return nil, &fs.PathError{Op: "open", Path: dir, Err: fs.ErrPermission}
+		}
+		return osReadDir(dir)
+	}
+	benches, walkErrors := Discover([]string{root})
+	if len(benches) != 1 || benches[0].Dir != scribe || len(walkErrors) != 0 {
+		t.Fatalf("below root: Discover = %#v, %v; want bench %s and no error", benches, walkErrors, scribe)
+	}
+	_, walkErrors = Discover([]string{locked})
+	want := "workbench discovery under " + locked + " could not read " + locked + ": open " + locked + ": permission denied"
+	if len(walkErrors) != 1 || walkErrors[0].Error() != want {
+		t.Fatalf("root: walkErrors = %v; want one %q", walkErrors, want)
 	}
 }
 

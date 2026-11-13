@@ -199,45 +199,6 @@ func RecordWorkerFailure(workerLog string, exitCode int) {
 	)
 }
 
-// WorkerArguments carries the validated CLI values to a backend-specific request.
-type WorkerArguments struct {
-	Account, Cache, Socket, Pane, Then, Model, Effort string
-	New, Hide                                         bool
-}
-
-// ParseWorkerArguments decodes values after the CLI's product validation.
-func ParseWorkerArguments(args []string) (WorkerArguments, error) {
-	var parsed WorkerArguments
-	values := map[string]*string{
-		"--account": &parsed.Account,
-		"--cache":   &parsed.Cache,
-		"--sock":    &parsed.Socket,
-		"--pane":    &parsed.Pane,
-		"--then":    &parsed.Then,
-		"--model":   &parsed.Model,
-		"--effort":  &parsed.Effort,
-	}
-	for index := 0; index < len(args); index++ {
-		switch args[index] {
-		case "--new":
-			parsed.New = true
-		case "--hide":
-			parsed.Hide = true
-		default:
-			if dest, ok := values[args[index]]; ok {
-				if index+1 >= len(args) {
-					return parsed, fmt.Errorf("%s needs a value", args[index])
-				}
-				index++
-				*dest = args[index]
-			} else {
-				parsed.Account = args[index]
-			}
-		}
-	}
-	return parsed, nil
-}
-
 // NativeRequest constructs a typed native request without tmux identity inference.
 func NativeRequest(runtime pfmconfig.Runtime, seat fleetdb.Seat, args WorkerArguments) (Request, error) {
 	engine := pfmengine.ID(seat.Engine)

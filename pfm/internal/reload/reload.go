@@ -1,8 +1,8 @@
 // Package reload reboots one Claude seat in its existing tmux pane.
 //
+// arguments.go: the /reload flags, their cache-spelling normalization and the worker's parse.
 // owner_exit.go: the pane mutex, the exit mark and the yield to an owner's /exit.
-// after_reboot.go: what a reload does once the reborn chat is up: the native --then turn and
-// the left-behind conversation's "(before --new)" label, tmux and native alike.
+// after_reboot.go: once the reborn chat is up, its native --then turn and the "(before --new)" label.
 package reload
 
 import (

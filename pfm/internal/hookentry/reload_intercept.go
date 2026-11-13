@@ -12,6 +12,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	pfmreload "github.com/rezzminator/professor/pfm/internal/reload"
 )
 
 // ReloadFront is the in-process reload command front injected by runInternal.
@@ -59,8 +60,7 @@ func reloadInterceptBody(
 	words, err := cmdparse.SplitShellWords(strings.Repeat(" ", len("/reload")) + strings.TrimPrefix(trimmed, "/reload"))
 	if err != nil {
 		recordReloadRefusal(trimmed, err.Error())
-		fmt.Fprintf(stderr, "reload: %v\n", err)
-		return 2
+		return blockPrompt(stdout, reloadFailedMessage(trimmed, err.Error()))
 	}
 	// Past the deadline the reload may still have been scheduled, so the
 	// timeout line says so and names where its worker logs.
@@ -68,15 +68,89 @@ func reloadInterceptBody(
 		runtime.Paths.SIDDir + ")")
 	var captured bytes.Buffer
 	if reload(ctx, words, &captured, &captured, runtime) == 0 {
-		reason := fmt.Sprintf(
-			"reload scheduled — this chat reboots when the current turn ends (%s)",
-			strings.TrimSpace(captured.String()),
-		)
-		return blockPrompt(stdout, reason)
+		return blockPrompt(stdout, reloadScheduledMessage(words, strings.TrimSpace(captured.String())))
 	}
 	recordReloadRefusal(trimmed, strings.TrimSpace(captured.String()))
-	fmt.Fprintf(stderr, "reload: %s", captured.String())
-	return 2
+	return blockPrompt(stdout, reloadFailedMessage(trimmed, captured.String()))
+}
+
+// Claude Code shows a hook's block message under its own yellow "blocked by
+// hook" line and offers no other style, but it keeps an SGR colour inside the
+// reason, re-opening its yellow after every newline: so each line opens its
+// own colour and closes it with a full reset.
+const (
+	reloadStyleScheduled = "\x1b[32m"
+	reloadStyleFailed    = "\x1b[31m"
+	reloadStyleBold      = "\x1b[1m"
+	reloadStyleMuted     = "\x1b[90m"
+	reloadStyleReset     = "\x1b[0m"
+)
+
+// reloadScheduledMessage says what the user asked the reload for, in the
+// settings they typed, and keeps the front's own line with its worker log.
+func reloadScheduledMessage(words []string, frontLine string) string {
+	asked := "same account, model and effort"
+	if settings := reloadAskedSettings(words); len(settings) != 0 {
+		asked = strings.Join(settings, " · ")
+	}
+	lines := []string{
+		reloadStyleScheduled + reloadStyleBold + "↻ Reloading — " + asked + reloadStyleReset,
+		reloadStyleScheduled + "  This chat restarts when the current turn ends." + reloadStyleReset,
+	}
+	if frontLine != "" {
+		lines = append(lines, reloadStyleMuted+"  "+frontLine+reloadStyleReset)
+	}
+	return strings.Join(lines, "\n")
+}
+
+// reloadAskedSettings names each setting a scheduled /reload carries, in the
+// order the usage line lists them; a word the front accepted but this list
+// does not know is shown as typed rather than dropped.
+func reloadAskedSettings(words []string) []string {
+	parsed, err := pfmreload.ParseWorkerArguments(pfmreload.NormalizeArguments(words))
+	if err != nil {
+		return []string{strings.Join(words, " ")}
+	}
+	var settings []string
+	add := func(value, label string) {
+		if value != "" {
+			settings = append(settings, label+" "+value)
+		}
+	}
+	add(parsed.Account, "account")
+	add(parsed.Model, "model")
+	add(parsed.Effort, "effort")
+	add(parsed.Cache, "cache")
+	if parsed.New {
+		settings = append(settings, "new conversation")
+	}
+	if parsed.Hide {
+		settings = append(settings, "old conversation hidden")
+	}
+	if parsed.Then != "" {
+		settings = append(settings, fmt.Sprintf("then %q", parsed.Then))
+	}
+	add(parsed.Socket, "chat")
+	add(parsed.Pane, "pane")
+	return settings
+}
+
+// reloadFailedMessage says the /reload did not run, the exact text the user
+// typed and every line of the reason, so nothing has to be looked up.
+func reloadFailedMessage(prompt, reason string) string {
+	lines := []string{
+		reloadStyleFailed + reloadStyleBold + "✗ Reload failed — this /reload was not scheduled" + reloadStyleReset,
+		reloadStyleFailed + "  You typed: " + prompt + reloadStyleReset,
+		reloadStyleFailed + "  What went wrong:" + reloadStyleReset,
+	}
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "pfm chat reload refused and printed no reason; `pfm log` holds its reload.refused record"
+	}
+	for _, line := range strings.Split(reason, "\n") {
+		lines = append(lines, reloadStyleFailed+"    "+line+reloadStyleReset)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // recordReloadRefusal writes the refusal's reason to the activity log. The

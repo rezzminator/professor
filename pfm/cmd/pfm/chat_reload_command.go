@@ -30,15 +30,15 @@ import (
 )
 
 const (
-	reloadNewFlag     = "--new"
-	reloadHideFlag    = "--hide"
-	reloadThenFlag    = "--then"
-	reloadSocketFlag  = "--sock"
-	reloadModelFlag   = "--model"
-	reloadEffortFlag  = "--effort"
-	reloadPaneFlag    = "--pane"
-	reloadCacheFlag   = "--cache"
-	reloadAccountFlag = "--account"
+	reloadNewFlag     = reload.ArgumentNew
+	reloadHideFlag    = reload.ArgumentHide
+	reloadThenFlag    = reload.ArgumentThen
+	reloadSocketFlag  = reload.ArgumentSocket
+	reloadModelFlag   = reload.ArgumentModel
+	reloadEffortFlag  = reload.ArgumentEffort
+	reloadPaneFlag    = reload.ArgumentPane
+	reloadCacheFlag   = reload.ArgumentCache
+	reloadAccountFlag = reload.ArgumentAccount
 )
 
 // startReloadWorker launches the detached worker (Detach: true), releases it
@@ -63,7 +63,7 @@ func runChatReloadWithRuntime(
 	env paths.Env,
 ) int {
 	env = defaultEnv(env)
-	args = normalizeReloadArgs(args)
+	args = reload.NormalizeArguments(args)
 	if len(args) == 1 && (args[0] == helpFlag || args[0] == "-h") {
 		fmt.Fprintln(stdout, reload.Usage)
 		return 0
@@ -191,7 +191,7 @@ func announceReloadWorkerFailure(
 func reloadWorkerConfigFailure(args []string, err error, stderr io.Writer) int {
 	line := fmt.Sprintf("pfm: config: %v", err)
 	fmt.Fprintln(stderr, line)
-	announceReloadWorkerFailure(normalizeReloadArgs(args), line, false, displayReloadWorkerFailure, stderr)
+	announceReloadWorkerFailure(reload.NormalizeArguments(args), line, false, displayReloadWorkerFailure, stderr)
 	return 1
 }
 
@@ -221,7 +221,7 @@ func runChatReloadWorkerWithRuntime(
 		}
 	}()
 	env = defaultEnv(env)
-	args = normalizeReloadArgs(args)
+	args = reload.NormalizeArguments(args)
 	if err := validateReloadArgs(args); err != nil {
 		fmt.Fprintf(stderr, "pfm chat reload: %v\n", err)
 		return 2

@@ -55,7 +55,7 @@ When a split moves a doc that consumers reference by its old path, leave a one-l
 
 ## Finish
 
-Run `rumdl fmt <file>` from the repo root on everything touched (`/law:markdown`). The format hook covers Edit/Write on root-owned paths (`CLAUDE.md`, `.claude/`, `docs/`); child-project docs (a sub-project's own `docs/`) and Bash-written files need the manual run.
+Run `rumdl fmt <file>` from the repo root on everything touched (`/law:markdown`). The format hook covers Edit/Write on `CLAUDE.md`, `.claude/` and the `docs/` paths the case list in `.claude/scripts/format-md.sh` names; every other `docs/` path (`docs/design/` included), child-project docs (a sub-project's own `docs/`) and Bash-written files need the manual run.
 
 ## Approval — certify a document
 

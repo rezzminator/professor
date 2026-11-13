@@ -66,9 +66,9 @@ Run `pfm doctor` from the managed root or bench. Read each line, including disco
 | `doctor: workbench none under {root}` | none | No workbench was found under this root. |
 | `doctor: workbench {dir} ok · engines {engines} · prompt {prompt}` | none | Manifest valid; printed after mirror checks only when none failed. |
 | `doctor: workbench {dir} FAILED: {fault}` | failure | Repair the named manifest field or prompt: valid JSON, known typed fields, an in-bench regular non-empty prompt, supported non-repeated engines and a one-word name without `:`. Rerun doctor. |
-| `doctor: workbench {dir} {engine} mirror STALE: {problems} — the next launch there rebuilds it` | warning | A build clears stale, missing, wrong-mode and orphaned outputs. Launch there to rebuild, or run `pfm {engine} build {dir}`. |
-| `doctor: workbench {dir} {engine} mirror FAILED: {problem} — the next launch there fails; fix it, then run pfm {engine} build {dir}` | failure per problem | Repair each named problem, build that mirror, then rerun doctor. Write a missing `CLAUDE.md` before a Codex build. |
-| `doctor: workbench {dir} {engine} mirror STALE: {problems} — rebuilt by pfm {engine} build {dir} once the failures are fixed` | warning | Fix the mirror failures, then build to clear these rebuildable outputs. |
+| `doctor: workbench {dir} {engine} mirror STALE: {problems} — the next launch there rebuilds it` | warning | A build clears stale, missing, wrong-mode and orphaned outputs. Launch there to rebuild, or run `engine-sync {engine} build {dir}`. |
+| `doctor: workbench {dir} {engine} mirror FAILED: {problem} — the next launch there fails; fix it, then run engine-sync {engine} build {dir}` | failure per problem | Repair each named problem, build that mirror, then rerun doctor. Write a missing `CLAUDE.md` before a Codex build. |
+| `doctor: workbench {dir} {engine} mirror STALE: {problems} — rebuilt by engine-sync {engine} build {dir} once the failures are fixed` | warning | Fix the mirror failures, then build to clear these rebuildable outputs. |
 | `doctor: workbench {dir} {engine} mirror BROKEN: {err}` | failure | Repair the named source/config, build that mirror, then rerun doctor. |
 | `doctor: workbench discovery FAILED: {WalkError text} — whether more workbenches exist there is UNKNOWN` | failure | Restore access to the named path; rerun doctor. |
 | `doctor: workbench UNREADABLE {err}` | failure | Repair the managed-root lookup path, then rerun doctor. |

@@ -15,7 +15,7 @@ tools: Read, Write, Edit, Bash, Glob, Grep, Agent, Skill, mcp__forward-compactio
 
 ## Mandatory skill load (before writing any reference doc)
 
-Load `/law:doc` (Skill tool; else Read `~/.claude/commands/law/doc.md`, machine-global) and apply it before creating or editing ANY permanent reference doc — every invocation, before the first edit. Two duties it does not carry:
+Load `/law:doc` (Skill tool; else Read `~/.claude/commands/law/doc.md`, machine-global) and apply it before creating or editing any permanent reference doc — every invocation, before the first edit. Two duties it does not carry:
 
 - **Grep-true, narrowly.** Each target file's symbols are checked in one shell call over source, tests excluded: `grep -c` or `grep -l` where existence is the question, `grep -n -m3` where the line itself matters. A claim is written only about code in the tree at write time: a row whose code is absent is not written — return it as `DEPENDENT: {doc path} — {what it needs, by symbol}` and finish the rest.
 - **Finish clean.** Run the `/law:doc` Approval gate over every doc you touched, emitting `APPROVED: {path}` or fix-and-recheck until it passes; a run never leaves a doc REJECTED. Then format every `.md` you created or edited with the project's markdown formatter (`/law:markdown`); where the repo's `format-md.sh` hook runs it after an Edit/Write, run it by hand only after a Bash-driven write.

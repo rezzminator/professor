@@ -23,14 +23,14 @@ Where Vocabulary, Runtime or On demand disagrees with the code on a path, comman
 - flights: the foreman tiers and the lander that build and land work, the tracer with its tracetree kit and caller manual, the reviewers, and `/flights:doctor`, their meter, shipped by the flights plugin · `plugins/flights/plugins/flights/{agents,commands,skills}/` · design `docs/design/flights/`
 - laws: the `/law:{x}` command family, the rule set every prompt and orientation-file edit loads before writing its subject; `/design:{x}` returns a design document; `/flights:trace-guide`, the tracer caller's manual, ships in the flights plugin · `templates/global/commands/law/`, `templates/global/commands/design/` · design `docs/design/law/`
 - fence: the shared `pfm-dev` container, own namespaces, HOME and `/tmp` per call, and the `pfm-sim` browser target · `infra/fence/` · design `docs/dev/isolated-dev-foundation.md`
-- install record: this repo's own pfm install (`VERSION`, `manifest.json`, whose `installed_from.repo` pfm's theme install reads) and its saved rr reports (`RR/`) · `.professor/`
+- install record: this repo's own pfm install (`VERSION`, `manifest.json`, whose `installed_from.repo` pfm's theme install reads) and its saved rr reports (`.professor/RR/`) · `.professor/`
 - this repo's install: the project tier this repo runs, source of truth for its engine mirrors; machine-global originals reach it only through `~/.claude/` symlinks, never a local copy · `.claude/`
 - engine-sync: the single writer of every Codex and OpenCode artifact derived from a Claude source, a Go binary and Claude plugin; pfm execs it, and `pfm install` links it as `~/.local/bin/engine-sync` · `plugins/engine-sync/` · design `docs/design/engine-sync/`
 - engine mirrors: `AGENTS.md`, `.codex/**`, `.opencode/**`, untracked, so a fresh clone generates before it checks · generated from `CLAUDE.md` and `.claude/` by engine-sync
 - Codex keeper: the one hand-written, tracked file under `.codex/` · `.codex/config.toml`
 - marketplace: the plugin listing · `.claude-plugin/marketplace.json`
 - plugins: the plugins professor tracks, each a git submodule of its own repo on `develop`, all but gpt-gateway listed in the marketplace; edits inside one leave this repo's status clean (`ignore = dirty`); an alpha `pfm install` installs every listed one as `{plugin}@professor` from a copy of its checkout in the pfm-owned `professor` directory marketplace `~/.local/share/professor-dev` (`claude.pluginCheckoutRoot` overriding), enabling those `claude.plugins` names · `plugins/{plugin}/`, `.gitmodules`
-- CI: GitHub Actions — `ci.yml`, the one check, runs every layer on each pull request into `main`, and by hand on any branch; `publish.yml` publishes the release merge and verifies the published assets; `make release-check` runs the release checks locally · `.github/workflows/`, `.claude/rules/ci-workflows.md`, `Makefile`
+- CI: GitHub Actions — `ci.yml`, the one check; `publish.yml` publishes the release merge; `make release-check` runs the release checks locally · `.github/workflows/`, `.claude/rules/ci-workflows.md`, `Makefile`
 
 ## Path vars
 
@@ -71,7 +71,7 @@ Where Vocabulary, Runtime or On demand disagrees with the code on a path, comman
 
 ## CI
 
-- `.github/workflows/ci.yml` runs on a pull request into `main` and on `workflow_dispatch` (below): `gate ({unit|e2e|race|mirrors|rest})`, the fence gate's step list sliced by `PFM_GATE_ONLY`/`PFM_GATE_SKIP` and run natively on the runner; `macos ({unit|e2e})`; `journey ({linux|macos})`, pfm's end-to-end suite; `fresh-install ({ubuntu-latest|macos-15})`; `build`; `scan` (the HOL plugin scan, then every plugin's workflow shape, `scripts/check-plugin-workflows.py`); `release` (`make release`).
+- `.github/workflows/ci.yml` runs on a pull request into `main`: `gate ({unit|e2e|race|mirrors|rest})`, the fence gate's step list sliced by `PFM_GATE_ONLY`/`PFM_GATE_SKIP` and run natively on the runner; `macos ({unit|e2e})`; `journey ({linux|macos})`, pfm's end-to-end suite; `fresh-install ({ubuntu-latest|macos-15})`; `build`; `scan` (the HOL plugin scan, then every plugin's workflow shape, `scripts/check-plugin-workflows.py`); `release` (`make release`).
 - Its `ci` job fails unless every other job succeeded and is `main`'s only required status check: no release merges or publishes until it is green.
 - `ci.yml` also runs on `workflow_dispatch` from any branch: `gh workflow run ci.yml --ref {branch} -f exclude='{jobs}'` skips the named jobs (macOS alone: `gate journey fresh-install build scan release`), and `-f only='{job or entry},…'` runs just the jobs and matrix entries it names (`journey (linux),gate (e2e)`); no workflow runs on a push.
 - `.github/workflows/publish.yml` runs only when a pull request into `main` closes: on a merge, `publish` tags `v{VERSION}` on the merge commit and creates the GitHub release, and `verify` checks the published assets against `SHA256SUMS`, the binary's version and the note.
@@ -127,9 +127,9 @@ Tiers and effort live in the fleet prompt's § Model Selection; the cast and eac
 - Commit only code whose tests pass.
 - Code builds and tests run in the fence through `.claude/scripts/dev.sh iso`; the full gate is the lander's on a flight, the main chat's on small work.
 - Fence runs leave the host's `~/.local/bin` and the real `$HOME` untouched; a live config change the user orders is edited in place.
-- Template, doc, prompt and config-file changes are small work, made in the main checkout.
+- Template, doc, prompt and config-file changes are non-code work, placed by `templates/global/rules/flights-life-cycle.md`.
 - Once a fenced flight merges, the main chat runs the host mirror build under § Host.
-- At every milestone, checkpoint the plan to a file, then compact before the next phase; a held turn arms an idle-fired self-call instead.
+- At every milestone, checkpoint the plan to a file and store the frontier with `forward_compaction`, which works mid-turn.
 - AskUserQuestion is the user's whole screen: context travels inside the question text; each round simpler and more concrete, never a rephrase.
 
 ## Testing

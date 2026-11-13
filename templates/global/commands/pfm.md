@@ -32,6 +32,11 @@ Operator verbs:
 - restart: end every chat, then restart Herdr and every pfm service that was running before, each verified up; a unit found stopped stays stopped, named; `--dry-run` prints the ordered plan and changes nothing
 - config: `init | show | validate` machine configuration
 - doctor: fleet database and jail health — exit 0 machine checks clean (`project_updates` rows advisory), 1 warnings, 3 failures
+- log: read this home's activity log (`--since --level --chat --cmd --follow`)
+- model-cost: the model price table, USD per million tokens (`MODEL_ID | --all | --check`)
+- tokens: audit transcripts for where the tokens went (`--codex`, `--opencode`, `--tree SESSION|AGENT`)
+- transcript: digest one Claude, Codex or OpenCode transcript — `show | locate | agents`
+- theme: Claude Code's theme rendered into tmux, Herdr and VS Code — `status | sync | on | off | list | use | check`
 - version: print the pfm version
 
 Wiring verbs (hooks and services call these; you rarely type them): name-sync, statusline, usage-hook, mcp (`ls | serve | <server> enable|disable|serve`).

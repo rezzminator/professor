@@ -117,9 +117,9 @@ Picker first paint uses this cache without walking; refresh discovers benches an
 | `doctor: workbench none under {root}` | none | No workbench was found under this managed root. |
 | `doctor: workbench {dir} ok · engines {engines} · prompt {prompt}` | none | Manifest valid; printed after mirror checks only when none failed. |
 | `doctor: workbench {dir} FAILED: {fault}` | failure | Repair the named manifest/prompt; no mirror check runs for it. |
-| `doctor: workbench {dir} {engine} mirror STALE: {problems} — the next launch there rebuilds it` | warning | Stale, missing, wrong-mode and orphaned outputs are cleared by a build. The next launch rebuilds them, or run `pfm {engine} build {dir}`. |
-| `doctor: workbench {dir} {engine} mirror FAILED: {problem} — the next launch there fails; fix it, then run pfm {engine} build {dir}` | failure per problem | Repair every named failure, build the mirror, then rerun doctor. |
-| `doctor: workbench {dir} {engine} mirror STALE: {problems} — rebuilt by pfm {engine} build {dir} once the failures are fixed` | warning | Rebuildable outputs accompany failures; fix those failures before building. |
+| `doctor: workbench {dir} {engine} mirror STALE: {problems} — the next launch there rebuilds it` | warning | Stale, missing, wrong-mode and orphaned outputs are cleared by a build. The next launch rebuilds them, or run `engine-sync {engine} build {dir}`. |
+| `doctor: workbench {dir} {engine} mirror FAILED: {problem} — the next launch there fails; fix it, then run engine-sync {engine} build {dir}` | failure per problem | Repair every named failure, build the mirror, then rerun doctor. |
+| `doctor: workbench {dir} {engine} mirror STALE: {problems} — rebuilt by engine-sync {engine} build {dir} once the failures are fixed` | warning | Rebuildable outputs accompany failures; fix those failures before building. |
 | `doctor: workbench {dir} {engine} mirror BROKEN: {err}` | failure | Repair the named compiler input and rebuild. |
 | `doctor: workbench discovery FAILED: {WalkError text} — whether more workbenches exist there is UNKNOWN` | failure | Restore access to the path and rerun discovery. |
 | `doctor: workbench UNREADABLE {err}` | failure | Repair the managed-root lookup path and rerun doctor. |

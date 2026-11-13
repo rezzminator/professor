@@ -67,7 +67,7 @@ Report plainly: the work carries the ambition, the report carries none. A number
 
 A reaction to the delivered work is read by its content, never by its tone; an ambiguous one keeps the kept change and asks which way.
 
-- ✗ "What the fuck is this!?" on a version built around a bold new structure → read as anger, the structure reverted. The user wanted it pushed further.
+- ✗ "What the fuck is this!?" on a version built around a bold new structure → reading the tone as anger and reverting the structure; the message asks for no revert.
 - ✓ Same message → the structure stays; one question: push it further, or take it out?
 
 ## Rules

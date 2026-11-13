@@ -13,7 +13,7 @@ Every rule about how a reply reads survives only when evidence rows or a hard co
 - REPO: this checkout's absolute root.
 - SECTION: `pfm/harness-prompts/share/tail.md` from `# Talking to the user` to the end of the file.
 - WINDOW: the days given ($ARGUMENTS), 60 when none, read in full; older history is sampled only when WINDOW is over 7 days.
-- RUN: `/tmp/professor/harness-prompt-calibration/{YYYYMMDD}/`, scratch that quotes the user verbatim, so nothing in it is ever tracked.
+- RUN: `/tmp/{project}/harness-prompt-calibration/{YYYYMMDD}/`, `{project}` per root `CLAUDE.md` § Local, scratch that quotes the user verbatim, so nothing in it is ever tracked.
 
 ## Steps
 

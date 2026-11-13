@@ -24,8 +24,8 @@ You are the Professor Change Manager. The dispatch prompt carries the user's req
 - `templates/global/rules/*.md`: machine-global rules, linked into `~/.claude/rules/` by `pfm install`; a project rule lives in `.claude/rules/`
 - `.claude/agents/*.md`: this repo's agents (`ls`), `gitter` the Git writer; machine-global ones in `~/.claude/agents/`
 - `templates/global/agents/pcm.md`, `templates/global/pcm/audit-scopes.md`: the global pcm adopters run; this file overrides it here; an adopter-usable change here lands there too
-- `.claude/skills/*/SKILL.md`: reusable skills, source-fetched per `templates/project/skills/sources.json`, never vendored
-- `.claude/scripts/*.{sh,mjs}`: dev.sh, format-md.sh
+- `templates/global/skills/*/SKILL.md`: machine-global skills, linked into `~/.claude/skills/` by `pfm install`; a source-fetched one is an entry in its tier's `templates/{global,project}/skills/sources.json`, never vendored; a project skill lives in `.claude/skills/`
+- `.claude/scripts/*.{sh,mjs}`: this repo's scripts (`ls`)
 - the engine-sync plugin's hooks (`hook claude mark|stop|start`, mirror auto-compile): registered in the plugin's `hooks.json`, not under `.claude/scripts/`
 - `docs/commands/{cmd}/references/`: command-owned reference docs (`$CDOCS/$CMD/$REFS/`); `pcm/references/{audit-scopes,refresh}.md` are yours
 - `templates/**`: the shipped product, an adopter's live framework; a change ships to every future install; spec `docs/{SETUP,PLACEHOLDERS}.md`; `templates/refresh-map.json` maps each template to its live source
@@ -120,7 +120,7 @@ In order: "Infrastructure updated, N files changed"; the changes (what and why);
 
 - Full rename: grep all occurrences (`templates/**`, `README.md`, `docs/SETUP.md`, `refresh-map.json` included), update agents, then `CLAUDE.md`, final grep for zero stale references, recompile the mirrors.
 - New agent: create `.claude/agents/{name}.md` (its `description:` is the registry entry, `model:` pins the tier, `tools:` names `mcp__forward-compaction__forward_compaction, mcp__forward-compaction__look_back` unless its `model:` is haiku), compile with `engine-sync codex build .`, decide whether it ships as `templates/global/agents/{name}.md` (machine-global) or `templates/project/agents/{name}.md` (scaffolded).
-- New skill: create `.claude/skills/{name}/SKILL.md`; a skill for adopters is registered in `templates/project/skills/sources.json` and lives in its own public repo.
+- New skill: create `templates/global/skills/{name}/SKILL.md` (machine-global), `templates/project/skills/{name}/SKILL.md` (scaffolded) or `.claude/skills/{name}/SKILL.md` (this repo alone); one living in its own public repo is an entry in its tier's `sources.json` instead.
 - New command: create `.claude/commands/{name}.md` with a `description:`; add it to `CLAUDE.md` only as a non-obvious routing decision.
 
 ## Authoring conventions

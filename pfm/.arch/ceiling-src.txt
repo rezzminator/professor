@@ -11,7 +11,6 @@ cmd/pfm/config_command.go 248
 cmd/pfm/headless_exec_command.go 402
 cmd/pfm/install_command.go 328
 cmd/pfm/main.go 668
-cmd/pfm/namesync_command.go 274
 cmd/pfm/reap_command.go 265
 internal/action/claude_spawn.go 268
 internal/action/executor.go 579

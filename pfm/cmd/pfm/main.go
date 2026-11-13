@@ -1,4 +1,6 @@
 // Command pfm manages live and resumable Claude and Codex chats.
+//
+// namesync_halves.go: name-sync's order, the native Herdr seats before the tmux windows.
 package main
 
 import (

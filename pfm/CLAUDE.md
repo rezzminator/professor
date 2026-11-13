@@ -59,13 +59,12 @@ It reads and writes the user's real chat state: a destructive operation on a liv
 - Lint law: `.golangci.yml` and `.testcoverage.yml` are gates — lint-new blocks a wave on the lines it changed, `make lint` is the burn-down view, coverage thresholds only ratchet up.
 - A kill is permanent, and the store table keeps its `hidden` name; a kill of a live chat always runs the detached exit choreography, `--exit` its explicit form.
 - The ratchet counts prompts, not bytes (K2): kill baselines are `baseline_prompts`; auto-unkill is `prompt_count > baseline`; legacy byte baselines convert once, at import.
-- One binary, two kernels: the OS doors are `gather` (process table, memory, CPU, sockets), `deps.Runner`/`deps.Process` (exec, detach, process-group signals), `servicemanager.Native` (systemd vs launchd) and, for shell, `scripts/platform.sh`; inside a door the seam is a `_linux.go` / `_darwin.go` pair, not a runtime `if`; arch-check C29 `os-door` and C30 `shell-platform` flag an OS branch or one-OS command outside them.
+- One binary, two kernels: the OS doors and their law live in `.claude/rules/pfm-os-doors.md`.
 - Darwin has no `/proc`: the process table comes from `sysctl`, and `ProcFS` dispatches through `gather.NewProcFS`, which still honours an existing root, because that is how the jail feeds it fixtures.
 - tmux's ioctl and format-separator spellings differ by kernel: parse through `internal/tmux/format.go`, not against one spelling.
 - Darwin has no dead-launchd jail, so the installer's rc 97 gate narrows to "not mid-execution" instead of "manager not live".
 - A platform whose constants nobody has confirmed fails to build instead of falling back to a guess.
 - `deps.Registry`: an entry with no `Platforms` field applies everywhere; everything ungated (`tmux`, `git`, `sh`, `bash`, `zsh`, `sleep`, `script`, `go`) works identically on both kernels; an entry carries `VersionArgs` only when every platform it applies to accepts them.
-- `/proc` sits behind the `ProcFS` interface, never read directly; this is what lets the suite run in a jail.
 - Account identity, emoji, theme and permission posture come from `internal/config/` alone: a hardcoded account count, `.cc/{N}` literal, medal emoji or bypass flag elsewhere is a defect.
 - Every Claude launch flag, env value and `--settings` key comes from the launch registry alone; a launch literal elsewhere fails `TestNoLaunchLiteralOutsideRegistry`.
 - A seat is identified by lineage, not file recency: Codex writes subagent threads into `~/.codex/sessions` beside real seats, marked `thread_source: subagent` with a `parent_thread_id`; code reading the rollout tree directly checks those two fields first.

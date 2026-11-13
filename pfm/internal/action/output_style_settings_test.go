@@ -4,12 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"os/exec"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
+	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 )
@@ -201,11 +201,11 @@ func TestLauncherRunSessionRouting(t *testing.T) {
 
 func shellWords(t *testing.T, run string) []string {
 	t.Helper()
-	output, err := exec.Command("sh", "-c", "set -- "+launchHead(run)+"; printf '%s\\000' \"$@\"").Output()
+	words, err := cmdparse.SplitShellWords(launchHead(run))
 	if err != nil {
-		t.Fatalf("parse shell launch: %v", err)
+		t.Fatalf("parse shell launch %q: %v", run, err)
 	}
-	return strings.Split(strings.TrimSuffix(string(output), "\x00"), "\x00")
+	return words
 }
 
 // launchHead is a launch line up to its fallback tail, the first " || " outside

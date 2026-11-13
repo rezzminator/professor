@@ -105,6 +105,10 @@ func (executor *Executor) Solo(
 			continue
 		}
 		panes, err := executor.tmux.ListPanes(ctx, socket)
+		if errors.Is(err, gather.ErrServerGone) {
+			// No server behind the socket: that chat ended, as an empty one did.
+			panes, err = nil, nil
+		}
 		if err != nil {
 			// A failed probe is not an empty server. The socket may still be
 			// live but temporarily unreadable; leave its crumb so a later

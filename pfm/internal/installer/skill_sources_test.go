@@ -3,6 +3,8 @@ package installer
 import (
 	"bytes"
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +13,7 @@ import (
 	"path/filepath"
 	goRuntime "runtime"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -21,8 +24,9 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
-// skillFixtureGit runs git in dir with a fixed identity; fixtures are local
-// repositories only — no test here reaches a network.
+// skillFixtureGit runs real git in dir with a fixed identity, for the tests
+// whose subject is real git's own behaviour; fixtures are local repositories
+// only — no test here reaches a network.
 func skillFixtureGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	command := exec.Command("git", append([]string{
@@ -34,24 +38,55 @@ func skillFixtureGit(t *testing.T, dir string, args ...string) {
 	}
 }
 
-// skillFixtureRepo creates a git repository at dir holding files, committed.
-func skillFixtureRepo(t *testing.T, dir string, files map[string]string) string {
+// skillRealRepo creates a real git repository at dir holding files, committed.
+func skillRealRepo(t *testing.T, dir string, files map[string]string) string {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	skillFixtureGit(t, dir, "init", "--quiet")
-	skillFixtureCommit(t, dir, files)
-	return dir
-}
-
-func skillFixtureCommit(t *testing.T, dir string, files map[string]string) {
-	t.Helper()
 	for name, content := range files {
 		writeFixture(t, filepath.Join(dir, name), content)
 	}
 	skillFixtureGit(t, dir, "add", "-A")
 	skillFixtureGit(t, dir, "commit", "--quiet", "-m", "fixture")
+	return dir
+}
+
+// realSkillGit runs a fetch through the real git on PATH.
+func realSkillGit(options *Options) { options.ProcessRunner = nil }
+
+// skillFixtureRepo creates a fixture repository at dir holding files,
+// committed, which skillGit serves.
+func skillFixtureRepo(t *testing.T, dir string, files map[string]string) string {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	skillFixtureCommit(t, dir, files)
+	return dir
+}
+
+var skillFixtureCommits atomic.Int64
+
+// skillFixtureCommit writes files into dir's work tree and commits the whole
+// tree as `git add -A && git commit` does: .git/fixture-tree holds the
+// committed tree (an empty directory dropped, as git drops it) and
+// .git/fixture-head a commit id no other commit shares.
+func skillFixtureCommit(t *testing.T, dir string, files map[string]string) {
+	t.Helper()
+	for name, content := range files {
+		writeFixture(t, filepath.Join(dir, name), content)
+	}
+	tree := filepath.Join(dir, ".git", "fixture-tree")
+	if err := os.RemoveAll(tree); err != nil {
+		t.Fatal(err)
+	}
+	if err := copySkillTree(dir, tree); err != nil {
+		t.Fatalf("commit fixture %s: %v", dir, err)
+	}
+	sum := sha1.Sum(fmt.Appendf(nil, "%s %d", dir, skillFixtureCommits.Add(1)))
+	writeFixture(t, filepath.Join(dir, ".git", "fixture-head"), hex.EncodeToString(sum[:])+"\n")
 }
 
 func writeSkillRegistry(t *testing.T, home, content string) string {
@@ -75,6 +110,7 @@ func runSkillInstall(t *testing.T, home string, mode Mode, mutate ...func(*Optio
 	options := Options{
 		MCPConfigPath: testConfigPath(t),
 		Mode:          mode, Home: home, Stdout: &output, Runner: &fakeRunner{},
+		ProcessRunner: skillGit{},
 	}
 	for _, apply := range mutate {
 		apply(&options)
@@ -158,29 +194,97 @@ func TestSourceFetchedSkillsReinstallFetchesTheNewCommit(t *testing.T) {
 	}
 }
 
-// TestSourceFetchedSkillsDryRunWritesNothing pins that a dry run clones,
-// fetches and links nothing, while printing the planned fetch and links.
-func TestSourceFetchedSkillsDryRunWritesNothing(t *testing.T) {
+// TestSourceFetchedSkillsDryRunPreviewsWithoutWriting pins the dry run over
+// every store state: with no store it plans the store root, the fetch and the
+// links and writes none of them; over an existing store it reads no remote,
+// previews the check and leaves the store and its commit record as they were;
+// over a store that lost its SKILL.md it previews the re-clone and keeps the
+// links reported ok.
+func TestSourceFetchedSkillsDryRunPreviewsWithoutWriting(t *testing.T) {
 	t.Parallel()
-	home := t.TempDir()
-	repo := skillFixtureRepo(t, filepath.Join(t.TempDir(), "atlas"), map[string]string{"SKILL.md": "# vf\n"})
-	writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"atlas": "file://" + repo}))
-
-	output := runSkillInstall(t, home, ModeDryRun)
-
-	store := filepath.Join(skillStoreRoot(home), "atlas")
-	requireNoPath(t, skillStoreRoot(home), "dry run created the store root")
-	requireNoPath(t, store, "dry run cloned")
-	requireNoPath(t, filepath.Join(home, ".agents", "skills", "atlas"), "dry run linked")
-	requireNoPath(t, filepath.Join(home, ".claude", "skills", "atlas"), "dry run linked")
-	for _, want := range []string{
-		"  change  create " + skillStoreRoot(home) + "\n",
-		"change  fetch file://" + repo + " -> " + store,
-		"change  link " + filepath.Join(home, ".agents", "skills", "atlas") + " -> " + store,
+	for _, test := range []struct {
+		name, skill, content string
+		// prepare brings the store into the row's state before the dry run and
+		// returns what check compares against.
+		prepare func(t *testing.T, home, repo, store string) string
+		check   func(t *testing.T, home, repo, store, output, prepared string)
+	}{
+		{
+			name: "no store yet", skill: "atlas", content: "# vf\n",
+			prepare: func(*testing.T, string, string, string) string { return "" },
+			check: func(t *testing.T, home, repo, store, output, _ string) {
+				requireNoPath(t, skillStoreRoot(home), "dry run created the store root")
+				requireNoPath(t, store, "dry run cloned")
+				requireNoPath(t, filepath.Join(home, ".agents", "skills", "atlas"), "dry run linked")
+				requireNoPath(t, filepath.Join(home, ".claude", "skills", "atlas"), "dry run linked")
+				for _, want := range []string{
+					"  change  create " + skillStoreRoot(home) + "\n",
+					"change  fetch file://" + repo + " -> " + store,
+					"change  link " + filepath.Join(home, ".agents", "skills", "atlas") + " -> " + store,
+				} {
+					if !strings.Contains(output, want) {
+						t.Fatalf("dry run omitted %q:\n%s", want, output)
+					}
+				}
+			},
+		},
+		{
+			name: "existing store at an older head", skill: "god-speed", content: "# gs\n",
+			prepare: func(t *testing.T, home, repo, _ string) string {
+				runSkillInstall(t, home, ModeApply)
+				was := repoHead(t, repo)
+				skillFixtureCommit(t, repo, map[string]string{"SKILL.md": "# gs v2\n"})
+				return was
+			},
+			check: func(t *testing.T, _, repo, store, output, was string) {
+				want := "check   " + store + " against file://" + repo +
+					" (a dry run reads no remote; the apply replaces it if the head moved)\n"
+				if !strings.Contains(output, want) {
+					t.Fatalf("preview missing %q:\n%s", want, output)
+				}
+				if got := readSkillFile(t, filepath.Join(store, "SKILL.md")); got != "# gs\n" {
+					t.Fatalf("preview changed the store to %q", got)
+				}
+				if got := readSkillFile(t, skillCommitPath(store)); got != was+"\n" {
+					t.Fatalf("preview changed the commit record to %q", got)
+				}
+			},
+		},
+		{
+			name: "store without SKILL.md", skill: "god-speed", content: "# v1\n",
+			prepare: func(t *testing.T, home, _, store string) string {
+				runSkillInstall(t, home, ModeApply)
+				if err := os.Remove(filepath.Join(store, "SKILL.md")); err != nil {
+					t.Fatal(err)
+				}
+				return ""
+			},
+			check: func(t *testing.T, home, repo, store, output, _ string) {
+				skill := filepath.Join(store, "SKILL.md")
+				want := "  change  re-clone " + store + " from file://" + repo +
+					" (inspect " + skill + ": lstat " + skill + ": no such file or directory)\n"
+				if !strings.Contains(output, want) ||
+					!strings.Contains(output, "  ok      "+filepath.Join(home, ".agents", "skills", "god-speed")+"\n") ||
+					strings.Contains(output, "SKILL-SOURCE-MISSING god-speed") {
+					t.Fatalf("dry run did not preview the usable replacement %q:\n%s", want, output)
+				}
+			},
+		},
 	} {
-		if !strings.Contains(output, want) {
-			t.Fatalf("dry run omitted %q:\n%s", want, output)
-		}
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			home := t.TempDir()
+			repo := skillFixtureRepo(
+				t, filepath.Join(t.TempDir(), test.skill), map[string]string{"SKILL.md": test.content},
+			)
+			writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{test.skill: "file://" + repo}))
+			store := filepath.Join(skillStoreRoot(home), test.skill)
+			prepared := test.prepare(t, home, repo, store)
+
+			output := runSkillInstall(t, home, ModeDryRun)
+
+			test.check(t, home, repo, store, output, prepared)
+		})
 	}
 }
 
@@ -469,10 +573,10 @@ func requireParentRepositoryUntouched(t *testing.T, inherited bool) {
 	t.Helper()
 	{
 		home := t.TempDir()
-		skillFixtureRepo(t, home, map[string]string{"tracked.txt": "parent\n"})
+		skillRealRepo(t, home, map[string]string{"tracked.txt": "parent\n"})
 		writeFixture(t, filepath.Join(home, "untracked.txt"), "mine\n")
 		parentHead := cleanGitOutput(t, home, "rev-parse", "HEAD")
-		repo := skillFixtureRepo(t, filepath.Join(t.TempDir(), "skill"), map[string]string{"SKILL.md": "# new\n"})
+		repo := skillRealRepo(t, filepath.Join(t.TempDir(), "skill"), map[string]string{"SKILL.md": "# new\n"})
 		writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"skill": "file://" + repo}))
 		store := filepath.Join(skillStoreRoot(home), "skill")
 		writeFixture(t, filepath.Join(store, "SKILL.md"), "# hand-made, no .git\n")
@@ -480,7 +584,7 @@ func requireParentRepositoryUntouched(t *testing.T, inherited bool) {
 			t.Setenv("GIT_DIR", filepath.Join(home, ".git"))
 		}
 
-		output := runSkillInstall(t, home, ModeApply)
+		output := runSkillInstall(t, home, ModeApply, realSkillGit)
 
 		if got := cleanGitOutput(t, home, "rev-parse", "HEAD"); got != parentHead {
 			t.Fatalf("GIT_DIR=%v: parent HEAD moved %s -> %s\n%s", inherited, parentHead, got, output)
@@ -506,7 +610,9 @@ func TestSourceFetchedSkillsKeepTheOldStoreWhenTheNewTreeHasNoSKILLMd(t *testing
 	repo := skillFixtureRepo(t, filepath.Join(t.TempDir(), "ghost-writer"), map[string]string{"SKILL.md": "# v1\n"})
 	writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"quill": "file://" + repo}))
 	runSkillInstall(t, home, ModeApply)
-	skillFixtureGit(t, repo, "rm", "--quiet", "SKILL.md")
+	if err := os.Remove(filepath.Join(repo, "SKILL.md")); err != nil {
+		t.Fatal(err)
+	}
 	skillFixtureCommit(t, repo, map[string]string{"README.md": "# moved\n"})
 
 	output := runSkillInstall(t, home, ModeApply)
@@ -710,27 +816,6 @@ func TestSourceFetchedSkillsRegistryWithoutTheObjectRetiresNothing(t *testing.T)
 			t.Fatalf("registry %q retired the store: %q", content, got)
 		}
 		assertLink(t, filepath.Join(home, ".agents", "skills", "god-speed"), store)
-	}
-}
-
-// TestSourceFetchedSkillsDryRunOfAnExistingStoreChangesNothing pins the F18
-// dry-run-update gap: a dry run over an existing store only plans the clone.
-func TestSourceFetchedSkillsDryRunOfAnExistingStoreChangesNothing(t *testing.T) {
-	t.Parallel()
-	home := t.TempDir()
-	repo := skillFixtureRepo(t, filepath.Join(t.TempDir(), "gs"), map[string]string{"SKILL.md": "# v1\n"})
-	writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"god-speed": "file://" + repo}))
-	runSkillInstall(t, home, ModeApply)
-	skillFixtureCommit(t, repo, map[string]string{"SKILL.md": "# v2\n"})
-
-	output := runSkillInstall(t, home, ModeDryRun)
-
-	store := filepath.Join(skillStoreRoot(home), "god-speed")
-	if got := readSkillFile(t, filepath.Join(store, "SKILL.md")); got != "# v1\n" {
-		t.Fatalf("a dry run changed the store: %q\n%s", got, output)
-	}
-	if !strings.Contains(output, "file://"+repo) {
-		t.Fatalf("a dry run did not plan the clone:\n%s", output)
 	}
 }
 

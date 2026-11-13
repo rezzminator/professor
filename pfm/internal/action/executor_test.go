@@ -24,6 +24,7 @@ type fakeActionTmux struct {
 	mutex        sync.Mutex
 	panes        map[string][]ActionPane
 	alive        map[string]bool
+	listErr      map[string]error
 	killedPanes  []string
 	killedServer []string
 	sized        []string
@@ -46,6 +47,9 @@ func (tmux *fakeActionTmux) ListPanes(
 ) ([]ActionPane, error) {
 	tmux.mutex.Lock()
 	defer tmux.mutex.Unlock()
+	if err := tmux.listErr[socket]; err != nil {
+		return nil, err
+	}
 	if !tmux.alive[socket] {
 		return nil, errors.New("dead socket")
 	}

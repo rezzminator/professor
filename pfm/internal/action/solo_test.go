@@ -257,9 +257,9 @@ func TestSoloStrayKillGoesThroughTheDoor(t *testing.T) {
 
 // A failed pane probe is not an empty server. The socket may still be live
 // but temporarily unreadable; removing its crumb here makes the next sweep
-// treat a working chat as unowned. Cleanup is safe only after a successful
-// probe that returned no panes.
-func TestSoloPreservesCrumbWhenPaneProbeFails(t *testing.T) {
+// treat a working chat as unowned. Cleanup is safe only after a probe that
+// returned no panes or found no server behind the socket.
+func TestSoloCrumbAfterPaneProbeError(t *testing.T) {
 	id := "55555555-5555-4555-8555-555555555555"
 	socket := "cc-900-1-1"
 	for _, test := range []struct {
@@ -267,12 +267,16 @@ func TestSoloPreservesCrumbWhenPaneProbeFails(t *testing.T) {
 		// unreadable makes the crumb a directory: its read fails, so whether
 		// it names this chat is unknown and it stays for a later pass.
 		unreadable bool
+		// listErr is what the pane probe of the crumb's socket answers.
+		listErr    error
+		wantCrumb  bool
 		wantStderr func(crumb string) string
 	}{
 		{
 			// L1-F14: the pane probe failure has a sibling below (the
 			// keep-socket probe) that already logs; this one was silent.
-			name: "pane probe fails",
+			name:      "pane probe fails",
+			wantCrumb: true,
 			wantStderr: func(string) string {
 				return "cc: solo — pane probe on " + socket + " failed; leaving its crumb: dead socket\n"
 			},
@@ -280,9 +284,17 @@ func TestSoloPreservesCrumbWhenPaneProbeFails(t *testing.T) {
 		{
 			name:       "crumb cannot be read",
 			unreadable: true,
+			wantCrumb:  true,
 			wantStderr: func(crumb string) string {
 				return "cc: solo — read crumb " + crumb + " failed; leaving it: read " + crumb + ": is a directory\n"
 			},
+		},
+		{
+			// A chat whose Claude died at launch leaves its socket file
+			// behind its exited server: an ended chat, removed in silence.
+			name:       "server behind the socket is gone",
+			listErr:    fmt.Errorf("%w: %s", gather.ErrServerGone, socket),
+			wantStderr: func(string) string { return "" },
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -295,7 +307,10 @@ func TestSoloPreservesCrumbWhenPaneProbeFails(t *testing.T) {
 			} else {
 				writeActionFile(t, crumb, "/tx/"+id+".jsonl", 0o600)
 			}
-			tmux := &fakeActionTmux{alive: map[string]bool{socket: false}}
+			tmux := &fakeActionTmux{
+				alive:   map[string]bool{socket: false},
+				listErr: map[string]error{socket: test.listErr},
+			}
 			var stderr bytes.Buffer
 			executor, err := New(Dependencies{
 				Tmux:      tmux,
@@ -310,8 +325,8 @@ func TestSoloPreservesCrumbWhenPaneProbeFails(t *testing.T) {
 			if err := executor.Solo(context.Background(), id, "", true); err != nil {
 				t.Fatalf("Solo() error = %v", err)
 			}
-			if _, err := os.Stat(crumb); err != nil {
-				t.Fatalf("Solo() removed crumb %s: %v", crumb, err)
+			if _, err := os.Stat(crumb); (err == nil) != test.wantCrumb {
+				t.Fatalf("Solo() crumb %s present = %t, want %t (stat: %v)", crumb, err == nil, test.wantCrumb, err)
 			}
 			if want := test.wantStderr(crumb); stderr.String() != want {
 				t.Fatalf("Solo() stderr = %q, want %q", stderr.String(), want)

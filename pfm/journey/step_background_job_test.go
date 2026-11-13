@@ -5,6 +5,8 @@ package journey
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -39,29 +41,16 @@ func backgroundJob(c *harness.Ctx, s State) State {
 	}
 	s.Chat.Session = record.ContinuedIn
 	c.Poll("a claude bg-spare process recording "+s.Chat.Session, stepBound, func() (bool, string) {
-		records := read(
-			c,
-			"sh",
-			"-c",
-			`cat "$HOME"/.claude/sessions/*.json "$HOME"/.cc/*/sessions/*.json 2>/dev/null; true`,
-		)
-		for _, line := range strings.Split(records, "\n") {
-			var job struct {
-				PID       int    `json:"pid"`
-				SessionID string `json:"sessionId"`
-				Kind      string `json:"kind"`
-			}
-			if json.Unmarshal([]byte(line), &job) != nil || job.SessionID != s.Chat.Session || job.Kind != "bg" {
-				continue
-			}
-			// The daemon serves the job away from the pane: not the pane engine's child.
-			p, ok := processes(c)[job.PID]
-			args := strings.Fields(p.Args)
-			daemon := ok && len(args) == 2 && args[1] == "bg-spare" && p.Ppid != s.Chat.Engine
-			return daemon, fmt.Sprintf("record %s, process %q (parent %d, the pane engine %d)",
-				line, p.Args, p.Ppid, s.Chat.Engine)
+		pid, line, records := jobRecord(c, s.Chat.Session)
+		if line == "" {
+			return false, "records:\n" + records
 		}
-		return false, "records:\n" + records
+		// The daemon serves the job away from the pane: not the pane engine's child.
+		p, ok := processes(c)[pid]
+		args := strings.Fields(p.Args)
+		daemon := ok && len(args) == 2 && args[1] == "bg-spare" && p.Ppid != s.Chat.Engine
+		return daemon, fmt.Sprintf("record %s, process %q (parent %d, the pane engine %d)",
+			line, p.Args, p.Ppid, s.Chat.Engine)
 	})
 	return s
 }
@@ -96,7 +85,7 @@ func jobScheduleFollows(c *harness.Ctx, s State) State {
 // jobOpenFindsSeat (escape herdr/open-continued-starts-second): `pfm chat open {new session}` finds the seat
 // the chat runs on and attaches to its pane; no second engine starts on the session.
 func jobOpenFindsSeat(c *harness.Ctx, s State) State {
-	before := claudeEngines(c)
+	before := chatEngines(c, s)
 	cli := c.Terminal(s.Term + "-cli")
 	cli.WaitFor(prompt)
 	cli.Type("pfm chat open " + s.Chat.Session + "\r")
@@ -112,8 +101,9 @@ func jobOpenFindsSeat(c *harness.Ctx, s State) State {
 		}
 		return false, fmt.Sprintf("no %q beneath the open", want)
 	})
-	if after := claudeEngines(c); after != before {
-		c.Failf("claude processes after pfm chat open %s = %d, want the %d before it", s.Chat.Session, after, before)
+	if after := chatEngines(c, s); !maps.Equal(after, before) {
+		c.Failf("the chat's claude processes after pfm chat open %s:\n%s\nwant the ones before it:\n%s",
+			s.Chat.Session, engineList(after), engineList(before))
 	}
 	// The attach is the owner's view of the pane; the step ends it rather than type into the chat.
 	if r := c.Read("kill", strconv.Itoa(attach)); r.Code != 0 {
@@ -123,12 +113,52 @@ func jobOpenFindsSeat(c *harness.Ctx, s State) State {
 	return s
 }
 
-func claudeEngines(c *harness.Ctx) int {
-	count := 0
-	for _, p := range processes(c) {
-		if p.Engine == "claude" {
-			count++
+// jobRecord reads the owner's Claude session records for the background job serving session: the job's pid
+// and its record line, "" when no record names it yet, and every record read, for a failure to print.
+func jobRecord(c *harness.Ctx, session string) (pid int, line, records string) {
+	records = read(c, "sh", "-c", `cat "$HOME"/.claude/sessions/*.json "$HOME"/.cc/*/sessions/*.json 2>/dev/null; true`)
+	for _, l := range strings.Split(records, "\n") {
+		var job struct {
+			PID       int    `json:"pid"`
+			SessionID string `json:"sessionId"`
+			Kind      string `json:"kind"`
+		}
+		if json.Unmarshal([]byte(l), &job) == nil && job.SessionID == session && job.Kind == "bg" {
+			return job.PID, l, records
 		}
 	}
-	return count
+	return 0, "", records
+}
+
+// chatEngines is every Claude process of the branch's chat, by pid: under the branch's Herdr server, naming
+// the session it runs or the one it left, or the background-job daemon serving it. Other branches' engines
+// are not read: they start and end while this step runs (a herdr-mesh chat ends at its own turn's end, after
+// its step has passed).
+func chatEngines(c *harness.Ctx, s State) map[int]process {
+	daemon, _, _ := jobRecord(c, s.Chat.Session)
+	table := processes(c)
+	server := herdrServer(table, s)
+	found := map[int]process{}
+	for pid, p := range table {
+		if p.Engine != "claude" {
+			continue
+		}
+		if pid == daemon || p.Session == s.Chat.Session || p.Session == s.Left ||
+			server != 0 && under(table, pid, server) {
+			found[pid] = p
+		}
+	}
+	return found
+}
+
+// engineList prints engines one line each, by pid: the pid, its first two argv words and the session it names.
+func engineList(engines map[int]process) string {
+	pids := slices.Sorted(maps.Keys(engines))
+	lines := make([]string, 0, len(pids))
+	for _, pid := range pids {
+		words := strings.Fields(engines[pid].Args)
+		lines = append(lines, fmt.Sprintf("%d %s (session %q)",
+			pid, strings.Join(words[:min(2, len(words))], " "), engines[pid].Session))
+	}
+	return strings.Join(lines, "\n")
 }

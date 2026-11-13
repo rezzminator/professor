@@ -213,7 +213,7 @@ func TestRunStdioUsesHealthyDaemonProxy(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		links, err := gather.NewProcFS("/proc").FDLinks(os.Getpid())
+		links, err := gather.NewProcFS("").FDLinks(os.Getpid())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -227,7 +227,7 @@ func TestRunStdioUsesHealthyDaemonProxy(t *testing.T) {
 	if marker := stdioTestRunInspect(t, local, address, inspect).Message; marker != "daemon" {
 		t.Fatalf("healthy daemon marker = %q, want proxy daemon marker", marker)
 	}
-	links, err := gather.NewProcFS("/proc").FDLinks(os.Getpid())
+	links, err := gather.NewProcFS("").FDLinks(os.Getpid())
 	if err != nil {
 		t.Fatal(err)
 	}

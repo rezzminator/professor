@@ -161,7 +161,7 @@ func paneExecutable(pid string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	reader, ok := gather.NewProcFS("/proc").(gather.ProcExecutable)
+	reader, ok := gather.NewProcFS("").(gather.ProcExecutable)
 	if !ok {
 		return "", errors.New("this platform's process reader names no executable")
 	}

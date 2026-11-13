@@ -81,7 +81,7 @@ func (installer *engine) provisionRumdl(ctx context.Context) {
 		return
 	}
 
-	uvPath, resolveErr := deps.Resolve("uv")
+	uvPath, resolveErr := processRunner.LookPath("uv")
 	if errors.Is(resolveErr, exec.ErrNotFound) {
 		installer.skip("rumdl: no uv available on PATH")
 		return

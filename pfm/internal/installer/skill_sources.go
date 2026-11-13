@@ -579,7 +579,7 @@ func (installer *engine) runSkillGit(deadline time.Time, args ...string) (string
 			strings.Join(args, " "),
 		)
 	}
-	git, err := deps.Resolve("git")
+	git, err := installer.processRunner().LookPath("git")
 	if err != nil {
 		return "", fmt.Errorf("resolve git: %w", err)
 	}

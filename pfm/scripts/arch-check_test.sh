@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Self-test for scripts/arch-check.sh's C1, C5, C10, C12, C23, C25, C26, C27, C28, C29, C30 and C31 ratchets and for
+# Self-test for scripts/arch-check.sh's C1, C5, C10, C12, C23, C25, C26, C27, C28, C29, C30, C31 and C32 ratchets and for
 # how it folds its concurrent checks: print order, exit status, and a check job
 # that dies. It runs arch-check.sh against a throwaway git fixture (PFM=<fixture>),
 # never against this repo, and asserts on the relevant CHECK line rather than the
@@ -685,6 +685,33 @@ else
   bad "C29: could not build the git fixture"
 fi
 
+# ---- C32: the OS door in test code -----------------------------------------
+
+REPO_C32="$T/os-door-test"
+if fixture "$REPO_C32"; then
+  : > "$REPO_C32/.arch/os-door-test.txt"
+  c29_registry "$REPO_C32" "$C29_ROWS"
+  mkdir -p "$REPO_C32/internal/gather" "$REPO_C32/journey"
+  printf 'package obs\n\nfunc TestRead(t *testing.T) {\n\t_, _ = os.ReadFile("/proc/self/stat")\n}\n' > "$REPO_C32/internal/obs/obs_test.go"
+  printf 'package gather\n\nfunc TestTable(t *testing.T) {\n\t_, _ = os.ReadFile("/proc/self/stat")\n}\n' > "$REPO_C32/internal/gather/procfs_test.go"
+  printf 'package loud\n\nfunc TestLinux(t *testing.T) {\n\t_, _ = os.ReadFile("/proc/self/stat")\n}\n' > "$REPO_C32/internal/loud/loud_linux_test.go"
+  printf '//go:build darwin\n\npackage loud\n\nfunc TestMac(t *testing.T) {\n\tif runtime.GOOS == "darwin" {\n\t}\n}\n' > "$REPO_C32/internal/loud/mac_test.go"
+  printf 'package loud\n\nfunc TestFake(t *testing.T) {\n\t_ = os.WriteFile(filepath.Join(dir, "stat"), nil, 0o600)\n\trunner.ScriptLookPath("launchctl", "/bin/launchctl", nil)\n\t_ = exec.Command("launchctl", "print")\n}\n' > "$REPO_C32/internal/loud/fake_test.go"
+  printf '//go:build journey\n\npackage journey\n\nfunc TestStep(t *testing.T) {\n\tif runtime.GOOS == "darwin" {\n\t}\n}\n' > "$REPO_C32/journey/step_test.go"
+  git -C "$REPO_C32" -c user.email=t@example.invalid -c user.name=t add -A 2>/dev/null
+  expect_line "C32: a live /proc read, an OS branch in the journey and an exec of a one-OS command count in tests; a door's test, an OS-selected test, a fake proc tree and a scripted command do not" \
+    "$(check_line "$REPO_C32" C32-os-door-test)" C32-os-door-test FAIL \
+    "internal/loud/fake_test.go (new 1) internal/obs/obs_test.go (new 1) journey/step_test.go (new 1) "
+  printf 'internal/loud/fake_test.go 1\ninternal/obs/obs_test.go 1\njourney/step_test.go 1\n' > "$REPO_C32/.arch/os-door-test.txt"
+  expect_line "C32: baselined test files pass" \
+    "$(check_line "$REPO_C32" C32-os-door-test)" C32-os-door-test PASS "3 in 3 keys, none above baseline"
+  printf 'func TestMore(t *testing.T) {\n\t_ = filepath.Join(paths.SystemProcRoot(), "self")\n}\n' >> "$REPO_C32/internal/obs/obs_test.go"
+  expect_line "C32: a baselined test file that reads the live proc root once more FAILs" \
+    "$(check_line "$REPO_C32" C32-os-door-test)" C32-os-door-test FAIL "internal/obs/obs_test.go (1->2) "
+else
+  bad "C32: could not build the git fixture"
+fi
+
 # ---- C30: a shell OS difference lives inside scripts/platform.sh -----------
 
 # C30 reads the repo root, the parent of PFM, so each fixture's PFM is <root>/pfm.
@@ -827,7 +854,7 @@ fi
 
 # ---- the concurrent checks: order, exit status, a job that dies ------------
 
-# green_fixture <dir>: a tree on which all 30 checks PASS — the fixture plus what
+# green_fixture <dir>: a tree on which all 31 checks PASS — the fixture plus what
 # C12, C14 and C15 parse, an internal/mcpserv package for C10, a deps registry
 # for C29, a jailed test file for C21 and C25, and the C24 script arch-check.sh
 # runs from $PFM/scripts (which C30 reads, so <dir> is <root>/pfm), with every
@@ -878,18 +905,18 @@ run_all() {
   out=$(env -u PFM_DEV_REPO_GIT_DIR -u PFM_DEV_REPO_WORK_TREE "$@" PFM="$dir" bash "$SUT" </dev/null 2>/dev/null); rc=$?
 }
 
-# Today's order: C1 … C8, C10 … C23, then C25 … C31, then C24 (its own script, last).
-EXPECTED_ORDER="C1-ceiling-src C2-ceiling-test C3-cmd-budget C4-cmd-primitives C5-tmux-runner C6-atomic-write C7-sql-open C8-negation-dirs C10-mcp-argv C11-db-names C12-claude-pointers C13-test-mirror C14-usage-parity C15-internal-usage C16-env-outside-paths C17-dup-functions C18-engine-spellings C19-env-namespace C20-codex-home C21-test-jail C22-host-doors C23-bare-log C25-testmain-jail C26-exec-write C27-identity-env C28-signal-door C29-os-door C30-shell-platform C31-front-door C24-unwrapped-door"
+# Today's order: C1 … C8, C10 … C23, then C25 … C32, then C24 (its own script, last).
+EXPECTED_ORDER="C1-ceiling-src C2-ceiling-test C3-cmd-budget C4-cmd-primitives C5-tmux-runner C6-atomic-write C7-sql-open C8-negation-dirs C10-mcp-argv C11-db-names C12-claude-pointers C13-test-mirror C14-usage-parity C15-internal-usage C16-env-outside-paths C17-dup-functions C18-engine-spellings C19-env-namespace C20-codex-home C21-test-jail C22-host-doors C23-bare-log C25-testmain-jail C26-exec-write C27-identity-env C28-signal-door C29-os-door C30-shell-platform C31-front-door C32-os-door-test C24-unwrapped-door"
 
 REPO_GREEN="$T/green/pfm"
 if green_fixture "$REPO_GREEN"; then
   run_all "$REPO_GREEN"
   order=$(printf '%s\n' "$out" | awk '$1 == "CHECK" {printf "%s ", $2}' | sed 's/ $//')
   passes=$(printf '%s\n' "$out" | grep -c '^CHECK [^ ]* *PASS ')
-  if [ "$rc" -eq 0 ] && [ "$passes" -eq 30 ] && [ "$order" = "$EXPECTED_ORDER" ]; then
-    ok "exit: a tree where all 30 checks PASS exits 0, one line per check in today's order"
+  if [ "$rc" -eq 0 ] && [ "$passes" -eq 31 ] && [ "$order" = "$EXPECTED_ORDER" ]; then
+    ok "exit: a tree where all 31 checks PASS exits 0, one line per check in today's order"
   else
-    bad "exit: expected rc 0, 30 PASS lines in order" "rc=$rc passes=$passes" "$order" "$out"
+    bad "exit: expected rc 0, 31 PASS lines in order" "rc=$rc passes=$passes" "$order" "$out"
   fi
 else
   bad "exit: could not build the green fixture"
@@ -900,7 +927,7 @@ if green_fixture "$REPO_FAIL"; then
   printf 'func Again() { log.Fatalf("bye") }\n' >> "$REPO_FAIL/internal/loud/loud.go"
   run_all "$REPO_FAIL"
   others=$(printf '%s\n' "$out" | grep '^CHECK ' | grep -vc 'C23-bare-log .*FAIL ')
-  if [ "$rc" -eq 1 ] && [ "$others" -eq 29 ] && [[ "$out" == *"C23-bare-log"*"FAIL"*"internal/loud/loud.go (1->2)"* ]]; then
+  if [ "$rc" -eq 1 ] && [ "$others" -eq 30 ] && [[ "$out" == *"C23-bare-log"*"FAIL"*"internal/loud/loud.go (1->2)"* ]]; then
     ok "exit: one FAIL and no ERROR exits 1"
   else
     bad "exit: expected rc 1 with only C23 failing" "rc=$rc others=$others" "$out"
@@ -933,8 +960,8 @@ if green_fixture "$REPO_KILL"; then
   passes=$(printf '%s\n' "$out" | grep -c '^CHECK [^ ]* *PASS ')
   lines=$(printf '%s\n' "$out" | grep -c '^CHECK ')
   line=$(printf '%s\n' "$out" | grep '^CHECK C1-ceiling-src ' || true)
-  if [ "$rc" -eq 2 ] && [ "$lines" -eq 30 ] && [ "$passes" -eq 29 ] && [[ "$line" == *ERROR* && "$line" == *"without leaving its CHECK line"* ]]; then
-    ok "a check job killed before its result is an ERROR line naming it, exit 2, the other 29 checks PASS"
+  if [ "$rc" -eq 2 ] && [ "$lines" -eq 31 ] && [ "$passes" -eq 30 ] && [[ "$line" == *ERROR* && "$line" == *"without leaving its CHECK line"* ]]; then
+    ok "a check job killed before its result is an ERROR line naming it, exit 2, the other 30 checks PASS"
   else
     bad "a killed check job must print ERROR for that check and exit 2" "rc=$rc lines=$lines passes=$passes" "$line"
   fi

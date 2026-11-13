@@ -567,44 +567,82 @@ chk_C28() {
   else say C28-signal-door ERROR "grep could not read sources"; fi
 }
 
-# C29 one door per OS operation: an OS difference lives inside its door
-# (internal/{deps,servicemanager,gather,paths,atomicfile}); internal/mockengine,
+# C29 and C32 share the OS door's parts. The doors are
+# internal/{deps,servicemanager,gather,paths,atomicfile}; internal/mockengine,
 # internal/hostfixture and cmd/mock-engine build fake proc trees and scripted
-# platform commands, so they are skipped too. Elsewhere, in an untagged
-# production file, a line that reads or compares the OS name, reads /proc or a
-# cgroup, or names a one-OS command counts; the one-OS commands are every
-# internal/deps/registry.go Name whose Platforms list holds exactly one
-# element, derived here so the list never drifts from the registry. A file
-# selected by OS (an _{os}.go name or a //go:build line naming an OS) counts 1.
-# Count per file, only shrinks; each baselined entry carries its reason in
-# .arch/exceptions.md.
-chk_C29() {
-  local registry=internal/deps/registry.go names
+# platform commands, so they are skipped too. OS_NAME_READ reads or compares the
+# OS name; OS_PROC_LIVE names the live /proc or cgroup tree.
+OS_DOOR_EXEMPT='^internal/(deps|servicemanager|gather|paths|atomicfile|mockengine|hostfixture)/|^cmd/mock-engine/'
+OS_NAME_READ='\bruntime\.GOOS\b|(==|!=)[[:space:]]*"(darwin|linux)"|"(darwin|linux)"[[:space:]]*(==|!=)|case[[:space:]]+"(darwin|linux)"'
+OS_PROC_LIVE='"/proc\b|"/sys/fs/cgroup|\bpaths\.(SystemProcRoot|ProcRootOr)\b'
+
+# os_door_names <id>: sets names to the one-OS commands, every
+# internal/deps/registry.go Name whose Platforms list holds exactly one element,
+# joined by |, so the list never drifts from the registry; says ERROR and
+# returns 1 when it cannot. It runs in the caller's shell, never in $(…), so its
+# ERROR line reaches the job's output.
+os_door_names() {
+  local registry=internal/deps/registry.go
   if ! names=$(awk '
       /^[[:space:]]*Name:[[:space:]]*"/ { n = $0; sub(/^[^"]*"/, "", n); sub(/".*/, "", n); next }
       /^[[:space:]]*Name:/ { n = ""; next }
       /Platforms:/ && n != "" { p = $0; sub(/.*\{/, "", p); sub(/\}.*/, "", p); if (p !~ /,/ && p ~ /[^[:space:]]/) print n; n = "" }
     ' "$registry" | paste -sd'|' -); then
-    say C29-os-door ERROR "could not read $registry"; return
+    say "$1" ERROR "could not read $registry"; return 1
   fi
-  [ -n "$names" ] || { say C29-os-door ERROR "no one-platform command derived from $registry — the enumerator did not run"; return; }
-  grep -vE '^internal/(deps|servicemanager|gather|paths|atomicfile|mockengine|hostfixture)/|^cmd/mock-engine/' "$L/src.list" > "$T/nodoor.list"
-  [ -s "$T/nodoor.list" ] || { say C29-os-door ERROR "no production sources outside the doors listed — the enumerator did not run"; return; }
+  [ -n "$names" ] || { say "$1" ERROR "no one-platform command derived from $registry — the enumerator did not run"; return 1; }
+}
+
+# os_door_split <id> <list> <what>: the list's files outside the doors, split into
+# $T/tagged.list, those selected by OS (an _{os}.go or _{os}_test.go name, or a
+# //go:build line naming an OS), and $T/untagged.list; says ERROR and returns 1
+# when it cannot read them.
+os_door_split() {
+  grep -vE "$OS_DOOR_EXEMPT" "$2" > "$T/nodoor.list"
+  [ -s "$T/nodoor.list" ] || { say "$1" ERROR "no $3 outside the doors listed — the enumerator did not run"; return 1; }
   # A //go:build line counts only before the package clause, where Go reads it.
   if ! awk '
-      FNR == 1 && FILENAME ~ /_(linux|darwin|other|bsd|unix|windows)\.go$/ { print FILENAME; nextfile }
+      FNR == 1 && FILENAME ~ /_(linux|darwin|other|bsd|unix|windows)(_test)?\.go$/ { print FILENAME; nextfile }
       /^package / { nextfile }
       /^\/\/go:build/ { if ($0 ~ /(^|[^A-Za-z0-9_])(linux|darwin|windows|freebsd|openbsd|netbsd|dragonfly|solaris|unix|bsd)([^A-Za-z0-9_]|$)/) print FILENAME; nextfile }
     ' $(cat "$T/nodoor.list") > "$T/tagged.raw"; then
-    say C29-os-door ERROR "awk could not read the build constraints"; return
+    say "$1" ERROR "awk could not read the build constraints"; return 1
   fi
   sort -u "$T/tagged.raw" > "$T/tagged.list"
   comm -23 "$T/nodoor.list" "$T/tagged.list" > "$T/untagged.list"
-  local os='\bruntime\.GOOS\b|(==|!=)[[:space:]]*"(darwin|linux)"|"(darwin|linux)"[[:space:]]*(==|!=)|case[[:space:]]+"(darwin|linux)"'
-  local proc='"/proc\b|"/sys/fs/cgroup|\bpaths\.(SystemProcRoot|ProcRootOr)\b|Join\(.*,[[:space:]]*"(stat|statm|status|cmdline|environ|exe|fd|fdinfo|cgroup|meminfo|loadavg|uptime|mountinfo)"\)|"net",[[:space:]]*"unix"'
-  if g "$T/raw" "$T/untagged.list" -nE "$os|$proc|\"($names)\""; then
+}
+
+# C29 one door per OS operation: an OS difference lives inside its door. Outside
+# the doors, in an untagged production file, a line that reads or compares the OS
+# name, reads /proc or a cgroup (a proc file named as a path component included),
+# or names a one-OS command counts. A file selected by OS counts 1. Count per
+# file, only shrinks; each baselined entry carries its reason in
+# .arch/exceptions.md.
+chk_C29() {
+  local names; os_door_names C29-os-door || return
+  os_door_split C29-os-door "$L/src.list" "production sources" || return
+  local proc='Join\(.*,[[:space:]]*"(stat|statm|status|cmdline|environ|exe|fd|fdinfo|cgroup|meminfo|loadavg|uptime|mountinfo)"\)|"net",[[:space:]]*"unix"'
+  if g "$T/raw" "$T/untagged.list" -nE "$OS_NAME_READ|$OS_PROC_LIVE|$proc|\"($names)\""; then
     { count_by_file "$T/raw"; awk '{print $1" 1"}' "$T/tagged.list"; } > "$T/c29"; ratchet_counts C29-os-door os-door "$T/c29"
   else say C29-os-door ERROR "grep could not read sources"; fi
+}
+
+# C32 the OS door in test code: C29's rule over every _test.go file, the
+# journey's and e2e's included, with the same doors and fake builders skipped
+# (internal/testjail is not: it builds no fake proc tree, and its own OS reads
+# sit in its OS-selected profile_ and pty_ files). A test builds fake proc trees
+# by component name and scripts one-OS commands into a fake runner, so neither
+# counts; a line that reads or compares the OS name, names the live /proc or
+# cgroup tree, or execs a one-OS command does. A file selected by OS does not
+# count. Count per file, only shrinks; each baselined entry carries its reason
+# in .arch/exceptions.md.
+chk_C32() {
+  local names; os_door_names C32-os-door-test || return
+  os_door_split C32-os-door-test "$L/test.list" "test files" || return
+  local exec="exec\.Command(Context)?\(([A-Za-z_.]+,[[:space:]]*)?\"($names)\""
+  if g "$T/raw" "$T/untagged.list" -nE "$OS_NAME_READ|$OS_PROC_LIVE|$exec"; then
+    count_by_file "$T/raw" > "$T/c32"; ratchet_counts C32-os-door-test os-door-test "$T/c32"
+  else say C32-os-door-test ERROR "grep could not read test files"; fi
 }
 
 # C30 one shell door per OS operation: scripts/platform.sh is the door, and a
@@ -687,7 +725,7 @@ for id in C1-ceiling-src C2-ceiling-test C3-cmd-budget C4-cmd-primitives C5-tmux
   C12-claude-pointers C13-test-mirror C14-usage-parity C15-internal-usage \
   C16-env-outside-paths C17-dup-functions C18-engine-spellings C19-env-namespace \
   C20-codex-home C21-test-jail C22-host-doors C23-bare-log C25-testmain-jail C26-exec-write C27-identity-env \
-  C28-signal-door C29-os-door C30-shell-platform C31-front-door C24-unwrapped-door; do
+  C28-signal-door C29-os-door C30-shell-platform C31-front-door C32-os-door-test C24-unwrapped-door; do
   job "$id"
 done
 

@@ -55,3 +55,18 @@ A baseline entry that a wave ADDED (not measured from the old tree) carries its 
 - C13 `internal/deps/deps.go`: the package's new front door, a package-doc file with no code; the package comment moved to it from `internal/deps/registry.go`.
 - C22, C24, C28 `journey/harness/session.go`: the journey harness opens an owner's terminal with `creack/pty`, which needs an `*exec.Cmd` started as a session leader with a controlling terminal, a shape `deps.RealRunner.Start` cannot express; it signals only the process group of the login shell it started, when the terminal closes.
 - C25 `journey`: the journey suite runs only inside its disposable machine (`infra/fence/journey/run.sh`), so its TestMain admits the run through `testjail.Disposable()` instead of the fence jail; on the host it refuses to start.
+- C32 `os-door-test.txt`: seeded 2026-11-13 when the OS door rule reached test code; every entry is a test file as it stood that day, each with its reason below, to shrink as its test moves onto a door or an OS-selected file.
+- C32 `cmd/pfm/install_check_test.go`, `cmd/pfm/install_command_test.go`, `e2e/doctor_expectations_e2e_test.go`, `e2e/install_e2e_test.go`, `internal/doctor/schedule_checks_test.go`: the expected install surface differs by OS (launchd plist vs systemd unit, `ErrLaunchAgentRunning` vs `ErrNameSyncRunning`), branched on `runtime.GOOS` in the expectation.
+- C32 `internal/doctor/herdr_test.go`: a scenario table's `platform == "darwin"` argument selects the macOS-only herdr lifetime fault under test, not the host's OS.
+- C32 `internal/globallink/globallink_test.go`: the concurrent-readlink watch is skipped on macOS, where `rename(2)` lets a reader catch the name mid-rename (EINVAL).
+- C32 `internal/index/sync_sources_test.go`: the expected `open(2)` refusal of a socket is ENXIO on Linux and EOPNOTSUPP on macOS, a map keyed by `runtime.GOOS`.
+- C32 `internal/usagehook/fetch_test.go`: hands the host's `runtime.GOOS` to `deps.Probe` as its `ProbeOptions.GOOS`, the door's own parameter.
+- C32 `cmd/pfm/testmain_test.go`: the known-skips table's `AppliesTo(runtime.GOOS)` selects the rows of this host.
+- C32 `cmd/pfm/chat_reload_command_test.go`, `cmd/pfm/internal_launch_test.go`, `cmd/pfm/reap_jail_test.go`, `cmd/pfm/chat_reload_worker_jail_test.go`: a jailed test whose fixture pane lives in the fence points `PFM_PROC_ROOT` (or `Paths.ProcRoot`) at the kernel's table so the code under test reads the live process.
+- C32 `internal/resolve/whoami_test.go`, `internal/mcpserv/whoami_find_test.go`: read a real child's environment through `ProcTree` at the system root, the kernel-table path the unit fakes cannot reach; the find test skips where there is no `/proc`.
+- C32 `internal/mcpserv/server_stress_test.go`, `internal/installer/skill_sources_test.go`: count this process's open descriptors and resident pages from `/proc/self` to prove nothing leaks; Linux-only, gated on the OS.
+- C32 `internal/installer/herdr_indicators_test.go`: refuses a painter whose proc root is the fence's live `/proc`, the guard naming that path.
+- C32 `internal/statusline/herdr_name_test.go`: `root + "/proc"` is a fake herdr status line's field, no read.
+- C32 `cmd/pfm/chat_name_jail_test.go`: execs `systemctl --user show-environment` to prove the jail cannot reach the user systemd bus.
+- C32 `internal/headless/run/run_test.go`: reads a live descendant's zombie state (`ps stat=`), which the gather door's `ProcStat` does not carry.
+- C32 `cmd/pfm/chat_watch_ladder_test.go`: compares a live pid's command line as `ps args=` prints it, one string; moving it onto `ProcFS.Cmdline` reworks its two callers, not a one-line swap.

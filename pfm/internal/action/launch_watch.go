@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -40,12 +41,11 @@ const launchWordsLines = 6
 // Claude Code's folder-trust dialog stays up untouched — the dialog is the
 // human's decision, and the key that clears it is never pressed here — and
 // comes back as a warning carrying the attach command. A pane showing the same
-// non-empty screen twice with an engine running on it (engineOnPane) is up, as
-// is one whose screen held still for launchQuiet with none — a launcher that
-// prints and then waits on the engine it starts must not read as up the moment
-// it prints; one that never settles is reported as opened once launchDeadline
-// passes. Every pane left alive gets remain-on-exit back off, so a chat that
-// ends later takes its server with it as it always did.
+// non-empty screen twice is up when an engine on it (paneEngines) ran both at
+// the poll before the screen last changed and at that change — words a launcher
+// or a failed first run printed as an engine just started are not its own — or
+// when the screen held still for launchQuiet; one never settling is opened once
+// launchDeadline passes. Every pane left alive gets remain-on-exit back off.
 func (executor *Executor) watchLaunch(
 	ctx context.Context,
 	server ChatServer,
@@ -67,6 +67,7 @@ func (executor *Executor) watchLaunch(
 	engines := enginePaneCommands(engineCommands...)
 	deadline := clock.Real.Now().Add(launchDeadline)
 	previous, stillSince := "", clock.Real.Now()
+	var running, painters []int // the engines at the last poll; those also there before the screen last changed
 	for {
 		pane, err := executor.tmux.LaunchPane(ctx, socket)
 		if err != nil && ctx.Err() != nil {
@@ -111,13 +112,16 @@ func (executor *Executor) watchLaunch(
 			refusal := spawn.Result{Socket: socket, Session: socket}.TrustRefusal(name, server.CWD)
 			return executor.keepLaunch(ctx, socket, []string{refusal}), nil
 		}
-		now := clock.Real.Now()
+		now, onPane := clock.Real.Now(), executor.paneEngines(ctx, pane, engines)
 		if screen != previous {
 			previous, stillSince = screen, now
-		} else if strings.TrimSpace(screen) != "" &&
-			(now.Sub(stillSince) >= launchQuiet || executor.engineOnPane(ctx, pane, engines)) {
+			painters = slices.DeleteFunc(slices.Clone(onPane),
+				func(engine int) bool { return !slices.Contains(running, engine) })
+		} else if strings.TrimSpace(screen) != "" && (now.Sub(stillSince) >= launchQuiet ||
+			slices.ContainsFunc(onPane, func(engine int) bool { return slices.Contains(painters, engine) })) {
 			return executor.keepLaunch(ctx, socket, nil), nil
 		}
+		running = onPane
 		if !now.Before(deadline) {
 			return executor.keepLaunch(ctx, socket, nil), nil
 		}
@@ -127,33 +131,29 @@ func (executor *Executor) watchLaunch(
 	}
 }
 
-// engineOnPane reports whether an engine runs on the pane: as its own command,
-// or as any process on its terminal — a resume row's compound line keeps its
-// shell in front and an agent row runs the engine as pfm's child, so neither
-// pane's command names the engine. A process table that cannot be read
-// answers no, leaving the pane to the quiet rule.
-func (executor *Executor) engineOnPane(ctx context.Context, pane LaunchPaneState, engines map[string]bool) bool {
+// paneEngines is every engine running on the pane: 0 for its own command, else
+// the pid of each engine process on its terminal, where a resume row's shell or
+// an agent row's pfm stays in front; an unreadable process table answers none.
+func (executor *Executor) paneEngines(ctx context.Context, pane LaunchPaneState, engines map[string]bool) []int {
 	if isEngineCommand(pane.Command, engines) {
-		return true
+		return []int{0}
 	}
 	if pane.TTY == "" {
-		return false
+		return nil
 	}
 	processes, err := executor.processes.Processes(ctx)
 	if err != nil {
-		obs.Logger(ctx).WarnContext(
-			ctx, "launch watch: read the process table failed",
-			"err", err, "tty", pane.TTY,
-		)
-		return false
+		obs.Logger(ctx).WarnContext(ctx, "launch watch: read the process table failed", "err", err, "tty", pane.TTY)
+		return nil
 	}
+	var running []int
 	for _, process := range processes {
 		if process.TTY == pane.TTY && len(process.Argv) > 0 &&
 			isEngineCommand(filepath.Base(process.Argv[0]), engines) {
-			return true
+			running = append(running, process.PID)
 		}
 	}
-	return false
+	return running
 }
 
 // unwatched is the warning of a launch whose caller stopped waiting: the chat

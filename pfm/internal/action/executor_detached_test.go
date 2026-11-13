@@ -363,9 +363,29 @@ func TestOpenWatchesTheLaunch(t *testing.T) {
 		wantCleared bool
 	}{
 		{
-			name:        "a chat that settles",
-			launch:      fakeLaunch{screen: "Claude Code\n\n> \n", command: "claude"},
+			name: "a chat that settles",
+			launch: fakeLaunch{
+				command: "claude", then: []fakeLaunch{{screen: "Claude Code\n\n> \n", command: "claude"}},
+			},
+			maxReads:    3,
 			wantCleared: true,
+		},
+		{
+			// A resume refused, and its fallback's line is read with the engine the
+			// fallback starts already running: that engine dies before it paints, so
+			// the words are not its own and the open fails quoting them.
+			name: "an engine that dies before painting under a launcher's words",
+			launch: fakeLaunch{command: "bash", then: []fakeLaunch{
+				{screen: "resume refused — session is live elsewhere:\n", command: "claude"},
+				{screen: "resume refused — session is live elsewhere:\n", command: "claude"},
+				{screen: "resume refused — session is live elsewhere:\nError: crashed at launch\n", dead: true},
+			}},
+			wantErr: []string{
+				"the chat resumable chat exited at launch — its pane said: " +
+					"resume refused — session is live elsewhere: | Error: crashed at launch",
+			},
+			wantKilled:  []string{socket},
+			wantRetired: []string{socket},
 		},
 		{
 			name: "the pane's process exits at launch",
@@ -397,10 +417,13 @@ func TestOpenWatchesTheLaunch(t *testing.T) {
 			// A resume row's pane runs its compound line under a shell that
 			// never execs, and an agent row's under pfm: the engine is a
 			// child on the pane's terminal, never the pane's own command.
-			name:        "an engine running under the pane's shell",
-			launch:      fakeLaunch{screen: "Claude Code\n\n> \n", command: "bash", tty: "pts/7"},
+			name: "an engine running under the pane's shell",
+			launch: fakeLaunch{
+				command: "bash", tty: "pts/7",
+				then: []fakeLaunch{{screen: "Claude Code\n\n> \n", command: "bash", tty: "pts/7"}},
+			},
 			processes:   []Process{{PID: 4242, Argv: []string{"/opt/bin/claude", "--resume"}, TTY: "pts/7"}},
-			maxReads:    2,
+			maxReads:    3,
 			wantCleared: true,
 		},
 		{

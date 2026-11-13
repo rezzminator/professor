@@ -480,6 +480,8 @@ func evidence(c *harness.Ctx, records []string) {
 		"chats.txt":     {"pfm", "chat", "ls", "--all"},
 		"sessions.json": {"herdr", "session", "list", "--json"},
 		"panes.json":    {"herdr", "pane", "list"},
+		// Each process's state: a stopped one (T) is alive in processes.txt yet runs nothing.
+		"ps.txt": {"ps", "-A", "-o", "pid,ppid,stat,command"},
 	}
 	for name, argv := range reads {
 		r := c.Read(argv...)

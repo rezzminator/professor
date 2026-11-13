@@ -547,12 +547,15 @@ func TestScheduleWakeRevivesATmuxChatInTmuxUnderConfiguredHerdr(t *testing.T) {
 		t.Setenv(name, "")
 	}
 	// The fake engine lays its own entry in the jailed process table, on the
-	// pane's terminal, as a real engine has one in /proc: the launch watch
-	// then sees it up at once, never waiting out its quiet rule.
+	// pane's terminal, as a real engine has one in /proc, and boots before it
+	// paints, as a real one loads its runtime first: the launch watch sees it
+	// on the pane before its screen and calls it up without waiting out its
+	// quiet rule.
 	engine := filepath.Join(root, "home", "claude")
 	script := `#!/bin/sh
 entry="$PFM_PROC_ROOT/$$"
 mkdir -p "$entry/fd" && printf 'claude\000' > "$entry/cmdline" && ln -s "$(readlink /proc/self/fd/0)" "$entry/fd/0"
+sleep 0.5
 printf '❯ \n'
 exec sleep 30
 `

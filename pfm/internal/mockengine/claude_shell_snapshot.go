@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
@@ -45,6 +46,10 @@ func (session *claudeSession) toolShell(command string) ([]string, error) {
 		defer cancel()
 		dump := exec.CommandContext(bounded, login, "-i", "-c", claudeSnapshotDump)
 		dump.Dir, dump.Env = session.proc.cwd, session.environ
+		// In a session of its own the interactive zsh has no terminal to take: on the chat's terminal it
+		// would make itself the foreground job, and on macOS the engine reading its keys in the background
+		// is stopped (SIGTTIN) with no one to continue it.
+		dump.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 		var stdout, stderr bytes.Buffer
 		dump.Stdout, dump.Stderr = &stdout, &stderr
 		if err := dump.Run(); err != nil {

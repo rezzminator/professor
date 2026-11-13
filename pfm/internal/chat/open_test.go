@@ -36,6 +36,7 @@ type fakeOpenTmux struct {
 	alive     map[string]bool
 	created   []action.ChatServer
 	createErr error
+	read      map[string]bool // sockets whose launch pane was read once
 }
 
 func (fake *fakeOpenTmux) ListPanes(context.Context, string) ([]action.ActionPane, error) {
@@ -62,9 +63,18 @@ func (fake *fakeOpenTmux) CreateChatServer(_ context.Context, server action.Chat
 	return fake.createErr
 }
 
-// LaunchPane shows every created pane as a settled chat: these tests are about
-// which chat opens where, the launch watch's own cases live in action's tests.
-func (fake *fakeOpenTmux) LaunchPane(context.Context, string) (action.LaunchPaneState, error) {
+// LaunchPane shows every created pane as a chat that settles: blank under its
+// engine at the first read, as a pane just created is, then its screen. These
+// tests are about which chat opens where; the launch watch's own cases live in
+// action's tests.
+func (fake *fakeOpenTmux) LaunchPane(_ context.Context, socket string) (action.LaunchPaneState, error) {
+	if !fake.read[socket] {
+		if fake.read == nil {
+			fake.read = map[string]bool{}
+		}
+		fake.read[socket] = true
+		return action.LaunchPaneState{Command: "claude"}, nil
+	}
 	return action.LaunchPaneState{Screen: "fake chat ready", Command: "claude"}, nil
 }
 

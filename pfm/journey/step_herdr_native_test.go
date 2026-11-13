@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/journey/harness"
 )
 
@@ -506,7 +507,15 @@ func userTexts(c *harness.Ctx, path string) []string {
 	return texts
 }
 
-// engineBuild is the executable engine pid runs, as /proc names it.
+// engineBuild is the executable engine pid runs, as pfm's process reader names it.
 func engineBuild(c *harness.Ctx, pid int) string {
-	return strings.TrimSpace(read(c, "readlink", fmt.Sprintf("/proc/%d/exe", pid)))
+	executable, ok := procTable(c).(gather.ProcExecutable)
+	if !ok {
+		c.Failf("the process table reports no executables")
+	}
+	path, err := executable.Executable(pid)
+	if err != nil {
+		c.Failf("read engine %d's executable: %v", pid, err)
+	}
+	return path
 }

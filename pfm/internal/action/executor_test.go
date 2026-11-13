@@ -35,8 +35,9 @@ type fakeActionTmux struct {
 	// watch, per socket; a socket without an entry shows a settled chat.
 	launches map[string]fakeLaunch
 	remain   []string
-	// launchReads counts the launch watch's reads of a pane.
+	// launchReads counts the launch watch's reads of a pane; paneReads, per socket.
 	launchReads int
+	paneReads   map[string]int
 }
 
 func (tmux *fakeActionTmux) ListPanes(

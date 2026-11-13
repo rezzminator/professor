@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -151,8 +152,14 @@ func TestWatchLaunchOnARealPane(t *testing.T) {
 	t.Run("a chat under a shell that stays in front", func(t *testing.T) {
 		// A resume row's compound line: the shell never execs, so the pane's
 		// command is the shell and the engine is found on the pane's terminal.
+		// The launch prompt's turn repaints the working footer each second, a
+		// change the engine already running makes its own.
 		const socket = "cc-911-1-1"
-		executor, server, _ := launchWatchServer(t, socket, mockClaudeRun(t, `{"busy_ms":0}`)+" || true")
+		executor, server, _ := launchWatchServer(
+			t,
+			socket,
+			mockClaudeRun(t, `{"busy_ms":3000}`)+" 'a launch prompt' || true",
+		)
 		executor.processes = RealProcesses{}
 		quiet, deadline := launchQuiet, launchDeadline
 		launchQuiet, launchDeadline = time.Hour, time.Hour
@@ -162,6 +169,32 @@ func TestWatchLaunchOnARealPane(t *testing.T) {
 		warnings, err := executor.watchLaunch(ctx, server, "shell probe", "claude")
 		if err != nil || len(warnings) != 0 {
 			t.Fatalf("watch of an engine under its shell = %q, %v; want it up with no warning", warnings, err)
+		}
+	})
+	t.Run("an engine that dies under an earlier run's words", func(t *testing.T) {
+		// A resume that died leaves its words and the fallback's on the pane, and
+		// the engine the fallback starts runs on the pane's terminal without
+		// painting before it dies too: the held screen is not that engine's, so
+		// the open fails quoting the pane rather than reporting the chat up.
+		const socket = "cc-912-1-1"
+		executor, server, _ := launchWatchServer(t, socket, "echo 'resume refused — earlier words'; sleep 1; "+
+			mockClaudeRun(t, `{"launch_crash":"Error: crashed at launch"}`)+"; sleep 0.3; exit 1")
+		executor.processes = RealProcesses{}
+		quiet, deadline := launchQuiet, launchDeadline
+		launchQuiet, launchDeadline = time.Hour, time.Hour
+		t.Cleanup(func() { launchQuiet, launchDeadline = quiet, deadline })
+		retired := recordRetires(t)
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		warnings, err := executor.watchLaunch(ctx, server, "crash probe", "claude")
+		// tmux's own line on the dead pane, stamped with the time it died, ends the words once tmux drew it.
+		want := regexp.MustCompile(`^the chat crash probe exited at launch — its pane said: resume refused — ` +
+			`earlier words \| Error: crashed at launch( \| Pane is dead \(status 1, [^)]+\))?$`)
+		if err == nil || !want.MatchString(err.Error()) {
+			t.Fatalf("watch of an engine that dies unpainted = %q, %v; want the error %q", warnings, err, want)
+		}
+		if want := []string{socket}; !slices.Equal(*retired, want) {
+			t.Fatalf("seats retired after the dead launch = %q, want %q", *retired, want)
 		}
 	})
 	t.Run("a pane that exits at launch", func(t *testing.T) {
@@ -205,6 +238,9 @@ type fakeLaunch struct {
 	// goneAfterReads: the pane shows screen for this many reads, then its
 	// server is gone, as a launcher that prints and exits between two polls.
 	goneAfterReads int
+	// then: what the pane shows on the reads after the first, one each, its
+	// last repeating.
+	then []fakeLaunch
 }
 
 func (tmux *fakeActionTmux) LaunchPane(
@@ -219,6 +255,11 @@ func (tmux *fakeActionTmux) LaunchPane(
 		return LaunchPaneState{}, err
 	}
 	tmux.launchReads++
+	if tmux.paneReads == nil {
+		tmux.paneReads = map[string]int{}
+	}
+	tmux.paneReads[socket]++
+	reads := tmux.paneReads[socket]
 	launch, found := tmux.launches[socket]
 	if launch.goneAfterReads > 0 && tmux.launchReads > launch.goneAfterReads {
 		launch.gone = true
@@ -228,7 +269,14 @@ func (tmux *fakeActionTmux) LaunchPane(
 		return LaunchPaneState{}, errors.New("no server running on " + socket)
 	}
 	if !found {
+		// An engine runs before it paints: the first read finds it on a blank pane.
+		if reads == 1 {
+			return LaunchPaneState{Command: "claude"}, nil
+		}
 		return LaunchPaneState{Screen: "fake chat ready", Command: "claude"}, nil
+	}
+	if reads > 1 && len(launch.then) > 0 {
+		launch = launch.then[min(reads, len(launch.then)+1)-2]
 	}
 	if launch.unreadable {
 		return LaunchPaneState{}, errors.New("tmux socket " + socket + " returned 1 launch pane fields")

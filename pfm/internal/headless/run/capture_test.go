@@ -4,8 +4,10 @@ import (
 	"context"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
@@ -13,22 +15,23 @@ import (
 // costs its oldest bytes, never the parsed answer of a finished, paid run.
 func TestRunKeepsTheAnswerPastTheCaptureLimit(t *testing.T) {
 	headlessJail(t)
-	answer := `printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"kept"}}' '{"type":"turn.completed"}'`
+	answer := `{"type":"item.completed","item":{"type":"agent_message","text":"kept"}}` + "\n" + `{"type":"turn.completed"}` + "\n"
+	filler := strings.Repeat("x", 9000000)
 	cases := []struct {
 		name        string
-		body        string
+		output      deps.StartOutput
 		diagnostics []string
 	}{
 		{
-			name: "stderr",
-			body: `head -c 9000000 /dev/zero | tr '\0' x >&2; ` + answer,
+			name:   "stderr",
+			output: deps.StartOutput{Stderr: filler, Stdout: answer},
 			diagnostics: []string{
 				"stderr exceeded the 8388608-byte capture limit; only its last 8388608 bytes were kept",
 			},
 		},
 		{
-			name: "stdout",
-			body: `head -c 9000000 /dev/zero | tr '\0' x; echo; ` + answer,
+			name:   "stdout",
+			output: deps.StartOutput{Stdout: filler + "\n" + answer},
 			diagnostics: []string{
 				"stdout exceeded the 8388608-byte capture limit; only its last 8388608 bytes were kept",
 				"could not read Codex JSONL event 1: invalid character 'x' looking for beginning of value",
@@ -37,7 +40,7 @@ func TestRunKeepsTheAnswerPastTheCaptureLimit(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			binary := writeEngineStub(t, testCase.body)
+			binary := engineBinary(t)
 			result, err := Run(context.Background(), Request{
 				Config: codexMachine(
 					binary,
@@ -45,6 +48,7 @@ func TestRunKeepsTheAnswerPastTheCaptureLimit(t *testing.T) {
 				),
 				Engine: pfmengine.Codex,
 				Prompt: "hello",
+				Runner: fakeEngine(testCase.output),
 			})
 			if err != nil {
 				t.Fatalf("Run() error = %v, want the answer kept", err)

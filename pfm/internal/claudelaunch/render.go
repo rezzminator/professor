@@ -12,6 +12,7 @@ import (
 	"uuid"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/naming"
@@ -41,6 +42,8 @@ type Request struct {
 	Args                                 []string
 	// Envs are the adopter settings' envs (workbench.Persona.Envs).
 	Envs map[string]string
+	// Runner resolves bash for CLAUDE_CODE_SHELL; nil is the real runner.
+	Runner deps.Runner
 }
 
 type Launch struct {
@@ -138,7 +141,7 @@ func Render(request Request, machine pfmconfig.Config) (Launch, error) {
 		return Launch{}, fmt.Errorf("account %d is not in the configured roster", request.Account)
 	}
 	result.Env = append(result.Env, envCacheLiveControlMainTTL+"="+promptCacheTTL(result.Cache1H))
-	result.Env = append(result.Env, ShellEnv(paths.OSEnv{}.Lookup)...)
+	result.Env = append(result.Env, shellEnvThrough(paths.OSEnv{}.Lookup, request.Runner)...)
 	costLedgerPlan(request, prefs.CostLedger, &result)
 	result.Argv = append(result.Argv, SessionArgs(request.SessionID, request.Resume, request.Fork)...)
 	if name := naming.LaunchName(request.Name); name != "" && !argsName(request.Args) && !resumesInPlace(request) {

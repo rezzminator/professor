@@ -9,6 +9,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/ask"
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
@@ -23,6 +24,8 @@ type AskOptions struct {
 	TempDir string
 	Engine  pfmengine.ID
 	Model   string
+	// Runner starts the ask engine child (nil: the real one).
+	Runner deps.Runner
 }
 
 // AskResult is Ask's answer. There is no Cached flag: Ask never caches.
@@ -113,6 +116,7 @@ func Ask(ctx context.Context, chat Chat, options AskOptions) (result AskResult) 
 		}
 		return failedAsk(engineErr)
 	}
+	runner = ask.WithRunner(runner, options.Runner)
 
 	prompt := askPrompt
 	if !exchangeComplete {

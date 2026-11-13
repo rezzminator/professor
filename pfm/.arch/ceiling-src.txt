@@ -70,7 +70,7 @@ internal/doctor/claude_plugins_checks.go 330
 internal/doctor/config_checks.go 273
 internal/doctor/database_doctor.go 273
 internal/doctor/doctor.go 1004
-internal/doctor/harness_prompt.go 675
+internal/doctor/harness_prompt.go 666
 internal/doctor/harness_prompt_baselines.go 246
 internal/doctor/herdr_check.go 297
 internal/doctor/mcp_serve_check.go 283

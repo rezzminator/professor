@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -334,15 +335,15 @@ func TestHerdrIntegrationDoctorExit(t *testing.T) {
 				}
 				want[at] = placeholders.Replace(row)
 			}
-			script := "#!/bin/sh\n[ \"$*\" = \"integration status\" ] || exit 9\nprintf '%s' '" + scenario.status + "'\n"
-			if err := testjail.WriteExecutable(stub, []byte(script), 0o700); err != nil {
-				t.Fatal(err)
-			}
 			t.Setenv("HERDR_BIN_PATH", stub)
 			t.Setenv(herdr.EnvSocket, serveHerdrDoctor(t, `{"type":"pong","version":"0.9.5","protocol":22}`))
 			stageDoctorHerdrShell(t, runtime.Paths.Home)
+			dependencies := testDependencies()
+			dependencies.Runner = herdrIntegrationRunner(stub, func([]string) deps.RunResult {
+				return deps.RunResult{Stdout: []byte(scenario.status)}
+			})
 			var stdout, stderr bytes.Buffer
-			code := Run(nil, &stdout, &stderr, runtime, testDependencies())
+			code := Run(nil, &stdout, &stderr, runtime, dependencies)
 
 			var rows []string
 			for _, line := range strings.Split(stdout.String(), "\n") {
@@ -613,7 +614,7 @@ func TestHerdrReporterErrorsDoctorExit(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
-	code := Run(nil, &stdout, &stderr, runtime, testDependencies())
+	code := runDoctor(nil, &stdout, &stderr, runtime)
 	var rows []string
 	for _, line := range strings.Split(stdout.String(), "\n") {
 		if strings.HasPrefix(line, herdrReporterRow) {
@@ -659,16 +660,18 @@ func TestHerdrDoctorChecksEveryManagedHome(t *testing.T) {
 				conflict = strings.Replace(clean, "codex: not installed", "codex: current (v10)", 1)
 				want = "FAIL need=no bundled codex integration checked=herdr integration status engine=codex home=" + second
 			}
-			script := "#!/bin/sh\n[ \"$*\" = \"integration status\" ] || exit 9\n" +
-				"if [ \"$CODEX_HOME\" = '" + second + "' ]; then printf '%s' '" + conflict + "'; else printf '%s' '" + clean + "'; fi\n"
-			if err := testjail.WriteExecutable(stub, []byte(script), 0o700); err != nil {
-				t.Fatal(err)
-			}
 			t.Setenv("HERDR_BIN_PATH", stub)
 			t.Setenv("HERDR_SOCKET_PATH", serveHerdrDoctor(t, `{"type":"pong","version":"0.9.5","protocol":22}`))
 			stageDoctorHerdrShell(t, runtime.Paths.Home)
+			dependencies := testDependencies()
+			dependencies.Runner = herdrIntegrationRunner(stub, func(env []string) deps.RunResult {
+				if home, _ := childEnvValue(env, "CODEX_HOME"); home == second {
+					return deps.RunResult{Stdout: []byte(conflict)}
+				}
+				return deps.RunResult{Stdout: []byte(clean)}
+			})
 			var stdout, stderr bytes.Buffer
-			code := Run(nil, &stdout, &stderr, runtime, testDependencies())
+			code := Run(nil, &stdout, &stderr, runtime, dependencies)
 			if code != 3 || !strings.Contains(stdout.String(), want) {
 				t.Fatalf("missed %s second home: code=%d want row %q\nstdout=%s stderr=%s",
 					engine, code, want, stdout.String(), stderr.String())
@@ -688,20 +691,25 @@ func TestHerdrDoctorLabelsScopedErrorsAndRepair(t *testing.T) {
 				config.CodexAccount{ID: 2, Home: second},
 			)
 			clean := herdrStatus(notInstalledClaude, notInstalledCodex, notInstalledOpenCode)
-			scoped := "printf '%s' '" + herdrStatus(notInstalledClaude, currentCodex, notInstalledOpenCode) + "'"
+			scoped := deps.RunResult{
+				Stdout: []byte(herdrStatus(notInstalledClaude, currentCodex, notInstalledOpenCode)),
+			}
 			if bad == "command failed" {
-				scoped = "echo 'permission denied' >&2; exit 7"
+				scoped = deps.RunResult{Stderr: []byte("permission denied\n"), ExitCode: 7}
 			}
 			if bad == "unreadable output" {
-				scoped = "echo 'unexpected status format'"
+				scoped = deps.RunResult{Stdout: []byte("unexpected status format\n")}
 			}
 			stub := filepath.Join(t.TempDir(), "herdr")
-			script := "#!/bin/sh\n[ \"$*\" = \"integration status\" ] || exit 9\nif [ \"$CODEX_HOME\" = '" + second + "' ]; then " + scoped + "; else printf '%s' '" + clean + "'; fi\n"
-			if err := testjail.WriteExecutable(stub, []byte(script), 0o700); err != nil {
-				t.Fatal(err)
-			}
 			t.Setenv("HERDR_BIN_PATH", stub)
-			dependencies := normalizeDependencies(testDependencies())
+			dependencies := testDependencies()
+			dependencies.Runner = herdrIntegrationRunner(stub, func(env []string) deps.RunResult {
+				if home, _ := childEnvValue(env, "CODEX_HOME"); home == second {
+					return scoped
+				}
+				return deps.RunResult{Stdout: []byte(clean)}
+			})
+			dependencies = normalizeDependencies(dependencies)
 			var stdout bytes.Buffer
 			// Exercise the production config handoff without involving backend probing.
 			warnings, failures := printHerdrDoctor(
@@ -719,4 +727,30 @@ func TestHerdrDoctorLabelsScopedErrorsAndRepair(t *testing.T) {
 			}
 		})
 	}
+}
+
+// herdrRunner is the FakeRunner standing in for the herdr at stub: its
+// `integration status` answers what status returns for the call's
+// environment and any other argument exits 9; every other command answers as
+// healthyDoctorRunner does.
+type herdrRunner struct {
+	*deps.FakeRunner
+	stub   string
+	status func(env []string) deps.RunResult
+}
+
+func herdrIntegrationRunner(stub string, status func(env []string) deps.RunResult) deps.Runner {
+	fake := healthyDoctorRunner()
+	fake.ScriptLookPath(stub, stub, nil)
+	return herdrRunner{FakeRunner: fake, stub: stub, status: status}
+}
+
+func (runner herdrRunner) Run(ctx context.Context, argv []string, opts deps.RunOptions) (deps.RunResult, error) {
+	if len(argv) > 0 && argv[0] == runner.stub {
+		if slices.Equal(argv, []string{runner.stub, "integration", "status"}) {
+			return runner.status(opts.Env), nil
+		}
+		return deps.RunResult{ExitCode: 9}, nil
+	}
+	return runner.FakeRunner.Run(ctx, argv, opts)
 }

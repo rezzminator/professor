@@ -68,11 +68,9 @@ func TestDoctorPrePushAcceptsEquivalentHooksPaths(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(root, ".githooks"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := testjail.WriteExecutable(
+	if err := testjail.WriteExecutableNeverRun(
 		filepath.Join(root, ".githooks", "pre-push"),
-		[]byte("#!/bin/sh\nexit 0\n"),
-		0o700,
-	); err != nil {
+		[]byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct{ path, state string }{

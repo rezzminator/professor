@@ -90,6 +90,10 @@ var spawn = func(t *testing.T) {
 }
 
 func TestThroughAClosureVar(t *testing.T) { spawn(t) }
+
+func TestWritesAnExecutableToRun(t *testing.T) { _ = testjail.WriteExecutable("x", nil, 0o700) }
+
+func TestWritesAnExecutableNeverRun(t *testing.T) { _ = testjail.WriteExecutableNeverRun("x", nil, 0o700) }
 GO
 cat > "$M/b/b_jail_test.go" <<'GO'
 package b
@@ -134,7 +138,7 @@ done
 
 out=$(bash "$SUT" "$M" 2>&1); rc=$?
 eq "the count line: unit = nothing + temp-dir, a door open memory, real = the jail files, move = the bottom three, every Test and Fuzz once" \
-  "0|KINDS unit 11 (nothing 9 · temp-dir 2) · real 3 · move 7 (home-sqlite 2 · process 3 · tmux 2) · total 21" "$rc|$out"
+  "0|KINDS unit 12 (nothing 9 · temp-dir 3) · real 3 · move 8 (home-sqlite 2 · process 4 · tmux 2) · total 23" "$rc|$out"
 
 out=$(bash "$SUT" --list "$M" 2>&1); rc=$?
 want=$(printf '%s\n' \
@@ -154,12 +158,14 @@ want=$(printf '%s\n' \
   $'nothing\ta\ta_test.go\tTestNamesTheMethodOnlyInAStringOrLocal' \
   $'process\ta\ta_test.go\tTestCallsTheMethod' \
   $'process\ta\ta_test.go\tTestThroughAClosureVar' \
+  $'process\ta\ta_test.go\tTestWritesAnExecutableToRun' \
+  $'temp-dir\ta\ta_test.go\tTestWritesAnExecutableNeverRun' \
   $'real\ta\tserver_jail_test.go\tTestInAJailFileOfA' \
   $'real\tb\tb_jail_test.go\tTestInAJailFile' \
   $'nothing\tb\tkilljail_test.go\tTestJailIsNotItsOwnWord' \
   $'nothing\tb\tnew_jail_stubs_test.go\tTestJailStubsIsNoOS' \
   $'real\tb\tseat_jail_linux_test.go\tTestInAnOSSelectedJailFile')
-eq "--list: one row per test with its kind, a helper two calls deep or a closure var reaching its test, a method only through a selector, a jail file's test real and its helper tmux to a test outside it" "0|$want" "$rc|$out"
+eq "--list: one row per test with its kind, a helper two calls deep or a closure var reaching its test, a method only through a selector, an executable written to run process and one never run temp-dir, a jail file's test real and its helper tmux to a test outside it" "0|$want" "$rc|$out"
 
 mkdir -p "$T/notests"; printf 'module p\n' > "$T/notests/go.mod"
 out=$(bash "$SUT" "$T/notests" 2>&1); rc=$?

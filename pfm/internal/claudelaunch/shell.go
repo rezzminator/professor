@@ -34,8 +34,8 @@ type launchShell struct {
 // carries; otherwise it resolves bash on PATH. Claude Code honours the variable
 // only for an executable whose path names bash or zsh and silently falls back
 // to the login shell for anything else, so a value it would refuse is reported
-// here and replaced by bash.
-func resolveShell(lookup func(string) (string, bool)) launchShell {
+// here and replaced by bash. runner resolves bash; nil is the real one.
+func resolveShell(lookup func(string) (string, bool), runner deps.Runner) launchShell {
 	var result launchShell
 	if value, ok := lookup(envShell); ok {
 		problem := shellProblem(value)
@@ -47,7 +47,10 @@ func resolveShell(lookup func(string) (string, bool)) launchShell {
 			fmt.Sprintf("%s=%q %s; resolving bash instead", envShell, value, problem),
 		)
 	}
-	path, err := deps.Resolve(shellBash)
+	if runner == nil {
+		runner = obs.Runner(deps.RealRunner{})
+	}
+	path, err := runner.LookPath(shellBash)
 	if err != nil {
 		result.problems = append(result.problems, fmt.Sprintf(
 			"no bash on PATH (%v): %s left unset, Claude Code's Bash tool runs under the login shell",
@@ -85,7 +88,12 @@ func shellProblem(value string) string {
 // kept; every refused value and a missing bash is warned to the activity log
 // and shown by `pfm config claude`, and never fails the launch.
 func ShellEnv(lookup func(string) (string, bool)) []string {
-	resolved := resolveShell(lookup)
+	return shellEnvThrough(lookup, nil)
+}
+
+// shellEnvThrough is ShellEnv resolving bash through runner; nil is the real one.
+func shellEnvThrough(lookup func(string) (string, bool), runner deps.Runner) []string {
+	resolved := resolveShell(lookup, runner)
 	for _, problem := range resolved.problems {
 		obs.Logger(context.Background()).Warn("claudelaunch: launch shell", obs.FieldErr, problem)
 	}
@@ -99,7 +107,7 @@ func ShellEnv(lookup func(string) (string, bool)) []string {
 // from this process would run, and where it came from; with no shell, the
 // reason, never an "unset" that reads as a settled answer.
 func shellValue() (value, won string) {
-	resolved := resolveShell(paths.OSEnv{}.Lookup)
+	resolved := resolveShell(paths.OSEnv{}.Lookup, nil)
 	won = wonPATH
 	if resolved.preset {
 		won = wonEnv

@@ -435,13 +435,14 @@ func TestClassifyRealEntryIsCopyOnlyWhenProven(t *testing.T) {
 // TestApplyCopyReplacesByRenameNeverAbsent pins that replacing a proven copy
 // (file or directory) with the link is a rename over the target: a reader
 // polling the target while Apply runs never sees it missing. macOS's
-// RENAME_SWAP of a directory lets a concurrent lstat miss the name for an
-// instant (CI: kind Dir only, about one swap in a thousand), and no darwin
-// primitive replaces a directory with a link more atomically, so there the
-// directory kind proves only the end state.
+// RENAME_SWAP lets a concurrent lstat miss the name for an instant whatever
+// the kind (CI: Dir, then File in run 43385853011), as its plain rename(2)
+// does a readlink (TestApplyKeepsPolicyLinkVisibleDuringRepoint), and no
+// darwin primitive swaps more atomically, so there both kinds prove only the
+// end state.
 func TestApplyCopyReplacesByRenameNeverAbsent(t *testing.T) {
+	watch := runtime.GOOS != "darwin"
 	for _, kind := range []Kind{File, Dir} {
-		watch := kind == File || runtime.GOOS != "darwin"
 		base := t.TempDir()
 		source := filepath.Join(base, "src")
 		target := filepath.Join(base, "dst")
@@ -480,8 +481,8 @@ func TestApplyCopyReplacesByRenameNeverAbsent(t *testing.T) {
 			if applyErr != nil {
 				t.Fatal(applyErr)
 			}
-			if info, err := os.Lstat(target); err != nil || info.Mode()&os.ModeSymlink == 0 {
-				t.Fatalf("kind %d: target is not the link: %v %v", kind, info, err)
+			if link, err := os.Readlink(target); err != nil || link != source {
+				t.Fatalf("kind %d: %s links to %q (err %v), want %q", kind, target, link, err, source)
 			}
 			if err := os.Remove(target); err != nil {
 				t.Fatal(err)

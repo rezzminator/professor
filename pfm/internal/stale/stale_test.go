@@ -18,7 +18,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/gather/gathertest"
 	"github.com/rezzminator/professor/pfm/internal/hostfixture"
 	"github.com/rezzminator/professor/pfm/internal/paths"
-	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 const (
@@ -66,7 +65,7 @@ func newFixture(t *testing.T) *fixture {
 		}
 		// Distinct files are distinct inodes: the install renamed a new file
 		// over the path, and the old image lives on only in its processes.
-		if err := testjail.WriteExecutable(path, []byte(path), 0o700); err != nil {
+		if err := os.WriteFile(path, []byte(path), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}

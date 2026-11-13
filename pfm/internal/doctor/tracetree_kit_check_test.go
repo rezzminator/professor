@@ -15,7 +15,6 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/installer"
-	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 const (
@@ -31,18 +30,20 @@ const (
 	tracerPendingRow    = "doctor: tracetree-kit: flights plugin not installed yet — run pfm install --yes"
 )
 
-// recordingRunner passes every call to the real runner and keeps each
-// completed run's argv, so a test sees the command the check ran.
-type recordingRunner struct {
-	deps.Runner
-	argv [][]string
+// tracerPython is the interpreter the scripted lookup finds; the version it
+// prints is the shape the healthy row's pattern checks.
+const tracerPython = "/fixture/bin/python3"
+
+// scriptTracerPython scripts the python3 lookup and its version probe, and the
+// kit run to answer kitRun.
+func scriptTracerPython(fake *deps.FakeRunner, kit string, kitRun deps.RunResult) {
+	fake.ScriptLookPath("python3", tracerPython, nil)
+	fake.Script([]string{tracerPython, "--version"}, deps.RunResult{Stdout: []byte("Python 3.12.1\n")}, nil)
+	fake.Script([]string{tracerPython, kit}, kitRun, nil)
 }
 
-func (recorder *recordingRunner) Run(ctx context.Context, argv []string, opts deps.RunOptions) (deps.RunResult, error) {
-	result, err := recorder.Runner.Run(ctx, argv, opts)
-	recorder.argv = append(recorder.argv, argv)
-	return result, err
-}
+// tracerUsage is what the stub kit answers: its usage line, exit 2.
+var tracerUsage = deps.RunResult{Stderr: []byte(tracetreeUsage + " [-h] {check,map}\n"), ExitCode: 2}
 
 func tracetreeKitRows(output string) []string {
 	var rows []string
@@ -116,20 +117,24 @@ func disableFlights(t *testing.T, home string) {
 
 // TestTracetreeKitDoctor is the tracetree-kit check's whole table: each state
 // of the kit's needs is a case that asserts the rows printed and doctor's exit
-// status. The cases run the real python3 over the stub kit the jail stages in
-// the flights plugin folder, or a broken kit written over it.
+// status. The cases play python3 through a scripted runner over the stub kit
+// the jail stages in the flights plugin folder, or a broken kit written over it.
 func TestTracetreeKitDoctor(t *testing.T) {
 	for _, scenario := range []struct {
 		name  string
 		stage func(t *testing.T, home string)
-		rows  func(kit, python string) []string
-		code  int
+		// run scripts the runner and returns the python3 path the check finds; nil
+		// scripts a healthy python3 and a kit printing its usage.
+		run  func(fake *deps.FakeRunner, home, kit string) (python string)
+		rows func(kit, python string) []string
+		code int
 		// count is the summary's failures= count, or its warnings= count when code is 1.
 		count string
 	}{
 		{
 			name:  "python3 absent from PATH",
 			stage: func(t *testing.T, home string) { t.Setenv("PATH", filepath.Join(home, ".local", "bin")) },
+			run:   func(*deps.FakeRunner, string, string) string { return "" },
 			rows: func(kit, _ string) []string {
 				return []string{
 					tracetreeKitRow + ` FAIL need=python3 checked=` + tracerPythonChecked +
@@ -140,18 +145,13 @@ func TestTracetreeKitDoctor(t *testing.T) {
 			code: 3, count: "2",
 		},
 		{
-			name: "python3 found but its version probe failing",
-			stage: func(t *testing.T, home string) {
-				bin := filepath.Join(home, "broken-python")
-				if err := os.Mkdir(bin, 0o700); err != nil {
-					t.Fatal(err)
-				}
-				if err := testjail.WriteExecutable(
-					filepath.Join(bin, "python3"), []byte("#!/bin/sh\necho boom >&2\nexit 1\n"), 0o700,
-				); err != nil {
-					t.Fatal(err)
-				}
-				t.Setenv("PATH", bin+string(os.PathListSeparator)+filepath.Join(home, ".local", "bin"))
+			name:  "python3 found but its version probe failing",
+			stage: func(*testing.T, string) {},
+			run: func(fake *deps.FakeRunner, home, _ string) string {
+				broken := filepath.Join(home, "broken-python", "python3")
+				fake.ScriptLookPath("python3", broken, nil)
+				fake.Script([]string{broken, "--version"}, deps.RunResult{Stderr: []byte("boom\n"), ExitCode: 1}, nil)
+				return broken
 			},
 			rows: func(kit, python string) []string {
 				return []string{
@@ -166,18 +166,11 @@ func TestTracetreeKitDoctor(t *testing.T) {
 			// A relative PATH entry (a project's venv/bin, say) resolves python3
 			// only with exec.ErrDot: the probe never gets a path, and the row
 			// still names what it checked.
-			name: "python3 resolving only through a relative PATH entry",
-			stage: func(t *testing.T, home string) {
-				if err := os.Mkdir(filepath.Join(home, "venv-bin"), 0o700); err != nil {
-					t.Fatal(err)
-				}
-				if err := testjail.WriteExecutable(
-					filepath.Join(home, "venv-bin", "python3"), []byte("#!/bin/sh\necho 'Python 3.12.1'\n"), 0o700,
-				); err != nil {
-					t.Fatal(err)
-				}
-				t.Chdir(home)
-				t.Setenv("PATH", "venv-bin"+string(os.PathListSeparator)+filepath.Join(home, ".local", "bin"))
+			name:  "python3 resolving only through a relative PATH entry",
+			stage: func(*testing.T, string) {},
+			run: func(fake *deps.FakeRunner, _, _ string) string {
+				fake.ScriptLookPath("python3", "", &exec.Error{Name: "python3", Err: exec.ErrDot})
+				return ""
 			},
 			rows: func(kit, _ string) []string {
 				return []string{
@@ -228,6 +221,14 @@ func TestTracetreeKitDoctor(t *testing.T) {
 		{
 			name:  "kit present but failing to import",
 			stage: func(t *testing.T, home string) { writeKit(t, home, "import tracemap_gone\n") },
+			run: func(fake *deps.FakeRunner, _, kit string) string {
+				scriptTracerPython(fake, kit, deps.RunResult{
+					Stderr: []byte("Traceback (most recent call last):\n" +
+						"ModuleNotFoundError: No module named 'tracemap_gone'\n"),
+					ExitCode: 1,
+				})
+				return tracerPython
+			},
 			rows: func(kit, python string) []string {
 				return []string{
 					tracetreeKitRow + ` FAIL need=run checked=` + python + ` ` + kit +
@@ -240,6 +241,10 @@ func TestTracetreeKitDoctor(t *testing.T) {
 		{
 			name:  "kit running but printing no usage",
 			stage: func(t *testing.T, home string) { writeKit(t, home, "import sys\nsys.exit(0)\n") },
+			run: func(fake *deps.FakeRunner, _, kit string) string {
+				scriptTracerPython(fake, kit, deps.RunResult{})
+				return tracerPython
+			},
 			rows: func(kit, python string) []string {
 				return []string{
 					tracetreeKitRow + ` FAIL need=run checked=` + python + ` ` + kit +
@@ -262,6 +267,7 @@ func TestTracetreeKitDoctor(t *testing.T) {
 				disableFlights(t, home)
 				t.Setenv("PATH", filepath.Join(home, ".local", "bin"))
 			},
+			run: func(*deps.FakeRunner, string, string) string { return "" },
 			rows: func(_, _ string) []string {
 				return []string{
 					tracetreeKitRow + ` FAIL need=python3 checked=` + tracerPythonChecked +
@@ -320,10 +326,15 @@ func TestTracetreeKitDoctor(t *testing.T) {
 			home := runtime.Paths.Home
 			kit := healthyKit(t, home)
 			scenario.stage(t, home)
-			python, _ := exec.LookPath("python3")
-			recorder := &recordingRunner{Runner: deps.RealRunner{}}
+			fake := &deps.FakeRunner{}
+			python := tracerPython
+			if scenario.run != nil {
+				python = scenario.run(fake, home, kit)
+			} else {
+				scriptTracerPython(fake, kit, tracerUsage)
+			}
 			dependencies := testDependencies()
-			dependencies.Runner = recorder
+			dependencies.Runner = fake
 			var stdout, stderr bytes.Buffer
 			code := Run(nil, &stdout, &stderr, runtime, dependencies)
 
@@ -362,10 +373,10 @@ func TestTracetreeKitDoctor(t *testing.T) {
 			if !strings.Contains(stdout.String(), wantSummary) {
 				t.Fatalf("summary: want %q in stdout:\n%s", wantSummary, stdout.String())
 			}
-			if scenario.name == "healthy" && !slices.ContainsFunc(recorder.argv, func(argv []string) bool {
-				return slices.Equal(argv, []string{python, kit})
+			if scenario.name == "healthy" && !slices.ContainsFunc(fake.Calls(), func(call deps.RunCall) bool {
+				return slices.Equal(call.Argv, []string{python, kit})
 			}) {
-				t.Fatalf("the check never ran %q; runs: %q", []string{python, kit}, recorder.argv)
+				t.Fatalf("the check never ran %q; runs: %+v", []string{python, kit}, fake.Calls())
 			}
 		})
 	}
@@ -376,13 +387,14 @@ func TestTracetreeKitDoctor(t *testing.T) {
 func TestTracetreeKitDoctorTimesOut(t *testing.T) {
 	runtime := buildCleanDoctorHome(t)
 	home := runtime.Paths.Home
-	writeKit(t, home, "import time\ntime.sleep(60)\n")
 	previous := tracetreeKitBound
 	tracetreeKitBound = time.Second
 	t.Cleanup(func() { tracetreeKitBound = previous })
-	python, _ := exec.LookPath("python3")
+	python := tracerPython
+	dependencies := testDependencies()
+	dependencies.Runner = kitOutrunRunner{FakeRunner: healthyDoctorRunner(), kit: healthyKit(t, home)}
 	var stdout, stderr bytes.Buffer
-	code := Run(nil, &stdout, &stderr, runtime, testDependencies())
+	code := Run(nil, &stdout, &stderr, runtime, dependencies)
 	want := tracetreeKitRow + " FAIL need=run checked=" + python + " " + healthyKit(t, home) +
 		` error="timed out after 1s" — fix: ` + tracerFixRelinkText
 	if rows := tracetreeKitRows(stdout.String()); !slices.Equal(rows, []string{want}) {
@@ -391,4 +403,20 @@ func TestTracetreeKitDoctorTimesOut(t *testing.T) {
 	if code != 3 {
 		t.Fatalf("exit code=%d, want 3; stdout:\n%s", code, stdout.String())
 	}
+}
+
+// kitOutrunRunner is healthyDoctorRunner with a kit that outlives its bound:
+// the run of python3 over kit returns only once its context is done, as a kit
+// sleeping past tracetreeKitBound does.
+type kitOutrunRunner struct {
+	*deps.FakeRunner
+	kit string
+}
+
+func (runner kitOutrunRunner) Run(ctx context.Context, argv []string, opts deps.RunOptions) (deps.RunResult, error) {
+	if slices.Equal(argv, []string{tracerPython, runner.kit}) {
+		<-ctx.Done()
+		return deps.RunResult{ExitCode: -1}, ctx.Err()
+	}
+	return runner.FakeRunner.Run(ctx, argv, opts)
 }

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	goRuntime "runtime"
+	"strings"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/action"
@@ -47,8 +48,34 @@ func testDependencies() Dependencies {
 	return Dependencies{ExpectedEngineCapabilities: expectedEngineCapabilities}
 }
 
+// runDoctor runs the doctor over healthyDoctorRunner; any other probe through
+// the doctor's runner answers as an unscripted call, never as a process.
 func runDoctor(args []string, stdout, stderr interface{ Write([]byte) (int, error) }, runtime config.Runtime) int {
-	return Run(args, stdout, stderr, runtime, testDependencies())
+	dependencies := testDependencies()
+	dependencies.Runner = healthyDoctorRunner()
+	return Run(args, stdout, stderr, runtime, dependencies)
+}
+
+// healthyDoctorRunner is the FakeRunner holding the one answer a healthy jail
+// needs: python3 and the stub kit.
+func healthyDoctorRunner() *deps.FakeRunner {
+	fake := &deps.FakeRunner{}
+	fake.ScriptLookPath("python3", tracerPython, nil)
+	fake.Script([]string{tracerPython, "--version"}, deps.RunResult{Stdout: []byte("Python 3.12.1\n")}, nil)
+	fake.Script([]string{tracerPython}, tracerUsage, nil)
+	return fake
+}
+
+// childEnvValue is the value a launched child's environment holds for name; the
+// last entry wins, as it does for a launched process.
+func childEnvValue(env []string, name string) (string, bool) {
+	value, found := "", false
+	for _, entry := range env {
+		if rest, ok := strings.CutPrefix(entry, name+"="); ok {
+			value, found = rest, true
+		}
+	}
+	return value, found
 }
 
 func stageModelHarnessPromptBaseline(

@@ -32,6 +32,7 @@ cmd/pfm/chat_watch_discovery_jail_test.go 5
 cmd/pfm/chat_watch_jail_test.go 3
 cmd/pfm/chat_watch_ladder_jail_test.go 14
 cmd/pfm/doctor_codex_pane_jail_test.go 5
+cmd/pfm/headless_exec_jail_test.go 4
 cmd/pfm/headless_matrix_jail_test.go 2
 cmd/pfm/heal_jail_test.go 3
 cmd/pfm/heal_noncanonical_jail_test.go 1
@@ -67,6 +68,8 @@ internal/chat/kill_server_linux_jail_test.go 1
 internal/chat/tmux_jail_test.go 3
 internal/config/tmux_titles_render_jail_test.go 1
 internal/deps/probe_home_jail_test.go 3
+internal/doctor/engine_roster_jail_test.go 1
+internal/doctor/logged_out_home_jail_test.go 1
 internal/doctor/regression_jail_test.go 1
 internal/doctor/tmux_titles_jail_test.go 1
 internal/fleet/reconcile_rebind_jail_test.go 3
@@ -99,6 +102,9 @@ internal/gather/tmux_stopped_jail_test.go 1
 internal/gather/tmuxprobe_jail_test.go 11
 internal/gather/tmuxprobe_obs_jail_test.go 1
 internal/gather/tmuxserver_jail_test.go 1
+internal/headless/run/opencode_jail_test.go 7
+internal/headless/run/opencode_plugin_jail_test.go 2
+internal/headless/run/run_jail_test.go 2
 internal/headless/statusask_jail_test.go 1
 internal/hookentry/chat_server_jail_test.go 4
 internal/hookentry/herdr_seat_jail_test.go 1
@@ -125,9 +131,16 @@ internal/mcpserv/metadata_identity_jail_test.go 9
 internal/mcpserv/server_jail_test.go 3
 internal/mcpserv/server_stress_jail_test.go 1
 internal/mcpserv/stdio_jail_test.go 1
+internal/mockengine/claude_background_job_jail_test.go 1
 internal/mockengine/claude_jail_test.go 1
+internal/mockengine/claude_quiet_jail_test.go 2
+internal/mockengine/claude_resume_jail_test.go 4
 internal/mockengine/claude_shell_snapshot_jail_test.go 1
+internal/mockengine/cli_jail_test.go 4
 internal/mockengine/codex_jail_test.go 1
+internal/mockengine/hooks_jail_test.go 4
+internal/mockengine/opencode_plugin_jail_test.go 1
+internal/mockengine/statusline_jail_test.go 1
 internal/picker/kill_jail_test.go 6
 internal/picker/presence_jail_test.go 2
 internal/picker/reboot_kind_jail_test.go 2

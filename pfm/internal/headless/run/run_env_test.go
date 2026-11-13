@@ -77,7 +77,7 @@ func TestOtherEngineEnvironmentKeepsClaudeProjectDir(t *testing.T) {
 }
 
 func TestClaudeResolveDoesNotUseAskModelOrEffort(t *testing.T) {
-	binary := writeEngineStub(t, "exit 0")
+	binary := engineBinary(t)
 	machine := claudeMachine(binary, t.TempDir())
 	machine.Ask.Prefs = map[pfmengine.ID]pfmconfig.EnginePrefs{
 		pfmengine.Claude: {Model: "ask-model", Effort: "high"},
@@ -92,7 +92,7 @@ func TestClaudeResolveDoesNotUseAskModelOrEffort(t *testing.T) {
 }
 
 func TestResolveUnknownClaudeAccountNamesRosterError(t *testing.T) {
-	machine := claudeMachine(writeEngineStub(t, "exit 0"), t.TempDir())
+	machine := claudeMachine(engineBinary(t), t.TempDir())
 	_, err := Resolve(Request{Config: machine, Engine: pfmengine.Claude, Account: 99})
 	if err == nil || !strings.Contains(err.Error(), "account 99 is not in the configured roster") {
 		t.Fatalf("Resolve unknown account error = %v", err)
@@ -107,7 +107,7 @@ func TestResolveChecksOnlyClaudeConfigDir(t *testing.T) {
 				name = string(engine) + "/without-account"
 			}
 			t.Run(name, func(t *testing.T) {
-				binary := writeEngineStub(t, "exit 0")
+				binary := engineBinary(t)
 				dir := filepath.Join(t.TempDir(), string(engine))
 				if engine == pfmengine.OpenCode {
 					dir = filepath.Join(filepath.Dir(dir), "opencode")

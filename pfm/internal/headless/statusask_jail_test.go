@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // startHeadlessTmuxSession mirrors internal/call's newCallTmuxJail
@@ -73,4 +74,18 @@ func TestAskCapturesLivePaneAndReportsPaneOnlyWithoutExchange(t *testing.T) {
 		t.Fatalf("pane-only ask=%+v", result)
 	}
 	assertNoLeakedTempFiles(t, tempDir)
+}
+
+func writeSummaryStub(t *testing.T, directory, name, body string) {
+	t.Helper()
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := testjail.WriteExecutable(
+		filepath.Join(directory, name),
+		[]byte("#!/bin/sh\n"+body+"\n"),
+		0o700,
+	); err != nil {
+		t.Fatal(err)
+	}
 }

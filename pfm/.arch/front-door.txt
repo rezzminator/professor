@@ -55,7 +55,7 @@ internal/spawn 14
 internal/stats 7
 internal/statusline 27
 internal/store 17
-internal/testjail 21
+internal/testjail 20
 internal/themecmd 3
 internal/themesync 28
 internal/tmux 5

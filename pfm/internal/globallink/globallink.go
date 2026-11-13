@@ -204,8 +204,11 @@ func equalFileBytes(target, source string) (bool, error) {
 
 // Apply keeps Correct and Conflict untouched and replaces proven copies and
 // stale or dangling links, always by making the link beside the target and
-// renaming it over (a directory copy: exchanging it), so readers see either
-// the previous entry or the desired link and never an absent target.
+// renaming it over (a proven copy, file or directory: exchanging it), so
+// readers see either the previous entry or the desired link and never an
+// absent target. On macOS a concurrent lookup can still miss the target for an
+// instant, during the swap as during any darwin rename(2); no darwin primitive
+// does better.
 func Apply(target, source string, state State) error {
 	switch state {
 	case Correct, Conflict:

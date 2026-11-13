@@ -20,23 +20,52 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/paths"
-	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
-// writeFakeHarnessClaude stages a shell `claude` stand-in used only by the
-// capture regression tests in this file. It never touches a network endpoint
-// other than pfm's own loopback sink.
-func writeFakeHarnessClaude(t *testing.T, body string) string {
-	t.Helper()
-	dir := t.TempDir()
-	path := filepath.Join(dir, "claude")
-	script := "#!/bin/sh\n" +
-		"if [ \"$1\" = --version ]; then printf '2.1.270 (Claude Code)\\n'; exit 0; fi\n" +
-		body
-	if err := testjail.WriteExecutable(path, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
+// harnessChild plays the `claude` child of one capture run: it reads the argv
+// and StartOptions the run launched it with and writes the child's streams
+// through them. The error it returns is the child's nonzero exit.
+type harnessChild func(argv []string, opts deps.StartOptions) error
+
+// harnessChildRunner is the FakeRunner whose Start plays a harnessChild before
+// answering with the process that child exited as.
+type harnessChildRunner struct {
+	*deps.FakeRunner
+	child harnessChild
+}
+
+func (runner harnessChildRunner) Start(
+	ctx context.Context,
+	argv []string,
+	opts deps.StartOptions,
+) (deps.Process, error) {
+	process, err := runner.FakeRunner.Start(ctx, argv, opts)
+	if err != nil {
+		return nil, err
 	}
-	return path
+	return exitedHarnessProcess{Process: process, exit: runner.child(argv, opts)}, nil
+}
+
+type exitedHarnessProcess struct {
+	deps.Process
+	exit error
+}
+
+func (process exitedHarnessProcess) Wait() error { return process.exit }
+
+var errHarnessChildExit = errors.New("exit status 1")
+
+// writeFakeHarnessClaude stages the `claude` the capture regression tests in
+// this file run: the sh binary standing at the CLI's path, which nothing
+// executes, and the runner whose scripted `claude --version` answers 2.1.270
+// and whose Start plays the child. No network endpoint other than pfm's own
+// loopback sink is reachable.
+func writeFakeHarnessClaude(t *testing.T, child harnessChild) (string, deps.Runner) {
+	t.Helper()
+	path := deps.Executable("sh")
+	fake := &deps.FakeRunner{}
+	fake.Script([]string{path, "--version"}, deps.RunResult{Stdout: []byte("2.1.270 (Claude Code)\n")}, nil)
+	return path, harnessChildRunner{FakeRunner: fake, child: child}
 }
 
 // TestHarnessCaptureReportsBypassWhenTheCLIAnswersWithoutHittingTheSink pins
@@ -46,14 +75,19 @@ func writeFakeHarnessClaude(t *testing.T, body string) string {
 // the OAuth-only routing spent real money.
 func TestHarnessCaptureReportsBypassWhenTheCLIAnswersWithoutHittingTheSink(t *testing.T) {
 	shortenHarnessCaptureSinkGrace(t)
-	binary := writeFakeHarnessClaude(
-		t,
-		"printf '{\"stop_reason\":\"end_turn\",\"usage\":{\"input_tokens\":12,\"output_tokens\":4},\"result\":\"hi\"}\\n'\nexit 0\n",
-	)
+	binary, runner := writeFakeHarnessClaude(t, func(_ []string, opts deps.StartOptions) error {
+		_, err := io.WriteString(
+			opts.Stdout,
+			`{"stop_reason":"end_turn","usage":{"input_tokens":12,"output_tokens":4},"result":"hi"}`+"\n",
+		)
+		return err
+	})
 	machine := config.Config{}
 	machine.Claude.Binary = binary
 
-	captured, err := captureHarnessPrompt(t.Context(), t.TempDir(), machine, "sonnet", "")
+	captured, err := captureHarnessPrompt(
+		t.Context(), t.TempDir(), machine, "sonnet", "", Dependencies{Runner: runner},
+	)
 	if !errors.Is(err, errHarnessBypassedSink) {
 		t.Fatalf("captureHarnessPrompt error = %v, want errHarnessBypassedSink", err)
 	}
@@ -73,16 +107,20 @@ func TestHarnessCaptureReportsBypassWhenTheCLIAnswersWithoutHittingTheSink(t *te
 func TestHarnessCaptureRunsTheCLIInAThrowawayConfigDir(t *testing.T) {
 	shortenHarnessCaptureSinkGrace(t)
 	record := filepath.Join(t.TempDir(), "config-dir-seen.txt")
-	t.Setenv("PFM_TEST_HARNESS_CONFIGDIR_RECORD", record)
-	binary := writeFakeHarnessClaude(
-		t,
-		"printf '%s' \"$CLAUDE_CONFIG_DIR\" > \"$PFM_TEST_HARNESS_CONFIGDIR_RECORD\"\nexit 1\n",
-	)
+	binary, runner := writeFakeHarnessClaude(t, func(_ []string, opts deps.StartOptions) error {
+		configDir, _ := childEnvValue(opts.Env, "CLAUDE_CONFIG_DIR")
+		if err := os.WriteFile(record, []byte(configDir), 0o600); err != nil {
+			return err
+		}
+		return errHarnessChildExit
+	})
 	machine := config.Config{}
 	machine.Claude.Binary = binary
 
 	home := t.TempDir()
-	if _, err := captureHarnessPrompt(t.Context(), home, machine, "sonnet", ""); err == nil {
+	if _, err := captureHarnessPrompt(
+		t.Context(), home, machine, "sonnet", "", Dependencies{Runner: runner},
+	); err == nil {
 		t.Fatal("fake CLI never reaches the sink, want a capture error")
 	}
 
@@ -125,16 +163,26 @@ func TestHarnessCaptureNeverLoadsTheCallersProjectSettings(t *testing.T) {
 	}
 	t.Chdir(caller)
 	record := filepath.Join(t.TempDir(), "project-settings-seen.txt")
-	t.Setenv("PFM_TEST_HARNESS_PROJECT_SETTINGS_RECORD", record)
-	binary := writeFakeHarnessClaude(
-		t,
-		"if [ -e .claude/settings.json ]; then seen=loaded; else seen=none; fi\n"+
-			"printf '%s %s' \"$seen\" \"$(pwd -P)\" > \"$PFM_TEST_HARNESS_PROJECT_SETTINGS_RECORD\"\nexit 1\n",
-	)
+	binary, runner := writeFakeHarnessClaude(t, func(_ []string, opts deps.StartOptions) error {
+		seen := "none"
+		if _, err := os.Stat(filepath.Join(opts.Dir, ".claude", "settings.json")); err == nil {
+			seen = "loaded"
+		}
+		cwd, err := filepath.EvalSymlinks(opts.Dir)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(record, []byte(seen+" "+cwd), 0o600); err != nil {
+			return err
+		}
+		return errHarnessChildExit
+	})
 	machine := config.Config{}
 	machine.Claude.Binary = binary
 
-	if _, err := captureHarnessPrompt(t.Context(), t.TempDir(), machine, "sonnet", ""); err == nil {
+	if _, err := captureHarnessPrompt(
+		t.Context(), t.TempDir(), machine, "sonnet", "", Dependencies{Runner: runner},
+	); err == nil {
 		t.Fatal("fake CLI never reaches the sink, want a capture error")
 	}
 
@@ -151,18 +199,27 @@ func TestHarnessCaptureNeverLoadsTheCallersProjectSettings(t *testing.T) {
 func TestHarnessCaptureUsesRegistryProbeEnvironment(t *testing.T) {
 	shortenHarnessCaptureSinkGrace(t)
 	path := filepath.Join(t.TempDir(), "environment")
-	t.Setenv("PFM_TEST_PROBE_ENV", path)
 	t.Setenv("CLAUDE_CODE_USE_BEDROCK", "1")
-	binary := writeFakeHarnessClaude(t, `if printenv CLAUDE_CODE_USE_BEDROCK >/dev/null; then
-  printf 'leaked\n' >> "$PFM_TEST_PROBE_ENV"
-else
-  printf 'clean\n' >> "$PFM_TEST_PROBE_ENV"
-fi
-exit 1
-`)
+	binary, runner := writeFakeHarnessClaude(t, func(_ []string, opts deps.StartOptions) error {
+		seen := "clean"
+		if _, set := childEnvValue(opts.Env, "CLAUDE_CODE_USE_BEDROCK"); set {
+			seen = "leaked"
+		}
+		file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = file.Close() }()
+		if _, err := file.WriteString(seen + "\n"); err != nil {
+			return err
+		}
+		return errHarnessChildExit
+	})
 	machine := config.Config{}
 	machine.Claude.Binary = binary
-	_, _ = captureHarnessPrompt(t.Context(), t.TempDir(), machine, "sonnet", "")
+	_, _ = captureHarnessPrompt(
+		t.Context(), t.TempDir(), machine, "sonnet", "", Dependencies{Runner: runner},
+	)
 	got, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
@@ -180,13 +237,21 @@ exit 1
 // earlier one's; a failed row points at its own model's file.
 func TestDoctorVerboseKeepsTheHarnessRunOutput(t *testing.T) {
 	shortenHarnessCaptureSinkGrace(t)
-	binary := writeFakeHarnessClaude(t, "printf 'diagnostic-stderr-line %s\\n' \"$*\" 1>&2\nexit 1\n")
+	binary, runner := writeFakeHarnessClaude(t, func(argv []string, opts deps.StartOptions) error {
+		_, err := fmt.Fprintf(opts.Stderr, "diagnostic-stderr-line %s\n", strings.Join(argv[1:], " "))
+		if err != nil {
+			return err
+		}
+		return errHarnessChildExit
+	})
 	machine := config.Config{}
 	machine.Claude.Binary = binary
 
 	verboseDir := t.TempDir()
 	for _, alias := range []string{"sonnet", "opus"} {
-		_, err := captureHarnessPrompt(t.Context(), t.TempDir(), machine, alias, verboseDir)
+		_, err := captureHarnessPrompt(
+			t.Context(), t.TempDir(), machine, alias, verboseDir, Dependencies{Runner: runner},
+		)
 		if err == nil {
 			t.Fatalf("%s: fake CLI never reaches the sink, want a capture error", alias)
 		}
@@ -271,7 +336,7 @@ func TestHarnessCaptureNamesAScratchDirItCouldNotRemove(t *testing.T) {
 	binary := deps.Executable("sh")
 	machine := config.Config{}
 	machine.Claude.Binary = binary
-	captured, err := captureHarnessPromptWithDeps(
+	captured, err := captureHarnessPrompt(
 		t.Context(), t.TempDir(), machine, "sonnet", "", Dependencies{Runner: harnessCaptureHTTPRunner{binary: binary}},
 	)
 	if left == "" || !strings.HasPrefix(filepath.Base(left), paths.SIDHarnessConfigDirPrefix) {
@@ -299,7 +364,7 @@ func TestHarnessCaptureVersionUsesWaitDelay(t *testing.T) {
 	fake.Script([]string{binary, "--version"}, deps.RunResult{Stdout: []byte("2.1.fixture\n")}, nil)
 	machine := config.Config{}
 	machine.Claude.Binary = binary
-	_, _ = captureHarnessPromptWithDeps(
+	_, _ = captureHarnessPrompt(
 		t.Context(), t.TempDir(), machine, "sonnet", "", Dependencies{Runner: fake},
 	)
 	calls := fake.Calls()
@@ -321,7 +386,7 @@ func TestHarnessCaptureReturnsDecodedResultWithEvidenceWriteError(t *testing.T) 
 	runner := harnessCaptureHTTPRunner{binary: binary}
 	machine := config.Config{}
 	machine.Claude.Binary = binary
-	captured, err := captureHarnessPromptWithDeps(
+	captured, err := captureHarnessPrompt(
 		t.Context(), t.TempDir(), machine, "sonnet", verboseDir, Dependencies{Runner: runner},
 	)
 	if err == nil || !strings.Contains(err.Error(), "sink hit evidence") {
@@ -404,7 +469,7 @@ func TestVerboseHarnessCapturePreservesReviewEvidence(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			captured, err := captureHarnessPromptWithDeps(
+			captured, err := captureHarnessPrompt(
 				t.Context(),
 				t.TempDir(),
 				machine,

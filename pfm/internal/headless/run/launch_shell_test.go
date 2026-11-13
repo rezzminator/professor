@@ -12,7 +12,7 @@ import (
 func TestClaudeEnvironmentAddsLaunchShell(t *testing.T) {
 	dir := t.TempDir()
 	bash := filepath.Join(dir, "bash")
-	if err := testjail.WriteExecutable(bash, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+	if err := testjail.WriteExecutableNeverRun(bash, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 		t.Fatalf("write fake bash: %v", err)
 	}
 	t.Setenv("PATH", dir)

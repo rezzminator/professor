@@ -8,6 +8,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/ask"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
@@ -20,6 +21,8 @@ type SummaryOptions struct {
 	TempDir  string
 	Engine   pfmengine.ID
 	Model    string
+	// Runner starts the ask engine child (nil: the real one).
+	Runner deps.Runner
 }
 
 type SummaryResult struct {
@@ -70,6 +73,7 @@ func Summarize(ctx context.Context, chat Chat, options SummaryOptions) SummaryRe
 		}
 		return failedSummary(err)
 	}
+	runner = ask.WithRunner(runner, options.Runner)
 
 	prepared, err := writePreparedExchange(options.TempDir, exchange.prompt, exchange.response, exchange.complete)
 	if err != nil {

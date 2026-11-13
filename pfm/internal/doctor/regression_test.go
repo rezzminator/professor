@@ -15,7 +15,7 @@ import (
 
 func TestHarnessCaptureUsesInjectedListener(t *testing.T) {
 	listenErr := errors.New("fixture listener refused")
-	_, err := captureHarnessPromptWithDeps(
+	_, err := captureHarnessPrompt(
 		context.Background(),
 		t.TempDir(),
 		config.Config{},
@@ -24,7 +24,7 @@ func TestHarnessCaptureUsesInjectedListener(t *testing.T) {
 		Dependencies{Listen: func(string, string) (net.Listener, error) { return nil, listenErr }},
 	)
 	if err == nil || !strings.Contains(err.Error(), listenErr.Error()) {
-		t.Fatalf("captureHarnessPromptWithDeps() error = %v, want injected listener error", err)
+		t.Fatalf("captureHarnessPrompt() error = %v, want injected listener error", err)
 	}
 }
 

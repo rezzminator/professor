@@ -24,7 +24,7 @@ func configuredMachinePolicy(home string) pfmconfig.Config {
 	if err := os.MkdirAll(filepath.Dir(claudeBinary), 0o700); err != nil {
 		panic(fmt.Sprintf("fixture tools dir %s: %v", filepath.Dir(claudeBinary), err))
 	}
-	if err := testjail.WriteExecutable(claudeBinary, []byte("#!/bin/sh\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutableNeverRun(claudeBinary, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		panic(fmt.Sprintf("fixture claude binary %s: %v", claudeBinary, err))
 	}
 	return pfmconfig.Config{

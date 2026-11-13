@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -156,12 +157,10 @@ func TestAskCapturesHerdrSeatThroughNativeHost(t *testing.T) {
 		t.Fatal(err)
 	}
 	bin := filepath.Join(root, "bin")
-	capture := filepath.Join(root, "stdin")
-	writeSummaryStub(t, bin, "claude", `/bin/cat > "$ASK_CAPTURE"
-printf '%s\n' '{"result":"native capture is running checks"}'`)
-	t.Setenv("ASK_CAPTURE", capture)
+	writeEngine(t, bin, "claude")
+	runner := fakeEngine(deps.StartOutput{Stdout: `{"result":"native capture is running checks"}` + "\n"})
 	t.Setenv("PATH", bin)
-	options := AskOptions{Config: summaryMachine(t, "claude"), TempDir: filepath.Join(root, "prepared")}
+	options := AskOptions{Config: summaryMachine(t, "claude"), TempDir: filepath.Join(root, "prepared"), Runner: runner}
 	chat := Chat{
 		Name: "native seat", Engine: pfmengine.Claude, Backend: "herdr", SeatID: "capture-seat",
 		HerdrWorkspace: "w1", Socket: socket, Pane: "w1:p2", Live: true,
@@ -170,9 +169,8 @@ printf '%s\n' '{"result":"native capture is running checks"}'`)
 	if result.Warning != nil || !strings.HasPrefix(result.Text, "PANE-ONLY (no human exchange recorded yet): ") {
 		t.Fatalf("native status ask=%+v; want a native pane capture, not TRANSCRIPT-ONLY or unavailable", result)
 	}
-	raw, err := os.ReadFile(capture)
-	if err != nil || !strings.Contains(string(raw), "native capture is running checks") {
-		t.Fatalf("runner missing native capture: %q err=%v", raw, err)
+	if raw := startedStdin(t, runner, 0); !strings.Contains(raw, "native capture is running checks") {
+		t.Fatalf("runner missing native capture: %q", raw)
 	}
 	assertNoLeakedTempFiles(t, options.TempDir)
 }
@@ -185,17 +183,11 @@ func TestAskPaysRunnerEveryCallNeverCaches(t *testing.T) {
 		`{"type":"assistant","message":{"role":"assistant","content":"steady state"}}`,
 	)
 	bin := filepath.Join(root, "bin")
-	counter := filepath.Join(root, "calls")
-	writeSummaryStub(
-		t,
-		bin,
-		"claude",
-		"printf x >> \"$ASK_COUNTER\"\nprintf '%s\\n' '{\"result\":\"nothing has changed\"}'",
-	)
+	writeEngine(t, bin, "claude")
+	runner := fakeEngine(deps.StartOutput{Stdout: `{"result":"nothing has changed"}` + "\n"})
 	t.Setenv("PATH", bin)
-	t.Setenv("ASK_COUNTER", counter)
 	tempDir := filepath.Join(root, "tmp", "chat-status")
-	options := AskOptions{Config: summaryMachine(t, "claude"), TempDir: tempDir}
+	options := AskOptions{Config: summaryMachine(t, "claude"), TempDir: tempDir, Runner: runner}
 	chat := Chat{Name: "seat", Engine: "cc", Path: transcriptPath, Live: false}
 
 	first := Ask(context.Background(), chat, options)
@@ -211,8 +203,8 @@ func TestAskPaysRunnerEveryCallNeverCaches(t *testing.T) {
 	}
 	assertNoLeakedTempFiles(t, tempDir)
 
-	if calls, err := os.ReadFile(counter); err != nil || string(calls) != "xx" {
-		t.Fatalf("runner calls=%q err=%v, want both calls paid (Ask never caches)", calls, err)
+	if calls := len(runner.Starts()); calls != 2 {
+		t.Fatalf("runner calls=%d, want both calls paid (Ask never caches)", calls)
 	}
 }
 
@@ -225,18 +217,15 @@ func TestAskPreservesAnswerWhenPreparedExchangeCleanupFails(t *testing.T) {
 	)
 	tempDir := filepath.Join(root, "tmp", "chat-status")
 	bin := filepath.Join(root, "bin")
-	writeSummaryStub(t, bin, "claude", `
-set -eu
-set -- "$HEADLESS_TEMP_DIR"/exchange-*.md
-[ "$#" -eq 1 ]
-[ -f "$1" ]
-rm "$1"
-printf '%s\n' '{"result":"cleanup-resistant answer"}'`)
+	writeEngine(t, bin, "claude")
+	runner := fakeEngine(deps.StartOutput{
+		AtStart: removePreparedExchange(t, tempDir),
+		Stdout:  `{"result":"cleanup-resistant answer"}` + "\n",
+	})
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("HEADLESS_TEMP_DIR", tempDir)
 
 	result := Ask(context.Background(), Chat{Name: "seat", Engine: "cc", Path: transcriptPath}, AskOptions{
-		Config: summaryMachine(t, "claude"), TempDir: tempDir,
+		Config: summaryMachine(t, "claude"), TempDir: tempDir, Runner: runner,
 	})
 	if result.Text != "TRANSCRIPT-ONLY (chat is not live: there is no pane to capture): cleanup-resistant answer" ||
 		strings.HasPrefix(result.Text, "failed (") {
@@ -263,11 +252,14 @@ func TestAskDistinguishesNotLiveFromCaptureFailure(t *testing.T) {
 		`{"type":"assistant","message":{"role":"assistant","content":"steady state"}}`,
 	)
 	bin := filepath.Join(root, "bin")
-	writeSummaryStub(t, bin, "claude", "printf '%s\\n' '{\"result\":\"answer\"}'")
+	writeEngine(t, bin, "claude")
 	// Prepend, not replace: the capture-failure call below still needs the
 	// REAL tmux binary to reach (and be refused by) the empty socket path.
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	options := AskOptions{Config: summaryMachine(t, "claude"), TempDir: filepath.Join(root, "tmp")}
+	options := AskOptions{
+		Config: summaryMachine(t, "claude"), TempDir: filepath.Join(root, "tmp"),
+		Runner: fakeEngine(deps.StartOutput{Stdout: `{"result":"answer"}` + "\n"}),
+	}
 
 	notLive := Ask(context.Background(), Chat{Name: "seat", Engine: "cc", Path: transcriptPath, Live: false}, options)
 	if !strings.Contains(notLive.Text, "TRANSCRIPT-ONLY (chat is not live: there is no pane to capture)") {
@@ -358,15 +350,20 @@ func TestAskReportsEngineBinaryMissingAndCleansUpOnEveryErrorReturn(t *testing.T
 	}
 	assertNoLeakedTempFiles(t, tempDir)
 
-	writeSummaryStub(t, bin, "claude", "printf 'provider crashed\\n' >&2\nexit 9")
-	failed := Ask(context.Background(), chat, AskOptions{Config: summaryMachine(t, "claude"), TempDir: tempDir})
+	writeEngine(t, bin, "claude")
+	failed := Ask(context.Background(), chat, AskOptions{
+		Config: summaryMachine(t, "claude"), TempDir: tempDir,
+		Runner: fakeEngine(deps.StartOutput{Stderr: "provider crashed\n", ExitCode: 9}),
+	})
 	if !strings.HasPrefix(failed.Text, "failed (") || !strings.Contains(failed.Text, "provider crashed") {
 		t.Fatalf("failed ask=%+v", failed)
 	}
 	assertNoLeakedTempFiles(t, tempDir)
 
-	writeSummaryStub(t, bin, "claude", "printf '%s\\n' '{\"result\":\"all clear\"}'")
-	ok := Ask(context.Background(), chat, AskOptions{Config: summaryMachine(t, "claude"), TempDir: tempDir})
+	ok := Ask(context.Background(), chat, AskOptions{
+		Config: summaryMachine(t, "claude"), TempDir: tempDir,
+		Runner: fakeEngine(deps.StartOutput{Stdout: `{"result":"all clear"}` + "\n"}),
+	})
 	if !strings.HasPrefix(ok.Text, "TRANSCRIPT-ONLY (chat is not live: there is no pane to capture): ") {
 		t.Fatalf("ok ask=%+v", ok)
 	}

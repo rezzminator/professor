@@ -441,6 +441,7 @@ type fakeStartScript struct {
 	killErr    error
 	groupErr   error
 	releaseErr error
+	output     *StartOutput
 }
 
 // fakeProcess is the scripted Process FakeRunner.Start hands back: a fixed
@@ -629,8 +630,9 @@ func (f *FakeRunner) Start(_ context.Context, argv []string, opts StartOptions) 
 	if (opts.StdinPipe && best.stdin == nil) || (opts.StdoutPipe && best.stdout == nil) {
 		return nil, fmt.Errorf("deps: FakeRunner: interactive script for %q did not provide requested pipes", argv)
 	}
+	waitErr := best.output.play(argv, opts, best.waitErr)
 	return &fakeProcess{
-		pid: best.pid, waitErr: best.waitErr, stdin: best.stdin, stdout: best.stdout,
+		pid: best.pid, waitErr: waitErr, stdin: best.stdin, stdout: best.stdout,
 		killErr: best.killErr, groupErr: best.groupErr, releaseErr: best.releaseErr, owner: f,
 	}, nil
 }

@@ -17,8 +17,9 @@
 #                (testjail.WriteExecutable and its fakes), a built binary, a PTY, mockengine
 #   home-sqlite  SQLite's own file: testjail.DatabaseFiles, or a database built with sql.Open; any
 #                other open goes through the SQLite door, which serves it from memory in a test process
-#   temp-dir     t.TempDir(), os.MkdirTemp, os.CreateTemp, testjail.ShortRoot / CreateShortRoot, or a
-#                testjail home built in one (Fleet, FleetEnv, InstalledHome, CleanHome)
+#   temp-dir     t.TempDir(), os.MkdirTemp, os.CreateTemp, testjail.ShortRoot / CreateShortRoot, a
+#                testjail home built in one (Fleet, FleetEnv, InstalledHome, CleanHome), or an
+#                executable written never to run (testjail.WriteExecutableNeverRun)
 #   nothing      none of the above: memory only
 # A method is reached only through a selector (`x.Name`), a func by its bare name or a selector; a name
 # inside a string literal reaches nothing. Markers are read from source, so the kind is what the test
@@ -50,7 +51,8 @@ MARKERS = [
                    r'|testjail\.(?:WriteExecutable|PFMBinary|MockEngineBinary|GoBuild|PTYCommand|HungTmux'
                    r'|FakeEngineSync|WriteLoggedOut\w*)\b|\bmockengine\.')),
     (2, re.compile(r'testjail\.DatabaseFiles\b|\bsql\.Open\(')),
-    (1, re.compile(r'\.TempDir\(\)|os\.(?:MkdirTemp|CreateTemp)\(|testjail\.(?:ShortRoot|CreateShortRoot|Fleet|FleetEnv|InstalledHome|CleanHome)\b')),
+    (1, re.compile(r'\.TempDir\(\)|os\.(?:MkdirTemp|CreateTemp)\(|testjail\.(?:ShortRoot|CreateShortRoot|Fleet|FleetEnv|InstalledHome|CleanHome'
+                   r'|WriteExecutableNeverRun)\b')),
 ]
 # A test in a jail file, `{name}_jail_test.go` or `{name}_jail_{os}_test.go`, is real.
 JAIL = re.compile(r'_jail(?:_(?:linux|darwin))?_test\.go$')

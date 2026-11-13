@@ -14,7 +14,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/stale"
-	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 type mcpServeProcTable struct {
@@ -89,7 +88,7 @@ func newMCPServeDoctorFixture(t *testing.T) (config.Runtime, gather.FileID, gath
 	t.Helper()
 	home := t.TempDir()
 	binary := filepath.Join(home, ".local", "bin", "pfm")
-	if err := writeExecutable(binary); err != nil {
+	if err := writePFMBinary(binary); err != nil {
 		t.Fatal(err)
 	}
 	fresh, err := gather.FileIDOf(binary)
@@ -101,11 +100,13 @@ func newMCPServeDoctorFixture(t *testing.T) (config.Runtime, gather.FileID, gath
 	return config.Runtime{Paths: paths.Values{Home: home}}, fresh, staleImage
 }
 
-func writeExecutable(path string) error {
+// writePFMBinary writes the pfm binary whose file identity the check compares;
+// nothing stats its mode or runs it.
+func writePFMBinary(path string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	return testjail.WriteExecutable(path, []byte("fixture"), 0o700)
+	return os.WriteFile(path, []byte("fixture"), 0o600)
 }
 
 func TestMCPServeProcessesDoctorReportsFreshAndStaleRows(t *testing.T) {

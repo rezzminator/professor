@@ -17,6 +17,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/cli"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	headlessrun "github.com/rezzminator/professor/pfm/internal/headless/run"
 )
@@ -25,6 +26,8 @@ const (
 	textFormat   = "text"
 	nativeFormat = "native"
 )
+
+var headlessExecRunner deps.Runner // the engine child's Runner; nil is the real one, a test sets a fake
 
 func runHeadlessExec(args []string, stdin io.Reader, stdout, stderr io.Writer, runtime commandRuntime) int {
 	flags := cli.NewFlagSet("headless exec", "usage: pfm headless exec [options] [-- ENGINE_ARGS...]\n"+
@@ -132,8 +135,8 @@ func runHeadlessExec(args []string, stdin io.Reader, stdout, stderr io.Writer, r
 		Model: *model, Effort: *effort, Prompt: *prompt, CWD: *cwd, TempDir: runtime.Paths.SIDDir,
 		Timeout: time.Duration(*timeout * float64(time.Second)), StrictMCP: *strictMCP,
 		NoSessionPersistence: *noPersistence, Sealed: *sealed, Native: *format == nativeFormat,
-		AllowUnsupported: *allowUnsupported,
-		Args:             append([]string(engineArgs), tail...),
+		AllowUnsupported: *allowUnsupported, Runner: headlessExecRunner,
+		Args: append([]string(engineArgs), tail...),
 	}
 	if err := headlessrun.ApplyEngineSelector(&request, *engine); err != nil {
 		fmt.Fprintf(stderr, "pfm headless: %v\n", err)

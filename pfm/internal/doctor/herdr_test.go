@@ -161,7 +161,7 @@ func TestHerdrBackendDoctorThroughRun(t *testing.T) {
 	t.Setenv(herdr.EnvSocket, socket)
 	t.Setenv(herdr.EnvBin, "")
 	var stdout, stderr bytes.Buffer
-	code := Run(nil, &stdout, &stderr, runtime, testDependencies())
+	code := runDoctor(nil, &stdout, &stderr, runtime)
 	want := "doctor: herdr protocol 23 DIVERGES from supported 22 — herdr seats disabled"
 	if code != 3 || !strings.Contains(stdout.String(), want) ||
 		!strings.Contains(stdout.String(), "doctor: failures=1\n") {
@@ -249,7 +249,7 @@ func TestHerdrBackendDoctorFollowsConfiguredBackend(t *testing.T) {
 			t.Setenv(herdr.EnvPane, scenario.pane)
 			t.Setenv("TMUX", scenario.tmux)
 			var stdout, stderr bytes.Buffer
-			code := Run(nil, &stdout, &stderr, runtime, testDependencies())
+			code := runDoctor(nil, &stdout, &stderr, runtime)
 			want := strings.ReplaceAll(scenario.want, "SOCKET", socket)
 			if code != scenario.code || !strings.Contains(stdout.String(), want) {
 				t.Fatalf(

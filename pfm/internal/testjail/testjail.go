@@ -3,6 +3,9 @@
 //
 // database.go: DatabaseFiles, the allowance a test that needs SQLite's own
 // file calls; Run turns the SQLite door's memory mode on for every test.
+// executable.go: WriteExecutable, the one writer of a file a test runs;
+// WriteExecutableNeverRun, of one the code under test only resolves or reads;
+// the fake logged-out engines.
 package testjail
 
 import (

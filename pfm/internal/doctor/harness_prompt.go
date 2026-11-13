@@ -69,7 +69,7 @@ func configuredHarnessCaptureWithDeps(
 	if HarnessCaptureOverride != nil {
 		return HarnessCaptureOverride(ctx, home, machine, model, verboseDir)
 	}
-	return captureHarnessPromptWithDeps(ctx, home, machine, model, verboseDir, dependencies)
+	return captureHarnessPrompt(ctx, home, machine, model, verboseDir, dependencies)
 }
 
 // harnessBuildStamp is the CLI build stamp inside the billing-header system
@@ -381,15 +381,6 @@ func harnessPromptDetail(
 // CLI loads `.claude/settings.json` in its cwd as project settings, whose env
 // beats ProbeEnv's sink URL — from `~`, the user's own settings file.
 func captureHarnessPrompt(
-	ctx context.Context,
-	home string,
-	machine config.Config,
-	model, verboseDir string,
-) (HarnessCapture, error) {
-	return captureHarnessPromptWithDeps(ctx, home, machine, model, verboseDir, normalizeDependencies(Dependencies{}))
-}
-
-func captureHarnessPromptWithDeps(
 	ctx context.Context,
 	home string,
 	machine config.Config,

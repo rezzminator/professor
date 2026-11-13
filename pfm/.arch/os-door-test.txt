@@ -12,7 +12,7 @@ e2e/install_e2e_test.go 3
 internal/doctor/herdr_test.go 1
 internal/doctor/schedule_checks_test.go 2
 internal/globallink/globallink_test.go 2
-internal/headless/run/run_test.go 1
+internal/headless/run/run_jail_test.go 1
 internal/index/sync_sources_test.go 1
 internal/installer/herdr_indicators_test.go 2
 internal/installer/skill_sources_test.go 3

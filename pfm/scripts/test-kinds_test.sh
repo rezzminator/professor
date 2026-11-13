@@ -58,6 +58,10 @@ func TestTmuxServer(t *testing.T) {
 	_ = exec.Command("tmux", "-S", "x", "new-session", "-d")
 }
 
+func TestAsksForATmuxServer(t *testing.T) { testjail.TmuxServer(t) }
+
+func TestNamesNewSessionInAFakeArgv(t *testing.T) { _ = []string{"tmux", "-S", "x", "new-session"} }
+
 func TestSQLite(t *testing.T) { _ = sqlitedb.OpenStore(ctx, "x") }
 
 func TestMemoryStore(t *testing.T) { _, _ = store.OpenMemory() }
@@ -138,7 +142,7 @@ done
 
 out=$(bash "$SUT" "$M" 2>&1); rc=$?
 eq "the count line: unit = nothing + temp-dir, a door open memory, real = the jail files, move = the bottom three, every Test and Fuzz once" \
-  "0|KINDS unit 12 (nothing 9 · temp-dir 3) · real 3 · move 8 (home-sqlite 2 · process 4 · tmux 2) · total 23" "$rc|$out"
+  "0|KINDS unit 13 (nothing 10 · temp-dir 3) · real 3 · move 9 (home-sqlite 2 · process 4 · tmux 3) · total 25" "$rc|$out"
 
 out=$(bash "$SUT" --list "$M" 2>&1); rc=$?
 want=$(printf '%s\n' \
@@ -148,6 +152,8 @@ want=$(printf '%s\n' \
   $'temp-dir\ta\ta_test.go\tTestHome' \
   $'process\ta\ta_test.go\tTestThroughHelper' \
   $'tmux\ta\ta_test.go\tTestTmuxServer' \
+  $'tmux\ta\ta_test.go\tTestAsksForATmuxServer' \
+  $'nothing\ta\ta_test.go\tTestNamesNewSessionInAFakeArgv' \
   $'nothing\ta\ta_test.go\tTestSQLite' \
   $'nothing\ta\ta_test.go\tTestMemoryStore' \
   $'nothing\ta\ta_test.go\tTestFileStore' \
@@ -165,7 +171,7 @@ want=$(printf '%s\n' \
   $'nothing\tb\tkilljail_test.go\tTestJailIsNotItsOwnWord' \
   $'nothing\tb\tnew_jail_stubs_test.go\tTestJailStubsIsNoOS' \
   $'real\tb\tseat_jail_linux_test.go\tTestInAnOSSelectedJailFile')
-eq "--list: one row per test with its kind, a helper two calls deep or a closure var reaching its test, a method only through a selector, an executable written to run process and one never run temp-dir, a jail file's test real and its helper tmux to a test outside it" "0|$want" "$rc|$out"
+eq "--list: one row per test with its kind, a helper two calls deep or a closure var reaching its test, a method only through a selector, an executable written to run process and one never run temp-dir, a jail file's test real and its helper tmux to a test outside it, a TmuxServer allowance tmux and a bare \"new-session\" argument nothing" "0|$want" "$rc|$out"
 
 mkdir -p "$T/notests"; printf 'module p\n' > "$T/notests/go.mod"
 out=$(bash "$SUT" "$T/notests" 2>&1); rc=$?

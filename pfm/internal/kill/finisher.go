@@ -589,7 +589,7 @@ func (finisher *Finisher) reapChild(ctx context.Context, kind, value string) err
 		err = finisher.tmux.KillPane(ctx, socketPath, pane)
 	}
 	if err != nil {
-		message := exitStderr(err)
+		message := tmuxReason(err)
 		if message == "" {
 			message = err.Error()
 		}

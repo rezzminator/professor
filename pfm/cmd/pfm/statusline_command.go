@@ -9,10 +9,8 @@ import (
 	"path/filepath"
 
 	"github.com/rezzminator/professor/pfm/internal/cli"
-	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/hookentry"
-	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/reload"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
@@ -91,7 +89,7 @@ func runStatuslineWithRuntime(
 // statuslinePacedSpawn starts a chat's paced render worker detached; tests
 // replace it, since the test binary is no pfm to start.
 var statuslinePacedSpawn = func(key string) error {
-	return statusline.SpawnDetached(statusline.RefreshKindPaced, obs.Runner(deps.RealRunner{}), key)
+	return statusline.SpawnDetached(statusline.RefreshKindPaced, commandRunner, key)
 }
 
 // runPacedStatuslineWorker is `pfm statusline --paced KEY`, started detached by
@@ -146,7 +144,7 @@ func statuslineRuntime(machine commandRuntime, env paths.Env, stderr io.Writer) 
 		}
 	}
 	runtime.Spawn = func(kind statusline.RefreshKind) error {
-		return statusline.SpawnDetached(kind, obs.Runner(deps.RealRunner{}))
+		return statusline.SpawnDetached(kind, commandRunner)
 	}
 	return runtime, nil
 }

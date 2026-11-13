@@ -1,3 +1,5 @@
+//go:build jail
+
 package schedule
 
 import (
@@ -22,6 +24,7 @@ import (
 // Deliver → OpenDetachedID → the action executor — on a jailed tmux, with a
 // fake engine and only the composer read and the typing faked.
 func TestScheduleWakeRevivesATmuxChatInTmuxUnderConfiguredHerdr(t *testing.T) {
+	testjail.TmuxServer(t)
 	root := testjail.Fleet(t)
 	// The wake runs where no chat is: a timer, a daemon.
 	for _, name := range []string{"TMUX", "TMUX_PANE", "HERDR_ENV", "HERDR_SOCKET_PATH", "HERDR_PANE_ID"} {

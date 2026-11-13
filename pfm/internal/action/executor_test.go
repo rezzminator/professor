@@ -308,7 +308,7 @@ func TestSoloReapsPaneAloneServerAndStrayWithKeepTTY(t *testing.T) {
 		"cc-400-1-1":    "/tx/" + id + ".jsonl",
 		"cc-500-1-1":    "/tx/" + id + ".jsonl",
 	} {
-		writeActionFile(t, filepath.Join(sidDir, name), content, 0o600)
+		writeActionFile(t, filepath.Join(sidDir, name), content)
 	}
 	tmux := &fakeActionTmux{
 		alive: map[string]bool{

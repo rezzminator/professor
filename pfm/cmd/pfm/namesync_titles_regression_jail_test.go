@@ -1,3 +1,5 @@
+//go:build jail
+
 package main
 
 import (
@@ -22,6 +24,7 @@ import (
 // whose window the claude binary kept renaming "2.1.257") stops renaming on
 // the next pass, and the transition is named.
 func TestNameSyncFreezesAWindowNameTheServerStillAutoRenames(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -116,6 +119,7 @@ func nameSyncTmux(t *testing.T, environment []string, socket string, arguments .
 // a stored hook back in: the second pass over a converged server reports
 // nothing converged and rewrites nothing.
 func TestNameSyncConvergesTheHerdrHooksInTheFormTmuxPrintsBack(t *testing.T) {
+	testjail.TmuxServer(t)
 	const socket = "cc-1800000041-1-1"
 	root, environment := startNameSyncFixture(t, socket)
 	client := gather.TmuxProbe{Binary: "tmux", TmuxTmpDir: root}
@@ -156,6 +160,7 @@ func TestNameSyncConvergesTheHerdrHooksInTheFormTmuxPrintsBack(t *testing.T) {
 // the window-renamed hook once, and the hook command reaches the pfm binary
 // with the server's socket path and the session name.
 func TestWindowRenamedHookRunsTheReporterOnceForACommandClientRename(t *testing.T) {
+	testjail.TmuxServer(t)
 	const socket = "cc-1800000042-1-1"
 	root, environment := startNameSyncFixture(t, socket)
 	logPath := filepath.Join(root, "reporter.log")

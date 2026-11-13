@@ -1,3 +1,5 @@
+//go:build jail
+
 package main
 
 import (
@@ -14,6 +16,7 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/herdr"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // TestChatLSPrintsNameBeforeSessionAtAndOverTruncationBoundary is the
@@ -24,6 +27,7 @@ import (
 // the tmux session id still present immediately after it — never lost,
 // never reordered, and never pushed out of alignment by an oversized name.
 func TestChatLSPrintsNameBeforeSessionAtAndOverTruncationBoundary(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -150,6 +154,7 @@ func serveHerdrOneRequestPerConnection(t *testing.T, path string, table map[stri
 // moved (found by its terminal id over the real socket); and, with no Herdr on
 // the host, a dash for every row. A failed lookup's text is presence_test's.
 func TestChatLSShowsEachChatsHerdrPresence(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}

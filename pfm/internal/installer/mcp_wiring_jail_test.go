@@ -1,3 +1,5 @@
+//go:build jail
+
 package installer
 
 // A real child of the test binary shows install never writes through an inherited CLAUDE_CONFIG_DIR.

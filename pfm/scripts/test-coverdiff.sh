@@ -55,7 +55,7 @@ run_one() { # run_one <jobs.tsv row>: one go test run of a side's tests in one d
   local side dir label count regex profile rc have=no
   IFS=$'\t' read -r side dir label count regex <<< "$1"
   profile="$out/raw/$side.$label.out"
-  go -C "$pfm" test -count=1 -covermode=set -coverpkg="$module/..." -run "$regex" -coverprofile="$profile" "./$dir" \
+  go -C "$pfm" test -tags jail -count=1 -covermode=set -coverpkg="$module/..." -run "$regex" -coverprofile="$profile" "./$dir" \
     > "$out/raw/$side.$label.log" 2>&1
   rc=$?
   [ -s "$profile" ] && have=yes

@@ -776,10 +776,13 @@ checks_templates() {
 
 checks_pfm_verify() {
   local d="$1"
-  run "pfm: go vet" -- go -C "$d" vet ./...
+  # Vet both test tiers: the unit tier untagged (a unit test calling a jail-only helper fails here),
+  # the jail tier under -tags jail (the *_jail_test.go files and their helpers).
+  run "pfm: go vet" -- bash -c 'go -C "$1" vet ./... && go -C "$1" vet -tags jail ./...' _ "$d"
   # The release binaries ship for macOS: vet the darwin build tags too, so a
   # darwin-only file is judged here and not first by CI.
-  run "pfm: go vet (darwin/arm64)" -- env GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go -C "$d" vet ./...
+  run "pfm: go vet (darwin/arm64)" -- env GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 \
+    bash -c 'go -C "$1" vet ./... && go -C "$1" vet -tags jail ./...' _ "$d"
   # Formatting and lint through the pinned golangci-lint (infra/fence/tools.env):
   # the Makefile names TOOLCHAIN-MISSING when the tool is absent — `make
   # tools` on the host; the fence image bakes it in. lint-new judges only
@@ -864,7 +867,9 @@ checks_pfm_unit() { # pfm dir, run dir, optional already-read TESTFLAGS
   [[ -z "$history" ]] || shard_args=(--history "$history")
   # Positional arguments keep flags and output paths out of shell code.
   # The JSON is retained even on failure; timing is a separate verdict.
-  run "pfm: go test" -- bash "$d/scripts/test-shard.sh" run --out "$run_dir/unit.json" "${shard_args[@]}" -- "${testflags[@]}"
+  # -tags jail: the gate runs the unit tier and the jail tier (*_jail_test.go) in one tagged binary
+  # per package, which internal/testjail admits only in the fence or on a hosted runner.
+  run "pfm: go test" -- bash "$d/scripts/test-shard.sh" run --out "$run_dir/unit.json" "${shard_args[@]}" -- -tags jail "${testflags[@]}"
   go_test_report "$run_dir/unit.json"
   checks_pfm_profile_pointers "$run_dir/unit.json" "$run_dir/profile" "$before"
   skip_gate "pfm: skipped tests are all listed (unit)" "$run_dir/unit.json"
@@ -1230,8 +1235,10 @@ gate_run() { # pfm, templates, or all
     # Heavy static steps longest first, so the short ones queue behind them for a heavy slot.
     steps_add_heavy pfm.lint-new run 'pfm: lint-new (golangci-lint, changed lines)' -- make -C "$d" --no-print-directory lint-new || return 1
     steps_add_heavy pfm.fmt-check run 'pfm: fmt-check (gofumpt + gci + golines)' -- make -C "$d" --no-print-directory fmt-check || return 1
-    steps_add_heavy pfm.vet run 'pfm: go vet' -- go -C "$d" vet ./... || return 1
-    steps_add_heavy pfm.vet-darwin run 'pfm: go vet (darwin/arm64)' -- env GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go -C "$d" vet ./... || return 1
+    # Both test tiers, as checks_pfm_verify: untagged, then -tags jail.
+    steps_add_heavy pfm.vet run 'pfm: go vet' -- bash -c 'go -C "$1" vet ./... && go -C "$1" vet -tags jail ./...' _ "$d" || return 1
+    steps_add_heavy pfm.vet-darwin run 'pfm: go vet (darwin/arm64)' -- env GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 \
+      bash -c 'go -C "$1" vet ./... && go -C "$1" vet -tags jail ./...' _ "$d" || return 1
     steps_add pfm.arch run 'pfm: architecture ratchet' -- bash "$d/scripts/arch-check.sh" || return 1
     steps_add pfm.testplan run 'pfm: flow-matrix citations' -- bash "$d/scripts/testplan-check.sh" || return 1
   fi

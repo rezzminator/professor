@@ -1,3 +1,5 @@
+//go:build jail
+
 package chat
 
 import (
@@ -20,6 +22,7 @@ import (
 )
 
 func TestReviewSplitRenameRetainsAmbiguityGuard(t *testing.T) {
+	testjail.TmuxServer(t)
 	root := testjail.Fleet(t)
 	values, err := paths.Resolve()
 	if err != nil {
@@ -220,6 +223,7 @@ while True:
 }
 
 func TestAmbientClaudeSplitSelfRetainsItsExactPane(t *testing.T) {
+	testjail.TmuxServer(t)
 	root := testjail.Fleet(t)
 	const (
 		first  = "a1111111-1111-4111-8111-111111111111"
@@ -269,6 +273,7 @@ func TestAmbientClaudeSplitSelfRetainsItsExactPane(t *testing.T) {
 }
 
 func TestAmbientSelfWithoutExportedIDEnrichesFromItsExactSocket(t *testing.T) {
+	testjail.TmuxServer(t)
 	root := testjail.Fleet(t)
 	t.Setenv(resolve.ClaudeSessionEnv, "")
 	t.Setenv(resolve.CodexThreadEnv, "")

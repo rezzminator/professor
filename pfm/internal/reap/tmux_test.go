@@ -7,19 +7,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
-
-// fakeTmuxBinary plays tmux: exits 0 and prints nothing.
-func fakeTmuxBinary(t *testing.T) string {
-	t.Helper()
-	binary := filepath.Join(t.TempDir(), "tmux")
-	if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	return binary
-}
 
 // requireTmuxRecord asserts the one comp=tmux record a façade call writes:
 // subcmd, target when given, exit 0 and dur_ms.
@@ -54,7 +46,8 @@ func requireTmuxRecord(t *testing.T, recorder *obs.Recorder, index int, subcmd, 
 // the observed tmux command — one record per call, the session as target.
 func TestTmuxReaperRecordsEveryInvocation(t *testing.T) {
 	ctx, recorder := obs.Test(t)
-	tmux := TmuxReaper{Binary: fakeTmuxBinary(t), TmuxDir: t.TempDir()}
+	ctx = pfmtmux.WithClientRunner(ctx, testjail.TmuxRunner(deps.RunResult{}))
+	tmux := TmuxReaper{Binary: "tmux", TmuxDir: t.TempDir()}
 	if err := tmux.KillSession(ctx, "cc-1-2-3", "main"); err != nil {
 		t.Fatal(err)
 	}
@@ -71,16 +64,9 @@ func TestTmuxReaperRecordsEveryInvocation(t *testing.T) {
 // state of a bunker socket that was never opened. That reads as absence, not
 // a sweep failure.
 func TestTmuxReaperSessionsNoServerIsAbsence(t *testing.T) {
-	binary := filepath.Join(t.TempDir(), "tmux")
-	if err := testjail.WriteExecutable(
-		binary,
-		[]byte("#!/bin/sh\necho 'no server running on vsct' >&2\nexit 1\n"),
-		0o700,
-	); err != nil {
-		t.Fatal(err)
-	}
-	tmux := TmuxReaper{Binary: binary, TmuxDir: t.TempDir()}
-	sessions, err := tmux.Sessions(context.Background(), "vsct")
+	fake := testjail.TmuxRunner(deps.RunResult{Stderr: []byte("no server running on vsct\n"), ExitCode: 1})
+	tmux := TmuxReaper{TmuxDir: t.TempDir()}
+	sessions, err := tmux.Sessions(pfmtmux.WithClientRunner(context.Background(), fake), "vsct")
 	if err != nil {
 		t.Fatalf("Sessions() = %v, want nil error for an unopened bunker", err)
 	}
@@ -107,16 +93,12 @@ func TestTmuxReaperSessionsCouldNotRunIsAnError(t *testing.T) {
 	}
 }
 
-// scriptedTmux plays tmux answering every call with stdout and exit status.
-func scriptedTmux(t *testing.T, stdout string, exit int) string {
-	t.Helper()
-	binary := filepath.Join(t.TempDir(), "tmux")
-	script := "#!/bin/sh\nprintf '%s' '" + stdout + "'\necho 'no server running' >&2\n" +
-		"exit " + string(rune('0'+exit)) + "\n"
-	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	return binary
+// scriptedTmux is a context whose tmux answers every call with stdout and
+// exit status, "no server running" on stderr.
+func scriptedTmux(stdout string, exit int) context.Context {
+	return pfmtmux.WithClientRunner(context.Background(), testjail.TmuxRunner(deps.RunResult{
+		Stdout: []byte(stdout), Stderr: []byte("no server running\n"), ExitCode: exit,
+	}))
 }
 
 // One session line tmux answers in an unreadable shape costs only that line: it is
@@ -127,8 +109,8 @@ func TestTmuxReaperSessionsKeepsAnUnreadableLineAsUnknown(t *testing.T) {
 	output := "good" + sep + "1" + sep + "9000\n" +
 		"short" + sep + "0\n" +
 		"stamp" + sep + "0" + sep + "soon\n"
-	tmux := TmuxReaper{Binary: scriptedTmux(t, output, 0), TmuxDir: t.TempDir(), Now: func() time.Time { return now }}
-	got, err := tmux.Sessions(context.Background(), "vsct")
+	tmux := TmuxReaper{Binary: "tmux", TmuxDir: t.TempDir(), Now: func() time.Time { return now }}
+	got, err := tmux.Sessions(scriptedTmux(output, 0), "vsct")
 	if err != nil {
 		t.Fatalf("Sessions() = %v, want the readable lines listed", err)
 	}
@@ -153,8 +135,8 @@ func TestTmuxReaperSessionsKeepsAnUnreadableLineAsUnknown(t *testing.T) {
 
 // A list-clients that fails is the probe's own error, never "no client answered".
 func TestTmuxReaperClientIdleReturnsAFailedProbe(t *testing.T) {
-	tmux := TmuxReaper{Binary: scriptedTmux(t, "", 1), TmuxDir: t.TempDir()}
-	_, found, err := tmux.ClientIdle(context.Background(), "cc-1-2-3")
+	tmux := TmuxReaper{Binary: "tmux", TmuxDir: t.TempDir()}
+	_, found, err := tmux.ClientIdle(scriptedTmux("", 1), "cc-1-2-3")
 	if found || err == nil || err.Error() != "tmux cc-1-2-3 list-clients: exit status 1" {
 		t.Fatalf("ClientIdle() = found %t, err %v; want the exit failure returned", found, err)
 	}

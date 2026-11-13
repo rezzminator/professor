@@ -1,3 +1,5 @@
+//go:build jail
+
 package main
 
 import (
@@ -41,11 +43,12 @@ func clearBranchCache1HEnv(t *testing.T) {
 }
 
 func TestChatBranchWorkbench(t *testing.T) {
+	testjail.TmuxServer(t)
 	for _, name := range []string{"Claude", "Claude no parent model", "Codex", "invalid", "mirror failure", "outside"} {
 		t.Run(name, func(t *testing.T) {
 			jail := newRunJail(t)
 			t.Cleanup(func() { jail.killSockets(t) })
-			scribe, duo := newWorkbenchRunFixture(t, jail)
+			scribe, duo := newWorkbenchRunFixture(t, jail.root)
 			engine, dir, socket, argvFile := "claude", scribe, "cc-workbench-branch", "cc-argv"
 			parentID := "a1000000-1111-4111-8111-111111111111"
 			var wantWarning, mirrorRecord string
@@ -177,6 +180,28 @@ func registerParentTranscript(t *testing.T, accountDir, id string) {
 	}
 }
 
+// newBranchInheritJail adds to the fixture the fake `claude` that records the
+// argv and environment its fork was born with. Jail: the tests run it as a
+// real child under a real tmux.
+func newBranchInheritJail(t *testing.T) *branchInheritJail {
+	t.Helper()
+	jail := newBranchInheritFixture(t)
+	script := "#!/bin/sh\n" +
+		"printf '%s\\n' \"$@\" > \"$PFM_TEST_BRANCH_ARGS\"\n" +
+		"env > \"$PFM_TEST_BRANCH_ENV\"\n" +
+		"if [ -n \"$PFM_TEST_BRANCH_FORK_ID\" ]; then\n" +
+		"  fork_path=\"$PFM_HOME/.claude/projects/fork/$PFM_TEST_BRANCH_FORK_ID.jsonl\"\n" +
+		"  mkdir -p \"$(dirname \"$fork_path\")\"\n" +
+		"  printf '{}\\n' > \"$fork_path\"\n" +
+		"  printf '%s\\n' \"$fork_path\" > \"$PFM_SID_DIR/$PFM_TEST_FRESH_SOCKET\"\n" +
+		"fi\n" +
+		"exec sleep 120\n"
+	if err := testjail.WriteExecutable(jail.fakeClaude, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return jail
+}
+
 func recordBranchParent(t *testing.T, jail *branchInheritJail, id string, account int, cache1H bool) {
 	t.Helper()
 	if err := fleetdb.RecordLaunch(context.Background(), paths.Values{
@@ -266,6 +291,7 @@ func forkedEnvironment(t *testing.T, jail *branchInheritJail) map[string]string 
 // fed the primary straight into resolveRunEngineIDAccount and never
 // consulted the parent at all, so the fork landed on M.
 func TestChatBranchInheritsParentAccountWhenNoFlagGiven(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -301,6 +327,7 @@ func TestChatBranchInheritsParentAccountWhenNoFlagGiven(t *testing.T) {
 // over-correct into always forking onto the parent no matter what the
 // caller asked for.
 func TestChatBranchExplicitAccountFlagOverridesParent(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -334,6 +361,7 @@ func TestChatBranchExplicitAccountFlagOverridesParent(t *testing.T) {
 // it carries inherited cache environment. The branch inherits the launch
 // record's 1h choice, regardless of that shell environment.
 func TestChatBranchInheritsOneHourCacheFromLiveParentThroughCachingOffShell(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -378,6 +406,7 @@ func TestChatBranchInheritsOneHourCacheFromLiveParentThroughCachingOffShell(t *t
 // even when the invoking shell claims
 // 1h is armed — proving the fix does not over-correct into always 1h.
 func TestChatBranchInheritsFiveMinuteCacheFromLaunchRecord(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -424,6 +453,7 @@ func TestChatBranchInheritsFiveMinuteCacheFromLaunchRecord(t *testing.T) {
 // machine with more than one account of its engine, is refused by name: the
 // fork is never guessed onto the primary.
 func TestChatBranchUnresolvableParentAccountRefuses(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -482,6 +512,7 @@ func TestChatBranchUnresolvableParentAccountRefuses(t *testing.T) {
 // fork lands on account 7 with account 7's configured cache policy, silently,
 // never on primary account 1.
 func TestChatBranchLiveParentAccountWithoutALaunchRecord(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -523,6 +554,7 @@ func TestChatBranchLiveParentAccountWithoutALaunchRecord(t *testing.T) {
 }
 
 func TestChatBranchRecordsResolvedForkFromParentLaunch(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -583,6 +615,7 @@ func TestChatBranchRecordsResolvedForkFromParentLaunch(t *testing.T) {
 }
 
 func TestChatBranchUnknownForkIDLeavesNoLaunchRecord(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -631,6 +664,7 @@ func TestChatBranchUnknownForkIDLeavesNoLaunchRecord(t *testing.T) {
 }
 
 func TestChatBranchUnreadableParentLaunchForksOnTheGivenAccount(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -690,6 +724,7 @@ func TestChatBranchCodexRequiresLogin(t *testing.T) {
 // A fork that cannot carry the fleet prompt its policy asks for says so on the
 // starter's stderr, with the cause, and still forks.
 func TestChatBranchWarnsWhenTheFleetPromptCannotReachTheFork(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}

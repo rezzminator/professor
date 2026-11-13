@@ -1,3 +1,5 @@
+//go:build jail
+
 package main
 
 import (
@@ -31,11 +33,12 @@ import (
 
 // These tests share process environment and spawn timings, so they stay serial.
 func TestChatNewWorkbench(t *testing.T) {
+	testjail.TmuxServer(t)
 	for _, name := range []string{"auto-name", "next number", "explicit effort", "explicit harness", "omitted enabled", "omitted disabled", "omitted skips opencode", "no account", "disabled explicit", "invalid manifest", "bad effort", "outside", "roster unreadable", "Codex", "mirror failure", "role"} {
 		t.Run(name, func(t *testing.T) {
 			jail := newRunJail(t)
 			defer jail.killSockets(t)
-			dir, duo := newWorkbenchRunFixture(t, jail)
+			dir, duo := newWorkbenchRunFixture(t, jail.root)
 			engine, socket, wantName := "cc", "cc-workbench", "_SCRIBE:1"
 			extra := []string{}
 			wantEffort, wantChannel := "xhigh", filepath.Join(dir, ".professor", "scribe.md")
@@ -282,7 +285,7 @@ func TestChatNewWorkbench(t *testing.T) {
 
 func TestChatNewExplicitNamePreservesAnotherProducersReservation(t *testing.T) {
 	jail := newRunJail(t)
-	dir, _ := newWorkbenchRunFixture(t, jail)
+	dir, _ := newWorkbenchRunFixture(t, jail.root)
 	name, found, err := pfmchat.WorkbenchName(context.Background(), dir, io.Discard, nil)
 	if err != nil || !found {
 		t.Fatal(name, found, err)
@@ -362,6 +365,7 @@ func TestFirstReplyVerdict(t *testing.T) {
 }
 
 func TestChatNewBackendFlag(t *testing.T) {
+	testjail.TmuxServer(t)
 	for _, tc := range []struct {
 		name, backend, want string
 		code                int
@@ -604,7 +608,7 @@ func TestChatNewNativeRawEngineBirth(t *testing.T) {
 			}
 			directory, selected := jail.root, engine
 			if strings.HasPrefix(engine, "opencode-workbench") {
-				directory, _ = newWorkbenchRunFixture(t, jail)
+				directory, _ = newWorkbenchRunFixture(t, jail.root)
 				personaEffort := "medium"
 				if engine == "opencode-workbench-bad-effort" {
 					personaEffort = "bogus"
@@ -746,6 +750,7 @@ func TestChatNewCodexRequiresLogin(t *testing.T) {
 }
 
 func TestChatNewCodexAdmitsAnAPIKeyHome(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}

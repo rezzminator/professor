@@ -17,10 +17,8 @@ import (
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
-	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
-	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/reload"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
@@ -253,7 +251,7 @@ func registeredDaemonSession(
 	if binaryName == "" {
 		binaryName = pfmengine.MustLookup(pfmengine.Claude).Binary
 	}
-	binary, err := obs.Runner(deps.RealRunner{}).LookPath(binaryName)
+	binary, err := commandRunner.LookPath(binaryName)
 	if err != nil {
 		if filepath.IsAbs(binaryName) {
 			binary = binaryName
@@ -270,6 +268,7 @@ func registeredDaemonSession(
 		// roster — the door never takes a bare directory.
 		command, buildErr := action.ClaudeSpawn{
 			Purpose: action.PurposeQuery,
+			Runner:  commandRunner,
 			Account: 1,
 			Args:    []string{agentsCommand, "--json"},
 			Machine: pfmconfig.Config{

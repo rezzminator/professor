@@ -31,15 +31,6 @@ func writeRetired(t *testing.T, path string) {
 	}
 }
 
-func rowFor(rows []Row, path string) (Row, bool) {
-	for _, row := range rows {
-		if row.Path == path {
-			return row, true
-		}
-	}
-	return Row{}, false
-}
-
 // TestRetiredPathsKeepLivePaths pins what is never stale: the account dir the
 // config names, a backup without pfm's marker, doctor's own move-aside dirs,
 // an unstamped file in an archive dir.

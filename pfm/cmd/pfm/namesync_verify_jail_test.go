@@ -1,3 +1,5 @@
+//go:build jail
+
 package main
 
 import (
@@ -19,6 +21,7 @@ import (
 )
 
 func TestNameSyncDefaultsToPreview(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -113,6 +116,7 @@ func TestNameSyncDefaultsToPreview(t *testing.T) {
 // one window in each state on a probe server: one whose name matches what was
 // asked for, one a second writer took back, and one whose server is gone.
 func TestNameSyncCountsOnlyVerifiedWindowsAsConverged(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -200,6 +204,7 @@ const namesyncThemeState = `{"enabled":true,"appearance":"dark","generation":1,"
 // theme's own door: nothing is said or touched while `pfm theme` has never
 // been set, and with the sync on each live server is themed and counted.
 func TestNameSyncThemesLiveServersOnlyWhileTheSyncIsOn(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}

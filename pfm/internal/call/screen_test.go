@@ -4,12 +4,13 @@ import (
 	"context"
 	"errors"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
 // TestCaptureScreenReadsOnlyTheScreen: kill's, reload's and status's checks
@@ -17,40 +18,31 @@ import (
 // composer, exit dialog), so a warning tmux writes to stderr must never join
 // that text; a failed capture still names tmux's own complaint.
 func TestCaptureScreenReadsOnlyTheScreen(t *testing.T) {
-	directory := t.TempDir()
-	warns := filepath.Join(directory, "tmux-warns")
-	script := "#!/bin/sh\nprintf '\\342\\235\\257 \\n'\necho 'tmux: terminal warning' >&2\nexit 0\n"
-	if err := testjail.WriteExecutable(warns, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	fails := filepath.Join(directory, "tmux-fails")
-	failing := []byte("#!/bin/sh\necho \"can't find pane: %4\" >&2\nexit 1\n")
-	if err := testjail.WriteExecutable(fails, failing, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	ctx := context.Background()
+	warns := pfmtmux.WithClientRunner(context.Background(), testjail.TmuxRunner(deps.RunResult{
+		Stdout: []byte("\u276f \n"), Stderr: []byte("tmux: terminal warning\n"),
+	}))
+	fails := pfmtmux.WithClientRunner(context.Background(), testjail.TmuxRunner(deps.RunResult{
+		Stderr: []byte("can't find pane: %4\n"), ExitCode: 1,
+	}))
 	target := Target{SocketPath: "/sockets/cc-1", Pane: "%4"}
-	door := func(binary string) *Engine {
-		engine, err := New(Dependencies{Tmux: TmuxCaller{Binary: binary}})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return engine
+	engine, err := New(Dependencies{Tmux: TmuxCaller{}})
+	if err != nil {
+		t.Fatal(err)
 	}
-	for name, capture := range map[string]func(*Engine) (string, error){
-		"plain":  func(engine *Engine) (string, error) { return engine.CaptureScreen(ctx, target) },
-		"styled": func(engine *Engine) (string, error) { return engine.CaptureStyled(ctx, target) },
+	for name, capture := range map[string]func(context.Context) (string, error){
+		"plain":  func(ctx context.Context) (string, error) { return engine.CaptureScreen(ctx, target) },
+		"styled": func(ctx context.Context) (string, error) { return engine.CaptureStyled(ctx, target) },
 	} {
-		screen, err := capture(door(warns))
+		screen, err := capture(warns)
 		if err != nil || screen != "\u276f \n" {
 			t.Fatalf("%s capture = %q, %v; want only the screen %q", name, screen, err, "\u276f \n")
 		}
-		_, err = capture(door(fails))
+		_, err = capture(fails)
 		if err == nil || !strings.Contains(err.Error(), "can't find pane: %4") {
 			t.Fatalf("%s capture of a failing tmux = %v, want tmux's own complaint", name, err)
 		}
 	}
-	if _, err := door(warns).CaptureScreen(ctx, Target{Backend: "screen-x", SocketPath: "/s", Pane: "%1"}); err == nil {
+	if _, err := engine.CaptureScreen(warns, Target{Backend: "screen-x", SocketPath: "/s", Pane: "%1"}); err == nil {
 		t.Fatal("CaptureScreen() of an unknown backend succeeded")
 	}
 }

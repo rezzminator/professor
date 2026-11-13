@@ -1,3 +1,5 @@
+//go:build jail
+
 package resolve
 
 import (
@@ -213,6 +215,7 @@ func (jail *resolveJail) split(
 }
 
 func TestJailedTmuxResolveContract(t *testing.T) {
+	testjail.TmuxServer(t)
 	jail := newResolveJail(t)
 	jail.start(t, "cc-100-1-1", "alpha-session", "alpha", "Alpha Label")
 	jail.start(
@@ -271,6 +274,7 @@ func TestJailedTmuxResolveContract(t *testing.T) {
 }
 
 func TestJailedTmuxNewestServerTieBreak(t *testing.T) {
+	testjail.TmuxServer(t)
 	jail := newResolveJail(t)
 	const uuid = "77777777-7777-4777-8777-777777777777"
 	jail.start(t, "cc-100-1-1", "old", "old", "One Chat")
@@ -326,6 +330,7 @@ func resolveDiagnostics(t *testing.T, resolver *Resolver) string {
 }
 
 func TestStressResolveSixtySocketsTwoHundredPanes(t *testing.T) {
+	testjail.TmuxServer(t)
 	strict := os.Getenv("PFM_STRESS_STRICT") == "1"
 	jail := newResolveJail(t)
 	const socketCount = 60
@@ -466,6 +471,7 @@ func assertTarget(
 // The second half runs the tab against an environment stripped of both, so the
 // trap is proven live and a rewrite back to a tab cannot pass quietly.
 func TestPaneOwnersSurvivesAStrippedEnvironment(t *testing.T) {
+	testjail.TmuxServer(t)
 	jail := newResolveJail(t)
 	jail.start(t, "cc-500-1-1", "locale-session", "locale", "Locale Label")
 
@@ -529,6 +535,7 @@ func TestPaneOwnersSurvivesAStrippedEnvironment(t *testing.T) {
 // to — label resolution answers with a %pane id, which is unambiguous
 // whatever the label contained.
 func TestJailedColonLabelResolvesToAPaneNeverATmuxTarget(t *testing.T) {
+	testjail.TmuxServer(t)
 	jail := newResolveJail(t)
 	jail.start(t, "cc-500-1-1", "colon-session", "colon", "P:DO")
 	// A second window, which tmux makes CURRENT. The labelled chat is now

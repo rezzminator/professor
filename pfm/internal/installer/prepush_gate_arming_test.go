@@ -2,14 +2,16 @@ package installer
 
 import (
 	"bytes"
+	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testjail/fakegit"
 )
 
 // buildSourceCloneWithPrePushHook builds a bare git working tree with a
@@ -20,15 +22,13 @@ import (
 func buildSourceCloneWithPrePushHook(t *testing.T) string {
 	t.Helper()
 	clone := t.TempDir()
-	if out, err := exec.Command("git", "-C", clone, "init", "-q").CombinedOutput(); err != nil {
-		t.Fatalf("git init clone: %v: %s", err, out)
-	}
+	prepushGit.Must(t, clone, "init", "-q")
 	hooksDir := filepath.Join(clone, ".githooks")
 	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	hook := filepath.Join(hooksDir, "pre-push")
-	if err := testjail.WriteExecutable(hook, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+	if err := testjail.WriteExecutableNeverRun(hook, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	return clone
@@ -38,15 +38,22 @@ func buildSourceCloneWithPrePushHook(t *testing.T) string {
 // config --get exits 1 with empty output) as "", never as an error.
 func gitConfigValue(t *testing.T, repo, key string) string {
 	t.Helper()
-	out, err := exec.Command("git", "-C", repo, "config", "--get", key).CombinedOutput()
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 && strings.TrimSpace(string(out)) == "" {
-			return ""
-		}
-		t.Fatalf("git -C %s config --get %s: %v: %s", repo, key, err, out)
+	result, err := prepushGit.Run(
+		context.Background(), []string{"git", "-C", repo, "config", "--get", key}, deps.RunOptions{},
+	)
+	out := strings.TrimSpace(string(result.Stdout))
+	if err == nil && result.ExitCode == 1 && out == "" {
+		return ""
 	}
-	return strings.TrimSpace(string(out))
+	if err != nil || result.ExitCode != 0 {
+		t.Fatalf("git -C %s config --get %s: exit %d: %v: %s", repo, key, result.ExitCode, err, result.Stderr)
+	}
+	return out
 }
+
+// prepushGit is the git the pre-push gate tests' clones live in: the fixture
+// builds through it and the engine's ProcessRunner reads and arms through it.
+var prepushGit = &fakegit.Runner{}
 
 // TestInstallArmsThePrePushGateInTheSourceClone is a REGRESSION test for the
 // v0.77.1 release finding: `pfm install` records/keeps the source-repo
@@ -61,7 +68,10 @@ func TestInstallArmsThePrePushGateInTheSourceClone(t *testing.T) {
 	home := t.TempDir()
 	clone := buildSourceCloneWithPrePushHook(t)
 	var stdout bytes.Buffer
-	installer := &engine{options: Options{Home: home, SourceRepo: clone, Stdout: &stdout}, apply: true}
+	installer := &engine{
+		options: Options{Home: home, SourceRepo: clone, Stdout: &stdout, ProcessRunner: prepushGit},
+		apply:   true,
+	}
 	if err := installer.writeUpdateMetadata(); err != nil {
 		t.Fatalf("writeUpdateMetadata() error = %v", err)
 	}
@@ -84,7 +94,7 @@ func TestInstallPreviewNamesTheUnarmedGateAndWritesNothing(t *testing.T) {
 	home := t.TempDir()
 	clone := buildSourceCloneWithPrePushHook(t)
 	var stdout bytes.Buffer
-	installer := &engine{options: Options{Home: home, SourceRepo: clone, Stdout: &stdout}}
+	installer := &engine{options: Options{Home: home, SourceRepo: clone, Stdout: &stdout, ProcessRunner: prepushGit}}
 	if err := installer.writeUpdateMetadata(); err != nil {
 		t.Fatalf("writeUpdateMetadata() error = %v", err)
 	}
@@ -106,10 +116,7 @@ func TestInstallReportsAnArmedGateAsOK(t *testing.T) {
 	home := t.TempDir()
 	clone := buildSourceCloneWithPrePushHook(t)
 	// Pre-arm the clone's git config directly, bypassing the step under test.
-	if out, err := exec.Command("git", "-C", clone, "config", "core.hooksPath", ".githooks").
-		CombinedOutput(); err != nil {
-		t.Fatalf("pre-arm clone: %v: %s", err, out)
-	}
+	prepushGit.Must(t, clone, "config", "core.hooksPath", ".githooks")
 	// Pre-settle the other two writeUpdateMetadata steps (marker + binary
 	// ownership) so only the arm step's own change/ok accounting is in play.
 	if err := paths.WriteSourceRepoMarker(home, clone); err != nil {
@@ -119,7 +126,10 @@ func TestInstallReportsAnArmedGateAsOK(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stdout bytes.Buffer
-	installer := &engine{options: Options{Home: home, SourceRepo: clone, Stdout: &stdout}, apply: true}
+	installer := &engine{
+		options: Options{Home: home, SourceRepo: clone, Stdout: &stdout, ProcessRunner: prepushGit},
+		apply:   true,
+	}
 	if err := installer.writeUpdateMetadata(); err != nil {
 		t.Fatalf("writeUpdateMetadata() error = %v", err)
 	}
@@ -142,11 +152,12 @@ func TestInstallSkipsAGateThatIsNotShipped(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	clone := t.TempDir()
-	if out, err := exec.Command("git", "-C", clone, "init", "-q").CombinedOutput(); err != nil {
-		t.Fatalf("git init clone: %v: %s", err, out)
-	}
+	prepushGit.Must(t, clone, "init", "-q")
 	var stdout bytes.Buffer
-	installer := &engine{options: Options{Home: home, SourceRepo: clone, Stdout: &stdout}, apply: true}
+	installer := &engine{
+		options: Options{Home: home, SourceRepo: clone, Stdout: &stdout, ProcessRunner: prepushGit},
+		apply:   true,
+	}
 	if err := installer.writeUpdateMetadata(); err != nil {
 		t.Fatalf("writeUpdateMetadata() error = %v", err)
 	}
@@ -179,7 +190,10 @@ func TestInstallRefusesABrokenHook(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stdout bytes.Buffer
-	installer := &engine{options: Options{Home: home, SourceRepo: clone, Stdout: &stdout}, apply: true}
+	installer := &engine{
+		options: Options{Home: home, SourceRepo: clone, Stdout: &stdout, ProcessRunner: prepushGit},
+		apply:   true,
+	}
 	err := installer.writeUpdateMetadata()
 	if err == nil {
 		t.Fatalf("writeUpdateMetadata() error = nil, want an error naming the broken hook %s", hook)
@@ -201,9 +215,7 @@ func TestInstallReportsAnAbsoluteHooksPathAsArmed(t *testing.T) {
 	home := t.TempDir()
 	clone := buildSourceCloneWithPrePushHook(t)
 	absolute := filepath.Join(clone, ".githooks")
-	if out, err := exec.Command("git", "-C", clone, "config", "core.hooksPath", absolute).CombinedOutput(); err != nil {
-		t.Fatalf("pre-arm clone with absolute hooksPath: %v: %s", err, out)
-	}
+	prepushGit.Must(t, clone, "config", "core.hooksPath", absolute)
 	if err := paths.WriteSourceRepoMarker(home, clone); err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +223,10 @@ func TestInstallReportsAnAbsoluteHooksPathAsArmed(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stdout bytes.Buffer
-	installer := &engine{options: Options{Home: home, SourceRepo: clone, Stdout: &stdout}, apply: true}
+	installer := &engine{
+		options: Options{Home: home, SourceRepo: clone, Stdout: &stdout, ProcessRunner: prepushGit},
+		apply:   true,
+	}
 	if err := installer.writeUpdateMetadata(); err != nil {
 		t.Fatalf("writeUpdateMetadata() error = %v", err)
 	}

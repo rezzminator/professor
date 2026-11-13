@@ -1,3 +1,5 @@
+//go:build jail
+
 package spawn
 
 import (
@@ -6,11 +8,14 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // A resolvable binary passes the preflight and the server is created — the
 // gate refuses the broken state without taxing the healthy one.
 func TestNewSessionAcceptsAResolvableBinary(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux binary is not installed")
 	}

@@ -1,3 +1,5 @@
+//go:build jail
+
 package main
 
 import (
@@ -65,6 +67,7 @@ func TestChatReloadHelpIsPublicAndSuccessful(t *testing.T) {
 }
 
 func TestChatReloadRefusesAnOpenSelectorOnAProbeSocket(t *testing.T) {
+	testjail.TmuxServer(t)
 	jailTest(t)
 	t.Setenv("PFM_RELOAD_DELAY_MS", "1")
 	t.Setenv("PFM_RELOAD_POLL_MS", "1")
@@ -131,6 +134,7 @@ func TestChatReloadRefusesAnOpenSelectorOnAProbeSocket(t *testing.T) {
 }
 
 func TestChatReloadSchedulesADetachedWorker(t *testing.T) {
+	testjail.TmuxServer(t)
 	root := jailTest(t)
 	for _, directory := range []string{filepath.Join(root, "account-1"), filepath.Join(root, "account-2")} {
 		if err := os.MkdirAll(directory, 0o700); err != nil {
@@ -196,6 +200,7 @@ func TestChatReloadSchedulesADetachedWorker(t *testing.T) {
 // left to re-derive it from (this is the couldn't-identify-this-chat bug a
 // bg-spare-served chat hit in production).
 func TestChatReloadHandsTheWorkerAnExplicitSockAndPane(t *testing.T) {
+	testjail.TmuxServer(t)
 	root := jailTest(t)
 	for _, directory := range []string{filepath.Join(root, "account-1"), filepath.Join(root, "account-2")} {
 		if err := os.MkdirAll(directory, 0o700); err != nil {
@@ -270,6 +275,7 @@ func TestChatReloadHandsTheWorkerAnExplicitSockAndPane(t *testing.T) {
 // since the caller's own args already carry a --pane — must NOT also append
 // its own, which would leave two --pane flags in the worker's argv.
 func TestChatReloadWithExplicitPaneOnAMultiPaneServerResolves(t *testing.T) {
+	testjail.TmuxServer(t)
 	root := jailTest(t)
 	for _, directory := range []string{filepath.Join(root, "account-1"), filepath.Join(root, "account-2")} {
 		if err := os.MkdirAll(directory, 0o700); err != nil {
@@ -380,6 +386,7 @@ while True:
 // live probe socket plus a substitute "claude" binary that records its own
 // argv and working directory is this package's actual stand-in for a fake.
 func TestChatReloadWorkerFreshDropsSessionButKeepsTranscriptCWD(t *testing.T) {
+	testjail.TmuxServer(t)
 	root := jailTest(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")

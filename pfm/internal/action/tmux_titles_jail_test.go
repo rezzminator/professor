@@ -1,3 +1,5 @@
+//go:build jail
+
 package action
 
 import (
@@ -12,6 +14,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // The Codex spawn path carries the same tmux.titles policy the Claude one
@@ -60,6 +63,7 @@ func showCodexOption(t *testing.T, socketPath string, arguments ...string) strin
 }
 
 func TestCodexServerAppliesTheTitleOptionsWhenPfmOwnsThem(t *testing.T) {
+	testjail.TmuxServer(t)
 	titles := pfmconfig.DefaultTmuxTitles()
 	socketPath := newCodexTitlesProbeServer(t, "probe-cx-1800000021-1-1", "Codex", &titles)
 	if got := showCodexOption(t, socketPath, "show-options", "-g", "set-titles"); got != "set-titles on" {
@@ -72,6 +76,7 @@ func TestCodexServerAppliesTheTitleOptionsWhenPfmOwnsThem(t *testing.T) {
 }
 
 func TestCodexServerLeavesTheHostsTitleAloneWhenTitlesAreDisabled(t *testing.T) {
+	testjail.TmuxServer(t)
 	socketPath := newCodexTitlesProbeServer(
 		t, "probe-cx-1800000022-1-1", "Codex", &pfmconfig.TmuxTitles{Enabled: false},
 	)
@@ -123,6 +128,7 @@ func TestSynthesizeCarriesTheConfiguredTitlePolicyIntoTheCodexPlan(t *testing.T)
 // its plan chose, so a Claude or OpenCode chat opened from the picker is
 // addressable by name from its first frame, and no pane command renames it.
 func TestChatServerIsBornWithThePlannedWindowName(t *testing.T) {
+	testjail.TmuxServer(t)
 	socketPath := newCodexTitlesProbeServer(t, "probe-ox-1800000023-1-1", "OpenCode", nil)
 	if got := showCodexOption(
 		t,

@@ -2,9 +2,7 @@ package kill
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"os/exec"
 	"slices"
 	"strconv"
 	"strings"
@@ -49,18 +47,15 @@ func (tmux TmuxKiller) KillServerIfSolePane(ctx context.Context, socketPath, pan
 	condition := "#{==:#{S:#{W:#{P:#{pane_id}}}}," + paneID + "}"
 	_, err = tmux.command(ctx, socketPath, "if-shell", "-F", "-t", paneID, condition, "kill-server").Output()
 	if err != nil {
-		return fmt.Errorf("kill exclusive server for pane %s on %s: %w: %s", paneID, socketPath, err, exitStderr(err))
+		return fmt.Errorf("kill exclusive server for pane %s on %s: %w: %s", paneID, socketPath, err, tmuxReason(err))
 	}
 	return nil
 }
 
-// exitStderr is what a failed tmux wrote to stderr, for the error text.
-func exitStderr(err error) string {
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
-		return strings.TrimSpace(string(exitErr.Stderr))
-	}
-	return ""
+// tmuxReason is what a failed tmux wrote to stderr, trimmed, for the error text.
+func tmuxReason(err error) string {
+	stderr, _ := pfmtmux.ExitStderr(err)
+	return strings.TrimSpace(string(stderr))
 }
 
 func (tmux TmuxKiller) KillPane(
@@ -69,7 +64,7 @@ func (tmux TmuxKiller) KillPane(
 ) error {
 	_, err := tmux.command(ctx, socketPath, "kill-pane", "-t", paneID).Output()
 	if err != nil {
-		return fmt.Errorf("kill pane %s on %s: %w: %s", paneID, socketPath, err, exitStderr(err))
+		return fmt.Errorf("kill pane %s on %s: %w: %s", paneID, socketPath, err, tmuxReason(err))
 	}
 	return nil
 }
@@ -123,7 +118,7 @@ func (tmux TmuxKiller) KillServer(
 ) error {
 	_, err := tmux.command(ctx, socketPath, "kill-server").Output()
 	if err != nil {
-		return fmt.Errorf("kill server on %s: %w: %s", socketPath, err, exitStderr(err))
+		return fmt.Errorf("kill server on %s: %w: %s", socketPath, err, tmuxReason(err))
 	}
 	return nil
 }
@@ -177,7 +172,7 @@ func (tmux TmuxKiller) Clients(
 // screen it drew on and exits.
 func (tmux TmuxKiller) DetachClient(ctx context.Context, socketPath, name string) error {
 	if _, err := tmux.command(ctx, socketPath, "detach-client", "-t", name).Output(); err != nil {
-		return fmt.Errorf("detach client %s on %s: %w: %s", name, socketPath, err, exitStderr(err))
+		return fmt.Errorf("detach client %s on %s: %w: %s", name, socketPath, err, tmuxReason(err))
 	}
 	return nil
 }

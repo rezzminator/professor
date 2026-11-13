@@ -1,3 +1,5 @@
+//go:build jail
+
 package fleet
 
 import (
@@ -42,6 +44,7 @@ type noopCodexRenamer struct{ pfmcall.Screen }
 // is itself a move (kill.Manager.AdvanceCodexPane), so the rename step
 // (which needs a real Codex composer) is never reached.
 func TestReconcileCodexPanesRecordsARebind(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -184,6 +187,7 @@ func (renamer *recordingCodexRenamer) SendKey(_ context.Context, _ pfmcall.Targe
 }
 
 func TestReconcileCodexPanesDefersClearWhileReloadOrTurnRuns(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -414,6 +418,7 @@ func startNoopCodexPane(t *testing.T, tmuxTmpDir, socket, statusLine string) {
 // the compacted child the pane was bound to — follows the pane onto the new
 // thread; a schedule of another chat stays where it is.
 func TestReconcileCodexPanesCarriesSchedulesAcrossAReset(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}

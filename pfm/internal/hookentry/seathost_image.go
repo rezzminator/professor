@@ -13,7 +13,8 @@ import (
 // engine inside this one process, so without it a chat keeps the supervisor
 // code of the day it opened, fixes and all left out. Exec keeps the pid and its
 // kernel birth, the identity the seat's owner proof keys on, so the new image
-// binds the seat again as the same supervisor and starts the pending engine.
+// proves the seat's binding as the same supervisor, without the conversation
+// lock a waiting reload holds (bindNativeHost), and starts the pending engine.
 // It returns only when the running image is current or the swap failed; a
 // failure is said on stderr and the running image carries on.
 func refreshSeatHostImage(

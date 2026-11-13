@@ -639,7 +639,7 @@ cur="$PFM_TEST_TIMING_DIR/run.current"
 export STUB_FAILURES_OUT="  PROFILE github.com/rezzminator/professor/pfm/internal/pricing: $cur/profile/internal_pricing.42/exit/DIAGNOSIS.txt"
 checks_pfm_unit "$T/fx/pfm" "$cur" >"$T/unit.out"
 unset STUB_FAILURES_OUT
-if grep -Fq "test-shard.sh run --out $cur/unit.json --history $PFM_TEST_TIMING_DIR/run.new/unit.json -- -race" "$T/unit.calls"; then
+if grep -Fq "test-shard.sh run --out $cur/unit.json --history $PFM_TEST_TIMING_DIR/run.new/unit.json -- -tags jail -race" "$T/unit.calls"; then
   ok 'unit row uses sharder with newest usable history and TESTFLAGS'
 else bad 'unit row or history selection' "$(cat "$T/unit.calls")"; fi
 if grep -Fq "$cur/profile pfm: go test -- bash $T/fx/pfm/scripts/test-shard.sh run --out" "$T/unit.calls" && [ -z "${PFM_TEST_ARTIFACT_DIR+x}" ]; then

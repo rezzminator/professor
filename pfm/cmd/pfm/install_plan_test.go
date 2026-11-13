@@ -37,12 +37,7 @@ func TestInstallPlanNeedsCheck(t *testing.T) {
 // installer forbidden and the dependency probe quiet, and proves home unchanged.
 func installPlanRun(t *testing.T, home string) (code int, stdout, stderr string) {
 	t.Helper()
-	bin, _ := writeManagerFakes(
-		t,
-		"case \"$*\" in *ActiveState*) echo inactive;; esac\nexit 0",
-		"echo 'state = not running'",
-	)
-	t.Setenv("PATH", bin)
+	scriptManagers(t, systemctlActiveState("inactive"), managerSays("state = not running\n"))
 	savedProbe, savedInstaller := doctor.DependencyProbeOverride, runInstaller
 	t.Cleanup(func() { doctor.DependencyProbeOverride, runInstaller = savedProbe, savedInstaller })
 	doctor.DependencyProbeOverride = func(context.Context, []deps.Entry, deps.ProbeOptions) []deps.Result { return nil }

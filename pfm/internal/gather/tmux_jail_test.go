@@ -1,3 +1,5 @@
+//go:build jail
+
 package gather
 
 import (
@@ -246,6 +248,7 @@ func TestServerGoneReadsTmuxOwnWords(t *testing.T) {
 // TestShowGlobalOptionReadsTmuxsUnsetAnswer runs the real tmux: an unset user
 // option on a live server is ErrOptionUnset, a set one reads back its value.
 func TestShowGlobalOptionReadsTmuxsUnsetAnswer(t *testing.T) {
+	testjail.TmuxServer(t)
 	dir := testjail.ShortRoot(t)
 	const socket = "cc-opt-unset"
 	start := exec.Command("tmux", "-L", socket, "-f", "/dev/null", "new-session", "-d", "-s", "probe")
@@ -318,6 +321,7 @@ func TestParseLegacyPaneFallback(t *testing.T) {
 }
 
 func TestJailedTmuxProbeAndGather(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux binary is not installed")
 	}
@@ -499,6 +503,7 @@ func TestJailedTmuxProbeAndGather(t *testing.T) {
 // would take ONE name take neither, and a pane holding a rollout descriptor
 // still converges through the path it always did.
 func TestJailedResumedCodexPaneNamingAndConflicts(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux binary is not installed")
 	}

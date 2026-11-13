@@ -40,8 +40,12 @@ const (
 )
 
 // SeatHost supervises a native engine without a shell or a tmux intermediary.
-
 func SeatHost(args []string, stdout, stderr io.Writer, runtime config.Runtime) int {
+	return SeatHostWith(args, stdout, stderr, runtime, nil)
+}
+
+// SeatHostWith is SeatHost with the runner that starts the seat engine; nil is the real one.
+func SeatHostWith(args []string, stdout, stderr io.Writer, runtime config.Runtime, runner deps.Runner) int {
 	if len(args) != 1 {
 		fmt.Fprintln(stderr, "pfm internal seat-host: expected one seat id")
 		return 1
@@ -166,7 +170,7 @@ func SeatHost(args []string, stdout, stderr io.Writer, runtime config.Runtime) i
 			)
 			options.Env, _ = armCostLedger(options.Env, paths.OSEnv{}, run.CostLedger, stderr)
 			acknowledge := seat.ReloadPending
-			status, started, runErr = runSeatEngine(argv, options, tty, func() error {
+			status, started, runErr = runSeatEngine(runner, argv, options, tty, func() error {
 				current, found, err := db.Seat(ctx, seat.SeatID)
 				if err != nil {
 					return fmt.Errorf("read started seat: %w", err)
@@ -440,6 +444,7 @@ func seatEnvironment(saved, current, keys []string) []string {
 }
 
 func runSeatEngine(
+	runner deps.Runner,
 	argv []string,
 	options deps.StartOptions,
 	tty *os.File,
@@ -468,7 +473,7 @@ func runSeatEngine(
 	signals := make(chan os.Signal, 8)
 	signal.Notify(signals, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 	defer signal.Stop(signals)
-	process, err := startSeatEngine(argv, options)
+	process, err := startSeatEngine(runner, argv, options)
 	if err != nil {
 		return 1, false, err
 	}
@@ -513,9 +518,9 @@ func seatForeground(tty, group int) error {
 	return unix.IoctlSetPointerInt(tty, unix.TIOCSPGRP, group)
 }
 
-func startSeatEngine(argv []string, options deps.StartOptions) (deps.Process, error) {
+func startSeatEngine(runner deps.Runner, argv []string, options deps.StartOptions) (deps.Process, error) {
 	if options.Argv0 != pfmengine.MustLookup(pfmengine.Claude).Binary {
-		process, err := obs.Runner(deps.RealRunner{}).Start(context.Background(), argv, options)
+		process, err := obs.Runner(runner).Start(context.Background(), argv, options)
 		if err != nil {
 			return nil, fmt.Errorf("start foreground engine: %w", err)
 		}
@@ -525,7 +530,7 @@ func startSeatEngine(argv []string, options deps.StartOptions) (deps.Process, er
 	if err != nil {
 		return nil, fmt.Errorf("guard native engine account: %w", err)
 	}
-	process, err := obs.Runner(deps.RealRunner{}).Start(context.Background(), argv, options)
+	process, err := obs.Runner(runner).Start(context.Background(), argv, options)
 	if err != nil {
 		return nil, fmt.Errorf("start foreground engine: %w", errors.Join(err, guard.Abort(), guard.Close()))
 	}

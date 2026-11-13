@@ -12,6 +12,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
@@ -31,6 +32,8 @@ type ExecCommands struct {
 	Machine config.Config
 	Stdout  io.Writer
 	Stderr  io.Writer
+	// Runner starts the Claude child; nil is the real process table.
+	Runner deps.Runner
 }
 
 // accountFor names the account that owns one config directory. The registry
@@ -69,6 +72,7 @@ func (commands ExecCommands) command(
 		Args:    args,
 		Home:    commands.Home,
 		Machine: commands.Machine,
+		Runner:  commands.Runner,
 	}.Command(ctx)
 	if err != nil {
 		return nil, err
@@ -111,7 +115,7 @@ func (commands ExecCommands) Resume(ctx context.Context, configName, cwd, id str
 	spawn := action.ClaudeSpawn{
 		Purpose: claudelaunch.PurposeResume,
 		Account: account, Cache1H: &cache1H, Resume: id,
-		Home: commands.Home, Machine: commands.Machine,
+		Home: commands.Home, Machine: commands.Machine, Runner: commands.Runner,
 		PromptFile: persona.Prompt, Effort: persona.Effort, Model: persona.Model, Envs: persona.Envs,
 	}
 	command, err := spawn.Command(ctx)

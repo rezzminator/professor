@@ -8,9 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/rezzminator/professor/pfm/internal/gather"
-	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestTmuxOptionsRenderStylesAndUserOptions(t *testing.T) {
@@ -78,9 +75,8 @@ func TestTmuxPriorOptionNameAndSentinel(t *testing.T) {
 }
 
 // The real gather probe executes vectors sequentially, not as an atomic batch.
-// Its executable fixture persists each option before the next vector can fail.
+// This fixture persists each option as a file before the next vector can fail.
 type prefixFaultTmux struct {
-	probe     gather.TmuxProbe
 	dir       string
 	remaining int
 	commands  int
@@ -96,18 +92,37 @@ func (f *prefixFaultTmux) Show(_ context.Context, _, name string) (string, error
 	return string(body), err
 }
 
-func (f *prefixFaultTmux) Apply(ctx context.Context, socket string, commands [][]string) error {
+func (f *prefixFaultTmux) Apply(_ context.Context, _ string, commands [][]string) error {
 	f.commands += len(commands)
 	if f.remaining >= 0 {
 		if f.remaining < len(commands) {
 			prefix := append([][]string{}, commands[:f.remaining]...)
 			prefix = append(prefix, []string{"injected-prefix-fault"})
 			f.remaining = -1
-			return f.probe.ApplyGlobalOptions(ctx, socket, prefix)
+			return f.play(prefix)
 		}
 		f.remaining -= len(commands)
 	}
-	return f.probe.ApplyGlobalOptions(ctx, socket, commands)
+	return f.play(commands)
+}
+
+// play runs the set-option vectors in order: -g writes the option's file, -u removes it, anything else fails
+// like a tmux command the server refuses.
+func (f *prefixFaultTmux) play(commands [][]string) error {
+	for _, arguments := range commands {
+		if len(arguments) < 3 || arguments[0] != "set-option" {
+			return fmt.Errorf("tmux fixture refuses %v", arguments)
+		}
+		path := filepath.Join(f.dir, arguments[2])
+		if arguments[1] == "-g" && len(arguments) >= 4 {
+			if err := os.WriteFile(path, []byte(arguments[3]), 0o600); err != nil {
+				return err
+			}
+		} else if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	return nil
 }
 
 func TestTmuxRestoreEveryPrefixIsRetrySafe(t *testing.T) {
@@ -118,13 +133,7 @@ func TestTmuxRestoreEveryPrefixIsRetrySafe(t *testing.T) {
 		t.Run(fmt.Sprint(prefix), func(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
-			binary := filepath.Join(dir, "tmux-fixture")
-			script := "#!/bin/sh\nshift 2\n[ \"$1\" = set-option ] || exit 73\n" +
-				"if [ \"$2\" = -g ]; then printf '%s' \"$4\" > \"" + dir + "/$3\"; else rm -f \"" + dir + "/$3\"; fi\n"
-			if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
-				t.Fatal(err)
-			}
-			f := &prefixFaultTmux{probe: gather.TmuxProbe{Binary: binary, TmuxTmpDir: dir}, dir: dir, remaining: -1}
+			f := &prefixFaultTmux{dir: dir, remaining: -1}
 			want := map[string]string{}
 			for _, name := range append(append([]string{}, tmuxStyleNames...), tmuxChipNames...) {
 				// Include both a captured empty value and a genuinely unset chip.

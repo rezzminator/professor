@@ -128,6 +128,11 @@ var (
 // Only Claude, under git-guard and pcm-guard, changes either. A read or
 // decode failure and a parser error are fail-open to stderr, as on Claude.
 func EngineGuard(args []string, input io.Reader, stdout, stderr io.Writer) int {
+	return EngineGuardWith(args, input, stdout, stderr, nil)
+}
+
+// EngineGuardWith is EngineGuard with the runner of the guard's git reads; nil is the real one.
+func EngineGuardWith(args []string, input io.Reader, stdout, stderr io.Writer, git deps.Runner) int {
 	id, err := engineGuardEngine(args)
 	if err != nil {
 		fmt.Fprintf(
@@ -160,7 +165,7 @@ func EngineGuard(args []string, input io.Reader, stdout, stderr io.Writer) int {
 	}
 	// No agent: an engine caller's agent_type is never an exemption, and
 	// engineClass reports no theme, so every framework path lands in pcmOnly.
-	judge := &pcmGuardJudge{scope: pcmGuardNewScope(stderr, true)}
+	judge := &pcmGuardJudge{scope: pcmGuardNewScope(stderr, true), git: git}
 	var reasons []string
 	switch kind {
 	case engineGuardShell:
@@ -168,7 +173,7 @@ func EngineGuard(args []string, input io.Reader, stdout, stderr io.Writer) int {
 		if workdir := hook.ToolInput.Workdir; workdir != "" {
 			cwd = gitGuardJoin(cwd, workdir)
 		}
-		reasons = append(reasons, gitGuardCheck(command, cwd, true, false, stderr))
+		reasons = append(reasons, gitGuardCheck(command, cwd, true, false, stderr, git))
 		if err := judge.bash(command, cwd, cmdparse.Script{}, 0); err != nil {
 			fmt.Fprintf(stderr, "pfm internal engine-guard: parse command (fail-open): %v\n", err)
 		}
@@ -494,16 +499,16 @@ func (judge *pcmGuardJudge) trusts(abs string) bool {
 	if judge.trusted == nil {
 		judge.trusted = map[string]bool{}
 	}
-	judge.trusted[abs] = engineGuardCommitted(abs)
+	judge.trusted[abs] = engineGuardCommitted(abs, judge.git)
 	return judge.trusted[abs]
 }
 
 // engineGuardCommitted reports a file git tracks whose content on disk is
 // HEAD's. Any failure (no repo, untracked, git missing) is untrusted.
-func engineGuardCommitted(abs string) bool {
+func engineGuardCommitted(abs string, git deps.Runner) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), engineGuardGitTimeout)
 	defer cancel()
-	run := obs.Runner(deps.RealRunner{})
+	run := obs.Runner(git)
 	dir, base := filepath.Dir(abs), filepath.Base(abs)
 	head, err := run.Run(
 		ctx,

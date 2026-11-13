@@ -1,3 +1,5 @@
+//go:build jail
+
 package gather
 
 import (
@@ -6,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // stoppedProbeTimeout is the probe bound these tests carry on the context of
@@ -66,6 +70,7 @@ func within(t *testing.T, bound time.Duration, calls map[string]func() error) ma
 // blocked forever; each now ends inside the bound with an error. No client
 // survives any of them.
 func TestProbeCallsOnStoppedServersReturnInOneBoundAndLeaveNoClient(t *testing.T) {
+	testjail.TmuxServer(t)
 	jail := newTmuxJail(t)
 	t.Setenv("PFM_TEST_PROBE_SOCKETS", "1")
 	sockets := []string{"probe-stop-1", "probe-stop-2", "probe-stop-3", "probe-stop-4"}

@@ -68,7 +68,7 @@ func TestHerdrSpawnReservesStructuredRecipeAndCleansRefusal(t *testing.T) {
 				)
 			}()
 			binary := filepath.Join(values.Home, "native-claude")
-			if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+			if err := testjail.WriteExecutableNeverRun(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 				t.Fatal(err)
 			}
 			request := HerdrRequest{
@@ -210,7 +210,7 @@ func TestHerdrBirthResolvesRealEngineBeforeReservation(t *testing.T) {
 					if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 						t.Fatal(err)
 					}
-					if err := testjail.WriteExecutable(path, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+					if err := testjail.WriteExecutableNeverRun(path, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -311,7 +311,11 @@ func TestHerdrRawBirthResolvesActualEngineBeforeReservation(t *testing.T) {
 					t.Fatal(err)
 				}
 				if mode != "missing" {
-					if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+					if err := testjail.WriteExecutableNeverRun(
+						binary,
+						[]byte("#!/bin/sh\nexit 0\n"),
+						0o700,
+					); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -392,7 +396,7 @@ func TestHerdrBirthRefusesProtocolBeforeReservation(t *testing.T) {
 		)
 	}()
 	binary := filepath.Join(values.Home, "real-engine")
-	if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutableNeverRun(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	_, err = PrepareHerdr(
@@ -513,7 +517,7 @@ func TestHerdrSpawnTabLabelIsNeverEmpty(t *testing.T) {
 				)
 			}()
 			binary := filepath.Join(values.Home, "native-claude")
-			if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+			if err := testjail.WriteExecutableNeverRun(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 				t.Fatal(err)
 			}
 			choice := BackendChoice{
@@ -564,7 +568,7 @@ func TestHerdrBirthOutlivesAFailedRetire(t *testing.T) {
 		)
 	}()
 	binary := filepath.Join(values.Home, "native-claude")
-	if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutableNeverRun(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	// A SID directory that is a regular file: the dead seat's reload record cannot be removed.

@@ -21,7 +21,7 @@ func TestRestoredRecipeCarriesTheRootSettingsEnvs(t *testing.T) {
 			bin := t.TempDir()
 			for _, name := range []string{"claude", "codex"} {
 				script := []byte("#!/bin/sh\nexit 0\n")
-				if err := testjail.WriteExecutable(filepath.Join(bin, name), script, 0o700); err != nil {
+				if err := testjail.WriteExecutableNeverRun(filepath.Join(bin, name), script, 0o700); err != nil {
 					t.Fatal(err)
 				}
 			}

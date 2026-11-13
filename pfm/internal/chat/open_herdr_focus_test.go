@@ -14,6 +14,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
 func TestOpenNativeFocusAcknowledgement(t *testing.T) {
@@ -288,7 +289,7 @@ func TestOpenNativeLiveMovesIntoThePickerTab(t *testing.T) {
 			if tc.stale != "" {
 				bin := t.TempDir()
 				stub := []byte("#!/bin/sh\nexit 1\n")
-				if err := testjail.WriteExecutable(filepath.Join(bin, "herdr"), stub, 0o700); err != nil {
+				if err := testjail.WriteExecutableNeverRun(filepath.Join(bin, "herdr"), stub, 0o700); err != nil {
 					t.Fatal(err)
 				}
 				// The stub shadows any real herdr; tmux stays reachable for the TMUX proof.
@@ -296,7 +297,7 @@ func TestOpenNativeLiveMovesIntoThePickerTab(t *testing.T) {
 			}
 			var stdout, stderr bytes.Buffer
 			handled, code := openNativeRow(
-				context.Background(),
+				pfmtmux.WithClientRunner(context.Background(), testjail.AbsentTmuxRunner()),
 				compose.Row{ID: seat.SessionID, SeatID: seat.SeatID, Backend: "herdr", Kind: compose.LiveClaude},
 				0, false, &stdout, &stderr, runtime,
 			)
@@ -503,7 +504,7 @@ func TestOpenNativeDeadResumesInTheCallerPane(t *testing.T) {
 			}
 			if tc.newTab != "" {
 				binary := filepath.Join(runtime.Paths.Home, "native-engine")
-				if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+				if err := testjail.WriteExecutableNeverRun(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 					t.Fatal(err)
 				}
 				run := fleetdb.SeatRun{

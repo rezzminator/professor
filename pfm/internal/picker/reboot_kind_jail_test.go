@@ -1,3 +1,5 @@
+//go:build jail
+
 package picker
 
 import (
@@ -7,6 +9,7 @@ import (
 	"errors"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strconv"
@@ -163,5 +166,32 @@ func waitPickerEndWorker(t *testing.T, marker, seat string) {
 			t.Fatal("owned worker acknowledgement timed out")
 		case <-tick.C:
 		}
+	}
+}
+
+// A test selection flag bounds the old binary to this assertion, not the suite.
+func TestNativeEndWorkerInvocationIsOwned(t *testing.T) {
+	if os.Getenv("PFM_PICKER_WORKER_PROBE") == "1" {
+		t.Fatal("unowned worker re-entered picker test suite")
+	}
+	marker := filepath.Join(t.TempDir(), "worker")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	command := exec.CommandContext(
+		ctx,
+		os.Args[0],
+		"-test.run=^TestNativeEndWorkerInvocationIsOwned$",
+		"chat",
+		"end",
+		"--native-end-worker",
+		"probe-seat",
+	)
+	command.Env = append(os.Environ(), "PFM_PICKER_WORKER_PROBE=1", "PFM_PICKER_END_WORKER="+marker)
+	if out, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("worker invocation was not owned: %v: %s", err, out)
+	}
+	body, err := os.ReadFile(marker)
+	if err != nil || !strings.HasSuffix(string(body), " probe-seat") {
+		t.Fatalf("worker acknowledgement=%q err=%v", body, err)
 	}
 }

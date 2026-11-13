@@ -74,7 +74,7 @@ var launchLiteralReaders = map[string]launchLiteralAllowance{
 		"ANTHROPIC_MODEL",
 	}},
 	"internal/testjail/launch_shell.go": {"pins the launch shell", []string{"CLAUDE_CODE_SHELL"}},
-	"internal/testjail/testjail.go":     {"sets fixture identity", []string{"CLAUDE_CODE_SESSION_ID"}},
+	"internal/testjail/unitnet.go":      {"clears the ambient identity", []string{"CLAUDE_CODE_SESSION_ID"}},
 }
 
 var launchEnvFamily = regexp.MustCompile(

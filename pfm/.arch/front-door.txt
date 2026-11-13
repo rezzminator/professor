@@ -6,8 +6,6 @@ internal/agentrole 3
 internal/archive 4
 internal/ask 1
 internal/atomicfile 4
-internal/call 25
-internal/claudelaunch 17
 internal/cmdparse 3
 internal/codexappendix 1
 internal/codexmeta 4
@@ -43,7 +41,6 @@ internal/place 1
 internal/pricing 3
 internal/pricing/command 2
 internal/pricing/modelcost 2
-internal/professor 11
 internal/reap 5
 internal/reload 19
 internal/resolve 9
@@ -53,12 +50,9 @@ internal/servicemanager 6
 internal/sky 1
 internal/spawn 14
 internal/stats 7
-internal/statusline 27
-internal/store 17
 internal/testjail 19
 internal/themecmd 3
 internal/themesync 28
-internal/tmux 5
 internal/tokens 17
 internal/transcript 14
 internal/transcript/digest 7

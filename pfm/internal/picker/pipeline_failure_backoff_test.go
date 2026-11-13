@@ -2,7 +2,6 @@ package picker
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -12,7 +11,6 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
-	fleetindex "github.com/rezzminator/professor/pfm/internal/index"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/ui"
 )
@@ -159,14 +157,4 @@ type armedTimer struct {
 func (timer *armedTimer) Reset(d time.Duration) bool {
 	timer.armed.arm(d)
 	return timer.Timer.Reset(d)
-}
-
-type clearRetryIndexRunner struct{ calls int }
-
-func (runner *clearRetryIndexRunner) Run(context.Context, fleetindex.Options) (fleetindex.Counters, error) {
-	runner.calls++
-	if runner.calls == 3 {
-		return fleetindex.Counters{}, fmt.Errorf("injected post-clear index failure")
-	}
-	return fleetindex.Counters{}, nil
 }

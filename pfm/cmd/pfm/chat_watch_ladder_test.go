@@ -1,3 +1,5 @@
+//go:build jail
+
 package main
 
 import (
@@ -271,10 +273,6 @@ func (seat *ladderSeat) typeLine(line string) {
 		seat.ladder.t.Fatalf("press Enter in %s: %v: %s", seat.name, err, output)
 	}
 }
-
-// answered is the transcript text of the assistant's answer reply: the
-// typed prompt names the reply too, so only this marks the turn as ended.
-func answered(reply string) string { return `"text":"` + reply + `"` }
 
 // turn plays one whole turn and waits until its answer is on disk.
 func (seat *ladderSeat) turn() {

@@ -1,3 +1,5 @@
+//go:build jail
+
 package main
 
 import (
@@ -27,6 +29,7 @@ import (
 // layout law for /chat:branch. Both the caller and the fork are real scratch
 // tmux servers; no live fleet socket is visible inside this jail.
 func TestChatBranchCreatesADetachedSeatWithoutTouchingTheCaller(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -248,6 +251,7 @@ func waitForFile(t *testing.T, path string, within time.Duration) ([]byte, error
 // With no Herdr server running a fork is born detached on its own tmux
 // server, whoever asks; Herdr asked for in config is refused, never tmux.
 func TestChatBranchBirthsDetachedTmux(t *testing.T) {
+	testjail.TmuxServer(t)
 	for _, tc := range []struct {
 		name, backend, herdrPane string
 		code                     int

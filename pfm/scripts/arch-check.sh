@@ -19,7 +19,7 @@
 # record the ruling in .arch/exceptions.md.
 #
 # The checks are independent, so they run as concurrent background jobs and print
-# in the order they always have: C1 … C8, C10 … C23, C25 … C33, then C24 (its own script). A job
+# in the order they always have: C1 … C8, C10 … C23, C25 … C34, then C24 (its own script). A job
 # that ends without leaving its CHECK line is reported as ERROR for that check,
 # never read as PASS.
 set -uo pipefail
@@ -696,6 +696,24 @@ chk_C33() {
   say C33-unit-kind PASS "$(c33_detail "$dirs") · $(c33_detail "$files")"
 }
 
+# C34 every jail file carries the jail build tag: a `{name}_jail_test.go` or `{name}_jail_{os}_test.go`
+# whose `//go:build` line does not open with the `jail` term (`//go:build jail`, `//go:build jail && linux`)
+# compiles into a plain `go test ./...`, the unit tier, and runs a real-resource test on whatever
+# machine started it. No baseline: FAIL names every untagged jail file.
+chk_C34() {
+  grep -E '_jail(_(linux|darwin))?_test\.go$' "$L/test.list" > "$T/jail.list"
+  if [ ! -s "$T/jail.list" ]; then say C34-jail-tag PASS "0 jail files"; return; fi
+  : > "$T/tagged"
+  g "$T/tagged" "$T/jail.list" -lE '^//go:build jail( && .+)?$'
+  [ $? -le 1 ] || { say C34-jail-tag ERROR "grep could not read the jail files"; return; }
+  local untagged
+  untagged=$(sort -u "$T/tagged" | comm -23 "$T/jail.list" -)
+  if [ -n "$untagged" ]; then
+    say C34-jail-tag FAIL "no leading \`//go:build jail\` line: $(echo "$untagged" | tr '\n' ' ' | sed 's/ $//')"; return
+  fi
+  say C34-jail-tag PASS "$(wc -l < "$T/jail.list" | tr -d ' ') jail files tagged"
+}
+
 # c33_detail <CHECK line>: the line's detail, its id and verdict cut.
 c33_detail() { sed -E 's/^CHECK +[^ ]+ +[A-Z]+ +//; s/ +$//' <<<"$1"; }
 
@@ -779,7 +797,7 @@ for id in C1-ceiling-src C2-ceiling-test C3-cmd-budget C4-cmd-primitives C5-tmux
   C12-claude-pointers C13-test-mirror C14-usage-parity C15-internal-usage \
   C16-env-outside-paths C17-dup-functions C18-engine-spellings C19-env-namespace \
   C20-codex-home C21-test-jail C22-host-doors C23-bare-log C25-testmain-jail C26-exec-write C27-identity-env \
-  C28-signal-door C29-os-door C30-shell-platform C31-front-door C32-os-door-test C33-unit-kind C24-unwrapped-door; do
+  C28-signal-door C29-os-door C30-shell-platform C31-front-door C32-os-door-test C33-unit-kind C34-jail-tag C24-unwrapped-door; do
   job "$id"
 done
 

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	goRuntime "runtime"
@@ -22,7 +21,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/paths"
-	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestInstallerOptionsCarryTheBuildAndPluginCheckoutRoot(t *testing.T) {
@@ -90,9 +88,6 @@ func TestInstallerOptionsCarryEachEngineRosterIndependently(t *testing.T) {
 // unfixed code because newInstallerOptions sets SourceRepo from
 // discoverSourceRepo() alone, which returns "" outside a clone.
 func TestInstallOptionsSourceRepoFallsBackToTheRecordedClone(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git is not installed")
-	}
 	t.Setenv("PFM_SOURCE_REPO", "")
 	t.Chdir(t.TempDir()) // no repo markers here — discoverSourceRepo() finds nothing
 	home := t.TempDir()
@@ -123,9 +118,6 @@ func TestInstallOptionsSourceRepoFallsBackToTheRecordedClone(t *testing.T) {
 // directory that no longer exists is an error rendered as absence. `pfm init`
 // (init_command.go) already names the same failure.
 func TestInstallOptionsNameAnUnusableRecordedCloneBeforeFallingBack(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git is not installed")
-	}
 	t.Setenv("PFM_SOURCE_REPO", "")
 	t.Chdir(t.TempDir()) // no repo markers here — discoverSourceRepo() finds nothing
 	home := t.TempDir()
@@ -160,23 +152,56 @@ func TestInstallOptionsNameAnUnusableRecordedCloneBeforeFallingBack(t *testing.T
 	}
 }
 
-// writeManagerFakes stages fake systemctl and launchctl binaries in one PATH
-// directory, each appending its own invocation to a shared log so a subtest
-// can assert WHICH manager the sandbox actually reached instead of assuming
-// a PATH miss silently degraded interception into "hopefully not found."
-func writeManagerFakes(t *testing.T, systemctlBody, launchctlBody string) (binDir, logPath string) {
+// managerAnswer is one manager invocation's answer from its arguments joined by spaces: stdout and exit code.
+type managerAnswer func(args string) (stdout string, exit int)
+
+// scriptManagers scripts systemctl (the Linux answers) and launchctl (the macOS answers) behind the command
+// runner; a nil answer is a manager the host lacks. The returned runner holds every invocation, so a subtest
+// can assert WHICH manager the sandbox actually reached instead of assuming a lookup miss silently degraded
+// interception into "hopefully not found."
+func scriptManagers(t *testing.T, systemctl, launchctl managerAnswer) *deps.FakeRunner {
 	t.Helper()
-	binDir = t.TempDir()
-	logPath = filepath.Join(t.TempDir(), "manager-calls.log")
-	write := func(name, body string) {
-		script := "#!/bin/sh\necho \"" + name + " $*\" >> " + logPath + "\n" + body
-		if err := testjail.WriteExecutable(filepath.Join(binDir, name), []byte(script), 0o700); err != nil {
-			t.Fatal(err)
+	fake := &deps.FakeRunner{}
+	for name, answer := range map[string]managerAnswer{"systemctl": systemctl, "launchctl": launchctl} {
+		if answer == nil {
+			continue
 		}
+		fake.Handle([]string{name}, func(_ context.Context, call deps.RunCall) (deps.RunResult, error) {
+			stdout, exit := answer(strings.Join(call.Argv[1:], " "))
+			return deps.RunResult{Stdout: []byte(stdout), ExitCode: exit}, nil
+		})
+		fake.ScriptLookPath(name, "/test/bin/"+name, nil)
 	}
-	write("systemctl", systemctlBody)
-	write("launchctl", launchctlBody)
-	return binDir, logPath
+	previous := commandRunner
+	commandRunner = fake
+	t.Cleanup(func() { commandRunner = previous })
+	t.Setenv("PATH", t.TempDir())
+	return fake
+}
+
+// managerSays answers every invocation with stdout and exit 0.
+func managerSays(stdout string) managerAnswer {
+	return func(string) (string, int) { return stdout, 0 }
+}
+
+// systemctlActiveState answers a `show ... ActiveState` query with state and anything else silently.
+func systemctlActiveState(state string) managerAnswer {
+	return func(args string) (string, int) {
+		if strings.Contains(args, "ActiveState") {
+			return state + "\n", 0
+		}
+		return "", 0
+	}
+}
+
+// launchctlPrint answers a `print` with the state line launchAgentRunning reads (launchd.go:177-196).
+func launchctlPrint(state string) managerAnswer {
+	return func(args string) (string, int) {
+		if strings.HasPrefix(args, "print") {
+			return "state = " + state + "\n", 0
+		}
+		return "", 0
+	}
 }
 
 // assertManagerConsulted proves the sandbox intercepted the platform's real
@@ -188,13 +213,12 @@ func writeManagerFakes(t *testing.T, systemctlBody, launchctlBody string) (binDi
 // for plan messaging on Linux (wireUnits' unconditional probe) but reaches
 // no manager at all on Darwin (wireLaunchAgent never dials out unless
 // applying).
-func assertManagerConsulted(t *testing.T, logPath string, wantDarwinConsulted bool) {
+func assertManagerConsulted(t *testing.T, fake *deps.FakeRunner, wantDarwinConsulted bool) {
 	t.Helper()
-	data, err := os.ReadFile(logPath)
-	if err != nil && !os.IsNotExist(err) {
-		t.Fatalf("read manager call log: %v", err)
+	log := ""
+	for _, call := range fake.Calls() {
+		log += strings.Join(call.Argv, " ") + "\n"
 	}
-	log := string(data)
 	if goRuntime.GOOS == "darwin" {
 		if strings.Contains(log, "systemctl ") {
 			t.Fatalf("manager log=%q, systemd must never be consulted on darwin", log)
@@ -218,12 +242,8 @@ func TestInstallGateScopesDryRunIdleAndRunningService(t *testing.T) {
 	// read-only test checkout; each subtest owns its default clone under HOME.
 	t.Chdir(t.TempDir())
 	t.Setenv("PFM_SOURCE_REPO", "")
-	// The launchctl fake's "print" reply models launchAgentRunning's state
-	// line (launchd.go:177-196); its exit code always succeeds like the
-	// existing systemctl fakes below, so a subtest's only lever is the
+	// The launchctl answers' exit code always succeeds, like systemctl's, so a subtest's only lever is the
 	// reported state, never a manager it forgot to answer.
-	const launchctlIdle = "case \"$1\" in\n  print) echo \"state = not running\" ;;\nesac\nexit 0\n"
-	const launchctlRunning = "case \"$1\" in\n  print) echo \"state = running\" ;;\nesac\nexit 0\n"
 
 	t.Run("bare preview ignores reachable manager", func(t *testing.T) {
 		home := t.TempDir()
@@ -231,9 +251,8 @@ func TestInstallGateScopesDryRunIdleAndRunningService(t *testing.T) {
 		if err := os.WriteFile(configPath, []byte(`{"version":2}`), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		binDir, logPath := writeManagerFakes(t, "exit 0\n", launchctlIdle)
+		managers := scriptManagers(t, managerSays(""), launchctlPrint("not running"))
 		t.Setenv("HOME", home)
-		t.Setenv("PATH", binDir)
 		var stdout, stderr bytes.Buffer
 		if code := runInstall(
 			nil,
@@ -250,7 +269,7 @@ func TestInstallGateScopesDryRunIdleAndRunningService(t *testing.T) {
 		if !strings.HasSuffix(stdout.String(), confirmation) || strings.Count(stdout.String(), confirmation) != 1 {
 			t.Fatalf("preview confirmation=%q, want one final line %q", stdout.String(), confirmation)
 		}
-		assertManagerConsulted(t, logPath, false)
+		assertManagerConsulted(t, managers, false)
 	})
 
 	t.Run("idle reachable manager applies with yes", func(t *testing.T) {
@@ -259,11 +278,16 @@ func TestInstallGateScopesDryRunIdleAndRunningService(t *testing.T) {
 		if err := os.WriteFile(configPath, []byte(`{"version":2}`), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		script := "case \"$*\" in *ActiveState*pfm-schedule.timer) echo active;; " +
-			"*ActiveState*) echo inactive;; esac\nexit 0\n"
-		binDir, logPath := writeManagerFakes(t, script, launchctlIdle)
+		managers := scriptManagers(t, func(args string) (string, int) {
+			switch {
+			case strings.Contains(args, "ActiveState") && strings.HasSuffix(args, "pfm-schedule.timer"):
+				return "active\n", 0
+			case strings.Contains(args, "ActiveState"):
+				return "inactive\n", 0
+			}
+			return "", 0
+		}, launchctlPrint("not running"))
 		t.Setenv("HOME", home)
-		t.Setenv("PATH", binDir)
 		var stdout, stderr bytes.Buffer
 		if code := runInstall(
 			[]string{"--yes"},
@@ -273,7 +297,7 @@ func TestInstallGateScopesDryRunIdleAndRunningService(t *testing.T) {
 		); code != 0 {
 			t.Fatalf("idle yes code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 		}
-		assertManagerConsulted(t, logPath, true)
+		assertManagerConsulted(t, managers, true)
 	})
 
 	t.Run("running service refuses actionably", func(t *testing.T) {
@@ -284,10 +308,8 @@ func TestInstallGateScopesDryRunIdleAndRunningService(t *testing.T) {
 		}
 		// A oneshot mid-run: `show` names it activating (is-active would exit 3).
 		// installer.Run checks the scheduler before applying its wiring.
-		script := "case \"$*\" in *ActiveState*) echo activating;; esac\nexit 0\n"
-		binDir, logPath := writeManagerFakes(t, script, launchctlRunning)
+		managers := scriptManagers(t, systemctlActiveState("activating"), launchctlPrint("running"))
 		t.Setenv("HOME", home)
-		t.Setenv("PATH", binDir)
 
 		var stdout, stderr bytes.Buffer
 		if code := runInstall(
@@ -309,7 +331,7 @@ func TestInstallGateScopesDryRunIdleAndRunningService(t *testing.T) {
 		if err != nil || len(entries) != 0 {
 			t.Fatalf("rc 97 refusal wrote files: entries=%v err=%v", entries, err)
 		}
-		assertManagerConsulted(t, logPath, true)
+		assertManagerConsulted(t, managers, true)
 	})
 }
 
@@ -349,12 +371,11 @@ func TestInstallConfirmationPreservesConfigDir(t *testing.T) {
 	if !found || !strings.Contains(confirmation, " --config-dir "+cmdparse.Quote(dir)) {
 		t.Fatalf("confirmation dropped shell-quoted config-dir %q: %q", dir, confirmation)
 	}
-	command := exec.Command("sh", "-c", "set -- "+strings.TrimSpace(confirmation)+"; printf '%s\\000' \"$@\"")
-	parsed, err := command.Output()
-	if err != nil {
-		t.Fatalf("parse confirmation %q: %v", confirmation, err)
+	batch, err := cmdparse.ParseBatch([]cmdparse.Call{{ID: "confirmation", Command: strings.TrimSpace(confirmation)}})
+	if err != nil || len(batch["confirmation"]) != 1 {
+		t.Fatalf("parse confirmation %q: %v parts=%v", confirmation, err, batch["confirmation"])
 	}
-	words := strings.Split(strings.TrimSuffix(string(parsed), "\x00"), "\x00")
+	words := append([]string{batch["confirmation"][0].Program}, batch["confirmation"][0].Args...)
 	if len(words) < 2 || words[0] != "pfm" || words[1] != "install" {
 		t.Fatalf("confirmation argv=%q", words)
 	}

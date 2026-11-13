@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -39,6 +38,10 @@ func (noNetworkThemeTransport) RoundTrip(*http.Request) (*http.Response, error) 
 // testBinaryDir is where TestMain built the shared pfm binary, and where the
 // watch ladder builds its mock engine once; empty when no build ran.
 var testBinaryDir string
+
+// attachHelperEnv marks a re-exec of this test binary as the attach helper a jailed attach test
+// runs inside a live tmux pane (attach_jail_test.go); TestMain reads it in every build.
+const attachHelperEnv = "PFM_ATTACH_HELPER"
 
 // TestMain gives this package a short, canonical TMPDIR before any test builds
 // a path from it. See internal/testjail for why both properties matter.
@@ -140,42 +143,4 @@ func runningOnlyMCPDaemonMountedTest() bool {
 		}
 	}
 	return false
-}
-
-func TestTestMainUsesPrebuiltPFMBinary(t *testing.T) {
-	if want := os.Getenv("TEST_EXPECT_PFM_BINARY"); want != "" {
-		if testPFMBinary != want {
-			t.Fatalf("testPFMBinary = %q, want prebuilt %q", testPFMBinary, want)
-		}
-		return
-	}
-	goDir := t.TempDir()
-	if err := testjail.WriteExecutable(filepath.Join(goDir, "go"), []byte("#!/bin/sh\nexit 41\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	prebuilt := filepath.Join(t.TempDir(), "pfm")
-	if err := testjail.WriteExecutable(prebuilt, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	command := exec.Command(os.Args[0], "-test.run=^TestTestMainUsesPrebuiltPFMBinary$")
-	command.Env = append(os.Environ(),
-		"PATH="+goDir, paths.EnvTestPFMBinary+"="+prebuilt, "TEST_EXPECT_PFM_BINARY="+prebuilt,
-	)
-	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("run with prebuilt pfm: %v\n%s", err, output)
-	}
-	if _, err := os.Stat(prebuilt); err != nil {
-		t.Fatalf("TestMain removed prebuilt binary %q: %v", prebuilt, err)
-	}
-}
-
-func TestTestMainRejectsBrokenPrebuiltPFMBinary(t *testing.T) {
-	missing := filepath.Join(t.TempDir(), "missing-pfm")
-	command := exec.Command(os.Args[0], "-test.run=^TestTestMainRejectsBrokenPrebuiltPFMBinary$")
-	command.Env = append(os.Environ(), paths.EnvTestPFMBinary+"="+missing)
-	output, err := command.CombinedOutput()
-	if err == nil || !strings.Contains(string(output), paths.EnvTestPFMBinary) ||
-		!strings.Contains(string(output), missing) {
-		t.Fatalf("TestMain broken prebuilt = %v, %q; want named failure", err, output)
-	}
 }

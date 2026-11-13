@@ -98,7 +98,7 @@ func TestDetachedLegacyRecipeRemoteControl(t *testing.T) {
 			account := filepath.Join(runtime.Paths.Home, "account")
 			runtime.Config.Accounts = []config.Account{{ID: 7, ConfigDir: account, Claude: &prefs}}
 			binary := filepath.Join(runtime.Paths.Home, "fixture-engine")
-			if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+			if err := testjail.WriteExecutableNeverRun(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 				t.Fatal(err)
 			}
 			run := fleetdb.SeatRun{

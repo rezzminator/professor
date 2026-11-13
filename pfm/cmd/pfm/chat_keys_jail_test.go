@@ -1,3 +1,5 @@
+//go:build jail
+
 package main
 
 import (
@@ -16,6 +18,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // TestChatKeysRefusesATokenTmuxWouldType guards the silent failure the whole
@@ -43,6 +46,7 @@ func TestChatKeysRefusesATokenTmuxWouldType(t *testing.T) {
 // tmux: text typed with --literal and submitted with Enter has to come back
 // out of the chat's own transcript.
 func TestChatKeysDrivesALiveChat(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -98,6 +102,7 @@ func TestChatKeysDrivesALiveChat(t *testing.T) {
 // chat's own pane, never whatever pane a target-less tmux command lands on
 // (here a newer session on the chat's server).
 func TestChatModalDeniesOnTheResolvedTmuxPane(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -154,6 +159,7 @@ func TestChatKeysRefusesADeadChat(t *testing.T) {
 // Enter, and the chat sat idle looking alive. The launch has to press the keys
 // a human would and prove the result against the engine's transcript.
 func TestRunRescuesAPromptStrandedByAnOverlay(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}

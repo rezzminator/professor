@@ -23,9 +23,13 @@ type branchInheritJail struct {
 	root, tmuxDir, sidDir, procRoot string
 	primaryDir, parentDir           string
 	configPath, argsPath, envPath   string
+	fakeClaude                      string
 }
 
-func newBranchInheritJail(t *testing.T) *branchInheritJail {
+// newBranchInheritFixture builds the jail's directories, machine config and
+// environment; fakeClaude names the binary the jail tests write (nothing
+// here runs it).
+func newBranchInheritFixture(t *testing.T) *branchInheritJail {
 	t.Helper()
 	root := testjail.ShortRoot(t)
 	home := filepath.Join(root, "home")
@@ -48,20 +52,6 @@ func newBranchInheritJail(t *testing.T) *branchInheritJail {
 	argsPath := filepath.Join(root, "claude.args")
 	envPath := filepath.Join(root, "claude.env")
 	fakeClaude := filepath.Join(binDir, "claude")
-	script := "#!/bin/sh\n" +
-		"printf '%s\\n' \"$@\" > \"$PFM_TEST_BRANCH_ARGS\"\n" +
-		"env > \"$PFM_TEST_BRANCH_ENV\"\n" +
-		"if [ -n \"$PFM_TEST_BRANCH_FORK_ID\" ]; then\n" +
-		"  fork_path=\"$PFM_HOME/.claude/projects/fork/$PFM_TEST_BRANCH_FORK_ID.jsonl\"\n" +
-		"  mkdir -p \"$(dirname \"$fork_path\")\"\n" +
-		"  printf '{}\\n' > \"$fork_path\"\n" +
-		"  printf '%s\\n' \"$fork_path\" > \"$PFM_SID_DIR/$PFM_TEST_FRESH_SOCKET\"\n" +
-		"fi\n" +
-		"exec sleep 120\n"
-	if err := testjail.WriteExecutable(fakeClaude, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
-
 	configPath := filepath.Join(root, "machine.json")
 	config := fmt.Sprintf(
 		`{"version":1,"accounts":[{"id":1,"configDir":%q},{"id":7,"configDir":%q}]}`,
@@ -90,7 +80,7 @@ func newBranchInheritJail(t *testing.T) *branchInheritJail {
 	return &branchInheritJail{
 		root: root, tmuxDir: tmuxDir, sidDir: sidDir, procRoot: procRoot,
 		primaryDir: primaryDir, parentDir: parentDir,
-		configPath: configPath, argsPath: argsPath, envPath: envPath,
+		configPath: configPath, argsPath: argsPath, envPath: envPath, fakeClaude: fakeClaude,
 	}
 }
 
@@ -109,7 +99,7 @@ func runBranchForked(t *testing.T, jail *branchInheritJail, args ...string) (std
 // instead of a permission bit so the injection is honest for a root-run
 // suite (a chmod-based block is a silent no-op for uid 0).
 func TestChatBranchFallsToTheAccountRefusalWhenTheParentScanFails(t *testing.T) {
-	jail := newBranchInheritJail(t)
+	jail := newBranchInheritFixture(t)
 	blocker := filepath.Join(jail.root, "not-a-directory")
 	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)

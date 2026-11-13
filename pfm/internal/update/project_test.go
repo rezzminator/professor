@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -962,13 +961,7 @@ func writeProjectFixtureFile(t *testing.T, root, relative, content string) {
 
 func projectGitShortSHA(t *testing.T, root string) string {
 	t.Helper()
-	command := exec.Command("git", "rev-parse", "--short", "HEAD")
-	command.Dir = root
-	output, err := command.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git rev-parse --short HEAD: %v\n%s", err, output)
-	}
-	return strings.TrimSpace(string(output))
+	return updateGit.Must(t, root, "rev-parse", "--short", "HEAD")
 }
 
 func projectTreeDigest(t *testing.T, root string) string {

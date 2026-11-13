@@ -9,6 +9,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
 // TestSocketForPIDReportsAnUnresponsiveServer: a Claude server that does not
@@ -20,7 +21,8 @@ func TestSocketForPIDReportsAnUnresponsiveServer(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "cc-1800000000-1-1"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	socket, err := RealTmux{Binary: testjail.HungTmux(t, 1), Dir: dir}.SocketForPID(context.Background(), 42)
+	ctx := pfmtmux.WithClientRunner(context.Background(), testjail.HungTmuxRunner(1))
+	socket, err := RealTmux{Binary: "tmux", Dir: dir}.SocketForPID(ctx, 42)
 	if !errors.Is(err, gather.ErrServerUnresponsive) {
 		t.Fatalf("SocketForPID() over an unresponsive server = %q, %v; want ErrServerUnresponsive", socket, err)
 	}

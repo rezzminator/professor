@@ -133,15 +133,16 @@ func CodexLaunch(args []string, stderr io.Writer, runtime config.Runtime) int {
 	return CodexLaunchWith(args, stderr, runtime, nil)
 }
 
-// CodexLaunchWith is CodexLaunch with the runner of the mirror's engine-sync child; nil is the real one.
-func CodexLaunchWith(args []string, stderr io.Writer, runtime config.Runtime, engineSync deps.Runner) int {
+// CodexLaunchWith is CodexLaunch with the runner of its children, the Codex binary's lookup and the
+// mirror's engine-sync; nil is the real one.
+func CodexLaunchWith(args []string, stderr io.Writer, runtime config.Runtime, runner deps.Runner) int {
 	primary := launchPrimaryAccount(runtime, stderr)
 	policy := runtime.Config.EffectiveCodex(primary)
 	binaryName := policy.Binary
 	if binaryName == "" {
 		binaryName = pfmengine.MustLookup(pfmengine.Codex).Binary
 	}
-	binary, err := obs.Runner(deps.RealRunner{}).LookPath(binaryName)
+	binary, err := obs.Runner(runner).LookPath(binaryName)
 	if err != nil {
 		fmt.Fprintf(stderr, "resolve Codex binary: %v\n", err)
 		return 1
@@ -150,7 +151,7 @@ func CodexLaunchWith(args []string, stderr io.Writer, runtime config.Runtime, en
 	if policy.Yolo {
 		argv = append(argv, "--dangerously-bypass-approvals-and-sandbox")
 	}
-	personaArgs, envs, err := codexWorkbenchArgs(args, runtime.Paths.Home, engineSync, stderr)
+	personaArgs, envs, err := codexWorkbenchArgs(args, runtime.Paths.Home, runner, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "launch Codex: %v\n", err)
 		return 1
@@ -188,7 +189,7 @@ func CodexLaunchWith(args []string, stderr io.Writer, runtime config.Runtime, en
 // settings' envs. A part that cannot be resolved is left out with a warning
 // and the launch goes on; only a workbench that does not enable Codex refuses it.
 func codexWorkbenchArgs(
-	args []string, home string, engineSync deps.Runner, stderr io.Writer,
+	args []string, home string, runner deps.Runner, stderr io.Writer,
 ) ([]string, map[string]string, error) {
 	const prefix = "launch Codex"
 	cwd, err := os.Getwd()
@@ -213,7 +214,7 @@ func codexWorkbenchArgs(
 	if err != nil {
 		return nil, nil, err
 	}
-	warnings = append(warnings, action.PersonaMirror(persona, pfmengine.Codex, home, engineSync)...)
+	warnings = append(warnings, action.PersonaMirror(persona, pfmengine.Codex, home, runner)...)
 	launchnotice.Print(stderr, prefix, warnings)
 	if !persona.Applies() {
 		return nil, persona.Envs, nil

@@ -1,7 +1,6 @@
 internal/archive/archive.go 1
 internal/heal/heal.go 1
 internal/mcpserv/daemon_status.go 1
-internal/mcpserv/stdio.go 1
 internal/statusline/cache_window.go 2
 internal/statusline/context.go 6
 internal/testjail/testjail.go 1

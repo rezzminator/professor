@@ -35,9 +35,9 @@ func TestChatNewReadsFlagsAfterAPositionalName(t *testing.T) {
 	}
 }
 
-func newWorkbenchRunFixture(t *testing.T, jail *runJail) (string, string) {
+func newWorkbenchRunFixture(t *testing.T, jailRoot string) (string, string) {
 	t.Helper()
-	root := filepath.Join(jail.root, "work", "acme")
+	root := filepath.Join(jailRoot, "work", "acme")
 	dir := filepath.Join(root, "docs", "scribe")
 	duo := filepath.Join(root, "docs", "duo")
 	for path, body := range map[string]string{

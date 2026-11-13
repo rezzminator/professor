@@ -1,3 +1,5 @@
+//go:build jail
+
 package gather
 
 import (
@@ -271,6 +273,7 @@ func TestProbeTmuxKeepsTheReadablePanesOfAPartlyMalformedAnswer(t *testing.T) {
 // says nothing; a server that cannot be read is an error naming the option,
 // never an empty "nothing to converge".
 func TestConvergeGlobalOptionsChangesOnlyWhatDiverges(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -323,6 +326,7 @@ func TestConvergeGlobalOptionsChangesOnlyWhatDiverges(t *testing.T) {
 // It is now ErrServerEmpty, listed in EmptyServers with a warning naming the
 // socket and the reap command, and its socket is never swept.
 func TestEmptyServerIsListedWithTheReapFix(t *testing.T) {
+	testjail.TmuxServer(t)
 	jail := newTmuxJail(t)
 	t.Setenv("PFM_TEST_PROBE_SOCKETS", "1")
 	const socket = "probe-empty-server"
@@ -395,6 +399,7 @@ func TestProbeFailureCarriesTmuxReasonAndAHandCheck(t *testing.T) {
 // read by the probe gather.New builds, which addresses it by full path the way
 // the tmux door does.
 func TestGathererProbesThePFMTmuxDirSockets(t *testing.T) {
+	testjail.TmuxServer(t)
 	jail := newTmuxJail(t)
 	const socket = "cc-probe-dir-1-2-3"
 	directory := filepath.Join(jail.root, "pfm-tmux")

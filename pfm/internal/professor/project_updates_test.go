@@ -57,107 +57,6 @@ func newUpdatedGitStoreProject(t *testing.T, store string) (project, home string
 	return project, t.TempDir()
 }
 
-// TestProjectUpdatesDiffIgnoresTheUsersGitDiffConfig: the diff printed under
-// an UPDATED row is git's own unified diff whatever the user's gitconfig
-// says — color.diff=always must not put ANSI escapes into the report or the
-// JSON diff, and a diff.external tool must not replace (or, failing, break)
-// it. Watched failing against the plain `git diff <pinned> -- …` call: the
-// external `false` made every UPDATED diff UNREADABLE and the run exit 3.
-func TestProjectUpdatesDiffIgnoresTheUsersGitDiffConfig(t *testing.T) {
-	store := newGitScaffoldStore(t)
-	runStoreGit(t, "-C", store, "config", "color.diff", "always")
-	runStoreGit(t, "-C", store, "config", "diff.external", "false")
-	project, home := newUpdatedGitStoreProject(t, store)
-
-	t.Run("diff ran", func(t *testing.T) {
-		var stdout bytes.Buffer
-		if code := RunProjectUpdates(project, home, true, &stdout, nil); code != 1 {
-			t.Fatalf("RunProjectUpdates(--json) code=%d, want 1 (review): %s", code, stdout.String())
-		}
-		var report struct {
-			Items []projectReportItem `json:"items"`
-		}
-		if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
-			t.Fatalf("report is not one JSON object: %v\n%s", err, stdout.String())
-		}
-		for _, item := range report.Items {
-			if item.Status != projectUpdated {
-				continue
-			}
-			if item.DiffError != "" || !strings.Contains(item.Diff, "\n+upstream line\n") ||
-				strings.Contains(item.Diff, "\x1b[") {
-				t.Fatalf(
-					"UPDATED %s diff=%q diffError=%q, want git's plain unified diff",
-					item.Local,
-					item.Diff,
-					item.DiffError,
-				)
-			}
-			var payload struct {
-				Items []map[string]json.RawMessage `json:"items"`
-			}
-			if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
-				t.Fatal(err)
-			}
-			for _, encoded := range payload.Items {
-				if _, skipped := encoded["diffSkipped"]; skipped {
-					t.Fatalf("diff ran but JSON includes diffSkipped: %s", stdout.String())
-				}
-			}
-			return
-		}
-		t.Fatalf("no UPDATED item in the report: %s", stdout.String())
-	})
-
-	t.Run("post-update review", func(t *testing.T) {
-		var stdout bytes.Buffer
-		if code := renderProjectCheck(
-			project,
-			home,
-			false,
-			&stdout,
-			nil,
-		); code != 1 ||
-			!strings.Contains(stdout.String(), "REVIEW REQUIRED — 1 items; nothing was written.") {
-			t.Fatalf("renderProjectCheck() code=%d, want 1 (review): %s", code, stdout.String())
-		}
-	})
-
-	t.Run("textconv", func(t *testing.T) {
-		if err := os.WriteFile(
-			filepath.Join(store, ".git", "info", "attributes"),
-			[]byte("* diff=upper\n"),
-			0o600,
-		); err != nil {
-			t.Fatal(err)
-		}
-		runStoreGit(t, "-C", store, "config", "diff.upper.textconv", "tr a-z A-Z")
-		var stdout bytes.Buffer
-		code := RunProjectUpdates(project, home, true, &stdout, nil)
-		var report struct {
-			Items []projectReportItem `json:"items"`
-		}
-		if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
-			t.Fatal(err)
-		}
-		for _, item := range report.Items {
-			if item.Status == projectUpdated {
-				if code != 1 || item.DiffError != "" || !strings.Contains(item.Diff, "\n+upstream line\n") ||
-					strings.Contains(item.Diff, "UPSTREAM LINE") {
-					t.Fatalf(
-						"textconv report code=%d diff=%q error=%q, want plain diff",
-						code,
-						item.Diff,
-						item.DiffError,
-					)
-				}
-				return
-			}
-		}
-		t.Fatalf("no UPDATED item: %s", stdout.String())
-	})
-}
-
 func TestProjectUpdatesDiffIgnoresAnInheritedForeignRepository(t *testing.T) {
 	project, home := newUpdatedGitStoreProject(t, newGitScaffoldStore(t))
 	foreign := newGitScaffoldStore(t)
@@ -733,7 +632,7 @@ func TestProjectUpdatesKeepsTheDiffWhenPinHistoryIsUnreadable(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			report.Store.runner = failingGitVerbRunner{Runner: deps.RealRunner{}, verb: row.verb}
+			report.Store.runner = failingGitVerbRunner{Runner: storeGit, verb: row.verb}
 			if failed := captureProjectDiffs(&report); failed {
 				t.Fatalf("captureProjectDiffs() failed = true, want the diff kept: %+v", report.Items)
 			}

@@ -1,3 +1,5 @@
+//go:build jail
+
 package gather
 
 import (
@@ -8,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // A window name that does not stick has exactly one interesting question
@@ -93,6 +97,7 @@ func windowNameSettles(t *testing.T, socket, tty, title string) string {
 // Candidate 1: tmux's automatic-rename. RULED OUT — rename-window turns it off
 // for the window it renames, even while the server-wide default is on.
 func TestAutomaticRenameIsNotTheSecondWriter(t *testing.T) {
+	testjail.TmuxServer(t)
 	socket, windowID, _ := startRenameProbeServer(t, "autorename")
 	renameProbeTmux(t, socket, "set-window-option", "-g", "automatic-rename", "on")
 
@@ -123,6 +128,7 @@ func TestAutomaticRenameIsNotTheSecondWriter(t *testing.T) {
 // emits. RULED OUT — inside tmux it sets pane_title and never the window name,
 // with allow-rename on or off.
 func TestOSCTitleWriteNeverTouchesTheWindowName(t *testing.T) {
+	testjail.TmuxServer(t)
 	socket, windowID, tty := startRenameProbeServer(t, "osc")
 	if err := (TmuxProbe{TmuxTmpDir: "/tmp"}).RenameWindow(context.Background(), WindowRename{
 		Socket: socket, WindowID: windowID, CurrentName: "before", TargetName: "WANTED",
@@ -158,6 +164,7 @@ func TestScreenTitleEscapeIsTheSecondWriterWhenAllowRenameIsOn(t *testing.T) {
 // …and RenameWindow's latch stops it: the same write against a window pfm
 // renamed leaves the fleet's name in place.
 func TestRenameWindowLatchSurvivesAScreenTitleEscape(t *testing.T) {
+	testjail.TmuxServer(t)
 	socket, windowID, tty := startRenameProbeServer(t, "latch")
 	renameProbeTmux(t, socket, "set-window-option", "-g", "allow-rename", "on")
 
@@ -187,6 +194,7 @@ func TestRenameWindowLatchSurvivesAScreenTitleEscape(t *testing.T) {
 // it already reads the exact name. The window name stays the clipped form; a
 // writer that does not know the name (ChatName empty) leaves the option unset.
 func TestRenameWindowSetsTheExactChatNameInTheSameCommand(t *testing.T) {
+	testjail.TmuxServer(t)
 	socket, windowID, _ := startRenameProbeServer(t, "chatname")
 	hookLog := fmt.Sprintf("/tmp/%s-hook.log", socket)
 	t.Cleanup(func() { _ = os.Remove(hookLog) })

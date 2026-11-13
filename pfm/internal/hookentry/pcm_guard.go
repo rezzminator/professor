@@ -14,6 +14,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/cmdparse"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -119,6 +120,8 @@ type pcmGuardJudge struct {
 	trusted map[string]bool
 	// grants memoises each grant file's directories for agent, by path.
 	grants map[string][]string
+	// git runs the engine mode's git reads; nil is the real runner.
+	git deps.Runner
 }
 
 // PcmGuard is the PreToolUse hook on the edit tools and Bash that denies a

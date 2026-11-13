@@ -20,6 +20,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
@@ -27,6 +28,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
 type nativeChatRequest struct {
@@ -377,12 +379,18 @@ func TestOpenNativeOutsideReportsLocationWhenAttachFails(t *testing.T) {
 	t.Setenv("HERDR_SOCKET_PATH", "")
 	t.Setenv("HERDR_ENV", "")
 	bin := t.TempDir()
-	if err := testjail.WriteExecutable(filepath.Join(bin, "herdr"), []byte("#!/bin/sh\nexit 1\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutableNeverRun(
+		filepath.Join(bin, "herdr"),
+		[]byte("#!/bin/sh\nexit 1\n"),
+		0o700,
+	); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin)
+	attach := &deps.FakeRunner{}
+	attach.ScriptStart(nil, 4242, errors.New("exit status 1"), nil)
 	var stdout, stderr bytes.Buffer
-	code := OpenID(context.Background(), seat.SessionID, &stdout, &stderr, &runtime)
+	code := OpenID(herdr.WithAttachRunner(context.Background(), attach), seat.SessionID, &stdout, &stderr, &runtime)
 	want := fmt.Sprintf("INTEGRATION lives in Herdr pane w6:p3 (%s)", socket)
 	if code != 1 || !strings.Contains(stderr.String(), want) {
 		t.Fatalf("external open code=%d out=%q err=%q want=%q", code, stdout.String(), stderr.String(), want)
@@ -673,7 +681,7 @@ func TestRetireOtherHerdrViewsSparesAViewFromAnAgentPane(t *testing.T) {
 			t.Setenv("TMUX", tc.tmux)
 			var stderr bytes.Buffer
 			retireOtherHerdrViews(
-				context.Background(),
+				pfmtmux.WithClientRunner(context.Background(), testjail.AbsentTmuxRunner()),
 				compose.Row{Name: "chat", Socket: "cc-chat", PaneID: "%1"},
 				config.Runtime{Paths: values},
 				&stderr,
@@ -801,13 +809,14 @@ func TestOpenNativeOffersAccountChange(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				marker := filepath.Join(t.TempDir(), "attached")
 				bin := t.TempDir()
-				if err := testjail.WriteExecutable(
-					filepath.Join(bin, "herdr"), []byte("#!/bin/sh\necho \"$@\" > "+marker+"\n"), 0o700,
+				if err := testjail.WriteExecutableNeverRun(
+					filepath.Join(bin, "herdr"), []byte("#!/bin/sh\n"), 0o700,
 				); err != nil {
 					t.Fatal(err)
 				}
+				attach := &deps.FakeRunner{}
+				attach.ScriptStart(nil, 4242, nil, nil)
 				t.Setenv("PATH", bin)
 				t.Setenv("HERDR_SOCKET_PATH", "")
 				t.Setenv("HERDR_ENV", "")
@@ -832,10 +841,26 @@ func TestOpenNativeOffersAccountChange(t *testing.T) {
 				code := 0
 				if door == "row" {
 					code = OpenRow(
-						context.Background(), nativeRow(seat), test.primary, false, "", &stdout, &stderr, &runtime,
+						herdr.WithAttachRunner(
+							context.Background(),
+							attach,
+						),
+						nativeRow(seat),
+						test.primary,
+						false,
+						"",
+						&stdout,
+						&stderr,
+						&runtime,
 					)
 				} else {
-					code = OpenID(context.Background(), seat.SessionID, &stdout, &stderr, &runtime)
+					code = OpenID(
+						herdr.WithAttachRunner(context.Background(), attach),
+						seat.SessionID,
+						&stdout,
+						&stderr,
+						&runtime,
+					)
 				}
 				if code != test.wantCode {
 					t.Fatalf("code=%d want %d stderr=%s", code, test.wantCode, &stderr)
@@ -863,8 +888,8 @@ func TestOpenNativeOffersAccountChange(t *testing.T) {
 						t.Fatalf("reboot=%+v want account %d on %s %s", got, test.wantWant, socket, seat.HerdrPane)
 					}
 				}
-				if _, err := os.Stat(marker); (err == nil) != test.wantAttach {
-					t.Fatalf("attach marker err=%v want attached=%t stderr=%s", err, test.wantAttach, &stderr)
+				if attached := len(attach.Starts()) > 0; attached != test.wantAttach {
+					t.Fatalf("attach started=%t want attached=%t stderr=%s", attached, test.wantAttach, &stderr)
 				}
 				if test.wantStderr != "" && !strings.Contains(stderr.String(), test.wantStderr) {
 					t.Fatalf("stderr=%q want %q", &stderr, test.wantStderr)

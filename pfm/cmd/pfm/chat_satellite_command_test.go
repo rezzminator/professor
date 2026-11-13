@@ -596,3 +596,7 @@ func TestChatLSNativeUnreachableIsVisibleAndNonzero(t *testing.T) {
 		t.Fatalf("unreachable list code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 }
+
+// answered is the transcript text of the assistant's answer reply: the
+// typed prompt names the reply too, so only this marks the turn as ended.
+func answered(reply string) string { return `"text":"` + reply + `"` }

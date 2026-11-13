@@ -1,3 +1,5 @@
+//go:build jail
+
 package main
 
 import (
@@ -121,6 +123,7 @@ func reloadWorkerCapturedAccount(t *testing.T, captured string) string {
 }
 
 func TestChatReloadWorkerFailureReachesThePaneAndLog(t *testing.T) {
+	testjail.TmuxServer(t)
 	configPath, socket, _ := reloadWorkerAccountFixture(t)
 	_, recorder := obs.Test(t)
 	runtime, err := pfmconfig.LoadRuntime(configPath)
@@ -254,6 +257,7 @@ func TestChatReloadWorkerConfigFailureReachesPaneAndLog(t *testing.T) {
 }
 
 func TestChatReloadWorkerNeverReadsAThenPayloadAsASeat(t *testing.T) {
+	testjail.TmuxServer(t)
 	configPath, socket, captured := reloadWorkerAccountFixture(t)
 	runtime, err := pfmconfig.LoadRuntime(configPath)
 	if err != nil {
@@ -282,6 +286,7 @@ func TestChatReloadWorkerNeverReadsAThenPayloadAsASeat(t *testing.T) {
 }
 
 func TestChatReloadWorkerTakesTheAccountAfterNewAndHide(t *testing.T) {
+	testjail.TmuxServer(t)
 	configPath, socket, captured := reloadWorkerAccountFixture(t)
 	runtime, err := pfmconfig.LoadRuntime(configPath)
 	if err != nil {
@@ -301,6 +306,7 @@ func TestChatReloadWorkerTakesTheAccountAfterNewAndHide(t *testing.T) {
 }
 
 func TestChatReloadWorkerContinuesAccountAfterNew(t *testing.T) {
+	testjail.TmuxServer(t)
 	configPath, socket, captured := reloadWorkerAccountFixture(t)
 	runtime, err := pfmconfig.LoadRuntime(configPath)
 	if err != nil {
@@ -331,6 +337,7 @@ func TestChatReloadWorkerContinuesAccountAfterNew(t *testing.T) {
 }
 
 func TestChatReloadWorkerContinuesBoundCodexConversationAfterNew(t *testing.T) {
+	testjail.TmuxServer(t)
 	root := jailTest(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
@@ -514,6 +521,7 @@ func TestChatReloadWorkerContinuesBoundCodexConversationAfterNew(t *testing.T) {
 }
 
 func TestChatReloadWorkerHidesTheSessionItContinuedFrom(t *testing.T) {
+	testjail.TmuxServer(t)
 	configPath, socket, _ := reloadWorkerAccountFixture(t)
 	runtime, err := pfmconfig.LoadRuntime(configPath)
 	if err != nil {

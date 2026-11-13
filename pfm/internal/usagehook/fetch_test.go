@@ -10,7 +10,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -18,7 +17,6 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
-	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
@@ -329,45 +327,6 @@ func TestHasCurrentWindowNeedsAReadingAndAResetNotYetPassed(t *testing.T) {
 	}
 }
 
-// TestClaudeProbesNeverWriteTheRealClaudeHome: the dependency probe (version
-// and self-doctor, as pfm doctor and pfm install run it) and the usage hook's
-// version read each run a logged-out claude. Run with the ambient env, it
-// recreated ~/.claude/backups and $HOME/.claude.json and the host check then
-// blocked the machine; each run now gets a throwaway home that is gone after.
-func TestClaudeProbesNeverWriteTheRealClaudeHome(t *testing.T) {
-	home := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("HOME", home)
-	sid := filepath.Join(t.TempDir(), "sid")
-	t.Setenv(paths.EnvSIDDir, sid)
-	scratch := t.TempDir()
-	record := filepath.Join(scratch, "config-dirs.log")
-	binary := filepath.Join(scratch, "claude")
-	if err := testjail.WriteLoggedOutClaude(binary, record, ""); err != nil {
-		t.Fatal(err)
-	}
-	var entries []deps.Entry
-	registry := deps.Registry(deps.Options{Home: home, ClaudeBinary: binary})
-	for index := range registry {
-		if registry[index].Engine == pfmengine.Claude {
-			entries = append(entries, registry[index])
-		}
-	}
-	results := deps.Probe(context.Background(), entries, deps.ProbeOptions{GOOS: runtime.GOOS})
-	if len(results) != 1 || results[0].State != deps.StateOK || results[0].SelfDoctor != "ok" {
-		t.Fatalf("dependency probe = %#v, want one healthy claude", results)
-	}
-	version, err := claudeCodeVersion(context.Background(), binary)
-	if err != nil || version != "2.1.238" {
-		t.Fatalf("usage hook version = %q, %v", version, err)
-	}
-	if runs := testjail.AssertClaudeRanInThrowawayHomes(t, home, sid, record); runs != 4 {
-		t.Errorf("the fake recorded %d runs, want 4 (--version, doctor --help, doctor, the usage --version)", runs)
-	}
-}
-
 // TestClaudeCodeVersionNamesAMissingBinary: a Claude binary absent from PATH
 // fails at resolution with its name, never as a stat of the bare name.
 func TestClaudeCodeVersionNamesAMissingBinary(t *testing.T) {
@@ -388,25 +347,28 @@ func TestClaudeVersionProbeDropsTheHerdrPane(t *testing.T) {
 	t.Setenv("HERDR_SOCKET_PATH", "/tmp/h.sock")
 	t.Setenv("HERDR_BIN_PATH", "/usr/local/bin/herdr")
 	t.Setenv("PFM_PROBE_KEEP", "kept")
-	scratch := t.TempDir()
-	record := filepath.Join(scratch, "env.log")
-	binary := filepath.Join(scratch, "claude")
-	script := "#!/bin/sh\n/usr/bin/env > '" + record + "'\nprintf '2.1.238 (Claude Code)\\n'\n"
-	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
+	binary := filepath.Join(t.TempDir(), "claude")
+	if err := testjail.WriteExecutableNeverRun(binary, []byte("#!/bin/sh\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
+	fake := &deps.FakeRunner{}
+	fake.Script([]string{binary, "--version"}, deps.RunResult{Stdout: []byte("2.1.238 (Claude Code)\n")}, nil)
+	previous := usageRunner
+	usageRunner = fake
+	t.Cleanup(func() { usageRunner = previous })
 	if version, err := claudeCodeVersion(context.Background(), binary); err != nil || version != "2.1.238" {
 		t.Fatalf("claudeCodeVersion = %q, %v, want 2.1.238", version, err)
 	}
-	raw, err := os.ReadFile(record)
-	if err != nil {
-		t.Fatal(err)
+	calls := fake.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("version probes = %v, want exactly 1", calls)
 	}
-	if !strings.Contains(string(raw), "PFM_PROBE_KEEP=kept") {
+	raw := strings.Join(calls[0].Opts.Env, "\n")
+	if !strings.Contains(raw, "PFM_PROBE_KEEP=kept") {
 		t.Fatalf("the probe lost an unrelated variable: %s", raw)
 	}
 	for _, name := range []string{"HERDR_ENV", "HERDR_PANE_ID", "HERDR_SOCKET_PATH", "HERDR_BIN_PATH"} {
-		if strings.Contains("\n"+string(raw), "\n"+name+"=") {
+		if strings.Contains("\n"+raw, "\n"+name+"=") {
 			t.Errorf("%s reached the version probe: %s", name, raw)
 		}
 	}

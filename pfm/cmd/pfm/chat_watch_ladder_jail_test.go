@@ -1,3 +1,5 @@
+//go:build jail
+
 package main
 
 import (
@@ -80,6 +82,7 @@ func newWatchLadder(t *testing.T) *watchLadder {
 
 // Rungs: a turn ending mid-poll, idle then busy again, death.
 func TestWatchLadderFollowsOneSeatThroughTurnsToItsExit(t *testing.T) {
+	testjail.TmuxServer(t)
 	ladder := newWatchLadder(t)
 	seat := ladder.start("lad-a")
 	watch := ladder.watch("lad-a", "--transitions")
@@ -103,6 +106,7 @@ func TestWatchLadderFollowsOneSeatThroughTurnsToItsExit(t *testing.T) {
 
 // Rung: --once announces the first idle and stops.
 func TestWatchLadderOnceAnnouncesTheFirstIdleAndStops(t *testing.T) {
+	testjail.TmuxServer(t)
 	ladder := newWatchLadder(t)
 	seat := ladder.start("lad-a")
 	release := seat.hold()
@@ -116,6 +120,7 @@ func TestWatchLadderOnceAnnouncesTheFirstIdleAndStops(t *testing.T) {
 
 // Rung: compaction is a turn, never an end.
 func TestWatchLadderCompactionIsNotAnEnd(t *testing.T) {
+	testjail.TmuxServer(t)
 	ladder := newWatchLadder(t)
 	seat := ladder.start("lad-a")
 	watch := ladder.watch("lad-a", "--transitions")
@@ -142,6 +147,7 @@ func TestWatchLadderCompactionIsNotAnEnd(t *testing.T) {
 // working: the watch keeps following its transcript, and the EXIT comes when
 // the engine ends.
 func TestWatchLadderASocketThatVanishes(t *testing.T) {
+	testjail.TmuxServer(t)
 	t.Run("kill-server", func(t *testing.T) {
 		ladder := newWatchLadder(t)
 		seat := ladder.start("lad-a")
@@ -188,6 +194,7 @@ func TestWatchLadderASocketThatVanishes(t *testing.T) {
 // never ends it and its turns are still announced; a glob follows names, so
 // the old name leaves (DEAD) and the new one is adopted (SEEN).
 func TestWatchLadderARenameKeepsTheNamedWatchAndMovesTheGlob(t *testing.T) {
+	testjail.TmuxServer(t)
 	ladder := newWatchLadder(t)
 	seat := ladder.start("lad-a")
 	named := ladder.watch("lad-a", "--transitions")
@@ -210,6 +217,7 @@ func TestWatchLadderARenameKeepsTheNamedWatchAndMovesTheGlob(t *testing.T) {
 // Rung: a respawn under the same name between two polls is the old seat's
 // EXIT, never a silent switch to the newcomer.
 func TestWatchLadderARespawnUnderTheSameNameIsTheOldSeatsExit(t *testing.T) {
+	testjail.TmuxServer(t)
 	ladder := newWatchLadder(t)
 	first := ladder.start("lad-a")
 	named := ladder.watch("lad-a", "--transitions")
@@ -228,6 +236,7 @@ func TestWatchLadderARespawnUnderTheSameNameIsTheOldSeatsExit(t *testing.T) {
 // Rung: two seats with one name. A named watch refuses the ambiguity; a glob
 // follows both seats, and each one's events and hooks are its own.
 func TestWatchLadderTwoSeatsWithOneName(t *testing.T) {
+	testjail.TmuxServer(t)
 	ladder := newWatchLadder(t)
 	first := ladder.start("lad-a")
 	second := ladder.start("lad-a")
@@ -259,6 +268,7 @@ func TestWatchLadderTwoSeatsWithOneName(t *testing.T) {
 
 // Rung: a glob adopts a seat born after the watch began.
 func TestWatchLadderAGlobAdoptsASeatBornLater(t *testing.T) {
+	testjail.TmuxServer(t)
 	ladder := newWatchLadder(t)
 	ladder.start("lad-a")
 	glob := ladder.watch("lad-*", "--transitions")
@@ -274,6 +284,7 @@ func TestWatchLadderAGlobAdoptsASeatBornLater(t *testing.T) {
 // Rung: a transcript rotated (/clear) or truncated never ends the watch, and
 // the next turn is still announced.
 func TestWatchLadderARotatedOrTruncatedTranscriptKeepsTheWatch(t *testing.T) {
+	testjail.TmuxServer(t)
 	for _, fault := range []string{"clear", "truncate-to-title", "truncate-mid-record"} {
 		t.Run(fault, func(t *testing.T) {
 			ladder := newWatchLadder(t)
@@ -354,6 +365,7 @@ func waitForReply(t *testing.T, project, reply string) {
 // the poll still finishes, nothing is announced while it is unreadable, and a
 // server that stays unreadable is an ERROR, never an EXIT.
 func TestWatchLadderAFrozenTmuxServerIsNeverAnExit(t *testing.T) {
+	testjail.TmuxServer(t)
 	t.Run("thaws", func(t *testing.T) {
 		ladder := newWatchLadder(t)
 		seat := ladder.start("lad-a")
@@ -417,6 +429,7 @@ func TestWatchLadderAFrozenTmuxServerIsNeverAnExit(t *testing.T) {
 
 // Rung: two watcher processes on one target each hear every event once.
 func TestWatchLadderTwoWatchersOnOneTargetBothHearEveryEvent(t *testing.T) {
+	testjail.TmuxServer(t)
 	ladder := newWatchLadder(t)
 	seat := ladder.start("lad-a")
 	first := ladder.watch("lad-a", "--transitions")
@@ -437,6 +450,7 @@ func TestWatchLadderTwoWatchersOnOneTargetBothHearEveryEvent(t *testing.T) {
 
 // Rung: --quiet-after announces a hung turn once, and its end.
 func TestWatchLadderQuietAfterAnnouncesAHungTurnOnce(t *testing.T) {
+	testjail.TmuxServer(t)
 	ladder := newWatchLadder(t)
 	seat := ladder.start("lad-a")
 	watch := ladder.watch("lad-a", "--transitions", "--quiet-after", "1")
@@ -456,6 +470,7 @@ func TestWatchLadderQuietAfterAnnouncesAHungTurnOnce(t *testing.T) {
 
 // Rung: --on-idle and --on-exit run once per event, with the event's seat.
 func TestWatchLadderHooksRunOncePerEvent(t *testing.T) {
+	testjail.TmuxServer(t)
 	ladder := newWatchLadder(t)
 	seat := ladder.start("lad-a")
 	hooks := filepath.Join(ladder.jail.root, "hooks.log")
@@ -479,6 +494,7 @@ func TestWatchLadderHooksRunOncePerEvent(t *testing.T) {
 
 // Rung: a cancelled context ends the watch at once, with no event.
 func TestWatchLadderCancelEndsTheWatchWithoutAnEvent(t *testing.T) {
+	testjail.TmuxServer(t)
 	ladder := newWatchLadder(t)
 	ladder.start("lad-a")
 	watch := ladder.watch("lad-*", "--transitions")

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
@@ -348,14 +349,7 @@ func TestResolveFailsLoudWhenTmuxCannotRun(t *testing.T) {
 // server is gone is one ended chat, not a fault — resolution skips it and
 // reports a plain miss, never an error.
 func TestResolveStillMissesPastADeadSocket(t *testing.T) {
-	binary := filepath.Join(t.TempDir(), "tmux-no-server")
-	if err := testjail.WriteExecutable(
-		binary,
-		[]byte("#!/bin/sh\necho 'no server running' >&2\nexit 1\n"),
-		0o700,
-	); err != nil {
-		t.Fatal(err)
-	}
+	fake := testjail.TmuxRunner(deps.RunResult{Stderr: []byte("no server running\n"), ExitCode: 1})
 	tmuxDir := t.TempDir()
 	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: filepath.Join(tmuxDir, "cc-1-2-3"), Net: "unix"})
 	if err != nil {
@@ -366,8 +360,8 @@ func TestResolveStillMissesPastADeadSocket(t *testing.T) {
 			t.Errorf("close listener: %v", err)
 		}
 	}()
-	resolver := &Resolver{tmux: TmuxResolver{Binary: binary}, tmuxDir: tmuxDir}
-	outcome, err := resolver.Resolve(context.Background(), Session, "any-chat")
+	resolver := &Resolver{tmux: TmuxResolver{}, tmuxDir: tmuxDir}
+	outcome, err := resolver.Resolve(pfmtmux.WithClientRunner(context.Background(), fake), Session, "any-chat")
 	if err != nil {
 		t.Fatalf("a dead socket failed resolution: %v", err)
 	}

@@ -170,7 +170,7 @@ func (tmux TmuxSpawner) NewSession(
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			createErr = fmt.Errorf("create chat server: %w", ctxErr)
 		}
-		return errors.Join(tmux.terminateUnrecorded(guard, spec.Socket, createErr), launch.Discard())
+		return errors.Join(tmux.terminateUnrecorded(ctx, guard, spec.Socket, createErr), launch.Discard())
 	}
 	started = true
 	if guard != nil {
@@ -203,7 +203,7 @@ func (tmux TmuxSpawner) NewSession(
 			if ctxErr := ctx.Err(); queryErr != nil && ctxErr != nil {
 				recordErr = fmt.Errorf("read account launch pane pid: %w", ctxErr)
 			}
-			return tmux.terminateUnrecorded(guard, spec.Socket, recordErr)
+			return tmux.terminateUnrecorded(ctx, guard, spec.Socket, recordErr)
 		}
 	}
 	for _, options := range pfmconfig.ChatServerOptions(tmux.Titles, tmux.pfmBinary()) {
@@ -252,12 +252,15 @@ func (tmux TmuxSpawner) themeBornServer(ctx context.Context, socket string) {
 }
 
 // terminateUnrecorded keeps protection if the child could still be alive.
-func (tmux TmuxSpawner) terminateUnrecorded(guard *gather.AccountGuard, socket string, launchErr error) error {
+func (tmux TmuxSpawner) terminateUnrecorded(
+	ctx context.Context,
+	guard *gather.AccountGuard, socket string, launchErr error,
+) error {
 	if guard == nil {
 		return &SessionCreatedError{Err: launchErr}
 	}
-	// A canceled launch still owns its child; cleanup uses a fresh context.
-	if err := tmux.command(context.Background(), socket, "kill-server").Run(); err != nil {
+	// A canceled launch still owns its child; cleanup outlives its cancel.
+	if err := tmux.command(context.WithoutCancel(ctx), socket, "kill-server").Run(); err != nil {
 		return &SessionCreatedError{
 			Err: errors.Join(launchErr, fmt.Errorf("terminate unrecorded chat server: %w", err)),
 		}

@@ -122,6 +122,11 @@ type gitGuardBlock struct {
 // that mentions git (gitGuardMentionsGit) but does not parse is denied, and
 // so is every command holding git or worktree.sh that hits a parse bound.
 func GitGuard(input io.Reader, stdout, stderr io.Writer) int {
+	return GitGuardWith(input, stdout, stderr, nil)
+}
+
+// GitGuardWith is GitGuard with the runner of the guard's git reads; nil is the real one.
+func GitGuardWith(input io.Reader, stdout, stderr io.Writer, git deps.Runner) int {
 	raw, err := io.ReadAll(input)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm internal git-guard: read hook payload (fail-open): %v\n", err)
@@ -138,7 +143,7 @@ func GitGuard(input io.Reader, stdout, stderr io.Writer) int {
 	if hook.ToolName != bashTool || hook.AgentType == gitGuardExemptAgent {
 		return 0
 	}
-	reason := gitGuardCheck(hook.ToolInput.Command, hook.Cwd, false, hook.AgentID == "", stderr)
+	reason := gitGuardCheck(hook.ToolInput.Command, hook.Cwd, false, hook.AgentID == "", stderr, git)
 	if reason == "" {
 		return 0
 	}
@@ -156,7 +161,7 @@ func GitGuard(input io.Reader, stdout, stderr io.Writer) int {
 // which gitGuardPart lets run the committed worktree script, found from the
 // directory the command's cd parts lead to. A parser error is fail-open to
 // stderr.
-func gitGuardCheck(command, cwd string, engine, mainChat bool, stderr io.Writer) string {
+func gitGuardCheck(command, cwd string, engine, mainChat bool, stderr io.Writer, git deps.Runner) string {
 	home := storeGuardGet(guardHomeEnv)
 	parsed, err := cmdparse.ParseBatch([]cmdparse.Call{{
 		ID: "git-guard", Command: command, Vars: map[string]string{guardHomeEnv: home},
@@ -185,7 +190,7 @@ func gitGuardCheck(command, cwd string, engine, mainChat bool, stderr io.Writer)
 		}
 		// An unread -c string runs commands no part shows.
 		unreadable = unreadable || (part.Unread && gitGuardMentionsGit(command))
-		if block, ok := gitGuardPart(part, dir, lost, engine, mainChat, stderr); ok {
+		if block, ok := gitGuardPart(part, dir, lost, engine, mainChat, stderr, git); ok {
 			blocks = append(blocks, block)
 		}
 		if lost == "" && slices.Contains(pcmGuardChdirs, filepath.Base(part.Program)) {
@@ -239,7 +244,7 @@ func gitGuardWordByte(b byte) bool {
 // dir is the directory the part runs in; lost, when set, the directory
 // change that left dir unknown, so only an absolute script path is found.
 func gitGuardPart(
-	part *cmdparse.Part, dir, lost string, engine, mainChat bool, stderr io.Writer,
+	part *cmdparse.Part, dir, lost string, engine, mainChat bool, stderr io.Writer, git deps.Runner,
 ) (gitGuardBlock, bool) {
 	written := strings.TrimSpace(part.Program + " " + strings.Join(part.Args, " "))
 	isScript := func(word string) bool { return strings.HasSuffix(word, gitGuardWorktreeSh) }
@@ -254,7 +259,7 @@ func gitGuardPart(
 	if script != "" {
 		found := filepath.IsAbs(script) || lost == ""
 		abs := gitGuardJoin(dir, script)
-		if mainChat && !engine && found && filepath.IsAbs(abs) && gitGuardScriptCommitted(abs) {
+		if mainChat && !engine && found && filepath.IsAbs(abs) && gitGuardScriptCommitted(abs, git) {
 			return gitGuardBlock{}, false
 		}
 		block := gitGuardBlock{command: written, worktree: true, repoDir: dir}
@@ -267,7 +272,7 @@ func gitGuardPart(
 		return gitGuardBlock{}, false
 	}
 	repoDir, sub, rest := gitGuardSplit(part.Args, dir)
-	blocked, worktree := gitGuardBlocks(sub, rest, repoDir, engine, stderr)
+	blocked, worktree := gitGuardBlocks(sub, rest, repoDir, engine, stderr, git)
 	return gitGuardBlock{command: written, worktree: worktree, stash: sub == "stash", repoDir: repoDir}, blocked
 }
 
@@ -302,8 +307,8 @@ func gitGuardChdir(part *cmdparse.Part, dir, home string) (string, bool) {
 // from HEAD (engineGuardCommitted) whose worktree/ helper directory, when one
 // sits beside it, holds no modified, staged, untracked or ignored file. Any
 // failure (no repo, git missing, an unreadable directory) is uncommitted.
-func gitGuardScriptCommitted(abs string) bool {
-	if !engineGuardCommitted(abs) {
+func gitGuardScriptCommitted(abs string, git deps.Runner) bool {
+	if !engineGuardCommitted(abs, git) {
 		return false
 	}
 	helpers := filepath.Join(filepath.Dir(abs), gitGuardScriptHelpers)
@@ -316,7 +321,7 @@ func gitGuardScriptCommitted(abs string) bool {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), engineGuardGitTimeout)
 	defer cancel()
-	status, err := obs.Runner(deps.RealRunner{}).Run(ctx, []string{
+	status, err := obs.Runner(git).Run(ctx, []string{
 		"git", "-C", helpers, "status", "--porcelain", "--untracked-files=all", "--ignored", "--", ".",
 	}, deps.RunOptions{})
 	return err == nil && status.ExitCode == 0 && strings.TrimSpace(string(status.Stdout)) == ""
@@ -355,7 +360,7 @@ func gitGuardSplit(args []string, cwd string) (string, string, []string) {
 // list and show. A subcommand no case judges is allowed only when the read
 // allowlist names it (engineGuardGitReads).
 func gitGuardBlocks(
-	sub string, rest []string, repoDir string, engine bool, stderr io.Writer,
+	sub string, rest []string, repoDir string, engine bool, stderr io.Writer, git deps.Runner,
 ) (blocked, worktree bool) {
 	first := gitGuardFirstOperand(rest)
 	switch sub {
@@ -400,7 +405,7 @@ func gitGuardBlocks(
 		return !slices.Contains(gitGuardNotesReads, first), false
 	case "submodule":
 		if first == gitGuardVerbForeach {
-			return gitGuardForeach(rest, repoDir, engine, stderr), false
+			return gitGuardForeach(rest, repoDir, engine, stderr, git), false
 		}
 		return !slices.Contains(gitGuardSubmoduleReads, first), false
 	case "reflog":
@@ -414,12 +419,12 @@ func gitGuardBlocks(
 // gitGuardForeach blocks a submodule foreach whose command, its words after
 // foreach and foreach's own flags joined as the shell string git runs, the
 // same judge would deny.
-func gitGuardForeach(rest []string, repoDir string, engine bool, stderr io.Writer) bool {
+func gitGuardForeach(rest []string, repoDir string, engine bool, stderr io.Writer, git deps.Runner) bool {
 	words := rest[slices.Index(rest, gitGuardVerbForeach)+1:]
 	for len(words) > 0 && slices.Contains(gitGuardForeachFlags, words[0]) {
 		words = words[1:]
 	}
-	return gitGuardCheck(strings.Join(words, " "), repoDir, engine, false, stderr) != ""
+	return gitGuardCheck(strings.Join(words, " "), repoDir, engine, false, stderr, git) != ""
 }
 
 // gitGuardCheckout blocks a branch switch or creation and a pathspec that

@@ -1,3 +1,5 @@
+//go:build jail
+
 package chat
 
 import (
@@ -19,6 +21,7 @@ import (
 // (spec § Middleware, `state`) — live to ended, comp=state, kind=chat —
 // never the socket name it closed.
 func TestKillServerRecordsAChatStateTransition(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -73,6 +76,7 @@ func TestKillServerRecordsAChatStateTransition(t *testing.T) {
 // the chat's pane is its sole pane; with no pane named, the server's one pane
 // stands in, and a server holding a second pane survives with its handles.
 func TestKillServerEndsOnlyASoleChatServer(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Fatalf("tmux is required: %v", err)
 	}

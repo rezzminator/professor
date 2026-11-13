@@ -1,3 +1,5 @@
+//go:build jail
+
 package spawn
 
 import (
@@ -89,6 +91,7 @@ func launchLeftovers(t *testing.T, tmuxDir, socket string) []string {
 }
 
 func TestNewSessionLaunchesARunLongerThanATmuxMessage(t *testing.T) {
+	testjail.TmuxServer(t)
 	root, tmuxDir := launchJail(t)
 	marker := filepath.Join(root, "launched")
 	// An env-assignment prefix, as a launch line may carry one, a 64 KiB
@@ -136,6 +139,7 @@ func TestNewSessionLaunchesARunLongerThanATmuxMessage(t *testing.T) {
 }
 
 func TestNewSessionKeepsAShortRunInline(t *testing.T) {
+	testjail.TmuxServer(t)
 	root, tmuxDir := launchJail(t)
 	const socket = "cx-1800000012-1-1"
 	tmux := TmuxSpawner{TmuxDir: tmuxDir}

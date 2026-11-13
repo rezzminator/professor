@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -107,7 +106,7 @@ func stubUpdatePipeline(t *testing.T, runtime pfmconfig.Runtime) {
 	if err := os.MkdirAll(filepath.Dir(canonical), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := testjail.WriteExecutable(canonical, []byte("old\n"), 0o755); err != nil {
+	if err := testjail.WriteExecutableNeverRun(canonical, []byte("old\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := installer.RecordCanonicalBinary(runtime.Paths.Home); err != nil {
@@ -122,7 +121,7 @@ func stubUpdatePipeline(t *testing.T, runtime pfmconfig.Runtime) {
 		updateRunDoctor = oldDoctor
 	})
 	updateBuildCandidate = func(_ context.Context, _, _, output string) error {
-		return testjail.WriteExecutable(output, []byte("new\n"), 0o755)
+		return testjail.WriteExecutableNeverRun(output, []byte("new\n"), 0o755)
 	}
 	updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, io.Writer, io.Writer) error {
 		return nil
@@ -257,10 +256,10 @@ func TestUpdateReplacesOwnedBinaryLeavesUnownedCopyAndRunsDoctor(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(canonical), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := testjail.WriteExecutable(canonical, []byte("old\n"), 0o755); err != nil {
+	if err := testjail.WriteExecutableNeverRun(canonical, []byte("old\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := testjail.WriteExecutable(unowned, []byte("unowned\n"), 0o755); err != nil {
+	if err := testjail.WriteExecutableNeverRun(unowned, []byte("unowned\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := installer.RecordCanonicalBinary(runtime.Paths.Home); err != nil {
@@ -279,7 +278,7 @@ func TestUpdateReplacesOwnedBinaryLeavesUnownedCopyAndRunsDoctor(t *testing.T) {
 		if version != "v0.10.0" {
 			t.Fatalf("build version=%q, want selected release v0.10.0", version)
 		}
-		return testjail.WriteExecutable(output, []byte("new\n"), 0o755)
+		return testjail.WriteExecutableNeverRun(output, []byte("new\n"), 0o755)
 	}
 	installCalls, doctorCalls := 0, 0
 	updateApplyInstall = func(_ context.Context, candidate, workingDir, sourceRepo string, _ pfmconfig.Runtime, _, _ io.Writer) error {
@@ -360,7 +359,7 @@ func TestUpdateRollsBackAfterStagingFailure(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(canonical), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := testjail.WriteExecutable(canonical, []byte("old\n"), 0o755); err != nil {
+	if err := testjail.WriteExecutableNeverRun(canonical, []byte("old\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := installer.RecordCanonicalBinary(runtime.Paths.Home); err != nil {
@@ -380,7 +379,7 @@ func TestUpdateRollsBackAfterStagingFailure(t *testing.T) {
 		updateRollbackDoctor = oldRollbackDoctor
 	})
 	updateBuildCandidate = func(_ context.Context, _, _, output string) error {
-		return testjail.WriteExecutable(output, []byte("new\n"), 0o755)
+		return testjail.WriteExecutableNeverRun(output, []byte("new\n"), 0o755)
 	}
 	managedMutation := filepath.Join(runtime.Paths.Home, ".local", "share", "pfm", "install", "new-asset")
 	updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, io.Writer, io.Writer) error {
@@ -470,7 +469,7 @@ func updateRollbackTestRuntime(t *testing.T) (runtime pfmconfig.Runtime, repo st
 	if err := os.MkdirAll(filepath.Dir(canonical), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := testjail.WriteExecutable(canonical, []byte("old\n"), 0o755); err != nil {
+	if err := testjail.WriteExecutableNeverRun(canonical, []byte("old\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := installer.RecordCanonicalBinary(runtime.Paths.Home); err != nil {
@@ -498,7 +497,7 @@ func TestUpdateProceedsWhenTheCandidateDoctorHasOnlyStandingWarnings(t *testing.
 		updateRollbackInstall, updateRollbackDoctor = oldRollbackInstall, oldRollbackDoctor
 	})
 	updateBuildCandidate = func(_ context.Context, _, _, output string) error {
-		return testjail.WriteExecutable(output, []byte("new\n"), 0o755)
+		return testjail.WriteExecutableNeverRun(output, []byte("new\n"), 0o755)
 	}
 	updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, io.Writer, io.Writer) error {
 		return nil
@@ -551,7 +550,7 @@ func TestUpdateRollsBackWhenTheCandidateDoctorReportsAFailure(t *testing.T) {
 		updateRollbackInstall, updateRollbackDoctor = oldRollbackInstall, oldRollbackDoctor
 	})
 	updateBuildCandidate = func(_ context.Context, _, _, output string) error {
-		return testjail.WriteExecutable(output, []byte("new\n"), 0o755)
+		return testjail.WriteExecutableNeverRun(output, []byte("new\n"), 0o755)
 	}
 	updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, io.Writer, io.Writer) error {
 		return nil
@@ -591,7 +590,7 @@ func TestUpdateNamesNewWarningRowsIntroducedByTheCandidate(t *testing.T) {
 		updateBuildCandidate, updateApplyInstall, updateRunDoctor = oldBuild, oldInstall, oldRunDoctor
 	})
 	updateBuildCandidate = func(_ context.Context, _, _, output string) error {
-		return testjail.WriteExecutable(output, []byte("new\n"), 0o755)
+		return testjail.WriteExecutableNeverRun(output, []byte("new\n"), 0o755)
 	}
 	updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, io.Writer, io.Writer) error {
 		return nil
@@ -638,7 +637,7 @@ func TestUpdateRollbackDoctorWarningsAreNotResidue(t *testing.T) {
 		updateRollbackInstall, updateRollbackDoctor = oldRollbackInstall, oldRollbackDoctor
 	})
 	updateBuildCandidate = func(_ context.Context, _, _, output string) error {
-		return testjail.WriteExecutable(output, []byte("new\n"), 0o755)
+		return testjail.WriteExecutableNeverRun(output, []byte("new\n"), 0o755)
 	}
 	updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, io.Writer, io.Writer) error {
 		return errors.New("injected install failure")
@@ -692,7 +691,7 @@ func TestUpdateRollbackDoctorFromAnOlderBinaryIsNamedNotClaimedAsResidue(t *test
 		updateRollbackInstall, updateRollbackDoctor = oldRollbackInstall, oldRollbackDoctor
 	})
 	updateBuildCandidate = func(_ context.Context, _, _, output string) error {
-		return testjail.WriteExecutable(output, []byte("new\n"), 0o755)
+		return testjail.WriteExecutableNeverRun(output, []byte("new\n"), 0o755)
 	}
 	updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, io.Writer, io.Writer) error {
 		return errors.New("injected install failure")
@@ -746,95 +745,15 @@ func updateWithReleaseNotesFakes(t *testing.T, repo string) string {
 
 func gitTemp(t *testing.T, repo string, args ...string) {
 	t.Helper()
-	command := exec.Command("git", args...)
-	command.Dir = repo
-	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, output)
-	}
+	updateGit.Must(t, repo, args...)
 }
 
 func updateGitBranch(t *testing.T, repo string) string {
 	t.Helper()
-	command := exec.Command("git", "symbolic-ref", "--quiet", "--short", "HEAD")
-	command.Dir = repo
-	output, err := command.CombinedOutput()
-	if err != nil {
-		t.Fatalf("resolve fixture branch: %v\n%s", err, output)
-	}
-	return strings.TrimSpace(string(output))
+	return updateGit.Must(t, repo, "symbolic-ref", "--quiet", "--short", "HEAD")
 }
 
 func updateGitRevision(t *testing.T, repo, revision string) string {
 	t.Helper()
-	command := exec.Command("git", "rev-parse", "--verify", revision)
-	command.Dir = repo
-	output, err := command.CombinedOutput()
-	if err != nil {
-		t.Fatalf("resolve fixture revision %s: %v\n%s", revision, err, output)
-	}
-	return strings.TrimSpace(string(output))
-}
-
-// TestBuildUpdateCandidateSurvivesAStrayGitDirectoryAboveTheWorktree pins
-// -buildvcs=false. pfm update stages its source as a git worktree, whose .git
-// is a FILE cmd/go does not accept as a VCS root, so VCS stamping walks up and
-// dies on any .git DIRECTORY above it — an empty $HOME/.git did it live:
-// "error obtaining VCS status: exit status 128".
-func TestBuildUpdateCandidateSurvivesAStrayGitDirectoryAboveTheWorktree(t *testing.T) {
-	for _, tool := range []string{"git", "go"} {
-		if _, err := exec.LookPath(tool); err != nil {
-			t.Skip(tool + " is not installed")
-		}
-	}
-	root := t.TempDir()
-	if err := os.Mkdir(filepath.Join(root, ".git"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	repo := filepath.Join(root, "source")
-	for name, content := range map[string]string{
-		"pfm/go.mod":          "module probe\n\ngo 1.24\n",
-		"pfm/cmd/pfm/main.go": "package main\n\nvar version = \"dev\"\n\nfunc main() { println(version) }\n",
-	} {
-		path := filepath.Join(repo, filepath.FromSlash(name))
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	git := func(args ...string) {
-		t.Helper()
-		command := exec.Command(
-			"git",
-			append(
-				[]string{
-					"-C",
-					repo,
-					"-c",
-					"user.name=probe",
-					"-c",
-					"user.email=probe@example.invalid",
-					"-c",
-					"commit.gpgsign=false",
-				},
-				args...)...)
-		if output, err := command.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v: %s", args, err, output)
-		}
-	}
-	git("init", "-q")
-	git("add", ".")
-	git("commit", "-q", "-m", "probe")
-	stage := filepath.Join(root, "stage")
-	git("worktree", "add", "--detach", "-q", stage, "HEAD")
-
-	candidate := filepath.Join(root, "pfm-candidate")
-	if err := buildUpdateCandidate(context.Background(), stage, "v9.9.9", candidate); err != nil {
-		t.Fatalf("candidate build beneath a stray .git directory: %v", err)
-	}
-	printed, err := exec.Command(candidate).CombinedOutput()
-	if err != nil || strings.TrimSpace(string(printed)) != "v9.9.9" {
-		t.Fatalf("candidate printed %q, %v; want the stamped v9.9.9", printed, err)
-	}
+	return updateGit.Must(t, repo, "rev-parse", "--verify", revision)
 }

@@ -1,3 +1,5 @@
+//go:build jail
+
 package spawn
 
 import (
@@ -9,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // A chat is a terminal the user LIVES in, so its tmux server has to load their
@@ -18,6 +21,7 @@ import (
 // own bar on top — same fleet, two different-looking chats.
 
 func TestChatServerLoadsTheConfigItIsGiven(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -74,6 +78,7 @@ func TestChatServerLoadsTheConfigItIsGiven(t *testing.T) {
 }
 
 func TestChatServerCreatesMissingSocketDirectoryOnFreshMachine(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}

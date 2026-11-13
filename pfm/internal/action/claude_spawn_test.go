@@ -53,7 +53,7 @@ func TestClaudeSeatRunRetainsCanonicalArgsEnvironmentAndLedgerPolicy(t *testing.
 				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 					t.Fatal(err)
 				}
-				if err := testjail.WriteExecutable(path, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+				if err := testjail.WriteExecutableNeverRun(path, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 					t.Fatal(err)
 				}
 			}

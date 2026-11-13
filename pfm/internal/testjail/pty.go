@@ -1,3 +1,5 @@
+//go:build jail
+
 package testjail
 
 import (
@@ -35,7 +37,8 @@ func bsdScriptArgv(script string, argv []string) []string {
 }
 
 // PTYCommand builds a command that runs argv on a REAL pty via script(1), for
-// behaviour that only happens on a terminal. A script(1) that cannot be
+// behaviour that only happens on a terminal. Built only under the jail tag: a
+// real child is no unit test's. A script(1) that cannot be
 // resolved is the deps.Resolve error, never a bare name left to fail later.
 func PTYCommand(argv ...string) (*exec.Cmd, error) {
 	scriptBinary, err := deps.Resolve("script")

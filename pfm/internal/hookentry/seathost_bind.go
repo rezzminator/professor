@@ -18,13 +18,33 @@ import (
 
 // bindNativeHost validates the caller's canonical producer identity and kernel
 // membership before publishing any new binding. Only explicit lost restoration
-// after positive old-host death may adopt a new terminal.
+// after positive old-host death may adopt a new terminal. A supervisor that
+// re-exec'd itself keeps the binding its earlier image published.
 func bindNativeHost(
 	ctx context.Context,
 	db *fleetdb.Store,
 	seat fleetdb.Seat,
 	values paths.Values,
 ) (result fleetdb.Seat, returnErr error) {
+	if seat.SeatHostPID == os.Getpid() {
+		// refreshSeatHostImage keeps the pid and kernel birth this binding names,
+		// while a reload awaiting the new engine holds the conversation lock: prove
+		// the standing binding as the in-process retry does, never wait on that lock.
+		dead, err := gather.HerdrHostDead(gather.NewProcFS(values.ProcRoot), seat)
+		if err != nil {
+			return seat, fmt.Errorf("check re-executed supervisor binding: %w", err)
+		}
+		if !dead {
+			if seat.EndPending {
+				return seat, errors.New("seat absent or pending end")
+			}
+			proved, err := proveRunningHost(ctx, db, seat, seat, values)
+			if err != nil {
+				return seat, fmt.Errorf("prove re-executed supervisor binding: %w", err)
+			}
+			return proved, nil
+		}
+	}
 	if err := awaitReservedPane(ctx, db, seat); err != nil {
 		return seat, err
 	}

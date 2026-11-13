@@ -39,9 +39,10 @@ func (locked *lockedBuffer) String() string {
 
 const watchTick = 10 * time.Millisecond
 
+// writeFakeBuild writes a build the watcher only stats: nothing starts it.
 func writeFakeBuild(t *testing.T, path, body string) {
 	t.Helper()
-	if err := testjail.WriteExecutable(path, []byte(body), 0o755); err != nil {
+	if err := testjail.WriteExecutableNeverRun(path, []byte(body), 0o755); err != nil {
 		t.Fatal(err)
 	}
 }

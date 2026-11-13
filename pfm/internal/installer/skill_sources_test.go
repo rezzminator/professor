@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	goRuntime "runtime"
 	"strings"
@@ -20,38 +19,6 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
-
-// skillFixtureGit runs real git in dir with a fixed identity, for the tests
-// whose subject is real git's own behaviour; fixtures are local repositories
-// only — no test here reaches a network.
-func skillFixtureGit(t *testing.T, dir string, args ...string) {
-	t.Helper()
-	command := exec.Command("git", append([]string{
-		"-C", dir, "-c", "user.name=fixture",
-		"-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false",
-	}, args...)...)
-	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("git %v: %v\n%s", args, err, output)
-	}
-}
-
-// skillRealRepo creates a real git repository at dir holding files, committed.
-func skillRealRepo(t *testing.T, dir string, files map[string]string) string {
-	t.Helper()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	skillFixtureGit(t, dir, "init", "--quiet")
-	for name, content := range files {
-		writeFixture(t, filepath.Join(dir, name), content)
-	}
-	skillFixtureGit(t, dir, "add", "-A")
-	skillFixtureGit(t, dir, "commit", "--quiet", "-m", "fixture")
-	return dir
-}
-
-// realSkillGit runs a fetch through the real git on PATH.
-func realSkillGit(options *Options) { options.ProcessRunner = nil }
 
 // skillFixtureRepo creates a fixture repository at dir holding files,
 // committed, which skillGit serves.
@@ -532,71 +499,6 @@ func TestSourceFetchedSkillsRetireUnregisteredAndUninstall(t *testing.T) {
 	requireNoPath(t, storeRoot, "uninstall left the skill store")
 	requireNoPath(t, ledger, "uninstall left the skill link record")
 	assertLink(t, operator, drop)
-}
-
-// cleanGitOutput runs git in dir with every inherited GIT_* variable stripped,
-// so a test's own GIT_DIR never steers the probe that checks for damage.
-func cleanGitOutput(t *testing.T, dir string, args ...string) string {
-	t.Helper()
-	command := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	for _, entry := range os.Environ() {
-		if !strings.HasPrefix(entry, "GIT_") {
-			command.Env = append(command.Env, entry)
-		}
-	}
-	output, err := command.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git %v in %s: %v\n%s", args, dir, err, output)
-	}
-	return strings.TrimSpace(string(output))
-}
-
-// TestSourceFetchedSkillsNeverTouchAParentRepository pins F1: a store with no
-// .git of its own, inside a $HOME that IS a git repository — reached by git
-// discovery, or named by an inherited GIT_DIR — is replaced by a fresh clone,
-// and the parent repository, its tracked and its untracked files stay as they
-// were. Serial: the GIT_DIR case sets the process environment.
-func TestSourceFetchedSkillsNeverTouchAParentRepository(t *testing.T) {
-	for _, inherited := range []bool{false, true} {
-		name := "discovery"
-		if inherited {
-			name = "GIT_DIR"
-		}
-		t.Run(name, func(t *testing.T) { requireParentRepositoryUntouched(t, inherited) })
-	}
-}
-
-func requireParentRepositoryUntouched(t *testing.T, inherited bool) {
-	t.Helper()
-	{
-		home := t.TempDir()
-		skillRealRepo(t, home, map[string]string{"tracked.txt": "parent\n"})
-		writeFixture(t, filepath.Join(home, "untracked.txt"), "mine\n")
-		parentHead := cleanGitOutput(t, home, "rev-parse", "HEAD")
-		repo := skillRealRepo(t, filepath.Join(t.TempDir(), "skill"), map[string]string{"SKILL.md": "# new\n"})
-		writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"skill": "file://" + repo}))
-		store := filepath.Join(skillStoreRoot(home), "skill")
-		writeFixture(t, filepath.Join(store, "SKILL.md"), "# hand-made, no .git\n")
-		if inherited {
-			t.Setenv("GIT_DIR", filepath.Join(home, ".git"))
-		}
-
-		output := runSkillInstall(t, home, ModeApply, realSkillGit)
-
-		if got := cleanGitOutput(t, home, "rev-parse", "HEAD"); got != parentHead {
-			t.Fatalf("GIT_DIR=%v: parent HEAD moved %s -> %s\n%s", inherited, parentHead, got, output)
-		}
-		if got := readSkillFile(t, filepath.Join(home, "tracked.txt")); got != "parent\n" {
-			t.Fatalf("GIT_DIR=%v: parent tracked file = %q\n%s", inherited, got, output)
-		}
-		if got := readSkillFile(t, filepath.Join(home, "untracked.txt")); got != "mine\n" {
-			t.Fatalf("GIT_DIR=%v: parent untracked file = %q\n%s", inherited, got, output)
-		}
-		requireNoPath(t, filepath.Join(home, "SKILL.md"), "the skill tree landed in the parent worktree")
-		if got := readSkillFile(t, filepath.Join(store, "SKILL.md")); got != "# new\n" {
-			t.Fatalf("GIT_DIR=%v: store SKILL.md = %q, want the fresh clone\n%s", inherited, got, output)
-		}
-	}
 }
 
 // TestSourceFetchedSkillsKeepTheOldStoreWhenTheNewTreeHasNoSKILLMd pins that

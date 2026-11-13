@@ -1,3 +1,5 @@
+//go:build jail
+
 package mcpserv
 
 import (
@@ -5,9 +7,12 @@ import (
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestHerdrCodexThreadMetaSignsCallAndWhoami(t *testing.T) {
+	testjail.TmuxServer(t)
 	service := metadataIdentityService(t)
 	verbs := service.backend.chat.(*fakeChatVerbs)
 	row := &verbs.listed.Rows[0]

@@ -1,3 +1,5 @@
+//go:build jail
+
 package main
 
 import (
@@ -9,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // THE BUG. `pfm kill <member-id>` addressed by a Codex lineage member's
@@ -21,6 +25,7 @@ import (
 // self-heal this the moment the member's file gets parsed) — so it is the
 // one CLI surface that can observe the wrong id actually landing.
 func TestKillCLIResolvesUnindexedLineageMemberToRoot(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}

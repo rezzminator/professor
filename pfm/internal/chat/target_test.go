@@ -15,6 +15,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
 // TestMatchPrefersTheLiveSeat covers resolution: a name, an id, a socket, the
@@ -217,9 +218,12 @@ func TestScopedRawPaneUsesOnlyTheCallerSocket(t *testing.T) {
 	t.Setenv("TMUX", filepath.Join(values.TmuxDir, "cc-other")+",123,0")
 
 	t.Run("scoped socket wins without copying caller identity", func(t *testing.T) {
-		ctx := WithResolvedSelf(context.Background(), headless.Chat{
-			Socket: "cx-caller", Session: "caller-session", Pane: "%1", ID: "thread-caller",
-		})
+		ctx := WithResolvedSelf(
+			pfmtmux.WithClientRunner(context.Background(), testjail.AbsentTmuxRunner()),
+			headless.Chat{
+				Socket: "cx-caller", Session: "caller-session", Pane: "%1", ID: "thread-caller",
+			},
+		)
 		for _, target := range []string{"%2", " %2 ", `"%2"`} {
 			got, found, err := Resolve(ctx, target, io.Discard, nil)
 			if err != nil || !found || got.Socket != "cx-caller" || got.Pane != "%2" {
@@ -232,9 +236,12 @@ func TestScopedRawPaneUsesOnlyTheCallerSocket(t *testing.T) {
 	})
 
 	t.Run("missing scoped socket refuses ambient fallback", func(t *testing.T) {
-		ctx := WithResolvedSelf(context.Background(), headless.Chat{
-			Session: "caller-session", Pane: "%1", ID: "thread-caller",
-		})
+		ctx := WithResolvedSelf(
+			pfmtmux.WithClientRunner(context.Background(), testjail.AbsentTmuxRunner()),
+			headless.Chat{
+				Session: "caller-session", Pane: "%1", ID: "thread-caller",
+			},
+		)
 		for _, target := range []string{"%2", " %2 ", `"%2"`} {
 			got, found, err := Resolve(ctx, target, io.Discard, nil)
 			if err != nil || found || got != (headless.Chat{}) {
@@ -244,7 +251,12 @@ func TestScopedRawPaneUsesOnlyTheCallerSocket(t *testing.T) {
 	})
 
 	t.Run("metadata-free raw pane refuses an unproved environment", func(t *testing.T) {
-		got, found, err := Resolve(context.Background(), "%3", io.Discard, nil)
+		got, found, err := Resolve(
+			pfmtmux.WithClientRunner(context.Background(), testjail.AbsentTmuxRunner()),
+			"%3",
+			io.Discard,
+			nil,
+		)
 		if !errors.Is(err, resolve.ErrNotInChat) || found || got != (headless.Chat{}) {
 			t.Fatalf("Resolve(ambient %%3) = %+v found=%t err=%v", got, found, err)
 		}

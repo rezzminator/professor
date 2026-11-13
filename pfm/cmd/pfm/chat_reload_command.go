@@ -22,7 +22,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/kill"
 	"github.com/rezzminator/professor/pfm/internal/launchnotice"
-	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/reload"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
@@ -45,7 +44,7 @@ const (
 // startReloadWorker launches the detached worker (Detach: true), releases it
 // and returns its pid; a test overrides this var to script the launch.
 var startReloadWorker = func(argv []string, opts deps.StartOptions) (int, error) {
-	process, err := obs.Runner(deps.RealRunner{}).Start(context.Background(), argv, opts)
+	process, err := commandRunner.Start(context.Background(), argv, opts)
 	if err != nil {
 		return 0, err
 	}

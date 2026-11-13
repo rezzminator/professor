@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -16,7 +15,6 @@ import (
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
-	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
@@ -101,42 +99,6 @@ func (tree fakeProcTree) Parent(pid int) (int, error) {
 	return parent, nil
 }
 
-func (jail *resolveJail) startPlain(
-	t *testing.T,
-	socket, session string,
-) string {
-	t.Helper()
-	command := jail.command(
-		"-f",
-		"/dev/null",
-		"-L",
-		socket,
-		"new-session",
-		"-d",
-		"-s",
-		session,
-		"-n",
-		"whoami-window",
-		"sleep",
-		"120",
-	)
-	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("start %s: %v: %s", socket, err, output)
-	}
-	jail.sockets = append(jail.sockets, socket)
-	output, err := jail.command(
-		"-L",
-		socket,
-		"list-panes",
-		"-F",
-		"#{pane_id}\t#{pane_pid}",
-	).Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return strings.TrimSpace(string(output))
-}
-
 // TestWhoamiProcTreeReadsAJailedProcRoot proves the real /proc reader is
 // jailable, so ancestry recovery is testable without touching live processes.
 func TestWhoamiProcTreeReadsAJailedProcRoot(t *testing.T) {
@@ -181,60 +143,6 @@ func TestWhoamiProcTreeReadsAJailedProcRoot(t *testing.T) {
 	if socketPath := pfmtmux.SocketPath(environment["TMUX"]); socketPath !=
 		"/tmp/tmux-1000/cc-1-2-3" {
 		t.Fatalf("pfmtmux.SocketPath() = %q", socketPath)
-	}
-}
-
-// kernelTableChildEnv marks the child TestWhoamiProcTreeReadsTheKernelTable
-// starts from its own test binary: the variable its environment must show.
-const kernelTableChildEnv = "PFM_TEST_KERNEL_TABLE_CHILD"
-
-// The kernel's own table answers ancestry recovery's two facts for a live
-// process on either OS: its environment and its parent. On macOS this read
-// once returned "not implemented", failing every caller lookup there.
-func TestWhoamiProcTreeReadsTheKernelTable(t *testing.T) {
-	if os.Getenv(kernelTableChildEnv) != "" {
-		// The kernel fills a new image's environment only after the exec that
-		// wakes Start's caller, so the child says when it runs Go code.
-		ready := os.NewFile(3, "ready")
-		_, _ = ready.Write([]byte{1})
-		_ = ready.Close()
-		_, _ = io.Copy(io.Discard, os.Stdin) // held until the parent has read it
-		return
-	}
-	marker := "held-by-" + strconv.Itoa(os.Getpid())
-	child := exec.Command(os.Args[0], "-test.run=^TestWhoamiProcTreeReadsTheKernelTable$")
-	child.Env = append(os.Environ(), kernelTableChildEnv+"="+marker)
-	stdin, err := child.StdinPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	readyRead, readyWrite, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = readyRead.Close() }()
-	child.ExtraFiles = []*os.File{readyWrite}
-	startErr := child.Start()
-	_ = readyWrite.Close()
-	if startErr != nil {
-		t.Fatalf("start the held child: %v", startErr)
-	}
-	t.Cleanup(func() {
-		_ = stdin.Close()
-		_ = child.Process.Kill()
-		_ = child.Wait()
-	})
-	if _, err := readyRead.Read(make([]byte, 1)); err != nil {
-		t.Fatalf("wait for the held child %d to run: %v", child.Process.Pid, err)
-	}
-	tree := ProcTree{Root: paths.SystemProcRoot()}
-	environment, err := tree.Environ(child.Process.Pid)
-	if err != nil || environment[kernelTableChildEnv] != marker {
-		t.Fatalf("Environ(child %d) %s=%q, %v; want %q",
-			child.Process.Pid, kernelTableChildEnv, environment[kernelTableChildEnv], err, marker)
-	}
-	if parent, err := tree.Parent(child.Process.Pid); err != nil || parent != os.Getpid() {
-		t.Fatalf("Parent(child %d) = %d, %v; want this test %d", child.Process.Pid, parent, err, os.Getpid())
 	}
 }
 

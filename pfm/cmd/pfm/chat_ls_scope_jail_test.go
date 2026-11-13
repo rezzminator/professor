@@ -1,3 +1,5 @@
+//go:build jail
+
 package main
 
 import (
@@ -18,6 +20,7 @@ import (
 // worktree lists from the repo root, and from another repository it is only
 // counted in the "+N live in other dirs" footer.
 func TestChatLSScopesByRepositoryNotByPathPrefix(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -78,6 +81,7 @@ func TestChatLSScopesByRepositoryNotByPathPrefix(t *testing.T) {
 // `chat ls --reap` ends it — while a server under a name pfm does not own and
 // a server that still has a live pane are never touched.
 func TestChatLSListsAndReapsAnAbandonedEmptyServer(t *testing.T) {
+	testjail.TmuxServer(t)
 	newKillCLIJail(t)
 	t.Setenv("PFM_TEST_PROBE_SOCKETS", "1")
 	const empty, foreign, live = "probe-abandoned-empty", "work-empty", "probe-live-pane"

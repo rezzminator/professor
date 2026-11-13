@@ -1,3 +1,5 @@
+//go:build jail
+
 package picker
 
 import (
@@ -19,10 +21,12 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/kill"
 	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 	"github.com/rezzminator/professor/pfm/internal/ui"
 )
 
 func TestCodexClearRefreshesBaselineAndRetainsFailedRetirement(t *testing.T) {
+	testjail.TmuxServer(t)
 	for _, scenario := range []string{"unindexed", "missing-rollout", "write-failed", "stale-baseline"} {
 		t.Run(scenario, func(t *testing.T) {
 			root := jailTest(t)
@@ -151,10 +155,12 @@ func TestCodexClearRefreshesBaselineAndRetainsFailedRetirement(t *testing.T) {
 }
 
 func TestParkedPickerStillObservesCodexClear(t *testing.T) {
+	testjail.TmuxServer(t)
 	runParkedCodexClear(t, false)
 }
 
 func TestParkedPickerRetriesRefreshAfterCodexClear(t *testing.T) {
+	testjail.TmuxServer(t)
 	runParkedCodexClear(t, true)
 }
 

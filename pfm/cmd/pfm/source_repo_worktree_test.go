@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/professor"
+	"github.com/rezzminator/professor/pfm/internal/testjail/fakegit"
 )
 
 // TestDiscoverSourceRepoMapsALinkedWorktreeToItsMainCheckout pins the source
@@ -15,9 +17,6 @@ import (
 // there and record it — and a worktree is deleted when its wave merges,
 // leaving the marker, `pfm update`, and the global links pointing at nothing.
 func TestDiscoverSourceRepoMapsALinkedWorktreeToItsMainCheckout(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git is not installed")
-	}
 	t.Setenv("PFM_SOURCE_REPO", "")
 	clone := filepath.Join(t.TempDir(), "clone")
 	for _, name := range []string{"CLAUDE.md", "AGENTS.md", ".claude/settings.json", "pfm/go.mod"} {
@@ -29,24 +28,15 @@ func TestDiscoverSourceRepoMapsALinkedWorktreeToItsMainCheckout(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	model := &fakegit.Runner{}
 	git := func(args ...string) {
 		t.Helper()
-		command := exec.Command(
-			"git",
-			append(
-				[]string{
-					"-C",
-					clone,
-					"-c",
-					"user.name=probe",
-					"-c",
-					"user.email=probe@example.invalid",
-					"-c",
-					"commit.gpgsign=false",
-				},
-				args...)...)
-		if output, err := command.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v: %s", args, err, output)
+		argv := append([]string{
+			"git", "-C", clone, "-c", "user.name=probe", "-c", "user.email=probe@example.invalid",
+			"-c", "commit.gpgsign=false",
+		}, args...)
+		if result, err := model.Run(context.Background(), argv, deps.RunOptions{}); err != nil || result.ExitCode != 0 {
+			t.Fatalf("git %v: %v: %s%s", args, err, result.Stdout, result.Stderr)
 		}
 	}
 	git("init", "-q")

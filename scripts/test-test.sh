@@ -3,8 +3,8 @@
 # every path spelling through the one resolver (the outside, two-file, missing and deleted rules), the
 # derivation of each path's affected tests (a Go test file's Test and Fuzz funcs in -run or its
 # ::selector byte for byte, TestMain excluded, a test file with none or a non-test .go file running its
-# whole package, the e2e tag, shell, TAP, unittest and script-style Python runners, under pfm/ as
-# elsewhere, a script bringing its sibling test, a file bringing none named on its UNCOVERED line), the
+# whole package, the e2e tag, the jail tag on every other package, shell, TAP, unittest and
+# script-style Python runners, under pfm/ as elsewhere, a script bringing its sibling test, a file bringing none named on its UNCOVERED line), the
 # one fence call per run (PFM_FENCE_NET=private, the caller's pid watched), the
 # TEST line verdicts (a red runner, a run that proved nothing, an unlisted skip, a skipped TAP or
 # unittest test), every check after one fails (fmt, typecheck's scope, lint-new's scope, arch,
@@ -150,8 +150,8 @@ no_dev() { if [ "$(dev_calls)" = 0 ]; then ok "$1"; else bad "$1" "dev.sh was ca
 checks() { sed -n 's/^CHECK \([A-Z]*\) \([a-z-]*\).*/\2/p' <<<"$OUT" | tr '\n' ' '; }
 
 U='usage: test.sh <path>[::<selector>]... | test.sh --full'
-GO_A=(go -C pfm test -v -count=1 -timeout 10m ./internal/a/ -run '^(TestOne|TestTwo|FuzzSeed)$')
-GO_A_PKG=(go -C pfm test -v -count=1 -timeout 10m ./internal/a/)
+GO_A=(go -C pfm test -v -count=1 -timeout 10m -tags jail ./internal/a/ -run '^(TestOne|TestTwo|FuzzSeed)$')
+GO_A_PKG=(go -C pfm test -v -count=1 -timeout 10m -tags jail ./internal/a/)
 GO_E=(go -C pfm test -v -count=1 -timeout 10m -tags e2e ./e2e/ -run '^(TestE2E)$')
 A=pfm/internal/a/a_test.go
 docker_off
@@ -200,6 +200,7 @@ run "$R" pfm/internal/a/gone_test.go
 rc_is "a deletion-only pfm selection is green when its checks are" 0
 out_has "a deletion-only selection runs no test" "TESTS NONE (no test file covers the named paths)"
 rec_has "a deletion-only pfm selection vets the whole module" go -C pfm vet ./...
+rec_has "a deletion-only pfm selection vets the whole module under the jail tag" go -C pfm vet -tags jail ./...
 out_has "a deletion-only selection skips fmt" "CHECK SKIP fmt (no named file it applies to)"
 out_has "a deletion-only selection skips leak (no file left to scan)" "CHECK SKIP leak (no named file it applies to)"
 run "$R" docs/gone.md
@@ -219,18 +220,18 @@ out_has "the journey selector refusal names the file" "test.sh: pfm/journey/tree
 # shellcheck disable=SC2016 # the $( ) is the point: a selector no shell may evaluate
 run "$R" "$A"'::TestOne/sub case$(touch PWNED)|x$'
 # shellcheck disable=SC2016 # literal, as above
-rec_has "a selector passes byte for byte into -run, never through a shell" go -C pfm test -v -count=1 -timeout 10m ./internal/a/ -run 'TestOne/sub case$(touch PWNED)|x$'
+rec_has "a selector passes byte for byte into -run, never through a shell" go -C pfm test -v -count=1 -timeout 10m -tags jail ./internal/a/ -run 'TestOne/sub case$(touch PWNED)|x$'
 if [ -e "$R/PWNED" ] || [ -e "$R/pfm/PWNED" ]; then bad "a selector is never evaluated by a shell" "PWNED exists"; else ok "a selector is never evaluated by a shell"; fi
 run "$R" "$A::Test[AB]"
 rec_has "a glob character in the selector is not a pattern" "${GO_A_PKG[@]}" -run 'Test[AB]'
 run "$R" pfm/internal/a/fuzz_test.go
-rec_has "a file with only Fuzz funcs runs its Fuzz func" go -C pfm test -v -count=1 -timeout 10m ./internal/a/ -run '^(FuzzOnly)$'
+rec_has "a file with only Fuzz funcs runs its Fuzz func" go -C pfm test -v -count=1 -timeout 10m -tags jail ./internal/a/ -run '^(FuzzOnly)$'
 # The affected go test flags are the fence config's: -count and -timeout always, -p and -parallel only when set.
 export PFM_FENCE_TEST_COUNT=3 PFM_FENCE_AFFECTED_TIMEOUT=7m PFM_FENCE_AFFECTED_P=2 PFM_FENCE_AFFECTED_PARALLEL=8
 run "$R" "$A"
 unset PFM_FENCE_TEST_COUNT PFM_FENCE_AFFECTED_TIMEOUT PFM_FENCE_AFFECTED_P PFM_FENCE_AFFECTED_PARALLEL
 rec_has "the fence config's count, timeout, -p and -parallel reach an affected go test" \
-  go -C pfm test -v -count=3 -timeout 7m -p 2 -parallel 8 ./internal/a/ -run '^(TestOne|TestTwo|FuzzSeed)$'
+  go -C pfm test -v -count=3 -timeout 7m -p 2 -parallel 8 -tags jail ./internal/a/ -run '^(TestOne|TestTwo|FuzzSeed)$'
 export PFM_FENCE_AFFECTED_TIMEOUT=10
 run "$R" "$A"
 unset PFM_FENCE_AFFECTED_TIMEOUT
@@ -431,7 +432,9 @@ if [ "$(checks)" = 'fmt typecheck lint-new arch launch-literals rumdl leak ' ]; 
 else bad "the check order" "$(checks)"; fi
 rec_has "fmt gets the named go file relative to pfm" golangci-lint fmt --diff internal/a/a.go
 rec_has "typecheck is go vet over the named package" go -C pfm vet ./internal/a
+rec_has "typecheck vets the named package again under the jail tag" go -C pfm vet -tags jail ./internal/a
 rec_lacks "a named go file never vets the whole module" 'go -C pfm vet ./\.\.\.$'
+rec_lacks "a named go file never vets the whole module under the jail tag" 'go -C pfm vet -tags jail ./\.\.\.$'
 rec_has "lint-new runs the make target over the named package" make -C pfm --no-print-directory lint-new LINT_PKGS=./internal/a
 rec_has "arch runs the make target" make -C pfm --no-print-directory arch
 rec_has "launch-literals runs its one test" go -C pfm test ./internal/claudelaunch/ -run TestNoLaunchLiteralOutsideRegistry -count=1
@@ -441,6 +444,7 @@ rec_lacks "a pfm-only selection runs no templates check" clone-check.sh
 if grep -qE 'GOPROXY=off -C pfm mod download$' "$REC.env"; then ok "the install probe runs offline"; else bad "the install probe runs offline" "$(cat "$REC.env")"; fi
 run "$R" pfm/docs/x.md
 rec_has "no named go file vets the whole module" go -C pfm vet ./...
+rec_has "no named go file vets the whole module under the jail tag" go -C pfm vet -tags jail ./...
 out_has "no named go file skips fmt" "CHECK SKIP fmt (no named file it applies to)"
 out_has "no named go file skips lint-new" "CHECK SKIP lint-new (no named file it applies to)"
 rec_has "a named .md file goes to rumdl" rumdl check --output-format concise pfm/docs/x.md
@@ -451,6 +455,7 @@ out_has "after fmt fails, arch still runs" "CHECK PASS arch"
 reset; rule go ' list ' 0 'example.test/pfm\t\nexample.test/pfm/internal/a\tfmt \nexample.test/pfm/internal/c\tfmt example.test/pfm/internal/a \nexample.test/pfm/internal/d\t example.test/pfm/internal/a\nexample.test/pfm/internal/e\tos example.test/pfm/internal/c '
 run "$R" pfm/internal/a/a.go
 rec_has "typecheck vets the named package and its direct importers (imports and test imports)" go -C pfm vet ./internal/a ./internal/c ./internal/d
+rec_has "typecheck vets the same packages under the jail tag" go -C pfm vet -tags jail ./internal/a ./internal/c ./internal/d
 reset; rule go ' list ' 1 'go: pattern ./...: boom'
 run "$R" pfm/internal/a/a.go
 expect "a failed go list is CHECK FAIL typecheck" 1 "CHECK FAIL typecheck"

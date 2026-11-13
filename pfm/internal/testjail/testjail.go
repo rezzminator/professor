@@ -7,6 +7,9 @@
 // WriteExecutableNeverRun, of one the code under test only resolves or reads;
 // the fake logged-out engines.
 // enginesync.go, enginesync_runner.go: the engine-sync fakes, run and in process.
+// fence.go: runsHere, the guard Run asks first; tier_unit.go and tier_machine.go, the build-tag pair
+// telling a unit binary from one built with the jail (or e2e, journey) tag.
+// unitnet.go: the unit net an armed unit binary runs inside, and its one switch.
 package testjail
 
 import (
@@ -48,8 +51,8 @@ const jailMarkerEnv = "PFM_TESTJAIL"
 // include t.TempDir's test name, so macOS's long TMPDIR can exceed its 104-byte
 // limit. Resolving /tmp once also collapses macOS's /private alias.
 func Run(m *testing.M) int {
-	if !admitted(paths.OSEnv{}, fenceMarker) {
-		return runInFence() // fence.go: no test ever runs on the machine that started it
+	if !runsHere(unitBinary, unitNetArmed, paths.OSEnv{}, fenceMarker) {
+		return runInFence() // fence.go: no machine-tier test ever runs on the machine that started it
 	}
 	// A chat exports its live state store's paths and its install's mark; a jailed
 	// test must open the jail's own store, and a process it starts must never carry
@@ -96,27 +99,12 @@ func Run(m *testing.M) int {
 		warnSetup("clear CLAUDE_CONFIG_DIR and the login default's sentinel: %v", err)
 		return 1
 	}
-	// The fence has none of these — no tmux pane, no chat socket, no host
-	// Claude/Codex session, no systemd service (INVOCATION_ID, which a hosted
-	// CI runner's job inherits and which routes every chat spawn through
-	// systemd-run) — and a jail must not inherit a live seat from the
-	// executor's own shell. A test that needs one sets it with t.Setenv.
-	// Literal names: testjail cannot import internal/resolve (import cycle).
-	//
-	// Exception: KeepAmbientIdentity (see its declaration).
+	// No live seat of the executor's own shell reaches a test (unitnet.go's ambientIdentity), except
+	// under KeepAmbientIdentity (see its declaration).
 	if !KeepAmbientIdentity {
-		for _, name := range []string{
-			"TMUX",
-			"TMUX_PANE",
-			"CHAT_CALL_SOCKET",
-			"CLAUDE_CODE_SESSION_ID",
-			"CODEX_THREAD_ID",
-			"INVOCATION_ID",
-		} {
-			if err := os.Setenv(name, ""); err != nil {
-				warnSetup("clear %s: %v", name, err)
-				return 1
-			}
+		if err := clearAmbientIdentity(os.Setenv); err != nil {
+			warnSetup("%v", err)
+			return 1
 		}
 	}
 	// The gate's step profiler exports BASH_ENV with `set -E` and an ERR trap so
@@ -178,20 +166,19 @@ func Run(m *testing.M) int {
 		// No canonical base to stand on. Run anyway rather than failing the
 		// whole package: on a platform where the default temp dir is already
 		// short and canonical, nothing here was needed in the first place.
-		cleanup, setupErr := jailHome(paths.TempRoot())
-		defer cleanup()
-		if setupErr != nil {
-			warnSetup("%v", setupErr)
-			return 1
-		}
-		return runProfiled(m)
-	}
-	// No wrapper directory of our own: t.TempDir() already makes a unique path
-	// per test and removes it. An extra layer would only spend a dozen of the
-	// 104 bytes a socket path is allowed, which is exactly the budget the
-	// longest test names need.
-	if err := os.Setenv("TMPDIR", base); err != nil {
+		base = paths.TempRoot()
+	} else if err := os.Setenv("TMPDIR", base); err != nil {
+		// No wrapper directory of our own: t.TempDir() already makes a unique path
+		// per test and removes it. An extra layer would only spend a dozen of the
+		// 104 bytes a socket path is allowed, which is exactly the budget the
+		// longest test names need.
 		warnSetup("set TMPDIR to %s: %v", base, err)
+		return 1
+	}
+	base, dropNet, err := unitNet(base) // unitnet.go: an armed unit binary's net, before any jail
+	defer dropNet()
+	if err != nil {
+		warnSetup("%v", err)
 		return 1
 	}
 	cleanup, setupErr := jailHome(base)

@@ -73,7 +73,7 @@ func runEngineGuard(t *testing.T, engine string, payload map[string]any) (int, s
 		t.Fatalf("marshal payload: %v", err)
 	}
 	var stdout, stderr bytes.Buffer
-	code := EngineGuard([]string{"--engine", engine}, bytes.NewReader(raw), &stdout, &stderr)
+	code := EngineGuardWith([]string{"--engine", engine}, bytes.NewReader(raw), &stdout, &stderr, guardGitModel)
 	return code, stdout.String(), stderr.String()
 }
 
@@ -331,7 +331,7 @@ func TestEngineGuardTrustsUnchangedScripts(t *testing.T) {
 			"git", "-C", repo, "-c", "user.name=probe", "-c", "user.email=probe@example.invalid",
 			"-c", "commit.gpgsign=false",
 		}, args...)
-		result, err := deps.RealRunner{}.Run(context.Background(), argv, deps.RunOptions{})
+		result, err := guardGitModel.Run(context.Background(), argv, deps.RunOptions{})
 		if err != nil || result.ExitCode != 0 {
 			t.Fatalf("git %v: exit %d: %v: %s", args, result.ExitCode, err, result.Stderr)
 		}

@@ -368,7 +368,7 @@ func TestUpdateSourceIgnoresForeignGitSelectors(t *testing.T) {
 				)
 			}
 			for source, want := range map[string]string{repo: wantRef, foreign: foreignPrevious} {
-				result, err := (deps.RealRunner{}).Run(
+				result, err := updateGit.Run(
 					context.Background(),
 					[]string{"git", "rev-parse", "HEAD"},
 					deps.RunOptions{Dir: source, Env: deps.WithoutGitRepoVars(os.Environ())},

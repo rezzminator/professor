@@ -11,10 +11,11 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-// pfm's suites run only in the fence, or on a GitHub-hosted CI runner. On a real machine a test
-// reaches that machine's tmux, git and pfm state: a host run on 2026-10-31 overwrote the
-// operator's live pfm.db. A test binary started anywhere else re-runs its package in the fence
-// and never runs a test where it was started.
+// A test binary built with the jail tag (or the e2e or journey suite's) runs only in the fence, or on
+// a GitHub-hosted CI runner. On a real machine such a test reaches that machine's tmux, git and pfm
+// state: a host run on 2026-10-31 overwrote the operator's live pfm.db. Started anywhere else, it
+// re-runs its package in the fence and never runs a test where it was started. A unit binary, built
+// without those tags, runs anywhere once the unit net is armed (unitnet.go), and like one until then.
 const (
 	fenceMarker   = "/.dockerenv" // exists only inside a container: an exported variable alone never passes
 	fenceLauncher = ".claude/scripts/dev.sh"
@@ -28,6 +29,12 @@ func admitted(env paths.Env, marker string) bool {
 	inFence := err == nil && env.Get(paths.EnvDevFence) == "1"
 	onHostedRunner := env.Get("GITHUB_ACTIONS") == "true" && env.Get("RUNNER_ENVIRONMENT") == "github-hosted"
 	return inFence || onHostedRunner
+}
+
+// runsHere is the guard's one decision: an armed unit binary runs on any host; every other binary
+// runs only where admitted holds, and Run re-runs it in the fence elsewhere.
+func runsHere(unit, netArmed bool, env paths.Env, marker string) bool {
+	return (unit && netArmed) || admitted(env, marker)
 }
 
 // Disposable reports whether this process runs on a machine a suite may treat as throwaway, by

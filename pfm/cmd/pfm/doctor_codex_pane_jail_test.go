@@ -1,3 +1,5 @@
+//go:build jail
+
 package main
 
 import (
@@ -17,6 +19,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/kill"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // A binding table in the exact state a real host was found in — two panes on
@@ -24,6 +27,7 @@ import (
 // this section existed, both facts sat in the meta table for weeks while
 // `pfm doctor` printed "clean".
 func TestCodexPaneBindingDoctorNamesContestedAndRetiredBindings(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -83,6 +87,7 @@ func TestCodexPaneBindingDoctorNamesContestedAndRetiredBindings(t *testing.T) {
 // The other half of the same contract: a healthy table must NOT print the same
 // words. A check that says "contested" in both states is worth nothing.
 func TestCodexPaneBindingDoctorStaysQuietOnAHealthyTable(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -132,6 +137,7 @@ func TestCodexPaneBindingDoctorStaysQuietOnAHealthyTable(t *testing.T) {
 // defensible while some other surface says it out loud — this is the test that
 // keeps that bargain honest.
 func TestCodexPaneDoctorNamesAPaneItCannotFollow(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -181,6 +187,7 @@ func TestCodexPaneDoctorNamesAPaneItCannotFollow(t *testing.T) {
 // And the other half: a pane pfm CAN follow must not be reported as one it
 // cannot. A check that says "unfollowable" either way says nothing.
 func TestCodexPaneDoctorStaysQuietOnAFollowablePane(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -216,6 +223,7 @@ func TestCodexPaneDoctorStaysQuietOnAFollowablePane(t *testing.T) {
 }
 
 func TestCodexPaneDoctorUsesHeldRootDespiteModelFirstStatus(t *testing.T) {
+	testjail.TmuxServer(t)
 	root := jailTest(t)
 	tmuxTmpDir := filepath.Join(root, "tmuxtmp")
 	resolved := jailPaths(t)

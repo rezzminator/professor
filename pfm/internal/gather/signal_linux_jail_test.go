@@ -1,4 +1,4 @@
-//go:build linux
+//go:build jail && linux
 
 package gather_test
 

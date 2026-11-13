@@ -1,3 +1,5 @@
+//go:build jail
+
 package main
 
 import (
@@ -15,6 +17,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // shareLadder is a ladder whose watches share the snapshot at a path the test
@@ -59,6 +62,7 @@ func holdShareLock(t *testing.T, snapshot string) func() {
 // missing, and locked by a holder that never publishes — none of them hides a
 // turn from the next poll.
 func TestWatchLadderAnUnfitSharedSnapshotNeverHidesATurn(t *testing.T) {
+	testjail.TmuxServer(t)
 	ladder, snapshot := shareLadder(t)
 	seat := ladder.start("lad-a")
 	watch := ladder.watch("lad-a", "--transitions")
@@ -99,6 +103,7 @@ func TestWatchLadderAnUnfitSharedSnapshotNeverHidesATurn(t *testing.T) {
 // back after, or stamped in this clock's future as a clock stepped back would
 // leave it — never makes the exited seat read alive.
 func TestWatchLadderASharedSnapshotNeverOutlivesAnExit(t *testing.T) {
+	testjail.TmuxServer(t)
 	for _, test := range []struct {
 		name  string
 		forge func(t *testing.T, alive []byte) []byte
@@ -158,6 +163,7 @@ func snapshotScan(t *testing.T, snapshot string) int64 {
 // turns still arrive; a /clear rewrites its crumb, which brings the scan back
 // and moves the watch onto the new conversation.
 func TestWatchLadderAQuietFollowedSeatIsNotRescanned(t *testing.T) {
+	testjail.TmuxServer(t)
 	ladder, snapshot := shareLadder(t)
 	seat := ladder.start("lad-a")
 	watch := ladder.watch("lad-a", "--transitions")
@@ -209,6 +215,7 @@ func TestWatchLadderAQuietFollowedSeatIsNotRescanned(t *testing.T) {
 // once its socket answers again: never an EXIT for the named watch, never a
 // DEAD and a second SEEN for the glob, and its turns still arrive once each.
 func TestWatchLadderASeatFirstSeenWithoutItsSocketKeepsItsWatch(t *testing.T) {
+	testjail.TmuxServer(t)
 	ladder := newWatchLadder(t)
 	seat := ladder.start("lad-a")
 	if err := os.Remove(seat.socketPath()); err != nil {
@@ -257,6 +264,7 @@ func listings(recorder *obs.Recorder) int {
 // Rung: a named watch checks its target exists on the scan its first poll
 // then reads — a watch starts on one scan, not two.
 func TestWatchLadderAWatchStartsOnOneScan(t *testing.T) {
+	testjail.TmuxServer(t)
 	ladder, _ := shareLadder(t)
 	ladder.start("lad-a")
 	_, recorder := obs.Test(t)

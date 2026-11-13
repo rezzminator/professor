@@ -7,8 +7,9 @@
 # resolver, .claude/scripts/unit-path.sh (cwd-relative, repository-relative, pfm-relative or absolute;
 # a file deleted at HEAD drops silently and still brings its unit's checks). Each path brings its
 # affected tests:
-#   pfm/**/*_test.go          go test -v of its package (pfm/e2e/ with the e2e tag), -count, -timeout,
-#                             -p and -parallel (the last two only when set) from the fence config
+#   pfm/**/*_test.go          go test -v of its package (pfm/e2e/ with the e2e tag, every other with
+#                             the jail tag), -count, -timeout, -p and -parallel (the last two only
+#                             when set) from the fence config
 #                             (PFM_FENCE_TEST_COUNT, PFM_FENCE_AFFECTED_*: infra/fence/shared.sh), -run the
 #                             ::selector byte for byte, else every Test and Fuzz func of the file
 #                             (TestMain excluded); a test file with none runs its whole package
@@ -38,9 +39,9 @@
 # The rules hold under pfm/ as everywhere. Any other file brings no test, only checks, and is named on
 # its own `TEST UNCOVERED <file>` line, a gap that does not fail the run. The checks, every one run
 # even after one fails:
-#   pfm paths      fmt (golangci-lint fmt --diff, named .go files), typecheck (go vet of the named .go
-#                  files' packages plus every module package importing one, test imports included; with
-#                  no named .go file the whole module), lint-new (make lint-new LINT_PKGS=those packages:
+#   pfm paths      fmt (golangci-lint fmt --diff, named .go files), typecheck (go vet, untagged then
+#                  -tags jail, of the named .go files' packages plus every module package importing
+#                  one, test imports included; with no named .go file the whole module), lint-new (make lint-new LINT_PKGS=those packages:
 #                  FAIL on a finding in a named file or any `(typecheck)` finding; others are burn-down),
 #                  arch, launch-literals
 #   any path       rumdl (named .md files), leak (named files)
@@ -169,13 +170,13 @@ static_pfm() { # static_pfm <file>...: pfm's checks over the named files
     case " ${pkgs[*]+"${pkgs[*]}"} " in *" $d "*) ;; *) pkgs+=("$d") ;; esac
   done
   if [ "${#pkgs[@]}" = 0 ]; then
-    s_check typecheck go -C pfm vet ./...
+    s_check typecheck bash -c 'go -C pfm vet ./... && go -C pfm vet -tags jail ./...'
   else
     mod="$(sed -n 's/^module[[:space:]]*//p' pfm/go.mod)"
     lrc=0; listed=
     if [ -z "$mod" ]; then lrc=1; listed='pfm/go.mod names no module path'
     else
-      listed="$(go -C pfm list -e -f '{{.ImportPath}}{{"\t"}}{{join .Imports " "}} {{join .TestImports " "}} {{join .XTestImports " "}}' ./... 2>&1)" || lrc=$?
+      listed="$(go -C pfm list -tags jail -e -f '{{.ImportPath}}{{"\t"}}{{join .Imports " "}} {{join .TestImports " "}} {{join .XTestImports " "}}' ./... 2>&1)" || lrc=$?
     fi
     if [ "$lrc" != 0 ]; then
       s_verdict typecheck "$lrc" "go list (the importers of the named packages) failed — no package was vetted:
@@ -192,7 +193,7 @@ $listed"
           esac
         done
       done <<<"$listed"
-      s_check typecheck go -C pfm vet "${vetpkgs[@]}"
+      s_check typecheck bash -c 'go -C pfm vet "$@" && go -C pfm vet -tags jail "$@"' _ "${vetpkgs[@]}"
     fi
   fi
   if [ "${#gofiles[@]}" = 0 ]; then
@@ -419,6 +420,7 @@ go_pkg_inv() { # go_pkg_inv <label> <pfm-relative dir> [-run selector]: one go t
     journey)
       case "$label" in *::*) echo "test.sh: $label: the journey suite takes no selector (it is only vetted)" >&2; usage ;; esac
       add_inv t_sh "$label" go_journey_vet; return ;;
+    *) tags=(-tags jail) ;;
   esac
   add_inv t_go "$label" "$pkgpath" go_affected ${tags[@]+"${tags[@]}"} "$pkg" "$@"
 }

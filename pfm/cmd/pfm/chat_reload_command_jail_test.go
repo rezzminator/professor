@@ -1,3 +1,5 @@
+//go:build jail
+
 package main
 
 import (
@@ -27,6 +29,7 @@ import (
 )
 
 func TestChatEndRemovesTheRoleSeatPrompt(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -82,6 +85,7 @@ func TestChatEndRemovesTheRoleSeatPrompt(t *testing.T) {
 }
 
 func TestChatEndWarnsButSucceedsWhenRolePromptRemovalFails(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}

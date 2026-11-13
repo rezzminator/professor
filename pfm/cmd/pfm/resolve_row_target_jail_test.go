@@ -1,3 +1,5 @@
+//go:build jail
+
 package main
 
 import (
@@ -13,6 +15,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // TestResolveRowTargetReturnsTheComposedRowsLiveAddress pins fleet.ResolveRow
@@ -21,6 +24,7 @@ import (
 // (kill.Manager.Kill's `live` gate), and that gate only fires when THIS
 // function hands its caller a real socket and pane, not just an engine.
 func TestResolveRowTargetReturnsTheComposedRowsLiveAddress(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}

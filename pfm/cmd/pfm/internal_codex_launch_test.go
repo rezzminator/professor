@@ -69,7 +69,7 @@ func TestCodexLaunchWorkbench(t *testing.T) {
 	for _, scenario := range []string{"new", "resume", "fork", "explicit", "long model", "equals model", "explicit effort", "disabled", "disabled resume", "invalid", "mirror failure", "outside", "settings extend", "settings envs in a workbench", "settings both keys", "login", "logout", "mcp", "mcp-server", "app-server", "completion", "sandbox", "debug", "apply", "cloud", "features", "help", "--version", "-V", "--help", "-h"} {
 		t.Run(scenario, func(t *testing.T) {
 			root := jailTest(t)
-			scribe, duo := newWorkbenchRunFixture(t, &runJail{root: root})
+			scribe, duo := newWorkbenchRunFixture(t, root)
 			if err := os.WriteFile(
 				paths.WorkbenchManifest(duo),
 				[]byte(`{"prompt":"duo.md","engines":["codex","claude"],"model":"gpt-x","effort":"xhigh"}`),
@@ -93,6 +93,7 @@ func TestCodexLaunchWorkbench(t *testing.T) {
 			wantError, wantWarning := "", ""
 			mirror := true
 			mirrorRecord, engineSync := testjail.FakeEngineSyncRunner(t, testjail.CleanMirrorReply, 0)
+			engineSync.ScriptLookPath(binary, binary, nil)
 			project := filepath.Dir(filepath.Dir(duo))
 			var wantEnv []string
 			if strings.HasPrefix(scenario, "settings ") {
@@ -157,6 +158,7 @@ func TestCodexLaunchWorkbench(t *testing.T) {
 					`: "prompt" is required); launching without it` + "\n"
 			case "mirror failure":
 				mirrorRecord, engineSync = testjail.FakeEngineSyncRunner(t, testjail.FailedMirrorReply, 1)
+				engineSync.ScriptLookPath(binary, binary, nil)
 				persona, err := workbench.ForLaunch(duo, "", pfmengine.Codex, workbench.New)
 				if err != nil {
 					t.Fatal(err)

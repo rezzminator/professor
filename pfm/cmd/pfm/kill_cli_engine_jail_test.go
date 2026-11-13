@@ -1,3 +1,5 @@
+//go:build jail
+
 package main
 
 import (
@@ -29,6 +31,7 @@ import (
 // TmuxClient, since runKill's fix must resolve through the same compose pass
 // the picker itself uses (scanFleet), not an injected stand-in.
 func TestKillCLIVouchesEngineForUnindexedButVisibleRows(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -268,6 +271,7 @@ func newKillCLIJail(t *testing.T) *killCLIJail {
 }
 
 func TestKillSelfResolveAndInternalCLI(t *testing.T) {
+	testjail.TmuxServer(t)
 	jailTest(t)
 	const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 	database, err := store.Open()

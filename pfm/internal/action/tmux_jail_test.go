@@ -1,3 +1,5 @@
+//go:build jail
+
 package action
 
 import (
@@ -123,6 +125,7 @@ func (jail *actionTmuxJail) paneID(t *testing.T, socket string) string {
 }
 
 func TestJailedSoloCompetingAttemptsAndSelfSwitch(t *testing.T) {
+	testjail.TmuxServer(t)
 	jail := newActionTmuxJail(t)
 	id := "66666666-6666-4666-8666-666666666666"
 	keepSocket := "cc-600-1-1"
@@ -149,7 +152,6 @@ func TestJailedSoloCompetingAttemptsAndSelfSwitch(t *testing.T) {
 			t,
 			filepath.Join(jail.sidDir, name),
 			"/tx/"+id+".jsonl",
-			0o600,
 		)
 	}
 	var stderr bytes.Buffer

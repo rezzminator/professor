@@ -1,3 +1,5 @@
+//go:build jail
+
 package main
 
 import (
@@ -12,6 +14,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/agentrole"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestChatNewRoleWithoutSourceRepoMarkerNamesCause(t *testing.T) {
@@ -57,6 +60,7 @@ func TestChatNewRoleWithoutSourceRepoMarkerNamesCause(t *testing.T) {
 }
 
 func TestChatNewAgentRoleKeysDuplicateNamesByFreshSocket(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}

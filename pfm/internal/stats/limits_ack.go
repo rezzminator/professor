@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	headlessrun "github.com/rezzminator/professor/pfm/internal/headless/run"
 	"github.com/rezzminator/professor/pfm/internal/obs"
@@ -105,10 +106,14 @@ func needsCredentialRefresh(err error) bool {
 	return isCredentialRejection(err)
 }
 
+// ackRunner starts the credential-refresh child; nil is headless/run's own runner, the real process
+// table. A test points it at a deps.FakeRunner.
+var ackRunner deps.Runner
+
 func defaultAck(ctx context.Context, account LimitAccount) error {
 	result, err := headlessrun.Run(ctx, headlessrun.Request{
 		Engine: pfmengine.Claude, Account: account.ID,
-		Model: "claude-haiku-4-5", Prompt: "ACK", Native: true,
+		Model: "claude-haiku-4-5", Prompt: "ACK", Native: true, Runner: ackRunner,
 		Args:     []string{"--max-turns", "1"},
 		Settings: map[string]any{"systemPrompt": "lean"},
 		Config: pfmconfig.Config{

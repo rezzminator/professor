@@ -1,8 +1,11 @@
+//go:build jail
+
 package tmux
 
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -56,4 +59,36 @@ func TestExecAttachedOutlivesTheDefaultBound(t *testing.T) {
 			defaultTimeout, err, command.TimedOut(),
 		)
 	}
+}
+
+// TestExecKeepsCommandsContract: the terminal is Command plus completion —
+// same binary, same -S socket argv, same cleared TMUX, and the embedded
+// *exec.Cmd still takes Stdin and exposes Process for the façades that
+// set or kill them. Its subject is the real child the embed starts, so it
+// runs one (a fake runner starts no Process).
+func TestExecKeepsCommandsContract(t *testing.T) {
+	t.Setenv("TMUX", "/tmp/caller-server,1,0")
+	binary := printingTmux(t)
+	command := Exec(context.Background(), binary, "/sockets/cc-1", "load-buffer", "-b", "buf", "-")
+	if command.Path != binary || command.Args[1] != "-S" || command.Args[2] != "/sockets/cc-1" {
+		t.Fatalf("argv = %q", command.Args)
+	}
+	command.Stdin = strings.NewReader("body")
+	if err := command.Run(); err != nil {
+		t.Fatal(err)
+	}
+	if command.Process == nil {
+		t.Fatal("the embedded exec.Cmd lost its Process")
+	}
+}
+
+// printingTmux writes a shell script that plays tmux: it prints its arguments
+// and exits 0. Its name is not tmux, so the test-process refusal lets it run.
+func printingTmux(t *testing.T) string {
+	t.Helper()
+	binary := filepath.Join(t.TempDir(), "tmux-fake")
+	if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nprintf '%s ' \"$@\"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return binary
 }

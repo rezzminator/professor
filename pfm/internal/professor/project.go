@@ -1,4 +1,3 @@
-// Package professor is the blueprint's template store: it scaffolds a project once, pins its baseline, reports drift against the store, and prints the project-side doctor row.
 package professor
 
 import (

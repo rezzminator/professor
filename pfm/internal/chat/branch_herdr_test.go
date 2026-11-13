@@ -54,7 +54,7 @@ func TestBranchHerdrBirthsAForkSeat(t *testing.T) {
 		Places: func(context.Context) (*place.Fleet, error) { return &place.Fleet{}, nil },
 	}
 	binary := filepath.Join(values.Home, "native-engine")
-	if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutableNeverRun(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	record := &fleetdb.Launch{SessionID: fork, Engine: pfmengine.Claude, Account: 1, Cache1H: true}

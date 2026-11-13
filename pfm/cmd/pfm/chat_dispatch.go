@@ -26,6 +26,10 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
+// commandRunner starts every child the commands run: the real runner, observed;
+// a test overrides this var to script them.
+var commandRunner deps.Runner = obs.Runner(deps.RealRunner{})
+
 // Headless exit codes are a scripting contract: 0 means the verb succeeded.
 const (
 	helpFlag        = "--help"
@@ -105,7 +109,7 @@ func runChatWithRuntime(
 	case askAction:
 		return runHeadlessAsk(rest, stdout, stderr, clock.Real, runtime)
 	case "watch":
-		return runHeadlessWatch(rest, stdout, stderr, obs.Runner(deps.RealRunner{}), runtime)
+		return runHeadlessWatch(rest, stdout, stderr, commandRunner, runtime)
 	case "capture":
 		return runChatCapture(rest, stdout, stderr, runtime)
 	case "keys":

@@ -1,7 +1,7 @@
 name: macOS suite
 description: >-
   One part of pfm's macOS suite on a macOS runner: `unit` runs the refresh-scope
-  fixture under the system Bash 3.2 and `go test ./...`; `e2e` runs the whole
+  fixture under the system Bash 3.2, `go test ./...` (the unit tier) and `go test -tags jail ./...` (the jail tier); `e2e` runs the whole
   tagged e2e suite serially, the Darwin installer and the release-upgrade e2e
   included. ci.yml runs both parts on every pull request into main and on a
   hand-started run (`-f exclude=` the other jobs for macOS alone). Needs the repository checked out with full history and Go set up;
@@ -38,7 +38,10 @@ runs:
           unit)
             # The refresh-scope fixture under the system Bash 3.2, as on a user's Mac.
             python3 scripts/test-refresh-scope.py
-            go -C pfm test -count=1 ./... ;;
+            # The unit tier as any machine runs it, untagged; then the jail tier (*_jail_test.go),
+            # whose tagged binaries internal/testjail admits on this hosted runner.
+            go -C pfm test -count=1 ./...
+            go -C pfm test -count=1 -tags jail ./... ;;
           e2e)
             export PFM_E2E_SOURCE_REPO="$GITHUB_WORKSPACE"
             export PFM_DEV_REPO_WORK_TREE="$GITHUB_WORKSPACE"

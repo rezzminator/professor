@@ -1,3 +1,5 @@
+//go:build jail
+
 package main
 
 import (
@@ -11,6 +13,7 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/spawn"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // TestChatOpenScansReadOnly is the regression for chat.OpenID's fleet.Scan call: it
@@ -27,6 +30,7 @@ import (
 // open`, and asserting the corpse survives is therefore a faithful proxy for
 // "chat.OpenID's scan requested ReadOnly".
 func TestChatOpenScansReadOnly(t *testing.T) {
+	testjail.TmuxServer(t)
 	root := jailTest(t)
 	t.Setenv(spawn.TestFreshSocketEnv, "cc-1700000000-1-1")
 

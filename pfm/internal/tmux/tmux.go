@@ -2,6 +2,17 @@
 // chat's server is built by Command, so the socket addressing, the binary
 // lookup and the cleared $TMUX live in one place. Each consumer package keeps
 // its own narrow interface over it (its fake is its test seam).
+//
+// Entry points: Command and Invocation (tmux.go) build a call; Exec,
+// ExecWithin and ExecAttached (exec.go) run one with its record; WithClientRunner
+// (runner.go) runs a context's calls through a deps.Runner.
+// Files:
+//   - exec.go: Cmd, the observed call: its deadline, its completion record.
+//   - runner.go: a context's runner, the test-process refusal of a real tmux, ExitError.
+//   - socket.go: Socket, a socket directory's calls: KillPane, KillServer.
+//   - accepts.go: Accepts, whether a server answers a connect, with no exec.
+//   - format.go: FormatSplit, a -F format string's fields.
+//   - launch.go: PrepareLaunch, a pane command inline or as a one-shot script.
 package tmux
 
 import (

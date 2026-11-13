@@ -18,6 +18,6 @@ internal/installer/herdr_indicators_test.go 2
 internal/installer/skill_sources_test.go 3
 internal/mcpserv/server_stress_test.go 2
 internal/mcpserv/whoami_find_test.go 1
-internal/resolve/whoami_test.go 1
+internal/resolve/whoami_jail_test.go 1
 internal/statusline/herdr_name_test.go 1
-internal/usagehook/fetch_test.go 1 
+internal/usagehook/fetch_jail_test.go 1

@@ -6,6 +6,8 @@
 // Files:
 //   - registry.go: the command registry, its platform gates and the resolved binary paths.
 //   - runner.go: the process runner, real and fake: run, start, detach, kill, group signals.
+//   - runner_script.go: the FakeRunner's Run answers: Script, Handle (computed at call time), the ledger.
+//   - test_allowance.go: AllowInTest, a test's leave to run a real command a door refuses in tests.
 //   - runner_output.go: StartOutput, the output and exit a FakeRunner child plays at Start.
 //   - runner_group_linux.go, runner_group_darwin.go: GroupGone, when a refused group signal means the group is gone.
 //   - probe.go: the version and self-doctor probes and their results.

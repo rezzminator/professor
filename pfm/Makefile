@@ -137,8 +137,9 @@ lint-new: ## Findings on lines changed since LINT_BASE (origin/main) — the gat
 	$(call need-tool,LINT)
 	$(FENCE_GIT) GOMEMLIMIT=1000MiB $(LINT) run --new-from-merge-base=$(LINT_BASE) $(LINT_PKGS)
 
-vet: ## go vet the whole module
+vet: ## go vet the whole module, the unit tier untagged and the jail tier under -tags jail
 	go vet ./...
+	go vet -tags jail ./...
 
 # Suites never run on the host: there `cover` runs in the fence instead (scripts/platform.sh platform_in_fence).
 IN_FENCE := $(shell . "$(REPO)/scripts/platform.sh" && platform_in_fence && echo 1)
@@ -149,7 +150,7 @@ else
 cover: ## Unit coverage (cross-package) + any e2e GOCOVERDIR run, merged and thresholded
 	$(call need-tool,COVER)
 	rm -rf "$(COVER_DIR)/unit" && mkdir -p "$(COVER_DIR)/unit"
-	go test ./... -count=1 -coverpkg=./... -covermode=atomic -args -test.gocoverdir="$(COVER_DIR)/unit"
+	go test -tags jail ./... -count=1 -coverpkg=./... -covermode=atomic -args -test.gocoverdir="$(COVER_DIR)/unit"
 	@dirs="$(COVER_DIR)/unit"; \
 	if ls "$(COVER_DIR)/e2e"/covmeta.* >/dev/null 2>&1; then dirs="$$dirs,$(COVER_DIR)/e2e"; fi; \
 	echo "cover: merging $$dirs"; \

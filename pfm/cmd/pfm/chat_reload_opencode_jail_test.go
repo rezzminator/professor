@@ -1,3 +1,5 @@
+//go:build jail
+
 package main
 
 import (
@@ -11,6 +13,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // `pfm chat reload --sock ox-…` used to print "reload scheduled in place" and
@@ -19,6 +22,7 @@ import (
 // caller can see beats a success it cannot. The worker seam must never be
 // touched, and stdout must stay empty.
 func TestChatReloadRefusesAnOpenCodeSocketUpFront(t *testing.T) {
+	testjail.TmuxServer(t)
 	root := jailTest(t)
 	configPath := writeConfigFixture(t, root, `{
   "version": 1,
@@ -72,6 +76,7 @@ func TestChatReloadRefusesAnOpenCodeSocketUpFront(t *testing.T) {
 // detached worker then refused the roster miss into its log, so the chat
 // simply never rebooted. The front refuses it where the caller reads.
 func TestChatReloadRefusesAnUnknownAccountUpFront(t *testing.T) {
+	testjail.TmuxServer(t)
 	root := jailTest(t)
 	configPath := writeConfigFixture(t, root, `{
   "version": 1,

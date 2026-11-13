@@ -1,3 +1,5 @@
+//go:build jail
+
 package statusline
 
 import (
@@ -36,6 +38,7 @@ func tmuxExecs(recorder *obs.Recorder) map[string]int {
 // quarter hour. The fixture runs a real render against a probe tmux server —
 // never a fleet socket — and reads the window name back off it.
 func TestRenderConvergesTheWindowNameOnAProbeSocket(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -231,6 +234,7 @@ func probeWindowField(t *testing.T, socketPath, format string) string {
 // converges to gather.WindowNameFor's clip, so the next name-sync pass sees a
 // converged window instead of renaming it back every 15 minutes forever.
 func TestRenderConvergesToTheSameClipNameSyncUses(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -284,6 +288,7 @@ func TestRenderConvergesToTheSameClipNameSyncUses(t *testing.T) {
 // more (the window-renamed hook fires), and a converged render still forks
 // nothing.
 func TestRenderRenamesWhenOnlyTheExactNameChangesPastTheClip(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}

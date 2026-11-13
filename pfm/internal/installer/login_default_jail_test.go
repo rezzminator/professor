@@ -1,3 +1,5 @@
+//go:build jail
+
 package installer
 
 // The login block is sourced by a real sh: the environment it leaves is the subject.

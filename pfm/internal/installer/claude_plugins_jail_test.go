@@ -1,3 +1,5 @@
+//go:build jail
+
 package installer
 
 // A plugin command that hangs is stopped with its whole process group: the real children and their pids are the subject.

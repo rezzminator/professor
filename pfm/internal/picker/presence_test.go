@@ -162,14 +162,10 @@ func presenceEnv(t *testing.T) fleet.Env {
 	}}
 }
 
-// goneProcessPID returns the pid of a process that has exited and been reaped.
-func goneProcessPID(t *testing.T) int {
-	t.Helper()
-	command := exec.Command("true")
-	if err := command.Run(); err != nil {
-		t.Fatalf("run a process to reap: %v", err)
-	}
-	return command.Process.Pid
+// goneProcessPID returns the nth pid no process holds: above every kernel's pid limit (Linux caps at 2^22,
+// macOS at 99999), so no child is needed to produce one.
+func goneProcessPID(n int) int {
+	return 1<<30 + n
 }
 
 // TestPresenceBaselineOwesOnePassPerNewlyGonePid pins the parked poll's verdict
@@ -184,7 +180,7 @@ func TestPresenceBaselineOwesOnePassPerNewlyGonePid(t *testing.T) {
 	pane := gather.ProbePane{Socket: "cc-1800000031-1-1", PaneID: "%1", PID: os.Getpid()}
 	live := gather.Snapshot{
 		Panes:           []gather.ProbePane{pane},
-		ClaudeProcesses: []gather.ClaudeProcess{{PID: goneProcessPID(t), PanePID: pane.PID}},
+		ClaudeProcesses: []gather.ClaudeProcess{{PID: goneProcessPID(0), PanePID: pane.PID}},
 	}
 	var baseline presenceBaseline
 	pass := func(live gather.Snapshot) {
@@ -213,7 +209,7 @@ func TestPresenceBaselineOwesOnePassPerNewlyGonePid(t *testing.T) {
 	}
 	// That pass ran and the pid is still listed gone (the host's fact); now a
 	// second chat dies while a pass runs.
-	live.ClaudeProcesses = append(live.ClaudeProcesses, gather.ClaudeProcess{PID: goneProcessPID(t), PanePID: pane.PID})
+	live.ClaudeProcesses = append(live.ClaudeProcesses, gather.ClaudeProcess{PID: goneProcessPID(1), PanePID: pane.PID})
 	pass(live)
 	if got := verdicts(live, 3); !slices.Equal(got, []bool{false, true, false}) {
 		t.Fatalf("a newly gone pid beside a permanently gone one: polls = %v, want its own owed pass, then unchanged",

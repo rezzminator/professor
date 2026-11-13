@@ -11,6 +11,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/professor"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testjail/fakegit"
 )
 
 func TestInitDeploysMappedTemplatesAndPinsExactlyTheDeployedSet(t *testing.T) {
@@ -387,15 +388,19 @@ func newScaffoldStoreFixture(t *testing.T) string {
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if err := testjail.WriteExecutable(path, []byte(fixture.content), fixture.mode); err != nil {
+		if err := testjail.WriteExecutableNeverRun(path, []byte(fixture.content), fixture.mode); err != nil {
 			t.Fatal(err)
 		}
 	}
-	gitTemp(t, root, "init", "-q")
-	gitTemp(t, root, "config", "user.email", "fixture.invalid")
-	gitTemp(t, root, "config", "user.name", "fixture-identity")
-	gitTemp(t, root, "add", ".")
-	gitTemp(t, root, "commit", "-qm", "fixture store")
+	// The store's git is a model: the fixture commits through it and init reads
+	// the store's SHA through it, until the test ends.
+	git := &fakegit.Runner{}
+	t.Cleanup(professor.StubStoreRunnerForTest(git))
+	git.Must(t, root, "init", "-q")
+	git.Must(t, root, "config", "user.email", "fixture.invalid")
+	git.Must(t, root, "config", "user.name", "fixture-identity")
+	git.Must(t, root, "add", ".")
+	git.Must(t, root, "commit", "-qm", "fixture store")
 	return root
 }
 

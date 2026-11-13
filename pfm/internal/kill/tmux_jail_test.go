@@ -1,3 +1,5 @@
+//go:build jail
+
 package kill
 
 import (
@@ -140,6 +142,7 @@ func shellQuote(value string) string {
 }
 
 func TestJailedKillExitFlushesAndSweeps(t *testing.T) {
+	testjail.TmuxServer(t)
 	jail := newKillTmuxJail(t)
 	ctx := context.Background()
 	database, err := store.Open()
@@ -256,6 +259,7 @@ func TestJailedKillExitFlushesAndSweeps(t *testing.T) {
 }
 
 func TestStressTenSimultaneousKillExits(t *testing.T) {
+	testjail.TmuxServer(t)
 	jail := newKillTmuxJail(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -371,6 +375,7 @@ func TestStressTenSimultaneousKillExits(t *testing.T) {
 // and detach: no client attached reports an empty slice with no error, a real
 // attached client reports its own live pid and name, and its detach ends it.
 func TestCommandTmuxClientsRealServer(t *testing.T) {
+	testjail.TmuxServer(t)
 	jail := newKillTmuxJail(t)
 	ctx := context.Background()
 	socket := "cc-viewport-clients"

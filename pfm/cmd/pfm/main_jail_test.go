@@ -1,3 +1,5 @@
+//go:build jail
+
 package main
 
 import (
@@ -10,13 +12,17 @@ import (
 	"strings"
 	"testing"
 
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/doctor"
 	"github.com/rezzminator/professor/pfm/internal/hostcheck"
 	"github.com/rezzminator/professor/pfm/internal/installer"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestWiredIndexListOpenAndDoctor(t *testing.T) {
+	testjail.TmuxServer(t)
 	root := jailTest(t)
 	t.Setenv(spawn.TestFreshSocketEnv, "cc-1700000000-1-1")
 	project := filepath.Join(root, "work", "project")
@@ -124,5 +130,92 @@ func holdClaudeOpen(t *testing.T, root, socket string) func(format string) strin
 			t.Fatalf("read the opened server %s: %v", socket, err)
 		}
 		return strings.TrimSpace(string(output))
+	}
+}
+
+// Jail: doctor asks the real git for core.hooksPath over a hand-written .git directory; a git model would be the subject's own answer.
+// An existing pre-push hook is inactive until Git is configured to use it.
+func TestDoctorNamesAnExistingButUnwiredPrePushGate(t *testing.T) {
+	savedProbe := doctor.PrePushGateProbeOverride
+	doctor.PrePushGateProbeOverride = nil
+	t.Cleanup(func() { doctor.PrePushGateProbeOverride = savedProbe })
+	root := jailTest(t)
+	testjail.PinClaudeAsk(t, filepath.Join(root, "home"))
+	home := jailPaths(t).Home
+	account := pfmconfig.DefaultAccountDir(home, 42)
+	if err := os.MkdirAll(account, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	testjail.StageGlobalAgents(t, home)
+	dirs, files := storeLayout()
+	testjail.StageAccountLinks(t, home, account, dirs, files)
+	t.Setenv(paths.EnvClaudeRoots, filepath.Join(account, "projects"))
+	repository := filepath.Join(root, "repository")
+	if err := os.MkdirAll(filepath.Join(repository, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(repository, ".githooks"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(repository, ".git", "config"),
+		[]byte("[core]\n\trepositoryformatversion = 0\n\tbare = false\n"),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(repository, ".git", "HEAD"),
+		[]byte("ref: refs/heads/main\n"),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	for _, directory := range []string{"objects", filepath.Join("refs", "heads")} {
+		if err := os.MkdirAll(filepath.Join(repository, ".git", directory), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := testjail.WriteExecutable(
+		filepath.Join(repository, ".githooks", "pre-push"),
+		[]byte("#!/bin/sh\nexit 0\n"),
+		0o700,
+	); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(repository)
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"doctor"}, &stdout, &stderr); code != 1 {
+		t.Fatalf("doctor code=%d, want warning exit\nstdout=%s\nstderr=%s", code, stdout.String(), stderr.String())
+	}
+	want := "doctor: pre-push gate=UNWIRED expected=.githooks actual=(unset)"
+	if !strings.Contains(stdout.String(), want) {
+		t.Fatalf("doctor omitted %q:\n%s", want, stdout.String())
+	}
+	if err := os.WriteFile(
+		filepath.Join(repository, ".git", "config"),
+		[]byte("[core]\n\trepositoryformatversion = 0\n\tbare = false\n\thooksPath = .githooks\n"),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := run([]string{"doctor"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("armed doctor code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if want := "doctor: pre-push gate=armed core.hooksPath=.githooks"; !strings.Contains(stdout.String(), want) {
+		t.Fatalf("armed doctor omitted %q:\n%s", want, stdout.String())
+	}
+	if err := os.Chmod(filepath.Join(repository, ".githooks", "pre-push"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := run([]string{"doctor"}, &stdout, &stderr); code != 1 {
+		t.Fatalf("broken-hook doctor code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if want := "doctor: pre-push gate=BROKEN core.hooksPath=.githooks"; !strings.Contains(stdout.String(), want) {
+		t.Fatalf("broken-hook doctor omitted %q:\n%s", want, stdout.String())
 	}
 }

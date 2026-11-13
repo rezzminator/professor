@@ -1,3 +1,5 @@
+//go:build jail
+
 package picker
 
 import (
@@ -147,6 +149,7 @@ func TestInteractiveRefreshBuffersGatherWarningsUntilFlushed(t *testing.T) {
 // of an indexed thread name. That is unresolved screen state, not a failed
 // probe: it must neither corrupt the active frame nor print on picker close.
 func TestInteractiveRefreshKeepsUnresolvedCodexNamesSilent(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}

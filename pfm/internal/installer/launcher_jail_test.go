@@ -1,3 +1,5 @@
+//go:build jail
+
 package installer
 
 // The staged claude shim is a real shell script: it is the subject, so it runs for real.

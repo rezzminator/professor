@@ -1,3 +1,5 @@
+//go:build jail
+
 package headless
 
 import (
@@ -55,6 +57,7 @@ func startHeadlessTmuxSession(t *testing.T) (socketPath, session string) {
 // distinct wording: a live pane that captured fine but has no recorded human
 // exchange yet reads as PANE-ONLY, never as an empty transcript-only answer.
 func TestAskCapturesLivePaneAndReportsPaneOnlyWithoutExchange(t *testing.T) {
+	testjail.TmuxServer(t)
 	socketPath, session := startHeadlessTmuxSession(t)
 	root := t.TempDir()
 	bin := filepath.Join(root, "bin")

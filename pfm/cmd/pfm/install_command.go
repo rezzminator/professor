@@ -19,7 +19,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/hookentry"
 	"github.com/rezzminator/professor/pfm/internal/hostcheck"
 	"github.com/rezzminator/professor/pfm/internal/installer"
-	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/pricing/modelcost"
 	"github.com/rezzminator/professor/pfm/internal/professor"
@@ -139,7 +138,7 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 		entries := deps.Registry(runtime.DepsOptions())
 		probe := deps.ProbeOptions{
 			SkipEngines: map[pfmengine.ID]bool{pfmengine.Codex: skipCodex},
-			Runner:      obs.Runner(deps.RealRunner{}),
+			Runner:      commandRunner,
 		}
 		_, failures, _ := doctor.PrintDependencies(context.Background(), w, runtime.Paths.Home, entries, probe)
 		return failures
@@ -151,7 +150,7 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 		}
 	}
 	if *check {
-		unprobed, err := installer.CheckScheduler(context.Background(), nil)
+		unprobed, err := installer.CheckScheduler(context.Background(), installer.NewCommandRunner(commandRunner))
 		if err != nil {
 			fmt.Fprintln(stderr, installer.SchedulerRefusal(installCommand, err))
 			return 4
@@ -237,6 +236,7 @@ func newInstallerOptions(
 		SkillSourcesOffline:        paths.SkillSourcesOffline(),
 		ThemesOffline:              paths.ThemesOffline(),
 		ReleaseNativeClaudeReports: hookentry.ReleaseNativeClaudeReports,
+		ProcessRunner:              commandRunner,
 	}
 	if len(runtimes) != 0 {
 		runtime := runtimes[0]

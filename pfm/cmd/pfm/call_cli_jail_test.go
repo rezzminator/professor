@@ -1,3 +1,5 @@
+//go:build jail
+
 package main
 
 import (
@@ -81,6 +83,7 @@ func TestCallReceiptPrintsResolverNoteOnStderr(t *testing.T) {
 }
 
 func TestChatCallResolvesUnindexedLiveSessionAcrossProbeSockets(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux binary is not installed")
 	}
@@ -663,6 +666,7 @@ func TestChatCallResumeRefusesDaemonRegistrySession(t *testing.T) {
 }
 
 func TestChatCallResumeRefusesLiveSocketCrumbSession(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux binary is not installed")
 	}

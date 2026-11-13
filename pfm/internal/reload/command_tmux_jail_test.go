@@ -1,3 +1,5 @@
+//go:build jail
+
 package reload
 
 import (
@@ -23,6 +25,7 @@ import (
 // could not come back. The long command launches through a one-shot script
 // that execs the target and removes itself.
 func TestReloadRespawnLaunchesACommandLongerThanATmuxMessage(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}

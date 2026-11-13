@@ -1,3 +1,5 @@
+//go:build jail
+
 package spawn
 
 import (
@@ -64,6 +66,7 @@ func showOption(t *testing.T, socketPath string, arguments ...string) string {
 }
 
 func TestSpawnAppliesTheTitleOptionsWhenPfmOwnsThem(t *testing.T) {
+	testjail.TmuxServer(t)
 	titles := pfmconfig.DefaultTmuxTitles()
 	socketPath := newTitlesProbeServer(t, "probe-cc-1800000011-1-1", &titles)
 	if got := showOption(t, socketPath, "show-options", "-g", "set-titles"); got != "set-titles on" {
@@ -78,6 +81,7 @@ func TestSpawnAppliesTheTitleOptionsWhenPfmOwnsThem(t *testing.T) {
 // The host owns the title: pfm sets NEITHER option, so whatever the host put on
 // the outer pty before tmux started still stands.
 func TestSpawnLeavesTheHostsTitleAloneWhenTitlesAreDisabled(t *testing.T) {
+	testjail.TmuxServer(t)
 	socketPath := newTitlesProbeServer(
 		t, "probe-cc-1800000012-1-1", &pfmconfig.TmuxTitles{Enabled: false},
 	)
@@ -104,6 +108,7 @@ func TestSpawnLeavesTheHostsTitleAloneWhenTitlesAreDisabled(t *testing.T) {
 // A client built without a machine config keeps today's behaviour rather than
 // silently handing the title to the host.
 func TestSpawnWithoutAConfigStillOwnsTheTitle(t *testing.T) {
+	testjail.TmuxServer(t)
 	socketPath := newTitlesProbeServer(t, "probe-cc-1800000013-1-1", nil)
 	if got := showOption(t, socketPath, "show-options", "-g", "set-titles"); got != "set-titles on" {
 		t.Fatalf("set-titles = %q, want on for a nil policy", got)
@@ -114,6 +119,7 @@ func TestSpawnWithoutAConfigStillOwnsTheTitle(t *testing.T) {
 // exists, so they state no size and let that first client size the window.
 // A zero size must reach tmux as NO -x/-y — `-x 0` is a size tmux refuses.
 func TestNewSessionWithoutASizeLetsTheFirstClientSizeTheWindow(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -147,6 +153,7 @@ func TestNewSessionWithoutASizeLetsTheFirstClientSizeTheWindow(t *testing.T) {
 // WindowName form; a name no user chose is also @pfm_chat_name_auto, a user's
 // is not. A chat born unnamed carries no option (D6).
 func TestNewSessionStoresTheExactChatNameInTheSameCommand(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}

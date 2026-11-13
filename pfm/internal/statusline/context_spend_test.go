@@ -377,7 +377,7 @@ func TestMainLineRendersOneDollarAmountInEveryState(t *testing.T) {
 				data.TranscriptPath = spendTranscript(t, tc.child, tc.lines...)
 			}
 			runtime := Runtime{
-				Home: t.TempDir(), Engine: pfmengine.Claude,
+				Home: t.TempDir(), Engine: pfmengine.Claude, CacheDir: t.TempDir(),
 				Env: map[string]string{paths.EnvCostLedgerDir: ledgerDir, claudelaunch.EnvCostLedger: tc.marker},
 			}
 			if !tc.noPrices {
@@ -432,7 +432,7 @@ func TestRenderContextLineReadsEachTranscriptOnce(t *testing.T) {
 	data := input{SessionID: spendSession}
 	data.TranscriptPath = spendTranscript(t, spendChildResponse)
 	runtime := Runtime{
-		Home: t.TempDir(), Engine: pfmengine.Claude, Prices: testPrices(t),
+		Home: t.TempDir(), Engine: pfmengine.Claude, Prices: testPrices(t), CacheDir: t.TempDir(),
 		Env: map[string]string{paths.EnvCostLedgerDir: t.TempDir()},
 	}
 	counts := readCounter(t)

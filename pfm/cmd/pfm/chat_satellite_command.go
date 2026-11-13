@@ -21,13 +21,11 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
-	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/launchnotice"
-	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
@@ -217,7 +215,7 @@ func runChatSaveContext(
 	); err != nil {
 		return fail("write transcript: %v", err)
 	}
-	writeRepositorySnapshot(ctx, file, obs.Runner(deps.RealRunner{}))
+	writeRepositorySnapshot(ctx, file, commandRunner)
 	closed = true
 	if err := file.Close(); err != nil {
 		return fail("close target: %v", err)
@@ -341,7 +339,7 @@ func runChatBranch(args []string, stdout, stderr io.Writer, env paths.Env, clk c
 	if engine == pfmengine.Codex {
 		binary = runtime.Config.EffectiveCodex(selectedAccount).Binary
 	}
-	if _, err := obs.Runner(deps.RealRunner{}).LookPath(binary); err != nil {
+	if _, err := commandRunner.LookPath(binary); err != nil {
 		fmt.Fprintf(stderr, "pfm chat branch: configured %s binary %q is not executable: %v\n", engine, binary, err)
 		return 1
 	}

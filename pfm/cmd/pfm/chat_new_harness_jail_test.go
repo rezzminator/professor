@@ -1,3 +1,5 @@
+//go:build jail
+
 package main
 
 import (
@@ -14,9 +16,11 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/launchnotice"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestChatNewHarnessPromptLaunchesOnTheFileAndRecordsItForReload(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -61,6 +65,7 @@ func TestChatNewHarnessPromptLaunchesOnTheFileAndRecordsItForReload(t *testing.T
 // starter's stderr, with the cause, and still starts; with the prompt staged it
 // says nothing.
 func TestChatNewWarnsWhenTheFleetPromptCannotReachTheChat(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}

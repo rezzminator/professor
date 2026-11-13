@@ -5,10 +5,8 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/professor"
 )
@@ -22,10 +20,9 @@ func (f projectUpdateFixture) upstreamCommit(t *testing.T, template, content, su
 	gitTemp(t, f.store, "commit", "-qm", subject)
 }
 
-// upstreamCommits is count upstreamCommit calls on one template written as one
-// git fast-import stream: commit index (1…count) sets template to
-// content(index) under subject(index), on the store's branch after its HEAD,
-// and the store is checked out at the last, as the calls would leave it.
+// upstreamCommits is count upstreamCommit calls on one template: commit index
+// (1…count) sets template to content(index) under subject(index), on the
+// store's branch after its HEAD, as the calls would leave it.
 func (f projectUpdateFixture) upstreamCommits(
 	t *testing.T,
 	template string,
@@ -33,27 +30,9 @@ func (f projectUpdateFixture) upstreamCommits(
 	content, subject func(index int) string,
 ) {
 	t.Helper()
-	branch := updateGitBranch(t, f.store)
-	parent := updateGitRevision(t, f.store, "HEAD")
-	when := time.Now().Unix()
-	var stream strings.Builder
 	for index := 1; index <= count; index++ {
-		message, body := subject(index)+"\n", content(index)
-		fmt.Fprintf(&stream, "commit refs/heads/%s\n", branch)
-		fmt.Fprintf(&stream, "committer fixture-identity <fixture.invalid> %d +0000\n", when)
-		fmt.Fprintf(&stream, "data %d\n%s", len(message), message)
-		if index == 1 {
-			fmt.Fprintf(&stream, "from %s\n", parent)
-		}
-		fmt.Fprintf(&stream, "M 100644 inline templates/%s\ndata %d\n%s\n", template, len(body), body)
+		f.upstreamCommit(t, template, content(index), subject(index))
 	}
-	command := exec.Command("git", "fast-import", "--quiet")
-	command.Dir = f.store
-	command.Stdin = strings.NewReader(stream.String())
-	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("git fast-import: %v\n%s", err, output)
-	}
-	gitTemp(t, f.store, "reset", "-q", "--hard")
 }
 
 // sessionVerb runs one `pfm update <verb>` in the fixture project.

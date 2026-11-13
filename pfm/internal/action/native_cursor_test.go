@@ -31,7 +31,7 @@ func TestLauncherRunNativeCursorFollowsConfig(t *testing.T) {
 func TestClaudeSpawnEnvironmentNativeCursorFollowsConfig(t *testing.T) {
 	// A real executable, so ClaudeSpawn.Command resolves the binary.
 	claudeBinary := filepath.Join(t.TempDir(), "claude")
-	if err := testjail.WriteExecutable(claudeBinary, []byte("#!/bin/sh\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutableNeverRun(claudeBinary, []byte("#!/bin/sh\n"), 0o700); err != nil {
 		t.Fatalf("stage claude stand-in %s: %v", claudeBinary, err)
 	}
 	for _, want := range []bool{false, true} {

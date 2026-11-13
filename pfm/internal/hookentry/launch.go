@@ -124,8 +124,14 @@ func launchIsHeadless(arguments []string) bool {
 	return false
 }
 
-// Launch is the managed Claude launcher entry.
-func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env paths.Env) int {
+// LaunchWith is Launch, the managed Claude launcher entry, with the runner that looks up tmux; nil is the real one.
+func LaunchWith(
+	args []string,
+	stdout, stderr io.Writer,
+	runtime config.Runtime,
+	env paths.Env,
+	runner deps.Runner,
+) int {
 	if env == nil {
 		env = paths.OSEnv{}
 	}
@@ -151,7 +157,7 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 		return 127
 	}
 	forcedPassThrough := env.Get("PFM_LAUNCH_PASSTHROUGH") == "1"
-	ctx := context.Background()
+	ctx := launchContext()
 	var caller resolve.Identity
 	var callerErr error
 	if !forcedPassThrough {
@@ -336,7 +342,7 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 		fmt.Fprintf(stderr, "pfm internal launch: build Claude command: %v\n", err)
 		return 1
 	}
-	tmuxBinary, err := obs.Runner(deps.RealRunner{}).LookPath(pfmtmux.Binary)
+	tmuxBinary, err := obs.Runner(runner).LookPath(pfmtmux.Binary)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm internal launch: find tmux: %v\n", err)
 		return 1
@@ -424,7 +430,7 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 		return 1
 	}
 	if _, err := fmt.Fprintf(stdout, "pfm launch: %s %s\n", socket, session); err != nil {
-		_ = waiter.Process.Kill()
+		cancelWait() // ends the waiter on either path: exec kills it, a client runner returns
 		fmt.Fprintf(stderr, "pfm internal launch: print socket: %v\n", err)
 		return 1
 	}
@@ -436,7 +442,7 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 		"-S",
 		startChannel,
 	).CombinedOutput(); err != nil {
-		_ = waiter.Process.Kill()
+		cancelWait() // ends the waiter on either path: exec kills it, a client runner returns
 		fmt.Fprintf(
 			stderr,
 			"pfm internal launch: release Claude pane: %v: %s\n",

@@ -185,27 +185,6 @@ func TestRunSkillGitStripsOnlyRepositorySelection(t *testing.T) {
 	}
 }
 
-// TestSourceFetchedSkillsIgnoreAHomeRepositoryConfig pins F24: a dotfiles
-// repository at $HOME whose config rewrites every URL never reaches a skill
-// fetch — no git call discovers it.
-func TestSourceFetchedSkillsIgnoreAHomeRepositoryConfig(t *testing.T) {
-	t.Parallel()
-	home := t.TempDir()
-	skillFixtureGit(t, home, "init", "--quiet")
-	skillFixtureGit(t, home, "config", "url.file:///nonexistent-rewrite/.insteadOf", "file://")
-	repo := skillRealRepo(t, filepath.Join(t.TempDir(), "gs"), map[string]string{"SKILL.md": "# gs\n"})
-	writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"god-speed": "file://" + repo}))
-
-	output := runSkillInstall(t, home, ModeApply, realSkillGit)
-
-	if strings.Contains(output, "SKILL-FETCH-FAILED") {
-		t.Fatalf("a home repository's config steered the fetch:\n%s", output)
-	}
-	if got := readSkillFile(t, filepath.Join(skillStoreRoot(home), "god-speed", "SKILL.md")); got != "# gs\n" {
-		t.Fatalf("store SKILL.md = %q\n%s", got, output)
-	}
-}
-
 // TestSourceFetchedSkillsRecloneAStoreWithoutSKILLMd pins F25: a store whose
 // SKILL.md is gone is re-cloned although its recorded commit is current. Other
 // damage (a deleted .git, a changed file) is not detected: pfm never runs git

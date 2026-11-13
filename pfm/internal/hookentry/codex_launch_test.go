@@ -25,7 +25,7 @@ func TestCodexLaunchDropsThePaneOfAChildThatIsNoInteractiveChat(t *testing.T) {
 	if err := os.MkdirAll(binDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutableNeverRun(binary, []byte("#!/bin/sh\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	t.Chdir(root)
@@ -152,7 +152,7 @@ func TestCodexLaunchRunsTheChatInProcess(t *testing.T) {
 	if err := os.MkdirAll(binDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutableNeverRun(binary, []byte("#!/bin/sh\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	t.Chdir(root)
@@ -218,26 +218,14 @@ func TestCodexLaunchWorkbenchPersonaParts(t *testing.T) {
 	root := testjail.ShortRoot(t)
 	binDir := filepath.Join(root, "bin")
 	binary := filepath.Join(binDir, "codex")
-	engineSync := filepath.Join(root, "engine-sync")
-	for path, body := range map[string]string{
-		binary:     "#!/bin/sh\n",
-		engineSync: "#!/bin/sh\nprintf '%s\\n' '{\"ok\":false,\"problems\":[\"mirror boom\"]}'\nexit 1\n",
-	} {
-		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-			t.Fatal(err)
-		}
-		if err := testjail.WriteExecutable(path, []byte(body), 0o700); err != nil {
-			t.Fatal(err)
-		}
-	}
+	_, runner := testjail.FakeEngineSyncRunner(t, `{"ok":false,"problems":["mirror boom"]}`, 1)
+	runner.ScriptLookPath("codex", binary, nil)
 	agent := filepath.Join(root, ".claude", "agents", "astra.md")
 	if err := os.MkdirAll(agent, 0o700); err != nil { // a directory: the alias cannot be read
 		t.Fatal(err)
 	}
 	dir := filepath.Join(root, "acme", "docs", "scribe")
 	t.Chdir(root)
-	t.Setenv("PATH", binDir)
-	t.Setenv("ENGINE_SYNC_BIN", engineSync)
 	previous := LaunchExec
 	t.Cleanup(func() { LaunchExec = previous })
 	for _, test := range []struct {
@@ -291,7 +279,7 @@ func TestCodexLaunchWorkbenchPersonaParts(t *testing.T) {
 				TmuxDir: filepath.Join(root, "tmux"),
 			}}
 			var stderr bytes.Buffer
-			code := CodexLaunch(nil, &stderr, runtime)
+			code := CodexLaunchWith(nil, &stderr, runtime, runner)
 			if code != test.code || !slices.Equal(gotArgv, test.want) || stderr.String() != test.wantStderr {
 				t.Fatalf("CodexLaunch code=%d argv=%q stderr=%q\nwant code=%d argv=%q stderr=%q",
 					code, gotArgv, stderr.String(), test.code, test.want, test.wantStderr)

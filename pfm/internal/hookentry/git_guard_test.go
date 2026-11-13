@@ -12,6 +12,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testjail/fakegit"
 )
 
 const (
@@ -37,10 +38,13 @@ func gitGuardPayload(t *testing.T, tool, command, cwd, agentType string) string 
 	return string(raw)
 }
 
+// guardGitModel answers the guards' git reads from the fixture trees, so no test starts a git process.
+var guardGitModel = &fakegit.Runner{}
+
 func runGitGuard(t *testing.T, payload string) (int, string, string) {
 	t.Helper()
 	var stdout, stderr bytes.Buffer
-	code := GitGuard(strings.NewReader(payload), &stdout, &stderr)
+	code := GitGuardWith(strings.NewReader(payload), &stdout, &stderr, guardGitModel)
 	return code, stdout.String(), stderr.String()
 }
 
@@ -107,7 +111,7 @@ func TestGitGuardMainChatWorktreeAddNamesTheRightWay(t *testing.T) {
 		}
 	}
 	script := filepath.Join(withScript, ".claude", "scripts", "worktree.sh")
-	if err := testjail.WriteExecutable(script, []byte("#!/bin/sh\n"), 0o755); err != nil {
+	if err := testjail.WriteExecutableNeverRun(script, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	without := t.TempDir()
@@ -623,7 +627,7 @@ func TestGitGuardMainChatRunsTheCommittedWorktreeScript(t *testing.T) {
 			"git", "-C", repo, "-c", "user.name=probe", "-c", "user.email=probe@example.invalid",
 			"-c", "commit.gpgsign=false",
 		}, args...)
-		result, err := deps.RealRunner{}.Run(context.Background(), argv, deps.RunOptions{})
+		result, err := guardGitModel.Run(context.Background(), argv, deps.RunOptions{})
 		if err != nil || result.ExitCode != 0 {
 			t.Fatalf("git %v: exit %d: %v: %s", args, result.ExitCode, err, result.Stderr)
 		}
@@ -646,7 +650,7 @@ func TestGitGuardMainChatRunsTheCommittedWorktreeScript(t *testing.T) {
 		if err := os.MkdirAll(filepath.Dir(script), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := testjail.WriteExecutable(script, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		if err := testjail.WriteExecutableNeverRun(script, []byte("#!/bin/sh\n"), 0o755); err != nil {
 			t.Fatal(err)
 		}
 		if helpers {
@@ -658,7 +662,7 @@ func TestGitGuardMainChatRunsTheCommittedWorktreeScript(t *testing.T) {
 			git(repo, "commit", "-q", "-m", "probe")
 		}
 		if edit {
-			if err := testjail.WriteExecutable(script, []byte("#!/bin/sh\ngit push\n"), 0o755); err != nil {
+			if err := testjail.WriteExecutableNeverRun(script, []byte("#!/bin/sh\ngit push\n"), 0o755); err != nil {
 				t.Fatal(err)
 			}
 		}

@@ -3,6 +3,7 @@ package hookentry
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -21,7 +22,7 @@ import (
 )
 
 func TestBindNativeHostRequiresKernelRoleAndCanonicalOwnership(t *testing.T) {
-	for _, mode := range []string{"legacy", "moved", "recycled", "old-live", "old-dead-live", "cold-lost", "cold-moved-caller", "unknown-old", "wrong-shell", "shell-negative", "shell-zero", "shell-one", "wrong-argv", "malformed", "malformed-list", "raced", "raced-other", "pane-pending", "pane-never"} {
+	for _, mode := range []string{"legacy", "moved", "recycled", "old-live", "old-dead-live", "cold-lost", "cold-moved-caller", "unknown-old", "wrong-shell", "shell-negative", "shell-zero", "shell-one", "wrong-argv", "malformed", "malformed-list", "raced", "raced-other", "pane-pending", "pane-never", "reexec", "reexec-ending", "cold-lost-held"} {
 		t.Run(mode, func(t *testing.T) {
 			root := testjail.ShortRoot(t)
 			proc := filepath.Join(root, "proc")
@@ -204,14 +205,21 @@ func TestBindNativeHostRequiresKernelRoleAndCanonicalOwnership(t *testing.T) {
 					reservedPaneWait = 100 * time.Millisecond
 					t.Cleanup(func() { reservedPaneWait = saved })
 				}
-			case "old-live", "old-dead-live", "cold-lost", "cold-moved-caller", "unknown-old":
+			case "reexec", "reexec-ending":
+				// This very supervisor bound the seat, then exec'd the installed pfm: same pid, same birth.
+				seat.HerdrTerminalID = terminal
+				if err := gather.StampHerdrHost(gather.NewProcFS(proc), &seat, os.Getpid()); err != nil {
+					t.Fatal(err)
+				}
+				seat.EndPending = mode == "reexec-ending"
+			case "old-live", "old-dead-live", "cold-lost", "cold-moved-caller", "unknown-old", "cold-lost-held":
 				seat.SeatHostPID = 900001
 				seat.SeatHostStart = 100
 				seat.HerdrTerminalID = "old-terminal"
 				if mode == "old-live" {
 					writeProc(900001, 1, "/fixture/pfm\x00internal\x00seat-host\x00host-seat\x00")
 				}
-				if mode == "cold-lost" || mode == "cold-moved-caller" {
+				if mode == "cold-lost" || mode == "cold-moved-caller" || mode == "cold-lost-held" {
 					seat.State = "lost"
 				}
 				if mode == "cold-moved-caller" {
@@ -253,7 +261,24 @@ func TestBindNativeHostRequiresKernelRoleAndCanonicalOwnership(t *testing.T) {
 			} else {
 				addressed <- nil
 			}
-			got, bindErr := bindNativeHost(context.Background(), db, before, values)
+			bindCtx := context.Background()
+			if mode == "reexec" || mode == "reexec-ending" || mode == "cold-lost-held" {
+				// A native reload holds the conversation lock while it awaits the new engine.
+				conversation := fleetdb.ConversationIdentity(seat.SessionID, seat.SeatID)
+				unlock, err := fleetdb.LockSeat(bindCtx, values, conversation)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() {
+					if err := unlock(); err != nil {
+						t.Error(err)
+					}
+				})
+				var cancel context.CancelFunc
+				bindCtx, cancel = context.WithTimeout(bindCtx, time.Second)
+				defer cancel()
+			}
+			got, bindErr := bindNativeHost(bindCtx, db, before, values)
 			if err := <-addressed; err != nil {
 				t.Fatalf("record the reserved pane: %v", err)
 			}
@@ -261,7 +286,7 @@ func TestBindNativeHostRequiresKernelRoleAndCanonicalOwnership(t *testing.T) {
 				before.HerdrPane = pane
 			}
 			allowed := mode == "legacy" || mode == "moved" || mode == "cold-lost" || mode == "cold-moved-caller" ||
-				mode == "raced" || mode == "pane-pending"
+				mode == "raced" || mode == "pane-pending" || mode == "reexec"
 			current, found, readErr := db.Seat(context.Background(), seat.SeatID)
 			if allowed {
 				if bindErr != nil || !found || readErr != nil || got.SeatHostPID != os.Getpid() ||
@@ -271,6 +296,25 @@ func TestBindNativeHostRequiresKernelRoleAndCanonicalOwnership(t *testing.T) {
 					got.HerdrSocket != socket ||
 					got.HerdrPane != pane {
 					t.Fatalf("bind %+v err=%v found=%v read=%v", got, bindErr, found, readErr)
+				}
+			} else if mode == "reexec-ending" {
+				// An ending seat refuses the re-executed supervisor at once, not at the reload's deadline.
+				if bindErr == nil || bindErr.Error() != "seat absent or pending end" || !found || readErr != nil ||
+					!reflect.DeepEqual(current, before) {
+					t.Fatalf(
+						"ending re-exec bind: err=%v before=%+v after=%+v read=%v",
+						bindErr,
+						before,
+						current,
+						readErr,
+					)
+				}
+			} else if mode == "cold-lost-held" {
+				// A new supervisor replacing a dead one still waits on the reload's lock.
+				if bindErr == nil || !errors.Is(bindErr, context.DeadlineExceeded) ||
+					!strings.HasPrefix(bindErr.Error(), "lock supervisor bind: ") || !found || readErr != nil ||
+					!reflect.DeepEqual(current, before) {
+					t.Fatalf("held-lock bind: err=%v before=%+v after=%+v read=%v", bindErr, before, current, readErr)
 				}
 			} else if mode == "raced-other" {
 				// Another supervisor's binding stands; the bind refuses at its write.

@@ -48,10 +48,10 @@ func TestSoloTrailCauseNamesWhatItKilled(t *testing.T) {
 					"cc-100-1-1": {{PaneID: "%1", TTY: "pts/1"}},
 				},
 			}
-			writeActionFile(t, filepath.Join(sidDir, "cc-100-1-1"), "/tx/"+id+".jsonl", 0o600)
+			writeActionFile(t, filepath.Join(sidDir, "cc-100-1-1"), "/tx/"+id+".jsonl")
 			processes := &fakeProcesses{}
 			if test.duplicate {
-				writeActionFile(t, filepath.Join(sidDir, "cc-200-1-1.%2"), "/tx/"+id+".jsonl", 0o600)
+				writeActionFile(t, filepath.Join(sidDir, "cc-200-1-1.%2"), "/tx/"+id+".jsonl")
 				tmux.alive["cc-200-1-1"] = true
 				tmux.panes["cc-200-1-1"] = []ActionPane{
 					{PaneID: "%2", TTY: "pts/2"},
@@ -305,7 +305,7 @@ func TestSoloCrumbAfterPaneProbeError(t *testing.T) {
 					t.Fatal(err)
 				}
 			} else {
-				writeActionFile(t, crumb, "/tx/"+id+".jsonl", 0o600)
+				writeActionFile(t, crumb, "/tx/"+id+".jsonl")
 			}
 			tmux := &fakeActionTmux{
 				alive:   map[string]bool{socket: false},

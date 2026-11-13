@@ -1,3 +1,5 @@
+//go:build jail
+
 package gather_test
 
 import (

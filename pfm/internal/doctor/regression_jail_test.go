@@ -1,3 +1,5 @@
+//go:build jail
+
 package doctor
 
 import (
@@ -9,9 +11,11 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestTmuxTitlesDoctorReportsStringDriftAsDivergent(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}

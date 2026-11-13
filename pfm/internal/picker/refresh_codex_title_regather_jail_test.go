@@ -1,3 +1,5 @@
+//go:build jail
+
 package picker
 
 import (
@@ -14,6 +16,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/kill"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 	"github.com/rezzminator/professor/pfm/internal/ui"
 )
 
@@ -136,6 +139,7 @@ func assertNoStaleCodexRow(t *testing.T, rows []compose.Row, oldID, newID, conte
 // (stale) and newID merely resumable; only a second gather, taken after the
 // binding moved, resolves the same rollout-less process to newID.
 func TestScanFleetRegathersAfterAMovedBindingSoTheSuccessorRendersLive(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -170,6 +174,7 @@ func TestScanFleetRegathersAfterAMovedBindingSoTheSuccessorRendersLive(t *testin
 // refreshDependencies to shortcut it — named as a gap in the test report
 // rather than faked.
 func TestInteractiveRefreshFirstPassRegathersAfterAMovedBinding(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}

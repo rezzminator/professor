@@ -3,95 +3,76 @@ package spawn
 import (
 	"context"
 	"errors"
-	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 	"github.com/rezzminator/professor/pfm/internal/themesync"
 	"github.com/rezzminator/professor/pfm/internal/themetmux"
+	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
-// fakeTmuxBinary plays tmux: exits 0 and prints nothing.
-func fakeTmuxBinary(t *testing.T) string {
-	t.Helper()
-	binary := filepath.Join(t.TempDir(), "tmux")
-	if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	return binary
+// fakeTmux plays tmux for every call made under the context it returns: each
+// exits 0 and prints nothing.
+func fakeTmux(ctx context.Context) context.Context {
+	return pfmtmux.WithClientRunner(ctx, testjail.TmuxRunner(deps.RunResult{}))
 }
 
-// fakeTmuxBinaryConfigureFails plays tmux: `new-session` succeeds, every
+// fakeTmuxConfigureFails plays tmux: `new-session` succeeds, every
 // other subcommand (the post-birth configure calls) fails, so NewSession
 // reaches its "configure chat server" error branch.
-func fakeTmuxBinaryConfigureFails(t *testing.T) string {
-	t.Helper()
-	binary := filepath.Join(t.TempDir(), "tmux")
-	script := `#!/bin/sh
-for a in "$@"; do
-  if [ "$a" = "new-session" ]; then
-    exit 0
-  fi
-done
-echo "server gone" >&2
-exit 1
-`
-	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	return binary
+func fakeTmuxConfigureFails(ctx context.Context) context.Context {
+	fake := &deps.FakeRunner{}
+	fake.Handle(nil, func(_ context.Context, call deps.RunCall) (deps.RunResult, error) {
+		if slices.Contains(call.Argv, "new-session") {
+			return deps.RunResult{}, nil
+		}
+		return deps.RunResult{Stderr: []byte("server gone\n"), ExitCode: 1}, nil
+	})
+	return pfmtmux.WithClientRunner(ctx, fake)
 }
 
-func fakeTmuxBinaryCreateFails(t *testing.T) string {
-	t.Helper()
-	binary := filepath.Join(t.TempDir(), "tmux")
-	if err := testjail.WriteExecutable(
-		binary,
-		[]byte("#!/bin/sh\necho create failed >&2\nexit 1\n"),
-		0o700,
-	); err != nil {
-		t.Fatal(err)
-	}
-	return binary
+func fakeTmuxCreateFails(ctx context.Context) context.Context {
+	return pfmtmux.WithClientRunner(
+		ctx,
+		testjail.TmuxRunner(deps.RunResult{Stderr: []byte("create failed\n"), ExitCode: 1}),
+	)
 }
 
-func fakeTmuxBinaryBlocks(t *testing.T, block, marker string) string {
-	t.Helper()
-	binary := filepath.Join(t.TempDir(), "tmux")
-	script := fmt.Sprintf(`#!/bin/sh
-for a in "$@"; do
-  if [ "$a" = "new-session" ]; then
-    if [ %q = "new-session" ]; then
-      : > %q
-      exec sleep 30
-    fi
-    exit 0
-  fi
-  if [ "$a" = "display-message" ] && [ %q = "query" ]; then
-    : > %q
-    exec sleep 30
-  fi
-done
-if [ %q = "configure" ]; then
-  : > %q
-  exec sleep 30
-fi
-exit 0
-`, block, marker, block, marker, block, marker)
-	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	return binary
+// fakeTmuxBlocks plays tmux whose call at stage block (new-session, the
+// account launch's pane pid query, or any configure call) hangs until its
+// caller cancels; reaching it closes reached. Every other call exits 0.
+func fakeTmuxBlocks(ctx context.Context, block string, reached chan<- struct{}) context.Context {
+	var once sync.Once
+	fake := &deps.FakeRunner{}
+	fake.Handle(nil, func(ctx context.Context, call deps.RunCall) (deps.RunResult, error) {
+		stage := "configure"
+		switch {
+		case slices.Contains(call.Argv, "new-session"):
+			stage = "new-session"
+		case slices.Contains(call.Argv, "display-message") && block == "query":
+			stage = "query"
+		}
+		if stage != block {
+			return deps.RunResult{}, nil
+		}
+		once.Do(func() { close(reached) })
+		<-ctx.Done()
+		return deps.RunResult{ExitCode: -1}, ctx.Err()
+	})
+	return pfmtmux.WithClientRunner(ctx, fake)
 }
 
 // recordingScreen is the pane door a TmuxSpawner hands out: a fakeCodex
@@ -130,11 +111,11 @@ func TestRunReadsAndTypesThroughTheScreenDoor(t *testing.T) {
 	dir := t.TempDir()
 	door := &recordingScreen{fakeCodex: newFakeCodex()}
 	tmux := TmuxSpawner{
-		Binary: fakeTmuxBinary(t), TmuxDir: dir, Screen: door,
+		TmuxDir: dir, Screen: door,
 		Env: &paths.MapEnv{Values: map[string]string{paths.EnvHome: t.TempDir()}},
 	}
 	request := codexRequest()
-	result, err := Run(context.Background(), tmux, request)
+	result, err := Run(fakeTmux(context.Background()), tmux, request)
 	if err != nil || !result.Named || !result.Prompted {
 		t.Fatalf("Run() = %#v, %v; want named and prompted", result, err)
 	}
@@ -164,8 +145,8 @@ func TestRunReadsAndTypesThroughTheScreenDoor(t *testing.T) {
 func TestNewSessionConfigureErrorOmitsTheCommandLine(t *testing.T) {
 	sentinel := "SENTINEL-PROMPT-BODY-DO-NOT-LOG"
 	dir := t.TempDir()
-	tmux := TmuxSpawner{Binary: fakeTmuxBinaryConfigureFails(t), TmuxDir: dir}
-	err := tmux.NewSession(context.Background(), SessionSpec{
+	tmux := TmuxSpawner{TmuxDir: dir}
+	err := tmux.NewSession(fakeTmuxConfigureFails(context.Background()), SessionSpec{
 		Socket:  "configure-fails",
 		Session: "configure-fails",
 		Window:  "w",
@@ -194,8 +175,8 @@ func TestNewSessionConfigureErrorOmitsTheCommandLine(t *testing.T) {
 
 func TestNewSessionCreateFailurePreservesOutput(t *testing.T) {
 	dir := t.TempDir()
-	tmux := TmuxSpawner{Binary: fakeTmuxBinaryCreateFails(t), TmuxDir: dir}
-	err := tmux.NewSession(context.Background(), SessionSpec{
+	tmux := TmuxSpawner{TmuxDir: dir}
+	err := tmux.NewSession(fakeTmuxCreateFails(context.Background()), SessionSpec{
 		Socket:  "create-fails",
 		Session: "create-fails",
 		Window:  "w",
@@ -210,14 +191,14 @@ func TestNewSessionCreateFailurePreservesOutput(t *testing.T) {
 func newSessionCancelledWhileBlocked(t *testing.T, block string) error {
 	t.Helper()
 	dir := t.TempDir()
-	marker := filepath.Join(dir, "blocking")
-	tmux := TmuxSpawner{Binary: fakeTmuxBinaryBlocks(t, block, marker), TmuxDir: dir}
+	reached := make(chan struct{})
+	tmux := TmuxSpawner{TmuxDir: dir}
 	// Only an account launch queries its pane pid (the account guard's record).
 	run := "echo ready"
 	if block == "query" {
 		run = "env CLAUDE_CONFIG_DIR=" + t.TempDir() + " claude --resume example"
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(fakeTmuxBlocks(context.Background(), block, reached))
 	defer cancel()
 	result := make(chan error, 1)
 	go func() {
@@ -231,17 +212,10 @@ func newSessionCancelledWhileBlocked(t *testing.T, block string) error {
 			Height:  24,
 		})
 	}()
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		if _, err := os.Stat(marker); err == nil {
-			break
-		} else if !os.IsNotExist(err) {
-			t.Fatalf("stat blocking marker: %v", err)
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("tmux command did not reach blocking arm")
-		}
-		time.Sleep(10 * time.Millisecond)
+	select {
+	case <-reached:
+	case <-time.After(5 * time.Second):
+		t.Fatal("tmux command did not reach blocking arm")
 	}
 	cancel()
 	select {
@@ -275,19 +249,27 @@ func TestNewSessionFailedLaunchKeepsOnlyUnresolvedClaims(t *testing.T) {
 	for _, scenario := range []string{"create cleanup", "create unresolved", "query cleanup", "query unresolved"} {
 		t.Run(scenario, func(t *testing.T) {
 			account, dir := t.TempDir(), t.TempDir()
-			createStatus, killStatus := "0", "0"
+			createStatus, killStatus := 0, 0
 			if strings.HasPrefix(scenario, "create") {
-				createStatus = "1"
+				createStatus = 1
 			}
 			if strings.HasSuffix(scenario, "unresolved") {
-				killStatus = "1"
+				killStatus = 1
 			}
-			binary := filepath.Join(dir, "tmux")
-			script := "#!/bin/sh\nfor a in \"$@\"; do\n case \"$a\" in\n new-session) exit " + createStatus + ";;\n display-message) echo invalid-pid; exit 0;;\n kill-server) exit " + killStatus + ";;\n esac\ndone\nexit 0\n"
-			if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
-				t.Fatal(err)
-			}
-			err := (TmuxSpawner{Binary: binary, TmuxDir: dir}).NewSession(context.Background(), SessionSpec{
+			fake := &deps.FakeRunner{}
+			fake.Handle(nil, func(_ context.Context, call deps.RunCall) (deps.RunResult, error) {
+				switch {
+				case slices.Contains(call.Argv, "new-session"):
+					return deps.RunResult{ExitCode: createStatus}, nil
+				case slices.Contains(call.Argv, "display-message"):
+					return deps.RunResult{Stdout: []byte("invalid-pid\n")}, nil
+				case slices.Contains(call.Argv, "kill-server"):
+					return deps.RunResult{ExitCode: killStatus}, nil
+				}
+				return deps.RunResult{}, nil
+			})
+			ctx := pfmtmux.WithClientRunner(context.Background(), fake)
+			err := (TmuxSpawner{TmuxDir: dir}).NewSession(ctx, SessionSpec{
 				Socket: "failed", Session: "failed", Window: "w", CWD: dir,
 				Run: "env CLAUDE_CONFIG_DIR=" + account + " claude --resume example",
 			})
@@ -324,14 +306,20 @@ func TestNewSessionFailedLaunchKeepsOnlyUnresolvedClaims(t *testing.T) {
 // the pid the second answer names and the server is kept.
 func TestNewSessionAsksForTheLaunchPanePidAgain(t *testing.T) {
 	account, dir := t.TempDir(), t.TempDir()
-	binary := filepath.Join(dir, "tmux")
-	asked := filepath.Join(dir, "asked")
-	script := "#!/bin/sh\nfor a in \"$@\"; do\n case \"$a\" in\n new-session) exit 0;;\n" +
-		" display-message) if [ -e " + asked + " ]; then echo $PPID; else : > " + asked + "; fi; exit 0;;\n esac\ndone\nexit 0\n"
-	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	err := (TmuxSpawner{Binary: binary, TmuxDir: dir}).NewSession(context.Background(), SessionSpec{
+	asked := false
+	fake := &deps.FakeRunner{}
+	fake.Handle(nil, func(_ context.Context, call deps.RunCall) (deps.RunResult, error) {
+		if !slices.Contains(call.Argv, "display-message") {
+			return deps.RunResult{}, nil
+		}
+		if !asked {
+			asked = true
+			return deps.RunResult{}, nil
+		}
+		return deps.RunResult{Stdout: []byte(strconv.Itoa(os.Getpid()) + "\n")}, nil
+	})
+	ctx := pfmtmux.WithClientRunner(context.Background(), fake)
+	err := (TmuxSpawner{TmuxDir: dir}).NewSession(ctx, SessionSpec{
 		Socket: "retry", Session: "retry", Window: "w", CWD: dir,
 		Run: "env CLAUDE_CONFIG_DIR=" + account + " claude --resume example",
 	})
@@ -386,7 +374,7 @@ func TestNewSessionThemesTheBornServerNonFatally(t *testing.T) {
 			dir := t.TempDir()
 			var gotState, gotSocket string
 			called := false
-			tmux := TmuxSpawner{Binary: fakeTmuxBinary(t), TmuxDir: dir, Env: tc.env}
+			tmux := TmuxSpawner{TmuxDir: dir, Env: tc.env}
 			tmux.applyTheme = func(_ context.Context, servers themesync.TmuxServers, stateDir, socket string) error {
 				called, gotState, gotSocket = true, stateDir, socket
 				if adapter, ok := servers.(themetmux.Servers); !ok || adapter.TmuxDir != dir {
@@ -394,7 +382,7 @@ func TestNewSessionThemesTheBornServerNonFatally(t *testing.T) {
 				}
 				return tc.applyErr
 			}
-			err := tmux.NewSession(ctx, SessionSpec{
+			err := tmux.NewSession(fakeTmux(ctx), SessionSpec{
 				Socket: "cc-1800000099-1-1", Session: "s", Window: "w", CWD: dir, Run: "claude", Width: 80, Height: 24,
 			})
 			if err != nil {
@@ -430,10 +418,10 @@ func TestNewSessionLeavesTheThemeOffWithoutState(t *testing.T) {
 	dir := t.TempDir()
 	home := t.TempDir()
 	tmux := TmuxSpawner{
-		Binary: fakeTmuxBinary(t), TmuxDir: dir,
-		Env: &paths.MapEnv{Values: map[string]string{paths.EnvHome: home}},
+		TmuxDir: dir,
+		Env:     &paths.MapEnv{Values: map[string]string{paths.EnvHome: home}},
 	}
-	if err := tmux.NewSession(ctx, SessionSpec{
+	if err := tmux.NewSession(fakeTmux(ctx), SessionSpec{
 		Socket: "cc-1800000098-1-1", Session: "s", Window: "w", CWD: dir, Run: "claude", Width: 80, Height: 24,
 	}); err != nil {
 		t.Fatal(err)
@@ -451,11 +439,13 @@ func TestNewSessionLeavesTheThemeOffWithoutState(t *testing.T) {
 func TestNewSessionBirthEnvironmentDropsTheCallersPane(t *testing.T) {
 	dir := t.TempDir()
 	dump := filepath.Join(t.TempDir(), "birth.env")
-	binary := filepath.Join(t.TempDir(), "tmux")
-	script := fmt.Sprintf("#!/bin/sh\ncase \"$*\" in *\" new-session \"*) env > %q ;; esac\nexit 0\n", dump)
-	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	fake := &deps.FakeRunner{}
+	fake.Handle(nil, func(_ context.Context, call deps.RunCall) (deps.RunResult, error) {
+		if slices.Contains(call.Argv, "new-session") {
+			return deps.RunResult{}, os.WriteFile(dump, []byte(strings.Join(call.Opts.Env, "\n")+"\n"), 0o600)
+		}
+		return deps.RunResult{}, nil
+	})
 	caller := map[string]string{
 		"HERDR_ENV": "1", "HERDR_PANE_ID": "wK:p29", "HERDR_WORKSPACE_ID": "wK", "HERDR_TAB_ID": "wK:t3",
 		"HERDR_SOCKET_PATH": "/srv/tester/herdr.sock", "HERDR_BIN_PATH": "/srv/tester/bin/herdr",
@@ -466,10 +456,10 @@ func TestNewSessionBirthEnvironmentDropsTheCallersPane(t *testing.T) {
 		t.Setenv(name, value)
 	}
 	tmux := TmuxSpawner{
-		Binary: binary, TmuxDir: dir,
-		Env: &paths.MapEnv{Values: map[string]string{paths.EnvHome: t.TempDir()}},
+		TmuxDir: dir,
+		Env:     &paths.MapEnv{Values: map[string]string{paths.EnvHome: t.TempDir()}},
 	}
-	if err := tmux.NewSession(context.Background(), SessionSpec{
+	if err := tmux.NewSession(pfmtmux.WithClientRunner(context.Background(), fake), SessionSpec{
 		Socket: "cc-1800000097-1-1", Session: "s", Window: "w", CWD: dir, Run: "claude", Width: 80, Height: 24,
 	}); err != nil {
 		t.Fatal(err)

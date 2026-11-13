@@ -249,6 +249,9 @@ type Report struct {
 // seam; the zero value runs through the observed real runner.
 type execCommandRunner struct{ runner deps.Runner }
 
+// NewCommandRunner is the CommandRunner that starts its commands through runner; nil is the real one.
+func NewCommandRunner(runner deps.Runner) CommandRunner { return execCommandRunner{runner: runner} }
+
 func (runner execCommandRunner) process() deps.Runner {
 	if runner.runner != nil {
 		return runner.runner

@@ -13,6 +13,7 @@ import (
 	"github.com/creack/pty"
 
 	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
@@ -30,6 +31,27 @@ func TestSeatHostRejectsMissingSeat(t *testing.T) {
 	); rc != 1 ||
 		!strings.Contains(stderr.String(), "expected one seat id") {
 		t.Fatalf("SeatHost = %d, %q", rc, stderr.String())
+	}
+}
+
+// TestStartSeatEngineStartsThroughItsRunner pins the seam SeatHostWith hands
+// down: a non-Claude seat engine starts through the runner the entry received,
+// with the argv and options the host built, and its process comes back.
+func TestStartSeatEngineStartsThroughItsRunner(t *testing.T) {
+	fake := &deps.FakeRunner{}
+	argv := []string{"/fixture/codex", "--no-daemon"}
+	options := deps.StartOptions{Argv0: "codex", Dir: "/fixture/work", Env: []string{"KEEP=engine"}}
+	process, err := startSeatEngine(fake, argv, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pid := process.Pid(); pid != 4242 {
+		t.Fatalf("process pid = %d, want the fake runner's 4242", pid)
+	}
+	starts := fake.Starts()
+	if len(starts) != 1 || !slices.Equal(starts[0].Argv, argv) || starts[0].Opts.Dir != "/fixture/work" ||
+		!slices.Equal(starts[0].Opts.Env, []string{"KEEP=engine"}) {
+		t.Fatalf("runner starts = %+v, want one start of %q in /fixture/work with KEEP=engine", starts, argv)
 	}
 }
 
@@ -238,7 +260,7 @@ func TestCurrentClaudeBinaryReplacesOnlyAPrunedBuild(t *testing.T) {
 	if err := os.MkdirAll(versions, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := testjail.WriteExecutable(kept, []byte("#!/bin/sh\n"), 0o755); err != nil {
+	if err := testjail.WriteExecutableNeverRun(kept, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	for _, test := range []struct{ recorded, want string }{

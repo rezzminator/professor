@@ -34,7 +34,7 @@ A — the top-level body has roughly 2,000 real shell launches; the pure synthes
 
 ### TestUpdateRunsPostBuildActionsThroughTheSelectedCandidate
 
-**Source:** [pfm/cmd/pfm/update_command_test.go](../../../pfm/cmd/pfm/update_command_test.go) line 69 · **Observed:** 2.05s · **Class:** build/git subprocess
+**Source:** [pfm/cmd/pfm/update_command_jail_test.go](../../../pfm/cmd/pfm/update_command_jail_test.go) line 74 · **Observed:** 2.05s · **Class:** build/git subprocess
 
 jailTest; newTaggedBuildFixture runs git; update.Run builds/runs candidate actions; reads marker.
 

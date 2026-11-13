@@ -1,3 +1,5 @@
+//go:build jail
+
 package chat
 
 import (
@@ -16,6 +18,7 @@ import (
 // tmux chat in-process, and the call returns nil only once the socket no
 // longer answers.
 func TestEndNowEndsATmuxChatAndConfirmsItsSocketGone(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Fatalf("tmux is required in the fence: %v", err)
 	}

@@ -106,21 +106,13 @@ func TestInstallCheckPreChangeChecks(t *testing.T) {
 	} {
 		t.Run(scenario, func(t *testing.T) {
 			home, _, _ := installCheckHome(t)
-			bin, _ := writeManagerFakes(
-				t,
-				"case \"$*\" in *ActiveState*) echo inactive;; esac\nexit 0",
-				"echo 'state = not running'",
-			)
+			systemctl, launchctl := systemctlActiveState("inactive"), managerSays("state = not running\n")
 			wantCode, wantErr := 0, ""
 			if scenario == "dependency" || scenario == "python3 missing" {
 				wantCode = 1
 			}
 			if scenario == "running" {
-				bin, _ = writeManagerFakes(
-					t,
-					"case \"$*\" in *ActiveState*) echo activating;; esac\nexit 0",
-					"echo 'state = running'",
-				)
+				systemctl, launchctl = systemctlActiveState("activating"), managerSays("state = running\n")
 				schedulerErr := installer.ErrNameSyncRunning
 				if runtime.GOOS == "darwin" {
 					schedulerErr = installer.ErrLaunchAgentRunning
@@ -128,24 +120,41 @@ func TestInstallCheckPreChangeChecks(t *testing.T) {
 				wantCode, wantErr = 4, installer.SchedulerRefusal(installCommand, schedulerErr)+"\n"
 			}
 			if scenario == "short schedule" {
-				bin, _ = writeManagerFakes(
-					t,
-					`case "$*" in *pfm-schedule.service*) if [ -e "$0.once" ]; then echo inactive; else : > "$0.once"; echo activating; fi;; *ActiveState*) echo inactive;; esac`+"\nexit 0",
-					`case "$*" in *com.professor.pfm.schedule*) if [ -e "$0.once" ]; then echo 'state = not running'; else : > "$0.once"; echo 'state = running'; fi;; *) echo 'state = not running';; esac`,
-				)
-			}
-			if scenario == "unprobed" {
-				bin, _ = writeManagerFakes(t,
-					"case \"$*\" in *show*) exit 1;; esac\nexit 0",
-					"exit 1",
-				)
-				// launchctl's positive exit answers "unknown label", which is
-				// idle. A missing tool models a probe that could not run.
-				if err := os.Remove(filepath.Join(bin, "launchctl")); err != nil {
-					t.Fatal(err)
+				// The schedule delivers on the first probe and has finished by the second.
+				probed := false
+				systemctl = func(args string) (string, int) {
+					switch {
+					case strings.Contains(args, "pfm-schedule.service"):
+						state := "inactive\n"
+						if !probed {
+							probed, state = true, "activating\n"
+						}
+						return state, 0
+					case strings.Contains(args, "ActiveState"):
+						return "inactive\n", 0
+					}
+					return "", 0
+				}
+				launchctl = func(args string) (string, int) {
+					if strings.Contains(args, "com.professor.pfm.schedule") && !probed {
+						probed = true
+						return "state = running\n", 0
+					}
+					return "state = not running\n", 0
 				}
 			}
-			t.Setenv("PATH", bin)
+			if scenario == "unprobed" {
+				// launchctl's positive exit answers "unknown label", which is
+				// idle. A missing tool models a probe that could not run.
+				systemctl = func(args string) (string, int) {
+					if strings.Contains(args, "show") {
+						return "", 1
+					}
+					return "", 0
+				}
+				launchctl = nil
+			}
+			scriptManagers(t, systemctl, launchctl)
 			if scenario == "kit missing python3 present" || scenario == "python3 missing" {
 				// A fresh machine has not got the flights plugin whose folder holds
 				// the tracetree kit: the pre-change check never judges the kit.
@@ -272,12 +281,7 @@ func installDatabaseFile(t *testing.T, path string) string {
 // would lock the binary it kept out of its own state. Neither migrates.
 func TestInstallCheckAndPreviewLeaveOlderDatabasesUnmigrated(t *testing.T) {
 	installCheckHome(t)
-	bin, _ := writeManagerFakes(
-		t,
-		"case \"$*\" in *ActiveState*) echo inactive;; esac\nexit 0",
-		"echo 'state = not running'",
-	)
-	t.Setenv("PATH", bin)
+	scriptManagers(t, systemctlActiveState("inactive"), managerSays("state = not running\n"))
 	savedProbe, savedInstaller := doctor.DependencyProbeOverride, runInstaller
 	t.Cleanup(func() { doctor.DependencyProbeOverride, runInstaller = savedProbe, savedInstaller })
 	doctor.DependencyProbeOverride = func(context.Context, []deps.Entry, deps.ProbeOptions) []deps.Result {

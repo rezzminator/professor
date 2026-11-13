@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -303,9 +302,8 @@ func (identifier *Whoami) proveTmux(
 	}
 	session, pid, err := identifier.namer.SessionPane(ctx, socket, pane)
 	if err != nil {
-		var exit *exec.ExitError
-		if gather.TmuxServerGone(err) ||
-			errors.As(err, &exit) && strings.Contains(string(exit.Stderr), "can't find pane") {
+		stderr, _ := pfmtmux.ExitStderr(err)
+		if gather.TmuxServerGone(err) || strings.Contains(string(stderr), "can't find pane") {
 			return identity, -1, fmt.Sprintf("tmux %s %s: %v", socket, pane, err), nil
 		}
 		return identity, -1, "", fmt.Errorf("look up the caller: tmux pane %s on %s: %w", pane, socket, err)
@@ -462,11 +460,10 @@ func (namer CommandTmuxNamer) SessionPane(ctx context.Context, socketPath, targe
 	arguments = append(arguments, "#{session_name} #{pane_pid}")
 	output, err := pfmtmux.Socket{Binary: namer.Binary}.Command(ctx, socketPath, arguments...).Output()
 	if err != nil {
-		var exit *exec.ExitError
-		if errors.As(err, &exit) && len(exit.Stderr) > 0 {
+		if stderr, _ := pfmtmux.ExitStderr(err); len(stderr) > 0 {
 			return "", 0, fmt.Errorf(
 				"read tmux session and pane pid (%s): %w",
-				strings.TrimSpace(string(exit.Stderr)),
+				strings.TrimSpace(string(stderr)),
 				err,
 			)
 		}

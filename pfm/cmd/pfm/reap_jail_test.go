@@ -1,3 +1,5 @@
+//go:build jail
+
 package main
 
 import (
@@ -137,6 +139,7 @@ func reapServerAlive(root, socket string) bool {
 // Claude busy proof is unavailable. Its durable branch-seat marker is the
 // evidence that an untouched, unattached fork is intentionally reapable.
 func TestReapClassifiesAndClearsAnUntouchedDetachedFork(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -196,6 +199,7 @@ func TestReapClassifiesAndClearsAnUntouchedDetachedFork(t *testing.T) {
 // orphan, however idle its chat looks. The twin socket in the same sweep
 // proves the guard is a guard and not a refusal to reap anything.
 func TestReapNeverKillsASocketHostingNonChatWork(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -255,6 +259,7 @@ func TestReapNeverKillsASocketHostingNonChatWork(t *testing.T) {
 // A chat writing its transcript right now is working, whatever the busy
 // snapshot said a moment ago.
 func TestReapKeepsAChatWhoseTranscriptIsBeingWritten(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -285,6 +290,7 @@ func TestReapKeepsAChatWhoseTranscriptIsBeingWritten(t *testing.T) {
 // A socket file with no server behind it is only a corpse once it is old
 // enough that a server cannot still be starting up behind it.
 func TestReapLeavesAYoungEmptySocketAlone(t *testing.T) {
+	testjail.TmuxServer(t)
 	root := reapJail(t)
 	const socket = "cc-1800000004-42-4"
 	path := filepath.Join(reapSocketDir(root), socket)

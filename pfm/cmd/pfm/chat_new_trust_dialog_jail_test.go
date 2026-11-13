@@ -1,3 +1,5 @@
+//go:build jail
+
 package main
 
 import (
@@ -8,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // TestChatNewRefusesAtTheClaudeFolderTrustDialogWithoutAKey: the dialog's
@@ -17,6 +21,7 @@ import (
 // delivery-proof retry), chat new names the dialog, never claims the prompt
 // went unrecorded, and presses nothing.
 func TestChatNewRefusesAtTheClaudeFolderTrustDialogWithoutAKey(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}

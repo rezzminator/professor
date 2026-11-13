@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -48,25 +47,4 @@ func (l *costLaunch) read(t *testing.T, name string) string {
 func (l *costLaunch) sinkLog() string {
 	data, _ := os.ReadFile(filepath.Join(l.home, ".local", "state", "pfm", "log", "cost-sink.log"))
 	return string(data)
-}
-
-func TestCostVerbsRefuseWithoutTheirArguments(t *testing.T) {
-	for _, tc := range []struct {
-		args []string
-		want int
-	}{
-		{[]string{"internal", "cost-launch"}, 2},
-		{[]string{"internal", "cost-launch", "--"}, 2},
-		{[]string{"internal", "cost-sink"}, 2},
-		{[]string{"internal", "cost-sink", "--pid", "0", "--start", "1"}, 2},
-		{[]string{"internal", "cost-launch", "--", "/nonexistent/claude"}, 127},
-	} {
-		command := exec.Command(testPFMBinary, tc.args...)
-		command.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + t.TempDir(), "PFM_HOME=" + t.TempDir()}
-		err := command.Run()
-		var exit *exec.ExitError
-		if !errors.As(err, &exit) || exit.ExitCode() != tc.want {
-			t.Errorf("pfm %v = %v, want exit %d", tc.args, err, tc.want)
-		}
-	}
 }

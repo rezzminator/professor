@@ -1,3 +1,5 @@
+//go:build jail
+
 package main
 
 import (
@@ -222,6 +224,7 @@ func (jail *runJail) await(t *testing.T, name, want string) string {
 // renamed through the engine's own UI, and only then is the first prompt
 // delivered.
 func TestChatNewSpawnsANamedCodexChat(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -334,6 +337,7 @@ func TestChatNewRefusesACodexModelTheCatalogueLacks(t *testing.T) {
 // Codex reads those as keys on an empty composer, and the chat is still named
 // and prompted.
 func TestChatNewNamesACodexChatSlowToLeaveItsStartupOverlay(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -368,6 +372,7 @@ func TestChatNewNamesACodexChatSlowToLeaveItsStartupOverlay(t *testing.T) {
 // non-zero exit, UNNAMED in the report — and the abandoned command must never
 // reach the model as a prompt.
 func TestRunReportsACodexBuildThatCannotBeRenamed(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -420,6 +425,7 @@ func TestRunReportsACodexBuildThatCannotBeRenamed(t *testing.T) {
 // route: Claude is named by its own flag, carries the autonomy flags, and is
 // never typed into.
 func TestChatNewSpawnsAClaudeChatWithItsNameOnTheCommandLine(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -461,6 +467,7 @@ func TestChatNewSpawnsAClaudeChatWithItsNameOnTheCommandLine(t *testing.T) {
 }
 
 func TestChatNewRecordsAssignedSessionAndAccountCache(t *testing.T) {
+	testjail.TmuxServer(t)
 	for _, testCase := range []struct {
 		name, configCache, cache, ambient string
 		want                              bool
@@ -539,6 +546,7 @@ func TestChatNewRejectsInvalidCacheChoice(t *testing.T) {
 }
 
 func TestChatNewRecordFailureReportsAndStillStartsPane(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -565,6 +573,7 @@ func TestChatNewRecordFailureReportsAndStillStartsPane(t *testing.T) {
 // merely the decoded config struct. The default-path tests above separately
 // pin today's bypass flags when no config file exists.
 func TestMachineConfigChangesTheActualLaunchCommands(t *testing.T) {
+	testjail.TmuxServer(t)
 	for _, test := range []struct {
 		name      string
 		engine    string
@@ -750,6 +759,7 @@ func assertJailedSpawnLineage(t *testing.T, jail *runJail, parent, forbiddenPare
 }
 
 func TestMCPChatNewResolvesRelativeCWDAndUsesRequestParent(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -777,6 +787,7 @@ func TestMCPChatNewResolvesRelativeCWDAndUsesRequestParent(t *testing.T) {
 }
 
 func TestDirectChatNewKeepsAmbientParent(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -814,6 +825,7 @@ func TestParentChatIDUsesScopedCallerIncludingEmptyID(t *testing.T) {
 }
 
 func TestChatNewCancellationReachesSpawnAndAwait(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -892,6 +904,7 @@ const firstTurnAPIError = "API Error: 400 unsupported beta header"
 // server refused is not a launch that worked. Both the bare launch and the
 // --await launch say so with a non-zero exit naming the error.
 func TestChatNewReportsAFirstTurnAPIError(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -927,6 +940,7 @@ func TestChatNewReportsAFirstTurnAPIError(t *testing.T) {
 // TestMCPChatNewReportsAFirstTurnAPIError is the MCP door of the same
 // failure: the tool must not answer ok for a chat sitting in state error.
 func TestMCPChatNewReportsAFirstTurnAPIError(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}

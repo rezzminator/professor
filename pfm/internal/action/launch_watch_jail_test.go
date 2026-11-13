@@ -1,3 +1,5 @@
+//go:build jail
+
 package action
 
 import (
@@ -90,6 +92,7 @@ func shellQuoteValue(value string) string {
 // and a pane whose command prints and exits is a failed open quoting it, its
 // server gone.
 func TestWatchLaunchOnARealPane(t *testing.T) {
+	testjail.TmuxServer(t)
 	t.Run("held at the folder-trust dialog", func(t *testing.T) {
 		const socket = "cc-908-1-1"
 		executor, server, read := launchWatchServer(

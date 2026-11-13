@@ -84,7 +84,7 @@ func TestHerdrScheduleSurvivesRestart(t *testing.T) {
 				t.Fatal(err)
 			}
 			binary := filepath.Join(runtime.Paths.Home, "fake-claude")
-			if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+			if err := testjail.WriteExecutableNeverRun(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 				t.Fatal(err)
 			}
 			socket := filepath.Join(testjail.ShortRoot(t), "h.sock")

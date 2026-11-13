@@ -1,3 +1,5 @@
+//go:build jail
+
 package index
 
 import (

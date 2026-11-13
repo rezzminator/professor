@@ -78,7 +78,7 @@ func TestBirthHerdrAwaitsTranscriptAndAttachesNativePane(t *testing.T) {
 				t.Fatal(err)
 			}
 			binary := filepath.Join(values.Home, "native-engine")
-			if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+			if err := testjail.WriteExecutableNeverRun(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 				t.Fatal(err)
 			}
 			focused := make(chan string, 2)

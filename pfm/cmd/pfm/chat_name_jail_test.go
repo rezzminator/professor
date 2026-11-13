@@ -1,3 +1,5 @@
+//go:build jail
+
 package main
 
 import (
@@ -16,9 +18,11 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestChatNameConvergesTheWindowInlineOnAProbeSocket(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -105,6 +109,7 @@ func TestChatNameConvergesTheWindowInlineOnAProbeSocket(t *testing.T) {
 // byte-index clip and a rune-index clip would disagree, and reads the
 // window name back through tmux itself.
 func TestRenameChatWindowClipsNamesLongerThanWindowNameRunes(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -172,6 +177,7 @@ func TestChatNameCallsThroughTheExactLivePaneNotTranscriptUUID(t *testing.T) {
 }
 
 func TestCodexSelfRetainsTheFleetMatchedPane(t *testing.T) {
+	testjail.TmuxServer(t)
 	jail := newKillCLIJail(t)
 	socket := "cx-self-pane-" + strconv.Itoa(os.Getpid())
 	if output, err := exec.Command(
@@ -220,6 +226,7 @@ func TestCodexSelfRetainsTheFleetMatchedPane(t *testing.T) {
 }
 
 func TestScopedLiveKillConfirmsClosureWithoutExitFlag(t *testing.T) {
+	testjail.TmuxServer(t)
 	jailTest(t)
 	// The finisher's start is recorded, never run: os.Executable here is this
 	// test binary, not pfm.

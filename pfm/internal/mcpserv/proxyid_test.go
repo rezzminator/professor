@@ -19,6 +19,8 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
+	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
 func TestParseProxyIdentityAcceptsWirePayload(t *testing.T) {
@@ -270,6 +272,7 @@ func TestWithBirthCaller(t *testing.T) {
 				t.Setenv(name, "")
 			}
 			ctx, recorder := obs.Test(t)
+			ctx = pfmtmux.WithClientRunner(ctx, testjail.AbsentTmuxRunner())
 			ctx = chat.WithHerdrServer(ctx, spawn.HerdrServer{
 				Socket: "/env/herdr.sock", Up: func(context.Context, string) error { return nil },
 			})

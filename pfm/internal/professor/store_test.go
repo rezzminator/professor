@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -301,12 +300,7 @@ func TestStoreSHAKeepsBrokenGitFileUnreadableWithoutFenceContract(t *testing.T) 
 
 func runStoreGit(t *testing.T, arguments ...string) string {
 	t.Helper()
-	command := exec.Command("git", arguments...)
-	output, err := command.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git %s: %v\n%s", strings.Join(arguments, " "), err, output)
-	}
-	return strings.TrimSpace(string(output))
+	return storeGit.Must(t, "", arguments...)
 }
 
 type boundedStoreRunner struct {

@@ -5,19 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
-	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // bridgeProc is a ProcFS whose Stat answers walk starts[pid] one read at a time.
@@ -322,59 +318,5 @@ func TestHerdrBridgeForegroundIsThatPanes(t *testing.T) {
 				t.Fatalf("foreground = %v, %v; want an error naming %q", got, err, tc.wantErr)
 			}
 		})
-	}
-}
-
-// TestHerdrBridgeTmuxGivesUpOnAFrozenServer pins the bridge read's bound: a
-// pfm tmux server that accepts and never answers fails the proof within
-// gather.ProbeTimeout, so it never stalls the painter that asked.
-func TestHerdrBridgeTmuxGivesUpOnAFrozenServer(t *testing.T) {
-	if _, err := exec.LookPath("tmux"); err != nil {
-		t.Skip("tmux is not installed")
-	}
-	root := testjail.ShortRoot(t)
-	// tmux's own refusal reason reaches the proof's error, not only its exit status.
-	if _, err := bridgeTmux(context.Background(), filepath.Join(root, "gone"), "list-clients"); err == nil ||
-		(!strings.Contains(err.Error(), "no server running") && !strings.Contains(err.Error(), "error connecting")) {
-		t.Fatalf("read of a missing server = %v, want tmux's refusal reason", err)
-	}
-	socketPath := filepath.Join(root, "cc-1")
-	listener, err := net.Listen("unix", socketPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	held := make(chan net.Conn, 16)
-	t.Cleanup(func() {
-		_ = listener.Close()
-		for len(held) > 0 {
-			_ = (<-held).Close()
-		}
-	})
-	go func() {
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				return
-			}
-			held <- conn // held open, never answered
-		}
-	}()
-	done := make(chan error, 1)
-	go func() {
-		_, err := bridgeTmux(context.Background(), socketPath, "list-clients", "-F", "#{client_pid}")
-		done <- err
-	}()
-	select {
-	case err := <-done:
-		if !errors.Is(err, gather.ErrServerUnresponsive) {
-			t.Fatalf(
-				"read of a frozen server = %v, want %v within %s",
-				err,
-				gather.ErrServerUnresponsive,
-				gather.ProbeTimeout,
-			)
-		}
-	case <-time.After(gather.ProbeTimeout + 5*time.Second):
-		t.Fatalf("read of a frozen server still waiting after %s", gather.ProbeTimeout+5*time.Second)
 	}
 }

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -106,7 +105,7 @@ func copyUpdateFixtureTree(t *testing.T, source, target string) {
 			if err != nil {
 				return err
 			}
-			return testjail.WriteExecutable(destination, body, mode.Perm())
+			return testjail.WriteExecutableNeverRun(destination, body, mode.Perm())
 		case mode&fs.ModeSymlink != 0:
 			link, err := os.Readlink(path)
 			if err != nil {
@@ -166,13 +165,8 @@ func TestUpdateGitFixtureCopiesOwnTheirRemote(t *testing.T) {
 	gitTemp(t, first, "push", "-q", "origin", "v0.11.0")
 	second := newUpdateGitFixture(t)
 	for repo, want := range map[string]bool{first: true, second: false} {
-		command := exec.Command("git", "ls-remote", "--tags", "origin", "refs/tags/v0.11.0")
-		command.Dir = repo
-		output, err := command.CombinedOutput()
-		if err != nil {
-			t.Fatalf("git ls-remote in %s: %v\n%s", repo, err, output)
-		}
-		if got := strings.Contains(string(output), "refs/tags/v0.11.0"); got != want {
+		output := updateGit.Must(t, repo, "ls-remote", "--tags", "origin", "refs/tags/v0.11.0")
+		if got := strings.Contains(output, "refs/tags/v0.11.0"); got != want {
 			t.Errorf("origin of %s holds v0.11.0 = %v, want %v: %q", repo, got, want, output)
 		}
 	}
@@ -458,7 +452,7 @@ func buildScaffoldStoreFixture(t *testing.T, root string) []string {
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if err := testjail.WriteExecutable(path, []byte(fixture.content), fixture.mode); err != nil {
+		if err := testjail.WriteExecutableNeverRun(path, []byte(fixture.content), fixture.mode); err != nil {
 			t.Fatal(err)
 		}
 	}

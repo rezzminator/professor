@@ -1,3 +1,5 @@
+//go:build jail
+
 package sqlitedb_test
 
 import (

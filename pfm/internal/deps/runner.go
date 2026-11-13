@@ -399,12 +399,6 @@ type FakeRunner struct {
 	lifecycle    []LifecycleCall
 }
 
-type fakeScript struct {
-	prefix []string
-	result RunResult
-	err    error
-}
-
 type fakeLookup struct {
 	path string
 	err  error
@@ -518,18 +512,6 @@ type InteractiveScript struct {
 	ReleaseErr error
 }
 
-// Script registers result/err for every Run call whose argv starts with
-// prefix.
-func (f *FakeRunner) Script(prefix []string, result RunResult, err error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.scripts = append(f.scripts, fakeScript{
-		prefix: append([]string(nil), prefix...),
-		result: result,
-		err:    err,
-	})
-}
-
 // ScriptLookPath registers LookPath(name)'s result.
 func (f *FakeRunner) ScriptLookPath(name, path string, err error) {
 	f.mu.Lock()
@@ -538,28 +520,6 @@ func (f *FakeRunner) ScriptLookPath(name, path string, err error) {
 		f.lookups = map[string]fakeLookup{}
 	}
 	f.lookups[name] = fakeLookup{path: path, err: err}
-}
-
-// Run records the call on the ledger, then answers with the longest
-// registered prefix match, or UnscriptedError when nothing matches.
-func (f *FakeRunner) Run(_ context.Context, argv []string, opts RunOptions) (RunResult, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.calls = append(f.calls, RunCall{Argv: append([]string(nil), argv...), Opts: opts})
-	var best *fakeScript
-	for index := range f.scripts {
-		script := &f.scripts[index]
-		if !argvHasPrefix(argv, script.prefix) {
-			continue
-		}
-		if best == nil || len(script.prefix) > len(best.prefix) {
-			best = script
-		}
-	}
-	if best == nil {
-		return RunResult{ExitCode: -1}, UnscriptedError{Argv: append([]string(nil), argv...)}
-	}
-	return best.result, best.err
 }
 
 // ScriptStart registers the Process a Start call whose argv starts with
@@ -668,40 +628,4 @@ func (f *FakeRunner) LookPath(name string) (string, error) {
 		}
 	}
 	return "", &exec.Error{Name: name, Err: exec.ErrNotFound}
-}
-
-// Calls returns every Run call FakeRunner has recorded, in call order. Each
-// entry's Argv is its own copy — mutating a returned call never reaches the
-// ledger, the same isolation Run already gives the recorded argv against
-// the caller's own slice.
-func (f *FakeRunner) Calls() []RunCall {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	calls := make([]RunCall, len(f.calls))
-	for index, call := range f.calls {
-		calls[index] = RunCall{Argv: append([]string(nil), call.Argv...), Opts: call.Opts}
-	}
-	return calls
-}
-
-func argvHasPrefix(argv, prefix []string) bool {
-	if len(prefix) > len(argv) {
-		return false
-	}
-	for index, want := range prefix {
-		if argv[index] != want {
-			return false
-		}
-	}
-	return true
-}
-
-// UnscriptedError names the argv a FakeRunner received with nothing
-// registered for it.
-type UnscriptedError struct {
-	Argv []string
-}
-
-func (err UnscriptedError) Error() string {
-	return fmt.Sprintf("deps: FakeRunner: unscripted call %q", err.Argv)
 }

@@ -1,8 +1,12 @@
+//go:build jail
+
 package gather
 
 import (
 	"context"
 	"errors"
+	"net"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -111,4 +115,52 @@ func TestProbeServerNeverReadsAFailureAsDead(t *testing.T) {
 func paneLine(paneID, pid, dead string) string {
 	fields := []string{"cc-1", "@1", "win", "title", "/dev/pts/7", pid, paneID, "1", "/work", "claude", dead, "3"}
 	return strings.Join(fields, "\\037") + "\\n"
+}
+
+// TestTmuxReadGivesUpOnAFrozenServer pins TmuxRead's bound: a chat server that
+// accepts its socket and never answers (stopped or wedged) fails the read
+// within ProbeTimeout, as the fleet scan's own probe does, so one frozen server
+// never hangs `pfm chat ls` or the MCP ls.
+func TestTmuxReadGivesUpOnAFrozenServer(t *testing.T) {
+	testjail.TmuxServer(t)
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	socketPath := filepath.Join(testjail.ShortRoot(t), "cc-1")
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	held := make(chan net.Conn, 16)
+	t.Cleanup(func() {
+		_ = listener.Close()
+		for len(held) > 0 {
+			_ = (<-held).Close()
+		}
+	})
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			held <- conn // held open, never answered
+		}
+	}()
+	done := make(chan error, 1)
+	go func() {
+		_, err := TmuxRead(context.Background(), socketPath, "show-options", "-qv", "-t", "cc-1", "@pfm_herdr")
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), ProbeTimeout.String()) {
+			t.Fatalf("read of a frozen server = %v, want an error naming the %s bound", err, ProbeTimeout)
+		}
+	case <-time.After(ProbeTimeout + 5*time.Second):
+		t.Fatalf(
+			"read of a frozen server still waiting after %s: its caller would hang",
+			ProbeTimeout+5*time.Second,
+		)
+	}
 }

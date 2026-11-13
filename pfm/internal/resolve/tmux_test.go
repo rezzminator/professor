@@ -3,26 +3,16 @@ package resolve
 import (
 	"context"
 	"errors"
-	"os"
-	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
-
-// fakeTmuxBinary plays tmux: exits 0 and prints nothing.
-func fakeTmuxBinary(t *testing.T) string {
-	t.Helper()
-	binary := filepath.Join(t.TempDir(), "tmux")
-	if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	return binary
-}
 
 // requireTmuxRecord asserts the one comp=tmux record a façade call writes:
 // subcmd, target when given, exit 0 and dur_ms.
@@ -58,7 +48,8 @@ func requireTmuxRecord(t *testing.T, recorder *obs.Recorder, index int, subcmd, 
 // the pane text.
 func TestTmuxResolverRecordsEveryInvocation(t *testing.T) {
 	ctx, recorder := obs.Test(t)
-	tmux := TmuxResolver{Binary: fakeTmuxBinary(t)}
+	ctx = pfmtmux.WithClientRunner(ctx, testjail.TmuxRunner(deps.RunResult{}))
+	tmux := TmuxResolver{Binary: "tmux"}
 	if _, err := tmux.CapturePane(ctx, "/sockets/cc-1", "%2"); err != nil {
 		t.Fatal(err)
 	}
@@ -70,16 +61,18 @@ func TestTmuxResolverRecordsEveryInvocation(t *testing.T) {
 	_ = context.Background
 }
 
-// fakeWhoamiTmuxBinary plays tmux for CommandTmuxNamer/CommandPaneOwners:
-// a display-message answers a session name, a list-panes answers pane rows.
-func fakeWhoamiTmuxBinary(t *testing.T) string {
-	t.Helper()
-	binary := filepath.Join(t.TempDir(), "tmux")
-	script := "#!/bin/sh\ncase \"$*\" in\n*list-panes*) printf '1234 %%0\\n' ;;\n*) printf 'mysession 1234\\n' ;;\nesac\nexit 0\n"
-	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	return binary
+// fakeWhoamiTmux plays tmux for CommandTmuxNamer/CommandPaneOwners on
+// /sockets/cc-1: a display-message answers a session name, a list-panes
+// answers pane rows.
+func fakeWhoamiTmux() *deps.FakeRunner {
+	fake := &deps.FakeRunner{}
+	fake.Script([]string{"tmux", "-S", "/sockets/cc-1", "list-panes"}, deps.RunResult{Stdout: []byte("1234 %0\n")}, nil)
+	fake.Script(
+		[]string{"tmux", "-S", "/sockets/cc-1", "display-message"},
+		deps.RunResult{Stdout: []byte("mysession 1234\n")},
+		nil,
+	)
+	return fake
 }
 
 // TestWhoamiTmuxRecordsEveryInvocation proves CommandTmuxNamer.SessionPane and
@@ -88,7 +81,7 @@ func fakeWhoamiTmuxBinary(t *testing.T) string {
 // sibling façade above.
 func TestWhoamiTmuxRecordsEveryInvocation(t *testing.T) {
 	ctx, recorder := obs.Test(t)
-	binary := fakeWhoamiTmuxBinary(t)
+	ctx, binary := pfmtmux.WithClientRunner(ctx, fakeWhoamiTmux()), "tmux"
 	namer := CommandTmuxNamer{Binary: binary}
 	name, pid, err := namer.SessionPane(ctx, "/sockets/cc-1", "%3")
 	if err != nil || name != "mysession" || pid != 1234 {
@@ -102,19 +95,9 @@ func TestWhoamiTmuxRecordsEveryInvocation(t *testing.T) {
 	requireTmuxRecord(t, recorder, 1, "list-panes", "")
 }
 
-// tmuxPrinting plays a tmux whose every answer is output.
-func tmuxPrinting(t *testing.T, output string) string {
-	t.Helper()
-	dir := t.TempDir()
-	answer := filepath.Join(dir, "answer")
-	if err := os.WriteFile(answer, []byte(output), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	binary := filepath.Join(dir, "tmux")
-	if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\ncat '"+answer+"'\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	return binary
+// tmuxPrinting is ctx whose tmux answers every call with output.
+func tmuxPrinting(ctx context.Context, output string) context.Context {
+	return pfmtmux.WithClientRunner(ctx, testjail.TmuxRunner(deps.RunResult{Stdout: []byte(output)}))
 }
 
 // One listing line tmux wrote in another shape costs that pane, never the
@@ -122,8 +105,8 @@ func tmuxPrinting(t *testing.T, output string) string {
 func TestTmuxListingsKeepEveryParsedPane(t *testing.T) {
 	t.Run("list-panes", func(t *testing.T) {
 		ctx, recorder := obs.Test(t)
-		binary := tmuxPrinting(t, "main\x1f%1\x1fclaude\x1fwin\nbroken-line\n")
-		panes, err := TmuxResolver{Binary: binary}.ListPanes(ctx, "/sockets/cc-1")
+		ctx = tmuxPrinting(ctx, "main\x1f%1\x1fclaude\x1fwin\nbroken-line\n")
+		panes, err := TmuxResolver{Binary: "tmux"}.ListPanes(ctx, "/sockets/cc-1")
 		want := []ResolvedPane{{
 			SocketPath: "/sockets/cc-1", SessionName: "main", PaneID: "%1", CurrentCommand: "claude", WindowName: "win",
 		}}
@@ -148,8 +131,8 @@ func TestTmuxListingsKeepEveryParsedPane(t *testing.T) {
 		}
 	})
 	t.Run("pane owners", func(t *testing.T) {
-		binary := tmuxPrinting(t, "1234 %0\nabc %1\n")
-		owners, err := CommandPaneOwners{Binary: binary}.PaneOwners(context.Background(), "/sockets/cc-1")
+		ctx := tmuxPrinting(context.Background(), "1234 %0\nabc %1\n")
+		owners, err := CommandPaneOwners{Binary: "tmux"}.PaneOwners(ctx, "/sockets/cc-1")
 		want := []PaneOwner{{SocketPath: "/sockets/cc-1", PaneID: "%0", PanePID: 1234}}
 		if !reflect.DeepEqual(owners, want) {
 			t.Fatalf("PaneOwners() = %+v, want %+v", owners, want)
@@ -162,12 +145,9 @@ func TestTmuxListingsKeepEveryParsedPane(t *testing.T) {
 	// A stopped tmux server never answers its client: the lookup costs that
 	// server alone, named, within the probe bound.
 	t.Run("pane owners on a stopped server", func(t *testing.T) {
-		binary := filepath.Join(t.TempDir(), "tmux")
-		if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexec sleep 60\n"), 0o700); err != nil {
-			t.Fatal(err)
-		}
+		ctx := pfmtmux.WithClientRunner(context.Background(), testjail.HungTmuxRunner(1))
 		started := time.Now()
-		owners, err := CommandPaneOwners{Binary: binary}.PaneOwners(context.Background(), "/sockets/cc-1")
+		owners, err := CommandPaneOwners{Binary: "tmux"}.PaneOwners(ctx, "/sockets/cc-1")
 		elapsed := time.Since(started)
 		want := "tmux server did not answer within 2s: /sockets/cc-1"
 		if owners != nil || err == nil || err.Error() != want || !errors.Is(err, gather.ErrServerUnresponsive) {

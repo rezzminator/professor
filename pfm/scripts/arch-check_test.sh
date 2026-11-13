@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Self-test for scripts/arch-check.sh's C1, C5, C10, C12, C13, C23, C25, C26, C27, C28, C29, C30, C31, C32 and C33 ratchets and for
+# Self-test for scripts/arch-check.sh's C1, C5, C10, C12, C13, C23, C25, C26, C27, C28, C29, C30, C31, C32 and C33 ratchets, the C34 jail tag and
 # how it folds its concurrent checks: print order, exit status, and a check job
 # that dies. It runs arch-check.sh against a throwaway git fixture (PFM=<fixture>),
 # never against this repo, and asserts on the relevant CHECK line rather than the
@@ -900,6 +900,36 @@ else
   bad "C33: could not build the git fixture"
 fi
 
+# ---- C34: every jail file carries the jail build tag -------------------------
+
+# c34_want <verdict> <detail>: the exact CHECK line arch-check prints for C34.
+c34_want() { printf 'CHECK %-22s %-7s %s' C34-jail-tag "$1" "$2"; }
+
+REPO_C34="$T/jail-tag"
+if fixture "$REPO_C34"; then
+  printf 'package loud\n' > "$REPO_C34/internal/loud/quiet_jail_test.go"
+  printf '//go:build jail && linux\n\npackage loud\n' > "$REPO_C34/internal/loud/kernel_jail_linux_test.go"
+  printf '//go:build linux\n\npackage loud\n' > "$REPO_C34/internal/loud/procfs_jail_linux_test.go"
+  line=$(check_line "$REPO_C34" C34-jail-tag)
+  want=$(c34_want FAIL 'no leading `//go:build jail` line: internal/loud/procfs_jail_linux_test.go internal/loud/quiet_jail_test.go')
+  if [ "$line" = "$want" ]; then
+    ok "C34: a jail file without the jail tag FAILs naming it, a GOOS-only line included"
+  else
+    bad "C34: expected FAIL naming every untagged jail file" "want: $want" "got:  $line"
+  fi
+  printf '//go:build jail\n\npackage loud\n' > "$REPO_C34/internal/loud/quiet_jail_test.go"
+  printf '//go:build jail && linux\n\npackage loud\n' > "$REPO_C34/internal/loud/procfs_jail_linux_test.go"
+  line=$(check_line "$REPO_C34" C34-jail-tag)
+  want=$(c34_want PASS "3 jail files tagged")
+  if [ "$line" = "$want" ]; then
+    ok "C34: every jail file tagged passes, counting them"
+  else
+    bad "C34: expected PASS once every jail file is tagged" "want: $want" "got:  $line"
+  fi
+else
+  bad "C34: could not build the git fixture"
+fi
+
 # ---- C13: a source whose tests are all real mirrors to its jail file -------
 
 REPO_C13="$T/test-mirror"
@@ -973,18 +1003,18 @@ run_all() {
   out=$(env -u PFM_DEV_REPO_GIT_DIR -u PFM_DEV_REPO_WORK_TREE "$@" PFM="$dir" bash "$SUT" </dev/null 2>/dev/null); rc=$?
 }
 
-# Today's order: C1 … C8, C10 … C23, then C25 … C33, then C24 (its own script, last).
-EXPECTED_ORDER="C1-ceiling-src C2-ceiling-test C3-cmd-budget C4-cmd-primitives C5-tmux-runner C6-atomic-write C7-sql-open C8-negation-dirs C10-mcp-argv C11-db-names C12-claude-pointers C13-test-mirror C14-usage-parity C15-internal-usage C16-env-outside-paths C17-dup-functions C18-engine-spellings C19-env-namespace C20-codex-home C21-test-jail C22-host-doors C23-bare-log C25-testmain-jail C26-exec-write C27-identity-env C28-signal-door C29-os-door C30-shell-platform C31-front-door C32-os-door-test C33-unit-kind C24-unwrapped-door"
+# Today's order: C1 … C8, C10 … C23, then C25 … C34, then C24 (its own script, last).
+EXPECTED_ORDER="C1-ceiling-src C2-ceiling-test C3-cmd-budget C4-cmd-primitives C5-tmux-runner C6-atomic-write C7-sql-open C8-negation-dirs C10-mcp-argv C11-db-names C12-claude-pointers C13-test-mirror C14-usage-parity C15-internal-usage C16-env-outside-paths C17-dup-functions C18-engine-spellings C19-env-namespace C20-codex-home C21-test-jail C22-host-doors C23-bare-log C25-testmain-jail C26-exec-write C27-identity-env C28-signal-door C29-os-door C30-shell-platform C31-front-door C32-os-door-test C33-unit-kind C34-jail-tag C24-unwrapped-door"
 
 REPO_GREEN="$T/green/pfm"
 if green_fixture "$REPO_GREEN"; then
   run_all "$REPO_GREEN"
   order=$(printf '%s\n' "$out" | awk '$1 == "CHECK" {printf "%s ", $2}' | sed 's/ $//')
   passes=$(printf '%s\n' "$out" | grep -c '^CHECK [^ ]* *PASS ')
-  if [ "$rc" -eq 0 ] && [ "$passes" -eq 32 ] && [ "$order" = "$EXPECTED_ORDER" ]; then
-    ok "exit: a tree where all 32 checks PASS exits 0, one line per check in today's order"
+  if [ "$rc" -eq 0 ] && [ "$passes" -eq 33 ] && [ "$order" = "$EXPECTED_ORDER" ]; then
+    ok "exit: a tree where all 33 checks PASS exits 0, one line per check in today's order"
   else
-    bad "exit: expected rc 0, 32 PASS lines in order" "rc=$rc passes=$passes" "$order" "$out"
+    bad "exit: expected rc 0, 33 PASS lines in order" "rc=$rc passes=$passes" "$order" "$out"
   fi
 else
   bad "exit: could not build the green fixture"
@@ -995,7 +1025,7 @@ if green_fixture "$REPO_FAIL"; then
   printf 'func Again() { log.Fatalf("bye") }\n' >> "$REPO_FAIL/internal/loud/loud.go"
   run_all "$REPO_FAIL"
   others=$(printf '%s\n' "$out" | grep '^CHECK ' | grep -vc 'C23-bare-log .*FAIL ')
-  if [ "$rc" -eq 1 ] && [ "$others" -eq 31 ] && [[ "$out" == *"C23-bare-log"*"FAIL"*"internal/loud/loud.go (1->2)"* ]]; then
+  if [ "$rc" -eq 1 ] && [ "$others" -eq 32 ] && [[ "$out" == *"C23-bare-log"*"FAIL"*"internal/loud/loud.go (1->2)"* ]]; then
     ok "exit: one FAIL and no ERROR exits 1"
   else
     bad "exit: expected rc 1 with only C23 failing" "rc=$rc others=$others" "$out"
@@ -1028,8 +1058,8 @@ if green_fixture "$REPO_KILL"; then
   passes=$(printf '%s\n' "$out" | grep -c '^CHECK [^ ]* *PASS ')
   lines=$(printf '%s\n' "$out" | grep -c '^CHECK ')
   line=$(printf '%s\n' "$out" | grep '^CHECK C1-ceiling-src ' || true)
-  if [ "$rc" -eq 2 ] && [ "$lines" -eq 32 ] && [ "$passes" -eq 31 ] && [[ "$line" == *ERROR* && "$line" == *"without leaving its CHECK line"* ]]; then
-    ok "a check job killed before its result is an ERROR line naming it, exit 2, the other 31 checks PASS"
+  if [ "$rc" -eq 2 ] && [ "$lines" -eq 33 ] && [ "$passes" -eq 32 ] && [[ "$line" == *ERROR* && "$line" == *"without leaving its CHECK line"* ]]; then
+    ok "a check job killed before its result is an ERROR line naming it, exit 2, the other 32 checks PASS"
   else
     bad "a killed check job must print ERROR for that check and exit 2" "rc=$rc lines=$lines passes=$passes" "$line"
   fi

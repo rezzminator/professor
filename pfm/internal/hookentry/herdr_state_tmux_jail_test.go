@@ -1,3 +1,5 @@
+//go:build jail
+
 package hookentry
 
 import (
@@ -28,6 +30,7 @@ import (
 // reporter's tmux calls read what tmux prints, and the stored state and the
 // client registry survive to a later attach.
 func TestHerdrStateFollowsTheClientThatAttachedOnARealTmuxServer(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -349,6 +352,7 @@ func atoi(t *testing.T, text string) int {
 // process. The logged median is what the docs print; the bound is the D2 flip
 // (20 ms) with room for a loaded fence.
 func TestHerdrStateAdoptionCostPerEvent(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}

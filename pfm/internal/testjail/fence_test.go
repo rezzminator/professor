@@ -25,9 +25,9 @@ func TestFenceArgsDropHostPathFlags(t *testing.T) {
 // suite against the live pfm.db: the variable alone is refused, so Run re-runs the package in the
 // fence and the exported store is never opened here.
 func TestGateAdmitsOnlyTheFence(t *testing.T) {
-	// This binary only runs where the gate let it in.
-	if !Disposable() {
-		t.Fatal("a test ran outside the fence and off a hosted runner: the gate failed")
+	// This binary only runs where the guard let it in.
+	if !runsHere(unitBinary, unitNetArmed, paths.OSEnv{}, fenceMarker) {
+		t.Fatal("a test ran where its guard refuses it: the guard failed")
 	}
 	present := filepath.Join(t.TempDir(), "dockerenv")
 	if err := os.WriteFile(present, nil, 0o600); err != nil {
@@ -65,6 +65,45 @@ func TestGateAdmitsOnlyTheFence(t *testing.T) {
 	for _, tc := range cases {
 		if got := admitted(&paths.MapEnv{Values: tc.env}, tc.marker); got != tc.want {
 			t.Errorf("%s: admitted(%v, %s) = %v, want %v", tc.name, tc.env, tc.marker, got, tc.want)
+		}
+	}
+}
+
+// TestGuardRunsOnlyAnArmedUnitBinaryOffTheFence: a host with no fence marker and no hosted runner runs
+// a unit binary once the unit net is armed, and nothing else; the fence runs every binary.
+func TestGuardRunsOnlyAnArmedUnitBinaryOffTheFence(t *testing.T) {
+	fence := filepath.Join(t.TempDir(), "dockerenv")
+	if err := os.WriteFile(fence, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	host := filepath.Join(t.TempDir(), "dockerenv")
+	inFence := map[string]string{"PFM_DEV_FENCE": "1"}
+	cases := []struct {
+		name        string
+		unit, armed bool
+		env         map[string]string
+		marker      string
+		want        bool
+	}{
+		{"an armed unit binary on a host", true, true, map[string]string{}, host, true},
+		{"an unarmed unit binary on a host", true, false, map[string]string{}, host, false},
+		{"a jail binary on a host, the net armed", false, true, map[string]string{}, host, false},
+		{"a jail binary on a host", false, false, map[string]string{}, host, false},
+		{"a jail binary in the fence", false, false, inFence, fence, true},
+		{"an unarmed unit binary in the fence", true, false, inFence, fence, true},
+	}
+	for _, tc := range cases {
+		if got := runsHere(tc.unit, tc.armed, &paths.MapEnv{Values: tc.env}, tc.marker); got != tc.want {
+			t.Errorf(
+				"%s: runsHere(unit=%v, armed=%v, %v, %s) = %v, want %v",
+				tc.name,
+				tc.unit,
+				tc.armed,
+				tc.env,
+				tc.marker,
+				got,
+				tc.want,
+			)
 		}
 	}
 }

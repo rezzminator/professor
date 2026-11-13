@@ -12,7 +12,8 @@
 # `{name}_jail_test.go` or `{name}_jail_{os}_test.go`, is real: a test kept on a real resource until a
 # fake or the journey can play it, its file's count ratcheted by arch-check C33; any other function of
 # a jail file marks the tests naming it tmux:
-#   tmux         exec of "tmux", a "new-session" argument, or a function of a jail file
+#   tmux         exec of "tmux", testjail.TmuxServer (a real server asked for: the tmux façade
+#                refuses the real binary in a test process without it), or a function of a jail file
 #   process      exec.Command, os.StartProcess, syscall exec, an executable written to run
 #                (testjail.WriteExecutable and its fakes), a built binary, a PTY, mockengine
 #   home-sqlite  SQLite's own file: testjail.DatabaseFiles, or a database built with sql.Open; any
@@ -46,9 +47,9 @@ import sys
 root, as_list = sys.argv[1], sys.argv[2] == '1'
 KINDS = ['nothing', 'temp-dir', 'home-sqlite', 'process', 'tmux', 'real']
 MARKERS = [
-    (4, re.compile(r'exec\.Command(?:Context)?\((?:[^,()]*,\s*)?"tmux"|"new-session"')),
+    (4, re.compile(r'exec\.Command(?:Context)?\((?:[^,()]*,\s*)?"tmux"|testjail\.TmuxServer\b')),
     (3, re.compile(r'exec\.Command(?:Context)?\(|os\.StartProcess\(|syscall\.(?:Exec|ForkExec)\('
-                   r'|testjail\.(?:WriteExecutable|PFMBinary|MockEngineBinary|GoBuild|PTYCommand|HungTmux'
+                   r'|testjail\.(?:WriteExecutable|PFMBinary|MockEngineBinary|GoBuild|PTYCommand'
                    r'|FakeEngineSync|WriteLoggedOut\w*)\b|\bmockengine\.')),
     (2, re.compile(r'testjail\.DatabaseFiles\b|\bsql\.Open\(')),
     (1, re.compile(r'\.TempDir\(\)|os\.(?:MkdirTemp|CreateTemp)\(|testjail\.(?:ShortRoot|CreateShortRoot|Fleet|FleetEnv|InstalledHome|CleanHome'

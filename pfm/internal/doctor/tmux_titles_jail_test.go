@@ -1,3 +1,5 @@
+//go:build jail
+
 package doctor
 
 import (
@@ -12,12 +14,14 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // The check exists so a reader can tell "pfm owns this title" from "the host
 // owns it and pfm has not stomped it". Both states must be visible, and
 // neither may be reported as a fault.
 func TestTmuxTitlesDoctorReportsBothOwnersOnProbeSockets(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}

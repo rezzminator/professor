@@ -1,3 +1,5 @@
+//go:build jail
+
 package main
 
 import (
@@ -14,6 +16,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // TestChatKillAndUnkillRecordChatStateTransitions: the CLI kill/unkill verbs
@@ -24,6 +27,7 @@ import (
 // kill_cli_engine_jail_test.go, whose real tmux + jailed /proc fixture this
 // reuses.
 func TestChatKillAndUnkillRecordChatStateTransitions(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -201,6 +205,7 @@ func TestChatEndRecordsAChatStateTransition(t *testing.T) {
 // obs.Test's recorder, over the same real tmux + stub engine jail the other
 // chat new tests use.
 func TestChatNewRecordsAChatStateTransition(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -251,6 +256,7 @@ func TestChatNewRecordsAChatStateTransition(t *testing.T) {
 // itself. Pattern: TestChatNameConvergesTheWindowInlineOnAProbeSocket in
 // chat_name_jail_test.go, whose real tmux probe fixture this reuses.
 func TestApplyChatNameRecordsAChatStateTransition(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}

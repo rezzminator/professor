@@ -1,3 +1,5 @@
+//go:build jail
+
 package installer
 
 // A FIFO registry must be rejected, not blocked on: the test re-runs its own binary as a real child under a deadline.

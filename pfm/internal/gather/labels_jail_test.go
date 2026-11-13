@@ -1,3 +1,5 @@
+//go:build jail
+
 package gather
 
 import (
@@ -7,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/naming"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // The claude half of window naming against a REAL tmux server on a scratch
@@ -15,6 +18,7 @@ import (
 // tmux calls behind them — capture-pane and rename-window — actually work
 // together on a live server.
 func TestClaudeWindowNameConvergesOnARealServer(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}

@@ -11,7 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
 type fakeCommands struct {
@@ -243,15 +245,11 @@ func TestSocketForPIDSuppressesPerSocketProbeFailures(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	binary := filepath.Join(t.TempDir(), "tmux")
 	// tmux's own word for a socket nothing listens on.
-	script := "#!/bin/sh\necho 'no server running on /tmp/cc-dead' >&2\nexit 1\n"
-	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	dead := testjail.TmuxRunner(deps.RunResult{ExitCode: 1, Stderr: []byte("no server running on /tmp/cc-dead\n")})
 	var stderr bytes.Buffer
-	tmux := RealTmux{Binary: binary, Dir: directory, Stderr: &stderr}
-	socket, err := tmux.SocketForPID(context.Background(), 46)
+	tmux := RealTmux{Binary: "tmux", Dir: directory, Stderr: &stderr}
+	socket, err := tmux.SocketForPID(pfmtmux.WithClientRunner(context.Background(), dead), 46)
 	if err != nil || socket != "" {
 		t.Fatalf("SocketForPID() socket=%q err=%v", socket, err)
 	}

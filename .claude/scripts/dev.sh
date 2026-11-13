@@ -378,7 +378,7 @@ act_pfm() {
         fi
       fi
       rm -rf "$build_dir" ;;
-    typecheck) run "pfm: go vet" -- go -C "$d" vet ./... ;;
+    typecheck) run "pfm: go vet" -- bash -c 'go -C "$1" vet ./... && go -C "$1" vet -tags jail ./...' _ "$d" ;;
     verify) checks_pfm_verify "$d" ;;
     # The rows (unit sharded by pfm/scripts/test-shard.sh, then the e2e rows):
     # checks_pfm_test in infra/fence/checks.sh.

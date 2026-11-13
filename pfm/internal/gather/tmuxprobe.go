@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -51,11 +50,11 @@ var ErrOptionUnset = errors.New("tmux option unset")
 
 // optionUnset reads tmux's refusal of an unset option named name.
 func optionUnset(err error, name string) bool {
-	var exit *exec.ExitError
-	if !errors.As(err, &exit) {
+	stderr, ok := pfmtmux.ExitStderr(err)
+	if !ok {
 		return false
 	}
-	for _, line := range strings.Split(string(exit.Stderr), "\n") {
+	for _, line := range strings.Split(string(stderr), "\n") {
 		if line = strings.TrimSpace(line); line == "invalid option: "+name || line == "unknown option: "+name {
 			return true
 		}
@@ -68,11 +67,8 @@ func optionUnset(err error, name string) bool {
 // the reason to stderr, which exec keeps on the ExitError rather than in the
 // error message.
 func TmuxServerGone(err error) bool {
-	var exit *exec.ExitError
-	if !errors.As(err, &exit) {
-		return false
-	}
-	return ServerGoneText(string(exit.Stderr))
+	stderr, ok := pfmtmux.ExitStderr(err)
+	return ok && ServerGoneText(string(stderr))
 }
 
 // ServerGoneText is TmuxServerGone over the stderr text a caller already holds.
@@ -122,16 +118,15 @@ func EmptyServerWarning(socket string) string {
 // serverEmpty reads tmux's own words for a running server with no session:
 // list-panes -a finds no target to resolve.
 func serverEmpty(err error) bool {
-	var exit *exec.ExitError
-	return errors.As(err, &exit) && strings.Contains(string(exit.Stderr), "no current target")
+	stderr, ok := pfmtmux.ExitStderr(err)
+	return ok && strings.Contains(string(stderr), "no current target")
 }
 
 // withStderr carries the reason tmux wrote to stderr into the error text,
 // which an ExitError alone renders as a bare "exit status 1".
 func withStderr(err error) error {
-	var exit *exec.ExitError
-	if errors.As(err, &exit) {
-		if reason := strings.TrimSpace(string(exit.Stderr)); reason != "" {
+	if stderr, ok := pfmtmux.ExitStderr(err); ok {
+		if reason := strings.TrimSpace(string(stderr)); reason != "" {
 			return fmt.Errorf("%w: %s", err, reason)
 		}
 	}

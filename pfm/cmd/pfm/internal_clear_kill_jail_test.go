@@ -1,3 +1,5 @@
+//go:build jail
+
 package main
 
 import (
@@ -406,6 +408,7 @@ func runInternalHookPayload(t *testing.T, entry, payload string) (int, string, s
 // SessionEnd(clear) and SessionStart(clear). The fleet scan then hides the
 // pre-clear conversation and lists the successor as `{name} #2`.
 func TestClearHidesTheNamedConversationAndListsItsNumberedSuccessor(t *testing.T) {
+	testjail.TmuxServer(t)
 	const name = "CLAUDE_RULES"
 	ladder := newWatchLadder(t)
 	testjail.DatabaseFiles(t, ladder.jail.root) // the hooks run the built pfm on the same files

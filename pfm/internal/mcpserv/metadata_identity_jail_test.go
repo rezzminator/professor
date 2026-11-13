@@ -1,3 +1,5 @@
+//go:build jail
+
 package mcpserv
 
 import (
@@ -19,6 +21,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // metadataIdentityService installs two deterministic live Codex rows through
@@ -174,6 +177,7 @@ func (metadataThenSpawner) Spawn(context.Context, pfmcall.SteerSpawn) error { re
 // calls are repeated concurrently so a cached sender or cached caller
 // identity cannot leak seat A into seat B.
 func TestMCPMetadataThreadIdentityRoutesDistinctCodexSeats(t *testing.T) {
+	testjail.TmuxServer(t)
 	service := metadataIdentityService(t)
 	clients := []protocolClient{
 		connectInMemory(t, service.Server()),
@@ -274,6 +278,7 @@ func TestMCPMetadataThreadIdentityRoutesDistinctCodexSeats(t *testing.T) {
 }
 
 func TestMCPRawPaneUsesRequestCallerSocketAcrossTools(t *testing.T) {
+	testjail.TmuxServer(t)
 	service := metadataIdentityService(t)
 	client := connectInMemory(t, service.Server())
 	meta := mcp.Meta{"threadId": "thread-a"}
@@ -472,6 +477,7 @@ func TestMCPMetadataIdentityRefusesMissingUnknownAndMalformedValues(t *testing.T
 }
 
 func TestMCPMetadataSignsExplicitTargetWithoutRedirectingIt(t *testing.T) {
+	testjail.TmuxServer(t)
 	service := metadataIdentityService(t)
 	client := connectInMemory(t, service.Server())
 	output := callToolWithMeta[CallOutput](

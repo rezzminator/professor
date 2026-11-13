@@ -211,7 +211,7 @@ func spawnInPlace(t *testing.T, fake *placeHerdr, cwd string) (fleetdb.Seat, err
 	}
 	socket := servePlaceHerdr(t, fake)
 	binary := filepath.Join(values.Home, "native-claude")
-	if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutableNeverRun(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	fleet := fleetDesk()

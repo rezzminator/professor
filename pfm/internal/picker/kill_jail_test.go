@@ -1,3 +1,5 @@
+//go:build jail
+
 package picker
 
 import (
@@ -14,6 +16,7 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 	"github.com/rezzminator/professor/pfm/internal/ui"
 )
 
@@ -158,6 +161,7 @@ func TestHidingALiveChatKeepsItRunningAndKeepsItsHandles(t *testing.T) {
 // second pane — another engine's chat, a split the scan never counted, a pane
 // born after the scan — keeps the server, its socket and its crumb alive.
 func TestEndingALiveChatEndsOnlyItsOwnServer(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Fatalf("tmux is required: %v", err)
 	}

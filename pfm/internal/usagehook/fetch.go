@@ -633,7 +633,7 @@ func claudeCodeVersion(ctx context.Context, binary string) (string, error) {
 	}()
 	ctx, cancel := context.WithTimeout(ctx, deps.ProbeTimeout)
 	defer cancel()
-	result, err := obs.Runner(deps.RealRunner{}).Run(ctx, []string{path, "--version"}, deps.RunOptions{
+	result, err := usageRunner.Run(ctx, []string{path, "--version"}, deps.RunOptions{
 		Env:       home.Env(herdr.StripPane(os.Environ())),
 		WaitDelay: time.Second,
 	})

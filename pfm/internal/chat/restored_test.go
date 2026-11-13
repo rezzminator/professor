@@ -618,7 +618,7 @@ func TestOpenRestoredIDWithoutSeatUsesCurrentHerdrPane(t *testing.T) {
 		t.Fatal(err)
 	}
 	binary := filepath.Join(runtime.Paths.Home, "native-engine")
-	if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutableNeverRun(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	runtime.Config.Claude.Binary = binary
@@ -725,7 +725,11 @@ func TestOpenRestoredTitlelessCodexWithoutSeat(t *testing.T) {
 	t.Setenv("TMUX", "")
 	nativeChatRestoredCaller(t, true)
 	bin := t.TempDir()
-	if err := testjail.WriteExecutable(filepath.Join(bin, "codex"), []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutableNeverRun(
+		filepath.Join(bin, "codex"),
+		[]byte("#!/bin/sh\nexit 0\n"),
+		0o700,
+	); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))

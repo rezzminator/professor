@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"testing"
@@ -15,12 +14,10 @@ import (
 // A stray that exited between the scan and the kill is gone: Terminate sends
 // nothing and reports it, never an error.
 func TestRealProcessesTerminateDeadPID(t *testing.T) {
-	command := exec.Command(os.Args[0], "-test.run=^$")
-	if err := command.Run(); err != nil {
-		t.Fatalf("run short-lived process: %v", err)
-	}
+	// Above every kernel's pid limit: no process holds it, so none needs to run and exit.
+	const deadPID = 1 << 30
 	target := gather.Target{Identity: gather.Identity{
-		PID: command.Process.Pid, Start: 1, UID: uint32(os.Geteuid()),
+		PID: deadPID, Start: 1, UID: uint32(os.Geteuid()),
 		Argv: []string{os.Args[0], "-test.run=^$"},
 	}}
 

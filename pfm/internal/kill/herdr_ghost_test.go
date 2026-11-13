@@ -20,7 +20,7 @@ func TestHerdrGhostKillRequiresDeadSavedHost(t *testing.T) {
 	} {
 		t.Run(mode, func(t *testing.T) {
 			jail := newKillJail(t)
-			database := jail.open(t)
+			database := jail.openFile(t)
 			server := newKillHerdr(t)
 			seat := seedKillHerdr(t, database, server)
 			request := Request{
@@ -125,7 +125,7 @@ func TestHerdrGhostKillRequiresDeadSavedHost(t *testing.T) {
 				}
 			}
 			spawner := &captureSpawner{}
-			manager, err := New(database, Dependencies{Tmux: &fakeTmux{}, Spawner: spawner})
+			manager, err := New(database, Dependencies{Paths: jail.resolved(), Tmux: &fakeTmux{}, Spawner: spawner})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -170,7 +170,7 @@ func TestHerdrGhostKillRequiresDeadSavedHost(t *testing.T) {
 func TestHerdrProveVanishedUnboundSeat(t *testing.T) {
 	for _, listed := range []bool{false, true} {
 		jail := newKillJail(t)
-		database := jail.open(t)
+		database := jail.openFile(t)
 		server := newKillHerdr(t)
 		seat := seedKillHerdr(t, database, server)
 		seat.SeatHostPID, seat.SeatHostStart = 0, 0

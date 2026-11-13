@@ -22,7 +22,7 @@ import (
 // the package's parallel tests.
 func TestStoreOperationsRecordUnderTheDBComponent(t *testing.T) {
 	ctx, recorder := obs.Test(t)
-	state, _ := openTestStore(t)
+	state := openTestStore(t)
 	const id = "cccccccc-cccc-4ccc-8ccc-PLANTEDBOUND"
 	if err := state.Kill(ctx, id, 1700000000); err != nil {
 		t.Fatal(err)
@@ -81,7 +81,7 @@ func TestPrimaryAccountAbsenceIsNotAnErrorRecord(t *testing.T) {
 		broken := mode == "query failure"
 		t.Run(mode, func(t *testing.T) {
 			ctx, recorder := obs.Test(t)
-			state, values := openTestStore(t)
+			state, values := openFileTestStore(t)
 			if broken {
 				if _, err := state.db.ExecContext(ctx, "DROP TABLE meta"); err != nil {
 					t.Fatal(err)
@@ -275,7 +275,7 @@ VALUES('s-bad','claude','wake',3600000000000,1,'yesterday')`)
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			ctx, recorder := obs.Test(t)
-			state, _ := openTestStore(t)
+			state := openTestStore(t)
 			if err := test.seed(ctx, state); err != nil {
 				t.Fatal(err)
 			}

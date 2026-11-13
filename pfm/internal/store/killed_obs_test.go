@@ -16,7 +16,7 @@ import (
 // bound arguments.
 func TestKilledWriteRecordsRetries(t *testing.T) {
 	setStoreTestJail(t)
-	writer := openTestStore(t)
+	writer := openFileTestStore(t)
 	t.Cleanup(func() { _ = writer.Close() })
 
 	if err := writer.Kill(context.Background(), Killed{ID: "seed", KilledAt: 1}); err != nil {

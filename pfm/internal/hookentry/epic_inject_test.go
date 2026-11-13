@@ -10,12 +10,22 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 func TestEpicInjectDedupeFollowsSessionAndEpicRename(t *testing.T) {
-	setStoreTestJailForHookEntry(t)
+	database, err := store.OpenMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	epicInjectStore = database
+	t.Cleanup(func() {
+		epicInjectStore = nil
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	})
 	root := t.TempDir()
 	if err := os.Mkdir(filepath.Join(root, ".git"), 0o700); err != nil {
 		t.Fatal(err)
@@ -67,18 +77,6 @@ func TestEpicInjectDedupeFollowsSessionAndEpicRename(t *testing.T) {
 	if fourth := call(); fourth != "" {
 		t.Fatalf("renamed-back epic injected twice: %q", fourth)
 	}
-}
-
-func setStoreTestJailForHookEntry(t *testing.T) {
-	t.Helper()
-	root := t.TempDir()
-	t.Setenv(paths.EnvCacheDB, filepath.Join(root, "state", "pfm-cache.db"))
-	t.Setenv(paths.EnvStateDB, filepath.Join(root, "cc", "pfm.db"))
-	t.Setenv(paths.EnvSIDDir, filepath.Join(root, "sid"))
-	t.Setenv(paths.EnvClaudeRoots, filepath.Join(root, "claude"))
-	t.Setenv(paths.EnvCodexHome, filepath.Join(root, "codex"))
-	t.Setenv(paths.EnvTmuxDir, filepath.Join(root, "tmux"))
-	t.Setenv(paths.EnvHome, filepath.Join(root, "home"))
 }
 
 // TestEpicInjectNativeWindowNameIsTheSeatName holds I1: a native Herdr chat's

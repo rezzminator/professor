@@ -1,7 +1,8 @@
 // Package sqlitedb is the one SQLite opener. pfm's own databases open through
-// OpenStore with one pragma set; a database another program owns — Codex's
-// state and history stores, OpenCode's store — opens through OpenReadOnly or
-// OpenReadWrite, which never change its settings.
+// OpenStore with one pragma set, or through OpenStoreMemory, its in-memory double
+// for unit tests; a database another program owns — Codex's state and history
+// stores, OpenCode's store — opens through OpenReadOnly or OpenReadWrite, which
+// never change its settings.
 package sqlitedb
 
 import (
@@ -12,6 +13,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"modernc.org/sqlite"
@@ -56,14 +59,8 @@ func openStoreFile(ctx context.Context, path string) (*sql.DB, error) {
 }
 
 func storePragmas(ctx context.Context, database *sql.DB) error {
-	if _, err := database.ExecContext(
-		ctx,
-		fmt.Sprintf("PRAGMA busy_timeout=%d", StoreBusyTimeout.Milliseconds()),
-	); err != nil {
-		return fmt.Errorf("set busy_timeout: %w", err)
-	}
-	if _, err := database.ExecContext(ctx, "PRAGMA foreign_keys=ON"); err != nil {
-		return fmt.Errorf("enable foreign keys: %w", err)
+	if err := connectionPragmas(ctx, database); err != nil {
+		return err
 	}
 	journalMode, err := enableWAL(ctx, database)
 	if err != nil {
@@ -76,6 +73,58 @@ func storePragmas(ctx context.Context, database *sql.DB) error {
 		return fmt.Errorf("set synchronous mode: %w", err)
 	}
 	return nil
+}
+
+// connectionPragmas sets what every pfm store connection runs with, a file or
+// memory: the store busy timeout and foreign keys on.
+func connectionPragmas(ctx context.Context, database *sql.DB) error {
+	if _, err := database.ExecContext(
+		ctx,
+		fmt.Sprintf("PRAGMA busy_timeout=%d", StoreBusyTimeout.Milliseconds()),
+	); err != nil {
+		return fmt.Errorf("set busy_timeout: %w", err)
+	}
+	if _, err := database.ExecContext(ctx, "PRAGMA foreign_keys=ON"); err != nil {
+		return fmt.Errorf("enable foreign keys: %w", err)
+	}
+	return nil
+}
+
+// memoryNames holds every database name OpenStoreMemory created in this process, so
+// InMemory answers for those alone and no resolved path can pass for one.
+var (
+	memoryNames  sync.Map
+	memoryNumber atomic.Uint64
+)
+
+// OpenStoreMemory opens a new, empty pfm database in this process's memory, the
+// unit-test double of OpenStore: one connection, StoreBusyTimeout and foreign
+// keys on, its journal in memory, since WAL needs a file. It creates no file and
+// reads no environment. name is the database's URI: another handle in this
+// process opens or ATTACHes it to reach the same database, which lives until
+// its last handle closes.
+func OpenStoreMemory(ctx context.Context) (database *sql.DB, name string, err error) {
+	name = fmt.Sprintf("file:/pfm-memory-%d?vfs=memdb", memoryNumber.Add(1))
+	finish := obs.SQLOpen(ctx, "memory", name)
+	defer func() { finish(err) }()
+	database, err = sql.Open(driverName, name)
+	if err != nil {
+		return nil, "", fmt.Errorf("open sqlite database %s: %w", name, err)
+	}
+	database.SetMaxOpenConns(1)
+	database.SetMaxIdleConns(1)
+	if err := connectionPragmas(ctx, database); err != nil {
+		return nil, "", errors.Join(fmt.Errorf("configure sqlite database %s: %w", name, err), database.Close())
+	}
+	memoryNames.Store(name, struct{}{})
+	return database, name, nil
+}
+
+// InMemory reports whether name is a database OpenStoreMemory created in this
+// process: one with no directory beside it for a lock, a backup or a file.
+func InMemory(name string) bool {
+	_, found := memoryNames.Load(name)
+	return found
 }
 
 // walRetryDelay spaces enableWAL's attempts.

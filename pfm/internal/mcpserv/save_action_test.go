@@ -115,8 +115,8 @@ func TestChatSaveResolvesCallerRelativePathsAndScopesRepository(t *testing.T) {
 }
 
 func TestChatSaveDefaultsToExactIndexedCallerTranscript(t *testing.T) {
-	setupBackendFixture(t)
-	database, err := store.Open()
+	setupBackendPaths(t)
+	database, err := store.OpenMemory()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -386,8 +386,8 @@ func TestChatSaveNamesCallerListingAndTranscriptLookupFailures(t *testing.T) {
 	})
 
 	t.Run("transcript", func(t *testing.T) {
-		setupBackendFixture(t)
-		database, err := store.Open()
+		setupBackendPaths(t)
+		database, err := store.OpenMemory()
 		if err != nil {
 			t.Fatal(err)
 		}

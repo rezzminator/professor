@@ -3,6 +3,7 @@ package kill
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -11,7 +12,6 @@ import (
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
-	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 )
 
 // TestManagerConfirmExitFailsWhenPaneOutlivesEscalation reproduces the live
@@ -25,6 +25,7 @@ func TestManagerConfirmExitFailsWhenPaneOutlivesEscalation(t *testing.T) {
 	database := jail.open(t)
 	tmux := &fakeTmux{existsFor: 1_000_000, panesByTTY: map[string]string{"/dev/pts/9": "%9"}} // never reports gone
 	manager, err := New(database, Dependencies{
+		Paths:        jail.resolved(),
 		Tmux:         tmux,
 		Spawner:      &captureSpawner{},
 		Now:          func() time.Time { return time.Unix(700, 0) },
@@ -62,6 +63,7 @@ func TestManagerConfirmExitSucceedsOncePaneGone(t *testing.T) {
 	database := jail.open(t)
 	tmux := &fakeTmux{existsFor: 0}
 	manager, err := New(database, Dependencies{
+		Paths:        jail.resolved(),
 		Tmux:         tmux,
 		Spawner:      &captureSpawner{},
 		Now:          func() time.Time { return time.Unix(700, 0) },
@@ -92,7 +94,7 @@ func TestConfirmExitDoesNotKillSiblingPanes(t *testing.T) {
 		killPaneErr: errors.New("kill-pane failed"),
 		panesByTTY:  map[string]string{"/dev/pts/4": "%4", "/dev/pts/5": "%5"},
 	}
-	manager, err := New(jail.open(t), Dependencies{Tmux: tmux, ConfirmEvery: time.Millisecond})
+	manager, err := New(jail.open(t), Dependencies{Paths: jail.resolved(), Tmux: tmux, ConfirmEvery: time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +138,7 @@ func TestNewConfirmEveryTestKnob(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Setenv("PFM_TEST_KILL_CONFIRM_EVERY_MS", test.value)
-			manager, err := New(database, Dependencies{ConfirmEvery: test.explicit})
+			manager, err := New(database, Dependencies{Paths: jail.resolved(), ConfirmEvery: test.explicit})
 			if test.wantError {
 				if err == nil || !strings.Contains(err.Error(), "PFM_TEST_KILL_CONFIRM_EVERY_MS") ||
 					!strings.Contains(err.Error(), test.value) {
@@ -165,8 +167,6 @@ func TestNewConfirmEveryTestKnob(t *testing.T) {
 
 func TestConfirmExitMovedSeatLookupFailureKeepsExplicitTmux(t *testing.T) {
 	jail := newKillJail(t)
-	statePath := filepath.Join(jail.root, "state.db")
-	t.Setenv("PFM_STATE_DB", statePath)
 	database := jail.open(t)
 	ctx := context.Background()
 	// A session row the pane read never selects (tmux backend) and the moved
@@ -177,7 +177,7 @@ func TestConfirmExitMovedSeatLookupFailureKeepsExplicitTmux(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	raw, err := sqlitedb.OpenReadWrite(statePath, time.Second)
+	raw, err := sql.Open("sqlite", database.SharedPath())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,6 +193,7 @@ func TestConfirmExitMovedSeatLookupFailureKeepsExplicitTmux(t *testing.T) {
 	var warnings bytes.Buffer
 	tmux := &fakeTmux{}
 	manager, err := New(database, Dependencies{
+		Paths:           jail.resolved(),
 		Tmux:            tmux,
 		Screen:          tmux,
 		Spawner:         &captureSpawner{},

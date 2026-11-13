@@ -15,7 +15,8 @@ import (
 // columns and constraints stay exact.
 func TestSharedSchemaIsComplete(t *testing.T) {
 	t.Parallel()
-	state, _ := openTestStore(t)
+	// The file: journal_mode=wal is a property of the file, never of the in-memory state.
+	state, _ := openFileTestStore(t)
 	ctx := context.Background()
 
 	tables := queryColumn(t, state, `
@@ -87,7 +88,7 @@ ORDER BY name`)
 func TestKillWithRevisionRollsBackOnlyAnInsertedRow(t *testing.T) {
 	for _, existing := range []bool{false, true} {
 		t.Run(map[bool]string{false: "insert", true: "concurrent prior kill"}[existing], func(t *testing.T) {
-			state, _ := openTestStore(t)
+			state := openTestStore(t)
 			ctx := context.Background()
 			const id = "revision-owner"
 			if existing {
@@ -116,7 +117,7 @@ func TestKillWithRevisionRollsBackOnlyAnInsertedRow(t *testing.T) {
 
 func TestUnkillReportsDeletedRow(t *testing.T) {
 	t.Parallel()
-	state, _ := openTestStore(t)
+	state := openTestStore(t)
 	ctx := context.Background()
 	const id = "shared-unkill"
 	if err := state.Kill(ctx, id, 42); err != nil {
@@ -132,7 +133,7 @@ func TestUnkillReportsDeletedRow(t *testing.T) {
 
 func TestReassertKillKeepsOriginalTimeAndMakesClearPermanent(t *testing.T) {
 	t.Parallel()
-	state, _ := openTestStore(t)
+	state := openTestStore(t)
 	ctx := context.Background()
 	const id = "shared-reassert"
 	if reasserted, err := state.ReassertKill(ctx, id); err != nil || reasserted {
@@ -155,7 +156,7 @@ func TestReassertKillKeepsOriginalTimeAndMakesClearPermanent(t *testing.T) {
 
 func TestClearKillBaselineIsMonotonicAndRaceSafe(t *testing.T) {
 	t.Parallel()
-	state, _ := openTestStore(t)
+	state := openTestStore(t)
 	ctx := context.Background()
 	const id = "11111111-1111-4111-8111-111111111111"
 
@@ -230,7 +231,7 @@ func TestDegradedStoreRejectsOperatorStateChanges(t *testing.T) {
 // for one sharing this chat's server (chat.sh:435).
 func TestChildrenRoundTripInCCDBShShapes(t *testing.T) {
 	t.Parallel()
-	state, _ := openTestStore(t)
+	state := openTestStore(t)
 	ctx := context.Background()
 
 	if err := state.AddChild(ctx, KindNew, "chat-1", "cc-new-worker", 10); err != nil {
@@ -274,7 +275,7 @@ func TestChildrenRoundTripInCCDBShShapes(t *testing.T) {
 
 func TestBranchSeatMarkersRoundTripWithoutChangingTheSchema(t *testing.T) {
 	t.Parallel()
-	state, _ := openTestStore(t)
+	state := openTestStore(t)
 	ctx := context.Background()
 	const socket = "cc-1800000000-42-7"
 	if err := state.RecordBranchSeat(ctx, socket, "parent-id", 123); err != nil {
@@ -296,7 +297,22 @@ func TestBranchSeatMarkersRoundTripWithoutChangingTheSchema(t *testing.T) {
 	}
 }
 
-func openTestStore(t *testing.T) (*Store, paths.Values) {
+// openTestStore opens the in-memory shared state (OpenSharedStateMemory), migrated as the file
+// is: the store a test of the queries runs on.
+func openTestStore(t *testing.T) *Store {
+	t.Helper()
+
+	state := OpenSharedStateMemory(context.Background())
+	if err := state.Degraded(); err != nil {
+		t.Fatalf("OpenSharedStateMemory() degraded: %v", err)
+	}
+	t.Cleanup(func() { _ = state.Close() })
+	return state
+}
+
+// openFileTestStore opens the shared state file under a fresh temp root, for a test of the file
+// itself: its path, a second connection, a reopen, a file beside it.
+func openFileTestStore(t *testing.T) (*Store, paths.Values) {
 	t.Helper()
 
 	root := t.TempDir()

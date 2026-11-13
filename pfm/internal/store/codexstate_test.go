@@ -486,7 +486,6 @@ func TestReadCodexThreadsExposesTitleTrimmed(t *testing.T) {
 // the kill is permanent: new prompts and a rollout file that finally appears
 // never lift it, and nothing writes a baseline to lift it with.
 func TestKillStoreOnlyCodexLineageIsPermanent(t *testing.T) {
-	setStoreTestJail(t)
 	database := openTestStore(t)
 	t.Cleanup(func() { _ = database.Close() })
 	ctx := context.Background()

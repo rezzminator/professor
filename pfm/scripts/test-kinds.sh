@@ -14,7 +14,8 @@
 #                (testjail.WriteExecutable and its fakes), a built binary, a PTY, mockengine
 #   home-sqlite  a private pfm home (testjail.Fleet, FleetEnv, InstalledHome, CleanHome,
 #                StageAccountLinks, PFM_HOME / PFM_STATE_DB / PFM_CACHE_DB) or a SQLite file
-#                (sqlitedb., sql.Open, store.Open…, index.New…, a ".db" literal)
+#                (sqlitedb., sql.Open, store.Open…, index.New…, a ".db" literal); store.OpenMemory, the
+#                store's in-memory door, is memory
 #   temp-dir     t.TempDir(), os.MkdirTemp, os.CreateTemp, testjail.ShortRoot / CreateShortRoot
 #   nothing      none of the above: memory only
 # A method is reached only through a selector (`x.Name`), a func by its bare name or a selector; a name
@@ -47,7 +48,7 @@ MARKERS = [
                    r'|testjail\.(?:WriteExecutable|PFMBinary|MockEngineBinary|GoBuild|PTYCommand|HungTmux'
                    r'|FakeEngineSync|WriteLoggedOut\w*)\b|\bmockengine\.')),
     (2, re.compile(r'testjail\.(?:Fleet|FleetEnv|InstalledHome|CleanHome|StageAccountLinks)\b|\bsqlitedb\.'
-                   r'|\bsql\.Open\(|\bstore\.Open\w*\(|\bindex\.New\w*\(|PFM_(?:HOME|STATE_DB|CACHE_DB)\b|\.db"')),
+                   r'|\bsql\.Open\(|\bstore\.Open(?!Memory\()\w*\(|\bindex\.New\w*\(|PFM_(?:HOME|STATE_DB|CACHE_DB)\b|\.db"')),
     (1, re.compile(r'\.TempDir\(\)|os\.(?:MkdirTemp|CreateTemp)\(|testjail\.(?:ShortRoot|CreateShortRoot)\b')),
 ]
 # A top-level func or method (its key `.{name}`, reached only through a selector), or a package-level

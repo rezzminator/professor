@@ -8,6 +8,7 @@
 //
 // Files, one line each:
 //   - target.go resolves a target to a chat, and scans the fleet's rows.
+//   - index_store.go opens the store those verbs, ls and status read, or the one a test hands in.
 //   - verbs.go is the Verbs bundle the surfaces call.
 //   - doors.go decides each outcome the CLI and the MCP door of a chat function both answer.
 //   - liststate.go names the state word a listed chat shows at both ls doors.

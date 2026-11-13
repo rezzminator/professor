@@ -19,7 +19,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
-	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
@@ -73,12 +72,12 @@ func List(
 	request ListRequest,
 	warn io.Writer,
 ) (result ListResult, returnErr error) {
-	database, err := store.Open(store.WithWarningWriter(warn))
+	database, closeIndex, err := openFleetIndex(warn)
 	if err != nil {
 		return ListResult{}, fmt.Errorf("chat list: open fleet database: %w", err)
 	}
 	defer func() {
-		if err := database.Close(); err != nil {
+		if err := closeIndex(); err != nil {
 			returnErr = errors.Join(returnErr, fmt.Errorf("close fleet database: %w", err))
 		}
 	}()

@@ -43,6 +43,73 @@ func TestOpenStoreAppliesTheStorePragmaSet(t *testing.T) {
 	}
 }
 
+// TestOpenStoreMemoryKeepsItsDatabaseInMemory pins OpenStore's in-memory double:
+// the store busy timeout and foreign keys on a memory journal, one connection,
+// a name another handle reaches the same database by, a new database per call,
+// InMemory true for the names it created alone, and no file written.
+func TestOpenStoreMemoryKeepsItsDatabaseInMemory(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	ctx := context.Background()
+	closeAll := func(databases ...*sql.DB) {
+		for _, database := range databases {
+			if err := database.Close(); err != nil {
+				t.Errorf("close database: %v", err)
+			}
+		}
+	}
+	database, name, err := OpenStoreMemory(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeAll(database)
+	for pragmaName, want := range map[string]string{"journal_mode": "memory", "foreign_keys": "1", "busy_timeout": "10000"} {
+		if got := pragma(t, database, pragmaName); got != want {
+			t.Errorf("PRAGMA %s = %q, want %q", pragmaName, got, want)
+		}
+	}
+	if got := database.Stats().MaxOpenConnections; got != 1 {
+		t.Errorf("MaxOpenConnections = %d, want 1", got)
+	}
+	if _, err := database.ExecContext(ctx, "CREATE TABLE kept(v INTEGER); INSERT INTO kept VALUES(7)"); err != nil {
+		t.Fatal(err)
+	}
+	second, err := sql.Open(driverName, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeAll(second)
+	var kept int
+	if err := second.QueryRowContext(ctx, "SELECT v FROM kept").Scan(&kept); err != nil || kept != 7 {
+		t.Fatalf("second handle on %s read %d, %v; want 7", name, kept, err)
+	}
+	other, otherName, err := OpenStoreMemory(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeAll(other)
+	if otherName == name {
+		t.Fatalf("two OpenStoreMemory calls share the name %s", name)
+	}
+	const missing = "SQL logic error: no such table: kept (1)"
+	if err := other.QueryRowContext(ctx, "SELECT v FROM kept").Scan(&kept); err == nil || err.Error() != missing {
+		t.Fatalf("other database read kept: %v, want %q", err, missing)
+	}
+	for path, want := range map[string]bool{
+		name:                           true,
+		otherName:                      true,
+		"file:/pfm-memory-0?vfs=memdb": false,
+		filepath.Join(dir, "pfm.db"):   false,
+	} {
+		if got := InMemory(path); got != want {
+			t.Errorf("InMemory(%q) = %v, want %v", path, got, want)
+		}
+	}
+	if entries, err := os.ReadDir(dir); err != nil || len(entries) != 0 {
+		t.Fatalf("working directory %s holds %v (%v), want nothing", dir, entries, err)
+	}
+}
+
 // TestForeignOpenersKeepTheOwnersSettings pins the other program's store:
 // read-only refuses a write, read-write can write, both carry the caller's
 // busy timeout, and neither switches the owner's rollback journal to WAL.

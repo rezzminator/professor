@@ -11,7 +11,6 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
-	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
@@ -144,7 +143,7 @@ func Status(
 		return headless.Status{}, err
 	}
 	if request.Summary {
-		database, err := store.Open(store.WithWarningWriter(warnings))
+		database, closeIndex, err := openFleetIndex(warnings)
 		if err != nil {
 			return headless.Status{}, err
 		}
@@ -157,7 +156,7 @@ func Status(
 		if summary.Warning != nil && warnings != nil {
 			fmt.Fprintf(warnings, "pfm chat status: summary cleanup warning: %v\n", summary.Warning)
 		}
-		if err := database.Close(); err != nil {
+		if err := closeIndex(); err != nil {
 			return headless.Status{}, fmt.Errorf("close summary cache: %w", err)
 		}
 	}

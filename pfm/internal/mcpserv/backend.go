@@ -45,6 +45,9 @@ type backend struct {
 	warnings             io.Writer
 	allowAmbientIdentity bool
 	runtimeIdentity      string
+	// borrowedStore says database and sharedState belong to the caller
+	// (Runtime.Store), so close leaves them open.
+	borrowedStore bool
 }
 
 func newBackendConfigured(warnings io.Writer, runtime Runtime) (*backend, error) {
@@ -71,18 +74,29 @@ func newBackendConfigured(warnings io.Writer, runtime Runtime) (*backend, error)
 	if err != nil {
 		return nil, fmt.Errorf("configure chat MCP backend: %w", err)
 	}
-	database, err := store.Open(store.WithWarningWriter(warnings))
-	if err != nil {
-		return nil, err
+	database, sharedState := runtime.Store, (*fleetdb.Store)(nil)
+	borrowedStore := database != nil
+	if borrowedStore {
+		sharedState = database.Shared()
+	} else {
+		database, err = store.Open(store.WithWarningWriter(warnings))
+		if err != nil {
+			return nil, err
+		}
+		sharedState = fleetdb.OpenSharedState(context.Background(), runtime.Paths)
 	}
-	sharedState := fleetdb.OpenSharedState(context.Background(), runtime.Paths)
+	closeOwned := func() {
+		if !borrowedStore {
+			_ = database.Close()
+			_ = sharedState.Close()
+		}
+	}
 	resolver, err := resolve.New(nil, resolve.Binaries{
 		Values:        engineBinaries(runtime),
 		AccountEmojis: accountEmojis(runtime.Accounts),
 	})
 	if err != nil {
-		_ = database.Close()
-		_ = sharedState.Close()
+		closeOwned()
 		return nil, err
 	}
 	caller, err := chat.NewCallEngineWith(chat.CallDependencies{
@@ -97,8 +111,7 @@ func newBackendConfigured(warnings io.Writer, runtime Runtime) (*backend, error)
 		WarningWriter:  warnings,
 	})
 	if err != nil {
-		_ = database.Close()
-		_ = sharedState.Close()
+		closeOwned()
 		return nil, err
 	}
 	return &backend{
@@ -113,10 +126,14 @@ func newBackendConfigured(warnings io.Writer, runtime Runtime) (*backend, error)
 		warnings:             warnings,
 		allowAmbientIdentity: runtime.AllowAmbientIdentity,
 		runtimeIdentity:      runtimeIdentity,
+		borrowedStore:        borrowedStore,
 	}, nil
 }
 
 func (current *backend) close() error {
+	if current.borrowedStore {
+		return nil
+	}
 	return errors.Join(current.database.Close(), current.sharedState.Close())
 }
 

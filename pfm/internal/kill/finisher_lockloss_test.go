@@ -35,6 +35,7 @@ func TestFinisherSurfacesAKillItNeverSawLand(t *testing.T) {
 	killPaneErr := errors.New("kill-pane: pane still attached")
 	tmux := &fakeTmux{existsErrFor: 10, killPaneErr: killPaneErr}
 	finisher, err := NewFinisher(database, Dependencies{
+		Paths:        jail.resolved(),
 		Tmux:         tmux,
 		Screen:       tmux,
 		Refresher:    refreshFunc(func(context.Context) error { return nil }),

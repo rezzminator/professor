@@ -335,6 +335,11 @@ const kernelTableChildEnv = "PFM_TEST_KERNEL_TABLE_CHILD"
 // once returned "not implemented", failing every caller lookup there.
 func TestWhoamiProcTreeReadsTheKernelTable(t *testing.T) {
 	if os.Getenv(kernelTableChildEnv) != "" {
+		// The kernel fills a new image's environment only after the exec that
+		// wakes Start's caller, so the child says when it runs Go code.
+		ready := os.NewFile(3, "ready")
+		_, _ = ready.Write([]byte{1})
+		_ = ready.Close()
 		_, _ = io.Copy(io.Discard, os.Stdin) // held until the parent has read it
 		return
 	}
@@ -345,14 +350,25 @@ func TestWhoamiProcTreeReadsTheKernelTable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := child.Start(); err != nil {
-		t.Fatalf("start the held child: %v", err)
+	readyRead, readyWrite, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = readyRead.Close() }()
+	child.ExtraFiles = []*os.File{readyWrite}
+	startErr := child.Start()
+	_ = readyWrite.Close()
+	if startErr != nil {
+		t.Fatalf("start the held child: %v", startErr)
 	}
 	t.Cleanup(func() {
 		_ = stdin.Close()
 		_ = child.Process.Kill()
 		_ = child.Wait()
 	})
+	if _, err := readyRead.Read(make([]byte, 1)); err != nil {
+		t.Fatalf("wait for the held child %d to run: %v", child.Process.Pid, err)
+	}
 	tree := ProcTree{Root: paths.SystemProcRoot()}
 	environment, err := tree.Environ(child.Process.Pid)
 	if err != nil || environment[kernelTableChildEnv] != marker {

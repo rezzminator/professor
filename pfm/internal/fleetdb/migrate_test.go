@@ -559,7 +559,7 @@ func TestSharedMigrationBackupFailureLeavesV1(t *testing.T) {
 
 func TestSharedMigrationReopenKeepsBackup(t *testing.T) {
 	t.Parallel()
-	state, values := openTestStore(t)
+	state, values := openFileTestStore(t)
 	if err := state.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -579,7 +579,7 @@ func TestSharedMigrationReopenKeepsBackup(t *testing.T) {
 
 func TestSharedMigrationRejectsNewerVersion(t *testing.T) {
 	t.Parallel()
-	state, values := openTestStore(t)
+	state, values := openFileTestStore(t)
 	newer := SchemaVersion + 1
 	if _, err := state.db.Exec(fmt.Sprintf("PRAGMA user_version=%d", newer)); err != nil {
 		t.Fatal(err)

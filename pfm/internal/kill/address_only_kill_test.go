@@ -18,6 +18,7 @@ func TestKillOfAnIdlessLiveAddressClosesItsPaneWithoutATombstone(t *testing.T) {
 	database := jail.open(t)
 	spawner := &captureSpawner{}
 	manager, err := New(database, Dependencies{
+		Paths:   jail.resolved(),
 		Spawner: spawner,
 		Now:     func() time.Time { return time.Unix(700, 0) },
 	})
@@ -60,6 +61,7 @@ func TestKillOfASocketKeyedClaudeSeatClosesWithoutATombstone(t *testing.T) {
 	database := jail.open(t)
 	spawner := &captureSpawner{}
 	manager, err := New(database, Dependencies{
+		Paths:   jail.resolved(),
 		Spawner: spawner,
 		Now:     func() time.Time { return time.Unix(700, 0) },
 	})
@@ -90,7 +92,7 @@ func TestKillOfASocketKeyedClaudeSeatClosesWithoutATombstone(t *testing.T) {
 
 func TestKillWithNeitherIdNorAddressStillRefuses(t *testing.T) {
 	jail := newKillJail(t)
-	manager, err := New(jail.open(t), Dependencies{Spawner: &captureSpawner{}})
+	manager, err := New(jail.open(t), Dependencies{Paths: jail.resolved(), Spawner: &captureSpawner{}})
 	if err != nil {
 		t.Fatal(err)
 	}

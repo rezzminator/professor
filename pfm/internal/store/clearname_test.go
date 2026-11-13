@@ -18,8 +18,7 @@ import (
 )
 
 func TestClearNameOverlaySurvivesIndexAndYieldsToRename(t *testing.T) {
-	testjail.Fleet(t)
-	db, err := Open()
+	db, err := OpenMemory()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,8 +59,7 @@ func TestClearNameOverlaySurvivesIndexAndYieldsToRename(t *testing.T) {
 }
 
 func TestClearNameReservesSmallestFreeStoredNumber(t *testing.T) {
-	testjail.Fleet(t)
-	db, err := Open()
+	db, err := OpenMemory()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,8 +116,7 @@ func TestClearNameReservesSmallestFreeStoredNumber(t *testing.T) {
 }
 
 func TestClearNameLookupFailureReservesNothing(t *testing.T) {
-	testjail.Fleet(t)
-	db, err := Open()
+	db, err := OpenMemory()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,8 +143,7 @@ func TestClearNameLookupFailureReservesNothing(t *testing.T) {
 }
 
 func TestSeedClearTranscriptKeepsConcurrentIndexData(t *testing.T) {
-	testjail.Fleet(t)
-	db, err := Open()
+	db, err := OpenMemory()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -362,7 +358,7 @@ func TestClearNameUnreadableKeepsTheTranscript(t *testing.T) {
 			testjail.Fleet(t)
 			ctx := context.Background()
 			var warnings strings.Builder
-			db := openTestStore(t, WithWarningWriter(&warnings))
+			db := openFileTestStore(t, WithWarningWriter(&warnings))
 			defer func() { _ = db.Close() }()
 			if err := db.UpsertTranscript(ctx, Transcript{
 				UUID: id, Path: "/fixture/successor.jsonl", CustomTitle: test.title, Size: 10, PromptCount: 1,

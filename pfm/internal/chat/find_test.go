@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/obs"
-	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // TestExcerptNeedlesStripsDecorationAndKeepsTheFiveLongest pins the needle
@@ -47,7 +46,7 @@ func TestExcerptNeedlesStripsDecorationAndKeepsTheFiveLongest(t *testing.T) {
 // match, most needles first — and each way of finding nothing is its own
 // error, so no surface reads "could not search" as "not there".
 func TestFindRanksByHitsAndNamesEachEmptyAnswer(t *testing.T) {
-	root := testjail.Fleet(t)
+	root := memoryFleet(t)
 	ctx, recorder := obs.Test(t)
 	if _, err := Find(
 		ctx,
@@ -144,7 +143,7 @@ func TestFindRanksByHitsAndNamesEachEmptyAnswer(t *testing.T) {
 // The caller's jail roots retain their given path spellings, including
 // symlinked roots and dangling transcript entries.
 func TestClaudeTranscriptsUsesGivenPaths(t *testing.T) {
-	root := testjail.Fleet(t)
+	root := memoryFleet(t)
 	shared := filepath.Join(root, "seat-a", "projects")
 	third := filepath.Join(root, "seat-c", "projects")
 	for _, directory := range []string{filepath.Join(shared, "p"), filepath.Join(third, "q")} {

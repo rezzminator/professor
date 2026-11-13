@@ -11,7 +11,6 @@ import (
 )
 
 func TestPlainQueries(t *testing.T) {
-	setStoreTestJail(t)
 	store := openTestStore(t)
 	t.Cleanup(func() { _ = store.Close() })
 	ctx := context.Background()
@@ -172,7 +171,6 @@ func TestPlainQueries(t *testing.T) {
 }
 
 func TestRolloutUpsertRepairsCollapsedIdentityPathConflict(t *testing.T) {
-	setStoreTestJail(t)
 	database := openTestStore(t)
 	t.Cleanup(func() { _ = database.Close() })
 	ctx := context.Background()
@@ -199,7 +197,6 @@ func TestRolloutUpsertRepairsCollapsedIdentityPathConflict(t *testing.T) {
 }
 
 func TestDefaultCandidatesAreCappedAndCountsStayHonest(t *testing.T) {
-	setStoreTestJail(t)
 	database := openTestStore(t)
 	defer func() {
 		if err := database.Close(); err != nil {
@@ -315,7 +312,6 @@ func TestDefaultCandidatesAreCappedAndCountsStayHonest(t *testing.T) {
 // the root nor the newest file, so a fix that only special-cases those two
 // would still miss it.
 func TestDefaultRolloutsKilledOnAnyLineageMember(t *testing.T) {
-	setStoreTestJail(t)
 	database := openTestStore(t)
 	defer func() {
 		if err := database.Close(); err != nil {
@@ -404,7 +400,7 @@ func TestV4MigrationAddsCxNameProvenanceIdempotently(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	migrated := openTestStore(t)
+	migrated := openFileTestStore(t)
 	// The whole chain runs from v3, not just migration_v4.sql in isolation.
 	assertSchemaVersion(t, migrated, SchemaVersion)
 	records, err := migrated.CxNameRecords(ctx)
@@ -428,7 +424,7 @@ func TestV4MigrationAddsCxNameProvenanceIdempotently(t *testing.T) {
 
 	// Reopening an already-v4 database is the other half of "idempotent":
 	// the migration loop must not attempt migration_v4.sql again.
-	reopened := openTestStore(t)
+	reopened := openFileTestStore(t)
 	t.Cleanup(func() { _ = reopened.Close() })
 	assertSchemaVersion(t, reopened, SchemaVersion)
 	records, err = reopened.CxNameRecords(ctx)
@@ -474,7 +470,6 @@ func hasOpenCodeSessionsAssistantCount(t *testing.T, db *sql.DB) bool {
 // binary.
 // assistant_count remains an additive, idempotently ensured column.
 func TestFreshStoreEnsuresAssistantCountAtSchema9(t *testing.T) {
-	setStoreTestJail(t)
 	fresh := openTestStore(t)
 	t.Cleanup(func() { _ = fresh.Close() })
 	got, err := fresh.UserVersion(context.Background())
@@ -522,7 +517,7 @@ func TestEnsureOpenCodeSessionsAssistantCountAddsColumnIdempotently(t *testing.T
 		t.Fatal(err)
 	}
 
-	opened := openTestStore(t)
+	opened := openFileTestStore(t)
 	assertSchemaVersion(t, opened, SchemaVersion)
 	if !hasOpenCodeSessionsAssistantCount(t, opened.db) {
 		t.Fatal("opening a pre-assistant_count schema-8 database did not add the column")
@@ -546,7 +541,7 @@ func TestEnsureOpenCodeSessionsAssistantCountAddsColumnIdempotently(t *testing.T
 
 	// Reopening must not attempt ALTER TABLE a second time — that fails with
 	// "duplicate column name" — and the earlier row must survive untouched.
-	reopened := openTestStore(t)
+	reopened := openFileTestStore(t)
 	t.Cleanup(func() { _ = reopened.Close() })
 	assertSchemaVersion(t, reopened, SchemaVersion)
 	sessions, err = reopened.OpenCodeSessions(ctx)

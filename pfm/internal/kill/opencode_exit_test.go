@@ -16,7 +16,7 @@ import (
 func TestKillSelfRefusesAnOpenCodeSocketByName(t *testing.T) {
 	jail := newKillJail(t)
 	database := jail.open(t)
-	manager, err := New(database, Dependencies{})
+	manager, err := New(database, Dependencies{Paths: jail.resolved()})
 	if err != nil {
 		t.Fatal(err)
 	}

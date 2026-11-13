@@ -18,7 +18,7 @@ import (
 func TestSharedKillsNeedNoBridgeInEitherDirection(t *testing.T) {
 	sqlite3 := lookSQLite3(t)
 	setStoreTestJail(t)
-	database := openTestStore(t)
+	database := openFileTestStore(t)
 	t.Cleanup(func() { _ = database.Close() })
 	ctx := context.Background()
 
@@ -129,7 +129,7 @@ VALUES ('cache-kill', 'cc', 4242, 9)`); err != nil {
 		t.Fatal(err)
 	}
 
-	first := openTestStore(t)
+	first := openFileTestStore(t)
 	killed, err := first.KilledChats(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -174,7 +174,7 @@ VALUES ('cache-kill', 'cc', 4242, 9)`); err != nil {
 	if err := first.Close(); err != nil {
 		t.Fatal(err)
 	}
-	second := openTestStore(t)
+	second := openFileTestStore(t)
 	t.Cleanup(func() { _ = second.Close() })
 	killed, err = second.KilledChats(ctx)
 	if err != nil {

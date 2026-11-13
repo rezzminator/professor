@@ -36,7 +36,7 @@ func TestContinuedInColumnIsEnsuredOnAnOlderSchema8Database(t *testing.T) {
 	}
 
 	for pass := 0; pass < 2; pass++ { // the second open must not ALTER again
-		opened := openTestStore(t)
+		opened := openFileTestStore(t)
 		assertSchemaVersion(t, opened, SchemaVersion)
 		if pass == 0 {
 			for _, transcript := range []Transcript{
@@ -96,7 +96,6 @@ func TestContinuedInColumnIsEnsuredOnAnOlderSchema8Database(t *testing.T) {
 // segment must name the newest one; a handoff to a successor the index lacks
 // is not followed, an unknown id is its own tail, and a cycle stops.
 func TestContinuationTailFollowsOnlyIndexedHandoffs(t *testing.T) {
-	setStoreTestJail(t)
 	opened := openTestStore(t)
 	ctx := context.Background()
 	for _, transcript := range []Transcript{

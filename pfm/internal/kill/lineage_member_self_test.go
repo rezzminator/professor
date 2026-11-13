@@ -98,6 +98,7 @@ func TestSelfKillOnUnindexedLineageMemberResolvesToRoot(t *testing.T) {
 			}
 			var warnings bytes.Buffer
 			manager, err := New(database, Dependencies{
+				Paths: jail.resolved(),
 				ResolveTarget: func(_ context.Context, identity resolve.Identity) (Target, error) {
 					if identity.ID != memberID || identity.Pane != "%9" {
 						t.Fatalf("unproved caller projection: %+v", identity)

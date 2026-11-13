@@ -13,7 +13,7 @@ import (
 // only when the database has no row.
 func TestPrimaryAccountPrefersTheDatabaseOverTheMirror(t *testing.T) {
 	t.Parallel()
-	state, values := openTestStore(t)
+	state, values := openFileTestStore(t)
 	ctx := context.Background()
 
 	if account, found, err := ClaudePrimaryAccount(ctx, values); found || err != nil {
@@ -54,7 +54,7 @@ func TestPrimaryAccountPrefersTheDatabaseOverTheMirror(t *testing.T) {
 // account instead of surfacing the outage.
 func TestClaudePrimaryAccountSurfacesAQueryFailureNotNotFound(t *testing.T) {
 	t.Parallel()
-	state, values := openTestStore(t)
+	state, values := openFileTestStore(t)
 	ctx := context.Background()
 	if err := state.SetMeta(ctx, PrimaryAccountKey, "2", 99); err != nil {
 		t.Fatal(err)

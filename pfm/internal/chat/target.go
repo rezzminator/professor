@@ -20,7 +20,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
-	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
@@ -377,13 +376,13 @@ func enrichRecordedSelf(
 	if resolved.Engine != pfmengine.Claude {
 		return resolved, nil
 	}
-	database, err := store.Open(store.WithWarningWriter(warn))
+	database, closeIndex, err := openFleetIndex(warn)
 	if err != nil {
 		fmt.Fprintf(warn, "pfm WARN: self transcript %s unknown: %v\n", resolved.ID, err)
 		return resolved, nil
 	}
 	defer func() {
-		if err := database.Close(); err != nil {
+		if err := closeIndex(); err != nil {
 			returnErr = errors.Join(returnErr, fmt.Errorf("close fleet database: %w", err))
 		}
 	}()
@@ -445,12 +444,12 @@ type FleetScan struct {
 func ScanRows(ctx context.Context, warn io.Writer, runtime *pfmconfig.Runtime) (
 	result FleetScan, returnErr error,
 ) {
-	database, err := store.Open(store.WithWarningWriter(warn))
+	database, closeIndex, err := openFleetIndex(warn)
 	if err != nil {
 		return FleetScan{}, err
 	}
 	defer func() {
-		if err := database.Close(); err != nil {
+		if err := closeIndex(); err != nil {
 			returnErr = errors.Join(returnErr, fmt.Errorf("close fleet database: %w", err))
 		}
 	}()
@@ -582,12 +581,12 @@ func panePID(pids []int) int {
 // CodexSeats supplies the live fleet rows for Identify's final Codex-thread rung.
 func CodexSeats(runtime *pfmconfig.Runtime) func(context.Context) ([]resolve.CodexSeat, error) {
 	return func(ctx context.Context) (seats []resolve.CodexSeat, returnErr error) {
-		database, err := store.Open(store.WithWarningWriter(io.Discard))
+		database, closeIndex, err := openFleetIndex(io.Discard)
 		if err != nil {
 			return nil, fmt.Errorf("open Codex identity store: %w", err)
 		}
 		defer func() {
-			if err := database.Close(); err != nil {
+			if err := closeIndex(); err != nil {
 				returnErr = errors.Join(returnErr, fmt.Errorf("close Codex identity store: %w", err))
 			}
 		}()

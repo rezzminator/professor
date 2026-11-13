@@ -21,7 +21,7 @@ import (
 // resumable chat with no server behind it comes back dead, with its facts,
 // and no error — the caller reads Alive(), never an error, for liveness.
 func TestStatusReportsADeadChatAsAStatusNotAnError(t *testing.T) {
-	root := testjail.Fleet(t)
+	root := memoryFleet(t)
 	const id = "c3333333-3333-4333-8333-333333333333"
 	seedClaudeChat(t, root, id, assistantSaid("tests are green"))
 	status, err := Status(context.Background(), nil, StatusRequest{Target: id}, io.Discard)
@@ -54,7 +54,7 @@ func TestHerdrAnsweredStatusRequiresReachableEndpoint(t *testing.T) {
 				name = state.name + "/watch"
 			}
 			t.Run(name, func(t *testing.T) {
-				root := testjail.Fleet(t)
+				root := memoryFleet(t)
 				const id = "c3333333-3333-4333-8333-333333333333"
 				seedClaudeChat(t, root, id, state.record)
 				target := headless.Chat{
@@ -104,7 +104,7 @@ func TestHerdrAnsweredStatusRequiresReachableEndpoint(t *testing.T) {
 func TestHerdrStatusRequiresItsPaneAndNamesEndpoint(t *testing.T) {
 	for _, answered := range []bool{false, true} {
 		t.Run(fmt.Sprint(answered), func(t *testing.T) {
-			root := testjail.Fleet(t)
+			root := memoryFleet(t)
 			const id = "c3333333-3333-4333-8333-333333333333"
 			target := headless.Chat{
 				ID: id, Name: "missing", Backend: "herdr", Engine: pfmengine.Claude,
@@ -192,7 +192,7 @@ func TestHerdrStatusReconcilesTranscript(t *testing.T) {
 		for _, native := range []string{"idle", "done", "working", "blocked", "unknown"} {
 			for _, cached := range []bool{false, true} {
 				t.Run(fmt.Sprintf("%s/%t/%d", native, cached, len(record)), func(t *testing.T) {
-					root := testjail.Fleet(t)
+					root := memoryFleet(t)
 					const id = "c3333333-3333-4333-8333-333333333333"
 					target := headless.Chat{
 						ID:      id,
@@ -270,7 +270,7 @@ func TestHerdrStatusAgentNotFoundIsAnAnswer(t *testing.T) {
 	} {
 		for _, watch := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/watch=%t", testCase.name, watch), func(t *testing.T) {
-				root := testjail.Fleet(t)
+				root := memoryFleet(t)
 				t.Setenv("PFM_STATE_DB", filepath.Join(t.TempDir(), "state.db"))
 				t.Setenv("PFM_PROC_ROOT", t.TempDir())
 				const id = "c3333333-3333-4333-8333-333333333333"

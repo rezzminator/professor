@@ -8,7 +8,7 @@ import (
 
 func TestSessionLabel(t *testing.T) {
 	setStoreTestJail(t)
-	database := openTestStore(t)
+	database := openFileTestStore(t)
 	ctx := context.Background()
 	for _, transcript := range []Transcript{
 		{UUID: "named", Path: "/fixtures/named.jsonl", CustomTitle: "custom", AITitle: "ai", FirstPrompt: "first"},

@@ -22,7 +22,7 @@ func newTestSchedule(session string, created time.Time, interval time.Duration) 
 
 func TestScheduleLifecycle(t *testing.T) {
 	t.Parallel()
-	state, _ := openTestStore(t)
+	state := openTestStore(t)
 	ctx := context.Background()
 	base := time.Unix(1_800_000_000, 0)
 
@@ -114,7 +114,7 @@ func TestScheduleLifecycle(t *testing.T) {
 
 func TestCreateScheduleRefusesInvalidInput(t *testing.T) {
 	t.Parallel()
-	state, _ := openTestStore(t)
+	state := openTestStore(t)
 	base := time.Unix(1_800_000_000, 0)
 	for name, mutate := range map[string]func(*Schedule){
 		"below minimum": func(r *Schedule) { r.Interval = MinScheduleInterval - time.Second },
@@ -137,7 +137,7 @@ func TestCreateScheduleRefusesInvalidInput(t *testing.T) {
 
 func TestScheduleProblemsNamesFailedAndOverdue(t *testing.T) {
 	t.Parallel()
-	state, _ := openTestStore(t)
+	state := openTestStore(t)
 	ctx := context.Background()
 	base := time.Unix(1_800_000_000, 0)
 	failed, _ := state.CreateSchedule(ctx, newTestSchedule("failed", base, 24*time.Hour))
@@ -267,7 +267,7 @@ VALUES('kept','claude','check the build',3600000000000,5,1);`,
 // schedule of the same chat stays.
 func TestOneTimeScheduleFiresOnceThenLeavesWhenSeen(t *testing.T) {
 	t.Parallel()
-	state, _ := openTestStore(t)
+	state := openTestStore(t)
 	ctx := context.Background()
 	base := time.Unix(1_800_000_000, 0)
 	fireAt := base.Add(2 * time.Hour)

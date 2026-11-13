@@ -19,7 +19,7 @@ func TestOpenMigratesAndReopensIdempotently(t *testing.T) {
 	dbPath := setStoreTestJail(t)
 	ctx := context.Background()
 
-	first := openTestStore(t)
+	first := openFileTestStore(t)
 	if got := first.Path(); got != dbPath {
 		t.Fatalf("Path() = %q, want %q", got, dbPath)
 	}
@@ -47,7 +47,7 @@ func TestOpenMigratesAndReopensIdempotently(t *testing.T) {
 		t.Fatalf("first Close() error = %v", err)
 	}
 
-	second := openTestStore(t)
+	second := openFileTestStore(t)
 	t.Cleanup(func() { _ = second.Close() })
 	assertSchemaVersion(t, second, SchemaVersion)
 	assertPragmas(t, second)
@@ -67,7 +67,7 @@ func TestOpenUsesConfiguredStateAndCacheDatabases(t *testing.T) {
 	cachePath := filepath.Join(home, "custom", "cache.db")
 	t.Setenv(paths.EnvStateDB, statePath)
 	t.Setenv(paths.EnvCacheDB, cachePath)
-	seed := openTestStore(t)
+	seed := openFileTestStore(t)
 	if err := seed.SetMeta(context.Background(), "location", "configured"); err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestOpenUsesConfiguredStateAndCacheDatabases(t *testing.T) {
 	t.Setenv(paths.EnvConfig, configPath)
 	t.Setenv(paths.EnvStateDB, "")
 	t.Setenv(paths.EnvCacheDB, "")
-	opened := openTestStore(t)
+	opened := openFileTestStore(t)
 	defer func() { _ = opened.Close() }()
 	if opened.Path() != cachePath || opened.state.Path() != statePath {
 		t.Fatalf("opened state/cache = %q/%q, want %q/%q", opened.state.Path(), opened.Path(), statePath, cachePath)
@@ -371,7 +371,22 @@ func setStoreTestJail(t *testing.T) string {
 	return dbPath
 }
 
+// openTestStore opens the in-memory store (OpenMemory), the store a test
+// opens unless the database file itself is its subject.
 func openTestStore(t *testing.T, options ...OpenOption) *Store {
+	t.Helper()
+
+	store, err := OpenMemory(options...)
+	if err != nil {
+		t.Fatalf("OpenMemory() error = %v", err)
+	}
+	return store
+}
+
+// openFileTestStore opens the store on the files setStoreTestJail names, for
+// a test of the file itself: its path, a reopen, an on-disk older version, a
+// second connection or process on the same file.
+func openFileTestStore(t *testing.T, options ...OpenOption) *Store {
 	t.Helper()
 
 	store, err := Open(options...)

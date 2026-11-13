@@ -71,7 +71,6 @@ internal/stats/resources_darwin.go
 internal/stats/resources_linux.go
 internal/statusline/render.go
 internal/statusline/runtime.go
-internal/store/doc.go
 internal/store/health.go
 internal/store/models.go
 internal/store/ocsessions.go

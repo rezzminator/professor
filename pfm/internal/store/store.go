@@ -1,3 +1,23 @@
+// Package store owns the pfm SQLite schema and queries: the Store over this
+// binary's cache (schema.sql, migration_v*.sql, migrated here) and the fleet's
+// shared state (internal/fleetdb).
+//
+// clearname.go: ReserveClearName and SeedClearTranscript, a /clear successor's name across both databases.
+// codexstate.go: CodexThread, a conversation read from the Codex CLI's own SQLite state store.
+// continuation.go: CarryContinuedSchedules and ContinuationTail, schedules that follow a continued chat.
+// epic.go: EpicInjected and RecordEpicInjection, one epic injection per chat session.
+// health.go: RowCounts, QuickCheck and the orphaned-kill sweep doctor reads.
+// killed.go: Kill, Unkill and Killed, operator kills kept in the shared state.
+// label.go: Label, the chat's pfm label by the one naming precedence.
+// lineage.go: CodexLineage, one user-visible Codex conversation across its threads.
+// logged.go: loggedDB, the wrapper every cache statement is logged through.
+// models.go: Transcript, Rollout, CxName, OpenCodeSession and Killed, the row types.
+// ocsessions.go: the oc_sessions mirror of OpenCode's sessions.
+// open.go: Open, OpenContext and OpenMemory, the doors a Store is built through, and their options.
+// queries.go: transcript, rollout, Codex-name and meta queries, and DefaultCandidates.
+// readonly.go: OpenWithoutMigrating, both databases read-only for doctor.
+// summary.go: ChatSummary and PutChatSummary, the paid summary of a transcript frontier.
+// tx.go: ImmediateTx, a BEGIN IMMEDIATE transaction.
 package store
 
 import (
@@ -7,15 +27,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"sync"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
-	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
-	"github.com/rezzminator/professor/pfm/internal/paths"
-	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 )
 
 const (
@@ -78,90 +94,6 @@ type Store struct {
 	warnMu sync.Mutex
 	warn   io.Writer
 	clock  clock.Clock
-}
-
-type openOptions struct {
-	warn  io.Writer
-	clock clock.Clock
-}
-
-// OpenOption customizes process-local Store behavior.
-type OpenOption func(*openOptions)
-
-// WithWarningWriter directs non-fatal busy warnings to w. The default is
-// os.Stderr.
-func WithWarningWriter(w io.Writer) OpenOption {
-	return func(options *openOptions) {
-		if w != nil {
-			options.warn = w
-		}
-	}
-}
-
-// WithClock injects the store clock for deterministic busy retry and audit timestamps.
-func WithClock(value clock.Clock) OpenOption {
-	return func(options *openOptions) {
-		if value != nil {
-			options.clock = value
-		}
-	}
-}
-
-// Open opens the database selected by internal/paths and applies migrations
-// and connection policy.
-func Open(options ...OpenOption) (*Store, error) {
-	return OpenContext(context.Background(), options...)
-}
-
-// OpenContext is Open with caller-controlled cancellation.
-func OpenContext(ctx context.Context, options ...OpenOption) (*Store, error) {
-	resolved, settings, err := resolveOpen(options)
-	if err != nil {
-		return nil, err
-	}
-
-	info, statErr := os.Stat(resolved.CacheDB)
-	if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
-		return nil, fmt.Errorf("inspect cache database %s: %w", resolved.CacheDB, statErr)
-	}
-	existed := statErr == nil && info.Size() > 0
-	db, err := sqlitedb.OpenStore(ctx, resolved.CacheDB)
-	if err != nil {
-		return nil, err
-	}
-
-	store := &Store{
-		db:    db,
-		state: fleetdb.OpenSharedState(ctx, resolved),
-		path:  resolved.CacheDB,
-		warn:  settings.warn,
-		clock: settings.clock,
-	}
-	if err := store.migrate(ctx, existed); err != nil {
-		return nil, errors.Join(err, store.Close())
-	}
-	if degraded := store.state.Degraded(); degraded != nil {
-		store.warningf(
-			"WARNING: pfm could not open the shared state store at %s: %v; "+
-				"operator-state operations will fail\n",
-			store.state.Path(),
-			degraded,
-		)
-	}
-	return store, nil
-}
-
-// resolveOpen resolves both database paths and the open settings.
-func resolveOpen(options []OpenOption) (paths.Values, openOptions, error) {
-	resolved, err := pfmconfig.ResolvePaths()
-	if err != nil {
-		return paths.Values{}, openOptions{}, fmt.Errorf("resolve store paths: %w", err)
-	}
-	settings := openOptions{warn: os.Stderr, clock: clock.Real}
-	for _, option := range options {
-		option(&settings)
-	}
-	return resolved, settings, nil
 }
 
 func (s *Store) clockNow() time.Time {

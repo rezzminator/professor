@@ -12,7 +12,6 @@ import (
 // the frame is built from, and the counts must call them killed, not
 // suppressed.
 func TestLabelKilledCandidatesNeverSpendAFrameSlot(t *testing.T) {
-	setStoreTestJail(t)
 	database := openTestStore(t)
 	defer func() {
 		if err := database.Close(); err != nil {
@@ -63,7 +62,6 @@ func TestLabelKilledCandidatesNeverSpendAFrameSlot(t *testing.T) {
 // TestLabelKilledCodexLineageLeavesTheCachedFrame covers the Codex half, whose
 // name comes from cx_names through the lineage walk rather than from a column.
 func TestLabelKilledCodexLineageLeavesTheCachedFrame(t *testing.T) {
-	setStoreTestJail(t)
 	database := openTestStore(t)
 	defer func() {
 		if err := database.Close(); err != nil {

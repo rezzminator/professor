@@ -50,6 +50,10 @@ type clearNamePayload struct {
 	AgentID   string `json:"agent_id"`
 }
 
+// clearNameStore, when set, is the store ClearName reads and writes (cache and
+// shared state) and the caller closes; nil opens both on disk for each event.
+var clearNameStore *store.Store
+
 // ClearName names pfm and Herdr immediately, then gives Claude its title on
 // the first prompt. SessionStart sessionTitle does not support source=clear.
 func ClearName(args []string, stdin io.Reader, stdout, stderr io.Writer, runtime config.Runtime) int {
@@ -113,8 +117,13 @@ func clearNameEvent(
 	if !engine.IsUUID(payload.SessionID) {
 		return fmt.Errorf("session_id %q is not a session id", payload.SessionID)
 	}
-	state := fleetdb.OpenSharedState(ctx, runtime.Paths)
-	defer func() { returnErr = errors.Join(returnErr, state.Close()) }()
+	var state *fleetdb.Store
+	if clearNameStore != nil {
+		state = clearNameStore.Shared()
+	} else {
+		state = fleetdb.OpenSharedState(ctx, runtime.Paths)
+		defer func() { returnErr = errors.Join(returnErr, state.Close()) }()
+	}
 	if payload.Event == claudelaunch.HookEventUserPromptSubmit {
 		pending, found, err := state.ClearName(ctx, payload.SessionID)
 		if err != nil {
@@ -157,11 +166,15 @@ func clearNameEvent(
 		name.Emitted = true
 		return state.PutClearName(ctx, payload.SessionID, name, clock.Real.Now().Unix())
 	}
-	db, err := store.OpenContext(ctx)
-	if err != nil {
-		return fmt.Errorf("open successor cache: %w", err)
+	db := clearNameStore
+	if db == nil {
+		opened, err := store.OpenContext(ctx)
+		if err != nil {
+			return fmt.Errorf("open successor cache: %w", err)
+		}
+		db = opened
+		defer func() { returnErr = errors.Join(returnErr, db.Close()) }()
 	}
-	defer func() { returnErr = errors.Join(returnErr, db.Close()) }()
 	if !found {
 		original := payload.Title
 		if original == "" && payload.Path != "" {

@@ -101,7 +101,7 @@ VALUES (?, ?, ?, ?)`,
 		t.Fatal(err)
 	}
 
-	migrated := openTestStore(t)
+	migrated := openFileTestStore(t)
 	// The whole chain runs, v1 through the newest: the lineage collapse below
 	// has to survive every later migration, not only the one that introduced
 	// it.
@@ -139,7 +139,7 @@ VALUES (?, ?, ?, ?)`,
 		t.Fatal(err)
 	}
 
-	reopened := openTestStore(t)
+	reopened := openFileTestStore(t)
 	t.Cleanup(func() { _ = reopened.Close() })
 	killed, err = reopened.KilledChats(ctx)
 	if err != nil || len(killed) != 1 ||
@@ -170,7 +170,7 @@ INSERT INTO hidden (id, engine, hidden_at) VALUES ('timeless', 'cx', 'noon')`); 
 		t.Fatal(err)
 	}
 	var warnings strings.Builder
-	migrated := openTestStore(t, WithWarningWriter(&warnings))
+	migrated := openFileTestStore(t, WithWarningWriter(&warnings))
 	t.Cleanup(func() { _ = migrated.Close() })
 	assertSchemaVersion(t, migrated, SchemaVersion)
 	killed, err := migrated.state.KilledAt(ctx)

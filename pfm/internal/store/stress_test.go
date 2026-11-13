@@ -37,7 +37,7 @@ func TestStoreStress(t *testing.T) {
 	dbPath := setStoreTestJail(t)
 	stressKilledContention(t, dbPath)
 
-	store := openTestStore(t)
+	store := openFileTestStore(t)
 	stressTranscriptVolume(t, store)
 	stressBigValues(t, store)
 	if err := store.Close(); err != nil {
@@ -50,7 +50,7 @@ func TestStoreStress(t *testing.T) {
 func stressKilledContention(t *testing.T, dbPath string) {
 	t.Helper()
 
-	initial := openTestStore(t)
+	initial := openFileTestStore(t)
 	if err := initial.Close(); err != nil {
 		t.Fatalf("close initial stress store: %v", err)
 	}
@@ -99,7 +99,7 @@ func stressKilledContention(t *testing.T, dbPath string) {
 	}
 	elapsed := time.Since(started)
 
-	store := openTestStore(t)
+	store := openFileTestStore(t)
 	defer func() {
 		if err := store.Close(); err != nil {
 			t.Errorf("close store: %v", err)
@@ -269,7 +269,7 @@ func stressReopen(t *testing.T, dbPath string) {
 	maxWAL := before
 	started := time.Now()
 	for cycle := 0; cycle < 100; cycle++ {
-		store := openTestStore(t)
+		store := openFileTestStore(t)
 		version, err := store.UserVersion(context.Background())
 		if err != nil {
 			_ = store.Close()
@@ -363,7 +363,7 @@ func TestStoreStressKilledHelper(t *testing.T) {
 	if err != nil || count < 1 {
 		t.Fatalf("invalid store stress write count %q", os.Getenv(storeStressCountEnv))
 	}
-	store := openTestStore(t)
+	store := openFileTestStore(t)
 	defer func() {
 		if err := store.Close(); err != nil {
 			t.Errorf("close store: %v", err)

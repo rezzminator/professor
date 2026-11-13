@@ -30,6 +30,7 @@ func exitFinisher(t *testing.T, jail killJail, tmux *fakeTmux) (*Finisher, *stor
 		t.Fatal(err)
 	}
 	finisher, err := NewFinisher(database, Dependencies{
+		Paths:        jail.resolved(),
 		Tmux:         tmux,
 		Screen:       tmux,
 		Refresher:    refreshFunc(func(context.Context) error { return nil }),

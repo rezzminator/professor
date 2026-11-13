@@ -238,11 +238,11 @@ func TestHerdrKillRoutesByDurableSeat(t *testing.T) {
 	for _, selector := range []string{"address", "session", "mismatch", "unowned", "partial", "moved-canonical", "moved-alias"} {
 		t.Run(selector, func(t *testing.T) {
 			jail := newKillJail(t)
-			database := jail.open(t)
+			database := jail.openFile(t)
 			server := newKillHerdr(t)
 			seat := seedKillHerdr(t, database, server)
 			spawner := &captureSpawner{}
-			manager, err := New(database, Dependencies{Tmux: &fakeTmux{}, Spawner: spawner})
+			manager, err := New(database, Dependencies{Paths: jail.resolved(), Tmux: &fakeTmux{}, Spawner: spawner})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -326,7 +326,7 @@ func TestHerdrFinisherReusesComposerRatchet(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			jail := newKillJail(t)
-			database := jail.open(t)
+			database := jail.openFile(t)
 			server := newKillHerdr(t)
 			server.frame, server.styledFrame, server.exitGone = test.frame, test.styled, test.exitGone
 			server.dialogOnce = test.dialog
@@ -347,6 +347,7 @@ func TestHerdrFinisherReusesComposerRatchet(t *testing.T) {
 			finisher, err := NewFinisher(
 				database,
 				Dependencies{
+					Paths:        jail.resolved(),
 					Tmux:         tmux,
 					Refresher:    refreshFunc(func(context.Context) error { return nil }),
 					Delay:        time.Nanosecond,
@@ -425,7 +426,7 @@ func TestHerdrConfirmDistinguishesAbsenceFromProbeFailure(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			jail := newKillJail(t)
-			database := jail.open(t)
+			database := jail.openFile(t)
 			server := newKillHerdr(t)
 			server.processes, server.gone, server.probeError = test.processes, test.gone, test.probeError
 			server.omitProcesses = test.omitProcesses
@@ -442,7 +443,10 @@ func TestHerdrConfirmDistinguishesAbsenceFromProbeFailure(t *testing.T) {
 				t.Fatal(err)
 			}
 			tmux := &fakeTmux{}
-			manager, err := New(database, Dependencies{Tmux: tmux, ConfirmEvery: time.Nanosecond, ConfirmAttempts: 1})
+			manager, err := New(
+				database,
+				Dependencies{Paths: jail.resolved(), Tmux: tmux, ConfirmEvery: time.Nanosecond, ConfirmAttempts: 1},
+			)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -485,13 +489,16 @@ func TestHerdrConfirmDistinguishesAbsenceFromProbeFailure(t *testing.T) {
 
 func TestHerdrConfirmUnreachableIsNotGone(t *testing.T) {
 	jail := newKillJail(t)
-	database := jail.open(t)
+	database := jail.openFile(t)
 	server := newKillHerdr(t)
 	seat := seedKillHerdr(t, database, server)
 	if err := os.Remove(server.socket); err != nil {
 		t.Fatal(err)
 	}
-	manager, err := New(database, Dependencies{Tmux: &fakeTmux{}, ConfirmEvery: time.Nanosecond, ConfirmAttempts: 1})
+	manager, err := New(
+		database,
+		Dependencies{Paths: jail.resolved(), Tmux: &fakeTmux{}, ConfirmEvery: time.Nanosecond, ConfirmAttempts: 1},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -513,7 +520,7 @@ func TestHerdrFinisherProtectsGoneOrReownedPane(t *testing.T) {
 	for _, state := range []string{"engine absent", "pane absent", "reowned", "host died"} {
 		t.Run(state, func(t *testing.T) {
 			jail := newKillJail(t)
-			database := jail.open(t)
+			database := jail.openFile(t)
 			server := newKillHerdr(t)
 			seat := seedKillHerdr(t, database, server)
 			switch state {
@@ -540,6 +547,7 @@ func TestHerdrFinisherProtectsGoneOrReownedPane(t *testing.T) {
 			finisher, err := NewFinisher(
 				database,
 				Dependencies{
+					Paths:        jail.resolved(),
 					Tmux:         tmux,
 					Refresher:    refreshFunc(func(context.Context) error { return nil }),
 					Delay:        time.Nanosecond,
@@ -583,6 +591,7 @@ func TestHerdrDegradedSeatStoreKeepsExplicitTmux(t *testing.T) {
 			jail := newKillJail(t)
 			statePath := filepath.Join(jail.root, "broken-state.db")
 			t.Setenv("PFM_STATE_DB", statePath)
+			t.Setenv("PFM_CACHE_DB", filepath.Join(jail.root, "pfm-cache.db"))
 			bootstrap, err := store.Open()
 			if err != nil {
 				t.Fatal(err)
@@ -629,6 +638,7 @@ func TestHerdrDegradedSeatStoreKeepsExplicitTmux(t *testing.T) {
 			}
 			spawner := &captureSpawner{}
 			dependencies := Dependencies{
+				Paths:           jail.resolved(),
 				Tmux:            tmux,
 				Screen:          tmux,
 				Spawner:         spawner,
@@ -720,7 +730,7 @@ func TestHerdrKillRequiresCanonicalSupervisor(t *testing.T) {
 	for _, mode := range []string{"recycled", "unknown-host", "moved", "dead-host", "move-before-ack", "retry-prompt"} {
 		t.Run(mode, func(t *testing.T) {
 			jail := newKillJail(t)
-			db := jail.open(t)
+			db := jail.openFile(t)
 			server := newKillHerdr(t)
 			seat := seedKillHerdr(t, db, server)
 			if err := db.Shared().WriteSeatRun(seat.SeatID, fleetdb.SeatRun{Binary: "/fixture/engine"}); err != nil {
@@ -806,7 +816,7 @@ func TestHerdrKillRequiresCanonicalSupervisor(t *testing.T) {
 
 func TestHerdrUnboundRetirementNamesItsState(t *testing.T) {
 	jail := newKillJail(t)
-	database := jail.open(t)
+	database := jail.openFile(t)
 	server := newKillHerdr(t)
 	seat := fleetdb.Seat{
 		SeatID:         "unbound-kill",
@@ -840,10 +850,10 @@ func TestHerdrUnboundRetirementNamesItsState(t *testing.T) {
 
 func TestHerdrKillSelfUsesTheSharedIdentity(t *testing.T) {
 	jail := newKillJail(t)
-	database := jail.open(t)
+	database := jail.openFile(t)
 	server := newKillHerdr(t)
 	seat := seedKillHerdr(t, database, server)
-	manager, err := New(database, Dependencies{Tmux: &fakeTmux{}, Spawner: &captureSpawner{}})
+	manager, err := New(database, Dependencies{Paths: jail.resolved(), Tmux: &fakeTmux{}, Spawner: &captureSpawner{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -879,7 +889,7 @@ func TestHerdrForcedCloseRemovesReloadRecord(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			jail := newKillJail(t)
-			database := jail.open(t)
+			database := jail.openFile(t)
 			server := newKillHerdr(t)
 			seat := seedKillHerdr(t, database, server)
 			reloadFile := func(seatID, suffix string) string {
@@ -934,7 +944,7 @@ func TestHerdrForcedCloseRemovesReloadRecord(t *testing.T) {
 // the Herdr socket path as a tmux socket name.
 func TestHerdrKillOfALostSeatOnlyHides(t *testing.T) {
 	jail := newKillJail(t)
-	database := jail.open(t)
+	database := jail.openFile(t)
 	server := newKillHerdr(t)
 	seat := seedKillHerdr(t, database, server)
 	lost := seat
@@ -943,7 +953,7 @@ func TestHerdrKillOfALostSeatOnlyHides(t *testing.T) {
 		t.Fatal(err)
 	}
 	spawner := &captureSpawner{}
-	manager, err := New(database, Dependencies{Tmux: &fakeTmux{}, Spawner: spawner})
+	manager, err := New(database, Dependencies{Paths: jail.resolved(), Tmux: &fakeTmux{}, Spawner: spawner})
 	if err != nil {
 		t.Fatal(err)
 	}

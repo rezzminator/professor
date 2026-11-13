@@ -200,7 +200,7 @@ func TestReviewProxySocketPathRejectsForeignNamespace(t *testing.T) {
 }
 
 func TestCallEngineForRequestKeepsSessionFallbackAndEngineAliases(t *testing.T) {
-	setupBackendFixture(t)
+	setupBackendPaths(t)
 	resolved, err := paths.Resolve()
 	if err != nil {
 		t.Fatal(err)
@@ -284,7 +284,7 @@ func TestCallEngineForRequestKeepsSessionFallbackAndEngineAliases(t *testing.T) 
 }
 
 func TestCallEngineForRequestSessionFallbackReachesResolvedSelf(t *testing.T) {
-	setupBackendFixture(t)
+	setupBackendPaths(t)
 	resolved, err := paths.Resolve()
 	if err != nil {
 		t.Fatal(err)
@@ -419,13 +419,13 @@ func TestCallEngineForRequestRejectsSplitProxyConflicts(t *testing.T) {
 // transcript path stay unknown (never the split row's, another pane's), and
 // an unreadable store is a warning naming the transcript.
 func TestCallEngineForRequestNamesSplitTranscriptFailures(t *testing.T) {
-	setupBackendFixture(t)
+	setupBackendPaths(t)
 	ctx, recorder := obs.Test(t)
 	resolved, err := paths.Resolve()
 	if err != nil {
 		t.Fatal(err)
 	}
-	database, err := store.Open()
+	database, err := store.OpenMemory()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -514,12 +514,12 @@ func TestCallEngineForRequestNamesSplitTranscriptFailures(t *testing.T) {
 }
 
 func TestCallEngineForRequestDisambiguatesSplitPaneProxyIdentity(t *testing.T) {
-	setupBackendFixture(t)
+	setupBackendPaths(t)
 	resolved, err := paths.Resolve()
 	if err != nil {
 		t.Fatal(err)
 	}
-	database, err := store.Open()
+	database, err := store.OpenMemory()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -587,12 +587,12 @@ func TestCallEngineForRequestDisambiguatesSplitPaneProxyIdentity(t *testing.T) {
 }
 
 func TestReviewSplitCallerRejectsUnrelatedTranscript(t *testing.T) {
-	root := setupBackendFixture(t)
+	root := setupBackendPaths(t)
 	resolved, err := paths.Resolve()
 	if err != nil {
 		t.Fatal(err)
 	}
-	database, err := store.Open()
+	database, err := store.OpenMemory()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -652,7 +652,7 @@ func TestReviewSplitCallerRejectsUnrelatedTranscript(t *testing.T) {
 }
 
 func TestSplitCallerRequiresReadableExactPaneBinding(t *testing.T) {
-	setupBackendFixture(t)
+	setupBackendPaths(t)
 	resolved, err := paths.Resolve()
 	if err != nil {
 		t.Fatal(err)
@@ -730,7 +730,7 @@ func TestCallEngineForRequestRefusesStaleProxySession(t *testing.T) {
 }
 
 func TestCallEngineForRequestFindsProxyBeyondPublicListLimit(t *testing.T) {
-	setupBackendFixture(t)
+	setupBackendPaths(t)
 	resolved, err := paths.Resolve()
 	if err != nil {
 		t.Fatal(err)
@@ -754,7 +754,7 @@ func TestCallEngineForRequestFindsProxyBeyondPublicListLimit(t *testing.T) {
 }
 
 func TestCallEngineForRequestFallsBackToMatchedIDWhenProxyOmitsIt(t *testing.T) {
-	setupBackendFixture(t)
+	setupBackendPaths(t)
 	resolved, err := paths.Resolve()
 	if err != nil {
 		t.Fatal(err)

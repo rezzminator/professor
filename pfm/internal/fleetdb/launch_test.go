@@ -15,7 +15,7 @@ import (
 
 func TestRecordLaunchFirst(t *testing.T) {
 	t.Parallel()
-	_, values := openTestStore(t)
+	_, values := openFileTestStore(t)
 	ctx := context.Background()
 	first := Launch{SessionID: "S", Engine: pfmengine.ID("cc"), Account: 2, Cache1H: true}
 	if err := RecordLaunch(ctx, values, first, 100); err != nil {
@@ -39,7 +39,7 @@ func TestRecordLaunchFirst(t *testing.T) {
 
 func TestRecordLaunchAgain(t *testing.T) {
 	t.Parallel()
-	_, values := openTestStore(t)
+	_, values := openFileTestStore(t)
 	ctx := context.Background()
 	first := Launch{SessionID: "S", Engine: pfmengine.ID("cc"), Account: 2, Cache1H: true}
 	if err := RecordLaunch(ctx, values, first, 100); err != nil {
@@ -70,7 +70,7 @@ func TestRecordLaunchAgain(t *testing.T) {
 
 func TestLaunchForHit(t *testing.T) {
 	t.Parallel()
-	_, values := openTestStore(t)
+	_, values := openFileTestStore(t)
 	ctx := context.Background()
 	if err := RecordLaunch(
 		ctx,
@@ -136,7 +136,7 @@ func TestRecordLaunchWriteErrorIncludesSession(t *testing.T) {
 
 func TestLaunchForMiss(t *testing.T) {
 	t.Parallel()
-	_, values := openTestStore(t)
+	_, values := openFileTestStore(t)
 	l, err := OpenLaunches(context.Background(), values)
 	if err != nil {
 		t.Fatal(err)

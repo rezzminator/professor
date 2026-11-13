@@ -13,6 +13,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/naming"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
@@ -21,6 +22,28 @@ import (
 type clearNameFailWriter struct{}
 
 func (clearNameFailWriter) Write([]byte) (int, error) { return 0, errors.New("name output failed") }
+
+// memoryClearName hands ClearName an in-memory store (clearNameStore) and
+// hand-built paths under a temp directory (StateDB names only the prefix of
+// the per-conversation lock files), and returns the runtime and that
+// directory. No PFM_HOME and no database file.
+func memoryClearName(t *testing.T) (config.Runtime, string) {
+	t.Helper()
+	database, err := store.OpenMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	clearNameStore = database
+	t.Cleanup(func() {
+		clearNameStore = nil
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	})
+	root := t.TempDir()
+	return config.Runtime{Paths: paths.Values{Home: root, StateDB: filepath.Join(root, "seat-lock")}}, root
+}
+
 func TestClearNameFailureIsVisibleAndRetryable(t *testing.T) {
 	root := testjail.Fleet(t)
 	runtime, err := config.LoadRuntime("")
@@ -71,11 +94,7 @@ func TestClearNameFailureIsVisibleAndRetryable(t *testing.T) {
 func TestClearNameStartIdempotentAndUserRenameWins(t *testing.T) {
 	for _, manual := range []bool{false, true} {
 		t.Run(map[bool]string{false: "pending", true: "manual rename"}[manual], func(t *testing.T) {
-			root := testjail.Fleet(t)
-			runtime, err := config.LoadRuntime("")
-			if err != nil {
-				t.Fatal(err)
-			}
+			runtime, root := memoryClearName(t)
 			const id = "22222222-2222-4222-8222-222222222222"
 			path := filepath.Join(root, "claude", id+".jsonl")
 			start := clearNamePayload{
@@ -92,6 +111,9 @@ func TestClearNameStartIdempotentAndUserRenameWins(t *testing.T) {
 				}
 			}
 			if manual {
+				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+					t.Fatal(err)
+				}
 				if err := os.WriteFile(
 					path,
 					[]byte(`{"type":"agent-name","agentName":"Manual"}`+"\n"),
@@ -116,11 +138,7 @@ func TestClearNameStartIdempotentAndUserRenameWins(t *testing.T) {
 }
 
 func TestClearNameIgnoresUnmanagedLifecycleEvents(t *testing.T) {
-	testjail.Fleet(t)
-	runtime, err := config.LoadRuntime("")
-	if err != nil {
-		t.Fatal(err)
-	}
+	runtime, _ := memoryClearName(t)
 	const id = "22222222-2222-4222-8222-222222222222"
 	for _, fields := range []string{
 		`"hook_event_name":"SessionStart","source":"startup"`,
@@ -137,8 +155,7 @@ func TestClearNameIgnoresUnmanagedLifecycleEvents(t *testing.T) {
 			t.Fatalf("unmanaged payload %s: code=%d out=%s stderr=%s", payload, code, &out, &stderr)
 		}
 	}
-	state := fleetdb.OpenSharedState(context.Background(), runtime.Paths)
-	defer func() { _ = state.Close() }()
+	state := clearNameStore.Shared()
 	if name, found, err := state.ClearName(context.Background(), id); err != nil || found {
 		t.Fatalf("unmanaged lifecycle reserved %+v found=%v err=%v", name, found, err)
 	}
@@ -150,15 +167,10 @@ func TestClearNamePromptBoundsHeldConversationLock(t *testing.T) {
 	t.Cleanup(func() { promptHookDeadline = oldDeadline })
 	for _, pending := range []bool{false, true} {
 		t.Run(map[bool]string{false: "unmanaged", true: "pending"}[pending], func(t *testing.T) {
-			testjail.Fleet(t)
-			runtime, err := config.LoadRuntime("")
-			if err != nil {
-				t.Fatal(err)
-			}
+			runtime, _ := memoryClearName(t)
 			const id = "22222222-2222-4222-8222-222222222222"
 			ctx := context.Background()
-			state := fleetdb.OpenSharedState(ctx, runtime.Paths)
-			defer func() { _ = state.Close() }()
+			state := clearNameStore.Shared()
 			if pending {
 				name := naming.ClearName{Inherited: "Desk", Name: "Desk #2"}
 				if err := state.PutClearName(ctx, id, name, 1); err != nil {
@@ -194,11 +206,7 @@ func TestClearNamePromptBoundsHeldConversationLock(t *testing.T) {
 }
 
 func TestClearNameNamesTheSuccessorOfARelativeTranscriptPath(t *testing.T) {
-	testjail.Fleet(t)
-	runtime, err := config.LoadRuntime("")
-	if err != nil {
-		t.Fatal(err)
-	}
+	runtime, _ := memoryClearName(t)
 	const id = "22222222-2222-4222-8222-222222222222"
 	payload := `{"hook_event_name":"SessionStart","source":"clear","session_id":"` + id +
 		`","session_title":"Desk","transcript_path":"claude/` + id + `.jsonl"}`
@@ -209,9 +217,7 @@ func TestClearNameNamesTheSuccessorOfARelativeTranscriptPath(t *testing.T) {
 	if code != 0 || stderr.String() != wantStderr {
 		t.Fatalf("code=%d stderr=%q, want 0 %q", code, stderr.String(), wantStderr)
 	}
-	state := fleetdb.OpenSharedState(context.Background(), runtime.Paths)
-	defer func() { _ = state.Close() }()
-	name, found, err := state.ClearName(context.Background(), id)
+	name, found, err := clearNameStore.Shared().ClearName(context.Background(), id)
 	if err != nil || !found || name.Inherited != "Desk" {
 		t.Fatalf("successor name=%+v found=%v err=%v, want inherited %q", name, found, err, "Desk")
 	}

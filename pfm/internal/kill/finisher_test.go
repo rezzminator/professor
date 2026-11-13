@@ -158,7 +158,7 @@ func TestReapTeammatesRetainsFailedChildren(t *testing.T) {
 				serverErr, paneErr = errors.New("no server running on /x"), errors.New("can't find pane: %7")
 			}
 			tmux := &reapTmux{fakeTmux: &fakeTmux{killPaneErr: paneErr}, serverErr: serverErr}
-			finisher, err := NewFinisher(database, Dependencies{Tmux: tmux, Screen: tmux})
+			finisher, err := NewFinisher(database, Dependencies{Paths: jail.resolved(), Tmux: tmux, Screen: tmux})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -220,7 +220,7 @@ func TestReapTeammatesReadsTheFlatFileWhenTheTableIsUnreadable(t *testing.T) {
 	database := jail.open(t)
 	ctx := context.Background()
 	tmux := &fakeTmux{}
-	finisher, err := NewFinisher(database, Dependencies{Tmux: tmux, Screen: tmux})
+	finisher, err := NewFinisher(database, Dependencies{Paths: jail.resolved(), Tmux: tmux, Screen: tmux})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -469,6 +469,7 @@ func TestFinisherTypesExitOnlyAfterTheTurnAndConfirmsTheExitDialog(t *testing.T)
 			database := jail.open(t)
 			var log bytes.Buffer
 			finisher, err := NewFinisher(database, Dependencies{
+				Paths:        jail.resolved(),
 				Log:          &log,
 				Tmux:         test.tmux,
 				Screen:       test.tmux,

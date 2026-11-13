@@ -218,15 +218,19 @@ func stubScheduleTimerProbe(t *testing.T, report ServiceManagerReport) {
 	t.Cleanup(func() { ScheduleTimerProbeOverride = previous })
 }
 
-// TestPrintScheduleDoctorRealStateOverdue reads a real shared state database
-// holding one schedule due for 20 minutes: past the 15-minute grace.
+// TestPrintScheduleDoctorRealStateOverdue renders the row over a real shared
+// state store (in memory) holding one schedule due for 20 minutes: past the
+// 15-minute grace.
 func TestPrintScheduleDoctorRealStateOverdue(t *testing.T) {
-	stubScheduleTimerProbe(t, armedTimerReport())
 	dir := t.TempDir()
-	values := paths.Values{Home: dir, StateDB: filepath.Join(dir, "state.db")}
 	now := time.Now()
 	ctx := context.Background()
-	store := fleetdb.OpenSharedState(ctx, values)
+	store := fleetdb.OpenSharedStateMemory(ctx)
+	defer func() {
+		if err := store.Close(); err != nil {
+			t.Errorf("close state db: %v", err)
+		}
+	}()
 	if err := store.Degraded(); err != nil {
 		t.Fatalf("open state db: %v", err)
 	}
@@ -236,12 +240,10 @@ func TestPrintScheduleDoctorRealStateOverdue(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create schedule: %v", err)
 	}
-	if err := store.Close(); err != nil {
-		t.Fatalf("close state db: %v", err)
-	}
 
 	var out strings.Builder
-	got := printScheduleDoctor(ctx, &out, &deps.FakeRunner{}, values, now)
+	drift := scheduleTimerDrift{Path: missingScheduleAsset(dir), Drifted: true}
+	got := renderScheduleDoctor(ctx, &out, armedTimerReport(), drift, store, now)
 	want := "doctor: schedules scheduler=systemd unit=pfm-schedule.timer armed=true state=active " +
 		"drift=" + missingScheduleAsset(dir) + " due=1 overdue=1 failed=0 — run pfm install --yes; " +
 		"1 schedule(s) due longer than 15m0s: nothing is firing them\n"

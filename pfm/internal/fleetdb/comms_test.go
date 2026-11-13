@@ -13,7 +13,7 @@ import (
 
 func TestCommsRoundTripIsNewestFirstAndBounded(t *testing.T) {
 	t.Parallel()
-	state, _ := openTestStore(t)
+	state := openTestStore(t)
 	ctx := context.Background()
 	events := []CommsEvent{
 		{
@@ -66,7 +66,7 @@ func TestCommsRoundTripIsNewestFirstAndBounded(t *testing.T) {
 
 func TestCommsRejectsUnknownKind(t *testing.T) {
 	t.Parallel()
-	state, _ := openTestStore(t)
+	state := openTestStore(t)
 	err := state.RecordComms(context.Background(), CommsEvent{Kind: "reload", Message: "excluded"})
 	if err == nil || !strings.Contains(err.Error(), "record comms event") {
 		t.Fatalf("RecordComms() error = %v, want wrapped schema rejection", err)
@@ -109,7 +109,7 @@ func TestDegradedStoreRejectsCommsWritesAndReads(t *testing.T) {
 // checkpoint in between completes.
 func TestCommsVersionMovesWhenAnotherConnectionCommits(t *testing.T) {
 	t.Parallel()
-	reader, values := openTestStore(t)
+	reader, values := openFileTestStore(t)
 	writer := OpenSharedState(context.Background(), values)
 	if err := writer.Degraded(); err != nil {
 		t.Fatalf("open the writing connection: %v", err)
@@ -175,7 +175,7 @@ func TestCommsVersionMovesWhenAnotherConnectionCommits(t *testing.T) {
 // Store that records an event itself must still see its own ledger change.
 func TestCommsVersionMovesForTheStoresOwnWrites(t *testing.T) {
 	t.Parallel()
-	state, _ := openTestStore(t)
+	state := openTestStore(t)
 	ctx := context.Background()
 	before, err := state.CommsVersion(ctx)
 	if err != nil {

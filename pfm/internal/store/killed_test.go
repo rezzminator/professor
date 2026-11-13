@@ -28,7 +28,6 @@ const (
 )
 
 func TestPromptBaselineKillAutoUnkillsAfterTranscriptGrowth(t *testing.T) {
-	setStoreTestJail(t)
 	database := openTestStore(t)
 	t.Cleanup(func() { _ = database.Close() })
 	ctx := context.Background()
@@ -90,7 +89,7 @@ func TestPromptBaselineKillThatCannotExpireStaysKilled(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			setStoreTestJail(t)
 			var warnings strings.Builder
-			database := openTestStore(t, WithWarningWriter(&warnings))
+			database := openFileTestStore(t, WithWarningWriter(&warnings))
 			t.Cleanup(func() { _ = database.Close() })
 			ctx := context.Background()
 			const id = "clear-killed"
@@ -153,7 +152,6 @@ func TestDatabaseEngineEdgeRejectsUnknownWithAcceptedSet(t *testing.T) {
 }
 
 func TestKilledChatsDeriveOpenCodeEngineFromMirror(t *testing.T) {
-	setStoreTestJail(t)
 	database := openTestStore(t)
 	t.Cleanup(func() { _ = database.Close() })
 	ctx := context.Background()
@@ -181,7 +179,6 @@ func TestKilledChatsDeriveOpenCodeEngineFromMirror(t *testing.T) {
 }
 
 func TestOpenCodeKillBecomesPrunableOnlyAfterMirrorRemoval(t *testing.T) {
-	setStoreTestJail(t)
 	database := openTestStore(t)
 	t.Cleanup(func() { _ = database.Close() })
 	ctx := context.Background()
@@ -221,7 +218,7 @@ func TestKilledBusyPolicyWarnsAndRejectsTheChange(t *testing.T) {
 	setStoreTestJail(t)
 
 	var warnings bytes.Buffer
-	writer := openTestStore(t, WithWarningWriter(&warnings))
+	writer := openFileTestStore(t, WithWarningWriter(&warnings))
 	t.Cleanup(func() { _ = writer.Close() })
 	ctx := context.Background()
 
@@ -268,7 +265,7 @@ func TestKilledWriteLogsWhenTheBusyWarningCounterCannotBeWritten(t *testing.T) {
 	setStoreTestJail(t)
 
 	var warnings bytes.Buffer
-	writer := openTestStore(t, WithWarningWriter(&warnings))
+	writer := openFileTestStore(t, WithWarningWriter(&warnings))
 	t.Cleanup(func() { _ = writer.Close() })
 	ctx := context.Background()
 
@@ -331,7 +328,6 @@ func holdSharedWriteLock(t *testing.T, path string) func() {
 }
 
 func TestOrphanedKillsListMatchesCountsAndPrunes(t *testing.T) {
-	setStoreTestJail(t)
 	database := openTestStore(t)
 	t.Cleanup(func() { _ = database.Close() })
 	ctx := context.Background()
@@ -430,7 +426,7 @@ func TestOrphanedKillsListMatchesCountsAndPrunes(t *testing.T) {
 
 func TestConcurrentKilledWritesAcrossProcesses(t *testing.T) {
 	dbPath := setStoreTestJail(t)
-	initial := openTestStore(t)
+	initial := openFileTestStore(t)
 	if err := initial.Close(); err != nil {
 		t.Fatalf("initial Close() error = %v", err)
 	}
@@ -476,7 +472,7 @@ func TestConcurrentKilledWritesAcrossProcesses(t *testing.T) {
 		}
 	}
 
-	store := openTestStore(t)
+	store := openFileTestStore(t)
 	t.Cleanup(func() { _ = store.Close() })
 	killedChats, err := store.KilledChats(context.Background())
 	if err != nil {
@@ -538,7 +534,7 @@ func TestKilledWriteHelperProcess(t *testing.T) {
 		t.Fatal("helper process has no PFM_CACHE_DB jail")
 	}
 
-	store := openTestStore(t)
+	store := openFileTestStore(t)
 	defer func() {
 		if err := store.Close(); err != nil {
 			t.Errorf("close store: %v", err)

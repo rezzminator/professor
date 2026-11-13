@@ -19,7 +19,7 @@ import (
 // across engines, and a Codex-scoped lookup lands on the Codex seat, addressed
 // under the jailed tmux directory.
 func TestSeatTargetKeepsACodexScopedLookupOnCodex(t *testing.T) {
-	testjail.Fleet(t)
+	memoryFleet(t)
 	const name = "same name"
 	rows := []compose.Row{
 		{ID: "claude-id", Name: name, Kind: compose.LiveClaude, Socket: "cc-1-2-3", PaneID: "%1"},
@@ -130,7 +130,7 @@ func resolvedPaths(t *testing.T) paths.Values {
 // not whatever the process environment resolves to, and never outside it — a
 // socket that is not one bare name is refused, not joined.
 func TestSeatTargetAddressesTheRuntimesTmuxDirectoryOnly(t *testing.T) {
-	testjail.Fleet(t)
+	memoryFleet(t)
 	values := paths.Values{TmuxDir: filepath.Join(t.TempDir(), "runtime-tmux")}
 	seat := func(socket string) []compose.Row {
 		return []compose.Row{{ID: "id", Name: "seat", Kind: compose.LiveClaude, Socket: socket, PaneID: "%1"}}
@@ -147,7 +147,7 @@ func TestSeatTargetAddressesTheRuntimesTmuxDirectoryOnly(t *testing.T) {
 }
 
 func TestRosterKeepsNativeReservationBeforePanePublication(t *testing.T) {
-	testjail.Fleet(t)
+	memoryFleet(t)
 	t.Setenv("TMUX_TMPDIR", t.TempDir())
 	rows := []compose.Row{{
 		Backend: "herdr", SeatID: "birth-seat", ID: "provisional-session",

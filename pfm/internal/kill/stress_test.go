@@ -26,7 +26,7 @@ const (
 
 func TestStressTwentyKillUnkillProcesses(t *testing.T) {
 	jail := newKillJail(t)
-	database := jail.open(t)
+	database := jail.openFile(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	if err := database.Batch(
@@ -107,7 +107,7 @@ func TestStressTwentyKillUnkillProcesses(t *testing.T) {
 	}
 	elapsed := time.Since(started)
 
-	database = jail.open(t)
+	database = jail.openFile(t)
 	defer func() {
 		if err := database.Close(); err != nil {
 			t.Errorf("close database: %v", err)

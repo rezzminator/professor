@@ -22,6 +22,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 const (
@@ -90,6 +91,10 @@ type Runtime struct {
 	// its environment and ancestry identify the daemon's launcher, not the MCP
 	// request that happens to be using it now.
 	AllowAmbientIdentity bool
+	// Store, when set, is the store (cache and shared state) the server reads
+	// and writes; its owner closes it. Nil opens the on-disk store (store.Open)
+	// and closes it with the server.
+	Store *store.Store
 }
 
 // ChatVerbs is the slice of the chat verb layer this server calls typed. Its

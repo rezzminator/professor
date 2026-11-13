@@ -11,7 +11,7 @@ import (
 )
 
 func TestClearNameDurableAndErrorsVisible(t *testing.T) {
-	db, _ := openTestStore(t)
+	db := openTestStore(t)
 	ctx := context.Background()
 	const id = "22222222-2222-4222-8222-222222222222"
 	fresh, err := naming.ClearSuccessorName("Desk", id)
@@ -48,7 +48,7 @@ func TestClearNameDurableAndErrorsVisible(t *testing.T) {
 func TestClearNameObservationsMergeStaleWriters(t *testing.T) {
 	for _, confirmFirst := range []bool{false, true} {
 		t.Run(map[bool]string{false: "prompt first", true: "observer first"}[confirmFirst], func(t *testing.T) {
-			db, _ := openTestStore(t)
+			db := openTestStore(t)
 			ctx := context.Background()
 			const id = "22222222-2222-4222-8222-222222222222"
 			initial := naming.ClearName{Inherited: "Desk", Name: "Desk #2"}
@@ -78,7 +78,8 @@ func TestClearNameObservationsMergeStaleWriters(t *testing.T) {
 }
 
 func TestReserveClearNameCountsFleetLabelsAndRollsBackWriteFailure(t *testing.T) {
-	state, _ := openTestStore(t)
+	// The file: ReserveClearName attaches the cache file by path, which the in-memory state cannot see.
+	state, _ := openFileTestStore(t)
 	ctx := context.Background()
 	cachePath := filepath.Join(t.TempDir(), "cache.db")
 	cache, err := sqlitedb.OpenStore(ctx, cachePath)

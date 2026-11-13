@@ -104,13 +104,14 @@ func TestChatLSRefuseBadInputBeforeTheVerb(t *testing.T) {
 }
 
 func TestChatMCPDispatchesStatefulActionsInProcess(t *testing.T) {
-	setupBackendFixture(t)
+	setupBackendPaths(t)
 	resolved, err := paths.Resolve()
 	if err != nil {
 		t.Fatal(err)
 	}
 	var got []string
 	service, err := NewConfigured("test", nil, Runtime{
+		Store: memoryStore(t),
 		Paths: resolved,
 		Dispatch: func(_ context.Context, args []string, _, _ io.Writer) int {
 			got = append(got, filepath.Join(args...))

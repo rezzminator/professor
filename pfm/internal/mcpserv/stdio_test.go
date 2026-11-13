@@ -39,12 +39,12 @@ import (
 // daemon's real posture.
 func newStdioTestService(t *testing.T) *Service {
 	t.Helper()
-	setupBackendFixture(t)
+	setupBackendPaths(t)
 	resolved, err := paths.Resolve()
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, err := NewConfigured("test", nil, Runtime{Paths: resolved})
+	service, err := NewConfigured("test", nil, Runtime{Store: memoryStore(t), Paths: resolved})
 	if err != nil {
 		t.Fatal(err)
 	}

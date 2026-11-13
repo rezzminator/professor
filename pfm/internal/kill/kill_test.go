@@ -198,6 +198,7 @@ func TestManagerCanExitResolvedCodexSelfWithoutAmbientTmux(t *testing.T) {
 	database := jail.open(t)
 	spawner := &captureSpawner{}
 	manager, err := New(database, Dependencies{
+		Paths:   jail.resolved(),
 		Spawner: spawner,
 		Now:     func() time.Time { return time.Unix(600, 0) },
 	})
@@ -273,6 +274,7 @@ func TestManagerIdentifiesClaudeAndCodexSelf(t *testing.T) {
 	spawner := &captureSpawner{}
 	now := time.Unix(1_700_000_000, 0)
 	manager, err := New(database, Dependencies{
+		Paths:   jail.resolved(),
 		ProcFS:  proc,
 		Tmux:    tmux,
 		Spawner: spawner,
@@ -355,7 +357,7 @@ func TestAdvanceCodexPaneReturnsThePreviousBindingAndChangedFlag(t *testing.T) {
 	database := jail.open(t)
 	ctx := context.Background()
 
-	manager, err := New(database, Dependencies{})
+	manager, err := New(database, Dependencies{Paths: jail.resolved()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -411,6 +413,7 @@ func TestKilledChatStaysKilledAsItGrowsUntilUnkill(t *testing.T) {
 	reindex(t, database)
 
 	manager, err := New(database, Dependencies{
+		Paths:   jail.resolved(),
 		ProcFS:  &fakeProc{},
 		Tmux:    &fakeTmux{},
 		Spawner: &captureSpawner{},
@@ -573,6 +576,7 @@ func TestKilledCodexLineageMatchesAnyMemberIDUntilUnkill(t *testing.T) {
 	// still clear the child-keyed kill, or the row would come right back
 	// killed the next time this same lineage is composed.
 	manager, err := New(database, Dependencies{
+		Paths:   jail.resolved(),
 		ProcFS:  &fakeProc{},
 		Tmux:    &fakeTmux{},
 		Spawner: &captureSpawner{},
@@ -693,6 +697,7 @@ func TestFinisherChoreographyAndTeammateReaping(t *testing.T) {
 		})
 	})
 	finisher, err := NewFinisher(database, Dependencies{
+		Paths:        jail.resolved(),
 		Tmux:         tmux,
 		Screen:       tmux,
 		Refresher:    refresher,
@@ -778,6 +783,7 @@ func TestFinisherReapsTeammatesFromTheSharedChildrenTable(t *testing.T) {
 	paneID := "%9"
 	tmux := &fakeTmux{existsFor: 1}
 	finisher, err := NewFinisher(database, Dependencies{
+		Paths:        jail.resolved(),
 		Tmux:         tmux,
 		Screen:       tmux,
 		Refresher:    refreshFunc(func(context.Context) error { return nil }),
@@ -884,63 +890,6 @@ func TestCommandSpawnerStartsTheFinisherDetached(t *testing.T) {
 			}
 		})
 	}
-}
-
-type killJail struct {
-	root       string
-	home       string
-	sidDir     string
-	tmuxDir    string
-	claudeRoot string
-	codexHome  string
-	dbPath     string
-}
-
-func newKillJail(t *testing.T) killJail {
-	t.Helper()
-	root := t.TempDir()
-	jail := killJail{
-		root:       root,
-		home:       filepath.Join(root, "home"),
-		sidDir:     filepath.Join(root, "sid"),
-		tmuxDir:    filepath.Join(root, "tmux"),
-		claudeRoot: filepath.Join(root, "claude"),
-		codexHome:  filepath.Join(root, "codex"),
-		dbPath:     filepath.Join(root, "pfm-cache.db"),
-	}
-	for _, directory := range []string{
-		jail.home,
-		jail.sidDir,
-		jail.tmuxDir,
-		jail.claudeRoot,
-		jail.codexHome,
-	} {
-		if err := os.MkdirAll(directory, 0o700); err != nil {
-			t.Fatal(err)
-		}
-	}
-	t.Setenv("TMUX_TMPDIR", filepath.Join(root, "tmp"))
-	t.Setenv("PFM_CACHE_DB", jail.dbPath)
-	t.Setenv("PFM_SID_DIR", jail.sidDir)
-	t.Setenv("PFM_CLAUDE_ROOTS", jail.claudeRoot)
-	t.Setenv("PFM_CODEX_ROOT", jail.codexHome)
-	t.Setenv("PFM_TMUX_DIR", jail.tmuxDir)
-	t.Setenv("PFM_HOME", jail.home)
-	return jail
-}
-
-func (jail killJail) open(t *testing.T) *store.Store {
-	t.Helper()
-	database, err := store.Open()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := database.Close(); err != nil {
-			t.Errorf("close database: %v", err)
-		}
-	})
-	return database
 }
 
 func appendTestFile(t *testing.T, path, content string) {
@@ -1050,6 +999,7 @@ func TestKillingALiveAgentRowSticksWhileItRuns(t *testing.T) {
 	}
 
 	manager, err := New(database, Dependencies{
+		Paths:   jail.resolved(),
 		ProcFS:  &fakeProc{},
 		Tmux:    &fakeTmux{},
 		Spawner: &captureSpawner{},
@@ -1092,6 +1042,7 @@ func TestKillingAnUnknownIDStillFailsWithoutAnEngine(t *testing.T) {
 	ctx := context.Background()
 
 	manager, err := New(database, Dependencies{
+		Paths:   jail.resolved(),
 		ProcFS:  &fakeProc{},
 		Tmux:    &fakeTmux{},
 		Spawner: &captureSpawner{},
@@ -1130,6 +1081,7 @@ func TestKillSelfEnrichesAProvenPaneFromItsSeat(t *testing.T) {
 	manager, err := New(
 		database,
 		Dependencies{
+			Paths:   jail.resolved(),
 			Spawner: &captureSpawner{},
 			Tmux:    &fakeTmux{},
 			Identifier: killTestIdentity{
@@ -1159,6 +1111,7 @@ func TestKillKnownClaudeSelfNeedsNoFleetRow(t *testing.T) {
 	manager, err := New(
 		database,
 		Dependencies{
+			Paths:   jail.resolved(),
 			Spawner: &captureSpawner{},
 			Tmux:    &fakeTmux{},
 			Identifier: killTestIdentity{

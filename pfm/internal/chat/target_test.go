@@ -207,7 +207,7 @@ func TestTargetErrorKeepsAScanFailureDistinctFromAbsence(t *testing.T) {
 }
 
 func TestScopedRawPaneUsesOnlyTheCallerSocket(t *testing.T) {
-	testjail.Fleet(t)
+	memoryFleet(t)
 	values, err := paths.Resolve()
 	if err != nil {
 		t.Fatal(err)
@@ -428,7 +428,7 @@ func TestHerdrRosterPreservesTargetOwnedAddress(t *testing.T) {
 func TestResolvedHandleSurvivesNativeSessionReplacement(t *testing.T) {
 	for _, kind := range []compose.Kind{compose.LiveCodex, compose.LiveClaude} {
 		t.Run(string(compose.EngineForKind(kind)), func(t *testing.T) {
-			testjail.Fleet(t)
+			memoryFleet(t)
 			t.Setenv("TMUX_TMPDIR", t.TempDir())
 			ctx := context.Background()
 			row := compose.Row{

@@ -13,6 +13,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 )
 
 // SchemaVersion is the user_version this build stamps on the shared database.
@@ -352,6 +353,10 @@ func hasMovedTmuxSeats(ctx context.Context, db *sql.DB) (bool, error) {
 // opener re-applies migrations the first one already committed. The returned
 // func releases the lock.
 func LockMigration(ctx context.Context, path string) (func() error, error) {
+	if sqlitedb.InMemory(path) {
+		// No other process reaches an in-memory database, and no directory holds its lock file.
+		return func() error { return nil }, nil
+	}
 	lockPath := path + ".migrate.lock"
 	for {
 		file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)

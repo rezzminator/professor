@@ -108,6 +108,7 @@ func TestKillWhoseFinisherCannotStartLeavesTheChatAsItWas(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			manager, err := New(database, Dependencies{
+				Paths:   jail.resolved(),
 				Spawner: test.spawner(t, root, database, cancel),
 				Now:     func() time.Time { return time.Unix(900, 0) },
 			})
@@ -141,6 +142,7 @@ func TestFailedLaunchRollbackPreservesConcurrentSuccessfulKill(t *testing.T) {
 	entered, release := make(chan struct{}), make(chan struct{})
 	launchFailed := errors.New("launch A failed")
 	first, err := New(database, Dependencies{
+		Paths: jail.resolved(),
 		Spawner: failingSpawner{spawn: func() error {
 			close(entered)
 			<-release
@@ -153,7 +155,11 @@ func TestFailedLaunchRollbackPreservesConcurrentSuccessfulKill(t *testing.T) {
 	}
 	second, err := New(
 		database,
-		Dependencies{Spawner: &captureSpawner{}, Now: func() time.Time { return time.Unix(900, 0) }},
+		Dependencies{
+			Paths:   jail.resolved(),
+			Spawner: &captureSpawner{},
+			Now:     func() time.Time { return time.Unix(900, 0) },
+		},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -264,7 +270,11 @@ func TestKillRunsRowAndFinisherInsideOneCommitSection(t *testing.T) {
 			})
 			manager, err := New(
 				database,
-				Dependencies{Spawner: spawner, Now: func() time.Time { return time.Unix(700, 0) }},
+				Dependencies{
+					Paths:   jail.resolved(),
+					Spawner: spawner,
+					Now:     func() time.Time { return time.Unix(700, 0) },
+				},
 			)
 			if err != nil {
 				t.Fatal(err)

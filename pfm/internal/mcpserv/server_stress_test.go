@@ -182,7 +182,7 @@ func TestMCPAdversarialUnknownAndHugeArguments(t *testing.T) {
 }
 
 func TestMCPMalformedFrameReturnsJSONRPCError(t *testing.T) {
-	root := setupBackendFixture(t)
+	root := setupBackendPaths(t)
 	binary := buildFleetBinary(t)
 	command := exec.Command(
 		binary,

@@ -22,6 +22,10 @@ type epicInjectPayload struct {
 	CWD            string `json:"cwd"`
 }
 
+// epicInjectStore, when set, is the store EpicInject records into and the
+// caller closes; nil opens the on-disk store for the call.
+var epicInjectStore *store.Store
+
 var epicInjectIdentify = func(ctx context.Context) (resolve.Identity, error) {
 	identifier, err := resolve.NewWhoami(resolve.WhoamiDependencies{})
 	if err != nil {
@@ -115,16 +119,20 @@ func epicInjectBody(ctx context.Context, step func(string), stdin io.Reader, std
 		return 0
 	}
 	step("record state")
-	database, err := store.Open()
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm internal epic-inject: open state: %v\n", err)
-		return 0
-	}
-	defer func() {
-		if err := database.Close(); err != nil {
-			fmt.Fprintf(stderr, "pfm internal epic-inject: close state (fail-open): %v\n", err)
+	database := epicInjectStore
+	if database == nil {
+		opened, err := store.Open()
+		if err != nil {
+			fmt.Fprintf(stderr, "pfm internal epic-inject: open state: %v\n", err)
+			return 0
 		}
-	}()
+		database = opened
+		defer func() {
+			if err := database.Close(); err != nil {
+				fmt.Fprintf(stderr, "pfm internal epic-inject: close state (fail-open): %v\n", err)
+			}
+		}()
+	}
 	seen, err := database.EpicInjected(ctx, sessionID, slug)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm internal epic-inject: check state: %v\n", err)

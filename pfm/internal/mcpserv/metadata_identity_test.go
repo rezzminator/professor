@@ -109,6 +109,7 @@ func metadataIdentityService(t *testing.T) *Service {
 		},
 	}
 	service, err := NewConfigured("test", io.Discard, Runtime{
+		Store: memoryStore(t),
 		Paths: resolved,
 		Chat:  &fakeChatVerbs{listed: chat.ListResult{Rows: rows, Matched: len(rows)}, seats: true},
 	})
@@ -531,7 +532,7 @@ func TestMCPMetadataIdentityRefusesMissingUnknownAndMalformedValues(t *testing.T
 }
 
 func TestMCPMetadataIdentityRejectsAmbiguousRowsAndNamesListFailures(t *testing.T) {
-	setupBackendFixture(t)
+	setupBackendPaths(t)
 	resolved, err := paths.Resolve()
 	if err != nil {
 		t.Fatal(err)
@@ -708,7 +709,7 @@ func TestBirthProxyBackendDisagreementRefused(t *testing.T) {
 }
 
 func TestCallEngineForRequestFindsThreadIDBeyondPublicListLimit(t *testing.T) {
-	setupBackendFixture(t)
+	setupBackendPaths(t)
 	resolved, err := paths.Resolve()
 	if err != nil {
 		t.Fatal(err)
@@ -732,7 +733,7 @@ func TestCallEngineForRequestFindsThreadIDBeyondPublicListLimit(t *testing.T) {
 }
 
 func TestCallEngineForRequestKeepsThreadIDPrecedenceAndEmptyMetadata(t *testing.T) {
-	setupBackendFixture(t)
+	setupBackendPaths(t)
 	resolved, err := paths.Resolve()
 	if err != nil {
 		t.Fatal(err)

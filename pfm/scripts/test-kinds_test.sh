@@ -60,6 +60,10 @@ func TestTmuxServer(t *testing.T) {
 
 func TestSQLite(t *testing.T) { _ = sqlitedb.Open("x") }
 
+func TestMemoryStore(t *testing.T) { _, _ = store.OpenMemory() }
+
+func TestFileStore(t *testing.T) { _, _ = store.OpenContext(ctx) }
+
 func FuzzParse(f *testing.F) { f.Fuzz(func(t *testing.T, s string) {}) }
 
 func helperNotATest(t *testing.T) { _ = exec.Command("tmux") }
@@ -93,8 +97,8 @@ for skip in journey e2e a/testdata .hidden; do
 done
 
 out=$(bash "$SUT" "$M" 2>&1); rc=$?
-eq "the count line: unit = nothing + temp-dir, move = the bottom three, every Test and Fuzz once" \
-  "0|KINDS unit 5 (nothing 4 · temp-dir 1) · move 7 (home-sqlite 2 · process 3 · tmux 2) · total 12" "$rc|$out"
+eq "the count line: unit = nothing + temp-dir, the in-memory store door memory, move = the bottom three, every Test and Fuzz once" \
+  "0|KINDS unit 6 (nothing 5 · temp-dir 1) · move 8 (home-sqlite 3 · process 3 · tmux 2) · total 14" "$rc|$out"
 
 out=$(bash "$SUT" --list "$M" 2>&1); rc=$?
 want=$(printf '%s\n' \
@@ -105,6 +109,8 @@ want=$(printf '%s\n' \
   $'process\ta\ta_test.go\tTestThroughHelper' \
   $'tmux\ta\ta_test.go\tTestTmuxServer' \
   $'home-sqlite\ta\ta_test.go\tTestSQLite' \
+  $'nothing\ta\ta_test.go\tTestMemoryStore' \
+  $'home-sqlite\ta\ta_test.go\tTestFileStore' \
   $'nothing\ta\ta_test.go\tFuzzParse' \
   $'nothing\ta\ta_test.go\tTestNamesTheMethodOnlyInAStringOrLocal' \
   $'process\ta\ta_test.go\tTestCallsTheMethod' \

@@ -15,7 +15,7 @@ import (
 )
 
 func TestSeatSchema(t *testing.T) {
-	state, _ := openTestStore(t)
+	state := openTestStore(t)
 	columns := queryColumn(t, state, "SELECT name FROM pragma_table_info('seat') ORDER BY cid")
 	want := []string{
 		"seat_id",
@@ -44,7 +44,7 @@ func TestSeatSchema(t *testing.T) {
 }
 
 func TestSeatCRUD(t *testing.T) {
-	state, _ := openTestStore(t)
+	state := openTestStore(t)
 	ctx := context.Background()
 	seat := Seat{
 		SeatID:         "seat-1",
@@ -110,7 +110,7 @@ func TestSeatCRUD(t *testing.T) {
 }
 
 func TestPutSeatRetiresTmuxRowsForMovedSessionOnlyAfterInsert(t *testing.T) {
-	state, _ := openTestStore(t)
+	state := openTestStore(t)
 	ctx := context.Background()
 	for _, seat := range []Seat{
 		{SeatID: "cc-old", SessionID: "S1", Backend: "tmux", State: "live", UpdatedAt: 100},
@@ -170,7 +170,7 @@ func TestPutSeatRetiresTmuxRowsForMovedSessionOnlyAfterInsert(t *testing.T) {
 }
 
 func TestSeatByPaneIgnoresFailedOwner(t *testing.T) {
-	state, _ := openTestStore(t)
+	state := openTestStore(t)
 	ctx := context.Background()
 	failed := Seat{
 		SeatID:      "failed",
@@ -194,7 +194,7 @@ func TestSeatByPaneIgnoresFailedOwner(t *testing.T) {
 }
 
 func TestSeatConcurrentUpdates(t *testing.T) {
-	state, _ := openTestStore(t)
+	state := openTestStore(t)
 	ctx := context.Background()
 	original := Seat{SeatID: "owner", Backend: "herdr", State: "live", Name: "old"}
 	if err := state.PutSeat(ctx, original); err != nil {
@@ -226,7 +226,7 @@ func TestSeatConcurrentUpdates(t *testing.T) {
 }
 
 func TestSeatRun(t *testing.T) {
-	state, values := openTestStore(t)
+	state, values := openFileTestStore(t)
 	run := SeatRun{
 		Binary:     "/bin/echo",
 		Args:       []string{"hello world"},
@@ -269,7 +269,7 @@ func TestSeatRun(t *testing.T) {
 }
 
 func TestReadSeatsPreservesLegacyDatabase(t *testing.T) {
-	state, values := openTestStore(t)
+	state, values := openFileTestStore(t)
 	if _, err := state.db.Exec("DROP TABLE seat; PRAGMA user_version=5"); err != nil {
 		t.Fatal(err)
 	}
@@ -286,7 +286,7 @@ func TestReadSeatsPreservesLegacyDatabase(t *testing.T) {
 func TestSeatLivePaneAtomicOwnership(t *testing.T) {
 	for _, mode := range []string{"put", "bind", "revive", "stale-patch"} {
 		t.Run(mode, func(t *testing.T) {
-			state, values := openTestStore(t)
+			state, values := openFileTestStore(t)
 			ctx := context.Background()
 			other := OpenSharedState(ctx, values)
 			defer func() { _ = other.Close() }()
@@ -378,7 +378,7 @@ func TestSeatLivePaneAtomicOwnership(t *testing.T) {
 }
 
 func TestSeatPaneHistoricalDuplicatesRefuse(t *testing.T) {
-	state, _ := openTestStore(t)
+	state := openTestStore(t)
 	ctx := context.Background()
 	owner := Seat{
 		SeatID:      "first",
@@ -407,7 +407,7 @@ func TestSeatPaneHistoricalDuplicatesRefuse(t *testing.T) {
 }
 
 func TestSeatUpdateRejectsStaleCanonicalAddress(t *testing.T) {
-	state, _ := openTestStore(t)
+	state := openTestStore(t)
 	ctx := context.Background()
 	before := Seat{SeatID: "moving", Backend: "herdr", State: "live", HerdrPane: "w1:p1", HerdrSocket: "fixture"}
 	if err := state.PutSeat(ctx, before); err != nil {
@@ -490,7 +490,7 @@ VALUES('legacy','session','claude','herdr','','','fixture.sock','w1:p2','w1','OL
 func TestSeatFailurePublicationRejectsChangedBinding(t *testing.T) {
 	for _, change := range []string{"host", "terminal", "end"} {
 		t.Run(change, func(t *testing.T) {
-			db, _ := openTestStore(t)
+			db := openTestStore(t)
 			ctx := context.Background()
 			before := Seat{
 				SeatID:          "failure",
@@ -536,7 +536,7 @@ func TestSeatFailurePublicationRejectsChangedBinding(t *testing.T) {
 func TestSeatLifecycleIgnoresHeartbeatConflict(t *testing.T) {
 	for _, lifecycle := range []string{"start", "failure", "heartbeat"} {
 		t.Run(lifecycle, func(t *testing.T) {
-			db, _ := openTestStore(t)
+			db := openTestStore(t)
 			ctx := context.Background()
 			before := Seat{SeatID: "heartbeat", Backend: "herdr", State: "live", SessionID: "session", UpdatedAt: 1}
 			if err := db.PutSeat(ctx, before); err != nil {
@@ -573,7 +573,7 @@ func TestSeatLifecycleIgnoresHeartbeatConflict(t *testing.T) {
 func TestSeatLifecycleComposesLearnedSession(t *testing.T) {
 	for _, phase := range []string{"retry-start", "reload-start", "failure"} {
 		t.Run(phase, func(t *testing.T) {
-			db, _ := openTestStore(t)
+			db := openTestStore(t)
 			ctx := context.Background()
 			before := Seat{
 				SeatID:          "learning",

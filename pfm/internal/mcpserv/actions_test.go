@@ -123,7 +123,7 @@ func (fake *fakeChatVerbs) CallAnswer(
 // status call the chat verb layer with the target as given — no argv, no
 // JSON round trip — and a dead chat comes back as a status, not an error.
 func TestChatLastAndStatusReachTheTypedVerbs(t *testing.T) {
-	setupBackendFixture(t)
+	setupBackendPaths(t)
 	resolved, err := paths.Resolve()
 	if err != nil {
 		t.Fatal(err)
@@ -135,7 +135,7 @@ func TestChatLastAndStatusReachTheTypedVerbs(t *testing.T) {
 			Engine: pfmengine.Codex, SessionID: "thread-a",
 		},
 	}
-	service, err := NewConfigured("test", nil, Runtime{Paths: resolved, Chat: verbs})
+	service, err := NewConfigured("test", nil, Runtime{Store: memoryStore(t), Paths: resolved, Chat: verbs})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,7 +271,7 @@ func TestCallerScopedSelfReachesMutationDispatchWithoutRedirectingExplicitTarget
 }
 
 func TestCallerScopedRawPaneReachesMutationDispatchOnTheCallerSocket(t *testing.T) {
-	setupBackendFixture(t)
+	setupBackendPaths(t)
 	values, err := paths.Resolve()
 	if err != nil {
 		t.Fatal(err)
@@ -327,8 +327,8 @@ func TestCallerScopedRawPaneReachesMutationDispatchOnTheCallerSocket(t *testing.
 }
 
 func TestResolvedCodexSelfUsesTheNewestLineageRollout(t *testing.T) {
-	setupBackendFixture(t)
-	database, err := store.Open()
+	setupBackendPaths(t)
+	database, err := store.OpenMemory()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -353,7 +353,7 @@ func TestResolvedCodexSelfUsesTheNewestLineageRollout(t *testing.T) {
 }
 
 func TestReviewScopedSelfKeepsUnindexedTranscript(t *testing.T) {
-	root := setupBackendFixture(t)
+	root := setupBackendPaths(t)
 	transcriptPath := filepath.Join(root, "claude", "project-alpha", "unindexed.jsonl")
 	if err := os.WriteFile(
 		transcriptPath,
@@ -556,8 +556,8 @@ func TestChatNewRefusesPresentInvalidCallerMetadata(t *testing.T) {
 }
 
 func TestResolvedSelfPathFallbacksAndIndexedPrecedence(t *testing.T) {
-	setupBackendFixture(t)
-	database, err := store.Open()
+	setupBackendPaths(t)
+	database, err := store.OpenMemory()
 	if err != nil {
 		t.Fatal(err)
 	}

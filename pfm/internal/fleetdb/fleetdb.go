@@ -4,7 +4,7 @@
 // chats, spawned teammates, and the primary account. The transcript database
 // (paths.Values.CacheDB) remains a derived cache that a rescan can rebuild.
 //
-// open.go: OpenSharedState and OpenSharedStateMemory, the shared database opened, created or in memory, and brought to schema.
+// open.go: OpenSharedState and OpenSharedStateMemory, the shared database opened, created or in memory, and brought to schema; Store.UserVersion, its stamp.
 // immediate.go: withImmediate, the BEGIN IMMEDIATE transaction a write that reads first runs in.
 // seatrun.go: SeatRun and its recipe file beside the shared database.
 // primary.go: ClaudePrimaryAccount and SetClaudePrimaryAccount, the primary Claude account row and its mirror file.

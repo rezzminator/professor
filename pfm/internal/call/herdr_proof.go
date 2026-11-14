@@ -26,6 +26,35 @@ func ProveHerdrTarget(ctx context.Context, target Target) (Target, error) {
 	if err != nil {
 		return target, fmt.Errorf("herdr ownership unproved: read durable owners: %w", err)
 	}
+	return proveHerdrOwner(values, seats, target, func(seat fleetdb.Seat) (fleetdb.Seat, bool, error) {
+		return gather.ResolveHerdrSeat(ctx, values, seat)
+	})
+}
+
+// proveHerdrTargetIn is ProveHerdrTarget over a shared state store its caller
+// holds open: the durable owners and the seat proof read state.
+func proveHerdrTargetIn(ctx context.Context, state *fleetdb.Store, target Target) (Target, error) {
+	values, err := paths.Resolve()
+	if err != nil {
+		return target, fmt.Errorf("herdr ownership unproved: resolve paths: %w", err)
+	}
+	seats, err := state.Seats(ctx)
+	if err != nil {
+		return target, fmt.Errorf("herdr ownership unproved: read durable owners: %w", err)
+	}
+	return proveHerdrOwner(values, seats, target, func(seat fleetdb.Seat) (fleetdb.Seat, bool, error) {
+		return gather.ProveHerdrSeat(ctx, state, gather.NewProcFS(values.ProcRoot), seat)
+	})
+}
+
+// proveHerdrOwner proves target's one durable owner among seats, prove
+// resolving the owner's current address.
+func proveHerdrOwner(
+	values paths.Values,
+	seats []fleetdb.Seat,
+	target Target,
+	prove func(fleetdb.Seat) (fleetdb.Seat, bool, error),
+) (Target, error) {
 	var owner *fleetdb.Seat
 	for i := range seats {
 		seat := &seats[i]
@@ -62,7 +91,7 @@ func ProveHerdrTarget(ctx context.Context, target Target) (Target, error) {
 	if owner.HerdrSocket != target.SocketPath || target.Engine != "" && owner.Engine != target.Engine {
 		return target, fmt.Errorf("herdr pane %s ownership unproved: durable owner changed", target.Pane)
 	}
-	proved, owned, err := gather.ResolveHerdrSeat(ctx, values, *owner)
+	proved, owned, err := prove(*owner)
 	if err != nil {
 		return target, fmt.Errorf("herdr seat %s ownership unproved: %w", owner.SeatID, err)
 	}
@@ -87,12 +116,31 @@ func ProveHerdrPane(ctx context.Context, socket, pane string) error {
 	return proveHerdrPaneOrBridge(ctx, socket, pane, ProveHerdrBridge)
 }
 
+// ProveHerdrPaneIn is ProveHerdrPane over a shared state store its caller
+// holds open (the Herdr indicator painter's, store.Held), so a proof on every
+// tick opens no database.
+func ProveHerdrPaneIn(ctx context.Context, state *fleetdb.Store, socket, pane string) error {
+	prove := func(ctx context.Context, target Target) (Target, error) {
+		return proveHerdrTargetIn(ctx, state, target)
+	}
+	return proveHerdrPaneWith(ctx, socket, pane, prove, ProveHerdrBridge)
+}
+
 func proveHerdrPaneOrBridge(
 	ctx context.Context,
 	socket, pane string,
 	bridge func(context.Context, string, string) (HerdrBridge, error),
 ) error {
-	proved, err := ProveHerdrTarget(ctx, Target{SocketPath: socket, Pane: pane})
+	return proveHerdrPaneWith(ctx, socket, pane, ProveHerdrTarget, bridge)
+}
+
+func proveHerdrPaneWith(
+	ctx context.Context,
+	socket, pane string,
+	prove func(context.Context, Target) (Target, error),
+	bridge func(context.Context, string, string) (HerdrBridge, error),
+) error {
+	proved, err := prove(ctx, Target{SocketPath: socket, Pane: pane})
 	if err != nil {
 		if _, bridgeErr := bridge(ctx, socket, pane); bridgeErr != nil {
 			if errors.Is(err, errNoHerdrOwner) && errors.Is(bridgeErr, errNoHerdrBridge) {

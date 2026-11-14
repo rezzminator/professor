@@ -40,19 +40,7 @@ func nativeSeat(
 ) (seat fleetdb.Seat, found bool, returnErr error) {
 	db := fleetdb.OpenSharedState(ctx, runtime.Paths)
 	defer func() { returnErr = errors.Join(returnErr, db.Close()) }()
-	if seatID != "" {
-		seat, found, returnErr = db.Seat(ctx, seatID)
-	} else {
-		seat, found, returnErr = db.SeatBySession(ctx, id)
-		if returnErr == nil && !found && id != "" {
-			seat, found, returnErr = db.Seat(ctx, id)
-		}
-	}
-	if returnErr == nil && found &&
-		(seat.Backend != spawn.BackendHerdr || (seat.SessionID != id && seat.SeatID != id)) {
-		found = false
-	}
-	return
+	return nativeSeatIn(ctx, db, id, seatID)
 }
 
 // nativeAlive proves the supervisor, including during startup and retry, and

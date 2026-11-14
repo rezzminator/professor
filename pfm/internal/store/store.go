@@ -6,6 +6,7 @@
 // codexstate.go: CodexThread, a conversation read from the Codex CLI's own SQLite state store.
 // continuation.go: CarryContinuedSchedules and ContinuationTail, schedules that follow a continued chat.
 // epic.go: EpicInjected and RecordEpicInjection, one epic injection per chat session.
+// held.go: Held and NewHeld, one Store kept open across a long-lived reader's calls, reopened when a file is replaced or migrated.
 // health.go: RowCounts, QuickCheck and the orphaned-kill sweep doctor reads.
 // killed.go: Kill, Unkill and Killed, operator kills kept in the shared state.
 // label.go: Label, the chat's pfm label by the one naming precedence.

@@ -14,14 +14,11 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
-	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
-	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
-	"github.com/rezzminator/professor/pfm/internal/themesync"
 )
 
 const tabStateUnknown = "unknown"
@@ -254,90 +251,6 @@ func missingTabAgentState(
 	return "", nil
 }
 
-// PaintHerdrIndicators is the actual plugin command's chat-aware painter.
-// The inspector persists across half-second polls and incrementally reads tails.
-func PaintHerdrIndicators(ctx context.Context, socket, lockDir string, stderr io.Writer) error {
-	persisted := tabIndicatorWarnings{dir: lockDir, stderr: stderr}
-	warnings := &tickWarnings{out: persisted}
-	runtime, err := pfmconfig.RuntimeOrDefault(nil)
-	if err != nil {
-		loadErr := fmt.Errorf("load tab indicator runtime: %w", err)
-		_, writeErr := fmt.Fprintln(persisted, loadErr)
-		return errors.Join(loadErr, writeErr)
-	}
-	proc := gather.NewProcFS(runtime.Paths.ProcRoot)
-	inspector := NewSeatInspector(&runtime)
-	provider := herdrTabProvider{
-		inspect: inspector.Inspect,
-		rest:    inspector.Rest,
-		warn:    warnings,
-		probe:   &tabProbe{openCodeRoots: runtime.Paths.Roots[pfmengine.OpenCode]},
-	}
-	calls, err := NewCallEngine(false, &runtime)
-	if err != nil {
-		loadErr := fmt.Errorf("load tab indicator screen reader: %w", err)
-		_, writeErr := fmt.Fprintln(persisted, loadErr)
-		return errors.Join(loadErr, writeErr)
-	}
-	provider.screen = func(ctx context.Context, chat headless.Chat) (string, error) {
-		return calls.CaptureScreen(ctx, call.Target{
-			Backend: chat.Backend, SeatID: chat.SeatID, SocketPath: chat.Socket,
-			Pane: chat.Pane, Engine: string(chat.Engine),
-		})
-	}
-	settings := herdrIndicatorConfig{path: runtime.Config.Path}
-	provider.mode = settings.mode
-	stateDir := themesync.DefaultStateDir(runtime.Paths.Home)
-	provider.glyphs = func() (herdr.TabGlyphs, error) { return themesync.HerdrTabGlyphs(stateDir) }
-	var panes []herdr.TabPane
-	var loaded bool
-	provider.scan = func(ctx context.Context) (FleetScan, error) {
-		loaded = false
-		inspector.Sweep()
-		return ScanRows(ctx, persisted, &runtime)
-	}
-	addresses := tabViewReader{
-		runtime: &runtime,
-		warn:    warnings,
-		tmux:    gather.TmuxRead,
-		resolve: herdr.WireResolver(
-			proc.Environ,
-			herdr.Call,
-			func() uint64 { return uint64(clock.Real.Now().UnixNano()) },
-		).Resolve,
-	}
-	provider.views = func(ctx context.Context, target headless.Chat, socket string) ([]herdr.TabDecoration, error) {
-		if !loaded {
-			var err error
-			panes, err = herdr.ReadTabPanes(ctx, socket)
-			var incomplete *herdr.IncompleteTabPanesError
-			if errors.As(err, &incomplete) {
-				// The complete panes still paint; only the skipped ones go unpainted.
-				if _, writeErr := fmt.Fprintf(
-					warnings,
-					"Herdr tab panes: %v (painting the complete panes)\n",
-					err,
-				); writeErr != nil {
-					return nil, fmt.Errorf("persist tab pane warning: %w", writeErr)
-				}
-			} else if err != nil {
-				return nil, fmt.Errorf("%w: %w", errTabPaneList, err)
-			}
-			loaded = true
-		}
-		return addresses.views(ctx, target, socket, panes)
-	}
-	return herdr.PaintIndicatorsWithTabs(
-		ctx,
-		socket,
-		lockDir,
-		persisted,
-		provider.tabs,
-		provider.changed,
-		call.ProveHerdrPane,
-	)
-}
-
 // tickWarnings names each per-chat tab diagnostic once while it recurs on
 // every half-second tick: a body written in the previous tick is not written
 // again, and one that stopped recurring is named afresh when it returns.
@@ -380,13 +293,15 @@ func (writer tabIndicatorWarnings) Write(body []byte) (int, error) {
 }
 
 // tabViewReader's prove is the native seat ownership proof (nil: nativeAlive),
-// engine its foreground engine probe (nil: call.HerdrEngine).
+// engine its foreground engine probe (nil: call.HerdrEngine), state the
+// shared state native seats are read from (nil: opened per read, nativeSeat).
 type tabViewReader struct {
 	runtime *pfmconfig.Runtime
 	tmux    func(context.Context, string, ...string) (string, error)
 	resolve func(context.Context, int) (herdr.Location, bool, error)
 	prove   func(context.Context, fleetdb.Seat, paths.Values) (fleetdb.Seat, bool, error)
 	engine  func(context.Context, fleetdb.Seat) (bool, error)
+	state   func(context.Context) (*fleetdb.Store, error)
 	// bridge proves a pfm tmux client in a Herdr pane's foreground; nil is
 	// call.ProveHerdrBridge.
 	bridge   func(context.Context, string, string) (call.HerdrBridge, error)
@@ -663,7 +578,7 @@ func (reader *tabViewReader) staleTabClaim(ctx context.Context, pane herdr.TabPa
 	if session.Kind != "id" {
 		return false, nil
 	}
-	claimed, found, err := nativeSeat(ctx, *reader.runtime, session.Value, "")
+	claimed, found, err := reader.seat(ctx, session.Value, "")
 	if err != nil {
 		return false, fmt.Errorf("read the native seat Herdr names in tab %s: %w", pane.Tab, err)
 	}
@@ -727,7 +642,7 @@ func (reader *tabViewReader) nativeView(
 	if claimErr != nil && !errors.Is(claimErr, errUnusableTabClaim) {
 		return nil, claimErr
 	}
-	seat, found, err := nativeSeat(ctx, *reader.runtime, target.ID, target.SeatID)
+	seat, found, err := reader.seat(ctx, target.ID, target.SeatID)
 	if err != nil {
 		return nil, fmt.Errorf("read native tab seat: %w", err)
 	}
@@ -757,7 +672,7 @@ func (reader *tabViewReader) nativeView(
 	d := tabView(pane, target.SeatID+":"+target.ID)
 	d.State = state
 	d.Validate = func(ctx context.Context) (bool, error) {
-		seat, found, err := nativeSeat(ctx, *reader.runtime, target.ID, target.SeatID)
+		seat, found, err := reader.seat(ctx, target.ID, target.SeatID)
 		if err != nil {
 			return false, fmt.Errorf("read native tab owner: %w", err)
 		}

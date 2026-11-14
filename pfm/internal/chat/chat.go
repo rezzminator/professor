@@ -8,7 +8,7 @@
 //
 // Files, one line each:
 //   - target.go resolves a target to a chat, and scans the fleet's rows.
-//   - index_store.go opens the store those verbs, ls and status read, or the one a test hands in.
+//   - index_store.go opens the store those verbs, ls and status read, or the one a test hands in, and scans it.
 //   - verbs.go is the Verbs bundle the surfaces call.
 //   - doors.go decides each outcome the CLI and the MCP door of a chat function both answer.
 //   - liststate.go names the state word a listed chat shows at both ls doors.
@@ -28,7 +28,8 @@
 //   - call_engine.go and call_types.go build the call engine.
 //   - loss_note.go reads a seat's durable loss note from its transcript.
 //   - fleetshare.go shares one fleet scan between watches; seatprint.go fingerprints a seat for a watch.
-//   - herdr_indicators.go, herdr_indicators_probe.go and herdr_indicator_config.go paint Herdr tab indicators.
+//   - herdr_indicators.go, herdr_indicators_probe.go and herdr_indicator_config.go paint Herdr tab indicators;
+//     herdr_indicators_run.go builds one painter run over a store it holds open across its ticks.
 //   - herdr_name.go and herdr_name_sync.go name Herdr tabs; herdr_places.go lists the Herdr places.
 package chat
 

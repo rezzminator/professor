@@ -97,3 +97,16 @@ func initDatabase(ctx context.Context, db *sql.DB, path string, existed bool) (*
 	}
 	return db, nil
 }
+
+// UserVersion reports the shared database's PRAGMA user_version, the schema
+// version its last migration stamped.
+func (s *Store) UserVersion(ctx context.Context) (int, error) {
+	if s.db == nil {
+		return 0, fmt.Errorf("read shared database schema version: %w", s.degraded)
+	}
+	var version int
+	if err := s.queryRow(ctx, "PRAGMA user_version").Scan(&version); err != nil {
+		return 0, fmt.Errorf("read shared database schema version: %w", err)
+	}
+	return version, nil
+}

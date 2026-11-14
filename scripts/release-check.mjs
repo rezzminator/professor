@@ -956,7 +956,8 @@ function seamRule(cwd, base, head, info) {
     ...new Set(changes.flatMap((c) => (c.status === "D" ? [c.path] : c.status === "R" ? [c.oldPath] : []))),
   ].sort();
   // A role moved into a listed plugin is renamed, not removed: its old name
-  // stays live as the plugin's Codex/OpenCode twin (`p-n`) or its command or skill.
+  // stays live as the plugin's Codex/OpenCode twin (`p-n`), as the agent's own
+  // name inside the plugin (`n` of `p:n`), or as its command or skill.
   const moved = pluginRoles(cwd, head);
   const roles = roleChanges(cwd, base, head, changes).removed.filter((r) => !moved.has(`${r.kind} ${r.name}`));
   info.push(`SEAMS ${paths.length} removed paths, ${roles.length} removed roles swept`);
@@ -1037,8 +1038,9 @@ function marketplacePlugins(cwd, head) {
 }
 
 // The roles the listed plugins ship at their gitlinks, keyed `${kind} ${name}`
-// as roleOf names them: agent `p-n` (the twin of `p:n`), command `/p:n`, skill
-// `n`. A plugin whose tree at its gitlink cannot be listed is an ERROR, never
+// as roleOf names them: agent `p-n` (the twin of `p:n`) and agent `n` (the
+// name it keeps inside `p:n` and in prose), command `/p:n`, skill `n`. A
+// plugin whose tree at its gitlink cannot be listed is an ERROR, never
 // "ships nothing"; one with no gitlink is T1's to report.
 function pluginRoles(cwd, head) {
   const roles = new Set();
@@ -1050,7 +1052,7 @@ function pluginRoles(cwd, head) {
     for (const p of nulSplit(git(join(cwd, path), ["ls-tree", "-r", "--name-only", "-z", gitlink, "--", dir]))) {
       const rest = p.slice(dir.length);
       let m;
-      if ((m = /^agents\/([^/]+)\.md$/.exec(rest))) roles.add(`agent ${name}-${m[1]}`);
+      if ((m = /^agents\/([^/]+)\.md$/.exec(rest))) roles.add(`agent ${name}-${m[1]}`).add(`agent ${m[1]}`);
       else if ((m = /^commands\/([^/]+)\.md$/.exec(rest))) roles.add(`command /${name}:${m[1]}`);
       else if ((m = /^skills\/([^/]+)\//.exec(rest))) roles.add(`skill ${m[1]}`);
     }

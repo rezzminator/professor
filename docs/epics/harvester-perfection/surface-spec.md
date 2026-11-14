@@ -89,7 +89,7 @@ The tools, their inputs and their output fields are named by `naming-spec.md` (t
 | `workflows/deep-rr/engine/src/**` | `fetch` → `read` with `urls` or `publications` by what the step reads; `search` → `search_web`; then `npm run build` regenerates `workflow.js` and the snapshots are updated; `SKILL.md` preflight uses `read` |
 | `docs/dev/pfm-surface.md` | the tool table and CLI rows |
 | `docs/dev/testing/landscape.md` | M21–M29, H10, H11 rewritten; the dangling `mcp.md` citation fixed to the file that holds the tools |
-| `infra/fence/lanes/M.sh`, `map.tsv`, `beats.md` | M50's served-tool list; M21–M28 per tool; H10, H11 and the chat-fetch check use `read` with `include_content: false` and the `cached` field as the cache oracle instead of `searchCache` |
+| the fence M lane's script, `map.tsv`, `beats.md` | M50's served-tool list; M21–M28 per tool; H10, H11 and the chat-fetch check use `read` with `include_content: false` and the `cached` field as the cache oracle instead of `searchCache` |
 | `infra/readme-cards/deck.html` | the demo card: `search_literature` → `read` with the handle in `publications` |
 | `docs/design/RR/rr.md` | the `searchCache` design notes removed |
 | `pfm/internal/harvest/README.md`, `pfm/cmd/pfm/mcp_serve_test.go` | new names |

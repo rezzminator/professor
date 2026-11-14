@@ -33,7 +33,7 @@ cx() {
   (( rc == 0 )) || return $rc
   if _pfm_selfswitch "$sock"; then :                          # already inside it → switch, never nest
   elif _pfm_in_bunker; then TMUX= exec tmux -L "$sock" attach # viewport dies with the tab
-  elif _pfm_owns_terminal; then TMUX= exec tmux -L "$sock" attach # bare terminal dies with the harness
+  elif _pfm_owns_terminal && ! _pfm_on_ssh_terminal; then TMUX= exec tmux -L "$sock" attach # bare terminal dies with the harness
   else
     TMUX= tmux -L "$sock" attach
     _pfm_own_terminal $?   # bare terminal: the chat took it, the chat closes it
@@ -65,6 +65,12 @@ _pfm_owns_terminal() {
   [[ -z "$TMUX" ]] || _pfm_in_bunker
 }
 
+# _pfm_on_ssh_terminal — true when this shell sits on the ssh session's own terminal ($SSH_TTY
+# is this shell's tty). That shell IS the ssh session: ending or replacing it drops the
+# connection, so a harness that ends there hands back the prompt. A Herdr pane or a VS Code tab
+# reached over ssh carries $SSH_CONNECTION but sits on another tty, and still closes.
+_pfm_on_ssh_terminal() { [[ -n "${SSH_TTY:-}" && "$SSH_TTY" == "$TTY" ]] }
+
 # _pfm_own_terminal <status> — the terminal belongs to the harness that was typed into it, so
 # a harness that ENDS takes the terminal with it (the VS Code tab closes) instead of falling
 # back to a prompt nobody asked for. Three guards keep it from eating anything else: only an
@@ -72,10 +78,11 @@ _pfm_owns_terminal() {
 # run return untouched; only a caller that actually ran a harness calls it, so the picker
 # (pfm) still escapes to the prompt on Esc; and a NON-ZERO exit holds the terminal for a
 # keypress first — a crash the tab swallowed is a crash that never happened. zsh's refusal to
-# exit while jobs are suspended is the right refusal, and is left alone.
+# exit while jobs are suspended is the right refusal, and is left alone. The ssh session's own
+# terminal is never ended: closing it would close the ssh connection.
 _pfm_own_terminal() {
   local exit_status="${1:-0}"
-  _pfm_owns_terminal || return "$exit_status"
+  _pfm_owns_terminal && ! _pfm_on_ssh_terminal || return "$exit_status"
   # A bare terminal or a bunker pane exists to hold a harness, so it goes when the harness
   # goes. Inside any OTHER tmux — a chat pane, an ad-hoc work window — the terminal is
   # someone else's and closing it would take the host down too.
@@ -102,7 +109,7 @@ _pfm_tui_call() {
 }
 
 # A harness typed straight into a terminal closes that terminal on exit, exactly as a fleet
-# chat does. claude bypasses recursion by calling the managed absolute launcher path, while
+# chat does, except on the ssh session's own terminal, which returns to its prompt. claude bypasses recursion by calling the managed absolute launcher path, while
 # codex delegates to the managed launch door, which resolves the real binary,
 # and selects --no-daemon for a TUI without an explicit transport.
 # Only this shell's own typing is affected — pfm, hooks and scripts exec the binary and never
@@ -125,7 +132,8 @@ codex() {
 # pfm — the picker typed into a bare terminal hands that terminal to the chat it opens, as `cx`
 # does. With stdout captured, pfm draws the picker on /dev/tty and prints the chosen action as
 # one line (action.Dispatch); this shell runs it, then closes when the chat ends or is detached,
-# so no prompt is left behind to read the terminal's late colour-query replies as typed input.
+# so no prompt is left behind to read the terminal's late colour-query replies as typed input;
+# on the ssh session's own terminal it returns to the prompt instead, as _pfm_own_terminal says.
 # Esc prints nothing and returns to the prompt; a failed pfm returns its status. Any argument, a
 # script, a shell inside another tmux, or a snapshot shell without the helpers runs pfm as is.
 pfm() {

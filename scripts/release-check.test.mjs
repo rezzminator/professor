@@ -777,25 +777,28 @@ describe("preflight S1, D1, T1", { concurrency: availableParallelism() }, () => 
     const f = await fixture();
     const before = await commit(f.r0, {
       "templates/global/agents/p-mover.md": "m\n",
+      "templates/global/agents/scout.md": "s\n",
       "templates/global/commands/p/doc.md": "d\n",
       "templates/global/skills/kit/SKILL.md": "k\n",
     }, "the roles before the move");
     await commit(f.plugin, {
       "plugins/p/agents/mover.md": "m\n",
+      "plugins/p/agents/scout.md": "s\n",
       "plugins/p/commands/doc.md": "d\n",
       "plugins/p/skills/kit/SKILL.md": "k\n",
     }, "the roles move in");
     await git(f.plugin, "tag", "-a", "v1.1.0", "-m", "v1.1.0");
     await commit(f.r0, {
       "templates/global/agents/p-mover.md": null,
+      "templates/global/agents/scout.md": null,
       "templates/global/commands/p/doc.md": null,
       "templates/global/skills/kit/SKILL.md": null,
       "README.md": "Run `/prompt:use check`, `/handy`, `/reload --account 2` or `/p:doc`.\n",
-      "docs/moved.md": "Codex runs p-mover; Claude runs `/p:doc` and the kit skill.\n",
+      "docs/moved.md": "Codex runs p-mover; Claude runs `/p:doc`, the kit skill and p:scout, the scout.\n",
     }, "move the roles into plugin p");
     const r = await run(f.r0, "preflight", "--base", before, "--head", "HEAD");
     assertClean(r, "preflight");
-    for (const line of ["SEAMS 3 removed paths, 0 removed roles swept", "README 4 commands checked"])
+    for (const line of ["SEAMS 4 removed paths, 0 removed roles swept", "README 4 commands checked"])
       assert.ok(r.out.split("\n").includes(line), `missing line ${JSON.stringify(line)}:\n${r.out}`);
   });
   test("S1 a design doc's history section is no exemption", async () => {

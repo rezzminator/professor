@@ -453,13 +453,7 @@ func ScanRows(ctx context.Context, warn io.Writer, runtime *pfmconfig.Runtime) (
 			returnErr = errors.Join(returnErr, fmt.Errorf("close fleet database: %w", err))
 		}
 	}()
-	scan, err := fleet.Scan(ctx, database, fleet.Request{
-		View: compose.AllView, ReadOnly: true, Runtime: runtime,
-	}, warn)
-	if err != nil {
-		return FleetScan{}, err
-	}
-	return FleetScan{Rows: scan.Output.Rows, Unreadable: scan.Live.UnreadableSockets}, nil
+	return scanFleetRows(ctx, database, warn, runtime)
 }
 
 // RosterCandidates projects composed rows onto the roster matching rule's input.

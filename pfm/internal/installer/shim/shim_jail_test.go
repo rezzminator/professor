@@ -179,45 +179,72 @@ func TestBareCodexLaunchExecsTheTerminalOwner(t *testing.T) {
 	if _, err := exec.LookPath("script"); err != nil {
 		t.Skip("script is not installed")
 	}
-	home := t.TempDir()
-	fakeBin := filepath.Join(home, "fake-bin")
-	if err := os.MkdirAll(filepath.Join(home, ".local", "bin"), 0o700); err != nil {
-		t.Fatal(err)
+	// The ssh session's own terminal attaches as a child instead: replacing
+	// that shell ends the ssh connection when the chat ends.
+	cases := []struct {
+		name     string
+		prelude  string
+		wantExec bool
+		want     string
+	}{
+		{name: "bare terminal execs the attach", prelude: "unset SSH_TTY SSH_CONNECTION", wantExec: true, want: "1\n"},
+		{
+			name:     "ssh session's own terminal keeps its shell",
+			prelude:  "export SSH_TTY=$TTY",
+			wantExec: false,
+			want:     "1\nSHELL-CAME-BACK\n",
+		},
 	}
-	if err := os.MkdirAll(fakeBin, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	writeShimFile(t, filepath.Join(home, ".local", "bin", "pfm"), "#!/bin/sh\nprintf '1\\n'\n")
-	writeShimFile(t, filepath.Join(fakeBin, "tmux"), `#!/bin/sh
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			home := t.TempDir()
+			fakeBin := filepath.Join(home, "fake-bin")
+			if err := os.MkdirAll(filepath.Join(home, ".local", "bin"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(fakeBin, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			writeShimFile(t, filepath.Join(home, ".local", "bin", "pfm"), "#!/bin/sh\nprintf '1\\n'\n")
+			writeShimFile(t, filepath.Join(fakeBin, "tmux"), `#!/bin/sh
 case " $* " in *" attach "*) printf '%s\n' "$$" > "$SHIM_TMUX_PID" ;; esac
 `)
-	shellPID := filepath.Join(home, "shell.pid")
-	tmuxPID := filepath.Join(home, "tmux.pid")
-	driver := filepath.Join(home, "driver.zsh")
-	writeShimFile(t, driver,
-		"source "+quoteZsh(embeddedShimPath(t))+"\n"+
-			"print -r -- \"$$\" > \"$SHIM_SHELL_PID\"\n"+
-			"cx\n",
-	)
-	command, err := testjail.PTYCommand(zsh, "-fi", driver)
-	if err != nil {
-		t.Fatal(err)
-	}
-	command.Env = append(
-		os.Environ(),
-		"HOME="+home,
-		"PATH="+fakeBin+":"+os.Getenv("PATH"),
-		"TMUX=",
-		"SHIM_SHELL_PID="+shellPID,
-		"SHIM_TMUX_PID="+tmuxPID,
-	)
-	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("drive interactive shim: %v: %s", err, output)
-	}
-	want := strings.TrimSpace(readShimFile(t, shellPID))
-	got := strings.TrimSpace(readShimFile(t, tmuxPID))
-	if got != want {
-		t.Fatalf("tmux pid=%s, shell pid=%s: Codex launch forked and left an outer terminal shell", got, want)
+			shellPID := filepath.Join(home, "shell.pid")
+			tmuxPID := filepath.Join(home, "tmux.pid")
+			driver := filepath.Join(home, "driver.zsh")
+			writeShimFile(t, driver,
+				"source "+quoteZsh(embeddedShimPath(t))+"\n"+
+					"print -r -- \"$$\" > \"$SHIM_SHELL_PID\"\n"+
+					testCase.prelude+"\n"+
+					"cx\n"+
+					"print -r -- SHELL-CAME-BACK\n",
+			)
+			command, err := testjail.PTYCommand(zsh, "-fi", driver)
+			if err != nil {
+				t.Fatal(err)
+			}
+			command.Env = append(
+				os.Environ(),
+				"HOME="+home,
+				"PATH="+fakeBin+":"+os.Getenv("PATH"),
+				"TMUX=",
+				"TERM=dumb",
+				"SHIM_SHELL_PID="+shellPID,
+				"SHIM_TMUX_PID="+tmuxPID,
+			)
+			output, err := command.CombinedOutput()
+			if err != nil {
+				t.Fatalf("drive interactive shim: %v: %s", err, output)
+			}
+			shell := strings.TrimSpace(readShimFile(t, shellPID))
+			tmux := strings.TrimSpace(readShimFile(t, tmuxPID))
+			if got := tmux == shell; got != testCase.wantExec {
+				t.Fatalf("tmux pid=%s, shell pid=%s: exec'd=%v, want %v", tmux, shell, got, testCase.wantExec)
+			}
+			if got := strings.ReplaceAll(testjail.PTYOutput(output), "\r\n", "\n"); got != testCase.want {
+				t.Fatalf("output after cx = %q, want %q", got, testCase.want)
+			}
+		})
 	}
 }
 
@@ -234,34 +261,74 @@ func TestPfmOwnTerminalClosesOwnedAndPreservesOthers(t *testing.T) {
 	}
 	shimPath := embeddedShimPath(t)
 
-	t.Run("closes an owned bare terminal", func(t *testing.T) {
-		if _, err := exec.LookPath("script"); err != nil {
-			t.Skip("script is not installed")
-		}
-		home := t.TempDir()
-		if err := os.MkdirAll(filepath.Join(home, ".local", "bin"), 0o700); err != nil {
-			t.Fatal(err)
-		}
-		writeShimFile(t, filepath.Join(home, ".local", "bin", "pfm"), "#!/bin/sh\nexit 0\n")
-		driver := filepath.Join(home, "driver.zsh")
-		writeShimFile(t, driver,
-			"source "+quoteZsh(shimPath)+"\n"+
-				"_pfm_own_terminal 0\n"+
-				"print -r -- UNREACHABLE\n",
-		)
-		command, err := testjail.PTYCommand(zsh, "-fi", driver)
-		if err != nil {
-			t.Fatal(err)
-		}
-		command.Env = append(os.Environ(), "HOME="+home, "TMUX=", "TERM=dumb")
-		output, err := command.CombinedOutput()
-		if err != nil {
-			t.Fatalf("owned terminal: %v: %s", err, output)
-		}
-		if got := testjail.PTYOutput(output); got != "" {
-			t.Fatalf("an owned terminal kept running past _pfm_own_terminal: %q", got)
-		}
-	})
+	// An ssh login's own terminal is the session itself: ending its only
+	// shell drops the connection, so there the shell returns the status
+	// instead, with no close prompt. Only SSH_TTY equal to the shell's own
+	// tty marks it; a Herdr pane or VS Code tab reached over ssh carries
+	// SSH_CONNECTION (and maybe another tty's SSH_TTY) and still closes.
+	ttyCases := []struct {
+		name    string
+		prelude string
+		status  string
+		want    string
+	}{
+		{name: "closes an owned bare terminal", prelude: "unset SSH_TTY SSH_CONNECTION", status: "0", want: ""},
+		{
+			name:    "closes when SSH_TTY names another tty",
+			prelude: "unset SSH_CONNECTION; export SSH_TTY=/dev/pts/pfm-not-this-tty",
+			status:  "0",
+			want:    "",
+		},
+		{
+			name:    "closes with SSH_CONNECTION set alone",
+			prelude: "unset SSH_TTY; export SSH_CONNECTION='192.0.2.1 50000 192.0.2.2 22'",
+			status:  "0",
+			want:    "",
+		},
+		{
+			name:    "keeps the ssh session's own terminal after a clean exit",
+			prelude: "export SSH_TTY=$TTY SSH_CONNECTION='192.0.2.1 50000 192.0.2.2 22'",
+			status:  "0",
+			want:    "after=0\n",
+		},
+		{
+			name:    "keeps the ssh session's own terminal after a failed exit",
+			prelude: "export SSH_TTY=$TTY SSH_CONNECTION='192.0.2.1 50000 192.0.2.2 22'",
+			status:  "3",
+			want:    "after=3\n",
+		},
+	}
+	for _, testCase := range ttyCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			if _, err := exec.LookPath("script"); err != nil {
+				t.Skip("script is not installed")
+			}
+			home := t.TempDir()
+			if err := os.MkdirAll(filepath.Join(home, ".local", "bin"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			writeShimFile(t, filepath.Join(home, ".local", "bin", "pfm"), "#!/bin/sh\nexit 0\n")
+			driver := filepath.Join(home, "driver.zsh")
+			writeShimFile(t, driver,
+				"source "+quoteZsh(shimPath)+"\n"+
+					testCase.prelude+"\n"+
+					"_pfm_own_terminal "+testCase.status+"\n"+
+					"print -r -- \"after=$?\"\n",
+			)
+			command, err := testjail.PTYCommand(zsh, "-fi", driver)
+			if err != nil {
+				t.Fatal(err)
+			}
+			command.Env = append(os.Environ(), "HOME="+home, "TMUX=", "TERM=dumb")
+			output, err := command.CombinedOutput()
+			if err != nil {
+				t.Fatalf("owned terminal: %v: %s", err, output)
+			}
+			if got := strings.ReplaceAll(testjail.PTYOutput(output), "\r\n", "\n"); got != testCase.want {
+				t.Fatalf("output after _pfm_own_terminal %s = %q, want %q", testCase.status, got, testCase.want)
+			}
+		})
+	}
 
 	t.Run("preserves a script or nested-chat shell", func(t *testing.T) {
 		home := t.TempDir()
@@ -549,9 +616,20 @@ func TestPickerTypedIntoABareTerminalHandsItToTheChat(t *testing.T) {
 	cases := []struct {
 		name      string
 		pfm       string
+		prelude   string
 		wantShell bool
 		wantTmux  string
 	}{
+		{
+			name:    "a chosen chat on the ssh session's own terminal returns to the prompt",
+			prelude: "export SSH_TTY=$TTY",
+			pfm: `#!/bin/sh
+if [ "$#" -ne 0 ]; then exit 64; fi
+if [ -t 1 ]; then TMUX= exec tmux -L cc-1-2-3 attach -t cc-1-2-3; fi
+printf '%s\n' 'TMUX= tmux -L cc-1-2-3 attach -t cc-1-2-3'
+`,
+			wantShell: true, wantTmux: "tmux -L cc-1-2-3 attach -t cc-1-2-3 TMUX=[]\n",
+		},
 		{
 			name: "a chosen chat ends the shell when the attach returns",
 			pfm: `#!/bin/sh
@@ -581,6 +659,7 @@ printf 'tmux %s TMUX=[%s]\n' "$*" "$TMUX" >> "$SHIM_TMUX_LOG"
 			driver := filepath.Join(home, "driver.zsh")
 			writeShimFile(t, driver,
 				"source "+quoteZsh(embeddedShimPath(t))+"\n"+
+					testCase.prelude+"\n"+
 					"pfm\n"+
 					"print -r -- SHELL-CAME-BACK\n",
 			)

@@ -142,7 +142,7 @@ func TestAPaintAfterThemeOffWritesNothing(t *testing.T) {
 				if err := painter.record(context.Background()); err != nil {
 					t.Fatal(err)
 				}
-				painter.tabs = func(context.Context, string) ([]TabDecoration, error) {
+				painter.tabs = func(context.Context, string, bool) ([]TabDecoration, error) {
 					if duringTabs {
 						if err := tc.off(painter); err != nil {
 							return nil, err

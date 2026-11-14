@@ -1,245 +1,116 @@
 <h1 align="center">Professor</h1>
 
-## Contents
-
-- [Why Professor?](#why-professor)
-- [Six things you can watch it do](#six-things-you-can-watch-it-do)
-  - [1. See the fleet](#1-see-the-fleet)
-  - [2. Chats that talk to each other](#2-chats-that-talk-to-each-other)
-  - [3. Rules that bite](#3-rules-that-bite)
-  - [4. Read what the web hides from bots](#4-read-what-the-web-hides-from-bots)
-  - [5. One contract, three runtimes](#5-one-contract-three-runtimes)
-  - [6. Reload without losing the conversation](#6-reload-without-losing-the-conversation)
-- [Install](#install)
-- [The discipline layer (`templates/`)](#the-discipline-layer-templates)
-- [The fleet CLI (`pfm/`)](#the-fleet-cli-pfm)
-- [Plugins](#plugins)
-- [Origin](#origin)
-- [Help and community](#help-and-community)
-- [Contributing](#contributing)
-- [License](#license)
+<p align="center">
+  <strong>Run ten agents with the attention of one.</strong>
+</p>
 
 <p align="center">
-  <strong>Multi-agent framework for Claude Code, Codex &amp; OpenCode.</strong><br>
-  Turns the AI coding chats on your machine into a disciplined engineering team —<br>
-  one you can see, message, and hold to the rules.
+  One workspace for your Claude Code, Codex and OpenCode chats:<br>
+  every chat on one screen, chats that call each other,<br>
+  one theme and one rulebook across all of them.
 </p>
 
 <p align="center">
   <a href="https://github.com/rezzminator/professor/releases"><img alt="release" src="https://img.shields.io/github/v/release/rezzminator/professor"></a>
   <a href="LICENSE"><img alt="license" src="https://img.shields.io/github/license/rezzminator/professor"></a>
-  <img alt="go" src="https://img.shields.io/badge/go-1.27-00ADD8">
   <img alt="platform" src="https://img.shields.io/badge/platform-linux%20%7C%20macOS-lightgrey">
   <img alt="works with" src="https://img.shields.io/badge/works%20with-Claude%20Code%20%C2%B7%20Codex%20%C2%B7%20OpenCode-8A2BE2">
 </p>
 
 <p align="center">
-  <a href="#six-things-you-can-watch-it-do">Watch it work</a> ·
-  <a href="#install">Install</a> ·
-  <a href="#the-discipline-layer-templates">Discipline layer</a> ·
-  <a href="#the-fleet-cli-pfm">Fleet CLI</a>
+  <a href="#quickstart">Quickstart</a> ·
+  <a href="#watch-it-work">Watch it work</a> ·
+  <a href="docs/guide/_index.md">Guide</a> ·
+  <a href="docs/guide/plugins.md">Plugins</a> ·
+  <a href="https://github.com/rezzminator/professor/discussions">Discussions</a>
 </p>
 
 <p align="center">
-  <img src="docs/img/cards/fleet.webp" alt="The pfm cosmos tab: four project stars — harvester, atlas, lumen, orbit — with their chats in orbit, coloured by engine; a comet flies along every chat call, the comms ledger scrolls underneath" width="900">
+  <img src="docs/img/hero.webp" alt="Animated loop. A pink coding workspace, captioned &quot;Professor makes them one.&quot;, fans out like a staircase into the six programs that draw it, each a solid sheet with its own tag: VS Code at the back, the Herdr pane manager, one tmux server per chat, and three agent engines in front (Claude Code, Codex, OpenCode). A glowing thread from pfm's chat list of ten chats on the right runs through every layer. A theme change starts at Claude Code and reaches tmux in 0.36 s and Herdr and VS Code in 0.72 s, turning every layer except the engines from pink to blue. Then the Claude Code chat asks the Codex chat to review a file, and the verdict travels back along the thread. When the Codex chat finishes, its tmux tab, shown enlarged, and its row in the list turn to the done colour together. The layers close back into one screen." width="900">
 </p>
 
-<h2 align="center">Professor is a complete, integrated toolbox for everything you want to do — that Anthropic, OpenAI <em>or anyone else</em> will <em>never</em> give you.</h2>
-
-A fleet controller and a discipline layer for **Claude Code, Codex, and OpenCode** — chats that talk to each other, agents that follow the rules, and a harvester that reads what the web won't show a bot.
+<p align="center">
+  <em>Professor owns none of these tools. It joins the ones you already run.</em>
+</p>
 
 ## Why Professor?
 
-You already run more than one AI chat. They cannot see each other, they forget the rules the moment context compacts, and a growing share of the web answers them with a 403. Professor is the layer that fixes all three — without touching what your harness is, only what it does.
+You already run more than one AI coding chat. They cannot see each other, each tool looks and behaves its own way, and the rules you wrote fade as a long conversation gets summarised.
 
 | | Without Professor | With Professor |
 | --- | --- | --- |
-| Many chats, many accounts | Scattered terminal tabs; a closed tab is a lost chat | One picker — every chat on every harness, live or resumable |
-| One chat needs another | You copy-paste between windows | `pfm chat call` — a signed turn, delivered and acknowledged |
-| The rules, after compaction | Whatever the prompt still remembers | Hooks that refuse, naming the right way in the refusal |
-| A bot-blocked page | A 403, or an empty page reported as content | A seven-rung fetch ladder; a block is reported as a block |
-| Claude and Codex rules | Two files that drift apart | One `CLAUDE.md`, compiled mirrors, drift fails the check |
-| An account hits its limit | Start over in a new chat | `/reload --account 2` — same pane, same history |
+| Many chats, many accounts | Scattered terminal tabs; a closed tab is a lost chat | One picker: every chat on every engine, live or resumable |
+| One chat needs another | You copy and paste between windows | One chat calls another, across engines, and gets the answer back |
+| Editor, panes, terminal, agent | Four tools, four looks, four ideas of what is running | Change the theme once: tmux, Herdr and VS Code follow Claude Code within a second, and a finished chat is marked done on its tab and in the list |
+| An account hits its usage limit | Start over in a new chat | The same chat moves to your next account: same pane, same history |
+| Your rules, late in a long chat | Whatever the prompt still remembers | Hooks that refuse the action and name the right way |
 
----
+## Quickstart
 
-## Six things you can watch it do
+Linux or macOS, with `tmux`, `git`, `jq`, `python3` and `zsh` installed.
 
-Every transcript below is real output from this repository, redacted only of names.
+```bash
+curl -fsSL https://raw.githubusercontent.com/rezzminator/professor/main/scripts/install.sh | sh
+pfm install          # preview: lists every file it would write, writes nothing
+pfm install --yes    # apply
+pfm                  # the picker: every chat on this machine
+```
 
-### 1. See the fleet
+The first line downloads the latest released `pfm`, one Go binary, checks it against the release's `SHA256SUMS` and puts it in `~/.local/bin`. Everything `pfm install` writes stays under your `$HOME`.
+
+> [!WARNING]
+> **Read before opting in:** `pfm` defaults Claude to bypass mode and Codex to approval bypass; machine and per-account configuration can select the prompted posture.
+
+A machine with a logged-in Codex needs one more step first, and VS Code, Herdr, a source build and the uninstall each have their own section: [INSTALL.md](INSTALL.md). Coming from an older version: [UPGRADING.md](UPGRADING.md).
+
+## Watch it work
+
+Every recording below is real output from this repository, redacted only of names.
+
+### Every chat on one screen
 
 <p align="center">
   <img src="docs/img/cards/pkx.webp" alt="pfm ls: every chat on this machine on one screen — api, webapp and ops projects; live, resumable, agent-run and new rows across Claude, Codex and OpenCode. The picker opens a Claude chat, takes a message, detaches back to the picker, then opens a Codex chat — same screen, different engine" width="900">
 </p>
 
-> `pfm ls`: every AI chat on the machine — Claude Code, Codex (⬢), and OpenCode — across accounts (🥇🥈), grouped by repo, live (●), resumable (↻), or agent-run (⚙). `⇄` marks chats that talk to other chats; `←here` is the one you are sitting in; `✦` opens a new one on any harness. Pick one, attach, or fire it a goal without ever attaching. A chat that scrolled off a closed terminal tab is not gone — it is a resumable transcript, and now somebody can find it.
+`pfm` lists every Claude Code, Codex and OpenCode chat on the machine, across accounts, grouped by project: live, resumable or run by an agent. Pick one and you are in it; a chat whose tab you closed is still there. [More on the picker](docs/guide/fleet-cli.md#see-the-fleet).
 
-`tab` once more and the same fleet is drawn as the sky at the top of this page.
-
-> Every project is a star its chats orbit; a spawned chat rises as a moon at its parent's angle, so lineage is visible in the sky itself. When chats talk to each other the sky draws an edge between them, read from a durable comms ledger — an edge is a fact, not a guess. The chronoscope replays the last 24h, and a chat that is dead now still renders as the ghost it was back then.
-
-### 2. Chats that talk to each other
-
-Two panes, two harnesses. You type one line into the Claude chat on the left; the Codex chat on the right receives it as a signed turn and gets to work.
+### Chats that call each other
 
 <p align="center">
   <img src="docs/img/cards/duo.webp" alt="Cross-harness orchestration: one Claude chat dispatches three workers — a Codex reviewer, an OpenCode docs writer, a Claude test runner — with chat call; each ACK and VERDICT flies back into the commanding chat, dispatched 3 · received 3" width="900">
 </p>
 
-> The footer on the Codex side is the signature: who spoke (`sid 0a98b7fe`) and the exact command to answer them. A message no sender could be derived for is refused, never delivered anonymously.
+A Claude chat hands a review to a Codex chat and a docs task to an OpenCode chat, and each answer comes back into the chat that asked. Every message is signed with its sender, and a message with no known sender is refused. [How a call works](docs/guide/fleet-cli.md#chats-that-talk-to-each-other).
 
-`pfm chat call` is what the Claude chat called — it types a real, signed turn into another chat's pane — under a per-target lock, safe against a busy target (`--force-now`) and shell-hostile payloads (`--file`). `pfm chat ask` waits for the answer, with named exit codes: `0 done · 2 usage · 3 chat dead · 4 no such chat · 5 answer timed out · 6 message not delivered · 7 answered, but another message reached the chat mid-wait`. The chat family is registered as `chat-professor`, with bare MCP tool names such as `call` and `ls`, so an agent can spawn, message, read, and retire other chats across all three harnesses.
+### Hit a limit, keep the conversation
 
-### 3. Rules that bite
+<p align="center">
+  <img src="docs/img/cards/reloadx.webp" alt="Reload without losing the conversation: the usage-limit hook fires at 96% on account 1; the chat finishes step 3, calls pfm chat reload --account 2 --then, the pane reboots in place on account 2 with every earlier turn still there, and resumes at step 4" width="900">
+</p>
 
-A subagent tries to run `git commit`. The `git-guard` PreToolUse hook answers:
+At 96% of an account's usage window the chat is warned, finishes the step in hand and restarts itself on your next account, in the same pane with every earlier turn still there. [Limits and reload](docs/guide/fleet-cli.md#reload-without-losing-the-conversation).
+
+### Rules that refuse
+
+A sub-agent tries to run `git commit`. A hook answers before the command runs:
 
 ```text
 git-guard blocked `git commit -m wip`.
 Only gitter writes this: spawn Agent(subagent_type: "gitter") with the repo path and the exact change. Never retry, rephrase, split or wrap the denied command to get past the guard.
 ```
 
-The refusal names the right way. Its twin, `pcm-guard`, refuses a write to a `CLAUDE.md`, a `.claude/` file or a template by anyone but the `pcm` agent (or an agent the project grants a `.claude/` directory in `.claude/pcm-guard.json`), whether the Edit tools or a `sed -i` make it. That is one of the mandatory rules every install ships with: only `gitter` writes git; framework edits go through the `pcm` agent; and **an error never renders as ABSENCE** — "we failed to look" is never shown as "nothing there".
+The refusal names the right way, so the agent takes it instead of trying again. [The rules and the agents behind them](docs/guide/discipline-layer.md).
 
-### 4. Read what the web hides from bots
+## Also in the box
 
-About one in ten of the world's top 10,000 websites now tells AI crawlers to stay out — among news publishers, more than half (HasData AI Crawler Block Index, July 2026). Harvester fetches the way a reader's browser does and climbs a seven-rung ladder — direct → Chrome-fingerprint TLS → reader proxy → extractor → headless-then-headed browser → Wayback → OCR — until it holds real content:
-
-<p align="center">
-  <img src="docs/img/cards/harv.webp" alt="Harvester: a fetch climbs the ladder on a live stage — every source it touched lit, every step logged with its reason, the result box with the character count and the trace; then the next scenario" width="900">
-</p>
-
-A block is reported as a block and an app shell is never stored as the page — a failure names every source it checked, never an empty success. DOIs, ISBNs, PMIDs and PMCIDs route through twelve open-access resolvers in parallel; `harvester ask -p "…" <sources>` feeds the full cached artifacts to a Claude or Codex ask engine, failed sources kept visible as receipts. Harvester is a standalone Go plugin in `plugins/harvester/`. Its native engine plugins register the `harvester` MCP server and launch `harvester mcp` as a stdio proxy to the persistent daemon; the [plugin guide](plugins/harvester/README.md) lists each engine's measured tool names and install route. The browser rung never solves anything interactive.
-
-### 5. One contract, three runtimes
-
-```text
-$ engine-sync codex build .
-$ head -1 AGENTS.md
-<!-- Generated by engine-sync from CLAUDE.md — edit the source, then run: engine-sync build -->
-$ engine-sync codex check .
-CODEX CHECK PASS
-```
-
-`CLAUDE.md` compiles to `AGENTS.md`; `.claude/**` compiles to `.codex/**` and `.opencode/**`; global agents' `.toml` roles compile straight into `~/.codex/agents/` as regular files — Codex opens a role with `O_NOFOLLOW` and refuses a symlink, so a link there is a role that cannot spawn. Every mirror is generated, never tracked — a fresh clone has none of them until its compiler runs. The Stop hook recompiles the mirrors and a drifted mirror fails the check, so the three harnesses can never disagree about the law. Even the verification engine is one TypeScript source compiled for both the Claude Workflow runtime and the Codex SDK.
-
-### 6. Reload without losing the conversation
-
-Every seat's windows on one tab, confirmed against the provider every two seconds — you see 96% before it becomes 100%:
-
-<p align="center">
-  <img src="docs/img/cards/limx.webp" alt="The pfm Limits tab: three Claude seats and a Codex home, each with its 5-hour and 7-day usage bars, percentage used and time to reset, provider-confirmed seconds ago" width="900">
-</p>
-
-Account 🥇 is at 96% of its 5-hour window. The usage hook warns the chat mid-task; it finishes the step in flight and moves the conversation to 🥈 itself — same pane, same history:
-
-<p align="center">
-  <img src="docs/img/cards/reloadx.webp" alt="Reload without losing the conversation: the usage-limit hook fires at 96% on account 1; the chat finishes step 3, calls pfm chat reload --account 2 --then, the pane reboots in place on account 2 with every earlier turn still there, and resumes at step 4" width="900">
-</p>
-
-> The red banner is the usage hook — it reaches the model before the limit does. `/reload` typed by a human goes through a hook too, before the model sees it, so the reboot never spends a turn.
-
-The running chat reboots in place — same pane, same history, new account, model, or effort. `--then "prompt"` hands the baton unattended; `/reload` typed by a human runs through a hook without spending a model turn; `/handoff --branch` carries the full context into a detached successor.
-
----
-
-## Install
-
-Two independent halves; adopt either without the other.
-
-- **`pfm`**, the fleet CLI — one Go binary, touches only your `$HOME`. Binary or source: [INSTALL.md](INSTALL.md).
-- **The discipline layer** — cloned, then scaffolded into your repo through an interview:
-
-```bash
-REPO=rezzminator/professor
-TAG=$(git ls-remote --tags --sort=-v:refname "https://github.com/${REPO}.git" 'v*' \
-  | grep -v '\^{}' | head -1 | sed 's#.*/##')
-git clone "https://github.com/${REPO}.git" "$HOME/.professor"
-git -C "$HOME/.professor" checkout "$TAG"
-cat "$HOME/.professor/docs/SETUP.md"      # the install interview — start here
-```
-
-The checkout is pinned to the latest semantic version tag. A maintainer checkout also runs `git config core.hooksPath .githooks` so `pfm doctor` reports `pre-push gate=armed`. Upgrading? Follow the [update workflow](INSTALL.md#updating): `pfm doctor --project-updates` reports `UPDATED / NEW / GONE-UPSTREAM / LOCAL-DELETED` with the upstream diff under each `UPDATED` row, you carry what applies into your local file, and `pin` / `ignore` / `drop` record your decision — pfm never rewrites a project file after init.
-
-Jumping several versions on one host? [UPGRADING.md](UPGRADING.md) prints the host fixes in apply order with `pfm install --check --plan`, and covers single-account gateway hosts.
-
-> [!WARNING]
-> **Read before opting in:** `pfm` defaults Claude to bypass mode and Codex to approval bypass; machine and per-account configuration can select the prompted posture. The `chat-professor` MCP server ships disabled through `mcp.servers.chat.enabled`. Harvester is installed and enabled separately through its native engine plugins; `pfm` does not control that registration.
-
----
-
-## The discipline layer (`templates/`)
-
-Clone it into a repo and you get the complete agent, command, hook and script template set; `CLAUDE.md` is yours to write, and `pfm init` points you at `/law:claude-md write CLAUDE.md` for it. `docs/SETUP.md` walks an interview that substitutes your project's names into every placeholder; `docs/PLACEHOLDERS.md` is the substitution law. Every template is the live source file verbatim — never a skeleton.
-
-The single idea underneath it is the **honest-looking absence** — an instrument that answers "nothing found" both when nothing is there and when the instrument itself is broken. The rules say it out loud:
-
-> An empty enumeration is never a verdict.
-
-- **One agent writes git.** `gitter` is the only agent that commits; every other agent is read-only.
-- **Framework edits.** A change to `.claude/**`, a rule file, a `CLAUDE.md` or `templates/**` goes through the `pcm` agent; it loads the `/law:prompt` contract before its first edit.
-- **The judge is never the thing being judged.** Verdicts are read from disk, never from a brief that asserts green.
-- **The flight pipeline.** Work too large to do directly goes to one foreman, its tier picked by difficulty and ambiguity, never size: `flights:foreman-sonnet` for a clear path where the pattern is in the code, `flights:foreman` for design choices, ambiguity, unfamiliar code, an unknown cause, several modules or the toughest work. The foreman reads what the build needs and writes the whole change by its own hand, spawning a child foreman only for an area sharing no file with its own. Once every foreman on the worktree has returned, the main chat sends one `flights:lander`: it computes its review plan from the diff, spawns cheap diff-checkers, spec-checkers and usage-checkers in parallel, verifies every candidate on disk, fixes every finding, runs the gate, then the main chat lands it through the repo's `worktree.sh` (`gitter` takes every refusal). `/flights:doctor` meters the flight from transcripts and git — landed lines per million input tokens — never from what an agent said it did.
-- **On-demand specifications.** The user, or the main chat on the user's request, invokes `flights:speccer` for a spec and token price. It returns to its caller, outside the build/land lifecycle; no lifecycle agent or command invokes it.
-- **The persona is load-bearing.** The Professor prompt replaces the vendor system prompt; the vendor baselines are pinned by sha256 so `pfm doctor` reports `MATCHES / DRIFT / CHECK FAILED / CANNOT CAPTURE` — never silence.
-
-Professor ships no GPT agents. `claude.gptAgents` in the machine config `pfm.config.json` (default `false`, disabled) is the switch for the engine-sync GPT-twin feature: it declares the engine-sync capability `gpt-agents`, and engine-sync installs only agents whose `requires` that capability satisfies. No agent requires it today. [gpt-gateway](https://github.com/rezzminator/gpt-gateway) is a separate model route that serves GPT model IDs over your ChatGPT login.
-
-A legal skill shelf ships for teams that want one.
-
----
-
-## The fleet CLI (`pfm/`)
-
-One Go binary with embedded installer assets. Beyond the six moments above:
-
-- **Limits, honestly.** The `Limits` tab shows every provider window on the box; a provider it cannot reach never renders as a 0% bar — the panel says `no usage source registered` instead.
-- **Crash-safety by construction.** `reap`, `archive`, `heal`, and `install` default to a dry run, and the dry run **is** the apply's preview. `heal` backs up the store before it deletes a row.
-- **Headless exec.** `pfm headless exec` is one scriptable interface for Claude and OpenCode; `--engine codex` also routes to OpenCode. Prompt, system prompt, schema, and timeout go in; normalized results or native streams come out. See [headless README](pfm/internal/headless/README.md).
-- **Housekeeping.** `doctor` runs the dependency registry and fleet DB checks; `tokens` attributes spend per agent from the telemetry ledger and the transcripts (ledger totals sum telemetry observations that can overlap, never a count of unique calls; telemetry with no session is kept apart from every chat, never guessed into one; transcript totals miss background calls such as `auto_mode` and `prompt_suggestion`, which only the telemetry ledger sees; and prices default to direct/global Claude list rates, so a Bedrock or Vertex setup sets its billing route in `pfm.prices.json`); `/context-audit` rebuilds and prices what each loop loads before its first tool call; `statusline` renders identity, session and spend; the mirrors' single writer is `engine-sync`, which the plugin hooks and `pfm install` run.
-- **Editor.** `pfm install --vscode` installs the Professor VS Code extension — visible as **Professor** in the Extensions view and a **Professor** entry in the terminal `+` dropdown — and makes the `PFM` settings profile (its own icon and colour) the default, so each new integrated terminal opens at the fleet picker. To open a Professor terminal, press Ctrl+Shift+Alt+T (macOS: Cmd+Shift+Alt+T), run **Professor: New Chat Terminal**, or pick **Professor** from the terminal `+` dropdown — all three give the next icon and colour; the default `+` terminal is `PFM`. On a prompt file (`SKILL.md`, an agent, a command, `CLAUDE.md`, `AGENTS.md`; setting `professor.promptLint.globs`) the **Prompt Lint** link above line 1 of the file (it reads "Prompt Lint… Ns · Cancel" while a run goes; the palette's **Professor: Prompt Lint** does the same) has Claude, on your own subscription through `pfm headless exec`, check the editor's text against Professor's prompt law (`/law:prompt`, built into the extension's system prompt by `pfm install`); its errors, warnings and info land in the Problems panel, each suggested rewrite a quick fix.
-
-<details>
-<summary><strong>Requirements</strong> — Linux or macOS, <code>tmux</code>, Go 1.27.1+ for source builds</summary>
-
-From `pfm doctor`'s own registry: Linux or macOS, `amd64` or `arm64`, plus `tmux` ≥ 1.8, `git`, `python3` (checked, never installed by `pfm install`), `sh`, `bash`, `zsh`, and `sleep`; `setsid` on Linux, `ps`/`lsof`/`launchctl`/`security` on macOS. A clone host also needs the [engine-sync binary](#plugins). Go **1.27.1 or newer** for source builds and `pfm update`. The `claude` and `codex` CLIs are optional diagnostics. Themes can be skipped with `--skip-themes`; the Codex probe with `--skip-engine codex`. Run the [dry preview](INSTALL.md#preview-plugin-setup-and-optional-components) before applying. Harvester's native install routes, configuration and testing are documented in its [plugin guide](plugins/harvester/README.md).
-
-</details>
-
----
-
-## Plugins
-
-Claude Code plugins built with Professor, installable on their own. This repo is their marketplace:
-
-```bash
-claude plugin marketplace add rezzminator/professor
-claude plugin install forward-compaction@professor
-```
-
-- [forward-compaction](https://github.com/rezzminator/forward-compaction): the model writes its own handoff through one tool and the plugin installs it at Claude Code's compaction, with facts recorded from typed events and every later message kept verbatim. It replaces the earlier `sub-agent-compact` plugin, whose settings it no longer reads (its CHANGELOG maps each one).
-- [cache-live-control](https://github.com/rezzminator/cache-live-control): a `/cache` command that switches the prompt-cache TTL (5m, 1h or automatic) for one chat and its sub-agents, live, with no model turn.
-- [auto-effort](https://github.com/rezzminator/auto-effort): reasoning effort for the main chat and for the sub-agents it launches. Each main-chat turn starts at a planned level, the model raises or lowers it with a `set_effort` tool, failing tests raise it, and a per-model cache check switches it off where an effort change would break the prompt cache. Start the Agent prompt with `[effort: low|medium|high|xhigh|max]` to set a sub-agent's effort per spawn; an agent whose frontmatter opts in with `effortControl` has its effort rise at each failing test run or red sub-task and come home once the trouble resolves. It replaces the earlier `auto-effort-control` and `effort-live-control` plugins, carrying their settings over (its README and CHANGELOG state the migration).
-- [tool-visibility-controller](https://github.com/rezzminator/tool-visibility-controller): one `visibility` field in agent, skill and command frontmatter decides, per agent, which sub-agents, skills, MCP tools and built-in tools it sees and may call — hidden from the listing and refused, never just discouraged.
-- [rule-control](https://github.com/rezzminator/rule-control): one `visible-to` key in a rule file's frontmatter names the loops that receive the rule — the main chat, chosen agent types (globs allowed), or all; a targeted rule leaves the context every loop shares and reaches only those loops, again after each compaction. Claude Code only: engine-sync still carries such a rule to every Codex and OpenCode loop.
-- [flights](https://github.com/rezzminator/flights): a codebase map for the agents that build and land work — the main chat at session start, and each flights foreman or lander as it starts, gets ponytail's symbol map, ported: one line per source folder naming the functions, classes and types its files export, within 2,000 characters, cached per commit; in a flight worktree it lists only the folders that flight changed; when the map cannot be built, the line says why. Claude Code only; the plugin also ships the flights agents (`flights:foreman`, `flights:lander` and their children), `/flights:spec`, `/flights:doctor` and the `flights:lander-inventory` skill.
-- [buddy](https://github.com/rezzminator/buddy): a tiny ASCII companion above your prompt — Quack the duck, seven more characters or your own — that comments on each turn, suggests your next prompt and answers `/buddy` questions from what it remembers of the chat.
-- [callmeter](https://github.com/rezzminator/callmeter): records every tool call, model request, sub-agent turn and session event into one local SQLite store — counts and sizes, never your prompts or file contents — and answers which files, commands and agents cost the most.
-- [engine-sync](https://github.com/rezzminator/engine-sync): carries a project's Claude Code agents, commands, skills and MCP servers to Codex and OpenCode — `AGENTS.md`, `.codex/`, `.opencode/` and the role TOMLs in each Codex home — and keeps them in step after every turn; at `pfm install`, `engine-sync global` also carries the always-on global rules of `~/.claude/rules/` to both engines; run it as `engine-sync codex ...` and `engine-sync opencode ...`.
-- [cache-keepwarm](https://github.com/rezzminator/cache-keepwarm): keeps the main chat's prompt cache warm while it waits on background agents, shells, Monitors and workflows — one invisible replay before expiry, admitted only while the forecast spend stays under the rewrite it saves; `/keepwarm on|off|status` controls it.
-
-`pfm install` ensures the plugins `claude.plugins` in `pfm.config.json` lists; unset, that is cache-live-control, forward-compaction, auto-effort, tool-visibility-controller, engine-sync and flights. A bare name is one of ours, installed as `{plugin}@professor` on every build. A release build installs it from this repo's marketplace, `rezzminator/professor`. An alpha build of pfm installs it instead from a local checkout: the working tree of `{plugin}/plugins/{plugin}` under the source clone's `plugins/`, where each plugin is a git submodule on its `develop` branch (`git submodule update --init`), or under the directory `claude.pluginCheckoutRoot` in `pfm.config.json` names, which wins when set: it copies each into `~/.local/share/professor-dev/plugins/{plugin}`, lists it in that directory's own marketplace, also named `professor`, and installs `{plugin}@professor` from there. An alpha build also installs every other plugin the source clone's `.claude-plugin/marketplace.json` lists the same way, so `claude.plugins` is the enabled set: a listed plugin is enabled, and one the list does not name is installed from its checkout and disabled. A plugin with no checkout is not installed on an alpha build, never from GitHub, and the line names the root it tried; for a listed one that is a failure. Unset on an alpha build, the list is every plugin the marketplace lists, all enabled; a release build's default stays the six above. The install re-points a `professor` marketplace Claude Code knows from another source with `claude plugin marketplace add`, never automatically removing it. A printed manual repair may require `claude plugin marketplace remove`; it deletes the plugins' saved options and data, so run it only if they may go. A plugin installed under an older id, `{plugin}@{plugin}` from its own GitHub marketplace or `{plugin}@{plugin}-dev` from `~/.local/share/{plugin}-dev`, moves to `{plugin}@professor` once that is installed: its `pluginConfigs` options are copied over, each old install is uninstalled with its data kept (one in a project scope is first installed as `{plugin}@professor` in that project), the old marketplace is removed once nothing is installed from it, `~/.local/share/{plugin}-dev` is deleted, and any old key left in `enabledPlugins` or `pluginConfigs` is dropped; `pfm doctor` names each old copy left. The install builds an enabled callmeter's binary from its checkout into `{callmeter home}/bin/{version}/callmeter` before refreshing its copy, keeping the binary it replaces as `callmeter.prev`. Claude Code reads an alpha checkout copy straight from its folder (`readFromFolder` in `claude plugin list --json`; `claude plugin update` answers that there is nothing to update), never from its versioned cache, so a checkout edit, committed or not, reaches a new chat or an open chat's `/reload-plugins` with no version bump, and a running chat's next hook call can already run newly mirrored files. The install also runs `claude plugin update` for each `plugins/installed_plugins.json` entry behind the checkout's `plugin.json` version. On a release build Claude's versioned cache is what runs: a content change ships with a version bump, and an open chat gets it when it restarts. A listed plugin the install leaves off its checkout copy or disabled is a `FAIL` line naming the plugin, the account dir and each cause, the summary line counts it as `failed=N` and the install exits non-zero; `pfm doctor` reports the same as `FAIL`, and fails when the callmeter binary the install placed is gone. A full `name@marketplace` id is installed as named, from Claude Code's own marketplace of that name when it knows one; an entry `{"id": "name@marketplace", "source": "owner/repo"}` adds the marketplace first (`source` is what `claude plugin marketplace add` takes: `owner/repo`, a git or https URL, a path). An id with neither is reported by name, with its repair, in install and doctor. A plugin neither the list nor, on an alpha build, the marketplace names is never touched in any `settings.json`.
-
-A plugin option is also an environment variable named `{PLUGIN}_{OPTION}`: the plugin's name and the option in upper snake case, as in `AUTO_EFFORT_FLOOR`. The variable beats the option, which beats the default. Two plugins differ: forward-compaction has no options and reads its settings from these variables alone, as in `FORWARD_COMPACTION_CEILING`; buddy reads none and keeps every setting in its own file, `${XDG_CONFIG_HOME:-~/.config}/buddy/config.json` (its README). `claude.env` in `pfm.config.json` maps each variable to its string value, and `pfm install` writes the map into the selected config directory's `settings.json` `env` (the primary account by default, normally shared through the accounts' links). Doctor checks the last successful install's recorded target, including `--config-dir`. pfm owns only the variables it wrote, recorded in `~/.local/share/pfm/install/claude-env-ownership.json`: a variable dropped from `claude.env` is removed unless it was changed by hand since, and one pfm never wrote is left alone. Alpha installs default an unset `PLUGIN_LOG_DIR` in each managed account directory to the shared `~/.local/state/pfm/plugin-logs` folder, or the absolute path set by `claude.env.PLUGIN_LOG_DIR`; an operator-set value is neither overwritten nor taken into ownership. Release installs and uninstall retire generated settings only while they remain pfm-owned, never deleting the logs. A chat writing that settings.json while pfm edits it keeps its write: pfm reads the file again just before replacing it and plans its edit again on what it finds, at most three times, then fails naming the file — rerun `pfm install`. Apart from the known `PLUGIN_LOG_DIR` knob, a variable no installed plugin's name prefixes is a warning. `claude.env` may not set the launch-owned `CACHE_LIVE_CONTROL_MAIN_TTL`, `CACHE_LIVE_CONTROL_AGENTS_TTL`, `CALLMETER_HOME` or `ENGINE_SYNC_HOME`; every launch sets the main cache TTL from `claude.cache1h`. `pfm doctor` fails a variable missing or different from `claude.env`, and one left behind after its removal.
-
-`pfm install` installs no engine-sync, and on any host with a Professor clone (the discipline-layer clone above, every `pfm update` host) or a Codex home it refuses without the binary, naming the missing path; a binary-only install with neither skips the step. So install the plugin before the first `pfm install --yes` or `pfm update`: `claude plugin marketplace add rezzminator/professor`, then `claude plugin install engine-sync@professor`, then start a new Claude session. At that session start its wrapper downloads the release binary, checks it against the plugin's `SHA256SUMS`, and links it at `~/.local/share/engine-sync/bin/engine-sync`, the binary the plugin's hooks run; `test -x` on that path confirms it. Once that binary exists, `pfm install --yes` links it onto PATH as `~/.local/bin/engine-sync` (an existing entry there that is not pfm's link stays untouched, and `pfm doctor` warns).
-
-## Origin
-
-Extracted from a live production monorepo, not designed in the abstract. Every rule here exists because something went wrong without it — the gate that reads disk instead of chat exists because an agent once claimed green; the scoped-commit rule exists because two concurrent commits once swallowed each other's files; the prevention step exists because the same bug class shipped twice. The characters exist because a generic agent wasn't good enough to argue with.
-
-Built by [@rezzminator](https://github.com/rezzminator).
+| | What it is | Read more |
+| --- | --- | --- |
+| The discipline layer | Agents, commands, hooks and rules you scaffold into your own repository through an interview | [Guide](docs/guide/discipline-layer.md) · [Setup](docs/SETUP.md) |
+| Harvester | Fetches the pages that turn AI tools away, and reports a block as a block, never as an empty page | [Guide](docs/guide/plugins.md#read-what-the-web-hides-from-bots) |
+| engine-sync | Write your project rules once for Claude Code; Codex and OpenCode get generated copies, checked for drift | [Guide](docs/guide/plugins.md#one-contract-three-runtimes) |
+| Ten Claude Code plugins | Each installs on its own: compaction that keeps your facts, live prompt-cache and effort control, per-agent tool and rule visibility, a call meter | [Guide](docs/guide/plugins.md#plugins) |
+| The rest of `pfm` | The limits tab, headless runs, token accounting, the VS Code extension | [Guide](docs/guide/fleet-cli.md) |
 
 ## Help and community
 
@@ -248,6 +119,10 @@ Questions and ideas go to [Discussions](https://github.com/rezzminator/professor
 ## Contributing
 
 Work lands on `develop`; `main` moves only by release. [CONTRIBUTING.md](CONTRIBUTING.md) carries the build, the gates and the rules of a repository whose files ship into other people's agent pipelines. Pull requests are welcome.
+
+## Origin
+
+Extracted from a live production monorepo, not designed in the abstract: every rule here exists because something went wrong without it. Built by [@rezzminator](https://github.com/rezzminator).
 
 ## License
 

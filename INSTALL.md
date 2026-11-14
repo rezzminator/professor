@@ -52,6 +52,8 @@ The `claude` and `codex` executables are not installed by `pfm`. Their self-doct
 
 No clone, no Go toolchain. The installer's own assets (command cards, launcher shim, scheduler units) are embedded in the binary.
 
+One line does the whole download: `curl -fsSL https://raw.githubusercontent.com/rezzminator/professor/main/scripts/install.sh | sh` fetches the latest release's binary for this OS and architecture, checks it against `SHA256SUMS` and installs it as `~/.local/bin/pfm` (`PFM_VERSION` picks another tag, `PFM_INSTALL_DIR` another directory). The block below is the same download by hand.
+
 Prerequisites: the shared runtime listed above and `git` (to resolve the latest tag — or read it off the [Releases page](https://github.com/rezzminator/professor/releases) by hand). The binary path does not require a Go toolchain or access to a Go module proxy.
 
 ```bash

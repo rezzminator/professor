@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -43,9 +44,17 @@ type herdrTabProvider struct {
 	warn   io.Writer
 	// probe, when set, takes each enumeration's baseline for changed.
 	probe *tabProbe
+	// last is the last enumeration's fleet scan and seen the decorations each
+	// chat it inspected to a settled state drew (nil: no tab), so a read that
+	// is not fresh, after a probe that saw only chats' and panes' state move,
+	// scans no fleet and re-inspects only those chats. reads counts the reads.
+	last  *FleetScan
+	seen  map[string][]herdr.TabDecoration
+	keys  []string // keys[i] is tabChatKey of last.Rows[i]
+	reads uint64
 }
 
-func (provider *herdrTabProvider) tabs(ctx context.Context, socket string) ([]herdr.TabDecoration, error) {
+func (provider *herdrTabProvider) tabs(ctx context.Context, socket string, fresh bool) ([]herdr.TabDecoration, error) {
 	if ticks, ok := provider.warn.(*tickWarnings); ok {
 		ticks.tick()
 	}
@@ -55,6 +64,9 @@ func (provider *herdrTabProvider) tabs(ctx context.Context, socket string) ([]he
 	}
 	pendingAgents := map[string]time.Time{}
 	defer func() { provider.missingAgents = pendingAgents }()
+	provider.reads++
+	dirty := provider.probe.takeDirty()
+	reuse := !fresh && dirty.partial && provider.last != nil
 	provider.probe.begin(ctx)
 	// An unreadable configuration never stops the tabs' status: it is named, and
 	// the tabs keep painting in the default mode while it lasts.
@@ -89,15 +101,38 @@ func (provider *herdrTabProvider) tabs(ctx context.Context, socket string) ([]he
 			}
 		}
 	}
-	scan, err := provider.scan(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("scan tab chats: %w", err)
+	scan, keys := provider.last, provider.keys
+	if !reuse {
+		read, err := provider.scan(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("scan tab chats: %w", err)
+		}
+		scan = &read
+		keys = make([]string, len(read.Rows))
+		for i := range read.Rows {
+			keys[i] = tabChatKey(&headless.Chat{SeatID: read.Rows[i].SeatID, ID: read.Rows[i].ID})
+		}
 	}
 	provider.probe.record(ctx, socket, scan.Rows, mode, glyphRead)
 	var decorations []herdr.TabDecoration
+	seen := provider.seen // a reuse keeps every chat's entry it does not re-inspect
+	if !reuse {
+		seen = map[string][]herdr.TabDecoration{}
+	}
 	for i := range scan.Rows {
 		row := scan.Rows[i]
 		target := FromRow(row)
+		chatKey := keys[i]
+		if prior, found := seen[chatKey]; reuse && found && !dirty.chats[chatKey] &&
+			!dirty.panes[tabPaneKey(target.Pane)] && !dirty.shown(prior) {
+			if len(prior) > 0 {
+				provider.probe.track(target, row.Size)
+				decorations = append(decorations, prior...)
+			}
+			continue
+		}
+		delete(seen, chatKey)
+		warned := provider.warnings()
 		views, err := provider.views(ctx, target, socket)
 		if errors.Is(err, errTabPaneList) {
 			return nil, fmt.Errorf("locate tab views of %s: %w", target.ID, err)
@@ -115,16 +150,19 @@ func (provider *herdrTabProvider) tabs(ctx context.Context, socket string) ([]he
 			continue
 		}
 		if len(views) == 0 {
+			if provider.warnings() == warned { // a views read that named a failure (an unproved owner) is no settled "no tab"
+				seen[chatKey] = nil
+			}
 			continue
 		}
-		provider.probe.track(target)
+		provider.probe.track(target, row.Size)
 		if !target.Live && len(scan.Unreadable) > 0 {
 			return nil, fmt.Errorf("fleet inspection incomplete, refusing dead tab status: %v", scan.Unreadable)
 		}
 		if views[0].State == headless.StateDead {
 			target.Live = false
 		}
-		state := tabStateUnknown
+		state, settled := tabStateUnknown, false
 		if views[0].State == tabStateUnknown {
 			// Ownership is proved, but foreground evidence is unavailable.
 			// A transcript/cache must not overwrite that uncertainty.
@@ -184,8 +222,9 @@ func (provider *herdrTabProvider) tabs(ctx context.Context, socket string) ([]he
 				}
 			}
 		} else {
-			state = status.State
+			state, settled = status.State, true
 		}
+		first := len(decorations)
 		for i := range views {
 			view := views[i]
 			view.Name, view.UserName, view.UserKnown = target.Name, row.UserName, row.UserNameKnown
@@ -194,8 +233,12 @@ func (provider *herdrTabProvider) tabs(ctx context.Context, socket string) ([]he
 			view.Glyphs = glyphs
 			decorations = append(decorations, view)
 		}
+		if settled && provider.warnings() == warned {
+			seen[chatKey] = slices.Clip(decorations[first:])
+		}
 	}
 	provider.probe.commit()
+	provider.last, provider.seen, provider.keys = scan, seen, keys
 	return decorations, nil
 }
 
@@ -257,6 +300,16 @@ func missingTabAgentState(
 type tickWarnings struct {
 	out        io.Writer
 	last, this map[string]bool
+	writes     uint64 // every body written, named or not
+}
+
+// warnings counts the diagnostics the provider wrote so far (0 when its writer
+// does not count them), so a read can tell whether a chat's views named one.
+func (provider *herdrTabProvider) warnings() uint64 {
+	if ticks, ok := provider.warn.(*tickWarnings); ok {
+		return ticks.writes
+	}
+	return 0
 }
 
 func (writer *tickWarnings) tick() {
@@ -267,6 +320,7 @@ func (writer *tickWarnings) Write(body []byte) (int, error) {
 	if writer.this == nil {
 		writer.this = map[string]bool{}
 	}
+	writer.writes++
 	key := string(body)
 	writer.this[key] = true
 	if writer.last[key] {

@@ -702,7 +702,7 @@ func TestTabMonitorKeepsPollingAndTakesSingletonBeforePaint(t *testing.T) {
 	fake := &fakeIndicatorHerdr{}
 	painter, step, _ := newTestPainter(t, fake, phaseOn)
 	polls := 0
-	painter.tabs = func(context.Context, string) ([]TabDecoration, error) {
+	painter.tabs = func(context.Context, string, bool) ([]TabDecoration, error) {
 		polls++
 		return nil, fmt.Errorf("tab provider failure")
 	}

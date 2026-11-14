@@ -12,6 +12,9 @@ ignore_paths = [
   # environment-variable NAMES, not values: its constants name
   # ANTHROPIC_AUTH_TOKEN and ANTHROPIC_API_KEY.
   "pfm/internal/claudelaunch/knobs.go",
+  # The same rule on the fake Claude engine's constant naming ANTHROPIC_API_KEY;
+  # the key it sends is the launch's own setting, read at run time.
+  "pfm/internal/mockengine/claude_api.go",
   # Display-token interpolation in a theme fixture, not an authentication token.
   "pfm/internal/themesync/herdr_test.go",
   # Research quotes available sandbox modes; it does not configure a default.

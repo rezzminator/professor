@@ -158,7 +158,7 @@ func TestTabStatusDoneUntilFirstFocus(t *testing.T) {
 			// Herdr's effective done becomes idle when focus marks it seen.
 			f.state, d.AgentStatus = "idle", "idle"
 		}
-		if _, err := reconcileTab(context.Background(), "endpoint", dir, d, int64(tick), f.call); err != nil {
+		if _, _, err := reconcileTab(context.Background(), "endpoint", dir, d, int64(tick), f.call); err != nil {
 			t.Fatal(err)
 		}
 		want := "[I] Chat"
@@ -172,7 +172,7 @@ func TestTabStatusDoneUntilFirstFocus(t *testing.T) {
 	}
 	// A later completion gets its own unseen state, even if it says the same thing.
 	f.state, d.AgentStatus = "done", "done"
-	if _, err := reconcileTab(context.Background(), "endpoint", dir, d, 0, f.call); err != nil {
+	if _, _, err := reconcileTab(context.Background(), "endpoint", dir, d, 0, f.call); err != nil {
 		t.Fatal(err)
 	}
 	if f.label != "[C] Chat" {
@@ -185,7 +185,7 @@ func TestTabStatusFocusedCompletionIsAlreadySeen(t *testing.T) {
 	f.state = "done"
 	d := tabObservation("idle")
 	d.AgentStatus, d.Mode = "done", "text"
-	if _, err := reconcileTab(context.Background(), "endpoint", t.TempDir(), d, 0, f.call); err != nil {
+	if _, _, err := reconcileTab(context.Background(), "endpoint", t.TempDir(), d, 0, f.call); err != nil {
 		t.Fatal(err)
 	}
 	if f.label != "[I] Chat" {
@@ -201,7 +201,7 @@ func TestTabStatusPulseAndNoop(t *testing.T) {
 			dir := t.TempDir()
 			d := tabObservation(state)
 			for _, tick := range []int64{0, 0, 1, 1, 0} {
-				if _, err := reconcileTab(context.Background(), "endpoint", dir, d, tick, f.call); err != nil {
+				if _, _, err := reconcileTab(context.Background(), "endpoint", dir, d, tick, f.call); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -220,7 +220,7 @@ func TestTabStatusNewNameWins(t *testing.T) {
 	f := newTabStatusFixture()
 	dir := t.TempDir()
 	d := tabObservation("blocked")
-	if _, err := reconcileTab(context.Background(), "endpoint", dir, d, 0, f.call); err != nil {
+	if _, _, err := reconcileTab(context.Background(), "endpoint", dir, d, 0, f.call); err != nil {
 		t.Fatal(err)
 	}
 	// A competing name writer uses the same lock/state, exactly as LabelSoleTab.
@@ -239,7 +239,7 @@ func TestTabStatusNewNameWins(t *testing.T) {
 	}()
 	<-locked
 	go func() {
-		_, err := reconcileTab(context.Background(), "endpoint", dir, d, 1, f.call)
+		_, _, err := reconcileTab(context.Background(), "endpoint", dir, d, 1, f.call)
 		pulseDone <- err
 	}()
 	close(proceed)
@@ -272,7 +272,7 @@ func TestTabStatusChatRenameReachesTheTab(t *testing.T) {
 	tick := func(name, want string) {
 		t.Helper()
 		d.Name = name
-		if _, err := reconcileTab(context.Background(), "endpoint", dir, d, 0, f.call); err != nil {
+		if _, _, err := reconcileTab(context.Background(), "endpoint", dir, d, 0, f.call); err != nil {
 			t.Fatal(err)
 		}
 		if want := DecoratedTabLabel(want, "blocked", "emoji", 0, TabGlyphs{}); f.label != want {
@@ -344,7 +344,7 @@ func TestTabStatusUserRenameReplacesAUserLabel(t *testing.T) {
 	tick := func(name, user, want string) {
 		t.Helper()
 		d.Name, d.UserName, d.UserKnown = name, user, known
-		if _, err := reconcileTab(context.Background(), "endpoint", dir, d, 0, f.call); err != nil {
+		if _, _, err := reconcileTab(context.Background(), "endpoint", dir, d, 0, f.call); err != nil {
 			t.Fatal(err)
 		}
 		if want := DecoratedTabLabel(want, "blocked", "emoji", 0, TabGlyphs{}); f.label != want {
@@ -473,7 +473,7 @@ func TestTabStatusExplicitRenameBeforeFirstPaintWaitsForSource(t *testing.T) {
 		{"Later rename", "Later rename"},
 	} {
 		d.Name, d.UserName, d.UserKnown = tick.source, tick.source, true
-		if _, err := reconcileTab(context.Background(), "endpoint", dir, d, 0, f.call); err != nil {
+		if _, _, err := reconcileTab(context.Background(), "endpoint", dir, d, 0, f.call); err != nil {
 			t.Fatal(err)
 		}
 		if want := DecoratedTabLabel(tick.want, "blocked", "emoji", 0, TabGlyphs{}); f.label != want {
@@ -496,7 +496,7 @@ func TestTabStatusAutomaticTitleBeforeFirstPaintReplacesLaunchLabel(t *testing.T
 		{"Later title", "Later title"},
 	} {
 		d.Name, d.UserName, d.UserKnown = tick.source, "", true
-		if _, err := reconcileTab(context.Background(), "endpoint", dir, d, 0, f.call); err != nil {
+		if _, _, err := reconcileTab(context.Background(), "endpoint", dir, d, 0, f.call); err != nil {
 			t.Fatal(err)
 		}
 		if want := DecoratedTabLabel(tick.want, "idle", "emoji", 0, TabGlyphs{}); f.label != want {
@@ -525,12 +525,12 @@ func TestTabStatusTopologyAndGeneration(t *testing.T) {
 			d := tabObservation("error")
 			dir := t.TempDir()
 			// Establish decoration first; the second observation is stale.
-			if _, err := reconcileTab(context.Background(), "a", dir, d, 0, f.call); err != nil {
+			if _, _, err := reconcileTab(context.Background(), "a", dir, d, 0, f.call); err != nil {
 				t.Fatal(err)
 			}
 			tc.change(f, &d)
 			before := len(f.renames)
-			if _, err := reconcileTab(context.Background(), "a", dir, d, 1, f.call); err != nil {
+			if _, _, err := reconcileTab(context.Background(), "a", dir, d, 1, f.call); err != nil {
 				t.Fatal(err)
 			}
 			if before != 1 || len(f.renames) != before {
@@ -544,15 +544,15 @@ func TestTabStatusEndpointIsolationAndRestore(t *testing.T) {
 	dir := t.TempDir()
 	a, b := newTabStatusFixture(), newTabStatusFixture()
 	d := tabObservation("error")
-	if _, err := reconcileTab(context.Background(), "a", dir, d, 0, a.call); err != nil {
+	if _, _, err := reconcileTab(context.Background(), "a", dir, d, 0, a.call); err != nil {
 		t.Fatal(err)
 	}
 	d.Name = "Other"
-	if _, err := reconcileTab(context.Background(), "b", dir, d, 0, b.call); err != nil {
+	if _, _, err := reconcileTab(context.Background(), "b", dir, d, 0, b.call); err != nil {
 		t.Fatal(err)
 	}
 	d.Mode = "off"
-	if _, err := reconcileTab(context.Background(), "a", dir, d, 1, a.call); err != nil {
+	if _, _, err := reconcileTab(context.Background(), "a", dir, d, 1, a.call); err != nil {
 		t.Fatal(err)
 	}
 	if a.label != "Chat" || b.label != "🟥 Other" {
@@ -566,7 +566,7 @@ func TestTabStatusShutdownRestoresOnlyCurrentOwner(t *testing.T) {
 			f := newTabStatusFixture()
 			d := tabObservation("blocked")
 			dir := t.TempDir()
-			if _, err := reconcileTab(context.Background(), "endpoint", dir, d, 0, f.call); err != nil {
+			if _, _, err := reconcileTab(context.Background(), "endpoint", dir, d, 0, f.call); err != nil {
 				t.Fatal(err)
 			}
 			call := f.call
@@ -656,7 +656,7 @@ func TestTabStatusActualSocketAndSidebar(t *testing.T) {
 		return true, nil
 	}
 	for _, tick := range []int64{0, 0, 1, 1} {
-		if _, err := reconcileTab(context.Background(), socket, dir, d, tick, Call); err != nil {
+		if _, _, err := reconcileTab(context.Background(), socket, dir, d, tick, Call); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -703,7 +703,7 @@ func TestTabOwnershipPrecedesPaneReads(t *testing.T) {
 					}
 					err = painter.restoreTabs(context.Background())
 				} else {
-					_, err = reconcileTab(context.Background(), "endpoint", t.TempDir(), d, 0, f.call)
+					_, _, err = reconcileTab(context.Background(), "endpoint", t.TempDir(), d, 0, f.call)
 				}
 				if reads != 0 || len(f.renames) != 0 {
 					t.Fatalf("unproved %s: reads=%d renames=%v err=%v", refusal, reads, f.renames, err)
@@ -838,7 +838,7 @@ func TestTabStatusLostRenameReplyNeverStacksThePrefix(t *testing.T) {
 	dir := t.TempDir()
 	d := tabObservation("blocked")
 	d.Name = "Chat"
-	if _, err := reconcileTab(context.Background(), "endpoint", dir, d, 0, f.call); err != nil {
+	if _, _, err := reconcileTab(context.Background(), "endpoint", dir, d, 0, f.call); err != nil {
 		t.Fatal(err)
 	}
 	lost := func(ctx context.Context, socket string, lines ...[]byte) ([]json.RawMessage, error) {
@@ -848,11 +848,11 @@ func TestTabStatusLostRenameReplyNeverStacksThePrefix(t *testing.T) {
 		}
 		return results, err
 	}
-	if _, err := reconcileTab(context.Background(), "endpoint", dir, d, 1, lost); err == nil {
+	if _, _, err := reconcileTab(context.Background(), "endpoint", dir, d, 1, lost); err == nil {
 		t.Fatal("a rename whose answer was lost must be an error")
 	}
 	for _, tick := range []int64{0, 1} {
-		if _, err := reconcileTab(context.Background(), "endpoint", dir, d, tick, f.call); err != nil {
+		if _, _, err := reconcileTab(context.Background(), "endpoint", dir, d, tick, f.call); err != nil {
 			t.Fatal(err)
 		}
 		if want := DecoratedTabLabel("Chat", "blocked", "emoji", int(tick), TabGlyphs{}); f.label != want {
@@ -866,7 +866,7 @@ func TestTabStatusLostRenameReplyNeverStacksThePrefix(t *testing.T) {
 		t.Fatal("a name writer's rename whose answer was lost must be an error")
 	}
 	d.Name = "Named"
-	if _, err := reconcileTab(context.Background(), "endpoint", dir, d, 0, f.call); err != nil {
+	if _, _, err := reconcileTab(context.Background(), "endpoint", dir, d, 0, f.call); err != nil {
 		t.Fatal(err)
 	}
 	if want := DecoratedTabLabel("Named", "blocked", "emoji", 0, TabGlyphs{}); f.label != want {

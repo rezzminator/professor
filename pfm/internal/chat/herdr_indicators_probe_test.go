@@ -29,6 +29,10 @@ import (
 // scan and re-inspect only that chat, a tmux chat's on the pane its tab shows;
 // a pane whose terminal moved, or a probe that could not tell, scans again; a
 // chat whose views named a failure is read again.
+// A title a tabbed Claude transcript changes past the scan's read of it (an
+// AI title, a /rename), one landing while the scan runs included, is the
+// fleet's to read again: the next read scans and paints the name; a title
+// restated unchanged is a turn.
 // The engine's foreground is read again only once tabEngineProbe passed.
 // A turn of a chat with no tab is no change. A pane list it cannot read is an
 // error, never "unchanged".
@@ -39,6 +43,17 @@ func TestHerdrTabProbeSeesWhatNoHookAnnounces(t *testing.T) {
 	for _, path := range []string{transcript, untabbed, other} {
 		if err := os.WriteFile(path, []byte("{}\n"), 0o600); err != nil {
 			t.Fatal(err)
+		}
+	}
+	appendLine := func(path, line string) {
+		t.Helper()
+		file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, writeErr := file.WriteString(line + "\n")
+		if closeErr := file.Close(); writeErr != nil || closeErr != nil {
+			t.Fatalf("append %s to %s: %v %v", line, path, writeErr, closeErr)
 		}
 	}
 	focused := true
@@ -64,15 +79,25 @@ func TestHerdrTabProbeSeesWhatNoHookAnnounces(t *testing.T) {
 		},
 		clock: clk,
 	}
-	scans := 0
+	scans, name, landing := 0, "Chat", ""
 	var inspected, viewed []string
 	warnings := &tickWarnings{out: &bytes.Buffer{}}
 	provider := herdrTabProvider{
 		scan: func(context.Context) (FleetScan, error) {
 			scans++
+			var size int64
+			if landing != "" { // the index read the transcript, then the title landed
+				info, err := os.Stat(transcript)
+				if err != nil {
+					t.Fatal(err)
+				}
+				size = info.Size()
+				appendLine(transcript, landing)
+				landing = ""
+			}
 			return FleetScan{Rows: []compose.Row{{
 				Backend: "herdr", SeatID: "seat1", ID: "s1", Socket: "endpoint", PaneID: "w1:p1",
-				Path: transcript, Name: "Chat", Kind: compose.LiveClaude,
+				Path: transcript, Name: name, Kind: compose.LiveClaude, Size: size,
 			}, {
 				Backend: "tmux", SeatID: "seat2", ID: "s2", Path: untabbed, Name: "Elsewhere", Kind: compose.LiveClaude,
 			}, {
@@ -116,7 +141,7 @@ func TestHerdrTabProbeSeesWhatNoHookAnnounces(t *testing.T) {
 		}
 	}
 	// reread reads not fresh, as a probed change does, and checks the scans and inspections it took.
-	reread := func(step string, wantScans int, wantInspected ...string) {
+	reread := func(step string, wantScans int, wantInspected ...string) []herdr.TabDecoration {
 		t.Helper()
 		scans, inspected = 0, nil
 		decorations, err := provider.tabs(ctx, "endpoint", false)
@@ -124,29 +149,45 @@ func TestHerdrTabProbeSeesWhatNoHookAnnounces(t *testing.T) {
 			t.Fatalf("%s: scans %d, inspected %q, %d tabs, %v; want %d scans, inspected %q, 2 tabs",
 				step, scans, inspected, len(decorations), err, wantScans, wantInspected)
 		}
+		return decorations
 	}
 	assertChanged("before any enumeration", true)
 	enumerate()
 	assertChanged("right after an enumeration", false)
 	assertChanged("probed again with nothing new", false)
 
-	appendTurn := func(path string) {
-		t.Helper()
-		file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
-		if err != nil {
-			t.Fatal(err)
-		}
-		_, writeErr := file.WriteString(`{"type":"assistant","isApiErrorMessage":true}` + "\n")
-		if closeErr := file.Close(); writeErr != nil || closeErr != nil {
-			t.Fatalf("append turn to %s: %v %v", path, writeErr, closeErr)
-		}
-	}
+	appendTurn := func(path string) { t.Helper(); appendLine(path, `{"type":"assistant","isApiErrorMessage":true}`) }
 	appendTurn(untabbed)
 	assertChanged("a turn of a chat with no tab", false)
 	appendTurn(transcript)
 	assertChanged("a turn only the tabbed chat's transcript holds", true)
 	reread("the transcript's turn re-read", 0, "s1")
 	assertChanged("the transcript's turn enumerated", false)
+
+	for _, title := range []struct{ step, line, name string }{
+		{"an AI title", `{"type":"ai-title","aiTitle":"Fixing the tabs","sessionId":"s1"}`, "Fixing the tabs"},
+		{"a /rename", `{"type":"custom-title","customTitle":"Tab work","sessionId":"s1"}`, "Tab work"},
+	} {
+		appendLine(transcript, title.line)
+		assertChanged(title.step+" the transcript gained", true)
+		name = title.name // the index reads it on the next scan
+		if got := reread(title.step+" re-read", 1, "s1", "s3"); got[0].Name != title.name {
+			t.Fatalf("%s: the tab of s1 is named %q, want %q", title.step, got[0].Name, title.name)
+		}
+		assertChanged(title.step+" enumerated", false)
+	}
+	appendLine(transcript, `{"type":"custom-title","customTitle":"Tab work","sessionId":"s1"}`)
+	assertChanged("a restated title the transcript gained", true)
+	reread("the restated title re-read", 0, "s1") // Claude restates its titles every few turns: no rename
+	assertChanged("the restated title enumerated", false)
+	landing = `{"type":"ai-title","aiTitle":"Landed mid-scan","sessionId":"s1"}`
+	enumerate()
+	assertChanged("a title landing while the scan ran", true)
+	name = "Landed mid-scan"
+	if got := reread("the title landed mid-scan re-read", 1, "s1", "s3"); got[0].Name != name {
+		t.Fatalf("a title landing mid-scan: the tab of s1 is named %q, want %q", got[0].Name, name)
+	}
+	assertChanged("the title landed mid-scan enumerated", false)
 
 	alive = false
 	clk.Advance(tabEngineProbe - time.Nanosecond)

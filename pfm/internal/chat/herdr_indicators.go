@@ -126,7 +126,7 @@ func (provider *herdrTabProvider) tabs(ctx context.Context, socket string, fresh
 		if prior, found := seen[chatKey]; reuse && found && !dirty.chats[chatKey] &&
 			!dirty.panes[tabPaneKey(target.Pane)] && !dirty.shown(prior) {
 			if len(prior) > 0 {
-				provider.probe.track(target)
+				provider.probe.track(target, row.Size)
 				decorations = append(decorations, prior...)
 			}
 			continue
@@ -155,7 +155,7 @@ func (provider *herdrTabProvider) tabs(ctx context.Context, socket string, fresh
 			}
 			continue
 		}
-		provider.probe.track(target)
+		provider.probe.track(target, row.Size)
 		if !target.Live && len(scan.Unreadable) > 0 {
 			return nil, fmt.Errorf("fleet inspection incomplete, refusing dead tab status: %v", scan.Unreadable)
 		}

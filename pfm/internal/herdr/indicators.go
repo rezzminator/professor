@@ -127,7 +127,7 @@ type indicatorPainter struct {
 	tabsChanged     TabProbe
 	hasTabs         bool
 	tabObservations []TabDecoration
-	tabFailed       map[string]bool // tabs whose last reconcile failed (tabSettled)
+	tabFailed       map[string]bool // tabs whose last reconcile failed or was refused (tabSettled)
 	// unproved holds each pane whose ownership proof failed: the status it
 	// failed under, when, and under which Herdr server start. Such a pane is
 	// named once per status change while it stays unproved, and paint re-proves
@@ -344,8 +344,10 @@ func (painter *indicatorPainter) paintTabs(ctx context.Context, observations []T
 		if !all && painter.tabSettled(previous, observation, key) {
 			continue
 		}
-		accepted, err := reconcileTab(ctx, painter.socket, painter.lockDir, observation, tick, painter.guardedCall)
-		wrote = wrote || painter.settleTab(key, accepted, err)
+		accepted, settled, err := reconcileTab(
+			ctx, painter.socket, painter.lockDir, observation, tick, painter.guardedCall,
+		)
+		wrote = wrote || painter.settleTab(key, accepted, settled && err == nil)
 		switch {
 		case errors.Is(err, errThemeOff):
 			return wrote, err

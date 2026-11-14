@@ -2,7 +2,6 @@ package chat
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -11,11 +10,9 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/compose"
-	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
-	"github.com/rezzminator/professor/pfm/internal/index"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 )
 
@@ -24,7 +21,8 @@ import (
 // setting and the theme's glyphs, the endpoint's panes (revision, agent
 // status, focus), each live native chat's engine in its pane's foreground (an
 // engine that died abruptly) and each decorated chat's transcript (size and
-// mtime: a failed turn arrives only there), or for an OpenCode chat, which
+// mtime: a failed turn arrives only there; a title record past the scan's
+// read of it: an AI title or a /rename), or for an OpenCode chat, which
 // writes none, its title in OpenCode's store. Only decorated chats' transcripts
 // count: a chat with no tab paints nothing, so its turns never warrant a scan.
 // tabs takes the baseline in three phases: the OpenCode titles before the scan
@@ -57,6 +55,9 @@ type tabProbe struct {
 	// makes no Herdr call per live engine and an abrupt death shows within it.
 	clock       clock.Clock
 	engineReads map[string]tabEngineRead
+	// transcriptReads is each tabbed Claude transcript's title read
+	// (transcriptRenamed).
+	transcriptReads map[string]tabTranscriptRead
 }
 
 // changed is the provider's herdr.TabProbe: whether the fingerprint differs
@@ -117,13 +118,18 @@ func (probe *tabProbe) record(ctx context.Context, socket string, rows []compose
 	probe.pendingOK = probe.surface(ctx, socket, mode, glyphs, &probe.pending) == nil
 }
 
-// track adds a decorated chat's transcript to the baseline being taken.
-func (probe *tabProbe) track(target headless.Chat) {
+// track adds a decorated chat's transcript to the baseline being taken, with
+// where the scan's read of it stopped (scanned, its row's size): the baseline
+// names no title past it.
+func (probe *tabProbe) track(target headless.Chat, scanned int64) {
 	if probe == nil {
 		return
 	}
 	probe.tabbed = append(probe.tabbed, target)
-	writeTranscript(&probe.pending, &target)
+	writeTranscript(&probe.pending, &target, func(size int64) string {
+		probe.scannedTranscript(&target, scanned, size)
+		return ""
+	})
 }
 
 // commit makes the baseline being taken the one changed compares with, once
@@ -132,7 +138,11 @@ func (probe *tabProbe) track(target headless.Chat) {
 // baseline carries none, so the next probe sees a change and the next
 // enumeration reads the new chats' titles before its scan.
 func (probe *tabProbe) commit() {
-	if probe != nil && probe.pendingOK {
+	if probe == nil {
+		return
+	}
+	probe.forgetTranscriptReads()
+	if probe.pendingOK {
 		if slices.Equal(probe.openCodeIDs(), probe.titleIDs) {
 			probe.pending.WriteString(probe.titles)
 		}
@@ -147,49 +157,11 @@ func (probe *tabProbe) fingerprint(ctx context.Context, socket, mode, glyphs str
 		return "", err
 	}
 	for i := range probe.tabbed {
-		writeTranscript(&out, &probe.tabbed[i])
+		path := probe.tabbed[i].Path
+		writeTranscript(&out, &probe.tabbed[i], func(size int64) string { return probe.transcriptRenamed(path, size) })
 	}
 	probe.writeOpenCodeTitles(ctx, &out, probe.openCodeIDs())
 	return out.String(), nil
-}
-
-// openCodeIDs are the tabbed OpenCode chats, sorted: the chats whose titles
-// a fingerprint carries.
-func (probe *tabProbe) openCodeIDs() []string {
-	var ids []string
-	for i := range probe.tabbed {
-		if target := &probe.tabbed[i]; target.Engine == pfmengine.OpenCode && target.Path == "" {
-			ids = append(ids, target.ID)
-		}
-	}
-	slices.Sort(ids)
-	return ids
-}
-
-// writeOpenCodeTitles renders the titles of the OpenCode chats ids names as
-// their store holds them: OpenCode writes no transcript, and the title its
-// tab paints lands only there. Only tabbed chats' rows are read, so another
-// chat's turn is no change. A store that cannot be read carries the error in
-// its line, so a lasting failure reads as no change.
-func (probe *tabProbe) writeOpenCodeTitles(ctx context.Context, out *strings.Builder, ids []string) {
-	if len(ids) == 0 {
-		return
-	}
-	for _, root := range probe.openCodeRoots {
-		titles, err := index.ReadOpenCodeTitles(ctx, root, ids)
-		if errors.Is(err, index.ErrNoOpenCodeStore) {
-			continue
-		}
-		if err != nil {
-			writeTabInput(out, "title", strconv.Quote(root), "", fmt.Sprintf("error %q", err))
-			continue
-		}
-		for _, id := range ids {
-			if title, found := titles[id]; found {
-				writeTabInput(out, "title", strconv.Quote(root)+" "+strconv.Quote(id), "", strconv.Quote(title))
-			}
-		}
-	}
 }
 
 // surface renders the mode, glyphs, panes and live engines. An engine that

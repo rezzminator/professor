@@ -25,15 +25,16 @@ func (painter *indicatorPainter) swapTabObservations(observations []TabDecoratio
 
 // tabSettled says whether a read that is not fresh may leave the tab keyed
 // key alone: it does not animate, the last read held it unchanged, and its
-// last reconcile did not fail, so a refused or failed rename is retried.
+// last reconcile settled it, so a failed rename, an owner not proved or a pane
+// read past the observation is retried at the next tick.
 func (painter *indicatorPainter) tabSettled(previous []TabDecoration, observation TabDecoration, key string) bool {
 	return !observation.animates() && tabObserved(previous, observation) && !painter.tabFailed[key]
 }
 
-// settleTab records whether the tab keyed key failed its reconcile and
+// settleTab records whether the tab keyed key's reconcile settled it and
 // returns accepted.
-func (painter *indicatorPainter) settleTab(key string, accepted bool, err error) bool {
-	if err == nil {
+func (painter *indicatorPainter) settleTab(key string, accepted, settled bool) bool {
+	if settled {
 		delete(painter.tabFailed, key)
 		return accepted
 	}

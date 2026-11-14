@@ -63,7 +63,8 @@ func (probe *tabProbe) forgetEngineReads() {
 // tabDirty is what a probe saw change since the last enumeration: partial when
 // a read may reuse the last fleet scan, re-inspecting only the chats (tabChatKey)
 // and panes (tabPaneKey) it names. A pane added, gone or moved, the tab status
-// setting, the glyphs or an OpenCode title changed need the fleet read again.
+// setting, the glyphs, an OpenCode title or a title a transcript names past the
+// scan's read changed need the fleet read again: only it composes the name.
 type tabDirty struct {
 	partial      bool
 	panes, chats map[string]bool
@@ -104,7 +105,7 @@ func (dirty *tabDirty) note(key string, sameRows bool) {
 	switch {
 	case kind == "pane" && sameRows:
 		dirty.panes[id] = true
-	case kind == "engine" || kind == "transcript":
+	case kind == "engine" || (kind == "transcript" && sameRows):
 		dirty.chats[id] = true
 	default:
 		dirty.partial = false
@@ -145,17 +146,19 @@ func tabChatKey(target *headless.Chat) string {
 
 func tabPaneKey(pane string) string { return strconv.Quote(pane) }
 
-// writeTranscript renders a chat's transcript line; one that cannot be read
+// writeTranscript renders a chat's transcript line: its size and mtime, then
+// renamed over its size ("" in a baseline). One that cannot be stat'ed
 // carries the error, so a lasting failure reads as no change.
-func writeTranscript(out *strings.Builder, target *headless.Chat) {
+func writeTranscript(out *strings.Builder, target *headless.Chat, renamed func(size int64) string) {
 	if target.Path == "" {
 		return
 	}
-	state := ""
+	state, rows := "", ""
 	if info, err := os.Stat(target.Path); err != nil {
 		state = fmt.Sprintf("error %q", err)
 	} else {
 		state = fmt.Sprintf("%d %d", info.Size(), info.ModTime().UnixNano())
+		rows = renamed(info.Size())
 	}
-	writeTabInput(out, "transcript", tabChatKey(target), state, "")
+	writeTabInput(out, "transcript", tabChatKey(target), state, rows)
 }

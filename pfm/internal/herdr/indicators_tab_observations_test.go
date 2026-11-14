@@ -41,28 +41,45 @@ func TestTabObservedComparesEveryPaintedField(t *testing.T) {
 
 // TestAStaticTabWhoseReconcileFailedIsRetriedUntilItSettles pins that a read
 // that is not fresh skips an unchanged static tab only once its last
-// reconcile succeeded: a failed rename is retried at the next tick, not left
-// until the next fresh read.
+// reconcile settled it: a failed owner read, an owner not proved for a tick
+// and a pane read past the observation are each retried at the next tick, not
+// left until the next fresh read.
 func TestAStaticTabWhoseReconcileFailedIsRetriedUntilItSettles(t *testing.T) {
-	f := newTabStatusFixture()
-	painter, _ := tabPainterFixture(t, f)
-	validates := 0
-	observation := tabObservation("idle")
-	observation.Validate = func(context.Context) (bool, error) {
-		validates++
-		if validates == 1 {
+	for _, tc := range []struct {
+		name  string
+		first func(*tabStatusFixture) (bool, error) // the first owner read; later ones prove it
+	}{
+		{"the owner read refused", func(*tabStatusFixture) (bool, error) {
 			return false, errors.New("owner read refused")
+		}},
+		{"the owner not proved", func(*tabStatusFixture) (bool, error) { return false, nil }},
+		{"the pane read past the observation", func(f *tabStatusFixture) (bool, error) {
+			f.state = "working" // the pane read right after differs from the observed blocked
+			return true, nil
+		}},
+	} {
+		f := newTabStatusFixture()
+		painter, _ := tabPainterFixture(t, f)
+		validates := 0
+		observation := tabObservation("idle")
+		observation.Validate = func(context.Context) (bool, error) {
+			validates++
+			if validates == 1 {
+				return tc.first(f)
+			}
+			f.state = "blocked"
+			return true, nil
 		}
-		return true, nil
-	}
-	ctx := context.Background()
-	for tick := range 3 { // the fresh paint the owner read fails, then two that are not fresh
-		if _, err := painter.paintTabs(ctx, []TabDecoration{observation}, int64(tick), tick == 0); err != nil {
-			t.Fatalf("tick %d: %v; want an unproved owner left untouched, named, never an error", tick, err)
+		ctx := context.Background()
+		for tick := range 3 { // the fresh paint the first owner read spoils, then two that are not fresh
+			if _, err := painter.paintTabs(ctx, []TabDecoration{observation}, int64(tick), tick == 0); err != nil {
+				t.Fatalf("%s: tick %d: %v; want an unproved owner left untouched, named, never an error",
+					tc.name, tick, err)
+			}
 		}
-	}
-	if validates != 2 || !slices.Equal(f.renames, []string{"⚪ Chat"}) {
-		t.Fatalf("validates %d, renames %q; want 2 and [\"⚪ Chat\"]: the failed tab retried once, then settled",
-			validates, f.renames)
+		if validates != 2 || !slices.Equal(f.renames, []string{"⚪ Chat"}) {
+			t.Errorf("%s: validates %d, renames %q; want 2 and [\"⚪ Chat\"]: the tab retried once, then settled",
+				tc.name, validates, f.renames)
+		}
 	}
 }

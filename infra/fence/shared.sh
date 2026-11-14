@@ -63,8 +63,8 @@ fence_config_schema() {
   local row
   while IFS= read -r row; do printf '%s\n' "$row"; done <<'CONFIG'
 PFM_FENCE_NET|private|network|=
-PFM_FENCE_CPUS|6|cpu|12
-PFM_FENCE_MEM|5g|size|12g
+PFM_FENCE_CPUS|6|cpu|20
+PFM_FENCE_MEM|5g|size|24g
 PFM_FENCE_CPUSET||cpuset|=
 PFM_FENCE_GOMAXPROCS||optional_int|=
 PFM_FENCE_TEST_P||optional_int|6
@@ -113,8 +113,8 @@ EGRESS_LISTEN_WAIT_S|5|number|=
 EGRESS_END_WAIT_S|5|number|=
 SKILL_TEST_SHARDS||optional_int|=
 PFM_FENCE_SKILL_SHARD_MAX|8|int|=
-STEPS_JOBS||optional_int|6
-STEPS_HEAVY_JOBS|2|int|=
+STEPS_JOBS||optional_int|=
+STEPS_HEAVY_JOBS|2|int|4
 STEPS_BOUND_S||optional_int|=
 STEPPROF_GRACE_TICKS|20|uint|=
 STEPPROF_TRACE|err|trace|=

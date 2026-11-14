@@ -194,7 +194,7 @@ Hazards:
 
 ## Fixtures
 
-`PFM_GATE_FIXTURES=1 .claude/scripts/dev.sh iso gate` registers five deliberately red steps in phase 0, the instrument's own proof:
+`PFM_GATE_FIXTURES=1 .claude/scripts/dev.sh iso gate` registers five deliberately red steps, the instrument's own proof:
 
 | Step | What it proves |
 | --- | --- |

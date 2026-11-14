@@ -378,7 +378,7 @@ unset PFM_FENCE_CPUS PFM_FENCE_MEM PFM_FENCE_CPUSET PFM_FENCE_GOMAXPROCS PFM_FEN
 fence_config_init || exit $?
 printf "%s|%s|%s|%s|%s|%s|%s" "$PFM_FENCE_CPUS" "$PFM_FENCE_MEM" "$PFM_FENCE_CPUSET" "$PFM_FENCE_GOMAXPROCS" "$PFM_FENCE_TEST_P" "$STEPS_JOBS" "$STEPS_HEAVY_JOBS"
 ' _ "$SUT" 2>&1)"; rc=$?
-[[ $rc == 0 && "$out" == '12|12g|||6|6|2' ]] && ok "native defaults match the measured portable bounded scheduler" || bad "measured native defaults" "rc=$rc $out"
+[[ $rc == 0 && "$out" == '20|24g|||6||4' ]] && ok "native defaults match the measured portable bounded scheduler" || bad "measured native defaults" "rc=$rc $out"
 
 # Different fixture defaults exercise the real resolver without shipping a tuning or a seam.
 profile_fixture='

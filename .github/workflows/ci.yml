@@ -142,6 +142,10 @@ jobs:
           # The fence's per-step bound derives from its own gate budget; a
           # hosted runner has fewer cores, so each step gets the default bound.
           STEPS_BOUND_S: "1500"
+          # The native profile sizes its step slots for the fence's own container;
+          # a hosted runner keeps the slots its slices were measured at.
+          STEPS_JOBS: "6"
+          STEPS_HEAVY_JOBS: "2"
           # The fence mounts the engine-sync source at /engine-sync; here it is
           # the checkout's own submodule (infra/fence/engine-sync.sh).
           ENGINE_SYNC_FENCE_SRC: ${{ github.workspace }}/plugins/engine-sync

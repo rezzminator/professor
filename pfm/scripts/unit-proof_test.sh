@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Fixture-driven tests for scripts/unit-proof.sh's filter and verdict: each trace record the spec
 # names is judged allowed or a reach row of its kind, a started program's own records drop after its
-# exec row, a record the filter cannot read and an allow row without a reason are errors, and the
-# verdict's three outcomes print their line and exit 0, 1 or 2.
+# exec row, a record the filter cannot read and an allow row without a reason are errors, the
+# verdict's three outcomes print their line and exit 0, 1 or 2, the exec wrapper runs a binary as one
+# traced process or as the parts its split table names, and the run's go test takes its package
+# concurrency from PFM_FENCE_TEST_P.
 #   bash pfm/scripts/unit-proof_test.sh
 set -uo pipefail
 
@@ -244,5 +246,136 @@ bash "$SUT" --verdict "$NOEVENT" > "$T/noevent.out" 2>&1
 rc=$?
 eq 'verdict ERROR: no test event, exit 2' \
   "2|UNIT-PROOF ERROR no test event in $NOEVENT/tests.json" "$rc|$(head -n 1 "$T/noevent.out")"
+
+# The exec wrapper on Linux, through a strace and a test binary of this suite's own: a package the
+# split table names runs as that many traced parts, one that it does not as one traced process.
+mkdir -p "$T/fakebin" "$T/pk"
+cat > "$T/fakebin/strace" <<'EOF'
+#!/bin/bash
+# Writes the traced binary's exec record and one foreign read where -o names, then runs the binary.
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o) trace="$2"; shift 2 ;;
+    -e | -s) shift 2 ;;
+    -*) shift ;;
+    *) break ;;
+  esac
+done
+printf 'execve("%s", ["%s"], 0x1 /* 0 vars */) = 0\nopenat(AT_FDCWD, "/srv/part", O_RDONLY) = -1 ENOENT (No such file or directory)\n' "$1" "$1" > "$trace.$$"
+exec "$@"
+EOF
+SPLITBIN=$T/gowork/b001/split.test
+cat > "$SPLITBIN" <<'EOF'
+#!/bin/bash
+# Five tests: -test.list names them, -test.run runs the ones its list names. {this}.lose names a test
+# it never starts; {this}.fail names one that fails and ends the process there; {this}.list replaces
+# the list run's output with its first line and exit status.
+names='TestA TestB TestC TestD TestE'
+run="|${names// /|}|"
+for arg in "$@"; do
+  case "$arg" in
+    -test.list=*)
+      if [ -f "$0.list" ]; then read -r out code < "$0.list"; echo "$out"; exit "$code"; fi
+      printf '%s\n' $names 'a line that is no test name'; exit 0 ;;
+    -test.run=*) run="${arg#-test.run=^(}"; run="|${run%)\$}|" ;;
+  esac
+done
+lose=; [ ! -f "$0.lose" ] || read -r lose < "$0.lose"
+fail=; [ ! -f "$0.fail" ] || read -r fail < "$0.fail"
+for name in $names; do
+  case "$run" in *"|$name|"*) ;; *) continue ;; esac
+  [ "$name" != "$lose" ] || continue
+  printf '\026=== RUN   %s\n' "$name"
+  if [ "$name" = "$fail" ]; then printf '\026--- FAIL: %s (0.00s)\nFAIL\n' "$name"; exit 1; fi
+  printf '\026--- PASS: %s (0.00s)\n' "$name"
+done
+printf 'PASS\n'
+EOF
+chmod 0755 "$T/fakebin/strace" "$SPLITBIN"
+PK="${T#/}/pk"
+PKSLUG="${PK//\//%}"
+# split_exec <out> <table>: the wrapper on the split binary from its package directory; its exit status.
+split_exec() {
+  make_out "$1"
+  (cd "$T/pk" && PATH="$T/fakebin:$PATH" UNIT_PROOF_SHARDS="$2" bash "$SUT" --exec "$1" "$SPLITBIN" -test.v=test2json) > "$1.stdout" 2> "$1.stderr"
+}
+frames() { printf '=== RUN   %s\n--- PASS: %s (0.00s)\n' "$1" "$1"; }
+split_exec "$T/split" "$PK=3"; rc=$?
+eq 'exec, a split package: each listed test runs once, the parts in order, and the binary passes' \
+  "0|$(frames TestA; frames TestD; echo PASS; frames TestB; frames TestE; echo PASS; frames TestC; echo PASS)" \
+  "$rc|$(tr -d '\026' < "$T/split.stdout")"
+eq 'exec, a split package: the list run and each part are filtered into their own reach file' \
+  "$(for part in 1 2 3 list; do printf '%s#%s.tsv read\t/srv/part\t1\n' "$PKSLUG" "$part"; done)" \
+  "$(cd "$T/split/reach" && for f in *; do printf '%s %s\n' "$f" "$(cut -f1-3 "$f")"; done)"
+eq 'exec, a split package: the traces and the part outputs are removed and no error is left' \
+  '|absent' "$(ls "$T/split/trace")|$([ -e "$T/split/errors" ] && echo present || echo absent)"
+cp "$PASSOUT/tests.json" "$T/split/tests.json"
+bash "$SUT" --verdict "$T/split" > "$T/split.verdict" 2>&1; rc=$?
+eq 'verdict: the parts of a split package add up to one reach row under its name' \
+  "1|read /srv/part ×4 ($PK)|UNIT-PROOF FAIL · tests 1 pass 0 fail 0 skip · reach 1 rows (0 exec · 1 read · 0 write · 0 socket · 0 tripwire) · syscalls traced · $T/split" \
+  "$rc|$(head -n 1 "$T/split.verdict")|$(tail -n 1 "$T/split.verdict")"
+split_exec "$T/whole" ''; rc=$?
+eq 'exec, a package the table does not name: one traced process, one reach file' \
+  "0|$(frames TestA; frames TestB; frames TestC; frames TestD; frames TestE; echo PASS)|$PKSLUG.tsv" \
+  "$rc|$(tr -d '\026' < "$T/whole.stdout")|$(ls "$T/whole/reach")"
+echo TestC > "$SPLITBIN.lose"
+split_exec "$T/lost" "$PK=3"; rc=$?
+eq 'exec, a split package: a listed test no part started is an error naming it' \
+  "2|$PK: 1 listed test(s) ran in no part, first TestC" "$rc|$(cat "$T/lost/errors/$PKSLUG#lost" 2>&1)"
+rm -f "$SPLITBIN.lose"
+echo TestB > "$SPLITBIN.fail"
+split_exec "$T/failed" "$PK=3"; rc=$?
+eq 'exec, a split package: a failing part fails the binary, and the tests behind it are no second error' \
+  "1|$(frames TestA; frames TestD; echo PASS; printf '=== RUN   TestB\n--- FAIL: TestB (0.00s)\nFAIL\n'; frames TestC; echo PASS)|absent" \
+  "$rc|$(tr -d '\026' < "$T/failed.stdout")|$([ -e "$T/failed/errors" ] && echo present || echo absent)"
+rm -f "$SPLITBIN.fail"
+split_exec "$T/badtable" "$PK=many"; rc=$?
+eq 'exec: a split table word that is no {package}={parts} is an error' \
+  "2|UNIT_PROOF_SHARDS: $PK=many is no {package}={parts}" "$rc|$(cat "$T/badtable/errors/$PKSLUG" 2>&1)"
+split_exec "$T/badword" "internal/other:3 $PK=3"; rc=$?
+eq 'exec: a malformed split table word for another package is an error too' \
+  "2|UNIT_PROOF_SHARDS: internal/other:3 is no {package}={parts}" "$rc|$(cat "$T/badword/errors/$PKSLUG" 2>&1)"
+# list_case <out> <list output> <exit status>: the split binary's list run answering so; the run's status.
+list_case() { echo "$2 $3" > "$SPLITBIN.list"; split_exec "$1" "$PK=3"; local rc=$?; rm -f "$SPLITBIN.list"; return "$rc"; }
+list_case "$T/listfail" broken 1; rc=$?
+eq 'exec, a split package: a list run that fails is an error naming its last line' \
+  "2|$PK: its test list could not be read: broken" "$rc|$(cat "$T/listfail/errors/$PKSLUG#names" 2>&1)"
+list_case "$T/listnone" no-test-here 0; rc=$?
+eq 'exec, a split package: a list that names no test is an error' \
+  "2|$PK: its binary lists no test to split" "$rc|$(cat "$T/listnone/errors/$PKSLUG#names" 2>&1)"
+
+# The run's own go test, through a go and a git of this suite's own: go answers the two env reads and
+# records a go test's arguments where GO_ARGV names, git lists one tracked file.
+cat > "$T/fakebin/go" <<'EOF'
+#!/bin/bash
+case "$1 ${2:-}" in
+  'env GOOS') echo linux ;;
+  'env GOROOT') echo /nonexistent/goroot ;;
+  'test '*) printf '%s\n' "$*" > "$GO_ARGV"; printf '{"Action":"pass","Package":"x","Elapsed":0}\n' ;;
+  *) echo "fake go: unexpected $*" >&2; exit 2 ;;
+esac
+EOF
+printf '#!/bin/bash\nprintf '"'"'pfm/go.mod\\0'"'"'\n' > "$T/fakebin/git"
+chmod 0755 "$T/fakebin/go" "$T/fakebin/git"
+TP="$(cd "$T" && pwd -P)"
+# proof_run <out> <PFM_FENCE_TEST_P, empty for unset>: the whole run on the fakes; its exit status.
+proof_run() {
+  rm -f "$T/go.argv"
+  (
+    unset PFM_FENCE_TEST_P
+    [ -z "$2" ] || export PFM_FENCE_TEST_P="$2"
+    PATH="$T/fakebin:$PATH" GO_ARGV="$T/go.argv" bash "$SUT" --out "$1" > "$1.out" 2>&1
+  )
+}
+proof_run "$T/runp" 3
+eq 'run: go test takes -p from PFM_FENCE_TEST_P' \
+  "test -count=1 -json -timeout 20m -p 3 -exec bash '$SUT' --exec '$TP/runp' ./..." "$(cat "$T/go.argv" 2>&1)"
+proof_run "$T/rund" ''
+eq 'run: without PFM_FENCE_TEST_P go test keeps its own package concurrency' \
+  "test -count=1 -json -timeout 20m -exec bash '$SUT' --exec '$TP/rund' ./..." "$(cat "$T/go.argv" 2>&1)"
+proof_run "$T/runbad" many; rc=$?
+eq 'run: a PFM_FENCE_TEST_P that is no positive integer is an error before any test runs' \
+  "2|UNIT-PROOF ERROR PFM_FENCE_TEST_P must be a positive integer (got 'many')|absent" \
+  "$rc|$(cat "$T/runbad.out")|$([ -e "$T/go.argv" ] && echo present || echo absent)"
 
 shtest_end

@@ -136,8 +136,7 @@ timing_run_dir() { mkdir -p "$1"; mktemp -d "$1/run.XXXXXX"; }
 steps_reset() { : > "$T/registered"; : > "$T/heavy"; : > "$T/bounds"; }
 steps_add() { printf '%s\n' "$1" >> "$T/registered"; printf '%s\n' "$*" >> "$T/registered.args"; }
 steps_add_heavy() { steps_add "$@"; printf '%s\n' "$1" >> "$T/heavy"; }
-steps_barrier() { printf 'BARRIER\n' >> "$T/registered"; }
-steps_set_bound() { printf '%s %s\n' "$(grep -v '^BARRIER$' "$T/registered" | tail -1)" "$1" >> "$T/bounds"; }
+steps_set_bound() { printf '%s %s\n' "$(tail -n 1 "$T/registered")" "$1" >> "$T/bounds"; }
 # Stub scripts log to $STUB_EVENTS; wait_event polls it in 0.1 s ticks, bounded at 5 s, for a line that
 # starts with one of its arguments (fixed strings, each naming one run's own directory).
 export STUB_EVENTS="$T/events"
@@ -171,26 +170,24 @@ repo_git() {
     status) printf ' M a\n?? b\n M c\n' ;;
   esac
 }
+# graph_order <target>: the registration groups in start order — the test steps (longest first), the
+# pfm static checks, the template checks, the pfm then the fence self-test suites, the fixtures.
 graph_order() {
   awk -v target="$1" '
-    $0=="BARRIER" {barriers++; after=1; next}
-    !after {
-      if ($0=="pfm.unit") group=1
-      else if ($0=="pfm.e2e") group=2
-      else if ($0=="pfm.race") group=3
-      else if ($0=="pfm.unit-proof") group=3
-      else if ($0 ~ /^pfm\.self\./) group=4
+    {
+      if ($0=="pfm.unit-proof" || $0=="pfm.e2e" || $0=="pfm.unit" || $0=="pfm.race") group=1
       else if ($0 ~ /^templates\.fence\./) group=5
+      else if ($0 ~ /^templates\./) group=3
+      else if ($0 ~ /^pfm\.self\./) group=4
+      else if ($0 ~ /^fixture\./) group=6
+      else if ($0 ~ /^pfm\./) group=2
       else exit 1
-      if (group<previous || (target=="pfm" && group>4) || (target=="templates" && group<5)) exit 1
+      if (group<previous || (target=="pfm" && (group==3 || group==5)) || (target=="templates" && group!=3 && group!=5)) exit 1
       previous=group
-      next
     }
-    after && ($0 ~ /^pfm\.self\./ || $0 ~ /^templates\.fence\./ || $0=="pfm.unit" || $0=="pfm.e2e" || $0=="pfm.race" || $0=="pfm.unit-proof") {exit 1}
-    END {if (barriers!=1) exit 1}
   ' "$T/registered"
 }
-static_names() { sed -n '/^BARRIER$/,$p' "$T/registered" | sed '1d' | sort | paste -sd, -; }
+static_names() { { grep -Ev '^(pfm\.(unit-proof|e2e|unit|race)|pfm\.self\..*|templates\.fence\..*|fixture\..*)$' "$T/registered" || true; } | sort | paste -sd, -; }
 pfm_static='pfm.lint-new,pfm.fmt-check,pfm.vet,pfm.vet-darwin,pfm.arch,pfm.testplan'
 templates_static='templates.clone,templates.leak,templates.plugin-logs,templates.plugin-lab,templates.placeholders,templates.scratch-paths,templates.descriptions,templates.mirrors,templates.generated-agents,templates.release-check,templates.refresh-scope,templates.plugin-workflows,templates.worktree-script,templates.dev-report,templates.format-md,templates.theme-glyphs,templates.test-tests,templates.unit-path-tests,templates.engine-sync-action-tests,templates.skill-tests'
 heavy_names='pfm.e2e,pfm.fmt-check,pfm.lint-new,pfm.race,pfm.unit,pfm.unit-proof,pfm.vet,pfm.vet-darwin'
@@ -200,19 +197,19 @@ if gate_run all >"$T/all.out" &&
   [ "$(grep -c '^pfm\.unit$' "$T/registered")" -eq 1 ] &&
   [ "$(grep -c '^pfm\.e2e$' "$T/registered")" -eq 1 ] &&
   [ "$(grep -c '^templates\.fence\.' "$T/registered")" -eq "$(find "$REPO_ROOT/infra/fence/tests" -name '*_test.sh' | wc -l | tr -d ' ')" ] &&
-  [ "$(sed -n '1,4p' "$T/registered" | paste -sd, -)" = 'pfm.unit,pfm.e2e,pfm.race,pfm.unit-proof' ] &&
+  [ "$(sed -n '1,11p' "$T/registered" | paste -sd, -)" = 'pfm.unit-proof,pfm.e2e,pfm.unit,pfm.race,pfm.lint-new,pfm.fmt-check,pfm.vet,pfm.vet-darwin,pfm.testplan,pfm.arch,templates.mirrors' ] &&
   [ "$(static_names)" = "$(printf '%s' "$pfm_static,$templates_static" | tr ',' '\n' | sort | paste -sd, -)" ] &&
   [ "$(sort "$T/heavy" | paste -sd, -)" = "$heavy_names" ] &&
   [ -z "$(sort "$T/registered" | uniq -d)" ] && graph_order all; then
-  ok 'all registers tests before one barrier and each static step once'
+  ok 'all registers its longest steps first and each step once'
 else bad 'all registration' "$(cat "$T/all.out")" "$(cat "$T/registered")"; fi
 
 if PFM_TEST_TIMING_DIR="$T/real-pfm" gate_run pfm >"$T/pfm.out" &&
-  [ "$(sed -n '1,4p' "$T/registered" | paste -sd, -)" = 'pfm.unit,pfm.e2e,pfm.race,pfm.unit-proof' ] &&
+  [ "$(sed -n '1,10p' "$T/registered" | paste -sd, -)" = 'pfm.unit-proof,pfm.e2e,pfm.unit,pfm.race,pfm.lint-new,pfm.fmt-check,pfm.vet,pfm.vet-darwin,pfm.testplan,pfm.arch' ] &&
   [ "$(static_names)" = "$(printf '%s' "$pfm_static" | tr ',' '\n' | sort | paste -sd, -)" ] &&
   [ "$(sort "$T/heavy" | paste -sd, -)" = "$heavy_names" ] &&
   graph_order pfm; then
-  ok 'pfm graph runs its tests before static checks'
+  ok 'pfm graph registers its test steps first, longest first'
 else bad 'pfm graph' "$(cat "$T/registered")"; fi
 real_run="$(ls -d "$T/real-pfm"/run.* | head -1)"
 if grep -Fxq "pfm.e2e checks_pfm_e2e $REPO_ROOT/pfm $real_run" "$T/registered.args"; then
@@ -226,10 +223,11 @@ if [ -s "$real_run/profile.tsv" ] && [ -f "$real_run/profile/INDEX.txt" ] && gre
 else bad 'real summary' "$(cat "$T/pfm.out")"; fi
 
 if gate_run templates >"$T/templates.out" &&
+  [ "$(sed -n '1p' "$T/registered")" = templates.mirrors ] &&
   [ "$(static_names)" = "$(printf '%s' "$templates_static" | tr ',' '\n' | sort | paste -sd, -)" ] &&
   [ -e "$T/heavy" ] && [ ! -s "$T/heavy" ] &&
   graph_order templates; then
-  ok 'templates graph runs its tests before static checks'
+  ok 'templates graph registers its checks, mirrors first, then its self-test suites'
 else bad 'templates graph' "$(cat "$T/registered")"; fi
 for n in test unit-path; do
   if grep -Fxq "templates.$n-tests checks_templates_unit_script $n" "$T/registered.args"; then
@@ -442,18 +440,17 @@ fx_case() { # fx_case <name> <target>: gate_run in $T/case-<name>; sets GATE_RC,
 }
 meta_get() { awk -F '\t' -v k="$1" '$1==k {print substr($0, length(k) + 2)}' "$2"; }
 
-# The fixture steps (PFM_GATE_FIXTURES=1): five broken steps close phase 0, before the barrier; every
+# The fixture steps (PFM_GATE_FIXTURES=1): five broken steps follow the self-test suites; every
 # graph case above registers with the env unset and so holds none of them.
 fixture_names='fixture.go-fail,fixture.go-hang,fixture.go-slow,fixture.shell-fail,fixture.shell-hang'
-fixture_case() { # fixture_case <target> <last phase-0 step of that target>
+fixture_case() { # fixture_case <target> <the step registered before the fixtures>
   PFM_GATE_FIXTURES=1 fx_case "fixtures-$1" "$1"
-  if [ "$(sed -n '/^BARRIER$/q;p' "$T/registered" | tail -6 | paste -sd, -)" = "$2,$fixture_names" ] &&
-    [ "$(grep -B1 '^BARRIER$' "$T/registered" | head -1)" = fixture.shell-hang ] &&
+  if [ "$(grep -B1 -A4 -m1 '^fixture\.' "$T/registered" | paste -sd, -)" = "$2,$fixture_names" ] &&
     [ "$(grep -c '^fixture\.' "$T/registered")" -eq 5 ] &&
     [ "$(cat "$T/bounds")" = "$(printf 'fixture.go-slow 45\nfixture.shell-hang 5')" ] &&
     grep -Fxq "fixture.go-slow checks_gate_fixture go-slow $RUN" "$T/registered.args" &&
     grep -Fxq "fixture.shell-fail checks_gate_fixture shell-fail $RUN" "$T/registered.args"; then
-    ok "PFM_GATE_FIXTURES=1 ($1): the five fixture steps follow $2, precede the barrier, carry their kind and run dir, and bound go-slow 45 and shell-hang 5"
+    ok "PFM_GATE_FIXTURES=1 ($1): the five fixture steps follow $2, carry their kind and run dir, and bound go-slow 45 and shell-hang 5"
   else bad "fixture registration ($1)" "$(cat "$T/registered")" "$(cat "$T/bounds")"; fi
 }
 fx_budget
@@ -947,16 +944,16 @@ roster_probe() {
     else printf 'unstaged\n' > "$T/roster.policy"; fi
     return "${STUB_ROSTER_RC:-0}"
   }
-  node_test_suite() { printf '%s\n' "$*" > "$T/roster.tests"; }
+  node_test_suite() { printf '%s shards=%s\n' "$*" "${NODE_TEST_SHARDS:-unset}" > "$T/roster.tests"; }
   checks_templates_mirrors_roster
 }
 : > "$T/roster.calls"; : > "$T/roster.tests"
 roster_case
 if [ "$(cat "$T/roster.calls")" = "$es_bin $TMP_BASE/engine-sync/mirror-home scripts/check-agent-roster.mjs" ] &&
   cmp -s "$REPO_ROOT/templates/global/engine-sync.json" "$T/roster.policy" &&
-  grep -Fq 'scripts/check-agent-roster.test.mjs' "$T/roster.tests" && grep -Fxq 'FAILURES=0' "$T/es.out"; then
-  ok 'roster uses the mirror compiler and staged mirror-home machine policy and runs its regression suite'
-else bad 'roster effective config handoff' "$(cat "$T/roster.calls")" "$(cat "$T/es.out")"; fi
+  [ "$(cat "$T/roster.tests")" = "generated agent rosters $TMP_BASE/templates/agent-roster.tap scripts/check-agent-roster.test.mjs shards=8" ] && grep -Fxq 'FAILURES=0' "$T/es.out"; then
+  ok 'roster uses the mirror compiler and staged mirror-home machine policy and runs its regression suite as eight shards'
+else bad 'roster effective config handoff' "$(cat "$T/roster.calls")" "$(cat "$T/roster.tests")" "$(cat "$T/es.out")"; fi
 roster_case STUB_ROSTER_RC=2
 if grep -Fq 'FAILSTEP agent roster ERROR' "$T/es.out" && grep -Fxq 'FAILURES=1' "$T/es.out"; then
   ok 'roster config ERROR remains distinct from a roster mismatch at the gate'

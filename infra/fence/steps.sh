@@ -21,8 +21,6 @@ steps_reset() {
   STEPS_COMMANDS=()
   STEPS_HEAVY=()
   STEPS_BOUND=()
-  STEPS_PHASE=()
-  STEPS_PHASE_ID=0
 }
 
 steps_add() { # steps_add <name> <command> [args...]
@@ -49,7 +47,6 @@ steps_add() { # steps_add <name> <command> [args...]
   STEPS_COMMANDS+=("$quoted")
   STEPS_HEAVY+=(0)
   STEPS_BOUND+=("")
-  STEPS_PHASE+=("$STEPS_PHASE_ID")
 }
 
 steps_add_heavy() { # steps_add_heavy <name> <command> [args...]
@@ -69,10 +66,6 @@ steps_set_bound() { # steps_set_bound <seconds>: the bound of the step registere
     return 1
   fi
   STEPS_BOUND[$((${#STEPS_BOUND[@]} - 1))]="$1"
-}
-
-steps_barrier() {
-  STEPS_PHASE_ID=$((STEPS_PHASE_ID + 1))
 }
 
 steps_seconds() { # start and end as EPOCHREALTIME values
@@ -133,7 +126,7 @@ steps_prof_field() { # steps_prof_field <prof.tsv> <key>: the value, nothing whe
 }
 
 steps_run() { # steps_run <run-dir>
-  local run="$1" jobs heavy_jobs default_bound bound i n="${#STEPS_NAMES[@]}" active=0 heavy_active=0 completed=0 phase=0 red=0 first="" last=""
+  local run="$1" jobs heavy_jobs default_bound bound i n="${#STEPS_NAMES[@]}" active=0 heavy_active=0 completed=0 red=0 first="" last=""
   local name log meta prof command start finish elapsed pid rc failures done_pid row pick ended records
   local -a verdict=() seconds=() pids=() starts=() started=() launched=()
   local -A pid_index=()
@@ -149,7 +142,6 @@ steps_run() { # steps_run <run-dir>
       pick=-1
       for (( i=0; i<n; i++ )); do
         [[ "${started[$i]:-}" ]] && continue
-        (( ${STEPS_PHASE[$i]} == phase )) || continue
         if (( ${STEPS_HEAVY[$i]} == 0 || heavy_active < heavy_jobs )); then
           pick=$i
           break
@@ -210,8 +202,6 @@ steps_run() { # steps_run <run-dir>
       active=$((active - 1))
       if (( ${STEPS_HEAVY[$row]} )); then heavy_active=$((heavy_active - 1)); fi
       completed=$((completed + 1))
-    else
-      phase=$((phase + 1))
     fi
   done
   [[ -n "$first" ]] || first="$EPOCHREALTIME"

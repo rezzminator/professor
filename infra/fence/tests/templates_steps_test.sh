@@ -49,20 +49,18 @@ checks_templates > "$ROOT/serial"
 sed -i '/^checks_templates_fence_serial /d' "$ROOT/serial"
 
 (
-  phase=0
   need_tool() { :; }
   timing_run_dir() { printf '%s\n' "$ROOT"; }
   timing_run_note() { :; }
   steps_reset() { :; }
-  steps_barrier() { phase=$((phase + 1)); }
   fail_step() { echo "ERROR templates steps: $*" >&2; exit 2; }
   steps_add() {
-    printf '%s\t%s\t%s\n' "$1" "$phase" normal >> "$ROOT/registrations"
+    printf '%s\t%s\n' "$1" normal >> "$ROOT/registrations"
     shift
     case "$1" in checks_templates_*) "$@" ;; esac
   }
   steps_add_heavy() {
-    printf '%s\t%s\t%s\n' "$1" "$phase" heavy >> "$ROOT/registrations"
+    printf '%s\t%s\n' "$1" heavy >> "$ROOT/registrations"
   }
   # Stop at the registration boundary: never run suites, builds or samplers.
   gate_derive_bound() { exit 0; }
@@ -77,12 +75,9 @@ if ! diff -u "$ROOT/serial.sorted" "$ROOT/gate.sorted"; then
   exit 1
 fi
 [[ -s "$ROOT/serial.sorted" ]] || { echo 'FAIL templates steps: no template check was registered' >&2; exit 1; }
-# Keep the gate placement contract as well as the shared check membership.
-awk -F '\t' '
-  $1 ~ /^templates\.fence\./ { if ($2 != 0 || $3 != "normal") bad=1; next }
-  { if ($2 != 1 || $3 != "normal") bad=1 }
-  END { exit bad }
-' "$ROOT/registrations" || { echo 'FAIL templates steps: gate phase placement changed' >&2; exit 1; }
+# Keep the gate placement contract as well as the shared check membership: no template step takes a heavy slot.
+awk -F '\t' '$2 != "normal" { bad=1 } END { exit bad }' "$ROOT/registrations" ||
+  { echo 'FAIL templates steps: a template step is registered heavy' >&2; exit 1; }
 expected=0
 for f in "$REPO_ROOT"/infra/fence/tests/*_test.sh; do
   [[ -f "$f" ]] || { echo "ERROR templates steps: no fence fixtures" >&2; exit 2; }
@@ -93,4 +88,4 @@ actual=$(grep -c "^templates\.fence\." "$ROOT/registrations" || true)
 if [[ -n "$(cut -f1 "$ROOT/registrations" | sort | uniq -d)" ]]; then
   echo 'FAIL templates steps: duplicate gate registration' >&2; exit 1
 fi
-printf 'PASS templates steps: serial/gate parity (%s checks) and fixture phases hold\n' "$(wc -l < "$ROOT/serial.sorted" | tr -d ' ')"
+printf 'PASS templates steps: serial/gate parity (%s checks) and placement hold\n' "$(wc -l < "$ROOT/serial.sorted" | tr -d ' ')"

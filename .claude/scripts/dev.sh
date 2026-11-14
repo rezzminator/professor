@@ -296,10 +296,15 @@ cmd_status() { # cmd_status [project|all]
 # node_test_suite LABEL TAP FILE... — runs node's test runner into TAP and
 # names every way it can fail to prove anything: a missing file, a red or
 # unrunnable suite, zero passing tests, a skipped or todo test.
+# NODE_TEST_SHARDS={n} runs the files as n processes at once, process i with
+# NODE_TEST_SHARD={i}/{n}: scripts/node-test-helpers.mjs then registers every
+# n-th top-level test, so a suite whose tests block on child processes no
+# longer runs them one at a time. TAP holds every shard's stream, in order;
+# only a suite importing `test` from that helper is split.
 node_test_suite() {
   local label="$1" tap="$2"
   shift 2
-  local file
+  local file shards="${NODE_TEST_SHARDS:-1}" shard pid rc=0 pids=()
   for file in "$@"; do
     if [[ ! -f "$file" ]]; then
       fail_step "$label tests NOT RUN — $file is missing; the suite was never executed"
@@ -311,17 +316,36 @@ node_test_suite() {
     fail_step "$label tests NOT RUN — the TAP directory for $tap could not be created"
     return
   fi
-  if ! node --test --test-reporter=tap "$@" >"$tap" 2>&1; then
+  if [[ ! "$shards" =~ ^[1-9][0-9]*$ ]]; then
+    fail_step "$label tests NOT RUN — NODE_TEST_SHARDS must be a positive integer: $shards"
+    return
+  fi
+  if (( shards == 1 )); then
+    node --test --test-reporter=tap "$@" >"$tap" 2>&1 || rc=$?
+  else
+    for ((shard = 1; shard <= shards; shard++)); do
+      NODE_TEST_SHARD="$shard/$shards" node --test --test-reporter=tap "$@" >"$tap.$shard" 2>&1 &
+      pids+=("$!")
+    done
+    for pid in "${pids[@]}"; do wait "$pid" || rc=$?; done
+    for ((shard = 1; shard <= shards; shard++)); do
+      printf '# shard %s/%s\n' "$shard" "$shards"
+      cat "$tap.$shard"
+      rm -f "$tap.$shard"
+    done >"$tap"
+  fi
+  # Every stream reports its own `# pass`: one with none ran nothing, whatever the others ran.
+  if (( rc != 0 )); then
     cat "$tap"
     fail_step "$label tests FAILED — a test regressed, or node could not run the suite (see output)"
-  elif ! awk '/^# pass /{ if ($3 > 0) found=1 } END{ exit !found }' "$tap"; then
+  elif ! awk -v want="$shards" '/^# pass /{ if ($3 > 0) found++ } END{ exit found != want }' "$tap"; then
     cat "$tap"
     fail_step "$label tests NOT RUN — the suite reported zero passing tests; a green exit with no test is not a pass"
   elif ! awk '/^# (skipped|todo) /{ if ($3 > 0) bad=1 } END{ exit bad }' "$tap"; then
     cat "$tap"
     fail_step "$label tests SKIPPED — a skipped or todo test is a named gap, never a pass"
   else
-    ok "$label tests hold ($(awk '/^# pass /{print $3}' "$tap") passing)"
+    ok "$label tests hold ($(awk '/^# pass /{n += $3} END{print n}' "$tap") passing)"
   fi
 }
 
@@ -611,9 +635,9 @@ its default and its validation; iso and the in-fence test, e2e, all and gate pat
 run it first, and an invalid value exits non-zero before any run. Among them:
   PFM_FENCE_PROFILE      desktop | native | auto (auto reads the Docker daemon's OS and
                          resources, never the hostname); native overrides four desktop
-                         defaults: PFM_FENCE_CPUS 12 (desktop 6), PFM_FENCE_MEM 12g
-                         (5g), PFM_FENCE_TEST_P 6 and STEPS_JOBS 6 (desktop empty,
-                         sized from the CPUs); every other knob is shared
+                         defaults: PFM_FENCE_CPUS 20 (desktop 6), PFM_FENCE_MEM 24g
+                         (5g), PFM_FENCE_TEST_P 6 (desktop empty, sized from the CPUs)
+                         and STEPS_HEAVY_JOBS 4 (2); every other knob is shared
   PFM_FENCE_CPUS         the container's CPU cap; 0 sets no quota
   PFM_FENCE_CPUSET       the container's pinned CPUs; empty leaves it unpinned
   PFM_FENCE_MEM          the container's memory cap, memory + swap

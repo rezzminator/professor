@@ -547,7 +547,8 @@ checks_templates_mirrors_roster() {
       fail_step "agent roster FAILED — a source role is missing or cannot perform its protocol"
     fi
   fi
-  ENGINE_SYNC_BIN="$es_bin" node_test_suite "generated agent rosters" "$TMP_BASE/templates/agent-roster.tap" scripts/check-agent-roster.test.mjs
+  # Each roster test blocks on the checker it starts: eight processes share the suite.
+  ENGINE_SYNC_BIN="$es_bin" NODE_TEST_SHARDS=8 node_test_suite "generated agent rosters" "$TMP_BASE/templates/agent-roster.tap" scripts/check-agent-roster.test.mjs
 }
 
 checks_templates_release_check() {
@@ -766,7 +767,7 @@ checks_named_template_steps() { # <callback> <name>...: register the matching ch
 
 checks_templates_steps() { # <callback>: callback <step name> <command> [args...]
   local add="$1" name
-  checks_named_template_steps "$add" clone leak plugin-logs plugin-lab placeholders scratch-paths descriptions mirrors \
+  checks_named_template_steps "$add" mirrors clone leak plugin-logs plugin-lab placeholders scratch-paths descriptions \
     generated-agents release-check refresh-scope plugin-workflows worktree-script dev-report \
     format-md theme-glyphs || return 1
   for name in test unit-path; do
@@ -1234,10 +1235,26 @@ gate_run() { # pfm, templates, or all
   done
   steps_reset || return 1
   if [[ "$target" == pfm || "$target" == all ]]; then
-    steps_add_heavy pfm.unit checks_pfm_unit "$d" "$run_dir" || return 1
-    steps_add_heavy pfm.e2e checks_pfm_e2e "$d" "$run_dir" || return 1
-    steps_add_heavy pfm.race checks_pfm_race "$d" "$run_dir" || return 1
+    # Longest first: a step starts as soon as a slot is free, in registration order, so the steps
+    # that outlast every other open the gate and none is left to run alone at its end.
     steps_add_heavy pfm.unit-proof checks_pfm_unit_proof "$d" "$run_dir" || return 1
+    steps_add_heavy pfm.e2e checks_pfm_e2e "$d" "$run_dir" || return 1
+    steps_add_heavy pfm.unit checks_pfm_unit "$d" "$run_dir" || return 1
+    steps_add_heavy pfm.race checks_pfm_race "$d" "$run_dir" || return 1
+    # The heavy static steps queue for the heavy slots the test steps free.
+    steps_add_heavy pfm.lint-new run 'pfm: lint-new (golangci-lint, changed lines)' -- make -C "$d" --no-print-directory lint-new || return 1
+    steps_add_heavy pfm.fmt-check run 'pfm: fmt-check (gofumpt + gci + golines)' -- make -C "$d" --no-print-directory fmt-check || return 1
+    # Both test tiers, as checks_pfm_verify: untagged, then -tags jail.
+    steps_add_heavy pfm.vet run 'pfm: go vet' -- bash -c 'go -C "$1" vet ./... && go -C "$1" vet -tags jail ./...' _ "$d" || return 1
+    steps_add_heavy pfm.vet-darwin run 'pfm: go vet (darwin/arm64)' -- env GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 \
+      bash -c 'go -C "$1" vet ./... && go -C "$1" vet -tags jail ./...' _ "$d" || return 1
+    steps_add pfm.testplan run 'pfm: flow-matrix citations' -- bash "$d/scripts/testplan-check.sh" || return 1
+    steps_add pfm.arch run 'pfm: architecture ratchet' -- bash "$d/scripts/arch-check.sh" || return 1
+  fi
+  if [[ "$target" == templates || "$target" == all ]]; then
+    checks_templates_steps steps_add || return 1
+  fi
+  if [[ "$target" == pfm || "$target" == all ]]; then
     for f in "$d"/scripts/*_test.sh; do
       [[ -f "$f" ]] || { fail_step 'pfm: gate-script self-tests NOT RUN — no fixture suites found'; return 1; }
       stem="${f##*/}"; stem="${stem%_test.sh}"
@@ -1256,21 +1273,6 @@ gate_run() { # pfm, templates, or all
       steps_add "fixture.$stem" checks_gate_fixture "$stem" "$run_dir" || return 1
       case "$stem" in go-slow) steps_set_bound 45 || return 1 ;; shell-hang) steps_set_bound 5 || return 1 ;; esac
     done
-  fi
-  steps_barrier || return 1
-  if [[ "$target" == pfm || "$target" == all ]]; then
-    # Heavy static steps longest first, so the short ones queue behind them for a heavy slot.
-    steps_add_heavy pfm.lint-new run 'pfm: lint-new (golangci-lint, changed lines)' -- make -C "$d" --no-print-directory lint-new || return 1
-    steps_add_heavy pfm.fmt-check run 'pfm: fmt-check (gofumpt + gci + golines)' -- make -C "$d" --no-print-directory fmt-check || return 1
-    # Both test tiers, as checks_pfm_verify: untagged, then -tags jail.
-    steps_add_heavy pfm.vet run 'pfm: go vet' -- bash -c 'go -C "$1" vet ./... && go -C "$1" vet -tags jail ./...' _ "$d" || return 1
-    steps_add_heavy pfm.vet-darwin run 'pfm: go vet (darwin/arm64)' -- env GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 \
-      bash -c 'go -C "$1" vet ./... && go -C "$1" vet -tags jail ./...' _ "$d" || return 1
-    steps_add pfm.arch run 'pfm: architecture ratchet' -- bash "$d/scripts/arch-check.sh" || return 1
-    steps_add pfm.testplan run 'pfm: flow-matrix citations' -- bash "$d/scripts/testplan-check.sh" || return 1
-  fi
-  if [[ "$target" == templates || "$target" == all ]]; then
-    checks_templates_steps steps_add || return 1
   fi
   if [[ -n "$filter" ]] && (( ${#STEPS_NAMES[@]} == 0 )); then
     fail_step "gate: the filter matched no step:$filter"

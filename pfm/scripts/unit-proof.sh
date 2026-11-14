@@ -7,11 +7,13 @@
 #   scripts/unit-proof.sh [--out DIR] [package…]   packages default ./...; DIR defaults to
 #                                                    /tmp/{project}/unit-proof/{UTC}-{pid}, refused when it holds files
 #   scripts/unit-proof.sh --exec OUT BINARY ARG…    go test -exec's wrapper: one test binary in the ambient
-#   scripts/unit-proof.sh --filter OUT PKG TRACEDIR BINARY   one binary's traces → OUT/reach/{slug}.tsv
+#   scripts/unit-proof.sh --filter OUT PKG TRACEDIR BINARY [PART]   one process's traces → OUT/reach/{slug}.tsv,
+#                                                    {slug}#{PART}.tsv for one part of a split binary
 #   scripts/unit-proof.sh --verdict OUT              OUT/tests.json and OUT/reach/ → reach.tsv, causes.tsv, verdict
 #
-# The run: `go test -count=1 -json -exec '{this} --exec {out}' {packages}` from the pfm module, no
-# build tag, its event stream in {out}/tests.json. The go tool itself is never traced or planted.
+# The run: `go test -count=1 -json [-p N] -exec '{this} --exec {out}' {packages}` from the pfm module,
+# no build tag, its event stream in {out}/tests.json; N is PFM_FENCE_TEST_P where the fence sets it,
+# the unit tier's package concurrency. The go tool itself is never traced or planted.
 #
 # The hostile ambient (--exec), what a lived-in machine would hand the binary:
 #   environment  emptied but PFM_TEST_ARTIFACT_DIR, PFM_DEV_FENCE, GITHUB_ACTIONS, RUNNER_ENVIRONMENT;
@@ -24,6 +26,10 @@
 #                reaches the real tool
 #   trace        Linux: strace -ff -y --seccomp-bpf -e trace=%file,connect,bind plus the clone family
 #                (to drop what a started program does after its exec, which its exec row already names)
+#   split        Linux: a package PROOF_SHARDS names runs its binary as that many traced processes at
+#                once, the tests a traced `-test.list` run names dealt over them by `-test.run`, each
+#                process filtered on its own; go test reads their output in part order, and the verdict
+#                adds the parts' reach rows up as the package's
 #
 # Judged (the filter, one record at a time, by its path, never its result):
 #   allowed      under a directory testjail makes directly under the system temp directory (a mkdir of
@@ -60,8 +66,12 @@
 # Exit 0 PASS: no failing test, no reach row, no skip naming a missing tool. 1 FAIL: any of those.
 # BROKEN STATE, exit 2 ERROR {why}: strace absent on Linux, no trace file, a trace record the filter
 # cannot parse, the checkout's file list unreadable, an allow row without a reason, no test event, a
-# reused out directory — "could not look" never reads as a pass.
-# UNIT_PROOF_KEEP_TRACES=1 keeps the raw traces in {out}/trace/ (removed once filtered otherwise).
+# reused out directory, a split binary whose test list cannot be read or names no test, a listed test
+# no part started, a UNIT_PROOF_SHARDS word that is no `{package}={parts}`, a PFM_FENCE_TEST_P that is
+# no positive integer — "could not look" never reads as a pass.
+# UNIT_PROOF_KEEP_TRACES=1 keeps the raw traces and each part's output in {out}/trace/ (removed once
+# filtered otherwise). UNIT_PROOF_SHARDS replaces the split table, `{package}={parts}` words; empty
+# splits nothing.
 set -uo pipefail
 export LC_ALL=C
 
@@ -415,8 +425,8 @@ def exec_target(args):
         return as_string(args[0]) or args[0]
     return ' '.join([os.path.basename(words[0])] + words[1:])[:200]
 
-def filter_mode(out, pkg, tracedir, binary):
-    slug = pkg.replace('/', '%')
+def filter_mode(out, pkg, tracedir, binary, part=''):
+    slug = pkg.replace('/', '%') + ('#' + part if part else '')
     checkout = load_zones(out)['checkout']
     judge = Judge(out, os.path.normpath(os.path.join(checkout, 'pfm', pkg)), binary)
     base = judge.pkgdir
@@ -616,14 +626,20 @@ def verdict_mode(out, goos, traced):
             totals[cause] = totals.get(cause, 0) + 1
         for cause, count in sorted(totals.items(), key=lambda kv: (-kv[1], kv[0])):
             fh.write('%s\t%d\n' % (cause, count))
-    reach = []
+    reach, merged = [], {}
     rdir = os.path.join(out, 'reach')
     if os.path.isdir(rdir):
         for f in sorted(os.listdir(rdir)):
-            pkg = f[:-4].replace('%', '/')
+            # a split binary leaves one file a part ({slug}#{part}.tsv): its package's rows are one set
+            pkg = f[:-4].split('#')[0].replace('%', '/')
             with open(os.path.join(rdir, f), encoding='utf-8', errors='replace') as rfh:
                 for line in rfh:
-                    reach.append([pkg] + line.rstrip('\n').split('\t', 3))
+                    row = [pkg] + line.rstrip('\n').split('\t', 3)
+                    first = merged.setdefault(tuple(row[:3]), row)
+                    if first is row:
+                        reach.append(row)
+                    else:
+                        first[3] = str(int(first[3]) + int(row[3]))
     elif traced:
         errors.append('no trace file: %s holds no filtered binary' % rdir)
     try:
@@ -671,39 +687,104 @@ def verdict_mode(out, goos, traced):
     return code
 
 if sys.argv[1] == 'filter':
-    filter_mode(*sys.argv[2:6])
+    filter_mode(*sys.argv[2:7])
 else:
     sys.exit(verdict_mode(sys.argv[2], sys.argv[3], sys.argv[4] == '1'))
 PY
 
 die() { echo "UNIT-PROOF ERROR $*"; exit 2; }
 
+# The packages whose traced binary runs as several processes, `{package}={parts}` words. Each is
+# hundreds of short serial tests that one process ran last and alone at the proof's end (installer
+# 622 tests, hookentry 290, doctor 242, chat 190). UNIT_PROOF_SHARDS replaces the table.
+PROOF_SHARDS='internal/installer=6 internal/hookentry=4 internal/doctor=4 internal/chat=4'
+
+# proof_shards <pkg>: the parts <pkg>'s binary runs as, 1 when the table does not name it.
+proof_shards() {
+  local word parts=1
+  # Every word is checked, not only <pkg>'s: a misspelt word would otherwise split nothing, silently.
+  for word in ${UNIT_PROOF_SHARDS-$PROOF_SHARDS}; do
+    [[ "$word" =~ ^[^=]+=[1-9][0-9]*$ ]] || { echo "UNIT_PROOF_SHARDS: $word is no {package}={parts}"; return 1; }
+    [[ "${word%=*}" != "$1" ]] || parts="${word##*=}"
+  done
+  echo "$parts"
+}
+
+# proof_error <part> <message>: one error the verdict reports, in exec_binary's out directory.
+proof_error() { mkdir -p "$out/errors"; printf '%s\n' "$2" > "$out/errors/$slug${1:+#$1}"; }
+
+# traced_run <part> <binary> <arg>…: one process of a test binary under strace, then its traces
+# filtered into reach/; <part> is empty for a whole binary. Called by exec_binary, whose out, pkg,
+# slug, envs and tool paths it reads.
+traced_run() {
+  local part="$1"; shift
+  local tdir="$out/trace/$slug${part:+#$part}" rc ferr
+  mkdir -p "$tdir"
+  (umask 002 && exec "$env_bin" -i "${envs[@]}" "$strace_bin" -qq -ff -y -s 256 --seccomp-bpf \
+    -e "trace=$TRACE_SET" -o "$tdir/t" "$@")
+  rc=$?
+  if ! ferr="$("$python_bin" -c "$FILTER_PY" filter "$out" "$pkg" "$tdir" "$1" "$part" 2>&1)"; then
+    ferr="$(tail -n 1 <<<"$ferr")"
+    proof_error "$part" "$pkg${part:+ (part $part)}: ${ferr#ValueError: }"
+  fi
+  [[ "${UNIT_PROOF_KEEP_TRACES:-}" == 1 ]] || rm -rf -- "$tdir"
+  return "$rc"
+}
+
+# shard_run <parts> <binary> <arg>…: the binary's tests dealt over <parts> traced processes that run
+# at once, each on its own -test.run list; their output follows in part order. The names come from a
+# traced -test.list run, and a listed test no part started is an error. Reads what traced_run reads.
+shard_run() {
+  local parts="$1"; shift
+  local base="$out/trace/$slug" names name lost i=0 k rc=0 part_rc pids=() runs=()
+  mkdir -p "$out/trace"
+  if ! traced_run list "$1" -test.list=. > "$base#list.out" 2>&1; then
+    # Keyed `names`, not `list`: the list run's own filter error, if any, stays beside it.
+    proof_error names "$pkg: its test list could not be read: $(tail -n 1 "$base#list.out")"; return 2
+  fi
+  names="$(grep -E '^(Test|Fuzz|Example)[^[:space:]/]*$' "$base#list.out" | sort -u)"
+  [[ -n "$names" ]] || { proof_error names "$pkg: its binary lists no test to split"; return 2; }
+  while IFS= read -r name; do
+    k=$((i % parts)); runs[k]="${runs[k]:+${runs[k]}|}$name"; i=$((i + 1))
+  done <<<"$names"
+  (( i >= parts )) || parts="$i"
+  for ((k = 0; k < parts; k++)); do
+    traced_run "$((k + 1))" "$@" "-test.run=^(${runs[k]})\$" > "$base#$((k + 1)).out" 2>&1 &
+    pids[k]=$!
+  done
+  for ((k = 0; k < parts; k++)); do
+    wait "${pids[k]}"; part_rc=$?
+    cat "$base#$((k + 1)).out"
+    (( rc != 0 || part_rc == 0 )) || rc="$part_rc"
+  done
+  # test2json framing puts one marker byte before a `=== RUN` line.
+  lost="$(comm -23 <(printf '%s\n' "$names") \
+    <(sed -n 's/^.\{0,1\}=== RUN   \([^[:space:]/]*\)$/\1/p' "$base#"[0-9]*.out | sort -u))"
+  [[ "${UNIT_PROOF_KEEP_TRACES:-}" == 1 ]] || rm -f -- "$base#list.out" "$base#"[0-9]*.out
+  # A part that failed already fails the package; the tests behind its failure are no second error.
+  if (( rc == 0 )) && [[ -n "$lost" ]]; then
+    proof_error lost "$pkg: $(grep -c . <<<"$lost") listed test(s) ran in no part, first $(head -n 1 <<<"$lost")"; return 2
+  fi
+  return "$rc"
+}
+
 # exec_binary <out> <binary> <arg>…: go test -exec's wrapper — one test binary in the hostile ambient.
 exec_binary() {
   local out="$1"; shift
-  local amb="$out/ambient" pkg slug rc envs=() name
+  local amb="$out/ambient" pkg slug envs=() name
   pkg="${PWD#"$PFM"}"; pkg="${pkg#/}"; pkg="${pkg:-.}"; slug="${pkg//\//%}"
   envs=("HOME=$amb/home" "PATH=$amb/bin" "HERDR_BIN_PATH=$amb/bin/herdr" "CLAUDECODE=1"
     "CLAUDE_CONFIG_DIR=$amb/home/.claude" "CODEX_HOME=$amb/home/.codex" "TMUX=$amb/tmux/default,4242,0"
     "TMUX_PANE=%9" "SHELL=$amb/bin/zsh")
   for name in "${KEEP_NAMES[@]}"; do [[ -z "${!name+x}" ]] || envs+=("$name=${!name}"); done
-  local env_bin strace_bin python_bin
-  env_bin="$(command -v env)" || { mkdir -p "$out/errors"; echo "no env for $pkg" > "$out/errors/$slug"; return 2; }
+  local env_bin strace_bin python_bin parts
+  env_bin="$(command -v env)" || { proof_error '' "no env for $pkg"; return 2; }
   if [[ "$(cat "$out/goos")" == linux ]]; then
-    strace_bin="$(command -v strace)" || { mkdir -p "$out/errors"; echo "strace absent for $pkg" > "$out/errors/$slug"; return 2; }
+    strace_bin="$(command -v strace)" || { proof_error '' "strace absent for $pkg"; return 2; }
     python_bin="$(command -v python3)"
-    local tdir="$out/trace/$slug"
-    mkdir -p "$tdir"
-    (umask 002 && exec "$env_bin" -i "${envs[@]}" "$strace_bin" -qq -ff -y -s 256 --seccomp-bpf \
-      -e "trace=$TRACE_SET" -o "$tdir/t" "$@")
-    rc=$?
-    local ferr
-    if ! ferr="$("$python_bin" -c "$FILTER_PY" filter "$out" "$pkg" "$tdir" "$1" 2>&1)"; then
-      ferr="$(tail -n 1 <<<"$ferr")"
-      mkdir -p "$out/errors"; printf '%s: %s\n' "$pkg" "${ferr#ValueError: }" > "$out/errors/$slug"
-    fi
-    [[ "${UNIT_PROOF_KEEP_TRACES:-}" == 1 ]] || rm -rf -- "$tdir"
-    return "$rc"
+    parts="$(proof_shards "$pkg")" || { proof_error '' "$parts"; return 2; }
+    if (( parts > 1 )); then shard_run "$parts" "$@"; else traced_run '' "$@"; fi
+    return
   fi
   (umask 002 && exec "$env_bin" -i "${envs[@]}" "$@")
 }
@@ -737,7 +818,7 @@ checkout_files() {
 }
 
 run_proof() {
-  local out="" pkgs=() goos goroot traced=0
+  local out="" pkgs=() jobs=() goos goroot traced=0
   while (( $# )); do
     case "$1" in
       --out) out="${2:?--out needs a directory}"; shift 2 ;;
@@ -745,6 +826,12 @@ run_proof() {
     esac
   done
   (( ${#pkgs[@]} )) || pkgs=(./...)
+  # The unit tier's package concurrency (pfm/Makefile TESTFLAGS) where the fence sets it: go's own
+  # default is every CPU, and the proof runs beside the unit tier in the gate.
+  if [[ -n "${PFM_FENCE_TEST_P:-}" ]]; then
+    [[ "$PFM_FENCE_TEST_P" =~ ^[1-9][0-9]*$ ]] || die "PFM_FENCE_TEST_P must be a positive integer (got '$PFM_FENCE_TEST_P')"
+    jobs=(-p "$PFM_FENCE_TEST_P")
+  fi
   [[ -n "$out" ]] || out="/tmp/$PROJECT/unit-proof/$(date -u +%Y%m%dT%H%M%SZ)-$$"
   if [[ -d "$out" ]] && [[ -n "$(ls -A -- "$out")" ]]; then die "out directory $out already holds files"; fi
   mkdir -p "$out" && out="$(cd -- "$out" && pwd -P)" || die "cannot create out directory $out"
@@ -760,7 +847,7 @@ run_proof() {
     "$(cd /tmp && pwd -P)" "$out/files.z" > "$out/zones.tsv"
   plant_ambient "$out" || die "cannot plant the ambient under $out/ambient"
   mkdir -p "$out/profile"
-  (cd "$PFM" && PFM_TEST_ARTIFACT_DIR="$out/profile" go test -count=1 -json -timeout 20m \
+  (cd "$PFM" && PFM_TEST_ARTIFACT_DIR="$out/profile" go test -count=1 -json -timeout 20m ${jobs[@]+"${jobs[@]}"} \
     -exec "bash '$SELF' --exec '$out'" "${pkgs[@]}" > "$out/tests.json" 2> "$out/go.stderr")
   python3 -c "$FILTER_PY" verdict "$out" "$goos" "$traced"
 }

@@ -273,30 +273,30 @@ else bad 'duplicate name'; fi
 
 timed_step() {
   local name="$1" delay="$2"
-  printf '%s %s start\n' "$EPOCHREALTIME" "$name" >> "$T/phase.events"
+  printf '%s %s start\n' "$EPOCHREALTIME" "$name" >> "$T/timed.events"
   sleep "$delay"
-  printf '%s %s end\n' "$EPOCHREALTIME" "$name" >> "$T/phase.events"
+  printf '%s %s end\n' "$EPOCHREALTIME" "$name" >> "$T/timed.events"
+}
+await_step() { # await_step <name> <other>: ends once <other> has ended, polled in 0.02 s ticks, bounded at 5 s
+  local name="$1" other="$2" tick
+  printf '%s %s start\n' "$EPOCHREALTIME" "$name" >> "$T/timed.events"
+  for (( tick = 0; tick < 250; tick++ )); do
+    grep -q " $other end\$" "$T/timed.events" 2>/dev/null && break
+    sleep 0.02
+  done
+  printf '%s %s end\n' "$EPOCHREALTIME" "$name" >> "$T/timed.events"
 }
 steps_reset
-steps_add a timed_step a 0.10; steps_add b timed_step b 0.14
-steps_barrier
+# a ends only after d, registered last, has ended: d must start while a runs, and the table keeps a first.
+steps_add a await_step a d; steps_add b timed_step b 0.01
 steps_add c timed_step c 0.01; steps_add d timed_step d 0.01
 STEPS_JOBS=4
-if steps_run "$T/barrier" >"$T/barrier.out" &&
-  [ "$(cut -f1 "$T/barrier/gate.tsv" | paste -sd, -)" = 'step,a,b,c,d,STEPS' ] &&
-  cmp -s "$T/barrier/gate.tsv" "$T/barrier.out" &&
-  awk '$2=="a" || $2=="b" {if($3=="end" && $1>latest)latest=$1} $2=="c" || $2=="d" {if($3=="start" && (!earliest || $1<earliest))earliest=$1} END {exit !(latest>0 && earliest>latest)}' "$T/phase.events"; then
-  ok 'barrier waits for both earlier steps and keeps table order'
-else bad 'barrier order or table' "$(cat "$T/barrier.out")"; fi
-
-steps_reset
-steps_barrier
-steps_add single true
-steps_barrier
-if steps_run "$T/empty-phase" >"$T/empty-phase.out" &&
-  [ "$(cut -f1 "$T/empty-phase/gate.tsv" | paste -sd, -)" = 'step,single,STEPS' ]; then
-  ok 'empty phases preserve the single step'
-else bad 'empty barrier side'; fi
+if steps_run "$T/table" >"$T/table.out" &&
+  [ "$(cut -f1 "$T/table/gate.tsv" | paste -sd, -)" = 'step,a,b,c,d,STEPS' ] &&
+  cmp -s "$T/table/gate.tsv" "$T/table.out" &&
+  awk '$2=="a" && $3=="end" {a=$1} $2=="d" && $3=="end" {d=$1} END {exit !(a>0 && d>0 && d<a)}' "$T/timed.events"; then
+  ok 'the table keeps registration order whatever order the steps end in'
+else bad 'table order' "$(cat "$T/table.out")"; fi
 
 heavy_step() {
   local name="$1"
@@ -319,9 +319,9 @@ steps_add_heavy h2 timed_step h2 0.16
 steps_add_heavy h3 timed_step h3 0.01
 steps_add light timed_step light 0.01
 STEPS_JOBS=3; STEPS_HEAVY_JOBS=2
-: > "$T/phase.events"
+: > "$T/timed.events"
 if steps_run "$T/overtake" >"$T/overtake.out" &&
-  awk '$2=="light" && $3=="start" {light=$1} $2=="h3" && $3=="start" {h3=$1} END {exit !(light>0 && h3>light)}' "$T/phase.events"; then
+  awk '$2=="light" && $3=="start" {light=$1} $2=="h3" && $3=="start" {h3=$1} END {exit !(light>0 && h3>light)}' "$T/timed.events"; then
   ok 'light step overtakes a heavy step waiting for its slot'
 else bad 'light overtake'; fi
 

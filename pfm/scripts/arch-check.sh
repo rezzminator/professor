@@ -583,11 +583,14 @@ OS_PROC_LIVE='"/proc\b|"/sys/fs/cgroup|\bpaths\.(SystemProcRoot|ProcRootOr)\b'
 # ERROR line reaches the job's output.
 os_door_names() {
   local registry=internal/deps/registry.go
+  # A missing registry is this ERROR alone: awk's own complaint on stderr would
+  # interleave with another check's line in the shared output.
+  [ -r "$registry" ] || { say "$1" ERROR "could not read $registry"; return 1; }
   if ! names=$(awk '
       /^[[:space:]]*Name:[[:space:]]*"/ { n = $0; sub(/^[^"]*"/, "", n); sub(/".*/, "", n); next }
       /^[[:space:]]*Name:/ { n = ""; next }
       /Platforms:/ && n != "" { p = $0; sub(/.*\{/, "", p); sub(/\}.*/, "", p); if (p !~ /,/ && p ~ /[^[:space:]]/) print n; n = "" }
-    ' "$registry" | paste -sd'|' -); then
+    ' "$registry" 2>/dev/null | paste -sd'|' -); then
     say "$1" ERROR "could not read $registry"; return 1
   fi
   [ -n "$names" ] || { say "$1" ERROR "no one-platform command derived from $registry — the enumerator did not run"; return 1; }

@@ -1,7 +1,7 @@
 name: macOS suite
 description: >-
   One part of pfm's macOS suite on a macOS runner: `unit` runs the refresh-scope
-  fixture under the system Bash 3.2, `go test ./...` (the unit tier) and `go test -tags jail ./...` (the jail tier); `e2e` runs the whole
+  fixture under the system Bash 3.2, the unit tier of only the packages whose files differ on darwin (the gate runs the whole unit tier once, on Linux) and `go test -tags jail ./...` (the jail tier); `e2e` runs the whole
   tagged e2e suite serially, the Darwin installer and the release-upgrade e2e
   included. ci.yml runs both parts on every pull request into main and on a
   hand-started run (`-f exclude=` the other jobs for macOS alone). Needs the repository checked out with full history and Go set up;
@@ -38,10 +38,18 @@ runs:
           unit)
             # The refresh-scope fixture under the system Bash 3.2, as on a user's Mac.
             python3 scripts/test-refresh-scope.py
-            # The unit tier as any machine runs it, untagged, under the unit-proof's hostile ambient
-            # (tripwires on every PATH name; darwin: syscalls not traced); then the jail tier
-            # (*_jail_test.go), whose tagged binaries internal/testjail admits on this hosted runner.
-            bash pfm/scripts/unit-proof.sh
+            # The unit tier runs once, on Linux, in the gate (with its proof); here only the
+            # packages whose files differ on darwin, the code no Linux run compiles. The Go
+            # toolchain names them: each package's file lists under GOOS=linux and natively.
+            files='{{.ImportPath}} {{join .GoFiles ","}} {{join .TestGoFiles ","}} {{join .XTestGoFiles ","}}'
+            GOOS=linux go -C pfm list -f "$files" ./... | sort > "$RUNNER_TEMP/packages-linux"
+            go -C pfm list -f "$files" ./... | sort > "$RUNNER_TEMP/packages-darwin"
+            darwin_packages=$(comm -13 "$RUNNER_TEMP/packages-linux" "$RUNNER_TEMP/packages-darwin" | cut -d' ' -f1 | sort -u)
+            [ -n "$darwin_packages" ] || { echo "::error::no package differs on darwin — the package listing did not run"; exit 1; }
+            # shellcheck disable=SC2086 # one import path per word
+            go -C pfm test -count=1 $darwin_packages
+            # Then the jail tier (*_jail_test.go), whose tagged binaries internal/testjail
+            # admits on this hosted runner: real processes, so every one runs here.
             go -C pfm test -count=1 -tags jail ./... ;;
           e2e)
             export PFM_E2E_SOURCE_REPO="$GITHUB_WORKSPACE"

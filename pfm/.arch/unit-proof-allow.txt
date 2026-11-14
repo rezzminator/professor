@@ -42,10 +42,6 @@
 {out}/ambient/bin/xsel	r	the same atotto/clipboard init lookup (xsel)
 {checkout}/pfm/internal/*	absent	a relative path a unit test hands code that resolves it against the package directory (an absent session id, binary, hidden config, fixture or testdata entry): the probe finds nothing there, and tracked files are readable without a row
 {checkout}/pfm/cmd/*	absent	the same relative probe from cmd/pfm tests and the upward walks through pfm/cmd (CLAUDE.md, .git, baseline) above them
-{checkout}/pfm/harness-prompts/generated/claude.md	r	the doctor reads the fleet prompt the checkout generated (gitignored), through the source-repository marker testjail writes
-{checkout}/plugins/*/.claude-plugin/plugin.json	r	the doctor and installer read each plugin manifest of the checkout (a submodule, so untracked in this repository) through the source-repository marker
-{checkout}/templates/global/skills/god-speed*	r	the installer and doctor read the shipped god-speed skill directory through the source-repository marker
-{checkout}/tmp/bin/pfm.dev	r	the dev build binary the checkout stages (gitignored), probed by the launcher tests
 /.claude/*	absent	an upward project walk reaching the filesystem root: agentrole and cmd/pfm stat .claude/agents in every ancestor of a temp directory
 /.codex/*	absent	the same upward walk (.codex/agents)
 /tmp/.claude/*	absent	the same upward walk at the system temp directory

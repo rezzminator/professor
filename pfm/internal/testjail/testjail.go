@@ -9,6 +9,7 @@
 // fence.go: runsHere, the guard Run asks first; ChildOutput, a re-exec's output; tier_unit.go and
 // tier_machine.go, the build-tag pair telling a unit binary from a jail (or e2e, journey) one.
 // unitnet.go: the unit net an armed unit binary runs inside, and its one switch.
+// source_repo.go: the run's empty source repository and StageSourceRepoMarker, the installed clone.
 // jail_dir.go: RunInJail, Run starting a package's tests in the jail directory.
 // place.go: Place, an invented fixture path's root in the jail directory; TempPath, a path under Run's temp root.
 // profile.go: the step profiler of every package process; profile_place.go names the process and holds
@@ -274,8 +275,8 @@ func jailHome(base string) (func(), error) {
 	if err := os.Setenv(paths.EnvManagedSettingsDir, managedDir); err != nil {
 		warnSetup("set %s: %v", paths.EnvManagedSettingsDir, err)
 	}
-	if err := paths.WriteSourceRepoMarker(home, checkoutRoot()); err != nil {
-		warnSetup("write source repository marker: %v", err)
+	if err := pinRunSourceRepo(home); err != nil {
+		return cleanup, err
 	}
 	if err := pinXDGConfigHome(home); err != nil {
 		return cleanup, err
@@ -394,8 +395,8 @@ func fleetSetenv(t *testing.T, setenv func(string, string)) string {
 		t.Fatal(err)
 	}
 	setenv(paths.EnvManagedSettingsDir, managedDir)
-	if err := paths.WriteSourceRepoMarker(filepath.Join(root, "home"), checkoutRoot()); err != nil {
-		t.Fatal(err)
+	if err := paths.WriteSourceRepoMarker(filepath.Join(root, "home"), runSourceRepo); err != nil {
+		t.Fatalf("point the fleet's source repository marker at the run's empty source repository: %v", err)
 	}
 	setenv("HOME", filepath.Join(root, "home"))
 	// Keep child tools' XDG files inside this fleet.
@@ -412,6 +413,7 @@ func InstalledHome(t *testing.T) string {
 
 	root := Fleet(t)
 	jailedHome := filepath.Join(root, "home")
+	StageSourceRepoMarker(t, jailedHome)
 	claudeBinary := pfmengine.MustLookup(pfmengine.Claude).Binary
 	if err := os.MkdirAll(filepath.Join(jailedHome, ".local", "bin"), 0o700); err != nil {
 		t.Fatal(err)
@@ -516,14 +518,6 @@ func stageCloneZshrc(t *testing.T, home string) {
 func checkoutRoot() string {
 	_, file, _, _ := runtime.Caller(0)
 	return filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(file))))
-}
-
-// StageSourceRepoMarker points a jail at this checkout's tracked prompts.
-func StageSourceRepoMarker(t *testing.T, home string) {
-	t.Helper()
-	if err := paths.WriteSourceRepoMarker(home, checkoutRoot()); err != nil {
-		t.Fatal(err)
-	}
 }
 
 // ShippedHarnessPrompt returns the reviewed baseline carried by this build.

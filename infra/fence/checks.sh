@@ -863,6 +863,11 @@ checks_gate_fixture() {
   checks_pfm_profile_pointers "$json" "$root" "$before"
 }
 
+# checks_tracked_view <cmd...>: the go-test steps' door to the tree under test — in the fence the
+# command sees it without its git-ignored paths and file-less untracked directories, as a CI checkout
+# holds it (infra/fence/tracked-view.sh), so no jail test passes or fails on a host-only file.
+checks_tracked_view() { bash "$REPO_ROOT/infra/fence/tracked-view.sh" "$REPO_ROOT" -- "$@"; }
+
 checks_pfm_unit() { # pfm dir, run dir, optional already-read TESTFLAGS
   local d="$1" run_dir="$2" flags_text="${3:-}" timing_base history before="$FAILURES"
   local testflags=() shard_args=()
@@ -879,7 +884,7 @@ checks_pfm_unit() { # pfm dir, run dir, optional already-read TESTFLAGS
   # The JSON is retained even on failure; timing is a separate verdict.
   # -tags jail: the gate runs the unit tier and the jail tier (*_jail_test.go) in one tagged binary
   # per package, which internal/testjail admits only in the fence or on a hosted runner.
-  run "pfm: go test" -- bash "$d/scripts/test-shard.sh" run --out "$run_dir/unit.json" "${shard_args[@]}" -- -tags jail "${testflags[@]}"
+  run "pfm: go test" -- checks_tracked_view bash "$d/scripts/test-shard.sh" run --out "$run_dir/unit.json" "${shard_args[@]}" -- -tags jail "${testflags[@]}"
   go_test_report "$run_dir/unit.json"
   checks_pfm_profile_pointers "$run_dir/unit.json" "$run_dir/profile" "$before"
   skip_gate "pfm: skipped tests are all listed (unit)" "$run_dir/unit.json"
@@ -942,7 +947,7 @@ checks_module_race() {
   need_tool gcc "$scope" || return 1
   regex="^($(awk '{print $2}' <<< "$tests" | paste -sd'|' -))\$"
   while read -r pkg; do pkgs+=("./$pkg/"); done < <(awk '{print $1}' <<< "$tests" | awk '!seen[$0]++')
-  run "$scope: go test -race (race regressions)" -- bash -c '
+  run "$scope: go test -race (race regressions)" -- checks_tracked_view bash -c '
     CGO_ENABLED=1 go -C "$1" test -race -count="$PFM_FENCE_TEST_COUNT" -json -timeout "$PFM_FENCE_RACE_TIMEOUT" -run "$2" "${@:4}" > "$3"
   ' _ "$d" "$regex" "$json" "${pkgs[@]}"
   go_test_report "$json"

@@ -7,9 +7,11 @@ package sourcesweep
 
 import "strings"
 
-// generatedDirs are the module-relative directories pfm install or engine-sync generates and git
-// ignores, outside any dot directory.
-var generatedDirs = []string{"harness-prompts/generated"}
+// generatedDirs are the module-relative directories no tracked file lives in, outside any dot
+// directory: the fleet prompts pfm install generates (git-ignored), and tmp, the scratch directory a
+// run may leave in the module (untracked, git-ignored on some hosts), which a sweep would otherwise
+// list on the one machine holding it.
+var generatedDirs = []string{"harness-prompts/generated", "tmp"}
 
 // SkipDir reports whether a sweep leaves the directory at rel, its slash path relative to the module
 // root ("." for the root itself): a dot directory, or a generated one.

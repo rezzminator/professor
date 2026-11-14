@@ -16,7 +16,7 @@ import (
 // the jail's fake engine-sync these are fixtures, not a second compiler:
 // engine-sync's gate proves the rendered manuals and settings. Shared files
 // below a subdirectory are never agents: the inventory never lists them. It
-// also links the checkout's global rules, the other registry a healthy home holds.
+// also links the installed clone's global rules, the other registry a healthy home holds.
 func StageGlobalAgents(t *testing.T, home string) {
 	t.Helper()
 	stageGlobalRules(t, home)
@@ -51,12 +51,12 @@ func StageGlobalAgents(t *testing.T, home string) {
 	}
 }
 
-// stageGlobalRules links every *.md of the checkout's templates/global/rules
-// into {home}/.claude/rules, the links pfm install makes, so a healthy jail
+// stageGlobalRules links every *.md of the installed clone's
+// templates/global/rules into {home}/.claude/rules, the links pfm install makes, so a healthy jail
 // home passes doctor's rules row; StageGlobalAgents calls it.
 func stageGlobalRules(t *testing.T, home string) {
 	t.Helper()
-	source := filepath.Join(checkoutRoot(), "templates", "global", "rules")
+	source := filepath.Join(installedCloneDir(t), "templates", "global", "rules")
 	entries, err := os.ReadDir(source)
 	if err != nil {
 		t.Fatalf("inventory global rule fixtures %s: %v", source, err)

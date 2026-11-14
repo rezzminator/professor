@@ -163,7 +163,7 @@ pfm_e2e_rows() {
   local -a flags=(-p "$PFM_FENCE_E2E_P")
   [[ -z "${PFM_FENCE_E2E_PARALLEL:-}" ]] || flags+=(-parallel "$PFM_FENCE_E2E_PARALLEL")
   flags+=(-count="$PFM_FENCE_TEST_COUNT" -timeout "$PFM_FENCE_E2E_TIMEOUT")
-  run "pfm: e2e (tagged)" -- bash -c '
+  run "pfm: e2e (tagged)" -- checks_tracked_view bash -c '
     d="$1" out="$2"; shift 2
     go -C "$d" test -tags e2e "$@" -json ./e2e/... >"$out"
   ' _ "$d" "$timing_run/e2e.json" "${flags[@]}"

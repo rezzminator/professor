@@ -98,6 +98,31 @@ func TestRunPinsSIDDirInsideTheJail(t *testing.T) {
 	}
 }
 
+// TestRunPinsSourceRepoDiscoveryToAnEmptyDirectory pins the door that keeps every test off the
+// checkout it runs from: PFM_SOURCE_REPO and the jail home's marker name one empty directory of the
+// run, in the armed unit binary and the jail binary alike.
+func TestRunPinsSourceRepoDiscoveryToAnEmptyDirectory(t *testing.T) {
+	home := os.Getenv(paths.EnvHome)
+	want := filepath.Join(home, "PFM_SOURCE_REPO")
+	marker, markerErr := paths.ReadSourceRepoMarker(home)
+	entries, readErr := os.ReadDir(want)
+	got := fmt.Sprintf(
+		"env=%s marker=%s %v entries=%d %v",
+		os.Getenv("PFM_SOURCE_REPO"),
+		marker,
+		markerErr,
+		len(entries),
+		readErr,
+	)
+	if wantText := fmt.Sprintf("env=%s marker=%s <nil> entries=0 <nil>", want, want); got != wantText {
+		t.Fatalf("source repository pin = %q, want %q", got, wantText)
+	}
+	root := Fleet(t)
+	if marker, err := paths.ReadSourceRepoMarker(filepath.Join(root, "home")); err != nil || marker != want {
+		t.Fatalf("fleet marker = %q, %v; want %q", marker, err, want)
+	}
+}
+
 func TestEveryJailPinsAndSeedsPFMConfig(t *testing.T) {
 	check := func(home, configPath string, extra map[string]any) {
 		t.Helper()

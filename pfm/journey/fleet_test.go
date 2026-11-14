@@ -493,3 +493,12 @@ func evidence(c *harness.Ctx, records []string) {
 	}
 	c.Artifact("processes.txt", []byte(table.String()))
 }
+
+// jobsAtRest waits for pfm's name-sync and schedule jobs to be at rest before a step installs or
+// uninstalls: either is refused beside a running job, and the timed name-sync job starts on its own.
+func jobsAtRest(c *harness.Ctx, before string) {
+	c.Poll("pfm's name-sync and schedule jobs at rest before "+before, 20*time.Second, func() (bool, string) {
+		running := jobsRunning(c)
+		return running == "", running
+	})
+}

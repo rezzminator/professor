@@ -42,7 +42,7 @@ It runs as the owner on the machine's real paths, no jail, and every branch of t
 
 - A Herdr branch starts with `herdrSession` and hands `herdrSocket(s)` to every reader: two terminals on one session mirror each other and interleave their keys.
 - Every `sqlite3` call on pfm's state database goes through `stateSQL` or `tryStateSQL`, which wait out the lock every branch and pfm contend for.
-- Before a step runs `pfm install`, poll `jobsRunning` to empty: an install beside a running name-sync or schedule job is refused.
+- Before a step runs `pfm install` or `pfm uninstall`, call `jobsAtRest`: either beside a running name-sync or schedule job is refused.
 - Replace a file another branch may read with one `mv` of a written temp file; remove a Claude build under `~/.local/share/claude/versions/` only once a poll shows no launch still execing it, and keep the newest — a sibling's launch resolves the file mid-swap.
 - Type commands both kernels' tools accept: `printenv` with two names, `stat -c` and `find -xtype` pass on Linux and fail on macOS; a kernel difference goes in an OS twin.
 

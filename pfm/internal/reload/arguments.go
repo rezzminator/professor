@@ -18,12 +18,16 @@ const (
 	ArgumentPane    = "--pane"
 )
 
-// NormalizeArguments maps every cache spelling a person reaches for onto the
-// one canonical --cache 1h|5m before validation: `--1h` and `--5m`, each with
-// an optional trailing `on`, and `--cache on|off`, since the launch knob is
-// the cache1h boolean. A flag's value is copied untouched, so `--then --1h`
-// keeps its prompt. The worker's argv is normalized again, idempotently.
+// NormalizeArguments maps every spelling a person reaches for onto the
+// canonical flags before validation: a setting with or without its dashes and
+// with `=` or a space before its value (`--model=opus`, `effort high`,
+// `effort=high`), and every cache spelling onto --cache 1h|5m: `--1h` and
+// `--5m`, each with an optional trailing `on`, and `--cache on|off`, since the
+// launch knob is the cache1h boolean. A flag's value is copied untouched, so
+// `--then --1h` keeps its prompt. The worker's argv is normalized again,
+// idempotently.
 func NormalizeArguments(args []string) []string {
+	args = splitArgumentSpellings(args)
 	normalized := make([]string, 0, len(args))
 	for index := 0; index < len(args); index++ {
 		switch word := args[index]; word {
@@ -56,6 +60,38 @@ func NormalizeArguments(args []string) []string {
 		}
 	}
 	return normalized
+}
+
+// argumentFlags holds every /reload flag by its bare name, true for the ones
+// followed by a value.
+var argumentFlags = map[string]bool{
+	"account": true, "model": true, "effort": true, "cache": true, "then": true, "sock": true, "pane": true,
+	"new": false, "hide": false,
+}
+
+// splitArgumentSpellings rewrites `--name=value`, `name=value` and a bare
+// `name` of a known flag into `--name` [value]; a value following a flag is
+// never rewritten, so `--then effort=high` keeps its prompt.
+func splitArgumentSpellings(args []string) []string {
+	split := make([]string, 0, len(args))
+	for index := 0; index < len(args); index++ {
+		word := args[index]
+		name, value, hasValue := strings.Cut(strings.TrimPrefix(word, "--"), "=")
+		name = strings.ToLower(name)
+		takesValue, known := argumentFlags[name]
+		if !known || (hasValue && !takesValue) {
+			split = append(split, word)
+			continue
+		}
+		split = append(split, "--"+name)
+		if hasValue {
+			split = append(split, value)
+		} else if takesValue && index+1 < len(args) {
+			index++
+			split = append(split, args[index])
+		}
+	}
+	return split
 }
 
 // WorkerArguments carries the validated CLI values to a backend-specific request.

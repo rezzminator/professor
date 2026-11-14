@@ -157,6 +157,8 @@ func TestReloadAcceptsNormalizedCacheSpellings(t *testing.T) {
 		{"--cache", "1H"},
 		{"--account", "2", "--1h", "on", "--new"},
 		{"--then", "--1h", "--5m"},
+		{"--model=opus", "effort=high"},
+		{"--model", "opus", "effort", "high"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			if err := validateReloadArgs(reload.NormalizeArguments(args)); err != nil {

@@ -128,7 +128,7 @@ func TestHerdrTabProviderReleasedAgentTeardown(t *testing.T) {
 				warn: tabIndicatorWarnings{dir: dir, stderr: &warnings},
 			}
 			for phase = 0; phase < 3; phase++ {
-				views, err := provider.tabs(context.Background(), socket)
+				views, err := provider.tabs(context.Background(), socket, true)
 				if err != nil {
 					t.Fatal(err)
 				}

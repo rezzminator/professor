@@ -7,7 +7,8 @@
 // nothing here runs. A pane's processes are what Herdr's pane.process_info
 // names (foreground.go). Whether Herdr resumes a restored pane's agent itself
 // is restore.go's. Whether a server runs at a socket is server.go's. The nudge
-// that makes a socket's blinker re-read its tabs is nudge.go's.
+// that makes a socket's blinker re-read its tabs is nudge.go's; which tabs a
+// tick reconciles from its tab observations is indicators_tab_observations.go's.
 package herdr
 
 import (

@@ -127,6 +127,7 @@ type indicatorPainter struct {
 	tabsChanged     TabProbe
 	hasTabs         bool
 	tabObservations []TabDecoration
+	tabFailed       map[string]bool // tabs whose last reconcile failed or was refused (tabSettled)
 	// unproved holds each pane whose ownership proof failed: the status it
 	// failed under, when, and under which Herdr server start. Such a pane is
 	// named once per status change while it stays unproved, and paint re-proves
@@ -135,7 +136,8 @@ type indicatorPainter struct {
 	// memo is kept in lockDir per socket (unprovedPath) and reread every paint;
 	// a lost update between two painters only names a pane once more.
 	unproved map[string]unprovedPane
-	// classified caches successful ownership only for no-op paints. Every write
+	// classified caches successful ownership only for no-op paints, and a pane
+	// proved no fleet pane's for every paint, writing nothing to it: every write
 	// still obtains fresh proof; the cache never authorizes a mutation.
 	classified map[string]unprovedPane
 	// serverStart reads the Herdr server's start identity (its socket file's
@@ -156,9 +158,10 @@ type indicatorPainter struct {
 }
 
 type unprovedPane struct {
-	Status string `json:"status"`
-	At     int64  `json:"at"`
-	Server int64  `json:"server"`
+	Status   string `json:"status"`
+	At       int64  `json:"at"`
+	Server   int64  `json:"server"`
+	NotFleet bool   `json:"-"`
 }
 
 // PaintIndicators repaints every pane's and workspace's indicator token on the
@@ -263,29 +266,33 @@ func (painter *indicatorPainter) run(ctx context.Context) error {
 // latest list. A target that vanished between list and report is logged and
 // skipped; every other refusal or failure ends the paint with its error.
 func (painter *indicatorPainter) paint(ctx context.Context) (blocked, wrote bool, err error) {
-	return painter.paintFrom(ctx, true)
+	return painter.paintFrom(ctx, true, true)
 }
 
 // paintFrom is paint; scan false reuses the tab observations already read and
-// paints tabs only while one animates.
-func (painter *indicatorPainter) paintFrom(ctx context.Context, scan bool) (blocked, wrote bool, err error) {
+// paints tabs only while one animates, fresh asks the provider for a fresh read.
+func (painter *indicatorPainter) paintFrom(ctx context.Context, scan, fresh bool) (blocked, wrote bool, err error) {
 	defer func() { painter.cadence.lastBlocked = blocked }()
 	targets, err := painter.list(ctx)
 	if err != nil {
 		return false, false, err
 	}
-	painter.loadUnproved()
+	painter.beginPaint(fresh)
 	tick := TabTick(painter.clock.Now().UnixMilli())
 	blinkOn := tick%2 == 0
 	painter.hasDone = false
 	for _, target := range targets {
 		want, known := wantedIndicators(target.status, blinkOn)
-		accepted, err := painter.report(ctx, target, indicatorPatch(target.tokens, want))
+		patch := indicatorPatch(target.tokens, want)
+		if patch == nil && known && target.status != string(StateBlocked) && target.status != agentStatusDone {
+			continue // no write, and only a blocked or done pane keeps the blinker alive: a proof changes nothing
+		}
+		accepted, err := painter.report(ctx, target, patch)
 		if errors.Is(err, ErrNotFleetPane) {
 			continue
 		}
 		blocked = blocked || target.status == string(StateBlocked)
-		painter.hasDone = painter.hasDone || target.status == "done"
+		painter.hasDone = painter.hasDone || target.status == agentStatusDone
 		if !known && err == nil && !painter.reported[target.status] {
 			painter.reported[target.status] = true
 			painter.logf("herdr indicators: socket %s: %s %s has agent_status %q, painted as unknown",
@@ -306,11 +313,11 @@ func (painter *indicatorPainter) paintFrom(ctx context.Context, scan bool) (bloc
 	if painter.tabs != nil && (scan || painter.tabsAnimate()) {
 		observations := painter.tabObservations
 		if scan {
-			if observations, err = painter.tabs(ctx, painter.socket); err != nil {
+			if observations, err = painter.tabs(ctx, painter.socket, fresh); err != nil {
 				return blocked, wrote, fmt.Errorf("herdr tab status: %w", err)
 			}
 		}
-		accepted, err := painter.paintTabs(ctx, observations, tick)
+		accepted, err := painter.paintTabs(ctx, observations, tick, fresh)
 		wrote = wrote || accepted
 		if errors.Is(err, errThemeOff) {
 			return blocked, wrote, nil
@@ -322,24 +329,25 @@ func (painter *indicatorPainter) paintFrom(ctx context.Context, scan bool) (bloc
 	return blocked, wrote, nil
 }
 
-// paintTabs reconciles every observed tab's status label. One tab's failure
-// never stops the others: an unproved owner or a foreign label leaves that tab
-// untouched, named once while it lasts; any other failure is named and joined
-// into the returned error after every other tab is painted.
-func (painter *indicatorPainter) paintTabs(
-	ctx context.Context,
-	observations []TabDecoration,
-	tick int64,
+// paintTabs reconciles the tabs' status labels: all after a fresh read, else those tabSettled leaves
+// (animated, changed or last failed). One tab's failure never stops the others: an unproved owner or a
+// foreign label leaves that tab untouched, named once while it lasts; any other failure is named and joined.
+func (painter *indicatorPainter) paintTabs(ctx context.Context, observations []TabDecoration, tick int64, all bool,
 ) (wrote bool, err error) {
-	painter.tabObservations = observations
+	previous := painter.swapTabObservations(observations)
 	painter.hasTabs = false
 	var failures []error
 	for i := range observations {
 		observation := observations[i]
 		painter.hasTabs = painter.hasTabs || observation.Mode != TabStatusOff
-		accepted, err := reconcileTab(ctx, painter.socket, painter.lockDir, observation, tick, painter.guardedCall)
-		wrote = wrote || accepted
 		key := "tab\x00" + observation.Tab + "\x00" + observation.Identity
+		if !all && painter.tabSettled(previous, observation, key) {
+			continue
+		}
+		accepted, settled, err := reconcileTab(
+			ctx, painter.socket, painter.lockDir, observation, tick, painter.guardedCall,
+		)
+		wrote = wrote || painter.settleTab(key, accepted, settled && err == nil)
 		switch {
 		case errors.Is(err, errThemeOff):
 			return wrote, err
@@ -435,12 +443,10 @@ func (painter *indicatorPainter) report(
 		if !painter.clearing && painter.skipUnproved(target) {
 			return false, errIndicatorOwnership
 		}
-		if patch == nil {
-			last, ok := painter.classified[target.id]
-			if ok && last.Status == target.status && last.Server == painter.server &&
-				painter.clock.Now().Sub(time.Unix(0, last.At)) < unprovedReprove {
-				return false, nil
-			}
+		if cached, notFleet := painter.classifiedAs(target); cached && notFleet {
+			return false, ErrNotFleetPane
+		} else if cached && patch == nil {
+			return false, nil
 		}
 		var err error
 		if painter.provePane == nil {
@@ -448,8 +454,9 @@ func (painter *indicatorPainter) report(
 		} else {
 			err = painter.provePane(ctx, painter.socket, target.id)
 		}
-		if err != nil {
-			delete(painter.classified, target.id)
+		delete(painter.classified, target.id)
+		if errors.Is(err, ErrNotFleetPane) {
+			painter.classify(target, true)
 		}
 		if errors.Is(err, ErrNotFleetPane) && !painter.clearing {
 			if last, named := painter.unproved[target.id]; named {
@@ -481,12 +488,7 @@ func (painter *indicatorPainter) report(
 			delete(painter.unproved, target.id)
 			painter.storeUnproved()
 		}
-		if painter.classified == nil {
-			painter.classified = map[string]unprovedPane{}
-		}
-		painter.classified[target.id] = unprovedPane{
-			Status: target.status, At: painter.clock.Now().UnixNano(), Server: painter.server,
-		}
+		painter.classify(target, false)
 	}
 	if patch == nil {
 		return false, nil

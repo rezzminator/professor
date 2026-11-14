@@ -297,7 +297,7 @@ func TestTabStatusPaintsAndRenamesWithTheThemeGlyphs(t *testing.T) {
 		tick int64
 		want string
 	}{{0, "🟣 Chat"}, {1, "🔘 Chat"}} {
-		if _, err := reconcileTab(context.Background(), "endpoint", dir, d, phase.tick, f.call); err != nil {
+		if _, _, err := reconcileTab(context.Background(), "endpoint", dir, d, phase.tick, f.call); err != nil {
 			t.Fatal(err)
 		}
 		if f.label != phase.want {
@@ -314,7 +314,7 @@ func TestTabStatusPaintsAndRenamesWithTheThemeGlyphs(t *testing.T) {
 	}
 	// A theme switch shows on the next paint.
 	d.Name, d.Glyphs = "Named", TabGlyphs{}
-	if _, err := reconcileTab(context.Background(), "endpoint", dir, d, 0, f.call); err != nil {
+	if _, _, err := reconcileTab(context.Background(), "endpoint", dir, d, 0, f.call); err != nil {
 		t.Fatal(err)
 	}
 	if f.label != "🔴 Named" {

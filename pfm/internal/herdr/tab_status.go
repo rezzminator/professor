@@ -51,8 +51,8 @@ type TabDecoration struct {
 	Retained bool
 }
 
-// TabProvider enumerates the chats displayed on one Herdr endpoint.
-type TabProvider func(context.Context, string) ([]TabDecoration, error)
+// TabProvider enumerates the chats on one Herdr endpoint; a read not fresh may reuse what its TabProbe saw unchanged.
+type TabProvider func(ctx context.Context, socket string, fresh bool) ([]TabDecoration, error)
 
 // TabProbe says, without the TabProvider's fleet scan, whether the inputs
 // behind its last enumeration on one Herdr endpoint changed since; an error
@@ -240,16 +240,17 @@ func reconcileTab(
 	d TabDecoration,
 	tick int64,
 	call func(context.Context, string, ...[]byte) ([]json.RawMessage, error),
-) (wrote bool, returnErr error) {
+) (wrote, settled bool, returnErr error) {
 	if d.Tab == "" || d.Terminal == "" || d.Identity == "" {
-		return false, fmt.Errorf("tab observation has incomplete ownership: %+v", d)
+		return false, false, fmt.Errorf("tab observation has incomplete ownership: %+v", d)
 	}
 	if !d.Retained {
 		valid, err := validateTabOwner(ctx, d)
-		if err != nil || !valid {
-			return false, err
+		if err != nil || !valid { // an owner refused now may be proved at the next tick: unsettled
+			return false, false, err
 		}
 	}
+	settled = true
 	err := withTabLabelLock(ctx, dir, socket, d.Tab, func(path string) error {
 		record, err := readTabLabel(path)
 		if err != nil {
@@ -267,6 +268,7 @@ func reconcileTab(
 		// one validation per tab per tick. Herdr has no conditional rename, so
 		// this read narrows, but cannot close, an external race.
 		if !sameTabObservation(pane, d) {
+			settled = false // the pane moved past this observation; the next tick reads it again
 			return nil
 		}
 		get, err := (TabGet{Tab: d.Tab, Seq: 1}).Line()
@@ -371,12 +373,12 @@ func reconcileTab(
 		return writeTabLabel(path, record)
 	})
 	if tabTargetGone(err) {
-		return false, nil
+		return false, true, nil
 	}
 	if err != nil {
-		return wrote, fmt.Errorf("tab status %s on %s: %w", d.Tab, socket, err)
+		return wrote, false, fmt.Errorf("tab status %s on %s: %w", d.Tab, socket, err)
 	}
-	return wrote, nil
+	return wrote, settled, nil
 }
 
 func tabTargetGone(err error) bool {
@@ -436,7 +438,7 @@ func (painter *indicatorPainter) restoreTabs(ctx context.Context) error {
 		}
 		d.AgentStatus = pane.State
 		d.Mode = TabStatusOff
-		if _, err := reconcileTab(ctx, painter.socket, painter.lockDir, d, 0, painter.call); err != nil &&
+		if _, _, err := reconcileTab(ctx, painter.socket, painter.lockDir, d, 0, painter.call); err != nil &&
 			!errors.Is(err, errTabLabelForeign) {
 			failures = append(failures, err)
 		}

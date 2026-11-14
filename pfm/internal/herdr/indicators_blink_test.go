@@ -32,17 +32,20 @@ func countPaneLists(painter *indicatorPainter) *int {
 // TestIdleTabBlinkerRereadsTheFleetOnlyWhenNudgedOrDue pins the idle cadence:
 // with every tab decorated but nothing blocked, done or animated, a tick does
 // no list and no fleet scan; a hook-fired painter's nudge makes the next tick
-// re-read, and idleRefresh after the last read one tick re-reads unprompted.
+// re-read, and idleRefresh after the last read one tick re-reads unprompted;
+// each of those reads is fresh.
 func TestIdleTabBlinkerRereadsTheFleetOnlyWhenNudgedOrDue(t *testing.T) {
 	f := newTabStatusFixture()
 	painter, stepping := tabPainterFixture(t, f)
 	lists := countPaneLists(painter)
 	scans := 0
-	painter.tabs = func(context.Context, string) ([]TabDecoration, error) {
+	var fresh []bool
+	painter.tabs = func(_ context.Context, _ string, read bool) ([]TabDecoration, error) {
 		scans++
+		fresh = append(fresh, read)
 		return []TabDecoration{tabObservation("idle")}, nil
 	}
-	const ticks = 24
+	const ticks = 124
 	var scansAt []int
 	stepping.onSleep = func(context.Context) error {
 		scansAt = append(scansAt, scans)
@@ -58,13 +61,18 @@ func TestIdleTabBlinkerRereadsTheFleetOnlyWhenNudgedOrDue(t *testing.T) {
 		t.Fatalf("run = %v", err)
 	}
 	// The first sleep is 400 ms (phaseOn), so tick k ends at 400+(k-1)*500 ms:
-	// the nudge is read at tick 3, and idleRefresh after it lands on tick 23.
-	if scans != 3 || *lists != 3 {
-		t.Fatalf("scans %d, lists %d over %d ticks; want 3 each: the first paint, the nudged tick, the due tick",
-			scans, *lists, ticks)
+	// the nudge is read at tick 3 (1.4 s), and idleRefresh (60 s) after it lands on tick 123.
+	if scans != 3 || *lists != 3 || !slices.Equal(fresh, []bool{true, true, true}) {
+		t.Fatalf(
+			"scans %d, lists %d, fresh %v over %d ticks; want 3 fresh reads: the first paint, the nudged tick, the due tick",
+			scans,
+			*lists,
+			fresh,
+			ticks,
+		)
 	}
-	if scansAt[3] != 2 || scansAt[22] != 2 || scansAt[23] != 3 {
-		t.Fatalf("scans before each sleep = %v; want the nudge read at tick 3 and the refresh at tick 23", scansAt)
+	if scansAt[3] != 2 || scansAt[122] != 2 || scansAt[123] != 3 {
+		t.Fatalf("scans before each sleep = %v; want the nudge read at tick 3 and the refresh at tick 123", scansAt)
 	}
 	if _, err := os.Stat(painter.nudgePath()); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("nudge after the blinker read it: %v, want it removed", err)
@@ -77,7 +85,7 @@ func TestBlockedTabAnimatesFromTheObservationsAlreadyRead(t *testing.T) {
 	f := newTabStatusFixture()
 	painter, stepping := tabPainterFixture(t, f)
 	scans := 0
-	painter.tabs = func(context.Context, string) ([]TabDecoration, error) {
+	painter.tabs = func(context.Context, string, bool) ([]TabDecoration, error) {
 		scans++
 		d := tabObservation("blocked")
 		d.Glyphs.Blocked = blockedFrames
@@ -207,7 +215,7 @@ func TestCancelledTabPainterRestoresWithinItsBudget(t *testing.T) {
 	painter.cadence.restoreBudget = 50 * time.Millisecond
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	painter.tabs = func(context.Context, string) ([]TabDecoration, error) {
+	painter.tabs = func(context.Context, string, bool) ([]TabDecoration, error) {
 		d := tabObservation("blocked")
 		d.Validate = func(validateCtx context.Context) (bool, error) {
 			if ctx.Err() == nil {
@@ -243,10 +251,17 @@ func TestIdleTabBlinkerRereadsWhenItsProbeSeesAChange(t *testing.T) {
 	painter, stepping := tabPainterFixture(t, f)
 	stderr := &strings.Builder{}
 	painter.stderr = stderr
-	scans, probes := 0, 0
-	painter.tabs = func(context.Context, string) ([]TabDecoration, error) {
+	scans, probes, validates := 0, 0, 0
+	var fresh []bool
+	painter.tabs = func(_ context.Context, _ string, read bool) ([]TabDecoration, error) {
 		scans++
-		return []TabDecoration{tabObservation("idle")}, nil
+		fresh = append(fresh, read)
+		d := tabObservation("idle")
+		d.Validate = func(context.Context) (bool, error) { validates++; return true, nil }
+		if scans >= 3 {
+			d.Name = "Renamed"
+		}
+		return []TabDecoration{d}, nil
 	}
 	painter.tabsChanged = func(context.Context, string) (bool, error) {
 		probes++
@@ -278,6 +293,14 @@ func TestIdleTabBlinkerRereadsWhenItsProbeSeesAChange(t *testing.T) {
 			want,
 		)
 	}
+	// Only the first paint reads fresh: a probed change, or a probe that could not tell, lets the provider reuse.
+	if want := []bool{true, false, false, false}; !slices.Equal(fresh, want) {
+		t.Fatalf("fresh per read = %v, want %v", fresh, want)
+	}
+	// A read that is not fresh reconciles only a tab whose observation changed: the renamed one at the third read.
+	if validates != 2 || !slices.Equal(f.renames, []string{"⚪ Chat", "⚪ Renamed"}) {
+		t.Fatalf("validates %d, renames %q; want 2: the fresh read and the changed observation", validates, f.renames)
+	}
 	if probes != ticks {
 		t.Fatalf("probes = %d over %d ticks, want one per tick", probes, ticks)
 	}
@@ -294,7 +317,7 @@ func TestIdleTabBlinkerRereadsWhenItsProbeSeesAChange(t *testing.T) {
 func TestTabPainterAnimatesBlockedWhileItsPaneRevisionMoves(t *testing.T) {
 	f := newTabStatusFixture()
 	painter, stepping := tabPainterFixture(t, f)
-	painter.tabs = func(context.Context, string) ([]TabDecoration, error) {
+	painter.tabs = func(context.Context, string, bool) ([]TabDecoration, error) {
 		d := tabObservation("blocked")
 		d.Glyphs.Blocked = blockedFrames
 		return []TabDecoration{d}, nil

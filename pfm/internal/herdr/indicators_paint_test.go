@@ -367,9 +367,11 @@ func TestNonFleetPanesAreNotIndicatorCandidates(t *testing.T) {
 			t.Run(fmt.Sprint(status, "/", at.UnixMilli()), func(t *testing.T) {
 				server := &fakeIndicatorHerdr{panes: []*fakeTarget{{ID: "w1:p1", Status: status}}}
 				painter, stepping, stderr := newTestPainter(t, server, at)
-				painter.provePane = func(context.Context, string, string) error { return ErrNotFleetPane }
-				for range 4 {
-					blocked, wrote, err := painter.paint(context.Background())
+				proofs := 0
+				painter.provePane = func(context.Context, string, string) error { proofs++; return ErrNotFleetPane }
+				for tick := range 4 {
+					// The first paint reads fresh; the blink ticks after it reuse its not-fleet proof.
+					blocked, wrote, err := painter.paintFrom(context.Background(), tick == 0, tick == 0)
 					if err != nil || blocked || wrote || painter.hasDone || stderr.Len() != 0 {
 						t.Fatalf("non-fleet pane became a candidate: blocked=%t wrote=%t done=%t err=%v stderr=%q",
 							blocked, wrote, painter.hasDone, err, stderr)
@@ -379,6 +381,10 @@ func TestNonFleetPanesAreNotIndicatorCandidates(t *testing.T) {
 				if len(server.writes) != 0 || len(painter.unproved) != 0 {
 					t.Fatalf("non-fleet pane was painted or memoized as unproved: writes=%v memo=%v",
 						server.writes, painter.unproved)
+				}
+				// An idle pane needing no write is never proved; any other is proved once within unprovedReprove.
+				if wantProofs := map[bool]int{true: 0, false: 1}[status == "idle"]; proofs != wantProofs {
+					t.Fatalf("status %q: proofs %d over 4 paints, want %d", status, proofs, wantProofs)
 				}
 				// A wrapper or picker that starts a chat is reconsidered, never
 				// permanently excluded by the earlier non-fleet observation.
@@ -395,7 +401,7 @@ func TestNonFleetPanesAreNotIndicatorCandidates(t *testing.T) {
 }
 
 func TestNoOpPaintCachesProofButNeverAuthorizesWrites(t *testing.T) {
-	server := &fakeIndicatorHerdr{panes: []*fakeTarget{{ID: "w1:p1", Status: "idle"}}}
+	server := &fakeIndicatorHerdr{panes: []*fakeTarget{{ID: "w1:p1", Status: "done"}}}
 	painter, stepping, _ := newTestPainter(t, server, phaseOn)
 	proofs := 0
 	painter.provePane = func(context.Context, string, string) error { proofs++; return nil }
@@ -409,8 +415,8 @@ func TestNoOpPaintCachesProofButNeverAuthorizesWrites(t *testing.T) {
 		paint()
 		stepping.now = stepping.now.Add(blinkHalfPeriod)
 	}
-	if proofs != 1 {
-		t.Fatalf("no-op paints repeatedly proved ownership: %d", proofs)
+	if proofs != 1 || len(server.paneWrites("w1:p1")) != 1 {
+		t.Fatalf("no-op paints of a done pane repeatedly proved ownership: proofs=%d writes=%v", proofs, server.writes)
 	}
 	stepping.now = stepping.now.Add(unprovedReprove)
 	paint()
@@ -425,8 +431,18 @@ func TestNoOpPaintCachesProofButNeverAuthorizesWrites(t *testing.T) {
 	// A token difference requires fresh proof even within the cache interval.
 	server.panes[0].Tokens = nil
 	paint()
-	if proofs != 4 || len(server.paneWrites("w1:p1")) != 2 {
+	if proofs != 4 || len(server.paneWrites("w1:p1")) != 3 {
 		t.Fatalf("cached proof authorized a write: proofs=%d writes=%v", proofs, server.writes)
+	}
+	// A working or idle pane needing no write keeps no blinker alive, so its proof would change nothing.
+	for _, status := range []string{"working", "idle", "idle"} {
+		server.setStatus(status)
+		stepping.now = stepping.now.Add(unprovedReprove)
+		paint()
+	}
+	if proofs != 5 || len(server.paneWrites("w1:p1")) != 4 {
+		t.Fatalf("a no-op working or idle pane was proved: proofs=%d writes=%v, want 5 proofs (the idle clear's)",
+			proofs, server.writes)
 	}
 }
 

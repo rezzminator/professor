@@ -3,6 +3,8 @@ package herdr
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
+	"time"
 )
 
 // The two kinds of target an indicator is painted on, named as Herdr names the
@@ -91,7 +93,7 @@ func wantedIndicators(status string, blinkOn bool) (tokens map[string]string, kn
 			return map[string]string{IndicatorBlocked: GlyphBlocked}, true
 		}
 		return nil, true
-	case "done":
+	case agentStatusDone:
 		return map[string]string{IndicatorDone: GlyphDone}, true
 	case "unknown":
 		return map[string]string{IndicatorUnknown: GlyphUnknown}, true
@@ -165,4 +167,39 @@ func (report tokenReport) Line() ([]byte, error) {
 		targetPane,
 		targetWorkspace,
 	)
+}
+
+// agentStatusDone is the agent_status of a Herdr pane holding an unseen completion.
+const agentStatusDone = "done"
+
+// classifiedAs says whether the pane's last proof stands for this paint (its
+// status and Herdr server unchanged, unprovedReprove not passed), and whether
+// it proved the pane no fleet pane's. A clear proves every pane afresh.
+func (painter *indicatorPainter) classifiedAs(target indicatorTarget) (cached, notFleet bool) {
+	last, ok := painter.classified[target.id]
+	if !ok || painter.clearing || last.Status != target.status || last.Server != painter.server ||
+		painter.clock.Now().Sub(time.Unix(0, last.At)) >= unprovedReprove {
+		return false, false
+	}
+	return true, last.NotFleet
+}
+
+// beginPaint readies a paint: a fresh one (the first, a nudge, the idle
+// refresh) forgets every not-fleet proof, so a chat started in such a pane is
+// proved at its hook's nudge; then it loads the unproved-pane memo.
+func (painter *indicatorPainter) beginPaint(fresh bool) {
+	if fresh {
+		maps.DeleteFunc(painter.classified, func(_ string, last unprovedPane) bool { return last.NotFleet })
+	}
+	painter.loadUnproved()
+}
+
+// classify keeps the pane's proof for the paints classifiedAs serves.
+func (painter *indicatorPainter) classify(target indicatorTarget, notFleet bool) {
+	if painter.classified == nil {
+		painter.classified = map[string]unprovedPane{}
+	}
+	painter.classified[target.id] = unprovedPane{
+		Status: target.status, At: painter.clock.Now().UnixNano(), Server: painter.server, NotFleet: notFleet,
+	}
 }

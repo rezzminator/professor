@@ -20,6 +20,8 @@ grep -Fxq "bash $REPO_ROOT/scripts/test-plugin-logs.sh" <<< "$plugin_log_command
   { echo "FAIL templates steps: plugin logs step does not run its self-test" >&2; exit 1; }
 grep -Fxq "bash $REPO_ROOT/scripts/test-platform.sh" <<< "$plugin_log_commands" ||
   { echo "FAIL templates steps: plugin logs step does not run the platform door self-test" >&2; exit 1; }
+grep -Fxq "bash $REPO_ROOT/scripts/test-install.sh" <<< "$plugin_log_commands" ||
+  { echo "FAIL templates steps: plugin logs step does not run the release installer self-test" >&2; exit 1; }
 
 # The plugin lab's step lints its shell, then runs every self-test it ships.
 plugin_lab_commands="$( (

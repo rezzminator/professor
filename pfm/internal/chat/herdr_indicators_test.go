@@ -53,7 +53,7 @@ func TestHerdrTabProviderNativeAndMultipleTmuxViews(t *testing.T) {
 			return []herdr.TabDecoration{{Pane: "w1:p2", Identity: "tmux"}, {Pane: "w1:p3", Identity: "tmux"}}, nil
 		}, mode: func() (string, error) { return "emoji", nil }, warn: &bytes.Buffer{},
 	}
-	got, err := provider.tabs(context.Background(), "endpoint")
+	got, err := provider.tabs(context.Background(), "endpoint", true)
 	if err != nil || len(got) != 3 || len(inspected) != 2 {
 		t.Fatalf("tabs=%+v inspected=%v err=%v", got, inspected, err)
 	}
@@ -100,7 +100,7 @@ func TestHerdrTabProviderMissedHooksAndNewPrompt(t *testing.T) {
 				mode: func() (string, error) { return "emoji", nil }, warn: &bytes.Buffer{},
 			}
 			for i = 0; i < len(tc.states); i++ {
-				got, err := provider.tabs(context.Background(), "endpoint")
+				got, err := provider.tabs(context.Background(), "endpoint", true)
 				if err != nil || len(got) != 1 || got[0].State != tc.states[i] || got[0].Identity != fmt.Sprint(i) {
 					t.Fatalf("poll %d tabs=%+v err=%v", i, got, err)
 				}
@@ -123,7 +123,7 @@ func TestHerdrTabProviderReadFailureIsVisible(t *testing.T) {
 		},
 		mode: func() (string, error) { return "emoji", nil }, warn: warnings,
 	}
-	got, err := provider.tabs(context.Background(), "endpoint")
+	got, err := provider.tabs(context.Background(), "endpoint", true)
 	if err != nil || len(got) != 1 || got[0].State != "unknown" ||
 		warnings.String() != "Herdr tab status of s1: transcript denied\n" {
 		t.Fatalf("tabs=%+v err=%v warnings=%s", got, err, warnings)
@@ -132,6 +132,7 @@ func TestHerdrTabProviderReadFailureIsVisible(t *testing.T) {
 	if _, err := provider.tabs(
 		context.Background(),
 		"endpoint",
+		true,
 	); err == nil ||
 		err.Error() != "scan tab chats: fleet denied" {
 		t.Fatalf("fleet failure=%v", err)
@@ -412,6 +413,7 @@ func TestHerdrTabNativeOwnershipProof(t *testing.T) {
 				if tabs, err := provider.tabs(
 					ctx,
 					"endpoint",
+					true,
 				); err != nil || len(tabs) != 1 ||
 					tabs[0].State != "unknown" {
 					t.Fatalf("unavailable evidence became known state: tabs=%+v err=%v", tabs, err)
@@ -649,7 +651,7 @@ func TestHerdrTabProviderOneChatFailureKeepsOthers(t *testing.T) {
 		},
 		mode: func() (string, error) { return "emoji", nil }, warn: warnings,
 	}
-	got, err := provider.tabs(context.Background(), "endpoint")
+	got, err := provider.tabs(context.Background(), "endpoint", true)
 	if err != nil || len(got) != 1 || got[0].Identity != "s2" ||
 		warnings.String() != "Herdr tab status of s1: list tab tmux clients: server gone\n" {
 		t.Fatalf("tabs=%+v err=%v warnings=%s", got, err, warnings)
@@ -668,7 +670,7 @@ func TestHerdrTabProviderOneChatFailureKeepsOthers(t *testing.T) {
 	}
 	for _, failing := range []bool{true, true, true, false, true} {
 		broken = failing
-		if _, err := provider.tabs(context.Background(), "endpoint"); err != nil {
+		if _, err := provider.tabs(context.Background(), "endpoint", true); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -676,7 +678,7 @@ func TestHerdrTabProviderOneChatFailureKeepsOthers(t *testing.T) {
 		t.Fatalf("a recurring chat failure was named %d times over 5 ticks, want 2: %s", named, warnings)
 	}
 	listErr = fmt.Errorf("%w: socket refused", errTabPaneList)
-	_, err = provider.tabs(context.Background(), "endpoint")
+	_, err = provider.tabs(context.Background(), "endpoint", true)
 	if err == nil || err.Error() != "locate tab views of s1: list Herdr tab panes: socket refused" {
 		t.Fatalf("pane listing failure=%v", err)
 	}
@@ -704,7 +706,7 @@ func TestHerdrTabProviderCarriesTheThemeGlyphs(t *testing.T) {
 		glyphs: func() (herdr.TabGlyphs, error) { return themeGlyphs, readErr },
 		warn:   warn,
 	}
-	got, err := provider.tabs(context.Background(), "endpoint")
+	got, err := provider.tabs(context.Background(), "endpoint", true)
 	if err != nil || len(got) != 2 {
 		t.Fatalf("tabs=%+v err=%v", got, err)
 	}
@@ -714,7 +716,7 @@ func TestHerdrTabProviderCarriesTheThemeGlyphs(t *testing.T) {
 		}
 	}
 	readErr = errors.New("parse state.json: unexpected end")
-	got, err = provider.tabs(context.Background(), "endpoint")
+	got, err = provider.tabs(context.Background(), "endpoint", true)
 	if err != nil || len(got) != 2 || !reflect.DeepEqual(got[0].Glyphs, herdr.TabGlyphs{}) {
 		t.Fatalf("an unreadable theme: tabs=%+v err=%v, want the tabs with the default glyphs", got, err)
 	}
@@ -727,7 +729,7 @@ func TestHerdrTabProviderCarriesTheThemeGlyphs(t *testing.T) {
 	provider.mode = func() (string, error) {
 		return "", errors.New("load Herdr tab status configuration: parse config.json: unexpected end")
 	}
-	got, err = provider.tabs(context.Background(), "endpoint")
+	got, err = provider.tabs(context.Background(), "endpoint", true)
 	if err != nil || len(got) != 2 || !reflect.DeepEqual(got[0].Glyphs, themeGlyphs) {
 		t.Fatalf("an unreadable configuration: tabs=%+v err=%v, want the tabs in the default emoji mode", got, err)
 	}
@@ -752,7 +754,7 @@ func TestHerdrTabProviderReadsNoGlyphsOutsideEmojiMode(t *testing.T) {
 			},
 			warn: warn,
 		}
-		if _, err := provider.tabs(context.Background(), "endpoint"); err != nil {
+		if _, err := provider.tabs(context.Background(), "endpoint", true); err != nil {
 			t.Fatalf("%s: %v", mode, err)
 		}
 		if read || warn.Len() > 0 {
@@ -799,7 +801,7 @@ func TestHerdrTabProviderPaneClosesDuringStatus(t *testing.T) {
 				},
 				mode: func() (string, error) { return "emoji", nil }, warn: &warnings,
 			}
-			views, err := provider.tabs(context.Background(), socket)
+			views, err := provider.tabs(context.Background(), socket, true)
 			if err != nil {
 				t.Fatal(err)
 			}

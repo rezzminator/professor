@@ -89,9 +89,8 @@ func newHerdrIndicatorRun(runtime *pfmconfig.Runtime, persisted io.Writer) (*her
 	stateDir := themesync.DefaultStateDir(runtime.Paths.Home)
 	run.provider.glyphs = func() (herdr.TabGlyphs, error) { return themesync.HerdrTabGlyphs(stateDir) }
 	var panes []herdr.TabPane
-	var loaded bool
+	var panesRead uint64 // the read the panes were listed for
 	run.provider.scan = func(ctx context.Context) (FleetScan, error) {
-		loaded = false
 		inspector.Sweep()
 		database, err := run.held.Store(ctx)
 		if err != nil {
@@ -118,7 +117,7 @@ func newHerdrIndicatorRun(runtime *pfmconfig.Runtime, persisted io.Writer) (*her
 		},
 	}
 	run.provider.views = func(ctx context.Context, target headless.Chat, socket string) ([]herdr.TabDecoration, error) {
-		if !loaded {
+		if panesRead != run.provider.reads {
 			var err error
 			panes, err = herdr.ReadTabPanes(ctx, socket)
 			var incomplete *herdr.IncompleteTabPanesError
@@ -134,7 +133,7 @@ func newHerdrIndicatorRun(runtime *pfmconfig.Runtime, persisted io.Writer) (*her
 			} else if err != nil {
 				return nil, fmt.Errorf("%w: %w", errTabPaneList, err)
 			}
-			loaded = true
+			panesRead = run.provider.reads
 		}
 		return run.reader.views(ctx, target, socket, panes)
 	}

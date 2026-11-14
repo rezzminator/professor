@@ -17,7 +17,7 @@ import (
 // does no work of its own.
 func TestHookFiredPainterNudgesTheRunningBlinker(t *testing.T) {
 	painter, _, _ := newTestPainter(t, &fakeIndicatorHerdr{}, phaseOn)
-	painter.tabs = func(context.Context, string) ([]TabDecoration, error) {
+	painter.tabs = func(context.Context, string, bool) ([]TabDecoration, error) {
 		t.Fatal("a painter that lost the lock scanned the fleet")
 		return nil, nil
 	}
@@ -64,7 +64,7 @@ func TestStoppingBlinkerTakesTheNudgeLeftAsItStopped(t *testing.T) {
 				}
 			}
 			reads := 0
-			painter.tabs = func(context.Context, string) ([]TabDecoration, error) {
+			painter.tabs = func(context.Context, string, bool) ([]TabDecoration, error) {
 				if reads == len(tc.reads) {
 					t.Fatalf("tab read %d, want %d", reads+1, len(tc.reads))
 				}

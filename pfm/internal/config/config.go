@@ -277,6 +277,9 @@ type rawConfig struct {
 	MCP      *rawMCP       `json:"mcp,omitempty"`
 	Log      *rawLog       `json:"log,omitempty"`
 	Ask      *rawAsk       `json:"ask,omitempty"`
+	// RetiredExtensions accepts the block the previous release wrote for an enabled extension; it
+	// is never read or written.
+	RetiredExtensions json.RawMessage `json:"extensions,omitempty"`
 }
 
 type rawTmux struct {

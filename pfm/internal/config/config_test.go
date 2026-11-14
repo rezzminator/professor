@@ -575,6 +575,21 @@ func TestLoadAcceptsRetiredKeysWithoutChangingOtherPreferences(t *testing.T) {
 			}
 		}
 	}
+	// The previous release wrote a top-level extensions block whenever one was enabled.
+	for _, value := range []string{`{"ponytail":{"enabled":true,"engines":["claude"]}}`, `{}`, `null`} {
+		retired := strings.TrimSuffix(base, "}") + `,"extensions":` + value + `}`
+		if err := os.WriteFile(path, []byte(retired), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		got, err := Load(path, home, nil)
+		if err != nil {
+			t.Fatalf("retired extensions value %s: %v", value, err)
+		}
+		if !reflect.DeepEqual(got.Claude, want.Claude) || !reflect.DeepEqual(got.Accounts, want.Accounts) ||
+			!reflect.DeepEqual(got.Sources, want.Sources) {
+			t.Fatalf("retired extensions value %s changed effective preferences or sources", value)
+		}
+	}
 }
 
 func TestV2ConfigDefaultsAndPerAccountOverrides(t *testing.T) {

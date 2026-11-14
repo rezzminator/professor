@@ -419,3 +419,63 @@ func userNameRollout(id string) store.Rollout {
 		PromptCount: 1,
 	}
 }
+
+// A lost or failed seat lists only while its chat can resume: its transcript or rollout is indexed, as the
+// chat's record names its project and directory, or its read failed and its absence is unproved. A seat with
+// nothing to resume lists nowhere; a live seat lists with or without a record.
+func TestHerdrDeadSeatListsOnlyWhileResumable(t *testing.T) {
+	orchard := testjail.Place("/jail/work/orchard")
+	input := Input{
+		Options: Options{View: AllView},
+		Transcripts: []store.Transcript{{
+			UUID: "claude-kept", Path: testjail.Place("/jail/claude-kept.jsonl"), PromptCount: 2, CWD: orchard,
+		}},
+		Rollouts: []store.Rollout{{
+			ID: "codex-kept", Path: testjail.Place("/jail/codex-kept.jsonl"), PromptCount: 4, CWD: orchard,
+			UserThread: true,
+		}},
+	}
+	for _, seat := range []struct {
+		id, engine, state string
+		unread            bool
+	}{
+		{"claude-kept", "cc", "lost", false},
+		{"claude-gone", "cc", "lost", false},
+		{"claude-failed", "cc", "failed", false},
+		{"codex-kept", "cx", "failed", false},
+		{"codex-gone", "cx", "lost", false},
+		{"codex-unread", "cx", "lost", true},
+		{"claude-live", "cc", "live", false},
+	} {
+		input.HerdrSeats = append(input.HerdrSeats, gather.HerdrSeat{
+			Seat: fleetdb.Seat{
+				SeatID: "seat-" + seat.id, SessionID: seat.id, Engine: seat.engine, Backend: "herdr",
+				State: seat.state, HerdrSocket: testjail.Place("/jail/herdr.sock"), HerdrPane: "w1:" + seat.id,
+			},
+			TranscriptUnread: seat.unread,
+		})
+	}
+	type listed struct {
+		Kind         Kind
+		Project, CWD string
+		PromptCount  int64
+	}
+	got := map[string]listed{}
+	for _, row := range Compose(input).Rows {
+		got[row.SeatID] = listed{row.Kind, row.Project, row.CWD, row.PromptCount}
+	}
+	want := map[string]listed{
+		"seat-claude-kept":  {ResumeClaude, "orchard", orchard, 2},
+		"seat-codex-kept":   {ResumeCodex, "orchard", orchard, 4},
+		"seat-codex-unread": {ResumeCodex, "?", "", 0},
+		"seat-claude-live":  {LiveClaude, "?", "", 0},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("listed seats = %+v, want %+v", got, want)
+	}
+	for id, row := range want {
+		if got[id] != row {
+			t.Errorf("seat %s listed %+v, want %+v", id, got[id], row)
+		}
+	}
+}

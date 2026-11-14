@@ -24,10 +24,14 @@ type HerdrSeat struct {
 	// Continued is the newest segment of the seat's Claude chat when Claude
 	// Code continued it under another session id; the seat keeps its launch
 	// id. Set by the fleet's continuation pass, empty otherwise.
-	Continued   string
-	Err         error
-	snapshot    json.RawMessage
-	directories map[string]string
+	Continued string
+	// TranscriptUnread marks a seat whose transcript or rollout the fleet's
+	// store read failed (fleet.EnrichNative): its record is unknown, never
+	// absent, so a dead seat keeps its resume row. False otherwise.
+	TranscriptUnread bool
+	Err              error
+	snapshot         json.RawMessage
+	directories      map[string]string
 }
 
 // ProbeHerdrSeats retains every live durable seat, including unreachable ones.

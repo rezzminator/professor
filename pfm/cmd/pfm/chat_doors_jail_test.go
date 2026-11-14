@@ -23,10 +23,12 @@ import (
 // TestChatDoorsAnswerAlike drives each refusal through both doors of one chat function, `pfm chat {verb}` and
 // the chat MCP tool, from one table: the CLI exits the row's code with its stderr's last line the row's message
 // behind the verb's prefix, and the MCP answers a receipt of the same status word, code and message — never a tool
-// error. A name no chat answers to and a dead chat the registry knows are the two subjects.
+// error. A name no chat answers to and a dead chat the registry knows (its rollout written, no turn answered)
+// are the two subjects.
 func TestChatDoorsAnswerAlike(t *testing.T) {
 	const deadID = "44444444-2222-4333-8444-555555555555"
 	_, transcript := resumeLadderJail(t, "55555555-2222-4333-8444-555555555555")
+	deadCodexRollout(t, transcript, deadID)
 	state := fleetdb.OpenSharedState(context.Background(), jailPaths(t))
 	if err := state.PutSeat(context.Background(), fleetdb.Seat{
 		SeatID: "dead-cx", SessionID: deadID, Engine: "cx", Backend: "herdr", State: "lost", Name: "gone-cx",
@@ -153,18 +155,11 @@ func TestChatDoorsAnswerAlike(t *testing.T) {
 			"", "status", "dead", 3, deadRevive,
 		},
 		{
-			"read dead answers as last does",
-			[]string{"read", "gone-cx"},
-			"last",
-			map[string]any{"target": "gone-cx"},
-			"pfm chat read: ", "status", "not_answered", 3, `"gone-cx" has not written a transcript yet`,
-		},
-		{
 			"last dead",
 			[]string{"last", "gone-cx"},
 			"last",
 			map[string]any{"target": "gone-cx"},
-			"pfm chat last: ", "status", "not_answered", 3, `"gone-cx" has not written a transcript yet`,
+			"pfm chat last: ", "status", "not_answered", 3, `"gone-cx" has not answered yet`,
 		},
 	}
 	for _, testCase := range cases {

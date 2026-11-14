@@ -243,7 +243,7 @@ func (manager *Manager) Kill(
 			request.ID, request.SocketName, request.PaneID = self.ID, self.SocketPath, self.Pane
 		}
 	}
-	target, native, err := manager.herdrTarget(ctx, request)
+	target, native, err := manager.nativeTarget(ctx, &request)
 	if err != nil {
 		return Target{}, err
 	}

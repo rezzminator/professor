@@ -16,6 +16,7 @@ Each `releases/vX.Y.Z.md` is written for the adopter updating onto it. Its secti
 
 ## Releases
 
+- [v0.88.0](releases/v0.88.0.md) — a one-screen README with a one-command installer, the Herdr indicator daemon stops rescanning the fleet on every change, and the journey suite gets its orientation file
 - [v0.87.0](releases/v0.87.0.md) — the flights family moves into its plugin, the journey tree and the unit net test pfm end to end, an adopter gets its own pfm.settings.json, the full gate runs in half the time, and the Herdr indicator daemon no longer rereads the cache
 - [v0.86.0](releases/v0.86.0.md) — Codex and OpenCode never write git or framework files; pfm works inside herdr-shield-protected Herdr panes; every plugin is self-contained and installs as {plugin}@professor; the Herdr indicator daemon stops re-reading OpenCode's store and rescanning on every turn
 - [v0.85.0](releases/v0.85.0.md) — pcm is a global agent

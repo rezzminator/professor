@@ -79,9 +79,9 @@ func fleet(c *harness.Ctx, s State) State {
 	return s
 }
 
-// sessionEndRan waits for pfm's activity log to hold, since the step began, the hooks.run records of the
-// SessionEnd hooks every pfm Claude launch registers: `pfm chat end` hangs the chat's tmux server up, and
-// the engine still runs them before it exits. The step ends no other chat.
+// sessionEndRan waits for pfm's activity log to hold, since the step began, the hooks.run record of
+// clear-kill, the SessionEnd hook every pfm Claude launch registers: `pfm chat end` hangs the chat's tmux
+// server up, and the engine still runs it before it exits. The step ends no other chat.
 func sessionEndRan(c *harness.Ctx) {
 	from, _ := c.Window()
 	c.Poll("the ended chat's SessionEnd hooks in pfm's activity log", stepBound, func() (bool, string) {
@@ -96,7 +96,7 @@ func sessionEndRan(c *harness.Ctx) {
 				seen[record.Hook] = record.Decision
 			}
 		}
-		return seen["clear-kill"] == "allow" && seen["exit-close"] == "allow", fmt.Sprintf("hook decisions %v", seen)
+		return seen["clear-kill"] == "allow", fmt.Sprintf("hook decisions %v", seen)
 	})
 }
 

@@ -189,7 +189,7 @@ func TestResultReceiptNamesWhatTheReloadDid(t *testing.T) {
 	}
 }
 
-// TestExitTypedNeedsTheLockAndTheMark pins the probe exit-close asks: a
+// TestExitTypedNeedsTheLockAndTheMark pins the probe a tmux chat's session end asks: a
 // reload's own /exit is in flight only while the reload holds the pane mutex
 // and has written its exit mark; the mutex alone (the reload still waits for
 // the turn, so a /exit is the owner's) or a leftover mark is not, and a lock

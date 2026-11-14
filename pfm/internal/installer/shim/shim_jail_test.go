@@ -82,7 +82,7 @@ func TestCxHandsArgumentsToCodexLaunch(t *testing.T) {
 		"cx --resume 'literal prompt'\n"
 	// cx() only runs its terminal dance under `[[ -o interactive ]]` (F11), so this drives it
 	// with `-i` even without a tty: real interactivity is covered separately by
-	// TestBareCodexLaunchExecsTheTerminalOwner over a PTY.
+	// TestCxAttachKeepsTheShellOutsideABunker over a PTY.
 	command := jailedZshCommand(zsh, script, home)
 	command.Args = append([]string{command.Args[0], "-i"}, command.Args[1:]...)
 	output, err := command.CombinedOutput()
@@ -168,10 +168,13 @@ source ` + quoteZsh(shimPath) + `
 	}
 }
 
-// A Codex fleet chat owns a bare terminal. Replacing that shell with the tmux
-// client makes terminal teardown structural: when the harness closes the
-// server, no parent shell remains to reveal an accidental prompt.
-func TestBareCodexLaunchExecsTheTerminalOwner(t *testing.T) {
+// cx attaches the chat's tmux client where it was typed. A terminal outside
+// Herdr keeps its shell: the client is the shell's child, and when it returns
+// the prompt is back with the attach's status. A vsct bunker pane exec's the
+// client, so the viewport dies with the tab. In a Herdr pane pfm births the
+// chat as a native seat in its own tab (_cx_server returns 3): nothing is
+// attached and the pane's shell stays.
+func TestCxAttachKeepsTheShellOutsideABunker(t *testing.T) {
 	zsh, err := exec.LookPath("zsh")
 	if err != nil {
 		t.Skip("zsh is not installed")
@@ -179,20 +182,39 @@ func TestBareCodexLaunchExecsTheTerminalOwner(t *testing.T) {
 	if _, err := exec.LookPath("script"); err != nil {
 		t.Skip("script is not installed")
 	}
-	// The ssh session's own terminal attaches as a child instead: replacing
-	// that shell ends the ssh connection when the chat ends.
+	const createdServer = "#!/bin/sh\nprintf '1\\n'\n"
 	cases := []struct {
 		name     string
 		prelude  string
+		pfm      string
+		status   string
 		wantExec bool
+		wantTmux bool
 		want     string
 	}{
-		{name: "bare terminal execs the attach", prelude: "unset SSH_TTY SSH_CONNECTION", wantExec: true, want: "1\n"},
 		{
-			name:     "ssh session's own terminal keeps its shell",
-			prelude:  "export SSH_TTY=$TTY",
-			wantExec: false,
-			want:     "1\nSHELL-CAME-BACK\n",
+			name:     "a terminal outside Herdr attaches as a child and gets its prompt back",
+			prelude:  "unset HERDR_ENV",
+			pfm:      createdServer,
+			status:   "5",
+			wantTmux: true,
+			want:     "1\nSHELL-CAME-BACK 5\n",
+		},
+		{
+			name:     "a vsct bunker pane execs the attach",
+			prelude:  "export TMUX=/tmp/pfm-shim-test/vsct,1,0",
+			pfm:      createdServer,
+			status:   "0",
+			wantExec: true,
+			wantTmux: true,
+			want:     "1\n",
+		},
+		{
+			name:    "a Herdr pane attaches nothing and keeps its shell",
+			prelude: "export HERDR_ENV=1",
+			pfm:     "#!/bin/sh\nexit 3\n",
+			status:  "0",
+			want:    "SHELL-CAME-BACK 0\n",
 		},
 	}
 	for _, testCase := range cases {
@@ -205,9 +227,9 @@ func TestBareCodexLaunchExecsTheTerminalOwner(t *testing.T) {
 			if err := os.MkdirAll(fakeBin, 0o700); err != nil {
 				t.Fatal(err)
 			}
-			writeShimFile(t, filepath.Join(home, ".local", "bin", "pfm"), "#!/bin/sh\nprintf '1\\n'\n")
+			writeShimFile(t, filepath.Join(home, ".local", "bin", "pfm"), testCase.pfm)
 			writeShimFile(t, filepath.Join(fakeBin, "tmux"), `#!/bin/sh
-case " $* " in *" attach "*) printf '%s\n' "$$" > "$SHIM_TMUX_PID" ;; esac
+case " $* " in *" attach "*) printf '%s\n' "$$" > "$SHIM_TMUX_PID"; exit "$SHIM_TMUX_STATUS" ;; esac
 `)
 			shellPID := filepath.Join(home, "shell.pid")
 			tmuxPID := filepath.Join(home, "tmux.pid")
@@ -217,7 +239,7 @@ case " $* " in *" attach "*) printf '%s\n' "$$" > "$SHIM_TMUX_PID" ;; esac
 					"print -r -- \"$$\" > \"$SHIM_SHELL_PID\"\n"+
 					testCase.prelude+"\n"+
 					"cx\n"+
-					"print -r -- SHELL-CAME-BACK\n",
+					"print -r -- \"SHELL-CAME-BACK $?\"\n",
 			)
 			command, err := testjail.PTYCommand(zsh, "-fi", driver)
 			if err != nil {
@@ -228,16 +250,25 @@ case " $* " in *" attach "*) printf '%s\n' "$$" > "$SHIM_TMUX_PID" ;; esac
 				"HOME="+home,
 				"PATH="+fakeBin+":"+os.Getenv("PATH"),
 				"TMUX=",
+				"HERDR_ENV=",
 				"TERM=dumb",
 				"SHIM_SHELL_PID="+shellPID,
 				"SHIM_TMUX_PID="+tmuxPID,
+				"SHIM_TMUX_STATUS="+testCase.status,
 			)
 			output, err := command.CombinedOutput()
 			if err != nil {
 				t.Fatalf("drive interactive shim: %v: %s", err, output)
 			}
 			shell := strings.TrimSpace(readShimFile(t, shellPID))
-			tmux := strings.TrimSpace(readShimFile(t, tmuxPID))
+			tmuxBytes, readErr := os.ReadFile(tmuxPID)
+			if readErr != nil && !os.IsNotExist(readErr) {
+				t.Fatalf("read %s: %v", tmuxPID, readErr)
+			}
+			tmux := strings.TrimSpace(string(tmuxBytes))
+			if got := tmux != ""; got != testCase.wantTmux {
+				t.Fatalf("tmux attached=%v (pid %q), want %v", got, tmux, testCase.wantTmux)
+			}
 			if got := tmux == shell; got != testCase.wantExec {
 				t.Fatalf("tmux pid=%s, shell pid=%s: exec'd=%v, want %v", tmux, shell, got, testCase.wantExec)
 			}
@@ -249,11 +280,11 @@ case " $* " in *" attach "*) printf '%s\n' "$$" > "$SHIM_TMUX_PID" ;; esac
 }
 
 // TestPfmOwnTerminalClosesOwnedAndPreservesOthers pins `_pfm_own_terminal`
-// itself (TESTPLAN.md's J row), not just a caller that happens to reach it:
-// an owned bare terminal is closed (the process exits, nothing after it
-// runs), while a shell that does not own its terminal — a script, a nested
-// chat pane — is preserved: the function returns the exit status instead of
-// ending the shell.
+// itself (TESTPLAN.md's J row), not just a caller that happens to reach it: a
+// Herdr pane's own shell and a vsct bunker pane are closed (the process exits,
+// nothing after it runs), while every other shell is preserved and the
+// function returns the exit status: a terminal outside Herdr, a chat's tmux
+// pane inside Herdr, a script.
 func TestPfmOwnTerminalClosesOwnedAndPreservesOthers(t *testing.T) {
 	zsh, err := exec.LookPath("zsh")
 	if err != nil {
@@ -261,42 +292,32 @@ func TestPfmOwnTerminalClosesOwnedAndPreservesOthers(t *testing.T) {
 	}
 	shimPath := embeddedShimPath(t)
 
-	// An ssh login's own terminal is the session itself: ending its only
-	// shell drops the connection, so there the shell returns the status
-	// instead, with no close prompt. Only SSH_TTY equal to the shell's own
-	// tty marks it; a Herdr pane or VS Code tab reached over ssh carries
-	// SSH_CONNECTION (and maybe another tty's SSH_TTY) and still closes.
 	ttyCases := []struct {
 		name    string
 		prelude string
 		status  string
 		want    string
 	}{
-		{name: "closes an owned bare terminal", prelude: "unset SSH_TTY SSH_CONNECTION", status: "0", want: ""},
 		{
-			name:    "closes when SSH_TTY names another tty",
-			prelude: "unset SSH_CONNECTION; export SSH_TTY=/dev/pts/pfm-not-this-tty",
-			status:  "0",
-			want:    "",
-		},
-		{
-			name:    "closes with SSH_CONNECTION set alone",
-			prelude: "unset SSH_TTY; export SSH_CONNECTION='192.0.2.1 50000 192.0.2.2 22'",
-			status:  "0",
-			want:    "",
-		},
-		{
-			name:    "keeps the ssh session's own terminal after a clean exit",
-			prelude: "export SSH_TTY=$TTY SSH_CONNECTION='192.0.2.1 50000 192.0.2.2 22'",
+			name:    "keeps a terminal outside Herdr after a clean exit",
+			prelude: "unset HERDR_ENV",
 			status:  "0",
 			want:    "after=0\n",
 		},
 		{
-			name:    "keeps the ssh session's own terminal after a failed exit",
-			prelude: "export SSH_TTY=$TTY SSH_CONNECTION='192.0.2.1 50000 192.0.2.2 22'",
+			name:    "keeps a terminal outside Herdr after a failed exit",
+			prelude: "unset HERDR_ENV",
 			status:  "3",
 			want:    "after=3\n",
 		},
+		{name: "closes a Herdr pane's shell", prelude: "export HERDR_ENV=1", status: "0", want: ""},
+		{
+			name:    "keeps a chat's tmux pane inside Herdr",
+			prelude: "export HERDR_ENV=1 TMUX=/tmp/pfm-shim-test/cc-1,1,0",
+			status:  "0",
+			want:    "after=0\n",
+		},
+		{name: "closes a vsct bunker pane", prelude: "export TMUX=/tmp/pfm-shim-test/vsct,1,0", status: "0", want: ""},
 	}
 	for _, testCase := range ttyCases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -319,7 +340,7 @@ func TestPfmOwnTerminalClosesOwnedAndPreservesOthers(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			command.Env = append(os.Environ(), "HOME="+home, "TMUX=", "TERM=dumb")
+			command.Env = append(os.Environ(), "HOME="+home, "TMUX=", "HERDR_ENV=", "TERM=dumb")
 			output, err := command.CombinedOutput()
 			if err != nil {
 				t.Fatalf("owned terminal: %v: %s", err, output)
@@ -598,14 +619,15 @@ func quoteZsh(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }
 
-// TestPickerTypedIntoABareTerminalHandsItToTheChat pins the picker's terminal
-// ownership: `pfm` typed into a bare terminal runs the action the picker chose
-// and then ENDS the shell, so a chat's /exit (or a detach) closes the terminal
-// instead of dropping to a prompt that reads the terminal's late colour-query
-// replies as typed input. Esc (no action line) and a failed pfm keep the
-// shell. The fake pfm behaves as action.Dispatch does: it execs the attach
-// itself when stdout is a terminal and prints the one-line action otherwise.
-func TestPickerTypedIntoABareTerminalHandsItToTheChat(t *testing.T) {
+// TestPickerHandsTheTerminalToTheChatOnlyInAHerdrPane pins where the picker
+// typed into a terminal leaves its shell. Outside Herdr the shim runs pfm as
+// is: pfm attaches the chosen chat as the shell's child, and when the chat ends
+// or is detached the prompt is back. In a Herdr pane the shim runs the action
+// the picker chose and then ENDS the shell, so the pane goes with the chat;
+// Esc (no action line) and a failed pfm keep it. The fake pfm behaves as
+// action.Dispatch does: it execs the attach itself when stdout is a terminal
+// and prints the one-line action otherwise.
+func TestPickerHandsTheTerminalToTheChatOnlyInAHerdrPane(t *testing.T) {
 	zsh, err := exec.LookPath("zsh")
 	if err != nil {
 		t.Skip("zsh is not installed")
@@ -613,6 +635,11 @@ func TestPickerTypedIntoABareTerminalHandsItToTheChat(t *testing.T) {
 	if _, err := exec.LookPath("script"); err != nil {
 		t.Skip("script is not installed")
 	}
+	const chooser = `#!/bin/sh
+if [ "$#" -ne 0 ]; then exit 64; fi
+if [ -t 1 ]; then TMUX= exec tmux -L cc-1-2-3 attach -t cc-1-2-3; fi
+printf '%s\n' 'TMUX= tmux -L cc-1-2-3 attach -t cc-1-2-3'
+`
 	cases := []struct {
 		name      string
 		pfm       string
@@ -621,26 +648,29 @@ func TestPickerTypedIntoABareTerminalHandsItToTheChat(t *testing.T) {
 		wantTmux  string
 	}{
 		{
-			name:    "a chosen chat on the ssh session's own terminal returns to the prompt",
-			prelude: "export SSH_TTY=$TTY",
-			pfm: `#!/bin/sh
-if [ "$#" -ne 0 ]; then exit 64; fi
-if [ -t 1 ]; then TMUX= exec tmux -L cc-1-2-3 attach -t cc-1-2-3; fi
-printf '%s\n' 'TMUX= tmux -L cc-1-2-3 attach -t cc-1-2-3'
-`,
+			name:      "a chosen chat outside Herdr returns to the prompt",
+			prelude:   "unset HERDR_ENV",
+			pfm:       chooser,
 			wantShell: true, wantTmux: "tmux -L cc-1-2-3 attach -t cc-1-2-3 TMUX=[]\n",
 		},
 		{
-			name: "a chosen chat ends the shell when the attach returns",
-			pfm: `#!/bin/sh
-if [ "$#" -ne 0 ]; then exit 64; fi
-if [ -t 1 ]; then TMUX= exec tmux -L cc-1-2-3 attach -t cc-1-2-3; fi
-printf '%s\n' 'TMUX= tmux -L cc-1-2-3 attach -t cc-1-2-3'
-`,
+			name:      "a chosen chat in a Herdr pane ends the shell when the attach returns",
+			prelude:   "export HERDR_ENV=1",
+			pfm:       chooser,
 			wantShell: false, wantTmux: "tmux -L cc-1-2-3 attach -t cc-1-2-3 TMUX=[]\n",
 		},
-		{name: "Esc returns to the prompt", pfm: "#!/bin/sh\nexit 0\n", wantShell: true},
-		{name: "a failed picker returns to the prompt", pfm: "#!/bin/sh\nexit 1\n", wantShell: true},
+		{
+			name:      "Esc in a Herdr pane returns to the prompt",
+			prelude:   "export HERDR_ENV=1",
+			pfm:       "#!/bin/sh\nexit 0\n",
+			wantShell: true,
+		},
+		{
+			name:      "a failed picker in a Herdr pane returns to the prompt",
+			prelude:   "export HERDR_ENV=1",
+			pfm:       "#!/bin/sh\nexit 1\n",
+			wantShell: true,
+		},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -672,6 +702,7 @@ printf 'tmux %s TMUX=[%s]\n' "$*" "$TMUX" >> "$SHIM_TMUX_LOG"
 				"HOME="+home,
 				"PATH="+filepath.Join(home, ".local", "bin")+":"+fakeBin+":"+os.Getenv("PATH"),
 				"TMUX=",
+				"HERDR_ENV=",
 				"TERM=dumb",
 				"SHIM_TMUX_LOG="+tmuxLog,
 			)
@@ -789,7 +820,9 @@ func TestHerdrShellReporterHandsAFinishedLongCommandToPFM(t *testing.T) {
 			got := ""
 			for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(50 * time.Millisecond) {
 				content, _ := os.ReadFile(log)
-				got = string(content)
+				// The shell counts whole clock seconds, so an instant command that
+				// straddles a second boundary reports 1: both readings are correct.
+				got = strings.ReplaceAll(string(content), "[--seconds][1]", "[--seconds][0]")
 				if got == test.want || time.Now().After(deadline) {
 					break
 				}

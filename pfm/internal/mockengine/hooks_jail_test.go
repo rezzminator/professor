@@ -205,14 +205,6 @@ func TestClaudeFiresTheInstalledHooksAndHonoursTheirAnswers(t *testing.T) {
 	if envelope := decodeEnvelope(t, end); envelope.Event != "SessionEnd" || envelope.Reason != "prompt_input_exit" {
 		t.Fatalf("SessionEnd payload = %+v", envelope)
 	}
-	var closeErr bytes.Buffer
-	if code := hookentry.ExitClose(
-		strings.NewReader(end),
-		&closeErr,
-	); code != 0 ||
-		strings.Contains(closeErr.String(), "decode") {
-		t.Fatalf("pfm's exit-close read the payload as exit=%d stderr=%q", code, closeErr.String())
-	}
 }
 
 // TestClaudePromptHookErrorStopsTheTurnInsteadOfFallingOpen covers F2: a

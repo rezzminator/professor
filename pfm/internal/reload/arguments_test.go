@@ -5,10 +5,11 @@ import (
 	"testing"
 )
 
-// The spelling a user actually typed, twice, before the refusal was traced:
-// `/reload --1h on`. Every cache spelling a person reaches for lands on the
-// one canonical --cache 1h|5m, and a flag's value is never rewritten.
-func TestNormalizeArgumentsCacheSpellings(t *testing.T) {
+// The spellings users actually typed and saw refused: `/reload --1h on`,
+// `/reload --model=opus effort=high`, `/reload --model opus effort high`. Every
+// setting spelling lands on its flag, every cache spelling on the one canonical
+// --cache 1h|5m, and a flag's value is never rewritten.
+func TestNormalizeArgumentsSpellings(t *testing.T) {
 	for _, test := range []struct {
 		args []string
 		want []string
@@ -23,6 +24,11 @@ func TestNormalizeArgumentsCacheSpellings(t *testing.T) {
 		{args: []string{"--account", "2", "--1h", "on", "--new"}, want: []string{"--account", "2", "--cache", "1h", "--new"}},
 		{args: []string{"--then", "--1h", "--5m"}, want: []string{"--then", "--1h", "--cache", "5m"}},
 		{args: []string{"--account", "2"}, want: []string{"--account", "2"}},
+		{args: []string{"--model=opus", "effort=high"}, want: []string{"--model", "opus", "--effort", "high"}},
+		{args: []string{"--model", "opus", "effort", "high"}, want: []string{"--model", "opus", "--effort", "high"}},
+		{args: []string{"model", "opus", "--effort=high", "account=2", "new", "cache=on"}, want: []string{"--model", "opus", "--effort", "high", "--account", "2", "--new", "--cache", "1h"}},
+		{args: []string{"--then", "effort=high", "Model=sonnet"}, want: []string{"--then", "effort=high", "--model", "sonnet"}},
+		{args: []string{"2"}, want: []string{"2"}},
 	} {
 		t.Run(strings.Join(test.args, " "), func(t *testing.T) {
 			got := NormalizeArguments(test.args)

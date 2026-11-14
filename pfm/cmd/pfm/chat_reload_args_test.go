@@ -148,8 +148,17 @@ usage: pfm chat reload [--account N] [--model M] [--effort E] [--cache 1h|5m (or
 // the normalized words themselves are pinned in internal/reload.
 func TestReloadAcceptsNormalizedCacheSpellings(t *testing.T) {
 	for _, args := range [][]string{
-		{"--1h", "on"}, {"--1h"}, {"--5m"}, {"--5m", "on"}, {"--cache", "on"}, {"--cache", "off"}, {"--cache", "1H"},
-		{"--account", "2", "--1h", "on", "--new"}, {"--then", "--1h", "--5m"},
+		{"--1h", "on"},
+		{"--1h"},
+		{"--5m"},
+		{"--5m", "on"},
+		{"--cache", "on"},
+		{"--cache", "off"},
+		{"--cache", "1H"},
+		{"--account", "2", "--1h", "on", "--new"},
+		{"--then", "--1h", "--5m"},
+		{"--model=opus", "effort=high"},
+		{"--model", "opus", "effort", "high"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			if err := validateReloadArgs(reload.NormalizeArguments(args)); err != nil {

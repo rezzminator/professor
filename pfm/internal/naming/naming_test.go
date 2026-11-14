@@ -310,4 +310,25 @@ func TestReservedSeatLabel(t *testing.T) {
 			t.Errorf("reserved launch name adopted: %q", got)
 		}
 	}
+	long := strings.Repeat("word ", 10_000)
+	for _, row := range []struct {
+		label string
+		want  bool
+	}{
+		{"seat:abc", true},
+		{"  SEAT:abc", true},
+		{" \tSeat:", true},
+		{"seat:" + long, true},
+		{"seat", false},
+		{"", false},
+		{"   ", false},
+		{"xseat:", false},
+		{long + "seat:", false},
+		{"Kseat:", false},
+		{"seät:", false},
+	} {
+		if got := ReservedLabel(row.label); got != row.want {
+			t.Errorf("ReservedLabel(%.20q) = %t, want %t", row.label, got, row.want)
+		}
+	}
 }

@@ -378,7 +378,7 @@ SELECT uuid, ? FROM transcripts WHERE uuid IN (` + marks + `)
 UNION ALL
 SELECT id, ? FROM rollouts WHERE id IN (` + marks + `)
 UNION ALL
-SELECT lineage_root, ? FROM rollouts WHERE lineage_root IN (` + marks + `)
+SELECT DISTINCT lineage_root, ? FROM rollouts WHERE lineage_root IN (` + marks + `)
 UNION ALL
 SELECT id, ? FROM cx_names WHERE id IN (` + marks + `)
 UNION ALL

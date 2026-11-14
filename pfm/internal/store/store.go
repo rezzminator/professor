@@ -17,6 +17,7 @@
 // open.go: Open, OpenContext and OpenMemory, the doors a Store is built through, and their options.
 // queries.go: transcript, rollout, Codex-name and meta queries, and DefaultCandidates.
 // readonly.go: OpenWithoutMigrating, both databases read-only for doctor.
+// rowcache.go: Transcripts and Rollouts, the index tables a Store rereads only where written since its last read.
 // summary.go: ChatSummary and PutChatSummary, the paid summary of a transcript frontier.
 // tx.go: ImmediateTx, a BEGIN IMMEDIATE transaction.
 package store
@@ -67,6 +68,11 @@ var schemaV8 string
 //go:embed migration_v9.sql
 var schemaV9 string
 
+// rowSeqSchema is ensured on every open, never migrated (row_seq.sql).
+//
+//go:embed row_seq.sql
+var rowSeqSchema string
+
 var migrations = [...]string{
 	schemaV1,
 	schemaV2,
@@ -91,6 +97,11 @@ type Store struct {
 	state    *fleetdb.Store
 	path     string
 	readOnly bool
+
+	// transcripts and rollouts hold the index tables as last read (rowcache.go),
+	// nil unless opened withRowCache.
+	transcripts *rowCache[Transcript]
+	rollouts    *rowCache[Rollout]
 
 	warnMu sync.Mutex
 	warn   io.Writer
@@ -190,25 +201,52 @@ func (s *Store) migrate(ctx context.Context, existed bool) (returnErr error) {
 		// older binary's explicit transcript column list never names it, and
 		// its upsert leaves it alone. The claude parser version bump that ships
 		// with it is what fills the rows indexed before it existed.
-		return ensureColumn(ctx, tx, "transcripts", "continued_in", "TEXT NOT NULL DEFAULT ''")
+		if err := ensureColumn(ctx, tx, "transcripts", "continued_in", "TEXT NOT NULL DEFAULT ''"); err != nil {
+			return err
+		}
+		return ensureRowSeq(ctx, tx)
 	}); err != nil {
 		return err
 	}
-	if version >= 9 {
-		return nil
-	}
-	if err := s.adoptLocalKills(ctx); err != nil {
-		return fmt.Errorf("adopt cache kills before migration 9: %w", err)
-	}
-	return s.WithImmediateTx(ctx, func(tx *ImmediateTx) error {
-		if _, err := tx.ExecContext(ctx, migrations[8]); err != nil {
-			return fmt.Errorf("apply database migration 9: %w", err)
+	if version < 9 {
+		if err := s.adoptLocalKills(ctx); err != nil {
+			return fmt.Errorf("adopt cache kills before migration 9: %w", err)
 		}
-		if _, err := tx.ExecContext(ctx, "PRAGMA user_version=9"); err != nil {
-			return fmt.Errorf("set database schema version 9: %w", err)
+	}
+	for next := max(version+1, 9); next <= SchemaVersion; next++ {
+		if err := s.applyMigration(ctx, next); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// applyMigration runs migration next and stamps its version in one transaction.
+func (s *Store) applyMigration(ctx context.Context, next int) error {
+	return s.WithImmediateTx(ctx, func(tx *ImmediateTx) error {
+		if _, err := tx.ExecContext(ctx, migrations[next-1]); err != nil {
+			return fmt.Errorf("apply database migration %d: %w", next, err)
+		}
+		if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version=%d", next)); err != nil {
+			return fmt.Errorf("set database schema version %d: %w", next, err)
 		}
 		return nil
 	})
+}
+
+// ensureRowSeq ensures the index tables' write count (row_seq.sql) the same
+// way as the columns above, so the schema stays at 9 and an older binary keeps
+// opening the cache.
+func ensureRowSeq(ctx context.Context, tx *ImmediateTx) error {
+	for _, table := range []string{"transcripts", "rollouts"} {
+		if err := ensureColumn(ctx, tx, table, "seq", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, rowSeqSchema); err != nil {
+		return fmt.Errorf("ensure the index write count: %w", err)
+	}
+	return nil
 }
 
 // ensureColumn adds one additive column when the table lacks it. table,

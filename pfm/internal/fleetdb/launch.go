@@ -77,27 +77,62 @@ func (l *Launches) LaunchFor(ctx context.Context, sessionID string) (Launch, err
 	if l.db == nil {
 		return Launch{}, ErrNoLaunch
 	}
-	var launch Launch
-	var engine string
-	var cache1h int
-	err := l.db.QueryRowContext(ctx, `
-SELECT session_id,engine,account,cache1h,launched_at,updated_at
-FROM launch WHERE session_id=?`, sessionID).Scan(
-		&launch.SessionID, &engine, &launch.Account, &cache1h,
-		&launch.LaunchedAt, &launch.UpdatedAt,
-	)
-	if errors.Is(err, sql.ErrNoRows) {
-		return Launch{}, ErrNoLaunch
-	}
-	if err != nil && strings.Contains(err.Error(), "no such table: launch") {
+	launch, err := scanLaunch(l.db.QueryRowContext(ctx, launchSelect+` WHERE session_id=?`, sessionID))
+	if errors.Is(err, sql.ErrNoRows) || launchTableMissing(err) {
 		return Launch{}, ErrNoLaunch
 	}
 	if err != nil {
 		return Launch{}, fmt.Errorf("read launch %s: %w", sessionID, err)
 	}
+	return launch, nil
+}
+
+// All is every launch record by session id, in one read: LaunchFor for a
+// caller that looks up a whole fleet's rows. Absence reads as LaunchFor's does.
+func (l *Launches) All(ctx context.Context) (launches map[string]Launch, returnErr error) {
+	launches = make(map[string]Launch)
+	if l.db == nil {
+		return launches, nil
+	}
+	rows, err := l.db.QueryContext(ctx, launchSelect)
+	if launchTableMissing(err) {
+		return launches, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read launches: %w", err)
+	}
+	defer func() {
+		if err := rows.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close launch rows: %w", err))
+		}
+	}()
+	for rows.Next() {
+		launch, err := scanLaunch(rows)
+		if err != nil {
+			return nil, fmt.Errorf("read launches: %w", err)
+		}
+		launches[launch.SessionID] = launch
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read launches: %w", err)
+	}
+	return launches, nil
+}
+
+const launchSelect = `SELECT session_id,engine,account,cache1h,launched_at,updated_at FROM launch`
+
+func launchTableMissing(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "no such table: launch")
+}
+
+func scanLaunch(row interface{ Scan(...any) error }) (Launch, error) {
+	var launch Launch
+	var engine string
+	var cache1h int
+	err := row.Scan(&launch.SessionID, &engine, &launch.Account, &cache1h, &launch.LaunchedAt, &launch.UpdatedAt)
 	launch.Engine = pfmengine.ID(engine)
 	launch.Cache1H = cache1h == 1
-	return launch, nil
+	return launch, err
 }
 
 func (l *Launches) Close() error {

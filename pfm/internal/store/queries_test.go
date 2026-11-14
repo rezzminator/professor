@@ -392,10 +392,9 @@ func hasOpenCodeSessionsAssistantCount(t *testing.T, db *sql.DB) bool {
 }
 
 // TestFreshStoreEnsuresAssistantCountAtSchema9 pins the cache's v9 migration.
-// Since 1-a, older pfm binaries read ~/.local/state/pfm/fleet.db and never
-// open pfm-cache.db; the cache is derived, so upgrading it strands no older
-// binary.
-// assistant_count remains an additive, idempotently ensured column.
+// assistant_count and the index write count (row_seq.sql) are additive and
+// ensured on every open, so they leave the schema at 9 and a binary built for
+// it keeps opening the cache; the write count starts at zero.
 func TestFreshStoreEnsuresAssistantCountAtSchema9(t *testing.T) {
 	fresh := openTestStore(t)
 	t.Cleanup(func() { _ = fresh.Close() })
@@ -411,5 +410,11 @@ func TestFreshStoreEnsuresAssistantCountAtSchema9(t *testing.T) {
 	}
 	if !hasOpenCodeSessionsAssistantCount(t, fresh.db) {
 		t.Fatal("fresh store has no oc_sessions.assistant_count column")
+	}
+	var writes int64
+	if err := fresh.db.QueryRowContext(context.Background(), "SELECT value FROM row_seq WHERE id=1").
+		Scan(&writes); err != nil ||
+		writes != 0 {
+		t.Fatalf("fresh store row_seq = %d, %v; want 0, nil", writes, err)
 	}
 }

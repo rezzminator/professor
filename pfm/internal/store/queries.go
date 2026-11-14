@@ -385,21 +385,6 @@ func (s *Store) Transcript(
 	return s.clearName(ctx, transcript), true, nil
 }
 
-// Transcripts returns all transcripts ordered by UUID.
-func (s *Store) Transcripts(ctx context.Context) ([]Transcript, error) {
-	transcripts, err := queryRows(
-		ctx,
-		s.logged(),
-		"SELECT "+transcriptColumns+" FROM transcripts AS t ORDER BY t.uuid",
-		"transcript",
-		scanTranscript,
-	)
-	if err != nil {
-		return nil, err
-	}
-	return s.clearNames(ctx, transcripts), nil
-}
-
 func scanTranscript(row rowScanner) (Transcript, error) {
 	var transcript Transcript
 	var isBG, superseded int
@@ -491,17 +476,6 @@ func (s *Store) Rollout(ctx context.Context, id string) (Rollout, bool, error) {
 		return Rollout{}, false, fmt.Errorf("query rollout %q: %w", id, err)
 	}
 	return rollout, true, nil
-}
-
-// Rollouts returns all rollouts ordered by ID.
-func (s *Store) Rollouts(ctx context.Context) ([]Rollout, error) {
-	return queryRows(
-		ctx,
-		s.logged(),
-		"SELECT "+rolloutColumns+" FROM rollouts ORDER BY id",
-		"rollout",
-		scanRollout,
-	)
 }
 
 func queryRows[T any](

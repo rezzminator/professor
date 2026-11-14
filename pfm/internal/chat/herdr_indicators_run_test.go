@@ -128,6 +128,21 @@ func (fixture *herdrRunFixture) opens(recorder *obs.Recorder) map[string]int {
 	return opens
 }
 
+// indexReads counts the select statements on the index's transcripts and
+// rollouts tables, with the rows each returned.
+func indexReads(recorder *obs.Recorder) map[string]int {
+	reads := map[string]int{}
+	for _, record := range recorder.Records() {
+		table := fmt.Sprint(record.Fields["table"])
+		if record.Message != "db.statement" || record.Fields["op"] != "select" ||
+			(table != "transcripts" && table != "rollouts") {
+			continue
+		}
+		reads[fmt.Sprintf("%s rows=%v", table, record.Fields["rows"])]++
+	}
+	return reads
+}
+
 // TestHerdrIndicatorRunHoldsItsStoreAcrossTicks: a painter run opens the
 // fleet store once for all its ticks' pane proofs, tab validations and
 // scans, and opens it again only when the shared state file is replaced,
@@ -143,6 +158,12 @@ func TestHerdrIndicatorRunHoldsItsStoreAcrossTicks(t *testing.T) {
 	want := map[string]int{"store cache": 1, "store state": 1, "readonly state": 20}
 	if got := fixture.opens(recorder); !reflect.DeepEqual(got, want) {
 		t.Fatalf("opens over 100 ticks = %v, want %v", got, want)
+	}
+	// Five scans read the index tables whole once; the later ones ask only
+	// whether anything was written since.
+	wantReads := map[string]int{"transcripts rows=0": 1, "rollouts rows=0": 1, "rollouts rows=<nil>": 1}
+	if got := indexReads(recorder); !reflect.DeepEqual(got, wantReads) {
+		t.Fatalf("index table reads over 100 ticks = %v, want %v", got, wantReads)
 	}
 	// The SQLite door serves this test from memory, so nothing holds the file
 	// the way the run's real connection does; hold it here, or the new state

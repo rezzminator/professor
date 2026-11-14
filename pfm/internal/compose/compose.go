@@ -33,6 +33,7 @@ type composer struct {
 	killedByID       map[string]store.Killed
 	panesBySocket    map[string][]gather.ProbePane
 	paneByTarget     map[string]gather.ProbePane
+	launches         launchCache
 	claudeSockets    map[string]struct{}
 	liveTranscripts  map[string]struct{}
 	livePaneThreads  map[string]string

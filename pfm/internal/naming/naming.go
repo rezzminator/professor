@@ -24,7 +24,18 @@ const SeatPrefix = "seat:"
 
 // ReservedLabel reports a label that would occupy the durable-handle namespace.
 func ReservedLabel(label string) bool {
-	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(label)), SeatPrefix)
+	head := strings.TrimLeftFunc(label, unicode.IsSpace)
+	// Lowering maps rune to rune, so only the first runes can decide the
+	// prefix: a long first prompt is never lowered whole.
+	runes := 0
+	for index := range head {
+		if runes == len(SeatPrefix) {
+			head = head[:index]
+			break
+		}
+		runes++
+	}
+	return strings.HasPrefix(strings.ToLower(head), SeatPrefix)
 }
 
 // ValidateLabel refuses reserved labels before any naming side effect.

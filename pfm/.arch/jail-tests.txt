@@ -234,7 +234,7 @@ internal/store/lineage_jail_test.go 2
 internal/store/open_jail_test.go 1
 internal/store/queries_jail_test.go 2
 internal/store/readonly_jail_test.go 1
-internal/store/store_jail_test.go 6
+internal/store/store_jail_test.go 7
 internal/store/stress_jail_test.go 1
 internal/testjail/database_jail_test.go 1
 internal/testjail/enginesync_jail_test.go 3

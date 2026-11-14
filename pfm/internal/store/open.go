@@ -16,8 +16,9 @@ import (
 )
 
 type openOptions struct {
-	warn  io.Writer
-	clock clock.Clock
+	warn     io.Writer
+	clock    clock.Clock
+	rowCache bool
 }
 
 // OpenOption customizes process-local Store behavior.
@@ -31,6 +32,12 @@ func WithWarningWriter(w io.Writer) OpenOption {
 			options.warn = w
 		}
 	}
+}
+
+// withRowCache keeps the index tables in memory between reads (rowcache.go):
+// only a Held Store, read again for a process's whole life, pays its memory.
+func withRowCache() OpenOption {
+	return func(options *openOptions) { options.rowCache = true }
 }
 
 // WithClock injects the store clock for deterministic busy retry and audit timestamps.
@@ -96,6 +103,9 @@ func openMigrated(
 		path:  path,
 		warn:  settings.warn,
 		clock: settings.clock,
+	}
+	if settings.rowCache {
+		store.transcripts, store.rollouts = newTranscriptCache(), newRolloutCache()
 	}
 	if err := store.migrate(ctx, existed); err != nil {
 		return nil, errors.Join(err, store.Close())

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"slices"
 	"time"
 )
 
@@ -47,8 +48,9 @@ type Held struct {
 }
 
 // NewHeld returns a Held that opens its Store through OpenContext with options.
+// Its Store keeps the index tables in memory between reads (withRowCache).
 func NewHeld(options ...OpenOption) *Held {
-	return &Held{options: options}
+	return &Held{options: append(slices.Clip(options), withRowCache())}
 }
 
 // Store returns the held Store, opening it on the first call and again when

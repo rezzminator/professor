@@ -18,6 +18,49 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
+// TestSchema9CacheGainsTheWriteCountAndAnOlderBinarysWritesMoveIt: a cache an
+// older pfm left at schema 9 gains row_seq without its version moving, so that
+// binary still opens it; a write made the way that binary writes (its own
+// connection, its explicit column lists) reaches a held Store's next read.
+func TestSchema9CacheGainsTheWriteCountAndAnOlderBinarysWritesMoveIt(t *testing.T) {
+	dbPath := setStoreTestJail(t)
+	ctx := context.Background()
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	older, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = older.Close() })
+	for _, statement := range append(slices.Clone(migrations[:]), "PRAGMA user_version=9",
+		"INSERT INTO transcripts(uuid,path,cwd) VALUES('old','/p/old.jsonl','/w')") {
+		if _, err := older.ExecContext(ctx, statement); err != nil {
+			t.Fatalf("%s: %v", statement, err)
+		}
+	}
+
+	held := openFileTestStore(t, withRowCache())
+	t.Cleanup(func() { _ = held.Close() })
+	assertSchemaVersion(t, held, 9)
+	states := func(want ...string) {
+		t.Helper()
+		if got := transcriptStates(t, ctx, held); !slices.Equal(got, want) {
+			t.Fatalf("transcripts = %q, want %q (database %s)", got, want, dbPath)
+		}
+	}
+	states("old superseded=false size=0")
+	for _, statement := range []string{
+		"INSERT INTO transcripts(uuid,path,cwd) VALUES('new','/p/new.jsonl','/w')",
+		"UPDATE transcripts SET size=5 WHERE uuid='old'",
+	} {
+		if _, err := older.ExecContext(ctx, statement); err != nil {
+			t.Fatalf("%s: %v", statement, err)
+		}
+	}
+	states("new superseded=false size=0", "old superseded=false size=5")
+}
+
 func TestOpenMigratesAndReopensIdempotently(t *testing.T) {
 	dbPath := setStoreTestJail(t)
 	ctx := context.Background()
@@ -34,6 +77,7 @@ func TestOpenMigratesAndReopensIdempotently(t *testing.T) {
 		"meta",
 		"oc_sessions",
 		"rollouts",
+		"row_seq",
 		"transcripts",
 	})
 	if _, err := os.Stat(dbPath + ".bak-before-v1"); !errors.Is(err, os.ErrNotExist) {
@@ -212,7 +256,16 @@ func TestCacheV9AdoptsBeforeDroppingHiddenAndBacksUp(t *testing.T) {
 	assertTables(
 		t,
 		s,
-		[]string{"chat_summaries", "cx_names", "epic_injections", "meta", "oc_sessions", "rollouts", "transcripts"},
+		[]string{
+			"chat_summaries",
+			"cx_names",
+			"epic_injections",
+			"meta",
+			"oc_sessions",
+			"rollouts",
+			"row_seq",
+			"transcripts",
+		},
 	)
 	if got, found, err := s.Meta(ctx, adoptedKillsMeta); err != nil || !found || got != "1" {
 		t.Fatalf("adoption flag=%q,%v,%v", got, found, err)

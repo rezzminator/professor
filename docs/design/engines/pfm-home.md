@@ -65,7 +65,7 @@ Tracked at the repo root. It holds every key pfm reads, each at its default, wit
 | File | Config key | Default | Holds |
 | --- | --- | --- | --- |
 | `pfm.db` | `state.db` | `~/.local/state/pfm/pfm.db` | the authoritative operator state: `chat`, `comms`, `children`, `hidden`, `meta` (the primary account), `launch` (what pfm launched per session — [claude-launch.md](claude-launch.md#the-launch-record)) |
-| `pfm-cache.db` | `state.cacheDb` | `~/.local/state/pfm/pfm-cache.db` | the derived cache, rebuildable from transcripts: `transcripts`, `chat_summaries`, `rollouts`, `cx_names`, `oc_sessions`, `epic_injections` |
+| `pfm-cache.db` | `state.cacheDb` | `~/.local/state/pfm/pfm-cache.db` | the derived cache, rebuildable from transcripts: `transcripts`, `chat_summaries`, `rollouts`, `cx_names`, `oc_sessions`, `epic_injections`, and `row_seq`, the write count a long-lived reader rereads those two index tables by |
 
 - `paths.Values.StateDB` and `paths.Values.CacheDB` resolve them: the test-jail environment variable (`PFM_STATE_DB`, `PFM_CACHE_DB`) first, then the config key, then the default.
 - `hidden` lives only in `pfm.db`.

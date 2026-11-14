@@ -147,6 +147,11 @@ func TestChatKeysRefusesADeadChat(t *testing.T) {
 	// migrated past this build's schema, turning an expected codeUnknownChat
 	// into a schema refusal.
 	t.Setenv("PFM_HOME", t.TempDir())
+	// The lookup probes every chat socket under the socket bases; a parallel
+	// reload test's live socket there turned the refusal into a tmux error.
+	sockets := t.TempDir()
+	t.Setenv(paths.EnvTmpDir, sockets)
+	t.Setenv(paths.EnvTmuxTmpDir, sockets)
 	var stdout, stderr bytes.Buffer
 	code := run([]string{"chat", "keys", "no-such-chat-here", "Enter"}, &stdout, &stderr)
 	if code != codeUnknownChat {
